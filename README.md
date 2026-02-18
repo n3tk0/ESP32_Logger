@@ -22,9 +22,8 @@ This firmware is designed to:
 - Support LittleFS or SD storage
 - Automatically correct misidentified flush events using volume logic
 
----
-
-## ⚙️ Core Features
+<details>
+ <summary>⚙️ Core Features</summary>
 
 ### 🔋 Low Power Operation
 - Deep sleep using GPIO wake-up
@@ -52,7 +51,7 @@ Volume-based correction of button identification:
 
 Post-correction events are logged to: /btn_log.txt
 
----
+</details>
 
 ## 🌐 Web Interface
 
