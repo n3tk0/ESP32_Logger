@@ -1,4 +1,4 @@
-# 💧 ESP32 Low-Power Water Usage Logger (v4.1.4)
+# 💧 ESP32 Low-Power Water Usage Logger
 
 Low-power multi-sensor water usage logger built for **XIAO ESP32-C3 (RISC-V)** with deep sleep wake-up, web interface, file management, configurable datalogging and advanced button post-correction logic.
 
@@ -237,6 +237,7 @@ CPU default frequency: **80 MHz**
 Set to 1 to enable Serial debug output
 Saves ~3KB flash when disabled.
 </details>
+
 ## 🧩 Project Goals
 
 Reliable water usage tracking
