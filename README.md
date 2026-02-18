@@ -24,7 +24,7 @@ This firmware is designed to:
 
 <details>
  <summary>⚙️ Core Features</summary>
-
+ 
 ### 🔋 Low Power Operation
 - Deep sleep using GPIO wake-up
 - Automatic sleep after inactivity
@@ -52,8 +52,8 @@ Volume-based correction of button identification:
 Post-correction events are logged to: /btn_log.txt
 
 </details>
-
-## 🌐 Web Interface
+<details>
+ <summary>🌐 Web Interface</summary>
 
 Accessible in:
 
@@ -82,9 +82,9 @@ Accessible in:
 - Live status JSON endpoints
 - Integrated changelog viewer (reads `/changelog.txt`)
 
----
-
-## 💾 Storage Support
+</details>
+<details>
+ <summary>💾 Storage Support</summary>
 
 Selectable storage type:
 
@@ -104,9 +104,9 @@ Selectable storage type:
   - End format (duration / time)
   - Volume format
 
----
-
-## 🔧 Hardware Configuration (Default Pins – XIAO ESP32-C3)
+</details>
+<details>
+ <summary>🔧 Hardware Configuration (Default Pins – XIAO ESP32-C3)</summary>
 
 | Function        | Default Pin |
 |---------------|------------|
@@ -118,10 +118,9 @@ Selectable storage type:
 | SD Card        | 10–13 |
 
 CPU default frequency: **80 MHz**
-
----
-
-## 🌍 Network Configuration
+</details>
+<details>
+ <summary>🌍 Network Configuration</summary>
 
 ### Default AP Mode
 
@@ -139,10 +138,9 @@ CPU default frequency: **80 MHz**
   - DNS
 - NTP Server default: pool.ntp.org
 - Default timezone: EET (UTC+2)
-
----
-
-## 📊 API Endpoints
+</details>
+<details>
+ <summary>📊 API Endpoints</summary>
 
 | Endpoint | Description |
 |----------|------------|
@@ -151,26 +149,26 @@ CPU default frequency: **80 MHz**
 | `/api/changelog` | Loads changelog from LittleFS |
 | `/api/regen-id` | Generate new device ID from MAC |
 
----
-
-## 🆔 Device ID
+</details>
+<details>
+ <summary>🆔 Device ID</summary>
 
 - Automatically generated from ESP32 MAC address
 - Uses last 4 bytes of MAC
 - Can be manually edited
 - Regeneration available via API
 
----
-
-## 🧪 Test Mode
+</details>
+<details>
+ <summary>🧪 Test Mode</summary>
 
 - WiFi pin used as LED output
 - Visual flow validation
 - Adjustable blink duration
 
----
-
-## 🛠 Technical Stack
+</details>
+<details>
+ <summary>🛠 Technical Stack</summary>
 
 - Arduino Framework
 - ESPAsyncWebServer
@@ -182,9 +180,9 @@ CPU default frequency: **80 MHz**
 - ESP32 Deep Sleep API
 - FlowSensor library
 
----
-
-## 📦 Version History (Latest)
+</details>
+<details>
+ <summary>📦 Version History (Latest)</summary>
 
 ### v4.1.4 – Post-Correction Improvements
 
@@ -221,10 +219,9 @@ CPU default frequency: **80 MHz**
 - Manual Device ID editing
 - Restart confirmation popup
 - Wake & sleep timestamps in datalog
-
----
-
-## 🚀 Flashing
+</details>
+<details>
+ <summary>🚀 Flashing</summary>
 
 1. Select board: XIAO ESP32-C3
 2. Set CPU frequency to 160 MHz
@@ -232,15 +229,14 @@ CPU default frequency: **80 MHz**
 - `/changelog.txt`
 - /styles.css
 - Static assets /www/
-
----
-
-## 🔒 Debug Mode
+</details>
+<details>
+ <summary>🔒 Debug Mode</summary>
 
 #define DEBUG_MODE 0
 Set to 1 to enable Serial debug output
 Saves ~3KB flash when disabled.
-
+</details>
 ## 🧩 Project Goals
 
 Reliable water usage tracking
