@@ -26,6 +26,41 @@
 #include <functional>
 #include <vector>
 
+
+// ============================================================================
+// HELPER FUNCTIONS (were global in monolithic .ino)
+// ============================================================================
+
+String getModeDisplay() {
+    if (onlineLoggerMode) return "🟢 Online Logger";
+    if (apModeTriggered)  return "🔵 Web Server";
+    return "🔴 Logger";
+}
+
+String icon(const char* emoji) {
+    return config.theme.showIcons ? String(emoji) + " " : "";
+}
+
+String getThemeClass() {
+    switch (config.theme.mode) {
+        case THEME_DARK: return "theme-dark";
+        case THEME_AUTO: return "theme-auto";
+        default:         return "theme-light";
+    }
+}
+
+String getNetworkDisplay() {
+    if (wifiConnectedAsClient) return connectedSSID;
+    return String(strlen(config.network.apSSID) > 0 ? config.network.apSSID : config.deviceName);
+}
+
+void sendJsonResponse(AsyncWebServerRequest *r, JsonDocument &doc) {
+    String json;
+    serializeJson(doc, json);
+    r->send(200, "application/json", json);
+}
+
+
 void sendRestartPage(AsyncWebServerRequest *r, const char* message) {
     String html = F("<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Restarting</title>"
         "<style>body{font-family:-apple-system,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#f0f2f5}"
