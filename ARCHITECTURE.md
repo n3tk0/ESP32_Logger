@@ -6,36 +6,41 @@
 Water_logger/
 ├── Logger.ino               ← Само setup() и loop()
 │
-├── core/                    ← Основни типове, константи и глобални променливи
-│   ├── Config.h             ← Всички struct-ове, enum-и, константи
-│   ├── Globals.h            ← extern декларации на глобални променливи
-│   └── Globals.cpp          ← Дефиниции на глобалните променливи
-│
-├── managers/                ← Бизнес логика – всички мениджъри
-│   ├── ConfigManager.h/.cpp ← loadConfig, saveConfig, loadDefaultConfig, migrateConfig
-│   ├── WiFiManager.h/.cpp   ← connectToWiFi, startAPMode, safeWiFiShutdown, syncTimeFromNTP
-│   ├── StorageManager.h/.cpp← initStorage, getActiveDatalogFile, getStorageInfo, ...
-│   ├── RtcManager.h/.cpp    ← initRtc, backupBootCount, restoreBootCount, getRtcTimeString, ...
-│   ├── HardwareManager.h/.cpp ← initHardware, debounceButton, ISR handlers
-│   └── DataLogger.h/.cpp    ← addLogEntry, flushLogBufferToFS
-│
-├── web/                     ← Уеб сървър и handlers
-│   └── WebServer.h/.cpp     ← setupWebServer + всички web handlers
-│
-└── utils/                   ← Помощни функции
-    ├── Utils.h
-    └── Utils.cpp            ← formatFileSize, sanitize, buildPath, deleteRecursive
+└── src/                     ← Всички модули (компилирани рекурсивно от Arduino IDE 2.x)
+    ├── core/                ← Основни типове, константи и глобални променливи
+    │   ├── Config.h         ← Всички struct-ове, enum-и, константи
+    │   ├── Globals.h        ← extern декларации на глобални променливи
+    │   └── Globals.cpp      ← Дефиниции на глобалните променливи
+    │
+    ├── managers/            ← Бизнес логика – всички мениджъри
+    │   ├── ConfigManager.h/.cpp ← loadConfig, saveConfig, loadDefaultConfig, migrateConfig
+    │   ├── WiFiManager.h/.cpp   ← connectToWiFi, startAPMode, safeWiFiShutdown, syncTimeFromNTP
+    │   ├── StorageManager.h/.cpp← initStorage, getActiveDatalogFile, getStorageInfo, ...
+    │   ├── RtcManager.h/.cpp    ← initRtc, backupBootCount, restoreBootCount, getRtcTimeString, ...
+    │   ├── HardwareManager.h/.cpp ← initHardware, debounceButton, ISR handlers
+    │   └── DataLogger.h/.cpp    ← addLogEntry, flushLogBufferToFS
+    │
+    ├── web/                 ← Уеб сървър и handlers
+    │   └── WebServer.h/.cpp ← setupWebServer + всички web handlers
+    │
+    └── utils/               ← Помощни функции
+        ├── Utils.h
+        └── Utils.cpp        ← formatFileSize, sanitize, buildPath, deleteRecursive
 ```
+
+> **Arduino IDE изискване:** Arduino IDE 2.x (arduino-cli) компилира рекурсивно
+> всички `.cpp` файлове в `src/` директорията на sketch-а. Файловете в
+> произволни поддиректории извън `src/` **не се компилират автоматично**.
 
 ### Правила за `#include` пътищата
 
 | Файл | Включва | С път |
 |------|---------|-------|
-| `Logger.ino` | core, managers, web, utils | `"core/Globals.h"`, `"managers/ConfigManager.h"`, ... |
-| `managers/*.cpp` | core | `"../core/Globals.h"` |
-| `managers/StorageManager.cpp` | utils | `"../utils/Utils.h"` |
-| `utils/Utils.h` | core | `"../core/Config.h"` |
-| `core/Globals.h` | core | `"Config.h"` (същата директория) |
+| `Logger.ino` | src/core, src/managers, src/web, src/utils | `"src/core/Globals.h"`, `"src/managers/ConfigManager.h"`, ... |
+| `src/managers/*.cpp` | core | `"../core/Globals.h"` |
+| `src/managers/StorageManager.cpp` | utils | `"../utils/Utils.h"` |
+| `src/utils/Utils.h` | core | `"../core/Config.h"` |
+| `src/core/Globals.h` | core | `"Config.h"` (същата директория) |
 
 ---
 
@@ -109,9 +114,9 @@ ESP.restart();
 
 ---
 
-## ⚙️ Важни бележки за web/WebServer.cpp
+## ⚙️ Важни бележки за src/web/WebServer.cpp
 
-При преместване на код от `Logger.ino` в `web/WebServer.cpp`:
+При преместване на код от `Logger.ino` в `src/web/WebServer.cpp`:
 
 1. Добави `#include "../managers/WiFiManager.h"` за `safeWiFiShutdown()`
 2. Замени всички директни `ESP.restart()` в web handlers с:

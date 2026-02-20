@@ -4,17 +4,17 @@
  * AUTHOR:  Petko Georgiev / Villeroy & Boch Bulgaria
  *
  * МОДУЛНА СТРУКТУРА:
- *   core/Config.h/.cpp         – структури, enums, константи
- *   core/Globals.h/.cpp        – глобални променливи
- *   utils/Utils.h/.cpp         – помощни функции (format, sanitize, path)
- *   managers/ConfigManager.h/.cpp  – зареждане/запис на конфигурация
- *   managers/WiFiManager.h/.cpp    – WiFi, AP, NTP + safeWiFiShutdown()
- *   managers/StorageManager.h/.cpp – LittleFS / SD управление
- *   managers/RtcManager.h/.cpp     – DS1302, bootcount backup, wake reason
- *   managers/HardwareManager.h/.cpp – init pins, ISR, debounce
- *   managers/DataLogger.h/.cpp     – log buffer, flush to FS
- *   web/WebServer.h/.cpp       – AsyncWebServer handlers
- *   Logger.ino                 – само setup() и loop()
+ *   src/core/Config.h/.cpp         – структури, enums, константи
+ *   src/core/Globals.h/.cpp        – глобални променливи
+ *   src/utils/Utils.h/.cpp         – помощни функции (format, sanitize, path)
+ *   src/managers/ConfigManager.h/.cpp  – зареждане/запис на конфигурация
+ *   src/managers/WiFiManager.h/.cpp    – WiFi, AP, NTP + safeWiFiShutdown()
+ *   src/managers/StorageManager.h/.cpp – LittleFS / SD управление
+ *   src/managers/RtcManager.h/.cpp     – DS1302, bootcount backup, wake reason
+ *   src/managers/HardwareManager.h/.cpp – init pins, ISR, debounce
+ *   src/managers/DataLogger.h/.cpp     – log buffer, flush to FS
+ *   src/web/WebServer.h/.cpp       – AsyncWebServer handlers
+ *   Logger.ino                     – само setup() и loop()
  **************************************************************************************************/
 
 #define CONFIG_FREERTOS_UNICORE 1
@@ -22,15 +22,15 @@
 #include <Arduino.h>
 #include <esp_sleep.h>
 
-#include "core/Globals.h"
-#include "managers/ConfigManager.h"
-#include "managers/HardwareManager.h"
-#include "managers/StorageManager.h"
-#include "managers/RtcManager.h"
-#include "managers/WiFiManager.h"
-#include "managers/DataLogger.h"
-#include "web/WebServer.h"    // setupWebServer()
-#include "utils/Utils.h"
+#include "src/core/Globals.h"
+#include "src/managers/ConfigManager.h"
+#include "src/managers/HardwareManager.h"
+#include "src/managers/StorageManager.h"
+#include "src/managers/RtcManager.h"
+#include "src/managers/WiFiManager.h"
+#include "src/managers/DataLogger.h"
+#include "src/web/WebServer.h"    // setupWebServer()
+#include "src/utils/Utils.h"
 
 // ============================================================================
 // SETUP
