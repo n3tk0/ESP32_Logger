@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Water Logger</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--primary:#1a6ea0;--accent:#27ae60;--bg:#eef2f7;--card:#fff;--text:#222;--muted:#666;--border:#dde3ec;--warn:#c53030}
+body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+nav{background:var(--primary);color:#fff;padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+nav a{color:#ffffffcc;text-decoration:none;font-size:.9em;padding:4px 8px;border-radius:4px;transition:.15s}
+nav a:hover,nav a.active{color:#fff;background:#ffffff22}
+nav .brand{font-weight:700;font-size:1.05em;color:#fff;margin-right:auto}
+.main{max-width:800px;margin:20px auto;padding:0 14px 40px}
+h2{font-size:1.05em;font-weight:600;color:var(--primary);margin:0 0 10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:500px){.grid2{grid-template-columns:1fr}}
+.card{background:var(--card);border-radius:8px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px #0001}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:.9em}
+.kv span:nth-child(odd){color:var(--muted)}
+.kv span:nth-child(even){font-weight:500;word-break:break-all}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:.8em;font-weight:600;background:#e1f0ff;color:var(--primary)}
+.badge.green{background:#d4f5e9;color:#1a7c40}
+.badge.red{background:#fde8e8;color:var(--warn)}
+.badge.gray{background:#eee;color:#555}
+.bar-wrap{background:#dde3ec;border-radius:4px;height:10px;margin-top:6px;overflow:hidden}
+.bar{height:100%;border-radius:4px;background:var(--accent);transition:width .5s}
+.bar.warn{background:#f0a500}
+.bar.danger{background:var(--warn)}
+.big-num{font-size:2em;font-weight:700;color:var(--primary)}
+.big-sub{font-size:.85em;color:var(--muted)}
+.status-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.stat-box{flex:1;min-width:110px;background:var(--card);border-radius:8px;padding:12px;text-align:center;box-shadow:0 1px 3px #0001}
+.refresh-btn{float:right;background:none;border:1px solid var(--border);border-radius:5px;padding:3px 10px;font-size:.85em;cursor:pointer;color:var(--primary)}
+.refresh-btn:hover{background:var(--bg)}
+#uptime{font-size:.8em;color:var(--muted);margin-top:8px}
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">&#128167; Water Logger</span>
+  <a href="/" class="active">Dashboard</a>
+  <a href="/settings">Settings</a>
+  <a href="/files">Files</a>
+</nav>
+<div class="main">
+  <div class="status-row" id="statBoxes">
+    <div class="stat-box"><div class="big-num" id="sBoots">—</div><div class="big-sub">Boot #</div></div>
+    <div class="stat-box"><div class="big-num" id="sPulses">—</div><div class="big-sub">Pulses</div></div>
+    <div class="stat-box"><div class="big-num" id="sState">—</div><div class="big-sub">State</div></div>
+  </div>
+
+  <div class="grid2">
+    <div>
+      <div class="card">
+        <h2>Device <button class="refresh-btn" onclick="load()">&#8635; Refresh</button></h2>
+        <div class="kv" id="kvDevice"><span class="muted">Loading…</span><span></span></div>
+        <div id="uptime"></div>
+      </div>
+      <div class="card">
+        <h2>Network</h2>
+        <div class="kv" id="kvNet"><span class="muted">—</span><span></span></div>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <h2>Storage</h2>
+        <div class="kv" id="kvStorage"><span class="muted">—</span><span></span></div>
+        <div class="bar-wrap"><div class="bar" id="storageBar" style="width:0%"></div></div>
+      </div>
+      <div class="card">
+        <h2>Logging</h2>
+        <div class="kv" id="kvLog"><span class="muted">—</span><span></span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var stateNames = ['Idle','Wait Flow','Monitoring','Done'];
+function badge(text, cls){return '<span class="badge '+cls+'">'+text+'</span>';}
+
+function load(){
+  fetch('/api/status').then(r=>r.json()).then(d=>{
+    document.getElementById('sBoots').textContent  = d.bootCount;
+    document.getElementById('sPulses').textContent = d.pulses;
+    var sn = stateNames[d.logState] || d.logState;
+    document.getElementById('sState').textContent  = sn;
+
+    document.getElementById('kvDevice').innerHTML =
+      row('Version', d.version)+
+      row('RTC',     (d.rtcValid ? badge(d.rtcTime,'green') : badge('Not set','red')))+
+      row('Uptime',  fmtSecs(d.uptime));
+
+    document.getElementById('kvNet').innerHTML =
+      row('IP',   d.ip)+
+      row('Mode', d.mode)+
+      row('AP',   d.apMode ? badge('AP','green') : badge('Client','gray'));
+
+    var pct = d.fsPct;
+    var barCls = pct>=90?'danger':(pct>=70?'warn':'');
+    document.getElementById('kvStorage').innerHTML =
+      row('Used',  d.fsUsed+' / '+d.fsTotal)+
+      row('Usage', pct+'%')+
+      row('Type',  d.fsType);
+    var bar = document.getElementById('storageBar');
+    bar.style.width = pct+'%';
+    bar.className = 'bar '+barCls;
+
+    document.getElementById('kvLog').innerHTML =
+      row('State',   badge(sn, d.logState===2?'green':(d.logState===0?'gray':'badge')))+
+      row('Wake by', d.wakeBy||'—')+
+      row('Cycle by',d.cycleBy||'—')+
+      row('Pulses',  d.pulses+' cycle / '+d.totalPulses+' total');
+
+  }).catch(function(e){
+    document.getElementById('kvDevice').innerHTML = '<span style="color:red">Error: '+e.message+'</span><span></span>';
+  });
+}
+
+function row(k,v){return '<span>'+k+'</span><span>'+v+'</span>';}
+function fmtSecs(s){
+  if(s<60) return s+'s';
+  if(s<3600) return Math.floor(s/60)+'m '+s%60+'s';
+  return Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m';
+}
+
+load();
+setInterval(load, 10000);
+</script>
+</body>
+</html>

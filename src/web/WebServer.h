@@ -6,37 +6,41 @@
 #include <functional>
 
 /**
- * Инициализира и стартира AsyncWebServer с всички endpoint-и.
+ * WebServer модул – архитектура на обслужването
  *
- * NOTE: Цялото HTML/JS генериране е запазено идентично с оригиналния
- *       Logger.ino. При рефакториране то може да се раздели в WebPages.h/.cpp.
+ * HTML страниците се зареждат от LittleFS /www/:
+ *   GET /         → /www/index.html    (dashboard)
+ *   GET /settings → /www/settings.html (настройки)
+ *   GET /files    → /www/files.html    (файлов мениджър)
+ *   GET /data     → /www/data.html     (данни / графика)
  *
- * ВАЖНА ПРОМЯНА относно рестарта:
- *   Всеки endpoint, който извиква ESP.restart() директно (напр. /save_hardware,
- *   /save_network), ТРЯБВА да извика safeWiFiShutdown() ПРЕДИ рестарта:
+ * Ако даден файл липсва, се сервира вграден failsafe HTML,
+ * който позволява качване на /www/ файловете чрез бразура.
  *
- *       #include "../managers/WiFiManager.h"
- *       ...
- *       safeWiFiShutdown();
- *       delay(100);
- *       ESP.restart();
- *
- *   Handlers, които само задават shouldRestart = true, са OK –
- *   главния loop() в Logger.ino ще извика safeWiFiShutdown() автоматично.
+ * JSON API (винаги в firmware, не изискват /www/ файлове):
+ *   GET  /api/status        – runtime статус
+ *   GET  /api/config        – пълна конфигурация
+ *   GET  /api/files?dir=/   – JSON списък на файловете
+ *   POST /save_hardware     – записва HW настройки (→ restart)
+ *   POST /save_network      – записва мрежови настройки (→ restart)
+ *   POST /save_datalog      – записва datalog настройки
+ *   POST /save_flowmeter    – записва flowmeter настройки
+ *   POST /save_theme        – записва theme настройки
+ *   POST /upload?dir=/www/  – качване на файл в LittleFS
+ *   GET  /download?path=... – сваляне на файл
+ *   GET  /delete?path=...   – изтриване
+ *   POST /mkdir?dir=...     – създаване на директория
+ *   POST /set_time          – ръчно задаване на RTC времето
+ *   POST /sync_ntp          – NTP синхронизация
+ *   POST /restart           – рестарт
+ *   POST /factory_reset     – нулиране до фабрични настройки
  */
+
 void setupWebServer();
 
-// Helper функции използвани от web handlers
+// Helpers използвани и от Logger.ino / other modules
 String getModeDisplay();
 String getNetworkDisplay();
-String getThemeClass();
-String icon(const char* emoji);
 
-// HTML page helpers
-void writeSidebar(Print& out, const char* currentPage);
-void writeBottomNav(Print& out, const char* currentPage);
-void sendChunkedHtml(AsyncWebServerRequest* r, const char* title,
-                     std::function<void(Print&)> bodyWriter);
 void sendJsonResponse(AsyncWebServerRequest* r, JsonDocument& doc);
 void sendRestartPage(AsyncWebServerRequest* r, const char* message);
-void writeFileList(Print& out, const String& dir, bool editMode = false);

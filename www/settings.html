@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Settings – Water Logger</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--primary:#1a6ea0;--accent:#27ae60;--bg:#eef2f7;--card:#fff;--text:#222;--muted:#666;--border:#dde3ec;--warn:#c53030}
+body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text)}
+nav{background:var(--primary);color:#fff;padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+nav a{color:#ffffffcc;text-decoration:none;font-size:.9em;padding:4px 8px;border-radius:4px;transition:.15s}
+nav a:hover,nav a.active{color:#fff;background:#ffffff22}
+nav .brand{font-weight:700;font-size:1.05em;color:#fff;margin-right:auto}
+.main{max-width:760px;margin:20px auto;padding:0 14px 40px}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:16px}
+.tab{padding:7px 14px;border-radius:6px 6px 0 0;border:1px solid var(--border);border-bottom:none;background:var(--card);cursor:pointer;font-size:.9em;color:var(--muted)}
+.tab.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+.tab-content{display:none}
+.tab-content.active{display:block}
+.card{background:var(--card);border-radius:0 8px 8px 8px;padding:18px;box-shadow:0 1px 3px #0001;margin-bottom:12px}
+.form-row{display:grid;grid-template-columns:180px 1fr;align-items:center;gap:6px 12px;margin-bottom:8px}
+@media(max-width:480px){.form-row{grid-template-columns:1fr}}
+label{font-size:.9em;color:var(--muted)}
+input[type=text],input[type=number],input[type=password],input[type=color],select{
+  width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:5px;font-size:.9em;background:#fff}
+input[type=checkbox]{width:18px;height:18px;cursor:pointer}
+.btn{padding:8px 18px;border:none;border-radius:6px;cursor:pointer;font-size:.9em;font-weight:600}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:#155880}
+.btn-danger{background:var(--warn);color:#fff}
+.btn-danger:hover{background:#a02020}
+.btn-sm{padding:5px 12px;font-size:.85em}
+.msg{margin-top:10px;padding:8px 12px;border-radius:5px;font-size:.9em;display:none}
+.msg.ok{background:#d4f5e9;color:#1a7c40;display:block}
+.msg.err{background:#fde8e8;color:var(--warn);display:block}
+.section-title{font-weight:600;color:var(--primary);margin:14px 0 6px;font-size:.95em}
+.rtc-row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:8px}
+.rtc-row .field{display:flex;flex-direction:column;gap:3px;font-size:.85em}
+.rtc-row input{width:70px}
+hr{border:none;border-top:1px solid var(--border);margin:12px 0}
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">&#128167; Water Logger</span>
+  <a href="/">Dashboard</a>
+  <a href="/settings" class="active">Settings</a>
+  <a href="/files">Files</a>
+</nav>
+<div class="main">
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('hardware')">Hardware</div>
+    <div class="tab" onclick="showTab('network')">Network</div>
+    <div class="tab" onclick="showTab('datalog')">Datalog</div>
+    <div class="tab" onclick="showTab('flowmeter')">Flow Meter</div>
+    <div class="tab" onclick="showTab('theme')">Theme</div>
+    <div class="tab" onclick="showTab('system')">System</div>
+  </div>
+
+  <!-- ========== HARDWARE ========== -->
+  <div class="tab-content active" id="tab-hardware">
+    <div class="card">
+      <form id="fHW">
+        <div class="section-title">Storage &amp; Mode</div>
+        <div class="form-row"><label>Storage</label>
+          <select name="storageType">
+            <option value="0">LittleFS (internal)</option>
+            <option value="1">SD Card</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Wakeup mode</label>
+          <select name="wakeupMode">
+            <option value="0">Active HIGH</option>
+            <option value="1">Active LOW</option>
+          </select>
+        </div>
+        <div class="form-row"><label>CPU Frequency (MHz)</label>
+          <input type="number" name="cpuFreq" min="10" max="240">
+        </div>
+        <div class="form-row"><label>Debounce (ms)</label>
+          <input type="number" name="debounceMs" min="0" max="500">
+        </div>
+        <div class="form-row"><label>Debug mode</label>
+          <input type="checkbox" name="debugMode" value="1">
+        </div>
+        <div class="section-title">Pin Assignments</div>
+        <div class="form-row"><label>WiFi trigger pin</label><input type="number" name="pinWifiTrigger" min="0" max="48"></div>
+        <div class="form-row"><label>Full-flush (FF) pin</label><input type="number" name="pinFF" min="0" max="48"></div>
+        <div class="form-row"><label>Partial-flush (PF) pin</label><input type="number" name="pinPF" min="0" max="48"></div>
+        <div class="form-row"><label>Flow sensor pin</label><input type="number" name="pinFlow" min="0" max="48"></div>
+        <div class="form-row"><label>RTC CE pin</label><input type="number" name="pinRtcCE" min="0" max="48"></div>
+        <div class="form-row"><label>RTC IO pin</label><input type="number" name="pinRtcIO" min="0" max="48"></div>
+        <div class="form-row"><label>RTC SCLK pin</label><input type="number" name="pinRtcSCLK" min="0" max="48"></div>
+        <div class="form-row"><label>SD CS pin</label><input type="number" name="pinSdCS" min="0" max="48"></div>
+        <button type="submit" class="btn btn-primary">Save &amp; Restart</button>
+      </form>
+      <div class="msg" id="msgHW"></div>
+    </div>
+  </div>
+
+  <!-- ========== NETWORK ========== -->
+  <div class="tab-content" id="tab-network">
+    <div class="card">
+      <form id="fNet">
+        <div class="form-row"><label>WiFi mode</label>
+          <select name="wifiMode" onchange="updateNetMode(this.value)">
+            <option value="0">Access Point (AP)</option>
+            <option value="1">Client (STA)</option>
+          </select>
+        </div>
+        <div class="section-title">Access Point</div>
+        <div class="form-row"><label>AP SSID</label><input type="text" name="apSSID" maxlength="32"></div>
+        <div class="form-row"><label>AP Password</label><input type="text" name="apPassword" maxlength="64"></div>
+        <div class="section-title" id="staSection">Client (Station)</div>
+        <div class="form-row"><label>Client SSID</label><input type="text" name="clientSSID" maxlength="32"></div>
+        <div class="form-row"><label>Client Password</label><input type="password" name="clientPassword" maxlength="64" placeholder="(leave blank to keep)"></div>
+        <div class="form-row"><label>Static IP</label><input type="checkbox" name="useStaticIP" value="1" onchange="toggleStatic(this.checked)"></div>
+        <div id="staticFields" style="display:none">
+          <div class="form-row"><label>IP address</label><input type="text" name="staticIP" placeholder="192.168.1.100"></div>
+          <div class="form-row"><label>Gateway</label><input type="text" name="gateway" placeholder="192.168.1.1"></div>
+          <div class="form-row"><label>Subnet</label><input type="text" name="subnet" placeholder="255.255.255.0"></div>
+          <div class="form-row"><label>DNS</label><input type="text" name="dns" placeholder="8.8.8.8"></div>
+        </div>
+        <div class="section-title">Time</div>
+        <div class="form-row"><label>NTP Server</label><input type="text" name="ntpServer" maxlength="64"></div>
+        <div class="form-row"><label>Timezone offset (h)</label><input type="number" name="timezone" min="-12" max="14"></div>
+        <button type="submit" class="btn btn-primary">Save &amp; Restart</button>
+      </form>
+      <div class="msg" id="msgNet"></div>
+      <hr>
+      <div class="section-title">RTC / NTP</div>
+      <button class="btn btn-sm btn-primary" onclick="syncNTP()">Sync NTP now</button>
+      <div class="section-title" style="margin-top:12px">Set RTC manually</div>
+      <div class="rtc-row">
+        <div class="field"><label>Year</label><input type="number" id="rtcYear" value="2025" min="2020" max="2099"></div>
+        <div class="field"><label>Month</label><input type="number" id="rtcMonth" value="1" min="1" max="12"></div>
+        <div class="field"><label>Day</label><input type="number" id="rtcDay" value="1" min="1" max="31"></div>
+        <div class="field"><label>Hour</label><input type="number" id="rtcHour" value="0" min="0" max="23"></div>
+        <div class="field"><label>Min</label><input type="number" id="rtcMin" value="0" min="0" max="59"></div>
+        <div class="field"><label>Sec</label><input type="number" id="rtcSec" value="0" min="0" max="59"></div>
+        <button class="btn btn-sm btn-primary" onclick="setRTC()">Set</button>
+      </div>
+      <div class="msg" id="msgNTP"></div>
+    </div>
+  </div>
+
+  <!-- ========== DATALOG ========== -->
+  <div class="tab-content" id="tab-datalog">
+    <div class="card">
+      <form id="fDL">
+        <div class="section-title">File Settings</div>
+        <div class="form-row"><label>Filename prefix</label><input type="text" name="prefix" maxlength="32"></div>
+        <div class="form-row"><label>Folder</label><input type="text" name="folder" maxlength="32"></div>
+        <div class="form-row"><label>Rotation</label>
+          <select name="rotation">
+            <option value="0">None</option>
+            <option value="1">Daily</option>
+            <option value="2">Weekly</option>
+            <option value="3">Monthly</option>
+            <option value="4">Size-based</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Max size (KB)</label><input type="number" name="maxSizeKB" min="0"></div>
+        <div class="form-row"><label>Max entries</label><input type="number" name="maxEntries" min="0"></div>
+        <div class="section-title">Format</div>
+        <div class="form-row"><label>Date format</label>
+          <select name="dateFormat">
+            <option value="0">Off</option>
+            <option value="1">DD/MM/YYYY</option>
+            <option value="2">MM/DD/YYYY</option>
+            <option value="3">YYYY-MM-DD</option>
+            <option value="4">DD.MM.YYYY</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Time format</label>
+          <select name="timeFormat">
+            <option value="0">HH:MM:SS</option>
+            <option value="1">HH:MM</option>
+            <option value="2">12h</option>
+          </select>
+        </div>
+        <div class="form-row"><label>End field</label>
+          <select name="endFormat">
+            <option value="0">End time</option>
+            <option value="1">Duration</option>
+            <option value="2">Off</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Volume format</label>
+          <select name="volumeFormat">
+            <option value="0">X.XX L (comma)</option>
+            <option value="1">X.XX L (dot)</option>
+            <option value="2">Number only</option>
+            <option value="3">Off</option>
+          </select>
+        </div>
+        <div class="section-title">Extras</div>
+        <div class="form-row"><label>Include boot count</label><input type="checkbox" name="inclBootCount" value="1"></div>
+        <div class="form-row"><label>Include extra presses</label><input type="checkbox" name="inclExtra" value="1"></div>
+        <div class="section-title">Post-correction (v4.1.3+)</div>
+        <div class="form-row"><label>Enable post-correction</label><input type="checkbox" name="postCorr" value="1"></div>
+        <div class="form-row"><label>PF→FF threshold</label><input type="number" name="pfToFf" step="0.01" min="0"></div>
+        <div class="form-row"><label>FF→PF threshold</label><input type="number" name="ffToPf" step="0.01" min="0"></div>
+        <div class="form-row"><label>Hold threshold (ms)</label><input type="number" name="holdThresh" min="0" max="5000"></div>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </form>
+      <div class="msg" id="msgDL"></div>
+    </div>
+  </div>
+
+  <!-- ========== FLOW METER ========== -->
+  <div class="tab-content" id="tab-flowmeter">
+    <div class="card">
+      <form id="fFM">
+        <div class="form-row"><label>Pulses per liter</label><input type="number" name="pulsesPerL" step="0.01" min="0"></div>
+        <div class="form-row"><label>Calibration multiplier</label><input type="number" name="calibMult" step="0.001" min="0"></div>
+        <div class="form-row"><label>Monitoring window (s)</label><input type="number" name="monitorSecs" min="1" max="600"></div>
+        <div class="form-row"><label>Test mode</label><input type="checkbox" name="testMode" value="1"></div>
+        <div class="form-row"><label>Blink duration (ms)</label><input type="number" name="blinkMs" min="50" max="2000"></div>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </form>
+      <div class="msg" id="msgFM"></div>
+    </div>
+  </div>
+
+  <!-- ========== THEME ========== -->
+  <div class="tab-content" id="tab-theme">
+    <div class="card">
+      <form id="fTH">
+        <div class="form-row"><label>Theme mode</label>
+          <select name="mode">
+            <option value="0">Light</option>
+            <option value="1">Dark</option>
+            <option value="2">Auto</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Primary color</label><input type="color" name="primaryColor"></div>
+        <div class="form-row"><label>Accent color</label><input type="color" name="accentColor"></div>
+        <div class="form-row"><label>Background color</label><input type="color" name="bgColor"></div>
+        <div class="form-row"><label>Text color</label><input type="color" name="textColor"></div>
+        <div class="form-row"><label>FF event color</label><input type="color" name="ffColor"></div>
+        <div class="form-row"><label>PF event color</label><input type="color" name="pfColor"></div>
+        <div class="form-row"><label>Chart source</label>
+          <select name="chartSource">
+            <option value="0">Local (LittleFS)</option>
+            <option value="1">CDN</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Show icons</label><input type="checkbox" name="showIcons" value="1"></div>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </form>
+      <div class="msg" id="msgTH"></div>
+    </div>
+  </div>
+
+  <!-- ========== SYSTEM ========== -->
+  <div class="tab-content" id="tab-system">
+    <div class="card">
+      <div class="section-title">System Actions</div>
+      <p style="font-size:.9em;color:var(--muted);margin:6px 0 12px">These actions take effect immediately.</p>
+      <button class="btn btn-primary" onclick="doRestart()">&#8635; Restart device</button>
+      &nbsp;
+      <button class="btn btn-danger" onclick="doReset()">&#9888; Factory reset</button>
+      <div class="msg" id="msgSYS"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function showTab(name){
+  document.querySelectorAll('.tab').forEach(function(t,i){
+    var tabs=['hardware','network','datalog','flowmeter','theme','system'];
+    t.classList.toggle('active', tabs[i]===name);
+  });
+  document.querySelectorAll('.tab-content').forEach(function(c){
+    c.classList.toggle('active', c.id==='tab-'+name);
+  });
+}
+
+function setMsg(id, text, ok){
+  var el=document.getElementById(id);
+  el.textContent=text; el.className='msg '+(ok?'ok':'err');
+  setTimeout(function(){el.className='msg';},4000);
+}
+
+function getVal(form, name){
+  var el=form.elements[name];
+  if(!el) return null;
+  if(el.type==='checkbox') return el.checked?'1':'0';
+  return el.value;
+}
+
+function postForm(url, form, msgId){
+  var fd=new FormData();
+  Array.from(form.elements).forEach(function(el){
+    if(el.name) fd.append(el.name, el.type==='checkbox'?(el.checked?'1':'0'):el.value);
+  });
+  fetch(url,{method:'POST',body:fd})
+    .then(function(r){return r.text();})
+    .then(function(t){setMsg(msgId,t,true);})
+    .catch(function(e){setMsg(msgId,'Error: '+e.message,false);});
+}
+
+function updateNetMode(v){ /* no-op: both sections always visible */ }
+function toggleStatic(v){
+  document.getElementById('staticFields').style.display=v?'block':'none';
+}
+
+// Populate forms from /api/config
+function loadConfig(){
+  fetch('/api/config').then(function(r){return r.json();}).then(function(d){
+    var hw=d.hw, net=d.net, dl=d.dl, fm=d.fm, th=d.th;
+    setField('fHW','storageType',hw.storageType);
+    setField('fHW','wakeupMode',hw.wakeupMode);
+    setField('fHW','cpuFreq',hw.cpuFreq);
+    setField('fHW','debounceMs',hw.debounceMs);
+    setField('fHW','debugMode',hw.debugMode,'cb');
+    setField('fHW','pinWifiTrigger',hw.pinWifiTrigger);
+    setField('fHW','pinFF',hw.pinFF);
+    setField('fHW','pinPF',hw.pinPF);
+    setField('fHW','pinFlow',hw.pinFlow);
+    setField('fHW','pinRtcCE',hw.pinRtcCE);
+    setField('fHW','pinRtcIO',hw.pinRtcIO);
+    setField('fHW','pinRtcSCLK',hw.pinRtcSCLK);
+    setField('fHW','pinSdCS',hw.pinSdCS);
+
+    setField('fNet','wifiMode',net.wifiMode);
+    setField('fNet','apSSID',net.apSSID);
+    setField('fNet','apPassword',net.apPassword);
+    setField('fNet','clientSSID',net.clientSSID);
+    setField('fNet','ntpServer',net.ntpServer);
+    setField('fNet','timezone',net.timezone);
+    setField('fNet','useStaticIP',net.useStaticIP,'cb');
+    toggleStatic(net.useStaticIP);
+    setField('fNet','staticIP',net.staticIP);
+    setField('fNet','gateway',net.gateway);
+    setField('fNet','subnet',net.subnet);
+    setField('fNet','dns',net.dns);
+
+    setField('fDL','prefix',dl.prefix);
+    setField('fDL','folder',dl.folder);
+    setField('fDL','rotation',dl.rotation);
+    setField('fDL','maxSizeKB',dl.maxSizeKB);
+    setField('fDL','maxEntries',dl.maxEntries);
+    setField('fDL','dateFormat',dl.dateFormat);
+    setField('fDL','timeFormat',dl.timeFormat);
+    setField('fDL','endFormat',dl.endFormat);
+    setField('fDL','volumeFormat',dl.volumeFormat);
+    setField('fDL','inclBootCount',dl.inclBootCount,'cb');
+    setField('fDL','inclExtra',dl.inclExtra,'cb');
+    setField('fDL','postCorr',dl.postCorr,'cb');
+    setField('fDL','pfToFf',dl.pfToFf);
+    setField('fDL','ffToPf',dl.ffToPf);
+    setField('fDL','holdThresh',dl.holdThresh);
+
+    setField('fFM','pulsesPerL',fm.pulsesPerL);
+    setField('fFM','calibMult',fm.calibMult);
+    setField('fFM','monitorSecs',fm.monitorSecs);
+    setField('fFM','testMode',fm.testMode,'cb');
+    setField('fFM','blinkMs',fm.blinkMs);
+
+    setField('fTH','mode',th.mode);
+    setColorField('fTH','primaryColor',th.primaryColor);
+    setColorField('fTH','accentColor',th.accentColor);
+    setColorField('fTH','bgColor',th.bgColor);
+    setColorField('fTH','textColor',th.textColor);
+    setColorField('fTH','ffColor',th.ffColor);
+    setColorField('fTH','pfColor',th.pfColor);
+    setField('fTH','chartSource',th.chartSource);
+    setField('fTH','showIcons',th.showIcons,'cb');
+  }).catch(function(e){console.error('Config load error:',e);});
+}
+
+function setField(formId, name, val, type){
+  var f=document.getElementById(formId);
+  var el=f?f.elements[name]:null;
+  if(!el) return;
+  if(type==='cb') el.checked=!!(val===true||val===1||val==='1');
+  else if(el.tagName==='SELECT') el.value=String(val);
+  else el.value=val;
+}
+
+function setColorField(formId, name, val){
+  var f=document.getElementById(formId);
+  var el=f?f.elements[name]:null;
+  if(!el||!val) return;
+  // Ensure 6-char hex with #
+  var v=String(val).trim();
+  if(v.length===6&&v[0]!=='#') v='#'+v;
+  el.value=v;
+}
+
+// Form submit handlers
+document.getElementById('fHW').addEventListener('submit',function(e){
+  e.preventDefault(); postForm('/save_hardware',this,'msgHW');
+});
+document.getElementById('fNet').addEventListener('submit',function(e){
+  e.preventDefault(); postForm('/save_network',this,'msgNet');
+});
+document.getElementById('fDL').addEventListener('submit',function(e){
+  e.preventDefault(); postForm('/save_datalog',this,'msgDL');
+});
+document.getElementById('fFM').addEventListener('submit',function(e){
+  e.preventDefault(); postForm('/save_flowmeter',this,'msgFM');
+});
+document.getElementById('fTH').addEventListener('submit',function(e){
+  e.preventDefault(); postForm('/save_theme',this,'msgTH');
+});
+
+function syncNTP(){
+  fetch('/sync_ntp',{method:'POST'})
+    .then(function(r){return r.text();})
+    .then(function(t){setMsg('msgNTP',t,true);})
+    .catch(function(e){setMsg('msgNTP','Error: '+e.message,false);});
+}
+
+function setRTC(){
+  var fd=new FormData();
+  fd.append('year',  document.getElementById('rtcYear').value);
+  fd.append('month', document.getElementById('rtcMonth').value);
+  fd.append('day',   document.getElementById('rtcDay').value);
+  fd.append('hour',  document.getElementById('rtcHour').value);
+  fd.append('minute',document.getElementById('rtcMin').value);
+  fd.append('second',document.getElementById('rtcSec').value);
+  fetch('/set_time',{method:'POST',body:fd})
+    .then(function(r){return r.text();})
+    .then(function(t){setMsg('msgNTP',t,true);})
+    .catch(function(e){setMsg('msgNTP','Error: '+e.message,false);});
+}
+
+function doRestart(){
+  if(!confirm('Restart device?')) return;
+  fetch('/restart',{method:'POST'}).then(function(){
+    setMsg('msgSYS','Restarting… reconnect in a few seconds.',true);
+    setTimeout(function(){location.href='/';},4000);
+  });
+}
+
+function doReset(){
+  if(!confirm('Factory reset? All settings will be lost!')) return;
+  fetch('/factory_reset',{method:'POST'}).then(function(){
+    setMsg('msgSYS','Factory reset done. Restarting…',true);
+    setTimeout(function(){location.href='/';},4000);
+  });
+}
+
+loadConfig();
+</script>
+</body>
+</html>
