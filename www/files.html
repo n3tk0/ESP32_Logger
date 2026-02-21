@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Files – Water Logger</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--primary:#1a6ea0;--accent:#27ae60;--bg:#eef2f7;--card:#fff;--text:#222;--muted:#666;--border:#dde3ec;--warn:#c53030}
+body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text)}
+nav{background:var(--primary);color:#fff;padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+nav a{color:#ffffffcc;text-decoration:none;font-size:.9em;padding:4px 8px;border-radius:4px;transition:.15s}
+nav a:hover,nav a.active{color:#fff;background:#ffffff22}
+nav .brand{font-weight:700;font-size:1.05em;color:#fff;margin-right:auto}
+.main{max-width:800px;margin:20px auto;padding:0 14px 40px}
+.card{background:var(--card);border-radius:8px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px #0001}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.toolbar input[type=text]{flex:1;min-width:160px;padding:7px 10px;border:1px solid var(--border);border-radius:5px;font-size:.9em}
+.btn{padding:7px 14px;border:none;border-radius:5px;cursor:pointer;font-size:.9em;font-weight:500}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:#155880}
+.btn-danger{background:var(--warn);color:#fff}
+.btn-danger:hover{background:#a02020}
+.btn-sm{padding:4px 10px;font-size:.82em}
+.btn-ghost{background:none;color:var(--primary);border:1px solid var(--border)}
+.btn-ghost:hover{background:var(--bg)}
+.breadcrumb{font-size:.9em;margin-bottom:10px;word-break:break-all}
+.breadcrumb a{color:var(--primary);cursor:pointer;text-decoration:underline}
+.breadcrumb span{color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:.9em}
+th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border);color:var(--muted);font-weight:600;white-space:nowrap}
+td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:hover td{background:#f5f8fc}
+.fname{cursor:pointer;color:var(--primary);word-break:break-all}
+.fname:hover{text-decoration:underline}
+.dir-icon{color:#f0a500}
+.file-icon{color:var(--muted)}
+.size{white-space:nowrap;color:var(--muted)}
+.actions{white-space:nowrap;display:flex;gap:4px}
+.empty{text-align:center;color:var(--muted);padding:28px;font-size:.95em}
+.upload-area{border:2px dashed var(--border);border-radius:7px;padding:16px;text-align:center;cursor:pointer;transition:.2s;margin-bottom:10px}
+.upload-area:hover,.upload-area.drag{border-color:var(--primary);background:#f0f7ff}
+.upload-area input{display:none}
+.upload-area p{color:var(--muted);font-size:.9em;margin-top:4px}
+progress{width:100%;height:8px;border-radius:4px;margin-top:6px;display:none}
+.msg{margin-top:8px;font-size:.9em;color:var(--primary);min-height:1.2em}
+.sel-bar{background:#e8f0fe;border-radius:6px;padding:6px 10px;font-size:.88em;display:none;align-items:center;gap:10px;margin-bottom:8px}
+.sel-bar span{flex:1;color:var(--primary)}
+select.dir-sel{padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:.9em}
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">&#128167; Water Logger</span>
+  <a href="/">Dashboard</a>
+  <a href="/settings">Settings</a>
+  <a href="/files" class="active">Files</a>
+</nav>
+<div class="main">
+  <!-- Upload card -->
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <strong>Upload to:</strong>
+      <select class="dir-sel" id="uploadDir">
+        <option value="/www/">/www/ (UI files)</option>
+        <option value="/">/  (root)</option>
+      </select>
+      <span style="font-size:.85em;color:var(--muted)" id="curDirHint"></span>
+    </div>
+    <div class="upload-area" id="dropZone" onclick="document.getElementById('fileInput').click()">
+      <input type="file" id="fileInput" multiple>
+      &#8679; <strong>Click or drag files here</strong>
+      <p>Multiple files supported</p>
+    </div>
+    <progress id="uploadProg" value="0" max="100"></progress>
+    <div class="msg" id="uploadMsg"></div>
+  </div>
+
+  <!-- File browser card -->
+  <div class="card">
+    <div class="toolbar">
+      <div class="breadcrumb" id="breadcrumb"></div>
+      <button class="btn btn-ghost btn-sm" onclick="loadDir(currentDir)">&#8635;</button>
+      <input type="text" id="newDirName" placeholder="New folder name">
+      <button class="btn btn-primary btn-sm" onclick="mkdir()">+ Folder</button>
+    </div>
+    <div id="selBar" class="sel-bar">
+      <span id="selCount"></span>
+      <button class="btn btn-danger btn-sm" onclick="deleteSelected()">&#128465; Delete selected</button>
+    </div>
+    <div id="fileList"><div class="empty">Loading…</div></div>
+  </div>
+</div>
+
+<script>
+var currentDir = '/';
+var selected = {};
+
+function fmt(bytes){
+  if(bytes<1024) return bytes+' B';
+  if(bytes<1048576) return (bytes/1024).toFixed(1)+' KB';
+  return (bytes/1048576).toFixed(2)+' MB';
+}
+
+function buildBreadcrumb(path){
+  var parts = path.replace(/\/+$/,'').split('/').filter(function(p){return p!=='';});
+  var html = '<a onclick="loadDir(\'/\')">&#127968; /</a>';
+  var acc = '/';
+  parts.forEach(function(p){
+    acc += p+'/';
+    var d = acc;
+    html += ' / <a onclick="loadDir(\''+d+'\')">'+p+'</a>';
+  });
+  document.getElementById('breadcrumb').innerHTML = html;
+}
+
+function loadDir(dir){
+  currentDir = dir || '/';
+  selected = {};
+  updateSelBar();
+  buildBreadcrumb(currentDir);
+  document.getElementById('uploadDir').value =
+    currentDir === '/' ? '/' : currentDir;
+
+  fetch('/api/files?dir='+encodeURIComponent(currentDir))
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var files = d.files || [];
+      if(files.length === 0){
+        document.getElementById('fileList').innerHTML = '<div class="empty">Empty folder</div>';
+        return;
+      }
+      // Sort: directories first, then by name
+      files.sort(function(a,b){
+        if(a.dir!==b.dir) return a.dir?-1:1;
+        return a.name.localeCompare(b.name);
+      });
+      var html = '<table><thead><tr>'+
+        '<th><input type="checkbox" id="checkAll" onchange="toggleAll(this.checked)"></th>'+
+        '<th>Name</th><th>Size</th><th>Actions</th></tr></thead><tbody>';
+      files.forEach(function(f){
+        var fullPath = (currentDir.replace(/\/+$/,'') + '/' + f.name);
+        var safeP = encodeURIComponent(fullPath);
+        var ico = f.dir ? '<span class="dir-icon">&#128193;</span>' : '<span class="file-icon">&#128196;</span>';
+        var size = f.dir ? '<span class="muted">—</span>' : fmt(f.size);
+        var nameClick = f.dir ? 'loadDir(\''+fullPath+'/\')' : 'download(\''+safeP+'\')';
+        html += '<tr>'+
+          '<td><input type="checkbox" class="row-cb" data-path="'+fullPath+'" onchange="toggleSel(this)"></td>'+
+          '<td><span class="fname" onclick="'+nameClick+'">'+ico+' '+f.name+'</span></td>'+
+          '<td class="size">'+size+'</td>'+
+          '<td><div class="actions">'+
+          (f.dir ? '' : '<button class="btn btn-primary btn-sm" onclick="download(\''+safeP+'\')">&#8681;</button>')+
+          '<button class="btn btn-danger btn-sm" onclick="deletePath(\''+safeP+'\',\''+f.name+'\')">&#128465;</button>'+
+          '</div></td>'+
+          '</tr>';
+      });
+      html += '</tbody></table>';
+      document.getElementById('fileList').innerHTML = html;
+    })
+    .catch(function(e){
+      document.getElementById('fileList').innerHTML = '<div class="empty" style="color:red">Error: '+e.message+'</div>';
+    });
+}
+
+function download(safePath){
+  window.location.href = '/download?path=' + safePath;
+}
+
+function deletePath(safePath, name){
+  if(!confirm('Delete "'+name+'"?')) return;
+  fetch('/delete?path='+safePath)
+    .then(function(r){return r.text();})
+    .then(function(){loadDir(currentDir);})
+    .catch(function(e){alert('Error: '+e.message);});
+}
+
+function deleteSelected(){
+  var paths = Object.keys(selected);
+  if(!paths.length) return;
+  if(!confirm('Delete '+paths.length+' item(s)?')) return;
+  var promises = paths.map(function(p){
+    return fetch('/delete?path='+encodeURIComponent(p));
+  });
+  Promise.all(promises).then(function(){loadDir(currentDir);});
+}
+
+function toggleSel(cb){
+  if(cb.checked) selected[cb.dataset.path]=1;
+  else delete selected[cb.dataset.path];
+  updateSelBar();
+}
+
+function toggleAll(v){
+  document.querySelectorAll('.row-cb').forEach(function(cb){
+    cb.checked=v;
+    if(v) selected[cb.dataset.path]=1;
+    else delete selected[cb.dataset.path];
+  });
+  updateSelBar();
+}
+
+function updateSelBar(){
+  var count = Object.keys(selected).length;
+  var bar = document.getElementById('selBar');
+  bar.style.display = count ? 'flex' : 'none';
+  document.getElementById('selCount').textContent = count + ' item(s) selected';
+}
+
+function mkdir(){
+  var name = document.getElementById('newDirName').value.trim();
+  if(!name){alert('Enter a folder name.');return;}
+  var dir = (currentDir.replace(/\/+$/,'') + '/' + name);
+  var fd = new FormData(); fd.append('dir', dir);
+  fetch('/mkdir',{method:'POST',body:fd})
+    .then(function(r){return r.text();})
+    .then(function(){
+      document.getElementById('newDirName').value='';
+      loadDir(currentDir);
+    })
+    .catch(function(e){alert('Error: '+e.message);});
+}
+
+// Upload
+var dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover',function(e){e.preventDefault();dropZone.classList.add('drag');});
+dropZone.addEventListener('dragleave',function(){dropZone.classList.remove('drag');});
+dropZone.addEventListener('drop',function(e){
+  e.preventDefault(); dropZone.classList.remove('drag');
+  uploadFiles(e.dataTransfer.files);
+});
+document.getElementById('fileInput').addEventListener('change',function(){
+  uploadFiles(this.files);
+});
+
+function uploadFiles(files){
+  if(!files||!files.length) return;
+  var dir = document.getElementById('uploadDir').value;
+  var prog = document.getElementById('uploadProg');
+  var msg  = document.getElementById('uploadMsg');
+  var i=0;
+  prog.style.display='block'; prog.value=0;
+  msg.textContent='';
+
+  function next(){
+    if(i>=files.length){
+      msg.textContent='Upload complete ('+files.length+' file(s)).';
+      loadDir(dir === '/' ? '/' : dir);
+      document.getElementById('fileInput').value='';
+      return;
+    }
+    var fd=new FormData();
+    fd.append('file', files[i]);
+    var xhr=new XMLHttpRequest();
+    xhr.open('POST','/upload?dir='+encodeURIComponent(dir));
+    xhr.upload.onprogress=function(e){
+      if(e.lengthComputable) prog.value=Math.round(e.loaded/e.total*100);
+    };
+    xhr.onload=function(){
+      msg.textContent='Uploaded: '+files[i].name+' ('+(i+1)+'/'+files.length+')';
+      i++; next();
+    };
+    xhr.onerror=function(){
+      msg.style.color='red';
+      msg.textContent='Error uploading: '+files[i].name;
+    };
+    xhr.send(fd);
+  }
+  next();
+}
+
+loadDir('/');
+</script>
+</body>
+</html>
