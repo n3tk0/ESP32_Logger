@@ -196,12 +196,12 @@ function uploadFiles(files){
       document.getElementById('fileInput').value=''; loadFiles(); return;
     }
     var fd=new FormData();
-    fd.append('file',files[i]); fd.append('path','/www/');
+    fd.append('file',files[i]);
     var xhr=new XMLHttpRequest();
     xhr.upload.onprogress=function(ev){if(ev.lengthComputable)prog.value=Math.round(ev.loaded/ev.total*100);};
     xhr.onload=function(){msg.textContent='Uploaded: '+files[i].name+' ('+(i+1)+'/'+files.length+')'; i++;next();};
     xhr.onerror=function(){msg.textContent='Error: '+files[i].name; msg.className='msg err'; prog.style.display='none';};
-    xhr.open('POST','/upload'); xhr.send(fd);
+    xhr.open('POST','/upload?path='+encodeURIComponent('/www/')+'&storage=internal'); xhr.send(fd);
   })();
 }
 
@@ -339,7 +339,7 @@ void setupWebServer() {
     Serial.println("Setting up web server...");
 
     // ── Static file serving from LittleFS /www/ ──────────────────────────────
-    bool uiReady = LittleFS.exists("/www/index.html");
+    bool uiReady = littleFsAvailable && LittleFS.exists("/www/index.html");
 
     if (uiReady) {
         server.serveStatic("/", LittleFS, "/www/").setDefaultFile("index.html");
@@ -554,7 +554,7 @@ void setupWebServer() {
         JsonArray files = doc.createNestedArray("files");
 
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
-        String dir     = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
+        String dir     = r->hasParam("dir")     ? sanitizePath(r->getParam("dir")->value())     : "/";
         String filter  = r->hasParam("filter")  ? r->getParam("filter")->value()  : "";
         bool recursive = r->hasParam("recursive");
 
@@ -944,6 +944,7 @@ void setupWebServer() {
             if (!index) {
                 _uploadDir     = request->hasArg("path") ? request->arg("path") : "/www/";
                 if (!_uploadDir.startsWith("/")) _uploadDir = "/" + _uploadDir;
+                if (_uploadDir.length() > 1 && _uploadDir.endsWith("/")) _uploadDir.remove(_uploadDir.length() - 1);
                 _uploadStorage = request->hasArg("storage") ? request->arg("storage") : currentStorageView;
             }
             fs::FS* targetFS = (_uploadStorage == "sdcard" && sdAvailable) ? (fs::FS*)&SD :

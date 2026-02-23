@@ -8,11 +8,12 @@
 
 bool initStorage() {
     DBGLN("Init LittleFS...");
-    if (LittleFS.begin(true)) {
+    // Explicitly using "spiffs" label for maximum compatibility on ESP32
+    if (LittleFS.begin(true, "/littlefs", 10, "spiffs")) {
         DBGLN("LittleFS OK");
         littleFsAvailable = true;
     } else {
-        DBGLN("LittleFS FAILED!");
+        DBGLN("LittleFS FAILED! Check partition scheme.");
         littleFsAvailable = false;
     }
 

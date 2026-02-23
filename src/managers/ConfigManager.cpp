@@ -138,8 +138,9 @@ void migrateConfig(uint8_t fromVersion) {
 }
 
 bool loadConfig() {
-    if (!LittleFS.begin(true)) {
-        DBGLN("LittleFS mount failed");
+    // Explicitly using "spiffs" label for maximum compatibility on ESP32
+    if (!LittleFS.begin(true, "/littlefs", 10, "spiffs")) {
+        DBGLN("LittleFS mount failed (loadConfig)");
         loadDefaultConfig();
         return false;
     }
