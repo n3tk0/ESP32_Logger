@@ -71,197 +71,205 @@ static const char FAILSAFE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Water Logger – Setup Mode</title>
+<title>Water Logger - Setup Mode</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,sans-serif;background:#f0f4f8;color:#2d3748;min-height:100vh}
-header{background:#275673;color:#fff;padding:16px 20px;display:flex;align-items:center;gap:12px}
-header h1{font-size:1.2rem}
+header{background:#275673;color:#fff;padding:16px 20px}
+header h1{font-size:1.2rem;display:flex;align-items:center;gap:10px}
 .badge{background:#e74c3c;color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem;font-weight:700}
-.container{max-width:700px;margin:24px auto;padding:0 16px}
-.card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.08);margin-bottom:16px;overflow:hidden}
-.card-header{padding:14px 18px;border-bottom:1px solid #e2e8f0;font-weight:600;background:#f7fafc}
-.card-body{padding:18px}
-.drop{border:2px dashed #cbd5e0;border-radius:8px;padding:28px;text-align:center;cursor:pointer;transition:.2s;margin-bottom:12px}
+.sub{font-size:.8rem;opacity:.8;margin-top:4px}
+.container{max-width:720px;margin:20px auto;padding:0 14px}
+.card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.09);margin-bottom:14px;overflow:hidden}
+.card-header{padding:13px 18px;border-bottom:1px solid #e2e8f0;font-weight:600;background:#f7fafc;display:flex;justify-content:space-between;align-items:center}
+.card-body{padding:16px 18px}
+.drop{border:2px dashed #cbd5e0;border-radius:8px;padding:24px;text-align:center;cursor:pointer;transition:.2s;margin-bottom:10px}
 .drop:hover,.drop.over{border-color:#275673;background:#ebf4ff}
 .drop input{display:none}
-.drop p{color:#718096;font-size:.9rem;margin-top:6px}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border:none;border-radius:8px;font-size:.9rem;font-weight:500;cursor:pointer;transition:.15s}
+.drop p{color:#718096;font-size:.85rem;margin-top:5px}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;border:none;border-radius:7px;font-size:.88rem;font-weight:500;cursor:pointer;transition:.15s;text-decoration:none}
 .btn-primary{background:#275673;color:#fff}.btn-primary:hover{background:#1d4259}
 .btn-danger{background:#e74c3c;color:#fff}.btn-danger:hover{background:#c0392b}
-.btn-sm{padding:5px 12px;font-size:.8rem}
+.btn-warn{background:#f39c12;color:#fff}.btn-warn:hover{background:#d68910}
+.btn-sm{padding:4px 10px;font-size:.78rem}
 progress{width:100%;height:8px;border-radius:4px;margin-top:8px;display:none}
-.msg{margin-top:8px;font-size:.9rem;min-height:1.2em;color:#275673}
-.file-list{font-size:.88rem}
-.file-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #e2e8f0}
+.msg{margin-top:8px;font-size:.88rem;min-height:1.1em}
+.ok{color:#27ae60}.err{color:#e74c3c}.inf{color:#275673}
+.file-list{font-size:.85rem}
+.file-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #e2e8f0;gap:6px}
 .file-row:last-child{border:none}
-.fname{word-break:break-all}
-.fsize{color:#718096;white-space:nowrap;margin:0 10px}
-.actions{display:flex;gap:6px;flex-shrink:0}
-.alert{padding:12px 16px;border-radius:8px;margin-bottom:12px;font-size:.9rem}
+.fname{word-break:break-all;flex:1}
+.fsize{color:#718096;white-space:nowrap;margin:0 8px}
+.acts{display:flex;gap:5px;flex-shrink:0}
+.alert{padding:11px 15px;border-radius:8px;margin-bottom:12px;font-size:.88rem;line-height:1.4}
 .alert-warn{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}
-.alert-success{background:#d1fae5;color:#065f46;border:1px solid #6ee7b7}
-input[type=text]{width:100%;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-size:.9rem}
+.legacy{background:#fff3cd;border-left:4px solid #f39c12;padding:6px 10px;border-radius:4px;font-size:.8rem;color:#856404;margin-top:4px}
+input[type=text]{width:100%;padding:7px 11px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem}
+.section-label{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#718096;padding:10px 0 4px}
 </style>
 </head>
 <body>
 <header>
-  <div>
-    <h1>&#x1F4A7; Water Logger <span class="badge">SETUP MODE</span></h1>
-    <div style="font-size:.8rem;opacity:.8;margin-top:2px">Upload the UI files to restore normal operation</div>
-  </div>
+  <h1>&#x1F4A7; Water Logger <span class="badge">SETUP MODE</span></h1>
+  <div class="sub">UI files missing from /www/ &mdash; upload them to restore normal operation</div>
 </header>
 <div class="container">
+
   <div class="alert alert-warn">
-    &#x26A0;&#xFE0F; <strong>UI files not found.</strong>
-    Upload <code>index.html</code> and <code>web.js</code> to <code>/www/</code> to restore the full interface.
+    &#x26A0;&#xFE0F; <strong>Normal UI not found.</strong>
+    Upload <code>index.html</code>, <code>web.js</code> and <code>style.css</code> into <code>/www/</code>.
+    If you see a broken page normally, you likely have <strong>old files at the root</strong> &mdash; delete them below.
   </div>
 
-  <!-- Upload -->
+  <!-- UPLOAD -->
   <div class="card">
-    <div class="card-header">&#x1F4E4; Upload Files to /www/</div>
+    <div class="card-header">&#x1F4E4; Upload files to /www/</div>
     <div class="card-body">
       <div class="drop" id="dropZone" onclick="document.getElementById('fileInput').click()">
         <input type="file" id="fileInput" multiple>
         &#x2B06; <strong>Click or drag files here</strong>
-        <p>Supports: index.html, web.js, style.css, images, etc. All files go into /www/</p>
+        <p>index.html &bull; web.js &bull; style.css &bull; images &bull; chart.min.js &bull; etc.</p>
       </div>
       <progress id="prog" value="0" max="100"></progress>
-      <div class="msg" id="uploadMsg"></div>
+      <div class="msg inf" id="uploadMsg"></div>
     </div>
   </div>
 
-  <!-- File List -->
+  <!-- FILE LIST: all LittleFS -->
   <div class="card">
-    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
-      <span>&#x1F4C1; LittleFS Files</span>
+    <div class="card-header">
+      <span>&#x1F4C1; LittleFS &mdash; All Files</span>
       <button class="btn btn-sm btn-primary" onclick="loadFiles()">&#x21BA; Refresh</button>
     </div>
-    <div class="card-body" style="padding:0 18px">
-      <div class="file-list" id="fileList">Loading...</div>
+    <div class="card-body" style="padding:4px 18px 14px">
+      <div id="legacyWarn" style="display:none" class="legacy">
+        &#x26A0;&#xFE0F; <strong>Legacy UI files found at root.</strong>
+        These override /www/ files and cause broken pages. Delete them!
+      </div>
+      <div class="section-label">&#x1F4C2; /www/ (new UI files)</div>
+      <div class="file-list" id="wwwList">Loading&#x2026;</div>
+      <div class="section-label" style="margin-top:10px">&#x1F4C2; / (root &mdash; legacy / system files)</div>
+      <div class="file-list" id="rootList">Loading&#x2026;</div>
     </div>
   </div>
 
-  <!-- Rename -->
+  <!-- RENAME / MOVE -->
   <div class="card">
-    <div class="card-header">&#x270F;&#xFE0F; Rename File</div>
+    <div class="card-header">&#x270F;&#xFE0F; Rename / Move File</div>
     <div class="card-body">
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <input type="text" id="renSrc" placeholder="Source path e.g. /www/old.js" style="flex:1;min-width:150px">
-        <input type="text" id="renDst" placeholder="Destination path e.g. /www/web.js" style="flex:1;min-width:150px">
-        <button class="btn btn-primary" onclick="doRename()">Rename</button>
+        <input type="text" id="renSrc" placeholder="From: e.g. /web.js" style="flex:1;min-width:140px">
+        <input type="text" id="renDst" placeholder="To: e.g. /www/web.js" style="flex:1;min-width:140px">
+        <button class="btn btn-primary" onclick="doRename()">Move</button>
       </div>
       <div class="msg" id="renMsg"></div>
     </div>
   </div>
 
-  <!-- Restart -->
+  <!-- RESTART -->
   <div class="card">
     <div class="card-header">&#x1F504; Device Control</div>
     <div class="card-body">
-      <button class="btn btn-primary" onclick="if(confirm('Restart now?'))fetch('/restart').then(function(){location.reload();})">
+      <button class="btn btn-primary" onclick="if(confirm('Restart now?'))fetch('/restart').then(function(){setTimeout(function(){location.reload();},3000)})">
         &#x1F504; Restart Device
       </button>
     </div>
   </div>
-</div>
 
+</div><!-- /container -->
 <script>
-var dropZone = document.getElementById('dropZone');
-var fileInput = document.getElementById('fileInput');
+var LEGACY = ['/web.js','/style.css','/index.html','/index.htm'];
 
-dropZone.addEventListener('dragover', function(e){ e.preventDefault(); dropZone.classList.add('over'); });
-dropZone.addEventListener('dragleave', function(){ dropZone.classList.remove('over'); });
-dropZone.addEventListener('drop', function(e){ e.preventDefault(); dropZone.classList.remove('over'); uploadFiles(e.dataTransfer.files); });
-fileInput.addEventListener('change', function(){ uploadFiles(this.files); });
+document.getElementById('dropZone').addEventListener('dragover',function(e){e.preventDefault();this.classList.add('over');});
+document.getElementById('dropZone').addEventListener('dragleave',function(){this.classList.remove('over');});
+document.getElementById('dropZone').addEventListener('drop',function(e){e.preventDefault();this.classList.remove('over');uploadFiles(e.dataTransfer.files);});
+document.getElementById('fileInput').addEventListener('change',function(){uploadFiles(this.files);});
 
-function uploadFiles(files) {
-  if (!files || !files.length) return;
-  var prog = document.getElementById('prog');
-  var msg = document.getElementById('uploadMsg');
-  var i = 0;
-  prog.style.display = 'block';
-
-  function next() {
-    if (i >= files.length) {
-      msg.textContent = 'Done! ' + files.length + ' file(s) uploaded.';
-      prog.style.display = 'none';
-      fileInput.value = '';
-      loadFiles();
-      return;
+function uploadFiles(files){
+  if(!files||!files.length)return;
+  var prog=document.getElementById('prog'),msg=document.getElementById('uploadMsg'),i=0;
+  prog.style.display='block'; msg.className='msg inf';
+  (function next(){
+    if(i>=files.length){
+      msg.textContent='Done! '+files.length+' file(s) uploaded to /www/.';
+      msg.className='msg ok'; prog.style.display='none';
+      document.getElementById('fileInput').value=''; loadFiles(); return;
     }
-    var fd = new FormData();
-    fd.append('file', files[i]);
-    fd.append('path', '/www/');
-    var xhr = new XMLHttpRequest();
-    xhr.upload.onprogress = function(ev) {
-      if (ev.lengthComputable) prog.value = Math.round(ev.loaded / ev.total * 100);
-    };
-    xhr.onload = function() {
-      msg.textContent = 'Uploaded: ' + files[i].name + ' (' + (i+1) + '/' + files.length + ')';
-      i++; next();
-    };
-    xhr.onerror = function() {
-      msg.textContent = 'Error uploading: ' + files[i].name;
-      prog.style.display = 'none';
-    };
-    xhr.open('POST', '/upload');
-    xhr.send(fd);
-  }
-  next();
+    var fd=new FormData();
+    fd.append('file',files[i]); fd.append('path','/www/');
+    var xhr=new XMLHttpRequest();
+    xhr.upload.onprogress=function(ev){if(ev.lengthComputable)prog.value=Math.round(ev.loaded/ev.total*100);};
+    xhr.onload=function(){msg.textContent='Uploaded: '+files[i].name+' ('+(i+1)+'/'+files.length+')'; i++;next();};
+    xhr.onerror=function(){msg.textContent='Error: '+files[i].name; msg.className='msg err'; prog.style.display='none';};
+    xhr.open('POST','/upload'); xhr.send(fd);
+  })();
 }
 
-function loadFiles() {
-  fetch('/api/filelist?storage=internal&dir=/www/')
-    .then(function(r){ return r.json(); })
-    .then(function(d) {
-      var files = d.files || [];
-      if (!files.length) {
-        document.getElementById('fileList').innerHTML = '<div style="padding:12px 0;color:#718096">No files in /www/</div>';
-        return;
-      }
-      var html = '';
-      files.forEach(function(f) {
-        html += '<div class="file-row">' +
-          '<span class="fname">&#x1F4C4; ' + f.path + '</span>' +
-          '<span class="fsize">' + fmtBytes(f.size) + '</span>' +
-          '<span class="actions">' +
-          '<a href="/download?file=' + encodeURIComponent(f.path) + '&storage=internal" class="btn btn-sm btn-primary">&#x1F4E5;</a>' +
-          '<button class="btn btn-sm btn-danger" onclick="delFile(\'' + f.path.replace(/'/g,"\\'") + '\')">&#x1F5D1;</button>' +
-          '</span></div>';
-      });
-      document.getElementById('fileList').innerHTML = html;
-    })
-    .catch(function() {
-      document.getElementById('fileList').innerHTML = '<div style="color:#e74c3c;padding:12px 0">Error loading file list</div>';
-    });
-}
-
-function fmtBytes(b) {
-  if (b >= 1048576) return (b/1048576).toFixed(1)+' MB';
-  if (b >= 1024)    return (b/1024).toFixed(1)+' KB';
+function fmtBytes(b){
+  if(!b)return'0 B';
+  if(b>=1048576)return(b/1048576).toFixed(1)+' MB';
+  if(b>=1024)return(b/1024).toFixed(1)+' KB';
   return b+' B';
 }
 
-function delFile(path) {
-  if (!confirm('Delete ' + path + '?')) return;
-  fetch('/delete?path=' + encodeURIComponent(path) + '&storage=internal')
-    .then(function(){ loadFiles(); })
-    .catch(function(e){ alert('Error: ' + e); });
+function fileRow(f, warn){
+  var isLeg = LEGACY.indexOf(f.path)>=0;
+  return '<div class="file-row"'+( isLeg?' style="background:#fff8e1"':'')+'>'+
+    '<span class="fname">'+(isLeg?'&#x26A0;&#xFE0F; ':'&#x1F4C4; ')+f.path+
+    (isLeg?' <span style="color:#e67e22;font-size:.75rem">[LEGACY - DELETE]</span>':'')+
+    '</span>'+
+    '<span class="fsize">'+fmtBytes(f.size)+'</span>'+
+    '<span class="acts">'+
+    '<a href="/download?file='+encodeURIComponent(f.path)+'&storage=internal" class="btn btn-sm btn-primary">&#x1F4E5;</a>'+
+    '<button class="btn btn-sm btn-danger" onclick="delFile(''+f.path.replace(/\/g,'\\').replace(/'/g,"\'")+'')">&#x1F5D1;</button>'+
+    '</span></div>';
 }
 
-function doRename() {
-  var src = document.getElementById('renSrc').value.trim();
-  var dst = document.getElementById('renDst').value.trim();
-  var msg = document.getElementById('renMsg');
-  if (!src || !dst) { msg.textContent = 'Both paths required.'; return; }
-  // Extract newName and destDir from dst
-  var parts = dst.lastIndexOf('/');
-  var newName = dst.substring(parts + 1);
-  var destDir = parts <= 0 ? '/' : dst.substring(0, parts);
-  fetch('/move_file?src=' + encodeURIComponent(src) + '&newName=' + encodeURIComponent(newName) + '&destDir=' + encodeURIComponent(destDir) + '&storage=internal')
-    .then(function() { msg.textContent = 'Renamed to ' + dst; loadFiles(); })
-    .catch(function(e) { msg.textContent = 'Error: ' + e; });
+function loadFiles(){
+  var wwwEl=document.getElementById('wwwList');
+  var rootEl=document.getElementById('rootList');
+  var warnEl=document.getElementById('legacyWarn');
+  wwwEl.innerHTML='Loading&#x2026;'; rootEl.innerHTML='Loading&#x2026;';
+
+  // Load /www/
+  fetch('/api/filelist?storage=internal&dir=/www/')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var files=d.files||[];
+      if(!files.length){wwwEl.innerHTML='<div style="padding:8px 0;color:#718096">Empty &mdash; upload files here</div>';return;}
+      wwwEl.innerHTML=files.map(function(f){return fileRow(f,false);}).join('');
+    }).catch(function(){wwwEl.innerHTML='<span class="err">Error</span>';});
+
+  // Load root /
+  fetch('/api/filelist?storage=internal&dir=/')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var files=(d.files||[]).filter(function(f){return !f.isDir;});
+      if(!files.length){rootEl.innerHTML='<div style="padding:8px 0;color:#718096">Empty</div>';warnEl.style.display='none';return;}
+      var hasLegacy=files.some(function(f){return LEGACY.indexOf(f.path)>=0;});
+      warnEl.style.display=hasLegacy?'block':'none';
+      rootEl.innerHTML=files.map(function(f){return fileRow(f,false);}).join('');
+    }).catch(function(){rootEl.innerHTML='<span class="err">Error</span>';});
+}
+
+function delFile(path){
+  if(!confirm('Delete '+path+'?'))return;
+  fetch('/delete?path='+encodeURIComponent(path)+'&storage=internal')
+    .then(function(){loadFiles();})
+    .catch(function(e){alert('Error: '+e);});
+}
+
+function doRename(){
+  var src=document.getElementById('renSrc').value.trim();
+  var dst=document.getElementById('renDst').value.trim();
+  var msg=document.getElementById('renMsg');
+  if(!src||!dst){msg.textContent='Both fields required.';msg.className='msg err';return;}
+  var p=dst.lastIndexOf('/');
+  var newName=dst.substring(p+1);
+  var destDir=p<=0?'/':dst.substring(0,p);
+  fetch('/move_file?src='+encodeURIComponent(src)+'&newName='+encodeURIComponent(newName)+'&destDir='+encodeURIComponent(destDir)+'&storage=internal')
+    .then(function(){msg.textContent='Done: '+src+' -> '+dst;msg.className='msg ok';loadFiles();})
+    .catch(function(e){msg.textContent='Error: '+e;msg.className='msg err';});
 }
 
 loadFiles();
@@ -1167,20 +1175,40 @@ void setupWebServer() {
     // =========================================================================
     // STATIC FILE FALLBACK (not found handler)
     // =========================================================================
-    server.onNotFound([uiReady](AsyncWebServerRequest *r) {
+    server.onNotFound([](AsyncWebServerRequest *r) {
         String path = r->url();
 
-        // Try LittleFS first (system assets: logo, favicon, board diagram, etc.)
+        // /www/* is handled by serveStatic. If it reaches here in failsafe mode,
+        // serve directly from LittleFS.
+        if (path.startsWith("/www/")) {
+            if (littleFsAvailable && LittleFS.exists(path)) {
+                r->send(LittleFS, path, getMime(path));
+                return;
+            }
+            r->send(404, "text/plain", "Not found");
+            return;
+        }
+
+        // Block stale legacy root-level UI files left over from before the /www/ migration.
+        // These must NOT shadow /www/web.js, /www/style.css etc.
+        if (path == "/web.js" || path == "/style.css" ||
+            path == "/index.html" || path == "/index.htm") {
+            r->send(404, "text/plain", "Moved to /www/ - please delete this file from LittleFS root");
+            return;
+        }
+
+        // Try LittleFS for legitimate assets stored at root:
+        // logos, favicons, board diagrams, chart.js, changelog, etc.
         if (littleFsAvailable && LittleFS.exists(path)) {
             r->send(LittleFS, path, getMime(path));
             return;
         }
-        // Then try activeFS (SD for log files, etc.)
+        // Then try activeFS (SD card log files, etc.)
         if (fsAvailable && activeFS && activeFS->exists(path)) {
             r->send(*activeFS, path, getMime(path));
             return;
         }
-        // SPA fallback: for any GET without extension, serve index.html
+        // SPA fallback: extensionless GET -> serve index.html
         if (r->method() == HTTP_GET && path.indexOf('.') < 0) {
             if (uiReady && LittleFS.exists("/www/index.html")) {
                 r->send(LittleFS, "/www/index.html", "text/html");
