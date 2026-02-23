@@ -1167,7 +1167,7 @@ void setupWebServer() {
     // =========================================================================
     // STATIC FILE FALLBACK (not found handler)
     // =========================================================================
-    server.onNotFound([](AsyncWebServerRequest *r) {
+    server.onNotFound([uiReady](AsyncWebServerRequest *r) {
         String path = r->url();
 
         // Try LittleFS first (system assets: logo, favicon, board diagram, etc.)
