@@ -169,12 +169,9 @@ input[type=text]{width:100%;padding:7px 11px;border:1px solid #e2e8f0;border-rad
   <!-- RESTART -->
   <div class="card">
     <div class="card-header">&#x1F504; Device Control</div>
-    <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap">
+    <div class="card-body">
       <button class="btn btn-primary" onclick="if(confirm('Restart now?'))fetch('/restart').then(function(){setTimeout(function(){location.reload();},3000)})">
         &#x1F504; Restart Device
-      </button>
-      <button class="btn btn-danger" onclick="doFormat()">
-        &#x1F5D1; Format LittleFS
       </button>
     </div>
   </div>
@@ -182,22 +179,6 @@ input[type=text]{width:100%;padding:7px 11px;border:1px solid #e2e8f0;border-rad
 </div><!-- /container -->
 <script>
 var LEGACY = ['/web.js','/style.css','/index.html','/index.htm'];
-
-function doFormat(){
-  if(!confirm('ERASE ALL FILES in LittleFS? This will delete config and UI!'))return;
-  var msg=document.getElementById('uploadMsg');
-  msg.textContent='Formatting... please wait...'; msg.className='msg warn';
-  fetch('/format_fs',{method:'POST'})
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if(d.ok){
-        msg.textContent='Format OK! Restarting...';
-        setTimeout(function(){location.reload();},5000);
-      } else {
-        msg.textContent='Format failed: '+d.error; msg.className='msg err';
-      }
-    }).catch(function(e){msg.textContent='Error: '+e;msg.className='msg err';});
-}
 
 document.getElementById('dropZone').addEventListener('dragover',function(e){e.preventDefault();this.classList.add('over');});
 document.getElementById('dropZone').addEventListener('dragleave',function(){this.classList.remove('over');});
@@ -215,12 +196,12 @@ function uploadFiles(files){
       document.getElementById('fileInput').value=''; loadFiles(); return;
     }
     var fd=new FormData();
-    fd.append('file',files[i]);
+    fd.append('file',files[i]); fd.append('path','/www/');
     var xhr=new XMLHttpRequest();
     xhr.upload.onprogress=function(ev){if(ev.lengthComputable)prog.value=Math.round(ev.loaded/ev.total*100);};
     xhr.onload=function(){msg.textContent='Uploaded: '+files[i].name+' ('+(i+1)+'/'+files.length+')'; i++;next();};
     xhr.onerror=function(){msg.textContent='Error: '+files[i].name; msg.className='msg err'; prog.style.display='none';};
-    xhr.open('POST','/upload?path='+encodeURIComponent('/www/')+'&storage=internal'); xhr.send(fd);
+    xhr.open('POST','/upload'); xhr.send(fd);
   })();
 }
 
@@ -231,16 +212,17 @@ function fmtBytes(b){
   return b+' B';
 }
 
-function fileRow(f, warn){
+function fileRow(f){
   var isLeg = LEGACY.indexOf(f.path)>=0;
-  return '<div class="file-row"'+( isLeg?' style="background:#fff8e1"':'')+'>'+
+  var sp = f.path.replace(/'/g,"\\\'");
+  return '<div class="file-row"'+(isLeg?' style="background:#fff8e1"':'')+'>'+
     '<span class="fname">'+(isLeg?'&#x26A0;&#xFE0F; ':'&#x1F4C4; ')+f.path+
     (isLeg?' <span style="color:#e67e22;font-size:.75rem">[LEGACY - DELETE]</span>':'')+
     '</span>'+
     '<span class="fsize">'+fmtBytes(f.size)+'</span>'+
     '<span class="acts">'+
-    '<a href="/download?file='+encodeURIComponent(f.path)+'&storage=internal" class="btn btn-sm btn-primary">&#x1F4E5;</a>'+
-    '<button class="btn btn-sm btn-danger" onclick="delFile(''+f.path.replace(/\/g,'\\').replace(/'/g,"\'")+'')">&#x1F5D1;</button>'+
+    '<a href="/download?file='+encodeURIComponent(f.path)+'&storage=internal" class="btn btn-sm btn-primary">&#x1F4E5;</a> '+
+    '<button class="btn btn-sm btn-danger" onclick="delFile(\\\'' +sp+ '\\\')">&#x1F5D1;</button>'+
     '</span></div>';
 }
 
@@ -250,14 +232,14 @@ function loadFiles(){
   var warnEl=document.getElementById('legacyWarn');
   wwwEl.innerHTML='Loading&#x2026;'; rootEl.innerHTML='Loading&#x2026;';
 
-  // Load /www
-  fetch('/api/filelist?storage=internal&dir=/www')
+  // Load /www/
+  fetch('/api/filelist?storage=internal&dir=/www/')
     .then(function(r){return r.json();})
     .then(function(d){
       var files=d.files||[];
-      if(!files.length){wwwEl.innerHTML='<div style="padding:8px 0;color:#718096">'+(d.error?d.error:'Empty &mdash; upload files here')+'</div>';return;}
+      if(!files.length){wwwEl.innerHTML='<div style="padding:8px 0;color:#718096">Empty &mdash; upload files here</div>';return;}
       wwwEl.innerHTML=files.map(function(f){return fileRow(f,false);}).join('');
-    }).catch(function(){wwwEl.innerHTML='<span class="err">Error loading /www</span>';});
+    }).catch(function(){wwwEl.innerHTML='<span class="err">Error</span>';});
 
   // Load root /
   fetch('/api/filelist?storage=internal&dir=/')
@@ -268,7 +250,7 @@ function loadFiles(){
       var hasLegacy=files.some(function(f){return LEGACY.indexOf(f.path)>=0;});
       warnEl.style.display=hasLegacy?'block':'none';
       rootEl.innerHTML=files.map(function(f){return fileRow(f,false);}).join('');
-    }).catch(function(){rootEl.innerHTML='<span class="err">Error loading root</span>';});
+    }).catch(function(){rootEl.innerHTML='<span class="err">Error</span>';});
 }
 
 function delFile(path){
@@ -320,15 +302,20 @@ static String getMime(const String& path) {
 // ============================================================================
 static void scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
                     const String& filter, bool recursive) {
-    if (!fs.exists(dir)) {
-        Serial.printf("scanDir: %s does not exist\n", dir.c_str());
-        return;
-    }
-    File d = fs.open(dir);
+    // Normalise dir: no trailing slash except root
+    String normDir = dir;
+    while (normDir.length() > 1 && normDir.endsWith("/")) normDir.remove(normDir.length()-1);
+    File d = fs.open(normDir);
     if (!d || !d.isDirectory()) return;
     while (File entry = d.openNextFile()) {
+        // entry.name() returns full path on esp-arduino >=2.x, filename only on older
         String name = String(entry.name());
-        String fullPath = (dir == "/") ? "/" + name : dir + "/" + name;
+        if (name.startsWith("/")) {
+            // full path returned — extract just the filename component
+            int slash = name.lastIndexOf('/');
+            name = (slash >= 0) ? name.substring(slash + 1) : name;
+        }
+        String fullPath = (normDir == "/") ? "/" + name : normDir + "/" + name;
         bool isDir = entry.isDirectory();
         if (isDir) {
             if (recursive) scanDir(fs, fullPath, arr, filter, true);
@@ -362,14 +349,22 @@ void setupWebServer() {
     Serial.println("Setting up web server...");
 
     // ── Static file serving from LittleFS /www/ ──────────────────────────────
-    bool uiReady = littleFsAvailable && LittleFS.exists("/www/index.html");
+    bool uiReady = LittleFS.exists("/www/index.html");
 
     if (uiReady) {
         server.serveStatic("/", LittleFS, "/www/").setDefaultFile("index.html");
         Serial.println("Web UI: serving from /www/");
     } else {
-        // Failsafe: serve embedded minimal page
+        // Failsafe: serve embedded minimal page.
+        // Root "/" is handled here. If the user uploads index.html during this session,
+        // the onNotFound handler will serve it for all other paths (/www/index.html).
+        // A device restart is needed to switch serveStatic on for "/" itself.
         server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
+            // Check live — if user just uploaded index.html, serve it immediately
+            if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
+                r->send(LittleFS, "/www/index.html", "text/html");
+                return;
+            }
             r->send_P(200, "text/html", FAILSAFE_HTML);
         });
         Serial.println("Web UI: FAILSAFE mode (upload /www/index.html to restore)");
@@ -577,7 +572,7 @@ void setupWebServer() {
         JsonArray files = doc.createNestedArray("files");
 
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
-        String dir     = r->hasParam("dir")     ? sanitizePath(r->getParam("dir")->value())     : "/";
+        String dir     = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
         String filter  = r->hasParam("filter")  ? r->getParam("filter")->value()  : "";
         bool recursive = r->hasParam("recursive");
 
@@ -877,19 +872,6 @@ void setupWebServer() {
         restartTimer  = millis();
     });
 
-    // /format_fs
-    server.on("/format_fs", HTTP_POST, [](AsyncWebServerRequest *r) {
-        Serial.println("Formatting LittleFS requested...");
-        bool ok = LittleFS.format();
-        if (ok) {
-            r->send(200, "application/json", "{\"ok\":true}");
-            shouldRestart = true;
-            restartTimer  = millis();
-        } else {
-            r->send(500, "application/json", "{\"ok\":false,\"error\":\"Format failed\"}");
-        }
-    });
-
     // =========================================================================
     // FILE OPERATIONS
     // =========================================================================
@@ -969,31 +951,74 @@ void setupWebServer() {
     });
 
     // /upload
-    static String _uploadDir     = "/";
-    static String _uploadStorage = "internal";
+    // Query params (URL): path=, storage=
+    // These are read from the URL, NOT from multipart body — AsyncWebServer
+    // makes URL params available via request->getParam() in upload callbacks.
     server.on("/upload", HTTP_POST,
         [](AsyncWebServerRequest *r) {
             r->send(200, "application/json", "{\"ok\":true}");
         },
         [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-            static File _uploadFile;
-            if (!index) {
-                _uploadDir     = request->hasArg("path") ? request->arg("path") : "/www/";
-                if (!_uploadDir.startsWith("/")) _uploadDir = "/" + _uploadDir;
-                if (_uploadDir.length() > 1 && _uploadDir.endsWith("/")) _uploadDir.remove(_uploadDir.length() - 1);
-                _uploadStorage = request->hasArg("storage") ? request->arg("storage") : currentStorageView;
+            // Use a heap-allocated File* stored in a static pointer per-request.
+            // On ESP32-C3, static local objects in lambda callbacks survive correctly
+            // because AsyncWebServer calls upload callback from the same task for a
+            // given request, but we use heap to avoid stale state across requests.
+            static File*  _upFile    = nullptr;
+            static String _upPath    = "";
+
+            if (index == 0) {
+                // Close any previously open file (safety)
+                if (_upFile) { _upFile->close(); delete _upFile; _upFile = nullptr; }
+
+                // Read destination from URL query params (NOT multipart body)
+                String upDir = request->hasParam("path")
+                               ? request->getParam("path")->value()
+                               : String("/www/");
+                if (!upDir.startsWith("/")) upDir = "/" + upDir;
+                // Normalize: remove trailing slash except root
+                while (upDir.length() > 1 && upDir.endsWith("/")) upDir.remove(upDir.length()-1);
+
+                String upStorage = request->hasParam("storage")
+                                   ? request->getParam("storage")->value()
+                                   : String("internal");
+
+                fs::FS* targetFS = (upStorage == "sdcard" && sdAvailable)
+                                   ? (fs::FS*)&SD
+                                   : (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
+                if (!targetFS) {
+                    Serial.println("Upload: no filesystem available");
+                    return;
+                }
+
+                // Ensure parent directory exists (ignore return — ok if already exists)
+                if (upDir != "/") {
+                    targetFS->mkdir(upDir);
+                }
+
+                _upPath = (upDir == "/") ? "/" + filename : upDir + "/" + filename;
+                Serial.printf("Upload start [%s]: %s\n", upStorage.c_str(), _upPath.c_str());
+
+                _upFile = new File(targetFS->open(_upPath, FILE_WRITE));
+                if (!_upFile || !(*_upFile)) {
+                    Serial.printf("Upload: cannot open %s for write\n", _upPath.c_str());
+                    if (_upFile) { delete _upFile; _upFile = nullptr; }
+                    return;
+                }
             }
-            fs::FS* targetFS = (_uploadStorage == "sdcard" && sdAvailable) ? (fs::FS*)&SD :
-                               (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
-            String fullPath = buildPath(_uploadDir, filename);
-            if (!index && targetFS) {
-                // Ensure parent dir exists
-                targetFS->mkdir(_uploadDir);
-                Serial.printf("Upload [%s]: %s\n", _uploadStorage.c_str(), fullPath.c_str());
-                _uploadFile = targetFS->open(fullPath, "w");
+
+            if (_upFile && *_upFile && len) {
+                _upFile->write(data, len);
             }
-            if (_uploadFile && len) _uploadFile.write(data, len);
-            if (final && _uploadFile) { Serial.printf("Upload done: %u bytes\n", index + len); _uploadFile.close(); }
+
+            if (final) {
+                if (_upFile) {
+                    _upFile->close();
+                    Serial.printf("Upload done: %s (%u bytes)\n", _upPath.c_str(), (unsigned)(index + len));
+                    delete _upFile;
+                    _upFile = nullptr;
+                }
+                _upPath = "";
+            }
         }
     );
 
@@ -1212,42 +1237,41 @@ void setupWebServer() {
     // =========================================================================
     // STATIC FILE FALLBACK (not found handler)
     // =========================================================================
-    server.onNotFound([uiReady](AsyncWebServerRequest *r) {
+    server.onNotFound([](AsyncWebServerRequest *r) {
         String path = r->url();
 
-        // /www/* is handled by serveStatic. If it reaches here in failsafe mode,
-        // serve directly from LittleFS.
+        // /www/* — serve from LittleFS directly.
+        // Works in both normal mode (serveStatic misses here) and failsafe mode.
+        // Allows newly uploaded files to be served immediately without restart.
         if (path.startsWith("/www/")) {
             if (littleFsAvailable && LittleFS.exists(path)) {
                 r->send(LittleFS, path, getMime(path));
                 return;
             }
-            r->send(404, "text/plain", "Not found");
+            r->send(404, "text/plain", "Not found: " + path);
             return;
         }
 
-        // Block stale legacy root-level UI files left over from before the /www/ migration.
-        // These must NOT shadow /www/web.js, /www/style.css etc.
-        if (path == "/web.js" || path == "/style.css" ||
+        // Block stale legacy root-level UI files.
+        if (path == "/web.js"     || path == "/style.css" ||
             path == "/index.html" || path == "/index.htm") {
-            r->send(404, "text/plain", "Moved to /www/ - please delete this file from LittleFS root");
+            r->send(404, "text/plain", "Moved to /www/");
             return;
         }
 
-        // Try LittleFS for legitimate assets stored at root:
-        // logos, favicons, board diagrams, chart.js, changelog, etc.
+        // System assets at LittleFS root (logos, favicon, chart.min.js, changelog, etc.)
         if (littleFsAvailable && LittleFS.exists(path)) {
             r->send(LittleFS, path, getMime(path));
             return;
         }
-        // Then try activeFS (SD card log files, etc.)
+        // SD card log files, etc.
         if (fsAvailable && activeFS && activeFS->exists(path)) {
             r->send(*activeFS, path, getMime(path));
             return;
         }
-        // SPA fallback: extensionless GET -> serve index.html
+        // SPA fallback: extensionless GET -> serve index.html or failsafe
         if (r->method() == HTTP_GET && path.indexOf('.') < 0) {
-            if (uiReady && LittleFS.exists("/www/index.html")) {
+            if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
                 r->send(LittleFS, "/www/index.html", "text/html");
                 return;
             }
