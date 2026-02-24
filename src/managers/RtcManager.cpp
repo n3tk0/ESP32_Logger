@@ -121,27 +121,20 @@ void configureWakeup() {
         return pin <= 5; // ESP32-C3 deep-sleep GPIO wake capable pins
     };
 
-    uint8_t ffPin   = config.hardware.pinWakeupFF;
-    uint8_t pfPin   = config.hardware.pinWakeupPF;
-    uint8_t wifiPin = config.hardware.pinWifiTrigger;
+    const uint8_t ffPin   = config.hardware.pinWakeupFF;
+    const uint8_t pfPin   = config.hardware.pinWakeupPF;
+    const uint8_t wifiPin = config.hardware.pinWifiTrigger;
 
-    bool invalidPins = !isRtcWakePinC3(ffPin) || !isRtcWakePinC3(pfPin) || !isRtcWakePinC3(wifiPin);
-    bool duplicatePins = (ffPin == pfPin) || (ffPin == wifiPin) || (pfPin == wifiPin);
+    if (!isRtcWakePinC3(ffPin) || !isRtcWakePinC3(pfPin) || !isRtcWakePinC3(wifiPin)) {
+        Serial.printf("WAKEUP CONFIG ERROR: C3 wake pins must be GPIO0..GPIO5 (FF=%u PF=%u WIFI=%u)\n",
+                      ffPin, pfPin, wifiPin);
+        return;
+    }
 
-    if (invalidPins || duplicatePins) {
-        Serial.printf("WAKEUP CONFIG FIXUP: invalid pins FF=%u PF=%u WIFI=%u -> defaults FF=%u PF=%u WIFI=%u\n",
-                      ffPin, pfPin, wifiPin,
-                      (uint8_t)DefaultPins::WAKEUP_FF,
-                      (uint8_t)DefaultPins::WAKEUP_PF,
-                      (uint8_t)DefaultPins::WIFI_TRIGGER);
-
-        ffPin   = DefaultPins::WAKEUP_FF;
-        pfPin   = DefaultPins::WAKEUP_PF;
-        wifiPin = DefaultPins::WIFI_TRIGGER;
-
-        config.hardware.pinWakeupFF    = ffPin;
-        config.hardware.pinWakeupPF    = pfPin;
-        config.hardware.pinWifiTrigger = wifiPin;
+    if (ffPin == pfPin || ffPin == wifiPin || pfPin == wifiPin) {
+        Serial.printf("WAKEUP CONFIG ERROR: duplicate wake pins (FF=%u PF=%u WIFI=%u)\n",
+                      ffPin, pfPin, wifiPin);
+        return;
     }
 
     if (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH) {

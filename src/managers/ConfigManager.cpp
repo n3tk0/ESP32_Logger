@@ -4,26 +4,19 @@
 #include "esp_mac.h"
 
 
-static bool sanitizeHardwareConfig() {
+static bool sanitizeWakeConfig() {
     auto isRtcWakePinC3 = [](uint8_t pin) -> bool { return pin <= 5; };
-    auto isPinSafe = [](uint8_t pin) -> bool {
-        if (pin > 21) return false;
-        if (pin >= 11 && pin <= 17) return false;
-        return true;
-    };
-    auto isRtcDataPinValid = [&](uint8_t pin) -> bool {
-        return pin != 0 && isPinSafe(pin);
-    };
+
+    bool invalidPins = !isRtcWakePinC3(config.hardware.pinWakeupFF) ||
+                       !isRtcWakePinC3(config.hardware.pinWakeupPF) ||
+                       !isRtcWakePinC3(config.hardware.pinWifiTrigger);
+    bool duplicatePins = (config.hardware.pinWakeupFF == config.hardware.pinWakeupPF) ||
+                         (config.hardware.pinWakeupFF == config.hardware.pinWifiTrigger) ||
+                         (config.hardware.pinWakeupPF == config.hardware.pinWifiTrigger);
 
     bool changed = false;
 
-    bool invalidWakePins = !isRtcWakePinC3(config.hardware.pinWakeupFF) ||
-                           !isRtcWakePinC3(config.hardware.pinWakeupPF) ||
-                           !isRtcWakePinC3(config.hardware.pinWifiTrigger);
-    bool duplicateWakePins = (config.hardware.pinWakeupFF == config.hardware.pinWakeupPF) ||
-                             (config.hardware.pinWakeupFF == config.hardware.pinWifiTrigger) ||
-                             (config.hardware.pinWakeupPF == config.hardware.pinWifiTrigger);
-    if (invalidWakePins || duplicateWakePins) {
+    if (invalidPins || duplicatePins) {
         config.hardware.pinWakeupFF    = DefaultPins::WAKEUP_FF;
         config.hardware.pinWakeupPF    = DefaultPins::WAKEUP_PF;
         config.hardware.pinWifiTrigger = DefaultPins::WIFI_TRIGGER;
@@ -33,19 +26,6 @@ static bool sanitizeHardwareConfig() {
     if (config.hardware.wakeupMode != WAKEUP_GPIO_ACTIVE_HIGH &&
         config.hardware.wakeupMode != WAKEUP_GPIO_ACTIVE_LOW) {
         config.hardware.wakeupMode = WAKEUP_GPIO_ACTIVE_HIGH;
-        changed = true;
-    }
-
-    if (!isRtcDataPinValid(config.hardware.pinRtcCE)) {
-        config.hardware.pinRtcCE = DefaultPins::RTC_CE;
-        changed = true;
-    }
-    if (!isRtcDataPinValid(config.hardware.pinRtcIO)) {
-        config.hardware.pinRtcIO = DefaultPins::RTC_IO;
-        changed = true;
-    }
-    if (!isRtcDataPinValid(config.hardware.pinRtcSCLK)) {
-        config.hardware.pinRtcSCLK = DefaultPins::RTC_SCLK;
         changed = true;
     }
 
@@ -263,8 +243,8 @@ bool loadConfig() {
 
     if (config.version < CONFIG_VERSION) migrateConfig(config.version);
 
-    if (sanitizeHardwareConfig()) {
-        DBGLN("Config hardware pins invalid -> restored defaults");
+    if (sanitizeWakeConfig()) {
+        DBGLN("Config wake pins invalid/duplicate -> restored defaults");
         saveConfig();
     }
 
