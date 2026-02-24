@@ -6,6 +6,10 @@
 <title>Water Logger</title>
 <link rel="stylesheet" href="/style.css">
 <style id="themeVars">:root{--primary:#275673;--secondary:#4a5568}</style>
+<!-- Hide footer ONLY while the Live page is active.
+     footer.app-footer is a later sibling of #page-live inside <main>,
+     so the CSS ~ combinator fires only when #page-live carries .active. -->
+<style>#page-live.active ~ footer.app-footer{display:none!important}</style>
 </head>
 <body>
 
@@ -183,7 +187,7 @@
 </div>
 
 <div id="page-live" class="page">
-  <style>.app-footer{display:none!important}</style>
+  <!-- NO inline <style> here — footer is hidden via scoped rule in <head> -->
   <div class="page-header">
     <h1><span class="icon">📡</span> Live</h1>
     <div class="breadcrumb"><span id="live-conn" class="text-success">● Connected</span></div>
@@ -354,7 +358,6 @@
       <div class="form-row" id="sd-sysInfo"></div>
     </div></div>
 
-    <!-- ═══ CHANGELOG CARD ═══ -->
     <div class="card">
       <div class="card-header" onclick="changelogToggle()" style="cursor:pointer;user-select:none;display:flex;justify-content:space-between;align-items:center">
         <span>📜 Change Log <small class="text-muted" style="font-size:.75rem">(tap to expand)</small></span>
