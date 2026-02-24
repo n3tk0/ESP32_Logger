@@ -848,20 +848,37 @@ function changelogToggle() {
     if (!changelogLoaded) { changelogLoad(); changelogLoaded = true; }
 }
 
+function changelogClose(ev) {
+    if (ev) ev.stopPropagation();
+    var el = document.getElementById('sd-changelog');
+    if (el) el.classList.add('hidden');
+}
+
 function changelogLoad() {
     var el = document.getElementById('sd-changelog');
+    if (!el) return;
+
     fetch('/api/changelog')
         .then(function(r) { if (!r.ok) throw new Error('not found'); return r.text(); })
         .then(function(txt) {
-            var html = '', lines = txt.trim().split('\n'), inVer = false;
-            lines.forEach(function(line) {
-                line = line.trim(); if (!line) return;
+            var html = '<div style="display:flex;justify-content:flex-end;margin-bottom:.5rem"><button type="button" class="btn btn-secondary btn-sm" onclick="changelogClose(event)">✖ Close</button></div>';
+            var lines = txt.trim().split('\n'), inVer = false, currentMarked = false, hasEntries = false;
+            lines.forEach(function(rawLine) {
+                var line = rawLine.trim();
+                if (!line) return;
+
                 if (line.startsWith('##')) {
+                    hasEntries = true;
                     if (inVer) html += '</ul></div>';
                     var ver = line.substring(2).trim();
-                    var isCur = ver.indexOf('Current')>=0 || lines.indexOf(line)<3;
+                    var isCur = ver.indexOf('Current') >= 0;
+                    if (!isCur && !currentMarked) isCur = true;
+                    if (isCur) currentMarked = true;
+
                     html += '<div style="margin-top:.5rem;padding:.5rem;' +
-                        (isCur?'background:var(--primary);color:#fff':'background:var(--bg)') +
+                        (isCur
+                            ? 'background:var(--primary);color:#fff'
+                            : 'background:var(--border);color:var(--text-muted)') +
                         ';border-radius:4px">';
                     html += '<strong>' + ver + '</strong><ul style="margin:.5rem 0 0 1rem;padding:0;font-size:.9rem">';
                     inVer = true;
@@ -870,7 +887,8 @@ function changelogLoad() {
                 }
             });
             if (inVer) html += '</ul></div>';
-            if (el) el.innerHTML = html || '<div class="text-muted">No entries found.</div>';
+            if (!hasEntries) html += '<div class="text-muted">No entries found.</div>';
+            if (el) el.innerHTML = html;
         })
         .catch(function() {
             if (el) el.innerHTML = "<div class='alert alert-warning'>Changelog not found. Upload /www/changelog.txt</div>";
