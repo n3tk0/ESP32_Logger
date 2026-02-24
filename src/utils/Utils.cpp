@@ -37,15 +37,19 @@ String sanitizeFilename(const String& filename) {
 }
 
 bool deleteRecursive(fs::FS& fs, const String& path) {
-    File dir = fs.open(path);
+    File dir = fs.open(path, FILE_READ);
     if (!dir || !dir.isDirectory()) return fs.remove(path);
+
     while (File entry = dir.openNextFile()) {
-        String childPath = path + "/" + String(entry.name());
+        String entryName = String(entry.name());
+        String childPath = entryName.startsWith("/") ? entryName : buildPath(path, entryName);
         bool isDir = entry.isDirectory();
         entry.close();
+
         if (isDir) deleteRecursive(fs, childPath);
         else       fs.remove(childPath);
     }
+
     dir.close();
     return fs.rmdir(path);
 }

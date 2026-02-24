@@ -117,6 +117,7 @@ function applyStatus(d) {
     setEl('footer-ip',   d.ip);
     setEl('footer-chip', d.chip);
     setEl('footer-ver',  d.version);
+    setEl('ota-currentVer', d.version || '-');
 
     // Header
     setEl('headerNet',  d.network);
@@ -162,6 +163,7 @@ function navigateTo(page) {
 
     // Page-specific init
     pageInit(page);
+    applySettingsFlash();
 }
 
 function showSubpage(page) {
@@ -237,8 +239,15 @@ function settingsSave(ev, url, form, restart) {
         try {
             var r = JSON.parse(xhr.responseText);
             var msgId = PAGE_MSG_IDS[currentPage] || (currentPage.replace('settings_','') + '-msg');
-            if (r.ok) showMsg(msgId, "<div class='alert alert-success'>✅ Saved</div>", true);
-            else      showMsg(msgId, "<div class='alert alert-error'>❌ " + (r.error || 'Save failed') + "</div>", true);
+            if (r.ok) {
+                sessionStorage.setItem('settingsFlash', JSON.stringify({
+                    page: currentPage,
+                    html: "<div class='alert alert-success'>✅ Settings saved successfully</div>"
+                }));
+                setTimeout(function() { location.reload(); }, 300);
+            } else {
+                showMsg(msgId, "<div class='alert alert-error'>❌ Setting couldn't be saved: " + (r.error || 'unknown error') + "</div>", true);
+            }
         } catch(e) {}
     };
     xhr.onerror = function() {
@@ -246,6 +255,18 @@ function settingsSave(ev, url, form, restart) {
         showMsg(msgId, "<div class='alert alert-error'>❌ Network error</div>", true);
     };
     xhr.send(fd);
+}
+
+function applySettingsFlash() {
+    var raw = sessionStorage.getItem('settingsFlash');
+    if (!raw) return;
+    sessionStorage.removeItem('settingsFlash');
+    try {
+        var f = JSON.parse(raw);
+        if (!f || !f.page || !f.html) return;
+        var msgId = PAGE_MSG_IDS[f.page] || (f.page.replace('settings_','') + '-msg');
+        showMsg(msgId, f.html, true);
+    } catch (e) {}
 }
 
 // ============================================================================
@@ -962,12 +983,12 @@ function netInit() {
         setVal('net-mode', net.wifiMode !== undefined ? net.wifiMode : 0);
         netToggleMode();
         setVal('net-apSSID', net.apSSID);
-        // apPassword not exported (security) — leave blank
+        setVal('net-apPass', net.apPassword || '');
         setVal('net-apIP', net.apIP || '');
         setVal('net-apGW', net.apGateway || '');
         setVal('net-apSN', net.apSubnet || '');
         setVal('net-cSSID', net.clientSSID);
-        // clientPassword not exported (security) — leave blank
+        setVal('net-cPass', net.clientPassword || '');
         setChk('net-staticCheck', net.useStaticIP);
         setVal('net-ip2', net.staticIP  || '');
         setVal('net-gw',  net.gateway   || '');
@@ -1319,7 +1340,11 @@ function otaUpload() {
             if (ev2.lengthComputable) {
                 var p = Math.round(ev2.loaded / ev2.total * 100);
                 if (bar) bar.style.width = p + '%';
-                if (pct) pct.textContent = p + '%';
+                if (pct) {
+                    var kbNow = (ev2.loaded / 1024).toFixed(1);
+                    var kbTot = (ev2.total / 1024).toFixed(1);
+                    pct.textContent = p + '% (' + kbNow + ' / ' + kbTot + ' KB)';
+                }
             }
         };
         xhr.onload = function() {

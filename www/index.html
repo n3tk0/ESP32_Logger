@@ -284,7 +284,10 @@
 
 <div id="page-settings" class="page">
   <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-    <div><h1><span class="icon">⚙️</span> Settings</h1></div>
+    <div>
+      <h1><span class="icon">⚙️</span> Settings</h1>
+      <div class="text-muted" style="margin-top:.35rem">Configure device, flow meter, hardware pins, network, time sync and firmware update.</div>
+    </div>
     <button onclick="showRestartPopup()" class="btn btn-warning">🔄 Restart</button>
   </div>
 
@@ -536,6 +539,7 @@
   <div class="page-header">
     <h1>🌐 Network</h1>
     <div class="breadcrumb"><a href="#settings">Settings</a> / Network</div>
+    <div class="text-muted" style="margin-top:.35rem">Choose AP or Client mode. Saving network settings requires restart.</div>
   </div>
   <div id="net-msg"></div>
   <div class="card"><div class="card-body">
@@ -767,11 +771,13 @@
     <div class="breadcrumb"><a href="#settings">Settings</a> / Update</div>
   </div>
   <div class="card"><div class="card-header">🔄 OTA Update</div><div class="card-body">
-    <p class="text-muted" style="margin-bottom:1rem">Select a compiled firmware .bin file to update over the air.</p>
+    <p class="text-muted" style="margin-bottom:.35rem">Select a compiled firmware <strong>.bin</strong> file to update over the air.</p>
+    <p class="text-muted" style="margin-bottom:1rem;font-size:.85rem">Current firmware: <span id="ota-currentVer">-</span> • Device will restart automatically after successful upload.</p>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <input type="file" id="ota-file" accept=".bin" class="form-input" style="flex:1">
+      <input type="file" id="ota-file" accept=".bin" class="form-input" style="flex:1" onchange="document.getElementById('ota-fileInfo').textContent=this.files.length?('Selected: '+this.files[0].name+' ('+(this.files[0].size/1024).toFixed(1)+' KB)'):'No file selected';">
       <button class="btn btn-warning" onclick="otaUpload()">📤 Flash</button>
     </div>
+    <div id="ota-fileInfo" class="text-muted" style="font-size:.82rem;margin-top:.5rem">No file selected</div>
     <div id="ota-prog" style="display:none;margin-top:1rem">
       <div style="display:flex;align-items:center;gap:8px">
         <div class="progress" style="flex:1;height:12px"><div id="ota-bar" class="progress-bar" style="width:0%;background:#f39c12"></div></div>
