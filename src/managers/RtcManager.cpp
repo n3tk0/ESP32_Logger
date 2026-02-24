@@ -117,17 +117,53 @@ String getRtcDateTimeString() {
 }
 
 void configureWakeup() {
+    auto isRtcWakePinC3 = [](uint8_t pin) -> bool {
+        return pin <= 5; // ESP32-C3 deep-sleep GPIO wake capable pins
+    };
+
+    const uint8_t ffPin   = config.hardware.pinWakeupFF;
+    const uint8_t pfPin   = config.hardware.pinWakeupPF;
+    const uint8_t wifiPin = config.hardware.pinWifiTrigger;
+
+    if (!isRtcWakePinC3(ffPin) || !isRtcWakePinC3(pfPin) || !isRtcWakePinC3(wifiPin)) {
+        Serial.printf("WAKEUP CONFIG ERROR: C3 wake pins must be GPIO0..GPIO5 (FF=%u PF=%u WIFI=%u)\n",
+                      ffPin, pfPin, wifiPin);
+        return;
+    }
+
+    if (ffPin == pfPin || ffPin == wifiPin || pfPin == wifiPin) {
+        Serial.printf("WAKEUP CONFIG ERROR: duplicate wake pins (FF=%u PF=%u WIFI=%u)\n",
+                      ffPin, pfPin, wifiPin);
+        return;
+    }
+
+    if (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH) {
+        pinMode(ffPin, INPUT_PULLDOWN);
+        pinMode(pfPin, INPUT_PULLDOWN);
+        pinMode(wifiPin, INPUT_PULLDOWN);
+    } else {
+        pinMode(ffPin, INPUT_PULLUP);
+        pinMode(pfPin, INPUT_PULLUP);
+        pinMode(wifiPin, INPUT_PULLUP);
+    }
+
     uint64_t mask = 0;
-    mask |= (1ULL << config.hardware.pinWakeupFF);
-    mask |= (1ULL << config.hardware.pinWakeupPF);
-    mask |= (1ULL << config.hardware.pinWifiTrigger);
+    mask |= (1ULL << ffPin);
+    mask |= (1ULL << pfPin);
+    mask |= (1ULL << wifiPin);
 
     esp_deepsleep_gpio_wake_up_mode_t mode =
         (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH)
         ? ESP_GPIO_WAKEUP_GPIO_HIGH
         : ESP_GPIO_WAKEUP_GPIO_LOW;
 
-    esp_deep_sleep_enable_gpio_wakeup(mask, mode);
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+
+    esp_err_t err = esp_deep_sleep_enable_gpio_wakeup(mask, mode);
+    if (err != ESP_OK) {
+        Serial.printf("WAKEUP CONFIG ERROR: esp_deep_sleep_enable_gpio_wakeup failed (%d)\n", (int)err);
+    }
 }
 
 String getWakeupReason() {
