@@ -850,18 +850,27 @@ function changelogToggle() {
 
 function changelogLoad() {
     var el = document.getElementById('sd-changelog');
+    if (!el) return;
+
     fetch('/api/changelog')
         .then(function(r) { if (!r.ok) throw new Error('not found'); return r.text(); })
         .then(function(txt) {
-            var html = '', lines = txt.trim().split('\n'), inVer = false;
-            lines.forEach(function(line) {
-                line = line.trim(); if (!line) return;
+            var html = '', lines = txt.trim().split('\n'), inVer = false, currentMarked = false;
+            lines.forEach(function(rawLine) {
+                var line = rawLine.trim();
+                if (!line) return;
+
                 if (line.startsWith('##')) {
                     if (inVer) html += '</ul></div>';
                     var ver = line.substring(2).trim();
-                    var isCur = ver.indexOf('Current')>=0 || lines.indexOf(line)<3;
+                    var isCur = ver.indexOf('Current') >= 0;
+                    if (!isCur && !currentMarked) isCur = true;
+                    if (isCur) currentMarked = true;
+
                     html += '<div style="margin-top:.5rem;padding:.5rem;' +
-                        (isCur?'background:var(--primary);color:#fff':'background:var(--bg)') +
+                        (isCur
+                            ? 'background:var(--primary);color:#fff'
+                            : 'background:var(--border);color:var(--text-muted)') +
                         ';border-radius:4px">';
                     html += '<strong>' + ver + '</strong><ul style="margin:.5rem 0 0 1rem;padding:0;font-size:.9rem">';
                     inVer = true;
