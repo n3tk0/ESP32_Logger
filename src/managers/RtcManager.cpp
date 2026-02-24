@@ -117,17 +117,59 @@ String getRtcDateTimeString() {
 }
 
 void configureWakeup() {
+    auto isRtcWakePinC3 = [](uint8_t pin) -> bool {
+        return pin <= 5; // ESP32-C3 deep-sleep GPIO wake capable pins
+    };
+
+    uint8_t ffPin   = config.hardware.pinWakeupFF;
+    uint8_t pfPin   = config.hardware.pinWakeupPF;
+    uint8_t wifiPin = config.hardware.pinWifiTrigger;
+
+    bool invalidPins = !isRtcWakePinC3(ffPin) || !isRtcWakePinC3(pfPin) || !isRtcWakePinC3(wifiPin);
+    bool duplicatePins = (ffPin == pfPin) || (ffPin == wifiPin) || (pfPin == wifiPin);
+
+    if (invalidPins || duplicatePins) {
+        Serial.printf("WAKEUP CONFIG FIXUP: invalid pins FF=%u PF=%u WIFI=%u -> defaults FF=%u PF=%u WIFI=%u\n",
+                      ffPin, pfPin, wifiPin,
+                      (uint8_t)DefaultPins::WAKEUP_FF,
+                      (uint8_t)DefaultPins::WAKEUP_PF,
+                      (uint8_t)DefaultPins::WIFI_TRIGGER);
+
+        ffPin   = DefaultPins::WAKEUP_FF;
+        pfPin   = DefaultPins::WAKEUP_PF;
+        wifiPin = DefaultPins::WIFI_TRIGGER;
+
+        config.hardware.pinWakeupFF    = ffPin;
+        config.hardware.pinWakeupPF    = pfPin;
+        config.hardware.pinWifiTrigger = wifiPin;
+    }
+
+    if (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH) {
+        pinMode(ffPin, INPUT_PULLDOWN);
+        pinMode(pfPin, INPUT_PULLDOWN);
+        pinMode(wifiPin, INPUT_PULLDOWN);
+    } else {
+        pinMode(ffPin, INPUT_PULLUP);
+        pinMode(pfPin, INPUT_PULLUP);
+        pinMode(wifiPin, INPUT_PULLUP);
+    }
+
     uint64_t mask = 0;
-    mask |= (1ULL << config.hardware.pinWakeupFF);
-    mask |= (1ULL << config.hardware.pinWakeupPF);
-    mask |= (1ULL << config.hardware.pinWifiTrigger);
+    mask |= (1ULL << ffPin);
+    mask |= (1ULL << pfPin);
+    mask |= (1ULL << wifiPin);
 
     esp_deepsleep_gpio_wake_up_mode_t mode =
         (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH)
         ? ESP_GPIO_WAKEUP_GPIO_HIGH
         : ESP_GPIO_WAKEUP_GPIO_LOW;
 
-    esp_deep_sleep_enable_gpio_wakeup(mask, mode);
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+
+    esp_err_t err = esp_deep_sleep_enable_gpio_wakeup(mask, mode);
+    if (err != ESP_OK) {
+        Serial.printf("WAKEUP CONFIG ERROR: esp_deep_sleep_enable_gpio_wakeup failed (%d)\n", (int)err);
+    }
 }
 
 String getWakeupReason() {
