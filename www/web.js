@@ -848,6 +848,12 @@ function changelogToggle() {
     if (!changelogLoaded) { changelogLoad(); changelogLoaded = true; }
 }
 
+function changelogClose(ev) {
+    if (ev) ev.stopPropagation();
+    var el = document.getElementById('sd-changelog');
+    if (el) el.classList.add('hidden');
+}
+
 function changelogLoad() {
     var el = document.getElementById('sd-changelog');
     if (!el) return;
@@ -861,6 +867,7 @@ function changelogLoad() {
                 if (!line) return;
 
                 if (line.startsWith('##')) {
+                    hasEntries = true;
                     if (inVer) html += '</ul></div>';
                     var ver = line.substring(2).trim();
                     var isCur = ver.indexOf('Current') >= 0;
@@ -879,7 +886,8 @@ function changelogLoad() {
                 }
             });
             if (inVer) html += '</ul></div>';
-            if (el) el.innerHTML = html || '<div class="text-muted">No entries found.</div>';
+            if (!hasEntries) html += '<div class="text-muted">No entries found.</div>';
+            if (el) el.innerHTML = html;
         })
         .catch(function() {
             if (el) el.innerHTML = "<div class='alert alert-warning'>Changelog not found. Upload /www/changelog.txt</div>";
