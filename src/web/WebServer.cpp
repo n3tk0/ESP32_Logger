@@ -257,7 +257,11 @@ function loadFiles(){
 function delFile(path){
   if(!confirm('Delete '+path+'?'))return;
   fetch('/delete?path='+encodeURIComponent(path)+'&storage=internal')
-    .then(function(){loadFiles();})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(!j || !j.ok){alert('Delete failed: '+((j&&j.error)?j.error:'unknown error')); return;}
+      loadFiles();
+    })
     .catch(function(e){alert('Error: '+e);});
 }
 
@@ -907,26 +911,28 @@ void setupWebServer() {
 
     // /delete
     server.on("/delete", HTTP_GET, [](AsyncWebServerRequest *r) {
-        if (!r->hasParam("path")) { r->redirect("/"); return; }
-        String path    = sanitizeFilename(r->getParam("path")->value());
-        if (!path.startsWith("/")) path = "/" + path;
+        if (!r->hasParam("path")) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing path\"}"); return; }
+
+        String path = sanitizePath(r->getParam("path")->value());
+        if (path == "/") { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Refusing to delete root\"}"); return; }
+
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         fs::FS* targetFS = nullptr;
-        if (storage == "sdcard" && sdAvailable)           targetFS = &SD;
+        if (storage == "sdcard" && sdAvailable)              targetFS = &SD;
         else if (storage == "internal" && littleFsAvailable) targetFS = &LittleFS;
         else if (activeFS) targetFS = activeFS;
 
         bool deleted = false;
-        if (targetFS) {
-            File f = targetFS->open(path);
-            if (f) {
-                bool isDir = f.isDirectory(); f.close();
-                if (isDir) deleteRecursive(*targetFS, path);
-                else       targetFS->remove(path);
-                deleted = true;
-            }
+        if (targetFS && targetFS->exists(path)) {
+            File f = targetFS->open(path, FILE_READ);
+            bool isDir = f && f.isDirectory();
+            if (f) f.close();
+
+            deleted = isDir ? deleteRecursive(*targetFS, path)
+                            : targetFS->remove(path);
         }
-        r->send(200, "application/json", deleted ? "{\"ok\":true}" : "{\"ok\":false}");
+
+        r->send(200, "application/json", deleted ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"Delete failed\"}");
     });
 
     // /mkdir
