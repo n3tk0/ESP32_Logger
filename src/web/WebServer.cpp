@@ -1091,7 +1091,9 @@ void setupWebServer() {
         JsonObject net = doc["network"].to<JsonObject>();
         net["wifiMode"]    = (int)config.network.wifiMode;
         net["apSSID"]      = config.network.apSSID;
+        net["apPassword"]  = config.network.apPassword;
         net["clientSSID"]  = config.network.clientSSID;
+        net["clientPassword"] = config.network.clientPassword;
         net["ntpServer"]   = config.network.ntpServer;
         net["timezone"]    = config.network.timezone;
         net["useStaticIP"] = config.network.useStaticIP;

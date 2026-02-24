@@ -95,6 +95,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .text-warning{color:var(--warning)}
 .text-danger{color:var(--danger)}
 .text-primary{color:var(--primary)}
+
+.hidden{display:none!important}
+.color-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}
+@media(max-width:575px){.color-grid{grid-template-columns:1fr}}
 .mt-1{margin-top:.5rem}
 .mt-2{margin-top:1rem}
 .mb-1{margin-bottom:.5rem}
