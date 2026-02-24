@@ -158,6 +158,7 @@ void configureWakeup() {
         : ESP_GPIO_WAKEUP_GPIO_LOW;
 
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
 
     esp_err_t err = esp_deep_sleep_enable_gpio_wakeup(mask, mode);
     if (err != ESP_OK) {
