@@ -3,6 +3,35 @@
 #include <LittleFS.h>
 #include "esp_mac.h"
 
+
+static bool sanitizeWakeConfig() {
+    auto isRtcWakePinC3 = [](uint8_t pin) -> bool { return pin <= 5; };
+
+    bool invalidPins = !isRtcWakePinC3(config.hardware.pinWakeupFF) ||
+                       !isRtcWakePinC3(config.hardware.pinWakeupPF) ||
+                       !isRtcWakePinC3(config.hardware.pinWifiTrigger);
+    bool duplicatePins = (config.hardware.pinWakeupFF == config.hardware.pinWakeupPF) ||
+                         (config.hardware.pinWakeupFF == config.hardware.pinWifiTrigger) ||
+                         (config.hardware.pinWakeupPF == config.hardware.pinWifiTrigger);
+
+    bool changed = false;
+
+    if (invalidPins || duplicatePins) {
+        config.hardware.pinWakeupFF    = DefaultPins::WAKEUP_FF;
+        config.hardware.pinWakeupPF    = DefaultPins::WAKEUP_PF;
+        config.hardware.pinWifiTrigger = DefaultPins::WIFI_TRIGGER;
+        changed = true;
+    }
+
+    if (config.hardware.wakeupMode != WAKEUP_GPIO_ACTIVE_HIGH &&
+        config.hardware.wakeupMode != WAKEUP_GPIO_ACTIVE_LOW) {
+        config.hardware.wakeupMode = WAKEUP_GPIO_ACTIVE_HIGH;
+        changed = true;
+    }
+
+    return changed;
+}
+
 String generateDeviceId() {
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -213,6 +242,12 @@ bool loadConfig() {
     }
 
     if (config.version < CONFIG_VERSION) migrateConfig(config.version);
+
+    if (sanitizeWakeConfig()) {
+        DBGLN("Config wake pins invalid/duplicate -> restored defaults");
+        saveConfig();
+    }
+
     DBGF("Config loaded v%d\n", config.version);
     return true;
 }
