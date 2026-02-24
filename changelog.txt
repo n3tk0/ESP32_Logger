@@ -1,17 +1,20 @@
-## v4.1.5 - SPA refactor & recovery improvements
-- Web UI migrated to external SPA served from LittleFS /www/ (index.html, web.js, style.css)
-- Failsafe mode: embedded setup page served when /www/index.html is missing
-- /setup route always available: navigate to http://<device-ip>/setup to access the recovery UI even when the main UI loads a broken index.html
-- Settings pages (Flow Meter, Hardware, Theme) now load config from /export_settings instead of /api/status — previously returned empty fields
-- Dashboard CSV export: filename now includes _noZero suffix when "Exclude 0.00L" filter is active (matches firmware behaviour)
-- OTA update: added pre-upload validation — checks .bin extension, minimum 10 KB size, and ESP32 magic byte 0xE9 before upload begins
-- Live page state hint now reads window/firstLoop timing from /export_settings (CFG.flowMeter) instead of undefined ST.flowMeter
-- Datalog page: currentFile selection sourced from /api/filelist response (always accurate); config fields from /export_settings
-- Files page: default storage tab now reads hardware.defaultStorageView from /export_settings (CFG.hardware) instead of undefined
-- Network settings: live status (IP, mode) from /api/status; full config from /export_settings; passwords intentionally blank on load (security)
-- Chart.js loader: idempotent, supports local path or CDN with auto-fallback, error shown in dashboard if both fail
-- Bootstrap: /api/status and /export_settings fetched in parallel at startup, cached as ST and CFG globals
-- Version bump: VERSION_PATCH 4 → 5
+## v4.1.5 - SPA refactor & recovery hardening
+- Web UI migrated to external SPA in LittleFS `/www/` (`index.html`, `web.js`, `style.css`).
+- Added robust recovery flow:
+  - Failsafe embedded setup page when `/www/index.html` is missing.
+  - `/setup` route is always available for recovery uploads, even if SPA is broken.
+- Config/data loading cleanup in SPA:
+  - Settings pages now use `/export_settings` for full configuration objects.
+  - Runtime-only status (IP/mode/live state) remains sourced from `/api/status`.
+  - Startup now fetches `/api/status` + `/export_settings` in parallel and caches as `ST`/`CFG`.
+- Dashboard/Data/Files correctness fixes:
+  - CSV export filename adds `_noZero` when "Exclude 0.00L" is active.
+  - Live state hint uses timing from `CFG.flowMeter`.
+  - Datalog current file is taken from `/api/filelist`; form values from `/export_settings`.
+  - Files default tab uses `CFG.hardware.defaultStorageView`.
+- Chart.js loader improved: idempotent load, supports local path or CDN with fallback, shows dashboard warning if both fail.
+- OTA upload safety checks before flashing: `.bin` extension, minimum size 10 KB, ESP magic byte `0xE9`.
+- Version patch increment: 4 → 5.
 
 ## v4.1.4 - Post-correction improvements
 - Button hold duration measurement: tracks how long flush plate button is pressed

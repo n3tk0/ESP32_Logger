@@ -1,262 +1,119 @@
 # 💧 ESP32 Low-Power Water Usage Logger
 
-Low-power multi-sensor water usage logger built for **XIAO ESP32-C3 (RISC-V)** with deep sleep wake-up, web interface, file management, configurable datalogging and advanced button post-correction logic.
+Low-power multi-sensor water usage logger for **Seeed XIAO ESP32-C3 (RISC-V)** with deep sleep wake-up, modular firmware, SPA web UI, and resilient recovery workflow.
 
 ---
 
 ## 📌 Project Overview
 
-**Project:** ESP32 Low-Power Water Usage Logger  
-**Version:** 4.1.4  
-**Target Board:** Seeed Studio XIAO ESP32-C3  
-**Author:** Petko Georgiev  
-**Organization:** Villeroy & Boch Bulgaria  
-**Location:** Sevlievo, Bulgaria  
+- **Project:** ESP32 Low-Power Water Usage Logger
+- **Release Line:** 4.1.x (latest web stack updates aligned with v4.1.5 changelog)
+- **Target Board:** Seeed Studio XIAO ESP32-C3
+- **Author:** Petko Georgiev
+- **Organization:** Villeroy & Boch Bulgaria
 
-This firmware is designed to:
+Firmware goals:
+- Accurate PF/FF flush event logging
+- Ultra low-power behavior via deep sleep
+- Reliable startup button detection
+- Robust web-based configuration and file management
+- Recovery path even when web UI files are missing/corrupted
 
-- Log water usage via flow sensor
-- Detect flush plate buttons (PF / FF)
-- Operate in ultra low-power deep sleep mode
-- Provide web-based configuration and monitoring
-- Support LittleFS or SD storage
-- Automatically correct misidentified flush events using volume logic
+---
 
-<details>
- <summary>⚙️ Core Features</summary>
- 
-### 🔋 Low Power Operation
-- Deep sleep using GPIO wake-up
-- Automatic sleep after inactivity
-- Optimized boot sequence for fast button detection (<1ms snapshot)
+## ⚙️ Core Features
 
-### 🚽 Multi-Button Detection
-- Supports:
-  - PF (Partial Flush)
-  - FF (Full Flush)
-- Configurable debounce (20–500ms)
-- Edge detection to prevent multiple counts
-- Early GPIO snapshot to avoid misidentification
+### 🔋 Low Power & Reliability
+- GPIO wake-up + deep sleep cycle
+- Early GPIO snapshot during boot (improves wake source detection)
+- Configurable debounce and edge filtering
+- Safe restart path with WiFi hardware shutdown (`safeWiFiShutdown()`)
 
-### 🧠 Post-Correction Logic (v4.1.4+)
-Volume-based correction of button identification:
+### 🚽 PF/FF Detection + Post-Correction
+- Multi-button flush identification (PF/FF)
+- Optional volume-based post-correction:
+  - PF → FF when volume exceeds threshold
+  - FF → PF when volume is below threshold
+- Hold-time guard (`manualPressThresholdMs`) to skip correction for intentional long presses
+- Post-correction events logged to `btn_log.txt`
 
-- PF with volume ≥ threshold → corrected to FF
-- FF with volume ≤ threshold → corrected to PF
-- Configurable thresholds:
-  - `pfToFfThreshold`
-  - `ffToPfThreshold`
-- Manual press detection:
-  - If button held longer than `manualPressThresholdMs` (default 500ms), correction is skipped
+### 💾 Storage
+- LittleFS (default) or SD Card
+- Rotation modes and formatting options for datalog output
+- Wake and sleep timestamps in log lines
 
-Post-correction events are logged to: /btn_log.txt
+---
 
-</details>
-<details>
- <summary>🌐 Web Interface</summary>
+## 🌐 Web UI (SPA + Recovery)
 
-Accessible in:
+### Main Behavior
+- Front-end is served from **LittleFS `/www/`** (`index.html`, `web.js`, `style.css`)
+- Legacy routes redirect to SPA root (`/`)
+- Runtime and configuration are separated:
+  - `/api/status` for live state
+  - `/export_settings` for complete config payload
 
-- 🔵 AP Mode (default)
-- 🟢 Client Mode (WiFi network)
-- 🔴 Logging Mode (offline)
+### Recovery & Failsafe
+- If `/www/index.html` is missing, device serves embedded failsafe page
+- `/setup` route is **always available** for emergency UI recovery uploads
 
-### Web Features
+### Additional Improvements
+- Chart.js loader supports local path or CDN fallback
+- CSV export reflects “Exclude 0.00L” filter in filename suffix
+- Network settings load status/config separately with password-safe behavior
 
-- Dashboard with:
-  - Button-only filtering
-  - Exclude 0.00L option
-  - CSV export
-- Settings pages:
-  - Device
-  - Hardware
-  - Flow Meter
-  - Datalog
-  - Network
-- File Manager:
-  - Upload
-  - Move / Rename
-  - Folder selection
-- Import / Export configuration
-- Restart confirmation popup
-- Live status JSON endpoints
-- Integrated changelog viewer (reads `/changelog.txt`)
+---
 
-</details>
-<details>
- <summary>💾 Storage Support</summary>
+## 🔌 Default Pins (XIAO ESP32-C3)
 
-Selectable storage type:
+| Function      | Default Pin |
+|---------------|-------------|
+| WiFi Trigger  | D0 (GPIO 2) |
+| Wakeup FF     | D1 (GPIO 3) |
+| Wakeup PF     | D2 (GPIO 4) |
+| Flow Sensor   | D6 (GPIO 21) |
+| RTC (DS1302)  | GPIO 5/6/7 |
+| SD Card SPI   | GPIO 10–13 |
 
-- LittleFS (default)
-- SD Card
+---
 
-### Datalog Features
+## 📊 API Endpoints (selected)
 
-- Configurable file rotation
-- Max size / entry limits
-- Filename timestamp option
-- Device ID in logs
-- Wake time AND sleep time included
-- Flexible formatting:
-  - Date format
-  - Time format
-  - End format (duration / time)
-  - Volume format
+| Endpoint | Purpose |
+|----------|---------|
+| `/api/status` | Live runtime status |
+| `/export_settings` | Full settings payload for UI |
+| `/api/recent_logs` | Last log entries |
+| `/api/changelog` | Changelog text from LittleFS |
+| `/api/filelist` | File list for selected storage |
+| `/setup` | Always-on failsafe recovery page |
 
-</details>
-<details>
- <summary>🔧 Hardware Configuration (Default Pins – XIAO ESP32-C3)</summary>
+---
 
-| Function        | Default Pin |
-|---------------|------------|
-| WiFi Trigger   | D0 (GPIO 2) |
-| Wakeup FF      | D1 (GPIO 3) |
-| Wakeup PF      | D2 (GPIO 4) |
-| Flow Sensor    | D6 (GPIO 21) |
-| RTC (DS1302)   | 5 / 6 / 7 |
-| SD Card        | 10–13 |
+## 🚀 Flashing / Deployment
 
-CPU default frequency: **80 MHz**
-</details>
-<details>
- <summary>🌍 Network Configuration</summary>
+1. Build and flash firmware (`Logger.ino`).
+2. Upload LittleFS content including:
+   - `/www/index.html`
+   - `/www/web.js`
+   - `/www/style.css`
+   - `/www/changelog.txt`
+   - optional assets (`/chart.min.js`, logo/favicon)
+3. If UI fails to load, open `http://<device-ip>/setup` and re-upload UI files.
 
-### Default AP Mode
+---
 
-- SSID: `WaterLogger`
-- Password: `water12345`
-- Default IP: `192.168.4.1`
+## 🛠 Tech Stack
 
-### Client Mode
-
-- DHCP or Static IP supported
-- Configurable:
-  - IP
-  - Gateway
-  - Subnet
-  - DNS
-- NTP Server default: pool.ntp.org
-- Default timezone: EET (UTC+2)
-</details>
-<details>
- <summary>📊 API Endpoints</summary>
-
-| Endpoint | Description |
-|----------|------------|
-| `/api/status` | Live device status (JSON) |
-| `/api/recent_logs` | Last 5 log entries |
-| `/api/changelog` | Loads changelog from LittleFS |
-| `/api/regen-id` | Generate new device ID from MAC |
-
-</details>
-<details>
- <summary>🆔 Device ID</summary>
-
-- Automatically generated from ESP32 MAC address
-- Uses last 4 bytes of MAC
-- Can be manually edited
-- Regeneration available via API
-
-</details>
-<details>
- <summary>🧪 Test Mode</summary>
-
-- WiFi pin used as LED output
-- Visual flow validation
-- Adjustable blink duration
-
-</details>
-<details>
- <summary>🛠 Technical Stack</summary>
-
-- Arduino Framework
-- ESPAsyncWebServer
-- AsyncTCP
-- LittleFS
-- SD
-- DS1302 RTC
+- Arduino Framework (ESP32)
+- ESPAsyncWebServer + AsyncTCP
+- LittleFS / SD
 - ArduinoJson
-- ESP32 Deep Sleep API
+- RtcDS1302
 - FlowSensor library
 
-</details>
-<details>
- <summary>📦 Version History (Latest)</summary>
-
-### v4.1.4 – Post-Correction Improvements
-
-- Button hold duration measurement
-- Extended hold skips correction
-- `manualPressThresholdMs` setting (default 500ms)
-- Cleaner UI when post-correction disabled
-- Config migration handling fix
-- Standardized version format
-
-### v4.1.3
-
-- Early GPIO snapshot (<1ms)
-- Volume-based correction logic introduced
-- Post-correction logging
-- CONFIG_VERSION 10
-
-### v4.1.2
-
-- Wake-up reliability fix
-- CSS moved to external file (~30KB flash saved)
-
-### v4.1.1
-
-- File Manager improvements
-- UI consistency fixes
-- Code size optimization (~5KB saved)
-
-### v4.1.0 – Major Release
-
-- Removed multi-language (English only)
-- CSV export
-- Import/Export settings
-- Manual Device ID editing
-- Restart confirmation popup
-- Wake & sleep timestamps in datalog
-</details>
-<details>
- <summary>🚀 Flashing</summary>
-
-1. Select board: XIAO ESP32-C3
-2. Set CPU frequency to 160 MHz
-3. Upload filesystem (LittleFS) including:
-- `/changelog.txt`
-- /styles.css
-- Static assets /www/
-</details>
-<details>
- <summary>🔒 Debug Mode</summary>
-
-#define DEBUG_MODE 0
-Set to 1 to enable Serial debug output
-Saves ~3KB flash when disabled.
-</details>
-
-## 🧩 Project Goals
-
-Reliable water usage tracking
-
-Minimal false button identification
-
-Ultra-low power consumption
-
-Professional embedded UI
-
-Easy configuration & deployment
+---
 
 ## 📄 License
 
-Internal / Custom project (define license if needed).
-
-## 👨‍💻 Author
-
-Petko Georgiev
-Villeroy & Boch Bulgaria
-Sevlievo, Bulgaria
-
+Internal / Custom project.

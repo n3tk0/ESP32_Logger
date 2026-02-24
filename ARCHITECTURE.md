@@ -1,131 +1,106 @@
-# 💧 ESP32 Water Logger – Модулна структура v4.1.4
+# 💧 ESP32 Water Logger – Модулна структура v4.1.5 (Web/UI refactor)
 
 ## 📁 Файлова структура
 
-```
+```text
 Water_logger/
-├── Logger.ino               ← Само setup() и loop()
-│
-└── src/                     ← Всички модули (компилирани рекурсивно от Arduino IDE 2.x)
-    ├── core/                ← Основни типове, константи и глобални променливи
-    │   ├── Config.h         ← Всички struct-ове, enum-и, константи
-    │   ├── Globals.h        ← extern декларации на глобални променливи
-    │   └── Globals.cpp      ← Дефиниции на глобалните променливи
-    │
-    ├── managers/            ← Бизнес логика – всички мениджъри
-    │   ├── ConfigManager.h/.cpp ← loadConfig, saveConfig, loadDefaultConfig, migrateConfig
-    │   ├── WiFiManager.h/.cpp   ← connectToWiFi, startAPMode, safeWiFiShutdown, syncTimeFromNTP
-    │   ├── StorageManager.h/.cpp← initStorage, getActiveDatalogFile, getStorageInfo, ...
-    │   ├── RtcManager.h/.cpp    ← initRtc, backupBootCount, restoreBootCount, getRtcTimeString, ...
-    │   ├── HardwareManager.h/.cpp ← initHardware, debounceButton, ISR handlers
-    │   └── DataLogger.h/.cpp    ← addLogEntry, flushLogBufferToFS
-    │
-    ├── web/                 ← Уеб сървър и handlers
-    │   └── WebServer.h/.cpp ← setupWebServer + всички web handlers
-    │
-    └── utils/               ← Помощни функции
+├── Logger.ino               ← setup()/loop(), state machine, deep-sleep логика
+├── full_logger.ino          ← исторически монолитен вариант (референтен)
+├── changelog.txt            ← release notes
+├── README.md
+├── ARCHITECTURE.md
+├── www/                     ← SPA UI файлове (качват се в LittleFS под /www/)
+│   ├── index.html
+│   ├── web.js
+│   ├── style.css
+│   └── chart.min.js
+└── src/
+    ├── core/
+    │   ├── Config.h         ← версии, enum-и, конфигурационни struct-ове
+    │   ├── Globals.h
+    │   └── Globals.cpp
+    ├── managers/
+    │   ├── ConfigManager.h/.cpp
+    │   ├── WiFiManager.h/.cpp
+    │   ├── StorageManager.h/.cpp
+    │   ├── RtcManager.h/.cpp
+    │   ├── HardwareManager.h/.cpp
+    │   └── DataLogger.h/.cpp
+    ├── web/
+    │   └── WebServer.h/.cpp ← API + static/failsafe routing
+    └── utils/
         ├── Utils.h
-        └── Utils.cpp        ← formatFileSize, sanitize, buildPath, deleteRecursive
-```
-
-> **Arduino IDE изискване:** Arduino IDE 2.x (arduino-cli) компилира рекурсивно
-> всички `.cpp` файлове в `src/` директорията на sketch-а. Файловете в
-> произволни поддиректории извън `src/` **не се компилират автоматично**.
-
-### Правила за `#include` пътищата
-
-| Файл | Включва | С път |
-|------|---------|-------|
-| `Logger.ino` | src/core, src/managers, src/web, src/utils | `"src/core/Globals.h"`, `"src/managers/ConfigManager.h"`, ... |
-| `src/managers/*.cpp` | core | `"../core/Globals.h"` |
-| `src/managers/StorageManager.cpp` | utils | `"../utils/Utils.h"` |
-| `src/utils/Utils.h` | core | `"../core/Config.h"` |
-| `src/core/Globals.h` | core | `"Config.h"` (същата директория) |
-
----
-
-## 🔧 Поправка на рестарт проблема
-
-### Проблемът
-При рестарт след активен WiFi (AP scan, client mode), ESP.restart() **не почиства**
-WiFi hardware state. При следващ boot:
-- `earlyGPIO_bitmask` може да хване GPIO 2 (WiFi trigger pin) като HIGH
-- `apModeTriggered` се задава TRUE погрешно
-- Устройството влиза в Web Server режим вместо Logging режим
-
-### Решението – `safeWiFiShutdown()`
-
-Нова функция в `WiFiManager.cpp`:
-
-```cpp
-void safeWiFiShutdown() {
-    WiFi.scanDelete();           // Изчиства незавършен scan
-    WiFi.disconnect(true);       // Disconnect + изчиства RAM credentials
-    delay(50);
-    WiFi.softAPdisconnect(true); // Спира SoftAP
-    delay(50);
-    WiFi.mode(WIFI_OFF);         // Изключва радиото напълно ← КЛЮЧОВО
-    delay(200);                  // Flush на радио стека
-}
-```
-
-### Кога се използва
-
-**В `Logger.ino` loop():**
-```cpp
-if (shouldRestart && millis() - restartTimer > 2000) {
-    safeWiFiShutdown();   // ← добавено
-    ESP.restart();
-}
-```
-
-**В `/save_hardware` и `/save_network` handlers (WebServer.cpp):**
-```cpp
-// Вместо:
-delay(500);
-ESP.restart();
-
-// Сега:
-sendRestartPage(r, "...");
-safeWiFiShutdown();
-delay(100);
-ESP.restart();
+        └── Utils.cpp
 ```
 
 ---
 
-## 📦 Зависимости (libraries)
+## 🌐 Web архитектура (v4.1.5)
 
-| Library | Версия |
-|---------|--------|
-| ESPAsyncWebServer | latest |
-| AsyncTCP | latest |
-| RtcDS1302 (Makuna) | latest |
-| ArduinoJson | ^7.x |
-| FlowSensor | custom |
-| LittleFS | built-in |
+### 1) SPA от `/www/` в LittleFS
+- При наличен `/www/index.html`: `serveStatic("/", LittleFS, "/www/")`.
+- Всички legacy страници (`/dashboard`, `/files`, `/settings*`, `/data`, `/live`) се пренасочват към `/`.
+- UI логиката е централизирана в `www/web.js`.
+
+### 2) Failsafe recovery режим
+- Ако `/www/index.html` липсва: root (`/`) връща вграден failsafe HTML.
+- Маршрутът `/setup` винаги е наличен и връща failsafe страницата, независимо от състоянието на SPA.
+- Цел: възстановяване чрез качване на липсващи/повредени UI файлове без повторно флашване.
+
+### 3) API модел: runtime + config разделяне
+- `/api/status` → live runtime статус (IP, mode, counters и др.).
+- `/export_settings` → пълна конфигурация за UI forms.
+- SPA зарежда двата endpoint-а паралелно и кешира резултатите (`ST` и `CFG`).
+
+### 4) Защитено OTA качване
+- Преди OTA upload се валидират:
+  - `.bin` разширение
+  - минимален размер (10 KB)
+  - ESP magic byte `0xE9`
+- Невалидни файлове се отхвърлят преди стартиране на update процеса.
+
+---
+
+## 🔁 Рестарт и WiFi cleanup
+
+`safeWiFiShutdown()` в `WiFiManager.cpp` се извиква преди `ESP.restart()` при restart-trigger операции.
+
+Полза:
+- избягва остатъчно WiFi състояние след scan/AP/client
+- намалява фалшив AP trigger при следващ boot
+- по-стабилно връщане към logging режим
+
+---
+
+## 💾 Конфигурация и миграция
+
+- Конфигурацията е бинарна (`/config.bin`) с `CONFIG_STRUCT_MAGIC` и `CONFIG_VERSION`.
+- `ConfigManager` поддържа migration при промени в struct-овете.
+- В datalog има post-correction параметри:
+  - `postCorrectionEnabled`
+  - `pfToFfThreshold`
+  - `ffToPfThreshold`
+  - `manualPressThresholdMs`
 
 ---
 
 ## 🚀 Upload последователност
 
-1. **Filesystem image:** LittleFS с `/style.css`, `/changelog.txt`, `/favicon.ico`
-2. **Firmware:** `Logger.ino`
+1. Качи LittleFS съдържание (вкл. `/www/index.html`, `/www/web.js`, `/www/style.css`, `/www/changelog.txt`).
+2. Качи firmware (`Logger.ino`).
+3. При проблем с UI отвори `http://<device-ip>/setup` за recovery upload.
 
 ---
 
-## ⚙️ Важни бележки за src/web/WebServer.cpp
+## 📦 Основни зависимости
 
-При преместване на код от `Logger.ino` в `src/web/WebServer.cpp`:
-
-1. Добави `#include "../managers/WiFiManager.h"` за `safeWiFiShutdown()`
-2. Замени всички директни `ESP.restart()` в web handlers с:
-   ```cpp
-   safeWiFiShutdown();
-   delay(100);
-   ESP.restart();
-   ```
-3. Handlers, които само задават `shouldRestart = true`, са OK.
+- ESPAsyncWebServer
+- AsyncTCP
+- ArduinoJson
+- LittleFS
+- SD
+- RtcDS1302 (Makuna)
+- FlowSensor
 
 ---
 
