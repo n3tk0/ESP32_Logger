@@ -4,6 +4,84 @@
 #include "esp_mac.h"
 
 
+// ============================================================================
+// INTERNAL: apply safe defaults to any zero/empty fields
+// Called after every load path so partially-migrated or corrupt-but-recoverable
+// configs always surface sane values to the web UI.
+// ============================================================================
+static void applyDefaults() {
+    // ── Flow meter ────────────────────────────────────────────────────────────
+    if (config.flowMeter.pulsesPerLiter            <= 0) config.flowMeter.pulsesPerLiter            = 450.0f;
+    if (config.flowMeter.calibrationMultiplier     <= 0) config.flowMeter.calibrationMultiplier     = 1.0f;
+    if (config.flowMeter.monitoringWindowSecs      <= 0) config.flowMeter.monitoringWindowSecs      = 3;
+    if (config.flowMeter.firstLoopMonitoringWindowSecs <= 0) config.flowMeter.firstLoopMonitoringWindowSecs = 6;
+    if (config.flowMeter.blinkDuration             <= 0) config.flowMeter.blinkDuration             = 250;
+
+    // ── Hardware ──────────────────────────────────────────────────────────────
+    if (config.hardware.cpuFreqMHz  <= 0) config.hardware.cpuFreqMHz  = 80;
+    if (config.hardware.debounceMs  == 0) config.hardware.debounceMs  = 100;
+
+    // ── Datalog ───────────────────────────────────────────────────────────────
+    if (config.datalog.pfToFfThreshold <= 0) config.datalog.pfToFfThreshold = 4.5f;
+    if (config.datalog.ffToPfThreshold <= 0) config.datalog.ffToPfThreshold = 3.7f;
+    if (config.datalog.maxSizeKB       == 0) config.datalog.maxSizeKB       = 1024;
+    if (!strlen(config.datalog.prefix))       strcpy(config.datalog.prefix,      DEFAULT_DATALOG_PREFIX);
+    if (!strlen(config.datalog.currentFile))  strcpy(config.datalog.currentFile, "/datalog.txt");
+
+    // ── Network ───────────────────────────────────────────────────────────────
+    if (!strlen(config.network.apSSID))    strcpy(config.network.apSSID,    DEFAULT_AP_SSID);
+    if (!strlen(config.network.ntpServer)) strcpy(config.network.ntpServer, DEFAULT_NTP_SERVER);
+
+    if (!config.network.apIP[0]) {
+        config.network.apIP[0]=192; config.network.apIP[1]=168;
+        config.network.apIP[2]=4;   config.network.apIP[3]=1;
+    }
+    if (!config.network.apGateway[0]) {
+        config.network.apGateway[0]=192; config.network.apGateway[1]=168;
+        config.network.apGateway[2]=4;   config.network.apGateway[3]=1;
+    }
+    if (!config.network.apSubnet[0]) {
+        config.network.apSubnet[0]=255; config.network.apSubnet[1]=255;
+        config.network.apSubnet[2]=255; config.network.apSubnet[3]=0;
+    }
+    if (!config.network.subnet[0]) {
+        config.network.subnet[0]=255; config.network.subnet[1]=255;
+        config.network.subnet[2]=255; config.network.subnet[3]=0;
+    }
+    if (!config.network.staticIP[0]) {
+        config.network.staticIP[0]=192; config.network.staticIP[1]=168;
+        config.network.staticIP[2]=4;   config.network.staticIP[3]=100;
+    }
+    if (!config.network.gateway[0]) {
+        config.network.gateway[0]=192; config.network.gateway[1]=168;
+        config.network.gateway[2]=4;   config.network.gateway[3]=1;
+    }
+    if (!config.network.dns[0]) {
+        config.network.dns[0]=8; config.network.dns[1]=8;
+        config.network.dns[2]=8; config.network.dns[3]=8;
+    }
+
+    // ── Identity ──────────────────────────────────────────────────────────────
+    if (!strlen(config.deviceName)) strcpy(config.deviceName, "Water Logger");
+
+    // ── Theme ─────────────────────────────────────────────────────────────────
+    if (!strlen(config.theme.primaryColor))      strcpy(config.theme.primaryColor,      "#275673");
+    if (!strlen(config.theme.secondaryColor))    strcpy(config.theme.secondaryColor,    "#4a5568");
+    if (!strlen(config.theme.bgColor))           strcpy(config.theme.bgColor,           "#f7fafc");
+    if (!strlen(config.theme.textColor))         strcpy(config.theme.textColor,         "#2d3748");
+    if (!strlen(config.theme.ffColor))           strcpy(config.theme.ffColor,           "#275673");
+    if (!strlen(config.theme.pfColor))           strcpy(config.theme.pfColor,           "#7eb0d5");
+    if (!strlen(config.theme.otherColor))        strcpy(config.theme.otherColor,        "#a0aec0");
+    if (!strlen(config.theme.storageBarColor))   strcpy(config.theme.storageBarColor,   "#27ae60");
+    if (!strlen(config.theme.storageBar70Color)) strcpy(config.theme.storageBar70Color, "#f39c12");
+    if (!strlen(config.theme.storageBar90Color)) strcpy(config.theme.storageBar90Color, "#e74c3c");
+    if (!strlen(config.theme.storageBarBorder))  strcpy(config.theme.storageBarBorder,  "#cccccc");
+    if (!strlen(config.theme.chartLocalPath))    strcpy(config.theme.chartLocalPath,    "/chart.min.js");
+}
+
+// ============================================================================
+// SANITIZE WAKE CONFIG
+// ============================================================================
 static bool sanitizeWakeConfig() {
     auto isRtcWakePinC3 = [](uint8_t pin) -> bool { return pin <= 5; };
 
@@ -32,6 +110,9 @@ static bool sanitizeWakeConfig() {
     return changed;
 }
 
+// ============================================================================
+// DEVICE ID
+// ============================================================================
 String generateDeviceId() {
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -49,6 +130,9 @@ void regenerateDeviceId() {
     saveConfig();
 }
 
+// ============================================================================
+// LOAD DEFAULTS
+// ============================================================================
 void loadDefaultConfig() {
     memset(&config, 0, sizeof(DeviceConfig));
     config.magic   = CONFIG_STRUCT_MAGIC;
@@ -100,12 +184,12 @@ void loadDefaultConfig() {
     config.datalog.manualPressThresholdMs = 500;
 
     // Flow meter
-    config.flowMeter.pulsesPerLiter                 = 450.0f;
-    config.flowMeter.calibrationMultiplier          = 1.0f;
-    config.flowMeter.monitoringWindowSecs           = 3;
-    config.flowMeter.firstLoopMonitoringWindowSecs  = 6;
-    config.flowMeter.testMode                       = false;
-    config.flowMeter.blinkDuration                  = 250;
+    config.flowMeter.pulsesPerLiter                = 450.0f;
+    config.flowMeter.calibrationMultiplier         = 1.0f;
+    config.flowMeter.monitoringWindowSecs          = 3;
+    config.flowMeter.firstLoopMonitoringWindowSecs = 6;
+    config.flowMeter.testMode                      = false;
+    config.flowMeter.blinkDuration                 = 250;
 
     // Hardware
     config.hardware.version            = CONFIG_VERSION;
@@ -150,6 +234,9 @@ void loadDefaultConfig() {
     config.network.apSubnet[2]  = 255; config.network.apSubnet[3]  = 0;
 }
 
+// ============================================================================
+// MIGRATE
+// ============================================================================
 void migrateConfig(uint8_t fromVersion) {
     DBGF("Migrating config v%d -> v%d\n", fromVersion, CONFIG_VERSION);
     if (fromVersion < 6) {
@@ -166,6 +253,9 @@ void migrateConfig(uint8_t fromVersion) {
     saveConfig();
 }
 
+// ============================================================================
+// LOAD CONFIG
+// ============================================================================
 bool loadConfig() {
     // ── Mount LittleFS ────────────────────────────────────────────────────────
     if (!LittleFS.begin(true, "/littlefs", 10, "spiffs")) {
@@ -300,10 +390,16 @@ bool loadConfig() {
     config.network.ntpServer[sizeof(config.network.ntpServer) - 1]     = '\0';
     config.theme.primaryColor[sizeof(config.theme.primaryColor) - 1]   = '\0';
 
+    // ── Fill any zero/empty fields that survived migration ────────────────────
+    applyDefaults();
+
     Serial.printf("[CFG] Loaded v%u OK\n", config.version);
     return true;
 }
 
+// ============================================================================
+// SAVE CONFIG
+// ============================================================================
 bool saveConfig() {
     config.magic   = CONFIG_STRUCT_MAGIC;
     config.version = CONFIG_VERSION;

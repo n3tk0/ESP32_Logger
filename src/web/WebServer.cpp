@@ -167,13 +167,35 @@ input[type=text]{width:100%;padding:7px 11px;border:1px solid #e2e8f0;border-rad
     </div>
   </div>
 
-  <!-- RESTART -->
+  <!-- DEVICE CONTROL -->
   <div class="card">
     <div class="card-header">&#x1F504; Device Control</div>
-    <div class="card-body">
-      <button class="btn btn-primary" onclick="if(confirm('Restart now?'))fetch('/restart').then(function(){setTimeout(function(){location.reload();},3000)})">
-        &#x1F504; Restart Device
+    <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn-primary" onclick="if(confirm('Restart now?'))fetch('/restart').then(function(){setTimeout(function(){location.reload();},5000)})">
+        &#x1F504; Restart
       </button>
+      <button class="btn btn-danger" onclick="doFactoryReset()">
+        &#x1F9F9; Factory Reset
+      </button>
+      <div class="msg" id="fsResetMsg" style="flex-basis:100%;margin-top:4px"></div>
+    </div>
+  </div>
+
+  <!-- OTA FIRMWARE UPDATE -->
+  <div class="card">
+    <div class="card-header">&#x1F6E0;&#xFE0F; OTA Firmware Update</div>
+    <div class="card-body">
+      <p style="font-size:.85rem;color:#718096;margin-bottom:10px">
+        Upload a <code>.bin</code> firmware file compiled for ESP32-C3.
+        The device will restart automatically after a successful flash.
+      </p>
+      <div class="drop" id="otaDropZone" onclick="document.getElementById('otaFile').click()">
+        <input type="file" id="otaFile" accept=".bin">
+        &#x2B06; <strong>Click or drag .bin file here</strong>
+        <p>Firmware must start with magic byte 0xE9</p>
+      </div>
+      <progress id="otaProg" value="0" max="100" style="display:none"></progress>
+      <div class="msg" id="otaMsg"></div>
     </div>
   </div>
 
@@ -276,6 +298,86 @@ function doRename(){
 }
 
 loadFiles();
+
+// ── Factory Reset ─────────────────────────────────────────────────────────────
+function doFactoryReset(){
+  if(!confirm('⚠️ FACTORY RESET\n\nThis will erase ALL files on LittleFS (config, UI, logs) and restart.\n\nProceed?'))return;
+  var ans=prompt('Type RESET to confirm:');
+  if(ans!=='RESET'){alert('Cancelled.');return;}
+  var msg=document.getElementById('fsResetMsg');
+  if(msg){msg.textContent='Factory reset in progress…';msg.className='msg inf';}
+  fetch('/factory_reset',{method:'POST'})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.ok){
+        alert('LittleFS formatted. Device is restarting.\nReconnect in ~10 seconds.');
+        setTimeout(function(){location.reload();},10000);
+      }else{
+        if(msg){msg.textContent='Reset failed: '+(d.error||'unknown');msg.className='msg err';}
+        else alert('Reset failed: '+(d.error||'unknown'));
+      }
+    })
+    .catch(function(e){if(msg){msg.textContent='Error: '+e;msg.className='msg err';}else alert('Error: '+e);});
+}
+
+// ── OTA Firmware Upload ────────────────────────────────────────────────────────
+document.getElementById('otaDropZone').addEventListener('dragover',function(e){e.preventDefault();this.classList.add('over');});
+document.getElementById('otaDropZone').addEventListener('dragleave',function(){this.classList.remove('over');});
+document.getElementById('otaDropZone').addEventListener('drop',function(e){
+  e.preventDefault();this.classList.remove('over');
+  var f=e.dataTransfer.files[0];if(f)doOtaUpload(f);
+});
+document.getElementById('otaFile').addEventListener('change',function(){
+  if(this.files.length)doOtaUpload(this.files[0]);
+});
+
+function doOtaUpload(file){
+  var msg=document.getElementById('otaMsg');
+  var prog=document.getElementById('otaProg');
+  if(!file.name.toLowerCase().endsWith('.bin')){
+    msg.textContent='Error: file must be a .bin firmware file.';msg.className='msg err';return;
+  }
+  if(file.size<10240){
+    msg.textContent='Error: file too small (min 10 KB).';msg.className='msg err';return;
+  }
+  var reader=new FileReader();
+  reader.onload=function(ev){
+    var bytes=new Uint8Array(ev.target.result);
+    if(bytes[0]!==0xE9){
+      msg.textContent='Error: invalid firmware (wrong magic byte – expected 0xE9, got 0x'+bytes[0].toString(16)+').';
+      msg.className='msg err';return;
+    }
+    prog.style.display='block';prog.value=0;
+    msg.textContent='Uploading…';msg.className='msg inf';
+    var fd=new FormData();fd.append('firmware',file);
+    var xhr=new XMLHttpRequest();
+    xhr.upload.onprogress=function(ev2){
+      if(ev2.lengthComputable){
+        var p=Math.round(ev2.loaded/ev2.total*100);
+        prog.value=p;
+        msg.textContent='Uploading: '+p+'% ('+Math.round(ev2.loaded/1024)+' / '+Math.round(ev2.total/1024)+' KB)';
+      }
+    };
+    xhr.onload=function(){
+      prog.style.display='none';
+      try{
+        var r=JSON.parse(xhr.responseText);
+        if(r.success){
+          msg.textContent='✅ '+r.message+' – reconnect in ~10 seconds.';msg.className='msg ok';
+          setTimeout(function(){location.reload();},10000);
+        }else{
+          msg.textContent='❌ '+r.message;msg.className='msg err';
+        }
+      }catch(e){
+        msg.textContent='✅ Firmware sent – device restarting…';msg.className='msg ok';
+        setTimeout(function(){location.reload();},10000);
+      }
+    };
+    xhr.onerror=function(){prog.style.display='none';msg.textContent='❌ Upload failed – connection error.';msg.className='msg err';};
+    xhr.open('POST','/do_update');xhr.send(fd);
+  };
+  reader.readAsArrayBuffer(file.slice(0,4));
+}
 </script>
 </body>
 </html>
@@ -342,6 +444,13 @@ static void scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
 }
 
 // ============================================================================
+// IP ARRAY FORMATTER  (uint8_t[4] → "A.B.C.D")
+// ============================================================================
+static void fmtIP(const uint8_t* ip, char* buf16) {
+    snprintf(buf16, 16, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+}
+
+// ============================================================================
 // WEB SERVER SETUP
 // ============================================================================
 void setupWebServer() {
@@ -382,23 +491,30 @@ void setupWebServer() {
 
     // =========================================================================
     // API: STATUS
+    // Keys consumed by web.js:
+    //   applyStatus: device, deviceId, version, time, network, ip, boot, heap,
+    //                heapTotal, chip, cpu, mode, theme{...}, freeSketch
+    //   sdInit:      device/deviceName, deviceId, defaultStorageView,
+    //                forceWebServer, version, boot, mode, heap, cpu, chip
+    //   timeInit:    time, boot, rtcRunning, rtcProtected, wifi, ip
+    //   netInit:     wifi, network, ip
     // =========================================================================
     server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *r) {
         StaticJsonDocument<1024> doc;
 
         // ── Identity ──────────────────────────────────────────────────────────
-        doc["device"]   = config.deviceName;
-        doc["deviceId"] = config.deviceId;
-        doc["version"]  = getVersionString();   // inline from Config.h
+        doc["device"]         = strlen(config.deviceName) ? config.deviceName : "Water Logger";
+        doc["deviceName"]     = doc["device"];   // alias – sdInit uses both
+        doc["deviceId"]       = config.deviceId;
+        doc["version"]        = getVersionString();
+        doc["forceWebServer"] = config.forceWebServer;
 
         // ── Time / Network ────────────────────────────────────────────────────
         doc["time"]    = getRtcDateTimeString();
         doc["network"] = getNetworkDisplay();
-
-        // ── IP: explicit WiFi API, correct for AP and STA modes ───────────────
-        doc["ip"] = wifiConnectedAsClient
-                    ? WiFi.localIP().toString()
-                    : WiFi.softAPIP().toString();
+        doc["ip"]      = wifiConnectedAsClient
+                         ? WiFi.localIP().toString()
+                         : WiFi.softAPIP().toString();
 
         // ── Runtime metrics ───────────────────────────────────────────────────
         doc["boot"]       = bootCount;
@@ -431,22 +547,22 @@ void setupWebServer() {
         // ── Theme (nested) ────────────────────────────────────────────────────
         JsonObject th = doc.createNestedObject("theme");
         th["mode"]              = (int)config.theme.mode;
-        th["primaryColor"]      = config.theme.primaryColor;
-        th["secondaryColor"]    = config.theme.secondaryColor;
-        th["bgColor"]           = config.theme.bgColor;
-        th["textColor"]         = config.theme.textColor;
-        th["ffColor"]           = config.theme.ffColor;
-        th["pfColor"]           = config.theme.pfColor;
-        th["otherColor"]        = config.theme.otherColor;
-        th["storageBarColor"]   = config.theme.storageBarColor;
-        th["storageBar70Color"] = config.theme.storageBar70Color;
-        th["storageBar90Color"] = config.theme.storageBar90Color;
-        th["storageBarBorder"]  = config.theme.storageBarBorder;
+        th["primaryColor"]      = strlen(config.theme.primaryColor)      ? config.theme.primaryColor      : "#275673";
+        th["secondaryColor"]    = strlen(config.theme.secondaryColor)    ? config.theme.secondaryColor    : "#4a5568";
+        th["bgColor"]           = strlen(config.theme.bgColor)           ? config.theme.bgColor           : "#f7fafc";
+        th["textColor"]         = strlen(config.theme.textColor)         ? config.theme.textColor         : "#2d3748";
+        th["ffColor"]           = strlen(config.theme.ffColor)           ? config.theme.ffColor           : "#275673";
+        th["pfColor"]           = strlen(config.theme.pfColor)           ? config.theme.pfColor           : "#7eb0d5";
+        th["otherColor"]        = strlen(config.theme.otherColor)        ? config.theme.otherColor        : "#a0aec0";
+        th["storageBarColor"]   = strlen(config.theme.storageBarColor)   ? config.theme.storageBarColor   : "#27ae60";
+        th["storageBar70Color"] = strlen(config.theme.storageBar70Color) ? config.theme.storageBar70Color : "#f39c12";
+        th["storageBar90Color"] = strlen(config.theme.storageBar90Color) ? config.theme.storageBar90Color : "#e74c3c";
+        th["storageBarBorder"]  = strlen(config.theme.storageBarBorder)  ? config.theme.storageBarBorder  : "#cccccc";
         th["logoSource"]        = config.theme.logoSource;
         th["faviconPath"]       = config.theme.faviconPath;
         th["boardDiagramPath"]  = config.theme.boardDiagramPath;
         th["chartSource"]       = (int)config.theme.chartSource;
-        th["chartLocalPath"]    = config.theme.chartLocalPath;
+        th["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/chart.min.js";
         th["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
         th["showIcons"]         = config.theme.showIcons;
 
@@ -463,19 +579,19 @@ void setupWebServer() {
         uint32_t safePulses = pulseCount;
         interrupts();
 
-        doc["time"]    = getRtcDateTimeString();
-        doc["ff"]      = digitalRead(config.hardware.pinWakeupFF);
-        doc["pf"]      = digitalRead(config.hardware.pinWakeupPF);
-        doc["wifi"]    = digitalRead(config.hardware.pinWifiTrigger);
-        doc["pulses"]  = safePulses;
-        doc["boot"]    = bootCount;
-        doc["heap"]    = ESP.getFreeHeap();
+        doc["time"]      = getRtcDateTimeString();
+        doc["ff"]        = digitalRead(config.hardware.pinWakeupFF);
+        doc["pf"]        = digitalRead(config.hardware.pinWakeupPF);
+        doc["wifi"]      = digitalRead(config.hardware.pinWifiTrigger);
+        doc["pulses"]    = safePulses;
+        doc["boot"]      = bootCount;
+        doc["heap"]      = ESP.getFreeHeap();
         doc["heapTotal"] = ESP.getHeapSize();
-        doc["uptime"]  = millis() / 1000;
-        doc["trigger"] = cycleStartedBy;
+        doc["uptime"]    = millis() / 1000;
+        doc["trigger"]   = cycleStartedBy;
         doc["cycleTime"] = (millis() - cycleStartTime) / 1000;
-        doc["ffCount"] = highCountFF;
-        doc["pfCount"] = highCountPF;
+        doc["ffCount"]   = highCountFF;
+        doc["pfCount"]   = highCountPF;
         doc["totalPulses"] = cycleTotalPulses + safePulses;
 
         const char* stateNames[] = {"IDLE", "WAIT_FLOW", "MONITORING", "DONE"};
@@ -503,7 +619,6 @@ void setupWebServer() {
         doc["fsUsed"]  = (uint32_t)used;
         doc["fsTotal"] = (uint32_t)total;
 
-        // IP live update
         doc["ip"] = wifiConnectedAsClient
                     ? WiFi.localIP().toString()
                     : WiFi.softAPIP().toString();
@@ -632,6 +747,135 @@ void setupWebServer() {
         String newId = mac.substring(mac.length() - 8);
         newId.toUpperCase();
         r->send(200, "text/plain", newId);
+    });
+
+    // =========================================================================
+    // EXPORT SETTINGS
+    // Keys consumed by web.js:
+    //   sfInit:  flowMeter{pulsesPerLiter, calibrationMultiplier, monitoringWindowSecs,
+    //                       firstLoopMonitoringWindowSecs, testMode, blinkDuration}
+    //   hwInit:  hardware{storageType, pinSdCS, pinSdMOSI, pinSdMISO, pinSdSCK,
+    //                      wakeupMode, debounceMs, pinWifiTrigger, pinWakeupFF,
+    //                      pinWakeupPF, pinFlowSensor, pinRtcCE, pinRtcIO, pinRtcSCLK, cpuFreqMHz}
+    //   thInit:  theme{mode, showIcons, primaryColor, secondaryColor, bgColor, textColor,
+    //                   ffColor, pfColor, otherColor, storageBarColor, storageBar70Color,
+    //                   storageBar90Color, storageBarBorder, logoSource, faviconPath,
+    //                   boardDiagramPath, chartSource, chartLocalPath, chartLabelFormat}
+    //   netInit: network{wifiMode, apSSID, apPassword, apIP, apGateway, apSubnet,
+    //                     clientSSID, clientPassword, useStaticIP, staticIP,
+    //                     gateway, subnet, dns}
+    //   timeInit: network{ntpServer, timezone}
+    //   dlInit:  datalog{prefix, folder, rotation, maxSizeKB, timestampFilename,
+    //                     includeDeviceId, dateFormat, timeFormat, endFormat,
+    //                     includeBootCount, volumeFormat, includeExtraPresses,
+    //                     postCorrectionEnabled, pfToFfThreshold, ffToPfThreshold,
+    //                     manualPressThresholdMs}
+    // =========================================================================
+    server.on("/export_settings", HTTP_GET, [](AsyncWebServerRequest *r) {
+        char ipBuf[16];
+
+        JsonDocument doc;
+
+        // ── Identity ──────────────────────────────────────────────────────────
+        doc["deviceName"]     = strlen(config.deviceName) ? config.deviceName : "Water Logger";
+        doc["deviceId"]       = config.deviceId;
+        doc["forceWebServer"] = config.forceWebServer;
+
+        // ── Theme ─────────────────────────────────────────────────────────────
+        JsonObject th = doc["theme"].to<JsonObject>();
+        th["mode"]              = (int)config.theme.mode;
+        th["primaryColor"]      = strlen(config.theme.primaryColor)      ? config.theme.primaryColor      : "#275673";
+        th["secondaryColor"]    = strlen(config.theme.secondaryColor)    ? config.theme.secondaryColor    : "#4a5568";
+        th["bgColor"]           = strlen(config.theme.bgColor)           ? config.theme.bgColor           : "#f7fafc";
+        th["textColor"]         = strlen(config.theme.textColor)         ? config.theme.textColor         : "#2d3748";
+        th["ffColor"]           = strlen(config.theme.ffColor)           ? config.theme.ffColor           : "#275673";
+        th["pfColor"]           = strlen(config.theme.pfColor)           ? config.theme.pfColor           : "#7eb0d5";
+        th["otherColor"]        = strlen(config.theme.otherColor)        ? config.theme.otherColor        : "#a0aec0";
+        th["storageBarColor"]   = strlen(config.theme.storageBarColor)   ? config.theme.storageBarColor   : "#27ae60";
+        th["storageBar70Color"] = strlen(config.theme.storageBar70Color) ? config.theme.storageBar70Color : "#f39c12";
+        th["storageBar90Color"] = strlen(config.theme.storageBar90Color) ? config.theme.storageBar90Color : "#e74c3c";
+        th["storageBarBorder"]  = strlen(config.theme.storageBarBorder)  ? config.theme.storageBarBorder  : "#cccccc";
+        th["logoSource"]        = config.theme.logoSource;
+        th["faviconPath"]       = config.theme.faviconPath;
+        th["boardDiagramPath"]  = config.theme.boardDiagramPath;
+        th["chartSource"]       = (int)config.theme.chartSource;
+        th["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/chart.min.js";
+        th["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
+        th["showIcons"]         = config.theme.showIcons;
+
+        // ── Flow Meter ────────────────────────────────────────────────────────
+        JsonObject fm = doc["flowMeter"].to<JsonObject>();
+        fm["pulsesPerLiter"]                = config.flowMeter.pulsesPerLiter > 0    ? config.flowMeter.pulsesPerLiter    : 450.0f;
+        fm["calibrationMultiplier"]         = config.flowMeter.calibrationMultiplier ? config.flowMeter.calibrationMultiplier : 1.0f;
+        fm["monitoringWindowSecs"]          = config.flowMeter.monitoringWindowSecs > 0 ? config.flowMeter.monitoringWindowSecs : 3;
+        fm["firstLoopMonitoringWindowSecs"] = config.flowMeter.firstLoopMonitoringWindowSecs > 0 ? config.flowMeter.firstLoopMonitoringWindowSecs : 6;
+        fm["testMode"]                      = config.flowMeter.testMode;
+        fm["blinkDuration"]                 = config.flowMeter.blinkDuration > 0 ? config.flowMeter.blinkDuration : 250;
+
+        // ── Datalog ───────────────────────────────────────────────────────────
+        JsonObject dl = doc["datalog"].to<JsonObject>();
+        dl["rotation"]               = (int)config.datalog.rotation;
+        dl["maxSizeKB"]              = config.datalog.maxSizeKB > 0 ? config.datalog.maxSizeKB : 1024;
+        dl["folder"]                 = config.datalog.folder;
+        dl["prefix"]                 = strlen(config.datalog.prefix) ? config.datalog.prefix : "datalog";
+        dl["dateFormat"]             = (int)config.datalog.dateFormat;
+        dl["timeFormat"]             = (int)config.datalog.timeFormat;
+        dl["endFormat"]              = (int)config.datalog.endFormat;
+        dl["volumeFormat"]           = (int)config.datalog.volumeFormat;
+        dl["includeBootCount"]       = config.datalog.includeBootCount;
+        dl["includeExtraPresses"]    = config.datalog.includeExtraPresses;
+        dl["postCorrectionEnabled"]  = config.datalog.postCorrectionEnabled;
+        dl["pfToFfThreshold"]        = config.datalog.pfToFfThreshold > 0 ? config.datalog.pfToFfThreshold : 4.5f;
+        dl["ffToPfThreshold"]        = config.datalog.ffToPfThreshold > 0 ? config.datalog.ffToPfThreshold : 3.7f;
+        dl["manualPressThresholdMs"] = config.datalog.manualPressThresholdMs;
+
+        // ── Network ───────────────────────────────────────────────────────────
+        JsonObject net = doc["network"].to<JsonObject>();
+        net["wifiMode"]       = (int)config.network.wifiMode;
+        net["apSSID"]         = strlen(config.network.apSSID)         ? config.network.apSSID         : DEFAULT_AP_SSID;
+        net["apPassword"]     = config.network.apPassword;
+        net["clientSSID"]     = config.network.clientSSID;
+        net["clientPassword"] = config.network.clientPassword;
+        net["ntpServer"]      = strlen(config.network.ntpServer)      ? config.network.ntpServer      : DEFAULT_NTP_SERVER;
+        net["timezone"]       = config.network.timezone;
+        net["useStaticIP"]    = config.network.useStaticIP;
+
+        // AP network — uint8_t[4] arrays → "A.B.C.D" strings
+        fmtIP(config.network.apIP,      ipBuf); net["apIP"]      = ipBuf;
+        fmtIP(config.network.apGateway, ipBuf); net["apGateway"] = ipBuf;
+        fmtIP(config.network.apSubnet,  ipBuf); net["apSubnet"]  = ipBuf;
+
+        // Client static IP — uint8_t[4] arrays → "A.B.C.D" strings
+        fmtIP(config.network.staticIP, ipBuf); net["staticIP"] = ipBuf;
+        fmtIP(config.network.gateway,  ipBuf); net["gateway"]  = ipBuf;
+        fmtIP(config.network.subnet,   ipBuf); net["subnet"]   = ipBuf;
+        fmtIP(config.network.dns,      ipBuf); net["dns"]      = ipBuf;
+
+        // ── Hardware ──────────────────────────────────────────────────────────
+        JsonObject hw = doc["hardware"].to<JsonObject>();
+        hw["storageType"]        = (int)config.hardware.storageType;
+        hw["wakeupMode"]         = (int)config.hardware.wakeupMode;
+        hw["cpuFreqMHz"]         = config.hardware.cpuFreqMHz > 0 ? config.hardware.cpuFreqMHz : 80;
+        hw["defaultStorageView"] = config.hardware.defaultStorageView;
+        hw["debounceMs"]         = config.hardware.debounceMs > 0  ? config.hardware.debounceMs : 100;
+        hw["pinWifiTrigger"]     = config.hardware.pinWifiTrigger;
+        hw["pinWakeupFF"]        = config.hardware.pinWakeupFF;
+        hw["pinWakeupPF"]        = config.hardware.pinWakeupPF;
+        hw["pinFlowSensor"]      = config.hardware.pinFlowSensor;
+        hw["pinRtcCE"]           = config.hardware.pinRtcCE;
+        hw["pinRtcIO"]           = config.hardware.pinRtcIO;
+        hw["pinRtcSCLK"]         = config.hardware.pinRtcSCLK;
+        hw["pinSdCS"]            = config.hardware.pinSdCS;
+        hw["pinSdMOSI"]          = config.hardware.pinSdMOSI;
+        hw["pinSdMISO"]          = config.hardware.pinSdMISO;
+        hw["pinSdSCK"]           = config.hardware.pinSdSCK;
+
+        String json;
+        serializeJsonPretty(doc, json);
+        AsyncWebServerResponse *resp = r->beginResponse(200, "application/json", json);
+        String fn = String(strlen(config.deviceName) ? config.deviceName : "device") + "_settings.json";
+        resp->addHeader("Content-Disposition", "attachment; filename=\"" + fn + "\"");
+        r->send(resp);
     });
 
     // =========================================================================
@@ -866,6 +1110,24 @@ void setupWebServer() {
     });
 
     // =========================================================================
+    // FACTORY RESET  – formats LittleFS, erases config, restarts
+    // =========================================================================
+    server.on("/factory_reset", HTTP_POST, [](AsyncWebServerRequest *r) {
+        r->send(200, "application/json", "{\"ok\":true}");
+        Serial.println("[FACTORY RESET] Formatting LittleFS…");
+        // Flush any pending log entries first so we don't corrupt SD data
+        // (activeFS may point to SD; LittleFS.format() only touches internal flash)
+        if (LittleFS.format()) {
+            Serial.println("[FACTORY RESET] LittleFS formatted OK – restarting");
+        } else {
+            Serial.println("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
+        }
+        safeWiFiShutdown();
+        delay(300);
+        ESP.restart();
+    });
+
+    // =========================================================================
     // RESTART
     // =========================================================================
     server.on("/restart", HTTP_GET, [](AsyncWebServerRequest *r) {
@@ -1001,90 +1263,8 @@ void setupWebServer() {
     );
 
     // =========================================================================
-    // EXPORT / IMPORT SETTINGS
+    // IMPORT SETTINGS
     // =========================================================================
-    server.on("/export_settings", HTTP_GET, [](AsyncWebServerRequest *r) {
-        JsonDocument doc;
-        doc["deviceName"]     = config.deviceName;
-        doc["deviceId"]       = config.deviceId;
-        doc["forceWebServer"] = config.forceWebServer;
-
-        JsonObject th = doc["theme"].to<JsonObject>();
-        th["mode"]              = (int)config.theme.mode;
-        th["primaryColor"]      = config.theme.primaryColor;
-        th["secondaryColor"]    = config.theme.secondaryColor;
-        th["bgColor"]           = config.theme.bgColor;
-        th["textColor"]         = config.theme.textColor;
-        th["ffColor"]           = config.theme.ffColor;
-        th["pfColor"]           = config.theme.pfColor;
-        th["otherColor"]        = config.theme.otherColor;
-        th["logoSource"]        = config.theme.logoSource;
-        th["faviconPath"]       = config.theme.faviconPath;
-        th["boardDiagramPath"]  = config.theme.boardDiagramPath;
-        th["chartSource"]       = (int)config.theme.chartSource;
-        th["chartLocalPath"]    = config.theme.chartLocalPath;
-        th["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
-        th["showIcons"]         = config.theme.showIcons;
-
-        JsonObject fm = doc["flowMeter"].to<JsonObject>();
-        fm["pulsesPerLiter"]                = config.flowMeter.pulsesPerLiter;
-        fm["calibrationMultiplier"]         = config.flowMeter.calibrationMultiplier;
-        fm["monitoringWindowSecs"]          = config.flowMeter.monitoringWindowSecs;
-        fm["firstLoopMonitoringWindowSecs"] = config.flowMeter.firstLoopMonitoringWindowSecs;
-        fm["blinkDuration"]                 = config.flowMeter.blinkDuration;
-
-        JsonObject dl = doc["datalog"].to<JsonObject>();
-        dl["rotation"]               = (int)config.datalog.rotation;
-        dl["maxSizeKB"]              = config.datalog.maxSizeKB;
-        dl["folder"]                 = config.datalog.folder;
-        dl["prefix"]                 = config.datalog.prefix;
-        dl["dateFormat"]             = config.datalog.dateFormat;
-        dl["timeFormat"]             = config.datalog.timeFormat;
-        dl["endFormat"]              = config.datalog.endFormat;
-        dl["volumeFormat"]           = config.datalog.volumeFormat;
-        dl["includeBootCount"]       = config.datalog.includeBootCount;
-        dl["includeExtraPresses"]    = config.datalog.includeExtraPresses;
-        dl["postCorrectionEnabled"]  = config.datalog.postCorrectionEnabled;
-        dl["pfToFfThreshold"]        = config.datalog.pfToFfThreshold;
-        dl["ffToPfThreshold"]        = config.datalog.ffToPfThreshold;
-        dl["manualPressThresholdMs"] = config.datalog.manualPressThresholdMs;
-
-        JsonObject net = doc["network"].to<JsonObject>();
-        net["wifiMode"]       = (int)config.network.wifiMode;
-        net["apSSID"]         = config.network.apSSID;
-        net["apPassword"]     = config.network.apPassword;
-        net["clientSSID"]     = config.network.clientSSID;
-        net["clientPassword"] = config.network.clientPassword;
-        net["ntpServer"]      = config.network.ntpServer;
-        net["timezone"]       = config.network.timezone;
-        net["useStaticIP"]    = config.network.useStaticIP;
-
-        JsonObject hw = doc["hardware"].to<JsonObject>();
-        hw["storageType"]        = (int)config.hardware.storageType;
-        hw["wakeupMode"]         = (int)config.hardware.wakeupMode;
-        hw["cpuFreqMHz"]         = config.hardware.cpuFreqMHz;
-        hw["defaultStorageView"] = config.hardware.defaultStorageView;
-        hw["debounceMs"]         = config.hardware.debounceMs;
-        hw["pinWifiTrigger"]     = config.hardware.pinWifiTrigger;
-        hw["pinWakeupFF"]        = config.hardware.pinWakeupFF;
-        hw["pinWakeupPF"]        = config.hardware.pinWakeupPF;
-        hw["pinFlowSensor"]      = config.hardware.pinFlowSensor;
-        hw["pinRtcCE"]           = config.hardware.pinRtcCE;
-        hw["pinRtcIO"]           = config.hardware.pinRtcIO;
-        hw["pinRtcSCLK"]         = config.hardware.pinRtcSCLK;
-        hw["pinSdCS"]            = config.hardware.pinSdCS;
-        hw["pinSdMOSI"]          = config.hardware.pinSdMOSI;
-        hw["pinSdMISO"]          = config.hardware.pinSdMISO;
-        hw["pinSdSCK"]           = config.hardware.pinSdSCK;
-
-        String json;
-        serializeJsonPretty(doc, json);
-        AsyncWebServerResponse *resp = r->beginResponse(200, "application/json", json);
-        String fn = String(config.deviceName) + "_settings.json";
-        resp->addHeader("Content-Disposition", "attachment; filename=\"" + fn + "\"");
-        r->send(resp);
-    });
-
     static String _importBuf;
     server.on("/import_settings", HTTP_POST,
         [](AsyncWebServerRequest *r) {
