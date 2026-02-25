@@ -356,7 +356,7 @@ function dbLoadChartJs(cb) {
         s2.src = 'https://cdn.jsdelivr.net/npm/chart.js'; s2.onload = fire;
         s2.onerror = function() {
             _chartJsLoading = false;
-            var err = document.getElementById('db-errorMsg');
+            var err = document.getElementById('errorMsg');
             if (err) { err.textContent = 'Failed to load Chart.js'; err.style.display = 'block'; }
         };
         document.head.appendChild(s2);
@@ -370,7 +370,7 @@ function dbInit() {
         fetch('/api/filelist?filter=log&recursive=1')
             .then(function(r) { return r.json(); })
             .then(function(d) {
-                var sel = document.getElementById('db-fileSelect');
+                var sel = document.getElementById('fileSelect');
                 if (!sel) return;
                 sel.innerHTML = '';
                 var curFile = d.currentFile || ST.currentFile || '';
@@ -386,7 +386,7 @@ function dbInit() {
                 dbLoadData(); // matches original: window.onload = loadData
             })
             .catch(function(e) {
-                var err = document.getElementById('db-errorMsg');
+                var err = document.getElementById('errorMsg');
                 if (err) { err.textContent = 'Error loading file list: '+e.message; err.style.display='block'; }
             });
     });
@@ -394,9 +394,9 @@ function dbInit() {
 
 // Matches original: function loadData()
 function dbLoadData() {
-    var file = getVal('db-fileSelect');
+    var file = getVal('fileSelect');
     if (!file || file === 'No log files found') return;
-    var err = document.getElementById('db-errorMsg');
+    var err = document.getElementById('errorMsg');
     if (err) err.style.display = 'none';
     fetch('/download?file=' + encodeURIComponent(file))
         .then(function(r) { if (!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
@@ -416,11 +416,11 @@ function dbApplyFilters() {
 function dbProcessData(data) {
     var lines      = data.trim().split('\n');
     var filtered   = [];
-    var startVal   = getVal('db-startDate');
-    var endVal     = getVal('db-endDate');
-    var filterType = getVal('db-eventFilter');
-    var pressType  = getVal('db-pressFilter');
-    var excZ       = document.getElementById('db-excludeZero') && document.getElementById('db-excludeZero').checked;
+    var startVal   = getVal('startDate');
+    var endVal     = getVal('endDate');
+    var filterType = getVal('eventFilter');
+    var pressType  = getVal('pressFilter');
+    var excZ       = document.getElementById('excludeZero') && document.getElementById('excludeZero').checked;
     var tVol=0, tFF=0, tPF=0;
 
     lines.forEach(function(line) {
@@ -471,7 +471,7 @@ function dbProcessData(data) {
 
 // Matches original: function renderChart(data)
 function dbRenderChart(data) {
-    var ctx = document.getElementById('db-chart');
+    var ctx = document.getElementById('chart');
     if (!ctx) return;
     if (typeof Chart === 'undefined') { dbLoadChartJs(function(){ dbRenderChart(data); }); return; }
     if (dbChart) { dbChart.destroy(); dbChart = null; }
@@ -518,12 +518,12 @@ function dbExportCSV() {
     });
     // Filename: deviceId_filters_date.csv  — exact match to original .ino
     var f = ST.deviceId || CFG.deviceId || 'logger';
-    var ft = getVal('db-eventFilter'); if (ft!=='ALL') f+='_'+ft;
-    var pt = getVal('db-pressFilter'); if (pt!=='ALL') f+='_'+pt;
-    var excZ = document.getElementById('db-excludeZero');
+    var ft = getVal('eventFilter'); if (ft!=='ALL') f+='_'+ft;
+    var pt = getVal('pressFilter'); if (pt!=='ALL') f+='_'+pt;
+    var excZ = document.getElementById('excludeZero');
     if (excZ && excZ.checked) f+='_noZero';
-    var sd = getVal('db-startDate'); if (sd) f+='_from'+sd;
-    var ed = getVal('db-endDate');   if (ed) f+='_to'+ed;
+    var sd = getVal('startDate'); if (sd) f+='_from'+sd;
+    var ed = getVal('endDate');   if (ed) f+='_to'+ed;
     f += '_'+new Date().toISOString().slice(0,10)+'.csv';
     var blob = new Blob([csv],{type:'text/csv'});
     var url = URL.createObjectURL(blob);
@@ -539,13 +539,13 @@ function filesInit() {
     currentFilesDir = '/';
     var hw = CFG.hardware || {};
     currentFilesStorage = (hw.defaultStorageView === 1) ? 'sdcard' : 'internal';
-    var list = document.getElementById('files-list');
+    var list = document.getElementById('list');
     if (list) list.innerHTML = "<div class='list-item text-muted'>Loading…</div>";
     filesRender();
 }
 
 function filesRender() {
-    var tabs = document.getElementById('files-tabs');
+    var tabs = document.getElementById('tabs');
     if (tabs) {
         tabs.innerHTML =
             '<a onclick="filesSetStorage(\'internal\')" class="btn '+(currentFilesStorage==='internal'?'btn-primary':'btn-secondary')+'">💾 Internal</a> '+
@@ -558,21 +558,21 @@ function filesRender() {
             var pct = d.percent || 0;
             setEl('files-usage', fmtBytes(d.used)+' / '+fmtBytes(d.total));
             setEl('files-pct', pct+'%');
-            var bar = document.getElementById('files-bar');
+            var bar = document.getElementById('bar');
             if (bar) {
                 bar.style.width = pct+'%';
                 bar.className = 'progress-bar'+(pct>=90?' progress-bar-danger':pct>=70?' progress-bar-warning':' progress-bar-success');
             }
 
             setEl('files-dirLabel', '📂 ['+(currentFilesStorage==='sdcard'?'SD':'Int')+'] '+(currentFilesDir==='/'?'Root':currentFilesDir));
-            var upBtn = document.getElementById('files-upBtn');
+            var upBtn = document.getElementById('upBtn');
             if (upBtn) upBtn.style.display = currentFilesDir==='/' ? 'none' : '';
-            var et = document.getElementById('files-editToggle');
+            var et = document.getElementById('editToggle');
             if (et) et.textContent = filesEditMode ? '✖️ Done' : '✏️ Edit';
-            var tools = document.getElementById('files-editTools');
+            var tools = document.getElementById('editTools');
             if (tools) tools.style.display = filesEditMode ? 'block' : 'none';
 
-            var list = document.getElementById('files-list');
+            var list = document.getElementById('list');
             if (!list) return;
             var files = d.files || [];
             if (!files.length) { list.innerHTML = "<div class='list-item text-muted'>Empty</div>"; return; }
@@ -599,7 +599,7 @@ function filesRender() {
             list.innerHTML = html;
         })
         .catch(function(e) {
-            var list = document.getElementById('files-list');
+            var list = document.getElementById('list');
             if (list) list.innerHTML = "<div class='list-item' style='color:red'>Error: "+e+"</div>";
         });
 }
@@ -621,12 +621,12 @@ function filesDelete(path) {
 }
 
 function filesUpload() {
-    var inp = document.getElementById('files-fileInput');
+    var inp = document.getElementById('fileInput');
     if (!inp || !inp.files.length) return;
     var files=inp.files, i=0;
-    var prog=document.getElementById('files-uploadProg');
-    var bar=document.getElementById('files-uploadBar');
-    var pct=document.getElementById('files-uploadPct');
+    var prog=document.getElementById('uploadProg');
+    var bar=document.getElementById('uploadBar');
+    var pct=document.getElementById('uploadPct');
     if (prog) prog.style.display='block';
     function next() {
         if (i>=files.length) {
@@ -650,7 +650,7 @@ function filesUpload() {
 }
 
 function filesMkdir() {
-    var name=document.getElementById('files-newFolder');
+    var name=document.getElementById('newFolder');
     if (!name||!name.value.trim()) return;
     fetch('/mkdir?name='+encodeURIComponent(name.value.trim())+'&dir='+encodeURIComponent(currentFilesDir)+'&storage='+currentFilesStorage)
         .then(function(){ name.value=''; filesRender(); });
@@ -659,11 +659,11 @@ function filesMkdir() {
 var mvSrcPath='';
 function showMovePopup(path,name) {
     mvSrcPath=path;
-    var inp=document.getElementById('mv-name'); if(inp) inp.value=name;
+    var inp=document.getElementById('name'); if(inp) inp.value=name;
     document.getElementById('movePopup').style.display='flex';
 }
 function filesApplyMove() {
-    var newName=getVal('mv-name').trim(), destDir=getVal('mv-dest');
+    var newName=getVal('name').trim(), destDir=getVal('dest');
     if (!newName) return;
     var url='/move_file?src='+encodeURIComponent(mvSrcPath)+'&newName='+encodeURIComponent(newName)+'&storage='+currentFilesStorage;
     if (destDir) url+='&destDir='+encodeURIComponent(destDir);
@@ -682,7 +682,7 @@ function liveInit() {
     if (ST.ip)      setEl('live-ip',   ST.ip);
     if (ST.network) setEl('live-net',  ST.network);
 
-    var hint = document.getElementById('live-stateHint');
+    var hint = document.getElementById('stateHint');
     if (hint) {
         var fm  = CFG.flowMeter || {};
         var fl  = fm.firstLoopMonitoringWindowSecs || '?';
@@ -701,7 +701,7 @@ function liveUpdate() {
     fetch('/api/live')
         .then(function(r){return r.json();})
         .then(function(d) {
-            var conn=document.getElementById('live-conn');
+            var conn=document.getElementById('conn');
             if (conn){ conn.textContent='● Connected'; conn.className='text-success'; }
 
             setEl('live-time',      d.time);
@@ -719,9 +719,9 @@ function liveUpdate() {
 
             // State machine colors — exact from original .ino
             var stColors={IDLE:'#3498db',WAIT_FLOW:'#f39c12',MONITORING:'#27ae60',DONE:'#e74c3c'};
-            var stEl=document.getElementById('live-state');
+            var stEl=document.getElementById('state');
             if (stEl){ stEl.textContent=d.state; stEl.style.background=stColors[d.state]||'#95a5a6'; stEl.style.color='#fff'; }
-            var remEl=document.getElementById('live-stateRem');
+            var remEl=document.getElementById('stateRem');
             if (remEl) remEl.textContent = d.stateRemaining>=0 ? d.stateRemaining+'s' : '-';
 
             // Button states
@@ -730,7 +730,7 @@ function liveUpdate() {
             liveBtn('live-wifi', d.wifi, 'Pressed','Released','#3498db','#95a5a6');
 
             // Mode display — matches original getModeDisplay()
-            var modeEl=document.getElementById('live-mode');
+            var modeEl=document.getElementById('mode');
             if (modeEl) {
                 if (d.mode==='online')      modeEl.innerHTML='🌐 Online Logger';
                 else if (d.mode==='webonly')modeEl.innerHTML='📶 Web Only';
@@ -744,7 +744,7 @@ function liveUpdate() {
             updateFooter({ boot:d.boot, heap:d.heap, heapTotal:d.heapTotal });
         })
         .catch(function(){
-            var conn=document.getElementById('live-conn');
+            var conn=document.getElementById('conn');
             if (conn){ conn.textContent='● Disconnected'; conn.className='text-danger'; }
         });
 }
@@ -760,7 +760,7 @@ function liveLogsUpdate() {
     fetch('/api/recent_logs')
         .then(function(r){return r.json();})
         .then(function(d) {
-            var el=document.getElementById('live-logs'); if(!el) return;
+            var el=document.getElementById('logs'); if(!el) return;
             var th=ST.theme||CFG.theme||{};
             var ffC=th.ffColor||'#3498db', pfC=th.pfColor||'#e74c3c', otC=th.otherColor||'#95a5a6';
             if (d.logs && d.logs.length) {
@@ -791,8 +791,8 @@ function liveLogsUpdate() {
 function sdInit() {
     // Reset changelog state on every page enter so re-navigation works cleanly
     changelogLoaded = false;
-    var clEl=document.getElementById('sd-changelog');
-    var chev=document.getElementById('sd-changelogChevron');
+    var clEl=document.getElementById('changelog');
+    var chev=document.getElementById('changelogChevron');
     if (clEl) clEl.classList.add('hidden');
     if (chev) chev.style.transform='';
 
@@ -804,7 +804,7 @@ function sdInit() {
         setChk('sd-forceWS',        d.forceWebServer);
 
         // System Info card — matches original .ino "System Info" card content
-        var info=document.getElementById('sd-sysInfo');
+        var info=document.getElementById('sysInfo');
         if (info) {
             info.innerHTML=
                 '<div><strong>Firmware</strong><div class="text-primary">'+(d.version||'-')+'</div></div>'+
@@ -822,7 +822,7 @@ function regenDevId() {
     fetch('/api/regen-id',{method:'POST'})
         .then(function(r){return r.text();})
         .then(function(id) {
-            var inp=document.getElementById('sd-devId');
+            var inp=document.getElementById('devId');
             if (inp){ inp.value=id.trim(); inp.disabled=false; }
             alert('New ID generated: '+id.trim()+'. Click Save to apply.');
         })
@@ -843,7 +843,7 @@ function toggleManualId(id) {
 
 // Matches original: onclick="changelogToggle()" on card-header
 function changelogToggle() {
-    var el=document.getElementById('sd-changelog');
+    var el=document.getElementById('changelog');
     if (!el) return;
 
     var isHidden=el.classList.contains('hidden');
@@ -855,23 +855,23 @@ function changelogToggle() {
     }
 
     // Rotate chevron indicator — matches original .ino #sd-changelogChevron
-    var chev=document.getElementById('sd-changelogChevron');
+    var chev=document.getElementById('changelogChevron');
     if (chev) chev.style.transform=el.classList.contains('hidden')?'':'rotate(180deg)';
 }
 
 // Used by error close button inside changelog body
 function changelogClose(ev) {
     if (ev) ev.stopPropagation();
-    var el=document.getElementById('sd-changelog');
+    var el=document.getElementById('changelog');
     if (el) el.classList.add('hidden');
-    var chev=document.getElementById('sd-changelogChevron');
+    var chev=document.getElementById('changelogChevron');
     if (chev) chev.style.transform='';
 }
 
 // Matches original .ino Device page:
 //   fetch('/api/changelog').then(r=>r.ok?r.text():...).then(txt=>{ render ## sections })
 function changelogLoad() {
-    var el=document.getElementById('sd-changelog'); if(!el) return;
+    var el=document.getElementById('changelog'); if(!el) return;
     el.innerHTML="<div class='text-muted' style='padding:.5rem'>Loading…</div>";
 
     fetch('/api/changelog')
@@ -944,7 +944,7 @@ function hwInit() {
     fetch('/export_settings').then(function(r){return r.json();}).then(function(d) {
         CFG=d; var hw=d.hardware||{}, th=ST.theme||CFG.theme||{};
         setVal('hw-storage',  hw.storageType!==undefined?hw.storageType:0);
-        var sdP=document.getElementById('hw-sdPins'); if(sdP) sdP.style.display=hw.storageType==1?'block':'none';
+        var sdP=document.getElementById('sdPins'); if(sdP) sdP.style.display=hw.storageType==1?'block':'none';
         setVal('hw-sdCS',    hw.pinSdCS);   setVal('hw-sdMOSI', hw.pinSdMOSI);
         setVal('hw-sdMISO',  hw.pinSdMISO); setVal('hw-sdSCK',  hw.pinSdSCK);
         setVal('hw-wakeup',  hw.wakeupMode!==undefined?hw.wakeupMode:0);
@@ -954,8 +954,8 @@ function hwInit() {
         setVal('hw-rtcCE',   hw.pinRtcCE);       setVal('hw-rtcIO',  hw.pinRtcIO);
         setVal('hw-rtcCLK',  hw.pinRtcSCLK);     setVal('hw-cpu',    hw.cpuFreqMHz||80);
         if (th.boardDiagramPath) {
-            var card=document.getElementById('hw-boardDiagramCard');
-            var img=document.getElementById('hw-boardDiagram');
+            var card=document.getElementById('boardDiagramCard');
+            var img=document.getElementById('boardDiagram');
             if (card) card.style.display='block'; if (img) img.src=th.boardDiagramPath;
         }
     });
@@ -978,7 +978,7 @@ function thInit() {
         setVal('th-logo',      th.logoSource);      setVal('th-favicon',  th.faviconPath);
         setVal('th-board',     th.boardDiagramPath);
         setVal('th-chartSrc',  th.chartSource!==undefined?th.chartSource:0);
-        var pr=document.getElementById('th-chartPathRow');
+        var pr=document.getElementById('chartPathRow');
         if (pr) pr.style.display=(th.chartSource==0||!th.chartSource)?'block':'none';
         setVal('th-chartPath', th.chartLocalPath);
         setVal('th-labelFmt',  th.chartLabelFormat!==undefined?th.chartLabelFormat:0);
@@ -1011,16 +1011,16 @@ function netInit() {
 
 // Matches original: function toggleMode()
 function netToggleMode() {
-    var m=getVal('net-mode');
-    var ap=document.getElementById('net-apSection');
-    var cl=document.getElementById('net-clientSection');
+    var m=getVal('mode');
+    var ap=document.getElementById('apSection');
+    var cl=document.getElementById('clientSection');
     if (ap) ap.style.display=m==='0'?'block':'none';
     if (cl) cl.style.display=m==='1'?'block':'none';
 }
 
 // Matches original: function toggleStatic()
 function netToggleStatic() {
-    var en=document.getElementById('net-staticCheck')&&document.getElementById('net-staticCheck').checked;
+    var en=document.getElementById('staticCheck')&&document.getElementById('staticCheck').checked;
     ['net-ip2','net-gw','net-sn','net-dns'].forEach(function(id) {
         var el=document.getElementById(id); if(!el) return;
         el.disabled=!en; el.style.opacity=en?'1':'0.5'; el.style.cursor=en?'text':'not-allowed';
@@ -1029,14 +1029,14 @@ function netToggleStatic() {
 
 // Matches original: function scanWifi() / function checkScanResult()
 function netScanWifi() {
-    var list=document.getElementById('net-wifiList'); if(!list) return;
+    var list=document.getElementById('wifiList'); if(!list) return;
     list.innerHTML="<div class='list-item'>🔍 Scanning…</div>"; list.style.display='block';
     netScanRetries=0;
     fetch('/wifi_scan_start').then(function(){ setTimeout(netCheckScan,2000); });
 }
 function netCheckScan() {
     fetch('/wifi_scan_result').then(function(r){return r.json();}).then(function(d) {
-        var list=document.getElementById('net-wifiList'); if(!list) return;
+        var list=document.getElementById('wifiList'); if(!list) return;
         if (d.scanning) {
             netScanRetries++;
             if (netScanRetries<10) { list.innerHTML="<div class='list-item'>🔍 Scanning… ("+netScanRetries+")</div>"; setTimeout(netCheckScan,1000); }
@@ -1049,12 +1049,12 @@ function netCheckScan() {
             var h='';
             d.networks.forEach(function(n) {
                 var safe=n.ssid.replace(/'/g,"\\'");
-                h+="<div class='list-item' style='cursor:pointer' onclick=\"document.getElementById('net-cSSID').value='"+safe+"';document.getElementById('net-wifiList').style.display='none'\">";
+                h+="<div class='list-item' style='cursor:pointer' onclick=\"document.getElementById('cSSID').value='"+safe+"';document.getElementById('wifiList').style.display='none'\">";
                 h+=(n.secure?'🔒':'📶')+' '+n.ssid+' <small class="text-muted">('+n.rssi+' dBm)</small></div>';
             });
             list.innerHTML=h;
         }
-    }).catch(function(e){ var l=document.getElementById('net-wifiList'); if(l) l.innerHTML="<div class='list-item'>❌ Error: "+e+"</div>"; });
+    }).catch(function(e){ var l=document.getElementById('wifiList'); if(l) l.innerHTML="<div class='list-item'>❌ Error: "+e+"</div>"; });
 }
 
 // ============================================================================
@@ -1065,20 +1065,20 @@ function timeInit() {
         ST=d;
         setEl('time-rtcTime', d.time||'--:--:--');
         setEl('time-boot', d.boot);
-        var bak=document.getElementById('time-bootBak'); if(bak) bak.textContent='-';
-        var status=document.getElementById('time-rtcStatus');
+        var bak=document.getElementById('bootBak'); if(bak) bak.textContent='-';
+        var status=document.getElementById('rtcStatus');
         if (status) {
             if (!d.rtcRunning) status.innerHTML="<div class='alert alert-error'>❌ RTC Error</div>";
             else               status.innerHTML="<div class='alert alert-success'>✅ RTC OK</div>";
         }
-        var detail=document.getElementById('time-rtcDetail');
+        var detail=document.getElementById('rtcDetail');
         if (detail) detail.textContent='Protected: '+(d.rtcProtected?'Yes':'No')+' | Running: '+(d.rtcRunning?'Yes':'No');
         setChk('time-rtcProt',d.rtcProtected);
-        var ntpSt=document.getElementById('time-ntpStatus');
+        var ntpSt=document.getElementById('ntpStatus');
         if (ntpSt) ntpSt.innerHTML=d.wifi==='client'
             ?"<div class='alert alert-success'>✅ WiFi Connected – NTP available</div>"
             :"<div class='alert alert-warning'>⚠️ Not connected (AP mode) – NTP unavailable</div>";
-        var dateEl=document.getElementById('time-date');
+        var dateEl=document.getElementById('date');
         if (dateEl&&!dateEl.value) dateEl.value=new Date().toISOString().slice(0,10);
     });
     fetch('/export_settings').then(function(r){return r.json();}).then(function(d) {
@@ -1090,7 +1090,7 @@ function timeInit() {
 
 function timeSetManual(ev) {
     ev.preventDefault();
-    var fd=new FormData(); fd.append('date',getVal('time-date')); fd.append('time',getVal('time-time'));
+    var fd=new FormData(); fd.append('date',getVal('date')); fd.append('time',getVal('time'));
     fetch('/set_time',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d) {
         showMsg('time-msg', d.ok?"<div class='alert alert-success'>✅ Time set!</div>":"<div class='alert alert-error'>❌ "+(d.error||'Failed')+"</div>", true);
         if (d.ok) timeInit();
@@ -1106,7 +1106,7 @@ function timeSyncNTP(ev) {
 function timeRtcProtect(ev) {
     if (ev) ev.preventDefault();
     var fd=new FormData();
-    var chk=document.getElementById('time-rtcProt'); if(chk&&chk.checked) fd.append('protect','1');
+    var chk=document.getElementById('rtcProt'); if(chk&&chk.checked) fd.append('protect','1');
     fetch('/rtc_protect',{method:'POST',body:fd});
 }
 function timeFlushLogs() {
@@ -1127,7 +1127,7 @@ function timeRestoreBoot() {
 // ============================================================================
 function dlInit() {
     fetch('/api/filelist?filter=log&recursive=1').then(function(r){return r.json();}).then(function(d) {
-        var sel=document.getElementById('dl-curFile'); if(!sel) return;
+        var sel=document.getElementById('curFile'); if(!sel) return;
         sel.innerHTML='';
         var curFile=d.currentFile||'';
         (d.files||[]).forEach(function(f) {
@@ -1140,7 +1140,7 @@ function dlInit() {
             setVal('dl-prefix',    dl.prefix||'datalog');
             setVal('dl-folder',    dl.folder||'');
             setVal('dl-rotation',  dl.rotation!==undefined?dl.rotation:0);
-            var msGrp=document.getElementById('dl-maxSizeGroup');
+            var msGrp=document.getElementById('maxSizeGroup');
             if (msGrp) msGrp.style.display=dl.rotation==4?'block':'none';
             setVal('dl-maxSize',   dl.maxSizeKB||500);
             setChk('dl-tsFile',    dl.timestampFilename||false);
@@ -1152,7 +1152,7 @@ function dlInit() {
             setVal('dl-vol',       dl.volumeFormat!==undefined?dl.volumeFormat:0);
             setVal('dl-extra',     dl.includeExtraPresses    ?'1':'0');
             setChk('dl-pcEnabled', dl.postCorrectionEnabled);
-            var pcF=document.getElementById('dl-pcFields');
+            var pcF=document.getElementById('pcFields');
             if (pcF) pcF.style.display=dl.postCorrectionEnabled?'block':'none';
             setVal('dl-pfff',dl.pfToFfThreshold);
             setVal('dl-ffpf',dl.ffToPfThreshold);
@@ -1164,7 +1164,7 @@ function dlInit() {
 }
 
 function dlLoadFiles() {
-    var el=document.getElementById('dl-files'); if(!el) return;
+    var el=document.getElementById('files'); if(!el) return;
     fetch('/api/filelist?filter=log&recursive=1').then(function(r){return r.json();}).then(function(d) {
         var files=d.files||[], curFile=d.currentFile||'';
         if (!files.length){ el.innerHTML="<div class='list-item text-muted'>No log files</div>"; return; }
@@ -1196,7 +1196,7 @@ function dlDeleteFile(path) {
 // Matches original: function updatePreview()
 function dlUpdatePreview() {
     var p=[], d=new Date();
-    var df=getVal('dl-date'), tf=getVal('dl-time'), ef=getVal('dl-end');
+    var df=getVal('date'), tf=getVal('time'), ef=getVal('end');
     var dd=String(d.getDate()).padStart(2,'0'), mm=String(d.getMonth()+1).padStart(2,'0'), yy=d.getFullYear();
     var hh=String(d.getHours()).padStart(2,'0'), mi=String(d.getMinutes()).padStart(2,'0'), ss=String(d.getSeconds()).padStart(2,'0');
 
@@ -1212,13 +1212,13 @@ function dlUpdatePreview() {
     p.push(tStr);
     if      (ef==='0') p.push(tStr);
     else if (ef==='1') p.push('45s');
-    if (getVal('dl-boot')==='1') p.push('#:1234');
+    if (getVal('boot')==='1') p.push('#:1234');
     p.push('FF_BTN');
-    var vf=getVal('dl-vol');
+    var vf=getVal('vol');
     if      (vf==='0') p.push('L:2,50');
     else if (vf==='1') p.push('L:2.50');
     else if (vf==='2') p.push('2.50');
-    if (getVal('dl-extra')==='1'){ p.push('FF0'); p.push('PF1'); }
+    if (getVal('extra')==='1'){ p.push('FF0'); p.push('PF1'); }
     setEl('dl-preview', p.join('|'));
 }
 
@@ -1242,14 +1242,14 @@ function settingsImport() {
 // ══ OTA UPDATE ══
 // ============================================================================
 function otaUpload() {
-    var fileInp=document.getElementById('ota-file');
+    var fileInp=document.getElementById('file');
     if (!fileInp||!fileInp.files.length){ alert('Select a .bin file first'); return; }
     var file=fileInp.files[0];
     if (!file.name.toLowerCase().endsWith('.bin')){ alert('File must be a .bin firmware file'); return; }
     if (file.size<10240){ alert('File too small (min 10 KB)'); return; }
 
-    var prog=document.getElementById('ota-prog'), bar=document.getElementById('ota-bar');
-    var pct=document.getElementById('ota-pct'),  msgEl=document.getElementById('ota-msg');
+    var prog=document.getElementById('prog'), bar=document.getElementById('bar');
+    var pct=document.getElementById('pct'),  msgEl=document.getElementById('msg');
 
     // Validate magic byte 0xE9 — matches original .ino OTA validation
     var reader=new FileReader();

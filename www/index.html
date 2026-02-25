@@ -1,321 +1,267 @@
 <!DOCTYPE html>
-<html id="htmlRoot" class="theme-light">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Water Logger</title>
 <link rel="stylesheet" href="/style.css">
-<style id="themeVars">:root{--primary:#275673;--secondary:#4a5568}</style>
-<!-- Hide footer ONLY while the Live page is active.
-     footer.app-footer is a later sibling of #page-live inside <main>,
-     so the CSS ~ combinator fires only when #page-live carries .active. -->
-<style>#page-live.active ~ footer.app-footer{display:none!important}</style>
+<style>
+.page{display:none}.page.active{display:block}
+.color-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.75rem}
+#logPreview{font-family:monospace;font-size:.85rem;padding:10px 12px;border-radius:var(--radius-sm);background:var(--bg);border:1px solid var(--border);overflow-x:auto;white-space:nowrap}
+</style>
 </head>
 <body>
+<aside class="sidebar" id="sidebar"></aside>
+<header class="app-header hide-desktop" id="appHeader"></header>
 
-<aside class="sidebar">
-  <div class="sidebar-header">
-    <img id="sidebarLogo" src="" alt="" style="display:none;max-height:40px" onerror="this.style.display='none'">
-    <span class="logo" id="sidebarName">Water Logger</span>
-  </div>
-  <nav>
-    <div class="nav-section">Main</div>
-    <a href="#dashboard" class="nav-item" data-page="dashboard" onclick="nav(this)"><span class="icon">📊</span> <span>Dashboard</span></a>
-    <a href="#files"     class="nav-item" data-page="files"     onclick="nav(this)"><span class="icon">📁</span> <span>Files</span></a>
-    <a href="#live"      class="nav-item" data-page="live"      onclick="nav(this)"><span class="icon">📡</span> <span>Live</span></a>
-    <div class="nav-section">System</div>
-    <a href="#settings"  class="nav-item" data-page="settings"  onclick="nav(this)"><span class="icon">⚙️</span> <span>Settings</span></a>
-    <a href="#settings_update" class="nav-item" data-page="settings_update" onclick="nav(this)"><span class="icon">📤</span> <span>Update</span></a>
-  </nav>
-</aside>
+<!-- ═══ PAGE: DASHBOARD ═══ -->
+<main class="main-content page" id="page-dashboard">
+<div class="page-header"><h1>📊 Dashboard</h1></div>
 
-<header class="app-header hide-desktop">
-  <div class="logo">
-    <img id="headerLogo" src="" alt="" style="display:none;max-height:32px" onerror="this.style.display='none'">
-    <span id="headerName">Water Logger</span>
-  </div>
-  <div class="status">
-    <div class="time" id="headerTime">--:--:--</div>
-    <span id="headerNet">…</span>
-  </div>
-</header>
-
-<main class="main-content">
-
-<div id="restartPopup" class="popup-overlay">
-  <div class="popup-content">
-    <div id="rPopIcon" style="font-size:4rem;margin-bottom:1rem">🔄</div>
-    <div id="rPopTitle" style="font-size:1.5rem;font-weight:bold;margin-bottom:.5rem">Restart Device?</div>
-    <div id="rPopMsg" style="margin-bottom:1rem">The device will restart. Any unsaved changes will be lost.</div>
-    <div id="rPopProgress" style="display:none;margin-bottom:1rem">
-      <div style="background:#e0e0e0;border-radius:4px;height:12px;overflow:hidden"><div id="rPopBar" style="width:0%;height:100%;background:#f39c12;transition:width .3s"></div></div>
-    </div>
-    <div id="rPopButtons" style="display:flex;gap:1rem;justify-content:center">
-      <button class="btn btn-danger" onclick="confirmRestart()">✔ Confirm</button>
-      <button class="btn btn-secondary" onclick="closeRestart()">✗ Cancel</button>
-    </div>
-  </div>
-</div>
-
-<div id="page-dashboard" class="page">
-  <div class="page-header"><h1><span class="icon">📊</span> Dashboard</h1></div>
-
+  <!-- File selector -->
   <div class="card"><div class="card-body">
     <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
-      <select id="db-fileSelect" class="form-input form-select" style="flex:1;min-width:200px" onchange="dbLoadData()"></select>
-      <button class="btn btn-primary" onclick="dbLoadData()">🔄</button>
+      <select id="fileSelect" class="form-input form-select" style="flex:1;min-width:200px" onchange="loadData()">
+        <option value="">Loading files...</option>
+      </select>
+      <button class="btn btn-primary" onclick="loadData()">🔄</button>
     </div>
   </div></div>
 
+  <!-- Filters -->
   <div class="card">
     <div class="card-header">🔍 Filters</div>
     <div class="card-body">
       <div class="form-row">
-        <div class="form-group"><label class="form-label">Start</label><input type="date" id="db-startDate" class="form-input" onchange="dbApplyFilters()"></div>
-        <div class="form-group"><label class="form-label">End</label><input type="date" id="db-endDate" class="form-input" onchange="dbApplyFilters()"></div>
+        <div class="form-group"><label class="form-label">Start</label>
+          <input type="date" id="startDate" class="form-input" onchange="applyFilters()"></div>
+        <div class="form-group"><label class="form-label">End</label>
+          <input type="date" id="endDate" class="form-input" onchange="applyFilters()"></div>
         <div class="form-group"><label class="form-label">Trigger</label>
-          <select id="db-eventFilter" class="form-input form-select" onchange="dbApplyFilters()">
+          <select id="eventFilter" class="form-input form-select" onchange="applyFilters()">
             <option value="ALL">All</option>
             <option value="BTN">Buttons Only</option>
             <option value="FF">Full Flush Btn</option>
             <option value="PF">Part Flush Btn</option>
-          </select>
-        </div>
+          </select></div>
         <div class="form-group"><label class="form-label">Extra presses</label>
-          <select id="db-pressFilter" class="form-input form-select" onchange="dbApplyFilters()">
+          <select id="pressFilter" class="form-input form-select" onchange="applyFilters()">
             <option value="ALL">All</option>
-            <option value="EXTRA">With Extra presses</option>
-            <option value="NONE">No Extra presses</option>
-          </select>
-        </div>
+            <option value="EXTRA">With Extra</option>
+            <option value="NONE">No Extra</option>
+          </select></div>
       </div>
-      <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-top:8px">
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-          <input type="checkbox" id="db-excludeZero" onchange="dbApplyFilters()" checked>
+          <input type="checkbox" id="excludeZero" onchange="applyFilters()" checked>
           <span>Exclude 0.00L entries</span>
         </label>
-        <button onclick="dbExportCSV()" class="btn btn-sm btn-secondary">📥 Export CSV</button>
+        <button onclick="exportCSV()" class="btn btn-sm btn-secondary">📥 Export CSV</button>
       </div>
     </div>
   </div>
 
-  <div id="db-errorMsg" class="alert alert-error" style="display:none"></div>
+  <div id="errorMsg" class="alert alert-error" style="display:none"></div>
 
+  <div id="dbError" class="alert alert-error" style="display:none"></div>
+  <!-- Stats -->
+  <div id="dbError" class="alert alert-error" style="display:none"></div>
   <div class="stats-grid mb-2">
-    <div class="stat-card"><div class="value" id="db-totalVol">0.00</div><div class="label">Liters</div></div>
-    <div class="stat-card"><div class="value" id="db-eventCount">0</div><div class="label">Events</div></div>
-    <div class="stat-card"><div class="value" id="db-totalFF">0</div><div class="label">Extra FF</div></div>
-    <div class="stat-card"><div class="value" id="db-totalPF">0</div><div class="label">Extra PF</div></div>
+    <div class="stat-card"><div class="value" id="dbTotalVol">0.00</div><div class="label">Liters</div></div>
+    <div class="stat-card"><div class="value" id="dbCount">0</div><div class="label">Events</div></div>
+    <div class="stat-card"><div class="value" id="dbFF" style="color:var(--ff-color,#e74c3c)">0</div><div class="label">Extra FF</div></div>
+    <div class="stat-card"><div class="value" id="dbPF" style="color:var(--pf-color,#3498db)">0</div><div class="label">Extra PF</div></div>
   </div>
 
+  <!-- Chart -->
   <div class="card">
     <div class="card-header">📈 Volume</div>
-    <div class="card-body" style="height:350px"><canvas id="db-chart"></canvas></div>
+    <div class="card-body" style="height:350px"><canvas id="dbChart"></canvas></div>
     <div class="card-body" style="padding-top:0">
-      <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;font-size:.85rem">
-        <span><span id="db-legendFF" style="display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:4px"></span>Full Flush Btn</span>
-        <span><span id="db-legendPF" style="display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:4px"></span>Part Flush Btn</span>
-        <span><span id="db-legendOther" style="display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:4px"></span>Other</span>
-      </div>
+      <div id="chartLegend" style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;font-size:.85rem"></div>
     </div>
   </div>
-</div>
+</main>
 
-<div id="page-files" class="page">
-  <div class="page-header"><h1><span class="icon">📁</span> File Manager</h1></div>
-
-  <div id="files-tabs" style="display:flex;gap:4px;margin-bottom:1rem"></div>
-
-  <div class="card"><div class="card-body">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <span id="files-usage">-</span><span id="files-pct" class="text-muted">-</span>
-    </div>
-    <div class="progress"><div class="progress-bar" id="files-bar" style="width:0%"></div></div>
-  </div></div>
-
-  <div class="card">
-    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
-      <span id="files-dirLabel">📂 Root</span>
-      <div class="btn-group">
-        <button id="files-upBtn" class="btn btn-sm btn-secondary" onclick="filesGoUp()" style="display:none">⬆️ Up</button>
-        <button id="files-editToggle" class="btn btn-sm btn-primary" onclick="filesToggleEdit()">✏️ Edit</button>
-      </div>
-    </div>
-    <div class="card-body" style="padding:0">
-      <div id="files-list">Loading…</div>
-    </div>
-
-    <div id="files-editTools" style="display:none">
-      <div class="card-body" style="border-top:1px solid var(--border);background:var(--bg)">
-        <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
-          <div style="display:flex;gap:8px;align-items:center;flex:1">
-            <input type="file" id="files-fileInput" multiple class="form-input" style="flex:1">
-            <button class="btn btn-sm btn-success" onclick="filesUpload()">📤 Upload</button>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input type="text" id="files-newFolder" placeholder="New folder" class="form-input" style="width:120px">
-            <button class="btn btn-sm btn-primary" onclick="filesMkdir()">📁 Create</button>
-          </div>
-        </div>
-        <div id="files-uploadProg" style="display:none;margin-top:8px">
-          <div style="display:flex;align-items:center;gap:8px">
-            <div class="progress" style="flex:1;height:10px"><div id="files-uploadBar" class="progress-bar progress-bar-success" style="width:0%"></div></div>
-            <span id="files-uploadPct" style="font-size:.8rem;min-width:45px">0%</span>
-          </div>
-        </div>
-      </div>
-
-      <div id="movePopup" class="popup-overlay">
-        <div class="popup-content" style="text-align:left;max-width:400px">
-          <div style="font-size:2.5rem;text-align:center;margin-bottom:.5rem">✂️</div>
-          <div style="font-size:1.2rem;font-weight:bold;text-align:center;margin-bottom:1rem">Move / Rename</div>
-          <div class="form-group"><label class="form-label">New Name</label><input type="text" id="mv-name" class="form-input"></div>
-          <div class="form-group"><label class="form-label">Move to Folder</label>
-            <select id="mv-dest" class="form-input form-select">
-              <option value="">(same location)</option>
-              <option value="/">/ (root)</option>
-            </select>
-          </div>
-          <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
-            <button class="btn btn-secondary" onclick="document.getElementById('movePopup').style.display='none'">Cancel</button>
-            <button class="btn btn-primary" onclick="filesApplyMove()">✂️ Apply</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div id="page-live" class="page">
-  <!-- NO inline <style> here — footer is hidden via scoped rule in <head> -->
-  <div class="page-header">
-    <h1><span class="icon">📡</span> Live</h1>
-    <div class="breadcrumb"><span id="live-conn" class="text-success">● Connected</span></div>
+<!-- ═══ PAGE: LIVE ═══ -->
+<main class="main-content page" id="page-live">
+<div class="page-header">
+    <h1>📡 Live</h1>
+    <div class="breadcrumb"><span id="connStatus" class="text-success">● Connected</span></div>
   </div>
 
+  <!-- Time + Mode -->
   <div class="card"><div class="card-body">
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
       <div>
         <div class="text-muted" style="font-size:.75rem">Mode</div>
-        <div id="live-mode" style="font-weight:bold;font-size:1.1rem">📊 Logging</div>
+        <div id="mode" style="font-weight:bold;font-size:1.1rem">–</div>
       </div>
       <div class="text-center" style="flex:1">
-        <div id="live-time" style="font-size:2.5rem;font-family:monospace;font-weight:bold">--:--:--</div>
+        <div id="time" style="font-size:2.5rem;font-family:monospace;font-weight:bold">--:--:--</div>
       </div>
       <div style="width:100px"></div>
     </div>
   </div></div>
 
+  <!-- Current Cycle -->
   <div class="card">
     <div class="card-header">💧 Current Cycle</div>
     <div class="card-body">
       <div class="stats-grid">
-        <div class="stat-card"><div class="value" id="live-liters">0.00</div><div class="label">Liters</div></div>
-        <div class="stat-card"><div class="value" id="live-pulses">0</div><div class="label">Pulses</div></div>
-        <div class="stat-card"><div class="value" id="live-ffCount">0</div><div class="label">Extra FF</div></div>
-        <div class="stat-card"><div class="value" id="live-pfCount">0</div><div class="label">Extra PF</div></div>
+        <div class="stat-card"><div class="value" id="liters">0.00</div><div class="label">Liters</div></div>
+        <div class="stat-card"><div class="value" id="pulses">0</div><div class="label">Pulses</div></div>
+        <div class="stat-card"><div class="value" id="ffCount" style="color:var(--ff-color,#e74c3c)">0</div><div class="label">Extra FF</div></div>
+        <div class="stat-card"><div class="value" id="pfCount" style="color:var(--pf-color,#3498db)">0</div><div class="label">Extra PF</div></div>
       </div>
       <div class="mt-1" style="display:flex;justify-content:space-between;font-size:.85rem">
-        <span>Trigger: <strong id="live-trigger">-</strong></span>
-        <span>Duration: <strong id="live-cycleTime">0</strong>s</span>
+        <span>Trigger: <strong id="trigger">–</strong></span>
+        <span>Duration: <strong id="cycleTime">0</strong>s</span>
       </div>
     </div>
   </div>
 
+  <!-- State Machine -->
   <div class="card">
     <div class="card-header">⚙️ State Machine</div>
     <div class="card-body">
       <div style="display:flex;align-items:center;justify-content:center;gap:1.5rem;flex-wrap:wrap">
         <div style="text-align:center">
           <div class="text-muted" style="font-size:.75rem">State</div>
-          <div id="live-state" style="font-weight:bold;padding:8px 16px;border-radius:6px;background:#e0e0e0;font-size:1.1rem">-</div>
+          <div id="stEl" style="font-weight:bold;padding:8px 16px;border-radius:6px;background:#e0e0e0;font-size:1.1rem">–</div>
         </div>
         <div style="text-align:center">
           <div class="text-muted" style="font-size:.75rem">Timer</div>
-          <div id="live-stateRem" style="font-size:2rem;font-weight:bold;color:var(--primary)">-</div>
+          <div id="stateRemaining" style="font-size:2rem;font-weight:bold;color:var(--primary)">–</div>
         </div>
       </div>
-      <div class="mt-1 text-muted" id="live-stateHint" style="font-size:.75rem;text-align:center">🔵 IDLE → 🟡 WAIT_FLOW → 🟢 MONITORING → Logging</div>
+      <div id="stateHint" class="mt-1 text-muted" style="font-size:.75rem;text-align:center"></div>
     </div>
   </div>
 
+  <!-- Button States -->
   <div class="card">
     <div class="card-header">🔘 Button States</div>
     <div class="card-body">
       <div style="display:flex;justify-content:space-around;flex-wrap:wrap;gap:1rem">
         <div style="text-align:center">
-          <div class="text-muted" style="font-size:.75rem">Full Flush Btn</div>
-          <div id="live-ff" style="padding:8px 16px;border-radius:6px;color:#fff;background:#95a5a6;font-weight:bold">-</div>
+          <div class="text-muted" style="font-size:.75rem">Full Flush</div>
+          <div id="ff" style="padding:8px 16px;border-radius:6px;color:#fff;background:#95a5a6;font-weight:bold">–</div>
         </div>
         <div style="text-align:center">
-          <div class="text-muted" style="font-size:.75rem">Part Flush Btn</div>
-          <div id="live-pf" style="padding:8px 16px;border-radius:6px;color:#fff;background:#95a5a6;font-weight:bold">-</div>
+          <div class="text-muted" style="font-size:.75rem">Part Flush</div>
+          <div id="pf" style="padding:8px 16px;border-radius:6px;color:#fff;background:#95a5a6;font-weight:bold">–</div>
         </div>
         <div style="text-align:center">
           <div class="text-muted" style="font-size:.75rem">WiFi Trigger</div>
-          <div id="live-wifi" style="padding:8px 16px;border-radius:6px;color:#fff;background:#95a5a6;font-weight:bold">-</div>
+          <div id="wifi" style="padding:8px 16px;border-radius:6px;color:#fff;background:#95a5a6;font-weight:bold">–</div>
         </div>
       </div>
     </div>
   </div>
 
+  <!-- Recent Logs -->
   <div class="card">
     <div class="card-header">📝 Recent Logs</div>
     <div class="card-body" style="padding:0;overflow-x:auto">
-      <div id="live-logs" style="font-family:monospace;font-size:.8rem;padding:.5rem">Loading…</div>
+      <div id="recentLogs" style="font-family:monospace;font-size:.8rem;padding:8px">Loading...</div>
     </div>
   </div>
 
+  <!-- System -->
   <div class="card">
     <div class="card-header">📊 System</div>
     <div class="card-body">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem;font-size:.85rem">
-        <span>Boot Count: <strong id="live-boot">0</strong></span>
-        <span>Uptime: <strong id="live-uptime">0</strong>s</span>
-        <span>Chip: <strong id="live-chip">-</strong></span>
+        <span>Boot: <strong id="boot">–</strong></span>
+        <span>Uptime: <strong id="uptime">–</strong>s</span>
+        <span>Chip: <strong id="chip">–</strong></span>
       </div>
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem;font-size:.85rem;margin-top:.5rem">
-        <span>RAM: <strong id="live-heap">-</strong> / <strong id="live-heapTotal">-</strong></span>
-        <span>CPU: <strong id="live-cpu">-</strong> MHz</span>
-        <span>Storage: <strong id="live-storage">-</strong></span>
-      </div>
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem;font-size:.85rem;margin-top:.5rem">
-        <span id="live-net">-</span><span></span><span>IP: <strong id="live-ip">-</strong></span>
+        <span>RAM: <strong id="heap">–</strong> / <strong id="heapTotal">–</strong></span>
+        <span>Storage: <strong id="storage">–</strong></span>
       </div>
     </div>
   </div>
-</div>
+</main>
 
-<div id="page-settings" class="page">
-  <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-    <div>
-      <h1><span class="icon">⚙️</span> Settings</h1>
-      <div class="text-muted" style="margin-top:.35rem">Configure device, flow meter, hardware pins, network, time sync and firmware update.</div>
+<!-- ═══ PAGE: FILES ═══ -->
+<main class="main-content page" id="page-files">
+<div class="page-header"><h1>📁 File Manager</h1></div>
+
+  <div id="statusMsg"></div>
+
+  <!-- Storage tabs -->
+  <div id="storageTabs" class="tabs" style="display:flex;gap:4px;margin-bottom:1rem"></div>
+
+  <!-- Storage info -->
+  <div class="card"><div class="card-body" id="storageInfo">Loading...</div></div>
+
+  <!-- Directory -->
+  <div class="card">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+      <span id="dirTitle">📂 /</span>
+      <div class="btn-group">
+        <button id="btnUp" class="btn btn-sm btn-secondary" onclick="goUp()" style="display:none">⬆️ Up</button>
+        <button id="btnEdit" class="btn btn-sm btn-primary"    onclick="toggleEdit()">✏️ Edit</button>
+        <button id="btnDone" class="btn btn-sm btn-secondary"  onclick="toggleEdit()" style="display:none">✖️ Done</button>
+      </div>
     </div>
-    <button onclick="showRestartPopup()" class="btn btn-warning">🔄 Restart</button>
+    <div class="card-body" style="padding:0" id="fileList">Loading...</div>
+
+    <!-- Edit mode tools -->
+    <div id="editTools" class="card-body" style="border-top:1px solid var(--border);background:var(--bg);display:none">
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
+        <form id="uploadForm" style="display:flex;gap:8px;align-items:center">
+          <input type="file" name="file" id="fileInput" required class="form-input" style="width:auto">
+          <button type="submit" class="btn btn-sm btn-success">📤 Upload</button>
+        </form>
+        <form id="mkdirForm" style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="newFolder" placeholder="New folder" class="form-input" style="width:120px">
+          <button type="submit" class="btn btn-sm btn-primary">📁 Create</button>
+        </form>
+      </div>
+      <div id="uploadProg" style="display:none;margin-top:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="progress" style="flex:1;height:10px"><div id="uploadBar" class="progress-bar progress-bar-success" style="width:0%"></div></div>
+          <span id="uploadPct" style="font-size:.8rem;min-width:45px">0%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ═══ PAGE: SETTINGS ═══ -->
+<main class="main-content page" id="page-settings">
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+    <div><h1>⚙️ Settings</h1></div>
+    <button onclick="document.getElementById('restartPopup').style.display='flex'" class="btn btn-warning">🔄 Restart</button>
   </div>
 
   <div class="settings-grid">
-    <div class="setting-card" onclick="showSubpage('settings_device')">   <div class="icon">📱</div><div class="title">Device</div></div>
-    <div class="setting-card" onclick="showSubpage('settings_flowmeter')"><div class="icon">💧</div><div class="title">Flow Meter</div></div>
-    <div class="setting-card" onclick="showSubpage('settings_hardware')"> <div class="icon">🔧</div><div class="title">Hardware</div></div>
-    <div class="setting-card" onclick="showSubpage('settings_datalog')">  <div class="icon">📝</div><div class="title">Data Log</div></div>
-    <div class="setting-card" onclick="showSubpage('settings_theme')">    <div class="icon">🎨</div><div class="title">Theme</div></div>
-    <div class="setting-card" onclick="showSubpage('settings_network')">  <div class="icon">🌐</div><div class="title">Network</div></div>
-    <div class="setting-card" onclick="showSubpage('settings_time')">     <div class="icon">🕐</div><div class="title">Time Sync</div></div>
-    <div class="setting-card" onclick="showSubpage('settings_update')">   <div class="icon">📤</div><div class="title">Update</div></div>
+    <div class="setting-card" onclick="navTo('settings-device')"><div class="icon">📱</div><div class="title">Device</div></div>
+    <div class="setting-card" onclick="navTo('settings-flowmeter')"><div class="icon">💧</div><div class="title">Flow Meter</div></div>
+    <div class="setting-card" onclick="navTo('settings-hardware')"><div class="icon">🔧</div><div class="title">Hardware</div></div>
+    <div class="setting-card" onclick="navTo('settings-datalog')"><div class="icon">📝</div><div class="title">Data Log</div></div>
+    <div class="setting-card" onclick="navTo('settings-theme')"><div class="icon">🎨</div><div class="title">Theme</div></div>
+    <div class="setting-card" onclick="navTo('settings-network')"><div class="icon">🌐</div><div class="title">Network</div></div>
+    <div class="setting-card" onclick="navTo('settings-time')"><div class="icon">🕐</div><div class="title">Time Sync</div></div>
+    <div class="setting-card" onclick="navTo('files')"><div class="icon">📤</div><div class="title">Files</div></div>
   </div>
 
   <div class="card mt-2">
     <div class="card-header">💾 Backup &amp; Restore</div>
     <div class="card-body">
-      <div class="btn-group" style="margin-bottom:1rem">
-        <a id="exportSettingsLink" href="/export_settings" class="btn btn-primary">📥 Export Settings</a>
+      <div style="margin-bottom:1rem">
+        <a href="/export_settings" download class="btn btn-primary">📥 Export Settings</a>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input type="file" id="importFile" accept=".json" class="form-input" style="flex:1;min-width:150px">
-        <button class="btn btn-secondary" onclick="settingsImport()">📤 Import Settings</button>
-      </div>
+      <form id="importForm" onsubmit="settingsImport();return false">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="file" name="settings" id="importFile" accept=".json" class="form-input" style="flex:1;min-width:150px">
+          <button type="submit" class="btn btn-secondary">📤 Import</button>
+        </div>
+      </form>
       <div id="importProg" style="display:none;margin-top:8px">
         <div style="display:flex;align-items:center;gap:8px">
           <div class="progress" style="flex:1;height:10px"><div id="importBar" class="progress-bar progress-bar-success" style="width:0%"></div></div>
@@ -324,509 +270,1385 @@
       </div>
     </div>
   </div>
-</div>
+</main>
 
-<div id="page-settings_device" class="page">
-  <div class="page-header">
+<!-- ═══ PAGE: SETTINGS-DEVICE ═══ -->
+<main class="main-content page" id="page-settings-device">
+<div class="page-header">
     <h1>📱 Device</h1>
-    <div class="breadcrumb"><a href="#settings">Settings</a> / Device</div>
+    <div class="breadcrumb"><a href='#settings' onclick="navTo('settings');return false">Settings</a> / Device</div>
   </div>
-  <div id="sd-msg"></div>
-  <form onsubmit="settingsSave(event,'/save_device',this)">
-    <div class="card"><div class="card-header">🔛 Identity</div><div class="card-body">
-      <div class="form-group"><label class="form-label">Device Name</label><input type="text" name="deviceName" id="sd-devName" maxlength="32" class="form-input"></div>
-      <div class="form-group"><label class="form-label">Device ID</label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input type="text" id="sd-devId" name="deviceId" maxlength="12" class="form-input" style="flex:1;min-width:120px" disabled>
-          <button type="button" onclick="regenDevId()" class="btn btn-secondary btn-sm">🔄 New ID</button>
-          <button type="button" onclick="toggleManualId('sd-devId')" class="btn btn-secondary btn-sm">✏️ Manual</button>
+
+  <form action="/save_device" method="POST">
+
+    <!-- Identity -->
+    <div class="card">
+      <div class="card-header">📛 Identity</div>
+      <div class="card-body">
+        <div class="form-group">
+          <label class="form-label">Device Name</label>
+          <input type="text" name="deviceName" id="deviceName" maxlength="32" class="form-input" placeholder="Water Logger">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Device ID</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input type="text" id="devIdInput" name="deviceId" maxlength="12" class="form-input" style="flex:1;min-width:120px" disabled>
+            <button type="button" onclick="regenId()" class="btn btn-secondary btn-sm">🔄 New ID</button>
+            <button type="button" onclick="toggleManualId()" class="btn btn-secondary btn-sm">✏️ Manual</button>
+          </div>
         </div>
       </div>
-    </div></div>
-    <div class="card"><div class="card-header">💾 Storage</div><div class="card-body">
-      <div class="form-group"><label class="form-label">Default Storage</label>
-        <select name="defaultStorageView" id="sd-defaultStorage" class="form-input form-select">
-          <option value="0">💾 Internal (LittleFS)</option>
-          <option value="1">💳 SD Card</option>
-        </select>
-      </div>
-    </div></div>
-    <div class="card"><div class="card-header">🌐 Web Server</div><div class="card-body">
-      <div class="form-group"><label class="form-label"><input type="checkbox" id="sd-forceWS" name="forceWebServer" value="1"> Force Web Server On</label></div>
-    </div></div>
-    <div class="card"><div class="card-header">📊 System Info</div><div class="card-body">
-      <div class="form-row" id="sd-sysInfo"></div>
-    </div></div>
-
-    <div class="card">
-      <div class="card-header" onclick="changelogToggle()" style="cursor:pointer;user-select:none;display:flex;justify-content:space-between;align-items:center">
-        <span>📜 Change Log <small class="text-muted" style="font-size:.75rem">(tap to expand)</small></span>
-        <span id="sd-changelogChevron" style="transition:transform .2s ease">▼</span>
-      </div>
-      <div class="card-body hidden" id="sd-changelog"></div>
     </div>
 
-    <div class="card"><div class="card-header">ℹ️ About</div><div class="card-body">
-      <div style="text-align:center">
-        <div style="font-size:1.2rem;font-weight:bold;color:var(--primary);margin-bottom:.5rem">Water Logger</div>
-        <div style="color:var(--text-muted);font-size:.9rem">Created by</div>
-        <div style="font-weight:600;margin:.5rem 0">Petko Georgiev</div>
-        <div style="color:var(--text-muted);font-size:.85rem">Villeroy &amp; Boch Bulgaria</div>
-        <div style="color:var(--text-muted);font-size:.85rem;margin-top:.25rem">📍 Sevlievo, Bulgaria</div>
-      </div>
-    </div></div>
-    <button type="submit" class="btn btn-primary btn-block">💾 Save</button>
-  </form>
-</div>
-
-<div id="page-settings_flowmeter" class="page">
-  <div class="page-header">
-    <h1>💧 Flow Meter</h1>
-    <div class="breadcrumb"><a href="#settings">Settings</a> / Flow Meter</div>
-  </div>
-  <div id="sf-msg"></div>
-  <form onsubmit="settingsSave(event,'/save_flowmeter',this)">
-    <div class="card"><div class="card-header">🔍 Calibration</div><div class="card-body">
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">Pulses/Liter</label><input type="number" step="0.1" name="pulsesPerLiter" id="sf-ppl" class="form-input"></div>
-        <div class="form-group"><label class="form-label">Multiplier</label><input type="number" step="0.01" name="calibrationMultiplier" id="sf-cal" class="form-input"></div>
-      </div>
-    </div></div>
-    <div class="card"><div class="card-header">⏱️ Timing</div><div class="card-body">
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">Window (sec)</label><input type="number" name="monitoringWindowSecs" id="sf-win" class="form-input"><p class="form-hint">Time window of idle before logging.</p></div>
-        <div class="form-group"><label class="form-label">First Loop (sec)</label><input type="number" name="firstLoopWindowSecs" id="sf-fl" class="form-input"><p class="form-hint">First loop delay before logging (for delayed fill).</p></div>
-      </div>
-    </div></div>
-    <div class="card"><div class="card-header">🧪 Test Mode</div><div class="card-body">
-      <div class="form-group"><label class="form-label"><input type="checkbox" id="sf-test" name="testMode" value="1"> Enable</label>
-        <p class="form-hint">Activate WiFi Pin as LED output for visual check.<br>Solid light = IDLE / Blink = Water running.</p>
-      </div>
-      <div class="form-group"><label class="form-label">Blink Duration (ms)</label><input type="number" name="blinkDuration" id="sf-blink" class="form-input"></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1rem">
-        <span>Boot Count: <strong id="sf-boot">0</strong></span>
-        <button type="submit" name="resetBootCount" value="1" class="btn btn-sm btn-danger">🔄 Reset</button>
-      </div>
-    </div></div>
-    <button type="submit" class="btn btn-primary btn-block">💾 Save</button>
-  </form>
-</div>
-
-<div id="page-settings_hardware" class="page">
-  <div class="page-header">
-    <h1>🔧 Hardware</h1>
-    <div class="breadcrumb"><a href="#settings">Settings</a> / Hardware</div>
-  </div>
-  <div id="hw-msg"></div>
-  <div class="alert alert-warning">⚠️ Changes require device restart to take effect</div>
-  <div class="card" id="hw-boardDiagramCard" style="display:none"><div class="card-body text-center">
-    <img id="hw-boardDiagram" src="" style="max-width:100%;height:auto" onerror="this.parentElement.parentElement.style.display='none'">
-  </div></div>
-  <form onsubmit="settingsSave(event,'/save_hardware',this,true)">
-    <div class="card"><div class="card-header">💾 Storage</div><div class="card-body">
-      <div class="form-group">
-        <select name="storageType" id="hw-storage" class="form-input form-select" onchange="document.getElementById('hw-sdPins').style.display=this.value==='1'?'block':'none'">
-          <option value="0">LittleFS (Internal)</option>
-          <option value="1">SD Card (SPI)</option>
-        </select>
-      </div>
-      <div id="hw-sdPins" style="display:none;margin-top:1rem">
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">CS</label><input type="number" name="pinSdCS" id="hw-sdCS" class="form-input"></div>
-          <div class="form-group"><label class="form-label">MOSI</label><input type="number" name="pinSdMOSI" id="hw-sdMOSI" class="form-input"></div>
-          <div class="form-group"><label class="form-label">MISO</label><input type="number" name="pinSdMISO" id="hw-sdMISO" class="form-input"></div>
-          <div class="form-group"><label class="form-label">SCK</label><input type="number" name="pinSdSCK" id="hw-sdSCK" class="form-input"></div>
+    <!-- Storage -->
+    <div class="card">
+      <div class="card-header">💾 Storage</div>
+      <div class="card-body">
+        <div class="form-group">
+          <label class="form-label">Default Storage View</label>
+          <select name="defaultStorageView" id="defaultStorageView" class="form-input form-select">
+            <option value="0">💾 Internal (LittleFS)</option>
+            <option value="1">💳 SD Card</option>
+          </select>
         </div>
       </div>
-    </div></div>
-    <div class="card"><div class="card-header">😴 Wakeup Mode</div><div class="card-body">
-      <div class="form-group"><label class="form-label">Button Active Level</label>
-        <select name="wakeupMode" id="hw-wakeup" class="form-input form-select">
-          <option value="0">Active HIGH (VCC)</option>
-          <option value="1">Active LOW (GND)</option>
-        </select>
-        <p class="form-hint">HIGH = button connects to VCC, LOW = button connects to GND</p>
-      </div>
-      <div class="form-group"><label class="form-label">Debounce (ms)</label><input type="number" name="debounceMs" id="hw-debounce" min="20" max="500" class="form-input">
-        <p class="form-hint">Higher values reduce false triggers but slow response</p>
-      </div>
-    </div></div>
-    <div class="card"><div class="card-header">🔘 Pin Configuration</div><div class="card-body">
-      <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem">GPIO pin numbers for ESP32-C3</p>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">WiFi Trigger</label><input type="number" name="pinWifiTrigger" id="hw-pinWifi" class="form-input"></div>
-        <div class="form-group"><label class="form-label">Full Flush Btn</label><input type="number" name="pinWakeupFF" id="hw-pinFF" class="form-input"></div>
-        <div class="form-group"><label class="form-label">Part Flush Btn</label><input type="number" name="pinWakeupPF" id="hw-pinPF" class="form-input"></div>
-        <div class="form-group"><label class="form-label">Flow Sensor</label><input type="number" name="pinFlowSensor" id="hw-pinFlow" class="form-input"></div>
-      </div>
-    </div></div>
-    <div class="card"><div class="card-header">🕐 RTC DS1302</div><div class="card-body">
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">CE</label><input type="number" name="pinRtcCE" id="hw-rtcCE" class="form-input"></div>
-        <div class="form-group"><label class="form-label">IO</label><input type="number" name="pinRtcIO" id="hw-rtcIO" class="form-input"></div>
-        <div class="form-group"><label class="form-label">CLK</label><input type="number" name="pinRtcSCLK" id="hw-rtcCLK" class="form-input"></div>
-      </div>
-    </div></div>
-    <div class="card"><div class="card-header">⚡ CPU Frequency</div><div class="card-body">
-      <div class="form-group">
-        <select name="cpuFreqMHz" id="hw-cpu" class="form-input form-select">
-          <option value="80">80 MHz</option>
-          <option value="160">160 MHz</option>
-        </select>
-      </div>
-    </div></div>
-    <button type="submit" class="btn btn-primary btn-block" onclick="return confirm('Settings will be saved and device will restart. Continue?')">💾 Save &amp; Restart</button>
-  </form>
-</div>
+    </div>
 
-<div id="page-settings_theme" class="page">
-  <div class="page-header">
-    <h1>🎨 Theme</h1>
-    <div class="breadcrumb"><a href="#settings">Settings</a> / Theme</div>
-  </div>
-  <div id="th-msg"></div>
-  <form onsubmit="settingsSave(event,'/save_theme',this)">
-    <div class="card"><div class="card-header">🌓 Mode</div><div class="card-body">
-      <div class="form-group"><select name="themeMode" id="th-mode" class="form-input form-select">
-        <option value="0">☀️ Light</option>
-        <option value="1">🌙 Dark</option>
-        <option value="2">🔄 Auto</option>
-      </select></div>
-      <div class="form-group"><label class="form-label"><input type="checkbox" id="th-icons" name="showIcons" value="1"> Show icons</label></div>
-    </div></div>
-    <div class="card"><div class="card-header">🎨 Colors</div><div class="card-body">
-      <div class="color-grid">
-        <div class="form-group"><label class="form-label">Primary</label>   <input type="color" name="primaryColor"   id="th-primary"   class="form-input"></div>
-        <div class="form-group"><label class="form-label">Secondary</label> <input type="color" name="secondaryColor" id="th-secondary" class="form-input"></div>
-        <div class="form-group"><label class="form-label">Background</label><input type="color" name="bgColor"        id="th-bg"        class="form-input"></div>
-        <div class="form-group"><label class="form-label">Text</label>      <input type="color" name="textColor"      id="th-text"      class="form-input"></div>
+    <!-- Web Server -->
+    <div class="card">
+      <div class="card-header">🌐 Web Server</div>
+      <div class="card-body">
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" name="forceWebServer" id="forceWebServer" value="1">
+            Force Web Server On
+          </label>
+        </div>
       </div>
-      <h4 class="mt-2">Chart</h4>
-      <div class="color-grid" style="grid-template-columns:repeat(3,1fr)">
-        <div class="form-group"><label class="form-label">Full Flush Btn</label><input type="color" name="ffColor"    id="th-ff"    class="form-input"></div>
-        <div class="form-group"><label class="form-label">Part Flush Btn</label><input type="color" name="pfColor"    id="th-pf"    class="form-input"></div>
-        <div class="form-group"><label class="form-label">Other</label>          <input type="color" name="otherColor" id="th-other" class="form-input"></div>
+    </div>
+
+    <!-- System Info -->
+    <div class="card">
+      <div class="card-header">📊 System Info</div>
+      <div class="card-body">
+        <div class="form-row" id="sysInfo">
+          <div><strong>Firmware</strong><div class="text-primary" id="siFirmware">–</div></div>
+          <div><strong>Boot Count</strong><div id="siBoot">–</div></div>
+          <div><strong>Mode</strong><div id="siMode">–</div></div>
+          <div><strong>Free Heap</strong><div id="siHeap">–</div></div>
+          <div><strong>CPU</strong><div id="siCpu">–</div></div>
+          <div><strong>Storage</strong><div id="siStorage">–</div></div>
+        </div>
       </div>
-      <h4 class="mt-2">Storage Bar</h4>
-      <div class="color-grid">
-        <div class="form-group"><label class="form-label">Normal</label><input type="color" name="storageBarColor"   id="th-bar"   class="form-input"></div>
-        <div class="form-group"><label class="form-label">70%+</label>  <input type="color" name="storageBar70Color" id="th-bar70" class="form-input"></div>
-        <div class="form-group"><label class="form-label">90%+</label>  <input type="color" name="storageBar90Color" id="th-bar90" class="form-input"></div>
-        <div class="form-group"><label class="form-label">Border</label><input type="color" name="storageBarBorder"  id="th-barB"  class="form-input"></div>
+    </div>
+
+    <!-- Changelog -->
+    <div class="card">
+      <div class="card-header" onclick="toggleChangelog()" style="cursor:pointer">
+        📜 Change Log <small class="text-muted">(tap)</small>
       </div>
-    </div></div>
-    <div class="card"><div class="card-header">🖼️ Images</div><div class="card-body">
-      <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem">Supported: PNG, JPG, GIF, SVG, ICO. Path: /file.png or /folder/file.png</p>
-      <div class="form-group"><label class="form-label">Logo Path</label><input type="text" name="logoSource" id="th-logo" placeholder="/logo.png" class="form-input"></div>
-      <div class="form-group"><label class="form-label">Favicon</label><input type="text" name="faviconPath" id="th-favicon" placeholder="/favicon.ico" class="form-input"></div>
-      <div class="form-group"><label class="form-label">Board Diagram</label><input type="text" name="boardDiagramPath" id="th-board" placeholder="/board.png" class="form-input"></div>
-    </div></div>
-    <div class="card"><div class="card-header">📈 Chart Source</div><div class="card-body">
-      <div class="form-group"><label class="form-label">Chart.js Library</label>
-        <select name="chartSource" id="th-chartSrc" class="form-input form-select" onchange="document.getElementById('th-chartPathRow').style.display=this.value==='0'?'block':'none'">
-          <option value="0">📁 Local File</option>
-          <option value="1">🌐 CDN (Online)</option>
-        </select>
-        <p class="form-hint">Local: requires /chart.min.js file, CDN: needs internet</p>
+      <div class="card-body" id="changelog" style="display:none" data-loaded="">
+        <div class="text-muted" id="sd_clContent">Loading...</div>
       </div>
-      <div id="th-chartPathRow">
-        <div class="form-group"><label class="form-label">Local Path</label><input type="text" name="chartLocalPath" id="th-chartPath" placeholder="/chart.min.js" class="form-input"></div>
+    </div>
+
+    <!-- About -->
+    <div class="card">
+      <div class="card-header">ℹ️ About</div>
+      <div class="card-body">
+        <div style="text-align:center">
+          <div style="font-size:1.2rem;font-weight:bold;color:var(--primary);margin-bottom:.5rem">Water Logger</div>
+          <div style="color:var(--text-muted);font-size:.9rem">Created by</div>
+          <div style="font-weight:600;margin:.5rem 0">Petko Georgiev</div>
+          <div style="color:var(--text-muted);font-size:.85rem">Villeroy &amp; Boch Bulgaria</div>
+          <div style="color:var(--text-muted);font-size:.85rem;margin-top:.25rem">📍 Sevlievo, Bulgaria</div>
+        </div>
       </div>
-      <div class="form-group mt-1"><label class="form-label">Dashboard Column Labels</label>
-        <select name="chartLabelFormat" id="th-labelFmt" class="form-input form-select">
-          <option value="0">📅 Date + Time</option>
-          <option value="1">🔢 Boot Count (#1234)</option>
-          <option value="2">📅🔢 Both (Date Time #Boot)</option>
-        </select>
-        <p class="form-hint">How to label bars in dashboard chart</p>
-      </div>
-    </div></div>
+    </div>
+
     <button type="submit" class="btn btn-primary btn-block">💾 Save</button>
   </form>
-</div>
+</main>
 
-<div id="page-settings_network" class="page">
-  <div class="page-header">
-    <h1>🌐 Network</h1>
-    <div class="breadcrumb"><a href="#settings">Settings</a> / Network</div>
-    <div class="text-muted" style="margin-top:.35rem">Choose AP or Client mode. Saving network settings requires restart.</div>
+<!-- ═══ PAGE: SETTINGS-FLOWMETER ═══ -->
+<main class="main-content page" id="page-settings-flowmeter">
+<div class="page-header">
+    <h1>💧 Flow Meter</h1>
+    <div class="breadcrumb"><a href='#settings' onclick="navTo('settings');return false">Settings</a> / Flow Meter</div>
   </div>
-  <div id="net-msg"></div>
+
+  <form action="/save_flowmeter" method="POST">
+    <!-- Calibration -->
+    <div class="card">
+      <div class="card-header">📏 Calibration</div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Pulses/Liter</label>
+            <input type="number" step="0.1" name="pulsesPerLiter" id="pulsesPerLiter" class="form-input" value="">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Multiplier</label>
+            <input type="number" step="0.01" name="calibrationMultiplier" id="calibrationMultiplier" class="form-input" value="">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Timing -->
+    <div class="card">
+      <div class="card-header">⏱️ Timing</div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Window (sec)</label>
+            <input type="number" name="monitoringWindowSecs" id="monitoringWindowSecs" class="form-input" value="">
+            <p class="form-hint">Idle time before logging.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">First Loop (sec)</label>
+            <input type="number" name="firstLoopWindowSecs" id="firstLoopWindowSecs" class="form-input" value="">
+            <p class="form-hint">Delay on first loop (for delayed fill).</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Test Mode -->
+    <div class="card">
+      <div class="card-header">🧪 Test Mode</div>
+      <div class="card-body">
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" name="testMode" id="testMode" value="1"> Enable
+          </label>
+          <p class="form-hint">WiFi Pin as LED output. Solid = IDLE / Blink = Water running.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Blink Duration (ms)</label>
+          <input type="number" name="blinkDuration" id="blinkDuration" class="form-input" value="">
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1rem">
+          <span>Boot Count: <strong id="bootCount">–</strong></span>
+          <button type="submit" name="resetBootCount" value="1" class="btn btn-sm btn-danger">🔄 Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-block">💾 Save</button>
+  </form>
+</main>
+
+<!-- ═══ PAGE: SETTINGS-HARDWARE ═══ -->
+<main class="main-content page" id="page-settings-hardware">
+<div class="page-header">
+    <h1>🔧 Hardware</h1>
+    <div class="breadcrumb"><a href='#settings' onclick="navTo('settings');return false">Settings</a> / Hardware</div>
+  </div>
+
+  <div class="alert alert-warning">⚠️ Changes require device restart to take effect.</div>
+
+  <!-- Board diagram (if configured) -->
+  <div id="boardDiagramCard" class="card" style="display:none">
+    <div class="card-body text-center">
+      <img id="boardDiagram" src="" style="max-width:100%;height:auto" onerror="this.parentElement.parentElement.style.display='none'">
+    </div>
+  </div>
+
+  <form action="/save_hardware" method="POST">
+    <!-- Storage -->
+    <div class="card">
+      <div class="card-header">💾 Storage</div>
+      <div class="card-body">
+        <div class="form-group">
+          <select name="storageType" id="storageType" class="form-input form-select" onchange="toggleSD()">
+            <option value="0">LittleFS (Internal)</option>
+            <option value="1">SD Card (SPI)</option>
+          </select>
+        </div>
+        <div id="sdPins" style="display:none;margin-top:1rem">
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">CS</label><input type="number" name="pinSdCS"   id="pinSdCS"   class="form-input"></div>
+            <div class="form-group"><label class="form-label">MOSI</label><input type="number" name="pinSdMOSI" id="pinSdMOSI" class="form-input"></div>
+            <div class="form-group"><label class="form-label">MISO</label><input type="number" name="pinSdMISO" id="pinSdMISO" class="form-input"></div>
+            <div class="form-group"><label class="form-label">SCK</label><input type="number" name="pinSdSCK"  id="pinSdSCK"  class="form-input"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Wakeup -->
+    <div class="card">
+      <div class="card-header">😴 Wakeup Mode</div>
+      <div class="card-body">
+        <div class="form-group">
+          <label class="form-label">Button Active Level</label>
+          <select name="wakeupMode" id="wakeupMode" class="form-input form-select">
+            <option value="0">Active HIGH (VCC)</option>
+            <option value="1">Active LOW (GND)</option>
+          </select>
+          <p class="form-hint">HIGH = button connects to VCC, LOW = to GND.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Debounce (ms)</label>
+          <input type="number" name="debounceMs" id="debounceMs" min="20" max="500" class="form-input">
+          <p class="form-hint">Higher = fewer false triggers but slower response.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- GPIO pins -->
+    <div class="card">
+      <div class="card-header">🔘 Pin Configuration</div>
+      <div class="card-body">
+        <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem">GPIO pin numbers for ESP32-C3</p>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">WiFi Trigger</label><input type="number" name="pinWifiTrigger" id="pinWifiTrigger" class="form-input"></div>
+          <div class="form-group"><label class="form-label">Full Flush Btn</label><input type="number" name="pinWakeupFF"   id="pinWakeupFF"   class="form-input"></div>
+          <div class="form-group"><label class="form-label">Part Flush Btn</label><input type="number" name="pinWakeupPF"   id="pinWakeupPF"   class="form-input"></div>
+          <div class="form-group"><label class="form-label">Flow Sensor</label><input type="number" name="pinFlowSensor" id="pinFlowSensor" class="form-input"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RTC -->
+    <div class="card">
+      <div class="card-header">🕐 RTC DS1302</div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">CE</label><input type="number" name="pinRtcCE"   id="pinRtcCE"   class="form-input"></div>
+          <div class="form-group"><label class="form-label">IO</label><input type="number" name="pinRtcIO"   id="pinRtcIO"   class="form-input"></div>
+          <div class="form-group"><label class="form-label">CLK</label><input type="number" name="pinRtcSCLK" id="pinRtcSCLK" class="form-input"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CPU -->
+    <div class="card">
+      <div class="card-header">⚡ CPU Frequency</div>
+      <div class="card-body">
+        <div class="form-group">
+          <select name="cpuFreqMHz" id="cpuFreqMHz" class="form-input form-select">
+            <option value="80">80 MHz</option>
+            <option value="160">160 MHz</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-block"
+      onclick="return confirm('Settings will be saved and device will restart. Continue?')">
+      💾 Save &amp; Restart
+    </button>
+  </form>
+</main>
+
+<!-- ═══ PAGE: SETTINGS-DATALOG ═══ -->
+<main class="main-content page" id="page-settings-datalog">
+<div class="page-header">
+    <h1>📝 Data Log</h1>
+    <div class="breadcrumb"><a href='#settings' onclick="navTo('settings');return false">Settings</a> / Data Log</div>
+  </div>
+
+  <form action="/save_datalog" method="POST">
+    <!-- Active File -->
+    <div class="card">
+      <div class="card-header">📄 Current File</div>
+      <div class="card-body">
+        <div class="form-group">
+          <label class="form-label">Select file</label>
+          <select name="currentFile" id="currentFile" class="form-input form-select">
+            <option value="">Loading...</option>
+          </select>
+        </div>
+        <div class="form-row mt-1">
+          <div class="form-group">
+            <label class="form-label">Prefix</label>
+            <input type="text" name="prefix" id="prefix" placeholder="datalog" class="form-input">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Folder</label>
+            <input type="text" name="folder" id="folder" placeholder="/" class="form-input">
+            <p class="text-muted" style="font-size:.75rem;margin-top:2px">Leave empty for root, or /logs for subfolder</p>
+          </div>
+        </div>
+        <button type="submit" name="action" value="create" class="btn btn-success">➕ Create</button>
+      </div>
+    </div>
+
+    <!-- Rotation -->
+    <div class="card">
+      <div class="card-header">🔄 Rotation</div>
+      <div class="card-body">
+        <p class="text-muted" style="font-size:.8rem;margin-bottom:.75rem">How to split log files over time</p>
+        <div class="form-row">
+          <div class="form-group">
+            <select name="rotation" id="rotation" class="form-input form-select" onchange="toggleMaxSize()">
+              <option value="0">None</option>
+              <option value="1">Daily</option>
+              <option value="2">Weekly</option>
+              <option value="3">Monthly</option>
+              <option value="4">By Size</option>
+            </select>
+          </div>
+          <div class="form-group" id="maxSizeGroup" style="display:none">
+            <label class="form-label">Max Size (KB)</label>
+            <input type="number" name="maxSizeKB" id="maxSizeKB" min="10" max="10000" class="form-input">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label"><input type="checkbox" name="timestampFilename" id="timestampFilename" value="1"> Timestamp filename</label>
+        </div>
+        <div class="form-group">
+          <label class="form-label"><input type="checkbox" name="includeDeviceId" id="includeDeviceId" value="1"> Device ID in filename</label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log Format -->
+    <div class="card">
+      <div class="card-header">⚙️ Log Format</div>
+      <div class="card-body">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+          <div class="form-group" style="min-width:100px">
+            <label class="form-label">Date</label>
+            <select name="dateFormat" id="dfDate" class="form-input form-select" onchange="updatePreview()">
+              <option value="0">Off</option>
+              <option value="1">DD/MM/YYYY</option>
+              <option value="2">MM/DD/YYYY</option>
+              <option value="3">YYYY-MM-DD</option>
+              <option value="4">DD.MM.YYYY</option>
+            </select>
+          </div>
+          <div class="form-group" style="min-width:90px">
+            <label class="form-label">Start</label>
+            <select name="timeFormat" id="dfTime" class="form-input form-select" onchange="updatePreview()">
+              <option value="0">HH:MM:SS</option>
+              <option value="1">HH:MM</option>
+              <option value="2">12h AM/PM</option>
+            </select>
+          </div>
+          <div class="form-group" style="min-width:80px">
+            <label class="form-label">End</label>
+            <select name="endFormat" id="dfEnd" class="form-input form-select" onchange="updatePreview()">
+              <option value="0">Time</option>
+              <option value="1">Duration</option>
+              <option value="2">Off</option>
+            </select>
+          </div>
+          <div class="form-group" style="min-width:80px">
+            <label class="form-label">Boot#</label>
+            <select name="includeBootCount" id="dfBoot" class="form-input form-select" onchange="updatePreview()">
+              <option value="1">On</option>
+              <option value="0">Off</option>
+            </select>
+          </div>
+          <div class="form-group" style="min-width:80px">
+            <label class="form-label">Volume</label>
+            <select name="volumeFormat" id="dfVol" class="form-input form-select" onchange="updatePreview()">
+              <option value="0">L:0,00</option>
+              <option value="1">L:0.00</option>
+              <option value="2">0.00</option>
+              <option value="3">Off</option>
+            </select>
+          </div>
+          <div class="form-group" style="min-width:80px">
+            <label class="form-label">FF/PF</label>
+            <select name="includeExtraPresses" id="dfExtra" class="form-input form-select" onchange="updatePreview()">
+              <option value="1">On</option>
+              <option value="0">Off</option>
+            </select>
+          </div>
+        </div>
+        <div class="mt-1">
+          <label class="form-label">Preview:</label>
+          <div id="logPreview" style="font-family:monospace;font-size:.85rem;padding:10px 12px;border-radius:var(--radius-sm);background:var(--bg);border:1px solid var(--border);overflow-x:auto;white-space:nowrap"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Post-Correction -->
+    <div class="card">
+      <div class="card-header">🔄 Post-Correction</div>
+      <div class="card-body">
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" name="postCorrectionEnabled" id="postCorrectionEnabled" value="1"
+              onchange="document.getElementById('pcFields').style.display=this.checked?'block':'none'">
+            Enable Post-Correction
+          </label>
+        </div>
+        <div id="pcFields" style="display:none">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">PF → FF Threshold (L)</label>
+              <input type="number" step="0.1" name="pfToFfThreshold" id="pfToFfThreshold" min="0.1" max="20" class="form-input">
+              <p class="form-hint">PF_BTN with volume ≥ this → corrected to FF_BTN</p>
+            </div>
+            <div class="form-group">
+              <label class="form-label">FF → PF Threshold (L)</label>
+              <input type="number" step="0.1" name="ffToPfThreshold" id="ffToPfThreshold" min="0.1" max="20" class="form-input">
+              <p class="form-hint">FF_BTN with volume ≤ this → corrected to PF_BTN</p>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Button Hold Threshold (ms)</label>
+            <input type="number" step="50" name="manualPressThresholdMs" id="manualPressThresholdMs" min="0" max="5000" class="form-input">
+            <p class="form-hint">Held longer than this → correction skipped. 0 = disabled.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-block">💾 Save</button>
+  </form>
+</main>
+
+<!-- ═══ PAGE: SETTINGS-THEME ═══ -->
+<main class="main-content page" id="page-settings-theme">
+<div class="page-header">
+    <h1>🎨 Theme</h1>
+    <div class="breadcrumb"><a href='#settings' onclick="navTo('settings');return false">Settings</a> / Theme</div>
+  </div>
+
+  <form action="/save_theme" method="POST">
+    <!-- Mode -->
+    <div class="card">
+      <div class="card-header">🌓 Mode</div>
+      <div class="card-body">
+        <div class="form-group">
+          <select name="themeMode" id="themeMode" class="form-input form-select">
+            <option value="0">☀️ Light</option>
+            <option value="1">🌙 Dark</option>
+            <option value="2">🔄 Auto</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" name="showIcons" id="showIcons" value="1"> Show icons
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Colors -->
+    <div class="card">
+      <div class="card-header">🎨 Colors</div>
+      <div class="card-body">
+        <div class="color-grid">
+          <div class="form-group"><label class="form-label">Primary</label><input type="color" name="primaryColor"   id="primaryColor"   class="form-input"></div>
+          <div class="form-group"><label class="form-label">Secondary</label><input type="color" name="secondaryColor" id="secondaryColor" class="form-input"></div>
+          <div class="form-group"><label class="form-label">Background</label><input type="color" name="bgColor"       id="bgColor"       class="form-input"></div>
+          <div class="form-group"><label class="form-label">Text</label><input type="color" name="textColor"     id="textColor"     class="form-input"></div>
+        </div>
+        <h4 class="mt-2">Chart</h4>
+        <div class="color-grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="form-group"><label class="form-label">Full Flush</label><input type="color" name="ffColor"    id="ffColor"    class="form-input"></div>
+          <div class="form-group"><label class="form-label">Part Flush</label><input type="color" name="pfColor"    id="pfColor"    class="form-input"></div>
+          <div class="form-group"><label class="form-label">Other</label><input type="color" name="otherColor" id="otherColor" class="form-input"></div>
+        </div>
+        <h4 class="mt-2">Storage Bar</h4>
+        <div class="color-grid">
+          <div class="form-group"><label class="form-label">Normal</label><input type="color" name="storageBarColor"    id="storageBarColor"    class="form-input"></div>
+          <div class="form-group"><label class="form-label">70%+</label><input type="color" name="storageBar70Color"  id="storageBar70Color"  class="form-input"></div>
+          <div class="form-group"><label class="form-label">90%+</label><input type="color" name="storageBar90Color"  id="storageBar90Color"  class="form-input"></div>
+          <div class="form-group"><label class="form-label">Border</label><input type="color" name="storageBarBorder" id="storageBarBorder" class="form-input"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Images -->
+    <div class="card">
+      <div class="card-header">🖼️ Images</div>
+      <div class="card-body">
+        <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem">Supported: PNG, JPG, GIF, SVG, ICO. Path: /file.png</p>
+        <div class="form-group"><label class="form-label">Logo Path</label><input type="text" name="logoSource" id="logoSource" placeholder="/logo.png" class="form-input"></div>
+        <div class="form-group"><label class="form-label">Favicon</label><input type="text" name="faviconPath" id="faviconPath" placeholder="/favicon.ico" class="form-input"></div>
+        <div class="form-group"><label class="form-label">Board Diagram</label><input type="text" name="boardDiagramPath" id="boardDiagramPath" placeholder="/board.png" class="form-input"></div>
+      </div>
+    </div>
+
+    <!-- Chart.js -->
+    <div class="card">
+      <div class="card-header">📈 Chart Source</div>
+      <div class="card-body">
+        <div class="form-group">
+          <label class="form-label">Chart.js Library</label>
+          <select name="chartSource" id="chartSource" class="form-input form-select" onchange="toggleChartPath()">
+            <option value="0">📁 Local File</option>
+            <option value="1">🌐 CDN (Online)</option>
+          </select>
+          <p class="form-hint">Local: requires /chart.min.js in LittleFS. CDN: needs internet.</p>
+        </div>
+        <div id="chartLocalPath" style="display:none">
+          <div class="form-group">
+            <label class="form-label">Local Path</label>
+            <input type="text" name="chartLocalPath" id="chartLocalPathInput" placeholder="/chart.min.js" class="form-input">
+          </div>
+        </div>
+        <div class="form-group mt-1">
+          <label class="form-label">Dashboard Column Labels</label>
+          <select name="chartLabelFormat" id="chartLabelFormat" class="form-input form-select">
+            <option value="0">📅 Date + Time</option>
+            <option value="1">🔢 Boot Count (#1234)</option>
+            <option value="2">📅🔢 Both</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-block">💾 Save</button>
+  </form>
+</main>
+
+<!-- ═══ PAGE: SETTINGS-NETWORK ═══ -->
+<main class="main-content page" id="page-settings-network">
+<div class="page-header">
+    <h1>🌐 Network</h1>
+    <div class="breadcrumb"><a href='#settings' onclick="navTo('settings');return false">Settings</a> / Network</div>
+  </div>
+
+  <!-- Status -->
   <div class="card"><div class="card-body">
     <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
-      <span><strong>Status:</strong> <span id="net-status">-</span></span>
-      <span><strong>IP:</strong> <span id="net-ip">-</span></span>
+      <span><strong>Status:</strong> <span id="wifiStatus">–</span></span>
+      <span><strong>IP:</strong> <span id="wifiIP">–</span></span>
     </div>
   </div></div>
-  <form onsubmit="settingsSave(event,'/save_network',this,true)">
-    <div class="card"><div class="card-header">📡 WiFi Mode</div><div class="card-body">
-      <select name="wifiMode" id="net-mode" class="form-input form-select" onchange="netToggleMode()">
-        <option value="0">📶 AP Mode</option>
-        <option value="1">🔗 Client Mode</option>
-      </select>
-    </div></div>
 
-    <div id="net-apSection">
-      <div class="card"><div class="card-header">📶 AP Mode</div><div class="card-body">
-        <div class="form-group"><label class="form-label">SSID</label><input type="text" name="apSSID" id="net-apSSID" placeholder="WaterLogger" class="form-input"></div>
-        <div class="form-group"><label class="form-label">Password</label>
-          <div style="display:flex;gap:8px">
-            <input type="password" name="apPassword" id="net-apPass" class="form-input" style="flex:1">
-            <button type="button" class="btn btn-secondary" onclick="togglePass('net-apPass')">👁️</button>
-          </div>
+  <form action="/save_network" method="POST">
+    <!-- WiFi Mode -->
+    <div class="card">
+      <div class="card-header">📡 WiFi Mode</div>
+      <div class="card-body">
+        <div class="form-group">
+          <select name="wifiMode" id="wifiMode" class="form-input form-select" onchange="toggleMode()">
+            <option value="0">📶 AP Mode</option>
+            <option value="1">🔗 Client Mode</option>
+          </select>
         </div>
-      </div></div>
-      <div class="card"><div class="card-header">🔧 Network Properties</div><div class="card-body">
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">IP Address</label><input type="text" name="apIP" id="net-apIP" class="form-input"></div>
-          <div class="form-group"><label class="form-label">Gateway</label><input type="text" name="apGateway" id="net-apGW" class="form-input"></div>
-          <div class="form-group"><label class="form-label">Subnet Mask</label><input type="text" name="apSubnet" id="net-apSN" class="form-input"></div>
-        </div>
-      </div></div>
+      </div>
     </div>
 
-    <div id="net-clientSection" style="display:none">
-      <div class="card"><div class="card-header">🔗 Client Mode</div><div class="card-body">
-        <div class="form-group"><label class="form-label">SSID</label>
-          <div style="display:flex;gap:8px">
-            <input type="text" name="clientSSID" id="net-cSSID" class="form-input" style="flex:1">
-            <button type="button" class="btn btn-secondary" onclick="netScanWifi()">🔍</button>
+    <!-- AP Settings -->
+    <div id="apSection">
+      <div class="card">
+        <div class="card-header">📶 AP Mode</div>
+        <div class="card-body">
+          <div class="form-group"><label class="form-label">SSID</label>
+            <input type="text" name="apSSID" id="apSSID" placeholder="WaterLogger" class="form-input"></div>
+          <div class="form-group"><label class="form-label">Password</label>
+            <div style="display:flex;gap:8px">
+              <input type="password" name="apPassword" id="apPass" class="form-input" style="flex:1">
+              <button type="button" class="btn btn-secondary" onclick="togglePass('apPass')">👁️</button>
+            </div>
           </div>
         </div>
-        <div id="net-wifiList" style="display:none;margin-bottom:1rem;max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px"></div>
-        <div class="form-group"><label class="form-label">Password</label>
-          <div style="display:flex;gap:8px">
-            <input type="password" name="clientPassword" id="net-cPass" class="form-input" style="flex:1">
-            <button type="button" class="btn btn-secondary" onclick="togglePass('net-cPass')">👁️</button>
+      </div>
+      <div class="card">
+        <div class="card-header">🔧 AP Network Properties</div>
+        <div class="card-body">
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">IP Address</label><input type="text" name="apIP"      id="apIP"      class="form-input"></div>
+            <div class="form-group"><label class="form-label">Gateway</label>   <input type="text" name="apGateway" id="apGateway" class="form-input"></div>
+            <div class="form-group"><label class="form-label">Subnet Mask</label><input type="text" name="apSubnet" id="apSubnet"  class="form-input"></div>
           </div>
         </div>
-      </div></div>
-      <div class="card"><div class="card-header">🔧 Network Properties</div><div class="card-body">
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">IP Address</label><input type="text" name="staticIP" id="net-ip2" class="form-input" disabled style="opacity:.5"></div>
-          <div class="form-group"><label class="form-label">Gateway</label><input type="text" name="gateway" id="net-gw" class="form-input" disabled style="opacity:.5"></div>
-          <div class="form-group"><label class="form-label">Subnet Mask</label><input type="text" name="subnet" id="net-sn" class="form-input" disabled style="opacity:.5"></div>
-          <div class="form-group"><label class="form-label">DNS Server</label><input type="text" name="dns" id="net-dns" class="form-input" disabled style="opacity:.5"></div>
+      </div>
+    </div>
+
+    <!-- Client Settings -->
+    <div id="clientSection" style="display:none">
+      <div class="card">
+        <div class="card-header">🔗 Client Mode</div>
+        <div class="card-body">
+          <div class="form-group"><label class="form-label">SSID</label>
+            <div style="display:flex;gap:8px">
+              <input type="text" name="clientSSID" id="clientSSID" class="form-input" style="flex:1">
+              <button type="button" class="btn btn-secondary" onclick="scanWifi()">🔍</button>
+            </div>
+          </div>
+          <div id="wifiList" style="display:none;margin-bottom:1rem;max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px"></div>
+          <div class="form-group"><label class="form-label">Password</label>
+            <div style="display:flex;gap:8px">
+              <input type="password" name="clientPassword" id="clientPass" class="form-input" style="flex:1">
+              <button type="button" class="btn btn-secondary" onclick="togglePass('clientPass')">👁️</button>
+            </div>
+          </div>
         </div>
-        <div class="form-group mt-1"><label class="form-label">
-          <input type="checkbox" id="net-staticCheck" name="useStaticIP" value="1" onchange="netToggleStatic()"> Use Static IP (enable editing)
-        </label></div>
-      </div></div>
+      </div>
+      <div class="card">
+        <div class="card-header">🔧 Client Network Properties</div>
+        <div class="card-body">
+          <div class="form-row" id="staticFields">
+            <div class="form-group"><label class="form-label">IP Address</label><input type="text" name="staticIP" id="fldIP"  class="form-input" disabled></div>
+            <div class="form-group"><label class="form-label">Gateway</label>    <input type="text" name="gateway"  id="fldGW"  class="form-input" disabled></div>
+            <div class="form-group"><label class="form-label">Subnet Mask</label><input type="text" name="subnet"   id="fldSN"  class="form-input" disabled></div>
+            <div class="form-group"><label class="form-label">DNS Server</label> <input type="text" name="dns"      id="fldDNS" class="form-input" disabled></div>
+          </div>
+          <div class="form-group mt-1">
+            <label class="form-label">
+              <input type="checkbox" name="useStaticIP" id="staticCheck" value="1" onchange="toggleStatic()"> Use Static IP
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
 
     <button type="submit" class="btn btn-primary btn-block">💾 Save &amp; Restart</button>
   </form>
-</div>
-
-<div id="page-settings_time" class="page">
-  <div class="page-header">
-    <h1>🕐 Time Sync</h1>
-    <div class="breadcrumb"><a href="#settings">Settings</a> / Time Sync</div>
-  </div>
-  <div id="time-msg"></div>
-
-  <div class="card"><div class="card-header">📟 RTC Status</div><div class="card-body">
-    <div id="time-rtcStatus"></div>
-    <div class="text-center" style="font-size:2.5rem;font-family:monospace;font-weight:bold;margin:1rem 0" id="time-rtcTime">--:--:--</div>
-    <div id="time-rtcDetail" class="text-muted text-center" style="font-size:.8rem"></div>
-  </div></div>
-
-  <div class="card card-accent" style="border-top-color:#27ae60"><div class="card-header">⏰ Set Time</div><div class="card-body">
-    <form onsubmit="timeSetManual(event)">
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">Date</label><input type="date" id="time-date" required class="form-input"></div>
-        <div class="form-group"><label class="form-label">Time</label><input type="time" id="time-time" required class="form-input"></div>
-      </div>
-      <button type="submit" class="btn btn-success btn-block">⏰ Set Time</button>
-    </form>
-  </div></div>
-
-  <div class="card"><div class="card-header">🌐 NTP Sync</div><div class="card-body">
-    <div id="time-ntpStatus"></div>
-    <form onsubmit="timeSyncNTP(event)" style="margin-bottom:1rem"><button type="submit" class="btn btn-primary">🔄 NTP Sync</button></form>
-    <form onsubmit="settingsSave(event,'/save_time',this)">
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">NTP Server</label><input type="text" name="ntpServer" id="time-ntp" class="form-input"></div>
-        <div class="form-group"><label class="form-label">Timezone (UTC+)</label><input type="number" name="timezone" id="time-tz" min="-12" max="14" class="form-input"></div>
-      </div>
-      <button type="submit" class="btn btn-secondary">💾 Save</button>
-    </form>
-  </div></div>
-
-  <div class="card"><div class="card-header">⚙️ RTC &amp; System Options</div><div class="card-body">
-    <form onsubmit="timeRtcProtect(event)" style="margin-bottom:1rem">
-      <div class="form-group"><label class="form-label">
-        <input type="checkbox" id="time-rtcProt" name="protect" value="1" onchange="this.form.requestSubmit()"> RTC Write Protected
-      </label>
-      <p class="form-hint">When enabled, prevents accidental time changes</p></div>
-    </form>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;padding:.75rem;background:var(--bg);border-radius:8px">
-      <div><strong>Log Buffer</strong><p class="form-hint" style="margin:0">Write pending logs to storage</p></div>
-      <button class="btn btn-secondary" onclick="timeFlushLogs()">💾 Flush</button>
-    </div>
-    <div style="padding:.75rem;background:var(--bg);border-radius:8px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
-        <div><strong>Boot Count:</strong> <span id="time-boot" style="font-size:1.25rem;color:var(--primary)">-</span></div>
-        <div><strong>Backup:</strong> <span id="time-bootBak" style="font-size:1.25rem;color:var(--secondary)">-</span></div>
-      </div>
-      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-        <button class="btn btn-secondary" onclick="timeBackupBoot()">📤 Backup Now</button>
-        <button class="btn btn-warning" onclick="if(confirm('Restore boot count from backup?'))timeRestoreBoot()">📥 Restore</button>
-      </div>
-      <p class="form-hint" style="margin-top:.5rem">Backup saves to RTC RAM + flash file</p>
-    </div>
-  </div></div>
-</div>
-
-<div id="page-settings_datalog" class="page">
-  <div class="page-header">
-    <h1>📝 Data Log</h1>
-    <div class="breadcrumb"><a href="#settings">Settings</a> / Data Log</div>
-  </div>
-  <div id="dl-msg"></div>
-  <form onsubmit="settingsSave(event,'/save_datalog',this)">
-    <div class="card"><div class="card-header">📄 Current File</div><div class="card-body">
-      <div class="form-group"><label class="form-label">Select file</label><select name="currentFile" id="dl-curFile" class="form-input form-select"></select></div>
-      <div class="form-row mt-1">
-        <div class="form-group"><label class="form-label">Prefix</label><input type="text" name="prefix" id="dl-prefix" placeholder="datalog" class="form-input"></div>
-        <div class="form-group"><label class="form-label">Folder</label><input type="text" name="folder" id="dl-folder" placeholder="/" class="form-input">
-          <p class="text-muted" style="font-size:.75rem;margin-top:2px">Leave empty for root, or /logs for subfolder</p></div>
-      </div>
-      <button type="submit" name="action" value="create" class="btn btn-success">➕ Create</button>
-    </div></div>
-
-    <div class="card"><div class="card-header">🔄 Rotation</div><div class="card-body">
-      <p class="text-muted" style="font-size:.8rem;margin-bottom:.75rem">How to split log files over time</p>
-      <div class="form-row">
-        <div class="form-group">
-          <select name="rotation" id="dl-rotation" class="form-input form-select" onchange="document.getElementById('dl-maxSizeGroup').style.display=this.value==='4'?'block':'none'">
-            <option value="0">None</option>
-            <option value="1">Daily</option>
-            <option value="2">Weekly</option>
-            <option value="3">Monthly</option>
-            <option value="4">By Size</option>
-          </select>
-        </div>
-        <div class="form-group" id="dl-maxSizeGroup" style="display:none"><label class="form-label">Max Size (KB)</label><input type="number" name="maxSizeKB" id="dl-maxSize" min="10" max="10000" class="form-input"></div>
-      </div>
-      <div class="form-group"><label class="form-label"><input type="checkbox" id="dl-tsFile" name="timestampFilename" value="1"> Timestamp filename</label></div>
-      <div class="form-group"><label class="form-label"><input type="checkbox" id="dl-devId" name="includeDeviceId" value="1"> Device ID in filename</label></div>
-    </div></div>
-
-    <div class="card"><div class="card-header">⚙️ Log Format</div><div class="card-body">
-      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
-        <div class="form-group" style="min-width:100px"><label class="form-label">Date</label>
-          <select name="dateFormat" id="dl-date" class="form-input form-select" onchange="dlUpdatePreview()">
-            <option value="0">Off</option><option value="1">DD/MM/YYYY</option><option value="2">MM/DD/YYYY</option>
-            <option value="3">YYYY-MM-DD</option><option value="4">DD.MM.YYYY</option>
-          </select>
-        </div>
-        <div class="form-group" style="min-width:90px"><label class="form-label">Start</label>
-          <select name="timeFormat" id="dl-time" class="form-input form-select" onchange="dlUpdatePreview()">
-            <option value="0">HH:MM:SS</option><option value="1">HH:MM</option><option value="2">12h AM/PM</option>
-          </select>
-        </div>
-        <div class="form-group" style="min-width:80px"><label class="form-label">End</label>
-          <select name="endFormat" id="dl-end" class="form-input form-select" onchange="dlUpdatePreview()">
-            <option value="0">Time</option><option value="1">Duration</option><option value="2">Off</option>
-          </select>
-        </div>
-        <div class="form-group" style="min-width:80px"><label class="form-label">Boot#</label>
-          <select name="includeBootCount" id="dl-boot" class="form-input form-select" onchange="dlUpdatePreview()">
-            <option value="1">On</option><option value="0">Off</option>
-          </select>
-        </div>
-        <div class="form-group" style="min-width:60px"><label class="form-label">Trigger</label>
-          <div style="padding:10px 12px;border-radius:var(--radius-sm);background:var(--border);color:var(--text-muted);text-align:center">On</div>
-        </div>
-        <div class="form-group" style="min-width:80px"><label class="form-label">Volume</label>
-          <select name="volumeFormat" id="dl-vol" class="form-input form-select" onchange="dlUpdatePreview()">
-            <option value="0">L:0,00</option><option value="1">L:0.00</option><option value="2">0.00</option><option value="3">Off</option>
-          </select>
-        </div>
-        <div class="form-group" style="min-width:80px"><label class="form-label">FF/PF</label>
-          <select name="includeExtraPresses" id="dl-extra" class="form-input form-select" onchange="dlUpdatePreview()">
-            <option value="1">On</option><option value="0">Off</option>
-          </select>
-        </div>
-      </div>
-      <div class="mt-1"><label class="form-label">Preview:</label>
-        <div id="dl-preview" style="font-family:monospace;font-size:.85rem;padding:10px 12px;border-radius:var(--radius-sm);background:var(--bg);color:var(--text);border:1px solid var(--border);overflow-x:auto;white-space:nowrap"></div>
-      </div>
-    </div></div>
-
-    <div class="card"><div class="card-header">🔄 Post-Correction</div><div class="card-body">
-      <div class="form-group"><label class="form-label">
-        <input type="checkbox" id="dl-pcEnabled" name="postCorrectionEnabled" value="1" onchange="document.getElementById('dl-pcFields').style.display=this.checked?'block':'none'"> Enable Post-Correction
-      </label></div>
-      <div id="dl-pcFields" style="display:none">
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">PF → FF Threshold (L)</label><input type="number" step="0.1" name="pfToFfThreshold" id="dl-pfff" min="0.1" max="20" class="form-input"><p class="form-hint">PF_BTN with volume ≥ this → corrected to FF_BTN</p></div>
-          <div class="form-group"><label class="form-label">FF → PF Threshold (L)</label><input type="number" step="0.1" name="ffToPfThreshold" id="dl-ffpf" min="0.1" max="20" class="form-input"><p class="form-hint">FF_BTN with volume ≤ this → corrected to PF_BTN</p></div>
-        </div>
-        <div class="form-group"><label class="form-label">Button Hold Threshold (ms)</label><input type="number" step="50" name="manualPressThresholdMs" id="dl-hold" min="0" max="5000" class="form-input"><p class="form-hint">If button held longer, correction is skipped. 0 = disabled.</p></div>
-        <p class="form-hint" style="margin-top:.5rem">Corrects button identification by comparing measured water volume against thresholds. Also checks how long the button was held — an extended press releases more water intentionally, so correction is skipped. Only applies to clean cycles with no extra button presses. Corrections are logged to btn_log.txt.</p>
-      </div>
-    </div></div>
-
-    <div class="card"><div class="card-header">📊 Files</div><div class="card-body" style="padding:0"><div id="dl-files">Loading…</div></div></div>
-
-    <button type="submit" class="btn btn-primary btn-block">💾 Save</button>
-  </form>
-</div>
-
-<div id="page-settings_update" class="page">
-  <div class="page-header">
-    <h1>📤 Firmware Update</h1>
-    <div class="breadcrumb"><a href="#settings">Settings</a> / Update</div>
-  </div>
-  <div class="card"><div class="card-header">🔄 OTA Update</div><div class="card-body">
-    <p class="text-muted" style="margin-bottom:.35rem">Select a compiled firmware <strong>.bin</strong> file to update over the air.</p>
-    <p class="text-muted" style="margin-bottom:1rem;font-size:.85rem">Current firmware: <span id="ota-currentVer">-</span> • Device will restart automatically after successful upload.</p>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <input type="file" id="ota-file" accept=".bin" class="form-input" style="flex:1" onchange="document.getElementById('ota-fileInfo').textContent=this.files.length?('Selected: '+this.files[0].name+' ('+(this.files[0].size/1024).toFixed(1)+' KB)'):'No file selected';">
-      <button class="btn btn-warning" onclick="otaUpload()">📤 Flash</button>
-    </div>
-    <div id="ota-fileInfo" class="text-muted" style="font-size:.82rem;margin-top:.5rem">No file selected</div>
-    <div id="ota-prog" style="display:none;margin-top:1rem">
-      <div style="display:flex;align-items:center;gap:8px">
-        <div class="progress" style="flex:1;height:12px"><div id="ota-bar" class="progress-bar" style="width:0%;background:#f39c12"></div></div>
-        <span id="ota-pct" style="font-size:.8rem;min-width:45px">0%</span>
-      </div>
-    </div>
-    <div id="ota-msg" style="margin-top:.5rem"></div>
-  </div></div>
-  <div class="card"><div class="card-header">⚠️ Safety Notes</div><div class="card-body">
-    <ul style="margin:0;padding-left:1.2rem;font-size:0.9rem">
-      <li>.bin files only</li>
-      <li>Do not disconnect power</li>
-      <li>Device will restart after update</li>
-    </ul>
-  </div></div>
-</div>
-
-<footer class="app-footer">
-  <div class="footer-grid">
-    <span>🔄 Boot: <span id="footer-boot">-</span></span>
-    <span>⚡ <span id="footer-cpu">-</span>MHz</span>
-    <span>💾 <span id="footer-heap">-</span></span>
-  </div>
-  <div class="footer-row">
-    <span id="footer-net">-</span>
-    <span style="text-align:right">IP: <span id="footer-ip">-</span></span>
-  </div>
-  <div class="footer-version">Board: <span id="footer-chip">-</span> – Firmware: <span id="footer-ver">-</span></div>
-</footer>
-
 </main>
 
-<nav class="bottom-nav">
-  <a href="#dashboard" data-page="dashboard" onclick="nav(this)"><span class="icon">📊</span> Home</a>
-  <a href="#files"     data-page="files"     onclick="nav(this)"><span class="icon">📁</span> Files</a>
-  <a href="#live"      data-page="live"      onclick="nav(this)"><span class="icon">📡</span> Live</a>
-  <a href="#settings"  data-page="settings"  onclick="nav(this)"><span class="icon">⚙️</span> Settings</a>
-</nav>
+<!-- ═══ PAGE: SETTINGS-TIME ═══ -->
+<main class="main-content page" id="page-settings-time">
+<div class="page-header">
+    <h1>🕐 Time Sync</h1>
+    <div class="breadcrumb"><a href='#settings' onclick="navTo('settings');return false">Settings</a> / Time Sync</div>
+  </div>
 
-<script src="/web.js"></script>
+  <!-- RTC Status -->
+  <div class="card">
+    <div class="card-header">📟 RTC Status</div>
+    <div class="card-body">
+      <div id="rtcStatus" class="alert alert-warning">Loading...</div>
+      <div class="text-center" style="font-size:2.5rem;font-family:monospace;font-weight:bold;margin:1rem 0" id="rtcTime">--:--:--</div>
+      <p class="text-muted text-center" style="font-size:.8rem" id="rtcMeta"></p>
+    </div>
+  </div>
+
+  <!-- Set Time manually -->
+  <div class="card card-accent" style="border-top-color:#27ae60">
+    <div class="card-header">⏰ Set Time</div>
+    <div class="card-body">
+      <form action="/set_time" method="POST">
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Date</label><input type="date" name="date" required class="form-input"></div>
+          <div class="form-group"><label class="form-label">Time</label><input type="time" name="time" required class="form-input"></div>
+        </div>
+        <button type="submit" class="btn btn-success btn-block">⏰ Set Time</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- NTP -->
+  <div class="card">
+    <div class="card-header">🌐 NTP Sync</div>
+    <div class="card-body">
+      <div id="ntpStatus"></div>
+      <form action="/sync_time" method="POST" style="margin-bottom:1rem" id="ntpForm">
+        <button type="submit" class="btn btn-primary" id="ntpBtn">🔄 NTP Sync</button>
+      </form>
+      <form action="/save_time" method="POST">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">NTP Server</label>
+            <input type="text" name="ntpServer" id="ntpServer" class="form-input" value="pool.ntp.org">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Timezone (UTC+)</label>
+            <input type="number" name="timezone" id="timezone" min="-12" max="14" class="form-input" value="2">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-secondary">💾 Save NTP Settings</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- RTC options + Boot Count -->
+  <div class="card">
+    <div class="card-header">⚙️ RTC &amp; System Options</div>
+    <div class="card-body">
+      <form action="/rtc_protect" method="POST" style="margin-bottom:1rem">
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" name="protect" id="rtcProtect" value="1" onchange="this.form.submit()"> RTC Write Protected
+          </label>
+          <p class="form-hint">Prevents accidental time changes.</p>
+        </div>
+      </form>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;padding:.75rem;background:var(--bg);border-radius:8px">
+        <div><strong>Log Buffer</strong><p class="form-hint" style="margin:0">Write pending logs to storage</p></div>
+        <form action="/flush_logs" method="POST"><button type="submit" class="btn btn-secondary">💾 Flush</button></form>
+      </div>
+
+      <div style="padding:.75rem;background:var(--bg);border-radius:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+          <div>Boot Count: <span style="font-size:1.25rem;color:var(--primary)" id="bootCount">–</span></div>
+          <div>Backup: <span style="font-size:1.25rem;color:var(--secondary)" id="bootBackup">–</span></div>
+        </div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+          <form action="/backup_bootcount"  method="POST"><button type="submit" class="btn btn-secondary">📤 Backup Now</button></form>
+          <form action="/restore_bootcount" method="POST" onsubmit="return confirm('Restore boot count from backup?')">
+            <button type="submit" class="btn btn-warning">📥 Restore</button>
+          </form>
+        </div>
+        <p class="form-hint" style="margin-top:.5rem">Backup saves to RTC RAM + flash file.</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ═══ PAGE: UPDATE ═══ -->
+<main class="main-content page" id="page-update">
+<div class="page-header">
+    <h1>📤 Firmware Update</h1>
+    <div class="breadcrumb"><a href='#settings' onclick="navTo('settings');return false">Settings</a> / Update</div>
+  </div>
+
+  <!-- Status popup -->
+  <div id="popup" class="popup-overlay" style="display:none">
+    <div class="popup-content">
+      <div id="popupIcon" style="font-size:4rem;margin-bottom:1rem"></div>
+      <div id="popupTitle" style="font-size:1.5rem;font-weight:bold;margin-bottom:.5rem"></div>
+      <div id="popupMsg" style="margin-bottom:1rem"></div>
+      <div id="popupProgress" style="display:none">
+        <div style="background:#e0e0e0;border-radius:4px;height:12px;margin-bottom:.5rem;overflow:hidden">
+          <div id="popupBar" style="width:0%;height:100%;background:#3498db;transition:width .3s"></div>
+        </div>
+        <div id="popupCounter"></div>
+      </div>
+      <button id="popupClose" class="btn btn-secondary" onclick="closePopup()" style="display:none">Close</button>
+    </div>
+  </div>
+
+  <!-- Current firmware -->
+  <div class="card">
+    <div class="card-header">📋 Current Firmware</div>
+    <div class="card-body">
+      <div class="form-row">
+        <div><strong>Version</strong><div class="text-primary" id="fwVersion">–</div></div>
+        <div><strong>Device</strong><div id="fwDevice">–</div></div>
+        <div><strong>Heap</strong><div id="fwHeap">–</div></div>
+        <div><strong>Storage</strong><div id="fwStorage">–</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upload new firmware -->
+  <div class="card">
+    <div class="card-header">📤 Upload Firmware (.bin)</div>
+    <div class="card-body">
+      <div class="alert alert-warning">⚠️ Upload the correct .bin file. Wrong firmware will require USB recovery.</div>
+      <form id="otaForm">
+        <div class="form-group">
+          <input type="file" id="fwFile" name="update" accept=".bin" class="form-input" required>
+        </div>
+        <button type="submit" class="btn btn-danger btn-block">🚀 Flash Firmware</button>
+      </form>
+    </div>
+  </div>
+</main>
+
+<!-- Move/Rename popup -->
+<div id="movePopup" class="popup-overlay" style="display:none">
+  <div class="popup-content" style="text-align:left;max-width:400px">
+    <div style="font-size:2.5rem;text-align:center;margin-bottom:.5rem">✂️</div>
+    <div style="font-size:1.2rem;font-weight:bold;text-align:center;margin-bottom:1rem">Move / Rename</div>
+    <div class="form-group"><label class="form-label">New Name</label>
+      <input type="text" id="mvName" class="form-input"></div>
+    <div class="form-group"><label class="form-label">Destination Folder</label>
+      <input type="text" id="mvDest" class="form-input" placeholder="(leave empty = same folder)"></div>
+    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+      <button class="btn btn-secondary" onclick="document.getElementById('movePopup').style.display='none'">Cancel</button>
+      <button class="btn btn-primary" onclick="applyMove()">✂️ Apply</button>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- RESTART POPUP -->
+<div id="restartPopup" class="popup-overlay" style="display:none">
+  <div class="popup-content">
+    <div id="rPopIcon" style="font-size:4rem;margin-bottom:1rem">🔄</div>
+    <div id="rPopTitle" style="font-size:1.5rem;font-weight:bold;margin-bottom:.5rem">Restart Device?</div>
+    <div id="rPopMsg" style="margin-bottom:1rem">Device will restart.</div>
+    <div id="rPopProgress" style="display:none">
+      <div style="background:#e0e0e0;border-radius:4px;height:12px;margin-bottom:.5rem;overflow:hidden">
+        <div id="rPopBar" style="width:0%;height:100%;background:#f39c12;transition:width .3s"></div>
+      </div>
+    </div>
+    <div id="rPopBtns" style="display:flex;gap:1rem;justify-content:center">
+      <button class="btn btn-danger" onclick="doRestart()">✓ Confirm</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('restartPopup').style.display='none'">✗ Cancel</button>
+    </div>
+  </div>
+</div>
+<nav class="bottom-nav" id="bottomNav"></nav>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// SPA ROUTER + SHELL
+// ═══════════════════════════════════════════════════════════
+var STATUS=null,liveIv=null,liveLogsIv=null;
+var PAGES={dashboard:'page-dashboard',live:'page-live',files:'page-files',settings:'page-settings',
+  'settings-device':'page-settings-device','settings-flowmeter':'page-settings-flowmeter',
+  'settings-hardware':'page-settings-hardware','settings-datalog':'page-settings-datalog',
+  'settings-theme':'page-settings-theme','settings-network':'page-settings-network',
+  'settings-time':'page-settings-time',update:'page-update'};
+var NAV=[{h:'dashboard',i:'📊',l:'Dashboard'},{h:'files',i:'📁',l:'Files'},
+  {h:'live',i:'📡',l:'Live'},{h:'settings',i:'⚙️',l:'Settings'},{h:'update',i:'📤',l:'Update'}];
+
+function curHash(){ return (location.hash||'#dashboard').replace('#',''); }
+function navTo(h){ location.hash='#'+h; }
+
+function showPage(h){
+  if(h!=='live'){ clearInterval(liveIv); clearInterval(liveLogsIv); liveIv=null; liveLogsIv=null; }
+  Object.values(PAGES).forEach(function(id){ var el=document.getElementById(id); if(el) el.classList.remove('active'); });
+  var pg=document.getElementById(PAGES[h]||PAGES.dashboard);
+  if(pg){ pg.classList.add('active'); window.scrollTo(0,0); }
+  updateNav(h); onEnter(h);
+}
+function updateNav(h){
+  var root=h.split('-')[0];
+  document.querySelectorAll('.nav-item').forEach(function(el){ el.classList.toggle('active',el.dataset.h===h||el.dataset.h===root); });
+  document.querySelectorAll('.bottom-nav a').forEach(function(el){ el.classList.toggle('active',el.dataset.h===h||el.dataset.h===root); });
+}
+window.addEventListener('hashchange',function(){ showPage(curHash()); });
+
+document.addEventListener('DOMContentLoaded',function(){
+  fetch('/api/status').then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(function(s){ STATUS=s; applyTheme(s); buildShell(s); showPage(curHash()); updateFooter(s); })
+    .catch(function(e){ document.body.innerHTML='<div style="padding:2rem;text-align:center;font-family:system-ui"><h2>&#x26A0;&#xFE0F; Cannot connect</h2><p>'+e.message+'</p><button onclick="location.reload()" style="padding:8px 20px;margin-top:1rem">Retry</button></div>'; });
+});
+
+// ── Theme ──
+function applyTheme(s){
+  var th=s.theme||{},r=document.documentElement;
+  r.classList.remove('theme-light','theme-dark','theme-auto');
+  r.classList.add(th.mode===1?'theme-dark':th.mode===2?'theme-auto':'theme-light');
+  var v={'--primary':th.primaryColor||'#275673','--secondary':th.secondaryColor||'#4a5568',
+    '--ff-color':th.ffColor||'#275673','--pf-color':th.pfColor||'#7eb0d5',
+    '--other-color':th.otherColor||'#a0aec0','--storage-bar':th.storageBarColor||'#27ae60',
+    '--storage-bar-70':th.storageBar70Color||'#f39c12','--storage-bar-90':th.storageBar90Color||'#e74c3c'};
+  for(var k in v) r.style.setProperty(k,v[k]);
+  if(th.faviconPath){ var lnk=document.querySelector("link[rel='icon']")||document.createElement('link'); lnk.rel='icon'; lnk.href=th.faviconPath; document.head.appendChild(lnk); }
+}
+
+// ── Shell ──
+function buildShell(s){
+  var th=s.theme||{},ic=function(t){ return th.showIcons!==false?t+' ':''; },logo=s.device||'Water Logger';
+  var sb='<div class="sidebar-header">';
+  if(th.logoSource) sb+='<img src="'+th.logoSource+'" alt="" onerror="this.style.display=\'none\'" style="max-width:100%;height:auto;margin-bottom:8px">';
+  sb+='<span class="logo">'+logo+'</span></div><nav><div class="nav-section">Main</div>';
+  NAV.slice(0,3).forEach(function(n){ sb+='<a href="#'+n.h+'" class="nav-item" data-h="'+n.h+'"><span class="icon">'+ic(n.i)+'</span><span>'+n.l+'</span></a>'; });
+  sb+='<div class="nav-section">System</div>';
+  NAV.slice(3).forEach(function(n){ sb+='<a href="#'+n.h+'" class="nav-item" data-h="'+n.h+'"><span class="icon">'+ic(n.i)+'</span><span>'+n.l+'</span></a>'; });
+  sb+='</nav>';
+  document.getElementById('sidebar').innerHTML=sb;
+  document.getElementById('appHeader').innerHTML='<div class="logo">'+ic('&#x1F4A7;')+logo+'</div><div class="status"><div class="time" id="hdrTime">'+(s.time||'--:--:--')+'</div><div>'+(s.network||'')+'</div></div>';
+  var bn='';
+  NAV.slice(0,4).forEach(function(n){ bn+='<a href="#'+n.h+'" data-h="'+n.h+'"><span class="icon">'+ic(n.i)+'</span>'+n.l+'</a>'; });
+  document.getElementById('bottomNav').innerHTML=bn;
+  document.title=logo;
+}
+
+// ── Page enter ──
+function onEnter(h){
+  var fn={'dashboard':db_onEnter,'live':live_onEnter,'files':files_onEnter,
+    'settings-device':sd_onEnter,'settings-flowmeter':sfm_onEnter,'settings-hardware':sh_onEnter,
+    'settings-datalog':sdl_onEnter,'settings-theme':sth_onEnter,'settings-network':sn_onEnter,
+    'settings-time':st_onEnter,'update':ota_onEnter}[h];
+  if(fn) fn();
+}
+
+// ── Utils ──
+function fmt(b){ if(!b)return'0 B'; if(b>=1073741824)return(b/1073741824).toFixed(2)+' GB'; if(b>=1048576)return(b/1048576).toFixed(1)+' MB'; if(b>=1024)return(b/1024).toFixed(1)+' KB'; return b+' B'; }
+function fmtBytes(b){return fmt(b);}
+function toast(msg,type){ var t=document.createElement('div'); t.className='alert alert-'+(type||'success'); t.style.cssText='position:fixed;top:1rem;right:1rem;z-index:9999;max-width:360px;box-shadow:0 4px 16px rgba(0,0,0,.2)'; t.innerHTML=msg; document.body.appendChild(t); setTimeout(function(){t.remove();},3500); }
+function msgEl(id,msg,type){ var el=document.getElementById(id); if(!el)return; el.innerHTML='<div class="alert alert-'+(type||'success')+'">'+msg+'</div>'; setTimeout(function(){el.innerHTML='';},4000); }
+function arrToIP(a){ if(!a)return''; if(typeof a==='string')return a; if(Array.isArray(a))return a.join('.'); return''; }
+function getCfg(cb){ fetch('/export_settings').then(function(r){return r.json();}).then(cb).catch(function(){}); }
+function storageBar(used,total,pct){ var cls=pct>=90?'progress-bar-danger':pct>=70?'progress-bar-warning':'progress-bar-success'; return '<div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:6px"><span>'+fmt(used)+' / '+fmt(total)+'</span><span>'+pct+'%</span></div><div class="progress"><div class="progress-bar '+cls+'" style="width:'+pct+'%"></div></div>'; }
+function hexToRgba(hex,a){ try{var r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return 'rgba('+r+','+g+','+b+','+a+')';}catch(e){return 'rgba(0,0,0,'+a+')'} }
+function postForm(e,pfx,url,restart){
+  if(e) e.preventDefault();
+  var fd=new FormData(e.target),xhr=new XMLHttpRequest();
+  xhr.open('POST',url);
+  xhr.onload=function(){
+    if(restart){showRestartCountdown();return;}
+    try{var r=JSON.parse(xhr.responseText);msgEl(pfx+'_msg',r.ok?'&#x2705; Saved':'&#x274C; '+(r.error||'Error'),r.ok?'success':'error');}
+    catch(x){msgEl(pfx+'_msg','&#x2705; Done','success');}
+  };
+  xhr.onerror=function(){msgEl(pfx+'_msg','&#x274C; Request failed','error');};
+  xhr.send(fd);
+}
+function showRestartPopup(){document.getElementById('restartPopup').style.display='flex';}
+function doRestart(){
+  document.getElementById('rPopBtns').style.display='none';
+  document.getElementById('rPopProgress').style.display='block';
+  document.getElementById('rPopIcon').textContent='&#x23F3;';
+  document.getElementById('rPopTitle').textContent='Restarting...';
+  fetch('/restart').catch(function(){});
+  showRestartCountdown();
+}
+function showRestartCountdown(){
+  var sec=5;
+  document.getElementById('restartPopup').style.display='flex';
+  document.getElementById('rPopBtns').style.display='none';
+  document.getElementById('rPopProgress').style.display='block';
+  var tick=function(){
+    document.getElementById('rPopMsg').innerHTML='Redirecting in <strong>'+sec+'</strong>s...';
+    document.getElementById('rPopBar').style.width=((5-sec)*20)+'%';
+    if(sec--<=0){location.hash='#dashboard';location.reload();}else setTimeout(tick,1000);
+  };
+  tick();
+}
+
+// ═══════════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════════
+var dbChart=null,dbRaw='',dbData=[];
+function db_onEnter(){
+  if(STATUS){var th=STATUS.theme||{};
+    document.getElementById('chartLegend').innerHTML=
+      '<span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+(th.ffColor||'#275673')+';margin-right:4px"></span>Full Flush</span>'+
+      '<span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+(th.pfColor||'#7eb0d5')+';margin-right:4px"></span>Part Flush</span>'+
+      '<span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+(th.otherColor||'#a0aec0')+';margin-right:4px"></span>Other</span>';
+  }
+  var src=(STATUS&&STATUS.theme&&STATUS.theme.chartSource===0&&STATUS.theme.chartLocalPath)?STATUS.theme.chartLocalPath:'https://cdn.jsdelivr.net/npm/chart.js';
+  if(!window.Chart){var s=document.createElement('script');s.src=src;s.onload=loadData;document.head.appendChild(s);}else loadData();
+}
+function loadData(){
+  fetch('/api/filelist?filter=log').then(function(r){return r.json();}).then(function(d){
+    var sel=document.getElementById('fileSelect');sel.innerHTML='';
+    var files=(d.files||[]).filter(function(f){return !f.isDir;});
+    if(!files.length){sel.innerHTML='<option value="">No log files</option>';return;}
+    files.forEach(function(f){var o=document.createElement('option');o.value=f.path;o.textContent=f.path+' ('+fmt(f.size)+')';if(f.path===d.currentFile)o.selected=true;sel.appendChild(o);});
+    fetchLogFile();
+  }).catch(function(){});
+}
+function fetchLogFile(){
+  var file=document.getElementById('fileSelect').value;if(!file)return;
+  document.getElementById('dbError').style.display='none';
+  fetch('/download?file='+encodeURIComponent(file))
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})
+    .then(function(data){dbRaw=data;applyFilters();})
+    .catch(function(e){document.getElementById('dbError').textContent='Error: '+e.message;document.getElementById('dbError').style.display='block';});
+}
+// aliases used in the dashboard page HTML
+function db_load(){fetchLogFile();}
+function db_apply(){applyFilters();}
+function applyFilters(){if(!dbRaw){fetchLogFile();return;}processData(dbRaw);}
+function processData(data){
+  var lines=data.trim().split('\n'),filtered=[],tVol=0,tFF=0,tPF=0;
+  var sv=document.getElementById('startDate').value,ev2=document.getElementById('endDate').value;
+  var ft=document.getElementById('eventFilter').value,fp=document.getElementById('pressFilter').value,excZ=document.getElementById('excludeZero').checked;
+  lines.forEach(function(line){
+    line=line.trim();if(!line)return;
+    var p=line.split('|');if(p.length<2)return;
+    var dateStr='',i=0,vol=0,reason='',ff=0,pf=0;
+    if(p[0].match(/\d{2}[\/\.\-]\d{2}[\/\.\-]\d{4}|\d{4}\-\d{2}\-\d{2}/)){dateStr=p[0];i=1;}
+    for(var j=i;j<p.length;j++){
+      if(p[j].match(/^(FF|PF|BTN|IDLE|TIMER|PWR|GPIO)/i))reason=p[j];
+      if(p[j].startsWith('L:')){var vs=p[j].substring(2).replace(',','.');vol=parseFloat(vs)||0;}
+      if(p[j].match(/^FF\d+$/))ff=parseInt(p[j].substring(2))||0;
+      if(p[j].match(/^PF\d+$/))pf=parseInt(p[j].substring(2))||0;
+    }
+    var ed='';
+    if(dateStr){var m;if((m=dateStr.match(/(\d{2})[\/\.](\d{2})[\/\.](\d{4})/)))ed=m[3]+'-'+m[2]+'-'+m[1];else if((m=dateStr.match(/(\d{4})\-(\d{2})\-(\d{2})/)))ed=m[0];}
+    if(sv&&ed&&ed<sv)return;if(ev2&&ed&&ed>ev2)return;
+    if(ft==='FF'&&reason.indexOf('FF')<0)return;if(ft==='PF'&&reason.indexOf('PF')<0)return;
+    if(fp==='EXTRA'&&ff===0&&pf===0)return;if(fp==='NONE'&&(ff>0||pf>0))return;
+    if(excZ&&vol===0)return;
+    tVol+=vol;tFF+=ff;tPF+=pf;
+    filtered.push({date:dateStr||'N/A',vol:vol,reason:reason,ff:ff,pf:pf});
+  });
+  dbData=filtered;
+  document.getElementById('dbTotalVol').textContent=tVol.toFixed(2)+' L';
+  document.getElementById('dbCount').textContent=filtered.length;
+  document.getElementById('dbFF').textContent=tFF;
+  document.getElementById('dbPF').textContent=tPF;
+  renderChart(filtered);
+}
+function renderChart(data){
+  var ctx=document.getElementById('dbChart').getContext('2d');
+  if(dbChart){dbChart.destroy();dbChart=null;}
+  if(!window.Chart)return;
+  var th=(STATUS&&STATUS.theme)||{};
+  var ff=th.ffColor||'#275673',pf=th.pfColor||'#7eb0d5',ot=th.otherColor||'#a0aec0';
+  var clr=data.map(function(d){return d.reason.indexOf('FF')>=0?ff:d.reason.indexOf('PF')>=0?pf:ot;});
+  dbChart=new Chart(ctx,{type:'bar',data:{labels:data.map(function(d){return d.date;}),datasets:[{label:'Liters',data:data.map(function(d){return d.vol;}),backgroundColor:clr,borderWidth:0}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{tooltip:{callbacks:{afterLabel:function(c){var d=data[c.dataIndex];return['Trigger: '+d.reason,'Extra FF: '+d.ff,'Extra PF: '+d.pf];}}}},
+    scales:{y:{beginAtZero:true,title:{display:true,text:'Liters'}}}}});
+}
+function exportCSV(){
+  if(!dbData.length){alert('No data');return;}
+  var csv='Date,Volume (L),Trigger,Extra FF,Extra PF\n';
+  dbData.forEach(function(d){csv+=d.date+','+d.vol.toFixed(2)+','+d.reason+','+d.ff+','+d.pf+'\n';});
+  var blob=new Blob([csv],{type:'text/csv'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=(STATUS?STATUS.deviceId:'device')+'_export.csv';a.click();URL.revokeObjectURL(url);
+}
+
+// ═══════════════════════════════════════════════════════════
+// LIVE
+// ═══════════════════════════════════════════════════════════
+var stClr={IDLE:'#3498db',WAIT_FLOW:'#f39c12',MONITORING:'#27ae60',DONE:'#e74c3c'};
+function live_onEnter(){upd();updLogs();liveIv=setInterval(upd,500);liveLogsIv=setInterval(updLogs,3000);}
+function upd(){
+  fetch('/api/live').then(function(r){return r.json();}).then(function(d){
+    document.getElementById('time').textContent=d.time;
+    document.getElementById('trigger').textContent=d.trigger;
+    document.getElementById('cycleTime').textContent=d.cycleTime;
+    document.getElementById('pulses').textContent=d.pulses;
+    document.getElementById('liters').textContent=d.liters.toFixed(2);
+    document.getElementById('ffCount').textContent=d.ffCount;
+    document.getElementById('pfCount').textContent=d.pfCount;
+    document.getElementById('boot').textContent=d.boot;
+    document.getElementById('uptime').textContent=d.uptime;
+    document.getElementById('heap').textContent=fmt(d.heap);
+    document.getElementById('heapTotal').textContent=fmt(d.heapTotal);
+    if(d.fsTotal)document.getElementById('storage').textContent=fmt(d.fsUsed)+'/'+fmt(d.fsTotal);
+    var st=document.getElementById('stEl');if(st){st.textContent=d.state;st.style.background=stClr[d.state]||'#95a5a6';st.style.color='#fff';}
+    var rm=document.getElementById('stateRemaining');if(rm)rm.textContent=d.stateRemaining>=0?d.stateRemaining+'s':'--';
+    var ff=STATUS&&STATUS.theme?STATUS.theme.ffColor:'#e74c3c',pf=STATUS&&STATUS.theme?STATUS.theme.pfColor:'#3498db';
+    function btn(id,val,clr){var e=document.getElementById(id);if(!e)return;e.textContent=val?'Pressed':'Released';e.style.background=val?clr:'#95a5a6';}
+    btn('ff',d.ff,ff);btn('pf',d.pf,pf);btn('wifi',d.wifi,'#3498db');
+    var mEl=document.getElementById('mode');if(mEl)mEl.innerHTML=d.mode==='online'?'&#x1F310; Online Logger':d.mode==='webonly'?'&#x1F4F6; Web Only':'&#x1F4CA; Logging';
+    var cc=document.getElementById('connStatus');if(cc){cc.className='text-success';cc.textContent='● Connected';}
+    if(document.getElementById('hdrTime'))document.getElementById('hdrTime').textContent=d.time;
+  }).catch(function(){var cc=document.getElementById('connStatus');if(cc){cc.className='text-danger';cc.textContent='● Disconnected';}});
+}
+function updLogs(){
+  fetch('/api/recent_logs').then(function(r){return r.json();}).then(function(d){
+    var el=document.getElementById('recentLogs');if(!el)return;
+    if(!d.logs||!d.logs.length){el.innerHTML='<div class="list-item text-muted">No log entries</div>';return;}
+    var ff=STATUS&&STATUS.theme?STATUS.theme.ffColor:'#275673',pf=STATUS&&STATUS.theme?STATUS.theme.pfColor:'#7eb0d5';
+    var html='<table style="width:100%;border-collapse:collapse;font-size:.75rem"><tr><th style="padding:6px;text-align:left">Time</th><th>Trigger</th><th>Volume</th><th>+FF</th><th>+PF</th></tr>';
+    d.logs.forEach(function(l){var tc=l.trigger.indexOf('FF')>=0?ff:l.trigger.indexOf('PF')>=0?pf:'#95a5a6';html+='<tr><td style="padding:6px">'+l.time+'</td><td style="color:'+tc+';font-weight:bold;text-align:center">'+l.trigger+'</td><td style="text-align:center">'+l.volume+'</td><td style="text-align:center">'+l.ff+'</td><td style="text-align:center">'+l.pf+'</td></tr>';});
+    el.innerHTML=html+'</table>';
+  }).catch(function(){});
+}
+
+// ═══════════════════════════════════════════════════════════
+// FILES
+// ═══════════════════════════════════════════════════════════
+var currentDir='/',currentStorage='internal',editMode=false,moveSrc='';
+function files_onEnter(){currentStorage=(STATUS&&STATUS.defaultStorageView===1)?'sdcard':'internal';buildStorageTabs();loadDir();}
+function buildStorageTabs(s){
+  var tabs=document.getElementById('storageTabs');if(!tabs)return;
+  s=s||{};
+  tabs.innerHTML='<a class="btn '+(currentStorage==='internal'?'btn-primary':'btn-secondary')+'" onclick="switchStorage(\'internal\')" style="cursor:pointer">&#x1F4BE; Internal</a>'+
+    '<a class="btn '+(currentStorage==='sdcard'?'btn-primary':'btn-secondary')+'" onclick="switchStorage(\'sdcard\')" style="cursor:pointer">&#x1F4B3; SD Card</a>';
+}
+function switchStorage(s){currentStorage=s;currentDir='/';files_onEnter();}
+function loadDir(){
+  fetch('/api/filelist?storage='+currentStorage+'&dir='+encodeURIComponent(currentDir))
+    .then(function(r){return r.json();}).then(renderDir)
+    .catch(function(e){var fl=document.getElementById('fileList');if(fl)fl.innerHTML='<div class="list-item">Error: '+e+'</div>';});
+}
+function renderDir(d){
+  var si=document.getElementById('storageInfo');if(si&&d.used!==undefined)si.innerHTML=storageBar(d.used,d.total,d.percent);
+  var dt=document.getElementById('dirTitle');if(dt)dt.innerHTML='&#x1F4C2; ['+(currentStorage==='sdcard'?'SD':'Int')+'] '+(currentDir==='/'?'Root':currentDir);
+  var ub=document.getElementById('btnUp');if(ub)ub.style.display=currentDir!=='/'?'inline-block':'none';
+  var list=document.getElementById('fileList');if(!list)return;
+  var files=d.files||[];
+  if(!files.length){list.innerHTML='<div class="list-item text-muted">Empty folder</div>';return;}
+  var html='';
+  files.forEach(function(f){
+    var icon=f.isDir?'&#x1F4C1;':'&#x1F4C4;';
+    html+='<div class="list-item"><span>';
+    if(f.isDir)html+='<a href="#" onclick="enterDir(\''+f.path.replace(/'/g,"\\'")+'\');return false" style="text-decoration:none">'+icon+' '+f.name+'</a>';
+    else html+=icon+' '+f.name+' <small class="text-muted">('+fmtBytes(f.size)+')</small>';
+    html+='</span><span class="btn-group">';
+    if(!f.isDir)html+='<a href="/download?file='+encodeURIComponent(f.path)+'&storage='+currentStorage+'" class="btn btn-sm btn-secondary">&#x1F4E5;</a>';
+    if(editMode){
+      html+='<button onclick="showMove(\''+f.path.replace(/'/g,"\\'")+'\',\''+f.name.replace(/'/g,"\\'")+'\')\" class="btn btn-sm btn-secondary">&#x2702;&#xFE0F;</button>';
+      html+='<button onclick="deleteFile(\''+f.path.replace(/'/g,"\\'")+'\')\" class="btn btn-sm btn-danger">&#x1F5D1;&#xFE0F;</button>';
+    }
+    html+='</span></div>';
+  });
+  list.innerHTML=html;
+}
+function enterDir(p){currentDir=p;loadDir();}
+function goUp(){var l=currentDir.lastIndexOf('/');currentDir=l<=0?'/':currentDir.substring(0,l);loadDir();}
+function toggleEdit(force){editMode=force!==undefined?force:!editMode;var ed=document.getElementById('btnEdit'),dn=document.getElementById('btnDone'),et=document.getElementById('editTools');if(ed)ed.style.display=editMode?'none':'inline-block';if(dn)dn.style.display=editMode?'inline-block':'none';if(et)et.style.display=editMode?'block':'none';loadDir();}
+function deleteFile(path){if(!confirm('Delete '+path+'?'))return;fetch('/delete?path='+encodeURIComponent(path)+'&storage='+currentStorage).then(loadDir).catch(function(e){alert('Error: '+e);});}
+function showMove(path,name){moveSrc=path;var mn=document.getElementById('mvName'),md=document.getElementById('mvDest'),mp=document.getElementById('movePopup');if(mn)mn.value=name;if(md)md.value='';if(mp)mp.style.display='flex';}
+function applyMove(){var n=document.getElementById('mvName').value.trim(),dest=document.getElementById('mvDest').value.trim()||currentDir;if(!n)return;fetch('/move_file?src='+encodeURIComponent(moveSrc)+'&newName='+encodeURIComponent(n)+'&destDir='+encodeURIComponent(dest)+'&storage='+currentStorage).then(function(){document.getElementById('movePopup').style.display='none';loadDir();});}
+(function(){
+  var uf=document.getElementById('uploadForm');
+  if(uf){uf.onsubmit=function(e){e.preventDefault();var file=document.getElementById('fileInput').files[0];if(!file)return;var fd=new FormData();fd.append('file',file);fd.append('path',currentDir);var xhr=new XMLHttpRequest();var prog=document.getElementById('uploadProg'),bar=document.getElementById('uploadBar'),pct=document.getElementById('uploadPct');if(prog)prog.style.display='block';xhr.upload.onprogress=function(ev){if(ev.lengthComputable){var p=Math.round(ev.loaded/ev.total*100);if(bar)bar.style.width=p+'%';if(pct)pct.textContent=p+'%';}};xhr.onload=function(){setTimeout(loadDir,500);};xhr.onerror=function(){alert('Upload failed');};xhr.open('POST','/upload');xhr.send(fd);};}
+  var mf=document.getElementById('mkdirForm');
+  if(mf){mf.onsubmit=function(e){e.preventDefault();var name=document.getElementById('newFolder').value.trim();if(!name)return;fetch('/mkdir?dir='+encodeURIComponent(currentDir)+'&name='+encodeURIComponent(name)+'&storage='+currentStorage).then(loadDir);};}
+})();
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS - DEVICE
+// ═══════════════════════════════════════════════════════════
+var sd_clLoaded=false;
+function sd_onEnter(){
+  if(!STATUS)return;
+  var dn=document.getElementById('deviceName');if(dn)dn.value=STATUS.device||'';
+  ['siFirmware','sd_firmware'].forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=STATUS.version||'--';});
+  ['siBoot','sd_boot'].forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=STATUS.boot||'--';});
+  ['siMode','sd_mode'].forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=STATUS.mode||'--';});
+  ['siHeap','sd_heap'].forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=fmt(STATUS.heap);});
+  ['siCpu','sd_chip'].forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=STATUS.chip||STATUS.cpu||'--';});
+  ['siStorage','sd_storage'].forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=fmt(STATUS.fsUsed)+'/'+fmt(STATUS.fsTotal);});
+  getCfg(function(cfg){
+    var di=document.getElementById('devIdInput');if(di){di.value=cfg.deviceId||'';}
+    var sv=document.getElementById('defaultStorageView');if(sv)sv.value=cfg.hardware&&cfg.hardware.defaultStorageView!=null?cfg.hardware.defaultStorageView:0;
+    var fw=document.getElementById('forceWebServer');if(fw)fw.checked=!!cfg.forceWebServer;
+  });
+}
+function regenId(){if(!confirm('Generate new ID from MAC?'))return;fetch('/api/regen-id',{method:'POST'}).then(function(r){return r.text();}).then(function(id){var di=document.getElementById('devIdInput')||document.getElementById('devIdInput');if(di){di.value=id;di.disabled=false;}toast('New ID: '+id+'. Click Save to apply.','success');}).catch(function(e){toast('Error: '+e,'error');});}
+function toggleManualId(){var di=document.getElementById('devIdInput')||document.getElementById('devIdInput');if(di){di.disabled=!di.disabled;if(!di.disabled){di.focus();di.select();}}}
+function toggleChangelog(id){
+  var el=document.getElementById(id||'changelog');
+  if(!el)return;
+  if(el.style.display==='none'||el.style.display===''){el.style.display='block';el.classList.remove('hidden');}else{el.style.display='none';el.classList.add('hidden');}
+  if(!sd_clLoaded){sd_clLoaded=true;fetch('/api/changelog').then(function(r){if(!r.ok)throw new Error('Not found');return r.text();}).then(function(t){var cl=document.getElementById('sd_clContent');if(cl){cl.style.whiteSpace='pre-wrap';cl.textContent=t;}}).catch(function(){var cl=document.getElementById('sd_clContent');if(cl)cl.textContent='Changelog not available';});}
+}
+function sd_toggleCL(){toggleChangelog('changelog');}
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS - FLOWMETER
+// ═══════════════════════════════════════════════════════════
+function sfm_onEnter(){
+  var bc=document.getElementById('bootCount');if(bc&&STATUS)bc.textContent=STATUS.boot||'--';
+  getCfg(function(cfg){var fm=cfg.flowMeter||{};
+    var fmap={pulsesPerLiter:'pulsesPerLiter',calibrationMultiplier:'calibrationMultiplier',
+      monitoringWindowSecs:'monitoringWindowSecs',firstLoopMonitoringWindowSecs:'firstLoopWindowSecs',
+      blinkDuration:'blinkDuration'};
+    for(var k in fmap){var el=document.getElementById(fmap[k]);if(el)el.value=fm[k]||'';}
+    var tm=document.getElementById('testMode');if(tm)tm.checked=!!fm.testMode;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS - HARDWARE
+// ═══════════════════════════════════════════════════════════
+function sh_onEnter(){
+  if(STATUS&&STATUS.theme&&STATUS.theme.boardDiagramPath){var bd=document.getElementById('boardDiagram');var bc2=document.getElementById('boardDiagramCard');if(bd)bd.src=STATUS.theme.boardDiagramPath;if(bc2)bc2.style.display='block';}
+  getCfg(function(cfg){var h=cfg.hardware||{};
+    var hmap={storageType:'storageType',wakeupMode:'wakeupMode',debounceMs:'debounceMs',
+      pinWifiTrigger:'pinWifiTrigger',pinWakeupFF:'pinWakeupFF',pinWakeupPF:'pinWakeupPF',
+      pinFlowSensor:'pinFlowSensor',pinRtcCE:'pinRtcCE',pinRtcIO:'pinRtcIO',pinRtcSCLK:'pinRtcSCLK',
+      pinSdCS:'pinSdCS',pinSdMOSI:'pinSdMOSI',pinSdMISO:'pinSdMISO',pinSdSCK:'pinSdSCK',cpuFreqMHz:'cpuFreqMHz'};
+    for(var k in hmap){var el=document.getElementById(hmap[k]);if(el)el.value=h[k]||'';}
+    toggleSD();
+  });
+}
+function toggleSD(){var sd=document.getElementById('sdPins'),st=document.getElementById('storageType');if(sd&&st)sd.style.display=st.value==='1'?'block':'none';}
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS - DATALOG
+// ═══════════════════════════════════════════════════════════
+function sdl_onEnter(){
+  getCfg(function(cfg){var d=cfg.datalog||{};
+    var dmap={prefix:'prefix',folder:'folder',maxSizeKB:'maxSizeKB',pfToFfThreshold:'pfToFfThreshold',
+      ffToPfThreshold:'ffToPfThreshold',manualPressThresholdMs:'manualPressThresholdMs'};
+    for(var k in dmap){var el=document.getElementById(dmap[k]);if(el)el.value=d[k]||'';}
+    var rot=document.getElementById('rotation');if(rot)rot.value=d.rotation||0;
+    var df=document.getElementById('dfDate');if(df)df.value=d.dateFormat||1;
+    var tf=document.getElementById('dfTime');if(tf)tf.value=d.timeFormat||0;
+    var ef=document.getElementById('dfEnd');if(ef)ef.value=d.endFormat||0;
+    var bf=document.getElementById('dfBoot');if(bf)bf.value=d.includeBootCount?'1':'0';
+    var vf=document.getElementById('dfVol');if(vf)vf.value=d.volumeFormat||0;
+    var xf=document.getElementById('dfExtra');if(xf)xf.value=d.includeExtraPresses?'1':'0';
+    var ts=document.getElementById('timestampFilename');if(ts)ts.checked=!!d.timestampFilename;
+    var di=document.getElementById('includeDeviceId');if(di)di.checked=!!d.includeDeviceId;
+    var pc=document.getElementById('postCorrectionEnabled');if(pc){pc.checked=!!d.postCorrectionEnabled;var pf2=document.getElementById('pcFields');if(pf2)pf2.style.display=d.postCorrectionEnabled?'block':'none';}
+    toggleMaxSize();updatePreview();
+    var cur=d.currentFile||'',sel=document.getElementById('currentFile');if(sel){sel.innerHTML='';
+      fetch('/api/filelist?filter=log&recursive=1').then(function(r){return r.json();}).then(function(fl){
+        (fl.files||[]).filter(function(f){return !f.isDir;})
+          .forEach(function(f){var o=document.createElement('option');o.value=f.path;o.textContent=f.path+' ('+fmtBytes(f.size)+')';if(f.path===cur)o.selected=true;sel.appendChild(o);});
+        if(!sel.options.length&&cur){var o=document.createElement('option');o.value=cur;o.textContent=cur;o.selected=true;sel.appendChild(o);}
+      }).catch(function(){var o=document.createElement('option');o.value=cur;o.textContent=cur||'(none)';if(sel)sel.appendChild(o);});
+    }
+  });
+}
+function toggleMaxSize(){var mg=document.getElementById('maxSizeGroup'),rot=document.getElementById('rotation');if(mg&&rot)mg.style.display=rot.value==='4'?'block':'none';}
+function updatePreview(){
+  var p=[],now=new Date();
+  var dd=now.getDate().toString().padStart(2,'0'),mm=(now.getMonth()+1).toString().padStart(2,'0'),yy=now.getFullYear();
+  var hh=now.getHours().toString().padStart(2,'0'),mi=now.getMinutes().toString().padStart(2,'0'),ss=now.getSeconds().toString().padStart(2,'0');
+  var df=document.getElementById('dfDate'),tf=document.getElementById('dfTime'),ef=document.getElementById('dfEnd'),bf=document.getElementById('dfBoot'),vf=document.getElementById('dfVol'),xf=document.getElementById('dfExtra');
+  if(!df)return;
+  if(df.value==='1')p.push(dd+'/'+mm+'/'+yy);else if(df.value==='2')p.push(mm+'/'+dd+'/'+yy);else if(df.value==='3')p.push(yy+'-'+mm+'-'+dd);else if(df.value==='4')p.push(dd+'.'+mm+'.'+yy);
+  var tStr=tf&&tf.value==='1'?hh+':'+mi:tf&&tf.value==='2'?(now.getHours()%12||12)+':'+mi+':'+ss+(now.getHours()<12?'AM':'PM'):hh+':'+mi+':'+ss;
+  p.push(tStr);
+  if(ef&&ef.value==='0')p.push(tStr);else if(ef&&ef.value==='1')p.push('45s');
+  if(bf&&bf.value==='1')p.push('#:1234');
+  p.push('FF_BTN');
+  if(vf&&vf.value==='0')p.push('L:2,50');else if(vf&&vf.value==='1')p.push('L:2.50');else if(vf&&vf.value==='2')p.push('2.50');
+  if(xf&&xf.value==='1'){p.push('FF0');p.push('PF1');}
+  var prev=document.getElementById('logPreview');if(prev)prev.textContent=p.join('|');
+}
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS - THEME
+// ═══════════════════════════════════════════════════════════
+function sth_onEnter(){
+  getCfg(function(cfg){var t=cfg.theme||{};
+    var tmap={themeMode:'mode',primaryColor:'primaryColor',secondaryColor:'secondaryColor',
+      bgColor:'bgColor',textColor:'textColor',ffColor:'ffColor',pfColor:'pfColor',otherColor:'otherColor',
+      storageBarColor:'storageBarColor',storageBar70Color:'storageBar70Color',storageBar90Color:'storageBar90Color',
+      storageBarBorder:'storageBarBorder',logoSource:'logoSource',faviconPath:'faviconPath',
+      boardDiagramPath:'boardDiagramPath',chartLocalPath:'chartLocalPath'};
+    for(var id in tmap){var el=document.getElementById(id);if(el)el.value=t[tmap[id]]||'';}
+    var si=document.getElementById('showIcons');if(si)si.checked=!!t.showIcons;
+    var cs=document.getElementById('chartSource');if(cs)cs.value=t.chartSource||0;
+    var clf=document.getElementById('chartLabelFormat');if(clf)clf.value=t.chartLabelFormat||0;
+    var clpi=document.getElementById('chartLocalPathInput');if(clpi)clpi.value=t.chartLocalPath||'/chart.min.js';
+    toggleChartPath();
+  });
+}
+function toggleChartPath(){var cpDiv=document.getElementById('chartLocalPath'),cs=document.getElementById('chartSource');if(cpDiv&&cs)cpDiv.style.display=cs.value==='0'?'block':'none';}
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS - NETWORK
+// ═══════════════════════════════════════════════════════════
+var scanRetries=0;
+function sn_onEnter(){
+  var ws=document.getElementById('wifiStatus'),wi=document.getElementById('wifiIP');
+  if(STATUS){if(ws)ws.textContent=STATUS.network||'--';if(wi)wi.textContent=STATUS.ip||'--';}
+  getCfg(function(cfg){var n=cfg.network||{};
+    var wm=document.getElementById('wifiMode');if(wm)wm.value=n.wifiMode||0;
+    var as=document.getElementById('apSSID');if(as)as.value=n.apSSID||'';
+    var ai=document.getElementById('apIP');if(ai)ai.value=arrToIP(n.apIP)||'192.168.4.1';
+    var ag=document.getElementById('apGateway');if(ag)ag.value=arrToIP(n.apGateway)||'192.168.4.1';
+    var an=document.getElementById('apSubnet');if(an)an.value=arrToIP(n.apSubnet)||'255.255.255.0';
+    var cs=document.getElementById('clientSSID');if(cs)cs.value=n.clientSSID||'';
+    var ap2=document.getElementById('apPass');if(ap2)ap2.value=n.apPassword||'';
+    var cp2=document.getElementById('clientPass');if(cp2)cp2.value=n.clientPassword||'';
+    var fi=document.getElementById('fldIP');if(fi)fi.value=arrToIP(n.staticIP)||'';
+    var fg=document.getElementById('fldGW');if(fg)fg.value=arrToIP(n.gateway)||'';
+    var fs=document.getElementById('fldSN');if(fs)fs.value=arrToIP(n.subnet)||'';
+    var fd=document.getElementById('fldDNS');if(fd)fd.value=arrToIP(n.dns)||'';
+    var sc=document.getElementById('staticCheck');if(sc)sc.checked=!!n.useStaticIP;
+    toggleMode();toggleStatic();
+  });
+}
+function toggleMode(){var m=document.getElementById('wifiMode'),ap=document.getElementById('apSection'),cl=document.getElementById('clientSection');if(!m)return;if(ap)ap.style.display=m.value==='0'?'block':'none';if(cl)cl.style.display=m.value==='1'?'block':'none';}
+function togglePass(id){var e=document.getElementById(id);if(e)e.type=e.type==='password'?'text':'password';}
+function toggleStatic(){var en=document.getElementById('staticCheck'),fields=['fldIP','fldGW','fldSN','fldDNS'];if(!en)return;fields.forEach(function(id){var el=document.getElementById(id);if(el){el.disabled=!en.checked;el.style.opacity=en.checked?'1':'0.5';}});}
+function scanWifi(){var l=document.getElementById('wifiList');if(l){l.innerHTML='<div class="list-item">&#x1F50D; Scanning...</div>';l.style.display='block';}scanRetries=0;fetch('/wifi_scan_start').then(function(){setTimeout(checkScanResult,2000);});}
+function checkScanResult(){fetch('/wifi_scan_result').then(function(r){return r.json();}).then(function(d){var l=document.getElementById('wifiList');if(!l)return;if(d.scanning){scanRetries++;if(scanRetries<10){l.innerHTML='<div class="list-item">&#x1F50D; Scanning... ('+scanRetries+')</div>';setTimeout(checkScanResult,1000);}else l.innerHTML='<div class="list-item">&#x23F1;&#xFE0F; Timeout</div>';}else if(d.error){l.innerHTML='<div class="list-item">&#x274C; '+d.error+'</div>';}else if(!d.networks||!d.networks.length){l.innerHTML='<div class="list-item">&#x1F4E1; No networks</div>';}else{l.innerHTML=d.networks.map(function(n){return'<div class="list-item" style="cursor:pointer" onclick="selectWifi(\''+n.ssid.replace(/'/g,"\\'")+'\')\">'+(n.secure?'&#x1F512;':'&#x1F4F6;')+' '+n.ssid+' <small class="text-muted">('+n.rssi+' dBm)</small></div>';}).join('');}}).catch(function(e){var l=document.getElementById('wifiList');if(l)l.innerHTML='<div class="list-item">&#x274C; '+e+'</div>';});}
+function selectWifi(ssid){var cs=document.getElementById('clientSSID');if(cs)cs.value=ssid;var wl=document.getElementById('wifiList');if(wl)wl.style.display='none';}
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS - TIME
+// ═══════════════════════════════════════════════════════════
+function st_onEnter(){
+  var clk=document.getElementById('rtcTime');
+  var rtcStat=document.getElementById('rtcStatus');if(rtcStat){if(STATUS&&STATUS.rtcRunning){rtcStat.innerHTML='<div class="alert alert-success">&#x2705; RTC Running</div>';}else if(STATUS&&!STATUS.rtcRunning){rtcStat.innerHTML='<div class="alert alert-error">&#x274C; RTC Stopped</div>';}}
+  var rtcMeta=document.getElementById('rtcMeta');if(rtcMeta&&STATUS)rtcMeta.textContent='Boot #'+(STATUS.boot||'?')+' | Chip: '+(STATUS.chip||'?');
+  if(STATUS){
+    if(clk)clk.textContent=STATUS.time||'--:--:--';
+    var bc=document.getElementById('bootCount');if(bc)bc.textContent=STATUS.boot||'--';
+    var isClient=STATUS.wifi==='client';
+    var ns=document.getElementById('ntpStatus');
+    if(ns)ns.innerHTML=isClient?'<div class="alert alert-success">&#x2705; WiFi – NTP available</div>':'<div class="alert alert-warning">&#x26A0;&#xFE0F; AP Mode – NTP unavailable</div>';
+    var nb=document.getElementById('ntpBtn');if(nb)nb.disabled=!isClient;
+    if(STATUS.rtcProtected!=null){var rp=document.getElementById('rtcProtect');if(rp)rp.checked=!!STATUS.rtcProtected;}
+  }
+  getCfg(function(cfg){var n=cfg.network||{};
+    var ns2=document.getElementById('ntpServer');if(ns2)ns2.value=n.ntpServer||'pool.ntp.org';
+    var tz=document.getElementById('timezone');if(tz)tz.value=n.timezone||2;
+  });
+  setInterval(function(){fetch('/api/live').then(function(r){return r.json();}).then(function(d){var clk2=document.getElementById('rtcTime');if(clk2)clk2.textContent=d.time||'--:--:--';}).catch(function(){});},1000);
+}
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS - OTA
+// ═══════════════════════════════════════════════════════════
+function ota_onEnter(){
+  if(STATUS){
+    var ov=document.getElementById('fwVersion');if(ov)ov.textContent=STATUS.version||'--';
+    var oc=document.getElementById('fwDevice');if(oc)oc.textContent=STATUS.chip||'--';
+    var oh=document.getElementById('fwHeap');if(oh)oh.textContent=fmt(STATUS.freeHeap);
+    var of=document.getElementById('fwStorage');if(of)of.textContent=fmt(STATUS.freeSketch);
+  }
+}
+
+// Settings import
+function settingsImport(){var file=document.getElementById('importFile').files[0];if(!file)return;var fd=new FormData();fd.append('settings',file);var xhr=new XMLHttpRequest();var prog=document.getElementById('importProg'),bar=document.getElementById('importBar'),pct=document.getElementById('importPct');if(prog)prog.style.display='block';xhr.upload.onprogress=function(ev){if(ev.lengthComputable){var p=Math.round(ev.loaded/ev.total*100);if(bar)bar.style.width=p+'%';if(pct)pct.textContent=p+'%';}};xhr.onload=function(){if(xhr.status===200){toast('&#x2705; Imported – reloading...','success');setTimeout(function(){location.reload();},1500);}else{toast('&#x274C; Import failed','error');if(prog)prog.style.display='none';}};xhr.open('POST','/import_settings');xhr.send(fd);}
+
+// ═══════════════════════════════════════════════════════════
+// OTA UPLOAD (wired to settings_ota.html form)
+// ═══════════════════════════════════════════════════════════
+(function(){
+  document.addEventListener('DOMContentLoaded', function(){
+    var form = document.getElementById('otaForm');
+    if(!form) return;
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      var file = document.getElementById('fwFile');
+      if(!file || !file.files[0]){ toast('Select a .bin file', 'error'); return; }
+      var f = file.files[0];
+      if(!f.name.endsWith('.bin')){ toast('Must be a .bin file', 'error'); return; }
+      if(!confirm('Upload ' + f.name + '?\nDo not disconnect power during update.')) return;
+      var fd = new FormData();
+      fd.append('firmware', f);
+      var xhr = new XMLHttpRequest();
+      // Show OTA page's own popup if available
+      var pop = document.getElementById('popup');
+      var pi = document.getElementById('popupIcon');
+      var pt = document.getElementById('popupTitle');
+      var pm = document.getElementById('popupMsg');
+      var pp = document.getElementById('popupProgress');
+      var pb = document.getElementById('popupBar');
+      if(pop){ pop.style.display='flex'; if(pi)pi.textContent='⏳'; if(pt)pt.textContent='Uploading...'; if(pm)pm.textContent=''; if(pp)pp.style.display='block'; }
+      xhr.upload.onprogress = function(ev){
+        if(ev.lengthComputable && pb){
+          var p = Math.round(ev.loaded/ev.total*100);
+          pb.style.width = p + '%';
+          if(pm) pm.textContent = p + '%';
+        }
+      };
+      xhr.onload = function(){
+        try{
+          var r = JSON.parse(xhr.responseText);
+          if(r.success){
+            if(pt) pt.textContent = '✅ Done!';
+            if(pm) pm.textContent = r.message || 'Restarting...';
+            setTimeout(function(){ if(pop) pop.style.display='none'; showRestartCountdown(); }, 1500);
+          } else {
+            if(pop) pop.style.display='none';
+            toast('❌ ' + (r.message||'Update failed'), 'error');
+          }
+        } catch(ex){
+          if(pop) pop.style.display='none';
+          showRestartCountdown();
+        }
+      };
+      xhr.onerror = function(){ if(pop) pop.style.display='none'; toast('❌ Upload failed', 'error'); };
+      xhr.open('POST', '/do_update');
+      xhr.send(fd);
+    });
+  });
+})();
+
+
+function updateFooter(s){
+  if(!s)return;
+  var v=document.getElementById('fwVersionFooter');if(v)v.textContent='v'+(s.version||'');
+  var u=document.getElementById('uptimeFooter');if(u)u.textContent=(s.boot||'--');
+  var h=document.getElementById('heapFooter');if(h)h.textContent=fmt(s.heap);
+  var st=document.getElementById('storageFooter');if(st)st.textContent=fmt(s.fsUsed)+'/'+fmt(s.fsTotal);
+}
+
+</script>
+
+
+<!-- ═══ FOOTER ═══ -->
+<footer class="app-footer" style="max-width:1200px;margin:0 auto 1rem auto">
+  <div class="footer-grid">
+    <div><strong>Water Logger</strong> <span id="fwVersionFooter" class="text-muted" style="font-size:0.75rem"></span></div>
+    <div>Boot: <span id="uptimeFooter" class="text-primary">--</span></div>
+  </div>
+  <div class="footer-row">
+    <div>Free RAM: <span id="heapFooter">--</span></div>
+    <div>Storage: <span id="storageFooter">--</span></div>
+  </div>
+  <div class="footer-version">
+    Created by Petko Georgiev
+  </div>
+</footer>
+
 </body>
 </html>

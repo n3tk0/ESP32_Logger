@@ -297,19 +297,21 @@ void loop() {
                     if (corrected && fsAvailable && activeFS) {
                         String folder = String(config.datalog.folder);
                         if (folder.length() > 0 && !folder.startsWith("/")) folder = "/" + folder;
-                        if (folder.length() == 0) folder = "/";
+                        if (folder.length() > 0 && !folder.endsWith("/"))   folder += "/";
+                        if (folder.isEmpty()) folder = "/";
                         String btnLogPath = folder + "btn_log.txt";
                         File btnLog = activeFS->open(btnLogPath, FILE_APPEND);
                         if (btnLog) {
+                            int exp = (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH) ? HIGH : LOW;
+                            bool ffSnap   = earlyGPIO_captured && ((exp==HIGH)==(bool)((earlyGPIO_bitmask>>config.hardware.pinWakeupFF)&1));
+                            bool pfSnap   = earlyGPIO_captured && ((exp==HIGH)==(bool)((earlyGPIO_bitmask>>config.hardware.pinWakeupPF)&1));
+                            bool wifiSnap = earlyGPIO_captured && ((exp==HIGH)==(bool)((earlyGPIO_bitmask>>config.hardware.pinWifiTrigger)&1));
                             char line[160];
-                            bool ffSnap   = earlyGPIO_captured && ((earlyGPIO_bitmask >> config.hardware.pinWakeupFF) & 1);
-                            bool pfSnap   = earlyGPIO_captured && ((earlyGPIO_bitmask >> config.hardware.pinWakeupPF) & 1);
-                            bool wifiSnap = earlyGPIO_captured && ((earlyGPIO_bitmask >> config.hardware.pinWifiTrigger) & 1);
                             snprintf(line, sizeof(line),
                                 "#:%d|bitmask:0x%04X|early:FF=%d,PF=%d,WIFI=%d|held:%lums|CORR:%s->%s|L:%.2f",
                                 bootCount, earlyGPIO_bitmask,
-                                ffSnap, pfSnap, wifiSnap, buttonHeldMs,
-                                orig.c_str(), cycleStartedBy.c_str(), corrVol);
+                                ffSnap, pfSnap, wifiSnap,
+                                buttonHeldMs, orig.c_str(), cycleStartedBy.c_str(), corrVol);
                             btnLog.println(line);
                             btnLog.close();
                         }
