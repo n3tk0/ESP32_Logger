@@ -1186,7 +1186,7 @@ function dlInit() {
 }
 
 function dlLoadFiles() {
-    var el = document.getElementById('files'); if (!el) return;
+    var el = document.getElementById('dl-files'); if (!el) return;
     fetch('/api/filelist?filter=log&recursive=1').then(function (r) { return r.json(); }).then(function (d) {
         var files = d.files || [], curFile = d.currentFile || '';
         if (!files.length) { el.innerHTML = "<div class='list-item text-muted'>No log files</div>"; return; }
