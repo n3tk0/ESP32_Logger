@@ -553,8 +553,11 @@ void setupWebServer() {
         // ── Storage ───────────────────────────────────────────────────────────
         uint64_t used = 0, total = 0; int pct = 0;
         getStorageInfo(used, total, pct);
-        doc["fsUsed"]             = (uint32_t)used;
-        doc["fsTotal"]            = (uint32_t)total;
+        char uBuf[24], tBuf[24];
+        snprintf(uBuf, sizeof(uBuf), "%llu", (unsigned long long)used);
+        snprintf(tBuf, sizeof(tBuf), "%llu", (unsigned long long)total);
+        doc["fsUsed"]             = serialized(String(uBuf));
+        doc["fsTotal"]            = serialized(String(tBuf));
         doc["fsPct"]              = pct;
         doc["defaultStorageView"] = config.hardware.defaultStorageView;
         doc["currentFile"]        = getActiveDatalogFile();
@@ -645,8 +648,11 @@ void setupWebServer() {
 
         uint64_t used = 0, total = 0; int pct = 0;
         getStorageInfo(used, total, pct);
-        doc["fsUsed"]  = (uint32_t)used;
-        doc["fsTotal"] = (uint32_t)total;
+        char uBuf[24], tBuf[24];
+        snprintf(uBuf, sizeof(uBuf), "%llu", (unsigned long long)used);
+        snprintf(tBuf, sizeof(tBuf), "%llu", (unsigned long long)total);
+        doc["fsUsed"]  = serialized(String(uBuf));
+        doc["fsTotal"] = serialized(String(tBuf));
 
         doc["ip"] = wifiConnectedAsClient
                     ? WiFi.localIP().toString()
@@ -766,8 +772,11 @@ void setupWebServer() {
             scanDir(*targetFS, dir, files, filter, recursive);
             uint64_t used = 0, total = 0; int pct = 0;
             getStorageInfo(used, total, pct, storage);
-            doc["used"]    = (uint32_t)used;
-            doc["total"]   = (uint32_t)total;
+            char uBuf[24], tBuf[24];
+            snprintf(uBuf, sizeof(uBuf), "%llu", (unsigned long long)used);
+            snprintf(tBuf, sizeof(tBuf), "%llu", (unsigned long long)total);
+            doc["used"]    = serialized(String(uBuf));
+            doc["total"]   = serialized(String(tBuf));
             doc["percent"] = pct;
         } else {
             doc["error"] = "Storage not available";
@@ -1443,7 +1452,10 @@ void setupWebServer() {
                    : "{\"success\":false,\"message\":\"Update failed\"}");
             resp->addHeader("Connection", "close");
             r->send(resp);
-            if (ok) { safeWiFiShutdown(); delay(200); ESP.restart(); }
+            if (ok) {
+                shouldRestart = true;
+                restartTimer = millis();
+            }
         },
         [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
             if (!index) {

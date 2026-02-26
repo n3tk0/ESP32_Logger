@@ -497,9 +497,10 @@ function dbRenderChart(data) {
     if (dbChart) { dbChart.destroy(); dbChart = null; }
 
     var th = ST.theme || CFG.theme || {};
-    var ffColor = th.ffColor || 'var(--ff-color)';
-    var pfColor = th.pfColor || 'var(--pf-color)';
-    var otherColor = th.otherColor || 'var(--other-color)';
+    var rootStyle = getComputedStyle(document.documentElement);
+    var ffColor = th.ffColor || rootStyle.getPropertyValue('--ff-color').trim() || '#275673';
+    var pfColor = th.pfColor || rootStyle.getPropertyValue('--pf-color').trim() || '#7eb0d5';
+    var otherColor = th.otherColor || rootStyle.getPropertyValue('--other-color').trim() || '#a0aec0';
 
     var clr = data.map(function (d) {
         if (d.reason.indexOf('FF') >= 0) return ffColor;
@@ -1437,53 +1438,147 @@ function otaInit() {
 
 function hwToggleSD() { var sd = document.getElementById('sdPins'), st = document.getElementById('hw-storage'); if (sd && st) sd.style.display = st.value === '1' ? 'block' : 'none'; }
 
-function otaUpload() {
-    var fileInp = document.getElementById('fwFile');
-    if (!fileInp || !fileInp.files.length) { alert('Select a .bin file first'); return; }
-    var file = fileInp.files[0];
-    if (!file.name.toLowerCase().endsWith('.bin')) { alert('File must be a .bin firmware file'); return; }
-    if (file.size < 10240) { alert('File too small (min 10 KB)'); return; }
+function otaFileSelected() {
+    var fileInput = document.getElementById('fwFile');
+    var uploadBtn = document.getElementById('otaUploadBtn');
+    var fileInfo = document.getElementById('otaFileInfo');
+    var file = fileInput.files[0];
 
-    var prog = document.getElementById('popupProgress'), bar = document.getElementById('popupBar');
-    var pct = document.getElementById('popupCounter'), msgEl = document.getElementById('popupMsg');
+    if (!file) {
+        uploadBtn.disabled = true;
+        fileInfo.style.display = 'none';
+        return;
+    }
 
-    // Validate magic byte 0xE9 — matches original .ino OTA validation
+    var errors = [];
+    if (!file.name.toLowerCase().endsWith('.bin')) errors.push('File must be a .bin file');
+    if (file.size < 10000) errors.push('File too small (min 10KB)');
+
+    if (errors.length > 0) {
+        fileInfo.innerHTML = '<span style="color:#c00">❌ ' + errors.join('<br>') + '</span>';
+        fileInfo.style.display = 'block';
+        uploadBtn.disabled = true;
+        return;
+    }
+
     var reader = new FileReader();
-    reader.onload = function (ev) {
-        var bytes = new Uint8Array(ev.target.result);
-        if (bytes[0] !== 0xE9) { alert('Invalid firmware (wrong magic byte – expected 0xE9)'); return; }
-        if (msgEl) msgEl.innerHTML = '';
-        if (prog) prog.style.display = 'block';
-        var fd = new FormData(); fd.append('firmware', file);
-        var xhr = new XMLHttpRequest();
-        xhr.upload.onprogress = function (ev2) {
-            if (ev2.lengthComputable) {
-                var p = Math.round(ev2.loaded / ev2.total * 100);
-                if (bar) bar.style.width = p + '%';
-                if (pct) pct.textContent = p + '% (' + (ev2.loaded / 1024).toFixed(1) + ' / ' + (ev2.total / 1024).toFixed(1) + ' KB)';
-            }
-        };
-        xhr.onload = function () {
-            if (prog) prog.style.display = 'none';
-            try {
-                var r = JSON.parse(xhr.responseText);
-                if (msgEl) {
-                    if (r.success) {
-                        msgEl.innerHTML = "<div class='alert alert-success'>✅ " + r.message + " – Redirecting…</div>";
-                        var s = 5, tick = function () { if (s <= 0) { location.href = '/'; return; } s--; setTimeout(tick, 1000); }; tick();
-                    } else {
-                        msgEl.innerHTML = "<div class='alert alert-error'>❌ " + r.message + "</div>";
-                    }
-                }
-            } catch (e) {
-                if (msgEl) msgEl.innerHTML = "<div class='alert alert-success'>✅ Update sent – device restarting…</div>";
-                setTimeout(function () { location.href = '/'; }, 4000);
-            }
-        };
-        xhr.onerror = function () { if (prog) prog.style.display = 'none'; if (msgEl) msgEl.innerHTML = "<div class='alert alert-error'>❌ Upload failed – connection error</div>"; };
-        xhr.open('POST', '/do_update'); xhr.send(fd);
+    reader.onload = function (e) {
+        var arr = new Uint8Array(e.target.result);
+        if (arr[0] !== 0xE9) {
+            fileInfo.innerHTML = '<span style="color:#c00">❌ Invalid firmware file (wrong magic byte)</span>';
+            fileInfo.style.display = 'block';
+            uploadBtn.disabled = true;
+            return;
+        }
+        fileInfo.innerHTML = '<span style="color:#080">✅ ' + file.name + ' (' + Math.round(file.size / 1024) + 'KB)</span>';
+        fileInfo.style.display = 'block';
+        uploadBtn.disabled = false;
     };
     reader.readAsArrayBuffer(file.slice(0, 4));
+}
+
+function otaShowPopup(icon, title, msg, showProgress, showClose) {
+    var p = document.getElementById('popup');
+    if (p) p.style.display = 'flex';
+    setEl('popupIcon', icon);
+    setEl('popupTitle', title);
+    var elMsg = document.getElementById('popupMsg');
+    if (elMsg) elMsg.innerHTML = msg;
+    var elProg = document.getElementById('popupProgress');
+    if (elProg) elProg.style.display = showProgress ? 'block' : 'none';
+    var elClose = document.getElementById('popupClose');
+    if (elClose) elClose.style.display = showClose ? 'inline-block' : 'none';
+}
+
+function otaUpdatePopupProgress(pct, text) {
+    var bar = document.getElementById('popupBar');
+    if (bar) bar.style.width = pct + '%';
+    setEl('popupCounter', text);
+}
+
+function otaUpload() {
+    var fileInput = document.getElementById('fwFile');
+    var uploadBtn = document.getElementById('otaUploadBtn');
+    var progressDiv = document.getElementById('otaProgress');
+    var progressBar = document.getElementById('otaProgressBar');
+    var progressText = document.getElementById('otaProgressText');
+
+    if (!fileInput || !fileInput.files.length) return;
+    var file = fileInput.files[0];
+
+    uploadBtn.disabled = true;
+    fileInput.disabled = true;
+    otaShowPopup('📤', 'Uploading...', 'Please wait while firmware is being uploaded.', true, false);
+
+    if (progressDiv) progressDiv.style.display = 'block';
+
+    var xhr = new XMLHttpRequest();
+    xhr.upload.onprogress = function (e) {
+        if (e.lengthComputable) {
+            var pct = Math.round(e.loaded / e.total * 100);
+            if (progressBar) progressBar.style.width = pct + '%';
+            if (progressText) progressText.textContent = pct + '%';
+            otaUpdatePopupProgress(pct, Math.round(e.loaded / 1024) + ' / ' + Math.round(e.total / 1024) + ' KB');
+        }
+    };
+    xhr.onload = function () {
+        if (progressDiv) progressDiv.style.display = 'none';
+
+        if (xhr.status === 200) {
+            try {
+                var resp = JSON.parse(xhr.responseText);
+                if (resp.success) {
+                    var seconds = 5;
+                    var tick = function () {
+                        otaShowPopup('✅', 'Update Complete!', 'Device will restart...<br>Redirecting in <strong>' + seconds + '</strong> seconds', true, false);
+                        otaUpdatePopupProgress((5 - seconds) * 20, '');
+                        if (seconds <= 0) {
+                            window.location.href = '/';
+                            window.location.reload();
+                        } else {
+                            seconds--;
+                            setTimeout(tick, 1000);
+                        }
+                    };
+                    tick();
+                } else {
+                    otaShowPopup('❌', 'Update Failed', resp.message || 'Unknown error', false, true);
+                    uploadBtn.disabled = false;
+                    fileInput.disabled = false;
+                }
+            } catch (e) {
+                // Failsafe if not JSON
+                var seconds = 5;
+                var tick = function () {
+                    otaShowPopup('✅', 'Update sent', 'Device is restarting...<br>Redirecting in <strong>' + seconds + '</strong> seconds', true, false);
+                    otaUpdatePopupProgress((5 - seconds) * 20, '');
+                    if (seconds <= 0) {
+                        window.location.href = '/';
+                        window.location.reload();
+                    } else {
+                        seconds--;
+                        setTimeout(tick, 1000);
+                    }
+                };
+                tick();
+            }
+        } else {
+            otaShowPopup('❌', 'Upload Error', 'Server returned: ' + xhr.statusText, false, true);
+            uploadBtn.disabled = false;
+            fileInput.disabled = false;
+        }
+    };
+    xhr.onerror = function () {
+        if (progressDiv) progressDiv.style.display = 'none';
+        otaShowPopup('❌', 'Connection Error', 'Could not connect to device', false, true);
+        uploadBtn.disabled = false;
+        fileInput.disabled = false;
+    };
+
+    var formData = new FormData();
+    formData.append('firmware', file);
+    xhr.open('POST', '/do_update');
+    xhr.send(formData);
 }
 
 function dlToggleMaxSize() { var mg = document.getElementById('maxSizeGroup'), rot = document.getElementById('dl-rotation'); if (mg && rot) mg.style.display = rot.value === '4' ? 'block' : 'none'; }

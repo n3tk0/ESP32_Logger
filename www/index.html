@@ -1295,10 +1295,18 @@
         </div>
         <form id="otaForm" onsubmit="event.preventDefault();otaUpload()">
           <div class="form-group">
-            <input type="file" id="fwFile" name="update" accept=".bin" class="form-input" required>
+            <input type="file" id="fwFile" name="update" accept=".bin" class="form-input" required
+              onchange="otaFileSelected()">
           </div>
-          <button type="submit" class="btn btn-danger btn-block">🚀 Flash Firmware</button>
+          <div id="otaFileInfo" class="alert" style="display:none;margin-bottom:1rem;"></div>
+          <button type="submit" id="otaUploadBtn" class="btn btn-danger btn-block" disabled>🚀 Flash Firmware</button>
         </form>
+        <div id="otaProgress" style="display:none;margin-top:1rem">
+          <div style="background:#e0e0e0;border-radius:4px;height:24px;overflow:hidden">
+            <div id="otaProgressBar" style="width:0%;height:100%;background:#27ae60;transition:width .3s"></div>
+          </div>
+          <p id="otaProgressText" class="text-center mt-1" style="font-weight:bold;">0%</p>
+        </div>
       </div>
     </div>
   </main>
