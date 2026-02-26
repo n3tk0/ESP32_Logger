@@ -81,34 +81,52 @@ function applyStatus(d) {
     // CSS custom properties (theme colors)
     if (d.theme) {
         var th = d.theme;
+        // Theme class on <html> element
+        var html = document.getElementById('htmlRoot');
+        var m = th.mode;
+        var actDark = false;
+
+        if (html) {
+            html.classList.remove('theme-light', 'theme-dark', 'theme-auto');
+            if (m === 0 || m === '0') html.classList.add('theme-light');
+            else if (m === 1 || m === '1') { html.classList.add('theme-dark'); actDark = true; }
+            else {
+                html.classList.add('theme-auto');
+                actDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                // Add listener to hot-reload if OS theme changes while in auto mode
+                if (!window._actDarkListenerAppended) {
+                    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
+                        if (ST && ST.theme && (ST.theme.mode === 2 || ST.theme.mode === '2')) applyStatus(ST);
+                    });
+                    window._actDarkListenerAppended = true;
+                }
+            }
+        }
+
         var vars = ':root{';
         if (th.primaryColor) vars += '--primary:' + th.primaryColor + ';';
         if (th.secondaryColor) vars += '--secondary:' + th.secondaryColor + ';';
-        if (th.bgColor) vars += '--bg:' + th.bgColor + ';';
-        if (th.textColor) vars += '--text:' + th.textColor + ';';
+        if (actDark) {
+            if (th.darkBgColor) vars += '--bg:' + th.darkBgColor + ';';
+            if (th.darkTextColor) vars += '--text:' + th.darkTextColor + ';';
+        } else {
+            if (th.lightBgColor) vars += '--bg:' + th.lightBgColor + ';';
+            if (th.lightTextColor) vars += '--text:' + th.lightTextColor + ';';
+        }
         vars += '}';
         var style = document.getElementById('themeVars');
         if (style) style.textContent = vars;
 
-        // Theme class on <html> element
-        var html = document.getElementById('htmlRoot');
-        if (html) {
-            html.classList.remove('theme-light', 'theme-dark', 'theme-auto');
-            var m = th.mode;
-            if (m === 0 || m === '0') html.classList.add('theme-light');
-            else if (m === 1 || m === '1') html.classList.add('theme-dark');
-            else html.classList.add('theme-auto');
-        }
-
         // Dashboard legend dot colors — matches original inline style in .ino
-        setElStyle('db-legendFF', 'background', th.ffColor);
-        setElStyle('db-legendPF', 'background', th.pfColor);
-        setElStyle('db-legendOther', 'background', th.otherColor);
+        // Dashboard legend dot colors — matches original inline style in .ino
+        setElStyle('db-legendFF', 'background', th.ffColor || 'var(--ff-color)');
+        setElStyle('db-legendPF', 'background', th.pfColor || 'var(--pf-color)');
+        setElStyle('db-legendOther', 'background', th.otherColor || 'var(--other-color)');
         // Stat card text colors — matches original: style='color:%s'
-        setElStyle('db-totalFF', 'color', th.ffColor);
-        setElStyle('db-totalPF', 'color', th.pfColor);
-        setElStyle('live-ffCount', 'color', th.ffColor);
-        setElStyle('live-pfCount', 'color', th.pfColor);
+        setElStyle('db-totalFF', 'color', th.ffColor || 'var(--ff-color)');
+        setElStyle('db-totalPF', 'color', th.pfColor || 'var(--pf-color)');
+        setElStyle('live-ffCount', 'color', th.ffColor || 'var(--ff-color)');
+        setElStyle('live-pfCount', 'color', th.pfColor || 'var(--pf-color)');
     }
 
     // Footer — matches original .ino footer construction exactly:
@@ -479,9 +497,9 @@ function dbRenderChart(data) {
     if (dbChart) { dbChart.destroy(); dbChart = null; }
 
     var th = ST.theme || CFG.theme || {};
-    var ffColor = th.ffColor || '#3498db';
-    var pfColor = th.pfColor || '#e74c3c';
-    var otherColor = th.otherColor || '#95a5a6';
+    var ffColor = th.ffColor || 'var(--ff-color)';
+    var pfColor = th.pfColor || 'var(--pf-color)';
+    var otherColor = th.otherColor || 'var(--other-color)';
 
     var clr = data.map(function (d) {
         if (d.reason.indexOf('FF') >= 0) return ffColor;
@@ -982,14 +1000,36 @@ function hwInit() {
 function thInit() {
     fetch('/export_settings').then(function (r) { return r.json(); }).then(function (d) {
         CFG = d; var th = d.theme || {};
-        setVal('th-mode', th.mode !== undefined ? th.mode : 0);
+        var mode = th.mode !== undefined ? th.mode : 0;
+        setVal('th-mode', mode);
         setChk('th-icons', th.showIcons);
-        setVal('th-primary', th.primaryColor); setVal('th-secondary', th.secondaryColor);
-        setVal('th-bg', th.bgColor); setVal('th-text', th.textColor);
-        setVal('th-ff', th.ffColor); setVal('th-pf', th.pfColor);
-        setVal('th-other', th.otherColor);
-        setVal('th-bar', th.storageBarColor); setVal('th-bar70', th.storageBar70Color);
-        setVal('th-bar90', th.storageBar90Color); setVal('th-barB', th.storageBarBorder);
+
+        var isDark = (mode === 1 || (mode === 2 && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
+
+        setVal('th-primary', th.primaryColor || '#275673');
+        setVal('th-secondary', th.secondaryColor || '#4a5568');
+        window._thData = th;
+        function updateColorPickers(m) {
+            var isD = (m === 1 || (m === 2 && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
+            setVal('th-bg', isD ? (window._thData.darkBgColor || '#0f172a') : (window._thData.lightBgColor || '#f0f2f5'));
+            setVal('th-text', isD ? (window._thData.darkTextColor || '#e2e8f0') : (window._thData.lightTextColor || '#2d3748'));
+        }
+        updateColorPickers(mode);
+
+        var modeSelect = document.getElementById('th-mode');
+        if (modeSelect && !window._modeListenerAppended) {
+            modeSelect.addEventListener('change', function (e) {
+                updateColorPickers(parseInt(e.target.value));
+            });
+            window._modeListenerAppended = true;
+        }
+        setVal('th-ff', th.ffColor || '#275673');
+        setVal('th-pf', th.pfColor || '#7eb0d5');
+        setVal('th-other', th.otherColor || '#a0aec0');
+        setVal('th-bar', th.storageBarColor || '#27ae60');
+        setVal('th-bar70', th.storageBar70Color || '#f39c12');
+        setVal('th-bar90', th.storageBar90Color || '#e74c3c');
+        setVal('th-barB', th.storageBarBorder || '#cccccc');
         setVal('th-logo', th.logoSource); setVal('th-favicon', th.faviconPath);
         setVal('th-board', th.boardDiagramPath);
         setVal('th-chartSrc', th.chartSource !== undefined ? th.chartSource : 0);
@@ -1000,6 +1040,106 @@ function thInit() {
     });
 }
 
+function themeSave(e, form) {
+    e.preventDefault();
+    var fd = new FormData(form);
+
+    var mode = parseInt(fd.get('themeMode') || '0');
+    var isDark = (mode === 1 || (mode === 2 && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
+
+    var currentBg = fd.get('bgColor') || '';
+    var currentText = fd.get('textColor') || '';
+    fd.delete('bgColor');
+    fd.delete('textColor');
+
+    if (isDark) {
+        fd.append('darkBgColor', currentBg);
+        fd.append('darkTextColor', currentText);
+        if (window._thData && window._thData.lightBgColor) fd.append('lightBgColor', window._thData.lightBgColor);
+        if (window._thData && window._thData.lightTextColor) fd.append('lightTextColor', window._thData.lightTextColor);
+    } else {
+        fd.append('lightBgColor', currentBg);
+        fd.append('lightTextColor', currentText);
+        if (window._thData && window._thData.darkBgColor) fd.append('darkBgColor', window._thData.darkBgColor);
+        if (window._thData && window._thData.darkTextColor) fd.append('darkTextColor', window._thData.darkTextColor);
+    }
+
+    var defs = {
+        'primaryColor': '#275673',
+        'secondaryColor': '#4a5568',
+        'lightBgColor': '#f0f2f5',
+        'lightTextColor': '#2d3748',
+        'darkBgColor': '#0f172a',
+        'darkTextColor': '#e2e8f0',
+        'ffColor': '#275673',
+        'pfColor': '#7eb0d5',
+        'otherColor': '#a0aec0',
+        'storageBarColor': '#27ae60',
+        'storageBar70Color': '#f39c12',
+        'storageBar90Color': '#e74c3c',
+        'storageBarBorder': '#cccccc'
+    };
+
+    for (var key in defs) {
+        var val = fd.get(key);
+        if (val && val.toLowerCase() === defs[key].toLowerCase()) {
+            fd.set(key, '');
+        }
+    }
+
+    var btn = form.querySelector('button[type="submit"]');
+    var old = btn.innerHTML;
+    btn.innerHTML = 'Saving...';
+    btn.disabled = true;
+
+    fetch('/save_theme', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            btn.innerHTML = old;
+            btn.disabled = false;
+            if (d.ok) {
+                var m = document.getElementById('th-msg');
+                if (m) m.innerHTML = '<div class="alert alert-success mt-1 mb-1">Theme saved! Rebooting...</div>';
+                setTimeout(function () { location.reload(); }, 1000);
+            } else {
+                alert('Save failed.');
+            }
+        }).catch(function (err) {
+            btn.innerHTML = old;
+            btn.disabled = false;
+            alert('Error: ' + err);
+        });
+}
+
+function themeRestoreDefault() {
+    if (!confirm('Are you sure you want to restore the default theme colors? This will wipe your custom choices.')) return;
+    var fd = new FormData();
+    fd.append('themeMode', '0');
+    fd.append('primaryColor', '');
+    fd.append('secondaryColor', '');
+    fd.append('lightBgColor', '');
+    fd.append('lightTextColor', '');
+    fd.append('darkBgColor', '');
+    fd.append('darkTextColor', '');
+    fd.append('ffColor', '');
+    fd.append('pfColor', '');
+    fd.append('otherColor', '');
+    fd.append('storageBarColor', '');
+    fd.append('storageBar70Color', '');
+    fd.append('storageBar90Color', '');
+    fd.append('storageBarBorder', '');
+    fetch('/save_theme', { method: 'POST', body: fd }).then(function (r) { return r.json(); }).then(function (d) {
+        if (d.ok) {
+            alert('Theme restored to defaults! Rebooting...');
+            location.reload();
+        } else {
+            alert('Failed to restore theme defaults.');
+        }
+    }).catch(function () {
+        alert('Theme restored to defaults! Rebooting...');
+        location.reload();
+    });
+}
 
 // ============================================================================
 // ══ SETTINGS: NETWORK ══

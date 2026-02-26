@@ -67,8 +67,10 @@ static void applyDefaults() {
     // ── Theme ─────────────────────────────────────────────────────────────────
     if (!strlen(config.theme.primaryColor))      strcpy(config.theme.primaryColor,      "#275673");
     if (!strlen(config.theme.secondaryColor))    strcpy(config.theme.secondaryColor,    "#4a5568");
-    if (!strlen(config.theme.bgColor))           strcpy(config.theme.bgColor,           "#f7fafc");
-    if (!strlen(config.theme.textColor))         strcpy(config.theme.textColor,         "#2d3748");
+    if (!strlen(config.theme.lightBgColor))      strcpy(config.theme.lightBgColor,      "#f0f2f5");
+    if (!strlen(config.theme.lightTextColor))    strcpy(config.theme.lightTextColor,    "#2d3748");
+    if (!strlen(config.theme.darkBgColor))       strcpy(config.theme.darkBgColor,       "#0f172a");
+    if (!strlen(config.theme.darkTextColor))     strcpy(config.theme.darkTextColor,     "#e2e8f0");
     if (!strlen(config.theme.ffColor))           strcpy(config.theme.ffColor,           "#275673");
     if (!strlen(config.theme.pfColor))           strcpy(config.theme.pfColor,           "#7eb0d5");
     if (!strlen(config.theme.otherColor))        strcpy(config.theme.otherColor,        "#a0aec0");
@@ -149,8 +151,10 @@ void loadDefaultConfig() {
     strcpy(config.theme.primaryColor,      "#275673");
     strcpy(config.theme.secondaryColor,    "#4a5568");
     strcpy(config.theme.accentColor,       "#3182ce");
-    strcpy(config.theme.bgColor,           "#f7fafc");
-    strcpy(config.theme.textColor,         "#2d3748");
+    strcpy(config.theme.lightBgColor,           "#f0f2f5");
+    strcpy(config.theme.lightTextColor,         "#2d3748");
+    strcpy(config.theme.darkBgColor,            "#0f172a");
+    strcpy(config.theme.darkTextColor,          "#e2e8f0");
     strcpy(config.theme.ffColor,           "#275673");
     strcpy(config.theme.pfColor,           "#7eb0d5");
     strcpy(config.theme.otherColor,        "#a0aec0");
@@ -270,6 +274,7 @@ bool loadConfig() {
         Serial.println("[CFG] No config file – using hardcoded defaults");
         if (f) f.close();
         loadDefaultConfig();
+        saveConfig();
         return false;
     }
 
@@ -280,6 +285,7 @@ bool loadConfig() {
         Serial.printf("[CFG] Bad file size %u – using hardcoded defaults\n", fileSize);
         f.close();
         loadDefaultConfig();
+        saveConfig();
         return false;
     }
 
@@ -292,6 +298,7 @@ bool loadConfig() {
         if (got != sizeof(DeviceConfig) || tmp.magic != CONFIG_STRUCT_MAGIC) {
             Serial.println("[CFG] Magic mismatch / short read – using hardcoded defaults");
             loadDefaultConfig();
+            saveConfig();
             return false;
         }
         memcpy(&config, &tmp, sizeof(DeviceConfig));
@@ -304,6 +311,7 @@ bool loadConfig() {
             Serial.println("[CFG] malloc failed – using hardcoded defaults");
             f.close();
             loadDefaultConfig();
+            saveConfig();
             return false;
         }
 
@@ -317,6 +325,7 @@ bool loadConfig() {
             free(rawBuf);
             Serial.println("[CFG] Corrupt file – using hardcoded defaults");
             loadDefaultConfig();
+            saveConfig();
             return false;
         }
 
@@ -366,6 +375,7 @@ bool loadConfig() {
         f.close();
         Serial.println("[CFG] Oversized config file – using hardcoded defaults");
         loadDefaultConfig();
+        saveConfig();
         return false;
     }
 
@@ -389,6 +399,19 @@ bool loadConfig() {
     config.network.clientSSID[sizeof(config.network.clientSSID) - 1]   = '\0';
     config.network.ntpServer[sizeof(config.network.ntpServer) - 1]     = '\0';
     config.theme.primaryColor[sizeof(config.theme.primaryColor) - 1]   = '\0';
+    config.theme.secondaryColor[sizeof(config.theme.secondaryColor) - 1] = '\0';
+    config.theme.lightBgColor[sizeof(config.theme.lightBgColor) - 1]   = '\0';
+    config.theme.lightTextColor[sizeof(config.theme.lightTextColor) - 1] = '\0';
+    config.theme.darkBgColor[sizeof(config.theme.darkBgColor) - 1]     = '\0';
+    config.theme.darkTextColor[sizeof(config.theme.darkTextColor) - 1] = '\0';
+    config.theme.ffColor[sizeof(config.theme.ffColor) - 1]             = '\0';
+    config.theme.pfColor[sizeof(config.theme.pfColor) - 1]             = '\0';
+    config.theme.otherColor[sizeof(config.theme.otherColor) - 1]       = '\0';
+    config.theme.storageBarColor[sizeof(config.theme.storageBarColor) - 1] = '\0';
+    config.theme.storageBar70Color[sizeof(config.theme.storageBar70Color) - 1] = '\0';
+    config.theme.storageBar90Color[sizeof(config.theme.storageBar90Color) - 1] = '\0';
+    config.theme.storageBarBorder[sizeof(config.theme.storageBarBorder) - 1] = '\0';
+    config.theme.chartLocalPath[sizeof(config.theme.chartLocalPath) - 1] = '\0';
 
     // ── Fill any zero/empty fields that survived migration ────────────────────
     applyDefaults();

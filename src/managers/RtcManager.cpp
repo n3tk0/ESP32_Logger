@@ -174,7 +174,12 @@ String getWakeupReason() {
             bool ffEarly  = (bool)((earlyGPIO_bitmask >> config.hardware.pinWakeupFF)    & 1);
             bool pfEarly  = (bool)((earlyGPIO_bitmask >> config.hardware.pinWakeupPF)    & 1);
             bool wifiEarly= (bool)((earlyGPIO_bitmask >> config.hardware.pinWifiTrigger) & 1);
-            if (expectedState == LOW) { ffEarly = !ffEarly; pfEarly = !pfEarly; wifiEarly = !wifiEarly; }
+            
+            if (expectedState == LOW) {
+                ffEarly   = !ffEarly;
+                pfEarly   = !pfEarly;
+                wifiEarly = !wifiEarly;
+            }
 
             Serial.printf("GPIO early: FF=%d PF=%d WIFI=%d (bitmask=0x%08X)\n",
                           ffEarly, pfEarly, wifiEarly, earlyGPIO_bitmask);

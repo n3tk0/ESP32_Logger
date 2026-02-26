@@ -725,7 +725,7 @@
       </div>
     </div>
 
-    <form onsubmit="settingsSave(event,'/save_datalog',this)">
+    <form onsubmit="settingsSave(event,'/save_datalog',this)" novalidate>
       <div id="dl-msg"></div>
       <!-- Active File -->
       <div class="card">
@@ -904,7 +904,7 @@
       </div>
     </div>
 
-    <form onsubmit="settingsSave(event,'/save_theme',this)">
+    <form onsubmit="themeSave(event, this)">
       <div id="th-msg"></div>
       <!-- Mode -->
       <div class="card">
@@ -1007,7 +1007,11 @@
         </div>
       </div>
 
-      <button type="submit" class="btn btn-primary btn-block">💾 Save</button>
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn btn-primary" style="flex:1;">💾 Save</button>
+        <button type="button" class="btn btn-secondary" onclick="themeRestoreDefault()">🔄 Restore Default
+          Theme</button>
+      </div>
     </form>
   </main>
 

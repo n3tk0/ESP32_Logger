@@ -52,8 +52,8 @@ const unsigned long ISR_DEBOUNCE_MICROS = 1000;  // 1ms
 const unsigned long BUTTON_WAIT_FLOW_MS  = 6000;
 const unsigned long FLOW_IDLE_TIMEOUT_MS = 3000;
 
-#define CONFIG_STRUCT_MAGIC  0xC0FFEE35
-#define CONFIG_VERSION       10
+#define CONFIG_STRUCT_MAGIC  0xC0FFEE36
+#define CONFIG_VERSION       12
 
 // DS1302 RAM addresses for bootcount backup
 #define RTC_RAM_BOOTCOUNT_ADDR  0
@@ -120,8 +120,10 @@ struct ThemeConfig {
     char primaryColor[8];
     char secondaryColor[8];
     char accentColor[8];
-    char bgColor[8];
-    char textColor[8];
+    char lightBgColor[8];
+    char lightTextColor[8];
+    char darkBgColor[8];
+    char darkTextColor[8];
     char ffColor[8];
     char pfColor[8];
     char otherColor[8];

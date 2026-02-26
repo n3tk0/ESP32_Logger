@@ -59,7 +59,7 @@ void setup() {
     isrDebounceUs = (unsigned long)config.hardware.debounceMs * 1000UL;
 
     initStorage();
-    initHardware();   // включва initRtc()
+    initStorage();
 
     // ── Measure button hold duration ─────────────────────────────────────────
     if (earlyGPIO_captured) {
@@ -91,6 +91,8 @@ void setup() {
     bootCount++;
     backupBootCount();
     DBGF("Boot count: %d\n", bootCount);
+
+    initHardware();   // Configure pin modes BEFORE reading fallback states
 
     // ── Wake reason ───────────────────────────────────────────────────────────
     wakeUpButtonStr = getWakeupReason();
