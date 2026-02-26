@@ -1171,9 +1171,12 @@
 
     <!-- NTP -->
     <div class="card">
-      <div class="card-header">🌐 NTP Sync</div>
+      <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>🌐 NTP Sync</span>
+        <div id="ntpStatus" class="alert alert-warning"
+          style="margin:0; padding:4px 8px; font-size:0.85rem; line-height:1;">⏳ Loading...</div>
+      </div>
       <div class="card-body">
-        <div id="ntpStatus"></div>
         <form onsubmit="timeSyncNTP(event)" style="margin-bottom:1rem" id="ntpForm">
           <button type="submit" class="btn btn-primary" id="ntpBtn">🔄 NTP Sync</button>
         </form>

@@ -1116,9 +1116,10 @@ function timeInit() {
         if (detail) detail.textContent = 'Protected: ' + (d.rtcProtected ? 'Yes' : 'No') + ' | Running: ' + (d.rtcRunning ? 'Yes' : 'No');
         setChk('time-rtcProt', d.rtcProtected);
         var ntpSt = document.getElementById('ntpStatus');
-        if (ntpSt) ntpSt.innerHTML = d.wifi === 'client'
-            ? "<div class='alert alert-success'>✅ WiFi Connected – NTP available</div>"
-            : "<div class='alert alert-warning'>⚠️ Not connected (AP mode) – NTP unavailable</div>";
+        if (ntpSt) {
+            ntpSt.className = d.wifi === 'client' ? 'alert alert-success' : 'alert alert-warning';
+            ntpSt.innerHTML = d.wifi === 'client' ? '✅ WiFi Connected – NTP available' : '⚠️ Not connected (AP mode) – NTP unavailable';
+        }
         var dateEl = document.getElementById('date');
         if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
     });
