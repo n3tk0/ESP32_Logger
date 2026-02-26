@@ -528,13 +528,14 @@ body {
   border-radius: var(--radius);
   padding: 1rem;
   margin: 1.5rem auto 1rem auto;
-  max-width: 1200px;
+  width: calc(100% - 2rem);
+  max-width: calc(1200px - 2rem);
   box-shadow: var(--shadow);
 }
 @media (min-width: 768px) {
   .app-footer {
-    margin-left: auto;
-    margin-right: auto;
+    width: calc(100% - 4rem);
+    max-width: calc(1200px - 4rem);
     padding: 1rem 2rem;
   }
 }
