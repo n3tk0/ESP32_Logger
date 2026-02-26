@@ -1109,8 +1109,8 @@ function timeInit() {
         var bak = document.getElementById('bootBak'); if (bak) bak.textContent = '-';
         var status = document.getElementById('rtcStatus');
         if (status) {
-            if (!d.rtcRunning) status.innerHTML = "<div class='alert alert-error'>❌ RTC Error</div>";
-            else status.innerHTML = "<div class='alert alert-success'>✅ RTC OK</div>";
+            status.className = !d.rtcRunning ? 'alert alert-error' : 'alert alert-success';
+            status.innerHTML = !d.rtcRunning ? '❌ RTC Error' : '✅ RTC OK';
         }
         var detail = document.getElementById('rtcDetail');
         if (detail) detail.textContent = 'Protected: ' + (d.rtcProtected ? 'Yes' : 'No') + ' | Running: ' + (d.rtcRunning ? 'Yes' : 'No');

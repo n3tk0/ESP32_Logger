@@ -1140,9 +1140,12 @@
 
     <!-- RTC Status -->
     <div class="card">
-      <div class="card-header">📟 RTC Status</div>
+      <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>📟 RTC Status</span>
+        <div id="rtcStatus" class="alert alert-warning"
+          style="margin:0; padding:4px 8px; font-size:0.85rem; line-height:1;">⏳ Loading...</div>
+      </div>
       <div class="card-body">
-        <div id="rtcStatus" class="alert alert-warning">Loading...</div>
         <div class="text-center" style="font-size:2.5rem;font-family:monospace;font-weight:bold;margin:1rem 0"
           id="time-rtcTime">--:--:--</div>
         <p class="text-muted text-center" style="font-size:.8rem" id="rtcDetail"></p>
