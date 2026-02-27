@@ -1,119 +1,105 @@
-# 💧 ESP32 Low-Power Water Usage Logger
-
-Low-power multi-sensor water usage logger for **Seeed XIAO ESP32-C3 (RISC-V)** with deep sleep wake-up, modular firmware, SPA web UI, and resilient recovery workflow.
+<div align="center">
+  <h1>💧 ESP32 Water Logger</h1>
+  <p><b>Low-power, modular multi-sensor water usage logger for Seeed XIAO ESP32-C3</b></p>
+  
+  [![ESP32-C3](https://img.shields.io/badge/Board-Seeed_XIAO_ESP32--C3-blue)](#)
+  [![C++](https://img.shields.io/badge/Language-C++-00599C?logo=c%2B%2B)](#)
+  [![SPA](https://img.shields.io/badge/Frontend-Vanilla_JS_SPA-F7DF1E)](#)
+  [![LittleFS](https://img.shields.io/badge/Filesystem-LittleFS-darkgreen)](#)
+</div>
 
 ---
 
 ## 📌 Project Overview
 
-- **Project:** ESP32 Low-Power Water Usage Logger
-- **Release Line:** 4.1.x (latest web stack updates aligned with v4.1.5 changelog)
-- **Target Board:** Seeed Studio XIAO ESP32-C3
+**ESP32 Water Logger** is a highly optimized, low-power logging system designed to track water usage exactly when it happens. By heavily utilizing hardware interrupts, deep sleep, and a modular C++ architecture, the device consumes minimal power while guaranteeing accurate flow monitoring.
+
+The system features a rich, responsive **Single Page Application (SPA)** served directly from the ESP32's LittleFS. 
+
+This project recently underwent a major architectural migration (v4.1.x) from a monolithic `.ino` design to a highly scalable, modular codebase cleanly separating hardware logic, API endpoints, and frontend assets.
+
 - **Author:** Petko Georgiev
 - **Organization:** Villeroy & Boch Bulgaria
 
-Firmware goals:
-- Accurate PF/FF flush event logging
-- Ultra low-power behavior via deep sleep
-- Reliable startup button detection
-- Robust web-based configuration and file management
-- Recovery path even when web UI files are missing/corrupted
+---
+
+## ⚙️ Key Features
+
+### 🔋 Ultra-Low Power & Reliability
+- Relies on **Deep Sleep** loops, waking only via GPIO interrupts (Flush Buttons or Flow Sensor).
+- Safe Restart paths with clean Wi-Fi hardware shutdown (`safeWiFiShutdown()`).
+
+### 🌊 Accurate Flow Detection & Post-Correction
+- Supports independent triggers: **Full Flush (FF)** and **Part Flush (PF)**.
+- **Smart Post-Correction:** Automatically corrects a logged PF to FF (or vice versa) if the monitored volume crosses configurable threshold parameters in the settings.
+- Bypasses correction if the user intentionally holds the button (`manualPressThresholdMs`).
+
+### 📱 Modern Modular Web Interface
+- The UI is a pure **Vanilla JS Single Page Application (SPA)** loaded tightly from `/www/`.
+- Features a highly responsive grid layout and custom **Theming System** (Light/Dark/Auto) governed by CSS Variables seamlessly injected via the backend API.
+- **Dynamic Network Feedback:** Real-time visual Wi-Fi Signal Strength (RSSI) indicators using SVG icons mapped dynamically to dBm thresholds and theme colors.
+
+### 💾 Flexible Storage & Datalogging
+- Logs directly to **LittleFS** (Internal) or **SD Card** (SPI).
+- Advanced automated log rotation (Daily, Weekly, Monthly, or By Size).
+- Exports data cleanly to CSV right from the browser.
+
+### 🛟 Resilient Failsafe Recovery
+- If the primary SPA files (`/www/index.html`) ever become corrupted or deleted, the backend automatically intercepts routing and serves a hardcoded "Failsafe UI".
+- The immutable `/setup` route is always available to easily drag-and-drop recovery files without serial flashing.
+- Robust OTA firmware updating supporting `.bin` magic byte `0xE9` validation.
 
 ---
 
-## ⚙️ Core Features
+## 🔌 Hardware Requirements & Default Pins
 
-### 🔋 Low Power & Reliability
-- GPIO wake-up + deep sleep cycle
-- Early GPIO snapshot during boot (improves wake source detection)
-- Configurable debounce and edge filtering
-- Safe restart path with WiFi hardware shutdown (`safeWiFiShutdown()`)
+Designed optimally for the **Seeed Studio XIAO ESP32-C3 (RISC-V)**.
 
-### 🚽 PF/FF Detection + Post-Correction
-- Multi-button flush identification (PF/FF)
-- Optional volume-based post-correction:
-  - PF → FF when volume exceeds threshold
-  - FF → PF when volume is below threshold
-- Hold-time guard (`manualPressThresholdMs`) to skip correction for intentional long presses
-- Post-correction events logged to `btn_log.txt`
-
-### 💾 Storage
-- LittleFS (default) or SD Card
-- Rotation modes and formatting options for datalog output
-- Wake and sleep timestamps in log lines
+| Component      | Default Pin | Description |
+|---------------|-------------|-------------|
+| **WiFi Trigger**| D0 (GPIO 2) | Wakes device to force AP/Web Server on. |
+| **Wakeup FF** | D1 (GPIO 3) | Full Flush Trigger. |
+| **Wakeup PF** | D2 (GPIO 4) | Part Flush Trigger. |
+| **Flow Sensor**| D6 (GPIO 21)| Interfaced with the water flow meter. |
+| **RTC (DS1302)**| D7/D8/D9 | Real-Time Clock (CE, IO, SCLK). |
+| **SD Card SPI**| D? | Configurable via Hardware Settings. |
 
 ---
 
-## 🌐 Web UI (SPA + Recovery)
+## 🚀 Software & Build Setup
 
-### Main Behavior
-- Front-end is served from **LittleFS `/www/`** (`index.html`, `web.js`, `style.css`)
-- Legacy routes redirect to SPA root (`/`)
-- Runtime and configuration are separated:
-  - `/api/status` for live state
-  - `/export_settings` for complete config payload
+### 1. Compile and Flash the Backend
+Compile the C++ source code via Arduino IDE or PlatformIO. Ensure your partition scheme allocates enough room for **LittleFS** (e.g., Minimum 1MB or 2MB APP / 2MB FATFS).
+- Flash the compiled firmware directly via USB.
 
-### Recovery & Failsafe
-- If `/www/index.html` is missing, device serves embedded failsafe page
-- `/setup` route is **always available** for emergency UI recovery uploads
-
-### Additional Improvements
-- Chart.js loader supports local path or CDN fallback
-- CSV export reflects “Exclude 0.00L” filter in filename suffix
-- Network settings load status/config separately with password-safe behavior
-
----
-
-## 🔌 Default Pins (XIAO ESP32-C3)
-
-| Function      | Default Pin |
-|---------------|-------------|
-| WiFi Trigger  | D0 (GPIO 2) |
-| Wakeup FF     | D1 (GPIO 3) |
-| Wakeup PF     | D2 (GPIO 4) |
-| Flow Sensor   | D6 (GPIO 21) |
-| RTC (DS1302)  | GPIO 5/6/7 |
-| SD Card SPI   | GPIO 10–13 |
+### 2. Deploy the Frontend (LittleFS)
+The Web UI does not live in C++ strings. It must be uploaded to the LittleFS partition.
+1. Connect to the ESP32's Access Point (usually `WaterLogger`) or its designated IP.
+2. The firmware will likely serve the **Recovery Page** (since `/www/index.html` is missing).
+3. Using the recovery page, upload the following core files into the root or `/www/` directory:
+   - `www/index.html`
+   - `www/web.js`
+   - `www/style.css`
+   - `www/changelog.txt` 
+4. Once successfully uploaded, the ESP32 will immediately route users to the beautiful SPA Dashboard.
 
 ---
 
-## 📊 API Endpoints (selected)
+## 📜 Migration Note
 
-| Endpoint | Purpose |
-|----------|---------|
-| `/api/status` | Live runtime status |
-| `/export_settings` | Full settings payload for UI |
-| `/api/recent_logs` | Last log entries |
-| `/api/changelog` | Changelog text from LittleFS |
-| `/api/filelist` | File list for selected storage |
-| `/setup` | Always-on failsafe recovery page |
+The transition to the **Modular Architecture** separates the monolithic `full_logger.ino` into clean, domain-driven Manager classes (`ConfigManager`, `HardwareManager`, `WiFiManager`, etc.) located in `src/`. 
 
----
-
-## 🚀 Flashing / Deployment
-
-1. Build and flash firmware (`Logger.ino`).
-2. Upload LittleFS content including:
-   - `/www/index.html`
-   - `/www/web.js`
-   - `/www/style.css`
-   - `/www/changelog.txt`
-   - optional assets (`/chart.min.js`, logo/favicon)
-3. If UI fails to load, open `http://<device-ip>/setup` and re-upload UI files.
+For an in-depth reading of the internal modules, file tree, request loops, and JSON payload structures, please refer to the dedicated [`ARCHITECTURE.md`](ARCHITECTURE.md) document.
 
 ---
 
 ## 🛠 Tech Stack
 
-- Arduino Framework (ESP32)
-- ESPAsyncWebServer + AsyncTCP
-- LittleFS / SD
-- ArduinoJson
-- RtcDS1302
-- FlowSensor library
+- **Firmware:** Arduino Framework (ESP32-C3 / RISC-V)
+- **Web Stack:** ESPAsyncWebServer + AsyncTCP, ArduinoJson
+- **Frontend Core:** HTML5, Vanilla JavaScript, CSS3
+- **Hardware Libs:** LittleFS, SD, RtcDS1302 (Makuna), FlowSensor
 
 ---
 
-## 📄 License
-
-Internal / Custom project.
+*Internal / Custom Project. Built exclusively for Villeroy & Boch Bulgaria.*
