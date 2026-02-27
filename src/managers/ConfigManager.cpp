@@ -79,6 +79,7 @@ static void applyDefaults() {
     // ── Theme ─────────────────────────────────────────────────────────────────
     if (!strlen(config.theme.primaryColor))      strcpy(config.theme.primaryColor,      "#275673");
     if (!strlen(config.theme.secondaryColor))    strcpy(config.theme.secondaryColor,    "#4a5568");
+    if (!strlen(config.theme.accentColor))       strcpy(config.theme.accentColor,       "#3182ce");
     if (!strlen(config.theme.lightBgColor))      strcpy(config.theme.lightBgColor,      "#f0f2f5");
     if (!strlen(config.theme.lightTextColor))    strcpy(config.theme.lightTextColor,    "#2d3748");
     if (!strlen(config.theme.darkBgColor))       strcpy(config.theme.darkBgColor,       "#0f172a");
@@ -305,6 +306,7 @@ void migrateConfig(uint8_t fromVersion) {
         if (!strlen(config.network.apPassword)) strcpy(config.network.apPassword, DEFAULT_AP_PASSWORD);
     }
     config.version = CONFIG_VERSION;
+    config.hardware.version = CONFIG_VERSION;
     saveConfig();
 }
 
@@ -319,6 +321,14 @@ bool loadConfig() {
         Serial.println("[CFG] LittleFS mount failed – using hardcoded defaults");
         loadDefaultConfig();
         return false;
+    }
+
+    // ── Recover interrupted crash-safe write ─────────────────────────────────
+    if (!LittleFS.exists(CONFIG_FILE) && LittleFS.exists("/config.tmp")) {
+        Serial.println("[CFG] Recovering config from temp file");
+        LittleFS.rename("/config.tmp", CONFIG_FILE);
+    } else if (LittleFS.exists("/config.tmp")) {
+        LittleFS.remove("/config.tmp");   // stale temp, real file exists
     }
 
     // ── Open config file ──────────────────────────────────────────────────────
@@ -465,10 +475,29 @@ bool loadConfig() {
 bool saveConfig() {
     config.magic   = CONFIG_STRUCT_MAGIC;
     config.version = CONFIG_VERSION;
-    File f = LittleFS.open(CONFIG_FILE, "w");
-    if (!f) { DBGLN("Failed to save config"); return false; }
-    f.write((uint8_t*)&config, sizeof(DeviceConfig));
+
+    // Crash-safe write: write to temp file, then rename over the real one.
+    // If power is lost during write, the original config.bin remains intact.
+    static const char* TMP_FILE = "/config.tmp";
+
+    File f = LittleFS.open(TMP_FILE, "w");
+    if (!f) { DBGLN("Failed to open config temp file"); return false; }
+    size_t written = f.write((uint8_t*)&config, sizeof(DeviceConfig));
     f.close();
+
+    if (written != sizeof(DeviceConfig)) {
+        DBGLN("Config write incomplete");
+        LittleFS.remove(TMP_FILE);
+        return false;
+    }
+
+    // Atomic-ish rename: LittleFS rename overwrites the destination
+    LittleFS.remove(CONFIG_FILE);
+    if (!LittleFS.rename(TMP_FILE, CONFIG_FILE)) {
+        DBGLN("Config rename failed");
+        return false;
+    }
+
     DBGLN("Config saved");
     return true;
 }

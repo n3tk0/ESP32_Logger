@@ -1,6 +1,6 @@
 /**
  * src/web/WebServer.cpp
- * ESP32 Water Logger v4.1.5 – Refactored: static files from LittleFS /www/
+ * ESP32 Water Logger v4.2.0 – Production audit hardening
  *
  * Architecture:
  *   – Normal mode  : AsyncWebServer serves /www/index.html + /www/web.js
@@ -23,6 +23,10 @@
 #include <WiFi.h>
 #include <functional>
 #include <vector>
+#include <math.h>
+
+// Safe strncpy that always null-terminates
+#define SAFE_STRNCPY(dst, src, n) do { strncpy(dst, src, (n) - 1); dst[(n) - 1] = '\0'; } while(0)
 
 // ============================================================================
 // HELPERS
@@ -519,7 +523,7 @@ void setupWebServer() {
     //   netInit:     wifi, network, ip
     // =========================================================================
     server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *r) {
-        StaticJsonDocument<1024> doc;
+        StaticJsonDocument<2048> doc;
 
         // ── Identity ──────────────────────────────────────────────────────────
         doc["device"]         = strlen(config.deviceName) ? config.deviceName : "Water Logger";
@@ -627,7 +631,8 @@ void setupWebServer() {
         doc["totalPulses"] = cycleTotalPulses + safePulses;
 
         const char* stateNames[] = {"IDLE", "WAIT_FLOW", "MONITORING", "DONE"};
-        doc["state"]     = stateNames[loggingState];
+        int stateIdx = (loggingState >= 0 && loggingState <= 3) ? loggingState : 0;
+        doc["state"]     = stateNames[stateIdx];
         doc["stateTime"] = (millis() - stateStartTime) / 1000;
 
         if (loggingState == STATE_WAIT_FLOW) {
@@ -688,15 +693,29 @@ void setupWebServer() {
             return;
         }
 
+        // Efficient tail-read: seek to last ~1KB of file instead of reading every line
         char lastLines[5][160];
         int lCount = 0;
-        
+        size_t fSize = f.size();
+        const size_t TAIL_BYTES = 1024;
+
+        if (fSize > TAIL_BYTES) {
+            f.seek(fSize - TAIL_BYTES);
+            f.readStringUntil('\n');   // discard partial first line
+        }
+
+        char lineBuf[160];
         while (f.available()) {
-            String line = f.readStringUntil('\n');
-            line.trim();
-            if (line.length() > 0) {
-                strncpy(lastLines[lCount % 5], line.c_str(), 159);
-                lastLines[lCount % 5][159] = '\0';
+            int i = 0;
+            while (f.available() && i < 159) {
+                char c = f.read();
+                if (c == '\n' || c == '\r') break;
+                lineBuf[i++] = c;
+            }
+            lineBuf[i] = '\0';
+            // skip empty lines
+            if (i > 0) {
+                memcpy(lastLines[lCount % 5], lineBuf, i + 1);
                 lCount++;
             }
         }
@@ -948,11 +967,11 @@ void setupWebServer() {
 
     server.on("/save_device", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (r->hasParam("deviceName", true))
-            strncpy(config.deviceName, r->getParam("deviceName", true)->value().c_str(), 32);
+            SAFE_STRNCPY(config.deviceName, r->getParam("deviceName", true)->value().c_str(), sizeof(config.deviceName));
         if (r->hasParam("deviceId", true)) {
             String newId = r->getParam("deviceId", true)->value();
             if (newId.length() > 0 && newId.length() <= 12)
-                strncpy(config.deviceId, newId.c_str(), sizeof(config.deviceId) - 1);
+                SAFE_STRNCPY(config.deviceId, newId.c_str(), sizeof(config.deviceId));
         }
         config.forceWebServer = r->hasParam("forceWebServer", true);
         if (r->hasParam("defaultStorageView", true))
@@ -962,17 +981,21 @@ void setupWebServer() {
     });
 
     server.on("/save_flowmeter", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (r->hasParam("pulsesPerLiter", true))
-            config.flowMeter.pulsesPerLiter = r->getParam("pulsesPerLiter", true)->value().toFloat();
-        if (r->hasParam("calibrationMultiplier", true))
-            config.flowMeter.calibrationMultiplier = r->getParam("calibrationMultiplier", true)->value().toFloat();
+        if (r->hasParam("pulsesPerLiter", true)) {
+            float v = r->getParam("pulsesPerLiter", true)->value().toFloat();
+            config.flowMeter.pulsesPerLiter = (v >= 1.0f && isfinite(v)) ? v : 450.0f;
+        }
+        if (r->hasParam("calibrationMultiplier", true)) {
+            float v = r->getParam("calibrationMultiplier", true)->value().toFloat();
+            config.flowMeter.calibrationMultiplier = (v > 0.0f && isfinite(v)) ? v : 1.0f;
+        }
         if (r->hasParam("monitoringWindowSecs", true))
-            config.flowMeter.monitoringWindowSecs = r->getParam("monitoringWindowSecs", true)->value().toInt();
+            config.flowMeter.monitoringWindowSecs = max(1, r->getParam("monitoringWindowSecs", true)->value().toInt());
         if (r->hasParam("firstLoopWindowSecs", true))
-            config.flowMeter.firstLoopMonitoringWindowSecs = r->getParam("firstLoopWindowSecs", true)->value().toInt();
+            config.flowMeter.firstLoopMonitoringWindowSecs = max(1, r->getParam("firstLoopWindowSecs", true)->value().toInt());
         config.flowMeter.testMode = r->hasParam("testMode", true);
         if (r->hasParam("blinkDuration", true))
-            config.flowMeter.blinkDuration = r->getParam("blinkDuration", true)->value().toInt();
+            config.flowMeter.blinkDuration = max(50, r->getParam("blinkDuration", true)->value().toInt());
         if (r->hasParam("resetBootCount", true)) { bootCount = 0; backupBootCount(); }
         saveConfig();
         r->send(200, "application/json", "{\"ok\":true}");
@@ -997,41 +1020,40 @@ void setupWebServer() {
         if (r->hasParam("debugMode", true))      config.hardware.debugMode      = r->getParam("debugMode", true)->value() == "1";
         saveConfig();
         sendRestartPage(r, "Device is restarting with new hardware settings.");
-        safeWiFiShutdown();
-        delay(100);
-        ESP.restart();
+        shouldRestart = true;
+        restartTimer  = millis();
     });
 
     server.on("/save_theme", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (r->hasParam("themeMode", true))        config.theme.mode           = (ThemeMode)r->getParam("themeMode", true)->value().toInt();
         config.theme.showIcons = r->hasParam("showIcons", true);
-        if (r->hasParam("primaryColor", true))     strncpy(config.theme.primaryColor,      r->getParam("primaryColor", true)->value().c_str(), 7);
-        if (r->hasParam("secondaryColor", true))   strncpy(config.theme.secondaryColor,    r->getParam("secondaryColor", true)->value().c_str(), 7);
-        if (r->hasParam("lightBgColor", true))     strncpy(config.theme.lightBgColor,      r->getParam("lightBgColor", true)->value().c_str(), 7);
-        if (r->hasParam("lightTextColor", true))   strncpy(config.theme.lightTextColor,    r->getParam("lightTextColor", true)->value().c_str(), 7);
-        if (r->hasParam("darkBgColor", true))      strncpy(config.theme.darkBgColor,       r->getParam("darkBgColor", true)->value().c_str(), 7);
-        if (r->hasParam("darkTextColor", true))    strncpy(config.theme.darkTextColor,     r->getParam("darkTextColor", true)->value().c_str(), 7);
-        if (r->hasParam("ffColor", true))          strncpy(config.theme.ffColor,           r->getParam("ffColor", true)->value().c_str(), 7);
-        if (r->hasParam("pfColor", true))          strncpy(config.theme.pfColor,           r->getParam("pfColor", true)->value().c_str(), 7);
-        if (r->hasParam("otherColor", true))       strncpy(config.theme.otherColor,        r->getParam("otherColor", true)->value().c_str(), 7);
-        if (r->hasParam("storageBarColor", true))  strncpy(config.theme.storageBarColor,   r->getParam("storageBarColor", true)->value().c_str(), 7);
-        if (r->hasParam("storageBar70Color", true))strncpy(config.theme.storageBar70Color, r->getParam("storageBar70Color", true)->value().c_str(), 7);
-        if (r->hasParam("storageBar90Color", true))strncpy(config.theme.storageBar90Color, r->getParam("storageBar90Color", true)->value().c_str(), 7);
-        if (r->hasParam("storageBarBorder", true)) strncpy(config.theme.storageBarBorder,  r->getParam("storageBarBorder", true)->value().c_str(), 7);
-        if (r->hasParam("logoSource", true))       strncpy(config.theme.logoSource,        r->getParam("logoSource", true)->value().c_str(), 128);
-        if (r->hasParam("faviconPath", true))      strncpy(config.theme.faviconPath,       r->getParam("faviconPath", true)->value().c_str(), 32);
-        if (r->hasParam("boardDiagramPath", true)) strncpy(config.theme.boardDiagramPath,  r->getParam("boardDiagramPath", true)->value().c_str(), 64);
+        if (r->hasParam("primaryColor", true))     SAFE_STRNCPY(config.theme.primaryColor,      r->getParam("primaryColor", true)->value().c_str(), sizeof(config.theme.primaryColor));
+        if (r->hasParam("secondaryColor", true))   SAFE_STRNCPY(config.theme.secondaryColor,    r->getParam("secondaryColor", true)->value().c_str(), sizeof(config.theme.secondaryColor));
+        if (r->hasParam("lightBgColor", true))     SAFE_STRNCPY(config.theme.lightBgColor,      r->getParam("lightBgColor", true)->value().c_str(), sizeof(config.theme.lightBgColor));
+        if (r->hasParam("lightTextColor", true))   SAFE_STRNCPY(config.theme.lightTextColor,    r->getParam("lightTextColor", true)->value().c_str(), sizeof(config.theme.lightTextColor));
+        if (r->hasParam("darkBgColor", true))      SAFE_STRNCPY(config.theme.darkBgColor,       r->getParam("darkBgColor", true)->value().c_str(), sizeof(config.theme.darkBgColor));
+        if (r->hasParam("darkTextColor", true))    SAFE_STRNCPY(config.theme.darkTextColor,     r->getParam("darkTextColor", true)->value().c_str(), sizeof(config.theme.darkTextColor));
+        if (r->hasParam("ffColor", true))          SAFE_STRNCPY(config.theme.ffColor,           r->getParam("ffColor", true)->value().c_str(), sizeof(config.theme.ffColor));
+        if (r->hasParam("pfColor", true))          SAFE_STRNCPY(config.theme.pfColor,           r->getParam("pfColor", true)->value().c_str(), sizeof(config.theme.pfColor));
+        if (r->hasParam("otherColor", true))       SAFE_STRNCPY(config.theme.otherColor,        r->getParam("otherColor", true)->value().c_str(), sizeof(config.theme.otherColor));
+        if (r->hasParam("storageBarColor", true))  SAFE_STRNCPY(config.theme.storageBarColor,   r->getParam("storageBarColor", true)->value().c_str(), sizeof(config.theme.storageBarColor));
+        if (r->hasParam("storageBar70Color", true))SAFE_STRNCPY(config.theme.storageBar70Color, r->getParam("storageBar70Color", true)->value().c_str(), sizeof(config.theme.storageBar70Color));
+        if (r->hasParam("storageBar90Color", true))SAFE_STRNCPY(config.theme.storageBar90Color, r->getParam("storageBar90Color", true)->value().c_str(), sizeof(config.theme.storageBar90Color));
+        if (r->hasParam("storageBarBorder", true)) SAFE_STRNCPY(config.theme.storageBarBorder,  r->getParam("storageBarBorder", true)->value().c_str(), sizeof(config.theme.storageBarBorder));
+        if (r->hasParam("logoSource", true))       SAFE_STRNCPY(config.theme.logoSource,        r->getParam("logoSource", true)->value().c_str(), sizeof(config.theme.logoSource));
+        if (r->hasParam("faviconPath", true))      SAFE_STRNCPY(config.theme.faviconPath,       r->getParam("faviconPath", true)->value().c_str(), sizeof(config.theme.faviconPath));
+        if (r->hasParam("boardDiagramPath", true)) SAFE_STRNCPY(config.theme.boardDiagramPath,  r->getParam("boardDiagramPath", true)->value().c_str(), sizeof(config.theme.boardDiagramPath));
         if (r->hasParam("chartSource", true))      config.theme.chartSource      = (ChartSource)r->getParam("chartSource", true)->value().toInt();
-        if (r->hasParam("chartLocalPath", true))   strncpy(config.theme.chartLocalPath,    r->getParam("chartLocalPath", true)->value().c_str(), 64);
+        if (r->hasParam("chartLocalPath", true))   SAFE_STRNCPY(config.theme.chartLocalPath,    r->getParam("chartLocalPath", true)->value().c_str(), sizeof(config.theme.chartLocalPath));
         if (r->hasParam("chartLabelFormat", true)) config.theme.chartLabelFormat = (ChartLabelFormat)r->getParam("chartLabelFormat", true)->value().toInt();
         saveConfig();
         r->send(200, "application/json", "{\"ok\":true}");
     });
 
     server.on("/save_datalog", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (r->hasParam("currentFile", true))  strncpy(config.datalog.currentFile, r->getParam("currentFile", true)->value().c_str(), 64);
-        if (r->hasParam("prefix", true))       strncpy(config.datalog.prefix,      r->getParam("prefix", true)->value().c_str(), 32);
-        if (r->hasParam("folder", true))       strncpy(config.datalog.folder,      r->getParam("folder", true)->value().c_str(), 32);
+        if (r->hasParam("currentFile", true))  SAFE_STRNCPY(config.datalog.currentFile, r->getParam("currentFile", true)->value().c_str(), sizeof(config.datalog.currentFile));
+        if (r->hasParam("prefix", true))       SAFE_STRNCPY(config.datalog.prefix,      r->getParam("prefix", true)->value().c_str(), sizeof(config.datalog.prefix));
+        if (r->hasParam("folder", true))       SAFE_STRNCPY(config.datalog.folder,      r->getParam("folder", true)->value().c_str(), sizeof(config.datalog.folder));
         if (r->hasParam("rotation", true))     config.datalog.rotation    = (DatalogRotation)r->getParam("rotation", true)->value().toInt();
         if (r->hasParam("maxSizeKB", true))    config.datalog.maxSizeKB   = constrain(r->getParam("maxSizeKB", true)->value().toInt(), 10, 10000);
         if (r->hasParam("maxEntries", true))   config.datalog.maxEntries  = constrain(r->getParam("maxEntries", true)->value().toInt(), 10, 100000);
@@ -1076,9 +1098,12 @@ void setupWebServer() {
             File f = activeFS->open(newFile, "w");
             if (f) {
                 f.close();
-                strncpy(config.datalog.currentFile, newFile.c_str(), 64);
+                SAFE_STRNCPY(config.datalog.currentFile, newFile.c_str(), sizeof(config.datalog.currentFile));
                 saveConfig();
                 r->send(200, "application/json", "{\"ok\":true,\"file\":\"" + newFile + "\"}");
+                return;
+            } else {
+                r->send(500, "application/json", "{\"ok\":false,\"error\":\"Failed to create file\"}");
                 return;
             }
         }
@@ -1087,14 +1112,19 @@ void setupWebServer() {
 
     server.on("/save_network", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (r->hasParam("wifiMode", true))       config.network.wifiMode = (WiFiModeType)r->getParam("wifiMode", true)->value().toInt();
-        if (r->hasParam("apSSID", true))         strncpy(config.network.apSSID,         r->getParam("apSSID", true)->value().c_str(), 32);
-        if (r->hasParam("apPassword", true))     strncpy(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), 64);
-        if (r->hasParam("clientSSID", true))     strncpy(config.network.clientSSID,     r->getParam("clientSSID", true)->value().c_str(), 32);
-        if (r->hasParam("clientPassword", true)) strncpy(config.network.clientPassword, r->getParam("clientPassword", true)->value().c_str(), 64);
+        if (r->hasParam("apSSID", true))         SAFE_STRNCPY(config.network.apSSID,         r->getParam("apSSID", true)->value().c_str(), sizeof(config.network.apSSID));
+        if (r->hasParam("apPassword", true))     SAFE_STRNCPY(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), sizeof(config.network.apPassword));
+        if (r->hasParam("clientSSID", true))     SAFE_STRNCPY(config.network.clientSSID,     r->getParam("clientSSID", true)->value().c_str(), sizeof(config.network.clientSSID));
+        if (r->hasParam("clientPassword", true)) SAFE_STRNCPY(config.network.clientPassword, r->getParam("clientPassword", true)->value().c_str(), sizeof(config.network.clientPassword));
         config.network.useStaticIP = r->hasParam("useStaticIP", true);
 
         auto parseIP = [&](const char* param, uint8_t* dst) {
-            if (r->hasParam(param, true)) sscanf(r->getParam(param, true)->value().c_str(), "%hhu.%hhu.%hhu.%hhu", dst, dst+1, dst+2, dst+3);
+            if (r->hasParam(param, true)) {
+                uint8_t tmp[4];
+                if (sscanf(r->getParam(param, true)->value().c_str(), "%hhu.%hhu.%hhu.%hhu", &tmp[0], &tmp[1], &tmp[2], &tmp[3]) == 4) {
+                    memcpy(dst, tmp, 4);
+                }
+            }
         };
         parseIP("staticIP",  config.network.staticIP);
         parseIP("gateway",   config.network.gateway);
@@ -1106,13 +1136,12 @@ void setupWebServer() {
 
         saveConfig();
         sendRestartPage(r, "Device is restarting with new network settings.");
-        safeWiFiShutdown();
-        delay(100);
-        ESP.restart();
+        shouldRestart = true;
+        restartTimer  = millis();
     });
 
     server.on("/save_time", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (r->hasParam("ntpServer", true)) strncpy(config.network.ntpServer, r->getParam("ntpServer", true)->value().c_str(), 64);
+        if (r->hasParam("ntpServer", true)) SAFE_STRNCPY(config.network.ntpServer, r->getParam("ntpServer", true)->value().c_str(), sizeof(config.network.ntpServer));
         if (r->hasParam("timezone", true))  config.network.timezone = r->getParam("timezone", true)->value().toInt();
         saveConfig();
         r->send(200, "application/json", "{\"ok\":true}");
@@ -1230,8 +1259,9 @@ void setupWebServer() {
         }
     });
 
-    server.on("/delete", HTTP_GET, [](AsyncWebServerRequest *r) {
-        if (!r->hasParam("path")) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing path\"}"); return; }
+    // Accept both GET (legacy web.js compat) and POST (preferred)
+    auto deleteHandler = [](AsyncWebServerRequest *r) {
+        if (!r->hasParam("path") && !r->hasParam("path", true)) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing path\"}"); return; }
         String path = sanitizePath(r->getParam("path")->value());
         if (path == "/") { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Refusing to delete root\"}"); return; }
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
@@ -1247,7 +1277,9 @@ void setupWebServer() {
             deleted = isDir ? deleteRecursive(*targetFS, path) : targetFS->remove(path);
         }
         r->send(200, "application/json", deleted ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"Delete failed\"}");
-    });
+    };
+    server.on("/delete", HTTP_GET,  deleteHandler);  // legacy compat
+    server.on("/delete", HTTP_POST, deleteHandler);   // preferred
 
     server.on("/mkdir", HTTP_GET, [](AsyncWebServerRequest *r) {
         fs::FS* targetFS = getCurrentViewFS();
@@ -1279,16 +1311,19 @@ void setupWebServer() {
         r->send(200, "application/json", ok ? "{\"ok\":true,\"dst\":\"" + dstPath + "\"}" : "{\"ok\":false}");
     });
 
+    // Upload handler: file handle stored per-request to prevent concurrent corruption
     server.on("/upload", HTTP_POST,
         [](AsyncWebServerRequest *r) {
+            // Clean up request-scoped file handle
+            File* fp = (File*)r->_tempObject;
+            if (fp) { if (*fp) fp->close(); delete fp; r->_tempObject = nullptr; }
             r->send(200, "application/json", "{\"ok\":true}");
         },
         [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-            static File   _upFile;
-            static String _upPath = "";
-
             if (index == 0) {
-                if (_upFile) { _upFile.close(); }
+                // Clean up any leftover handle from a previous aborted upload
+                File* old = (File*)request->_tempObject;
+                if (old) { if (*old) old->close(); delete old; }
 
                 String upDir = request->hasParam("path")
                                ? request->getParam("path")->value()
@@ -1303,27 +1338,34 @@ void setupWebServer() {
                 fs::FS* targetFS = (upStorage == "sdcard" && sdAvailable)
                                    ? (fs::FS*)&SD
                                    : (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
-                if (!targetFS) { Serial.println("Upload: no filesystem available"); return; }
+                if (!targetFS) { Serial.println("Upload: no filesystem available"); request->_tempObject = nullptr; return; }
                 if (upDir != "/") targetFS->mkdir(upDir);
 
-                _upPath = (upDir == "/") ? "/" + filename : upDir + "/" + filename;
-                Serial.printf("Upload start [%s]: %s\n", upStorage.c_str(), _upPath.c_str());
+                String upPath = (upDir == "/") ? "/" + filename : upDir + "/" + filename;
+                Serial.printf("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
 
-                _upFile = targetFS->open(_upPath, FILE_WRITE);
-                if (!_upFile) {
-                    Serial.printf("Upload: cannot open %s for write\n", _upPath.c_str());
+                File* fp = new File(targetFS->open(upPath, FILE_WRITE));
+                if (!fp || !*fp) {
+                    Serial.printf("Upload: cannot open %s for write\n", upPath.c_str());
+                    if (fp) delete fp;
+                    request->_tempObject = nullptr;
                     return;
                 }
+                request->_tempObject = fp;
             }
 
-            if (_upFile && len) _upFile.write(data, len);
+            File* fp = (File*)request->_tempObject;
+            if (fp && *fp && len) fp->write(data, len);
 
             if (final) {
-                if (_upFile) {
-                    _upFile.close();
-                    Serial.printf("Upload done: %s (%u bytes)\n", _upPath.c_str(), (unsigned)(index + len));
+                if (fp) {
+                    if (*fp) {
+                        Serial.printf("Upload done: %s (%u bytes)\n", filename.c_str(), (unsigned)(index + len));
+                        fp->close();
+                    }
+                    delete fp;
+                    request->_tempObject = nullptr;
                 }
-                _upPath = "";
             }
         }
     );
@@ -1337,25 +1379,25 @@ void setupWebServer() {
             if (_importBuf.isEmpty()) { r->send(400, "text/plain", "No data"); return; }
             JsonDocument doc;
             DeserializationError err = deserializeJson(doc, _importBuf);
-            _importBuf = "";
+            _importBuf = String();   // release heap buffer, not just clear
             if (err) { r->send(400, "text/plain", String("JSON error: ") + err.c_str()); return; }
 
-            if (doc["deviceName"].is<const char*>()) strncpy(config.deviceName, doc["deviceName"], 32);
+            if (doc["deviceName"].is<const char*>()) SAFE_STRNCPY(config.deviceName, doc["deviceName"], sizeof(config.deviceName));
             if (doc["forceWebServer"].is<bool>()) config.forceWebServer = doc["forceWebServer"];
 
             if (doc["theme"].is<JsonObject>()) {
                 JsonObject t = doc["theme"];
                 if (t["mode"].is<int>()) config.theme.mode = (ThemeMode)(int)t["mode"];
-                auto cp7 = [&](const char* k, char* dst){ if(t[k].is<const char*>()) strncpy(dst, t[k], 7); };
-                cp7("primaryColor",   config.theme.primaryColor);
-                cp7("secondaryColor", config.theme.secondaryColor);
-                cp7("lightBgColor",   config.theme.lightBgColor);
-                cp7("lightTextColor", config.theme.lightTextColor);
-                cp7("darkBgColor",    config.theme.darkBgColor);
-                cp7("darkTextColor",  config.theme.darkTextColor);
-                cp7("ffColor",        config.theme.ffColor);
-                cp7("pfColor",        config.theme.pfColor);
-                cp7("otherColor",     config.theme.otherColor);
+                auto cpColor = [&](const char* k, char* dst, size_t sz){ if(t[k].is<const char*>()) SAFE_STRNCPY(dst, t[k], sz); };
+                cpColor("primaryColor",   config.theme.primaryColor,   sizeof(config.theme.primaryColor));
+                cpColor("secondaryColor", config.theme.secondaryColor, sizeof(config.theme.secondaryColor));
+                cpColor("lightBgColor",   config.theme.lightBgColor,   sizeof(config.theme.lightBgColor));
+                cpColor("lightTextColor", config.theme.lightTextColor, sizeof(config.theme.lightTextColor));
+                cpColor("darkBgColor",    config.theme.darkBgColor,    sizeof(config.theme.darkBgColor));
+                cpColor("darkTextColor",  config.theme.darkTextColor,  sizeof(config.theme.darkTextColor));
+                cpColor("ffColor",        config.theme.ffColor,        sizeof(config.theme.ffColor));
+                cpColor("pfColor",        config.theme.pfColor,        sizeof(config.theme.pfColor));
+                cpColor("otherColor",     config.theme.otherColor,     sizeof(config.theme.otherColor));
                 if (t["showIcons"].is<bool>())        config.theme.showIcons        = t["showIcons"];
                 if (t["chartSource"].is<int>())       config.theme.chartSource       = (ChartSource)(int)t["chartSource"];
                 if (t["chartLabelFormat"].is<int>())  config.theme.chartLabelFormat  = (ChartLabelFormat)(int)t["chartLabelFormat"];
@@ -1387,7 +1429,7 @@ void setupWebServer() {
             if (doc["network"].is<JsonObject>()) {
                 JsonObject net = doc["network"];
                 if (net["wifiMode"].is<int>())         config.network.wifiMode   = (WiFiModeType)(int)net["wifiMode"];
-                if (net["ntpServer"].is<const char*>()) strncpy(config.network.ntpServer, net["ntpServer"], 64);
+                if (net["ntpServer"].is<const char*>()) SAFE_STRNCPY(config.network.ntpServer, net["ntpServer"], sizeof(config.network.ntpServer));
                 if (net["timezone"].is<int>())         config.network.timezone   = net["timezone"];
                 if (net["useStaticIP"].is<bool>())     config.network.useStaticIP= net["useStaticIP"];
             }

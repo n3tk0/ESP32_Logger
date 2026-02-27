@@ -69,11 +69,11 @@ bool connectToWiFi() {
     WiFi.begin(config.network.clientSSID, config.network.clientPassword);
 
     unsigned long start = millis();
+    unsigned long lastDot = 0;
     while (WiFi.status() != WL_CONNECTED &&
            millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
         yield();
         esp_task_wdt_reset();
-        static unsigned long lastDot = 0;
         if (millis() - lastDot >= 250) { Serial.print("."); lastDot = millis(); }
     }
 

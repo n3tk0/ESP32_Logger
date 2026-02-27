@@ -159,8 +159,6 @@ void configureWakeup() {
         ? ESP_GPIO_WAKEUP_GPIO_HIGH
         : ESP_GPIO_WAKEUP_GPIO_LOW;
 
-    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-
     esp_err_t err = esp_deep_sleep_enable_gpio_wakeup(mask, mode);
     if (err != ESP_OK) {
         Serial.printf("WAKEUP CONFIG ERROR: esp_deep_sleep_enable_gpio_wakeup failed (%d)\n", (int)err);

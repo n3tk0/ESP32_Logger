@@ -24,7 +24,6 @@ void IRAM_ATTR onPFButton() {
 void IRAM_ATTR onFlowPulse() {
     unsigned long now = micros();
     if (now - lastFlowInterrupt > ISR_DEBOUNCE_MICROS) {
-        if (Sensor) Sensor->count();
         pulseCount++;
         lastFlowInterrupt = now;
         flowSensorPulseDetected = true;

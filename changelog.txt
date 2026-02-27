@@ -1,3 +1,26 @@
+## v4.2.0 - Production audit hardening
+- CRITICAL: Crash-safe config writes (write-to-temp-then-rename pattern prevents corruption on power loss)
+- CRITICAL: Division-by-zero guard on pulsesPerLiter/calibrationMultiplier in all calculation paths
+- CRITICAL: save_hardware/save_network now use deferred restart (response is sent before ESP.restart)
+- CRITICAL: Upload handler uses per-request file handle instead of static — safe for concurrent uploads
+- CRITICAL: /api/recent_logs uses efficient tail-seek (last 1KB) instead of reading entire file — prevents heap exhaustion
+- CRITICAL: maxEntries limit now enforced — oldest log entries trimmed when limit exceeded
+- WARNING: All strncpy calls in save handlers replaced with SAFE_STRNCPY (guaranteed null-termination)
+- WARNING: StaticJsonDocument size increased to 2048 for /api/status to prevent overflow
+- WARNING: /delete endpoint now accepts POST (preferred) in addition to GET (legacy compat)
+- WARNING: IP address parsing validates sscanf return value (all 4 octets required)
+- WARNING: Removed dead FlowSensor->count() call from ISR (Sensor never instantiated)
+- WARNING: config.hardware.version now synced in migrateConfig()
+- WARNING: accentColor field added to applyDefaults()
+- WARNING: save_datalog file creation failure now returns proper error response
+- WARNING: loggingState bounds-checked before array access in /api/live
+- WARNING: Duplicate esp_sleep_disable_wakeup_source call removed
+- OPT: Static lastDot in connectToWiFi changed to local (no stale value between calls)
+- OPT: _importBuf releases heap on clear (= String() vs = "")
+- OPT: Log entry line builder uses String::reserve(120)
+- OPT: bootCount safely cast to uint16_t with mask in LogEntry
+- CONFIG_VERSION remains 12 (no struct layout changes)
+
 ## v4.1.5 - SPA refactor & recovery hardening
 - Web UI migrated to external SPA in LittleFS `/www/` (`index.html`, `web.js`, `style.css`).
 - Added robust recovery flow:

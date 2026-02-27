@@ -6,8 +6,8 @@
 // VERSION  –  single source of truth
 // ============================================================================
 #define VERSION_MAJOR 4
-#define VERSION_MINOR 1
-#define VERSION_PATCH 5
+#define VERSION_MINOR 2
+#define VERSION_PATCH 0
 
 // Inline so every translation unit that includes Config.h gets the same
 // string without needing Utils.h
