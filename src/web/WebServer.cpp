@@ -990,12 +990,12 @@ void setupWebServer() {
             config.flowMeter.calibrationMultiplier = (v > 0.0f && isfinite(v)) ? v : 1.0f;
         }
         if (r->hasParam("monitoringWindowSecs", true))
-            config.flowMeter.monitoringWindowSecs = max(1, r->getParam("monitoringWindowSecs", true)->value().toInt());
+            config.flowMeter.monitoringWindowSecs = max(1L, r->getParam("monitoringWindowSecs", true)->value().toInt());
         if (r->hasParam("firstLoopWindowSecs", true))
-            config.flowMeter.firstLoopMonitoringWindowSecs = max(1, r->getParam("firstLoopWindowSecs", true)->value().toInt());
+            config.flowMeter.firstLoopMonitoringWindowSecs = max(1L, r->getParam("firstLoopWindowSecs", true)->value().toInt());
         config.flowMeter.testMode = r->hasParam("testMode", true);
         if (r->hasParam("blinkDuration", true))
-            config.flowMeter.blinkDuration = max(50, r->getParam("blinkDuration", true)->value().toInt());
+            config.flowMeter.blinkDuration = max(50L, r->getParam("blinkDuration", true)->value().toInt());
         if (r->hasParam("resetBootCount", true)) { bootCount = 0; backupBootCount(); }
         saveConfig();
         r->send(200, "application/json", "{\"ok\":true}");
