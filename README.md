@@ -61,8 +61,8 @@ Designed optimally for the **Seeed Studio XIAO ESP32-C3 (RISC-V)**.
 | **Wakeup FF** | D1 (GPIO 3) | Full Flush Trigger. |
 | **Wakeup PF** | D2 (GPIO 4) | Part Flush Trigger. |
 | **Flow Sensor**| D6 (GPIO 21)| Interfaced with the water flow meter. |
-| **RTC (DS1302)**| D7/D8/D9 | Real-Time Clock (CE, IO, SCLK). |
-| **SD Card SPI**| D? | Configurable via Hardware Settings. |
+| **RTC (DS1302)**| D3/D4/D5 | Real-Time Clock (CE, IO, SCLK). |
+| **SD Card SPI**| D7/D8/D9/D10 | Configurable via Hardware Settings. |
 
 ---
 
