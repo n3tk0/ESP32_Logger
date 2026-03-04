@@ -101,4 +101,9 @@ For an in-depth reading of the internal modules, file tree, request loops, and J
 
 ---
 
-*Internal / Custom Project.*
+<p align="center">
+  <a href="https://revolut.me/petk0g">
+    <img src="https://img.shields.io/badge/Support-Revolut-0666EB?style=for-the-badge&logo=revolut&logoColor=white" />
+  </a>
+</p>
+
