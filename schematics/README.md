@@ -24,8 +24,8 @@ This file is a cleaned and readable version of the original BOM and power notes 
 
 ### 💰 Total Cost
 
-- **Total (BGN):** 120.44 BGN
-- **Total (EUR):** 61.45 EUR
+- **Total (BGN):** 117.54 BGN
+- **Total (EUR):** 59.98 EUR
 
 ---
 
@@ -48,5 +48,5 @@ This file is a cleaned and readable version of the original BOM and power notes 
 ## 📊 Summary
 
 - Estimated runtime is based on the current measurements above.
-- Storage estimation is included for a 90-day logging scenario.
+- Storage estimation is included for a 90-day logging scenario on LittleFS and years for external SD storage.
 - BOM is optimized for the Version 2 hardware layout.
