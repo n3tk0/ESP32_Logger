@@ -16,14 +16,16 @@ This file is a cleaned and readable version of the original BOM and power notes 
 | Real-time clock | Модул часовник за реално време с DS1302 | 1 | 3.9 | 1.99 |
 | Flow meter | Водомер - YF-S201 | 1 | 17.9 | 9.13 |
 | Wires | Комплект многожични кабели | 1 | 15.9 | 8.11 |
+| SD card reader | micro SD конектор към 2,54mm | 1 | 7.5 | 3.83 |
+| SD card | Maxell микро SD карта 16GB Class 10 | 1 | 7.14 | 3.64 |
 | Fittings 1/2' - 3/8' | AIGNEP редуцир нипел-муфа G3/8 - G1/2 - 2050 | 1 | 3.5 | 1.79 |
 | Fittings 1/2' - 3/8' | AIGNEP редуцир муфа с две вътрешни резби G3/8 - G1/2 - 3010 | 1 | 3.5 | 1.79 |
 | Flex hose 10-15cm | Гъвкава връзка G3/8 - 15см | 1 | 3.5 | 1.79 |
 
 ### 💰 Total Cost
 
-- **Total (BGN):** 116.50 BGN
-- **Total (EUR):** 54.34 EUR
+- **Total (BGN):** 120.44 BGN
+- **Total (EUR):** 61.45 EUR
 
 ---
 
