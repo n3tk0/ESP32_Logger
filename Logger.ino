@@ -1,7 +1,7 @@
 /**************************************************************************************************
  * PROJECT: ESP32 Low-Power Water Usage Logger v4.2.0
  * TARGET:  XIAO ESP32-C3 (RISC-V)
- * AUTHOR:  Petko Georgiev / Villeroy & Boch Bulgaria
+ * AUTHOR:  Petko Georgiev
  *
  * МОДУЛНА СТРУКТУРА:
  *   src/core/Config.h/.cpp         – структури, enums, константи

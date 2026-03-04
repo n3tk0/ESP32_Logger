@@ -52,7 +52,7 @@
  *   v3.6.12 - Changelog from LittleFS, About card, DEBUG_MODE macro
  *   v3.6.10 - ISR-safe pulseCount, atomic operations, JS translations
  * 
- * AUTHOR: Petko Georgiev / Villeroy & Boch Bulgaria
+ * AUTHOR: Petko Georgiev
  **************************************************************************************************/
 
 // Version constants
@@ -2482,7 +2482,6 @@ void setupWebServer() {
             out.print(F("<div style='font-size:1.2rem;font-weight:bold;color:var(--primary);margin-bottom:0.5rem'>Water Logger</div>"));
             out.print(F("<div style='color:var(--text-muted);font-size:0.9rem'>Created by</div>"));
             out.print(F("<div style='font-weight:600;margin:0.5rem 0'>Petko Georgiev</div>"));
-            out.print(F("<div style='color:var(--text-muted);font-size:0.85rem'>Villeroy &amp; Boch Bulgaria</div>"));
             out.print(F("<div style='color:var(--text-muted);font-size:0.85rem;margin-top:0.25rem'>ðŸ“ Sevlievo, Bulgaria</div>"));
             out.print(F("</div></div></div>"));
             

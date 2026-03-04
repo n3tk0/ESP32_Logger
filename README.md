@@ -19,7 +19,6 @@ The system features a rich, responsive **Single Page Application (SPA)** served 
 This project recently underwent a major architectural migration (v4.1.x) from a monolithic `.ino` design to a highly scalable, modular codebase cleanly separating hardware logic, API endpoints, and frontend assets.
 
 - **Author:** Petko Georgiev
-- **Organization:** Villeroy & Boch Bulgaria
 
 ---
 
@@ -102,4 +101,4 @@ For an in-depth reading of the internal modules, file tree, request loops, and J
 
 ---
 
-*Internal / Custom Project. Built exclusively for Villeroy & Boch Bulgaria.*
+*Internal / Custom Project.*
