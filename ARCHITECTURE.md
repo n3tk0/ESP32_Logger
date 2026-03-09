@@ -21,12 +21,12 @@ The project strictly separates the C++ logic from the UI assets.
 ```text
 Water_logger/
 ├── Logger.ino               ← The main entry point (setup/loop), state machine, and deep-sleep logic.
-├── changelog.txt            ← Project release notes.
 ├── README.md                ← High-level project documentation.
 ├── ARCHITECTURE.md          ← This file.
 │
 ├── www/                     ← 🌐 FRONTEND: Assets served to the browser (Upload to LittleFS)
 │   ├── index.html           ← The single HTML file containing all UI views/templates.
+|   ├── changelog.txt        ← Project release notes.
 │   ├── web.js               ← Vanilla JS handling routing, DOM updates, and API calls.
 │   ├── style.css            ← Vanilla CSS defining the custom design system and layout.
 │   └── chart.min.js         ← Local dependency for rendering volume charts.
