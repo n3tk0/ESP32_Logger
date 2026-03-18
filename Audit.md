@@ -26,7 +26,7 @@
 | 13 | `last_read_ts` never updated | **CONFIRMED** | Every plugin sets `_lastReadTs = 0` after read. `SensorManager::tick()` never writes it |
 | 14 | Bus ownership implicit | **CONFIRMED** | No bus manager; each I2C sensor calls `Wire.begin()` independently |
 | 15 | `loadAndInit` always returns success | **CONFIRMED** | `ExportManager.cpp:44`: `return ok >= 0` — always true |
-| 16 | `if (!sensor["enabled"] | false)` logic bug | **CONFIRMED** | `SensorManager.cpp:63`: bitwise OR `|` instead of logical `||` — but ArduinoJson returns `bool`, so `|` is integer promotion to `int`; the result is functionally wrong: `!sensor["enabled"]` evaluates first, then `| false` is no-op. A sensor with `"enabled": true` evaluates `!true | false` = `false`, so the sensor is skipped. **This is actually a critical bug: ALL sensors with `"enabled": true` are silently skipped.** |
+| 16 | `if (!sensor["enabled"] | false)` logic bug | **OVERSTATED — Code smell, not a bug** | `SensorManager.cpp:63`: bitwise OR `|` instead of logical `||` — but operator precedence means `!` binds first: `!sensor["enabled"] | false` ≡ `(!sensor["enabled"]) | false`. For `"enabled": true`: `!true | false` = `0 | 0` = `0` → sensor processed ✓. For `"enabled": false`: `!false | false` = `1 | 0` = `1` → sensor skipped ✓. **Works correctly by accident.** The `| false` is a dead no-op and the expression is confusing, but not functionally broken. |
 | 17 | Ring buffer not actually lock-free | **CONFIRMED** | `DataPipeline.h:30-33`: `push()` modifies `_head` and `_tail` without atomics; protected externally by `webDataMutex` |
 
 ### Issues MISSED by the Original Audit
@@ -70,17 +70,17 @@
   ```
 - **Risk:** Low — additive change, no existing behavior altered for legacy mode.
 
-### C2: Sensor Enabled Check Logic Bug
-- **Root cause:** `SensorManager.cpp:63`: `if (!sensor["enabled"] | false)` — operator precedence means `!sensor["enabled"]` evaluates first (negating the bool), then `| false` is a no-op. For `"enabled": true`: `!true | false` = `0 | 0` = `0` → `continue` is NOT taken. Wait — re-checking: `!true` = `false` = `0`, `0 | false` = `0`, `if(0)` → sensor IS processed. For `"enabled": false`: `!false` = `true` = `1`, `1 | 0` = `1`, `if(1)` → `continue` → sensor skipped. **So it actually works correctly by accident**, but the intent is unclear and fragile. The audit's original claim that this is a logic bug is **overstated** — it works but is a code smell.
-- **Real-world impact:** None currently, but any refactor could break it.
+### C2: Sensor Enabled Check — Code Smell (Downgraded from Critical)
+- **Root cause:** `SensorManager.cpp:63`: `if (!sensor["enabled"] | false)` uses bitwise OR `|` instead of the intended ArduinoJson default-value pattern `(sensor["enabled"] | false)`. However, due to operator precedence, `!` binds first: the expression is `(!sensor["enabled"]) | false`. The `| false` is a dead no-op. The result is that enabled sensors are processed and disabled sensors are skipped — **correct behavior, by accident.**
+- **Real-world impact:** None currently, but the intent is unclear and any refactor (e.g., removing the `!` thinking the `| false` handles the default) could break it.
 - **Exact fix:**
   ```cpp
   // SensorManager.cpp:63 — replace:
   if (!sensor["enabled"] | false) continue;
-  // with:
-  if (!(sensor["enabled"] | false)) continue;
+  // with the clear, idiomatic form:
+  if (!sensor["enabled"]) continue;
   ```
-- **Risk:** None.
+- **Risk:** None. Functionally identical, just removes the confusing dead `| false`.
 
 ### C3: `/api/data` OOM on ESP32-C3
 - **Root cause:** `ApiHandlers.cpp:50-51,88`: allocates `2000 × sizeof(SensorReading)` + `501 × sizeof(SensorReading)` on heap. `SensorReading` is ~80 bytes → **160 KB + 40 KB = 200 KB peak** in a single request handler. ESP32-C3 has ~330 KB free heap at best.
@@ -153,7 +153,7 @@
 | 1.3 | **Add bounds check in ExportTask batch accumulation** | `ExportTask.cpp:23-25` | None |
 | 1.4 | **Reduce `MAX_RAW` to 500** in `/api/data` handler | `ApiHandlers.cpp:50` | Shorter query range |
 | 1.5 | **Fix `loadAndInit` return**: `ok >= 0` → `ok > 0` | `ExportManager.cpp:44` | Correct error reporting |
-| 1.6 | **Fix sensor enabled check**: `!sensor["enabled"] | false` → `!(sensor["enabled"] | false)` | `SensorManager.cpp:63` | None |
+| 1.6 | **Clarify sensor enabled check**: `!sensor["enabled"] | false` → `!sensor["enabled"]` (remove dead `| false`) | `SensorManager.cpp:63` | None |
 | 1.7 | **Add mutex to static `JsonLogger` in API handler** or create per-request instance | `ApiHandlers.cpp:80-84` | Minor perf overhead |
 | 1.8 | **Set `_lastReadTs`** in `SensorManager::tick()` after successful `readAll()` | `SensorManager.cpp:122` | None |
 
