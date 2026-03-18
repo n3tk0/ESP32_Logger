@@ -69,6 +69,46 @@ static uint8_t _detectPlatformMode() {
 }
 
 // ---------------------------------------------------------------------------
+// Read sleep_mode from /platform_config.json
+// Returns: 0 = deep (default), 1 = light, 2 = none, 3 = online
+// ---------------------------------------------------------------------------
+static uint8_t g_sleepMode = 0;
+
+static uint8_t _readSleepMode() {
+    if (!fsAvailable || !activeFS) return 0;
+    File f = activeFS->open("/platform_config.json", FILE_READ);
+    if (!f) return 0;
+    StaticJsonDocument<128> doc;
+    if (deserializeJson(doc, f) != DeserializationError::Ok) { f.close(); return 0; }
+    f.close();
+    const char* sm = doc["sleep_mode"] | "deep";
+    if (strcmp(sm, "light")  == 0) return 1;
+    if (strcmp(sm, "none")   == 0) return 2;
+    if (strcmp(sm, "online") == 0) return 3;
+    return 0; // "deep" or any unknown value → deep sleep
+}
+
+// ---------------------------------------------------------------------------
+// Execute the configured sleep (or no-op if sleep disabled).
+// Must be called with wakeup sources already configured.
+// ---------------------------------------------------------------------------
+static void _doSleep() {
+    if (g_sleepMode >= 2) {
+        // none / online: keep device awake, just yield
+        delay(100);
+        return;
+    }
+    if (g_sleepMode == 1) {
+        // Light sleep: WiFi maintained, faster wake
+        esp_light_sleep_start();
+        return;
+    }
+    // Deep sleep (default)
+    safeWiFiShutdown(); delay(50);
+    esp_deep_sleep_start();
+}
+
+// ---------------------------------------------------------------------------
 // Register all sensor plugins and init pipeline (called in continuous/hybrid)
 // ---------------------------------------------------------------------------
 static void _initPlatform() {
@@ -195,8 +235,18 @@ void setup() {
 
         setupWebServer();   // ← в WebServer.cpp
 
-        // Platform v5.0: start sensor pipeline in continuous/hybrid mode
+        // Platform v5.0: read sleep_mode, start sensor pipeline in continuous/hybrid mode
         {
+            g_sleepMode = _readSleepMode();
+            // Online sleep mode keeps device permanently awake with web server up
+            if (g_sleepMode == 3) {
+                onlineLoggerMode = true;
+                Serial.println("Sleep mode: ONLINE (WiFi + web server always active)");
+            } else {
+                const char* smNames[] = { "DEEP", "LIGHT", "NONE", "ONLINE" };
+                Serial.printf("Sleep mode: %s\n", smNames[g_sleepMode]);
+            }
+
             uint8_t platformMode = _detectPlatformMode();
             if (platformMode == 1 || platformMode == 2) {
                 _initPlatform();
@@ -326,12 +376,11 @@ void loop() {
                     currentWakeTimestamp = now.IsValid() ? now.Unix32Time() : 0;
                 }
                 highCountFF = 0; highCountPF = 0;
-            } else if (!onlineLoggerMode && !apModeTriggered && millis() - stateStartTime >= 2000) {
+            } else if (!onlineLoggerMode && g_sleepMode < 2 && !apModeTriggered && millis() - stateStartTime >= 2000) {
                 DBGLN("No button -> sleep");
                 configureWakeup();
                 Serial.flush();
-                safeWiFiShutdown(); delay(50);
-                esp_deep_sleep_start();
+                _doSleep();
             }
             break;
 
@@ -420,12 +469,11 @@ void loop() {
                 loggingState   = STATE_IDLE;
                 stateStartTime = millis(); cycleStartTime = millis();
                 lastFlowPulseTime = 0;
-            } else if (!shouldRestart) {
+            } else if (!shouldRestart && !onlineLoggerMode && g_sleepMode < 2) {
                 configureWakeup();
-                DBGLN("Deep sleep...");
+                DBGLN("Going to sleep...");
                 Serial.flush();
-                safeWiFiShutdown(); delay(50);
-                esp_deep_sleep_start();
+                _doSleep();
             }
             break;
         }

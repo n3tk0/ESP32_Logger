@@ -1838,6 +1838,12 @@ var CL_SENSOR_TYPES = [
     { value: 'wind',    label: 'Wind speed (anemometer)',           iface: 'pulse' }
 ];
 
+function clSleepModeCheck() {
+    var sEl = document.getElementById('cl-sleep-mode');
+    var wEl = document.getElementById('cl-online-warn');
+    if(sEl && wEl) wEl.style.display = (sEl.value === 'online') ? 'block' : 'none';
+}
+
 function clLoad() {
     var msg = document.getElementById('cl-msg');
     if(msg) { msg.textContent = ''; msg.className = ''; }
@@ -1845,6 +1851,10 @@ function clLoad() {
         // Mode
         var modeEl = document.getElementById('cl-mode');
         if(modeEl) modeEl.value = cfg.mode || 'legacy';
+
+        // Sleep mode
+        var sleepEl = document.getElementById('cl-sleep-mode');
+        if(sleepEl) { sleepEl.value = cfg.sleep_mode || 'deep'; clSleepModeCheck(); }
 
         // Aggregation defaults
         var agg = cfg.aggregation || {};
@@ -1940,7 +1950,8 @@ function clSave() {
     if(!PCFG) { if(msg){ msg.textContent='❌ No config loaded'; msg.className='alert alert-danger'; } return; }
 
     // Read form values back into PCFG
-    var modeEl = document.getElementById('cl-mode'); if(modeEl) PCFG.mode = modeEl.value;
+    var modeEl  = document.getElementById('cl-mode');       if(modeEl)  PCFG.mode       = modeEl.value;
+    var sleepEl = document.getElementById('cl-sleep-mode'); if(sleepEl) PCFG.sleep_mode = sleepEl.value;
 
     if(!PCFG.aggregation) PCFG.aggregation = {};
     var amEl = document.getElementById('cl-aggmode');   if(amEl) PCFG.aggregation.default_mode = amEl.value;

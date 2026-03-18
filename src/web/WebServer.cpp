@@ -117,6 +117,18 @@ progress{width:100%;height:8px;border-radius:4px;margin-top:8px;display:none}
 .legacy{background:#fff3cd;border-left:4px solid #f39c12;padding:6px 10px;border-radius:4px;font-size:.8rem;color:#856404;margin-top:4px}
 input[type=text]{width:100%;padding:7px 11px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem}
 .section-label{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#718096;padding:10px 0 4px}
+.sel{width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem;margin-top:4px;background:#fff;color:#2d3748}
+.fhint{font-size:.78rem;color:#718096;margin-top:4px}
+.chk-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #e2e8f0;font-size:.88rem}
+.chk-row:last-child{border:none}
+.warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:7px;padding:11px 14px;font-size:.83rem;color:#92400e;margin-top:8px;display:none}
+.warn-box.show{display:block}
+.flabel{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#718096;display:block;margin-bottom:2px}
+.tabs{display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px}
+.tab{padding:10px 20px;border:none;background:none;cursor:pointer;font-size:.9rem;color:#718096;font-weight:500;border-bottom:3px solid transparent;margin-bottom:-2px;transition:.15s;display:flex;align-items:center;gap:6px}
+.tab:hover{color:#275673;background:#f7fafc}
+.tab.active{color:#275673;border-bottom-color:#275673;font-weight:700}
+.tab-pane{display:none}.tab-pane.active{display:block}
 </style>
 </head>
 <body>
@@ -125,6 +137,15 @@ input[type=text]{width:100%;padding:7px 11px;border:1px solid #e2e8f0;border-rad
   <div class="sub">Upload UI files to /www/ to restore normal operation &mdash; or bookmark <strong>/setup</strong> for recovery</div>
 </header>
 <div class="container">
+
+  <!-- TAB BAR -->
+  <div class="tabs">
+    <button class="tab active" id="tab-btn-setup"      onclick="switchTab('setup',this)">&#x2699;&#xFE0F; Setup</button>
+    <button class="tab"        id="tab-btn-corelogic"  onclick="switchTab('corelogic',this)">&#x1F9E9; Core Logic</button>
+  </div>
+
+  <!-- ═══════════════════════════ TAB: SETUP ═══════════════════════════ -->
+  <div id="tab-setup" class="tab-pane active">
 
   <div class="alert alert-warn">
     &#x26A0;&#xFE0F; <strong>Normal UI not found.</strong>
@@ -210,8 +231,78 @@ input[type=text]{width:100%;padding:7px 11px;border:1px solid #e2e8f0;border-rad
     </div>
   </div>
 
+  </div><!-- /tab-setup -->
+
+  <!-- ═══════════════════════════ TAB: CORE LOGIC ═══════════════════════════ -->
+  <div id="tab-corelogic" class="tab-pane">
+
+  <!-- Operating Mode -->
+  <div class="card">
+    <div class="card-header">&#x2699;&#xFE0F; Operating Mode</div>
+    <div class="card-body">
+      <label class="flabel">Mode</label>
+      <select id="cl-mode" class="sel">
+        <option value="legacy">Legacy &mdash; Water logger only (deep sleep, original behaviour)</option>
+        <option value="continuous">Continuous &mdash; Multi-sensor pipeline (FreeRTOS tasks)</option>
+        <option value="hybrid">Hybrid &mdash; Water logger + sensor pipeline</option>
+      </select>
+      <p class="fhint"><strong>Legacy</strong>: original behaviour, deep-sleep between flush events.<br>
+        <strong>Continuous</strong>: all sensors polled continuously; device stays awake.<br>
+        <strong>Hybrid</strong>: both modes active simultaneously.</p>
+    </div>
+  </div>
+
+  <!-- Sleep Mode -->
+  <div class="card">
+    <div class="card-header">&#x1F4A4; Sleep Mode</div>
+    <div class="card-body">
+      <label class="flabel">Sleep Mode</label>
+      <select id="cl-sleep" class="sel" onchange="fsSlpChk()">
+        <option value="deep">Deep Sleep &mdash; maximum power saving (recommended for battery)</option>
+        <option value="light">Light Sleep &mdash; faster wake-up, moderate power use</option>
+        <option value="none">No Sleep &mdash; device stays awake, Wi-Fi may disconnect between events</option>
+        <option value="online">&#x1F310; Online Mode &mdash; always awake, Wi-Fi + web server permanently active</option>
+      </select>
+      <div id="cl-slp-warn" class="warn-box">
+        &#x26A0;&#xFE0F; <strong>Online Mode</strong> keeps Wi-Fi and the web server permanently active.
+        Power consumption increases significantly (&asymp;50&ndash;200&thinsp;mA continuously).
+        This mode is recommended <strong>only when connected to mains power</strong>.
+        <strong>Not suitable for battery operation.</strong>
+      </div>
+      <p class="fhint">Controls how the device behaves between measurement events. Takes effect after restart.</p>
+    </div>
+  </div>
+
+  <!-- Sensor quick-enable list -->
+  <div class="card">
+    <div class="card-header">&#x1F50C; Sensors &mdash; Enable / Disable</div>
+    <div class="card-body" style="padding:4px 18px 14px">
+      <div id="cl-slist">
+        <span style="color:#718096;font-size:.85rem">Loading&hellip;</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+    <button class="btn btn-primary" onclick="fsClSave()">&#x1F4BE; Save &amp; Restart</button>
+    <button class="btn btn-warn"    onclick="fsClLoad()">&#x21BA; Reload</button>
+    <span id="cl-msg" class="msg"></span>
+  </div>
+
+  </div><!-- /tab-corelogic -->
+
 </div><!-- /container -->
 <script>
+// ── Tab switching ──────────────────────────────────────────────────────────────
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(function(b){b.classList.remove('active');});
+  document.querySelectorAll('.tab-pane').forEach(function(p){p.classList.remove('active');p.style.display='none';});
+  btn.classList.add('active');
+  var pane = document.getElementById('tab-' + name);
+  if(pane) { pane.classList.add('active'); pane.style.display='block'; }
+  if(name === 'corelogic' && !FS_PCFG) fsClLoad();
+}
+
 var LEGACY = ['/web.js','/style.css','/index.html','/index.htm'];
 
 document.getElementById('dropZone').addEventListener('dragover',function(e){e.preventDefault();this.classList.add('over');});
@@ -388,6 +479,87 @@ function doOtaUpload(file){
     xhr.open('POST','/do_update');xhr.send(fd);
   };
   reader.readAsArrayBuffer(file.slice(0,4));
+}
+
+// ── Core Logic (platform_config.json) ─────────────────────────────────────────
+var FS_PCFG = null;
+
+function fsClLoad() {
+  var msg = document.getElementById('cl-msg');
+  if(msg) { msg.textContent='Loading\u2026'; msg.className='msg inf'; }
+  fetch('/api/platform_config')
+    .then(function(r) { return r.json(); })
+    .then(function(cfg) {
+      FS_PCFG = cfg;
+      var mEl = document.getElementById('cl-mode');
+      if(mEl) mEl.value = cfg.mode || 'legacy';
+      var sEl = document.getElementById('cl-sleep');
+      if(sEl) { sEl.value = cfg.sleep_mode || 'deep'; fsSlpChk(); }
+      var slist = document.getElementById('cl-slist');
+      if(slist) {
+        var sensors = cfg.sensors || [];
+        if(!sensors.length) {
+          slist.innerHTML = '<span style="color:#718096;font-size:.85rem">No sensors configured.</span>';
+        } else {
+          slist.innerHTML = sensors.map(function(s, i) {
+            return '<div class="chk-row">'
+              + '<input type="checkbox" id="fss-' + i + '"'
+              + (s.enabled ? ' checked' : '')
+              + ' onchange="fsSensorToggle(' + i + ',this.checked)">'
+              + '<label for="fss-' + i + '" style="cursor:pointer;flex:1">'
+              +   '<strong>' + (s.id || s.type) + '</strong>'
+              +   ' <span style="color:#718096;font-size:.78rem">(' + s.type + ' \u00b7 ' + (s.interface || '') + ')</span>'
+              + '</label>'
+              + '</div>';
+          }).join('');
+        }
+      }
+      if(msg) { msg.textContent=''; msg.className='msg'; }
+    })
+    .catch(function(e) {
+      if(msg) { msg.textContent='Load failed: ' + e; msg.className='msg err'; }
+    });
+}
+
+function fsSensorToggle(idx, en) {
+  if(FS_PCFG && FS_PCFG.sensors && FS_PCFG.sensors[idx]) FS_PCFG.sensors[idx].enabled = en;
+}
+
+function fsSlpChk() {
+  var sEl = document.getElementById('cl-sleep');
+  var wEl = document.getElementById('cl-slp-warn');
+  if(sEl && wEl) wEl.className = (sEl.value === 'online') ? 'warn-box show' : 'warn-box';
+}
+
+function fsClSave() {
+  var msg = document.getElementById('cl-msg');
+  if(!FS_PCFG) { if(msg) { msg.textContent='No config \u2014 click Reload first.'; msg.className='msg err'; } return; }
+  var mEl = document.getElementById('cl-mode');
+  var sEl = document.getElementById('cl-sleep');
+  if(mEl) FS_PCFG.mode       = mEl.value;
+  if(sEl) FS_PCFG.sleep_mode = sEl.value;
+  if(msg) { msg.textContent='Saving\u2026'; msg.className='msg inf'; }
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', '/save_platform');
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.onload = function() {
+    try {
+      var r = JSON.parse(xhr.responseText);
+      if(r && r.ok) {
+        if(msg) { msg.textContent='\u2705 Saved! Restarting\u2026'; msg.className='msg ok'; }
+        setTimeout(function() {
+          fetch('/api/platform_reload', {method:'POST'}).catch(function(){});
+          setTimeout(function() { location.reload(); }, 5000);
+        }, 300);
+      } else {
+        if(msg) { msg.textContent='\u274C Save failed'; msg.className='msg err'; }
+      }
+    } catch(e) {
+      if(msg) { msg.textContent='\u274C ' + e; msg.className='msg err'; }
+    }
+  };
+  xhr.onerror = function() { if(msg) { msg.textContent='\u274C Network error'; msg.className='msg err'; } };
+  xhr.send(JSON.stringify(FS_PCFG));
 }
 </script>
 </body>
