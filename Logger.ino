@@ -32,6 +32,78 @@
 #include "src/web/WebServer.h"    // setupWebServer()
 #include "src/utils/Utils.h"
 
+// ── Platform v5.0 — multi-sensor modules (compiled in only when needed) ──────
+#include "src/sensors/SensorManager.h"
+#include "src/sensors/plugins/BME280Sensor.h"
+#include "src/sensors/plugins/SDS011Sensor.h"
+#include "src/sensors/plugins/PMS5003Sensor.h"
+#include "src/sensors/plugins/YFS201Sensor.h"
+#include "src/sensors/plugins/ENS160Sensor.h"
+#include "src/sensors/plugins/SGP30Sensor.h"
+#include "src/sensors/plugins/RainSensor.h"
+#include "src/sensors/plugins/WindSensor.h"
+#include "src/pipeline/DataPipeline.h"
+#include "src/tasks/TaskManager.h"
+#include "src/export/ExportManager.h"
+#include "src/export/MqttExporter.h"
+#include "src/export/HttpExporter.h"
+#include "src/export/SensorCommunityExporter.h"
+#include "src/export/OpenSenseMapExporter.h"
+#include "src/web/ApiHandlers.h"
+
+// ---------------------------------------------------------------------------
+// Detect operating mode from /platform_config.json
+// Returns: 0 = legacy (default, no change), 1 = continuous, 2 = hybrid
+// ---------------------------------------------------------------------------
+static uint8_t _detectPlatformMode() {
+    if (!fsAvailable || !activeFS) return 0;
+    File f = activeFS->open("/platform_config.json", FILE_READ);
+    if (!f) return 0;
+    StaticJsonDocument<128> doc;
+    if (deserializeJson(doc, f) != DeserializationError::Ok) { f.close(); return 0; }
+    f.close();
+    const char* mode = doc["mode"] | "legacy";
+    if (strcmp(mode, "continuous") == 0) return 1;
+    if (strcmp(mode, "hybrid")     == 0) return 2;
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Register all sensor plugins and init pipeline (called in continuous/hybrid)
+// ---------------------------------------------------------------------------
+static void _initPlatform() {
+    Serial.println("=== Platform v5.0: initialising sensors ===");
+
+    // Register all plugins
+    sensorManager.registerPlugin("bme280",  []()->ISensor*{ return new BME280Sensor(); });
+    sensorManager.registerPlugin("sds011",  []()->ISensor*{ return new SDS011Sensor(); });
+    sensorManager.registerPlugin("pms5003", []()->ISensor*{ return new PMS5003Sensor(); });
+    sensorManager.registerPlugin("yfs201",  []()->ISensor*{ return new YFS201Sensor(); });
+    sensorManager.registerPlugin("ens160",  []()->ISensor*{ return new ENS160Sensor(); });
+    sensorManager.registerPlugin("sgp30",   []()->ISensor*{ return new SGP30Sensor(); });
+    sensorManager.registerPlugin("rain",    []()->ISensor*{ return new RainSensor(); });
+    sensorManager.registerPlugin("wind",    []()->ISensor*{ return new WindSensor(); });
+
+    // Load sensor configs from /platform_config.json
+    if (activeFS) sensorManager.loadAndInit(*activeFS);
+
+    // Register exporters
+    exportManager.addExporter(new MqttExporter());
+    exportManager.addExporter(new HttpExporter());
+    exportManager.addExporter(new SensorCommunityExporter());
+    exportManager.addExporter(new OpenSenseMapExporter());
+    if (activeFS) exportManager.loadAndInit(*activeFS);
+
+    // Register new API routes (sensor data + config)
+    registerApiRoutes(server);
+
+    // Start FreeRTOS task pipeline
+    if (activeFS) TaskManager::init(*activeFS);
+
+    Serial.printf("Platform ready. Sensors: %d  Exporters: %d\n",
+                  sensorManager.count(), exportManager.count());
+}
+
 // ============================================================================
 // SETUP
 // ============================================================================
@@ -122,6 +194,17 @@ void setup() {
         }
 
         setupWebServer();   // ← в WebServer.cpp
+
+        // Platform v5.0: start sensor pipeline in continuous/hybrid mode
+        {
+            uint8_t platformMode = _detectPlatformMode();
+            if (platformMode == 1 || platformMode == 2) {
+                _initPlatform();
+            } else {
+                // Even in legacy mode, register API routes so /api/sensors works
+                registerApiRoutes(server);
+            }
+        }
 
         if (onlineLoggerMode) {
             attachInterrupt(digitalPinToInterrupt(config.hardware.pinFlowSensor),

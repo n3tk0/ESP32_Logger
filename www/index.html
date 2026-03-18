@@ -39,7 +39,9 @@
         onclick="return nav(this)"><span class="icon">📊</span><span>Dashboard</span></a><a href="#files"
         data-page="files" class="nav-item" onclick="return nav(this)"><span
           class="icon">📁</span><span>Files</span></a><a href="#live" data-page="live" class="nav-item"
-        onclick="return nav(this)"><span class="icon">📡</span><span>Live</span></a>
+        onclick="return nav(this)"><span class="icon">📡</span><span>Live</span></a><a href="#sensors"
+        data-page="sensors" class="nav-item" onclick="return nav(this)"><span
+          class="icon">🌡️</span><span>Sensors</span></a>
       <div class="nav-section">System</div><a href="#settings" data-page="settings" class="nav-item"
         onclick="return nav(this)"><span class="icon">⚙️</span><span>Settings</span></a><a href="#update"
         data-page="update" class="nav-item" onclick="return nav(this)"><span
@@ -357,6 +359,14 @@
       <div class="setting-card" onclick="showSubpage('settings_datalog')">
         <div class="icon">📝</div>
         <div class="title">Data Log</div>
+      </div>
+      <div class="setting-card" onclick="showSubpage('settings_corelogic')">
+        <div class="icon">🧩</div>
+        <div class="title">Core Logic</div>
+      </div>
+      <div class="setting-card" onclick="showSubpage('settings_export')">
+        <div class="icon">📡</div>
+        <div class="title">Export</div>
       </div>
       <div class="setting-card" onclick="showSubpage('settings_theme')">
         <div class="icon">🎨</div>
@@ -891,8 +901,388 @@
         </div>
       </div>
 
+      <!-- Sensor Data Visualisation (platform v5.0) -->
+      <div class="card">
+        <div class="card-header">📈 Sensor Data Visualisation</div>
+        <div class="card-body">
+          <p class="form-hint" style="margin-bottom:1rem">
+            These settings control how sensor data is displayed in charts.
+            Raw data on the device is <strong>never modified</strong> — aggregation
+            and interpolation happen only at display time.
+          </p>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">
+                Aggregation Interval
+                <span class="help-tip" title="Groups readings into time buckets before displaying. Reduces chart point count.">ℹ️</span>
+              </label>
+              <select id="agg-bucket" class="form-input form-select">
+                <option value="raw">Raw (no grouping)</option>
+                <option value="1m">1 minute</option>
+                <option value="5m" selected>5 minutes</option>
+                <option value="1h">1 hour</option>
+                <option value="1d">1 day</option>
+              </select>
+              <p class="form-hint">Group readings into time windows.</p>
+            </div>
+            <div class="form-group">
+              <label class="form-label">
+                Interpolation Mode
+                <span class="help-tip" title="How values are combined within each time bucket.">ℹ️</span>
+              </label>
+              <select id="agg-mode" class="form-input form-select">
+                <option value="lttb" selected>LTTB (visual fidelity — default)</option>
+                <option value="avg">Average</option>
+                <option value="min">Minimum</option>
+                <option value="max">Maximum</option>
+                <option value="raw">No aggregation (raw points)</option>
+              </select>
+              <p class="form-hint">
+                <strong>LTTB</strong>: Largest Triangle Three Buckets — keeps the
+                visual shape of the curve while reducing points. Best for display.
+                <strong>Average</strong>: mean per bucket.
+                <strong>Min/Max</strong>: extremes per bucket.
+              </p>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">
+              Max Points
+              <span class="help-tip" title="Maximum data points sent to the chart. Lower = faster rendering.">ℹ️</span>
+            </label>
+            <input type="number" id="agg-limit" class="form-input" value="500" min="50" max="5000" step="50">
+            <p class="form-hint">Maximum chart points (50–5000). Default: 500.</p>
+          </div>
+          <button type="button" class="btn btn-secondary" onclick="aggSettingsSave()">💾 Save Visualisation Settings</button>
+          <div id="agg-msg" style="margin-top:8px;font-size:.85rem"></div>
+        </div>
+      </div>
+
       <button type="submit" class="btn btn-primary btn-block">💾 Save</button>
     </form>
+  </main>
+
+  <!-- ═══ PAGE: SENSORS (live dashboard) ═══ -->
+  <main class="main-content page" id="page-sensors">
+    <div class="page-header">
+      <h1>🌡️ Sensors</h1>
+      <button class="btn btn-secondary btn-sm" onclick="sensorsLoad()">🔄 Refresh</button>
+    </div>
+    <div id="sensors-msg" class="text-muted" style="margin-bottom:1rem;font-size:.9rem">
+      Loading sensor data…
+    </div>
+    <!-- Live readings grid — populated by sensorsLoad() in web.js -->
+    <div id="sensors-grid" class="sensors-grid"></div>
+
+    <!-- Sensor chart -->
+    <div class="card" style="margin-top:1rem">
+      <div class="card-header">
+        <span>📈 Sensor Chart</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="sc-sensor" class="form-input form-select" style="width:auto" onchange="sensorChartLoad()">
+            <option value="">— select sensor —</option>
+          </select>
+          <select id="sc-metric" class="form-input form-select" style="width:auto" onchange="sensorChartLoad()">
+            <option value="">— metric —</option>
+          </select>
+          <select id="sc-agg" class="form-input form-select" style="width:auto" onchange="sensorChartLoad()">
+            <option value="5m">5 min</option>
+            <option value="1h">1 hour</option>
+            <option value="1d">1 day</option>
+            <option value="raw">Raw</option>
+          </select>
+          <select id="sc-mode" class="form-input form-select" style="width:auto" onchange="sensorChartLoad()">
+            <option value="lttb">LTTB</option>
+            <option value="avg">Avg</option>
+            <option value="min">Min</option>
+            <option value="max">Max</option>
+          </select>
+          <select id="sc-range" class="form-input form-select" style="width:auto" onchange="sensorChartLoad()">
+            <option value="3600">Last 1h</option>
+            <option value="21600">Last 6h</option>
+            <option value="86400" selected>Last 24h</option>
+            <option value="604800">Last 7d</option>
+          </select>
+        </div>
+      </div>
+      <div class="card-body" style="padding:8px">
+        <canvas id="sensorChart" style="width:100%;max-height:320px"></canvas>
+        <div id="sc-msg" style="font-size:.8rem;color:var(--text-muted);margin-top:4px"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ═══ PAGE: SETTINGS-CORELOGIC ═══ -->
+  <main class="main-content page" id="page-settings_corelogic">
+    <div class="page-header">
+      <h1>🧩 Core Logic</h1>
+      <div class="breadcrumb">
+        <a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Core Logic
+      </div>
+    </div>
+
+    <div id="cl-msg"></div>
+
+    <!-- Operating Mode -->
+    <div class="card">
+      <div class="card-header">⚙️ Operating Mode</div>
+      <div class="card-body">
+        <div class="form-group">
+          <label class="form-label">
+            Mode
+            <span class="help-tip" title="Controls whether the FreeRTOS sensor pipeline runs alongside the water-logger.">ℹ️</span>
+          </label>
+          <select id="cl-mode" class="form-input form-select">
+            <option value="legacy">Legacy — Water logger only (deep sleep, original behaviour)</option>
+            <option value="continuous">Continuous — Multi-sensor pipeline (FreeRTOS tasks, no deep sleep)</option>
+            <option value="hybrid">Hybrid — Water logger + sensor pipeline</option>
+          </select>
+          <p class="form-hint">
+            <strong>Legacy</strong>: original behaviour unchanged, deep-sleep between events.<br>
+            <strong>Continuous</strong>: all sensors polled continuously; device stays awake.<br>
+            <strong>Hybrid</strong>: both modes active simultaneously.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sensor List -->
+    <div class="card">
+      <div class="card-header">
+        <span>🔌 Sensors</span>
+        <button type="button" class="btn btn-sm btn-primary" onclick="clAddSensor()">+ Add Sensor</button>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div id="cl-sensors-list">
+          <!-- Populated by clLoad() -->
+          <p class="text-muted" style="padding:1rem">Loading…</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Aggregation defaults -->
+    <div class="card">
+      <div class="card-header">📊 Aggregation Defaults</div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Default Mode</label>
+            <select id="cl-aggmode" class="form-input form-select">
+              <option value="lttb">LTTB (recommended)</option>
+              <option value="avg">Average</option>
+              <option value="min">Minimum</option>
+              <option value="max">Maximum</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Default Bucket (min)</label>
+            <select id="cl-aggbucket" class="form-input form-select">
+              <option value="0">Raw</option>
+              <option value="1">1 minute</option>
+              <option value="5" selected>5 minutes</option>
+              <option value="60">1 hour</option>
+              <option value="1440">1 day</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Max Points</label>
+            <input type="number" id="cl-maxpoints" class="form-input" value="500" min="50" max="5000">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Raw Retention (days)</label>
+          <input type="number" id="cl-retention" class="form-input" value="7" min="1" max="365">
+          <p class="form-hint">Raw log files older than this are deleted automatically.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export -->
+    <div class="card">
+      <div class="card-header">📤 Export Quick-Enable</div>
+      <div class="card-body">
+        <p class="form-hint" style="margin-bottom:.75rem">
+          Enable export targets. Full configuration is in the
+          <a href="#settings" onclick="showSubpage('settings_export');return false">Export settings</a>.
+        </p>
+        <div class="form-row" style="gap:.5rem">
+          <label class="form-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+            <input type="checkbox" id="cl-exp-mqtt"> MQTT
+          </label>
+          <label class="form-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+            <input type="checkbox" id="cl-exp-http"> HTTP POST
+          </label>
+          <label class="form-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+            <input type="checkbox" id="cl-exp-sc"> Sensor.Community
+          </label>
+          <label class="form-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+            <input type="checkbox" id="cl-exp-osm"> openSenseMap
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">
+      <button class="btn btn-primary" onclick="clSave()">💾 Save &amp; Restart</button>
+      <button class="btn btn-secondary" onclick="clLoad()">🔄 Reload</button>
+    </div>
+  </main>
+
+  <!-- ═══ PAGE: SETTINGS-EXPORT ═══ -->
+  <main class="main-content page" id="page-settings_export">
+    <div class="page-header">
+      <h1>📡 Export</h1>
+      <div class="breadcrumb">
+        <a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Export
+      </div>
+    </div>
+
+    <div id="exp-msg"></div>
+
+    <!-- MQTT -->
+    <div class="card">
+      <div class="card-header">
+        <span>🔗 MQTT</span>
+        <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
+          <input type="checkbox" id="exp-mqtt-en"> Enable
+        </label>
+      </div>
+      <div class="card-body">
+        <p class="form-hint" style="margin-bottom:.75rem">
+          Publishes each sensor reading to <code>{prefix}/device/{id}/sensor/{name}/{metric}</code>.
+          Requires an MQTT broker (e.g. Mosquitto, Home Assistant, Node-RED).
+        </p>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Broker Host</label>
+            <input type="text" id="exp-mqtt-host" class="form-input" placeholder="192.168.1.100">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Port</label>
+            <input type="number" id="exp-mqtt-port" class="form-input" value="1883">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Topic Prefix</label>
+            <input type="text" id="exp-mqtt-prefix" class="form-input" value="waterlogger">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Client ID (leave blank = auto)</label>
+            <input type="text" id="exp-mqtt-clientid" class="form-input" placeholder="wl-DEVICEID">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Username</label>
+            <input type="text" id="exp-mqtt-user" class="form-input" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" id="exp-mqtt-pass" class="form-input" autocomplete="new-password">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Send Interval (ms)</label>
+            <input type="number" id="exp-mqtt-interval" class="form-input" value="60000" step="1000">
+            <p class="form-hint">How often to flush batched readings. Default 60 000 ms.</p>
+          </div>
+          <div class="form-group" style="padding-top:1.5rem">
+            <label style="display:flex;gap:.4rem;align-items:center;cursor:pointer">
+              <input type="checkbox" id="exp-mqtt-retain"> Retain messages
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- HTTP POST -->
+    <div class="card">
+      <div class="card-header">
+        <span>🌐 HTTP POST</span>
+        <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
+          <input type="checkbox" id="exp-http-en"> Enable
+        </label>
+      </div>
+      <div class="card-body">
+        <p class="form-hint" style="margin-bottom:.75rem">
+          POSTs a JSON array of readings to any HTTP endpoint.
+          Compatible with InfluxDB v2 (<code>/api/v2/write</code>), Grafana, custom servers.
+        </p>
+        <div class="form-group">
+          <label class="form-label">URL</label>
+          <input type="text" id="exp-http-url" class="form-input" placeholder="http://192.168.1.100:8086/api/v2/write">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Authorization Header (optional)</label>
+          <input type="text" id="exp-http-auth" class="form-input" placeholder="Token mytoken  or  Bearer xyz">
+          <p class="form-hint">Sent as <code>Authorization: …</code></p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Send Interval (ms)</label>
+          <input type="number" id="exp-http-interval" class="form-input" value="60000" step="1000">
+        </div>
+      </div>
+    </div>
+
+    <!-- Sensor.Community -->
+    <div class="card">
+      <div class="card-header">
+        <span>🌍 Sensor.Community</span>
+        <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
+          <input type="checkbox" id="exp-sc-en"> Enable
+        </label>
+      </div>
+      <div class="card-body">
+        <p class="form-hint">
+          Sends PM2.5/PM10 and environmental data to
+          <a href="https://sensor.community" target="_blank">sensor.community</a>.
+          Register your device at the site first to get a chip ID.
+          The device ID is your ESP32 MAC-derived ID (shown in Device settings).
+          Send interval must be ≥ 145 seconds (API requirement).
+        </p>
+        <div class="form-group" style="margin-top:.75rem">
+          <label class="form-label">Send Interval (ms)</label>
+          <input type="number" id="exp-sc-interval" class="form-input" value="145000" min="145000">
+        </div>
+      </div>
+    </div>
+
+    <!-- openSenseMap -->
+    <div class="card">
+      <div class="card-header">
+        <span>🗺️ openSenseMap</span>
+        <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
+          <input type="checkbox" id="exp-osm-en"> Enable
+        </label>
+      </div>
+      <div class="card-body">
+        <p class="form-hint" style="margin-bottom:.75rem">
+          Sends readings to <a href="https://opensensemap.org" target="_blank">opensensemap.org</a>.
+          Create a senseBox at the site, then copy the Box ID, access token and sensor IDs below.
+        </p>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Box ID</label>
+            <input type="text" id="exp-osm-boxid" class="form-input" placeholder="5f3a...">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Access Token</label>
+            <input type="password" id="exp-osm-token" class="form-input" autocomplete="new-password">
+          </div>
+        </div>
+        <p class="form-hint" style="margin-bottom:.5rem">Sensor IDs — copy from your senseBox sensors:</p>
+        <div id="exp-osm-ids">
+          <!-- Populated by expLoad() -->
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">
+      <button class="btn btn-primary" onclick="expSave()">💾 Save &amp; Restart</button>
+      <button class="btn btn-secondary" onclick="expLoad()">🔄 Reload</button>
+    </div>
   </main>
 
   <!-- ═══ PAGE: SETTINGS-THEME ═══ -->
@@ -1353,8 +1743,8 @@
   </div>
   <nav class="bottom-nav" id="bottomNav"><a href="#dashboard" data-page="dashboard" onclick="return nav(this)"><span
         class="icon">📊</span>Dashboard</a><a href="#files" data-page="files" onclick="return nav(this)"><span
-        class="icon">📁</span>Files</a><a href="#live" data-page="live" onclick="return nav(this)"><span
-        class="icon">📡</span>Live</a><a href="#settings" data-page="settings" onclick="return nav(this)"><span
+        class="icon">📁</span>Files</a><a href="#sensors" data-page="sensors" onclick="return nav(this)"><span
+        class="icon">🌡️</span>Sensors</a><a href="#settings" data-page="settings" onclick="return nav(this)"><span
         class="icon">⚙️</span>Settings</a></nav>
 
   <script src="/web.js"></script>
