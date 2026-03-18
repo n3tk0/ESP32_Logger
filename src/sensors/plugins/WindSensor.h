@@ -17,6 +17,12 @@ public:
     const char* getType() const override { return "wind"; }
     const char* getName() const override { return "Wind Speed"; }
     uint32_t    getReadIntervalMs() const override { return _sampleWindowMs; }
+    int getMetrics(const char** out, int maxOut) const override {
+        static const char* m[] = { "wind_speed" };
+        int n = 1; if (n > maxOut) n = maxOut;
+        for (int i = 0; i < n; i++) out[i] = m[i];
+        return n;
+    }
 
 private:
     static void IRAM_ATTR _isr(void* arg);

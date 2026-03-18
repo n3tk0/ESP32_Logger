@@ -16,6 +16,12 @@ public:
     const char* getName() const override { return "PMS5003 PM1/2.5/10"; }
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
     bool        isContinuous() const override { return true; }
+    int getMetrics(const char** out, int maxOut) const override {
+        static const char* m[] = { "pm1", "pm25", "pm10" };
+        int n = 3; if (n > maxOut) n = maxOut;
+        for (int i = 0; i < n; i++) out[i] = m[i];
+        return n;
+    }
 
 private:
     HardwareSerial* _serial    = nullptr;
