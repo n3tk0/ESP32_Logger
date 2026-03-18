@@ -209,6 +209,9 @@ function pageInit(page) {
         case 'settings_time': timeInit(); break;
         case 'settings_datalog': dlInit(); break;
         case 'update': otaInit(); break;
+        case 'sensors': sensorsLoad(); break;
+        case 'settings_corelogic': clLoad(); break;
+        case 'settings_export': expLoad(); break;
     }
 }
 
@@ -1609,3 +1612,485 @@ function otaUpload() {
 
 function dlToggleMaxSize() { var mg = document.getElementById('maxSizeGroup'), rot = document.getElementById('dl-rotation'); if (mg && rot) mg.style.display = rot.value === '4' ? 'block' : 'none'; }
 function closePopup() { var p = document.getElementById('popup'); if (p) p.style.display = 'none'; }
+
+// ============================================================================
+// PLATFORM CONFIG  (platform_config.json management)
+// ============================================================================
+var PCFG = null;  // cached platform config object
+
+function pcfgLoad(cb) {
+    fetch('/api/platform_config')
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){ PCFG = d || { version:1, mode:'legacy', sensors:[], aggregation:{}, export:{}, storage:{} }; if(cb) cb(PCFG); })
+        .catch(function(){ PCFG = { version:1, mode:'legacy', sensors:[], aggregation:{}, export:{}, storage:{} }; if(cb) cb(PCFG); });
+}
+
+function pcfgSave(obj, cb) {
+    var body = JSON.stringify(obj, null, 2);
+    fetch('/save_platform', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: body
+    }).then(function(r){ return r.json(); })
+      .then(function(d){ if(cb) cb(d.ok, d.error || ''); })
+      .catch(function(e){ if(cb) cb(false, String(e)); });
+}
+
+// ============================================================================
+// AGGREGATION SETTINGS  (in Datalog page)
+// ============================================================================
+// Load stored aggregation prefs from localStorage (client-side only)
+(function aggSettingsInit() {
+    window.addEventListener('DOMContentLoaded', function() {
+        var b = localStorage.getItem('agg_bucket') || '5m';
+        var m = localStorage.getItem('agg_mode')   || 'lttb';
+        var l = parseInt(localStorage.getItem('agg_limit') || '500', 10);
+        var eb = document.getElementById('agg-bucket');
+        var em = document.getElementById('agg-mode');
+        var el = document.getElementById('agg-limit');
+        if(eb) eb.value = b;
+        if(em) em.value = m;
+        if(el) el.value = l;
+    });
+})();
+
+function aggSettingsSave() {
+    var b = (document.getElementById('agg-bucket')||{}).value || '5m';
+    var m = (document.getElementById('agg-mode')||{}).value   || 'lttb';
+    var l = parseInt((document.getElementById('agg-limit')||{}).value || '500', 10);
+    localStorage.setItem('agg_bucket', b);
+    localStorage.setItem('agg_mode',   m);
+    localStorage.setItem('agg_limit',  String(l));
+    var msg = document.getElementById('agg-msg');
+    if(msg){ msg.textContent = '✅ Saved (used when viewing sensor charts)'; msg.style.color='green'; }
+}
+
+function aggGetPrefs() {
+    return {
+        bucket: localStorage.getItem('agg_bucket') || '5m',
+        mode:   localStorage.getItem('agg_mode')   || 'lttb',
+        limit:  parseInt(localStorage.getItem('agg_limit') || '500', 10)
+    };
+}
+
+// ============================================================================
+// SENSORS PAGE
+// ============================================================================
+var sensorChart = null;
+
+function sensorsLoad() {
+    var grid = document.getElementById('sensors-grid');
+    var msg  = document.getElementById('sensors-msg');
+    if(msg)  msg.textContent = 'Loading…';
+    if(grid) grid.innerHTML  = '';
+
+    fetch('/api/sensors')
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d) {
+            if(!d || !d.sensors || d.sensors.length === 0) {
+                if(msg) msg.textContent = 'No sensors registered. Set mode to Continuous in Core Logic settings and configure sensors.';
+                return;
+            }
+            if(msg) msg.textContent = '';
+            if(grid) {
+                grid.innerHTML = d.sensors.map(function(s) {
+                    var statusClass = s.status === 'ok' ? 'badge-ok' : (s.status === 'disabled' ? 'badge-dis' : 'badge-err');
+                    var ts = s.last_read_ts ? new Date(s.last_read_ts * 1000).toLocaleTimeString() : '—';
+                    return '<div class="sensor-card">'
+                        + '<div class="sensor-card-header">'
+                        +   '<span class="sensor-name">' + s.name + '</span>'
+                        +   '<span class="badge ' + statusClass + '">' + s.status + '</span>'
+                        + '</div>'
+                        + '<div class="sensor-meta">'
+                        +   '<span>ID: <code>' + s.id + '</code></span>'
+                        +   '<span>Type: <code>' + s.type + '</code></span>'
+                        +   '<span>Last: ' + ts + '</span>'
+                        + '</div>'
+                        + '<div class="sensor-metrics">'
+                        +   (s.metrics || []).map(function(m){ return '<span class="metric-tag">' + m + '</span>'; }).join('')
+                        + '</div>'
+                        + '</div>';
+                }).join('');
+            }
+
+            // Populate chart sensor selector
+            var sel = document.getElementById('sc-sensor');
+            if(sel) {
+                sel.innerHTML = '<option value="">— select sensor —</option>'
+                    + d.sensors.map(function(s){
+                        return '<option value="' + s.id + '">' + s.name + '</option>';
+                      }).join('');
+            }
+        })
+        .catch(function(e) {
+            if(msg) msg.textContent = 'Failed to load sensors: ' + e;
+        });
+}
+
+function sensorChartLoad() {
+    var sid    = (document.getElementById('sc-sensor')||{}).value;
+    var metric = (document.getElementById('sc-metric')||{}).value;
+    var agg    = (document.getElementById('sc-agg')||{}).value   || '5m';
+    var mode   = (document.getElementById('sc-mode')||{}).value  || 'lttb';
+    var range  = parseInt((document.getElementById('sc-range')||{}).value || '86400', 10);
+    var msg    = document.getElementById('sc-msg');
+
+    if(!sid) return;
+
+    // Update metric dropdown when sensor changes
+    var metricSel = document.getElementById('sc-metric');
+    if(metricSel && !metric) {
+        // load first available metric from API sensors cache
+        if(msg) msg.textContent = 'Select a metric…';
+        return;
+    }
+
+    var now  = Math.floor(Date.now() / 1000);
+    var from = now - range;
+    var url  = '/api/data?sensor=' + encodeURIComponent(sid)
+             + '&metric=' + encodeURIComponent(metric)
+             + '&from=' + from + '&to=' + now
+             + '&agg=' + agg + '&mode=' + mode + '&limit=500';
+
+    if(msg) msg.textContent = 'Loading…';
+
+    fetch(url)
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d) {
+            if(!d || !d.data || d.data.length === 0) {
+                if(msg) msg.textContent = 'No data for selected period.';
+                return;
+            }
+            if(msg) msg.textContent = d.count + ' points · ' + d.agg + ' · ' + d.mode;
+
+            var labels = d.data.map(function(pt){ return new Date(pt.ts * 1000).toLocaleTimeString(); });
+            var values = d.data.map(function(pt){ return pt.v; });
+
+            var ctx = document.getElementById('sensorChart');
+            if(!ctx) return;
+
+            if(sensorChart) sensorChart.destroy();
+            sensorChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: sid + ' / ' + metric,
+                        data: values,
+                        borderColor: '#275673',
+                        backgroundColor: 'rgba(39,86,115,0.08)',
+                        borderWidth: 2,
+                        pointRadius: d.data.length > 100 ? 0 : 3,
+                        tension: 0.3,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    animation: false,
+                    plugins: {
+                        legend: { display: true },
+                        tooltip: { mode: 'index', intersect: false }
+                    },
+                    scales: {
+                        x: { ticks: { maxTicksLimit: 10, maxRotation: 45 } },
+                        y: { beginAtZero: false }
+                    }
+                }
+            });
+        })
+        .catch(function(e){
+            if(msg) msg.textContent = 'Error: ' + e;
+        });
+}
+
+// Update metric selector when sensor changes
+document.addEventListener('DOMContentLoaded', function(){
+    var sensorSel = document.getElementById('sc-sensor');
+    if(!sensorSel) return;
+    sensorSel.addEventListener('change', function(){
+        var sid = this.value;
+        var metricSel = document.getElementById('sc-metric');
+        if(!metricSel || !sid) return;
+        // Fetch sensor list to get metrics
+        fetch('/api/sensors').then(function(r){ return r.json(); }).then(function(d){
+            var s = (d.sensors || []).find(function(s){ return s.id === sid; });
+            if(s && s.metrics) {
+                metricSel.innerHTML = s.metrics.map(function(m){
+                    return '<option value="' + m + '">' + m + '</option>';
+                }).join('');
+            }
+        }).catch(function(){});
+    });
+});
+
+// ============================================================================
+// CORE LOGIC PAGE  (platform_config.json editor)
+// ============================================================================
+var CL_SENSOR_TYPES = [
+    { value: 'bme280',  label: 'BME280 (temp/humidity/pressure)',   iface: 'i2c' },
+    { value: 'sds011',  label: 'SDS011 (PM2.5/PM10)',              iface: 'uart' },
+    { value: 'pms5003', label: 'PMS5003 (PM1/2.5/10)',             iface: 'uart' },
+    { value: 'yfs201',  label: 'YF-S201/YF-S403 (water flow)',     iface: 'pulse' },
+    { value: 'ens160',  label: 'ENS160 (TVOC/eCO2)',               iface: 'i2c' },
+    { value: 'sgp30',   label: 'SGP30 (TVOC/eCO2)',                iface: 'i2c' },
+    { value: 'rain',    label: 'Rain gauge (tipping bucket)',        iface: 'pulse' },
+    { value: 'wind',    label: 'Wind speed (anemometer)',           iface: 'pulse' }
+];
+
+function clLoad() {
+    var msg = document.getElementById('cl-msg');
+    if(msg) { msg.textContent = ''; msg.className = ''; }
+    pcfgLoad(function(cfg) {
+        // Mode
+        var modeEl = document.getElementById('cl-mode');
+        if(modeEl) modeEl.value = cfg.mode || 'legacy';
+
+        // Aggregation defaults
+        var agg = cfg.aggregation || {};
+        var amEl = document.getElementById('cl-aggmode');   if(amEl) amEl.value = agg.default_mode || 'lttb';
+        var abEl = document.getElementById('cl-aggbucket'); if(abEl) abEl.value = String(agg.default_bucket_min || 5);
+        var mpEl = document.getElementById('cl-maxpoints'); if(mpEl) mpEl.value = agg.max_points || 500;
+        var rtEl = document.getElementById('cl-retention'); if(rtEl) rtEl.value = agg.raw_retention_days || 7;
+
+        // Export quick-enables
+        var exp = cfg.export || {};
+        var mqttEl = document.getElementById('cl-exp-mqtt');if(mqttEl) mqttEl.checked = !!(exp.mqtt && exp.mqtt.enabled);
+        var httpEl = document.getElementById('cl-exp-http');if(httpEl) httpEl.checked = !!(exp.http && exp.http.enabled);
+        var scEl   = document.getElementById('cl-exp-sc');  if(scEl)   scEl.checked   = !!(exp.sensor_community && exp.sensor_community.enabled);
+        var osmEl  = document.getElementById('cl-exp-osm'); if(osmEl)  osmEl.checked  = !!(exp.opensensemap && exp.opensensemap.enabled);
+
+        // Sensor list
+        clRenderSensors(cfg.sensors || []);
+    });
+}
+
+function clRenderSensors(sensors) {
+    var list = document.getElementById('cl-sensors-list');
+    if(!list) return;
+    if(!sensors || sensors.length === 0) {
+        list.innerHTML = '<p class="text-muted" style="padding:1rem">No sensors configured. Click <strong>+ Add Sensor</strong> to begin.</p>';
+        return;
+    }
+    list.innerHTML = sensors.map(function(s, i) {
+        var typeLabel = (CL_SENSOR_TYPES.find(function(t){ return t.value === s.type; }) || {}).label || s.type;
+        var pinInfo   = s.interface === 'i2c'   ? 'SDA:' + (s.sda||'?') + ' SCL:' + (s.scl||'?')
+                      : s.interface === 'uart'  ? 'RX:' + (s.uart_rx||'?')
+                      : s.interface === 'pulse' ? 'Pin:' + (s.pin||'?')
+                      : '';
+        return '<div class="sensor-list-row" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border)">'
+            + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:0 0 auto">'
+            +   '<input type="checkbox" onchange="clToggleSensor(' + i + ',this.checked)"'
+            +   (s.enabled ? ' checked' : '') + '>'
+            +   '<span style="font-size:.8rem;color:var(--text-muted)">' + (s.enabled ? 'ON' : 'OFF') + '</span>'
+            + '</label>'
+            + '<div style="flex:1;min-width:0">'
+            +   '<div style="font-weight:600">' + (s.id || s.type) + '</div>'
+            +   '<div style="font-size:.8rem;color:var(--text-muted)">' + typeLabel + ' · ' + pinInfo + '</div>'
+            + '</div>'
+            + '<button type="button" class="btn btn-sm btn-secondary" onclick="clEditSensor(' + i + ')">✏️</button>'
+            + '<button type="button" class="btn btn-sm btn-danger"   onclick="clRemoveSensor(' + i + ')">🗑</button>'
+        + '</div>';
+    }).join('');
+}
+
+function clToggleSensor(idx, enabled) {
+    if(!PCFG || !PCFG.sensors) return;
+    PCFG.sensors[idx].enabled = enabled;
+}
+
+function clRemoveSensor(idx) {
+    if(!PCFG || !PCFG.sensors) return;
+    if(!confirm('Remove sensor "' + (PCFG.sensors[idx].id || PCFG.sensors[idx].type) + '"?')) return;
+    PCFG.sensors.splice(idx, 1);
+    clRenderSensors(PCFG.sensors);
+}
+
+function clAddSensor() {
+    var type = prompt('Sensor type:\n' + CL_SENSOR_TYPES.map(function(t){ return t.value + ' — ' + t.label; }).join('\n'));
+    if(!type) return;
+    type = type.trim().toLowerCase();
+    var info = CL_SENSOR_TYPES.find(function(t){ return t.value === type; });
+    if(!info) { alert('Unknown sensor type: ' + type); return; }
+    if(!PCFG) PCFG = { sensors: [] };
+    if(!PCFG.sensors) PCFG.sensors = [];
+    var newS = { id: type + '_' + (PCFG.sensors.length + 1), type: type, enabled: true, interface: info.iface };
+    if(info.iface === 'i2c')   { newS.sda = 6; newS.scl = 7; newS.read_interval_ms = 10000; }
+    if(info.iface === 'uart')  { newS.uart_rx = 20; newS.uart_tx = -1; newS.baud = 9600; }
+    if(info.iface === 'pulse') { newS.pin = 9; newS.read_interval_ms = 5000; }
+    PCFG.sensors.push(newS);
+    clRenderSensors(PCFG.sensors);
+}
+
+function clEditSensor(idx) {
+    if(!PCFG || !PCFG.sensors) return;
+    var s    = PCFG.sensors[idx];
+    var json = prompt('Edit sensor JSON (be careful with syntax):', JSON.stringify(s, null, 2));
+    if(!json) return;
+    try {
+        PCFG.sensors[idx] = JSON.parse(json);
+        clRenderSensors(PCFG.sensors);
+    } catch(e) {
+        alert('Invalid JSON: ' + e.message);
+    }
+}
+
+function clSave() {
+    var msg = document.getElementById('cl-msg');
+    if(!PCFG) { if(msg){ msg.textContent='❌ No config loaded'; msg.className='alert alert-danger'; } return; }
+
+    // Read form values back into PCFG
+    var modeEl = document.getElementById('cl-mode'); if(modeEl) PCFG.mode = modeEl.value;
+
+    if(!PCFG.aggregation) PCFG.aggregation = {};
+    var amEl = document.getElementById('cl-aggmode');   if(amEl) PCFG.aggregation.default_mode = amEl.value;
+    var abEl = document.getElementById('cl-aggbucket'); if(abEl) PCFG.aggregation.default_bucket_min = parseInt(abEl.value,10);
+    var mpEl = document.getElementById('cl-maxpoints'); if(mpEl) PCFG.aggregation.max_points = parseInt(mpEl.value,10);
+    var rtEl = document.getElementById('cl-retention'); if(rtEl) PCFG.aggregation.raw_retention_days = parseInt(rtEl.value,10);
+
+    if(!PCFG.export) PCFG.export = {};
+    if(!PCFG.export.mqtt) PCFG.export.mqtt = {};
+    if(!PCFG.export.http) PCFG.export.http = {};
+    if(!PCFG.export.sensor_community) PCFG.export.sensor_community = {};
+    if(!PCFG.export.opensensemap) PCFG.export.opensensemap = {};
+
+    var mqttEl = document.getElementById('cl-exp-mqtt'); if(mqttEl) PCFG.export.mqtt.enabled = mqttEl.checked;
+    var httpEl = document.getElementById('cl-exp-http'); if(httpEl) PCFG.export.http.enabled = httpEl.checked;
+    var scEl   = document.getElementById('cl-exp-sc');   if(scEl)   PCFG.export.sensor_community.enabled = scEl.checked;
+    var osmEl  = document.getElementById('cl-exp-osm');  if(osmEl)  PCFG.export.opensensemap.enabled = osmEl.checked;
+
+    if(msg){ msg.textContent='Saving…'; msg.className=''; }
+
+    pcfgSave(PCFG, function(ok, err) {
+        if(ok) {
+            if(msg){ msg.textContent='✅ Saved! Restarting device…'; msg.className=''; }
+            // Trigger restart so new mode takes effect
+            setTimeout(function(){
+                fetch('/api/platform_reload', { method: 'POST' }).catch(function(){});
+            }, 500);
+        } else {
+            if(msg){ msg.textContent='❌ Save failed: ' + err; msg.className=''; }
+        }
+    });
+}
+
+// ============================================================================
+// EXPORT PAGE
+// ============================================================================
+function expLoad() {
+    pcfgLoad(function(cfg) {
+        var exp = cfg.export || {};
+
+        // MQTT
+        var m = exp.mqtt || {};
+        _setVal('exp-mqtt-en',       m.enabled  || false,  true);
+        _setVal('exp-mqtt-host',     m.broker   || '');
+        _setVal('exp-mqtt-port',     m.port     || 1883);
+        _setVal('exp-mqtt-prefix',   m.topic_prefix || 'waterlogger');
+        _setVal('exp-mqtt-clientid', m.client_id || '');
+        _setVal('exp-mqtt-user',     m.username  || '');
+        _setVal('exp-mqtt-pass',     m.password  || '');
+        _setVal('exp-mqtt-interval', m.interval_ms || 60000);
+        _setVal('exp-mqtt-retain',   m.retain || false, true);
+
+        // HTTP
+        var h = exp.http || {};
+        _setVal('exp-http-en',       h.enabled || false, true);
+        _setVal('exp-http-url',      h.url || '');
+        _setVal('exp-http-auth',     (h.headers && h.headers.Authorization) || '');
+        _setVal('exp-http-interval', h.interval_ms || 60000);
+
+        // Sensor.Community
+        var sc = exp.sensor_community || {};
+        _setVal('exp-sc-en',       sc.enabled || false, true);
+        _setVal('exp-sc-interval', sc.interval_ms || 145000);
+
+        // openSenseMap
+        var osm = exp.opensensemap || {};
+        _setVal('exp-osm-en',    osm.enabled || false, true);
+        _setVal('exp-osm-boxid', osm.box_id || '');
+        _setVal('exp-osm-token', osm.access_token || '');
+
+        // OSM sensor IDs grid
+        var ids = osm.sensor_ids || {};
+        var osmDiv = document.getElementById('exp-osm-ids');
+        if(osmDiv) {
+            var metrics = ['temperature','humidity','pressure','pm25','pm10','tvoc','eco2','flow_rate','rain_total','wind_speed'];
+            osmDiv.innerHTML = '<div class="form-row" style="flex-wrap:wrap">'
+                + metrics.map(function(m){
+                    return '<div class="form-group" style="min-width:180px">'
+                         + '<label class="form-label">' + m + '</label>'
+                         + '<input type="text" id="osm-id-' + m + '" class="form-input" value="'
+                         + (ids[m] || '') + '" placeholder="sensor ID…">'
+                         + '</div>';
+                  }).join('')
+                + '</div>';
+        }
+    });
+}
+
+function _setVal(id, val, isCheck) {
+    var el = document.getElementById(id);
+    if(!el) return;
+    if(isCheck) el.checked = !!val;
+    else el.value = val;
+}
+
+function expSave() {
+    var msg = document.getElementById('exp-msg');
+    if(!PCFG) PCFG = {};
+    if(!PCFG.export) PCFG.export = {};
+
+    // MQTT
+    PCFG.export.mqtt = {
+        enabled:     !!(document.getElementById('exp-mqtt-en')||{}).checked,
+        broker:      ((document.getElementById('exp-mqtt-host')||{}).value || ''),
+        port:        parseInt(((document.getElementById('exp-mqtt-port')||{}).value || '1883'), 10),
+        topic_prefix:((document.getElementById('exp-mqtt-prefix')||{}).value || 'waterlogger'),
+        client_id:   ((document.getElementById('exp-mqtt-clientid')||{}).value || ''),
+        username:    ((document.getElementById('exp-mqtt-user')||{}).value || ''),
+        password:    ((document.getElementById('exp-mqtt-pass')||{}).value || ''),
+        interval_ms: parseInt(((document.getElementById('exp-mqtt-interval')||{}).value || '60000'), 10),
+        retain:      !!(document.getElementById('exp-mqtt-retain')||{}).checked,
+        qos: 0
+    };
+
+    // HTTP
+    var authVal = ((document.getElementById('exp-http-auth')||{}).value || '');
+    PCFG.export.http = {
+        enabled:     !!(document.getElementById('exp-http-en')||{}).checked,
+        url:         ((document.getElementById('exp-http-url')||{}).value || ''),
+        method:      'POST',
+        headers:     authVal ? { Authorization: authVal } : {},
+        interval_ms: parseInt(((document.getElementById('exp-http-interval')||{}).value || '60000'), 10)
+    };
+
+    // Sensor.Community
+    PCFG.export.sensor_community = {
+        enabled:     !!(document.getElementById('exp-sc-en')||{}).checked,
+        interval_ms: parseInt(((document.getElementById('exp-sc-interval')||{}).value || '145000'), 10)
+    };
+
+    // openSenseMap
+    var ids = {};
+    ['temperature','humidity','pressure','pm25','pm10','tvoc','eco2','flow_rate','rain_total','wind_speed'].forEach(function(m){
+        var v = ((document.getElementById('osm-id-' + m)||{}).value || '').trim();
+        if(v) ids[m] = v;
+    });
+    PCFG.export.opensensemap = {
+        enabled:      !!(document.getElementById('exp-osm-en')||{}).checked,
+        box_id:       ((document.getElementById('exp-osm-boxid')||{}).value || ''),
+        access_token: ((document.getElementById('exp-osm-token')||{}).value || ''),
+        sensor_ids:   ids
+    };
+
+    if(msg){ msg.textContent='Saving…'; msg.className=''; }
+    pcfgSave(PCFG, function(ok, err) {
+        if(ok) {
+            if(msg){ msg.textContent='✅ Saved! Restarting…'; msg.className=''; }
+            setTimeout(function(){ fetch('/api/platform_reload', {method:'POST'}).catch(function(){}); }, 500);
+        } else {
+            if(msg){ msg.textContent='❌ ' + err; msg.className=''; }
+        }
+    });
+}

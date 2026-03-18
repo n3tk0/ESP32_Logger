@@ -17,6 +17,7 @@
 #include "../managers/RtcManager.h"
 #include "../managers/DataLogger.h"
 #include "../utils/Utils.h"
+#include "ApiHandlers.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Update.h>
@@ -1552,6 +1553,62 @@ void setupWebServer() {
             return;
         }
         r->send(404, "text/plain", "Not found");
+    });
+
+    // =========================================================================
+    // API: PLATFORM CONFIG  (GET = read, POST = write)
+    // Used by Core Logic settings page to manage /platform_config.json
+    // =========================================================================
+    server.on("/api/platform_config", HTTP_GET, [](AsyncWebServerRequest *r) {
+        if (!fsAvailable || !activeFS || !activeFS->exists("/platform_config.json")) {
+            r->send(404, "application/json", "{\"error\":\"platform_config.json not found\"}");
+            return;
+        }
+        r->send(*activeFS, "/platform_config.json", "application/json");
+    });
+
+    // POST /save_platform — receives JSON body, writes to /platform_config.json
+    // Uses static file handle (only one request at a time on embedded device).
+    {
+        // Static file handle shared across onRequest + onBody lambdas
+        static File s_pcfgFile;
+
+        server.on("/save_platform", HTTP_POST,
+            [](AsyncWebServerRequest *r) {
+                // onRequest fires AFTER body is fully collected (when using onBody).
+                // At this point the file is already closed by onBody; just ACK.
+                if (!fsAvailable || !activeFS) {
+                    r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
+                    return;
+                }
+                r->send(200, "application/json", "{\"ok\":true}");
+            },
+            nullptr,
+            [](AsyncWebServerRequest *r, uint8_t *data, size_t len,
+               size_t index, size_t total) {
+                if (!fsAvailable || !activeFS) return;
+                if (index == 0) {
+                    s_pcfgFile = activeFS->open("/platform_config.json", FILE_WRITE);
+                }
+                if (s_pcfgFile) {
+                    s_pcfgFile.write(data, len);
+                }
+                if (index + len >= total && s_pcfgFile) {
+                    s_pcfgFile.close();
+                }
+            }
+        );
+    }
+
+    // =========================================================================
+    // API: PLATFORM RELOAD — trigger live sensor/exporter reload after save
+    // =========================================================================
+    server.on("/api/platform_reload", HTTP_POST, [](AsyncWebServerRequest *r) {
+        // Signal to main loop / TaskManager to reload configs
+        // Full reload requires restart; signal shouldRestart
+        shouldRestart = true;
+        restartTimer  = millis();
+        r->send(200, "application/json", "{\"ok\":true,\"restart\":true}");
     });
 
     server.begin();
