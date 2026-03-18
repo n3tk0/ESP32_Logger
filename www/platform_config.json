@@ -1,7 +1,6 @@
 {
   "version": 1,
   "mode": "legacy",
-  "sleep_mode": "deep",
 
   "sensors": [
     {

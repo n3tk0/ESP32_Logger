@@ -1043,25 +1043,6 @@
             <strong>Hybrid</strong>: both modes active simultaneously.
           </p>
         </div>
-        <div class="form-group">
-          <label class="form-label">
-            Sleep Mode
-            <span class="help-tip" title="Controls how the device sleeps between measurement events.">ℹ️</span>
-          </label>
-          <select id="cl-sleep-mode" class="form-input form-select" onchange="clSleepModeCheck()">
-            <option value="deep">Deep Sleep — maximum power saving (recommended for battery)</option>
-            <option value="light">Light Sleep — faster wake-up, moderate power use</option>
-            <option value="none">No Sleep — device stays awake, Wi-Fi may disconnect between events</option>
-            <option value="online">🌐 Online Mode — always awake, Wi-Fi + web server permanently active</option>
-          </select>
-          <div id="cl-online-warn" class="alert alert-warning" style="display:none;margin-top:.5rem">
-            ⚠️ <strong>Online Mode</strong> keeps Wi-Fi and the web server permanently active.
-            Power consumption increases significantly (≈50–200 mA continuously).
-            This mode is recommended <strong>only when connected to mains power</strong>.
-            <strong>Not suitable for battery operation.</strong>
-          </div>
-          <p class="form-hint">Independent of Operating Mode. Takes effect after restart.</p>
-        </div>
       </div>
     </div>
 
