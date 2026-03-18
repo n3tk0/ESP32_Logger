@@ -181,6 +181,8 @@ void setup() {
                        (wakeUpButtonStr != "WIFI");
 
     // ── WiFi + Web Server ─────────────────────────────────────────────────────
+    uint8_t platformMode = _detectPlatformMode();
+
     if (apModeTriggered) {
         Serial.println(onlineLoggerMode ? "=== Online Logger ===" : "=== Web Server ===");
         setCpuFrequencyMhz(160);
@@ -196,14 +198,11 @@ void setup() {
         setupWebServer();   // ← в WebServer.cpp
 
         // Platform v5.0: start sensor pipeline in continuous/hybrid mode
-        {
-            uint8_t platformMode = _detectPlatformMode();
-            if (platformMode == 1 || platformMode == 2) {
-                _initPlatform();
-            } else {
-                // Even in legacy mode, register API routes so /api/sensors works
-                registerApiRoutes(server);
-            }
+        if (platformMode == 1 || platformMode == 2) {
+            _initPlatform();
+        } else {
+            // Even in legacy mode, register API routes so /api/sensors works
+            registerApiRoutes(server);
         }
 
         if (onlineLoggerMode) {
@@ -216,6 +215,12 @@ void setup() {
         setCpuFrequencyMhz(config.hardware.cpuFreqMHz);
         attachInterrupt(digitalPinToInterrupt(config.hardware.pinFlowSensor),
                         onFlowPulse, FALLING);
+
+        // Platform v5.0: start sensor pipeline on normal boot when configured
+        // for continuous or hybrid mode (no web server routes needed here)
+        if (platformMode == 1 || platformMode == 2) {
+            _initPlatform();
+        }
     }
 
     // ── Init logging cycle ────────────────────────────────────────────────────

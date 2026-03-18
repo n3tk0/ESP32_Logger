@@ -21,6 +21,12 @@ public:
     const char* getType() const override { return "sgp30"; }
     const char* getName() const override { return "SGP30 TVOC/eCO2"; }
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
+    int getMetrics(const char** out, int maxOut) const override {
+        static const char* m[] = { "tvoc", "eco2" };
+        int n = 2; if (n > maxOut) n = maxOut;
+        for (int i = 0; i < n; i++) out[i] = m[i];
+        return n;
+    }
 
 private:
     bool    _measure(uint16_t& tvoc, uint16_t& eco2);

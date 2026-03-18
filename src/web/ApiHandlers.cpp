@@ -4,6 +4,7 @@
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/AggregationEngine.h"
 #include "../sensors/SensorManager.h"
+#include "../export/ExportManager.h"
 #include "../storage/JsonLogger.h"
 #include "../core/Globals.h"   // config, activeFS
 
@@ -59,6 +60,19 @@ static void handleApiData(AsyncWebServerRequest* req) {
     if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
         rawCount = webRingBuf.copyRecent(raw, MAX_RAW, fromTs);
         xSemaphoreGive(webDataMutex);
+    }
+
+    // Apply sensor/metric/toTs filters to ring buffer results
+    if (rawCount > 0) {
+        size_t out = 0;
+        for (size_t i = 0; i < rawCount; i++) {
+            if (raw[i].timestamp > toTs) continue;
+            if (sensorFilter && strcmp(raw[i].sensorId, sensorFilter) != 0) continue;
+            if (metricFilter && strcmp(raw[i].metric,   metricFilter) != 0) continue;
+            if (out != i) raw[out] = raw[i];
+            out++;
+        }
+        rawCount = out;
     }
 
     // If ring buffer doesn't cover the requested range, query filesystem
@@ -133,10 +147,11 @@ static void handleConfigPlatform(AsyncWebServerRequest* req) {
     }
     // Lock config mutex so tasks don't read a partially-updated config
     if (configMutex && xSemaphoreTake(configMutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
-        bool ok = sensorManager.reloadConfig(*activeFS);
+        bool sensorsOk   = sensorManager.reloadConfig(*activeFS);
+        bool exportersOk = exportManager.reloadConfig(*activeFS);
         xSemaphoreGive(configMutex);
-        if (ok) req->send(200, "application/json", "{\"ok\":true}");
-        else    req->send(500, "application/json", "{\"error\":\"reload failed\"}");
+        if (sensorsOk && exportersOk) req->send(200, "application/json", "{\"ok\":true}");
+        else                          req->send(500, "application/json", "{\"error\":\"reload failed\"}");
     } else {
         req->send(503, "application/json", "{\"error\":\"busy\"}");
     }

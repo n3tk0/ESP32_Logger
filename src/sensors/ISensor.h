@@ -53,6 +53,11 @@ public:
     // (e.g. UART-streaming sensors like SDS011 / PMS5003)
     virtual bool isContinuous() const { return false; }
 
+    // Returns metric names this sensor produces (e.g. "temperature", "humidity").
+    // Fills out[] with up to maxOut pointers to static string literals.
+    // Returns the number of metrics filled.
+    virtual int getMetrics(const char** out, int maxOut) const { return 0; }
+
     // Runtime enable/disable (web UI toggle without reboot)
     virtual void setEnabled(bool en) { _enabled = en; }
     virtual bool isEnabled()   const { return _enabled; }

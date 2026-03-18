@@ -17,6 +17,12 @@ public:
     const char* getType() const override { return "ens160"; }
     const char* getName() const override { return "ENS160 TVOC/eCO2"; }
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
+    int getMetrics(const char** out, int maxOut) const override {
+        static const char* m[] = { "tvoc", "eco2", "aqi" };
+        int n = 3; if (n > maxOut) n = maxOut;
+        for (int i = 0; i < n; i++) out[i] = m[i];
+        return n;
+    }
 
 private:
     // Use raw I2C registers to avoid library dependency issues.

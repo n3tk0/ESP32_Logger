@@ -17,6 +17,12 @@ public:
     const char* getType() const override { return "bme280"; }
     const char* getName() const override { return "BME280 Environmental"; }
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
+    int getMetrics(const char** out, int maxOut) const override {
+        static const char* m[] = { "temperature", "humidity", "pressure" };
+        int n = 3; if (n > maxOut) n = maxOut;
+        for (int i = 0; i < n; i++) out[i] = m[i];
+        return n;
+    }
 
 private:
     Adafruit_BME280 _bme;

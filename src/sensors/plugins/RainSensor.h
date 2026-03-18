@@ -18,6 +18,12 @@ public:
     const char* getType() const override { return "rain"; }
     const char* getName() const override { return "Rain Gauge"; }
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
+    int getMetrics(const char** out, int maxOut) const override {
+        static const char* m[] = { "rain_rate", "rain_total" };
+        int n = 2; if (n > maxOut) n = maxOut;
+        for (int i = 0; i < n; i++) out[i] = m[i];
+        return n;
+    }
 
 private:
     static void IRAM_ATTR _isr(void* arg);

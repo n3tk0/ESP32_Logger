@@ -10,6 +10,13 @@ class ExportManager {
 public:
     static constexpr int MAX_EXPORTERS = 8;
 
+    ~ExportManager() {
+        for (int i = 0; i < _count; i++) {
+            delete _exporters[i];
+            _exporters[i] = nullptr;
+        }
+    }
+
     // Register an exporter instance (call before loadAndInit)
     bool addExporter(IExporter* exporter);
 
