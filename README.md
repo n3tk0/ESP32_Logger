@@ -13,7 +13,7 @@
 
 ## 📌 Project Overview
 
-**ESP32 Water Logger** started as a low-power water usage tracker and has evolved into a full **multi-sensor environmental sensing platform (v5.0)**. It combines the original deep-sleep water logger with a FreeRTOS task pipeline that can run up to 8 sensor types simultaneously, log data locally in JSON Lines format, and push readings to multiple cloud or home-automation destinations.
+**ESP32 Logger** started as a low-power water usage tracker and has evolved into a full **multi-sensor environmental sensing platform (v5.0)**. It combines the original deep-sleep water logger with a FreeRTOS task pipeline that can run up to 8 sensor types simultaneously, log data locally in JSON Lines format, and push readings to multiple cloud or home-automation destinations.
 
 Three operating modes let you keep existing behavior or opt into the new pipeline at your own pace — with full backward compatibility guaranteed.
 
