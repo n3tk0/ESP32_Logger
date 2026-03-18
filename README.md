@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>💧 ESP32 Water Logger</h1>
+  <h1>💧 ESP32 Logger</h1>
   <p><b>Modular, multi-sensor environmental logging platform for Seeed XIAO ESP32-C3</b></p>
 
   [![ESP32-C3](https://img.shields.io/badge/Board-Seeed_XIAO_ESP32--C3-blue)](#)
