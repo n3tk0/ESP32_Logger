@@ -326,12 +326,11 @@ void loop() {
                     currentWakeTimestamp = now.IsValid() ? now.Unix32Time() : 0;
                 }
                 highCountFF = 0; highCountPF = 0;
-            } else if (!onlineLoggerMode && !apModeTriggered && millis() - stateStartTime >= 2000) {
+            } else if (!onlineLoggerMode && g_sleepMode < 2 && !apModeTriggered && millis() - stateStartTime >= 2000) {
                 DBGLN("No button -> sleep");
                 configureWakeup();
                 Serial.flush();
-                safeWiFiShutdown(); delay(50);
-                esp_deep_sleep_start();
+                _doSleep();
             }
             break;
 
@@ -420,12 +419,11 @@ void loop() {
                 loggingState   = STATE_IDLE;
                 stateStartTime = millis(); cycleStartTime = millis();
                 lastFlowPulseTime = 0;
-            } else if (!shouldRestart) {
+            } else if (!shouldRestart && !onlineLoggerMode && g_sleepMode < 2) {
                 configureWakeup();
-                DBGLN("Deep sleep...");
+                DBGLN("Going to sleep...");
                 Serial.flush();
-                safeWiFiShutdown(); delay(50);
-                esp_deep_sleep_start();
+                _doSleep();
             }
             break;
         }
