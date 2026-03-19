@@ -1,4 +1,5 @@
 #include "JsonLogger.h"
+#include "../pipeline/AggregationEngine.h"
 #include <string.h>
 #include <time.h>
 
@@ -208,6 +209,148 @@ size_t JsonLogger::query(fs::FS& fs,
         entry.close();
     }
     return found;
+}
+
+// ---------------------------------------------------------------------------
+// streamAggregateQuery — P1/3.1: reads JSONL line-by-line and accumulates
+// per-bucket stats without materialising the full raw array.
+//
+// Memory model: allocates Accum[maxOut] on heap (~80B * 500 = 40KB), writes
+// aggregated output directly into out[]. Frees Accum before returning.
+// Savings vs two-step query+aggregate: eliminates raw[] (40KB) + agg[] (40KB).
+// ---------------------------------------------------------------------------
+size_t JsonLogger::streamAggregateQuery(fs::FS& fs,
+                                         uint32_t fromTs, uint32_t toTs,
+                                         const char* sensorId, const char* metric,
+                                         SensorReading* out, size_t maxOut,
+                                         TimeBucket bucketMins, AggMode mode,
+                                         size_t maxPoints)
+{
+    // Fall through to regular query for raw mode (no bucketing needed)
+    if (bucketMins == BUCKET_RAW || mode == AGG_RAW) {
+        return query(fs, fromTs, toTs, sensorId, metric, out, maxOut);
+    }
+
+    struct Accum {
+        uint32_t bucketTs;     // UTC seconds of bucket start
+        double   sum;
+        float    vmin, vmax;
+        uint32_t count;
+        char     metric[16];
+        char     unit[12];
+        char     sensorId[17];
+        char     sensorType[12];
+        uint8_t  quality;
+    };
+
+    Accum* acc = new Accum[maxOut]();
+    if (!acc) return 0;
+    size_t nBuckets = 0;
+
+    uint32_t bucketSecs = (uint32_t)bucketMins * 60u;
+    if (bucketSecs == 0) bucketSecs = 1;
+
+    char lineBuf[160];
+    File dir = fs.open(_logDir);
+    if (dir && dir.isDirectory()) {
+        File entry;
+        while ((entry = dir.openNextFile())) {
+            const char* name = entry.name();
+            size_t nLen = strlen(name);
+            if (nLen < 6 || strcmp(name + nLen - 6, ".jsonl") != 0) {
+                entry.close(); continue;
+            }
+            if (!_fileDateInRange(name, fromTs, toTs)) {
+                entry.close(); continue;
+            }
+
+            while (entry.available()) {
+                int len = entry.readBytesUntil('\n', lineBuf, sizeof(lineBuf) - 1);
+                if (len <= 0) break;
+                lineBuf[len] = '\0';
+
+                StaticJsonDocument<192> doc;
+                if (deserializeJson(doc, lineBuf) != DeserializationError::Ok) continue;
+
+                uint32_t ts = doc["ts"] | 0;
+                if (ts < fromTs || ts > toTs) continue;
+                if (sensorId && *sensorId && strcmp(doc["id"] | "", sensorId) != 0) continue;
+                if (metric  && *metric  && strcmp(doc["metric"] | "", metric)   != 0) continue;
+
+                float    val = doc["value"] | 0.0f;
+                uint32_t bTs = (ts / bucketSecs) * bucketSecs;
+
+                // Find bucket slot (linear scan; maxOut <= 500 so ≤250 avg ops)
+                Accum* slot = nullptr;
+                for (size_t i = 0; i < nBuckets; i++) {
+                    if (acc[i].bucketTs == bTs) { slot = &acc[i]; break; }
+                }
+                if (!slot) {
+                    if (nBuckets >= maxOut) continue;  // bucket table full
+                    slot = &acc[nBuckets++];
+                    slot->bucketTs = bTs;
+                    slot->sum      = 0;
+                    slot->vmin     = val;
+                    slot->vmax     = val;
+                    slot->count    = 0;
+                    strncpy(slot->metric,     doc["metric"] | "", sizeof(slot->metric)-1);
+                    strncpy(slot->unit,       doc["unit"]   | "", sizeof(slot->unit)-1);
+                    strncpy(slot->sensorId,   doc["id"]     | "", sizeof(slot->sensorId)-1);
+                    strncpy(slot->sensorType, doc["sensor"] | "", sizeof(slot->sensorType)-1);
+                    slot->quality = (uint8_t)(doc["q"] | 0);
+                }
+                slot->sum += val;
+                slot->count++;
+                if (val < slot->vmin) slot->vmin = val;
+                if (val > slot->vmax) slot->vmax = val;
+            }
+            entry.close();
+        }
+    }
+
+    // Insertion-sort accumulators by bucket start timestamp
+    for (size_t i = 1; i < nBuckets; i++) {
+        Accum tmp = acc[i];
+        size_t j = i;
+        while (j > 0 && acc[j-1].bucketTs > tmp.bucketTs) {
+            acc[j] = acc[j-1]; j--;
+        }
+        acc[j] = tmp;
+    }
+
+    // Convert accumulators to output SensorReadings
+    size_t n = 0;
+    for (size_t i = 0; i < nBuckets && n < maxOut; i++) {
+        if (acc[i].count == 0) continue;
+        SensorReading& r = out[n++];
+        r.timestamp = acc[i].bucketTs + bucketSecs / 2;  // bucket midpoint
+        switch (mode) {
+            case AGG_MIN: r.value = acc[i].vmin; break;
+            case AGG_MAX: r.value = acc[i].vmax; break;
+            case AGG_SUM: r.value = (float)acc[i].sum;
+                          r.timestamp = acc[i].bucketTs + bucketSecs; break;
+            default:      r.value = (float)(acc[i].sum / acc[i].count); break;
+        }
+        strncpy(r.metric,     acc[i].metric,     sizeof(r.metric)-1);
+        strncpy(r.unit,       acc[i].unit,        sizeof(r.unit)-1);
+        strncpy(r.sensorId,   acc[i].sensorId,   sizeof(r.sensorId)-1);
+        strncpy(r.sensorType, acc[i].sensorType, sizeof(r.sensorType)-1);
+        r.quality = (SensorQuality)acc[i].quality;
+    }
+
+    delete[] acc;
+
+    // Apply LTTB post-bucketing if requested and result exceeds maxPoints
+    if (mode == AGG_LTTB && maxPoints > 0 && n > maxPoints) {
+        SensorReading* tmp = new SensorReading[maxPoints];
+        if (tmp) {
+            n = AggregationEngine::lttb(out, n, tmp, maxPoints);
+            memcpy(out, tmp, n * sizeof(SensorReading));
+            delete[] tmp;
+        }
+    }
+
+    return n;
 }
 
 // ---------------------------------------------------------------------------

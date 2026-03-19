@@ -33,6 +33,20 @@ public:
                  const char* metric,    // nullptr = all
                  SensorReading* out,    size_t maxOut);
 
+    // Streaming aggregation — reads JSONL files line-by-line and buckets
+    // in one pass without materialising raw readings (P1 / 3.1).
+    // For AGG_RAW/BUCKET_RAW falls through to query().
+    // maxPoints: apply LTTB after bucketing when result > maxPoints (0=no LTTB).
+    // Returns number of output readings (always <= maxOut).
+    size_t streamAggregateQuery(fs::FS& fs,
+                                uint32_t fromTs, uint32_t toTs,
+                                const char* sensorId,
+                                const char* metric,
+                                SensorReading* out,  size_t maxOut,
+                                TimeBucket bucketMins,
+                                AggMode    mode,
+                                size_t     maxPoints = 500);
+
     // List available log files (names only, most recent first)
     int listFiles(fs::FS& fs, char (*names)[32], int maxNames);
 

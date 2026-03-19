@@ -19,6 +19,15 @@ bool MqttExporter::init(JsonObjectConst cfg) {
     _retain = cfg["retain"] | false;
     strncpy(_deviceId, config.deviceId, sizeof(_deviceId)-1);
 
+    // PubSubClient only supports QoS 0 for publish(). Warn and zero so the
+    // config field is not silently ignored (4.1 / 4.6 dead-config fix).
+    if (_qos > 0) {
+        Serial.printf("[MQTT] WARNING: qos=%u requested but PubSubClient supports "
+                      "QoS 0 only; using QoS 0. Use AsyncMQTTClient for QoS 1/2.\n",
+                      _qos);
+        _qos = 0;
+    }
+
     // Auto-generate client ID from deviceId if empty
     if (_clientId[0] == '\0') {
         snprintf(_clientId, sizeof(_clientId), "wl-%s", _deviceId);

@@ -9,6 +9,7 @@ struct StorageTaskParam {
     const char* logDir      = "/logs";  // log directory path (#8)
     uint32_t    maxSizeKB   = 512;      // per-file size limit before rotation
     bool        rotateDaily = true;     // daily rotation (vs. size-only)
+    fs::FS*     mirrorFS    = nullptr;  // optional second FS for dual-write (#5/2.1)
 };
 
 // ============================================================================

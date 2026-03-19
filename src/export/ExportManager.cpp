@@ -1,4 +1,5 @@
 #include "ExportManager.h"
+#include <string.h>
 
 ExportManager exportManager;
 
@@ -59,7 +60,107 @@ bool ExportManager::_sendWithRetry(IExporter* exp,
         Serial.printf("[ExportManager] '%s' retry %d/%d\n",
                       exp->getName(), attempt + 1, exp->maxRetries());
     }
+    // All retries exhausted — spool for later retry (#4.7)
+    _spoolBatch(exp, r, n);
     return false;
+}
+
+// ---------------------------------------------------------------------------
+// _spoolBatch — append failed batch to /spool/<name>.jsonl for later retry.
+// Caps spool file at MAX_SPOOL_BYTES to protect flash from runaway growth.
+// ---------------------------------------------------------------------------
+void ExportManager::_spoolBatch(IExporter* exp,
+                                 const SensorReading* r, size_t n) {
+    if (!_spoolFS || !r || n == 0) return;
+
+    char path[48];
+    snprintf(path, sizeof(path), "/spool/%s.jsonl", exp->getName());
+
+    // Ensure /spool directory exists
+    if (!_spoolFS->exists("/spool")) _spoolFS->mkdir("/spool");
+
+    // Size guard: don't grow spool beyond MAX_SPOOL_BYTES
+    if (_spoolFS->exists(path)) {
+        File sz = _spoolFS->open(path, FILE_READ);
+        size_t fSize = sz ? sz.size() : 0;
+        if (sz) sz.close();
+        if (fSize >= MAX_SPOOL_BYTES) {
+            Serial.printf("[ExportManager] Spool full for '%s' (%zu B) — dropping\n",
+                          exp->getName(), fSize);
+            return;
+        }
+    }
+
+    File f = _spoolFS->open(path, FILE_APPEND);
+    if (!f) {
+        Serial.printf("[ExportManager] Cannot open spool %s\n", path);
+        return;
+    }
+
+    char line[160];
+    for (size_t i = 0; i < n; i++) {
+        int len = r[i].toJsonLine(line, sizeof(line));
+        if (len > 0) { f.println(line); }
+    }
+    f.flush();
+    f.close();
+    Serial.printf("[ExportManager] Spooled %zu readings for '%s'\n",
+                  n, exp->getName());
+}
+
+// ---------------------------------------------------------------------------
+// _drainSpool — try to resend readings from spool file. Deletes file on
+// complete success; leaves it intact if send fails.
+// ---------------------------------------------------------------------------
+bool ExportManager::_drainSpool(IExporter* exp) {
+    if (!_spoolFS) return true;
+
+    char path[48];
+    snprintf(path, sizeof(path), "/spool/%s.jsonl", exp->getName());
+    if (!_spoolFS->exists(path)) return true;
+
+    File f = _spoolFS->open(path, FILE_READ);
+    if (!f) return true;
+
+    // Read up to one batch at a time to bound memory use
+    static constexpr int SPOOL_BATCH = 20;
+    SensorReading batch[SPOOL_BATCH];
+    int count = 0;
+    bool allOk = true;
+    char lineBuf[160];
+
+    while (f.available()) {
+        int len = f.readBytesUntil('\n', lineBuf, sizeof(lineBuf) - 1);
+        if (len <= 0) break;
+        lineBuf[len] = '\0';
+
+        StaticJsonDocument<192> doc;
+        if (deserializeJson(doc, lineBuf) != DeserializationError::Ok) continue;
+
+        SensorReading& sr = batch[count];
+        sr.timestamp = doc["ts"] | 0;
+        strncpy(sr.sensorId,   doc["id"]     | "", sizeof(sr.sensorId)-1);
+        strncpy(sr.sensorType, doc["sensor"] | "", sizeof(sr.sensorType)-1);
+        strncpy(sr.metric,     doc["metric"] | "", sizeof(sr.metric)-1);
+        sr.value   = doc["value"] | 0.0f;
+        strncpy(sr.unit,       doc["unit"]   | "", sizeof(sr.unit)-1);
+        sr.quality = (SensorQuality)(doc["q"] | 0);
+        count++;
+
+        if (count >= SPOOL_BATCH) {
+            if (!exp->send(batch, count)) { allOk = false; break; }
+            count = 0;
+        }
+    }
+    f.close();
+
+    if (count > 0 && allOk) allOk = exp->send(batch, count);
+
+    if (allOk) {
+        _spoolFS->remove(path);
+        Serial.printf("[ExportManager] Spool drained for '%s'\n", exp->getName());
+    }
+    return allOk;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +179,9 @@ void ExportManager::sendAll(const SensorReading* readings, size_t count) {
         // Per-exporter interval_ms throttle (#11)
         uint32_t interval = _exporters[i]->intervalMs();
         if (interval > 0 && (now - _lastSentMs[i]) < interval) continue;
+
+        // Drain any spooled backlog before sending new live data (#4.7)
+        _drainSpool(_exporters[i]);
 
         if (_sendWithRetry(_exporters[i], readings, count)) {
             _lastSentMs[i] = now;

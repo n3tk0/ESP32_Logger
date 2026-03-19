@@ -201,10 +201,13 @@ size_t AggregationEngine::aggregate(const SensorReading* in,  size_t inLen,
     size_t bucketedMax = outMaxLen;
     SensorReading* bucketed = out; // Reuse output buffer for first pass if safe
 
-    // If mode is LTTB we need a separate intermediate buffer
+    // If mode is LTTB we need a separate intermediate buffer.
+    // Cap to min(inLen, outMaxLen) to avoid over-allocating when inLen is small
+    // (e.g. ring-buffer path with 200 entries uses 16KB not 40KB) (#3.6).
     SensorReading* tmpBuf = nullptr;
     if (mode == AGG_LTTB && bucketMins != BUCKET_RAW) {
-        tmpBuf  = new SensorReading[outMaxLen];
+        size_t tmpSz = (inLen < outMaxLen) ? inLen : outMaxLen;
+        tmpBuf  = new SensorReading[tmpSz];
         if (!tmpBuf) {
             // Fallback: no intermediate, skip LTTB
             return bucket(in, inLen, out, outMaxLen, bucketMins, AGG_AVG);

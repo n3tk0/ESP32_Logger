@@ -48,12 +48,30 @@ All Phase 1 stabilisation fixes and selected Phase 3 performance optimisations h
 | Ring+FS merge in `/api/data` | `src/web/ApiHandlers.cpp` | Always queries both ring (200) and FS (300); insertion-sort merge + dedup by `(ts, sensorId, metric)` | #4 | High |
 | `metric`/`unit` in API response | `src/web/ApiHandlers.cpp` | Each data point includes `"metric"` and `"unit"` fields | #12 | Medium |
 
-**All audit findings resolved. Remaining non-issues:**
+### Session 3 — All Remaining Roadmap Items (2026-03-19)
+
+| Fix | File | Change | Audit Ref | Severity |
+|-----|------|--------|-----------|----------|
+| Pin conflict detection | `Logger.ino` | `_checkPinConflicts()` scans platform_config.json sensors for `pin` == `config.hardware.pinFlowSensor`; logs warn at `_initPlatform()` time | M9 / 2.6 | High |
+| MQTT QoS warning + dead field | `src/export/MqttExporter.cpp` | Logs warning when `qos>0`; zeros `_qos` since PubSubClient is QoS-0 only; documents upgrade path to AsyncMQTTClient | 4.1 / 4.6 | Medium |
+| Dynamic sensor queue sizing | `src/tasks/TaskManager.cpp` | `sensorQueue` depth = `max(20, sensorManager.count() * 4)` at init time; scales with actual sensor count | 3.5 | Medium |
+| Mirror write (HybridStorage) | `src/tasks/StorageTask.h/.cpp`, `TaskManager.cpp` | `StorageTaskParam.mirrorFS`; `StorageTask` creates a second `JsonLogger` when set; `TaskManager` enables when `"storage.mode":"mirror"` + both SD + LittleFS available | #5 / 2.1 | High |
+| `/api/diag` endpoint | `src/web/ApiHandlers.cpp` | `GET /api/diag` returns `free_heap`, `min_free_heap`, `queue_drops`, per-queue `waiting`/`spaces`, per-task stack HWMs | 4.5 | Medium |
+| Streaming aggregation | `src/storage/JsonLogger.h/.cpp` | `streamAggregateQuery()` reads JSONL line-by-line, accumulates into `Accum[maxOut]` buckets — no raw materialisation; used for historical queries (ring is empty) | P1 / 3.1 | Performance |
+| `tmpBuf` size capped | `src/pipeline/AggregationEngine.cpp` | `tmpBuf` allocation capped to `min(inLen, outMaxLen)` instead of always `outMaxLen`; ring path (200 entries) uses 16KB not 40KB | 3.6 | Performance |
+| Historical/recent query split | `src/web/ApiHandlers.cpp` | When ring is empty and mode is not raw: uses `streamAggregateQuery` (saves ~40KB); otherwise raw merge path | P1 / 3.1 | Performance |
+| Multi-metric warning | `src/web/ApiHandlers.cpp` | Response includes `"warning"` when multiple metrics are present without `metric=` filter | 4.3 | Medium |
+| Export retry spool | `src/export/ExportManager.h/.cpp` | On retry exhaustion: `_spoolBatch()` writes readings to `/spool/{name}.jsonl` (max 32KB); `sendAll()` calls `_drainSpool()` before each live send; `setSpoolFS(&LittleFS)` wired in `_initPlatform()` | 4.7 | High |
+
+**ALL audit findings resolved. Non-issues confirmed:**
 - M1/C1 — `g_sleepMode` IS declared (Globals.h:106); finding was stale
 - C5 — `_doSleep()` already calls `TaskManager::shutdown()` (Logger.ino:94-96)
 - M6 — ExportManager destructor correctly deletes all registered exporters
 - M8 — `millis()` unsigned subtraction wraps correctly on ESP32 (not a bug)
-- Streaming aggregation (P1) — deferred; current MAX_RAW=500 is sufficient for ESP32-C3
+
+**Deferred by scope:**
+- 2.5 — Full `BusManager.h` class (wireMutex achieves the core goal; full bus manager adds complexity with no current benefit)
+- 4.6 — Broad dead config audit (MQTT `qos` field is now handled correctly; full config audit requires UI review)
 
 ---
 

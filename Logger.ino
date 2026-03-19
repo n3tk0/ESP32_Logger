@@ -173,6 +173,33 @@ static uint8_t _detectPlatformMode() {
 }
 
 // ---------------------------------------------------------------------------
+// M9/2.6 — Check for sensor pin conflicts with hardware config pins
+// ---------------------------------------------------------------------------
+static void _checkPinConflicts() {
+    if (!activeFS) return;
+    File f = activeFS->open("/platform_config.json", FILE_READ);
+    if (!f) return;
+    StaticJsonDocument<4096> doc;
+    if (deserializeJson(doc, f) != DeserializationError::Ok) { f.close(); return; }
+    f.close();
+
+    JsonArray sensors = doc["sensors"].as<JsonArray>();
+    if (sensors.isNull()) return;
+
+    int flowPin = config.hardware.pinFlowSensor;
+    for (JsonObject s : sensors) {
+        if (!s["enabled"]) continue;
+        int sPin = s["pin"] | -1;
+        if (sPin >= 0 && sPin == flowPin) {
+            Serial.printf("[WARN] M9: Sensor '%s' (type=%s) pin %d conflicts with "
+                          "pinFlowSensor — dual ISR registration will panic!\n",
+                          (const char*)(s["id"] | s["type"] | "?"),
+                          (const char*)(s["type"] | "?"), flowPin);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Register all sensor plugins and init pipeline (called in continuous/hybrid)
 // ---------------------------------------------------------------------------
 static void _initPlatform() {
@@ -209,12 +236,17 @@ static void _initPlatform() {
     // Load sensor configs from /platform_config.json
     if (activeFS) sensorManager.loadAndInit(*activeFS);
 
+    // Detect sensor pin conflicts with hardware flow sensor pin (M9)
+    _checkPinConflicts();
+
     // Register exporters
     exportManager.addExporter(new MqttExporter());
     exportManager.addExporter(new HttpExporter());
     exportManager.addExporter(new SensorCommunityExporter());
     exportManager.addExporter(new OpenSenseMapExporter());
     if (activeFS) exportManager.loadAndInit(*activeFS);
+    // Spool failed exports to LittleFS (always available, even without SD) (#4.7)
+    if (littleFsAvailable) exportManager.setSpoolFS(&LittleFS);
 
     // Register new API routes (sensor data + config)
     registerApiRoutes(server);
