@@ -18,8 +18,17 @@ bool WaterFlowSensor::init(JsonObjectConst cfg) {
     _calibration    = cfg["calibration"]       | 1.0f;
     _intervalMs     = cfg["read_interval_ms"]  | 1000;
 
-    if (_pulsesPerLiter <= 0.0f) _pulsesPerLiter = _defaultPPL;
-    if (_calibration    <= 0.0f) _calibration    = 1.0f;
+    // For custom type (defaultPPL == 0), pulses_per_liter is mandatory.
+    if (_pulsesPerLiter <= 0.0f) {
+        if (_defaultPPL == 0.0f) {
+            Serial.printf("[%s] ERROR: 'pulses_per_liter' is required for custom "
+                          "water flow sensor (e.g. 450.0 for YF-S201-equivalent)\n",
+                          getType());
+            return false;
+        }
+        _pulsesPerLiter = _defaultPPL;
+    }
+    if (_calibration <= 0.0f) _calibration = 1.0f;
 
     JsonObjectConst cal = cfg["cal"];
     _calFlow.load(cal, "flow_rate");

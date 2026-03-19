@@ -4,15 +4,17 @@
 #include <freertos/semphr.h>
 
 // ============================================================================
-// WaterFlowSensor — Hall-effect water flow sensor (YF-S201 or YF-S403)
+// WaterFlowSensor — Hall-effect water flow sensor
 //
-// Model differences:
-//   YF-S201: 1–30 L/min range, ~450 pulses/L (default)
-//   YF-S403: 1–60 L/min range, ~600 pulses/L (default, larger pipe)
+// Supported types:
+//   "yfs201"     — YF-S201, 1–30 L/min, ~450 pulses/L
+//   "yfs403"     — YF-S403, 1–60 L/min, ~600 pulses/L
+//   "water_flow" — Custom sensor; user MUST supply "pulses_per_liter" in config
 //
 // Config keys:
 //   "pin"              — GPIO pin (default 21)
-//   "pulses_per_liter" — override default PPL for the chosen model
+//   "pulses_per_liter" — pulses per litre (mandatory for "water_flow" type;
+//                        overrides model default for yfs201/yfs403)
 //   "calibration"      — multiplier for volume/flow correction (default 1.0)
 //   "read_interval_ms" — snapshot interval (default 1000 ms)
 //   "cal_offset"       — additive offset on flow_rate (default 0.0)
@@ -35,8 +37,9 @@ public:
 
     const char* getType() const override { return _typeName; }
     const char* getName() const override {
-        return (_typeName[4] == '4') ? "YF-S403 Water Flow"
-                                     : "YF-S201 Water Flow";
+        if (strcmp(_typeName, "yfs403")     == 0) return "YF-S403 Water Flow";
+        if (strcmp(_typeName, "yfs201")     == 0) return "YF-S201 Water Flow";
+        return "Custom Water Flow";
     }
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
     int getMetrics(const char** out, int maxOut) const override {

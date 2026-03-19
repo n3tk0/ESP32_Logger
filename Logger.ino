@@ -221,8 +221,10 @@ static void _initPlatform() {
     sensorManager.registerPlugin("veml7700",[]()->ISensor*{ return new VEML7700Sensor(); });
     sensorManager.registerPlugin("bh1750",  []()->ISensor*{ return new BH1750Sensor(); });
     // Water / flow
-    sensorManager.registerPlugin("yfs201",  []()->ISensor*{ return new WaterFlowSensor("yfs201", 450.0f); });
-    sensorManager.registerPlugin("yfs403",  []()->ISensor*{ return new WaterFlowSensor("yfs403", 600.0f); });
+    sensorManager.registerPlugin("yfs201",      []()->ISensor*{ return new WaterFlowSensor("yfs201",      450.0f); });
+    sensorManager.registerPlugin("yfs403",      []()->ISensor*{ return new WaterFlowSensor("yfs403",      600.0f); });
+    // Custom hall-effect flow sensor: user must set "pulses_per_liter" in config
+    sensorManager.registerPlugin("water_flow",  []()->ISensor*{ return new WaterFlowSensor("water_flow",  0.0f);   });
     // Weather
     sensorManager.registerPlugin("rain",    []()->ISensor*{ return new RainSensor(); });
     sensorManager.registerPlugin("wind",    []()->ISensor*{ return new WindSensor(); });
