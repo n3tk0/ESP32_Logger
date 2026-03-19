@@ -41,7 +41,7 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
                           name, _exporters[i]->isEnabled() ? "true" : "false");
         }
     }
-    return ok >= 0;
+    return ok > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,8 +61,16 @@ bool ExportManager::_sendWithRetry(IExporter* exp,
 
 // ---------------------------------------------------------------------------
 void ExportManager::sendAll(const SensorReading* readings, size_t count) {
+    static constexpr uint32_t MAX_SENDALL_MS = 30000; // 30s circuit breaker
+    uint32_t deadline = millis() + MAX_SENDALL_MS;
+
     for (int i = 0; i < _count; i++) {
         if (!_exporters[i]->isEnabled()) continue;
+        if (millis() > deadline) {
+            Serial.printf("[ExportManager] circuit breaker: skipping '%s'\n",
+                          _exporters[i]->getName());
+            break;
+        }
         _sendWithRetry(_exporters[i], readings, count);
     }
 }

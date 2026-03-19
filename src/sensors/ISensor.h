@@ -85,7 +85,8 @@ public:
     void        setId(const char* id) { strncpy(_id, id, sizeof(_id)-1); }
 
     // Last successful read timestamp (Unix epoch)
-    uint32_t    lastReadTs() const { return _lastReadTs; }
+    uint32_t    lastReadTs()               const { return _lastReadTs; }
+    void        setLastReadTs(uint32_t ts)       { _lastReadTs = ts; }
 
 protected:
     bool     _enabled    = false;

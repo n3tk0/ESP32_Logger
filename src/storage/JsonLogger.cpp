@@ -116,6 +116,26 @@ void JsonLogger::flush() {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: parse "YYYY-MM-DD" filename prefix to a UTC day range [dayStart, dayEnd).
+// Returns false if the name doesn't look like a date file.
+static bool _fileDateInRange(const char* name, uint32_t fromTs, uint32_t toTs) {
+    // Filename format: "YYYY-MM-DD.jsonl" (LittleFS returns just the base name)
+    int y = 0, m = 0, d = 0;
+    if (sscanf(name, "%4d-%2d-%2d.jsonl", &y, &m, &d) != 3) return true; // not a date file — include it
+    if (y < 1970 || m < 1 || m > 12 || d < 1 || d > 31) return true;
+
+    // Approximate day start/end in UTC seconds (mktime uses local TZ, add ±1 day buffer)
+    struct tm t = {};
+    t.tm_year = y - 1900; t.tm_mon = m - 1; t.tm_mday = d;
+    time_t dayStart = mktime(&t);               // local midnight ≈ UTC midnight ± 14h
+    time_t dayEnd   = dayStart + 86400;
+
+    // Skip only when clearly outside range (with 1-day safety margin each side)
+    return !((time_t)toTs   < dayStart - 86400 ||
+             (time_t)fromTs > dayEnd   + 86400);
+}
+
+// ---------------------------------------------------------------------------
 size_t JsonLogger::query(fs::FS& fs,
                           uint32_t fromTs, uint32_t toTs,
                           const char* sensorId, const char* metric,
@@ -133,6 +153,12 @@ size_t JsonLogger::query(fs::FS& fs,
         const char* name = entry.name();
         size_t nLen = strlen(name);
         if (nLen < 6 || strcmp(name + nLen - 6, ".jsonl") != 0) {
+            entry.close();
+            continue;
+        }
+
+        // Skip files whose date is clearly outside [fromTs, toTs] (P3 optimisation)
+        if (!_fileDateInRange(name, fromTs, toTs)) {
             entry.close();
             continue;
         }

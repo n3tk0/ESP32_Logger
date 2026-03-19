@@ -20,7 +20,7 @@ void exportTaskFunc(void* /*param*/) {
     while (TaskManager::running) {
         bool got = xQueueReceive(exportQueue, &r,
                                   pdMS_TO_TICKS(1000)) == pdTRUE;
-        if (got) {
+        if (got && batchCount < BATCH_SIZE) {
             batch[batchCount++] = r;
         }
 

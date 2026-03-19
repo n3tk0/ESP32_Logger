@@ -60,7 +60,7 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
 
     int initialised = 0;
     for (JsonObject sensor : arr) {
-        if (!sensor["enabled"] | false) continue;
+        if (!sensor["enabled"]) continue;
         if (_count >= MAX_SENSORS) {
             Serial.println("[SensorManager] MAX_SENSORS reached");
             break;
@@ -120,6 +120,7 @@ int SensorManager::tick(QueueHandle_t sensorQueue, uint32_t now) {
                 }
             }
             _lastReadMs[i] = ms;
+            s->setLastReadTs(now);
         }
     }
     return pushed;

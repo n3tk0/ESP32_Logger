@@ -47,7 +47,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
     // --- Fetch raw data ---
     // Strategy: first try in-memory ring buffer (recent data),
     //           fall back to filesystem query for historical data.
-    constexpr size_t MAX_RAW = 2000;
+    constexpr size_t MAX_RAW = 500;  // 40 KB vs 160 KB — prevents OOM on ESP32-C3
     SensorReading* raw = new SensorReading[MAX_RAW];
     if (!raw) {
         req->send(500, "application/json", "{\"error\":\"out of memory\"}");
@@ -75,14 +75,24 @@ static void handleApiData(AsyncWebServerRequest* req) {
         rawCount = out;
     }
 
-    // If ring buffer doesn't cover the requested range, query filesystem
+    // Capture agg/mode strings before any async ops
+    const char* aggParamStr  = req->hasParam("agg")  ? req->getParam("agg")->value().c_str()  : "5m";
+    const char* modeParamStr = req->hasParam("mode") ? req->getParam("mode")->value().c_str() : "lttb";
+
+    // If ring buffer doesn't cover the requested range, query filesystem.
+    // Guard with configMutex: static JsonLogger shares internal state and
+    // concurrent /api/data requests would race on openNextFile().
+    bool truncated = false;
     if (rawCount == 0 && activeFS) {
         static JsonLogger logger;
-        // (logger.begin() called at startup; reuse static instance)
-        rawCount = logger.query(*activeFS, fromTs, toTs,
-                                sensorFilter, metricFilter,
-                                raw, MAX_RAW);
+        if (configMutex && xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+            rawCount = logger.query(*activeFS, fromTs, toTs,
+                                    sensorFilter, metricFilter,
+                                    raw, MAX_RAW);
+            xSemaphoreGive(configMutex);
+        }
     }
+    truncated = (rawCount >= MAX_RAW);
 
     // --- Aggregate ---
     SensorReading* agg = new SensorReading[limit + 1];
@@ -93,35 +103,26 @@ static void handleApiData(AsyncWebServerRequest* req) {
                                                 bucket, mode, limit);
     }
 
-    // --- Build JSON response ---
-    // Use chunked response to avoid large heap allocation
-    String body;
-    body.reserve(aggCount * 30 + 128);
-    body  = "{\"from\":";    body += fromTs;
-    body += ",\"to\":";      body += toTs;
-    body += ",\"agg\":\"";   body += req->getParam("agg")
-                                     ? req->getParam("agg")->value() : "5m";
-    body += "\",\"mode\":\""; body += req->getParam("mode")
-                                     ? req->getParam("mode")->value() : "lttb";
-    body += "\",\"count\":";  body += (int)aggCount;
-    body += ",\"data\":[";
+    delete[] raw;
+
+    // --- Build JSON response via AsyncResponseStream (no String realloc) ---
+    AsyncResponseStream* response =
+        req->beginResponseStream("application/json");
+    response->printf("{\"from\":%u,\"to\":%u,\"agg\":\"%s\",\"mode\":\"%s\","
+                     "\"count\":%zu,\"truncated\":%s,\"data\":[",
+                     fromTs, toTs, aggParamStr, modeParamStr,
+                     aggCount, truncated ? "true" : "false");
 
     for (size_t i = 0; i < aggCount; i++) {
-        if (i > 0) body += ',';
-        body += "{\"ts\":";
-        body += agg[i].timestamp;
-        body += ",\"v\":";
         char valBuf[16];
         snprintf(valBuf, sizeof(valBuf), "%.4g", agg[i].value);
-        body += valBuf;
-        body += '}';
+        response->printf("%s{\"ts\":%u,\"v\":%s}",
+                         (i > 0 ? "," : ""), agg[i].timestamp, valBuf);
     }
-    body += "]}";
+    response->print("]}");
 
-    delete[] raw;
     delete[] agg;
-
-    req->send(200, "application/json", body);
+    req->send(response);
 }
 
 // ---------------------------------------------------------------------------
