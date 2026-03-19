@@ -18,6 +18,7 @@ public:
     const char* getName() const override { return "SDS011 PM2.5/PM10"; }
     uint32_t    getReadIntervalMs() const override { return _workPeriodMs; }
     bool        isContinuous() const override { return true; }
+    bool        isBlocking()   const override { return true; }
     int getMetrics(const char** out, int maxOut) const override {
         static const char* m[] = { "pm25", "pm10" };
         int n = 2; if (n > maxOut) n = maxOut;

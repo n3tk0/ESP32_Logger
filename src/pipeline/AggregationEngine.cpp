@@ -213,8 +213,10 @@ size_t AggregationEngine::aggregate(const SensorReading* in,  size_t inLen,
         bucketedMax = outMaxLen;
     }
 
+    // Use AGG_MAX for the pre-bucket pass when LTTB is selected so that spikes
+    // are preserved rather than washed out by averaging before downsampling (#7).
     size_t n = bucket(in, inLen, bucketed, bucketedMax, bucketMins,
-                      (mode == AGG_LTTB) ? AGG_AVG : mode);
+                      (mode == AGG_LTTB) ? AGG_MAX : mode);
 
     // Phase 2: LTTB if needed
     size_t result = n;

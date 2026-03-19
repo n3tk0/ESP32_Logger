@@ -1,5 +1,6 @@
 #include "SensorManager.h"
 #include <LittleFS.h>
+#include "../pipeline/DataPipeline.h"  // wireMutex (#14)
 
 SensorManager sensorManager;
 
@@ -94,28 +95,41 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
 }
 
 // ---------------------------------------------------------------------------
-int SensorManager::tick(QueueHandle_t sensorQueue, uint32_t now) {
+int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking) {
     int pushed = 0;
     uint32_t ms = millis();
 
-    // Up to 4 readings per sensor per tick (multi-metric sensors)
     SensorReading readings[4];
 
     for (int i = 0; i < _count; i++) {
         ISensor* s = _sensors[i];
         if (!s || !s->isEnabled()) continue;
+        if (s->isBlocking() != blocking) continue;   // dispatch filter
 
         uint32_t intervalMs = s->getReadIntervalMs();
         if (intervalMs > 0 && (ms - _lastReadMs[i]) < intervalMs) continue;
 
+        // Serialise I2C bus access for non-blocking sensors (#14).
+        // Blocking sensors (UART-based: SDS011, PMS5003, Wind) manage their own
+        // bus, so only lock for non-blocking I2C reads.
+        bool tookMutex = false;
+        if (!blocking && wireMutex) {
+            tookMutex = (xSemaphoreTake(wireMutex, pdMS_TO_TICKS(100)) == pdTRUE);
+        }
+
         int n = s->readAll(readings, 4);
+
+        if (tookMutex) xSemaphoreGive(wireMutex);
         if (n > 0) {
             for (int j = 0; j < n; j++) {
                 readings[j].timestamp = now;
                 strncpy(readings[j].sensorId,   s->getId(),   sizeof(readings[j].sensorId)   - 1);
                 strncpy(readings[j].sensorType, s->getType(), sizeof(readings[j].sensorType) - 1);
 
-                if (xQueueSend(sensorQueue, &readings[j], 0) == pdTRUE) {
+                if (xQueueSend(queue, &readings[j], 0) != pdTRUE) {
+                    extern volatile uint32_t g_queueDrops;
+                    g_queueDrops++;
+                } else {
                     pushed++;
                 }
             }
@@ -124,6 +138,13 @@ int SensorManager::tick(QueueHandle_t sensorQueue, uint32_t now) {
         }
     }
     return pushed;
+}
+
+// ---------------------------------------------------------------------------
+int SensorManager::tick(QueueHandle_t sensorQueue, uint32_t now) {
+    // Backwards-compat: read all sensors (blocking + non-blocking)
+    return tickFiltered(sensorQueue, now, false) +
+           tickFiltered(sensorQueue, now, true);
 }
 
 // ---------------------------------------------------------------------------

@@ -36,6 +36,7 @@ public:
 private:
     IExporter* _exporters[MAX_EXPORTERS] = {};
     int        _count = 0;
+    uint32_t   _lastSentMs[MAX_EXPORTERS] = {};  // per-exporter last send time
 
     bool _sendWithRetry(IExporter* exp,
                         const SensorReading* readings, size_t count);

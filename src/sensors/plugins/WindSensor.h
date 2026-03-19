@@ -30,6 +30,7 @@ public:
     const char* getType() const override { return "wind"; }
     const char* getName() const override { return "Wind Speed/Direction"; }
     uint32_t    getReadIntervalMs() const override { return _sampleWindowMs; }
+    bool        isBlocking()        const override { return true; }
     int getMetrics(const char** out, int maxOut) const override {
         static const char* m[] = { "wind_speed", "wind_direction" };
         int n = (_dirPin >= 0) ? 2 : 1;

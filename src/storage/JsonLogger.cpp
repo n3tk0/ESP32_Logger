@@ -84,34 +84,45 @@ void JsonLogger::write(const SensorReading& r) {
 void JsonLogger::flush() {
     if (!_fs || _bufCount == 0) return;
 
-    // Determine current date from first buffered line's timestamp
-    // (rough: parse "\"ts\":" from line buffer)
-    char date[12] = "unknown";
-
-    // All readings in buffer have the same approximate time, use first
-    // We extract ts by scanning the first line for "\"ts\":"
-    const char* tsPtr = strstr(_lineBuf[0], "\"ts\":");
-    if (tsPtr) {
-        uint32_t ts = (uint32_t)strtoul(tsPtr + 5, nullptr, 10);
-        _getCurrentDate(ts, date);
-    }
-
-    char path[80];
-    _buildPath(path, sizeof(path), date);
-    _rotatIfNeeded(path);
+    // Group buffered lines by date so midnight-spanning batches go to the
+    // correct file (#10).  Each line carries its own "ts" field.
     _ensureDir();
 
-    File f = _fs->open(path, FILE_APPEND);
-    if (!f) {
-        Serial.printf("[JsonLogger] Cannot open %s\n", path);
-        _bufCount = 0;
-        return;
+    // Sort lines into date-bucketed groups (max BUF_LINES = 8, no alloc needed)
+    char dates[BUF_LINES][12];
+    for (int i = 0; i < _bufCount; i++) {
+        dates[i][0] = '\0';
+        const char* tsPtr = strstr(_lineBuf[i], "\"ts\":");
+        if (tsPtr) {
+            uint32_t ts = (uint32_t)strtoul(tsPtr + 5, nullptr, 10);
+            _getCurrentDate(ts, dates[i]);
+        }
+        if (dates[i][0] == '\0') strncpy(dates[i], "unknown", 8);
     }
 
+    // Walk unique dates and write lines belonging to each date in one open/close
     for (int i = 0; i < _bufCount; i++) {
-        f.println(_lineBuf[i]);
+        if (dates[i][0] == '\0') continue;  // already consumed
+
+        char path[80];
+        _buildPath(path, sizeof(path), dates[i]);
+        _rotatIfNeeded(path);
+
+        File f = _fs->open(path, FILE_APPEND);
+        if (!f) {
+            Serial.printf("[JsonLogger] Cannot open %s\n", path);
+        } else {
+            for (int j = i; j < _bufCount; j++) {
+                if (strcmp(dates[j], dates[i]) == 0) {
+                    f.println(_lineBuf[j]);
+                    dates[j][0] = '\0';  // mark consumed
+                }
+            }
+            f.flush();   // fsync equivalent — ensure data survives power loss (#9)
+            f.close();
+        }
     }
-    f.close();
+
     _bufCount = 0;
 }
 

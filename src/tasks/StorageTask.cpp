@@ -11,7 +11,11 @@ void storageTaskFunc(void* param) {
     JsonLogger logger;
 
     if (p && p->fs) {
-        logger.begin(*p->fs);
+        // Use logDir/maxSizeKB/rotateDaily from config if provided (#8)
+        logger.begin(*p->fs,
+                     p->logDir    ? p->logDir    : "/logs",
+                     p->maxSizeKB > 0 ? p->maxSizeKB : 512,
+                     p->rotateDaily);
     } else {
         Serial.println("[StorageTask] No filesystem — storage disabled");
     }

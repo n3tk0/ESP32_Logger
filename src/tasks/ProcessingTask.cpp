@@ -52,7 +52,9 @@ void processingTaskFunc(void* /*param*/) {
 
         // Forward to export (only good data)
         if (r.quality != QUALITY_ERROR) {
-            xQueueSend(exportQueue, &r, 0); // non-blocking; exporters are slow
+            if (xQueueSend(exportQueue, &r, 0) != pdTRUE) {
+                g_queueDrops++;  // exportQueue full — count silent drop (#3)
+            }
         }
     }
 

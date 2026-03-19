@@ -335,15 +335,23 @@ void setup() {
         }
 
         if (onlineLoggerMode) {
-            attachInterrupt(digitalPinToInterrupt(config.hardware.pinFlowSensor),
-                            onFlowPulse, FALLING);
+            // Skip Arduino attachInterrupt when platform mode is active:
+            // WaterFlowSensor::init() already registers the ISR via
+            // gpio_isr_handler_add(); dual registration causes a panic (#6).
+            if (g_platformMode == 0) {
+                attachInterrupt(digitalPinToInterrupt(config.hardware.pinFlowSensor),
+                                onFlowPulse, FALLING);
+            }
             configureWakeup();
         }
     } else {
         DBGLN("=== Normal Logging Mode ===");
         setCpuFrequencyMhz(config.hardware.cpuFreqMHz);
-        attachInterrupt(digitalPinToInterrupt(config.hardware.pinFlowSensor),
-                        onFlowPulse, FALLING);
+        // Guard: skip Arduino ISR when WaterFlowSensor is handling the pin (#6)
+        if (g_platformMode == 0) {
+            attachInterrupt(digitalPinToInterrupt(config.hardware.pinFlowSensor),
+                            onFlowPulse, FALLING);
+        }
 
         // Platform v5.0: start sensor pipeline on normal boot when configured
         // for continuous or hybrid mode (no web server routes needed here)

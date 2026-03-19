@@ -71,6 +71,11 @@ public:
     // (e.g. UART-streaming sensors like SDS011 / PMS5003)
     virtual bool isContinuous() const { return false; }
 
+    // True if readAll() may block for >500 ms (e.g. wind sample window,
+    // UART frame wait). Blocking sensors are dispatched by SlowSensorTask
+    // so they do not stall the main SensorTask tick loop.
+    virtual bool isBlocking() const { return false; }
+
     // Returns metric names this sensor produces (e.g. "temperature", "humidity").
     // Fills out[] with up to maxOut pointers to static string literals.
     // Returns the number of metrics filled.

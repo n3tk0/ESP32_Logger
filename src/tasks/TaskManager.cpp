@@ -1,19 +1,25 @@
 #include "TaskManager.h"
 #include "SensorTask.h"
+#include "SlowSensorTask.h"
 #include "ProcessingTask.h"
 #include "StorageTask.h"
 #include "ExportTask.h"
 #include "../pipeline/DataPipeline.h"
+#include <ArduinoJson.h>
 
 // Static member definitions
-TaskHandle_t      TaskManager::hSensor  = nullptr;
-TaskHandle_t      TaskManager::hProcess = nullptr;
-TaskHandle_t      TaskManager::hStorage = nullptr;
-TaskHandle_t      TaskManager::hExport  = nullptr;
-volatile bool     TaskManager::running  = false;
+TaskHandle_t      TaskManager::hSensor     = nullptr;
+TaskHandle_t      TaskManager::hSlowSensor = nullptr;
+TaskHandle_t      TaskManager::hProcess    = nullptr;
+TaskHandle_t      TaskManager::hStorage    = nullptr;
+TaskHandle_t      TaskManager::hExport     = nullptr;
+volatile bool     TaskManager::running     = false;
 
 // Storage task needs a persistent param (lives for task lifetime)
 static StorageTaskParam storageParam;
+
+// Persistent storage for logDir string (must outlive storageParam)
+static char s_logDir[48] = "/logs";
 
 // ---------------------------------------------------------------------------
 bool TaskManager::init(fs::FS& fs) {
@@ -32,13 +38,32 @@ bool TaskManager::init(fs::FS& fs) {
     // Create mutexes
     webDataMutex = xSemaphoreCreateMutex();
     configMutex  = xSemaphoreCreateMutex();
+    wireMutex    = xSemaphoreCreateMutex();   // I2C bus serialisation (#14)
 
-    if (!webDataMutex || !configMutex) {
+    if (!webDataMutex || !configMutex || !wireMutex) {
         Serial.println("[TaskManager] Mutex creation FAILED");
         return false;
     }
 
-    storageParam.fs = &fs;
+    // Parse storage config from platform_config.json (#8)
+    {
+        File cfgFile = fs.open("/platform_config.json", FILE_READ);
+        if (cfgFile) {
+            StaticJsonDocument<256> doc;
+            if (deserializeJson(doc, cfgFile) == DeserializationError::Ok) {
+                JsonObjectConst st = doc["storage"];
+                if (!st.isNull()) {
+                    const char* dir = st["log_dir"] | "/logs";
+                    strncpy(s_logDir, dir, sizeof(s_logDir) - 1);
+                    storageParam.maxSizeKB   = st["max_size_kb"]   | 512;
+                    storageParam.rotateDaily = st["rotate_daily"]  | true;
+                }
+            }
+            cfgFile.close();
+        }
+    }
+    storageParam.fs     = &fs;
+    storageParam.logDir = s_logDir;
 
     // Create tasks — all on core 0 (ESP32-C3 is unicore; dual-core ESP32
     // can assign WebTask to core 1 by changing tskNO_AFFINITY to 1)
@@ -48,6 +73,11 @@ bool TaskManager::init(fs::FS& fs) {
                                 STACK_SENSOR_TASK,  nullptr,
                                 TASK_PRIO_SENSOR,   &hSensor,   0);
     if (r != pdPASS) { Serial.println("[TaskManager] SensorTask FAILED"); return false; }
+
+    r = xTaskCreatePinnedToCore(slowSensorTaskFunc,     "SlowSensorTask",
+                                STACK_SLOW_SENSOR_TASK, nullptr,
+                                TASK_PRIO_SLOW_SENSOR,  &hSlowSensor, 0);
+    if (r != pdPASS) { Serial.println("[TaskManager] SlowSensorTask FAILED"); return false; }
 
     r = xTaskCreatePinnedToCore(processingTaskFunc, "ProcessTask",
                                 STACK_PROCESS_TASK, nullptr,
@@ -71,6 +101,19 @@ bool TaskManager::init(fs::FS& fs) {
 // ---------------------------------------------------------------------------
 void TaskManager::shutdown() {
     running = false;
-    // Give tasks time to drain and exit (2s)
-    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    // Wait for sensor queues to drain (up to 3s) before hard timeout.
+    // Prevents storageQueue data loss when sensor pipeline is still writing.
+    constexpr uint32_t DRAIN_TIMEOUT_MS = 3000;
+    uint32_t deadline = millis() + DRAIN_TIMEOUT_MS;
+    while (millis() < deadline) {
+        UBaseType_t sq = sensorQueue  ? uxQueueMessagesWaiting(sensorQueue)  : 0;
+        UBaseType_t stq = storageQueue ? uxQueueMessagesWaiting(storageQueue) : 0;
+        UBaseType_t eq = exportQueue  ? uxQueueMessagesWaiting(exportQueue)  : 0;
+        if (sq == 0 && stq == 0 && eq == 0) break;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    // Hard wait for task stacks to unwind
+    vTaskDelay(pdMS_TO_TICKS(500));
 }

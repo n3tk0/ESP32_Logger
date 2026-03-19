@@ -54,45 +54,81 @@ static void handleApiData(AsyncWebServerRequest* req) {
         return;
     }
 
-    size_t rawCount = 0;
+    // Strategy: always query BOTH ring buffer (up to RING_SHARE) AND filesystem
+    // (up to FS_SHARE), then merge by timestamp and deduplicate (#4).
+    constexpr size_t RING_SHARE = 200;
+    constexpr size_t FS_SHARE   = MAX_RAW - RING_SHARE;  // = 300
 
-    // Try ring buffer first (no mutex needed for read-only snapshot)
+    size_t ringCount = 0;
+    size_t fsCount   = 0;
+
+    // 1) Ring buffer (recent, in-memory)
     if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        rawCount = webRingBuf.copyRecent(raw, MAX_RAW, fromTs);
+        ringCount = webRingBuf.copyRecent(raw, RING_SHARE, fromTs);
         xSemaphoreGive(webDataMutex);
     }
-
-    // Apply sensor/metric/toTs filters to ring buffer results
-    if (rawCount > 0) {
+    // Filter ring results
+    {
         size_t out = 0;
-        for (size_t i = 0; i < rawCount; i++) {
+        for (size_t i = 0; i < ringCount; i++) {
             if (raw[i].timestamp > toTs) continue;
             if (sensorFilter && strcmp(raw[i].sensorId, sensorFilter) != 0) continue;
             if (metricFilter && strcmp(raw[i].metric,   metricFilter) != 0) continue;
             if (out != i) raw[out] = raw[i];
             out++;
         }
-        rawCount = out;
+        ringCount = out;
     }
 
     // Capture agg/mode strings before any async ops
     const char* aggParamStr  = req->hasParam("agg")  ? req->getParam("agg")->value().c_str()  : "5m";
     const char* modeParamStr = req->hasParam("mode") ? req->getParam("mode")->value().c_str() : "lttb";
 
-    // If ring buffer doesn't cover the requested range, query filesystem.
-    // Guard with configMutex: static JsonLogger shares internal state and
-    // concurrent /api/data requests would race on openNextFile().
-    bool truncated = false;
-    if (rawCount == 0 && activeFS) {
+    // 2) Filesystem query (historical); always run alongside ring (#4)
+    if (activeFS) {
         static JsonLogger logger;
         if (configMutex && xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-            rawCount = logger.query(*activeFS, fromTs, toTs,
-                                    sensorFilter, metricFilter,
-                                    raw, MAX_RAW);
+            fsCount = logger.query(*activeFS, fromTs, toTs,
+                                   sensorFilter, metricFilter,
+                                   raw + ringCount, FS_SHARE);
             xSemaphoreGive(configMutex);
         }
     }
-    truncated = (rawCount >= MAX_RAW);
+
+    size_t rawCount = ringCount + fsCount;
+
+    // 3) Merge: sort combined buffer by timestamp, then dedup consecutive
+    //    entries with identical (timestamp, sensorId, metric) (#4)
+    if (fsCount > 0 && ringCount > 0) {
+        // Simple insertion sort — buffer is at most 500 entries
+        for (size_t i = ringCount; i < rawCount; i++) {
+            SensorReading tmp = raw[i];
+            size_t j = i;
+            while (j > 0 && raw[j-1].timestamp > tmp.timestamp) {
+                raw[j] = raw[j-1];
+                j--;
+            }
+            raw[j] = tmp;
+        }
+        // Dedup: keep only the first occurrence of (ts, sensorId, metric)
+        size_t out = 0;
+        for (size_t i = 0; i < rawCount; i++) {
+            bool dup = false;
+            if (i > 0 &&
+                raw[i].timestamp == raw[i-1].timestamp &&
+                strcmp(raw[i].sensorId, raw[i-1].sensorId) == 0 &&
+                strcmp(raw[i].metric,   raw[i-1].metric)   == 0) {
+                dup = true;
+            }
+            if (!dup) {
+                if (out != i) raw[out] = raw[i];
+                out++;
+            }
+        }
+        rawCount = out;
+    }
+
+    bool truncated = (rawCount >= MAX_RAW);
 
     // --- Aggregate ---
     SensorReading* agg = new SensorReading[limit + 1];
@@ -116,8 +152,11 @@ static void handleApiData(AsyncWebServerRequest* req) {
     for (size_t i = 0; i < aggCount; i++) {
         char valBuf[16];
         snprintf(valBuf, sizeof(valBuf), "%.4g", agg[i].value);
-        response->printf("%s{\"ts\":%u,\"v\":%s}",
-                         (i > 0 ? "," : ""), agg[i].timestamp, valBuf);
+        // Include metric and unit so clients can display axes correctly (#12)
+        response->printf("%s{\"ts\":%u,\"v\":%s,\"metric\":\"%s\",\"unit\":\"%s\"}",
+                         (i > 0 ? "," : ""),
+                         agg[i].timestamp, valBuf,
+                         agg[i].metric, agg[i].unit);
     }
     response->print("]}");
 

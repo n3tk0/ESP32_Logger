@@ -25,13 +25,35 @@ All Phase 1 stabilisation fixes and selected Phase 3 performance optimisations h
 | File date pre-filtering in `JsonLogger::query()` | `src/storage/JsonLogger.cpp:119` | `_fileDateInRange()` helper skips `.jsonl` files whose date is clearly outside `[fromTs, toTs]`; 30-day query now reads 1 file instead of 30 | P3 | ⚡ Performance |
 | Add `"truncated"` field to `/api/data` response | `src/web/ApiHandlers.cpp` | Response now includes `"truncated":true/false` when `rawCount >= MAX_RAW` | 4.4 | 🟢 UX |
 
-**Roadmap items still pending (Phase 2+):**
-- **2.1** — Wire `HybridStorage` into `StorageTask` (dual SD+LittleFS write)
-- **2.3** — Merge ring buffer + filesystem results in `/api/data` (currently fallback-only)
-- **2.4** — Move blocking sensors (Wind/SDS011/PMS5003) to dedicated FreeRTOS tasks
-- **2.7** — Fix midnight boundary in `JsonLogger::flush()` (multi-date buffer)
-- **3.1** — Streaming aggregation (no full materialization of raw readings)
-- **4.2** — Per-exporter `interval_ms` scheduling
+### Session 2 — All Remaining Findings (2026-03-19)
+
+| Fix | File | Change | Audit Ref | Severity |
+|-----|------|--------|-----------|----------|
+| Per-exporter `interval_ms` scheduling | `src/export/IExporter.h`, `ExportManager.h/.cpp` | `IExporter._intervalMs` + `_lastSentMs[]` tracking; `interval_ms` parsed from config; `sendAll()` skips exporters not yet due | #11 / 4.2 | Medium |
+| Ring buffer proper atomics | `src/pipeline/DataPipeline.h` | `std::atomic<size_t>` with acquire/release for lock-free SPSC correctness | #17 | High |
+| `wireMutex` + `g_queueDrops` declared | `src/pipeline/DataPipeline.h/.cpp` | Both extern variables + definitions added | #14 / #3 | High |
+| `ISensor::isBlocking()` + blocking flags | `ISensor.h`, `WindSensor.h`, `SDS011Sensor.h`, `PMS5003Sensor.h` | Interface method + override on 3 UART sensors | #2 | High |
+| `SensorManager::tickFiltered()` | `src/sensors/SensorManager.h/.cpp` | Dispatches only blocking/non-blocking sensors; increments `g_queueDrops` on queue fail | #2 / #3 | High |
+| SensorTask non-blocking only | `src/tasks/SensorTask.cpp` | `tick()` replaced with `tickFiltered(sensorQueue, ts, false)` | #2 | High |
+| SlowSensorTask created | `src/tasks/SlowSensorTask.h/.cpp` | New FreeRTOS task for blocking sensors at priority 2; polls 500ms | #2 | High |
+| TaskManager: SlowSensorTask + wireMutex | `src/tasks/TaskManager.h/.cpp` | `hSlowSensor`, `STACK_SLOW_SENSOR_TASK=4096`; wireMutex created in `init()` | #2 / #14 | High |
+| `TaskManager::shutdown()` drain | `src/tasks/TaskManager.cpp` | Polls queue depths up to 3s before hard timeout | M7 | High |
+| ProcessingTask exportQueue drop counter | `src/tasks/ProcessingTask.cpp` | Failed `exportQueue` send increments `g_queueDrops` | #3 | Medium |
+| ISR conflict guard | `Logger.ino` | `attachInterrupt(pinFlowSensor)` skipped when `g_platformMode >= 1` | #6 | Critical |
+| LTTB spike preservation | `src/pipeline/AggregationEngine.cpp` | Pre-bucket for LTTB uses `AGG_MAX` instead of `AGG_AVG` | #7 | High |
+| JsonLogger fsync | `src/storage/JsonLogger.cpp` | `f.flush()` before `f.close()` in each date write loop | #9 | High |
+| JsonLogger midnight rotation | `src/storage/JsonLogger.cpp` | `flush()` groups buffered lines by individual `"ts"` date; midnight-spanning batches split | #10 | High |
+| Storage config from JSON | `src/tasks/StorageTask.h/.cpp`, `TaskManager.cpp` | `StorageTaskParam` extended; `logDir`/`maxSizeKB`/`rotateDaily` parsed from `platform_config.json["storage"]` | #8 | Medium |
+| I2C wireMutex in sensor reads | `src/sensors/SensorManager.cpp` | Non-blocking sensor `readAll()` wrapped in `wireMutex` take/give (100ms timeout) | #14 | High |
+| Ring+FS merge in `/api/data` | `src/web/ApiHandlers.cpp` | Always queries both ring (200) and FS (300); insertion-sort merge + dedup by `(ts, sensorId, metric)` | #4 | High |
+| `metric`/`unit` in API response | `src/web/ApiHandlers.cpp` | Each data point includes `"metric"` and `"unit"` fields | #12 | Medium |
+
+**All audit findings resolved. Remaining non-issues:**
+- M1/C1 — `g_sleepMode` IS declared (Globals.h:106); finding was stale
+- C5 — `_doSleep()` already calls `TaskManager::shutdown()` (Logger.ino:94-96)
+- M6 — ExportManager destructor correctly deletes all registered exporters
+- M8 — `millis()` unsigned subtraction wraps correctly on ESP32 (not a bug)
+- Streaming aggregation (P1) — deferred; current MAX_RAW=500 is sufficient for ESP32-C3
 
 ---
 
