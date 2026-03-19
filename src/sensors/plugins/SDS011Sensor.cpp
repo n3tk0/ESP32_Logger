@@ -9,7 +9,11 @@ bool SDS011Sensor::init(JsonObjectConst cfg) {
     int baud  = cfg["baud"]    | 9600;
     int work  = cfg["work_period_min"] | 1;
     _workPeriodMs = (uint32_t)work * 60000UL;
-    if (_workPeriodMs == 0) _workPeriodMs = 1000; // continuous → 1s poll
+    if (_workPeriodMs == 0) _workPeriodMs = 1000;
+
+    JsonObjectConst cal = cfg["calibration"];
+    _calPm25.load(cal, "pm25");
+    _calPm10.load(cal, "pm10");
 
     _serial = &Serial2;
     if (txPin >= 0) {
@@ -92,9 +96,9 @@ int SDS011Sensor::readAll(SensorReading* out, int maxOut) {
         if (pos == FRAME_LEN) {
             if (_parseFrame(buf)) {
                 out[0] = SensorReading::make(0, _id, getType(),
-                                              "pm25", _pm25, "ug/m3");
+                                              "pm25", _calPm25.apply(_pm25), "ug/m3");
                 out[1] = SensorReading::make(0, _id, getType(),
-                                              "pm10", _pm10, "ug/m3");
+                                              "pm10", _calPm10.apply(_pm10), "ug/m3");
                 _newData    = false;
                 _lastReadTs = 0;
                 return 2;

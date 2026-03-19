@@ -3,6 +3,7 @@
   "mode": "legacy",
 
   "sensors": [
+
     {
       "id": "flow_main",
       "type": "yfs201",
@@ -11,8 +12,28 @@
       "pin": 21,
       "pulses_per_liter": 450.0,
       "calibration": 1.0,
-      "read_interval_ms": 1000
+      "read_interval_ms": 1000,
+      "cal": {
+        "flow_rate": { "offset": 0.0, "scale": 1.0 },
+        "volume":    { "offset": 0.0, "scale": 1.0 }
+      }
     },
+
+    {
+      "id": "flow_large",
+      "type": "yfs403",
+      "enabled": false,
+      "interface": "pulse",
+      "pin": 21,
+      "pulses_per_liter": 600.0,
+      "calibration": 1.0,
+      "read_interval_ms": 1000,
+      "cal": {
+        "flow_rate": { "offset": 0.0, "scale": 1.0 },
+        "volume":    { "offset": 0.0, "scale": 1.0 }
+      }
+    },
+
     {
       "id": "env_indoor",
       "type": "bme280",
@@ -21,8 +42,48 @@
       "sda": 6,
       "scl": 7,
       "address": 118,
-      "read_interval_ms": 10000
+      "read_interval_ms": 10000,
+      "calibration": {
+        "temperature": { "offset": 0.0, "scale": 1.0 },
+        "humidity":    { "offset": 0.0, "scale": 1.0 },
+        "pressure":    { "offset": 0.0, "scale": 1.0 }
+      }
     },
+
+    {
+      "id": "baro_outdoor",
+      "type": "bmp280",
+      "enabled": false,
+      "interface": "i2c",
+      "sda": 6,
+      "scl": 7,
+      "address": 118,
+      "read_interval_ms": 10000,
+      "calibration": {
+        "temperature": { "offset": 0.0, "scale": 1.0 },
+        "pressure":    { "offset": 0.0, "scale": 1.0 }
+      }
+    },
+
+    {
+      "id": "env_gas",
+      "type": "bme688",
+      "enabled": false,
+      "interface": "i2c",
+      "sda": 6,
+      "scl": 7,
+      "address": 118,
+      "read_interval_ms": 10000,
+      "heater_temp": 320,
+      "heater_duration_ms": 150,
+      "calibration": {
+        "temperature":    { "offset": 0.0, "scale": 1.0 },
+        "humidity":       { "offset": 0.0, "scale": 1.0 },
+        "pressure":       { "offset": 0.0, "scale": 1.0 },
+        "gas_resistance": { "offset": 0.0, "scale": 1.0 }
+      }
+    },
+
     {
       "id": "dust_outdoor",
       "type": "sds011",
@@ -31,8 +92,13 @@
       "uart_rx": 20,
       "uart_tx": -1,
       "baud": 9600,
-      "work_period_min": 1
+      "work_period_min": 1,
+      "calibration": {
+        "pm25": { "offset": 0.0, "scale": 1.0 },
+        "pm10": { "offset": 0.0, "scale": 1.0 }
+      }
     },
+
     {
       "id": "pm_outdoor",
       "type": "pms5003",
@@ -41,8 +107,14 @@
       "uart_rx": 20,
       "uart_tx": -1,
       "baud": 9600,
-      "read_interval_ms": 30000
+      "read_interval_ms": 30000,
+      "calibration": {
+        "pm1":  { "offset": 0.0, "scale": 1.0 },
+        "pm25": { "offset": 0.0, "scale": 1.0 },
+        "pm10": { "offset": 0.0, "scale": 1.0 }
+      }
     },
+
     {
       "id": "voc_indoor",
       "type": "ens160",
@@ -51,8 +123,103 @@
       "sda": 6,
       "scl": 7,
       "address": 82,
-      "read_interval_ms": 30000
+      "read_interval_ms": 30000,
+      "calibration": {
+        "tvoc": { "offset": 0.0, "scale": 1.0 },
+        "eco2": { "offset": 0.0, "scale": 1.0 }
+      }
     },
+
+    {
+      "id": "voc_sgp",
+      "type": "sgp30",
+      "enabled": false,
+      "interface": "i2c",
+      "sda": 6,
+      "scl": 7,
+      "read_interval_ms": 30000,
+      "calibration": {
+        "tvoc": { "offset": 0.0, "scale": 1.0 },
+        "eco2": { "offset": 0.0, "scale": 1.0 }
+      }
+    },
+
+    {
+      "id": "co2_sensor",
+      "type": "scd4x",
+      "enabled": false,
+      "interface": "i2c",
+      "sda": 6,
+      "scl": 7,
+      "read_interval_ms": 5000,
+      "calibration": {
+        "co2":         { "offset": 0.0, "scale": 1.0 },
+        "temperature": { "offset": 0.0, "scale": 1.0 },
+        "humidity":    { "offset": 0.0, "scale": 1.0 }
+      }
+    },
+
+    {
+      "id": "uv_sensor",
+      "type": "veml6075",
+      "enabled": false,
+      "interface": "i2c",
+      "sda": 6,
+      "scl": 7,
+      "read_interval_ms": 15000,
+      "calibration": {
+        "uva":      { "offset": 0.0, "scale": 1.0 },
+        "uvb":      { "offset": 0.0, "scale": 1.0 },
+        "uv_index": { "offset": 0.0, "scale": 1.0 }
+      }
+    },
+
+    {
+      "id": "light_veml",
+      "type": "veml7700",
+      "enabled": false,
+      "interface": "i2c",
+      "sda": 6,
+      "scl": 7,
+      "gain": 0,
+      "integration_ms": 100,
+      "read_interval_ms": 5000,
+      "calibration": {
+        "lux":   { "offset": 0.0, "scale": 1.0 },
+        "white": { "offset": 0.0, "scale": 1.0 }
+      }
+    },
+
+    {
+      "id": "light_bh",
+      "type": "bh1750",
+      "enabled": false,
+      "interface": "i2c",
+      "sda": 6,
+      "scl": 7,
+      "address": 35,
+      "mode": "H",
+      "read_interval_ms": 2000,
+      "calibration": {
+        "lux": { "offset": 0.0, "scale": 1.0 }
+      }
+    },
+
+    {
+      "id": "soil_1",
+      "type": "soil_moisture",
+      "enabled": false,
+      "interface": "analog",
+      "pin": 3,
+      "dry_value": 3300,
+      "wet_value": 1500,
+      "adc_samples": 16,
+      "read_interval_ms": 5000,
+      "calibration": {
+        "moisture": { "offset": 0.0, "scale": 1.0 }
+      }
+    },
+
     {
       "id": "rain_gauge",
       "type": "rain",
@@ -60,18 +227,57 @@
       "interface": "pulse",
       "pin": 9,
       "mm_per_pulse": 0.2794,
-      "read_interval_ms": 60000
+      "read_interval_ms": 60000,
+      "calibration": {
+        "rain_rate":  { "offset": 0.0, "scale": 1.0 },
+        "rain_total": { "offset": 0.0, "scale": 1.0 }
+      }
     },
+
     {
-      "id": "wind_speed",
+      "id": "wind_station",
       "type": "wind",
       "enabled": false,
       "interface": "pulse",
       "pin": 8,
       "pulses_per_rev": 1,
       "meters_per_rev": 0.5,
-      "sample_window_ms": 3000
+      "sample_window_ms": 3000,
+      "dir_pin": -1,
+      "dir_min_val": 0,
+      "dir_max_val": 4095,
+      "calibration": {
+        "wind_speed": { "offset": 0.0, "scale": 1.0 }
+      }
+    },
+
+    {
+      "id": "distance_tank",
+      "type": "hcsr04",
+      "enabled": false,
+      "interface": "gpio",
+      "trig_pin": 5,
+      "echo_pin": 4,
+      "max_distance_cm": 400,
+      "read_interval_ms": 1000,
+      "calibration": {
+        "distance": { "offset": 0.0, "scale": 1.0 }
+      }
+    },
+
+    {
+      "id": "temp_probe",
+      "type": "ds18b20",
+      "enabled": false,
+      "interface": "onewire",
+      "pin": 2,
+      "resolution": 12,
+      "read_interval_ms": 5000,
+      "calibration": {
+        "temperature": { "offset": 0.0, "scale": 1.0 }
+      }
     }
+
   ],
 
   "aggregation": {

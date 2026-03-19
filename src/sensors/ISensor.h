@@ -4,6 +4,24 @@
 #include "../core/SensorTypes.h"
 
 // ============================================================================
+// CalibrationAxis — per-metric calibration helper (offset + scale)
+// Applies: calibrated = raw * scale + offset
+// JSON config: {"offset": 0.0, "scale": 1.0}
+// ============================================================================
+struct CalibrationAxis {
+    float offset = 0.0f;
+    float scale  = 1.0f;
+    float apply(float raw) const { return raw * scale + offset; }
+    void  load(JsonObjectConst parent, const char* key) {
+        JsonObjectConst c = parent[key];
+        if (!c.isNull()) {
+            offset = c["offset"] | 0.0f;
+            scale  = c["scale"]  | 1.0f;
+        }
+    }
+};
+
+// ============================================================================
 // ISensor — abstract plugin interface
 // Every sensor driver must implement this and be registered with SensorManager.
 // ============================================================================

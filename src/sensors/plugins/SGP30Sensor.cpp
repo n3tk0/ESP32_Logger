@@ -49,6 +49,10 @@ bool SGP30Sensor::init(JsonObjectConst cfg) {
     if (sda >= 0 && scl >= 0) Wire.begin((int8_t)sda, (int8_t)scl);
     else                       Wire.begin();
 
+    JsonObjectConst cal = cfg["calibration"];
+    _calTvoc.load(cal, "tvoc");
+    _calEco2.load(cal, "eco2");
+
     // Verify chip is present by reading feature set
     if (!_sendCommand(CMD_GET_FEAT)) {
         Serial.println("[SGP30] Not found at 0x58");
@@ -90,8 +94,8 @@ int SGP30Sensor::readAll(SensorReading* out, int maxOut) {
     if (!_measure(tvoc, eco2)) return 0;
 
     SensorQuality q = warmedUp ? QUALITY_GOOD : QUALITY_ESTIMATED;
-    out[0] = SensorReading::make(0, _id, getType(), "tvoc",  (float)tvoc, "ppb", q);
-    out[1] = SensorReading::make(0, _id, getType(), "eco2",  (float)eco2, "ppm", q);
+    out[0] = SensorReading::make(0, _id, getType(), "tvoc", _calTvoc.apply((float)tvoc), "ppb", q);
+    out[1] = SensorReading::make(0, _id, getType(), "eco2", _calEco2.apply((float)eco2), "ppm", q);
     _lastReadTs = 0;
     return 2;
 }

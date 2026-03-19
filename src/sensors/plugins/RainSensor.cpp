@@ -17,12 +17,17 @@ bool RainSensor::init(JsonObjectConst cfg) {
     _mmPerTip   = cfg["mm_per_pulse"]     | 0.2794f;
     _intervalMs = cfg["read_interval_ms"] | 60000;
 
+    JsonObjectConst cal = cfg["calibration"];
+    _calRate.load(cal, "rain_rate");
+    _calTotal.load(cal, "rain_total");
+
     pinMode(_pin, INPUT_PULLUP);
     gpio_install_isr_service(0);
     gpio_set_intr_type((gpio_num_t)_pin, GPIO_INTR_NEGEDGE);
     gpio_isr_handler_add((gpio_num_t)_pin, _isr, this);
 
-    Serial.printf("[Rain] pin=%d mm/tip=%.4f\n", _pin, _mmPerTip);
+    Serial.printf("[Rain] pin=%d mm/tip=%.4f  cal_rate(%.2f+%.2fx)\n",
+                  _pin, _mmPerTip, _calRate.offset, _calRate.scale);
     return true;
 }
 
@@ -37,17 +42,17 @@ int RainSensor::readAll(SensorReading* out, int maxOut) {
     if (!_enabled || maxOut < 2) return 0;
 
     noInterrupts();
-    uint32_t tips        = _tips;
-    uint32_t intervalUs  = _lastIntervalUs;
+    uint32_t tips       = _tips;
+    uint32_t intervalUs = _lastIntervalUs;
     interrupts();
 
-    float total = (float)tips * _mmPerTip;
+    float total = _calTotal.apply((float)tips * _mmPerTip);
 
     // Instantaneous rate: if last tip was recent, extrapolate to mm/h
     float rate = 0.0f;
     if (intervalUs > 0 && intervalUs < 3600000000UL) {
-        // mm/h = mmPerTip / (intervalUs / 3600000000)
-        rate = _mmPerTip / ((float)intervalUs / 3600000000.0f);
+        float rawRate = _mmPerTip / ((float)intervalUs / 3600000000.0f);
+        rate = _calRate.apply(rawRate);
     }
 
     out[0] = SensorReading::make(0, _id, getType(), "rain_rate",  rate,  "mm/h");
@@ -58,8 +63,8 @@ int RainSensor::readAll(SensorReading* out, int maxOut) {
 
 void RainSensor::resetTotal() {
     noInterrupts();
-    _tips         = 0;
-    _lastTipUs    = 0;
+    _tips           = 0;
+    _lastTipUs      = 0;
     _lastIntervalUs = 0;
     interrupts();
 }

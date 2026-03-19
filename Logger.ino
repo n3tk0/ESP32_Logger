@@ -34,14 +34,24 @@
 
 // ── Platform v5.0 — multi-sensor modules (compiled in only when needed) ──────
 #include "src/sensors/SensorManager.h"
+// Existing sensors (upgraded)
 #include "src/sensors/plugins/BME280Sensor.h"
 #include "src/sensors/plugins/SDS011Sensor.h"
 #include "src/sensors/plugins/PMS5003Sensor.h"
-#include "src/sensors/plugins/YFS201Sensor.h"
+#include "src/sensors/plugins/WaterFlowSensor.h"   // replaces YFS201Sensor (YF-S201 + YF-S403)
 #include "src/sensors/plugins/ENS160Sensor.h"
 #include "src/sensors/plugins/SGP30Sensor.h"
 #include "src/sensors/plugins/RainSensor.h"
 #include "src/sensors/plugins/WindSensor.h"
+// New sensors
+#include "src/sensors/plugins/VEML6075Sensor.h"
+#include "src/sensors/plugins/VEML7700Sensor.h"
+#include "src/sensors/plugins/BH1750Sensor.h"
+#include "src/sensors/plugins/SoilMoistureSensor.h"
+#include "src/sensors/plugins/SCD4xSensor.h"
+#include "src/sensors/plugins/BME688Sensor.h"
+#include "src/sensors/plugins/HCSR04Sensor.h"
+#include "src/sensors/plugins/DS18B20Sensor.h"
 #include "src/pipeline/DataPipeline.h"
 #include "src/tasks/TaskManager.h"
 #include "src/export/ExportManager.h"
@@ -75,14 +85,32 @@ static void _initPlatform() {
     Serial.println("=== Platform v5.0: initialising sensors ===");
 
     // Register all plugins
+    // Environmental
     sensorManager.registerPlugin("bme280",  []()->ISensor*{ return new BME280Sensor(); });
+    sensorManager.registerPlugin("bmp280",  []()->ISensor*{ return new BME280Sensor(); }); // BMP280 variant (no humidity)
+    sensorManager.registerPlugin("bme688",  []()->ISensor*{ return new BME688Sensor(); });
+    // Air quality
     sensorManager.registerPlugin("sds011",  []()->ISensor*{ return new SDS011Sensor(); });
     sensorManager.registerPlugin("pms5003", []()->ISensor*{ return new PMS5003Sensor(); });
-    sensorManager.registerPlugin("yfs201",  []()->ISensor*{ return new YFS201Sensor(); });
     sensorManager.registerPlugin("ens160",  []()->ISensor*{ return new ENS160Sensor(); });
     sensorManager.registerPlugin("sgp30",   []()->ISensor*{ return new SGP30Sensor(); });
+    sensorManager.registerPlugin("scd4x",   []()->ISensor*{ return new SCD4xSensor(); });
+    // Light
+    sensorManager.registerPlugin("veml6075",[]()->ISensor*{ return new VEML6075Sensor(); });
+    sensorManager.registerPlugin("veml7700",[]()->ISensor*{ return new VEML7700Sensor(); });
+    sensorManager.registerPlugin("bh1750",  []()->ISensor*{ return new BH1750Sensor(); });
+    // Water / flow
+    sensorManager.registerPlugin("yfs201",  []()->ISensor*{ return new WaterFlowSensor("yfs201", 450.0f); });
+    sensorManager.registerPlugin("yfs403",  []()->ISensor*{ return new WaterFlowSensor("yfs403", 600.0f); });
+    // Weather
     sensorManager.registerPlugin("rain",    []()->ISensor*{ return new RainSensor(); });
     sensorManager.registerPlugin("wind",    []()->ISensor*{ return new WindSensor(); });
+    // Soil
+    sensorManager.registerPlugin("soil_moisture", []()->ISensor*{ return new SoilMoistureSensor(); });
+    // Distance
+    sensorManager.registerPlugin("hcsr04", []()->ISensor*{ return new HCSR04Sensor(); });
+    // Temperature (1-Wire)
+    sensorManager.registerPlugin("ds18b20", []()->ISensor*{ return new DS18B20Sensor(); });
 
     // Load sensor configs from /platform_config.json
     if (activeFS) sensorManager.loadAndInit(*activeFS);

@@ -39,6 +39,10 @@ bool ENS160Sensor::init(JsonObjectConst cfg) {
     if (sda >= 0 && scl >= 0) Wire.begin((int8_t)sda, (int8_t)scl);
     else                       Wire.begin();
 
+    JsonObjectConst cal = cfg["calibration"];
+    _calTvoc.load(cal, "tvoc");
+    _calEco2.load(cal, "eco2");
+
     // Set standard operating mode
     if (!_writeReg(REG_OPMODE, MODE_STANDARD)) {
         Serial.printf("[ENS160] Not found at 0x%02X\n", _addr);
@@ -67,8 +71,8 @@ int ENS160Sensor::readAll(SensorReading* out, int maxOut) {
     if (!_readRegs(REG_TVOC_L, tvocBuf,   2)) return 0;
     if (!_readRegs(REG_ECO2_L, eco2Buf,   2)) return 0;
 
-    float tvoc = (float)((tvocBuf[1] << 8) | tvocBuf[0]);
-    float eco2 = (float)((eco2Buf[1] << 8) | eco2Buf[0]);
+    float tvoc = _calTvoc.apply((float)((tvocBuf[1] << 8) | tvocBuf[0]));
+    float eco2 = _calEco2.apply((float)((eco2Buf[1] << 8) | eco2Buf[0]));
 
     out[0] = SensorReading::make(0, _id, getType(), "tvoc",  tvoc,       "ppb");
     out[1] = SensorReading::make(0, _id, getType(), "eco2",  eco2,       "ppm");

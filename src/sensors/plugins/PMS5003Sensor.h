@@ -24,12 +24,16 @@ public:
     }
 
 private:
-    HardwareSerial* _serial    = nullptr;
+    HardwareSerial* _serial     = nullptr;
     uint32_t        _intervalMs = 30000;
-    float           _pm1  = 0, _pm25 = 0, _pm10 = 0;
+    float           _pm1 = 0, _pm25 = 0, _pm10 = 0;
 
-    static constexpr uint8_t  START1 = 0x42;
-    static constexpr uint8_t  START2 = 0x4D;
+    CalibrationAxis _calPm1;
+    CalibrationAxis _calPm25;
+    CalibrationAxis _calPm10;
+
+    static constexpr uint8_t  START1    = 0x42;
+    static constexpr uint8_t  START2    = 0x4D;
     static constexpr int      FRAME_LEN = 32;
 
     bool _readFrame();

@@ -31,9 +31,12 @@ private:
     bool    _readRegs(uint8_t reg, uint8_t* buf, size_t len);
     bool    _waitReady(uint32_t timeoutMs = 1000);
 
-    uint8_t  _addr      = 0x52;
+    uint8_t  _addr       = 0x52;
     uint32_t _intervalMs = 30000;
-    bool     _ready     = false;
+    bool     _ready      = false;
+
+    CalibrationAxis _calTvoc;
+    CalibrationAxis _calEco2;
 
     static constexpr uint8_t REG_OPMODE   = 0x10;
     static constexpr uint8_t REG_STATUS   = 0x20;
