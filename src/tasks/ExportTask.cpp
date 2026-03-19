@@ -18,9 +18,11 @@ void exportTaskFunc(void* /*param*/) {
 
     SensorReading r;
     while (TaskManager::running) {
+        // Short timeout so the task responds to running=false within 100ms,
+        // allowing shutdown() to flush the final batch before the hard wait expires.
         bool got = xQueueReceive(exportQueue, &r,
-                                  pdMS_TO_TICKS(1000)) == pdTRUE;
-        if (got) {
+                                  pdMS_TO_TICKS(100)) == pdTRUE;
+        if (got && batchCount < BATCH_SIZE) {
             batch[batchCount++] = r;
         }
 

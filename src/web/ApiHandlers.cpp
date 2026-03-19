@@ -1,12 +1,14 @@
 #include "ApiHandlers.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <freertos/task.h>
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/AggregationEngine.h"
 #include "../sensors/SensorManager.h"
 #include "../export/ExportManager.h"
 #include "../storage/JsonLogger.h"
 #include "../core/Globals.h"   // config, activeFS
+#include "../tasks/TaskManager.h"  // task handles for /api/diag
 
 // ---------------------------------------------------------------------------
 // GET /api/data
@@ -47,81 +49,157 @@ static void handleApiData(AsyncWebServerRequest* req) {
     // --- Fetch raw data ---
     // Strategy: first try in-memory ring buffer (recent data),
     //           fall back to filesystem query for historical data.
-    constexpr size_t MAX_RAW = 2000;
+    constexpr size_t MAX_RAW = 500;  // 40 KB vs 160 KB — prevents OOM on ESP32-C3
     SensorReading* raw = new SensorReading[MAX_RAW];
     if (!raw) {
         req->send(500, "application/json", "{\"error\":\"out of memory\"}");
         return;
     }
 
-    size_t rawCount = 0;
+    // Reserve up to 200 slots for the ring buffer; give all remaining slots to
+    // the filesystem query.  When the ring is empty (historical request) the
+    // full MAX_RAW budget is available for FS rows instead of a fixed 300-cap.
+    constexpr size_t RING_SHARE = 200;
 
-    // Try ring buffer first (no mutex needed for read-only snapshot)
+    size_t ringCount = 0;
+    size_t fsCount   = 0;
+
+    // 1) Ring buffer (recent, in-memory)
     if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        rawCount = webRingBuf.copyRecent(raw, MAX_RAW, fromTs);
+        ringCount = webRingBuf.copyRecent(raw, RING_SHARE, fromTs);
         xSemaphoreGive(webDataMutex);
     }
-
-    // Apply sensor/metric/toTs filters to ring buffer results
-    if (rawCount > 0) {
+    // Filter ring results
+    {
         size_t out = 0;
-        for (size_t i = 0; i < rawCount; i++) {
+        for (size_t i = 0; i < ringCount; i++) {
             if (raw[i].timestamp > toTs) continue;
             if (sensorFilter && strcmp(raw[i].sensorId, sensorFilter) != 0) continue;
             if (metricFilter && strcmp(raw[i].metric,   metricFilter) != 0) continue;
             if (out != i) raw[out] = raw[i];
             out++;
         }
-        rawCount = out;
+        ringCount = out;
     }
 
-    // If ring buffer doesn't cover the requested range, query filesystem
-    if (rawCount == 0 && activeFS) {
+    // Capture agg/mode strings before any async ops
+    const char* aggParamStr  = req->hasParam("agg")  ? req->getParam("agg")->value().c_str()  : "5m";
+    const char* modeParamStr = req->hasParam("mode") ? req->getParam("mode")->value().c_str() : "lttb";
+
+    // 2) Filesystem query — choose strategy based on whether ring has data:
+    //    a) Ring is empty (historical query): use streaming aggregation (P1/3.1)
+    //       — avoids materialising raw readings, saving ~40KB heap.
+    //    b) Ring has data (recent query): use raw query + merge for ring+FS union.
+    bool historicalPath = (ringCount == 0) &&
+                          (mode != AGG_RAW) &&
+                          (bucket != BUCKET_RAW);
+
+    SensorReading* agg     = new SensorReading[limit + 1];
+    size_t         aggCount = 0;
+    bool           truncated = false;
+
+    if (!agg) {
+        delete[] raw;
+        req->send(500, "application/json", "{\"error\":\"out of memory\"}");
+        return;
+    }
+
+    if (historicalPath && activeFS) {
+        // Streaming path: Accum[] allocated inside, freed before return (P1/3.1)
         static JsonLogger logger;
-        // (logger.begin() called at startup; reuse static instance)
-        rawCount = logger.query(*activeFS, fromTs, toTs,
-                                sensorFilter, metricFilter,
-                                raw, MAX_RAW);
+        if (configMutex && xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+            aggCount = logger.streamAggregateQuery(*activeFS, fromTs, toTs,
+                                                    sensorFilter, metricFilter,
+                                                    agg, limit,
+                                                    bucket, mode, limit);
+            xSemaphoreGive(configMutex);
+        }
+        delete[] raw;  // ring buffer was empty; free it
+        raw = nullptr;
+    } else {
+        // Raw path: query FS for remaining slots, merge with ring, then aggregate
+        if (activeFS) {
+            static JsonLogger logger;
+            if (configMutex && xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+                size_t fsShare = MAX_RAW - ringCount;  // full budget when ring is empty
+                fsCount = logger.query(*activeFS, fromTs, toTs,
+                                       sensorFilter, metricFilter,
+                                       raw + ringCount, fsShare);
+                xSemaphoreGive(configMutex);
+            }
+        }
+
+        size_t rawCount = ringCount + fsCount;
+        truncated = (rawCount >= MAX_RAW);
+
+        // Merge: insertion-sort by timestamp + dedup by (ts, sensorId, metric) (#4)
+        if (fsCount > 0 && ringCount > 0) {
+            for (size_t i = ringCount; i < rawCount; i++) {
+                SensorReading tmp = raw[i];
+                size_t j = i;
+                while (j > 0 && raw[j-1].timestamp > tmp.timestamp) {
+                    raw[j] = raw[j-1]; j--;
+                }
+                raw[j] = tmp;
+            }
+            size_t out = 0;
+            for (size_t i = 0; i < rawCount; i++) {
+                bool dup = (i > 0 &&
+                            raw[i].timestamp == raw[i-1].timestamp &&
+                            strcmp(raw[i].sensorId, raw[i-1].sensorId) == 0 &&
+                            strcmp(raw[i].metric,   raw[i-1].metric)   == 0);
+                if (!dup) { if (out != i) raw[out] = raw[i]; out++; }
+            }
+            rawCount = out;
+        }
+
+        if (rawCount > 0) {
+            aggCount = AggregationEngine::aggregate(raw, rawCount,
+                                                    agg, limit,
+                                                    bucket, mode, limit);
+        }
+        delete[] raw;
+        raw = nullptr;
     }
 
-    // --- Aggregate ---
-    SensorReading* agg = new SensorReading[limit + 1];
-    size_t aggCount = 0;
-    if (agg && rawCount > 0) {
-        aggCount = AggregationEngine::aggregate(raw, rawCount,
-                                                agg, limit,
-                                                bucket, mode, limit);
+    // 4.3 — Warn when multiple metrics are mixed in one response without a filter
+    bool multiMetricWarning = false;
+    if (!metricFilter && aggCount > 1) {
+        const char* firstMetric = agg[0].metric;
+        for (size_t i = 1; i < aggCount; i++) {
+            if (strcmp(agg[i].metric, firstMetric) != 0) {
+                multiMetricWarning = true;
+                break;
+            }
+        }
     }
 
-    // --- Build JSON response ---
-    // Use chunked response to avoid large heap allocation
-    String body;
-    body.reserve(aggCount * 30 + 128);
-    body  = "{\"from\":";    body += fromTs;
-    body += ",\"to\":";      body += toTs;
-    body += ",\"agg\":\"";   body += req->getParam("agg")
-                                     ? req->getParam("agg")->value() : "5m";
-    body += "\",\"mode\":\""; body += req->getParam("mode")
-                                     ? req->getParam("mode")->value() : "lttb";
-    body += "\",\"count\":";  body += (int)aggCount;
-    body += ",\"data\":[";
+    // --- Build JSON response via AsyncResponseStream (no String realloc) ---
+    AsyncResponseStream* response =
+        req->beginResponseStream("application/json");
+    response->printf("{\"from\":%u,\"to\":%u,\"agg\":\"%s\",\"mode\":\"%s\","
+                     "\"count\":%zu,\"truncated\":%s",
+                     fromTs, toTs, aggParamStr, modeParamStr,
+                     aggCount, truncated ? "true" : "false");
+    if (multiMetricWarning) {
+        response->print(",\"warning\":\"multiple metrics in response; add metric= "
+                        "param for single-series queries\"");
+    }
+    response->print(",\"data\":[");
 
     for (size_t i = 0; i < aggCount; i++) {
-        if (i > 0) body += ',';
-        body += "{\"ts\":";
-        body += agg[i].timestamp;
-        body += ",\"v\":";
         char valBuf[16];
         snprintf(valBuf, sizeof(valBuf), "%.4g", agg[i].value);
-        body += valBuf;
-        body += '}';
+        // Include metric and unit so clients can display axes correctly (#12)
+        response->printf("%s{\"ts\":%u,\"v\":%s,\"metric\":\"%s\",\"unit\":\"%s\"}",
+                         (i > 0 ? "," : ""),
+                         agg[i].timestamp, valBuf,
+                         agg[i].metric, agg[i].unit);
     }
-    body += "]}";
+    response->print("]}");
 
-    delete[] raw;
     delete[] agg;
-
-    req->send(200, "application/json", body);
+    req->send(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -158,8 +236,56 @@ static void handleConfigPlatform(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/diag — FreeRTOS diagnostics: heap, queues, task stack HWMs, drops
+// ---------------------------------------------------------------------------
+static void handleApiDiag(AsyncWebServerRequest* req) {
+    StaticJsonDocument<1024> doc;
+
+    // Heap
+    doc["free_heap"]     = (uint32_t)ESP.getFreeHeap();
+    doc["min_free_heap"] = (uint32_t)ESP.getMinFreeHeap();
+    doc["queue_drops"]   = (uint32_t)g_queueDrops;
+
+    // Queues
+    JsonObject queues = doc.createNestedObject("queues");
+    if (sensorQueue) {
+        JsonObject q = queues.createNestedObject("sensor");
+        q["waiting"] = (uint32_t)uxQueueMessagesWaiting(sensorQueue);
+        q["spaces"]  = (uint32_t)uxQueueSpacesAvailable(sensorQueue);
+    }
+    if (storageQueue) {
+        JsonObject q = queues.createNestedObject("storage");
+        q["waiting"] = (uint32_t)uxQueueMessagesWaiting(storageQueue);
+        q["spaces"]  = (uint32_t)uxQueueSpacesAvailable(storageQueue);
+    }
+    if (exportQueue) {
+        JsonObject q = queues.createNestedObject("export");
+        q["waiting"] = (uint32_t)uxQueueMessagesWaiting(exportQueue);
+        q["spaces"]  = (uint32_t)uxQueueSpacesAvailable(exportQueue);
+    }
+
+    // Task stack high-water marks (words remaining before overflow)
+    JsonObject tasks = doc.createNestedObject("tasks");
+    if (TaskManager::hSensor)
+        tasks["SensorTask"]     = (uint32_t)uxTaskGetStackHighWaterMark(TaskManager::hSensor);
+    if (TaskManager::hSlowSensor)
+        tasks["SlowSensorTask"] = (uint32_t)uxTaskGetStackHighWaterMark(TaskManager::hSlowSensor);
+    if (TaskManager::hProcess)
+        tasks["ProcessTask"]    = (uint32_t)uxTaskGetStackHighWaterMark(TaskManager::hProcess);
+    if (TaskManager::hStorage)
+        tasks["StorageTask"]    = (uint32_t)uxTaskGetStackHighWaterMark(TaskManager::hStorage);
+    if (TaskManager::hExport)
+        tasks["ExportTask"]     = (uint32_t)uxTaskGetStackHighWaterMark(TaskManager::hExport);
+
+    String out;
+    serializeJson(doc, out);
+    req->send(200, "application/json", out);
+}
+
+// ---------------------------------------------------------------------------
 void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/data",             HTTP_GET,  handleApiData);
     server.on("/api/sensors",          HTTP_GET,  handleApiSensors);
+    server.on("/api/diag",             HTTP_GET,  handleApiDiag);
     server.on("/api/config/platform",  HTTP_POST, handleConfigPlatform);
 }

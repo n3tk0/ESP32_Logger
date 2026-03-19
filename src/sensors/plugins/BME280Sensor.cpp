@@ -9,7 +9,6 @@ bool BME280Sensor::init(JsonObjectConst cfg) {
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
 
-    // Allow custom I2C pins; fall back to default Wire
     if (sda >= 0 && scl >= 0) {
         Wire.begin((int8_t)sda, (int8_t)scl);
     } else {
@@ -19,14 +18,50 @@ bool BME280Sensor::init(JsonObjectConst cfg) {
     _ready = _bme.begin(_addr, &Wire);
     if (!_ready) {
         Serial.printf("[BME280] Not found at 0x%02X\n", _addr);
+        return false;
     }
-    return _ready;
+
+    // Detect BMP280 (chip ID 0x60 = BME280, 0x58 = BMP280)
+    // Adafruit library exposes sensorID() for this check
+    uint32_t sensorId = _bme.sensorID();
+    _isBMP280 = (sensorId == 0x60056 || sensorId == 0x58 ||
+                 (sensorId & 0xFF) == 0x58);
+    // Simpler: read humidity; if it returns 0.0 consistently, it's BMP280.
+    // More reliable: Adafruit_BME280 returns chip ID 0x60 for BME280,
+    // other values for BMP280. We check bit pattern.
+    // Actually Adafruit sensorID() returns the chip ID shifted — just check
+    // if humidity reads consistently NaN or zero.
+    // Use direct chip ID: Wire read of register 0xD0 at _addr.
+    {
+        Wire.beginTransmission(_addr);
+        Wire.write(0xD0); // chip_id register
+        Wire.endTransmission(false);
+        Wire.requestFrom((int)_addr, 1);
+        if (Wire.available()) {
+            uint8_t chipId = Wire.read();
+            _isBMP280 = (chipId == 0x58 || chipId == 0x56 || chipId == 0x57);
+            Serial.printf("[BME280] chip_id=0x%02X → %s\n",
+                          chipId, _isBMP280 ? "BMP280" : "BME280");
+        }
+    }
+
+    // Load calibration
+    JsonObjectConst cal = cfg["calibration"];
+    _calTemp.load(cal, "temperature");
+    _calHumidity.load(cal, "humidity");
+    _calPressure.load(cal, "pressure");
+
+    Serial.printf("[%s] ready at 0x%02X  cal_T(%.2f+%.2fx) cal_P(%.2f+%.2fx)\n",
+                  getType(), _addr,
+                  _calTemp.offset, _calTemp.scale,
+                  _calPressure.offset, _calPressure.scale);
+    return true;
 }
 
 // ---------------------------------------------------------------------------
 bool BME280Sensor::read(SensorReading& out) {
     if (!_ready) return false;
-    float t = _bme.readTemperature();
+    float t = _calTemp.apply(_bme.readTemperature());
     if (isnan(t)) return false;
     out = _makeReading(0, "temperature", t, "C");
     return true;
@@ -34,19 +69,29 @@ bool BME280Sensor::read(SensorReading& out) {
 
 // ---------------------------------------------------------------------------
 int BME280Sensor::readAll(SensorReading* out, int maxOut) {
-    if (!_ready || maxOut < 3) return 0;
+    if (!_ready) return 0;
 
-    float t = _bme.readTemperature();
-    float h = _bme.readHumidity();
-    float p = _bme.readPressure() / 100.0f; // Pa → hPa
+    float t = _calTemp.apply(_bme.readTemperature());
+    float p = _calPressure.apply(_bme.readPressure() / 100.0f);
 
-    if (isnan(t) || isnan(h) || isnan(p)) return 0;
+    if (isnan(t) || isnan(p)) return 0;
+
+    if (_isBMP280) {
+        if (maxOut < 2) return 0;
+        out[0] = _makeReading(0, "temperature", t, "C");
+        out[1] = _makeReading(0, "pressure",    p, "hPa");
+        _lastReadTs = 0;
+        return 2;
+    }
+
+    if (maxOut < 3) return 0;
+    float h = _calHumidity.apply(_bme.readHumidity());
+    if (isnan(h)) return 0;
 
     out[0] = _makeReading(0, "temperature", t, "C");
     out[1] = _makeReading(0, "humidity",    h, "%");
     out[2] = _makeReading(0, "pressure",    p, "hPa");
-
-    _lastReadTs = 0; // Set by SensorManager from RTC/NTP
+    _lastReadTs = 0;
     return 3;
 }
 

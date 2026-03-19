@@ -4,6 +4,24 @@
 #include "../core/SensorTypes.h"
 
 // ============================================================================
+// CalibrationAxis — per-metric calibration helper (offset + scale)
+// Applies: calibrated = raw * scale + offset
+// JSON config: {"offset": 0.0, "scale": 1.0}
+// ============================================================================
+struct CalibrationAxis {
+    float offset = 0.0f;
+    float scale  = 1.0f;
+    float apply(float raw) const { return raw * scale + offset; }
+    void  load(JsonObjectConst parent, const char* key) {
+        JsonObjectConst c = parent[key];
+        if (!c.isNull()) {
+            offset = c["offset"] | 0.0f;
+            scale  = c["scale"]  | 1.0f;
+        }
+    }
+};
+
+// ============================================================================
 // ISensor — abstract plugin interface
 // Every sensor driver must implement this and be registered with SensorManager.
 // ============================================================================
@@ -53,6 +71,11 @@ public:
     // (e.g. UART-streaming sensors like SDS011 / PMS5003)
     virtual bool isContinuous() const { return false; }
 
+    // True if readAll() may block for >500 ms (e.g. wind sample window,
+    // UART frame wait). Blocking sensors are dispatched by SlowSensorTask
+    // so they do not stall the main SensorTask tick loop.
+    virtual bool isBlocking() const { return false; }
+
     // Returns metric names this sensor produces (e.g. "temperature", "humidity").
     // Fills out[] with up to maxOut pointers to static string literals.
     // Returns the number of metrics filled.
@@ -67,7 +90,8 @@ public:
     void        setId(const char* id) { strncpy(_id, id, sizeof(_id)-1); }
 
     // Last successful read timestamp (Unix epoch)
-    uint32_t    lastReadTs() const { return _lastReadTs; }
+    uint32_t    lastReadTs()               const { return _lastReadTs; }
+    void        setLastReadTs(uint32_t ts)       { _lastReadTs = ts; }
 
 protected:
     bool     _enabled    = false;

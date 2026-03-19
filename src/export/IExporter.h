@@ -27,8 +27,13 @@ public:
     virtual uint8_t     maxRetries()   const { return 3; }
     virtual uint32_t    retryDelayMs() const { return 5000; }
 
+    // Minimum ms between sendAll() calls for this exporter.
+    // 0 = no throttle (send every batch). Set via "interval_ms" in config.
+    virtual uint32_t    intervalMs()   const { return _intervalMs; }
+
 protected:
-    bool _enabled = false;
+    bool     _enabled    = false;
+    uint32_t _intervalMs = 0;
 };
 
 using ExporterFactory = IExporter* (*)();

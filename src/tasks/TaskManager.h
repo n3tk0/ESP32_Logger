@@ -5,16 +5,18 @@
 #include <FS.h>
 
 // Task priorities (higher number = higher priority)
-#define TASK_PRIO_SENSOR    3
-#define TASK_PRIO_PROCESS   2
-#define TASK_PRIO_STORAGE   1
-#define TASK_PRIO_EXPORT    1
+#define TASK_PRIO_SENSOR      3
+#define TASK_PRIO_PROCESS     2
+#define TASK_PRIO_SLOW_SENSOR 2   // Blocking sensors — same as process, below fast sensor
+#define TASK_PRIO_STORAGE     1
+#define TASK_PRIO_EXPORT      1
 
 // Stack sizes in bytes (tuned for ESP32-C3, 400KB DRAM total)
-#define STACK_SENSOR_TASK   4096
-#define STACK_PROCESS_TASK  6144   // LTTB intermediate buffer on stack
-#define STACK_STORAGE_TASK  4096
-#define STACK_EXPORT_TASK   8192   // WiFi + TLS + JSON serialisation
+#define STACK_SENSOR_TASK      4096
+#define STACK_PROCESS_TASK     6144   // LTTB intermediate buffer on stack
+#define STACK_SLOW_SENSOR_TASK 4096   // Blocking sensor reads (UART + delay)
+#define STACK_STORAGE_TASK     4096
+#define STACK_EXPORT_TASK      8192   // WiFi + TLS + JSON serialisation
 
 // Queue depths (items = SensorReading, ~80 bytes each)
 #define QUEUE_SENSOR_DEPTH  20
@@ -37,6 +39,7 @@ public:
 
     // Task handles (public for diagnostics / watchdog)
     static TaskHandle_t hSensor;
+    static TaskHandle_t hSlowSensor;
     static TaskHandle_t hProcess;
     static TaskHandle_t hStorage;
     static TaskHandle_t hExport;

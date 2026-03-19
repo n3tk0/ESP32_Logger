@@ -45,6 +45,14 @@ public:
     int tick(QueueHandle_t sensorQueue, uint32_t now);
 
     // ------------------------------------------------------------------
+    // tickFiltered()
+    //   Like tick() but only reads sensors where isBlocking() == blocking.
+    //   SensorTask calls this with blocking=false (fast I2C/ISR sensors).
+    //   SlowSensorTask calls this with blocking=true (UART/delay sensors).
+    // ------------------------------------------------------------------
+    int tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking);
+
+    // ------------------------------------------------------------------
     // Reload config at runtime (web UI config save)
     // Destroys old sensor instances, re-creates from updated JSON.
     // ------------------------------------------------------------------

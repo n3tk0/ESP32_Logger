@@ -18,6 +18,7 @@ public:
     const char* getName() const override { return "SDS011 PM2.5/PM10"; }
     uint32_t    getReadIntervalMs() const override { return _workPeriodMs; }
     bool        isContinuous() const override { return true; }
+    bool        isBlocking()   const override { return true; }
     int getMetrics(const char** out, int maxOut) const override {
         static const char* m[] = { "pm25", "pm10" };
         int n = 2; if (n > maxOut) n = maxOut;
@@ -26,13 +27,15 @@ public:
     }
 
 private:
-    HardwareSerial* _serial     = nullptr;
-    uint32_t        _workPeriodMs = 60000; // 1 minute default
-    float           _pm25       = 0.0f;
-    float           _pm10       = 0.0f;
-    bool            _newData    = false;
+    HardwareSerial* _serial       = nullptr;
+    uint32_t        _workPeriodMs = 60000;
+    float           _pm25         = 0.0f;
+    float           _pm10         = 0.0f;
+    bool            _newData      = false;
 
-    // SDS011 uses UART2 by default on ESP32
+    CalibrationAxis _calPm25;
+    CalibrationAxis _calPm10;
+
     static constexpr int SERIAL_NUM = 2;
     static constexpr int FRAME_LEN  = 10;
 

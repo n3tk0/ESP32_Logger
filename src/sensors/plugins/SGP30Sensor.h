@@ -34,9 +34,12 @@ private:
     bool    _readWords(uint16_t* words, int count);
     static uint8_t _crc8(uint8_t d1, uint8_t d2);
 
-    uint32_t _intervalMs  = 30000;
-    bool     _ready       = false;
-    uint32_t _initMs      = 0;   // millis() at init, for 15s warmup tracking
+    uint32_t _intervalMs = 30000;
+    bool     _ready      = false;
+    uint32_t _initMs     = 0;
+
+    CalibrationAxis _calTvoc;
+    CalibrationAxis _calEco2;
 
     static constexpr uint8_t  ADDR          = 0x58;
     static constexpr uint16_t CMD_IAQ_INIT  = 0x2003;

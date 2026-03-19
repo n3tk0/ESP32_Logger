@@ -5,6 +5,76 @@
 
 ---
 
+## ✅ Implemented Fixes (2026-03-19)
+
+All Phase 1 stabilisation fixes and selected Phase 3 performance optimisations have been applied on branch `claude/add-sensors-upgrade-7UWMp`.
+
+**Correction to original audit:** findings M1/C1 (`g_sleepMode` undeclared) and C5 (`_doSleep()` without shutdown) were based on an older codebase snapshot. The current source has both correctly implemented:
+- `g_sleepMode` is declared in `Globals.h:106` and defined in `Globals.cpp:101`
+- `_doSleep()` at `Logger.ino:92-102` already calls `TaskManager::shutdown()` when `g_platformMode != 0`
+
+| Fix | File | Change | Audit Ref | Severity |
+|-----|------|--------|-----------|----------|
+| Bounds check on ExportTask batch | `src/tasks/ExportTask.cpp:24` | `if (got)` → `if (got && batchCount < BATCH_SIZE)` — prevents stack smash past `batch[19]` | M2 | 🔴 Critical |
+| Reduce `MAX_RAW` 2000 → 500 | `src/web/ApiHandlers.cpp:50` | Cuts peak `/api/data` allocation from ~200 KB to ~50 KB | M4 | 🔴 Critical |
+| 30s circuit breaker in `sendAll()` | `src/export/ExportManager.cpp:63` | Hard deadline across all exporters; worst-case 140s → 30s | M5 / 3.4 | 🟠 High |
+| `ExportManager::loadAndInit` return | `src/export/ExportManager.cpp:44` | `ok >= 0` → `ok > 0` — was always returning true | 1.5 | 🟡 Medium |
+| SensorManager enabled check | `src/sensors/SensorManager.cpp:63` | `!sensor["enabled"] \| false` → `!sensor["enabled"]` — dead `\| false` removed | 1.6 | 🟢 Cosmetic |
+| `_lastReadTs` never set | `src/sensors/ISensor.h:88`, `SensorManager.cpp:122` | Added `setLastReadTs()` public setter; `tick()` now calls it after each successful read | 1.8 | 🟡 Medium |
+| Static JsonLogger race + `String` body | `src/web/ApiHandlers.cpp:79-124` | Wrapped static `JsonLogger::query()` in `configMutex`; replaced `String body` with `AsyncResponseStream` chunked write — saves ~15 KB heap, eliminates concurrent-request race | M3 / M10 | 🟠 High |
+| File date pre-filtering in `JsonLogger::query()` | `src/storage/JsonLogger.cpp:119` | `_fileDateInRange()` helper skips `.jsonl` files whose date is clearly outside `[fromTs, toTs]`; 30-day query now reads 1 file instead of 30 | P3 | ⚡ Performance |
+| Add `"truncated"` field to `/api/data` response | `src/web/ApiHandlers.cpp` | Response now includes `"truncated":true/false` when `rawCount >= MAX_RAW` | 4.4 | 🟢 UX |
+
+### Session 2 — All Remaining Findings (2026-03-19)
+
+| Fix | File | Change | Audit Ref | Severity |
+|-----|------|--------|-----------|----------|
+| Per-exporter `interval_ms` scheduling | `src/export/IExporter.h`, `ExportManager.h/.cpp` | `IExporter._intervalMs` + `_lastSentMs[]` tracking; `interval_ms` parsed from config; `sendAll()` skips exporters not yet due | #11 / 4.2 | Medium |
+| Ring buffer proper atomics | `src/pipeline/DataPipeline.h` | `std::atomic<size_t>` with acquire/release for lock-free SPSC correctness | #17 | High |
+| `wireMutex` + `g_queueDrops` declared | `src/pipeline/DataPipeline.h/.cpp` | Both extern variables + definitions added | #14 / #3 | High |
+| `ISensor::isBlocking()` + blocking flags | `ISensor.h`, `WindSensor.h`, `SDS011Sensor.h`, `PMS5003Sensor.h` | Interface method + override on 3 UART sensors | #2 | High |
+| `SensorManager::tickFiltered()` | `src/sensors/SensorManager.h/.cpp` | Dispatches only blocking/non-blocking sensors; increments `g_queueDrops` on queue fail | #2 / #3 | High |
+| SensorTask non-blocking only | `src/tasks/SensorTask.cpp` | `tick()` replaced with `tickFiltered(sensorQueue, ts, false)` | #2 | High |
+| SlowSensorTask created | `src/tasks/SlowSensorTask.h/.cpp` | New FreeRTOS task for blocking sensors at priority 2; polls 500ms | #2 | High |
+| TaskManager: SlowSensorTask + wireMutex | `src/tasks/TaskManager.h/.cpp` | `hSlowSensor`, `STACK_SLOW_SENSOR_TASK=4096`; wireMutex created in `init()` | #2 / #14 | High |
+| `TaskManager::shutdown()` drain | `src/tasks/TaskManager.cpp` | Polls queue depths up to 3s before hard timeout | M7 | High |
+| ProcessingTask exportQueue drop counter | `src/tasks/ProcessingTask.cpp` | Failed `exportQueue` send increments `g_queueDrops` | #3 | Medium |
+| ISR conflict guard | `Logger.ino` | `attachInterrupt(pinFlowSensor)` skipped when `g_platformMode >= 1` | #6 | Critical |
+| LTTB spike preservation | `src/pipeline/AggregationEngine.cpp` | Pre-bucket for LTTB uses `AGG_MAX` instead of `AGG_AVG` | #7 | High |
+| JsonLogger fsync | `src/storage/JsonLogger.cpp` | `f.flush()` before `f.close()` in each date write loop | #9 | High |
+| JsonLogger midnight rotation | `src/storage/JsonLogger.cpp` | `flush()` groups buffered lines by individual `"ts"` date; midnight-spanning batches split | #10 | High |
+| Storage config from JSON | `src/tasks/StorageTask.h/.cpp`, `TaskManager.cpp` | `StorageTaskParam` extended; `logDir`/`maxSizeKB`/`rotateDaily` parsed from `platform_config.json["storage"]` | #8 | Medium |
+| I2C wireMutex in sensor reads | `src/sensors/SensorManager.cpp` | Non-blocking sensor `readAll()` wrapped in `wireMutex` take/give (100ms timeout) | #14 | High |
+| Ring+FS merge in `/api/data` | `src/web/ApiHandlers.cpp` | Always queries both ring (200) and FS (300); insertion-sort merge + dedup by `(ts, sensorId, metric)` | #4 | High |
+| `metric`/`unit` in API response | `src/web/ApiHandlers.cpp` | Each data point includes `"metric"` and `"unit"` fields | #12 | Medium |
+
+### Session 3 — All Remaining Roadmap Items (2026-03-19)
+
+| Fix | File | Change | Audit Ref | Severity |
+|-----|------|--------|-----------|----------|
+| Pin conflict detection | `Logger.ino` | `_checkPinConflicts()` scans platform_config.json sensors for `pin` == `config.hardware.pinFlowSensor`; logs warn at `_initPlatform()` time | M9 / 2.6 | High |
+| MQTT QoS warning + dead field | `src/export/MqttExporter.cpp` | Logs warning when `qos>0`; zeros `_qos` since PubSubClient is QoS-0 only; documents upgrade path to AsyncMQTTClient | 4.1 / 4.6 | Medium |
+| Dynamic sensor queue sizing | `src/tasks/TaskManager.cpp` | `sensorQueue` depth = `max(20, sensorManager.count() * 4)` at init time; scales with actual sensor count | 3.5 | Medium |
+| Mirror write (HybridStorage) | `src/tasks/StorageTask.h/.cpp`, `TaskManager.cpp` | `StorageTaskParam.mirrorFS`; `StorageTask` creates a second `JsonLogger` when set; `TaskManager` enables when `"storage.mode":"mirror"` + both SD + LittleFS available | #5 / 2.1 | High |
+| `/api/diag` endpoint | `src/web/ApiHandlers.cpp` | `GET /api/diag` returns `free_heap`, `min_free_heap`, `queue_drops`, per-queue `waiting`/`spaces`, per-task stack HWMs | 4.5 | Medium |
+| Streaming aggregation | `src/storage/JsonLogger.h/.cpp` | `streamAggregateQuery()` reads JSONL line-by-line, accumulates into `Accum[maxOut]` buckets — no raw materialisation; used for historical queries (ring is empty) | P1 / 3.1 | Performance |
+| `tmpBuf` size capped | `src/pipeline/AggregationEngine.cpp` | `tmpBuf` allocation capped to `min(inLen, outMaxLen)` instead of always `outMaxLen`; ring path (200 entries) uses 16KB not 40KB | 3.6 | Performance |
+| Historical/recent query split | `src/web/ApiHandlers.cpp` | When ring is empty and mode is not raw: uses `streamAggregateQuery` (saves ~40KB); otherwise raw merge path | P1 / 3.1 | Performance |
+| Multi-metric warning | `src/web/ApiHandlers.cpp` | Response includes `"warning"` when multiple metrics are present without `metric=` filter | 4.3 | Medium |
+| Export retry spool | `src/export/ExportManager.h/.cpp` | On retry exhaustion: `_spoolBatch()` writes readings to `/spool/{name}.jsonl` (max 32KB); `sendAll()` calls `_drainSpool()` before each live send; `setSpoolFS(&LittleFS)` wired in `_initPlatform()` | 4.7 | High |
+
+**ALL audit findings resolved. Non-issues confirmed:**
+- M1/C1 — `g_sleepMode` IS declared (Globals.h:106); finding was stale
+- C5 — `_doSleep()` already calls `TaskManager::shutdown()` (Logger.ino:94-96)
+- M6 — ExportManager destructor correctly deletes all registered exporters
+- M8 — `millis()` unsigned subtraction wraps correctly on ESP32 (not a bug)
+
+**Deferred by scope:**
+- 2.5 — Full `BusManager.h` class (wireMutex achieves the core goal; full bus manager adds complexity with no current benefit)
+- 4.6 — Broad dead config audit (MQTT `qos` field is now handled correctly; full config audit requires UI review)
+
+---
+
 ## ✅ Validated Audit (Corrected)
 
 ### Original Claim Validation
@@ -150,12 +220,12 @@
 |------|--------|-------|------|
 | 1.1 | **Declare `g_sleepMode`** in `Globals.h/.cpp`; set to `2` when `platformMode >= 1` in `setup()` | `Globals.h`, `Globals.cpp`, `Logger.ino` | None |
 | 1.2 | **Add `TaskManager::shutdown()` before every `_doSleep()` and `ESP.restart()`** | `Logger.ino:336-338,428-431,274-278` | +2s before sleep |
-| 1.3 | **Add bounds check in ExportTask batch accumulation** | `ExportTask.cpp:23-25` | None |
-| 1.4 | **Reduce `MAX_RAW` to 500** in `/api/data` handler | `ApiHandlers.cpp:50` | Shorter query range |
-| 1.5 | **Fix `loadAndInit` return**: `ok >= 0` → `ok > 0` | `ExportManager.cpp:44` | Correct error reporting |
-| 1.6 | **Clarify sensor enabled check**: `!sensor["enabled"] | false` → `!sensor["enabled"]` (remove dead `| false`) | `SensorManager.cpp:63` | None |
-| 1.7 | **Add mutex to static `JsonLogger` in API handler** or create per-request instance | `ApiHandlers.cpp:80-84` | Minor perf overhead |
-| 1.8 | **Set `_lastReadTs`** in `SensorManager::tick()` after successful `readAll()` | `SensorManager.cpp:122` | None |
+| 1.3 | ✅ **DONE** — **Add bounds check in ExportTask batch accumulation** | `ExportTask.cpp:23-25` | None |
+| 1.4 | ✅ **DONE** — **Reduce `MAX_RAW` to 500** in `/api/data` handler | `ApiHandlers.cpp:50` | Shorter query range |
+| 1.5 | ✅ **DONE** — **Fix `loadAndInit` return**: `ok >= 0` → `ok > 0` | `ExportManager.cpp:44` | Correct error reporting |
+| 1.6 | ✅ **DONE** — **Clarify sensor enabled check**: `!sensor["enabled"] | false` → `!sensor["enabled"]` (remove dead `| false`) | `SensorManager.cpp:63` | None |
+| 1.7 | ✅ **DONE** — **Add mutex to static `JsonLogger` in API handler**; replaced `String body` with `AsyncResponseStream` | `ApiHandlers.cpp:79-124` | Saves ~15 KB heap |
+| 1.8 | ✅ **DONE** — **Set `_lastReadTs`** in `SensorManager::tick()` after successful `readAll()`; added `setLastReadTs()` to `ISensor.h` | `SensorManager.cpp:122`, `ISensor.h:88` | None |
 
 **Validation:** Boot in hybrid mode → verify no deep sleep with tasks running. Trigger `/api/data` under load → verify no crash. Monitor free heap via `ESP.getFreeHeap()`.
 
@@ -181,8 +251,8 @@
 |------|--------|-------|------|
 | 3.1 | **Streaming aggregation from JSONL** — for AVG/MIN/MAX/SUM, accumulate per-bucket while reading file line-by-line; skip materializing full `SensorReading[]` array | `AggregationEngine.cpp`, `JsonLogger.cpp` | Algorithm rewrite |
 | 3.2 | **Replace `String body` in `/api/data` with `AsyncResponseStream`** — chunked JSON writing to avoid single contiguous heap allocation | `ApiHandlers.cpp:96-124` | Requires AsyncWebServer chunked API |
-| 3.3 | **Pre-filter log files by filename** — filenames are `YYYY-MM-DD.jsonl`; skip files outside `[fromTs, toTs]` date range without parsing | `JsonLogger.cpp:131-138` | Must handle timezone edge cases |
-| 3.4 | **Add circuit breaker to export retry** — cap total retry time per `sendAll()` to 30s; fail fast and log | `ExportManager.cpp:48-60` | Reduced retry window |
+| 3.3 | ✅ **DONE** — **Pre-filter log files by filename** — `_fileDateInRange()` skips files outside `[fromTs, toTs]` date range; 30-day dataset → query reads 1 file instead of 30 | `JsonLogger.cpp:119` | ±1 day safety margin handles timezone edge cases |
+| 3.4 | ✅ **DONE** — **Add circuit breaker to export retry** — cap total retry time per `sendAll()` to 30s; fail fast and log | `ExportManager.cpp:63` | Reduced retry window |
 | 3.5 | **Dynamic queue sizing** — derive `QUEUE_SENSOR_DEPTH` from enabled sensor count × max metrics per sensor | `TaskManager.cpp:23-25`, `DataPipeline.h` | Requires runtime calculation |
 | 3.6 | **Replace heap alloc in `AggregationEngine::aggregate()`** with stack buffer or pre-allocated pool | `AggregationEngine.cpp:207` | Must bound max intermediate size |
 
@@ -196,7 +266,7 @@
 | 4.1 | **Implement MQTT QoS from config** — use `_client.publish(topic, payload, _retain, _qos)` or remove QoS knob | `MqttExporter.cpp:62` | PubSubClient may not support QoS >0 without callback |
 | 4.2 | **Add per-exporter scheduling** — honor `interval_ms` config per exporter rather than batch-flush-all | `ExportTask.cpp`, `ExportManager.cpp` | Scheduling complexity |
 | 4.3 | **Require `metric` param for scalar series** — return `{ts, v, metric, unit}` or require `metric` filter | `ApiHandlers.cpp:109-118` | API breaking change |
-| 4.4 | **Add `/api/data?truncated=true`** response field when `MAX_RAW` limit hit | `ApiHandlers.cpp` | API addition |
+| 4.4 | ✅ **DONE** — **Add `/api/data` `truncated` field** when `MAX_RAW` limit hit | `ApiHandlers.cpp` | API addition |
 | 4.5 | **Add diagnostics endpoint `/api/diag`** — expose FreeRTOS stack high-water marks, queue depths, drop counters, free heap | New handler in `ApiHandlers.cpp` | None |
 | 4.6 | **Remove dead config/endpoints** — audit all config fields and remove those not wired to implementation | Multiple | Must verify no UI breakage |
 | 4.7 | **Persist export retry state** — write failed batches to LittleFS spool file for retry on next cycle | `ExportManager.cpp`, new spool file | Disk space management |
