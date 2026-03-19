@@ -158,5 +158,9 @@ void SensorManager::toJson(JsonArray arr) const {
         o["enabled"]      = s->isEnabled();
         o["last_read_ts"] = s->lastReadTs();
         o["status"]       = s->isEnabled() ? "ok" : "disabled";
+        JsonArray metrics = o.createNestedArray("metrics");
+        const char* mNames[8];
+        int mCount = s->getMetrics(mNames, 8);
+        for (int m = 0; m < mCount; m++) metrics.add(mNames[m]);
     }
 }

@@ -16,6 +16,11 @@ public:
 
     const char* getType() const override { return "wind"; }
     const char* getName() const override { return "Wind Speed"; }
+    int getMetrics(const char** m, int max) const override {
+        static const char* M[] = {"wind_speed"};
+        int n = 1; if(n>max) n=max;
+        for(int i=0;i<n;i++) m[i]=M[i]; return n;
+    }
     uint32_t    getReadIntervalMs() const override { return _sampleWindowMs; }
 
 private:

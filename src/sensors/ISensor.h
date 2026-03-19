@@ -46,6 +46,13 @@ public:
     // Human-readable display name
     virtual const char* getName() const = 0;
 
+    // Fill metricNames[] with pointers to static metric name strings.
+    // Returns the number of metrics written (≤ maxMetrics).
+    // Used by /api/sensors to populate the UI metric selectors.
+    virtual int getMetrics(const char** metricNames, int maxMetrics) const {
+        (void)metricNames; (void)maxMetrics; return 0;
+    }
+
     // Milliseconds between consecutive reads (0 = as fast as possible)
     virtual uint32_t getReadIntervalMs() const { return 5000; }
 

@@ -16,6 +16,11 @@ public:
 
     const char* getType() const override { return "bme280"; }
     const char* getName() const override { return "BME280 Environmental"; }
+    int getMetrics(const char** m, int max) const override {
+        static const char* M[] = {"temperature","humidity","pressure"};
+        int n = 3; if(n>max) n=max;
+        for(int i=0;i<n;i++) m[i]=M[i]; return n;
+    }
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
 
 private:

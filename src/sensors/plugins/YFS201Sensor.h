@@ -27,6 +27,11 @@ public:
 
     const char* getType() const override { return "yfs201"; }
     const char* getName() const override { return "YF-S201 Water Flow"; }
+    int getMetrics(const char** m, int max) const override {
+        static const char* M[] = {"flow_rate","volume"};
+        int n = 2; if(n>max) n=max;
+        for(int i=0;i<n;i++) m[i]=M[i]; return n;
+    }
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
 
     // Expose raw pulse count for legacy state machine compatibility

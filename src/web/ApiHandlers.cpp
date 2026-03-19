@@ -4,6 +4,7 @@
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/AggregationEngine.h"
 #include "../sensors/SensorManager.h"
+#include "../export/ExportManager.h"
 #include "../storage/JsonLogger.h"
 #include "../core/Globals.h"   // config, activeFS
 
@@ -55,10 +56,21 @@ static void handleApiData(AsyncWebServerRequest* req) {
 
     size_t rawCount = 0;
 
-    // Try ring buffer first (no mutex needed for read-only snapshot)
+    // Try ring buffer first, then post-filter by sensor/metric/toTs
     if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        rawCount = webRingBuf.copyRecent(raw, MAX_RAW, fromTs);
+        size_t count = webRingBuf.copyRecent(raw, MAX_RAW, fromTs);
         xSemaphoreGive(webDataMutex);
+        size_t w = 0;
+        for (size_t i = 0; i < count; i++) {
+            const SensorReading& r = raw[i];
+            if (r.timestamp > toTs) continue;
+            if (sensorFilter && strncmp(r.sensorId, sensorFilter,
+                                        sizeof(r.sensorId)) != 0) continue;
+            if (metricFilter && strncmp(r.metric, metricFilter,
+                                        sizeof(r.metric)) != 0) continue;
+            raw[w++] = r;
+        }
+        rawCount = w;
     }
 
     // If ring buffer doesn't cover the requested range, query filesystem
@@ -133,7 +145,8 @@ static void handleConfigPlatform(AsyncWebServerRequest* req) {
     }
     // Lock config mutex so tasks don't read a partially-updated config
     if (configMutex && xSemaphoreTake(configMutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
-        bool ok = sensorManager.reloadConfig(*activeFS);
+        bool ok = sensorManager.reloadConfig(*activeFS)
+                & exportManager.reloadConfig(*activeFS);
         xSemaphoreGive(configMutex);
         if (ok) req->send(200, "application/json", "{\"ok\":true}");
         else    req->send(500, "application/json", "{\"error\":\"reload failed\"}");

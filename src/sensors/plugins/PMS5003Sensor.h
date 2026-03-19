@@ -14,6 +14,11 @@ public:
 
     const char* getType() const override { return "pms5003"; }
     const char* getName() const override { return "PMS5003 PM1/2.5/10"; }
+    int getMetrics(const char** m, int max) const override {
+        static const char* M[] = {"pm1","pm25","pm10"};
+        int n = 3; if(n>max) n=max;
+        for(int i=0;i<n;i++) m[i]=M[i]; return n;
+    }
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
     bool        isContinuous() const override { return true; }
 
