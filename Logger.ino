@@ -17,10 +17,12 @@
  *   Logger.ino                     – само setup() и loop()
  **************************************************************************************************/
 
-#define CONFIG_FREERTOS_UNICORE 1
+// Arduino IDE build-flag shim — must come before all other includes
+#include "src/arduino_build_flags.h"
 
 #include <Arduino.h>
 #include <esp_sleep.h>
+#include <WiFi.h>           // for WiFi.setSleep() in continuous mode
 
 #include "src/core/Globals.h"
 #include "src/managers/ConfigManager.h"
@@ -60,6 +62,98 @@
 #include "src/export/SensorCommunityExporter.h"
 #include "src/export/OpenSenseMapExporter.h"
 #include "src/web/ApiHandlers.h"
+
+// ============================================================================
+// PLATFORM MODE & SLEEP GLOBALS
+// ============================================================================
+// Active platform mode (set once in setup, read in loop):
+//   0 = legacy   — deep-sleep water logger (no sensor pipeline)
+//   1 = continuous — always-on sensor pipeline, modem/CPU sleep when idle
+//   2 = hybrid    — sensor pipeline + flow logging, deep sleep between cycles
+static uint8_t g_platformMode = 0;
+
+// Continuous-mode idle power management
+static uint32_t g_contIdleMs       = 300000; // ms idle before reducing power (5 min)
+static uint8_t  g_contIdleCpuMhz   = 80;     // CPU MHz when idle (vs 160 when active)
+static bool     g_contModemSleep   = true;   // enable WiFi modem sleep when idle
+static uint32_t g_contLastActivity = 0;      // millis() of last tracked activity
+static bool     g_contPowerReduced = false;  // true once idle power applied
+
+// Hybrid-mode deep sleep (periodic timer wake for sensor readings)
+static uint32_t g_hybridIdleMs    = 120000;  // ms idle in STATE_IDLE → deep sleep
+static uint32_t g_hybridSleepMs   = 60000;   // deep sleep duration (ms)
+static uint32_t g_hybridActiveMs  = 30000;   // active window on timer wake (ms)
+static uint32_t g_hybridIdleStart = 0;       // millis() when STATE_IDLE began
+
+// ============================================================================
+// _doSleep() — graceful deep sleep
+// Shuts down FreeRTOS tasks for continuous/hybrid before sleeping.
+// ============================================================================
+static void _doSleep() {
+    // Give platform tasks a chance to finish current work
+    if (g_platformMode != 0 && TaskManager::running) {
+        TaskManager::shutdown();
+        delay(200);
+    }
+    Serial.println("[Sleep] Deep sleep →");
+    Serial.flush();
+    delay(10);
+    esp_deep_sleep_start();
+}
+
+// ============================================================================
+// _loadSleepConfig() — read sleep settings from platform_config.json
+// ============================================================================
+static void _loadSleepConfig() {
+    if (!fsAvailable || !activeFS) return;
+    File f = activeFS->open("/platform_config.json", FILE_READ);
+    if (!f) return;
+    // Use a dedicated small doc — sleep section only needs ~256 bytes
+    StaticJsonDocument<512> doc;
+    DeserializationError err = deserializeJson(doc, f);
+    f.close();
+    if (err) return;
+
+    JsonObjectConst sl = doc["sleep"];
+    if (sl.isNull()) return;
+
+    JsonObjectConst cont = sl["continuous"];
+    if (!cont.isNull()) {
+        g_contIdleMs     = cont["idle_timeout_ms"] | (uint32_t)300000;
+        g_contIdleCpuMhz = (uint8_t)(cont["idle_cpu_mhz"] | 80);
+        g_contModemSleep = cont["modem_sleep"]      | true;
+    }
+
+    JsonObjectConst hyb = sl["hybrid"];
+    if (!hyb.isNull()) {
+        g_hybridIdleMs   = hyb["idle_before_sleep_ms"] | (uint32_t)120000;
+        g_hybridSleepMs  = hyb["sleep_duration_ms"]    | (uint32_t)60000;
+        g_hybridActiveMs = hyb["active_window_ms"]     | (uint32_t)30000;
+    }
+}
+
+// ============================================================================
+// _manageContinuousPower() — reduce CPU + enable modem sleep after idle
+// Called every loop() iteration in continuous mode.
+// ============================================================================
+static void _manageContinuousPower() {
+    // Reset activity clock on explicit external events
+    // (caller can set g_contLastActivity = millis() to signal activity)
+    if (g_contLastActivity == 0) g_contLastActivity = millis(); // init once
+
+    uint32_t idleMs = millis() - g_contLastActivity;
+
+    if (!g_contPowerReduced && idleMs >= g_contIdleMs) {
+        // Throttle CPU and enable WiFi modem sleep
+        setCpuFrequencyMhz(g_contIdleCpuMhz);
+        if (g_contModemSleep) WiFi.setSleep(true);
+        Serial.printf("[Sleep] Continuous idle %us → CPU=%uMHz modem_sleep=%d\n",
+                      idleMs / 1000, g_contIdleCpuMhz, (int)g_contModemSleep);
+        g_contPowerReduced = true;
+    }
+    // Restore is handled externally: set g_contPowerReduced=false + g_contLastActivity=millis()
+    // then call setCpuFrequencyMhz(160) + WiFi.setSleep(false) if needed.
+}
 
 // ---------------------------------------------------------------------------
 // Detect operating mode from /platform_config.json
@@ -209,7 +303,14 @@ void setup() {
                        (wakeUpButtonStr != "WIFI");
 
     // ── WiFi + Web Server ─────────────────────────────────────────────────────
-    uint8_t platformMode = _detectPlatformMode();
+    g_platformMode = _detectPlatformMode();
+
+    // Set sleep guard: continuous keeps FreeRTOS tasks alive → no legacy deep sleep
+    // Hybrid also blocks legacy 2-second sleep; its own timed sleep runs in loop()
+    g_sleepMode = (g_platformMode >= 1) ? 2 : 0;
+
+    // Load per-mode sleep tuning from platform_config.json
+    _loadSleepConfig();
 
     if (apModeTriggered) {
         Serial.println(onlineLoggerMode ? "=== Online Logger ===" : "=== Web Server ===");
@@ -226,7 +327,7 @@ void setup() {
         setupWebServer();   // ← в WebServer.cpp
 
         // Platform v5.0: start sensor pipeline in continuous/hybrid mode
-        if (platformMode == 1 || platformMode == 2) {
+        if (g_platformMode == 1 || g_platformMode == 2) {
             _initPlatform();
         } else {
             // Even in legacy mode, register API routes so /api/sensors works
@@ -246,9 +347,32 @@ void setup() {
 
         // Platform v5.0: start sensor pipeline on normal boot when configured
         // for continuous or hybrid mode (no web server routes needed here)
-        if (platformMode == 1 || platformMode == 2) {
+        if (g_platformMode == 1 || g_platformMode == 2) {
             _initPlatform();
         }
+    }
+
+    // ── Hybrid timer wakeup: quick headless sensor cycle → back to sleep ─────
+    // When the hybrid periodic timer fires, skip the full web/flow cycle:
+    // just let sensor tasks run for g_hybridActiveMs, flush data, then re-sleep.
+    if (g_platformMode == 2 && !apModeTriggered && wakeUpButtonStr == "TIMER") {
+        Serial.printf("[Hybrid] Timer wake: sensor window %ums...\n", g_hybridActiveMs);
+        delay(g_hybridActiveMs);      // FreeRTOS tasks run; main task just waits
+        flushLogBufferToFS();
+        configureWakeup();            // re-arm GPIO wakeup sources
+        esp_sleep_enable_timer_wakeup((uint64_t)g_hybridSleepMs * 1000ULL);
+        TaskManager::shutdown();
+        Serial.printf("[Hybrid] Timer cycle done — sleeping %us\n", g_hybridSleepMs / 1000);
+        Serial.flush();
+        esp_deep_sleep_start();
+        // unreachable — execution resumes from setup() after wakeup
+    }
+
+    // ── Continuous mode: init activity clock ─────────────────────────────────
+    if (g_platformMode == 1) {
+        g_contLastActivity = millis();
+        // Enable WiFi modem sleep from the start if configured
+        if (g_contModemSleep) WiFi.setSleep(true);
     }
 
     // ── Init logging cycle ────────────────────────────────────────────────────
@@ -306,8 +430,18 @@ void loop() {
         ESP.restart();
     }
 
-    // Pure Web Server mode
+    // ── Continuous platform mode ──────────────────────────────────────────────
+    // FreeRTOS tasks handle all sensing; loop() only manages idle power.
+    if (g_platformMode == 1) {
+        _manageContinuousPower();
+        delay(10);
+        return;
+    }
+
+    // Pure Web Server mode (legacy or hybrid with web server active)
     if (apModeTriggered && !onlineLoggerMode) {
+        // Hybrid: still manage power if idle
+        if (g_platformMode == 2) _manageContinuousPower();
         delay(10);
         return;
     }
@@ -457,8 +591,34 @@ void loop() {
                 DBGLN("Going to sleep...");
                 Serial.flush();
                 _doSleep();
+            } else if (!shouldRestart && !onlineLoggerMode && g_platformMode == 2) {
+                // Hybrid: after a flow cycle, reset idle timer so hybrid sleep
+                // won't fire immediately — give sensors time to log the event.
+                g_hybridIdleStart = millis();
             }
             break;
+        }
+    }
+
+    // ── Hybrid mode: deep sleep after extended idle ───────────────────────────
+    // g_sleepMode == 2 blocks the legacy 2-second sleep above.
+    // Instead, wait g_hybridIdleMs in STATE_IDLE before sleeping with both
+    // a GPIO wakeup (buttons/flow) and a periodic timer for sensor reads.
+    if (g_platformMode == 2 && !apModeTriggered && !onlineLoggerMode && !shouldRestart) {
+        if (loggingState == STATE_IDLE) {
+            if (g_hybridIdleStart == 0) g_hybridIdleStart = millis();
+
+            if (millis() - g_hybridIdleStart >= g_hybridIdleMs) {
+                flushLogBufferToFS();
+                configureWakeup(); // GPIO: buttons + flow pin
+                esp_sleep_enable_timer_wakeup((uint64_t)g_hybridSleepMs * 1000ULL);
+                Serial.printf("[Hybrid] Idle %us → deep sleep %us (GPIO+timer)\n",
+                              g_hybridIdleMs / 1000, g_hybridSleepMs / 1000);
+                _doSleep();
+            }
+        } else {
+            // Active cycle in progress — reset idle timer
+            g_hybridIdleStart = 0;
         }
     }
 }

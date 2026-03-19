@@ -331,5 +331,28 @@
     "rotate_daily": true,
     "max_file_size_kb": 512,
     "cloud_only": false
+  },
+
+  "sleep": {
+
+    "legacy": {
+      "_comment": "Deep sleep between flow cycles. Wakeup sources: GPIO (buttons + flow).",
+      "wakeup_sources": ["gpio"]
+    },
+
+    "continuous": {
+      "_comment": "Always-on sensor pipeline. No deep sleep — reduces CPU + WiFi power after idle.",
+      "idle_timeout_ms": 300000,
+      "idle_cpu_mhz": 80,
+      "modem_sleep": true
+    },
+
+    "hybrid": {
+      "_comment": "Runs flow logging + sensor pipeline. Deep sleeps between cycles with timer+GPIO wakeup.",
+      "idle_before_sleep_ms": 120000,
+      "sleep_duration_ms": 60000,
+      "active_window_ms": 30000
+    }
+
   }
 }

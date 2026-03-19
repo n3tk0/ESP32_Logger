@@ -7,7 +7,6 @@
 #include <SD.h>
 #include <ThreeWire.h>
 #include <RtcDS1302.h>
-#include <FlowSensor.h>
 #include <ESPAsyncWebServer.h>
 
 // ============================================================================
@@ -16,7 +15,6 @@
 extern DeviceConfig config;
 extern ThreeWire*   rtcWire;
 extern RtcDS1302<ThreeWire>* Rtc;
-extern FlowSensor*  Sensor;
 extern AsyncWebServer server;
 
 // ============================================================================
@@ -98,6 +96,14 @@ extern bool          shouldRestart;
 extern unsigned long restartTimer;
 extern String        statusMessage;
 extern String        currentDir;
+
+// ============================================================================
+// PLATFORM SLEEP CONTROL
+// ============================================================================
+// 0 = deep sleep allowed (legacy default)
+// 1 = light/modem sleep only
+// 2 = no sleep (continuous, web server active)
+extern uint8_t g_sleepMode;
 
 // ============================================================================
 // MISC

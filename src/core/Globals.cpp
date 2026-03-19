@@ -6,7 +6,6 @@
 DeviceConfig config;
 ThreeWire*   rtcWire = nullptr;
 RtcDS1302<ThreeWire>* Rtc = nullptr;
-FlowSensor*  Sensor = nullptr;
 AsyncWebServer server(80);
 
 // ============================================================================
@@ -95,3 +94,8 @@ String        currentDir    = "/";
 // MISC
 // ============================================================================
 unsigned long lastLoggingCycleStartTime = 0;
+
+// ============================================================================
+// PLATFORM SLEEP CONTROL
+// ============================================================================
+uint8_t g_sleepMode = 0;
