@@ -56,10 +56,10 @@ static void handleApiData(AsyncWebServerRequest* req) {
         return;
     }
 
-    // Strategy: always query BOTH ring buffer (up to RING_SHARE) AND filesystem
-    // (up to FS_SHARE), then merge by timestamp and deduplicate (#4).
+    // Reserve up to 200 slots for the ring buffer; give all remaining slots to
+    // the filesystem query.  When the ring is empty (historical request) the
+    // full MAX_RAW budget is available for FS rows instead of a fixed 300-cap.
     constexpr size_t RING_SHARE = 200;
-    constexpr size_t FS_SHARE   = MAX_RAW - RING_SHARE;  // = 300
 
     size_t ringCount = 0;
     size_t fsCount   = 0;
@@ -121,9 +121,10 @@ static void handleApiData(AsyncWebServerRequest* req) {
         if (activeFS) {
             static JsonLogger logger;
             if (configMutex && xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+                size_t fsShare = MAX_RAW - ringCount;  // full budget when ring is empty
                 fsCount = logger.query(*activeFS, fromTs, toTs,
                                        sensorFilter, metricFilter,
-                                       raw + ringCount, FS_SHARE);
+                                       raw + ringCount, fsShare);
                 xSemaphoreGive(configMutex);
             }
         }

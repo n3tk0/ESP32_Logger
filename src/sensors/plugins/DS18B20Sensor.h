@@ -28,8 +28,9 @@ public:
     bool read(SensorReading& out) override;
     int  readAll(SensorReading* out, int maxOut) override;
 
-    const char* getType() const override { return "ds18b20"; }
-    const char* getName() const override { return "DS18B20 Temperature"; }
+    const char* getType()    const override { return "ds18b20"; }
+    const char* getName()    const override { return "DS18B20 Temperature"; }
+    bool        isBlocking() const override { return true; }  // delay() up to 760ms during conversion
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
     int getMetrics(const char** out, int maxOut) const override;
 

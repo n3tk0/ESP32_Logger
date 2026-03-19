@@ -163,8 +163,16 @@ static uint8_t _detectPlatformMode() {
     if (!fsAvailable || !activeFS) return 0;
     File f = activeFS->open("/platform_config.json", FILE_READ);
     if (!f) return 0;
-    StaticJsonDocument<128> doc;
-    if (deserializeJson(doc, f) != DeserializationError::Ok) { f.close(); return 0; }
+    // Use a filter so only the top-level "mode" key is parsed; the rest of
+    // platform_config.json (sensors array, etc.) can be many KB and would
+    // overflow a small document, returning NoMemory and silently falling back
+    // to legacy mode even when continuous/hybrid is configured.
+    StaticJsonDocument<8>   filter;
+    filter["mode"] = true;
+    StaticJsonDocument<64>  doc;
+    if (deserializeJson(doc, f, DeserializationOption::Filter(filter)) != DeserializationError::Ok) {
+        f.close(); return 0;
+    }
     f.close();
     const char* mode = doc["mode"] | "legacy";
     if (strcmp(mode, "continuous") == 0) return 1;
@@ -433,7 +441,11 @@ void setup() {
     lastFFDebounceTime = millis();
     lastPFDebounceTime = millis();
 
-    if (wakeUpButtonStr == "FF_BTN") {
+    // In platform mode (>=1), WaterFlowSensor owns the flow ISR; the legacy
+    // flow state machine has no pulse source and must stay in STATE_IDLE.
+    if (g_platformMode >= 1) {
+        loggingState = STATE_IDLE;
+    } else if (wakeUpButtonStr == "FF_BTN") {
         cycleButtonSet = true; cycleStartedBy = "FF_BTN";
         loggingState   = STATE_WAIT_FLOW;
     } else if (wakeUpButtonStr == "PF_BTN") {
@@ -517,7 +529,7 @@ void loop() {
     switch (loggingState) {
 
         case STATE_IDLE:
-            if (highCountFF > 0) {
+            if (g_platformMode == 0 && highCountFF > 0) {
                 cycleStartedBy = "FF_BTN"; cycleButtonSet = true;
                 loggingState   = STATE_WAIT_FLOW;
                 stateStartTime = millis(); cycleStartTime = millis();
@@ -526,7 +538,7 @@ void loop() {
                     currentWakeTimestamp = now.IsValid() ? now.Unix32Time() : 0;
                 }
                 highCountFF = 0; highCountPF = 0;
-            } else if (highCountPF > 0) {
+            } else if (g_platformMode == 0 && highCountPF > 0) {
                 cycleStartedBy = "PF_BTN"; cycleButtonSet = true;
                 loggingState   = STATE_WAIT_FLOW;
                 stateStartTime = millis(); cycleStartTime = millis();

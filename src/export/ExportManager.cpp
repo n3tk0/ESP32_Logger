@@ -45,7 +45,9 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
                           name, _exporters[i]->isEnabled() ? "true" : "false", ivMs);
         }
     }
-    return ok > 0;
+    // Return true as long as the config parsed successfully — "no exporters
+    // enabled" is a valid configuration (e.g. default platform_config.json).
+    return true;
 }
 
 // ---------------------------------------------------------------------------
