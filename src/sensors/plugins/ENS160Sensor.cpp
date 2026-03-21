@@ -77,6 +77,5 @@ int ENS160Sensor::readAll(SensorReading* out, int maxOut) {
     out[0] = SensorReading::make(0, _id, getType(), "tvoc",  tvoc,       "ppb");
     out[1] = SensorReading::make(0, _id, getType(), "eco2",  eco2,       "ppm");
     out[2] = SensorReading::make(0, _id, getType(), "aqi",   (float)aqi, "");
-    _lastReadTs = 0;
     return 3;
 }

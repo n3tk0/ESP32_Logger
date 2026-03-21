@@ -22,7 +22,8 @@ bool RainSensor::init(JsonObjectConst cfg) {
     _calTotal.load(cal, "rain_total");
 
     pinMode(_pin, INPUT_PULLUP);
-    gpio_install_isr_service(0);
+    static bool _isrServiceInstalled = false;
+    if (!_isrServiceInstalled) { gpio_install_isr_service(0); _isrServiceInstalled = true; }
     gpio_set_intr_type((gpio_num_t)_pin, GPIO_INTR_NEGEDGE);
     gpio_isr_handler_add((gpio_num_t)_pin, _isr, this);
 
@@ -51,13 +52,12 @@ int RainSensor::readAll(SensorReading* out, int maxOut) {
     // Instantaneous rate: if last tip was recent, extrapolate to mm/h
     float rate = 0.0f;
     if (intervalUs > 0 && intervalUs < 3600000000UL) {
-        float rawRate = _mmPerTip / ((float)intervalUs / 3600000000.0f);
+        float rawRate = _mmPerTip * 3600000000.0f / (float)intervalUs;
         rate = _calRate.apply(rawRate);
     }
 
     out[0] = SensorReading::make(0, _id, getType(), "rain_rate",  rate,  "mm/h");
     out[1] = SensorReading::make(0, _id, getType(), "rain_total", total, "mm");
-    _lastReadTs = 0;
     return 2;
 }
 

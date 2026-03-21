@@ -100,7 +100,6 @@ int SDS011Sensor::readAll(SensorReading* out, int maxOut) {
                 out[1] = SensorReading::make(0, _id, getType(),
                                               "pm10", _calPm10.apply(_pm10), "ug/m3");
                 _newData    = false;
-                _lastReadTs = 0;
                 return 2;
             }
             pos = 0;

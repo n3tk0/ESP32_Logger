@@ -80,7 +80,6 @@ int BME280Sensor::readAll(SensorReading* out, int maxOut) {
         if (maxOut < 2) return 0;
         out[0] = _makeReading(0, "temperature", t, "C");
         out[1] = _makeReading(0, "pressure",    p, "hPa");
-        _lastReadTs = 0;
         return 2;
     }
 
@@ -91,7 +90,6 @@ int BME280Sensor::readAll(SensorReading* out, int maxOut) {
     out[0] = _makeReading(0, "temperature", t, "C");
     out[1] = _makeReading(0, "humidity",    h, "%");
     out[2] = _makeReading(0, "pressure",    p, "hPa");
-    _lastReadTs = 0;
     return 3;
 }
 

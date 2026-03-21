@@ -43,7 +43,7 @@ String       wakeUpButtonStr      = "";
 String       cycleStartedBy       = "BOOT";
 bool         cycleButtonSet       = false;
 unsigned long cycleStartTime      = 0;
-uint32_t     cycleTotalPulses     = 0;
+volatile uint32_t cycleTotalPulses = 0;
 
 uint32_t      earlyGPIO_bitmask = 0;
 bool          earlyGPIO_captured = false;

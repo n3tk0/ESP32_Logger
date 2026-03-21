@@ -96,6 +96,5 @@ int SGP30Sensor::readAll(SensorReading* out, int maxOut) {
     SensorQuality q = warmedUp ? QUALITY_GOOD : QUALITY_ESTIMATED;
     out[0] = SensorReading::make(0, _id, getType(), "tvoc", _calTvoc.apply((float)tvoc), "ppb", q);
     out[1] = SensorReading::make(0, _id, getType(), "eco2", _calEco2.apply((float)eco2), "ppm", q);
-    _lastReadTs = 0;
     return 2;
 }

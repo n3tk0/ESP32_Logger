@@ -23,7 +23,8 @@ bool YFS201Sensor::init(JsonObjectConst cfg) {
 
     pinMode(_pin, INPUT_PULLUP);
     // Attach ISR with this instance as argument (ESP-IDF style)
-    gpio_install_isr_service(0);
+    static bool _isrServiceInstalled = false;
+    if (!_isrServiceInstalled) { gpio_install_isr_service(0); _isrServiceInstalled = true; }
     gpio_set_intr_type((gpio_num_t)_pin, GPIO_INTR_NEGEDGE);
     gpio_isr_handler_add((gpio_num_t)_pin, _isr, this);
 
@@ -46,7 +47,7 @@ bool YFS201Sensor::read(SensorReading& out) {
 
 // ---------------------------------------------------------------------------
 int YFS201Sensor::readAll(SensorReading* out, int maxOut) {
-    if (!_enabled || maxOut < 2) return 0;
+    if (!_enabled || maxOut < 2 || _pulsesPerLiter <= 0) return 0;
 
     uint32_t now    = millis();
     uint32_t dtMs   = now - _lastReadMs;
@@ -70,7 +71,6 @@ int YFS201Sensor::readAll(SensorReading* out, int maxOut) {
 
     out[0] = SensorReading::make(0, _id, getType(), "flow_rate", flowRate, "L/min");
     out[1] = SensorReading::make(0, _id, getType(), "volume",    volume,   "L");
-    _lastReadTs = 0;
     return 2;
 }
 

@@ -84,6 +84,5 @@ int DS18B20Sensor::readAll(SensorReading* out, int maxOut) {
         out[reported++] = SensorReading::make(0, _id, getType(),
                                               _metricName(i), t, "C");
     }
-    _lastReadTs = 0;
     return reported;
 }

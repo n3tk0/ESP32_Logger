@@ -55,6 +55,5 @@ int SoilMoistureSensor::readAll(SensorReading* out, int maxOut) {
 
     out[0] = SensorReading::make(0, _id, getType(), "moisture_pct", pct,       "%");
     out[1] = SensorReading::make(0, _id, getType(), "moisture_raw", (float)raw, "");
-    _lastReadTs = 0;
     return 2;
 }

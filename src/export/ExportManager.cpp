@@ -169,7 +169,6 @@ bool ExportManager::_drainSpool(IExporter* exp) {
 void ExportManager::sendAll(const SensorReading* readings, size_t count) {
     static constexpr uint32_t MAX_SENDALL_MS = 30000; // 30s circuit breaker
     uint32_t deadline = millis() + MAX_SENDALL_MS;
-    uint32_t now = millis();
 
     for (int i = 0; i < _count; i++) {
         if (!_exporters[i]->isEnabled()) continue;
@@ -180,13 +179,14 @@ void ExportManager::sendAll(const SensorReading* readings, size_t count) {
         }
         // Per-exporter interval_ms throttle (#11)
         uint32_t interval = _exporters[i]->intervalMs();
-        if (interval > 0 && (now - _lastSentMs[i]) < interval) continue;
+        uint32_t nowMs = millis();
+        if (interval > 0 && (nowMs - _lastSentMs[i]) < interval) continue;
 
         // Drain any spooled backlog before sending new live data (#4.7)
         _drainSpool(_exporters[i]);
 
         if (_sendWithRetry(_exporters[i], readings, count)) {
-            _lastSentMs[i] = now;
+            _lastSentMs[i] = millis();
         }
     }
 }

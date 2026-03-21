@@ -24,6 +24,8 @@ void exportTaskFunc(void* /*param*/) {
                                   pdMS_TO_TICKS(100)) == pdTRUE;
         if (got && batchCount < BATCH_SIZE) {
             batch[batchCount++] = r;
+        } else if (got) {
+            g_queueDrops++;  // batch full — count drop (N9)
         }
 
         bool batchFull     = (batchCount >= BATCH_SIZE);

@@ -69,9 +69,12 @@ void JsonLogger::write(const SensorReading& r) {
     if (!_fs) return;
 
     // Format line
-    char line[128];
+    char line[160];
     int  n = r.toJsonLine(line, sizeof(line));
-    if (n <= 0 || n >= (int)sizeof(line)) return;
+    if (n <= 0 || n >= (int)sizeof(line)) {
+        Serial.println("[JsonLogger] WARN: line too long, dropped");
+        return;
+    }
     line[n] = '\0';
 
     // Buffer it
