@@ -530,7 +530,7 @@ void loop() {
         static bool pinConfigured = false;
         if (!pinConfigured) { pinMode(config.hardware.pinWifiTrigger, OUTPUT); pinConfigured = true; }
         if (pulseCount > 0 && lastFlowPulseTime > 0) {
-            if      (millis() - lastFlowPulseTime < 100)           digitalWrite(config.hardware.pinWifiTrigger, (millis() / config.flowMeter.blinkDuration) % 2);
+            if      (millis() - lastFlowPulseTime < 100 && config.flowMeter.blinkDuration > 0) digitalWrite(config.hardware.pinWifiTrigger, (millis() / config.flowMeter.blinkDuration) % 2);
             else if (millis() - lastFlowPulseTime < TEST_MODE_HOLD_MS) digitalWrite(config.hardware.pinWifiTrigger, HIGH);
             else    digitalWrite(config.hardware.pinWifiTrigger, LOW);
         } else {
@@ -627,12 +627,12 @@ void loop() {
                         File btnLog = activeFS->open(btnLogPath, FILE_APPEND);
                         if (btnLog) {
                             int exp = (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH) ? HIGH : LOW;
-                            bool ffSnap   = earlyGPIO_captured && ((exp==HIGH)==(bool)((earlyGPIO_bitmask>>config.hardware.pinWakeupFF)&1));
-                            bool pfSnap   = earlyGPIO_captured && ((exp==HIGH)==(bool)((earlyGPIO_bitmask>>config.hardware.pinWakeupPF)&1));
-                            bool wifiSnap = earlyGPIO_captured && ((exp==HIGH)==(bool)((earlyGPIO_bitmask>>config.hardware.pinWifiTrigger)&1));
+                            bool ffSnap   = earlyGPIO_captured && config.hardware.pinWakeupFF < 32   && ((exp==HIGH)==(bool)((earlyGPIO_bitmask>>config.hardware.pinWakeupFF)&1));
+                            bool pfSnap   = earlyGPIO_captured && config.hardware.pinWakeupPF < 32   && ((exp==HIGH)==(bool)((earlyGPIO_bitmask>>config.hardware.pinWakeupPF)&1));
+                            bool wifiSnap = earlyGPIO_captured && config.hardware.pinWifiTrigger < 32 && ((exp==HIGH)==(bool)((earlyGPIO_bitmask>>config.hardware.pinWifiTrigger)&1));
                             char line[160];
                             snprintf(line, sizeof(line),
-                                "#:%d|bitmask:0x%04X|early:FF=%d,PF=%d,WIFI=%d|held:%lums|CORR:%s->%s|L:%.2f",
+                                "#:%d|bitmask:0x%08lX|early:FF=%d,PF=%d,WIFI=%d|held:%lums|CORR:%s->%s|L:%.2f",
                                 bootCount, earlyGPIO_bitmask,
                                 ffSnap, pfSnap, wifiSnap,
                                 buttonHeldMs, orig, cycleStartedBy.c_str(), corrVol);

@@ -41,11 +41,11 @@ struct SensorReading {
     {
         SensorReading r;
         r.timestamp = ts;
-        strncpy(r.sensorId,   id,     sizeof(r.sensorId)   - 1);
-        strncpy(r.sensorType, type,   sizeof(r.sensorType) - 1);
-        strncpy(r.metric,     metric, sizeof(r.metric)     - 1);
+        strncpy(r.sensorId,   id,     sizeof(r.sensorId)   - 1); r.sensorId[sizeof(r.sensorId) - 1]     = '\0';
+        strncpy(r.sensorType, type,   sizeof(r.sensorType) - 1); r.sensorType[sizeof(r.sensorType) - 1] = '\0';
+        strncpy(r.metric,     metric, sizeof(r.metric)     - 1); r.metric[sizeof(r.metric) - 1]         = '\0';
         r.value   = value;
-        strncpy(r.unit,       unit,   sizeof(r.unit)       - 1);
+        strncpy(r.unit,       unit,   sizeof(r.unit)       - 1); r.unit[sizeof(r.unit) - 1]             = '\0';
         r.quality = q;
         return r;
     }

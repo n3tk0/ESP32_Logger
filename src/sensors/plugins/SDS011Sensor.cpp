@@ -15,7 +15,7 @@ bool SDS011Sensor::init(JsonObjectConst cfg) {
     _calPm25.load(cal, "pm25");
     _calPm10.load(cal, "pm10");
 
-    _serial = &Serial2;
+    _serial = &Serial1;
     if (txPin >= 0) {
         _serial->begin(baud, SERIAL_8N1, rxPin, txPin);
     } else {
@@ -100,7 +100,6 @@ int SDS011Sensor::readAll(SensorReading* out, int maxOut) {
                 out[1] = SensorReading::make(0, _id, getType(),
                                               "pm10", _calPm10.apply(_pm10), "ug/m3");
                 _newData    = false;
-                _lastReadTs = 0;
                 return 2;
             }
             pos = 0;

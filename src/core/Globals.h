@@ -52,7 +52,7 @@ extern String   wakeUpButtonStr;
 extern String   cycleStartedBy;
 extern bool     cycleButtonSet;
 extern unsigned long cycleStartTime;
-extern uint32_t cycleTotalPulses;
+extern volatile uint32_t cycleTotalPulses;
 
 // Early GPIO snapshot
 extern uint32_t      earlyGPIO_bitmask;

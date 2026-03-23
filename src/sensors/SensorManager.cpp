@@ -44,7 +44,7 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     }
 
     // Use a static doc to avoid heap fragmentation — 4KB is plenty for config
-    StaticJsonDocument<4096> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, f);
     f.close();
 

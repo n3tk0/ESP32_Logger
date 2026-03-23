@@ -208,10 +208,11 @@ struct NetworkConfig {
     uint8_t dns[4];
     char ntpServer[65];
     int8_t timezone;
+    int8_t dstOffsetHours;     // DST offset in hours (0 or 1 typically)
     uint8_t apIP[4];
     uint8_t apGateway[4];
     uint8_t apSubnet[4];
-    uint8_t reserved[18]; // Reserved for alignment (2 + 16 bytes from removed String deviceId)
+    uint8_t reserved[17]; // Reserved for alignment (one byte used for dstOffsetHours)
 };
 
 struct DeviceConfig {

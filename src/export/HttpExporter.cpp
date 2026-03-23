@@ -1,4 +1,5 @@
 #include "HttpExporter.h"
+#include <WiFi.h>
 
 bool HttpExporter::init(JsonObjectConst cfg) {
     _enabled = cfg["enabled"] | false;

@@ -55,6 +55,5 @@ int HCSR04Sensor::readAll(SensorReading* out, int maxOut) {
 
     cm = _calDistance.apply(cm);
     out[0] = SensorReading::make(0, _id, getType(), "distance", cm, "cm");
-    _lastReadTs = 0;
     return 1;
 }

@@ -82,9 +82,13 @@ static void handleApiData(AsyncWebServerRequest* req) {
         ringCount = out;
     }
 
-    // Capture agg/mode strings before any async ops
-    const char* aggParamStr  = req->hasParam("agg")  ? req->getParam("agg")->value().c_str()  : "5m";
-    const char* modeParamStr = req->hasParam("mode") ? req->getParam("mode")->value().c_str() : "lttb";
+    // Copy agg/mode strings — c_str() pointers may dangle during async response (N21)
+    char aggParamBuf[16]  = "5m";
+    char modeParamBuf[16] = "lttb";
+    if (req->hasParam("agg"))  { strncpy(aggParamBuf,  req->getParam("agg")->value().c_str(),  sizeof(aggParamBuf) - 1);  aggParamBuf[sizeof(aggParamBuf) - 1]   = '\0'; }
+    if (req->hasParam("mode")) { strncpy(modeParamBuf, req->getParam("mode")->value().c_str(), sizeof(modeParamBuf) - 1); modeParamBuf[sizeof(modeParamBuf) - 1] = '\0'; }
+    const char* aggParamStr  = aggParamBuf;
+    const char* modeParamStr = modeParamBuf;
 
     // 2) Filesystem query — choose strategy based on whether ring has data:
     //    a) Ring is empty (historical query): use streaming aggregation (P1/3.1)
@@ -206,7 +210,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
 // GET /api/sensors — list registered sensors + status
 // ---------------------------------------------------------------------------
 static void handleApiSensors(AsyncWebServerRequest* req) {
-    StaticJsonDocument<2048> doc;
+    JsonDocument doc;
     JsonArray arr = doc.createNestedArray("sensors");
     sensorManager.toJson(arr);
 
@@ -239,7 +243,7 @@ static void handleConfigPlatform(AsyncWebServerRequest* req) {
 // GET /api/diag — FreeRTOS diagnostics: heap, queues, task stack HWMs, drops
 // ---------------------------------------------------------------------------
 static void handleApiDiag(AsyncWebServerRequest* req) {
-    StaticJsonDocument<1024> doc;
+    JsonDocument doc;
 
     // Heap
     doc["free_heap"]     = (uint32_t)ESP.getFreeHeap();

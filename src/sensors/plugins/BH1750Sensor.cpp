@@ -66,6 +66,5 @@ int BH1750Sensor::readAll(SensorReading* out, int maxOut) {
     float lux;
     if (!_readLux(lux)) return 0;
     out[0] = SensorReading::make(0, _id, getType(), "lux", lux, "lx");
-    _lastReadTs = 0;
     return 1;
 }

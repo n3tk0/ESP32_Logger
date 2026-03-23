@@ -1,5 +1,6 @@
 #include "SensorCommunityExporter.h"
 #include "../core/Globals.h"
+#include <WiFi.h>
 
 bool SensorCommunityExporter::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]      | false;

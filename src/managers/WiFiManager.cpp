@@ -72,7 +72,7 @@ bool connectToWiFi() {
     unsigned long lastDot = 0;
     while (WiFi.status() != WL_CONNECTED &&
            millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
-        yield();
+        delay(100);
         esp_task_wdt_reset();
         if (millis() - lastDot >= 250) { Serial.print("."); lastDot = millis(); }
     }
@@ -114,7 +114,7 @@ void startAPMode() {
 bool syncTimeFromNTP() {
     if (!wifiConnectedAsClient) { DBGLN("NTP: No WiFi"); return false; }
 
-    configTime(config.network.timezone * 3600, 0, config.network.ntpServer);
+    configTime(config.network.timezone * 3600, config.network.dstOffsetHours * 3600, config.network.ntpServer);
 
     time_t now = 0;
     struct tm ti = {0};

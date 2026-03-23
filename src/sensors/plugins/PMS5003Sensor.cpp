@@ -12,7 +12,7 @@ bool PMS5003Sensor::init(JsonObjectConst cfg) {
     _calPm25.load(cal, "pm25");
     _calPm10.load(cal, "pm10");
 
-    _serial = &Serial2;
+    _serial = &Serial1;
     _serial->begin(baud, SERIAL_8N1, rx, tx);
     delay(100);
     while (_serial->available()) _serial->read();
@@ -59,6 +59,5 @@ int PMS5003Sensor::readAll(SensorReading* out, int maxOut) {
     out[0] = SensorReading::make(0, _id, getType(), "pm1",  _calPm1.apply(_pm1),  "ug/m3");
     out[1] = SensorReading::make(0, _id, getType(), "pm25", _calPm25.apply(_pm25), "ug/m3");
     out[2] = SensorReading::make(0, _id, getType(), "pm10", _calPm10.apply(_pm10), "ug/m3");
-    _lastReadTs = 0;
     return 3;
 }

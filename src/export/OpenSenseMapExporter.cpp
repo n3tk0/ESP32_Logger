@@ -1,4 +1,5 @@
 #include "OpenSenseMapExporter.h"
+#include <WiFi.h>
 
 bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
     _enabled = cfg["enabled"] | false;
@@ -68,7 +69,9 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
         HTTPClient http;
         http.begin(url);
         http.addHeader("Content-Type",  "application/json");
-        http.addHeader("Authorization", (String("Bearer ") + _token).c_str());
+        char authHeader[80];
+        snprintf(authHeader, sizeof(authHeader), "Bearer %s", _token);
+        http.addHeader("Authorization", authHeader);
 
         int code = http.POST(body);
         ok = (code >= 200 && code < 300);

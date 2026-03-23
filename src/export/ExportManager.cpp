@@ -18,7 +18,7 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         return false;
     }
 
-    StaticJsonDocument<4096> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, f);
     f.close();
     if (err) {
@@ -39,7 +39,7 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         if (!ecfg.isNull() && _exporters[i]->init(ecfg)) {
             // Apply interval_ms from config (cross-cutting, handled centrally)
             uint32_t ivMs = ecfg["interval_ms"] | 0;
-            _exporters[i]->_intervalMs = ivMs;
+            _exporters[i]->setIntervalMs(ivMs);
             ok++;
             Serial.printf("[ExportManager] '%s' enabled=%s interval=%ums\n",
                           name, _exporters[i]->isEnabled() ? "true" : "false", ivMs);
@@ -136,7 +136,7 @@ bool ExportManager::_drainSpool(IExporter* exp) {
         if (len <= 0) break;
         lineBuf[len] = '\0';
 
-        StaticJsonDocument<192> doc;
+        JsonDocument doc;
         if (deserializeJson(doc, lineBuf) != DeserializationError::Ok) continue;
 
         SensorReading& sr = batch[count];
@@ -169,7 +169,6 @@ bool ExportManager::_drainSpool(IExporter* exp) {
 void ExportManager::sendAll(const SensorReading* readings, size_t count) {
     static constexpr uint32_t MAX_SENDALL_MS = 30000; // 30s circuit breaker
     uint32_t deadline = millis() + MAX_SENDALL_MS;
-    uint32_t now = millis();
 
     for (int i = 0; i < _count; i++) {
         if (!_exporters[i]->isEnabled()) continue;
@@ -180,13 +179,14 @@ void ExportManager::sendAll(const SensorReading* readings, size_t count) {
         }
         // Per-exporter interval_ms throttle (#11)
         uint32_t interval = _exporters[i]->intervalMs();
-        if (interval > 0 && (now - _lastSentMs[i]) < interval) continue;
+        uint32_t nowMs = millis();
+        if (interval > 0 && (nowMs - _lastSentMs[i]) < interval) continue;
 
         // Drain any spooled backlog before sending new live data (#4.7)
         _drainSpool(_exporters[i]);
 
         if (_sendWithRetry(_exporters[i], readings, count)) {
-            _lastSentMs[i] = now;
+            _lastSentMs[i] = millis();
         }
     }
 }

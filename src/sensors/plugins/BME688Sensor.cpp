@@ -58,6 +58,5 @@ int BME688Sensor::readAll(SensorReading* out, int maxOut) {
     out[1] = SensorReading::make(0, _id, getType(), "humidity",       h, "%");
     out[2] = SensorReading::make(0, _id, getType(), "pressure",       p, "hPa");
     out[3] = SensorReading::make(0, _id, getType(), "gas_resistance", g, "Ohm");
-    _lastReadTs = 0;
     return 4;
 }

@@ -14,7 +14,7 @@ bool HybridStorage::begin(const char* cfgPath) {
     if (fsAvailable && activeFS && activeFS->exists(cfgPath)) {
         File f = activeFS->open(cfgPath, FILE_READ);
         if (f) {
-            StaticJsonDocument<256> doc;
+            JsonDocument doc;
             if (deserializeJson(doc, f) == DeserializationError::Ok) {
                 cloudOnly = doc["storage"]["cloud_only"] | false;
             }
@@ -64,13 +64,21 @@ void HybridStorage::mirrorWrite(const char* path, const uint8_t* data, size_t le
     fs::FS* pri = primary();
     if (pri) {
         File f = pri->open(path, FILE_APPEND);
-        if (f) { f.write(data, len); f.close(); }
+        if (f) {
+            size_t written = f.write(data, len);
+            if (written != len) Serial.printf("[HybridStorage] WARN: primary wrote %u/%u\n", written, len);
+            f.close();
+        }
     }
     // Mirror to secondary (cache, best-effort — never blocks on failure)
     fs::FS* sec = secondary();
     if (sec) {
         File f = sec->open(path, FILE_APPEND);
-        if (f) { f.write(data, len); f.close(); }
+        if (f) {
+            size_t written = f.write(data, len);
+            if (written != len) Serial.printf("[HybridStorage] WARN: mirror wrote %u/%u\n", written, len);
+            f.close();
+        }
     }
 }
 

@@ -20,13 +20,15 @@ bool WindSensor::init(JsonObjectConst cfg) {
     _dirMaxVal      = cfg["dir_max_val"]      | 4095;
 
     if (_pulsesPerRev <= 0) _pulsesPerRev = 1.0f;
+    if (_metersPerRev <= 0) _metersPerRev = 0.5f;
     if (_dirMaxVal <= _dirMinVal) _dirMaxVal = _dirMinVal + 4095;
 
     JsonObjectConst cal = cfg["calibration"];
     _calSpeed.load(cal, "wind_speed");
 
     pinMode(_pin, INPUT_PULLUP);
-    gpio_install_isr_service(0);
+    static bool _isrServiceInstalled = false;
+    if (!_isrServiceInstalled) { gpio_install_isr_service(0); _isrServiceInstalled = true; }
     gpio_set_intr_type((gpio_num_t)_pin, GPIO_INTR_NEGEDGE);
     gpio_isr_handler_add((gpio_num_t)_pin, _isr, this);
 
@@ -81,6 +83,5 @@ int WindSensor::readAll(SensorReading* out, int maxOut) {
         n = 2;
     }
 
-    _lastReadTs = 0;
     return n;
 }

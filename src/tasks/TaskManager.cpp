@@ -64,7 +64,7 @@ bool TaskManager::init(fs::FS& fs) {
     {
         File cfgFile = fs.open("/platform_config.json", FILE_READ);
         if (cfgFile) {
-            StaticJsonDocument<256> doc;
+            JsonDocument doc;
             if (deserializeJson(doc, cfgFile) == DeserializationError::Ok) {
                 JsonObjectConst st = doc["storage"];
                 if (!st.isNull()) {
@@ -86,7 +86,7 @@ bool TaskManager::init(fs::FS& fs) {
     {
         File cfgFile2 = fs.open("/platform_config.json", FILE_READ);
         if (cfgFile2) {
-            StaticJsonDocument<128> doc2;
+            JsonDocument doc2;
             if (deserializeJson(doc2, cfgFile2) == DeserializationError::Ok) {
                 const char* stMode = doc2["storage"]["mode"] | "primary";
                 if (strcmp(stMode, "mirror") == 0 && sdAvailable && littleFsAvailable) {

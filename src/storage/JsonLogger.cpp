@@ -1,5 +1,6 @@
 #include "JsonLogger.h"
 #include "../pipeline/AggregationEngine.h"
+#include <ArduinoJson.h>
 #include <string.h>
 #include <time.h>
 
@@ -69,9 +70,12 @@ void JsonLogger::write(const SensorReading& r) {
     if (!_fs) return;
 
     // Format line
-    char line[128];
+    char line[160];
     int  n = r.toJsonLine(line, sizeof(line));
-    if (n <= 0 || n >= (int)sizeof(line)) return;
+    if (n <= 0 || n >= (int)sizeof(line)) {
+        Serial.println("[JsonLogger] WARN: line too long, dropped");
+        return;
+    }
     line[n] = '\0';
 
     // Buffer it
@@ -182,7 +186,7 @@ size_t JsonLogger::query(fs::FS& fs,
 
             // Fast parse: extract ts, id, metric, value from JSON line
             // Use ArduinoJson for correctness
-            StaticJsonDocument<192> doc;
+            JsonDocument doc;
             if (deserializeJson(doc, lineBuf) != DeserializationError::Ok) continue;
 
             uint32_t ts = doc["ts"] | 0;
@@ -269,7 +273,7 @@ size_t JsonLogger::streamAggregateQuery(fs::FS& fs,
                 if (len <= 0) break;
                 lineBuf[len] = '\0';
 
-                StaticJsonDocument<192> doc;
+                JsonDocument doc;
                 if (deserializeJson(doc, lineBuf) != DeserializationError::Ok) continue;
 
                 uint32_t ts = doc["ts"] | 0;

@@ -102,6 +102,5 @@ int SCD4xSensor::readAll(SensorReading* out, int maxOut) {
     out[0] = SensorReading::make(0, _id, getType(), "co2",         co2,  "ppm");
     out[1] = SensorReading::make(0, _id, getType(), "temperature", temp, "C");
     out[2] = SensorReading::make(0, _id, getType(), "humidity",    rh,   "%");
-    _lastReadTs = 0;
     return 3;
 }

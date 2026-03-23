@@ -107,6 +107,5 @@ int VEML7700Sensor::readAll(SensorReading* out, int maxOut) {
 
     out[0] = SensorReading::make(0, _id, getType(), "lux",   lux,                         "lux");
     out[1] = SensorReading::make(0, _id, getType(), "white", _calWhite.apply((float)white), "counts");
-    _lastReadTs = 0;
     return 2;
 }

@@ -85,6 +85,5 @@ int VEML6075Sensor::readAll(SensorReading* out, int maxOut) {
     out[0] = SensorReading::make(0, _id, getType(), "uva",      _calUva.apply(uva),         "counts");
     out[1] = SensorReading::make(0, _id, getType(), "uvb",      _calUvb.apply(uvb),         "counts");
     out[2] = SensorReading::make(0, _id, getType(), "uv_index", _calUvIndex.apply(uvIndex), "");
-    _lastReadTs = 0;
     return 3;
 }

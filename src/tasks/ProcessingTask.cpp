@@ -48,7 +48,9 @@ void processingTaskFunc(void* /*param*/) {
         }
 
         // Forward to storage (always, even errors — raw data is immutable)
-        xQueueSend(storageQueue, &r, pdMS_TO_TICKS(50));
+        if (xQueueSend(storageQueue, &r, pdMS_TO_TICKS(50)) != pdTRUE) {
+            g_queueDrops++;  // storageQueue full — count drop (N8)
+        }
 
         // Forward to export (only good data)
         if (r.quality != QUALITY_ERROR) {

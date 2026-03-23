@@ -3,6 +3,9 @@
 #include <LittleFS.h>
 #include "esp_mac.h"
 #include <math.h>
+
+// Safe strcpy — always null-terminates (N25)
+#define SAFE_STRCPY(dst, src) do { strncpy(dst, src, sizeof(dst) - 1); dst[sizeof(dst) - 1] = '\0'; } while(0)
 // ============================================================================
 // INTERNAL: apply safe defaults to any zero/empty fields
 // Called after every load path so partially-migrated or corrupt-but-recoverable
@@ -36,13 +39,13 @@ static void applyDefaults() {
     }
     
     if (config.datalog.manualPressThresholdMs == 0) config.datalog.manualPressThresholdMs = 500;
-    if (!strlen(config.datalog.prefix))       strcpy(config.datalog.prefix,      DEFAULT_DATALOG_PREFIX);
-    if (!strlen(config.datalog.currentFile))  strcpy(config.datalog.currentFile, "/datalog.txt");
+    if (!strlen(config.datalog.prefix))       SAFE_STRCPY(config.datalog.prefix,      DEFAULT_DATALOG_PREFIX);
+    if (!strlen(config.datalog.currentFile))  SAFE_STRCPY(config.datalog.currentFile, "/datalog.txt");
 
     // ── Network ───────────────────────────────────────────────────────────────
-    if (!strlen(config.network.apSSID))     strcpy(config.network.apSSID,    DEFAULT_AP_SSID);
-    if (!strlen(config.network.apPassword)) strcpy(config.network.apPassword, DEFAULT_AP_PASSWORD);
-    if (!strlen(config.network.ntpServer)) strcpy(config.network.ntpServer, DEFAULT_NTP_SERVER);
+    if (!strlen(config.network.apSSID))     SAFE_STRCPY(config.network.apSSID,    DEFAULT_AP_SSID);
+    if (!strlen(config.network.apPassword)) SAFE_STRCPY(config.network.apPassword, DEFAULT_AP_PASSWORD);
+    if (!strlen(config.network.ntpServer)) SAFE_STRCPY(config.network.ntpServer, DEFAULT_NTP_SERVER);
 
     if (!config.network.apIP[0]) {
         config.network.apIP[0]=192; config.network.apIP[1]=168;
@@ -74,24 +77,24 @@ static void applyDefaults() {
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────
-    if (!strlen(config.deviceName)) strcpy(config.deviceName, "Water Logger");
+    if (!strlen(config.deviceName)) SAFE_STRCPY(config.deviceName, "Water Logger");
 
     // ── Theme ─────────────────────────────────────────────────────────────────
-    if (!strlen(config.theme.primaryColor))      strcpy(config.theme.primaryColor,      "#275673");
-    if (!strlen(config.theme.secondaryColor))    strcpy(config.theme.secondaryColor,    "#4a5568");
-    if (!strlen(config.theme.accentColor))       strcpy(config.theme.accentColor,       "#3182ce");
-    if (!strlen(config.theme.lightBgColor))      strcpy(config.theme.lightBgColor,      "#f0f2f5");
-    if (!strlen(config.theme.lightTextColor))    strcpy(config.theme.lightTextColor,    "#2d3748");
-    if (!strlen(config.theme.darkBgColor))       strcpy(config.theme.darkBgColor,       "#0f172a");
-    if (!strlen(config.theme.darkTextColor))     strcpy(config.theme.darkTextColor,     "#e2e8f0");
-    if (!strlen(config.theme.ffColor))           strcpy(config.theme.ffColor,           "#275673");
-    if (!strlen(config.theme.pfColor))           strcpy(config.theme.pfColor,           "#7eb0d5");
-    if (!strlen(config.theme.otherColor))        strcpy(config.theme.otherColor,        "#a0aec0");
-    if (!strlen(config.theme.storageBarColor))   strcpy(config.theme.storageBarColor,   "#27ae60");
-    if (!strlen(config.theme.storageBar70Color)) strcpy(config.theme.storageBar70Color, "#f39c12");
-    if (!strlen(config.theme.storageBar90Color)) strcpy(config.theme.storageBar90Color, "#e74c3c");
-    if (!strlen(config.theme.storageBarBorder))  strcpy(config.theme.storageBarBorder,  "#cccccc");
-    if (!strlen(config.theme.chartLocalPath))    strcpy(config.theme.chartLocalPath,    "/chart.min.js");
+    if (!strlen(config.theme.primaryColor))      SAFE_STRCPY(config.theme.primaryColor,      "#275673");
+    if (!strlen(config.theme.secondaryColor))    SAFE_STRCPY(config.theme.secondaryColor,    "#4a5568");
+    if (!strlen(config.theme.accentColor))       SAFE_STRCPY(config.theme.accentColor,       "#3182ce");
+    if (!strlen(config.theme.lightBgColor))      SAFE_STRCPY(config.theme.lightBgColor,      "#f0f2f5");
+    if (!strlen(config.theme.lightTextColor))    SAFE_STRCPY(config.theme.lightTextColor,    "#2d3748");
+    if (!strlen(config.theme.darkBgColor))       SAFE_STRCPY(config.theme.darkBgColor,       "#0f172a");
+    if (!strlen(config.theme.darkTextColor))     SAFE_STRCPY(config.theme.darkTextColor,     "#e2e8f0");
+    if (!strlen(config.theme.ffColor))           SAFE_STRCPY(config.theme.ffColor,           "#275673");
+    if (!strlen(config.theme.pfColor))           SAFE_STRCPY(config.theme.pfColor,           "#7eb0d5");
+    if (!strlen(config.theme.otherColor))        SAFE_STRCPY(config.theme.otherColor,        "#a0aec0");
+    if (!strlen(config.theme.storageBarColor))   SAFE_STRCPY(config.theme.storageBarColor,   "#27ae60");
+    if (!strlen(config.theme.storageBar70Color)) SAFE_STRCPY(config.theme.storageBar70Color, "#f39c12");
+    if (!strlen(config.theme.storageBar90Color)) SAFE_STRCPY(config.theme.storageBar90Color, "#e74c3c");
+    if (!strlen(config.theme.storageBarBorder))  SAFE_STRCPY(config.theme.storageBarBorder,  "#cccccc");
+    if (!strlen(config.theme.chartLocalPath))    SAFE_STRCPY(config.theme.chartLocalPath,    "/chart.min.js");
 }
 
 // ============================================================================
@@ -192,29 +195,29 @@ void loadDefaultConfig() {
 
     // Theme
     config.theme.mode = THEME_AUTO;
-    strcpy(config.theme.primaryColor,      "#275673");
-    strcpy(config.theme.secondaryColor,    "#4a5568");
-    strcpy(config.theme.accentColor,       "#3182ce");
-    strcpy(config.theme.lightBgColor,           "#f0f2f5");
-    strcpy(config.theme.lightTextColor,         "#2d3748");
-    strcpy(config.theme.darkBgColor,            "#0f172a");
-    strcpy(config.theme.darkTextColor,          "#e2e8f0");
-    strcpy(config.theme.ffColor,           "#275673");
-    strcpy(config.theme.pfColor,           "#7eb0d5");
-    strcpy(config.theme.otherColor,        "#a0aec0");
-    strcpy(config.theme.storageBarColor,   "#27ae60");
-    strcpy(config.theme.storageBar70Color, "#f39c12");
-    strcpy(config.theme.storageBar90Color, "#e74c3c");
-    strcpy(config.theme.storageBarBorder,  "#cccccc");
+    SAFE_STRCPY(config.theme.primaryColor,      "#275673");
+    SAFE_STRCPY(config.theme.secondaryColor,    "#4a5568");
+    SAFE_STRCPY(config.theme.accentColor,       "#3182ce");
+    SAFE_STRCPY(config.theme.lightBgColor,           "#f0f2f5");
+    SAFE_STRCPY(config.theme.lightTextColor,         "#2d3748");
+    SAFE_STRCPY(config.theme.darkBgColor,            "#0f172a");
+    SAFE_STRCPY(config.theme.darkTextColor,          "#e2e8f0");
+    SAFE_STRCPY(config.theme.ffColor,           "#275673");
+    SAFE_STRCPY(config.theme.pfColor,           "#7eb0d5");
+    SAFE_STRCPY(config.theme.otherColor,        "#a0aec0");
+    SAFE_STRCPY(config.theme.storageBarColor,   "#27ae60");
+    SAFE_STRCPY(config.theme.storageBar70Color, "#f39c12");
+    SAFE_STRCPY(config.theme.storageBar90Color, "#e74c3c");
+    SAFE_STRCPY(config.theme.storageBarBorder,  "#cccccc");
     config.theme.chartSource      = CHART_CDN;
-    strcpy(config.theme.chartLocalPath, "/chart.min.js");
+    SAFE_STRCPY(config.theme.chartLocalPath, "/chart.min.js");
     config.theme.showIcons        = true;
     config.theme.chartLabelFormat = LABEL_DATETIME;
 
     // Datalog
-    strcpy(config.datalog.prefix,      DEFAULT_DATALOG_PREFIX);
-    strcpy(config.datalog.currentFile, "/datalog.txt");
-    strcpy(config.datalog.folder,      "");
+    SAFE_STRCPY(config.datalog.prefix,      DEFAULT_DATALOG_PREFIX);
+    SAFE_STRCPY(config.datalog.currentFile, "/datalog.txt");
+    SAFE_STRCPY(config.datalog.folder,      "");
     config.datalog.rotation             = ROTATION_NONE;
     config.datalog.maxSizeKB            = 1024;
     config.datalog.maxEntries           = 10000;
@@ -261,9 +264,9 @@ void loadDefaultConfig() {
 
     // Network
     config.network.wifiMode      = WIFIMODE_AP;
-    strcpy(config.network.apSSID,     DEFAULT_AP_SSID);
-    strcpy(config.network.apPassword, DEFAULT_AP_PASSWORD);
-    strcpy(config.network.ntpServer,  DEFAULT_NTP_SERVER);
+    SAFE_STRCPY(config.network.apSSID,     DEFAULT_AP_SSID);
+    SAFE_STRCPY(config.network.apPassword, DEFAULT_AP_PASSWORD);
+    SAFE_STRCPY(config.network.ntpServer,  DEFAULT_NTP_SERVER);
     config.network.timezone     = 2;
     config.network.useStaticIP  = false;
     config.network.staticIP[0]  = 192; config.network.staticIP[1]  = 168;
@@ -287,8 +290,13 @@ void loadDefaultConfig() {
 // ============================================================================
 void migrateConfig(uint8_t fromVersion) {
     DBGF("Migrating config v%d -> v%d\n", fromVersion, CONFIG_VERSION);
+    if (fromVersion > CONFIG_VERSION) {
+        Serial.printf("[Config] WARN: config v%d > firmware v%d — resetting defaults\n", fromVersion, CONFIG_VERSION);
+        resetConfig();
+        return;
+    }
     if (fromVersion < 6) {
-        strcpy(config.network.ntpServer, DEFAULT_NTP_SERVER);
+        SAFE_STRCPY(config.network.ntpServer, DEFAULT_NTP_SERVER);
         config.network.timezone = 2;
     }
     if (fromVersion < 10) {
@@ -303,7 +311,7 @@ void migrateConfig(uint8_t fromVersion) {
     }
     if (fromVersion < 12) {
         config.hardware.defaultStorageView = 0;
-        if (!strlen(config.network.apPassword)) strcpy(config.network.apPassword, DEFAULT_AP_PASSWORD);
+        if (!strlen(config.network.apPassword)) SAFE_STRCPY(config.network.apPassword, DEFAULT_AP_PASSWORD);
     }
     config.version = CONFIG_VERSION;
     config.hardware.version = CONFIG_VERSION;

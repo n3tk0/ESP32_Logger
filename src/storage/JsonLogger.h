@@ -59,7 +59,7 @@ private:
 
     // Write buffer (flush every 8 writes to reduce I/O)
     static constexpr int BUF_LINES = 8;
-    char     _lineBuf[BUF_LINES][128];
+    char     _lineBuf[BUF_LINES][160];
     int      _bufCount = 0;
 
     void _ensureDir();
