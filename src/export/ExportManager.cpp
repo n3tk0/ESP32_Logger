@@ -18,7 +18,7 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         return false;
     }
 
-    StaticJsonDocument<4096> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, f);
     f.close();
     if (err) {
@@ -39,7 +39,7 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         if (!ecfg.isNull() && _exporters[i]->init(ecfg)) {
             // Apply interval_ms from config (cross-cutting, handled centrally)
             uint32_t ivMs = ecfg["interval_ms"] | 0;
-            _exporters[i]->_intervalMs = ivMs;
+            _exporters[i]->setIntervalMs(ivMs);
             ok++;
             Serial.printf("[ExportManager] '%s' enabled=%s interval=%ums\n",
                           name, _exporters[i]->isEnabled() ? "true" : "false", ivMs);
@@ -136,7 +136,7 @@ bool ExportManager::_drainSpool(IExporter* exp) {
         if (len <= 0) break;
         lineBuf[len] = '\0';
 
-        StaticJsonDocument<192> doc;
+        JsonDocument doc;
         if (deserializeJson(doc, lineBuf) != DeserializationError::Ok) continue;
 
         SensorReading& sr = batch[count];

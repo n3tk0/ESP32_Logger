@@ -696,7 +696,7 @@ void setupWebServer() {
     //   netInit:     wifi, network, ip
     // =========================================================================
     server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *r) {
-        StaticJsonDocument<2048> doc;
+        JsonDocument doc;
 
         // ── Identity ──────────────────────────────────────────────────────────
         doc["device"]         = strlen(config.deviceName) ? config.deviceName : "Water Logger";
@@ -781,7 +781,7 @@ void setupWebServer() {
     // API: LIVE  (polled every 500 ms by SPA live page)
     // =========================================================================
     server.on("/api/live", HTTP_GET, [](AsyncWebServerRequest *r) {
-        StaticJsonDocument<1024> doc;
+        JsonDocument doc;
 
         noInterrupts();
         uint32_t safePulses = pulseCount;
@@ -845,7 +845,7 @@ void setupWebServer() {
     // API: RECENT LOGS
     // =========================================================================
     server.on("/api/recent_logs", HTTP_GET, [](AsyncWebServerRequest *r) {
-        StaticJsonDocument<2048> doc;
+        JsonDocument doc;
         JsonArray logs = doc.createNestedArray("logs");
 
         if (!fsAvailable || !activeFS) {
@@ -949,7 +949,7 @@ void setupWebServer() {
     // API: FILE LIST
     // =========================================================================
     server.on("/api/filelist", HTTP_GET, [](AsyncWebServerRequest *r) {
-        StaticJsonDocument<4096> doc;
+        JsonDocument doc;
         JsonArray files = doc.createNestedArray("files");
 
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
@@ -1641,7 +1641,7 @@ void setupWebServer() {
     });
 
     server.on("/wifi_scan_result", HTTP_GET, [](AsyncWebServerRequest *r) {
-        StaticJsonDocument<2048> doc;
+        JsonDocument doc;
         JsonArray nets = doc.createNestedArray("networks");
         int n = WiFi.scanComplete();
         if      (n == WIFI_SCAN_RUNNING) { doc["scanning"] = true; }

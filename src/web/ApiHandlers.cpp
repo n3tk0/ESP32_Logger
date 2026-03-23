@@ -210,7 +210,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
 // GET /api/sensors — list registered sensors + status
 // ---------------------------------------------------------------------------
 static void handleApiSensors(AsyncWebServerRequest* req) {
-    StaticJsonDocument<2048> doc;
+    JsonDocument doc;
     JsonArray arr = doc.createNestedArray("sensors");
     sensorManager.toJson(arr);
 
@@ -243,7 +243,7 @@ static void handleConfigPlatform(AsyncWebServerRequest* req) {
 // GET /api/diag — FreeRTOS diagnostics: heap, queues, task stack HWMs, drops
 // ---------------------------------------------------------------------------
 static void handleApiDiag(AsyncWebServerRequest* req) {
-    StaticJsonDocument<1024> doc;
+    JsonDocument doc;
 
     // Heap
     doc["free_heap"]     = (uint32_t)ESP.getFreeHeap();

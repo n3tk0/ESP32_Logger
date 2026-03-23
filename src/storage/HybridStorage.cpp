@@ -14,7 +14,7 @@ bool HybridStorage::begin(const char* cfgPath) {
     if (fsAvailable && activeFS && activeFS->exists(cfgPath)) {
         File f = activeFS->open(cfgPath, FILE_READ);
         if (f) {
-            StaticJsonDocument<256> doc;
+            JsonDocument doc;
             if (deserializeJson(doc, f) == DeserializationError::Ok) {
                 cloudOnly = doc["storage"]["cloud_only"] | false;
             }

@@ -1,4 +1,5 @@
 #include "OpenSenseMapExporter.h"
+#include <WiFi.h>
 
 bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
     _enabled = cfg["enabled"] | false;

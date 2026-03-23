@@ -12,7 +12,7 @@ bool PMS5003Sensor::init(JsonObjectConst cfg) {
     _calPm25.load(cal, "pm25");
     _calPm10.load(cal, "pm10");
 
-    _serial = &Serial2;
+    _serial = &Serial1;
     _serial->begin(baud, SERIAL_8N1, rx, tx);
     delay(100);
     while (_serial->available()) _serial->read();

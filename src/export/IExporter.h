@@ -30,6 +30,7 @@ public:
     // Minimum ms between sendAll() calls for this exporter.
     // 0 = no throttle (send every batch). Set via "interval_ms" in config.
     virtual uint32_t    intervalMs()   const { return _intervalMs; }
+    void                setIntervalMs(uint32_t ms) { _intervalMs = ms; }
 
 protected:
     bool     _enabled    = false;
