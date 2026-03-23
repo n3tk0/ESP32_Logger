@@ -15,6 +15,23 @@
  *   src/managers/DataLogger.h/.cpp     – log buffer, flush to FS
  *   src/web/WebServer.h/.cpp       – AsyncWebServer handlers
  *   Logger.ino                     – само setup() и loop()
+ *
+ * ИЗПОЛЗВАНИ БИБЛИОТЕКИ:
+ * ---------------------------------------------------------------
+ * | Library                     | Author           | Needed by   |
+ * ---------------------------------------------------------------
+ * | Adafruit BME280 Library    | Adafruit         | BME280Sensor |
+ * | Adafruit Unified Sensor    | Adafruit         | BME280,BME688|
+ * | Adafruit BME680 Library    | Adafruit         | BME688Sensor |
+ * | ArduinoJson                | Benoit Blanchon  | Core         |
+ * | ESPAsyncWebServer          | me-no-dev        | WebServer    |
+ * | AsyncTCP                   | me-no-dev        | WebServer    |
+ * | PubSubClient               | Nick O'Leary     | MqttExporter |
+ * | OneWire                    | Paul Stoffregen  | DS18B20Sensor|
+ * | DallasTemperature          | Miles Burton     | DS18B20Sensor|
+ * | RTC by Makuna              | Makuna           | RtcManager   |
+ * ---------------------------------------------------------------
+ *
  **************************************************************************************************/
 
 // Arduino IDE build-flag shim — must come before all other includes
