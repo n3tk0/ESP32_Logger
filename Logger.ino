@@ -176,7 +176,7 @@ static void _doSleep() {
         TaskManager::shutdown();
         delay(200);
     }
-    Serial.println("[Sleep] Deep sleep →");
+    DBGLN("[Sleep] Deep sleep →");
     Serial.flush();
     delay(10);
     esp_deep_sleep_start();
@@ -228,7 +228,7 @@ static void _manageContinuousPower() {
         // Throttle CPU and enable WiFi modem sleep
         setCpuFrequencyMhz(g_contIdleCpuMhz);
         if (g_contModemSleep) WiFi.setSleep(true);
-        Serial.printf("[Sleep] Continuous idle %us → CPU=%uMHz modem_sleep=%d\n",
+        DBGF("[Sleep] Continuous idle %us → CPU=%uMHz modem_sleep=%d\n",
                       idleMs / 1000, g_contIdleCpuMhz, (int)g_contModemSleep);
         g_contPowerReduced = true;
     }
@@ -280,7 +280,7 @@ static void _checkPinConflicts() {
         if (!s["enabled"]) continue;
         int sPin = s["pin"] | -1;
         if (sPin >= 0 && sPin == flowPin) {
-            Serial.printf("[WARN] M9: Sensor '%s' (type=%s) pin %d conflicts with "
+            DBGF("[WARN] M9: Sensor '%s' (type=%s) pin %d conflicts with "
                           "pinFlowSensor — dual ISR registration will panic!\n",
                           (const char*)(s["id"] | s["type"] | "?"),
                           (const char*)(s["type"] | "?"), flowPin);
@@ -292,7 +292,7 @@ static void _checkPinConflicts() {
 // Register all sensor plugins and init pipeline (called in continuous/hybrid)
 // ---------------------------------------------------------------------------
 static void _initPlatform() {
-    Serial.println("=== Platform v5.0: initialising sensors ===");
+    DBGLN("=== Platform v5.0: initialising sensors ===");
 
     // Register all plugins (guarded by arduino_build_flags.h toggles)
 #ifdef SENSOR_BME280_ENABLED
@@ -376,7 +376,7 @@ static void _initPlatform() {
     // Start FreeRTOS task pipeline
     if (activeFS) TaskManager::init(*activeFS);
 
-    Serial.printf("Platform ready. Sensors: %d  Exporters: %d\n",
+    DBGF("Platform ready. Sensors: %d  Exporters: %d\n",
                   sensorManager.count(), exportManager.count());
 }
 
@@ -399,8 +399,8 @@ void setup() {
 
     Serial.begin(115200);
     delay(100);
-    Serial.printf("\n\n=== ESP32 Water Logger %s ===\n", getVersionString().c_str());
-    Serial.printf("Early GPIO bitmask: 0x%08X\n", earlyGPIO_bitmask);
+    DBGF("\n\n=== ESP32 Water Logger %s ===\n", getVersionString().c_str());
+    DBGF("Early GPIO bitmask: 0x%08X\n", earlyGPIO_bitmask);
 
     loadConfig();
 
@@ -426,7 +426,7 @@ void setup() {
         } else {
             buttonHeldMs = 0;
         }
-        Serial.printf("Button held: %lums\n", buttonHeldMs);
+        DBGF("Button held: %lums\n", buttonHeldMs);
     }
 
     initHardware();   // Configure pin modes AND initialize RTC BEFORE reading time
@@ -444,7 +444,7 @@ void setup() {
 
     // ── Wake reason ───────────────────────────────────────────────────────────
     wakeUpButtonStr = getWakeupReason();
-    Serial.printf("Wake reason: %s\n", wakeUpButtonStr.c_str());
+    DBGF("Wake reason: %s\n", wakeUpButtonStr.c_str());
 
     int  wifiTrigState  = digitalRead(config.hardware.pinWifiTrigger);
 
@@ -467,7 +467,7 @@ void setup() {
     _loadSleepConfig();
 
     if (apModeTriggered) {
-        Serial.println(onlineLoggerMode ? "=== Online Logger ===" : "=== Web Server ===");
+        DBGLN(onlineLoggerMode ? "=== Online Logger ===" : "=== Web Server ===");
         setCpuFrequencyMhz(160);
 
         if (!onlineLoggerMode) flushLogBufferToFS();
@@ -518,13 +518,13 @@ void setup() {
     // When the hybrid periodic timer fires, skip the full web/flow cycle:
     // just let sensor tasks run for g_hybridActiveMs, flush data, then re-sleep.
     if (g_platformMode == 2 && !apModeTriggered && wakeUpButtonStr == "TIMER") {
-        Serial.printf("[Hybrid] Timer wake: sensor window %ums...\n", g_hybridActiveMs);
+        DBGF("[Hybrid] Timer wake: sensor window %ums...\n", g_hybridActiveMs);
         delay(g_hybridActiveMs);      // FreeRTOS tasks run; main task just waits
         flushLogBufferToFS();
         configureWakeup();            // re-arm GPIO wakeup sources
         esp_sleep_enable_timer_wakeup((uint64_t)g_hybridSleepMs * 1000ULL);
         TaskManager::shutdown();
-        Serial.printf("[Hybrid] Timer cycle done — sleeping %us\n", g_hybridSleepMs / 1000);
+        DBGF("[Hybrid] Timer cycle done — sleeping %us\n", g_hybridSleepMs / 1000);
         Serial.flush();
         esp_deep_sleep_start();
         // unreachable — execution resumes from setup() after wakeup
@@ -577,7 +577,7 @@ void setup() {
         loggingState = STATE_IDLE;
     }
 
-    Serial.println("Setup complete!");
+    DBGLN("Setup complete!");
 }
 
 // ============================================================================
@@ -589,7 +589,7 @@ void loop() {
     // Това изчиства WiFi radio state и предотвратява "phantom WiFi pin" проблема:
     // при следващ boot earlyGPIO snapshot НЕ вижда стар HIGH на WiFi pin.
     if (shouldRestart && millis() - restartTimer > 2000) {
-        Serial.println("Restarting...");
+        DBGLN("Restarting...");
         Serial.flush();
         safeWiFiShutdown();   // ← КЛЮЧОВО: изчиства WiFi преди рестарт
         delay(100);
@@ -778,7 +778,7 @@ void loop() {
                 flushLogBufferToFS();
                 configureWakeup(); // GPIO: buttons + flow pin
                 esp_sleep_enable_timer_wakeup((uint64_t)g_hybridSleepMs * 1000ULL);
-                Serial.printf("[Hybrid] Idle %us → deep sleep %us (GPIO+timer)\n",
+                DBGF("[Hybrid] Idle %us → deep sleep %us (GPIO+timer)\n",
                               g_hybridIdleMs / 1000, g_hybridSleepMs / 1000);
                 _doSleep();
             }
