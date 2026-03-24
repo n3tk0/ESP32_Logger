@@ -62,13 +62,13 @@ public:
     }
 
     void InitWithUnix32Time(uint32_t ts) {
-        uint32_t days = ts / 86400UL;
-        uint32_t rem  = ts % 86400UL;
+        uint32_t days = ts / SECONDS_PER_DAY;
+        uint32_t rem  = ts % SECONDS_PER_DAY;
 
-        _hour   = (uint8_t)(rem / 3600UL);
-        rem    %= 3600UL;
-        _minute = (uint8_t)(rem / 60UL);
-        _second = (uint8_t)(rem % 60UL);
+        _hour   = (uint8_t)(rem / SECONDS_PER_HOUR);
+        rem    %= SECONDS_PER_HOUR;
+        _minute = (uint8_t)(rem / SECONDS_PER_MINUTE);
+        _second = (uint8_t)(rem % SECONDS_PER_MINUTE);
 
         uint16_t year = 1970;
         while (true) {
