@@ -18,6 +18,8 @@ void exportTaskFunc(void* /*param*/) {
 
     SensorReading r;
     while (TaskManager::running) {
+        g_taskHeartbeat[TASK_IDX_EXPORT] = millis();   // C4 heartbeat
+
         // Short timeout so the task responds to running=false within 100ms,
         // allowing shutdown() to flush the final batch before the hard wait expires.
         bool got = xQueueReceive(exportQueue, &r,

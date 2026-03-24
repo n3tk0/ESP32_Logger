@@ -153,6 +153,17 @@ bool SensorManager::reloadConfig(fs::FS& fs, const char* cfgPath) {
 }
 
 // ---------------------------------------------------------------------------
+uint32_t SensorManager::minReadIntervalMs() const {
+    uint32_t minMs = 1000;  // default 1s if no sensors
+    for (int i = 0; i < _count; i++) {
+        if (!_sensors[i] || !_sensors[i]->isEnabled()) continue;
+        uint32_t iv = _sensors[i]->getReadIntervalMs();
+        if (iv > 0 && iv < minMs) minMs = iv;
+    }
+    return (minMs < 50) ? 50 : minMs;   // clamp: never poll faster than 50ms
+}
+
+// ---------------------------------------------------------------------------
 ISensor* SensorManager::get(int index) {
     if (index < 0 || index >= _count) return nullptr;
     return _sensors[index];

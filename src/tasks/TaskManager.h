@@ -37,6 +37,9 @@ public:
     // Call before deep sleep or factory reset.
     static void shutdown();
 
+    // Software watchdog (C4): returns false if any task is stuck (>30s no heartbeat)
+    static bool checkHealth();
+
     // Task handles (public for diagnostics / watchdog)
     static TaskHandle_t hSensor;
     static TaskHandle_t hSlowSensor;

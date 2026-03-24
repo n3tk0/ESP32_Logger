@@ -128,13 +128,13 @@ void configureWakeup() {
     const uint8_t wifiPin = config.hardware.pinWifiTrigger;
 
     if (!isRtcWakePinC3(ffPin) || !isRtcWakePinC3(pfPin) || !isRtcWakePinC3(wifiPin)) {
-        Serial.printf("WAKEUP CONFIG ERROR: C3 wake pins must be GPIO0..GPIO5 (FF=%u PF=%u WIFI=%u)\n",
+        DBGF("WAKEUP CONFIG ERROR: C3 wake pins must be GPIO0..GPIO5 (FF=%u PF=%u WIFI=%u)\n",
                       ffPin, pfPin, wifiPin);
         return;
     }
 
     if (ffPin == pfPin || ffPin == wifiPin || pfPin == wifiPin) {
-        Serial.printf("WAKEUP CONFIG ERROR: duplicate wake pins (FF=%u PF=%u WIFI=%u)\n",
+        DBGF("WAKEUP CONFIG ERROR: duplicate wake pins (FF=%u PF=%u WIFI=%u)\n",
                       ffPin, pfPin, wifiPin);
         return;
     }
@@ -161,7 +161,7 @@ void configureWakeup() {
 
     esp_err_t err = esp_deep_sleep_enable_gpio_wakeup(mask, mode);
     if (err != ESP_OK) {
-        Serial.printf("WAKEUP CONFIG ERROR: esp_deep_sleep_enable_gpio_wakeup failed (%d)\n", (int)err);
+        DBGF("WAKEUP CONFIG ERROR: esp_deep_sleep_enable_gpio_wakeup failed (%d)\n", (int)err);
     }
 }
 
@@ -181,7 +181,7 @@ String getWakeupReason() {
                 wifiEarly = !wifiEarly;
             }
 
-            Serial.printf("GPIO early: FF=%d PF=%d WIFI=%d (bitmask=0x%08X)\n",
+            DBGF("GPIO early: FF=%d PF=%d WIFI=%d (bitmask=0x%08X)\n",
                           ffEarly, pfEarly, wifiEarly, earlyGPIO_bitmask);
             if (ffEarly)   return "FF_BTN";
             if (pfEarly)   return "PF_BTN";

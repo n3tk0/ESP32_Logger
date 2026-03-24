@@ -18,6 +18,7 @@
 #include "../managers/DataLogger.h"
 #include "../utils/Utils.h"
 #include "ApiHandlers.h"
+#include "../pipeline/DataPipeline.h"   // fsMutex (FS1)
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Update.h>
@@ -197,6 +198,9 @@ static void fmtIP(const uint8_t* ip, char* buf16) {
 void setupWebServer() {
     Serial.println("Setting up web server...");
 
+    // C2: track web activity for idle power restore
+    auto touchActivity = []() { g_lastWebActivity = millis(); };
+
     bool uiReady = LittleFS.exists("/www/index.html");
 
     if (uiReady) {
@@ -241,6 +245,7 @@ void setupWebServer() {
     //   netInit:     wifi, network, ip
     // =========================================================================
     server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *r) {
+        g_lastWebActivity = millis();   // C2: any poll = active user
         JsonDocument doc;
 
         // ── Identity ──────────────────────────────────────────────────────────
@@ -932,13 +937,13 @@ void setupWebServer() {
     server.on("/factory_reset", HTTP_POST, [](AsyncWebServerRequest *r) {
         r->send(200, "application/json", "{\"ok\":true}");
         Serial.println("[FACTORY RESET] Formatting LittleFS…");
-        // Flush any pending log entries first so we don't corrupt SD data
-        // (activeFS may point to SD; LittleFS.format() only touches internal flash)
+        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
         if (LittleFS.format()) {
             Serial.println("[FACTORY RESET] LittleFS formatted OK – restarting");
         } else {
             Serial.println("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
         }
+        if (fsMutex) xSemaphoreGive(fsMutex);   // FS1
         safeWiFiShutdown();
         delay(300);
         ESP.restart();
@@ -994,7 +999,9 @@ void setupWebServer() {
             File f = targetFS->open(path, FILE_READ);
             bool isDir = f && f.isDirectory();
             if (f) f.close();
+            if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
             deleted = isDir ? deleteRecursive(*targetFS, path) : targetFS->remove(path);
+            if (fsMutex) xSemaphoreGive(fsMutex);
         }
         r->send(200, "application/json", deleted ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"Delete failed\"}");
     };
@@ -1010,7 +1017,9 @@ void setupWebServer() {
         else targetFS = &LittleFS;
         String name = sanitizeFilename(r->getParam("name")->value());
         String fp   = buildPath(dir, name);
+        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
         bool ok = targetFS->mkdir(fp);
+        if (fsMutex) xSemaphoreGive(fsMutex);
         r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
     });
 
@@ -1027,7 +1036,9 @@ void setupWebServer() {
         String dstDir  = destDir.isEmpty() ? src.substring(0, src.lastIndexOf('/')) : destDir;
         if (dstDir.isEmpty()) dstDir = "/";
         String dstPath = buildPath(dstDir, newName);
+        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
         bool ok = targetFS->rename(src, dstPath);
+        if (fsMutex) xSemaphoreGive(fsMutex);
         r->send(200, "application/json", ok ? "{\"ok\":true,\"dst\":\"" + dstPath + "\"}" : "{\"ok\":false}");
     });
 
@@ -1064,6 +1075,7 @@ void setupWebServer() {
                 String upPath = (upDir == "/") ? "/" + filename : upDir + "/" + filename;
                 Serial.printf("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
 
+                if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
                 File* fp = new File(targetFS->open(upPath, FILE_WRITE));
                 if (!fp || !*fp) {
                     Serial.printf("Upload: cannot open %s for write\n", upPath.c_str());
@@ -1085,6 +1097,7 @@ void setupWebServer() {
                     }
                     delete fp;
                     request->_tempObject = nullptr;
+                    if (fsMutex) xSemaphoreGive(fsMutex);   // FS1
                 }
             }
         }
@@ -1305,6 +1318,7 @@ void setupWebServer() {
                size_t index, size_t total) {
                 if (!fsAvailable || !activeFS) return;
                 if (index == 0) {
+                    if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
                     s_pcfgFile = activeFS->open("/platform_config.json", FILE_WRITE);
                 }
                 if (s_pcfgFile) {
@@ -1312,6 +1326,7 @@ void setupWebServer() {
                 }
                 if (index + len >= total && s_pcfgFile) {
                     s_pcfgFile.close();
+                    if (fsMutex) xSemaphoreGive(fsMutex);   // FS1
                 }
             }
         );
@@ -1326,6 +1341,12 @@ void setupWebServer() {
         shouldRestart = true;
         restartTimer  = millis();
         r->send(200, "application/json", "{\"ok\":true,\"restart\":true}");
+    });
+
+    // C2: catch-all filter — update web activity timestamp on every request
+    server.onNotFound([touchActivity](AsyncWebServerRequest *r) {
+        touchActivity();
+        r->send(404, "text/plain", "Not found");
     });
 
     server.begin();

@@ -72,7 +72,7 @@ volatile unsigned long lastFlowInterrupt    = 0;
 volatile bool         ffPressed             = false;
 volatile bool         pfPressed             = false;
 volatile bool         flowSensorPulseDetected = false;
-volatile unsigned long isrDebounceUs        = 100000;
+volatile uint32_t isrDebounceUs         = 100000;
 
 // ============================================================================
 // STATE MACHINE
@@ -99,3 +99,6 @@ unsigned long lastLoggingCycleStartTime = 0;
 // PLATFORM SLEEP CONTROL
 // ============================================================================
 uint8_t g_sleepMode = 0;
+
+// Web activity timestamp (C2 power restore)
+volatile uint32_t g_lastWebActivity = 0;

@@ -167,7 +167,7 @@ void flushLogBufferToFS() {
     DBGF("Flushed %d entries to %s\n", cnt, logFile.c_str());
 }
 
-void addLogEntry() {
+void addLogEntry(uint32_t capturedPulses) {
     if (logBufferCount >= LOG_BATCH_SIZE) {
         flushLogBufferToFS();
         if (logBufferCount >= LOG_BATCH_SIZE) {
@@ -190,16 +190,12 @@ void addLogEntry() {
     logBuffer[i].ffCount   = highCountFF;
     logBuffer[i].pfCount   = highCountPF;
 
-    noInterrupts();
-    uint32_t safePulse = pulseCount;
-    pulseCount = 0;
-    interrupts();
-
+    // L2: use pre-captured pulse count (caller clears pulseCount atomically)
     float ppl = config.flowMeter.pulsesPerLiter;
     if (ppl < 1.0f || !isfinite(ppl)) ppl = 450.0f;
     float cal = config.flowMeter.calibrationMultiplier;
     if (cal <= 0.0f || !isfinite(cal)) cal = 1.0f;
-    logBuffer[i].volumeLiters = (float)safePulse / ppl * cal;
+    logBuffer[i].volumeLiters = (float)capturedPulses / ppl * cal;
 
     String reason = onlineLoggerMode ? cycleStartedBy : wakeUpButtonStr;
     strncpy(logBuffer[i].wakeupReason, reason.c_str(), 9);

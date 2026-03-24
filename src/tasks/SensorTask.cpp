@@ -8,7 +8,12 @@
 void sensorTaskFunc(void* /*param*/) {
     Serial.println("[SensorTask] started");
 
+    // C1: compute poll interval from sensor config (min 50ms, default 1s)
+    uint32_t pollMs = sensorManager.minReadIntervalMs();
+
     while (TaskManager::running) {
+        g_taskHeartbeat[TASK_IDX_SENSOR] = millis();   // C4 heartbeat
+
         // Get current Unix timestamp
         uint32_t ts = 0;
         if (Rtc) {
@@ -20,7 +25,7 @@ void sensorTaskFunc(void* /*param*/) {
 
         sensorManager.tickFiltered(sensorQueue, ts, false);
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(pollMs));
     }
 
     Serial.println("[SensorTask] stopped");

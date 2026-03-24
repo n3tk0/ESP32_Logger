@@ -219,8 +219,18 @@ static void _loadSleepConfig() {
 // ============================================================================
 static void _manageContinuousPower() {
     // Reset activity clock on explicit external events
-    // (caller can set g_contLastActivity = millis() to signal activity)
     if (g_contLastActivity == 0) g_contLastActivity = millis(); // init once
+
+    // C2: web server activity restores full power
+    if (g_lastWebActivity > g_contLastActivity) {
+        g_contLastActivity = g_lastWebActivity;
+        if (g_contPowerReduced) {
+            setCpuFrequencyMhz(160);
+            WiFi.setSleep(false);
+            g_contPowerReduced = false;
+            DBGLN("[Sleep] Power restored (web activity)");
+        }
+    }
 
     uint32_t idleMs = millis() - g_contLastActivity;
 
@@ -232,8 +242,6 @@ static void _manageContinuousPower() {
                       idleMs / 1000, g_contIdleCpuMhz, (int)g_contModemSleep);
         g_contPowerReduced = true;
     }
-    // Restore is handled externally: set g_contPowerReduced=false + g_contLastActivity=millis()
-    // then call setCpuFrequencyMhz(160) + WiFi.setSleep(false) if needed.
 }
 
 // ---------------------------------------------------------------------------
@@ -391,8 +399,9 @@ void setup() {
         earlyGPIO_bitmask = 0;
         for (uint8_t pin = 0; pin <= 10; pin++)
             if (digitalRead(pin)) earlyGPIO_bitmask |= (1UL << pin);
-        if (digitalRead(20)) earlyGPIO_bitmask |= (1UL << 20);
-        if (digitalRead(21)) earlyGPIO_bitmask |= (1UL << 21);
+        // L1: include pins 18-21 (SuperMini exposes 18-19)
+        for (uint8_t pin = 18; pin <= 21; pin++)
+            if (digitalRead(pin)) earlyGPIO_bitmask |= (1UL << pin);
         earlyGPIO_captured = true;
         earlyGPIO_millis   = millis();
     }
@@ -404,7 +413,7 @@ void setup() {
 
     loadConfig();
 
-    isrDebounceUs = (unsigned long)config.hardware.debounceMs * 1000UL;
+    isrDebounceUs = (uint32_t)config.hardware.debounceMs * 1000UL;   // I1
 
     initStorage();
 
@@ -519,7 +528,12 @@ void setup() {
     // just let sensor tasks run for g_hybridActiveMs, flush data, then re-sleep.
     if (g_platformMode == 2 && !apModeTriggered && wakeUpButtonStr == "TIMER") {
         DBGF("[Hybrid] Timer wake: sensor window %ums...\n", g_hybridActiveMs);
-        delay(g_hybridActiveMs);      // FreeRTOS tasks run; main task just waits
+        // H2: non-blocking active window — poll in 100ms steps so shouldRestart is honoured
+        uint32_t windowEnd = millis() + g_hybridActiveMs;
+        while (millis() < windowEnd) {
+            if (shouldRestart) { safeWiFiShutdown(); delay(100); ESP.restart(); }
+            delay(100);
+        }
         flushLogBufferToFS();
         configureWakeup();            // re-arm GPIO wakeup sources
         esp_sleep_enable_timer_wakeup((uint64_t)g_hybridSleepMs * 1000ULL);
@@ -598,8 +612,43 @@ void loop() {
 
     // ── Continuous platform mode ──────────────────────────────────────────────
     // FreeRTOS tasks handle all sensing; loop() only manages idle power.
+    // C3: buttons remain functional — debounce + publish events through pipeline.
     if (g_platformMode == 1) {
         _manageContinuousPower();
+
+        // C3: poll buttons in continuous mode
+        debounceButton(config.hardware.pinWakeupFF, lastFFButtonState, stableFFState,
+                       lastFFDebounceTime, highCountFF);
+        debounceButton(config.hardware.pinWakeupPF, lastPFButtonState, stablePFState,
+                       lastPFDebounceTime, highCountPF);
+
+        if (highCountFF > 0 || highCountPF > 0) {
+            // Publish button event as SensorReading through the pipeline
+            uint32_t ts = 0;
+            if (Rtc) { RtcDateTime now = Rtc->GetDateTime(); if (now.IsValid()) ts = now.Unix32Time(); }
+            if (ts == 0) ts = (uint32_t)(millis() / 1000UL);
+
+            if (highCountFF > 0) {
+                SensorReading btn = SensorReading::make(ts, "buttons", "gpio",
+                    "ff_press", (float)highCountFF, "count", QUALITY_GOOD);
+                if (sensorQueue) xQueueSend(sensorQueue, &btn, 0);
+                highCountFF = 0;
+            }
+            if (highCountPF > 0) {
+                SensorReading btn = SensorReading::make(ts, "buttons", "gpio",
+                    "pf_press", (float)highCountPF, "count", QUALITY_GOOD);
+                if (sensorQueue) xQueueSend(sensorQueue, &btn, 0);
+                highCountPF = 0;
+            }
+            // Reset idle timer — user is active
+            g_contLastActivity = millis();
+            g_lastWebActivity  = millis();
+        }
+
+        // C4: software watchdog
+        if (!TaskManager::checkHealth()) {
+            shouldRestart = true; restartTimer = millis();
+        }
         delay(10);
         return;
     }
@@ -608,6 +657,10 @@ void loop() {
     if (apModeTriggered && !onlineLoggerMode) {
         // Hybrid: still manage power if idle
         if (g_platformMode == 2) _manageContinuousPower();
+        // C4: software watchdog in hybrid/web mode
+        if (g_platformMode >= 1 && !TaskManager::checkHealth()) {
+            shouldRestart = true; restartTimer = millis();
+        }
         delay(10);
         return;
     }
@@ -683,8 +736,10 @@ void loop() {
             break;
 
         case STATE_DONE: {
+            // L2: single atomic read+clear — eliminates race between here and addLogEntry
             noInterrupts();
             uint32_t currentPulses = pulseCount;
+            pulseCount = 0;
             interrupts();
 
             bool hasActivity = (currentPulses > 0 || highCountFF > 0 || highCountPF > 0);
@@ -741,12 +796,12 @@ void loop() {
                     }
                 }
 
-                addLogEntry();
+                addLogEntry(currentPulses);   // L2: pass captured pulses
                 flushLogBufferToFS();
             }
 
             if (onlineLoggerMode) {
-                noInterrupts(); cycleTotalPulses += pulseCount; pulseCount = 0; interrupts();
+                noInterrupts(); cycleTotalPulses += currentPulses; interrupts();  // L2: already cleared above
                 highCountFF = 0; highCountPF = 0;
                 cycleStartedBy = "IDLE"; cycleButtonSet = false;
                 loggingState   = STATE_IDLE;
@@ -770,8 +825,10 @@ void loop() {
     // g_sleepMode == 2 blocks the legacy 2-second sleep above.
     // Instead, wait g_hybridIdleMs in STATE_IDLE before sleeping with both
     // a GPIO wakeup (buttons/flow) and a periodic timer for sensor reads.
-    if (g_platformMode == 2 && !apModeTriggered && !onlineLoggerMode && !shouldRestart) {
-        if (loggingState == STATE_IDLE) {
+    if (g_platformMode == 2 && !onlineLoggerMode && !shouldRestart) {
+        // H4: also allow sleep when web server is active but no clients connected
+        bool webIdle = apModeTriggered ? (WiFi.softAPgetStationNum() == 0) : true;
+        if (loggingState == STATE_IDLE && webIdle) {
             if (g_hybridIdleStart == 0) g_hybridIdleStart = millis();
 
             if (millis() - g_hybridIdleStart >= g_hybridIdleMs) {
@@ -780,10 +837,12 @@ void loop() {
                 esp_sleep_enable_timer_wakeup((uint64_t)g_hybridSleepMs * 1000ULL);
                 DBGF("[Hybrid] Idle %us → deep sleep %us (GPIO+timer)\n",
                               g_hybridIdleMs / 1000, g_hybridSleepMs / 1000);
+                // H3: clean WiFi before sleep if it was started
+                if (wifiConnectedAsClient || apModeTriggered) safeWiFiShutdown();
                 _doSleep();
             }
         } else {
-            // Active cycle in progress — reset idle timer
+            // Active cycle in progress or clients connected — reset idle timer
             g_hybridIdleStart = 0;
         }
     }

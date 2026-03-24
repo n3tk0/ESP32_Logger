@@ -21,9 +21,21 @@ extern QueueHandle_t    exportQueue;    // ProcessingTask → ExportTask
 extern SemaphoreHandle_t webDataMutex;  // webRingBuf access (Web ↔ Processing)
 extern SemaphoreHandle_t configMutex;   // platform_config.json reload guard
 extern SemaphoreHandle_t wireMutex;     // I2C Wire bus serialisation (#14)
+extern SemaphoreHandle_t fsMutex;       // LittleFS write serialisation (FS1)
 
 // Drop counter — incremented whenever a queue send fails (finding #3)
 extern volatile uint32_t g_queueDrops;
+
+// Task health heartbeat (C4) — each task writes millis() here every loop
+enum TaskIndex : uint8_t {
+    TASK_IDX_SENSOR      = 0,
+    TASK_IDX_SLOW_SENSOR = 1,
+    TASK_IDX_PROCESS     = 2,
+    TASK_IDX_STORAGE     = 3,
+    TASK_IDX_EXPORT      = 4,
+    TASK_COUNT           = 5
+};
+extern volatile uint32_t g_taskHeartbeat[TASK_COUNT];
 
 // ============================================================================
 // RingBuffer — SPSC ring buffer (finding #17: proper acquire/release atomics)

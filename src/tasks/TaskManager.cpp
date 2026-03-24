@@ -54,8 +54,9 @@ bool TaskManager::init(fs::FS& fs) {
     webDataMutex = xSemaphoreCreateMutex();
     configMutex  = xSemaphoreCreateMutex();
     wireMutex    = xSemaphoreCreateMutex();   // I2C bus serialisation (#14)
+    fsMutex      = xSemaphoreCreateMutex();   // FS write serialisation (FS1)
 
-    if (!webDataMutex || !configMutex || !wireMutex) {
+    if (!webDataMutex || !configMutex || !wireMutex || !fsMutex) {
         Serial.println("[TaskManager] Mutex creation FAILED");
         return false;
     }
@@ -152,4 +153,24 @@ void TaskManager::shutdown() {
 
     // Hard wait for task stacks to unwind
     vTaskDelay(pdMS_TO_TICKS(500));
+}
+
+// ---------------------------------------------------------------------------
+// checkHealth() — software watchdog (C4)
+// Called from loop(). If any task hasn’t updated its heartbeat in 30s,
+// set shouldRestart to trigger a graceful reboot.
+// ---------------------------------------------------------------------------
+bool TaskManager::checkHealth() {
+    if (!running) return true;
+    constexpr uint32_t MAX_SILENCE_MS = 30000;
+    uint32_t now = millis();
+    for (int i = 0; i < TASK_COUNT; i++) {
+        uint32_t hb = g_taskHeartbeat[i];
+        if (hb == 0) continue;   // task hasn’t started yet
+        if (now - hb > MAX_SILENCE_MS) {
+            Serial.printf("[Watchdog] Task %d stuck (%lums)\n", i, now - hb);
+            return false;
+        }
+    }
+    return true;
 }

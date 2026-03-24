@@ -9,6 +9,8 @@ void slowSensorTaskFunc(void* /*param*/) {
     Serial.println("[SlowSensorTask] started");
 
     while (TaskManager::running) {
+        g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();   // C4 heartbeat
+
         // Get current Unix timestamp (same logic as SensorTask)
         uint32_t ts = 0;
         if (Rtc) {

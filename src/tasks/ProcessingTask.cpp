@@ -30,6 +30,8 @@ void processingTaskFunc(void* /*param*/) {
 
     SensorReading r;
     while (TaskManager::running) {
+        g_taskHeartbeat[TASK_IDX_PROCESS] = millis();   // C4 heartbeat
+
         // Block up to 100ms waiting for a reading
         if (xQueueReceive(sensorQueue, &r, pdMS_TO_TICKS(100)) != pdTRUE) {
             continue;

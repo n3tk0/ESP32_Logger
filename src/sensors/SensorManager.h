@@ -61,6 +61,7 @@ public:
 
     // Accessors
     int      count()            const { return _count; }
+    uint32_t minReadIntervalMs() const;   // smallest interval across all sensors (C1)
     ISensor* get(int index);
     ISensor* getById(const char* id);
 

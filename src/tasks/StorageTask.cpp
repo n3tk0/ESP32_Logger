@@ -33,14 +33,20 @@ void storageTaskFunc(void* param) {
 
     SensorReading r;
     while (TaskManager::running) {
+        g_taskHeartbeat[TASK_IDX_STORAGE] = millis();   // C4 heartbeat
+
         if (xQueueReceive(storageQueue, &r, pdMS_TO_TICKS(200)) == pdTRUE) {
+            if (fsMutex) xSemaphoreTake(fsMutex, portMAX_DELAY);   // FS1
             logger.write(r);
             if (mirrorActive) mirrorLogger.write(r);
+            if (fsMutex) xSemaphoreGive(fsMutex);
         }
     }
 
+    if (fsMutex) xSemaphoreTake(fsMutex, portMAX_DELAY);   // FS1
     logger.flush();
     if (mirrorActive) mirrorLogger.flush();
+    if (fsMutex) xSemaphoreGive(fsMutex);
     Serial.println("[StorageTask] stopped");
     vTaskDelete(nullptr);
 }

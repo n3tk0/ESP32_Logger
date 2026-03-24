@@ -78,7 +78,7 @@ extern volatile unsigned long lastFlowInterrupt;
 extern volatile bool          ffPressed;
 extern volatile bool          pfPressed;
 extern volatile bool          flowSensorPulseDetected;
-extern volatile unsigned long isrDebounceUs;
+extern volatile uint32_t isrDebounceUs;         // I1: uint32_t = atomic on RISC-V
 
 // ============================================================================
 // STATE MACHINE
@@ -108,3 +108,6 @@ extern uint8_t g_sleepMode;
 // MISC
 // ============================================================================
 extern unsigned long lastLoggingCycleStartTime;
+
+// Web activity timestamp — updated by web request handlers (C2 power restore)
+extern volatile uint32_t g_lastWebActivity;
