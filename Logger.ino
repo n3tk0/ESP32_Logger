@@ -36,31 +36,71 @@
 
 // ── Platform v5.0 — multi-sensor modules (compiled in only when needed) ──────
 #include "src/sensors/SensorManager.h"
-// Existing sensors (upgraded)
-#include "src/sensors/plugins/BME280Sensor.h"
-#include "src/sensors/plugins/SDS011Sensor.h"
-#include "src/sensors/plugins/PMS5003Sensor.h"
-#include "src/sensors/plugins/WaterFlowSensor.h"   // replaces YFS201Sensor (YF-S201 + YF-S403)
-#include "src/sensors/plugins/ENS160Sensor.h"
-#include "src/sensors/plugins/SGP30Sensor.h"
-#include "src/sensors/plugins/RainSensor.h"
-#include "src/sensors/plugins/WindSensor.h"
+// Existing sensors (upgraded) — each guarded by arduino_build_flags.h toggles
+#ifdef SENSOR_BME280_ENABLED
+#  include "src/sensors/plugins/BME280Sensor.h"
+#endif
+#ifdef SENSOR_SDS011_ENABLED
+#  include "src/sensors/plugins/SDS011Sensor.h"
+#endif
+#ifdef SENSOR_PMS5003_ENABLED
+#  include "src/sensors/plugins/PMS5003Sensor.h"
+#endif
+#ifdef SENSOR_WATERFLOW_ENABLED
+#  include "src/sensors/plugins/WaterFlowSensor.h"   // replaces YFS201Sensor (YF-S201 + YF-S403)
+#endif
+#ifdef SENSOR_ENS160_ENABLED
+#  include "src/sensors/plugins/ENS160Sensor.h"
+#endif
+#ifdef SENSOR_SGP30_ENABLED
+#  include "src/sensors/plugins/SGP30Sensor.h"
+#endif
+#ifdef SENSOR_RAIN_ENABLED
+#  include "src/sensors/plugins/RainSensor.h"
+#endif
+#ifdef SENSOR_WIND_ENABLED
+#  include "src/sensors/plugins/WindSensor.h"
+#endif
 // New sensors
-#include "src/sensors/plugins/VEML6075Sensor.h"
-#include "src/sensors/plugins/VEML7700Sensor.h"
-#include "src/sensors/plugins/BH1750Sensor.h"
-#include "src/sensors/plugins/SoilMoistureSensor.h"
-#include "src/sensors/plugins/SCD4xSensor.h"
-#include "src/sensors/plugins/BME688Sensor.h"
-#include "src/sensors/plugins/HCSR04Sensor.h"
-#include "src/sensors/plugins/DS18B20Sensor.h"
+#ifdef SENSOR_VEML6075_ENABLED
+#  include "src/sensors/plugins/VEML6075Sensor.h"
+#endif
+#ifdef SENSOR_VEML7700_ENABLED
+#  include "src/sensors/plugins/VEML7700Sensor.h"
+#endif
+#ifdef SENSOR_BH1750_ENABLED
+#  include "src/sensors/plugins/BH1750Sensor.h"
+#endif
+#ifdef SENSOR_SOIL_ENABLED
+#  include "src/sensors/plugins/SoilMoistureSensor.h"
+#endif
+#ifdef SENSOR_SCD4X_ENABLED
+#  include "src/sensors/plugins/SCD4xSensor.h"
+#endif
+#ifdef SENSOR_BME688_ENABLED
+#  include "src/sensors/plugins/BME688Sensor.h"
+#endif
+#ifdef SENSOR_HCSR04_ENABLED
+#  include "src/sensors/plugins/HCSR04Sensor.h"
+#endif
+#ifdef SENSOR_DS18B20_ENABLED
+#  include "src/sensors/plugins/DS18B20Sensor.h"
+#endif
 #include "src/pipeline/DataPipeline.h"
 #include "src/tasks/TaskManager.h"
 #include "src/export/ExportManager.h"
-#include "src/export/MqttExporter.h"
-#include "src/export/HttpExporter.h"
-#include "src/export/SensorCommunityExporter.h"
-#include "src/export/OpenSenseMapExporter.h"
+#ifdef EXPORT_MQTT_ENABLED
+#  include "src/export/MqttExporter.h"
+#endif
+#ifdef EXPORT_HTTP_ENABLED
+#  include "src/export/HttpExporter.h"
+#endif
+#ifdef EXPORT_SENSORCOMMUNITY_ENABLED
+#  include "src/export/SensorCommunityExporter.h"
+#endif
+#ifdef EXPORT_OPENSENSEMAP_ENABLED
+#  include "src/export/OpenSenseMapExporter.h"
+#endif
 #include "src/web/ApiHandlers.h"
 
 // ============================================================================
@@ -213,35 +253,58 @@ static void _checkPinConflicts() {
 static void _initPlatform() {
     Serial.println("=== Platform v5.0: initialising sensors ===");
 
-    // Register all plugins
-    // Environmental
+    // Register all plugins (guarded by arduino_build_flags.h toggles)
+#ifdef SENSOR_BME280_ENABLED
     sensorManager.registerPlugin("bme280",  []()->ISensor*{ return new BME280Sensor(); });
-    sensorManager.registerPlugin("bmp280",  []()->ISensor*{ return new BME280Sensor(); }); // BMP280 variant (no humidity)
+    sensorManager.registerPlugin("bmp280",  []()->ISensor*{ return new BME280Sensor(); });
+#endif
+#ifdef SENSOR_BME688_ENABLED
     sensorManager.registerPlugin("bme688",  []()->ISensor*{ return new BME688Sensor(); });
-    // Air quality
+#endif
+#ifdef SENSOR_SDS011_ENABLED
     sensorManager.registerPlugin("sds011",  []()->ISensor*{ return new SDS011Sensor(); });
+#endif
+#ifdef SENSOR_PMS5003_ENABLED
     sensorManager.registerPlugin("pms5003", []()->ISensor*{ return new PMS5003Sensor(); });
+#endif
+#ifdef SENSOR_ENS160_ENABLED
     sensorManager.registerPlugin("ens160",  []()->ISensor*{ return new ENS160Sensor(); });
+#endif
+#ifdef SENSOR_SGP30_ENABLED
     sensorManager.registerPlugin("sgp30",   []()->ISensor*{ return new SGP30Sensor(); });
+#endif
+#ifdef SENSOR_SCD4X_ENABLED
     sensorManager.registerPlugin("scd4x",   []()->ISensor*{ return new SCD4xSensor(); });
-    // Light
+#endif
+#ifdef SENSOR_VEML6075_ENABLED
     sensorManager.registerPlugin("veml6075",[]()->ISensor*{ return new VEML6075Sensor(); });
+#endif
+#ifdef SENSOR_VEML7700_ENABLED
     sensorManager.registerPlugin("veml7700",[]()->ISensor*{ return new VEML7700Sensor(); });
+#endif
+#ifdef SENSOR_BH1750_ENABLED
     sensorManager.registerPlugin("bh1750",  []()->ISensor*{ return new BH1750Sensor(); });
-    // Water / flow
+#endif
+#ifdef SENSOR_WATERFLOW_ENABLED
     sensorManager.registerPlugin("yfs201",      []()->ISensor*{ return new WaterFlowSensor("yfs201",      450.0f); });
     sensorManager.registerPlugin("yfs403",      []()->ISensor*{ return new WaterFlowSensor("yfs403",      600.0f); });
-    // Custom hall-effect flow sensor: user must set "pulses_per_liter" in config
     sensorManager.registerPlugin("water_flow",  []()->ISensor*{ return new WaterFlowSensor("water_flow",  0.0f);   });
-    // Weather
+#endif
+#ifdef SENSOR_RAIN_ENABLED
     sensorManager.registerPlugin("rain",    []()->ISensor*{ return new RainSensor(); });
+#endif
+#ifdef SENSOR_WIND_ENABLED
     sensorManager.registerPlugin("wind",    []()->ISensor*{ return new WindSensor(); });
-    // Soil
+#endif
+#ifdef SENSOR_SOIL_ENABLED
     sensorManager.registerPlugin("soil_moisture", []()->ISensor*{ return new SoilMoistureSensor(); });
-    // Distance
+#endif
+#ifdef SENSOR_HCSR04_ENABLED
     sensorManager.registerPlugin("hcsr04", []()->ISensor*{ return new HCSR04Sensor(); });
-    // Temperature (1-Wire)
+#endif
+#ifdef SENSOR_DS18B20_ENABLED
     sensorManager.registerPlugin("ds18b20", []()->ISensor*{ return new DS18B20Sensor(); });
+#endif
 
     // Load sensor configs from /platform_config.json
     if (activeFS) sensorManager.loadAndInit(*activeFS);
@@ -249,11 +312,19 @@ static void _initPlatform() {
     // Detect sensor pin conflicts with hardware flow sensor pin (M9)
     _checkPinConflicts();
 
-    // Register exporters
+    // Register exporters (guarded by arduino_build_flags.h toggles)
+#ifdef EXPORT_MQTT_ENABLED
     exportManager.addExporter(new MqttExporter());
+#endif
+#ifdef EXPORT_HTTP_ENABLED
     exportManager.addExporter(new HttpExporter());
+#endif
+#ifdef EXPORT_SENSORCOMMUNITY_ENABLED
     exportManager.addExporter(new SensorCommunityExporter());
+#endif
+#ifdef EXPORT_OPENSENSEMAP_ENABLED
     exportManager.addExporter(new OpenSenseMapExporter());
+#endif
     if (activeFS) exportManager.loadAndInit(*activeFS);
     // Spool failed exports to LittleFS (always available, even without SD) (#4.7)
     if (littleFsAvailable) exportManager.setSpoolFS(&LittleFS);
