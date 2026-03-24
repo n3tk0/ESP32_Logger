@@ -40,7 +40,7 @@
 #define SENSOR_SOIL_ENABLED
 #define SENSOR_HCSR04_ENABLED
 // Exporters (~10-20 KB each):
-#define EXPORT_MQTT_ENABLED         // PubSubClient library required
+#define EXPORT_MQTT_ENABLED         // internal MQTT driver
 #define EXPORT_HTTP_ENABLED
 #define EXPORT_SENSORCOMMUNITY_ENABLED
 #define EXPORT_OPENSENSEMAP_ENABLED

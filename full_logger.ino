@@ -84,8 +84,7 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <pgmspace.h>
-#include <ThreeWire.h>
-#include <RtcDS1302.h>
+#include "src/drivers/DS1302_Mini.h"
 #include <FlowSensor.h>
 #include <Update.h>
 #include <esp_sleep.h>

@@ -1,6 +1,6 @@
 #pragma once
 #include "IExporter.h"
-#include <PubSubClient.h>
+#include "../drivers/MQTT_Mini.h"
 #include <WiFiClient.h>
 
 // ============================================================================
@@ -28,7 +28,7 @@ private:
     bool _publish(const SensorReading& r);
 
     WiFiClient   _wifiClient;
-    PubSubClient _client;
+    MQTT_Mini    _client;
 
     char     _broker[65]      = {};
     uint16_t _port            = 1883;

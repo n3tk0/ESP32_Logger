@@ -15,10 +15,8 @@
 //   - ArduinoJson          (bblanchon)             >= 7.0.0
 //   - ESPAsyncWebServer    (esphome / lacamera)     >= 3.1.0
 //   - AsyncTCP             (me-no-dev)              >= 1.1.1
-//   - PubSubClient         (Nick O'Leary)           >= 2.8.0
-//   - Rtc                  (Makuna)                 >= 2.4.2
 //
-// BME280, BME688, DS18B20 use built-in mini drivers — no external libs needed.
+// All sensors, MQTT, and RTC use built-in mini drivers — no other libs needed.
 //
 // LittleFS data upload (for web UI & platform_config.json):
 //   Install the "arduino-esp32fs-plugin" or use Arduino IDE 2.x with the

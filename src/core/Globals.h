@@ -5,8 +5,7 @@
 #include <LittleFS.h>
 #include <FS.h>
 #include <SD.h>
-#include <ThreeWire.h>
-#include <RtcDS1302.h>
+#include "../drivers/DS1302_Mini.h"
 #include <ESPAsyncWebServer.h>
 
 // ============================================================================
