@@ -6,7 +6,8 @@
 //
 // Arduino IDE setup:
 //   Board:     XIAO ESP32-C3  (via Boards Manager → "esp32 by Espressif")
-//   Partition: Minimal SPIFFS  (Tools → Partition Scheme)
+//   Partition: Huge APP (3MB No OTA/1MB SPIFFS)  ← REQUIRED for full build
+//              Or use "Minimal SPIFFS" + disable unused sensors below
 //   Upload:    921600 baud
 //   Monitor:   115200 baud
 //
@@ -14,13 +15,8 @@
 //   - ArduinoJson          (bblanchon)             >= 7.0.0
 //   - ESPAsyncWebServer    (esphome / lacamera)     >= 3.1.0
 //   - AsyncTCP             (me-no-dev)              >= 1.1.1
-//   - PubSubClient         (Nick O'Leary)           >= 2.8.0
-//   - Adafruit BME280      (Adafruit)               >= 2.2.4
-//   - Adafruit BME680      (Adafruit)               >= 2.0.4
-//   - Adafruit Unified Sensor (Adafruit)            >= 1.1.14
-//   - OneWire              (Paul Stoffregen)        >= 2.3.8
-//   - DallasTemperature    (Miles Burton)           >= 3.11.0
-//   - Rtc                  (Makuna)                 >= 2.4.2
+//
+// All sensors, MQTT, and RTC use built-in mini drivers — no other libs needed.
 //
 // LittleFS data upload (for web UI & platform_config.json):
 //   Install the "arduino-esp32fs-plugin" or use Arduino IDE 2.x with the
@@ -55,3 +51,8 @@
 #ifndef DEFAULT_FLOW_PIN
 #  define DEFAULT_FLOW_PIN  21
 #endif
+
+// ============================================================================
+// MODULE TOGGLES are defined in Logger.ino (top of file), NOT here.
+// For PlatformIO builds they come from build_flags in platformio.ini.
+// ============================================================================

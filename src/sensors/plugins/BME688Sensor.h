@@ -1,12 +1,12 @@
 #pragma once
 #include "../ISensor.h"
 #include <Wire.h>
-#include <Adafruit_BME680.h>
+#include "../../drivers/BME688_Mini.h"
 
 // ============================================================================
 // BME688 — Temperature / Humidity / Pressure / Gas Resistance (I2C)
-// Uses the Adafruit BME680 library which is compatible with BME688 for
-// basic sensor readings (without Bosch BSEC AI features).
+// Uses internal BME688_Mini driver (no Adafruit dependency).
+// Compatible with BME680 and BME688 for basic readings.
 //
 // Config keys:
 //   "sda", "scl"           — I2C pins
@@ -44,7 +44,7 @@ public:
     }
 
 private:
-    Adafruit_BME680 _bme;
+    BME688_Mini     _bme;
     uint32_t _intervalMs   = 10000;
     uint8_t  _addr         = 0x76;
     int      _heaterTemp   = 320;

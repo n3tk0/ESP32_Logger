@@ -1,12 +1,12 @@
 #pragma once
 #include "../ISensor.h"
-#include <OneWire.h>
-#include <DallasTemperature.h>
+#include "../../drivers/DS18B20_Mini.h"
 
 // ============================================================================
 // DS18B20 — 1-Wire digital temperature sensor
+// Uses internal DS18B20_Mini driver (no OneWire/DallasTemperature dependency).
 // Supports multiple sensors on a single bus (up to 8 reported).
-// Each sensor on the bus gets its own metric named "temperature_0",
+// Each sensor on the bus gets its own metric named "temperature",
 // "temperature_1", etc.
 //
 // Config keys:
@@ -35,12 +35,10 @@ public:
     int getMetrics(const char** out, int maxOut) const override;
 
 private:
-    OneWire*          _ow      = nullptr;
-    DallasTemperature* _dt     = nullptr;
+    DS18B20_Mini _ds;
 
     uint32_t _intervalMs  = 5000;
     uint8_t  _resolution  = 12;
-    int      _count       = 0;  // number of sensors found on bus
     bool     _ready       = false;
 
     CalibrationAxis _calTemp;
