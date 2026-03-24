@@ -35,9 +35,6 @@
 #ifndef CORE_DEBUG_LEVEL
 #  define CORE_DEBUG_LEVEL 0
 #endif
-#ifndef DEBUG_MODE
-#  define DEBUG_MODE 0
-#endif
 
 // ── Default hardware pins for XIAO ESP32-C3 ────────────────────────────────
 // These match the platformio.ini -D flags and act as fallback values when

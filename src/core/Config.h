@@ -17,18 +17,12 @@ inline String getVersionString() {
     return String(buf);
 }
 
-// Debug mode - set to 1 to enable Serial debug output, 0 to save ~3KB flash
-#define DEBUG_MODE 0
+// Debug mode switch is declared in Logger.ino for easier tuning in one place.
+extern bool gDebugMode;
 
-#if DEBUG_MODE
-  #define DBG(x)      Serial.print(x)
-  #define DBGLN(x)    Serial.println(x)
-  #define DBGF(...)   Serial.printf(__VA_ARGS__)
-#else
-  #define DBG(x)
-  #define DBGLN(x)
-  #define DBGF(...)
-#endif
+#define DBG(x)      do { if (gDebugMode) Serial.print(x); } while (0)
+#define DBGLN(x)    do { if (gDebugMode) Serial.println(x); } while (0)
+#define DBGF(...)   do { if (gDebugMode) Serial.printf(__VA_ARGS__); } while (0)
 
 // ============================================================================
 // CONSTANTS

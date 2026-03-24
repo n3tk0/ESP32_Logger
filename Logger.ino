@@ -144,6 +144,10 @@
 #endif
 #include "src/web/ApiHandlers.h"
 
+// Debug switch (easy to toggle from Arduino IDE):
+// false = no serial debug logs, true = enable DBG/DBGLN/DBGF output.
+bool gDebugMode = false;
+
 // ============================================================================
 // PLATFORM MODE & SLEEP GLOBALS
 // ============================================================================
