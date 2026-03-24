@@ -17,6 +17,34 @@
  *   Logger.ino                     – само setup() и loop()
  **************************************************************************************************/
 
+// ============================================================================
+// MODULE TOGGLES — comment out to exclude sensors/exporters from the build.
+// Reduces flash usage (~10-80 KB per module). Only enable what you use.
+// ============================================================================
+// Sensors requiring external libraries (comment out to save ~40-80 KB each):
+#define SENSOR_BME280_ENABLED       // Adafruit BME280 library required
+#define SENSOR_BME688_ENABLED       // Adafruit BME680 library required
+#define SENSOR_DS18B20_ENABLED      // OneWire + DallasTemperature required
+// Sensors with no external library (built-in I2C/GPIO, ~5-15 KB each):
+#define SENSOR_SDS011_ENABLED
+#define SENSOR_PMS5003_ENABLED
+#define SENSOR_ENS160_ENABLED
+#define SENSOR_SGP30_ENABLED
+#define SENSOR_SCD4X_ENABLED
+#define SENSOR_VEML6075_ENABLED
+#define SENSOR_VEML7700_ENABLED
+#define SENSOR_BH1750_ENABLED
+#define SENSOR_WATERFLOW_ENABLED
+#define SENSOR_RAIN_ENABLED
+#define SENSOR_WIND_ENABLED
+#define SENSOR_SOIL_ENABLED
+#define SENSOR_HCSR04_ENABLED
+// Exporters (~10-20 KB each):
+#define EXPORT_MQTT_ENABLED         // PubSubClient library required
+#define EXPORT_HTTP_ENABLED
+#define EXPORT_SENSORCOMMUNITY_ENABLED
+#define EXPORT_OPENSENSEMAP_ENABLED
+
 // Arduino IDE build-flag shim — must come before all other includes
 #include "src/arduino_build_flags.h"
 
