@@ -292,7 +292,7 @@ void migrateConfig(uint8_t fromVersion) {
     DBGF("Migrating config v%d -> v%d\n", fromVersion, CONFIG_VERSION);
     if (fromVersion > CONFIG_VERSION) {
         Serial.printf("[Config] WARN: config v%d > firmware v%d — resetting defaults\n", fromVersion, CONFIG_VERSION);
-        resetConfig();
+        applyDefaults();
         return;
     }
     if (fromVersion < 6) {
