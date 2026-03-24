@@ -8,6 +8,11 @@
 
 // ── RtcDateTime — date/time container ─────────────────────────────────────────
 class RtcDateTime {
+private:
+    static constexpr uint32_t SECONDS_PER_DAY    = 86400UL;
+    static constexpr uint32_t SECONDS_PER_HOUR   = 3600UL;
+    static constexpr uint32_t SECONDS_PER_MINUTE = 60UL;
+
 public:
     RtcDateTime() : _year(2000), _month(1), _day(1), _hour(0), _minute(0), _second(0) {}
 
