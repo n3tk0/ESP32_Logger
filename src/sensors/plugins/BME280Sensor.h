@@ -1,13 +1,13 @@
 #pragma once
 #include "../ISensor.h"
 #include <Wire.h>
-#include <Adafruit_BME280.h>
+#include "../../drivers/BME280_Mini.h"
 
 // ============================================================================
 // BME280 / BMP280 — Temperature / Humidity / Pressure (I2C)
-// The Adafruit_BME280 library auto-detects whether the chip is a BMP280
-// (no humidity sensor) or BME280. When a BMP280 is found, humidity reads
-// are skipped and only temperature + pressure are returned.
+// Uses internal BME280_Mini driver (no Adafruit dependency).
+// Auto-detects whether the chip is a BMP280 (no humidity sensor) or BME280.
+// When a BMP280 is found, humidity reads are skipped.
 //
 // Config keys:
 //   "sda", "scl"                     — I2C pins (defaults to Wire defaults)
@@ -45,7 +45,7 @@ public:
     }
 
 private:
-    Adafruit_BME280 _bme;
+    BME280_Mini     _bme;
     uint32_t        _intervalMs = 10000;
     uint8_t         _addr       = 0x76;
     bool            _ready      = false;

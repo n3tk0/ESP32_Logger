@@ -21,29 +21,10 @@ bool BME280Sensor::init(JsonObjectConst cfg) {
         return false;
     }
 
-    // Detect BMP280 (chip ID 0x60 = BME280, 0x58 = BMP280)
-    // Adafruit library exposes sensorID() for this check
-    uint32_t sensorId = _bme.sensorID();
-    _isBMP280 = (sensorId == 0x60056 || sensorId == 0x58 ||
-                 (sensorId & 0xFF) == 0x58);
-    // Simpler: read humidity; if it returns 0.0 consistently, it's BMP280.
-    // More reliable: Adafruit_BME280 returns chip ID 0x60 for BME280,
-    // other values for BMP280. We check bit pattern.
-    // Actually Adafruit sensorID() returns the chip ID shifted — just check
-    // if humidity reads consistently NaN or zero.
-    // Use direct chip ID: Wire read of register 0xD0 at _addr.
-    {
-        Wire.beginTransmission(_addr);
-        Wire.write(0xD0); // chip_id register
-        Wire.endTransmission(false);
-        Wire.requestFrom((int)_addr, 1);
-        if (Wire.available()) {
-            uint8_t chipId = Wire.read();
-            _isBMP280 = (chipId == 0x58 || chipId == 0x56 || chipId == 0x57);
-            Serial.printf("[BME280] chip_id=0x%02X → %s\n",
-                          chipId, _isBMP280 ? "BMP280" : "BME280");
-        }
-    }
+    // BME280_Mini auto-detects chip type via chip ID register
+    _isBMP280 = !_bme.isBME280();
+    Serial.printf("[BME280] chip_id=0x%02X → %s\n",
+                  _bme.chipId(), _isBMP280 ? "BMP280" : "BME280");
 
     // Load calibration
     JsonObjectConst cal = cfg["calibration"];

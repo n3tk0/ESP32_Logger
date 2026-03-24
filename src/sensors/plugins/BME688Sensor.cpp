@@ -24,10 +24,10 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
     }
 
     // Configure sensor oversampling and filter
-    _bme.setTemperatureOversampling(BME680_OS_8X);
-    _bme.setHumidityOversampling(BME680_OS_2X);
-    _bme.setPressureOversampling(BME680_OS_4X);
-    _bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
+    _bme.setTemperatureOversampling(BME688_Mini::OS_8X);
+    _bme.setHumidityOversampling(BME688_Mini::OS_2X);
+    _bme.setPressureOversampling(BME688_Mini::OS_4X);
+    _bme.setIIRFilterSize(BME688_Mini::FILTER_3);
     _bme.setGasHeater(_heaterTemp, _heaterDurMs);
 
     _ready = true;

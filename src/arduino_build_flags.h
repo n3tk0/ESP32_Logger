@@ -16,12 +16,9 @@
 //   - ESPAsyncWebServer    (esphome / lacamera)     >= 3.1.0
 //   - AsyncTCP             (me-no-dev)              >= 1.1.1
 //   - PubSubClient         (Nick O'Leary)           >= 2.8.0
-//   - Adafruit BME280      (Adafruit)               >= 2.2.4
-//   - Adafruit BME680      (Adafruit)               >= 2.0.4
-//   - Adafruit Unified Sensor (Adafruit)            >= 1.1.14
-//   - OneWire              (Paul Stoffregen)        >= 2.3.8
-//   - DallasTemperature    (Miles Burton)           >= 3.11.0
 //   - Rtc                  (Makuna)                 >= 2.4.2
+//
+// BME280, BME688, DS18B20 use built-in mini drivers — no external libs needed.
 //
 // LittleFS data upload (for web UI & platform_config.json):
 //   Install the "arduino-esp32fs-plugin" or use Arduino IDE 2.x with the

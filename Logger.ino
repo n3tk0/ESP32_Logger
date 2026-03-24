@@ -21,10 +21,10 @@
 // MODULE TOGGLES — comment out to exclude sensors/exporters from the build.
 // Reduces flash usage (~10-80 KB per module). Only enable what you use.
 // ============================================================================
-// Sensors requiring external libraries (comment out to save ~40-80 KB each):
-#define SENSOR_BME280_ENABLED       // Adafruit BME280 library required
-#define SENSOR_BME688_ENABLED       // Adafruit BME680 library required
-#define SENSOR_DS18B20_ENABLED      // OneWire + DallasTemperature required
+// Sensors using internal mini drivers (~5-15 KB each):
+#define SENSOR_BME280_ENABLED       // BME280/BMP280 (internal I2C driver)
+#define SENSOR_BME688_ENABLED       // BME680/BME688 (internal I2C driver)
+#define SENSOR_DS18B20_ENABLED      // DS18B20 (internal 1-Wire driver)
 // Sensors with no external library (built-in I2C/GPIO, ~5-15 KB each):
 #define SENSOR_SDS011_ENABLED
 #define SENSOR_PMS5003_ENABLED
