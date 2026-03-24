@@ -40,9 +40,70 @@ public:
     uint8_t  Minute() const { return _minute; }
     uint8_t  Second() const { return _second; }
 
+    bool IsValid() const {
+        if (_year < 2000 || _year > 2099) return false;
+        if (_month < 1 || _month > 12) return false;
+        if (_hour > 23 || _minute > 59 || _second > 59) return false;
+        uint8_t dim = _daysInMonth(_year, _month);
+        return _day >= 1 && _day <= dim;
+    }
+
+    uint32_t Unix32Time() const {
+        if (!IsValid()) return 0;
+        uint32_t days = 0;
+        for (uint16_t y = 1970; y < _year; y++) {
+            days += _isLeapYear(y) ? 366 : 365;
+        }
+        for (uint8_t m = 1; m < _month; m++) {
+            days += _daysInMonth(_year, m);
+        }
+        days += (uint32_t)(_day - 1);
+        return days * 86400UL + (uint32_t)_hour * 3600UL + (uint32_t)_minute * 60UL + (uint32_t)_second;
+    }
+
+    void InitWithUnix32Time(uint32_t ts) {
+        uint32_t days = ts / 86400UL;
+        uint32_t rem  = ts % 86400UL;
+
+        _hour   = (uint8_t)(rem / 3600UL);
+        rem    %= 3600UL;
+        _minute = (uint8_t)(rem / 60UL);
+        _second = (uint8_t)(rem % 60UL);
+
+        uint16_t year = 1970;
+        while (true) {
+            uint16_t diy = _isLeapYear(year) ? 366 : 365;
+            if (days < diy) break;
+            days -= diy;
+            year++;
+        }
+
+        uint8_t month = 1;
+        while (true) {
+            uint8_t dim = _daysInMonth(year, month);
+            if (days < dim) break;
+            days -= dim;
+            month++;
+        }
+
+        _year  = year;
+        _month = month;
+        _day   = (uint8_t)(days + 1);
+    }
+
 private:
     uint16_t _year;
     uint8_t  _month, _day, _hour, _minute, _second;
+
+    static bool _isLeapYear(uint16_t year) {
+        return ((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0);
+    }
+
+    static uint8_t _daysInMonth(uint16_t year, uint8_t month) {
+        static const uint8_t kDaysInMonth[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
+        if (month == 2 && _isLeapYear(year)) return 29;
+        return kDaysInMonth[month - 1];
+    }
 };
 
 // ── ThreeWire — 3-wire serial bus (IO/DAT, SCLK, CE/RST) ────────────────────
