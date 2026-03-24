@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include "../core/SensorTypes.h"
+#include "../core/Config.h"
 
 // ============================================================================
 // CalibrationAxis — per-metric calibration helper (offset + scale)

@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include "../core/SensorTypes.h"
+#include "../core/Config.h"
 
 // ============================================================================
 // IExporter — abstract interface for all data exporters.
