@@ -1675,14 +1675,17 @@ void setupWebServer() {
             }
         },
         [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+            auto printOtaError = []() {
+                if (gDebugMode) Update.printError(Serial);
+            };
             if (!index) {
                 DBGF("OTA start: %s\n", filename.c_str());
-                if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+                if (!Update.begin(UPDATE_SIZE_UNKNOWN)) printOtaError();
             }
-            if (Update.write(data, len) != len) Update.printError(Serial);
+            if (Update.write(data, len) != len) printOtaError();
             if (final) {
                 if (Update.end(true)) DBGF("OTA done: %u bytes\n", index + len);
-                else Update.printError(Serial);
+                else printOtaError();
             }
         }
     );
