@@ -622,3 +622,101 @@ Format: Unix epoch uint32_t (seconds since 1970-01-01 UTC)
 
 Mode selected via `platform_config.json` → `"mode": "continuous"`.
 Default on first boot: `"legacy"` (preserves existing behavior).
+
+---
+
+## 11. Hardware Constraints (ESP32-C3 Specific)
+
+### D2 — Deep Sleep GPIO Wakeup: C3-Only Implementation
+
+`configureWakeup()` in `RtcManager.cpp` uses `esp_deep_sleep_enable_gpio_wakeup()`,
+which is available **only on ESP32-C3 and ESP32-S2** and accepts a pin bitmask.
+
+On the original **ESP32 (dual-core Xtensa)**, GPIO wakeup from deep sleep requires
+`esp_sleep_enable_ext0_wakeup()` (single pin) or `esp_sleep_enable_ext1_wakeup()`
+(multiple pins via RTC domain), with a different API and different capable-pin constraints.
+
+**Supported wakeup pins on ESP32-C3:** GPIO 0–5 only (RTC-capable pins).
+
+> **Portability note:** If porting to ESP32 (non-C3), the wakeup configuration in
+> `configureWakeup()` must be rewritten. The rest of the firmware is compatible.
+
+| Board            | Wakeup API                              | Wake-capable pins |
+|------------------|-----------------------------------------|-------------------|
+| XIAO ESP32-C3    | `esp_deep_sleep_enable_gpio_wakeup()`   | GPIO 0–5          |
+| ESP32-C3 SuperMini | `esp_deep_sleep_enable_gpio_wakeup()` | GPIO 0–5          |
+| ESP32 (Xtensa)   | `esp_sleep_enable_ext0/ext1_wakeup()`  | RTC GPIO 0, 2, 4, 12–15, 25–27, 32–39 |
+
+---
+
+## 12. Pin Assignment Guide
+
+### P1 — RTC (DS1302) Pins vs I2C Sensor Bus
+
+The DS1302 uses a **bit-banged 3-wire protocol** (CE, IO, SCLK) implemented via
+the `ThreeWire` library — it does **not** use the hardware I2C peripheral.
+
+However, by default the firmware assigns the RTC to GPIO 5 (CE), 6 (IO), 7 (SCLK).
+GPIO 6 and 7 are also the **default `Wire` I2C bus** on ESP32-C3 (SDA=8, SCL=9 per
+Arduino-ESP32 defaults, but many I2C sensor configs use 6/7).
+
+**Risk:** If an I2C sensor (BME280, ENS160, etc.) is configured with `sda=6, scl=7`,
+the RTC bit-banging and I2C communication will conflict on the same pins.
+
+**Recommended pin assignment for XIAO ESP32-C3:**
+
+| Function         | GPIO | Notes |
+|------------------|------|-------|
+| FF Wake button   | 3    | Deep-sleep wake capable |
+| PF Wake button   | 4    | Deep-sleep wake capable |
+| WiFi trigger     | 2    | Deep-sleep wake capable |
+| DS1302 CE        | 5    | Deep-sleep wake capable, safe for bit-bang |
+| DS1302 IO        | 20   | USB-CDC RX — **only use when USB CDC is disabled** |
+| DS1302 SCLK      | 21   | Flow sensor default — reassign if using RTC here |
+| I2C SDA          | 6    | Use when RTC IO is NOT on GPIO 6 |
+| I2C SCL          | 7    | Use when RTC SCLK is NOT on GPIO 7 |
+| Flow sensor      | 21   | ISR-capable, non-wake |
+| SD CS            | 10   | Boot strapping — safe after boot |
+
+**Recommended `platform_config.json` for I2C + RTC coexistence:**
+
+```json
+{
+  "sensors": [
+    {
+      "type": "bme280",
+      "sda": 6,
+      "scl": 7
+    }
+  ]
+}
+```
+
+In `config.bin` hardware settings, set RTC pins to avoid 6/7:
+- `pinRtcCE = 5`, `pinRtcIO = 20`, `pinRtcSCLK = 21`
+
+> **Warning:** GPIO 20 and 21 are USB-CDC RX/TX on ESP32-C3. They can be used
+> as general GPIO only when the USB CDC Serial is disabled (i.e., when you use
+> hardware UART or the board is powered without USB connection). If you rely on
+> USB Serial for debugging, do not use GPIO 20/21 for RTC.
+
+### Pin Safety Matrix
+
+| GPIO | Wake? | I2C? | UART? | Boot-strap? | Recommended Use |
+|------|-------|------|-------|-------------|-----------------|
+| 0    | ✅    | —    | —     | ⚠️ pull-up  | Button / wake   |
+| 1    | ✅    | —    | —     | —           | Button / wake   |
+| 2    | ✅    | —    | —     | ⚠️ pull-up  | WiFi trigger    |
+| 3    | ✅    | —    | —     | —           | FF button       |
+| 4    | ✅    | —    | —     | —           | PF button       |
+| 5    | ✅    | —    | —     | —           | RTC CE          |
+| 6    | ❌    | SDA  | —     | —           | I2C sensors     |
+| 7    | ❌    | SCL  | —     | —           | I2C sensors     |
+| 8    | ❌    | SDA* | —     | ⚠️ pull-up  | Alt I2C / GPIO  |
+| 9    | ❌    | SCL* | —     | ⚠️ pull-up  | Alt I2C / GPIO  |
+| 10   | ❌    | —    | —     | ⚠️ pull-up  | SD CS           |
+| 20   | ❌    | —    | RX    | —           | USB-CDC / RTC IO|
+| 21   | ❌    | —    | TX    | —           | Flow sensor     |
+
+*GPIO 8/9 are the Arduino-ESP32 `Wire` defaults but have internal pull-ups that
+may conflict with some I2C slaves — use with care.
