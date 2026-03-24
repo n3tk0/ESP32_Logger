@@ -55,25 +55,25 @@ bool SGP30Sensor::init(JsonObjectConst cfg) {
 
     // Verify chip is present by reading feature set
     if (!_sendCommand(CMD_GET_FEAT)) {
-        Serial.println("[SGP30] Not found at 0x58");
+        DBGLN("[SGP30] Not found at 0x58");
         return false;
     }
     delay(10);
     uint16_t feat;
     if (!_readWords(&feat, 1)) {
-        Serial.println("[SGP30] Feature read failed");
+        DBGLN("[SGP30] Feature read failed");
         return false;
     }
 
     // Start IAQ algorithm
     if (!_sendCommand(CMD_IAQ_INIT)) {
-        Serial.println("[SGP30] IAQ init failed");
+        DBGLN("[SGP30] IAQ init failed");
         return false;
     }
 
     _initMs = millis();
     _ready  = true;
-    Serial.printf("[SGP30] Ready (feature=0x%04X)\n", feat);
+    DBGF("[SGP30] Ready (feature=0x%04X)\n", feat);
     return true;
 }
 

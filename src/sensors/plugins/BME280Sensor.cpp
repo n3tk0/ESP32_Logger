@@ -17,13 +17,13 @@ bool BME280Sensor::init(JsonObjectConst cfg) {
 
     _ready = _bme.begin(_addr, &Wire);
     if (!_ready) {
-        Serial.printf("[BME280] Not found at 0x%02X\n", _addr);
+        DBGF("[BME280] Not found at 0x%02X\n", _addr);
         return false;
     }
 
     // BME280_Mini auto-detects chip type via chip ID register
     _isBMP280 = !_bme.isBME280();
-    Serial.printf("[BME280] chip_id=0x%02X → %s\n",
+    DBGF("[BME280] chip_id=0x%02X → %s\n",
                   _bme.chipId(), _isBMP280 ? "BMP280" : "BME280");
 
     // Load calibration
@@ -32,7 +32,7 @@ bool BME280Sensor::init(JsonObjectConst cfg) {
     _calHumidity.load(cal, "humidity");
     _calPressure.load(cal, "pressure");
 
-    Serial.printf("[%s] ready at 0x%02X  cal_T(%.2f+%.2fx) cal_P(%.2f+%.2fx)\n",
+    DBGF("[%s] ready at 0x%02X  cal_T(%.2f+%.2fx) cal_P(%.2f+%.2fx)\n",
                   getType(), _addr,
                   _calTemp.offset, _calTemp.scale,
                   _calPressure.offset, _calPressure.scale);

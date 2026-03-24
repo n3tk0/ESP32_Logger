@@ -20,7 +20,7 @@ bool HttpExporter::init(JsonObjectConst cfg) {
         }
     }
 
-    Serial.printf("[HTTP] url=%s method=%s\n", _url, _method);
+    DBGF("[HTTP] url=%s method=%s\n", _url, _method);
     return true;
 }
 
@@ -57,7 +57,7 @@ bool HttpExporter::send(const SensorReading* readings, size_t count) {
     int code = http.POST(body);
     bool ok  = (code >= 200 && code < 300);
     if (!ok) {
-        Serial.printf("[HTTP] POST failed, code=%d\n", code);
+        DBGF("[HTTP] POST failed, code=%d\n", code);
     }
     http.end();
     delete[] body;

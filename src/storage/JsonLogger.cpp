@@ -13,7 +13,7 @@ void JsonLogger::begin(fs::FS& fs, const char* logDir,
     _rotateDaily  = rotateDaily;
     strncpy(_logDir, logDir, sizeof(_logDir)-1);
     _ensureDir();
-    Serial.printf("[JsonLogger] dir=%s maxKB=%u rotate=%s\n",
+    DBGF("[JsonLogger] dir=%s maxKB=%u rotate=%s\n",
                   _logDir, _maxSizeKB, _rotateDaily ? "daily" : "size");
 }
 
@@ -61,7 +61,7 @@ void JsonLogger::_rotatIfNeeded(const char* path) {
         snprintf(bakPath, sizeof(bakPath), "%s.bak", path);
         _fs->remove(bakPath);
         _fs->rename(path, bakPath);
-        Serial.printf("[JsonLogger] rotated %s → %s\n", path, bakPath);
+        DBGF("[JsonLogger] rotated %s → %s\n", path, bakPath);
     }
 }
 
@@ -73,7 +73,7 @@ void JsonLogger::write(const SensorReading& r) {
     char line[160];
     int  n = r.toJsonLine(line, sizeof(line));
     if (n <= 0 || n >= (int)sizeof(line)) {
-        Serial.println("[JsonLogger] WARN: line too long, dropped");
+        DBGLN("[JsonLogger] WARN: line too long, dropped");
         return;
     }
     line[n] = '\0';
@@ -115,7 +115,7 @@ void JsonLogger::flush() {
 
         File f = _fs->open(path, FILE_APPEND);
         if (!f) {
-            Serial.printf("[JsonLogger] Cannot open %s\n", path);
+            DBGF("[JsonLogger] Cannot open %s\n", path);
         } else {
             for (int j = i; j < _bufCount; j++) {
                 if (strcmp(dates[j], dates[i]) == 0) {

@@ -10,7 +10,7 @@ static constexpr int  FLUSH_INTERVAL_MS = 60000; // 1 min max wait
 
 // ---------------------------------------------------------------------------
 void exportTaskFunc(void* /*param*/) {
-    Serial.println("[ExportTask] started");
+    DBGLN("[ExportTask] started");
 
     SensorReading batch[BATCH_SIZE];
     int           batchCount  = 0;
@@ -43,6 +43,6 @@ void exportTaskFunc(void* /*param*/) {
         exportManager.sendAll(batch, batchCount);
     }
 
-    Serial.println("[ExportTask] stopped");
+    DBGLN("[ExportTask] stopped");
     vTaskDelete(nullptr);
 }

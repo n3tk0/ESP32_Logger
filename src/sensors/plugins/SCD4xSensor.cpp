@@ -61,14 +61,14 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
 
     // Start periodic measurement (5s interval, fixed in SCD40/41)
     if (!_sendCmd(CMD_START_PERIODIC)) {
-        Serial.println("[SCD4x] Not found at 0x62");
+        DBGLN("[SCD4x] Not found at 0x62");
         return false;
     }
 
     // Wait for first measurement (SCD40 needs ~5s)
     delay(5100);
     _ready = true;
-    Serial.println("[SCD4x] Ready");
+    DBGLN("[SCD4x] Ready");
     return true;
 }
 

@@ -650,13 +650,13 @@ static void fmtIP(const uint8_t* ip, char* buf16) {
 // WEB SERVER SETUP
 // ============================================================================
 void setupWebServer() {
-    Serial.println("Setting up web server...");
+    DBGLN("Setting up web server...");
 
     bool uiReady = LittleFS.exists("/www/index.html");
 
     if (uiReady) {
         server.serveStatic("/", LittleFS, "/www/").setDefaultFile("index.html");
-        Serial.println("Web UI: serving from /www/");
+        DBGLN("Web UI: serving from /www/");
     } else {
         server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
             if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
@@ -665,7 +665,7 @@ void setupWebServer() {
             }
             r->send_P(200, "text/html", FAILSAFE_HTML);
         });
-        Serial.println("Web UI: FAILSAFE mode (upload /www/index.html to restore)");
+        DBGLN("Web UI: FAILSAFE mode (upload /www/index.html to restore)");
     }
 
     server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *r) {
@@ -1386,13 +1386,13 @@ void setupWebServer() {
     // =========================================================================
     server.on("/factory_reset", HTTP_POST, [](AsyncWebServerRequest *r) {
         r->send(200, "application/json", "{\"ok\":true}");
-        Serial.println("[FACTORY RESET] Formatting LittleFS…");
+        DBGLN("[FACTORY RESET] Formatting LittleFS…");
         // Flush any pending log entries first so we don't corrupt SD data
         // (activeFS may point to SD; LittleFS.format() only touches internal flash)
         if (LittleFS.format()) {
-            Serial.println("[FACTORY RESET] LittleFS formatted OK – restarting");
+            DBGLN("[FACTORY RESET] LittleFS formatted OK – restarting");
         } else {
-            Serial.println("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
+            DBGLN("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
         }
         safeWiFiShutdown();
         delay(300);
@@ -1513,15 +1513,15 @@ void setupWebServer() {
                 fs::FS* targetFS = (upStorage == "sdcard" && sdAvailable)
                                    ? (fs::FS*)&SD
                                    : (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
-                if (!targetFS) { Serial.println("Upload: no filesystem available"); request->_tempObject = nullptr; return; }
+                if (!targetFS) { DBGLN("Upload: no filesystem available"); request->_tempObject = nullptr; return; }
                 if (upDir != "/") targetFS->mkdir(upDir);
 
                 String upPath = (upDir == "/") ? "/" + filename : upDir + "/" + filename;
-                Serial.printf("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
+                DBGF("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
 
                 File* fp = new File(targetFS->open(upPath, FILE_WRITE));
                 if (!fp || !*fp) {
-                    Serial.printf("Upload: cannot open %s for write\n", upPath.c_str());
+                    DBGF("Upload: cannot open %s for write\n", upPath.c_str());
                     if (fp) delete fp;
                     request->_tempObject = nullptr;
                     return;
@@ -1535,7 +1535,7 @@ void setupWebServer() {
             if (final) {
                 if (fp) {
                     if (*fp) {
-                        Serial.printf("Upload done: %s (%u bytes)\n", filename.c_str(), (unsigned)(index + len));
+                        DBGF("Upload done: %s (%u bytes)\n", filename.c_str(), (unsigned)(index + len));
                         fp->close();
                     }
                     delete fp;
@@ -1676,12 +1676,12 @@ void setupWebServer() {
         },
         [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
             if (!index) {
-                Serial.printf("OTA start: %s\n", filename.c_str());
+                DBGF("OTA start: %s\n", filename.c_str());
                 if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
             }
             if (Update.write(data, len) != len) Update.printError(Serial);
             if (final) {
-                if (Update.end(true)) Serial.printf("OTA done: %u bytes\n", index + len);
+                if (Update.end(true)) DBGF("OTA done: %u bytes\n", index + len);
                 else Update.printError(Serial);
             }
         }
@@ -1784,5 +1784,5 @@ void setupWebServer() {
     });
 
     server.begin();
-    Serial.printf("Web server started. Free heap: %d\n", ESP.getFreeHeap());
+    DBGF("Web server started. Free heap: %d\n", ESP.getFreeHeap());
 }

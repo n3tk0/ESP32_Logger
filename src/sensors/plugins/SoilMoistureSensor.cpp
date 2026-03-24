@@ -23,7 +23,7 @@ bool SoilMoistureSensor::init(JsonObjectConst cfg) {
 
     pinMode(_pin, INPUT);
     _ready = true;
-    Serial.printf("[SoilMoisture] pin=%d dry=%d wet=%d samples=%d\n",
+    DBGF("[SoilMoisture] pin=%d dry=%d wet=%d samples=%d\n",
                   _pin, _dryValue, _wetValue, _samples);
     return true;
 }

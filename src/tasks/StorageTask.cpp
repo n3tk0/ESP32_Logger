@@ -5,7 +5,7 @@
 
 // ---------------------------------------------------------------------------
 void storageTaskFunc(void* param) {
-    Serial.println("[StorageTask] started");
+    DBGLN("[StorageTask] started");
 
     auto* p = static_cast<StorageTaskParam*>(param);
     JsonLogger logger;
@@ -25,10 +25,10 @@ void storageTaskFunc(void* param) {
                                p->maxSizeKB > 0 ? p->maxSizeKB : 512,
                                p->rotateDaily);
             mirrorActive = true;
-            Serial.println("[StorageTask] Mirror write active");
+            DBGLN("[StorageTask] Mirror write active");
         }
     } else {
-        Serial.println("[StorageTask] No filesystem — storage disabled");
+        DBGLN("[StorageTask] No filesystem — storage disabled");
     }
 
     SensorReading r;
@@ -41,6 +41,6 @@ void storageTaskFunc(void* param) {
 
     logger.flush();
     if (mirrorActive) mirrorLogger.flush();
-    Serial.println("[StorageTask] stopped");
+    DBGLN("[StorageTask] stopped");
     vTaskDelete(nullptr);
 }

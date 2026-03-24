@@ -14,7 +14,7 @@ bool ExportManager::addExporter(IExporter* exporter) {
 bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     File f = fs.open(cfgPath, FILE_READ);
     if (!f) {
-        Serial.printf("[ExportManager] %s not found\n", cfgPath);
+        DBGF("[ExportManager] %s not found\n", cfgPath);
         return false;
     }
 
@@ -22,13 +22,13 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     DeserializationError err = deserializeJson(doc, f);
     f.close();
     if (err) {
-        Serial.printf("[ExportManager] JSON error: %s\n", err.c_str());
+        DBGF("[ExportManager] JSON error: %s\n", err.c_str());
         return false;
     }
 
     JsonObject exportCfg = doc["export"].as<JsonObject>();
     if (exportCfg.isNull()) {
-        Serial.println("[ExportManager] No 'export' section in config");
+        DBGLN("[ExportManager] No 'export' section in config");
         return false;
     }
 
@@ -41,7 +41,7 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
             uint32_t ivMs = ecfg["interval_ms"] | 0;
             _exporters[i]->setIntervalMs(ivMs);
             ok++;
-            Serial.printf("[ExportManager] '%s' enabled=%s interval=%ums\n",
+            DBGF("[ExportManager] '%s' enabled=%s interval=%ums\n",
                           name, _exporters[i]->isEnabled() ? "true" : "false", ivMs);
         }
     }
@@ -59,7 +59,7 @@ bool ExportManager::_sendWithRetry(IExporter* exp,
             vTaskDelay(pdMS_TO_TICKS(delayMs));
         }
         if (exp->send(r, n)) return true;
-        Serial.printf("[ExportManager] '%s' retry %d/%d\n",
+        DBGF("[ExportManager] '%s' retry %d/%d\n",
                       exp->getName(), attempt + 1, exp->maxRetries());
     }
     // All retries exhausted — spool for later retry (#4.7)
@@ -87,7 +87,7 @@ void ExportManager::_spoolBatch(IExporter* exp,
         size_t fSize = sz ? sz.size() : 0;
         if (sz) sz.close();
         if (fSize >= MAX_SPOOL_BYTES) {
-            Serial.printf("[ExportManager] Spool full for '%s' (%zu B) — dropping\n",
+            DBGF("[ExportManager] Spool full for '%s' (%zu B) — dropping\n",
                           exp->getName(), fSize);
             return;
         }
@@ -95,7 +95,7 @@ void ExportManager::_spoolBatch(IExporter* exp,
 
     File f = _spoolFS->open(path, FILE_APPEND);
     if (!f) {
-        Serial.printf("[ExportManager] Cannot open spool %s\n", path);
+        DBGF("[ExportManager] Cannot open spool %s\n", path);
         return;
     }
 
@@ -106,7 +106,7 @@ void ExportManager::_spoolBatch(IExporter* exp,
     }
     f.flush();
     f.close();
-    Serial.printf("[ExportManager] Spooled %zu readings for '%s'\n",
+    DBGF("[ExportManager] Spooled %zu readings for '%s'\n",
                   n, exp->getName());
 }
 
@@ -160,7 +160,7 @@ bool ExportManager::_drainSpool(IExporter* exp) {
 
     if (allOk) {
         _spoolFS->remove(path);
-        Serial.printf("[ExportManager] Spool drained for '%s'\n", exp->getName());
+        DBGF("[ExportManager] Spool drained for '%s'\n", exp->getName());
     }
     return allOk;
 }
@@ -173,7 +173,7 @@ void ExportManager::sendAll(const SensorReading* readings, size_t count) {
     for (int i = 0; i < _count; i++) {
         if (!_exporters[i]->isEnabled()) continue;
         if (millis() > deadline) {
-            Serial.printf("[ExportManager] circuit breaker: skipping '%s'\n",
+            DBGF("[ExportManager] circuit breaker: skipping '%s'\n",
                           _exporters[i]->getName());
             break;
         }

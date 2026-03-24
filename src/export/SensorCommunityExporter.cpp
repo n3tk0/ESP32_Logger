@@ -6,7 +6,7 @@ bool SensorCommunityExporter::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]      | false;
     _intervalMs = cfg["interval_ms"]  | 145000;
     strncpy(_deviceId, config.deviceId, sizeof(_deviceId)-1);
-    Serial.printf("[SC] deviceId=%s interval=%lus\n",
+    DBGF("[SC] deviceId=%s interval=%lus\n",
                   _deviceId, _intervalMs/1000);
     return true;
 }
@@ -29,7 +29,7 @@ bool SensorCommunityExporter::_postPin(const char* pin,
     int code = http.POST(const_cast<char*>(body));
     bool ok  = (code == 201 || code == 200);
     if (!ok) {
-        Serial.printf("[SC] pin=%s POST failed code=%d\n", pin, code);
+        DBGF("[SC] pin=%s POST failed code=%d\n", pin, code);
     }
     http.end();
     return ok;

@@ -24,7 +24,7 @@
 //           и earlyGPIO snapshot чете само реалния физически бутон.
 // ============================================================================
 void safeWiFiShutdown() {
-    Serial.println("WiFi: Safe shutdown before restart...");
+    DBGLN("WiFi: Safe shutdown before restart...");
 
     // Изчисти незавършен WiFi scan (оставен от /wifi_scan_start endpoint)
     WiFi.scanDelete();
@@ -42,7 +42,7 @@ void safeWiFiShutdown() {
     WiFi.mode(WIFI_OFF);
     delay(200);   // Дай на радио стека да се flush-не
 
-    Serial.println("WiFi: Radio OFF, safe to restart.");
+    DBGLN("WiFi: Radio OFF, safe to restart.");
 }
 
 bool connectToWiFi() {
@@ -74,18 +74,18 @@ bool connectToWiFi() {
            millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
         delay(100);
         esp_task_wdt_reset();
-        if (millis() - lastDot >= 250) { Serial.print("."); lastDot = millis(); }
+        if (millis() - lastDot >= 250) { DBG("."); lastDot = millis(); }
     }
 
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnectedAsClient = true;
         currentIPAddress      = WiFi.localIP().toString();
         connectedSSID         = config.network.clientSSID;
-        Serial.printf("\nWiFi connected: %s\n", currentIPAddress.c_str());
+        DBGF("\nWiFi connected: %s\n", currentIPAddress.c_str());
         return true;
     }
 
-    Serial.println("\nWiFi connection failed");
+    DBGLN("\nWiFi connection failed");
     return false;
 }
 

@@ -19,7 +19,7 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
     _calGas.load(cal, "gas_resistance");
 
     if (!_bme.begin(_addr, &Wire)) {
-        Serial.printf("[BME688] Not found at 0x%02X\n", _addr);
+        DBGF("[BME688] Not found at 0x%02X\n", _addr);
         return false;
     }
 
@@ -31,7 +31,7 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
     _bme.setGasHeater(_heaterTemp, _heaterDurMs);
 
     _ready = true;
-    Serial.printf("[BME688] Ready at 0x%02X heater=%d°C/%dms\n",
+    DBGF("[BME688] Ready at 0x%02X heater=%d°C/%dms\n",
                   _addr, _heaterTemp, _heaterDurMs);
     return true;
 }

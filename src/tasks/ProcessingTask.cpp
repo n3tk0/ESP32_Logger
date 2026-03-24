@@ -26,7 +26,7 @@ static bool isPlausible(const SensorReading& r) {
 
 // ---------------------------------------------------------------------------
 void processingTaskFunc(void* /*param*/) {
-    Serial.println("[ProcessingTask] started");
+    DBGLN("[ProcessingTask] started");
 
     SensorReading r;
     while (TaskManager::running) {
@@ -60,6 +60,6 @@ void processingTaskFunc(void* /*param*/) {
         }
     }
 
-    Serial.println("[ProcessingTask] stopped");
+    DBGLN("[ProcessingTask] stopped");
     vTaskDelete(nullptr);
 }

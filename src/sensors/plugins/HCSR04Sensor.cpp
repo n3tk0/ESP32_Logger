@@ -16,7 +16,7 @@ bool HCSR04Sensor::init(JsonObjectConst cfg) {
     delayMicroseconds(2);
 
     _ready = true;
-    Serial.printf("[HC-SR04] trig=%d echo=%d max=%.0fcm\n",
+    DBGF("[HC-SR04] trig=%d echo=%d max=%.0fcm\n",
                   _trigPin, _echoPin, _maxDistanceCm);
     return true;
 }

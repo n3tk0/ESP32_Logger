@@ -43,7 +43,7 @@ bool initStorage() {
     } else {
         activeFS = nullptr;
         fsAvailable = false;
-        Serial.println("ERR: No storage available!");
+        DBGLN("ERR: No storage available!");
         return false;
     }
     return true;

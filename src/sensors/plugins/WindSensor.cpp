@@ -34,10 +34,10 @@ bool WindSensor::init(JsonObjectConst cfg) {
 
     if (_dirPin >= 0) {
         pinMode(_dirPin, INPUT);
-        Serial.printf("[Wind] speed pin=%d  dir pin=%d  dir_range=[%d,%d]\n",
+        DBGF("[Wind] speed pin=%d  dir pin=%d  dir_range=[%d,%d]\n",
                       _pin, _dirPin, _dirMinVal, _dirMaxVal);
     } else {
-        Serial.printf("[Wind] speed pin=%d ppr=%.1f mpr=%.2f window=%ums\n",
+        DBGF("[Wind] speed pin=%d ppr=%.1f mpr=%.2f window=%ums\n",
                       _pin, _pulsesPerRev, _metersPerRev, _sampleWindowMs);
     }
     return true;

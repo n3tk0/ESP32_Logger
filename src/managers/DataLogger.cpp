@@ -68,7 +68,7 @@ void flushLogBufferToFS() {
     }
 
     File f = activeFS->open(logFile, FILE_APPEND);
-    if (!f) { Serial.println("ERR: Can't open datalog"); return; }
+    if (!f) { DBGLN("ERR: Can't open datalog"); return; }
 
     for (int i = 0; i < logBufferCount; i++) {
         RtcDateTime wakeTime, sleepTime;

@@ -42,11 +42,11 @@ bool TaskManager::init(fs::FS& fs) {
     sensorQueue  = xQueueCreate((UBaseType_t)dynSDepth, sizeof(SensorReading));
     storageQueue = xQueueCreate(QUEUE_STORAGE_DEPTH,    sizeof(SensorReading));
     exportQueue  = xQueueCreate(QUEUE_EXPORT_DEPTH,     sizeof(SensorReading));
-    Serial.printf("[TaskManager] sensorQueue depth=%d (sensors=%d)\n",
+    DBGF("[TaskManager] sensorQueue depth=%d (sensors=%d)\n",
                   dynSDepth, sCount);
 
     if (!sensorQueue || !storageQueue || !exportQueue) {
-        Serial.println("[TaskManager] Queue creation FAILED");
+        DBGLN("[TaskManager] Queue creation FAILED");
         return false;
     }
 
@@ -56,7 +56,7 @@ bool TaskManager::init(fs::FS& fs) {
     wireMutex    = xSemaphoreCreateMutex();   // I2C bus serialisation (#14)
 
     if (!webDataMutex || !configMutex || !wireMutex) {
-        Serial.println("[TaskManager] Mutex creation FAILED");
+        DBGLN("[TaskManager] Mutex creation FAILED");
         return false;
     }
 
@@ -94,7 +94,7 @@ bool TaskManager::init(fs::FS& fs) {
                     storageParam.mirrorFS = (&fs == &SD)
                                            ? static_cast<fs::FS*>(&LittleFS)
                                            : static_cast<fs::FS*>(&SD);
-                    Serial.println("[TaskManager] Mirror write enabled (SD + LittleFS)");
+                    DBGLN("[TaskManager] Mirror write enabled (SD + LittleFS)");
                 }
             }
             cfgFile2.close();
@@ -108,29 +108,29 @@ bool TaskManager::init(fs::FS& fs) {
     r = xTaskCreatePinnedToCore(sensorTaskFunc,     "SensorTask",
                                 STACK_SENSOR_TASK,  nullptr,
                                 TASK_PRIO_SENSOR,   &hSensor,   0);
-    if (r != pdPASS) { Serial.println("[TaskManager] SensorTask FAILED"); return false; }
+    if (r != pdPASS) { DBGLN("[TaskManager] SensorTask FAILED"); return false; }
 
     r = xTaskCreatePinnedToCore(slowSensorTaskFunc,     "SlowSensorTask",
                                 STACK_SLOW_SENSOR_TASK, nullptr,
                                 TASK_PRIO_SLOW_SENSOR,  &hSlowSensor, 0);
-    if (r != pdPASS) { Serial.println("[TaskManager] SlowSensorTask FAILED"); return false; }
+    if (r != pdPASS) { DBGLN("[TaskManager] SlowSensorTask FAILED"); return false; }
 
     r = xTaskCreatePinnedToCore(processingTaskFunc, "ProcessTask",
                                 STACK_PROCESS_TASK, nullptr,
                                 TASK_PRIO_PROCESS,  &hProcess,  0);
-    if (r != pdPASS) { Serial.println("[TaskManager] ProcessTask FAILED"); return false; }
+    if (r != pdPASS) { DBGLN("[TaskManager] ProcessTask FAILED"); return false; }
 
     r = xTaskCreatePinnedToCore(storageTaskFunc,    "StorageTask",
                                 STACK_STORAGE_TASK, &storageParam,
                                 TASK_PRIO_STORAGE,  &hStorage,  0);
-    if (r != pdPASS) { Serial.println("[TaskManager] StorageTask FAILED"); return false; }
+    if (r != pdPASS) { DBGLN("[TaskManager] StorageTask FAILED"); return false; }
 
     r = xTaskCreatePinnedToCore(exportTaskFunc,     "ExportTask",
                                 STACK_EXPORT_TASK,  nullptr,
                                 TASK_PRIO_EXPORT,   &hExport,   0);
-    if (r != pdPASS) { Serial.println("[TaskManager] ExportTask FAILED"); return false; }
+    if (r != pdPASS) { DBGLN("[TaskManager] ExportTask FAILED"); return false; }
 
-    Serial.println("[TaskManager] All tasks started");
+    DBGLN("[TaskManager] All tasks started");
     return true;
 }
 

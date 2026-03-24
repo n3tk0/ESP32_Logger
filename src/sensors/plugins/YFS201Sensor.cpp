@@ -32,7 +32,7 @@ bool YFS201Sensor::init(JsonObjectConst cfg) {
     _lastPulseSnap = 0;
     _lastReadMs    = millis();
 
-    Serial.printf("[YFS201] pin=%d ppl=%.1f cal=%.2f\n",
+    DBGF("[YFS201] pin=%d ppl=%.1f cal=%.2f\n",
                   _pin, _pulsesPerLiter, _calibration);
     return true;
 }

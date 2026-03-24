@@ -38,7 +38,7 @@ bool VEML6075Sensor::init(JsonObjectConst cfg) {
     uint16_t devId = 0;
     _readReg16(0x0C, devId);
     if ((devId & 0xFF) != 0x26) {
-        Serial.printf("[VEML6075] Unexpected device ID 0x%04X (expected 0x0026)\n", devId);
+        DBGF("[VEML6075] Unexpected device ID 0x%04X (expected 0x0026)\n", devId);
         // Continue anyway — some modules don't expose ID
     }
 
@@ -46,12 +46,12 @@ bool VEML6075Sensor::init(JsonObjectConst cfg) {
     // Bits [6:4]=UV_IT, bit[3]=HD, bit[2]=UV_TRIG, bit[1]=AF, bit[0]=SD
     uint16_t conf = (0b010 << 4); // 100ms integration, power on
     if (!_writeReg16(REG_CONF, conf)) {
-        Serial.println("[VEML6075] Init failed");
+        DBGLN("[VEML6075] Init failed");
         return false;
     }
     delay(110); // wait one integration cycle
     _ready = true;
-    Serial.println("[VEML6075] Ready");
+    DBGLN("[VEML6075] Ready");
     return true;
 }
 

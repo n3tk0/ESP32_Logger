@@ -40,7 +40,7 @@ bool BH1750Sensor::init(JsonObjectConst cfg) {
     _calLux.load(cal, "lux");
 
     if (!_sendCmd(CMD_POWER_ON)) {
-        Serial.printf("[BH1750] Not found at 0x%02X\n", _addr);
+        DBGF("[BH1750] Not found at 0x%02X\n", _addr);
         return false;
     }
     delay(10);
@@ -50,7 +50,7 @@ bool BH1750Sensor::init(JsonObjectConst cfg) {
     delay(180); // wait for first measurement (120ms for H mode, some margin)
 
     _ready = true;
-    Serial.printf("[BH1750] Ready at 0x%02X mode=%s\n", _addr, mode);
+    DBGF("[BH1750] Ready at 0x%02X mode=%s\n", _addr, mode);
     return true;
 }
 

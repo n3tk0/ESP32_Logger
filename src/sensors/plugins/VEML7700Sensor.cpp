@@ -68,14 +68,14 @@ bool VEML7700Sensor::init(JsonObjectConst cfg) {
     // ALS_CONF: bits[12:11]=gain, bits[9:6]=IT, bit[0]=SD(0=on)
     uint16_t conf = ((uint16_t)_gain << 11) | ((uint16_t)itBits << 6);
     if (!_writeReg(REG_CONF, conf)) {
-        Serial.println("[VEML7700] Init failed");
+        DBGLN("[VEML7700] Init failed");
         return false;
     }
     delay(_intMs + 10);
 
     _resolution = _lookupResolution(_gain, _intMs);
     _ready = true;
-    Serial.printf("[VEML7700] Ready gain=%d IT=%dms res=%.5f\n",
+    DBGF("[VEML7700] Ready gain=%d IT=%dms res=%.5f\n",
                   _gain, _intMs, _resolution);
     return true;
 }

@@ -39,7 +39,7 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
 
     File f = fs.open(cfgPath, FILE_READ);
     if (!f) {
-        Serial.printf("[SensorManager] %s not found\n", cfgPath);
+        DBGF("[SensorManager] %s not found\n", cfgPath);
         return false;
     }
 
@@ -49,13 +49,13 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     f.close();
 
     if (err) {
-        Serial.printf("[SensorManager] JSON parse error: %s\n", err.c_str());
+        DBGF("[SensorManager] JSON parse error: %s\n", err.c_str());
         return false;
     }
 
     JsonArray arr = doc["sensors"].as<JsonArray>();
     if (arr.isNull()) {
-        Serial.println("[SensorManager] No 'sensors' array in config");
+        DBGLN("[SensorManager] No 'sensors' array in config");
         return false;
     }
 
@@ -63,7 +63,7 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     for (JsonObject sensor : arr) {
         if (!sensor["enabled"]) continue;
         if (_count >= MAX_SENSORS) {
-            Serial.println("[SensorManager] MAX_SENSORS reached");
+            DBGLN("[SensorManager] MAX_SENSORS reached");
             break;
         }
 
@@ -72,7 +72,7 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
 
         ISensor* s = _createPlugin(type);
         if (!s) {
-            Serial.printf("[SensorManager] Unknown plugin type: %s\n", type);
+            DBGF("[SensorManager] Unknown plugin type: %s\n", type);
             continue;
         }
 
@@ -82,14 +82,14 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
             _lastReadMs[_count] = 0;
             _count++;
             initialised++;
-            Serial.printf("[SensorManager] Sensor '%s' (%s) ready\n", id, type);
+            DBGF("[SensorManager] Sensor '%s' (%s) ready\n", id, type);
         } else {
-            Serial.printf("[SensorManager] Sensor '%s' init FAILED\n", id);
+            DBGF("[SensorManager] Sensor '%s' init FAILED\n", id);
             delete s;
         }
     }
 
-    Serial.printf("[SensorManager] %d/%d sensors initialised\n",
+    DBGF("[SensorManager] %d/%d sensors initialised\n",
                   initialised, _count);
     return initialised > 0;
 }

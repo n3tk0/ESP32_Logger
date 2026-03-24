@@ -22,7 +22,7 @@ bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
         }
     }
 
-    Serial.printf("[OSM] boxId=%s sensors=%d\n", _boxId, _sensorIdCount);
+    DBGF("[OSM] boxId=%s sensors=%d\n", _boxId, _sensorIdCount);
     return true;
 }
 
@@ -75,7 +75,7 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
 
         int code = http.POST(body);
         ok = (code >= 200 && code < 300);
-        if (!ok) Serial.printf("[OSM] POST failed code=%d\n", code);
+        if (!ok) DBGF("[OSM] POST failed code=%d\n", code);
         http.end();
     }
 

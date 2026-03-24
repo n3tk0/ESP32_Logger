@@ -23,7 +23,7 @@ bool SDS011Sensor::init(JsonObjectConst cfg) {
     }
 
     _drainBuffer();
-    Serial.printf("[SDS011] RX=%d TX=%d baud=%d period=%lus\n",
+    DBGF("[SDS011] RX=%d TX=%d baud=%d period=%lus\n",
                   rxPin, txPin, baud, _workPeriodMs / 1000);
     return true; // Can't verify HW without a valid frame yet
 }

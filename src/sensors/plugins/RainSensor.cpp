@@ -27,7 +27,7 @@ bool RainSensor::init(JsonObjectConst cfg) {
     gpio_set_intr_type((gpio_num_t)_pin, GPIO_INTR_NEGEDGE);
     gpio_isr_handler_add((gpio_num_t)_pin, _isr, this);
 
-    Serial.printf("[Rain] pin=%d mm/tip=%.4f  cal_rate(%.2f+%.2fx)\n",
+    DBGF("[Rain] pin=%d mm/tip=%.4f  cal_rate(%.2f+%.2fx)\n",
                   _pin, _mmPerTip, _calRate.offset, _calRate.scale);
     return true;
 }

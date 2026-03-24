@@ -45,12 +45,12 @@ bool ENS160Sensor::init(JsonObjectConst cfg) {
 
     // Set standard operating mode
     if (!_writeReg(REG_OPMODE, MODE_STANDARD)) {
-        Serial.printf("[ENS160] Not found at 0x%02X\n", _addr);
+        DBGF("[ENS160] Not found at 0x%02X\n", _addr);
         return false;
     }
     delay(100);
     _ready = _waitReady(2000);
-    if (!_ready) Serial.println("[ENS160] Not ready after init");
+    if (!_ready) DBGLN("[ENS160] Not ready after init");
     return _ready;
 }
 

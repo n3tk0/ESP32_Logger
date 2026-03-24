@@ -32,10 +32,10 @@ bool DS18B20Sensor::init(JsonObjectConst cfg) {
     _ready = _ds.begin((uint8_t)pin, _resolution);
     int count = _ds.deviceCount();
     if (count == 0) {
-        Serial.printf("[DS18B20] No sensors found on pin %d\n", pin);
+        DBGF("[DS18B20] No sensors found on pin %d\n", pin);
         _ready = true;  // bus may have device connect later
     } else {
-        Serial.printf("[DS18B20] Found %d sensor(s) on pin %d res=%d-bit\n",
+        DBGF("[DS18B20] Found %d sensor(s) on pin %d res=%d-bit\n",
                       count, pin, _resolution);
     }
 

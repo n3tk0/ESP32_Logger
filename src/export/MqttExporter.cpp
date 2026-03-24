@@ -21,7 +21,7 @@ bool MqttExporter::init(JsonObjectConst cfg) {
 
     // MQTT_Mini only supports QoS 0 (publish-only). Zero silently.
     if (_qos > 0) {
-        Serial.printf("[MQTT] WARNING: qos=%u requested but only QoS 0 is supported; "
+        DBGF("[MQTT] WARNING: qos=%u requested but only QoS 0 is supported; "
                       "using QoS 0.\n", _qos);
         _qos = 0;
     }
@@ -35,7 +35,7 @@ bool MqttExporter::init(JsonObjectConst cfg) {
     _client.setServer(_broker, _port);
     _client.setKeepAlive(60);
 
-    Serial.printf("[MQTT] broker=%s:%d prefix=%s\n",
+    DBGF("[MQTT] broker=%s:%d prefix=%s\n",
                   _broker, _port, _topicPrefix);
     return true;
 }
@@ -50,7 +50,7 @@ bool MqttExporter::_connect() {
         ok = _client.connect(_clientId);
     }
     if (!ok) {
-        Serial.printf("[MQTT] connect failed, rc=%d\n", _client.state());
+        DBGF("[MQTT] connect failed, rc=%d\n", _client.state());
     }
     return ok;
 }

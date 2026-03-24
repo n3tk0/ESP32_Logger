@@ -21,7 +21,7 @@ bool WaterFlowSensor::init(JsonObjectConst cfg) {
     // For custom type (defaultPPL == 0), pulses_per_liter is mandatory.
     if (_pulsesPerLiter <= 0.0f) {
         if (_defaultPPL == 0.0f) {
-            Serial.printf("[%s] ERROR: 'pulses_per_liter' is required for custom "
+            DBGF("[%s] ERROR: 'pulses_per_liter' is required for custom "
                           "water flow sensor (e.g. 450.0 for YF-S201-equivalent)\n",
                           getType());
             return false;
@@ -44,7 +44,7 @@ bool WaterFlowSensor::init(JsonObjectConst cfg) {
     _lastPulseSnap = 0;
     _lastReadMs    = millis();
 
-    Serial.printf("[%s] pin=%d ppl=%.1f cal=%.2f\n",
+    DBGF("[%s] pin=%d ppl=%.1f cal=%.2f\n",
                   getType(), _pin, _pulsesPerLiter, _calibration);
     return true;
 }

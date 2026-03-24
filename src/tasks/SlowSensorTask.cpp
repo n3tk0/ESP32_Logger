@@ -6,7 +6,7 @@
 
 // ---------------------------------------------------------------------------
 void slowSensorTaskFunc(void* /*param*/) {
-    Serial.println("[SlowSensorTask] started");
+    DBGLN("[SlowSensorTask] started");
 
     while (TaskManager::running) {
         // Get current Unix timestamp (same logic as SensorTask)
@@ -24,6 +24,6 @@ void slowSensorTaskFunc(void* /*param*/) {
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 
-    Serial.println("[SlowSensorTask] stopped");
+    DBGLN("[SlowSensorTask] stopped");
     vTaskDelete(nullptr);
 }

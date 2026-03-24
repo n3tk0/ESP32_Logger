@@ -24,7 +24,7 @@ bool HybridStorage::begin(const char* cfgPath) {
 
     if (cloudOnly) {
         _mode = CLOUD;
-        Serial.println("[HybridStorage] Cloud-only mode — no local writes");
+        DBGLN("[HybridStorage] Cloud-only mode — no local writes");
         return true;
     }
 
@@ -32,12 +32,12 @@ bool HybridStorage::begin(const char* cfgPath) {
     _sdOk = SD.begin(_sdCS);
     if (_sdOk) {
         _mode = HYBRID;
-        Serial.printf("[HybridStorage] SD ready (CS=%d) — hybrid mode\n", _sdCS);
+        DBGF("[HybridStorage] SD ready (CS=%d) — hybrid mode\n", _sdCS);
         // Ensure /logs directory exists on SD
         ensureDir(SD, "/logs");
     } else {
         _mode = LITTLEFS;
-        Serial.println("[HybridStorage] No SD — LittleFS-only mode");
+        DBGLN("[HybridStorage] No SD — LittleFS-only mode");
         if (fsAvailable && activeFS) {
             ensureDir(*activeFS, "/logs");
         }
@@ -66,7 +66,7 @@ void HybridStorage::mirrorWrite(const char* path, const uint8_t* data, size_t le
         File f = pri->open(path, FILE_APPEND);
         if (f) {
             size_t written = f.write(data, len);
-            if (written != len) Serial.printf("[HybridStorage] WARN: primary wrote %u/%u\n", written, len);
+            if (written != len) DBGF("[HybridStorage] WARN: primary wrote %u/%u\n", written, len);
             f.close();
         }
     }
@@ -76,7 +76,7 @@ void HybridStorage::mirrorWrite(const char* path, const uint8_t* data, size_t le
         File f = sec->open(path, FILE_APPEND);
         if (f) {
             size_t written = f.write(data, len);
-            if (written != len) Serial.printf("[HybridStorage] WARN: mirror wrote %u/%u\n", written, len);
+            if (written != len) DBGF("[HybridStorage] WARN: mirror wrote %u/%u\n", written, len);
             f.close();
         }
     }
