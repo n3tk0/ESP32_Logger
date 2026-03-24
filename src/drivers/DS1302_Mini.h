@@ -58,7 +58,7 @@ public:
             days += _daysInMonth(_year, m);
         }
         days += (uint32_t)(_day - 1);
-        return days * 86400UL + (uint32_t)_hour * 3600UL + (uint32_t)_minute * 60UL + (uint32_t)_second;
+        return days * SECONDS_PER_DAY + (uint32_t)_hour * SECONDS_PER_HOUR + (uint32_t)_minute * SECONDS_PER_MINUTE + (uint32_t)_second;
     }
 
     void InitWithUnix32Time(uint32_t ts) {
