@@ -15,7 +15,7 @@
 #define STACK_SENSOR_TASK      4096
 #define STACK_PROCESS_TASK     6144   // LTTB intermediate buffer on stack
 #define STACK_SLOW_SENSOR_TASK 4096   // Blocking sensor reads (UART + delay)
-#define STACK_STORAGE_TASK     4096
+#define STACK_STORAGE_TASK     6144   // Two JsonLogger (~1.3KB each) + File I/O
 #define STACK_EXPORT_TASK      8192   // WiFi + TLS + JSON serialisation
 
 // Queue depths (items = SensorReading, ~80 bytes each)
