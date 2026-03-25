@@ -85,6 +85,7 @@ enum WiFiModeType  : uint8_t { WIFIMODE_AP = 0, WIFIMODE_CLIENT = 1 };
 enum ThemeMode     : uint8_t { THEME_LIGHT = 0, THEME_DARK = 1, THEME_AUTO = 2 };
 enum ChartSource   : uint8_t { CHART_LOCAL = 0, CHART_CDN = 1 };
 enum WakeupMode    : uint8_t { WAKEUP_GPIO_ACTIVE_HIGH = 0, WAKEUP_GPIO_ACTIVE_LOW = 1 };
+enum PlatformMode  : uint8_t { PLATFORM_LEGACY = 0, PLATFORM_CONTINUOUS = 1, PLATFORM_HYBRID = 2 };
 
 enum DatalogRotation : uint8_t {
     ROTATION_NONE = 0, ROTATION_DAILY = 1,

@@ -147,11 +147,8 @@
 // ============================================================================
 // PLATFORM MODE & SLEEP GLOBALS
 // ============================================================================
-// Active platform mode (set once in setup, read in loop):
-//   0 = legacy   — deep-sleep water logger (no sensor pipeline)
-//   1 = continuous — always-on sensor pipeline, modem/CPU sleep when idle
-//   2 = hybrid    — sensor pipeline + flow logging, deep sleep between cycles
-static uint8_t g_platformMode = 0;
+// Active platform mode (set once in setup, read in loop). See PlatformMode in Config.h.
+static PlatformMode g_platformMode = PLATFORM_LEGACY;
 
 // Continuous-mode idle power management
 static uint32_t g_contIdleMs       = 300000; // ms idle before reducing power (5 min)
@@ -172,7 +169,7 @@ static uint32_t g_hybridIdleStart = 0;       // millis() when STATE_IDLE began
 // ============================================================================
 static void _doSleep() {
     // Give platform tasks a chance to finish current work
-    if (g_platformMode != 0 && TaskManager::running) {
+    if (g_platformMode != PLATFORM_LEGACY && TaskManager::running) {
         TaskManager::shutdown();
         delay(200);
     }
@@ -245,13 +242,13 @@ static void _manageContinuousPower() {
 }
 
 // ---------------------------------------------------------------------------
-// Detect operating mode from /platform_config.json
-// Returns: 0 = legacy (default, no change), 1 = continuous, 2 = hybrid
 // ---------------------------------------------------------------------------
-static uint8_t _detectPlatformMode() {
-    if (!fsAvailable || !activeFS) return 0;
+// Detect operating mode from /platform_config.json
+// ---------------------------------------------------------------------------
+static PlatformMode _detectPlatformMode() {
+    if (!fsAvailable || !activeFS) return PLATFORM_LEGACY;
     File f = activeFS->open("/platform_config.json", FILE_READ);
-    if (!f) return 0;
+    if (!f) return PLATFORM_LEGACY;
     // Use a filter so only the top-level "mode" key is parsed; the rest of
     // platform_config.json (sensors array, etc.) can be many KB and would
     // overflow a small document, returning NoMemory and silently falling back
@@ -260,13 +257,13 @@ static uint8_t _detectPlatformMode() {
     filter["mode"] = true;
     StaticJsonDocument<64>  doc;
     if (deserializeJson(doc, f, DeserializationOption::Filter(filter)) != DeserializationError::Ok) {
-        f.close(); return 0;
+        f.close(); return PLATFORM_LEGACY;
     }
     f.close();
     const char* mode = doc["mode"] | "legacy";
-    if (strcmp(mode, "continuous") == 0) return 1;
-    if (strcmp(mode, "hybrid")     == 0) return 2;
-    return 0;
+    if (strcmp(mode, "continuous") == 0) return PLATFORM_CONTINUOUS;
+    if (strcmp(mode, "hybrid")     == 0) return PLATFORM_HYBRID;
+    return PLATFORM_LEGACY;
 }
 
 // ---------------------------------------------------------------------------
@@ -470,10 +467,21 @@ void setup() {
 
     // Set sleep guard: continuous keeps FreeRTOS tasks alive → no legacy deep sleep
     // Hybrid also blocks legacy 2-second sleep; its own timed sleep runs in loop()
-    g_sleepMode = (g_platformMode >= 1) ? 2 : 0;
+    g_sleepMode = (g_platformMode != PLATFORM_LEGACY) ? 2 : 0;
 
     // Load per-mode sleep tuning from platform_config.json
     _loadSleepConfig();
+
+    // In hybrid/continuous mode the web server (and WiFi) always starts — no button press required.
+    // Exception: hybrid timer wake keeps its headless sensor cycle so WiFi doesn't delay readings.
+    // If wifiMode=CLIENT and connection fails, the existing fallback below starts AP mode.
+    if (g_platformMode != PLATFORM_LEGACY && !apModeTriggered) {
+        bool isHybridTimerWake = (g_platformMode == PLATFORM_HYBRID && wakeUpButtonStr == "TIMER");
+        if (!isHybridTimerWake) {
+            apModeTriggered = true;
+            DBGLN("Non-legacy: auto-activating web server");
+        }
+    }
 
     if (apModeTriggered) {
         DBGLN(onlineLoggerMode ? "=== Online Logger ===" : "=== Web Server ===");
@@ -490,7 +498,7 @@ void setup() {
         setupWebServer();   // ← в WebServer.cpp
 
         // Platform v5.0: start sensor pipeline in continuous/hybrid mode
-        if (g_platformMode == 1 || g_platformMode == 2) {
+        if (g_platformMode != PLATFORM_LEGACY) {
             _initPlatform();
         } else {
             // Even in legacy mode, register API routes so /api/sensors works
@@ -501,7 +509,7 @@ void setup() {
             // Skip Arduino attachInterrupt when platform mode is active:
             // WaterFlowSensor::init() already registers the ISR via
             // gpio_isr_handler_add(); dual registration causes a panic (#6).
-            if (g_platformMode == 0) {
+            if (g_platformMode == PLATFORM_LEGACY) {
                 attachInterrupt(digitalPinToInterrupt(config.hardware.pinFlowSensor),
                                 onFlowPulse, FALLING);
             }
@@ -511,14 +519,14 @@ void setup() {
         DBGLN("=== Normal Logging Mode ===");
         setCpuFrequencyMhz(config.hardware.cpuFreqMHz);
         // Guard: skip Arduino ISR when WaterFlowSensor is handling the pin (#6)
-        if (g_platformMode == 0) {
+        if (g_platformMode == PLATFORM_LEGACY) {
             attachInterrupt(digitalPinToInterrupt(config.hardware.pinFlowSensor),
                             onFlowPulse, FALLING);
         }
 
         // Platform v5.0: start sensor pipeline on normal boot when configured
         // for continuous or hybrid mode (no web server routes needed here)
-        if (g_platformMode == 1 || g_platformMode == 2) {
+        if (g_platformMode != PLATFORM_LEGACY) {
             _initPlatform();
         }
     }
@@ -526,7 +534,7 @@ void setup() {
     // ── Hybrid timer wakeup: quick headless sensor cycle → back to sleep ─────
     // When the hybrid periodic timer fires, skip the full web/flow cycle:
     // just let sensor tasks run for g_hybridActiveMs, flush data, then re-sleep.
-    if (g_platformMode == 2 && !apModeTriggered && wakeUpButtonStr == "TIMER") {
+    if (g_platformMode == PLATFORM_HYBRID && !apModeTriggered && wakeUpButtonStr == "TIMER") {
         DBGF("[Hybrid] Timer wake: sensor window %ums...\n", g_hybridActiveMs);
         // H2: non-blocking active window — poll in 100ms steps so shouldRestart is honoured
         uint32_t windowEnd = millis() + g_hybridActiveMs;
@@ -545,7 +553,7 @@ void setup() {
     }
 
     // ── Continuous mode: init activity clock ─────────────────────────────────
-    if (g_platformMode == 1) {
+    if (g_platformMode == PLATFORM_CONTINUOUS) {
         g_contLastActivity = millis();
         // Enable WiFi modem sleep from the start if configured
         if (g_contModemSleep) WiFi.setSleep(true);
@@ -569,7 +577,7 @@ void setup() {
 
     // In platform mode (>=1), WaterFlowSensor owns the flow ISR; the legacy
     // flow state machine has no pulse source and must stay in STATE_IDLE.
-    if (g_platformMode >= 1) {
+    if (g_platformMode != PLATFORM_LEGACY) {
         loggingState = STATE_IDLE;
     } else if (wakeUpButtonStr == "FF_BTN") {
         cycleButtonSet = true; cycleStartedBy = "FF_BTN";
@@ -613,7 +621,7 @@ void loop() {
     // ── Continuous platform mode ──────────────────────────────────────────────
     // FreeRTOS tasks handle all sensing; loop() only manages idle power.
     // C3: buttons remain functional — debounce + publish events through pipeline.
-    if (g_platformMode == 1) {
+    if (g_platformMode == PLATFORM_CONTINUOUS) {
         _manageContinuousPower();
 
         // C3: poll buttons in continuous mode
@@ -656,13 +664,14 @@ void loop() {
     // Pure Web Server mode (legacy or hybrid with web server active)
     if (apModeTriggered && !onlineLoggerMode) {
         // Hybrid: still manage power if idle
-        if (g_platformMode == 2) _manageContinuousPower();
+        if (g_platformMode == PLATFORM_HYBRID) _manageContinuousPower();
         // C4: software watchdog in hybrid/web mode
-        if (g_platformMode >= 1 && !TaskManager::checkHealth()) {
+        if (g_platformMode != PLATFORM_LEGACY && !TaskManager::checkHealth()) {
             shouldRestart = true; restartTimer = millis();
         }
         delay(10);
-        return;
+        // Hybrid must fall through to the idle-sleep check at the bottom of loop().
+        if (g_platformMode != PLATFORM_HYBRID) return;
     }
 
     // ── Button debounce ───────────────────────────────────────────────────────
@@ -694,7 +703,7 @@ void loop() {
     switch (loggingState) {
 
         case STATE_IDLE:
-            if (g_platformMode == 0 && highCountFF > 0) {
+            if (g_platformMode == PLATFORM_LEGACY && highCountFF > 0) {
                 cycleStartedBy = "FF_BTN"; cycleButtonSet = true;
                 loggingState   = STATE_WAIT_FLOW;
                 stateStartTime = millis(); cycleStartTime = millis();
@@ -703,7 +712,7 @@ void loop() {
                     currentWakeTimestamp = now.IsValid() ? now.Unix32Time() : 0;
                 }
                 highCountFF = 0; highCountPF = 0;
-            } else if (g_platformMode == 0 && highCountPF > 0) {
+            } else if (g_platformMode == PLATFORM_LEGACY && highCountPF > 0) {
                 cycleStartedBy = "PF_BTN"; cycleButtonSet = true;
                 loggingState   = STATE_WAIT_FLOW;
                 stateStartTime = millis(); cycleStartTime = millis();
@@ -812,7 +821,7 @@ void loop() {
                 DBGLN("Going to sleep...");
                 Serial.flush();
                 _doSleep();
-            } else if (!shouldRestart && !onlineLoggerMode && g_platformMode == 2) {
+            } else if (!shouldRestart && !onlineLoggerMode && g_platformMode == PLATFORM_HYBRID) {
                 // Hybrid: after a flow cycle, reset idle timer so hybrid sleep
                 // won't fire immediately — give sensors time to log the event.
                 g_hybridIdleStart = millis();
@@ -825,7 +834,7 @@ void loop() {
     // g_sleepMode == 2 blocks the legacy 2-second sleep above.
     // Instead, wait g_hybridIdleMs in STATE_IDLE before sleeping with both
     // a GPIO wakeup (buttons/flow) and a periodic timer for sensor reads.
-    if (g_platformMode == 2 && !onlineLoggerMode && !shouldRestart) {
+    if (g_platformMode == PLATFORM_HYBRID && !onlineLoggerMode && !shouldRestart) {
         // H4: also allow sleep when web server is active but no clients connected
         bool webIdle = apModeTriggered ? (WiFi.softAPgetStationNum() == 0) : true;
         if (loggingState == STATE_IDLE && webIdle) {
