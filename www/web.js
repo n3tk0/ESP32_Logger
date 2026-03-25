@@ -1860,6 +1860,20 @@ function clLoad() {
         var scEl   = document.getElementById('cl-exp-sc');  if(scEl)   scEl.checked   = !!(exp.sensor_community && exp.sensor_community.enabled);
         var osmEl  = document.getElementById('cl-exp-osm'); if(osmEl)  osmEl.checked  = !!(exp.opensensemap && exp.opensensemap.enabled);
 
+        // Sleep settings
+        var sl   = cfg.sleep || {};
+        var cont = sl.continuous || {};
+        var hyb  = sl.hybrid    || {};
+        var ciEl = document.getElementById('cl-cont-idle');  if(ciEl) ciEl.value   = cont.idle_timeout_ms      || 300000;
+        var ccEl = document.getElementById('cl-cont-cpu');   if(ccEl) ccEl.value   = String(cont.idle_cpu_mhz  || 80);
+        var cmEl = document.getElementById('cl-cont-modem'); if(cmEl) cmEl.checked = cont.modem_sleep !== false;
+        var hiEl = document.getElementById('cl-hyb-idle');   if(hiEl) hiEl.value   = hyb.idle_before_sleep_ms  || 120000;
+        var hsEl = document.getElementById('cl-hyb-sleep');  if(hsEl) hsEl.value   = hyb.sleep_duration_ms     || 60000;
+        var haEl = document.getElementById('cl-hyb-active'); if(haEl) haEl.value   = hyb.active_window_ms      || 30000;
+
+        // Show/hide sleep panel according to selected mode
+        clUpdateSleepPanel();
+
         // Sensor list
         clRenderSensors(cfg.sensors || []);
     });
@@ -1959,6 +1973,17 @@ function clSave() {
     var scEl   = document.getElementById('cl-exp-sc');   if(scEl)   PCFG.export.sensor_community.enabled = scEl.checked;
     var osmEl  = document.getElementById('cl-exp-osm');  if(osmEl)  PCFG.export.opensensemap.enabled = osmEl.checked;
 
+    // Sleep settings
+    if(!PCFG.sleep) PCFG.sleep = {};
+    if(!PCFG.sleep.continuous) PCFG.sleep.continuous = {};
+    if(!PCFG.sleep.hybrid)     PCFG.sleep.hybrid     = {};
+    var ciEl = document.getElementById('cl-cont-idle');  if(ciEl) PCFG.sleep.continuous.idle_timeout_ms    = parseInt(ciEl.value, 10) || 300000;
+    var ccEl = document.getElementById('cl-cont-cpu');   if(ccEl) PCFG.sleep.continuous.idle_cpu_mhz       = parseInt(ccEl.value, 10) || 80;
+    var cmEl = document.getElementById('cl-cont-modem'); if(cmEl) PCFG.sleep.continuous.modem_sleep        = cmEl.checked;
+    var hiEl = document.getElementById('cl-hyb-idle');   if(hiEl) PCFG.sleep.hybrid.idle_before_sleep_ms   = parseInt(hiEl.value, 10) || 120000;
+    var hsEl = document.getElementById('cl-hyb-sleep');  if(hsEl) PCFG.sleep.hybrid.sleep_duration_ms      = parseInt(hsEl.value, 10) || 60000;
+    var haEl = document.getElementById('cl-hyb-active'); if(haEl) PCFG.sleep.hybrid.active_window_ms       = parseInt(haEl.value, 10) || 30000;
+
     if(msg){ msg.textContent='Saving…'; msg.className=''; }
 
     pcfgSave(PCFG, function(ok, err) {
@@ -1972,6 +1997,33 @@ function clSave() {
             if(msg){ msg.textContent='❌ Save failed: ' + err; msg.className=''; }
         }
     });
+}
+
+// Show/hide the Power & Sleep card and its sub-panels based on selected mode.
+function clUpdateSleepPanel() {
+    var modeEl  = document.getElementById('cl-mode');
+    var mode    = modeEl ? modeEl.value : 'legacy';
+    var card    = document.getElementById('cl-sleep-card');
+    var contDiv = document.getElementById('cl-sleep-cont');
+    var hybDiv  = document.getElementById('cl-sleep-hyb');
+    if(card)    card.style.display    = (mode === 'continuous' || mode === 'hybrid') ? '' : 'none';
+    if(contDiv) contDiv.style.display = (mode === 'continuous') ? '' : 'none';
+    if(hybDiv)  hybDiv.style.display  = (mode === 'hybrid')     ? '' : 'none';
+    clUpdateHybCycle();
+}
+
+// Update the hybrid cycle summary label (sleep + active = total).
+function clUpdateHybCycle() {
+    var lbl  = document.getElementById('cl-hyb-cycle-label');
+    if(!lbl) return;
+    var hsEl = document.getElementById('cl-hyb-sleep');
+    var haEl = document.getElementById('cl-hyb-active');
+    var sleepMs  = parseInt(hsEl  ? hsEl.value  : 60000,  10) || 60000;
+    var activeMs = parseInt(haEl ? haEl.value : 30000, 10) || 30000;
+    var totalMs  = sleepMs + activeMs;
+    lbl.textContent = (sleepMs/1000).toFixed(0) + 's sleep + '
+                    + (activeMs/1000).toFixed(0) + 's active = '
+                    + (totalMs/1000).toFixed(0)  + 's per cycle';
 }
 
 // ============================================================================
