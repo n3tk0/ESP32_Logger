@@ -475,6 +475,20 @@ void setup() {
     // Load per-mode sleep tuning from platform_config.json
     _loadSleepConfig();
 
+    // W1: В hybrid/continuous режим web сървърът (и WiFi) стартира автоматично
+    // без да се изисква натискане на WiFi trigger бутона.
+    // Изключение: hybrid timer wake → headless sensor цикъл (виж долу: !apModeTriggered && TIMER)
+    // → не стартира WiFi за да не забавя периодичните показания.
+    // Ако WiFi client mode е конфигуриран и не успее → при следващ ред
+    // 485 fallback-ва към AP (Failsafe AP) — същото поведение като legacy режима.
+    if (g_platformMode >= 1 && !apModeTriggered) {
+        bool isHybridTimerWake = (g_platformMode == 2 && wakeUpButtonStr == "TIMER");
+        if (!isHybridTimerWake) {
+            apModeTriggered = true;
+            DBGLN("[W1] Platform mode >= 1: auto-activating web server");
+        }
+    }
+
     if (apModeTriggered) {
         DBGLN(onlineLoggerMode ? "=== Online Logger ===" : "=== Web Server ===");
         setCpuFrequencyMhz(160);
@@ -662,7 +676,10 @@ void loop() {
             shouldRestart = true; restartTimer = millis();
         }
         delay(10);
-        return;
+        // W2: hybrid трябва да достигне sleep логиката в края на loop()
+        // за да може да заспи след idle timeout (WiFi се изчиства в _doSleep).
+        // Legacy и continuous се връщат тук.
+        if (g_platformMode != 2) return;
     }
 
     // ── Button debounce ───────────────────────────────────────────────────────
