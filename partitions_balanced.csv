@@ -1,8 +1,8 @@
 # Custom balanced partition table for XIAO ESP32-C3 (4MB flash)
-# 1,472 KB APP (×2 for OTA) + 1,088 KB SPIFFS = 4,032 KB
+# 1,536 KB APP (×2 for OTA) + 960 KB SPIFFS = 4,032 KB
 # Name,   Type, SubType, Offset,   Size,    Flags
 nvs,      data, nvs,     0x9000,   0x5000,
 otadata,  data, ota,     0xe000,   0x2000,
-app0,     app,  ota_0,   0x10000,  0x170000,
-app1,     app,  ota_1,   0x180000, 0x170000,
-spiffs,   data, spiffs,  0x2F0000, 0x110000,
+app0,     app,  ota_0,   0x10000,  0x180000,
+app1,     app,  ota_1,   0x190000, 0x180000,
+spiffs,   data, spiffs,  0x310000, 0xF0000,
