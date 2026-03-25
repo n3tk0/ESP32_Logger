@@ -1838,6 +1838,16 @@ var CL_SENSOR_TYPES = [
     { value: 'wind',    label: 'Wind speed (anemometer)',           iface: 'pulse' }
 ];
 
+// Single source of truth for sleep-config defaults (mirrors Logger.ino initial values).
+var CL_SLEEP_DEFAULTS = {
+    cont_idle_timeout_ms:    300000,
+    cont_idle_cpu_mhz:       80,
+    cont_modem_sleep:        true,
+    hyb_idle_before_sleep_ms: 120000,
+    hyb_sleep_duration_ms:   60000,
+    hyb_active_window_ms:    30000
+};
+
 function clLoad() {
     var msg = document.getElementById('cl-msg');
     if(msg) { msg.textContent = ''; msg.className = ''; }
@@ -1864,12 +1874,12 @@ function clLoad() {
         var sl   = cfg.sleep || {};
         var cont = sl.continuous || {};
         var hyb  = sl.hybrid    || {};
-        var ciEl = document.getElementById('cl-cont-idle');  if(ciEl) ciEl.value   = cont.idle_timeout_ms      || 300000;
-        var ccEl = document.getElementById('cl-cont-cpu');   if(ccEl) ccEl.value   = String(cont.idle_cpu_mhz  || 80);
+        var ciEl = document.getElementById('cl-cont-idle');  if(ciEl) ciEl.value   = cont.idle_timeout_ms      || CL_SLEEP_DEFAULTS.cont_idle_timeout_ms;
+        var ccEl = document.getElementById('cl-cont-cpu');   if(ccEl) ccEl.value   = String(cont.idle_cpu_mhz  || CL_SLEEP_DEFAULTS.cont_idle_cpu_mhz);
         var cmEl = document.getElementById('cl-cont-modem'); if(cmEl) cmEl.checked = cont.modem_sleep !== false;
-        var hiEl = document.getElementById('cl-hyb-idle');   if(hiEl) hiEl.value   = hyb.idle_before_sleep_ms  || 120000;
-        var hsEl = document.getElementById('cl-hyb-sleep');  if(hsEl) hsEl.value   = hyb.sleep_duration_ms     || 60000;
-        var haEl = document.getElementById('cl-hyb-active'); if(haEl) haEl.value   = hyb.active_window_ms      || 30000;
+        var hiEl = document.getElementById('cl-hyb-idle');   if(hiEl) hiEl.value   = hyb.idle_before_sleep_ms  || CL_SLEEP_DEFAULTS.hyb_idle_before_sleep_ms;
+        var hsEl = document.getElementById('cl-hyb-sleep');  if(hsEl) hsEl.value   = hyb.sleep_duration_ms     || CL_SLEEP_DEFAULTS.hyb_sleep_duration_ms;
+        var haEl = document.getElementById('cl-hyb-active'); if(haEl) haEl.value   = hyb.active_window_ms      || CL_SLEEP_DEFAULTS.hyb_active_window_ms;
 
         // Show/hide sleep panel according to selected mode
         clUpdateSleepPanel();
@@ -1977,12 +1987,12 @@ function clSave() {
     if(!PCFG.sleep) PCFG.sleep = {};
     if(!PCFG.sleep.continuous) PCFG.sleep.continuous = {};
     if(!PCFG.sleep.hybrid)     PCFG.sleep.hybrid     = {};
-    var ciEl = document.getElementById('cl-cont-idle');  if(ciEl) PCFG.sleep.continuous.idle_timeout_ms    = parseInt(ciEl.value, 10) || 300000;
-    var ccEl = document.getElementById('cl-cont-cpu');   if(ccEl) PCFG.sleep.continuous.idle_cpu_mhz       = parseInt(ccEl.value, 10) || 80;
+    var ciEl = document.getElementById('cl-cont-idle');  if(ciEl) PCFG.sleep.continuous.idle_timeout_ms    = parseInt(ciEl.value, 10) || CL_SLEEP_DEFAULTS.cont_idle_timeout_ms;
+    var ccEl = document.getElementById('cl-cont-cpu');   if(ccEl) PCFG.sleep.continuous.idle_cpu_mhz       = parseInt(ccEl.value, 10) || CL_SLEEP_DEFAULTS.cont_idle_cpu_mhz;
     var cmEl = document.getElementById('cl-cont-modem'); if(cmEl) PCFG.sleep.continuous.modem_sleep        = cmEl.checked;
-    var hiEl = document.getElementById('cl-hyb-idle');   if(hiEl) PCFG.sleep.hybrid.idle_before_sleep_ms   = parseInt(hiEl.value, 10) || 120000;
-    var hsEl = document.getElementById('cl-hyb-sleep');  if(hsEl) PCFG.sleep.hybrid.sleep_duration_ms      = parseInt(hsEl.value, 10) || 60000;
-    var haEl = document.getElementById('cl-hyb-active'); if(haEl) PCFG.sleep.hybrid.active_window_ms       = parseInt(haEl.value, 10) || 30000;
+    var hiEl = document.getElementById('cl-hyb-idle');   if(hiEl) PCFG.sleep.hybrid.idle_before_sleep_ms   = parseInt(hiEl.value, 10) || CL_SLEEP_DEFAULTS.hyb_idle_before_sleep_ms;
+    var hsEl = document.getElementById('cl-hyb-sleep');  if(hsEl) PCFG.sleep.hybrid.sleep_duration_ms      = parseInt(hsEl.value, 10) || CL_SLEEP_DEFAULTS.hyb_sleep_duration_ms;
+    var haEl = document.getElementById('cl-hyb-active'); if(haEl) PCFG.sleep.hybrid.active_window_ms       = parseInt(haEl.value, 10) || CL_SLEEP_DEFAULTS.hyb_active_window_ms;
 
     if(msg){ msg.textContent='Saving…'; msg.className=''; }
 
@@ -2018,12 +2028,10 @@ function clUpdateHybCycle() {
     if(!lbl) return;
     var hsEl = document.getElementById('cl-hyb-sleep');
     var haEl = document.getElementById('cl-hyb-active');
-    var sleepMs  = parseInt(hsEl  ? hsEl.value  : 60000,  10) || 60000;
-    var activeMs = parseInt(haEl ? haEl.value : 30000, 10) || 30000;
+    var sleepMs  = parseInt(hsEl ? hsEl.value : CL_SLEEP_DEFAULTS.hyb_sleep_duration_ms,   10) || CL_SLEEP_DEFAULTS.hyb_sleep_duration_ms;
+    var activeMs = parseInt(haEl ? haEl.value : CL_SLEEP_DEFAULTS.hyb_active_window_ms,    10) || CL_SLEEP_DEFAULTS.hyb_active_window_ms;
     var totalMs  = sleepMs + activeMs;
-    lbl.textContent = (sleepMs/1000).toFixed(0) + 's sleep + '
-                    + (activeMs/1000).toFixed(0) + 's active = '
-                    + (totalMs/1000).toFixed(0)  + 's per cycle';
+    lbl.textContent = `${(sleepMs/1000).toFixed(0)}s sleep + ${(activeMs/1000).toFixed(0)}s active = ${(totalMs/1000).toFixed(0)}s per cycle`;
 }
 
 // ============================================================================
