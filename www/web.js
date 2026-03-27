@@ -2944,6 +2944,11 @@ function clRemoveSensor(idx) {
   clRenderSensors(PCFG.sensors);
 }
 
+// ============================================================================
+// SENSOR ADD POPUP
+// ============================================================================
+var SAP_selectedType = null;
+
 function clAddSensor() {
   var b = document.getElementById("sensorPopupBody");
   var t = document.getElementById("sensorPopupTitle");
