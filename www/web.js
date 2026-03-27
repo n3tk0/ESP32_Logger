@@ -1930,33 +1930,206 @@ function clRemoveSensor(idx) {
     clRenderSensors(PCFG.sensors);
 }
 
+// ============================================================================
+// SENSOR ADD POPUP
+// ============================================================================
+var SAP_selectedType = null;
+
 function clAddSensor() {
-    var type = prompt('Sensor type:\n' + CL_SENSOR_TYPES.map(function(t){ return t.value + ' — ' + t.label; }).join('\n'));
-    if(!type) return;
-    type = type.trim().toLowerCase();
-    var info = CL_SENSOR_TYPES.find(function(t){ return t.value === type; });
-    if(!info) { alert('Unknown sensor type: ' + type); return; }
     if(!PCFG) PCFG = { sensors: [] };
     if(!PCFG.sensors) PCFG.sensors = [];
-    var newS = { id: type + '_' + (PCFG.sensors.length + 1), type: type, enabled: true, interface: info.iface };
+    SAP_selectedType = null;
+
+    var grid = document.getElementById('sap-type-grid');
+    if(grid) {
+        grid.innerHTML = CL_SENSOR_TYPES.map(function(t) {
+            // Extract the interface tag and description separately for nicer display
+            var ifaceBadge = '<span style="font-size:.7rem;background:var(--bg);border-radius:4px;padding:1px 5px;opacity:.8">'
+                           + t.iface + '</span>';
+            return '<button type="button" id="sap-btn-' + t.value + '" class="btn btn-secondary"'
+                + ' onclick="sapSelectType(\'' + t.value + '\')"'
+                + ' style="text-align:left;padding:.5rem .6rem;display:flex;flex-direction:column;gap:2px;height:auto">'
+                + '<span style="font-weight:700;font-size:.88rem">' + t.value + ' ' + ifaceBadge + '</span>'
+                + '<span style="font-size:.75rem;opacity:.75;white-space:normal">' + t.label + '</span>'
+                + '</button>';
+        }).join('');
+    }
+
+    var idEl = document.getElementById('sap-id');
+    if(idEl) idEl.value = '';
+
+    document.getElementById('sensor-add-popup').style.display = 'flex';
+}
+
+function sapSelectType(type) {
+    SAP_selectedType = type;
+    CL_SENSOR_TYPES.forEach(function(t) {
+        var btn = document.getElementById('sap-btn-' + t.value);
+        if(btn) {
+            btn.className = 'btn ' + (t.value === type ? 'btn-primary' : 'btn-secondary');
+        }
+    });
+    var idEl = document.getElementById('sap-id');
+    if(idEl && !idEl.value.trim()) {
+        var count = PCFG && PCFG.sensors ? PCFG.sensors.length + 1 : 1;
+        idEl.value = type + '_' + count;
+    }
+}
+
+function sapClose() {
+    document.getElementById('sensor-add-popup').style.display = 'none';
+    SAP_selectedType = null;
+}
+
+function sapConfirm() {
+    if(!SAP_selectedType) { alert('Please select a sensor type first.'); return; }
+    var id = (document.getElementById('sap-id').value || '').trim();
+    if(!id) { alert('Please enter a sensor ID.'); return; }
+    var info = CL_SENSOR_TYPES.find(function(t){ return t.value === SAP_selectedType; });
+    if(!info) return;
+    var newS = { id: id, type: SAP_selectedType, enabled: true, interface: info.iface };
     if(info.iface === 'i2c')   { newS.sda = 6; newS.scl = 7; newS.read_interval_ms = 10000; }
     if(info.iface === 'uart')  { newS.uart_rx = 20; newS.uart_tx = -1; newS.baud = 9600; }
     if(info.iface === 'pulse') { newS.pin = 9; newS.read_interval_ms = 5000; }
     PCFG.sensors.push(newS);
+    sapClose();
     clRenderSensors(PCFG.sensors);
+    // Open edit popup for the new sensor so user can fine-tune it immediately
+    clEditSensor(PCFG.sensors.length - 1);
+}
+
+// ============================================================================
+// SENSOR EDIT POPUP
+// ============================================================================
+var SEP_idx = null;
+
+function _sepEsc(str) {
+    return String(str === undefined || str === null ? '' : str)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _sepRow(label, inputHtml, hint) {
+    return '<div class="form-group" style="margin-bottom:.7rem">'
+        + '<label class="form-label" style="margin-bottom:.3rem">' + label + '</label>'
+        + inputHtml
+        + (hint ? '<p class="form-hint" style="margin-top:.2rem">' + hint + '</p>' : '')
+        + '</div>';
+}
+
+function _sepNumInput(id, val, min, max, step) {
+    return '<input type="number" id="' + id + '" class="form-input" value="' + _sepEsc(val) + '"'
+        + (min !== undefined ? ' min="' + min + '"' : '')
+        + (max !== undefined ? ' max="' + max + '"' : '')
+        + (step !== undefined ? ' step="' + step + '"' : '')
+        + '>';
 }
 
 function clEditSensor(idx) {
     if(!PCFG || !PCFG.sensors) return;
-    var s    = PCFG.sensors[idx];
-    var json = prompt('Edit sensor JSON (be careful with syntax):', JSON.stringify(s, null, 2));
-    if(!json) return;
-    try {
-        PCFG.sensors[idx] = JSON.parse(json);
-        clRenderSensors(PCFG.sensors);
-    } catch(e) {
-        alert('Invalid JSON: ' + e.message);
+    SEP_idx = idx;
+    var s = PCFG.sensors[idx];
+    var iface = s.interface || 'i2c';
+    var typeInfo = CL_SENSOR_TYPES.find(function(t){ return t.value === s.type; }) || {};
+    var html = '';
+
+    // ── Basic fields ────────────────────────────────────────────────────────
+    html += _sepRow('Sensor ID',
+        '<input type="text" id="sep-id" class="form-input" value="' + _sepEsc(s.id || '') + '">');
+
+    html += _sepRow('Type',
+        '<input type="text" class="form-input" value="' + _sepEsc((typeInfo.label || s.type) + ' [' + iface + ']') + '"'
+        + ' readonly style="background:var(--bg);cursor:default;opacity:.75">');
+
+    html += '<div class="form-group" style="margin-bottom:.7rem">'
+        + '<label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">'
+        + '<input type="checkbox" id="sep-enabled"' + (s.enabled ? ' checked' : '') + '>'
+        + '<span class="form-label" style="margin:0">Enabled</span>'
+        + '</label></div>';
+
+    // ── Interface-specific fields ────────────────────────────────────────────
+    if(iface === 'i2c') {
+        html += '<div class="form-row" style="gap:.5rem">';
+        html += '<div>' + _sepRow('SDA Pin', _sepNumInput('sep-sda', s.sda !== undefined ? s.sda : 6, 0, 48)) + '</div>';
+        html += '<div>' + _sepRow('SCL Pin', _sepNumInput('sep-scl', s.scl !== undefined ? s.scl : 7, 0, 48)) + '</div>';
+        html += '</div>';
+        html += _sepRow('Read Interval (ms)', _sepNumInput('sep-interval', s.read_interval_ms || 10000, 100, undefined, 100));
+        if(s.address !== undefined) {
+            html += _sepRow('I²C Address (hex)', '<input type="text" id="sep-address" class="form-input" value="' + _sepEsc(s.address) + '">');
+        }
+
+    } else if(iface === 'uart') {
+        html += '<div class="form-row" style="gap:.5rem">';
+        html += '<div>' + _sepRow('RX Pin', _sepNumInput('sep-uart_rx', s.uart_rx !== undefined ? s.uart_rx : 20, -1, 48)) + '</div>';
+        html += '<div>' + _sepRow('TX Pin', _sepNumInput('sep-uart_tx', s.uart_tx !== undefined ? s.uart_tx : -1, -1, 48)) + '</div>';
+        html += '</div>';
+        var baudOpts = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200];
+        html += _sepRow('Baud Rate',
+            '<select id="sep-baud" class="form-input form-select">'
+            + baudOpts.map(function(b) {
+                return '<option value="' + b + '"' + (s.baud === b ? ' selected' : '') + '>' + b + '</option>';
+            }).join('')
+            + '</select>');
+
+    } else if(iface === 'pulse') {
+        html += _sepRow('Signal Pin', _sepNumInput('sep-pin', s.pin !== undefined ? s.pin : 9, 0, 48));
+        html += _sepRow('Read Interval (ms)', _sepNumInput('sep-interval', s.read_interval_ms || 5000, 100, undefined, 100));
+        if(s.pulses_per_liter !== undefined) {
+            html += _sepRow('Pulses per Liter', _sepNumInput('sep-pulses_per_liter', s.pulses_per_liter, 0, undefined, 0.1));
+        }
+        if(s.calibration !== undefined) {
+            html += _sepRow('Calibration Factor', _sepNumInput('sep-calibration', s.calibration, undefined, undefined, 0.001));
+        }
     }
+
+    document.getElementById('sep-fields').innerHTML = html;
+    document.getElementById('sensor-edit-popup').style.display = 'flex';
+}
+
+function sepClose() {
+    document.getElementById('sensor-edit-popup').style.display = 'none';
+    SEP_idx = null;
+}
+
+function sepConfirm() {
+    if(SEP_idx === null || !PCFG || !PCFG.sensors) return;
+    var s = PCFG.sensors[SEP_idx];
+
+    var idEl = document.getElementById('sep-id');
+    var enEl = document.getElementById('sep-enabled');
+    if(idEl) s.id      = idEl.value.trim();
+    if(enEl) s.enabled = enEl.checked;
+
+    var iface = s.interface;
+    if(iface === 'i2c') {
+        var sdaEl = document.getElementById('sep-sda');
+        var sclEl = document.getElementById('sep-scl');
+        var ivEl  = document.getElementById('sep-interval');
+        var adEl  = document.getElementById('sep-address');
+        if(sdaEl) s.sda              = parseInt(sdaEl.value, 10);
+        if(sclEl) s.scl              = parseInt(sclEl.value, 10);
+        if(ivEl)  s.read_interval_ms = parseInt(ivEl.value,  10);
+        if(adEl)  s.address          = adEl.value.trim();
+    } else if(iface === 'uart') {
+        var rxEl   = document.getElementById('sep-uart_rx');
+        var txEl   = document.getElementById('sep-uart_tx');
+        var baudEl = document.getElementById('sep-baud');
+        if(rxEl)   s.uart_rx = parseInt(rxEl.value,   10);
+        if(txEl)   s.uart_tx = parseInt(txEl.value,   10);
+        if(baudEl) s.baud    = parseInt(baudEl.value, 10);
+    } else if(iface === 'pulse') {
+        var pinEl = document.getElementById('sep-pin');
+        var ivEl2 = document.getElementById('sep-interval');
+        var plEl  = document.getElementById('sep-pulses_per_liter');
+        var calEl = document.getElementById('sep-calibration');
+        if(pinEl) s.pin              = parseInt(pinEl.value, 10);
+        if(ivEl2) s.read_interval_ms = parseInt(ivEl2.value, 10);
+        if(plEl)  s.pulses_per_liter = parseFloat(plEl.value);
+        if(calEl) s.calibration      = parseFloat(calEl.value);
+    }
+
+    PCFG.sensors[SEP_idx] = s;
+    sepClose();
+    clRenderSensors(PCFG.sensors);
 }
 
 function clSave() {

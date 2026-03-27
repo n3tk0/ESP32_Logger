@@ -1810,6 +1810,35 @@
       </div>
     </div>
   </div>
+
+  <!-- ═══ SENSOR ADD POPUP ═══ -->
+  <div id="sensor-add-popup" class="popup-overlay" style="display:none" onclick="if(event.target===this)sapClose()">
+    <div class="popup-content" style="max-width:520px;text-align:left;width:92%">
+      <div style="font-size:1.2rem;font-weight:700;margin-bottom:.25rem">+ Add Sensor</div>
+      <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:1rem">Select a sensor type, then set an ID.</p>
+      <div id="sap-type-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:.4rem;margin-bottom:1rem"></div>
+      <div class="form-group" style="margin-bottom:1rem">
+        <label class="form-label">Sensor ID <span style="font-weight:400;color:var(--text-muted)">(unique name)</span></label>
+        <input type="text" id="sap-id" class="form-input" placeholder="e.g. bme280_roof">
+      </div>
+      <div style="display:flex;gap:.5rem">
+        <button class="btn btn-primary" onclick="sapConfirm()">Add &amp; Configure</button>
+        <button class="btn btn-secondary" onclick="sapClose()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SENSOR EDIT POPUP ═══ -->
+  <div id="sensor-edit-popup" class="popup-overlay" style="display:none" onclick="if(event.target===this)sepClose()">
+    <div class="popup-content" style="max-width:520px;text-align:left;width:92%;max-height:88vh;overflow-y:auto">
+      <div style="font-size:1.2rem;font-weight:700;margin-bottom:1rem">✏️ Edit Sensor</div>
+      <div id="sep-fields"></div>
+      <div style="display:flex;gap:.5rem;margin-top:1.25rem">
+        <button class="btn btn-primary" onclick="sepConfirm()">💾 Save</button>
+        <button class="btn btn-secondary" onclick="sepClose()">Cancel</button>
+      </div>
+    </div>
+  </div>
   <nav class="bottom-nav" id="bottomNav"><a href="#dashboard" data-page="dashboard" onclick="return nav(this)"><span
         class="icon">📊</span>Dashboard</a><a href="#files" data-page="files" onclick="return nav(this)"><span
         class="icon">📁</span>Files</a><a href="#sensors" data-page="sensors" onclick="return nav(this)"><span
