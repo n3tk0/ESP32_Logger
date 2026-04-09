@@ -231,6 +231,33 @@ spiffs    data  spiffs   0x310000   0xF0000   (960 KB)
 > - If it crashes before calling `OtaManager::confirm()`, the bootloader automatically reverts
 > - `OtaManager::isRollbackCapable()` returns `true`
 
+### Easy path — Use pre-built binaries (recommended)
+
+The GitHub Actions CI builds rollback-enabled bootloaders automatically. Pre-built binaries are committed to `tools/bootloader/esp32c3/` and `tools/bootloader/esp32/`.
+
+```bash
+# Install esptool if you don't have it
+pip install esptool
+
+# Flash the bootloader (auto-detects port and chip)
+python tools/flash_bootloader.py
+
+# Or specify explicitly
+python tools/flash_bootloader.py --port /dev/ttyACM0 --chip esp32c3
+python tools/flash_bootloader.py --port COM3 --chip esp32
+
+# List available ports
+python tools/flash_bootloader.py --list-ports
+```
+
+The tool flashes `bootloader.bin` and `partition-table.bin` to the correct addresses. It prompts for confirmation before writing.
+
+After flashing the bootloader, upload your firmware as usual. The next OTA update will activate rollback-on-crash protection.
+
+### Manual path — Build from source with ESP-IDF
+
+Only needed if you want to customize bootloader settings beyond rollback support, or if pre-built binaries aren't available for your chip.
+
 ### Step 1 — Install ESP-IDF
 
 Install ESP-IDF v5.1+ (must match the version used by your Arduino ESP32 core).

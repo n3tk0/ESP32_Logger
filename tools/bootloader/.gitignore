@@ -1,0 +1,10 @@
+# ESP-IDF build artifacts (only kept locally, CI rebuilds from source)
+/build/
+/sdkconfig
+/sdkconfig.old
+
+# The actual binaries ARE tracked (committed by CI)
+!esp32c3/bootloader.bin
+!esp32c3/partition-table.bin
+!esp32/bootloader.bin
+!esp32/partition-table.bin
