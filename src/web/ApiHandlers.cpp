@@ -291,9 +291,10 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
 
     // OTA rollback info
     JsonObject ota = doc.createNestedObject("ota");
-    ota["running"]        = OtaManager::runningPartitionLabel();
-    ota["previous"]       = OtaManager::previousPartitionLabel();
-    ota["pending_verify"] = OtaManager::isPendingVerify();
+    ota["running"]          = OtaManager::runningPartitionLabel();
+    ota["previous"]         = OtaManager::previousPartitionLabel();
+    ota["pending_verify"]   = OtaManager::isPendingVerify();
+    ota["rollback_capable"] = OtaManager::isRollbackCapable();
 
     String out;
     serializeJson(doc, out);
@@ -380,6 +381,7 @@ static void handleOtaStatus(AsyncWebServerRequest* req) {
     doc["running_partition"]  = OtaManager::runningPartitionLabel();
     doc["previous_partition"] = OtaManager::previousPartitionLabel();
     doc["pending_verify"]     = OtaManager::isPendingVerify();
+    doc["rollback_capable"]   = OtaManager::isRollbackCapable();
     String out;
     serializeJson(doc, out);
     req->send(200, "application/json", out);

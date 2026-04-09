@@ -40,4 +40,9 @@ namespace OtaManager {
 
     // Returns the label of the partition that would be rolled back to, or "" if N/A.
     const char* previousPartitionLabel();
+
+    // True if the bootloader supports automatic rollback-on-crash.
+    // False when using Arduino IDE's default pre-built bootloader.
+    // Manual rollback via rollback() still works regardless.
+    bool isRollbackCapable();
 }
