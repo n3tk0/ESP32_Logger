@@ -1135,6 +1135,14 @@ function liveInit() {
   liveLogsTimer = setInterval(liveLogsUpdate, 3000);
 }
 
+function liveSetRate() {
+    var rateEl = document.getElementById('live-refresh-rate');
+    if (!rateEl) return;
+    var rate = parseInt(rateEl.value, 10) || 500;
+    if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+    liveTimer = setInterval(liveUpdate, rate);
+}
+
 // Matches original: function upd()
 function liveUpdate() {
   fetch("/api/live")
@@ -2787,6 +2795,53 @@ var CL_SENSOR_TYPES = [
   { value: "wind", label: "Wind speed (anemometer)", iface: "pulse" },
 ];
 
+// XIAO ESP32-C3 — exposed GPIO pins with board labels.
+// Only ADC-capable pins (GPIO 0-5) should be used for analog sensors.
+var CL_GPIO_PINS = [
+    { gpio: 0,  label: 'GPIO0  — D0/A0',      adc: true  },
+    { gpio: 1,  label: 'GPIO1  — D1/A1',      adc: true  },
+    { gpio: 2,  label: 'GPIO2  — D2/A2',      adc: true  },
+    { gpio: 3,  label: 'GPIO3  — D3/A3',      adc: true  },
+    { gpio: 4,  label: 'GPIO4  — D4/A4',      adc: true  },
+    { gpio: 5,  label: 'GPIO5  — D5/A5',      adc: true  },
+    { gpio: 6,  label: 'GPIO6  — D4/SDA',     adc: false },
+    { gpio: 7,  label: 'GPIO7  — D5/SCL',     adc: false },
+    { gpio: 8,  label: 'GPIO8  — D8/SCK',     adc: false },
+    { gpio: 9,  label: 'GPIO9  — D9/MISO',    adc: false },
+    { gpio: 10, label: 'GPIO10 — D10/MOSI',   adc: false },
+    { gpio: 20, label: 'GPIO20 — D7/RX',      adc: false },
+    { gpio: 21, label: 'GPIO21 — D6/TX',      adc: false }
+];
+
+// Known system/reserved pins on XIAO ESP32-C3 default config — shown as warnings.
+var CL_SYSTEM_PINS = {
+    2:  'WiFi trigger',
+    3:  'Wakeup FF btn',
+    4:  'Wakeup PF btn',
+    5:  'RTC CE',
+    6:  'RTC IO / SDA',
+    7:  'RTC SCLK / SCL',
+    10: 'SD CS',
+    21: 'Flow sensor'
+};
+
+// Returns a map { gpioNum: [sensorId, ...] } of pins in use,
+// excluding the sensor at excludeIdx (so editing a sensor doesn't block its own pins).
+function clGetUsedPins(excludeIdx) {
+    var used = {};
+    if(!PCFG || !PCFG.sensors) return used;
+    PCFG.sensors.forEach(function(s, i) {
+        if(i === excludeIdx) return;
+        [s.sda, s.scl, s.pin, s.uart_rx, s.uart_tx].forEach(function(p) {
+            if(p !== undefined && p !== null && p >= 0) {
+                if(!used[p]) used[p] = [];
+                used[p].push(s.id || s.type);
+            }
+        });
+    });
+    return used;
+}
+
 // Single source of truth for sleep-config defaults (mirrors Logger.ino initial values).
 var CL_SLEEP_DEFAULTS = {
   cont_idle_timeout_ms: 300000,
@@ -2944,6 +2999,24 @@ function clRemoveSensor(idx) {
   clRenderSensors(PCFG.sensors);
 }
 
+function clMoveSensor(idx, dir) {
+    if(!PCFG || !PCFG.sensors) return;
+    var j = idx + dir;
+    if(j < 0 || j >= PCFG.sensors.length) return;
+    var tmp = PCFG.sensors[idx];
+    PCFG.sensors[idx] = PCFG.sensors[j];
+    PCFG.sensors[j] = tmp;
+    clRenderSensors(PCFG.sensors);
+}
+
+function clDupSensor(idx) {
+    if(!PCFG || !PCFG.sensors) return;
+    var copy = JSON.parse(JSON.stringify(PCFG.sensors[idx]));
+    copy.id = copy.id + '_copy';
+    PCFG.sensors.splice(idx + 1, 0, copy);
+    clRenderSensors(PCFG.sensors);
+}
+
 // ============================================================================
 // SENSOR ADD POPUP
 // ============================================================================
@@ -2999,6 +3072,33 @@ function clDoAddSensor(type) {
 }
 
 window.clCurrentEditingSensor = -1;
+
+// Build a GPIO pin <select>.
+// allowNone = true adds a "— Not connected —" option for value -1.
+// adcOnly   = true hides non-ADC pins (for analog sensors).
+// usedPins  = map returned by clGetUsedPins(). Used pins are shown disabled + labelled.
+function _sepPinSelect(elemId, currentVal, usedPins, allowNone, adcOnly) {
+    var opts = '';
+    if(allowNone) {
+        var selNone = (currentVal === -1 || currentVal === undefined || currentVal === null) ? ' selected' : '';
+        opts += '<option value="-1"' + selNone + '>— Not connected —</option>';
+    }
+    CL_GPIO_PINS.forEach(function(p) {
+        if(adcOnly && !p.adc) return;
+        var usedBy    = usedPins ? usedPins[p.gpio] : null;
+        var sysLabel  = CL_SYSTEM_PINS[p.gpio];
+        var isSelected = (Number(currentVal) === p.gpio);
+        var isDisabled = usedBy && !isSelected;
+        var suffix = '';
+        if(usedBy)   suffix += '  ✗ ' + usedBy.join(', ');
+        if(sysLabel) suffix += '  ⚠ ' + sysLabel;
+        opts += '<option value="' + p.gpio + '"'
+            + (isSelected  ? ' selected' : '')
+            + (isDisabled  ? ' disabled' : '')
+            + '>' + p.label + suffix + '</option>';
+    });
+    return '<select id="' + elemId + '" class="form-input form-select">' + opts + '</select>';
+}
 
 function clEditSensor(idx) {
   if (!PCFG || !PCFG.sensors) return;

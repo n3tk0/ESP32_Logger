@@ -8,11 +8,15 @@
 //
 // Config keys (from platform_config.json → export → mqtt):
 //   broker, port (1883), topic_prefix ("waterlogger"),
-//   client_id, username, password, qos (0), retain (false)
+//   client_id, username, password, qos (0), retain (false),
+//   ha_discovery (false) — publish Home Assistant MQTT discovery payloads
 //
 // Topic format:
 //   {prefix}/device/{deviceId}/sensor/{sensorId}/{metric}
 //   Payload: {"ts":..,"value":..,"unit":..,"q":..}
+//
+// HA discovery topics:
+//   homeassistant/sensor/{deviceId}_{sensorId}_{metric}/config
 // ============================================================================
 class MqttExporter : public IExporter {
 public:
@@ -23,9 +27,16 @@ public:
     const char* getName()   const override { return "mqtt"; }
     bool        isEnabled() const override { return _enabled; }
 
+    // Publish HA MQTT discovery payloads for all known sensors.
+    // Call once after init() (or on demand via API).
+    void        publishHaDiscovery();
+
 private:
     bool _connect();
     bool _publish(const SensorReading& r);
+    bool _publishDiscoveryOne(const char* sensorId, const char* sensorName,
+                              const char* metric,   const char* unit,
+                              const char* deviceClass);
 
     WiFiClient   _wifiClient;
     MQTT_Mini    _client;
@@ -38,5 +49,6 @@ private:
     char     _password[65]    = {};
     uint8_t  _qos             = 0;
     bool     _retain          = false;
+    bool     _haDiscovery     = false;
     char     _deviceId[13]    = {};
 };

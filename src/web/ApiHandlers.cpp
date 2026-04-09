@@ -6,8 +6,15 @@
 #include "../pipeline/AggregationEngine.h"
 #include "../sensors/SensorManager.h"
 #include "../export/ExportManager.h"
+#include "../export/MqttExporter.h"
 #include "../storage/JsonLogger.h"
 #include "../core/Globals.h"   // config, activeFS
+
+// Forward-declared in Logger.ino — accessible here because this file is
+// compiled in the same sketch scope.
+#ifdef EXPORT_MQTT_ENABLED
+extern MqttExporter* g_mqttExporter;
+#endif
 #include "../tasks/TaskManager.h"  // task handles for /api/diag
 
 // ---------------------------------------------------------------------------
@@ -287,9 +294,83 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/sensors/read_now?id=<sensorId>
+//   Immediately reads a single non-blocking sensor and returns the values.
+//   Blocking sensors (UART / HC-SR04 / Wind) are rejected with 400.
+//   Uses wireMutex to avoid bus conflicts with the SensorTask.
+// ---------------------------------------------------------------------------
+static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
+    if (!req->hasArg("id")) {
+        req->send(400, "application/json", "{\"error\":\"missing id param\"}");
+        return;
+    }
+    String id = req->arg("id");
+    ISensor* s = sensorManager.getById(id.c_str());
+    if (!s) {
+        req->send(404, "application/json", "{\"error\":\"sensor not found\"}");
+        return;
+    }
+    if (!s->isEnabled()) {
+        req->send(400, "application/json", "{\"error\":\"sensor is disabled\"}");
+        return;
+    }
+    if (s->isBlocking()) {
+        req->send(400, "application/json",
+                  "{\"error\":\"blocking sensor — use scheduled reads\"}");
+        return;
+    }
+
+    SensorReading readings[8];
+    bool tookMutex = false;
+    if (wireMutex) {
+        tookMutex = (xSemaphoreTake(wireMutex, pdMS_TO_TICKS(300)) == pdTRUE);
+    }
+    int n = s->readAll(readings, 8);
+    if (tookMutex) xSemaphoreGive(wireMutex);
+
+    if (n <= 0) {
+        s->incErrorCount();
+        req->send(500, "application/json", "{\"error\":\"read failed\"}");
+        return;
+    }
+
+    JsonDocument doc;
+    doc["id"]   = s->getId();
+    doc["type"] = s->getType();
+    JsonArray arr = doc.createNestedArray("readings");
+    for (int i = 0; i < n; i++) {
+        JsonObject r = arr.createNestedObject();
+        r["metric"] = readings[i].metric;
+        r["value"]  = readings[i].value;
+        r["unit"]   = readings[i].unit;
+    }
+    String out;
+    serializeJson(doc, out);
+    req->send(200, "application/json", out);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/mqtt/ha_discovery — trigger HA MQTT discovery payloads on demand
+// ---------------------------------------------------------------------------
+static void handleMqttHaDiscovery(AsyncWebServerRequest* req) {
+#ifdef EXPORT_MQTT_ENABLED
+    if (!g_mqttExporter) {
+        req->send(503, "application/json", "{\"error\":\"mqtt not initialised\"}");
+        return;
+    }
+    g_mqttExporter->publishHaDiscovery();
+    req->send(200, "application/json", "{\"ok\":true}");
+#else
+    req->send(404, "application/json", "{\"error\":\"mqtt not compiled\"}");
+#endif
+}
+
+// ---------------------------------------------------------------------------
 void registerApiRoutes(AsyncWebServer& server) {
-    server.on("/api/data",             HTTP_GET,  handleApiData);
-    server.on("/api/sensors",          HTTP_GET,  handleApiSensors);
-    server.on("/api/diag",             HTTP_GET,  handleApiDiag);
-    server.on("/api/config/platform",  HTTP_POST, handleConfigPlatform);
+    server.on("/api/data",              HTTP_GET,  handleApiData);
+    server.on("/api/sensors",           HTTP_GET,  handleApiSensors);
+    server.on("/api/sensors/read_now",  HTTP_GET,  handleApiSensorReadNow);
+    server.on("/api/diag",              HTTP_GET,  handleApiDiag);
+    server.on("/api/config/platform",   HTTP_POST, handleConfigPlatform);
+    server.on("/api/mqtt/ha_discovery", HTTP_POST, handleMqttHaDiscovery);
 }
