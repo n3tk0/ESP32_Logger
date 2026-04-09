@@ -1828,15 +1828,52 @@ document.addEventListener('DOMContentLoaded', function(){
 // CORE LOGIC PAGE  (platform_config.json editor)
 // ============================================================================
 var CL_SENSOR_TYPES = [
-    { value: 'bme280',  label: 'BME280 (temp/humidity/pressure)',   iface: 'i2c' },
-    { value: 'sds011',  label: 'SDS011 (PM2.5/PM10)',              iface: 'uart' },
-    { value: 'pms5003', label: 'PMS5003 (PM1/2.5/10)',             iface: 'uart' },
-    { value: 'yfs201',  label: 'YF-S201/YF-S403 (water flow)',     iface: 'pulse' },
-    { value: 'ens160',  label: 'ENS160 (TVOC/eCO2)',               iface: 'i2c' },
-    { value: 'sgp30',   label: 'SGP30 (TVOC/eCO2)',                iface: 'i2c' },
-    { value: 'rain',    label: 'Rain gauge (tipping bucket)',        iface: 'pulse' },
-    { value: 'wind',    label: 'Wind speed (anemometer)',           iface: 'pulse' }
+    { value: 'bme280',   label: 'BME280 (temp/humidity/pressure)',   iface: 'i2c'    },
+    { value: 'sds011',   label: 'SDS011 (PM2.5/PM10)',              iface: 'uart'   },
+    { value: 'pms5003',  label: 'PMS5003 (PM1/2.5/10)',             iface: 'uart'   },
+    { value: 'yfs201',   label: 'YF-S201/YF-S403 (water flow)',     iface: 'pulse'  },
+    { value: 'ens160',   label: 'ENS160 (TVOC/eCO2)',               iface: 'i2c'    },
+    { value: 'sgp30',    label: 'SGP30 (TVOC/eCO2)',                iface: 'i2c'    },
+    { value: 'rain',     label: 'Rain gauge (tipping bucket)',        iface: 'pulse'  },
+    { value: 'wind',     label: 'Wind speed (anemometer)',           iface: 'pulse'  },
+    { value: 'zmpt101b', label: 'ZMPT101B (AC voltage)',             iface: 'analog' },
+    { value: 'zmct103c', label: 'ZMCT103C (AC current)',             iface: 'analog' }
 ];
+
+// XIAO ESP32-C3 — exposed GPIO pins with board labels.
+// Only ADC-capable pins (GPIO 0-5) should be used for analog sensors.
+var CL_GPIO_PINS = [
+    { gpio: 0,  label: 'GPIO0  — D0/A0',      adc: true  },
+    { gpio: 1,  label: 'GPIO1  — D1/A1',      adc: true  },
+    { gpio: 2,  label: 'GPIO2  — D2/A2',      adc: true  },
+    { gpio: 3,  label: 'GPIO3  — D3/A3',      adc: true  },
+    { gpio: 4,  label: 'GPIO4  — D4/A4',      adc: true  },
+    { gpio: 5,  label: 'GPIO5  — D5/A5',      adc: true  },
+    { gpio: 6,  label: 'GPIO6  — D4/SDA',     adc: false },
+    { gpio: 7,  label: 'GPIO7  — D5/SCL',     adc: false },
+    { gpio: 8,  label: 'GPIO8  — D8/SCK',     adc: false },
+    { gpio: 9,  label: 'GPIO9  — D9/MISO',    adc: false },
+    { gpio: 10, label: 'GPIO10 — D10/MOSI',   adc: false },
+    { gpio: 20, label: 'GPIO20 — D7/RX',      adc: false },
+    { gpio: 21, label: 'GPIO21 — D6/TX',      adc: false }
+];
+
+// Returns a map { gpioNum: [sensorId, ...] } of pins in use,
+// excluding the sensor at excludeIdx (so editing a sensor doesn't block its own pins).
+function clGetUsedPins(excludeIdx) {
+    var used = {};
+    if(!PCFG || !PCFG.sensors) return used;
+    PCFG.sensors.forEach(function(s, i) {
+        if(i === excludeIdx) return;
+        [s.sda, s.scl, s.pin, s.uart_rx, s.uart_tx].forEach(function(p) {
+            if(p !== undefined && p !== null && p >= 0) {
+                if(!used[p]) used[p] = [];
+                used[p].push(s.id || s.type);
+            }
+        });
+    });
+    return used;
+}
 
 // Single source of truth for sleep-config defaults (mirrors Logger.ino initial values).
 var CL_SLEEP_DEFAULTS = {
@@ -1988,9 +2025,14 @@ function sapConfirm() {
     var info = CL_SENSOR_TYPES.find(function(t){ return t.value === SAP_selectedType; });
     if(!info) return;
     var newS = { id: id, type: SAP_selectedType, enabled: true, interface: info.iface };
-    if(info.iface === 'i2c')   { newS.sda = 6; newS.scl = 7; newS.read_interval_ms = 10000; }
-    if(info.iface === 'uart')  { newS.uart_rx = 20; newS.uart_tx = -1; newS.baud = 9600; }
-    if(info.iface === 'pulse') { newS.pin = 9; newS.read_interval_ms = 5000; }
+    if(info.iface === 'i2c')    { newS.sda = 6; newS.scl = 7; newS.read_interval_ms = 10000; }
+    if(info.iface === 'uart')   { newS.uart_rx = 20; newS.uart_tx = -1; newS.baud = 9600; }
+    if(info.iface === 'pulse')  { newS.pin = 9; newS.read_interval_ms = 5000; }
+    if(info.iface === 'analog') {
+        newS.pin = 0; newS.adc_samples = 64; newS.read_interval_ms = 1000;
+        if(SAP_selectedType === 'zmpt101b') newS.voltage_factor = 1.0;
+        if(SAP_selectedType === 'zmct103c') newS.current_factor = 1.0;
+    }
     PCFG.sensors.push(newS);
     sapClose();
     clRenderSensors(PCFG.sensors);
@@ -2024,15 +2066,40 @@ function _sepNumInput(id, val, min, max, step) {
         + '>';
 }
 
+// Build a GPIO pin <select>.
+// allowNone = true adds a "— Not connected —" option for value -1.
+// adcOnly   = true hides non-ADC pins (for analog sensors).
+// usedPins  = map returned by clGetUsedPins(). Used pins are shown disabled + labelled.
+function _sepPinSelect(elemId, currentVal, usedPins, allowNone, adcOnly) {
+    var opts = '';
+    if(allowNone) {
+        var selNone = (currentVal === -1 || currentVal === undefined || currentVal === null) ? ' selected' : '';
+        opts += '<option value="-1"' + selNone + '>— Not connected —</option>';
+    }
+    CL_GPIO_PINS.forEach(function(p) {
+        if(adcOnly && !p.adc) return;
+        var usedBy   = usedPins ? usedPins[p.gpio] : null;
+        var isSelected = (Number(currentVal) === p.gpio);
+        var isDisabled = usedBy && !isSelected;
+        var suffix   = usedBy ? '  ✗ used by: ' + usedBy.join(', ') : '';
+        opts += '<option value="' + p.gpio + '"'
+            + (isSelected  ? ' selected' : '')
+            + (isDisabled  ? ' disabled' : '')
+            + '>' + p.label + suffix + '</option>';
+    });
+    return '<select id="' + elemId + '" class="form-input form-select">' + opts + '</select>';
+}
+
 function clEditSensor(idx) {
     if(!PCFG || !PCFG.sensors) return;
     SEP_idx = idx;
-    var s = PCFG.sensors[idx];
+    var s     = PCFG.sensors[idx];
     var iface = s.interface || 'i2c';
-    var typeInfo = CL_SENSOR_TYPES.find(function(t){ return t.value === s.type; }) || {};
+    var typeInfo  = CL_SENSOR_TYPES.find(function(t){ return t.value === s.type; }) || {};
+    var usedPins  = clGetUsedPins(idx);
     var html = '';
 
-    // ── Basic fields ────────────────────────────────────────────────────────
+    // ── Basic fields ──────────────────────────────────────────────────────────
     html += _sepRow('Sensor ID',
         '<input type="text" id="sep-id" class="form-input" value="' + _sepEsc(s.id || '') + '">');
 
@@ -2046,11 +2113,11 @@ function clEditSensor(idx) {
         + '<span class="form-label" style="margin:0">Enabled</span>'
         + '</label></div>';
 
-    // ── Interface-specific fields ────────────────────────────────────────────
+    // ── Interface-specific fields ─────────────────────────────────────────────
     if(iface === 'i2c') {
         html += '<div class="form-row" style="gap:.5rem">';
-        html += '<div>' + _sepRow('SDA Pin', _sepNumInput('sep-sda', s.sda !== undefined ? s.sda : 6, 0, 48)) + '</div>';
-        html += '<div>' + _sepRow('SCL Pin', _sepNumInput('sep-scl', s.scl !== undefined ? s.scl : 7, 0, 48)) + '</div>';
+        html += '<div>' + _sepRow('SDA Pin', _sepPinSelect('sep-sda', s.sda !== undefined ? s.sda : 6, usedPins, false, false)) + '</div>';
+        html += '<div>' + _sepRow('SCL Pin', _sepPinSelect('sep-scl', s.scl !== undefined ? s.scl : 7, usedPins, false, false)) + '</div>';
         html += '</div>';
         html += _sepRow('Read Interval (ms)', _sepNumInput('sep-interval', s.read_interval_ms || 10000, 100, undefined, 100));
         if(s.address !== undefined) {
@@ -2059,8 +2126,9 @@ function clEditSensor(idx) {
 
     } else if(iface === 'uart') {
         html += '<div class="form-row" style="gap:.5rem">';
-        html += '<div>' + _sepRow('RX Pin', _sepNumInput('sep-uart_rx', s.uart_rx !== undefined ? s.uart_rx : 20, -1, 48)) + '</div>';
-        html += '<div>' + _sepRow('TX Pin', _sepNumInput('sep-uart_tx', s.uart_tx !== undefined ? s.uart_tx : -1, -1, 48)) + '</div>';
+        html += '<div>' + _sepRow('RX Pin', _sepPinSelect('sep-uart_rx', s.uart_rx !== undefined ? s.uart_rx : 20, usedPins, false, false)) + '</div>';
+        html += '<div>' + _sepRow('TX Pin', _sepPinSelect('sep-uart_tx', s.uart_tx !== undefined ? s.uart_tx : -1, usedPins, true,  false),
+            'Set to "Not connected" if the sensor only uses RX.') + '</div>';
         html += '</div>';
         var baudOpts = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200];
         html += _sepRow('Baud Rate',
@@ -2071,13 +2139,43 @@ function clEditSensor(idx) {
             + '</select>');
 
     } else if(iface === 'pulse') {
-        html += _sepRow('Signal Pin', _sepNumInput('sep-pin', s.pin !== undefined ? s.pin : 9, 0, 48));
+        html += _sepRow('Signal Pin', _sepPinSelect('sep-pin', s.pin !== undefined ? s.pin : 9, usedPins, false, false));
         html += _sepRow('Read Interval (ms)', _sepNumInput('sep-interval', s.read_interval_ms || 5000, 100, undefined, 100));
         if(s.pulses_per_liter !== undefined) {
             html += _sepRow('Pulses per Liter', _sepNumInput('sep-pulses_per_liter', s.pulses_per_liter, 0, undefined, 0.1));
         }
         if(s.calibration !== undefined) {
             html += _sepRow('Calibration Factor', _sepNumInput('sep-calibration', s.calibration, undefined, undefined, 0.001));
+        }
+
+    } else if(iface === 'analog') {
+        html += _sepRow('ADC Pin',
+            _sepPinSelect('sep-pin', s.pin !== undefined ? s.pin : 0, usedPins, false, true),
+            'ADC-capable pins only (GPIO 0–5 on XIAO ESP32-C3).');
+        html += _sepRow('ADC Samples (averaged)', _sepNumInput('sep-adc_samples', s.adc_samples || 64, 1, 1024),
+            'More samples → less noise, slower reading.');
+        html += _sepRow('Read Interval (ms)', _sepNumInput('sep-interval', s.read_interval_ms || 1000, 100, undefined, 100));
+        // Type-specific calibration fields
+        if(s.type === 'zmpt101b') {
+            html += _sepRow('Voltage Factor',
+                _sepNumInput('sep-voltage_factor', s.voltage_factor !== undefined ? s.voltage_factor : 1.0, 0, undefined, 0.0001),
+                'Scale factor to convert ADC units → Volts RMS. Calibrate against a known AC source.');
+        } else if(s.type === 'zmct103c') {
+            html += _sepRow('Current Factor',
+                _sepNumInput('sep-current_factor', s.current_factor !== undefined ? s.current_factor : 1.0, 0, undefined, 0.0001),
+                'Scale factor to convert ADC units → Amperes RMS. Calibrate against a known load.');
+        } else if(s.type === 'soil_moisture') {
+            html += '<div class="form-row" style="gap:.5rem">';
+            html += '<div>' + _sepRow('Dry ADC Value', _sepNumInput('sep-dry_value', s.dry_value || 3300, 0, 4095)) + '</div>';
+            html += '<div>' + _sepRow('Wet ADC Value', _sepNumInput('sep-wet_value', s.wet_value || 1500, 0, 4095)) + '</div>';
+            html += '</div>';
+        }
+
+    } else {
+        // gpio / onewire / unknown — single pin + interval
+        html += _sepRow('Pin', _sepPinSelect('sep-pin', s.pin !== undefined ? s.pin : 0, usedPins, false, false));
+        if(s.read_interval_ms !== undefined) {
+            html += _sepRow('Read Interval (ms)', _sepNumInput('sep-interval', s.read_interval_ms, 100, undefined, 100));
         }
     }
 
@@ -2100,31 +2198,41 @@ function sepConfirm() {
     if(enEl) s.enabled = enEl.checked;
 
     var iface = s.interface;
+
+    function _int(id)   { var e = document.getElementById(id); return e ? parseInt(e.value,  10) : undefined; }
+    function _flt(id)   { var e = document.getElementById(id); return e ? parseFloat(e.value)    : undefined; }
+    function _str(id)   { var e = document.getElementById(id); return e ? e.value.trim()         : undefined; }
+    function _set(key, val) { if(val !== undefined && !isNaN(val)) s[key] = val; }
+
     if(iface === 'i2c') {
-        var sdaEl = document.getElementById('sep-sda');
-        var sclEl = document.getElementById('sep-scl');
-        var ivEl  = document.getElementById('sep-interval');
-        var adEl  = document.getElementById('sep-address');
-        if(sdaEl) s.sda              = parseInt(sdaEl.value, 10);
-        if(sclEl) s.scl              = parseInt(sclEl.value, 10);
-        if(ivEl)  s.read_interval_ms = parseInt(ivEl.value,  10);
-        if(adEl)  s.address          = adEl.value.trim();
+        _set('sda',              _int('sep-sda'));
+        _set('scl',              _int('sep-scl'));
+        _set('read_interval_ms', _int('sep-interval'));
+        var addr = _str('sep-address'); if(addr !== undefined && addr !== '') s.address = addr;
+
     } else if(iface === 'uart') {
-        var rxEl   = document.getElementById('sep-uart_rx');
-        var txEl   = document.getElementById('sep-uart_tx');
-        var baudEl = document.getElementById('sep-baud');
-        if(rxEl)   s.uart_rx = parseInt(rxEl.value,   10);
-        if(txEl)   s.uart_tx = parseInt(txEl.value,   10);
-        if(baudEl) s.baud    = parseInt(baudEl.value, 10);
+        _set('uart_rx', _int('sep-uart_rx'));
+        _set('uart_tx', _int('sep-uart_tx'));
+        _set('baud',    _int('sep-baud'));
+
     } else if(iface === 'pulse') {
-        var pinEl = document.getElementById('sep-pin');
-        var ivEl2 = document.getElementById('sep-interval');
-        var plEl  = document.getElementById('sep-pulses_per_liter');
-        var calEl = document.getElementById('sep-calibration');
-        if(pinEl) s.pin              = parseInt(pinEl.value, 10);
-        if(ivEl2) s.read_interval_ms = parseInt(ivEl2.value, 10);
-        if(plEl)  s.pulses_per_liter = parseFloat(plEl.value);
-        if(calEl) s.calibration      = parseFloat(calEl.value);
+        _set('pin',              _int('sep-pin'));
+        _set('read_interval_ms', _int('sep-interval'));
+        if(document.getElementById('sep-pulses_per_liter')) _set('pulses_per_liter', _flt('sep-pulses_per_liter'));
+        if(document.getElementById('sep-calibration'))      _set('calibration',      _flt('sep-calibration'));
+
+    } else if(iface === 'analog') {
+        _set('pin',              _int('sep-pin'));
+        _set('adc_samples',      _int('sep-adc_samples'));
+        _set('read_interval_ms', _int('sep-interval'));
+        if(document.getElementById('sep-voltage_factor')) _set('voltage_factor', _flt('sep-voltage_factor'));
+        if(document.getElementById('sep-current_factor')) _set('current_factor', _flt('sep-current_factor'));
+        if(document.getElementById('sep-dry_value'))      _set('dry_value',      _int('sep-dry_value'));
+        if(document.getElementById('sep-wet_value'))      _set('wet_value',      _int('sep-wet_value'));
+
+    } else {
+        _set('pin',              _int('sep-pin'));
+        _set('read_interval_ms', _int('sep-interval'));
     }
 
     PCFG.sensors[SEP_idx] = s;
