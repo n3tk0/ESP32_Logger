@@ -51,7 +51,8 @@
   <header class="app-header hide-desktop" id="appHeader">
     <div class="logo"><img id="headerLogo" src="" alt="" style="display:none;height:28px;margin-right:6px"><span
         id="headerName">Water Logger</span></div>
-    <div class="status">
+    <div class="status" style="display:flex;align-items:center;gap:.5rem">
+      <button id="themeToggleBtn" onclick="quickThemeToggle()" title="Toggle dark/light theme">🌙</button>
       <div class="time" id="headerTime">--:--</div>
       <div id="headerNet"></div>
     </div>
@@ -139,7 +140,16 @@
 
     <!-- Chart -->
     <div class="card">
-      <div class="card-header">📈 Volume</div>
+      <div class="card-header">
+        <span>📈 Volume</span>
+        <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:.3rem;font-size:.8rem;font-weight:400">
+            Threshold&nbsp;(L):
+            <input type="number" id="db-threshold" class="form-input" style="width:72px;padding:.25rem .4rem;font-size:.82rem" placeholder="none" min="0" step="0.1" oninput="dbApplyFilters()">
+          </label>
+          <button class="btn btn-sm btn-secondary" onclick="dbExportPNG()" title="Export chart as PNG">📷 PNG</button>
+        </div>
+      </div>
       <div class="card-body" style="height:350px"><canvas id="chart"></canvas></div>
       <div class="card-body" style="padding-top:0">
         <div id="chartLegend" data-ffl="db-legendFF" data-pfl="db-legendPF" data-otl="db-legendOther"
@@ -152,7 +162,18 @@
   <main class="main-content page" id="page-live">
     <div class="page-header">
       <h1>📡 Live</h1>
-      <div class="breadcrumb"><span id="conn" class="text-success">● Connected</span></div>
+      <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
+        <span id="conn" class="text-success">● Connected</span>
+        <label style="display:flex;align-items:center;gap:.35rem;font-size:.8rem">
+          Refresh:
+          <select id="live-refresh-rate" class="form-input form-select" style="width:auto;padding:.2rem .5rem;font-size:.8rem" onchange="liveSetRate()">
+            <option value="500">0.5s</option>
+            <option value="1000">1s</option>
+            <option value="2000">2s</option>
+            <option value="5000">5s</option>
+          </select>
+        </label>
+      </div>
     </div>
 
     <!-- Time + Mode -->
@@ -1839,6 +1860,31 @@
       </div>
     </div>
   </div>
+  <!-- ═══ TOAST ═══ -->
+  <div id="toast"></div>
+
+  <!-- ═══ KEYBOARD SHORTCUTS POPUP ═══ -->
+  <div id="kbPopup" class="popup-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+    <div class="popup-content" style="max-width:420px;text-align:left">
+      <div style="font-size:1.2rem;font-weight:700;margin-bottom:1rem">⌨️ Keyboard Shortcuts</div>
+      <table style="width:100%;font-size:.85rem;border-collapse:collapse">
+        <tr><td style="padding:.3rem .6rem"><kbd>?</kbd></td><td>Show this help</td></tr>
+        <tr><td style="padding:.3rem .6rem"><kbd>Esc</kbd></td><td>Close popup / dialog</td></tr>
+        <tr><td style="padding:.3rem .6rem" colspan="2" style="padding-top:.6rem;color:var(--text-muted);font-size:.78rem">Navigation</td></tr>
+        <tr><td style="padding:.3rem .6rem"><kbd>1</kbd></td><td>Dashboard</td></tr>
+        <tr><td style="padding:.3rem .6rem"><kbd>2</kbd></td><td>Files</td></tr>
+        <tr><td style="padding:.3rem .6rem"><kbd>3</kbd></td><td>Live</td></tr>
+        <tr><td style="padding:.3rem .6rem"><kbd>4</kbd></td><td>Sensors</td></tr>
+        <tr><td style="padding:.3rem .6rem"><kbd>5</kbd></td><td>Settings</td></tr>
+        <tr><td style="padding:.3rem .6rem"><kbd>R</kbd></td><td>Reload current page data</td></tr>
+        <tr><td style="padding:.3rem .6rem"><kbd>D</kbd></td><td>Toggle dark / light theme</td></tr>
+      </table>
+      <div style="margin-top:1rem;text-align:right">
+        <button class="btn btn-secondary" onclick="document.getElementById('kbPopup').style.display='none'">Close</button>
+      </div>
+    </div>
+  </div>
+
   <nav class="bottom-nav" id="bottomNav"><a href="#dashboard" data-page="dashboard" onclick="return nav(this)"><span
         class="icon">📊</span>Dashboard</a><a href="#files" data-page="files" onclick="return nav(this)"><span
         class="icon">📁</span>Files</a><a href="#sensors" data-page="sensors" onclick="return nav(this)"><span

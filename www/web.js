@@ -24,6 +24,7 @@ var dbFilteredData = [];    // filtered, parsed rows
 var liveTimer = null;       // live page interval
 var liveLogsTimer = null;   // live logs interval
 var currentPage = '';       // active page id (without 'page-' prefix)
+var _toastTimer = null;     // toast auto-hide timer
 var currentFilesDir = '/';
 var currentFilesStorage = 'internal';
 var filesEditMode = false;
@@ -519,15 +520,32 @@ function dbRenderChart(data) {
         return d.date + ' ' + d.time;
     });
 
+    var threshEl = document.getElementById('db-threshold');
+    var threshVal = threshEl ? parseFloat(threshEl.value) : NaN;
+    var datasets = [{ type: 'bar', label: 'Liters (L)', data: data.map(function (d) { return d.vol; }), backgroundColor: clr, borderWidth: 0 }];
+    if (!isNaN(threshVal) && threshVal > 0) {
+        datasets.push({
+            type: 'line',
+            label: 'Threshold',
+            data: data.map(function () { return threshVal; }),
+            borderColor: '#e74c3c',
+            borderWidth: 2,
+            borderDash: [6, 3],
+            pointRadius: 0,
+            fill: false
+        });
+    }
+
     dbChart = new Chart(ctx, {
         type: 'bar',
-        data: { labels: lbls, datasets: [{ label: 'Liters (L)', data: data.map(function (d) { return d.vol; }), backgroundColor: clr, borderWidth: 0 }] },
+        data: { labels: lbls, datasets: datasets },
         options: {
             responsive: true, maintainAspectRatio: false,
             plugins: {
                 tooltip: {
                     callbacks: {
                         afterLabel: function (c) {
+                            if (c.datasetIndex !== 0) return [];
                             var d = data[c.dataIndex];
                             return ['Trigger: ' + d.reason, 'Boot: ' + (d.boot || 'N/A'), 'Extra FF: ' + d.ff, 'Extra PF: ' + d.pf];
                         }
@@ -722,10 +740,21 @@ function liveInit() {
         hint.textContent = '🔧 IDLE → 🟡 WAIT_FLOW (' + fl + 's) → 🟢 MONITORING (' + win + 's idle) → Logging';
     }
 
+    var rateEl = document.getElementById('live-refresh-rate');
+    var rate = rateEl ? parseInt(rateEl.value, 10) || 500 : 500;
+
     liveUpdate();
     liveLogsUpdate();
-    liveTimer = setInterval(liveUpdate, 500);
+    liveTimer = setInterval(liveUpdate, rate);
     liveLogsTimer = setInterval(liveLogsUpdate, 3000);
+}
+
+function liveSetRate() {
+    var rateEl = document.getElementById('live-refresh-rate');
+    if (!rateEl) return;
+    var rate = parseInt(rateEl.value, 10) || 500;
+    if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+    liveTimer = setInterval(liveUpdate, rate);
 }
 
 // Matches original: function upd()
@@ -1828,16 +1857,30 @@ document.addEventListener('DOMContentLoaded', function(){
 // CORE LOGIC PAGE  (platform_config.json editor)
 // ============================================================================
 var CL_SENSOR_TYPES = [
-    { value: 'bme280',   label: 'BME280 (temp/humidity/pressure)',   iface: 'i2c'    },
-    { value: 'sds011',   label: 'SDS011 (PM2.5/PM10)',              iface: 'uart'   },
-    { value: 'pms5003',  label: 'PMS5003 (PM1/2.5/10)',             iface: 'uart'   },
-    { value: 'yfs201',   label: 'YF-S201/YF-S403 (water flow)',     iface: 'pulse'  },
-    { value: 'ens160',   label: 'ENS160 (TVOC/eCO2)',               iface: 'i2c'    },
-    { value: 'sgp30',    label: 'SGP30 (TVOC/eCO2)',                iface: 'i2c'    },
-    { value: 'rain',     label: 'Rain gauge (tipping bucket)',        iface: 'pulse'  },
-    { value: 'wind',     label: 'Wind speed (anemometer)',           iface: 'pulse'  },
-    { value: 'zmpt101b', label: 'ZMPT101B (AC voltage)',             iface: 'analog' },
-    { value: 'zmct103c', label: 'ZMCT103C (AC current)',             iface: 'analog' }
+    // I2C
+    { value: 'bme280',        label: 'BME280 (temp/humidity/pressure)',        iface: 'i2c'     },
+    { value: 'bme688',        label: 'BME688 (temp/humidity/pressure/gas)',    iface: 'i2c'     },
+    { value: 'ens160',        label: 'ENS160 (TVOC/eCO2)',                     iface: 'i2c'     },
+    { value: 'sgp30',         label: 'SGP30 (TVOC/eCO2)',                      iface: 'i2c'     },
+    { value: 'scd4x',         label: 'SCD40/41 (CO2/temp/humidity)',           iface: 'i2c'     },
+    { value: 'bh1750',        label: 'BH1750 (ambient light)',                 iface: 'i2c'     },
+    { value: 'veml6075',      label: 'VEML6075 (UV index A+B)',                iface: 'i2c'     },
+    { value: 'veml7700',      label: 'VEML7700 (high-accuracy lux)',           iface: 'i2c'     },
+    // UART
+    { value: 'sds011',        label: 'SDS011 (PM2.5/PM10)',                    iface: 'uart'    },
+    { value: 'pms5003',       label: 'PMS5003 (PM1/PM2.5/PM10)',               iface: 'uart'    },
+    // Pulse
+    { value: 'yfs201',        label: 'YF-S201/YF-S403 (water flow)',           iface: 'pulse'   },
+    { value: 'rain',          label: 'Rain gauge (tipping bucket)',             iface: 'pulse'   },
+    { value: 'wind',          label: 'Wind speed (anemometer)',                 iface: 'pulse'   },
+    // Analog (ADC)
+    { value: 'zmpt101b',      label: 'ZMPT101B (AC voltage)',                  iface: 'analog'  },
+    { value: 'zmct103c',      label: 'ZMCT103C (AC current)',                  iface: 'analog'  },
+    { value: 'soil_moisture', label: 'Soil moisture (capacitive ADC)',         iface: 'analog'  },
+    // OneWire
+    { value: 'ds18b20',       label: 'DS18B20 (1-Wire temperature probe)',     iface: 'onewire' },
+    // GPIO
+    { value: 'hcsr04',        label: 'HC-SR04 (ultrasonic distance)',          iface: 'gpio'    }
 ];
 
 // XIAO ESP32-C3 — exposed GPIO pins with board labels.
@@ -1857,6 +1900,18 @@ var CL_GPIO_PINS = [
     { gpio: 20, label: 'GPIO20 — D7/RX',      adc: false },
     { gpio: 21, label: 'GPIO21 — D6/TX',      adc: false }
 ];
+
+// Known system/reserved pins on XIAO ESP32-C3 default config — shown as warnings.
+var CL_SYSTEM_PINS = {
+    2:  'WiFi trigger',
+    3:  'Wakeup FF btn',
+    4:  'Wakeup PF btn',
+    5:  'RTC CE',
+    6:  'RTC IO / SDA',
+    7:  'RTC SCLK / SCL',
+    10: 'SD CS',
+    21: 'Flow sensor'
+};
 
 // Returns a map { gpioNum: [sensorId, ...] } of pins in use,
 // excluding the sensor at excludeIdx (so editing a sensor doesn't block its own pins).
@@ -1933,24 +1988,33 @@ function clRenderSensors(sensors) {
         list.innerHTML = '<p class="text-muted" style="padding:1rem">No sensors configured. Click <strong>+ Add Sensor</strong> to begin.</p>';
         return;
     }
+    var n = sensors.length;
     list.innerHTML = sensors.map(function(s, i) {
         var typeLabel = (CL_SENSOR_TYPES.find(function(t){ return t.value === s.type; }) || {}).label || s.type;
-        var pinInfo   = s.interface === 'i2c'   ? 'SDA:' + (s.sda||'?') + ' SCL:' + (s.scl||'?')
-                      : s.interface === 'uart'  ? 'RX:' + (s.uart_rx||'?')
-                      : s.interface === 'pulse' ? 'Pin:' + (s.pin||'?')
+        var pinInfo   = s.interface === 'i2c'     ? 'SDA:' + (s.sda||'?') + ' SCL:' + (s.scl||'?')
+                      : s.interface === 'uart'    ? 'RX:' + (s.uart_rx||'?')
+                      : s.interface === 'pulse'   ? 'Pin:' + (s.pin||'?')
+                      : s.interface === 'analog'  ? 'ADC:' + (s.pin||'?')
+                      : s.interface === 'onewire' ? 'Pin:' + (s.pin||'?')
+                      : s.interface === 'gpio'    ? ('trig:' + (s.trig_pin||'?') + ' echo:' + (s.echo_pin||'?'))
                       : '';
-        return '<div class="sensor-list-row" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border)">'
+        return '<div class="sensor-list-row" style="display:flex;align-items:center;gap:6px;padding:8px 16px;border-bottom:1px solid var(--border)">'
             + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:0 0 auto">'
             +   '<input type="checkbox" onchange="clToggleSensor(' + i + ',this.checked)"'
             +   (s.enabled ? ' checked' : '') + '>'
-            +   '<span style="font-size:.8rem;color:var(--text-muted)">' + (s.enabled ? 'ON' : 'OFF') + '</span>'
+            +   '<span style="font-size:.75rem;color:var(--text-muted)">' + (s.enabled ? 'ON' : 'OFF') + '</span>'
             + '</label>'
             + '<div style="flex:1;min-width:0">'
             +   '<div style="font-weight:600">' + (s.id || s.type) + '</div>'
-            +   '<div style="font-size:.8rem;color:var(--text-muted)">' + typeLabel + ' · ' + pinInfo + '</div>'
+            +   '<div style="font-size:.78rem;color:var(--text-muted)">' + typeLabel + ' · ' + pinInfo + '</div>'
             + '</div>'
-            + '<button type="button" class="btn btn-sm btn-secondary" onclick="clEditSensor(' + i + ')">✏️</button>'
-            + '<button type="button" class="btn btn-sm btn-danger"   onclick="clRemoveSensor(' + i + ')">🗑</button>'
+            + '<div style="display:flex;gap:3px;flex-shrink:0">'
+            +   '<button type="button" class="btn btn-sm btn-secondary" onclick="clMoveSensor(' + i + ',-1)" title="Move up"'    + (i === 0   ? ' disabled' : '') + '>▲</button>'
+            +   '<button type="button" class="btn btn-sm btn-secondary" onclick="clMoveSensor(' + i + ',1)"  title="Move down"'  + (i === n-1 ? ' disabled' : '') + '>▼</button>'
+            +   '<button type="button" class="btn btn-sm btn-secondary" onclick="clDupSensor('  + i + ')"   title="Duplicate">⧉</button>'
+            +   '<button type="button" class="btn btn-sm btn-secondary" onclick="clEditSensor(' + i + ')"   title="Edit">✏️</button>'
+            +   '<button type="button" class="btn btn-sm btn-danger"    onclick="clRemoveSensor(' + i + ')" title="Remove">🗑</button>'
+            + '</div>'
         + '</div>';
     }).join('');
 }
@@ -1964,6 +2028,24 @@ function clRemoveSensor(idx) {
     if(!PCFG || !PCFG.sensors) return;
     if(!confirm('Remove sensor "' + (PCFG.sensors[idx].id || PCFG.sensors[idx].type) + '"?')) return;
     PCFG.sensors.splice(idx, 1);
+    clRenderSensors(PCFG.sensors);
+}
+
+function clMoveSensor(idx, dir) {
+    if(!PCFG || !PCFG.sensors) return;
+    var j = idx + dir;
+    if(j < 0 || j >= PCFG.sensors.length) return;
+    var tmp = PCFG.sensors[idx];
+    PCFG.sensors[idx] = PCFG.sensors[j];
+    PCFG.sensors[j] = tmp;
+    clRenderSensors(PCFG.sensors);
+}
+
+function clDupSensor(idx) {
+    if(!PCFG || !PCFG.sensors) return;
+    var copy = JSON.parse(JSON.stringify(PCFG.sensors[idx]));
+    copy.id = copy.id + '_copy';
+    PCFG.sensors.splice(idx + 1, 0, copy);
     clRenderSensors(PCFG.sensors);
 }
 
@@ -2030,9 +2112,12 @@ function sapConfirm() {
     if(info.iface === 'pulse')  { newS.pin = 9; newS.read_interval_ms = 5000; }
     if(info.iface === 'analog') {
         newS.pin = 0; newS.adc_samples = 64; newS.read_interval_ms = 1000;
-        if(SAP_selectedType === 'zmpt101b') newS.voltage_factor = 1.0;
-        if(SAP_selectedType === 'zmct103c') newS.current_factor = 1.0;
+        if(SAP_selectedType === 'zmpt101b')      { newS.voltage_factor = 1.0; }
+        if(SAP_selectedType === 'zmct103c')      { newS.current_factor = 1.0; }
+        if(SAP_selectedType === 'soil_moisture') { newS.dry_value = 3300; newS.wet_value = 1500; newS.calibration = { moisture: { offset: 0.0, scale: 1.0 } }; }
     }
+    if(info.iface === 'onewire') { newS.pin = 2; newS.resolution = 12; newS.read_interval_ms = 5000; newS.calibration = { temperature: { offset: 0.0, scale: 1.0 } }; }
+    if(info.iface === 'gpio' && SAP_selectedType === 'hcsr04') { newS.trig_pin = 5; newS.echo_pin = 4; newS.max_distance_cm = 400; newS.read_interval_ms = 1000; newS.calibration = { distance: { offset: 0.0, scale: 1.0 } }; }
     PCFG.sensors.push(newS);
     sapClose();
     clRenderSensors(PCFG.sensors);
@@ -2078,10 +2163,13 @@ function _sepPinSelect(elemId, currentVal, usedPins, allowNone, adcOnly) {
     }
     CL_GPIO_PINS.forEach(function(p) {
         if(adcOnly && !p.adc) return;
-        var usedBy   = usedPins ? usedPins[p.gpio] : null;
+        var usedBy    = usedPins ? usedPins[p.gpio] : null;
+        var sysLabel  = CL_SYSTEM_PINS[p.gpio];
         var isSelected = (Number(currentVal) === p.gpio);
         var isDisabled = usedBy && !isSelected;
-        var suffix   = usedBy ? '  ✗ used by: ' + usedBy.join(', ') : '';
+        var suffix = '';
+        if(usedBy)   suffix += '  ✗ ' + usedBy.join(', ');
+        if(sysLabel) suffix += '  ⚠ ' + sysLabel;
         opts += '<option value="' + p.gpio + '"'
             + (isSelected  ? ' selected' : '')
             + (isDisabled  ? ' disabled' : '')
@@ -2102,11 +2190,9 @@ function clEditSensor(idx) {
     // ── Basic fields ──────────────────────────────────────────────────────────
     html += _sepRow('Sensor ID',
         '<input type="text" id="sep-id" class="form-input" value="' + _sepEsc(s.id || '') + '">');
-
     html += _sepRow('Type',
         '<input type="text" class="form-input" value="' + _sepEsc((typeInfo.label || s.type) + ' [' + iface + ']') + '"'
         + ' readonly style="background:var(--bg);cursor:default;opacity:.75">');
-
     html += '<div class="form-group" style="margin-bottom:.7rem">'
         + '<label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">'
         + '<input type="checkbox" id="sep-enabled"' + (s.enabled ? ' checked' : '') + '>'
@@ -2121,7 +2207,40 @@ function clEditSensor(idx) {
         html += '</div>';
         html += _sepRow('Read Interval (ms)', _sepNumInput('sep-interval', s.read_interval_ms || 10000, 100, undefined, 100));
         if(s.address !== undefined) {
-            html += _sepRow('I²C Address (hex)', '<input type="text" id="sep-address" class="form-input" value="' + _sepEsc(s.address) + '">');
+            html += _sepRow('I²C Address (hex/dec)',
+                '<input type="text" id="sep-address" class="form-input" value="' + _sepEsc(s.address) + '">',
+                'e.g. 0x76 or 118');
+        }
+        // BME688-specific
+        if(s.type === 'bme688') {
+            html += '<div class="form-row" style="gap:.5rem">';
+            html += '<div>' + _sepRow('Heater Temp (°C)', _sepNumInput('sep-heater_temp', s.heater_temp || 320, 100, 400)) + '</div>';
+            html += '<div>' + _sepRow('Heater Duration (ms)', _sepNumInput('sep-heater_duration_ms', s.heater_duration_ms || 150, 1, 4032)) + '</div>';
+            html += '</div>';
+        }
+        // BH1750-specific
+        if(s.type === 'bh1750') {
+            html += _sepRow('Measurement Mode',
+                '<select id="sep-mode" class="form-input form-select">'
+                + ['H','H2','L'].map(function(m) {
+                    return '<option value="' + m + '"' + (s.mode === m ? ' selected' : '') + '>' + m
+                        + (m === 'H' ? ' — 1 lx res (default)' : m === 'H2' ? ' — 0.5 lx res' : ' — 4 lx res') + '</option>';
+                }).join('') + '</select>');
+        }
+        // VEML7700-specific
+        if(s.type === 'veml7700') {
+            var gainOpts = [{v:0,l:'1× (default)'},{v:1,l:'2×'},{v:2,l:'1/8×'},{v:3,l:'1/4×'}];
+            var intOpts  = [25, 50, 100, 200, 400, 800];
+            html += '<div class="form-row" style="gap:.5rem">';
+            html += '<div>' + _sepRow('Gain',
+                '<select id="sep-gain" class="form-input form-select">'
+                + gainOpts.map(function(g){ return '<option value="'+g.v+'"'+(s.gain===g.v?' selected':'')+'>'+g.l+'</option>'; }).join('')
+                + '</select>') + '</div>';
+            html += '<div>' + _sepRow('Integration (ms)',
+                '<select id="sep-integration_ms" class="form-input form-select">'
+                + intOpts.map(function(t){ return '<option value="'+t+'"'+(s.integration_ms===t?' selected':'')+'>'+t+' ms</option>'; }).join('')
+                + '</select>') + '</div>';
+            html += '</div>';
         }
 
     } else if(iface === 'uart') {
@@ -2133,10 +2252,9 @@ function clEditSensor(idx) {
         var baudOpts = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200];
         html += _sepRow('Baud Rate',
             '<select id="sep-baud" class="form-input form-select">'
-            + baudOpts.map(function(b) {
+            + baudOpts.map(function(b){
                 return '<option value="' + b + '"' + (s.baud === b ? ' selected' : '') + '>' + b + '</option>';
-            }).join('')
-            + '</select>');
+            }).join('') + '</select>');
 
     } else if(iface === 'pulse') {
         html += _sepRow('Signal Pin', _sepPinSelect('sep-pin', s.pin !== undefined ? s.pin : 9, usedPins, false, false));
@@ -2144,26 +2262,20 @@ function clEditSensor(idx) {
         if(s.pulses_per_liter !== undefined) {
             html += _sepRow('Pulses per Liter', _sepNumInput('sep-pulses_per_liter', s.pulses_per_liter, 0, undefined, 0.1));
         }
-        if(s.calibration !== undefined) {
-            html += _sepRow('Calibration Factor', _sepNumInput('sep-calibration', s.calibration, undefined, undefined, 0.001));
-        }
 
     } else if(iface === 'analog') {
         html += _sepRow('ADC Pin',
             _sepPinSelect('sep-pin', s.pin !== undefined ? s.pin : 0, usedPins, false, true),
             'ADC-capable pins only (GPIO 0–5 on XIAO ESP32-C3).');
         html += _sepRow('ADC Samples (averaged)', _sepNumInput('sep-adc_samples', s.adc_samples || 64, 1, 1024),
-            'More samples → less noise, slower reading.');
+            'More samples → lower noise, slower reading.');
         html += _sepRow('Read Interval (ms)', _sepNumInput('sep-interval', s.read_interval_ms || 1000, 100, undefined, 100));
-        // Type-specific calibration fields
         if(s.type === 'zmpt101b') {
-            html += _sepRow('Voltage Factor',
-                _sepNumInput('sep-voltage_factor', s.voltage_factor !== undefined ? s.voltage_factor : 1.0, 0, undefined, 0.0001),
-                'Scale factor to convert ADC units → Volts RMS. Calibrate against a known AC source.');
+            html += _sepRow('Voltage Factor', _sepNumInput('sep-voltage_factor', s.voltage_factor !== undefined ? s.voltage_factor : 1.0, 0, undefined, 0.0001),
+                'Multiplier: ADC units → Volts RMS. Calibrate against known AC source.');
         } else if(s.type === 'zmct103c') {
-            html += _sepRow('Current Factor',
-                _sepNumInput('sep-current_factor', s.current_factor !== undefined ? s.current_factor : 1.0, 0, undefined, 0.0001),
-                'Scale factor to convert ADC units → Amperes RMS. Calibrate against a known load.');
+            html += _sepRow('Current Factor', _sepNumInput('sep-current_factor', s.current_factor !== undefined ? s.current_factor : 1.0, 0, undefined, 0.0001),
+                'Multiplier: ADC units → Amperes RMS. Calibrate against known load.');
         } else if(s.type === 'soil_moisture') {
             html += '<div class="form-row" style="gap:.5rem">';
             html += '<div>' + _sepRow('Dry ADC Value', _sepNumInput('sep-dry_value', s.dry_value || 3300, 0, 4095)) + '</div>';
@@ -2171,11 +2283,52 @@ function clEditSensor(idx) {
             html += '</div>';
         }
 
+    } else if(iface === 'onewire') {
+        html += _sepRow('Data Pin', _sepPinSelect('sep-pin', s.pin !== undefined ? s.pin : 2, usedPins, false, false));
+        html += _sepRow('Resolution',
+            '<select id="sep-resolution" class="form-input form-select">'
+            + [9, 10, 11, 12].map(function(r){
+                return '<option value="' + r + '"' + (s.resolution === r ? ' selected' : '') + '>' + r + ' bit'
+                    + (r === 9 ? ' (93ms, ±0.5°C)' : r === 10 ? ' (187ms, ±0.25°C)' : r === 11 ? ' (375ms, ±0.125°C)' : ' (750ms, ±0.0625°C, default)') + '</option>';
+            }).join('') + '</select>');
+        html += _sepRow('Read Interval (ms)', _sepNumInput('sep-interval', s.read_interval_ms || 5000, 500, undefined, 100));
+
+    } else if(iface === 'gpio') {
+        // HC-SR04 has trig + echo as separate pins
+        if(s.type === 'hcsr04' || s.trig_pin !== undefined) {
+            html += '<div class="form-row" style="gap:.5rem">';
+            html += '<div>' + _sepRow('Trigger Pin', _sepPinSelect('sep-trig_pin', s.trig_pin !== undefined ? s.trig_pin : 5, usedPins, false, false)) + '</div>';
+            html += '<div>' + _sepRow('Echo Pin',    _sepPinSelect('sep-echo_pin', s.echo_pin  !== undefined ? s.echo_pin  : 4, usedPins, false, false)) + '</div>';
+            html += '</div>';
+            html += _sepRow('Max Distance (cm)', _sepNumInput('sep-max_distance_cm', s.max_distance_cm || 400, 10, 600));
+        } else {
+            html += _sepRow('Pin', _sepPinSelect('sep-pin', s.pin !== undefined ? s.pin : 0, usedPins, false, false));
+        }
+        html += _sepRow('Read Interval (ms)', _sepNumInput('sep-interval', s.read_interval_ms || 1000, 100, undefined, 100));
+
     } else {
-        // gpio / onewire / unknown — single pin + interval
         html += _sepRow('Pin', _sepPinSelect('sep-pin', s.pin !== undefined ? s.pin : 0, usedPins, false, false));
         if(s.read_interval_ms !== undefined) {
             html += _sepRow('Read Interval (ms)', _sepNumInput('sep-interval', s.read_interval_ms, 100, undefined, 100));
+        }
+    }
+
+    // ── Calibration sub-form ─────────────────────────────────────────────────
+    var calObj = s.cal || s.calibration;
+    if(calObj && typeof calObj === 'object' && !Array.isArray(calObj)) {
+        var calKeys = Object.keys(calObj).filter(function(k) { return typeof calObj[k] === 'object'; });
+        if(calKeys.length) {
+            html += '<div style="border-top:1px solid var(--border);margin-top:.75rem;padding-top:.75rem">';
+            html += '<div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.5rem">Calibration</div>';
+            calKeys.forEach(function(metric) {
+                var c = calObj[metric];
+                html += '<div style="font-size:.82rem;font-weight:600;color:var(--text-muted);margin-bottom:.2rem">' + metric + '</div>';
+                html += '<div class="form-row" style="gap:.5rem;margin-bottom:.6rem">';
+                html += '<div>' + _sepRow('Offset', _sepNumInput('sep-cal-' + metric + '-offset', c.offset !== undefined ? c.offset : 0, undefined, undefined, 0.00001)) + '</div>';
+                html += '<div>' + _sepRow('Scale',  _sepNumInput('sep-cal-' + metric + '-scale',  c.scale  !== undefined ? c.scale  : 1, undefined, undefined, 0.00001)) + '</div>';
+                html += '</div>';
+            });
+            html += '</div>';
         }
     }
 
@@ -2199,16 +2352,25 @@ function sepConfirm() {
 
     var iface = s.interface;
 
-    function _int(id)   { var e = document.getElementById(id); return e ? parseInt(e.value,  10) : undefined; }
-    function _flt(id)   { var e = document.getElementById(id); return e ? parseFloat(e.value)    : undefined; }
-    function _str(id)   { var e = document.getElementById(id); return e ? e.value.trim()         : undefined; }
-    function _set(key, val) { if(val !== undefined && !isNaN(val)) s[key] = val; }
+    function _int(id)   { var e = document.getElementById(id); return e && e.value !== '' ? parseInt(e.value,  10) : undefined; }
+    function _flt(id)   { var e = document.getElementById(id); return e && e.value !== '' ? parseFloat(e.value)    : undefined; }
+    function _str(id)   { var e = document.getElementById(id); return e ? e.value.trim()                           : undefined; }
+    function _set(key, val) { if(val !== undefined && !isNaN(Number(val))) s[key] = val; }
+    function _has(id)   { return !!document.getElementById(id); }
 
     if(iface === 'i2c') {
         _set('sda',              _int('sep-sda'));
         _set('scl',              _int('sep-scl'));
         _set('read_interval_ms', _int('sep-interval'));
         var addr = _str('sep-address'); if(addr !== undefined && addr !== '') s.address = addr;
+        // BME688
+        if(_has('sep-heater_temp'))        _set('heater_temp',         _int('sep-heater_temp'));
+        if(_has('sep-heater_duration_ms')) _set('heater_duration_ms',  _int('sep-heater_duration_ms'));
+        // BH1750
+        if(_has('sep-mode'))               { var m = _str('sep-mode'); if(m) s.mode = m; }
+        // VEML7700
+        if(_has('sep-gain'))               _set('gain',                _int('sep-gain'));
+        if(_has('sep-integration_ms'))     _set('integration_ms',      _int('sep-integration_ms'));
 
     } else if(iface === 'uart') {
         _set('uart_rx', _int('sep-uart_rx'));
@@ -2218,21 +2380,48 @@ function sepConfirm() {
     } else if(iface === 'pulse') {
         _set('pin',              _int('sep-pin'));
         _set('read_interval_ms', _int('sep-interval'));
-        if(document.getElementById('sep-pulses_per_liter')) _set('pulses_per_liter', _flt('sep-pulses_per_liter'));
-        if(document.getElementById('sep-calibration'))      _set('calibration',      _flt('sep-calibration'));
+        if(_has('sep-pulses_per_liter')) _set('pulses_per_liter', _flt('sep-pulses_per_liter'));
 
     } else if(iface === 'analog') {
         _set('pin',              _int('sep-pin'));
         _set('adc_samples',      _int('sep-adc_samples'));
         _set('read_interval_ms', _int('sep-interval'));
-        if(document.getElementById('sep-voltage_factor')) _set('voltage_factor', _flt('sep-voltage_factor'));
-        if(document.getElementById('sep-current_factor')) _set('current_factor', _flt('sep-current_factor'));
-        if(document.getElementById('sep-dry_value'))      _set('dry_value',      _int('sep-dry_value'));
-        if(document.getElementById('sep-wet_value'))      _set('wet_value',      _int('sep-wet_value'));
+        if(_has('sep-voltage_factor')) _set('voltage_factor', _flt('sep-voltage_factor'));
+        if(_has('sep-current_factor')) _set('current_factor', _flt('sep-current_factor'));
+        if(_has('sep-dry_value'))      _set('dry_value',      _int('sep-dry_value'));
+        if(_has('sep-wet_value'))      _set('wet_value',      _int('sep-wet_value'));
+
+    } else if(iface === 'onewire') {
+        _set('pin',              _int('sep-pin'));
+        _set('resolution',       _int('sep-resolution'));
+        _set('read_interval_ms', _int('sep-interval'));
+
+    } else if(iface === 'gpio') {
+        _set('read_interval_ms', _int('sep-interval'));
+        if(_has('sep-trig_pin'))        _set('trig_pin',        _int('sep-trig_pin'));
+        if(_has('sep-echo_pin'))        _set('echo_pin',        _int('sep-echo_pin'));
+        if(_has('sep-max_distance_cm')) _set('max_distance_cm', _flt('sep-max_distance_cm'));
+        if(_has('sep-pin'))             _set('pin',             _int('sep-pin'));
 
     } else {
         _set('pin',              _int('sep-pin'));
         _set('read_interval_ms', _int('sep-interval'));
+    }
+
+    // ── Calibration sub-form ─────────────────────────────────────────────────
+    var calObj = s.cal || s.calibration;
+    var calKey = s.cal ? 'cal' : 'calibration';
+    if(calObj && typeof calObj === 'object') {
+        Object.keys(calObj).forEach(function(metric) {
+            var offEl = document.getElementById('sep-cal-' + metric + '-offset');
+            var sclEl = document.getElementById('sep-cal-' + metric + '-scale');
+            if(offEl || sclEl) {
+                if(!s[calKey])           s[calKey] = {};
+                if(!s[calKey][metric])   s[calKey][metric] = {};
+                if(offEl) s[calKey][metric].offset = parseFloat(offEl.value);
+                if(sclEl) s[calKey][metric].scale  = parseFloat(sclEl.value);
+            }
+        });
     }
 
     PCFG.sensors[SEP_idx] = s;
@@ -2375,6 +2564,102 @@ function _setVal(id, val, isCheck) {
     if(!el) return;
     if(isCheck) el.checked = !!val;
     else el.value = val;
+}
+
+// ============================================================================
+// ══ TOAST NOTIFICATIONS ══
+// ============================================================================
+function showToast(msg, type) {
+    var el = document.getElementById('toast');
+    if (!el) return;
+    if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
+    el.textContent = msg;
+    el.className = 'toast-show' + (type ? ' toast-' + type : '');
+    _toastTimer = setTimeout(function () {
+        el.className = '';
+        _toastTimer = null;
+    }, 3500);
+}
+
+// ============================================================================
+// ══ THEME QUICK TOGGLE ══
+// ============================================================================
+function quickThemeToggle() {
+    var html = document.getElementById('htmlRoot');
+    if (!html) return;
+    var isDark = html.classList.contains('theme-dark') ||
+        (html.classList.contains('theme-auto') &&
+         window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var next = isDark ? 'theme-light' : 'theme-dark';
+    html.classList.remove('theme-light', 'theme-dark', 'theme-auto');
+    html.classList.add(next);
+    localStorage.setItem('quickTheme', next);
+    var btn = document.getElementById('themeToggleBtn');
+    if (btn) btn.textContent = next === 'theme-dark' ? '☀️' : '🌙';
+}
+
+// Restore quick theme override on load (before applyStatus overwrites it)
+(function () {
+    var qt = localStorage.getItem('quickTheme');
+    if (!qt) return;
+    var html = document.getElementById('htmlRoot');
+    if (!html) return;
+    html.classList.remove('theme-light', 'theme-dark', 'theme-auto');
+    html.classList.add(qt);
+    // Update button icon once DOM ready
+    window.addEventListener('DOMContentLoaded', function () {
+        var btn = document.getElementById('themeToggleBtn');
+        if (btn) btn.textContent = qt === 'theme-dark' ? '☀️' : '🌙';
+    });
+}());
+
+// ============================================================================
+// ══ KEYBOARD SHORTCUTS ══
+// ============================================================================
+document.addEventListener('keydown', function (e) {
+    // Ignore when typing in inputs/textareas
+    var tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    // Ignore modifier keys
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+    switch (e.key) {
+        case '?':
+            var kbp = document.getElementById('kbPopup');
+            if (kbp) kbp.style.display = kbp.style.display === 'flex' ? 'none' : 'flex';
+            break;
+        case 'Escape':
+            // Close any open popup-overlay
+            document.querySelectorAll('.popup-overlay').forEach(function (p) {
+                if (p.style.display !== 'none') p.style.display = 'none';
+            });
+            break;
+        case '1': location.hash = 'dashboard'; break;
+        case '2': location.hash = 'files'; break;
+        case '3': location.hash = 'live'; break;
+        case '4': location.hash = 'sensors'; break;
+        case '5': location.hash = 'settings_device'; break;
+        case 'r':
+        case 'R':
+            pageInit(currentPage);
+            showToast('Page reloaded', 'success');
+            break;
+        case 'd':
+        case 'D':
+            quickThemeToggle();
+            break;
+    }
+});
+
+// ============================================================================
+// ══ CHART PNG EXPORT ══
+// ============================================================================
+function dbExportPNG() {
+    if (!dbChart) { showToast('No chart to export', 'warning'); return; }
+    var url = dbChart.toBase64Image('image/png', 1);
+    var a = document.createElement('a');
+    var f = (ST.deviceId || CFG.deviceId || 'logger') + '_chart_' + new Date().toISOString().slice(0, 10) + '.png';
+    a.href = url; a.download = f; a.click();
 }
 
 function expSave() {

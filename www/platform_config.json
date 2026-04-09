@@ -276,6 +276,36 @@
       "calibration": {
         "temperature": { "offset": 0.0, "scale": 1.0 }
       }
+    },
+
+    {
+      "id": "ac_voltage",
+      "type": "zmpt101b",
+      "enabled": false,
+      "interface": "analog",
+      "pin": 0,
+      "voltage_factor": 1.0,
+      "adc_samples": 200,
+      "sample_period_us": 100,
+      "read_interval_ms": 1000,
+      "calibration": {
+        "voltage_vrms": { "offset": 0.0, "scale": 1.0 }
+      }
+    },
+
+    {
+      "id": "ac_current",
+      "type": "zmct103c",
+      "enabled": false,
+      "interface": "analog",
+      "pin": 1,
+      "current_factor": 1.0,
+      "adc_samples": 200,
+      "sample_period_us": 100,
+      "read_interval_ms": 1000,
+      "calibration": {
+        "current_arms": { "offset": 0.0, "scale": 1.0 }
+      }
     }
 
   ],

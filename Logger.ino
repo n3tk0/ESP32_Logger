@@ -52,6 +52,8 @@
 #define SENSOR_WIND_ENABLED
 #define SENSOR_SOIL_ENABLED
 #define SENSOR_HCSR04_ENABLED
+#define SENSOR_ZMPT101B_ENABLED
+#define SENSOR_ZMCT103C_ENABLED
 // Exporters (~10-20 KB each):
 #define EXPORT_MQTT_ENABLED         // internal MQTT driver
 #define EXPORT_HTTP_ENABLED
@@ -63,6 +65,7 @@
 
 #include <Arduino.h>
 #include <esp_sleep.h>
+#include <esp_system.h>     // esp_reset_reason()
 #include <WiFi.h>           // for WiFi.setSleep() in continuous mode
 
 #include "src/core/Globals.h"
@@ -126,6 +129,12 @@
 #endif
 #ifdef SENSOR_DS18B20_ENABLED
 #  include "src/sensors/plugins/DS18B20Sensor.h"
+#endif
+#ifdef SENSOR_ZMPT101B_ENABLED
+#  include "src/sensors/plugins/ZMPT101BSensor.h"
+#endif
+#ifdef SENSOR_ZMCT103C_ENABLED
+#  include "src/sensors/plugins/ZMCT103CSensor.h"
 #endif
 #include "src/pipeline/DataPipeline.h"
 #include "src/tasks/TaskManager.h"
@@ -267,6 +276,45 @@ static PlatformMode _detectPlatformMode() {
 }
 
 // ---------------------------------------------------------------------------
+// Watchdog recovery log — write reset reason to /reset_log.txt on LittleFS
+// Appends one line per boot so resets can be diagnosed via the Files page.
+// ---------------------------------------------------------------------------
+static const char* _resetReasonStr(esp_reset_reason_t r) {
+    switch (r) {
+        case ESP_RST_POWERON:  return "POWER_ON";
+        case ESP_RST_EXT:      return "EXT_RESET";
+        case ESP_RST_SW:       return "SW_RESET";
+        case ESP_RST_PANIC:    return "PANIC";
+        case ESP_RST_INT_WDT:  return "INT_WDT";
+        case ESP_RST_TASK_WDT: return "TASK_WDT";
+        case ESP_RST_WDT:      return "WDT";
+        case ESP_RST_DEEPSLEEP:return "DEEP_SLEEP";
+        case ESP_RST_BROWNOUT: return "BROWNOUT";
+        case ESP_RST_SDIO:     return "SDIO";
+        default:               return "UNKNOWN";
+    }
+}
+
+static void _writeResetLog() {
+    if (!activeFS) return;
+    esp_reset_reason_t reason = esp_reset_reason();
+    // Only log notable resets (skip normal power-on and deep-sleep wake)
+    if (reason == ESP_RST_POWERON || reason == ESP_RST_DEEPSLEEP) return;
+
+    File f = activeFS->open("/reset_log.txt", FILE_APPEND);
+    if (!f) return;
+
+    // Format: YYYY-MM-DD HH:MM:SS  REASON  boot#N
+    // RTC time may not be valid at this point; use uptime placeholder
+    char line[80];
+    snprintf(line, sizeof(line), "boot#%u  reason=%s\n",
+             (unsigned)bootCount, _resetReasonStr(reason));
+    f.print(line);
+    f.close();
+    DBGF("[WDT] Reset log entry: %s", line);
+}
+
+// ---------------------------------------------------------------------------
 // M9/2.6 — Check for sensor pin conflicts with hardware config pins
 // ---------------------------------------------------------------------------
 static void _checkPinConflicts() {
@@ -350,6 +398,12 @@ static void _initPlatform() {
 #endif
 #ifdef SENSOR_DS18B20_ENABLED
     sensorManager.registerPlugin("ds18b20", []()->ISensor*{ return new DS18B20Sensor(); });
+#endif
+#ifdef SENSOR_ZMPT101B_ENABLED
+    sensorManager.registerPlugin("zmpt101b", []()->ISensor*{ return new ZMPT101BSensor(); });
+#endif
+#ifdef SENSOR_ZMCT103C_ENABLED
+    sensorManager.registerPlugin("zmct103c", []()->ISensor*{ return new ZMCT103CSensor(); });
 #endif
 
     // Load sensor configs from /platform_config.json
@@ -447,6 +501,9 @@ void setup() {
     bootCount++;
     backupBootCount();
     DBGF("Boot count: %d\n", bootCount);
+
+    // ── Watchdog recovery log ─────────────────────────────────────────────────
+    _writeResetLog();
 
     // ── Wake reason ───────────────────────────────────────────────────────────
     wakeUpButtonStr = getWakeupReason();

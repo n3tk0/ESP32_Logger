@@ -120,6 +120,9 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
         int n = s->readAll(readings, 4);
 
         if (tookMutex) xSemaphoreGive(wireMutex);
+        if (n <= 0) {
+            s->incErrorCount();
+        }
         if (n > 0) {
             for (int j = 0; j < n; j++) {
                 readings[j].timestamp = now;
@@ -190,7 +193,8 @@ void SensorManager::toJson(JsonArray arr) const {
         o["name"]         = s->getName();
         o["enabled"]      = s->isEnabled();
         o["last_read_ts"] = s->lastReadTs();
-        o["status"]       = s->isEnabled() ? "ok" : "disabled";
+        o["error_count"]  = s->errorCount();
+        o["status"]       = s->isEnabled() ? (s->errorCount() > 0 ? "error" : "ok") : "disabled";
 
         const char* metricNames[8] = {};
         int mcount = s->getMetrics(metricNames, 8);

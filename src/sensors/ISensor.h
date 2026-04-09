@@ -93,10 +93,16 @@ public:
     uint32_t    lastReadTs()               const { return _lastReadTs; }
     void        setLastReadTs(uint32_t ts)       { _lastReadTs = ts; }
 
+    // Error tracking — incremented by SensorManager on failed reads
+    uint32_t    errorCount()               const { return _errorCount; }
+    void        incErrorCount()                  { _errorCount++; }
+    void        resetErrorCount()                { _errorCount = 0; }
+
 protected:
     bool     _enabled    = false;
     char     _id[17]     = {};
     uint32_t _lastReadTs = 0;
+    uint32_t _errorCount = 0;
 };
 
 // Factory function signature — used to register plugins without vtable overhead
