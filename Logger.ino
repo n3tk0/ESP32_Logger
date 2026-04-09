@@ -75,6 +75,7 @@
 #include "src/managers/RtcManager.h"
 #include "src/managers/WiFiManager.h"
 #include "src/managers/DataLogger.h"
+#include "src/managers/OtaManager.h"
 #include "src/web/WebServer.h"    // setupWebServer()
 #include "src/utils/Utils.h"
 
@@ -520,6 +521,9 @@ void setup() {
 
     // ── Watchdog recovery log ─────────────────────────────────────────────────
     _writeResetLog();
+
+    // ── OTA rollback support ─────────────────────────────────────────────────
+    OtaManager::boot();
 
     // ── Wake reason ───────────────────────────────────────────────────────────
     wakeUpButtonStr = getWakeupReason();

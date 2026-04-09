@@ -1037,6 +1037,16 @@
           </select>
         </div>
       </div>
+      <!-- Secondary series overlay (dual Y-axis) -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 16px;border-top:1px solid var(--border);font-size:.85rem">
+        <span style="color:var(--text-muted)">Overlay:</span>
+        <select id="sc-sensor2" class="form-input form-select" style="width:auto;font-size:.82rem" onchange="sensorChartLoad()">
+          <option value="">— none —</option>
+        </select>
+        <select id="sc-metric2" class="form-input form-select" style="width:auto;font-size:.82rem" onchange="sensorChartLoad()">
+          <option value="">— metric —</option>
+        </select>
+      </div>
       <div class="card-body" style="padding:8px">
         <canvas id="sensorChart" style="width:100%;max-height:320px"></canvas>
         <div id="sc-msg" style="font-size:.8rem;color:var(--text-muted);margin-top:4px"></div>

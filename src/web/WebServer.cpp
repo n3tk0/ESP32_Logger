@@ -1254,7 +1254,8 @@ void setupWebServer() {
     // =========================================================================
     // STATIC FILE FALLBACK (not found handler)
     // =========================================================================
-    server.onNotFound([](AsyncWebServerRequest *r) {
+    server.onNotFound([touchActivity](AsyncWebServerRequest *r) {
+        touchActivity();   // C2: track web activity for idle power management
         String path = r->url();
 
         if (path.startsWith("/www/")) {
@@ -1347,12 +1348,6 @@ void setupWebServer() {
         shouldRestart = true;
         restartTimer  = millis();
         r->send(200, "application/json", "{\"ok\":true,\"restart\":true}");
-    });
-
-    // C2: catch-all filter — update web activity timestamp on every request
-    server.onNotFound([touchActivity](AsyncWebServerRequest *r) {
-        touchActivity();
-        r->send(404, "text/plain", "Not found");
     });
 
     server.begin();
