@@ -1,0 +1,18 @@
+[package]
+name = "flash_bootloader"
+version = "1.0.0"
+edition = "2021"
+description = "Flash rollback-enabled bootloader to ESP32 devices — standalone, no Python needed"
+license = "MIT"
+readme = "README.md"
+
+[dependencies]
+serialport = "4.5"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1

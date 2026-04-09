@@ -10,6 +10,8 @@
 #   - tools/bootloader/esp32c3/partition-table.bin
 #   - tools/bootloader/esp32/bootloader.bin
 #   - tools/bootloader/esp32/partition-table.bin
+#   - flash_bootloader.exe (Windows x86_64, standalone)
+#   - flash_bootloader     (Linux x86_64, standalone)
 
 name: Build Bootloader
 
@@ -19,6 +21,7 @@ on:
       - 'tools/bootloader/sdkconfig.defaults.*'
       - 'tools/bootloader/CMakeLists.txt'
       - 'tools/bootloader/main/**'
+      - 'tools/flash_bootloader/**'
       - 'partitions_balanced.csv'
       - '.github/workflows/build-bootloader.yml'
   workflow_dispatch:
@@ -125,8 +128,66 @@ jobs:
             git push
           fi
 
-  attach-to-release:
+  build-flash-tool:
     needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-pc-windows-gnu
+            artifact: flash_bootloader.exe
+            ext: .exe
+            packages: gcc-mingw-w64-x86-64
+          - target: x86_64-unknown-linux-gnu
+            artifact: flash_bootloader
+            ext: ""
+            packages: ""
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download bootloader binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: bootloader-esp32c3
+          path: tools/bootloader/esp32c3/
+
+      - name: Download ESP32 bootloader
+        uses: actions/download-artifact@v4
+        with:
+          name: bootloader-esp32
+          path: tools/bootloader/esp32/
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation packages
+        if: matrix.packages != ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ${{ matrix.packages }}
+
+      - name: Build flash tool
+        working-directory: tools/flash_bootloader
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Collect binary
+        run: |
+          cp tools/flash_bootloader/target/${{ matrix.target }}/release/flash_bootloader${{ matrix.ext }} \
+             ${{ matrix.artifact }}
+          ls -lh ${{ matrix.artifact }}
+
+      - name: Upload flash tool
+        uses: actions/upload-artifact@v4
+        with:
+          name: flash-tool-${{ matrix.target }}
+          path: ${{ matrix.artifact }}
+
+  attach-to-release:
+    needs: [build, build-flash-tool]
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
     permissions:
@@ -145,6 +206,18 @@ jobs:
           name: bootloader-esp32
           path: esp32/
 
+      - name: Download Windows flash tool
+        uses: actions/download-artifact@v4
+        with:
+          name: flash-tool-x86_64-pc-windows-gnu
+          path: flash-tool/
+
+      - name: Download Linux flash tool
+        uses: actions/download-artifact@v4
+        with:
+          name: flash-tool-x86_64-unknown-linux-gnu
+          path: flash-tool/
+
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
@@ -153,3 +226,5 @@ jobs:
             esp32c3/partition-table.bin
             esp32/bootloader.bin
             esp32/partition-table.bin
+            flash-tool/flash_bootloader.exe
+            flash-tool/flash_bootloader
