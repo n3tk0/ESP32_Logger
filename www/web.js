@@ -387,6 +387,7 @@ function dbLoadChartJs(cb) {
 }
 
 function dbInit() {
+    dbRestoreFilters();
     dbLoadChartJs(function () {
         // Matches original: generateDatalogFileOptions() via select population
         fetch('/api/filelist?filter=log&recursive=1')
@@ -433,6 +434,8 @@ function dbLoadData() {
 // Matches original: function applyFilters()
 function dbApplyFilters() {
     if (!dbRawData) { dbLoadData(); return; }
+    dbSaveFilters();
+    dbViewStart = 0; dbViewEnd = -1;  // reset zoom on filter change
     dbProcessData(dbRawData);
 }
 
@@ -499,6 +502,13 @@ function dbRenderChart(data) {
     if (!ctx) return;
     if (typeof Chart === 'undefined') { dbLoadChartJs(function () { dbRenderChart(data); }); return; }
     if (dbChart) { dbChart.destroy(); dbChart = null; }
+
+    // Apply zoom window
+    if (data.length > 0 && dbViewEnd >= 0) {
+        var s = Math.max(0, Math.min(dbViewStart, data.length - 1));
+        var e = Math.max(s, Math.min(dbViewEnd, data.length - 1));
+        data = data.slice(s, e + 1);
+    }
 
     var th = ST.theme || CFG.theme || {};
     var rootStyle = getComputedStyle(document.documentElement);
@@ -2012,6 +2022,7 @@ function clRenderSensors(sensors) {
             +   '<button type="button" class="btn btn-sm btn-secondary" onclick="clMoveSensor(' + i + ',-1)" title="Move up"'    + (i === 0   ? ' disabled' : '') + '>▲</button>'
             +   '<button type="button" class="btn btn-sm btn-secondary" onclick="clMoveSensor(' + i + ',1)"  title="Move down"'  + (i === n-1 ? ' disabled' : '') + '>▼</button>'
             +   '<button type="button" class="btn btn-sm btn-secondary" onclick="clDupSensor('  + i + ')"   title="Duplicate">⧉</button>'
+            +   '<button type="button" class="btn btn-sm btn-secondary" onclick="clPingSensor(\'' + (s.id||s.type) + '\')" title="Test / read now">🔍</button>'
             +   '<button type="button" class="btn btn-sm btn-secondary" onclick="clEditSensor(' + i + ')"   title="Edit">✏️</button>'
             +   '<button type="button" class="btn btn-sm btn-danger"    onclick="clRemoveSensor(' + i + ')" title="Remove">🗑</button>'
             + '</div>'
@@ -2265,8 +2276,11 @@ function clEditSensor(idx) {
 
     } else if(iface === 'analog') {
         html += _sepRow('ADC Pin',
-            _sepPinSelect('sep-pin', s.pin !== undefined ? s.pin : 0, usedPins, false, true),
-            'ADC-capable pins only (GPIO 0–5 on XIAO ESP32-C3).');
+            '<div id="sep-pin-wrap">' + _sepPinSelect('sep-pin', s.pin !== undefined ? s.pin : 0, usedPins, false, true) + '</div>');
+        html += '<div style="margin-top:-.4rem;margin-bottom:.6rem">'
+            + '<label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;color:var(--text-muted);cursor:pointer">'
+            + '<input type="checkbox" id="sep-adc-only" checked onchange="sepRebuildPinSel()">'
+            + 'Show ADC-capable pins only (GPIO 0–5)</label></div>';
         html += _sepRow('ADC Samples (averaged)', _sepNumInput('sep-adc_samples', s.adc_samples || 64, 1, 1024),
             'More samples → lower noise, slower reading.');
         html += _sepRow('Read Interval (ms)', _sepNumInput('sep-interval', s.read_interval_ms || 1000, 100, undefined, 100));
@@ -2660,6 +2674,180 @@ function dbExportPNG() {
     var a = document.createElement('a');
     var f = (ST.deviceId || CFG.deviceId || 'logger') + '_chart_' + new Date().toISOString().slice(0, 10) + '.png';
     a.href = url; a.download = f; a.click();
+}
+
+// ============================================================================
+// ══ SENSOR TEST / PING ══
+// ============================================================================
+var _sensorPingEl = null;
+
+function clPingSensor(id) {
+    if (!_sensorPingEl) {
+        _sensorPingEl = document.createElement('div');
+        _sensorPingEl.className = 'popup-overlay';
+        _sensorPingEl.style.display = 'none';
+        _sensorPingEl.onclick = function (e) { if (e.target === this) this.style.display = 'none'; };
+        _sensorPingEl.innerHTML =
+            '<div class="popup-content" style="max-width:340px">'
+            + '<div id="spr-title" style="font-size:1.1rem;font-weight:700;margin-bottom:.8rem"></div>'
+            + '<div id="spr-body"></div>'
+            + '<div style="text-align:right;margin-top:1rem">'
+            + '<button class="btn btn-secondary" onclick="document.querySelector(\'.popup-overlay[data-ping]\').style.display=\'none\'">Close</button>'
+            + '</div></div>';
+        _sensorPingEl.setAttribute('data-ping', '1');
+        document.body.appendChild(_sensorPingEl);
+    }
+    document.getElementById('spr-title').textContent = '🔍 ' + id;
+    document.getElementById('spr-body').innerHTML = '<p style="color:var(--text-muted)">Reading…</p>';
+    _sensorPingEl.style.display = 'flex';
+
+    fetch('/api/sensors/read_now?id=' + encodeURIComponent(id))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            var body = document.getElementById('spr-body');
+            if (!body) return;
+            if (d.error) {
+                body.innerHTML = '<p style="color:var(--danger,#e74c3c)">❌ ' + d.error + '</p>';
+                return;
+            }
+            var rows = (d.readings || []).map(function (r) {
+                return '<div style="display:flex;justify-content:space-between;padding:.35rem 0;border-bottom:1px solid var(--border)">'
+                    + '<span style="color:var(--text-muted)">' + r.metric + '</span>'
+                    + '<strong>' + Number(r.value).toFixed(4)
+                    + ' <span style="font-weight:400;color:var(--text-muted)">' + (r.unit || '') + '</span></strong>'
+                    + '</div>';
+            }).join('');
+            body.innerHTML = rows || '<p style="color:var(--text-muted)">No readings returned.</p>';
+        })
+        .catch(function (e) {
+            var body = document.getElementById('spr-body');
+            if (body) body.innerHTML = '<p style="color:var(--danger,#e74c3c)">❌ ' + e.message + '</p>';
+        });
+}
+
+// ============================================================================
+// ══ DASHBOARD: ZOOM / PAN ══
+// ============================================================================
+var dbViewStart = 0;
+var dbViewEnd   = -1;  // -1 means "show all"
+
+function dbZoom(dir) {
+    // dir=-1 → zoom in (fewer bars), dir=+1 → zoom out (more bars)
+    var total = dbFilteredData.length;
+    if (total === 0) return;
+    var start = dbViewStart;
+    var end   = dbViewEnd < 0 ? total - 1 : dbViewEnd;
+    var visible = end - start + 1;
+    var step = Math.max(1, Math.round(visible * 0.25));
+    if (dir < 0) {  // zoom in: shrink from both ends
+        start += step;
+        end   -= step;
+        if (start >= end) { start = Math.max(0, Math.round((total - 1) / 2)); end = start; }
+    } else {        // zoom out: expand toward full range
+        start = Math.max(0, start - step);
+        end   = Math.min(total - 1, end + step);
+    }
+    dbViewStart = start;
+    dbViewEnd   = end;
+    dbRenderChart(dbFilteredData);
+}
+
+function dbZoomReset() {
+    dbViewStart = 0;
+    dbViewEnd   = -1;
+    dbRenderChart(dbFilteredData);
+}
+
+// ============================================================================
+// ══ DASHBOARD: PERSISTENT FILTERS ══
+// ============================================================================
+function dbSaveFilters() {
+    try {
+        localStorage.setItem('dbFilters', JSON.stringify({
+            startDate:   getVal('startDate'),
+            endDate:     getVal('endDate'),
+            eventFilter: getVal('eventFilter'),
+            pressFilter: getVal('pressFilter'),
+            excludeZero: !!(document.getElementById('excludeZero') || {}).checked
+        }));
+    } catch (e) {}
+}
+
+function dbRestoreFilters() {
+    try {
+        var pf = JSON.parse(localStorage.getItem('dbFilters') || 'null');
+        if (!pf) return;
+        if (pf.startDate)   setVal('startDate',   pf.startDate);
+        if (pf.endDate)     setVal('endDate',      pf.endDate);
+        if (pf.eventFilter) setVal('eventFilter',  pf.eventFilter);
+        if (pf.pressFilter) setVal('pressFilter',  pf.pressFilter);
+        if (pf.excludeZero) setChk('excludeZero',  pf.excludeZero);
+    } catch (e) {}
+}
+
+// ============================================================================
+// ══ SETTINGS FILTER / SEARCH ══
+// ============================================================================
+function settingsFilter(query) {
+    var q = (query || '').trim().toLowerCase();
+    var grid = document.getElementById('settings-grid');
+    var noMatch = document.getElementById('settings-no-match');
+    if (!grid) return;
+    var cards = grid.querySelectorAll('.setting-card');
+    var visible = 0;
+    cards.forEach(function (card) {
+        var title = (card.querySelector('.title') || {}).textContent || '';
+        var icon  = (card.querySelector('.icon')  || {}).textContent || '';
+        var match = !q || (title + ' ' + icon).toLowerCase().indexOf(q) >= 0;
+        card.style.display = match ? '' : 'none';
+        if (match) visible++;
+    });
+    if (noMatch) noMatch.style.display = visible === 0 ? 'block' : 'none';
+}
+
+// ============================================================================
+// ══ UNSAVED CHANGES TRACKING ══
+// ============================================================================
+var _dirtyPage = null;
+
+function _markDirty() { _dirtyPage = currentPage; }
+function _clearDirty() { _dirtyPage = null; }
+
+// Override navigateTo to warn about unsaved changes on settings pages
+(function () {
+    var _origNavigateTo = navigateTo;
+    navigateTo = function (page) {
+        if (_dirtyPage && _dirtyPage !== page && _dirtyPage.startsWith('settings')) {
+            if (!confirm('You have unsaved changes on this settings page. Leave without saving?')) return;
+        }
+        _clearDirty();
+        _origNavigateTo(page);
+    };
+}());
+
+// Attach dirty tracking to all settings forms after page loads
+document.addEventListener('DOMContentLoaded', function () {
+    // Delegated listener: any input/change in a .page element marks dirty
+    document.querySelectorAll('.page').forEach(function (page) {
+        if (!page.id || !page.id.startsWith('page-settings')) return;
+        page.addEventListener('change', function () {
+            if (currentPage && currentPage.startsWith('settings')) _markDirty();
+        });
+        page.addEventListener('input', function () {
+            if (currentPage && currentPage.startsWith('settings')) _markDirty();
+        });
+    });
+});
+
+// ADC-only pin filter rebuild for analog sensor edit popup
+function sepRebuildPinSel() {
+    var wrap = document.getElementById('sep-pin-wrap');
+    if (!wrap) return;
+    var adcOnly = !!(document.getElementById('sep-adc-only') || {}).checked;
+    var pinEl = document.getElementById('sep-pin');
+    var current = pinEl ? parseInt(pinEl.value, 10) : 0;
+    var used = clGetUsedPins(SEP_idx);
+    wrap.innerHTML = _sepPinSelect('sep-pin', current, used, false, adcOnly);
 }
 
 function expSave() {

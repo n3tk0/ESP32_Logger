@@ -151,13 +151,20 @@
 #ifdef EXPORT_OPENSENSEMAP_ENABLED
 #  include "src/export/OpenSenseMapExporter.h"
 #endif
+#define EXPORT_WEBHOOK_ENABLED
+#ifdef EXPORT_WEBHOOK_ENABLED
+#  include "src/export/WebhookExporter.h"
+#endif
 #include "src/web/ApiHandlers.h"
 
 // ============================================================================
 // PLATFORM MODE & SLEEP GLOBALS
 // ============================================================================
 // Active platform mode (set once in setup, read in loop). See PlatformMode in Config.h.
-static PlatformMode g_platformMode = PLATFORM_LEGACY;
+static PlatformMode g_platformMode  = PLATFORM_LEGACY;
+#ifdef EXPORT_MQTT_ENABLED
+static MqttExporter* g_mqttExporter = nullptr;  // for HA discovery + API access
+#endif
 
 // Continuous-mode idle power management
 static uint32_t g_contIdleMs       = 300000; // ms idle before reducing power (5 min)
@@ -414,7 +421,8 @@ static void _initPlatform() {
 
     // Register exporters (guarded by arduino_build_flags.h toggles)
 #ifdef EXPORT_MQTT_ENABLED
-    exportManager.addExporter(new MqttExporter());
+    g_mqttExporter = new MqttExporter();
+    exportManager.addExporter(g_mqttExporter);
 #endif
 #ifdef EXPORT_HTTP_ENABLED
     exportManager.addExporter(new HttpExporter());
@@ -425,9 +433,17 @@ static void _initPlatform() {
 #ifdef EXPORT_OPENSENSEMAP_ENABLED
     exportManager.addExporter(new OpenSenseMapExporter());
 #endif
+#ifdef EXPORT_WEBHOOK_ENABLED
+    exportManager.addExporter(new WebhookExporter());
+#endif
     if (activeFS) exportManager.loadAndInit(*activeFS);
     // Spool failed exports to LittleFS (always available, even without SD) (#4.7)
     if (littleFsAvailable) exportManager.setSpoolFS(&LittleFS);
+
+    // Publish HA MQTT discovery payloads (runs after sensors and exporters are loaded)
+#ifdef EXPORT_MQTT_ENABLED
+    if (g_mqttExporter) g_mqttExporter->publishHaDiscovery();
+#endif
 
     // Register new API routes (sensor data + config)
     registerApiRoutes(server);

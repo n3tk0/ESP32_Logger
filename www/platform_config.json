@@ -329,6 +329,7 @@
       "password": "",
       "qos": 0,
       "retain": false,
+      "ha_discovery": false,
       "interval_ms": 60000
     },
     "http": {
@@ -353,6 +354,19 @@
         "pm25": "",
         "pm10": ""
       }
+    },
+    "webhook": {
+      "enabled": false,
+      "url": "https://example.com/webhook",
+      "cooldown_ms": 60000,
+      "rules": [
+        {
+          "sensor_id": "temp_indoor",
+          "metric": "temperature",
+          "threshold": 35.0,
+          "condition": "above"
+        }
+      ]
     }
   },
 

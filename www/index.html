@@ -147,6 +147,11 @@
             Threshold&nbsp;(L):
             <input type="number" id="db-threshold" class="form-input" style="width:72px;padding:.25rem .4rem;font-size:.82rem" placeholder="none" min="0" step="0.1" oninput="dbApplyFilters()">
           </label>
+          <div style="display:flex;gap:2px">
+            <button class="btn btn-sm btn-secondary" onclick="dbZoom(-1)" title="Zoom in">🔍+</button>
+            <button class="btn btn-sm btn-secondary" onclick="dbZoom(1)"  title="Zoom out">🔍−</button>
+            <button class="btn btn-sm btn-secondary" onclick="dbZoomReset()" title="Reset zoom">↺</button>
+          </div>
           <button class="btn btn-sm btn-secondary" onclick="dbExportPNG()" title="Export chart as PNG">📷 PNG</button>
         </div>
       </div>
@@ -364,7 +369,12 @@
         Restart</button>
     </div>
 
-    <div class="settings-grid">
+    <div style="margin-bottom:.75rem">
+      <input type="search" id="settings-search" class="form-input" placeholder="🔍 Filter settings…"
+        oninput="settingsFilter(this.value)" style="max-width:340px">
+    </div>
+
+    <div class="settings-grid" id="settings-grid">
       <div class="setting-card" onclick="showSubpage('settings_device')">
         <div class="icon">📱</div>
         <div class="title">Device</div>
@@ -406,6 +416,7 @@
         <div class="title">Files</div>
       </div>
     </div>
+    <div id="settings-no-match" style="display:none;padding:1rem;color:var(--text-muted);text-align:center">No settings match your search.</div>
 
     <div class="card mt-2">
       <div class="card-header">💾 Backup &amp; Restore</div>

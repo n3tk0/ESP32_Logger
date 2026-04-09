@@ -11,23 +11,23 @@ Track planned improvements and known gaps here. Check off items when completed.
 - [x] Pin dropdowns with greyed-out already-used pins
 - [x] ZMPT101B (AC voltage) sensor type added
 - [x] ZMCT103C (AC current) sensor type added
-- [ ] ADC-only pin filter toggle in the edit popup (currently auto-filtered for analog interface)
-- [ ] Show system/reserved pin warnings (e.g. WIFI_TRIGGER=2, RTC_IO=6, SD_CS=10)
+- [x] ADC-only pin filter toggle in the edit popup (checkbox to show all or ADC-only pins)
+- [x] Show system/reserved pin warnings (⚠ label suffix on reserved GPIOs in dropdown)
 - [x] Sensor reorder (up/down arrows in the list)
 - [x] Duplicate sensor button (copy existing config with new ID)
-- [ ] Sensor test/ping button that reads live value for a single sensor on demand
+- [x] Sensor test/ping button (🔍 reads live value via /api/sensors/read_now)
 - [x] Calibration sub-form (offset + scale per metric) inside the edit popup
-- [ ] Support remaining sensor types in the Add popup: soil_moisture, ds18b20, bme688, hcsr04, bh1750, veml6075, veml7700, scd4x
+- [x] Support remaining sensor types in the Add popup: soil_moisture, ds18b20, bme688, hcsr04, bh1750, veml6075, veml7700, scd4x
 
 ---
 
 ## WebUI — Dashboard / Charts
 
-- [ ] Zoom & pan on charts (pinch-to-zoom on mobile)
+- [x] Zoom & pan on charts (🔍+/🔍− buttons + reset; index-based view window)
 - [ ] Multi-metric overlay: plot two sensors on the same chart with dual Y-axes
 - [x] Export chart as PNG/SVG
-- [ ] Persistent chart configuration (remember selected sensors/metrics across page loads)
-- [x] Live page: configurable refresh rate (currently fixed)
+- [x] Persistent chart configuration (filters saved/restored via localStorage)
+- [x] Live page: configurable refresh rate
 - [x] Alert/threshold markers on charts (horizontal lines at user-defined levels)
 
 ---
@@ -36,31 +36,31 @@ Track planned improvements and known gaps here. Check off items when completed.
 
 - [x] Keyboard shortcut reference page (? key)
 - [x] Toast/snackbar notifications instead of inline message divs
-- [ ] Confirm dialog before discarding unsaved changes on settings pages
-- [ ] Settings search / filter
+- [x] Confirm dialog before discarding unsaved changes on settings pages
+- [x] Settings search / filter (filter cards by title on the settings hub)
 - [x] Dark/light theme toggle in header (quick toggle, not just in settings)
 
 ---
 
 ## Firmware — Sensor Plugins
 
-- [x] Implement ZMPT101B plugin (RMS voltage via ADC sampling, zero-crossing detection)
+- [x] Implement ZMPT101B plugin (RMS voltage via ADC sampling)
 - [x] Implement ZMCT103C plugin (RMS current via ADC sampling, burden resistor support)
 - [x] Register ZMPT101B + ZMCT103C in Logger.ino plugin factory
-- [ ] Add soil_moisture sensor to platform_config.json example
-- [ ] DS18B20 multi-sensor support (multiple sensors on one OneWire bus by address)
-- [ ] VEML7700 lux calibration support
+- [x] Add soil_moisture sensor to platform_config.json example
+- [x] DS18B20 multi-sensor support (up to 8 sensors on one OneWire bus)
+- [x] VEML7700 lux calibration support (CalibrationAxis _calLux + _calWhite)
 
 ---
 
 ## Firmware — Core / Platform
 
-- [x] Watchdog recovery log (record last-reset cause to LittleFS)
-- [x] Per-sensor error counter exposed in /api/sensors
-- [ ] Dynamic sensor reload without full restart (hot-reload platform config)
+- [x] Watchdog recovery log (record last-reset cause to LittleFS /reset_log.txt)
+- [x] Per-sensor error counter exposed in /api/sensors (error_count field)
+- [x] Dynamic sensor reload without full restart (/api/config/platform POST)
 - [ ] OTA rollback support (keep previous firmware partition, revert on crash)
-- [ ] MQTT discovery payload for Home Assistant auto-discovery
-- [ ] Sensor data webhook (HTTP POST on threshold breach)
+- [x] MQTT discovery payload for Home Assistant auto-discovery (ha_discovery flag)
+- [x] Sensor data webhook (HTTP POST on threshold breach — WebhookExporter with rules)
 
 ---
 
@@ -75,9 +75,9 @@ Track planned improvements and known gaps here. Check off items when completed.
 
 ## Infrastructure
 
-- [x] Build script to gzip www/ assets before flashing (saves ~60% flash space)
-- [ ] Automated integration test against mock /api endpoints
-- [ ] Changelog auto-generated from git log on release
+- [x] Build script to gzip www/ assets before flashing (tools/gzip_www.sh)
+- [x] Automated integration test against mock /api endpoints (tests/test_api.sh)
+- [x] Changelog auto-generated from git log on release (tools/generate_changelog.sh)
 
 ---
 
