@@ -6,7 +6,7 @@
 //! Implements the ESP ROM bootloader serial protocol directly:
 //! SLIP framing, SYNC, READ_REG, SPI_ATTACH, FLASH_BEGIN/DATA/END.
 
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -414,12 +414,22 @@ fn list_serial_ports() -> Vec<serialport::SerialPortInfo> {
 
 fn pick_port(ports: &[serialport::SerialPortInfo]) -> Result<String> {
     // Prefer USB ports
-    let usb: Vec<_> = ports
+    let usb_indices: Vec<usize> = ports
         .iter()
-        .filter(|p| matches!(p.port_type, serialport::SerialPortType::UsbPort(_)))
+        .enumerate()
+        .filter(|(_, p)| matches!(p.port_type, serialport::SerialPortType::UsbPort(_)))
+        .map(|(i, _)| i)
         .collect();
 
-    let candidates = if usb.is_empty() { ports } else { &usb };
+    // If USB ports exist, use those; otherwise use all ports
+    let indices: Vec<usize> = if usb_indices.is_empty() {
+        (0..ports.len()).collect()
+    } else {
+        usb_indices
+    };
+
+    let candidates: Vec<&serialport::SerialPortInfo> =
+        indices.iter().map(|&i| &ports[i]).collect();
 
     match candidates.len() {
         0 => bail!("No serial ports found. Connect the device and try again, or use --port."),
