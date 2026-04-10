@@ -1,5 +1,6 @@
 #include "HybridStorage.h"
 #include "../core/Globals.h"   // config.hardware.pinSdCS, fsAvailable, activeFS
+#include <ArduinoJson.h>
 
 HybridStorage::Mode HybridStorage::_mode  = HybridStorage::LITTLEFS;
 bool                HybridStorage::_sdOk  = false;
