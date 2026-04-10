@@ -26,9 +26,12 @@
 
 #pragma once
 
-// ── FreeRTOS: single-core for ESP32-C3 ─────────────────────────────────────
+// ── FreeRTOS: single-core only for ESP32-C3 (RISC-V, 1 core) ──────────────
+// Dual-core chips (ESP32, ESP32-S3) should NOT define this.
 #ifndef CONFIG_FREERTOS_UNICORE
-#  define CONFIG_FREERTOS_UNICORE 1
+#  if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
+#    define CONFIG_FREERTOS_UNICORE 1
+#  endif
 #endif
 
 // ── Debug verbosity (0 = off, match platformio.ini defaults) ───────────────
