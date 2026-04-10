@@ -1,0 +1,99 @@
+# Build ESP32 firmware with PlatformIO.
+#
+# Triggers:
+#   - Push changes to firmware source files
+#   - Pull requests targeting main
+#   - Manual dispatch (workflow_dispatch)
+#   - Release creation (attaches .bin to release assets)
+#
+# Outputs:
+#   - firmware-esp32c3.bin  (XIAO ESP32-C3, production target)
+#   - firmware-esp32.bin    (Generic ESP32)
+
+name: Build Firmware
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'platformio.ini'
+      - 'partitions_balanced.csv'
+      - '.github/workflows/build-firmware.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'platformio.ini'
+      - 'partitions_balanced.csv'
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - env: xiao_esp32c3
+            name: esp32c3
+          - env: esp32
+            name: esp32
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build firmware (${{ matrix.name }})
+        run: pio run -e ${{ matrix.env }}
+
+      - name: Collect binary
+        run: |
+          mkdir -p output
+          cp .pio/build/${{ matrix.env }}/firmware.bin output/firmware-${{ matrix.name }}.bin
+          echo "=== ${{ matrix.name }} firmware ==="
+          ls -lh output/firmware-${{ matrix.name }}.bin
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.name }}
+          path: output/firmware-${{ matrix.name }}.bin
+
+  attach-to-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download ESP32-C3 firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32c3
+          path: firmware/
+
+      - name: Download ESP32 firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32
+          path: firmware/
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            firmware/firmware-esp32c3.bin
+            firmware/firmware-esp32.bin
