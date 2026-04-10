@@ -40,8 +40,12 @@ jobs:
         include:
           - env: xiao_esp32c3
             name: esp32c3
+            flash: 4MB
+            app_max: 1572864    # 0x180000 = 1,536 KB (from partitions_balanced.csv)
           - env: esp32
             name: esp32
+            flash: 8MB
+            app_max: 3145728    # 3,072 KB (PlatformIO default_8MB)
 
     steps:
       - name: Checkout repository
@@ -58,12 +62,27 @@ jobs:
       - name: Build firmware (${{ matrix.name }})
         run: pio run -e ${{ matrix.env }}
 
-      - name: Collect binary
+      - name: Collect binary and report size
         run: |
           mkdir -p output
           cp .pio/build/${{ matrix.env }}/firmware.bin output/firmware-${{ matrix.name }}.bin
-          echo "=== ${{ matrix.name }} firmware ==="
+
+          # Report firmware size vs partition limit
+          SIZE=$(stat -c%s output/firmware-${{ matrix.name }}.bin)
+          MAX=${{ matrix.app_max }}
+          PCT=$((SIZE * 100 / MAX))
+          REMAIN=$(( (MAX - SIZE) / 1024 ))
+
+          echo "=== ${{ matrix.name }} (${{ matrix.flash }} flash) ==="
+          echo "Firmware size: $(( SIZE / 1024 )) KB / $(( MAX / 1024 )) KB (${PCT}% used, ${REMAIN} KB free)"
           ls -lh output/firmware-${{ matrix.name }}.bin
+
+          if [ "$SIZE" -gt "$MAX" ]; then
+            echo "::error::Firmware exceeds app partition! ${SIZE} > ${MAX} bytes"
+            exit 1
+          elif [ "$PCT" -ge 95 ]; then
+            echo "::warning::Firmware uses ${PCT}% of app partition — only ${REMAIN} KB free"
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
