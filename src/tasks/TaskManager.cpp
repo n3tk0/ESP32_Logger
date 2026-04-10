@@ -153,6 +153,13 @@ void TaskManager::shutdown() {
 
     // Hard wait for task stacks to unwind
     vTaskDelay(pdMS_TO_TICKS(500));
+
+    // Null out handles — tasks self-delete via vTaskDelete(nullptr)
+    hSensor     = nullptr;
+    hSlowSensor = nullptr;
+    hProcess    = nullptr;
+    hStorage    = nullptr;
+    hExport     = nullptr;
 }
 
 // ---------------------------------------------------------------------------

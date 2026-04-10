@@ -24,10 +24,14 @@ void exportTaskFunc(void* /*param*/) {
         // allowing shutdown() to flush the final batch before the hard wait expires.
         bool got = xQueueReceive(exportQueue, &r,
                                   pdMS_TO_TICKS(100)) == pdTRUE;
-        if (got && batchCount < BATCH_SIZE) {
+        if (got) {
+            if (batchCount >= BATCH_SIZE) {
+                // Flush full batch before accepting new reading
+                exportManager.sendAll(batch, batchCount);
+                batchCount  = 0;
+                lastFlushMs = millis();
+            }
             batch[batchCount++] = r;
-        } else if (got) {
-            g_queueDrops++;  // batch full — count drop (N9)
         }
 
         bool batchFull     = (batchCount >= BATCH_SIZE);

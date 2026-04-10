@@ -24,7 +24,7 @@ Track planned improvements and known gaps here. Check off items when completed.
 ## WebUI — Dashboard / Charts
 
 - [x] Zoom & pan on charts (🔍+/🔍− buttons + reset; index-based view window)
-- [ ] Multi-metric overlay: plot two sensors on the same chart with dual Y-axes
+- [x] Multi-metric overlay: plot two sensors on the same chart with dual Y-axes
 - [x] Export chart as PNG/SVG
 - [x] Persistent chart configuration (filters saved/restored via localStorage)
 - [x] Live page: configurable refresh rate
@@ -58,7 +58,7 @@ Track planned improvements and known gaps here. Check off items when completed.
 - [x] Watchdog recovery log (record last-reset cause to LittleFS /reset_log.txt)
 - [x] Per-sensor error counter exposed in /api/sensors (error_count field)
 - [x] Dynamic sensor reload without full restart (/api/config/platform POST)
-- [ ] OTA rollback support (keep previous firmware partition, revert on crash)
+- [x] OTA rollback support (keep previous firmware partition, revert on crash)
 - [x] MQTT discovery payload for Home Assistant auto-discovery (ha_discovery flag)
 - [x] Sensor data webhook (HTTP POST on threshold breach — WebhookExporter with rules)
 

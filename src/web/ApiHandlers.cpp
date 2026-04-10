@@ -16,6 +16,7 @@
 extern MqttExporter* g_mqttExporter;
 #endif
 #include "../tasks/TaskManager.h"  // task handles for /api/diag
+#include "../managers/OtaManager.h"
 
 // ---------------------------------------------------------------------------
 // GET /api/data
@@ -288,6 +289,13 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     if (TaskManager::hExport)
         tasks["ExportTask"]     = (uint32_t)uxTaskGetStackHighWaterMark(TaskManager::hExport);
 
+    // OTA rollback info
+    JsonObject ota = doc.createNestedObject("ota");
+    ota["running"]          = OtaManager::runningPartitionLabel();
+    ota["previous"]         = OtaManager::previousPartitionLabel();
+    ota["pending_verify"]   = OtaManager::isPendingVerify();
+    ota["rollback_capable"] = OtaManager::isRollbackCapable();
+
     String out;
     serializeJson(doc, out);
     req->send(200, "application/json", out);
@@ -366,6 +374,46 @@ static void handleMqttHaDiscovery(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/ota/status — OTA rollback status
+// ---------------------------------------------------------------------------
+static void handleOtaStatus(AsyncWebServerRequest* req) {
+    JsonDocument doc;
+    doc["running_partition"]  = OtaManager::runningPartitionLabel();
+    doc["previous_partition"] = OtaManager::previousPartitionLabel();
+    doc["pending_verify"]     = OtaManager::isPendingVerify();
+    doc["rollback_capable"]   = OtaManager::isRollbackCapable();
+    String out;
+    serializeJson(doc, out);
+    req->send(200, "application/json", out);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/ota/confirm — confirm current firmware as stable
+// ---------------------------------------------------------------------------
+static void handleOtaConfirm(AsyncWebServerRequest* req) {
+    if (OtaManager::confirm()) {
+        req->send(200, "application/json", "{\"ok\":true}");
+    } else {
+        req->send(500, "application/json", "{\"error\":\"confirm failed\"}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/ota/rollback — revert to previous firmware partition and restart
+// ---------------------------------------------------------------------------
+static void handleOtaRollback(AsyncWebServerRequest* req) {
+    req->send(200, "application/json",
+              "{\"ok\":true,\"message\":\"Rolling back and restarting...\"}");
+    // Delay rollback so the response is sent first
+    shouldRestart = false;  // prevent normal restart path
+    delay(200);
+    OtaManager::rollback();
+    // If rollback() returns (shouldn't normally), fall back to restart
+    shouldRestart = true;
+    restartTimer  = millis();
+}
+
+// ---------------------------------------------------------------------------
 void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/data",              HTTP_GET,  handleApiData);
     server.on("/api/sensors",           HTTP_GET,  handleApiSensors);
@@ -373,4 +421,7 @@ void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/diag",              HTTP_GET,  handleApiDiag);
     server.on("/api/config/platform",   HTTP_POST, handleConfigPlatform);
     server.on("/api/mqtt/ha_discovery", HTTP_POST, handleMqttHaDiscovery);
+    server.on("/api/ota/status",        HTTP_GET,  handleOtaStatus);
+    server.on("/api/ota/confirm",       HTTP_POST, handleOtaConfirm);
+    server.on("/api/ota/rollback",      HTTP_POST, handleOtaRollback);
 }

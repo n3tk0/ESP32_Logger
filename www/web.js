@@ -2636,16 +2636,20 @@ function sensorsLoad() {
           .join("");
       }
 
-      // Populate chart sensor selector
+      // Populate chart sensor selectors (primary + overlay)
+      var sensorOpts =
+        d.sensors
+          .map(function (s) {
+            return '<option value="' + s.id + '">' + s.name + "</option>";
+          })
+          .join("");
       var sel = document.getElementById("sc-sensor");
       if (sel) {
-        sel.innerHTML =
-          '<option value="">— select sensor —</option>' +
-          d.sensors
-            .map(function (s) {
-              return '<option value="' + s.id + '">' + s.name + "</option>";
-            })
-            .join("");
+        sel.innerHTML = '<option value="">— select sensor —</option>' + sensorOpts;
+      }
+      var sel2 = document.getElementById("sc-sensor2");
+      if (sel2) {
+        sel2.innerHTML = '<option value="">— none —</option>' + sensorOpts;
       }
     })
     .catch(function (e) {
@@ -2669,70 +2673,144 @@ function sensorChartLoad() {
   // Update metric dropdown when sensor changes
   var metricSel = document.getElementById("sc-metric");
   if (metricSel && !metric) {
-    // load first available metric from API sensors cache
     if (msg) msg.textContent = "Select a metric…";
     return;
   }
 
   var now = Math.floor(Date.now() / 1000);
   var from = now - range;
-  var url =
+
+  // Build primary URL
+  var url1 =
     "/api/data?sensor=" +
     encodeURIComponent(sid) +
     "&metric=" +
     encodeURIComponent(metric) +
-    "&from=" +
-    from +
-    "&to=" +
-    now +
-    "&agg=" +
-    agg +
-    "&mode=" +
-    mode +
-    "&limit=500";
+    "&from=" + from + "&to=" + now +
+    "&agg=" + agg + "&mode=" + mode + "&limit=500";
+
+  // Secondary overlay sensor
+  var sid2 = (document.getElementById("sc-sensor2") || {}).value;
+  var metric2 = (document.getElementById("sc-metric2") || {}).value;
+  var url2 = null;
+  if (sid2 && metric2) {
+    url2 =
+      "/api/data?sensor=" +
+      encodeURIComponent(sid2) +
+      "&metric=" +
+      encodeURIComponent(metric2) +
+      "&from=" + from + "&to=" + now +
+      "&agg=" + agg + "&mode=" + mode + "&limit=500";
+  }
 
   if (msg) msg.textContent = "Loading…";
 
-  fetch(url)
-    .then(function (r) {
-      return r.ok ? r.json() : null;
-    })
-    .then(function (d) {
-      if (!d || !d.data || d.data.length === 0) {
+  // Fetch primary (and optionally secondary) data
+  var fetches = [fetch(url1).then(function (r) { return r.ok ? r.json() : null; })];
+  if (url2) fetches.push(fetch(url2).then(function (r) { return r.ok ? r.json() : null; }));
+
+  Promise.all(fetches)
+    .then(function (results) {
+      var d1 = results[0];
+      var d2 = results.length > 1 ? results[1] : null;
+
+      if (!d1 || !d1.data || d1.data.length === 0) {
         if (msg) msg.textContent = "No data for selected period.";
         return;
       }
-      if (msg)
-        msg.textContent = d.count + " points · " + d.agg + " · " + d.mode;
 
-      var labels = d.data.map(function (pt) {
+      var unit1 = d1.data[0].unit || "";
+      var unit2 = d2 && d2.data && d2.data.length > 0 ? (d2.data[0].unit || "") : "";
+      var hasDual = d2 && d2.data && d2.data.length > 0;
+
+      // Build unified timestamp labels from primary series
+      var labels = d1.data.map(function (pt) {
         return new Date(pt.ts * 1000).toLocaleTimeString();
       });
-      var values = d.data.map(function (pt) {
-        return pt.v;
-      });
+      var values1 = d1.data.map(function (pt) { return pt.v; });
+
+      // For the secondary series, align data by timestamp to primary labels
+      var values2 = [];
+      if (hasDual) {
+        // Build a lookup map from ts -> value for secondary
+        var tsMap = {};
+        d2.data.forEach(function (pt) { tsMap[pt.ts] = pt.v; });
+
+        // For each primary timestamp, find the closest secondary point
+        values2 = d1.data.map(function (pt) {
+          if (tsMap[pt.ts] !== undefined) return tsMap[pt.ts];
+          // Find nearest secondary point within ±bucket window
+          var closest = null, bestDist = Infinity;
+          d2.data.forEach(function (p2) {
+            var dist = Math.abs(p2.ts - pt.ts);
+            if (dist < bestDist) { bestDist = dist; closest = p2.v; }
+          });
+          // Only include if within 2x the aggregation window
+          var maxDist = range / labels.length * 2;
+          return bestDist <= maxDist ? closest : null;
+        });
+      }
+
+      var infoStr = d1.count + " pts";
+      if (hasDual) infoStr += " + " + d2.count + " pts (overlay)";
+      infoStr += " · " + d1.agg + " · " + d1.mode;
+      if (msg) msg.textContent = infoStr;
 
       var ctx = document.getElementById("sensorChart");
       if (!ctx) return;
 
       if (sensorChart) sensorChart.destroy();
+
+      var datasets = [
+        {
+          label: sid + " / " + metric + (unit1 ? " (" + unit1 + ")" : ""),
+          data: values1,
+          borderColor: "#275673",
+          backgroundColor: "rgba(39,86,115,0.08)",
+          borderWidth: 2,
+          pointRadius: d1.data.length > 100 ? 0 : 3,
+          tension: 0.3,
+          fill: true,
+          yAxisID: "y",
+        },
+      ];
+
+      if (hasDual) {
+        datasets.push({
+          label: sid2 + " / " + metric2 + (unit2 ? " (" + unit2 + ")" : ""),
+          data: values2,
+          borderColor: "#e67e22",
+          backgroundColor: "rgba(230,126,34,0.08)",
+          borderWidth: 2,
+          pointRadius: d2.data.length > 100 ? 0 : 3,
+          tension: 0.3,
+          fill: false,
+          borderDash: [5, 3],
+          yAxisID: "y2",
+        });
+      }
+
+      var scales = {
+        x: { ticks: { maxTicksLimit: 10, maxRotation: 45 } },
+        y: {
+          beginAtZero: false,
+          position: "left",
+          title: { display: true, text: metric + (unit1 ? " (" + unit1 + ")" : "") },
+        },
+      };
+
+      if (hasDual) {
+        scales.y2 = {
+          beginAtZero: false,
+          position: "right",
+          grid: { drawOnChartArea: false },
+          title: { display: true, text: metric2 + (unit2 ? " (" + unit2 + ")" : "") },
+        };
+      }
+
       sensorChart = new Chart(ctx, {
         type: "line",
-        data: {
-          labels: labels,
-          datasets: [
-            {
-              label: sid + " / " + metric,
-              data: values,
-              borderColor: "#275673",
-              backgroundColor: "rgba(39,86,115,0.08)",
-              borderWidth: 2,
-              pointRadius: d.data.length > 100 ? 0 : 3,
-              tension: 0.3,
-              fill: true,
-            },
-          ],
-        },
+        data: { labels: labels, datasets: datasets },
         options: {
           responsive: true,
           animation: false,
@@ -2740,10 +2818,7 @@ function sensorChartLoad() {
             legend: { display: true },
             tooltip: { mode: "index", intersect: false },
           },
-          scales: {
-            x: { ticks: { maxTicksLimit: 10, maxRotation: 45 } },
-            y: { beginAtZero: false },
-          },
+          scales: scales,
         },
       });
     })
@@ -2752,33 +2827,34 @@ function sensorChartLoad() {
     });
 }
 
-// Update metric selector when sensor changes
+// Update metric selectors when sensor changes (primary + overlay)
 document.addEventListener("DOMContentLoaded", function () {
-  var sensorSel = document.getElementById("sc-sensor");
-  if (!sensorSel) return;
-  sensorSel.addEventListener("change", function () {
-    var sid = this.value;
-    var metricSel = document.getElementById("sc-metric");
-    if (!metricSel || !sid) return;
-    // Fetch sensor list to get metrics
-    fetch("/api/sensors")
-      .then(function (r) {
-        return r.json();
-      })
-      .then(function (d) {
-        var s = (d.sensors || []).find(function (s) {
-          return s.id === sid;
-        });
-        if (s && s.metrics) {
-          metricSel.innerHTML = s.metrics
-            .map(function (m) {
-              return '<option value="' + m + '">' + m + "</option>";
-            })
-            .join("");
-        }
-      })
-      .catch(function () {});
-  });
+  function bindSensorMetricSync(sensorId, metricId) {
+    var sensorSel = document.getElementById(sensorId);
+    if (!sensorSel) return;
+    sensorSel.addEventListener("change", function () {
+      var sid = this.value;
+      var metricSel = document.getElementById(metricId);
+      if (!metricSel) return;
+      if (!sid) {
+        metricSel.innerHTML = '<option value="">— metric —</option>';
+        return;
+      }
+      fetch("/api/sensors")
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var s = (d.sensors || []).find(function (s) { return s.id === sid; });
+          if (s && s.metrics) {
+            metricSel.innerHTML = s.metrics
+              .map(function (m) { return '<option value="' + m + '">' + m + "</option>"; })
+              .join("");
+          }
+        })
+        .catch(function () {});
+    });
+  }
+  bindSensorMetricSync("sc-sensor", "sc-metric");
+  bindSensorMetricSync("sc-sensor2", "sc-metric2");
 });
 
 // ============================================================================
