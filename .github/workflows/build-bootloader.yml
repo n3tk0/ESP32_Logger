@@ -137,11 +137,11 @@ jobs:
           - target: x86_64-pc-windows-gnu
             artifact: flash_bootloader.exe
             ext: .exe
-            packages: gcc-mingw-w64-x86-64
+            packages: gcc-mingw-w64-x86-64 libudev-dev
           - target: x86_64-unknown-linux-gnu
             artifact: flash_bootloader
             ext: ""
-            packages: ""
+            packages: libudev-dev
 
     steps:
       - name: Checkout repository
