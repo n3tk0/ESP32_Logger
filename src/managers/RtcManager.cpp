@@ -119,6 +119,8 @@ String getRtcDateTimeString() {
 void configureWakeup() {
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
 
+#if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6
+    // ── ESP32-C3 / C6: deep-sleep GPIO wake on pins 0..5 ─────────────────
     auto isRtcWakePinC3 = [](uint8_t pin) -> bool {
         return pin <= 5; // ESP32-C3 deep-sleep GPIO wake capable pins
     };
@@ -163,6 +165,32 @@ void configureWakeup() {
     if (err != ESP_OK) {
         DBGF("WAKEUP CONFIG ERROR: esp_deep_sleep_enable_gpio_wakeup failed (%d)\n", (int)err);
     }
+#elif CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32S3
+    // ── ESP32 / S2 / S3: use EXT1 wakeup on RTC GPIOs ────────────────────
+    // Note: EXT1 ANY_HIGH wakes if any pin goes HIGH; ALL_LOW requires all
+    // pins LOW simultaneously. ACTIVE_LOW button semantics don't map cleanly
+    // to ALL_LOW, so we only support ACTIVE_HIGH on these targets.
+    const uint8_t ffPin   = config.hardware.pinWakeupFF;
+    const uint8_t pfPin   = config.hardware.pinWakeupPF;
+    const uint8_t wifiPin = config.hardware.pinWifiTrigger;
+
+    if (config.hardware.wakeupMode != WAKEUP_GPIO_ACTIVE_HIGH) {
+        DBGLN("WAKEUP CONFIG: EXT1 wake requires ACTIVE_HIGH on ESP32/S2/S3");
+        return;
+    }
+
+    pinMode(ffPin,   INPUT_PULLDOWN);
+    pinMode(pfPin,   INPUT_PULLDOWN);
+    pinMode(wifiPin, INPUT_PULLDOWN);
+
+    uint64_t mask = (1ULL << ffPin) | (1ULL << pfPin) | (1ULL << wifiPin);
+    esp_err_t err = esp_sleep_enable_ext1_wakeup(mask, ESP_EXT1_WAKEUP_ANY_HIGH);
+    if (err != ESP_OK) {
+        DBGF("WAKEUP CONFIG ERROR: esp_sleep_enable_ext1_wakeup failed (%d)\n", (int)err);
+    }
+#else
+    DBGLN("WAKEUP CONFIG: deep-sleep GPIO wake not implemented for this target");
+#endif
 }
 
 String getWakeupReason() {

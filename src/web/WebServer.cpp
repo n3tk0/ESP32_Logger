@@ -168,7 +168,7 @@ static void scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
                 if (recursive) {
                     stack.push_back(fullPath);
                 } else {
-                    JsonObject o = arr.createNestedObject();
+                    JsonObject o = arr.add<JsonObject>();
                     o["name"]  = name;
                     o["path"]  = fullPath;
                     o["isDir"] = true;
@@ -178,7 +178,7 @@ static void scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
                 bool include = filter.isEmpty() ||
                     (filter == "log" && (name.endsWith(".txt") || name.endsWith(".log") || name.endsWith(".csv")));
                 if (include) {
-                    JsonObject o = arr.createNestedObject();
+                    JsonObject o = arr.add<JsonObject>();
                     o["name"]  = name;
                     o["path"]  = fullPath;
                     o["isDir"] = false;
@@ -307,7 +307,7 @@ void setupWebServer() {
         }
 
         // ── Theme (nested) ────────────────────────────────────────────────────
-        JsonObject th = doc.createNestedObject("theme");
+        JsonObject th = doc["theme"].to<JsonObject>();
         th["mode"]              = (int)config.theme.mode;
         th["primaryColor"]      = config.theme.primaryColor;
         th["secondaryColor"]    = config.theme.secondaryColor;
@@ -402,7 +402,7 @@ void setupWebServer() {
     // =========================================================================
     server.on("/api/recent_logs", HTTP_GET, [](AsyncWebServerRequest *r) {
         JsonDocument doc;
-        JsonArray logs = doc.createNestedArray("logs");
+        JsonArray logs = doc["logs"].to<JsonArray>();
 
         if (!fsAvailable || !activeFS) {
             doc["error"] = "Storage not available";
@@ -467,7 +467,7 @@ void setupWebServer() {
             }
 
             if (tCount >= 7) {
-                JsonObject entry = logs.createNestedObject();
+                JsonObject entry = logs.add<JsonObject>();
                 int tail = tCount - 1;
                 
                 if (tCount >= 8) {
@@ -506,7 +506,7 @@ void setupWebServer() {
     // =========================================================================
     server.on("/api/filelist", HTTP_GET, [](AsyncWebServerRequest *r) {
         JsonDocument doc;
-        JsonArray files = doc.createNestedArray("files");
+        JsonArray files = doc["files"].to<JsonArray>();
 
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         String dir     = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
@@ -1206,13 +1206,13 @@ void setupWebServer() {
 
     server.on("/wifi_scan_result", HTTP_GET, [](AsyncWebServerRequest *r) {
         JsonDocument doc;
-        JsonArray nets = doc.createNestedArray("networks");
+        JsonArray nets = doc["networks"].to<JsonArray>();
         int n = WiFi.scanComplete();
         if      (n == WIFI_SCAN_RUNNING) { doc["scanning"] = true; }
         else if (n == WIFI_SCAN_FAILED)  { doc["error"] = "Scan failed"; }
         else if (n >= 0) {
             for (int i = 0; i < n && i < 20; i++) {
-                JsonObject net = nets.createNestedObject();
+                JsonObject net = nets.add<JsonObject>();
                 net["ssid"]   = WiFi.SSID(i);
                 net["rssi"]   = WiFi.RSSI(i);
                 net["secure"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;

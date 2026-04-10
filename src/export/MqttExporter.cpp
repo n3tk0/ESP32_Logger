@@ -134,7 +134,7 @@ bool MqttExporter::_publishDiscoveryOne(const char* sensorId, const char* sensor
     if (unit && unit[0])        doc["unit_of_measurement"] = unit;
     if (deviceClass && deviceClass[0]) doc["device_class"]= deviceClass;
 
-    JsonObject dev = doc.createNestedObject("device");
+    JsonObject dev = doc["device"].to<JsonObject>();
     dev["identifiers"][0] = String("wl_") + _deviceId;
     dev["name"]           = String(config.deviceName[0] ? config.deviceName : "Water Logger");
     dev["model"]          = "ESP32-C3 Logger";
