@@ -2,6 +2,11 @@
 
 #include <Arduino.h>
 
+// All build-time tunables (module toggles, debug flags, task tuning,
+// timeouts, batch sizes) live in src/setup.h.  We pull them in here so
+// every file that includes Config.h transparently gets them too.
+#include "../setup.h"
+
 // ============================================================================
 // VERSION  –  single source of truth
 // ============================================================================
@@ -17,9 +22,7 @@ inline String getVersionString() {
     return String(buf);
 }
 
-// Debug mode - set to 1 to enable Serial debug output, 0 to save ~3KB flash
-#define DEBUG_MODE 0
-
+// DBG/DBGLN/DBGF resolve to no-ops when DEBUG_MODE == 0 (set in setup.h).
 #if DEBUG_MODE
   #define DBG(x)      Serial.print(x)
   #define DBGLN(x)    Serial.println(x)
@@ -31,7 +34,8 @@ inline String getVersionString() {
 #endif
 
 // ============================================================================
-// CONSTANTS
+// CONSTANTS — file paths, default network identity
+// (numeric/timeout tunables now live in setup.h)
 // ============================================================================
 constexpr const char* CONFIG_FILE            = "/config.bin";
 constexpr const char* BOOTCOUNT_BACKUP_FILE  = "/bootcount.bin";
@@ -39,18 +43,6 @@ constexpr const char* DEFAULT_AP_SSID        = "WaterLogger";
 constexpr const char* DEFAULT_AP_PASSWORD    = "water12345";
 constexpr const char* DEFAULT_DATALOG_PREFIX = "datalog";
 constexpr const char* DEFAULT_NTP_SERVER     = "pool.ntp.org";
-
-const unsigned long TEST_MODE_BLINK_MS      = 250;
-const unsigned long TEST_MODE_HOLD_MS       = 1000;
-const unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;
-const int           LOG_BATCH_SIZE          = 16;
-
-// ISR Debounce for flow sensor
-const unsigned long ISR_DEBOUNCE_MICROS = 1000;  // 1ms
-
-// State machine timing
-const unsigned long BUTTON_WAIT_FLOW_MS  = 6000;
-const unsigned long FLOW_IDLE_TIMEOUT_MS = 3000;
 
 #define CONFIG_STRUCT_MAGIC  0xC0FFEE36
 #define CONFIG_VERSION       12

@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <FS.h>
+#include "../setup.h"
 #include "../core/SensorTypes.h"
 
 // ============================================================================
@@ -57,8 +58,8 @@ private:
     bool     _rotateDaily = true;
     char     _currentDate[12] = {}; // "YYYY-MM-DD\0"
 
-    // Write buffer (flush every 8 writes to reduce I/O)
-    static constexpr int BUF_LINES = 8;
+    // Write buffer — LOG_BUF_LINES is configured in setup.h (default 8).
+    static constexpr int BUF_LINES = LOG_BUF_LINES;
     char     _lineBuf[BUF_LINES][160];
     int      _bufCount = 0;
 

@@ -30,7 +30,7 @@ String connectedSSID        = "";
 // ============================================================================
 // LOGGING BUFFER
 // ============================================================================
-RTC_DATA_ATTR LogEntry logBuffer[16];
+RTC_DATA_ATTR LogEntry logBuffer[LOG_BATCH_SIZE];
 RTC_DATA_ATTR int      logBufferCount   = 0;
 RTC_DATA_ATTR int      bootCount        = 0;
 RTC_DATA_ATTR bool     bootcount_restore = true;

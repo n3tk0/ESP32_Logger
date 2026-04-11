@@ -5,9 +5,9 @@
 #include <esp_system.h>
 #include <LittleFS.h>
 
-// Time the new firmware must run without crashing before auto-confirmation.
-// 90 seconds: enough for WiFi connect + sensor init + a few pipeline cycles.
-static constexpr uint32_t OTA_CONFIRM_TIMEOUT_MS = 90000;
+// OTA_CONFIRM_TIMEOUT_MS is configured in setup.h (default 90 s).
+// It controls how long the new firmware must run without crashing before
+// auto-confirmation flips the OTA app slot to "valid".
 
 static bool s_pending       = false;
 static bool s_confirmed     = false;
