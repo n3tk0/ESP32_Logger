@@ -1,4 +1,5 @@
 #include "ExportManager.h"
+#include "../setup.h"
 #include <string.h>
 
 ExportManager exportManager;
@@ -124,9 +125,9 @@ bool ExportManager::_drainSpool(IExporter* exp) {
     File f = _spoolFS->open(path, FILE_READ);
     if (!f) return true;
 
-    // Read up to one batch at a time to bound memory use
-    static constexpr int SPOOL_BATCH = 20;
-    SensorReading batch[SPOOL_BATCH];
+    // Read up to one batch at a time to bound memory use.
+    // EXPORT_SPOOL_BATCH is configured in setup.h.
+    SensorReading batch[EXPORT_SPOOL_BATCH];
     int count = 0;
     bool allOk = true;
     char lineBuf[160];
@@ -149,7 +150,7 @@ bool ExportManager::_drainSpool(IExporter* exp) {
         sr.quality = (SensorQuality)(doc["q"] | 0);
         count++;
 
-        if (count >= SPOOL_BATCH) {
+        if (count >= EXPORT_SPOOL_BATCH) {
             if (!exp->send(batch, count)) { allOk = false; break; }
             count = 0;
         }
@@ -167,8 +168,8 @@ bool ExportManager::_drainSpool(IExporter* exp) {
 
 // ---------------------------------------------------------------------------
 void ExportManager::sendAll(const SensorReading* readings, size_t count) {
-    static constexpr uint32_t MAX_SENDALL_MS = 30000; // 30s circuit breaker
-    uint32_t deadline = millis() + MAX_SENDALL_MS;
+    // EXPORT_MAX_SENDALL_MS is the per-call circuit breaker (setup.h).
+    uint32_t deadline = millis() + EXPORT_MAX_SENDALL_MS;
 
     for (int i = 0; i < _count; i++) {
         if (!_exporters[i]->isEnabled()) continue;

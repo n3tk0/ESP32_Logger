@@ -1,18 +1,18 @@
 #include "ExportTask.h"
 #include "TaskManager.h"
+#include "../setup.h"
 #include "../pipeline/DataPipeline.h"
 #include "../export/ExportManager.h"
 
-// Accumulate readings into a local batch before dispatching.
-// Prevents hammering the network with single-reading requests.
-static constexpr int  BATCH_SIZE      = 20;
-static constexpr int  FLUSH_INTERVAL_MS = 60000; // 1 min max wait
+// EXPORT_EXPORT_BATCH_SIZE / EXPORT_FLUSH_INTERVAL_MS are configured in setup.h.
+// We accumulate readings into a local batch before dispatching to prevent
+// hammering the network with single-reading requests.
 
 // ---------------------------------------------------------------------------
 void exportTaskFunc(void* /*param*/) {
     Serial.println("[ExportTask] started");
 
-    SensorReading batch[BATCH_SIZE];
+    SensorReading batch[EXPORT_EXPORT_BATCH_SIZE];
     int           batchCount  = 0;
     uint32_t      lastFlushMs = millis();
 
@@ -25,7 +25,7 @@ void exportTaskFunc(void* /*param*/) {
         bool got = xQueueReceive(exportQueue, &r,
                                   pdMS_TO_TICKS(100)) == pdTRUE;
         if (got) {
-            if (batchCount >= BATCH_SIZE) {
+            if (batchCount >= EXPORT_BATCH_SIZE) {
                 // Flush full batch before accepting new reading
                 exportManager.sendAll(batch, batchCount);
                 batchCount  = 0;
@@ -34,8 +34,8 @@ void exportTaskFunc(void* /*param*/) {
             batch[batchCount++] = r;
         }
 
-        bool batchFull     = (batchCount >= BATCH_SIZE);
-        bool timeoutElapsed= (millis() - lastFlushMs) >= FLUSH_INTERVAL_MS;
+        bool batchFull     = (batchCount >= EXPORT_BATCH_SIZE);
+        bool timeoutElapsed= (millis() - lastFlushMs) >= EXPORT_FLUSH_INTERVAL_MS;
 
         if ((batchFull || timeoutElapsed) && batchCount > 0) {
             exportManager.sendAll(batch, batchCount);

@@ -38,7 +38,7 @@ extern String connectedSSID;
 // ============================================================================
 // LOGGING BUFFER (RTC_DATA_ATTR survives deep sleep)
 // ============================================================================
-extern RTC_DATA_ATTR LogEntry logBuffer[16];   // LOG_BATCH_SIZE
+extern RTC_DATA_ATTR LogEntry logBuffer[LOG_BATCH_SIZE];
 extern RTC_DATA_ATTR int      logBufferCount;
 extern RTC_DATA_ATTR int      bootCount;
 extern RTC_DATA_ATTR bool     bootcount_restore;

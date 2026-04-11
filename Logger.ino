@@ -31,37 +31,11 @@
  **************************************************************************************************/
 
 // ============================================================================
-// MODULE TOGGLES — comment out to exclude sensors/exporters from the build.
-// Reduces flash usage (~10-80 KB per module). Only enable what you use.
+// All build-time configuration (module toggles, pin defaults, debug flags,
+// task tuning, application timeouts) lives in src/setup.h.
+// Edit that single file to change what gets built and how it behaves.
 // ============================================================================
-// Sensors using internal mini drivers (~5-15 KB each):
-#define SENSOR_BME280_ENABLED       // BME280/BMP280 (internal I2C driver)
-#define SENSOR_BME688_ENABLED       // BME680/BME688 (internal I2C driver)
-#define SENSOR_DS18B20_ENABLED      // DS18B20 (internal 1-Wire driver)
-// Sensors with no external library (built-in I2C/GPIO, ~5-15 KB each):
-#define SENSOR_SDS011_ENABLED
-#define SENSOR_PMS5003_ENABLED
-#define SENSOR_ENS160_ENABLED
-#define SENSOR_SGP30_ENABLED
-#define SENSOR_SCD4X_ENABLED
-#define SENSOR_VEML6075_ENABLED
-#define SENSOR_VEML7700_ENABLED
-#define SENSOR_BH1750_ENABLED
-#define SENSOR_WATERFLOW_ENABLED
-#define SENSOR_RAIN_ENABLED
-#define SENSOR_WIND_ENABLED
-#define SENSOR_SOIL_ENABLED
-#define SENSOR_HCSR04_ENABLED
-#define SENSOR_ZMPT101B_ENABLED
-#define SENSOR_ZMCT103C_ENABLED
-// Exporters (~10-20 KB each):
-#define EXPORT_MQTT_ENABLED         // internal MQTT driver
-#define EXPORT_HTTP_ENABLED
-#define EXPORT_SENSORCOMMUNITY_ENABLED
-#define EXPORT_OPENSENSEMAP_ENABLED
-
-// Arduino IDE build-flag shim — must come before all other includes
-#include "src/arduino_build_flags.h"
+#include "src/setup.h"
 
 #include <Arduino.h>
 #include <esp_sleep.h>
@@ -152,7 +126,6 @@
 #ifdef EXPORT_OPENSENSEMAP_ENABLED
 #  include "src/export/OpenSenseMapExporter.h"
 #endif
-#define EXPORT_WEBHOOK_ENABLED
 #ifdef EXPORT_WEBHOOK_ENABLED
 #  include "src/export/WebhookExporter.h"
 #endif

@@ -219,7 +219,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
 // ---------------------------------------------------------------------------
 static void handleApiSensors(AsyncWebServerRequest* req) {
     JsonDocument doc;
-    JsonArray arr = doc.createNestedArray("sensors");
+    JsonArray arr = doc["sensors"].to<JsonArray>();
     sensorManager.toJson(arr);
 
     String out;
@@ -259,25 +259,25 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     doc["queue_drops"]   = (uint32_t)g_queueDrops;
 
     // Queues
-    JsonObject queues = doc.createNestedObject("queues");
+    JsonObject queues = doc["queues"].to<JsonObject>();
     if (sensorQueue) {
-        JsonObject q = queues.createNestedObject("sensor");
+        JsonObject q = queues["sensor"].to<JsonObject>();
         q["waiting"] = (uint32_t)uxQueueMessagesWaiting(sensorQueue);
         q["spaces"]  = (uint32_t)uxQueueSpacesAvailable(sensorQueue);
     }
     if (storageQueue) {
-        JsonObject q = queues.createNestedObject("storage");
+        JsonObject q = queues["storage"].to<JsonObject>();
         q["waiting"] = (uint32_t)uxQueueMessagesWaiting(storageQueue);
         q["spaces"]  = (uint32_t)uxQueueSpacesAvailable(storageQueue);
     }
     if (exportQueue) {
-        JsonObject q = queues.createNestedObject("export");
+        JsonObject q = queues["export"].to<JsonObject>();
         q["waiting"] = (uint32_t)uxQueueMessagesWaiting(exportQueue);
         q["spaces"]  = (uint32_t)uxQueueSpacesAvailable(exportQueue);
     }
 
     // Task stack high-water marks (words remaining before overflow)
-    JsonObject tasks = doc.createNestedObject("tasks");
+    JsonObject tasks = doc["tasks"].to<JsonObject>();
     if (TaskManager::hSensor)
         tasks["SensorTask"]     = (uint32_t)uxTaskGetStackHighWaterMark(TaskManager::hSensor);
     if (TaskManager::hSlowSensor)
@@ -290,7 +290,7 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         tasks["ExportTask"]     = (uint32_t)uxTaskGetStackHighWaterMark(TaskManager::hExport);
 
     // OTA rollback info
-    JsonObject ota = doc.createNestedObject("ota");
+    JsonObject ota = doc["ota"].to<JsonObject>();
     ota["running"]          = OtaManager::runningPartitionLabel();
     ota["previous"]         = OtaManager::previousPartitionLabel();
     ota["pending_verify"]   = OtaManager::isPendingVerify();
@@ -345,9 +345,9 @@ static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
     JsonDocument doc;
     doc["id"]   = s->getId();
     doc["type"] = s->getType();
-    JsonArray arr = doc.createNestedArray("readings");
+    JsonArray arr = doc["readings"].to<JsonArray>();
     for (int i = 0; i < n; i++) {
-        JsonObject r = arr.createNestedObject();
+        JsonObject r = arr.add<JsonObject>();
         r["metric"] = readings[i].metric;
         r["value"]  = readings[i].value;
         r["unit"]   = readings[i].unit;

@@ -187,7 +187,7 @@ void SensorManager::toJson(JsonArray arr) const {
     for (int i = 0; i < _count; i++) {
         ISensor* s = _sensors[i];
         if (!s) continue;
-        JsonObject o = arr.createNestedObject();
+        JsonObject o = arr.add<JsonObject>();
         o["id"]           = s->getId();
         o["type"]         = s->getType();
         o["name"]         = s->getName();
@@ -198,7 +198,7 @@ void SensorManager::toJson(JsonArray arr) const {
 
         const char* metricNames[8] = {};
         int mcount = s->getMetrics(metricNames, 8);
-        JsonArray ma = o.createNestedArray("metrics");
+        JsonArray ma = o["metrics"].to<JsonArray>();
         for (int m = 0; m < mcount; m++) ma.add(metricNames[m]);
     }
 }

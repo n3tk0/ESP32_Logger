@@ -1,0 +1,121 @@
+# Build ESP32 firmware with PlatformIO.
+#
+# Triggers:
+#   - Push changes to firmware source files
+#   - Pull requests targeting main
+#   - Manual dispatch (workflow_dispatch)
+#   - Release creation (attaches .bin to release assets)
+#
+# Outputs:
+#   - firmware-esp32c3.bin  (XIAO ESP32-C3, 4MB, production target)
+#   - firmware-esp32s3.bin  (ESP32-S3, 8MB)
+
+name: Build Firmware
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'Logger.ino'
+      - 'platformio.ini'
+      - 'partitions_balanced.csv'
+      - '.github/workflows/build-firmware.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'Logger.ino'
+      - 'platformio.ini'
+      - 'partitions_balanced.csv'
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: xiao_esp32c3
+            name: esp32c3
+            flash: 4MB
+            app_max: 1572864    # 0x180000 = 1,536 KB (from partitions_balanced.csv)
+          - env: esp32s3
+            name: esp32s3
+            flash: 8MB
+            app_max: 3342336    # 0x330000 = 3,264 KB (PlatformIO default_8MB)
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build firmware (${{ matrix.name }})
+        run: pio run -e ${{ matrix.env }}
+
+      - name: Collect binary and report size
+        run: |
+          mkdir -p output
+          cp .pio/build/${{ matrix.env }}/firmware.bin output/firmware-${{ matrix.name }}.bin
+
+          # Report firmware size vs partition limit
+          SIZE=$(stat -c%s output/firmware-${{ matrix.name }}.bin)
+          MAX=${{ matrix.app_max }}
+          PCT=$((SIZE * 100 / MAX))
+          REMAIN=$(( (MAX - SIZE) / 1024 ))
+
+          echo "=== ${{ matrix.name }} (${{ matrix.flash }} flash) ==="
+          echo "Firmware size: $(( SIZE / 1024 )) KB / $(( MAX / 1024 )) KB (${PCT}% used, ${REMAIN} KB free)"
+          ls -lh output/firmware-${{ matrix.name }}.bin
+
+          if [ "$SIZE" -gt "$MAX" ]; then
+            echo "::error::Firmware exceeds app partition! ${SIZE} > ${MAX} bytes"
+            exit 1
+          elif [ "$PCT" -ge 95 ]; then
+            echo "::warning::Firmware uses ${PCT}% of app partition — only ${REMAIN} KB free"
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.name }}
+          path: output/firmware-${{ matrix.name }}.bin
+
+  attach-to-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download ESP32-C3 firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32c3
+          path: firmware/
+
+      - name: Download ESP32-S3 firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32s3
+          path: firmware/
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            firmware/firmware-esp32c3.bin
+            firmware/firmware-esp32s3.bin
