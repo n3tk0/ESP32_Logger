@@ -84,7 +84,7 @@ R"HTML(<div id="tab-setup" class="tab-pane active"><div class="alert alert-warn"
 R"HTML(<div class="card"><div class="card-header">&#x1F4E4; Upload files to /www/</div><div class="card-body"><div class="drop" id="dropZone" onclick="document.getElementById('fileInput').click()"><input type="file" id="fileInput" multiple>&#x2B06; <strong>Click or drag files here</strong><p>index.html &bull; web.js &bull; style.css &bull; changelog.txt &bull; chart.min.js &bull; etc.</p></div><progress id="prog" value="0" max="100"></progress><div class="msg inf" id="uploadMsg"></div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header"><span>&#x1F4C1; LittleFS &mdash; All Files</span><button class="btn btn-sm btn-primary" onclick="loadFiles()">&#x21BA; Refresh</button></div><div class="card-body" style="padding:4px 18px 14px"><div id="legacyWarn" style="display:none" class="legacy">&#x26A0;&#xFE0F; <strong>Legacy UI files found at root.</strong> These override /www/ files and cause broken pages. Delete them!</div><div class="section-label">&#x1F4C2; /www/ (new UI files)</div><div class="file-list" id="wwwList">Loading&#x2026;</div><div class="section-label" style="margin-top:10px">&#x1F4C2; / (root &mdash; legacy / system files)</div><div class="file-list" id="rootList">Loading&#x2026;</div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header">&#x270F;&#xFE0F; Rename / Move File</div><div class="card-body"><div style="display:flex;gap:8px;flex-wrap:wrap"><input type="text" id="renSrc" placeholder="From: e.g. /web.js" style="flex:1;min-width:140px"><input type="text" id="renDst" placeholder="To: e.g. /www/web.js" style="flex:1;min-width:140px"><button class="btn btn-primary" onclick="doRename()">Move</button></div><div class="msg" id="renMsg"></div></div></div>)HTML"
-R"HTML(<div class="card"><div class="card-header">&#x1F504; Device Control</div><div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn btn-primary" onclick="if(confirm('Restart now?'))fetch('/restart').then(function(){setTimeout(function(){location.reload();},5000)})">&#x1F504; Restart</button><button class="btn btn-danger" onclick="doFactoryReset()">&#x1F9F9; Factory Reset</button><div class="msg" id="fsResetMsg" style="flex-basis:100%;margin-top:4px"></div></div></div>)HTML"
+R"HTML(<div class="card"><div class="card-header">&#x1F504; Device Control</div><div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn btn-primary" onclick="if(confirm('Restart now?'))fetch('/restart',{method:'POST'}).then(function(){setTimeout(function(){location.reload();},5000)})">&#x1F504; Restart</button><button class="btn btn-danger" onclick="doFactoryReset()">&#x1F9F9; Factory Reset</button><div class="msg" id="fsResetMsg" style="flex-basis:100%;margin-top:4px"></div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header">&#x1F6E0;&#xFE0F; OTA Firmware Update</div><div class="card-body"><p style="font-size:.85rem;color:#718096;margin-bottom:10px">Upload a <code>.bin</code> firmware file compiled for ESP32-C3. The device will restart automatically after a successful flash.</p><div class="drop" id="otaDropZone" onclick="document.getElementById('otaFile').click()"><input type="file" id="otaFile" accept=".bin">&#x2B06; <strong>Click or drag .bin file here</strong><p>Firmware must start with magic byte 0xE9</p></div><progress id="otaProg" value="0" max="100" style="display:none"></progress><div class="msg" id="otaMsg"></div></div></div></div>)HTML"
 R"HTML(<div id="tab-corelogic" class="tab-pane"><div class="card"><div class="card-header">&#x2699;&#xFE0F; Operating Mode</div><div class="card-body"><label class="flabel">Mode</label><select id="cl-mode" class="sel"><option value="legacy">Legacy &mdash; Water logger only (deep sleep, original behaviour)</option><option value="continuous">Continuous &mdash; Multi-sensor pipeline (FreeRTOS tasks)</option><option value="hybrid">Hybrid &mdash; Water logger + sensor pipeline</option></select><p class="fhint"><strong>Legacy</strong>: original behaviour, deep-sleep between flush events.<br><strong>Continuous</strong>: all sensors polled continuously; device stays awake.<br><strong>Hybrid</strong>: both modes active simultaneously.</p></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header">&#x1F4A4; Sleep Mode</div><div class="card-body"><label class="flabel">Sleep Mode</label><select id="cl-sleep" class="sel" onchange="fsSlpChk()"><option value="deep">Deep Sleep &mdash; maximum power saving (recommended for battery)</option><option value="light">Light Sleep &mdash; faster wake-up, moderate power use</option><option value="none">No Sleep &mdash; device stays awake, Wi-Fi may disconnect between events</option><option value="online">&#x1F310; Online Mode &mdash; always awake, Wi-Fi + web server permanently active</option></select><div id="cl-slp-warn" class="warn-box">&#x26A0;&#xFE0F; <strong>Online Mode</strong> keeps Wi-Fi and the web server permanently active. Power consumption increases significantly (&asymp;50&ndash;200&thinsp;mA continuously). This mode is recommended <strong>only when connected to mains power</strong>. <strong>Not suitable for battery operation.</strong></div><p class="fhint">Controls how the device behaves between measurement events. Takes effect after restart.</p></div></div>)HTML"
@@ -97,8 +97,8 @@ function upF(fs){if(!fs||!fs.length)return;var pg=document.getElementById('prog'
 function fmB(b){if(!b)return'0 B';if(b>=1048576)return(b/1048576).toFixed(1)+' MB';if(b>=1024)return(b/1024).toFixed(1)+' KB';return b+' B'}
 function fRow(f){var lg=LEG.indexOf(f.path)>=0;return'<div class="file-row"'+(lg?' style="background:#fff8e1"':'')+'><span class="fname">'+(lg?'&#x26A0;&#xFE0F; ':'&#x1F4C4; ')+f.path+(lg?' <span style="color:#e67e22;font-size:.75rem">[LEGACY - DELETE]</span>':'')+'</span><span class="fsize">'+fmB(f.size)+'</span><span class="acts"><a href="/download?file='+encodeURIComponent(f.path)+'&storage=internal" class="btn btn-sm btn-primary">&#x1F4E5;</a> <button class="btn btn-sm btn-danger" data-path="'+f.path+'" onclick="dlF(this.dataset.path)">&#x1F5D1;</button></span></div>'}
 function ldF(){var w=document.getElementById('wwwList'),r=document.getElementById('rootList'),wn=document.getElementById('legacyWarn');if(w.innerHTML==='')w.innerHTML='Loading&#x2026;';if(r.innerHTML==='')r.innerHTML='Loading&#x2026;';fetch('/api/filelist?storage=internal&dir=/www/').then(function(r){return r.json()}).then(function(d){var f=d.files||[];if(!f.length){w.innerHTML='<div style="padding:8px 0;color:#718096">Empty &mdash; upload files here</div>';return}w.innerHTML=f.map(function(x){return fRow(x)}).join('')}).catch(function(){w.innerHTML='<span class="err">Error</span>'});fetch('/api/filelist?storage=internal&dir=/').then(function(r){return r.json()}).then(function(d){var f=(d.files||[]).filter(function(x){return!x.isDir});if(!f.length){r.innerHTML='<div style="padding:8px 0;color:#718096">Empty</div>';wn.style.display='none';return}wn.style.display=f.some(function(x){return LEG.indexOf(x.path)>=0})?'block':'none';r.innerHTML=f.map(function(x){return fRow(x)}).join('')}).catch(function(){r.innerHTML='<span class="err">Error</span>'})}
-function dlF(p){if(!confirm('Delete '+p+'?'))return;fetch('/delete?path='+encodeURIComponent(p)+'&storage=internal').then(function(r){return r.json()}).then(function(j){if(!j||!j.ok){alert('Delete failed: '+((j&&j.error)?j.error:'unknown error'));return}ldF()}).catch(function(e){alert('Error: '+e)})}
-function doRename(){var s=document.getElementById('renSrc').value.trim(),d=document.getElementById('renDst').value.trim(),m=document.getElementById('renMsg');if(!s||!d){m.textContent='Both fields required.';m.className='msg err';return}var p=d.lastIndexOf('/'),nn=d.substring(p+1),dd=p<=0?'/':d.substring(0,p);fetch('/move_file?src='+encodeURIComponent(s)+'&newName='+encodeURIComponent(nn)+'&destDir='+encodeURIComponent(dd)+'&storage=internal').then(function(){m.textContent='Done: '+s+' -> '+d;m.className='msg ok';ldF()}).catch(function(e){m.textContent='Error: '+e;m.className='msg err'})}
+function dlF(p){if(!confirm('Delete '+p+'?'))return;fetch('/delete?path='+encodeURIComponent(p)+'&storage=internal',{method:'POST'}).then(function(r){return r.json()}).then(function(j){if(!j||!j.ok){alert('Delete failed: '+((j&&j.error)?j.error:'unknown error'));return}ldF()}).catch(function(e){alert('Error: '+e)})}
+function doRename(){var s=document.getElementById('renSrc').value.trim(),d=document.getElementById('renDst').value.trim(),m=document.getElementById('renMsg');if(!s||!d){m.textContent='Both fields required.';m.className='msg err';return}var p=d.lastIndexOf('/'),nn=d.substring(p+1),dd=p<=0?'/':d.substring(0,p);fetch('/move_file?src='+encodeURIComponent(s)+'&newName='+encodeURIComponent(nn)+'&destDir='+encodeURIComponent(dd)+'&storage=internal',{method:'POST'}).then(function(){m.textContent='Done: '+s+' -> '+d;m.className='msg ok';ldF()}).catch(function(e){m.textContent='Error: '+e;m.className='msg err'})}
 ldF();
 function doFactoryReset(){if(!confirm('\u26a0\ufe0f FACTORY RESET\n\nThis will erase ALL files on LittleFS (config, UI, logs) and restart.\n\nProceed?'))return;var a=prompt('Type RESET to confirm:');if(a!=='RESET'){alert('Cancelled.');return}var m=document.getElementById('fsResetMsg');if(m){m.textContent='Factory reset in progress\u2026';m.className='msg inf'}fetch('/factory_reset',{method:'POST'}).then(function(r){return r.json()}).then(function(d){if(d.ok){alert('LittleFS formatted. Device is restarting.\nReconnect in ~10 seconds.');setTimeout(function(){location.reload()},10000)}else{if(m){m.textContent='Reset failed: '+(d.error||'unknown');m.className='msg err'}else alert('Reset failed: '+(d.error||'unknown'))}}).catch(function(e){if(m){m.textContent='Error: '+e;m.className='msg err'}else alert('Error: '+e)})}
 var odz=document.getElementById('otaDropZone');odz.addEventListener('dragover',function(e){e.preventDefault();this.classList.add('over')});odz.addEventListener('dragleave',function(){this.classList.remove('over')});odz.addEventListener('drop',function(e){e.preventDefault();this.classList.remove('over');var f=e.dataTransfer.files[0];if(f)doOta(f)});document.getElementById('otaFile').addEventListener('change',function(){if(this.files.length)doOta(this.files[0])});
@@ -958,11 +958,6 @@ void setupWebServer() {
     // =========================================================================
     // RESTART
     // =========================================================================
-    server.on("/restart", HTTP_GET, [](AsyncWebServerRequest *r) {
-        r->send(200, "application/json", "{\"ok\":true}");
-        shouldRestart = true;
-        restartTimer  = millis();
-    });
     server.on("/restart", HTTP_POST, [](AsyncWebServerRequest *r) {
         r->send(200, "application/json", "{\"ok\":true}");
         shouldRestart = true;
@@ -1017,10 +1012,9 @@ void setupWebServer() {
         }
         r->send(200, "application/json", deleted ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"Delete failed\"}");
     };
-    server.on("/delete", HTTP_GET,  deleteHandler);  // legacy compat
-    server.on("/delete", HTTP_POST, deleteHandler);   // preferred
+    server.on("/delete", HTTP_POST, deleteHandler);
 
-    server.on("/mkdir", HTTP_GET, [](AsyncWebServerRequest *r) {
+    server.on("/mkdir", HTTP_POST, [](AsyncWebServerRequest *r) {
         fs::FS* targetFS = getCurrentViewFS();
         if (!r->hasParam("name") || !targetFS) { r->send(400, "text/plain", "Missing name"); return; }
         String dirRaw  = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
@@ -1037,7 +1031,7 @@ void setupWebServer() {
         r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
     });
 
-    server.on("/move_file", HTTP_GET, [](AsyncWebServerRequest *r) {
+    server.on("/move_file", HTTP_POST, [](AsyncWebServerRequest *r) {
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         String src     = r->hasParam("src")     ? sanitizePath(r->getParam("src")->value())     : "";
         String newName = r->hasParam("newName") ? sanitizeFilename(r->getParam("newName")->value()) : "";
@@ -1268,11 +1262,16 @@ void setupWebServer() {
             r->send(200, "text/plain", "OK");
         },
         [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+            // Hard cap matches the accept-limit below so a malicious
+            // Content-Length cannot trigger a huge heap allocation.
+            constexpr size_t kImportMax = 8192;
             if (!index) {
                 _importBuf = "";
-                _importBuf.reserve(req->contentLength() > 0 ? req->contentLength() : 4096);
+                size_t hint = req->contentLength() > 0 ? req->contentLength() : 4096;
+                if (hint > kImportMax) hint = kImportMax;
+                _importBuf.reserve(hint);
             }
-            if (_importBuf.length() + len > 8192) return; // Hard cap
+            if (_importBuf.length() + len > kImportMax) return; // Hard cap
             _importBuf.concat((const char*)data, len);
         }
     );
@@ -1308,31 +1307,51 @@ void setupWebServer() {
     // =========================================================================
     // OTA FIRMWARE UPDATE
     // =========================================================================
-    server.on("/do_update", HTTP_POST,
-        [](AsyncWebServerRequest *r) {
-            bool ok = !Update.hasError();
-            AsyncWebServerResponse *resp = r->beginResponse(200, "application/json",
-                ok ? "{\"success\":true,\"message\":\"Update complete, restarting...\"}"
-                   : "{\"success\":false,\"message\":\"Update failed\"}");
-            resp->addHeader("Connection", "close");
-            r->send(resp);
-            if (ok) {
-                shouldRestart = true;
-                restartTimer = millis();
+    {
+        static bool s_otaRejected = false;
+        server.on("/do_update", HTTP_POST,
+            [](AsyncWebServerRequest *r) {
+                bool ok = !s_otaRejected && !Update.hasError();
+                const char* msg = s_otaRejected
+                    ? "{\"success\":false,\"message\":\"Invalid firmware image\"}"
+                    : (ok ? "{\"success\":true,\"message\":\"Update complete, restarting...\"}"
+                          : "{\"success\":false,\"message\":\"Update failed\"}");
+                AsyncWebServerResponse *resp = r->beginResponse(ok ? 200 : 400,
+                    "application/json", msg);
+                resp->addHeader("Connection", "close");
+                r->send(resp);
+                if (ok) {
+                    shouldRestart = true;
+                    restartTimer = millis();
+                }
+            },
+            [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+                if (!index) {
+                    s_otaRejected = false;
+                    Serial.printf("OTA start: %s\n", filename.c_str());
+                    // First byte of an ESP32 firmware image must be
+                    // ESP_IMAGE_HEADER_MAGIC (0xE9). Reject anything else
+                    // before touching flash.
+                    if (len < 1 || data[0] != 0xE9) {
+                        Serial.println("OTA: bad magic byte, rejecting");
+                        s_otaRejected = true;
+                        return;
+                    }
+                    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+                        Update.printError(Serial);
+                        s_otaRejected = true;
+                        return;
+                    }
+                }
+                if (s_otaRejected) return;
+                if (Update.write(data, len) != len) Update.printError(Serial);
+                if (final) {
+                    if (Update.end(true)) Serial.printf("OTA done: %u bytes\n", index + len);
+                    else Update.printError(Serial);
+                }
             }
-        },
-        [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-            if (!index) {
-                Serial.printf("OTA start: %s\n", filename.c_str());
-                if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
-            }
-            if (Update.write(data, len) != len) Update.printError(Serial);
-            if (final) {
-                if (Update.end(true)) Serial.printf("OTA done: %u bytes\n", index + len);
-                else Update.printError(Serial);
-            }
-        }
-    );
+        );
+    }
 
     // =========================================================================
     // STATIC FILE FALLBACK (not found handler)

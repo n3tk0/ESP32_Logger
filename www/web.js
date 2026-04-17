@@ -462,7 +462,7 @@ function confirmRestart() {
       "Redirecting in <strong>" + s + "</strong> seconds…";
     if (bar) bar.style.width = (5 - s) * 20 + "%";
     if (s <= 0) {
-      fetch("/restart").finally(function () {
+      fetch("/restart", { method: "POST" }).finally(function () {
         location.hash = "dashboard";
         location.reload();
       });
@@ -1070,6 +1070,7 @@ function filesMkdir() {
       encodeURIComponent(currentFilesDir) +
       "&storage=" +
       currentFilesStorage,
+    { method: "POST" },
   ).then(function () {
     name.value = "";
     filesRender();
@@ -1095,7 +1096,7 @@ function filesApplyMove() {
     "&storage=" +
     currentFilesStorage;
   if (destDir) url += "&destDir=" + encodeURIComponent(destDir);
-  fetch(url)
+  fetch(url, { method: "POST" })
     .then(function () {
       document.getElementById("movePopup").style.display = "none";
       filesRender();
@@ -2154,11 +2155,11 @@ function dlLoadFiles() {
 // Uses storage=internal explicitly — matches original failsafe fix
 function dlDeleteFile(path) {
   if (!confirm("Delete " + path + "?")) return;
-  fetch("/delete?path=" + encodeURIComponent(path) + "&storage=internal").then(
-    function () {
-      dlLoadFiles();
-    },
-  );
+  fetch("/delete?path=" + encodeURIComponent(path) + "&storage=internal", {
+    method: "POST",
+  }).then(function () {
+    dlLoadFiles();
+  });
 }
 
 // Matches original: function updatePreview()
