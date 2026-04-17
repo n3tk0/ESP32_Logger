@@ -137,7 +137,7 @@
 // Active platform mode (set once in setup, read in loop). See PlatformMode in Config.h.
 static PlatformMode g_platformMode  = PLATFORM_LEGACY;
 #ifdef EXPORT_MQTT_ENABLED
-static MqttExporter* g_mqttExporter = nullptr;  // for HA discovery + API access
+MqttExporter* g_mqttExporter = nullptr;  // for HA discovery + API access (external linkage — referenced from web/ApiHandlers.cpp)
 #endif
 
 // Continuous-mode idle power management
