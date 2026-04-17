@@ -975,8 +975,8 @@ void setupWebServer() {
 
     server.on("/download", HTTP_GET, [](AsyncWebServerRequest *r) {
         if (!r->hasParam("file")) { r->send(400, "text/plain", "No file"); return; }
-        String path = sanitizeFilename(r->getParam("file")->value());
-        if (!path.startsWith("/")) path = "/" + path;
+        String path = sanitizePath(r->getParam("file")->value());
+        if (path.isEmpty() || path == "/") { r->send(400, "text/plain", "Invalid path"); return; }
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         fs::FS* targetFS = (storage == "sdcard" && sdAvailable) ? (fs::FS*)&SD :
                            (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
@@ -993,8 +993,14 @@ void setupWebServer() {
     // Accept both GET (legacy web.js compat) and POST (preferred)
     auto deleteHandler = [](AsyncWebServerRequest *r) {
         if (!r->hasParam("path") && !r->hasParam("path", true)) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing path\"}"); return; }
-        String path = sanitizePath(r->getParam("path")->value());
-        if (path == "/") { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Refusing to delete root\"}"); return; }
+        // Prefer POST param; fall back to query — sanitizePath rejects "..",
+        // control chars, backslash, and NUL, returning "" on any violation.
+        String raw = r->hasParam("path", true)
+                     ? r->getParam("path", true)->value()
+                     : r->getParam("path")->value();
+        String path = sanitizePath(raw);
+        if (path.isEmpty() || path == "/") { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid path\"}"); return; }
+        if (isPathProtected(path))          { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         fs::FS* targetFS = nullptr;
         if (storage == "sdcard" && sdAvailable)              targetFS = &SD;
@@ -1017,11 +1023,13 @@ void setupWebServer() {
     server.on("/mkdir", HTTP_GET, [](AsyncWebServerRequest *r) {
         fs::FS* targetFS = getCurrentViewFS();
         if (!r->hasParam("name") || !targetFS) { r->send(400, "text/plain", "Missing name"); return; }
-        String dir     = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
+        String dirRaw  = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         if (storage == "sdcard" && sdAvailable) targetFS = &SD;
         else targetFS = &LittleFS;
+        String dir  = sanitizePath(dirRaw);
         String name = sanitizeFilename(r->getParam("name")->value());
+        if (dir.isEmpty() || name.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid name or dir\"}"); return; }
         String fp   = buildPath(dir, name);
         if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
         bool ok = targetFS->mkdir(fp);
@@ -1032,79 +1040,154 @@ void setupWebServer() {
     server.on("/move_file", HTTP_GET, [](AsyncWebServerRequest *r) {
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         String src     = r->hasParam("src")     ? sanitizePath(r->getParam("src")->value())     : "";
-        String newName = r->hasParam("newName") ? r->getParam("newName")->value() : "";
-        String destDir = r->hasParam("destDir") ? r->getParam("destDir")->value() : "";
-        if (src.isEmpty() || newName.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing params\"}"); return; }
+        String newName = r->hasParam("newName") ? sanitizeFilename(r->getParam("newName")->value()) : "";
+        String destRaw = r->hasParam("destDir") ? r->getParam("destDir")->value() : "";
+        if (src.isEmpty() || newName.isEmpty() || src == "/") { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid src or newName\"}"); return; }
+        if (isPathProtected(src)) { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
         fs::FS* targetFS = nullptr;
         if (storage == "sdcard" && sdAvailable)              targetFS = &SD;
         else if (storage == "internal" && littleFsAvailable) targetFS = &LittleFS;
         if (!targetFS) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"No storage\"}"); return; }
-        String dstDir  = destDir.isEmpty() ? src.substring(0, src.lastIndexOf('/')) : destDir;
-        if (dstDir.isEmpty()) dstDir = "/";
+        String dstDir;
+        if (destRaw.isEmpty()) {
+            dstDir = src.substring(0, src.lastIndexOf('/'));
+            if (dstDir.isEmpty()) dstDir = "/";
+        } else {
+            dstDir = sanitizePath(destRaw);
+            if (dstDir.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid destDir\"}"); return; }
+        }
         String dstPath = buildPath(dstDir, newName);
+        if (isPathProtected(dstPath)) { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
         if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
         bool ok = targetFS->rename(src, dstPath);
         if (fsMutex) xSemaphoreGive(fsMutex);
         r->send(200, "application/json", ok ? "{\"ok\":true,\"dst\":\"" + dstPath + "\"}" : "{\"ok\":false}");
     });
 
-    // Upload handler: file handle stored per-request to prevent concurrent corruption
+    // Upload handler: per-request state in _tempObject tracks file handle
+    // AND mutex-held flag so that client abort (onDisconnect) can release both.
+    struct UploadCtx { File file; bool mutexHeld; bool failed; };
     server.on("/upload", HTTP_POST,
         [](AsyncWebServerRequest *r) {
-            // Clean up request-scoped file handle
-            File* fp = (File*)r->_tempObject;
-            if (fp) { if (*fp) fp->close(); delete fp; r->_tempObject = nullptr; }
+            UploadCtx* ctx = (UploadCtx*)r->_tempObject;
+            if (ctx) {
+                if (ctx->file) ctx->file.close();
+                if (ctx->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
+                bool failed = ctx->failed;
+                delete ctx;
+                r->_tempObject = nullptr;
+                if (failed) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Upload failed\"}"); return; }
+            }
             r->send(200, "application/json", "{\"ok\":true}");
         },
         [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
             if (index == 0) {
-                // Clean up any leftover handle from a previous aborted upload
-                File* old = (File*)request->_tempObject;
-                if (old) { if (*old) old->close(); delete old; }
+                // Clean up leftover state from a previous aborted upload
+                UploadCtx* old = (UploadCtx*)request->_tempObject;
+                if (old) {
+                    if (old->file) old->file.close();
+                    if (old->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
+                    delete old;
+                    request->_tempObject = nullptr;
+                }
 
-                String upDir = request->hasParam("path")
-                               ? request->getParam("path")->value()
-                               : String("/www/");
-                if (!upDir.startsWith("/")) upDir = "/" + upDir;
-                while (upDir.length() > 1 && upDir.endsWith("/")) upDir.remove(upDir.length()-1);
+                String upDirRaw = request->hasParam("path")
+                                  ? request->getParam("path")->value()
+                                  : String("/www/");
+                String upDir = sanitizePath(upDirRaw);
+                if (upDir.isEmpty()) {
+                    Serial.printf("Upload: invalid path '%s'\n", upDirRaw.c_str());
+                    auto* ctx = new UploadCtx{File(), false, true};
+                    request->_tempObject = ctx;
+                    return;
+                }
+
+                String safeName = sanitizeFilename(filename);
+                if (safeName.isEmpty()) {
+                    Serial.printf("Upload: invalid filename '%s'\n", filename.c_str());
+                    auto* ctx = new UploadCtx{File(), false, true};
+                    request->_tempObject = ctx;
+                    return;
+                }
 
                 String upStorage = request->hasParam("storage")
                                    ? request->getParam("storage")->value()
                                    : String("internal");
 
-                fs::FS* targetFS = (upStorage == "sdcard" && sdAvailable)
+                bool wantSD = (upStorage == "sdcard");
+                fs::FS* targetFS = (wantSD && sdAvailable)
                                    ? (fs::FS*)&SD
                                    : (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
-                if (!targetFS) { Serial.println("Upload: no filesystem available"); request->_tempObject = nullptr; return; }
-                if (upDir != "/") targetFS->mkdir(upDir);
-
-                String upPath = (upDir == "/") ? "/" + filename : upDir + "/" + filename;
-                Serial.printf("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
-
-                if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
-                File* fp = new File(targetFS->open(upPath, FILE_WRITE));
-                if (!fp || !*fp) {
-                    Serial.printf("Upload: cannot open %s for write\n", upPath.c_str());
-                    if (fp) delete fp;
-                    request->_tempObject = nullptr;
+                if (!targetFS) {
+                    Serial.println("Upload: no filesystem available");
+                    auto* ctx = new UploadCtx{File(), false, true};
+                    request->_tempObject = ctx;
                     return;
                 }
-                request->_tempObject = fp;
+
+                String upPath = buildPath(upDir, safeName);
+                if (!wantSD && isPathProtected(upPath)) {
+                    Serial.printf("Upload: refusing protected path %s\n", upPath.c_str());
+                    auto* ctx = new UploadCtx{File(), false, true};
+                    request->_tempObject = ctx;
+                    return;
+                }
+
+                // Disk-full guard for internal storage. Use content-length when
+                // supplied; otherwise require at least 32 KB headroom.
+                if (targetFS == (fs::FS*)&LittleFS) {
+                    size_t free = LittleFS.totalBytes() - LittleFS.usedBytes();
+                    size_t need = request->contentLength() ? request->contentLength() : 32768;
+                    if (free < need) {
+                        Serial.printf("Upload: disk full (free=%u need=%u)\n",
+                                      (unsigned)free, (unsigned)need);
+                        auto* ctx = new UploadCtx{File(), false, true};
+                        request->_tempObject = ctx;
+                        return;
+                    }
+                }
+
+                Serial.printf("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
+
+                auto* ctx = new UploadCtx{File(), false, false};
+                if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
+                    ctx->mutexHeld = true;
+                }
+                if (upDir != "/") targetFS->mkdir(upDir);
+                ctx->file = targetFS->open(upPath, FILE_WRITE);
+                if (!ctx->file) {
+                    Serial.printf("Upload: cannot open %s for write\n", upPath.c_str());
+                    if (ctx->mutexHeld && fsMutex) { xSemaphoreGive(fsMutex); ctx->mutexHeld = false; }
+                    ctx->failed = true;
+                }
+                request->_tempObject = ctx;
+
+                // Release FS mutex + close partial file if the client aborts.
+                request->onDisconnect([request]() {
+                    UploadCtx* c = (UploadCtx*)request->_tempObject;
+                    if (!c) return;
+                    if (c->file) c->file.close();
+                    if (c->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
+                    delete c;
+                    request->_tempObject = nullptr;
+                });
             }
 
-            File* fp = (File*)request->_tempObject;
-            if (fp && *fp && len) fp->write(data, len);
-
-            if (final) {
-                if (fp) {
-                    if (*fp) {
-                        Serial.printf("Upload done: %s (%u bytes)\n", filename.c_str(), (unsigned)(index + len));
-                        fp->close();
-                    }
-                    delete fp;
-                    request->_tempObject = nullptr;
-                    if (fsMutex) xSemaphoreGive(fsMutex);   // FS1
+            UploadCtx* ctx = (UploadCtx*)request->_tempObject;
+            if (ctx && ctx->file && !ctx->failed && len) {
+                if (ctx->file.write(data, len) != len) {
+                    Serial.println("Upload: short write (disk full?)");
+                    ctx->failed = true;
                 }
+            }
+
+            if (final && ctx) {
+                if (ctx->file) {
+                    Serial.printf("Upload done: %s (%u bytes)\n",
+                                  filename.c_str(), (unsigned)(index + len));
+                    ctx->file.close();
+                }
+                if (ctx->mutexHeld && fsMutex) { xSemaphoreGive(fsMutex); ctx->mutexHeld = false; }
             }
         }
     );
@@ -1307,33 +1390,47 @@ void setupWebServer() {
     // POST /save_platform — receives JSON body, writes to /platform_config.json
     // Uses static file handle (only one request at a time on embedded device).
     {
-        // Static file handle shared across onRequest + onBody lambdas
         static File s_pcfgFile;
+        static bool s_pcfgMutexHeld = false;
+
+        auto pcfgCleanup = []() {
+            if (s_pcfgFile) s_pcfgFile.close();
+            if (s_pcfgMutexHeld && fsMutex) {
+                xSemaphoreGive(fsMutex);
+                s_pcfgMutexHeld = false;
+            }
+        };
 
         server.on("/save_platform", HTTP_POST,
-            [](AsyncWebServerRequest *r) {
-                // onRequest fires AFTER body is fully collected (when using onBody).
-                // At this point the file is already closed by onBody; just ACK.
+            [pcfgCleanup](AsyncWebServerRequest *r) {
                 if (!fsAvailable || !activeFS) {
+                    pcfgCleanup();
                     r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
                     return;
                 }
                 r->send(200, "application/json", "{\"ok\":true}");
             },
             nullptr,
-            [](AsyncWebServerRequest *r, uint8_t *data, size_t len,
+            [pcfgCleanup](AsyncWebServerRequest *r, uint8_t *data, size_t len,
                size_t index, size_t total) {
                 if (!fsAvailable || !activeFS) return;
                 if (index == 0) {
-                    if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
+                    if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
+                        s_pcfgMutexHeld = true;
+                    }
                     s_pcfgFile = activeFS->open("/platform_config.json", FILE_WRITE);
+                    if (!s_pcfgFile && s_pcfgMutexHeld && fsMutex) {
+                        xSemaphoreGive(fsMutex);
+                        s_pcfgMutexHeld = false;
+                    }
+                    // Release FS mutex + close partial file if the client aborts.
+                    r->onDisconnect(pcfgCleanup);
                 }
                 if (s_pcfgFile) {
                     s_pcfgFile.write(data, len);
                 }
-                if (index + len >= total && s_pcfgFile) {
-                    s_pcfgFile.close();
-                    if (fsMutex) xSemaphoreGive(fsMutex);   // FS1
+                if (index + len >= total) {
+                    pcfgCleanup();
                 }
             }
         );
