@@ -238,7 +238,13 @@ void setupWebServer() {
     bool uiReady = LittleFS.exists("/www/index.html");
 
     if (uiReady) {
-        server.serveStatic("/", LittleFS, "/www/").setDefaultFile("index.html");
+        // 5-min cache lets the browser reuse JS/CSS/images across page navigation
+        // without re-fetching, while still picking up firmware-bundled UI changes
+        // within a few minutes of a release. Tight enough to avoid stale-asset
+        // headaches; long enough to noticeably speed up the SPA on cold loads.
+        server.serveStatic("/", LittleFS, "/www/")
+              .setDefaultFile("index.html")
+              .setCacheControl("public, max-age=300, must-revalidate");
         Serial.println("Web UI: serving from /www/");
     } else {
         server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
