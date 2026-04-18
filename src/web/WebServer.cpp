@@ -309,7 +309,7 @@ static AsyncAuthGateHandler s_authGate;
 #endif
 
 void setupWebServer() {
-    Serial.println("Setting up web server...");
+    DBGLN("Setting up web server...");
 
 #if WEB_BASIC_AUTH_ENABLED
     // Must be registered FIRST — handlers are matched in insertion order and
@@ -317,7 +317,7 @@ void setupWebServer() {
     // GET responses (export_settings, platform_config) behind the same wall
     // as the mutating endpoints.
     server.addHandler(&s_authGate);
-    Serial.println("Web server: Basic Auth ENABLED");
+    DBGLN("Web server: Basic Auth ENABLED");
 #endif
 
     // C2: track web activity for idle power restore
@@ -333,7 +333,7 @@ void setupWebServer() {
         server.serveStatic("/", LittleFS, "/www/")
               .setDefaultFile("index.html")
               .setCacheControl("public, max-age=300, must-revalidate");
-        Serial.println("Web UI: serving from /www/");
+        DBGLN("Web UI: serving from /www/");
     } else {
         server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
             if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
@@ -342,7 +342,7 @@ void setupWebServer() {
             }
             r->send_P(200, "text/html", FAILSAFE_HTML);
         });
-        Serial.println("Web UI: FAILSAFE mode (upload /www/index.html to restore)");
+        DBGLN("Web UI: FAILSAFE mode (upload /www/index.html to restore)");
     }
 
     server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *r) {
@@ -1057,15 +1057,15 @@ void setupWebServer() {
     // =========================================================================
     server.on("/factory_reset", HTTP_POST, [](AsyncWebServerRequest *r) {
         r->send(200, "application/json", "{\"ok\":true}");
-        Serial.println("[FACTORY RESET] Formatting LittleFS…");
+        DBGLN("[FACTORY RESET] Formatting LittleFS…");
         // Short timeout keeps the AsyncTCP worker responsive; factory reset
         // restarts the chip regardless so blocking the worker longer buys us
         // nothing.
         if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
         if (LittleFS.format()) {
-            Serial.println("[FACTORY RESET] LittleFS formatted OK – restarting");
+            DBGLN("[FACTORY RESET] LittleFS formatted OK – restarting");
         } else {
-            Serial.println("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
+            DBGLN("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
         }
         if (fsMutex) xSemaphoreGive(fsMutex);   // FS1
         safeWiFiShutdown();
@@ -1211,7 +1211,7 @@ void setupWebServer() {
                                   : String("/www/");
                 String upDir = sanitizePath(upDirRaw);
                 if (upDir.isEmpty()) {
-                    Serial.printf("Upload: invalid path '%s'\n", upDirRaw.c_str());
+                    DBGF("Upload: invalid path '%s'\n", upDirRaw.c_str());
                     auto* ctx = new UploadCtx{File(), false, true};
                     request->_tempObject = ctx;
                     return;
@@ -1219,7 +1219,7 @@ void setupWebServer() {
 
                 String safeName = sanitizeFilename(filename);
                 if (safeName.isEmpty()) {
-                    Serial.printf("Upload: invalid filename '%s'\n", filename.c_str());
+                    DBGF("Upload: invalid filename '%s'\n", filename.c_str());
                     auto* ctx = new UploadCtx{File(), false, true};
                     request->_tempObject = ctx;
                     return;
@@ -1234,7 +1234,7 @@ void setupWebServer() {
                                    ? (fs::FS*)&SD
                                    : (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
                 if (!targetFS) {
-                    Serial.println("Upload: no filesystem available");
+                    DBGLN("Upload: no filesystem available");
                     auto* ctx = new UploadCtx{File(), false, true};
                     request->_tempObject = ctx;
                     return;
@@ -1242,7 +1242,7 @@ void setupWebServer() {
 
                 String upPath = buildPath(upDir, safeName);
                 if (!wantSD && isPathProtected(upPath)) {
-                    Serial.printf("Upload: refusing protected path %s\n", upPath.c_str());
+                    DBGF("Upload: refusing protected path %s\n", upPath.c_str());
                     auto* ctx = new UploadCtx{File(), false, true};
                     request->_tempObject = ctx;
                     return;
@@ -1254,7 +1254,7 @@ void setupWebServer() {
                     size_t free = LittleFS.totalBytes() - LittleFS.usedBytes();
                     size_t need = request->contentLength() ? request->contentLength() : 32768;
                     if (free < need) {
-                        Serial.printf("Upload: disk full (free=%u need=%u)\n",
+                        DBGF("Upload: disk full (free=%u need=%u)\n",
                                       (unsigned)free, (unsigned)need);
                         auto* ctx = new UploadCtx{File(), false, true};
                         request->_tempObject = ctx;
@@ -1262,7 +1262,7 @@ void setupWebServer() {
                     }
                 }
 
-                Serial.printf("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
+                DBGF("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
 
                 auto* ctx = new UploadCtx{File(), false, false};
                 if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
@@ -1271,7 +1271,7 @@ void setupWebServer() {
                 if (upDir != "/") targetFS->mkdir(upDir);
                 ctx->file = targetFS->open(upPath, FILE_WRITE);
                 if (!ctx->file) {
-                    Serial.printf("Upload: cannot open %s for write\n", upPath.c_str());
+                    DBGF("Upload: cannot open %s for write\n", upPath.c_str());
                     if (ctx->mutexHeld && fsMutex) { xSemaphoreGive(fsMutex); ctx->mutexHeld = false; }
                     ctx->failed = true;
                 }
@@ -1291,14 +1291,14 @@ void setupWebServer() {
             UploadCtx* ctx = (UploadCtx*)request->_tempObject;
             if (ctx && ctx->file && !ctx->failed && len) {
                 if (ctx->file.write(data, len) != len) {
-                    Serial.println("Upload: short write (disk full?)");
+                    DBGLN("Upload: short write (disk full?)");
                     ctx->failed = true;
                 }
             }
 
             if (final && ctx) {
                 if (ctx->file) {
-                    Serial.printf("Upload done: %s (%u bytes)\n",
+                    DBGF("Upload done: %s (%u bytes)\n",
                                   filename.c_str(), (unsigned)(index + len));
                     ctx->file.close();
                 }
@@ -1449,12 +1449,12 @@ void setupWebServer() {
             [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
                 if (!index) {
                     s_otaRejected = false;
-                    Serial.printf("OTA start: %s\n", filename.c_str());
+                    DBGF("OTA start: %s\n", filename.c_str());
                     // First byte of an ESP32 firmware image must be
                     // ESP_IMAGE_HEADER_MAGIC (0xE9). Reject anything else
                     // before touching flash.
                     if (len < 1 || data[0] != 0xE9) {
-                        Serial.println("OTA: bad magic byte, rejecting");
+                        DBGLN("OTA: bad magic byte, rejecting");
                         s_otaRejected = true;
                         return;
                     }
@@ -1467,7 +1467,7 @@ void setupWebServer() {
                 if (s_otaRejected) return;
                 if (Update.write(data, len) != len) Update.printError(Serial);
                 if (final) {
-                    if (Update.end(true)) Serial.printf("OTA done: %u bytes\n", index + len);
+                    if (Update.end(true)) DBGF("OTA done: %u bytes\n", index + len);
                     else Update.printError(Serial);
                 }
             }
@@ -1619,5 +1619,5 @@ void setupWebServer() {
     });
 
     server.begin();
-    Serial.printf("Web server started. Free heap: %d\n", ESP.getFreeHeap());
+    DBGF("Web server started. Free heap: %d\n", ESP.getFreeHeap());
 }
