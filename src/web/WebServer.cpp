@@ -77,6 +77,82 @@ void sendRestartPage(AsyncWebServerRequest *r, const char* message) {
 }
 
 // ============================================================================
+// LIVE SNAPSHOT  (shared by /api/live polling endpoint and SSE /api/events)
+// ============================================================================
+
+// SSE channel: clients open `new EventSource('/api/events')`. The handler is
+// registered in setupWebServer() so library auth gating still applies.
+static AsyncEventSource liveEvents("/api/events");
+
+static void buildLiveSnapshot(JsonDocument& doc) {
+    noInterrupts();
+    uint32_t safePulses = pulseCount;
+    interrupts();
+
+    doc["time"]      = getRtcDateTimeString();
+    doc["chip"]      = ESP.getChipModel();
+    doc["version"]   = getVersionString();
+    doc["network"]   = getNetworkDisplay();
+    doc["ff"]        = digitalRead(config.hardware.pinWakeupFF);
+    doc["pf"]        = digitalRead(config.hardware.pinWakeupPF);
+    doc["wifi"]      = digitalRead(config.hardware.pinWifiTrigger);
+    doc["pulses"]    = safePulses;
+    doc["boot"]      = bootCount;
+    doc["heap"]      = ESP.getFreeHeap();
+    doc["heapTotal"] = ESP.getHeapSize();
+    doc["uptime"]    = millis() / 1000;
+    doc["trigger"]   = cycleStartedBy;
+    doc["cycleTime"] = (millis() - cycleStartTime) / 1000;
+    doc["ffCount"]   = highCountFF;
+    doc["pfCount"]   = highCountPF;
+    doc["totalPulses"] = cycleTotalPulses + safePulses;
+
+    const char* stateNames[] = {"IDLE", "WAIT_FLOW", "MONITORING", "DONE"};
+    int stateIdx = (loggingState >= 0 && loggingState <= 3) ? loggingState : 0;
+    doc["state"]     = stateNames[stateIdx];
+    doc["stateTime"] = (millis() - stateStartTime) / 1000;
+
+    if (loggingState == STATE_WAIT_FLOW) {
+        long rem = (BUTTON_WAIT_FLOW_MS - (millis() - stateStartTime)) / 1000;
+        doc["stateRemaining"] = rem > 0 ? rem : 0;
+    } else if (loggingState == STATE_MONITORING && lastFlowPulseTime > 0) {
+        long rem = (FLOW_IDLE_TIMEOUT_MS - (millis() - lastFlowPulseTime)) / 1000;
+        doc["stateRemaining"] = rem > 0 ? rem : 0;
+    } else {
+        doc["stateRemaining"] = -1;
+    }
+
+    float liters = 0;
+    if (config.flowMeter.pulsesPerLiter > 0)
+        liters = (float)safePulses / config.flowMeter.pulsesPerLiter * config.flowMeter.calibrationMultiplier;
+    doc["liters"] = liters;
+    doc["mode"]   = onlineLoggerMode ? "online" : (apModeTriggered ? "webonly" : "logging");
+
+    uint64_t used = 0, total = 0; int pct = 0;
+    getStorageInfo(used, total, pct);
+    char uBuf[24], tBuf[24];
+    snprintf(uBuf, sizeof(uBuf), "%llu", (unsigned long long)used);
+    snprintf(tBuf, sizeof(tBuf), "%llu", (unsigned long long)total);
+    doc["fsUsed"]  = serialized(String(uBuf));
+    doc["fsTotal"] = serialized(String(tBuf));
+
+    doc["ip"] = wifiConnectedAsClient
+                ? WiFi.localIP().toString()
+                : WiFi.softAPIP().toString();
+}
+
+// Called from loop() at ~1 Hz.  Skips work entirely when nobody is subscribed
+// so polling-only deployments pay zero cost.
+void publishLiveEvent() {
+    if (liveEvents.count() == 0) return;
+    JsonDocument doc;
+    buildLiveSnapshot(doc);
+    String buf;
+    serializeJson(doc, buf);
+    liveEvents.send(buf.c_str(), "live", millis());
+}
+
+// ============================================================================
 // FAILSAFE HTML  (served when /www/index.html is missing)
 // ============================================================================
 static const char FAILSAFE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Water Logger - Setup Mode</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,sans-serif;background:#f0f4f8;color:#2d3748;min-height:100vh}header{background:#275673;color:#fff;padding:16px 20px}header h1{font-size:1.2rem;display:flex;align-items:center;gap:10px}.badge{background:#e74c3c;color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem;font-weight:700}.sub{font-size:.8rem;opacity:.8;margin-top:4px}.container{max-width:720px;margin:20px auto;padding:0 14px}.card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.09);margin-bottom:14px;overflow:hidden}.card-header{padding:13px 18px;border-bottom:1px solid #e2e8f0;font-weight:600;background:#f7fafc;display:flex;justify-content:space-between;align-items:center}.card-body{padding:16px 18px}.drop{border:2px dashed #cbd5e0;border-radius:8px;padding:24px;text-align:center;cursor:pointer;transition:.2s;margin-bottom:10px}.drop:hover,.drop.over{border-color:#275673;background:#ebf4ff}.drop input{display:none}.drop p{color:#718096;font-size:.85rem;margin-top:5px}.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;border:none;border-radius:7px;font-size:.88rem;font-weight:500;cursor:pointer;transition:.15s;text-decoration:none}.btn-primary{background:#275673;color:#fff}.btn-primary:hover{background:#1d4259}.btn-danger{background:#e74c3c;color:#fff}.btn-danger:hover{background:#c0392b}.btn-warn{background:#f39c12;color:#fff}.btn-warn:hover{background:#d68910}.btn-sm{padding:4px 10px;font-size:.78rem}progress{width:100%;height:8px;border-radius:4px;margin-top:8px;display:none}.msg{margin-top:8px;font-size:.88rem;min-height:1.1em}.ok{color:#27ae60}.err{color:#e74c3c}.inf{color:#275673}.file-list{font-size:.85rem}.file-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #e2e8f0;gap:6px}.file-row:last-child{border:none}.fname{word-break:break-all;flex:1}.fsize{color:#718096;white-space:nowrap;margin:0 8px}.acts{display:flex;gap:5px;flex-shrink:0}.alert{padding:11px 15px;border-radius:8px;margin-bottom:12px;font-size:.88rem;line-height:1.4}.alert-warn{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}.legacy{background:#fff3cd;border-left:4px solid #f39c12;padding:6px 10px;border-radius:4px;font-size:.8rem;color:#856404;margin-top:4px}input[type=text]{width:100%;padding:7px 11px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem}.section-label{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#718096;padding:10px 0 4px}.sel{width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem;margin-top:4px;background:#fff;color:#2d3748}.fhint{font-size:.78rem;color:#718096;margin-top:4px}.chk-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #e2e8f0;font-size:.88rem}.chk-row:last-child{border:none}.warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:7px;padding:11px 14px;font-size:.83rem;color:#92400e;margin-top:8px;display:none}.warn-box.show{display:block}.flabel{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#718096;display:block;margin-bottom:2px}.tabs{display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px}.tab{padding:10px 20px;border:none;background:none;cursor:pointer;font-size:.9rem;color:#718096;font-weight:500;border-bottom:3px solid transparent;margin-bottom:-2px;transition:.15s;display:flex;align-items:center;gap:6px}.tab:hover{color:#275673;background:#f7fafc}.tab.active{color:#275673;border-bottom-color:#275673;font-weight:700}.tab-pane{display:none}.tab-pane.active{display:block}</style></head><body>)HTML"
@@ -368,68 +444,21 @@ void setupWebServer() {
     });
 
     // =========================================================================
-    // API: LIVE  (polled every 500 ms by SPA live page)
+    // API: LIVE  (legacy poll endpoint + SSE channel /api/events)
+    // -------------------------------------------------------------------------
+    // Modern clients open `new EventSource('/api/events')` and receive 'live'
+    // events at ~1 Hz, driven from loop() via publishLiveEvent(). Older
+    // clients (or fallback when EventSource fails) keep polling /api/live.
+    // Both paths build the same JSON snapshot via buildLiveSnapshot().
     // =========================================================================
     server.on("/api/live", HTTP_GET, [](AsyncWebServerRequest *r) {
         JsonDocument doc;
-
-        noInterrupts();
-        uint32_t safePulses = pulseCount;
-        interrupts();
-
-        doc["time"]      = getRtcDateTimeString();
-        doc["chip"]      = ESP.getChipModel();
-        doc["version"]   = getVersionString();
-        doc["network"]   = getNetworkDisplay();
-        doc["ff"]        = digitalRead(config.hardware.pinWakeupFF);
-        doc["pf"]        = digitalRead(config.hardware.pinWakeupPF);
-        doc["wifi"]      = digitalRead(config.hardware.pinWifiTrigger);
-        doc["pulses"]    = safePulses;
-        doc["boot"]      = bootCount;
-        doc["heap"]      = ESP.getFreeHeap();
-        doc["heapTotal"] = ESP.getHeapSize();
-        doc["uptime"]    = millis() / 1000;
-        doc["trigger"]   = cycleStartedBy;
-        doc["cycleTime"] = (millis() - cycleStartTime) / 1000;
-        doc["ffCount"]   = highCountFF;
-        doc["pfCount"]   = highCountPF;
-        doc["totalPulses"] = cycleTotalPulses + safePulses;
-
-        const char* stateNames[] = {"IDLE", "WAIT_FLOW", "MONITORING", "DONE"};
-        int stateIdx = (loggingState >= 0 && loggingState <= 3) ? loggingState : 0;
-        doc["state"]     = stateNames[stateIdx];
-        doc["stateTime"] = (millis() - stateStartTime) / 1000;
-
-        if (loggingState == STATE_WAIT_FLOW) {
-            long rem = (BUTTON_WAIT_FLOW_MS - (millis() - stateStartTime)) / 1000;
-            doc["stateRemaining"] = rem > 0 ? rem : 0;
-        } else if (loggingState == STATE_MONITORING && lastFlowPulseTime > 0) {
-            long rem = (FLOW_IDLE_TIMEOUT_MS - (millis() - lastFlowPulseTime)) / 1000;
-            doc["stateRemaining"] = rem > 0 ? rem : 0;
-        } else {
-            doc["stateRemaining"] = -1;
-        }
-
-        float liters = 0;
-        if (config.flowMeter.pulsesPerLiter > 0)
-            liters = (float)safePulses / config.flowMeter.pulsesPerLiter * config.flowMeter.calibrationMultiplier;
-        doc["liters"] = liters;
-        doc["mode"]   = onlineLoggerMode ? "online" : (apModeTriggered ? "webonly" : "logging");
-
-        uint64_t used = 0, total = 0; int pct = 0;
-        getStorageInfo(used, total, pct);
-        char uBuf[24], tBuf[24];
-        snprintf(uBuf, sizeof(uBuf), "%llu", (unsigned long long)used);
-        snprintf(tBuf, sizeof(tBuf), "%llu", (unsigned long long)total);
-        doc["fsUsed"]  = serialized(String(uBuf));
-        doc["fsTotal"] = serialized(String(tBuf));
-
-        doc["ip"] = wifiConnectedAsClient
-                    ? WiFi.localIP().toString()
-                    : WiFi.softAPIP().toString();
-
+        buildLiveSnapshot(doc);
         sendJsonResponse(r, doc);
     });
+
+    // SSE channel — same payload, pushed at 1 Hz by publishLiveEvent().
+    server.addHandler(&liveEvents);
 
     // =========================================================================
     // API: RECENT LOGS

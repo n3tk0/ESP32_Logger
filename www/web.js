@@ -21,7 +21,8 @@ var CFG = {}; // cached /export_settings payload
 var dbChart = null; // Chart.js instance on dashboard
 var dbRawData = ""; // raw log text for dashboard
 var dbFilteredData = []; // filtered, parsed rows
-var liveTimer = null; // live page interval
+var liveTimer = null; // live page polling interval (fallback)
+var liveES    = null; // live page EventSource (preferred transport)
 var liveLogsTimer = null; // live logs interval
 var currentPage = ""; // active page id (without 'page-' prefix)
 var currentFilesDir = "/";
@@ -207,6 +208,10 @@ function navigateTo(page) {
     if (liveTimer) {
       clearInterval(liveTimer);
       liveTimer = null;
+    }
+    if (liveES) {
+      try { liveES.close(); } catch (e) {}
+      liveES = null;
     }
     if (liveLogsTimer) {
       clearInterval(liveLogsTimer);
@@ -1130,84 +1135,64 @@ function liveInit() {
       "s idle) → Logging";
   }
 
-  liveUpdate();
+  // Prefer Server-Sent Events; fall back to polling on error / unsupported.
+  liveStartTransport();
   liveLogsUpdate();
-  liveTimer = setInterval(liveUpdate, 500);
   liveLogsTimer = setInterval(liveLogsUpdate, 3000);
+}
+
+function liveStartTransport() {
+  // Always do one immediate fetch so the page is populated before the first
+  // SSE tick (server pushes at 1 Hz).
+  liveUpdate();
+
+  if (typeof EventSource === "undefined") {
+    liveStartPolling(500);
+    return;
+  }
+  try {
+    liveES = new EventSource("/api/events");
+  } catch (e) {
+    liveStartPolling(500);
+    return;
+  }
+  liveES.addEventListener("live", function (ev) {
+    try { liveRender(JSON.parse(ev.data)); } catch (e) {}
+  });
+  liveES.onerror = function () {
+    // Browser will auto-retry, but surface the disconnect and degrade to
+    // polling if the SSE channel never recovers.
+    var conn = document.getElementById("conn");
+    if (conn) {
+      conn.textContent = "● Reconnecting…";
+      conn.className = "text-warning";
+    }
+    if (!liveTimer) liveStartPolling(1000);
+  };
+}
+
+function liveStartPolling(rate) {
+  if (liveTimer) { clearInterval(liveTimer); }
+  liveTimer = setInterval(liveUpdate, rate || 500);
 }
 
 function liveSetRate() {
     var rateEl = document.getElementById('live-refresh-rate');
     if (!rateEl) return;
     var rate = parseInt(rateEl.value, 10) || 500;
-    if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
-    liveTimer = setInterval(liveUpdate, rate);
+    // Manual rate override → close SSE and use polling at the chosen interval.
+    if (liveES) { try { liveES.close(); } catch (e) {} liveES = null; }
+    liveStartPolling(rate);
 }
 
-// Matches original: function upd()
+// Polling fallback — kept identical in shape to the original upd() so the
+// liveRender() body works for both EventSource and fetch results.
 function liveUpdate() {
   fetch("/api/live")
     .then(function (r) {
       return r.json();
     })
-    .then(function (d) {
-      var conn = document.getElementById("conn");
-      if (conn) {
-        conn.textContent = "● Connected";
-        conn.className = "text-success";
-      }
-
-      setEl("live-time", d.time);
-      setEl("live-trigger", d.trigger);
-      setEl("live-cycleTime", d.cycleTime);
-      setEl("live-pulses", d.pulses);
-      setEl("live-liters", parseFloat(d.liters || 0).toFixed(2));
-      setEl("live-ffCount", d.ffCount);
-      setEl("live-pfCount", d.pfCount);
-      setEl("live-boot", d.boot);
-      setEl("live-heap", fmtBytes(d.heap));
-      setEl("live-heapTotal", fmtBytes(d.heapTotal));
-      setEl("live-uptime", d.uptime);
-      if (d.fsTotal)
-        setEl("live-storage", fmtBytes(d.fsUsed) + "/" + fmtBytes(d.fsTotal));
-
-      // State machine colors — exact from original .ino
-      var stColors = {
-        IDLE: "#3498db",
-        WAIT_FLOW: "#f39c12",
-        MONITORING: "#27ae60",
-        DONE: "#e74c3c",
-      };
-      var stEl = document.getElementById("state");
-      if (stEl) {
-        stEl.textContent = d.state;
-        stEl.style.background = stColors[d.state] || "#95a5a6";
-        stEl.style.color = "#fff";
-      }
-      var remEl = document.getElementById("stateRem");
-      if (remEl)
-        remEl.textContent =
-          d.stateRemaining >= 0 ? d.stateRemaining + "s" : "-";
-
-      // Button states
-      liveBtn("live-ff", d.ff, "Pressed", "Released", "#27ae60", "#95a5a6");
-      liveBtn("live-pf", d.pf, "Pressed", "Released", "#27ae60", "#95a5a6");
-      liveBtn("live-wifi", d.wifi, "Pressed", "Released", "#3498db", "#95a5a6");
-
-      // Mode display — matches original getModeDisplay()
-      var modeEl = document.getElementById("mode");
-      if (modeEl) {
-        if (d.mode === "online") modeEl.innerHTML = "🌐 Online Logger";
-        else if (d.mode === "webonly") modeEl.innerHTML = "📡 Web Only";
-        else modeEl.innerHTML = "📊 Logging";
-      }
-
-      // Live header time update
-      if (d.time) setEl("headerTime", d.time.split(" ")[1] || d.time);
-
-      // Footer live refresh — boot count + heap (chip/version stay from applyStatus)
-      updateFooter({ boot: d.boot, heap: d.heap, heapTotal: d.heapTotal });
-    })
+    .then(liveRender)
     .catch(function () {
       var conn = document.getElementById("conn");
       if (conn) {
@@ -1215,6 +1200,59 @@ function liveUpdate() {
         conn.className = "text-danger";
       }
     });
+}
+
+function liveRender(d) {
+  if (!d) return;
+  var conn = document.getElementById("conn");
+  if (conn) {
+    conn.textContent = "● Connected";
+    conn.className = "text-success";
+  }
+
+  setEl("live-time", d.time);
+  setEl("live-trigger", d.trigger);
+  setEl("live-cycleTime", d.cycleTime);
+  setEl("live-pulses", d.pulses);
+  setEl("live-liters", parseFloat(d.liters || 0).toFixed(2));
+  setEl("live-ffCount", d.ffCount);
+  setEl("live-pfCount", d.pfCount);
+  setEl("live-boot", d.boot);
+  setEl("live-heap", fmtBytes(d.heap));
+  setEl("live-heapTotal", fmtBytes(d.heapTotal));
+  setEl("live-uptime", d.uptime);
+  if (d.fsTotal)
+    setEl("live-storage", fmtBytes(d.fsUsed) + "/" + fmtBytes(d.fsTotal));
+
+  var stColors = {
+    IDLE: "#3498db",
+    WAIT_FLOW: "#f39c12",
+    MONITORING: "#27ae60",
+    DONE: "#e74c3c",
+  };
+  var stEl = document.getElementById("state");
+  if (stEl) {
+    stEl.textContent = d.state;
+    stEl.style.background = stColors[d.state] || "#95a5a6";
+    stEl.style.color = "#fff";
+  }
+  var remEl = document.getElementById("stateRem");
+  if (remEl)
+    remEl.textContent = d.stateRemaining >= 0 ? d.stateRemaining + "s" : "-";
+
+  liveBtn("live-ff", d.ff, "Pressed", "Released", "#27ae60", "#95a5a6");
+  liveBtn("live-pf", d.pf, "Pressed", "Released", "#27ae60", "#95a5a6");
+  liveBtn("live-wifi", d.wifi, "Pressed", "Released", "#3498db", "#95a5a6");
+
+  var modeEl = document.getElementById("mode");
+  if (modeEl) {
+    if (d.mode === "online") modeEl.innerHTML = "🌐 Online Logger";
+    else if (d.mode === "webonly") modeEl.innerHTML = "📡 Web Only";
+    else modeEl.innerHTML = "📊 Logging";
+  }
+
+  if (d.time) setEl("headerTime", d.time.split(" ")[1] || d.time);
+  updateFooter({ boot: d.boot, heap: d.heap, heapTotal: d.heapTotal });
 }
 
 function liveBtn(id, pressed, txtOn, txtOff, colorOn, colorOff) {

@@ -668,6 +668,17 @@ void loop() {
         g_pendingNtpSync    = 0;
     }
 
+    // ── SSE live heartbeat (1 Hz) ─────────────────────────────────────────────
+    // No-op when no EventSource clients are subscribed.
+    {
+        static uint32_t s_lastLiveTick = 0;
+        uint32_t now = millis();
+        if (now - s_lastLiveTick >= 1000) {
+            s_lastLiveTick = now;
+            publishLiveEvent();
+        }
+    }
+
     // ── Restart check ─────────────────────────────────────────────────────────
     // ПОПРАВКА: използваме safeWiFiShutdown() преди ESP.restart()
     // Това изчиства WiFi radio state и предотвратява "phantom WiFi pin" проблема:

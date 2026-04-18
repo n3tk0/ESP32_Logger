@@ -38,6 +38,10 @@
 
 void setupWebServer();
 
+// SSE: publish a /api/live snapshot to all connected EventSource clients.
+// Called from loop() at ~1 Hz. No-op when no clients are subscribed.
+void publishLiveEvent();
+
 // Helpers използвани и от Logger.ino / other modules
 String getModeDisplay();
 String getNetworkDisplay();
