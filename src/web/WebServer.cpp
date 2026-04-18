@@ -10,6 +10,7 @@
  */
 
 #include "WebServer.h"
+#include "../setup.h"                   // WEB_BASIC_AUTH_* macros
 #include "../core/Globals.h"
 #include "../managers/ConfigManager.h"
 #include "../managers/WiFiManager.h"
@@ -201,8 +202,35 @@ static void fmtIP(const uint8_t* ip, char* buf16) {
 // ============================================================================
 // WEB SERVER SETUP
 // ============================================================================
+#if WEB_BASIC_AUTH_ENABLED
+// Front-door handler: when Basic Auth is compiled in, this handler is
+// registered FIRST, so it's matched before anything else. It only claims
+// the request when the client is NOT authenticated, which makes us return
+// 401 + WWW-Authenticate and discard the body. Authenticated requests fall
+// through to the real handler chain.
+class AsyncAuthGateHandler : public AsyncWebHandler {
+public:
+    bool canHandle(AsyncWebServerRequest* r) override {
+        return !r->authenticate(WEB_BASIC_AUTH_USER, WEB_BASIC_AUTH_PASS);
+    }
+    void handleRequest(AsyncWebServerRequest* r) override {
+        r->requestAuthentication();
+    }
+};
+static AsyncAuthGateHandler s_authGate;
+#endif
+
 void setupWebServer() {
     Serial.println("Setting up web server...");
+
+#if WEB_BASIC_AUTH_ENABLED
+    // Must be registered FIRST — handlers are matched in insertion order and
+    // the first canHandle()==true wins. Gating every request keeps secrets in
+    // GET responses (export_settings, platform_config) behind the same wall
+    // as the mutating endpoints.
+    server.addHandler(&s_authGate);
+    Serial.println("Web server: Basic Auth ENABLED");
+#endif
 
     // C2: track web activity for idle power restore
     auto touchActivity = []() { g_lastWebActivity = millis(); };
