@@ -216,7 +216,13 @@ static String getMime(const String& path) {
 // ============================================================================
 // FILE LIST HELPER  (used in /api/filelist)
 // ============================================================================
-static void scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
+// Hard-cap on entries returned by a single /api/filelist call.  Bounds heap
+// use from JsonDocument and prevents a malformed / crafted filesystem from
+// driving the AsyncTCP worker OOM.
+static const size_t SCANDIR_MAX_ENTRIES = 500;
+
+// Returns true if the scan was truncated because SCANDIR_MAX_ENTRIES was hit.
+static bool scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
                     const String& filter, bool recursive) {
     std::vector<String> stack;
     stack.push_back(dir);
@@ -234,13 +240,18 @@ static void scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
         }
 
         while (File entry = d.openNextFile()) {
+            if (arr.size() >= SCANDIR_MAX_ENTRIES) {
+                entry.close();
+                d.close();
+                return true;   // truncated
+            }
             String name = String(entry.name());
             if (name.startsWith("/")) {
                 int slash = name.lastIndexOf('/');
                 name = (slash >= 0) ? name.substring(slash + 1) : name;
             }
             String fullPath = (currentDir == "/") ? "/" + name : currentDir + "/" + name;
-            
+
             if (entry.isDirectory()) {
                 if (recursive) {
                     stack.push_back(fullPath);
@@ -266,6 +277,7 @@ static void scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
         }
         d.close();
     }
+    return false;
 }
 
 // ============================================================================
@@ -603,7 +615,8 @@ void setupWebServer() {
         else if (littleFsAvailable)                          targetFS = &LittleFS;
 
         if (targetFS) {
-            scanDir(*targetFS, dir, files, filter, recursive);
+            bool truncated = scanDir(*targetFS, dir, files, filter, recursive);
+            if (truncated) doc["truncated"] = true;
             uint64_t used = 0, total = 0; int pct = 0;
             getStorageInfo(used, total, pct, storage);
             char uBuf[24], tBuf[24];
