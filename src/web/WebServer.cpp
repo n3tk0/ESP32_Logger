@@ -1407,13 +1407,24 @@ void setupWebServer() {
     });
 
     // POST /save_platform — receives JSON body, writes to /platform_config.json
+    // Crash-safe: streams into /platform_config.tmp, then renames on success.
+    // If the client aborts or the device resets mid-write, the real file stays
+    // intact and the tmp is removed on next save attempt.
     // Uses static file handle (only one request at a time on embedded device).
     {
         static File s_pcfgFile;
         static bool s_pcfgMutexHeld = false;
+        static bool s_pcfgComplete  = false;
+        static constexpr const char* PCFG_PATH = "/platform_config.json";
+        static constexpr const char* PCFG_TMP  = "/platform_config.tmp";
 
         auto pcfgCleanup = []() {
             if (s_pcfgFile) s_pcfgFile.close();
+            // If the upload didn't finish cleanly, discard the partial tmp so
+            // the real platform_config.json remains the last good copy.
+            if (!s_pcfgComplete && activeFS && activeFS->exists(PCFG_TMP)) {
+                activeFS->remove(PCFG_TMP);
+            }
             if (s_pcfgMutexHeld && fsMutex) {
                 xSemaphoreGive(fsMutex);
                 s_pcfgMutexHeld = false;
@@ -1434,21 +1445,41 @@ void setupWebServer() {
                size_t index, size_t total) {
                 if (!fsAvailable || !activeFS) return;
                 if (index == 0) {
+                    s_pcfgComplete = false;
                     if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
                         s_pcfgMutexHeld = true;
                     }
-                    s_pcfgFile = activeFS->open("/platform_config.json", FILE_WRITE);
+                    // Clean up any leftover tmp from a previous aborted save.
+                    if (activeFS->exists(PCFG_TMP)) activeFS->remove(PCFG_TMP);
+                    s_pcfgFile = activeFS->open(PCFG_TMP, FILE_WRITE);
                     if (!s_pcfgFile && s_pcfgMutexHeld && fsMutex) {
                         xSemaphoreGive(fsMutex);
                         s_pcfgMutexHeld = false;
                     }
-                    // Release FS mutex + close partial file if the client aborts.
+                    // Release FS mutex + discard partial tmp if the client aborts.
                     r->onDisconnect(pcfgCleanup);
                 }
                 if (s_pcfgFile) {
                     s_pcfgFile.write(data, len);
                 }
                 if (index + len >= total) {
+                    // Close the tmp file, then atomically replace the real one.
+                    if (s_pcfgFile) { s_pcfgFile.close(); s_pcfgFile = File(); }
+                    // LittleFS rename overwrites; SD/FAT does not — fall back to
+                    // remove+rename if the first attempt fails. If we crash between
+                    // remove and rename the tmp is still on disk, but no recovery
+                    // path picks it up, so the small window is acceptable.
+                    bool ok = activeFS->rename(PCFG_TMP, PCFG_PATH);
+                    if (!ok) {
+                        if (activeFS->exists(PCFG_PATH)) activeFS->remove(PCFG_PATH);
+                        ok = activeFS->rename(PCFG_TMP, PCFG_PATH);
+                    }
+                    if (!ok) {
+                        // Rename still failed — clean up the tmp so we don't leak it.
+                        if (activeFS->exists(PCFG_TMP)) activeFS->remove(PCFG_TMP);
+                    } else {
+                        s_pcfgComplete = true;  // success → cleanup() won't delete anything
+                    }
                     pcfgCleanup();
                 }
             }
