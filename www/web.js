@@ -1026,6 +1026,12 @@ function filesRender() {
       }
 
       var html = "";
+      if (d.truncated) {
+        html +=
+          "<div class='list-item text-warning' style='font-size:.8rem'>" +
+          "⚠️ Listing truncated at 500 entries \u2014 refine with a subfolder." +
+          "</div>";
+      }
       files.forEach(function (f) {
         var safePath = f.path.replace(/'/g, "\\'");
         var safeName = f.name.replace(/'/g, "\\'");
