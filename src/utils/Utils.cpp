@@ -75,32 +75,60 @@ bool isPathProtected(const String& path) {
     return false;
 }
 
+// Iterative deletion using an explicit work-stack on the heap.
+// The previous recursive version called itself on every sub-directory, which
+// risked blowing the ~4 KB AsyncTCP worker stack on deep trees.  This version
+// uses post-order traversal: a directory is marked once its children have been
+// pushed and gets rmdir'd on the second visit.
 bool deleteRecursive(fs::FS& fs, const String& path) {
-    File dir = fs.open(path);
-    if (!dir || !dir.isDirectory()) {
-        if (dir) dir.close();
-        return fs.remove(path);
-    }
+    struct Pending { String path; bool listed; };
+    std::vector<Pending> stack;
+    stack.push_back({ path, false });
 
-    std::vector<String> entries;
-    while (File entry = dir.openNextFile()) {
-        String entryName = String(entry.name());
-        entries.push_back(entryName.startsWith("/") ? entryName : buildPath(path, entryName));
-        entry.close();
-    }
-    dir.close();
+    bool overallOk = true;
 
-    for (const String& childPath : entries) {
-        File child = fs.open(childPath);
-        bool isDir = child && child.isDirectory();
-        if (child) child.close();
-        
-        if (isDir) {
-            deleteRecursive(fs, childPath);
-        } else {
-            fs.remove(childPath);
+    while (!stack.empty()) {
+        Pending cur = stack.back();   // peek
+
+        File entry = fs.open(cur.path);
+        if (!entry) {
+            stack.pop_back();
+            // Unknown / already-gone — treat as success so a partial tree
+            // can still be cleaned up.
+            continue;
         }
+
+        bool isDir = entry.isDirectory();
+        entry.close();
+
+        if (!isDir) {
+            stack.pop_back();
+            if (!fs.remove(cur.path)) overallOk = false;
+            continue;
+        }
+
+        if (cur.listed) {
+            // Children already processed; remove the directory itself.
+            stack.pop_back();
+            if (!fs.rmdir(cur.path)) overallOk = false;
+            continue;
+        }
+
+        // Mark this directory and queue all its children for processing.
+        stack.back().listed = true;
+        File dir = fs.open(cur.path);
+        if (dir && dir.isDirectory()) {
+            while (File c = dir.openNextFile()) {
+                String name = String(c.name());
+                stack.push_back({
+                    name.startsWith("/") ? name : buildPath(cur.path, name),
+                    false
+                });
+                c.close();
+            }
+        }
+        if (dir) dir.close();
     }
 
-    return fs.rmdir(path);
+    return overallOk;
 }
