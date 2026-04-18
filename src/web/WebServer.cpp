@@ -943,7 +943,10 @@ void setupWebServer() {
     server.on("/factory_reset", HTTP_POST, [](AsyncWebServerRequest *r) {
         r->send(200, "application/json", "{\"ok\":true}");
         Serial.println("[FACTORY RESET] Formatting LittleFS…");
-        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
+        // Short timeout keeps the AsyncTCP worker responsive; factory reset
+        // restarts the chip regardless so blocking the worker longer buys us
+        // nothing.
+        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
         if (LittleFS.format()) {
             Serial.println("[FACTORY RESET] LittleFS formatted OK – restarting");
         } else {
@@ -1006,7 +1009,8 @@ void setupWebServer() {
             File f = targetFS->open(path, FILE_READ);
             bool isDir = f && f.isDirectory();
             if (f) f.close();
-            if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
+            // 2s cap so the AsyncTCP worker yields if the mutex is contended.
+            if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
             deleted = isDir ? deleteRecursive(*targetFS, path) : targetFS->remove(path);
             if (fsMutex) xSemaphoreGive(fsMutex);
         }
@@ -1025,7 +1029,8 @@ void setupWebServer() {
         String name = sanitizeFilename(r->getParam("name")->value());
         if (dir.isEmpty() || name.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid name or dir\"}"); return; }
         String fp   = buildPath(dir, name);
-        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
+        // 2s cap so the AsyncTCP worker yields if the mutex is contended.
+        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
         bool ok = targetFS->mkdir(fp);
         if (fsMutex) xSemaphoreGive(fsMutex);
         r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
@@ -1052,7 +1057,8 @@ void setupWebServer() {
         }
         String dstPath = buildPath(dstDir, newName);
         if (isPathProtected(dstPath)) { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
-        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
+        // 2s cap so the AsyncTCP worker yields if the mutex is contended.
+        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
         bool ok = targetFS->rename(src, dstPath);
         if (fsMutex) xSemaphoreGive(fsMutex);
         r->send(200, "application/json", ok ? "{\"ok\":true,\"dst\":\"" + dstPath + "\"}" : "{\"ok\":false}");
