@@ -1085,7 +1085,7 @@ void setupWebServer() {
         if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
         bool ok = targetFS->mkdir(fp);
         if (fsMutex) xSemaphoreGive(fsMutex);
-        r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
+        r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"mkdir failed\"}");
     });
 
     server.on("/move_file", HTTP_POST, [](AsyncWebServerRequest *r) {
@@ -1113,7 +1113,7 @@ void setupWebServer() {
         if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
         bool ok = targetFS->rename(src, dstPath);
         if (fsMutex) xSemaphoreGive(fsMutex);
-        r->send(200, "application/json", ok ? "{\"ok\":true,\"dst\":\"" + dstPath + "\"}" : "{\"ok\":false}");
+        r->send(200, "application/json", ok ? "{\"ok\":true,\"dst\":\"" + dstPath + "\"}" : "{\"ok\":false,\"error\":\"Rename failed\"}");
     });
 
     // Upload handler: per-request state in _tempObject tracks file handle
@@ -1458,7 +1458,7 @@ void setupWebServer() {
     // =========================================================================
     server.on("/api/platform_config", HTTP_GET, [](AsyncWebServerRequest *r) {
         if (!fsAvailable || !activeFS || !activeFS->exists("/platform_config.json")) {
-            r->send(404, "application/json", "{\"error\":\"platform_config.json not found\"}");
+            r->send(404, "application/json", "{\"ok\":false,\"error\":\"platform_config.json not found\"}");
             return;
         }
         r->send(*activeFS, "/platform_config.json", "application/json");
