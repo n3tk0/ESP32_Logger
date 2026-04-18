@@ -360,86 +360,107 @@ void setupWebServer() {
     //   timeInit:    time, boot, rtcRunning, rtcProtected, wifi, ip
     //   netInit:     wifi, network, ip
     // =========================================================================
-    server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *r) {
-        g_lastWebActivity = millis();   // C2: any poll = active user
-        JsonDocument doc;
+    // ── /api/status payload builders (shared by /api/identity, /api/runtime,
+    //    /api/theme).  Each fills the supplied JsonObject in place so the
+    //    same code path produces both the focused and combined responses.
+    auto fillIdentity = [](JsonObject o) {
+        o["device"]         = strlen(config.deviceName) ? config.deviceName : "Water Logger";
+        o["deviceName"]     = o["device"];   // alias – sdInit uses both
+        o["deviceId"]       = config.deviceId;
+        o["version"]        = getVersionString();
+        o["forceWebServer"] = config.forceWebServer;
+        o["network"]        = getNetworkDisplay();
+        o["ip"]             = wifiConnectedAsClient
+                              ? WiFi.localIP().toString()
+                              : WiFi.softAPIP().toString();
+        o["gateway"]        = wifiConnectedAsClient ? WiFi.gatewayIP().toString() : "";
+        o["subnet"]         = wifiConnectedAsClient ? WiFi.subnetMask().toString() : "";
+        o["dns"]            = wifiConnectedAsClient ? WiFi.dnsIP().toString()      : "";
+    };
 
-        // ── Identity ──────────────────────────────────────────────────────────
-        doc["device"]         = strlen(config.deviceName) ? config.deviceName : "Water Logger";
-        doc["deviceName"]     = doc["device"];   // alias – sdInit uses both
-        doc["deviceId"]       = config.deviceId;
-        doc["version"]        = getVersionString();
-        doc["forceWebServer"] = config.forceWebServer;
+    auto fillRuntime = [](JsonObject o) {
+        o["time"]       = getRtcDateTimeString();
+        o["rssi"]       = wifiConnectedAsClient ? WiFi.RSSI() : -100;
+        o["boot"]       = bootCount;
+        o["heap"]       = ESP.getFreeHeap();
+        o["heapTotal"]  = ESP.getHeapSize();
+        o["heapPct"]    = (int)(ESP.getFreeHeap() * 100UL / ESP.getHeapSize());
+        o["chip"]       = ESP.getChipModel();
+        o["cpu"]        = getCpuFrequencyMhz();
+        o["mode"]       = getModeDisplay();
+        o["wifi"]       = wifiConnectedAsClient ? "client" : "ap";
+        o["freeSketch"] = ESP.getFreeSketchSpace();
 
-        // ── Time / Network ────────────────────────────────────────────────────
-        doc["time"]    = getRtcDateTimeString();
-        doc["network"] = getNetworkDisplay();
-        doc["ip"]      = wifiConnectedAsClient
-                         ? WiFi.localIP().toString()
-                         : WiFi.softAPIP().toString();
-
-        doc["rssi"]    = wifiConnectedAsClient ? WiFi.RSSI() : -100;
-
-        doc["gateway"] = wifiConnectedAsClient ? WiFi.gatewayIP().toString() : "";
-        doc["subnet"]  = wifiConnectedAsClient ? WiFi.subnetMask().toString() : "";
-        doc["dns"]     = wifiConnectedAsClient ? WiFi.dnsIP().toString() : "";
-
-        // ── Runtime metrics ───────────────────────────────────────────────────
-        doc["boot"]       = bootCount;
-        doc["heap"]       = ESP.getFreeHeap();
-        doc["heapTotal"]  = ESP.getHeapSize();
-        doc["heapPct"]    = (int)(ESP.getFreeHeap() * 100UL / ESP.getHeapSize());
-        doc["chip"]       = ESP.getChipModel();
-        doc["cpu"]        = getCpuFrequencyMhz();
-        doc["mode"]       = getModeDisplay();
-        doc["wifi"]       = wifiConnectedAsClient ? "client" : "ap";
-        doc["freeSketch"] = ESP.getFreeSketchSpace();
-
-        // ── Storage ───────────────────────────────────────────────────────────
         uint64_t used = 0, total = 0; int pct = 0;
         getStorageInfo(used, total, pct);
         char uBuf[24], tBuf[24];
         snprintf(uBuf, sizeof(uBuf), "%llu", (unsigned long long)used);
         snprintf(tBuf, sizeof(tBuf), "%llu", (unsigned long long)total);
-        doc["fsUsed"]             = serialized(String(uBuf));
-        doc["fsTotal"]            = serialized(String(tBuf));
-        doc["fsPct"]              = pct;
-        doc["defaultStorageView"] = config.hardware.defaultStorageView;
-        doc["currentFile"]        = getActiveDatalogFile();
+        o["fsUsed"]             = serialized(String(uBuf));
+        o["fsTotal"]            = serialized(String(tBuf));
+        o["fsPct"]              = pct;
+        o["defaultStorageView"] = config.hardware.defaultStorageView;
+        o["currentFile"]        = getActiveDatalogFile();
 
-        // ── RTC (null-safe) ───────────────────────────────────────────────────
         if (Rtc) {
-            doc["rtcProtected"] = Rtc->GetIsWriteProtected();
-            doc["rtcRunning"]   = Rtc->GetIsRunning();
+            o["rtcProtected"] = Rtc->GetIsWriteProtected();
+            o["rtcRunning"]   = Rtc->GetIsRunning();
         } else {
-            doc["rtcProtected"] = false;
-            doc["rtcRunning"]   = false;
+            o["rtcProtected"] = false;
+            o["rtcRunning"]   = false;
         }
+    };
 
-        // ── Theme (nested) ────────────────────────────────────────────────────
-        JsonObject th = doc["theme"].to<JsonObject>();
-        th["mode"]              = (int)config.theme.mode;
-        th["primaryColor"]      = config.theme.primaryColor;
-        th["secondaryColor"]    = config.theme.secondaryColor;
-        th["lightBgColor"]      = config.theme.lightBgColor;
-        th["lightTextColor"]    = config.theme.lightTextColor;
-        th["darkBgColor"]       = config.theme.darkBgColor;
-        th["darkTextColor"]     = config.theme.darkTextColor;
-        th["ffColor"]           = config.theme.ffColor;
-        th["pfColor"]           = config.theme.pfColor;
-        th["otherColor"]        = config.theme.otherColor;
-        th["storageBarColor"]   = config.theme.storageBarColor;
-        th["storageBar70Color"] = config.theme.storageBar70Color;
-        th["storageBar90Color"] = config.theme.storageBar90Color;
-        th["storageBarBorder"]  = config.theme.storageBarBorder;
-        th["logoSource"]        = config.theme.logoSource;
-        th["faviconPath"]       = config.theme.faviconPath;
-        th["boardDiagramPath"]  = config.theme.boardDiagramPath;
-        th["chartSource"]       = (int)config.theme.chartSource;
-        th["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/chart.min.js";
-        th["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
-        th["showIcons"]         = config.theme.showIcons;
+    auto fillTheme = [](JsonObject o) {
+        o["mode"]              = (int)config.theme.mode;
+        o["primaryColor"]      = config.theme.primaryColor;
+        o["secondaryColor"]    = config.theme.secondaryColor;
+        o["lightBgColor"]      = config.theme.lightBgColor;
+        o["lightTextColor"]    = config.theme.lightTextColor;
+        o["darkBgColor"]       = config.theme.darkBgColor;
+        o["darkTextColor"]     = config.theme.darkTextColor;
+        o["ffColor"]           = config.theme.ffColor;
+        o["pfColor"]           = config.theme.pfColor;
+        o["otherColor"]        = config.theme.otherColor;
+        o["storageBarColor"]   = config.theme.storageBarColor;
+        o["storageBar70Color"] = config.theme.storageBar70Color;
+        o["storageBar90Color"] = config.theme.storageBar90Color;
+        o["storageBarBorder"]  = config.theme.storageBarBorder;
+        o["logoSource"]        = config.theme.logoSource;
+        o["faviconPath"]       = config.theme.faviconPath;
+        o["boardDiagramPath"]  = config.theme.boardDiagramPath;
+        o["chartSource"]       = (int)config.theme.chartSource;
+        o["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/chart.min.js";
+        o["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
+        o["showIcons"]         = config.theme.showIcons;
+    };
 
+    server.on("/api/status", HTTP_GET, [fillIdentity, fillRuntime, fillTheme](AsyncWebServerRequest *r) {
+        g_lastWebActivity = millis();   // C2: any poll = active user
+        JsonDocument doc;
+        JsonObject root = doc.to<JsonObject>();
+        fillIdentity(root);
+        fillRuntime(root);
+        fillTheme(doc["theme"].to<JsonObject>());
+        sendJsonResponse(r, doc);
+    });
+
+    server.on("/api/identity", HTTP_GET, [fillIdentity](AsyncWebServerRequest *r) {
+        JsonDocument doc;
+        fillIdentity(doc.to<JsonObject>());
+        sendJsonResponse(r, doc);
+    });
+
+    server.on("/api/runtime", HTTP_GET, [fillRuntime](AsyncWebServerRequest *r) {
+        g_lastWebActivity = millis();   // runtime polls count as activity too
+        JsonDocument doc;
+        fillRuntime(doc.to<JsonObject>());
+        sendJsonResponse(r, doc);
+    });
+
+    server.on("/api/theme", HTTP_GET, [fillTheme](AsyncWebServerRequest *r) {
+        JsonDocument doc;
+        fillTheme(doc.to<JsonObject>());
         sendJsonResponse(r, doc);
     });
 

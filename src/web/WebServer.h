@@ -18,7 +18,10 @@
  * който позволява качване на /www/ файловете чрез бразура.
  *
  * JSON API (винаги в firmware, не изискват /www/ файлове):
- *   GET  /api/status        – runtime статус
+ *   GET  /api/status        – пълен снапшот (identity + runtime + theme)
+ *   GET  /api/identity      – само device/network identity (статичен)
+ *   GET  /api/runtime       – само живи метрики (heap, time, RTC, FS)
+ *   GET  /api/theme         – само theme секцията (root-level)
  *   GET  /api/config        – пълна конфигурация
  *   GET  /api/files?dir=/   – JSON списък на файловете
  *   POST /save_hardware     – записва HW настройки (→ restart)
