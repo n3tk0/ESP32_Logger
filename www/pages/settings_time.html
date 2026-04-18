@@ -1,0 +1,107 @@
+  <main class="main-content page" id="page-settings_time">
+    <div class="page-header">
+      <h1>🕐 Time Sync</h1>
+      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Time
+        Sync</div>
+    </div>
+
+    <!-- RTC Status -->
+    <div class="card">
+      <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>📟 RTC Status</span>
+        <div id="rtcStatus" class="alert alert-warning"
+          style="margin:0; padding:4px 8px; font-size:0.85rem; line-height:1;">⏳ Loading...</div>
+      </div>
+      <div class="card-body">
+        <div class="text-center" style="font-size:2.5rem;font-family:monospace;font-weight:bold;margin:1rem 0"
+          id="time-rtcTime">--:--:--</div>
+        <p class="text-muted text-center" style="font-size:.8rem" id="rtcDetail"></p>
+      </div>
+    </div>
+
+    <!-- Set Time manually -->
+    <div class="card card-accent" style="border-top-color:#27ae60">
+      <div class="card-header">⏰ Set Time</div>
+      <div class="card-body">
+        <form onsubmit="timeSetManual(event)">
+          <div id="time-msg"></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Date</label><input type="date" name="date" required
+                class="form-input"></div>
+            <div class="form-group"><label class="form-label">Time</label><input type="time" name="time" required
+                class="form-input"></div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">⏰ Set Time</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- NTP -->
+    <div class="card">
+      <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>🌐 NTP Sync</span>
+        <div id="ntpStatus" class="alert alert-warning"
+          style="margin:0; padding:4px 8px; font-size:0.85rem; line-height:1;">⏳ Loading...</div>
+      </div>
+      <div class="card-body">
+        <form onsubmit="settingsSave(event,'/save_time',this)">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">NTP Server</label>
+              <input type="text" name="ntpServer" id="time-ntp" class="form-input" value="pool.ntp.org">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Timezone (UTC+)</label>
+              <input type="number" name="timezone" id="time-tz" min="-12" max="14" class="form-input" value="2">
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <button type="submit" class="btn btn-primary">💾 Save NTP Settings</button>
+            <button type="submit" form="ntpForm" class="btn btn-secondary" id="ntpBtn">🔄 NTP Sync</button>
+          </div>
+        </form>
+        <form onsubmit="timeSyncNTP(event)" id="ntpForm" style="display:none;"></form>
+      </div>
+    </div>
+
+    <!-- RTC options + Boot Count -->
+    <div class="card">
+      <div class="card-header">⚙️ RTC &amp; System Options</div>
+      <div class="card-body">
+        <form onsubmit="timeRtcProtect(event)" style="margin-bottom:1rem">
+          <div class="form-group">
+            <label class="form-label">
+              <input type="checkbox" name="protect" id="time-rtcProt" value="1" onchange="this.form.submit()"> RTC Write
+              Protected
+            </label>
+            <p class="form-hint">Prevents accidental time changes.</p>
+          </div>
+        </form>
+
+        <div
+          style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;padding:.75rem;background:var(--bg);border-radius:8px">
+          <div><strong>Log Buffer</strong>
+            <p class="form-hint" style="margin:0">Write pending logs to storage</p>
+          </div>
+          <form onsubmit="event.preventDefault();timeFlushLogs()"><button type="submit" class="btn btn-secondary">💾
+              Flush</button></form>
+        </div>
+
+        <div style="padding:.75rem;background:var(--bg);border-radius:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+            <div>Boot Count: <span style="font-size:1.25rem;color:var(--primary)" id="sf-boot">–</span></div>
+            <div>Backup: <span style="font-size:1.25rem;color:var(--secondary)" id="bootBak">–</span></div>
+          </div>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+            <form action="/backup_bootcount" method="POST"><button type="submit" class="btn btn-secondary">📤 Backup
+                Now</button></form>
+            <form onsubmit="event.preventDefault();timeRestoreBoot()"
+              onsubmit="return confirm('Restore boot count from backup?')">
+              <button type="submit" class="btn btn-warning">📥 Restore</button>
+            </form>
+          </div>
+          <p class="form-hint" style="margin-top:.5rem">Backup saves to RTC RAM + flash file.</p>
+        </div>
+      </div>
+    </div>
+  </main>

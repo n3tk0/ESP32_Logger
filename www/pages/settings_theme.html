@@ -1,0 +1,117 @@
+  <main class="main-content page" id="page-settings_theme">
+    <div class="page-header">
+      <h1>🎨 Theme</h1>
+      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Theme
+      </div>
+    </div>
+
+    <form onsubmit="themeSave(event, this)">
+      <div id="th-msg"></div>
+      <!-- Mode -->
+      <div class="card">
+        <div class="card-header">🌓 Mode</div>
+        <div class="card-body">
+          <div class="form-group">
+            <select name="themeMode" id="th-mode" class="form-input form-select">
+              <option value="0">☀️ Light</option>
+              <option value="1">🌙 Dark</option>
+              <option value="2">🔄 Auto</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">
+              <input type="checkbox" name="showIcons" id="th-icons" value="1"> Show icons
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Colors -->
+      <div class="card">
+        <div class="card-header">🎨 Colors</div>
+        <div class="card-body">
+          <div class="color-grid">
+            <div class="form-group"><label class="form-label">Primary</label><input type="color" name="primaryColor"
+                id="th-primary" class="form-input"></div>
+            <div class="form-group"><label class="form-label">Secondary</label><input type="color" name="secondaryColor"
+                id="th-secondary" class="form-input"></div>
+            <div class="form-group"><label class="form-label">Background</label><input type="color" name="bgColor"
+                id="th-bg" class="form-input"></div>
+            <div class="form-group"><label class="form-label">Text</label><input type="color" name="textColor"
+                id="th-text" class="form-input"></div>
+          </div>
+          <h4 class="mt-2">Chart</h4>
+          <div class="color-grid" style="grid-template-columns:repeat(3,1fr)">
+            <div class="form-group"><label class="form-label">Full Flush</label><input type="color" name="ffColor"
+                id="th-ff" class="form-input"></div>
+            <div class="form-group"><label class="form-label">Part Flush</label><input type="color" name="pfColor"
+                id="th-pf" class="form-input"></div>
+            <div class="form-group"><label class="form-label">Other</label><input type="color" name="otherColor"
+                id="th-other" class="form-input"></div>
+          </div>
+          <h4 class="mt-2">Storage Bar</h4>
+          <div class="color-grid">
+            <div class="form-group"><label class="form-label">Normal</label><input type="color" name="storageBarColor"
+                id="th-bar" class="form-input"></div>
+            <div class="form-group"><label class="form-label">70%+</label><input type="color" name="storageBar70Color"
+                id="th-bar70" class="form-input"></div>
+            <div class="form-group"><label class="form-label">90%+</label><input type="color" name="storageBar90Color"
+                id="th-bar90" class="form-input"></div>
+            <div class="form-group"><label class="form-label">Border</label><input type="color" name="storageBarBorder"
+                id="th-barB" class="form-input"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Images -->
+      <div class="card">
+        <div class="card-header">🖼️ Images</div>
+        <div class="card-body">
+          <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem">Supported: PNG, JPG, GIF, SVG, ICO. Path:
+            /file.png</p>
+          <div class="form-group"><label class="form-label">Logo Path</label><input type="text" name="logoSource"
+              id="th-logo" placeholder="/logo.png" class="form-input"></div>
+          <div class="form-group"><label class="form-label">Favicon</label><input type="text" name="faviconPath"
+              id="th-favicon" placeholder="/favicon.ico" class="form-input"></div>
+          <div class="form-group"><label class="form-label">Board Diagram</label><input type="text"
+              name="boardDiagramPath" id="th-board" placeholder="/xiao_esp32_c3_board.jpg" class="form-input"></div>
+        </div>
+      </div>
+
+      <!-- Chart.js -->
+      <div class="card">
+        <div class="card-header">📈 Chart Source</div>
+        <div class="card-body">
+          <div class="form-group">
+            <label class="form-label">Chart.js Library</label>
+            <select name="chartSource" id="th-chartSrc" class="form-input form-select"
+              onchange="var pr=document.getElementById('chartPathRow');if(pr)pr.style.display=this.value=='0'?'block':'none'">
+              <option value="0">📁 Local File</option>
+              <option value="1">🌐 CDN (Online)</option>
+            </select>
+            <p class="form-hint">Local: requires /chart.min.js in LittleFS. CDN: needs internet.</p>
+          </div>
+          <div id="chartPathRow" style="display:none">
+            <div class="form-group">
+              <label class="form-label">Local Path</label>
+              <input type="text" name="chartLocalPath" id="th-chartPath" placeholder="/chart.min.js" class="form-input">
+            </div>
+          </div>
+          <div class="form-group mt-1">
+            <label class="form-label">Dashboard Column Labels</label>
+            <select name="chartLabelFormat" id="th-labelFmt" class="form-input form-select">
+              <option value="0">📅 Date + Time</option>
+              <option value="1">🔢 Boot Count (#1234)</option>
+              <option value="2">📅🔢 Both</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn btn-primary" style="flex:1;">💾 Save</button>
+        <button type="button" class="btn btn-secondary" onclick="themeRestoreDefault()">🔄 Restore Default
+          Theme</button>
+      </div>
+    </form>
+  </main>

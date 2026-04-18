@@ -205,7 +205,18 @@ function nav(el) {
 // Pages whose markup is shipped as a separate /pages/<name>.html file and
 // injected on first navigation.  Keep dashboard/live/files/settings hub
 // inlined in index.html for fast first paint.
-var LAZY_PAGES = { settings_export: 1 };
+var LAZY_PAGES = {
+  settings_device:    1,
+  settings_flowmeter: 1,
+  settings_hardware:  1,
+  settings_datalog:   1,
+  settings_corelogic: 1,
+  settings_export:    1,
+  settings_theme:     1,
+  settings_network:   1,
+  settings_time:      1,
+  update:             1,
+};
 var _loadedPartials = {};   // page name → true once injected
 var _inflightPartials = {}; // page name → Promise in flight
 

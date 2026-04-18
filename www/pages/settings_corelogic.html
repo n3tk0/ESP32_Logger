@@ -1,0 +1,169 @@
+  <main class="main-content page" id="page-settings_corelogic">
+    <div class="page-header">
+      <h1>🧩 Core Logic</h1>
+      <div class="breadcrumb">
+        <a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Core Logic
+      </div>
+    </div>
+
+    <div id="cl-msg"></div>
+
+    <!-- Operating Mode -->
+    <div class="card">
+      <div class="card-header">⚙️ Operating Mode</div>
+      <div class="card-body">
+        <div class="form-group">
+          <label class="form-label">
+            Mode
+            <span class="help-tip" title="Controls whether the FreeRTOS sensor pipeline runs alongside the water-logger.">ℹ️</span>
+          </label>
+          <select id="cl-mode" class="form-input form-select" onchange="clUpdateSleepPanel()">
+            <option value="legacy">Legacy — Water logger only (deep sleep, original behaviour)</option>
+            <option value="continuous">Continuous — Multi-sensor pipeline (FreeRTOS tasks, no deep sleep)</option>
+            <option value="hybrid">Hybrid — Water logger + sensor pipeline</option>
+          </select>
+          <p class="form-hint">
+            <strong>Legacy</strong>: original behaviour unchanged, deep-sleep between events.<br>
+            <strong>Continuous</strong>: all sensors polled continuously; device stays awake.<br>
+            <strong>Hybrid</strong>: both modes active simultaneously.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Power & Sleep (shown only for continuous / hybrid) -->
+    <div class="card" id="cl-sleep-card" style="display:none">
+      <div class="card-header">💤 Power &amp; Sleep</div>
+      <div class="card-body">
+
+        <!-- Continuous-mode settings -->
+        <div id="cl-sleep-cont" style="display:none">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">
+                Idle timeout (ms)
+                <span class="help-tip" title="Milliseconds without activity before CPU + WiFi power is reduced.">ℹ️</span>
+              </label>
+              <input type="number" id="cl-cont-idle" class="form-input" value="300000" min="5000" max="3600000" step="1000">
+            </div>
+            <div class="form-group">
+              <label class="form-label">
+                Idle CPU (MHz)
+                <span class="help-tip" title="CPU frequency while idle. Active frequency is always 160 MHz.">ℹ️</span>
+              </label>
+              <select id="cl-cont-cpu" class="form-input form-select">
+                <option value="80">80 MHz</option>
+                <option value="160">160 MHz (no throttle)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+              <input type="checkbox" id="cl-cont-modem" checked>
+              Modem sleep when idle
+              <span class="help-tip" title="Enable WiFi modem sleep after idle timeout (~20-50 mA saving).">ℹ️</span>
+            </label>
+            <p class="form-hint">WiFi modem sleeps between data bursts, wakes automatically on requests.</p>
+          </div>
+        </div>
+
+        <!-- Hybrid-mode settings -->
+        <div id="cl-sleep-hyb" style="display:none">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">
+                Idle before sleep (ms)
+                <span class="help-tip" title="Milliseconds of inactivity in STATE_IDLE before entering deep sleep.">ℹ️</span>
+              </label>
+              <input type="number" id="cl-hyb-idle" class="form-input" value="120000" min="5000" max="600000" step="1000" oninput="clUpdateHybCycle()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">
+                Sleep duration (ms)
+                <span class="help-tip" title="Deep sleep duration. Timer wakeup fires sensors after this interval.">ℹ️</span>
+              </label>
+              <input type="number" id="cl-hyb-sleep" class="form-input" value="60000" min="5000" max="3600000" step="1000" oninput="clUpdateHybCycle()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">
+                Active window (ms)
+                <span class="help-tip" title="How long sensor tasks run on timer wake before going back to sleep.">ℹ️</span>
+              </label>
+              <input type="number" id="cl-hyb-active" class="form-input" value="30000" min="1000" max="300000" step="1000" oninput="clUpdateHybCycle()">
+            </div>
+          </div>
+          <p class="form-hint">
+            Sleep cycle: <strong id="cl-hyb-cycle-label">–</strong>
+          </p>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Aggregation defaults -->
+    <div class="card">
+      <div class="card-header">📊 Aggregation Defaults</div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Default Mode</label>
+            <select id="cl-aggmode" class="form-input form-select">
+              <option value="lttb">LTTB (recommended)</option>
+              <option value="avg">Average</option>
+              <option value="min">Minimum</option>
+              <option value="max">Maximum</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Default Bucket (min)</label>
+            <select id="cl-aggbucket" class="form-input form-select">
+              <option value="0">Raw</option>
+              <option value="1">1 minute</option>
+              <option value="5" selected>5 minutes</option>
+              <option value="60">1 hour</option>
+              <option value="1440">1 day</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Max Points</label>
+            <input type="number" id="cl-maxpoints" class="form-input" value="500" min="50" max="5000">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Raw Retention (days)</label>
+          <input type="number" id="cl-retention" class="form-input" value="7" min="1" max="365">
+          <p class="form-hint">Raw log files older than this are deleted automatically.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export -->
+    <div class="card">
+      <div class="card-header">📤 Export Quick-Enable</div>
+      <div class="card-body">
+        <p class="form-hint" style="margin-bottom:.75rem">
+          Enable export targets. Full configuration is in the
+          <a href="#settings" onclick="showSubpage('settings_export');return false">Export settings</a>.
+        </p>
+        <div class="form-row" style="gap:.5rem">
+          <label class="form-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+            <input type="checkbox" id="cl-exp-mqtt"> MQTT
+          </label>
+          <label class="form-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+            <input type="checkbox" id="cl-exp-http"> HTTP POST
+          </label>
+          <label class="form-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+            <input type="checkbox" id="cl-exp-sc"> Sensor.Community
+          </label>
+          <label class="form-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+            <input type="checkbox" id="cl-exp-osm"> openSenseMap
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">
+      <button class="btn btn-primary" onclick="clSave()">💾 Save &amp; Restart</button>
+      <button class="btn btn-secondary" onclick="clLoad()">🔄 Reload</button>
+    </div>
+  </main>

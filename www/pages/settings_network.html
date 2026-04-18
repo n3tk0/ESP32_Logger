@@ -1,0 +1,118 @@
+  <main class="main-content page" id="page-settings_network">
+    <div class="page-header">
+      <h1>🌐 Network</h1>
+      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Network
+      </div>
+    </div>
+
+    <!-- Status -->
+    <div class="card">
+      <div class="card-body">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+          <span><strong>Status:</strong> <span id="net-status">–</span></span>
+          <span style="display:flex;align-items:center;gap:6px;"><strong>Signal strength:</strong> <span
+              id="net-rssi-icon"></span><span id="net-rssi">–</span></span>
+        </div>
+      </div>
+    </div>
+
+    <form onsubmit="settingsSave(event,'/save_network',this,true)">
+      <div id="net-msg"></div>
+      <!-- WiFi Mode -->
+      <div class="card">
+        <div class="card-header">📡 WiFi Mode</div>
+        <div class="card-body">
+          <div class="form-group">
+            <select name="wifiMode" id="net-mode" class="form-input form-select" onchange="netToggleMode()">
+              <option value="0">📶 AP Mode</option>
+              <option value="1">🔗 Client Mode</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- AP Settings -->
+      <div id="apSection">
+        <div class="card">
+          <div class="card-header">📶 AP Mode</div>
+          <div class="card-body">
+            <div class="form-group"><label class="form-label">SSID</label>
+              <input type="text" name="apSSID" id="net-apSSID" placeholder="WaterLogger" class="form-input">
+            </div>
+            <div class="form-group"><label class="form-label">Password</label>
+              <div style="display:flex;gap:8px">
+                <input type="password" name="apPassword" id="net-apPass" class="form-input" style="flex:1">
+                <button type="button" class="btn btn-secondary" onclick="togglePass('net-apPass')">👁️</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">🔧 AP Network Properties</div>
+          <div class="card-body">
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">IP Address</label><input type="text" name="apIP"
+                  id="net-apIP" class="form-input"></div>
+              <div class="form-group"><label class="form-label">Gateway</label> <input type="text" name="apGateway"
+                  id="net-apGW" class="form-input"></div>
+              <div class="form-group"><label class="form-label">Subnet Mask</label><input type="text" name="apSubnet"
+                  id="net-apSN" class="form-input"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Client Settings -->
+      <div id="clientSection" style="display:none">
+        <div class="card">
+          <div class="card-header">🔗 Client Mode</div>
+          <div class="card-body">
+            <div class="form-group"><label class="form-label">SSID</label>
+              <div style="display:flex;gap:8px">
+                <input type="text" name="clientSSID" id="net-cSSID" class="form-input" style="flex:1">
+                <button type="button" class="btn btn-secondary" onclick="netScanWifi()">🔍</button>
+              </div>
+            </div>
+            <div id="wifiList"
+              style="display:none;margin-bottom:1rem;max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+            </div>
+            <div class="form-group"><label class="form-label">Password</label>
+              <div style="display:flex;gap:8px">
+                <input type="password" name="clientPassword" id="net-cPass" class="form-input" style="flex:1">
+                <button type="button" class="btn btn-secondary" onclick="togglePass('net-cPass')">👁️</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">🔧 Client Network Properties</div>
+          <div class="card-body">
+            <div class="form-row" id="staticFields">
+              <!-- Hidden fields to store current connection details when form is un-checked -->
+              <input type="hidden" id="net-ip2-current" value="">
+              <input type="hidden" id="net-gw-current" value="">
+              <input type="hidden" id="net-sn-current" value="">
+              <input type="hidden" id="net-dns-current" value="">
+
+              <div class="form-group"><label class="form-label">IP Address</label><input type="text" name="staticIP"
+                  id="net-ip2" class="form-input" disabled></div>
+              <div class="form-group"><label class="form-label">Gateway</label> <input type="text" name="gateway"
+                  id="net-gw" class="form-input" disabled></div>
+              <div class="form-group"><label class="form-label">Subnet Mask</label><input type="text" name="subnet"
+                  id="net-sn" class="form-input" disabled></div>
+              <div class="form-group"><label class="form-label">DNS Server</label> <input type="text" name="dns"
+                  id="net-dns" class="form-input" disabled></div>
+            </div>
+            <div class="form-group mt-1">
+              <label class="form-label">
+                <input type="checkbox" name="useStaticIP" id="staticCheck" value="1" onchange="netToggleStatic()"> Use
+                Static IP
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block">💾 Save &amp; Restart</button>
+    </form>
+  </main>
