@@ -106,13 +106,18 @@ function applyStatus(d) {
     var actDark = false;
 
     if (html) {
+      // Per-client override (set by quickThemeToggle) wins over server config
+      // so the toggle is responsive without a round-trip.
+      var override = null;
+      try { override = localStorage.getItem("themeOverride"); } catch (e) {}
+      var effective = override || (m === 0 || m === "0" ? "light"
+                                : m === 1 || m === "1" ? "dark"
+                                : "auto");
       html.classList.remove("theme-light", "theme-dark", "theme-auto");
-      if (m === 0 || m === "0") html.classList.add("theme-light");
-      else if (m === 1 || m === "1") {
-        html.classList.add("theme-dark");
+      html.classList.add("theme-" + effective);
+      if (effective === "dark") {
         actDark = true;
-      } else {
-        html.classList.add("theme-auto");
+      } else if (effective === "auto") {
         actDark =
           window.matchMedia &&
           window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -121,16 +126,16 @@ function applyStatus(d) {
           window
             .matchMedia("(prefers-color-scheme: dark)")
             .addEventListener("change", function (e) {
-              if (
-                ST &&
-                ST.theme &&
-                (ST.theme.mode === 2 || ST.theme.mode === "2")
-              )
-                applyStatus(ST);
+              var ov = null;
+              try { ov = localStorage.getItem("themeOverride"); } catch (e2) {}
+              var inAuto = ov ? ov === "auto"
+                              : (ST && ST.theme && (ST.theme.mode === 2 || ST.theme.mode === "2"));
+              if (inAuto) applyStatus(ST);
             });
           window._actDarkListenerAppended = true;
         }
       }
+      _themeUpdateToggleIcon(effective);
     }
 
     var vars = ":root{";
@@ -192,6 +197,45 @@ function updateFooter(d) {
   if (d.version !== undefined && d.version !== null)
     setEl("footer-ver", d.version);
 }
+
+// ============================================================================
+// THEME (client-side override; server config is the source of truth and is
+// applied by applyStatus().  This lets the user flip the theme instantly
+// without waiting for a /save_theme round-trip.)
+// ============================================================================
+function _themeApplyOverride(mode) {
+  // mode: 'light' | 'dark' | 'auto'
+  var html = document.documentElement;
+  html.classList.remove("theme-light", "theme-dark", "theme-auto");
+  html.classList.add("theme-" + mode);
+  try { localStorage.setItem("themeOverride", mode); } catch (e) {}
+  _themeUpdateToggleIcon(mode);
+}
+
+function _themeUpdateToggleIcon(mode) {
+  var btn = document.getElementById("themeToggleBtn");
+  if (!btn) return;
+  // Show the icon for the mode you'd switch INTO so the affordance is obvious.
+  btn.textContent = mode === "dark" ? "☀️" : (mode === "light" ? "🌓" : "🌙");
+  btn.title = "Theme: " + mode + " (click to change)";
+}
+
+function quickThemeToggle() {
+  var current;
+  try { current = localStorage.getItem("themeOverride") || "auto"; }
+  catch (e) { current = "auto"; }
+  // Cycle: auto → dark → light → auto
+  var next = current === "auto" ? "dark" : (current === "dark" ? "light" : "auto");
+  _themeApplyOverride(next);
+}
+
+// Initialise toggle icon on first script run (DOM is ready since we're at the
+// bottom of <body>).
+(function () {
+  var pref = "auto";
+  try { pref = localStorage.getItem("themeOverride") || "auto"; } catch (e) {}
+  _themeUpdateToggleIcon(pref);
+})();
 
 // ============================================================================
 // NAVIGATION

@@ -7,6 +7,21 @@
   <title>Water Logger</title>
   <link rel="stylesheet" href="/style.css">
   <style id="themeVars"></style>
+  <!-- Early-paint theme bootstrap: avoids the flash-of-light-theme on dark
+       systems by setting the html class before stylesheets are evaluated.
+       The full theme (custom colours, etc.) is layered on by applyStatus()
+       once /api/status arrives. -->
+  <script>
+    (function () {
+      try {
+        var pref = localStorage.getItem("themeOverride") || "auto";
+        var cls = "theme-" + (pref === "light" || pref === "dark" ? pref : "auto");
+        document.documentElement.classList.add(cls);
+      } catch (e) {
+        document.documentElement.classList.add("theme-auto");
+      }
+    })();
+  </script>
   <style>
     .page {
       display: none
