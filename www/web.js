@@ -1479,6 +1479,12 @@ function sfInit() {
           setEl("sf-boot", s.boot);
         });
     });
+  // Unified Sensors page: also populate the additional-sensor list
+  // from platform_config.json (the form uses /save_flowmeter; the list
+  // uses /save_platform via clSave()).
+  if (document.getElementById("cl-sensors-list")) {
+    clLoad();
+  }
 }
 
 // ============================================================================
@@ -3280,7 +3286,9 @@ function clSaveEditedSensor() {
 }
 
 function clSave() {
-  var msg = document.getElementById("cl-msg");
+  // Message element lives on whichever page hosts the sensor list
+  // (corelogic legacy or the unified Sensors page).
+  var msg = document.getElementById("cl-msg") || document.getElementById("ss-msg");
   if (!PCFG) {
     if (msg) {
       msg.textContent = "❌ No config loaded";

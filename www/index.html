@@ -380,8 +380,8 @@
         <div class="title">Device</div>
       </div>
       <div class="setting-card" onclick="showSubpage('settings_flowmeter')">
-        <div class="icon">💧</div>
-        <div class="title">Flow Meter</div>
+        <div class="icon">🔌</div>
+        <div class="title">Sensors</div>
       </div>
       <div class="setting-card" onclick="showSubpage('settings_hardware')">
         <div class="icon">🔧</div>
@@ -565,16 +565,20 @@
     </form>
   </main>
 
-  <!-- ═══ PAGE: SETTINGS-FLOWMETER ═══ -->
+  <!-- ═══ PAGE: SETTINGS-SENSORS (legacy id: settings_flowmeter) ═══ -->
   <main class="main-content page" id="page-settings_flowmeter">
     <div class="page-header">
-      <h1>💧 Flow Meter</h1>
-      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Flow
-        Meter</div>
+      <h1>🔌 Sensors</h1>
+      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Sensors
+      </div>
     </div>
 
     <form onsubmit="settingsSave(event,'/save_flowmeter',this)">
       <div id="sf-msg"></div>
+      <div class="card">
+        <div class="card-header">💧 Flow Meter</div>
+        <div class="card-body"><p class="form-hint">Primary pulse-counter flow sensor (hardware pin fixed in <strong>Hardware</strong>). Treated as a dedicated sensor because its pulses drive the state machine.</p></div>
+      </div>
       <!-- Calibration -->
       <div class="card">
         <div class="card-header">📏 Calibration</div>
@@ -636,8 +640,23 @@
         </div>
       </div>
 
-      <button type="submit" class="btn btn-primary btn-block">💾 Save</button>
+      <button type="submit" class="btn btn-primary btn-block">💾 Save Flow Meter</button>
     </form>
+
+    <!-- Additional sensors (platform_config.json pipeline) -->
+    <div class="card" style="margin-top:1.5rem">
+      <div class="card-header">
+        <span>➕ Additional Sensors</span>
+        <button type="button" class="btn btn-sm btn-primary" onclick="clAddSensor()">+ Add Sensor</button>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div id="cl-sensors-list">
+          <p class="text-muted" style="padding:1rem">Loading…</p>
+        </div>
+      </div>
+    </div>
+    <div id="ss-msg"></div>
+    <button type="button" class="btn btn-primary btn-block" style="margin-top:1rem" onclick="clSave()">💾 Save Sensor List</button>
   </main>
 
   <!-- ═══ PAGE: SETTINGS-HARDWARE ═══ -->
@@ -1154,20 +1173,6 @@
           </p>
         </div>
 
-      </div>
-    </div>
-
-    <!-- Sensor List -->
-    <div class="card">
-      <div class="card-header">
-        <span>🔌 Sensors</span>
-        <button type="button" class="btn btn-sm btn-primary" onclick="clAddSensor()">+ Add Sensor</button>
-      </div>
-      <div class="card-body" style="padding:0">
-        <div id="cl-sensors-list">
-          <!-- Populated by clLoad() -->
-          <p class="text-muted" style="padding:1rem">Loading…</p>
-        </div>
       </div>
     </div>
 
