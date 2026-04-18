@@ -323,6 +323,25 @@ void setupWebServer() {
     // C2: track web activity for idle power restore
     auto touchActivity = []() { g_lastWebActivity = millis(); };
 
+    // Defense-in-depth headers applied to every response.  Full strict CSP
+    // would require rewriting every inline onclick/style — this intermediate
+    // policy already blocks cross-origin scripts/images/fetches, which is
+    // the most valuable win for a LAN-exposed device.  Tightening to remove
+    // 'unsafe-inline' is a follow-up (Pass 4 A4 hardening).
+    DefaultHeaders::Instance().addHeader(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'"
+    );
+    DefaultHeaders::Instance().addHeader("X-Content-Type-Options", "nosniff");
+    DefaultHeaders::Instance().addHeader("X-Frame-Options", "DENY");
+    DefaultHeaders::Instance().addHeader("Referrer-Policy", "no-referrer");
+
     bool uiReady = LittleFS.exists("/www/index.html");
 
     if (uiReady) {
