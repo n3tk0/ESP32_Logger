@@ -18,7 +18,10 @@
  * който позволява качване на /www/ файловете чрез бразура.
  *
  * JSON API (винаги в firmware, не изискват /www/ файлове):
- *   GET  /api/status        – runtime статус
+ *   GET  /api/status        – пълен снапшот (identity + runtime + theme)
+ *   GET  /api/identity      – само device/network identity (статичен)
+ *   GET  /api/runtime       – само живи метрики (heap, time, RTC, FS)
+ *   GET  /api/theme         – само theme секцията (root-level)
  *   GET  /api/config        – пълна конфигурация
  *   GET  /api/files?dir=/   – JSON списък на файловете
  *   POST /save_hardware     – записва HW настройки (→ restart)
@@ -37,6 +40,10 @@
  */
 
 void setupWebServer();
+
+// SSE: publish a /api/live snapshot to all connected EventSource clients.
+// Called from loop() at ~1 Hz. No-op when no clients are subscribed.
+void publishLiveEvent();
 
 // Helpers използвани и от Logger.ino / other modules
 String getModeDisplay();

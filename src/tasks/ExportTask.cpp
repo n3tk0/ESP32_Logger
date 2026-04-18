@@ -12,7 +12,8 @@
 void exportTaskFunc(void* /*param*/) {
     Serial.println("[ExportTask] started");
 
-    SensorReading batch[EXPORT_EXPORT_BATCH_SIZE];
+    // EXPORT_BATCH_SIZE / EXPORT_FLUSH_INTERVAL_MS are configured in setup.h.
+    SensorReading batch[EXPORT_BATCH_SIZE];
     int           batchCount  = 0;
     uint32_t      lastFlushMs = millis();
 

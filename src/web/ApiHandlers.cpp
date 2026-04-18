@@ -60,7 +60,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
     constexpr size_t MAX_RAW = 500;  // 40 KB vs 160 KB — prevents OOM on ESP32-C3
     SensorReading* raw = new SensorReading[MAX_RAW];
     if (!raw) {
-        req->send(500, "application/json", "{\"error\":\"out of memory\"}");
+        req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
         return;
     }
 
@@ -112,7 +112,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
 
     if (!agg) {
         delete[] raw;
-        req->send(500, "application/json", "{\"error\":\"out of memory\"}");
+        req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
         return;
     }
 
@@ -232,7 +232,7 @@ static void handleApiSensors(AsyncWebServerRequest* req) {
 // ---------------------------------------------------------------------------
 static void handleConfigPlatform(AsyncWebServerRequest* req) {
     if (!activeFS) {
-        req->send(503, "application/json", "{\"error\":\"no fs\"}");
+        req->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
         return;
     }
     // Lock config mutex so tasks don't read a partially-updated config
@@ -241,9 +241,9 @@ static void handleConfigPlatform(AsyncWebServerRequest* req) {
         bool exportersOk = exportManager.reloadConfig(*activeFS);
         xSemaphoreGive(configMutex);
         if (sensorsOk && exportersOk) req->send(200, "application/json", "{\"ok\":true}");
-        else                          req->send(500, "application/json", "{\"error\":\"reload failed\"}");
+        else                          req->send(500, "application/json", "{\"ok\":false,\"error\":\"reload failed\"}");
     } else {
-        req->send(503, "application/json", "{\"error\":\"busy\"}");
+        req->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
     }
 }
 
@@ -309,22 +309,22 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
 // ---------------------------------------------------------------------------
 static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
     if (!req->hasArg("id")) {
-        req->send(400, "application/json", "{\"error\":\"missing id param\"}");
+        req->send(400, "application/json", "{\"ok\":false,\"error\":\"missing id param\"}");
         return;
     }
     String id = req->arg("id");
     ISensor* s = sensorManager.getById(id.c_str());
     if (!s) {
-        req->send(404, "application/json", "{\"error\":\"sensor not found\"}");
+        req->send(404, "application/json", "{\"ok\":false,\"error\":\"sensor not found\"}");
         return;
     }
     if (!s->isEnabled()) {
-        req->send(400, "application/json", "{\"error\":\"sensor is disabled\"}");
+        req->send(400, "application/json", "{\"ok\":false,\"error\":\"sensor is disabled\"}");
         return;
     }
     if (s->isBlocking()) {
         req->send(400, "application/json",
-                  "{\"error\":\"blocking sensor — use scheduled reads\"}");
+                  "{\"ok\":false,\"error\":\"blocking sensor — use scheduled reads\"}");
         return;
     }
 
@@ -338,7 +338,7 @@ static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
 
     if (n <= 0) {
         s->incErrorCount();
-        req->send(500, "application/json", "{\"error\":\"read failed\"}");
+        req->send(500, "application/json", "{\"ok\":false,\"error\":\"read failed\"}");
         return;
     }
 
@@ -363,13 +363,13 @@ static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
 static void handleMqttHaDiscovery(AsyncWebServerRequest* req) {
 #ifdef EXPORT_MQTT_ENABLED
     if (!g_mqttExporter) {
-        req->send(503, "application/json", "{\"error\":\"mqtt not initialised\"}");
+        req->send(503, "application/json", "{\"ok\":false,\"error\":\"mqtt not initialised\"}");
         return;
     }
     g_mqttExporter->publishHaDiscovery();
     req->send(200, "application/json", "{\"ok\":true}");
 #else
-    req->send(404, "application/json", "{\"error\":\"mqtt not compiled\"}");
+    req->send(404, "application/json", "{\"ok\":false,\"error\":\"mqtt not compiled\"}");
 #endif
 }
 
@@ -394,7 +394,7 @@ static void handleOtaConfirm(AsyncWebServerRequest* req) {
     if (OtaManager::confirm()) {
         req->send(200, "application/json", "{\"ok\":true}");
     } else {
-        req->send(500, "application/json", "{\"error\":\"confirm failed\"}");
+        req->send(500, "application/json", "{\"ok\":false,\"error\":\"confirm failed\"}");
     }
 }
 

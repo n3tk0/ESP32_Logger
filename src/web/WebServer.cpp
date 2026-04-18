@@ -10,6 +10,7 @@
  */
 
 #include "WebServer.h"
+#include "../setup.h"                   // WEB_BASIC_AUTH_* macros
 #include "../core/Globals.h"
 #include "../managers/ConfigManager.h"
 #include "../managers/WiFiManager.h"
@@ -76,6 +77,82 @@ void sendRestartPage(AsyncWebServerRequest *r, const char* message) {
 }
 
 // ============================================================================
+// LIVE SNAPSHOT  (shared by /api/live polling endpoint and SSE /api/events)
+// ============================================================================
+
+// SSE channel: clients open `new EventSource('/api/events')`. The handler is
+// registered in setupWebServer() so library auth gating still applies.
+static AsyncEventSource liveEvents("/api/events");
+
+static void buildLiveSnapshot(JsonDocument& doc) {
+    noInterrupts();
+    uint32_t safePulses = pulseCount;
+    interrupts();
+
+    doc["time"]      = getRtcDateTimeString();
+    doc["chip"]      = ESP.getChipModel();
+    doc["version"]   = getVersionString();
+    doc["network"]   = getNetworkDisplay();
+    doc["ff"]        = digitalRead(config.hardware.pinWakeupFF);
+    doc["pf"]        = digitalRead(config.hardware.pinWakeupPF);
+    doc["wifi"]      = digitalRead(config.hardware.pinWifiTrigger);
+    doc["pulses"]    = safePulses;
+    doc["boot"]      = bootCount;
+    doc["heap"]      = ESP.getFreeHeap();
+    doc["heapTotal"] = ESP.getHeapSize();
+    doc["uptime"]    = millis() / 1000;
+    doc["trigger"]   = cycleStartedBy;
+    doc["cycleTime"] = (millis() - cycleStartTime) / 1000;
+    doc["ffCount"]   = highCountFF;
+    doc["pfCount"]   = highCountPF;
+    doc["totalPulses"] = cycleTotalPulses + safePulses;
+
+    const char* stateNames[] = {"IDLE", "WAIT_FLOW", "MONITORING", "DONE"};
+    int stateIdx = (loggingState >= 0 && loggingState <= 3) ? loggingState : 0;
+    doc["state"]     = stateNames[stateIdx];
+    doc["stateTime"] = (millis() - stateStartTime) / 1000;
+
+    if (loggingState == STATE_WAIT_FLOW) {
+        long rem = (BUTTON_WAIT_FLOW_MS - (millis() - stateStartTime)) / 1000;
+        doc["stateRemaining"] = rem > 0 ? rem : 0;
+    } else if (loggingState == STATE_MONITORING && lastFlowPulseTime > 0) {
+        long rem = (FLOW_IDLE_TIMEOUT_MS - (millis() - lastFlowPulseTime)) / 1000;
+        doc["stateRemaining"] = rem > 0 ? rem : 0;
+    } else {
+        doc["stateRemaining"] = -1;
+    }
+
+    float liters = 0;
+    if (config.flowMeter.pulsesPerLiter > 0)
+        liters = (float)safePulses / config.flowMeter.pulsesPerLiter * config.flowMeter.calibrationMultiplier;
+    doc["liters"] = liters;
+    doc["mode"]   = onlineLoggerMode ? "online" : (apModeTriggered ? "webonly" : "logging");
+
+    uint64_t used = 0, total = 0; int pct = 0;
+    getStorageInfo(used, total, pct);
+    char uBuf[24], tBuf[24];
+    snprintf(uBuf, sizeof(uBuf), "%llu", (unsigned long long)used);
+    snprintf(tBuf, sizeof(tBuf), "%llu", (unsigned long long)total);
+    doc["fsUsed"]  = serialized(String(uBuf));
+    doc["fsTotal"] = serialized(String(tBuf));
+
+    doc["ip"] = wifiConnectedAsClient
+                ? WiFi.localIP().toString()
+                : WiFi.softAPIP().toString();
+}
+
+// Called from loop() at ~1 Hz.  Skips work entirely when nobody is subscribed
+// so polling-only deployments pay zero cost.
+void publishLiveEvent() {
+    if (liveEvents.count() == 0) return;
+    JsonDocument doc;
+    buildLiveSnapshot(doc);
+    String buf;
+    serializeJson(doc, buf);
+    liveEvents.send(buf.c_str(), "live", millis());
+}
+
+// ============================================================================
 // FAILSAFE HTML  (served when /www/index.html is missing)
 // ============================================================================
 static const char FAILSAFE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Water Logger - Setup Mode</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,sans-serif;background:#f0f4f8;color:#2d3748;min-height:100vh}header{background:#275673;color:#fff;padding:16px 20px}header h1{font-size:1.2rem;display:flex;align-items:center;gap:10px}.badge{background:#e74c3c;color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem;font-weight:700}.sub{font-size:.8rem;opacity:.8;margin-top:4px}.container{max-width:720px;margin:20px auto;padding:0 14px}.card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.09);margin-bottom:14px;overflow:hidden}.card-header{padding:13px 18px;border-bottom:1px solid #e2e8f0;font-weight:600;background:#f7fafc;display:flex;justify-content:space-between;align-items:center}.card-body{padding:16px 18px}.drop{border:2px dashed #cbd5e0;border-radius:8px;padding:24px;text-align:center;cursor:pointer;transition:.2s;margin-bottom:10px}.drop:hover,.drop.over{border-color:#275673;background:#ebf4ff}.drop input{display:none}.drop p{color:#718096;font-size:.85rem;margin-top:5px}.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;border:none;border-radius:7px;font-size:.88rem;font-weight:500;cursor:pointer;transition:.15s;text-decoration:none}.btn-primary{background:#275673;color:#fff}.btn-primary:hover{background:#1d4259}.btn-danger{background:#e74c3c;color:#fff}.btn-danger:hover{background:#c0392b}.btn-warn{background:#f39c12;color:#fff}.btn-warn:hover{background:#d68910}.btn-sm{padding:4px 10px;font-size:.78rem}progress{width:100%;height:8px;border-radius:4px;margin-top:8px;display:none}.msg{margin-top:8px;font-size:.88rem;min-height:1.1em}.ok{color:#27ae60}.err{color:#e74c3c}.inf{color:#275673}.file-list{font-size:.85rem}.file-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #e2e8f0;gap:6px}.file-row:last-child{border:none}.fname{word-break:break-all;flex:1}.fsize{color:#718096;white-space:nowrap;margin:0 8px}.acts{display:flex;gap:5px;flex-shrink:0}.alert{padding:11px 15px;border-radius:8px;margin-bottom:12px;font-size:.88rem;line-height:1.4}.alert-warn{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}.legacy{background:#fff3cd;border-left:4px solid #f39c12;padding:6px 10px;border-radius:4px;font-size:.8rem;color:#856404;margin-top:4px}input[type=text]{width:100%;padding:7px 11px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem}.section-label{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#718096;padding:10px 0 4px}.sel{width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem;margin-top:4px;background:#fff;color:#2d3748}.fhint{font-size:.78rem;color:#718096;margin-top:4px}.chk-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #e2e8f0;font-size:.88rem}.chk-row:last-child{border:none}.warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:7px;padding:11px 14px;font-size:.83rem;color:#92400e;margin-top:8px;display:none}.warn-box.show{display:block}.flabel{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#718096;display:block;margin-bottom:2px}.tabs{display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px}.tab{padding:10px 20px;border:none;background:none;cursor:pointer;font-size:.9rem;color:#718096;font-weight:500;border-bottom:3px solid transparent;margin-bottom:-2px;transition:.15s;display:flex;align-items:center;gap:6px}.tab:hover{color:#275673;background:#f7fafc}.tab.active{color:#275673;border-bottom-color:#275673;font-weight:700}.tab-pane{display:none}.tab-pane.active{display:block}</style></head><body>)HTML"
@@ -84,7 +161,7 @@ R"HTML(<div id="tab-setup" class="tab-pane active"><div class="alert alert-warn"
 R"HTML(<div class="card"><div class="card-header">&#x1F4E4; Upload files to /www/</div><div class="card-body"><div class="drop" id="dropZone" onclick="document.getElementById('fileInput').click()"><input type="file" id="fileInput" multiple>&#x2B06; <strong>Click or drag files here</strong><p>index.html &bull; web.js &bull; style.css &bull; changelog.txt &bull; chart.min.js &bull; etc.</p></div><progress id="prog" value="0" max="100"></progress><div class="msg inf" id="uploadMsg"></div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header"><span>&#x1F4C1; LittleFS &mdash; All Files</span><button class="btn btn-sm btn-primary" onclick="loadFiles()">&#x21BA; Refresh</button></div><div class="card-body" style="padding:4px 18px 14px"><div id="legacyWarn" style="display:none" class="legacy">&#x26A0;&#xFE0F; <strong>Legacy UI files found at root.</strong> These override /www/ files and cause broken pages. Delete them!</div><div class="section-label">&#x1F4C2; /www/ (new UI files)</div><div class="file-list" id="wwwList">Loading&#x2026;</div><div class="section-label" style="margin-top:10px">&#x1F4C2; / (root &mdash; legacy / system files)</div><div class="file-list" id="rootList">Loading&#x2026;</div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header">&#x270F;&#xFE0F; Rename / Move File</div><div class="card-body"><div style="display:flex;gap:8px;flex-wrap:wrap"><input type="text" id="renSrc" placeholder="From: e.g. /web.js" style="flex:1;min-width:140px"><input type="text" id="renDst" placeholder="To: e.g. /www/web.js" style="flex:1;min-width:140px"><button class="btn btn-primary" onclick="doRename()">Move</button></div><div class="msg" id="renMsg"></div></div></div>)HTML"
-R"HTML(<div class="card"><div class="card-header">&#x1F504; Device Control</div><div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn btn-primary" onclick="if(confirm('Restart now?'))fetch('/restart').then(function(){setTimeout(function(){location.reload();},5000)})">&#x1F504; Restart</button><button class="btn btn-danger" onclick="doFactoryReset()">&#x1F9F9; Factory Reset</button><div class="msg" id="fsResetMsg" style="flex-basis:100%;margin-top:4px"></div></div></div>)HTML"
+R"HTML(<div class="card"><div class="card-header">&#x1F504; Device Control</div><div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn btn-primary" onclick="if(confirm('Restart now?'))fetch('/restart',{method:'POST'}).then(function(){setTimeout(function(){location.reload();},5000)})">&#x1F504; Restart</button><button class="btn btn-danger" onclick="doFactoryReset()">&#x1F9F9; Factory Reset</button><div class="msg" id="fsResetMsg" style="flex-basis:100%;margin-top:4px"></div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header">&#x1F6E0;&#xFE0F; OTA Firmware Update</div><div class="card-body"><p style="font-size:.85rem;color:#718096;margin-bottom:10px">Upload a <code>.bin</code> firmware file compiled for ESP32-C3. The device will restart automatically after a successful flash.</p><div class="drop" id="otaDropZone" onclick="document.getElementById('otaFile').click()"><input type="file" id="otaFile" accept=".bin">&#x2B06; <strong>Click or drag .bin file here</strong><p>Firmware must start with magic byte 0xE9</p></div><progress id="otaProg" value="0" max="100" style="display:none"></progress><div class="msg" id="otaMsg"></div></div></div></div>)HTML"
 R"HTML(<div id="tab-corelogic" class="tab-pane"><div class="card"><div class="card-header">&#x2699;&#xFE0F; Operating Mode</div><div class="card-body"><label class="flabel">Mode</label><select id="cl-mode" class="sel"><option value="legacy">Legacy &mdash; Water logger only (deep sleep, original behaviour)</option><option value="continuous">Continuous &mdash; Multi-sensor pipeline (FreeRTOS tasks)</option><option value="hybrid">Hybrid &mdash; Water logger + sensor pipeline</option></select><p class="fhint"><strong>Legacy</strong>: original behaviour, deep-sleep between flush events.<br><strong>Continuous</strong>: all sensors polled continuously; device stays awake.<br><strong>Hybrid</strong>: both modes active simultaneously.</p></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header">&#x1F4A4; Sleep Mode</div><div class="card-body"><label class="flabel">Sleep Mode</label><select id="cl-sleep" class="sel" onchange="fsSlpChk()"><option value="deep">Deep Sleep &mdash; maximum power saving (recommended for battery)</option><option value="light">Light Sleep &mdash; faster wake-up, moderate power use</option><option value="none">No Sleep &mdash; device stays awake, Wi-Fi may disconnect between events</option><option value="online">&#x1F310; Online Mode &mdash; always awake, Wi-Fi + web server permanently active</option></select><div id="cl-slp-warn" class="warn-box">&#x26A0;&#xFE0F; <strong>Online Mode</strong> keeps Wi-Fi and the web server permanently active. Power consumption increases significantly (&asymp;50&ndash;200&thinsp;mA continuously). This mode is recommended <strong>only when connected to mains power</strong>. <strong>Not suitable for battery operation.</strong></div><p class="fhint">Controls how the device behaves between measurement events. Takes effect after restart.</p></div></div>)HTML"
@@ -97,8 +174,8 @@ function upF(fs){if(!fs||!fs.length)return;var pg=document.getElementById('prog'
 function fmB(b){if(!b)return'0 B';if(b>=1048576)return(b/1048576).toFixed(1)+' MB';if(b>=1024)return(b/1024).toFixed(1)+' KB';return b+' B'}
 function fRow(f){var lg=LEG.indexOf(f.path)>=0;return'<div class="file-row"'+(lg?' style="background:#fff8e1"':'')+'><span class="fname">'+(lg?'&#x26A0;&#xFE0F; ':'&#x1F4C4; ')+f.path+(lg?' <span style="color:#e67e22;font-size:.75rem">[LEGACY - DELETE]</span>':'')+'</span><span class="fsize">'+fmB(f.size)+'</span><span class="acts"><a href="/download?file='+encodeURIComponent(f.path)+'&storage=internal" class="btn btn-sm btn-primary">&#x1F4E5;</a> <button class="btn btn-sm btn-danger" data-path="'+f.path+'" onclick="dlF(this.dataset.path)">&#x1F5D1;</button></span></div>'}
 function ldF(){var w=document.getElementById('wwwList'),r=document.getElementById('rootList'),wn=document.getElementById('legacyWarn');if(w.innerHTML==='')w.innerHTML='Loading&#x2026;';if(r.innerHTML==='')r.innerHTML='Loading&#x2026;';fetch('/api/filelist?storage=internal&dir=/www/').then(function(r){return r.json()}).then(function(d){var f=d.files||[];if(!f.length){w.innerHTML='<div style="padding:8px 0;color:#718096">Empty &mdash; upload files here</div>';return}w.innerHTML=f.map(function(x){return fRow(x)}).join('')}).catch(function(){w.innerHTML='<span class="err">Error</span>'});fetch('/api/filelist?storage=internal&dir=/').then(function(r){return r.json()}).then(function(d){var f=(d.files||[]).filter(function(x){return!x.isDir});if(!f.length){r.innerHTML='<div style="padding:8px 0;color:#718096">Empty</div>';wn.style.display='none';return}wn.style.display=f.some(function(x){return LEG.indexOf(x.path)>=0})?'block':'none';r.innerHTML=f.map(function(x){return fRow(x)}).join('')}).catch(function(){r.innerHTML='<span class="err">Error</span>'})}
-function dlF(p){if(!confirm('Delete '+p+'?'))return;fetch('/delete?path='+encodeURIComponent(p)+'&storage=internal').then(function(r){return r.json()}).then(function(j){if(!j||!j.ok){alert('Delete failed: '+((j&&j.error)?j.error:'unknown error'));return}ldF()}).catch(function(e){alert('Error: '+e)})}
-function doRename(){var s=document.getElementById('renSrc').value.trim(),d=document.getElementById('renDst').value.trim(),m=document.getElementById('renMsg');if(!s||!d){m.textContent='Both fields required.';m.className='msg err';return}var p=d.lastIndexOf('/'),nn=d.substring(p+1),dd=p<=0?'/':d.substring(0,p);fetch('/move_file?src='+encodeURIComponent(s)+'&newName='+encodeURIComponent(nn)+'&destDir='+encodeURIComponent(dd)+'&storage=internal').then(function(){m.textContent='Done: '+s+' -> '+d;m.className='msg ok';ldF()}).catch(function(e){m.textContent='Error: '+e;m.className='msg err'})}
+function dlF(p){if(!confirm('Delete '+p+'?'))return;fetch('/delete?path='+encodeURIComponent(p)+'&storage=internal',{method:'POST'}).then(function(r){return r.json()}).then(function(j){if(!j||!j.ok){alert('Delete failed: '+((j&&j.error)?j.error:'unknown error'));return}ldF()}).catch(function(e){alert('Error: '+e)})}
+function doRename(){var s=document.getElementById('renSrc').value.trim(),d=document.getElementById('renDst').value.trim(),m=document.getElementById('renMsg');if(!s||!d){m.textContent='Both fields required.';m.className='msg err';return}var p=d.lastIndexOf('/'),nn=d.substring(p+1),dd=p<=0?'/':d.substring(0,p);fetch('/move_file?src='+encodeURIComponent(s)+'&newName='+encodeURIComponent(nn)+'&destDir='+encodeURIComponent(dd)+'&storage=internal',{method:'POST'}).then(function(){m.textContent='Done: '+s+' -> '+d;m.className='msg ok';ldF()}).catch(function(e){m.textContent='Error: '+e;m.className='msg err'})}
 ldF();
 function doFactoryReset(){if(!confirm('\u26a0\ufe0f FACTORY RESET\n\nThis will erase ALL files on LittleFS (config, UI, logs) and restart.\n\nProceed?'))return;var a=prompt('Type RESET to confirm:');if(a!=='RESET'){alert('Cancelled.');return}var m=document.getElementById('fsResetMsg');if(m){m.textContent='Factory reset in progress\u2026';m.className='msg inf'}fetch('/factory_reset',{method:'POST'}).then(function(r){return r.json()}).then(function(d){if(d.ok){alert('LittleFS formatted. Device is restarting.\nReconnect in ~10 seconds.');setTimeout(function(){location.reload()},10000)}else{if(m){m.textContent='Reset failed: '+(d.error||'unknown');m.className='msg err'}else alert('Reset failed: '+(d.error||'unknown'))}}).catch(function(e){if(m){m.textContent='Error: '+e;m.className='msg err'}else alert('Error: '+e)})}
 var odz=document.getElementById('otaDropZone');odz.addEventListener('dragover',function(e){e.preventDefault();this.classList.add('over')});odz.addEventListener('dragleave',function(){this.classList.remove('over')});odz.addEventListener('drop',function(e){e.preventDefault();this.classList.remove('over');var f=e.dataTransfer.files[0];if(f)doOta(f)});document.getElementById('otaFile').addEventListener('change',function(){if(this.files.length)doOta(this.files[0])});
@@ -139,7 +216,13 @@ static String getMime(const String& path) {
 // ============================================================================
 // FILE LIST HELPER  (used in /api/filelist)
 // ============================================================================
-static void scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
+// Hard-cap on entries returned by a single /api/filelist call.  Bounds heap
+// use from JsonDocument and prevents a malformed / crafted filesystem from
+// driving the AsyncTCP worker OOM.
+static const size_t SCANDIR_MAX_ENTRIES = 500;
+
+// Returns true if the scan was truncated because SCANDIR_MAX_ENTRIES was hit.
+static bool scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
                     const String& filter, bool recursive) {
     std::vector<String> stack;
     stack.push_back(dir);
@@ -157,13 +240,18 @@ static void scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
         }
 
         while (File entry = d.openNextFile()) {
+            if (arr.size() >= SCANDIR_MAX_ENTRIES) {
+                entry.close();
+                d.close();
+                return true;   // truncated
+            }
             String name = String(entry.name());
             if (name.startsWith("/")) {
                 int slash = name.lastIndexOf('/');
                 name = (slash >= 0) ? name.substring(slash + 1) : name;
             }
             String fullPath = (currentDir == "/") ? "/" + name : currentDir + "/" + name;
-            
+
             if (entry.isDirectory()) {
                 if (recursive) {
                     stack.push_back(fullPath);
@@ -189,6 +277,7 @@ static void scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
         }
         d.close();
     }
+    return false;
 }
 
 // ============================================================================
@@ -201,17 +290,69 @@ static void fmtIP(const uint8_t* ip, char* buf16) {
 // ============================================================================
 // WEB SERVER SETUP
 // ============================================================================
+#if WEB_BASIC_AUTH_ENABLED
+// Front-door handler: when Basic Auth is compiled in, this handler is
+// registered FIRST, so it's matched before anything else. It only claims
+// the request when the client is NOT authenticated, which makes us return
+// 401 + WWW-Authenticate and discard the body. Authenticated requests fall
+// through to the real handler chain.
+class AsyncAuthGateHandler : public AsyncWebHandler {
+public:
+    bool canHandle(AsyncWebServerRequest* r) override {
+        return !r->authenticate(WEB_BASIC_AUTH_USER, WEB_BASIC_AUTH_PASS);
+    }
+    void handleRequest(AsyncWebServerRequest* r) override {
+        r->requestAuthentication();
+    }
+};
+static AsyncAuthGateHandler s_authGate;
+#endif
+
 void setupWebServer() {
-    Serial.println("Setting up web server...");
+    DBGLN("Setting up web server...");
+
+#if WEB_BASIC_AUTH_ENABLED
+    // Must be registered FIRST — handlers are matched in insertion order and
+    // the first canHandle()==true wins. Gating every request keeps secrets in
+    // GET responses (export_settings, platform_config) behind the same wall
+    // as the mutating endpoints.
+    server.addHandler(&s_authGate);
+    DBGLN("Web server: Basic Auth ENABLED");
+#endif
 
     // C2: track web activity for idle power restore
     auto touchActivity = []() { g_lastWebActivity = millis(); };
 
+    // Defense-in-depth headers applied to every response.  Full strict CSP
+    // would require rewriting every inline onclick/style — this intermediate
+    // policy already blocks cross-origin scripts/images/fetches, which is
+    // the most valuable win for a LAN-exposed device.  Tightening to remove
+    // 'unsafe-inline' is a follow-up (Pass 4 A4 hardening).
+    DefaultHeaders::Instance().addHeader(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'"
+    );
+    DefaultHeaders::Instance().addHeader("X-Content-Type-Options", "nosniff");
+    DefaultHeaders::Instance().addHeader("X-Frame-Options", "DENY");
+    DefaultHeaders::Instance().addHeader("Referrer-Policy", "no-referrer");
+
     bool uiReady = LittleFS.exists("/www/index.html");
 
     if (uiReady) {
-        server.serveStatic("/", LittleFS, "/www/").setDefaultFile("index.html");
-        Serial.println("Web UI: serving from /www/");
+        // 5-min cache lets the browser reuse JS/CSS/images across page navigation
+        // without re-fetching, while still picking up firmware-bundled UI changes
+        // within a few minutes of a release. Tight enough to avoid stale-asset
+        // headaches; long enough to noticeably speed up the SPA on cold loads.
+        server.serveStatic("/", LittleFS, "/www/")
+              .setDefaultFile("index.html")
+              .setCacheControl("public, max-age=300, must-revalidate");
+        DBGLN("Web UI: serving from /www/");
     } else {
         server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
             if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
@@ -220,7 +361,7 @@ void setupWebServer() {
             }
             r->send_P(200, "text/html", FAILSAFE_HTML);
         });
-        Serial.println("Web UI: FAILSAFE mode (upload /www/index.html to restore)");
+        DBGLN("Web UI: FAILSAFE mode (upload /www/index.html to restore)");
     }
 
     server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *r) {
@@ -250,152 +391,126 @@ void setupWebServer() {
     //   timeInit:    time, boot, rtcRunning, rtcProtected, wifi, ip
     //   netInit:     wifi, network, ip
     // =========================================================================
-    server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *r) {
-        g_lastWebActivity = millis();   // C2: any poll = active user
-        JsonDocument doc;
+    // ── /api/status payload builders (shared by /api/identity, /api/runtime,
+    //    /api/theme).  Each fills the supplied JsonObject in place so the
+    //    same code path produces both the focused and combined responses.
+    auto fillIdentity = [](JsonObject o) {
+        o["device"]         = strlen(config.deviceName) ? config.deviceName : "Water Logger";
+        o["deviceName"]     = o["device"];   // alias – sdInit uses both
+        o["deviceId"]       = config.deviceId;
+        o["version"]        = getVersionString();
+        o["forceWebServer"] = config.forceWebServer;
+        o["network"]        = getNetworkDisplay();
+        o["ip"]             = wifiConnectedAsClient
+                              ? WiFi.localIP().toString()
+                              : WiFi.softAPIP().toString();
+        o["gateway"]        = wifiConnectedAsClient ? WiFi.gatewayIP().toString() : "";
+        o["subnet"]         = wifiConnectedAsClient ? WiFi.subnetMask().toString() : "";
+        o["dns"]            = wifiConnectedAsClient ? WiFi.dnsIP().toString()      : "";
+    };
 
-        // ── Identity ──────────────────────────────────────────────────────────
-        doc["device"]         = strlen(config.deviceName) ? config.deviceName : "Water Logger";
-        doc["deviceName"]     = doc["device"];   // alias – sdInit uses both
-        doc["deviceId"]       = config.deviceId;
-        doc["version"]        = getVersionString();
-        doc["forceWebServer"] = config.forceWebServer;
+    auto fillRuntime = [](JsonObject o) {
+        o["time"]       = getRtcDateTimeString();
+        o["rssi"]       = wifiConnectedAsClient ? WiFi.RSSI() : -100;
+        o["boot"]       = bootCount;
+        o["heap"]       = ESP.getFreeHeap();
+        o["heapTotal"]  = ESP.getHeapSize();
+        o["heapPct"]    = (int)(ESP.getFreeHeap() * 100UL / ESP.getHeapSize());
+        o["chip"]       = ESP.getChipModel();
+        o["cpu"]        = getCpuFrequencyMhz();
+        o["mode"]       = getModeDisplay();
+        o["wifi"]       = wifiConnectedAsClient ? "client" : "ap";
+        o["freeSketch"] = ESP.getFreeSketchSpace();
 
-        // ── Time / Network ────────────────────────────────────────────────────
-        doc["time"]    = getRtcDateTimeString();
-        doc["network"] = getNetworkDisplay();
-        doc["ip"]      = wifiConnectedAsClient
-                         ? WiFi.localIP().toString()
-                         : WiFi.softAPIP().toString();
-
-        doc["rssi"]    = wifiConnectedAsClient ? WiFi.RSSI() : -100;
-
-        doc["gateway"] = wifiConnectedAsClient ? WiFi.gatewayIP().toString() : "";
-        doc["subnet"]  = wifiConnectedAsClient ? WiFi.subnetMask().toString() : "";
-        doc["dns"]     = wifiConnectedAsClient ? WiFi.dnsIP().toString() : "";
-
-        // ── Runtime metrics ───────────────────────────────────────────────────
-        doc["boot"]       = bootCount;
-        doc["heap"]       = ESP.getFreeHeap();
-        doc["heapTotal"]  = ESP.getHeapSize();
-        doc["heapPct"]    = (int)(ESP.getFreeHeap() * 100UL / ESP.getHeapSize());
-        doc["chip"]       = ESP.getChipModel();
-        doc["cpu"]        = getCpuFrequencyMhz();
-        doc["mode"]       = getModeDisplay();
-        doc["wifi"]       = wifiConnectedAsClient ? "client" : "ap";
-        doc["freeSketch"] = ESP.getFreeSketchSpace();
-
-        // ── Storage ───────────────────────────────────────────────────────────
         uint64_t used = 0, total = 0; int pct = 0;
         getStorageInfo(used, total, pct);
         char uBuf[24], tBuf[24];
         snprintf(uBuf, sizeof(uBuf), "%llu", (unsigned long long)used);
         snprintf(tBuf, sizeof(tBuf), "%llu", (unsigned long long)total);
-        doc["fsUsed"]             = serialized(String(uBuf));
-        doc["fsTotal"]            = serialized(String(tBuf));
-        doc["fsPct"]              = pct;
-        doc["defaultStorageView"] = config.hardware.defaultStorageView;
-        doc["currentFile"]        = getActiveDatalogFile();
+        o["fsUsed"]             = serialized(String(uBuf));
+        o["fsTotal"]            = serialized(String(tBuf));
+        o["fsPct"]              = pct;
+        o["defaultStorageView"] = config.hardware.defaultStorageView;
+        o["currentFile"]        = getActiveDatalogFile();
 
-        // ── RTC (null-safe) ───────────────────────────────────────────────────
         if (Rtc) {
-            doc["rtcProtected"] = Rtc->GetIsWriteProtected();
-            doc["rtcRunning"]   = Rtc->GetIsRunning();
+            o["rtcProtected"] = Rtc->GetIsWriteProtected();
+            o["rtcRunning"]   = Rtc->GetIsRunning();
         } else {
-            doc["rtcProtected"] = false;
-            doc["rtcRunning"]   = false;
+            o["rtcProtected"] = false;
+            o["rtcRunning"]   = false;
         }
+    };
 
-        // ── Theme (nested) ────────────────────────────────────────────────────
-        JsonObject th = doc["theme"].to<JsonObject>();
-        th["mode"]              = (int)config.theme.mode;
-        th["primaryColor"]      = config.theme.primaryColor;
-        th["secondaryColor"]    = config.theme.secondaryColor;
-        th["lightBgColor"]      = config.theme.lightBgColor;
-        th["lightTextColor"]    = config.theme.lightTextColor;
-        th["darkBgColor"]       = config.theme.darkBgColor;
-        th["darkTextColor"]     = config.theme.darkTextColor;
-        th["ffColor"]           = config.theme.ffColor;
-        th["pfColor"]           = config.theme.pfColor;
-        th["otherColor"]        = config.theme.otherColor;
-        th["storageBarColor"]   = config.theme.storageBarColor;
-        th["storageBar70Color"] = config.theme.storageBar70Color;
-        th["storageBar90Color"] = config.theme.storageBar90Color;
-        th["storageBarBorder"]  = config.theme.storageBarBorder;
-        th["logoSource"]        = config.theme.logoSource;
-        th["faviconPath"]       = config.theme.faviconPath;
-        th["boardDiagramPath"]  = config.theme.boardDiagramPath;
-        th["chartSource"]       = (int)config.theme.chartSource;
-        th["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/chart.min.js";
-        th["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
-        th["showIcons"]         = config.theme.showIcons;
+    auto fillTheme = [](JsonObject o) {
+        o["mode"]              = (int)config.theme.mode;
+        o["primaryColor"]      = config.theme.primaryColor;
+        o["secondaryColor"]    = config.theme.secondaryColor;
+        o["lightBgColor"]      = config.theme.lightBgColor;
+        o["lightTextColor"]    = config.theme.lightTextColor;
+        o["darkBgColor"]       = config.theme.darkBgColor;
+        o["darkTextColor"]     = config.theme.darkTextColor;
+        o["ffColor"]           = config.theme.ffColor;
+        o["pfColor"]           = config.theme.pfColor;
+        o["otherColor"]        = config.theme.otherColor;
+        o["storageBarColor"]   = config.theme.storageBarColor;
+        o["storageBar70Color"] = config.theme.storageBar70Color;
+        o["storageBar90Color"] = config.theme.storageBar90Color;
+        o["storageBarBorder"]  = config.theme.storageBarBorder;
+        o["logoSource"]        = config.theme.logoSource;
+        o["faviconPath"]       = config.theme.faviconPath;
+        o["boardDiagramPath"]  = config.theme.boardDiagramPath;
+        o["chartSource"]       = (int)config.theme.chartSource;
+        o["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/chart.min.js";
+        o["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
+        o["showIcons"]         = config.theme.showIcons;
+    };
 
+    server.on("/api/status", HTTP_GET, [fillIdentity, fillRuntime, fillTheme](AsyncWebServerRequest *r) {
+        g_lastWebActivity = millis();   // C2: any poll = active user
+        JsonDocument doc;
+        JsonObject root = doc.to<JsonObject>();
+        fillIdentity(root);
+        fillRuntime(root);
+        fillTheme(doc["theme"].to<JsonObject>());
+        sendJsonResponse(r, doc);
+    });
+
+    server.on("/api/identity", HTTP_GET, [fillIdentity](AsyncWebServerRequest *r) {
+        JsonDocument doc;
+        fillIdentity(doc.to<JsonObject>());
+        sendJsonResponse(r, doc);
+    });
+
+    server.on("/api/runtime", HTTP_GET, [fillRuntime](AsyncWebServerRequest *r) {
+        g_lastWebActivity = millis();   // runtime polls count as activity too
+        JsonDocument doc;
+        fillRuntime(doc.to<JsonObject>());
+        sendJsonResponse(r, doc);
+    });
+
+    server.on("/api/theme", HTTP_GET, [fillTheme](AsyncWebServerRequest *r) {
+        JsonDocument doc;
+        fillTheme(doc.to<JsonObject>());
         sendJsonResponse(r, doc);
     });
 
     // =========================================================================
-    // API: LIVE  (polled every 500 ms by SPA live page)
+    // API: LIVE  (legacy poll endpoint + SSE channel /api/events)
+    // -------------------------------------------------------------------------
+    // Modern clients open `new EventSource('/api/events')` and receive 'live'
+    // events at ~1 Hz, driven from loop() via publishLiveEvent(). Older
+    // clients (or fallback when EventSource fails) keep polling /api/live.
+    // Both paths build the same JSON snapshot via buildLiveSnapshot().
     // =========================================================================
     server.on("/api/live", HTTP_GET, [](AsyncWebServerRequest *r) {
         JsonDocument doc;
-
-        noInterrupts();
-        uint32_t safePulses = pulseCount;
-        interrupts();
-
-        doc["time"]      = getRtcDateTimeString();
-        doc["chip"]      = ESP.getChipModel();
-        doc["version"]   = getVersionString();
-        doc["network"]   = getNetworkDisplay();
-        doc["ff"]        = digitalRead(config.hardware.pinWakeupFF);
-        doc["pf"]        = digitalRead(config.hardware.pinWakeupPF);
-        doc["wifi"]      = digitalRead(config.hardware.pinWifiTrigger);
-        doc["pulses"]    = safePulses;
-        doc["boot"]      = bootCount;
-        doc["heap"]      = ESP.getFreeHeap();
-        doc["heapTotal"] = ESP.getHeapSize();
-        doc["uptime"]    = millis() / 1000;
-        doc["trigger"]   = cycleStartedBy;
-        doc["cycleTime"] = (millis() - cycleStartTime) / 1000;
-        doc["ffCount"]   = highCountFF;
-        doc["pfCount"]   = highCountPF;
-        doc["totalPulses"] = cycleTotalPulses + safePulses;
-
-        const char* stateNames[] = {"IDLE", "WAIT_FLOW", "MONITORING", "DONE"};
-        int stateIdx = (loggingState >= 0 && loggingState <= 3) ? loggingState : 0;
-        doc["state"]     = stateNames[stateIdx];
-        doc["stateTime"] = (millis() - stateStartTime) / 1000;
-
-        if (loggingState == STATE_WAIT_FLOW) {
-            long rem = (BUTTON_WAIT_FLOW_MS - (millis() - stateStartTime)) / 1000;
-            doc["stateRemaining"] = rem > 0 ? rem : 0;
-        } else if (loggingState == STATE_MONITORING && lastFlowPulseTime > 0) {
-            long rem = (FLOW_IDLE_TIMEOUT_MS - (millis() - lastFlowPulseTime)) / 1000;
-            doc["stateRemaining"] = rem > 0 ? rem : 0;
-        } else {
-            doc["stateRemaining"] = -1;
-        }
-
-        float liters = 0;
-        if (config.flowMeter.pulsesPerLiter > 0)
-            liters = (float)safePulses / config.flowMeter.pulsesPerLiter * config.flowMeter.calibrationMultiplier;
-        doc["liters"] = liters;
-        doc["mode"]   = onlineLoggerMode ? "online" : (apModeTriggered ? "webonly" : "logging");
-
-        uint64_t used = 0, total = 0; int pct = 0;
-        getStorageInfo(used, total, pct);
-        char uBuf[24], tBuf[24];
-        snprintf(uBuf, sizeof(uBuf), "%llu", (unsigned long long)used);
-        snprintf(tBuf, sizeof(tBuf), "%llu", (unsigned long long)total);
-        doc["fsUsed"]  = serialized(String(uBuf));
-        doc["fsTotal"] = serialized(String(tBuf));
-
-        doc["ip"] = wifiConnectedAsClient
-                    ? WiFi.localIP().toString()
-                    : WiFi.softAPIP().toString();
-
+        buildLiveSnapshot(doc);
         sendJsonResponse(r, doc);
     });
+
+    // SSE channel — same payload, pushed at 1 Hz by publishLiveEvent().
+    server.addHandler(&liveEvents);
 
     // =========================================================================
     // API: RECENT LOGS
@@ -519,7 +634,8 @@ void setupWebServer() {
         else if (littleFsAvailable)                          targetFS = &LittleFS;
 
         if (targetFS) {
-            scanDir(*targetFS, dir, files, filter, recursive);
+            bool truncated = scanDir(*targetFS, dir, files, filter, recursive);
+            if (truncated) doc["truncated"] = true;
             uint64_t used = 0, total = 0; int pct = 0;
             getStorageInfo(used, total, pct, storage);
             char uBuf[24], tBuf[24];
@@ -892,24 +1008,42 @@ void setupWebServer() {
             int yr = ds.substring(0,4).toInt(), mo = ds.substring(5,7).toInt(), dy = ds.substring(8,10).toInt();
             int hr = ts.substring(0,2).toInt(), mi = ts.substring(3,5).toInt();
             RtcDateTime dt(yr, mo, dy, hr, mi, 0);
-            bool ok = false;
-            for (int attempt = 0; attempt < 3 && !ok; attempt++) {
-                Rtc->SetIsWriteProtected(false); delay(10);
-                Rtc->SetIsRunning(true); delay(10);
-                Rtc->SetDateTime(dt); delay(100);
-                RtcDateTime v = Rtc->GetDateTime();
-                if (v.Year() == yr && v.Month() == mo && v.Day() == dy) { ok = true; rtcValid = true; }
-            }
+            // Single write attempt — keeps the AsyncTCP worker responsive.
+            // The 3× retry loop used to block this handler for ~360 ms on a
+            // failing RTC; if one write fails the client can retry.
+            Rtc->SetIsWriteProtected(false); delay(10);
+            Rtc->SetIsRunning(true); delay(10);
+            Rtc->SetDateTime(dt); delay(100);
+            RtcDateTime v = Rtc->GetDateTime();
+            bool ok = (v.Year() == yr && v.Month() == mo && v.Day() == dy);
+            if (ok) rtcValid = true;
             r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"RTC write failed\"}");
         } else {
             r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing params or no RTC\"}");
         }
     });
 
+    // NTP sync can block up to ~10 seconds inside syncTimeFromNTP() (20 × 500 ms
+    // retry loop). Doing that on the AsyncTCP worker stalls every other HTTP
+    // connection. Instead we set g_pendingNtpSync and the main loop picks it
+    // up on its next iteration. Clients poll /api/time_sync_status.
     server.on("/sync_time", HTTP_POST, [](AsyncWebServerRequest *r) {
-        bool ok = syncTimeFromNTP();
-        if (ok) rtcValid = true;
-        r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"NTP sync failed\"}");
+        if (g_pendingNtpSync != 0) {
+            r->send(202, "application/json", "{\"ok\":true,\"pending\":true,\"running\":true}");
+            return;
+        }
+        g_lastNtpSyncResult = 0;
+        g_pendingNtpSync    = 1;
+        r->send(202, "application/json", "{\"ok\":true,\"pending\":true}");
+    });
+
+    server.on("/api/time_sync_status", HTTP_GET, [](AsyncWebServerRequest *r) {
+        String j = "{\"pending\":";
+        j += (g_pendingNtpSync != 0 ? "true" : "false");
+        j += ",\"result\":";
+        j += String((int)g_lastNtpSyncResult);  // 0=unknown, 1=ok, -1=fail
+        j += "}";
+        r->send(200, "application/json", j);
     });
 
     server.on("/rtc_protect", HTTP_POST, [](AsyncWebServerRequest *r) {
@@ -942,12 +1076,15 @@ void setupWebServer() {
     // =========================================================================
     server.on("/factory_reset", HTTP_POST, [](AsyncWebServerRequest *r) {
         r->send(200, "application/json", "{\"ok\":true}");
-        Serial.println("[FACTORY RESET] Formatting LittleFS…");
-        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
+        DBGLN("[FACTORY RESET] Formatting LittleFS…");
+        // Short timeout keeps the AsyncTCP worker responsive; factory reset
+        // restarts the chip regardless so blocking the worker longer buys us
+        // nothing.
+        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
         if (LittleFS.format()) {
-            Serial.println("[FACTORY RESET] LittleFS formatted OK – restarting");
+            DBGLN("[FACTORY RESET] LittleFS formatted OK – restarting");
         } else {
-            Serial.println("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
+            DBGLN("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
         }
         if (fsMutex) xSemaphoreGive(fsMutex);   // FS1
         safeWiFiShutdown();
@@ -958,11 +1095,6 @@ void setupWebServer() {
     // =========================================================================
     // RESTART
     // =========================================================================
-    server.on("/restart", HTTP_GET, [](AsyncWebServerRequest *r) {
-        r->send(200, "application/json", "{\"ok\":true}");
-        shouldRestart = true;
-        restartTimer  = millis();
-    });
     server.on("/restart", HTTP_POST, [](AsyncWebServerRequest *r) {
         r->send(200, "application/json", "{\"ok\":true}");
         shouldRestart = true;
@@ -975,8 +1107,8 @@ void setupWebServer() {
 
     server.on("/download", HTTP_GET, [](AsyncWebServerRequest *r) {
         if (!r->hasParam("file")) { r->send(400, "text/plain", "No file"); return; }
-        String path = sanitizeFilename(r->getParam("file")->value());
-        if (!path.startsWith("/")) path = "/" + path;
+        String path = sanitizePath(r->getParam("file")->value());
+        if (path.isEmpty() || path == "/") { r->send(400, "text/plain", "Invalid path"); return; }
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         fs::FS* targetFS = (storage == "sdcard" && sdAvailable) ? (fs::FS*)&SD :
                            (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
@@ -993,8 +1125,14 @@ void setupWebServer() {
     // Accept both GET (legacy web.js compat) and POST (preferred)
     auto deleteHandler = [](AsyncWebServerRequest *r) {
         if (!r->hasParam("path") && !r->hasParam("path", true)) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing path\"}"); return; }
-        String path = sanitizePath(r->getParam("path")->value());
-        if (path == "/") { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Refusing to delete root\"}"); return; }
+        // Prefer POST param; fall back to query — sanitizePath rejects "..",
+        // control chars, backslash, and NUL, returning "" on any violation.
+        String raw = r->hasParam("path", true)
+                     ? r->getParam("path", true)->value()
+                     : r->getParam("path")->value();
+        String path = sanitizePath(raw);
+        if (path.isEmpty() || path == "/") { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid path\"}"); return; }
+        if (isPathProtected(path))          { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         fs::FS* targetFS = nullptr;
         if (storage == "sdcard" && sdAvailable)              targetFS = &SD;
@@ -1005,106 +1143,185 @@ void setupWebServer() {
             File f = targetFS->open(path, FILE_READ);
             bool isDir = f && f.isDirectory();
             if (f) f.close();
-            if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
+            // 2s cap so the AsyncTCP worker yields if the mutex is contended.
+            if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
             deleted = isDir ? deleteRecursive(*targetFS, path) : targetFS->remove(path);
             if (fsMutex) xSemaphoreGive(fsMutex);
         }
         r->send(200, "application/json", deleted ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"Delete failed\"}");
     };
-    server.on("/delete", HTTP_GET,  deleteHandler);  // legacy compat
-    server.on("/delete", HTTP_POST, deleteHandler);   // preferred
+    server.on("/delete", HTTP_POST, deleteHandler);
 
-    server.on("/mkdir", HTTP_GET, [](AsyncWebServerRequest *r) {
+    server.on("/mkdir", HTTP_POST, [](AsyncWebServerRequest *r) {
         fs::FS* targetFS = getCurrentViewFS();
         if (!r->hasParam("name") || !targetFS) { r->send(400, "text/plain", "Missing name"); return; }
-        String dir     = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
+        String dirRaw  = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         if (storage == "sdcard" && sdAvailable) targetFS = &SD;
         else targetFS = &LittleFS;
+        String dir  = sanitizePath(dirRaw);
         String name = sanitizeFilename(r->getParam("name")->value());
+        if (dir.isEmpty() || name.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid name or dir\"}"); return; }
         String fp   = buildPath(dir, name);
-        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
+        // 2s cap so the AsyncTCP worker yields if the mutex is contended.
+        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
         bool ok = targetFS->mkdir(fp);
         if (fsMutex) xSemaphoreGive(fsMutex);
-        r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
+        r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"mkdir failed\"}");
     });
 
-    server.on("/move_file", HTTP_GET, [](AsyncWebServerRequest *r) {
+    server.on("/move_file", HTTP_POST, [](AsyncWebServerRequest *r) {
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         String src     = r->hasParam("src")     ? sanitizePath(r->getParam("src")->value())     : "";
-        String newName = r->hasParam("newName") ? r->getParam("newName")->value() : "";
-        String destDir = r->hasParam("destDir") ? r->getParam("destDir")->value() : "";
-        if (src.isEmpty() || newName.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing params\"}"); return; }
+        String newName = r->hasParam("newName") ? sanitizeFilename(r->getParam("newName")->value()) : "";
+        String destRaw = r->hasParam("destDir") ? r->getParam("destDir")->value() : "";
+        if (src.isEmpty() || newName.isEmpty() || src == "/") { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid src or newName\"}"); return; }
+        if (isPathProtected(src)) { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
         fs::FS* targetFS = nullptr;
         if (storage == "sdcard" && sdAvailable)              targetFS = &SD;
         else if (storage == "internal" && littleFsAvailable) targetFS = &LittleFS;
         if (!targetFS) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"No storage\"}"); return; }
-        String dstDir  = destDir.isEmpty() ? src.substring(0, src.lastIndexOf('/')) : destDir;
-        if (dstDir.isEmpty()) dstDir = "/";
+        String dstDir;
+        if (destRaw.isEmpty()) {
+            dstDir = src.substring(0, src.lastIndexOf('/'));
+            if (dstDir.isEmpty()) dstDir = "/";
+        } else {
+            dstDir = sanitizePath(destRaw);
+            if (dstDir.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid destDir\"}"); return; }
+        }
         String dstPath = buildPath(dstDir, newName);
-        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
+        if (isPathProtected(dstPath)) { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
+        // 2s cap so the AsyncTCP worker yields if the mutex is contended.
+        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
         bool ok = targetFS->rename(src, dstPath);
         if (fsMutex) xSemaphoreGive(fsMutex);
-        r->send(200, "application/json", ok ? "{\"ok\":true,\"dst\":\"" + dstPath + "\"}" : "{\"ok\":false}");
+        r->send(200, "application/json", ok ? "{\"ok\":true,\"dst\":\"" + dstPath + "\"}" : "{\"ok\":false,\"error\":\"Rename failed\"}");
     });
 
-    // Upload handler: file handle stored per-request to prevent concurrent corruption
+    // Upload handler: per-request state in _tempObject tracks file handle
+    // AND mutex-held flag so that client abort (onDisconnect) can release both.
+    struct UploadCtx { File file; bool mutexHeld; bool failed; };
     server.on("/upload", HTTP_POST,
         [](AsyncWebServerRequest *r) {
-            // Clean up request-scoped file handle
-            File* fp = (File*)r->_tempObject;
-            if (fp) { if (*fp) fp->close(); delete fp; r->_tempObject = nullptr; }
+            UploadCtx* ctx = (UploadCtx*)r->_tempObject;
+            if (ctx) {
+                if (ctx->file) ctx->file.close();
+                if (ctx->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
+                bool failed = ctx->failed;
+                delete ctx;
+                r->_tempObject = nullptr;
+                if (failed) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Upload failed\"}"); return; }
+            }
             r->send(200, "application/json", "{\"ok\":true}");
         },
         [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
             if (index == 0) {
-                // Clean up any leftover handle from a previous aborted upload
-                File* old = (File*)request->_tempObject;
-                if (old) { if (*old) old->close(); delete old; }
+                // Clean up leftover state from a previous aborted upload
+                UploadCtx* old = (UploadCtx*)request->_tempObject;
+                if (old) {
+                    if (old->file) old->file.close();
+                    if (old->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
+                    delete old;
+                    request->_tempObject = nullptr;
+                }
 
-                String upDir = request->hasParam("path")
-                               ? request->getParam("path")->value()
-                               : String("/www/");
-                if (!upDir.startsWith("/")) upDir = "/" + upDir;
-                while (upDir.length() > 1 && upDir.endsWith("/")) upDir.remove(upDir.length()-1);
+                String upDirRaw = request->hasParam("path")
+                                  ? request->getParam("path")->value()
+                                  : String("/www/");
+                String upDir = sanitizePath(upDirRaw);
+                if (upDir.isEmpty()) {
+                    DBGF("Upload: invalid path '%s'\n", upDirRaw.c_str());
+                    auto* ctx = new UploadCtx{File(), false, true};
+                    request->_tempObject = ctx;
+                    return;
+                }
+
+                String safeName = sanitizeFilename(filename);
+                if (safeName.isEmpty()) {
+                    DBGF("Upload: invalid filename '%s'\n", filename.c_str());
+                    auto* ctx = new UploadCtx{File(), false, true};
+                    request->_tempObject = ctx;
+                    return;
+                }
 
                 String upStorage = request->hasParam("storage")
                                    ? request->getParam("storage")->value()
                                    : String("internal");
 
-                fs::FS* targetFS = (upStorage == "sdcard" && sdAvailable)
+                bool wantSD = (upStorage == "sdcard");
+                fs::FS* targetFS = (wantSD && sdAvailable)
                                    ? (fs::FS*)&SD
                                    : (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
-                if (!targetFS) { Serial.println("Upload: no filesystem available"); request->_tempObject = nullptr; return; }
-                if (upDir != "/") targetFS->mkdir(upDir);
-
-                String upPath = (upDir == "/") ? "/" + filename : upDir + "/" + filename;
-                Serial.printf("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
-
-                if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
-                File* fp = new File(targetFS->open(upPath, FILE_WRITE));
-                if (!fp || !*fp) {
-                    Serial.printf("Upload: cannot open %s for write\n", upPath.c_str());
-                    if (fp) delete fp;
-                    request->_tempObject = nullptr;
+                if (!targetFS) {
+                    DBGLN("Upload: no filesystem available");
+                    auto* ctx = new UploadCtx{File(), false, true};
+                    request->_tempObject = ctx;
                     return;
                 }
-                request->_tempObject = fp;
+
+                String upPath = buildPath(upDir, safeName);
+                if (!wantSD && isPathProtected(upPath)) {
+                    DBGF("Upload: refusing protected path %s\n", upPath.c_str());
+                    auto* ctx = new UploadCtx{File(), false, true};
+                    request->_tempObject = ctx;
+                    return;
+                }
+
+                // Disk-full guard for internal storage. Use content-length when
+                // supplied; otherwise require at least 32 KB headroom.
+                if (targetFS == (fs::FS*)&LittleFS) {
+                    size_t free = LittleFS.totalBytes() - LittleFS.usedBytes();
+                    size_t need = request->contentLength() ? request->contentLength() : 32768;
+                    if (free < need) {
+                        DBGF("Upload: disk full (free=%u need=%u)\n",
+                                      (unsigned)free, (unsigned)need);
+                        auto* ctx = new UploadCtx{File(), false, true};
+                        request->_tempObject = ctx;
+                        return;
+                    }
+                }
+
+                DBGF("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
+
+                auto* ctx = new UploadCtx{File(), false, false};
+                if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
+                    ctx->mutexHeld = true;
+                }
+                if (upDir != "/") targetFS->mkdir(upDir);
+                ctx->file = targetFS->open(upPath, FILE_WRITE);
+                if (!ctx->file) {
+                    DBGF("Upload: cannot open %s for write\n", upPath.c_str());
+                    if (ctx->mutexHeld && fsMutex) { xSemaphoreGive(fsMutex); ctx->mutexHeld = false; }
+                    ctx->failed = true;
+                }
+                request->_tempObject = ctx;
+
+                // Release FS mutex + close partial file if the client aborts.
+                request->onDisconnect([request]() {
+                    UploadCtx* c = (UploadCtx*)request->_tempObject;
+                    if (!c) return;
+                    if (c->file) c->file.close();
+                    if (c->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
+                    delete c;
+                    request->_tempObject = nullptr;
+                });
             }
 
-            File* fp = (File*)request->_tempObject;
-            if (fp && *fp && len) fp->write(data, len);
-
-            if (final) {
-                if (fp) {
-                    if (*fp) {
-                        Serial.printf("Upload done: %s (%u bytes)\n", filename.c_str(), (unsigned)(index + len));
-                        fp->close();
-                    }
-                    delete fp;
-                    request->_tempObject = nullptr;
-                    if (fsMutex) xSemaphoreGive(fsMutex);   // FS1
+            UploadCtx* ctx = (UploadCtx*)request->_tempObject;
+            if (ctx && ctx->file && !ctx->failed && len) {
+                if (ctx->file.write(data, len) != len) {
+                    DBGLN("Upload: short write (disk full?)");
+                    ctx->failed = true;
                 }
+            }
+
+            if (final && ctx) {
+                if (ctx->file) {
+                    DBGF("Upload done: %s (%u bytes)\n",
+                                  filename.c_str(), (unsigned)(index + len));
+                    ctx->file.close();
+                }
+                if (ctx->mutexHeld && fsMutex) { xSemaphoreGive(fsMutex); ctx->mutexHeld = false; }
             }
         }
     );
@@ -1185,11 +1402,16 @@ void setupWebServer() {
             r->send(200, "text/plain", "OK");
         },
         [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+            // Hard cap matches the accept-limit below so a malicious
+            // Content-Length cannot trigger a huge heap allocation.
+            constexpr size_t kImportMax = 8192;
             if (!index) {
                 _importBuf = "";
-                _importBuf.reserve(req->contentLength() > 0 ? req->contentLength() : 4096);
+                size_t hint = req->contentLength() > 0 ? req->contentLength() : 4096;
+                if (hint > kImportMax) hint = kImportMax;
+                _importBuf.reserve(hint);
             }
-            if (_importBuf.length() + len > 8192) return; // Hard cap
+            if (_importBuf.length() + len > kImportMax) return; // Hard cap
             _importBuf.concat((const char*)data, len);
         }
     );
@@ -1225,31 +1447,51 @@ void setupWebServer() {
     // =========================================================================
     // OTA FIRMWARE UPDATE
     // =========================================================================
-    server.on("/do_update", HTTP_POST,
-        [](AsyncWebServerRequest *r) {
-            bool ok = !Update.hasError();
-            AsyncWebServerResponse *resp = r->beginResponse(200, "application/json",
-                ok ? "{\"success\":true,\"message\":\"Update complete, restarting...\"}"
-                   : "{\"success\":false,\"message\":\"Update failed\"}");
-            resp->addHeader("Connection", "close");
-            r->send(resp);
-            if (ok) {
-                shouldRestart = true;
-                restartTimer = millis();
+    {
+        static bool s_otaRejected = false;
+        server.on("/do_update", HTTP_POST,
+            [](AsyncWebServerRequest *r) {
+                bool ok = !s_otaRejected && !Update.hasError();
+                const char* msg = s_otaRejected
+                    ? "{\"success\":false,\"message\":\"Invalid firmware image\"}"
+                    : (ok ? "{\"success\":true,\"message\":\"Update complete, restarting...\"}"
+                          : "{\"success\":false,\"message\":\"Update failed\"}");
+                AsyncWebServerResponse *resp = r->beginResponse(ok ? 200 : 400,
+                    "application/json", msg);
+                resp->addHeader("Connection", "close");
+                r->send(resp);
+                if (ok) {
+                    shouldRestart = true;
+                    restartTimer = millis();
+                }
+            },
+            [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+                if (!index) {
+                    s_otaRejected = false;
+                    DBGF("OTA start: %s\n", filename.c_str());
+                    // First byte of an ESP32 firmware image must be
+                    // ESP_IMAGE_HEADER_MAGIC (0xE9). Reject anything else
+                    // before touching flash.
+                    if (len < 1 || data[0] != 0xE9) {
+                        DBGLN("OTA: bad magic byte, rejecting");
+                        s_otaRejected = true;
+                        return;
+                    }
+                    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+                        Update.printError(Serial);
+                        s_otaRejected = true;
+                        return;
+                    }
+                }
+                if (s_otaRejected) return;
+                if (Update.write(data, len) != len) Update.printError(Serial);
+                if (final) {
+                    if (Update.end(true)) DBGF("OTA done: %u bytes\n", index + len);
+                    else Update.printError(Serial);
+                }
             }
-        },
-        [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-            if (!index) {
-                Serial.printf("OTA start: %s\n", filename.c_str());
-                if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
-            }
-            if (Update.write(data, len) != len) Update.printError(Serial);
-            if (final) {
-                if (Update.end(true)) Serial.printf("OTA done: %u bytes\n", index + len);
-                else Update.printError(Serial);
-            }
-        }
-    );
+        );
+    }
 
     // =========================================================================
     // STATIC FILE FALLBACK (not found handler)
@@ -1298,42 +1540,87 @@ void setupWebServer() {
     // =========================================================================
     server.on("/api/platform_config", HTTP_GET, [](AsyncWebServerRequest *r) {
         if (!fsAvailable || !activeFS || !activeFS->exists("/platform_config.json")) {
-            r->send(404, "application/json", "{\"error\":\"platform_config.json not found\"}");
+            r->send(404, "application/json", "{\"ok\":false,\"error\":\"platform_config.json not found\"}");
             return;
         }
         r->send(*activeFS, "/platform_config.json", "application/json");
     });
 
     // POST /save_platform — receives JSON body, writes to /platform_config.json
+    // Crash-safe: streams into /platform_config.tmp, then renames on success.
+    // If the client aborts or the device resets mid-write, the real file stays
+    // intact and the tmp is removed on next save attempt.
     // Uses static file handle (only one request at a time on embedded device).
     {
-        // Static file handle shared across onRequest + onBody lambdas
         static File s_pcfgFile;
+        static bool s_pcfgMutexHeld = false;
+        static bool s_pcfgComplete  = false;
+        static constexpr const char* PCFG_PATH = "/platform_config.json";
+        static constexpr const char* PCFG_TMP  = "/platform_config.tmp";
+
+        auto pcfgCleanup = []() {
+            if (s_pcfgFile) s_pcfgFile.close();
+            // If the upload didn't finish cleanly, discard the partial tmp so
+            // the real platform_config.json remains the last good copy.
+            if (!s_pcfgComplete && activeFS && activeFS->exists(PCFG_TMP)) {
+                activeFS->remove(PCFG_TMP);
+            }
+            if (s_pcfgMutexHeld && fsMutex) {
+                xSemaphoreGive(fsMutex);
+                s_pcfgMutexHeld = false;
+            }
+        };
 
         server.on("/save_platform", HTTP_POST,
-            [](AsyncWebServerRequest *r) {
-                // onRequest fires AFTER body is fully collected (when using onBody).
-                // At this point the file is already closed by onBody; just ACK.
+            [pcfgCleanup](AsyncWebServerRequest *r) {
                 if (!fsAvailable || !activeFS) {
+                    pcfgCleanup();
                     r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
                     return;
                 }
                 r->send(200, "application/json", "{\"ok\":true}");
             },
             nullptr,
-            [](AsyncWebServerRequest *r, uint8_t *data, size_t len,
+            [pcfgCleanup](AsyncWebServerRequest *r, uint8_t *data, size_t len,
                size_t index, size_t total) {
                 if (!fsAvailable || !activeFS) return;
                 if (index == 0) {
-                    if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000));   // FS1
-                    s_pcfgFile = activeFS->open("/platform_config.json", FILE_WRITE);
+                    s_pcfgComplete = false;
+                    if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
+                        s_pcfgMutexHeld = true;
+                    }
+                    // Clean up any leftover tmp from a previous aborted save.
+                    if (activeFS->exists(PCFG_TMP)) activeFS->remove(PCFG_TMP);
+                    s_pcfgFile = activeFS->open(PCFG_TMP, FILE_WRITE);
+                    if (!s_pcfgFile && s_pcfgMutexHeld && fsMutex) {
+                        xSemaphoreGive(fsMutex);
+                        s_pcfgMutexHeld = false;
+                    }
+                    // Release FS mutex + discard partial tmp if the client aborts.
+                    r->onDisconnect(pcfgCleanup);
                 }
                 if (s_pcfgFile) {
                     s_pcfgFile.write(data, len);
                 }
-                if (index + len >= total && s_pcfgFile) {
-                    s_pcfgFile.close();
-                    if (fsMutex) xSemaphoreGive(fsMutex);   // FS1
+                if (index + len >= total) {
+                    // Close the tmp file, then atomically replace the real one.
+                    if (s_pcfgFile) { s_pcfgFile.close(); s_pcfgFile = File(); }
+                    // LittleFS rename overwrites; SD/FAT does not — fall back to
+                    // remove+rename if the first attempt fails. If we crash between
+                    // remove and rename the tmp is still on disk, but no recovery
+                    // path picks it up, so the small window is acceptable.
+                    bool ok = activeFS->rename(PCFG_TMP, PCFG_PATH);
+                    if (!ok) {
+                        if (activeFS->exists(PCFG_PATH)) activeFS->remove(PCFG_PATH);
+                        ok = activeFS->rename(PCFG_TMP, PCFG_PATH);
+                    }
+                    if (!ok) {
+                        // Rename still failed — clean up the tmp so we don't leak it.
+                        if (activeFS->exists(PCFG_TMP)) activeFS->remove(PCFG_TMP);
+                    } else {
+                        s_pcfgComplete = true;  // success → cleanup() won't delete anything
+                    }
+                    pcfgCleanup();
                 }
             }
         );
@@ -1351,5 +1638,5 @@ void setupWebServer() {
     });
 
     server.begin();
-    Serial.printf("Web server started. Free heap: %d\n", ESP.getFreeHeap());
+    DBGF("Web server started. Free heap: %d\n", ESP.getFreeHeap());
 }

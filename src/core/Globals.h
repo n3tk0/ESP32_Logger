@@ -111,3 +111,11 @@ extern unsigned long lastLoggingCycleStartTime;
 
 // Web activity timestamp — updated by web request handlers (C2 power restore)
 extern volatile uint32_t g_lastWebActivity;
+
+// ============================================================================
+// DEFERRED ACTIONS (executed from loop() so async handlers don't block)
+// ============================================================================
+// g_pendingNtpSync:      0 = idle, 1 = requested, 2 = running
+// g_lastNtpSyncResult:   0 = unknown, 1 = ok, -1 = fail
+extern volatile uint8_t g_pendingNtpSync;
+extern volatile int8_t  g_lastNtpSyncResult;

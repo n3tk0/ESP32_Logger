@@ -1,0 +1,116 @@
+  <main class="main-content page" id="page-settings_hardware">
+    <div class="page-header">
+      <h1>🔧 Hardware</h1>
+      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Hardware
+      </div>
+    </div>
+
+    <div class="alert alert-warning">⚠️ Changes require device restart to take effect.</div>
+
+    <!-- Board diagram (if configured) -->
+    <div id="boardDiagramCard" class="card" style="display:none">
+      <div class="card-body text-center">
+        <img id="boardDiagram" src="" style="max-width:100%;height:auto"
+          onerror="this.parentElement.parentElement.style.display='none'">
+      </div>
+    </div>
+
+    <form onsubmit="settingsSave(event,'/save_hardware',this,true)">
+      <div id="hw-msg"></div>
+      <!-- Storage -->
+      <div class="card">
+        <div class="card-header">💾 Storage</div>
+        <div class="card-body">
+          <div class="form-group">
+            <select name="storageType" id="hw-storage" class="form-input form-select" onchange="hwToggleSD()">
+              <option value="0">LittleFS (Internal)</option>
+              <option value="1">SD Card (SPI)</option>
+            </select>
+          </div>
+          <div id="sdPins" style="display:none;margin-top:1rem">
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">CS</label><input type="number" name="pinSdCS"
+                  id="hw-sdCS" class="form-input"></div>
+              <div class="form-group"><label class="form-label">MOSI</label><input type="number" name="pinSdMOSI"
+                  id="hw-sdMOSI" class="form-input"></div>
+              <div class="form-group"><label class="form-label">MISO</label><input type="number" name="pinSdMISO"
+                  id="hw-sdMISO" class="form-input"></div>
+              <div class="form-group"><label class="form-label">SCK</label><input type="number" name="pinSdSCK"
+                  id="hw-sdSCK" class="form-input"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Wakeup -->
+      <div class="card">
+        <div class="card-header">😴 Wakeup Mode</div>
+        <div class="card-body">
+          <div class="form-group">
+            <label class="form-label">Button Active Level</label>
+            <select name="wakeupMode" id="hw-wakeup" class="form-input form-select">
+              <option value="0">Active HIGH (VCC)</option>
+              <option value="1">Active LOW (GND)</option>
+            </select>
+            <p class="form-hint">HIGH = button connects to VCC, LOW = to GND.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Debounce (ms)</label>
+            <input type="number" name="debounceMs" id="hw-debounce" min="20" max="500" class="form-input">
+            <p class="form-hint">Higher = fewer false triggers but slower response.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- GPIO pins -->
+      <div class="card">
+        <div class="card-header">🔘 Pin Configuration</div>
+        <div class="card-body">
+          <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem">GPIO pin numbers for ESP32-C3</p>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">WiFi Trigger</label><input type="number"
+                name="pinWifiTrigger" id="hw-pinWifi" class="form-input"></div>
+            <div class="form-group"><label class="form-label">Full Flush Btn</label><input type="number"
+                name="pinWakeupFF" id="hw-pinFF" class="form-input"></div>
+            <div class="form-group"><label class="form-label">Part Flush Btn</label><input type="number"
+                name="pinWakeupPF" id="hw-pinPF" class="form-input"></div>
+            <div class="form-group"><label class="form-label">Flow Sensor</label><input type="number"
+                name="pinFlowSensor" id="hw-pinFlow" class="form-input"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RTC -->
+      <div class="card">
+        <div class="card-header">🕐 RTC DS1302</div>
+        <div class="card-body">
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">CE (RST)</label><input type="number" name="pinRtcCE"
+                id="hw-rtcCE" class="form-input"></div>
+            <div class="form-group"><label class="form-label">IO (DAT)</label><input type="number" name="pinRtcIO"
+                id="hw-rtcIO" class="form-input"></div>
+            <div class="form-group"><label class="form-label">CLK (SCLK)</label><input type="number" name="pinRtcSCLK"
+                id="hw-rtcCLK" class="form-input"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CPU -->
+      <div class="card">
+        <div class="card-header">⚡ CPU Frequency</div>
+        <div class="card-body">
+          <div class="form-group">
+            <select name="cpuFreqMHz" id="hw-cpu" class="form-input form-select">
+              <option value="80">80 MHz</option>
+              <option value="160">160 MHz</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block"
+        onclick="return confirm('Settings will be saved and device will restart. Continue?')">
+        💾 Save &amp; Restart
+      </button>
+    </form>
+  </main>

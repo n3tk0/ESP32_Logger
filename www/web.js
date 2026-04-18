@@ -21,7 +21,8 @@ var CFG = {}; // cached /export_settings payload
 var dbChart = null; // Chart.js instance on dashboard
 var dbRawData = ""; // raw log text for dashboard
 var dbFilteredData = []; // filtered, parsed rows
-var liveTimer = null; // live page interval
+var liveTimer = null; // live page polling interval (fallback)
+var liveES    = null; // live page EventSource (preferred transport)
 var liveLogsTimer = null; // live logs interval
 var currentPage = ""; // active page id (without 'page-' prefix)
 var currentFilesDir = "/";
@@ -105,13 +106,18 @@ function applyStatus(d) {
     var actDark = false;
 
     if (html) {
+      // Per-client override (set by quickThemeToggle) wins over server config
+      // so the toggle is responsive without a round-trip.
+      var override = null;
+      try { override = localStorage.getItem("themeOverride"); } catch (e) {}
+      var effective = override || (m === 0 || m === "0" ? "light"
+                                : m === 1 || m === "1" ? "dark"
+                                : "auto");
       html.classList.remove("theme-light", "theme-dark", "theme-auto");
-      if (m === 0 || m === "0") html.classList.add("theme-light");
-      else if (m === 1 || m === "1") {
-        html.classList.add("theme-dark");
+      html.classList.add("theme-" + effective);
+      if (effective === "dark") {
         actDark = true;
-      } else {
-        html.classList.add("theme-auto");
+      } else if (effective === "auto") {
         actDark =
           window.matchMedia &&
           window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -120,16 +126,16 @@ function applyStatus(d) {
           window
             .matchMedia("(prefers-color-scheme: dark)")
             .addEventListener("change", function (e) {
-              if (
-                ST &&
-                ST.theme &&
-                (ST.theme.mode === 2 || ST.theme.mode === "2")
-              )
-                applyStatus(ST);
+              var ov = null;
+              try { ov = localStorage.getItem("themeOverride"); } catch (e2) {}
+              var inAuto = ov ? ov === "auto"
+                              : (ST && ST.theme && (ST.theme.mode === 2 || ST.theme.mode === "2"));
+              if (inAuto) applyStatus(ST);
             });
           window._actDarkListenerAppended = true;
         }
       }
+      _themeUpdateToggleIcon(effective);
     }
 
     var vars = ":root{";
@@ -193,12 +199,101 @@ function updateFooter(d) {
 }
 
 // ============================================================================
+// THEME (client-side override; server config is the source of truth and is
+// applied by applyStatus().  This lets the user flip the theme instantly
+// without waiting for a /save_theme round-trip.)
+// ============================================================================
+function _themeApplyOverride(mode) {
+  // mode: 'light' | 'dark' | 'auto'
+  var html = document.documentElement;
+  html.classList.remove("theme-light", "theme-dark", "theme-auto");
+  html.classList.add("theme-" + mode);
+  try { localStorage.setItem("themeOverride", mode); } catch (e) {}
+  _themeUpdateToggleIcon(mode);
+}
+
+function _themeUpdateToggleIcon(mode) {
+  var btn = document.getElementById("themeToggleBtn");
+  if (!btn) return;
+  // Show the icon for the mode you'd switch INTO so the affordance is obvious.
+  btn.textContent = mode === "dark" ? "☀️" : (mode === "light" ? "🌓" : "🌙");
+  btn.title = "Theme: " + mode + " (click to change)";
+}
+
+function quickThemeToggle() {
+  var current;
+  try { current = localStorage.getItem("themeOverride") || "auto"; }
+  catch (e) { current = "auto"; }
+  // Cycle: auto → dark → light → auto
+  var next = current === "auto" ? "dark" : (current === "dark" ? "light" : "auto");
+  _themeApplyOverride(next);
+}
+
+// Initialise toggle icon on first script run (DOM is ready since we're at the
+// bottom of <body>).
+(function () {
+  var pref = "auto";
+  try { pref = localStorage.getItem("themeOverride") || "auto"; } catch (e) {}
+  _themeUpdateToggleIcon(pref);
+})();
+
+// ============================================================================
 // NAVIGATION
 // ============================================================================
 function nav(el) {
   var page = el.getAttribute("data-page");
   location.hash = page;
   return false;
+}
+
+// Pages whose markup is shipped as a separate /pages/<name>.html file and
+// injected on first navigation.  Keep dashboard/live/files/settings hub
+// inlined in index.html for fast first paint.
+var LAZY_PAGES = {
+  settings_device:    1,
+  settings_flowmeter: 1,
+  settings_hardware:  1,
+  settings_datalog:   1,
+  settings_corelogic: 1,
+  settings_export:    1,
+  settings_theme:     1,
+  settings_network:   1,
+  settings_time:      1,
+  update:             1,
+};
+var _loadedPartials = {};   // page name → true once injected
+var _inflightPartials = {}; // page name → Promise in flight
+
+function loadPagePartial(page) {
+  if (!LAZY_PAGES[page]) return Promise.resolve();
+  if (_loadedPartials[page]) return Promise.resolve();
+  if (_inflightPartials[page]) return _inflightPartials[page];
+
+  var url = "/pages/" + page + ".html";
+  var p = fetch(url)
+    .then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.text();
+    })
+    .then(function (html) {
+      // Inject as the last child of <body> so it becomes a sibling of the
+      // other .page elements and the existing .active toggle logic finds it.
+      var host = document.createElement("div");
+      host.innerHTML = html;
+      while (host.firstChild) document.body.appendChild(host.firstChild);
+      _loadedPartials[page] = true;
+    })
+    .catch(function (e) {
+      console.error("loadPagePartial(" + page + ") failed:", e);
+      // Swallow — navigateTo's existing fallback will land the user on the
+      // settings hub if the page element is still missing.
+    })
+    .then(function () {
+      delete _inflightPartials[page];
+    });
+
+  _inflightPartials[page] = p;
+  return p;
 }
 
 function navigateTo(page) {
@@ -208,40 +303,46 @@ function navigateTo(page) {
       clearInterval(liveTimer);
       liveTimer = null;
     }
+    if (liveES) {
+      try { liveES.close(); } catch (e) {}
+      liveES = null;
+    }
     if (liveLogsTimer) {
       clearInterval(liveLogsTimer);
       liveLogsTimer = null;
     }
   }
 
-  document.querySelectorAll(".page").forEach(function (p) {
-    p.classList.remove("active");
-  });
-  document.querySelectorAll(".nav-item, .bottom-nav a").forEach(function (a) {
-    a.classList.remove("active");
-  });
-
-  var topPage = page.startsWith("settings") ? "settings" : page;
-  currentPage = page;
-
-  var pageEl = document.getElementById("page-" + page);
-  if (pageEl) {
-    pageEl.classList.add("active");
-  } else {
-    var hub = document.getElementById("page-settings");
-    if (hub) hub.classList.add("active");
-    topPage = "settings";
-    currentPage = "settings";
-  }
-
-  document
-    .querySelectorAll('[data-page="' + topPage + '"]')
-    .forEach(function (a) {
-      a.classList.add("active");
+  loadPagePartial(page).then(function () {
+    document.querySelectorAll(".page").forEach(function (p) {
+      p.classList.remove("active");
+    });
+    document.querySelectorAll(".nav-item, .bottom-nav a").forEach(function (a) {
+      a.classList.remove("active");
     });
 
-  pageInit(page);
-  applySettingsFlash();
+    var topPage = page.startsWith("settings") ? "settings" : page;
+    currentPage = page;
+
+    var pageEl = document.getElementById("page-" + page);
+    if (pageEl) {
+      pageEl.classList.add("active");
+    } else {
+      var hub = document.getElementById("page-settings");
+      if (hub) hub.classList.add("active");
+      topPage = "settings";
+      currentPage = "settings";
+    }
+
+    document
+      .querySelectorAll('[data-page="' + topPage + '"]')
+      .forEach(function (a) {
+        a.classList.add("active");
+      });
+
+    pageInit(page);
+    applySettingsFlash();
+  });
 }
 
 function showSubpage(page) {
@@ -462,7 +563,7 @@ function confirmRestart() {
       "Redirecting in <strong>" + s + "</strong> seconds…";
     if (bar) bar.style.width = (5 - s) * 20 + "%";
     if (s <= 0) {
-      fetch("/restart").finally(function () {
+      fetch("/restart", { method: "POST" }).finally(function () {
         location.hash = "dashboard";
         location.reload();
       });
@@ -925,6 +1026,12 @@ function filesRender() {
       }
 
       var html = "";
+      if (d.truncated) {
+        html +=
+          "<div class='list-item text-warning' style='font-size:.8rem'>" +
+          "⚠️ Listing truncated at 500 entries \u2014 refine with a subfolder." +
+          "</div>";
+      }
       files.forEach(function (f) {
         var safePath = f.path.replace(/'/g, "\\'");
         var safeName = f.name.replace(/'/g, "\\'");
@@ -1070,6 +1177,7 @@ function filesMkdir() {
       encodeURIComponent(currentFilesDir) +
       "&storage=" +
       currentFilesStorage,
+    { method: "POST" },
   ).then(function () {
     name.value = "";
     filesRender();
@@ -1095,7 +1203,7 @@ function filesApplyMove() {
     "&storage=" +
     currentFilesStorage;
   if (destDir) url += "&destDir=" + encodeURIComponent(destDir);
-  fetch(url)
+  fetch(url, { method: "POST" })
     .then(function () {
       document.getElementById("movePopup").style.display = "none";
       filesRender();
@@ -1129,84 +1237,64 @@ function liveInit() {
       "s idle) → Logging";
   }
 
-  liveUpdate();
+  // Prefer Server-Sent Events; fall back to polling on error / unsupported.
+  liveStartTransport();
   liveLogsUpdate();
-  liveTimer = setInterval(liveUpdate, 500);
   liveLogsTimer = setInterval(liveLogsUpdate, 3000);
+}
+
+function liveStartTransport() {
+  // Always do one immediate fetch so the page is populated before the first
+  // SSE tick (server pushes at 1 Hz).
+  liveUpdate();
+
+  if (typeof EventSource === "undefined") {
+    liveStartPolling(500);
+    return;
+  }
+  try {
+    liveES = new EventSource("/api/events");
+  } catch (e) {
+    liveStartPolling(500);
+    return;
+  }
+  liveES.addEventListener("live", function (ev) {
+    try { liveRender(JSON.parse(ev.data)); } catch (e) {}
+  });
+  liveES.onerror = function () {
+    // Browser will auto-retry, but surface the disconnect and degrade to
+    // polling if the SSE channel never recovers.
+    var conn = document.getElementById("conn");
+    if (conn) {
+      conn.textContent = "● Reconnecting…";
+      conn.className = "text-warning";
+    }
+    if (!liveTimer) liveStartPolling(1000);
+  };
+}
+
+function liveStartPolling(rate) {
+  if (liveTimer) { clearInterval(liveTimer); }
+  liveTimer = setInterval(liveUpdate, rate || 500);
 }
 
 function liveSetRate() {
     var rateEl = document.getElementById('live-refresh-rate');
     if (!rateEl) return;
     var rate = parseInt(rateEl.value, 10) || 500;
-    if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
-    liveTimer = setInterval(liveUpdate, rate);
+    // Manual rate override → close SSE and use polling at the chosen interval.
+    if (liveES) { try { liveES.close(); } catch (e) {} liveES = null; }
+    liveStartPolling(rate);
 }
 
-// Matches original: function upd()
+// Polling fallback — kept identical in shape to the original upd() so the
+// liveRender() body works for both EventSource and fetch results.
 function liveUpdate() {
   fetch("/api/live")
     .then(function (r) {
       return r.json();
     })
-    .then(function (d) {
-      var conn = document.getElementById("conn");
-      if (conn) {
-        conn.textContent = "● Connected";
-        conn.className = "text-success";
-      }
-
-      setEl("live-time", d.time);
-      setEl("live-trigger", d.trigger);
-      setEl("live-cycleTime", d.cycleTime);
-      setEl("live-pulses", d.pulses);
-      setEl("live-liters", parseFloat(d.liters || 0).toFixed(2));
-      setEl("live-ffCount", d.ffCount);
-      setEl("live-pfCount", d.pfCount);
-      setEl("live-boot", d.boot);
-      setEl("live-heap", fmtBytes(d.heap));
-      setEl("live-heapTotal", fmtBytes(d.heapTotal));
-      setEl("live-uptime", d.uptime);
-      if (d.fsTotal)
-        setEl("live-storage", fmtBytes(d.fsUsed) + "/" + fmtBytes(d.fsTotal));
-
-      // State machine colors — exact from original .ino
-      var stColors = {
-        IDLE: "#3498db",
-        WAIT_FLOW: "#f39c12",
-        MONITORING: "#27ae60",
-        DONE: "#e74c3c",
-      };
-      var stEl = document.getElementById("state");
-      if (stEl) {
-        stEl.textContent = d.state;
-        stEl.style.background = stColors[d.state] || "#95a5a6";
-        stEl.style.color = "#fff";
-      }
-      var remEl = document.getElementById("stateRem");
-      if (remEl)
-        remEl.textContent =
-          d.stateRemaining >= 0 ? d.stateRemaining + "s" : "-";
-
-      // Button states
-      liveBtn("live-ff", d.ff, "Pressed", "Released", "#27ae60", "#95a5a6");
-      liveBtn("live-pf", d.pf, "Pressed", "Released", "#27ae60", "#95a5a6");
-      liveBtn("live-wifi", d.wifi, "Pressed", "Released", "#3498db", "#95a5a6");
-
-      // Mode display — matches original getModeDisplay()
-      var modeEl = document.getElementById("mode");
-      if (modeEl) {
-        if (d.mode === "online") modeEl.innerHTML = "🌐 Online Logger";
-        else if (d.mode === "webonly") modeEl.innerHTML = "📡 Web Only";
-        else modeEl.innerHTML = "📊 Logging";
-      }
-
-      // Live header time update
-      if (d.time) setEl("headerTime", d.time.split(" ")[1] || d.time);
-
-      // Footer live refresh — boot count + heap (chip/version stay from applyStatus)
-      updateFooter({ boot: d.boot, heap: d.heap, heapTotal: d.heapTotal });
-    })
+    .then(liveRender)
     .catch(function () {
       var conn = document.getElementById("conn");
       if (conn) {
@@ -1214,6 +1302,59 @@ function liveUpdate() {
         conn.className = "text-danger";
       }
     });
+}
+
+function liveRender(d) {
+  if (!d) return;
+  var conn = document.getElementById("conn");
+  if (conn) {
+    conn.textContent = "● Connected";
+    conn.className = "text-success";
+  }
+
+  setEl("live-time", d.time);
+  setEl("live-trigger", d.trigger);
+  setEl("live-cycleTime", d.cycleTime);
+  setEl("live-pulses", d.pulses);
+  setEl("live-liters", parseFloat(d.liters || 0).toFixed(2));
+  setEl("live-ffCount", d.ffCount);
+  setEl("live-pfCount", d.pfCount);
+  setEl("live-boot", d.boot);
+  setEl("live-heap", fmtBytes(d.heap));
+  setEl("live-heapTotal", fmtBytes(d.heapTotal));
+  setEl("live-uptime", d.uptime);
+  if (d.fsTotal)
+    setEl("live-storage", fmtBytes(d.fsUsed) + "/" + fmtBytes(d.fsTotal));
+
+  var stColors = {
+    IDLE: "#3498db",
+    WAIT_FLOW: "#f39c12",
+    MONITORING: "#27ae60",
+    DONE: "#e74c3c",
+  };
+  var stEl = document.getElementById("state");
+  if (stEl) {
+    stEl.textContent = d.state;
+    stEl.style.background = stColors[d.state] || "#95a5a6";
+    stEl.style.color = "#fff";
+  }
+  var remEl = document.getElementById("stateRem");
+  if (remEl)
+    remEl.textContent = d.stateRemaining >= 0 ? d.stateRemaining + "s" : "-";
+
+  liveBtn("live-ff", d.ff, "Pressed", "Released", "#27ae60", "#95a5a6");
+  liveBtn("live-pf", d.pf, "Pressed", "Released", "#27ae60", "#95a5a6");
+  liveBtn("live-wifi", d.wifi, "Pressed", "Released", "#3498db", "#95a5a6");
+
+  var modeEl = document.getElementById("mode");
+  if (modeEl) {
+    if (d.mode === "online") modeEl.innerHTML = "🌐 Online Logger";
+    else if (d.mode === "webonly") modeEl.innerHTML = "📡 Web Only";
+    else modeEl.innerHTML = "📊 Logging";
+  }
+
+  if (d.time) setEl("headerTime", d.time.split(" ")[1] || d.time);
+  updateFooter({ boot: d.boot, heap: d.heap, heapTotal: d.heapTotal });
 }
 
 function liveBtn(id, pressed, txtOn, txtOff, colorOn, colorOff) {
@@ -1478,6 +1619,12 @@ function sfInit() {
           setEl("sf-boot", s.boot);
         });
     });
+  // Unified Sensors page: also populate the additional-sensor list
+  // from platform_config.json (the form uses /save_flowmeter; the list
+  // uses /save_platform via clSave()).
+  if (document.getElementById("cl-sensors-list")) {
+    clLoad();
+  }
 }
 
 // ============================================================================
@@ -1887,31 +2034,44 @@ function netCheckScan() {
           setTimeout(netCheckScan, 1000);
         } else list.innerHTML = "<div class='list-item'>⏱️ Scan timeout</div>";
       } else if (d.error) {
-        list.innerHTML = "<div class='list-item'>❌ " + d.error + "</div>";
+        list.innerHTML = "";
+        var errRow = document.createElement("div");
+        errRow.className = "list-item";
+        errRow.textContent = "❌ " + d.error;
+        list.appendChild(errRow);
       } else if (!d.networks || !d.networks.length) {
         list.innerHTML = "<div class='list-item'>📶 No networks found</div>";
       } else {
-        var h = "";
+        // Build rows via DOM so SSID content is always text, never HTML.
+        list.innerHTML = "";
         d.networks.forEach(function (n) {
-          var safe = n.ssid.replace(/'/g, "\\'");
-          h +=
-            "<div class='list-item' style='cursor:pointer' onclick=\"document.getElementById('net-cSSID').value='" +
-            safe +
-            "';document.getElementById('wifiList').style.display='none'\">";
-          h +=
-            (n.secure ? "🔒" : "📡") +
-            " " +
-            n.ssid +
-            ' <small class="text-muted">(' +
-            n.rssi +
-            " dBm)</small></div>";
+          var row = document.createElement("div");
+          row.className = "list-item";
+          row.style.cursor = "pointer";
+          row.appendChild(
+            document.createTextNode((n.secure ? "🔒" : "📡") + " " + n.ssid + " ")
+          );
+          var rssi = document.createElement("small");
+          rssi.className = "text-muted";
+          rssi.textContent = "(" + n.rssi + " dBm)";
+          row.appendChild(rssi);
+          row.addEventListener("click", function () {
+            var input = document.getElementById("net-cSSID");
+            if (input) input.value = n.ssid;
+            list.style.display = "none";
+          });
+          list.appendChild(row);
         });
-        list.innerHTML = h;
       }
     })
     .catch(function (e) {
       var l = document.getElementById("wifiList");
-      if (l) l.innerHTML = "<div class='list-item'>❌ Error: " + e + "</div>";
+      if (!l) return;
+      l.innerHTML = "";
+      var row = document.createElement("div");
+      row.className = "list-item";
+      row.textContent = "❌ Error: " + e;
+      l.appendChild(row);
     });
 }
 
@@ -1993,19 +2153,50 @@ function timeSetManual(ev) {
 
 function timeSyncNTP(ev) {
   if (ev) ev.preventDefault();
+  showMsg(
+    "time-msg",
+    "<div class='alert alert-info'>⏳ Syncing from NTP…</div>",
+    true,
+  );
   fetch("/sync_time", { method: "POST" })
-    .then(function (r) {
-      return r.json();
-    })
+    .then(function (r) { return r.json(); })
     .then(function (d) {
-      showMsg(
-        "time-msg",
-        d.ok
-          ? "<div class='alert alert-success'>✅ Time synced!</div>"
-          : "<div class='alert alert-error'>❌ NTP sync failed</div>",
-        true,
-      );
-      if (d.ok) timeInit();
+      if (!d.ok) {
+        showMsg("time-msg",
+          "<div class='alert alert-error'>❌ NTP sync failed to start</div>",
+          true);
+        return;
+      }
+      // Server runs the sync on the main task (up to ~10 s). Poll the status
+      // endpoint until result != 0.
+      var attempts = 0;
+      var poll = function () {
+        attempts++;
+        fetch("/api/time_sync_status")
+          .then(function (r2) { return r2.json(); })
+          .then(function (s) {
+            if (s.result === 1) {
+              showMsg("time-msg",
+                "<div class='alert alert-success'>✅ Time synced!</div>",
+                true);
+              timeInit();
+            } else if (s.result === -1) {
+              showMsg("time-msg",
+                "<div class='alert alert-error'>❌ NTP sync failed</div>",
+                true);
+            } else if (attempts < 30) {
+              setTimeout(poll, 500);
+            } else {
+              showMsg("time-msg",
+                "<div class='alert alert-error'>❌ NTP sync timed out</div>",
+                true);
+            }
+          })
+          .catch(function () {
+            if (attempts < 30) setTimeout(poll, 500);
+          });
+      };
+      setTimeout(poll, 500);
     });
 }
 
@@ -2154,11 +2345,11 @@ function dlLoadFiles() {
 // Uses storage=internal explicitly — matches original failsafe fix
 function dlDeleteFile(path) {
   if (!confirm("Delete " + path + "?")) return;
-  fetch("/delete?path=" + encodeURIComponent(path) + "&storage=internal").then(
-    function () {
-      dlLoadFiles();
-    },
-  );
+  fetch("/delete?path=" + encodeURIComponent(path) + "&storage=internal", {
+    method: "POST",
+  }).then(function () {
+    dlLoadFiles();
+  });
 }
 
 // Matches original: function updatePreview()
@@ -3279,7 +3470,9 @@ function clSaveEditedSensor() {
 }
 
 function clSave() {
-  var msg = document.getElementById("cl-msg");
+  // Message element lives on whichever page hosts the sensor list
+  // (corelogic legacy or the unified Sensors page).
+  var msg = document.getElementById("cl-msg") || document.getElementById("ss-msg");
   if (!PCFG) {
     if (msg) {
       msg.textContent = "❌ No config loaded";

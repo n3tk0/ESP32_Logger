@@ -218,6 +218,20 @@
 #  define OTA_CONFIRM_TIMEOUT_MS 90000  // 90 s
 #endif
 
+// Web HTTP Basic Auth — opt-in at compile time.
+// When WEB_BASIC_AUTH_ENABLED=1, every HTTP request requires the given
+// credentials. Off by default to preserve local-LAN ergonomics; enable for
+// internet-exposed deployments. Override via -DWEB_BASIC_AUTH_ENABLED=1 etc.
+#ifndef WEB_BASIC_AUTH_ENABLED
+#  define WEB_BASIC_AUTH_ENABLED 0
+#endif
+#ifndef WEB_BASIC_AUTH_USER
+#  define WEB_BASIC_AUTH_USER "admin"
+#endif
+#ifndef WEB_BASIC_AUTH_PASS
+#  define WEB_BASIC_AUTH_PASS "change-me"
+#endif
+
 // Export pipeline batching (ExportTask)
 #ifndef EXPORT_BATCH_SIZE
 #  define EXPORT_BATCH_SIZE 20

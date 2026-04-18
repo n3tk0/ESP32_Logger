@@ -137,7 +137,7 @@
 // Active platform mode (set once in setup, read in loop). See PlatformMode in Config.h.
 static PlatformMode g_platformMode  = PLATFORM_LEGACY;
 #ifdef EXPORT_MQTT_ENABLED
-static MqttExporter* g_mqttExporter = nullptr;  // for HA discovery + API access
+MqttExporter* g_mqttExporter = nullptr;  // for HA discovery + API access (external linkage — referenced from web/ApiHandlers.cpp)
 #endif
 
 // Continuous-mode idle power management
@@ -656,6 +656,29 @@ void setup() {
 // LOOP
 // ============================================================================
 void loop() {
+    // ── Deferred NTP sync ─────────────────────────────────────────────────────
+    // The /sync_time web handler sets g_pendingNtpSync=1 and returns 202 so it
+    // doesn't block the AsyncTCP worker. We run the actual sync (up to ~10 s)
+    // here on the main task, where blocking is fine.
+    if (g_pendingNtpSync == 1) {
+        g_pendingNtpSync = 2;  // running
+        bool ok = syncTimeFromNTP();
+        if (ok) rtcValid = true;
+        g_lastNtpSyncResult = ok ? 1 : -1;
+        g_pendingNtpSync    = 0;
+    }
+
+    // ── SSE live heartbeat (1 Hz) ─────────────────────────────────────────────
+    // No-op when no EventSource clients are subscribed.
+    {
+        static uint32_t s_lastLiveTick = 0;
+        uint32_t now = millis();
+        if (now - s_lastLiveTick >= 1000) {
+            s_lastLiveTick = now;
+            publishLiveEvent();
+        }
+    }
+
     // ── Restart check ─────────────────────────────────────────────────────────
     // ПОПРАВКА: използваме safeWiFiShutdown() преди ESP.restart()
     // Това изчиства WiFi radio state и предотвратява "phantom WiFi pin" проблема:

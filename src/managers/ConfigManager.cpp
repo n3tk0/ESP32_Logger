@@ -1,8 +1,11 @@
 #include "ConfigManager.h"
 #include "../core/Globals.h"
+#include "../pipeline/DataPipeline.h"   // fsMutex
 #include <LittleFS.h>
 #include "esp_mac.h"
 #include <math.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 // Safe strcpy — always null-terminates (N25)
 #define SAFE_STRCPY(dst, src) do { strncpy(dst, src, sizeof(dst) - 1); dst[sizeof(dst) - 1] = '\0'; } while(0)
@@ -484,27 +487,42 @@ bool saveConfig() {
     config.magic   = CONFIG_STRUCT_MAGIC;
     config.version = CONFIG_VERSION;
 
+    // Serialise with every other FS writer.  A 3 s timeout is long enough that
+    // any legitimate FS op in flight will finish, but short enough that a
+    // genuinely stuck mutex does not wedge the caller (often an async handler).
+    // If the mutex is unavailable we still attempt the save — a stale config
+    // is worse than a rare unserialised write that LittleFS will serialise
+    // internally anyway.
+    bool held = (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(3000)) == pdTRUE);
+
     // Crash-safe write: write to temp file, then rename over the real one.
     // If power is lost during write, the original config.bin remains intact.
     static const char* TMP_FILE = "/config.tmp";
 
     File f = LittleFS.open(TMP_FILE, "w");
-    if (!f) { DBGLN("Failed to open config temp file"); return false; }
+    if (!f) {
+        DBGLN("Failed to open config temp file");
+        if (held) xSemaphoreGive(fsMutex);
+        return false;
+    }
     size_t written = f.write((uint8_t*)&config, sizeof(DeviceConfig));
     f.close();
 
     if (written != sizeof(DeviceConfig)) {
         DBGLN("Config write incomplete");
         LittleFS.remove(TMP_FILE);
+        if (held) xSemaphoreGive(fsMutex);
         return false;
     }
 
     // Atomic rename: LittleFS rename overwrites the destination
     if (!LittleFS.rename(TMP_FILE, CONFIG_FILE)) {
         DBGLN("Config rename failed");
+        if (held) xSemaphoreGive(fsMutex);
         return false;
     }
 
+    if (held) xSemaphoreGive(fsMutex);
     DBGLN("Config saved");
     return true;
 }

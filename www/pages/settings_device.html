@@ -1,0 +1,120 @@
+  <main class="main-content page" id="page-settings_device">
+    <div class="page-header">
+      <h1>📱 Device</h1>
+      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Device
+      </div>
+    </div>
+
+    <form onsubmit="settingsSave(event,'/save_device',this)">
+      <div id="sd-msg"></div>
+
+      <!-- Identity -->
+      <div class="card">
+        <div class="card-header">📛 Identity</div>
+        <div class="card-body">
+          <div class="form-group">
+            <label class="form-label">Device Name</label>
+            <input type="text" name="deviceName" id="sd-devName" maxlength="32" class="form-input"
+              placeholder="Water Logger">
+            <p class="form-hint">Displayed in the sidebar, header, and browser title.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Device ID</label>
+            <p class="form-hint">Unique device identifier. Used in log filenames and CSV exports.</p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <input type="text" id="sd-devId" name="deviceId" maxlength="12" class="form-input"
+                style="flex:1;min-width:120px" disabled>
+              <button type="button" onclick="regenDevId()" class="btn btn-secondary btn-sm">🔄 New ID</button>
+              <button type="button" onclick="toggleManualId('sd-devId')" class="btn btn-secondary btn-sm">✏️
+                Manual</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Storage -->
+      <div class="card">
+        <div class="card-header">💾 Storage</div>
+        <div class="card-body">
+          <div class="form-group">
+            <label class="form-label">Default Storage View</label>
+            <select name="defaultStorageView" id="sd-defaultStorage" class="form-input form-select">
+              <option value="0">💾 Internal (LittleFS)</option>
+              <option value="1">💳 SD Card</option>
+            </select>
+            <p class="form-hint">Choose which storage (Internal LittleFS or SD Card) the Files page opens to by default.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Web Server -->
+      <div class="card">
+        <div class="card-header">🌐 Web Server</div>
+        <div class="card-body">
+          <div class="form-group">
+            <label class="form-label">
+              <input type="checkbox" name="forceWebServer" id="sd-forceWS" value="1">
+              Force Web Server On
+            </label>
+            <p class="form-hint">When enabled, the web server stays active even in deep sleep modes. Disable to save
+              power when web access is not needed.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- System Info -->
+      <div class="card">
+        <div class="card-header">📊 System Info</div>
+        <div class="card-body">
+          <div class="form-row" id="sysInfo">
+            <div><strong>Firmware</strong>
+              <div class="text-primary" id="siFirmware">–</div>
+            </div>
+            <div><strong>Boot Count</strong>
+              <div id="siBoot">–</div>
+            </div>
+            <div><strong>Mode</strong>
+              <div id="siMode">–</div>
+            </div>
+            <div><strong>Free Heap</strong>
+              <div id="siHeap">–</div>
+            </div>
+            <div><strong>CPU</strong>
+              <div id="siCpu">–</div>
+            </div>
+            <div><strong>Storage</strong>
+              <div id="siStorage">–</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Changelog -->
+      <div class="card">
+        <div class="card-header" onclick="changelogToggle()"
+          style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+          <span>📜 Change Log <small class="text-muted">(tap)</small></span>
+          <span id="changelogChevron" style="transition: transform 0.3s;">▼</span>
+        </div>
+        <div class="card-body hidden" id="changelog" data-loaded="">
+          <div class="text-muted" id="sd_clContent">Loading...</div>
+        </div>
+      </div>
+
+      <!-- About -->
+      <div class="card">
+        <div class="card-header">ℹ️ About</div>
+        <div class="card-body">
+          <div style="text-align:center">
+            <div style="font-size:1.2rem;font-weight:bold;color:var(--primary);margin-bottom:.5rem">Water Logger</div>
+            <div style="color:var(--text-muted);font-size:.9rem">Created by</div>
+            <div style="font-weight:600;margin:.5rem 0">Petko Georgiev</div>
+            <div style="color:var(--text-muted);font-size:.85rem;margin-top:.25rem">📍 Sevlievo, Bulgaria</div>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block">💾 Save</button>
+    </form>
+  </main>
