@@ -3,7 +3,7 @@
  * ESP32 Water Logger v4.2.0 – Production audit hardening
  *
  * Architecture:
- *   – Normal mode  : AsyncWebServer serves /www/index.html + /www/web.js
+ *   – Normal mode  : AsyncWebServer serves /www/index.html + /www/js/*.js
  *   – Failsafe mode: If /www/index.html is missing, embedded minimal HTML is
  *                    served that lets the user upload the real UI files.
  *   – All JSON API endpoints are always available regardless of UI mode.
