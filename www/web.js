@@ -2038,22 +2038,26 @@ function netCheckScan() {
       } else if (!d.networks || !d.networks.length) {
         list.innerHTML = "<div class='list-item'>📶 No networks found</div>";
       } else {
-        var h = "";
+        // Build rows via DOM so SSID content is always text, never HTML.
+        list.innerHTML = "";
         d.networks.forEach(function (n) {
-          var safe = n.ssid.replace(/'/g, "\\'");
-          h +=
-            "<div class='list-item' style='cursor:pointer' onclick=\"document.getElementById('net-cSSID').value='" +
-            safe +
-            "';document.getElementById('wifiList').style.display='none'\">";
-          h +=
-            (n.secure ? "🔒" : "📡") +
-            " " +
-            n.ssid +
-            ' <small class="text-muted">(' +
-            n.rssi +
-            " dBm)</small></div>";
+          var row = document.createElement("div");
+          row.className = "list-item";
+          row.style.cursor = "pointer";
+          row.appendChild(
+            document.createTextNode((n.secure ? "🔒" : "📡") + " " + n.ssid + " ")
+          );
+          var rssi = document.createElement("small");
+          rssi.className = "text-muted";
+          rssi.textContent = "(" + n.rssi + " dBm)";
+          row.appendChild(rssi);
+          row.addEventListener("click", function () {
+            var input = document.getElementById("net-cSSID");
+            if (input) input.value = n.ssid;
+            list.style.display = "none";
+          });
+          list.appendChild(row);
         });
-        list.innerHTML = h;
       }
     })
     .catch(function (e) {
