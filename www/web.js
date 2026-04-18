@@ -2034,7 +2034,11 @@ function netCheckScan() {
           setTimeout(netCheckScan, 1000);
         } else list.innerHTML = "<div class='list-item'>⏱️ Scan timeout</div>";
       } else if (d.error) {
-        list.innerHTML = "<div class='list-item'>❌ " + d.error + "</div>";
+        list.innerHTML = "";
+        var errRow = document.createElement("div");
+        errRow.className = "list-item";
+        errRow.textContent = "❌ " + d.error;
+        list.appendChild(errRow);
       } else if (!d.networks || !d.networks.length) {
         list.innerHTML = "<div class='list-item'>📶 No networks found</div>";
       } else {
@@ -2062,7 +2066,12 @@ function netCheckScan() {
     })
     .catch(function (e) {
       var l = document.getElementById("wifiList");
-      if (l) l.innerHTML = "<div class='list-item'>❌ Error: " + e + "</div>";
+      if (!l) return;
+      l.innerHTML = "";
+      var row = document.createElement("div");
+      row.className = "list-item";
+      row.textContent = "❌ Error: " + e;
+      l.appendChild(row);
     });
 }
 
