@@ -202,6 +202,45 @@ function nav(el) {
   return false;
 }
 
+// Pages whose markup is shipped as a separate /pages/<name>.html file and
+// injected on first navigation.  Keep dashboard/live/files/settings hub
+// inlined in index.html for fast first paint.
+var LAZY_PAGES = { settings_export: 1 };
+var _loadedPartials = {};   // page name → true once injected
+var _inflightPartials = {}; // page name → Promise in flight
+
+function loadPagePartial(page) {
+  if (!LAZY_PAGES[page]) return Promise.resolve();
+  if (_loadedPartials[page]) return Promise.resolve();
+  if (_inflightPartials[page]) return _inflightPartials[page];
+
+  var url = "/pages/" + page + ".html";
+  var p = fetch(url)
+    .then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.text();
+    })
+    .then(function (html) {
+      // Inject as the last child of <body> so it becomes a sibling of the
+      // other .page elements and the existing .active toggle logic finds it.
+      var host = document.createElement("div");
+      host.innerHTML = html;
+      while (host.firstChild) document.body.appendChild(host.firstChild);
+      _loadedPartials[page] = true;
+    })
+    .catch(function (e) {
+      console.error("loadPagePartial(" + page + ") failed:", e);
+      // Swallow — navigateTo's existing fallback will land the user on the
+      // settings hub if the page element is still missing.
+    })
+    .then(function () {
+      delete _inflightPartials[page];
+    });
+
+  _inflightPartials[page] = p;
+  return p;
+}
+
 function navigateTo(page) {
   // Stop live timers when leaving live page
   if (currentPage === "live" && page !== "live") {
@@ -219,34 +258,36 @@ function navigateTo(page) {
     }
   }
 
-  document.querySelectorAll(".page").forEach(function (p) {
-    p.classList.remove("active");
-  });
-  document.querySelectorAll(".nav-item, .bottom-nav a").forEach(function (a) {
-    a.classList.remove("active");
-  });
-
-  var topPage = page.startsWith("settings") ? "settings" : page;
-  currentPage = page;
-
-  var pageEl = document.getElementById("page-" + page);
-  if (pageEl) {
-    pageEl.classList.add("active");
-  } else {
-    var hub = document.getElementById("page-settings");
-    if (hub) hub.classList.add("active");
-    topPage = "settings";
-    currentPage = "settings";
-  }
-
-  document
-    .querySelectorAll('[data-page="' + topPage + '"]')
-    .forEach(function (a) {
-      a.classList.add("active");
+  loadPagePartial(page).then(function () {
+    document.querySelectorAll(".page").forEach(function (p) {
+      p.classList.remove("active");
+    });
+    document.querySelectorAll(".nav-item, .bottom-nav a").forEach(function (a) {
+      a.classList.remove("active");
     });
 
-  pageInit(page);
-  applySettingsFlash();
+    var topPage = page.startsWith("settings") ? "settings" : page;
+    currentPage = page;
+
+    var pageEl = document.getElementById("page-" + page);
+    if (pageEl) {
+      pageEl.classList.add("active");
+    } else {
+      var hub = document.getElementById("page-settings");
+      if (hub) hub.classList.add("active");
+      topPage = "settings";
+      currentPage = "settings";
+    }
+
+    document
+      .querySelectorAll('[data-page="' + topPage + '"]')
+      .forEach(function (a) {
+        a.classList.add("active");
+      });
+
+    pageInit(page);
+    applySettingsFlash();
+  });
 }
 
 function showSubpage(page) {
