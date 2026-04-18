@@ -656,6 +656,18 @@ void setup() {
 // LOOP
 // ============================================================================
 void loop() {
+    // ── Deferred NTP sync ─────────────────────────────────────────────────────
+    // The /sync_time web handler sets g_pendingNtpSync=1 and returns 202 so it
+    // doesn't block the AsyncTCP worker. We run the actual sync (up to ~10 s)
+    // here on the main task, where blocking is fine.
+    if (g_pendingNtpSync == 1) {
+        g_pendingNtpSync = 2;  // running
+        bool ok = syncTimeFromNTP();
+        if (ok) rtcValid = true;
+        g_lastNtpSyncResult = ok ? 1 : -1;
+        g_pendingNtpSync    = 0;
+    }
+
     // ── Restart check ─────────────────────────────────────────────────────────
     // ПОПРАВКА: използваме safeWiFiShutdown() преди ESP.restart()
     // Това изчиства WiFi radio state и предотвратява "phantom WiFi pin" проблема:

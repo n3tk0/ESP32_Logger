@@ -2000,19 +2000,50 @@ function timeSetManual(ev) {
 
 function timeSyncNTP(ev) {
   if (ev) ev.preventDefault();
+  showMsg(
+    "time-msg",
+    "<div class='alert alert-info'>⏳ Syncing from NTP…</div>",
+    true,
+  );
   fetch("/sync_time", { method: "POST" })
-    .then(function (r) {
-      return r.json();
-    })
+    .then(function (r) { return r.json(); })
     .then(function (d) {
-      showMsg(
-        "time-msg",
-        d.ok
-          ? "<div class='alert alert-success'>✅ Time synced!</div>"
-          : "<div class='alert alert-error'>❌ NTP sync failed</div>",
-        true,
-      );
-      if (d.ok) timeInit();
+      if (!d.ok) {
+        showMsg("time-msg",
+          "<div class='alert alert-error'>❌ NTP sync failed to start</div>",
+          true);
+        return;
+      }
+      // Server runs the sync on the main task (up to ~10 s). Poll the status
+      // endpoint until result != 0.
+      var attempts = 0;
+      var poll = function () {
+        attempts++;
+        fetch("/api/time_sync_status")
+          .then(function (r2) { return r2.json(); })
+          .then(function (s) {
+            if (s.result === 1) {
+              showMsg("time-msg",
+                "<div class='alert alert-success'>✅ Time synced!</div>",
+                true);
+              timeInit();
+            } else if (s.result === -1) {
+              showMsg("time-msg",
+                "<div class='alert alert-error'>❌ NTP sync failed</div>",
+                true);
+            } else if (attempts < 30) {
+              setTimeout(poll, 500);
+            } else {
+              showMsg("time-msg",
+                "<div class='alert alert-error'>❌ NTP sync timed out</div>",
+                true);
+            }
+          })
+          .catch(function () {
+            if (attempts < 30) setTimeout(poll, 500);
+          });
+      };
+      setTimeout(poll, 500);
     });
 }
 

@@ -892,24 +892,42 @@ void setupWebServer() {
             int yr = ds.substring(0,4).toInt(), mo = ds.substring(5,7).toInt(), dy = ds.substring(8,10).toInt();
             int hr = ts.substring(0,2).toInt(), mi = ts.substring(3,5).toInt();
             RtcDateTime dt(yr, mo, dy, hr, mi, 0);
-            bool ok = false;
-            for (int attempt = 0; attempt < 3 && !ok; attempt++) {
-                Rtc->SetIsWriteProtected(false); delay(10);
-                Rtc->SetIsRunning(true); delay(10);
-                Rtc->SetDateTime(dt); delay(100);
-                RtcDateTime v = Rtc->GetDateTime();
-                if (v.Year() == yr && v.Month() == mo && v.Day() == dy) { ok = true; rtcValid = true; }
-            }
+            // Single write attempt — keeps the AsyncTCP worker responsive.
+            // The 3× retry loop used to block this handler for ~360 ms on a
+            // failing RTC; if one write fails the client can retry.
+            Rtc->SetIsWriteProtected(false); delay(10);
+            Rtc->SetIsRunning(true); delay(10);
+            Rtc->SetDateTime(dt); delay(100);
+            RtcDateTime v = Rtc->GetDateTime();
+            bool ok = (v.Year() == yr && v.Month() == mo && v.Day() == dy);
+            if (ok) rtcValid = true;
             r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"RTC write failed\"}");
         } else {
             r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing params or no RTC\"}");
         }
     });
 
+    // NTP sync can block up to ~10 seconds inside syncTimeFromNTP() (20 × 500 ms
+    // retry loop). Doing that on the AsyncTCP worker stalls every other HTTP
+    // connection. Instead we set g_pendingNtpSync and the main loop picks it
+    // up on its next iteration. Clients poll /api/time_sync_status.
     server.on("/sync_time", HTTP_POST, [](AsyncWebServerRequest *r) {
-        bool ok = syncTimeFromNTP();
-        if (ok) rtcValid = true;
-        r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"NTP sync failed\"}");
+        if (g_pendingNtpSync != 0) {
+            r->send(202, "application/json", "{\"ok\":true,\"pending\":true,\"running\":true}");
+            return;
+        }
+        g_lastNtpSyncResult = 0;
+        g_pendingNtpSync    = 1;
+        r->send(202, "application/json", "{\"ok\":true,\"pending\":true}");
+    });
+
+    server.on("/api/time_sync_status", HTTP_GET, [](AsyncWebServerRequest *r) {
+        String j = "{\"pending\":";
+        j += (g_pendingNtpSync != 0 ? "true" : "false");
+        j += ",\"result\":";
+        j += String((int)g_lastNtpSyncResult);  // 0=unknown, 1=ok, -1=fail
+        j += "}";
+        r->send(200, "application/json", j);
     });
 
     server.on("/rtc_protect", HTTP_POST, [](AsyncWebServerRequest *r) {

@@ -102,3 +102,7 @@ uint8_t g_sleepMode = 0;
 
 // Web activity timestamp (C2 power restore)
 volatile uint32_t g_lastWebActivity = 0;
+
+// Deferred NTP sync — driven from loop() so /sync_time never blocks AsyncTCP
+volatile uint8_t g_pendingNtpSync    = 0;
+volatile int8_t  g_lastNtpSyncResult = 0;
