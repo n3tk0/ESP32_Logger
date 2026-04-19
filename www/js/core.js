@@ -68,8 +68,12 @@ function _dispatchEvent(eventName) {
     var args;
     var raw = t.getAttribute("data-args");
     if (raw) {
-      try { args = JSON.parse(raw); }
-      catch (e) { console.warn("bad data-args on", t, raw); args = []; }
+      try {
+        args = JSON.parse(raw);
+        // Accept a scalar/object for convenience (data-args="5" or '{"x":1}')
+        // by wrapping it; fn.apply strictly requires an array.
+        if (args !== null && !Array.isArray(args)) args = [args];
+      } catch (e) { console.warn("bad data-args on", t, raw); args = []; }
     }
     var result = args ? fn.apply(t, args) : fn.call(t, ev);
     if (result === false) ev.preventDefault();
@@ -126,18 +130,6 @@ function hideParent(ev) {
 
 // Sidebar/header nav link → returns false so dispatcher calls preventDefault.
 function navPage() { return nav(this); }
-
-// Confirm-save wrapper for destructive form submits
-// (e.g. "Settings will be saved and device will restart. Continue?").
-// Reads the prompt from data-confirm-msg.
-function confirmOrCancel(ev) {
-  var msg = this.getAttribute("data-confirm-msg") || "Continue?";
-  if (!confirm(msg)) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    return false;
-  }
-}
 
 // Submit the containing form. Replaces onchange="this.form.submit()".
 // Note: programmatic .submit() skips submit event listeners, so we dispatch

@@ -642,7 +642,7 @@ function clAddSensor() {
   t.textContent = "Select Sensor Type";
   var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   CL_SENSOR_TYPES.forEach(function(st) {
-    html += '<button class="btn btn-secondary" style="text-align:left;height:auto;padding:10px;display:flex;flex-direction:column;gap:4px" data-click="clDoAddSensor" data-args=\'["' + esc(st.value) + '"]\'>'
+    html += '<button class="btn btn-secondary" style="text-align:left;height:auto;padding:10px;display:flex;flex-direction:column;gap:4px" data-click="clDoAddSensor" data-args="' + esc(JSON.stringify([st.value])) + '">'
           + '<strong style="color:var(--text)">' + esc(st.value) + '</strong><span style="font-size:0.8rem;color:var(--text-muted)">' + esc(st.label) + '</span></button>';
   });
   html += '</div>';
