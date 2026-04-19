@@ -1,5 +1,6 @@
 #include "ConfigManager.h"
 #include "../core/Globals.h"
+#include "../core/ModuleRegistry.h"     // Pass 5: shadow modules.json on save
 #include "../pipeline/DataPipeline.h"   // fsMutex
 #include <LittleFS.h>
 #include "esp_mac.h"
@@ -523,6 +524,12 @@ bool saveConfig() {
     }
 
     if (held) xSemaphoreGive(fsMutex);
+
+    // Pass 5 phase 2: shadow the subset of DeviceConfig that IModule adapters
+    // track into /config/modules.json.  Failures here are non-fatal — config.bin
+    // is authoritative; modules.json is a secondary view for the new UI.
+    moduleRegistry.saveAll(LittleFS);
+
     DBGLN("Config saved");
     return true;
 }
