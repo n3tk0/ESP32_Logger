@@ -1296,3 +1296,228 @@ function closePopup() {
   var p = document.getElementById("popup");
   if (p) p.style.display = "none";
 }
+
+// ============================================================================
+// Pass 5 phase 4 — schema-driven settings via /api/modules
+// ----------------------------------------------------------------------------
+// Each module reports a compact JSON schema (see audit §5.4).  Field types:
+//   string | password | int | bool | ipv4 | color | enum
+// Optional keys: min, max, label, options (for enum), showIf (string or object).
+// ============================================================================
+var Modules = (function () {
+  var current = null;  // currently selected module id
+
+  function escAttr(v) { return esc(String(v == null ? "" : v)); }
+
+  function renderField(f, data) {
+    var id = f.id;
+    var val = (data && id in data) ? data[id] : "";
+    var cls = "form-input";
+    var input;
+
+    if (f.type === "bool") {
+      input =
+        '<label class="form-label">' +
+          '<input type="checkbox" name="' + escAttr(id) + '"' +
+          (val ? " checked" : "") + '> ' + escAttr(f.label || id) +
+        '</label>';
+      return '<div class="form-group" data-field="' + escAttr(id) + '">' +
+             input + '</div>';
+    }
+    if (f.type === "enum") {
+      var opts = (f.options || []).map(function (o) {
+        return '<option value="' + escAttr(o.v) + '"' +
+               (String(val) === String(o.v) ? " selected" : "") + '>' +
+               escAttr(o.l) + '</option>';
+      }).join("");
+      input = '<select class="' + cls + ' form-select" name="' +
+              escAttr(id) + '">' + opts + '</select>';
+    } else if (f.type === "color") {
+      input = '<input type="color" class="' + cls + '" name="' +
+              escAttr(id) + '" value="' + escAttr(val) + '">';
+    } else if (f.type === "password") {
+      input = '<input type="password" class="' + cls + '" name="' +
+              escAttr(id) + '" value="' + escAttr(val) + '"' +
+              (f.max ? ' maxlength="' + Number(f.max) + '"' : '') + '>';
+    } else if (f.type === "int") {
+      input = '<input type="number" class="' + cls + '" name="' +
+              escAttr(id) + '" value="' + escAttr(val) + '"' +
+              (f.min != null ? ' min="' + Number(f.min) + '"' : '') +
+              (f.max != null ? ' max="' + Number(f.max) + '"' : '') + '>';
+    } else {
+      // string (default) or ipv4 — both just text inputs with validation.
+      var pattern = f.type === "ipv4"
+        ? ' pattern="^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"'
+        : "";
+      input = '<input type="text" class="' + cls + '" name="' +
+              escAttr(id) + '" value="' + escAttr(val) + '"' +
+              (f.max ? ' maxlength="' + Number(f.max) + '"' : '') +
+              pattern + '>';
+    }
+    var showIf = f.showIf
+      ? ' data-showif="' + esc(JSON.stringify(f.showIf)) + '"'
+      : "";
+    return (
+      '<div class="form-group" data-field="' + escAttr(id) + '"' + showIf + '>' +
+        (f.label ? '<label class="form-label">' + escAttr(f.label) + '</label>' : '') +
+        input +
+      '</div>'
+    );
+  }
+
+  // Evaluate showIf spec against current form values.
+  // spec = "otherField"  → truthy when that field is truthy.
+  // spec = { field: value } → value-match.
+  function applyShowIf(form) {
+    var groups = form.querySelectorAll("[data-showif]");
+    if (!groups.length) return;
+    function vOf(name) {
+      var el = form.elements[name];
+      if (!el) return "";
+      return el.type === "checkbox" ? (el.checked ? "1" : "") : el.value;
+    }
+    function match(spec) {
+      if (typeof spec === "string") return !!vOf(spec);
+      for (var k in spec) {
+        if (String(vOf(k)) !== String(spec[k])) return false;
+      }
+      return true;
+    }
+    function refresh() {
+      groups.forEach(function (g) {
+        var spec;
+        try { spec = JSON.parse(g.getAttribute("data-showif")); }
+        catch (e) { return; }
+        g.style.display = match(spec) ? "" : "none";
+      });
+    }
+    form.addEventListener("change", refresh);
+    refresh();
+  }
+
+  function collect(form, schema) {
+    var out = {};
+    (schema.fields || []).forEach(function (f) {
+      var el = form.elements[f.id];
+      if (!el) return;
+      var v;
+      if (f.type === "bool")       v = el.checked;
+      else if (f.type === "int")   v = el.value === "" ? 0 : parseInt(el.value, 10);
+      else                         v = el.value;
+      out[f.id] = v;
+    });
+    return out;
+  }
+
+  function loadList() {
+    return fetch("/api/modules").then(function (r) { return r.json(); });
+  }
+  function loadDetail(id) {
+    return fetch("/api/modules/" + encodeURIComponent(id))
+      .then(function (r) { return r.json(); });
+  }
+  function save(id, body) {
+    return fetch("/api/modules/" + encodeURIComponent(id), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json(); });
+  }
+
+  function renderTabs(list) {
+    var host = document.getElementById("mod-tabs");
+    if (!host) return;
+    host.innerHTML = list.map(function (m) {
+      var active = (current === m.id) ? " active" : "";
+      return (
+        '<button class="btn btn-sm btn-secondary tab' + active + '"' +
+        ' data-click="modulesSelect"' +
+        ' data-args="' + esc(JSON.stringify([m.id])) + '">' +
+          escAttr(m.name) +
+          (m.enabled ? "" : " <span class='badge'>off</span>") +
+        '</button>'
+      );
+    }).join(" ");
+  }
+
+  function renderDetail(detail) {
+    var host = document.getElementById("mod-host");
+    if (!host) return;
+    if (!detail.hasUI || !detail.schema) {
+      host.innerHTML =
+        '<p class="form-hint">' +
+          'This module has no form. ' +
+          (detail.config
+            ? '<pre>' + esc(JSON.stringify(detail.config, null, 2)) + '</pre>'
+            : "") +
+        '</p>';
+      return;
+    }
+    var schema;
+    try { schema = JSON.parse(detail.schema); }
+    catch (e) {
+      host.innerHTML = '<p class="form-hint">Bad schema JSON.</p>';
+      return;
+    }
+    var fields = (schema.fields || [])
+      .map(function (f) { return renderField(f, detail.config || {}); })
+      .join("");
+    host.innerHTML =
+      '<form id="mod-form">' +
+        '<div class="form-group">' +
+          '<label class="form-label">' +
+            '<input type="checkbox" name="__enabled"' +
+            (detail.enabled ? " checked" : "") + '> Enabled' +
+          '</label>' +
+        '</div>' +
+        fields +
+        '<button type="submit" class="btn btn-primary btn-block">💾 Save</button>' +
+      '</form>';
+    var form = document.getElementById("mod-form");
+    applyShowIf(form);
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var msg = document.getElementById("mod-msg");
+      var body = {
+        enabled: form.elements["__enabled"].checked,
+        config:  collect(form, schema)
+      };
+      save(detail.id, body).then(function (res) {
+        if (msg) {
+          msg.innerHTML = res && res.ok
+            ? '<div class="alert alert-success">Saved ' + escAttr(detail.id) + '</div>'
+            : '<div class="alert alert-error">' +
+                escAttr((res && res.error) || "save failed") +
+              '</div>';
+        }
+      });
+    });
+  }
+
+  function select(id) {
+    current = id;
+    var msg = document.getElementById("mod-msg");
+    if (msg) msg.innerHTML = "";
+    loadDetail(id).then(renderDetail);
+    loadList().then(renderTabs);  // refresh highlight
+  }
+
+  function init() {
+    loadList().then(function (list) {
+      if (!list || !list.length) {
+        var h = document.getElementById("mod-host");
+        if (h) h.innerHTML = '<p class="form-hint">No modules registered.</p>';
+        return;
+      }
+      current = list[0].id;
+      renderTabs(list);
+      select(list[0].id);
+    });
+  }
+
+  return { init: init, select: select };
+})();
+
+// Event-dispatcher entry points
+function modulesInit()       { Modules.init(); }
+function modulesSelect(id)   { Modules.select(id); }

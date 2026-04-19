@@ -384,6 +384,7 @@ var LAZY_PAGES = {
   settings_theme:     1,
   settings_network:   1,
   settings_time:      1,
+  settings_modules:   1,
   update:             1,
 };
 var _loadedPartials = {};   // page name → true once injected
@@ -520,6 +521,9 @@ function pageInit(page) {
       break;
     case "settings_export":
       expLoad();
+      break;
+    case "settings_modules":
+      modulesInit();
       break;
   }
 }
