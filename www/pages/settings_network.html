@@ -1,7 +1,7 @@
   <main class="main-content page" id="page-settings_network">
     <div class="page-header">
       <h1>🌐 Network</h1>
-      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Network
+      <div class="breadcrumb"><a href="#settings">Settings</a> / Network
       </div>
     </div>
 
@@ -16,14 +16,14 @@
       </div>
     </div>
 
-    <form onsubmit="settingsSave(event,'/save_network',this,true)">
+    <form data-submit="settingsSaveForm" data-save-url="/save_network" data-save-restart>
       <div id="net-msg"></div>
       <!-- WiFi Mode -->
       <div class="card">
         <div class="card-header">📡 WiFi Mode</div>
         <div class="card-body">
           <div class="form-group">
-            <select name="wifiMode" id="net-mode" class="form-input form-select" onchange="netToggleMode()">
+            <select name="wifiMode" id="net-mode" class="form-input form-select" data-change="netToggleMode">
               <option value="0">📶 AP Mode</option>
               <option value="1">🔗 Client Mode</option>
             </select>
@@ -42,7 +42,7 @@
             <div class="form-group"><label class="form-label">Password</label>
               <div style="display:flex;gap:8px">
                 <input type="password" name="apPassword" id="net-apPass" class="form-input" style="flex:1">
-                <button type="button" class="btn btn-secondary" onclick="togglePass('net-apPass')">👁️</button>
+                <button type="button" class="btn btn-secondary" data-click="togglePass" data-args='["net-apPass"]'>👁️</button>
               </div>
             </div>
           </div>
@@ -70,7 +70,7 @@
             <div class="form-group"><label class="form-label">SSID</label>
               <div style="display:flex;gap:8px">
                 <input type="text" name="clientSSID" id="net-cSSID" class="form-input" style="flex:1">
-                <button type="button" class="btn btn-secondary" onclick="netScanWifi()">🔍</button>
+                <button type="button" class="btn btn-secondary" data-click="netScanWifi">🔍</button>
               </div>
             </div>
             <div id="wifiList"
@@ -79,7 +79,7 @@
             <div class="form-group"><label class="form-label">Password</label>
               <div style="display:flex;gap:8px">
                 <input type="password" name="clientPassword" id="net-cPass" class="form-input" style="flex:1">
-                <button type="button" class="btn btn-secondary" onclick="togglePass('net-cPass')">👁️</button>
+                <button type="button" class="btn btn-secondary" data-click="togglePass" data-args='["net-cPass"]'>👁️</button>
               </div>
             </div>
           </div>
@@ -105,7 +105,7 @@
             </div>
             <div class="form-group mt-1">
               <label class="form-label">
-                <input type="checkbox" name="useStaticIP" id="staticCheck" value="1" onchange="netToggleStatic()"> Use
+                <input type="checkbox" name="useStaticIP" id="staticCheck" value="1" data-change="netToggleStatic"> Use
                 Static IP
               </label>
             </div>

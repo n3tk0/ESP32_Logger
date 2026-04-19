@@ -42,9 +42,132 @@ var netScanRetries = 0;
 var changelogLoaded = false;
 
 // ============================================================================
+// EVENT DISPATCHER  (Pass 4 A4: replaces inline on* handlers)
+// ----------------------------------------------------------------------------
+// Markup convention:
+//   <button data-click="dbExportCSV">…</button>
+//   <input  data-change="dbApplyFilters">…
+//   <form   data-submit="settingsSaveForm" data-save-url="/save_hardware"
+//           data-save-restart>…</form>
+//   <button data-click="filesDelete" data-args='["/foo.txt"]'>🗑️</button>
+//   <img    data-error="hideParent">
+//
+// Arguments come from the optional `data-args` JSON array. If absent, the
+// handler is called as fn(event), with `this` bound to the delegated element.
+// Functions are looked up on `window`. A returned false => preventDefault().
+// A small set of built-ins (hideParent, navPage, settingsSaveForm) handles
+// the patterns previously done as inline JS.
+// ============================================================================
+function _dispatchEvent(eventName) {
+  return function (ev) {
+    var t = ev.target.closest("[data-" + eventName + "]");
+    if (!t) return;
+    var name = t.getAttribute("data-" + eventName);
+    var fn = window[name];
+    if (typeof fn !== "function") return;
+    var args;
+    var raw = t.getAttribute("data-args");
+    if (raw) {
+      try { args = JSON.parse(raw); }
+      catch (e) { console.warn("bad data-args on", t, raw); args = []; }
+    }
+    var result = args ? fn.apply(t, args) : fn.call(t, ev);
+    if (result === false) ev.preventDefault();
+  };
+}
+
+function installEventDispatcher() {
+  ["click", "change", "input"].forEach(function (name) {
+    document.addEventListener(name, _dispatchEvent(name));
+  });
+  // Every form submit in this app is AJAX; preventDefault unconditionally so
+  // handlers don't each have to remember to block the native POST navigation.
+  document.addEventListener("submit", function (ev) {
+    if (ev.target.closest("[data-submit]")) ev.preventDefault();
+    _dispatchEvent("submit")(ev);
+  }, true);
+  // onerror does not bubble: wire direct listeners on every [data-error] node
+  // present at bootstrap. Nodes added later via innerHTML miss this wiring;
+  // re-run wireLateErrorHandlers() after any such injection.
+  wireLateErrorHandlers(document);
+}
+
+function wireLateErrorHandlers(root) {
+  (root || document).querySelectorAll("[data-error]").forEach(function (el) {
+    if (el._dataErrorWired) return;
+    var fn = window[el.getAttribute("data-error")];
+    if (typeof fn === "function") {
+      el.addEventListener("error", fn);
+      el._dataErrorWired = true;
+    }
+  });
+}
+
+// Submit handler for settings forms with data-save-url / data-save-restart.
+// Replaces the old onsubmit="settingsSave(event,'/save_x',this,true)" pattern.
+function settingsSaveForm(ev) {
+  var f = ev.target;
+  settingsSave(
+    ev,
+    f.getAttribute("data-save-url"),
+    f,
+    f.hasAttribute("data-save-restart")
+  );
+}
+
+// Hide the element's grandparent — used by images whose card should
+// disappear if the image fails to load.
+function hideParent(ev) {
+  var el = ev.target;
+  if (el && el.parentElement && el.parentElement.parentElement) {
+    el.parentElement.parentElement.style.display = "none";
+  }
+}
+
+// Sidebar/header nav link → returns false so dispatcher calls preventDefault.
+function navPage() { return nav(this); }
+
+// Confirm-save wrapper for destructive form submits
+// (e.g. "Settings will be saved and device will restart. Continue?").
+// Reads the prompt from data-confirm-msg.
+function confirmOrCancel(ev) {
+  var msg = this.getAttribute("data-confirm-msg") || "Continue?";
+  if (!confirm(msg)) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    return false;
+  }
+}
+
+// Submit the containing form. Replaces onchange="this.form.submit()".
+// Note: programmatic .submit() skips submit event listeners, so we dispatch
+// a proper 'submit' event to go through our dispatcher.
+function submitParentForm() {
+  var f = this.form || (this.closest && this.closest("form"));
+  if (f) f.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+}
+
+// Popup helpers. Replace inline style="display:flex/none" mutation.
+// Named hidePopup (not closePopup) because settings.js defines its own
+// zero-arg closePopup() tied to id="popup" that we don't want to shadow.
+function showPopup(id) { var el = document.getElementById(id); if (el) el.style.display = "flex"; }
+function hidePopup(id) { var el = document.getElementById(id); if (el) el.style.display = "none"; }
+
+// Backdrop click-to-close. Attach to the .popup-overlay. The default action
+// hides the overlay; if data-backdrop-fn is set, that window-level function is
+// called instead (e.g. sapClose, sepClose which reset state as well as hide).
+function backdropClose(ev) {
+  if (ev.target !== this) return;
+  var fn = this.getAttribute("data-backdrop-fn");
+  if (fn && typeof window[fn] === "function") window[fn]();
+  else this.style.display = "none";
+}
+
+// ============================================================================
 // BOOTSTRAP
 // ============================================================================
 window.addEventListener("DOMContentLoaded", function () {
+  installEventDispatcher();
   Promise.all([
     fetch("/api/status")
       .then(function (r) {
@@ -292,6 +415,9 @@ function loadPagePartial(page) {
       host.innerHTML = html;
       while (host.firstChild) document.body.appendChild(host.firstChild);
       _loadedPartials[page] = true;
+      // click/change/submit/input delegate from document already catch events
+      // inside the new nodes; onerror does not bubble, so wire those directly.
+      wireLateErrorHandlers(document);
     })
     .catch(function (e) {
       console.error("loadPagePartial(" + page + ") failed:", e);

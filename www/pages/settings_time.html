@@ -1,7 +1,7 @@
   <main class="main-content page" id="page-settings_time">
     <div class="page-header">
       <h1>🕐 Time Sync</h1>
-      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Time
+      <div class="breadcrumb"><a href="#settings">Settings</a> / Time
         Sync</div>
     </div>
 
@@ -23,7 +23,7 @@
     <div class="card card-accent" style="border-top-color:#27ae60">
       <div class="card-header">⏰ Set Time</div>
       <div class="card-body">
-        <form onsubmit="timeSetManual(event)">
+        <form data-submit="timeSetManual">
           <div id="time-msg"></div>
           <div class="form-row">
             <div class="form-group"><label class="form-label">Date</label><input type="date" name="date" required
@@ -44,7 +44,7 @@
           style="margin:0; padding:4px 8px; font-size:0.85rem; line-height:1;">⏳ Loading...</div>
       </div>
       <div class="card-body">
-        <form onsubmit="settingsSave(event,'/save_time',this)">
+        <form data-submit="settingsSaveForm" data-save-url="/save_time">
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">NTP Server</label>
@@ -60,7 +60,7 @@
             <button type="submit" form="ntpForm" class="btn btn-secondary" id="ntpBtn">🔄 NTP Sync</button>
           </div>
         </form>
-        <form onsubmit="timeSyncNTP(event)" id="ntpForm" style="display:none;"></form>
+        <form data-submit="timeSyncNTP" id="ntpForm" style="display:none;"></form>
       </div>
     </div>
 
@@ -68,10 +68,10 @@
     <div class="card">
       <div class="card-header">⚙️ RTC &amp; System Options</div>
       <div class="card-body">
-        <form onsubmit="timeRtcProtect(event)" style="margin-bottom:1rem">
+        <form data-submit="timeRtcProtect" style="margin-bottom:1rem">
           <div class="form-group">
             <label class="form-label">
-              <input type="checkbox" name="protect" id="time-rtcProt" value="1" onchange="this.form.submit()"> RTC Write
+              <input type="checkbox" name="protect" id="time-rtcProt" value="1" data-change="submitParentForm"> RTC Write
               Protected
             </label>
             <p class="form-hint">Prevents accidental time changes.</p>
@@ -83,7 +83,7 @@
           <div><strong>Log Buffer</strong>
             <p class="form-hint" style="margin:0">Write pending logs to storage</p>
           </div>
-          <form onsubmit="event.preventDefault();timeFlushLogs()"><button type="submit" class="btn btn-secondary">💾
+          <form data-submit="timeFlushLogs"><button type="submit" class="btn btn-secondary">💾
               Flush</button></form>
         </div>
 
@@ -95,8 +95,7 @@
           <div style="display:flex;gap:.5rem;flex-wrap:wrap">
             <form action="/backup_bootcount" method="POST"><button type="submit" class="btn btn-secondary">📤 Backup
                 Now</button></form>
-            <form onsubmit="event.preventDefault();timeRestoreBoot()"
-              onsubmit="return confirm('Restore boot count from backup?')">
+            <form data-submit="timeRestoreBoot">
               <button type="submit" class="btn btn-warning">📥 Restore</button>
             </form>
           </div>

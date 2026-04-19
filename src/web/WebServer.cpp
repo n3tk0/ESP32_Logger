@@ -323,15 +323,16 @@ void setupWebServer() {
     // C2: track web activity for idle power restore
     auto touchActivity = []() { g_lastWebActivity = millis(); };
 
-    // Defense-in-depth headers applied to every response.  Full strict CSP
-    // would require rewriting every inline onclick/style — this intermediate
-    // policy already blocks cross-origin scripts/images/fetches, which is
-    // the most valuable win for a LAN-exposed device.  Tightening to remove
-    // 'unsafe-inline' is a follow-up (Pass 4 A4 hardening).
+    // Defense-in-depth headers applied to every response.  Pass 4 A4 removed
+    // every inline on* handler and the inline theme-boot <script>, so
+    // script-src no longer needs 'unsafe-inline' — any injected <script>
+    // (stored XSS, rogue file upload) is now blocked by the browser.
+    // style-src still keeps 'unsafe-inline' because many layout style="…"
+    // attributes remain; tightening that is a separate pass.
     DefaultHeaders::Instance().addHeader(
         "Content-Security-Policy",
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        "script-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "connect-src 'self'; "

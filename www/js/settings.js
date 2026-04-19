@@ -172,7 +172,7 @@ function changelogLoad() {
       changelogLoaded = false; // allow retry on next open
       el.innerHTML =
         "<div style='display:flex;justify-content:flex-end;margin-bottom:.5rem'>" +
-        "<button type='button' class='btn btn-secondary btn-sm' onclick='changelogClose(event)'>✖ Close</button></div>" +
+        '<button type="button" class="btn btn-secondary btn-sm" data-click="changelogClose">✖ Close</button></div>' +
         "<div class='alert alert-warning'>Changelog not found. Upload <code>/changelog.txt</code> to LittleFS.</div>";
     });
 }
@@ -370,7 +370,8 @@ function thInit() {
 }
 
 function themeSave(e, form) {
-  e.preventDefault();
+  if (e && e.preventDefault) e.preventDefault();
+  if (!form) form = e && e.target;
   var fd = new FormData(form);
 
   var mode = parseInt(fd.get("themeMode") || "0");
@@ -453,6 +454,12 @@ function themeSave(e, form) {
       btn.disabled = false;
       showToast("Error: " + err, "error");
     });
+}
+
+function themeToggleChartPath() {
+  var pr = document.getElementById("chartPathRow"),
+    sel = document.getElementById("th-chartSrc");
+  if (pr && sel) pr.style.display = sel.value === "0" ? "block" : "none";
 }
 
 function themeRestoreDefault() {
@@ -855,6 +862,7 @@ function timeBackupBoot() {
   });
 }
 function timeRestoreBoot() {
+  if (!confirm("Restore boot count from backup?")) return;
   fetch("/restore_bootcount", { method: "POST" })
     .then(function (r) {
       return r.json();
@@ -959,11 +967,10 @@ function dlLoadFiles() {
           encodeURIComponent(f.path) +
           "' class='btn btn-sm btn-secondary'>📥</a>";
         if (!isCur) {
-          // data-path prevents quote-in-attribute bug
           html +=
-            ' <button data-path="' +
-            f.path +
-            '" onclick="dlDeleteFile(this.dataset.path)" class=\'btn btn-sm btn-danger\'>🗑️</button>';
+            ' <button data-click="dlDeleteFile" data-args="' +
+            esc(JSON.stringify([f.path])) +
+            '" class=\'btn btn-sm btn-danger\'>🗑️</button>';
         }
         html += "</span></div>";
       });
@@ -1279,6 +1286,11 @@ function dlToggleMaxSize() {
   var mg = document.getElementById("maxSizeGroup"),
     rot = document.getElementById("dl-rotation");
   if (mg && rot) mg.style.display = rot.value === "4" ? "block" : "none";
+}
+function dlTogglePcFields() {
+  var f = document.getElementById("pcFields"),
+    cb = document.getElementById("dl-pcEnabled");
+  if (f && cb) f.style.display = cb.checked ? "block" : "none";
 }
 function closePopup() {
   var p = document.getElementById("popup");

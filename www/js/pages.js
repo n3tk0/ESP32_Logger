@@ -400,10 +400,10 @@ function filesRender() {
   var tabs = document.getElementById("tabs");
   if (tabs) {
     tabs.innerHTML =
-      '<a onclick="filesSetStorage(\'internal\')" class="btn ' +
+      '<a data-click="filesSetStorage" data-args=\'["internal"]\' class="btn ' +
       (currentFilesStorage === "internal" ? "btn-primary" : "btn-secondary") +
       '">💾 Internal</a> ' +
-      '<a onclick="filesSetStorage(\'sdcard\')"   class="btn ' +
+      '<a data-click="filesSetStorage" data-args=\'["sdcard"]\'   class="btn ' +
       (currentFilesStorage === "sdcard" ? "btn-primary" : "btn-secondary") +
       '">💳 SD Card</a>';
   }
@@ -463,18 +463,12 @@ function filesRender() {
           "</div>";
       }
       files.forEach(function (f) {
-        // For inline JS string literal: escape backslash and single quote in
-        // JS, then HTML-escape the whole attribute value.
-        var jsPath = f.path.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-        var jsName = f.name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-        var safePath = esc(jsPath);
-        var safeName = esc(jsName);
         var actions = "";
         if (f.isDir) {
           actions =
-            "<a onclick=\"filesEnterDir('" +
-            safePath +
-            "')\" class='btn btn-sm btn-secondary'>📂 Open</a>";
+            '<a data-click="filesEnterDir" data-args="' +
+            esc(JSON.stringify([f.path])) +
+            '" class=\'btn btn-sm btn-secondary\'>📂 Open</a>';
         } else {
           actions +=
             "<a href='/download?file=" +
@@ -484,16 +478,13 @@ function filesRender() {
             "' class='btn btn-sm btn-secondary'>📥</a>";
           if (filesEditMode) {
             actions +=
-              " <button onclick=\"showMovePopup('" +
-              safePath +
-              "','" +
-              safeName +
-              "')\" class='btn btn-sm btn-secondary'>✂️</button>";
-            // data-path is HTML-escaped; the handler reads it via dataset.
+              ' <button data-click="showMovePopup" data-args="' +
+              esc(JSON.stringify([f.path, f.name])) +
+              '" class=\'btn btn-sm btn-secondary\'>✂️</button>';
             actions +=
-              ' <button data-path="' +
-              esc(f.path) +
-              '" onclick="filesDelete(this.dataset.path)" class=\'btn btn-sm btn-danger\'>🗑️</button>';
+              ' <button data-click="filesDelete" data-args="' +
+              esc(JSON.stringify([f.path])) +
+              '" class=\'btn btn-sm btn-danger\'>🗑️</button>';
           }
         }
         html +=
