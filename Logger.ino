@@ -43,6 +43,7 @@
 #include <WiFi.h>           // for WiFi.setSleep() in continuous mode
 
 #include "src/core/Globals.h"
+#include "src/core/ModuleRegistry.h"  // Pass 5: unified module registry (phase 1 = empty)
 #include "src/managers/ConfigManager.h"
 #include "src/managers/HardwareManager.h"
 #include "src/managers/StorageManager.h"
@@ -457,6 +458,13 @@ void setup() {
     isrDebounceUs = (uint32_t)config.hardware.debounceMs * 1000UL;   // I1
 
     initStorage();
+
+    // Pass 5 phase 1: load /config/modules.json so any registered modules
+    // hydrate their state.  Phase 1 registers nothing so this is a no-op;
+    // phase 2+ wraps WiFi/OTA/theme as IModule and this call becomes live.
+    if (fsAvailable && activeFS) {
+        moduleRegistry.loadAll(*activeFS);
+    }
 
     int expectedActive = (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH) ? HIGH : LOW;
 
