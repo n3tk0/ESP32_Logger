@@ -349,8 +349,16 @@ void setupWebServer() {
     // immediately, without the reboot that the old uiReady-gated registration
     // required (audit Pass 7 "serveStatic only registered in the uiReady
     // branch").  Registered BEFORE serveStatic so it wins route matching for
-    // the exact `/` path.
+    // the exact `/` path.  Also honours a pre-gzipped index.html.gz sibling
+    // (audit Pass 4 C1) — flash savings are worth a single extension probe.
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
+        if (littleFsAvailable && LittleFS.exists("/www/index.html.gz")) {
+            AsyncWebServerResponse* resp =
+                r->beginResponse(LittleFS, "/www/index.html.gz", "text/html");
+            resp->addHeader("Content-Encoding", "gzip");
+            r->send(resp);
+            return;
+        }
         if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
             r->send(LittleFS, "/www/index.html", "text/html");
             return;
@@ -361,7 +369,9 @@ void setupWebServer() {
     // Always register the static tree so asset fetches (js/css/images) work
     // the moment `/www/` is populated.  5-min cache: reuses JS/CSS across
     // page navigation but still picks up firmware-bundled UI changes within
-    // a few minutes of a release.
+    // a few minutes of a release.  AsyncStaticWebHandler already probes a
+    // `.gz` sibling automatically and emits `Content-Encoding: gzip` — no
+    // extra wiring needed for the regular asset tree.
     server.serveStatic("/", LittleFS, "/www/")
           .setDefaultFile("index.html")
           .setCacheControl("public, max-age=300, must-revalidate");
