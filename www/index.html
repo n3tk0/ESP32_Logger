@@ -159,7 +159,7 @@
           <button class="btn btn-sm btn-secondary" data-click="dbExportPNG" title="Export chart as PNG">📷 PNG</button>
         </div>
       </div>
-      <div class="card-body" style="height:350px"><canvas id="chart"></canvas></div>
+      <div class="card-body"><div class="chart-container"><canvas id="chart"></canvas></div></div>
       <div class="card-body" style="padding-top:0">
         <div id="chartLegend" data-ffl="db-legendFF" data-pfl="db-legendPF" data-otl="db-legendOther"
           style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;font-size:.85rem"></div>
@@ -505,7 +505,7 @@
         </select>
       </div>
       <div class="card-body" style="padding:8px">
-        <canvas id="sensorChart" style="width:100%;max-height:320px"></canvas>
+        <div class="chart-container" style="max-height:320px"><canvas id="sensorChart"></canvas></div>
         <div id="sc-msg" style="font-size:.8rem;color:var(--text-muted);margin-top:4px"></div>
       </div>
     </div>

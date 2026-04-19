@@ -62,12 +62,20 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
-  padding-bottom: 70px;
+  /* Bottom-nav is 58px tall; add the device's safe-area inset so iOS
+     home-indicator doesn't cover it. */
+  padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
 }
 
 @media (min-width: 768px) {
   body {
     padding-bottom: 1rem;
+    padding-left: 240px;
+  }
+}
+
+@media (min-width: 1024px) {
+  body {
     padding-left: 240px;
   }
 }
@@ -202,6 +210,8 @@ body {
   border-top: 1px solid var(--border);
   z-index: 200;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+  /* Extend the tappable area into the iOS home-indicator gutter. */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 @media (min-width: 768px) {
@@ -215,11 +225,14 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   padding: 8px 4px;
   color: var(--text-muted);
   text-decoration: none;
   font-size: 0.7rem;
   transition: var(--transition);
+  /* WCAG/Apple HIG minimum tappable height. */
+  min-height: 44px;
 }
 
 .bottom-nav a .icon {
@@ -398,6 +411,8 @@ body {
   color: var(--text);
   font-size: 1rem;
   transition: var(--transition);
+  /* 44px minimum touch target. */
+  min-height: 44px;
 }
 
 .form-input:focus {
@@ -415,6 +430,7 @@ body {
 
 .form-input[type="checkbox"] {
   width: auto;
+  min-height: auto;
   margin-right: 8px;
 }
 
@@ -457,6 +473,8 @@ body {
   cursor: pointer;
   transition: var(--transition);
   text-decoration: none;
+  /* 44px minimum touch target. */
+  min-height: 44px;
 }
 
 .btn-primary {
@@ -540,6 +558,7 @@ body {
 .btn-sm {
   padding: 6px 12px;
   font-size: 0.8rem;
+  min-height: 32px;  /* sm variants opt out of the 44px floor */
 }
 
 .btn-block {
@@ -886,4 +905,25 @@ body {
   .sensors-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ── Responsive chart containers ───────────────────────────────────────────
+   Fixed-height (`height:350px`) containers clipped labels on narrow phones
+   and wasted vertical space on desktops.  Use aspect-ratio so the chart
+   scales with the viewport; keep a hard max-height so very wide desktops
+   don't give the chart a full-page takeover. */
+.chart-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 420px;
+}
+.chart-container > canvas {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+@media (max-width: 480px) {
+  .chart-container { aspect-ratio: 4 / 3; }
 }
