@@ -15,6 +15,9 @@
 // Called after every load path so partially-migrated or corrupt-but-recoverable
 // configs always surface sane values to the web UI.
 // ============================================================================
+// Exposed in ConfigManager.h as `fillConfigDefaults()`; kept here under the
+// original internal name so existing call sites compile unchanged via the
+// thin wrapper at the bottom of the file.
 static void applyDefaults() {
     auto badFloat = [](float v){ return v <= 0.0f || !isfinite(v); };
 
@@ -533,3 +536,7 @@ bool saveConfig() {
     DBGLN("Config saved");
     return true;
 }
+
+// Public wrapper declared in ConfigManager.h.  Callers outside this TU get an
+// idempotent "top up defaults" operation without needing the internal linkage.
+void fillConfigDefaults() { applyDefaults(); }

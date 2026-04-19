@@ -25,6 +25,7 @@
 #include <Update.h>
 #include <WiFi.h>
 #include <functional>
+#include <memory>
 #include <vector>
 #include <math.h>
 
@@ -343,25 +344,31 @@ void setupWebServer() {
     DefaultHeaders::Instance().addHeader("X-Frame-Options", "DENY");
     DefaultHeaders::Instance().addHeader("Referrer-Policy", "no-referrer");
 
-    bool uiReady = LittleFS.exists("/www/index.html");
+    // Root handler decides per-request whether a real SPA shell is present;
+    // this means uploading /www/index.html after boot starts serving the SPA
+    // immediately, without the reboot that the old uiReady-gated registration
+    // required (audit Pass 7 "serveStatic only registered in the uiReady
+    // branch").  Registered BEFORE serveStatic so it wins route matching for
+    // the exact `/` path.
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
+        if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
+            r->send(LittleFS, "/www/index.html", "text/html");
+            return;
+        }
+        r->send_P(200, "text/html", FAILSAFE_HTML);
+    });
 
-    if (uiReady) {
-        // 5-min cache lets the browser reuse JS/CSS/images across page navigation
-        // without re-fetching, while still picking up firmware-bundled UI changes
-        // within a few minutes of a release. Tight enough to avoid stale-asset
-        // headaches; long enough to noticeably speed up the SPA on cold loads.
-        server.serveStatic("/", LittleFS, "/www/")
-              .setDefaultFile("index.html")
-              .setCacheControl("public, max-age=300, must-revalidate");
+    // Always register the static tree so asset fetches (js/css/images) work
+    // the moment `/www/` is populated.  5-min cache: reuses JS/CSS across
+    // page navigation but still picks up firmware-bundled UI changes within
+    // a few minutes of a release.
+    server.serveStatic("/", LittleFS, "/www/")
+          .setDefaultFile("index.html")
+          .setCacheControl("public, max-age=300, must-revalidate");
+
+    if (LittleFS.exists("/www/index.html")) {
         DBGLN("Web UI: serving from /www/");
     } else {
-        server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
-            if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
-                r->send(LittleFS, "/www/index.html", "text/html");
-                return;
-            }
-            r->send_P(200, "text/html", FAILSAFE_HTML);
-        });
         DBGLN("Web UI: FAILSAFE mode (upload /www/index.html to restore)");
     }
 
@@ -540,8 +547,21 @@ void setupWebServer() {
             return;
         }
 
-        // Efficient tail-read: seek to last ~1KB of file instead of reading every line
-        char lastLines[5][160];
+        // Efficient tail-read: seek to last ~1KB of file instead of reading every line.
+        // Buffers moved to the heap — the previous on-stack `lastLines[5][160]` +
+        // `lineBuf[160]` (~960 B) ate most of the AsyncTCP worker's budget.
+        constexpr int    LR_LINES  = 5;
+        constexpr size_t LR_LINELN = 160;
+        auto lastLines = std::unique_ptr<char[]>(new (std::nothrow) char[LR_LINES * LR_LINELN]);
+        auto lineBuf   = std::unique_ptr<char[]>(new (std::nothrow) char[LR_LINELN]);
+        if (!lastLines || !lineBuf) {
+            f.close();
+            doc["error"] = "out of memory";
+            sendJsonResponse(r, doc);
+            return;
+        }
+        auto slot = [&](int k) { return lastLines.get() + (k * LR_LINELN); };
+
         int lCount = 0;
         size_t fSize = f.size();
         const size_t TAIL_BYTES = 1024;
@@ -551,10 +571,9 @@ void setupWebServer() {
             f.readStringUntil('\n');   // discard partial first line
         }
 
-        char lineBuf[160];
         while (f.available()) {
             int i = 0;
-            while (f.available() && i < 159) {
+            while (f.available() && i < (int)LR_LINELN - 1) {
                 char c = f.read();
                 if (c == '\n' || c == '\r') break;
                 lineBuf[i++] = c;
@@ -562,16 +581,16 @@ void setupWebServer() {
             lineBuf[i] = '\0';
             // skip empty lines
             if (i > 0) {
-                memcpy(lastLines[lCount % 5], lineBuf, i + 1);
+                memcpy(slot(lCount % LR_LINES), lineBuf.get(), i + 1);
                 lCount++;
             }
         }
         f.close();
 
-        int count = lCount < 5 ? lCount : 5;
+        int count = lCount < LR_LINES ? lCount : LR_LINES;
         for (int i = 0; i < count; i++) {
-            int idx = (lCount - 1 - i) % 5;
-            char* lineStr = lastLines[idx];
+            int idx = (lCount - 1 - i) % LR_LINES;
+            char* lineStr = slot(idx);
             
             char* saveptr;
             char* tokens[10];
@@ -666,15 +685,21 @@ void setupWebServer() {
     });
 
     // =========================================================================
-    // API: REGEN DEVICE ID
+    // API: PREVIEW NEXT DEVICE ID
+    // Returns a fresh MAC-derived ID.  This endpoint NEVER persists; the user
+    // must click Save in the Device settings page to commit, so the shown ID
+    // always matches the stored one (audit Pass 7 clarification).  The legacy
+    // /api/regen-id alias is kept for one release for backwards compat.
     // =========================================================================
-    server.on("/api/regen-id", HTTP_POST, [](AsyncWebServerRequest *r) {
+    auto nextIdHandler = [](AsyncWebServerRequest *r) {
         String mac = WiFi.macAddress();
         mac.replace(":", "");
         String newId = mac.substring(mac.length() - 8);
         newId.toUpperCase();
         r->send(200, "text/plain", newId);
-    });
+    };
+    server.on("/api/next-id",  HTTP_POST, nextIdHandler);
+    server.on("/api/regen-id", HTTP_POST, nextIdHandler);  // legacy alias
 
     // =========================================================================
     // EXPORT SETTINGS
@@ -700,6 +725,13 @@ void setupWebServer() {
     // =========================================================================
     server.on("/export_settings", HTTP_GET, [](AsyncWebServerRequest *r) {
         char ipBuf[16];
+
+        // Guarantee the payload is complete regardless of how config landed
+        // in memory — fillConfigDefaults() is idempotent, so callers still
+        // see their last-saved non-default values.  Audit Pass 4 F:
+        // "Remove duplicated fallback logic in /export_settings by running
+        // applyDefaults() before serialization."
+        fillConfigDefaults();
 
         JsonDocument doc;
 
@@ -1009,9 +1041,13 @@ void setupWebServer() {
             int yr = ds.substring(0,4).toInt(), mo = ds.substring(5,7).toInt(), dy = ds.substring(8,10).toInt();
             int hr = ts.substring(0,2).toInt(), mi = ts.substring(3,5).toInt();
             RtcDateTime dt(yr, mo, dy, hr, mi, 0);
-            // Single write attempt — keeps the AsyncTCP worker responsive.
-            // The 3× retry loop used to block this handler for ~360 ms on a
-            // failing RTC; if one write fails the client can retry.
+            // RAII guard: re-enable RTC write protection on every exit path
+            // (success, verify-failed, early return).  Previous code left the
+            // RTC writable if the write failed or SetDateTime threw — next
+            // glitch could silently corrupt clock state.
+            struct RtcWriteGuard {
+                ~RtcWriteGuard() { if (Rtc) Rtc->SetIsWriteProtected(true); }
+            } guard;
             Rtc->SetIsWriteProtected(false); delay(10);
             Rtc->SetIsRunning(true); delay(10);
             Rtc->SetDateTime(dt); delay(100);
@@ -1144,8 +1180,12 @@ void setupWebServer() {
             File f = targetFS->open(path, FILE_READ);
             bool isDir = f && f.isDirectory();
             if (f) f.close();
-            // 2s cap so the AsyncTCP worker yields if the mutex is contended.
-            if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
+            // 500 ms cap: if a storage task is holding fsMutex we'd rather
+            // return busy to the client than freeze the AsyncTCP worker.
+            if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+                r->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+                return;
+            }
             deleted = isDir ? deleteRecursive(*targetFS, path) : targetFS->remove(path);
             if (fsMutex) xSemaphoreGive(fsMutex);
         }
@@ -1164,8 +1204,11 @@ void setupWebServer() {
         String name = sanitizeFilename(r->getParam("name")->value());
         if (dir.isEmpty() || name.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid name or dir\"}"); return; }
         String fp   = buildPath(dir, name);
-        // 2s cap so the AsyncTCP worker yields if the mutex is contended.
-        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
+        // 500 ms cap: report busy rather than freeze the AsyncTCP worker.
+        if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+            r->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+            return;
+        }
         bool ok = targetFS->mkdir(fp);
         if (fsMutex) xSemaphoreGive(fsMutex);
         r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"mkdir failed\"}");
@@ -1192,8 +1235,11 @@ void setupWebServer() {
         }
         String dstPath = buildPath(dstDir, newName);
         if (isPathProtected(dstPath)) { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
-        // 2s cap so the AsyncTCP worker yields if the mutex is contended.
-        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
+        // 500 ms cap: report busy rather than freeze the AsyncTCP worker.
+        if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+            r->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+            return;
+        }
         bool ok = targetFS->rename(src, dstPath);
         if (fsMutex) xSemaphoreGive(fsMutex);
         r->send(200, "application/json", ok ? "{\"ok\":true,\"dst\":\"" + dstPath + "\"}" : "{\"ok\":false,\"error\":\"Rename failed\"}");

@@ -31,6 +31,18 @@ IModule* ModuleRegistry::getById(const char* id) const {
 bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
     if (_count == 0) return true;  // phase-1 no-op when nothing registered
 
+    // Crash-recovery: if a previous saveAll() died between close and rename,
+    // a .new sibling is still around.  Complete the rename if the canonical
+    // file is missing, otherwise drop the stale tempfile.
+    String tmp = String(path) + ".new";
+    if (fs.exists(tmp.c_str())) {
+        if (!fs.exists(path)) {
+            fs.rename(tmp.c_str(), path);
+        } else {
+            fs.remove(tmp.c_str());
+        }
+    }
+
     File f = fs.open(path, FILE_READ);
     if (!f) {
         Serial.printf("[ModuleRegistry] %s not found, using defaults\n", path);
@@ -85,14 +97,29 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
         _modules[i]->save(slice);
     }
 
-    File f = fs.open(path, FILE_WRITE);
+    // Crash-safe write: serialize to a sibling .new file, fsync via close,
+    // then rename over the real target.  A power loss during write leaves
+    // the old file intact; a crash between close and rename leaves a stray
+    // .new which the next boot can garbage-collect on demand.
+    String tmp = String(path) + ".new";
+    File f = fs.open(tmp.c_str(), FILE_WRITE);
     if (!f) {
-        Serial.printf("[ModuleRegistry] cannot open %s for write\n", path);
+        Serial.printf("[ModuleRegistry] cannot open %s for write\n", tmp.c_str());
         return false;
     }
     size_t n = serializeJson(doc, f);
     f.close();
-    return n > 0;
+    if (n == 0) {
+        fs.remove(tmp.c_str());
+        return false;
+    }
+    if (fs.exists(path)) fs.remove(path);
+    if (!fs.rename(tmp.c_str(), path)) {
+        Serial.printf("[ModuleRegistry] rename %s -> %s failed\n", tmp.c_str(), path);
+        fs.remove(tmp.c_str());
+        return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------

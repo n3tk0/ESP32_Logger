@@ -476,6 +476,40 @@ static void handleApiModuleUpdate(AsyncWebServerRequest* req, const String& id,
     req->send(200, "application/json", "{\"ok\":true}");
 }
 
+// POST /api/modules/:id/enable?on=1  — fast enable/disable without requiring
+// the full config body.  Modules that cannot hot-restart still honour the
+// flag; the next saveConfig() persists it and the caller can reboot via
+// /restart if needed (audit Pass 5 5.3 "enable endpoint").
+static void handleApiModuleEnable(AsyncWebServerRequest* req, const String& id) {
+    IModule* mod = moduleRegistry.getById(id.c_str());
+    if (!mod) {
+        req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
+        return;
+    }
+    bool on = true;
+    if (req->hasParam("on", true)) on = req->getParam("on", true)->value() == "1";
+    else if (req->hasParam("on")) on = req->getParam("on")->value() == "1";
+    mod->setEnabled(on);
+
+    // Try a hot (re)start first; modules that cannot hot-cycle return false
+    // from start() and the caller gets restartRequired=true in the reply.
+    bool restartRequired = false;
+    if (on) {
+        if (!mod->start()) restartRequired = true;
+    } else {
+        mod->stop();
+    }
+    saveConfig();
+
+    JsonDocument out;
+    out["ok"] = true;
+    out["enabled"] = on;
+    out["restartRequired"] = restartRequired;
+    String body;
+    serializeJson(out, body);
+    req->send(200, "application/json", body);
+}
+
 // Dispatcher — ESPAsyncWebServer's on() does exact-match only, so we register
 // a single handler at "/api/modules/" that parses the tail segment.
 static void handleApiModulesDispatch(AsyncWebServerRequest* req) {
@@ -523,9 +557,9 @@ void registerApiRoutes(AsyncWebServer& server) {
     // is buffered before the dispatcher runs.  ESPAsyncWebServer copies the
     // URL string internally, so a stack-local String is fine here.
     for (int i = 0; i < moduleRegistry.count(); i++) {
-        String path = String("/api/modules/") + moduleRegistry.get(i)->getId();
-        server.on(path.c_str(), HTTP_GET, handleApiModulesDispatch);
-        server.on(path.c_str(), HTTP_POST,
+        String base = String("/api/modules/") + moduleRegistry.get(i)->getId();
+        server.on(base.c_str(), HTTP_GET, handleApiModulesDispatch);
+        server.on(base.c_str(), HTTP_POST,
             [](AsyncWebServerRequest* r) { /* body handled below */ },
             nullptr,
             [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
@@ -543,5 +577,16 @@ void registerApiRoutes(AsyncWebServer& server) {
                 int q = id.indexOf('?'); if (q >= 0) id.remove(q);
                 handleApiModuleUpdate(r, id, data, len);
             });
+
+        // Dedicated enable/disable endpoint — lets the UI flip a module
+        // without sending the whole config blob.
+        String enablePath = base + "/enable";
+        server.on(enablePath.c_str(), HTTP_POST, [](AsyncWebServerRequest* r) {
+            String url = r->url();
+            const char* prefix = "/api/modules/";
+            String id = url.substring(strlen(prefix));
+            if (id.endsWith("/enable")) id.remove(id.length() - strlen("/enable"));
+            handleApiModuleEnable(r, id);
+        });
     }
 }
