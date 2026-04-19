@@ -414,11 +414,24 @@ function showToast(msg, type) {
   if (!c) return;
   var el = document.createElement("div");
   el.className = "toast " + (type === "error" ? "toast-error" : "toast-success");
-  el.innerHTML = (type === "error" ? "❌ " : "✅ ") + msg;
+  el.textContent = (type === "error" ? "❌ " : "✅ ") + msg;
   c.appendChild(el);
   setTimeout(function() {
     if(c.contains(el)) c.removeChild(el);
   }, 3000);
+}
+
+// HTML-escape for safe insertion into innerHTML. Use textContent / DOM
+// construction where possible; reach for esc() only when string templates
+// are unavoidable. Defined in core.js so all later modules can call it.
+function esc(s) {
+  if (s === undefined || s === null) return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function setEl(id, val) {

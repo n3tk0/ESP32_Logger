@@ -1074,7 +1074,7 @@ function otaFileSelected() {
     }
     fileInfo.innerHTML =
       '<span style="color:#080">✅ ' +
-      file.name +
+      esc(file.name) +
       " (" +
       Math.round(file.size / 1024) +
       "KB)</span>";

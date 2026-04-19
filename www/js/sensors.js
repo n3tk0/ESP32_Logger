@@ -139,20 +139,20 @@ function sensorsLoad() {
               '<div class="sensor-card">' +
               '<div class="sensor-card-header">' +
               '<span class="sensor-name">' +
-              s.name +
+              esc(s.name) +
               "</span>" +
               '<span class="badge ' +
               statusClass +
               '">' +
-              s.status +
+              esc(s.status) +
               "</span>" +
               "</div>" +
               '<div class="sensor-meta">' +
               "<span>ID: <code>" +
-              s.id +
+              esc(s.id) +
               "</code></span>" +
               "<span>Type: <code>" +
-              s.type +
+              esc(s.type) +
               "</code></span>" +
               "<span>Last: " +
               ts +
@@ -161,7 +161,7 @@ function sensorsLoad() {
               '<div class="sensor-metrics">' +
               (s.metrics || [])
                 .map(function (m) {
-                  return '<span class="metric-tag">' + m + "</span>";
+                  return '<span class="metric-tag">' + esc(m) + "</span>";
                 })
                 .join("") +
               "</div>" +
@@ -175,7 +175,7 @@ function sensorsLoad() {
       var sensorOpts =
         d.sensors
           .map(function (s) {
-            return '<option value="' + s.id + '">' + s.name + "</option>";
+            return '<option value="' + esc(s.id) + '">' + esc(s.name) + "</option>";
           })
           .join("");
       var sel = document.getElementById("sc-sensor");
@@ -727,7 +727,7 @@ function clEditSensor(idx) {
   
   // ID
   html += '<div class="form-group"><label class="form-label">Sensor ID</label>' +
-          '<input type="text" name="id" class="form-input" value="' + (s.id || '') + '"></div>';
+          '<input type="text" name="id" class="form-input" value="' + esc(s.id || '') + '"></div>';
           
   // Enabled
   html += '<div class="form-group"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" name="enabled"' + (s.enabled ? ' checked' : '') + '> Enabled</label></div>';

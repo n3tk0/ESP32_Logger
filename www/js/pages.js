@@ -463,8 +463,12 @@ function filesRender() {
           "</div>";
       }
       files.forEach(function (f) {
-        var safePath = f.path.replace(/'/g, "\\'");
-        var safeName = f.name.replace(/'/g, "\\'");
+        // For inline JS string literal: escape backslash and single quote in
+        // JS, then HTML-escape the whole attribute value.
+        var jsPath = f.path.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+        var jsName = f.name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+        var safePath = esc(jsPath);
+        var safeName = esc(jsName);
         var actions = "";
         if (f.isDir) {
           actions =
@@ -485,17 +489,17 @@ function filesRender() {
               "','" +
               safeName +
               "')\" class='btn btn-sm btn-secondary'>✂️</button>";
-            // Use data-path to avoid quote-in-attribute bug
+            // data-path is HTML-escaped; the handler reads it via dataset.
             actions +=
               ' <button data-path="' +
-              f.path +
+              esc(f.path) +
               '" onclick="filesDelete(this.dataset.path)" class=\'btn btn-sm btn-danger\'>🗑️</button>';
           }
         }
         html +=
           "<div class='list-item'><span>" +
           (f.isDir ? "📁 " : "📄 ") +
-          f.name +
+          esc(f.name) +
           (f.isDir
             ? ""
             : ' <small class="text-muted">(' + fmtBytes(f.size) + ")</small>") +
@@ -825,21 +829,21 @@ function liveLogsUpdate() {
             bg +
             '">' +
             '<td style="padding:6px">' +
-            l.time +
+            esc(l.time) +
             "</td>" +
             '<td style="color:' +
             color +
             ';font-weight:bold;text-align:center">' +
-            l.trigger +
+            esc(l.trigger) +
             "</td>" +
             '<td style="text-align:center">' +
-            l.volume +
+            esc(l.volume) +
             "</td>" +
             '<td style="text-align:center">' +
-            l.ff +
+            esc(l.ff) +
             "</td>" +
             '<td style="text-align:center">' +
-            l.pf +
+            esc(l.pf) +
             "</td></tr>";
         });
         html += "</table>";
