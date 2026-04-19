@@ -33,10 +33,7 @@ const char WIFI_SCHEMA[] PROGMEM =
       "{\"id\":\"staticIP\",\"type\":\"ipv4\",\"label\":\"IP\",\"showIf\":\"useStaticIP\"},"
       "{\"id\":\"gateway\",\"type\":\"ipv4\",\"label\":\"Gateway\",\"showIf\":\"useStaticIP\"},"
       "{\"id\":\"subnet\",\"type\":\"ipv4\",\"label\":\"Subnet\",\"showIf\":\"useStaticIP\"},"
-      "{\"id\":\"dns\",\"type\":\"ipv4\",\"label\":\"DNS\",\"showIf\":\"useStaticIP\"},"
-      "{\"id\":\"ntpServer\",\"type\":\"string\",\"max\":64,\"label\":\"NTP server\"},"
-      "{\"id\":\"timezone\",\"type\":\"int\",\"min\":-12,\"max\":14,\"label\":\"Timezone\"},"
-      "{\"id\":\"dstOffsetHours\",\"type\":\"int\",\"min\":0,\"max\":2,\"label\":\"DST offset\"}"
+      "{\"id\":\"dns\",\"type\":\"ipv4\",\"label\":\"DNS\",\"showIf\":\"useStaticIP\"}"
     "]}";
 
 } // namespace
@@ -46,15 +43,11 @@ bool WiFiModule::load(JsonObjectConst cfg) {
     NetworkConfig& n = config.network;
     n.wifiMode       = (WiFiModeType)(cfg["wifiMode"] | (int)n.wifiMode);
     n.useStaticIP    = cfg["useStaticIP"] | n.useStaticIP;
-    n.timezone       = (int8_t)(cfg["timezone"] | (int)n.timezone);
-    n.dstOffsetHours = (int8_t)(cfg["dstOffsetHours"] | (int)n.dstOffsetHours);
 
     const char* ssid = cfg["clientSSID"] | (const char*)nullptr;
     if (ssid) strlcpy(n.clientSSID, ssid, sizeof(n.clientSSID));
     const char* pw = cfg["clientPassword"] | (const char*)nullptr;
     if (pw) strlcpy(n.clientPassword, pw, sizeof(n.clientPassword));
-    const char* ntp = cfg["ntpServer"] | (const char*)nullptr;
-    if (ntp) strlcpy(n.ntpServer, ntp, sizeof(n.ntpServer));
 
     parseIPv4(cfg["staticIP"] | (const char*)nullptr, n.staticIP);
     parseIPv4(cfg["gateway"]  | (const char*)nullptr, n.gateway);
@@ -72,9 +65,6 @@ void WiFiModule::save(JsonObject cfg) const {
     // storing it in two places without encryption is worse than one.  The
     // real password continues to live in config.bin only.
     cfg["useStaticIP"]    = n.useStaticIP;
-    cfg["ntpServer"]      = n.ntpServer;
-    cfg["timezone"]       = (int)n.timezone;
-    cfg["dstOffsetHours"] = (int)n.dstOffsetHours;
 
     char buf[16];
     formatIPv4(n.staticIP, buf, sizeof(buf)); cfg["staticIP"] = String(buf);

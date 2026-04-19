@@ -47,6 +47,8 @@
 #include "src/modules/WiFiModule.h"    // Pass 5 phase 2
 #include "src/modules/OtaModule.h"     // Pass 5 phase 2
 #include "src/modules/ThemeModule.h"   // Pass 5 phase 2
+#include "src/modules/DataLogModule.h" // Pass 5 phase 2b
+#include "src/modules/TimeModule.h"    // Pass 5 phase 2b
 #include "src/managers/ConfigManager.h"
 #include "src/managers/HardwareManager.h"
 #include "src/managers/StorageManager.h"
@@ -469,6 +471,8 @@ void setup() {
     moduleRegistry.add(&WiFiModule::instance());
     moduleRegistry.add(&OtaModule::instance());
     moduleRegistry.add(&ThemeModule::instance());
+    moduleRegistry.add(&DataLogModule::instance());
+    moduleRegistry.add(&TimeModule::instance());
     if (fsAvailable && activeFS) {
         moduleRegistry.loadAll(*activeFS);
         if (!activeFS->exists(ModuleRegistry::DEFAULT_PATH)) {
