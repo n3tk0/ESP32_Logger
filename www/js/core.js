@@ -58,12 +58,23 @@ var changelogLoaded = false;
 // A small set of built-ins (hideParent, navPage, settingsSaveForm) handles
 // the patterns previously done as inline JS.
 // ============================================================================
+// Handlers registry — whitelist of functions callable via data-click / data-change /
+// data-input / data-submit / data-error / data-backdrop-fn.  Using a dedicated map
+// (instead of window[name]) closes a CSP-adjacent risk: if HTML injection ever lands
+// in a sensor id / file name / etc., the injected data-click can still only invoke a
+// function the application explicitly enrolled here.  Each JS module calls
+// registerHandlers({...}) to add its public entries; anything else is un-callable.
+var Handlers = Object.create(null);
+function registerHandlers(obj) {
+  for (var k in obj) if (typeof obj[k] === "function") Handlers[k] = obj[k];
+}
+
 function _dispatchEvent(eventName) {
   return function (ev) {
     var t = ev.target.closest("[data-" + eventName + "]");
     if (!t) return;
     var name = t.getAttribute("data-" + eventName);
-    var fn = window[name];
+    var fn = Handlers[name];
     if (typeof fn !== "function") return;
     var args;
     var raw = t.getAttribute("data-args");
@@ -99,7 +110,7 @@ function installEventDispatcher() {
 function wireLateErrorHandlers(root) {
   (root || document).querySelectorAll("[data-error]").forEach(function (el) {
     if (el._dataErrorWired) return;
-    var fn = window[el.getAttribute("data-error")];
+    var fn = Handlers[el.getAttribute("data-error")];
     if (typeof fn === "function") {
       el.addEventListener("error", fn);
       el._dataErrorWired = true;
@@ -151,7 +162,7 @@ function hidePopup(id) { var el = document.getElementById(id); if (el) el.style.
 function backdropClose(ev) {
   if (ev.target !== this) return;
   var fn = this.getAttribute("data-backdrop-fn");
-  if (fn && typeof window[fn] === "function") window[fn]();
+  if (fn && typeof Handlers[fn] === "function") Handlers[fn]();
   else this.style.display = "none";
 }
 
@@ -908,4 +919,21 @@ function confirmRestart() {
   };
   tick();
 }
+
+// Enrol every handler referenced from markup via data-click / data-change /
+// data-input / data-submit / data-error / data-backdrop-fn.  Anything not in
+// this list is un-callable through the dispatcher even if injected HTML tries.
+registerHandlers({
+  navPage: navPage,
+  quickThemeToggle: quickThemeToggle,
+  showPopup: showPopup,
+  hidePopup: hidePopup,
+  showSubpage: showSubpage,
+  backdropClose: backdropClose,
+  hideParent: hideParent,
+  togglePass: togglePass,
+  settingsSaveForm: settingsSaveForm,
+  submitParentForm: submitParentForm,
+  confirmRestart: confirmRestart,
+});
 

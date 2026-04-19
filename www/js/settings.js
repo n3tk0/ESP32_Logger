@@ -1521,3 +1521,33 @@ var Modules = (function () {
 // Event-dispatcher entry points
 function modulesInit()       { Modules.init(); }
 function modulesSelect(id)   { Modules.select(id); }
+
+// Enrol markup-reachable handlers.  See core.js::Handlers for the whitelist
+// rationale.  modulesInit is called internally by pageInit, not via markup,
+// so it is left out here.
+registerHandlers({
+  regenDevId: regenDevId,
+  toggleManualId: toggleManualId,
+  changelogToggle: changelogToggle,
+  changelogClose: changelogClose,
+  themeSave: themeSave,
+  themeToggleChartPath: themeToggleChartPath,
+  themeRestoreDefault: themeRestoreDefault,
+  netToggleMode: netToggleMode,
+  netToggleStatic: netToggleStatic,
+  netScanWifi: netScanWifi,
+  timeSetManual: timeSetManual,
+  timeSyncNTP: timeSyncNTP,
+  timeRtcProtect: timeRtcProtect,
+  timeFlushLogs: timeFlushLogs,
+  timeRestoreBoot: timeRestoreBoot,
+  dlDeleteFile: dlDeleteFile,
+  dlUpdatePreview: dlUpdatePreview,
+  dlToggleMaxSize: dlToggleMaxSize,
+  dlTogglePcFields: dlTogglePcFields,
+  settingsImport: settingsImport,
+  otaFileSelected: otaFileSelected,
+  otaUpload: otaUpload,
+  closePopup: closePopup,
+  modulesSelect: modulesSelect,
+});

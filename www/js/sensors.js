@@ -1114,3 +1114,23 @@ function expSave() {
   });
 }
 
+// Enrol markup-reachable handlers.  See core.js::Handlers for why the
+// whitelist exists.
+registerHandlers({
+  aggSettingsSave: aggSettingsSave,
+  sensorsLoad: sensorsLoad,
+  sensorChartLoad: sensorChartLoad,
+  clToggleSensor: clToggleSensor,
+  clRemoveSensor: clRemoveSensor,
+  clAddSensor: clAddSensor,
+  clDoAddSensor: clDoAddSensor,
+  clEditSensor: clEditSensor,
+  clSaveEditedSensor: clSaveEditedSensor,
+  clSave: clSave,
+  clLoad: clLoad,
+  clUpdateSleepPanel: clUpdateSleepPanel,
+  clUpdateHybCycle: clUpdateHybCycle,
+  expLoad: expLoad,
+  expSave: expSave,
+});
+

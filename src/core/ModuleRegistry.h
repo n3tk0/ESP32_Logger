@@ -31,6 +31,12 @@ public:
     static constexpr int MAX_MODULES = 16;
     static constexpr const char* DEFAULT_PATH = "/config/modules.json";
 
+    // Upper bound on /config/modules.json size.  Each module's slice is small
+    // (theme is the fattest at ~400 B; wifi ~200 B).  With MAX_MODULES = 16 a
+    // 16 KB cap leaves ~5× headroom vs. the realistic worst case and blocks
+    // accidentally-huge or maliciously-crafted files from OOMing the parse.
+    static constexpr size_t MAX_FILE_BYTES = 16 * 1024;
+
     // ------------------------------------------------------------------
     // Register a module.  Call before loadAll().  Returns false if the
     // table is full or if a module with the same id is already present.

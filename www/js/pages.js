@@ -789,6 +789,24 @@ function liveBtn(id, pressed, txtOn, txtOff, colorOn, colorOff) {
   el.style.background = pressed ? colorOn : colorOff;
 }
 
+// Enrol markup-reachable handlers (data-click / data-change / data-input /
+// data-submit).  See core.js::Handlers for why the whitelist exists.
+registerHandlers({
+  dbLoadData: dbLoadData,
+  dbApplyFilters: dbApplyFilters,
+  dbExportCSV: dbExportCSV,
+  filesSetStorage: filesSetStorage,
+  filesEnterDir: filesEnterDir,
+  filesGoUp: filesGoUp,
+  filesToggleEdit: filesToggleEdit,
+  filesDelete: filesDelete,
+  filesUpload: filesUpload,
+  filesMkdir: filesMkdir,
+  showMovePopup: showMovePopup,
+  filesApplyMove: filesApplyMove,
+  liveSetRate: liveSetRate,
+});
+
 // Matches original: function updLogs()
 function liveLogsUpdate() {
   fetch("/api/recent_logs")

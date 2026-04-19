@@ -37,6 +37,16 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
         return true;  // absence is fine — modules keep compile-time defaults
     }
 
+    // Cap the parse input so a corrupted or oversize file can't OOM the device.
+    // Realistic worst case is a few KB (see MAX_FILE_BYTES rationale in .h).
+    size_t sz = f.size();
+    if (sz > MAX_FILE_BYTES) {
+        Serial.printf("[ModuleRegistry] %s too large (%u B, cap %u) — ignoring\n",
+                      path, (unsigned)sz, (unsigned)MAX_FILE_BYTES);
+        f.close();
+        return false;
+    }
+
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, f);
     f.close();
