@@ -558,6 +558,195 @@ function applySettingsFlash() {
 }
 
 // ============================================================================
+// COMPONENT HELPERS  (Pass 4 A3)
+// ============================================================================
+// Tiny DOM builder: h("input", { type: "number", name: "x" })
+// Children may be a string, a Node, or an array of those (nested allowed).
+function h(tag, attrs, children) {
+  var el = document.createElement(tag);
+  if (attrs) {
+    for (var k in attrs) {
+      if (!Object.prototype.hasOwnProperty.call(attrs, k)) continue;
+      var v = attrs[k];
+      if (v === null || v === undefined || v === false) continue;
+      if (k === "class")        el.className = v;
+      else if (k === "style")   for (var sk in v) el.style[sk] = v[sk];
+      else if (k === "html")    el.innerHTML = v;       // caller is responsible
+      else if (k === "text")    el.textContent = v;     // safe
+      else if (k.indexOf("on") === 0 && typeof v === "function")
+                                el.addEventListener(k.substring(2), v);
+      else if (k === "dataset") for (var dk in v) el.dataset[dk] = v[dk];
+      else                      el.setAttribute(k, v === true ? "" : v);
+    }
+  }
+  function add(c) {
+    if (c == null || c === false) return;
+    if (Array.isArray(c)) c.forEach(add);
+    else el.appendChild(c.nodeType ? c : document.createTextNode(String(c)));
+  }
+  add(children);
+  return el;
+}
+
+// ----------------------------------------------------------------------------
+// Form.bind(host, schema, data) — schema-driven settings form renderer.
+//
+// schema = {
+//   saveUrl:   "/save_hardware",       // POST target
+//   restart:   true,                   // show restart popup on success
+//   confirm:   "Save and restart?",    // optional pre-submit confirm()
+//   submitLabel: "💾 Save & Restart",
+//   sections: [
+//     { title: "💾 Storage", hint: "...optional intro paragraph...",
+//       fields: [
+//         { name: "storageType", label: "Type", type: "select",
+//           options: [["0","LittleFS"],["1","SD"]],
+//           hint: "..." },
+//         { row: [                                  // horizontal group
+//           { name: "pinSdCS",   label: "CS",   type: "number",
+//             showWhen: { storageType: "1" } },    // value-conditional
+//           { name: "pinSdMOSI", label: "MOSI", type: "number" },
+//         ]},
+//         { name: "testMode", label: "Enable", type: "checkbox" },
+//       ]
+//     }
+//   ]
+// };
+//
+// Field types: text | number | password | select | checkbox
+// Per-field options: min, max, step, placeholder, hint, hidden, showWhen.
+//
+// Form.bind returns the rendered <form>; values can be re-applied later via
+// Form.fill(form, data). Submit is wired to settingsSave().
+// ----------------------------------------------------------------------------
+var Form = (function () {
+  function field(f, data) {
+    if (f.row) {
+      return h("div", { class: "form-row" }, f.row.map(function (sub) {
+        return field(sub, data);
+      }));
+    }
+
+    var val = (data != null && f.name in data) ? data[f.name] : f.value;
+    var input;
+
+    if (f.type === "select") {
+      input = h("select", {
+        name: f.name, id: f.id || null,
+        class: "form-input form-select",
+      }, (f.options || []).map(function (opt) {
+        var ov = Array.isArray(opt) ? opt[0] : opt.value;
+        var ol = Array.isArray(opt) ? opt[1] : opt.label;
+        var o = h("option", { value: ov, text: ol });
+        if (String(val) === String(ov)) o.selected = true;
+        return o;
+      }));
+    } else if (f.type === "checkbox") {
+      input = h("input", {
+        type: "checkbox", name: f.name, id: f.id || null, value: "1",
+      });
+      if (val) input.checked = true;
+    } else {
+      input = h("input", {
+        type: f.type || "text", name: f.name, id: f.id || null,
+        class: "form-input",
+        min: f.min, max: f.max, step: f.step,
+        placeholder: f.placeholder,
+      });
+      if (val !== undefined && val !== null) input.value = val;
+    }
+
+    var label = f.label
+      ? h("label", { class: "form-label" },
+          f.type === "checkbox" ? [input, " " + f.label] : f.label)
+      : null;
+    var hint = f.hint ? h("p", { class: "form-hint", text: f.hint }) : null;
+
+    var group = h("div", {
+      class: "form-group",
+      dataset: f.showWhen ? { showwhen: JSON.stringify(f.showWhen) } : null,
+    }, f.type === "checkbox" ? [label, hint] : [label, input, hint]);
+
+    if (f.hidden) group.style.display = "none";
+    return group;
+  }
+
+  function applyShowWhen(form) {
+    var groups = form.querySelectorAll("[data-showwhen]");
+    if (!groups.length) return;
+    function eval1(spec) {
+      for (var k in spec) {
+        var el = form.elements[k];
+        if (!el) return false;
+        var v = el.type === "checkbox" ? (el.checked ? "1" : "") : el.value;
+        if (String(v) !== String(spec[k])) return false;
+      }
+      return true;
+    }
+    function refresh() {
+      groups.forEach(function (g) {
+        var spec;
+        try { spec = JSON.parse(g.dataset.showwhen); } catch (e) { return; }
+        g.style.display = eval1(spec) ? "" : "none";
+      });
+    }
+    form.addEventListener("change", refresh);
+    refresh();
+  }
+
+  function bind(host, schema, data) {
+    if (typeof host === "string") host = document.getElementById(host);
+    if (!host) return null;
+    host.innerHTML = "";
+
+    var msgId = PAGE_MSG_IDS[currentPage] || (currentPage.replace("settings_","") + "-msg");
+    var form = h("form", {}, [
+      h("div", { id: msgId }),
+      schema.sections.map(function (sec) {
+        return h("div", { class: "card" }, [
+          sec.title
+            ? h("div", { class: "card-header", text: sec.title })
+            : null,
+          h("div", { class: "card-body" }, [
+            sec.hint ? h("p", { class: "form-hint", text: sec.hint }) : null,
+            sec.fields.map(function (f) { return field(f, data); }),
+          ]),
+        ]);
+      }),
+      h("button", {
+        type: "submit", class: "btn btn-primary btn-block",
+        text: schema.submitLabel || "💾 Save",
+      }),
+    ]);
+
+    form.addEventListener("submit", function (ev) {
+      if (schema.confirm && !confirm(schema.confirm)) {
+        ev.preventDefault();
+        return;
+      }
+      settingsSave(ev, schema.saveUrl, form, !!schema.restart);
+    });
+
+    host.appendChild(form);
+    applyShowWhen(form);
+    return form;
+  }
+
+  // Re-apply data values (e.g. after a refresh fetch).
+  function fill(form, data) {
+    if (!form || !data) return;
+    Array.prototype.forEach.call(form.elements, function (el) {
+      if (!el.name || !(el.name in data)) return;
+      if (el.type === "checkbox") el.checked = !!data[el.name];
+      else el.value = data[el.name];
+    });
+    form.dispatchEvent(new Event("change"));
+  }
+
+  return { bind: bind, fill: fill };
+})();
+
+// ============================================================================
 // RESTART POPUP
 // ============================================================================
 function showRestartPopup() {

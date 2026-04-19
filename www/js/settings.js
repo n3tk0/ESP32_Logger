@@ -213,37 +213,83 @@ function sfInit() {
 // ============================================================================
 // ══ SETTINGS: HARDWARE ══
 // ============================================================================
+// First settings page migrated to schema-driven Form.bind (Pass 4 A3).
+// The HTML partial provides only #hw-host; the entire form is rendered
+// from HW_SCHEMA against CFG.hardware.
+var HW_SCHEMA = {
+  saveUrl: "/save_hardware",
+  restart: true,
+  confirm: "Settings will be saved and device will restart. Continue?",
+  submitLabel: "💾 Save & Restart",
+  sections: [
+    { title: "💾 Storage", fields: [
+        { name: "storageType", label: "Type", type: "select", options: [
+            ["0", "LittleFS (Internal)"],
+            ["1", "SD Card (SPI)"],
+        ]},
+        { row: [
+            { name: "pinSdCS",   label: "CS",   type: "number", showWhen: { storageType: "1" } },
+            { name: "pinSdMOSI", label: "MOSI", type: "number", showWhen: { storageType: "1" } },
+            { name: "pinSdMISO", label: "MISO", type: "number", showWhen: { storageType: "1" } },
+            { name: "pinSdSCK",  label: "SCK",  type: "number", showWhen: { storageType: "1" } },
+        ]},
+    ]},
+    { title: "😴 Wakeup Mode", fields: [
+        { name: "wakeupMode", label: "Button Active Level", type: "select",
+          hint: "HIGH = button connects to VCC, LOW = to GND.",
+          options: [
+            ["0", "Active HIGH (VCC)"],
+            ["1", "Active LOW (GND)"],
+        ]},
+        { name: "debounceMs", label: "Debounce (ms)", type: "number",
+          min: 20, max: 500,
+          hint: "Higher = fewer false triggers but slower response." },
+    ]},
+    { title: "🔘 Pin Configuration",
+      hint: "GPIO pin numbers for ESP32-C3",
+      fields: [
+        { row: [
+            { name: "pinWifiTrigger", label: "WiFi Trigger",   type: "number" },
+            { name: "pinWakeupFF",    label: "Full Flush Btn", type: "number" },
+            { name: "pinWakeupPF",    label: "Part Flush Btn", type: "number" },
+            { name: "pinFlowSensor",  label: "Flow Sensor",    type: "number" },
+        ]},
+    ]},
+    { title: "🕐 RTC DS1302", fields: [
+        { row: [
+            { name: "pinRtcCE",   label: "CE (RST)",   type: "number" },
+            { name: "pinRtcIO",   label: "IO (DAT)",   type: "number" },
+            { name: "pinRtcSCLK", label: "CLK (SCLK)", type: "number" },
+        ]},
+    ]},
+    { title: "⚡ CPU Frequency", fields: [
+        { name: "cpuFreqMHz", type: "select", options: [
+            ["80",  "80 MHz"],
+            ["160", "160 MHz"],
+        ]},
+    ]},
+  ],
+};
+
 function hwInit() {
   fetch("/export_settings")
-    .then(function (r) {
-      return r.json();
-    })
+    .then(function (r) { return r.json(); })
     .then(function (d) {
       CFG = d;
-      var hw = d.hardware || {},
-        th = ST.theme || CFG.theme || {};
-      setVal("hw-storage", hw.storageType !== undefined ? hw.storageType : 0);
-      var sdP = document.getElementById("sdPins");
-      if (sdP) sdP.style.display = hw.storageType == 1 ? "block" : "none";
-      setVal("hw-sdCS", hw.pinSdCS);
-      setVal("hw-sdMOSI", hw.pinSdMOSI);
-      setVal("hw-sdMISO", hw.pinSdMISO);
-      setVal("hw-sdSCK", hw.pinSdSCK);
-      setVal("hw-wakeup", hw.wakeupMode !== undefined ? hw.wakeupMode : 0);
-      setVal("hw-debounce", hw.debounceMs || 100);
-      setVal("hw-pinWifi", hw.pinWifiTrigger);
-      setVal("hw-pinFF", hw.pinWakeupFF);
-      setVal("hw-pinPF", hw.pinWakeupPF);
-      setVal("hw-pinFlow", hw.pinFlowSensor);
-      setVal("hw-rtcCE", hw.pinRtcCE);
-      setVal("hw-rtcIO", hw.pinRtcIO);
-      setVal("hw-rtcCLK", hw.pinRtcSCLK);
-      setVal("hw-cpu", hw.cpuFreqMHz || 80);
+      var hw = d.hardware || {};
+      var defaults = {
+        storageType: 0, wakeupMode: 0, debounceMs: 100, cpuFreqMHz: 80,
+      };
+      for (var k in defaults) if (hw[k] === undefined) hw[k] = defaults[k];
+
+      Form.bind("hw-host", HW_SCHEMA, hw);
+
+      var th = (ST && ST.theme) || (CFG && CFG.theme) || {};
       if (th.boardDiagramPath) {
         var card = document.getElementById("boardDiagramCard");
-        var img = document.getElementById("boardDiagram");
+        var img  = document.getElementById("boardDiagram");
         if (card) card.style.display = "block";
-        if (img) img.src = th.boardDiagramPath + "?v=" + Date.now();
+        if (img)  img.src = th.boardDiagramPath + "?v=" + Date.now();
       }
     });
 }
@@ -1031,11 +1077,6 @@ function otaInit() {
     });
 }
 
-function hwToggleSD() {
-  var sd = document.getElementById("sdPins"),
-    st = document.getElementById("hw-storage");
-  if (sd && st) sd.style.display = st.value === "1" ? "block" : "none";
-}
 
 function otaFileSelected() {
   var fileInput = document.getElementById("fwFile");
