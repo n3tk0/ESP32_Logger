@@ -632,7 +632,14 @@
         class="icon">⚙️</span>Settings</a></nav>
 
   <div id="toastContainer" class="toast-container"></div>
-  <script src="/web.js"></script>
+  <!--
+    JS modules are plain scripts in shared global scope; load order matters:
+    core.js defines globals/utils/nav, the others depend on them.
+  -->
+  <script src="/js/core.js"></script>
+  <script src="/js/pages.js"></script>
+  <script src="/js/settings.js"></script>
+  <script src="/js/sensors.js"></script>
 
   <!-- ═══ FOOTER ═══ -->
   <footer class="app-footer">
