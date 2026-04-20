@@ -1,11 +1,11 @@
   <main class="main-content page" id="page-settings_datalog">
     <div class="page-header">
       <h1>📝 Data Log</h1>
-      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Data Log
+      <div class="breadcrumb"><a href="#settings">Settings</a> / Data Log
       </div>
     </div>
 
-    <form onsubmit="settingsSave(event,'/save_datalog',this)" novalidate>
+    <form data-submit="settingsSaveForm" data-save-url="/save_datalog" novalidate>
       <div id="dl-msg"></div>
       <!-- Active File -->
       <div class="card">
@@ -40,7 +40,7 @@
           <p class="text-muted" style="font-size:.8rem;margin-bottom:.75rem">How to split log files over time</p>
           <div class="form-row">
             <div class="form-group">
-              <select name="rotation" id="dl-rotation" class="form-input form-select" onchange="dlToggleMaxSize()">
+              <select name="rotation" id="dl-rotation" class="form-input form-select" data-change="dlToggleMaxSize">
                 <option value="0">None</option>
                 <option value="1">Daily</option>
                 <option value="2">Weekly</option>
@@ -71,7 +71,7 @@
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
             <div class="form-group" style="min-width:100px">
               <label class="form-label">Date</label>
-              <select name="dateFormat" id="dl-date" class="form-input form-select" onchange="dlUpdatePreview()">
+              <select name="dateFormat" id="dl-date" class="form-input form-select" data-change="dlUpdatePreview">
                 <option value="0">Off</option>
                 <option value="1">DD/MM/YYYY</option>
                 <option value="2">MM/DD/YYYY</option>
@@ -81,7 +81,7 @@
             </div>
             <div class="form-group" style="min-width:90px">
               <label class="form-label">Start</label>
-              <select name="timeFormat" id="dl-time" class="form-input form-select" onchange="dlUpdatePreview()">
+              <select name="timeFormat" id="dl-time" class="form-input form-select" data-change="dlUpdatePreview">
                 <option value="0">HH:MM:SS</option>
                 <option value="1">HH:MM</option>
                 <option value="2">12h AM/PM</option>
@@ -89,7 +89,7 @@
             </div>
             <div class="form-group" style="min-width:80px">
               <label class="form-label">End</label>
-              <select name="endFormat" id="dl-end" class="form-input form-select" onchange="dlUpdatePreview()">
+              <select name="endFormat" id="dl-end" class="form-input form-select" data-change="dlUpdatePreview">
                 <option value="0">Time</option>
                 <option value="1">Duration</option>
                 <option value="2">Off</option>
@@ -97,14 +97,14 @@
             </div>
             <div class="form-group" style="min-width:80px">
               <label class="form-label">Boot#</label>
-              <select name="includeBootCount" id="dl-boot" class="form-input form-select" onchange="dlUpdatePreview()">
+              <select name="includeBootCount" id="dl-boot" class="form-input form-select" data-change="dlUpdatePreview">
                 <option value="1">On</option>
                 <option value="0">Off</option>
               </select>
             </div>
             <div class="form-group" style="min-width:80px">
               <label class="form-label">Volume</label>
-              <select name="volumeFormat" id="dl-vol" class="form-input form-select" onchange="dlUpdatePreview()">
+              <select name="volumeFormat" id="dl-vol" class="form-input form-select" data-change="dlUpdatePreview">
                 <option value="0">L:0,00</option>
                 <option value="1">L:0.00</option>
                 <option value="2">0.00</option>
@@ -114,7 +114,7 @@
             <div class="form-group" style="min-width:80px">
               <label class="form-label">FF/PF</label>
               <select name="includeExtraPresses" id="dl-extra" class="form-input form-select"
-                onchange="dlUpdatePreview()">
+                data-change="dlUpdatePreview">
                 <option value="1">On</option>
                 <option value="0">Off</option>
               </select>
@@ -136,7 +136,7 @@
           <div class="form-group">
             <label class="form-label">
               <input type="checkbox" name="postCorrectionEnabled" id="dl-pcEnabled" value="1"
-                onchange="var f=document.getElementById('pcFields');if(f)f.style.display=this.checked?'block':'none'">
+                data-change="dlTogglePcFields">
               Enable Post-Correction
             </label>
           </div>
@@ -224,7 +224,7 @@
             <input type="number" id="agg-limit" class="form-input" value="500" min="50" max="5000" step="50">
             <p class="form-hint">Maximum chart points (50–5000). Default: 500.</p>
           </div>
-          <button type="button" class="btn btn-secondary" onclick="aggSettingsSave()">💾 Save Visualisation Settings</button>
+          <button type="button" class="btn btn-secondary" data-click="aggSettingsSave">💾 Save Visualisation Settings</button>
           <div id="agg-msg" style="margin-top:8px;font-size:.85rem"></div>
         </div>
       </div>

@@ -1,11 +1,11 @@
   <main class="main-content page" id="page-settings_device">
     <div class="page-header">
       <h1>📱 Device</h1>
-      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Device
+      <div class="breadcrumb"><a href="#settings">Settings</a> / Device
       </div>
     </div>
 
-    <form onsubmit="settingsSave(event,'/save_device',this)">
+    <form data-submit="settingsSaveForm" data-save-url="/save_device">
       <div id="sd-msg"></div>
 
       <!-- Identity -->
@@ -24,8 +24,8 @@
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <input type="text" id="sd-devId" name="deviceId" maxlength="12" class="form-input"
                 style="flex:1;min-width:120px" disabled>
-              <button type="button" onclick="regenDevId()" class="btn btn-secondary btn-sm">🔄 New ID</button>
-              <button type="button" onclick="toggleManualId('sd-devId')" class="btn btn-secondary btn-sm">✏️
+              <button type="button" data-click="regenDevId" class="btn btn-secondary btn-sm">🔄 New ID</button>
+              <button type="button" data-click="toggleManualId" data-args='["sd-devId"]' class="btn btn-secondary btn-sm">✏️
                 Manual</button>
             </div>
           </div>
@@ -92,7 +92,7 @@
 
       <!-- Changelog -->
       <div class="card">
-        <div class="card-header" onclick="changelogToggle()"
+        <div class="card-header" data-click="changelogToggle"
           style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
           <span>📜 Change Log <small class="text-muted">(tap)</small></span>
           <span id="changelogChevron" style="transition: transform 0.3s;">▼</span>

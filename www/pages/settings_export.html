@@ -2,7 +2,7 @@
     <div class="page-header">
       <h1>📡 Export</h1>
       <div class="breadcrumb">
-        <a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Export
+        <a href="#settings">Settings</a> / Export
       </div>
     </div>
 
@@ -149,7 +149,7 @@
     </div>
 
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">
-      <button class="btn btn-primary" onclick="expSave()">💾 Save &amp; Restart</button>
-      <button class="btn btn-secondary" onclick="expLoad()">🔄 Reload</button>
+      <button class="btn btn-primary" data-click="expSave">💾 Save &amp; Restart</button>
+      <button class="btn btn-secondary" data-click="expLoad">🔄 Reload</button>
     </div>
   </main>

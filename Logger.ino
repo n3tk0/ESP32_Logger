@@ -43,6 +43,12 @@
 #include <WiFi.h>           // for WiFi.setSleep() in continuous mode
 
 #include "src/core/Globals.h"
+#include "src/core/ModuleRegistry.h"  // Pass 5: unified module registry (phase 1 = empty)
+#include "src/modules/WiFiModule.h"    // Pass 5 phase 2
+#include "src/modules/OtaModule.h"     // Pass 5 phase 2
+#include "src/modules/ThemeModule.h"   // Pass 5 phase 2
+#include "src/modules/DataLogModule.h" // Pass 5 phase 2b
+#include "src/modules/TimeModule.h"    // Pass 5 phase 2b
 #include "src/managers/ConfigManager.h"
 #include "src/managers/HardwareManager.h"
 #include "src/managers/StorageManager.h"
@@ -457,6 +463,22 @@ void setup() {
     isrDebounceUs = (uint32_t)config.hardware.debounceMs * 1000UL;   // I1
 
     initStorage();
+
+    // Pass 5 phase 2: register IModule adapters for WiFi/OTA/theme and
+    // hydrate them from /config/modules.json.  config.bin still wins when
+    // the file is missing (first boot); saveConfig() will seed it on the
+    // next save_* so subsequent boots read from JSON.
+    moduleRegistry.add(&WiFiModule::instance());
+    moduleRegistry.add(&OtaModule::instance());
+    moduleRegistry.add(&ThemeModule::instance());
+    moduleRegistry.add(&DataLogModule::instance());
+    moduleRegistry.add(&TimeModule::instance());
+    if (fsAvailable && activeFS) {
+        moduleRegistry.loadAll(*activeFS);
+        if (!activeFS->exists(ModuleRegistry::DEFAULT_PATH)) {
+            moduleRegistry.saveAll(*activeFS);  // seed from current DeviceConfig
+        }
+    }
 
     int expectedActive = (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH) ? HIGH : LOW;
 

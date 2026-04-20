@@ -8,7 +8,10 @@
 #include "../export/ExportManager.h"
 #include "../export/MqttExporter.h"
 #include "../storage/JsonLogger.h"
-#include "../core/Globals.h"   // config, activeFS
+#include "../core/Globals.h"         // config, activeFS
+#include "../core/ModuleRegistry.h"  // Pass 5 phase 3: /api/modules
+#include "../managers/ConfigManager.h" // saveConfig() after module update
+#include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 
 // Forward-declared in Logger.ino — accessible here because this file is
 // compiled in the same sketch scope.
@@ -414,6 +417,130 @@ static void handleOtaRollback(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
+// Pass 5 phase 3: generic /api/modules* endpoints.
+//
+// Coexists with the legacy /save_* handlers — both paths write to the same
+// DeviceConfig, so either one staying the authoritative source of truth is
+// fine during the transition.  Legacy save_* are kept through §5.8 step 5.
+// ---------------------------------------------------------------------------
+
+// GET /api/modules → [{id,name,enabled,hasUI}, ...]
+static void handleApiModulesIndex(AsyncWebServerRequest* req) {
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    moduleRegistry.toIndexJson(arr);
+    String body; serializeJson(doc, body);
+    req->send(200, "application/json", body);
+}
+
+// GET /api/modules/:id → {id,name,enabled,hasUI,config,schema?}
+// The :id is extracted from the URL by the dispatcher below.
+static void handleApiModuleDetail(AsyncWebServerRequest* req, const String& id) {
+    JsonDocument doc;
+    JsonObject obj = doc.to<JsonObject>();
+    if (!moduleRegistry.toDetailJson(id.c_str(), obj)) {
+        req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
+        return;
+    }
+    String body; serializeJson(doc, body);
+    req->send(200, "application/json", body);
+}
+
+// POST /api/modules/:id with JSON body → load() + persist.
+// Uses an AsyncCallbackJsonWebHandler-style manual body buffer because the
+// project already parses JSON bodies this way elsewhere.
+static void handleApiModuleUpdate(AsyncWebServerRequest* req, const String& id,
+                                   uint8_t* data, size_t len) {
+    if (rateLimit429(req)) return;
+    IModule* mod = moduleRegistry.getById(id.c_str());
+    if (!mod) {
+        req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
+        return;
+    }
+    JsonDocument body;
+    DeserializationError err = deserializeJson(body, data, len);
+    if (err) {
+        req->send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}");
+        return;
+    }
+    // Top-level "enabled" toggles runtime state; the rest of the payload is
+    // the module's own field bag (schema shape).
+    if (body["enabled"].is<bool>()) mod->setEnabled(body["enabled"].as<bool>());
+    JsonObjectConst cfg = body["config"].is<JsonObjectConst>()
+                          ? body["config"].as<JsonObjectConst>()
+                          : body.as<JsonObjectConst>();
+    if (!mod->load(cfg)) {
+        req->send(400, "application/json", "{\"ok\":false,\"error\":\"validation failed\"}");
+        return;
+    }
+    // Persist: saveConfig() already shadows modules.json via moduleRegistry.
+    saveConfig();
+    req->send(200, "application/json", "{\"ok\":true}");
+}
+
+// POST /api/modules/:id/enable?on=1  — fast enable/disable without requiring
+// the full config body.  Modules that cannot hot-restart still honour the
+// flag; the next saveConfig() persists it and the caller can reboot via
+// /restart if needed (audit Pass 5 5.3 "enable endpoint").
+static void handleApiModuleEnable(AsyncWebServerRequest* req, const String& id) {
+    if (rateLimit429(req)) return;
+    IModule* mod = moduleRegistry.getById(id.c_str());
+    if (!mod) {
+        req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
+        return;
+    }
+    bool on = true;
+    if (req->hasParam("on", true)) on = req->getParam("on", true)->value() == "1";
+    else if (req->hasParam("on")) on = req->getParam("on")->value() == "1";
+    mod->setEnabled(on);
+
+    // Try a hot (re)start first; modules that cannot hot-cycle return false
+    // from start() and the caller gets restartRequired=true in the reply.
+    bool restartRequired = false;
+    if (on) {
+        if (!mod->start()) restartRequired = true;
+    } else {
+        mod->stop();
+    }
+    saveConfig();
+
+    JsonDocument out;
+    out["ok"] = true;
+    out["enabled"] = on;
+    out["restartRequired"] = restartRequired;
+    String body;
+    serializeJson(out, body);
+    req->send(200, "application/json", body);
+}
+
+// Dispatcher — ESPAsyncWebServer's on() does exact-match only, so we register
+// a single handler at "/api/modules/" that parses the tail segment.
+static void handleApiModulesDispatch(AsyncWebServerRequest* req) {
+    // GET /api/modules/:id  (update path handled by body callback below)
+    String url = req->url();
+    const char* prefix = "/api/modules/";
+    if (!url.startsWith(prefix)) {
+        req->send(404, "application/json", "{\"ok\":false}");
+        return;
+    }
+    String id = url.substring(strlen(prefix));
+    // Strip trailing slash or query if present.
+    int q = id.indexOf('?'); if (q >= 0) id.remove(q);
+    if (id.endsWith("/")) id.remove(id.length() - 1);
+    if (id.length() == 0) {                 // /api/modules/ with no id
+        req->send(400, "application/json", "{\"ok\":false,\"error\":\"missing id\"}");
+        return;
+    }
+    if (req->method() == HTTP_GET) {
+        handleApiModuleDetail(req, id);
+        return;
+    }
+    // POST lands here only after the body callback has run; the body is
+    // delivered via the onBody handler registered alongside this route.
+    req->send(405, "application/json", "{\"ok\":false,\"error\":\"method not allowed\"}");
+}
+
+// ---------------------------------------------------------------------------
 void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/data",              HTTP_GET,  handleApiData);
     server.on("/api/sensors",           HTTP_GET,  handleApiSensors);
@@ -424,4 +551,45 @@ void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/ota/status",        HTTP_GET,  handleOtaStatus);
     server.on("/api/ota/confirm",       HTTP_POST, handleOtaConfirm);
     server.on("/api/ota/rollback",      HTTP_POST, handleOtaRollback);
+
+    // Pass 5 phase 3: generic module CRUD
+    server.on("/api/modules", HTTP_GET, handleApiModulesIndex);
+
+    // Per-module routes (ESPAsyncWebServer does exact-match only; iterating is
+    // cheap with MAX_MODULES = 16).  POST uses onBody so the full JSON payload
+    // is buffered before the dispatcher runs.  ESPAsyncWebServer copies the
+    // URL string internally, so a stack-local String is fine here.
+    for (int i = 0; i < moduleRegistry.count(); i++) {
+        String base = String("/api/modules/") + moduleRegistry.get(i)->getId();
+        server.on(base.c_str(), HTTP_GET, handleApiModulesDispatch);
+        server.on(base.c_str(), HTTP_POST,
+            [](AsyncWebServerRequest* r) { /* body handled below */ },
+            nullptr,
+            [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
+               size_t index, size_t total) {
+                // Small module payloads (≤ a few hundred bytes) arrive in a
+                // single chunk on LittleFS-backed boards; reject chunked
+                // uploads rather than buffer unbounded bytes in RAM.
+                if (index != 0 || len != total) {
+                    r->send(413, "application/json",
+                            "{\"ok\":false,\"error\":\"body too large\"}");
+                    return;
+                }
+                String url = r->url();
+                String id  = url.substring(sizeof("/api/modules/") - 1);
+                int q = id.indexOf('?'); if (q >= 0) id.remove(q);
+                handleApiModuleUpdate(r, id, data, len);
+            });
+
+        // Dedicated enable/disable endpoint — lets the UI flip a module
+        // without sending the whole config blob.
+        String enablePath = base + "/enable";
+        server.on(enablePath.c_str(), HTTP_POST, [](AsyncWebServerRequest* r) {
+            String url = r->url();
+            const char* prefix = "/api/modules/";
+            String id = url.substring(strlen(prefix));
+            if (id.endsWith("/enable")) id.remove(id.length() - strlen("/enable"));
+            handleApiModuleEnable(r, id);
+        });
+    }
 }

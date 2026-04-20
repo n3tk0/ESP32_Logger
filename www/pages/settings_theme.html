@@ -1,11 +1,11 @@
   <main class="main-content page" id="page-settings_theme">
     <div class="page-header">
       <h1>🎨 Theme</h1>
-      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Theme
+      <div class="breadcrumb"><a href="#settings">Settings</a> / Theme
       </div>
     </div>
 
-    <form onsubmit="themeSave(event, this)">
+    <form data-submit="themeSave">
       <div id="th-msg"></div>
       <!-- Mode -->
       <div class="card">
@@ -85,7 +85,7 @@
           <div class="form-group">
             <label class="form-label">Chart.js Library</label>
             <select name="chartSource" id="th-chartSrc" class="form-input form-select"
-              onchange="var pr=document.getElementById('chartPathRow');if(pr)pr.style.display=this.value=='0'?'block':'none'">
+              data-change="themeToggleChartPath">
               <option value="0">📁 Local File</option>
               <option value="1">🌐 CDN (Online)</option>
             </select>
@@ -110,7 +110,7 @@
 
       <div style="display:flex; gap:10px;">
         <button type="submit" class="btn btn-primary" style="flex:1;">💾 Save</button>
-        <button type="button" class="btn btn-secondary" onclick="themeRestoreDefault()">🔄 Restore Default
+        <button type="button" class="btn btn-secondary" data-click="themeRestoreDefault">🔄 Restore Default
           Theme</button>
       </div>
     </form>

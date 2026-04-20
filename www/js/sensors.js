@@ -348,6 +348,7 @@ function sensorChartLoad() {
         data: { labels: labels, datasets: datasets },
         options: {
           responsive: true,
+          maintainAspectRatio: false,
           animation: false,
           plugins: {
             legend: { display: true },
@@ -560,9 +561,9 @@ function clRenderSensors(sensors) {
       return (
         '<div class="sensor-list-row" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border)">' +
         '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:0 0 auto">' +
-        '<input type="checkbox" onchange="clToggleSensor(' +
+        '<input type="checkbox" data-change="clToggleSensor" data-args="[' +
         i +
-        ',this.checked)"' +
+        ']"' +
         (s.enabled ? " checked" : "") +
         ">" +
         '<span style="font-size:.8rem;color:var(--text-muted)">' +
@@ -579,12 +580,12 @@ function clRenderSensors(sensors) {
         pinInfo +
         "</div>" +
         "</div>" +
-        '<button type="button" class="btn btn-sm btn-secondary" onclick="clEditSensor(' +
+        '<button type="button" class="btn btn-sm btn-secondary" data-click="clEditSensor" data-args="[' +
         i +
-        ')">✏️</button>' +
-        '<button type="button" class="btn btn-sm btn-danger"   onclick="clRemoveSensor(' +
+        ']">✏️</button>' +
+        '<button type="button" class="btn btn-sm btn-danger"   data-click="clRemoveSensor" data-args="[' +
         i +
-        ')">🗑</button>' +
+        ']">🗑</button>' +
         "</div>"
       );
     })
@@ -593,6 +594,7 @@ function clRenderSensors(sensors) {
 
 function clToggleSensor(idx, enabled) {
   if (!PCFG || !PCFG.sensors) return;
+  if (typeof enabled !== "boolean") enabled = !!this.checked;
   PCFG.sensors[idx].enabled = enabled;
 }
 
@@ -641,8 +643,8 @@ function clAddSensor() {
   t.textContent = "Select Sensor Type";
   var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   CL_SENSOR_TYPES.forEach(function(st) {
-    html += '<button class="btn btn-secondary" style="text-align:left;height:auto;padding:10px;display:flex;flex-direction:column;gap:4px" onclick="clDoAddSensor(\'' + st.value + '\')">'
-          + '<strong style="color:var(--text)">' + st.value + '</strong><span style="font-size:0.8rem;color:var(--text-muted)">' + st.label + '</span></button>';
+    html += '<button class="btn btn-secondary" style="text-align:left;height:auto;padding:10px;display:flex;flex-direction:column;gap:4px" data-click="clDoAddSensor" data-args="' + esc(JSON.stringify([st.value])) + '">'
+          + '<strong style="color:var(--text)">' + esc(st.value) + '</strong><span style="font-size:0.8rem;color:var(--text-muted)">' + esc(st.label) + '</span></button>';
   });
   html += '</div>';
   b.innerHTML = html;
@@ -723,7 +725,7 @@ function clEditSensor(idx) {
   
   t.textContent = "Edit Sensor: " + (s.id || s.type);
   
-  var html = '<form id="sensorEditForm" onsubmit="event.preventDefault();clSaveEditedSensor()">';
+  var html = '<form id="sensorEditForm" data-submit="clSaveEditedSensor">';
   
   // ID
   html += '<div class="form-group"><label class="form-label">Sensor ID</label>' +
@@ -1112,4 +1114,24 @@ function expSave() {
     }
   });
 }
+
+// Enrol markup-reachable handlers.  See core.js::Handlers for why the
+// whitelist exists.
+registerHandlers({
+  aggSettingsSave: aggSettingsSave,
+  sensorsLoad: sensorsLoad,
+  sensorChartLoad: sensorChartLoad,
+  clToggleSensor: clToggleSensor,
+  clRemoveSensor: clRemoveSensor,
+  clAddSensor: clAddSensor,
+  clDoAddSensor: clDoAddSensor,
+  clEditSensor: clEditSensor,
+  clSaveEditedSensor: clSaveEditedSensor,
+  clSave: clSave,
+  clLoad: clLoad,
+  clUpdateSleepPanel: clUpdateSleepPanel,
+  clUpdateHybCycle: clUpdateHybCycle,
+  expLoad: expLoad,
+  expSave: expSave,
+});
 

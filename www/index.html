@@ -7,21 +7,10 @@
   <title>Water Logger</title>
   <link rel="stylesheet" href="/style.css">
   <style id="themeVars"></style>
-  <!-- Early-paint theme bootstrap: avoids the flash-of-light-theme on dark
-       systems by setting the html class before stylesheets are evaluated.
-       The full theme (custom colours, etc.) is layered on by applyStatus()
-       once /api/status arrives. -->
-  <script>
-    (function () {
-      try {
-        var pref = localStorage.getItem("themeOverride") || "auto";
-        var cls = "theme-" + (pref === "light" || pref === "dark" ? pref : "auto");
-        document.documentElement.classList.add(cls);
-      } catch (e) {
-        document.documentElement.classList.add("theme-auto");
-      }
-    })();
-  </script>
+  <!-- Early-paint theme bootstrap: must run BEFORE stylesheets evaluate so
+       there is no flash-of-light-theme on dark systems. Extracted to an
+       external file so script-src CSP can drop 'unsafe-inline'. -->
+  <script src="/js/theme-boot.js"></script>
   <style>
     .page {
       display: none
@@ -51,15 +40,15 @@
         Logger</span></div>
     <nav>
       <div class="nav-section">Main</div><a href="#dashboard" data-page="dashboard" class="nav-item"
-        onclick="return nav(this)"><span class="icon">📊</span><span>Dashboard</span></a><a href="#files"
-        data-page="files" class="nav-item" onclick="return nav(this)"><span
+        data-click="navPage"><span class="icon">📊</span><span>Dashboard</span></a><a href="#files"
+        data-page="files" class="nav-item" data-click="navPage"><span
           class="icon">📁</span><span>Files</span></a><a href="#live" data-page="live" class="nav-item"
-        onclick="return nav(this)"><span class="icon">📡</span><span>Live</span></a><a href="#sensors"
-        data-page="sensors" class="nav-item" onclick="return nav(this)"><span
+        data-click="navPage"><span class="icon">📡</span><span>Live</span></a><a href="#sensors"
+        data-page="sensors" class="nav-item" data-click="navPage"><span
           class="icon">🌡️</span><span>Sensors</span></a>
       <div class="nav-section">System</div><a href="#settings" data-page="settings" class="nav-item"
-        onclick="return nav(this)"><span class="icon">⚙️</span><span>Settings</span></a><a href="#update"
-        data-page="update" class="nav-item" onclick="return nav(this)"><span
+        data-click="navPage"><span class="icon">⚙️</span><span>Settings</span></a><a href="#update"
+        data-page="update" class="nav-item" data-click="navPage"><span
           class="icon">📤</span><span>Update</span></a>
     </nav>
   </aside>
@@ -67,7 +56,7 @@
     <div class="logo"><img id="headerLogo" src="" alt="" style="display:none;height:28px;margin-right:6px"><span
         id="headerName">Water Logger</span></div>
     <div class="status" style="display:flex;align-items:center;gap:.5rem">
-      <button id="themeToggleBtn" onclick="quickThemeToggle()" title="Toggle dark/light theme">🌙</button>
+      <button id="themeToggleBtn" data-click="quickThemeToggle" title="Toggle dark/light theme">🌙</button>
       <div class="time" id="headerTime">--:--</div>
       <div id="headerNet"></div>
     </div>
@@ -83,10 +72,10 @@
     <div class="card">
       <div class="card-body">
         <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
-          <select id="fileSelect" class="form-input form-select" style="flex:1;min-width:200px" onchange="dbLoadData()">
+          <select id="fileSelect" class="form-input form-select" style="flex:1;min-width:200px" data-change="dbLoadData">
             <option value="">Loading files...</option>
           </select>
-          <button class="btn btn-primary" onclick="dbLoadData()">🔄</button>
+          <button class="btn btn-primary" data-click="dbLoadData">🔄</button>
         </div>
       </div>
     </div>
@@ -97,13 +86,13 @@
       <div class="card-body">
         <div class="form-row">
           <div class="form-group"><label class="form-label">Start</label>
-            <input type="date" id="startDate" class="form-input" onchange="dbApplyFilters()">
+            <input type="date" id="startDate" class="form-input" data-change="dbApplyFilters">
           </div>
           <div class="form-group"><label class="form-label">End</label>
-            <input type="date" id="endDate" class="form-input" onchange="dbApplyFilters()">
+            <input type="date" id="endDate" class="form-input" data-change="dbApplyFilters">
           </div>
           <div class="form-group"><label class="form-label">Trigger</label>
-            <select id="eventFilter" class="form-input form-select" onchange="dbApplyFilters()">
+            <select id="eventFilter" class="form-input form-select" data-change="dbApplyFilters">
               <option value="ALL">All</option>
               <option value="BTN">Buttons Only</option>
               <option value="FF">Full Flush Btn</option>
@@ -111,7 +100,7 @@
             </select>
           </div>
           <div class="form-group"><label class="form-label">Extra presses</label>
-            <select id="pressFilter" class="form-input form-select" onchange="dbApplyFilters()">
+            <select id="pressFilter" class="form-input form-select" data-change="dbApplyFilters">
               <option value="ALL">All</option>
               <option value="EXTRA">With Extra</option>
               <option value="NONE">No Extra</option>
@@ -121,10 +110,10 @@
         <div
           style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-top:8px">
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-            <input type="checkbox" id="excludeZero" onchange="dbApplyFilters()" checked>
+            <input type="checkbox" id="excludeZero" data-change="dbApplyFilters" checked>
             <span>Exclude 0.00L entries</span>
           </label>
-          <button onclick="dbExportCSV()" class="btn btn-sm btn-secondary">📥 Export CSV</button>
+          <button data-click="dbExportCSV" class="btn btn-sm btn-secondary">📥 Export CSV</button>
         </div>
       </div>
     </div>
@@ -160,17 +149,17 @@
         <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
           <label style="display:flex;align-items:center;gap:.3rem;font-size:.8rem;font-weight:400">
             Threshold&nbsp;(L):
-            <input type="number" id="db-threshold" class="form-input" style="width:72px;padding:.25rem .4rem;font-size:.82rem" placeholder="none" min="0" step="0.1" oninput="dbApplyFilters()">
+            <input type="number" id="db-threshold" class="form-input" style="width:72px;padding:.25rem .4rem;font-size:.82rem" placeholder="none" min="0" step="0.1" data-input="dbApplyFilters">
           </label>
           <div style="display:flex;gap:2px">
-            <button class="btn btn-sm btn-secondary" onclick="dbZoom(-1)" title="Zoom in">🔍+</button>
-            <button class="btn btn-sm btn-secondary" onclick="dbZoom(1)"  title="Zoom out">🔍−</button>
-            <button class="btn btn-sm btn-secondary" onclick="dbZoomReset()" title="Reset zoom">↺</button>
+            <button class="btn btn-sm btn-secondary" data-click="dbZoom" data-args="[-1]" title="Zoom in">🔍+</button>
+            <button class="btn btn-sm btn-secondary" data-click="dbZoom" data-args="[1]"  title="Zoom out">🔍−</button>
+            <button class="btn btn-sm btn-secondary" data-click="dbZoomReset" title="Reset zoom">↺</button>
           </div>
-          <button class="btn btn-sm btn-secondary" onclick="dbExportPNG()" title="Export chart as PNG">📷 PNG</button>
+          <button class="btn btn-sm btn-secondary" data-click="dbExportPNG" title="Export chart as PNG">📷 PNG</button>
         </div>
       </div>
-      <div class="card-body" style="height:350px"><canvas id="chart"></canvas></div>
+      <div class="card-body"><div class="chart-container"><canvas id="chart"></canvas></div></div>
       <div class="card-body" style="padding-top:0">
         <div id="chartLegend" data-ffl="db-legendFF" data-pfl="db-legendPF" data-otl="db-legendOther"
           style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;font-size:.85rem"></div>
@@ -186,7 +175,7 @@
         <span id="conn" class="text-success">● Connected</span>
         <label style="display:flex;align-items:center;gap:.35rem;font-size:.8rem">
           Refresh:
-          <select id="live-refresh-rate" class="form-input form-select" style="width:auto;padding:.2rem .5rem;font-size:.8rem" onchange="liveSetRate()">
+          <select id="live-refresh-rate" class="form-input form-select" style="width:auto;padding:.2rem .5rem;font-size:.8rem" data-change="liveSetRate">
             <option value="500">0.5s</option>
             <option value="1000">1s</option>
             <option value="2000">2s</option>
@@ -339,9 +328,9 @@
       <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
         <span id="files-dirLabel">📂 /</span>
         <div class="btn-group">
-          <button id="upBtn" class="btn btn-sm btn-secondary" onclick="filesGoUp()" style="display:none">⬆️ Up</button>
-          <button id="btnEdit" class="btn btn-sm btn-primary" onclick="filesToggleEdit()">✏️ Edit</button>
-          <button id="btnDone" class="btn btn-sm btn-secondary" onclick="filesToggleEdit()" style="display:none">✖️
+          <button id="upBtn" class="btn btn-sm btn-secondary" data-click="filesGoUp" style="display:none">⬆️ Up</button>
+          <button id="btnEdit" class="btn btn-sm btn-primary" data-click="filesToggleEdit">✏️ Edit</button>
+          <button id="btnDone" class="btn btn-sm btn-secondary" data-click="filesToggleEdit" style="display:none">✖️
             Done</button>
         </div>
       </div>
@@ -351,12 +340,12 @@
       <div id="editTools" class="card-body"
         style="border-top:1px solid var(--border);background:var(--bg);display:none">
         <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
-          <form id="uploadForm" onsubmit="event.preventDefault();filesUpload()"
+          <form id="uploadForm" data-submit="filesUpload"
             style="display:flex;gap:8px;align-items:center">
             <input type="file" name="file" id="fileInput" required class="form-input" style="width:auto">
             <button type="submit" class="btn btn-sm btn-success">📤 Upload</button>
           </form>
-          <form id="mkdirForm" onsubmit="event.preventDefault();filesMkdir()"
+          <form id="mkdirForm" data-submit="filesMkdir"
             style="display:flex;gap:8px;align-items:center">
             <input type="text" id="newFolder" placeholder="New folder" class="form-input" style="width:120px">
             <button type="submit" class="btn btn-sm btn-primary">📁 Create</button>
@@ -380,55 +369,59 @@
       <div>
         <h1>⚙️ Settings</h1>
       </div>
-      <button onclick="document.getElementById('restartPopup').style.display='flex'" class="btn btn-warning">🔄
+      <button data-click="showPopup" data-args='["restartPopup"]' class="btn btn-warning">🔄
         Restart</button>
     </div>
 
     <div style="margin-bottom:.75rem">
       <input type="search" id="settings-search" class="form-input" placeholder="🔍 Filter settings…"
-        oninput="settingsFilter(this.value)" style="max-width:340px">
+        style="max-width:340px">
     </div>
 
     <div class="settings-grid" id="settings-grid">
-      <div class="setting-card" onclick="showSubpage('settings_device')">
+      <div class="setting-card" data-click="showSubpage" data-args='["settings_device"]'>
         <div class="icon">📱</div>
         <div class="title">Device</div>
       </div>
-      <div class="setting-card" onclick="showSubpage('settings_flowmeter')">
+      <div class="setting-card" data-click="showSubpage" data-args='["settings_flowmeter"]'>
         <div class="icon">🔌</div>
         <div class="title">Sensors</div>
       </div>
-      <div class="setting-card" onclick="showSubpage('settings_hardware')">
+      <div class="setting-card" data-click="showSubpage" data-args='["settings_hardware"]'>
         <div class="icon">🔧</div>
         <div class="title">Hardware</div>
       </div>
-      <div class="setting-card" onclick="showSubpage('settings_datalog')">
+      <div class="setting-card" data-click="showSubpage" data-args='["settings_datalog"]'>
         <div class="icon">📝</div>
         <div class="title">Data Log</div>
       </div>
-      <div class="setting-card" onclick="showSubpage('settings_corelogic')">
+      <div class="setting-card" data-click="showSubpage" data-args='["settings_corelogic"]'>
         <div class="icon">🧩</div>
         <div class="title">Core Logic</div>
       </div>
-      <div class="setting-card" onclick="showSubpage('settings_export')">
+      <div class="setting-card" data-click="showSubpage" data-args='["settings_export"]'>
         <div class="icon">📡</div>
         <div class="title">Export</div>
       </div>
-      <div class="setting-card" onclick="showSubpage('settings_theme')">
+      <div class="setting-card" data-click="showSubpage" data-args='["settings_theme"]'>
         <div class="icon">🎨</div>
         <div class="title">Theme</div>
       </div>
-      <div class="setting-card" onclick="showSubpage('settings_network')">
+      <div class="setting-card" data-click="showSubpage" data-args='["settings_network"]'>
         <div class="icon">🌐</div>
         <div class="title">Network</div>
       </div>
-      <div class="setting-card" onclick="showSubpage('settings_time')">
+      <div class="setting-card" data-click="showSubpage" data-args='["settings_time"]'>
         <div class="icon">🕐</div>
         <div class="title">Time Sync</div>
       </div>
-      <div class="setting-card" onclick="showSubpage('files')">
+      <div class="setting-card" data-click="showSubpage" data-args='["files"]'>
         <div class="icon">📤</div>
         <div class="title">Files</div>
+      </div>
+      <div class="setting-card" data-click="showSubpage" data-args='["settings_modules"]'>
+        <div class="icon">🧩</div>
+        <div class="title">Modules <span class="badge badge-info">preview</span></div>
       </div>
     </div>
     <div id="settings-no-match" style="display:none;padding:1rem;color:var(--text-muted);text-align:center">No settings match your search.</div>
@@ -439,7 +432,7 @@
         <div style="margin-bottom:1rem">
           <a href="/export_settings" download class="btn btn-primary">📥 Export Settings</a>
         </div>
-        <form id="importForm" onsubmit="settingsImport();return false">
+        <form id="importForm" data-submit="settingsImport">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <input type="file" name="settings" id="importFile" accept=".json" class="form-input"
               style="flex:1;min-width:150px">
@@ -462,7 +455,7 @@
   <main class="main-content page" id="page-sensors">
     <div class="page-header">
       <h1>🌡️ Sensors</h1>
-      <button class="btn btn-secondary btn-sm" onclick="sensorsLoad()">🔄 Refresh</button>
+      <button class="btn btn-secondary btn-sm" data-click="sensorsLoad">🔄 Refresh</button>
     </div>
     <div id="sensors-msg" class="text-muted" style="margin-bottom:1rem;font-size:.9rem">
       Loading sensor data…
@@ -475,25 +468,25 @@
       <div class="card-header">
         <span>📈 Sensor Chart</span>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <select id="sc-sensor" class="form-input form-select" style="width:auto" onchange="sensorChartLoad()">
+          <select id="sc-sensor" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
             <option value="">— select sensor —</option>
           </select>
-          <select id="sc-metric" class="form-input form-select" style="width:auto" onchange="sensorChartLoad()">
+          <select id="sc-metric" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
             <option value="">— metric —</option>
           </select>
-          <select id="sc-agg" class="form-input form-select" style="width:auto" onchange="sensorChartLoad()">
+          <select id="sc-agg" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
             <option value="5m">5 min</option>
             <option value="1h">1 hour</option>
             <option value="1d">1 day</option>
             <option value="raw">Raw</option>
           </select>
-          <select id="sc-mode" class="form-input form-select" style="width:auto" onchange="sensorChartLoad()">
+          <select id="sc-mode" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
             <option value="lttb">LTTB</option>
             <option value="avg">Avg</option>
             <option value="min">Min</option>
             <option value="max">Max</option>
           </select>
-          <select id="sc-range" class="form-input form-select" style="width:auto" onchange="sensorChartLoad()">
+          <select id="sc-range" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
             <option value="3600">Last 1h</option>
             <option value="21600">Last 6h</option>
             <option value="86400" selected>Last 24h</option>
@@ -504,15 +497,15 @@
       <!-- Secondary series overlay (dual Y-axis) -->
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 16px;border-top:1px solid var(--border);font-size:.85rem">
         <span style="color:var(--text-muted)">Overlay:</span>
-        <select id="sc-sensor2" class="form-input form-select" style="width:auto;font-size:.82rem" onchange="sensorChartLoad()">
+        <select id="sc-sensor2" class="form-input form-select" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
           <option value="">— none —</option>
         </select>
-        <select id="sc-metric2" class="form-input form-select" style="width:auto;font-size:.82rem" onchange="sensorChartLoad()">
+        <select id="sc-metric2" class="form-input form-select" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
           <option value="">— metric —</option>
         </select>
       </div>
       <div class="card-body" style="padding:8px">
-        <canvas id="sensorChart" style="width:100%;max-height:320px"></canvas>
+        <div class="chart-container" style="max-height:320px"><canvas id="sensorChart"></canvas></div>
         <div id="sc-msg" style="font-size:.8rem;color:var(--text-muted);margin-top:4px"></div>
       </div>
     </div>
@@ -531,8 +524,8 @@
       </div>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
         <button class="btn btn-secondary"
-          onclick="document.getElementById('movePopup').style.display='none'">Cancel</button>
-        <button class="btn btn-primary" onclick="filesApplyMove()">✂️ Apply</button>
+          data-click="hidePopup" data-args='["movePopup"]'>Cancel</button>
+        <button class="btn btn-primary" data-click="filesApplyMove">✂️ Apply</button>
       </div>
     </div>
   </div>
@@ -541,12 +534,12 @@
     <div class="popup-content" style="text-align:left;max-width:500px;width:100%;max-height:80vh;overflow-y:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
         <div id="sensorPopupTitle" style="font-size:1.2rem;font-weight:bold">Sensor configuration</div>
-        <button class="btn btn-sm btn-secondary" onclick="document.getElementById('sensorPopup').style.display='none'">✕</button>
+        <button class="btn btn-sm btn-secondary" data-click="hidePopup" data-args='["sensorPopup"]'>✕</button>
       </div>
       <div id="sensorPopupBody">
       </div>
       <div id="sensorPopupFooter" style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.5rem">
-        <button class="btn btn-secondary" onclick="document.getElementById('sensorPopup').style.display='none'">Cancel</button>
+        <button class="btn btn-secondary" data-click="hidePopup" data-args='["sensorPopup"]'>Cancel</button>
         <button class="btn btn-primary" id="sensorPopupSaveBtn">💾 Save</button>
       </div>
     </div>
@@ -565,15 +558,15 @@
         </div>
       </div>
       <div id="rPopButtons" style="display:flex;gap:1rem;justify-content:center">
-        <button class="btn btn-danger" onclick="confirmRestart()">✓ Confirm</button>
-        <button class="btn btn-secondary" onclick="document.getElementById('restartPopup').style.display='none'">✗
+        <button class="btn btn-danger" data-click="confirmRestart">✓ Confirm</button>
+        <button class="btn btn-secondary" data-click="hidePopup" data-args='["restartPopup"]'>✗
           Cancel</button>
       </div>
     </div>
   </div>
 
   <!-- ═══ SENSOR ADD POPUP ═══ -->
-  <div id="sensor-add-popup" class="popup-overlay" style="display:none" onclick="if(event.target===this)sapClose()">
+  <div id="sensor-add-popup" class="popup-overlay" style="display:none" data-click="backdropClose" data-backdrop-fn="sapClose">
     <div class="popup-content" style="max-width:520px;text-align:left;width:92%">
       <div style="font-size:1.2rem;font-weight:700;margin-bottom:.25rem">+ Add Sensor</div>
       <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:1rem">Select a sensor type, then set an ID.</p>
@@ -583,20 +576,20 @@
         <input type="text" id="sap-id" class="form-input" placeholder="e.g. bme280_roof">
       </div>
       <div style="display:flex;gap:.5rem">
-        <button class="btn btn-primary" onclick="sapConfirm()">Add &amp; Configure</button>
-        <button class="btn btn-secondary" onclick="sapClose()">Cancel</button>
+        <button class="btn btn-primary" data-click="sapConfirm">Add &amp; Configure</button>
+        <button class="btn btn-secondary" data-click="sapClose">Cancel</button>
       </div>
     </div>
   </div>
 
   <!-- ═══ SENSOR EDIT POPUP ═══ -->
-  <div id="sensor-edit-popup" class="popup-overlay" style="display:none" onclick="if(event.target===this)sepClose()">
+  <div id="sensor-edit-popup" class="popup-overlay" style="display:none" data-click="backdropClose" data-backdrop-fn="sepClose">
     <div class="popup-content" style="max-width:520px;text-align:left;width:92%;max-height:88vh;overflow-y:auto">
       <div style="font-size:1.2rem;font-weight:700;margin-bottom:1rem">✏️ Edit Sensor</div>
       <div id="sep-fields"></div>
       <div style="display:flex;gap:.5rem;margin-top:1.25rem">
-        <button class="btn btn-primary" onclick="sepConfirm()">💾 Save</button>
-        <button class="btn btn-secondary" onclick="sepClose()">Cancel</button>
+        <button class="btn btn-primary" data-click="sepConfirm">💾 Save</button>
+        <button class="btn btn-secondary" data-click="sepClose">Cancel</button>
       </div>
     </div>
   </div>
@@ -604,7 +597,7 @@
   <div id="toast"></div>
 
   <!-- ═══ KEYBOARD SHORTCUTS POPUP ═══ -->
-  <div id="kbPopup" class="popup-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div id="kbPopup" class="popup-overlay" style="display:none" data-click="backdropClose">
     <div class="popup-content" style="max-width:420px;text-align:left">
       <div style="font-size:1.2rem;font-weight:700;margin-bottom:1rem">⌨️ Keyboard Shortcuts</div>
       <table style="width:100%;font-size:.85rem;border-collapse:collapse">
@@ -620,15 +613,15 @@
         <tr><td style="padding:.3rem .6rem"><kbd>D</kbd></td><td>Toggle dark / light theme</td></tr>
       </table>
       <div style="margin-top:1rem;text-align:right">
-        <button class="btn btn-secondary" onclick="document.getElementById('kbPopup').style.display='none'">Close</button>
+        <button class="btn btn-secondary" data-click="hidePopup" data-args='["kbPopup"]'>Close</button>
       </div>
     </div>
   </div>
 
-  <nav class="bottom-nav" id="bottomNav"><a href="#dashboard" data-page="dashboard" onclick="return nav(this)"><span
-        class="icon">📊</span>Dashboard</a><a href="#files" data-page="files" onclick="return nav(this)"><span
-        class="icon">📁</span>Files</a><a href="#sensors" data-page="sensors" onclick="return nav(this)"><span
-        class="icon">🌡️</span>Sensors</a><a href="#settings" data-page="settings" onclick="return nav(this)"><span
+  <nav class="bottom-nav" id="bottomNav"><a href="#dashboard" data-page="dashboard" data-click="navPage"><span
+        class="icon">📊</span>Dashboard</a><a href="#files" data-page="files" data-click="navPage"><span
+        class="icon">📁</span>Files</a><a href="#sensors" data-page="sensors" data-click="navPage"><span
+        class="icon">🌡️</span>Sensors</a><a href="#settings" data-page="settings" data-click="navPage"><span
         class="icon">⚙️</span>Settings</a></nav>
 
   <div id="toastContainer" class="toast-container"></div>

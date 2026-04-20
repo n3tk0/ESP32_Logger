@@ -19,12 +19,14 @@
 #include "../managers/DataLogger.h"
 #include "../utils/Utils.h"
 #include "ApiHandlers.h"
+#include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "../pipeline/DataPipeline.h"   // fsMutex (FS1)
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Update.h>
 #include <WiFi.h>
 #include <functional>
+#include <memory>
 #include <vector>
 #include <math.h>
 
@@ -323,15 +325,16 @@ void setupWebServer() {
     // C2: track web activity for idle power restore
     auto touchActivity = []() { g_lastWebActivity = millis(); };
 
-    // Defense-in-depth headers applied to every response.  Full strict CSP
-    // would require rewriting every inline onclick/style — this intermediate
-    // policy already blocks cross-origin scripts/images/fetches, which is
-    // the most valuable win for a LAN-exposed device.  Tightening to remove
-    // 'unsafe-inline' is a follow-up (Pass 4 A4 hardening).
+    // Defense-in-depth headers applied to every response.  Pass 4 A4 removed
+    // every inline on* handler and the inline theme-boot <script>, so
+    // script-src no longer needs 'unsafe-inline' — any injected <script>
+    // (stored XSS, rogue file upload) is now blocked by the browser.
+    // style-src still keeps 'unsafe-inline' because many layout style="…"
+    // attributes remain; tightening that is a separate pass.
     DefaultHeaders::Instance().addHeader(
         "Content-Security-Policy",
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        "script-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
@@ -342,25 +345,41 @@ void setupWebServer() {
     DefaultHeaders::Instance().addHeader("X-Frame-Options", "DENY");
     DefaultHeaders::Instance().addHeader("Referrer-Policy", "no-referrer");
 
-    bool uiReady = LittleFS.exists("/www/index.html");
+    // Root handler decides per-request whether a real SPA shell is present;
+    // this means uploading /www/index.html after boot starts serving the SPA
+    // immediately, without the reboot that the old uiReady-gated registration
+    // required (audit Pass 7 "serveStatic only registered in the uiReady
+    // branch").  Registered BEFORE serveStatic so it wins route matching for
+    // the exact `/` path.  Also honours a pre-gzipped index.html.gz sibling
+    // (audit Pass 4 C1) — flash savings are worth a single extension probe.
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
+        if (littleFsAvailable && LittleFS.exists("/www/index.html.gz")) {
+            AsyncWebServerResponse* resp =
+                r->beginResponse(LittleFS, "/www/index.html.gz", "text/html");
+            resp->addHeader("Content-Encoding", "gzip");
+            r->send(resp);
+            return;
+        }
+        if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
+            r->send(LittleFS, "/www/index.html", "text/html");
+            return;
+        }
+        r->send_P(200, "text/html", FAILSAFE_HTML);
+    });
 
-    if (uiReady) {
-        // 5-min cache lets the browser reuse JS/CSS/images across page navigation
-        // without re-fetching, while still picking up firmware-bundled UI changes
-        // within a few minutes of a release. Tight enough to avoid stale-asset
-        // headaches; long enough to noticeably speed up the SPA on cold loads.
-        server.serveStatic("/", LittleFS, "/www/")
-              .setDefaultFile("index.html")
-              .setCacheControl("public, max-age=300, must-revalidate");
+    // Always register the static tree so asset fetches (js/css/images) work
+    // the moment `/www/` is populated.  5-min cache: reuses JS/CSS across
+    // page navigation but still picks up firmware-bundled UI changes within
+    // a few minutes of a release.  AsyncStaticWebHandler already probes a
+    // `.gz` sibling automatically and emits `Content-Encoding: gzip` — no
+    // extra wiring needed for the regular asset tree.
+    server.serveStatic("/", LittleFS, "/www/")
+          .setDefaultFile("index.html")
+          .setCacheControl("public, max-age=300, must-revalidate");
+
+    if (LittleFS.exists("/www/index.html")) {
         DBGLN("Web UI: serving from /www/");
     } else {
-        server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
-            if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
-                r->send(LittleFS, "/www/index.html", "text/html");
-                return;
-            }
-            r->send_P(200, "text/html", FAILSAFE_HTML);
-        });
         DBGLN("Web UI: FAILSAFE mode (upload /www/index.html to restore)");
     }
 
@@ -515,9 +534,22 @@ void setupWebServer() {
     // =========================================================================
     // API: RECENT LOGS
     // =========================================================================
+    // Supports `?since=<bootcount>` (audit Pass 4 D2).  When present, entries
+    // whose "#:<n>" token is <= the supplied value are suppressed.  The
+    // response always echoes the current bootCount so the client can advance
+    // its cursor; if the logfile has no bootCount tokens (user disabled the
+    // column, or legacy file) the filter degrades to a no-op.
     server.on("/api/recent_logs", HTTP_GET, [](AsyncWebServerRequest *r) {
         JsonDocument doc;
         JsonArray logs = doc["logs"].to<JsonArray>();
+
+        uint32_t sinceBoot = 0;
+        bool hasSince = false;
+        if (r->hasParam("since")) {
+            sinceBoot = (uint32_t)r->getParam("since")->value().toInt();
+            hasSince  = true;
+        }
+        doc["bootCount"] = bootCount;  // client advances cursor from this
 
         if (!fsAvailable || !activeFS) {
             doc["error"] = "Storage not available";
@@ -539,8 +571,21 @@ void setupWebServer() {
             return;
         }
 
-        // Efficient tail-read: seek to last ~1KB of file instead of reading every line
-        char lastLines[5][160];
+        // Efficient tail-read: seek to last ~1KB of file instead of reading every line.
+        // Buffers moved to the heap — the previous on-stack `lastLines[5][160]` +
+        // `lineBuf[160]` (~960 B) ate most of the AsyncTCP worker's budget.
+        constexpr int    LR_LINES  = 5;
+        constexpr size_t LR_LINELN = 160;
+        auto lastLines = std::unique_ptr<char[]>(new (std::nothrow) char[LR_LINES * LR_LINELN]);
+        auto lineBuf   = std::unique_ptr<char[]>(new (std::nothrow) char[LR_LINELN]);
+        if (!lastLines || !lineBuf) {
+            f.close();
+            doc["error"] = "out of memory";
+            sendJsonResponse(r, doc);
+            return;
+        }
+        auto slot = [&](int k) { return lastLines.get() + (k * LR_LINELN); };
+
         int lCount = 0;
         size_t fSize = f.size();
         const size_t TAIL_BYTES = 1024;
@@ -550,10 +595,9 @@ void setupWebServer() {
             f.readStringUntil('\n');   // discard partial first line
         }
 
-        char lineBuf[160];
         while (f.available()) {
             int i = 0;
-            while (f.available() && i < 159) {
+            while (f.available() && i < (int)LR_LINELN - 1) {
                 char c = f.read();
                 if (c == '\n' || c == '\r') break;
                 lineBuf[i++] = c;
@@ -561,16 +605,16 @@ void setupWebServer() {
             lineBuf[i] = '\0';
             // skip empty lines
             if (i > 0) {
-                memcpy(lastLines[lCount % 5], lineBuf, i + 1);
+                memcpy(slot(lCount % LR_LINES), lineBuf.get(), i + 1);
                 lCount++;
             }
         }
         f.close();
 
-        int count = lCount < 5 ? lCount : 5;
+        int count = lCount < LR_LINES ? lCount : LR_LINES;
         for (int i = 0; i < count; i++) {
-            int idx = (lCount - 1 - i) % 5;
-            char* lineStr = lastLines[idx];
+            int idx = (lCount - 1 - i) % LR_LINES;
+            char* lineStr = slot(idx);
             
             char* saveptr;
             char* tokens[10];
@@ -582,9 +626,25 @@ void setupWebServer() {
             }
 
             if (tCount >= 7) {
+                // Opportunistic `?since=<bootcount>` filter — scan tokens for
+                // a `#:<n>` entry and skip if n <= sinceBoot.  If no such token
+                // exists (user disabled includeBootCount) the filter is a
+                // no-op and the entry is returned as before.
+                if (hasSince) {
+                    bool skip = false;
+                    for (int t = 0; t < tCount; t++) {
+                        if (tokens[t][0] == '#' && tokens[t][1] == ':') {
+                            uint32_t bc = (uint32_t)atoi(tokens[t] + 2);
+                            if (bc <= sinceBoot) skip = true;
+                            break;
+                        }
+                    }
+                    if (skip) continue;
+                }
+
                 JsonObject entry = logs.add<JsonObject>();
                 int tail = tCount - 1;
-                
+
                 if (tCount >= 8) {
                     char timeBuf[80];
                     snprintf(timeBuf, sizeof(timeBuf), "%s %s-%s", tokens[0], tokens[1], tokens[2]);
@@ -594,7 +654,7 @@ void setupWebServer() {
                     snprintf(timeBuf, sizeof(timeBuf), "%s|%s", tokens[0], tokens[1]);
                     entry["time"] = timeBuf;
                 }
-                
+
                 entry["trigger"] = tokens[tail - 3];
                 
                 char* vs = tokens[tail - 2];
@@ -665,15 +725,21 @@ void setupWebServer() {
     });
 
     // =========================================================================
-    // API: REGEN DEVICE ID
+    // API: PREVIEW NEXT DEVICE ID
+    // Returns a fresh MAC-derived ID.  This endpoint NEVER persists; the user
+    // must click Save in the Device settings page to commit, so the shown ID
+    // always matches the stored one (audit Pass 7 clarification).  The legacy
+    // /api/regen-id alias is kept for one release for backwards compat.
     // =========================================================================
-    server.on("/api/regen-id", HTTP_POST, [](AsyncWebServerRequest *r) {
+    auto nextIdHandler = [](AsyncWebServerRequest *r) {
         String mac = WiFi.macAddress();
         mac.replace(":", "");
         String newId = mac.substring(mac.length() - 8);
         newId.toUpperCase();
         r->send(200, "text/plain", newId);
-    });
+    };
+    server.on("/api/next-id",  HTTP_POST, nextIdHandler);
+    server.on("/api/regen-id", HTTP_POST, nextIdHandler);  // legacy alias
 
     // =========================================================================
     // EXPORT SETTINGS
@@ -699,6 +765,13 @@ void setupWebServer() {
     // =========================================================================
     server.on("/export_settings", HTTP_GET, [](AsyncWebServerRequest *r) {
         char ipBuf[16];
+
+        // Guarantee the payload is complete regardless of how config landed
+        // in memory — fillConfigDefaults() is idempotent, so callers still
+        // see their last-saved non-default values.  Audit Pass 4 F:
+        // "Remove duplicated fallback logic in /export_settings by running
+        // applyDefaults() before serialization."
+        fillConfigDefaults();
 
         JsonDocument doc;
 
@@ -813,6 +886,7 @@ void setupWebServer() {
     // =========================================================================
 
     server.on("/save_device", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (rateLimit429(r)) return;
         if (r->hasParam("deviceName", true))
             SAFE_STRNCPY(config.deviceName, r->getParam("deviceName", true)->value().c_str(), sizeof(config.deviceName));
         if (r->hasParam("deviceId", true)) {
@@ -828,6 +902,7 @@ void setupWebServer() {
     });
 
     server.on("/save_flowmeter", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (rateLimit429(r)) return;
         if (r->hasParam("pulsesPerLiter", true)) {
             float v = r->getParam("pulsesPerLiter", true)->value().toFloat();
             config.flowMeter.pulsesPerLiter = (v >= 1.0f && isfinite(v)) ? v : 450.0f;
@@ -849,6 +924,7 @@ void setupWebServer() {
     });
 
     server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (rateLimit429(r)) return;
         if (r->hasParam("storageType", true))    config.hardware.storageType    = (StorageType)r->getParam("storageType", true)->value().toInt();
         if (r->hasParam("wakeupMode", true))     config.hardware.wakeupMode     = (WakeupMode)r->getParam("wakeupMode", true)->value().toInt();
         if (r->hasParam("pinWifiTrigger", true)) config.hardware.pinWifiTrigger = r->getParam("pinWifiTrigger", true)->value().toInt();
@@ -872,6 +948,7 @@ void setupWebServer() {
     });
 
     server.on("/save_theme", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (rateLimit429(r)) return;
         if (r->hasParam("themeMode", true))        config.theme.mode           = (ThemeMode)r->getParam("themeMode", true)->value().toInt();
         config.theme.showIcons = r->hasParam("showIcons", true);
         if (r->hasParam("primaryColor", true))     SAFE_STRNCPY(config.theme.primaryColor,      r->getParam("primaryColor", true)->value().c_str(), sizeof(config.theme.primaryColor));
@@ -898,6 +975,7 @@ void setupWebServer() {
     });
 
     server.on("/save_datalog", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (rateLimit429(r)) return;
         if (r->hasParam("currentFile", true))  SAFE_STRNCPY(config.datalog.currentFile, r->getParam("currentFile", true)->value().c_str(), sizeof(config.datalog.currentFile));
         if (r->hasParam("prefix", true))       SAFE_STRNCPY(config.datalog.prefix,      r->getParam("prefix", true)->value().c_str(), sizeof(config.datalog.prefix));
         if (r->hasParam("folder", true))       SAFE_STRNCPY(config.datalog.folder,      r->getParam("folder", true)->value().c_str(), sizeof(config.datalog.folder));
@@ -958,6 +1036,7 @@ void setupWebServer() {
     });
 
     server.on("/save_network", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (rateLimit429(r)) return;
         if (r->hasParam("wifiMode", true))       config.network.wifiMode = (WiFiModeType)r->getParam("wifiMode", true)->value().toInt();
         if (r->hasParam("apSSID", true))         SAFE_STRNCPY(config.network.apSSID,         r->getParam("apSSID", true)->value().c_str(), sizeof(config.network.apSSID));
         if (r->hasParam("apPassword", true))     SAFE_STRNCPY(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), sizeof(config.network.apPassword));
@@ -988,6 +1067,7 @@ void setupWebServer() {
     });
 
     server.on("/save_time", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (rateLimit429(r)) return;
         if (r->hasParam("ntpServer", true)) SAFE_STRNCPY(config.network.ntpServer, r->getParam("ntpServer", true)->value().c_str(), sizeof(config.network.ntpServer));
         if (r->hasParam("timezone", true))  config.network.timezone = r->getParam("timezone", true)->value().toInt();
         saveConfig();
@@ -998,6 +1078,7 @@ void setupWebServer() {
     // TIME MANAGEMENT
     // =========================================================================
     server.on("/set_time", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (rateLimit429(r)) return;
         if (loggingState != STATE_IDLE && loggingState != STATE_DONE) {
             r->send(409, "application/json", "{\"ok\":false,\"error\":\"Busy\"}");
             return;
@@ -1008,9 +1089,13 @@ void setupWebServer() {
             int yr = ds.substring(0,4).toInt(), mo = ds.substring(5,7).toInt(), dy = ds.substring(8,10).toInt();
             int hr = ts.substring(0,2).toInt(), mi = ts.substring(3,5).toInt();
             RtcDateTime dt(yr, mo, dy, hr, mi, 0);
-            // Single write attempt — keeps the AsyncTCP worker responsive.
-            // The 3× retry loop used to block this handler for ~360 ms on a
-            // failing RTC; if one write fails the client can retry.
+            // RAII guard: re-enable RTC write protection on every exit path
+            // (success, verify-failed, early return).  Previous code left the
+            // RTC writable if the write failed or SetDateTime threw — next
+            // glitch could silently corrupt clock state.
+            struct RtcWriteGuard {
+                ~RtcWriteGuard() { if (Rtc) Rtc->SetIsWriteProtected(true); }
+            } guard;
             Rtc->SetIsWriteProtected(false); delay(10);
             Rtc->SetIsRunning(true); delay(10);
             Rtc->SetDateTime(dt); delay(100);
@@ -1096,6 +1181,7 @@ void setupWebServer() {
     // RESTART
     // =========================================================================
     server.on("/restart", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (rateLimit429(r)) return;
         r->send(200, "application/json", "{\"ok\":true}");
         shouldRestart = true;
         restartTimer  = millis();
@@ -1124,6 +1210,7 @@ void setupWebServer() {
 
     // Accept both GET (legacy web.js compat) and POST (preferred)
     auto deleteHandler = [](AsyncWebServerRequest *r) {
+        if (rateLimit429(r)) return;
         if (!r->hasParam("path") && !r->hasParam("path", true)) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing path\"}"); return; }
         // Prefer POST param; fall back to query — sanitizePath rejects "..",
         // control chars, backslash, and NUL, returning "" on any violation.
@@ -1143,8 +1230,12 @@ void setupWebServer() {
             File f = targetFS->open(path, FILE_READ);
             bool isDir = f && f.isDirectory();
             if (f) f.close();
-            // 2s cap so the AsyncTCP worker yields if the mutex is contended.
-            if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
+            // 500 ms cap: if a storage task is holding fsMutex we'd rather
+            // return busy to the client than freeze the AsyncTCP worker.
+            if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+                r->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+                return;
+            }
             deleted = isDir ? deleteRecursive(*targetFS, path) : targetFS->remove(path);
             if (fsMutex) xSemaphoreGive(fsMutex);
         }
@@ -1153,6 +1244,7 @@ void setupWebServer() {
     server.on("/delete", HTTP_POST, deleteHandler);
 
     server.on("/mkdir", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (rateLimit429(r)) return;
         fs::FS* targetFS = getCurrentViewFS();
         if (!r->hasParam("name") || !targetFS) { r->send(400, "text/plain", "Missing name"); return; }
         String dirRaw  = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
@@ -1163,14 +1255,18 @@ void setupWebServer() {
         String name = sanitizeFilename(r->getParam("name")->value());
         if (dir.isEmpty() || name.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid name or dir\"}"); return; }
         String fp   = buildPath(dir, name);
-        // 2s cap so the AsyncTCP worker yields if the mutex is contended.
-        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
+        // 500 ms cap: report busy rather than freeze the AsyncTCP worker.
+        if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+            r->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+            return;
+        }
         bool ok = targetFS->mkdir(fp);
         if (fsMutex) xSemaphoreGive(fsMutex);
         r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"mkdir failed\"}");
     });
 
     server.on("/move_file", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (rateLimit429(r)) return;
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         String src     = r->hasParam("src")     ? sanitizePath(r->getParam("src")->value())     : "";
         String newName = r->hasParam("newName") ? sanitizeFilename(r->getParam("newName")->value()) : "";
@@ -1191,8 +1287,11 @@ void setupWebServer() {
         }
         String dstPath = buildPath(dstDir, newName);
         if (isPathProtected(dstPath)) { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
-        // 2s cap so the AsyncTCP worker yields if the mutex is contended.
-        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
+        // 500 ms cap: report busy rather than freeze the AsyncTCP worker.
+        if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+            r->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+            return;
+        }
         bool ok = targetFS->rename(src, dstPath);
         if (fsMutex) xSemaphoreGive(fsMutex);
         r->send(200, "application/json", ok ? "{\"ok\":true,\"dst\":\"" + dstPath + "\"}" : "{\"ok\":false,\"error\":\"Rename failed\"}");
@@ -1203,6 +1302,7 @@ void setupWebServer() {
     struct UploadCtx { File file; bool mutexHeld; bool failed; };
     server.on("/upload", HTTP_POST,
         [](AsyncWebServerRequest *r) {
+            if (rateLimit429(r)) return;
             UploadCtx* ctx = (UploadCtx*)r->_tempObject;
             if (ctx) {
                 if (ctx->file) ctx->file.close();
@@ -1573,6 +1673,7 @@ void setupWebServer() {
 
         server.on("/save_platform", HTTP_POST,
             [pcfgCleanup](AsyncWebServerRequest *r) {
+                if (rateLimit429(r)) { pcfgCleanup(); return; }
                 if (!fsAvailable || !activeFS) {
                     pcfgCleanup();
                     r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");

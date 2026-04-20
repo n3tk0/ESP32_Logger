@@ -1,5 +1,6 @@
 #include "ConfigManager.h"
 #include "../core/Globals.h"
+#include "../core/ModuleRegistry.h"     // Pass 5: shadow modules.json on save
 #include "../pipeline/DataPipeline.h"   // fsMutex
 #include <LittleFS.h>
 #include "esp_mac.h"
@@ -14,6 +15,9 @@
 // Called after every load path so partially-migrated or corrupt-but-recoverable
 // configs always surface sane values to the web UI.
 // ============================================================================
+// Exposed in ConfigManager.h as `fillConfigDefaults()`; kept here under the
+// original internal name so existing call sites compile unchanged via the
+// thin wrapper at the bottom of the file.
 static void applyDefaults() {
     auto badFloat = [](float v){ return v <= 0.0f || !isfinite(v); };
 
@@ -523,6 +527,16 @@ bool saveConfig() {
     }
 
     if (held) xSemaphoreGive(fsMutex);
+
+    // Pass 5 phase 2: shadow the subset of DeviceConfig that IModule adapters
+    // track into /config/modules.json.  Failures here are non-fatal — config.bin
+    // is authoritative; modules.json is a secondary view for the new UI.
+    moduleRegistry.saveAll(LittleFS);
+
     DBGLN("Config saved");
     return true;
 }
+
+// Public wrapper declared in ConfigManager.h.  Callers outside this TU get an
+// idempotent "top up defaults" operation without needing the internal linkage.
+void fillConfigDefaults() { applyDefaults(); }

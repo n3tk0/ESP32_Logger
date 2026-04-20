@@ -19,6 +19,17 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         return false;
     }
 
+    // Cap parse input so a corrupted/crafted config file can't OOM the heap
+    // (audit Pass 7 JsonDocument sizing).  Realistic worst case is a couple
+    // of KB; 16 KB is comfortably above that while still a hard ceiling.
+    constexpr size_t MAX_CFG_BYTES = 16 * 1024;
+    if (f.size() > MAX_CFG_BYTES) {
+        Serial.printf("[ExportManager] %s too large (%u B, cap %u)\n",
+                      cfgPath, (unsigned)f.size(), (unsigned)MAX_CFG_BYTES);
+        f.close();
+        return false;
+    }
+
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, f);
     f.close();

@@ -1,7 +1,7 @@
   <main class="main-content page" id="page-update">
     <div class="page-header">
       <h1>📤 Firmware Update</h1>
-      <div class="breadcrumb"><a href='#settings' onclick="showSubpage('settings');return false">Settings</a> / Update
+      <div class="breadcrumb"><a href="#settings">Settings</a> / Update
       </div>
     </div>
 
@@ -17,7 +17,7 @@
           </div>
           <div id="popupCounter"></div>
         </div>
-        <button id="popupClose" class="btn btn-secondary" onclick="closePopup()" style="display:none">Close</button>
+        <button id="popupClose" class="btn btn-secondary" data-click="closePopup" style="display:none">Close</button>
       </div>
     </div>
 
@@ -48,10 +48,10 @@
       <div class="card-body">
         <div class="alert alert-warning">⚠️ Upload the correct .bin file. Wrong firmware will require USB recovery.
         </div>
-        <form id="otaForm" onsubmit="event.preventDefault();otaUpload()">
+        <form id="otaForm" data-submit="otaUpload">
           <div class="form-group">
             <input type="file" id="fwFile" name="update" accept=".bin" class="form-input" required
-              onchange="otaFileSelected()">
+              data-change="otaFileSelected">
           </div>
           <div id="otaFileInfo" class="alert" style="display:none;margin-bottom:1rem;"></div>
           <button type="submit" id="otaUploadBtn" class="btn btn-danger btn-block" disabled>🚀 Flash Firmware</button>
