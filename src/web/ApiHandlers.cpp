@@ -11,6 +11,7 @@
 #include "../core/Globals.h"         // config, activeFS
 #include "../core/ModuleRegistry.h"  // Pass 5 phase 3: /api/modules
 #include "../managers/ConfigManager.h" // saveConfig() after module update
+#include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 
 // Forward-declared in Logger.ino — accessible here because this file is
 // compiled in the same sketch scope.
@@ -450,6 +451,7 @@ static void handleApiModuleDetail(AsyncWebServerRequest* req, const String& id) 
 // project already parses JSON bodies this way elsewhere.
 static void handleApiModuleUpdate(AsyncWebServerRequest* req, const String& id,
                                    uint8_t* data, size_t len) {
+    if (rateLimit429(req)) return;
     IModule* mod = moduleRegistry.getById(id.c_str());
     if (!mod) {
         req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
@@ -481,6 +483,7 @@ static void handleApiModuleUpdate(AsyncWebServerRequest* req, const String& id,
 // flag; the next saveConfig() persists it and the caller can reboot via
 // /restart if needed (audit Pass 5 5.3 "enable endpoint").
 static void handleApiModuleEnable(AsyncWebServerRequest* req, const String& id) {
+    if (rateLimit429(req)) return;
     IModule* mod = moduleRegistry.getById(id.c_str());
     if (!mod) {
         req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
