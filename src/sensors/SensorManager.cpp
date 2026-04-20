@@ -43,7 +43,16 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         return false;
     }
 
-    // Use a static doc to avoid heap fragmentation — 4KB is plenty for config
+    // Input-size cap (audit Pass 7 JsonDocument sizing): refuses oversize
+    // sensor configs so a crafted file can't exhaust the heap during parse.
+    constexpr size_t MAX_CFG_BYTES = 16 * 1024;
+    if (f.size() > MAX_CFG_BYTES) {
+        Serial.printf("[SensorManager] %s too large (%u B, cap %u)\n",
+                      cfgPath, (unsigned)f.size(), (unsigned)MAX_CFG_BYTES);
+        f.close();
+        return false;
+    }
+
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, f);
     f.close();

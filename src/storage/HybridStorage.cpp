@@ -15,9 +15,15 @@ bool HybridStorage::begin(const char* cfgPath) {
     if (fsAvailable && activeFS && activeFS->exists(cfgPath)) {
         File f = activeFS->open(cfgPath, FILE_READ);
         if (f) {
-            JsonDocument doc;
-            if (deserializeJson(doc, f) == DeserializationError::Ok) {
-                cloudOnly = doc["storage"]["cloud_only"] | false;
+            // Input-size cap (audit Pass 7 JsonDocument sizing) — platform
+            // config should be well under 4 KB; refuse anything bigger so a
+            // corrupted file can't exhaust the heap during parse.
+            constexpr size_t MAX_CFG_BYTES = 8 * 1024;
+            if (f.size() <= MAX_CFG_BYTES) {
+                JsonDocument doc;
+                if (deserializeJson(doc, f) == DeserializationError::Ok) {
+                    cloudOnly = doc["storage"]["cloud_only"] | false;
+                }
             }
             f.close();
         }
