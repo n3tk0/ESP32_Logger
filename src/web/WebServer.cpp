@@ -534,9 +534,22 @@ void setupWebServer() {
     // =========================================================================
     // API: RECENT LOGS
     // =========================================================================
+    // Supports `?since=<bootcount>` (audit Pass 4 D2).  When present, entries
+    // whose "#:<n>" token is <= the supplied value are suppressed.  The
+    // response always echoes the current bootCount so the client can advance
+    // its cursor; if the logfile has no bootCount tokens (user disabled the
+    // column, or legacy file) the filter degrades to a no-op.
     server.on("/api/recent_logs", HTTP_GET, [](AsyncWebServerRequest *r) {
         JsonDocument doc;
         JsonArray logs = doc["logs"].to<JsonArray>();
+
+        uint32_t sinceBoot = 0;
+        bool hasSince = false;
+        if (r->hasParam("since")) {
+            sinceBoot = (uint32_t)r->getParam("since")->value().toInt();
+            hasSince  = true;
+        }
+        doc["bootCount"] = bootCount;  // client advances cursor from this
 
         if (!fsAvailable || !activeFS) {
             doc["error"] = "Storage not available";
@@ -613,9 +626,25 @@ void setupWebServer() {
             }
 
             if (tCount >= 7) {
+                // Opportunistic `?since=<bootcount>` filter — scan tokens for
+                // a `#:<n>` entry and skip if n <= sinceBoot.  If no such token
+                // exists (user disabled includeBootCount) the filter is a
+                // no-op and the entry is returned as before.
+                if (hasSince) {
+                    bool skip = false;
+                    for (int t = 0; t < tCount; t++) {
+                        if (tokens[t][0] == '#' && tokens[t][1] == ':') {
+                            uint32_t bc = (uint32_t)atoi(tokens[t] + 2);
+                            if (bc <= sinceBoot) skip = true;
+                            break;
+                        }
+                    }
+                    if (skip) continue;
+                }
+
                 JsonObject entry = logs.add<JsonObject>();
                 int tail = tCount - 1;
-                
+
                 if (tCount >= 8) {
                     char timeBuf[80];
                     snprintf(timeBuf, sizeof(timeBuf), "%s %s-%s", tokens[0], tokens[1], tokens[2]);
@@ -625,7 +654,7 @@ void setupWebServer() {
                     snprintf(timeBuf, sizeof(timeBuf), "%s|%s", tokens[0], tokens[1]);
                     entry["time"] = timeBuf;
                 }
-                
+
                 entry["trigger"] = tokens[tail - 3];
                 
                 char* vs = tokens[tail - 2];
