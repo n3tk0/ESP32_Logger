@@ -113,7 +113,11 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
         fs.remove(tmp.c_str());
         return false;
     }
-    if (fs.exists(path)) fs.remove(path);
+    // LittleFS rename() overwrites the destination atomically when it
+    // exists, so we deliberately DON'T remove() first — doing so would
+    // create a window where neither file is present if power drops
+    // between remove and rename.  The loadAll() recovery path still GC's
+    // a stale .new in case rename itself fails mid-operation.
     if (!fs.rename(tmp.c_str(), path)) {
         Serial.printf("[ModuleRegistry] rename %s -> %s failed\n", tmp.c_str(), path);
         fs.remove(tmp.c_str());

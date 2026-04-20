@@ -1316,15 +1316,15 @@ var Modules = (function () {
     var input;
 
     if (f.type === "bool") {
+      // Let bool fall through to the shared showIf/wrapper tail below so
+      // checkboxes honour conditional visibility (e.g. WiFiModule's
+      // `useStaticIP` toggling the IPv4 field group).
       input =
         '<label class="form-label">' +
           '<input type="checkbox" name="' + escAttr(id) + '"' +
           (val ? " checked" : "") + '> ' + escAttr(f.label || id) +
         '</label>';
-      return '<div class="form-group" data-field="' + escAttr(id) + '">' +
-             input + '</div>';
-    }
-    if (f.type === "enum") {
+    } else if (f.type === "enum") {
       var opts = (f.options || []).map(function (o) {
         return '<option value="' + escAttr(o.v) + '"' +
                (String(val) === String(o.v) ? " selected" : "") + '>' +
