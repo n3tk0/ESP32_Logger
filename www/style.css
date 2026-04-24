@@ -1107,11 +1107,13 @@ body {
 }
 .skip-link:focus { top: 8px; }
 
-/* ── WCAG 2.4.11 — Global focus indicator (3px, 2px offset, accent) ─────── */
+/* ── WCAG 2.4.11 — Global focus indicator (3px, 2px offset, accent) ───────
+   Modern browsers make the outline follow the element's existing border-
+   radius, so we don't need to set one here (doing so caused focus-triggered
+   shape jumps on un-rounded elements). */
 :focus-visible {
   outline: 3px solid var(--d-accent);
   outline-offset: 2px;
-  border-radius: var(--d-radius);
 }
 :focus:not(:focus-visible) { outline: none; }
 
@@ -1172,24 +1174,27 @@ body {
 /* Rail (collapsed) state — only desktop layouts carry the .rail class on
    <body>; mobile layout ignores it.  Icons stay centred; text labels hide. */
 @media (min-width: 768px) {
-  body.sidebar-rail { padding-left: 60px; }
+  /* body inherits the left-inset from html.sidebar-rail (descendant
+     selector) — attribute on html so theme-boot.js can add it pre-paint
+     without a body node. */
+  :root.sidebar-rail body { padding-left: 60px; }
 
-  body.sidebar-rail .sidebar { width: 60px; overflow-x: hidden; }
-  body.sidebar-rail .sidebar .nav-item { justify-content: center; padding: 12px 0; }
-  body.sidebar-rail .sidebar .nav-item > span:not(.icon):not([data-icon]) { display: none; }
-  body.sidebar-rail .sidebar .nav-section { opacity: 0; height: 4px; padding: 0; overflow: hidden; }
-  body.sidebar-rail .sidebar-header .logo,
-  body.sidebar-rail .sidebar-header img { display: none; }
-  body.sidebar-rail .sidebar-rail-btn { top: 10px; right: 14px; }
-  body.sidebar-rail .sidebar-rail-btn [data-lucide] { transform: rotate(180deg); }
+  :root.sidebar-rail .sidebar { width: 60px; overflow-x: hidden; }
+  :root.sidebar-rail .sidebar .nav-item { justify-content: center; padding: 12px 0; }
+  :root.sidebar-rail .sidebar .nav-item > span:not(.icon):not([data-icon]) { display: none; }
+  :root.sidebar-rail .sidebar .nav-section { opacity: 0; height: 4px; padding: 0; overflow: hidden; }
+  :root.sidebar-rail .sidebar-header .logo,
+  :root.sidebar-rail .sidebar-header img { display: none; }
+  :root.sidebar-rail .sidebar-rail-btn { top: 10px; right: 14px; }
+  :root.sidebar-rail .sidebar-rail-btn [data-lucide] { transform: rotate(180deg); }
 
   /* Tooltip-on-hover for collapsed nav items — shows the label next to the
      icon without re-expanding the sidebar.  CSS-only, no JS needed. */
-  body.sidebar-rail .sidebar .nav-item { position: relative; }
-  body.sidebar-rail .sidebar .nav-item > span:last-child {
+  :root.sidebar-rail .sidebar .nav-item { position: relative; }
+  :root.sidebar-rail .sidebar .nav-item > span:last-child {
     /* expose via title-like popup */
   }
-  body.sidebar-rail .sidebar .nav-item:hover::after {
+  :root.sidebar-rail .sidebar .nav-item:hover::after {
     content: attr(data-page);
     position: absolute;
     left: 60px;

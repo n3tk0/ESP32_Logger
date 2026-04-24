@@ -369,23 +369,39 @@ function quickThemeToggle() {
 // width on desktop only; mobile ignores the class since the bottom-nav
 // handles navigation there.  Preference persists across reloads.
 function sidebarRailToggle() {
-  var isRail = document.body.classList.toggle("sidebar-rail");
+  // Class lives on <html> so theme-boot.js can restore it pre-paint without
+  // waiting for <body> (gemini review PR #47 — avoids FOUC on reload).
+  var isRail = document.documentElement.classList.toggle("sidebar-rail");
   try { localStorage.setItem("sidebarRail", isRail ? "1" : "0"); } catch (e) {}
-  var btn = document.getElementById("sidebarRailBtn");
-  if (btn) {
-    btn.setAttribute("aria-label", isRail ? "Expand sidebar" : "Collapse sidebar");
-    btn.setAttribute("title",      isRail ? "Expand sidebar" : "Collapse sidebar");
-  }
+  _sidebarRailSyncBtn(isRail);
 }
 
-// Apply the saved rail preference on load — inline so no FOUC.
-(function () {
-  try {
-    if (localStorage.getItem("sidebarRail") === "1") {
-      document.body.classList.add("sidebar-rail");
-    }
-  } catch (e) {}
-})();
+// Keep the toggle button's ARIA + tooltip in sync with current state.
+// Called from sidebarRailToggle() and on DOMContentLoaded so a page that
+// loads already-railed (pre-paint class in theme-boot.js) still gets the
+// correct "Expand" labels.
+function _sidebarRailSyncBtn(isRail) {
+  var btn = document.getElementById("sidebarRailBtn");
+  if (!btn) return;
+  btn.setAttribute("aria-label", isRail ? "Expand sidebar" : "Collapse sidebar");
+  btn.setAttribute("title",      isRail ? "Expand sidebar" : "Collapse sidebar");
+}
+document.addEventListener("DOMContentLoaded", function () {
+  _sidebarRailSyncBtn(document.documentElement.classList.contains("sidebar-rail"));
+});
+
+// WCAG 2.4.1 skip-to-content — programmatic focus instead of #anchor so
+// we don't trigger the SPA hash router (gemini review PR #47).  Focuses
+// whichever <main class="page active"> is currently visible.
+function skipToContent() {
+  var target = document.querySelector("main.page.active") ||
+               document.querySelector("main.page");
+  if (!target) return;
+  if (target.getAttribute("tabindex") === null) {
+    target.setAttribute("tabindex", "-1");
+  }
+  target.focus({ preventScroll: false });
+}
 
 // Initialise toggle icon on first script run (DOM is ready since we're at the
 // bottom of <body>).
@@ -1015,6 +1031,7 @@ registerHandlers({
   navPage: navPage,
   quickThemeToggle: quickThemeToggle,
   sidebarRailToggle: sidebarRailToggle,
+  skipToContent: skipToContent,
   showPopup: showPopup,
   hidePopup: hidePopup,
   showSubpage: showSubpage,
@@ -1057,7 +1074,9 @@ registerHandlers({
     return false;
   }
 
-  function navigateTo(pageId) {
+  // Locally scoped to the shortcut IIFE — named differently from the
+  // global navigateTo(url) to avoid shadowing (gemini review PR #47).
+  function triggerPageLink(pageId) {
     var link = document.querySelector('a[data-page="' + pageId + '"]');
     if (link) link.click();
   }
@@ -1115,7 +1134,7 @@ registerHandlers({
       clearTimeout(timer);
       if (MAP[key]) {
         ev.preventDefault();
-        navigateTo(MAP[key]);
+        triggerPageLink(MAP[key]);
       }
       return;
     }

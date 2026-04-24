@@ -34,8 +34,8 @@
 </head>
 
 <body>
-  <!-- WCAG 2.4.1 bypass link — appears on first Tab keypress. -->
-  <a href="#main-content" class="skip-link">Skip to main content</a>
+  <!-- WCAG 2.4.1 bypass link — programmatic focus avoids the SPA hash router. -->
+  <button type="button" class="skip-link" data-click="skipToContent">Skip to main content</button>
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <img id="sidebarLogo" src="" alt=""
@@ -82,8 +82,7 @@
   </header>
 
   <!-- ═══ PAGE: DASHBOARD ═══ -->
-  <main class="main-content page" id="page-dashboard" tabindex="-1">
-    <a id="main-content" aria-hidden="true"></a>
+  <main class="main-content page" id="page-dashboard">
     <div class="page-header">
       <h1>📊 Dashboard</h1>
     </div>
