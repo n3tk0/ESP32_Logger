@@ -37,9 +37,17 @@
   <!-- WCAG 2.4.1 bypass link — appears on first Tab keypress. -->
   <a href="#main-content" class="skip-link">Skip to main content</a>
   <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header"><img id="sidebarLogo" src="" alt=""
-        style="display:none;max-width:100%;height:auto;margin-bottom:8px"><span class="logo" id="sidebarName">Water
-        Logger</span></div>
+    <div class="sidebar-header">
+      <img id="sidebarLogo" src="" alt=""
+        style="display:none;max-width:100%;height:auto;margin-bottom:8px">
+      <span class="logo" id="sidebarName">Water Logger</span>
+      <button type="button" id="sidebarRailBtn" class="sidebar-rail-btn"
+              data-click="sidebarRailToggle"
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar">
+        <span data-icon="chevron-left"></span>
+      </button>
+    </div>
     <nav>
       <div class="nav-section">Main</div>
       <a href="#dashboard" data-page="dashboard" class="nav-item" data-click="navPage">

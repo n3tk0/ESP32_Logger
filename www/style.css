@@ -1135,3 +1135,76 @@ body {
   stroke-width: 1.75;
   flex-shrink: 0;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Design phase 4: sidebar rail mode + footer stats (desktop only)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.sidebar-header {
+  position: relative;
+}
+.sidebar-rail-btn {
+  display: none;           /* mobile hides the rail toggle; desktop shows it */
+  position: absolute;
+  top: 14px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  transition: color .15s, background .15s;
+}
+.sidebar-rail-btn:hover { color: var(--text); background: var(--bg); }
+.sidebar-rail-btn [data-lucide] {
+  transition: transform .2s;
+}
+@media (min-width: 768px) {
+  .sidebar-rail-btn { display: inline-flex; }
+}
+
+/* Rail (collapsed) state — only desktop layouts carry the .rail class on
+   <body>; mobile layout ignores it.  Icons stay centred; text labels hide. */
+@media (min-width: 768px) {
+  body.sidebar-rail { padding-left: 60px; }
+
+  body.sidebar-rail .sidebar { width: 60px; overflow-x: hidden; }
+  body.sidebar-rail .sidebar .nav-item { justify-content: center; padding: 12px 0; }
+  body.sidebar-rail .sidebar .nav-item > span:not(.icon):not([data-icon]) { display: none; }
+  body.sidebar-rail .sidebar .nav-section { opacity: 0; height: 4px; padding: 0; overflow: hidden; }
+  body.sidebar-rail .sidebar-header .logo,
+  body.sidebar-rail .sidebar-header img { display: none; }
+  body.sidebar-rail .sidebar-rail-btn { top: 10px; right: 14px; }
+  body.sidebar-rail .sidebar-rail-btn [data-lucide] { transform: rotate(180deg); }
+
+  /* Tooltip-on-hover for collapsed nav items — shows the label next to the
+     icon without re-expanding the sidebar.  CSS-only, no JS needed. */
+  body.sidebar-rail .sidebar .nav-item { position: relative; }
+  body.sidebar-rail .sidebar .nav-item > span:last-child {
+    /* expose via title-like popup */
+  }
+  body.sidebar-rail .sidebar .nav-item:hover::after {
+    content: attr(data-page);
+    position: absolute;
+    left: 60px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--card);
+    color: var(--text);
+    padding: 6px 10px;
+    font-size: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+    text-transform: capitalize;
+    white-space: nowrap;
+    z-index: 300;
+    pointer-events: none;
+  }
+}

@@ -365,6 +365,28 @@ function quickThemeToggle() {
   _themeApplyOverride(next);
 }
 
+// Collapsible sidebar rail (Claude Design phase 4a).  Toggles 60px rail
+// width on desktop only; mobile ignores the class since the bottom-nav
+// handles navigation there.  Preference persists across reloads.
+function sidebarRailToggle() {
+  var isRail = document.body.classList.toggle("sidebar-rail");
+  try { localStorage.setItem("sidebarRail", isRail ? "1" : "0"); } catch (e) {}
+  var btn = document.getElementById("sidebarRailBtn");
+  if (btn) {
+    btn.setAttribute("aria-label", isRail ? "Expand sidebar" : "Collapse sidebar");
+    btn.setAttribute("title",      isRail ? "Expand sidebar" : "Collapse sidebar");
+  }
+}
+
+// Apply the saved rail preference on load — inline so no FOUC.
+(function () {
+  try {
+    if (localStorage.getItem("sidebarRail") === "1") {
+      document.body.classList.add("sidebar-rail");
+    }
+  } catch (e) {}
+})();
+
 // Initialise toggle icon on first script run (DOM is ready since we're at the
 // bottom of <body>).
 (function () {
@@ -992,6 +1014,7 @@ function confirmRestart() {
 registerHandlers({
   navPage: navPage,
   quickThemeToggle: quickThemeToggle,
+  sidebarRailToggle: sidebarRailToggle,
   showPopup: showPopup,
   hidePopup: hidePopup,
   showSubpage: showSubpage,
