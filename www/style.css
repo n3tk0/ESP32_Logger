@@ -503,23 +503,92 @@ body {
   color: var(--text);
   border-left: 4px solid var(--primary);
   box-shadow: var(--shadow-lg);
-  padding: 12px 20px;
+  padding: 12px 16px;
   border-radius: var(--radius-sm);
   font-size: 0.9rem;
   font-weight: 500;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
+  min-width: 260px;
+  max-width: 360px;
   opacity: 0;
   transform: translateX(100%);
-  animation: toast-slide-in 0.3s forwards, toast-fade-out 0.3s 2.7s forwards;
+  animation: toast-slide-in 0.3s forwards;
+  position: relative;
+  overflow: hidden;
+}
+.toast.toast-dismissing {
+  animation: toast-fade-out 0.25s forwards;
 }
 
-.toast.toast-error {
-  border-left-color: var(--danger);
+/* Per-type accent colour: supports both legacy (success/error) and the new
+   design types (ok/warn/err/info).  The design-phase types win where both
+   are applied, since they're listed second in the selector cascade. */
+.toast.toast-success,
+.toast.toast-ok   { border-left-color: var(--success, #27ae60); }
+.toast.toast-error,
+.toast.toast-err  { border-left-color: var(--danger, #e74c3c); }
+.toast.toast-warn { border-left-color: var(--warning, #f39c12); }
+.toast.toast-info { border-left-color: var(--accent, #3182ce); }
+
+.toast .toast-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.toast.toast-success {
-  border-left-color: var(--success);
+.toast .toast-icon [data-lucide] { width: 18px; height: 18px; }
+.toast .toast-success .toast-icon,
+.toast.toast-ok  .toast-icon { color: var(--success, #27ae60); }
+.toast.toast-error .toast-icon,
+.toast.toast-err   .toast-icon { color: var(--danger, #e74c3c); }
+.toast.toast-warn  .toast-icon { color: var(--warning, #f39c12); }
+.toast.toast-info  .toast-icon { color: var(--accent, #3182ce); }
+
+.toast .toast-body { flex: 1; min-width: 0; }
+.toast .toast-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 2px;
+  color: var(--text);
+}
+.toast .toast-msg {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+.toast .toast-close {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 2px;
+  cursor: pointer;
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: auto;
+}
+.toast .toast-close:hover { color: var(--text); background: var(--border); }
+.toast .toast-close [data-lucide] { width: 14px; height: 14px; }
+
+.toast .toast-countdown {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  width: 100%;
+  background: currentColor;
+  opacity: 0.35;
+  transform-origin: left;
+  animation: toast-countdown linear forwards;
 }
 
 @keyframes toast-slide-in {
@@ -528,6 +597,11 @@ body {
 
 @keyframes toast-fade-out {
   to { opacity: 0; transform: translateY(10px); }
+}
+
+@keyframes toast-countdown {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
 }
 
 .btn-primary:hover {

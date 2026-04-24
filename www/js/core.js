@@ -542,16 +542,82 @@ function pageInit(page) {
 // ============================================================================
 // HELPERS
 // ============================================================================
-function showToast(msg, type) {
-  var c = document.getElementById("toastContainer");
-  if (!c) return;
+// Toast notifications (Claude Design phase 3).
+//
+// Backward-compatible with the legacy two-arg form:
+//     showToast(msg, "success" | "error")
+// plus the richer three-arg form from the design spec:
+//     showToast(title, msg, "ok" | "warn" | "err" | "info")
+// Aliases: "success" → "ok", "error" → "err".  Each toast carries a Lucide
+// icon, an optional body message, a close button, and a countdown bar that
+// drains across the 3 s lifetime.
+function showToast(a, b, c) {
+  var container = document.getElementById("toastContainer");
+  if (!container) return;
+
+  var title, msg, type;
+  if (arguments.length >= 3) {
+    title = a || ""; msg = b || ""; type = c || "info";
+  } else {
+    title = a || "";  msg = "";  type = b || "info";
+  }
+
+  // Normalise legacy type names.
+  var typeMap = { success: "ok", error: "err" };
+  type = typeMap[type] || type;
+  var ICON = { ok: "check", warn: "alert-triangle", err: "x", info: "info" };
+  var iconName = ICON[type] || "info";
+
   var el = document.createElement("div");
-  el.className = "toast " + (type === "error" ? "toast-error" : "toast-success");
-  el.textContent = (type === "error" ? "❌ " : "✅ ") + msg;
-  c.appendChild(el);
-  setTimeout(function() {
-    if(c.contains(el)) c.removeChild(el);
-  }, 3000);
+  el.className = "toast toast-" + type;
+  el.setAttribute("role", type === "err" ? "alert" : "status");
+  el.setAttribute("aria-live", type === "err" ? "assertive" : "polite");
+
+  var iconSpan = document.createElement("span");
+  iconSpan.className = "toast-icon";
+  iconSpan.setAttribute("data-icon", iconName);
+  el.appendChild(iconSpan);
+
+  var body = document.createElement("div");
+  body.className = "toast-body";
+  var titleEl = document.createElement("div");
+  titleEl.className = "toast-title";
+  titleEl.textContent = title;
+  body.appendChild(titleEl);
+  if (msg) {
+    var msgEl = document.createElement("div");
+    msgEl.className = "toast-msg";
+    msgEl.textContent = msg;
+    body.appendChild(msgEl);
+  }
+  el.appendChild(body);
+
+  var close = document.createElement("button");
+  close.type = "button";
+  close.className = "toast-close";
+  close.setAttribute("aria-label", "Dismiss notification");
+  var closeIcon = document.createElement("span");
+  closeIcon.setAttribute("data-icon", "x");
+  close.appendChild(closeIcon);
+  el.appendChild(close);
+
+  var countdown = document.createElement("div");
+  countdown.className = "toast-countdown";
+  countdown.style.animationDuration = "3000ms";
+  el.appendChild(countdown);
+
+  container.appendChild(el);
+  if (window.Icons && Icons.swap) Icons.swap(el);
+
+  function dismiss() {
+    if (!container.contains(el)) return;
+    el.classList.add("toast-dismissing");
+    setTimeout(function () {
+      if (container.contains(el)) container.removeChild(el);
+    }, 260);
+  }
+  close.addEventListener("click", dismiss);
+  setTimeout(dismiss, 3000);
 }
 
 // HTML-escape for safe insertion into innerHTML. Use textContent / DOM
