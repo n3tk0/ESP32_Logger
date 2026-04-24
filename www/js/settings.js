@@ -711,9 +711,40 @@ function netCheckScan() {
     });
 }
 
-// POST /api/modules/wifi/test — validate credentials without persisting.
-// Server keeps the AP up during the probe so this session survives a bad
-// password.
+// POST /api/modules/wifi/test → the server runs the probe in a worker task
+// and responds 202 immediately, then we poll GET /api/modules/wifi/test for
+// the result.  Keeps the async web server responsive for other clients.
+var netTestPollTimer = null;
+function netTestPoll(out, tries) {
+  if (!out) return;
+  if (tries > 20) {          // 20×600ms ≈ 12s — safely over the 8s server cap
+    out.textContent = "❌ Timed out waiting for result";
+    out.style.color = "var(--danger)";
+    return;
+  }
+  fetch("/api/modules/wifi/test")
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.state === "success") {
+        out.textContent = "✅ Connected (" + d.rssi + " dBm, " + d.ip + ")";
+        out.style.color = "var(--success)";
+      } else if (d.state === "failed") {
+        out.textContent = "❌ " + (d.error || "Failed to connect");
+        out.style.color = "var(--danger)";
+      } else if (d.state === "running") {
+        netTestPollTimer = setTimeout(function () {
+          netTestPoll(out, tries + 1);
+        }, 600);
+      } else {
+        out.textContent = "Result expired — click Test again";
+        out.style.color = "var(--text-muted)";
+      }
+    })
+    .catch(function (e) {
+      out.textContent = "❌ " + e;
+      out.style.color = "var(--danger)";
+    });
+}
 function netTestWifi() {
   var ssidEl = document.getElementById("net-cSSID");
   var passEl = document.getElementById("net-cPass");
@@ -724,20 +755,20 @@ function netTestWifi() {
     if (out) { out.textContent = "Enter an SSID first"; out.style.color = "var(--danger)"; }
     return;
   }
+  if (netTestPollTimer) { clearTimeout(netTestPollTimer); netTestPollTimer = null; }
   if (out) { out.textContent = "🧪 Testing… (up to 8s)"; out.style.color = "var(--text-muted)"; }
   fetch("/api/modules/wifi/test", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ssid: ssid, password: pass })
   })
-    .then(function (r) { return r.json(); })
-    .then(function (d) {
+    .then(function (r) { return r.json().then(function (d) { return { status: r.status, body: d }; }); })
+    .then(function (resp) {
       if (!out) return;
-      if (d.connected) {
-        out.textContent = "✅ Connected (" + d.rssi + " dBm, " + d.ip + ")";
-        out.style.color = "var(--success)";
+      if (resp.status === 202) {
+        netTestPoll(out, 0);
       } else {
-        out.textContent = "❌ " + (d.error || "Failed to connect");
+        out.textContent = "❌ " + (resp.body.error || "Start failed");
         out.style.color = "var(--danger)";
       }
     })

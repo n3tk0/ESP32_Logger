@@ -515,40 +515,102 @@ static void handleApiModuleEnable(AsyncWebServerRequest* req, const String& id) 
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/modules/wifi/scan  — list visible networks.  Blocking scan (~2-3s
-// on ESP32-C3).  Returns {ok, count, networks:[{ssid,rssi,secure,channel}]}.
-// Runs regardless of current WiFi mode; ESP32's scanNetworks() transparently
-// switches to AP_STA so the serving AP stays up for the requester.
-// (Pass 5 5.5 phase 1.)
+// WiFi scan + credential-test endpoints (Pass 5 5.5 phase 1).
+//
+// Both endpoints are fully async-safe — no call inside an AsyncWebServer
+// handler blocks the AsyncTCP task.  Strategy:
+//   • scan: WiFi.scanNetworks(async=true) → GET polls via WiFi.scanComplete()
+//   • test: a short-lived FreeRTOS task runs the connect-and-wait loop;
+//           handlers only touch a file-static state machine (g_wtState).
+// Both responses stream via AsyncResponseStream to avoid building a big
+// contiguous String on the heap.
 // ---------------------------------------------------------------------------
+
+// ── WiFi test state machine ─────────────────────────────────────────────────
+enum WifiTestState : uint8_t {
+    WT_IDLE = 0, WT_RUNNING, WT_SUCCESS, WT_FAILED
+};
+static volatile WifiTestState g_wtState = WT_IDLE;
+static char     g_wtSsid[33]        = "";
+static char     g_wtPassword[65]    = "";
+static int32_t  g_wtRssi            = 0;
+static char     g_wtIp[20]          = "";
+static char     g_wtError[48]       = "";
+
+static void wifiTestTaskFn(void* /*arg*/) {
+    // Save mode so a bad password can't drop a user who's connected over the
+    // serving AP.  AP_STA keeps the AP alive during the probe.
+    WiFiMode_t priorMode = WiFi.getMode();
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.begin(g_wtSsid, g_wtPassword);
+
+    constexpr uint32_t TIMEOUT_MS = 8000;
+    uint32_t start = millis();
+    while (WiFi.status() != WL_CONNECTED &&
+           millis() - start < TIMEOUT_MS) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        g_wtRssi = WiFi.RSSI();
+        strlcpy(g_wtIp, WiFi.localIP().toString().c_str(), sizeof(g_wtIp));
+        g_wtState = WT_SUCCESS;
+    } else {
+        strlcpy(g_wtError, "timeout or auth failure", sizeof(g_wtError));
+        g_wtState = WT_FAILED;
+    }
+
+    // Tear down the probe connection but keep stored NVS creds intact —
+    // `eraseap=true` would wipe the user's real saved network on a failed
+    // test, which is decidedly not what they signed up for.
+    WiFi.disconnect(/*wifioff=*/false, /*eraseap=*/false);
+    WiFi.mode(priorMode);
+    vTaskDelete(nullptr);
+}
+
+// GET /api/modules/wifi/scan  — starts an async scan on first call, returns
+// the cached results on subsequent calls.  Never blocks more than a handful
+// of microseconds.  Response shape:
+//   • scan in progress: {ok, scanning:true}
+//   • results ready:    {ok, scanning:false, count, networks:[…]}
 static void handleApiWifiScan(AsyncWebServerRequest* req) {
     if (rateLimit429(req)) return;
 
-    int n = WiFi.scanNetworks(/*async=*/false, /*show_hidden=*/false);
+    int n = WiFi.scanComplete();
     JsonDocument doc;
-    doc["ok"] = true;
-    doc["count"] = (n < 0) ? 0 : n;
-    JsonArray arr = doc["networks"].to<JsonArray>();
-    for (int i = 0; i < n && i < 32; i++) {     // cap response at 32 entries
-        JsonObject o = arr.add<JsonObject>();
-        o["ssid"]    = WiFi.SSID(i);
-        o["rssi"]    = WiFi.RSSI(i);
-        o["channel"] = WiFi.channel(i);
-        o["secure"]  = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
-    }
-    WiFi.scanDelete();
 
-    String body;
-    serializeJson(doc, body);
-    req->send(200, "application/json", body);
+    if (n == WIFI_SCAN_RUNNING) {
+        doc["ok"] = true;
+        doc["scanning"] = true;
+    } else if (n == WIFI_SCAN_FAILED || n < 0) {
+        // No scan pending → kick a fresh one off.  ESP32 transparently goes
+        // AP_STA for the duration so the serving AP stays up.
+        WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/false);
+        doc["ok"] = true;
+        doc["scanning"] = true;
+    } else {
+        doc["ok"] = true;
+        doc["scanning"] = false;
+        doc["count"] = n;
+        JsonArray arr = doc["networks"].to<JsonArray>();
+        for (int i = 0; i < n && i < 32; i++) {    // cap at 32 entries
+            JsonObject o = arr.add<JsonObject>();
+            o["ssid"]    = WiFi.SSID(i);
+            o["rssi"]    = WiFi.RSSI(i);
+            o["channel"] = WiFi.channel(i);
+            o["secure"]  = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+        }
+        WiFi.scanDelete();   // free slots so the next GET triggers a new scan
+    }
+
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+    serializeJson(doc, *resp);
+    req->send(resp);
 }
 
-// ---------------------------------------------------------------------------
-// POST /api/modules/wifi/test  — validate SSID/password without persisting.
-// Body: {"ssid":"...","password":"..."}.  Returns {ok, connected, rssi,
-// ip, error}.  Always restores the prior WiFi mode so the caller's session
-// (typically over the AP) survives the probe.
-// ---------------------------------------------------------------------------
+// POST /api/modules/wifi/test  — kicks off a credential probe in a worker
+// task and returns immediately with 202.  Clients poll the same path with
+// GET to retrieve the result.  Body: {"ssid":"...","password":"..."}.
 static void handleApiWifiTest(AsyncWebServerRequest* req,
                               uint8_t* data, size_t len) {
     if (rateLimit429(req)) return;
@@ -566,39 +628,61 @@ static void handleApiWifiTest(AsyncWebServerRequest* req,
                   "{\"ok\":false,\"error\":\"missing ssid\"}");
         return;
     }
-
-    // Save prior mode so we can restore it — users connecting over the AP
-    // must not lose their session just because credentials were wrong.
-    WiFiMode_t priorMode = WiFi.getMode();
-    WiFi.mode(WIFI_AP_STA);
-    WiFi.begin(ssid, pw);
-
-    constexpr uint32_t TIMEOUT_MS = 8000;
-    uint32_t start = millis();
-    while (WiFi.status() != WL_CONNECTED &&
-           millis() - start < TIMEOUT_MS) {
-        delay(100);
+    if (g_wtState == WT_RUNNING) {
+        req->send(409, "application/json",
+                  "{\"ok\":false,\"error\":\"test already running\"}");
+        return;
     }
 
-    JsonDocument out;
-    if (WiFi.status() == WL_CONNECTED) {
-        out["ok"]        = true;
-        out["connected"] = true;
-        out["rssi"]      = WiFi.RSSI();
-        out["ip"]        = WiFi.localIP().toString();
-    } else {
-        out["ok"]        = true;     // request itself succeeded
-        out["connected"] = false;
-        out["error"]     = "timeout or auth failure";
+    strlcpy(g_wtSsid,     ssid, sizeof(g_wtSsid));
+    strlcpy(g_wtPassword, pw,   sizeof(g_wtPassword));
+    g_wtRssi  = 0;
+    g_wtIp[0] = '\0';
+    g_wtError[0] = '\0';
+    g_wtState = WT_RUNNING;
+
+    BaseType_t rc = xTaskCreate(wifiTestTaskFn, "wifiTest", 4096,
+                                 nullptr, 1, nullptr);
+    if (rc != pdPASS) {
+        g_wtState = WT_IDLE;
+        req->send(500, "application/json",
+                  "{\"ok\":false,\"error\":\"cannot spawn task\"}");
+        return;
     }
+    req->send(202, "application/json",
+              "{\"ok\":true,\"state\":\"running\"}");
+}
 
-    // Tear down the probe STA connection and restore prior mode.
-    WiFi.disconnect(/*wifioff=*/false, /*eraseap=*/true);
-    WiFi.mode(priorMode);
-
-    String resp;
-    serializeJson(out, resp);
-    req->send(200, "application/json", resp);
+// GET /api/modules/wifi/test  — poll current test state.  Returns one of
+// {state:"idle"}, {state:"running"}, {state:"success",rssi,ip},
+// {state:"failed",error}.  Consumes the result on read so repeated polls
+// after success/failed return "idle" (client gets one shot).
+static void handleApiWifiTestPoll(AsyncWebServerRequest* req) {
+    JsonDocument doc;
+    doc["ok"] = true;
+    switch (g_wtState) {
+        case WT_RUNNING:
+            doc["state"] = "running";
+            break;
+        case WT_SUCCESS:
+            doc["state"] = "success";
+            doc["rssi"]  = g_wtRssi;
+            doc["ip"]    = g_wtIp;
+            g_wtState = WT_IDLE;    // consume
+            break;
+        case WT_FAILED:
+            doc["state"] = "failed";
+            doc["error"] = g_wtError;
+            g_wtState = WT_IDLE;    // consume
+            break;
+        case WT_IDLE:
+        default:
+            doc["state"] = "idle";
+            break;
+    }
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+    serializeJson(doc, *resp);
+    req->send(resp);
 }
 
 // Dispatcher — ESPAsyncWebServer's on() does exact-match only, so we register
@@ -683,8 +767,10 @@ void registerApiRoutes(AsyncWebServer& server) {
 
     // Pass 5 5.5 phase 1 — WiFi-specific helpers.  Registered only when the
     // wifi module is present so stripped-down builds don't pay the flash cost.
+    // All three endpoints are fully async-safe (see handler comments).
     if (moduleRegistry.getById("wifi")) {
-        server.on("/api/modules/wifi/scan", HTTP_GET, handleApiWifiScan);
+        server.on("/api/modules/wifi/scan", HTTP_GET,  handleApiWifiScan);
+        server.on("/api/modules/wifi/test", HTTP_GET,  handleApiWifiTestPoll);
         server.on("/api/modules/wifi/test", HTTP_POST,
             [](AsyncWebServerRequest* r) { /* body handled below */ },
             nullptr,
