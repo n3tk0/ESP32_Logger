@@ -1,6 +1,7 @@
 #include "ApiHandlers.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <WiFi.h>                      // WiFi scan/test (Pass 5 5.5 phase 1)
 #include <freertos/task.h>
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/AggregationEngine.h"
@@ -513,6 +514,93 @@ static void handleApiModuleEnable(AsyncWebServerRequest* req, const String& id) 
     req->send(200, "application/json", body);
 }
 
+// ---------------------------------------------------------------------------
+// GET /api/modules/wifi/scan  — list visible networks.  Blocking scan (~2-3s
+// on ESP32-C3).  Returns {ok, count, networks:[{ssid,rssi,secure,channel}]}.
+// Runs regardless of current WiFi mode; ESP32's scanNetworks() transparently
+// switches to AP_STA so the serving AP stays up for the requester.
+// (Pass 5 5.5 phase 1.)
+// ---------------------------------------------------------------------------
+static void handleApiWifiScan(AsyncWebServerRequest* req) {
+    if (rateLimit429(req)) return;
+
+    int n = WiFi.scanNetworks(/*async=*/false, /*show_hidden=*/false);
+    JsonDocument doc;
+    doc["ok"] = true;
+    doc["count"] = (n < 0) ? 0 : n;
+    JsonArray arr = doc["networks"].to<JsonArray>();
+    for (int i = 0; i < n && i < 32; i++) {     // cap response at 32 entries
+        JsonObject o = arr.add<JsonObject>();
+        o["ssid"]    = WiFi.SSID(i);
+        o["rssi"]    = WiFi.RSSI(i);
+        o["channel"] = WiFi.channel(i);
+        o["secure"]  = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+    }
+    WiFi.scanDelete();
+
+    String body;
+    serializeJson(doc, body);
+    req->send(200, "application/json", body);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/modules/wifi/test  — validate SSID/password without persisting.
+// Body: {"ssid":"...","password":"..."}.  Returns {ok, connected, rssi,
+// ip, error}.  Always restores the prior WiFi mode so the caller's session
+// (typically over the AP) survives the probe.
+// ---------------------------------------------------------------------------
+static void handleApiWifiTest(AsyncWebServerRequest* req,
+                              uint8_t* data, size_t len) {
+    if (rateLimit429(req)) return;
+
+    JsonDocument body;
+    if (deserializeJson(body, data, len)) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"bad json\"}");
+        return;
+    }
+    const char* ssid = body["ssid"] | "";
+    const char* pw   = body["password"] | "";
+    if (!*ssid) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"missing ssid\"}");
+        return;
+    }
+
+    // Save prior mode so we can restore it — users connecting over the AP
+    // must not lose their session just because credentials were wrong.
+    WiFiMode_t priorMode = WiFi.getMode();
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.begin(ssid, pw);
+
+    constexpr uint32_t TIMEOUT_MS = 8000;
+    uint32_t start = millis();
+    while (WiFi.status() != WL_CONNECTED &&
+           millis() - start < TIMEOUT_MS) {
+        delay(100);
+    }
+
+    JsonDocument out;
+    if (WiFi.status() == WL_CONNECTED) {
+        out["ok"]        = true;
+        out["connected"] = true;
+        out["rssi"]      = WiFi.RSSI();
+        out["ip"]        = WiFi.localIP().toString();
+    } else {
+        out["ok"]        = true;     // request itself succeeded
+        out["connected"] = false;
+        out["error"]     = "timeout or auth failure";
+    }
+
+    // Tear down the probe STA connection and restore prior mode.
+    WiFi.disconnect(/*wifioff=*/false, /*eraseap=*/true);
+    WiFi.mode(priorMode);
+
+    String resp;
+    serializeJson(out, resp);
+    req->send(200, "application/json", resp);
+}
+
 // Dispatcher — ESPAsyncWebServer's on() does exact-match only, so we register
 // a single handler at "/api/modules/" that parses the tail segment.
 static void handleApiModulesDispatch(AsyncWebServerRequest* req) {
@@ -591,5 +679,23 @@ void registerApiRoutes(AsyncWebServer& server) {
             if (id.endsWith("/enable")) id.remove(id.length() - strlen("/enable"));
             handleApiModuleEnable(r, id);
         });
+    }
+
+    // Pass 5 5.5 phase 1 — WiFi-specific helpers.  Registered only when the
+    // wifi module is present so stripped-down builds don't pay the flash cost.
+    if (moduleRegistry.getById("wifi")) {
+        server.on("/api/modules/wifi/scan", HTTP_GET, handleApiWifiScan);
+        server.on("/api/modules/wifi/test", HTTP_POST,
+            [](AsyncWebServerRequest* r) { /* body handled below */ },
+            nullptr,
+            [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
+               size_t index, size_t total) {
+                if (index != 0 || len != total) {
+                    r->send(413, "application/json",
+                            "{\"ok\":false,\"error\":\"body too large\"}");
+                    return;
+                }
+                handleApiWifiTest(r, data, len);
+            });
     }
 }

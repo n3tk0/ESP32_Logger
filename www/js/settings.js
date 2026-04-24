@@ -711,6 +711,43 @@ function netCheckScan() {
     });
 }
 
+// POST /api/modules/wifi/test — validate credentials without persisting.
+// Server keeps the AP up during the probe so this session survives a bad
+// password.
+function netTestWifi() {
+  var ssidEl = document.getElementById("net-cSSID");
+  var passEl = document.getElementById("net-cPass");
+  var out    = document.getElementById("net-testResult");
+  var ssid   = ssidEl ? ssidEl.value.trim() : "";
+  var pass   = passEl ? passEl.value        : "";
+  if (!ssid) {
+    if (out) { out.textContent = "Enter an SSID first"; out.style.color = "var(--danger)"; }
+    return;
+  }
+  if (out) { out.textContent = "🧪 Testing… (up to 8s)"; out.style.color = "var(--text-muted)"; }
+  fetch("/api/modules/wifi/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ssid: ssid, password: pass })
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!out) return;
+      if (d.connected) {
+        out.textContent = "✅ Connected (" + d.rssi + " dBm, " + d.ip + ")";
+        out.style.color = "var(--success)";
+      } else {
+        out.textContent = "❌ " + (d.error || "Failed to connect");
+        out.style.color = "var(--danger)";
+      }
+    })
+    .catch(function (e) {
+      if (!out) return;
+      out.textContent = "❌ " + e;
+      out.style.color = "var(--danger)";
+    });
+}
+
 // ============================================================================
 // ══ SETTINGS: TIME ══
 // ============================================================================
@@ -1536,6 +1573,7 @@ registerHandlers({
   netToggleMode: netToggleMode,
   netToggleStatic: netToggleStatic,
   netScanWifi: netScanWifi,
+  netTestWifi: netTestWifi,
   timeSetManual: timeSetManual,
   timeSyncNTP: timeSyncNTP,
   timeRtcProtect: timeRtcProtect,
