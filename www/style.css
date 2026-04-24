@@ -1208,3 +1208,114 @@ body {
     pointer-events: none;
   }
 }
+
+/* ── Phase 5a — Keyboard shortcut help sheet ─────────────────────────────── */
+.kb-help-sheet {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9500;
+  padding: 1rem;
+  animation: kb-help-in 0.15s forwards;
+}
+@keyframes kb-help-in { from { opacity: 0; } to { opacity: 1; } }
+
+.kb-help-card {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 20px 24px;
+  min-width: 280px;
+  max-width: 380px;
+}
+.kb-help-title {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+.kb-help-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.kb-help-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.kb-help-list li span { margin-left: auto; color: var(--text); }
+.kb-help-list kbd {
+  font-family: var(--d-mono, ui-monospace, monospace);
+  font-size: 0.8rem;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  min-width: 22px;
+  text-align: center;
+}
+.kb-help-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 12px;
+  text-align: center;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Design phase 5b — Print stylesheet
+ * Single-column clean report for monthly water-usage review.  Strips
+ * chrome (sidebar, bottom-nav, buttons, toasts), forces black-on-white
+ * for ink economy, keeps cards and tables readable.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+@media print {
+  body {
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 10pt;
+  }
+  .sidebar, .bottom-nav, .app-header, .toast-container, .kb-help-sheet,
+  .sidebar-rail-btn, .skip-link,
+  [data-click="dbExportPNG"], [data-click="dbExportCSV"],
+  button, .btn, #themeToggleBtn {
+    display: none !important;
+  }
+  .main-content {
+    padding: 0 !important;
+    max-width: none !important;
+    margin: 0 !important;
+  }
+  .card {
+    box-shadow: none !important;
+    border: 1px solid #aaa;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin-bottom: 10pt;
+  }
+  .card:hover { box-shadow: none !important; }
+  .page-header h1 {
+    border-bottom: 2px solid #000;
+    padding-bottom: 4pt;
+    margin-bottom: 8pt;
+  }
+  a { color: #000 !important; text-decoration: underline; }
+  .chart-container {
+    aspect-ratio: auto;
+    max-height: 280pt;
+  }
+  .stat-card {
+    box-shadow: none !important;
+    border: 1px solid #aaa;
+  }
+}

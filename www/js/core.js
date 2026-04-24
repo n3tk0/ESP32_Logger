@@ -1026,3 +1026,105 @@ registerHandlers({
   confirmRestart: confirmRestart,
 });
 
+// ============================================================================
+// KEYBOARD SHORTCUTS (Claude Design phase 5a)
+//
+// Two-key "G <letter>" sequences for top-level page nav; `?` opens a tiny
+// help sheet listing every binding.  Skipped when focus is in a text input,
+// so typing "go" in an SSID field doesn't hijack the keystroke.
+// ============================================================================
+(function () {
+  "use strict";
+
+  var MAP = {
+    d: "dashboard",
+    l: "live",
+    s: "settings",
+    f: "files",
+    c: "sensors",   /* "core logic" in the design == sensors in current UI */
+    u: "update"
+  };
+
+  var waitingForSecond = false;
+  var timer = null;
+
+  function inTypableContext(ev) {
+    var t = ev.target;
+    if (!t) return false;
+    var tag = (t.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    if (t.isContentEditable) return true;
+    return false;
+  }
+
+  function navigateTo(pageId) {
+    var link = document.querySelector('a[data-page="' + pageId + '"]');
+    if (link) link.click();
+  }
+
+  function openHelp() {
+    if (document.getElementById("kbHelpSheet")) return;
+    var sheet = document.createElement("div");
+    sheet.id = "kbHelpSheet";
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-label", "Keyboard shortcuts");
+    sheet.className = "kb-help-sheet";
+    sheet.innerHTML =
+      '<div class="kb-help-card">' +
+        '<div class="kb-help-title">Keyboard shortcuts</div>' +
+        '<ul class="kb-help-list">' +
+          '<li><kbd>G</kbd> <kbd>D</kbd><span>Dashboard</span></li>' +
+          '<li><kbd>G</kbd> <kbd>L</kbd><span>Live</span></li>' +
+          '<li><kbd>G</kbd> <kbd>F</kbd><span>Files</span></li>' +
+          '<li><kbd>G</kbd> <kbd>C</kbd><span>Sensors</span></li>' +
+          '<li><kbd>G</kbd> <kbd>S</kbd><span>Settings</span></li>' +
+          '<li><kbd>G</kbd> <kbd>U</kbd><span>Update</span></li>' +
+          '<li><kbd>?</kbd><span>Show this help</span></li>' +
+          '<li><kbd>Esc</kbd><span>Close help</span></li>' +
+        '</ul>' +
+        '<div class="kb-help-hint">Click outside to dismiss</div>' +
+      '</div>';
+    sheet.addEventListener("click", function (ev) {
+      if (ev.target === sheet) closeHelp();
+    });
+    document.body.appendChild(sheet);
+  }
+  function closeHelp() {
+    var s = document.getElementById("kbHelpSheet");
+    if (s && s.parentNode) s.parentNode.removeChild(s);
+  }
+
+  document.addEventListener("keydown", function (ev) {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    if (inTypableContext(ev)) return;
+
+    var key = (ev.key || "").toLowerCase();
+
+    if (key === "escape") {
+      closeHelp();
+      return;
+    }
+    if (ev.key === "?") {
+      ev.preventDefault();
+      openHelp();
+      return;
+    }
+
+    if (waitingForSecond) {
+      waitingForSecond = false;
+      clearTimeout(timer);
+      if (MAP[key]) {
+        ev.preventDefault();
+        navigateTo(MAP[key]);
+      }
+      return;
+    }
+
+    if (key === "g") {
+      ev.preventDefault();
+      waitingForSecond = true;
+      timer = setTimeout(function () { waitingForSecond = false; }, 1200);
+    }
+  });
+})();
+
