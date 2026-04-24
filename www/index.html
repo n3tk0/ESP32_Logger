@@ -34,6 +34,8 @@
 </head>
 
 <body>
+  <!-- WCAG 2.4.1 bypass link — appears on first Tab keypress. -->
+  <a href="#main-content" class="skip-link">Skip to main content</a>
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header"><img id="sidebarLogo" src="" alt=""
         style="display:none;max-width:100%;height:auto;margin-bottom:8px"><span class="logo" id="sidebarName">Water
@@ -63,7 +65,8 @@
   </header>
 
   <!-- ═══ PAGE: DASHBOARD ═══ -->
-  <main class="main-content page" id="page-dashboard">
+  <main class="main-content page" id="page-dashboard" tabindex="-1">
+    <a id="main-content" aria-hidden="true"></a>
     <div class="page-header">
       <h1>📊 Dashboard</h1>
     </div>
