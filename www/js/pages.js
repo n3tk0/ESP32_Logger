@@ -877,8 +877,8 @@ function _liveLogsRender() {
         String(l.time).toLowerCase().indexOf(query) >= 0 ||
         String(l.trigger).toLowerCase().indexOf(query) >= 0 ||
         String(l.volume).toLowerCase().indexOf(query) >= 0 ||
-        String(l.ff).indexOf(query) >= 0 ||
-        String(l.pf).indexOf(query) >= 0
+        String(l.ff).toLowerCase().indexOf(query) >= 0 ||
+        String(l.pf).toLowerCase().indexOf(query) >= 0
       );
     });
   }
@@ -924,6 +924,5 @@ function liveLogsFilterClear() {
   var f = document.getElementById("logsFilter");
   if (f) f.value = "";
   _liveLogsRender();
-}
 }
 

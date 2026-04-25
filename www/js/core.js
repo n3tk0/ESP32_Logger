@@ -603,7 +603,10 @@ function showToast(a, b, c) {
   // Normalise legacy type names.
   var typeMap = { success: "ok", error: "err" };
   type = typeMap[type] || type;
-  var ICON = { ok: "check", warn: "alert-triangle", err: "x", info: "info" };
+  // Distinct icons per type — `err` uses alert-triangle (not `x`) so it
+  // doesn't visually collide with the toast's close button (gemini review
+  // PR #47).  Mirrors the OTA popup's error icon for consistency.
+  var ICON = { ok: "check", warn: "alert-triangle", err: "alert-triangle", info: "info" };
   var iconName = ICON[type] || "info";
 
   var el = document.createElement("div");
