@@ -24,6 +24,7 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Update.h>
+#include <mbedtls/sha256.h>             // OTA SHA-256 verify (Pass 5 5.6)
 #include <WiFi.h>
 #include <functional>
 #include <memory>
@@ -1546,16 +1547,39 @@ void setupWebServer() {
 
     // =========================================================================
     // OTA FIRMWARE UPDATE
+    //
+    // POST /do_update[?sha256=<64-hex>]
+    //   Streams the firmware image into the OTA partition.  When the
+    //   `sha256` query param is supplied, the server hashes every chunk
+    //   with mbedTLS and compares the digest before committing — any
+    //   mismatch aborts the update and returns 400.  When the param is
+    //   absent, behaviour is unchanged (Pass 5 5.6 first slice).
+    //
+    //   Rejection paths:
+    //     • magic byte != 0xE9  → invalid image
+    //     • Update.begin failed → flash partition unavailable
+    //     • SHA-256 mismatch    → tampered/corrupted image
     // =========================================================================
     {
-        static bool s_otaRejected = false;
+        static bool s_otaRejected     = false;
+        static bool s_otaShaActive    = false;
+        static bool s_otaShaMismatch  = false;
+        static String s_otaExpectedSha;
+        static mbedtls_sha256_context s_otaSha;
+
         server.on("/do_update", HTTP_POST,
             [](AsyncWebServerRequest *r) {
                 bool ok = !s_otaRejected && !Update.hasError();
-                const char* msg = s_otaRejected
-                    ? "{\"success\":false,\"message\":\"Invalid firmware image\"}"
-                    : (ok ? "{\"success\":true,\"message\":\"Update complete, restarting...\"}"
-                          : "{\"success\":false,\"message\":\"Update failed\"}");
+                const char* msg;
+                if (s_otaShaMismatch) {
+                    msg = "{\"success\":false,\"message\":\"SHA-256 mismatch — image rejected\"}";
+                } else if (s_otaRejected) {
+                    msg = "{\"success\":false,\"message\":\"Invalid firmware image\"}";
+                } else if (ok) {
+                    msg = "{\"success\":true,\"message\":\"Update complete, restarting...\"}";
+                } else {
+                    msg = "{\"success\":false,\"message\":\"Update failed\"}";
+                }
                 AsyncWebServerResponse *resp = r->beginResponse(ok ? 200 : 400,
                     "application/json", msg);
                 resp->addHeader("Connection", "close");
@@ -1567,8 +1591,23 @@ void setupWebServer() {
             },
             [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
                 if (!index) {
-                    s_otaRejected = false;
+                    s_otaRejected    = false;
+                    s_otaShaMismatch = false;
+                    s_otaExpectedSha = "";
                     DBGF("OTA start: %s\n", filename.c_str());
+
+                    // Expected hash arrives as a query param (header-free
+                    // for client simplicity).  Empty → verification skipped.
+                    if (req->hasParam("sha256")) {
+                        s_otaExpectedSha = req->getParam("sha256")->value();
+                        s_otaExpectedSha.toLowerCase();
+                        if (s_otaExpectedSha.length() != 64) {
+                            DBGF("OTA: bad sha256 length %u (expected 64), ignoring\n",
+                                 (unsigned)s_otaExpectedSha.length());
+                            s_otaExpectedSha = "";
+                        }
+                    }
+
                     // First byte of an ESP32 firmware image must be
                     // ESP_IMAGE_HEADER_MAGIC (0xE9). Reject anything else
                     // before touching flash.
@@ -1582,10 +1621,42 @@ void setupWebServer() {
                         s_otaRejected = true;
                         return;
                     }
+                    // Initialise the hasher exactly once per upload, regardless
+                    // of whether verification was requested — the cost is tiny
+                    // and lets us log the actual digest for debugging.
+                    mbedtls_sha256_init(&s_otaSha);
+                    mbedtls_sha256_starts(&s_otaSha, 0);  // 0 = SHA-256, not -224
+                    s_otaShaActive = true;
                 }
                 if (s_otaRejected) return;
                 if (Update.write(data, len) != len) Update.printError(Serial);
+                if (s_otaShaActive) {
+                    mbedtls_sha256_update(&s_otaSha, data, len);
+                }
                 if (final) {
+                    if (s_otaShaActive) {
+                        uint8_t digest[32];
+                        mbedtls_sha256_finish(&s_otaSha, digest);
+                        mbedtls_sha256_free(&s_otaSha);
+                        s_otaShaActive = false;
+
+                        char hex[65];
+                        for (int i = 0; i < 32; i++) {
+                            snprintf(hex + i*2, 3, "%02x", digest[i]);
+                        }
+                        hex[64] = '\0';
+                        DBGF("OTA: SHA-256 = %s\n", hex);
+
+                        if (s_otaExpectedSha.length() == 64 &&
+                            !s_otaExpectedSha.equalsIgnoreCase(hex)) {
+                            DBGF("OTA: SHA-256 mismatch — expected %s\n",
+                                 s_otaExpectedSha.c_str());
+                            s_otaRejected    = true;
+                            s_otaShaMismatch = true;
+                            Update.abort();
+                            return;
+                        }
+                    }
                     if (Update.end(true)) DBGF("OTA done: %u bytes\n", index + len);
                     else Update.printError(Serial);
                 }
