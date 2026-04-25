@@ -297,6 +297,31 @@ function dbRenderChart(data) {
     return d.date + " " + d.time;
   });
 
+  // Phase 5c-5 — crosshair plugin draws a vertical guide line from chart
+  // top to bottom anchored at the currently-hovered data index.  Reads
+  // active tooltip element list set by Chart.js's index-mode interaction.
+  var crosshairPlugin = {
+    id: "dashboardCrosshair",
+    afterDraw: function (chart) {
+      var tt = chart.tooltip;
+      if (!tt || !tt._active || !tt._active.length) return;
+      var active = tt._active[0];
+      var x = active.element.x;
+      var c = chart.ctx;
+      var top = chart.chartArea.top;
+      var bottom = chart.chartArea.bottom;
+      c.save();
+      c.beginPath();
+      c.moveTo(x, top);
+      c.lineTo(x, bottom);
+      c.lineWidth = 1;
+      c.strokeStyle = "rgba(8, 145, 178, 0.4)";  /* design --d-accent */
+      c.setLineDash([4, 4]);
+      c.stroke();
+      c.restore();
+    }
+  };
+
   dbChart = new Chart(ctx, {
     type: "bar",
     data: {
@@ -315,6 +340,9 @@ function dbRenderChart(data) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      // index-mode + intersect:false makes the crosshair track even when
+      // the cursor is between bars, matching the design's expected feel.
+      interaction: { mode: "index", intersect: false },
       plugins: {
         tooltip: {
           callbacks: {
@@ -334,6 +362,7 @@ function dbRenderChart(data) {
         y: { beginAtZero: true, title: { display: true, text: "Liters" } },
       },
     },
+    plugins: [crosshairPlugin],
   });
 }
 
