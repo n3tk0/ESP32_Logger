@@ -678,6 +678,13 @@ void setup() {
 // LOOP
 // ============================================================================
 void loop() {
+    // ── OTA rollback watchdog ────────────────────────────────────────────────
+    // No-op once the running image is confirmed; while pending, confirms
+    // automatically after OTA_CONFIRM_TIMEOUT_MS (default 90 s) of stable
+    // operation.  A panic or hardware-watchdog reset before then triggers
+    // a bootloader-level rollback to the previous slot.
+    OtaManager::tick(millis());
+
     // ── Deferred NTP sync ─────────────────────────────────────────────────────
     // The /sync_time web handler sets g_pendingNtpSync=1 and returns 202 so it
     // doesn't block the AsyncTCP worker. We run the actual sync (up to ~10 s)

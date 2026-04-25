@@ -19,14 +19,25 @@
 // ============================================================================
 namespace OtaManager {
 
-    // Call once in setup() after basic init.  Handles:
-    //   - Auto-confirming pending OTA after stability window
-    //   - Logging rollback events to /reset_log.txt
+    // Call once in setup() after basic init.  Captures partition state and
+    // arms the rollback watchdog when the running image is in PENDING_VERIFY.
+    // Does NOT auto-confirm — that happens later from tick() once the
+    // OTA_CONFIRM_TIMEOUT_MS stability window has elapsed.
     void boot();
 
+    // Pump the rollback watchdog from the main loop.  No-op once the image
+    // is confirmed.  Confirms automatically when millis() ≥ deadline.
+    void tick(uint32_t nowMs);
+
     // Mark current firmware as confirmed (valid).
-    // Called automatically after OTA_CONFIRM_TIMEOUT_MS, or manually via API.
+    // Called automatically by tick() once the timeout elapses, or manually
+    // via the /api/ota/confirm endpoint.
     bool confirm();
+
+    // Milliseconds remaining until the watchdog auto-confirms.  Returns 0
+    // when not pending or already confirmed; lets the UI surface a
+    // countdown after a fresh OTA install.
+    uint32_t millisUntilConfirm();
 
     // Roll back to the previous OTA partition and restart.
     // Returns false only if rollback is not possible (e.g. single app partition).
