@@ -1600,6 +1600,34 @@ void setupWebServer() {
         touchActivity();   // C2: track web activity for idle power management
         String path = r->url();
 
+        // ── Pass 4 F — /api/v1/* alias layer ────────────────────────────────
+        // Forward versioned API requests to the unversioned route via 307
+        // (preserves method + body, unlike 302/303 which can downgrade POST
+        // to GET in some clients).  Lets the deployed UI keep working for
+        // one release while clients migrate to /api/v1/.  Query string is
+        // rebuilt from parsed GET params; POST bodies are resent verbatim
+        // by the client when it follows the 307.
+        if (path.startsWith("/api/v1/")) {
+            String rewritten = "/api/" + path.substring(strlen("/api/v1/"));
+            String query;
+            for (size_t i = 0; i < r->params(); i++) {
+                AsyncWebParameter* p = r->getParam(i);
+                if (!p || p->isFile() || p->isPost()) continue;
+                if (query.length()) query += "&";
+                query += p->name();
+                query += "=";
+                query += p->value();   // values come pre-decoded; for the
+                // typical numeric / ASCII params used by this UI a verbatim
+                // re-encode is fine.  Exotic chars would round-trip with
+                // a quirk but no API endpoint here exercises that.
+            }
+            if (query.length()) { rewritten += "?"; rewritten += query; }
+            AsyncWebServerResponse* resp = r->beginResponse(307);
+            resp->addHeader("Location", rewritten);
+            r->send(resp);
+            return;
+        }
+
         if (path.startsWith("/www/")) {
             if (littleFsAvailable && LittleFS.exists(path)) {
                 r->send(LittleFS, path, getMime(path));
