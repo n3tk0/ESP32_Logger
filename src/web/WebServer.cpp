@@ -408,11 +408,13 @@ void setupWebServer() {
     // without typing any IP.  Reachable from any host header thanks to the
     // wildcard DNS, so we don't filter by Host.
     auto captiveRedirect = [](AsyncWebServerRequest *r) {
-        // 302 to the SPA root.  Some OSes follow this transparently in the
-        // captive-portal banner; others show "Login required" and let the
-        // user open the page manually.  Either way it beats the user
-        // copy-pasting an IP into a browser.
-        r->redirect("/");
+        // 302 to the SPA root with an ABSOLUTE URL pointing at the AP IP
+        // (gemini review PR #48).  Some older Android NCSI implementations
+        // and Windows captive-portal probes refuse to follow relative
+        // redirects when the Host header doesn't match the expected probe
+        // domain — an absolute URL sidesteps that entirely.
+        String url = "http://" + WiFi.softAPIP().toString() + "/";
+        r->redirect(url);
     };
     // Apple iOS / macOS
     server.on("/hotspot-detect.html",  HTTP_GET, captiveRedirect);

@@ -137,7 +137,10 @@ void startAPMode() {
     }
     s_dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
     s_dnsServer.setTTL(60);
-    if (s_dnsServer.start(53, "*", WiFi.softAPIP())) {
+    // Use the locally-configured `apIP` rather than WiFi.softAPIP() — the
+    // latter can transiently return 0.0.0.0 right after softAP() while the
+    // netif finishes coming up (gemini review PR #48).
+    if (s_dnsServer.start(53, "*", apIP)) {
         s_dnsRunning = true;
         DBGLN("WiFi: captive-portal DNS responder started");
     } else {
