@@ -365,6 +365,44 @@ function quickThemeToggle() {
   _themeApplyOverride(next);
 }
 
+// Collapsible sidebar rail (Claude Design phase 4a).  Toggles 60px rail
+// width on desktop only; mobile ignores the class since the bottom-nav
+// handles navigation there.  Preference persists across reloads.
+function sidebarRailToggle() {
+  // Class lives on <html> so theme-boot.js can restore it pre-paint without
+  // waiting for <body> (gemini review PR #47 — avoids FOUC on reload).
+  var isRail = document.documentElement.classList.toggle("sidebar-rail");
+  try { localStorage.setItem("sidebarRail", isRail ? "1" : "0"); } catch (e) {}
+  _sidebarRailSyncBtn(isRail);
+}
+
+// Keep the toggle button's ARIA + tooltip in sync with current state.
+// Called from sidebarRailToggle() and on DOMContentLoaded so a page that
+// loads already-railed (pre-paint class in theme-boot.js) still gets the
+// correct "Expand" labels.
+function _sidebarRailSyncBtn(isRail) {
+  var btn = document.getElementById("sidebarRailBtn");
+  if (!btn) return;
+  btn.setAttribute("aria-label", isRail ? "Expand sidebar" : "Collapse sidebar");
+  btn.setAttribute("title",      isRail ? "Expand sidebar" : "Collapse sidebar");
+}
+document.addEventListener("DOMContentLoaded", function () {
+  _sidebarRailSyncBtn(document.documentElement.classList.contains("sidebar-rail"));
+});
+
+// WCAG 2.4.1 skip-to-content — programmatic focus instead of #anchor so
+// we don't trigger the SPA hash router (gemini review PR #47).  Focuses
+// whichever <main class="page active"> is currently visible.
+function skipToContent() {
+  var target = document.querySelector("main.page.active") ||
+               document.querySelector("main.page");
+  if (!target) return;
+  if (target.getAttribute("tabindex") === null) {
+    target.setAttribute("tabindex", "-1");
+  }
+  target.focus({ preventScroll: false });
+}
+
 // Initialise toggle icon on first script run (DOM is ready since we're at the
 // bottom of <body>).
 (function () {
@@ -542,16 +580,136 @@ function pageInit(page) {
 // ============================================================================
 // HELPERS
 // ============================================================================
-function showToast(msg, type) {
-  var c = document.getElementById("toastContainer");
-  if (!c) return;
+// Toast notifications (Claude Design phase 3).
+//
+// Backward-compatible with the legacy two-arg form:
+//     showToast(msg, "success" | "error")
+// plus the richer three-arg form from the design spec:
+//     showToast(title, msg, "ok" | "warn" | "err" | "info")
+// Aliases: "success" → "ok", "error" → "err".  Each toast carries a Lucide
+// icon, an optional body message, a close button, and a countdown bar that
+// drains across the 3 s lifetime.
+function showToast(a, b, c) {
+  var container = document.getElementById("toastContainer");
+  if (!container) return;
+
+  var title, msg, type;
+  if (arguments.length >= 3) {
+    title = a || ""; msg = b || ""; type = c || "info";
+  } else {
+    title = a || "";  msg = "";  type = b || "info";
+  }
+
+  // Normalise legacy type names.
+  var typeMap = { success: "ok", error: "err" };
+  type = typeMap[type] || type;
+  // Distinct icons per type — `err` uses alert-triangle (not `x`) so it
+  // doesn't visually collide with the toast's close button (gemini review
+  // PR #47).  Mirrors the OTA popup's error icon for consistency.
+  var ICON = { ok: "check", warn: "alert-triangle", err: "alert-triangle", info: "info" };
+  var iconName = ICON[type] || "info";
+
   var el = document.createElement("div");
-  el.className = "toast " + (type === "error" ? "toast-error" : "toast-success");
-  el.textContent = (type === "error" ? "❌ " : "✅ ") + msg;
-  c.appendChild(el);
-  setTimeout(function() {
-    if(c.contains(el)) c.removeChild(el);
-  }, 3000);
+  el.className = "toast toast-" + type;
+  el.setAttribute("role", type === "err" ? "alert" : "status");
+  el.setAttribute("aria-live", type === "err" ? "assertive" : "polite");
+
+  var iconSpan = document.createElement("span");
+  iconSpan.className = "toast-icon";
+  iconSpan.setAttribute("data-icon", iconName);
+  el.appendChild(iconSpan);
+
+  var body = document.createElement("div");
+  body.className = "toast-body";
+  var titleEl = document.createElement("div");
+  titleEl.className = "toast-title";
+  titleEl.textContent = title;
+  body.appendChild(titleEl);
+  if (msg) {
+    var msgEl = document.createElement("div");
+    msgEl.className = "toast-msg";
+    msgEl.textContent = msg;
+    body.appendChild(msgEl);
+  }
+  el.appendChild(body);
+
+  var close = document.createElement("button");
+  close.type = "button";
+  close.className = "toast-close";
+  close.setAttribute("aria-label", "Dismiss notification");
+  var closeIcon = document.createElement("span");
+  closeIcon.setAttribute("data-icon", "x");
+  close.appendChild(closeIcon);
+  el.appendChild(close);
+
+  var countdown = document.createElement("div");
+  countdown.className = "toast-countdown";
+  countdown.style.animationDuration = "3000ms";
+  el.appendChild(countdown);
+
+  container.appendChild(el);
+  if (window.Icons && Icons.swap) Icons.swap(el);
+
+  function dismiss() {
+    if (!container.contains(el)) return;
+    el.classList.add("toast-dismissing");
+    setTimeout(function () {
+      if (container.contains(el)) container.removeChild(el);
+    }, 260);
+  }
+  close.addEventListener("click", dismiss);
+  setTimeout(dismiss, 3000);
+}
+
+// emptyState(opts) — returns DOM for the design's structured empty state.
+// opts: { icon, title, msg, ctaText, ctaPage }.  Title is required;
+// everything else is optional.  Used by page renderers to swap raw
+// "Loading..." / "No X" strings for an icon + message + optional CTA.
+//
+//   container.innerHTML = "";
+//   container.appendChild(emptyState({
+//     icon: "folder", title: "No files",
+//     msg: "Upload a file to get started.",
+//     ctaText: "Upload", ctaPage: "files",
+//   }));
+function emptyState(opts) {
+  opts = opts || {};
+  var wrap = document.createElement("div");
+  wrap.className = "empty-state";
+
+  if (opts.icon) {
+    var ic = document.createElement("span");
+    ic.className = "empty-icon";
+    var iSpan = document.createElement("span");
+    iSpan.setAttribute("data-icon", opts.icon);
+    ic.appendChild(iSpan);
+    wrap.appendChild(ic);
+  }
+  if (opts.title) {
+    var t = document.createElement("div");
+    t.className = "empty-title";
+    t.textContent = opts.title;
+    wrap.appendChild(t);
+  }
+  if (opts.msg) {
+    var m = document.createElement("div");
+    m.className = "empty-msg";
+    m.textContent = opts.msg;
+    wrap.appendChild(m);
+  }
+  if (opts.ctaText && opts.ctaPage) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-primary btn-sm empty-cta";
+    btn.setAttribute("data-click", "navPage");
+    btn.setAttribute("data-page", opts.ctaPage);
+    btn.textContent = opts.ctaText;
+    wrap.appendChild(btn);
+  }
+
+  // If Icons module is loaded, swap the data-icon spans now.
+  if (window.Icons && Icons.swap) Icons.swap(wrap);
+  return wrap;
 }
 
 // HTML-escape for safe insertion into innerHTML. Use textContent / DOM
@@ -926,6 +1084,8 @@ function confirmRestart() {
 registerHandlers({
   navPage: navPage,
   quickThemeToggle: quickThemeToggle,
+  sidebarRailToggle: sidebarRailToggle,
+  skipToContent: skipToContent,
   showPopup: showPopup,
   hidePopup: hidePopup,
   showSubpage: showSubpage,
@@ -936,4 +1096,108 @@ registerHandlers({
   submitParentForm: submitParentForm,
   confirmRestart: confirmRestart,
 });
+
+// ============================================================================
+// KEYBOARD SHORTCUTS (Claude Design phase 5a)
+//
+// Two-key "G <letter>" sequences for top-level page nav; `?` opens a tiny
+// help sheet listing every binding.  Skipped when focus is in a text input,
+// so typing "go" in an SSID field doesn't hijack the keystroke.
+// ============================================================================
+(function () {
+  "use strict";
+
+  var MAP = {
+    d: "dashboard",
+    l: "live",
+    s: "settings",
+    f: "files",
+    c: "sensors",   /* "core logic" in the design == sensors in current UI */
+    u: "update"
+  };
+
+  var waitingForSecond = false;
+  var timer = null;
+
+  function inTypableContext(ev) {
+    var t = ev.target;
+    if (!t) return false;
+    var tag = (t.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    if (t.isContentEditable) return true;
+    return false;
+  }
+
+  // Locally scoped to the shortcut IIFE — named differently from the
+  // global navigateTo(url) to avoid shadowing (gemini review PR #47).
+  function triggerPageLink(pageId) {
+    var link = document.querySelector('a[data-page="' + pageId + '"]');
+    if (link) link.click();
+  }
+
+  function openHelp() {
+    if (document.getElementById("kbHelpSheet")) return;
+    var sheet = document.createElement("div");
+    sheet.id = "kbHelpSheet";
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-label", "Keyboard shortcuts");
+    sheet.className = "kb-help-sheet";
+    sheet.innerHTML =
+      '<div class="kb-help-card">' +
+        '<div class="kb-help-title">Keyboard shortcuts</div>' +
+        '<ul class="kb-help-list">' +
+          '<li><kbd>G</kbd> <kbd>D</kbd><span>Dashboard</span></li>' +
+          '<li><kbd>G</kbd> <kbd>L</kbd><span>Live</span></li>' +
+          '<li><kbd>G</kbd> <kbd>F</kbd><span>Files</span></li>' +
+          '<li><kbd>G</kbd> <kbd>C</kbd><span>Sensors</span></li>' +
+          '<li><kbd>G</kbd> <kbd>S</kbd><span>Settings</span></li>' +
+          '<li><kbd>G</kbd> <kbd>U</kbd><span>Update</span></li>' +
+          '<li><kbd>?</kbd><span>Show this help</span></li>' +
+          '<li><kbd>Esc</kbd><span>Close help</span></li>' +
+        '</ul>' +
+        '<div class="kb-help-hint">Click outside to dismiss</div>' +
+      '</div>';
+    sheet.addEventListener("click", function (ev) {
+      if (ev.target === sheet) closeHelp();
+    });
+    document.body.appendChild(sheet);
+  }
+  function closeHelp() {
+    var s = document.getElementById("kbHelpSheet");
+    if (s && s.parentNode) s.parentNode.removeChild(s);
+  }
+
+  document.addEventListener("keydown", function (ev) {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    if (inTypableContext(ev)) return;
+
+    var key = (ev.key || "").toLowerCase();
+
+    if (key === "escape") {
+      closeHelp();
+      return;
+    }
+    if (ev.key === "?") {
+      ev.preventDefault();
+      openHelp();
+      return;
+    }
+
+    if (waitingForSecond) {
+      waitingForSecond = false;
+      clearTimeout(timer);
+      if (MAP[key]) {
+        ev.preventDefault();
+        triggerPageLink(MAP[key]);
+      }
+      return;
+    }
+
+    if (key === "g") {
+      ev.preventDefault();
+      waitingForSecond = true;
+      timer = setTimeout(function () { waitingForSecond = false; }, 1200);
+    }
+  });
+})();
 

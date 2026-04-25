@@ -111,6 +111,20 @@ function sensorsLoad() {
   if (msg) msg.textContent = "Loading…";
   if (grid) grid.innerHTML = "";
 
+  // Phase 5c-4 — short relative-time formatter for sensor freshness pills.
+  // Falls through "5s" → "3m" → "2h" → "1d" so the staleness signal stays
+  // legible at a glance.
+  function _sensorFmtAge(ms) {
+    var s = Math.round(ms / 1000);
+    if (s < 60)   return s + "s";
+    var m = Math.round(s / 60);
+    if (m < 60)   return m + "m";
+    var h = Math.round(m / 60);
+    if (h < 24)   return h + "h";
+    var d = Math.round(h / 24);
+    return d + "d";
+  }
+
   fetch("/api/sensors")
     .then(function (r) {
       return r.ok ? r.json() : null;
@@ -124,6 +138,7 @@ function sensorsLoad() {
       }
       if (msg) msg.textContent = "";
       if (grid) {
+        var nowMs = Date.now();
         grid.innerHTML = d.sensors
           .map(function (s) {
             var statusClass =
@@ -135,28 +150,29 @@ function sensorsLoad() {
             var ts = s.last_read_ts
               ? new Date(s.last_read_ts * 1000).toLocaleTimeString()
               : "—";
+
+            // Staleness — flag the card amber if no reading within 2×
+            // the configured read_interval_ms; flag red if errored.  Cards
+            // with no last_read_ts yet (just-booted) get neither flag.
+            var ageStr = "";
+            var staleClass = "";
+            if (s.last_read_ts && s.read_interval_ms) {
+              var ageMs = nowMs - (s.last_read_ts * 1000);
+              if (ageMs > s.read_interval_ms * 2) staleClass = " sensor-stale";
+              ageStr = " · " + _sensorFmtAge(ageMs) + " ago";
+            }
+            if (s.status === "error") staleClass = " sensor-error";
+
             return (
-              '<div class="sensor-card">' +
+              '<div class="sensor-card' + staleClass + '">' +
               '<div class="sensor-card-header">' +
-              '<span class="sensor-name">' +
-              esc(s.name) +
-              "</span>" +
-              '<span class="badge ' +
-              statusClass +
-              '">' +
-              esc(s.status) +
-              "</span>" +
+              '<span class="sensor-name">' + esc(s.name) + "</span>" +
+              '<span class="badge ' + statusClass + '">' + esc(s.status) + "</span>" +
               "</div>" +
               '<div class="sensor-meta">' +
-              "<span>ID: <code>" +
-              esc(s.id) +
-              "</code></span>" +
-              "<span>Type: <code>" +
-              esc(s.type) +
-              "</code></span>" +
-              "<span>Last: " +
-              ts +
-              "</span>" +
+              "<span>ID: <code>" + esc(s.id) + "</code></span>" +
+              "<span>Type: <code>" + esc(s.type) + "</code></span>" +
+              "<span>Last: " + ts + ageStr + "</span>" +
               "</div>" +
               '<div class="sensor-metrics">' +
               (s.metrics || [])
@@ -538,8 +554,12 @@ function clRenderSensors(sensors) {
   var list = document.getElementById("cl-sensors-list");
   if (!list) return;
   if (!sensors || sensors.length === 0) {
-    list.innerHTML =
-      '<p class="text-muted" style="padding:1rem">No sensors configured. Click <strong>+ Add Sensor</strong> to begin.</p>';
+    list.innerHTML = "";
+    list.appendChild(emptyState({
+      icon: "gauge",
+      title: "No sensors configured",
+      msg: "Click + Add Sensor to register your first sensor."
+    }));
     return;
   }
   list.innerHTML = sensors

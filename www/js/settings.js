@@ -1200,10 +1200,23 @@ function otaFileSelected() {
   reader.readAsArrayBuffer(file.slice(0, 4));
 }
 
+// otaShowPopup — `icon` may be a Lucide icon name (e.g. "cloud-upload",
+// "check", "x", "alert-triangle") OR a literal emoji string for backward
+// compat with older callsites.  Lucide names are detected via the global
+// Icons module; anything else is rendered as text.
 function otaShowPopup(icon, title, msg, showProgress, showClose) {
   var p = document.getElementById("popup");
   if (p) p.style.display = "flex";
-  setEl("popupIcon", icon);
+  var iconEl = document.getElementById("popupIcon");
+  if (iconEl) {
+    if (window.Icons && Icons.svg && Icons.svg(icon)) {
+      iconEl.innerHTML = Icons.svg(icon);
+      iconEl.style.fontSize = "0";   // collapse the emoji-sized line-height
+    } else {
+      iconEl.textContent = icon;
+      iconEl.style.fontSize = "";
+    }
+  }
   setEl("popupTitle", title);
   var elMsg = document.getElementById("popupMsg");
   if (elMsg) elMsg.innerHTML = msg;
@@ -1232,8 +1245,8 @@ function otaUpload() {
   uploadBtn.disabled = true;
   fileInput.disabled = true;
   otaShowPopup(
-    "📤",
-    "Uploading...",
+    "cloud-upload",
+    "Uploading firmware…",
     "Please wait while firmware is being uploaded.",
     true,
     false,
@@ -1256,6 +1269,19 @@ function otaUpload() {
       );
     }
   };
+  // Once the upload byte stream is fully on the device, the server still
+  // needs ~5 s to verify + write flash before xhr.onload fires.  Surface
+  // that phase explicitly so users don't think the UI froze.
+  xhr.upload.onload = function () {
+    otaShowPopup(
+      "cpu",
+      "Verifying firmware…",
+      "Upload complete. The device is checking and flashing the binary.",
+      true,
+      false,
+    );
+    otaUpdatePopupProgress(100, "Flashing…");
+  };
   xhr.onload = function () {
     if (progressDiv) progressDiv.style.display = "none";
 
@@ -1266,7 +1292,7 @@ function otaUpload() {
           var seconds = 5;
           var tick = function () {
             otaShowPopup(
-              "✅",
+              "check",
               "Update Complete!",
               "Device will restart...<br>Redirecting in <strong>" +
                 seconds +
@@ -1286,7 +1312,7 @@ function otaUpload() {
           tick();
         } else {
           otaShowPopup(
-            "❌",
+            "alert-triangle",
             "Update Failed",
             resp.message || "Unknown error",
             false,
@@ -1300,7 +1326,7 @@ function otaUpload() {
         var seconds = 5;
         var tick = function () {
           otaShowPopup(
-            "✅",
+            "check",
             "Update sent",
             "Device is restarting...<br>Redirecting in <strong>" +
               seconds +
@@ -1321,7 +1347,7 @@ function otaUpload() {
       }
     } else {
       otaShowPopup(
-        "❌",
+        "alert-triangle",
         "Upload Error",
         "Server returned: " + xhr.statusText,
         false,
@@ -1334,7 +1360,7 @@ function otaUpload() {
   xhr.onerror = function () {
     if (progressDiv) progressDiv.style.display = "none";
     otaShowPopup(
-      "❌",
+      "alert-triangle",
       "Connection Error",
       "Could not connect to device",
       false,

@@ -34,29 +34,48 @@
 </head>
 
 <body>
+  <!-- WCAG 2.4.1 bypass link — programmatic focus avoids the SPA hash router. -->
+  <button type="button" class="skip-link" data-click="skipToContent">Skip to main content</button>
   <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header"><img id="sidebarLogo" src="" alt=""
-        style="display:none;max-width:100%;height:auto;margin-bottom:8px"><span class="logo" id="sidebarName">Water
-        Logger</span></div>
+    <div class="sidebar-header">
+      <img id="sidebarLogo" src="" alt=""
+        style="display:none;max-width:100%;height:auto;margin-bottom:8px">
+      <span class="logo" id="sidebarName">Water Logger</span>
+      <button type="button" id="sidebarRailBtn" class="sidebar-rail-btn"
+              data-click="sidebarRailToggle"
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar">
+        <span data-icon="chevron-left"></span>
+      </button>
+    </div>
     <nav>
-      <div class="nav-section">Main</div><a href="#dashboard" data-page="dashboard" class="nav-item"
-        data-click="navPage"><span class="icon">📊</span><span>Dashboard</span></a><a href="#files"
-        data-page="files" class="nav-item" data-click="navPage"><span
-          class="icon">📁</span><span>Files</span></a><a href="#live" data-page="live" class="nav-item"
-        data-click="navPage"><span class="icon">📡</span><span>Live</span></a><a href="#sensors"
-        data-page="sensors" class="nav-item" data-click="navPage"><span
-          class="icon">🌡️</span><span>Sensors</span></a>
-      <div class="nav-section">System</div><a href="#settings" data-page="settings" class="nav-item"
-        data-click="navPage"><span class="icon">⚙️</span><span>Settings</span></a><a href="#update"
-        data-page="update" class="nav-item" data-click="navPage"><span
-          class="icon">📤</span><span>Update</span></a>
+      <div class="nav-section">Main</div>
+      <a href="#dashboard" data-page="dashboard" class="nav-item" data-click="navPage">
+        <span class="icon" data-icon="layout-dashboard"></span><span>Dashboard</span>
+      </a>
+      <a href="#files" data-page="files" class="nav-item" data-click="navPage">
+        <span class="icon" data-icon="folder"></span><span>Files</span>
+      </a>
+      <a href="#live" data-page="live" class="nav-item" data-click="navPage">
+        <span class="icon" data-icon="activity"></span><span>Live</span>
+      </a>
+      <a href="#sensors" data-page="sensors" class="nav-item" data-click="navPage">
+        <span class="icon" data-icon="gauge"></span><span>Sensors</span>
+      </a>
+      <div class="nav-section">System</div>
+      <a href="#settings" data-page="settings" class="nav-item" data-click="navPage">
+        <span class="icon" data-icon="settings"></span><span>Settings</span>
+      </a>
+      <a href="#update" data-page="update" class="nav-item" data-click="navPage">
+        <span class="icon" data-icon="cloud-upload"></span><span>Update</span>
+      </a>
     </nav>
   </aside>
   <header class="app-header hide-desktop" id="appHeader">
     <div class="logo"><img id="headerLogo" src="" alt="" style="display:none;height:28px;margin-right:6px"><span
         id="headerName">Water Logger</span></div>
     <div class="status" style="display:flex;align-items:center;gap:.5rem">
-      <button id="themeToggleBtn" data-click="quickThemeToggle" title="Toggle dark/light theme">🌙</button>
+      <button id="themeToggleBtn" data-click="quickThemeToggle" title="Toggle dark/light theme" aria-label="Toggle dark/light theme"><span data-icon="moon"></span></button>
       <div class="time" id="headerTime">--:--</div>
       <div id="headerNet"></div>
     </div>
@@ -275,7 +294,19 @@
 
     <!-- Recent Logs -->
     <div class="card">
-      <div class="card-header">📝 Recent Logs</div>
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+        <span><span data-icon="activity" style="vertical-align:middle"></span> Recent Logs</span>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <input type="search" id="logsFilter" class="form-input" placeholder="Filter…"
+                 data-input="liveLogsFilter"
+                 style="width:160px;padding:6px 10px;font-size:.85rem;min-height:32px"
+                 aria-label="Filter log entries">
+          <button type="button" class="btn btn-sm btn-secondary"
+                  data-click="liveLogsFilterClear" title="Clear filter">
+            <span data-icon="x"></span>
+          </button>
+        </div>
+      </div>
       <div class="card-body" style="padding:0;overflow-x:auto">
         <div id="logs" style="font-family:monospace;font-size:.8rem;padding:8px">Loading...</div>
       </div>
@@ -618,11 +649,20 @@
     </div>
   </div>
 
-  <nav class="bottom-nav" id="bottomNav"><a href="#dashboard" data-page="dashboard" data-click="navPage"><span
-        class="icon">📊</span>Dashboard</a><a href="#files" data-page="files" data-click="navPage"><span
-        class="icon">📁</span>Files</a><a href="#sensors" data-page="sensors" data-click="navPage"><span
-        class="icon">🌡️</span>Sensors</a><a href="#settings" data-page="settings" data-click="navPage"><span
-        class="icon">⚙️</span>Settings</a></nav>
+  <nav class="bottom-nav" id="bottomNav">
+    <a href="#dashboard" data-page="dashboard" data-click="navPage">
+      <span class="icon" data-icon="layout-dashboard"></span>Dashboard
+    </a>
+    <a href="#files" data-page="files" data-click="navPage">
+      <span class="icon" data-icon="folder"></span>Files
+    </a>
+    <a href="#sensors" data-page="sensors" data-click="navPage">
+      <span class="icon" data-icon="gauge"></span>Sensors
+    </a>
+    <a href="#settings" data-page="settings" data-click="navPage">
+      <span class="icon" data-icon="settings"></span>Settings
+    </a>
+  </nav>
 
   <div id="toastContainer" class="toast-container"></div>
   <!--
@@ -630,6 +670,7 @@
     core.js defines globals/utils/nav, the others depend on them.
   -->
   <script src="/js/core.js"></script>
+  <script src="/js/icons.js"></script>
   <script src="/js/pages.js"></script>
   <script src="/js/settings.js"></script>
   <script src="/js/sensors.js"></script>
