@@ -810,67 +810,91 @@ registerHandlers({
   showMovePopup: showMovePopup,
   filesApplyMove: filesApplyMove,
   liveSetRate: liveSetRate,
+  liveLogsFilter: liveLogsFilter,
+  liveLogsFilterClear: liveLogsFilterClear,
 });
 
 // Matches original: function updLogs()
+// Phase 5c-3: caches the rendered logs in `_liveLogsCache` so the filter
+// input can re-render without re-fetching.  liveLogsFilter() reads the
+// cache; liveLogsFilterClear() resets the input + re-renders.
+var _liveLogsCache = [];
 function liveLogsUpdate() {
   fetch("/api/recent_logs")
     .then(function (r) {
       return r.json();
     })
     .then(function (d) {
-      var el = document.getElementById("logs");
-      if (!el) return;
-      var th = ST.theme || CFG.theme || {};
-      var ffC = th.ffColor || "#3498db",
-        pfC = th.pfColor || "#e74c3c",
-        otC = th.otherColor || "#95a5a6";
-      if (d.logs && d.logs.length) {
-        var html =
-          '<table style="width:100%;border-collapse:collapse;font-size:.75rem">';
-        html +=
-          '<tr style="background:var(--bg)"><th style="padding:6px;text-align:left">Time</th><th>Trigger</th><th>Volume</th><th>+FF</th><th>+PF</th></tr>';
-        d.logs.forEach(function (l) {
-          var color =
-            l.trigger.indexOf("FF") >= 0
-              ? ffC
-              : l.trigger.indexOf("PF") >= 0
-                ? pfC
-                : otC;
-          var bg = hexToRgba(color, 0.15);
-          html +=
-            '<tr style="background:' +
-            bg +
-            '">' +
-            '<td style="padding:6px">' +
-            esc(l.time) +
-            "</td>" +
-            '<td style="color:' +
-            color +
-            ';font-weight:bold;text-align:center">' +
-            esc(l.trigger) +
-            "</td>" +
-            '<td style="text-align:center">' +
-            esc(l.volume) +
-            "</td>" +
-            '<td style="text-align:center">' +
-            esc(l.ff) +
-            "</td>" +
-            '<td style="text-align:center">' +
-            esc(l.pf) +
-            "</td></tr>";
-        });
-        html += "</table>";
-        el.innerHTML = html;
-      } else {
-        el.innerHTML = "";
-        el.appendChild(emptyState({
-          icon: "activity",
-          title: "No log entries yet",
-          msg: "Log entries appear here after the first wakeup with flow."
-        }));
-      }
+      _liveLogsCache = (d && d.logs) || [];
+      _liveLogsRender();
     })
     .catch(function () {});
+}
+
+function _liveLogsRender() {
+  var el = document.getElementById("logs");
+  if (!el) return;
+  var th = ST.theme || CFG.theme || {};
+  var ffC = th.ffColor || "#3498db",
+    pfC = th.pfColor || "#e74c3c",
+    otC = th.otherColor || "#95a5a6";
+
+  var filterEl = document.getElementById("logsFilter");
+  var query = filterEl ? filterEl.value.trim().toLowerCase() : "";
+  var rows = _liveLogsCache;
+  if (query) {
+    rows = rows.filter(function (l) {
+      return (
+        String(l.time).toLowerCase().indexOf(query) >= 0 ||
+        String(l.trigger).toLowerCase().indexOf(query) >= 0 ||
+        String(l.volume).toLowerCase().indexOf(query) >= 0 ||
+        String(l.ff).indexOf(query) >= 0 ||
+        String(l.pf).indexOf(query) >= 0
+      );
+    });
+  }
+
+  if (!rows.length) {
+    el.innerHTML = "";
+    el.appendChild(emptyState({
+      icon: "activity",
+      title: query ? "No matches" : "No log entries yet",
+      msg: query
+        ? "Try a different search term, or clear the filter."
+        : "Log entries appear here after the first wakeup with flow."
+    }));
+    return;
+  }
+
+  var html =
+    '<table style="width:100%;border-collapse:collapse;font-size:.75rem">';
+  html +=
+    '<tr style="background:var(--bg)"><th style="padding:6px;text-align:left">Time</th><th>Trigger</th><th>Volume</th><th>+FF</th><th>+PF</th></tr>';
+  rows.forEach(function (l) {
+    var color =
+      l.trigger.indexOf("FF") >= 0
+        ? ffC
+        : l.trigger.indexOf("PF") >= 0
+          ? pfC
+          : otC;
+    var bg = hexToRgba(color, 0.15);
+    html +=
+      '<tr style="background:' + bg + '">' +
+      '<td style="padding:6px">' + esc(l.time) + "</td>" +
+      '<td style="color:' + color + ';font-weight:bold;text-align:center">' + esc(l.trigger) + "</td>" +
+      '<td style="text-align:center">' + esc(l.volume) + "</td>" +
+      '<td style="text-align:center">' + esc(l.ff) + "</td>" +
+      '<td style="text-align:center">' + esc(l.pf) + "</td></tr>";
+  });
+  html += "</table>";
+  el.innerHTML = html;
+}
+
+function liveLogsFilter() { _liveLogsRender(); }
+function liveLogsFilterClear() {
+  var f = document.getElementById("logsFilter");
+  if (f) f.value = "";
+  _liveLogsRender();
+}
 }
 

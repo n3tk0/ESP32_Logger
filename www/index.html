@@ -294,7 +294,19 @@
 
     <!-- Recent Logs -->
     <div class="card">
-      <div class="card-header">📝 Recent Logs</div>
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+        <span><span data-icon="activity" style="vertical-align:middle"></span> Recent Logs</span>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <input type="search" id="logsFilter" class="form-input" placeholder="Filter…"
+                 data-input="liveLogsFilter"
+                 style="width:160px;padding:6px 10px;font-size:.85rem;min-height:32px"
+                 aria-label="Filter log entries">
+          <button type="button" class="btn btn-sm btn-secondary"
+                  data-click="liveLogsFilterClear" title="Clear filter">
+            <span data-icon="x"></span>
+          </button>
+        </div>
+      </div>
       <div class="card-body" style="padding:0;overflow-x:auto">
         <div id="logs" style="font-family:monospace;font-size:.8rem;padding:8px">Loading...</div>
       </div>
