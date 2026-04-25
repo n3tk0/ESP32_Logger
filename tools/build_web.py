@@ -74,8 +74,11 @@ def minify_html(src: str) -> str:
         flags=re.DOTALL | re.IGNORECASE,
     )
 
-    # Collapse runs of whitespace between tags to a single space.
-    src = re.sub(r">\s+<", "><", src)
+    # Collapse runs of whitespace between tags to a SINGLE space (not zero
+    # — gemini review PR #49: dropping the gap entirely breaks the visual
+    # space between adjacent inline / inline-block elements like
+    # `<span>A</span> <span>B</span>`).
+    src = re.sub(r">\s+<", "> <", src)
     # Collapse runs of whitespace inside text nodes.
     src = re.sub(r"[ \t]+", " ", src)
     src = re.sub(r"\n\s*\n", "\n", src)
@@ -92,27 +95,43 @@ def minify_html(src: str) -> str:
 def minify_css(src: str) -> str:
     """Conservative CSS minify: drop /* … */ comments + collapse whitespace.
 
-    Preserves !important and a single space after colons inside data URIs
-    (which can contain CSS-looking tokens that we mustn't crush).
+    Quoted strings are stashed before whitespace collapse so values like
+    `content: " : "` or `font-family: "Open Sans"` survive intact (gemini
+    review PR #49).  data: URIs in url() are also quote-protected via the
+    same mechanism when wrapped in single/double quotes.
     """
-    # Strip /* … */ comments.  CSS doesn't have nested comments so a greedy
-    # non-greedy match is safe.
+    # Strip /* … */ comments first — CSS doesn't have nested comments so a
+    # greedy non-greedy match is safe.
     src = re.sub(r"/\*.*?\*/", "", src, flags=re.DOTALL)
+
+    # Stash quoted strings (single + double) before whitespace collapse so
+    # any whitespace they legitimately contain is preserved.  Escapes (\")
+    # are honoured so `"a\"b"` doesn't terminate early.
+    strings: list[str] = []
+
+    def stash_str(match: re.Match) -> str:
+        strings.append(match.group(0))
+        return f"\x00S{len(strings) - 1}\x00"
+
+    src = re.sub(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', stash_str, src)
 
     # Collapse runs of whitespace to single spaces, drop newlines.
     src = re.sub(r"\s+", " ", src)
 
     # Tighten the obvious noisy spots: `{ ` → `{`, ` }` → `}`, `; ` → `;`,
-    # `: ` → `:`, `, ` → `,`.  Keep one space after colons inside the
-    # data:image/...,xxx URIs — but the regex below only collapses spaces
-    # OUTSIDE quoted strings, since we removed line breaks first and
-    # quoted strings can't contain a literal `;` or `}` to confuse us.
+    # `: ` → `:`, `, ` → `,`.  Strings are stashed at this point so the
+    # punctuation regex can't reach into them.
     src = re.sub(r"\s*([{};,:])\s*", r"\1", src)
 
-    # `:` inside selectors (like `a:hover`) and properties (`color:red`) is
-    # fine.  Multiple semicolons collapse to one.
+    # Multiple semicolons collapse to one; trailing `;}` simplifies to `}`.
     src = re.sub(r";+", ";", src)
     src = re.sub(r";}", "}", src)
+
+    # Restore the stashed quoted strings.
+    def unstash_str(match: re.Match) -> str:
+        return strings[int(match.group(1))]
+
+    src = re.sub(r"\x00S(\d+)\x00", unstash_str, src)
     return src.strip() + "\n"
 
 
@@ -149,16 +168,23 @@ def build(src_root: Path, dst_root: Path, *, do_gzip: bool) -> dict:
         in_bytes += len(raw)
 
         # Minify text formats; pass everything else through unchanged.
-        if src.suffix.lower() in MIN_HTML_EXTS:
-            text = raw.decode("utf-8")
-            text = minify_html(text)
-            out_bytes = text.encode("utf-8")
-        elif src.suffix.lower() in MIN_CSS_EXTS:
-            text = raw.decode("utf-8")
-            text = minify_css(text)
-            out_bytes = text.encode("utf-8")
-        else:
-            out_bytes = raw
+        # Wrap decode in try/except so a non-UTF-8 file (e.g. a stray
+        # Windows-1252 page) names itself in the error rather than crashing
+        # mid-walk (gemini review PR #49).
+        try:
+            if src.suffix.lower() in MIN_HTML_EXTS:
+                text = raw.decode("utf-8")
+                text = minify_html(text)
+                out_bytes = text.encode("utf-8")
+            elif src.suffix.lower() in MIN_CSS_EXTS:
+                text = raw.decode("utf-8")
+                text = minify_css(text)
+                out_bytes = text.encode("utf-8")
+            else:
+                out_bytes = raw
+        except UnicodeDecodeError as ex:
+            print(f"error: {src} is not valid UTF-8 ({ex})", file=sys.stderr)
+            sys.exit(1)
 
         dst.write_bytes(out_bytes)
         plain_bytes += len(out_bytes)
@@ -224,7 +250,14 @@ def main() -> int:
     print(f"[build_web] source : {in_b:>9} B")
     print(f"[build_web] wire   : {wire_b:>9} B  ({wire_pct:.1f}% of source — what gzip-aware browsers download)")
     print(f"[build_web] flash  : {flash_b:>9} B  (plain + .gz siblings on LittleFS)")
-    print(f"[build_web] flash {dst_root.relative_to(ROOT)}/ to LittleFS.")
+    # `relative_to(ROOT)` raises ValueError when --dst points outside the
+    # project root (gemini review PR #49); fall back to the absolute path
+    # so the line still reads sensibly.
+    try:
+        rel_dst = dst_root.relative_to(ROOT)
+    except ValueError:
+        rel_dst = dst_root
+    print(f"[build_web] flash {rel_dst}/ to LittleFS.")
     return 0
 
 
