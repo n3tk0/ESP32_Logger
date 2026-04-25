@@ -2,8 +2,18 @@
 #include "../core/Globals.h"
 #include "ConfigManager.h"
 #include <WiFi.h>
+#include <DNSServer.h>            // Captive portal — Pass 5 5.5 phase 2
 #include <time.h>
 #include <esp_task_wdt.h>
+
+// Captive-portal DNS responder.  Bound to UDP/53 with a wildcard "*" rule
+// that resolves every query to the soft-AP IP, so a phone's captive-portal
+// probe (Apple `captive.apple.com`, Android `connectivitycheck.gstatic.com`,
+// Windows `www.msftconnecttest.com`, …) lands on us regardless of host.
+// The probe URL handlers in WebServer.cpp turn each into an HTTP redirect
+// to "/" so the OS shows its captive-portal banner.
+static DNSServer s_dnsServer;
+static bool      s_dnsRunning = false;
 
 // ============================================================================
 // safeWiFiShutdown – КЛЮЧОВА ПОПРАВКА за проблема с рестарта
@@ -25,6 +35,13 @@
 // ============================================================================
 void safeWiFiShutdown() {
     Serial.println("WiFi: Safe shutdown before restart...");
+
+    // Stop captive-portal DNS first so no in-flight UDP packet trips up
+    // the radio teardown below.
+    if (s_dnsRunning) {
+        s_dnsServer.stop();
+        s_dnsRunning = false;
+    }
 
     // Изчисти незавършен WiFi scan (оставен от /wifi_scan_start endpoint)
     WiFi.scanDelete();
@@ -109,6 +126,31 @@ void startAPMode() {
     currentIPAddress      = WiFi.softAPIP().toString();
     wifiConnectedAsClient = false;
     DBGF("WiFi: AP IP: %s\n", currentIPAddress.c_str());
+
+    // Start the captive-portal DNS responder.  TTL=60s keeps phones from
+    // hammering us with re-queries; wildcard "*" matches every label so a
+    // probe to captive.apple.com resolves to the AP IP just like any other
+    // hostname.  Non-blocking — main loop must call tickCaptivePortalDNS().
+    if (s_dnsRunning) {
+        s_dnsServer.stop();
+        s_dnsRunning = false;
+    }
+    s_dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+    s_dnsServer.setTTL(60);
+    if (s_dnsServer.start(53, "*", WiFi.softAPIP())) {
+        s_dnsRunning = true;
+        DBGLN("WiFi: captive-portal DNS responder started");
+    } else {
+        DBGLN("WiFi: captive-portal DNS bind failed (port 53 in use?)");
+    }
+}
+
+void tickCaptivePortalDNS() {
+    if (s_dnsRunning) s_dnsServer.processNextRequest();
+}
+
+bool isCaptivePortalDNSRunning() {
+    return s_dnsRunning;
 }
 
 bool syncTimeFromNTP() {
