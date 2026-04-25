@@ -74,7 +74,14 @@
     "download":
       '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>' +
       '<polyline points="7 10 12 15 17 10"></polyline>' +
-      '<line x1="12" x2="12" y1="15" y2="3"></line>'
+      '<line x1="12" x2="12" y1="15" y2="3"></line>',
+    "cpu":
+      '<rect x="4" y="4" width="16" height="16" rx="2"></rect>' +
+      '<rect x="9" y="9" width="6" height="6"></rect>' +
+      '<path d="M15 2v2"></path><path d="M15 20v2"></path>' +
+      '<path d="M2 15h2"></path><path d="M2 9h2"></path>' +
+      '<path d="M20 15h2"></path><path d="M20 9h2"></path>' +
+      '<path d="M9 2v2"></path><path d="M9 20v2"></path>'
   };
 
   function svg(name) {
