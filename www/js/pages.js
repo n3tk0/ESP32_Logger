@@ -451,7 +451,12 @@ function filesRender() {
       if (!list) return;
       var files = d.files || [];
       if (!files.length) {
-        list.innerHTML = "<div class='list-item text-muted'>Empty</div>";
+        list.innerHTML = "";
+        list.appendChild(emptyState({
+          icon: "folder",
+          title: "No files",
+          msg: "This directory is empty. Upload a file or create a subfolder to get started."
+        }));
         return;
       }
 
@@ -858,8 +863,12 @@ function liveLogsUpdate() {
         html += "</table>";
         el.innerHTML = html;
       } else {
-        el.innerHTML =
-          "<div class='list-item text-muted'>No log entries yet</div>";
+        el.innerHTML = "";
+        el.appendChild(emptyState({
+          icon: "activity",
+          title: "No log entries yet",
+          msg: "Log entries appear here after the first wakeup with flow."
+        }));
       }
     })
     .catch(function () {});

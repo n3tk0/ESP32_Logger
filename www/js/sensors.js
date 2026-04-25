@@ -538,8 +538,12 @@ function clRenderSensors(sensors) {
   var list = document.getElementById("cl-sensors-list");
   if (!list) return;
   if (!sensors || sensors.length === 0) {
-    list.innerHTML =
-      '<p class="text-muted" style="padding:1rem">No sensors configured. Click <strong>+ Add Sensor</strong> to begin.</p>';
+    list.innerHTML = "";
+    list.appendChild(emptyState({
+      icon: "gauge",
+      title: "No sensors configured",
+      msg: "Click + Add Sensor to register your first sensor."
+    }));
     return;
   }
   list.innerHTML = sensors

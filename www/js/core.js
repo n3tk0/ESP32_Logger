@@ -658,6 +658,57 @@ function showToast(a, b, c) {
   setTimeout(dismiss, 3000);
 }
 
+// emptyState(opts) — returns DOM for the design's structured empty state.
+// opts: { icon, title, msg, ctaText, ctaPage }.  Title is required;
+// everything else is optional.  Used by page renderers to swap raw
+// "Loading..." / "No X" strings for an icon + message + optional CTA.
+//
+//   container.innerHTML = "";
+//   container.appendChild(emptyState({
+//     icon: "folder", title: "No files",
+//     msg: "Upload a file to get started.",
+//     ctaText: "Upload", ctaPage: "files",
+//   }));
+function emptyState(opts) {
+  opts = opts || {};
+  var wrap = document.createElement("div");
+  wrap.className = "empty-state";
+
+  if (opts.icon) {
+    var ic = document.createElement("span");
+    ic.className = "empty-icon";
+    var iSpan = document.createElement("span");
+    iSpan.setAttribute("data-icon", opts.icon);
+    ic.appendChild(iSpan);
+    wrap.appendChild(ic);
+  }
+  if (opts.title) {
+    var t = document.createElement("div");
+    t.className = "empty-title";
+    t.textContent = opts.title;
+    wrap.appendChild(t);
+  }
+  if (opts.msg) {
+    var m = document.createElement("div");
+    m.className = "empty-msg";
+    m.textContent = opts.msg;
+    wrap.appendChild(m);
+  }
+  if (opts.ctaText && opts.ctaPage) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-primary btn-sm empty-cta";
+    btn.setAttribute("data-click", "navPage");
+    btn.setAttribute("data-page", opts.ctaPage);
+    btn.textContent = opts.ctaText;
+    wrap.appendChild(btn);
+  }
+
+  // If Icons module is loaded, swap the data-icon spans now.
+  if (window.Icons && Icons.swap) Icons.swap(wrap);
+  return wrap;
+}
+
 // HTML-escape for safe insertion into innerHTML. Use textContent / DOM
 // construction where possible; reach for esc() only when string templates
 // are unavoidable. Defined in core.js so all later modules can call it.

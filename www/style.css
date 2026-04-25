@@ -1324,3 +1324,43 @@ body {
     border: 1px solid #aaa;
   }
 }
+
+/* ── Phase 5c-1 — Empty states ────────────────────────────────────────────
+   Replaces "Loading..." / "No X" placeholders with a structured icon +
+   headline + sub-message + optional CTA, surfaced via emptyState() in
+   core.js. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 36px 24px;
+  color: var(--text-muted);
+  gap: 8px;
+}
+.empty-state .empty-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.empty-state .empty-icon [data-lucide] { width: 22px; height: 22px; }
+.empty-state .empty-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.empty-state .empty-msg {
+  font-size: 0.85rem;
+  max-width: 320px;
+}
+.empty-state .empty-cta {
+  margin-top: 8px;
+}
