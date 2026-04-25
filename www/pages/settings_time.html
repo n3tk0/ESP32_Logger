@@ -1,6 +1,6 @@
   <main class="main-content page" id="page-settings_time">
     <div class="page-header">
-      <h1>🕐 Time Sync</h1>
+      <h1><span data-icon="clock"></span> Time Sync</h1>
       <div class="breadcrumb"><a href="#settings">Settings</a> / Time
         Sync</div>
     </div>
@@ -39,7 +39,7 @@
     <!-- NTP -->
     <div class="card">
       <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
-        <span>🌐 NTP Sync</span>
+        <span><span data-icon="globe"></span> NTP Sync</span>
         <div id="ntpStatus" class="alert alert-warning"
           style="margin:0; padding:4px 8px; font-size:0.85rem; line-height:1;">⏳ Loading...</div>
       </div>
@@ -56,8 +56,8 @@
             </div>
           </div>
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-            <button type="submit" class="btn btn-primary">💾 Save NTP Settings</button>
-            <button type="submit" form="ntpForm" class="btn btn-secondary" id="ntpBtn">🔄 NTP Sync</button>
+            <button type="submit" class="btn btn-primary"><span data-icon="save"></span> Save NTP Settings</button>
+            <button type="submit" form="ntpForm" class="btn btn-secondary" id="ntpBtn"><span data-icon="refresh-cw"></span> NTP Sync</button>
           </div>
         </form>
         <form data-submit="timeSyncNTP" id="ntpForm" style="display:none;"></form>
@@ -66,7 +66,7 @@
 
     <!-- RTC options + Boot Count -->
     <div class="card">
-      <div class="card-header">⚙️ RTC &amp; System Options</div>
+      <div class="card-header"><span data-icon="settings"></span> RTC &amp; System Options</div>
       <div class="card-body">
         <form data-submit="timeRtcProtect" style="margin-bottom:1rem">
           <div class="form-group">
@@ -83,7 +83,7 @@
           <div><strong>Log Buffer</strong>
             <p class="form-hint" style="margin:0">Write pending logs to storage</p>
           </div>
-          <form data-submit="timeFlushLogs"><button type="submit" class="btn btn-secondary">💾
+          <form data-submit="timeFlushLogs"><button type="submit" class="btn btn-secondary"><span data-icon="save"></span>
               Flush</button></form>
         </div>
 
@@ -93,10 +93,10 @@
             <div>Backup: <span style="font-size:1.25rem;color:var(--secondary)" id="bootBak">–</span></div>
           </div>
           <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-            <form action="/backup_bootcount" method="POST"><button type="submit" class="btn btn-secondary">📤 Backup
+            <form action="/backup_bootcount" method="POST"><button type="submit" class="btn btn-secondary"><span data-icon="cloud-upload"></span> Backup
                 Now</button></form>
             <form data-submit="timeRestoreBoot">
-              <button type="submit" class="btn btn-warning">📥 Restore</button>
+              <button type="submit" class="btn btn-warning"><span data-icon="download"></span> Restore</button>
             </form>
           </div>
           <p class="form-hint" style="margin-top:.5rem">Backup saves to RTC RAM + flash file.</p>

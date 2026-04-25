@@ -1,6 +1,6 @@
   <main class="main-content page" id="page-update">
     <div class="page-header">
-      <h1>📤 Firmware Update</h1>
+      <h1><span data-icon="cloud-upload"></span> Firmware Update</h1>
       <div class="breadcrumb"><a href="#settings">Settings</a> / Update
       </div>
     </div>
@@ -23,7 +23,7 @@
 
     <!-- Current firmware -->
     <div class="card">
-      <div class="card-header">📋 Current Firmware</div>
+      <div class="card-header"><span data-icon="file-text"></span> Current Firmware</div>
       <div class="card-body">
         <div class="form-row">
           <div><strong>Version</strong>
@@ -44,9 +44,9 @@
 
     <!-- Upload new firmware -->
     <div class="card">
-      <div class="card-header">📤 Upload Firmware (.bin)</div>
+      <div class="card-header"><span data-icon="cloud-upload"></span> Upload Firmware (.bin)</div>
       <div class="card-body">
-        <div class="alert alert-warning">⚠️ Upload the correct .bin file. Wrong firmware will require USB recovery.
+        <div class="alert alert-warning"><span data-icon="alert-triangle"></span> Upload the correct .bin file. Wrong firmware will require USB recovery.
         </div>
         <form id="otaForm" data-submit="otaUpload">
           <div class="form-group">
@@ -54,7 +54,7 @@
               data-change="otaFileSelected">
           </div>
           <div id="otaFileInfo" class="alert" style="display:none;margin-bottom:1rem;"></div>
-          <button type="submit" id="otaUploadBtn" class="btn btn-danger btn-block" disabled>🚀 Flash Firmware</button>
+          <button type="submit" id="otaUploadBtn" class="btn btn-danger btn-block" disabled><span data-icon="rocket"></span> Flash Firmware</button>
         </form>
         <div id="otaProgress" style="display:none;margin-top:1rem">
           <div style="background:#e0e0e0;border-radius:4px;height:24px;overflow:hidden">
