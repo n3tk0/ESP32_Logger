@@ -203,6 +203,9 @@ void SensorManager::toJson(JsonArray arr) const {
         o["enabled"]      = s->isEnabled();
         o["last_read_ts"] = s->lastReadTs();
         o["error_count"]  = s->errorCount();
+        // Phase 5c-4 — exposes read_interval_ms so the UI can compute
+        // staleness (entry is "stale" once age > 2× this interval).
+        o["read_interval_ms"] = s->getReadIntervalMs();
         o["status"]       = s->isEnabled() ? (s->errorCount() > 0 ? "error" : "ok") : "disabled";
 
         const char* metricNames[8] = {};

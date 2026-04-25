@@ -1364,3 +1364,17 @@ body {
 .empty-state .empty-cta {
   margin-top: 8px;
 }
+
+/* ── Phase 5c-4 — Sensor card staleness states ───────────────────────────
+   Amber when the last reading is older than 2× the configured read
+   interval; red when the sensor reports an error.  The colored band
+   sits along the left edge so it reads at a glance without disturbing
+   the existing header layout. */
+.sensor-card.sensor-stale {
+  border-left: 3px solid var(--warning, #f39c12);
+  background: linear-gradient(90deg, rgba(243, 156, 18, 0.05), transparent 60px);
+}
+.sensor-card.sensor-error {
+  border-left: 3px solid var(--danger, #e74c3c);
+  background: linear-gradient(90deg, rgba(231, 76, 60, 0.06), transparent 60px);
+}
