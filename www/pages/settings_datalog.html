@@ -1,6 +1,6 @@
   <main class="main-content page" id="page-settings_datalog">
     <div class="page-header">
-      <h1>📝 Data Log</h1>
+      <h1><span data-icon="file-text"></span> Data Log</h1>
       <div class="breadcrumb"><a href="#settings">Settings</a> / Data Log
       </div>
     </div>
@@ -9,7 +9,7 @@
       <div id="dl-msg"></div>
       <!-- Active File -->
       <div class="card">
-        <div class="card-header">📄 Current File</div>
+        <div class="card-header"><span data-icon="file-text"></span> Current File</div>
         <div class="card-body">
           <div class="form-group">
             <label class="form-label">Select file</label>
@@ -29,13 +29,13 @@
               </p>
             </div>
           </div>
-          <button type="submit" name="action" value="create" class="btn btn-success">➕ Create</button>
+          <button type="submit" name="action" value="create" class="btn btn-success"><span data-icon="plus"></span> Create</button>
         </div>
       </div>
 
       <!-- Rotation -->
       <div class="card">
-        <div class="card-header">🔄 Rotation</div>
+        <div class="card-header"><span data-icon="refresh-cw"></span> Rotation</div>
         <div class="card-body">
           <p class="text-muted" style="font-size:.8rem;margin-bottom:.75rem">How to split log files over time</p>
           <div class="form-row">
@@ -66,7 +66,7 @@
 
       <!-- Log Format -->
       <div class="card">
-        <div class="card-header">⚙️ Log Format</div>
+        <div class="card-header"><span data-icon="settings"></span> Log Format</div>
         <div class="card-body">
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
             <div class="form-group" style="min-width:100px">
@@ -131,7 +131,7 @@
 
       <!-- Post-Correction -->
       <div class="card">
-        <div class="card-header">🔄 Post-Correction</div>
+        <div class="card-header"><span data-icon="refresh-cw"></span> Post-Correction</div>
         <div class="card-body">
           <div class="form-group">
             <label class="form-label">
@@ -166,7 +166,7 @@
       </div>
       <!-- Log Files -->
       <div class="card">
-        <div class="card-header">📂 Log Files</div>
+        <div class="card-header"><span data-icon="folder"></span> Log Files</div>
         <div class="card-body">
           <div id="dl-files" class="text-muted" style="font-size:0.9rem">Loading...</div>
         </div>
@@ -174,7 +174,7 @@
 
       <!-- Sensor Data Visualisation (platform v5.0) -->
       <div class="card">
-        <div class="card-header">📈 Sensor Data Visualisation</div>
+        <div class="card-header"><span data-icon="line-chart"></span> Sensor Data Visualisation</div>
         <div class="card-body">
           <p class="form-hint" style="margin-bottom:1rem">
             These settings control how sensor data is displayed in charts.
@@ -224,11 +224,11 @@
             <input type="number" id="agg-limit" class="form-input" value="500" min="50" max="5000" step="50">
             <p class="form-hint">Maximum chart points (50–5000). Default: 500.</p>
           </div>
-          <button type="button" class="btn btn-secondary" data-click="aggSettingsSave">💾 Save Visualisation Settings</button>
+          <button type="button" class="btn btn-secondary" data-click="aggSettingsSave"><span data-icon="save"></span> Save Visualisation Settings</button>
           <div id="agg-msg" style="margin-top:8px;font-size:.85rem"></div>
         </div>
       </div>
 
-      <button type="submit" class="btn btn-primary btn-block">💾 Save</button>
+      <button type="submit" class="btn btn-primary btn-block"><span data-icon="save"></span> Save</button>
     </form>
   </main>

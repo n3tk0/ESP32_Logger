@@ -1,6 +1,6 @@
   <main class="main-content page" id="page-settings_theme">
     <div class="page-header">
-      <h1>🎨 Theme</h1>
+      <h1><span data-icon="palette"></span> Theme</h1>
       <div class="breadcrumb"><a href="#settings">Settings</a> / Theme
       </div>
     </div>
@@ -15,7 +15,7 @@
             <select name="themeMode" id="th-mode" class="form-input form-select">
               <option value="0">☀️ Light</option>
               <option value="1">🌙 Dark</option>
-              <option value="2">🔄 Auto</option>
+              <option value="2"><span data-icon="refresh-cw"></span> Auto</option>
             </select>
           </div>
           <div class="form-group">
@@ -28,7 +28,7 @@
 
       <!-- Colors -->
       <div class="card">
-        <div class="card-header">🎨 Colors</div>
+        <div class="card-header"><span data-icon="palette"></span> Colors</div>
         <div class="card-body">
           <div class="color-grid">
             <div class="form-group"><label class="form-label">Primary</label><input type="color" name="primaryColor"
@@ -80,14 +80,14 @@
 
       <!-- Chart.js -->
       <div class="card">
-        <div class="card-header">📈 Chart Source</div>
+        <div class="card-header"><span data-icon="line-chart"></span> Chart Source</div>
         <div class="card-body">
           <div class="form-group">
             <label class="form-label">Chart.js Library</label>
             <select name="chartSource" id="th-chartSrc" class="form-input form-select"
               data-change="themeToggleChartPath">
-              <option value="0">📁 Local File</option>
-              <option value="1">🌐 CDN (Online)</option>
+              <option value="0"><span data-icon="folder"></span> Local File</option>
+              <option value="1"><span data-icon="globe"></span> CDN (Online)</option>
             </select>
             <p class="form-hint">Local: requires /chart.min.js in LittleFS. CDN: needs internet.</p>
           </div>
@@ -100,17 +100,17 @@
           <div class="form-group mt-1">
             <label class="form-label">Dashboard Column Labels</label>
             <select name="chartLabelFormat" id="th-labelFmt" class="form-input form-select">
-              <option value="0">📅 Date + Time</option>
-              <option value="1">🔢 Boot Count (#1234)</option>
-              <option value="2">📅🔢 Both</option>
+              <option value="0"><span data-icon="calendar"></span> Date + Time</option>
+              <option value="1"><span data-icon="list"></span> Boot Count (#1234)</option>
+              <option value="2"><span data-icon="calendar"></span><span data-icon="list"></span> Both</option>
             </select>
           </div>
         </div>
       </div>
 
       <div style="display:flex; gap:10px;">
-        <button type="submit" class="btn btn-primary" style="flex:1;">💾 Save</button>
-        <button type="button" class="btn btn-secondary" data-click="themeRestoreDefault">🔄 Restore Default
+        <button type="submit" class="btn btn-primary" style="flex:1;"><span data-icon="save"></span> Save</button>
+        <button type="button" class="btn btn-secondary" data-click="themeRestoreDefault"><span data-icon="refresh-cw"></span> Restore Default
           Theme</button>
       </div>
     </form>
