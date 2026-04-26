@@ -1647,17 +1647,35 @@ void setupWebServer() {
         // by the client when it follows the 307.
         if (path.startsWith("/api/v1/")) {
             String rewritten = "/api/" + path.substring(strlen("/api/v1/"));
+            // Rebuild the query string from parsed params.  This fork of
+            // ESPAsyncWebServer doesn't keep the raw query around (gemini
+            // review PR #50 suggested r->queryString() but that accessor
+            // doesn't exist here), so we re-encode each value defensively
+            // to handle `&`, `=`, ` ` and other reserved chars correctly.
+            auto urlEncode = [](const String& v) -> String {
+                String out;
+                out.reserve(v.length() + 8);
+                for (size_t i = 0; i < v.length(); i++) {
+                    char c = v[i];
+                    bool unreserved = (c >= 'A' && c <= 'Z') ||
+                                      (c >= 'a' && c <= 'z') ||
+                                      (c >= '0' && c <= '9') ||
+                                      c == '-' || c == '_' || c == '.' || c == '~';
+                    if (unreserved) { out += c; continue; }
+                    char buf[4];
+                    snprintf(buf, sizeof(buf), "%%%02X", (uint8_t)c);
+                    out += buf;
+                }
+                return out;
+            };
             String query;
             for (size_t i = 0; i < r->params(); i++) {
                 AsyncWebParameter* p = r->getParam(i);
                 if (!p || p->isFile() || p->isPost()) continue;
                 if (query.length()) query += "&";
-                query += p->name();
+                query += urlEncode(p->name());
                 query += "=";
-                query += p->value();   // values come pre-decoded; for the
-                // typical numeric / ASCII params used by this UI a verbatim
-                // re-encode is fine.  Exotic chars would round-trip with
-                // a quirk but no API endpoint here exercises that.
+                query += urlEncode(p->value());
             }
             if (query.length()) { rewritten += "?"; rewritten += query; }
             AsyncWebServerResponse* resp = r->beginResponse(307);
