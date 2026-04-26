@@ -713,11 +713,73 @@ static void handleApiModulesDispatch(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/backup — full-state JSON snapshot (Pass 5 5.7).
+//
+// Bundles the JSON-layer config files into a single download so users can
+// archive a complete known-good state and restore it on a new device:
+//   /config/modules.json  → backup.modules
+//   /config/sensors.json  → backup.sensors
+//   platform_config.json  → backup.platform
+// plus a header section identifying the device + firmware + boot count.
+//
+// /export_settings continues to expose the binary core config; clients
+// that need the full picture fetch both and merge.  Restore is intentionally
+// a separate endpoint (not yet shipped) — backup is the safe-to-ship slice.
+// ---------------------------------------------------------------------------
+static void handleApiBackup(AsyncWebServerRequest* req) {
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+
+    // Suggest a sensible filename so curl -OJ / browser save-as gets it
+    // right (e.g. "waterlogger-backup-c8df84c4ed68-42.json").
+    String fname = "waterlogger-backup-";
+    fname += config.deviceId[0] ? config.deviceId : "device";
+    fname += "-";
+    fname += String((unsigned)bootCount);
+    fname += ".json";
+    resp->addHeader("Content-Disposition",
+                    String("attachment; filename=\"") + fname + "\"");
+
+    JsonDocument doc;
+    doc["version"]    = 1;
+    doc["created_at"] = (uint32_t)(millis() / 1000UL);  // best-effort uptime stamp
+
+    JsonObject dev = doc["device"].to<JsonObject>();
+    dev["name"]       = config.deviceName[0] ? config.deviceName : "Water Logger";
+    dev["id"]         = config.deviceId;
+    dev["firmware"]   = getVersionString();
+    dev["boot_count"] = bootCount;
+
+    auto inhaleJsonFile = [](JsonObject parent, const char* key, const char* path) {
+        if (!activeFS || !activeFS->exists(path)) return;
+        File f = activeFS->open(path, FILE_READ);
+        if (!f) return;
+        // 16 KB cap — same as ExportManager / SensorManager input caps;
+        // beyond that we'd risk OOM on the AsyncTCP worker.
+        if (f.size() > 16 * 1024) { f.close(); return; }
+        JsonDocument tmp;
+        if (deserializeJson(tmp, f) == DeserializationError::Ok) {
+            parent[key] = tmp;
+        }
+        f.close();
+    };
+
+    // Each section is best-effort — a missing file just leaves the key off
+    // the response.  Restore code (future) must cope with absent keys.
+    inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
+    inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
+    inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+
+    serializeJson(doc, *resp);
+    req->send(resp);
+}
+
+// ---------------------------------------------------------------------------
 void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/data",              HTTP_GET,  handleApiData);
     server.on("/api/sensors",           HTTP_GET,  handleApiSensors);
     server.on("/api/sensors/read_now",  HTTP_GET,  handleApiSensorReadNow);
     server.on("/api/diag",              HTTP_GET,  handleApiDiag);
+    server.on("/api/backup",            HTTP_GET,  handleApiBackup);
     server.on("/api/config/platform",   HTTP_POST, handleConfigPlatform);
     server.on("/api/mqtt/ha_discovery", HTTP_POST, handleMqttHaDiscovery);
     server.on("/api/ota/status",        HTTP_GET,  handleOtaStatus);
