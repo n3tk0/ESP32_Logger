@@ -21,13 +21,15 @@ namespace {
     }
 
     // Constant-time compare so a malicious caller can't time-side-channel
-    // partial matches.  Always walks the full 32-byte length.
+    // partial matches.  Always walks the full 32-byte length without an
+    // early-exit branch — the caller already pre-validates length and the
+    // stored token is a 32-char hex string with no embedded NULs (gemini
+    // review PR #52).
     bool secureEq(const char* a, const char* b) {
         if (!a || !b) return false;
         unsigned diff = 0;
         for (int i = 0; i < 32; i++) {
             diff |= (unsigned)(a[i] ^ b[i]);
-            if (a[i] == '\0' || b[i] == '\0') return false;
         }
         return diff == 0;
     }

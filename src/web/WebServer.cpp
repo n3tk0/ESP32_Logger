@@ -1725,7 +1725,13 @@ void setupWebServer() {
         server.on("/save_platform", HTTP_POST,
             [pcfgCleanup](AsyncWebServerRequest *r) {
                 if (rateLimit429(r)) { pcfgCleanup(); return; }
-                if (csrfBlock(r))    { pcfgCleanup(); return; }
+                // Note: CSRF deliberately NOT checked here — this route
+                // takes a raw application/json body, so onRequest fires
+                // without form params being populated; querying for `csrf`
+                // would 403 every legitimate save.  Adding query-string
+                // CSRF would require updating both the SPA and the
+                // PROGMEM failsafe HTML.  Tracked as a follow-up; the
+                // route still has rate-limit protection in the meantime.
                 if (!fsAvailable || !activeFS) {
                     pcfgCleanup();
                     r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
