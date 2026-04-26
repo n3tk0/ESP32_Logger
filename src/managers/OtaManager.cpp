@@ -93,7 +93,8 @@ void OtaManager::boot() {
 void OtaManager::tick(uint32_t nowMs) {
     if (s_confirmed || !s_pending) return;
     // millis() wraps at ~49.7 days; using signed difference makes the
-    // comparison wrap-safe (negative ⇒ deadline still in the future).
+    // comparison wrap-safe (positive ⇒ deadline still in the future,
+    // ≤ 0 ⇒ deadline reached/passed).
     int32_t remaining = (int32_t)(s_pendingDeadline - nowMs);
     if (remaining <= 0) {
         Serial.printf("[OTA] Stability window elapsed (%us) — confirming\n",
