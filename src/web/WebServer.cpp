@@ -400,6 +400,37 @@ void setupWebServer() {
     server.on("/settings_network",   HTTP_GET, spaRedirect);
     server.on("/settings_datalog",   HTTP_GET, spaRedirect);
 
+    // ── Captive-portal probe endpoints (Pass 5 5.5 phase 2) ────────────────
+    // Phones, laptops, and game consoles all probe a hardcoded URL on join
+    // to detect captive portals.  The DNS responder in WiFiManager already
+    // points every hostname at us; redirecting these paths to "/" makes the
+    // OS auto-pop its captive-portal banner so the user lands on the SPA
+    // without typing any IP.  Reachable from any host header thanks to the
+    // wildcard DNS, so we don't filter by Host.
+    auto captiveRedirect = [](AsyncWebServerRequest *r) {
+        // 302 to the SPA root with an ABSOLUTE URL pointing at the AP IP
+        // (gemini review PR #48).  Some older Android NCSI implementations
+        // and Windows captive-portal probes refuse to follow relative
+        // redirects when the Host header doesn't match the expected probe
+        // domain — an absolute URL sidesteps that entirely.
+        String url = "http://" + WiFi.softAPIP().toString() + "/";
+        r->redirect(url);
+    };
+    // Apple iOS / macOS
+    server.on("/hotspot-detect.html",  HTTP_GET, captiveRedirect);
+    server.on("/library/test/success.html", HTTP_GET, captiveRedirect);
+    // Android — expects 204 NoContent normally; we return 302 so the OS
+    // recognises a portal and prompts the user.
+    server.on("/generate_204",         HTTP_GET, captiveRedirect);
+    server.on("/gen_204",              HTTP_GET, captiveRedirect);
+    // Windows
+    server.on("/connecttest.txt",      HTTP_GET, captiveRedirect);
+    server.on("/redirect",             HTTP_GET, captiveRedirect);
+    server.on("/ncsi.txt",             HTTP_GET, captiveRedirect);
+    // Mozilla / Firefox
+    server.on("/canonical.html",       HTTP_GET, captiveRedirect);
+    server.on("/success.txt",          HTTP_GET, captiveRedirect);
+
     // =========================================================================
     // API: STATUS
     // Keys consumed by web.js:
