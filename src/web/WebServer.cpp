@@ -25,6 +25,7 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Update.h>
+#include <mbedtls/sha256.h>             // OTA SHA-256 verify (Pass 5 5.6)
 #include <WiFi.h>
 #include <functional>
 #include <memory>
@@ -1597,20 +1598,68 @@ void setupWebServer() {
 
     // =========================================================================
     // OTA FIRMWARE UPDATE
+    //
+    // POST /do_update[?sha256=<64-hex>]
+    //   Streams the firmware image into the OTA partition.  When the
+    //   `sha256` query param is supplied, the server hashes every chunk
+    //   with mbedTLS and compares the digest before committing — any
+    //   mismatch aborts the update and returns 400.  When the param is
+    //   absent, behaviour is unchanged (Pass 5 5.6 first slice).
+    //
+    //   Rejection paths:
+    //     • magic byte != 0xE9  → invalid image
+    //     • Update.begin failed → flash partition unavailable
+    //     • SHA-256 mismatch    → tampered/corrupted image
     // =========================================================================
     {
-        static bool s_otaRejected = false;
+        // OTA upload state — per-request via _tempObject so concurrent
+        // requests can't corrupt each other's hash context (gemini review
+        // PR #49).  The destructor releases the mbedTLS hardware-SHA lock,
+        // so any early exit (magic-byte fail, Update.begin fail, mismatch)
+        // OR a client disconnect reclaims the engine cleanly via
+        // request->onDisconnect.
+        struct OtaCtx {
+            bool rejected     = false;
+            bool shaMismatch  = false;
+            bool shaActive    = false;
+            String expectedSha;
+            mbedtls_sha256_context sha;
+            ~OtaCtx() {
+                if (shaActive) {
+                    mbedtls_sha256_free(&sha);
+                    shaActive = false;
+                }
+            }
+        };
+
         server.on("/do_update", HTTP_POST,
             [](AsyncWebServerRequest *r) {
-                bool ok = !s_otaRejected && !Update.hasError();
-                const char* msg = s_otaRejected
-                    ? "{\"success\":false,\"message\":\"Invalid firmware image\"}"
-                    : (ok ? "{\"success\":true,\"message\":\"Update complete, restarting...\"}"
-                          : "{\"success\":false,\"message\":\"Update failed\"}");
+                OtaCtx* ctx = static_cast<OtaCtx*>(r->_tempObject);
+                bool rejected    = ctx ? ctx->rejected    : true;
+                bool shaMismatch = ctx ? ctx->shaMismatch : false;
+
+                bool ok = !rejected && !Update.hasError();
+                const char* msg;
+                if (shaMismatch) {
+                    msg = "{\"success\":false,\"message\":\"SHA-256 mismatch — image rejected\"}";
+                } else if (rejected) {
+                    msg = "{\"success\":false,\"message\":\"Invalid firmware image\"}";
+                } else if (ok) {
+                    msg = "{\"success\":true,\"message\":\"Update complete, restarting...\"}";
+                } else {
+                    msg = "{\"success\":false,\"message\":\"Update failed\"}";
+                }
                 AsyncWebServerResponse *resp = r->beginResponse(ok ? 200 : 400,
                     "application/json", msg);
                 resp->addHeader("Connection", "close");
                 r->send(resp);
+
+                // Free per-request state.  Context destructor releases the
+                // mbedTLS SHA engine if the upload aborted before final.
+                if (ctx) {
+                    delete ctx;
+                    r->_tempObject = nullptr;
+                }
                 if (ok) {
                     shouldRestart = true;
                     restartTimer = millis();
@@ -1618,25 +1667,88 @@ void setupWebServer() {
             },
             [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
                 if (!index) {
-                    s_otaRejected = false;
+                    auto* ctx = new (std::nothrow) OtaCtx();
+                    if (!ctx) {
+                        DBGLN("OTA: ctx alloc failed");
+                        return;
+                    }
+                    req->_tempObject = ctx;
+                    // Reclaim ctx + SHA engine if the client drops the
+                    // connection before onRequest fires.
+                    req->onDisconnect([req]() {
+                        OtaCtx* leftover = static_cast<OtaCtx*>(req->_tempObject);
+                        if (leftover) {
+                            delete leftover;
+                            req->_tempObject = nullptr;
+                        }
+                    });
+
                     DBGF("OTA start: %s\n", filename.c_str());
+
+                    // Expected hash arrives as a query param (header-free
+                    // for client simplicity).  Empty → verification skipped.
+                    if (req->hasParam("sha256")) {
+                        ctx->expectedSha = req->getParam("sha256")->value();
+                        ctx->expectedSha.toLowerCase();
+                        if (ctx->expectedSha.length() != 64) {
+                            DBGF("OTA: bad sha256 length %u (expected 64), ignoring\n",
+                                 (unsigned)ctx->expectedSha.length());
+                            ctx->expectedSha = "";
+                        }
+                    }
+
                     // First byte of an ESP32 firmware image must be
                     // ESP_IMAGE_HEADER_MAGIC (0xE9). Reject anything else
                     // before touching flash.
                     if (len < 1 || data[0] != 0xE9) {
                         DBGLN("OTA: bad magic byte, rejecting");
-                        s_otaRejected = true;
+                        ctx->rejected = true;
                         return;
                     }
                     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
                         Update.printError(Serial);
-                        s_otaRejected = true;
+                        ctx->rejected = true;
                         return;
                     }
+                    // Initialise the hasher exactly once per upload, regardless
+                    // of whether verification was requested — the cost is tiny
+                    // and lets us log the actual digest for debugging.
+                    mbedtls_sha256_init(&ctx->sha);
+                    mbedtls_sha256_starts(&ctx->sha, 0);  // 0 = SHA-256, not -224
+                    ctx->shaActive = true;
                 }
-                if (s_otaRejected) return;
+
+                OtaCtx* ctx = static_cast<OtaCtx*>(req->_tempObject);
+                if (!ctx || ctx->rejected) return;
+
                 if (Update.write(data, len) != len) Update.printError(Serial);
+                if (ctx->shaActive) {
+                    mbedtls_sha256_update(&ctx->sha, data, len);
+                }
                 if (final) {
+                    if (ctx->shaActive) {
+                        uint8_t digest[32];
+                        mbedtls_sha256_finish(&ctx->sha, digest);
+                        mbedtls_sha256_free(&ctx->sha);
+                        ctx->shaActive = false;   // destructor now a no-op
+
+                        char hex[65];
+                        for (int i = 0; i < 32; i++) {
+                            snprintf(hex + i*2, 3, "%02x", digest[i]);
+                        }
+                        hex[64] = '\0';
+                        DBGF("OTA: SHA-256 = %s\n", hex);
+
+                        if (ctx->expectedSha.length() == 64 &&
+                            !ctx->expectedSha.equalsIgnoreCase(hex)) {
+                            DBGF("OTA: SHA-256 mismatch — expected %s\n",
+                                 ctx->expectedSha.c_str());
+                            ctx->rejected    = true;
+                            ctx->shaMismatch = true;
+                            Update.abort();
+                            return;
+                        }
+                    }
                     if (Update.end(true)) DBGF("OTA done: %u bytes\n", index + len);
                     else Update.printError(Serial);
                 }

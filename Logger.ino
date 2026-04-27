@@ -164,6 +164,14 @@ static uint32_t g_hybridIdleStart = 0;       // millis() when STATE_IDLE began
 // Shuts down FreeRTOS tasks for continuous/hybrid before sleeping.
 // ============================================================================
 static void _doSleep() {
+    // Confirm any pending OTA before sleeping.  Without this, a fresh OTA
+    // install in legacy mode (which sleeps within ~2 s of wake) would never
+    // reach the 90 s tick() deadline before the device reset, and the
+    // bootloader would roll a perfectly healthy image back on the next
+    // wake (codex review PR #49).  confirm() is idempotent — no-op when
+    // already confirmed or no pending verify.
+    OtaManager::confirm();
+
     // Give platform tasks a chance to finish current work
     if (g_platformMode != PLATFORM_LEGACY && TaskManager::running) {
         TaskManager::shutdown();
@@ -611,7 +619,7 @@ void setup() {
         // H2: non-blocking active window — poll in 100ms steps so shouldRestart is honoured
         uint32_t windowEnd = millis() + g_hybridActiveMs;
         while (millis() < windowEnd) {
-            if (shouldRestart) { safeWiFiShutdown(); delay(100); ESP.restart(); }
+            if (shouldRestart) { OtaManager::confirm(); safeWiFiShutdown(); delay(100); ESP.restart(); }
             delay(100);
         }
         flushLogBufferToFS();
@@ -620,6 +628,8 @@ void setup() {
         TaskManager::shutdown();
         DBGF("[Hybrid] Timer cycle done — sleeping %us\n", g_hybridSleepMs / 1000);
         Serial.flush();
+        // Confirm pending OTA before deep-sleep — same reason as _doSleep().
+        OtaManager::confirm();
         esp_deep_sleep_start();
         // unreachable — execution resumes from setup() after wakeup
     }
@@ -678,6 +688,12 @@ void setup() {
 // LOOP
 // ============================================================================
 void loop() {
+    // ── OTA rollback watchdog ────────────────────────────────────────────────
+    // No-op once the running image is confirmed; while pending, confirms
+    // automatically after OTA_CONFIRM_TIMEOUT_MS (default 90 s) of stable
+    // operation.  A panic or hardware-watchdog reset before then triggers
+    // a bootloader-level rollback to the previous slot.
+    OtaManager::tick(millis());
     // ── Captive-portal DNS pump (no-op when AP mode is off) ───────────────────
     // The DNS responder is non-blocking; we just need to drain the queue once
     // per loop iteration so phones get prompt replies and the OS-level portal
@@ -714,6 +730,8 @@ void loop() {
     if (shouldRestart && millis() - restartTimer > 2000) {
         DBGLN("Restarting...");
         Serial.flush();
+        // Confirm pending OTA before deliberate reboot — see _doSleep().
+        OtaManager::confirm();
         safeWiFiShutdown();   // ← КЛЮЧОВО: изчиства WiFi преди рестарт
         delay(100);
         ESP.restart();

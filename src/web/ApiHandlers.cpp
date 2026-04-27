@@ -387,6 +387,10 @@ static void handleOtaStatus(AsyncWebServerRequest* req) {
     doc["previous_partition"] = OtaManager::previousPartitionLabel();
     doc["pending_verify"]     = OtaManager::isPendingVerify();
     doc["rollback_capable"]   = OtaManager::isRollbackCapable();
+    // Pass 5 5.6 — countdown until the rollback watchdog auto-confirms.
+    // Zero when not pending or already confirmed; lets the UI surface a
+    // "Confirming in N s" banner on the Update page.
+    doc["confirm_in_ms"]      = OtaManager::millisUntilConfirm();
     String out;
     serializeJson(doc, out);
     req->send(200, "application/json", out);

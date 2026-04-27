@@ -1232,6 +1232,29 @@ function otaUpdatePopupProgress(pct, text) {
   setEl("popupCounter", text);
 }
 
+// Pass 5 5.6 — client-side SHA-256 of the selected .bin so the firmware
+// can verify the image before committing.  Returns "" when SubtleCrypto
+// is unavailable (HTTP context, very old browser); the server treats an
+// empty/missing param as "verification not requested".
+function _otaSha256(file) {
+  return new Promise(function (resolve) {
+    if (!window.crypto || !window.crypto.subtle) { resolve(""); return; }
+    var rd = new FileReader();
+    rd.onload = function (e) {
+      window.crypto.subtle.digest("SHA-256", e.target.result).then(function (buf) {
+        var arr = new Uint8Array(buf);
+        var hex = "";
+        for (var i = 0; i < arr.length; i++) {
+          hex += ("0" + arr[i].toString(16)).slice(-2);
+        }
+        resolve(hex);
+      }).catch(function () { resolve(""); });
+    };
+    rd.onerror = function () { resolve(""); };
+    rd.readAsArrayBuffer(file);
+  });
+}
+
 function otaUpload() {
   var fileInput = document.getElementById("fwFile");
   var uploadBtn = document.getElementById("otaUploadBtn");
@@ -1245,16 +1268,30 @@ function otaUpload() {
   uploadBtn.disabled = true;
   fileInput.disabled = true;
   otaShowPopup(
-    "cloud-upload",
-    "Uploading firmware…",
-    "Please wait while firmware is being uploaded.",
+    "cpu",
+    "Hashing firmware…",
+    "Computing SHA-256 before upload.",
     true,
     false,
   );
 
-  if (progressDiv) progressDiv.style.display = "block";
+  // Compute the hash first, then start the actual upload with the digest
+  // appended as a query param.  HTTP context (no SubtleCrypto) yields ""
+  // and we fall back to the no-verification path the server already handles.
+  _otaSha256(file).then(function (sha) {
+    otaShowPopup(
+      "cloud-upload",
+      "Uploading firmware…",
+      sha
+        ? "Image hashed. Uploading and verifying on-device…"
+        : "Uploading firmware (SHA-256 unavailable on this browser).",
+      true,
+      false,
+    );
 
-  var xhr = new XMLHttpRequest();
+    if (progressDiv) progressDiv.style.display = "block";
+
+    var xhr = new XMLHttpRequest();
   xhr.upload.onprogress = function (e) {
     if (e.lengthComputable) {
       var pct = Math.round((e.loaded / e.total) * 100);
@@ -1370,10 +1407,12 @@ function otaUpload() {
     fileInput.disabled = false;
   };
 
-  var formData = new FormData();
-  formData.append("firmware", file);
-  xhr.open("POST", "/do_update");
-  xhr.send(formData);
+    var formData = new FormData();
+    formData.append("firmware", file);
+    var url = sha ? "/do_update?sha256=" + sha : "/do_update";
+    xhr.open("POST", url);
+    xhr.send(formData);
+  });   // end _otaSha256().then
 }
 
 function dlToggleMaxSize() {
