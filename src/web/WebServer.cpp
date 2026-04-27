@@ -354,7 +354,45 @@ void setupWebServer() {
     // branch").  Registered BEFORE serveStatic so it wins route matching for
     // the exact `/` path.  Also honours a pre-gzipped index.html.gz sibling
     // (audit Pass 4 C1) — flash savings are worth a single extension probe.
+    //
+    // ── Pass 4 C4 — Optional CDN UI ─────────────────────────────────────────
+    // When the firmware is built with -DUI_CDN_BASE="https://example.com/v4",
+    // the root handler emits a tiny bootstrap that loads /style.css and
+    // /js/*.js from the CDN instead of LittleFS.  Frees ~200 KB of LittleFS
+    // for logs.  No build flag → behaviour unchanged.  Local-served pages
+    // and the failsafe HTML are still always available as fallback.
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
+#ifdef UI_CDN_BASE
+        // Build-time CDN opt-in: a 1 KB bootstrap loads the SPA from the
+        // hosted URL.  All API calls still target this device — only the
+        // static bundle moves off-flash.  ?_local=1 lets devs force the
+        // on-device copy when the CDN is unreachable; otherwise CDN is the
+        // default whenever the flag is compiled in.
+        bool wantLocal = r->hasParam("_local");
+        if (!wantLocal) {
+            String html =
+                "<!DOCTYPE html><html lang=\"en\" id=\"htmlRoot\"><head>"
+                "<meta charset=\"UTF-8\">"
+                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">"
+                "<title>Water Logger</title>"
+                "<base href=\"" UI_CDN_BASE "/\">"
+                "<link rel=\"stylesheet\" href=\"style.css\">"
+                "<script src=\"js/theme-boot.js\"></script>"
+                "</head><body>"
+                "<div id=\"cdnBoot\" style=\"font-family:sans-serif;padding:2rem;text-align:center\">"
+                "Loading UI from CDN…</div>"
+                "<script>"
+                  "fetch('" UI_CDN_BASE "/index.html').then(r=>r.text()).then(t=>{"
+                    "document.open();document.write(t);document.close();"
+                  "}).catch(e=>{"
+                    "document.getElementById('cdnBoot').innerHTML="
+                      "'CDN unreachable. <a href=\"/?_local=1\">Use local UI</a>';"
+                  "});"
+                "</script></body></html>";
+            r->send(200, "text/html", html);
+            return;
+        }
+#endif
         if (littleFsAvailable && LittleFS.exists("/www/index.html.gz")) {
             AsyncWebServerResponse* resp =
                 r->beginResponse(LittleFS, "/www/index.html.gz", "text/html");
@@ -1762,6 +1800,52 @@ void setupWebServer() {
     server.onNotFound([touchActivity](AsyncWebServerRequest *r) {
         touchActivity();   // C2: track web activity for idle power management
         String path = r->url();
+
+        // ── Pass 4 F — /api/v1/* alias layer ────────────────────────────────
+        // Forward versioned API requests to the unversioned route via 307
+        // (preserves method + body, unlike 302/303 which can downgrade POST
+        // to GET in some clients).  Lets the deployed UI keep working for
+        // one release while clients migrate to /api/v1/.  Query string is
+        // rebuilt from parsed GET params; POST bodies are resent verbatim
+        // by the client when it follows the 307.
+        if (path.startsWith("/api/v1/")) {
+            String rewritten = "/api/" + path.substring(strlen("/api/v1/"));
+            // Rebuild the query string from parsed params.  This fork of
+            // ESPAsyncWebServer doesn't keep the raw query around (gemini
+            // review PR #50 suggested r->queryString() but that accessor
+            // doesn't exist here), so we re-encode each value defensively
+            // to handle `&`, `=`, ` ` and other reserved chars correctly.
+            auto urlEncode = [](const String& v) -> String {
+                String out;
+                out.reserve(v.length() + 8);
+                for (size_t i = 0; i < v.length(); i++) {
+                    char c = v[i];
+                    bool unreserved = (c >= 'A' && c <= 'Z') ||
+                                      (c >= 'a' && c <= 'z') ||
+                                      (c >= '0' && c <= '9') ||
+                                      c == '-' || c == '_' || c == '.' || c == '~';
+                    if (unreserved) { out += c; continue; }
+                    char buf[4];
+                    snprintf(buf, sizeof(buf), "%%%02X", (uint8_t)c);
+                    out += buf;
+                }
+                return out;
+            };
+            String query;
+            for (size_t i = 0; i < r->params(); i++) {
+                AsyncWebParameter* p = r->getParam(i);
+                if (!p || p->isFile() || p->isPost()) continue;
+                if (query.length()) query += "&";
+                query += urlEncode(p->name());
+                query += "=";
+                query += urlEncode(p->value());
+            }
+            if (query.length()) { rewritten += "?"; rewritten += query; }
+            AsyncWebServerResponse* resp = r->beginResponse(307);
+            resp->addHeader("Location", rewritten);
+            r->send(resp);
+            return;
+        }
 
         if (path.startsWith("/www/")) {
             if (littleFsAvailable && LittleFS.exists(path)) {

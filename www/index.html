@@ -84,7 +84,7 @@
   <!-- ═══ PAGE: DASHBOARD ═══ -->
   <main class="main-content page" id="page-dashboard">
     <div class="page-header">
-      <h1>📊 Dashboard</h1>
+      <h1><span data-icon="bar-chart-3"></span> Dashboard</h1>
     </div>
 
     <!-- File selector -->
@@ -94,14 +94,14 @@
           <select id="fileSelect" class="form-input form-select" style="flex:1;min-width:200px" data-change="dbLoadData">
             <option value="">Loading files...</option>
           </select>
-          <button class="btn btn-primary" data-click="dbLoadData">🔄</button>
+          <button class="btn btn-primary" data-click="dbLoadData"><span data-icon="refresh-cw"></span></button>
         </div>
       </div>
     </div>
 
     <!-- Filters -->
     <div class="card">
-      <div class="card-header">🔍 Filters</div>
+      <div class="card-header"><span data-icon="search"></span> Filters</div>
       <div class="card-body">
         <div class="form-row">
           <div class="form-group"><label class="form-label">Start</label>
@@ -132,7 +132,7 @@
             <input type="checkbox" id="excludeZero" data-change="dbApplyFilters" checked>
             <span>Exclude 0.00L entries</span>
           </label>
-          <button data-click="dbExportCSV" class="btn btn-sm btn-secondary">📥 Export CSV</button>
+          <button data-click="dbExportCSV" class="btn btn-sm btn-secondary"><span data-icon="download"></span> Export CSV</button>
         </div>
       </div>
     </div>
@@ -164,15 +164,15 @@
     <!-- Chart -->
     <div class="card">
       <div class="card-header">
-        <span>📈 Volume</span>
+        <span><span data-icon="line-chart"></span> Volume</span>
         <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
           <label style="display:flex;align-items:center;gap:.3rem;font-size:.8rem;font-weight:400">
             Threshold&nbsp;(L):
             <input type="number" id="db-threshold" class="form-input" style="width:72px;padding:.25rem .4rem;font-size:.82rem" placeholder="none" min="0" step="0.1" data-input="dbApplyFilters">
           </label>
           <div style="display:flex;gap:2px">
-            <button class="btn btn-sm btn-secondary" data-click="dbZoom" data-args="[-1]" title="Zoom in">🔍+</button>
-            <button class="btn btn-sm btn-secondary" data-click="dbZoom" data-args="[1]"  title="Zoom out">🔍−</button>
+            <button class="btn btn-sm btn-secondary" data-click="dbZoom" data-args="[-1]" title="Zoom in"><span data-icon="search"></span>+</button>
+            <button class="btn btn-sm btn-secondary" data-click="dbZoom" data-args="[1]"  title="Zoom out"><span data-icon="search"></span>−</button>
             <button class="btn btn-sm btn-secondary" data-click="dbZoomReset" title="Reset zoom">↺</button>
           </div>
           <button class="btn btn-sm btn-secondary" data-click="dbExportPNG" title="Export chart as PNG">📷 PNG</button>
@@ -189,7 +189,7 @@
   <!-- ═══ PAGE: LIVE ═══ -->
   <main class="main-content page" id="page-live">
     <div class="page-header">
-      <h1>📡 Live</h1>
+      <h1><span data-icon="wifi"></span> Live</h1>
       <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
         <span id="conn" class="text-success">● Connected</span>
         <label style="display:flex;align-items:center;gap:.35rem;font-size:.8rem">
@@ -251,7 +251,7 @@
 
     <!-- State Machine -->
     <div class="card">
-      <div class="card-header">⚙️ State Machine</div>
+      <div class="card-header"><span data-icon="settings"></span> State Machine</div>
       <div class="card-body">
         <div style="display:flex;align-items:center;justify-content:center;gap:1.5rem;flex-wrap:wrap">
           <div style="text-align:center">
@@ -270,7 +270,7 @@
 
     <!-- Button States -->
     <div class="card">
-      <div class="card-header">🔘 Button States</div>
+      <div class="card-header"><span data-icon="circle-dot"></span> Button States</div>
       <div class="card-body">
         <div style="display:flex;justify-content:space-around;flex-wrap:wrap;gap:1rem">
           <div style="text-align:center">
@@ -314,7 +314,7 @@
 
     <!-- System -->
     <div class="card">
-      <div class="card-header">📊 System</div>
+      <div class="card-header"><span data-icon="bar-chart-3"></span> System</div>
       <div class="card-body">
         <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem;font-size:.85rem">
           <span>Boot: <strong id="live-boot">–</strong></span>
@@ -333,7 +333,7 @@
   <!-- ═══ PAGE: FILES ═══ -->
   <main class="main-content page" id="page-files">
     <div class="page-header">
-      <h1>📁 File Manager</h1>
+      <h1><span data-icon="folder"></span> File Manager</h1>
     </div>
 
     <div id="statusMsg"></div>
@@ -357,10 +357,10 @@
     <!-- Directory -->
     <div class="card">
       <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
-        <span id="files-dirLabel">📂 /</span>
+        <span id="files-dirLabel"><span data-icon="folder"></span> /</span>
         <div class="btn-group">
           <button id="upBtn" class="btn btn-sm btn-secondary" data-click="filesGoUp" style="display:none">⬆️ Up</button>
-          <button id="btnEdit" class="btn btn-sm btn-primary" data-click="filesToggleEdit">✏️ Edit</button>
+          <button id="btnEdit" class="btn btn-sm btn-primary" data-click="filesToggleEdit"><span data-icon="pencil"></span> Edit</button>
           <button id="btnDone" class="btn btn-sm btn-secondary" data-click="filesToggleEdit" style="display:none">✖️
             Done</button>
         </div>
@@ -374,12 +374,12 @@
           <form id="uploadForm" data-submit="filesUpload"
             style="display:flex;gap:8px;align-items:center">
             <input type="file" name="file" id="fileInput" required class="form-input" style="width:auto">
-            <button type="submit" class="btn btn-sm btn-success">📤 Upload</button>
+            <button type="submit" class="btn btn-sm btn-success"><span data-icon="cloud-upload"></span> Upload</button>
           </form>
           <form id="mkdirForm" data-submit="filesMkdir"
             style="display:flex;gap:8px;align-items:center">
             <input type="text" id="newFolder" placeholder="New folder" class="form-input" style="width:120px">
-            <button type="submit" class="btn btn-sm btn-primary">📁 Create</button>
+            <button type="submit" class="btn btn-sm btn-primary"><span data-icon="folder"></span> Create</button>
           </form>
         </div>
         <div id="uploadProg" style="display:none;margin-top:8px">
@@ -398,14 +398,14 @@
   <main class="main-content page" id="page-settings">
     <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
       <div>
-        <h1>⚙️ Settings</h1>
+        <h1><span data-icon="settings"></span> Settings</h1>
       </div>
-      <button data-click="showPopup" data-args='["restartPopup"]' class="btn btn-warning">🔄
+      <button data-click="showPopup" data-args='["restartPopup"]' class="btn btn-warning"><span data-icon="refresh-cw"></span>
         Restart</button>
     </div>
 
     <div style="margin-bottom:.75rem">
-      <input type="search" id="settings-search" class="form-input" placeholder="🔍 Filter settings…"
+      <input type="search" id="settings-search" class="form-input" placeholder="Filter settings…"
         style="max-width:340px">
     </div>
 
@@ -415,59 +415,59 @@
         <div class="title">Device</div>
       </div>
       <div class="setting-card" data-click="showSubpage" data-args='["settings_flowmeter"]'>
-        <div class="icon">🔌</div>
+        <div class="icon"><span data-icon="wrench"></span></div>
         <div class="title">Sensors</div>
       </div>
       <div class="setting-card" data-click="showSubpage" data-args='["settings_hardware"]'>
-        <div class="icon">🔧</div>
+        <div class="icon"><span data-icon="wrench"></span></div>
         <div class="title">Hardware</div>
       </div>
       <div class="setting-card" data-click="showSubpage" data-args='["settings_datalog"]'>
-        <div class="icon">📝</div>
+        <div class="icon"><span data-icon="file-text"></span></div>
         <div class="title">Data Log</div>
       </div>
       <div class="setting-card" data-click="showSubpage" data-args='["settings_corelogic"]'>
-        <div class="icon">🧩</div>
+        <div class="icon"><span data-icon="layers"></span></div>
         <div class="title">Core Logic</div>
       </div>
       <div class="setting-card" data-click="showSubpage" data-args='["settings_export"]'>
-        <div class="icon">📡</div>
+        <div class="icon"><span data-icon="wifi"></span></div>
         <div class="title">Export</div>
       </div>
       <div class="setting-card" data-click="showSubpage" data-args='["settings_theme"]'>
-        <div class="icon">🎨</div>
+        <div class="icon"><span data-icon="palette"></span></div>
         <div class="title">Theme</div>
       </div>
       <div class="setting-card" data-click="showSubpage" data-args='["settings_network"]'>
-        <div class="icon">🌐</div>
+        <div class="icon"><span data-icon="globe"></span></div>
         <div class="title">Network</div>
       </div>
       <div class="setting-card" data-click="showSubpage" data-args='["settings_time"]'>
-        <div class="icon">🕐</div>
+        <div class="icon"><span data-icon="clock"></span></div>
         <div class="title">Time Sync</div>
       </div>
       <div class="setting-card" data-click="showSubpage" data-args='["files"]'>
-        <div class="icon">📤</div>
+        <div class="icon"><span data-icon="cloud-upload"></span></div>
         <div class="title">Files</div>
       </div>
       <div class="setting-card" data-click="showSubpage" data-args='["settings_modules"]'>
-        <div class="icon">🧩</div>
+        <div class="icon"><span data-icon="layers"></span></div>
         <div class="title">Modules <span class="badge badge-info">preview</span></div>
       </div>
     </div>
     <div id="settings-no-match" style="display:none;padding:1rem;color:var(--text-muted);text-align:center">No settings match your search.</div>
 
     <div class="card mt-2">
-      <div class="card-header">💾 Backup &amp; Restore</div>
+      <div class="card-header"><span data-icon="save"></span> Backup &amp; Restore</div>
       <div class="card-body">
         <div style="margin-bottom:1rem">
-          <a href="/export_settings" download class="btn btn-primary">📥 Export Settings</a>
+          <a href="/export_settings" download class="btn btn-primary"><span data-icon="download"></span> Export Settings</a>
         </div>
         <form id="importForm" data-submit="settingsImport">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <input type="file" name="settings" id="importFile" accept=".json" class="form-input"
               style="flex:1;min-width:150px">
-            <button type="submit" class="btn btn-secondary">📤 Import</button>
+            <button type="submit" class="btn btn-secondary"><span data-icon="cloud-upload"></span> Import</button>
           </div>
         </form>
         <div id="importProg" style="display:none;margin-top:8px">
@@ -485,8 +485,8 @@
   <!-- ═══ PAGE: SENSORS (live dashboard) ═══ -->
   <main class="main-content page" id="page-sensors">
     <div class="page-header">
-      <h1>🌡️ Sensors</h1>
-      <button class="btn btn-secondary btn-sm" data-click="sensorsLoad">🔄 Refresh</button>
+      <h1><span data-icon="thermometer"></span> Sensors</h1>
+      <button class="btn btn-secondary btn-sm" data-click="sensorsLoad"><span data-icon="refresh-cw"></span> Refresh</button>
     </div>
     <div id="sensors-msg" class="text-muted" style="margin-bottom:1rem;font-size:.9rem">
       Loading sensor data…
@@ -497,7 +497,7 @@
     <!-- Sensor chart -->
     <div class="card" style="margin-top:1rem">
       <div class="card-header">
-        <span>📈 Sensor Chart</span>
+        <span><span data-icon="line-chart"></span> Sensor Chart</span>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select id="sc-sensor" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
             <option value="">— select sensor —</option>
@@ -571,7 +571,7 @@
       </div>
       <div id="sensorPopupFooter" style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.5rem">
         <button class="btn btn-secondary" data-click="hidePopup" data-args='["sensorPopup"]'>Cancel</button>
-        <button class="btn btn-primary" id="sensorPopupSaveBtn">💾 Save</button>
+        <button class="btn btn-primary" id="sensorPopupSaveBtn"><span data-icon="save"></span> Save</button>
       </div>
     </div>
   </div>
@@ -580,7 +580,7 @@
   <!-- RESTART POPUP -->
   <div id="restartPopup" class="popup-overlay" style="display:none">
     <div class="popup-content">
-      <div id="rPopIcon" style="font-size:4rem;margin-bottom:1rem">🔄</div>
+      <div id="rPopIcon" style="font-size:4rem;margin-bottom:1rem"><span data-icon="refresh-cw"></span></div>
       <div id="rPopTitle" style="font-size:1.5rem;font-weight:bold;margin-bottom:.5rem">Restart Device?</div>
       <div id="rPopMsg" style="margin-bottom:1rem">Device will restart.</div>
       <div id="rPopProgress" style="display:none">
@@ -616,10 +616,10 @@
   <!-- ═══ SENSOR EDIT POPUP ═══ -->
   <div id="sensor-edit-popup" class="popup-overlay" style="display:none" data-click="backdropClose" data-backdrop-fn="sepClose">
     <div class="popup-content" style="max-width:520px;text-align:left;width:92%;max-height:88vh;overflow-y:auto">
-      <div style="font-size:1.2rem;font-weight:700;margin-bottom:1rem">✏️ Edit Sensor</div>
+      <div style="font-size:1.2rem;font-weight:700;margin-bottom:1rem"><span data-icon="pencil"></span> Edit Sensor</div>
       <div id="sep-fields"></div>
       <div style="display:flex;gap:.5rem;margin-top:1.25rem">
-        <button class="btn btn-primary" data-click="sepConfirm">💾 Save</button>
+        <button class="btn btn-primary" data-click="sepConfirm"><span data-icon="save"></span> Save</button>
         <button class="btn btn-secondary" data-click="sepClose">Cancel</button>
       </div>
     </div>
@@ -678,9 +678,9 @@
   <!-- ═══ FOOTER ═══ -->
   <footer class="app-footer">
     <div class="footer-grid">
-      <span>🔄 Boot: <span id="footer-boot" class="text-primary">--</span></span>
+      <span><span data-icon="refresh-cw"></span> Boot: <span id="footer-boot" class="text-primary">--</span></span>
       <span>⚡ CPU: <span id="footer-cpu">--</span> MHz</span>
-      <span>💾 <span id="footer-heap">--</span></span>
+      <span><span data-icon="save"></span> <span id="footer-heap">--</span></span>
     </div>
     <div class="footer-row">
       <span>📶 <span id="footer-net">--</span></span>
