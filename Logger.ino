@@ -694,6 +694,11 @@ void loop() {
     // operation.  A panic or hardware-watchdog reset before then triggers
     // a bootloader-level rollback to the previous slot.
     OtaManager::tick(millis());
+    // ── Captive-portal DNS pump (no-op when AP mode is off) ───────────────────
+    // The DNS responder is non-blocking; we just need to drain the queue once
+    // per loop iteration so phones get prompt replies and the OS-level portal
+    // banner triggers within a second of joining the AP.
+    tickCaptivePortalDNS();
 
     // ── Deferred NTP sync ─────────────────────────────────────────────────────
     // The /sync_time web handler sets g_pendingNtpSync=1 and returns 202 so it

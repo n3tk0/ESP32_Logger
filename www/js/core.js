@@ -411,6 +411,18 @@ function skipToContent() {
   _themeUpdateToggleIcon(pref);
 })();
 
+// Pass 7 CSRF — fetch the per-boot token early so the first mutating
+// request carries it.  Cached in window.__csrfToken; cleared on any
+// 403 csrf response so callers retry transparently.
+(function () {
+  fetch("/api/csrf-token", { credentials: "same-origin" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (d && d.token) window.__csrfToken = d.token;
+    })
+    .catch(function () { /* offline-friendly: caller will retry */ });
+})();
+
 // ============================================================================
 // NAVIGATION
 // ============================================================================
@@ -791,6 +803,10 @@ var PAGE_MSG_IDS = {
 function settingsSave(ev, url, form, restart) {
   if (ev) ev.preventDefault();
   var fd = new FormData(form);
+  // Pass 7 CSRF — server requires the per-boot token on every mutating
+  // call.  Cached in window.__csrfToken on first need; cleared on a
+  // 403/csrf response so the next save refetches automatically.
+  if (window.__csrfToken) fd.append("csrf", window.__csrfToken);
   var xhr = new XMLHttpRequest();
   xhr.open("POST", url);
   xhr.onload = function () {

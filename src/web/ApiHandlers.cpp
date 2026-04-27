@@ -2,6 +2,7 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <WiFi.h>                      // WiFi scan/test (Pass 5 5.5 phase 1)
+#include <time.h>                      // /api/backup created_at (Pass 5 5.7)
 #include <freertos/task.h>
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/AggregationEngine.h"
@@ -717,11 +718,94 @@ static void handleApiModulesDispatch(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/backup — full-state JSON snapshot (Pass 5 5.7).
+//
+// Bundles the JSON-layer config files into a single download so users can
+// archive a complete known-good state and restore it on a new device:
+//   /config/modules.json  → backup.modules
+//   /config/sensors.json  → backup.sensors
+//   platform_config.json  → backup.platform
+// plus a header section identifying the device + firmware + boot count.
+//
+// /export_settings continues to expose the binary core config; clients
+// that need the full picture fetch both and merge.  Restore is intentionally
+// a separate endpoint (not yet shipped) — backup is the safe-to-ship slice.
+// ---------------------------------------------------------------------------
+static void handleApiBackup(AsyncWebServerRequest* req) {
+    // Serialise against background config writes — handleApiData uses the
+    // same configMutex pattern, and saveConfig() / handleApiModuleUpdate
+    // can race with us otherwise.  500 ms is plenty for a JSON read pass.
+    if (!configMutex || xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+        req->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+        return;
+    }
+
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+
+    // Suggest a sensible filename so curl -OJ / browser save-as gets it
+    // right (e.g. "waterlogger-backup-c8df84c4ed68-42.json").
+    String fname = "waterlogger-backup-";
+    fname += config.deviceId[0] ? config.deviceId : "device";
+    fname += "-";
+    fname += String((unsigned)bootCount);
+    fname += ".json";
+    resp->addHeader("Content-Disposition",
+                    String("attachment; filename=\"") + fname + "\"");
+
+    JsonDocument doc;
+    doc["version"] = 1;
+    // Prefer wall-clock time when the RTC has been set; fall back to uptime
+    // seconds when it hasn't (gemini review PR #51).  Restore code can tell
+    // the two apart by checking time_valid.
+    if (rtcValid) {
+        time_t now = 0; time(&now);
+        doc["created_at"] = (uint32_t)now;
+        doc["time_valid"] = true;
+    } else {
+        doc["created_at"] = (uint32_t)(millis() / 1000UL);
+        doc["time_valid"] = false;
+    }
+
+    JsonObject dev = doc["device"].to<JsonObject>();
+    dev["name"]       = config.deviceName[0] ? config.deviceName : "Water Logger";
+    dev["id"]         = config.deviceId;
+    dev["firmware"]   = getVersionString();
+    dev["boot_count"] = bootCount;
+
+    // Deserialize each shadow file directly into the parent doc to avoid
+    // the temp-doc + deep-copy round-trip (gemini review PR #51).
+    auto inhaleJsonFile = [](JsonObject parent, const char* key, const char* path) {
+        if (!activeFS || !activeFS->exists(path)) return;
+        File f = activeFS->open(path, FILE_READ);
+        if (!f) return;
+        // 16 KB cap — same as ExportManager / SensorManager input caps;
+        // beyond that we'd risk OOM on the AsyncTCP worker.
+        if (f.size() > 16 * 1024) { f.close(); return; }
+        JsonVariant slot = parent[key].to<JsonVariant>();
+        if (deserializeJson(slot, f) != DeserializationError::Ok) {
+            parent.remove(key);
+        }
+        f.close();
+    };
+
+    // Each section is best-effort — a missing file just leaves the key off
+    // the response.  Restore code (future) must cope with absent keys.
+    inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
+    inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
+    inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+
+    serializeJson(doc, *resp);
+    xSemaphoreGive(configMutex);
+    req->send(resp);
+}
+
+// ---------------------------------------------------------------------------
 void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/data",              HTTP_GET,  handleApiData);
     server.on("/api/sensors",           HTTP_GET,  handleApiSensors);
     server.on("/api/sensors/read_now",  HTTP_GET,  handleApiSensorReadNow);
     server.on("/api/diag",              HTTP_GET,  handleApiDiag);
+    server.on("/api/backup",            HTTP_GET,  handleApiBackup);
     server.on("/api/config/platform",   HTTP_POST, handleConfigPlatform);
     server.on("/api/mqtt/ha_discovery", HTTP_POST, handleMqttHaDiscovery);
     server.on("/api/ota/status",        HTTP_GET,  handleOtaStatus);
