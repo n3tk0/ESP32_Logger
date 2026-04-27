@@ -123,7 +123,11 @@ void startAPMode() {
     WiFi.softAPConfig(apIP, apGW, apSubnet);
     WiFi.softAP(apName.c_str(), config.network.apPassword);
 
-    currentIPAddress      = WiFi.softAPIP().toString();
+    // Use the locally-configured `apIP` instead of WiFi.softAPIP() for the
+    // same reason as the DNS bind below — softAPIP() can transiently return
+    // 0.0.0.0 right after softAP() while the netif finishes coming up
+    // (gemini review PR #48).
+    currentIPAddress      = apIP.toString();
     wifiConnectedAsClient = false;
     DBGF("WiFi: AP IP: %s\n", currentIPAddress.c_str());
 

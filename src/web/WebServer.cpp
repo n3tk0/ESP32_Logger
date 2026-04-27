@@ -453,7 +453,13 @@ void setupWebServer() {
         // and Windows captive-portal probes refuse to follow relative
         // redirects when the Host header doesn't match the expected probe
         // domain — an absolute URL sidesteps that entirely.
-        String url = "http://" + WiFi.softAPIP().toString() + "/";
+        //
+        // Use `r->client()->localIP()` rather than WiFi.softAPIP() — it's
+        // the IP of the interface that actually received the request, which
+        // (a) avoids the transient 0.0.0.0 that softAPIP() can return right
+        // after softAP() startup, and (b) handles WIFI_AP_STA correctly
+        // when the test endpoint puts us in dual mode (gemini review #2).
+        String url = "http://" + r->client()->localIP().toString() + "/";
         r->redirect(url);
     };
     // Apple iOS / macOS
