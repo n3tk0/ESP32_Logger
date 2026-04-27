@@ -20,6 +20,7 @@
 #include "../utils/Utils.h"
 #include "ApiHandlers.h"
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
+#include "CsrfToken.h"                 // Pass 7 CSRF on mutating routes
 #include "../pipeline/DataPipeline.h"   // fsMutex (FS1)
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -539,6 +540,18 @@ void setupWebServer() {
         sendJsonResponse(r, doc);
     });
 
+    // Pass 7 — per-boot CSRF token for the SPA to inject into mutating
+    // calls.  Generated on first call from esp_random(); same token
+    // returned for the lifetime of the firmware run.
+    server.on("/api/csrf-token", HTTP_GET, [](AsyncWebServerRequest *r) {
+        String body = "{\"token\":\"";
+        body += CsrfToken::get();
+        body += "\"}";
+        AsyncWebServerResponse* resp = r->beginResponse(200, "application/json", body);
+        resp->addHeader("Cache-Control", "no-store");
+        r->send(resp);
+    });
+
     server.on("/api/theme", HTTP_GET, [fillTheme](AsyncWebServerRequest *r) {
         JsonDocument doc;
         fillTheme(doc.to<JsonObject>());
@@ -918,6 +931,7 @@ void setupWebServer() {
 
     server.on("/save_device", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("deviceName", true))
             SAFE_STRNCPY(config.deviceName, r->getParam("deviceName", true)->value().c_str(), sizeof(config.deviceName));
         if (r->hasParam("deviceId", true)) {
@@ -934,6 +948,7 @@ void setupWebServer() {
 
     server.on("/save_flowmeter", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("pulsesPerLiter", true)) {
             float v = r->getParam("pulsesPerLiter", true)->value().toFloat();
             config.flowMeter.pulsesPerLiter = (v >= 1.0f && isfinite(v)) ? v : 450.0f;
@@ -956,6 +971,7 @@ void setupWebServer() {
 
     server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("storageType", true))    config.hardware.storageType    = (StorageType)r->getParam("storageType", true)->value().toInt();
         if (r->hasParam("wakeupMode", true))     config.hardware.wakeupMode     = (WakeupMode)r->getParam("wakeupMode", true)->value().toInt();
         if (r->hasParam("pinWifiTrigger", true)) config.hardware.pinWifiTrigger = r->getParam("pinWifiTrigger", true)->value().toInt();
@@ -980,6 +996,7 @@ void setupWebServer() {
 
     server.on("/save_theme", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("themeMode", true))        config.theme.mode           = (ThemeMode)r->getParam("themeMode", true)->value().toInt();
         config.theme.showIcons = r->hasParam("showIcons", true);
         if (r->hasParam("primaryColor", true))     SAFE_STRNCPY(config.theme.primaryColor,      r->getParam("primaryColor", true)->value().c_str(), sizeof(config.theme.primaryColor));
@@ -1007,6 +1024,7 @@ void setupWebServer() {
 
     server.on("/save_datalog", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("currentFile", true))  SAFE_STRNCPY(config.datalog.currentFile, r->getParam("currentFile", true)->value().c_str(), sizeof(config.datalog.currentFile));
         if (r->hasParam("prefix", true))       SAFE_STRNCPY(config.datalog.prefix,      r->getParam("prefix", true)->value().c_str(), sizeof(config.datalog.prefix));
         if (r->hasParam("folder", true))       SAFE_STRNCPY(config.datalog.folder,      r->getParam("folder", true)->value().c_str(), sizeof(config.datalog.folder));
@@ -1068,6 +1086,7 @@ void setupWebServer() {
 
     server.on("/save_network", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("wifiMode", true))       config.network.wifiMode = (WiFiModeType)r->getParam("wifiMode", true)->value().toInt();
         if (r->hasParam("apSSID", true))         SAFE_STRNCPY(config.network.apSSID,         r->getParam("apSSID", true)->value().c_str(), sizeof(config.network.apSSID));
         if (r->hasParam("apPassword", true))     SAFE_STRNCPY(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), sizeof(config.network.apPassword));
@@ -1099,6 +1118,7 @@ void setupWebServer() {
 
     server.on("/save_time", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("ntpServer", true)) SAFE_STRNCPY(config.network.ntpServer, r->getParam("ntpServer", true)->value().c_str(), sizeof(config.network.ntpServer));
         if (r->hasParam("timezone", true))  config.network.timezone = r->getParam("timezone", true)->value().toInt();
         saveConfig();
@@ -1705,6 +1725,13 @@ void setupWebServer() {
         server.on("/save_platform", HTTP_POST,
             [pcfgCleanup](AsyncWebServerRequest *r) {
                 if (rateLimit429(r)) { pcfgCleanup(); return; }
+                // Note: CSRF deliberately NOT checked here — this route
+                // takes a raw application/json body, so onRequest fires
+                // without form params being populated; querying for `csrf`
+                // would 403 every legitimate save.  Adding query-string
+                // CSRF would require updating both the SPA and the
+                // PROGMEM failsafe HTML.  Tracked as a follow-up; the
+                // route still has rate-limit protection in the meantime.
                 if (!fsAvailable || !activeFS) {
                     pcfgCleanup();
                     r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
