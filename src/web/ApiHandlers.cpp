@@ -4,6 +4,7 @@
 #include <WiFi.h>                      // WiFi scan/test (Pass 5 5.5 phase 1)
 #include <time.h>                      // /api/backup created_at (Pass 5 5.7)
 #include <freertos/task.h>
+#include <new>                            // std::nothrow
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/AggregationEngine.h"
 #include "../sensors/SensorManager.h"
@@ -56,14 +57,15 @@ static void handleApiData(AsyncWebServerRequest* req) {
                         ? req->getParam("mode")->value().c_str() : "lttb");
     size_t     limit  = req->hasParam("limit")
                         ? (size_t)req->getParam("limit")->value().toInt()
-                        : 500;
-    if (limit < 1 || limit > 5000) limit = 500;
+                        : 250;
+    if (limit < 1) limit = 250;
+    if (limit > 300) limit = 300; // Cap to 300 to prevent OOM on ESP32-C3 (~24KB)
 
     // --- Fetch raw data ---
     // Strategy: first try in-memory ring buffer (recent data),
     //           fall back to filesystem query for historical data.
-    constexpr size_t MAX_RAW = 500;  // 40 KB vs 160 KB — prevents OOM on ESP32-C3
-    SensorReading* raw = new SensorReading[MAX_RAW];
+    constexpr size_t MAX_RAW = 300;  // ~20 KB — prevents OOM on ESP32-C3
+    SensorReading* raw = new(std::nothrow) SensorReading[MAX_RAW];
     if (!raw) {
         req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
         return;
@@ -111,7 +113,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
                           (mode != AGG_RAW) &&
                           (bucket != BUCKET_RAW);
 
-    SensorReading* agg     = new SensorReading[limit + 1];
+    SensorReading* agg     = new(std::nothrow) SensorReading[limit + 1];
     size_t         aggCount = 0;
     bool           truncated = false;
 
@@ -227,9 +229,10 @@ static void handleApiSensors(AsyncWebServerRequest* req) {
     JsonArray arr = doc["sensors"].to<JsonArray>();
     sensorManager.toJson(arr);
 
-    String out;
-    serializeJson(doc, out);
-    req->send(200, "application/json", out);
+    AsyncResponseStream* response =
+        req->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    req->send(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -301,9 +304,10 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     ota["pending_verify"]   = OtaManager::isPendingVerify();
     ota["rollback_capable"] = OtaManager::isRollbackCapable();
 
-    String out;
-    serializeJson(doc, out);
-    req->send(200, "application/json", out);
+    AsyncResponseStream* response =
+        req->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    req->send(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -357,9 +361,10 @@ static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
         r["value"]  = readings[i].value;
         r["unit"]   = readings[i].unit;
     }
-    String out;
-    serializeJson(doc, out);
-    req->send(200, "application/json", out);
+    AsyncResponseStream* response =
+        req->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    req->send(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -391,9 +396,10 @@ static void handleOtaStatus(AsyncWebServerRequest* req) {
     // Zero when not pending or already confirmed; lets the UI surface a
     // "Confirming in N s" banner on the Update page.
     doc["confirm_in_ms"]      = OtaManager::millisUntilConfirm();
-    String out;
-    serializeJson(doc, out);
-    req->send(200, "application/json", out);
+    AsyncResponseStream* response =
+        req->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    req->send(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -435,8 +441,9 @@ static void handleApiModulesIndex(AsyncWebServerRequest* req) {
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
     moduleRegistry.toIndexJson(arr);
-    String body; serializeJson(doc, body);
-    req->send(200, "application/json", body);
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+    serializeJson(doc, *resp);
+    req->send(resp);
 }
 
 // GET /api/modules/:id → {id,name,enabled,hasUI,config,schema?}
@@ -448,8 +455,9 @@ static void handleApiModuleDetail(AsyncWebServerRequest* req, const String& id) 
         req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
         return;
     }
-    String body; serializeJson(doc, body);
-    req->send(200, "application/json", body);
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+    serializeJson(doc, *resp);
+    req->send(resp);
 }
 
 // POST /api/modules/:id with JSON body → load() + persist.
@@ -510,13 +518,13 @@ static void handleApiModuleEnable(AsyncWebServerRequest* req, const String& id) 
     }
     saveConfig();
 
-    JsonDocument out;
-    out["ok"] = true;
-    out["enabled"] = on;
-    out["restartRequired"] = restartRequired;
-    String body;
-    serializeJson(out, body);
-    req->send(200, "application/json", body);
+    JsonDocument outDoc;
+    outDoc["ok"] = true;
+    outDoc["enabled"] = on;
+    outDoc["restartRequired"] = restartRequired;
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+    serializeJson(outDoc, *resp);
+    req->send(resp);
 }
 
 // ---------------------------------------------------------------------------

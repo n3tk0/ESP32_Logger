@@ -4,7 +4,6 @@
 #include <WiFi.h>
 #include <DNSServer.h>            // Captive portal — Pass 5 5.5 phase 2
 #include <time.h>
-#include <esp_task_wdt.h>
 
 // Captive-portal DNS responder.  Bound to UDP/53 with a wildcard "*" rule
 // that resolves every query to the soft-AP IP, so a phone's captive-portal
@@ -90,7 +89,7 @@ bool connectToWiFi() {
     while (WiFi.status() != WL_CONNECTED &&
            millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
         delay(100);
-        esp_task_wdt_reset();
+        yield();  // Cooperative scheduling (task not registered with ESP-IDF TWDT)
         if (millis() - lastDot >= 250) { Serial.print("."); lastDot = millis(); }
     }
 

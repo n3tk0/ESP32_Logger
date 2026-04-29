@@ -1,0 +1,1314 @@
+<!DOCTYPE html><html lang="en" data-theme="light" data-density="comfortable" data-nav="sidebar" data-accent="cyan"><head>
+
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ESP32 Logger — Audit &amp; Redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@0.441.0/dist/umd/lucide.min.js"></script>
+<script>
+const TWEAKS = /*EDITMODE-BEGIN*/{
+  "theme": "light",
+  "nav": "sidebar",
+  "density": "comfortable",
+  "accent": "cyan"
+}/*EDITMODE-END*/;
+</script>
+<link rel="stylesheet" href="esp32-redesign.css">
+<link id="gfont-Inter" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap"></head>
+<body style="font-family: Inter; font-size: 14px;">
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<div class="frame">
+  <div class="frame-bar">
+    <div class="brand"><span class="dot"></span> ESP32 Logger · Redesign Proposal</div>
+    <div class="frame-tabs">
+      <button class="ftab active" data-view="proto"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="layout-dashboard" class="lucide lucide-layout-dashboard"><rect width="7" height="9" x="3" y="3" rx="1"></rect><rect width="7" height="5" x="14" y="3" rx="1"></rect><rect width="7" height="9" x="14" y="12" rx="1"></rect><rect width="7" height="5" x="3" y="16" rx="1"></rect></svg> Prototype</button>
+      <button class="ftab" data-view="audit"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="clipboard-list" class="lucide lucide-clipboard-list"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="M12 11h4"></path><path d="M12 16h4"></path><path d="M8 11h.01"></path><path d="M8 16h.01"></path></svg> Audit</button>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <span class="mono" style="color:var(--text-3);font-size:11px">v6.0-rc</span>
+    </div>
+  </div>
+
+  <!-- ════════════════ PROTOTYPE ════════════════ -->
+  <div class="frame-body" id="view-proto">
+    <div class="app">
+      <!-- topbar -->
+      <header class="topbar" role="banner">
+        <button class="icon-btn nav-burger" id="navBurger" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="sidebar"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="menu" class="lucide lucide-menu"><line x1="4" x2="20" y1="12" y2="12"></line><line x1="4" x2="20" y1="6" y2="6"></line><line x1="4" x2="20" y1="18" y2="18"></line></svg></button>
+        <div class="logo">
+          <div class="logo-mark"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="droplets" class="lucide lucide-droplets"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"></path><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"></path></svg></div>
+          <div>
+            <div class="logo-name">Water Logger</div>
+            <div class="logo-meta mono">XIAO-C3 · 192.168.1.42</div>
+          </div>
+        </div>
+        <div class="status-strip">
+          <span class="pill ok"><span class="dot"></span> Online</span>
+          <span class="pill mono" id="topClock">15:43:06</span>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="icon-btn" id="themeBtn" aria-label="Toggle light/dark theme"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="moon" class="lucide lucide-moon"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg></button>
+          <button class="icon-btn" aria-label="Notifications"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="bell" class="lucide lucide-bell"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg></button>
+          <button class="icon-btn" aria-label="Restart device"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="rotate-ccw" class="lucide lucide-rotate-ccw"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg></button>
+        </div>
+      </header>
+
+      <!-- sidebar -->
+      <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
+        <div class="nav-group">Main</div>
+        <a class="nav-item active" data-page="dashboard"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="layout-dashboard" class="lucide lucide-layout-dashboard"><rect width="7" height="9" x="3" y="3" rx="1"></rect><rect width="7" height="5" x="14" y="3" rx="1"></rect><rect width="7" height="9" x="14" y="12" rx="1"></rect><rect width="7" height="5" x="3" y="16" rx="1"></rect></svg><span>Dashboard</span></a>
+        <a class="nav-item" data-page="live"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="activity" class="lucide lucide-activity"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg><span>Live</span><span class="ndot"></span></a>
+        <a class="nav-item" data-page="sensors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="thermometer" class="lucide lucide-thermometer"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"></path></svg><span>Sensors</span><span class="nbadge mono">8</span></a>
+        <a class="nav-item" data-page="files"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="folder" class="lucide lucide-folder"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg><span>Files</span></a>
+        <div class="nav-group">System</div>
+        <a class="nav-item" data-page="settings"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="settings" class="lucide lucide-settings"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg><span>Settings</span></a>
+        <a class="nav-item" data-page="corelogic"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="puzzle" class="lucide lucide-puzzle"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z"></path></svg><span>Core Logic</span></a>
+        <a class="nav-item" data-page="export"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="cloud-upload" class="lucide lucide-cloud-upload"><path d="M12 13v8"></path><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="m8 17 4-4 4 4"></path></svg><span>Export</span></a>
+        <a class="nav-item" data-page="update"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="upload-cloud" class="lucide lucide-upload-cloud"><path d="M12 13v8"></path><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="m8 17 4-4 4 4"></path></svg><span>Update</span></a>
+        <div class="sidebar-foot">
+          <div class="sidebar-stats">
+            <div class="sstat"><i data-lucide="wifi"></i><span>-54 dBm</span></div>
+            <div class="sstat"><i data-lucide="cpu"></i><span>160 MHz</span></div>
+            <div class="sstat"><i data-lucide="hard-drive"></i><span>64% / 1.4 MB</span></div>
+            <div class="sstat ok"><i data-lucide="circle"></i><span>Online</span></div>
+          </div>
+          <div class="mono" style="color:var(--text-3);font-size:11px">FW 5.2.1 · Boot #142</div>
+          <div class="mono" style="color:var(--text-4);font-size:10px;margin-top:2px">© Petko Georgiev</div>
+        </div>
+      </aside>
+
+      <!-- bottom nav (mobile / when nav=bottom) -->
+      <nav class="bottomnav">
+        <a class="bnav active" data-page="dashboard"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="layout-dashboard" class="lucide lucide-layout-dashboard"><rect width="7" height="9" x="3" y="3" rx="1"></rect><rect width="7" height="5" x="14" y="3" rx="1"></rect><rect width="7" height="9" x="14" y="12" rx="1"></rect><rect width="7" height="5" x="3" y="16" rx="1"></rect></svg><span>Dash</span></a>
+        <a class="bnav" data-page="live"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="activity" class="lucide lucide-activity"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg><span>Live</span></a>
+        <a class="bnav" data-page="sensors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="thermometer" class="lucide lucide-thermometer"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"></path></svg><span>Sensors</span></a>
+        <a class="bnav" data-page="files"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="folder" class="lucide lucide-folder"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg><span>Files</span></a>
+        <a class="bnav" data-page="settings"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="settings" class="lucide lucide-settings"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg><span>More</span></a>
+      </nav>
+
+      <!-- main pages -->
+      <main class="main" id="main-content" tabindex="-1">
+        <!-- ─── DASHBOARD ─── -->
+        <section class="page active" data-page="dashboard">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Dashboard</h1>
+              <div class="page-sub">Water consumption · last 7 days</div>
+            </div>
+            <div class="page-actions">
+              <div class="seg" id="rangeSeg">
+                <button>24h</button><button class="active">7d</button><button>30d</button><button>All</button>
+              </div>
+              <button class="btn"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg> Export CSV</button>
+              <button class="btn"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="image" class="lucide lucide-image"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg> PNG</button>
+            </div>
+          </div>
+
+          <div class="grid grid-4">
+            <div class="kpi">
+              <div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="droplets" class="lucide lucide-droplets"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"></path><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"></path></svg> Total volume</div>
+              <div class="kpi-v"><span class="num">142.6</span><span class="unit">L</span></div>
+              <div class="kpi-d up"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trending-up" class="lucide lucide-trending-up"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline><polyline points="16 7 22 7 22 13"></polyline></svg> +8.2% vs prev</div>
+              <svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"><polyline points="0,22 10,18 20,20 30,12 40,15 50,8 60,11 70,6 80,9 90,4 100,7" fill="none" stroke="currentColor" stroke-width="1.5"></polyline></svg>
+            </div>
+            <div class="kpi">
+              <div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="zap" class="lucide lucide-zap"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"></path></svg> Events</div>
+              <div class="kpi-v"><span class="num">87</span><span class="unit">flushes</span></div>
+              <div class="kpi-d"><span class="mono">FF 24</span> · <span class="mono">PF 63</span></div>
+              <svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"><polyline points="0,18 10,15 20,20 30,18 40,12 50,16 60,10 70,14 80,8 90,12 100,6" fill="none" stroke="currentColor" stroke-width="1.5"></polyline></svg>
+            </div>
+            <div class="kpi">
+              <div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="alert-triangle" class="lucide lucide-alert-triangle"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg> Extra presses</div>
+              <div class="kpi-v"><span class="num">11</span><span class="unit">corrected</span></div>
+              <div class="kpi-d down"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trending-down" class="lucide lucide-trending-down"><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"></polyline><polyline points="16 17 22 17 22 11"></polyline></svg> −3 vs prev</div>
+              <svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"><polyline points="0,8 10,12 20,10 30,14 40,12 50,18 60,16 70,20 80,18 90,22 100,20" fill="none" stroke="currentColor" stroke-width="1.5"></polyline></svg>
+            </div>
+            <div class="kpi">
+              <div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="gauge" class="lucide lucide-gauge"><path d="m12 14 4-4"></path><path d="M3.34 19a10 10 0 1 1 17.32 0"></path></svg> Avg per event</div>
+              <div class="kpi-v"><span class="num">1.64</span><span class="unit">L</span></div>
+              <div class="kpi-d"><span class="mono">min 0.3</span> · <span class="mono">max 6.1</span></div>
+              <svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"><polyline points="0,16 10,14 20,17 30,13 40,15 50,12 60,14 70,11 80,13 90,10 100,12" fill="none" stroke="currentColor" stroke-width="1.5"></polyline></svg>
+            </div>
+          </div>
+
+          <div class="grid grid-12" style="margin-top:var(--gap)">
+            <div class="card span-8">
+              <div class="card-head">
+                <div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="bar-chart-3" class="lucide lucide-bar-chart-3"><path d="M3 3v16a2 2 0 0 0 2 2h16"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path></svg> Volume timeline</div>
+                <div style="display:flex;gap:6px;align-items:center">
+                  <span class="legend"><i class="sw" style="background:var(--accent)"></i> FF</span>
+                  <span class="legend"><i class="sw" style="background:var(--accent-2);opacity:.6"></i> PF</span>
+                  <span class="legend"><i class="sw" style="background:var(--text-4)"></i> Other</span>
+                  <button class="btn-mini" title="Zoom"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="search" class="lucide lucide-search"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></button>
+                  <button class="btn-mini" title="Reset"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="rotate-ccw" class="lucide lucide-rotate-ccw"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg></button>
+                </div>
+              </div>
+              <div class="card-body" style="padding:8px 12px 12px">
+                <div class="chart-wrap" id="chartWrap">
+                  <svg viewBox="0 0 700 220" preserveAspectRatio="none" class="chart-svg">
+                    <!-- gridlines -->
+                    <g stroke="var(--border)" stroke-width="1">
+                      <line x1="0" y1="0" x2="700" y2="0"></line>
+                      <line x1="0" y1="55" x2="700" y2="55"></line>
+                      <line x1="0" y1="110" x2="700" y2="110"></line>
+                      <line x1="0" y1="165" x2="700" y2="165"></line>
+                      <line x1="0" y1="219" x2="700" y2="219"></line>
+                    </g>
+                    <!-- bars -->
+                    <g id="chartBars"><rect x="11" y="128.3673469387755" width="22.285714285714285" height="81.63265306122449" fill="var(--accent)" opacity="0.85" rx="1"></rect><rect x="35.285714285714285" y="148.77551020408163" width="22.285714285714285" height="61.224489795918366" fill="var(--accent-2)" opacity="0.45" rx="1"></rect><rect x="59.57142857142857" y="101.156462585034" width="22.285714285714285" height="108.843537414966" fill="var(--text-4)" opacity="0.45" rx="1"></rect><rect x="83.85714285714286" y="162.38095238095238" width="22.285714285714285" height="47.61904761904762" fill="var(--accent)" opacity="0.85" rx="1"></rect><rect x="108.14285714285714" y="56.93877551020407" width="22.285714285714285" height="153.06122448979593" fill="var(--accent-2)" opacity="0.45" rx="1"></rect><rect x="132.42857142857142" y="135.17006802721087" width="22.285714285714285" height="74.82993197278913" fill="var(--text-4)" opacity="0.45" rx="1"></rect><rect x="156.71428571428572" y="114.76190476190476" width="22.285714285714285" height="95.23809523809524" fill="var(--accent)" opacity="0.85" rx="1"></rect><rect x="181" y="80.74829931972789" width="22.285714285714285" height="129.2517006802721" fill="var(--accent-2)" opacity="0.45" rx="1"></rect><rect x="205.28571428571428" y="158.9795918367347" width="22.285714285714285" height="51.02040816326531" fill="var(--text-4)" opacity="0.45" rx="1"></rect><rect x="229.57142857142856" y="67.14285714285714" width="22.285714285714285" height="142.85714285714286" fill="var(--accent)" opacity="0.85" rx="1"></rect><rect x="253.85714285714283" y="121.56462585034012" width="22.285714285714285" height="88.43537414965988" fill="var(--accent-2)" opacity="0.45" rx="1"></rect><rect x="278.1428571428571" y="104.55782312925169" width="22.285714285714285" height="105.44217687074831" fill="var(--text-4)" opacity="0.45" rx="1"></rect><rect x="302.42857142857144" y="145.37414965986395" width="22.285714285714285" height="64.62585034013605" fill="var(--accent)" opacity="0.85" rx="1"></rect><rect x="326.7142857142857" y="94.35374149659864" width="22.285714285714285" height="115.64625850340136" fill="var(--accent-2)" opacity="0.45" rx="1"></rect><rect x="351" y="111.36054421768706" width="22.285714285714285" height="98.63945578231294" fill="var(--text-4)" opacity="0.45" rx="1"></rect><rect x="375.2857142857143" y="70.54421768707482" width="22.285714285714285" height="139.45578231292518" fill="var(--accent)" opacity="0.85" rx="1"></rect><rect x="399.57142857142856" y="131.7687074829932" width="22.285714285714285" height="78.2312925170068" fill="var(--accent-2)" opacity="0.45" rx="1"></rect><rect x="423.85714285714283" y="84.14965986394557" width="22.285714285714285" height="125.85034013605443" fill="var(--text-4)" opacity="0.45" rx="1"></rect><rect x="448.1428571428571" y="155.578231292517" width="22.285714285714285" height="54.421768707483" fill="var(--accent)" opacity="0.85" rx="1"></rect><rect x="472.4285714285714" y="43.333333333333314" width="22.285714285714285" height="166.66666666666669" fill="var(--accent-2)" opacity="0.45" rx="1"></rect><rect x="496.71428571428567" y="114.76190476190476" width="22.285714285714285" height="95.23809523809524" fill="var(--text-4)" opacity="0.45" rx="1"></rect><rect x="521" y="97.75510204081631" width="22.285714285714285" height="112.24489795918369" fill="var(--accent)" opacity="0.85" rx="1"></rect><rect x="545.2857142857142" y="138.57142857142856" width="22.285714285714285" height="71.42857142857143" fill="var(--accent-2)" opacity="0.45" rx="1"></rect><rect x="569.5714285714286" y="77.34693877551018" width="22.285714285714285" height="132.65306122448982" fill="var(--text-4)" opacity="0.45" rx="1"></rect><rect x="593.8571428571429" y="124.96598639455783" width="22.285714285714285" height="85.03401360544218" fill="var(--accent)" opacity="0.85" rx="1"></rect><rect x="618.1428571428571" y="60.34013605442175" width="22.285714285714285" height="149.65986394557825" fill="var(--accent-2)" opacity="0.45" rx="1"></rect><rect x="642.4285714285714" y="152.17687074829934" width="22.285714285714285" height="57.82312925170068" fill="var(--text-4)" opacity="0.45" rx="1"></rect><rect x="666.7142857142857" y="87.55102040816327" width="22.285714285714285" height="122.44897959183673" fill="var(--accent)" opacity="0.85" rx="1"></rect></g>
+                    <!-- area -->
+                    <path id="areaPath" fill="url(#area)" stroke="var(--accent)" stroke-width="1.5" opacity="0.9" d="M 22.142857142857142,210 L 22.142857142857142,128.3673469387755 L 46.42857142857143,148.77551020408163 L 70.71428571428571,101.156462585034 L 95,162.38095238095238 L 119.28571428571428,56.93877551020407 L 143.57142857142856,135.17006802721087 L 167.85714285714286,114.76190476190476 L 192.14285714285714,80.74829931972789 L 216.42857142857142,158.9795918367347 L 240.7142857142857,67.14285714285714 L 265,121.56462585034012 L 289.2857142857143,104.55782312925169 L 313.5714285714286,145.37414965986395 L 337.8571428571429,94.35374149659864 L 362.14285714285717,111.36054421768706 L 386.42857142857144,70.54421768707482 L 410.7142857142857,131.7687074829932 L 435,84.14965986394557 L 459.2857142857143,155.578231292517 L 483.57142857142856,43.333333333333314 L 507.85714285714283,114.76190476190476 L 532.1428571428571,97.75510204081631 L 556.4285714285713,138.57142857142856 L 580.7142857142857,77.34693877551018 L 605,124.96598639455783 L 629.2857142857142,60.34013605442175 L 653.5714285714286,152.17687074829934 L 677.8571428571428,87.55102040816327 L 677.8571428571428,210 Z"></path>
+                    <defs>
+                      <linearGradient id="area" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="0" stop-color="var(--accent)" stop-opacity="0.4"></stop>
+                        <stop offset="1" stop-color="var(--accent)" stop-opacity="0"></stop>
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                  <div class="chart-axis" id="chartAxis"><span>Mon 11</span><span>Tue 12</span><span>Wed 13</span><span>Thu 14</span><span>Fri 15</span><span>Sat 16</span><span>Sun 17</span><span>Mon 18</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card span-4">
+              <div class="card-head">
+                <div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="list" class="lucide lucide-list"><line x1="8" x2="21" y1="6" y2="6"></line><line x1="8" x2="21" y1="12" y2="12"></line><line x1="8" x2="21" y1="18" y2="18"></line><line x1="3" x2="3.01" y1="6" y2="6"></line><line x1="3" x2="3.01" y1="12" y2="12"></line><line x1="3" x2="3.01" y1="18" y2="18"></line></svg> Recent events</div>
+                <button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="more-horizontal" class="lucide lucide-more-horizontal"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg></button>
+              </div>
+              <div class="card-body" style="padding:0">
+                <div class="evlist" id="evList">
+      <div class="ev">
+        <div class="ev-tag ff">FF</div>
+        <div class="ev-meta">
+          <div class="l1">Full Flush <span class="badge warn" style="margin-left:6px">corrected +1</span></div>
+          <div class="l2">14:32:08 · 14s</div>
+        </div>
+        <div class="ev-vol">6.2 L</div>
+      </div>
+    
+      <div class="ev">
+        <div class="ev-tag pf">PF</div>
+        <div class="ev-meta">
+          <div class="l1">Part Flush </div>
+          <div class="l2">14:28:41 · 6s</div>
+        </div>
+        <div class="ev-vol">1.8 L</div>
+      </div>
+    
+      <div class="ev">
+        <div class="ev-tag pf">PF</div>
+        <div class="ev-meta">
+          <div class="l1">Part Flush </div>
+          <div class="l2">14:14:02 · 7s</div>
+        </div>
+        <div class="ev-vol">2.1 L</div>
+      </div>
+    
+      <div class="ev">
+        <div class="ev-tag ff">FF</div>
+        <div class="ev-meta">
+          <div class="l1">Full Flush </div>
+          <div class="l2">13:57:19 · 12s</div>
+        </div>
+        <div class="ev-vol">5.8 L</div>
+      </div>
+    
+      <div class="ev">
+        <div class="ev-tag pf">PF</div>
+        <div class="ev-meta">
+          <div class="l1">Part Flush </div>
+          <div class="l2">13:42:55 · 4s</div>
+        </div>
+        <div class="ev-vol">0.9 L</div>
+      </div>
+    
+      <div class="ev">
+        <div class="ev-tag pf">PF</div>
+        <div class="ev-meta">
+          <div class="l1">Part Flush <span class="badge warn" style="margin-left:6px">corrected +1</span></div>
+          <div class="l2">13:18:33 · 8s</div>
+        </div>
+        <div class="ev-vol">2.4 L</div>
+      </div>
+    
+      <div class="ev">
+        <div class="ev-tag ff">FF</div>
+        <div class="ev-meta">
+          <div class="l1">Full Flush </div>
+          <div class="l2">12:47:11 · 13s</div>
+        </div>
+        <div class="ev-vol">6.0 L</div>
+      </div>
+    </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-12" style="margin-top:var(--gap)">
+            <div class="card span-6">
+              <div class="card-head"><div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="filter" class="lucide lucide-filter"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg> Filters</div></div>
+              <div class="card-body">
+                <div class="form-grid">
+                  <div class="field"><label>From</label><input class="input" type="date" value="2026-04-11"></div>
+                  <div class="field"><label>To</label><input class="input" type="date" value="2026-04-18"></div>
+                  <div class="field"><label>Trigger</label>
+                    <select class="input"><option>All</option><option>FF only</option><option>PF only</option></select>
+                  </div>
+                  <div class="field"><label>Threshold (L)</label><input class="input mono" type="number" placeholder="0.0"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+                  <label class="check"><input type="checkbox" checked=""><span>Exclude 0.00 L entries</span></label>
+                  <button class="btn primary"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="check" class="lucide lucide-check"><path d="M20 6 9 17l-5-5"></path></svg> Apply</button>
+                </div>
+              </div>
+            </div>
+            <div class="card span-6">
+              <div class="card-head">
+                <div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="hard-drive" class="lucide lucide-hard-drive"><line x1="22" x2="2" y1="12" y2="12"></line><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path><line x1="6" x2="6.01" y1="16" y2="16"></line><line x1="10" x2="10.01" y1="16" y2="16"></line></svg> Storage</div>
+                <span class="mono" style="color:var(--text-3);font-size:11px">SD + LittleFS</span>
+              </div>
+              <div class="card-body">
+                <div class="storage-row">
+                  <div class="storage-label"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="database" class="lucide lucide-database"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5V19A9 3 0 0 0 21 19V5"></path><path d="M3 12A9 3 0 0 0 21 12"></path></svg> SD Card · /logs</div>
+                  <div class="storage-bar"><span style="width:42%"></span></div>
+                  <div class="mono" style="color:var(--text-3);font-size:12px">6.7 / 16 GB</div>
+                </div>
+                <div class="storage-row">
+                  <div class="storage-label"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="microchip" class="lucide lucide-microchip"><path d="M18 12h2"></path><path d="M18 16h2"></path><path d="M18 20h2"></path><path d="M18 4h2"></path><path d="M18 8h2"></path><path d="M4 12h2"></path><path d="M4 16h2"></path><path d="M4 20h2"></path><path d="M4 4h2"></path><path d="M4 8h2"></path><path d="M8 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2h-1.5c-.276 0-.494.227-.562.495a2 2 0 0 1-3.876 0C9.994 2.227 9.776 2 9.5 2z"></path></svg> LittleFS · /</div>
+                  <div class="storage-bar"><span style="width:64%" class="warn"></span></div>
+                  <div class="mono" style="color:var(--text-3);font-size:12px">920 / 1440 KB</div>
+                </div>
+                <div class="storage-row">
+                  <div class="storage-label"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="upload-cloud" class="lucide lucide-upload-cloud"><path d="M12 13v8"></path><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="m8 17 4-4 4 4"></path></svg> Export queue</div>
+                  <div class="storage-bar"><span style="width:8%"></span></div>
+                  <div class="mono" style="color:var(--text-3);font-size:12px">12 / 1024 msg</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ─── LIVE ─── -->
+        <section class="page" data-page="live">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Live <span class="badge ok pulse">● Streaming</span></h1>
+              <div class="page-sub">Real-time telemetry · refreshing every 500 ms</div>
+            </div>
+            <div class="page-actions">
+              <div class="seg">
+                <button class="active">0.5s</button><button>1s</button><button>2s</button><button>5s</button>
+              </div>
+              <button class="btn"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pause" class="lucide lucide-pause"><rect x="14" y="4" width="4" height="16" rx="1"></rect><rect x="6" y="4" width="4" height="16" rx="1"></rect></svg> Pause</button>
+            </div>
+          </div>
+
+          <div class="grid grid-12">
+            <div class="card span-8">
+              <div class="card-head">
+                <div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="droplets" class="lucide lucide-droplets"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"></path><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"></path></svg> Current cycle</div>
+                <span class="badge acc mono">CYCLE #1428</span>
+              </div>
+              <div class="card-body">
+                <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;justify-content:space-between">
+                  <div class="bigstat">
+                    <div class="bigstat-l">Volume</div>
+                    <div class="bigstat-v mono">2.47<span>L</span></div>
+                  </div>
+                  <div class="bigstat">
+                    <div class="bigstat-l">Pulses</div>
+                    <div class="bigstat-v mono">1112</div>
+                  </div>
+                  <div class="bigstat">
+                    <div class="bigstat-l">Duration</div>
+                    <div class="bigstat-v mono">14<span>s</span></div>
+                  </div>
+                  <div class="bigstat">
+                    <div class="bigstat-l">Trigger</div>
+                    <div class="bigstat-v" style="color:var(--accent)">FF_BTN</div>
+                  </div>
+                </div>
+                <div style="margin-top:16px">
+                  <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:6px">
+                    <span class="mono">FLOW RATE · L/min</span>
+                    <span class="mono" id="flowRate">8.6</span>
+                  </div>
+                  <svg class="live-chart" viewBox="0 0 600 80" preserveAspectRatio="none">
+                    <g stroke="var(--border)" stroke-width="1"><line x1="0" y1="20" x2="600" y2="20"></line><line x1="0" y1="40" x2="600" y2="40"></line><line x1="0" y1="60" x2="600" y2="60"></line></g>
+                    <polyline id="flowPath" fill="none" stroke="var(--accent)" stroke-width="2" points="0,39.10945769568926 7.594936708860759,41.61234971650346 15.189873417721518,47.61114840260733 22.78481012658228,35.72162124286382 30.379746835443036,22.065148531420746 37.9746835443038,19.96921025447731 45.56962025316456,12.674798935395842 53.164556962025316,14.159451635599275 60.75949367088607,22.883676412494765 68.35443037974683,36.831771960752846 75.9493670886076,46.11167143196863 83.54430379746834,47.9396805804636 91.13924050632912,39.22944135380476 98.73417721518987,40.50837320743895 106.32911392405063,21.45651647474557 113.9240506329114,19.943830526671526 121.51898734177215,13.609775116617293 129.1139240506329,14.858194442933417 136.70886075949366,23.389545551210055 144.30379746835445,28.893256977489663 151.8987341772152,45.55450861695834 159.49367088607593,47.493122845743095 167.0886075949367,42.83710935899041 174.68354430379748,35.53734582123556 182.27848101265823,28.608321580775844 189.873417721519,21.878240847205817 197.46835443037975,19.061774988368192 205.0632911392405,11.137066946762346 212.65822784810126,21.84311123421042 220.25316455696202,33.13160242529561 227.8481012658228,45.539745919513074 235.44303797468353,43.20205109391796 243.0379746835443,47.187588596438566 250.63291139240508,34.76944332895728 258.2278481012658,30.437880544250895 265.82278481012656,21.12192291311841 273.4177215189873,17.239847418931532 281.0126582278481,11.777961469987389 288.6075949367089,21.864551052896374 296.20253164556965,29.689842364011547 303.7974683544304,36.91495942335351 311.3924050632911,45.96473045581256 318.98734177215186,40.47059002907568 326.5822784810127,34.48075828835994 334.1772151898734,28.383736882386223 341.7721518987342,16.439071935272935 349.36708860759495,12.678937280548574 356.96202531645565,14.8689033968814 364.55696202531647,22.952473492395 372.1518987341772,27.470321233647226 379.746835443038,35.525155890796725 387.34177215189874,49.05065768732622 394.9367088607595,47.4150537390543 402.53164556962025,35.064066273884656 410.126582278481,23.452904763448203 417.7215189873418,18.868811272966965 425.3164556962025,14.043811087920403 432.9113924050633,13.327925621169598 440.50632911392404,17.918966706139692 448.1012658227848,32.46418244406809 455.6962025316456,34.575380811926415 463.2911392405063,40.374817927190335 470.88607594936707,47.51372938244422 478.4810126582279,40.189225462902314 486.0759493670886,29.04099328144399 493.6708860759494,23.300282169609204 501.26582278481015,12.039496355802441 508.86075949367086,11.80144964618178 516.4556962025316,23.26386015953831 524.0506329113924,26.660595309214187 531.6455696202531,37.81670277183117 539.2405063291139,40.73578440578295 546.8354430379746,39.59393937643394 554.4303797468355,40.366604441762306 562.0253164556962,33.41908740312256 569.620253164557,18.877270411226633 577.2151898734178,18.269594339827776 584.8101265822785,19.93611902269741 592.4050632911393,15.554563343333854 600,31.597074151991926"></polyline>
+                    <path id="flowFill" fill="url(#area)" opacity="0.5" d="M0,80 L 0,39.10945769568926 L 7.594936708860759,41.61234971650346 L 15.189873417721518,47.61114840260733 L 22.78481012658228,35.72162124286382 L 30.379746835443036,22.065148531420746 L 37.9746835443038,19.96921025447731 L 45.56962025316456,12.674798935395842 L 53.164556962025316,14.159451635599275 L 60.75949367088607,22.883676412494765 L 68.35443037974683,36.831771960752846 L 75.9493670886076,46.11167143196863 L 83.54430379746834,47.9396805804636 L 91.13924050632912,39.22944135380476 L 98.73417721518987,40.50837320743895 L 106.32911392405063,21.45651647474557 L 113.9240506329114,19.943830526671526 L 121.51898734177215,13.609775116617293 L 129.1139240506329,14.858194442933417 L 136.70886075949366,23.389545551210055 L 144.30379746835445,28.893256977489663 L 151.8987341772152,45.55450861695834 L 159.49367088607593,47.493122845743095 L 167.0886075949367,42.83710935899041 L 174.68354430379748,35.53734582123556 L 182.27848101265823,28.608321580775844 L 189.873417721519,21.878240847205817 L 197.46835443037975,19.061774988368192 L 205.0632911392405,11.137066946762346 L 212.65822784810126,21.84311123421042 L 220.25316455696202,33.13160242529561 L 227.8481012658228,45.539745919513074 L 235.44303797468353,43.20205109391796 L 243.0379746835443,47.187588596438566 L 250.63291139240508,34.76944332895728 L 258.2278481012658,30.437880544250895 L 265.82278481012656,21.12192291311841 L 273.4177215189873,17.239847418931532 L 281.0126582278481,11.777961469987389 L 288.6075949367089,21.864551052896374 L 296.20253164556965,29.689842364011547 L 303.7974683544304,36.91495942335351 L 311.3924050632911,45.96473045581256 L 318.98734177215186,40.47059002907568 L 326.5822784810127,34.48075828835994 L 334.1772151898734,28.383736882386223 L 341.7721518987342,16.439071935272935 L 349.36708860759495,12.678937280548574 L 356.96202531645565,14.8689033968814 L 364.55696202531647,22.952473492395 L 372.1518987341772,27.470321233647226 L 379.746835443038,35.525155890796725 L 387.34177215189874,49.05065768732622 L 394.9367088607595,47.4150537390543 L 402.53164556962025,35.064066273884656 L 410.126582278481,23.452904763448203 L 417.7215189873418,18.868811272966965 L 425.3164556962025,14.043811087920403 L 432.9113924050633,13.327925621169598 L 440.50632911392404,17.918966706139692 L 448.1012658227848,32.46418244406809 L 455.6962025316456,34.575380811926415 L 463.2911392405063,40.374817927190335 L 470.88607594936707,47.51372938244422 L 478.4810126582279,40.189225462902314 L 486.0759493670886,29.04099328144399 L 493.6708860759494,23.300282169609204 L 501.26582278481015,12.039496355802441 L 508.86075949367086,11.80144964618178 L 516.4556962025316,23.26386015953831 L 524.0506329113924,26.660595309214187 L 531.6455696202531,37.81670277183117 L 539.2405063291139,40.73578440578295 L 546.8354430379746,39.59393937643394 L 554.4303797468355,40.366604441762306 L 562.0253164556962,33.41908740312256 L 569.620253164557,18.877270411226633 L 577.2151898734178,18.269594339827776 L 584.8101265822785,19.93611902269741 L 592.4050632911393,15.554563343333854 L 600,31.597074151991926 L600,80 Z"></path>
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            <div class="card span-4">
+              <div class="card-head"><div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="git-branch" class="lucide lucide-git-branch"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg> State machine</div></div>
+              <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
+                <div class="sm-track">
+                  <div class="sm-step done"><span>1</span> WAKE</div>
+                  <div class="sm-conn"></div>
+                  <div class="sm-step done"><span>2</span> ARM</div>
+                  <div class="sm-conn"></div>
+                  <div class="sm-step active"><span>3</span> MEASURE</div>
+                  <div class="sm-conn"></div>
+                  <div class="sm-step"><span>4</span> LOG</div>
+                  <div class="sm-conn"></div>
+                  <div class="sm-step"><span>5</span> SLEEP</div>
+                </div>
+                <div class="sm-timer">
+                  <div>
+                    <div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Timer</div>
+                    <div class="mono" style="font-size:32px;font-weight:600;color:var(--accent)">07.2<span style="font-size:14px;color:var(--text-3)">s</span></div>
+                  </div>
+                  <svg viewBox="0 0 60 60" width="56" height="56"><circle cx="30" cy="30" r="24" fill="none" stroke="var(--panel-3)" stroke-width="6"></circle><circle cx="30" cy="30" r="24" fill="none" stroke="var(--accent)" stroke-width="6" stroke-dasharray="150" stroke-dashoffset="60" transform="rotate(-90 30 30)" stroke-linecap="round"></circle></svg>
+                </div>
+                <div style="font-size:12px;color:var(--text-3);text-align:center">Window closes in 7.2 s if no further pulses</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-12" style="margin-top:var(--gap)">
+            <div class="card span-4">
+              <div class="card-head"><div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="circle-dot" class="lucide lucide-circle-dot"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="1"></circle></svg> Buttons</div></div>
+              <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+                <div class="btn-state"><span><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="droplets" class="lucide lucide-droplets"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"></path><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"></path></svg> Full Flush</span><span class="badge ok">PRESSED</span><span class="mono" style="color:var(--text-3);font-size:11px">D1 · 320 ms</span></div>
+                <div class="btn-state"><span><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="droplet" class="lucide lucide-droplet"><path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"></path></svg> Part Flush</span><span class="badge dim">IDLE</span><span class="mono" style="color:var(--text-3);font-size:11px">D2</span></div>
+                <div class="btn-state"><span><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="wifi" class="lucide lucide-wifi"><path d="M12 20h.01"></path><path d="M2 8.82a15 15 0 0 1 20 0"></path><path d="M5 12.859a10 10 0 0 1 14 0"></path><path d="M8.5 16.429a5 5 0 0 1 7 0"></path></svg> WiFi Trigger</span><span class="badge dim">IDLE</span><span class="mono" style="color:var(--text-3);font-size:11px">D0</span></div>
+              </div>
+            </div>
+            <div class="card span-8">
+              <div class="card-head"><div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="terminal" class="lucide lucide-terminal"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg> Recent log</div><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="copy" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></button></div>
+              <div class="card-body" style="padding:0">
+                <div class="log" id="logFeed"><div class="line"><span class="t">14:32:08.214</span><span class="lv info">INFO</span><span class="msg">FF_BTN pressed (D1) ⇢ enter MEASURE</span></div><div class="line"><span class="t">14:32:08.198</span><span class="lv ok">OK</span><span class="msg">WAKE → ARM transition (3 ms)</span></div><div class="line"><span class="t">14:32:07.640</span><span class="lv info">INFO</span><span class="msg">Pulse detected on D6 · cycle #1428</span></div><div class="line"><span class="t">14:31:54.012</span><span class="lv warn">WARN</span><span class="msg">PF→FF correction applied (2.4 L &gt; 2.0 L)</span></div><div class="line"><span class="t">14:31:42.880</span><span class="lv info">INFO</span><span class="msg">Storage write OK · /logs/2026-04-18.jsonl (+218 B)</span></div><div class="line"><span class="t">14:31:42.671</span><span class="lv ok">OK</span><span class="msg">Export queued · MQTT home/water/event</span></div><div class="line"><span class="t">14:30:11.005</span><span class="lv err">ERR</span><span class="msg">SCD4x I2C ack failed @ 0x62 (retry 2/3)</span></div><div class="line"><span class="t">14:29:58.412</span><span class="lv info">INFO</span><span class="msg">BME280 read · 22.4°C / 47.2% / 1013.4 hPa</span></div><div class="line"><span class="t">14:29:46.221</span><span class="lv info">INFO</span><span class="msg">Sensor sweep complete · 7 of 8 OK</span></div><div class="line"><span class="t">14:29:34.117</span><span class="lv ok">OK</span><span class="msg">WiFi connected · -54 dBm · 192.168.1.42</span></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-4" style="margin-top:var(--gap)">
+            <div class="kpi"><div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="cpu" class="lucide lucide-cpu"><rect width="16" height="16" x="4" y="4" rx="2"></rect><rect width="6" height="6" x="9" y="9" rx="1"></rect><path d="M15 2v2"></path><path d="M15 20v2"></path><path d="M2 15h2"></path><path d="M2 9h2"></path><path d="M20 15h2"></path><path d="M20 9h2"></path><path d="M9 2v2"></path><path d="M9 20v2"></path></svg> CPU</div><div class="kpi-v"><span class="num">160</span><span class="unit">MHz</span></div><div class="bar"><span style="width:18%"></span></div></div>
+            <div class="kpi"><div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="memory-stick" class="lucide lucide-memory-stick"><path d="M6 19v-3"></path><path d="M10 19v-3"></path><path d="M14 19v-3"></path><path d="M18 19v-3"></path><path d="M8 11V9"></path><path d="M16 11V9"></path><path d="M12 11V9"></path><path d="M2 15h20"></path><path d="M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v1.1a2 2 0 0 0 0 3.837V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5.1a2 2 0 0 0 0-3.837Z"></path></svg> Heap</div><div class="kpi-v"><span class="num">214</span><span class="unit">/ 320 KB</span></div><div class="bar"><span style="width:67%"></span></div></div>
+            <div class="kpi"><div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="thermometer" class="lucide lucide-thermometer"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"></path></svg> Chip temp</div><div class="kpi-v"><span class="num">42.6</span><span class="unit">°C</span></div><div class="bar"><span style="width:42%"></span></div></div>
+            <div class="kpi"><div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="clock" class="lucide lucide-clock"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> Uptime</div><div class="kpi-v mono" style="font-size:18px">2d 14:32:08</div><div style="color:var(--text-3);font-size:11px">Boot #142 · 14 Apr 03:00</div></div>
+          </div>
+        </section>
+
+        <!-- ─── SENSORS ─── -->
+        <section class="page" data-page="sensors">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Sensors</h1>
+              <div class="page-sub">8 active · 1 errored · last sweep 0.4s ago</div>
+            </div>
+            <div class="page-actions">
+              <input class="input" placeholder="Filter sensors…" style="width:200px">
+              <button class="btn"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="plus" class="lucide lucide-plus"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg> Add sensor</button>
+              <button class="btn"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="refresh-cw" class="lucide lucide-refresh-cw"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg> Refresh</button>
+            </div>
+          </div>
+
+          <div class="grid grid-auto" id="sensorGrid">
+      <div class="sensor ">
+        <div class="s-head">
+          <div>
+            <div class="s-name"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="thermometer" class="lucide lucide-thermometer"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"></path></svg> BME280</div>
+            <div class="s-id">env_indoor · I2C 0x76</div>
+          </div>
+          <span class="badge ok">OK</span>
+        </div>
+        <div class="s-val"><span class="n">22.4</span><span class="u">°C</span></div>
+        <svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none">
+          <polyline points="0,15.735836686211512 3.4,12.88291369017842 6.8,11.688314047402498 10.2,11.20659855120556 13.6,16.487920154707037 17,19.03717372224175 20.4,22.852721273774208 23.8,27.816985559631355 27.2,31.53103856294718 30.599999999999998,30.65886148282329 34,25.862883458553043 37.4,22.338195314683173 40.8,17.48201691080299 44.199999999999996,12.759710797113545 47.6,11.111189589603748 51,8.943053119307859 54.4,14.058390321640022 57.8,16.94744824618568 61.199999999999996,20.920225230813372 64.6,24.741152775149292 68,30.392450611450833 71.39999999999999,31.391223784082776 74.8,29.493953107314873 78.2,24.61008673421052 81.6,21.37201662926867 85,13.204839511860763 88.39999999999999,11.60907005087125 91.8,9.770029453354608 95.2,10.98427700729468 98.6,13.07661136052377" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>
+        </svg>
+        <div class="s-metrics"><span class="badge dim">Humidity 47.2%</span><span class="badge dim">Pressure 1013.4 hPa</span></div>
+        <div class="s-foot"><span>last 0.4s ago</span><span>I2C 0x76</span></div>
+      </div>
+    
+      <div class="sensor ">
+        <div class="s-head">
+          <div>
+            <div class="s-name"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="wind" class="lucide lucide-wind"><path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"></path><path d="M9.6 4.6A2 2 0 1 1 11 8H2"></path><path d="M12.6 19.4A2 2 0 1 0 14 16H2"></path></svg> SGP30</div>
+            <div class="s-id">air_quality · I2C 0x58</div>
+          </div>
+          <span class="badge ok">OK</span>
+        </div>
+        <div class="s-val"><span class="n">412</span><span class="u">ppm</span></div>
+        <svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none">
+          <polyline points="0,11.613307104898512 3.4,9.29616336756938 6.8,13.777035822988871 10.2,20.287303015322827 13.6,25.980779603445725 17,26.967570384676364 20.4,29.843968278598833 23.8,30.53736483931293 27.2,25.965475433729367 30.599999999999998,23.414977830618596 34,16.738459879046886 37.4,13.622008844629802 40.8,12.139034267180767 44.199999999999996,8.297026137421994 47.6,11.45215166015835 51,15.26744457164479 54.4,19.70977831096969 57.8,25.812228703569886 61.199999999999996,29.75586882533209 64.6,30.110749079347933 68,27.82813026275984 71.39999999999999,23.512229397455037 74.8,21.54280168580665 78.2,14.85837206091247 81.6,13.199073960359136 85,10.236024319604194 88.39999999999999,10.224171501406403 91.8,14.129016632836768 95.2,17.27179751828259 98.6,21.80154458007723" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>
+        </svg>
+        <div class="s-metrics"><span class="badge dim">TVOC 87 ppb</span><span class="badge dim">eCO₂ 412 ppm</span></div>
+        <div class="s-foot"><span>last 0.4s ago</span><span>I2C 0x58</span></div>
+      </div>
+    
+      <div class="sensor ">
+        <div class="s-head">
+          <div>
+            <div class="s-name"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="cloud-fog" class="lucide lucide-cloud-fog"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M16 17H7"></path><path d="M17 21H9"></path></svg> SDS011</div>
+            <div class="s-id">pm_outdoor · UART1</div>
+          </div>
+          <span class="badge ok">OK</span>
+        </div>
+        <div class="s-val"><span class="n">12.4</span><span class="u">µg/m³</span></div>
+        <svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none">
+          <polyline points="0,14.753911397380895 3.4,9.788653457888197 6.8,9.398505279343702 10.2,12.709628282025795 13.6,15.195387813332244 17,17.409107331954818 20.4,24.40580290545868 23.8,28.431455657064596 27.2,30.444744410958158 30.599999999999998,30.12077344170825 34,24.58502077119914 37.4,20.6340718859608 40.8,17.361980628753862 44.199999999999996,12.715742843788977 47.6,8.452554296240594 51,11.750044972352327 54.4,12.381896757203725 57.8,15.118300091897742 61.199999999999996,21.46876608767227 64.6,24.532811987814597 68,29.6699312099606 71.39999999999999,28.54571037885891 74.8,27.562030671187383 78.2,26.083982753179537 81.6,20.413400940436283 85,13.17061340444038 88.39999999999999,11.991413871157519 91.8,11.054823580826916 95.2,11.354045309200135 98.6,13.285245528476555" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>
+        </svg>
+        <div class="s-metrics"><span class="badge dim">PM2.5 12.4</span><span class="badge dim">PM10 18.2</span></div>
+        <div class="s-foot"><span>last 0.4s ago</span><span>UART1</span></div>
+      </div>
+    
+      <div class="sensor ">
+        <div class="s-head">
+          <div>
+            <div class="s-name"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="cloud-rain" class="lucide lucide-cloud-rain"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M16 14v6"></path><path d="M8 14v6"></path><path d="M12 16v6"></path></svg> Rain</div>
+            <div class="s-id">rain_gauge · GPIO 7</div>
+          </div>
+          <span class="badge ok">OK</span>
+        </div>
+        <div class="s-val"><span class="n">0.0</span><span class="u">mm/h</span></div>
+        <svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none">
+          <polyline points="0,12.761966552473845 3.4,10.382095203376261 6.8,9.105700055356104 10.2,11.380484891647564 13.6,14.31568395139523 17,20.44031662585385 20.4,24.104220050920176 23.8,27.72008968308898 27.2,29.976955664321768 30.599999999999998,28.185083486392763 34,28.275837988722042 37.4,20.817922757963608 40.8,16.05242674288982 44.199999999999996,11.897800100213551 47.6,12.367254864408249 51,11.681824969124776 54.4,12.68586850185808 57.8,16.589566195184844 61.199999999999996,20.782308356231226 64.6,27.748018565010376 68,29.54601411173752 71.39999999999999,28.098990138092027 74.8,29.42019131537384 78.2,23.97500428329561 81.6,21.766169098523694 85,14.971226289436073 88.39999999999999,13.216462795171545 91.8,10.466370438196142 95.2,10.753277316083537 98.6,12.109776232547087" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>
+        </svg>
+        <div class="s-metrics"><span class="badge dim">Total 4.6 mm</span></div>
+        <div class="s-foot"><span>last 0.4s ago</span><span>GPIO 7</span></div>
+      </div>
+    
+      <div class="sensor ">
+        <div class="s-head">
+          <div>
+            <div class="s-name"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="wind" class="lucide lucide-wind"><path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"></path><path d="M9.6 4.6A2 2 0 1 1 11 8H2"></path><path d="M12.6 19.4A2 2 0 1 0 14 16H2"></path></svg> Wind</div>
+            <div class="s-id">wind · GPIO 8</div>
+          </div>
+          <span class="badge ok">OK</span>
+        </div>
+        <div class="s-val"><span class="n">3.2</span><span class="u">m/s</span></div>
+        <svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none">
+          <polyline points="0,12.901522766903012 3.4,11.839383757325342 6.8,11.918910977065918 10.2,11.843361475009115 13.6,18.286535006765 17,21.00349497161684 20.4,26.553263733835216 23.8,28.763208012537483 27.2,28.94254069591837 30.599999999999998,26.526435694575632 34,23.398186490239944 37.4,17.88871803177692 40.8,12.647968422893195 44.199999999999996,9.761651746512008 47.6,11.629208250950729 51,10.510127890953305 54.4,14.307253034903754 57.8,20.652073016172544 61.199999999999996,24.89557966419888 64.6,29.10913901028445 68,28.300523739448344 71.39999999999999,30.371636267875047 74.8,25.197466814571044 78.2,22.18987299180662 81.6,17.806781600796448 85,13.336800105233571 88.39999999999999,8.968876632974114 91.8,10.604510671853589 95.2,11.702283746025826 98.6,16.340033342457783" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>
+        </svg>
+        <div class="s-metrics"><span class="badge dim">Gust 5.8 m/s</span></div>
+        <div class="s-foot"><span>last 0.4s ago</span><span>GPIO 8</span></div>
+      </div>
+    
+      <div class="sensor ">
+        <div class="s-head">
+          <div>
+            <div class="s-name"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="droplets" class="lucide lucide-droplets"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"></path><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"></path></svg> YF-S201</div>
+            <div class="s-id">flow_main · GPIO 21</div>
+          </div>
+          <span class="badge ok">OK</span>
+        </div>
+        <div class="s-val"><span class="n">0.0</span><span class="u">L/min</span></div>
+        <svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none">
+          <polyline points="0,24.88761741396517 3.4,17.43781166156198 6.8,15.395033839763073 10.2,11.560338873681449 13.6,8.311229910134399 17,12.254898296010076 20.4,14.48142963159226 23.8,20.990753062243193 27.2,23.328363638500047 30.599999999999998,28.752272361593217 34,31.093409758964146 37.4,29.519379061073575 40.8,26.472868533406 44.199999999999996,23.436307400236462 47.6,18.841326001204187 51,13.673849985600569 54.4,10.490019245957122 57.8,8.400407039805714 61.199999999999996,14.454471336394972 64.6,15.563878329676132 68,19.606512368075514 71.39999999999999,27.89595618638324 74.8,28.203606821100543 78.2,28.039239320978027 81.6,27.613083311970858 85,24.204453269500814 88.39999999999999,20.885201056857 91.8,15.80853041884949 95.2,13.321461158851944 98.6,9.528067335170434" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>
+        </svg>
+        <div class="s-metrics"><span class="badge dim">Total 142.6 L</span></div>
+        <div class="s-foot"><span>last 0.4s ago</span><span>GPIO 21</span></div>
+      </div>
+    
+      <div class="sensor err">
+        <div class="s-head">
+          <div>
+            <div class="s-name"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="leaf" class="lucide lucide-leaf"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"></path><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"></path></svg> SCD4x</div>
+            <div class="s-id">co2_sensor · I2C 0x62</div>
+          </div>
+          <span class="badge err">ERR</span>
+        </div>
+        <div class="s-val"><span class="n">—</span><span class="u"></span></div>
+        <svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none">
+          <polyline points="0,13.872927805636508 3.4,10.055196068351584 6.8,10.002035261240085 10.2,9.463595125824304 13.6,16.629948026857456 17,19.53436918526157 20.4,26.183119718718668 23.8,28.315774945957532 27.2,28.86096388689906 30.599999999999998,29.62501141614005 34,24.929251538242003 37.4,23.205220546366615 40.8,18.511013054963247 44.199999999999996,12.198966564127868 47.6,10.286608336608303 51,11.091052129121406 54.4,12.365829072577712 57.8,18.290674448318107 61.199999999999996,20.13340811433322 64.6,24.679062572750315 68,29.943301828543564 71.39999999999999,31.86521317975234 74.8,28.53017051995732 78.2,25.000933578457932 81.6,18.369913482930237 85,15.731443932992631 88.39999999999999,12.969095343676429 91.8,9.679660598009276 95.2,9.438754484122567 98.6,12.919561498482338" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>
+        </svg>
+        <div class="s-metrics"><span class="badge dim">I2C ack failed</span></div>
+        <div class="s-foot"><span>last 0.4s ago</span><span>I2C 0x62</span></div>
+      </div>
+    
+      <div class="sensor dis">
+        <div class="s-head">
+          <div>
+            <div class="s-name"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="sprout" class="lucide lucide-sprout"><path d="M7 20h10"></path><path d="M10 20c5.5-2.5.8-6.4 3-10"></path><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"></path><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z"></path></svg> Soil</div>
+            <div class="s-id">soil_dry · ADC 3</div>
+          </div>
+          <span class="badge dim">OFF</span>
+        </div>
+        <div class="s-val"><span class="n">34</span><span class="u">%</span></div>
+        <svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none">
+          <polyline points="0,29.081505253826897 3.4,27.233015378151737 6.8,22.528095766995445 10.2,20.05659659161529 13.6,14.628255995416618 17,11.172522090371983 20.4,10.658010329506883 23.8,11.07332110483762 27.2,15.413781330982424 30.599999999999998,17.87831789797567 34,22.524095039745937 37.4,27.678052731487977 40.8,28.457440867646376 44.199999999999996,29.318671285337114 47.6,26.570259206998365 51,23.11471373994961 54.4,18.620670418232887 57.8,11.114545112185922 61.199999999999996,11.608247232269914 64.6,8.61229616212295 68,11.661100382541818 71.39999999999999,15.104564576718825 74.8,21.95339753571283 78.2,25.27362448039674 81.6,29.63203597621515 85,31.364034385905217 88.39999999999999,27.122309349442663 91.8,25.946068439346995 95.2,20.33918171033794 98.6,16.560772849086238" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>
+        </svg>
+        <div class="s-metrics"><span class="badge dim">Calibrated</span></div>
+        <div class="s-foot"><span>last 0.4s ago</span><span>ADC 3</span></div>
+      </div>
+    </div>
+
+          <div class="card" style="margin-top:var(--gap)">
+            <div class="card-head">
+              <div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="line-chart" class="lucide lucide-line-chart"><path d="M3 3v16a2 2 0 0 0 2 2h16"></path><path d="m19 9-5 5-4-4-3 3"></path></svg> Sensor chart</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <select class="input"><option>env_indoor · BME280</option></select>
+                <select class="input"><option>Temperature</option><option>Humidity</option><option>Pressure</option></select>
+                <select class="input"><option>Last 24h</option><option>Last 6h</option><option>Last 1h</option></select>
+                <select class="input"><option>LTTB</option><option>Avg</option><option>Min</option><option>Max</option></select>
+                <select class="input"><option>5 min</option><option>1 hour</option><option>1 day</option></select>
+              </div>
+            </div>
+            <div class="card-body">
+              <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px">
+                <div>
+                  <div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Current</div>
+                  <div class="mono" style="font-size:28px;font-weight:600">22.4<span style="font-size:14px;color:var(--text-3)">°C</span></div>
+                </div>
+                <div style="display:flex;gap:14px">
+                  <div><div style="color:var(--text-3);font-size:11px">Min</div><div class="mono">19.8°C</div></div>
+                  <div><div style="color:var(--text-3);font-size:11px">Avg</div><div class="mono">21.6°C</div></div>
+                  <div><div style="color:var(--text-3);font-size:11px">Max</div><div class="mono">24.1°C</div></div>
+                  <div><div style="color:var(--text-3);font-size:11px">Pts</div><div class="mono">486</div></div>
+                </div>
+              </div>
+              <svg class="live-chart" style="height:200px" viewBox="0 0 700 200" preserveAspectRatio="none">
+                <g stroke="var(--border)" stroke-width="1"><line x1="0" y1="50" x2="700" y2="50"></line><line x1="0" y1="100" x2="700" y2="100"></line><line x1="0" y1="150" x2="700" y2="150"></line></g>
+                <polyline id="sensorPath" fill="none" stroke="var(--accent)" stroke-width="2" points="0.0,110.0 7.0,119.5 14.0,121.0 21.0,119.1 28.0,125.8 35.0,123.5 42.0,123.0 49.0,122.1 56.0,120.6 63.0,126.2 70.0,125.3 77.0,129.2 84.0,134.5 91.0,136.1 98.0,136.7 105.0,138.1 112.0,142.9 119.0,142.7 126.0,140.9 133.0,137.7 140.0,131.2 147.0,130.0 154.0,123.8 161.0,114.0 168.0,107.2 175.0,99.0 182.0,90.4 189.0,78.7 196.0,76.4 203.0,73.4 210.0,69.7 217.0,67.0 224.0,68.4 231.0,68.5 238.0,69.6 245.0,68.9 252.0,72.0 259.0,69.8 266.0,73.9 273.0,71.2 280.0,72.8 287.0,68.2 294.0,71.2 301.0,64.2 308.0,67.8 315.0,63.4 322.0,69.7 329.0,72.6 336.0,74.9 343.0,85.6 350.0,90.7 357.0,102.3 364.0,106.1 371.0,114.1 378.0,129.1 385.0,131.2 392.0,134.3 399.0,138.2 406.0,146.5 413.0,147.0 420.0,138.8 427.0,143.9 434.0,136.0 441.0,134.5 448.0,131.3 455.0,123.2 462.0,126.8 469.0,120.7 476.0,118.9 483.0,121.7 490.0,118.7 497.0,118.9 504.0,124.6 511.0,124.1 518.0,120.0 525.0,115.6 532.0,105.1 539.0,104.7 546.0,95.6 553.0,85.8 560.0,77.2 567.0,73.0 574.0,63.8 581.0,56.3 588.0,50.2 595.0,49.7 602.0,46.5 609.0,54.1 616.0,53.7 623.0,55.8 630.0,67.1 637.0,66.0 644.0,70.0 651.0,79.0 658.0,82.1 665.0,85.8 672.0,85.7 679.0,93.5 686.0,92.9 693.0,93.4 700.0,92.7"></polyline>
+                <polyline id="sensorPath2" fill="none" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.8" points="0.0,117.3 7.0,114.8 14.0,111.7 21.0,108.0 28.0,103.7 35.0,99.1 42.0,94.2 49.0,89.2 56.0,84.3 63.0,79.5 70.0,75.0 77.0,70.9 84.0,67.3 91.0,64.4 98.0,62.1 105.0,60.7 112.0,60.0 119.0,60.2 126.0,61.2 133.0,63.0 140.0,65.6 147.0,68.8 154.0,72.7 161.0,77.0 168.0,81.6 175.0,86.5 182.0,91.5 189.0,96.5 196.0,101.2 203.0,105.7 210.0,109.7 217.0,113.2 224.0,116.0 231.0,118.1 238.0,119.5 245.0,120.0 252.0,119.7 259.0,118.5 266.0,116.6 273.0,114.0 280.0,110.6 287.0,106.7 294.0,102.4 301.0,97.7 308.0,92.7 315.0,87.7 322.0,82.8 329.0,78.1 336.0,73.7 343.0,69.7 350.0,66.3 357.0,63.6 364.0,61.6 371.0,60.4 378.0,60.0 385.0,60.4 392.0,61.7 399.0,63.7 406.0,66.5 413.0,69.9 420.0,73.9 427.0,78.3 434.0,83.1 441.0,88.0 448.0,93.0 455.0,97.9 462.0,102.6 469.0,106.9 476.0,110.8 483.0,114.1 490.0,116.7 497.0,118.6 504.0,119.7 511.0,120.0 518.0,119.4 525.0,118.0 532.0,115.9 539.0,113.0 546.0,109.5 553.0,105.5 560.0,101.0 567.0,96.2 574.0,91.2 581.0,86.2 588.0,81.4 595.0,76.7 602.0,72.4 609.0,68.6 616.0,65.4 623.0,62.9 630.0,61.2 637.0,60.2 644.0,60.0 651.0,60.7 658.0,62.2 665.0,64.5 672.0,67.5 679.0,71.1 686.0,75.2 693.0,79.7 700.0,84.5"></polyline>
+              </svg>
+              <div style="display:flex;justify-content:space-between;color:var(--text-3);font-size:11px;font-family:var(--mono);margin-top:6px">
+                <span>00:00</span><span>04:00</span><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span><span>now</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ─── FILES ─── -->
+        <section class="page" data-page="files">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Files</h1>
+              <div class="page-sub">SD card · /logs</div>
+            </div>
+            <div class="page-actions">
+              <div class="seg">
+                <button><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="microchip" class="lucide lucide-microchip"><path d="M18 12h2"></path><path d="M18 16h2"></path><path d="M18 20h2"></path><path d="M18 4h2"></path><path d="M18 8h2"></path><path d="M4 12h2"></path><path d="M4 16h2"></path><path d="M4 20h2"></path><path d="M4 4h2"></path><path d="M4 8h2"></path><path d="M8 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2h-1.5c-.276 0-.494.227-.562.495a2 2 0 0 1-3.876 0C9.994 2.227 9.776 2 9.5 2z"></path></svg> LittleFS</button>
+                <button class="active"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="hard-drive" class="lucide lucide-hard-drive"><line x1="22" x2="2" y1="12" y2="12"></line><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path><line x1="6" x2="6.01" y1="16" y2="16"></line><line x1="10" x2="10.01" y1="16" y2="16"></line></svg> SD Card</button>
+              </div>
+              <button class="btn"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="folder-plus" class="lucide lucide-folder-plus"><path d="M12 10v6"></path><path d="M9 13h6"></path><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg> New folder</button>
+              <button class="btn primary"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="upload" class="lucide lucide-upload"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" x2="12" y1="3" y2="15"></line></svg> Upload</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head" style="padding:8px 14px">
+              <div style="display:flex;gap:6px;align-items:center;font-size:13px">
+                <button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="chevron-left" class="lucide lucide-chevron-left"><path d="m15 18-6-6 6-6"></path></svg></button>
+                <span class="mono" style="color:var(--text-3)">SD:/</span><span class="mono">logs</span>
+              </div>
+              <div style="display:flex;gap:14px;align-items:center;font-size:12px">
+                <span style="color:var(--text-3)">14 files · 6.4 MB</span>
+                <div class="storage-bar" style="width:140px"><span style="width:42%"></span></div>
+              </div>
+            </div>
+            <div class="card-body" style="padding:0">
+              <table class="ftable">
+                <thead><tr><th></th><th>Name</th><th>Size</th><th>Modified</th><th></th></tr></thead>
+                <tbody id="fileBody">
+      <tr>
+        <td style="width:32px"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="folder" class="lucide lucide-folder"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></td>
+        <td><div class="fname dir">logs</div></td>
+        <td>—</td>
+        <td>18 Apr 14:30</td>
+        <td>
+          <div class="row-acts">
+            <button class="btn-mini" title="Download"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg></button>
+            <button class="btn-mini" title="Rename"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button class="btn-mini" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button>
+          </div>
+        </td>
+      </tr>
+    
+      <tr>
+        <td style="width:32px"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="folder" class="lucide lucide-folder"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></td>
+        <td><div class="fname dir">config</div></td>
+        <td>—</td>
+        <td>14 Apr 03:00</td>
+        <td>
+          <div class="row-acts">
+            <button class="btn-mini" title="Download"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg></button>
+            <button class="btn-mini" title="Rename"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button class="btn-mini" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button>
+          </div>
+        </td>
+      </tr>
+    
+      <tr>
+        <td style="width:32px"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="file-text" class="lucide lucide-file-text"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M10 9H8"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></td>
+        <td><div class="fname ">2026-04-18.jsonl</div></td>
+        <td>218 KB</td>
+        <td>18 Apr 14:32</td>
+        <td>
+          <div class="row-acts">
+            <button class="btn-mini" title="Download"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg></button>
+            <button class="btn-mini" title="Rename"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button class="btn-mini" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button>
+          </div>
+        </td>
+      </tr>
+    
+      <tr>
+        <td style="width:32px"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="file-text" class="lucide lucide-file-text"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M10 9H8"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></td>
+        <td><div class="fname ">2026-04-17.jsonl</div></td>
+        <td>412 KB</td>
+        <td>17 Apr 23:59</td>
+        <td>
+          <div class="row-acts">
+            <button class="btn-mini" title="Download"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg></button>
+            <button class="btn-mini" title="Rename"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button class="btn-mini" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button>
+          </div>
+        </td>
+      </tr>
+    
+      <tr>
+        <td style="width:32px"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="file-text" class="lucide lucide-file-text"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M10 9H8"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></td>
+        <td><div class="fname ">2026-04-16.jsonl</div></td>
+        <td>386 KB</td>
+        <td>16 Apr 23:59</td>
+        <td>
+          <div class="row-acts">
+            <button class="btn-mini" title="Download"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg></button>
+            <button class="btn-mini" title="Rename"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button class="btn-mini" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button>
+          </div>
+        </td>
+      </tr>
+    
+      <tr>
+        <td style="width:32px"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="file-text" class="lucide lucide-file-text"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M10 9H8"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></td>
+        <td><div class="fname ">2026-04-15.jsonl</div></td>
+        <td>298 KB</td>
+        <td>15 Apr 23:59</td>
+        <td>
+          <div class="row-acts">
+            <button class="btn-mini" title="Download"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg></button>
+            <button class="btn-mini" title="Rename"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button class="btn-mini" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button>
+          </div>
+        </td>
+      </tr>
+    
+      <tr>
+        <td style="width:32px"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="braces" class="lucide lucide-braces"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"></path><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"></path></svg></td>
+        <td><div class="fname ">platform_config.json</div></td>
+        <td>8.8 KB</td>
+        <td>12 Apr 09:14</td>
+        <td>
+          <div class="row-acts">
+            <button class="btn-mini" title="Download"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg></button>
+            <button class="btn-mini" title="Rename"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button class="btn-mini" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button>
+          </div>
+        </td>
+      </tr>
+    
+      <tr>
+        <td style="width:32px"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="file-archive" class="lucide lucide-file-archive"><path d="M10 12v-1"></path><path d="M10 18v-2"></path><path d="M10 7V6"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M15.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v16a2 2 0 0 0 .274 1.01"></path><circle cx="10" cy="20" r="2"></circle></svg></td>
+        <td><div class="fname ">index.html.gz</div></td>
+        <td>34.1 KB</td>
+        <td>12 Apr 09:14</td>
+        <td>
+          <div class="row-acts">
+            <button class="btn-mini" title="Download"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg></button>
+            <button class="btn-mini" title="Rename"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button class="btn-mini" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button>
+          </div>
+        </td>
+      </tr>
+    
+      <tr>
+        <td style="width:32px"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="file-archive" class="lucide lucide-file-archive"><path d="M10 12v-1"></path><path d="M10 18v-2"></path><path d="M10 7V6"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M15.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v16a2 2 0 0 0 .274 1.01"></path><circle cx="10" cy="20" r="2"></circle></svg></td>
+        <td><div class="fname ">web.js.gz</div></td>
+        <td>38.4 KB</td>
+        <td>12 Apr 09:14</td>
+        <td>
+          <div class="row-acts">
+            <button class="btn-mini" title="Download"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg></button>
+            <button class="btn-mini" title="Rename"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button class="btn-mini" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button>
+          </div>
+        </td>
+      </tr>
+    
+      <tr>
+        <td style="width:32px"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="file-archive" class="lucide lucide-file-archive"><path d="M10 12v-1"></path><path d="M10 18v-2"></path><path d="M10 7V6"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M15.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v16a2 2 0 0 0 .274 1.01"></path><circle cx="10" cy="20" r="2"></circle></svg></td>
+        <td><div class="fname ">style.css.gz</div></td>
+        <td>4.2 KB</td>
+        <td>12 Apr 09:14</td>
+        <td>
+          <div class="row-acts">
+            <button class="btn-mini" title="Download"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg></button>
+            <button class="btn-mini" title="Rename"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button class="btn-mini" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button>
+          </div>
+        </td>
+      </tr>
+    </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ─── SETTINGS HUB ─── -->
+        <section class="page" data-page="settings">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Settings</h1>
+              <div class="page-sub">Configure device, sensors, exports and storage</div>
+            </div>
+            <div class="page-actions">
+              <input class="input" placeholder="Filter settings…" style="width:240px">
+              <button class="btn"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg> Export</button>
+              <button class="btn"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="upload" class="lucide lucide-upload"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" x2="12" y1="3" y2="15"></line></svg> Import</button>
+            </div>
+          </div>
+
+          <div class="grid grid-auto" id="settingsGrid">
+      <div class="set-card">
+        <div class="set-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="smartphone" class="lucide lucide-smartphone"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"></rect><path d="M12 18h.01"></path></svg></div>
+        <div class="set-card-t">Device</div>
+        <div class="set-card-d">Name, ID, default storage view</div>
+      </div>
+    
+      <div class="set-card">
+        <div class="set-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="droplets" class="lucide lucide-droplets"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"></path><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"></path></svg></div>
+        <div class="set-card-t">Flow meter</div>
+        <div class="set-card-d">Calibration, timing, test mode</div>
+      </div>
+    
+      <div class="set-card">
+        <div class="set-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="cpu" class="lucide lucide-cpu"><rect width="16" height="16" x="4" y="4" rx="2"></rect><rect width="6" height="6" x="9" y="9" rx="1"></rect><path d="M15 2v2"></path><path d="M15 20v2"></path><path d="M2 15h2"></path><path d="M2 9h2"></path><path d="M20 15h2"></path><path d="M20 9h2"></path><path d="M9 2v2"></path><path d="M9 20v2"></path></svg></div>
+        <div class="set-card-t">Hardware</div>
+        <div class="set-card-d">Pins, RTC, SD, CPU frequency</div>
+      </div>
+    
+      <div class="set-card">
+        <div class="set-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="database" class="lucide lucide-database"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5V19A9 3 0 0 0 21 19V5"></path><path d="M3 12A9 3 0 0 0 21 12"></path></svg></div>
+        <div class="set-card-t">Data log</div>
+        <div class="set-card-d">Rotation, format, retention</div>
+      </div>
+    
+      <div class="set-card">
+        <div class="set-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="puzzle" class="lucide lucide-puzzle"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z"></path></svg></div>
+        <div class="set-card-t">Core Logic</div>
+        <div class="set-card-d">Operating mode, sensors, aggregation</div>
+      </div>
+    
+      <div class="set-card">
+        <div class="set-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="cloud-upload" class="lucide lucide-cloud-upload"><path d="M12 13v8"></path><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="m8 17 4-4 4 4"></path></svg></div>
+        <div class="set-card-t">Export</div>
+        <div class="set-card-d">MQTT, HTTP, openSenseMap, SC</div>
+      </div>
+    
+      <div class="set-card">
+        <div class="set-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="palette" class="lucide lucide-palette"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg></div>
+        <div class="set-card-t">Theme</div>
+        <div class="set-card-d">Colors, typography, density</div>
+      </div>
+    
+      <div class="set-card">
+        <div class="set-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="wifi" class="lucide lucide-wifi"><path d="M12 20h.01"></path><path d="M2 8.82a15 15 0 0 1 20 0"></path><path d="M5 12.859a10 10 0 0 1 14 0"></path><path d="M8.5 16.429a5 5 0 0 1 7 0"></path></svg></div>
+        <div class="set-card-t">Network</div>
+        <div class="set-card-d">WiFi, AP, captive portal</div>
+      </div>
+    
+      <div class="set-card">
+        <div class="set-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="clock" class="lucide lucide-clock"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div>
+        <div class="set-card-t">Time sync</div>
+        <div class="set-card-d">NTP, RTC, timezone</div>
+      </div>
+    
+      <div class="set-card">
+        <div class="set-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="folder" class="lucide lucide-folder"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></div>
+        <div class="set-card-t">Files</div>
+        <div class="set-card-d">Manage device storage</div>
+      </div>
+    </div>
+
+          <div class="card" style="margin-top:var(--gap)">
+            <div class="card-head"><div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="info" class="lucide lucide-info"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg> Device</div></div>
+            <div class="card-body">
+              <div class="form-grid">
+                <div class="field"><label>Device name</label><input class="input" value="Water Logger"></div>
+                <div class="field"><label>Device ID</label><input class="input mono" value="WL-A3F2-9B1C" disabled=""><div class="hint">Used in log filenames</div></div>
+                <div class="field"><label>Mode</label><select class="input"><option>Continuous</option><option>Legacy</option><option>Hybrid</option></select></div>
+                <div class="field"><label>Storage view</label><select class="input"><option>SD Card</option><option>LittleFS</option></select></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ─── CORE LOGIC ─── -->
+        <section class="page" data-page="corelogic">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Core Logic</h1>
+              <div class="page-sub crumb"><a>Settings</a> / Core Logic</div>
+            </div>
+            <div class="page-actions"><button class="btn primary"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="save" class="lucide lucide-save"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"></path><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"></path><path d="M7 3v4a1 1 0 0 0 1 1h7"></path></svg> Save &amp; reload</button></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="puzzle" class="lucide lucide-puzzle"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z"></path></svg> Operating mode</div></div>
+            <div class="card-body">
+              <div class="mode-grid">
+                <label class="mode-card"><input type="radio" name="mode"><div class="mode-h"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="moon" class="lucide lucide-moon"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg> Legacy</div><div class="mode-d">Original water logger. Deep sleep between events. No pipeline.</div><div class="mode-tag mono">DEFAULT</div></label>
+                <label class="mode-card selected"><input type="radio" name="mode" checked=""><div class="mode-h"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="activity" class="lucide lucide-activity"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg> Continuous</div><div class="mode-d">FreeRTOS pipeline runs all sensors. No deep sleep.</div><div class="mode-tag mono">RECOMMENDED</div></label>
+                <label class="mode-card"><input type="radio" name="mode"><div class="mode-h"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="layers" class="lucide lucide-layers"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"></path><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"></path><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"></path></svg> Hybrid</div><div class="mode-d">Water logger + sensor pipeline running together.</div></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="thermometer" class="lucide lucide-thermometer"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"></path></svg> Registered sensors</div>
+              <button class="btn"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="plus" class="lucide lucide-plus"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg> Add</button>
+            </div>
+            <div class="card-body" style="padding:0">
+              <table class="ftable" id="clSensors">
+                <thead><tr><th>Status</th><th>ID</th><th>Type</th><th>Interface</th><th>Interval</th><th>Metrics</th><th></th></tr></thead>
+                <tbody>
+      <tr>
+        <td><span class="badge ok">OK</span></td>
+        <td class="mono" style="font-size:11.5px">env_indoor</td>
+        <td>BME280</td>
+        <td class="mono" style="font-size:11.5px;color:var(--text-3)">I2C 0x76</td>
+        <td class="mono">10s</td>
+        <td style="color:var(--text-3);font-size:11.5px">temp · humidity · pressure</td>
+        <td><div class="row-acts"><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button></div></td>
+      </tr>
+    
+      <tr>
+        <td><span class="badge ok">OK</span></td>
+        <td class="mono" style="font-size:11.5px">air_quality</td>
+        <td>SGP30</td>
+        <td class="mono" style="font-size:11.5px;color:var(--text-3)">I2C 0x58</td>
+        <td class="mono">15s</td>
+        <td style="color:var(--text-3);font-size:11.5px">tvoc · eco2</td>
+        <td><div class="row-acts"><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button></div></td>
+      </tr>
+    
+      <tr>
+        <td><span class="badge ok">OK</span></td>
+        <td class="mono" style="font-size:11.5px">pm_outdoor</td>
+        <td>SDS011</td>
+        <td class="mono" style="font-size:11.5px;color:var(--text-3)">UART1</td>
+        <td class="mono">120s</td>
+        <td style="color:var(--text-3);font-size:11.5px">pm2.5 · pm10</td>
+        <td><div class="row-acts"><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button></div></td>
+      </tr>
+    
+      <tr>
+        <td><span class="badge ok">OK</span></td>
+        <td class="mono" style="font-size:11.5px">rain_gauge</td>
+        <td>RainSensor</td>
+        <td class="mono" style="font-size:11.5px;color:var(--text-3)">GPIO 7 (ISR)</td>
+        <td class="mono">event</td>
+        <td style="color:var(--text-3);font-size:11.5px">rain_rate · rain_total</td>
+        <td><div class="row-acts"><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button></div></td>
+      </tr>
+    
+      <tr>
+        <td><span class="badge ok">OK</span></td>
+        <td class="mono" style="font-size:11.5px">wind</td>
+        <td>WindSensor</td>
+        <td class="mono" style="font-size:11.5px;color:var(--text-3)">GPIO 8 (ISR)</td>
+        <td class="mono">5s</td>
+        <td style="color:var(--text-3);font-size:11.5px">wind_speed</td>
+        <td><div class="row-acts"><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button></div></td>
+      </tr>
+    
+      <tr>
+        <td><span class="badge ok">OK</span></td>
+        <td class="mono" style="font-size:11.5px">flow_main</td>
+        <td>YF-S201</td>
+        <td class="mono" style="font-size:11.5px;color:var(--text-3)">GPIO 21 (ISR)</td>
+        <td class="mono">event</td>
+        <td style="color:var(--text-3);font-size:11.5px">flow_rate · volume</td>
+        <td><div class="row-acts"><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button></div></td>
+      </tr>
+    
+      <tr>
+        <td><span class="badge err">ERR</span></td>
+        <td class="mono" style="font-size:11.5px">co2_sensor</td>
+        <td>SCD4x</td>
+        <td class="mono" style="font-size:11.5px;color:var(--text-3)">I2C 0x62</td>
+        <td class="mono">30s</td>
+        <td style="color:var(--text-3);font-size:11.5px">co2 · temp · humidity</td>
+        <td><div class="row-acts"><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button></div></td>
+      </tr>
+    
+      <tr>
+        <td><span class="badge dim">DIS</span></td>
+        <td class="mono" style="font-size:11.5px">soil_dry</td>
+        <td>SoilMoisture</td>
+        <td class="mono" style="font-size:11.5px;color:var(--text-3)">ADC 3</td>
+        <td class="mono">60s</td>
+        <td style="color:var(--text-3);font-size:11.5px">moisture</td>
+        <td><div class="row-acts"><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pencil" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button class="btn-mini"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg></button></div></td>
+      </tr>
+    </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="grid grid-2">
+            <div class="card">
+              <div class="card-head"><div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="layers" class="lucide lucide-layers"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"></path><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"></path><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"></path></svg> Aggregation defaults</div></div>
+              <div class="card-body">
+                <div class="form-grid">
+                  <div class="field"><label>Default mode</label><select class="input"><option>LTTB</option><option>Average</option><option>Min</option><option>Max</option></select><div class="hint">LTTB preserves visual shape</div></div>
+                  <div class="field"><label>Bucket</label><select class="input"><option>5 minutes</option><option>1 minute</option><option>1 hour</option></select></div>
+                  <div class="field"><label>Max points</label><input class="input mono" value="500"></div>
+                  <div class="field"><label>Retention (days)</label><input class="input mono" value="90"></div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="cloud-upload" class="lucide lucide-cloud-upload"><path d="M12 13v8"></path><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="m8 17 4-4 4 4"></path></svg> Export quick toggles</div></div>
+              <div class="card-body" style="display:flex;flex-direction:column;gap:6px">
+                <div class="toggle-row"><span><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="server" class="lucide lucide-server"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"></rect><rect width="20" height="8" x="2" y="14" rx="2" ry="2"></rect><line x1="6" x2="6.01" y1="6" y2="6"></line><line x1="6" x2="6.01" y1="18" y2="18"></line></svg> MQTT broker</span><span class="mono" style="color:var(--text-3);font-size:11px">192.168.1.10:1883</span><label class="switch"><input type="checkbox" checked=""><span></span></label></div>
+                <div class="toggle-row"><span><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="globe" class="lucide lucide-globe"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg> HTTP POST</span><span class="mono" style="color:var(--text-3);font-size:11px">api.example.com/v1</span><label class="switch"><input type="checkbox"><span></span></label></div>
+                <div class="toggle-row"><span><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="leaf" class="lucide lucide-leaf"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"></path><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"></path></svg> Sensor.Community</span><span class="mono" style="color:var(--text-3);font-size:11px">Pin 1, 7</span><label class="switch"><input type="checkbox" checked=""><span></span></label></div>
+                <div class="toggle-row"><span><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="map-pin" class="lucide lucide-map-pin"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"></path><circle cx="12" cy="10" r="3"></circle></svg> openSenseMap</span><span class="mono" style="color:var(--text-3);font-size:11px">box 5f3...</span><label class="switch"><input type="checkbox"><span></span></label></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ─── EXPORT ─── -->
+        <section class="page" data-page="export">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Export</h1>
+              <div class="page-sub crumb"><a>Settings</a> / Export</div>
+            </div>
+            <div class="page-actions"><button class="btn primary"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="save" class="lucide lucide-save"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"></path><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"></path><path d="M7 3v4a1 1 0 0 0 1 1h7"></path></svg> Save</button></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="server" class="lucide lucide-server"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"></rect><rect width="20" height="8" x="2" y="14" rx="2" ry="2"></rect><line x1="6" x2="6.01" y1="6" y2="6"></line><line x1="6" x2="6.01" y1="18" y2="18"></line></svg> MQTT</div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span class="badge ok"><span class="mono">CONNECTED</span></span>
+                <label class="switch"><input type="checkbox" checked=""><span></span></label>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="form-grid">
+                <div class="field"><label>Broker host</label><input class="input mono" value="192.168.1.10"></div>
+                <div class="field"><label>Port</label><input class="input mono" value="1883"></div>
+                <div class="field"><label>Username</label><input class="input" value="esp32"></div>
+                <div class="field"><label>Password</label><input class="input" type="password" value="••••••••"></div>
+                <div class="field"><label>Topic prefix</label><input class="input mono" value="home/water/"></div>
+                <div class="field"><label>QoS</label><select class="input"><option>0</option><option>1</option><option>2</option></select></div>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:14px">
+                <label class="check"><input type="checkbox" checked=""><span>Retain messages</span></label>
+                <label class="check" style="margin-left:14px"><input type="checkbox"><span>TLS</span></label>
+                <button class="btn" style="margin-left:auto"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="zap" class="lucide lucide-zap"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"></path></svg> Test connection</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="globe" class="lucide lucide-globe"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg> HTTP POST</div>
+              <label class="switch"><input type="checkbox"><span></span></label>
+            </div>
+            <div class="card-body">
+              <div class="form-grid">
+                <div class="field" style="grid-column:span 2"><label>Endpoint URL</label><input class="input mono" value="https://api.example.com/v1/ingest"></div>
+                <div class="field"><label>Method</label><select class="input"><option>POST</option><option>PUT</option></select></div>
+                <div class="field"><label>Auth header</label><input class="input mono" placeholder="Bearer …"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ─── UPDATE ─── -->
+        <section class="page" data-page="update">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Firmware update</h1>
+              <div class="page-sub">Current FW 5.2.1 · built 12 Apr 2026</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="upload-cloud" class="lucide lucide-upload-cloud"><path d="M12 13v8"></path><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="m8 17 4-4 4 4"></path></svg> OTA upload</div></div>
+            <div class="card-body">
+              <div class="dropzone">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="upload" style="width:32px;height:32px;color:var(--text-3)" class="lucide lucide-upload"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" x2="12" y1="3" y2="15"></line></svg>
+                <div style="font-weight:600">Drop firmware.bin here</div>
+                <div style="color:var(--text-3);font-size:12px">or <a style="color:var(--accent);text-decoration:underline;cursor:pointer">browse</a> · max 1.6 MB · validated by magic byte</div>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+                <label class="check"><input type="checkbox" checked=""><span>Reboot automatically after flash</span></label>
+                <button class="btn primary" disabled=""><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="zap" class="lucide lucide-zap"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"></path></svg> Flash &amp; reboot</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- ════════════════ AUDIT ════════════════ -->
+  <div class="frame-body" id="view-audit" style="display:none">
+    <div class="audit">
+      <header class="audit-head">
+        <div>
+          <h1>Design audit · ESP32 Logger Web UI</h1>
+          <div class="page-sub">Vanilla SPA · style.css 14.8 KB · index.html 90 KB · web.js 116 KB</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <span class="badge dim mono">12 ISSUES</span>
+          <span class="badge warn mono">5 HIGH</span>
+          <span class="badge err mono">2 CRITICAL</span>
+        </div>
+      </header>
+
+      <div class="audit-body" id="auditBody">
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:18px;line-height:1.6">
+        <p>Walked the SPA via the source — <code>www/index.html</code>, <code>www/style.css</code>, <code>www/web.js</code>. Firmware-side concerns are out of scope; the existing <code>audit_webui.md</code> covers those.</p>
+        <p style="margin-top:8px">The redesign in the other tab is one possible response to the issues below — neutral slate panels, single accent, density toggle, real icons, tabular numerics on every value. It does not change a single API contract.</p>
+      </div>
+    
+      <div class="audit-section">
+        <h2>Critical <span class="mono" style="color:var(--text-4);font-weight:500">· 2</span></h2>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">A1</span>
+              <span class="badge err">Critical</span>
+            </div>
+            <div>
+              <div class="issue-title">Single 90 KB index.html with 25+ pages inline</div>
+              <div class="issue-body">The entire SPA — every form, every settings subpage — is one HTML document. Editing one screen risks breaking all of them. The file is harder to diff than the firmware that serves it.</div>
+              <div class="issue-rec">Split per route and inline at build time, or load partials over fetch. Keep the failsafe single-file fallback.</div>
+            </div>
+          </div>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">A2</span>
+              <span class="badge err">Critical</span>
+            </div>
+            <div>
+              <div class="issue-title">Two duplicate <code>id="db-error"</code> elements on the dashboard</div>
+              <div class="issue-body">Lines 113 and 115 of <code>index.html</code> both declare <code>id="db-error"</code>. Browsers ignore the second; whichever element <code>web.js</code> targets first wins, silently. Classic copy-paste bug.</div>
+              <div class="issue-rec">Remove the duplicate. Add an HTML lint step to CI.</div>
+            </div>
+          </div>
+        
+      </div>
+    
+      <div class="audit-section">
+        <h2>High <span class="mono" style="color:var(--text-4);font-weight:500">· 5</span></h2>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">B1</span>
+              <span class="badge warn">High</span>
+            </div>
+            <div>
+              <div class="issue-title">Emoji-as-icons everywhere</div>
+              <div class="issue-body">Navigation, buttons, badges and headings rely on system emoji (🌡️ 📊 ⚙️). They render differently on iOS, Android, Windows and the captive-portal browser. Some are plain symbols (▼) styled as chevrons — they cannot be tinted with CSS <code>color</code>.</div>
+              <div class="issue-rec">Adopt a real icon set (Lucide / Material / Tabler SVG sprites). 2 KB inline sprite covers every glyph in the UI.</div>
+            </div>
+          </div>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">B2</span>
+              <span class="badge warn">High</span>
+            </div>
+            <div>
+              <div class="issue-title">Sidebar + bottom nav + header + page header — four chrome layers</div>
+              <div class="issue-body">Desktop renders the sidebar plus the page-header H1 plus a status pill row plus, on narrower widths, the mobile header. The actual content area gets ~55% of the viewport.</div>
+              <div class="issue-rec">Pick one nav surface per breakpoint. Move device status into a single persistent topbar; demote the H1 since the active sidebar item already names the page.</div>
+            </div>
+          </div>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">B3</span>
+              <span class="badge warn">High</span>
+            </div>
+            <div>
+              <div class="issue-title">No information density — gigantic cards everywhere</div>
+              <div class="issue-body"><code>--radius:12px</code>, <code>1rem</code> padding, <code>1.5rem</code> page padding, generous margins between every card. A 24-inch monitor shows the same 4 KPIs as a phone. There is no compact mode for power users actually monitoring this thing.</div>
+              <div class="issue-rec">Add a density toggle. Default to a tighter grid on desktop (12-col, 14 px gutters, 6 px radii).</div>
+            </div>
+          </div>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">B4</span>
+              <span class="badge warn">High</span>
+            </div>
+            <div>
+              <div class="issue-title">No tabular numerics anywhere — values jiggle when they update</div>
+              <div class="issue-body">Live values like <code>0.00 → 12.4</code> shift left/right because the default font has proportional digits. On a polling dashboard this looks broken.</div>
+              <div class="issue-rec">Use <code>font-variant-numeric: tabular-nums</code> on every numeric. Pair with a real mono font for raw telemetry.</div>
+            </div>
+          </div>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">B5</span>
+              <span class="badge warn">High</span>
+            </div>
+            <div>
+              <div class="issue-title">Inline styles for everything custom</div>
+              <div class="issue-body">Hundreds of <code>style="display:flex;gap:.5rem;..."</code> attributes throughout <code>index.html</code>. New colors, new spacings, new font sizes appear on a per-element basis with no system.</div>
+              <div class="issue-rec">Define utility classes or replace ad-hoc styling with composable components.</div>
+            </div>
+          </div>
+        
+      </div>
+    
+      <div class="audit-section">
+        <h2>Medium <span class="mono" style="color:var(--text-4);font-weight:500">· 5</span></h2>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">C1</span>
+              <span class="badge acc">Medium</span>
+            </div>
+            <div>
+              <div class="issue-title">Color palette is one teal blob</div>
+              <div class="issue-body">Primary, accent and chart-FF are all variations of the same teal (<code>#275673</code>, <code>#3182ce</code>, <code>#7eb0d5</code>). State machine, badges and chart legend rely on color contrast that mostly does not exist.</div>
+              <div class="issue-rec">One brand accent. State colors (ok/warn/err) should be perceptually distinct, not just hue-shifted teal.</div>
+            </div>
+          </div>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">C2</span>
+              <span class="badge acc">Medium</span>
+            </div>
+            <div>
+              <div class="issue-title">Native <code>alert()</code> for user feedback</div>
+              <div class="issue-body">Theme save, settings import, OTA upload — all surface errors via <code>alert()</code>. Acknowledged in the existing audit but still in the codebase.</div>
+              <div class="issue-rec">Toast component already half-built in <code>style.css</code>; finish wiring it.</div>
+            </div>
+          </div>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">C3</span>
+              <span class="badge acc">Medium</span>
+            </div>
+            <div>
+              <div class="issue-title">State machine is invisible when stopped</div>
+              <div class="issue-body">Live page shows current state as a colored chip with a 2-line label. The pipeline diagram from <code>README.md</code> is more informative than the actual UI.</div>
+              <div class="issue-rec">Render the state pipeline as a 5-step horizontal track with done/active/pending styling. The redesign shows it.</div>
+            </div>
+          </div>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">C4</span>
+              <span class="badge acc">Medium</span>
+            </div>
+            <div>
+              <div class="issue-title">Filters live in their own card, not on the chart</div>
+              <div class="issue-body">Date range, trigger filter, threshold and "exclude 0.00 L" each occupy a row in a dedicated card. By the time you scroll back to the chart, you have forgotten the filter values.</div>
+              <div class="issue-rec">Inline the time-range as a segmented control on the chart card. Keep the date range for power users in a popover.</div>
+            </div>
+          </div>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">C5</span>
+              <span class="badge acc">Medium</span>
+            </div>
+            <div>
+              <div class="issue-title">Sensor cards have no signal of "is this fresh?"</div>
+              <div class="issue-body"><code>.sensor-card</code> shows the current value and a status badge but no timestamp, sparkline or staleness indicator. A frozen sensor looks identical to a healthy one.</div>
+              <div class="issue-rec">Add "last update" timestamp + a 24-point sparkline + an err-state border for cards over their <code>read_interval_ms</code> threshold.</div>
+            </div>
+          </div>
+        
+      </div>
+    
+      <div class="audit-section">
+        <h2>Low <span class="mono" style="color:var(--text-4);font-weight:500">· 2</span></h2>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">D1</span>
+              <span class="badge dim">Low</span>
+            </div>
+            <div>
+              <div class="issue-title">Light + dark themes share the same chart grid color</div>
+              <div class="issue-body">Chart.js uses default gridlines; in dark mode they are nearly invisible.</div>
+              <div class="issue-rec">Theme tokens for chart axes, gridlines, tooltip background.</div>
+            </div>
+          </div>
+        
+          <div class="issue">
+            <div class="issue-meta">
+              <span class="issue-id">D2</span>
+              <span class="badge dim">Low</span>
+            </div>
+            <div>
+              <div class="issue-title">Form labels are plain text, hints are below the input</div>
+              <div class="issue-body">Every settings page has the same pattern: bold label, input, gray hint. The hint usually contains the most important info (default value, valid range). It is the smallest text on the page.</div>
+              <div class="issue-rec">Hint above input, secondary; keep label as the primary anchor. Or use a placeholder with a real default.</div>
+            </div>
+          </div>
+        
+      </div>
+    
+      <div class="audit-section">
+        <h2>Strengths · keep</h2>
+        <ul style="font-size:13px;color:var(--text-2);line-height:1.7;padding-left:18px">
+          <li><strong>Clean URL structure</strong> — hash-based SPA with predictable <code>#dashboard</code>, <code>#settings_corelogic</code> routes.</li>
+          <li><strong>Failsafe recovery page</strong> — graceful degradation when <code>/www/index.html</code> is missing.</li>
+          <li><strong>LTTB aggregation surfaced in the UI</strong> — power users can see and tune the visualisation pipeline.</li>
+          <li><strong>Plugin-aware sensor architecture mirrored in the UI</strong> — Core Logic page maps 1:1 to <code>platform_config.json</code>.</li>
+          <li><strong>Sensible separation of legacy / continuous / hybrid modes</strong> — UI does not hide complexity.</li>
+        </ul>
+      </div>
+    </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tweaks panel -->
+<div class="tweaks" id="tweaks" style="">
+  <div class="tweaks-head">
+    <span style="display:flex;align-items:center;gap:8px"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="sliders" class="lucide lucide-sliders"><line x1="4" x2="4" y1="21" y2="14"></line><line x1="4" x2="4" y1="10" y2="3"></line><line x1="12" x2="12" y1="21" y2="12"></line><line x1="12" x2="12" y1="8" y2="3"></line><line x1="20" x2="20" y1="21" y2="16"></line><line x1="20" x2="20" y1="12" y2="3"></line><line x1="2" x2="6" y1="14" y2="14"></line><line x1="10" x2="14" y1="8" y2="8"></line><line x1="18" x2="22" y1="16" y2="16"></line></svg> Tweaks</span>
+    <button class="btn-mini" onclick="document.getElementById('tweaks').style.display='none'"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="x" class="lucide lucide-x"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button>
+  </div>
+  <div class="tweaks-body">
+    <div class="t-field"><label>Theme</label>
+      <div class="seg" id="tw-theme"><button data-v="light" class="active">Light</button><button data-v="dark" class="">Dark</button></div>
+    </div>
+    <div class="t-field"><label>Navigation</label>
+      <div class="seg" id="tw-nav"><button data-v="sidebar" class="active">Sidebar</button><button data-v="top" class="">Top</button><button data-v="bottom">Bottom</button></div>
+    </div>
+    <div class="t-field"><label>Density</label>
+      <div class="seg" id="tw-density"><button data-v="comfortable" class="active">Comfortable</button><button data-v="compact" class="">Compact</button></div>
+    </div>
+    <div class="t-field"><label>Accent</label>
+      <div class="seg" id="tw-accent">
+        <button data-v="cyan" style="--c:#22d3ee" class="active">Cyan</button>
+        <button data-v="green" style="--c:#22c55e" class="">Green</button>
+        <button data-v="amber" style="--c:#f59e0b" class="">Amber</button>
+        <button data-v="violet" style="--c:#a78bfa" class="">Violet</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="esp32-redesign.js"></script>
+
+
+</body></html>

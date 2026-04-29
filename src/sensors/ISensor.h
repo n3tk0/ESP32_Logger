@@ -95,7 +95,7 @@ public:
 
     // Error tracking — incremented by SensorManager on failed reads
     uint32_t    errorCount()               const { return _errorCount; }
-    void        incErrorCount()                  { _errorCount++; }
+    virtual void incErrorCount()                 { _errorCount++; }
     void        resetErrorCount()                { _errorCount = 0; }
 
 protected:

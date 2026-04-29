@@ -3,6 +3,7 @@
 #include "../sensors/SensorManager.h"
 #include "../pipeline/DataPipeline.h"
 #include "../core/Globals.h"  // Rtc, rtcAvailable
+#include <time.h>                // time() — NTP system clock fallback
 
 // ---------------------------------------------------------------------------
 void sensorTaskFunc(void* /*param*/) {
@@ -20,7 +21,12 @@ void sensorTaskFunc(void* /*param*/) {
             RtcDateTime now = Rtc->GetDateTime();
             if (now.IsValid()) ts = now.Unix32Time();
         }
-        // Fallback: relative millis (quality = ESTIMATED, set by sensor plugin)
+        // Fallback: system clock (set by NTP when no hardware RTC)
+        if (ts == 0) {
+            time_t sysNow = 0; time(&sysNow);
+            if (sysNow > 1000000000UL) ts = (uint32_t)sysNow;
+        }
+        // Last resort: relative millis (quality = ESTIMATED)
         if (ts == 0) ts = (uint32_t)(millis() / 1000UL);
 
         sensorManager.tickFiltered(sensorQueue, ts, false);

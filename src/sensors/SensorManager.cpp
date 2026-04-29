@@ -212,5 +212,21 @@ void SensorManager::toJson(JsonArray arr) const {
         int mcount = s->getMetrics(metricNames, 8);
         JsonArray ma = o["metrics"].to<JsonArray>();
         for (int m = 0; m < mcount; m++) ma.add(metricNames[m]);
+
+        // Include last-read values from ring buffer for live display
+        if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+            JsonObject vals = o["last_values"].to<JsonObject>();
+            for (int m = 0; m < mcount; m++) {
+                // Scan backwards in ring buffer for most recent match
+                SensorReading r;
+                bool found = webRingBuf.findLast(s->getId(), metricNames[m], r);
+                if (found) {
+                    char vBuf[16];
+                    snprintf(vBuf, sizeof(vBuf), "%.2f", r.value);
+                    vals[metricNames[m]] = serialized(String(vBuf));
+                }
+            }
+            xSemaphoreGive(webDataMutex);
+        }
     }
 }

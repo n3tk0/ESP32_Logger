@@ -177,7 +177,10 @@ function sensorsLoad() {
               '<div class="sensor-metrics">' +
               (s.metrics || [])
                 .map(function (m) {
-                  return '<span class="metric-tag">' + esc(m) + "</span>";
+                  var val = s.last_values && s.last_values[m] !== undefined
+                    ? '<strong>' + s.last_values[m] + '</strong> '
+                    : '';
+                  return '<span class="metric-tag">' + val + esc(m) + "</span>";
                 })
                 .join("") +
               "</div>" +
@@ -238,7 +241,7 @@ function sensorChartLoad() {
     "&metric=" +
     encodeURIComponent(metric) +
     "&from=" + from + "&to=" + now +
-    "&agg=" + agg + "&mode=" + mode + "&limit=500";
+    "&agg=" + agg + "&mode=" + mode + "&limit=250";
 
   // Secondary overlay sensor
   var sid2 = (document.getElementById("sc-sensor2") || {}).value;
@@ -251,7 +254,7 @@ function sensorChartLoad() {
       "&metric=" +
       encodeURIComponent(metric2) +
       "&from=" + from + "&to=" + now +
-      "&agg=" + agg + "&mode=" + mode + "&limit=500";
+      "&agg=" + agg + "&mode=" + mode + "&limit=250";
   }
 
   if (msg) msg.textContent = "Loading…";
@@ -774,12 +777,17 @@ function clEditSensor(idx) {
             '<option value="38400"' + (s.baud == 38400 ? ' selected' : '') + '>38400</option>' +
             '<option value="115200"' + (s.baud == 115200 ? ' selected' : '') + '>115200</option>' +
             '</select></div>';
+    if (s.type === "sds011") {
+      html += '<div class="form-group"><label class="form-label">Working Period (minutes)</label>' +
+              '<input type="number" min="0" max="30" name="work_period_min" class="form-input" value="' + (s.work_period_min !== undefined ? s.work_period_min : 1) + '">' +
+              '<p class="form-hint">0 = Continuous. 1-30 = Sensor sleeps and wakes automatically.</p></div>';
+    }
   } else if (s.interface === "pulse") {
     html += '<div class="form-group"><label class="form-label">Pin</label><input type="number" name="pin" class="form-input" value="' + (s.pin !== undefined ? s.pin : 9) + '"></div>';
   }
 
   // Support for custom JSON fields (advanced)
-  var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "uart_rx", "uart_tx", "baud", "pin"];
+  var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "uart_rx", "uart_tx", "baud", "pin", "work_period_min"];
   var advObj = {};
   for (var k in s) {
     if (stdKeys.indexOf(k) === -1) advObj[k] = s[k];
@@ -817,6 +825,9 @@ function clSaveEditedSensor() {
     s.uart_rx = parseInt(fd.get("uart_rx") || 20, 10);
     s.uart_tx = parseInt(fd.get("uart_tx") || -1, 10);
     s.baud = parseInt(fd.get("baud") || 9600, 10);
+    if (s.type === "sds011") {
+      s.work_period_min = parseInt(fd.get("work_period_min") || 1, 10);
+    }
   } else if (s.interface === "pulse") {
     s.pin = parseInt(fd.get("pin") || 9, 10);
   }

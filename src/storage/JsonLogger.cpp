@@ -180,6 +180,7 @@ size_t JsonLogger::query(fs::FS& fs,
         }
 
         while (entry.available() && found < maxOut) {
+            yield(); // Prevent starving AsyncTCP and hardware watchdog
             int len = entry.readBytesUntil('\n', lineBuf, sizeof(lineBuf)-1);
             if (len <= 0) break;
             lineBuf[len] = '\0';
@@ -269,6 +270,7 @@ size_t JsonLogger::streamAggregateQuery(fs::FS& fs,
             }
 
             while (entry.available()) {
+                yield(); // Prevent starving AsyncTCP and hardware watchdog
                 int len = entry.readBytesUntil('\n', lineBuf, sizeof(lineBuf) - 1);
                 if (len <= 0) break;
                 lineBuf[len] = '\0';

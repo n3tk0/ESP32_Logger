@@ -204,7 +204,7 @@ def build(src_root: Path, dst_root: Path, *, do_gzip: bool) -> dict:
         gz_bytes += wire_bytes
 
         rel_pct = 100.0 * wire_bytes / max(1, len(raw))
-        print(f"  {rel}: {len(raw):>7} → {wire_bytes:>7} B over the wire  ({rel_pct:5.1f}%)")
+        print(f"  {rel}: {len(raw):>7} -> {wire_bytes:>7} B over the wire  ({rel_pct:5.1f}%)")
 
     return {
         "in_bytes": in_bytes,
@@ -239,7 +239,7 @@ def main() -> int:
 
     dst_root.mkdir(parents=True, exist_ok=True)
 
-    print(f"[build_web] {src_root} → {dst_root}")
+    print(f"[build_web] {src_root} -> {dst_root}")
     totals = build(src_root, dst_root, do_gzip=not args.no_gzip)
 
     in_b   = totals["in_bytes"]
@@ -248,7 +248,7 @@ def main() -> int:
     wire_pct = 100.0 * wire_b / max(1, in_b)
     print()
     print(f"[build_web] source : {in_b:>9} B")
-    print(f"[build_web] wire   : {wire_b:>9} B  ({wire_pct:.1f}% of source — what gzip-aware browsers download)")
+    print(f"[build_web] wire   : {wire_b:>9} B  ({wire_pct:.1f}% of source - what gzip-aware browsers download)")
     print(f"[build_web] flash  : {flash_b:>9} B  (plain + .gz siblings on LittleFS)")
     # `relative_to(ROOT)` raises ValueError when --dst points outside the
     # project root (gemini review PR #49); fall back to the absolute path

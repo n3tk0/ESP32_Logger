@@ -1,11 +1,13 @@
 /**************************************************************************************************
- * PROJECT: ESP32 Low-Power Water Usage Logger v4.2.0
- * TARGET:  XIAO ESP32-C3 (RISC-V)
+ * PROJECT: ESP32 Multi-Sensor Water Usage Logger v5.1.0
+ * TARGET:  XIAO ESP32-C3 / ESP32-C3 Super Mini (RISC-V) / generic ESP32
  * AUTHOR:  Petko Georgiev
  *
  * МОДУЛНА СТРУКТУРА:
- *   src/core/Config.h/.cpp         – структури, enums, константи
+ *   src/setup.h                    – единствен файл за build-time конфигурация
+ *   src/core/Config.h/.cpp         – структури, enums, константи, версия
  *   src/core/Globals.h/.cpp        – глобални променливи
+ *   src/core/ModuleRegistry.h/.cpp – IModule регистър (WiFi, OTA, Theme, DataLog, Time)
  *   src/utils/Utils.h/.cpp         – помощни функции (format, sanitize, path)
  *   src/managers/ConfigManager.h/.cpp  – зареждане/запис на конфигурация
  *   src/managers/WiFiManager.h/.cpp    – WiFi, AP, NTP + safeWiFiShutdown()
@@ -13,20 +15,25 @@
  *   src/managers/RtcManager.h/.cpp     – DS1302, bootcount backup, wake reason
  *   src/managers/HardwareManager.h/.cpp – init pins, ISR, debounce
  *   src/managers/DataLogger.h/.cpp     – log buffer, flush to FS
- *   src/web/WebServer.h/.cpp       – AsyncWebServer handlers
- *   Logger.ino                     – само setup() и loop()
+ *   src/managers/OtaManager.h/.cpp     – OTA rollback, pending verify, auto-confirm
+ *   src/sensors/SensorManager.h        – plugin-based multi-sensor registry
+ *   src/sensors/plugins/*              – BME280, SDS011, DS18B20, WaterFlow, etc.
+ *   src/pipeline/DataPipeline.h        – LTTB aggregation pipeline
+ *   src/tasks/TaskManager.h            – FreeRTOS task orchestration
+ *   src/export/ExportManager.h         – MQTT, HTTP, SensorCommunity, OpenSenseMap, Webhook
+ *   src/web/WebServer.h/.cpp           – AsyncWebServer + failsafe PROGMEM UI
+ *   src/web/ApiHandlers.h/.cpp         – REST API routes (/api/sensors, /api/ota, etc.)
+ *   ESP_Logger.ino                     – setup() и loop()
  *
- * ИЗПОЛЗВАНИ БИБЛИОТЕКИ:
- *   Adafruit BME280 Library     (Adafruit)        -> BME280Sensor
- *   Adafruit Unified Sensor     (Adafruit)        -> BME280, BME688
- *   Adafruit BME680 Library     (Adafruit)        -> BME688Sensor
- *   ArduinoJson                 (B. Blanchon)     -> Core
- *   ESPAsyncWebServer           (me-no-dev)       -> WebServer
- *   AsyncTCP                    (me-no-dev)       -> WebServer
- *   PubSubClient                (Nick O'Leary)    -> MqttExporter
- *   OneWire                     (P. Stoffregen)   -> DS18B20Sensor
- *   DallasTemperature           (Miles Burton)    -> DS18B20Sensor
- *   RTC by Makuna               (Makuna)          -> RtcManager
+ * ИЗПОЛЗВАНИ БИБЛИОТЕКИ (Arduino Library Manager):
+ *   ArduinoJson                 (B. Blanchon)     >= 7.0   -> Core
+ *   ESPAsyncWebServer           (esphome/lacamera)>= 3.1   -> WebServer
+ *   AsyncTCP                    (me-no-dev)       >= 1.1   -> WebServer
+ *
+ * Всички сензорни драйвери (BME280, BME688, DS18B20, SDS011, PMS5003, ENS160,
+ * SGP30, SCD4x, VEML6075, VEML7700, BH1750, HC-SR04, ZMPT101B, ZMCT103C,
+ * WaterFlow, Rain, Wind, Soil) са вградени mini drivers — НЕ изискват
+ * допълнителни библиотеки. MQTT използва вграден lightweight клиент.
  *
  **************************************************************************************************/
 
@@ -575,7 +582,14 @@ void setup() {
             startAPMode();
         }
 
-        setupWebServer();   // ← в WebServer.cpp
+        setupWebServer();   // <- WebServer.cpp
+
+        // Auto NTP sync on boot when WiFi client is connected (no RTC needed)
+        if (wifiConnectedAsClient && !rtcValid) {
+            bool ok = syncTimeFromNTP();
+            if (ok) rtcValid = true;
+            DBGF("Auto NTP: %s\n", ok ? "OK" : "FAIL");
+        }
 
         // Platform v5.0: start sensor pipeline in continuous/hybrid mode
         if (g_platformMode != PLATFORM_LEGACY) {

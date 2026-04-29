@@ -3,6 +3,7 @@
 #include "../sensors/SensorManager.h"
 #include "../pipeline/DataPipeline.h"
 #include "../core/Globals.h"  // Rtc, rtcAvailable
+#include <time.h>
 
 // ---------------------------------------------------------------------------
 void slowSensorTaskFunc(void* /*param*/) {
@@ -16,6 +17,10 @@ void slowSensorTaskFunc(void* /*param*/) {
         if (Rtc) {
             RtcDateTime now = Rtc->GetDateTime();
             if (now.IsValid()) ts = now.Unix32Time();
+        }
+        if (ts == 0) {
+            time_t sysNow = 0; time(&sysNow);
+            if (sysNow > 1000000000UL) ts = (uint32_t)sysNow;
         }
         if (ts == 0) ts = (uint32_t)(millis() / 1000UL);
 

@@ -1,5 +1,5 @@
 // ============================================================================
-// setup.h — central build-time configuration for ESP32 Water Logger v5.0
+// setup.h — central build-time configuration for ESP32 Water Logger v5.1.0
 // ============================================================================
 // This is the single place to configure WHAT GETS BUILT and HOW IT BEHAVES.
 //
@@ -11,6 +11,11 @@
 //
 // All macros use #ifndef so PlatformIO -D build_flags can override them
 // without editing this file.  Arduino IDE users can edit this file directly.
+//
+// Supported targets:
+//   • XIAO ESP32-C3        (SDA=6, SCL=7)
+//   • ESP32-C3 Super Mini  (SDA=8, SCL=9, USB CDC On Boot)
+//   • Generic ESP32
 //
 // What is NOT here:
 //   • Data structures (DeviceConfig, HardwareConfig, ...) — see core/Config.h
@@ -170,7 +175,7 @@
 #  define STACK_SLOW_SENSOR_TASK 4096   // Blocking sensor reads (UART + delay)
 #endif
 #ifndef STACK_STORAGE_TASK
-#  define STACK_STORAGE_TASK     6144   // Two JsonLogger + File I/O
+#  define STACK_STORAGE_TASK     8192   // Two JsonLogger + File I/O (was 6144, HWM=1048)
 #endif
 #ifndef STACK_EXPORT_TASK
 #  define STACK_EXPORT_TASK      8192   // WiFi + TLS + JSON serialisation

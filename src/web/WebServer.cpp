@@ -1,12 +1,19 @@
 /**
  * src/web/WebServer.cpp
- * ESP32 Water Logger v4.2.0 – Production audit hardening
+ * ESP32 Water Logger v5.1.0 – Production audit hardening
  *
  * Architecture:
  *   – Normal mode  : AsyncWebServer serves /www/index.html + /www/js/*.js
  *   – Failsafe mode: If /www/index.html is missing, embedded minimal HTML is
- *                    served that lets the user upload the real UI files.
+ *                    served that lets the user upload the real UI files,
+ *                    create directories, manage files, configure sensors,
+ *                    and flash OTA firmware — all from PROGMEM.
  *   – All JSON API endpoints are always available regardless of UI mode.
+ *
+ * CSP: script-src includes 'unsafe-inline' because the failsafe PROGMEM page
+ *      relies on inline <script> blocks and onclick handlers.
+ *
+ * Compatibility: ESPAsyncWebServer >= 3.11 (const-correct getParam API).
  */
 
 #include "WebServer.h"
@@ -51,9 +58,9 @@ String getNetworkDisplay() {
 }
 
 void sendJsonResponse(AsyncWebServerRequest *r, JsonDocument &doc) {
-    String json;
-    serializeJson(doc, json);
-    r->send(200, "application/json", json);
+    AsyncResponseStream *resp = r->beginResponseStream("application/json");
+    serializeJson(doc, *resp);
+    r->send(resp);
 }
 
 const char RESTART_HEAD[] PROGMEM = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -162,7 +169,8 @@ void publishLiveEvent() {
 static const char FAILSAFE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Water Logger - Setup Mode</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,sans-serif;background:#f0f4f8;color:#2d3748;min-height:100vh}header{background:#275673;color:#fff;padding:16px 20px}header h1{font-size:1.2rem;display:flex;align-items:center;gap:10px}.badge{background:#e74c3c;color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem;font-weight:700}.sub{font-size:.8rem;opacity:.8;margin-top:4px}.container{max-width:720px;margin:20px auto;padding:0 14px}.card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.09);margin-bottom:14px;overflow:hidden}.card-header{padding:13px 18px;border-bottom:1px solid #e2e8f0;font-weight:600;background:#f7fafc;display:flex;justify-content:space-between;align-items:center}.card-body{padding:16px 18px}.drop{border:2px dashed #cbd5e0;border-radius:8px;padding:24px;text-align:center;cursor:pointer;transition:.2s;margin-bottom:10px}.drop:hover,.drop.over{border-color:#275673;background:#ebf4ff}.drop input{display:none}.drop p{color:#718096;font-size:.85rem;margin-top:5px}.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;border:none;border-radius:7px;font-size:.88rem;font-weight:500;cursor:pointer;transition:.15s;text-decoration:none}.btn-primary{background:#275673;color:#fff}.btn-primary:hover{background:#1d4259}.btn-danger{background:#e74c3c;color:#fff}.btn-danger:hover{background:#c0392b}.btn-warn{background:#f39c12;color:#fff}.btn-warn:hover{background:#d68910}.btn-sm{padding:4px 10px;font-size:.78rem}progress{width:100%;height:8px;border-radius:4px;margin-top:8px;display:none}.msg{margin-top:8px;font-size:.88rem;min-height:1.1em}.ok{color:#27ae60}.err{color:#e74c3c}.inf{color:#275673}.file-list{font-size:.85rem}.file-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #e2e8f0;gap:6px}.file-row:last-child{border:none}.fname{word-break:break-all;flex:1}.fsize{color:#718096;white-space:nowrap;margin:0 8px}.acts{display:flex;gap:5px;flex-shrink:0}.alert{padding:11px 15px;border-radius:8px;margin-bottom:12px;font-size:.88rem;line-height:1.4}.alert-warn{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}.legacy{background:#fff3cd;border-left:4px solid #f39c12;padding:6px 10px;border-radius:4px;font-size:.8rem;color:#856404;margin-top:4px}input[type=text]{width:100%;padding:7px 11px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem}.section-label{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#718096;padding:10px 0 4px}.sel{width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem;margin-top:4px;background:#fff;color:#2d3748}.fhint{font-size:.78rem;color:#718096;margin-top:4px}.chk-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #e2e8f0;font-size:.88rem}.chk-row:last-child{border:none}.warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:7px;padding:11px 14px;font-size:.83rem;color:#92400e;margin-top:8px;display:none}.warn-box.show{display:block}.flabel{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#718096;display:block;margin-bottom:2px}.tabs{display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px}.tab{padding:10px 20px;border:none;background:none;cursor:pointer;font-size:.9rem;color:#718096;font-weight:500;border-bottom:3px solid transparent;margin-bottom:-2px;transition:.15s;display:flex;align-items:center;gap:6px}.tab:hover{color:#275673;background:#f7fafc}.tab.active{color:#275673;border-bottom-color:#275673;font-weight:700}.tab-pane{display:none}.tab-pane.active{display:block}</style></head><body>)HTML"
 R"HTML(<header><h1>&#x1F4A7; Water Logger <span class="badge">SETUP MODE</span></h1><div class="sub">Upload UI files to /www/ to restore normal operation &mdash; or bookmark <strong>/setup</strong> for recovery</div><div id="fs-sysinfo" class="sub" style="font-size:.72rem;margin-top:3px;opacity:.8"></div></header><div class="container"><div class="tabs"><button class="tab active" id="tab-btn-setup" onclick="switchTab('setup',this)">&#x2699;&#xFE0F; Setup</button><button class="tab" id="tab-btn-corelogic" onclick="switchTab('corelogic',this)">&#x1F9E9; Core Logic</button></div>)HTML"
 R"HTML(<div id="tab-setup" class="tab-pane active"><div class="alert alert-warn">&#x26A0;&#xFE0F; <strong>Normal UI not found.</strong> Upload <code>index.html</code>, <code>web.js</code> and <code>style.css</code> into <code>/www/</code>. If you see a broken page normally, you likely have <strong>old files at the root</strong> &mdash; delete them below. If the main UI is broken, navigate to <code>/setup</code> at any time to return here.</div>)HTML"
-R"HTML(<div class="card"><div class="card-header">&#x1F4E4; Upload files to /www/</div><div class="card-body"><div class="drop" id="dropZone" onclick="document.getElementById('fileInput').click()"><input type="file" id="fileInput" multiple>&#x2B06; <strong>Click or drag files here</strong><p>index.html &bull; web.js &bull; style.css &bull; changelog.txt &bull; chart.min.js &bull; etc.</p></div><progress id="prog" value="0" max="100"></progress><div class="msg inf" id="uploadMsg"></div></div></div>)HTML"
+R"HTML(<div class="card"><div class="card-header">&#x1F4E4; Upload Files</div><div class="card-body"><div style="margin-bottom:10px"><label class="flabel">Upload to directory:</label><input type="text" id="uploadDir" value="/www/" placeholder="/www/js/pages/"><p class="fhint">Directory will be created automatically if it doesn't exist.</p></div><div class="drop" id="dropZone" onclick="document.getElementById('fileInput').click()"><input type="file" id="fileInput" multiple>&#x2B06; <strong>Click or drag files here</strong><p>index.html &bull; web.js &bull; style.css &bull; etc.</p></div><progress id="prog" value="0" max="100"></progress><div class="msg inf" id="uploadMsg"></div></div></div>)HTML"
+R"HTML(<div class="card"><div class="card-header">&#x1F4C1; Create Directory</div><div class="card-body"><div style="display:flex;gap:8px"><input type="text" id="mkdirPath" placeholder="/www/js/pages"><button class="btn btn-primary" onclick="doMkdir()">Create</button></div><div class="msg" id="mkdirMsg"></div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header"><span>&#x1F4C1; LittleFS &mdash; All Files</span><button class="btn btn-sm btn-primary" onclick="loadFiles()">&#x21BA; Refresh</button></div><div class="card-body" style="padding:4px 18px 14px"><div id="legacyWarn" style="display:none" class="legacy">&#x26A0;&#xFE0F; <strong>Legacy UI files found at root.</strong> These override /www/ files and cause broken pages. Delete them!</div><div class="section-label">&#x1F4C2; /www/ (new UI files)</div><div class="file-list" id="wwwList">Loading&#x2026;</div><div class="section-label" style="margin-top:10px">&#x1F4C2; / (root &mdash; legacy / system files)</div><div class="file-list" id="rootList">Loading&#x2026;</div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header">&#x270F;&#xFE0F; Rename / Move File</div><div class="card-body"><div style="display:flex;gap:8px;flex-wrap:wrap"><input type="text" id="renSrc" placeholder="From: e.g. /web.js" style="flex:1;min-width:140px"><input type="text" id="renDst" placeholder="To: e.g. /www/web.js" style="flex:1;min-width:140px"><button class="btn btn-primary" onclick="doRename()">Move</button></div><div class="msg" id="renMsg"></div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header">&#x1F504; Device Control</div><div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn btn-primary" onclick="if(confirm('Restart now?'))fetch('/restart',{method:'POST'}).then(function(){setTimeout(function(){location.reload();},5000)})">&#x1F504; Restart</button><button class="btn btn-danger" onclick="doFactoryReset()">&#x1F9F9; Factory Reset</button><div class="msg" id="fsResetMsg" style="flex-basis:100%;margin-top:4px"></div></div></div>)HTML"
@@ -174,7 +182,8 @@ R"HTML(<script>
 function switchTab(n,b){document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-pane').forEach(function(p){p.classList.remove('active');p.style.display='none'});b.classList.add('active');var p=document.getElementById('tab-'+n);if(p){p.classList.add('active');p.style.display='block'}if(n==='corelogic'&&!FS_PCFG)fsClLoad()}
 var LEG=['/web.js','/style.css','/index.html','/index.htm'];
 var dz=document.getElementById('dropZone');dz.addEventListener('dragover',function(e){e.preventDefault();this.classList.add('over')});dz.addEventListener('dragleave',function(){this.classList.remove('over')});dz.addEventListener('drop',function(e){e.preventDefault();this.classList.remove('over');upF(e.dataTransfer.files)});document.getElementById('fileInput').addEventListener('change',function(){upF(this.files)});
-function upF(fs){if(!fs||!fs.length)return;var pg=document.getElementById('prog'),mg=document.getElementById('uploadMsg'),i=0;pg.style.display='block';mg.className='msg inf';(function nx(){if(i>=fs.length){mg.textContent='Done! '+fs.length+' file(s) uploaded to /www/.';mg.className='msg ok';pg.style.display='none';document.getElementById('fileInput').value='';ldF();return}var fd=new FormData();fd.append('file',fs[i]);fd.append('path','/www/');var x=new XMLHttpRequest();x.upload.onprogress=function(e){if(e.lengthComputable)pg.value=Math.round(e.loaded/e.total*100)};x.onload=function(){mg.textContent='Uploaded: '+fs[i].name+' ('+(i+1)+'/'+fs.length+')';i++;nx()};x.onerror=function(){mg.textContent='Error: '+fs[i].name;mg.className='msg err';pg.style.display='none'};x.open('POST','/upload');x.send(fd)})()}
+function upF(fs){if(!fs||!fs.length)return;var tgt=document.getElementById('uploadDir').value.trim()||'/www/';var pg=document.getElementById('prog'),mg=document.getElementById('uploadMsg'),i=0;pg.style.display='block';mg.className='msg inf';(function nx(){if(i>=fs.length){mg.textContent='Done! '+fs.length+' file(s) uploaded to '+tgt;mg.className='msg ok';pg.style.display='none';document.getElementById('fileInput').value='';ldF();return}var fd=new FormData();fd.append('file',fs[i]);fd.append('path',tgt);var x=new XMLHttpRequest();x.upload.onprogress=function(e){if(e.lengthComputable)pg.value=Math.round(e.loaded/e.total*100)};x.onload=function(){mg.textContent='Uploaded: '+fs[i].name+' ('+(i+1)+'/'+fs.length+')';i++;nx()};x.onerror=function(){mg.textContent='Error: '+fs[i].name;mg.className='msg err';pg.style.display='none'};x.open('POST','/upload');x.send(fd)})()}
+function doMkdir(){var p=document.getElementById('mkdirPath').value.trim(),m=document.getElementById('mkdirMsg');if(!p){m.textContent='Enter a path.';m.className='msg err';return}var parts=p.split('/').filter(function(s){return s.length>0});var nm=parts.pop();var dr='/'+parts.join('/');if(!dr||dr==='/')dr='/';fetch('/mkdir?name='+encodeURIComponent(nm)+'&dir='+encodeURIComponent(dr)+'&storage=internal',{method:'POST'}).then(function(r){return r.json()}).then(function(j){if(j&&j.ok){m.textContent='Created: '+p;m.className='msg ok';ldF()}else{m.textContent='Failed: '+(j.error||'unknown');m.className='msg err'}}).catch(function(e){m.textContent='Error: '+e;m.className='msg err'})}
 function fmB(b){if(!b)return'0 B';if(b>=1048576)return(b/1048576).toFixed(1)+' MB';if(b>=1024)return(b/1024).toFixed(1)+' KB';return b+' B'}
 function fRow(f){var lg=LEG.indexOf(f.path)>=0;return'<div class="file-row"'+(lg?' style="background:#fff8e1"':'')+'><span class="fname">'+(lg?'&#x26A0;&#xFE0F; ':'&#x1F4C4; ')+f.path+(lg?' <span style="color:#e67e22;font-size:.75rem">[LEGACY - DELETE]</span>':'')+'</span><span class="fsize">'+fmB(f.size)+'</span><span class="acts"><a href="/download?file='+encodeURIComponent(f.path)+'&storage=internal" class="btn btn-sm btn-primary">&#x1F4E5;</a> <button class="btn btn-sm btn-danger" data-path="'+f.path+'" onclick="dlF(this.dataset.path)">&#x1F5D1;</button></span></div>'}
 function ldF(){var w=document.getElementById('wwwList'),r=document.getElementById('rootList'),wn=document.getElementById('legacyWarn');if(w.innerHTML==='')w.innerHTML='Loading&#x2026;';if(r.innerHTML==='')r.innerHTML='Loading&#x2026;';fetch('/api/filelist?storage=internal&dir=/www/').then(function(r){return r.json()}).then(function(d){var f=d.files||[];if(!f.length){w.innerHTML='<div style="padding:8px 0;color:#718096">Empty &mdash; upload files here</div>';return}w.innerHTML=f.map(function(x){return fRow(x)}).join('')}).catch(function(){w.innerHTML='<span class="err">Error</span>'});fetch('/api/filelist?storage=internal&dir=/').then(function(r){return r.json()}).then(function(d){var f=(d.files||[]).filter(function(x){return!x.isDir});if(!f.length){r.innerHTML='<div style="padding:8px 0;color:#718096">Empty</div>';wn.style.display='none';return}wn.style.display=f.some(function(x){return LEG.indexOf(x.path)>=0})?'block':'none';r.innerHTML=f.map(function(x){return fRow(x)}).join('')}).catch(function(){r.innerHTML='<span class="err">Error</span>'})}
@@ -336,7 +345,7 @@ void setupWebServer() {
     DefaultHeaders::Instance().addHeader(
         "Content-Security-Policy",
         "default-src 'self'; "
-        "script-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
@@ -417,7 +426,7 @@ void setupWebServer() {
           .setDefaultFile("index.html")
           .setCacheControl("public, max-age=300, must-revalidate");
 
-    if (LittleFS.exists("/www/index.html")) {
+    if (LittleFS.exists("/www/index.html") || LittleFS.exists("/www/index.html.gz")) {
         DBGLN("Web UI: serving from /www/");
     } else {
         DBGLN("Web UI: FAILSAFE mode (upload /www/index.html to restore)");
@@ -962,11 +971,10 @@ void setupWebServer() {
         hw["pinSdMISO"]          = config.hardware.pinSdMISO;
         hw["pinSdSCK"]           = config.hardware.pinSdSCK;
 
-        String json;
-        serializeJsonPretty(doc, json);
-        AsyncWebServerResponse *resp = r->beginResponse(200, "application/json", json);
+        AsyncResponseStream *resp = r->beginResponseStream("application/json");
         String fn = String(strlen(config.deviceName) ? config.deviceName : "device") + "_settings.json";
         resp->addHeader("Content-Disposition", "attachment; filename=\"" + fn + "\"");
+        serializeJson(doc, *resp);
         r->send(resp);
     });
 
@@ -1858,7 +1866,33 @@ void setupWebServer() {
                 r->send(LittleFS, path, getMime(path));
                 return;
             }
+            // Probe .gz-only files (flash-saving mode: only .gz on disk)
+            String gzPath = path + ".gz";
+            if (littleFsAvailable && LittleFS.exists(gzPath)) {
+                AsyncWebServerResponse* resp =
+                    r->beginResponse(LittleFS, gzPath, getMime(path));
+                resp->addHeader("Content-Encoding", "gzip");
+                r->send(resp);
+                return;
+            }
             r->send(404, "text/plain", "Not found: " + path);
+            return;
+        }
+
+        // Also check if the requested file exists in /www/ as a .gz (e.g. /chart.min.js -> /www/chart.min.js.gz)
+        String wwwGzPath = "/www" + path + ".gz";
+        if (littleFsAvailable && LittleFS.exists(wwwGzPath)) {
+            AsyncWebServerResponse* resp =
+                r->beginResponse(LittleFS, wwwGzPath, getMime(path));
+            resp->addHeader("Content-Encoding", "gzip");
+            r->send(resp);
+            return;
+        }
+
+        // And check if it exists in /www/ uncompressed
+        String wwwPath = "/www" + path;
+        if (littleFsAvailable && LittleFS.exists(wwwPath)) {
+            r->send(LittleFS, wwwPath, getMime(path));
             return;
         }
 
@@ -1879,6 +1913,13 @@ void setupWebServer() {
         if (r->method() == HTTP_GET && path.indexOf('.') < 0) {
             if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
                 r->send(LittleFS, "/www/index.html", "text/html");
+                return;
+            }
+            if (littleFsAvailable && LittleFS.exists("/www/index.html.gz")) {
+                AsyncWebServerResponse* resp =
+                    r->beginResponse(LittleFS, "/www/index.html.gz", "text/html");
+                resp->addHeader("Content-Encoding", "gzip");
+                r->send(resp);
                 return;
             }
             r->send_P(200, "text/html", FAILSAFE_HTML);

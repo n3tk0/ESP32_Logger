@@ -32,6 +32,10 @@ static char s_logDir[48] = "/logs";
 bool TaskManager::init(fs::FS& fs) {
     running = true;
 
+    // Zero heartbeats — stale values survive warm reboots (RTC_SW_CPU_RST)
+    // and cause immediate false-positive watchdog triggers (#C4).
+    for (int i = 0; i < TASK_COUNT; i++) g_taskHeartbeat[i] = 0;
+
     // Dynamic queue depth: scale sensor queue to actual sensor count × 4 metrics
     // so one full tick cycle never drops readings (#3.5)
     int sCount    = sensorManager.count();
@@ -169,11 +173,15 @@ void TaskManager::shutdown() {
 // ---------------------------------------------------------------------------
 bool TaskManager::checkHealth() {
     if (!running) return true;
-    constexpr uint32_t MAX_SILENCE_MS = 30000;
+    // Grace period: skip watchdog checks for the first 60s after boot.
+    // SDS011 in periodic mode may wait 60-90s for its first frame.
+    constexpr uint32_t GRACE_PERIOD_MS = 60000;
+    constexpr uint32_t MAX_SILENCE_MS  = 30000;
     uint32_t now = millis();
+    if (now < GRACE_PERIOD_MS) return true;
     for (int i = 0; i < TASK_COUNT; i++) {
         uint32_t hb = g_taskHeartbeat[i];
-        if (hb == 0) continue;   // task hasn’t started yet
+        if (hb == 0) continue;   // task has not started yet
         if (now - hb > MAX_SILENCE_MS) {
             Serial.printf("[Watchdog] Task %d stuck (%lums)\n", i, now - hb);
             return false;
