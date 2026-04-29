@@ -31,57 +31,57 @@
 #ifndef SENSOR_BME280_ENABLED
 #  define SENSOR_BME280_ENABLED       // BME280/BMP280 (I2C)
 #endif
-#ifndef SENSOR_BME688_ENABLED
-#  define SENSOR_BME688_ENABLED       // BME680/BME688 (I2C)
-#endif
-#ifndef SENSOR_DS18B20_ENABLED
-#  define SENSOR_DS18B20_ENABLED      // DS18B20 (1-Wire)
-#endif
+//#ifndef SENSOR_BME688_ENABLED
+//#  define SENSOR_BME688_ENABLED       // BME680/BME688 (I2C)
+//#endif
+//#ifndef SENSOR_DS18B20_ENABLED
+//#  define SENSOR_DS18B20_ENABLED      // DS18B20 (1-Wire)
+//#endif
 #ifndef SENSOR_SDS011_ENABLED
 #  define SENSOR_SDS011_ENABLED       // SDS011 PM2.5/PM10 (UART)
 #endif
-#ifndef SENSOR_PMS5003_ENABLED
-#  define SENSOR_PMS5003_ENABLED      // PMS5003 PM (UART)
-#endif
-#ifndef SENSOR_ENS160_ENABLED
-#  define SENSOR_ENS160_ENABLED       // ENS160 air quality (I2C)
-#endif
-#ifndef SENSOR_SGP30_ENABLED
-#  define SENSOR_SGP30_ENABLED        // SGP30 VOC (I2C)
-#endif
-#ifndef SENSOR_SCD4X_ENABLED
-#  define SENSOR_SCD4X_ENABLED        // SCD40/SCD41 CO2 (I2C)
-#endif
-#ifndef SENSOR_VEML6075_ENABLED
-#  define SENSOR_VEML6075_ENABLED     // VEML6075 UV (I2C)
-#endif
-#ifndef SENSOR_VEML7700_ENABLED
-#  define SENSOR_VEML7700_ENABLED     // VEML7700 lux (I2C)
-#endif
-#ifndef SENSOR_BH1750_ENABLED
-#  define SENSOR_BH1750_ENABLED       // BH1750 lux (I2C)
-#endif
-#ifndef SENSOR_WATERFLOW_ENABLED
-#  define SENSOR_WATERFLOW_ENABLED    // YF-S201 / YF-S403 water flow (GPIO)
-#endif
-#ifndef SENSOR_RAIN_ENABLED
-#  define SENSOR_RAIN_ENABLED         // Tipping-bucket rain gauge (GPIO)
-#endif
-#ifndef SENSOR_WIND_ENABLED
-#  define SENSOR_WIND_ENABLED         // Anemometer + wind vane (GPIO/ADC)
-#endif
-#ifndef SENSOR_SOIL_ENABLED
-#  define SENSOR_SOIL_ENABLED         // Capacitive soil moisture (ADC)
-#endif
-#ifndef SENSOR_HCSR04_ENABLED
-#  define SENSOR_HCSR04_ENABLED       // HC-SR04 ultrasonic distance (GPIO)
-#endif
-#ifndef SENSOR_ZMPT101B_ENABLED
-#  define SENSOR_ZMPT101B_ENABLED     // ZMPT101B AC voltage (ADC)
-#endif
-#ifndef SENSOR_ZMCT103C_ENABLED
-#  define SENSOR_ZMCT103C_ENABLED     // ZMCT103C AC current (ADC)
-#endif
+//#ifndef SENSOR_PMS5003_ENABLED
+//#  define SENSOR_PMS5003_ENABLED      // PMS5003 PM (UART)
+//#endif
+//#ifndef SENSOR_ENS160_ENABLED
+//#  define SENSOR_ENS160_ENABLED       // ENS160 air quality (I2C)
+//#endif
+//#ifndef SENSOR_SGP30_ENABLED
+//#  define SENSOR_SGP30_ENABLED        // SGP30 VOC (I2C)
+//#endif
+//#ifndef SENSOR_SCD4X_ENABLED
+//#  define SENSOR_SCD4X_ENABLED        // SCD40/SCD41 CO2 (I2C)
+//#endif
+//#ifndef SENSOR_VEML6075_ENABLED
+//#  define SENSOR_VEML6075_ENABLED     // VEML6075 UV (I2C)
+//#endif
+//#ifndef SENSOR_VEML7700_ENABLED
+//#  define SENSOR_VEML7700_ENABLED     // VEML7700 lux (I2C)
+//#endif
+//#ifndef SENSOR_BH1750_ENABLED
+//#  define SENSOR_BH1750_ENABLED       // BH1750 lux (I2C)
+//#endif
+//#ifndef SENSOR_WATERFLOW_ENABLED
+//#  define SENSOR_WATERFLOW_ENABLED    // YF-S201 / YF-S403 water flow (GPIO)
+//#endif
+//#ifndef SENSOR_RAIN_ENABLED
+//#  define SENSOR_RAIN_ENABLED         // Tipping-bucket rain gauge (GPIO)
+//#endif
+//#ifndef SENSOR_WIND_ENABLED
+//#  define SENSOR_WIND_ENABLED         // Anemometer + wind vane (GPIO/ADC)
+//#endif
+//#ifndef SENSOR_SOIL_ENABLED
+//#  define SENSOR_SOIL_ENABLED         // Capacitive soil moisture (ADC)
+//#endif
+//#ifndef SENSOR_HCSR04_ENABLED
+//#  define SENSOR_HCSR04_ENABLED       // HC-SR04 ultrasonic distance (GPIO)
+//#endif
+//#ifndef SENSOR_ZMPT101B_ENABLED
+//#  define SENSOR_ZMPT101B_ENABLED     // ZMPT101B AC voltage (ADC)
+//#endif
+//#ifndef SENSOR_ZMCT103C_ENABLED
+//#  define SENSOR_ZMCT103C_ENABLED     // ZMCT103C AC current (ADC)
+//#endif
 
 // Cloud / network exporters
 #ifndef EXPORT_MQTT_ENABLED
@@ -107,13 +107,13 @@
 // Defaults below match the XIAO ESP32-C3 wiring.
 // ----------------------------------------------------------------------------
 #ifndef DEFAULT_SDA
-#  define DEFAULT_SDA        6
+#  define DEFAULT_SDA        8
 #endif
 #ifndef DEFAULT_SCL
-#  define DEFAULT_SCL        7
+#  define DEFAULT_SCL        9
 #endif
 #ifndef DEFAULT_FLOW_PIN
-#  define DEFAULT_FLOW_PIN  21
+#  define DEFAULT_FLOW_PIN  4
 #endif
 
 // ============================================================================
@@ -229,7 +229,7 @@
 #  define WEB_BASIC_AUTH_USER "admin"
 #endif
 #ifndef WEB_BASIC_AUTH_PASS
-#  define WEB_BASIC_AUTH_PASS "change-me"
+#  define WEB_BASIC_AUTH_PASS "admin"
 #endif
 
 // Export pipeline batching (ExportTask)

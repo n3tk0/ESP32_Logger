@@ -33,6 +33,15 @@ CHIP_CONFIG = {
         "flash_mode":      "dio",
         "flash_freq":      "80m",
         "flash_size":      "4MB",
+        "esptool_chip":    "esp32c3",
+    },
+    "esp32c3_supermini": {
+        "bootloader_addr": "0x0",
+        "partition_addr":  "0x8000",
+        "flash_mode":      "dio",
+        "flash_freq":      "80m",
+        "flash_size":      "4MB",
+        "esptool_chip":    "esp32c3",
     },
     "esp32": {
         "bootloader_addr": "0x1000",
@@ -40,6 +49,7 @@ CHIP_CONFIG = {
         "flash_mode":      "dio",
         "flash_freq":      "40m",
         "flash_size":      "4MB",
+        "esptool_chip":    "esp32",
     },
 }
 
@@ -76,6 +86,9 @@ def detect_chip(port):
         )
         output = result.stdout + result.stderr
         if "ESP32-C3" in output:
+            # We can't automatically distinguish a standard ESP32-C3 from a Super Mini
+            # just by chip_id. We'll default to 'esp32c3' but the user can specify
+            # '--chip esp32c3_supermini' manually.
             return "esp32c3"
         elif "ESP32-S3" in output:
             print("WARNING: ESP32-S3 detected. Using esp32c3 config (RISC-V).")
@@ -89,11 +102,14 @@ def detect_chip(port):
 
 def find_binary(chip, name):
     """Locate a pre-built binary for the given chip."""
-    path = os.path.join(BOOTLOADER_DIR, chip, name)
+    # Special fallback for esp32c3_supermini
+    search_chip = "esp32c3" if chip == "esp32c3_supermini" else chip
+    
+    path = os.path.join(BOOTLOADER_DIR, search_chip, name)
     if os.path.isfile(path):
         return path
     # Fallback: check flat directory
-    flat = os.path.join(BOOTLOADER_DIR, f"{chip}_{name}")
+    flat = os.path.join(BOOTLOADER_DIR, f"{search_chip}_{name}")
     if os.path.isfile(flat):
         return flat
     return None
@@ -116,7 +132,7 @@ def flash(port, chip, bootloader_only=False, baud=921600):
 
     cmd = [
         sys.executable, "-m", "esptool",
-        "--chip", chip,
+        "--chip", cfg["esptool_chip"],
         "--port", port,
         "--baud", str(baud),
         "write_flash",
@@ -135,6 +151,13 @@ def flash(port, chip, bootloader_only=False, baud=921600):
     if pt_bin and not bootloader_only:
         print(f"Partitions: {pt_bin} @ {cfg['partition_addr']}")
     print()
+
+    if chip == "esp32c3_supermini":
+        print("NOTE for ESP32-C3 Super Mini users:")
+        print("  Because it uses native USB, auto-reset into bootloader might fail.")
+        print("  If flashing hangs at 'Connecting...', hold the BOOT button,")
+        print("  click the RST button, and then release BOOT.")
+        print()
 
     # Safety prompt
     answer = input("Flash bootloader? This overwrites the existing bootloader. [y/N] ")

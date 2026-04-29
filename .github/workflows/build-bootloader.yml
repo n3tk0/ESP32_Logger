@@ -36,6 +36,8 @@ jobs:
         include:
           - chip: esp32c3
             idf_target: esp32c3
+          - chip: esp32c3_supermini
+            idf_target: esp32c3
           - chip: esp32
             idf_target: esp32
 
@@ -104,6 +106,12 @@ jobs:
           name: bootloader-esp32c3
           path: tools/bootloader/esp32c3/
 
+      - name: Download ESP32-C3 Super Mini bootloader
+        uses: actions/download-artifact@v4
+        with:
+          name: bootloader-esp32c3_supermini
+          path: tools/bootloader/esp32c3_supermini/
+
       - name: Download ESP32 bootloader
         uses: actions/download-artifact@v4
         with:
@@ -117,6 +125,8 @@ jobs:
 
           git add tools/bootloader/esp32c3/bootloader.bin \
                   tools/bootloader/esp32c3/partition-table.bin \
+                  tools/bootloader/esp32c3_supermini/bootloader.bin \
+                  tools/bootloader/esp32c3_supermini/partition-table.bin \
                   tools/bootloader/esp32/bootloader.bin \
                   tools/bootloader/esp32/partition-table.bin
 
@@ -200,6 +210,12 @@ jobs:
           name: bootloader-esp32c3
           path: esp32c3/
 
+      - name: Download ESP32-C3 Super Mini bootloader
+        uses: actions/download-artifact@v4
+        with:
+          name: bootloader-esp32c3_supermini
+          path: esp32c3_supermini/
+
       - name: Download ESP32 bootloader
         uses: actions/download-artifact@v4
         with:
@@ -224,6 +240,8 @@ jobs:
           files: |
             esp32c3/bootloader.bin
             esp32c3/partition-table.bin
+            esp32c3_supermini/bootloader.bin
+            esp32c3_supermini/partition-table.bin
             esp32/bootloader.bin
             esp32/partition-table.bin
             flash-tool/flash_bootloader.exe

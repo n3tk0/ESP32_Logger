@@ -1839,7 +1839,7 @@ void setupWebServer() {
             };
             String query;
             for (size_t i = 0; i < r->params(); i++) {
-                AsyncWebParameter* p = r->getParam(i);
+                const AsyncWebParameter* p = r->getParam(i);
                 if (!p || p->isFile() || p->isPost()) continue;
                 if (query.length()) query += "&";
                 query += urlEncode(p->name());
