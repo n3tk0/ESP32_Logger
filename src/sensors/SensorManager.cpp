@@ -191,9 +191,33 @@ ISensor* SensorManager::getById(const char* id) {
     return nullptr;
 }
 
+// Format a sensor reading for JSON output.
+// Drops trailing zeros so "23.50" → "23.5" and integer-like values
+// ("400.00" → "400") render cleanly in the UI without per-metric format
+// rules.  Buffer is 16 bytes — wider than any plausible sensor reading.
+static void _formatValue(float v, char* out, size_t outSz) {
+    snprintf(out, outSz, "%.2f", v);
+    // Trim trailing zeros after the decimal point, then the point itself.
+    char* dot = strchr(out, '.');
+    if (!dot) return;
+    char* end = out + strlen(out) - 1;
+    while (end > dot && *end == '0') *end-- = '\0';
+    if (end == dot) *dot = '\0';
+}
+
 // ---------------------------------------------------------------------------
 void SensorManager::toJson(JsonArray arr) const {
-    for (int i = 0; i < _count; i++) {
+    // Build the per-sensor JSON skeletons first; populate live values in a
+    // single critical section after.  Holding the mutex once across the whole
+    // sensor list (instead of per-iteration) keeps the ring-buffer producer
+    // paused for one short window and removes the partial-result hazard
+    // where one sensor gets values and another doesn't because the 20 ms
+    // try-take expired mid-loop.
+    struct Slot { JsonObject obj; ISensor* sensor; const char* metrics[8]; int mcount; };
+    Slot slots[16];
+    int  slotCount = 0;
+
+    for (int i = 0; i < _count && slotCount < 16; i++) {
         ISensor* s = _sensors[i];
         if (!s) continue;
         JsonObject o = arr.add<JsonObject>();
@@ -208,25 +232,55 @@ void SensorManager::toJson(JsonArray arr) const {
         o["read_interval_ms"] = s->getReadIntervalMs();
         o["status"]       = s->isEnabled() ? (s->errorCount() > 0 ? "error" : "ok") : "disabled";
 
-        const char* metricNames[8] = {};
-        int mcount = s->getMetrics(metricNames, 8);
-        JsonArray ma = o["metrics"].to<JsonArray>();
-        for (int m = 0; m < mcount; m++) ma.add(metricNames[m]);
+        Slot& sl = slots[slotCount++];
+        sl.obj    = o;
+        sl.sensor = s;
+        sl.mcount = s->getMetrics(sl.metrics, 8);
 
-        // Include last-read values from ring buffer for live display
-        if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
-            JsonObject vals = o["last_values"].to<JsonObject>();
-            for (int m = 0; m < mcount; m++) {
-                // Scan backwards in ring buffer for most recent match
-                SensorReading r;
-                bool found = webRingBuf.findLast(s->getId(), metricNames[m], r);
-                if (found) {
-                    char vBuf[16];
-                    snprintf(vBuf, sizeof(vBuf), "%.2f", r.value);
-                    vals[metricNames[m]] = serialized(String(vBuf));
+        JsonArray ma = o["metrics"].to<JsonArray>();
+        for (int m = 0; m < sl.mcount; m++) ma.add(sl.metrics[m]);
+    }
+
+    // Single critical section: scan the ring buffer for every metric of
+    // every sensor under one lock acquisition.  ~16 sensors × 8 metrics ×
+    // 200-entry strcmp is well under 1 ms on the C3.
+    if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) != pdTRUE) return;
+    for (int i = 0; i < slotCount; i++) {
+        Slot& sl = slots[i];
+        JsonObject vals = sl.obj["last_values"].to<JsonObject>();
+        for (int m = 0; m < sl.mcount; m++) {
+            SensorReading r;
+            if (!webRingBuf.findLast(sl.sensor->getId(), sl.metrics[m], r)) continue;
+            // {v: 23.5, u: "C", ts: 1714492800}
+            // Frontend renders the value+unit pair and uses ts for per-metric
+            // staleness.  serialized() embeds the raw number string so we
+            // don't lose decimal precision through ArduinoJson's float path.
+            char vBuf[16];
+            _formatValue(r.value, vBuf, sizeof(vBuf));
+            JsonObject mv = vals[sl.metrics[m]].to<JsonObject>();
+            mv["v"]  = serialized(String(vBuf));
+            mv["u"]  = r.unit;
+            mv["ts"] = r.timestamp;
+        }
+
+        // Per-card sparkline of the *primary* metric — keeps the payload
+        // bounded.  32 points covers ~5 min at 10 s read intervals which
+        // is enough for a thumbnail trend without inflating /api/sensors
+        // beyond a few KB even on devices with 8+ sensors.
+        if (sl.mcount > 0) {
+            constexpr size_t SPARK_MAX = 32;
+            float spark[SPARK_MAX];
+            size_t got = webRingBuf.collectMetricSeries(
+                sl.sensor->getId(), sl.metrics[0], spark, SPARK_MAX);
+            if (got >= 2) {
+                JsonArray arr = sl.obj["spark"].to<JsonArray>();
+                for (size_t k = 0; k < got; k++) {
+                    char b[12];
+                    _formatValue(spark[k], b, sizeof(b));
+                    arr.add(serialized(String(b)));
                 }
             }
-            xSemaphoreGive(webDataMutex);
         }
     }
+    xSemaphoreGive(webDataMutex);
 }

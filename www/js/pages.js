@@ -24,10 +24,14 @@ function dbLoadChartJs(cb) {
   _chartJsLoading = true;
 
   var th = ST.theme || CFG.theme || {};
-  var src =
-    th.chartSource === 0 || th.chartSource === "0"
-      ? th.chartLocalPath || "/chart.min.js"
-      : "https://cdn.jsdelivr.net/npm/chart.js";
+  var localPath = th.chartLocalPath || "/chart.min.js";
+  var cdnPath = "https://cdn.jsdelivr.net/npm/chart.js";
+  var wantsCDN = !(th.chartSource === 0 || th.chartSource === "0");
+  // Strict CSP (script-src 'self') blocks the CDN.  Try whatever the user
+  // configured first, but always fall back to the on-device copy instead of
+  // retrying the same CDN URL.
+  var primary  = wantsCDN ? cdnPath : localPath;
+  var fallback = wantsCDN ? localPath : cdnPath;
 
   function fire() {
     _chartJsLoaded = true;
@@ -37,36 +41,30 @@ function dbLoadChartJs(cb) {
     });
     _chartJsCbs = [];
   }
+
+  function _giveUp() {
+    window._chartJsLoading = false;
+    _chartJsLoading = false;
+    var err = document.getElementById("errorMsg");
+    if (err) {
+      err.innerHTML =
+        "<strong>Charts unavailable:</strong> Could not load <code>chart.min.js</code>. " +
+        "If you removed it from LittleFS, re-upload it via /upload.";
+      err.style.display = "block";
+    }
+    if (typeof showToast === "function") {
+      showToast("Failed to load chart.min.js", "error");
+    }
+  }
+
   var s = document.createElement("script");
-  s.src = src;
+  s.src = primary;
   s.onload = fire;
   s.onerror = function () {
     var s2 = document.createElement("script");
-    
-    // Check if we're in AP mode where we obviously can't load from CDN
-    var isOffline = (ST.wifi === "ap") || (CFG.network && CFG.network.wifiMode === 0);
-    
-    if (isOffline) {
-      showToast("Offline AP mode: Please upload chart.min.js to LittleFS to view charts.", "error");
-      window._chartJsLoading = false;
-      var err = document.getElementById("errorMsg");
-      if (err) {
-        err.innerHTML = "<strong>Offline AP mode:</strong> Please upload <code>chart.min.js</code> to LittleFS to view charts.";
-        err.style.display = "block";
-      }
-      return;
-    }
-
-    s2.src = "https://cdn.jsdelivr.net/npm/chart.js";
+    s2.src = fallback;
     s2.onload = fire;
-    s2.onerror = function () {
-      window._chartJsLoading = false;
-      var err = document.getElementById("errorMsg");
-      if (err) {
-        err.textContent = "Failed to load Chart.js";
-        err.style.display = "block";
-      }
-    };
+    s2.onerror = _giveUp;
     document.head.appendChild(s2);
   };
   document.head.appendChild(s);

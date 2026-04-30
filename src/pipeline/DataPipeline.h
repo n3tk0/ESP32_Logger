@@ -95,6 +95,34 @@ public:
         return false;
     }
 
+    // Collect up to maxOut most-recent values for sensorId+metric in
+    // chronological order (oldest → newest).  Used to render per-card
+    // sparklines without a separate endpoint.  Returns the number written.
+    size_t collectMetricSeries(const char* sensorId, const char* metric,
+                                float* out, size_t maxOut) const {
+        if (maxOut == 0) return 0;
+        size_t h = _head.load(std::memory_order_acquire);
+        size_t t = _tail.load(std::memory_order_relaxed);
+        size_t start = (h > N) ? (h - N) : t;
+
+        // Walk backward, append to a temp at decreasing indices so the
+        // final compaction yields oldest → newest with one memmove.
+        size_t count = 0;
+        for (size_t i = h; i > start && count < maxOut; ) {
+            --i;
+            const SensorReading& e = _buf[i % N];
+            if (strcmp(e.sensorId, sensorId) == 0 &&
+                strcmp(e.metric, metric) == 0) {
+                out[maxOut - 1 - count] = e.value;
+                count++;
+            }
+        }
+        if (count < maxOut && count > 0) {
+            for (size_t i = 0; i < count; i++) out[i] = out[maxOut - count + i];
+        }
+        return count;
+    }
+
 private:
     SensorReading _buf[N] = {};
     std::atomic<size_t> _head{0};
