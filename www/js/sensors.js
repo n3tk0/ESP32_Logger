@@ -177,10 +177,32 @@ function sensorsLoad() {
               '<div class="sensor-metrics">' +
               (s.metrics || [])
                 .map(function (m) {
-                  var val = s.last_values && s.last_values[m] !== undefined
-                    ? '<strong>' + s.last_values[m] + '</strong> '
-                    : '';
-                  return '<span class="metric-tag">' + val + esc(m) + "</span>";
+                  // last_values[m] can be either a {v,u,ts} object (current
+                  // firmware) or a bare string (older firmware) — handle both.
+                  var lv = s.last_values && s.last_values[m];
+                  var val = "", unit = "", metricStale = false;
+                  if (lv !== undefined && lv !== null) {
+                    if (typeof lv === "object") {
+                      val  = lv.v !== undefined ? String(lv.v) : "";
+                      unit = lv.u || "";
+                      if (lv.ts && s.read_interval_ms) {
+                        var mAge = nowMs - lv.ts * 1000;
+                        if (mAge > s.read_interval_ms * 2) metricStale = true;
+                      }
+                    } else {
+                      val = String(lv);
+                    }
+                  }
+                  var hasVal = val !== "";
+                  return '<span class="metric-tag' +
+                         (hasVal ? ' has-value' : '') +
+                         (metricStale ? ' stale' : '') + '">' +
+                         (hasVal
+                           ? '<strong class="metric-val">' + esc(val) + '</strong>' +
+                             (unit ? '<span class="metric-unit">' + esc(unit) + '</span>' : '')
+                           : '') +
+                         '<span class="metric-name">' + esc(m) + '</span>' +
+                         '</span>';
                 })
                 .join("") +
               "</div>" +

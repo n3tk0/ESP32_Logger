@@ -893,9 +893,10 @@ body {
 .sensor-metrics {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.5rem;
 }
 
+/* Compact "has no value yet" pill (just the metric name). */
 .metric-tag {
   background: var(--primary);
   color: #fff;
@@ -903,6 +904,65 @@ body {
   padding: 0.15rem 0.55rem;
   font-size: 0.75rem;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+/* KPI-style tag once the ring buffer has at least one reading: prominent
+ * value, small unit, muted metric name underneath the value baseline. */
+.metric-tag.has-value {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.65rem 0.35rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 80px;
+}
+
+.metric-tag .metric-val {
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+.metric-tag .metric-unit {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-left: 3px;
+  font-weight: 500;
+}
+
+.metric-tag .metric-name {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.metric-tag.has-value .metric-val + .metric-unit {
+  align-self: baseline;
+}
+
+/* Per-metric staleness indicator — amber tint without losing the value. */
+.metric-tag.stale {
+  border-color: rgba(243, 156, 18, 0.45);
+  background: linear-gradient(
+    180deg,
+    rgba(243, 156, 18, 0.06),
+    transparent 40%
+  );
+}
+.metric-tag.stale .metric-name::after {
+  content: " · stale";
+  color: var(--warning, #e67e22);
 }
 
 /* ── Status badges ── */

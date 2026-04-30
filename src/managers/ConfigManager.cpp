@@ -216,7 +216,11 @@ void loadDefaultConfig() {
     SAFE_STRCPY(config.theme.storageBar70Color, "#f39c12");
     SAFE_STRCPY(config.theme.storageBar90Color, "#e74c3c");
     SAFE_STRCPY(config.theme.storageBarBorder,  "#cccccc");
-    config.theme.chartSource      = CHART_CDN;
+    // Default to the on-device copy.  The strict CSP (script-src 'self')
+    // blocks jsdelivr, and we ship chart.min.js in LittleFS, so CDN mode
+    // is opt-in only — flipping it on also requires relaxing CSP, which
+    // is a deliberate user choice.
+    config.theme.chartSource      = CHART_LOCAL;
     SAFE_STRCPY(config.theme.chartLocalPath, "/chart.min.js");
     config.theme.showIcons        = true;
     config.theme.chartLabelFormat = LABEL_DATETIME;
