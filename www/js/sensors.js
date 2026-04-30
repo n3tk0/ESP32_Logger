@@ -141,72 +141,119 @@ function sensorsLoad() {
         var nowMs = Date.now();
         grid.innerHTML = d.sensors
           .map(function (s) {
-            var statusClass =
-              s.status === "ok"
-                ? "badge-ok"
-                : s.status === "disabled"
-                  ? "badge-dis"
-                  : "badge-err";
-            var ts = s.last_read_ts
-              ? new Date(s.last_read_ts * 1000).toLocaleTimeString()
-              : "—";
-
-            // Staleness — flag the card amber if no reading within 2×
-            // the configured read_interval_ms; flag red if errored.  Cards
-            // with no last_read_ts yet (just-booted) get neither flag.
-            var ageStr = "";
-            var staleClass = "";
-            if (s.last_read_ts && s.read_interval_ms) {
-              var ageMs = nowMs - (s.last_read_ts * 1000);
-              if (ageMs > s.read_interval_ms * 2) staleClass = " sensor-stale";
-              ageStr = " · " + _sensorFmtAge(ageMs) + " ago";
+            // Sparkline path from `s.spark` (oldest → newest values).  We
+            // map the series onto a 100×36 viewBox using min/max so a flat
+            // line shows mid-card; the stroke path is what makes the card
+            // feel like it has a "history" backdrop.
+            var sparkSvg = "";
+            var spark = s.spark || [];
+            if (spark.length >= 2) {
+              var min = Infinity, max = -Infinity;
+              for (var i = 0; i < spark.length; i++) {
+                var n = +spark[i];
+                if (n < min) min = n;
+                if (n > max) max = n;
+              }
+              var range = max - min;
+              if (range < 1e-9) range = 1;
+              var stepX = 100 / (spark.length - 1);
+              var pts = "";
+              for (var j = 0; j < spark.length; j++) {
+                var x = (j * stepX).toFixed(1);
+                // 4 px top padding, 32 px bottom — matches design height
+                var y = (32 - ((+spark[j] - min) / range) * 28).toFixed(1);
+                pts += (j ? " " : "") + x + "," + y;
+              }
+              sparkSvg =
+                '<svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true">' +
+                '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>' +
+                "</svg>";
             }
-            if (s.status === "error") staleClass = " sensor-error";
+
+            // Pick the "primary" metric to drive the big value display.
+            var primary = (s.metrics && s.metrics[0]) || null;
+            var primaryLv = primary && s.last_values ? s.last_values[primary] : null;
+            var primaryVal = "", primaryUnit = "", primaryTs = 0;
+            if (primaryLv !== undefined && primaryLv !== null) {
+              if (typeof primaryLv === "object") {
+                primaryVal  = primaryLv.v !== undefined ? String(primaryLv.v) : "";
+                primaryUnit = primaryLv.u || "";
+                primaryTs   = primaryLv.ts || 0;
+              } else {
+                primaryVal = String(primaryLv);
+              }
+            }
+
+            // Card-level staleness — picks the most accurate timestamp
+            // available (per-metric ts > sensor last_read_ts).
+            var stateClass = "";
+            var ageStr = "—";
+            var refMs = 0;
+            if (primaryTs)         refMs = primaryTs * 1000;
+            else if (s.last_read_ts) refMs = s.last_read_ts * 1000;
+            if (refMs && s.read_interval_ms) {
+              var ageMs = nowMs - refMs;
+              ageStr = _sensorFmtAge(ageMs) + " ago";
+              if (ageMs > s.read_interval_ms * 2) stateClass = " stale";
+            }
+            if (s.status === "error")    stateClass = " err";
+            if (s.status === "disabled") stateClass = " dis";
+
+            // Status badge — matches the design's small uppercase pill
+            // (.badge.ok / .err / dim) instead of the prior .badge-ok pattern.
+            var badgeClass =
+              s.status === "ok" ? "ok" :
+              s.status === "disabled" ? "dim" : "err";
+            var badgeText =
+              s.status === "ok" ? "OK" :
+              s.status === "disabled" ? "OFF" : "ERR";
+
+            // Secondary metric badges: every metric that isn't the primary,
+            // rendered with their value+unit when available.
+            var metricBadges = (s.metrics || [])
+              .filter(function (m) { return m !== primary; })
+              .map(function (m) {
+                var lv = s.last_values && s.last_values[m];
+                var v = "", u = "";
+                if (lv !== undefined && lv !== null) {
+                  if (typeof lv === "object") {
+                    v = lv.v !== undefined ? String(lv.v) : "";
+                    u = lv.u || "";
+                  } else {
+                    v = String(lv);
+                  }
+                }
+                var label = esc(m) + (v ? " " + esc(v) : "") + (u ? " " + esc(u) : "");
+                return '<span class="badge dim">' + label + "</span>";
+              })
+              .join("");
+
+            // Footer: last-read age + transport hint.  We don't know the
+            // exact bus from /api/sensors, so fall back to type when missing.
+            var transport = s.transport || s.type || "";
 
             return (
-              '<div class="sensor-card' + staleClass + '">' +
-              '<div class="sensor-card-header">' +
-              '<span class="sensor-name">' + esc(s.name) + "</span>" +
-              '<span class="badge ' + statusClass + '">' + esc(s.status) + "</span>" +
-              "</div>" +
-              '<div class="sensor-meta">' +
-              "<span>ID: <code>" + esc(s.id) + "</code></span>" +
-              "<span>Type: <code>" + esc(s.type) + "</code></span>" +
-              "<span>Last: " + ts + ageStr + "</span>" +
-              "</div>" +
-              '<div class="sensor-metrics">' +
-              (s.metrics || [])
-                .map(function (m) {
-                  // last_values[m] can be either a {v,u,ts} object (current
-                  // firmware) or a bare string (older firmware) — handle both.
-                  var lv = s.last_values && s.last_values[m];
-                  var val = "", unit = "", metricStale = false;
-                  if (lv !== undefined && lv !== null) {
-                    if (typeof lv === "object") {
-                      val  = lv.v !== undefined ? String(lv.v) : "";
-                      unit = lv.u || "";
-                      if (lv.ts && s.read_interval_ms) {
-                        var mAge = nowMs - lv.ts * 1000;
-                        if (mAge > s.read_interval_ms * 2) metricStale = true;
-                      }
-                    } else {
-                      val = String(lv);
-                    }
-                  }
-                  var hasVal = val !== "";
-                  return '<span class="metric-tag' +
-                         (hasVal ? ' has-value' : '') +
-                         (metricStale ? ' stale' : '') + '">' +
-                         (hasVal
-                           ? '<strong class="metric-val">' + esc(val) + '</strong>' +
-                             (unit ? '<span class="metric-unit">' + esc(unit) + '</span>' : '')
-                           : '') +
-                         '<span class="metric-name">' + esc(m) + '</span>' +
-                         '</span>';
-                })
-                .join("") +
-              "</div>" +
-              "</div>"
+              '<div class="sensor' + stateClass + '">' +
+                '<div class="s-head">' +
+                  '<div>' +
+                    '<div class="s-name">' + esc(s.name) + '</div>' +
+                    '<div class="s-id">' + esc(s.id) +
+                      (transport ? ' · ' + esc(transport) : '') + '</div>' +
+                  '</div>' +
+                  '<span class="badge ' + badgeClass + '">' + badgeText + '</span>' +
+                '</div>' +
+                '<div class="s-val">' +
+                  '<span class="n">' + (primaryVal ? esc(primaryVal) : "—") + '</span>' +
+                  (primaryUnit ? '<span class="u">' + esc(primaryUnit) + '</span>' : '') +
+                  (primary ? '<span class="s-primary-name">' + esc(primary) + '</span>' : '') +
+                '</div>' +
+                sparkSvg +
+                (metricBadges ? '<div class="s-metrics">' + metricBadges + '</div>' : '') +
+                '<div class="s-foot">' +
+                  '<span>last ' + ageStr + '</span>' +
+                  '<span>' + esc(transport) + '</span>' +
+                '</div>' +
+              '</div>'
             );
           })
           .join("");

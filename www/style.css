@@ -1439,6 +1439,118 @@ body {
   background: linear-gradient(90deg, rgba(231, 76, 60, 0.06), transparent 60px);
 }
 
+/* ── Sensor card v2 (Claude design) ────────────────────────────────────────
+ * Each sensor renders a compact card with a big primary value, a sparkline
+ * of recent readings, secondary metric pills, and a footer.  Data feeds
+ * from /api/sensors → s.last_values (per-metric {v,u,ts}) and s.spark
+ * (chronological array of the primary metric's recent values). */
+.sensors-grid .sensor {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+  box-shadow: var(--shadow);
+}
+.sensors-grid .sensor.err { border-color: rgba(231, 76, 60, 0.45); }
+.sensors-grid .sensor.dis { opacity: 0.55; }
+.sensors-grid .sensor.stale {
+  border-color: rgba(243, 156, 18, 0.45);
+  background: linear-gradient(180deg, rgba(243, 156, 18, 0.04), transparent 40%);
+}
+
+.sensors-grid .sensor .s-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sensors-grid .sensor .s-name {
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sensors-grid .sensor .s-id {
+  font-family: monospace;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.sensors-grid .sensor .s-val {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: monospace;
+  flex-wrap: wrap;
+}
+.sensors-grid .sensor .s-val .n {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.sensors-grid .sensor .s-val .u {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: sans-serif;
+}
+.sensors-grid .sensor .s-val .s-primary-name {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: sans-serif;
+  font-weight: 600;
+}
+
+/* Sparkline — full-width line chart that visually anchors the card.
+ * The negative side margins extend it past the card padding for an
+ * "edge-to-edge" feel; opacity keeps it from fighting with the value. */
+.sensors-grid .sensor .s-spark {
+  width: calc(100% + 8px);
+  height: 36px;
+  color: var(--primary);
+  margin: 0 -4px;
+  opacity: 0.7;
+  display: block;
+}
+.sensors-grid .sensor.err   .s-spark { color: var(--danger, #e74c3c); }
+.sensors-grid .sensor.stale .s-spark { color: var(--warning, #f39c12); }
+
+.sensors-grid .sensor .s-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.sensors-grid .sensor .s-metrics .badge.dim {
+  background: var(--bg, rgba(0, 0, 0, 0.05));
+  color: var(--text-muted);
+  font-weight: 500;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 10.5px;
+  text-transform: none;
+  letter-spacing: 0;
+  border: 1px solid var(--border);
+  font-family: monospace;
+}
+
+.sensors-grid .sensor .s-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
 /* Redesign additions for Live page */
 .page-head { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:14px; gap:14px; flex-wrap:wrap; }
 .page-title { font-size:22px; font-weight:600; letter-spacing:-.02em; line-height:1.1; display:flex; align-items:center; gap:10px; }

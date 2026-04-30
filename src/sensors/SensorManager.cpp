@@ -262,6 +262,25 @@ void SensorManager::toJson(JsonArray arr) const {
             mv["u"]  = r.unit;
             mv["ts"] = r.timestamp;
         }
+
+        // Per-card sparkline of the *primary* metric — keeps the payload
+        // bounded.  32 points covers ~5 min at 10 s read intervals which
+        // is enough for a thumbnail trend without inflating /api/sensors
+        // beyond a few KB even on devices with 8+ sensors.
+        if (sl.mcount > 0) {
+            constexpr size_t SPARK_MAX = 32;
+            float spark[SPARK_MAX];
+            size_t got = webRingBuf.collectMetricSeries(
+                sl.sensor->getId(), sl.metrics[0], spark, SPARK_MAX);
+            if (got >= 2) {
+                JsonArray arr = sl.obj["spark"].to<JsonArray>();
+                for (size_t k = 0; k < got; k++) {
+                    char b[12];
+                    _formatValue(spark[k], b, sizeof(b));
+                    arr.add(serialized(String(b)));
+                }
+            }
+        }
     }
     xSemaphoreGive(webDataMutex);
 }
