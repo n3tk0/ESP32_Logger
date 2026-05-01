@@ -1,5 +1,5 @@
   <main class="main-content page" id="page-settings_flowmeter">
-    <div class="page-header">
+    <div class="page-head">
       <h1><span data-icon="wrench"></span> Sensors</h1>
       <div class="breadcrumb"><a href="#settings">Settings</a> / Sensors
       </div>
@@ -8,14 +8,14 @@
     <form data-submit="settingsSaveForm" data-save-url="/save_flowmeter">
       <div id="sf-msg"></div>
       <div class="card">
-        <div class="card-header">💧 Flow Meter</div>
+        <div class="card-head">💧 Flow Meter</div>
         <div class="card-body"><p class="form-hint">Primary pulse-counter flow sensor (hardware pin fixed in <strong>Hardware</strong>). Treated as a dedicated sensor because its pulses drive the state machine.</p></div>
       </div>
       <!-- Calibration -->
       <div class="card">
-        <div class="card-header">📏 Calibration</div>
+        <div class="card-head">📏 Calibration</div>
         <div class="card-body">
-          <div class="form-row">
+          <div class="form-grid">
             <div class="form-group">
               <label class="form-label">Pulses/Liter</label>
               <input type="number" step="0.1" name="pulsesPerLiter" id="sf-ppl" class="form-input" value="">
@@ -34,9 +34,9 @@
 
       <!-- Timing -->
       <div class="card">
-        <div class="card-header">⏱️ Timing</div>
+        <div class="card-head">⏱️ Timing</div>
         <div class="card-body">
-          <div class="form-row">
+          <div class="form-grid">
             <div class="form-group">
               <label class="form-label">Window (sec)</label>
               <input type="number" name="monitoringWindowSecs" id="sf-win" class="form-input" value="">
@@ -53,7 +53,7 @@
 
       <!-- Test Mode -->
       <div class="card">
-        <div class="card-header">🧪 Test Mode</div>
+        <div class="card-head">🧪 Test Mode</div>
         <div class="card-body">
           <div class="form-group">
             <label class="form-label">
@@ -72,12 +72,12 @@
         </div>
       </div>
 
-      <button type="submit" class="btn btn-primary btn-block"><span data-icon="save"></span> Save Flow Meter</button>
+      <button type="submit" class="btn primary btn-block"><span data-icon="save"></span> Save Flow Meter</button>
     </form>
 
     <!-- Additional sensors (platform_config.json pipeline) -->
     <div class="card" style="margin-top:1.5rem">
-      <div class="card-header">
+      <div class="card-head">
         <span><span data-icon="plus"></span> Additional Sensors</span>
         <button type="button" class="btn btn-sm btn-primary" data-click="clAddSensor">+ Add Sensor</button>
       </div>
@@ -88,5 +88,5 @@
       </div>
     </div>
     <div id="ss-msg"></div>
-    <button type="button" class="btn btn-primary btn-block" style="margin-top:1rem" data-click="clSave"><span data-icon="save"></span> Save Sensor List</button>
+    <button type="button" class="btn primary btn-block" style="margin-top:1rem" data-click="clSave"><span data-icon="save"></span> Save Sensor List</button>
   </main>

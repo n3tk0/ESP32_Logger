@@ -1,5 +1,5 @@
 <main class="main-content page" id="page-settings_export">
-    <div class="page-header">
+    <div class="page-head">
       <h1><span data-icon="wifi"></span> Export</h1>
       <div class="breadcrumb">
         <a href="#settings">Settings</a> / Export
@@ -10,7 +10,7 @@
 
     <!-- MQTT -->
     <div class="card">
-      <div class="card-header">
+      <div class="card-head">
         <span>🔗 MQTT</span>
         <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
           <input type="checkbox" id="exp-mqtt-en"> Enable
@@ -21,7 +21,7 @@
           Publishes each sensor reading to <code>{prefix}/device/{id}/sensor/{name}/{metric}</code>.
           Requires an MQTT broker (e.g. Mosquitto, Home Assistant, Node-RED).
         </p>
-        <div class="form-row">
+        <div class="form-grid">
           <div class="form-group">
             <label class="form-label">Broker Host</label>
             <input type="text" id="exp-mqtt-host" class="form-input" placeholder="192.168.1.100">
@@ -31,7 +31,7 @@
             <input type="number" id="exp-mqtt-port" class="form-input" value="1883">
           </div>
         </div>
-        <div class="form-row">
+        <div class="form-grid">
           <div class="form-group">
             <label class="form-label">Topic Prefix</label>
             <input type="text" id="exp-mqtt-prefix" class="form-input" value="waterlogger">
@@ -41,7 +41,7 @@
             <input type="text" id="exp-mqtt-clientid" class="form-input" placeholder="wl-DEVICEID">
           </div>
         </div>
-        <div class="form-row">
+        <div class="form-grid">
           <div class="form-group">
             <label class="form-label">Username</label>
             <input type="text" id="exp-mqtt-user" class="form-input" autocomplete="off">
@@ -51,7 +51,7 @@
             <input type="password" id="exp-mqtt-pass" class="form-input" autocomplete="new-password">
           </div>
         </div>
-        <div class="form-row">
+        <div class="form-grid">
           <div class="form-group">
             <label class="form-label">Send Interval (ms)</label>
             <input type="number" id="exp-mqtt-interval" class="form-input" value="60000" step="1000">
@@ -68,7 +68,7 @@
 
     <!-- HTTP POST -->
     <div class="card">
-      <div class="card-header">
+      <div class="card-head">
         <span><span data-icon="globe"></span> HTTP POST</span>
         <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
           <input type="checkbox" id="exp-http-en"> Enable
@@ -97,7 +97,7 @@
 
     <!-- Sensor.Community -->
     <div class="card">
-      <div class="card-header">
+      <div class="card-head">
         <span><span data-icon="globe"></span> Sensor.Community</span>
         <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
           <input type="checkbox" id="exp-sc-en"> Enable
@@ -120,7 +120,7 @@
 
     <!-- openSenseMap -->
     <div class="card">
-      <div class="card-header">
+      <div class="card-head">
         <span>🗺️ openSenseMap</span>
         <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
           <input type="checkbox" id="exp-osm-en"> Enable
@@ -131,7 +131,7 @@
           Sends readings to <a href="https://opensensemap.org" target="_blank">opensensemap.org</a>.
           Create a senseBox at the site, then copy the Box ID, access token and sensor IDs below.
         </p>
-        <div class="form-row">
+        <div class="form-grid">
           <div class="form-group">
             <label class="form-label">Box ID</label>
             <input type="text" id="exp-osm-boxid" class="form-input" placeholder="5f3a...">
@@ -149,7 +149,7 @@
     </div>
 
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">
-      <button class="btn btn-primary" data-click="expSave"><span data-icon="save"></span> Save &amp; Restart</button>
-      <button class="btn btn-secondary" data-click="expLoad"><span data-icon="refresh-cw"></span> Reload</button>
+      <button class="btn primary" data-click="expSave"><span data-icon="save"></span> Save &amp; Restart</button>
+      <button class="btn" data-click="expLoad"><span data-icon="refresh-cw"></span> Reload</button>
     </div>
   </main>

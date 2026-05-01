@@ -1,5 +1,5 @@
   <main class="main-content page" id="page-settings_corelogic">
-    <div class="page-header">
+    <div class="page-head">
       <h1><span data-icon="layers"></span> Core Logic</h1>
       <div class="breadcrumb">
         <a href="#settings">Settings</a> / Core Logic
@@ -10,14 +10,14 @@
 
     <!-- Operating Mode -->
     <div class="card">
-      <div class="card-header"><span data-icon="settings"></span> Operating Mode</div>
+      <div class="card-head"><span data-icon="settings"></span> Operating Mode</div>
       <div class="card-body">
         <div class="form-group">
           <label class="form-label">
             Mode
             <span class="help-tip" title="Controls whether the FreeRTOS sensor pipeline runs alongside the water-logger.">ℹ️</span>
           </label>
-          <select id="cl-mode" class="form-input form-select" data-change="clUpdateSleepPanel">
+          <select id="cl-mode" class="input" data-change="clUpdateSleepPanel">
             <option value="legacy">Legacy — Water logger only (deep sleep, original behaviour)</option>
             <option value="continuous">Continuous — Multi-sensor pipeline (FreeRTOS tasks, no deep sleep)</option>
             <option value="hybrid">Hybrid — Water logger + sensor pipeline</option>
@@ -33,12 +33,12 @@
 
     <!-- Power & Sleep (shown only for continuous / hybrid) -->
     <div class="card" id="cl-sleep-card" style="display:none">
-      <div class="card-header">💤 Power &amp; Sleep</div>
+      <div class="card-head">💤 Power &amp; Sleep</div>
       <div class="card-body">
 
         <!-- Continuous-mode settings -->
         <div id="cl-sleep-cont" style="display:none">
-          <div class="form-row">
+          <div class="form-grid">
             <div class="form-group">
               <label class="form-label">
                 Idle timeout (ms)
@@ -51,7 +51,7 @@
                 Idle CPU (MHz)
                 <span class="help-tip" title="CPU frequency while idle. Active frequency is always 160 MHz.">ℹ️</span>
               </label>
-              <select id="cl-cont-cpu" class="form-input form-select">
+              <select id="cl-cont-cpu" class="input">
                 <option value="80">80 MHz</option>
                 <option value="160">160 MHz (no throttle)</option>
               </select>
@@ -69,7 +69,7 @@
 
         <!-- Hybrid-mode settings -->
         <div id="cl-sleep-hyb" style="display:none">
-          <div class="form-row">
+          <div class="form-grid">
             <div class="form-group">
               <label class="form-label">
                 Idle before sleep (ms)
@@ -102,12 +102,12 @@
 
     <!-- Aggregation defaults -->
     <div class="card">
-      <div class="card-header"><span data-icon="bar-chart-3"></span> Aggregation Defaults</div>
+      <div class="card-head"><span data-icon="bar-chart-3"></span> Aggregation Defaults</div>
       <div class="card-body">
-        <div class="form-row">
+        <div class="form-grid">
           <div class="form-group">
             <label class="form-label">Default Mode</label>
-            <select id="cl-aggmode" class="form-input form-select">
+            <select id="cl-aggmode" class="input">
               <option value="lttb">LTTB (recommended)</option>
               <option value="avg">Average</option>
               <option value="min">Minimum</option>
@@ -116,7 +116,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">Default Bucket (min)</label>
-            <select id="cl-aggbucket" class="form-input form-select">
+            <select id="cl-aggbucket" class="input">
               <option value="0">Raw</option>
               <option value="1">1 minute</option>
               <option value="5" selected>5 minutes</option>
@@ -139,13 +139,13 @@
 
     <!-- Export -->
     <div class="card">
-      <div class="card-header"><span data-icon="cloud-upload"></span> Export Quick-Enable</div>
+      <div class="card-head"><span data-icon="cloud-upload"></span> Export Quick-Enable</div>
       <div class="card-body">
         <p class="form-hint" style="margin-bottom:.75rem">
           Enable export targets. Full configuration is in the
           <a href="#settings_export">Export settings</a>.
         </p>
-        <div class="form-row" style="gap:.5rem">
+        <div class="form-grid" style="gap:.5rem">
           <label class="form-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
             <input type="checkbox" id="cl-exp-mqtt"> MQTT
           </label>
@@ -163,7 +163,7 @@
     </div>
 
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">
-      <button class="btn btn-primary" data-click="clSave"><span data-icon="save"></span> Save &amp; Restart</button>
-      <button class="btn btn-secondary" data-click="clLoad"><span data-icon="refresh-cw"></span> Reload</button>
+      <button class="btn primary" data-click="clSave"><span data-icon="save"></span> Save &amp; Restart</button>
+      <button class="btn" data-click="clLoad"><span data-icon="refresh-cw"></span> Reload</button>
     </div>
   </main>

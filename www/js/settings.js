@@ -1033,7 +1033,7 @@ function dlLoadFiles() {
           "</span><span class='btn-group'>" +
           "<a href='/download?file=" +
           encodeURIComponent(f.path) +
-          "' class='btn btn-sm btn-secondary'>📥</a>";
+          "' class='btn'>📥</a>";
         if (!isCur) {
           html +=
             ' <button data-click="dlDeleteFile" data-args="' +

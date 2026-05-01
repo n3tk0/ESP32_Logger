@@ -1,5 +1,5 @@
   <main class="main-content page" id="page-settings_network">
-    <div class="page-header">
+    <div class="page-head">
       <h1><span data-icon="globe"></span> Network</h1>
       <div class="breadcrumb"><a href="#settings">Settings</a> / Network
       </div>
@@ -20,10 +20,10 @@
       <div id="net-msg"></div>
       <!-- WiFi Mode -->
       <div class="card">
-        <div class="card-header"><span data-icon="wifi"></span> WiFi Mode</div>
+        <div class="card-head"><span data-icon="wifi"></span> WiFi Mode</div>
         <div class="card-body">
           <div class="form-group">
-            <select name="wifiMode" id="net-mode" class="form-input form-select" data-change="netToggleMode">
+            <select name="wifiMode" id="net-mode" class="input" data-change="netToggleMode">
               <option value="0">📶 AP Mode</option>
               <option value="1">🔗 Client Mode</option>
             </select>
@@ -34,7 +34,7 @@
       <!-- AP Settings -->
       <div id="apSection">
         <div class="card">
-          <div class="card-header">📶 AP Mode</div>
+          <div class="card-head">📶 AP Mode</div>
           <div class="card-body">
             <div class="form-group"><label class="form-label">SSID</label>
               <input type="text" name="apSSID" id="net-apSSID" placeholder="WaterLogger" class="form-input">
@@ -42,15 +42,15 @@
             <div class="form-group"><label class="form-label">Password</label>
               <div style="display:flex;gap:8px">
                 <input type="password" name="apPassword" id="net-apPass" class="form-input" style="flex:1">
-                <button type="button" class="btn btn-secondary" data-click="togglePass" data-args='["net-apPass"]'><span data-icon="eye"></span></button>
+                <button type="button" class="btn" data-click="togglePass" data-args='["net-apPass"]'><span data-icon="eye"></span></button>
               </div>
             </div>
           </div>
         </div>
         <div class="card">
-          <div class="card-header"><span data-icon="wrench"></span> AP Network Properties</div>
+          <div class="card-head"><span data-icon="wrench"></span> AP Network Properties</div>
           <div class="card-body">
-            <div class="form-row">
+            <div class="form-grid">
               <div class="form-group"><label class="form-label">IP Address</label><input type="text" name="apIP"
                   id="net-apIP" class="form-input"></div>
               <div class="form-group"><label class="form-label">Gateway</label> <input type="text" name="apGateway"
@@ -65,12 +65,12 @@
       <!-- Client Settings -->
       <div id="clientSection" style="display:none">
         <div class="card">
-          <div class="card-header">🔗 Client Mode</div>
+          <div class="card-head">🔗 Client Mode</div>
           <div class="card-body">
             <div class="form-group"><label class="form-label">SSID</label>
               <div style="display:flex;gap:8px">
                 <input type="text" name="clientSSID" id="net-cSSID" class="form-input" style="flex:1">
-                <button type="button" class="btn btn-secondary" data-click="netScanWifi"><span data-icon="search"></span></button>
+                <button type="button" class="btn" data-click="netScanWifi"><span data-icon="search"></span></button>
               </div>
             </div>
             <div id="wifiList"
@@ -79,17 +79,17 @@
             <div class="form-group"><label class="form-label">Password</label>
               <div style="display:flex;gap:8px">
                 <input type="password" name="clientPassword" id="net-cPass" class="form-input" style="flex:1">
-                <button type="button" class="btn btn-secondary" data-click="togglePass" data-args='["net-cPass"]'><span data-icon="eye"></span></button>
-                <button type="button" class="btn btn-secondary" data-click="netTestWifi" title="Verify credentials without saving">🧪 Test</button>
+                <button type="button" class="btn" data-click="togglePass" data-args='["net-cPass"]'><span data-icon="eye"></span></button>
+                <button type="button" class="btn" data-click="netTestWifi" title="Verify credentials without saving">🧪 Test</button>
               </div>
               <div id="net-testResult" style="font-size:.85rem;margin-top:6px"></div>
             </div>
           </div>
         </div>
         <div class="card">
-          <div class="card-header"><span data-icon="wrench"></span> Client Network Properties</div>
+          <div class="card-head"><span data-icon="wrench"></span> Client Network Properties</div>
           <div class="card-body">
-            <div class="form-row" id="staticFields">
+            <div class="form-grid" id="staticFields">
               <!-- Hidden fields to store current connection details when form is un-checked -->
               <input type="hidden" id="net-ip2-current" value="">
               <input type="hidden" id="net-gw-current" value="">
@@ -115,6 +115,6 @@
         </div>
       </div>
 
-      <button type="submit" class="btn btn-primary btn-block"><span data-icon="save"></span> Save &amp; Restart</button>
+      <button type="submit" class="btn primary btn-block"><span data-icon="save"></span> Save &amp; Restart</button>
     </form>
   </main>

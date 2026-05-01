@@ -1,5 +1,5 @@
   <main class="main-content page" id="page-settings_theme">
-    <div class="page-header">
+    <div class="page-head">
       <h1><span data-icon="palette"></span> Theme</h1>
       <div class="breadcrumb"><a href="#settings">Settings</a> / Theme
       </div>
@@ -9,10 +9,10 @@
       <div id="th-msg"></div>
       <!-- Mode -->
       <div class="card">
-        <div class="card-header">🌓 Mode</div>
+        <div class="card-head">🌓 Mode</div>
         <div class="card-body">
           <div class="form-group">
-            <select name="themeMode" id="th-mode" class="form-input form-select">
+            <select name="themeMode" id="th-mode" class="input">
               <option value="0">☀️ Light</option>
               <option value="1">🌙 Dark</option>
               <option value="2">Auto</option>
@@ -28,7 +28,7 @@
 
       <!-- Colors -->
       <div class="card">
-        <div class="card-header"><span data-icon="palette"></span> Colors</div>
+        <div class="card-head"><span data-icon="palette"></span> Colors</div>
         <div class="card-body">
           <div class="color-grid">
             <div class="form-group"><label class="form-label">Primary</label><input type="color" name="primaryColor"
@@ -65,7 +65,7 @@
 
       <!-- Images -->
       <div class="card">
-        <div class="card-header">🖼️ Images</div>
+        <div class="card-head">🖼️ Images</div>
         <div class="card-body">
           <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem">Supported: PNG, JPG, GIF, SVG, ICO. Path:
             /file.png</p>
@@ -80,11 +80,11 @@
 
       <!-- Chart.js -->
       <div class="card">
-        <div class="card-header"><span data-icon="line-chart"></span> Chart Source</div>
+        <div class="card-head"><span data-icon="line-chart"></span> Chart Source</div>
         <div class="card-body">
           <div class="form-group">
             <label class="form-label">Chart.js Library</label>
-            <select name="chartSource" id="th-chartSrc" class="form-input form-select"
+            <select name="chartSource" id="th-chartSrc" class="input"
               data-change="themeToggleChartPath">
               <option value="0">Local File</option>
               <option value="1">CDN (Online)</option>
@@ -99,7 +99,7 @@
           </div>
           <div class="form-group mt-1">
             <label class="form-label">Dashboard Column Labels</label>
-            <select name="chartLabelFormat" id="th-labelFmt" class="form-input form-select">
+            <select name="chartLabelFormat" id="th-labelFmt" class="input">
               <option value="0">Date + Time</option>
               <option value="1">Boot Count (#1234)</option>
               <option value="2">Both</option>
@@ -109,8 +109,8 @@
       </div>
 
       <div style="display:flex; gap:10px;">
-        <button type="submit" class="btn btn-primary" style="flex:1;"><span data-icon="save"></span> Save</button>
-        <button type="button" class="btn btn-secondary" data-click="themeRestoreDefault"><span data-icon="refresh-cw"></span> Restore Default
+        <button type="submit" class="btn primary" style="flex:1;"><span data-icon="save"></span> Save</button>
+        <button type="button" class="btn" data-click="themeRestoreDefault"><span data-icon="refresh-cw"></span> Restore Default
           Theme</button>
       </div>
     </form>

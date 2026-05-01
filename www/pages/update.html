@@ -1,5 +1,5 @@
   <main class="main-content page" id="page-update">
-    <div class="page-header">
+    <div class="page-head">
       <h1><span data-icon="cloud-upload"></span> Firmware Update</h1>
       <div class="breadcrumb"><a href="#settings">Settings</a> / Update
       </div>
@@ -17,15 +17,15 @@
           </div>
           <div id="popupCounter"></div>
         </div>
-        <button id="popupClose" class="btn btn-secondary" data-click="closePopup" style="display:none">Close</button>
+        <button id="popupClose" class="btn" data-click="closePopup" style="display:none">Close</button>
       </div>
     </div>
 
     <!-- Current firmware -->
     <div class="card">
-      <div class="card-header"><span data-icon="file-text"></span> Current Firmware</div>
+      <div class="card-head"><span data-icon="file-text"></span> Current Firmware</div>
       <div class="card-body">
-        <div class="form-row">
+        <div class="form-grid">
           <div><strong>Version</strong>
             <div class="text-primary" id="ota-currentVer">–</div>
           </div>
@@ -44,7 +44,7 @@
 
     <!-- Upload new firmware -->
     <div class="card">
-      <div class="card-header"><span data-icon="cloud-upload"></span> Upload Firmware (.bin)</div>
+      <div class="card-head"><span data-icon="cloud-upload"></span> Upload Firmware (.bin)</div>
       <div class="card-body">
         <div class="alert alert-warning"><span data-icon="alert-triangle"></span> Upload the correct .bin file. Wrong firmware will require USB recovery.
         </div>
@@ -54,7 +54,7 @@
               data-change="otaFileSelected">
           </div>
           <div id="otaFileInfo" class="alert" style="display:none;margin-bottom:1rem;"></div>
-          <button type="submit" id="otaUploadBtn" class="btn btn-danger btn-block" disabled><span data-icon="rocket"></span> Flash Firmware</button>
+          <button type="submit" id="otaUploadBtn" class="btn btn-block" style="background:var(--err);color:#fff;border-color:var(--err)" disabled><span data-icon="rocket"></span> Flash Firmware</button>
         </form>
         <div id="otaProgress" style="display:none;margin-top:1rem">
           <div style="background:#e0e0e0;border-radius:4px;height:24px;overflow:hidden">
