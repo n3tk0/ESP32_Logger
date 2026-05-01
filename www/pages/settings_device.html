@@ -12,17 +12,17 @@
       <div class="card">
         <div class="card-head">📛 Identity</div>
         <div class="card-body">
-          <div class="form-group">
-            <label class="form-label">Device Name</label>
-            <input type="text" name="deviceName" id="sd-devName" maxlength="32" class="form-input"
+          <div class="field">
+            <label class="field-label">Device Name</label>
+            <input type="text" name="deviceName" id="sd-devName" maxlength="32" class="input"
               placeholder="Water Logger">
-            <p class="form-hint">Displayed in the sidebar, header, and browser title.</p>
+            <p class="hint">Displayed in the sidebar, header, and browser title.</p>
           </div>
-          <div class="form-group">
-            <label class="form-label">Device ID</label>
-            <p class="form-hint">Unique device identifier. Used in log filenames and CSV exports.</p>
+          <div class="field">
+            <label class="field-label">Device ID</label>
+            <p class="hint">Unique device identifier. Used in log filenames and CSV exports.</p>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <input type="text" id="sd-devId" name="deviceId" maxlength="12" class="form-input"
+              <input type="text" id="sd-devId" name="deviceId" maxlength="12" class="input"
                 style="flex:1;min-width:120px" disabled>
               <button type="button" data-click="regenDevId" class="btn btn-sm"><span data-icon="refresh-cw"></span> New ID</button>
               <button type="button" data-click="toggleManualId" data-args='["sd-devId"]' class="btn btn-sm"><span data-icon="pencil"></span>
@@ -36,13 +36,13 @@
       <div class="card">
         <div class="card-head"><span data-icon="save"></span> Storage</div>
         <div class="card-body">
-          <div class="form-group">
-            <label class="form-label">Default Storage View</label>
+          <div class="field">
+            <label class="field-label">Default Storage View</label>
             <select name="defaultStorageView" id="sd-defaultStorage" class="input">
               <option value="0">Internal (LittleFS)</option>
               <option value="1">💳 SD Card</option>
             </select>
-            <p class="form-hint">Choose which storage (Internal LittleFS or SD Card) the Files page opens to by default.
+            <p class="hint">Choose which storage (Internal LittleFS or SD Card) the Files page opens to by default.
             </p>
           </div>
         </div>
@@ -52,12 +52,12 @@
       <div class="card">
         <div class="card-head"><span data-icon="globe"></span> Web Server</div>
         <div class="card-body">
-          <div class="form-group">
-            <label class="form-label">
+          <div class="field">
+            <label class="field-label">
               <input type="checkbox" name="forceWebServer" id="sd-forceWS" value="1">
               Force Web Server On
             </label>
-            <p class="form-hint">When enabled, the web server stays active even in deep sleep modes. Disable to save
+            <p class="hint">When enabled, the web server stays active even in deep sleep modes. Disable to save
               power when web access is not needed.</p>
           </div>
         </div>

@@ -11,20 +11,20 @@
       <div class="card">
         <div class="card-head"><span data-icon="file-text"></span> Current File</div>
         <div class="card-body">
-          <div class="form-group">
-            <label class="form-label">Select file</label>
+          <div class="field">
+            <label class="field-label">Select file</label>
             <select name="currentFile" id="curFile" class="input">
               <option value="">Loading...</option>
             </select>
           </div>
           <div class="form-grid mt-1">
-            <div class="form-group">
-              <label class="form-label">Prefix</label>
-              <input type="text" name="prefix" id="dl-prefix" placeholder="datalog" class="form-input">
+            <div class="field">
+              <label class="field-label">Prefix</label>
+              <input type="text" name="prefix" id="dl-prefix" placeholder="datalog" class="input">
             </div>
-            <div class="form-group">
-              <label class="form-label">Folder</label>
-              <input type="text" name="folder" id="dl-folder" placeholder="/" class="form-input">
+            <div class="field">
+              <label class="field-label">Folder</label>
+              <input type="text" name="folder" id="dl-folder" placeholder="/" class="input">
               <p class="text-muted" style="font-size:.75rem;margin-top:2px">Leave empty for root, or /logs for subfolder
               </p>
             </div>
@@ -39,7 +39,7 @@
         <div class="card-body">
           <p class="text-muted" style="font-size:.8rem;margin-bottom:.75rem">How to split log files over time</p>
           <div class="form-grid">
-            <div class="form-group">
+            <div class="field">
               <select name="rotation" id="dl-rotation" class="input" data-change="dlToggleMaxSize">
                 <option value="0">None</option>
                 <option value="1">Daily</option>
@@ -48,17 +48,17 @@
                 <option value="4">By Size</option>
               </select>
             </div>
-            <div class="form-group" id="maxSizeGroup" style="display:none">
-              <label class="form-label">Max Size (KB)</label>
-              <input type="number" name="maxSizeKB" id="dl-maxSize" min="10" max="10000" class="form-input">
+            <div class="field" id="maxSizeGroup" style="display:none">
+              <label class="field-label">Max Size (KB)</label>
+              <input type="number" name="maxSizeKB" id="dl-maxSize" min="10" max="10000" class="input">
             </div>
           </div>
-          <div class="form-group">
-            <label class="form-label"><input type="checkbox" name="timestampFilename" id="dl-tsFile" value="1">
+          <div class="field">
+            <label class="field-label"><input type="checkbox" name="timestampFilename" id="dl-tsFile" value="1">
               Timestamp filename</label>
           </div>
-          <div class="form-group">
-            <label class="form-label"><input type="checkbox" name="includeDeviceId" id="dl-devId" value="1"> Device ID
+          <div class="field">
+            <label class="field-label"><input type="checkbox" name="includeDeviceId" id="dl-devId" value="1"> Device ID
               in filename</label>
           </div>
         </div>
@@ -69,8 +69,8 @@
         <div class="card-head"><span data-icon="settings"></span> Log Format</div>
         <div class="card-body">
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
-            <div class="form-group" style="min-width:100px">
-              <label class="form-label">Date</label>
+            <div class="field" style="min-width:100px">
+              <label class="field-label">Date</label>
               <select name="dateFormat" id="dl-date" class="input" data-change="dlUpdatePreview">
                 <option value="0">Off</option>
                 <option value="1">DD/MM/YYYY</option>
@@ -79,31 +79,31 @@
                 <option value="4">DD.MM.YYYY</option>
               </select>
             </div>
-            <div class="form-group" style="min-width:90px">
-              <label class="form-label">Start</label>
+            <div class="field" style="min-width:90px">
+              <label class="field-label">Start</label>
               <select name="timeFormat" id="dl-time" class="input" data-change="dlUpdatePreview">
                 <option value="0">HH:MM:SS</option>
                 <option value="1">HH:MM</option>
                 <option value="2">12h AM/PM</option>
               </select>
             </div>
-            <div class="form-group" style="min-width:80px">
-              <label class="form-label">End</label>
+            <div class="field" style="min-width:80px">
+              <label class="field-label">End</label>
               <select name="endFormat" id="dl-end" class="input" data-change="dlUpdatePreview">
                 <option value="0">Time</option>
                 <option value="1">Duration</option>
                 <option value="2">Off</option>
               </select>
             </div>
-            <div class="form-group" style="min-width:80px">
-              <label class="form-label">Boot#</label>
+            <div class="field" style="min-width:80px">
+              <label class="field-label">Boot#</label>
               <select name="includeBootCount" id="dl-boot" class="input" data-change="dlUpdatePreview">
                 <option value="1">On</option>
                 <option value="0">Off</option>
               </select>
             </div>
-            <div class="form-group" style="min-width:80px">
-              <label class="form-label">Volume</label>
+            <div class="field" style="min-width:80px">
+              <label class="field-label">Volume</label>
               <select name="volumeFormat" id="dl-vol" class="input" data-change="dlUpdatePreview">
                 <option value="0">L:0,00</option>
                 <option value="1">L:0.00</option>
@@ -111,8 +111,8 @@
                 <option value="3">Off</option>
               </select>
             </div>
-            <div class="form-group" style="min-width:80px">
-              <label class="form-label">FF/PF</label>
+            <div class="field" style="min-width:80px">
+              <label class="field-label">FF/PF</label>
               <select name="includeExtraPresses" id="dl-extra" class="input"
                 data-change="dlUpdatePreview">
                 <option value="1">On</option>
@@ -121,7 +121,7 @@
             </div>
           </div>
           <div class="mt-1">
-            <label class="form-label">Preview:</label>
+            <label class="field-label">Preview:</label>
             <div id="dl-preview"
               style="font-family:monospace;font-size:.85rem;padding:10px 12px;border-radius:var(--radius-sm);background:var(--bg);border:1px solid var(--border);overflow-x:auto;white-space:nowrap">
             </div>
@@ -133,8 +133,8 @@
       <div class="card">
         <div class="card-head"><span data-icon="refresh-cw"></span> Post-Correction</div>
         <div class="card-body">
-          <div class="form-group">
-            <label class="form-label">
+          <div class="field">
+            <label class="field-label">
               <input type="checkbox" name="postCorrectionEnabled" id="dl-pcEnabled" value="1"
                 data-change="dlTogglePcFields">
               Enable Post-Correction
@@ -142,24 +142,24 @@
           </div>
           <div id="pcFields" style="display:none">
             <div class="form-grid">
-              <div class="form-group">
-                <label class="form-label">PF → FF Threshold (L)</label>
+              <div class="field">
+                <label class="field-label">PF → FF Threshold (L)</label>
                 <input type="number" step="0.1" name="pfToFfThreshold" id="dl-pfff" min="0.1" max="20"
-                  class="form-input">
-                <p class="form-hint">PF_BTN with volume ≥ this → corrected to FF_BTN</p>
+                  class="input">
+                <p class="hint">PF_BTN with volume ≥ this → corrected to FF_BTN</p>
               </div>
-              <div class="form-group">
-                <label class="form-label">FF → PF Threshold (L)</label>
+              <div class="field">
+                <label class="field-label">FF → PF Threshold (L)</label>
                 <input type="number" step="0.1" name="ffToPfThreshold" id="dl-ffpf" min="0.1" max="20"
-                  class="form-input">
-                <p class="form-hint">FF_BTN with volume ≤ this → corrected to PF_BTN</p>
+                  class="input">
+                <p class="hint">FF_BTN with volume ≤ this → corrected to PF_BTN</p>
               </div>
             </div>
-            <div class="form-group">
-              <label class="form-label">Button Hold Threshold (ms)</label>
+            <div class="field">
+              <label class="field-label">Button Hold Threshold (ms)</label>
               <input type="number" step="50" name="manualPressThresholdMs" id="dl-hold" min="0" max="5000"
-                class="form-input">
-              <p class="form-hint">Held longer than this → correction skipped. 0 = disabled.</p>
+                class="input">
+              <p class="hint">Held longer than this → correction skipped. 0 = disabled.</p>
             </div>
           </div>
         </div>
@@ -176,14 +176,14 @@
       <div class="card">
         <div class="card-head"><span data-icon="line-chart"></span> Sensor Data Visualisation</div>
         <div class="card-body">
-          <p class="form-hint" style="margin-bottom:1rem">
+          <p class="hint" style="margin-bottom:1rem">
             These settings control how sensor data is displayed in charts.
             Raw data on the device is <strong>never modified</strong> — aggregation
             and interpolation happen only at display time.
           </p>
           <div class="form-grid">
-            <div class="form-group">
-              <label class="form-label">
+            <div class="field">
+              <label class="field-label">
                 Aggregation Interval
                 <span class="help-tip" title="Groups readings into time buckets before displaying. Reduces chart point count.">ℹ️</span>
               </label>
@@ -194,10 +194,10 @@
                 <option value="1h">1 hour</option>
                 <option value="1d">1 day</option>
               </select>
-              <p class="form-hint">Group readings into time windows.</p>
+              <p class="hint">Group readings into time windows.</p>
             </div>
-            <div class="form-group">
-              <label class="form-label">
+            <div class="field">
+              <label class="field-label">
                 Interpolation Mode
                 <span class="help-tip" title="How values are combined within each time bucket.">ℹ️</span>
               </label>
@@ -208,7 +208,7 @@
                 <option value="max">Maximum</option>
                 <option value="raw">No aggregation (raw points)</option>
               </select>
-              <p class="form-hint">
+              <p class="hint">
                 <strong>LTTB</strong>: Largest Triangle Three Buckets — keeps the
                 visual shape of the curve while reducing points. Best for display.
                 <strong>Average</strong>: mean per bucket.
@@ -216,13 +216,13 @@
               </p>
             </div>
           </div>
-          <div class="form-group">
-            <label class="form-label">
+          <div class="field">
+            <label class="field-label">
               Max Points
               <span class="help-tip" title="Maximum data points sent to the chart. Lower = faster rendering.">ℹ️</span>
             </label>
-            <input type="number" id="agg-limit" class="form-input" value="500" min="50" max="5000" step="50">
-            <p class="form-hint">Maximum chart points (50–5000). Default: 500.</p>
+            <input type="number" id="agg-limit" class="input" value="500" min="50" max="5000" step="50">
+            <p class="hint">Maximum chart points (50–5000). Default: 500.</p>
           </div>
           <button type="button" class="btn" data-click="aggSettingsSave"><span data-icon="save"></span> Save Visualisation Settings</button>
           <div id="agg-msg" style="margin-top:8px;font-size:.85rem"></div>

@@ -22,7 +22,7 @@
       <div class="card">
         <div class="card-head"><span data-icon="wifi"></span> WiFi Mode</div>
         <div class="card-body">
-          <div class="form-group">
+          <div class="field">
             <select name="wifiMode" id="net-mode" class="input" data-change="netToggleMode">
               <option value="0">📶 AP Mode</option>
               <option value="1">🔗 Client Mode</option>
@@ -36,12 +36,12 @@
         <div class="card">
           <div class="card-head">📶 AP Mode</div>
           <div class="card-body">
-            <div class="form-group"><label class="form-label">SSID</label>
-              <input type="text" name="apSSID" id="net-apSSID" placeholder="WaterLogger" class="form-input">
+            <div class="field"><label class="field-label">SSID</label>
+              <input type="text" name="apSSID" id="net-apSSID" placeholder="WaterLogger" class="input">
             </div>
-            <div class="form-group"><label class="form-label">Password</label>
+            <div class="field"><label class="field-label">Password</label>
               <div style="display:flex;gap:8px">
-                <input type="password" name="apPassword" id="net-apPass" class="form-input" style="flex:1">
+                <input type="password" name="apPassword" id="net-apPass" class="input" style="flex:1">
                 <button type="button" class="btn" data-click="togglePass" data-args='["net-apPass"]'><span data-icon="eye"></span></button>
               </div>
             </div>
@@ -51,12 +51,12 @@
           <div class="card-head"><span data-icon="wrench"></span> AP Network Properties</div>
           <div class="card-body">
             <div class="form-grid">
-              <div class="form-group"><label class="form-label">IP Address</label><input type="text" name="apIP"
-                  id="net-apIP" class="form-input"></div>
-              <div class="form-group"><label class="form-label">Gateway</label> <input type="text" name="apGateway"
-                  id="net-apGW" class="form-input"></div>
-              <div class="form-group"><label class="form-label">Subnet Mask</label><input type="text" name="apSubnet"
-                  id="net-apSN" class="form-input"></div>
+              <div class="field"><label class="field-label">IP Address</label><input type="text" name="apIP"
+                  id="net-apIP" class="input"></div>
+              <div class="field"><label class="field-label">Gateway</label> <input type="text" name="apGateway"
+                  id="net-apGW" class="input"></div>
+              <div class="field"><label class="field-label">Subnet Mask</label><input type="text" name="apSubnet"
+                  id="net-apSN" class="input"></div>
             </div>
           </div>
         </div>
@@ -67,18 +67,18 @@
         <div class="card">
           <div class="card-head">🔗 Client Mode</div>
           <div class="card-body">
-            <div class="form-group"><label class="form-label">SSID</label>
+            <div class="field"><label class="field-label">SSID</label>
               <div style="display:flex;gap:8px">
-                <input type="text" name="clientSSID" id="net-cSSID" class="form-input" style="flex:1">
+                <input type="text" name="clientSSID" id="net-cSSID" class="input" style="flex:1">
                 <button type="button" class="btn" data-click="netScanWifi"><span data-icon="search"></span></button>
               </div>
             </div>
             <div id="wifiList"
               style="display:none;margin-bottom:1rem;max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
             </div>
-            <div class="form-group"><label class="form-label">Password</label>
+            <div class="field"><label class="field-label">Password</label>
               <div style="display:flex;gap:8px">
-                <input type="password" name="clientPassword" id="net-cPass" class="form-input" style="flex:1">
+                <input type="password" name="clientPassword" id="net-cPass" class="input" style="flex:1">
                 <button type="button" class="btn" data-click="togglePass" data-args='["net-cPass"]'><span data-icon="eye"></span></button>
                 <button type="button" class="btn" data-click="netTestWifi" title="Verify credentials without saving">🧪 Test</button>
               </div>
@@ -96,17 +96,17 @@
               <input type="hidden" id="net-sn-current" value="">
               <input type="hidden" id="net-dns-current" value="">
 
-              <div class="form-group"><label class="form-label">IP Address</label><input type="text" name="staticIP"
-                  id="net-ip2" class="form-input" disabled></div>
-              <div class="form-group"><label class="form-label">Gateway</label> <input type="text" name="gateway"
-                  id="net-gw" class="form-input" disabled></div>
-              <div class="form-group"><label class="form-label">Subnet Mask</label><input type="text" name="subnet"
-                  id="net-sn" class="form-input" disabled></div>
-              <div class="form-group"><label class="form-label">DNS Server</label> <input type="text" name="dns"
-                  id="net-dns" class="form-input" disabled></div>
+              <div class="field"><label class="field-label">IP Address</label><input type="text" name="staticIP"
+                  id="net-ip2" class="input" disabled></div>
+              <div class="field"><label class="field-label">Gateway</label> <input type="text" name="gateway"
+                  id="net-gw" class="input" disabled></div>
+              <div class="field"><label class="field-label">Subnet Mask</label><input type="text" name="subnet"
+                  id="net-sn" class="input" disabled></div>
+              <div class="field"><label class="field-label">DNS Server</label> <input type="text" name="dns"
+                  id="net-dns" class="input" disabled></div>
             </div>
-            <div class="form-group mt-1">
-              <label class="form-label">
+            <div class="field mt-1">
+              <label class="field-label">
                 <input type="checkbox" name="useStaticIP" id="staticCheck" value="1" data-change="netToggleStatic"> Use
                 Static IP
               </label>

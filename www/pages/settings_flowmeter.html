@@ -9,23 +9,23 @@
       <div id="sf-msg"></div>
       <div class="card">
         <div class="card-head">💧 Flow Meter</div>
-        <div class="card-body"><p class="form-hint">Primary pulse-counter flow sensor (hardware pin fixed in <strong>Hardware</strong>). Treated as a dedicated sensor because its pulses drive the state machine.</p></div>
+        <div class="card-body"><p class="hint">Primary pulse-counter flow sensor (hardware pin fixed in <strong>Hardware</strong>). Treated as a dedicated sensor because its pulses drive the state machine.</p></div>
       </div>
       <!-- Calibration -->
       <div class="card">
         <div class="card-head">📏 Calibration</div>
         <div class="card-body">
           <div class="form-grid">
-            <div class="form-group">
-              <label class="form-label">Pulses/Liter</label>
-              <input type="number" step="0.1" name="pulsesPerLiter" id="sf-ppl" class="form-input" value="">
-              <p class="form-hint">Number of flow sensor pulses per liter. Check your sensor datasheet (e.g., YF-S201 =
+            <div class="field">
+              <label class="field-label">Pulses/Liter</label>
+              <input type="number" step="0.1" name="pulsesPerLiter" id="sf-ppl" class="input" value="">
+              <p class="hint">Number of flow sensor pulses per liter. Check your sensor datasheet (e.g., YF-S201 =
                 450).</p>
             </div>
-            <div class="form-group">
-              <label class="form-label">Multiplier</label>
-              <input type="number" step="0.01" name="calibrationMultiplier" id="sf-cal" class="form-input" value="">
-              <p class="form-hint">Fine-tune measured volume. 1.0 = no adjustment. Adjust up/down based on comparison
+            <div class="field">
+              <label class="field-label">Multiplier</label>
+              <input type="number" step="0.01" name="calibrationMultiplier" id="sf-cal" class="input" value="">
+              <p class="hint">Fine-tune measured volume. 1.0 = no adjustment. Adjust up/down based on comparison
                 with a known volume.</p>
             </div>
           </div>
@@ -37,15 +37,15 @@
         <div class="card-head">⏱️ Timing</div>
         <div class="card-body">
           <div class="form-grid">
-            <div class="form-group">
-              <label class="form-label">Window (sec)</label>
-              <input type="number" name="monitoringWindowSecs" id="sf-win" class="form-input" value="">
-              <p class="form-hint">Idle time before logging.</p>
+            <div class="field">
+              <label class="field-label">Window (sec)</label>
+              <input type="number" name="monitoringWindowSecs" id="sf-win" class="input" value="">
+              <p class="hint">Idle time before logging.</p>
             </div>
-            <div class="form-group">
-              <label class="form-label">First Loop (sec)</label>
-              <input type="number" name="firstLoopWindowSecs" id="sf-fl" class="form-input" value="">
-              <p class="form-hint">Delay on first loop (for delayed fill).</p>
+            <div class="field">
+              <label class="field-label">First Loop (sec)</label>
+              <input type="number" name="firstLoopWindowSecs" id="sf-fl" class="input" value="">
+              <p class="hint">Delay on first loop (for delayed fill).</p>
             </div>
           </div>
         </div>
@@ -55,15 +55,15 @@
       <div class="card">
         <div class="card-head">🧪 Test Mode</div>
         <div class="card-body">
-          <div class="form-group">
-            <label class="form-label">
+          <div class="field">
+            <label class="field-label">
               <input type="checkbox" name="testMode" id="sf-test" value="1"> Enable
             </label>
-            <p class="form-hint">WiFi Pin as LED output. Solid = IDLE / Blink = Water running.</p>
+            <p class="hint">WiFi Pin as LED output. Solid = IDLE / Blink = Water running.</p>
           </div>
-          <div class="form-group">
-            <label class="form-label">Blink Duration (ms)</label>
-            <input type="number" name="blinkDuration" id="sf-blink" class="form-input" value="">
+          <div class="field">
+            <label class="field-label">Blink Duration (ms)</label>
+            <input type="number" name="blinkDuration" id="sf-blink" class="input" value="">
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1rem">
             <span>Boot Count: <strong id="sf-boot">–</strong></span>

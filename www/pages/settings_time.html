@@ -26,10 +26,10 @@
         <form data-submit="timeSetManual">
           <div id="time-msg"></div>
           <div class="form-grid">
-            <div class="form-group"><label class="form-label">Date</label><input type="date" name="date" required
-                class="form-input"></div>
-            <div class="form-group"><label class="form-label">Time</label><input type="time" name="time" required
-                class="form-input"></div>
+            <div class="field"><label class="field-label">Date</label><input type="date" name="date" required
+                class="input"></div>
+            <div class="field"><label class="field-label">Time</label><input type="time" name="time" required
+                class="input"></div>
           </div>
           <button type="submit" class="btn primary btn-block">⏰ Set Time</button>
         </form>
@@ -46,13 +46,13 @@
       <div class="card-body">
         <form data-submit="settingsSaveForm" data-save-url="/save_time">
           <div class="form-grid">
-            <div class="form-group">
-              <label class="form-label">NTP Server</label>
-              <input type="text" name="ntpServer" id="time-ntp" class="form-input" value="pool.ntp.org">
+            <div class="field">
+              <label class="field-label">NTP Server</label>
+              <input type="text" name="ntpServer" id="time-ntp" class="input" value="pool.ntp.org">
             </div>
-            <div class="form-group">
-              <label class="form-label">Timezone (UTC+)</label>
-              <input type="number" name="timezone" id="time-tz" min="-12" max="14" class="form-input" value="2">
+            <div class="field">
+              <label class="field-label">Timezone (UTC+)</label>
+              <input type="number" name="timezone" id="time-tz" min="-12" max="14" class="input" value="2">
             </div>
           </div>
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
@@ -69,19 +69,19 @@
       <div class="card-head"><span data-icon="settings"></span> RTC &amp; System Options</div>
       <div class="card-body">
         <form data-submit="timeRtcProtect" style="margin-bottom:1rem">
-          <div class="form-group">
-            <label class="form-label">
+          <div class="field">
+            <label class="field-label">
               <input type="checkbox" name="protect" id="time-rtcProt" value="1" data-change="submitParentForm"> RTC Write
               Protected
             </label>
-            <p class="form-hint">Prevents accidental time changes.</p>
+            <p class="hint">Prevents accidental time changes.</p>
           </div>
         </form>
 
         <div
           style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;padding:.75rem;background:var(--bg);border-radius:8px">
           <div><strong>Log Buffer</strong>
-            <p class="form-hint" style="margin:0">Write pending logs to storage</p>
+            <p class="hint" style="margin:0">Write pending logs to storage</p>
           </div>
           <form data-submit="timeFlushLogs"><button type="submit" class="btn"><span data-icon="save"></span>
               Flush</button></form>
@@ -99,7 +99,7 @@
               <button type="submit" class="btn warn"><span data-icon="download"></span> Restore</button>
             </form>
           </div>
-          <p class="form-hint" style="margin-top:.5rem">Backup saves to RTC RAM + flash file.</p>
+          <p class="hint" style="margin-top:.5rem">Backup saves to RTC RAM + flash file.</p>
         </div>
       </div>
     </div>
