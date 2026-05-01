@@ -248,7 +248,7 @@ All routes are also reachable under **`/api/v1/<X>`** via a 307-redirect alias, 
 | /api/sensors/read_now?id=<id> | GET | Read a single non-blocking sensor by ID |
 | `/api/recent_logs` | GET | Recent flow-event log; `?since=<bootcount>` returns delta |
 | `/api/diag` | GET | Free heap, queue depths, task stats |
-| `/api/identity` / `/api/runtime` / `/api/theme` | GET | Split status (cached / polled / ETag-keyed) |
+| /api/identity / /api/runtime / /api/theme | GET | Split status (identity / runtime / theme) |
 | `/api/changelog` | GET | Markdown changelog from `/changelog.txt` |
 
 ### Modules (Pass 5)
