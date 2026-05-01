@@ -190,7 +190,7 @@
         <h1 class="page-title">Live <span class="badge ok pulse" id="conn">● Connected</span></h1>
         <div class="page-sub" style="display:flex;align-items:center;gap:6px">
           Real-time telemetry · refreshing every 
-          <select id="live-refresh-rate" class="form-input form-select" style="width:auto;padding:2px 4px;font-size:11px;min-height:22px" data-change="liveSetRate">
+          <select id="live-refresh-rate" class="input" style="width:auto;padding:2px 4px;font-size:11px;min-height:22px" data-change="liveSetRate">
             <option value="500">0.5s</option>
             <option value="1000">1s</option>
             <option value="2000">2s</option>
@@ -273,7 +273,7 @@
         <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="terminal" class="lucide lucide-terminal"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg> Recent log</div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <input type="search" id="logsFilter" class="form-input" placeholder="Filter…" data-input="liveLogsFilter" style="width:160px;padding:4px 8px;font-size:12px;min-height:28px" aria-label="Filter log entries">
+            <input type="search" id="logsFilter" class="input" placeholder="Filter…" data-input="liveLogsFilter" style="width:160px;padding:4px 8px;font-size:12px;min-height:28px" aria-label="Filter log entries">
             <button type="button" class="btn-mini" data-click="liveLogsFilterClear" title="Clear filter"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="x" class="lucide lucide-x"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
           </div>
         </div>
@@ -302,7 +302,7 @@
         <div id="tabs" class="seg"></div>
         <button id="upBtn" class="btn" data-click="filesGoUp" style="display:none"><span data-icon="chevron-left"></span> Up</button>
         <button id="btnEdit" class="btn" data-click="filesToggleEdit"><span data-icon="pencil"></span> Edit</button>
-        <button id="btnDone" class="btn btn-secondary" data-click="filesToggleEdit" style="display:none"><span data-icon="x"></span> Done</button>
+        <button id="btnDone" class="btn" data-click="filesToggleEdit" style="display:none"><span data-icon="x"></span> Done</button>
       </div>
     </div>
 
@@ -437,9 +437,9 @@
 
   <!-- ═══ PAGE: SENSORS (live dashboard) ═══ -->
   <main class="main-content page" id="page-sensors">
-    <div class="page-header">
+    <div class="page-head">
       <h1><span data-icon="thermometer"></span> Sensors</h1>
-      <button class="btn btn-secondary btn-sm" data-click="sensorsLoad"><span data-icon="refresh-cw"></span> Refresh</button>
+      <button class="btn btn-sm" data-click="sensorsLoad"><span data-icon="refresh-cw"></span> Refresh</button>
     </div>
     <div id="sensors-msg" class="text-muted" style="margin-bottom:1rem;font-size:.9rem">
       Loading sensor data…
@@ -449,28 +449,28 @@
 
     <!-- Sensor chart -->
     <div class="card" style="margin-top:1rem">
-      <div class="card-header">
+      <div class="card-head">
         <span><span data-icon="line-chart"></span> Sensor Chart</span>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <select id="sc-sensor" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
+          <select id="sc-sensor" class="input" style="width:auto" data-change="sensorChartLoad">
             <option value="">— select sensor —</option>
           </select>
-          <select id="sc-metric" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
+          <select id="sc-metric" class="input" style="width:auto" data-change="sensorChartLoad">
             <option value="">— metric —</option>
           </select>
-          <select id="sc-agg" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
+          <select id="sc-agg" class="input" style="width:auto" data-change="sensorChartLoad">
             <option value="5m">5 min</option>
             <option value="1h">1 hour</option>
             <option value="1d">1 day</option>
             <option value="raw">Raw</option>
           </select>
-          <select id="sc-mode" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
+          <select id="sc-mode" class="input" style="width:auto" data-change="sensorChartLoad">
             <option value="lttb">LTTB</option>
             <option value="avg">Avg</option>
             <option value="min">Min</option>
             <option value="max">Max</option>
           </select>
-          <select id="sc-range" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
+          <select id="sc-range" class="input" style="width:auto" data-change="sensorChartLoad">
             <option value="3600">Last 1h</option>
             <option value="21600">Last 6h</option>
             <option value="86400" selected>Last 24h</option>
@@ -481,10 +481,10 @@
       <!-- Secondary series overlay (dual Y-axis) -->
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 16px;border-top:1px solid var(--border);font-size:.85rem">
         <span style="color:var(--text-muted)">Overlay:</span>
-        <select id="sc-sensor2" class="form-input form-select" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
+        <select id="sc-sensor2" class="input" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
           <option value="">— none —</option>
         </select>
-        <select id="sc-metric2" class="form-input form-select" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
+        <select id="sc-metric2" class="input" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
           <option value="">— metric —</option>
         </select>
       </div>
@@ -500,16 +500,16 @@
     <div class="popup-content" style="text-align:left;max-width:400px">
       <div style="font-size:2.5rem;text-align:center;margin-bottom:.5rem">✂️</div>
       <div style="font-size:1.2rem;font-weight:bold;text-align:center;margin-bottom:1rem">Move / Rename</div>
-      <div class="form-group"><label class="form-label">New Name</label>
-        <input type="text" id="name" class="form-input">
+      <div class="field"><label class="field-label">New Name</label>
+        <input type="text" id="name" class="input">
       </div>
-      <div class="form-group"><label class="form-label">Destination Folder</label>
-        <input type="text" id="dest" class="form-input" placeholder="(leave empty = same folder)">
+      <div class="field"><label class="field-label">Destination Folder</label>
+        <input type="text" id="dest" class="input" placeholder="(leave empty = same folder)">
       </div>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
-        <button class="btn btn-secondary"
+        <button class="btn"
           data-click="hidePopup" data-args='["movePopup"]'>Cancel</button>
-        <button class="btn btn-primary" data-click="filesApplyMove">✂️ Apply</button>
+        <button class="btn primary" data-click="filesApplyMove">✂️ Apply</button>
       </div>
     </div>
   </div>
@@ -518,13 +518,13 @@
     <div class="popup-content" style="text-align:left;max-width:500px;width:100%;max-height:80vh;overflow-y:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
         <div id="sensorPopupTitle" style="font-size:1.2rem;font-weight:bold">Sensor configuration</div>
-        <button class="btn btn-sm btn-secondary" data-click="hidePopup" data-args='["sensorPopup"]'>✕</button>
+        <button class="btn" data-click="hidePopup" data-args='["sensorPopup"]'>✕</button>
       </div>
       <div id="sensorPopupBody">
       </div>
       <div id="sensorPopupFooter" style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.5rem">
-        <button class="btn btn-secondary" data-click="hidePopup" data-args='["sensorPopup"]'>Cancel</button>
-        <button class="btn btn-primary" id="sensorPopupSaveBtn"><span data-icon="save"></span> Save</button>
+        <button class="btn" data-click="hidePopup" data-args='["sensorPopup"]'>Cancel</button>
+        <button class="btn primary" id="sensorPopupSaveBtn"><span data-icon="save"></span> Save</button>
       </div>
     </div>
   </div>
@@ -542,8 +542,8 @@
         </div>
       </div>
       <div id="rPopButtons" style="display:flex;gap:1rem;justify-content:center">
-        <button class="btn btn-danger" data-click="confirmRestart">✓ Confirm</button>
-        <button class="btn btn-secondary" data-click="hidePopup" data-args='["restartPopup"]'>✗
+        <button class="btn" data-click="confirmRestart">✓ Confirm</button>
+        <button class="btn" data-click="hidePopup" data-args='["restartPopup"]'>✗
           Cancel</button>
       </div>
     </div>
@@ -555,13 +555,13 @@
       <div style="font-size:1.2rem;font-weight:700;margin-bottom:.25rem">+ Add Sensor</div>
       <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:1rem">Select a sensor type, then set an ID.</p>
       <div id="sap-type-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:.4rem;margin-bottom:1rem"></div>
-      <div class="form-group" style="margin-bottom:1rem">
-        <label class="form-label">Sensor ID <span style="font-weight:400;color:var(--text-muted)">(unique name)</span></label>
-        <input type="text" id="sap-id" class="form-input" placeholder="e.g. bme280_roof">
+      <div class="field" style="margin-bottom:1rem">
+        <label class="field-label">Sensor ID <span style="font-weight:400;color:var(--text-muted)">(unique name)</span></label>
+        <input type="text" id="sap-id" class="input" placeholder="e.g. bme280_roof">
       </div>
       <div style="display:flex;gap:.5rem">
-        <button class="btn btn-primary" data-click="sapConfirm">Add &amp; Configure</button>
-        <button class="btn btn-secondary" data-click="sapClose">Cancel</button>
+        <button class="btn primary" data-click="sapConfirm">Add &amp; Configure</button>
+        <button class="btn" data-click="sapClose">Cancel</button>
       </div>
     </div>
   </div>
@@ -572,8 +572,8 @@
       <div style="font-size:1.2rem;font-weight:700;margin-bottom:1rem"><span data-icon="pencil"></span> Edit Sensor</div>
       <div id="sep-fields"></div>
       <div style="display:flex;gap:.5rem;margin-top:1.25rem">
-        <button class="btn btn-primary" data-click="sepConfirm"><span data-icon="save"></span> Save</button>
-        <button class="btn btn-secondary" data-click="sepClose">Cancel</button>
+        <button class="btn primary" data-click="sepConfirm"><span data-icon="save"></span> Save</button>
+        <button class="btn" data-click="sepClose">Cancel</button>
       </div>
     </div>
   </div>
@@ -597,7 +597,7 @@
         <tr><td style="padding:.3rem .6rem"><kbd>D</kbd></td><td>Toggle dark / light theme</td></tr>
       </table>
       <div style="margin-top:1rem;text-align:right">
-        <button class="btn btn-secondary" data-click="hidePopup" data-args='["kbPopup"]'>Close</button>
+        <button class="btn" data-click="hidePopup" data-args='["kbPopup"]'>Close</button>
       </div>
     </div>
   </div>

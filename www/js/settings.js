@@ -87,7 +87,7 @@ function toggleManualId(id) {
 //   fetch('/api/changelog') → render ## sections → first block highlighted
 // ============================================================================
 
-// Matches original: onclick="changelogToggle()" on card-header
+// Matches original: onclick="changelogToggle()" on card-head
 function changelogToggle() {
   var el = document.getElementById("changelog");
   if (!el) return;
@@ -172,7 +172,7 @@ function changelogLoad() {
       changelogLoaded = false; // allow retry on next open
       el.innerHTML =
         "<div style='display:flex;justify-content:flex-end;margin-bottom:.5rem'>" +
-        '<button type="button" class="btn btn-secondary btn-sm" data-click="changelogClose">✖ Close</button></div>' +
+        '<button type="button" class="btn btn-sm" data-click="changelogClose">✖ Close</button></div>' +
         "<div class='alert alert-warning'>Changelog not found. Upload <code>/changelog.txt</code> to LittleFS.</div>";
     });
 }
@@ -1038,7 +1038,7 @@ function dlLoadFiles() {
           html +=
             ' <button data-click="dlDeleteFile" data-args="' +
             esc(JSON.stringify([f.path])) +
-            '" class=\'btn btn-sm btn-danger\'>🗑️</button>';
+            '" class=\'btn\'>🗑️</button>';
         }
         html += "</span></div>";
       });
@@ -1445,7 +1445,7 @@ var Modules = (function () {
   function renderField(f, data) {
     var id = f.id;
     var val = (data && id in data) ? data[id] : "";
-    var cls = "form-input";
+    var cls = "input";
     var input;
 
     if (f.type === "bool") {
@@ -1453,7 +1453,7 @@ var Modules = (function () {
       // checkboxes honour conditional visibility (e.g. WiFiModule's
       // `useStaticIP` toggling the IPv4 field group).
       input =
-        '<label class="form-label">' +
+        '<label class="field-label">' +
           '<input type="checkbox" name="' + escAttr(id) + '"' +
           (val ? " checked" : "") + '> ' + escAttr(f.label || id) +
         '</label>';
@@ -1463,7 +1463,7 @@ var Modules = (function () {
                (String(val) === String(o.v) ? " selected" : "") + '>' +
                escAttr(o.l) + '</option>';
       }).join("");
-      input = '<select class="' + cls + ' form-select" name="' +
+      input = '<select class="' + cls + ' input" name="' +
               escAttr(id) + '">' + opts + '</select>';
     } else if (f.type === "color") {
       input = '<input type="color" class="' + cls + '" name="' +
@@ -1491,8 +1491,8 @@ var Modules = (function () {
       ? ' data-showif="' + esc(JSON.stringify(f.showIf)) + '"'
       : "";
     return (
-      '<div class="form-group" data-field="' + escAttr(id) + '"' + showIf + '>' +
-        (f.label ? '<label class="form-label">' + escAttr(f.label) + '</label>' : '') +
+      '<div class="field" data-field="' + escAttr(id) + '"' + showIf + '>' +
+        (f.label ? '<label class="field-label">' + escAttr(f.label) + '</label>' : '') +
         input +
       '</div>'
     );
@@ -1563,7 +1563,7 @@ var Modules = (function () {
     host.innerHTML = list.map(function (m) {
       var active = (current === m.id) ? " active" : "";
       return (
-        '<button class="btn btn-sm btn-secondary tab' + active + '"' +
+        '<button class="btn tab' + active + '"' +
         ' data-click="modulesSelect"' +
         ' data-args="' + esc(JSON.stringify([m.id])) + '">' +
           escAttr(m.name) +
@@ -1578,7 +1578,7 @@ var Modules = (function () {
     if (!host) return;
     if (!detail.hasUI || !detail.schema) {
       host.innerHTML =
-        '<p class="form-hint">' +
+        '<p class="hint">' +
           'This module has no form. ' +
           (detail.config
             ? '<pre>' + esc(JSON.stringify(detail.config, null, 2)) + '</pre>'
@@ -1589,7 +1589,7 @@ var Modules = (function () {
     var schema;
     try { schema = JSON.parse(detail.schema); }
     catch (e) {
-      host.innerHTML = '<p class="form-hint">Bad schema JSON.</p>';
+      host.innerHTML = '<p class="hint">Bad schema JSON.</p>';
       return;
     }
     var fields = (schema.fields || [])
@@ -1597,14 +1597,14 @@ var Modules = (function () {
       .join("");
     host.innerHTML =
       '<form id="mod-form">' +
-        '<div class="form-group">' +
-          '<label class="form-label">' +
+        '<div class="field">' +
+          '<label class="field-label">' +
             '<input type="checkbox" name="__enabled"' +
             (detail.enabled ? " checked" : "") + '> Enabled' +
           '</label>' +
         '</div>' +
         fields +
-        '<button type="submit" class="btn btn-primary btn-block">💾 Save</button>' +
+        '<button type="submit" class="btn primary btn-block">💾 Save</button>' +
       '</form>';
     var form = document.getElementById("mod-form");
     applyShowIf(form);
@@ -1639,7 +1639,7 @@ var Modules = (function () {
     loadList().then(function (list) {
       if (!list || !list.length) {
         var h = document.getElementById("mod-host");
-        if (h) h.innerHTML = '<p class="form-hint">No modules registered.</p>';
+        if (h) h.innerHTML = '<p class="hint">No modules registered.</p>';
         return;
       }
       current = list[0].id;

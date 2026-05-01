@@ -672,10 +672,10 @@ function clRenderSensors(sensors) {
         pinInfo +
         "</div>" +
         "</div>" +
-        '<button type="button" class="btn btn-sm btn-secondary" data-click="clEditSensor" data-args="[' +
+        '<button type="button" class="btn" data-click="clEditSensor" data-args="[' +
         i +
         ']">✏️</button>' +
-        '<button type="button" class="btn btn-sm btn-danger"   data-click="clRemoveSensor" data-args="[' +
+        '<button type="button" class="btn"   data-click="clRemoveSensor" data-args="[' +
         i +
         ']">🗑</button>' +
         "</div>"
@@ -735,7 +735,7 @@ function clAddSensor() {
   t.textContent = "Select Sensor Type";
   var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   CL_SENSOR_TYPES.forEach(function(st) {
-    html += '<button class="btn btn-secondary" style="text-align:left;height:auto;padding:10px;display:flex;flex-direction:column;gap:4px" data-click="clDoAddSensor" data-args="' + esc(JSON.stringify([st.value])) + '">'
+    html += '<button class="btn" style="text-align:left;height:auto;padding:10px;display:flex;flex-direction:column;gap:4px" data-click="clDoAddSensor" data-args="' + esc(JSON.stringify([st.value])) + '">'
           + '<strong style="color:var(--text)">' + esc(st.value) + '</strong><span style="font-size:0.8rem;color:var(--text-muted)">' + esc(st.label) + '</span></button>';
   });
   html += '</div>';
@@ -802,7 +802,7 @@ function _sepPinSelect(elemId, currentVal, usedPins, allowNone, adcOnly) {
             + (isDisabled  ? ' disabled' : '')
             + '>' + p.label + suffix + '</option>';
     });
-    return '<select id="' + elemId + '" class="form-input form-select">' + opts + '</select>';
+    return '<select id="' + elemId + '" class="input">' + opts + '</select>';
 }
 
 function clEditSensor(idx) {
@@ -820,39 +820,39 @@ function clEditSensor(idx) {
   var html = '<form id="sensorEditForm" data-submit="clSaveEditedSensor">';
   
   // ID
-  html += '<div class="form-group"><label class="form-label">Sensor ID</label>' +
-          '<input type="text" name="id" class="form-input" value="' + esc(s.id || '') + '"></div>';
+  html += '<div class="field"><label class="field-label">Sensor ID</label>' +
+          '<input type="text" name="id" class="input" value="' + esc(s.id || '') + '"></div>';
           
   // Enabled
-  html += '<div class="form-group"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" name="enabled"' + (s.enabled ? ' checked' : '') + '> Enabled</label></div>';
+  html += '<div class="field"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" name="enabled"' + (s.enabled ? ' checked' : '') + '> Enabled</label></div>';
   
   // Read Interval
-  html += '<div class="form-group"><label class="form-label">Read Interval (ms)</label>' +
-          '<input type="number" step="100" name="read_interval_ms" class="form-input" value="' + (s.read_interval_ms || 10000) + '"></div>';
+  html += '<div class="field"><label class="field-label">Read Interval (ms)</label>' +
+          '<input type="number" step="100" name="read_interval_ms" class="input" value="' + (s.read_interval_ms || 10000) + '"></div>';
 
   if (s.interface === "i2c") {
-    html += '<div class="form-row">' +
-            '<div class="form-group"><label class="form-label">SDA Pin</label><input type="number" name="sda" class="form-input" value="' + (s.sda !== undefined ? s.sda : 6) + '"></div>' +
-            '<div class="form-group"><label class="form-label">SCL Pin</label><input type="number" name="scl" class="form-input" value="' + (s.scl !== undefined ? s.scl : 7) + '"></div>' +
+    html += '<div class="form-grid">' +
+            '<div class="field"><label class="field-label">SDA Pin</label><input type="number" name="sda" class="input" value="' + (s.sda !== undefined ? s.sda : 6) + '"></div>' +
+            '<div class="field"><label class="field-label">SCL Pin</label><input type="number" name="scl" class="input" value="' + (s.scl !== undefined ? s.scl : 7) + '"></div>' +
             '</div>';
   } else if (s.interface === "uart") {
-    html += '<div class="form-row">' +
-            '<div class="form-group"><label class="form-label">RX Pin</label><input type="number" name="uart_rx" class="form-input" value="' + (s.uart_rx !== undefined ? s.uart_rx : 20) + '"></div>' +
-            '<div class="form-group"><label class="form-label">TX Pin</label><input type="number" name="uart_tx" class="form-input" value="' + (s.uart_tx !== undefined ? s.uart_tx : -1) + '"></div>' +
+    html += '<div class="form-grid">' +
+            '<div class="field"><label class="field-label">RX Pin</label><input type="number" name="uart_rx" class="input" value="' + (s.uart_rx !== undefined ? s.uart_rx : 20) + '"></div>' +
+            '<div class="field"><label class="field-label">TX Pin</label><input type="number" name="uart_tx" class="input" value="' + (s.uart_tx !== undefined ? s.uart_tx : -1) + '"></div>' +
             '</div>';
-    html += '<div class="form-group"><label class="form-label">Baud Rate</label><select name="baud" class="form-input form-select">' +
+    html += '<div class="field"><label class="field-label">Baud Rate</label><select name="baud" class="input">' +
             '<option value="9600"' + (s.baud == 9600 ? ' selected' : '') + '>9600</option>' +
             '<option value="19200"' + (s.baud == 19200 ? ' selected' : '') + '>19200</option>' +
             '<option value="38400"' + (s.baud == 38400 ? ' selected' : '') + '>38400</option>' +
             '<option value="115200"' + (s.baud == 115200 ? ' selected' : '') + '>115200</option>' +
             '</select></div>';
     if (s.type === "sds011") {
-      html += '<div class="form-group"><label class="form-label">Working Period (minutes)</label>' +
-              '<input type="number" min="0" max="30" name="work_period_min" class="form-input" value="' + (s.work_period_min !== undefined ? s.work_period_min : 1) + '">' +
-              '<p class="form-hint">0 = Continuous. 1-30 = Sensor sleeps and wakes automatically.</p></div>';
+      html += '<div class="field"><label class="field-label">Working Period (minutes)</label>' +
+              '<input type="number" min="0" max="30" name="work_period_min" class="input" value="' + (s.work_period_min !== undefined ? s.work_period_min : 1) + '">' +
+              '<p class="hint">0 = Continuous. 1-30 = Sensor sleeps and wakes automatically.</p></div>';
     }
   } else if (s.interface === "pulse") {
-    html += '<div class="form-group"><label class="form-label">Pin</label><input type="number" name="pin" class="form-input" value="' + (s.pin !== undefined ? s.pin : 9) + '"></div>';
+    html += '<div class="field"><label class="field-label">Pin</label><input type="number" name="pin" class="input" value="' + (s.pin !== undefined ? s.pin : 9) + '"></div>';
   }
 
   // Support for custom JSON fields (advanced)
@@ -862,9 +862,9 @@ function clEditSensor(idx) {
     if (stdKeys.indexOf(k) === -1) advObj[k] = s[k];
   }
   var advStr = Object.keys(advObj).length > 0 ? JSON.stringify(advObj) : "{}";
-  html += '<div class="form-group" style="margin-top:1rem"><label class="form-label">Advanced (JSON overlay)</label>' +
-          '<input type="text" name="advanced" class="form-input" value=\'' + advStr.replace(/'/g, "&apos;") + '\'>' +
-          '<p class="form-hint">Additional parameters applied directly to this sensor. Keep as {} if unsure.</p></div>';
+  html += '<div class="field" style="margin-top:1rem"><label class="field-label">Advanced (JSON overlay)</label>' +
+          '<input type="text" name="advanced" class="input" value=\'' + advStr.replace(/'/g, "&apos;") + '\'>' +
+          '<p class="hint">Additional parameters applied directly to this sensor. Keep as {} if unsure.</p></div>';
 
   html += '</form>';
   
@@ -1092,17 +1092,17 @@ function expLoad() {
         "wind_speed",
       ];
       osmDiv.innerHTML =
-        '<div class="form-row" style="flex-wrap:wrap">' +
+        '<div class="form-grid" style="flex-wrap:wrap">' +
         metrics
           .map(function (m) {
             return (
-              '<div class="form-group" style="min-width:180px">' +
-              '<label class="form-label">' +
+              '<div class="field" style="min-width:180px">' +
+              '<label class="field-label">' +
               m +
               "</label>" +
               '<input type="text" id="osm-id-' +
               m +
-              '" class="form-input" value="' +
+              '" class="input" value="' +
               (ids[m] || "") +
               '" placeholder="sensor ID…">' +
               "</div>"
