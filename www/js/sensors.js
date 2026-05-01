@@ -559,9 +559,29 @@ function clLoad() {
     msg.className = "";
   }
   pcfgLoad(function (cfg) {
-    // Mode
+    // Mode — hidden <select> drives the form, .mode-card grid is the UI.
     var modeEl = document.getElementById("cl-mode");
-    if (modeEl) modeEl.value = cfg.mode || "legacy";
+    var mode = cfg.mode || "legacy";
+    if (modeEl) modeEl.value = mode;
+    document.querySelectorAll(".mode-card").forEach(function (card) {
+      var on = card.getAttribute("data-mode") === mode;
+      card.classList.toggle("selected", on);
+      var radio = card.querySelector("input[type=radio]");
+      if (radio) radio.checked = on;
+      if (!card._wired) {
+        card._wired = true;
+        card.addEventListener("click", function () {
+          var v = card.getAttribute("data-mode");
+          var sel = document.getElementById("cl-mode");
+          if (sel) { sel.value = v; sel.dispatchEvent(new Event("change")); }
+          document.querySelectorAll(".mode-card").forEach(function (c) {
+            c.classList.toggle("selected", c === card);
+            var r = c.querySelector("input[type=radio]");
+            if (r) r.checked = c === card;
+          });
+        });
+      }
+    });
 
     // Aggregation defaults
     var agg = cfg.aggregation || {};

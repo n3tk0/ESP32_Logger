@@ -172,7 +172,7 @@ function changelogLoad() {
       changelogLoaded = false; // allow retry on next open
       el.innerHTML =
         "<div style='display:flex;justify-content:flex-end;margin-bottom:.5rem'>" +
-        '<button type="button" class="btn btn-sm" data-click="changelogClose">✖ Close</button></div>' +
+        '<button type="button" class="btn" data-click="changelogClose">✖ Close</button></div>' +
         "<div class='alert alert-warning'>Changelog not found. Upload <code>/changelog.txt</code> to LittleFS.</div>";
     });
 }
@@ -298,6 +298,21 @@ function hwInit() {
 // ══ SETTINGS: THEME ══
 // ============================================================================
 function thInit() {
+  // Wire .seg buttons → hidden #th-mode select.  Done once per init.
+  var seg = document.getElementById("th-mode-seg");
+  if (seg && !seg._wired) {
+    seg._wired = true;
+    seg.querySelectorAll("button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var v = b.getAttribute("data-v");
+        seg.querySelectorAll("button").forEach(function (x) {
+          x.classList.toggle("active", x === b);
+        });
+        var sel = document.getElementById("th-mode");
+        if (sel) { sel.value = v; sel.dispatchEvent(new Event("change")); }
+      });
+    });
+  }
   fetch("/export_settings")
     .then(function (r) {
       return r.json();
@@ -307,6 +322,9 @@ function thInit() {
       var th = d.theme || {};
       var mode = th.mode !== undefined ? th.mode : 0;
       setVal("th-mode", mode);
+      if (seg) seg.querySelectorAll("button").forEach(function (b) {
+        b.classList.toggle("active", String(b.getAttribute("data-v")) === String(mode));
+      });
       setChk("th-icons", th.showIcons);
 
       var isDark =
@@ -1157,11 +1175,13 @@ function otaFileSelected() {
   var fileInput = document.getElementById("fwFile");
   var uploadBtn = document.getElementById("otaUploadBtn");
   var fileInfo = document.getElementById("otaFileInfo");
+  var dropzone = fileInput && fileInput.closest(".dropzone");
   var file = fileInput.files[0];
 
   if (!file) {
     uploadBtn.disabled = true;
-    fileInfo.style.display = "none";
+    if (fileInfo) fileInfo.textContent = "";
+    if (dropzone) dropzone.classList.remove("has-file");
     return;
   }
 
@@ -1171,9 +1191,9 @@ function otaFileSelected() {
   if (file.size < 10000) errors.push("File too small (min 10KB)");
 
   if (errors.length > 0) {
-    fileInfo.innerHTML =
-      '<span style="color:#c00">❌ ' + errors.join("<br>") + "</span>";
-    fileInfo.style.display = "block";
+    if (fileInfo) fileInfo.innerHTML =
+      '<span style="color:var(--err)">' + errors.join("<br>") + "</span>";
+    if (dropzone) dropzone.classList.add("has-file");
     uploadBtn.disabled = true;
     return;
   }
@@ -1182,19 +1202,15 @@ function otaFileSelected() {
   reader.onload = function (e) {
     var arr = new Uint8Array(e.target.result);
     if (arr[0] !== 0xe9) {
-      fileInfo.innerHTML =
-        '<span style="color:#c00">❌ Invalid firmware file (wrong magic byte)</span>';
-      fileInfo.style.display = "block";
+      if (fileInfo) fileInfo.innerHTML =
+        '<span style="color:var(--err)">Invalid firmware (wrong magic byte)</span>';
+      if (dropzone) dropzone.classList.add("has-file");
       uploadBtn.disabled = true;
       return;
     }
-    fileInfo.innerHTML =
-      '<span style="color:#080">✅ ' +
-      esc(file.name) +
-      " (" +
-      Math.round(file.size / 1024) +
-      "KB)</span>";
-    fileInfo.style.display = "block";
+    if (fileInfo) fileInfo.textContent =
+      file.name + " (" + Math.round(file.size / 1024) + " KB)";
+    if (dropzone) dropzone.classList.add("has-file");
     uploadBtn.disabled = false;
   };
   reader.readAsArrayBuffer(file.slice(0, 4));
@@ -1296,7 +1312,9 @@ function otaUpload() {
     if (e.lengthComputable) {
       var pct = Math.round((e.loaded / e.total) * 100);
       if (progressBar) progressBar.style.width = pct + "%";
-      if (progressText) progressText.textContent = pct + "%";
+      if (progressText) progressText.textContent = "Uploading firmware…";
+      var progressPct = document.getElementById("otaProgressPct");
+      if (progressPct) progressPct.textContent = pct + "%";
       otaUpdatePopupProgress(
         pct,
         Math.round(e.loaded / 1024) +
@@ -1604,7 +1622,7 @@ var Modules = (function () {
           '</label>' +
         '</div>' +
         fields +
-        '<button type="submit" class="btn primary btn-block">💾 Save</button>' +
+        '<button type="submit" class="btn primary">💾 Save</button>' +
       '</form>';
     var form = document.getElementById("mod-form");
     applyShowIf(form);

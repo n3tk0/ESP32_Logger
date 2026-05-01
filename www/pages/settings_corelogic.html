@@ -10,24 +10,32 @@
 
     <!-- Operating Mode -->
     <div class="card">
-      <div class="card-head"><span data-icon="settings"></span> Operating Mode</div>
+      <div class="card-head"><div class="card-title"><span data-icon="settings"></span> Operating mode</div></div>
       <div class="card-body">
-        <div class="field">
-          <label class="field-label">
-            Mode
-            <span class="help-tip" title="Controls whether the FreeRTOS sensor pipeline runs alongside the water-logger.">ℹ️</span>
+        <div class="mode-grid">
+          <label class="mode-card" data-mode="legacy">
+            <input type="radio" name="cl-mode-radio" value="legacy">
+            <div class="mode-h"><span data-icon="moon"></span> Legacy</div>
+            <div class="mode-d">Original water-logger behaviour. Deep-sleep between events.</div>
+            <div class="mode-tag mono">DEFAULT</div>
           </label>
-          <select id="cl-mode" class="input" data-change="clUpdateSleepPanel">
-            <option value="legacy">Legacy — Water logger only (deep sleep, original behaviour)</option>
-            <option value="continuous">Continuous — Multi-sensor pipeline (FreeRTOS tasks, no deep sleep)</option>
-            <option value="hybrid">Hybrid — Water logger + sensor pipeline</option>
-          </select>
-          <p class="hint">
-            <strong>Legacy</strong>: original behaviour unchanged, deep-sleep between events.<br>
-            <strong>Continuous</strong>: all sensors polled continuously; device stays awake.<br>
-            <strong>Hybrid</strong>: both modes active simultaneously.
-          </p>
+          <label class="mode-card" data-mode="continuous">
+            <input type="radio" name="cl-mode-radio" value="continuous">
+            <div class="mode-h"><span data-icon="activity"></span> Continuous</div>
+            <div class="mode-d">FreeRTOS pipeline runs all sensors. No deep sleep.</div>
+            <div class="mode-tag mono">RECOMMENDED</div>
+          </label>
+          <label class="mode-card" data-mode="hybrid">
+            <input type="radio" name="cl-mode-radio" value="hybrid">
+            <div class="mode-h"><span data-icon="layers"></span> Hybrid</div>
+            <div class="mode-d">Water logger + sensor pipeline running together.</div>
+          </label>
         </div>
+        <select id="cl-mode" class="input" style="display:none" data-change="clUpdateSleepPanel">
+          <option value="legacy">Legacy</option>
+          <option value="continuous">Continuous</option>
+          <option value="hybrid">Hybrid</option>
+        </select>
       </div>
     </div>
 

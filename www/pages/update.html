@@ -21,46 +21,55 @@
       </div>
     </div>
 
-    <!-- Current firmware -->
-    <div class="card">
-      <div class="card-head"><span data-icon="file-text"></span> Current Firmware</div>
-      <div class="card-body">
-        <div class="form-grid">
-          <div><strong>Version</strong>
-            <div class="text-primary" id="ota-currentVer">–</div>
-          </div>
-          <div><strong>Device</strong>
-            <div id="fwDevice">–</div>
-          </div>
-          <div><strong>Heap</strong>
-            <div id="fwHeap">–</div>
-          </div>
-          <div><strong>Storage</strong>
-            <div id="fwStorage">–</div>
-          </div>
-        </div>
+    <div class="grid grid-4">
+      <div class="kpi">
+        <div class="kpi-l"><span data-icon="info"></span> Version</div>
+        <div class="kpi-v"><span class="num" id="ota-currentVer" style="font-size:18px">–</span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-l"><span data-icon="cpu"></span> Device</div>
+        <div class="kpi-v"><span class="num" id="fwDevice" style="font-size:18px">–</span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-l"><span data-icon="memory-stick"></span> Free heap</div>
+        <div class="kpi-v"><span class="num" id="fwHeap" style="font-size:18px">–</span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-l"><span data-icon="hard-drive"></span> Storage</div>
+        <div class="kpi-v"><span class="num" id="fwStorage" style="font-size:18px">–</span></div>
       </div>
     </div>
 
-    <!-- Upload new firmware -->
-    <div class="card">
-      <div class="card-head"><span data-icon="cloud-upload"></span> Upload Firmware (.bin)</div>
+    <div class="card" style="margin-top:var(--gap)">
+      <div class="card-head"><div class="card-title"><span data-icon="upload-cloud"></span> Upload firmware</div></div>
       <div class="card-body">
-        <div class="alert alert-warning"><span data-icon="alert-triangle"></span> Upload the correct .bin file. Wrong firmware will require USB recovery.
+        <div class="alert alert-warning" style="margin-bottom:14px">
+          <span data-icon="alert-triangle"></span>
+          Upload the correct <code>.bin</code> file. Wrong firmware will require USB recovery.
         </div>
         <form id="otaForm" data-submit="otaUpload">
-          <div class="field">
-            <input type="file" id="fwFile" name="update" accept=".bin" class="input" required
-              data-change="otaFileSelected">
+          <label class="dropzone" for="fwFile">
+            <span class="drop-idle" style="display:flex;flex-direction:column;align-items:center;gap:6px">
+              <span data-icon="upload-cloud" style="width:32px;height:32px"></span>
+              <strong>Choose firmware (.bin)</strong>
+              <span style="font-size:11px;color:var(--text-3)">or drag &amp; drop here</span>
+            </span>
+            <span class="drop-ready">
+              <span data-icon="file-archive" style="width:24px;height:24px;color:var(--accent)"></span>
+              <span id="otaFileInfo" class="mono" style="font-size:12px"></span>
+            </span>
+            <input type="file" id="fwFile" name="update" accept=".bin" required data-change="otaFileSelected" style="position:absolute;opacity:0;width:0;height:0">
+          </label>
+          <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+            <button type="submit" id="otaUploadBtn" class="btn primary" disabled><span data-icon="rocket"></span> Flash firmware</button>
           </div>
-          <div id="otaFileInfo" class="alert" style="display:none;margin-bottom:1rem;"></div>
-          <button type="submit" id="otaUploadBtn" class="btn btn-block" style="background:var(--err);color:#fff;border-color:var(--err)" disabled><span data-icon="rocket"></span> Flash Firmware</button>
         </form>
-        <div id="otaProgress" style="display:none;margin-top:1rem">
-          <div style="background:#e0e0e0;border-radius:4px;height:24px;overflow:hidden">
-            <div id="otaProgressBar" style="width:0%;height:100%;background:#27ae60;transition:width .3s"></div>
+        <div id="otaProgress" class="ota-progress" style="display:none">
+          <div class="ota-status" id="otaProgressText">Preparing…</div>
+          <div class="ota-bar-wrap">
+            <div class="ota-bar"><span id="otaProgressBar" style="width:0%"></span></div>
+            <span class="ota-pct" id="otaProgressPct">0%</span>
           </div>
-          <p id="otaProgressText" class="text-center mt-1" style="font-weight:bold;">0%</p>
         </div>
       </div>
     </div>
