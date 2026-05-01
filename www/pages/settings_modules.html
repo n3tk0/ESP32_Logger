@@ -1,21 +1,21 @@
   <main class="main-content page" id="page-settings_modules">
     <div class="page-head">
-      <h1><span data-icon="layers"></span> Modules <span class="badge badge-info">preview</span></h1>
-      <div class="page-sub"><a href="#settings">Settings</a> / Modules
+      <div>
+        <h1 class="page-title"><span data-icon="layers"></span> Modules <span class="badge dim" style="margin-left:8px">preview</span></h1>
+        <div class="page-sub"><a href="#settings">Settings</a> / Modules</div>
       </div>
     </div>
 
     <div class="card">
+      <div class="card-head"><div class="card-title"><span data-icon="puzzle"></span> Schema-driven modules</div></div>
       <div class="card-body">
-        <p class="hint">
-          Schema-driven module configuration (Pass 5). The tab strip below is
-          built from <code>/api/modules</code>; each form is rendered from the
-          module's embedded JSON schema and saves via <code>POST /api/modules/:id</code>.
-          The legacy <em>Settings → Network</em> and <em>Settings → Theme</em> pages still
-          work and remain the recommended UI until all modules are ported.
+        <p class="hint" style="margin-bottom:14px">
+          Tab strip is built from <code>/api/modules</code>; each form is rendered
+          from the module's embedded JSON schema and saves via
+          <code>POST /api/modules/:id</code>. The legacy <em>Network</em> and
+          <em>Theme</em> pages remain the recommended UI until all modules are ported.
         </p>
-
-        <div id="mod-tabs" class="tab-strip" role="tablist"></div>
+        <div id="mod-tabs" class="seg" role="tablist" style="margin-bottom:14px"></div>
         <div id="mod-msg"></div>
         <div id="mod-host"></div>
       </div>

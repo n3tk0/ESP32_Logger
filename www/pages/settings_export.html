@@ -11,10 +11,8 @@
     <!-- MQTT -->
     <div class="card">
       <div class="card-head">
-        <span>🔗 MQTT</span>
-        <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
-          <input type="checkbox" id="exp-mqtt-en"> Enable
-        </label>
+        <div class="card-title"><span data-icon="link"></span> MQTT</div>
+        <label class="switch"><input type="checkbox" id="exp-mqtt-en"><span></span></label>
       </div>
       <div class="card-body">
         <p class="hint" style="margin-bottom:.75rem">
@@ -57,10 +55,8 @@
             <input type="number" id="exp-mqtt-interval" class="input" value="60000" step="1000">
             <p class="hint">How often to flush batched readings. Default 60 000 ms.</p>
           </div>
-          <div class="field" style="padding-top:1.5rem">
-            <label style="display:flex;gap:.4rem;align-items:center;cursor:pointer">
-              <input type="checkbox" id="exp-mqtt-retain"> Retain messages
-            </label>
+          <div class="field" style="justify-content:flex-end">
+            <label class="check"><input type="checkbox" id="exp-mqtt-retain"><span>Retain messages</span></label>
           </div>
         </div>
       </div>
@@ -69,10 +65,8 @@
     <!-- HTTP POST -->
     <div class="card">
       <div class="card-head">
-        <span><span data-icon="globe"></span> HTTP POST</span>
-        <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
-          <input type="checkbox" id="exp-http-en"> Enable
-        </label>
+        <div class="card-title"><span data-icon="globe"></span> HTTP POST</div>
+        <label class="switch"><input type="checkbox" id="exp-http-en"><span></span></label>
       </div>
       <div class="card-body">
         <p class="hint" style="margin-bottom:.75rem">
@@ -98,10 +92,8 @@
     <!-- Sensor.Community -->
     <div class="card">
       <div class="card-head">
-        <span><span data-icon="globe"></span> Sensor.Community</span>
-        <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
-          <input type="checkbox" id="exp-sc-en"> Enable
-        </label>
+        <div class="card-title"><span data-icon="cloud-fog"></span> Sensor.Community</div>
+        <label class="switch"><input type="checkbox" id="exp-sc-en"><span></span></label>
       </div>
       <div class="card-body">
         <p class="hint">
@@ -121,10 +113,8 @@
     <!-- openSenseMap -->
     <div class="card">
       <div class="card-head">
-        <span>🗺️ openSenseMap</span>
-        <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
-          <input type="checkbox" id="exp-osm-en"> Enable
-        </label>
+        <div class="card-title"><span data-icon="globe"></span> openSenseMap</div>
+        <label class="switch"><input type="checkbox" id="exp-osm-en"><span></span></label>
       </div>
       <div class="card-body">
         <p class="hint" style="margin-bottom:.75rem">

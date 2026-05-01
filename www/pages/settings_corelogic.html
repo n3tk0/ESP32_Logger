@@ -41,7 +41,7 @@
 
     <!-- Power & Sleep (shown only for continuous / hybrid) -->
     <div class="card" id="cl-sleep-card" style="display:none">
-      <div class="card-head">💤 Power &amp; Sleep</div>
+      <div class="card-head"><div class="card-title"><span data-icon="moon"></span> Power &amp; Sleep</div></div>
       <div class="card-body">
 
         <!-- Continuous-mode settings -->
@@ -110,7 +110,7 @@
 
     <!-- Aggregation defaults -->
     <div class="card">
-      <div class="card-head"><span data-icon="bar-chart-3"></span> Aggregation Defaults</div>
+      <div class="card-head"><div class="card-title"><span data-icon="bar-chart-3"></span> Aggregation Defaults</div></div>
       <div class="card-body">
         <div class="form-grid">
           <div class="field">
@@ -147,25 +147,17 @@
 
     <!-- Export -->
     <div class="card">
-      <div class="card-head"><span data-icon="cloud-upload"></span> Export Quick-Enable</div>
+      <div class="card-head"><div class="card-title"><span data-icon="cloud-upload"></span> Export Quick-Enable</div></div>
       <div class="card-body">
         <p class="hint" style="margin-bottom:.75rem">
           Enable export targets. Full configuration is in the
           <a href="#settings_export">Export settings</a>.
         </p>
-        <div class="form-grid" style="gap:.5rem">
-          <label class="field-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
-            <input type="checkbox" id="cl-exp-mqtt"> MQTT
-          </label>
-          <label class="field-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
-            <input type="checkbox" id="cl-exp-http"> HTTP POST
-          </label>
-          <label class="field-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
-            <input type="checkbox" id="cl-exp-sc"> Sensor.Community
-          </label>
-          <label class="field-label" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
-            <input type="checkbox" id="cl-exp-osm"> openSenseMap
-          </label>
+        <div class="form-grid" style="gap:8px">
+          <label class="check"><input type="checkbox" id="cl-exp-mqtt"><span>MQTT</span></label>
+          <label class="check"><input type="checkbox" id="cl-exp-http"><span>HTTP POST</span></label>
+          <label class="check"><input type="checkbox" id="cl-exp-sc"><span>Sensor.Community</span></label>
+          <label class="check"><input type="checkbox" id="cl-exp-osm"><span>openSenseMap</span></label>
         </div>
       </div>
     </div>

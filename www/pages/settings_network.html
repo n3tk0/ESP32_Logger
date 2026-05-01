@@ -20,7 +20,7 @@
       <div id="net-msg"></div>
       <!-- WiFi Mode -->
       <div class="card">
-        <div class="card-head"><span data-icon="wifi"></span> WiFi Mode</div>
+        <div class="card-head"><div class="card-title"><span data-icon="wifi"></span> WiFi Mode</div></div>
         <div class="card-body">
           <div class="field">
             <select name="wifiMode" id="net-mode" class="input" data-change="netToggleMode">
@@ -34,7 +34,7 @@
       <!-- AP Settings -->
       <div id="apSection">
         <div class="card">
-          <div class="card-head">📶 AP Mode</div>
+          <div class="card-head"><div class="card-title"><span data-icon="wifi"></span> AP Mode</div></div>
           <div class="card-body">
             <div class="field"><label class="field-label">SSID</label>
               <input type="text" name="apSSID" id="net-apSSID" placeholder="WaterLogger" class="input">
@@ -48,7 +48,7 @@
           </div>
         </div>
         <div class="card">
-          <div class="card-head"><span data-icon="wrench"></span> AP Network Properties</div>
+          <div class="card-head"><div class="card-title"><span data-icon="wrench"></span> AP Network Properties</div></div>
           <div class="card-body">
             <div class="form-grid">
               <div class="field"><label class="field-label">IP Address</label><input type="text" name="apIP"
@@ -65,7 +65,7 @@
       <!-- Client Settings -->
       <div id="clientSection" style="display:none">
         <div class="card">
-          <div class="card-head">🔗 Client Mode</div>
+          <div class="card-head"><div class="card-title"><span data-icon="link"></span> Client Mode</div></div>
           <div class="card-body">
             <div class="field"><label class="field-label">SSID</label>
               <div style="display:flex;gap:8px">
@@ -87,7 +87,7 @@
           </div>
         </div>
         <div class="card">
-          <div class="card-head"><span data-icon="wrench"></span> Client Network Properties</div>
+          <div class="card-head"><div class="card-title"><span data-icon="wrench"></span> Client Network Properties</div></div>
           <div class="card-body">
             <div class="form-grid" id="staticFields">
               <!-- Hidden fields to store current connection details when form is un-checked -->
