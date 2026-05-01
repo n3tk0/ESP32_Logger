@@ -427,12 +427,12 @@ function filesRender() {
   var tabs = document.getElementById("tabs");
   if (tabs) {
     tabs.innerHTML =
-      '<a data-click="filesSetStorage" data-args=\'["internal"]\' class="btn ' +
-      (currentFilesStorage === "internal" ? "btn-primary" : "btn-secondary") +
-      '">💾 Internal</a> ' +
-      '<a data-click="filesSetStorage" data-args=\'["sdcard"]\'   class="btn ' +
-      (currentFilesStorage === "sdcard" ? "btn-primary" : "btn-secondary") +
-      '">💳 SD Card</a>';
+      '<button data-click="filesSetStorage" data-args=\'["internal"]\' class="' +
+      (currentFilesStorage === "internal" ? "active" : "") +
+      '"><span data-icon="microchip"></span> LittleFS</button>' +
+      '<button data-click="filesSetStorage" data-args=\'["sdcard"]\' class="' +
+      (currentFilesStorage === "sdcard" ? "active" : "") +
+      '"><span data-icon="hard-drive"></span> SD Card</button>';
   }
 
   fetch(
@@ -451,26 +451,22 @@ function filesRender() {
       var bar = document.getElementById("bar");
       if (bar) {
         bar.style.width = pct + "%";
-        bar.className =
-          "progress-bar" +
-          (pct >= 90
-            ? " progress-bar-danger"
-            : pct >= 70
-              ? " progress-bar-warning"
-              : " progress-bar-success");
+        bar.className = pct >= 70 ? "warn" : "";
       }
 
-      setEl(
-        "files-dirLabel",
-        "📂 [" +
-          (currentFilesStorage === "sdcard" ? "SD" : "Int") +
-          "] " +
-          (currentFilesDir === "/" ? "Root" : currentFilesDir),
-      );
+      var lbl = document.getElementById("files-dirLabel");
+      if (lbl) {
+        lbl.innerHTML =
+          '<span class="mono">' +
+          (currentFilesStorage === "sdcard" ? "SD:" : "FS:") +
+          "</span> " + esc(currentFilesDir);
+      }
       var upBtn = document.getElementById("upBtn");
       if (upBtn) upBtn.style.display = currentFilesDir === "/" ? "none" : "";
-      var et = document.getElementById("editToggle");
-      if (et) et.textContent = filesEditMode ? "✖️ Done" : "✏️ Edit";
+      var btnEdit = document.getElementById("btnEdit");
+      var btnDone = document.getElementById("btnDone");
+      if (btnEdit) btnEdit.style.display = filesEditMode ? "none" : "";
+      if (btnDone) btnDone.style.display = filesEditMode ? "" : "none";
       var tools = document.getElementById("editTools");
       if (tools) tools.style.display = filesEditMode ? "block" : "none";
 
@@ -487,56 +483,63 @@ function filesRender() {
         return;
       }
 
-      var html = "";
+      var rows = "";
       if (d.truncated) {
-        html +=
-          "<div class='list-item text-warning' style='font-size:.8rem'>" +
-          "⚠️ Listing truncated at 500 entries \u2014 refine with a subfolder." +
-          "</div>";
+        rows +=
+          '<tr><td colspan="5" style="color:var(--warn);font-size:11.5px;padding:6px 14px">' +
+          "Listing truncated at 500 entries — refine with a subfolder." +
+          "</td></tr>";
       }
       files.forEach(function (f) {
+        var icon = f.isDir
+          ? '<span data-icon="folder"></span>'
+          : (/\.gz$/i.test(f.name)
+              ? '<span data-icon="file-archive"></span>'
+              : (/\.(jsonl?|csv|txt|log)$/i.test(f.name)
+                  ? '<span data-icon="file-text"></span>'
+                  : '<span data-icon="file"></span>'));
+        var nameCell = f.isDir
+          ? '<a class="fname dir" data-click="filesEnterDir" data-args="' +
+            esc(JSON.stringify([f.path])) + '">' + esc(f.name) + "</a>"
+          : '<span class="fname">' + esc(f.name) + "</span>";
         var actions = "";
-        if (f.isDir) {
-          actions =
-            '<a data-click="filesEnterDir" data-args="' +
-            esc(JSON.stringify([f.path])) +
-            '" class=\'btn btn-sm btn-secondary\'>📂 Open</a>';
-        } else {
+        if (!f.isDir) {
           actions +=
-            "<a href='/download?file=" +
+            '<a class="btn-mini" title="Download" href="/download?file=' +
             encodeURIComponent(f.path) +
-            "&storage=" +
-            currentFilesStorage +
-            "' class='btn btn-sm btn-secondary'>📥</a>";
-          if (filesEditMode) {
-            actions +=
-              ' <button data-click="showMovePopup" data-args="' +
-              esc(JSON.stringify([f.path, f.name])) +
-              '" class=\'btn btn-sm btn-secondary\'>✂️</button>';
-            actions +=
-              ' <button data-click="filesDelete" data-args="' +
-              esc(JSON.stringify([f.path])) +
-              '" class=\'btn btn-sm btn-danger\'>🗑️</button>';
-          }
+            "&storage=" + currentFilesStorage + '">' +
+            '<span data-icon="download"></span></a>';
         }
-        html +=
-          "<div class='list-item'><span>" +
-          (f.isDir ? "📁 " : "📄 ") +
-          esc(f.name) +
-          (f.isDir
-            ? ""
-            : ' <small class="text-muted">(' + fmtBytes(f.size) + ")</small>") +
-          "</span><span class='btn-group'>" +
-          actions +
-          "</span></div>";
+        if (filesEditMode) {
+          if (!f.isDir) {
+            actions +=
+              '<button class="btn-mini" title="Move/Rename" data-click="showMovePopup" data-args="' +
+              esc(JSON.stringify([f.path, f.name])) + '">' +
+              '<span data-icon="pencil"></span></button>';
+          }
+          actions +=
+            '<button class="btn-mini" title="Delete" data-click="filesDelete" data-args="' +
+            esc(JSON.stringify([f.path])) + '">' +
+            '<span data-icon="trash-2"></span></button>';
+        }
+        rows +=
+          '<tr><td style="width:32px">' + icon + "</td>" +
+          "<td>" + nameCell + "</td>" +
+          "<td>" + (f.isDir ? "—" : fmtBytes(f.size)) + "</td>" +
+          "<td>" + (f.modified ? esc(f.modified) : "") + "</td>" +
+          '<td><div class="row-acts">' + actions + "</div></td></tr>";
       });
-      list.innerHTML = html;
+      list.innerHTML =
+        '<table class="ftable">' +
+        "<thead><tr><th></th><th>Name</th><th>Size</th><th>Modified</th><th></th></tr></thead>" +
+        "<tbody>" + rows + "</tbody></table>";
+      if (window.Icons && Icons.swap) Icons.swap(list);
     })
     .catch(function (e) {
       var list = document.getElementById("list");
       if (list)
         list.innerHTML =
-          "<div class='list-item' style='color:red'>Error: " + e + "</div>";
+          '<div style="padding:14px;color:var(--err)">Error: ' + esc(String(e)) + "</div>";
     });
 }
 
