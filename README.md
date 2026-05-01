@@ -245,7 +245,7 @@ All routes are also reachable under **`/api/v1/<X>`** via a 307-redirect alias, 
 |---|---|---|
 | `/api/data` | GET | Query sensor readings with aggregation (params below) |
 | `/api/sensors` | GET | List all registered sensors with `status` + `read_interval_ms` |
-| `/api/sensors/read_now` | GET | Force-tick all enabled sensors |
+| /api/sensors/read_now?id=<id> | GET | Read a single non-blocking sensor by ID |
 | `/api/recent_logs` | GET | Recent flow-event log; `?since=<bootcount>` returns delta |
 | `/api/diag` | GET | Free heap, queue depths, task stats |
 | `/api/identity` / `/api/runtime` / `/api/theme` | GET | Split status (cached / polled / ETag-keyed) |
