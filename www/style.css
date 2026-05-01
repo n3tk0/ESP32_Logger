@@ -903,3 +903,59 @@ textarea.form-input { height:auto; padding:9px 11px; min-height:80px; }
 
 .skip-link    { position:absolute; top:-40px; left:0; background:var(--accent); color:#fff; padding:8px 16px; z-index:1000; }
 .skip-link:focus { top:0; }
+
+/* Shell: HTML keeps separate <aside.sidebar> + <main.main-content> instead
+   of the design's .app grid wrapper, so emulate the same layout without
+   changing the markup. */
+body { margin:0; }
+.sidebar {
+  position:fixed; top:0; left:0; bottom:0; width:228px; z-index:20;
+  border-right:1px solid var(--border);
+  display:flex; flex-direction:column;
+}
+.sidebar-header { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); min-height:54px; }
+.sidebar-header .logo { font-weight:600; font-size:14px; flex:1; }
+.sidebar-rail-btn { width:28px; height:28px; border:1px solid var(--border); background:var(--panel-2); border-radius:4px; display:grid; place-items:center; color:var(--text-3); }
+.nav-section { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-4); font-weight:700; padding:14px 14px 6px; }
+.sidebar nav { padding:0 8px; }
+.sidebar .nav-item { padding:0 10px; }
+.sidebar .nav-item .icon { width:15px; height:15px; }
+
+.main-content { margin-left:228px; padding:var(--gap); min-height:100vh; }
+.app-header   { position:sticky; top:0; left:0; right:0; height:54px; background:var(--panel); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:14px; padding:0 14px; z-index:10; margin-left:228px; }
+
+.bottom-nav   { display:none; position:fixed; bottom:0; left:0; right:0; height:56px; background:var(--panel); border-top:1px solid var(--border); z-index:30; }
+.bottom-nav .nav-item { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; height:auto; padding:0; border-radius:0; color:var(--text-3); font-size:10px; font-weight:500; border-top:2px solid transparent; }
+.bottom-nav .nav-item.active { color:var(--accent); border-top-color:var(--accent); background:transparent; }
+.bottom-nav .nav-item .icon { width:18px; height:18px; }
+
+@media (max-width:780px) {
+  .sidebar { display:none; }
+  .main-content, .app-header { margin-left:0; }
+  .bottom-nav { display:flex; }
+  .main-content { padding-bottom:72px; }
+  .hide-desktop { display:flex !important; }
+}
+@media (min-width:781px) {
+  .app-header.hide-desktop { display:none; }
+}
+
+.sidebar-rail .sidebar { width:52px; padding:0; }
+.sidebar-rail .sidebar nav { padding:0 4px; }
+.sidebar-rail .sidebar .nav-section,
+.sidebar-rail .sidebar .nav-item span:not(.icon),
+.sidebar-rail .sidebar .logo,
+.sidebar-rail .sidebar #sidebarLogo,
+.sidebar-rail .sidebar #sidebarRailBtn span { display:none; }
+.sidebar-rail .sidebar .nav-item { padding:0; justify-content:center; }
+.sidebar-rail .sidebar-header { padding:8px; min-height:42px; }
+.sidebar-rail .main-content,
+.sidebar-rail .app-header { margin-left:52px; }
+
+#bottomNav { /* legacy id */ }
+.app-header .logo img { height:28px; }
+.app-header .time { font-family:var(--mono); font-size:14px; color:var(--text-2); }
+
+.tabs { display:flex; gap:4px; }
+
+.btn.warn { background:var(--warn); color:#fff; border-color:var(--warn); }
