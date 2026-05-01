@@ -328,7 +328,7 @@ python3 tools/build_web.py [--clean]
 
 | Asset | Transform | Result |
 |---|---|---|
-| `*.html` | conservative regex minify (protects `<pre>`/`<style>`/quoted strings), gzip -9 | ~25-30 % wire size |
+| *.html | conservative regex minify (protects <pre>/<textarea>/<script>/<style>), gzip -9 | ~25-30 % wire size |
 | `*.css` | comment + whitespace strip with quote-stash, gzip -9 | ~30 % wire size |
 | `*.js` / `*.json` / `*.txt` | gzip -9 only (no parser-free JS minify) | ~30-50 % wire size |
 | binary (`*.png` / `*.ico` / `*.woff` …) | passed through | unchanged |
