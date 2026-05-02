@@ -573,7 +573,7 @@ function clLoad() {
         card.addEventListener("click", function () {
           var v = card.getAttribute("data-mode");
           var sel = document.getElementById("cl-mode");
-          if (sel) { sel.value = v; sel.dispatchEvent(new Event("change")); }
+          if (sel) { sel.value = v; sel.dispatchEvent(new Event("change", { bubbles: true })); }
           document.querySelectorAll(".mode-card").forEach(function (c) {
             c.classList.toggle("selected", c === card);
             var r = c.querySelector("input[type=radio]");
@@ -695,7 +695,7 @@ function clRenderSensors(sensors) {
         '<button type="button" class="btn" data-click="clEditSensor" data-args="[' +
         i +
         ']">✏️</button>' +
-        '<button type="button" class="btn"   data-click="clRemoveSensor" data-args="[' +
+        '<button type="button" class="btn warn" data-click="clRemoveSensor" data-args="[' +
         i +
         ']">🗑</button>' +
         "</div>"
@@ -883,7 +883,7 @@ function clEditSensor(idx) {
   }
   var advStr = Object.keys(advObj).length > 0 ? JSON.stringify(advObj) : "{}";
   html += '<div class="field" style="margin-top:1rem"><label class="field-label">Advanced (JSON overlay)</label>' +
-          '<input type="text" name="advanced" class="input" value=\'' + advStr.replace(/'/g, "&apos;") + '\'>' +
+          '<input type="text" name="advanced" class="input" value="' + esc(advStr) + '">' +
           '<p class="hint">Additional parameters applied directly to this sensor. Keep as {} if unsure.</p></div>';
 
   html += '</form>';
@@ -1123,7 +1123,7 @@ function expLoad() {
               '<input type="text" id="osm-id-' +
               m +
               '" class="input" value="' +
-              (ids[m] || "") +
+              esc(ids[m] || "") +
               '" placeholder="sensor ID…">' +
               "</div>"
             );

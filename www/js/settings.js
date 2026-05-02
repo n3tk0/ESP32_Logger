@@ -309,7 +309,7 @@ function thInit() {
           x.classList.toggle("active", x === b);
         });
         var sel = document.getElementById("th-mode");
-        if (sel) { sel.value = v; sel.dispatchEvent(new Event("change")); }
+        if (sel) { sel.value = v; sel.dispatchEvent(new Event("change", { bubbles: true })); }
       });
     });
   }
@@ -1056,7 +1056,7 @@ function dlLoadFiles() {
           html +=
             ' <button data-click="dlDeleteFile" data-args="' +
             esc(JSON.stringify([f.path])) +
-            '" class=\'btn\'>🗑️</button>';
+            '" class=\'btn warn\'>🗑️</button>';
         }
         html += "</span></div>";
       });

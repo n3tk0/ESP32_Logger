@@ -712,7 +712,7 @@ function emptyState(opts) {
   if (opts.ctaText && opts.ctaPage) {
     var btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "btn primary  empty-cta";
+    btn.className = "btn primary empty-cta";
     btn.setAttribute("data-click", "navPage");
     btn.setAttribute("data-page", opts.ctaPage);
     btn.textContent = opts.ctaText;
@@ -1021,7 +1021,7 @@ var Form = (function () {
         ]);
       }),
       h("button", {
-        type: "submit", class: "btn primary ",
+        type: "submit", class: "btn primary",
         text: schema.submitLabel || "💾 Save",
       }),
     ]);

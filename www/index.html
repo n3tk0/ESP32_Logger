@@ -153,13 +153,13 @@
         <div class="card-body">
           <div class="form-grid">
             <div class="field"><label>From</label>
-              <input type="date" id="startDate" class="input" data-change="dbApplyFilters">
+              <input type="date" id="startDate" class="input">
             </div>
             <div class="field"><label>To</label>
-              <input type="date" id="endDate" class="input" data-change="dbApplyFilters">
+              <input type="date" id="endDate" class="input">
             </div>
             <div class="field"><label>Trigger</label>
-              <select id="eventFilter" class="input" data-change="dbApplyFilters">
+              <select id="eventFilter" class="input">
                 <option value="ALL">All</option>
                 <option value="BTN">Buttons only</option>
                 <option value="FF">FF only</option>
@@ -167,7 +167,7 @@
               </select>
             </div>
             <div class="field"><label>Extra presses</label>
-              <select id="pressFilter" class="input" data-change="dbApplyFilters">
+              <select id="pressFilter" class="input">
                 <option value="ALL">All</option>
                 <option value="EXTRA">With extra</option>
                 <option value="NONE">No extra</option>
@@ -175,7 +175,7 @@
             </div>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;flex-wrap:wrap;gap:8px">
-            <label class="check"><input type="checkbox" id="excludeZero" data-change="dbApplyFilters" checked><span>Exclude 0.00 L entries</span></label>
+            <label class="check"><input type="checkbox" id="excludeZero" checked><span>Exclude 0.00 L entries</span></label>
             <button class="btn primary" data-click="dbApplyFilters"><span data-icon="check"></span> Apply</button>
           </div>
         </div>
@@ -542,7 +542,7 @@
         </div>
       </div>
       <div id="rPopButtons" style="display:flex;gap:1rem;justify-content:center">
-        <button class="btn" data-click="confirmRestart">✓ Confirm</button>
+        <button class="btn warn" data-click="confirmRestart">✓ Confirm</button>
         <button class="btn" data-click="hidePopup" data-args='["restartPopup"]'>✗
           Cancel</button>
       </div>

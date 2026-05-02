@@ -518,7 +518,7 @@ function filesRender() {
               '<span data-icon="pencil"></span></button>';
           }
           actions +=
-            '<button class="btn-mini" title="Delete" data-click="filesDelete" data-args="' +
+            '<button class="btn-mini warn" title="Delete" data-click="filesDelete" data-args="' +
             esc(JSON.stringify([f.path])) + '">' +
             '<span data-icon="trash-2"></span></button>';
         }

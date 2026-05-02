@@ -962,3 +962,5 @@ body { margin:0; }
 
 .field-label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--text-3); }
 .hint        { font-size:11px; color:var(--text-3); margin-top:3px; }
+.btn-mini.warn { color:var(--err); border-color:rgba(220,38,38,.4); }
+.btn-mini.warn:hover { background:rgba(220,38,38,.1); border-color:var(--err); }
