@@ -7,8 +7,9 @@
 #   - Release creation (attaches .bin to release assets)
 #
 # Outputs:
-#   - firmware-esp32c3.bin  (XIAO ESP32-C3, 4MB, production target)
-#   - firmware-esp32s3.bin  (ESP32-S3, 8MB)
+#   - firmware-esp32c3.bin           (XIAO ESP32-C3, 4MB, production target)
+#   - firmware-esp32c3_supermini.bin (ESP32-C3 Super Mini, 4MB, native USB JTAG)
+#   - firmware-esp32s3.bin           (ESP32-S3, 8MB)
 
 name: Build Firmware
 
@@ -18,7 +19,7 @@ on:
       - 'src/**'
       - 'include/**'
       - 'lib/**'
-      - 'Logger.ino'
+      - '*.ino'
       - 'platformio.ini'
       - 'partitions_balanced.csv'
       - '.github/workflows/build-firmware.yml'
@@ -27,7 +28,7 @@ on:
       - 'src/**'
       - 'include/**'
       - 'lib/**'
-      - 'Logger.ino'
+      - '*.ino'
       - 'platformio.ini'
       - 'partitions_balanced.csv'
   workflow_dispatch:
@@ -43,6 +44,10 @@ jobs:
         include:
           - env: xiao_esp32c3
             name: esp32c3
+            flash: 4MB
+            app_max: 1572864    # 0x180000 = 1,536 KB (from partitions_balanced.csv)
+          - env: esp32c3_supermini
+            name: esp32c3_supermini
             flash: 4MB
             app_max: 1572864    # 0x180000 = 1,536 KB (from partitions_balanced.csv)
           - env: esp32s3
@@ -101,10 +106,16 @@ jobs:
       contents: write
 
     steps:
-      - name: Download ESP32-C3 firmware
+      - name: Download XIAO ESP32-C3 firmware
         uses: actions/download-artifact@v4
         with:
           name: firmware-esp32c3
+          path: firmware/
+
+      - name: Download ESP32-C3 Super Mini firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32c3_supermini
           path: firmware/
 
       - name: Download ESP32-S3 firmware
@@ -118,4 +129,5 @@ jobs:
         with:
           files: |
             firmware/firmware-esp32c3.bin
+            firmware/firmware-esp32c3_supermini.bin
             firmware/firmware-esp32s3.bin

@@ -1,7 +1,7 @@
   <main class="main-content page" id="page-settings_device">
-    <div class="page-header">
-      <h1>📱 Device</h1>
-      <div class="breadcrumb"><a href="#settings">Settings</a> / Device
+    <div class="page-head">
+      <h1 class="page-title">📱 Device</h1>
+      <div class="page-sub"><a href="#settings">Settings</a> / Device
       </div>
     </div>
 
@@ -10,22 +10,22 @@
 
       <!-- Identity -->
       <div class="card">
-        <div class="card-header">📛 Identity</div>
+        <div class="card-head"><div class="card-title"><span data-icon="tag"></span> Identity</div></div>
         <div class="card-body">
-          <div class="form-group">
-            <label class="form-label">Device Name</label>
-            <input type="text" name="deviceName" id="sd-devName" maxlength="32" class="form-input"
+          <div class="field">
+            <label class="field-label">Device Name</label>
+            <input type="text" name="deviceName" id="sd-devName" maxlength="32" class="input"
               placeholder="Water Logger">
-            <p class="form-hint">Displayed in the sidebar, header, and browser title.</p>
+            <p class="hint">Displayed in the sidebar, header, and browser title.</p>
           </div>
-          <div class="form-group">
-            <label class="form-label">Device ID</label>
-            <p class="form-hint">Unique device identifier. Used in log filenames and CSV exports.</p>
+          <div class="field">
+            <label class="field-label">Device ID</label>
+            <p class="hint">Unique device identifier. Used in log filenames and CSV exports.</p>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <input type="text" id="sd-devId" name="deviceId" maxlength="12" class="form-input"
+              <input type="text" id="sd-devId" name="deviceId" maxlength="12" class="input"
                 style="flex:1;min-width:120px" disabled>
-              <button type="button" data-click="regenDevId" class="btn btn-secondary btn-sm"><span data-icon="refresh-cw"></span> New ID</button>
-              <button type="button" data-click="toggleManualId" data-args='["sd-devId"]' class="btn btn-secondary btn-sm"><span data-icon="pencil"></span>
+              <button type="button" data-click="regenDevId" class="btn"><span data-icon="refresh-cw"></span> New ID</button>
+              <button type="button" data-click="toggleManualId" data-args='["sd-devId"]' class="btn"><span data-icon="pencil"></span>
                 Manual</button>
             </div>
           </div>
@@ -34,15 +34,15 @@
 
       <!-- Storage -->
       <div class="card">
-        <div class="card-header"><span data-icon="save"></span> Storage</div>
+        <div class="card-head"><div class="card-title"><span data-icon="save"></span> Storage</div></div>
         <div class="card-body">
-          <div class="form-group">
-            <label class="form-label">Default Storage View</label>
-            <select name="defaultStorageView" id="sd-defaultStorage" class="form-input form-select">
+          <div class="field">
+            <label class="field-label">Default Storage View</label>
+            <select name="defaultStorageView" id="sd-defaultStorage" class="input">
               <option value="0">Internal (LittleFS)</option>
               <option value="1">💳 SD Card</option>
             </select>
-            <p class="form-hint">Choose which storage (Internal LittleFS or SD Card) the Files page opens to by default.
+            <p class="hint">Choose which storage (Internal LittleFS or SD Card) the Files page opens to by default.
             </p>
           </div>
         </div>
@@ -50,14 +50,14 @@
 
       <!-- Web Server -->
       <div class="card">
-        <div class="card-header"><span data-icon="globe"></span> Web Server</div>
+        <div class="card-head"><div class="card-title"><span data-icon="globe"></span> Web Server</div></div>
         <div class="card-body">
-          <div class="form-group">
-            <label class="form-label">
+          <div class="field">
+            <label class="field-label">
               <input type="checkbox" name="forceWebServer" id="sd-forceWS" value="1">
               Force Web Server On
             </label>
-            <p class="form-hint">When enabled, the web server stays active even in deep sleep modes. Disable to save
+            <p class="hint">When enabled, the web server stays active even in deep sleep modes. Disable to save
               power when web access is not needed.</p>
           </div>
         </div>
@@ -65,9 +65,9 @@
 
       <!-- System Info -->
       <div class="card">
-        <div class="card-header"><span data-icon="bar-chart-3"></span> System Info</div>
+        <div class="card-head"><div class="card-title"><span data-icon="bar-chart-3"></span> System Info</div></div>
         <div class="card-body">
-          <div class="form-row" id="sysInfo">
+          <div class="form-grid" id="sysInfo">
             <div><strong>Firmware</strong>
               <div class="text-primary" id="siFirmware">–</div>
             </div>
@@ -92,7 +92,7 @@
 
       <!-- Changelog -->
       <div class="card">
-        <div class="card-header" data-click="changelogToggle"
+        <div class="card-head" data-click="changelogToggle"
           style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
           <span><span data-icon="file-text"></span> Change Log <small class="text-muted">(tap)</small></span>
           <span id="changelogChevron" style="transition: transform 0.3s;">▼</span>
@@ -104,7 +104,7 @@
 
       <!-- About -->
       <div class="card">
-        <div class="card-header">ℹ️ About</div>
+        <div class="card-head"><div class="card-title"><span data-icon="info"></span> About</div></div>
         <div class="card-body">
           <div style="text-align:center">
             <div style="font-size:1.2rem;font-weight:bold;color:var(--primary);margin-bottom:.5rem">Water Logger</div>
@@ -115,6 +115,6 @@
         </div>
       </div>
 
-      <button type="submit" class="btn btn-primary btn-block"><span data-icon="save"></span> Save</button>
+      <button type="submit" class="btn primary"><span data-icon="save"></span> Save</button>
     </form>
   </main>

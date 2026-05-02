@@ -712,7 +712,7 @@ function emptyState(opts) {
   if (opts.ctaText && opts.ctaPage) {
     var btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "btn btn-primary btn-sm empty-cta";
+    btn.className = "btn primary empty-cta";
     btn.setAttribute("data-click", "navPage");
     btn.setAttribute("data-page", opts.ctaPage);
     btn.textContent = opts.ctaText;
@@ -929,7 +929,7 @@ function h(tag, attrs, children) {
 var Form = (function () {
   function field(f, data) {
     if (f.row) {
-      return h("div", { class: "form-row" }, f.row.map(function (sub) {
+      return h("div", { class: "form-grid" }, f.row.map(function (sub) {
         return field(sub, data);
       }));
     }
@@ -940,7 +940,7 @@ var Form = (function () {
     if (f.type === "select") {
       input = h("select", {
         name: f.name, id: f.id || null,
-        class: "form-input form-select",
+        class: "input",
       }, (f.options || []).map(function (opt) {
         var ov = Array.isArray(opt) ? opt[0] : opt.value;
         var ol = Array.isArray(opt) ? opt[1] : opt.label;
@@ -956,7 +956,7 @@ var Form = (function () {
     } else {
       input = h("input", {
         type: f.type || "text", name: f.name, id: f.id || null,
-        class: "form-input",
+        class: "input",
         min: f.min, max: f.max, step: f.step,
         placeholder: f.placeholder,
       });
@@ -964,13 +964,13 @@ var Form = (function () {
     }
 
     var label = f.label
-      ? h("label", { class: "form-label" },
+      ? h("label", { class: "field-label" },
           f.type === "checkbox" ? [input, " " + f.label] : f.label)
       : null;
-    var hint = f.hint ? h("p", { class: "form-hint", text: f.hint }) : null;
+    var hint = f.hint ? h("p", { class: "hint", text: f.hint }) : null;
 
     var group = h("div", {
-      class: "form-group",
+      class: "field",
       dataset: f.showWhen ? { showwhen: JSON.stringify(f.showWhen) } : null,
     }, f.type === "checkbox" ? [label, hint] : [label, input, hint]);
 
@@ -1012,16 +1012,16 @@ var Form = (function () {
       schema.sections.map(function (sec) {
         return h("div", { class: "card" }, [
           sec.title
-            ? h("div", { class: "card-header", text: sec.title })
+            ? h("div", { class: "card-head", text: sec.title })
             : null,
           h("div", { class: "card-body" }, [
-            sec.hint ? h("p", { class: "form-hint", text: sec.hint }) : null,
+            sec.hint ? h("p", { class: "hint", text: sec.hint }) : null,
             sec.fields.map(function (f) { return field(f, data); }),
           ]),
         ]);
       }),
       h("button", {
-        type: "submit", class: "btn btn-primary btn-block",
+        type: "submit", class: "btn primary",
         text: schema.submitLabel || "💾 Save",
       }),
     ]);

@@ -1,7 +1,7 @@
   <main class="main-content page" id="page-settings_theme">
-    <div class="page-header">
-      <h1><span data-icon="palette"></span> Theme</h1>
-      <div class="breadcrumb"><a href="#settings">Settings</a> / Theme
+    <div class="page-head">
+      <h1 class="page-title"><span data-icon="palette"></span> Theme</h1>
+      <div class="page-sub"><a href="#settings">Settings</a> / Theme
       </div>
     </div>
 
@@ -9,97 +9,99 @@
       <div id="th-msg"></div>
       <!-- Mode -->
       <div class="card">
-        <div class="card-header">🌓 Mode</div>
-        <div class="card-body">
-          <div class="form-group">
-            <select name="themeMode" id="th-mode" class="form-input form-select">
-              <option value="0">☀️ Light</option>
-              <option value="1">🌙 Dark</option>
+        <div class="card-head"><div class="card-title"><span data-icon="moon"></span> Appearance</div></div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+          <div class="field">
+            <label>Theme</label>
+            <div class="seg" id="th-mode-seg">
+              <button type="button" data-v="0"><span data-icon="sun"></span> Light</button>
+              <button type="button" data-v="1"><span data-icon="moon"></span> Dark</button>
+              <button type="button" data-v="2"><span data-icon="laptop"></span> Auto</button>
+            </div>
+            <select name="themeMode" id="th-mode" style="display:none">
+              <option value="0">Light</option>
+              <option value="1">Dark</option>
               <option value="2">Auto</option>
             </select>
           </div>
-          <div class="form-group">
-            <label class="form-label">
-              <input type="checkbox" name="showIcons" id="th-icons" value="1"> Show icons
-            </label>
-          </div>
+          <label class="check"><input type="checkbox" name="showIcons" id="th-icons" value="1"><span>Show icons in nav and cards</span></label>
         </div>
       </div>
 
       <!-- Colors -->
       <div class="card">
-        <div class="card-header"><span data-icon="palette"></span> Colors</div>
+        <div class="card-head"><div class="card-title"><span data-icon="palette"></span> Colors</div></div>
         <div class="card-body">
           <div class="color-grid">
-            <div class="form-group"><label class="form-label">Primary</label><input type="color" name="primaryColor"
-                id="th-primary" class="form-input"></div>
-            <div class="form-group"><label class="form-label">Secondary</label><input type="color" name="secondaryColor"
-                id="th-secondary" class="form-input"></div>
-            <div class="form-group"><label class="form-label">Background</label><input type="color" name="bgColor"
-                id="th-bg" class="form-input"></div>
-            <div class="form-group"><label class="form-label">Text</label><input type="color" name="textColor"
-                id="th-text" class="form-input"></div>
+            <div class="field"><label class="field-label">Primary</label><input type="color" name="primaryColor"
+                id="th-primary" class="input"></div>
+            <div class="field"><label class="field-label">Secondary</label><input type="color" name="secondaryColor"
+                id="th-secondary" class="input"></div>
+            <div class="field"><label class="field-label">Background</label><input type="color" name="bgColor"
+                id="th-bg" class="input"></div>
+            <div class="field"><label class="field-label">Text</label><input type="color" name="textColor"
+                id="th-text" class="input"></div>
           </div>
           <h4 class="mt-2">Chart</h4>
           <div class="color-grid" style="grid-template-columns:repeat(3,1fr)">
-            <div class="form-group"><label class="form-label">Full Flush</label><input type="color" name="ffColor"
-                id="th-ff" class="form-input"></div>
-            <div class="form-group"><label class="form-label">Part Flush</label><input type="color" name="pfColor"
-                id="th-pf" class="form-input"></div>
-            <div class="form-group"><label class="form-label">Other</label><input type="color" name="otherColor"
-                id="th-other" class="form-input"></div>
+            <div class="field"><label class="field-label">Full Flush</label><input type="color" name="ffColor"
+                id="th-ff" class="input"></div>
+            <div class="field"><label class="field-label">Part Flush</label><input type="color" name="pfColor"
+                id="th-pf" class="input"></div>
+            <div class="field"><label class="field-label">Other</label><input type="color" name="otherColor"
+                id="th-other" class="input"></div>
           </div>
           <h4 class="mt-2">Storage Bar</h4>
           <div class="color-grid">
-            <div class="form-group"><label class="form-label">Normal</label><input type="color" name="storageBarColor"
-                id="th-bar" class="form-input"></div>
-            <div class="form-group"><label class="form-label">70%+</label><input type="color" name="storageBar70Color"
-                id="th-bar70" class="form-input"></div>
-            <div class="form-group"><label class="form-label">90%+</label><input type="color" name="storageBar90Color"
-                id="th-bar90" class="form-input"></div>
-            <div class="form-group"><label class="form-label">Border</label><input type="color" name="storageBarBorder"
-                id="th-barB" class="form-input"></div>
+            <div class="field"><label class="field-label">Normal</label><input type="color" name="storageBarColor"
+                id="th-bar" class="input"></div>
+            <div class="field"><label class="field-label">70%+</label><input type="color" name="storageBar70Color"
+                id="th-bar70" class="input"></div>
+            <div class="field"><label class="field-label">90%+</label><input type="color" name="storageBar90Color"
+                id="th-bar90" class="input"></div>
+            <div class="field"><label class="field-label">Border</label><input type="color" name="storageBarBorder"
+                id="th-barB" class="input"></div>
           </div>
         </div>
       </div>
 
       <!-- Images -->
       <div class="card">
-        <div class="card-header">🖼️ Images</div>
+        <div class="card-head"><div class="card-title"><span data-icon="image"></span> Images</div></div>
         <div class="card-body">
           <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem">Supported: PNG, JPG, GIF, SVG, ICO. Path:
             /file.png</p>
-          <div class="form-group"><label class="form-label">Logo Path</label><input type="text" name="logoSource"
-              id="th-logo" placeholder="/logo.png" class="form-input"></div>
-          <div class="form-group"><label class="form-label">Favicon</label><input type="text" name="faviconPath"
-              id="th-favicon" placeholder="/favicon.ico" class="form-input"></div>
-          <div class="form-group"><label class="form-label">Board Diagram</label><input type="text"
-              name="boardDiagramPath" id="th-board" placeholder="/xiao_esp32_c3_board.jpg" class="form-input"></div>
+          <div class="field"><label class="field-label">Logo Path</label><input type="text" name="logoSource"
+              id="th-logo" placeholder="/logo.png" class="input"></div>
+          <div class="field"><label class="field-label">Favicon</label><input type="text" name="faviconPath"
+              id="th-favicon" placeholder="/favicon.ico" class="input"></div>
+          <div class="field"><label class="field-label">Board Diagram</label><input type="text"
+              name="boardDiagramPath" id="th-board" placeholder="/xiao_esp32_c3_board.jpg" class="input"></div>
         </div>
       </div>
 
       <!-- Chart.js -->
       <div class="card">
-        <div class="card-header"><span data-icon="line-chart"></span> Chart Source</div>
+        <div class="card-head"><div class="card-title"><span data-icon="line-chart"></span> Chart Source</div></div>
         <div class="card-body">
-          <div class="form-group">
-            <label class="form-label">Chart.js Library</label>
-            <select name="chartSource" id="th-chartSrc" class="form-input form-select"
+          <div class="field">
+            <label class="field-label">Chart.js Library</label>
+            <select name="chartSource" id="th-chartSrc" class="input"
               data-change="themeToggleChartPath">
               <option value="0">Local File</option>
               <option value="1">CDN (Online)</option>
             </select>
-            <p class="form-hint">Local: requires /chart.min.js in LittleFS. CDN: needs internet.</p>
+            <p class="hint">Local: requires /chart.min.js in LittleFS. CDN: needs internet.</p>
           </div>
           <div id="chartPathRow" style="display:none">
-            <div class="form-group">
-              <label class="form-label">Local Path</label>
-              <input type="text" name="chartLocalPath" id="th-chartPath" placeholder="/chart.min.js" class="form-input">
+            <div class="field">
+              <label class="field-label">Local Path</label>
+              <input type="text" name="chartLocalPath" id="th-chartPath" placeholder="/chart.min.js" class="input">
             </div>
           </div>
-          <div class="form-group mt-1">
-            <label class="form-label">Dashboard Column Labels</label>
-            <select name="chartLabelFormat" id="th-labelFmt" class="form-input form-select">
+          <div class="field mt-1">
+            <label class="field-label">Dashboard Column Labels</label>
+            <select name="chartLabelFormat" id="th-labelFmt" class="input">
               <option value="0">Date + Time</option>
               <option value="1">Boot Count (#1234)</option>
               <option value="2">Both</option>
@@ -109,8 +111,8 @@
       </div>
 
       <div style="display:flex; gap:10px;">
-        <button type="submit" class="btn btn-primary" style="flex:1;"><span data-icon="save"></span> Save</button>
-        <button type="button" class="btn btn-secondary" data-click="themeRestoreDefault"><span data-icon="refresh-cw"></span> Restore Default
+        <button type="submit" class="btn primary" style="flex:1;"><span data-icon="save"></span> Save</button>
+        <button type="button" class="btn" data-click="themeRestoreDefault"><span data-icon="refresh-cw"></span> Restore Default
           Theme</button>
       </div>
     </form>

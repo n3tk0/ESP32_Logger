@@ -83,105 +83,102 @@
 
   <!-- ═══ PAGE: DASHBOARD ═══ -->
   <main class="main-content page" id="page-dashboard">
-    <div class="page-header">
-      <h1><span data-icon="bar-chart-3"></span> Dashboard</h1>
-    </div>
-
-    <!-- File selector -->
-    <div class="card">
-      <div class="card-body">
-        <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
-          <select id="fileSelect" class="form-input form-select" style="flex:1;min-width:200px" data-change="dbLoadData">
-            <option value="">Loading files...</option>
-          </select>
-          <button class="btn btn-primary" data-click="dbLoadData"><span data-icon="refresh-cw"></span></button>
-        </div>
+    <div class="page-head">
+      <div>
+        <h1 class="page-title"><span data-icon="layout-dashboard"></span> Dashboard</h1>
+        <div class="page-sub">Water consumption · select a log file to load</div>
+      </div>
+      <div class="page-actions">
+        <button class="btn" data-click="dbExportCSV"><span data-icon="download"></span> Export CSV</button>
+        <button class="btn" data-click="dbExportPNG"><span data-icon="image"></span> PNG</button>
       </div>
     </div>
 
-    <!-- Filters -->
     <div class="card">
-      <div class="card-header"><span data-icon="search"></span> Filters</div>
       <div class="card-body">
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">Start</label>
-            <input type="date" id="startDate" class="form-input" data-change="dbApplyFilters">
-          </div>
-          <div class="form-group"><label class="form-label">End</label>
-            <input type="date" id="endDate" class="form-input" data-change="dbApplyFilters">
-          </div>
-          <div class="form-group"><label class="form-label">Trigger</label>
-            <select id="eventFilter" class="form-input form-select" data-change="dbApplyFilters">
-              <option value="ALL">All</option>
-              <option value="BTN">Buttons Only</option>
-              <option value="FF">Full Flush Btn</option>
-              <option value="PF">Part Flush Btn</option>
-            </select>
-          </div>
-          <div class="form-group"><label class="form-label">Extra presses</label>
-            <select id="pressFilter" class="form-input form-select" data-change="dbApplyFilters">
-              <option value="ALL">All</option>
-              <option value="EXTRA">With Extra</option>
-              <option value="NONE">No Extra</option>
-            </select>
-          </div>
-        </div>
-        <div
-          style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-top:8px">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-            <input type="checkbox" id="excludeZero" data-change="dbApplyFilters" checked>
-            <span>Exclude 0.00L entries</span>
-          </label>
-          <button data-click="dbExportCSV" class="btn btn-sm btn-secondary"><span data-icon="download"></span> Export CSV</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select id="fileSelect" class="input" style="flex:1;min-width:200px" data-change="dbLoadData">
+            <option value="">Loading files…</option>
+          </select>
+          <button class="btn primary" data-click="dbLoadData"><span data-icon="refresh-cw"></span> Reload</button>
         </div>
       </div>
     </div>
 
     <div id="errorMsg" class="alert alert-error" style="display:none"></div>
+    <div id="db-error"  class="alert alert-error" style="display:none"></div>
 
-    <div id="db-error" class="alert alert-error" style="display:none"></div>
-    <!-- Stats -->
-    <div id="db-error" class="alert alert-error" style="display:none"></div>
-    <div class="stats-grid mb-2">
-      <div class="stat-card">
-        <div class="value" id="db-totalVol">0.00</div>
-        <div class="label">Liters</div>
+    <div class="grid grid-4" style="margin-top:var(--gap)">
+      <div class="kpi">
+        <div class="kpi-l"><span data-icon="droplets"></span> Total volume</div>
+        <div class="kpi-v"><span class="num" id="db-totalVol">0.00</span><span class="unit">L</span></div>
+        <div class="kpi-d" id="db-volSub">all events</div>
       </div>
-      <div class="stat-card">
-        <div class="value" id="db-eventCount">0</div>
-        <div class="label">Events</div>
+      <div class="kpi">
+        <div class="kpi-l"><span data-icon="zap"></span> Events</div>
+        <div class="kpi-v"><span class="num" id="db-eventCount">0</span><span class="unit">flushes</span></div>
+        <div class="kpi-d"><span class="mono">FF <span id="db-ffCount">0</span></span> · <span class="mono">PF <span id="db-pfCount">0</span></span></div>
       </div>
-      <div class="stat-card">
-        <div class="value" id="db-totalFF" style="color:var(--ff-color,#e74c3c)">0</div>
-        <div class="label">Extra FF</div>
+      <div class="kpi">
+        <div class="kpi-l"><span data-icon="alert-triangle"></span> Extra FF</div>
+        <div class="kpi-v"><span class="num" id="db-totalFF" style="color:var(--ff-color,#e74c3c)">0</span></div>
+        <div class="kpi-d" id="db-legendFF"></div>
       </div>
-      <div class="stat-card">
-        <div class="value" id="db-totalPF" style="color:var(--pf-color,#3498db)">0</div>
-        <div class="label">Extra PF</div>
+      <div class="kpi">
+        <div class="kpi-l"><span data-icon="alert-triangle"></span> Extra PF</div>
+        <div class="kpi-v"><span class="num" id="db-totalPF" style="color:var(--pf-color,#3498db)">0</span></div>
+        <div class="kpi-d" id="db-legendPF"></div>
       </div>
     </div>
 
-    <!-- Chart -->
-    <div class="card">
-      <div class="card-header">
-        <span><span data-icon="line-chart"></span> Volume</span>
-        <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
-          <label style="display:flex;align-items:center;gap:.3rem;font-size:.8rem;font-weight:400">
-            Threshold&nbsp;(L):
-            <input type="number" id="db-threshold" class="form-input" style="width:72px;padding:.25rem .4rem;font-size:.82rem" placeholder="none" min="0" step="0.1" data-input="dbApplyFilters">
-          </label>
-          <div style="display:flex;gap:2px">
-            <button class="btn btn-sm btn-secondary" data-click="dbZoom" data-args="[-1]" title="Zoom in"><span data-icon="search"></span>+</button>
-            <button class="btn btn-sm btn-secondary" data-click="dbZoom" data-args="[1]"  title="Zoom out"><span data-icon="search"></span>−</button>
-            <button class="btn btn-sm btn-secondary" data-click="dbZoomReset" title="Reset zoom">↺</button>
+    <div class="grid grid-12" style="margin-top:var(--gap)">
+      <div class="card span-8">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="bar-chart-3"></span> Volume timeline</div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <label class="check"><input type="number" id="db-threshold" class="input mono" style="width:72px;height:30px;padding:0 8px;font-size:12px" placeholder="0.0" min="0" step="0.1" data-input="dbApplyFilters"><span style="font-size:11px;color:var(--text-3)">L threshold</span></label>
+            <button class="btn-mini" data-click="dbZoom" data-args="[-1]" title="Zoom in"><span data-icon="search"></span></button>
+            <button class="btn-mini" data-click="dbZoom" data-args="[1]"  title="Zoom out"><span data-icon="search"></span></button>
+            <button class="btn-mini" data-click="dbZoomReset" title="Reset"><span data-icon="rotate-ccw"></span></button>
           </div>
-          <button class="btn btn-sm btn-secondary" data-click="dbExportPNG" title="Export chart as PNG">📷 PNG</button>
+        </div>
+        <div class="card-body" style="padding:8px 12px 12px">
+          <div class="chart-container" id="chartWrap"><canvas id="chart"></canvas></div>
+          <div id="chartLegend" data-ffl="db-legendFF" data-pfl="db-legendPF" data-otl="db-legendOther" style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;font-size:11px;margin-top:6px"></div>
         </div>
       </div>
-      <div class="card-body"><div class="chart-container"><canvas id="chart"></canvas></div></div>
-      <div class="card-body" style="padding-top:0">
-        <div id="chartLegend" data-ffl="db-legendFF" data-pfl="db-legendPF" data-otl="db-legendOther"
-          style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;font-size:.85rem"></div>
+
+      <div class="card span-4">
+        <div class="card-head"><div class="card-title"><span data-icon="filter"></span> Filters</div></div>
+        <div class="card-body">
+          <div class="form-grid">
+            <div class="field"><label>From</label>
+              <input type="date" id="startDate" class="input">
+            </div>
+            <div class="field"><label>To</label>
+              <input type="date" id="endDate" class="input">
+            </div>
+            <div class="field"><label>Trigger</label>
+              <select id="eventFilter" class="input">
+                <option value="ALL">All</option>
+                <option value="BTN">Buttons only</option>
+                <option value="FF">FF only</option>
+                <option value="PF">PF only</option>
+              </select>
+            </div>
+            <div class="field"><label>Extra presses</label>
+              <select id="pressFilter" class="input">
+                <option value="ALL">All</option>
+                <option value="EXTRA">With extra</option>
+                <option value="NONE">No extra</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;flex-wrap:wrap;gap:8px">
+            <label class="check"><input type="checkbox" id="excludeZero" checked><span>Exclude 0.00 L entries</span></label>
+            <button class="btn primary" data-click="dbApplyFilters"><span data-icon="check"></span> Apply</button>
+          </div>
+        </div>
       </div>
     </div>
   </main>
@@ -193,7 +190,7 @@
         <h1 class="page-title">Live <span class="badge ok pulse" id="conn">● Connected</span></h1>
         <div class="page-sub" style="display:flex;align-items:center;gap:6px">
           Real-time telemetry · refreshing every 
-          <select id="live-refresh-rate" class="form-input form-select" style="width:auto;padding:2px 4px;font-size:11px;min-height:22px" data-change="liveSetRate">
+          <select id="live-refresh-rate" class="input" style="width:auto;padding:2px 4px;font-size:11px;min-height:22px" data-change="liveSetRate">
             <option value="500">0.5s</option>
             <option value="1000">1s</option>
             <option value="2000">2s</option>
@@ -276,7 +273,7 @@
         <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <div class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="terminal" class="lucide lucide-terminal"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg> Recent log</div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <input type="search" id="logsFilter" class="form-input" placeholder="Filter…" data-input="liveLogsFilter" style="width:160px;padding:4px 8px;font-size:12px;min-height:28px" aria-label="Filter log entries">
+            <input type="search" id="logsFilter" class="input" placeholder="Filter…" data-input="liveLogsFilter" style="width:160px;padding:4px 8px;font-size:12px;min-height:28px" aria-label="Filter log entries">
             <button type="button" class="btn-mini" data-click="liveLogsFilterClear" title="Clear filter"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="x" class="lucide lucide-x"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
           </div>
         </div>
@@ -296,62 +293,46 @@
 
   <!-- ═══ PAGE: FILES ═══ -->
   <main class="main-content page" id="page-files">
-    <div class="page-header">
-      <h1><span data-icon="folder"></span> File Manager</h1>
+    <div class="page-head">
+      <div>
+        <h1 class="page-title"><span data-icon="folder"></span> Files</h1>
+        <div class="page-sub" id="files-dirLabel">/</div>
+      </div>
+      <div class="page-actions">
+        <div id="tabs" class="seg"></div>
+        <button id="upBtn" class="btn" data-click="filesGoUp" style="display:none"><span data-icon="chevron-left"></span> Up</button>
+        <button id="btnEdit" class="btn" data-click="filesToggleEdit"><span data-icon="pencil"></span> Edit</button>
+        <button id="btnDone" class="btn" data-click="filesToggleEdit" style="display:none"><span data-icon="x"></span> Done</button>
+      </div>
     </div>
 
     <div id="statusMsg"></div>
 
-    <!-- Storage tabs -->
-    <div id="tabs" class="tabs" style="display:flex;gap:4px;margin-bottom:1rem"></div>
-
-    <!-- Storage info -->
     <div class="card">
-      <div class="card-body">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-          <span id="files-usage">Loading...</span>
-          <span id="files-pct">--%</span>
-        </div>
-        <div class="progress">
-          <div id="bar" class="progress-bar progress-bar-success" style="width:0%"></div>
+      <div class="card-head" style="padding:8px 14px">
+        <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-3);flex:1">
+          <span id="files-usage">Loading…</span>
+          <div class="storage-bar" style="width:140px"><span id="bar" style="width:0%"></span></div>
+          <span id="files-pct" class="mono">--%</span>
         </div>
       </div>
-    </div>
+      <div class="card-body" style="padding:0" id="list">Loading…</div>
 
-    <!-- Directory -->
-    <div class="card">
-      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
-        <span id="files-dirLabel"><span data-icon="folder"></span> /</span>
-        <div class="btn-group">
-          <button id="upBtn" class="btn btn-sm btn-secondary" data-click="filesGoUp" style="display:none">⬆️ Up</button>
-          <button id="btnEdit" class="btn btn-sm btn-primary" data-click="filesToggleEdit"><span data-icon="pencil"></span> Edit</button>
-          <button id="btnDone" class="btn btn-sm btn-secondary" data-click="filesToggleEdit" style="display:none">✖️
-            Done</button>
-        </div>
-      </div>
-      <div class="card-body" style="padding:0" id="list">Loading...</div>
-
-      <!-- Edit mode tools -->
-      <div id="editTools" class="card-body"
-        style="border-top:1px solid var(--border);background:var(--bg);display:none">
-        <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
-          <form id="uploadForm" data-submit="filesUpload"
-            style="display:flex;gap:8px;align-items:center">
-            <input type="file" name="file" id="fileInput" required class="form-input" style="width:auto">
-            <button type="submit" class="btn btn-sm btn-success"><span data-icon="cloud-upload"></span> Upload</button>
+      <div id="editTools" class="card-body" style="border-top:1px solid var(--border);background:var(--panel-2);display:none">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+          <form id="uploadForm" data-submit="filesUpload" style="display:flex;gap:8px;align-items:center">
+            <input type="file" name="file" id="fileInput" required class="input" style="height:36px">
+            <button type="submit" class="btn primary"><span data-icon="upload"></span> Upload</button>
           </form>
-          <form id="mkdirForm" data-submit="filesMkdir"
-            style="display:flex;gap:8px;align-items:center">
-            <input type="text" id="newFolder" placeholder="New folder" class="form-input" style="width:120px">
-            <button type="submit" class="btn btn-sm btn-primary"><span data-icon="folder"></span> Create</button>
+          <form id="mkdirForm" data-submit="filesMkdir" style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="newFolder" placeholder="New folder" class="input" style="width:140px;height:36px">
+            <button type="submit" class="btn"><span data-icon="folder-plus"></span> Create</button>
           </form>
         </div>
-        <div id="uploadProg" style="display:none;margin-top:8px">
+        <div id="uploadProg" style="display:none;margin-top:10px">
           <div style="display:flex;align-items:center;gap:8px">
-            <div class="progress" style="flex:1;height:10px">
-              <div id="uploadBar" class="progress-bar progress-bar-success" style="width:0%"></div>
-            </div>
-            <span id="uploadPct" style="font-size:.8rem;min-width:45px">0%</span>
+            <div class="storage-bar" style="flex:1;height:8px"><span id="uploadBar" style="width:0%"></span></div>
+            <span id="uploadPct" class="mono" style="font-size:11px;min-width:40px;text-align:right">0%</span>
           </div>
         </div>
       </div>
@@ -360,86 +341,94 @@
 
   <!-- ═══ PAGE: SETTINGS ═══ -->
   <main class="main-content page" id="page-settings">
-    <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+    <div class="page-head">
       <div>
-        <h1><span data-icon="settings"></span> Settings</h1>
+        <h1 class="page-title"><span data-icon="settings"></span> Settings</h1>
+        <div class="page-sub">Configure device, sensors, exports and storage</div>
       </div>
-      <button data-click="showPopup" data-args='["restartPopup"]' class="btn btn-warning"><span data-icon="refresh-cw"></span>
-        Restart</button>
-    </div>
-
-    <div style="margin-bottom:.75rem">
-      <input type="search" id="settings-search" class="form-input" placeholder="Filter settings…"
-        style="max-width:340px">
-    </div>
-
-    <div class="settings-grid" id="settings-grid">
-      <div class="setting-card" data-click="showSubpage" data-args='["settings_device"]'>
-        <div class="icon">📱</div>
-        <div class="title">Device</div>
-      </div>
-      <div class="setting-card" data-click="showSubpage" data-args='["settings_flowmeter"]'>
-        <div class="icon"><span data-icon="wrench"></span></div>
-        <div class="title">Sensors</div>
-      </div>
-      <div class="setting-card" data-click="showSubpage" data-args='["settings_hardware"]'>
-        <div class="icon"><span data-icon="wrench"></span></div>
-        <div class="title">Hardware</div>
-      </div>
-      <div class="setting-card" data-click="showSubpage" data-args='["settings_datalog"]'>
-        <div class="icon"><span data-icon="file-text"></span></div>
-        <div class="title">Data Log</div>
-      </div>
-      <div class="setting-card" data-click="showSubpage" data-args='["settings_corelogic"]'>
-        <div class="icon"><span data-icon="layers"></span></div>
-        <div class="title">Core Logic</div>
-      </div>
-      <div class="setting-card" data-click="showSubpage" data-args='["settings_export"]'>
-        <div class="icon"><span data-icon="wifi"></span></div>
-        <div class="title">Export</div>
-      </div>
-      <div class="setting-card" data-click="showSubpage" data-args='["settings_theme"]'>
-        <div class="icon"><span data-icon="palette"></span></div>
-        <div class="title">Theme</div>
-      </div>
-      <div class="setting-card" data-click="showSubpage" data-args='["settings_network"]'>
-        <div class="icon"><span data-icon="globe"></span></div>
-        <div class="title">Network</div>
-      </div>
-      <div class="setting-card" data-click="showSubpage" data-args='["settings_time"]'>
-        <div class="icon"><span data-icon="clock"></span></div>
-        <div class="title">Time Sync</div>
-      </div>
-      <div class="setting-card" data-click="showSubpage" data-args='["files"]'>
-        <div class="icon"><span data-icon="cloud-upload"></span></div>
-        <div class="title">Files</div>
-      </div>
-      <div class="setting-card" data-click="showSubpage" data-args='["settings_modules"]'>
-        <div class="icon"><span data-icon="layers"></span></div>
-        <div class="title">Modules <span class="badge badge-info">preview</span></div>
+      <div class="page-actions">
+        <input type="search" id="settings-search" class="input" placeholder="Filter settings…" style="width:240px">
+        <a href="/export_settings" download class="btn"><span data-icon="download"></span> Export</a>
+        <button class="btn warn" data-click="showPopup" data-args='["restartPopup"]'><span data-icon="refresh-cw"></span> Restart</button>
       </div>
     </div>
-    <div id="settings-no-match" style="display:none;padding:1rem;color:var(--text-muted);text-align:center">No settings match your search.</div>
 
-    <div class="card mt-2">
-      <div class="card-header"><span data-icon="save"></span> Backup &amp; Restore</div>
+    <div class="grid grid-auto" id="settings-grid">
+      <div class="set-card" data-click="showSubpage" data-args='["settings_device"]'>
+        <div class="set-card-icon"><span data-icon="smartphone"></span></div>
+        <div class="set-card-t">Device</div>
+        <div class="set-card-d">Name, ID, default storage view</div>
+      </div>
+      <div class="set-card" data-click="showSubpage" data-args='["settings_flowmeter"]'>
+        <div class="set-card-icon"><span data-icon="droplets"></span></div>
+        <div class="set-card-t">Flow meter</div>
+        <div class="set-card-d">Pulse pin, calibration, debounce</div>
+      </div>
+      <div class="set-card" data-click="showSubpage" data-args='["settings_hardware"]'>
+        <div class="set-card-icon"><span data-icon="cpu"></span></div>
+        <div class="set-card-t">Hardware</div>
+        <div class="set-card-d">Pins, board diagram, transports</div>
+      </div>
+      <div class="set-card" data-click="showSubpage" data-args='["settings_datalog"]'>
+        <div class="set-card-icon"><span data-icon="file-text"></span></div>
+        <div class="set-card-t">Data log</div>
+        <div class="set-card-d">Rotation, retention, format</div>
+      </div>
+      <div class="set-card" data-click="showSubpage" data-args='["settings_corelogic"]'>
+        <div class="set-card-icon"><span data-icon="puzzle"></span></div>
+        <div class="set-card-t">Core logic</div>
+        <div class="set-card-d">Operating mode, sensors, aggregation</div>
+      </div>
+      <div class="set-card" data-click="showSubpage" data-args='["settings_export"]'>
+        <div class="set-card-icon"><span data-icon="cloud-upload"></span></div>
+        <div class="set-card-t">Export</div>
+        <div class="set-card-d">MQTT, HTTP, openSenseMap</div>
+      </div>
+      <div class="set-card" data-click="showSubpage" data-args='["settings_theme"]'>
+        <div class="set-card-icon"><span data-icon="palette"></span></div>
+        <div class="set-card-t">Theme</div>
+        <div class="set-card-d">Colors, density, accent</div>
+      </div>
+      <div class="set-card" data-click="showSubpage" data-args='["settings_network"]'>
+        <div class="set-card-icon"><span data-icon="wifi"></span></div>
+        <div class="set-card-t">Network</div>
+        <div class="set-card-d">WiFi, AP, hostname</div>
+      </div>
+      <div class="set-card" data-click="showSubpage" data-args='["settings_time"]'>
+        <div class="set-card-icon"><span data-icon="clock"></span></div>
+        <div class="set-card-t">Time sync</div>
+        <div class="set-card-d">NTP server, timezone, RTC</div>
+      </div>
+      <div class="set-card" data-click="showSubpage" data-args='["files"]'>
+        <div class="set-card-icon"><span data-icon="folder"></span></div>
+        <div class="set-card-t">Files</div>
+        <div class="set-card-d">Browse SD / LittleFS</div>
+      </div>
+      <div class="set-card" data-click="showSubpage" data-args='["settings_modules"]'>
+        <div class="set-card-icon"><span data-icon="layers"></span></div>
+        <div class="set-card-t">Modules <span class="badge dim" style="margin-left:6px">preview</span></div>
+        <div class="set-card-d">Optional plug-in features</div>
+      </div>
+    </div>
+    <div id="settings-no-match" class="empty" style="display:none">
+      <div class="empty-icon"><span data-icon="search"></span></div>
+      <div class="empty-title">No settings match your search.</div>
+    </div>
+
+    <div class="card" style="margin-top:var(--gap)">
+      <div class="card-head"><div class="card-title"><span data-icon="save"></span> Backup &amp; restore</div></div>
       <div class="card-body">
-        <div style="margin-bottom:1rem">
-          <a href="/export_settings" download class="btn btn-primary"><span data-icon="download"></span> Export Settings</a>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+          <a href="/export_settings" download class="btn primary"><span data-icon="download"></span> Export settings</a>
+          <form id="importForm" data-submit="settingsImport" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="file" name="settings" id="importFile" accept=".json" class="input" style="height:36px">
+            <button type="submit" class="btn"><span data-icon="upload"></span> Import</button>
+          </form>
         </div>
-        <form id="importForm" data-submit="settingsImport">
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input type="file" name="settings" id="importFile" accept=".json" class="form-input"
-              style="flex:1;min-width:150px">
-            <button type="submit" class="btn btn-secondary"><span data-icon="cloud-upload"></span> Import</button>
-          </div>
-        </form>
-        <div id="importProg" style="display:none;margin-top:8px">
+        <div id="importProg" style="display:none;margin-top:10px">
           <div style="display:flex;align-items:center;gap:8px">
-            <div class="progress" style="flex:1;height:10px">
-              <div id="importBar" class="progress-bar progress-bar-success" style="width:0%"></div>
-            </div>
-            <span id="importPct" style="font-size:.8rem;min-width:45px">0%</span>
+            <div class="storage-bar" style="flex:1;height:8px"><span id="importBar" style="width:0%"></span></div>
+            <span id="importPct" class="mono" style="font-size:11px;min-width:40px;text-align:right">0%</span>
           </div>
         </div>
       </div>
@@ -448,9 +437,9 @@
 
   <!-- ═══ PAGE: SENSORS (live dashboard) ═══ -->
   <main class="main-content page" id="page-sensors">
-    <div class="page-header">
+    <div class="page-head">
       <h1><span data-icon="thermometer"></span> Sensors</h1>
-      <button class="btn btn-secondary btn-sm" data-click="sensorsLoad"><span data-icon="refresh-cw"></span> Refresh</button>
+      <button class="btn" data-click="sensorsLoad"><span data-icon="refresh-cw"></span> Refresh</button>
     </div>
     <div id="sensors-msg" class="text-muted" style="margin-bottom:1rem;font-size:.9rem">
       Loading sensor data…
@@ -460,28 +449,28 @@
 
     <!-- Sensor chart -->
     <div class="card" style="margin-top:1rem">
-      <div class="card-header">
+      <div class="card-head">
         <span><span data-icon="line-chart"></span> Sensor Chart</span>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <select id="sc-sensor" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
+          <select id="sc-sensor" class="input" style="width:auto" data-change="sensorChartLoad">
             <option value="">— select sensor —</option>
           </select>
-          <select id="sc-metric" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
+          <select id="sc-metric" class="input" style="width:auto" data-change="sensorChartLoad">
             <option value="">— metric —</option>
           </select>
-          <select id="sc-agg" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
+          <select id="sc-agg" class="input" style="width:auto" data-change="sensorChartLoad">
             <option value="5m">5 min</option>
             <option value="1h">1 hour</option>
             <option value="1d">1 day</option>
             <option value="raw">Raw</option>
           </select>
-          <select id="sc-mode" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
+          <select id="sc-mode" class="input" style="width:auto" data-change="sensorChartLoad">
             <option value="lttb">LTTB</option>
             <option value="avg">Avg</option>
             <option value="min">Min</option>
             <option value="max">Max</option>
           </select>
-          <select id="sc-range" class="form-input form-select" style="width:auto" data-change="sensorChartLoad">
+          <select id="sc-range" class="input" style="width:auto" data-change="sensorChartLoad">
             <option value="3600">Last 1h</option>
             <option value="21600">Last 6h</option>
             <option value="86400" selected>Last 24h</option>
@@ -492,10 +481,10 @@
       <!-- Secondary series overlay (dual Y-axis) -->
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 16px;border-top:1px solid var(--border);font-size:.85rem">
         <span style="color:var(--text-muted)">Overlay:</span>
-        <select id="sc-sensor2" class="form-input form-select" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
+        <select id="sc-sensor2" class="input" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
           <option value="">— none —</option>
         </select>
-        <select id="sc-metric2" class="form-input form-select" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
+        <select id="sc-metric2" class="input" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
           <option value="">— metric —</option>
         </select>
       </div>
@@ -511,16 +500,16 @@
     <div class="popup-content" style="text-align:left;max-width:400px">
       <div style="font-size:2.5rem;text-align:center;margin-bottom:.5rem">✂️</div>
       <div style="font-size:1.2rem;font-weight:bold;text-align:center;margin-bottom:1rem">Move / Rename</div>
-      <div class="form-group"><label class="form-label">New Name</label>
-        <input type="text" id="name" class="form-input">
+      <div class="field"><label class="field-label">New Name</label>
+        <input type="text" id="name" class="input">
       </div>
-      <div class="form-group"><label class="form-label">Destination Folder</label>
-        <input type="text" id="dest" class="form-input" placeholder="(leave empty = same folder)">
+      <div class="field"><label class="field-label">Destination Folder</label>
+        <input type="text" id="dest" class="input" placeholder="(leave empty = same folder)">
       </div>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
-        <button class="btn btn-secondary"
+        <button class="btn"
           data-click="hidePopup" data-args='["movePopup"]'>Cancel</button>
-        <button class="btn btn-primary" data-click="filesApplyMove">✂️ Apply</button>
+        <button class="btn primary" data-click="filesApplyMove">✂️ Apply</button>
       </div>
     </div>
   </div>
@@ -529,13 +518,13 @@
     <div class="popup-content" style="text-align:left;max-width:500px;width:100%;max-height:80vh;overflow-y:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
         <div id="sensorPopupTitle" style="font-size:1.2rem;font-weight:bold">Sensor configuration</div>
-        <button class="btn btn-sm btn-secondary" data-click="hidePopup" data-args='["sensorPopup"]'>✕</button>
+        <button class="btn" data-click="hidePopup" data-args='["sensorPopup"]'>✕</button>
       </div>
       <div id="sensorPopupBody">
       </div>
       <div id="sensorPopupFooter" style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.5rem">
-        <button class="btn btn-secondary" data-click="hidePopup" data-args='["sensorPopup"]'>Cancel</button>
-        <button class="btn btn-primary" id="sensorPopupSaveBtn"><span data-icon="save"></span> Save</button>
+        <button class="btn" data-click="hidePopup" data-args='["sensorPopup"]'>Cancel</button>
+        <button class="btn primary" id="sensorPopupSaveBtn"><span data-icon="save"></span> Save</button>
       </div>
     </div>
   </div>
@@ -553,8 +542,8 @@
         </div>
       </div>
       <div id="rPopButtons" style="display:flex;gap:1rem;justify-content:center">
-        <button class="btn btn-danger" data-click="confirmRestart">✓ Confirm</button>
-        <button class="btn btn-secondary" data-click="hidePopup" data-args='["restartPopup"]'>✗
+        <button class="btn warn" data-click="confirmRestart">✓ Confirm</button>
+        <button class="btn" data-click="hidePopup" data-args='["restartPopup"]'>✗
           Cancel</button>
       </div>
     </div>
@@ -566,13 +555,13 @@
       <div style="font-size:1.2rem;font-weight:700;margin-bottom:.25rem">+ Add Sensor</div>
       <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:1rem">Select a sensor type, then set an ID.</p>
       <div id="sap-type-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:.4rem;margin-bottom:1rem"></div>
-      <div class="form-group" style="margin-bottom:1rem">
-        <label class="form-label">Sensor ID <span style="font-weight:400;color:var(--text-muted)">(unique name)</span></label>
-        <input type="text" id="sap-id" class="form-input" placeholder="e.g. bme280_roof">
+      <div class="field" style="margin-bottom:1rem">
+        <label class="field-label">Sensor ID <span style="font-weight:400;color:var(--text-muted)">(unique name)</span></label>
+        <input type="text" id="sap-id" class="input" placeholder="e.g. bme280_roof">
       </div>
       <div style="display:flex;gap:.5rem">
-        <button class="btn btn-primary" data-click="sapConfirm">Add &amp; Configure</button>
-        <button class="btn btn-secondary" data-click="sapClose">Cancel</button>
+        <button class="btn primary" data-click="sapConfirm">Add &amp; Configure</button>
+        <button class="btn" data-click="sapClose">Cancel</button>
       </div>
     </div>
   </div>
@@ -583,8 +572,8 @@
       <div style="font-size:1.2rem;font-weight:700;margin-bottom:1rem"><span data-icon="pencil"></span> Edit Sensor</div>
       <div id="sep-fields"></div>
       <div style="display:flex;gap:.5rem;margin-top:1.25rem">
-        <button class="btn btn-primary" data-click="sepConfirm"><span data-icon="save"></span> Save</button>
-        <button class="btn btn-secondary" data-click="sepClose">Cancel</button>
+        <button class="btn primary" data-click="sepConfirm"><span data-icon="save"></span> Save</button>
+        <button class="btn" data-click="sepClose">Cancel</button>
       </div>
     </div>
   </div>
@@ -608,23 +597,26 @@
         <tr><td style="padding:.3rem .6rem"><kbd>D</kbd></td><td>Toggle dark / light theme</td></tr>
       </table>
       <div style="margin-top:1rem;text-align:right">
-        <button class="btn btn-secondary" data-click="hidePopup" data-args='["kbPopup"]'>Close</button>
+        <button class="btn" data-click="hidePopup" data-args='["kbPopup"]'>Close</button>
       </div>
     </div>
   </div>
 
   <nav class="bottom-nav" id="bottomNav">
-    <a href="#dashboard" data-page="dashboard" data-click="navPage">
-      <span class="icon" data-icon="layout-dashboard"></span>Dashboard
+    <a href="#dashboard" data-page="dashboard" class="nav-item" data-click="navPage">
+      <span class="icon" data-icon="layout-dashboard"></span><span>Dash</span>
     </a>
-    <a href="#files" data-page="files" data-click="navPage">
-      <span class="icon" data-icon="folder"></span>Files
+    <a href="#live" data-page="live" class="nav-item" data-click="navPage">
+      <span class="icon" data-icon="activity"></span><span>Live</span>
     </a>
-    <a href="#sensors" data-page="sensors" data-click="navPage">
-      <span class="icon" data-icon="gauge"></span>Sensors
+    <a href="#sensors" data-page="sensors" class="nav-item" data-click="navPage">
+      <span class="icon" data-icon="thermometer"></span><span>Sensors</span>
     </a>
-    <a href="#settings" data-page="settings" data-click="navPage">
-      <span class="icon" data-icon="settings"></span>Settings
+    <a href="#files" data-page="files" class="nav-item" data-click="navPage">
+      <span class="icon" data-icon="folder"></span><span>Files</span>
+    </a>
+    <a href="#settings" data-page="settings" class="nav-item" data-click="navPage">
+      <span class="icon" data-icon="settings"></span><span>More</span>
     </a>
   </nav>
 

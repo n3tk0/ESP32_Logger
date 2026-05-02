@@ -1,7 +1,7 @@
 <main class="main-content page" id="page-settings_export">
-    <div class="page-header">
-      <h1><span data-icon="wifi"></span> Export</h1>
-      <div class="breadcrumb">
+    <div class="page-head">
+      <h1 class="page-title"><span data-icon="wifi"></span> Export</h1>
+      <div class="page-sub">
         <a href="#settings">Settings</a> / Export
       </div>
     </div>
@@ -10,57 +10,53 @@
 
     <!-- MQTT -->
     <div class="card">
-      <div class="card-header">
-        <span>🔗 MQTT</span>
-        <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
-          <input type="checkbox" id="exp-mqtt-en"> Enable
-        </label>
+      <div class="card-head">
+        <div class="card-title"><span data-icon="link"></span> MQTT</div>
+        <label class="switch"><input type="checkbox" id="exp-mqtt-en"><span></span></label>
       </div>
       <div class="card-body">
-        <p class="form-hint" style="margin-bottom:.75rem">
+        <p class="hint" style="margin-bottom:.75rem">
           Publishes each sensor reading to <code>{prefix}/device/{id}/sensor/{name}/{metric}</code>.
           Requires an MQTT broker (e.g. Mosquitto, Home Assistant, Node-RED).
         </p>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Broker Host</label>
-            <input type="text" id="exp-mqtt-host" class="form-input" placeholder="192.168.1.100">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label">Broker Host</label>
+            <input type="text" id="exp-mqtt-host" class="input" placeholder="192.168.1.100">
           </div>
-          <div class="form-group">
-            <label class="form-label">Port</label>
-            <input type="number" id="exp-mqtt-port" class="form-input" value="1883">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Topic Prefix</label>
-            <input type="text" id="exp-mqtt-prefix" class="form-input" value="waterlogger">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Client ID (leave blank = auto)</label>
-            <input type="text" id="exp-mqtt-clientid" class="form-input" placeholder="wl-DEVICEID">
+          <div class="field">
+            <label class="field-label">Port</label>
+            <input type="number" id="exp-mqtt-port" class="input" value="1883">
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Username</label>
-            <input type="text" id="exp-mqtt-user" class="form-input" autocomplete="off">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label">Topic Prefix</label>
+            <input type="text" id="exp-mqtt-prefix" class="input" value="waterlogger">
           </div>
-          <div class="form-group">
-            <label class="form-label">Password</label>
-            <input type="password" id="exp-mqtt-pass" class="form-input" autocomplete="new-password">
+          <div class="field">
+            <label class="field-label">Client ID (leave blank = auto)</label>
+            <input type="text" id="exp-mqtt-clientid" class="input" placeholder="wl-DEVICEID">
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Send Interval (ms)</label>
-            <input type="number" id="exp-mqtt-interval" class="form-input" value="60000" step="1000">
-            <p class="form-hint">How often to flush batched readings. Default 60 000 ms.</p>
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label">Username</label>
+            <input type="text" id="exp-mqtt-user" class="input" autocomplete="off">
           </div>
-          <div class="form-group" style="padding-top:1.5rem">
-            <label style="display:flex;gap:.4rem;align-items:center;cursor:pointer">
-              <input type="checkbox" id="exp-mqtt-retain"> Retain messages
-            </label>
+          <div class="field">
+            <label class="field-label">Password</label>
+            <input type="password" id="exp-mqtt-pass" class="input" autocomplete="new-password">
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label">Send Interval (ms)</label>
+            <input type="number" id="exp-mqtt-interval" class="input" value="60000" step="1000">
+            <p class="hint">How often to flush batched readings. Default 60 000 ms.</p>
+          </div>
+          <div class="field" style="justify-content:flex-end">
+            <label class="check"><input type="checkbox" id="exp-mqtt-retain"><span>Retain messages</span></label>
           </div>
         </div>
       </div>
@@ -68,80 +64,74 @@
 
     <!-- HTTP POST -->
     <div class="card">
-      <div class="card-header">
-        <span><span data-icon="globe"></span> HTTP POST</span>
-        <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
-          <input type="checkbox" id="exp-http-en"> Enable
-        </label>
+      <div class="card-head">
+        <div class="card-title"><span data-icon="globe"></span> HTTP POST</div>
+        <label class="switch"><input type="checkbox" id="exp-http-en"><span></span></label>
       </div>
       <div class="card-body">
-        <p class="form-hint" style="margin-bottom:.75rem">
+        <p class="hint" style="margin-bottom:.75rem">
           POSTs a JSON array of readings to any HTTP endpoint.
           Compatible with InfluxDB v2 (<code>/api/v2/write</code>), Grafana, custom servers.
         </p>
-        <div class="form-group">
-          <label class="form-label">URL</label>
-          <input type="text" id="exp-http-url" class="form-input" placeholder="http://192.168.1.100:8086/api/v2/write">
+        <div class="field">
+          <label class="field-label">URL</label>
+          <input type="text" id="exp-http-url" class="input" placeholder="http://192.168.1.100:8086/api/v2/write">
         </div>
-        <div class="form-group">
-          <label class="form-label">Authorization Header (optional)</label>
-          <input type="text" id="exp-http-auth" class="form-input" placeholder="Token mytoken  or  Bearer xyz">
-          <p class="form-hint">Sent as <code>Authorization: …</code></p>
+        <div class="field">
+          <label class="field-label">Authorization Header (optional)</label>
+          <input type="text" id="exp-http-auth" class="input" placeholder="Token mytoken  or  Bearer xyz">
+          <p class="hint">Sent as <code>Authorization: …</code></p>
         </div>
-        <div class="form-group">
-          <label class="form-label">Send Interval (ms)</label>
-          <input type="number" id="exp-http-interval" class="form-input" value="60000" step="1000">
+        <div class="field">
+          <label class="field-label">Send Interval (ms)</label>
+          <input type="number" id="exp-http-interval" class="input" value="60000" step="1000">
         </div>
       </div>
     </div>
 
     <!-- Sensor.Community -->
     <div class="card">
-      <div class="card-header">
-        <span><span data-icon="globe"></span> Sensor.Community</span>
-        <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
-          <input type="checkbox" id="exp-sc-en"> Enable
-        </label>
+      <div class="card-head">
+        <div class="card-title"><span data-icon="cloud-fog"></span> Sensor.Community</div>
+        <label class="switch"><input type="checkbox" id="exp-sc-en"><span></span></label>
       </div>
       <div class="card-body">
-        <p class="form-hint">
+        <p class="hint">
           Sends PM2.5/PM10 and environmental data to
           <a href="https://sensor.community" target="_blank">sensor.community</a>.
           Register your device at the site first to get a chip ID.
           The device ID is your ESP32 MAC-derived ID (shown in Device settings).
           Send interval must be ≥ 145 seconds (API requirement).
         </p>
-        <div class="form-group" style="margin-top:.75rem">
-          <label class="form-label">Send Interval (ms)</label>
-          <input type="number" id="exp-sc-interval" class="form-input" value="145000" min="145000">
+        <div class="field" style="margin-top:.75rem">
+          <label class="field-label">Send Interval (ms)</label>
+          <input type="number" id="exp-sc-interval" class="input" value="145000" min="145000">
         </div>
       </div>
     </div>
 
     <!-- openSenseMap -->
     <div class="card">
-      <div class="card-header">
-        <span>🗺️ openSenseMap</span>
-        <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
-          <input type="checkbox" id="exp-osm-en"> Enable
-        </label>
+      <div class="card-head">
+        <div class="card-title"><span data-icon="globe"></span> openSenseMap</div>
+        <label class="switch"><input type="checkbox" id="exp-osm-en"><span></span></label>
       </div>
       <div class="card-body">
-        <p class="form-hint" style="margin-bottom:.75rem">
+        <p class="hint" style="margin-bottom:.75rem">
           Sends readings to <a href="https://opensensemap.org" target="_blank">opensensemap.org</a>.
           Create a senseBox at the site, then copy the Box ID, access token and sensor IDs below.
         </p>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Box ID</label>
-            <input type="text" id="exp-osm-boxid" class="form-input" placeholder="5f3a...">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label">Box ID</label>
+            <input type="text" id="exp-osm-boxid" class="input" placeholder="5f3a...">
           </div>
-          <div class="form-group">
-            <label class="form-label">Access Token</label>
-            <input type="password" id="exp-osm-token" class="form-input" autocomplete="new-password">
+          <div class="field">
+            <label class="field-label">Access Token</label>
+            <input type="password" id="exp-osm-token" class="input" autocomplete="new-password">
           </div>
         </div>
-        <p class="form-hint" style="margin-bottom:.5rem">Sensor IDs — copy from your senseBox sensors:</p>
+        <p class="hint" style="margin-bottom:.5rem">Sensor IDs — copy from your senseBox sensors:</p>
         <div id="exp-osm-ids">
           <!-- Populated by expLoad() -->
         </div>
@@ -149,7 +139,7 @@
     </div>
 
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">
-      <button class="btn btn-primary" data-click="expSave"><span data-icon="save"></span> Save &amp; Restart</button>
-      <button class="btn btn-secondary" data-click="expLoad"><span data-icon="refresh-cw"></span> Reload</button>
+      <button class="btn primary" data-click="expSave"><span data-icon="save"></span> Save &amp; Restart</button>
+      <button class="btn" data-click="expLoad"><span data-icon="refresh-cw"></span> Reload</button>
     </div>
   </main>
