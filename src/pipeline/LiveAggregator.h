@@ -29,7 +29,10 @@ public:
     static constexpr uint8_t  MAX_COLUMNS    = 24;
     static constexpr uint8_t  COL_KEY_LEN    = 28;   // sensorType + '_' + metric
     static constexpr uint8_t  COL_HEADER_LEN = 28;
-    static constexpr size_t   ROW_BUF_BYTES  = 320;  // recommended buffer size
+    // Worst-case header is timestamp + MAX_COLUMNS * (1 comma + COL_HEADER_LEN-1)
+    // characters + NUL — 24*28 ≈ 700 bytes.  Keep the headroom at 1 KB so a
+    // future bump to 32 columns or 32-char names doesn't silently overflow.
+    static constexpr size_t   ROW_BUF_BYTES  = 1024;
 
     LiveAggregator();
     ~LiveAggregator();

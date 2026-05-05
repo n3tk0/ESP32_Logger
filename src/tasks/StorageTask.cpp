@@ -64,8 +64,8 @@ void storageTaskFunc(void* param) {
                   agg.humidityKappa(),
                   writingEnabled ? 1 : 0);
 
-    char headerBuf[320];
-    char rowBuf[320];
+    char headerBuf[LiveAggregator::ROW_BUF_BYTES];
+    char rowBuf   [LiveAggregator::ROW_BUF_BYTES];
 
     SensorReading r;
     while (TaskManager::running) {

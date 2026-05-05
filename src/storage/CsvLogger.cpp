@@ -106,18 +106,32 @@ bool CsvLogger::appendRow(uint32_t epoch, const char* headerLine, const char* ro
         Serial.printf("[CsvLogger] open FAILED: %s\n", path);
         return false;
     }
+
+    // Header is written once on file creation.  A short write here would
+    // leave a headerless file that future appends would silently corrupt;
+    // bail out and remove the empty file so the next call starts clean.
     if (isNew) {
-        f.println(headerLine);
+        size_t hwant    = strlen(headerLine);
+        size_t hwritten = f.write((const uint8_t*)headerLine, hwant);
+        size_t hnl      = f.write((uint8_t)'\n');
+        if (hwritten != hwant || hnl == 0) {
+            Serial.printf("[CsvLogger] short header write %u/%u — removing %s\n",
+                          (unsigned)hwritten, (unsigned)hwant, path);
+            f.close();
+            _fs->remove(path);
+            return false;
+        }
     }
+
     size_t want    = strlen(row);
     size_t written = f.write((const uint8_t*)row, want);
-    f.write((uint8_t)'\n');
+    size_t nl      = f.write((uint8_t)'\n');
     f.flush();
     f.close();
 
-    if (written != want) {
-        Serial.printf("[CsvLogger] short write %u/%u (disk full?)\n",
-                      (unsigned)written, (unsigned)want);
+    if (written != want || nl == 0) {
+        Serial.printf("[CsvLogger] short row write %u/%u nl=%u (disk full?)\n",
+                      (unsigned)written, (unsigned)want, (unsigned)nl);
         return false;
     }
     return true;

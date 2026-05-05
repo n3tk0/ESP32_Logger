@@ -62,21 +62,32 @@ int LiveAggregator::_findOrCreateCol(const char* id,
                                       const char* metric,
                                       const char* unit)
 {
-    char header[COL_HEADER_LEN];
-    _buildColumnHeader(header, sizeof(header), sensorType, metric);
+    const char* idSafe   = id         ? id         : "";
+    const char* typeSafe = sensorType ? sensorType : "";
+    const char* mSafe    = metric     ? metric     : "";
 
-    // First pass: exact header + same ownerId
+    // Identity match: (ownerId, sensorType, metric).  Comparing the display
+    // header would miss disambiguated columns whose header was suffixed with
+    // the id at creation time, leading to a fresh duplicate column on every
+    // feed() until the pool is exhausted.
     for (uint8_t i = 0; i < _nCols; i++) {
-        if (strncmp(_cols[i].header, header, sizeof(_cols[i].header)) == 0 &&
-            strncmp(_cols[i].ownerId, id, sizeof(_cols[i].ownerId)) == 0) {
+        if (strncmp(_cols[i].ownerId,    idSafe,   sizeof(_cols[i].ownerId))    == 0 &&
+            strncmp(_cols[i].sensorType, typeSafe, sizeof(_cols[i].sensorType)) == 0 &&
+            strncmp(_cols[i].metric,     mSafe,    sizeof(_cols[i].metric))     == 0) {
             return (int)i;
         }
     }
-    // Second pass: same header, different ownerId → disambiguate by appending
-    // the id suffix to a freshly-allocated column.
+
+    char header[COL_HEADER_LEN];
+    _buildColumnHeader(header, sizeof(header), typeSafe, mSafe);
+
+    // Collision detection: another instance already claimed this base header
+    // (same sensorType + metric, different ownerId).  Disambiguate by
+    // suffixing the id to the new column's display header.
     bool collision = false;
     for (uint8_t i = 0; i < _nCols; i++) {
-        if (strncmp(_cols[i].header, header, sizeof(_cols[i].header)) == 0) {
+        if (strncmp(_cols[i].sensorType, typeSafe, sizeof(_cols[i].sensorType)) == 0 &&
+            strncmp(_cols[i].metric,     mSafe,    sizeof(_cols[i].metric))     == 0) {
             collision = true;
             break;
         }
