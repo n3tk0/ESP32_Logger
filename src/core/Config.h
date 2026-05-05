@@ -45,7 +45,7 @@ constexpr const char* DEFAULT_DATALOG_PREFIX = "datalog";
 constexpr const char* DEFAULT_NTP_SERVER     = "pool.ntp.org";
 
 #define CONFIG_STRUCT_MAGIC  0xC0FFEE36
-#define CONFIG_VERSION       12
+#define CONFIG_VERSION       13
 
 // DS1302 RAM addresses for bootcount backup
 #define RTC_RAM_BOOTCOUNT_ADDR  0
@@ -154,6 +154,14 @@ struct DatalogConfig {
     float ffToPfThreshold;
     // v4.1.4+ Hold threshold
     uint16_t manualPressThresholdMs;
+    // v4.2 wide-CSV pipeline (CONFIG_VERSION 13).  All fields must remain at
+    // the END of the struct: the loader uses offsetof-based safe-copy to
+    // forward-migrate older binary configs, which only works if existing
+    // offsets are preserved.
+    bool     csvLoggingEnabled;          // 0 = legacy flowmeter, 1 = wide-CSV
+    uint16_t aggregationIntervalSec;     // RAM aggregator flush cadence (sec)
+    bool     humidityCorrectionEnabled;  // SDS011 k-Köhler correction
+    float    humidityCorrectionKappa;    // default 0.35
 };
 
 struct FlowMeterConfig {

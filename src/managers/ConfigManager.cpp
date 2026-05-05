@@ -49,6 +49,14 @@ static void applyDefaults() {
     if (!strlen(config.datalog.prefix))       SAFE_STRCPY(config.datalog.prefix,      DEFAULT_DATALOG_PREFIX);
     if (!strlen(config.datalog.currentFile))  SAFE_STRCPY(config.datalog.currentFile, "/datalog.txt");
 
+    // ── Wide-CSV pipeline (v13) ──────────────────────────────────────────────
+    if (config.datalog.aggregationIntervalSec == 0)
+        config.datalog.aggregationIntervalSec = 60;
+    if (config.datalog.aggregationIntervalSec > 3600)
+        config.datalog.aggregationIntervalSec = 3600;
+    if (badFloat(config.datalog.humidityCorrectionKappa))
+        config.datalog.humidityCorrectionKappa = 0.35f;
+
     // ── Network ───────────────────────────────────────────────────────────────
     if (!strlen(config.network.apSSID))     SAFE_STRCPY(config.network.apSSID,    DEFAULT_AP_SSID);
     if (!strlen(config.network.apPassword)) SAFE_STRCPY(config.network.apPassword, DEFAULT_AP_PASSWORD);
@@ -240,6 +248,11 @@ void loadDefaultConfig() {
     config.datalog.pfToFfThreshold      = 4.5f;
     config.datalog.ffToPfThreshold      = 3.7f;
     config.datalog.manualPressThresholdMs = 500;
+    // v13 wide-CSV pipeline defaults
+    config.datalog.csvLoggingEnabled         = false;  // opt-in, set by setup wizard
+    config.datalog.aggregationIntervalSec    = 60;
+    config.datalog.humidityCorrectionEnabled = false;
+    config.datalog.humidityCorrectionKappa   = 0.35f;
 
     // Flow meter
     config.flowMeter.pulsesPerLiter                = 450.0f;
@@ -319,6 +332,15 @@ void migrateConfig(uint8_t fromVersion) {
     if (fromVersion < 12) {
         config.hardware.defaultStorageView = 0;
         if (!strlen(config.network.apPassword)) SAFE_STRCPY(config.network.apPassword, DEFAULT_AP_PASSWORD);
+    }
+    if (fromVersion < 13) {
+        // Wide-CSV pipeline introduced.  Existing devices keep the legacy
+        // pipe-delimited datalog by default to avoid surprising format changes
+        // on upgrade — opt-in via Settings → Datalog.
+        config.datalog.csvLoggingEnabled         = false;
+        config.datalog.aggregationIntervalSec    = 60;
+        config.datalog.humidityCorrectionEnabled = false;
+        config.datalog.humidityCorrectionKappa   = 0.35f;
     }
     config.version = CONFIG_VERSION;
     config.hardware.version = CONFIG_VERSION;

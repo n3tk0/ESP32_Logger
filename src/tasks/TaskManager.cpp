@@ -81,6 +81,14 @@ bool TaskManager::init(fs::FS& fs) {
     storageParam.fs     = &fs;
     storageParam.logDir = s_logDir;
 
+    // Wide-CSV pipeline knobs sourced from DeviceConfig (set via web UI).
+    storageParam.csvLoggingEnabled         = config.datalog.csvLoggingEnabled;
+    storageParam.aggregationIntervalSec    = config.datalog.aggregationIntervalSec
+                                                ? config.datalog.aggregationIntervalSec : 60;
+    storageParam.humidityCorrectionEnabled = config.datalog.humidityCorrectionEnabled;
+    storageParam.humidityCorrectionKappa   = (config.datalog.humidityCorrectionKappa > 0.0f)
+                                                ? config.datalog.humidityCorrectionKappa : 0.35f;
+
     // Mirror write: if SD is primary and LittleFS is also available (or vice versa),
     // and config requests "mirror" mode, start a second StorageTask on the other FS.
     storageParam.mirrorFS = nullptr;

@@ -3,17 +3,32 @@
 #include <freertos/task.h>
 #include <FS.h>
 
-// Context passed to StorageTask at creation
+// ============================================================================
+// StorageTask — drains storageQueue and persists sensor readings.
+//
+// Two pipelines, selected at runtime via `csvLoggingEnabled`:
+//
+//   ┌───────────────┬─────────────────────────────────────────────────────────┐
+//   │ legacy (0)    │ JsonLogger writes one JSONL line per reading            │
+//   │ wide-CSV (1)  │ LiveAggregator buffers in RAM; CsvLogger emits a single │
+//   │               │ wide row every aggregationIntervalSec                   │
+//   └───────────────┴─────────────────────────────────────────────────────────┘
+//
+// Both pipelines respect fsMutex for serialised filesystem access and never
+// allocate during the steady-state write path (snprintf + static buffers).
+// ============================================================================
 struct StorageTaskParam {
     fs::FS*     fs;
-    const char* logDir      = "/logs";  // log directory path (#8)
-    uint32_t    maxSizeKB   = 512;      // per-file size limit before rotation
-    bool        rotateDaily = true;     // daily rotation (vs. size-only)
-    fs::FS*     mirrorFS    = nullptr;  // optional second FS for dual-write (#5/2.1)
+    const char* logDir      = "/logs";   // log directory path
+    uint32_t    maxSizeKB   = 512;       // per-file size cap before rotation
+    bool        rotateDaily = true;      // daily file rotation (vs. size only)
+    fs::FS*     mirrorFS    = nullptr;   // optional secondary FS for dual-write
+
+    // Wide-CSV pipeline knobs (used only when csvLoggingEnabled == true)
+    bool        csvLoggingEnabled         = false;
+    uint16_t    aggregationIntervalSec    = 60;
+    bool        humidityCorrectionEnabled = false;
+    float       humidityCorrectionKappa   = 0.35f;
 };
 
-// ============================================================================
-// StorageTask — drains storageQueue and writes JSON lines to filesystem.
-// Priority: TASK_PRIO_STORAGE
-// ============================================================================
 void storageTaskFunc(void* param);
