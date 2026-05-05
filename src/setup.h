@@ -170,7 +170,7 @@
 #  define STACK_SLOW_SENSOR_TASK 4096   // Blocking sensor reads (UART + delay)
 #endif
 #ifndef STACK_STORAGE_TASK
-#  define STACK_STORAGE_TASK     6144   // Two JsonLogger + File I/O
+#  define STACK_STORAGE_TASK     6144   // LiveAggregator + CsvLogger + File I/O
 #endif
 #ifndef STACK_EXPORT_TASK
 #  define STACK_EXPORT_TASK      8192   // WiFi + TLS + JSON serialisation
@@ -248,7 +248,3 @@
 #  define EXPORT_MAX_SENDALL_MS 30000     // 30 s circuit breaker
 #endif
 
-// JsonLogger write buffer (lines flushed at once)
-#ifndef LOG_BUF_LINES
-#  define LOG_BUF_LINES 8
-#endif

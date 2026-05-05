@@ -158,7 +158,7 @@ struct DatalogConfig {
     // the END of the struct: the loader uses offsetof-based safe-copy to
     // forward-migrate older binary configs, which only works if existing
     // offsets are preserved.
-    bool     csvLoggingEnabled;          // 0 = legacy flowmeter, 1 = wide-CSV
+    bool     csvLoggingEnabled;          // wide-CSV pipeline kill switch (default on)
     uint16_t aggregationIntervalSec;     // RAM aggregator flush cadence (sec)
     bool     humidityCorrectionEnabled;  // SDS011 k-Köhler correction
     float    humidityCorrectionKappa;    // default 0.35

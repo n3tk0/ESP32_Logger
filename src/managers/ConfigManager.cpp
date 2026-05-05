@@ -249,7 +249,7 @@ void loadDefaultConfig() {
     config.datalog.ffToPfThreshold      = 3.7f;
     config.datalog.manualPressThresholdMs = 500;
     // v13 wide-CSV pipeline defaults
-    config.datalog.csvLoggingEnabled         = false;  // opt-in, set by setup wizard
+    config.datalog.csvLoggingEnabled         = true;
     config.datalog.aggregationIntervalSec    = 60;
     config.datalog.humidityCorrectionEnabled = false;
     config.datalog.humidityCorrectionKappa   = 0.35f;
@@ -334,10 +334,10 @@ void migrateConfig(uint8_t fromVersion) {
         if (!strlen(config.network.apPassword)) SAFE_STRCPY(config.network.apPassword, DEFAULT_AP_PASSWORD);
     }
     if (fromVersion < 13) {
-        // Wide-CSV pipeline introduced.  Existing devices keep the legacy
-        // pipe-delimited datalog by default to avoid surprising format changes
-        // on upgrade — opt-in via Settings → Datalog.
-        config.datalog.csvLoggingEnabled         = false;
+        // Wide-CSV pipeline introduced.  JsonLogger has been removed; sensor
+        // data is now persisted as wide CSV.  Default the kill switch to ON so
+        // existing devices keep logging on upgrade.
+        config.datalog.csvLoggingEnabled         = true;
         config.datalog.aggregationIntervalSec    = 60;
         config.datalog.humidityCorrectionEnabled = false;
         config.datalog.humidityCorrectionKappa   = 0.35f;

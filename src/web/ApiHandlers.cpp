@@ -8,7 +8,11 @@
 #include "../sensors/SensorManager.h"
 #include "../export/ExportManager.h"
 #include "../export/MqttExporter.h"
-#include "../storage/JsonLogger.h"
+// Historical sensor data is now persisted as wide CSV by StorageTask
+// (see src/pipeline/LiveAggregator + src/storage/CsvLogger).  The CSV
+// query/streaming endpoint that replaces JsonLogger lands with the
+// Smart Dashboard rework (chunk F).  Until then, /api/data serves
+// the in-memory ring buffer only — historical FS queries return 0 rows.
 #include "../core/Globals.h"         // config, activeFS
 #include "../core/ModuleRegistry.h"  // Pass 5 phase 3: /api/modules
 #include "../managers/ConfigManager.h" // saveConfig() after module update
@@ -121,29 +125,15 @@ static void handleApiData(AsyncWebServerRequest* req) {
     }
 
     if (historicalPath && activeFS) {
-        // Streaming path: Accum[] allocated inside, freed before return (P1/3.1)
-        static JsonLogger logger;
-        if (configMutex && xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-            aggCount = logger.streamAggregateQuery(*activeFS, fromTs, toTs,
-                                                    sensorFilter, metricFilter,
-                                                    agg, limit,
-                                                    bucket, mode, limit);
-            xSemaphoreGive(configMutex);
-        }
-        delete[] raw;  // ring buffer was empty; free it
+        // FS-backed history is migrating to wide CSV — chunk F will land a
+        // dedicated CSV-streaming endpoint.  Until then this path returns
+        // zero historical rows; recent data still flows from the ring buffer.
+        aggCount = 0;
+        delete[] raw;
         raw = nullptr;
     } else {
-        // Raw path: query FS for remaining slots, merge with ring, then aggregate
-        if (activeFS) {
-            static JsonLogger logger;
-            if (configMutex && xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-                size_t fsShare = MAX_RAW - ringCount;  // full budget when ring is empty
-                fsCount = logger.query(*activeFS, fromTs, toTs,
-                                       sensorFilter, metricFilter,
-                                       raw + ringCount, fsShare);
-                xSemaphoreGive(configMutex);
-            }
-        }
+        // FS query disabled until the wide-CSV reader ships (chunk F).
+        fsCount = 0;
 
         size_t rawCount = ringCount + fsCount;
         truncated = (rawCount >= MAX_RAW);
