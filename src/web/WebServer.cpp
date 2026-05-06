@@ -29,6 +29,8 @@
 #include <memory>
 #include <vector>
 #include <math.h>
+#include <time.h>
+#include <sys/time.h>
 
 // Safe strncpy that always null-terminates
 #define SAFE_STRNCPY(dst, src, n) do { strncpy(dst, src, (n) - 1); dst[(n) - 1] = '\0'; } while(0)
@@ -452,12 +454,17 @@ void setupWebServer() {
         o["defaultStorageView"] = config.hardware.defaultStorageView;
         o["currentFile"]        = getActiveDatalogFile();
 
+        o["rtcPresent"] = (Rtc != nullptr);
         if (Rtc) {
             o["rtcProtected"] = Rtc->GetIsWriteProtected();
             o["rtcRunning"]   = Rtc->GetIsRunning();
+            RtcDateTime rtNow = Rtc->GetDateTime();
+            o["timeSource"]   = (rtNow.Year() >= 2020) ? "rtc" : "unknown";
         } else {
             o["rtcProtected"] = false;
             o["rtcRunning"]   = false;
+            time_t sysT = time(nullptr);
+            o["timeSource"]   = (sysT > 1000000000L) ? "ntp" : "unknown";
         }
     };
 
@@ -1083,28 +1090,39 @@ void setupWebServer() {
             r->send(409, "application/json", "{\"ok\":false,\"error\":\"Busy\"}");
             return;
         }
-        if (r->hasParam("date", true) && r->hasParam("time", true) && Rtc) {
+        if (r->hasParam("date", true) && r->hasParam("time", true)) {
             String ds = r->getParam("date", true)->value();
             String ts = r->getParam("time", true)->value();
             int yr = ds.substring(0,4).toInt(), mo = ds.substring(5,7).toInt(), dy = ds.substring(8,10).toInt();
             int hr = ts.substring(0,2).toInt(), mi = ts.substring(3,5).toInt();
-            RtcDateTime dt(yr, mo, dy, hr, mi, 0);
-            // RAII guard: re-enable RTC write protection on every exit path
-            // (success, verify-failed, early return).  Previous code left the
-            // RTC writable if the write failed or SetDateTime threw — next
-            // glitch could silently corrupt clock state.
-            struct RtcWriteGuard {
-                ~RtcWriteGuard() { if (Rtc) Rtc->SetIsWriteProtected(true); }
-            } guard;
-            Rtc->SetIsWriteProtected(false); delay(10);
-            Rtc->SetIsRunning(true); delay(10);
-            Rtc->SetDateTime(dt); delay(100);
-            RtcDateTime v = Rtc->GetDateTime();
-            bool ok = (v.Year() == yr && v.Month() == mo && v.Day() == dy);
-            if (ok) rtcValid = true;
+
+            // Always set the POSIX system clock so time(nullptr) works even
+            // without hardware RTC.  Input is treated as UTC to stay consistent
+            // with NTP and gmtime_r usage elsewhere in the codebase.
+            struct tm ti = {};
+            ti.tm_year = yr - 1900; ti.tm_mon = mo - 1; ti.tm_mday = dy;
+            ti.tm_hour = hr; ti.tm_min = mi; ti.tm_sec = 0;
+            time_t epoch = mktime(&ti);
+            struct timeval tv = { epoch, 0 };
+            settimeofday(&tv, nullptr);
+            rtcValid = true;
+
+            bool ok = true;
+            if (Rtc) {
+                // RAII guard: re-enable RTC write protection on every exit path.
+                struct RtcWriteGuard {
+                    ~RtcWriteGuard() { if (Rtc) Rtc->SetIsWriteProtected(true); }
+                } guard;
+                RtcDateTime dt(yr, mo, dy, hr, mi, 0);
+                Rtc->SetIsWriteProtected(false); delay(10);
+                Rtc->SetIsRunning(true); delay(10);
+                Rtc->SetDateTime(dt); delay(100);
+                RtcDateTime v = Rtc->GetDateTime();
+                ok = (v.Year() == yr && v.Month() == mo && v.Day() == dy);
+            }
             r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"RTC write failed\"}");
         } else {
-            r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing params or no RTC\"}");
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing date or time\"}");
         }
     });
 

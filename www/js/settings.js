@@ -793,20 +793,38 @@ function timeInit() {
       setEl("time-boot", d.boot);
       var bak = document.getElementById("bootBak");
       if (bak) bak.textContent = "-";
+
+      // RTC-present: show/hide hardware-only sections
+      var rtcPresent = !!d.rtcPresent;
+      var optCard = document.getElementById("rtcOptionsCard");
+      if (optCard) optCard.style.display = rtcPresent ? "" : "none";
+      var absentBanner = document.getElementById("rtcAbsentBanner");
+      if (absentBanner) absentBanner.style.display = rtcPresent ? "none" : "";
+
       var status = document.getElementById("rtcStatus");
       if (status) {
-        status.className = !d.rtcRunning
-          ? "alert alert-error"
-          : "alert alert-success";
-        status.innerHTML = !d.rtcRunning ? "❌ RTC Error" : "✅ RTC OK";
+        var src = d.timeSource || "unknown";
+        if (src === "rtc") {
+          status.className = "alert alert-success";
+          status.innerHTML = "✅ RTC";
+        } else if (src === "ntp") {
+          status.className = "alert alert-success";
+          status.innerHTML = "✅ NTP";
+        } else {
+          status.className = "alert alert-" + (rtcPresent ? "error" : "warning");
+          status.innerHTML = rtcPresent ? "❌ RTC Error" : "⚠️ Time not set";
+        }
       }
       var detail = document.getElementById("rtcDetail");
-      if (detail)
-        detail.textContent =
-          "Protected: " +
-          (d.rtcProtected ? "Yes" : "No") +
-          " | Running: " +
-          (d.rtcRunning ? "Yes" : "No");
+      if (detail) {
+        if (rtcPresent) {
+          detail.textContent =
+            "Protected: " + (d.rtcProtected ? "Yes" : "No") +
+            " | Running: " + (d.rtcRunning ? "Yes" : "No");
+        } else {
+          detail.textContent = "Source: " + (d.timeSource === "ntp" ? "NTP system clock" : "Not set — use NTP or manual set below");
+        }
+      }
       setChk("time-rtcProt", d.rtcProtected);
       var ntpSt = document.getElementById("ntpStatus");
       if (ntpSt) {
