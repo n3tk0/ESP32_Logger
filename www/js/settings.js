@@ -200,14 +200,14 @@ function sfInit() {
         })
         .then(function (s) {
           setEl("sf-boot", s.boot);
+          // Chunk G: redirect to settings hub when this build was
+          // compiled without SENSOR_WATERFLOW_ENABLED.  The page is
+          // already hidden in the hub but a hash-jump still lands here.
+          if (s.caps && s.caps.flowmeter === false) {
+            location.hash = "#settings";
+          }
         });
     });
-  // Unified Sensors page: also populate the additional-sensor list
-  // from platform_config.json (the form uses /save_flowmeter; the list
-  // uses /save_platform via clSave()).
-  if (document.getElementById("cl-sensors-list")) {
-    clLoad();
-  }
 }
 
 // ============================================================================
@@ -292,6 +292,10 @@ function hwInit() {
         if (img)  img.src = th.boardDiagramPath + "?v=" + Date.now();
       }
     });
+  // Chunk G: sensor list moved here from the (legacy) Flow Meter page.
+  if (document.getElementById("cl-sensors-list") && typeof clLoad === "function") {
+    clLoad();
+  }
 }
 
 // ============================================================================

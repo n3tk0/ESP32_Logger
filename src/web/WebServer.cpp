@@ -466,6 +466,18 @@ void setupWebServer() {
             time_t sysT = time(nullptr);
             o["timeSource"]   = (sysT > 1000000000L) ? "ntp" : "unknown";
         }
+
+        // Build-time capability flags — UI uses these to hide pages/cards
+        // for features the firmware was built without.  Flowmeter is the
+        // only optional sensor with its own settings page; the others
+        // (BME280, SDS011, …) live in the unified sensor list.
+        JsonObject caps = o["caps"].to<JsonObject>();
+#if defined(SENSOR_WATERFLOW_ENABLED)
+        caps["flowmeter"] = true;
+#else
+        caps["flowmeter"] = false;
+#endif
+        caps["platformMode"] = (int)g_platformMode;
     };
 
     auto fillTheme = [](JsonObject o) {
@@ -917,6 +929,13 @@ void setupWebServer() {
 
     server.on("/save_flowmeter", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+#if !defined(SENSOR_WATERFLOW_ENABLED)
+        // Chunk G: feature compiled out — return 410 Gone so the UI can
+        // surface a meaningful error if it's still bookmarked or cached.
+        r->send(410, "application/json",
+                "{\"ok\":false,\"error\":\"flowmeter not built into this firmware\"}");
+        return;
+#endif
         if (r->hasParam("pulsesPerLiter", true)) {
             float v = r->getParam("pulsesPerLiter", true)->value().toFloat();
             config.flowMeter.pulsesPerLiter = (v >= 1.0f && isfinite(v)) ? v : 450.0f;

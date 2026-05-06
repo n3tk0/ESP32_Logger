@@ -544,7 +544,29 @@ function pageInit(page) {
     case "settings_modules":
       modulesInit();
       break;
+    case "settings":
+      // Chunk G: hide settings cards for build-time-disabled features.
+      // /api/status fills ST.caps; if it isn't loaded yet, kick a fetch
+      // and re-apply once it lands.
+      applyCapsToSettingsHub();
+      break;
   }
+}
+
+// Hide the Flow Meter settings card when the firmware was built without
+// SENSOR_WATERFLOW_ENABLED.  Pulls capability flags from ST.caps (cached
+// from /api/status) — falls back to a fresh fetch if the cache is empty.
+function applyCapsToSettingsHub() {
+  function apply(caps) {
+    if (!caps) return;
+    var fm = document.getElementById("settings-card-flowmeter");
+    if (fm) fm.style.display = caps.flowmeter === false ? "none" : "";
+  }
+  if (ST && ST.caps) { apply(ST.caps); return; }
+  fetch("/api/status")
+    .then(function (r) { return r.json(); })
+    .then(function (s) { ST = s; apply(s.caps || {}); })
+    .catch(function () {});
 }
 
 // ============================================================================
