@@ -154,14 +154,6 @@ struct DatalogConfig {
     float ffToPfThreshold;
     // v4.1.4+ Hold threshold
     uint16_t manualPressThresholdMs;
-    // v4.2 wide-CSV pipeline (CONFIG_VERSION 13).  All fields must remain at
-    // the END of the struct: the loader uses offsetof-based safe-copy to
-    // forward-migrate older binary configs, which only works if existing
-    // offsets are preserved.
-    bool     csvLoggingEnabled;          // wide-CSV pipeline kill switch (default on)
-    uint16_t aggregationIntervalSec;     // RAM aggregator flush cadence (sec)
-    bool     humidityCorrectionEnabled;  // SDS011 k-Köhler correction
-    float    humidityCorrectionKappa;    // default 0.35
 };
 
 struct FlowMeterConfig {
@@ -194,6 +186,22 @@ struct HardwareConfig {
     uint8_t defaultStorageView;
     uint16_t debounceMs;
     uint8_t reserved[5];
+};
+
+// LoggerConfig — wide-CSV pipeline + sensor logging knobs (v13).
+//
+// IMPORTANT: this struct lives at the END of DeviceConfig.  The on-disk
+// migration in ConfigManager::loadConfig() uses offsetof-based safe-copy
+// to forward-migrate older binary configs; appending here means the
+// offsets of every pre-v13 field stay stable and old binaries keep
+// loading cleanly.  Future fields go at the end of LoggerConfig (or
+// inside the `reserved` tail if size-stable padding is needed).
+struct LoggerConfig {
+    bool     csvLoggingEnabled;          // wide-CSV pipeline kill switch (default on)
+    uint16_t aggregationIntervalSec;     // RAM aggregator flush cadence (sec)
+    bool     humidityCorrectionEnabled;  // SDS011 k-Köhler correction
+    float    humidityCorrectionKappa;    // default 0.35
+    uint8_t  reserved[16];               // future v13+ fields without ABI break
 };
 
 struct NetworkConfig {
@@ -229,6 +237,7 @@ struct DeviceConfig {
     FlowMeterConfig flowMeter;
     HardwareConfig hardware;
     NetworkConfig  network;
+    LoggerConfig   logger;     // appended in v13 — keep at the end
 };
 
 struct LogEntry {

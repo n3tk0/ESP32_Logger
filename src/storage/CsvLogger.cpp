@@ -1,4 +1,5 @@
 #include "CsvLogger.h"
+#include "../pipeline/LiveAggregator.h"   // ROW_BUF_BYTES — must match aggregator
 #include <string.h>
 #include <time.h>
 
@@ -29,8 +30,11 @@ void CsvLogger::_getDate(uint32_t epoch, char* dateBuf) const {
         snprintf(dateBuf, 12, "day-%06lu", (unsigned long)day);
         return;
     }
+    // gmtime_r: thread-safe variant.  CsvLogger is currently called only from
+    // StorageTask but the web UI may share time funcs in future chunks.
     time_t t = (time_t)epoch;
-    struct tm* tmInfo = gmtime(&t);
+    struct tm tmStorage;
+    struct tm* tmInfo = gmtime_r(&t, &tmStorage);
     if (tmInfo) {
         strftime(dateBuf, 12, "%Y-%m-%d", tmInfo);
     } else {
@@ -62,7 +66,9 @@ bool CsvLogger::_readFirstLine(const char* path, char* buf, size_t bufLen) const
 // ---------------------------------------------------------------------------
 void CsvLogger::_rotate(const char* path) {
     if (!_fs) return;
-    char bak[80];
+    // path[80] + ".bak" + NUL — give 16 bytes of headroom so future path-
+    // length bumps don't silently truncate the backup name.
+    char bak[96];
     snprintf(bak, sizeof(bak), "%s.bak", path);
     _fs->remove(bak);             // discard previous .bak if any
     _fs->rename(path, bak);
@@ -88,9 +94,11 @@ bool CsvLogger::appendRow(uint32_t epoch, const char* headerLine, const char* ro
     _buildPath(path, sizeof(path), epoch);
 
     // Schema-change guard: rotate if the existing file's header doesn't
-    // match what we're about to write.
+    // match what we're about to write.  Buffer must be at least
+    // LiveAggregator::ROW_BUF_BYTES so a long header line doesn't truncate
+    // here and cause a spurious schema-mismatch on every append.
     if (_fs->exists(path)) {
-        char existing[256];
+        char existing[LiveAggregator::ROW_BUF_BYTES];
         if (_readFirstLine(path, existing, sizeof(existing))) {
             if (strcmp(existing, headerLine) != 0) {
                 Serial.println("[CsvLogger] schema change — rotating file");

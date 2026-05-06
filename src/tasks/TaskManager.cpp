@@ -82,12 +82,12 @@ bool TaskManager::init(fs::FS& fs) {
     storageParam.logDir = s_logDir;
 
     // Wide-CSV pipeline knobs sourced from DeviceConfig (set via web UI).
-    storageParam.csvLoggingEnabled         = config.datalog.csvLoggingEnabled;
-    storageParam.aggregationIntervalSec    = config.datalog.aggregationIntervalSec
-                                                ? config.datalog.aggregationIntervalSec : 60;
-    storageParam.humidityCorrectionEnabled = config.datalog.humidityCorrectionEnabled;
-    storageParam.humidityCorrectionKappa   = (config.datalog.humidityCorrectionKappa > 0.0f)
-                                                ? config.datalog.humidityCorrectionKappa : 0.35f;
+    storageParam.csvLoggingEnabled         = config.logger.csvLoggingEnabled;
+    storageParam.aggregationIntervalSec    = config.logger.aggregationIntervalSec
+                                                ? config.logger.aggregationIntervalSec : 60;
+    storageParam.humidityCorrectionEnabled = config.logger.humidityCorrectionEnabled;
+    storageParam.humidityCorrectionKappa   = (config.logger.humidityCorrectionKappa > 0.0f)
+                                                ? config.logger.humidityCorrectionKappa : 0.35f;
 
     // FlowRunLogger: per-fill flowmeter logging.  Active in PLATFORM_HYBRID
     // only — PLATFORM_LEGACY uses DataLogger.cpp's run logger and

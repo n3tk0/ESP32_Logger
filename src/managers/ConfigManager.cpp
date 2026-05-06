@@ -49,13 +49,13 @@ static void applyDefaults() {
     if (!strlen(config.datalog.prefix))       SAFE_STRCPY(config.datalog.prefix,      DEFAULT_DATALOG_PREFIX);
     if (!strlen(config.datalog.currentFile))  SAFE_STRCPY(config.datalog.currentFile, "/datalog.txt");
 
-    // ── Wide-CSV pipeline (v13) ──────────────────────────────────────────────
-    if (config.datalog.aggregationIntervalSec == 0)
-        config.datalog.aggregationIntervalSec = 60;
-    if (config.datalog.aggregationIntervalSec > 3600)
-        config.datalog.aggregationIntervalSec = 3600;
-    if (badFloat(config.datalog.humidityCorrectionKappa))
-        config.datalog.humidityCorrectionKappa = 0.35f;
+    // ── Logger (wide-CSV pipeline, v13) ─────────────────────────────────────
+    if (config.logger.aggregationIntervalSec == 0)
+        config.logger.aggregationIntervalSec = 60;
+    if (config.logger.aggregationIntervalSec > 3600)
+        config.logger.aggregationIntervalSec = 3600;
+    if (badFloat(config.logger.humidityCorrectionKappa))
+        config.logger.humidityCorrectionKappa = 0.35f;
 
     // ── Network ───────────────────────────────────────────────────────────────
     if (!strlen(config.network.apSSID))     SAFE_STRCPY(config.network.apSSID,    DEFAULT_AP_SSID);
@@ -248,11 +248,6 @@ void loadDefaultConfig() {
     config.datalog.pfToFfThreshold      = 4.5f;
     config.datalog.ffToPfThreshold      = 3.7f;
     config.datalog.manualPressThresholdMs = 500;
-    // v13 wide-CSV pipeline defaults
-    config.datalog.csvLoggingEnabled         = true;
-    config.datalog.aggregationIntervalSec    = 60;
-    config.datalog.humidityCorrectionEnabled = false;
-    config.datalog.humidityCorrectionKappa   = 0.35f;
 
     // Flow meter
     config.flowMeter.pulsesPerLiter                = 450.0f;
@@ -303,6 +298,12 @@ void loadDefaultConfig() {
     config.network.apGateway[2] = 4;   config.network.apGateway[3] = 1;
     config.network.apSubnet[0]  = 255; config.network.apSubnet[1]  = 255;
     config.network.apSubnet[2]  = 255; config.network.apSubnet[3]  = 0;
+
+    // Logger (v13 wide-CSV pipeline)
+    config.logger.csvLoggingEnabled         = true;
+    config.logger.aggregationIntervalSec    = 60;
+    config.logger.humidityCorrectionEnabled = false;
+    config.logger.humidityCorrectionKappa   = 0.35f;
 }
 
 // ============================================================================
@@ -336,11 +337,12 @@ void migrateConfig(uint8_t fromVersion) {
     if (fromVersion < 13) {
         // Wide-CSV pipeline introduced.  JsonLogger has been removed; sensor
         // data is now persisted as wide CSV.  Default the kill switch to ON so
-        // existing devices keep logging on upgrade.
-        config.datalog.csvLoggingEnabled         = true;
-        config.datalog.aggregationIntervalSec    = 60;
-        config.datalog.humidityCorrectionEnabled = false;
-        config.datalog.humidityCorrectionKappa   = 0.35f;
+        // existing devices keep logging on upgrade.  Fields live in the new
+        // top-level LoggerConfig appended at the end of DeviceConfig.
+        config.logger.csvLoggingEnabled         = true;
+        config.logger.aggregationIntervalSec    = 60;
+        config.logger.humidityCorrectionEnabled = false;
+        config.logger.humidityCorrectionKappa   = 0.35f;
     }
     config.version = CONFIG_VERSION;
     config.hardware.version = CONFIG_VERSION;
@@ -447,6 +449,7 @@ bool loadConfig() {
         SAFE_COPY(flowMeter);
         SAFE_COPY(hardware);
         SAFE_COPY(network);
+        SAFE_COPY(logger);   // v13+; pre-v13 binaries fall through to defaults
 
         #undef SAFE_COPY
 
