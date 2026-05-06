@@ -181,7 +181,12 @@
 #  define STACK_SLOW_SENSOR_TASK 4096   // Blocking sensor reads (UART + delay)
 #endif
 #ifndef STACK_STORAGE_TASK
-#  define STACK_STORAGE_TASK     6144   // LiveAggregator + CsvLogger + File I/O
+#  define STACK_STORAGE_TASK     8192   // LiveAggregator (~2.4 KB) + StorageTask
+                                        // local row/header buffers (2 KB) +
+                                        // CsvLogger.appendRow() 1 KB on-stack
+                                        // existing-header buffer + FS driver
+                                        // overhead — needs headroom for
+                                        // worst-case wide-CSV schema.
 #endif
 #ifndef STACK_EXPORT_TASK
 #  define STACK_EXPORT_TASK      8192   // WiFi + TLS + JSON serialisation

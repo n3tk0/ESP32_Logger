@@ -85,11 +85,13 @@ void storageTaskFunc(void* param) {
 
         // Drain available readings into the aggregator (and the run logger
         // when active).  The 100 ms wait keeps the heartbeat fresh while
-        // still draining bursts.
+        // still draining bursts.  When CSV writing is disabled the
+        // aggregator must be skipped — it would otherwise accumulate sum/
+        // count forever (no flush ever resets them in drain-only mode).
         uint32_t feedEpoch = nowEpochSafe();
         while (xQueueReceive(storageQueue, &r, pdMS_TO_TICKS(100)) == pdTRUE) {
-            agg.feed(r);
-            if (flowRunActive) flowRunLog.feed(r, feedEpoch);
+            if (writingEnabled) agg.feed(r);
+            if (flowRunActive)  flowRunLog.feed(r, feedEpoch);
         }
 
         uint32_t epoch = nowEpochSafe();
