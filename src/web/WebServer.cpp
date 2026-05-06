@@ -1132,14 +1132,17 @@ void setupWebServer() {
             int hr = ts.substring(0,2).toInt(), mi = ts.substring(3,5).toInt();
 
             // Always set the POSIX system clock so time(nullptr) works even
-            // without hardware RTC.  Input is treated as UTC, so we use
-            // timegm() (not mktime()) — mktime() would interpret the tm as
-            // local time per the system TZ and return an epoch off by the
-            // configured timezone offset.
+            // without hardware RTC.  Input is treated as UTC.  ESP32's newlib
+            // does not expose timegm(); we get UTC-mktime by saving TZ,
+            // forcing UTC0 around mktime(), then restoring.
             struct tm ti = {};
             ti.tm_year = yr - 1900; ti.tm_mon = mo - 1; ti.tm_mday = dy;
             ti.tm_hour = hr; ti.tm_min = mi; ti.tm_sec = 0;
-            time_t epoch = timegm(&ti);
+            const char* prevTz = getenv("TZ");
+            setenv("TZ", "UTC0", 1); tzset();
+            time_t epoch = mktime(&ti);
+            if (prevTz) setenv("TZ", prevTz, 1); else unsetenv("TZ");
+            tzset();
             struct timeval tv = { epoch, 0 };
             settimeofday(&tv, nullptr);
             rtcValid = true;
