@@ -40,12 +40,13 @@
         Logger</span></div>
     <nav>
       <div class="nav-section">Main</div><a href="#dashboard" data-page="dashboard" class="nav-item"
-        data-click="navPage"><span class="icon">📊</span><span>Dashboard</span></a><a href="#files"
-        data-page="files" class="nav-item" data-click="navPage"><span
-          class="icon">📁</span><span>Files</span></a><a href="#live" data-page="live" class="nav-item"
-        data-click="navPage"><span class="icon">📡</span><span>Live</span></a><a href="#sensors"
+        data-click="navPage"><span class="icon">📊</span><span>Dashboard</span></a><a href="#sensors"
         data-page="sensors" class="nav-item" data-click="navPage"><span
-          class="icon">🌡️</span><span>Sensors</span></a>
+          class="icon">🌡️</span><span>Sensors</span></a><a href="#live" data-page="live" class="nav-item"
+        data-click="navPage"><span class="icon">📡</span><span>Live</span></a><a href="#logs"
+        data-page="logs" class="nav-item" data-click="navPage"><span
+          class="icon">📒</span><span>Logs</span></a><a href="#files" data-page="files" class="nav-item"
+        data-click="navPage"><span class="icon">📁</span><span>Files</span></a>
       <div class="nav-section">System</div><a href="#settings" data-page="settings" class="nav-item"
         data-click="navPage"><span class="icon">⚙️</span><span>Settings</span></a><a href="#update"
         data-page="update" class="nav-item" data-click="navPage"><span
@@ -64,8 +65,52 @@
 
   <!-- ═══ PAGE: DASHBOARD ═══ -->
   <main class="main-content page" id="page-dashboard">
-    <div class="page-header">
+    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.75rem">
       <h1>📊 Dashboard</h1>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:.4rem;font-size:.85rem">
+          Time:
+          <select id="db-range" class="form-input form-select" style="width:auto;padding:.2rem .5rem;font-size:.85rem" data-change="dbRangeChange">
+            <option value="900">Last 15 min</option>
+            <option value="3600" selected>Last 1 h</option>
+            <option value="43200">Last 12 h</option>
+            <option value="86400">Last 24 h</option>
+          </select>
+        </label>
+        <span id="db-poll-status" class="text-muted" style="font-size:.75rem">⏳</span>
+        <button class="btn btn-sm btn-secondary" data-click="dbRefreshNow" title="Refresh now">🔄</button>
+      </div>
+    </div>
+
+    <div id="errorMsg" class="alert alert-error" style="display:none"></div>
+
+    <!-- Empty state (shown when /api/sensors returns no sensors) -->
+    <div id="db-empty" class="card" style="display:none">
+      <div class="card-body text-center" style="padding:2rem 1rem">
+        <div style="font-size:2rem">🛰️</div>
+        <p style="margin:.5rem 0 0">No sensors registered yet.</p>
+        <p class="form-hint">Set platform mode to <strong>Continuous</strong> or
+          <strong>Hybrid</strong> in <a href="#settings_corelogic">Core Logic</a>
+          and add sensors to start streaming data.</p>
+      </div>
+    </div>
+
+    <!-- Loading skeleton (shown during first sensor fetch) -->
+    <div id="db-loading" class="dashboard-grid">
+      <div class="sensor-card-mini skeleton"></div>
+      <div class="sensor-card-mini skeleton"></div>
+      <div class="sensor-card-mini skeleton"></div>
+    </div>
+
+    <!-- Sensor cards grid -->
+    <div id="db-cards" class="dashboard-grid" style="display:none"></div>
+  </main>
+
+  <!-- ═══ PAGE: LOG VIEWER (legacy txt log analysis) ═══ -->
+  <main class="main-content page" id="page-logs">
+    <div class="page-header">
+      <h1>📒 Log Viewer</h1>
+      <div class="breadcrumb">Per-fill flowmeter log analysis (PLATFORM_LEGACY / HYBRID)</div>
     </div>
 
     <!-- File selector -->
@@ -118,11 +163,8 @@
       </div>
     </div>
 
-    <div id="errorMsg" class="alert alert-error" style="display:none"></div>
-
-    <div id="db-error" class="alert alert-error" style="display:none"></div>
+    <div id="logsErrorMsg" class="alert alert-error" style="display:none"></div>
     <!-- Stats -->
-    <div id="db-error" class="alert alert-error" style="display:none"></div>
     <div class="stats-grid mb-2">
       <div class="stat-card">
         <div class="value" id="db-totalVol">0.00</div>

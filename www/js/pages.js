@@ -74,13 +74,251 @@ function dbLoadUPlot(cb) {
   document.head.appendChild(s);
 }
 
+// ============================================================================
+// SMART DASHBOARD — sensor cards with uPlot sparklines + /api/latest polling.
+// State is held in module-scope vars so dbStopPolling() (called from core.js
+// on navigation away) can reach the timer/charts without a global hop.
+// ============================================================================
+var dbCardCharts = {};   // key = `${id}::${metric}` → uPlot instance
+var dbPollTimer  = null;
+var dbRangeSec   = 3600; // default 1h, persisted in localStorage
+var DB_POLL_MS   = 60000;
+
+function dbStorageKey() { return "dashboard.v1"; }
+
+function dbLoadPrefs() {
+  try {
+    var s = localStorage.getItem(dbStorageKey());
+    if (!s) return {};
+    var p = JSON.parse(s) || {};
+    if (typeof p.rangeSec === "number") dbRangeSec = p.rangeSec;
+    return p;
+  } catch (e) { return {}; }
+}
+
+function dbSavePrefs(patch) {
+  var p = dbLoadPrefs();
+  Object.keys(patch || {}).forEach(function (k) { p[k] = patch[k]; });
+  try { localStorage.setItem(dbStorageKey(), JSON.stringify(p)); } catch (e) {}
+}
+
+function dbCardKey(id, metric) { return id + "::" + metric; }
+
 function dbInit() {
+  var prefs = dbLoadPrefs();
+  var rangeEl = document.getElementById("db-range");
+  if (rangeEl) {
+    if (prefs.rangeSec) rangeEl.value = String(prefs.rangeSec);
+    dbRangeSec = parseInt(rangeEl.value, 10) || 3600;
+  }
+  dbLoadUPlot(function () { dbLoadCards(); });
+}
+
+function dbRangeChange(ev) {
+  var v = parseInt(ev.target.value, 10);
+  if (isNaN(v) || v <= 0) return;
+  dbRangeSec = v;
+  dbSavePrefs({ rangeSec: v });
+  dbDestroyAllCharts();
+  dbLoadCards();
+}
+
+function dbRefreshNow() {
+  var status = document.getElementById("db-poll-status");
+  if (status) { status.textContent = "🔄"; status.className = "text-primary"; }
+  dbRefreshLatest();
+}
+
+function dbDestroyAllCharts() {
+  Object.keys(dbCardCharts).forEach(function (k) {
+    try { dbCardCharts[k].destroy(); } catch (e) {}
+  });
+  dbCardCharts = {};
+}
+
+function dbStartPolling() {
+  if (dbPollTimer) return;
+  dbPollTimer = setInterval(dbRefreshLatest, DB_POLL_MS);
+}
+
+function dbStopPolling() {
+  if (dbPollTimer) { clearInterval(dbPollTimer); dbPollTimer = null; }
+  dbDestroyAllCharts();
+}
+
+// Build the card grid from /api/sensors, then fetch a sparkline series
+// (/api/data) per (sensor, metric) and seed each card chart.  Once cards
+// are mounted, /api/latest polling drives the value labels in place.
+function dbLoadCards() {
+  var grid    = document.getElementById("db-cards");
+  var loading = document.getElementById("db-loading");
+  var empty   = document.getElementById("db-empty");
+  if (!grid) return;
+  if (empty)   empty.style.display   = "none";
+  if (loading) loading.style.display = "";
+  grid.style.display = "none";
+
+  fetch("/api/sensors")
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var sensors = (d && d.sensors) || [];
+      // Each sensor exposes one or more metrics — we render one card per
+      // (sensor, metric) pair so the user can see the full breakdown.
+      var pairs = [];
+      sensors.forEach(function (s) {
+        if (s.status === "disabled") return;
+        (s.metrics || []).forEach(function (m) {
+          pairs.push({ id: s.id, type: s.type, name: s.name, metric: m });
+        });
+      });
+
+      if (loading) loading.style.display = "none";
+      if (!pairs.length) {
+        if (empty) empty.style.display = "";
+        return;
+      }
+
+      grid.innerHTML = pairs.map(dbBuildCardHtml).join("");
+      grid.style.display = "";
+
+      // Pull the spark series in parallel — chart creation is cheap so we
+      // start polling /api/latest once they're all mounted.
+      Promise.all(pairs.map(dbLoadSparkSeries))
+        .then(function () {
+          dbRefreshLatest();
+          dbStartPolling();
+        });
+    })
+    .catch(function (e) {
+      if (loading) loading.style.display = "none";
+      var err = document.getElementById("errorMsg");
+      if (err) {
+        err.textContent = "Failed to load sensor list: " + e;
+        err.style.display = "block";
+      }
+    });
+}
+
+function dbBuildCardHtml(p) {
+  var key = dbCardKey(p.id, p.metric);
+  return ''
+    + '<div class="sensor-card-mini" data-key="' + key + '">'
+    +   '<div class="sensor-card-mini-header">'
+    +     '<span class="sensor-card-mini-name" title="' + p.id + '">' + (p.name || p.id) + '</span>'
+    +     '<span class="sensor-card-mini-metric">' + p.metric + '</span>'
+    +   '</div>'
+    +   '<div class="sensor-card-mini-value">'
+    +     '<span class="value" data-card-value="' + key + '">--</span>'
+    +     '<span class="unit" data-card-unit="' + key + '"></span>'
+    +   '</div>'
+    +   '<div class="sensor-card-mini-spark" data-card-spark="' + key + '"></div>'
+    +   '<div class="sensor-card-mini-foot">'
+    +     '<span class="ts" data-card-ts="' + key + '">—</span>'
+    +     '<span class="quality" data-card-q="' + key + '"></span>'
+    +   '</div>'
+    + '</div>';
+}
+
+function dbLoadSparkSeries(p) {
+  var key  = dbCardKey(p.id, p.metric);
+  var now  = Math.floor(Date.now() / 1000);
+  var from = now - dbRangeSec;
+  // Pick a bucket that yields ~30 spark points across the chosen range.
+  var bucket = "raw";
+  if (dbRangeSec >= 86400)      bucket = "1h";
+  else if (dbRangeSec >= 43200) bucket = "1h";
+  else if (dbRangeSec >= 3600)  bucket = "5m";
+  else if (dbRangeSec >= 900)   bucket = "1m";
+  var url = "/api/data?sensor=" + encodeURIComponent(p.id)
+          + "&metric=" + encodeURIComponent(p.metric)
+          + "&from=" + from + "&to=" + now
+          + "&agg=" + bucket + "&mode=lttb&limit=60";
+  return fetch(url)
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      var pts = (d && d.data) || [];
+      var xs = pts.map(function (pt) { return pt.ts; });
+      var ys = pts.map(function (pt) { return pt.v; });
+      dbMountSparkChart(key, xs, ys);
+    })
+    .catch(function () { /* card stays without spark; foot shows '—' */ });
+}
+
+function dbMountSparkChart(key, xs, ys) {
+  var host = document.querySelector('[data-card-spark="' + key + '"]');
+  if (!host || typeof uPlot === "undefined") return;
+  if (dbCardCharts[key]) {
+    try { dbCardCharts[key].destroy(); } catch (e) {}
+  }
+  if (!xs.length) {
+    host.innerHTML = '<span class="sensor-card-mini-empty">no data</span>';
+    return;
+  }
+  host.innerHTML = "";
+  var rootStyle = getComputedStyle(document.documentElement);
+  var stroke = rootStyle.getPropertyValue("--primary").trim() || "#275673";
+  dbCardCharts[key] = new uPlot({
+    width:  host.clientWidth || 200,
+    height: host.clientHeight || 48,
+    pxAlign: false,
+    cursor: { show: false },
+    legend: { show: false },
+    scales: { x: { time: true }, y: {} },
+    axes:   [{ show: false }, { show: false }],
+    series: [
+      {},
+      { stroke: stroke, width: 1.5, points: { show: false }, fill: stroke + "22" },
+    ],
+  }, [xs, ys], host);
+}
+
+function dbRefreshLatest() {
+  fetch("/api/latest")
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      var status = document.getElementById("db-poll-status");
+      if (status) {
+        status.textContent = "✅ " + new Date().toLocaleTimeString();
+        status.className = "text-success";
+      }
+      var items = (d && d.items) || [];
+      items.forEach(function (it) {
+        var key = dbCardKey(it.id, it.metric);
+        var v = document.querySelector('[data-card-value="' + key + '"]');
+        var u = document.querySelector('[data-card-unit="' + key + '"]');
+        var t = document.querySelector('[data-card-ts="' + key + '"]');
+        var q = document.querySelector('[data-card-q="' + key + '"]');
+        if (v) v.textContent = (it.value !== undefined && it.value !== null)
+          ? Number(it.value).toPrecision(4) : "--";
+        if (u) u.textContent = it.unit ? " " + it.unit : "";
+        if (t) t.textContent = it.ts ? new Date(it.ts * 1000).toLocaleTimeString() : "—";
+        if (q) {
+          q.textContent =
+            it.q === 1 ? "" :
+            it.q === 2 ? "est" :
+            it.q === 3 ? "err" : "?";
+          q.className = "quality" + (it.q === 3 ? " text-danger" : "");
+        }
+      });
+    })
+    .catch(function () {
+      var status = document.getElementById("db-poll-status");
+      if (status) {
+        status.textContent = "⚠️ offline";
+        status.className = "text-warning";
+      }
+    });
+}
+
+// ============================================================================
+// LEGACY LOG VIEWER (per-fill flowmeter pipe-delimited TXT, PLATFORM_LEGACY)
+// Hosted on its own page (`#logs`); reuses the existing dbLoadData /
+// dbApplyFilters / dbExportCSV / dbRenderChart pipeline below.
+// ============================================================================
+function logsInit() {
   dbLoadUPlot(function () {
-    // Matches original: generateDatalogFileOptions() via select population
     fetch("/api/filelist?filter=log&recursive=1")
-      .then(function (r) {
-        return r.json();
-      })
+      .then(function (r) { return r.json(); })
       .then(function (d) {
         var sel = document.getElementById("fileSelect");
         if (!sel) return;
@@ -97,10 +335,10 @@ function dbInit() {
           if (curFile && f.path === curFile) opt.selected = true;
           sel.appendChild(opt);
         });
-        dbLoadData(); // matches original: window.onload = loadData
+        dbLoadData();
       })
       .catch(function (e) {
-        var err = document.getElementById("errorMsg");
+        var err = document.getElementById("logsErrorMsg");
         if (err) {
           err.textContent = "Error loading file list: " + e.message;
           err.style.display = "block";
@@ -113,7 +351,7 @@ function dbInit() {
 function dbLoadData() {
   var file = getVal("fileSelect");
   if (!file || file === "No log files found") return;
-  var err = document.getElementById("errorMsg");
+  var err = document.getElementById("logsErrorMsg");
   if (err) err.style.display = "none";
   fetch("/download?file=" + encodeURIComponent(file))
     .then(function (r) {
@@ -813,6 +1051,8 @@ function liveBtn(id, pressed, txtOn, txtOff, colorOn, colorOff) {
 // Enrol markup-reachable handlers (data-click / data-change / data-input /
 // data-submit).  See core.js::Handlers for why the whitelist exists.
 registerHandlers({
+  dbRangeChange: dbRangeChange,
+  dbRefreshNow: dbRefreshNow,
   dbLoadData: dbLoadData,
   dbApplyFilters: dbApplyFilters,
   dbExportCSV: dbExportCSV,

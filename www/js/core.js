@@ -453,6 +453,11 @@ function navigateTo(page) {
     }
   }
 
+  // Stop dashboard /api/latest polling when leaving the dashboard
+  if (currentPage === "dashboard" && page !== "dashboard") {
+    if (typeof dbStopPolling === "function") dbStopPolling();
+  }
+
   loadPagePartial(page).then(function () {
     document.querySelectorAll(".page").forEach(function (p) {
       p.classList.remove("active");
@@ -493,6 +498,9 @@ function pageInit(page) {
   switch (page) {
     case "dashboard":
       dbInit();
+      break;
+    case "logs":
+      logsInit();
       break;
     case "files":
       filesInit();

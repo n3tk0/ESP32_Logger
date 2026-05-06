@@ -209,6 +209,79 @@ static void handleApiData(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/latest
+//   Smart Dashboard polling endpoint.  Returns the most recent reading per
+//   (sensorId, metric) tuple seen in the in-memory webRingBuf, plus the
+//   sensor's display name from SensorManager.  Designed to be cheap enough
+//   to poll every 60 s from the dashboard:
+//   - single mutex acquire
+//   - single full-ring scan (O(N) where N ≤ WEB_RING_SIZE = 500)
+//   - JsonDocument sized for ≤ 32 (sensor, metric) pairs
+//
+// Response shape:
+//   { "ok": true, "ts": 1714900000,
+//     "items": [
+//       { "id": "env_indoor", "type": "bme280", "metric": "temperature",
+//         "value": 22.5, "unit": "C", "ts": 1714900000, "q": 1 },
+//       ...
+//     ] }
+// ---------------------------------------------------------------------------
+static void handleApiLatest(AsyncWebServerRequest* req) {
+    constexpr size_t MAX_RAW = 500;
+    SensorReading* raw = new SensorReading[MAX_RAW];
+    if (!raw) {
+        req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
+        return;
+    }
+
+    size_t copied = 0;
+    if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        copied = webRingBuf.copyRecent(raw, MAX_RAW, 0);
+        xSemaphoreGive(webDataMutex);
+    }
+
+    // Walk newest→oldest, keeping the first occurrence of each (id, metric).
+    // 32 unique pairs is well above the realistic device sensor count.
+    constexpr size_t MAX_PAIRS = 32;
+    int    latestIdx[MAX_PAIRS];
+    size_t nPairs = 0;
+
+    if (copied > 0) {
+        for (int i = (int)copied - 1; i >= 0 && nPairs < MAX_PAIRS; --i) {
+            const SensorReading& r = raw[i];
+            bool seen = false;
+            for (size_t j = 0; j < nPairs; j++) {
+                const SensorReading& p = raw[latestIdx[j]];
+                if (strcmp(p.sensorId, r.sensorId) == 0 &&
+                    strcmp(p.metric,   r.metric)   == 0) { seen = true; break; }
+            }
+            if (!seen) latestIdx[nPairs++] = i;
+        }
+    }
+
+    JsonDocument doc;
+    doc["ok"] = true;
+    doc["ts"] = (uint32_t)(millis() / 1000UL);
+    JsonArray arr = doc["items"].to<JsonArray>();
+    for (size_t k = 0; k < nPairs; k++) {
+        const SensorReading& r = raw[latestIdx[k]];
+        JsonObject o = arr.add<JsonObject>();
+        o["id"]     = r.sensorId;
+        o["type"]   = r.sensorType;
+        o["metric"] = r.metric;
+        o["value"]  = r.value;
+        o["unit"]   = r.unit;
+        o["ts"]     = r.timestamp;
+        o["q"]      = (uint8_t)r.quality;
+    }
+
+    delete[] raw;
+    String out;
+    serializeJson(doc, out);
+    req->send(200, "application/json", out);
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/sensors — list registered sensors + status
 // ---------------------------------------------------------------------------
 static void handleApiSensors(AsyncWebServerRequest* req) {
@@ -705,6 +778,7 @@ static void handleApiModulesDispatch(AsyncWebServerRequest* req) {
 // ---------------------------------------------------------------------------
 void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/data",              HTTP_GET,  handleApiData);
+    server.on("/api/latest",            HTTP_GET,  handleApiLatest);
     server.on("/api/sensors",           HTTP_GET,  handleApiSensors);
     server.on("/api/sensors/read_now",  HTTP_GET,  handleApiSensorReadNow);
     server.on("/api/diag",              HTTP_GET,  handleApiDiag);
