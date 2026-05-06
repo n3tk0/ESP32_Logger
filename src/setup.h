@@ -119,6 +119,17 @@
 // ============================================================================
 // 3. DEBUG / BUILD FLAGS
 // ============================================================================
+// PLATFORM_LEGACY_BUILD — when 1 (default) the legacy flowmeter run logger
+// (deepsleep / wake-on-button cycles, RTC RAM bootcount, FF/PF press
+// recording, pipe-delimited TXT output) is compiled into the firmware.
+// Set to 0 (-DPLATFORM_LEGACY_BUILD=0) for non-legacy deployments to drop
+// the entire legacy code path; PLATFORM_HYBRID gets per-run flowmeter
+// logging via FlowRunLogger instead, and PLATFORM_CONTINUOUS streams flow
+// readings into the wide-CSV pipeline like any other sensor.
+#ifndef PLATFORM_LEGACY_BUILD
+#  define PLATFORM_LEGACY_BUILD 1
+#endif
+
 // FreeRTOS unicore: only ESP32-C3 / C6 are single-core.
 // Dual-core chips (ESP32, ESP32-S3) MUST NOT define CONFIG_FREERTOS_UNICORE.
 #ifndef CONFIG_FREERTOS_UNICORE

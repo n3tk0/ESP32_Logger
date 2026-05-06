@@ -2,6 +2,7 @@
 #include "TaskManager.h"
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/LiveAggregator.h"
+#include "../pipeline/FlowRunLogger.h"
 #include "../storage/CsvLogger.h"
 #include "../core/Globals.h"   // Rtc for epoch fallback
 #include <time.h>
@@ -38,8 +39,18 @@ void storageTaskFunc(void* param) {
 
     CsvLogger primary;
     CsvLogger mirror;
-    bool      mirrorActive = false;
+    bool      mirrorActive  = false;
     bool      writingEnabled = cfg.csvLoggingEnabled && (cfg.fs != nullptr);
+
+    FlowRunLogger flowRunLog;
+    bool          flowRunActive = cfg.enableFlowRunLogger && (cfg.fs != nullptr);
+    if (flowRunActive) {
+        flowRunLog.setIdleTimeoutSec(cfg.flowRunIdleTimeoutSec);
+        flowRunLog.setStartThreshold(cfg.flowRunStartThreshold);
+        flowRunLog.begin(*cfg.fs,
+                         cfg.flowRunLogDir ? cfg.flowRunLogDir : "/runs",
+                         256);
+    }
 
     if (writingEnabled) {
         primary.begin(*cfg.fs,
@@ -58,11 +69,12 @@ void storageTaskFunc(void* param) {
         Serial.println("[StorageTask] No filesystem — drain-only mode");
     }
 
-    Serial.printf("[StorageTask] interval=%us humCorr=%d kappa=%.2f writing=%d\n",
+    Serial.printf("[StorageTask] interval=%us humCorr=%d kappa=%.2f writing=%d runLog=%d\n",
                   (unsigned)agg.intervalSec(),
                   agg.humidityCorrection() ? 1 : 0,
                   agg.humidityKappa(),
-                  writingEnabled ? 1 : 0);
+                  writingEnabled ? 1 : 0,
+                  flowRunActive  ? 1 : 0);
 
     char headerBuf[LiveAggregator::ROW_BUF_BYTES];
     char rowBuf   [LiveAggregator::ROW_BUF_BYTES];
@@ -71,15 +83,24 @@ void storageTaskFunc(void* param) {
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_STORAGE] = millis();
 
-        // Drain available readings into the aggregator.  The 100 ms wait keeps
-        // the heartbeat fresh while still draining bursts.
+        // Drain available readings into the aggregator (and the run logger
+        // when active).  The 100 ms wait keeps the heartbeat fresh while
+        // still draining bursts.
+        uint32_t feedEpoch = nowEpochSafe();
         while (xQueueReceive(storageQueue, &r, pdMS_TO_TICKS(100)) == pdTRUE) {
             agg.feed(r);
+            if (flowRunActive) flowRunLog.feed(r, feedEpoch);
+        }
+
+        uint32_t epoch = nowEpochSafe();
+        if (flowRunActive) {
+            if (fsMutex) xSemaphoreTake(fsMutex, portMAX_DELAY);
+            flowRunLog.tick(epoch);
+            if (fsMutex) xSemaphoreGive(fsMutex);
         }
 
         if (!writingEnabled) continue;
 
-        uint32_t epoch = nowEpochSafe();
         uint32_t rowTs = 0;
         if (agg.buildRowIfDue(epoch, rowBuf, sizeof(rowBuf), &rowTs)) {
             if (agg.buildHeader(headerBuf, sizeof(headerBuf)) > 0) {

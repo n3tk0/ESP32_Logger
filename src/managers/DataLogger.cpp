@@ -1,4 +1,7 @@
 #include "DataLogger.h"
+
+#if PLATFORM_LEGACY_BUILD
+
 #include "../core/Globals.h"
 #include "StorageManager.h"
 #include "RtcManager.h"
@@ -205,3 +208,12 @@ void addLogEntry(uint32_t capturedPulses) {
     highCountFF = 0;
     highCountPF = 0;
 }
+
+#else  // PLATFORM_LEGACY_BUILD == 0
+
+// Legacy flowmeter run logger compiled out.  Stubs preserve link compatibility
+// with Logger.ino call sites that are runtime-gated by g_platformMode.
+void flushLogBufferToFS()                {}
+void addLogEntry(uint32_t /*pulses*/)    {}
+
+#endif  // PLATFORM_LEGACY_BUILD

@@ -33,6 +33,14 @@ struct StorageTaskParam {
     uint16_t    aggregationIntervalSec    = 60;
     bool        humidityCorrectionEnabled = false;
     float       humidityCorrectionKappa   = 0.35f;
+
+    // FlowRunLogger — per-fill flowmeter logger for PLATFORM_HYBRID.
+    // Compile-time gated by SENSOR_WATERFLOW_ENABLED in TaskManager so the
+    // class can be DCE'd when no flowmeter is built in.
+    bool        enableFlowRunLogger       = false;
+    const char* flowRunLogDir             = "/runs";
+    uint16_t    flowRunIdleTimeoutSec     = 5;
+    float       flowRunStartThreshold     = 0.5f;  // L/min
 };
 
 void storageTaskFunc(void* param);

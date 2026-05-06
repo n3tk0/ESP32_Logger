@@ -97,6 +97,15 @@ extern String        statusMessage;
 extern String        currentDir;
 
 // ============================================================================
+// PLATFORM MODE
+// ============================================================================
+// Detected at boot from /platform_config.json.  Owned in Globals.cpp; the
+// sketch initialises it from _detectPlatformMode() during setup().  Other
+// translation units (TaskManager, StorageTask, FlowRunLogger) read it to
+// pick the appropriate storage / flow-logging path.
+extern PlatformMode g_platformMode;
+
+// ============================================================================
 // PLATFORM SLEEP CONTROL
 // ============================================================================
 // 0 = deep sleep allowed (legacy default)
