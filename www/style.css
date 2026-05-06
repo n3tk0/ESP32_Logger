@@ -918,12 +918,20 @@ body {
   aspect-ratio: 16 / 9;
   max-height: 420px;
 }
-.chart-container > canvas {
+.chart-container > canvas,
+.chart-container > div {
   position: absolute;
   inset: 0;
   width: 100% !important;
   height: 100% !important;
 }
+/* uPlot tooltips and axis labels — minimal styling so the gzipped uPlot
+   bundle stays the only required asset. */
+.uplot { font: 12px system-ui, sans-serif; }
+.u-legend { color: var(--text); }
+.u-tooltip { position: absolute; pointer-events: none; padding: 4px 8px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  font-size: 0.8rem; }
 @media (max-width: 480px) {
   .chart-container { aspect-ratio: 4 / 3; }
 }

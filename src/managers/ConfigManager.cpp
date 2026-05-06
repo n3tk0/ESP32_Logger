@@ -109,7 +109,7 @@ static void applyDefaults() {
     if (!strlen(config.theme.storageBar70Color)) SAFE_STRCPY(config.theme.storageBar70Color, "#f39c12");
     if (!strlen(config.theme.storageBar90Color)) SAFE_STRCPY(config.theme.storageBar90Color, "#e74c3c");
     if (!strlen(config.theme.storageBarBorder))  SAFE_STRCPY(config.theme.storageBarBorder,  "#cccccc");
-    if (!strlen(config.theme.chartLocalPath))    SAFE_STRCPY(config.theme.chartLocalPath,    "/chart.min.js");
+    if (!strlen(config.theme.chartLocalPath))    SAFE_STRCPY(config.theme.chartLocalPath,    "/uPlot.iife.min.js");
 }
 
 // ============================================================================
@@ -224,8 +224,8 @@ void loadDefaultConfig() {
     SAFE_STRCPY(config.theme.storageBar70Color, "#f39c12");
     SAFE_STRCPY(config.theme.storageBar90Color, "#e74c3c");
     SAFE_STRCPY(config.theme.storageBarBorder,  "#cccccc");
-    config.theme.chartSource      = CHART_CDN;
-    SAFE_STRCPY(config.theme.chartLocalPath, "/chart.min.js");
+    config.theme.chartSource      = CHART_LOCAL;
+    SAFE_STRCPY(config.theme.chartLocalPath, "/uPlot.iife.min.js");
     config.theme.showIcons        = true;
     config.theme.chartLabelFormat = LABEL_DATETIME;
 

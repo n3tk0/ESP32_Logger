@@ -162,7 +162,7 @@ void publishLiveEvent() {
 static const char FAILSAFE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Water Logger - Setup Mode</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,sans-serif;background:#f0f4f8;color:#2d3748;min-height:100vh}header{background:#275673;color:#fff;padding:16px 20px}header h1{font-size:1.2rem;display:flex;align-items:center;gap:10px}.badge{background:#e74c3c;color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem;font-weight:700}.sub{font-size:.8rem;opacity:.8;margin-top:4px}.container{max-width:720px;margin:20px auto;padding:0 14px}.card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.09);margin-bottom:14px;overflow:hidden}.card-header{padding:13px 18px;border-bottom:1px solid #e2e8f0;font-weight:600;background:#f7fafc;display:flex;justify-content:space-between;align-items:center}.card-body{padding:16px 18px}.drop{border:2px dashed #cbd5e0;border-radius:8px;padding:24px;text-align:center;cursor:pointer;transition:.2s;margin-bottom:10px}.drop:hover,.drop.over{border-color:#275673;background:#ebf4ff}.drop input{display:none}.drop p{color:#718096;font-size:.85rem;margin-top:5px}.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;border:none;border-radius:7px;font-size:.88rem;font-weight:500;cursor:pointer;transition:.15s;text-decoration:none}.btn-primary{background:#275673;color:#fff}.btn-primary:hover{background:#1d4259}.btn-danger{background:#e74c3c;color:#fff}.btn-danger:hover{background:#c0392b}.btn-warn{background:#f39c12;color:#fff}.btn-warn:hover{background:#d68910}.btn-sm{padding:4px 10px;font-size:.78rem}progress{width:100%;height:8px;border-radius:4px;margin-top:8px;display:none}.msg{margin-top:8px;font-size:.88rem;min-height:1.1em}.ok{color:#27ae60}.err{color:#e74c3c}.inf{color:#275673}.file-list{font-size:.85rem}.file-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #e2e8f0;gap:6px}.file-row:last-child{border:none}.fname{word-break:break-all;flex:1}.fsize{color:#718096;white-space:nowrap;margin:0 8px}.acts{display:flex;gap:5px;flex-shrink:0}.alert{padding:11px 15px;border-radius:8px;margin-bottom:12px;font-size:.88rem;line-height:1.4}.alert-warn{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}.legacy{background:#fff3cd;border-left:4px solid #f39c12;padding:6px 10px;border-radius:4px;font-size:.8rem;color:#856404;margin-top:4px}input[type=text]{width:100%;padding:7px 11px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem}.section-label{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#718096;padding:10px 0 4px}.sel{width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem;margin-top:4px;background:#fff;color:#2d3748}.fhint{font-size:.78rem;color:#718096;margin-top:4px}.chk-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #e2e8f0;font-size:.88rem}.chk-row:last-child{border:none}.warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:7px;padding:11px 14px;font-size:.83rem;color:#92400e;margin-top:8px;display:none}.warn-box.show{display:block}.flabel{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#718096;display:block;margin-bottom:2px}.tabs{display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px}.tab{padding:10px 20px;border:none;background:none;cursor:pointer;font-size:.9rem;color:#718096;font-weight:500;border-bottom:3px solid transparent;margin-bottom:-2px;transition:.15s;display:flex;align-items:center;gap:6px}.tab:hover{color:#275673;background:#f7fafc}.tab.active{color:#275673;border-bottom-color:#275673;font-weight:700}.tab-pane{display:none}.tab-pane.active{display:block}</style></head><body>)HTML"
 R"HTML(<header><h1>&#x1F4A7; Water Logger <span class="badge">SETUP MODE</span></h1><div class="sub">Upload UI files to /www/ to restore normal operation &mdash; or bookmark <strong>/setup</strong> for recovery</div><div id="fs-sysinfo" class="sub" style="font-size:.72rem;margin-top:3px;opacity:.8"></div></header><div class="container"><div class="tabs"><button class="tab active" id="tab-btn-setup" onclick="switchTab('setup',this)">&#x2699;&#xFE0F; Setup</button><button class="tab" id="tab-btn-corelogic" onclick="switchTab('corelogic',this)">&#x1F9E9; Core Logic</button></div>)HTML"
 R"HTML(<div id="tab-setup" class="tab-pane active"><div class="alert alert-warn">&#x26A0;&#xFE0F; <strong>Normal UI not found.</strong> Upload <code>index.html</code>, <code>web.js</code> and <code>style.css</code> into <code>/www/</code>. If you see a broken page normally, you likely have <strong>old files at the root</strong> &mdash; delete them below. If the main UI is broken, navigate to <code>/setup</code> at any time to return here.</div>)HTML"
-R"HTML(<div class="card"><div class="card-header">&#x1F4E4; Upload files to /www/</div><div class="card-body"><div class="drop" id="dropZone" onclick="document.getElementById('fileInput').click()"><input type="file" id="fileInput" multiple>&#x2B06; <strong>Click or drag files here</strong><p>index.html &bull; web.js &bull; style.css &bull; changelog.txt &bull; chart.min.js &bull; etc.</p></div><progress id="prog" value="0" max="100"></progress><div class="msg inf" id="uploadMsg"></div></div></div>)HTML"
+R"HTML(<div class="card"><div class="card-header">&#x1F4E4; Upload files to /www/</div><div class="card-body"><div class="drop" id="dropZone" onclick="document.getElementById('fileInput').click()"><input type="file" id="fileInput" multiple>&#x2B06; <strong>Click or drag files here</strong><p>index.html &bull; web.js &bull; style.css &bull; changelog.txt &bull; uPlot.iife.min.js &bull; etc.</p></div><progress id="prog" value="0" max="100"></progress><div class="msg inf" id="uploadMsg"></div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header"><span>&#x1F4C1; LittleFS &mdash; All Files</span><button class="btn btn-sm btn-primary" onclick="loadFiles()">&#x21BA; Refresh</button></div><div class="card-body" style="padding:4px 18px 14px"><div id="legacyWarn" style="display:none" class="legacy">&#x26A0;&#xFE0F; <strong>Legacy UI files found at root.</strong> These override /www/ files and cause broken pages. Delete them!</div><div class="section-label">&#x1F4C2; /www/ (new UI files)</div><div class="file-list" id="wwwList">Loading&#x2026;</div><div class="section-label" style="margin-top:10px">&#x1F4C2; / (root &mdash; legacy / system files)</div><div class="file-list" id="rootList">Loading&#x2026;</div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header">&#x270F;&#xFE0F; Rename / Move File</div><div class="card-body"><div style="display:flex;gap:8px;flex-wrap:wrap"><input type="text" id="renSrc" placeholder="From: e.g. /web.js" style="flex:1;min-width:140px"><input type="text" id="renDst" placeholder="To: e.g. /www/web.js" style="flex:1;min-width:140px"><button class="btn btn-primary" onclick="doRename()">Move</button></div><div class="msg" id="renMsg"></div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header">&#x1F504; Device Control</div><div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn btn-primary" onclick="if(confirm('Restart now?'))fetch('/restart',{method:'POST'}).then(function(){setTimeout(function(){location.reload();},5000)})">&#x1F504; Restart</button><button class="btn btn-danger" onclick="doFactoryReset()">&#x1F9F9; Factory Reset</button><div class="msg" id="fsResetMsg" style="flex-basis:100%;margin-top:4px"></div></div></div>)HTML"
@@ -487,7 +487,7 @@ void setupWebServer() {
         o["faviconPath"]       = config.theme.faviconPath;
         o["boardDiagramPath"]  = config.theme.boardDiagramPath;
         o["chartSource"]       = (int)config.theme.chartSource;
-        o["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/chart.min.js";
+        o["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/uPlot.iife.min.js";
         o["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
         o["showIcons"]         = config.theme.showIcons;
     };
@@ -807,7 +807,7 @@ void setupWebServer() {
         th["faviconPath"]       = config.theme.faviconPath;
         th["boardDiagramPath"]  = config.theme.boardDiagramPath;
         th["chartSource"]       = (int)config.theme.chartSource;
-        th["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/chart.min.js";
+        th["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/uPlot.iife.min.js";
         th["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
         th["showIcons"]         = config.theme.showIcons;
 
@@ -838,6 +838,13 @@ void setupWebServer() {
         dl["pfToFfThreshold"]        = config.datalog.pfToFfThreshold > 0 ? config.datalog.pfToFfThreshold : 4.5f;
         dl["ffToPfThreshold"]        = config.datalog.ffToPfThreshold > 0 ? config.datalog.ffToPfThreshold : 3.7f;
         dl["manualPressThresholdMs"] = config.datalog.manualPressThresholdMs;
+
+        // ── Logger (wide-CSV pipeline) ────────────────────────────────────────
+        JsonObject lg = doc["logger"].to<JsonObject>();
+        lg["csvLoggingEnabled"]         = config.logger.csvLoggingEnabled;
+        lg["aggregationIntervalSec"]    = config.logger.aggregationIntervalSec ? config.logger.aggregationIntervalSec : 60;
+        lg["humidityCorrectionEnabled"] = config.logger.humidityCorrectionEnabled;
+        lg["humidityCorrectionKappa"]   = config.logger.humidityCorrectionKappa > 0.0f ? config.logger.humidityCorrectionKappa : 0.35f;
 
         // ── Network ───────────────────────────────────────────────────────────
         JsonObject net = doc["network"].to<JsonObject>();
@@ -1001,6 +1008,15 @@ void setupWebServer() {
         if (r->hasParam("pfToFfThreshold", true))        config.datalog.pfToFfThreshold        = max(0.1f, r->getParam("pfToFfThreshold", true)->value().toFloat());
         if (r->hasParam("ffToPfThreshold", true))        config.datalog.ffToPfThreshold        = max(0.1f, r->getParam("ffToPfThreshold", true)->value().toFloat());
         if (r->hasParam("manualPressThresholdMs", true)) config.datalog.manualPressThresholdMs = r->getParam("manualPressThresholdMs", true)->value().toInt();
+
+        // Wide-CSV pipeline knobs (config.logger.*).  Applied on next StorageTask
+        // restart — see TaskManager::init().
+        config.logger.csvLoggingEnabled         = r->hasParam("csvLoggingEnabled", true);
+        config.logger.humidityCorrectionEnabled = r->hasParam("humidityCorrectionEnabled", true);
+        if (r->hasParam("aggregationIntervalSec", true))
+            config.logger.aggregationIntervalSec = constrain(r->getParam("aggregationIntervalSec", true)->value().toInt(), 5, 3600);
+        if (r->hasParam("humidityCorrectionKappa", true))
+            config.logger.humidityCorrectionKappa = constrain(r->getParam("humidityCorrectionKappa", true)->value().toFloat(), 0.0f, 2.0f);
 
         saveConfig();
 
@@ -1515,6 +1531,13 @@ void setupWebServer() {
                 if (hw["defaultStorageView"].is<int>()) config.hardware.defaultStorageView = hw["defaultStorageView"];
                 if (hw["debounceMs"].is<int>())         config.hardware.debounceMs         = hw["debounceMs"];
                 if (hw.containsKey("debugMode"))        config.hardware.debugMode          = hw["debugMode"].as<bool>();
+            }
+            if (doc["logger"].is<JsonObject>()) {
+                JsonObject lg = doc["logger"];
+                if (lg["csvLoggingEnabled"].is<bool>())         config.logger.csvLoggingEnabled         = lg["csvLoggingEnabled"];
+                if (lg["humidityCorrectionEnabled"].is<bool>()) config.logger.humidityCorrectionEnabled = lg["humidityCorrectionEnabled"];
+                if (lg["aggregationIntervalSec"].is<int>())     config.logger.aggregationIntervalSec    = constrain(lg["aggregationIntervalSec"].as<int>(), 5, 3600);
+                if (lg["humidityCorrectionKappa"].is<float>())  config.logger.humidityCorrectionKappa   = constrain(lg["humidityCorrectionKappa"].as<float>(), 0.0f, 2.0f);
             }
             saveConfig();
             r->send(200, "text/plain", "OK");

@@ -172,60 +172,53 @@
         </div>
       </div>
 
-      <!-- Sensor Data Visualisation (platform v5.0) -->
+      <!-- Wide-CSV Pipeline (sensor logging) -->
       <div class="card">
-        <div class="card-header">📈 Sensor Data Visualisation</div>
+        <div class="card-header">📈 CSV Pipeline (Sensor Logging)</div>
         <div class="card-body">
           <p class="form-hint" style="margin-bottom:1rem">
-            These settings control how sensor data is displayed in charts.
-            Raw data on the device is <strong>never modified</strong> — aggregation
-            and interpolation happen only at display time.
+            Wide-CSV stores sensor readings as one row per aggregation window
+            with one column per active sensor metric. Header is rebuilt
+            dynamically when sensors are added or removed; the per-day file is
+            rotated automatically on schema change.
           </p>
+          <div class="form-group">
+            <label class="form-label">
+              <input type="checkbox" name="csvLoggingEnabled" id="lg-csvEnabled" value="1">
+              Enable CSV logging
+            </label>
+            <p class="form-hint">Master switch. When off, sensor readings are still
+              streamed to the live UI but never written to flash/SD.</p>
+          </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">
-                Aggregation Interval
-                <span class="help-tip" title="Groups readings into time buckets before displaying. Reduces chart point count.">ℹ️</span>
+                Aggregation Interval (seconds)
+                <span class="help-tip" title="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files.">ℹ️</span>
               </label>
-              <select id="agg-bucket" class="form-input form-select">
-                <option value="raw">Raw (no grouping)</option>
-                <option value="1m">1 minute</option>
-                <option value="5m" selected>5 minutes</option>
-                <option value="1h">1 hour</option>
-                <option value="1d">1 day</option>
-              </select>
-              <p class="form-hint">Group readings into time windows.</p>
+              <input type="number" name="aggregationIntervalSec" id="lg-aggSec" class="form-input"
+                min="5" max="3600" step="5" value="60">
+              <p class="form-hint">Default 60 s. Range 5–3600 s.</p>
             </div>
             <div class="form-group">
               <label class="form-label">
-                Interpolation Mode
-                <span class="help-tip" title="How values are combined within each time bucket.">ℹ️</span>
+                Humidity-correction κ (Köhler)
+                <span class="help-tip" title="κ-Köhler correction factor for SDS011 PM2.5/PM10 readings: corrected = raw / (1 + κ·RH/(100−RH)). Typical κ ≈ 0.35.">ℹ️</span>
               </label>
-              <select id="agg-mode" class="form-input form-select">
-                <option value="lttb" selected>LTTB (visual fidelity — default)</option>
-                <option value="avg">Average</option>
-                <option value="min">Minimum</option>
-                <option value="max">Maximum</option>
-                <option value="raw">No aggregation (raw points)</option>
-              </select>
-              <p class="form-hint">
-                <strong>LTTB</strong>: Largest Triangle Three Buckets — keeps the
-                visual shape of the curve while reducing points. Best for display.
-                <strong>Average</strong>: mean per bucket.
-                <strong>Min/Max</strong>: extremes per bucket.
-              </p>
+              <input type="number" name="humidityCorrectionKappa" id="lg-kappa" class="form-input"
+                min="0" max="2" step="0.05" value="0.35">
+              <p class="form-hint">Only applied when humidity correction is enabled.</p>
             </div>
           </div>
           <div class="form-group">
             <label class="form-label">
-              Max Points
-              <span class="help-tip" title="Maximum data points sent to the chart. Lower = faster rendering.">ℹ️</span>
+              <input type="checkbox" name="humidityCorrectionEnabled" id="lg-humCorr" value="1">
+              Enable SDS011 humidity correction
             </label>
-            <input type="number" id="agg-limit" class="form-input" value="500" min="50" max="5000" step="50">
-            <p class="form-hint">Maximum chart points (50–5000). Default: 500.</p>
+            <p class="form-hint">Requires a BME280 (or compatible) humidity sensor in the
+              same readings stream. Correction is applied at write-time only — raw
+              readings are unchanged.</p>
           </div>
-          <button type="button" class="btn btn-secondary" data-click="aggSettingsSave">💾 Save Visualisation Settings</button>
-          <div id="agg-msg" style="margin-top:8px;font-size:.85rem"></div>
         </div>
       </div>
 

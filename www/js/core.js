@@ -28,7 +28,7 @@
 // ============================================================================
 var ST = {}; // cached /api/status payload
 var CFG = {}; // cached /export_settings payload
-var dbChart = null; // Chart.js instance on dashboard
+var dbChart = null; // uPlot instance on dashboard
 var dbRawData = ""; // raw log text for dashboard
 var dbFilteredData = []; // filtered, parsed rows
 var liveTimer = null; // live page polling interval (fallback)

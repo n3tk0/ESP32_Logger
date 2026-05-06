@@ -1018,6 +1018,17 @@ function dlInit() {
           setVal("dl-ffpf", dl.ffToPfThreshold);
           setVal("dl-hold", dl.manualPressThresholdMs);
           dlUpdatePreview();
+
+          // Wide-CSV pipeline knobs (config.logger.*)
+          var lg = cfg.logger || {};
+          setChk("lg-csvEnabled",
+            lg.csvLoggingEnabled === undefined ? true : lg.csvLoggingEnabled);
+          setVal("lg-aggSec",
+            lg.aggregationIntervalSec !== undefined ? lg.aggregationIntervalSec : 60);
+          setChk("lg-humCorr",
+            lg.humidityCorrectionEnabled || false);
+          setVal("lg-kappa",
+            lg.humidityCorrectionKappa !== undefined ? lg.humidityCorrectionKappa : 0.35);
         });
     });
   dlLoadFiles();
