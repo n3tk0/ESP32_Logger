@@ -198,7 +198,7 @@ static void _loadSleepConfig() {
     File f = activeFS->open("/platform_config.json", FILE_READ);
     if (!f) return;
     // Use a dedicated small doc — sleep section only needs ~256 bytes
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, f);
     f.close();
     if (err) return;
@@ -264,9 +264,9 @@ static PlatformMode _detectPlatformMode() {
     // platform_config.json (sensors array, etc.) can be many KB and would
     // overflow a small document, returning NoMemory and silently falling back
     // to legacy mode even when continuous/hybrid is configured.
-    StaticJsonDocument<8>   filter;
+    JsonDocument   filter;
     filter["mode"] = true;
-    StaticJsonDocument<64>  doc;
+    JsonDocument  doc;
     if (deserializeJson(doc, f, DeserializationOption::Filter(filter)) != DeserializationError::Ok) {
         f.close(); return PLATFORM_LEGACY;
     }
@@ -323,7 +323,7 @@ static void _checkPinConflicts() {
     if (!activeFS) return;
     File f = activeFS->open("/platform_config.json", FILE_READ);
     if (!f) return;
-    StaticJsonDocument<4096> doc;
+    JsonDocument doc;
     if (deserializeJson(doc, f) != DeserializationError::Ok) { f.close(); return; }
     f.close();
 
