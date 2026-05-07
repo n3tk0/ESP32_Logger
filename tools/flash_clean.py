@@ -81,27 +81,34 @@ def _default_env(root: Path) -> str:
 
 
 def _ensure_data_dir(root: Path) -> None:
-    """Populate data/ from www/ via build_web.py when data/ is absent or empty."""
-    data_dir = root / "data"
+    """Populate data/www/ from www/ via build_web.py.
+
+    PlatformIO's `uploadfs` writes the contents of `data/` verbatim to the
+    LittleFS root, and the firmware looks up assets at `/www/...`.  So the
+    on-disk staging path must be `data/www/`, not `data/` — otherwise files
+    land at the LittleFS root and `/www/index.html` is still missing on the
+    device even after a successful upload.
+    """
+    data_www = root / "data" / "www"
     build_web = root / "tools" / "build_web.py"
 
-    populated = data_dir.is_dir() and any(data_dir.iterdir())
+    populated = data_www.is_dir() and any(data_www.iterdir())
     if populated:
         return
 
     if not build_web.is_file():
         _err(
-            f"data/ directory is missing and tools/build_web.py not found.\n"
-            f"  Create data/ manually by copying your web assets there, then retry."
+            f"data/www/ is missing and tools/build_web.py not found.\n"
+            f"  Create data/www/ manually by copying your web assets there, then retry."
         )
         sys.exit(2)
 
-    _step("web", "Building web assets into data/ via tools/build_web.py")
-    rc = _run([sys.executable, str(build_web), "--dst", str(data_dir)])
+    _step("web", "Building web assets into data/www/ via tools/build_web.py")
+    rc = _run([sys.executable, str(build_web), "--dst", str(data_www)])
     if rc != 0:
-        _err("build_web.py failed — cannot build LittleFS image without data/.")
+        _err("build_web.py failed — cannot build LittleFS image without data/www/.")
         sys.exit(rc)
-    _ok("Web assets ready in data/.")
+    _ok("Web assets ready in data/www/.")
 
 
 def _check_pio() -> str:
