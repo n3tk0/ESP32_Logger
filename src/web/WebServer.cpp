@@ -506,12 +506,19 @@ void setupWebServer() {
         // redirects when the Host header doesn't match the expected probe
         // domain — an absolute URL sidesteps that entirely.
         //
-        // Use `r->client()->localIP()` rather than WiFi.softAPIP() — it's
-        // the IP of the interface that actually received the request, which
-        // (a) avoids the transient 0.0.0.0 that softAPIP() can return right
-        // after softAP() startup, and (b) handles WIFI_AP_STA correctly
-        // when the test endpoint puts us in dual mode (gemini review #2).
-        String url = "http://" + r->client()->localIP().toString() + "/";
+        // Prefer `r->client()->localIP()` — it's the IP of the interface
+        // that actually received the request, which (a) avoids the
+        // transient 0.0.0.0 that softAPIP() can return right after softAP()
+        // startup, and (b) handles WIFI_AP_STA correctly when the test
+        // endpoint puts us in dual mode.  Fall back to softAPIP/localIP
+        // when the underlying AsyncClient has already torn down — observed
+        // crash with MEPC=0x42036bcc on a captive-portal probe arriving
+        // milliseconds before the client struct was published.
+        IPAddress ip;
+        if (auto* c = r->client()) ip = c->localIP();
+        if (ip == IPAddress((uint32_t)0)) ip = WiFi.softAPIP();
+        if (ip == IPAddress((uint32_t)0)) ip = WiFi.localIP();
+        String url = "http://" + ip.toString() + "/";
         r->redirect(url);
     };
     // Apple iOS / macOS
