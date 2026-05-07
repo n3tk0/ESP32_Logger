@@ -29,3 +29,12 @@ bool isPathProtected(const String& path);
 
 // ---- FS helpers ----
 bool deleteRecursive(fs::FS& fs, const String& path);
+
+// ---- URL helpers ----
+// Percent-encode a string per RFC 3986 unreserved set (A-Z a-z 0-9 -_.~).
+// Used by the /api/v1/* alias layer to rebuild query strings from parsed
+// params — this fork of ESPAsyncWebServer-esphome doesn't expose the raw
+// queryString(), so values returned by AsyncWebParameter::value() (which
+// are url-decoded) need re-encoding before they go back into a Location
+// header.  Centralised here so future call sites don't reinvent it.
+String urlEncode(const String& v);

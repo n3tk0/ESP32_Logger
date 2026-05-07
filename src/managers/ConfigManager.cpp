@@ -224,6 +224,10 @@ void loadDefaultConfig() {
     SAFE_STRCPY(config.theme.storageBar70Color, "#f39c12");
     SAFE_STRCPY(config.theme.storageBar90Color, "#e74c3c");
     SAFE_STRCPY(config.theme.storageBarBorder,  "#cccccc");
+    // Default to the on-device copy.  Strict CSP (script-src 'self') blocks
+    // CDN, and we expect uPlot.iife.min.js (or .gz) to be in LittleFS, so
+    // CDN mode is opt-in only — flipping it on also requires relaxing CSP,
+    // which is a deliberate user choice.
     config.theme.chartSource      = CHART_LOCAL;
     SAFE_STRCPY(config.theme.chartLocalPath, "/uPlot.iife.min.js");
     config.theme.showIcons        = true;

@@ -1,11 +1,11 @@
   <main class="main-content page" id="page-settings_hardware">
-    <div class="page-header">
-      <h1>🔧 Hardware</h1>
-      <div class="breadcrumb"><a href="#settings">Settings</a> / Hardware
+    <div class="page-head">
+      <h1 class="page-title"><span data-icon="wrench"></span> Hardware</h1>
+      <div class="page-sub"><a href="#settings">Settings</a> / Hardware
       </div>
     </div>
 
-    <div class="alert alert-warning">⚠️ Changes require device restart to take effect.</div>
+    <div class="alert alert-warning"><span data-icon="alert-triangle"></span> Changes require device restart to take effect.</div>
 
     <!-- Board diagram (if configured) — populated by hwInit() -->
     <div id="boardDiagramCard" class="card" style="display:none">
@@ -22,9 +22,9 @@
     <!-- Moved here from the Flow Meter page in chunk G so the sensor list is
          visible on every build, even without SENSOR_WATERFLOW_ENABLED. -->
     <div class="card" style="margin-top:1.5rem">
-      <div class="card-header">
-        <span>🌡️ Sensors</span>
-        <button type="button" class="btn btn-sm btn-primary" data-click="clAddSensor">+ Add Sensor</button>
+      <div class="card-head">
+        <div class="card-title"><span data-icon="thermometer"></span> Sensors</div>
+        <button type="button" class="btn primary" data-click="clAddSensor">+ Add Sensor</button>
       </div>
       <div class="card-body" style="padding:0">
         <div id="cl-sensors-list">
@@ -33,5 +33,5 @@
       </div>
     </div>
     <div id="ss-msg"></div>
-    <button type="button" class="btn btn-primary btn-block" style="margin-top:1rem" data-click="clSave">💾 Save Sensor List</button>
+    <button type="button" class="btn primary" style="margin-top:1rem" data-click="clSave"><span data-icon="save"></span> Save Sensor List</button>
   </main>

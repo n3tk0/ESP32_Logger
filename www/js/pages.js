@@ -40,6 +40,20 @@ function dbLoadUPlot(cb) {
     _uPlotCbs = [];
   }
 
+  function _giveUp() {
+    _uPlotLoading = false;
+    var err = document.getElementById("errorMsg");
+    if (err) {
+      err.innerHTML =
+        "<strong>Charts unavailable:</strong> Could not load <code>uPlot.iife.min.js</code>. " +
+        "If you removed it from LittleFS, re-upload it via /upload.";
+      err.style.display = "block";
+    }
+    if (typeof showToast === "function") {
+      showToast("Failed to load uPlot.iife.min.js", "error");
+    }
+  }
+
   // Stylesheet first — best-effort. uPlot still renders without it.
   var link = document.createElement("link");
   link.rel  = "stylesheet";
@@ -53,22 +67,13 @@ function dbLoadUPlot(cb) {
     var isOffline = (ST.wifi === "ap") || (CFG.network && CFG.network.wifiMode === 0);
     if (isOffline) {
       showToast("Offline AP mode: upload uPlot.iife.min.js(.gz) to LittleFS.", "error");
-      _uPlotLoading = false;
-      var err = document.getElementById("errorMsg");
-      if (err) {
-        err.innerHTML = "<strong>Offline AP mode:</strong> upload <code>uPlot.iife.min.js</code> (or <code>.gz</code>) to LittleFS to view charts.";
-        err.style.display = "block";
-      }
+      _giveUp();
       return;
     }
     var s2 = document.createElement("script");
-    s2.src = cdnSrc;
+    s2.src = preferLocal ? cdnSrc : localSrc;
     s2.onload = fire;
-    s2.onerror = function () {
-      _uPlotLoading = false;
-      var err = document.getElementById("errorMsg");
-      if (err) { err.textContent = "Failed to load uPlot"; err.style.display = "block"; }
-    };
+    s2.onerror = _giveUp;
     document.head.appendChild(s2);
   };
   document.head.appendChild(s);
@@ -659,12 +664,12 @@ function filesRender() {
   var tabs = document.getElementById("tabs");
   if (tabs) {
     tabs.innerHTML =
-      '<a data-click="filesSetStorage" data-args=\'["internal"]\' class="btn ' +
-      (currentFilesStorage === "internal" ? "btn-primary" : "btn-secondary") +
-      '">💾 Internal</a> ' +
-      '<a data-click="filesSetStorage" data-args=\'["sdcard"]\'   class="btn ' +
-      (currentFilesStorage === "sdcard" ? "btn-primary" : "btn-secondary") +
-      '">💳 SD Card</a>';
+      '<button data-click="filesSetStorage" data-args=\'["internal"]\' class="' +
+      (currentFilesStorage === "internal" ? "active" : "") +
+      '"><span data-icon="microchip"></span> LittleFS</button>' +
+      '<button data-click="filesSetStorage" data-args=\'["sdcard"]\' class="' +
+      (currentFilesStorage === "sdcard" ? "active" : "") +
+      '"><span data-icon="hard-drive"></span> SD Card</button>';
   }
 
   fetch(
@@ -683,26 +688,22 @@ function filesRender() {
       var bar = document.getElementById("bar");
       if (bar) {
         bar.style.width = pct + "%";
-        bar.className =
-          "progress-bar" +
-          (pct >= 90
-            ? " progress-bar-danger"
-            : pct >= 70
-              ? " progress-bar-warning"
-              : " progress-bar-success");
+        bar.className = pct >= 70 ? "warn" : "";
       }
 
-      setEl(
-        "files-dirLabel",
-        "📂 [" +
-          (currentFilesStorage === "sdcard" ? "SD" : "Int") +
-          "] " +
-          (currentFilesDir === "/" ? "Root" : currentFilesDir),
-      );
+      var lbl = document.getElementById("files-dirLabel");
+      if (lbl) {
+        lbl.innerHTML =
+          '<span class="mono">' +
+          (currentFilesStorage === "sdcard" ? "SD:" : "FS:") +
+          "</span> " + esc(currentFilesDir);
+      }
       var upBtn = document.getElementById("upBtn");
       if (upBtn) upBtn.style.display = currentFilesDir === "/" ? "none" : "";
-      var et = document.getElementById("editToggle");
-      if (et) et.textContent = filesEditMode ? "✖️ Done" : "✏️ Edit";
+      var btnEdit = document.getElementById("btnEdit");
+      var btnDone = document.getElementById("btnDone");
+      if (btnEdit) btnEdit.style.display = filesEditMode ? "none" : "";
+      if (btnDone) btnDone.style.display = filesEditMode ? "" : "none";
       var tools = document.getElementById("editTools");
       if (tools) tools.style.display = filesEditMode ? "block" : "none";
 
@@ -710,60 +711,72 @@ function filesRender() {
       if (!list) return;
       var files = d.files || [];
       if (!files.length) {
-        list.innerHTML = "<div class='list-item text-muted'>Empty</div>";
+        list.innerHTML = "";
+        list.appendChild(emptyState({
+          icon: "folder",
+          title: "No files",
+          msg: "This directory is empty. Upload a file or create a subfolder to get started."
+        }));
         return;
       }
 
-      var html = "";
+      var rows = "";
       if (d.truncated) {
-        html +=
-          "<div class='list-item text-warning' style='font-size:.8rem'>" +
-          "⚠️ Listing truncated at 500 entries \u2014 refine with a subfolder." +
-          "</div>";
+        rows +=
+          '<tr><td colspan="5" style="color:var(--warn);font-size:11.5px;padding:6px 14px">' +
+          "Listing truncated at 500 entries — refine with a subfolder." +
+          "</td></tr>";
       }
       files.forEach(function (f) {
+        var icon = f.isDir
+          ? '<span data-icon="folder"></span>'
+          : (/\.gz$/i.test(f.name)
+              ? '<span data-icon="file-archive"></span>'
+              : (/\.(jsonl?|csv|txt|log)$/i.test(f.name)
+                  ? '<span data-icon="file-text"></span>'
+                  : '<span data-icon="file"></span>'));
+        var nameCell = f.isDir
+          ? '<a class="fname dir" data-click="filesEnterDir" data-args="' +
+            esc(JSON.stringify([f.path])) + '">' + esc(f.name) + "</a>"
+          : '<span class="fname">' + esc(f.name) + "</span>";
         var actions = "";
-        if (f.isDir) {
-          actions =
-            '<a data-click="filesEnterDir" data-args="' +
-            esc(JSON.stringify([f.path])) +
-            '" class=\'btn btn-sm btn-secondary\'>📂 Open</a>';
-        } else {
+        if (!f.isDir) {
           actions +=
-            "<a href='/download?file=" +
+            '<a class="btn-mini" title="Download" href="/download?file=' +
             encodeURIComponent(f.path) +
-            "&storage=" +
-            currentFilesStorage +
-            "' class='btn btn-sm btn-secondary'>📥</a>";
-          if (filesEditMode) {
-            actions +=
-              ' <button data-click="showMovePopup" data-args="' +
-              esc(JSON.stringify([f.path, f.name])) +
-              '" class=\'btn btn-sm btn-secondary\'>✂️</button>';
-            actions +=
-              ' <button data-click="filesDelete" data-args="' +
-              esc(JSON.stringify([f.path])) +
-              '" class=\'btn btn-sm btn-danger\'>🗑️</button>';
-          }
+            "&storage=" + currentFilesStorage + '">' +
+            '<span data-icon="download"></span></a>';
         }
-        html +=
-          "<div class='list-item'><span>" +
-          (f.isDir ? "📁 " : "📄 ") +
-          esc(f.name) +
-          (f.isDir
-            ? ""
-            : ' <small class="text-muted">(' + fmtBytes(f.size) + ")</small>") +
-          "</span><span class='btn-group'>" +
-          actions +
-          "</span></div>";
+        if (filesEditMode) {
+          if (!f.isDir) {
+            actions +=
+              '<button class="btn-mini" title="Move/Rename" data-click="showMovePopup" data-args="' +
+              esc(JSON.stringify([f.path, f.name])) + '">' +
+              '<span data-icon="pencil"></span></button>';
+          }
+          actions +=
+            '<button class="btn-mini warn" title="Delete" data-click="filesDelete" data-args="' +
+            esc(JSON.stringify([f.path])) + '">' +
+            '<span data-icon="trash-2"></span></button>';
+        }
+        rows +=
+          '<tr><td style="width:32px">' + icon + "</td>" +
+          "<td>" + nameCell + "</td>" +
+          "<td>" + (f.isDir ? "—" : fmtBytes(f.size)) + "</td>" +
+          "<td>" + (f.modified ? esc(f.modified) : "") + "</td>" +
+          '<td><div class="row-acts">' + actions + "</div></td></tr>";
       });
-      list.innerHTML = html;
+      list.innerHTML =
+        '<table class="ftable">' +
+        "<thead><tr><th></th><th>Name</th><th>Size</th><th>Modified</th><th></th></tr></thead>" +
+        "<tbody>" + rows + "</tbody></table>";
+      if (window.Icons && Icons.swap) Icons.swap(list);
     })
     .catch(function (e) {
       var list = document.getElementById("list");
       if (list)
         list.innerHTML =
-          "<div class='list-item' style='color:red'>Error: " + e + "</div>";
+          '<div style="padding:14px;color:var(--err)">Error: ' + esc(String(e)) + "</div>";
     });
 }
 
@@ -1066,63 +1079,90 @@ registerHandlers({
   showMovePopup: showMovePopup,
   filesApplyMove: filesApplyMove,
   liveSetRate: liveSetRate,
+  liveLogsFilter: liveLogsFilter,
+  liveLogsFilterClear: liveLogsFilterClear,
 });
 
 // Matches original: function updLogs()
+// Phase 5c-3: caches the rendered logs in `_liveLogsCache` so the filter
+// input can re-render without re-fetching.  liveLogsFilter() reads the
+// cache; liveLogsFilterClear() resets the input + re-renders.
+var _liveLogsCache = [];
 function liveLogsUpdate() {
   fetch("/api/recent_logs")
     .then(function (r) {
       return r.json();
     })
     .then(function (d) {
-      var el = document.getElementById("logs");
-      if (!el) return;
-      var th = ST.theme || CFG.theme || {};
-      var ffC = th.ffColor || "#3498db",
-        pfC = th.pfColor || "#e74c3c",
-        otC = th.otherColor || "#95a5a6";
-      if (d.logs && d.logs.length) {
-        var html =
-          '<table style="width:100%;border-collapse:collapse;font-size:.75rem">';
-        html +=
-          '<tr style="background:var(--bg)"><th style="padding:6px;text-align:left">Time</th><th>Trigger</th><th>Volume</th><th>+FF</th><th>+PF</th></tr>';
-        d.logs.forEach(function (l) {
-          var color =
-            l.trigger.indexOf("FF") >= 0
-              ? ffC
-              : l.trigger.indexOf("PF") >= 0
-                ? pfC
-                : otC;
-          var bg = hexToRgba(color, 0.15);
-          html +=
-            '<tr style="background:' +
-            bg +
-            '">' +
-            '<td style="padding:6px">' +
-            esc(l.time) +
-            "</td>" +
-            '<td style="color:' +
-            color +
-            ';font-weight:bold;text-align:center">' +
-            esc(l.trigger) +
-            "</td>" +
-            '<td style="text-align:center">' +
-            esc(l.volume) +
-            "</td>" +
-            '<td style="text-align:center">' +
-            esc(l.ff) +
-            "</td>" +
-            '<td style="text-align:center">' +
-            esc(l.pf) +
-            "</td></tr>";
-        });
-        html += "</table>";
-        el.innerHTML = html;
-      } else {
-        el.innerHTML =
-          "<div class='list-item text-muted'>No log entries yet</div>";
-      }
+      _liveLogsCache = (d && d.logs) || [];
+      _liveLogsRender();
     })
     .catch(function () {});
+}
+
+function _liveLogsRender() {
+  var el = document.getElementById("logs");
+  if (!el) return;
+  var th = ST.theme || CFG.theme || {};
+  var ffC = th.ffColor || "#3498db",
+    pfC = th.pfColor || "#e74c3c",
+    otC = th.otherColor || "#95a5a6";
+
+  var filterEl = document.getElementById("logsFilter");
+  var query = filterEl ? filterEl.value.trim().toLowerCase() : "";
+  var rows = _liveLogsCache;
+  if (query) {
+    rows = rows.filter(function (l) {
+      return (
+        String(l.time).toLowerCase().indexOf(query) >= 0 ||
+        String(l.trigger).toLowerCase().indexOf(query) >= 0 ||
+        String(l.volume).toLowerCase().indexOf(query) >= 0 ||
+        String(l.ff).toLowerCase().indexOf(query) >= 0 ||
+        String(l.pf).toLowerCase().indexOf(query) >= 0
+      );
+    });
+  }
+
+  if (!rows.length) {
+    el.innerHTML = "";
+    el.appendChild(emptyState({
+      icon: "activity",
+      title: query ? "No matches" : "No log entries yet",
+      msg: query
+        ? "Try a different search term, or clear the filter."
+        : "Log entries appear here after the first wakeup with flow."
+    }));
+    return;
+  }
+
+  var html =
+    '<table style="width:100%;border-collapse:collapse;font-size:.75rem">';
+  html +=
+    '<tr style="background:var(--bg)"><th style="padding:6px;text-align:left">Time</th><th>Trigger</th><th>Volume</th><th>+FF</th><th>+PF</th></tr>';
+  rows.forEach(function (l) {
+    var color =
+      l.trigger.indexOf("FF") >= 0
+        ? ffC
+        : l.trigger.indexOf("PF") >= 0
+          ? pfC
+          : otC;
+    var bg = hexToRgba(color, 0.15);
+    html +=
+      '<tr style="background:' + bg + '">' +
+      '<td style="padding:6px">' + esc(l.time) + "</td>" +
+      '<td style="color:' + color + ';font-weight:bold;text-align:center">' + esc(l.trigger) + "</td>" +
+      '<td style="text-align:center">' + esc(l.volume) + "</td>" +
+      '<td style="text-align:center">' + esc(l.ff) + "</td>" +
+      '<td style="text-align:center">' + esc(l.pf) + "</td></tr>";
+  });
+  html += "</table>";
+  el.innerHTML = html;
+}
+
+function liveLogsFilter() { _liveLogsRender(); }
+function liveLogsFilterClear() {
+  var f = document.getElementById("logsFilter");
+  if (f) f.value = "";
+  _liveLogsRender();
 }
 

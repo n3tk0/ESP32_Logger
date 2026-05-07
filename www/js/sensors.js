@@ -68,6 +68,20 @@ function sensorsLoad() {
   if (msg) msg.textContent = "Loading…";
   if (grid) grid.innerHTML = "";
 
+  // Phase 5c-4 — short relative-time formatter for sensor freshness pills.
+  // Falls through "5s" → "3m" → "2h" → "1d" so the staleness signal stays
+  // legible at a glance.
+  function _sensorFmtAge(ms) {
+    var s = Math.round(ms / 1000);
+    if (s < 60)   return s + "s";
+    var m = Math.round(s / 60);
+    if (m < 60)   return m + "m";
+    var h = Math.round(m / 60);
+    if (h < 24)   return h + "h";
+    var d = Math.round(h / 24);
+    return d + "d";
+  }
+
   fetch("/api/sensors")
     .then(function (r) {
       return r.ok ? r.json() : null;
@@ -81,48 +95,122 @@ function sensorsLoad() {
       }
       if (msg) msg.textContent = "";
       if (grid) {
+        var nowMs = Date.now();
         grid.innerHTML = d.sensors
           .map(function (s) {
-            var statusClass =
-              s.status === "ok"
-                ? "badge-ok"
-                : s.status === "disabled"
-                  ? "badge-dis"
-                  : "badge-err";
-            var ts = s.last_read_ts
-              ? new Date(s.last_read_ts * 1000).toLocaleTimeString()
-              : "—";
+            // Sparkline path from `s.spark` (oldest → newest values).  We
+            // map the series onto a 100×36 viewBox using min/max so a flat
+            // line shows mid-card; the stroke path is what makes the card
+            // feel like it has a "history" backdrop.
+            var sparkSvg = "";
+            var spark = s.spark || [];
+            if (spark.length >= 2) {
+              var min = Infinity, max = -Infinity;
+              for (var i = 0; i < spark.length; i++) {
+                var n = +spark[i];
+                if (n < min) min = n;
+                if (n > max) max = n;
+              }
+              var range = max - min;
+              if (range < 1e-9) range = 1;
+              var stepX = 100 / (spark.length - 1);
+              var pts = "";
+              for (var j = 0; j < spark.length; j++) {
+                var x = (j * stepX).toFixed(1);
+                // 4 px top padding, 32 px bottom — matches design height
+                var y = (32 - ((+spark[j] - min) / range) * 28).toFixed(1);
+                pts += (j ? " " : "") + x + "," + y;
+              }
+              sparkSvg =
+                '<svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true">' +
+                '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>' +
+                "</svg>";
+            }
+
+            // Pick the "primary" metric to drive the big value display.
+            var primary = (s.metrics && s.metrics[0]) || null;
+            var primaryLv = primary && s.last_values ? s.last_values[primary] : null;
+            var primaryVal = "", primaryUnit = "", primaryTs = 0;
+            if (primaryLv !== undefined && primaryLv !== null) {
+              if (typeof primaryLv === "object") {
+                primaryVal  = primaryLv.v !== undefined ? String(primaryLv.v) : "";
+                primaryUnit = primaryLv.u || "";
+                primaryTs   = primaryLv.ts || 0;
+              } else {
+                primaryVal = String(primaryLv);
+              }
+            }
+
+            // Card-level staleness — picks the most accurate timestamp
+            // available (per-metric ts > sensor last_read_ts).
+            var stateClass = "";
+            var ageStr = "—";
+            var refMs = 0;
+            if (primaryTs)         refMs = primaryTs * 1000;
+            else if (s.last_read_ts) refMs = s.last_read_ts * 1000;
+            if (refMs && s.read_interval_ms) {
+              var ageMs = nowMs - refMs;
+              ageStr = _sensorFmtAge(ageMs) + " ago";
+              if (ageMs > s.read_interval_ms * 2) stateClass = " stale";
+            }
+            if (s.status === "error")    stateClass = " err";
+            if (s.status === "disabled") stateClass = " dis";
+
+            // Status badge — matches the design's small uppercase pill
+            // (.badge.ok / .err / dim) instead of the prior .badge-ok pattern.
+            var badgeClass =
+              s.status === "ok" ? "ok" :
+              s.status === "disabled" ? "dim" : "err";
+            var badgeText =
+              s.status === "ok" ? "OK" :
+              s.status === "disabled" ? "OFF" : "ERR";
+
+            // Secondary metric badges: every metric that isn't the primary,
+            // rendered with their value+unit when available.
+            var metricBadges = (s.metrics || [])
+              .filter(function (m) { return m !== primary; })
+              .map(function (m) {
+                var lv = s.last_values && s.last_values[m];
+                var v = "", u = "";
+                if (lv !== undefined && lv !== null) {
+                  if (typeof lv === "object") {
+                    v = lv.v !== undefined ? String(lv.v) : "";
+                    u = lv.u || "";
+                  } else {
+                    v = String(lv);
+                  }
+                }
+                var label = esc(m) + (v ? " " + esc(v) : "") + (u ? " " + esc(u) : "");
+                return '<span class="badge dim">' + label + "</span>";
+              })
+              .join("");
+
+            // Footer: last-read age + transport hint.  We don't know the
+            // exact bus from /api/sensors, so fall back to type when missing.
+            var transport = s.transport || s.type || "";
+
             return (
-              '<div class="sensor-card">' +
-              '<div class="sensor-card-header">' +
-              '<span class="sensor-name">' +
-              esc(s.name) +
-              "</span>" +
-              '<span class="badge ' +
-              statusClass +
-              '">' +
-              esc(s.status) +
-              "</span>" +
-              "</div>" +
-              '<div class="sensor-meta">' +
-              "<span>ID: <code>" +
-              esc(s.id) +
-              "</code></span>" +
-              "<span>Type: <code>" +
-              esc(s.type) +
-              "</code></span>" +
-              "<span>Last: " +
-              ts +
-              "</span>" +
-              "</div>" +
-              '<div class="sensor-metrics">' +
-              (s.metrics || [])
-                .map(function (m) {
-                  return '<span class="metric-tag">' + esc(m) + "</span>";
-                })
-                .join("") +
-              "</div>" +
-              "</div>"
+              '<div class="sensor' + stateClass + '">' +
+                '<div class="s-head">' +
+                  '<div>' +
+                    '<div class="s-name">' + esc(s.name) + '</div>' +
+                    '<div class="s-id">' + esc(s.id) +
+                      (transport ? ' · ' + esc(transport) : '') + '</div>' +
+                  '</div>' +
+                  '<span class="badge ' + badgeClass + '">' + badgeText + '</span>' +
+                '</div>' +
+                '<div class="s-val">' +
+                  '<span class="n">' + (primaryVal ? esc(primaryVal) : "—") + '</span>' +
+                  (primaryUnit ? '<span class="u">' + esc(primaryUnit) + '</span>' : '') +
+                  (primary ? '<span class="s-primary-name">' + esc(primary) + '</span>' : '') +
+                '</div>' +
+                sparkSvg +
+                (metricBadges ? '<div class="s-metrics">' + metricBadges + '</div>' : '') +
+                '<div class="s-foot">' +
+                  '<span>last ' + ageStr + '</span>' +
+                  '<span>' + esc(transport) + '</span>' +
+                '</div>' +
+              '</div>'
             );
           })
           .join("");
@@ -179,7 +267,7 @@ function sensorChartLoad() {
     "&metric=" +
     encodeURIComponent(metric) +
     "&from=" + from + "&to=" + now +
-    "&agg=" + agg + "&mode=" + mode + "&limit=500";
+    "&agg=" + agg + "&mode=" + mode + "&limit=250";
 
   // Secondary overlay sensor
   var sid2 = (document.getElementById("sc-sensor2") || {}).value;
@@ -192,7 +280,7 @@ function sensorChartLoad() {
       "&metric=" +
       encodeURIComponent(metric2) +
       "&from=" + from + "&to=" + now +
-      "&agg=" + agg + "&mode=" + mode + "&limit=500";
+      "&agg=" + agg + "&mode=" + mode + "&limit=250";
   }
 
   if (msg) msg.textContent = "Loading…";
@@ -426,9 +514,29 @@ function clLoad() {
     msg.className = "";
   }
   pcfgLoad(function (cfg) {
-    // Mode
+    // Mode — hidden <select> drives the form, .mode-card grid is the UI.
     var modeEl = document.getElementById("cl-mode");
-    if (modeEl) modeEl.value = cfg.mode || "legacy";
+    var mode = cfg.mode || "legacy";
+    if (modeEl) modeEl.value = mode;
+    document.querySelectorAll(".mode-card").forEach(function (card) {
+      var on = card.getAttribute("data-mode") === mode;
+      card.classList.toggle("selected", on);
+      var radio = card.querySelector("input[type=radio]");
+      if (radio) radio.checked = on;
+      if (!card._wired) {
+        card._wired = true;
+        card.addEventListener("click", function () {
+          var v = card.getAttribute("data-mode");
+          var sel = document.getElementById("cl-mode");
+          if (sel) { sel.value = v; sel.dispatchEvent(new Event("change", { bubbles: true })); }
+          document.querySelectorAll(".mode-card").forEach(function (c) {
+            c.classList.toggle("selected", c === card);
+            var r = c.querySelector("input[type=radio]");
+            if (r) r.checked = c === card;
+          });
+        });
+      }
+    });
 
     // Aggregation defaults
     var agg = cfg.aggregation || {};
@@ -493,8 +601,12 @@ function clRenderSensors(sensors) {
   var list = document.getElementById("cl-sensors-list");
   if (!list) return;
   if (!sensors || sensors.length === 0) {
-    list.innerHTML =
-      '<p class="text-muted" style="padding:1rem">No sensors configured. Click <strong>+ Add Sensor</strong> to begin.</p>';
+    list.innerHTML = "";
+    list.appendChild(emptyState({
+      icon: "gauge",
+      title: "No sensors configured",
+      msg: "Click + Add Sensor to register your first sensor."
+    }));
     return;
   }
   list.innerHTML = sensors
@@ -535,10 +647,10 @@ function clRenderSensors(sensors) {
         pinInfo +
         "</div>" +
         "</div>" +
-        '<button type="button" class="btn btn-sm btn-secondary" data-click="clEditSensor" data-args="[' +
+        '<button type="button" class="btn" data-click="clEditSensor" data-args="[' +
         i +
         ']">✏️</button>' +
-        '<button type="button" class="btn btn-sm btn-danger"   data-click="clRemoveSensor" data-args="[' +
+        '<button type="button" class="btn warn" data-click="clRemoveSensor" data-args="[' +
         i +
         ']">🗑</button>' +
         "</div>"
@@ -598,7 +710,7 @@ function clAddSensor() {
   t.textContent = "Select Sensor Type";
   var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   CL_SENSOR_TYPES.forEach(function(st) {
-    html += '<button class="btn btn-secondary" style="text-align:left;height:auto;padding:10px;display:flex;flex-direction:column;gap:4px" data-click="clDoAddSensor" data-args="' + esc(JSON.stringify([st.value])) + '">'
+    html += '<button class="btn" style="text-align:left;height:auto;padding:10px;display:flex;flex-direction:column;gap:4px" data-click="clDoAddSensor" data-args="' + esc(JSON.stringify([st.value])) + '">'
           + '<strong style="color:var(--text)">' + esc(st.value) + '</strong><span style="font-size:0.8rem;color:var(--text-muted)">' + esc(st.label) + '</span></button>';
   });
   html += '</div>';
@@ -665,7 +777,7 @@ function _sepPinSelect(elemId, currentVal, usedPins, allowNone, adcOnly) {
             + (isDisabled  ? ' disabled' : '')
             + '>' + p.label + suffix + '</option>';
     });
-    return '<select id="' + elemId + '" class="form-input form-select">' + opts + '</select>';
+    return '<select id="' + elemId + '" class="input">' + opts + '</select>';
 }
 
 function clEditSensor(idx) {
@@ -683,46 +795,51 @@ function clEditSensor(idx) {
   var html = '<form id="sensorEditForm" data-submit="clSaveEditedSensor">';
   
   // ID
-  html += '<div class="form-group"><label class="form-label">Sensor ID</label>' +
-          '<input type="text" name="id" class="form-input" value="' + esc(s.id || '') + '"></div>';
+  html += '<div class="field"><label class="field-label">Sensor ID</label>' +
+          '<input type="text" name="id" class="input" value="' + esc(s.id || '') + '"></div>';
           
   // Enabled
-  html += '<div class="form-group"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" name="enabled"' + (s.enabled ? ' checked' : '') + '> Enabled</label></div>';
+  html += '<div class="field"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" name="enabled"' + (s.enabled ? ' checked' : '') + '> Enabled</label></div>';
   
   // Read Interval
-  html += '<div class="form-group"><label class="form-label">Read Interval (ms)</label>' +
-          '<input type="number" step="100" name="read_interval_ms" class="form-input" value="' + (s.read_interval_ms || 10000) + '"></div>';
+  html += '<div class="field"><label class="field-label">Read Interval (ms)</label>' +
+          '<input type="number" step="100" name="read_interval_ms" class="input" value="' + (s.read_interval_ms || 10000) + '"></div>';
 
   if (s.interface === "i2c") {
-    html += '<div class="form-row">' +
-            '<div class="form-group"><label class="form-label">SDA Pin</label><input type="number" name="sda" class="form-input" value="' + (s.sda !== undefined ? s.sda : 6) + '"></div>' +
-            '<div class="form-group"><label class="form-label">SCL Pin</label><input type="number" name="scl" class="form-input" value="' + (s.scl !== undefined ? s.scl : 7) + '"></div>' +
+    html += '<div class="form-grid">' +
+            '<div class="field"><label class="field-label">SDA Pin</label><input type="number" name="sda" class="input" value="' + (s.sda !== undefined ? s.sda : 6) + '"></div>' +
+            '<div class="field"><label class="field-label">SCL Pin</label><input type="number" name="scl" class="input" value="' + (s.scl !== undefined ? s.scl : 7) + '"></div>' +
             '</div>';
   } else if (s.interface === "uart") {
-    html += '<div class="form-row">' +
-            '<div class="form-group"><label class="form-label">RX Pin</label><input type="number" name="uart_rx" class="form-input" value="' + (s.uart_rx !== undefined ? s.uart_rx : 20) + '"></div>' +
-            '<div class="form-group"><label class="form-label">TX Pin</label><input type="number" name="uart_tx" class="form-input" value="' + (s.uart_tx !== undefined ? s.uart_tx : -1) + '"></div>' +
+    html += '<div class="form-grid">' +
+            '<div class="field"><label class="field-label">RX Pin</label><input type="number" name="uart_rx" class="input" value="' + (s.uart_rx !== undefined ? s.uart_rx : 20) + '"></div>' +
+            '<div class="field"><label class="field-label">TX Pin</label><input type="number" name="uart_tx" class="input" value="' + (s.uart_tx !== undefined ? s.uart_tx : -1) + '"></div>' +
             '</div>';
-    html += '<div class="form-group"><label class="form-label">Baud Rate</label><select name="baud" class="form-input form-select">' +
+    html += '<div class="field"><label class="field-label">Baud Rate</label><select name="baud" class="input">' +
             '<option value="9600"' + (s.baud == 9600 ? ' selected' : '') + '>9600</option>' +
             '<option value="19200"' + (s.baud == 19200 ? ' selected' : '') + '>19200</option>' +
             '<option value="38400"' + (s.baud == 38400 ? ' selected' : '') + '>38400</option>' +
             '<option value="115200"' + (s.baud == 115200 ? ' selected' : '') + '>115200</option>' +
             '</select></div>';
+    if (s.type === "sds011") {
+      html += '<div class="field"><label class="field-label">Working Period (minutes)</label>' +
+              '<input type="number" min="0" max="30" name="work_period_min" class="input" value="' + (s.work_period_min !== undefined ? s.work_period_min : 1) + '">' +
+              '<p class="hint">0 = Continuous. 1-30 = Sensor sleeps and wakes automatically.</p></div>';
+    }
   } else if (s.interface === "pulse") {
-    html += '<div class="form-group"><label class="form-label">Pin</label><input type="number" name="pin" class="form-input" value="' + (s.pin !== undefined ? s.pin : 9) + '"></div>';
+    html += '<div class="field"><label class="field-label">Pin</label><input type="number" name="pin" class="input" value="' + (s.pin !== undefined ? s.pin : 9) + '"></div>';
   }
 
   // Support for custom JSON fields (advanced)
-  var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "uart_rx", "uart_tx", "baud", "pin"];
+  var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "uart_rx", "uart_tx", "baud", "pin", "work_period_min"];
   var advObj = {};
   for (var k in s) {
     if (stdKeys.indexOf(k) === -1) advObj[k] = s[k];
   }
   var advStr = Object.keys(advObj).length > 0 ? JSON.stringify(advObj) : "{}";
-  html += '<div class="form-group" style="margin-top:1rem"><label class="form-label">Advanced (JSON overlay)</label>' +
-          '<input type="text" name="advanced" class="form-input" value=\'' + advStr.replace(/'/g, "&apos;") + '\'>' +
-          '<p class="form-hint">Additional parameters applied directly to this sensor. Keep as {} if unsure.</p></div>';
+  html += '<div class="field" style="margin-top:1rem"><label class="field-label">Advanced (JSON overlay)</label>' +
+          '<input type="text" name="advanced" class="input" value="' + esc(advStr) + '">' +
+          '<p class="hint">Additional parameters applied directly to this sensor. Keep as {} if unsure.</p></div>';
 
   html += '</form>';
   
@@ -752,6 +869,9 @@ function clSaveEditedSensor() {
     s.uart_rx = parseInt(fd.get("uart_rx") || 20, 10);
     s.uart_tx = parseInt(fd.get("uart_tx") || -1, 10);
     s.baud = parseInt(fd.get("baud") || 9600, 10);
+    if (s.type === "sds011") {
+      s.work_period_min = parseInt(fd.get("work_period_min") || 1, 10);
+    }
   } else if (s.interface === "pulse") {
     s.pin = parseInt(fd.get("pin") || 9, 10);
   }
@@ -947,18 +1067,18 @@ function expLoad() {
         "wind_speed",
       ];
       osmDiv.innerHTML =
-        '<div class="form-row" style="flex-wrap:wrap">' +
+        '<div class="form-grid" style="flex-wrap:wrap">' +
         metrics
           .map(function (m) {
             return (
-              '<div class="form-group" style="min-width:180px">' +
-              '<label class="form-label">' +
+              '<div class="field" style="min-width:180px">' +
+              '<label class="field-label">' +
               m +
               "</label>" +
               '<input type="text" id="osm-id-' +
               m +
-              '" class="form-input" value="' +
-              (ids[m] || "") +
+              '" class="input" value="' +
+              esc(ids[m] || "") +
               '" placeholder="sensor ID…">' +
               "</div>"
             );

@@ -1,12 +1,19 @@
 /**
  * src/web/WebServer.cpp
- * ESP32 Water Logger v4.2.0 – Production audit hardening
+ * ESP32 Water Logger v5.1.0 – Production audit hardening
  *
  * Architecture:
  *   – Normal mode  : AsyncWebServer serves /www/index.html + /www/js/*.js
  *   – Failsafe mode: If /www/index.html is missing, embedded minimal HTML is
- *                    served that lets the user upload the real UI files.
+ *                    served that lets the user upload the real UI files,
+ *                    create directories, manage files, configure sensors,
+ *                    and flash OTA firmware — all from PROGMEM.
  *   – All JSON API endpoints are always available regardless of UI mode.
+ *
+ * CSP: script-src includes 'unsafe-inline' because the failsafe PROGMEM page
+ *      relies on inline <script> blocks and onclick handlers.
+ *
+ * Compatibility: ESPAsyncWebServer >= 3.11 (const-correct getParam API).
  */
 
 #include "WebServer.h"
@@ -20,10 +27,12 @@
 #include "../utils/Utils.h"
 #include "ApiHandlers.h"
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
+#include "CsrfToken.h"                 // Pass 7 CSRF on mutating routes
 #include "../pipeline/DataPipeline.h"   // fsMutex (FS1)
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Update.h>
+#include <mbedtls/sha256.h>             // OTA SHA-256 verify (Pass 5 5.6)
 #include <WiFi.h>
 #include <functional>
 #include <memory>
@@ -51,9 +60,9 @@ String getNetworkDisplay() {
 }
 
 void sendJsonResponse(AsyncWebServerRequest *r, JsonDocument &doc) {
-    String json;
-    serializeJson(doc, json);
-    r->send(200, "application/json", json);
+    AsyncResponseStream *resp = r->beginResponseStream("application/json");
+    serializeJson(doc, *resp);
+    r->send(resp);
 }
 
 const char RESTART_HEAD[] PROGMEM = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -162,7 +171,8 @@ void publishLiveEvent() {
 static const char FAILSAFE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Water Logger - Setup Mode</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,sans-serif;background:#f0f4f8;color:#2d3748;min-height:100vh}header{background:#275673;color:#fff;padding:16px 20px}header h1{font-size:1.2rem;display:flex;align-items:center;gap:10px}.badge{background:#e74c3c;color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem;font-weight:700}.sub{font-size:.8rem;opacity:.8;margin-top:4px}.container{max-width:720px;margin:20px auto;padding:0 14px}.card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.09);margin-bottom:14px;overflow:hidden}.card-header{padding:13px 18px;border-bottom:1px solid #e2e8f0;font-weight:600;background:#f7fafc;display:flex;justify-content:space-between;align-items:center}.card-body{padding:16px 18px}.drop{border:2px dashed #cbd5e0;border-radius:8px;padding:24px;text-align:center;cursor:pointer;transition:.2s;margin-bottom:10px}.drop:hover,.drop.over{border-color:#275673;background:#ebf4ff}.drop input{display:none}.drop p{color:#718096;font-size:.85rem;margin-top:5px}.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;border:none;border-radius:7px;font-size:.88rem;font-weight:500;cursor:pointer;transition:.15s;text-decoration:none}.btn-primary{background:#275673;color:#fff}.btn-primary:hover{background:#1d4259}.btn-danger{background:#e74c3c;color:#fff}.btn-danger:hover{background:#c0392b}.btn-warn{background:#f39c12;color:#fff}.btn-warn:hover{background:#d68910}.btn-sm{padding:4px 10px;font-size:.78rem}progress{width:100%;height:8px;border-radius:4px;margin-top:8px;display:none}.msg{margin-top:8px;font-size:.88rem;min-height:1.1em}.ok{color:#27ae60}.err{color:#e74c3c}.inf{color:#275673}.file-list{font-size:.85rem}.file-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #e2e8f0;gap:6px}.file-row:last-child{border:none}.fname{word-break:break-all;flex:1}.fsize{color:#718096;white-space:nowrap;margin:0 8px}.acts{display:flex;gap:5px;flex-shrink:0}.alert{padding:11px 15px;border-radius:8px;margin-bottom:12px;font-size:.88rem;line-height:1.4}.alert-warn{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}.legacy{background:#fff3cd;border-left:4px solid #f39c12;padding:6px 10px;border-radius:4px;font-size:.8rem;color:#856404;margin-top:4px}input[type=text]{width:100%;padding:7px 11px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem}.section-label{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#718096;padding:10px 0 4px}.sel{width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:.88rem;margin-top:4px;background:#fff;color:#2d3748}.fhint{font-size:.78rem;color:#718096;margin-top:4px}.chk-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #e2e8f0;font-size:.88rem}.chk-row:last-child{border:none}.warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:7px;padding:11px 14px;font-size:.83rem;color:#92400e;margin-top:8px;display:none}.warn-box.show{display:block}.flabel{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#718096;display:block;margin-bottom:2px}.tabs{display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px}.tab{padding:10px 20px;border:none;background:none;cursor:pointer;font-size:.9rem;color:#718096;font-weight:500;border-bottom:3px solid transparent;margin-bottom:-2px;transition:.15s;display:flex;align-items:center;gap:6px}.tab:hover{color:#275673;background:#f7fafc}.tab.active{color:#275673;border-bottom-color:#275673;font-weight:700}.tab-pane{display:none}.tab-pane.active{display:block}</style></head><body>)HTML"
 R"HTML(<header><h1>&#x1F4A7; Water Logger <span class="badge">SETUP MODE</span></h1><div class="sub">Upload UI files to /www/ to restore normal operation &mdash; or bookmark <strong>/setup</strong> for recovery</div><div id="fs-sysinfo" class="sub" style="font-size:.72rem;margin-top:3px;opacity:.8"></div></header><div class="container"><div class="tabs"><button class="tab active" id="tab-btn-setup" onclick="switchTab('setup',this)">&#x2699;&#xFE0F; Setup</button><button class="tab" id="tab-btn-corelogic" onclick="switchTab('corelogic',this)">&#x1F9E9; Core Logic</button></div>)HTML"
 R"HTML(<div id="tab-setup" class="tab-pane active"><div class="alert alert-warn">&#x26A0;&#xFE0F; <strong>Normal UI not found.</strong> Upload <code>index.html</code>, <code>web.js</code> and <code>style.css</code> into <code>/www/</code>. If you see a broken page normally, you likely have <strong>old files at the root</strong> &mdash; delete them below. If the main UI is broken, navigate to <code>/setup</code> at any time to return here.</div>)HTML"
-R"HTML(<div class="card"><div class="card-header">&#x1F4E4; Upload files to /www/</div><div class="card-body"><div class="drop" id="dropZone" onclick="document.getElementById('fileInput').click()"><input type="file" id="fileInput" multiple>&#x2B06; <strong>Click or drag files here</strong><p>index.html &bull; web.js &bull; style.css &bull; changelog.txt &bull; uPlot.iife.min.js &bull; etc.</p></div><progress id="prog" value="0" max="100"></progress><div class="msg inf" id="uploadMsg"></div></div></div>)HTML"
+R"HTML(<div class="card"><div class="card-header">&#x1F4E4; Upload Files</div><div class="card-body"><div style="margin-bottom:10px"><label class="flabel">Upload to directory:</label><input type="text" id="uploadDir" value="/www/" placeholder="/www/js/pages/"><p class="fhint">Directory will be created automatically if it doesn't exist.</p></div><div class="drop" id="dropZone" onclick="document.getElementById('fileInput').click()"><input type="file" id="fileInput" multiple>&#x2B06; <strong>Click or drag files here</strong><p>index.html &bull; web.js &bull; style.css &bull; uPlot.iife.min.js &bull; etc.</p></div><progress id="prog" value="0" max="100"></progress><div class="msg inf" id="uploadMsg"></div></div></div>)HTML"
+R"HTML(<div class="card"><div class="card-header">&#x1F4C1; Create Directory</div><div class="card-body"><div style="display:flex;gap:8px"><input type="text" id="mkdirPath" placeholder="/www/js/pages"><button class="btn btn-primary" onclick="doMkdir()">Create</button></div><div class="msg" id="mkdirMsg"></div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header"><span>&#x1F4C1; LittleFS &mdash; All Files</span><button class="btn btn-sm btn-primary" onclick="loadFiles()">&#x21BA; Refresh</button></div><div class="card-body" style="padding:4px 18px 14px"><div id="legacyWarn" style="display:none" class="legacy">&#x26A0;&#xFE0F; <strong>Legacy UI files found at root.</strong> These override /www/ files and cause broken pages. Delete them!</div><div class="section-label">&#x1F4C2; /www/ (new UI files)</div><div class="file-list" id="wwwList">Loading&#x2026;</div><div class="section-label" style="margin-top:10px">&#x1F4C2; / (root &mdash; legacy / system files)</div><div class="file-list" id="rootList">Loading&#x2026;</div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header">&#x270F;&#xFE0F; Rename / Move File</div><div class="card-body"><div style="display:flex;gap:8px;flex-wrap:wrap"><input type="text" id="renSrc" placeholder="From: e.g. /web.js" style="flex:1;min-width:140px"><input type="text" id="renDst" placeholder="To: e.g. /www/web.js" style="flex:1;min-width:140px"><button class="btn btn-primary" onclick="doRename()">Move</button></div><div class="msg" id="renMsg"></div></div></div>)HTML"
 R"HTML(<div class="card"><div class="card-header">&#x1F504; Device Control</div><div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn btn-primary" onclick="if(confirm('Restart now?'))fetch('/restart',{method:'POST'}).then(function(){setTimeout(function(){location.reload();},5000)})">&#x1F504; Restart</button><button class="btn btn-danger" onclick="doFactoryReset()">&#x1F9F9; Factory Reset</button><div class="msg" id="fsResetMsg" style="flex-basis:100%;margin-top:4px"></div></div></div>)HTML"
@@ -174,7 +184,8 @@ R"HTML(<script>
 function switchTab(n,b){document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-pane').forEach(function(p){p.classList.remove('active');p.style.display='none'});b.classList.add('active');var p=document.getElementById('tab-'+n);if(p){p.classList.add('active');p.style.display='block'}if(n==='corelogic'&&!FS_PCFG)fsClLoad()}
 var LEG=['/web.js','/style.css','/index.html','/index.htm'];
 var dz=document.getElementById('dropZone');dz.addEventListener('dragover',function(e){e.preventDefault();this.classList.add('over')});dz.addEventListener('dragleave',function(){this.classList.remove('over')});dz.addEventListener('drop',function(e){e.preventDefault();this.classList.remove('over');upF(e.dataTransfer.files)});document.getElementById('fileInput').addEventListener('change',function(){upF(this.files)});
-function upF(fs){if(!fs||!fs.length)return;var pg=document.getElementById('prog'),mg=document.getElementById('uploadMsg'),i=0;pg.style.display='block';mg.className='msg inf';(function nx(){if(i>=fs.length){mg.textContent='Done! '+fs.length+' file(s) uploaded to /www/.';mg.className='msg ok';pg.style.display='none';document.getElementById('fileInput').value='';ldF();return}var fd=new FormData();fd.append('file',fs[i]);fd.append('path','/www/');var x=new XMLHttpRequest();x.upload.onprogress=function(e){if(e.lengthComputable)pg.value=Math.round(e.loaded/e.total*100)};x.onload=function(){mg.textContent='Uploaded: '+fs[i].name+' ('+(i+1)+'/'+fs.length+')';i++;nx()};x.onerror=function(){mg.textContent='Error: '+fs[i].name;mg.className='msg err';pg.style.display='none'};x.open('POST','/upload');x.send(fd)})()}
+function upF(fs){if(!fs||!fs.length)return;var tgt=document.getElementById('uploadDir').value.trim()||'/www/';var pg=document.getElementById('prog'),mg=document.getElementById('uploadMsg'),i=0;pg.style.display='block';mg.className='msg inf';(function nx(){if(i>=fs.length){mg.textContent='Done! '+fs.length+' file(s) uploaded to '+tgt;mg.className='msg ok';pg.style.display='none';document.getElementById('fileInput').value='';ldF();return}var fd=new FormData();fd.append('file',fs[i]);fd.append('path',tgt);var x=new XMLHttpRequest();x.upload.onprogress=function(e){if(e.lengthComputable)pg.value=Math.round(e.loaded/e.total*100)};x.onload=function(){mg.textContent='Uploaded: '+fs[i].name+' ('+(i+1)+'/'+fs.length+')';i++;nx()};x.onerror=function(){mg.textContent='Error: '+fs[i].name;mg.className='msg err';pg.style.display='none'};x.open('POST','/upload');x.send(fd)})()}
+function doMkdir(){var p=document.getElementById('mkdirPath').value.trim(),m=document.getElementById('mkdirMsg');if(!p){m.textContent='Enter a path.';m.className='msg err';return}var parts=p.split('/').filter(function(s){return s.length>0});var nm=parts.pop();var dr='/'+parts.join('/');if(!dr||dr==='/')dr='/';fetch('/mkdir?name='+encodeURIComponent(nm)+'&dir='+encodeURIComponent(dr)+'&storage=internal',{method:'POST'}).then(function(r){return r.json()}).then(function(j){if(j&&j.ok){m.textContent='Created: '+p;m.className='msg ok';ldF()}else{m.textContent='Failed: '+(j.error||'unknown');m.className='msg err'}}).catch(function(e){m.textContent='Error: '+e;m.className='msg err'})}
 function fmB(b){if(!b)return'0 B';if(b>=1048576)return(b/1048576).toFixed(1)+' MB';if(b>=1024)return(b/1024).toFixed(1)+' KB';return b+' B'}
 function fRow(f){var lg=LEG.indexOf(f.path)>=0;return'<div class="file-row"'+(lg?' style="background:#fff8e1"':'')+'><span class="fname">'+(lg?'&#x26A0;&#xFE0F; ':'&#x1F4C4; ')+f.path+(lg?' <span style="color:#e67e22;font-size:.75rem">[LEGACY - DELETE]</span>':'')+'</span><span class="fsize">'+fmB(f.size)+'</span><span class="acts"><a href="/download?file='+encodeURIComponent(f.path)+'&storage=internal" class="btn btn-sm btn-primary">&#x1F4E5;</a> <button class="btn btn-sm btn-danger" data-path="'+f.path+'" onclick="dlF(this.dataset.path)">&#x1F5D1;</button></span></div>'}
 function ldF(){var w=document.getElementById('wwwList'),r=document.getElementById('rootList'),wn=document.getElementById('legacyWarn');if(w.innerHTML==='')w.innerHTML='Loading&#x2026;';if(r.innerHTML==='')r.innerHTML='Loading&#x2026;';fetch('/api/filelist?storage=internal&dir=/www/').then(function(r){return r.json()}).then(function(d){var f=d.files||[];if(!f.length){w.innerHTML='<div style="padding:8px 0;color:#718096">Empty &mdash; upload files here</div>';return}w.innerHTML=f.map(function(x){return fRow(x)}).join('')}).catch(function(){w.innerHTML='<span class="err">Error</span>'});fetch('/api/filelist?storage=internal&dir=/').then(function(r){return r.json()}).then(function(d){var f=(d.files||[]).filter(function(x){return!x.isDir});if(!f.length){r.innerHTML='<div style="padding:8px 0;color:#718096">Empty</div>';wn.style.display='none';return}wn.style.display=f.some(function(x){return LEG.indexOf(x.path)>=0})?'block':'none';r.innerHTML=f.map(function(x){return fRow(x)}).join('')}).catch(function(){r.innerHTML='<span class="err">Error</span>'})}
@@ -333,16 +344,37 @@ void setupWebServer() {
     // (stored XSS, rogue file upload) is now blocked by the browser.
     // style-src still keeps 'unsafe-inline' because many layout style="…"
     // attributes remain; tightening that is a separate pass.
+    //
+    // When the firmware is built with -DUI_CDN_BASE the CSP must permit the
+    // CDN host in script-src / style-src / connect-src / img-src so the
+    // bootstrap can pull assets and the SPA can call back to the device.
+    // Path-restricted source (e.g. `https://example.com/v4.2.0/`) is honoured
+    // by every modern browser and is tighter than a bare origin (codex P1
+    // review on PR #54).
+#ifdef UI_CDN_BASE
     DefaultHeaders::Instance().addHeader(
         "Content-Security-Policy",
         "default-src 'self'; "
-        "script-src 'self'; "
+        "script-src 'self' " UI_CDN_BASE "/; "
+        "style-src 'self' 'unsafe-inline' " UI_CDN_BASE "/; "
+        "img-src 'self' data: " UI_CDN_BASE "/; "
+        "font-src 'self' " UI_CDN_BASE "/; "
+        "connect-src 'self' " UI_CDN_BASE "/; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'"
+    );
+#else
+    DefaultHeaders::Instance().addHeader(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
         "frame-ancestors 'none'; "
         "base-uri 'self'"
     );
+#endif
     DefaultHeaders::Instance().addHeader("X-Content-Type-Options", "nosniff");
     DefaultHeaders::Instance().addHeader("X-Frame-Options", "DENY");
     DefaultHeaders::Instance().addHeader("Referrer-Policy", "no-referrer");
@@ -354,7 +386,65 @@ void setupWebServer() {
     // branch").  Registered BEFORE serveStatic so it wins route matching for
     // the exact `/` path.  Also honours a pre-gzipped index.html.gz sibling
     // (audit Pass 4 C1) — flash savings are worth a single extension probe.
+    //
+    // ── Pass 4 C4 — Optional CDN UI ─────────────────────────────────────────
+    // When the firmware is built with -DUI_CDN_BASE="https://example.com/v4",
+    // the root handler emits a tiny bootstrap that loads /style.css and
+    // /js/*.js from the CDN instead of LittleFS.  Frees ~200 KB of LittleFS
+    // for logs.  No build flag → behaviour unchanged.  Local-served pages
+    // and the failsafe HTML are still always available as fallback.
+#ifdef UI_CDN_BASE
+    // Bootstrap HTML hoisted out of the request handler (gemini review
+    // PR #54).  CSP-compatible (codex P1 on PR #54): no <base href> (would
+    // violate base-uri 'self') and no inline <script> (would need
+    // 'unsafe-inline' even with the CDN whitelisted in script-src).  The
+    // boot logic lives in /cdn-boot.js, served from the device itself so
+    // script-src 'self' covers it.  Stylesheet / theme-boot loaded by
+    // absolute CDN URL — the relaxed CSP whitelists UI_CDN_BASE.
+    static const char CDN_BOOTSTRAP_HTML[] PROGMEM =
+        "<!DOCTYPE html><html lang=\"en\" id=\"htmlRoot\"><head>"
+        "<meta charset=\"UTF-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">"
+        "<title>Water Logger</title>"
+        "<link rel=\"stylesheet\" href=\"" UI_CDN_BASE "/style.css\">"
+        "<script src=\"" UI_CDN_BASE "/js/theme-boot.js\"></script>"
+        "</head><body>"
+        "<div id=\"cdnBoot\" style=\"font-family:sans-serif;padding:2rem;text-align:center\">"
+        "Loading UI from CDN…</div>"
+        "<script src=\"/cdn-boot.js\"></script>"
+        "</body></html>";
+
+    // Boot script served from the device — `script-src 'self'` covers it
+    // without needing 'unsafe-inline'.  Fetches the SPA HTML from the CDN
+    // and replaces the bootstrap document; on failure, shows a link back
+    // to the on-device UI.
+    static const char CDN_BOOT_JS[] PROGMEM =
+        "fetch('" UI_CDN_BASE "/index.html').then(function(r){return r.text();})"
+        ".then(function(t){document.open();document.write(t);document.close();})"
+        ".catch(function(e){"
+          "document.getElementById('cdnBoot').innerHTML="
+            "'CDN unreachable. <a href=\"/?_local=1\">Use local UI</a>';"
+        "});";
+
+    server.on("/cdn-boot.js", HTTP_GET, [](AsyncWebServerRequest *r) {
+        AsyncWebServerResponse* resp =
+            r->beginResponse_P(200, "application/javascript", CDN_BOOT_JS);
+        resp->addHeader("Cache-Control", "public, max-age=300");
+        r->send(resp);
+    });
+#endif
+
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
+#ifdef UI_CDN_BASE
+        // Build-time CDN opt-in: 1 KB bootstrap from PROGMEM loads the SPA
+        // from the hosted URL.  All API calls still target this device —
+        // only the static bundle moves off-flash.  ?_local=1 lets devs
+        // force the on-device copy when the CDN is unreachable.
+        if (!r->hasParam("_local")) {
+            r->send_P(200, "text/html", CDN_BOOTSTRAP_HTML);
+            return;
+        }
+#endif
         if (littleFsAvailable && LittleFS.exists("/www/index.html.gz")) {
             AsyncWebServerResponse* resp =
                 r->beginResponse(LittleFS, "/www/index.html.gz", "text/html");
@@ -379,7 +469,7 @@ void setupWebServer() {
           .setDefaultFile("index.html")
           .setCacheControl("public, max-age=300, must-revalidate");
 
-    if (LittleFS.exists("/www/index.html")) {
+    if (LittleFS.exists("/www/index.html") || LittleFS.exists("/www/index.html.gz")) {
         DBGLN("Web UI: serving from /www/");
     } else {
         DBGLN("Web UI: FAILSAFE mode (upload /www/index.html to restore)");
@@ -401,6 +491,43 @@ void setupWebServer() {
     server.on("/settings_time",      HTTP_GET, spaRedirect);
     server.on("/settings_network",   HTTP_GET, spaRedirect);
     server.on("/settings_datalog",   HTTP_GET, spaRedirect);
+
+    // ── Captive-portal probe endpoints (Pass 5 5.5 phase 2) ────────────────
+    // Phones, laptops, and game consoles all probe a hardcoded URL on join
+    // to detect captive portals.  The DNS responder in WiFiManager already
+    // points every hostname at us; redirecting these paths to "/" makes the
+    // OS auto-pop its captive-portal banner so the user lands on the SPA
+    // without typing any IP.  Reachable from any host header thanks to the
+    // wildcard DNS, so we don't filter by Host.
+    auto captiveRedirect = [](AsyncWebServerRequest *r) {
+        // 302 to the SPA root with an ABSOLUTE URL pointing at the AP IP
+        // (gemini review PR #48).  Some older Android NCSI implementations
+        // and Windows captive-portal probes refuse to follow relative
+        // redirects when the Host header doesn't match the expected probe
+        // domain — an absolute URL sidesteps that entirely.
+        //
+        // Use `r->client()->localIP()` rather than WiFi.softAPIP() — it's
+        // the IP of the interface that actually received the request, which
+        // (a) avoids the transient 0.0.0.0 that softAPIP() can return right
+        // after softAP() startup, and (b) handles WIFI_AP_STA correctly
+        // when the test endpoint puts us in dual mode (gemini review #2).
+        String url = "http://" + r->client()->localIP().toString() + "/";
+        r->redirect(url);
+    };
+    // Apple iOS / macOS
+    server.on("/hotspot-detect.html",  HTTP_GET, captiveRedirect);
+    server.on("/library/test/success.html", HTTP_GET, captiveRedirect);
+    // Android — expects 204 NoContent normally; we return 302 so the OS
+    // recognises a portal and prompts the user.
+    server.on("/generate_204",         HTTP_GET, captiveRedirect);
+    server.on("/gen_204",              HTTP_GET, captiveRedirect);
+    // Windows
+    server.on("/connecttest.txt",      HTTP_GET, captiveRedirect);
+    server.on("/redirect",             HTTP_GET, captiveRedirect);
+    server.on("/ncsi.txt",             HTTP_GET, captiveRedirect);
+    // Mozilla / Firefox
+    server.on("/canonical.html",       HTTP_GET, captiveRedirect);
+    server.on("/success.txt",          HTTP_GET, captiveRedirect);
 
     // =========================================================================
     // API: STATUS
@@ -525,6 +652,18 @@ void setupWebServer() {
         JsonDocument doc;
         fillRuntime(doc.to<JsonObject>());
         sendJsonResponse(r, doc);
+    });
+
+    // Pass 7 — per-boot CSRF token for the SPA to inject into mutating
+    // calls.  Generated on first call from esp_random(); same token
+    // returned for the lifetime of the firmware run.
+    server.on("/api/csrf-token", HTTP_GET, [](AsyncWebServerRequest *r) {
+        String body = "{\"token\":\"";
+        body += CsrfToken::get();
+        body += "\"}";
+        AsyncWebServerResponse* resp = r->beginResponse(200, "application/json", body);
+        resp->addHeader("Cache-Control", "no-store");
+        r->send(resp);
     });
 
     server.on("/api/theme", HTTP_GET, [fillTheme](AsyncWebServerRequest *r) {
@@ -899,11 +1038,10 @@ void setupWebServer() {
         hw["pinSdMISO"]          = config.hardware.pinSdMISO;
         hw["pinSdSCK"]           = config.hardware.pinSdSCK;
 
-        String json;
-        serializeJsonPretty(doc, json);
-        AsyncWebServerResponse *resp = r->beginResponse(200, "application/json", json);
+        AsyncResponseStream *resp = r->beginResponseStream("application/json");
         String fn = String(strlen(config.deviceName) ? config.deviceName : "device") + "_settings.json";
         resp->addHeader("Content-Disposition", "attachment; filename=\"" + fn + "\"");
+        serializeJson(doc, *resp);
         r->send(resp);
     });
 
@@ -913,6 +1051,7 @@ void setupWebServer() {
 
     server.on("/save_device", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("deviceName", true))
             SAFE_STRNCPY(config.deviceName, r->getParam("deviceName", true)->value().c_str(), sizeof(config.deviceName));
         if (r->hasParam("deviceId", true)) {
@@ -929,6 +1068,7 @@ void setupWebServer() {
 
     server.on("/save_flowmeter", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
 #if !defined(SENSOR_WATERFLOW_ENABLED)
         // Chunk G: feature compiled out — return 410 Gone so the UI can
         // surface a meaningful error if it's still bookmarked or cached.
@@ -958,6 +1098,7 @@ void setupWebServer() {
 
     server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("storageType", true))    config.hardware.storageType    = (StorageType)r->getParam("storageType", true)->value().toInt();
         if (r->hasParam("wakeupMode", true))     config.hardware.wakeupMode     = (WakeupMode)r->getParam("wakeupMode", true)->value().toInt();
         if (r->hasParam("pinWifiTrigger", true)) config.hardware.pinWifiTrigger = r->getParam("pinWifiTrigger", true)->value().toInt();
@@ -982,6 +1123,7 @@ void setupWebServer() {
 
     server.on("/save_theme", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("themeMode", true))        config.theme.mode           = (ThemeMode)r->getParam("themeMode", true)->value().toInt();
         config.theme.showIcons = r->hasParam("showIcons", true);
         if (r->hasParam("primaryColor", true))     SAFE_STRNCPY(config.theme.primaryColor,      r->getParam("primaryColor", true)->value().c_str(), sizeof(config.theme.primaryColor));
@@ -1009,6 +1151,7 @@ void setupWebServer() {
 
     server.on("/save_datalog", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("currentFile", true))  SAFE_STRNCPY(config.datalog.currentFile, r->getParam("currentFile", true)->value().c_str(), sizeof(config.datalog.currentFile));
         if (r->hasParam("prefix", true))       SAFE_STRNCPY(config.datalog.prefix,      r->getParam("prefix", true)->value().c_str(), sizeof(config.datalog.prefix));
         if (r->hasParam("folder", true))       SAFE_STRNCPY(config.datalog.folder,      r->getParam("folder", true)->value().c_str(), sizeof(config.datalog.folder));
@@ -1079,6 +1222,7 @@ void setupWebServer() {
 
     server.on("/save_network", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("wifiMode", true))       config.network.wifiMode = (WiFiModeType)r->getParam("wifiMode", true)->value().toInt();
         if (r->hasParam("apSSID", true))         SAFE_STRNCPY(config.network.apSSID,         r->getParam("apSSID", true)->value().c_str(), sizeof(config.network.apSSID));
         if (r->hasParam("apPassword", true))     SAFE_STRNCPY(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), sizeof(config.network.apPassword));
@@ -1110,6 +1254,7 @@ void setupWebServer() {
 
     server.on("/save_time", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (rateLimit429(r)) return;
+        if (csrfBlock(r)) return;
         if (r->hasParam("ntpServer", true)) SAFE_STRNCPY(config.network.ntpServer, r->getParam("ntpServer", true)->value().c_str(), sizeof(config.network.ntpServer));
         if (r->hasParam("timezone", true))  config.network.timezone = r->getParam("timezone", true)->value().toInt();
         saveConfig();
@@ -1611,20 +1756,68 @@ void setupWebServer() {
 
     // =========================================================================
     // OTA FIRMWARE UPDATE
+    //
+    // POST /do_update[?sha256=<64-hex>]
+    //   Streams the firmware image into the OTA partition.  When the
+    //   `sha256` query param is supplied, the server hashes every chunk
+    //   with mbedTLS and compares the digest before committing — any
+    //   mismatch aborts the update and returns 400.  When the param is
+    //   absent, behaviour is unchanged (Pass 5 5.6 first slice).
+    //
+    //   Rejection paths:
+    //     • magic byte != 0xE9  → invalid image
+    //     • Update.begin failed → flash partition unavailable
+    //     • SHA-256 mismatch    → tampered/corrupted image
     // =========================================================================
     {
-        static bool s_otaRejected = false;
+        // OTA upload state — per-request via _tempObject so concurrent
+        // requests can't corrupt each other's hash context (gemini review
+        // PR #49).  The destructor releases the mbedTLS hardware-SHA lock,
+        // so any early exit (magic-byte fail, Update.begin fail, mismatch)
+        // OR a client disconnect reclaims the engine cleanly via
+        // request->onDisconnect.
+        struct OtaCtx {
+            bool rejected     = false;
+            bool shaMismatch  = false;
+            bool shaActive    = false;
+            String expectedSha;
+            mbedtls_sha256_context sha;
+            ~OtaCtx() {
+                if (shaActive) {
+                    mbedtls_sha256_free(&sha);
+                    shaActive = false;
+                }
+            }
+        };
+
         server.on("/do_update", HTTP_POST,
             [](AsyncWebServerRequest *r) {
-                bool ok = !s_otaRejected && !Update.hasError();
-                const char* msg = s_otaRejected
-                    ? "{\"success\":false,\"message\":\"Invalid firmware image\"}"
-                    : (ok ? "{\"success\":true,\"message\":\"Update complete, restarting...\"}"
-                          : "{\"success\":false,\"message\":\"Update failed\"}");
+                OtaCtx* ctx = static_cast<OtaCtx*>(r->_tempObject);
+                bool rejected    = ctx ? ctx->rejected    : true;
+                bool shaMismatch = ctx ? ctx->shaMismatch : false;
+
+                bool ok = !rejected && !Update.hasError();
+                const char* msg;
+                if (shaMismatch) {
+                    msg = "{\"success\":false,\"message\":\"SHA-256 mismatch — image rejected\"}";
+                } else if (rejected) {
+                    msg = "{\"success\":false,\"message\":\"Invalid firmware image\"}";
+                } else if (ok) {
+                    msg = "{\"success\":true,\"message\":\"Update complete, restarting...\"}";
+                } else {
+                    msg = "{\"success\":false,\"message\":\"Update failed\"}";
+                }
                 AsyncWebServerResponse *resp = r->beginResponse(ok ? 200 : 400,
                     "application/json", msg);
                 resp->addHeader("Connection", "close");
                 r->send(resp);
+
+                // Free per-request state.  Context destructor releases the
+                // mbedTLS SHA engine if the upload aborted before final.
+                if (ctx) {
+                    delete ctx;
+                    r->_tempObject = nullptr;
+                }
                 if (ok) {
                     shouldRestart = true;
                     restartTimer = millis();
@@ -1632,25 +1825,88 @@ void setupWebServer() {
             },
             [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
                 if (!index) {
-                    s_otaRejected = false;
+                    auto* ctx = new (std::nothrow) OtaCtx();
+                    if (!ctx) {
+                        DBGLN("OTA: ctx alloc failed");
+                        return;
+                    }
+                    req->_tempObject = ctx;
+                    // Reclaim ctx + SHA engine if the client drops the
+                    // connection before onRequest fires.
+                    req->onDisconnect([req]() {
+                        OtaCtx* leftover = static_cast<OtaCtx*>(req->_tempObject);
+                        if (leftover) {
+                            delete leftover;
+                            req->_tempObject = nullptr;
+                        }
+                    });
+
                     DBGF("OTA start: %s\n", filename.c_str());
+
+                    // Expected hash arrives as a query param (header-free
+                    // for client simplicity).  Empty → verification skipped.
+                    if (req->hasParam("sha256")) {
+                        ctx->expectedSha = req->getParam("sha256")->value();
+                        ctx->expectedSha.toLowerCase();
+                        if (ctx->expectedSha.length() != 64) {
+                            DBGF("OTA: bad sha256 length %u (expected 64), ignoring\n",
+                                 (unsigned)ctx->expectedSha.length());
+                            ctx->expectedSha = "";
+                        }
+                    }
+
                     // First byte of an ESP32 firmware image must be
                     // ESP_IMAGE_HEADER_MAGIC (0xE9). Reject anything else
                     // before touching flash.
                     if (len < 1 || data[0] != 0xE9) {
                         DBGLN("OTA: bad magic byte, rejecting");
-                        s_otaRejected = true;
+                        ctx->rejected = true;
                         return;
                     }
                     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
                         Update.printError(Serial);
-                        s_otaRejected = true;
+                        ctx->rejected = true;
                         return;
                     }
+                    // Initialise the hasher exactly once per upload, regardless
+                    // of whether verification was requested — the cost is tiny
+                    // and lets us log the actual digest for debugging.
+                    mbedtls_sha256_init(&ctx->sha);
+                    mbedtls_sha256_starts(&ctx->sha, 0);  // 0 = SHA-256, not -224
+                    ctx->shaActive = true;
                 }
-                if (s_otaRejected) return;
+
+                OtaCtx* ctx = static_cast<OtaCtx*>(req->_tempObject);
+                if (!ctx || ctx->rejected) return;
+
                 if (Update.write(data, len) != len) Update.printError(Serial);
+                if (ctx->shaActive) {
+                    mbedtls_sha256_update(&ctx->sha, data, len);
+                }
                 if (final) {
+                    if (ctx->shaActive) {
+                        uint8_t digest[32];
+                        mbedtls_sha256_finish(&ctx->sha, digest);
+                        mbedtls_sha256_free(&ctx->sha);
+                        ctx->shaActive = false;   // destructor now a no-op
+
+                        char hex[65];
+                        for (int i = 0; i < 32; i++) {
+                            snprintf(hex + i*2, 3, "%02x", digest[i]);
+                        }
+                        hex[64] = '\0';
+                        DBGF("OTA: SHA-256 = %s\n", hex);
+
+                        if (ctx->expectedSha.length() == 64 &&
+                            !ctx->expectedSha.equalsIgnoreCase(hex)) {
+                            DBGF("OTA: SHA-256 mismatch — expected %s\n",
+                                 ctx->expectedSha.c_str());
+                            ctx->rejected    = true;
+                            ctx->shaMismatch = true;
+                            Update.abort();
+                            return;
+                        }
+                    }
                     if (Update.end(true)) DBGF("OTA done: %u bytes\n", index + len);
                     else Update.printError(Serial);
                 }
@@ -1665,12 +1921,69 @@ void setupWebServer() {
         touchActivity();   // C2: track web activity for idle power management
         String path = r->url();
 
+        // ── Pass 4 F — /api/v1/* alias layer ────────────────────────────────
+        // Forward versioned API requests to the unversioned route via 307
+        // (preserves method + body, unlike 302/303 which can downgrade POST
+        // to GET in some clients).  Lets the deployed UI keep working for
+        // one release while clients migrate to /api/v1/.  Query string is
+        // rebuilt from parsed GET params; POST bodies are resent verbatim
+        // by the client when it follows the 307.
+        if (path.startsWith("/api/v1/")) {
+            String rewritten = "/api/" + path.substring(strlen("/api/v1/"));
+            // Rebuild the query string from parsed params.  This fork of
+            // ESPAsyncWebServer doesn't keep the raw query around (gemini
+            // review PR #50 suggested r->queryString() but that accessor
+            // doesn't exist here), so we re-encode each value defensively
+            // via urlEncode() in utils — gemini review PR #54 asked for
+            // it to be centralised so future call sites don't reinvent it.
+            String query;
+            for (size_t i = 0; i < r->params(); i++) {
+                const AsyncWebParameter* p = r->getParam(i);
+                if (!p || p->isFile() || p->isPost()) continue;
+                if (query.length()) query += "&";
+                query += urlEncode(p->name());
+                query += "=";
+                query += urlEncode(p->value());
+            }
+            if (query.length()) { rewritten += "?"; rewritten += query; }
+            AsyncWebServerResponse* resp = r->beginResponse(307);
+            resp->addHeader("Location", rewritten);
+            r->send(resp);
+            return;
+        }
+
         if (path.startsWith("/www/")) {
             if (littleFsAvailable && LittleFS.exists(path)) {
                 r->send(LittleFS, path, getMime(path));
                 return;
             }
+            // Probe .gz-only files (flash-saving mode: only .gz on disk)
+            String gzPath = path + ".gz";
+            if (littleFsAvailable && LittleFS.exists(gzPath)) {
+                AsyncWebServerResponse* resp =
+                    r->beginResponse(LittleFS, gzPath, getMime(path));
+                resp->addHeader("Content-Encoding", "gzip");
+                r->send(resp);
+                return;
+            }
             r->send(404, "text/plain", "Not found: " + path);
+            return;
+        }
+
+        // Also check if the requested file exists in /www/ as a .gz (e.g. /chart.min.js -> /www/chart.min.js.gz)
+        String wwwGzPath = "/www" + path + ".gz";
+        if (littleFsAvailable && LittleFS.exists(wwwGzPath)) {
+            AsyncWebServerResponse* resp =
+                r->beginResponse(LittleFS, wwwGzPath, getMime(path));
+            resp->addHeader("Content-Encoding", "gzip");
+            r->send(resp);
+            return;
+        }
+
+        // And check if it exists in /www/ uncompressed
+        String wwwPath = "/www" + path;
+        if (littleFsAvailable && LittleFS.exists(wwwPath)) {
+            r->send(LittleFS, wwwPath, getMime(path));
             return;
         }
 
@@ -1691,6 +2004,13 @@ void setupWebServer() {
         if (r->method() == HTTP_GET && path.indexOf('.') < 0) {
             if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
                 r->send(LittleFS, "/www/index.html", "text/html");
+                return;
+            }
+            if (littleFsAvailable && LittleFS.exists("/www/index.html.gz")) {
+                AsyncWebServerResponse* resp =
+                    r->beginResponse(LittleFS, "/www/index.html.gz", "text/html");
+                resp->addHeader("Content-Encoding", "gzip");
+                r->send(resp);
                 return;
             }
             r->send_P(200, "text/html", FAILSAFE_HTML);
@@ -1739,6 +2059,13 @@ void setupWebServer() {
         server.on("/save_platform", HTTP_POST,
             [pcfgCleanup](AsyncWebServerRequest *r) {
                 if (rateLimit429(r)) { pcfgCleanup(); return; }
+                // Note: CSRF deliberately NOT checked here — this route
+                // takes a raw application/json body, so onRequest fires
+                // without form params being populated; querying for `csrf`
+                // would 403 every legitimate save.  Adding query-string
+                // CSRF would require updating both the SPA and the
+                // PROGMEM failsafe HTML.  Tracked as a follow-up; the
+                // route still has rate-limit protection in the meantime.
                 if (!fsAvailable || !activeFS) {
                     pcfgCleanup();
                     r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");

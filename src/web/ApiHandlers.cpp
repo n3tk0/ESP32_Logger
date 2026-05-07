@@ -2,7 +2,9 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <WiFi.h>                      // WiFi scan/test (Pass 5 5.5 phase 1)
+#include <time.h>                      // /api/backup created_at (Pass 5 5.7)
 #include <freertos/task.h>
+#include <new>                            // std::nothrow
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/AggregationEngine.h"
 #include "../sensors/SensorManager.h"
@@ -59,14 +61,15 @@ static void handleApiData(AsyncWebServerRequest* req) {
                         ? req->getParam("mode")->value().c_str() : "lttb");
     size_t     limit  = req->hasParam("limit")
                         ? (size_t)req->getParam("limit")->value().toInt()
-                        : 500;
-    if (limit < 1 || limit > 5000) limit = 500;
+                        : 250;
+    if (limit < 1) limit = 250;
+    if (limit > 300) limit = 300; // Cap to 300 to prevent OOM on ESP32-C3 (~24KB)
 
     // --- Fetch raw data ---
     // Strategy: first try in-memory ring buffer (recent data),
     //           fall back to filesystem query for historical data.
-    constexpr size_t MAX_RAW = 500;  // 40 KB vs 160 KB — prevents OOM on ESP32-C3
-    SensorReading* raw = new SensorReading[MAX_RAW];
+    constexpr size_t MAX_RAW = 300;  // ~20 KB — prevents OOM on ESP32-C3
+    SensorReading* raw = new(std::nothrow) SensorReading[MAX_RAW];
     if (!raw) {
         req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
         return;
@@ -114,7 +117,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
                           (mode != AGG_RAW) &&
                           (bucket != BUCKET_RAW);
 
-    SensorReading* agg     = new SensorReading[limit + 1];
+    SensorReading* agg     = new(std::nothrow) SensorReading[limit + 1];
     size_t         aggCount = 0;
     bool           truncated = false;
 
@@ -289,9 +292,10 @@ static void handleApiSensors(AsyncWebServerRequest* req) {
     JsonArray arr = doc["sensors"].to<JsonArray>();
     sensorManager.toJson(arr);
 
-    String out;
-    serializeJson(doc, out);
-    req->send(200, "application/json", out);
+    AsyncResponseStream* response =
+        req->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    req->send(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -363,9 +367,10 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     ota["pending_verify"]   = OtaManager::isPendingVerify();
     ota["rollback_capable"] = OtaManager::isRollbackCapable();
 
-    String out;
-    serializeJson(doc, out);
-    req->send(200, "application/json", out);
+    AsyncResponseStream* response =
+        req->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    req->send(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -419,9 +424,10 @@ static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
         r["value"]  = readings[i].value;
         r["unit"]   = readings[i].unit;
     }
-    String out;
-    serializeJson(doc, out);
-    req->send(200, "application/json", out);
+    AsyncResponseStream* response =
+        req->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    req->send(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -449,9 +455,14 @@ static void handleOtaStatus(AsyncWebServerRequest* req) {
     doc["previous_partition"] = OtaManager::previousPartitionLabel();
     doc["pending_verify"]     = OtaManager::isPendingVerify();
     doc["rollback_capable"]   = OtaManager::isRollbackCapable();
-    String out;
-    serializeJson(doc, out);
-    req->send(200, "application/json", out);
+    // Pass 5 5.6 — countdown until the rollback watchdog auto-confirms.
+    // Zero when not pending or already confirmed; lets the UI surface a
+    // "Confirming in N s" banner on the Update page.
+    doc["confirm_in_ms"]      = OtaManager::millisUntilConfirm();
+    AsyncResponseStream* response =
+        req->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    req->send(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -493,8 +504,9 @@ static void handleApiModulesIndex(AsyncWebServerRequest* req) {
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
     moduleRegistry.toIndexJson(arr);
-    String body; serializeJson(doc, body);
-    req->send(200, "application/json", body);
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+    serializeJson(doc, *resp);
+    req->send(resp);
 }
 
 // GET /api/modules/:id → {id,name,enabled,hasUI,config,schema?}
@@ -506,8 +518,9 @@ static void handleApiModuleDetail(AsyncWebServerRequest* req, const String& id) 
         req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
         return;
     }
-    String body; serializeJson(doc, body);
-    req->send(200, "application/json", body);
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+    serializeJson(doc, *resp);
+    req->send(resp);
 }
 
 // POST /api/modules/:id with JSON body → load() + persist.
@@ -568,13 +581,13 @@ static void handleApiModuleEnable(AsyncWebServerRequest* req, const String& id) 
     }
     saveConfig();
 
-    JsonDocument out;
-    out["ok"] = true;
-    out["enabled"] = on;
-    out["restartRequired"] = restartRequired;
-    String body;
-    serializeJson(out, body);
-    req->send(200, "application/json", body);
+    JsonDocument outDoc;
+    outDoc["ok"] = true;
+    outDoc["enabled"] = on;
+    outDoc["restartRequired"] = restartRequired;
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+    serializeJson(outDoc, *resp);
+    req->send(resp);
 }
 
 // ---------------------------------------------------------------------------
@@ -776,12 +789,95 @@ static void handleApiModulesDispatch(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/backup — full-state JSON snapshot (Pass 5 5.7).
+//
+// Bundles the JSON-layer config files into a single download so users can
+// archive a complete known-good state and restore it on a new device:
+//   /config/modules.json  → backup.modules
+//   /config/sensors.json  → backup.sensors
+//   platform_config.json  → backup.platform
+// plus a header section identifying the device + firmware + boot count.
+//
+// /export_settings continues to expose the binary core config; clients
+// that need the full picture fetch both and merge.  Restore is intentionally
+// a separate endpoint (not yet shipped) — backup is the safe-to-ship slice.
+// ---------------------------------------------------------------------------
+static void handleApiBackup(AsyncWebServerRequest* req) {
+    // Serialise against background config writes — handleApiData uses the
+    // same configMutex pattern, and saveConfig() / handleApiModuleUpdate
+    // can race with us otherwise.  500 ms is plenty for a JSON read pass.
+    if (!configMutex || xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+        req->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+        return;
+    }
+
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+
+    // Suggest a sensible filename so curl -OJ / browser save-as gets it
+    // right (e.g. "waterlogger-backup-c8df84c4ed68-42.json").
+    String fname = "waterlogger-backup-";
+    fname += config.deviceId[0] ? config.deviceId : "device";
+    fname += "-";
+    fname += String((unsigned)bootCount);
+    fname += ".json";
+    resp->addHeader("Content-Disposition",
+                    String("attachment; filename=\"") + fname + "\"");
+
+    JsonDocument doc;
+    doc["version"] = 1;
+    // Prefer wall-clock time when the RTC has been set; fall back to uptime
+    // seconds when it hasn't (gemini review PR #51).  Restore code can tell
+    // the two apart by checking time_valid.
+    if (rtcValid) {
+        time_t now = 0; time(&now);
+        doc["created_at"] = (uint32_t)now;
+        doc["time_valid"] = true;
+    } else {
+        doc["created_at"] = (uint32_t)(millis() / 1000UL);
+        doc["time_valid"] = false;
+    }
+
+    JsonObject dev = doc["device"].to<JsonObject>();
+    dev["name"]       = config.deviceName[0] ? config.deviceName : "Water Logger";
+    dev["id"]         = config.deviceId;
+    dev["firmware"]   = getVersionString();
+    dev["boot_count"] = bootCount;
+
+    // Deserialize each shadow file directly into the parent doc to avoid
+    // the temp-doc + deep-copy round-trip (gemini review PR #51).
+    auto inhaleJsonFile = [](JsonObject parent, const char* key, const char* path) {
+        if (!activeFS || !activeFS->exists(path)) return;
+        File f = activeFS->open(path, FILE_READ);
+        if (!f) return;
+        // 16 KB cap — same as ExportManager / SensorManager input caps;
+        // beyond that we'd risk OOM on the AsyncTCP worker.
+        if (f.size() > 16 * 1024) { f.close(); return; }
+        JsonVariant slot = parent[key].to<JsonVariant>();
+        if (deserializeJson(slot, f) != DeserializationError::Ok) {
+            parent.remove(key);
+        }
+        f.close();
+    };
+
+    // Each section is best-effort — a missing file just leaves the key off
+    // the response.  Restore code (future) must cope with absent keys.
+    inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
+    inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
+    inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+
+    serializeJson(doc, *resp);
+    xSemaphoreGive(configMutex);
+    req->send(resp);
+}
+
+// ---------------------------------------------------------------------------
 void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/data",              HTTP_GET,  handleApiData);
     server.on("/api/latest",            HTTP_GET,  handleApiLatest);
     server.on("/api/sensors",           HTTP_GET,  handleApiSensors);
     server.on("/api/sensors/read_now",  HTTP_GET,  handleApiSensorReadNow);
     server.on("/api/diag",              HTTP_GET,  handleApiDiag);
+    server.on("/api/backup",            HTTP_GET,  handleApiBackup);
     server.on("/api/config/platform",   HTTP_POST, handleConfigPlatform);
     server.on("/api/mqtt/ha_discovery", HTTP_POST, handleMqttHaDiscovery);
     server.on("/api/ota/status",        HTTP_GET,  handleOtaStatus);

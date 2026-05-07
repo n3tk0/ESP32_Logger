@@ -23,10 +23,13 @@ Complete reference for building, configuring, and flashing the firmware.
 
 ## Prerequisites
 
-**Hardware**: XIAO ESP32-C3 (primary target) or generic ESP32-DevKit
+**Hardware** (any of):
+- XIAO ESP32-C3 (primary target)
+- ESP32-C3 Super Mini (native USB — requires USB CDC On Boot = Enabled)
+- Generic ESP32-DevKit
 
 **Software** (one of):
-- Arduino IDE 2.x + ESP32 Board Package 2.0.14+
+- Arduino IDE 2.x + ESP32 Board Package 3.x
 - PlatformIO (VS Code extension or CLI)
 
 **Required libraries** (Arduino IDE — install via Library Manager):
@@ -43,28 +46,35 @@ All sensor drivers, MQTT, and RTC use built-in mini drivers — no additional li
 ## Building with Arduino IDE
 
 1. **Board selection**:
-   - Tools → Board → ESP32 Arduino → **XIAO_ESP32C3**
+   - Tools → Board → ESP32 Arduino → **ESP32C3 Dev Module** (for Super Mini)
+   - Tools → Board → ESP32 Arduino → **XIAO_ESP32C3** (for XIAO)
    - (or "ESP32 Dev Module" for generic ESP32)
 
-2. **Partition scheme** — choose one:
+2. **Super Mini specific settings**:
+   - USB CDC On Boot: **Enabled** (required for serial monitor over native USB)
+   - CPU Frequency: **160MHz**
+
+3. **Partition scheme** — choose one:
    | Scheme | OTA | LittleFS | Notes |
    |--------|-----|----------|-------|
    | Huge APP (3MB/1MB SPIFFS) | No | 1 MB | Fits all modules, no OTA |
    | Minimal SPIFFS (1.9MB/190KB) | No | 190 KB | Tight — disable unused sensors |
-   | Custom (`partitions_balanced.csv`) | Yes | 960 KB | Recommended — see [Partition Table](#partition-table--ota) |
+   | Custom (`partitions_balanced.csv`) | Yes | 448 KB | **Recommended** — see [Partition Table](#partition-table--ota) |
 
 3. **Upload speed**: 921600
 4. **Monitor speed**: 115200
 
-5. **Module toggles** — edit the `#define` block at the top of `Logger.ino` (lines 36–60). Comment out any sensor or exporter you don't use:
+6. **Module toggles** — edit the `#define` block in `src/setup.h`. Comment out any sensor or exporter you don't use:
    ```cpp
    // #define SENSOR_BME280_ENABLED    // ← commented out = excluded from build
    #define SENSOR_DS18B20_ENABLED      // ← included
    ```
 
-6. **Pin overrides** — edit `src/arduino_build_flags.h` if your wiring differs from the XIAO ESP32-C3 defaults.
+7. **Pin overrides** — edit `src/setup.h` (section 2) if your wiring differs from the defaults.
 
-7. **Compile & upload** as usual (Ctrl+U).
+8. **Compile & upload** as usual (Ctrl+U).
+
+> **⚠️ First flash with custom bootloader:** If you have already flashed a custom rollback bootloader via `flash_bootloader.py`, use **Sketch → Export compiled Binary** and then flash only the app with `esptool` at address `0x10000` to avoid overwriting the bootloader. See [Flashing the Custom Bootloader](#flashing-the-custom-bootloader).
 
 ---
 
@@ -133,13 +143,15 @@ The Webhook exporter (`WebhookExporter`) is always compiled in (hardcoded `#defi
 
 ## Pin Definitions
 
-Default pin mapping for XIAO ESP32-C3. Override in `platformio.ini` (`-DDEFAULT_SDA=X`) or in `src/arduino_build_flags.h` for Arduino IDE.
+Default pin mapping (edit in `src/setup.h`). Override in `platformio.ini` (`-DDEFAULT_SDA=X`).
 
-| Define | Default | Function |
-|--------|---------|----------|
-| `DEFAULT_SDA` | 6 | I2C data |
-| `DEFAULT_SCL` | 7 | I2C clock |
-| `DEFAULT_FLOW_PIN` | 21 | Flow sensor input (ISR) |
+| Define | XIAO ESP32-C3 | Super Mini | Function |
+|--------|--------------|------------|----------|
+| `DEFAULT_SDA` | 6 | 8 | I2C data |
+| `DEFAULT_SCL` | 7 | 9 | I2C clock |
+| `DEFAULT_FLOW_PIN` | 21 | 4 | Flow sensor input (ISR) |
+
+> Current `setup.h` defaults are set for **ESP32-C3 Super Mini** (SDA=8, SCL=9, FLOW=4).
 
 Additional hardware pins defined in `src/core/Config.h` → `DefaultPins` namespace:
 
@@ -202,10 +214,13 @@ Edit `src/tasks/TaskManager.h` to adjust. Reduce stack sizes to free DRAM if you
 Name      Type  SubType  Offset     Size
 nvs       data  nvs      0x9000     0x5000    (20 KB)
 otadata   data  ota      0xe000     0x2000    (8 KB)
-app0      app   ota_0    0x10000    0x180000  (1,536 KB)
-app1      app   ota_1    0x190000   0x180000  (1,536 KB)
-spiffs    data  spiffs   0x310000   0xF0000   (960 KB)
+app0      app   ota_0    0x10000    0x1C0000  (1,792 KB)
+app1      app   ota_1    0x1D0000   0x1C0000  (1,792 KB)
+spiffs    data  spiffs   0x390000   0x70000   (448 KB)
 ```
+
+> **Note:** App partitions were increased from 1,536 KB to 1,792 KB in v5.1.0
+> to accommodate the larger firmware produced by ESP32 Board Package 3.x.
 
 - Two app slots (`ota_0`, `ota_1`) enable over-the-air updates
 - `otadata` tracks which slot is active — required for OTA and rollback
@@ -233,7 +248,7 @@ spiffs    data  spiffs   0x310000   0xF0000   (960 KB)
 
 ### Easy path — Use pre-built binaries (recommended)
 
-The GitHub Actions CI builds rollback-enabled bootloaders automatically. Pre-built binaries are committed to `tools/bootloader/esp32c3/` and `tools/bootloader/esp32/`.
+The GitHub Actions CI builds rollback-enabled bootloaders automatically. Pre-built binaries are committed to `tools/bootloader/esp32c3/`, `tools/bootloader/esp32c3_supermini/`, and `tools/bootloader/esp32/`.
 
 ```bash
 # Install esptool if you don't have it
@@ -244,6 +259,7 @@ python tools/flash_bootloader.py
 
 # Or specify explicitly
 python tools/flash_bootloader.py --port /dev/ttyACM0 --chip esp32c3
+python tools/flash_bootloader.py --port COM10 --chip esp32c3_supermini
 python tools/flash_bootloader.py --port COM3 --chip esp32
 
 # List available ports
@@ -546,12 +562,12 @@ pio run -v 2>&1 | grep "Flash:"
 | `CONFIG_FREERTOS_UNICORE` | 1 | platformio.ini / arduino_build_flags.h | Single-core FreeRTOS (ESP32-C3) |
 | `CORE_DEBUG_LEVEL` | 0 | platformio.ini / arduino_build_flags.h | ESP-IDF log verbosity (0–5) |
 | `DEBUG_MODE` | 0 | platformio.ini / Config.h | App serial debug output |
-| `DEFAULT_SDA` | 6 | platformio.ini / arduino_build_flags.h | Default I2C SDA pin |
-| `DEFAULT_SCL` | 7 | platformio.ini / arduino_build_flags.h | Default I2C SCL pin |
-| `DEFAULT_FLOW_PIN` | 21 | platformio.ini / arduino_build_flags.h | Default flow sensor pin |
-| `SENSOR_*_ENABLED` | all on | Logger.ino / platformio.ini | Include sensor module |
-| `EXPORT_*_ENABLED` | all on | Logger.ino / platformio.ini | Include exporter module |
+| `DEFAULT_SDA` | 8 | platformio.ini / setup.h | Default I2C SDA pin (6 for XIAO, 8 for Super Mini) |
+| `DEFAULT_SCL` | 9 | platformio.ini / setup.h | Default I2C SCL pin (7 for XIAO, 9 for Super Mini) |
+| `DEFAULT_FLOW_PIN` | 4 | platformio.ini / setup.h | Default flow sensor pin |
+| `SENSOR_*_ENABLED` | all on | setup.h / platformio.ini | Include sensor module |
+| `EXPORT_*_ENABLED` | all on | setup.h / platformio.ini | Include exporter module |
 
 ---
 
-_Applies to firmware v4.2.0 — XIAO ESP32-C3 + generic ESP32_
+_Applies to firmware v5.1.0 — XIAO ESP32-C3 / ESP32-C3 Super Mini / generic ESP32_

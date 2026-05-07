@@ -132,3 +132,27 @@ bool deleteRecursive(fs::FS& fs, const String& path) {
 
     return overallOk;
 }
+
+// ---------------------------------------------------------------------------
+// urlEncode — percent-encode a string per RFC 3986 unreserved set.
+// Inputs from AsyncWebParameter::value() are already url-decoded; re-encode
+// here so the rebuilt query string round-trips characters like &, =, space,
+// and Unicode bytes correctly.  Pre-allocates with an 8-char headroom which
+// matches the typical worst-case for short ASCII params.
+// ---------------------------------------------------------------------------
+String urlEncode(const String& v) {
+    String out;
+    out.reserve(v.length() + 8);
+    for (size_t i = 0; i < v.length(); i++) {
+        char c = v[i];
+        bool unreserved = (c >= 'A' && c <= 'Z') ||
+                          (c >= 'a' && c <= 'z') ||
+                          (c >= '0' && c <= '9') ||
+                          c == '-' || c == '_' || c == '.' || c == '~';
+        if (unreserved) { out += c; continue; }
+        char buf[4];
+        snprintf(buf, sizeof(buf), "%%%02X", (uint8_t)c);
+        out += buf;
+    }
+    return out;
+}

@@ -87,7 +87,7 @@ function toggleManualId(id) {
 //   fetch('/api/changelog') → render ## sections → first block highlighted
 // ============================================================================
 
-// Matches original: onclick="changelogToggle()" on card-header
+// Matches original: onclick="changelogToggle()" on card-head
 function changelogToggle() {
   var el = document.getElementById("changelog");
   if (!el) return;
@@ -172,7 +172,7 @@ function changelogLoad() {
       changelogLoaded = false; // allow retry on next open
       el.innerHTML =
         "<div style='display:flex;justify-content:flex-end;margin-bottom:.5rem'>" +
-        '<button type="button" class="btn btn-secondary btn-sm" data-click="changelogClose">✖ Close</button></div>' +
+        '<button type="button" class="btn" data-click="changelogClose">✖ Close</button></div>' +
         "<div class='alert alert-warning'>Changelog not found. Upload <code>/changelog.txt</code> to LittleFS.</div>";
     });
 }
@@ -302,6 +302,21 @@ function hwInit() {
 // ══ SETTINGS: THEME ══
 // ============================================================================
 function thInit() {
+  // Wire .seg buttons → hidden #th-mode select.  Done once per init.
+  var seg = document.getElementById("th-mode-seg");
+  if (seg && !seg._wired) {
+    seg._wired = true;
+    seg.querySelectorAll("button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var v = b.getAttribute("data-v");
+        seg.querySelectorAll("button").forEach(function (x) {
+          x.classList.toggle("active", x === b);
+        });
+        var sel = document.getElementById("th-mode");
+        if (sel) { sel.value = v; sel.dispatchEvent(new Event("change", { bubbles: true })); }
+      });
+    });
+  }
   fetch("/export_settings")
     .then(function (r) {
       return r.json();
@@ -311,6 +326,9 @@ function thInit() {
       var th = d.theme || {};
       var mode = th.mode !== undefined ? th.mode : 0;
       setVal("th-mode", mode);
+      if (seg) seg.querySelectorAll("button").forEach(function (b) {
+        b.classList.toggle("active", String(b.getAttribute("data-v")) === String(mode));
+      });
       setChk("th-icons", th.showIcons);
 
       var isDark =
@@ -1066,12 +1084,12 @@ function dlLoadFiles() {
           "</span><span class='btn-group'>" +
           "<a href='/download?file=" +
           encodeURIComponent(f.path) +
-          "' class='btn btn-sm btn-secondary'>📥</a>";
+          "' class='btn'>📥</a>";
         if (!isCur) {
           html +=
             ' <button data-click="dlDeleteFile" data-args="' +
             esc(JSON.stringify([f.path])) +
-            '" class=\'btn btn-sm btn-danger\'>🗑️</button>';
+            '" class=\'btn warn\'>🗑️</button>';
         }
         html += "</span></div>";
       });
@@ -1190,11 +1208,13 @@ function otaFileSelected() {
   var fileInput = document.getElementById("fwFile");
   var uploadBtn = document.getElementById("otaUploadBtn");
   var fileInfo = document.getElementById("otaFileInfo");
+  var dropzone = fileInput && fileInput.closest(".dropzone");
   var file = fileInput.files[0];
 
   if (!file) {
     uploadBtn.disabled = true;
-    fileInfo.style.display = "none";
+    if (fileInfo) fileInfo.textContent = "";
+    if (dropzone) dropzone.classList.remove("has-file");
     return;
   }
 
@@ -1204,9 +1224,9 @@ function otaFileSelected() {
   if (file.size < 10000) errors.push("File too small (min 10KB)");
 
   if (errors.length > 0) {
-    fileInfo.innerHTML =
-      '<span style="color:#c00">❌ ' + errors.join("<br>") + "</span>";
-    fileInfo.style.display = "block";
+    if (fileInfo) fileInfo.innerHTML =
+      '<span style="color:var(--err)">' + errors.join("<br>") + "</span>";
+    if (dropzone) dropzone.classList.add("has-file");
     uploadBtn.disabled = true;
     return;
   }
@@ -1215,28 +1235,37 @@ function otaFileSelected() {
   reader.onload = function (e) {
     var arr = new Uint8Array(e.target.result);
     if (arr[0] !== 0xe9) {
-      fileInfo.innerHTML =
-        '<span style="color:#c00">❌ Invalid firmware file (wrong magic byte)</span>';
-      fileInfo.style.display = "block";
+      if (fileInfo) fileInfo.innerHTML =
+        '<span style="color:var(--err)">Invalid firmware (wrong magic byte)</span>';
+      if (dropzone) dropzone.classList.add("has-file");
       uploadBtn.disabled = true;
       return;
     }
-    fileInfo.innerHTML =
-      '<span style="color:#080">✅ ' +
-      esc(file.name) +
-      " (" +
-      Math.round(file.size / 1024) +
-      "KB)</span>";
-    fileInfo.style.display = "block";
+    if (fileInfo) fileInfo.textContent =
+      file.name + " (" + Math.round(file.size / 1024) + " KB)";
+    if (dropzone) dropzone.classList.add("has-file");
     uploadBtn.disabled = false;
   };
   reader.readAsArrayBuffer(file.slice(0, 4));
 }
 
+// otaShowPopup — `icon` may be a Lucide icon name (e.g. "cloud-upload",
+// "check", "x", "alert-triangle") OR a literal emoji string for backward
+// compat with older callsites.  Lucide names are detected via the global
+// Icons module; anything else is rendered as text.
 function otaShowPopup(icon, title, msg, showProgress, showClose) {
   var p = document.getElementById("popup");
   if (p) p.style.display = "flex";
-  setEl("popupIcon", icon);
+  var iconEl = document.getElementById("popupIcon");
+  if (iconEl) {
+    if (window.Icons && Icons.svg && Icons.svg(icon)) {
+      iconEl.innerHTML = Icons.svg(icon);
+      iconEl.style.fontSize = "0";   // collapse the emoji-sized line-height
+    } else {
+      iconEl.textContent = icon;
+      iconEl.style.fontSize = "";
+    }
+  }
   setEl("popupTitle", title);
   var elMsg = document.getElementById("popupMsg");
   if (elMsg) elMsg.innerHTML = msg;
@@ -1252,6 +1281,29 @@ function otaUpdatePopupProgress(pct, text) {
   setEl("popupCounter", text);
 }
 
+// Pass 5 5.6 — client-side SHA-256 of the selected .bin so the firmware
+// can verify the image before committing.  Returns "" when SubtleCrypto
+// is unavailable (HTTP context, very old browser); the server treats an
+// empty/missing param as "verification not requested".
+function _otaSha256(file) {
+  return new Promise(function (resolve) {
+    if (!window.crypto || !window.crypto.subtle) { resolve(""); return; }
+    var rd = new FileReader();
+    rd.onload = function (e) {
+      window.crypto.subtle.digest("SHA-256", e.target.result).then(function (buf) {
+        var arr = new Uint8Array(buf);
+        var hex = "";
+        for (var i = 0; i < arr.length; i++) {
+          hex += ("0" + arr[i].toString(16)).slice(-2);
+        }
+        resolve(hex);
+      }).catch(function () { resolve(""); });
+    };
+    rd.onerror = function () { resolve(""); };
+    rd.readAsArrayBuffer(file);
+  });
+}
+
 function otaUpload() {
   var fileInput = document.getElementById("fwFile");
   var uploadBtn = document.getElementById("otaUploadBtn");
@@ -1265,21 +1317,37 @@ function otaUpload() {
   uploadBtn.disabled = true;
   fileInput.disabled = true;
   otaShowPopup(
-    "📤",
-    "Uploading...",
-    "Please wait while firmware is being uploaded.",
+    "cpu",
+    "Hashing firmware…",
+    "Computing SHA-256 before upload.",
     true,
     false,
   );
 
-  if (progressDiv) progressDiv.style.display = "block";
+  // Compute the hash first, then start the actual upload with the digest
+  // appended as a query param.  HTTP context (no SubtleCrypto) yields ""
+  // and we fall back to the no-verification path the server already handles.
+  _otaSha256(file).then(function (sha) {
+    otaShowPopup(
+      "cloud-upload",
+      "Uploading firmware…",
+      sha
+        ? "Image hashed. Uploading and verifying on-device…"
+        : "Uploading firmware (SHA-256 unavailable on this browser).",
+      true,
+      false,
+    );
 
-  var xhr = new XMLHttpRequest();
+    if (progressDiv) progressDiv.style.display = "block";
+
+    var xhr = new XMLHttpRequest();
   xhr.upload.onprogress = function (e) {
     if (e.lengthComputable) {
       var pct = Math.round((e.loaded / e.total) * 100);
       if (progressBar) progressBar.style.width = pct + "%";
-      if (progressText) progressText.textContent = pct + "%";
+      if (progressText) progressText.textContent = "Uploading firmware…";
+      var progressPct = document.getElementById("otaProgressPct");
+      if (progressPct) progressPct.textContent = pct + "%";
       otaUpdatePopupProgress(
         pct,
         Math.round(e.loaded / 1024) +
@@ -1288,6 +1356,19 @@ function otaUpload() {
           " KB",
       );
     }
+  };
+  // Once the upload byte stream is fully on the device, the server still
+  // needs ~5 s to verify + write flash before xhr.onload fires.  Surface
+  // that phase explicitly so users don't think the UI froze.
+  xhr.upload.onload = function () {
+    otaShowPopup(
+      "cpu",
+      "Verifying firmware…",
+      "Upload complete. The device is checking and flashing the binary.",
+      true,
+      false,
+    );
+    otaUpdatePopupProgress(100, "Flashing…");
   };
   xhr.onload = function () {
     if (progressDiv) progressDiv.style.display = "none";
@@ -1299,7 +1380,7 @@ function otaUpload() {
           var seconds = 5;
           var tick = function () {
             otaShowPopup(
-              "✅",
+              "check",
               "Update Complete!",
               "Device will restart...<br>Redirecting in <strong>" +
                 seconds +
@@ -1319,7 +1400,7 @@ function otaUpload() {
           tick();
         } else {
           otaShowPopup(
-            "❌",
+            "alert-triangle",
             "Update Failed",
             resp.message || "Unknown error",
             false,
@@ -1333,7 +1414,7 @@ function otaUpload() {
         var seconds = 5;
         var tick = function () {
           otaShowPopup(
-            "✅",
+            "check",
             "Update sent",
             "Device is restarting...<br>Redirecting in <strong>" +
               seconds +
@@ -1354,7 +1435,7 @@ function otaUpload() {
       }
     } else {
       otaShowPopup(
-        "❌",
+        "alert-triangle",
         "Upload Error",
         "Server returned: " + xhr.statusText,
         false,
@@ -1367,7 +1448,7 @@ function otaUpload() {
   xhr.onerror = function () {
     if (progressDiv) progressDiv.style.display = "none";
     otaShowPopup(
-      "❌",
+      "alert-triangle",
       "Connection Error",
       "Could not connect to device",
       false,
@@ -1377,10 +1458,12 @@ function otaUpload() {
     fileInput.disabled = false;
   };
 
-  var formData = new FormData();
-  formData.append("firmware", file);
-  xhr.open("POST", "/do_update");
-  xhr.send(formData);
+    var formData = new FormData();
+    formData.append("firmware", file);
+    var url = sha ? "/do_update?sha256=" + sha : "/do_update";
+    xhr.open("POST", url);
+    xhr.send(formData);
+  });   // end _otaSha256().then
 }
 
 function dlToggleMaxSize() {
@@ -1413,7 +1496,7 @@ var Modules = (function () {
   function renderField(f, data) {
     var id = f.id;
     var val = (data && id in data) ? data[id] : "";
-    var cls = "form-input";
+    var cls = "input";
     var input;
 
     if (f.type === "bool") {
@@ -1421,7 +1504,7 @@ var Modules = (function () {
       // checkboxes honour conditional visibility (e.g. WiFiModule's
       // `useStaticIP` toggling the IPv4 field group).
       input =
-        '<label class="form-label">' +
+        '<label class="field-label">' +
           '<input type="checkbox" name="' + escAttr(id) + '"' +
           (val ? " checked" : "") + '> ' + escAttr(f.label || id) +
         '</label>';
@@ -1431,7 +1514,7 @@ var Modules = (function () {
                (String(val) === String(o.v) ? " selected" : "") + '>' +
                escAttr(o.l) + '</option>';
       }).join("");
-      input = '<select class="' + cls + ' form-select" name="' +
+      input = '<select class="' + cls + ' input" name="' +
               escAttr(id) + '">' + opts + '</select>';
     } else if (f.type === "color") {
       input = '<input type="color" class="' + cls + '" name="' +
@@ -1459,8 +1542,8 @@ var Modules = (function () {
       ? ' data-showif="' + esc(JSON.stringify(f.showIf)) + '"'
       : "";
     return (
-      '<div class="form-group" data-field="' + escAttr(id) + '"' + showIf + '>' +
-        (f.label ? '<label class="form-label">' + escAttr(f.label) + '</label>' : '') +
+      '<div class="field" data-field="' + escAttr(id) + '"' + showIf + '>' +
+        (f.label ? '<label class="field-label">' + escAttr(f.label) + '</label>' : '') +
         input +
       '</div>'
     );
@@ -1531,7 +1614,7 @@ var Modules = (function () {
     host.innerHTML = list.map(function (m) {
       var active = (current === m.id) ? " active" : "";
       return (
-        '<button class="btn btn-sm btn-secondary tab' + active + '"' +
+        '<button class="btn tab' + active + '"' +
         ' data-click="modulesSelect"' +
         ' data-args="' + esc(JSON.stringify([m.id])) + '">' +
           escAttr(m.name) +
@@ -1546,7 +1629,7 @@ var Modules = (function () {
     if (!host) return;
     if (!detail.hasUI || !detail.schema) {
       host.innerHTML =
-        '<p class="form-hint">' +
+        '<p class="hint">' +
           'This module has no form. ' +
           (detail.config
             ? '<pre>' + esc(JSON.stringify(detail.config, null, 2)) + '</pre>'
@@ -1557,7 +1640,7 @@ var Modules = (function () {
     var schema;
     try { schema = JSON.parse(detail.schema); }
     catch (e) {
-      host.innerHTML = '<p class="form-hint">Bad schema JSON.</p>';
+      host.innerHTML = '<p class="hint">Bad schema JSON.</p>';
       return;
     }
     var fields = (schema.fields || [])
@@ -1565,14 +1648,14 @@ var Modules = (function () {
       .join("");
     host.innerHTML =
       '<form id="mod-form">' +
-        '<div class="form-group">' +
-          '<label class="form-label">' +
+        '<div class="field">' +
+          '<label class="field-label">' +
             '<input type="checkbox" name="__enabled"' +
             (detail.enabled ? " checked" : "") + '> Enabled' +
           '</label>' +
         '</div>' +
         fields +
-        '<button type="submit" class="btn btn-primary btn-block">💾 Save</button>' +
+        '<button type="submit" class="btn primary">💾 Save</button>' +
       '</form>';
     var form = document.getElementById("mod-form");
     applyShowIf(form);
@@ -1607,7 +1690,7 @@ var Modules = (function () {
     loadList().then(function (list) {
       if (!list || !list.length) {
         var h = document.getElementById("mod-host");
-        if (h) h.innerHTML = '<p class="form-hint">No modules registered.</p>';
+        if (h) h.innerHTML = '<p class="hint">No modules registered.</p>';
         return;
       }
       current = list[0].id;

@@ -16,4 +16,11 @@
   } catch (e) {
     document.documentElement.classList.add("theme-auto");
   }
+  // Claude Design phase 4a — restore sidebar rail preference pre-paint to
+  // avoid FOUC (body doesn't exist yet; attach to documentElement).
+  try {
+    if (localStorage.getItem("sidebarRail") === "1") {
+      document.documentElement.classList.add("sidebar-rail");
+    }
+  } catch (e) {}
 })();

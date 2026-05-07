@@ -3,7 +3,7 @@
 #include "../sensors/SensorManager.h"
 #include "../pipeline/DataPipeline.h"
 #include "../core/Globals.h"  // Rtc, rtcValid
-#include <time.h>
+#include <time.h>             // time() — NTP system clock fallback
 
 // ---------------------------------------------------------------------------
 void sensorTaskFunc(void* /*param*/) {
