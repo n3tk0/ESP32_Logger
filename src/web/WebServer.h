@@ -41,6 +41,12 @@
 
 void setupWebServer();
 
+// Starts the AsyncTCP listener.  MUST be called only after all routes
+// (base routes from setupWebServer + API routes from registerApiRoutes)
+// have been registered — adding handlers after begin() corrupts the
+// handler list mid-iteration and crashes on the first request.
+void startWebServer();
+
 // SSE: publish a /api/live snapshot to all connected EventSource clients.
 // Called from loop() at ~1 Hz. No-op when no clients are subscribed.
 void publishLiveEvent();

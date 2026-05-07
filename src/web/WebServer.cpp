@@ -2155,6 +2155,17 @@ void setupWebServer() {
         r->send(200, "application/json", "{\"ok\":true,\"restart\":true}");
     });
 
+    // server.begin() is intentionally NOT called here.  ESP_Logger.ino
+    // registers additional API routes via registerApiRoutes() AFTER this
+    // function returns; calling server.on(...) post-begin() corrupts the
+    // handler list while the AsyncTCP service task is iterating it,
+    // producing null-deref crashes deep inside _server access on the first
+    // request (observed MEPC=0x42036c5e in AsyncWebServer::_rewriteRequest).
+    // The single startWebServer() call below is invoked once after all
+    // route registrations are complete.
+}
+
+void startWebServer() {
     server.begin();
     DBGF("Web server started. Free heap: %d\n", ESP.getFreeHeap());
 }
