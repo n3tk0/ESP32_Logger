@@ -202,14 +202,10 @@ def main() -> int:
 
     print()
     _ok("All done. Open the serial monitor to confirm:")
-<<<<<<< HEAD
-    monitor_cmd = [pio, "device", "monitor", "-e", args.env]
+    monitor_cmd = [pio, "device", "monitor", "-e", env]
     if args.port:
         monitor_cmd.extend(["--port", args.port])
     print(f"  {shlex.join(monitor_cmd)}")
-=======
-    print(f"  {pio} device monitor -e {env}" + (f" --port {args.port}" if args.port else ""))
->>>>>>> 426eab2 (fix(flash_clean): auto-detect env + auto-build data/ for --with-fs)
     return 0
 
 
