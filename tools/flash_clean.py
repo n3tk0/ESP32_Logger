@@ -54,7 +54,7 @@ def _err(msg: str) -> None:
 
 def _run(cmd: list[str]) -> int:
     """Run a subprocess, streaming its output, return its exit code."""
-    print(_color("  $ " + " ".join(cmd), "0;90"), flush=True)
+    print(_color("  $ " + shlex.join(cmd), "0;90"), flush=True)
     return subprocess.call(cmd)
 
 
