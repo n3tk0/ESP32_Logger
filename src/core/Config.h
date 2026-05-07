@@ -45,7 +45,7 @@ constexpr const char* DEFAULT_DATALOG_PREFIX = "datalog";
 constexpr const char* DEFAULT_NTP_SERVER     = "pool.ntp.org";
 
 #define CONFIG_STRUCT_MAGIC  0xC0FFEE36
-#define CONFIG_VERSION       12
+#define CONFIG_VERSION       13
 
 // DS1302 RAM addresses for bootcount backup
 #define RTC_RAM_BOOTCOUNT_ADDR  0
@@ -188,6 +188,22 @@ struct HardwareConfig {
     uint8_t reserved[5];
 };
 
+// LoggerConfig — wide-CSV pipeline + sensor logging knobs (v13).
+//
+// IMPORTANT: this struct lives at the END of DeviceConfig.  The on-disk
+// migration in ConfigManager::loadConfig() uses offsetof-based safe-copy
+// to forward-migrate older binary configs; appending here means the
+// offsets of every pre-v13 field stay stable and old binaries keep
+// loading cleanly.  Future fields go at the end of LoggerConfig (or
+// inside the `reserved` tail if size-stable padding is needed).
+struct LoggerConfig {
+    bool     csvLoggingEnabled;          // wide-CSV pipeline kill switch (default on)
+    uint16_t aggregationIntervalSec;     // RAM aggregator flush cadence (sec)
+    bool     humidityCorrectionEnabled;  // SDS011 k-Köhler correction
+    float    humidityCorrectionKappa;    // default 0.35
+    uint8_t  reserved[16];               // future v13+ fields without ABI break
+};
+
 struct NetworkConfig {
     WiFiModeType wifiMode;
     char apSSID[33];
@@ -221,6 +237,7 @@ struct DeviceConfig {
     FlowMeterConfig flowMeter;
     HardwareConfig hardware;
     NetworkConfig  network;
+    LoggerConfig   logger;     // appended in v13 — keep at the end
 };
 
 struct LogEntry {

@@ -147,8 +147,8 @@
 // ============================================================================
 // PLATFORM MODE & SLEEP GLOBALS
 // ============================================================================
-// Active platform mode (set once in setup, read in loop). See PlatformMode in Config.h.
-static PlatformMode g_platformMode  = PLATFORM_LEGACY;
+// Active platform mode (set once in setup, read in loop). See PlatformMode in
+// Config.h; storage in Globals.cpp, declared extern in Globals.h.
 #ifdef EXPORT_MQTT_ENABLED
 MqttExporter* g_mqttExporter = nullptr;  // for HA discovery + API access (external linkage — referenced from web/ApiHandlers.cpp)
 #endif

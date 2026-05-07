@@ -964,3 +964,136 @@ body { margin:0; }
 .hint        { font-size:11px; color:var(--text-3); margin-top:3px; }
 .btn-mini.warn { color:var(--err); border-color:rgba(220,38,38,.4); }
 .btn-mini.warn:hover { background:rgba(220,38,38,.1); border-color:var(--err); }
+
+/* ============================================================================
+   uPlot host containers — both legacy <canvas> and new <div> hosts.
+   The static-position parent card flows naturally above the footer.
+   ============================================================================ */
+.chart-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 420px;
+}
+.chart-container > canvas,
+.chart-container > div {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+.uplot { font: 12px system-ui, sans-serif; }
+.u-legend { color: var(--text); }
+.u-tooltip { position: absolute; pointer-events: none; padding: 4px 8px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+  font-size: 12px; }
+
+/* ============================================================================
+   SMART DASHBOARD — sensor card grid with uPlot sparklines (chunk F).
+   Auto-fill grid keeps the cards readable on all viewports without a
+   masonry library.  Card height is fixed so the in-flow footer stays clear.
+   ============================================================================ */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.sensor-card-mini {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 138px;
+}
+
+.sensor-card-mini-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.sensor-card-mini-name {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.sensor-card-mini-metric {
+  font-family: var(--mono);
+  font-size: 10px;
+  background: var(--panel-3);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.sensor-card-mini-value {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.sensor-card-mini-value .value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.sensor-card-mini-value .unit {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.sensor-card-mini-spark {
+  position: relative;
+  height: 48px;
+  margin: 0 -3px;
+}
+
+.sensor-card-mini-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.sensor-card-mini-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.sensor-card-mini-foot .quality {
+  font-family: var(--mono);
+}
+
+.sensor-card-mini-foot .quality.text-danger { color: var(--err); font-weight: 700; }
+
+/* Loading skeleton — pulses while /api/sensors is in flight. */
+.sensor-card-mini.skeleton {
+  background: linear-gradient(90deg, var(--panel) 0%, var(--panel-3) 50%, var(--panel) 100%);
+  background-size: 200% 100%;
+  animation: dbSkeleton 1.4s ease-in-out infinite;
+}
+
+@keyframes dbSkeleton {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

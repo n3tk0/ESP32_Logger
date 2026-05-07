@@ -58,49 +58,6 @@ function pcfgSave(obj, cb) {
 }
 
 // ============================================================================
-// AGGREGATION SETTINGS  (in Datalog page)
-// ============================================================================
-// Load stored aggregation prefs from localStorage (client-side only)
-(function aggSettingsInit() {
-  window.addEventListener("DOMContentLoaded", function () {
-    var b = localStorage.getItem("agg_bucket") || "5m";
-    var m = localStorage.getItem("agg_mode") || "lttb";
-    var l = parseInt(localStorage.getItem("agg_limit") || "500", 10);
-    var eb = document.getElementById("agg-bucket");
-    var em = document.getElementById("agg-mode");
-    var el = document.getElementById("agg-limit");
-    if (eb) eb.value = b;
-    if (em) em.value = m;
-    if (el) el.value = l;
-  });
-})();
-
-function aggSettingsSave() {
-  var b = (document.getElementById("agg-bucket") || {}).value || "5m";
-  var m = (document.getElementById("agg-mode") || {}).value || "lttb";
-  var l = parseInt(
-    (document.getElementById("agg-limit") || {}).value || "500",
-    10,
-  );
-  localStorage.setItem("agg_bucket", b);
-  localStorage.setItem("agg_mode", m);
-  localStorage.setItem("agg_limit", String(l));
-  var msg = document.getElementById("agg-msg");
-  if (msg) {
-    msg.textContent = "✅ Saved (used when viewing sensor charts)";
-    msg.style.color = "green";
-  }
-}
-
-function aggGetPrefs() {
-  return {
-    bucket: localStorage.getItem("agg_bucket") || "5m",
-    mode: localStorage.getItem("agg_mode") || "lttb",
-    limit: parseInt(localStorage.getItem("agg_limit") || "500", 10),
-  };
-}
-
-// ============================================================================
 // SENSORS PAGE
 // ============================================================================
 var sensorChart = null;
@@ -382,69 +339,67 @@ function sensorChartLoad() {
       var ctx = document.getElementById("sensorChart");
       if (!ctx) return;
 
-      if (sensorChart) sensorChart.destroy();
+      function render() {
+        if (sensorChart) { sensorChart.destroy(); sensorChart = null; }
 
-      var datasets = [
-        {
-          label: sid + " / " + metric + (unit1 ? " (" + unit1 + ")" : ""),
-          data: values1,
-          borderColor: "#275673",
-          backgroundColor: "rgba(39,86,115,0.08)",
-          borderWidth: 2,
-          pointRadius: d1.data.length > 100 ? 0 : 3,
-          tension: 0.3,
-          fill: true,
-          yAxisID: "y",
-        },
-      ];
+        // uPlot wants epoch-seconds for time scale; convert from API ts.
+        var xs = d1.data.map(function (pt) { return pt.ts; });
 
-      if (hasDual) {
-        datasets.push({
-          label: sid2 + " / " + metric2 + (unit2 ? " (" + unit2 + ")" : ""),
-          data: values2,
-          borderColor: "#e67e22",
-          backgroundColor: "rgba(230,126,34,0.08)",
-          borderWidth: 2,
-          pointRadius: d2.data.length > 100 ? 0 : 3,
-          tension: 0.3,
-          fill: false,
-          borderDash: [5, 3],
-          yAxisID: "y2",
-        });
-      }
-
-      var scales = {
-        x: { ticks: { maxTicksLimit: 10, maxRotation: 45 } },
-        y: {
-          beginAtZero: false,
-          position: "left",
-          title: { display: true, text: metric + (unit1 ? " (" + unit1 + ")" : "") },
-        },
-      };
-
-      if (hasDual) {
-        scales.y2 = {
-          beginAtZero: false,
-          position: "right",
-          grid: { drawOnChartArea: false },
-          title: { display: true, text: metric2 + (unit2 ? " (" + unit2 + ")" : "") },
-        };
-      }
-
-      sensorChart = new Chart(ctx, {
-        type: "line",
-        data: { labels: labels, datasets: datasets },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          plugins: {
-            legend: { display: true },
-            tooltip: { mode: "index", intersect: false },
+        var series = [
+          { label: "Time" },
+          {
+            label: sid + " / " + metric + (unit1 ? " (" + unit1 + ")" : ""),
+            stroke: "#275673",
+            fill: "rgba(39,86,115,0.08)",
+            width: 2,
+            points: { show: d1.data.length <= 100 },
+            scale: "y",
           },
-          scales: scales,
-        },
-      });
+        ];
+        var seriesData = [xs, values1];
+
+        if (hasDual) {
+          series.push({
+            label: sid2 + " / " + metric2 + (unit2 ? " (" + unit2 + ")" : ""),
+            stroke: "#e67e22",
+            width: 2,
+            dash: [5, 3],
+            points: { show: d2.data.length <= 100 },
+            scale: "y2",
+          });
+          seriesData.push(values2);
+        }
+
+        var axes = [
+          {},
+          { scale: "y", label: metric + (unit1 ? " (" + unit1 + ")" : "") },
+        ];
+        if (hasDual) {
+          axes.push({
+            scale: "y2",
+            side: 1,
+            grid: { show: false },
+            label: metric2 + (unit2 ? " (" + unit2 + ")" : ""),
+          });
+        }
+
+        ctx.innerHTML = "";
+        sensorChart = new uPlot({
+          width: ctx.clientWidth || 600,
+          height: ctx.clientHeight || 320,
+          scales: { x: { time: true }, y: {}, y2: {} },
+          series: series,
+          axes: axes,
+          legend: { show: true },
+          cursor: { sync: { key: "sensors" } },
+        }, seriesData, ctx);
+      }
+
+      if (typeof uPlot === "undefined") {
+        dbLoadUPlot(render);
+      } else {
+        render();
+      }
     })
     .catch(function (e) {
       if (msg) msg.textContent = "Error: " + e;
@@ -1238,7 +1193,6 @@ function expSave() {
 // Enrol markup-reachable handlers.  See core.js::Handlers for why the
 // whitelist exists.
 registerHandlers({
-  aggSettingsSave: aggSettingsSave,
   sensorsLoad: sensorsLoad,
   sensorChartLoad: sensorChartLoad,
   clToggleSensor: clToggleSensor,

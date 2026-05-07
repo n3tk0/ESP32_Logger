@@ -200,14 +200,14 @@ function sfInit() {
         })
         .then(function (s) {
           setEl("sf-boot", s.boot);
+          // Chunk G: redirect to settings hub when this build was
+          // compiled without SENSOR_WATERFLOW_ENABLED.  The page is
+          // already hidden in the hub but a hash-jump still lands here.
+          if (s.caps && s.caps.flowmeter === false) {
+            location.hash = "#settings";
+          }
         });
     });
-  // Unified Sensors page: also populate the additional-sensor list
-  // from platform_config.json (the form uses /save_flowmeter; the list
-  // uses /save_platform via clSave()).
-  if (document.getElementById("cl-sensors-list")) {
-    clLoad();
-  }
 }
 
 // ============================================================================
@@ -292,6 +292,10 @@ function hwInit() {
         if (img)  img.src = th.boardDiagramPath + "?v=" + Date.now();
       }
     });
+  // Chunk G: sensor list moved here from the (legacy) Flow Meter page.
+  if (document.getElementById("cl-sensors-list") && typeof clLoad === "function") {
+    clLoad();
+  }
 }
 
 // ============================================================================
@@ -811,20 +815,38 @@ function timeInit() {
       setEl("time-boot", d.boot);
       var bak = document.getElementById("bootBak");
       if (bak) bak.textContent = "-";
+
+      // RTC-present: show/hide hardware-only sections
+      var rtcPresent = !!d.rtcPresent;
+      var optCard = document.getElementById("rtcOptionsCard");
+      if (optCard) optCard.style.display = rtcPresent ? "" : "none";
+      var absentBanner = document.getElementById("rtcAbsentBanner");
+      if (absentBanner) absentBanner.style.display = rtcPresent ? "none" : "";
+
       var status = document.getElementById("rtcStatus");
       if (status) {
-        status.className = !d.rtcRunning
-          ? "alert alert-error"
-          : "alert alert-success";
-        status.innerHTML = !d.rtcRunning ? "❌ RTC Error" : "✅ RTC OK";
+        var src = d.timeSource || "unknown";
+        if (src === "rtc") {
+          status.className = "alert alert-success";
+          status.innerHTML = "✅ RTC";
+        } else if (src === "ntp") {
+          status.className = "alert alert-success";
+          status.innerHTML = "✅ NTP";
+        } else {
+          status.className = "alert alert-" + (rtcPresent ? "error" : "warning");
+          status.innerHTML = rtcPresent ? "❌ RTC Error" : "⚠️ Time not set";
+        }
       }
       var detail = document.getElementById("rtcDetail");
-      if (detail)
-        detail.textContent =
-          "Protected: " +
-          (d.rtcProtected ? "Yes" : "No") +
-          " | Running: " +
-          (d.rtcRunning ? "Yes" : "No");
+      if (detail) {
+        if (rtcPresent) {
+          detail.textContent =
+            "Protected: " + (d.rtcProtected ? "Yes" : "No") +
+            " | Running: " + (d.rtcRunning ? "Yes" : "No");
+        } else {
+          detail.textContent = "Source: " + (d.timeSource === "ntp" ? "NTP system clock" : "Not set — use NTP or manual set below");
+        }
+      }
       setChk("time-rtcProt", d.rtcProtected);
       var ntpSt = document.getElementById("ntpStatus");
       if (ntpSt) {
@@ -1018,6 +1040,17 @@ function dlInit() {
           setVal("dl-ffpf", dl.ffToPfThreshold);
           setVal("dl-hold", dl.manualPressThresholdMs);
           dlUpdatePreview();
+
+          // Wide-CSV pipeline knobs (config.logger.*)
+          var lg = cfg.logger || {};
+          setChk("lg-csvEnabled",
+            lg.csvLoggingEnabled === undefined ? true : lg.csvLoggingEnabled);
+          setVal("lg-aggSec",
+            lg.aggregationIntervalSec !== undefined ? lg.aggregationIntervalSec : 60);
+          setChk("lg-humCorr",
+            lg.humidityCorrectionEnabled || false);
+          setVal("lg-kappa",
+            lg.humidityCorrectionKappa !== undefined ? lg.humidityCorrectionKappa : 0.35);
         });
     });
   dlLoadFiles();

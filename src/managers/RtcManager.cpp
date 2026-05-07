@@ -3,6 +3,7 @@
 #include <LittleFS.h>
 #include <esp_sleep.h>
 #include <driver/gpio.h>
+#include <time.h>
 
 void initRtc() {
     DBGLN("Init RTC...");
@@ -95,25 +96,59 @@ void restoreBootCount() {
     DBGF("Bootcount from flash: %d\n", bootCount);
 }
 
+// ---------------------------------------------------------------------------
+// Shared helper: read system clock into tm struct; returns false if not set.
+static bool _sysClockTm(struct tm* out) {
+    time_t t = time(nullptr);
+    if (t <= 1000000000L) return false;
+    gmtime_r(&t, out);
+    return true;
+}
+
 String getRtcTimeString() {
-    if (!Rtc) return "No RTC";
-    RtcDateTime now = Rtc->GetDateTime();
-    if (now.Year() < 2020 || now.Month() == 0) return "Set Time";
-    char buf[10];
-    snprintf(buf, sizeof(buf), "%02u:%02u:%02u",
-             now.Hour(), now.Minute(), now.Second());
-    return String(buf);
+    if (Rtc) {
+        RtcDateTime now = Rtc->GetDateTime();
+        if (now.Year() >= 2020 && now.Month() != 0) {
+            char buf[10];
+            snprintf(buf, sizeof(buf), "%02u:%02u:%02u",
+                     now.Hour(), now.Minute(), now.Second());
+            return String(buf);
+        }
+        return "Set Time";
+    }
+    // No hardware RTC — fall back to system clock (NTP or manual settimeofday)
+    struct tm ti;
+    if (_sysClockTm(&ti)) {
+        char buf[10];
+        snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
+                 ti.tm_hour, ti.tm_min, ti.tm_sec);
+        return String(buf);
+    }
+    return "No RTC";
 }
 
 String getRtcDateTimeString() {
-    if (!Rtc) return "No RTC";
-    RtcDateTime now = Rtc->GetDateTime();
-    if (now.Year() < 2020 || now.Month() == 0) return "Not Set - Use Manual Set";
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%04u-%02u-%02u %02u:%02u:%02u",
-             now.Year(), now.Month(), now.Day(),
-             now.Hour(), now.Minute(), now.Second());
-    return String(buf);
+    if (Rtc) {
+        RtcDateTime now = Rtc->GetDateTime();
+        if (now.Year() >= 2020 && now.Month() != 0) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%04u-%02u-%02u %02u:%02u:%02u",
+                     now.Year(), now.Month(), now.Day(),
+                     now.Hour(), now.Minute(), now.Second());
+            return String(buf);
+        }
+        return "Not Set - Use Manual Set";
+    }
+    // No hardware RTC — fall back to system clock
+    struct tm ti;
+    if (_sysClockTm(&ti)) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
+                 ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
+                 ti.tm_hour, ti.tm_min, ti.tm_sec);
+        return String(buf);
+    }
+    return "No RTC - Set time via NTP";
 }
 
 void configureWakeup() {

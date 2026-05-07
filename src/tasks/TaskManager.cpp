@@ -85,6 +85,25 @@ bool TaskManager::init(fs::FS& fs) {
     storageParam.fs     = &fs;
     storageParam.logDir = s_logDir;
 
+    // Wide-CSV pipeline knobs sourced from DeviceConfig (set via web UI).
+    storageParam.csvLoggingEnabled         = config.logger.csvLoggingEnabled;
+    storageParam.aggregationIntervalSec    = config.logger.aggregationIntervalSec
+                                                ? config.logger.aggregationIntervalSec : 60;
+    storageParam.humidityCorrectionEnabled = config.logger.humidityCorrectionEnabled;
+    storageParam.humidityCorrectionKappa   = (config.logger.humidityCorrectionKappa > 0.0f)
+                                                ? config.logger.humidityCorrectionKappa : 0.35f;
+
+    // FlowRunLogger: per-fill flowmeter logging.  Active in PLATFORM_HYBRID
+    // only — PLATFORM_LEGACY uses DataLogger.cpp's run logger and
+    // PLATFORM_CONTINUOUS streams flow readings through the wide-CSV
+    // pipeline.  Compile-time gated by SENSOR_WATERFLOW_ENABLED so non-
+    // flowmeter builds DCE the class entirely.
+#if defined(SENSOR_WATERFLOW_ENABLED)
+    storageParam.enableFlowRunLogger = (g_platformMode == PLATFORM_HYBRID);
+#else
+    storageParam.enableFlowRunLogger = false;
+#endif
+
     // Mirror write: if SD is primary and LittleFS is also available (or vice versa),
     // and config requests "mirror" mode, start a second StorageTask on the other FS.
     storageParam.mirrorFS = nullptr;

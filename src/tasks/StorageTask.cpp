@@ -1,52 +1,132 @@
 #include "StorageTask.h"
 #include "TaskManager.h"
 #include "../pipeline/DataPipeline.h"
-#include "../storage/JsonLogger.h"
+#include "../pipeline/LiveAggregator.h"
+#include "../pipeline/FlowRunLogger.h"
+#include "../storage/CsvLogger.h"
+#include "../core/Globals.h"   // Rtc for epoch fallback
+#include <time.h>
+
+namespace {
+
+// ---------------------------------------------------------------------------
+// Best-effort current epoch.  Tries the RTC first, then the system clock
+// (set by NTP), and finally falls back to a millis-based monotonic counter
+// so the aggregator still flushes on cadence even before time is known.
+// ---------------------------------------------------------------------------
+uint32_t nowEpochSafe() {
+    if (Rtc) {
+        RtcDateTime n = Rtc->GetDateTime();
+        if (n.IsValid() && n.Year() >= 2020) return n.Unix32Time();
+    }
+    time_t sysT = time(nullptr);
+    if (sysT > 1000000000) return (uint32_t)sysT;
+    return (uint32_t)(millis() / 1000UL);
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 void storageTaskFunc(void* param) {
     Serial.println("[StorageTask] started");
-
     auto* p = static_cast<StorageTaskParam*>(param);
-    JsonLogger logger;
-    JsonLogger mirrorLogger;
-    bool       mirrorActive = false;
+    StorageTaskParam cfg = p ? *p : StorageTaskParam{};
 
-    if (p && p->fs) {
-        // Use logDir/maxSizeKB/rotateDaily from config if provided (#8)
-        logger.begin(*p->fs,
-                     p->logDir    ? p->logDir    : "/logs",
-                     p->maxSizeKB > 0 ? p->maxSizeKB : 512,
-                     p->rotateDaily);
-        // Mirror write to second FS if configured (#5/2.1)
-        if (p->mirrorFS) {
-            mirrorLogger.begin(*p->mirrorFS,
-                               p->logDir    ? p->logDir    : "/logs",
-                               p->maxSizeKB > 0 ? p->maxSizeKB : 512,
-                               p->rotateDaily);
+    LiveAggregator agg;
+    agg.setIntervalSec(cfg.aggregationIntervalSec);
+    agg.setHumidityCorrection(cfg.humidityCorrectionEnabled,
+                              cfg.humidityCorrectionKappa);
+
+    CsvLogger primary;
+    CsvLogger mirror;
+    bool      mirrorActive  = false;
+    bool      writingEnabled = cfg.csvLoggingEnabled && (cfg.fs != nullptr);
+
+    FlowRunLogger flowRunLog;
+    bool          flowRunActive = cfg.enableFlowRunLogger && (cfg.fs != nullptr);
+    if (flowRunActive) {
+        flowRunLog.setIdleTimeoutSec(cfg.flowRunIdleTimeoutSec);
+        flowRunLog.setStartThreshold(cfg.flowRunStartThreshold);
+        flowRunLog.begin(*cfg.fs,
+                         cfg.flowRunLogDir ? cfg.flowRunLogDir : "/runs",
+                         256);
+    }
+
+    if (writingEnabled) {
+        primary.begin(*cfg.fs,
+                      cfg.logDir    ? cfg.logDir    : "/logs",
+                      cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024);
+        if (cfg.mirrorFS) {
+            mirror.begin(*cfg.mirrorFS,
+                         cfg.logDir    ? cfg.logDir    : "/logs",
+                         cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024);
             mirrorActive = true;
             Serial.println("[StorageTask] Mirror write active");
         }
+    } else if (!cfg.csvLoggingEnabled) {
+        Serial.println("[StorageTask] CSV logging disabled — drain-only mode");
     } else {
-        Serial.println("[StorageTask] No filesystem — storage disabled");
+        Serial.println("[StorageTask] No filesystem — drain-only mode");
     }
+
+    Serial.printf("[StorageTask] interval=%us humCorr=%d kappa=%.2f writing=%d runLog=%d\n",
+                  (unsigned)agg.intervalSec(),
+                  agg.humidityCorrection() ? 1 : 0,
+                  agg.humidityKappa(),
+                  writingEnabled ? 1 : 0,
+                  flowRunActive  ? 1 : 0);
+
+    char headerBuf[LiveAggregator::ROW_BUF_BYTES];
+    char rowBuf   [LiveAggregator::ROW_BUF_BYTES];
 
     SensorReading r;
     while (TaskManager::running) {
-        g_taskHeartbeat[TASK_IDX_STORAGE] = millis();   // C4 heartbeat
+        g_taskHeartbeat[TASK_IDX_STORAGE] = millis();
 
-        if (xQueueReceive(storageQueue, &r, pdMS_TO_TICKS(200)) == pdTRUE) {
-            if (fsMutex) xSemaphoreTake(fsMutex, portMAX_DELAY);   // FS1
-            logger.write(r);
-            if (mirrorActive) mirrorLogger.write(r);
+        // Drain available readings into the aggregator (and the run logger
+        // when active).  The 100 ms wait keeps the heartbeat fresh while
+        // still draining bursts.  When CSV writing is disabled the
+        // aggregator must be skipped — it would otherwise accumulate sum/
+        // count forever (no flush ever resets them in drain-only mode).
+        uint32_t feedEpoch = nowEpochSafe();
+        while (xQueueReceive(storageQueue, &r, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if (writingEnabled) agg.feed(r);
+            if (flowRunActive)  flowRunLog.feed(r, feedEpoch);
+        }
+
+        uint32_t epoch = nowEpochSafe();
+        if (flowRunActive) {
+            if (fsMutex) xSemaphoreTake(fsMutex, portMAX_DELAY);
+            flowRunLog.tick(epoch);
             if (fsMutex) xSemaphoreGive(fsMutex);
+        }
+
+        if (!writingEnabled) continue;
+
+        uint32_t rowTs = 0;
+        if (agg.buildRowIfDue(epoch, rowBuf, sizeof(rowBuf), &rowTs)) {
+            if (agg.buildHeader(headerBuf, sizeof(headerBuf)) > 0) {
+                if (fsMutex) xSemaphoreTake(fsMutex, portMAX_DELAY);
+                primary.appendRow(rowTs, headerBuf, rowBuf);
+                if (mirrorActive) mirror.appendRow(rowTs, headerBuf, rowBuf);
+                if (fsMutex) xSemaphoreGive(fsMutex);
+            }
         }
     }
 
-    if (fsMutex) xSemaphoreTake(fsMutex, portMAX_DELAY);   // FS1
-    logger.flush();
-    if (mirrorActive) mirrorLogger.flush();
-    if (fsMutex) xSemaphoreGive(fsMutex);
+    // Final flush on shutdown (best-effort).
+    if (writingEnabled) {
+        uint32_t rowTs = 0;
+        if (agg.flushNow(nowEpochSafe(), rowBuf, sizeof(rowBuf), &rowTs)) {
+            if (agg.buildHeader(headerBuf, sizeof(headerBuf)) > 0) {
+                if (fsMutex) xSemaphoreTake(fsMutex, portMAX_DELAY);
+                primary.appendRow(rowTs, headerBuf, rowBuf);
+                if (mirrorActive) mirror.appendRow(rowTs, headerBuf, rowBuf);
+                if (fsMutex) xSemaphoreGive(fsMutex);
+            }
+        }
+    }
+
     Serial.println("[StorageTask] stopped");
     vTaskDelete(nullptr);
 }

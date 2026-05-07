@@ -80,23 +80,23 @@
         </div>
       </div>
 
-      <!-- Chart.js -->
+      <!-- Chart engine -->
       <div class="card">
         <div class="card-head"><div class="card-title"><span data-icon="line-chart"></span> Chart Source</div></div>
         <div class="card-body">
           <div class="field">
-            <label class="field-label">Chart.js Library</label>
+            <label class="field-label">uPlot Library</label>
             <select name="chartSource" id="th-chartSrc" class="input"
               data-change="themeToggleChartPath">
               <option value="0">Local File</option>
               <option value="1">CDN (Online)</option>
             </select>
-            <p class="hint">Local: requires /chart.min.js in LittleFS. CDN: needs internet.</p>
+            <p class="hint">Local: requires /uPlot.iife.min.js (or .gz) in LittleFS. CDN: needs internet.</p>
           </div>
           <div id="chartPathRow" style="display:none">
             <div class="field">
               <label class="field-label">Local Path</label>
-              <input type="text" name="chartLocalPath" id="th-chartPath" placeholder="/chart.min.js" class="input">
+              <input type="text" name="chartLocalPath" id="th-chartPath" placeholder="/uPlot.iife.min.js" class="input">
             </div>
           </div>
           <div class="field mt-1">

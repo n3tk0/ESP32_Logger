@@ -12,8 +12,9 @@
 //            3. cloud_only mode → skip local writes
 //
 // After initStorage() (existing), call HybridStorage::begin() to get the
-// active filesystem pointer.  All new JsonLogger and TaskManager code uses
-// this pointer; existing DataLogger continues to use `activeFS` directly.
+// active filesystem pointer.  StorageTask + CsvLogger consume this pointer;
+// the legacy flowmeter writer (DataLogger.cpp) continues to use `activeFS`
+// directly for PLATFORM_LEGACY pipe-delimited TXT logs.
 //
 // Usage:
 //   HybridStorage::begin();

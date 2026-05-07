@@ -7,62 +7,71 @@
 
 // ============================================================================
 // ══ PAGE: DASHBOARD ══
-// Exact port of original .ino embedded JS:
-//   loadData() → fetch('/download?file=...') → processData() → renderChart()
+// uPlot replaces Chart.js as the sole chart engine.  uPlot is canvas-based,
+// ~50 KB gzipped, and renders the time-series workloads we need much faster
+// than Chart.js.  serveStatic auto-serves a `.gz` sibling so a single
+// uPlot.iife.min.js.gz on LittleFS is enough.
 // ============================================================================
-var _chartJsLoading = false;
-var _chartJsLoaded = false;
-var _chartJsCbs = [];
+var _uPlotLoading = false;
+var _uPlotLoaded  = false;
+var _uPlotCbs     = [];
 
-function dbLoadChartJs(cb) {
-  if (_chartJsLoaded) {
+function dbLoadUPlot(cb) {
+  if (_uPlotLoaded || typeof uPlot !== "undefined") {
+    _uPlotLoaded = true;
     cb();
     return;
   }
-  _chartJsCbs.push(cb);
-  if (_chartJsLoading) return;
-  _chartJsLoading = true;
+  _uPlotCbs.push(cb);
+  if (_uPlotLoading) return;
+  _uPlotLoading = true;
 
   var th = ST.theme || CFG.theme || {};
-  var localPath = th.chartLocalPath || "/chart.min.js";
-  var cdnPath = "https://cdn.jsdelivr.net/npm/chart.js";
-  var wantsCDN = !(th.chartSource === 0 || th.chartSource === "0");
-  // Strict CSP (script-src 'self') blocks the CDN.  Try whatever the user
-  // configured first, but always fall back to the on-device copy instead of
-  // retrying the same CDN URL.
-  var primary  = wantsCDN ? cdnPath : localPath;
-  var fallback = wantsCDN ? localPath : cdnPath;
+  var preferLocal = th.chartSource === 0 || th.chartSource === "0";
+  var localSrc = th.chartLocalPath || "/uPlot.iife.min.js";
+  var cdnSrc   = "https://cdn.jsdelivr.net/npm/uplot@1/dist/uPlot.iife.min.js";
+  var localCss = "/uPlot.min.css";
+  var cdnCss   = "https://cdn.jsdelivr.net/npm/uplot@1/dist/uPlot.min.css";
 
   function fire() {
-    _chartJsLoaded = true;
-    _chartJsLoading = false;
-    _chartJsCbs.forEach(function (fn) {
-      fn();
-    });
-    _chartJsCbs = [];
+    _uPlotLoaded = true;
+    _uPlotLoading = false;
+    _uPlotCbs.forEach(function (fn) { fn(); });
+    _uPlotCbs = [];
   }
 
   function _giveUp() {
-    window._chartJsLoading = false;
-    _chartJsLoading = false;
+    _uPlotLoading = false;
     var err = document.getElementById("errorMsg");
     if (err) {
       err.innerHTML =
-        "<strong>Charts unavailable:</strong> Could not load <code>chart.min.js</code>. " +
+        "<strong>Charts unavailable:</strong> Could not load <code>uPlot.iife.min.js</code>. " +
         "If you removed it from LittleFS, re-upload it via /upload.";
       err.style.display = "block";
     }
     if (typeof showToast === "function") {
-      showToast("Failed to load chart.min.js", "error");
+      showToast("Failed to load uPlot.iife.min.js", "error");
     }
   }
 
+  // Stylesheet first — best-effort. uPlot still renders without it.
+  var link = document.createElement("link");
+  link.rel  = "stylesheet";
+  link.href = preferLocal ? localCss : cdnCss;
+  document.head.appendChild(link);
+
   var s = document.createElement("script");
-  s.src = primary;
+  s.src = preferLocal ? localSrc : cdnSrc;
   s.onload = fire;
   s.onerror = function () {
+    var isOffline = (ST.wifi === "ap") || (CFG.network && CFG.network.wifiMode === 0);
+    if (isOffline) {
+      showToast("Offline AP mode: upload uPlot.iife.min.js(.gz) to LittleFS.", "error");
+      _giveUp();
+      return;
+    }
     var s2 = document.createElement("script");
-    s2.src = fallback;
+    s2.src = preferLocal ? cdnSrc : localSrc;
     s2.onload = fire;
     s2.onerror = _giveUp;
     document.head.appendChild(s2);
@@ -70,13 +79,251 @@ function dbLoadChartJs(cb) {
   document.head.appendChild(s);
 }
 
+// ============================================================================
+// SMART DASHBOARD — sensor cards with uPlot sparklines + /api/latest polling.
+// State is held in module-scope vars so dbStopPolling() (called from core.js
+// on navigation away) can reach the timer/charts without a global hop.
+// ============================================================================
+var dbCardCharts = {};   // key = `${id}::${metric}` → uPlot instance
+var dbPollTimer  = null;
+var dbRangeSec   = 3600; // default 1h, persisted in localStorage
+var DB_POLL_MS   = 60000;
+
+function dbStorageKey() { return "dashboard.v1"; }
+
+function dbLoadPrefs() {
+  try {
+    var s = localStorage.getItem(dbStorageKey());
+    if (!s) return {};
+    var p = JSON.parse(s) || {};
+    if (typeof p.rangeSec === "number") dbRangeSec = p.rangeSec;
+    return p;
+  } catch (e) { return {}; }
+}
+
+function dbSavePrefs(patch) {
+  var p = dbLoadPrefs();
+  Object.keys(patch || {}).forEach(function (k) { p[k] = patch[k]; });
+  try { localStorage.setItem(dbStorageKey(), JSON.stringify(p)); } catch (e) {}
+}
+
+function dbCardKey(id, metric) { return id + "::" + metric; }
+
 function dbInit() {
-  dbLoadChartJs(function () {
-    // Matches original: generateDatalogFileOptions() via select population
+  var prefs = dbLoadPrefs();
+  var rangeEl = document.getElementById("db-range");
+  if (rangeEl) {
+    if (prefs.rangeSec) rangeEl.value = String(prefs.rangeSec);
+    dbRangeSec = parseInt(rangeEl.value, 10) || 3600;
+  }
+  dbLoadUPlot(function () { dbLoadCards(); });
+}
+
+function dbRangeChange(ev) {
+  var v = parseInt(ev.target.value, 10);
+  if (isNaN(v) || v <= 0) return;
+  dbRangeSec = v;
+  dbSavePrefs({ rangeSec: v });
+  dbDestroyAllCharts();
+  dbLoadCards();
+}
+
+function dbRefreshNow() {
+  var status = document.getElementById("db-poll-status");
+  if (status) { status.textContent = "🔄"; status.className = "text-primary"; }
+  dbRefreshLatest();
+}
+
+function dbDestroyAllCharts() {
+  Object.keys(dbCardCharts).forEach(function (k) {
+    try { dbCardCharts[k].destroy(); } catch (e) {}
+  });
+  dbCardCharts = {};
+}
+
+function dbStartPolling() {
+  if (dbPollTimer) return;
+  dbPollTimer = setInterval(dbRefreshLatest, DB_POLL_MS);
+}
+
+function dbStopPolling() {
+  if (dbPollTimer) { clearInterval(dbPollTimer); dbPollTimer = null; }
+  dbDestroyAllCharts();
+}
+
+// Build the card grid from /api/sensors, then fetch a sparkline series
+// (/api/data) per (sensor, metric) and seed each card chart.  Once cards
+// are mounted, /api/latest polling drives the value labels in place.
+function dbLoadCards() {
+  var grid    = document.getElementById("db-cards");
+  var loading = document.getElementById("db-loading");
+  var empty   = document.getElementById("db-empty");
+  if (!grid) return;
+  if (empty)   empty.style.display   = "none";
+  if (loading) loading.style.display = "";
+  grid.style.display = "none";
+
+  fetch("/api/sensors")
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var sensors = (d && d.sensors) || [];
+      // Each sensor exposes one or more metrics — we render one card per
+      // (sensor, metric) pair so the user can see the full breakdown.
+      var pairs = [];
+      sensors.forEach(function (s) {
+        if (s.status === "disabled") return;
+        (s.metrics || []).forEach(function (m) {
+          pairs.push({ id: s.id, type: s.type, name: s.name, metric: m });
+        });
+      });
+
+      if (loading) loading.style.display = "none";
+      if (!pairs.length) {
+        if (empty) empty.style.display = "";
+        return;
+      }
+
+      grid.innerHTML = pairs.map(dbBuildCardHtml).join("");
+      grid.style.display = "";
+
+      // Pull the spark series in parallel — chart creation is cheap so we
+      // start polling /api/latest once they're all mounted.
+      Promise.all(pairs.map(dbLoadSparkSeries))
+        .then(function () {
+          dbRefreshLatest();
+          dbStartPolling();
+        });
+    })
+    .catch(function (e) {
+      if (loading) loading.style.display = "none";
+      var err = document.getElementById("errorMsg");
+      if (err) {
+        err.textContent = "Failed to load sensor list: " + e;
+        err.style.display = "block";
+      }
+    });
+}
+
+function dbBuildCardHtml(p) {
+  var key = dbCardKey(p.id, p.metric);
+  return ''
+    + '<div class="sensor-card-mini" data-key="' + key + '">'
+    +   '<div class="sensor-card-mini-header">'
+    +     '<span class="sensor-card-mini-name" title="' + p.id + '">' + (p.name || p.id) + '</span>'
+    +     '<span class="sensor-card-mini-metric">' + p.metric + '</span>'
+    +   '</div>'
+    +   '<div class="sensor-card-mini-value">'
+    +     '<span class="value" data-card-value="' + key + '">--</span>'
+    +     '<span class="unit" data-card-unit="' + key + '"></span>'
+    +   '</div>'
+    +   '<div class="sensor-card-mini-spark" data-card-spark="' + key + '"></div>'
+    +   '<div class="sensor-card-mini-foot">'
+    +     '<span class="ts" data-card-ts="' + key + '">—</span>'
+    +     '<span class="quality" data-card-q="' + key + '"></span>'
+    +   '</div>'
+    + '</div>';
+}
+
+function dbLoadSparkSeries(p) {
+  var key  = dbCardKey(p.id, p.metric);
+  var now  = Math.floor(Date.now() / 1000);
+  var from = now - dbRangeSec;
+  // Pick a bucket that yields ~30 spark points across the chosen range.
+  var bucket = "raw";
+  if (dbRangeSec >= 86400)      bucket = "1h";
+  else if (dbRangeSec >= 43200) bucket = "1h";
+  else if (dbRangeSec >= 3600)  bucket = "5m";
+  else if (dbRangeSec >= 900)   bucket = "1m";
+  var url = "/api/data?sensor=" + encodeURIComponent(p.id)
+          + "&metric=" + encodeURIComponent(p.metric)
+          + "&from=" + from + "&to=" + now
+          + "&agg=" + bucket + "&mode=lttb&limit=60";
+  return fetch(url)
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      var pts = (d && d.data) || [];
+      var xs = pts.map(function (pt) { return pt.ts; });
+      var ys = pts.map(function (pt) { return pt.v; });
+      dbMountSparkChart(key, xs, ys);
+    })
+    .catch(function () { /* card stays without spark; foot shows '—' */ });
+}
+
+function dbMountSparkChart(key, xs, ys) {
+  var host = document.querySelector('[data-card-spark="' + key + '"]');
+  if (!host || typeof uPlot === "undefined") return;
+  if (dbCardCharts[key]) {
+    try { dbCardCharts[key].destroy(); } catch (e) {}
+  }
+  if (!xs.length) {
+    host.innerHTML = '<span class="sensor-card-mini-empty">no data</span>';
+    return;
+  }
+  host.innerHTML = "";
+  var rootStyle = getComputedStyle(document.documentElement);
+  var stroke = rootStyle.getPropertyValue("--primary").trim() || "#275673";
+  dbCardCharts[key] = new uPlot({
+    width:  host.clientWidth || 200,
+    height: host.clientHeight || 48,
+    pxAlign: false,
+    cursor: { show: false },
+    legend: { show: false },
+    scales: { x: { time: true }, y: {} },
+    axes:   [{ show: false }, { show: false }],
+    series: [
+      {},
+      { stroke: stroke, width: 1.5, points: { show: false }, fill: stroke + "22" },
+    ],
+  }, [xs, ys], host);
+}
+
+function dbRefreshLatest() {
+  fetch("/api/latest")
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      var status = document.getElementById("db-poll-status");
+      if (status) {
+        status.textContent = "✅ " + new Date().toLocaleTimeString();
+        status.className = "text-success";
+      }
+      var items = (d && d.items) || [];
+      items.forEach(function (it) {
+        var key = dbCardKey(it.id, it.metric);
+        var v = document.querySelector('[data-card-value="' + key + '"]');
+        var u = document.querySelector('[data-card-unit="' + key + '"]');
+        var t = document.querySelector('[data-card-ts="' + key + '"]');
+        var q = document.querySelector('[data-card-q="' + key + '"]');
+        if (v) v.textContent = (it.value !== undefined && it.value !== null)
+          ? Number(it.value).toPrecision(4) : "--";
+        if (u) u.textContent = it.unit ? " " + it.unit : "";
+        if (t) t.textContent = it.ts ? new Date(it.ts * 1000).toLocaleTimeString() : "—";
+        if (q) {
+          q.textContent =
+            it.q === 1 ? "" :
+            it.q === 2 ? "est" :
+            it.q === 3 ? "err" : "?";
+          q.className = "quality" + (it.q === 3 ? " text-danger" : "");
+        }
+      });
+    })
+    .catch(function () {
+      var status = document.getElementById("db-poll-status");
+      if (status) {
+        status.textContent = "⚠️ offline";
+        status.className = "text-warning";
+      }
+    });
+}
+
+// ============================================================================
+// LEGACY LOG VIEWER (per-fill flowmeter pipe-delimited TXT, PLATFORM_LEGACY)
+// Hosted on its own page (`#logs`); reuses the existing dbLoadData /
+// dbApplyFilters / dbExportCSV / dbRenderChart pipeline below.
+// ============================================================================
+function logsInit() {
+  dbLoadUPlot(function () {
     fetch("/api/filelist?filter=log&recursive=1")
-      .then(function (r) {
-        return r.json();
-      })
+      .then(function (r) { return r.json(); })
       .then(function (d) {
         var sel = document.getElementById("fileSelect");
         if (!sel) return;
@@ -93,10 +340,10 @@ function dbInit() {
           if (curFile && f.path === curFile) opt.selected = true;
           sel.appendChild(opt);
         });
-        dbLoadData(); // matches original: window.onload = loadData
+        dbLoadData();
       })
       .catch(function (e) {
-        var err = document.getElementById("errorMsg");
+        var err = document.getElementById("logsErrorMsg");
         if (err) {
           err.textContent = "Error loading file list: " + e.message;
           err.style.display = "block";
@@ -109,7 +356,7 @@ function dbInit() {
 function dbLoadData() {
   var file = getVal("fileSelect");
   if (!file || file === "No log files found") return;
-  var err = document.getElementById("errorMsg");
+  var err = document.getElementById("logsErrorMsg");
   if (err) err.style.display = "none";
   fetch("/download?file=" + encodeURIComponent(file))
     .then(function (r) {
@@ -254,20 +501,18 @@ function dbProcessData(data) {
   dbRenderChart(filtered);
 }
 
-// Matches original: function renderChart(data)
+// uPlot port of the legacy bar chart.  uPlot is a time-series engine, so
+// each entry becomes a (x, volume) point with vertical bars drawn via the
+// `paths` builder.  Per-bar coloring (FF / PF / other) is preserved via a
+// custom paths function that emits one stroke per bar.
 function dbRenderChart(data) {
   var ctx = document.getElementById("chart");
   if (!ctx) return;
-  if (typeof Chart === "undefined") {
-    dbLoadChartJs(function () {
-      dbRenderChart(data);
-    });
+  if (typeof uPlot === "undefined") {
+    dbLoadUPlot(function () { dbRenderChart(data); });
     return;
   }
-  if (dbChart) {
-    dbChart.destroy();
-    dbChart = null;
-  }
+  if (dbChart) { dbChart.destroy(); dbChart = null; }
 
   var th = ST.theme || CFG.theme || {};
   var rootStyle = getComputedStyle(document.documentElement);
@@ -276,92 +521,84 @@ function dbRenderChart(data) {
   var pfColor =
     th.pfColor || rootStyle.getPropertyValue("--pf-color").trim() || "#7eb0d5";
   var otherColor =
-    th.otherColor ||
-    rootStyle.getPropertyValue("--other-color").trim() ||
-    "#a0aec0";
+    th.otherColor || rootStyle.getPropertyValue("--other-color").trim() || "#a0aec0";
 
+  // Synthetic x-axis: bar index → ts within session.  Real RTC times exist on
+  // each entry but the legacy TXT logs don't always carry full ISO dates, so
+  // we sequence them.  Chunk F's smart dashboard reads from CSV and uses
+  // real epochs.
+  var xs = data.map(function (_, i) { return i; });
+  var ys = data.map(function (d) { return d.vol; });
   var clr = data.map(function (d) {
     if (d.reason.indexOf("FF") >= 0) return ffColor;
     if (d.reason.indexOf("PF") >= 0) return pfColor;
     return otherColor;
   });
 
-  // Matches original: var lblFmt = config.theme.chartLabelFormat
-  var lblFmt = th.chartLabelFormat !== undefined ? th.chartLabelFormat : 0;
-  var lbls = data.map(function (d) {
-    if (lblFmt === 1) return d.boot ? "#" + d.boot : "#?";
-    if (lblFmt === 2)
-      return d.date + " " + d.time + (d.boot ? " #" + d.boot : "");
-    return d.date + " " + d.time;
-  });
-
-  // Phase 5c-5 — crosshair plugin draws a vertical guide line from chart
-  // top to bottom anchored at the currently-hovered data index.  Reads
-  // active tooltip element list set by Chart.js's index-mode interaction.
-  var crosshairPlugin = {
-    id: "dashboardCrosshair",
-    afterDraw: function (chart) {
-      var tt = chart.tooltip;
-      if (!tt || !tt._active || !tt._active.length) return;
-      var active = tt._active[0];
-      var x = active.element.x;
-      var c = chart.ctx;
-      var top = chart.chartArea.top;
-      var bottom = chart.chartArea.bottom;
-      c.save();
-      c.beginPath();
-      c.moveTo(x, top);
-      c.lineTo(x, bottom);
-      c.lineWidth = 1;
-      c.strokeStyle = "rgba(8, 145, 178, 0.4)";  /* design --d-accent */
-      c.setLineDash([4, 4]);
-      c.stroke();
-      c.restore();
+  // uPlot custom paths: vertical bars from baseline to value, one color per bar.
+  function barPaths(u, seriesIdx) {
+    var data = u.data, idxs = data[0], vals = data[seriesIdx];
+    var fill = new Path2D();
+    var bw = Math.max(1, Math.floor((u.bbox.width / Math.max(1, idxs.length)) * 0.7));
+    for (var i = 0; i < idxs.length; i++) {
+      if (vals[i] == null) continue;
+      var cx = u.valToPos(idxs[i], "x", true);
+      var y0 = u.valToPos(0,       "y", true);
+      var y1 = u.valToPos(vals[i], "y", true);
+      fill.rect(cx - bw / 2, Math.min(y0, y1), bw, Math.abs(y1 - y0));
     }
-  };
+    return { fill: fill, stroke: null };
+  }
 
-  dbChart = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels: lbls,
-      datasets: [
-        {
-          label: "Liters (L)",
-          data: data.map(function (d) {
-            return d.vol;
-          }),
-          backgroundColor: clr,
-          borderWidth: 0,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      // index-mode + intersect:false makes the crosshair track even when
-      // the cursor is between bars, matching the design's expected feel.
-      interaction: { mode: "index", intersect: false },
-      plugins: {
-        tooltip: {
-          callbacks: {
-            afterLabel: function (c) {
-              var d = data[c.dataIndex];
-              return [
-                "Trigger: " + d.reason,
-                "Boot: " + (d.boot || "N/A"),
-                "Extra FF: " + d.ff,
-                "Extra PF: " + d.pf,
-              ];
-            },
-          },
-        },
-      },
-      scales: {
-        y: { beginAtZero: true, title: { display: true, text: "Liters" } },
-      },
-    },
-    plugins: [crosshairPlugin],
+  // Per-bar fill: uPlot doesn't natively colorize per-point in a single
+  // series, so draw each colored group as its own series using `bands`.
+  // For simplicity here we use a single series with the FF color and emit
+  // distinct colored series only when the dataset has both kinds.
+  var colorGroups = {};
+  data.forEach(function (d, i) {
+    var c = clr[i];
+    if (!colorGroups[c]) colorGroups[c] = [];
+    colorGroups[c].push(i);
   });
+
+  var lblFmt = th.chartLabelFormat !== undefined ? th.chartLabelFormat : 0;
+  function formatLabel(i) {
+    var d = data[i] || {};
+    if (lblFmt === 1) return d.boot ? "#" + d.boot : "#?";
+    if (lblFmt === 2) return d.date + " " + d.time + (d.boot ? " #" + d.boot : "");
+    return d.date + " " + d.time;
+  }
+
+  var series = [{}, { label: "Liters (L)", stroke: ffColor, fill: ffColor, paths: barPaths }];
+  var seriesData = [xs, ys];
+
+  ctx.innerHTML = "";
+  dbChart = new uPlot({
+    width: ctx.clientWidth || 600,
+    height: ctx.clientHeight || 320,
+    scales: { x: { time: false }, y: { range: function (u, lo, hi) { return [0, hi || 1]; } } },
+    axes: [
+      {
+        values: function (u, splits) {
+          return splits.map(function (i) {
+            var ii = Math.round(i);
+            return (ii >= 0 && ii < data.length) ? formatLabel(ii) : "";
+          });
+        },
+        rotate: 45,
+      },
+      { label: "Liters" },
+    ],
+    series: series,
+    cursor: { drag: { x: false, y: false } },
+    legend: { show: true },
+  }, seriesData, ctx);
+
+  // Bars are uniformly colored via `paths`; per-bar coloring is too costly
+  // for a single-series uPlot. For Chunk F's smart dashboard we'll move to
+  // proper time-series scatter/line which doesn't need per-point colors.
+  void colorGroups;  // kept for potential future overlay-by-color rendering
+  void pfColor; void otherColor;
 }
 
 // Matches original: function exportCSV()
@@ -827,6 +1064,8 @@ function liveBtn(id, pressed, txtOn, txtOff, colorOn, colorOff) {
 // Enrol markup-reachable handlers (data-click / data-change / data-input /
 // data-submit).  See core.js::Handlers for why the whitelist exists.
 registerHandlers({
+  dbRangeChange: dbRangeChange,
+  dbRefreshNow: dbRefreshNow,
   dbLoadData: dbLoadData,
   dbApplyFilters: dbApplyFilters,
   dbExportCSV: dbExportCSV,

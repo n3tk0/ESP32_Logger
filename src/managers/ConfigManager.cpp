@@ -49,6 +49,14 @@ static void applyDefaults() {
     if (!strlen(config.datalog.prefix))       SAFE_STRCPY(config.datalog.prefix,      DEFAULT_DATALOG_PREFIX);
     if (!strlen(config.datalog.currentFile))  SAFE_STRCPY(config.datalog.currentFile, "/datalog.txt");
 
+    // ── Logger (wide-CSV pipeline, v13) ─────────────────────────────────────
+    if (config.logger.aggregationIntervalSec == 0)
+        config.logger.aggregationIntervalSec = 60;
+    if (config.logger.aggregationIntervalSec > 3600)
+        config.logger.aggregationIntervalSec = 3600;
+    if (badFloat(config.logger.humidityCorrectionKappa))
+        config.logger.humidityCorrectionKappa = 0.35f;
+
     // ── Network ───────────────────────────────────────────────────────────────
     if (!strlen(config.network.apSSID))     SAFE_STRCPY(config.network.apSSID,    DEFAULT_AP_SSID);
     if (!strlen(config.network.apPassword)) SAFE_STRCPY(config.network.apPassword, DEFAULT_AP_PASSWORD);
@@ -101,7 +109,7 @@ static void applyDefaults() {
     if (!strlen(config.theme.storageBar70Color)) SAFE_STRCPY(config.theme.storageBar70Color, "#f39c12");
     if (!strlen(config.theme.storageBar90Color)) SAFE_STRCPY(config.theme.storageBar90Color, "#e74c3c");
     if (!strlen(config.theme.storageBarBorder))  SAFE_STRCPY(config.theme.storageBarBorder,  "#cccccc");
-    if (!strlen(config.theme.chartLocalPath))    SAFE_STRCPY(config.theme.chartLocalPath,    "/chart.min.js");
+    if (!strlen(config.theme.chartLocalPath))    SAFE_STRCPY(config.theme.chartLocalPath,    "/uPlot.iife.min.js");
 }
 
 // ============================================================================
@@ -216,12 +224,12 @@ void loadDefaultConfig() {
     SAFE_STRCPY(config.theme.storageBar70Color, "#f39c12");
     SAFE_STRCPY(config.theme.storageBar90Color, "#e74c3c");
     SAFE_STRCPY(config.theme.storageBarBorder,  "#cccccc");
-    // Default to the on-device copy.  The strict CSP (script-src 'self')
-    // blocks jsdelivr, and we ship chart.min.js in LittleFS, so CDN mode
-    // is opt-in only — flipping it on also requires relaxing CSP, which
-    // is a deliberate user choice.
+    // Default to the on-device copy.  Strict CSP (script-src 'self') blocks
+    // CDN, and we expect uPlot.iife.min.js (or .gz) to be in LittleFS, so
+    // CDN mode is opt-in only — flipping it on also requires relaxing CSP,
+    // which is a deliberate user choice.
     config.theme.chartSource      = CHART_LOCAL;
-    SAFE_STRCPY(config.theme.chartLocalPath, "/chart.min.js");
+    SAFE_STRCPY(config.theme.chartLocalPath, "/uPlot.iife.min.js");
     config.theme.showIcons        = true;
     config.theme.chartLabelFormat = LABEL_DATETIME;
 
@@ -294,6 +302,12 @@ void loadDefaultConfig() {
     config.network.apGateway[2] = 4;   config.network.apGateway[3] = 1;
     config.network.apSubnet[0]  = 255; config.network.apSubnet[1]  = 255;
     config.network.apSubnet[2]  = 255; config.network.apSubnet[3]  = 0;
+
+    // Logger (v13 wide-CSV pipeline)
+    config.logger.csvLoggingEnabled         = true;
+    config.logger.aggregationIntervalSec    = 60;
+    config.logger.humidityCorrectionEnabled = false;
+    config.logger.humidityCorrectionKappa   = 0.35f;
 }
 
 // ============================================================================
@@ -323,6 +337,16 @@ void migrateConfig(uint8_t fromVersion) {
     if (fromVersion < 12) {
         config.hardware.defaultStorageView = 0;
         if (!strlen(config.network.apPassword)) SAFE_STRCPY(config.network.apPassword, DEFAULT_AP_PASSWORD);
+    }
+    if (fromVersion < 13) {
+        // Wide-CSV pipeline introduced.  JsonLogger has been removed; sensor
+        // data is now persisted as wide CSV.  Default the kill switch to ON so
+        // existing devices keep logging on upgrade.  Fields live in the new
+        // top-level LoggerConfig appended at the end of DeviceConfig.
+        config.logger.csvLoggingEnabled         = true;
+        config.logger.aggregationIntervalSec    = 60;
+        config.logger.humidityCorrectionEnabled = false;
+        config.logger.humidityCorrectionKappa   = 0.35f;
     }
     config.version = CONFIG_VERSION;
     config.hardware.version = CONFIG_VERSION;
@@ -429,6 +453,7 @@ bool loadConfig() {
         SAFE_COPY(flowMeter);
         SAFE_COPY(hardware);
         SAFE_COPY(network);
+        SAFE_COPY(logger);   // v13+; pre-v13 binaries fall through to defaults
 
         #undef SAFE_COPY
 

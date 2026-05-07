@@ -2,8 +2,8 @@
 #include "TaskManager.h"
 #include "../sensors/SensorManager.h"
 #include "../pipeline/DataPipeline.h"
-#include "../core/Globals.h"  // Rtc, rtcAvailable
-#include <time.h>                // time() — NTP system clock fallback
+#include "../core/Globals.h"  // Rtc, rtcValid
+#include <time.h>             // time() — NTP system clock fallback
 
 // ---------------------------------------------------------------------------
 void sensorTaskFunc(void* /*param*/) {
@@ -15,18 +15,16 @@ void sensorTaskFunc(void* /*param*/) {
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_SENSOR] = millis();   // C4 heartbeat
 
-        // Get current Unix timestamp
+        // Timestamp priority: hardware RTC → NTP system clock → millis monotonic
         uint32_t ts = 0;
         if (Rtc) {
             RtcDateTime now = Rtc->GetDateTime();
-            if (now.IsValid()) ts = now.Unix32Time();
+            if (now.IsValid() && now.Year() >= 2020) ts = now.Unix32Time();
         }
-        // Fallback: system clock (set by NTP when no hardware RTC)
         if (ts == 0) {
-            time_t sysNow = 0; time(&sysNow);
-            if (sysNow > 1000000000UL) ts = (uint32_t)sysNow;
+            time_t sysT = time(nullptr);
+            if (sysT > 1000000000L) ts = (uint32_t)sysT;
         }
-        // Last resort: relative millis (quality = ESTIMATED)
         if (ts == 0) ts = (uint32_t)(millis() / 1000UL);
 
         sensorManager.tickFiltered(sensorQueue, ts, false);

@@ -96,6 +96,11 @@ String        currentDir    = "/";
 unsigned long lastLoggingCycleStartTime = 0;
 
 // ============================================================================
+// PLATFORM MODE — initialised in Logger.ino setup() via _detectPlatformMode().
+// ============================================================================
+PlatformMode g_platformMode = PLATFORM_LEGACY;
+
+// ============================================================================
 // PLATFORM SLEEP CONTROL
 // ============================================================================
 uint8_t g_sleepMode = 0;

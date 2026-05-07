@@ -53,14 +53,17 @@
       <a href="#dashboard" data-page="dashboard" class="nav-item" data-click="navPage">
         <span class="icon" data-icon="layout-dashboard"></span><span>Dashboard</span>
       </a>
-      <a href="#files" data-page="files" class="nav-item" data-click="navPage">
-        <span class="icon" data-icon="folder"></span><span>Files</span>
+      <a href="#sensors" data-page="sensors" class="nav-item" data-click="navPage">
+        <span class="icon" data-icon="gauge"></span><span>Sensors</span>
       </a>
       <a href="#live" data-page="live" class="nav-item" data-click="navPage">
         <span class="icon" data-icon="activity"></span><span>Live</span>
       </a>
-      <a href="#sensors" data-page="sensors" class="nav-item" data-click="navPage">
-        <span class="icon" data-icon="gauge"></span><span>Sensors</span>
+      <a href="#logs" data-page="logs" class="nav-item" data-click="navPage">
+        <span class="icon" data-icon="book-text"></span><span>Logs</span>
+      </a>
+      <a href="#files" data-page="files" class="nav-item" data-click="navPage">
+        <span class="icon" data-icon="folder"></span><span>Files</span>
       </a>
       <div class="nav-section">System</div>
       <a href="#settings" data-page="settings" class="nav-item" data-click="navPage">
@@ -81,12 +84,58 @@
     </div>
   </header>
 
-  <!-- ═══ PAGE: DASHBOARD ═══ -->
+  <!-- ═══ PAGE: DASHBOARD (smart sensor cards + sparklines, chunk F) ═══ -->
   <main class="main-content page" id="page-dashboard">
     <div class="page-head">
       <div>
         <h1 class="page-title"><span data-icon="layout-dashboard"></span> Dashboard</h1>
-        <div class="page-sub">Water consumption · select a log file to load</div>
+        <div class="page-sub">Live sensor readings · auto-refresh every 60 s</div>
+      </div>
+      <div class="page-actions">
+        <label class="check">
+          <span style="font-size:11px;color:var(--text-3)">Time</span>
+          <select id="db-range" class="input" style="width:auto;padding:2px 6px;font-size:12px;min-height:26px" data-change="dbRangeChange">
+            <option value="900">Last 15 min</option>
+            <option value="3600" selected>Last 1 h</option>
+            <option value="43200">Last 12 h</option>
+            <option value="86400">Last 24 h</option>
+          </select>
+        </label>
+        <span id="db-poll-status" class="badge" style="font-size:10px">⏳</span>
+        <button class="btn-mini" data-click="dbRefreshNow" title="Refresh now"><span data-icon="refresh-cw"></span></button>
+      </div>
+    </div>
+
+    <div id="errorMsg" class="alert alert-error" style="display:none"></div>
+
+    <!-- Empty state (shown when /api/sensors returns no sensors) -->
+    <div id="db-empty" class="card" style="display:none">
+      <div class="card-body text-center" style="padding:2rem 1rem">
+        <div style="font-size:2rem"><span data-icon="satellite"></span></div>
+        <p style="margin:.5rem 0 0">No sensors registered yet.</p>
+        <p class="hint">Set platform mode to <strong>Continuous</strong> or
+          <strong>Hybrid</strong> in <a href="#settings_corelogic">Core Logic</a>
+          and add sensors to start streaming data.</p>
+      </div>
+    </div>
+
+    <!-- Loading skeleton (shown during first sensor fetch) -->
+    <div id="db-loading" class="dashboard-grid">
+      <div class="sensor-card-mini skeleton"></div>
+      <div class="sensor-card-mini skeleton"></div>
+      <div class="sensor-card-mini skeleton"></div>
+    </div>
+
+    <!-- Sensor cards grid -->
+    <div id="db-cards" class="dashboard-grid" style="display:none"></div>
+  </main>
+
+  <!-- ═══ PAGE: LOG VIEWER (legacy txt-log analysis, PLATFORM_LEGACY / HYBRID) ═══ -->
+  <main class="main-content page" id="page-logs">
+    <div class="page-head">
+      <div>
+        <h1 class="page-title"><span data-icon="book-text"></span> Log Viewer</h1>
+        <div class="page-sub">Per-fill flowmeter log analysis · select a log file to load</div>
       </div>
       <div class="page-actions">
         <button class="btn" data-click="dbExportCSV"><span data-icon="download"></span> Export CSV</button>
@@ -105,8 +154,8 @@
       </div>
     </div>
 
-    <div id="errorMsg" class="alert alert-error" style="display:none"></div>
-    <div id="db-error"  class="alert alert-error" style="display:none"></div>
+    <div id="logsErrorMsg" class="alert alert-error" style="display:none"></div>
+    <div id="db-error"     class="alert alert-error" style="display:none"></div>
 
     <div class="grid grid-4" style="margin-top:var(--gap)">
       <div class="kpi">
@@ -143,7 +192,7 @@
           </div>
         </div>
         <div class="card-body" style="padding:8px 12px 12px">
-          <div class="chart-container" id="chartWrap"><canvas id="chart"></canvas></div>
+          <div class="chart-container" id="chartWrap"><div id="chart"></div></div>
           <div id="chartLegend" data-ffl="db-legendFF" data-pfl="db-legendPF" data-otl="db-legendOther" style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;font-size:11px;margin-top:6px"></div>
         </div>
       </div>
@@ -359,7 +408,8 @@
         <div class="set-card-t">Device</div>
         <div class="set-card-d">Name, ID, default storage view</div>
       </div>
-      <div class="set-card" data-click="showSubpage" data-args='["settings_flowmeter"]'>
+      <div class="set-card" data-click="showSubpage" data-args='["settings_flowmeter"]'
+           id="settings-card-flowmeter">
         <div class="set-card-icon"><span data-icon="droplets"></span></div>
         <div class="set-card-t">Flow meter</div>
         <div class="set-card-d">Pulse pin, calibration, debounce</div>
@@ -489,7 +539,7 @@
         </select>
       </div>
       <div class="card-body" style="padding:8px">
-        <div class="chart-container" style="max-height:320px"><canvas id="sensorChart"></canvas></div>
+        <div class="chart-container" style="max-height:320px"><div id="sensorChart"></div></div>
         <div id="sc-msg" style="font-size:.8rem;color:var(--text-muted);margin-top:4px"></div>
       </div>
     </div>

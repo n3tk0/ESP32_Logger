@@ -124,6 +124,17 @@
 // ============================================================================
 // 3. DEBUG / BUILD FLAGS
 // ============================================================================
+// PLATFORM_LEGACY_BUILD — when 1 (default) the legacy flowmeter run logger
+// (deepsleep / wake-on-button cycles, RTC RAM bootcount, FF/PF press
+// recording, pipe-delimited TXT output) is compiled into the firmware.
+// Set to 0 (-DPLATFORM_LEGACY_BUILD=0) for non-legacy deployments to drop
+// the entire legacy code path; PLATFORM_HYBRID gets per-run flowmeter
+// logging via FlowRunLogger instead, and PLATFORM_CONTINUOUS streams flow
+// readings into the wide-CSV pipeline like any other sensor.
+#ifndef PLATFORM_LEGACY_BUILD
+#  define PLATFORM_LEGACY_BUILD 1
+#endif
+
 // FreeRTOS unicore: only ESP32-C3 / C6 are single-core.
 // Dual-core chips (ESP32, ESP32-S3) MUST NOT define CONFIG_FREERTOS_UNICORE.
 #ifndef CONFIG_FREERTOS_UNICORE
@@ -175,7 +186,12 @@
 #  define STACK_SLOW_SENSOR_TASK 4096   // Blocking sensor reads (UART + delay)
 #endif
 #ifndef STACK_STORAGE_TASK
-#  define STACK_STORAGE_TASK     8192   // Two JsonLogger + File I/O (was 6144, HWM=1048)
+#  define STACK_STORAGE_TASK     8192   // LiveAggregator (~2.4 KB) + StorageTask
+                                        // local row/header buffers (2 KB) +
+                                        // CsvLogger.appendRow() 1 KB on-stack
+                                        // existing-header buffer + FS driver
+                                        // overhead — needs headroom for
+                                        // worst-case wide-CSV schema.
 #endif
 #ifndef STACK_EXPORT_TASK
 #  define STACK_EXPORT_TASK      8192   // WiFi + TLS + JSON serialisation
@@ -253,7 +269,3 @@
 #  define EXPORT_MAX_SENDALL_MS 30000     // 30 s circuit breaker
 #endif
 
-// JsonLogger write buffer (lines flushed at once)
-#ifndef LOG_BUF_LINES
-#  define LOG_BUF_LINES 8
-#endif
