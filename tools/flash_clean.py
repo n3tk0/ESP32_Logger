@@ -30,6 +30,7 @@ Run from the project root (where platformio.ini lives).
 """
 
 import argparse
+import shlex
 import shutil
 import subprocess
 import sys
