@@ -599,6 +599,14 @@ void setup() {
             registerApiRoutes(server);
         }
 
+        // Start the AsyncTCP listener now that EVERY route is registered.
+        // server.begin() must run AFTER both setupWebServer() and
+        // registerApiRoutes() (called either directly above or from inside
+        // _initPlatform).  Adding routes after begin() corrupts the handler
+        // list and produces null-deref crashes on the first incoming
+        // request.
+        startWebServer();
+
         if (onlineLoggerMode) {
             // Skip Arduino attachInterrupt when platform mode is active:
             // WaterFlowSensor::init() already registers the ISR via
