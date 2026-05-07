@@ -159,7 +159,10 @@ def main() -> int:
 
     print()
     _ok("All done. Open the serial monitor to confirm:")
-    print(f"  {pio} device monitor -e {args.env}" + (f" --port {args.port}" if args.port else ""))
+    monitor_cmd = [pio, "device", "monitor", "-e", args.env]
+    if args.port:
+        monitor_cmd.extend(["--port", args.port])
+    print(f"  {shlex.join(monitor_cmd)}")
     return 0
 
 
