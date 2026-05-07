@@ -448,9 +448,16 @@ void setupWebServer() {
         if (littleFsAvailable && LittleFS.exists("/www/index.html.gz")) {
             AsyncWebServerResponse* resp =
                 r->beginResponse(LittleFS, "/www/index.html.gz", "text/html");
-            resp->addHeader("Content-Encoding", "gzip");
-            r->send(resp);
-            return;
+            if (resp) {
+                resp->addHeader("Content-Encoding", "gzip");
+                r->send(resp);
+                return;
+            }
+            // beginResponse can return null on low heap or a race with the
+            // file being removed between exists() and beginResponse() —
+            // fall through to the plain index.html / failsafe instead of
+            // dereferencing the null pointer (observed crash MEPC=0x42036bcc
+            // on first GET / after AP join).
         }
         if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
             r->send(LittleFS, "/www/index.html", "text/html");
@@ -1969,8 +1976,12 @@ void setupWebServer() {
             if (littleFsAvailable && LittleFS.exists(gzPath)) {
                 AsyncWebServerResponse* resp =
                     r->beginResponse(LittleFS, gzPath, getMime(path));
-                resp->addHeader("Content-Encoding", "gzip");
-                r->send(resp);
+                if (resp) {
+                    resp->addHeader("Content-Encoding", "gzip");
+                    r->send(resp);
+                    return;
+                }
+                r->send(500, "text/plain", "Out of memory");
                 return;
             }
             r->send(404, "text/plain", "Not found: " + path);
@@ -1982,9 +1993,12 @@ void setupWebServer() {
         if (littleFsAvailable && LittleFS.exists(wwwGzPath)) {
             AsyncWebServerResponse* resp =
                 r->beginResponse(LittleFS, wwwGzPath, getMime(path));
-            resp->addHeader("Content-Encoding", "gzip");
-            r->send(resp);
-            return;
+            if (resp) {
+                resp->addHeader("Content-Encoding", "gzip");
+                r->send(resp);
+                return;
+            }
+            // Fall through to plain-file lookup below.
         }
 
         // And check if it exists in /www/ uncompressed
@@ -2016,9 +2030,13 @@ void setupWebServer() {
             if (littleFsAvailable && LittleFS.exists("/www/index.html.gz")) {
                 AsyncWebServerResponse* resp =
                     r->beginResponse(LittleFS, "/www/index.html.gz", "text/html");
-                resp->addHeader("Content-Encoding", "gzip");
-                r->send(resp);
-                return;
+                if (resp) {
+                    resp->addHeader("Content-Encoding", "gzip");
+                    r->send(resp);
+                    return;
+                }
+                // Fall through to FAILSAFE_HTML below if the gz response
+                // couldn't be allocated.
             }
             r->send_P(200, "text/html", FAILSAFE_HTML);
             return;
