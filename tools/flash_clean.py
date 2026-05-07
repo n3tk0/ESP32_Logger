@@ -20,8 +20,8 @@ exactly like Arduino IDE used to.
 
 Usage
 -----
-    python3 tools/flash_clean.py                         # default xiao_esp32c3
-    python3 tools/flash_clean.py -e esp32s3              # different env
+    python3 tools/flash_clean.py                         # auto-detect env from platformio.ini
+    python3 tools/flash_clean.py -e esp32s3              # explicit env
     python3 tools/flash_clean.py --port /dev/ttyACM0     # explicit port
     python3 tools/flash_clean.py --with-fs               # also flash LittleFS
     python3 tools/flash_clean.py -y                      # skip confirmation
@@ -30,6 +30,7 @@ Run from the project root (where platformio.ini lives).
 """
 
 import argparse
+import re
 import shlex
 import shutil
 import subprocess
@@ -67,6 +68,42 @@ def _check_project_root() -> Path:
     return here
 
 
+def _default_env(root: Path) -> str:
+    """Return the first [env:NAME] from platformio.ini, or 'xiao_esp32c3' as fallback."""
+    try:
+        text = (root / "platformio.ini").read_text()
+        m = re.search(r"^\[env:([^\]]+)\]", text, re.MULTILINE)
+        if m:
+            return m.group(1).strip()
+    except OSError:
+        pass
+    return "xiao_esp32c3"
+
+
+def _ensure_data_dir(root: Path) -> None:
+    """Populate data/ from www/ via build_web.py when data/ is absent or empty."""
+    data_dir = root / "data"
+    build_web = root / "tools" / "build_web.py"
+
+    populated = data_dir.is_dir() and any(data_dir.iterdir())
+    if populated:
+        return
+
+    if not build_web.is_file():
+        _err(
+            f"data/ directory is missing and tools/build_web.py not found.\n"
+            f"  Create data/ manually by copying your web assets there, then retry."
+        )
+        sys.exit(2)
+
+    _step("web", "Building web assets into data/ via tools/build_web.py")
+    rc = _run([sys.executable, str(build_web), "--dst", str(data_dir)])
+    if rc != 0:
+        _err("build_web.py failed — cannot build LittleFS image without data/.")
+        sys.exit(rc)
+    _ok("Web assets ready in data/.")
+
+
 def _check_pio() -> str:
     pio = shutil.which("pio") or shutil.which("platformio")
     if not pio:
@@ -94,8 +131,8 @@ def _confirm(env: str, port: str | None) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("-e", "--env", default="xiao_esp32c3",
-                    help="PlatformIO environment (default: xiao_esp32c3)")
+    ap.add_argument("-e", "--env", default=None,
+                    help="PlatformIO environment (default: first env in platformio.ini)")
     ap.add_argument("--port", default=None,
                     help="Serial port (e.g. /dev/ttyACM0, COM5). "
                          "Omit to let PlatformIO auto-detect.")
@@ -107,11 +144,13 @@ def main() -> int:
                     help="Skip the destructive-action confirmation prompt.")
     args = ap.parse_args()
 
-    _check_project_root()
+    root = _check_project_root()
     pio = _check_pio()
 
+    env = args.env or _default_env(root)
+
     if not args.yes:
-        _confirm(args.env, args.port)
+        _confirm(env, args.port)
 
     port_args: list[str] = ["--upload-port", args.port] if args.port else []
 
@@ -119,8 +158,8 @@ def main() -> int:
     # from a previous Arduino IDE flash makes LittleFS unable to find its
     # data partition.  pio's `erase` target invokes esptool erase_flash
     # under the hood and respects --upload-port for the serial selection.
-    _step("erase", f"Full chip erase via PlatformIO (env={args.env})")
-    rc = _run([pio, "run", "-t", "erase", "-e", args.env, *port_args])
+    _step("erase", f"Full chip erase via PlatformIO (env={env})")
+    rc = _run([pio, "run", "-t", "erase", "-e", env, *port_args])
     if rc != 0:
         _err("Erase failed. Is the device in download mode and reachable on the chosen port?")
         return rc
@@ -130,8 +169,8 @@ def main() -> int:
     # from upload gives a clearer failure surface — a build error here is
     # surfaced before we touch the device a second time.
     if not args.skip_build:
-        _step("build", f"Compiling firmware (env={args.env})")
-        rc = _run([pio, "run", "-e", args.env])
+        _step("build", f"Compiling firmware (env={env})")
+        rc = _run([pio, "run", "-e", env])
         if rc != 0:
             _err("Build failed.")
             return rc
@@ -141,7 +180,7 @@ def main() -> int:
     # + app to a clean flash, so LittleFS can format its newly-aligned
     # partition cleanly on first boot.
     _step("flash", "Uploading firmware")
-    rc = _run([pio, "run", "-t", "upload", "-e", args.env, *port_args])
+    rc = _run([pio, "run", "-t", "upload", "-e", env, *port_args])
     if rc != 0:
         _err("Firmware upload failed.")
         return rc
@@ -150,9 +189,12 @@ def main() -> int:
     # Step 4 (optional) — upload LittleFS image with web assets.  Skipped
     # by default because most users are happy letting the device auto-
     # format on first boot and uploading UI files via /setup afterwards.
+    # Requires a populated data/ directory; build_web.py is invoked
+    # automatically when data/ is absent or empty.
     if args.with_fs:
+        _ensure_data_dir(root)
         _step("fs", "Uploading LittleFS image")
-        rc = _run([pio, "run", "-t", "uploadfs", "-e", args.env, *port_args])
+        rc = _run([pio, "run", "-t", "uploadfs", "-e", env, *port_args])
         if rc != 0:
             _err("LittleFS upload failed.")
             return rc
@@ -160,10 +202,14 @@ def main() -> int:
 
     print()
     _ok("All done. Open the serial monitor to confirm:")
+<<<<<<< HEAD
     monitor_cmd = [pio, "device", "monitor", "-e", args.env]
     if args.port:
         monitor_cmd.extend(["--port", args.port])
     print(f"  {shlex.join(monitor_cmd)}")
+=======
+    print(f"  {pio} device monitor -e {env}" + (f" --port {args.port}" if args.port else ""))
+>>>>>>> 426eab2 (fix(flash_clean): auto-detect env + auto-build data/ for --with-fs)
     return 0
 
 
