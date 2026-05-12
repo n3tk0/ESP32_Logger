@@ -1681,13 +1681,13 @@ void setupWebServer() {
                 if (fm["calibrationMultiplier"].is<float>())        config.flowMeter.calibrationMultiplier        = fm["calibrationMultiplier"];
                 if (fm["monitoringWindowSecs"].is<int>())           config.flowMeter.monitoringWindowSecs         = fm["monitoringWindowSecs"];
                 if (fm["firstLoopMonitoringWindowSecs"].is<int>())  config.flowMeter.firstLoopMonitoringWindowSecs= fm["firstLoopMonitoringWindowSecs"];
-                else if (fm.containsKey("firstLoopWindow"))         config.flowMeter.firstLoopMonitoringWindowSecs= fm["firstLoopWindow"] | 6;
+                else if (fm["firstLoopWindow"].is<int>())           config.flowMeter.firstLoopMonitoringWindowSecs= fm["firstLoopWindow"] | 6;
             }
             if (doc["datalog"].is<JsonObject>()) {
                 JsonObject dl = doc["datalog"];
                 if (dl["rotation"].is<int>())               config.datalog.rotation               = (DatalogRotation)(int)dl["rotation"];
                 if (dl["maxSizeKB"].is<int>())              config.datalog.maxSizeKB              = constrain(dl["maxSizeKB"].as<int>(), 10, 10000);
-                if (dl.containsKey("maxEntries"))           config.datalog.maxEntries             = constrain(dl["maxEntries"].as<int>(), 10, 100000);
+                if (dl["maxEntries"].is<int>())             config.datalog.maxEntries             = constrain(dl["maxEntries"].as<int>(), 10, 100000);
                 if (dl["dateFormat"].is<int>())             config.datalog.dateFormat             = dl["dateFormat"];
                 if (dl["timeFormat"].is<int>())             config.datalog.timeFormat             = dl["timeFormat"];
                 if (dl["endFormat"].is<int>())              config.datalog.endFormat              = dl["endFormat"];
@@ -1713,7 +1713,7 @@ void setupWebServer() {
                 if (hw["cpuFreqMHz"].is<int>())         config.hardware.cpuFreqMHz         = hw["cpuFreqMHz"];
                 if (hw["defaultStorageView"].is<int>()) config.hardware.defaultStorageView = hw["defaultStorageView"];
                 if (hw["debounceMs"].is<int>())         config.hardware.debounceMs         = hw["debounceMs"];
-                if (hw.containsKey("debugMode"))        config.hardware.debugMode          = hw["debugMode"].as<bool>();
+                if (hw["debugMode"].is<bool>())         config.hardware.debugMode          = hw["debugMode"].as<bool>();
             }
             if (doc["logger"].is<JsonObject>()) {
                 JsonObject lg = doc["logger"];
