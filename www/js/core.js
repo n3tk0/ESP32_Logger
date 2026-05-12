@@ -412,16 +412,21 @@ function skipToContent() {
 })();
 
 // Pass 7 CSRF — returns a Promise<string> with the per-boot token.
-// Caches in window.__csrfToken; fetches fresh when the cache is empty.
+// Caches the token in window.__csrfToken and deduplicates concurrent fetches
+// by holding the in-flight Promise in _csrfFetch until it settles.
+var _csrfFetch = null;
 function getCsrfToken() {
   if (window.__csrfToken) return Promise.resolve(window.__csrfToken);
-  return fetch("/api/csrf-token", { credentials: "same-origin" })
+  if (_csrfFetch) return _csrfFetch;
+  _csrfFetch = fetch("/api/csrf-token", { credentials: "same-origin" })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
       if (d && d.token) window.__csrfToken = d.token;
       return window.__csrfToken || "";
     })
-    .catch(function () { return ""; });
+    .catch(function () { return ""; })
+    .finally(function () { _csrfFetch = null; });
+  return _csrfFetch;
 }
 // Warm the cache early so the first mutating request doesn't pay a round-trip.
 getCsrfToken();

@@ -99,10 +99,11 @@ function sensorsLoad() {
 
       // Update page subtitle with live counts
       var nowMs = Date.now();
-      var totalCount  = d.sensors.length;
       var errCount    = d.sensors.filter(function(s) { return s.status === "error"; }).length;
       var okCount     = d.sensors.filter(function(s) { return s.status === "ok"; }).length;
-      var sweepAge    = d.last_sweep_ms != null ? Math.round((nowMs - d.last_sweep_ms) / 100) / 10 : null;
+      var sweepAge    = (d.last_sweep_ms && d.last_sweep_ms > 0)
+                          ? Math.round((nowMs - d.last_sweep_ms) / 100) / 10
+                          : null;
       var sub = document.getElementById("sensors-sub");
       if (sub) {
         var parts = [okCount + " active"];
@@ -212,13 +213,15 @@ function sensorsLoad() {
                         esc(s.status_detail) + '</span></div>';
             }
 
-            // Age indicator: fresh (✓) vs stale/error
-            var ageIcon = stateClass === " err" ? "⊘" : stateClass === " stale" ? "⚠" : "✓";
-            var ageColor = stateClass === " err" ? "var(--err)" :
-                           stateClass === " stale" ? "var(--warn)" : "var(--ok)";
+            // Age indicator: only show ✓ when sensor is active and has a timestamp
+            var refMs = s.last_read_ms || 0;
+            var ageIcon = "", ageColor = "inherit";
+            if (stateClass === " err")        { ageIcon = "⊘"; ageColor = "var(--err)"; }
+            else if (stateClass === " stale") { ageIcon = "⚠"; ageColor = "var(--warn)"; }
+            else if (refMs && stateClass !== " dis") { ageIcon = "✓"; ageColor = "var(--ok)"; }
 
             return (
-              '<div class="sensor' + stateClass + '" data-sensor-name="' + esc((s.name + ' ' + s.id).toLowerCase()) + '">' +
+              '<div class="sensor' + stateClass + '" data-sensor-name="' + esc(((s.name || '') + ' ' + (s.id || '')).toLowerCase().trim()) + '">' +
                 '<div class="s-head">' +
                   '<div>' +
                     '<div class="s-name">' + esc(s.name) + '</div>' +
@@ -1252,9 +1255,12 @@ function expSave() {
 
 // Enrol markup-reachable handlers.  See core.js::Handlers for why the
 // whitelist exists.
+function sensorsPrint() { window.print(); }
+
 registerHandlers({
   sensorsLoad: sensorsLoad,
   sensorsFilter: sensorsFilter,
+  sensorsPrint: sensorsPrint,
   sensorChartLoad: sensorChartLoad,
   clToggleSensor: clToggleSensor,
   clRemoveSensor: clRemoveSensor,
