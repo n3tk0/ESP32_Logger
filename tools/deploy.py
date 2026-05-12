@@ -47,6 +47,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -99,7 +100,8 @@ DEFAULT_CFG: dict[str, Any] = {
     "baud":          921600,
     "device_ip":     "192.168.4.1",
     "steps":         [1, 3, 5, 6, 7],
-    "upload_filter": "all",   # all | gz | plain
+    "upload_filter":      "all",   # all | gz | plain
+    "wipe_before_upload": False,   # delete /www on device before uploading
 }
 
 _UPLOAD_FILTERS = ["all", "gz", "plain"]
@@ -193,7 +195,8 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     # Settings block
     print(_bold("  ── Settings " + "─" * 50))
     port_disp = cfg.get("port") or _dim("auto-detect")
-    uf = cfg.get("upload_filter", "all")
+    uf   = cfg.get("upload_filter", "all")
+    wipe = cfg.get("wipe_before_upload", False)
     for key, label, val in [
         ("e", "PlatformIO env ", cfg.get("env", "")),
         ("p", "Serial port    ", port_disp),
@@ -201,6 +204,7 @@ def _print_menu(cfg: dict[str, Any]) -> None:
         ("c", "Chip type      ", cfg.get("chip", "")),
         ("b", "Baud rate      ", str(cfg.get("baud", 921600))),
         ("u", "HTTP upload    ", _UPLOAD_FILTER_LABELS.get(uf, uf)),
+        ("w", "Wipe /www first", _green("YES — delete all before upload") if wipe else _dim("no")),
     ]:
         print(f"  {_cyan(f'[{key}]')}  {label}: {_bold(val)}")
     print()
@@ -286,6 +290,12 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
                                    if cur in _UPLOAD_FILTERS else 0]
             cfg["upload_filter"] = nxt
             print(_dim(f"  → {_UPLOAD_FILTER_LABELS[nxt]}"))
+            time.sleep(0.5)
+
+        elif ch == "w":
+            cfg["wipe_before_upload"] = not cfg.get("wipe_before_upload", False)
+            state = _green("ON") if cfg["wipe_before_upload"] else _dim("off")
+            print(_dim(f"  → Wipe /www before upload: ") + state)
             time.sleep(0.5)
 
         elif ch in {str(n) for n in STEP_NAMES}:
@@ -415,6 +425,14 @@ def s8_upload_http(cfg: dict[str, Any]) -> int:
         print(_red(f"  Device not reachable at {base}: {exc}"))
         return 1
 
+    # Optional wipe of existing /www before upload
+    if cfg.get("wipe_before_upload"):
+        print()
+        print(_yellow("  ── Wiping /www on device ─────────────────────────────"))
+        deleted, wfail = _http_wipe_www(base)
+        print(_yellow(f"  Deleted {deleted} file(s)" + (f", {wfail} failed" if wfail else "") + "."))
+        print()
+
     # Ensure /www and subdirs exist on device
     _http_mkdir(base, "/", "www")
     for sub in ["js", "pages"]:
@@ -470,6 +488,46 @@ def s8_upload_http(cfg: dict[str, Any]) -> int:
         return 0
     print(_yellow(f"  ⚠  {ok} uploaded, {fail} failed{skip_note}."))
     return 1
+
+
+def _http_wipe_www(base: str) -> tuple[int, int]:
+    """Delete every file under /www on the device via GET /api/filelist + POST /delete.
+    Returns (deleted, failed) counts."""
+    print(_yellow("  Fetching file list from device…"))
+    try:
+        url = f"{base}/api/filelist?dir=/www&recursive=1&storage=internal"
+        with urllib.request.urlopen(url, timeout=8) as resp:
+            import json as _json
+            data = _json.loads(resp.read().decode())
+    except Exception as exc:
+        print(_red(f"  ✗ Could not fetch file list: {exc}"))
+        return 0, 0
+
+    files = data.get("files") or []
+    if not files:
+        print(_dim("  /www appears empty — nothing to delete."))
+        return 0, 0
+
+    deleted = failed = 0
+    for f in files:
+        path = f.get("path") or f.get("name") or ""
+        if not path:
+            continue
+        disp = path if path.startswith("/") else "/" + path
+        print(f"  🗑  {disp:<52} … ", end="", flush=True)
+        try:
+            del_url = f"{base}/delete?path={urllib.parse.quote(disp)}&storage=internal"
+            req = urllib.request.Request(del_url, data=b"", method="POST")
+            with urllib.request.urlopen(req, timeout=6):
+                pass
+            print(_green("✓"))
+            deleted += 1
+        except Exception as exc:
+            print(_red(f"✗  {exc}"))
+            failed += 1
+        time.sleep(0.05)
+
+    return deleted, failed
 
 
 def _http_mkdir(base: str, parent: str, name: str) -> None:
