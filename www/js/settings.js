@@ -493,35 +493,28 @@ function themeSave(e, form) {
     });
 }
 
-// Display Preferences — accent picker.  Whitelisted set mirrors theme-boot.js
-// so a bad localStorage write can't smuggle arbitrary attribute content.
-function accentSelect() {
-  var v = this.getAttribute("data-v");
-  if (v !== "cyan" && v !== "amber" && v !== "green" && v !== "violet") return;
-  document.documentElement.setAttribute("data-accent", v);
-  try { localStorage.setItem("accentColor", v); } catch (_) {}
-  var seg = this.parentElement;
+// Shared helper for Display Preferences — validates value, sets the
+// data-* attribute on <html>, persists to localStorage, and updates the
+// .active class on the clicked .seg button (gemini review PR #64).
+function _applyUiPref(btn, attr, key, allowed) {
+  var v = btn.getAttribute("data-v");
+  if (allowed.indexOf(v) === -1) return;
+  document.documentElement.setAttribute(attr, v);
+  try { localStorage.setItem(key, v); } catch (_) {}
+  var seg = btn.parentElement;
   if (seg) {
-    var self = this;
     seg.querySelectorAll("button").forEach(function (b) {
-      b.classList.toggle("active", b === self);
+      b.classList.toggle("active", b === btn);
     });
   }
 }
 
-// Display Preferences — density toggle.
+function accentSelect() {
+  _applyUiPref(this, "data-accent", "accentColor", ["cyan", "amber", "green", "violet"]);
+}
+
 function densitySelect() {
-  var v = this.getAttribute("data-v");
-  if (v !== "comfortable" && v !== "compact") return;
-  document.documentElement.setAttribute("data-density", v);
-  try { localStorage.setItem("uiDensity", v); } catch (_) {}
-  var seg = this.parentElement;
-  if (seg) {
-    var self = this;
-    seg.querySelectorAll("button").forEach(function (b) {
-      b.classList.toggle("active", b === self);
-    });
-  }
+  _applyUiPref(this, "data-density", "uiDensity", ["comfortable", "compact"]);
 }
 
 function themeToggleChartPath() {
