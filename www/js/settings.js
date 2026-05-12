@@ -317,6 +317,21 @@ function thInit() {
       });
     });
   }
+
+  // Display Preferences — sync .seg active state to current localStorage values.
+  // The actual apply happens in theme-boot.js pre-paint; this just reflects state.
+  function _syncSeg(id, def, key) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var cur;
+    try { cur = localStorage.getItem(key); } catch (_) { cur = null; }
+    if (!cur) cur = def;
+    el.querySelectorAll("button").forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-v") === cur);
+    });
+  }
+  _syncSeg("th-density-seg", "comfortable", "uiDensity");
+  _syncSeg("th-accent-seg",  "cyan",        "accentColor");
   fetch("/export_settings")
     .then(function (r) {
       return r.json();
@@ -476,6 +491,30 @@ function themeSave(e, form) {
       btn.disabled = false;
       showToast("Error: " + err, "error");
     });
+}
+
+// Shared helper for Display Preferences — validates value, sets the
+// data-* attribute on <html>, persists to localStorage, and updates the
+// .active class on the clicked .seg button (gemini review PR #64).
+function _applyUiPref(btn, attr, key, allowed) {
+  var v = btn.getAttribute("data-v");
+  if (allowed.indexOf(v) === -1) return;
+  document.documentElement.setAttribute(attr, v);
+  try { localStorage.setItem(key, v); } catch (_) {}
+  var seg = btn.parentElement;
+  if (seg) {
+    seg.querySelectorAll("button").forEach(function (b) {
+      b.classList.toggle("active", b === btn);
+    });
+  }
+}
+
+function accentSelect() {
+  _applyUiPref(this, "data-accent", "accentColor", ["cyan", "amber", "green", "violet"]);
+}
+
+function densitySelect() {
+  _applyUiPref(this, "data-density", "uiDensity", ["comfortable", "compact"]);
 }
 
 function themeToggleChartPath() {
@@ -1717,6 +1756,8 @@ registerHandlers({
   themeSave: themeSave,
   themeToggleChartPath: themeToggleChartPath,
   themeRestoreDefault: themeRestoreDefault,
+  accentSelect: accentSelect,
+  densitySelect: densitySelect,
   netToggleMode: netToggleMode,
   netToggleStatic: netToggleStatic,
   netScanWifi: netScanWifi,

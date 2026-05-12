@@ -23,4 +23,22 @@
       document.documentElement.classList.add("sidebar-rail");
     }
   } catch (e) {}
+  // Restore accent + density pre-paint so [data-accent] / [data-density]
+  // selectors in style.css apply on first frame.  Default to "cyan" /
+  // "comfortable" when storage is empty so the first paint matches the UI
+  // defaults shown in settings_theme.html (gemini review PR #64).
+  // Whitelisted so a bad localStorage value can't inject arbitrary content.
+  try {
+    var accent = localStorage.getItem("accentColor") || "cyan";
+    if (accent === "cyan" || accent === "amber" ||
+        accent === "green" || accent === "violet") {
+      document.documentElement.setAttribute("data-accent", accent);
+    }
+  } catch (e) {}
+  try {
+    var density = localStorage.getItem("uiDensity") || "comfortable";
+    if (density === "comfortable" || density === "compact") {
+      document.documentElement.setAttribute("data-density", density);
+    }
+  } catch (e) {}
 })();
