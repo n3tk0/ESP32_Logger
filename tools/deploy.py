@@ -91,12 +91,20 @@ PRESETS: dict[str, tuple[str, list[int]]] = {
 
 # ── Config defaults + persistence ─────────────────────────────────────────────
 DEFAULT_CFG: dict[str, Any] = {
-    "env":       None,
-    "port":      None,
-    "chip":      "esp32c3",
-    "baud":      921600,
-    "device_ip": "192.168.4.1",
-    "steps":     [1, 3, 4, 5, 6],
+    "env":           None,
+    "port":          None,
+    "chip":          "esp32c3",
+    "baud":          921600,
+    "device_ip":     "192.168.4.1",
+    "steps":         [1, 3, 4, 5, 6],
+    "upload_filter": "all",   # all | gz | plain
+}
+
+_UPLOAD_FILTERS = ["all", "gz", "plain"]
+_UPLOAD_FILTER_LABELS = {
+    "all":   "Both (compressed + uncompressed)",
+    "gz":    "Compressed only (.gz + binaries)",
+    "plain": "Uncompressed only (plain + binaries)",
 }
 
 
@@ -183,12 +191,14 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     # Settings block
     print(_bold("  ── Settings " + "─" * 50))
     port_disp = cfg.get("port") or _dim("auto-detect")
+    uf = cfg.get("upload_filter", "all")
     for key, label, val in [
         ("e", "PlatformIO env ", cfg.get("env", "")),
         ("p", "Serial port    ", port_disp),
         ("i", "Device IP      ", cfg.get("device_ip", "")),
         ("c", "Chip type      ", cfg.get("chip", "")),
         ("b", "Baud rate      ", str(cfg.get("baud", 921600))),
+        ("u", "HTTP upload    ", _UPLOAD_FILTER_LABELS.get(uf, uf)),
     ]:
         print(f"  {_cyan(f'[{key}]')}  {label}: {_bold(val)}")
     print()
@@ -267,6 +277,14 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
                 cfg["baud"] = int(v)
             except ValueError:
                 pass
+
+        elif ch == "u":
+            cur = cfg.get("upload_filter", "all")
+            nxt = _UPLOAD_FILTERS[((_UPLOAD_FILTERS.index(cur) + 1) % len(_UPLOAD_FILTERS))
+                                   if cur in _UPLOAD_FILTERS else 0]
+            cfg["upload_filter"] = nxt
+            print(_dim(f"  → {_UPLOAD_FILTER_LABELS[nxt]}"))
+            time.sleep(0.5)
 
         elif ch in {str(n) for n in STEP_NAMES}:
             n = int(ch)
@@ -394,22 +412,26 @@ def s7_upload_http(cfg: dict[str, Any]) -> int:
             _http_mkdir(base, "/www", sub)
     time.sleep(0.3)
 
-    # Upload files — .gz sidecars + non-compressible formats
+    # Upload files — filtered by upload_filter setting
+    uf = cfg.get("upload_filter", "all")
+    _BIN_EXT = {".ico", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".woff", ".woff2"}
     ok = fail = 0
+    skipped = 0
     for fpath in sorted(DATA_WWW.rglob("*")):
         if not fpath.is_file():
             continue
-        # Skip: platform_config.json stays on device; skip plain text if .gz exists
         if "platform_config" in fpath.name:
             continue
         is_gz  = fpath.suffix == ".gz"
-        is_bin = fpath.suffix.lower() in {".ico", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".woff", ".woff2"}
-        if not is_gz and not is_bin:
-            # Skip plain text file when its .gz sibling exists; the firmware
-            # probes .gz first and falls back to plain — but we still need the
-            # plain copy for clients that don't accept gzip encoding.
-            # Upload both so the fallback path works.
-            pass  # upload all files
+        is_bin = fpath.suffix.lower() in _BIN_EXT
+        # Apply filter (binaries are always included — they are neither gz nor plain text)
+        if not is_bin:
+            if uf == "gz" and not is_gz:
+                skipped += 1
+                continue
+            if uf == "plain" and is_gz:
+                skipped += 1
+                continue
 
         rel   = fpath.relative_to(DATA_WWW)
         parts = rel.parts
@@ -432,10 +454,11 @@ def s7_upload_http(cfg: dict[str, Any]) -> int:
         time.sleep(0.12)
 
     print()
+    skip_note = f", {skipped} skipped" if skipped else ""
     if fail == 0:
-        print(_green(f"  ✓  Uploaded {ok} files successfully."))
+        print(_green(f"  ✓  Uploaded {ok} files successfully{skip_note}."))
         return 0
-    print(_yellow(f"  ⚠  {ok} uploaded, {fail} failed."))
+    print(_yellow(f"  ⚠  {ok} uploaded, {fail} failed{skip_note}."))
     return 1
 
 

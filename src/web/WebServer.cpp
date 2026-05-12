@@ -364,11 +364,15 @@ void setupWebServer() {
         "base-uri 'self'"
     );
 #else
+    // cdn.jsdelivr.net is allowed in script-src / style-src so the uPlot CDN
+    // fallback works when the library file is not present on LittleFS.
+    // 'unsafe-inline' is already present for the failsafe PROGMEM page; adding
+    // a CDN host does not weaken the existing posture further.
     DefaultHeaders::Instance().addHeader(
         "Content-Security-Policy",
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
         "frame-ancestors 'none'; "

@@ -411,17 +411,20 @@ function skipToContent() {
   _themeUpdateToggleIcon(pref);
 })();
 
-// Pass 7 CSRF — fetch the per-boot token early so the first mutating
-// request carries it.  Cached in window.__csrfToken; cleared on any
-// 403 csrf response so callers retry transparently.
-(function () {
-  fetch("/api/csrf-token", { credentials: "same-origin" })
+// Pass 7 CSRF — returns a Promise<string> with the per-boot token.
+// Caches in window.__csrfToken; fetches fresh when the cache is empty.
+function getCsrfToken() {
+  if (window.__csrfToken) return Promise.resolve(window.__csrfToken);
+  return fetch("/api/csrf-token", { credentials: "same-origin" })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
       if (d && d.token) window.__csrfToken = d.token;
+      return window.__csrfToken || "";
     })
-    .catch(function () { /* offline-friendly: caller will retry */ });
-})();
+    .catch(function () { return ""; });
+}
+// Warm the cache early so the first mutating request doesn't pay a round-trip.
+getCsrfToken();
 
 // ============================================================================
 // NAVIGATION
@@ -832,53 +835,58 @@ var PAGE_MSG_IDS = {
 
 function settingsSave(ev, url, form, restart) {
   if (ev) ev.preventDefault();
-  var fd = new FormData(form);
-  // Pass 7 CSRF — server requires the per-boot token on every mutating
-  // call.  Cached in window.__csrfToken on first need; cleared on a
-  // 403/csrf response so the next save refetches automatically.
-  if (window.__csrfToken) fd.append("csrf", window.__csrfToken);
-  var xhr = new XMLHttpRequest();
-  xhr.open("POST", url);
-  xhr.onload = function () {
-    if (restart) return;
-    try {
-      var r = JSON.parse(xhr.responseText);
+
+  function doPost(token, isRetry) {
+    var fd = new FormData(form);
+    if (token) fd.append("csrf", token);
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.onload = function () {
+      if (restart) return;
+      // 403 csrf mismatch — clear cache and retry once with a fresh token.
+      if (xhr.status === 403 && !isRetry) {
+        window.__csrfToken = null;
+        getCsrfToken().then(function (t) { doPost(t, true); });
+        return;
+      }
+      try {
+        var r = JSON.parse(xhr.responseText);
+        var msgId =
+          PAGE_MSG_IDS[currentPage] ||
+          currentPage.replace("settings_", "") + "-msg";
+        if (r.ok) {
+          sessionStorage.setItem(
+            "settingsFlash",
+            JSON.stringify({
+              page: currentPage,
+              html: "<div class='alert alert-success'>✅ Settings saved successfully</div>",
+            }),
+          );
+          setTimeout(function () { location.reload(); }, 300);
+        } else {
+          showMsg(
+            msgId,
+            "<div class='alert alert-error'>❌ " +
+              (r.error || "Unknown error") + "</div>",
+            true,
+          );
+        }
+      } catch (e) {}
+    };
+    xhr.onerror = function () {
       var msgId =
         PAGE_MSG_IDS[currentPage] ||
         currentPage.replace("settings_", "") + "-msg";
-      if (r.ok) {
-        sessionStorage.setItem(
-          "settingsFlash",
-          JSON.stringify({
-            page: currentPage,
-            html: "<div class='alert alert-success'>✅ Settings saved successfully</div>",
-          }),
-        );
-        setTimeout(function () {
-          location.reload();
-        }, 300);
-      } else {
-        showMsg(
-          msgId,
-          "<div class='alert alert-error'>❌ " +
-            (r.error || "Unknown error") +
-            "</div>",
-          true,
-        );
-      }
-    } catch (e) {}
-  };
-  xhr.onerror = function () {
-    var msgId =
-      PAGE_MSG_IDS[currentPage] ||
-      currentPage.replace("settings_", "") + "-msg";
-    showMsg(
-      msgId,
-      "<div class='alert alert-error'>❌ Network error</div>",
-      true,
-    );
-  };
-  xhr.send(fd);
+      showMsg(
+        msgId,
+        "<div class='alert alert-error'>❌ Network error</div>",
+        true,
+      );
+    };
+    xhr.send(fd);
+  }
+
+  getCsrfToken().then(function (token) { doPost(token, false); });
 }
 
 function applySettingsFlash() {

@@ -467,30 +467,40 @@ function themeSave(e, form) {
   btn.innerHTML = "Saving...";
   btn.disabled = true;
 
-  fetch("/save_theme", { method: "POST", body: fd })
-    .then(function (r) {
-      return r.json();
-    })
-    .then(function (d) {
-      btn.innerHTML = old;
-      btn.disabled = false;
-      if (d.ok) {
-        var m = document.getElementById("th-msg");
-        if (m)
-          m.innerHTML =
-            '<div class="alert alert-success mt-1 mb-1">Theme saved! Rebooting...</div>';
-        setTimeout(function () {
-          location.reload();
-        }, 1000);
-      } else {
-        showToast("Save failed.", "error");
-      }
-    })
-    .catch(function (err) {
-      btn.innerHTML = old;
-      btn.disabled = false;
-      showToast("Error: " + err, "error");
+  function _sendTheme(isRetry) {
+    getCsrfToken().then(function (token) {
+      if (token) fd.set("csrf", token);
+      fetch("/save_theme", { method: "POST", body: fd })
+        .then(function (r) {
+          if (r.status === 403 && !isRetry) {
+            window.__csrfToken = null;
+            _sendTheme(true);
+            return;
+          }
+          return r.json();
+        })
+        .then(function (d) {
+          if (!d) return;
+          btn.innerHTML = old;
+          btn.disabled = false;
+          if (d.ok) {
+            var m = document.getElementById("th-msg");
+            if (m)
+              m.innerHTML =
+                '<div class="alert alert-success mt-1 mb-1">Theme saved! Rebooting...</div>';
+            setTimeout(function () { location.reload(); }, 1000);
+          } else {
+            showToast("Save failed.", "error");
+          }
+        })
+        .catch(function (err) {
+          btn.innerHTML = old;
+          btn.disabled = false;
+          showToast("Error: " + err, "error");
+        });
     });
+  }
+  _sendTheme(false);
 }
 
 // Shared helper for Display Preferences — validates value, sets the
@@ -545,22 +555,34 @@ function themeRestoreDefault() {
   fd.append("storageBar70Color", "");
   fd.append("storageBar90Color", "");
   fd.append("storageBarBorder", "");
-  fetch("/save_theme", { method: "POST", body: fd })
-    .then(function (r) {
-      return r.json();
-    })
-    .then(function (d) {
-      if (d.ok) {
-        showToast("Theme restored to defaults! Rebooting...", "success");
-        location.reload();
-      } else {
-        showToast("Failed to restore theme defaults.", "error");
-      }
-    })
-    .catch(function () {
-      showToast("Theme restored to defaults! Rebooting...", "success");
-      location.reload();
+  function _sendRestore(isRetry) {
+    getCsrfToken().then(function (token) {
+      if (token) fd.set("csrf", token);
+      fetch("/save_theme", { method: "POST", body: fd })
+        .then(function (r) {
+          if (r.status === 403 && !isRetry) {
+            window.__csrfToken = null;
+            _sendRestore(true);
+            return;
+          }
+          return r.json();
+        })
+        .then(function (d) {
+          if (!d) return;
+          if (d.ok) {
+            showToast("Theme restored to defaults! Rebooting...", "success");
+            location.reload();
+          } else {
+            showToast("Failed to restore theme defaults.", "error");
+          }
+        })
+        .catch(function () {
+          showToast("Theme restored to defaults! Rebooting...", "success");
+          location.reload();
+        });
     });
+  }
+  _sendRestore(false);
 }
 
 // ============================================================================
