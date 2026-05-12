@@ -54,10 +54,20 @@ function dbLoadUPlot(cb) {
     }
   }
 
-  // Stylesheet first — best-effort. uPlot still renders without it.
+  // Stylesheet: try preferred source, fall back to the other on error.
+  // Best-effort — uPlot renders without its CSS (just loses some grid styling).
   var link = document.createElement("link");
   link.rel  = "stylesheet";
   link.href = preferLocal ? localCss : cdnCss;
+  link.onerror = function () {
+    var fallbackCss = preferLocal ? cdnCss : localCss;
+    if (fallbackCss && link.href !== fallbackCss) {
+      var link2 = document.createElement("link");
+      link2.rel  = "stylesheet";
+      link2.href = fallbackCss;
+      document.head.appendChild(link2);
+    }
+  };
   document.head.appendChild(link);
 
   var s = document.createElement("script");
@@ -1023,25 +1033,24 @@ function liveRender(d) {
   if (d.fsTotal)
     setEl("live-storage", fmtBytes(d.fsUsed) + "/" + fmtBytes(d.fsTotal));
 
-  var stColors = {
-    IDLE: "#3498db",
-    WAIT_FLOW: "#f39c12",
-    MONITORING: "#27ae60",
-    DONE: "#e74c3c",
+  var stClasses = {
+    IDLE:       "sm-idle",
+    WAIT_FLOW:  "sm-wait-flow",
+    MONITORING: "sm-monitoring",
+    DONE:       "sm-done",
   };
   var stEl = document.getElementById("state");
   if (stEl) {
-    stEl.textContent = d.state;
-    stEl.style.background = stColors[d.state] || "#95a5a6";
-    stEl.style.color = "#fff";
+    stEl.textContent = d.state || "–";
+    stEl.className = stClasses[d.state] || "";
   }
   var remEl = document.getElementById("stateRem");
   if (remEl)
     remEl.textContent = d.stateRemaining >= 0 ? d.stateRemaining + "s" : "-";
 
-  liveBtn("live-ff", d.ff, "Pressed", "Released", "#27ae60", "#95a5a6");
-  liveBtn("live-pf", d.pf, "Pressed", "Released", "#27ae60", "#95a5a6");
-  liveBtn("live-wifi", d.wifi, "Pressed", "Released", "#3498db", "#95a5a6");
+  liveBtn("live-ff",   d.ff,   "Pressed", "Released", "live-on",   "live-idle");
+  liveBtn("live-pf",   d.pf,   "Pressed", "Released", "live-on",   "live-idle");
+  liveBtn("live-wifi", d.wifi, "Pressed", "Released", "live-wifi", "live-idle");
 
   var modeEl = document.getElementById("mode");
   if (modeEl) {
@@ -1054,11 +1063,11 @@ function liveRender(d) {
   updateFooter({ boot: d.boot, heap: d.heap, heapTotal: d.heapTotal });
 }
 
-function liveBtn(id, pressed, txtOn, txtOff, colorOn, colorOff) {
+function liveBtn(id, pressed, txtOn, txtOff, clsOn, clsOff) {
   var el = document.getElementById(id);
   if (!el) return;
   el.textContent = pressed ? txtOn : txtOff;
-  el.style.background = pressed ? colorOn : colorOff;
+  el.className = "badge " + (pressed ? clsOn : clsOff);
 }
 
 // Enrol markup-reachable handlers (data-click / data-change / data-input /

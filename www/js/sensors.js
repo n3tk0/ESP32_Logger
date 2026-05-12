@@ -91,11 +91,28 @@ function sensorsLoad() {
         if (msg)
           msg.textContent =
             "No sensors registered. Set mode to Continuous in Core Logic settings and configure sensors.";
+        var sub = document.getElementById("sensors-sub");
+        if (sub) sub.textContent = "0 sensors";
         return;
       }
       if (msg) msg.textContent = "";
+
+      // Update page subtitle with live counts
+      var nowMs = Date.now();
+      var errCount    = d.sensors.filter(function(s) { return s.status === "error"; }).length;
+      var okCount     = d.sensors.filter(function(s) { return s.status === "ok"; }).length;
+      var sweepAge    = (d.last_sweep_ms && d.last_sweep_ms > 0)
+                          ? Math.round((nowMs - d.last_sweep_ms) / 100) / 10
+                          : null;
+      var sub = document.getElementById("sensors-sub");
+      if (sub) {
+        var parts = [okCount + " active"];
+        if (errCount) parts.push(errCount + " errored");
+        if (sweepAge != null) parts.push("last sweep " + sweepAge + "s ago");
+        sub.textContent = parts.join(" · ");
+      }
+
       if (grid) {
-        var nowMs = Date.now();
         grid.innerHTML = d.sensors
           .map(function (s) {
             // Sparkline path from `s.spark` (oldest → newest values).  We
@@ -189,8 +206,22 @@ function sensorsLoad() {
             // exact bus from /api/sensors, so fall back to type when missing.
             var transport = s.transport || s.type || "";
 
+            // Error detail chip (e.g. "I2C ACK FAILED") from status_detail field
+            var errChip = "";
+            if (s.status === "error" && s.status_detail) {
+              errChip = '<div class="s-metrics"><span class="badge err" style="font-size:10px">' +
+                        esc(s.status_detail) + '</span></div>';
+            }
+
+            // Age indicator: only show ✓ when sensor is active and has a timestamp
+            var refMs = s.last_read_ms || 0;
+            var ageIcon = "", ageColor = "inherit";
+            if (stateClass === " err")        { ageIcon = "⊘"; ageColor = "var(--err)"; }
+            else if (stateClass === " stale") { ageIcon = "⚠"; ageColor = "var(--warn)"; }
+            else if (refMs && stateClass !== " dis") { ageIcon = "✓"; ageColor = "var(--ok)"; }
+
             return (
-              '<div class="sensor' + stateClass + '">' +
+              '<div class="sensor' + stateClass + '" data-sensor-name="' + esc(((s.name || '') + ' ' + (s.id || '')).toLowerCase().trim()) + '">' +
                 '<div class="s-head">' +
                   '<div>' +
                     '<div class="s-name">' + esc(s.name) + '</div>' +
@@ -202,12 +233,12 @@ function sensorsLoad() {
                 '<div class="s-val">' +
                   '<span class="n">' + (primaryVal ? esc(primaryVal) : "—") + '</span>' +
                   (primaryUnit ? '<span class="u">' + esc(primaryUnit) + '</span>' : '') +
-                  (primary ? '<span class="s-primary-name">' + esc(primary) + '</span>' : '') +
                 '</div>' +
                 sparkSvg +
                 (metricBadges ? '<div class="s-metrics">' + metricBadges + '</div>' : '') +
+                errChip +
                 '<div class="s-foot">' +
-                  '<span>last ' + ageStr + '</span>' +
+                  '<span style="color:' + ageColor + '">' + ageIcon + ' ' + ageStr + '</span>' +
                   '<span>' + esc(transport) + '</span>' +
                 '</div>' +
               '</div>'
@@ -235,6 +266,16 @@ function sensorsLoad() {
     .catch(function (e) {
       if (msg) msg.textContent = "Failed to load sensors: " + e;
     });
+}
+
+function sensorsFilter() {
+  var q = (document.getElementById("sensors-filter") || {}).value || "";
+  q = q.toLowerCase().trim();
+  var cards = document.querySelectorAll("#sensors-grid .sensor");
+  cards.forEach(function (card) {
+    var name = card.getAttribute("data-sensor-name") || "";
+    card.style.display = (!q || name.indexOf(q) !== -1) ? "" : "none";
+  });
 }
 
 function sensorChartLoad() {
@@ -331,9 +372,31 @@ function sensorChartLoad() {
         });
       }
 
-      var infoStr = d1.count + " pts";
-      if (hasDual) infoStr += " + " + d2.count + " pts (overlay)";
-      infoStr += " · " + d1.agg + " · " + d1.mode;
+      // Compute and display CURRENT / Min / Avg / Max / Pts stats
+      var fmt = function(v) { return v != null ? (Math.round(v * 10) / 10) + (unit1 ? " " + unit1 : "") : "—"; };
+      var lastVal = values1[values1.length - 1];
+      var minVal = Infinity, maxVal = -Infinity, sumVal = 0, cntVal = 0;
+      for (var vi = 0; vi < values1.length; vi++) {
+        var vv = values1[vi];
+        if (vv == null) continue;
+        if (vv < minVal) minVal = vv;
+        if (vv > maxVal) maxVal = vv;
+        sumVal += vv; cntVal++;
+      }
+      var avgVal = cntVal ? sumVal / cntVal : null;
+      var elCur = document.getElementById("sc-current");
+      var elMin = document.getElementById("sc-min");
+      var elAvg = document.getElementById("sc-avg");
+      var elMax = document.getElementById("sc-max");
+      var elPts = document.getElementById("sc-pts");
+      if (elCur) elCur.textContent = fmt(lastVal);
+      if (elMin) elMin.textContent = minVal !== Infinity ? fmt(minVal) : "—";
+      if (elAvg) elAvg.textContent = fmt(avgVal);
+      if (elMax) elMax.textContent = maxVal !== -Infinity ? fmt(maxVal) : "—";
+      if (elPts) elPts.textContent = d1.count;
+
+      var infoStr = d1.agg + " · " + d1.mode;
+      if (hasDual) infoStr += " + overlay";
       if (msg) msg.textContent = infoStr;
 
       var ctx = document.getElementById("sensorChart");
@@ -1192,8 +1255,12 @@ function expSave() {
 
 // Enrol markup-reachable handlers.  See core.js::Handlers for why the
 // whitelist exists.
+function sensorsPrint() { window.print(); }
+
 registerHandlers({
   sensorsLoad: sensorsLoad,
+  sensorsFilter: sensorsFilter,
+  sensorsPrint: sensorsPrint,
   sensorChartLoad: sensorChartLoad,
   clToggleSensor: clToggleSensor,
   clRemoveSensor: clRemoveSensor,
