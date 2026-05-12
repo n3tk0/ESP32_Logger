@@ -74,19 +74,21 @@ STEP_NAMES: dict[int, str] = {
     1: "Build web assets      www/ → data/www/",
     2: "Flash bootloader      rollback-enabled, via esptool",
     3: "Erase chip flash      full wipe",
-    4: "Compile firmware      pio run",
-    5: "Flash firmware        pio run -t upload",
-    6: "Upload LittleFS       pio run -t uploadfs",
-    7: "Upload web via HTTP   POST /upload to device IP",
-    8: "Open serial monitor   pio device monitor",
+    4: "Clean build artifacts pio run -t clean",
+    5: "Compile firmware      pio run",
+    6: "Flash firmware        pio run -t upload",
+    7: "Upload LittleFS       pio run -t uploadfs",
+    8: "Upload web via HTTP   POST /upload to device IP",
+    9: "Open serial monitor   pio device monitor",
 }
 
 PRESETS: dict[str, tuple[str, list[int]]] = {
-    "F": ("Full flash",   [1, 3, 4, 5, 6]),
-    "Q": ("Quick flash",  [4, 5]),
-    "H": ("HTTP deploy",  [1, 7]),
-    "A": ("All steps",    list(range(1, 9))),
-    "N": ("None",         []),
+    "F": ("Full flash",    [1, 3, 5, 6, 7]),
+    "C": ("Clean build",   [4, 5, 6]),
+    "Q": ("Quick flash",   [5, 6]),
+    "H": ("HTTP deploy",   [1, 8]),
+    "A": ("All steps",     list(range(1, 10))),  # 1-9
+    "N": ("None",          []),
 }
 
 # ── Config defaults + persistence ─────────────────────────────────────────────
@@ -96,7 +98,7 @@ DEFAULT_CFG: dict[str, Any] = {
     "chip":          "esp32c3",
     "baud":          921600,
     "device_ip":     "192.168.4.1",
-    "steps":         [1, 3, 4, 5, 6],
+    "steps":         [1, 3, 5, 6, 7],
     "upload_filter": "all",   # all | gz | plain
 }
 
@@ -353,16 +355,24 @@ def s3_erase(cfg: dict[str, Any], pio: str) -> int:
     return rc
 
 
-def s4_compile(cfg: dict[str, Any], pio: str) -> int:
-    _hdr("4 · compile", f"Compiling firmware  env={cfg['env']}")
+def s4_clean(cfg: dict[str, Any], pio: str) -> int:
+    _hdr("4 · clean", f"Cleaning build artifacts  env={cfg['env']}")
+    rc = _run([pio, "run", "-t", "clean", "-e", cfg["env"]])
+    if rc == 0:
+        print(_green("  ✓ Build artifacts cleaned."))
+    return rc
+
+
+def s5_compile(cfg: dict[str, Any], pio: str) -> int:
+    _hdr("5 · compile", f"Compiling firmware  env={cfg['env']}")
     rc = _run([pio, "run", "-e", cfg["env"]])
     if rc == 0:
         print(_green("  ✓ Firmware compiled."))
     return rc
 
 
-def s5_flash_fw(cfg: dict[str, Any], pio: str) -> int:
-    _hdr("5 · flash", f"Flashing firmware  env={cfg['env']}")
+def s6_flash_fw(cfg: dict[str, Any], pio: str) -> int:
+    _hdr("6 · flash", f"Flashing firmware  env={cfg['env']}")
     cmd = [pio, "run", "-t", "upload", "-e", cfg["env"]]
     if cfg.get("port"):
         cmd += ["--upload-port", cfg["port"]]
@@ -372,8 +382,8 @@ def s5_flash_fw(cfg: dict[str, Any], pio: str) -> int:
     return rc
 
 
-def s6_upload_fs(cfg: dict[str, Any], pio: str) -> int:
-    _hdr("6 · uploadfs", f"Uploading LittleFS  env={cfg['env']}  src={DATA_WWW}")
+def s7_upload_fs(cfg: dict[str, Any], pio: str) -> int:
+    _hdr("7 · uploadfs", f"Uploading LittleFS  env={cfg['env']}  src={DATA_WWW}")
     if not DATA_WWW.is_dir() or not any(DATA_WWW.iterdir()):
         print(_yellow("  data/www/ is empty — running Build web first…"))
         rc = s1_build_web()
@@ -388,10 +398,10 @@ def s6_upload_fs(cfg: dict[str, Any], pio: str) -> int:
     return rc
 
 
-def s7_upload_http(cfg: dict[str, Any]) -> int:
+def s8_upload_http(cfg: dict[str, Any]) -> int:
     ip = cfg.get("device_ip", "192.168.4.1")
     base = f"http://{ip}"
-    _hdr("7 · http-upload", f"Uploading web via HTTP  {base}")
+    _hdr("8 · http-upload", f"Uploading web via HTTP  {base}")
 
     if not DATA_WWW.is_dir() or not any(DATA_WWW.iterdir()):
         print(_red("  data/www/ is empty. Run step 1 (Build web assets) first."))
@@ -494,8 +504,8 @@ def _http_post_file(base: str, upload_dir: str, fpath: Path) -> None:
         pass
 
 
-def s8_monitor(cfg: dict[str, Any], pio: str) -> int:
-    _hdr("8 · monitor", f"Serial monitor  env={cfg['env']}")
+def s9_monitor(cfg: dict[str, Any], pio: str) -> int:
+    _hdr("9 · monitor", f"Serial monitor  env={cfg['env']}")
     cmd = [pio, "device", "monitor", "-e", cfg["env"]]
     if cfg.get("port"):
         cmd += ["--port", cfg["port"]]
@@ -511,9 +521,9 @@ def run_steps(cfg: dict[str, Any]) -> None:
         input(_dim("  Press Enter to return to menu… "))
         return
 
-    # Find PlatformIO once — required for steps 3-6, 8
+    # Find PlatformIO once — required for steps 3-7, 9
     pio = shutil.which("pio") or shutil.which("platformio")
-    pio_steps = {3, 4, 5, 6, 8}
+    pio_steps = {3, 4, 5, 6, 7, 9}
     if pio is None and pio_steps & set(steps):
         print(_red("  PlatformIO CLI (pio) not found in PATH."))
         print(_red("  Install:  pip install platformio"))
@@ -531,11 +541,12 @@ def run_steps(cfg: dict[str, Any]) -> None:
         1: lambda: s1_build_web(),
         2: lambda: s2_flash_bootloader(cfg),
         3: lambda: s3_erase(cfg, pio),
-        4: lambda: s4_compile(cfg, pio),
-        5: lambda: s5_flash_fw(cfg, pio),
-        6: lambda: s6_upload_fs(cfg, pio),
-        7: lambda: s7_upload_http(cfg),
-        8: lambda: s8_monitor(cfg, pio),
+        4: lambda: s4_clean(cfg, pio),
+        5: lambda: s5_compile(cfg, pio),
+        6: lambda: s6_flash_fw(cfg, pio),
+        7: lambda: s7_upload_fs(cfg, pio),
+        8: lambda: s8_upload_http(cfg),
+        9: lambda: s9_monitor(cfg, pio),
     }
 
     failed: list[int] = []
