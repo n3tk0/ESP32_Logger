@@ -23,4 +23,20 @@
       document.documentElement.classList.add("sidebar-rail");
     }
   } catch (e) {}
+  // Restore accent + density pre-paint so [data-accent] / [data-density]
+  // selectors in style.css apply on first frame.  Whitelisted so a bad
+  // localStorage value can't inject arbitrary attribute content.
+  try {
+    var accent = localStorage.getItem("accentColor");
+    if (accent === "cyan" || accent === "amber" ||
+        accent === "green" || accent === "violet") {
+      document.documentElement.setAttribute("data-accent", accent);
+    }
+  } catch (e) {}
+  try {
+    var density = localStorage.getItem("uiDensity");
+    if (density === "comfortable" || density === "compact") {
+      document.documentElement.setAttribute("data-density", density);
+    }
+  } catch (e) {}
 })();

@@ -116,4 +116,30 @@
           Theme</button>
       </div>
     </form>
+
+    <!-- Display preferences (client-side, instant apply via localStorage —
+         not part of the /save_theme POST since they're per-device). -->
+    <div class="card">
+      <div class="card-head"><div class="card-title"><span data-icon="sliders"></span> Display Preferences</div></div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+        <div class="field">
+          <label>Density</label>
+          <div class="seg" id="th-density-seg">
+            <button type="button" data-v="comfortable" data-click="densitySelect">Comfortable</button>
+            <button type="button" data-v="compact" data-click="densitySelect">Compact</button>
+          </div>
+          <p class="hint">Compact shrinks row height, card padding, and gaps.</p>
+        </div>
+        <div class="field">
+          <label>Accent Color</label>
+          <div class="seg" id="th-accent-seg">
+            <button type="button" data-v="cyan"   data-click="accentSelect" style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:10px;height:10px;background:#22d3ee;border-radius:50%"></i>Cyan</button>
+            <button type="button" data-v="green"  data-click="accentSelect" style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:50%"></i>Green</button>
+            <button type="button" data-v="amber"  data-click="accentSelect" style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:50%"></i>Amber</button>
+            <button type="button" data-v="violet" data-click="accentSelect" style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:10px;height:10px;background:#a78bfa;border-radius:50%"></i>Violet</button>
+          </div>
+          <p class="hint">Applies instantly. Stored on this device only.</p>
+        </div>
+      </div>
+    </div>
   </main>

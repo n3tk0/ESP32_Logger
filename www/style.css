@@ -812,9 +812,7 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .btn-danger   { background:var(--err); color:#fff; border-color:var(--err); }
 .btn-success  { background:var(--ok);  color:#fff; border-color:var(--ok); }
 .btn-warning  { background:var(--warn);color:#fff; border-color:var(--warn); }
-.btn-sm       { height:30px; padding:0 10px; font-size:12px; }
 
-.form-group   { display:flex; flex-direction:column; gap:5px; margin-bottom:10px; }
 .form-label   { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--text-3); }
 .form-hint    { font-size:11px; color:var(--text-3); margin-top:3px; }
 .form-input,

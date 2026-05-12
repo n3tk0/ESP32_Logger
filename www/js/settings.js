@@ -317,6 +317,21 @@ function thInit() {
       });
     });
   }
+
+  // Display Preferences — sync .seg active state to current localStorage values.
+  // The actual apply happens in theme-boot.js pre-paint; this just reflects state.
+  function _syncSeg(id, def, key) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var cur;
+    try { cur = localStorage.getItem(key); } catch (_) { cur = null; }
+    if (!cur) cur = def;
+    el.querySelectorAll("button").forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-v") === cur);
+    });
+  }
+  _syncSeg("th-density-seg", "comfortable", "uiDensity");
+  _syncSeg("th-accent-seg",  "cyan",        "accentColor");
   fetch("/export_settings")
     .then(function (r) {
       return r.json();
@@ -476,6 +491,37 @@ function themeSave(e, form) {
       btn.disabled = false;
       showToast("Error: " + err, "error");
     });
+}
+
+// Display Preferences — accent picker.  Whitelisted set mirrors theme-boot.js
+// so a bad localStorage write can't smuggle arbitrary attribute content.
+function accentSelect() {
+  var v = this.getAttribute("data-v");
+  if (v !== "cyan" && v !== "amber" && v !== "green" && v !== "violet") return;
+  document.documentElement.setAttribute("data-accent", v);
+  try { localStorage.setItem("accentColor", v); } catch (_) {}
+  var seg = this.parentElement;
+  if (seg) {
+    var self = this;
+    seg.querySelectorAll("button").forEach(function (b) {
+      b.classList.toggle("active", b === self);
+    });
+  }
+}
+
+// Display Preferences — density toggle.
+function densitySelect() {
+  var v = this.getAttribute("data-v");
+  if (v !== "comfortable" && v !== "compact") return;
+  document.documentElement.setAttribute("data-density", v);
+  try { localStorage.setItem("uiDensity", v); } catch (_) {}
+  var seg = this.parentElement;
+  if (seg) {
+    var self = this;
+    seg.querySelectorAll("button").forEach(function (b) {
+      b.classList.toggle("active", b === self);
+    });
+  }
 }
 
 function themeToggleChartPath() {
@@ -1717,6 +1763,8 @@ registerHandlers({
   themeSave: themeSave,
   themeToggleChartPath: themeToggleChartPath,
   themeRestoreDefault: themeRestoreDefault,
+  accentSelect: accentSelect,
+  densitySelect: densitySelect,
   netToggleMode: netToggleMode,
   netToggleStatic: netToggleStatic,
   netScanWifi: netScanWifi,
