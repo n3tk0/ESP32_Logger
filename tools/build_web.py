@@ -36,6 +36,7 @@ import gzip
 import re
 import shutil
 import sys
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -214,6 +215,83 @@ def build(src_root: Path, dst_root: Path, *, do_gzip: bool) -> dict:
     }
 
 
+# ── Font bootstrap ────────────────────────────────────────────────────────────
+# Maps the local filename (under www/fonts/) to the Google Fonts CSS2 API URL
+# that serves the variable-weight woff2 for the latin subset.
+_FONTS: dict[str, str] = {
+    "inter-var.woff2": (
+        "https://fonts.googleapis.com/css2"
+        "?family=Inter:wght@100..900&display=swap"
+    ),
+    "jetbrainsmono-var.woff2": (
+        "https://fonts.googleapis.com/css2"
+        "?family=JetBrains+Mono:wght@100..800&display=swap"
+    ),
+}
+
+_GFONTS_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+
+def _ensure_fonts(src_root: Path) -> None:
+    """Download variable woff2 fonts into www/fonts/ if they are missing.
+
+    Fonts are committed to the repository so this is a no-op for the common
+    case.  It only runs when someone clones the repo without LFS or without
+    the font files (e.g. a fresh checkout before the first commit of fonts).
+
+    The download uses the Google Fonts CSS2 API with a Chrome User-Agent to
+    receive the woff2 format, then extracts the first fonts.gstatic.com URL
+    from the response (the latin subset, which is all the UI needs).
+    """
+    fonts_dir = src_root / "fonts"
+    fonts_dir.mkdir(parents=True, exist_ok=True)
+
+    missing = [name for name in _FONTS if not (fonts_dir / name).is_file()]
+    if not missing:
+        return
+
+    print(f"[build_web] Downloading {len(missing)} missing font file(s)…")
+    for name in missing:
+        css_url = _FONTS[name]
+        dst = fonts_dir / name
+        try:
+            req = urllib.request.Request(css_url, headers={"User-Agent": _GFONTS_UA})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                css = resp.read().decode()
+
+            m = re.search(
+                r"url\((https://fonts\.gstatic\.com/[^)]+\.woff2)\)", css
+            )
+            if not m:
+                print(
+                    f"[build_web] WARNING: could not find woff2 URL for {name} "
+                    f"— UI will use fallback system font",
+                    file=sys.stderr,
+                )
+                continue
+
+            woff2_url = m.group(1)
+            req2 = urllib.request.Request(
+                woff2_url, headers={"User-Agent": _GFONTS_UA}
+            )
+            with urllib.request.urlopen(req2, timeout=30) as resp2:
+                data = resp2.read()
+
+            dst.write_bytes(data)
+            print(f"[build_web]   {name}  ({len(data):,} B)")
+
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[build_web] WARNING: could not download {name}: {exc} "
+                f"— UI will use fallback system font",
+                file=sys.stderr,
+            )
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--clean", action="store_true",
@@ -232,6 +310,9 @@ def main() -> int:
     if not src_root.is_dir():
         print(f"error: source {src_root} is not a directory", file=sys.stderr)
         return 1
+
+    # Download variable-weight woff2 fonts if not already present in www/fonts/.
+    _ensure_fonts(src_root)
 
     if args.clean and dst_root.exists():
         print(f"[clean] removing {dst_root}")
