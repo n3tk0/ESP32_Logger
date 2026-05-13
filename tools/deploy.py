@@ -229,7 +229,7 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     print(_bold("  ── Actions " + "─" * 51))
     print(f"  {_cyan('[r]')}  Run  {_dim(f'({enabled_list})')}")
     print(f"  {_cyan('[s]')}  Save as default")
-    print(f"  {_cyan('[W]')}  WiFi provision  via serial COM port")
+    print(f"  {_cyan('[W]')}  WiFi provision  via serial COM port  {_dim('(uppercase W)')}")
     print(f"  {_cyan('[q]')}  Quit")
     print()
 
@@ -305,7 +305,7 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             steps ^= {n}  # toggle
             cfg["steps"] = sorted(steps)
 
-        elif ch == "w":
+        elif choice == "W":          # uppercase-only to avoid clash with wipe [w]
             s_wifi_provision(cfg)
 
         elif choice.upper() in PRESETS:

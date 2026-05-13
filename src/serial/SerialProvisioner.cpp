@@ -1,5 +1,6 @@
 #include "SerialProvisioner.h"
 #include <WiFi.h>
+#include "../managers/OtaManager.h"   // tick() during blocking connect wait
 
 SerialProvisioner serialProvisioner;
 
@@ -10,9 +11,10 @@ void SerialProvisioner::_respond(const char* json) {
 }
 
 void SerialProvisioner::_respondDoc(JsonDocument& doc) {
-    String s;
-    serializeJson(doc, s);
-    _respond(s.c_str());
+    // Serialize directly to Serial to avoid an intermediate String heap allocation.
+    Serial.print(SERIAL_RESP_PREFIX);
+    serializeJson(doc, Serial);
+    Serial.println();
 }
 
 // ---------------------------------------------------------------------------
@@ -97,18 +99,24 @@ void SerialProvisioner::_cmdScan() {
     } else {
         resp["ok"] = true;
         JsonArray nets = resp["nets"].to<JsonArray>();
-        // Sort by RSSI descending (strongest first) — simple insertion sort
-        // on the WiFi.RSSI(i) values; indices stored in a local array.
+        // Sort by RSSI descending (strongest first) — insertion sort on cached
+        // values.  WiFi.RSSI() involves IPC with the WiFi task so we read each
+        // value once up front rather than calling it repeatedly inside the loop.
         int order[32];
+        int rssis[32];
         int cnt = min(n, 32);
-        for (int i = 0; i < cnt; i++) order[i] = i;
+        for (int i = 0; i < cnt; i++) {
+            order[i] = i;
+            rssis[i] = WiFi.RSSI(i);
+        }
         for (int i = 1; i < cnt; i++) {
-            int key = order[i];
+            int keyIdx  = order[i];
+            int keyRssi = rssis[keyIdx];
             int j = i - 1;
-            while (j >= 0 && WiFi.RSSI(order[j]) < WiFi.RSSI(key)) {
+            while (j >= 0 && rssis[order[j]] < keyRssi) {
                 order[j + 1] = order[j--];
             }
-            order[j + 1] = key;
+            order[j + 1] = keyIdx;
         }
         for (int i = 0; i < cnt; i++) {
             int idx = order[i];
@@ -135,9 +143,19 @@ void SerialProvisioner::_cmdConnect(const char* ssid, const char* pass) {
     WiFi.mode(WIFI_MODE_APSTA);
     WiFi.begin(ssid, (pass && pass[0]) ? pass : nullptr);
 
+    // Wait up to 20 s for association.
+    // • Call OtaManager::tick() each iteration so the 90-second OTA rollback
+    //   confirmation window is not starved during this blocking wait.
+    // • Exit early on terminal failure states so we don't spin the full timeout
+    //   when the password is wrong or the SSID no longer exists.
     constexpr uint32_t TIMEOUT_MS = 20000;
     uint32_t deadline = millis() + TIMEOUT_MS;
-    while (millis() < deadline && WiFi.status() != WL_CONNECTED) {
+    while (millis() < deadline) {
+        wl_status_t st = (wl_status_t)WiFi.status();
+        if (st == WL_CONNECTED)      break;
+        if (st == WL_CONNECT_FAILED) break;   // wrong password
+        if (st == WL_NO_SSID_AVAIL)  break;   // SSID not found
+        OtaManager::tick(millis());
         delay(500);
     }
 
