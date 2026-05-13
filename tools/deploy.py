@@ -433,11 +433,12 @@ def s8_upload_http(cfg: dict[str, Any]) -> int:
         print(_yellow(f"  Deleted {deleted} file(s)" + (f", {wfail} failed" if wfail else "") + "."))
         print()
 
-    # Ensure /www and subdirs exist on device
+    # Ensure /www and all immediate subdirectories exist on device.
+    # Discovered dynamically so new subdirs (e.g. fonts/) are picked up
+    # automatically without editing this script.
     _http_mkdir(base, "/", "www")
-    for sub in ["js", "pages"]:
-        if (DATA_WWW / sub).is_dir():
-            _http_mkdir(base, "/www", sub)
+    for sub in sorted(p.name for p in DATA_WWW.iterdir() if p.is_dir()):
+        _http_mkdir(base, "/www", sub)
     time.sleep(0.3)
 
     # Upload files — filtered by upload_filter setting
