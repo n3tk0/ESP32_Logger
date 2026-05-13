@@ -293,7 +293,10 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             print(_dim(f"  → {_UPLOAD_FILTER_LABELS[nxt]}"))
             time.sleep(0.5)
 
-        elif ch == "w":
+        elif choice == "W":          # uppercase W — WiFi provisioner
+            s_wifi_provision(cfg)
+
+        elif ch == "w":              # lowercase w — wipe toggle
             cfg["wipe_before_upload"] = not cfg.get("wipe_before_upload", False)
             state = _green("ON") if cfg["wipe_before_upload"] else _dim("off")
             print(_dim(f"  → Wipe /www before upload: ") + state)
@@ -304,9 +307,6 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             steps = set(cfg.get("steps", []))
             steps ^= {n}  # toggle
             cfg["steps"] = sorted(steps)
-
-        elif choice == "W":          # uppercase-only to avoid clash with wipe [w]
-            s_wifi_provision(cfg)
 
         elif choice.upper() in PRESETS:
             cfg["steps"] = list(PRESETS[choice.upper()][1])
