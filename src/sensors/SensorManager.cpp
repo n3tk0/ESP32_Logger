@@ -134,19 +134,22 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
         if (tookMutex) xSemaphoreGive(wireMutex);
 
         // ------------------------------------------------------------------
-        // Health tracking — rotate hourly bucket when ≥ 3600 s have elapsed
+        // Health tracking — rotate hourly buckets for every elapsed hour.
+        // Loop (not if) so multi-hour gaps mark intermediate slots as
+        // "unknown" rather than leaving stale data in them.
         // ------------------------------------------------------------------
         {
+            constexpr uint32_t ONE_HOUR_MS = 3600UL * 1000UL;
             HealthData& h = _health[i];
             if (h.slotStartMs == 0) h.slotStartMs = ms;   // first ever read
-            if ((ms - h.slotStartMs) >= 3600000UL) {
+            while ((ms - h.slotStartMs) >= ONE_HOUR_MS) {
                 // Advance to next slot, clear its accumulators.
-                // Use +=3600000 (not =ms) so partial overruns don't drift.
+                // Use += ONE_HOUR_MS (not =ms) so overruns don't accumulate drift.
                 h.curSlot = (h.curSlot + 1) % 24;
                 h.hourReads [h.curSlot] = 0;
                 h.hourErrors[h.curSlot] = 0;
                 h.hourLatUs [h.curSlot] = 0;
-                h.slotStartMs += 3600000UL;
+                h.slotStartMs += ONE_HOUR_MS;
             }
             if (n > 0) {
                 h.hourReads [h.curSlot]++;
@@ -330,8 +333,10 @@ void SensorManager::toJson(JsonArray arr) const {
             errors += h.hourErrors[b];
             latSum += h.hourLatUs[b];
         }
-        uint32_t total = reads + errors;
-        uint32_t avgLat = (total > 0) ? (latSum / total) : 0;
+        uint32_t total  = reads + errors;
+        // Latency is accumulated only on successful reads, so divide by reads
+        // only — avoids systematic underreporting as error counts grow.
+        uint32_t avgLat = (reads > 0) ? (latSum / reads) : 0;
         float uptime = (total > 0) ? (100.0f * (float)reads / (float)total) : 100.0f;
 
         JsonObject ho = slots[i].obj["health"].to<JsonObject>();
@@ -339,7 +344,9 @@ void SensorManager::toJson(JsonArray arr) const {
         ho["errors_24h"]       = errors;
         ho["avg_latency_us"]   = avgLat;
         ho["last_read_ms_ago"] = (lastMs > 0) ? (nowMs - lastMs) : 0;
-        ho["uptime_pct_24h"]   = serialized(String(uptime, 1));
+        // Direct float assignment — avoids the temporary String object and
+        // heap fragmentation caused by serialized(String(uptime, 1)).
+        ho["uptime_pct_24h"]   = (float)((int)(uptime * 10 + 0.5f)) / 10.0f;
 
         // Buckets oldest → newest (curSlot+1 is the oldest slot)
         JsonArray barr = ho["uptime_buckets_24h"].to<JsonArray>();

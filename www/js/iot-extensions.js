@@ -490,14 +490,14 @@
           '<input class="input" placeholder="Filter rules…" id="al-filter" style="width:200px;height:28px"/>',
         '</div>',
         '<div class="card-body" style="padding:0" id="al-rules">',
-          buildAlertRulesHTML(),
+          '<div class="empty" style="padding:24px"><span class="empty-title">Loading…</span></div>',
         '</div>',
       '</div>',
 
       '<div class="card" style="margin-top:var(--gap)">',
-        '<div class="card-head"><div class="card-title"><span data-icon="history"></span> Trigger history (last 24 h)</div></div>',
+        '<div class="card-head"><div class="card-title"><span data-icon="history"></span> Trigger history</div></div>',
         '<div class="card-body" style="padding:0" id="al-history">',
-          buildAlertHistoryHTML(),
+          '<div class="empty" style="padding:24px"><span class="empty-title">Loading…</span></div>',
         '</div>',
       '</div>',
     ].join("");
@@ -505,7 +505,7 @@
     document.body.insertBefore(page, document.getElementById("toastContainer") || null);
     reIcons(page);
 
-    // Filter input
+    // Filter input — wired up after API data populates the rules container
     var fi = document.getElementById("al-filter");
     if (fi) fi.addEventListener("input", function () {
       var q = fi.value.toLowerCase();
@@ -514,57 +514,147 @@
       });
     });
 
-    // Update KPIs
-    var rules = page.querySelectorAll(".alert-rule");
-    var firing = page.querySelectorAll(".alert-rule.firing").length;
-    var snoozed = page.querySelectorAll(".alert-rule.snoozed").length;
-    setEl("al-total", rules.length);
-    setEl("al-firing", firing);
-    setEl("al-snoozed", snoozed);
-    setEl("al-rule-d", "across sensors");
-    if (firing) setEl("alerts-badge", firing);
-    var badge = document.getElementById("alerts-badge");
-    if (badge) badge.style.display = firing ? "" : "none";
+    // Fetch live data from /api/alerts immediately after page is in DOM
+    _loadAlertsData();
   }
 
-  function buildAlertRulesHTML() {
-    var rules = [
-      { state:"armed",   name:"Indoor temp too high",     expr:"env_indoor.temperature > 26 for 5min",  trips:0, last:"—",      actions:["toast","mqtt"] },
-      { state:"armed",   name:"PM2.5 elevated",           expr:"pm_outdoor.pm25 > 35 µg/m³",            trips:0, last:"—",      actions:["toast"] },
-      { state:"armed",   name:"CO₂ ventilation needed",   expr:"air_quality.eco2 > 1000 ppm for 10min", trips:0, last:"—",      actions:["toast","mqtt"] },
-      { state:"armed",   name:"Humidity out of range",    expr:"env_indoor.humidity < 30 OR > 70",      trips:0, last:"2d ago", actions:["toast"] },
-      { state:"armed",   name:"Storage 90% full",         expr:"storage.littlefs > 90%",                trips:0, last:"—",      actions:["toast"] },
-      { state:"armed",   name:"MQTT broker down",         expr:"mqtt.connected == false for 60s",       trips:0, last:"—",      actions:["toast","log"] },
-      { state:"armed",   name:"Rain rate severe",         expr:"rain_gauge.rate > 10 mm/h",             trips:0, last:"14d ago",actions:["toast","webhook"] },
-      { state:"snoozed", name:"Power draw spike",         expr:"power > 2000 W for 30s",                trips:0, last:"4d ago", actions:["toast","mqtt"] },
-    ];
-    return rules.map(function (r) {
-      var acts = r.actions.map(function (a) {
+  // Fetch GET /api/alerts and render rules + history from real firmware data.
+  function _loadAlertsData() {
+    fetch("/api/alerts")
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (data) {
+        _renderAlertRules(data.rules  || []);
+        _renderAlertHistory(data.history || []);
+      })
+      .catch(function (err) {
+        var msg = '<div class="empty" style="padding:24px"><span class="empty-title">Failed to load alerts (' + err + ')</span></div>';
+        var rc = document.getElementById("al-rules");
+        var hc = document.getElementById("al-history");
+        if (rc) rc.innerHTML = msg;
+        if (hc) hc.innerHTML = msg;
+      });
+  }
+
+  // Render the rules list from API data and update KPI counters.
+  function _renderAlertRules(rules) {
+    var rc = document.getElementById("al-rules");
+    if (!rc) return;
+
+    if (!rules.length) {
+      rc.innerHTML = '<div class="empty" style="padding:24px">' +
+        '<span class="empty-title">No rules configured</span>' +
+        '<div class="empty-sub">Click "New rule" to create your first alert.</div></div>';
+      setEl("al-total",   0);
+      setEl("al-firing",  0);
+      setEl("al-snoozed", 0);
+      setEl("al-rule-d",  "across sensors");
+      return;
+    }
+
+    var nowTs    = Math.floor(Date.now() / 1000);
+    var firing   = 0;
+    var snoozed  = 0;
+
+    rc.innerHTML = rules.map(function (r) {
+      var isSnoozed = r.snooze_until && r.snooze_until > nowTs;
+      var isFiring  = r.firing && !isSnoozed;
+      var state     = isSnoozed ? "snoozed" : (isFiring ? "firing" : "armed");
+      if (isFiring)  firing++;
+      if (isSnoozed) snoozed++;
+
+      var expr = esc(r.expr ? r.expr.sensor + "." + r.expr.metric + " " + r.expr.op + " " + r.expr.value
+                             + (r.expr.duration_s ? " for " + r.expr.duration_s + "s" : "") : "");
+
+      var lastFired = r.last_fired
+        ? _relTime(r.last_fired)
+        : (r.lastFiredTs ? _relTime(r.lastFiredTs) : "—");
+
+      var acts = (r.actions || []).map(function (a) {
         return '<span class="badge dim" title="' + esc(a) + '">' + esc(a) + '</span>';
       }).join("");
-      return '<div class="alert-rule ' + r.state + '">' +
-        '<span class="ar-state" aria-label="' + r.state + '"></span>' +
-        '<div><div class="ar-name">' + esc(r.name) + '</div><div class="ar-expr">' + esc(r.expr) + '</div></div>' +
-        '<div class="ar-meta"><span class="ar-trips' + (r.trips ? ' warn' : '') + '">' + r.trips + ' trips today</span><span class="ar-last">' + esc(r.last) + '</span></div>' +
+
+      return '<div class="alert-rule ' + state + '" data-id="' + esc(r.id || "") + '">' +
+        '<span class="ar-state" aria-label="' + state + '"></span>' +
+        '<div><div class="ar-name">' + esc(r.name || r.id || "Rule") + '</div>' +
+          '<div class="ar-expr">' + expr + '</div></div>' +
+        '<div class="ar-meta">' +
+          '<span class="ar-last">' + lastFired + '</span>' +
+        '</div>' +
         '<div class="ar-actions">' + acts +
           '<button class="btn-mini" aria-label="Edit rule"><span data-icon="pencil"></span></button>' +
-          '<label class="switch" style="margin-left:4px" title="Enable rule"><input type="checkbox"' + (r.state !== "snoozed" ? " checked" : "") + '/><span></span></label>' +
+          '<label class="switch" style="margin-left:4px" title="' + (r.enabled ? "Disable" : "Enable") + ' rule">' +
+            '<input type="checkbox"' + (r.enabled ? " checked" : "") + ' data-rule-id="' + esc(r.id || "") + '"/>' +
+            '<span></span></label>' +
         '</div>' +
       '</div>';
     }).join("");
+
+    // Wire toggle checkboxes to POST /api/alerts with updated rule
+    rc.querySelectorAll('input[data-rule-id]').forEach(function (cb) {
+      cb.addEventListener("change", function () {
+        var ruleId = cb.dataset.ruleId;
+        // Re-fetch, flip enabled, save back
+        fetch("/api/alerts")
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            (data.rules || []).forEach(function (rule) {
+              if (rule.id === ruleId) rule.enabled = cb.checked;
+            });
+            return fetch("/api/alerts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(data)
+            });
+          })
+          .catch(function () { cb.checked = !cb.checked; }); // revert on error
+      });
+    });
+
+    reIcons(rc);
+
+    setEl("al-total",   rules.length);
+    setEl("al-firing",  firing);
+    setEl("al-snoozed", snoozed);
+    setEl("al-rule-d",  "across sensors");
+
+    var badge = document.getElementById("alerts-badge");
+    if (badge) {
+      badge.textContent = firing || "";
+      badge.style.display = firing ? "" : "none";
+    }
   }
 
-  function buildAlertHistoryHTML() {
-    var history = [
-      ["—", "No alerts in last 24h", "", "ok"],
-    ];
-    return history.map(function (h) {
+  // Render the history feed from API data.
+  function _renderAlertHistory(history) {
+    var hc = document.getElementById("al-history");
+    if (!hc) return;
+
+    if (!history.length) {
+      hc.innerHTML = '<div class="empty" style="padding:24px">' +
+        '<span class="empty-title">No alert history</span></div>';
+      return;
+    }
+
+    // Show newest-first (API returns oldest-first)
+    hc.innerHTML = history.slice().reverse().map(function (h) {
       return '<div class="alert-feed-row">' +
-        '<span class="af-time">' + esc(h[0]) + '</span>' +
-        '<div><div class="af-name">' + esc(h[1]) + '</div><div class="af-val">' + esc(h[2]) + '</div></div>' +
-        '<span class="badge ' + h[3] + '">' + h[3].toUpperCase() + '</span>' +
+        '<span class="af-time">' + esc(_relTime(h.ts)) + '</span>' +
+        '<div><div class="af-name">' + esc(h.rule_id || "") + '</div>' +
+          '<div class="af-val">' + (h.value !== undefined ? h.value : "") + '</div></div>' +
+        '<span class="badge ' + esc(h.outcome || "ok") + '">' + esc((h.outcome || "ok").toUpperCase()) + '</span>' +
       '</div>';
     }).join("");
+  }
+
+  // Format a unix timestamp as a relative time string ("3 min ago", "2 h ago").
+  function _relTime(ts) {
+    if (!ts) return "—";
+    var diff = Math.floor(Date.now() / 1000) - ts;
+    if (diff < 0)    return "just now";
+    if (diff < 60)   return diff + "s ago";
+    if (diff < 3600) return Math.floor(diff / 60) + " min ago";
+    if (diff < 86400) return Math.floor(diff / 3600) + " h ago";
+    return Math.floor(diff / 86400) + " d ago";
   }
 
   // ── Health page ────────────────────────────────────────────────────────────

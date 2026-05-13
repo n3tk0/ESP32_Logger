@@ -5,10 +5,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Water Logger</title>
-  <!-- Inter + JetBrains Mono — same fonts as the design system -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- No external font CDN — captive portal has no internet access.
+       Inter and JetBrains Mono are declared via @font-face in style.css
+       using locally-hosted WOFF2 files (www/fonts/).  System-ui is the
+       fallback if the WOFF2 files are not yet uploaded to LittleFS. -->
   <link rel="stylesheet" href="/style.css">
   <style id="themeVars"></style>
   <!-- Early-paint theme bootstrap: must run BEFORE stylesheets evaluate so

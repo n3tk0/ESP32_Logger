@@ -1,3 +1,24 @@
+/* ── Local web fonts ───────────────────────────────────────────────────────
+   Hosted in www/fonts/ on LittleFS.  If the WOFF2 files are absent (e.g.
+   before first upload) the ESP32 returns 404 and the browser silently uses
+   the system-ui fallback stack already declared in --sans / --mono below.
+   No CDN dependency — captive portal works without internet access.
+   ────────────────────────────────────────────────────────────────────────── */
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/inter-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrainsmono-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ESP32 Logger — Industrial IoT redesign */
 :root {
   --bg:            #f1f3f5;

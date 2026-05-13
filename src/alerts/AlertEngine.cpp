@@ -18,6 +18,7 @@ AlertEngine::AlertEngine() {
 bool AlertEngine::begin(fs::FS& fs, const char* path) {
     _fs = &fs;
     strncpy(_path, path, sizeof(_path) - 1);
+    _path[sizeof(_path) - 1] = '\0';
 
     File f = fs.open(path, FILE_READ);
     if (!f) {
@@ -42,6 +43,7 @@ bool AlertEngine::begin(fs::FS& fs, const char* path) {
 
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) return false;
 
+    // Load rules
     _ruleCount = 0;
     JsonArray rules = doc["rules"].as<JsonArray>();
     for (JsonObject o : rules) {
@@ -51,8 +53,24 @@ bool AlertEngine::begin(fs::FS& fs, const char* path) {
         }
     }
 
+    // Restore persisted history ring so alert history survives reboots
+    _histHead  = 0;
+    _histCount = 0;
+    JsonArray hist = doc["history"].as<JsonArray>();
+    for (JsonObject ho : hist) {
+        if (_histCount >= ALERT_HISTORY_MAX) break;
+        HistEntry& e = _history[_histHead];
+        e.ts    = ho["ts"]    | (uint32_t)0;
+        e.value = ho["value"] | 0.0f;
+        strncpy(e.rule_id, ho["rule_id"] | "", sizeof(e.rule_id) - 1);
+        e.rule_id[sizeof(e.rule_id) - 1] = '\0';
+        _histHead = (_histHead + 1) % ALERT_HISTORY_MAX;
+        _histCount++;
+    }
+
     xSemaphoreGive(_mutex);
-    Serial.printf("[AlertEngine] loaded %d rule(s) from %s\n", _ruleCount, path);
+    Serial.printf("[AlertEngine] loaded %d rule(s), %d history entries from %s\n",
+                  _ruleCount, _histCount, path);
     return true;
 }
 
@@ -61,15 +79,15 @@ bool AlertEngine::_parseRule(JsonObject o, Rule& r) const {
     const char* id = o["id"] | "";
     if (!id[0]) return false;
 
-    strncpy(r.id,     id,               sizeof(r.id)     - 1);
-    strncpy(r.name,   o["name"] | id,   sizeof(r.name)   - 1);
+    strncpy(r.id,     id,               sizeof(r.id)     - 1); r.id    [sizeof(r.id)    - 1] = '\0';
+    strncpy(r.name,   o["name"] | id,   sizeof(r.name)   - 1); r.name  [sizeof(r.name)  - 1] = '\0';
     r.enabled      = o["enabled"] | false;
     r.snooze_until = o["snooze_until"] | (uint32_t)0;
 
     JsonObjectConst expr = o["expr"];
-    strncpy(r.sensor,   expr["sensor"] | "",  sizeof(r.sensor)   - 1);
-    strncpy(r.metric,   expr["metric"] | "",  sizeof(r.metric)   - 1);
-    strncpy(r.op,       expr["op"]     | ">", sizeof(r.op)       - 1);
+    strncpy(r.sensor, expr["sensor"] | "",  sizeof(r.sensor) - 1); r.sensor[sizeof(r.sensor) - 1] = '\0';
+    strncpy(r.metric, expr["metric"] | "",  sizeof(r.metric) - 1); r.metric[sizeof(r.metric) - 1] = '\0';
+    strncpy(r.op,     expr["op"]     | ">", sizeof(r.op)     - 1); r.op    [sizeof(r.op)     - 1] = '\0';
     r.threshold  = expr["value"]      | 0.0f;
     r.duration_s = expr["duration_s"] | (uint32_t)0;
 
@@ -139,7 +157,7 @@ bool AlertEngine::_evalOp(float val, const char* op, float threshold) const {
     if (strcmp(op, "<")  == 0) return val <  threshold;
     if (strcmp(op, ">=") == 0) return val >= threshold;
     if (strcmp(op, "<=") == 0) return val <= threshold;
-    if (strcmp(op, "==") == 0) return fabsf(val - threshold) < 0.001f;
+    if (strcmp(op, "==") == 0) return fabsf(val - threshold) < ALERT_FLOAT_EPS;
     return false;
 }
 

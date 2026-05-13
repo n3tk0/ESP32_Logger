@@ -26,6 +26,9 @@ constexpr int ALERT_TOAST_MAX    = 8;   // in-RAM toast ring
 constexpr uint8_t ACTION_TOAST   = 0x01;
 constexpr uint8_t ACTION_MQTT    = 0x02;
 
+// Epsilon for float equality comparison in _evalOp ("==" operator)
+constexpr float ALERT_FLOAT_EPS  = 0.001f;
+
 struct AlertToast {
     char     rule_id[24];
     char     name[48];
