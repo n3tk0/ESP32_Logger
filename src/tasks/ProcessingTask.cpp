@@ -45,7 +45,7 @@ void processingTaskFunc(void* /*param*/) {
         }
 
         // Write to web ring buffer (non-blocking, best-effort)
-        if (xSemaphoreTake(webDataMutex, 0) == pdTRUE) {
+        if (webDataMutex && xSemaphoreTake(webDataMutex, 0) == pdTRUE) {
             webRingBuf.push(r);
             xSemaphoreGive(webDataMutex);
         }

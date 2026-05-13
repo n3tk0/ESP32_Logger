@@ -277,7 +277,8 @@ void SensorManager::toJson(JsonArray arr) const {
     // Single critical section: scan the ring buffer for every metric of
     // every sensor under one lock acquisition.  ~16 sensors × 8 metrics ×
     // 200-entry strcmp is well under 1 ms on the C3.
-    if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) != pdTRUE) return;
+    // Guard against legacy / early-boot path where mutexes are still nullptr.
+    if (!webDataMutex || xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) != pdTRUE) return;
     for (int i = 0; i < slotCount; i++) {
         Slot& sl = slots[i];
         JsonObject vals = sl.obj["last_values"].to<JsonObject>();

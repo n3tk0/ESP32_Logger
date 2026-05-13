@@ -61,6 +61,11 @@ public:
     bool popToast(AlertToast& out);
     bool hasToasts() const;
 
+    // Returns false if begin() was never called successfully (mutex is null).
+    // Callers can check this to surface an error in the UI rather than silently
+    // returning empty data.
+    bool isHealthy() const { return _mutex != nullptr; }
+
 private:
     // ---- Rule ---------------------------------------------------------------
     struct Rule {

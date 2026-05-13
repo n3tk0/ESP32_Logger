@@ -10,12 +10,31 @@ extern MqttExporter* g_mqttExporter;
 AlertEngine alertEngine;
 
 // ---------------------------------------------------------------------------
+// NOTE: global C++ constructors run via __libc_init_array() BEFORE
+// app_main() / the FreeRTOS scheduler starts on ESP32-C3.  Any
+// xSemaphoreCreate*() call at that point returns NULL because the heap
+// allocator is not yet ready.  We therefore defer mutex creation to
+// begin(), which is always called from application code after the
+// scheduler is running.
 AlertEngine::AlertEngine() {
-    _mutex = xSemaphoreCreateMutex();
+    _mutex = nullptr;   // created in begin()
 }
 
 // ---------------------------------------------------------------------------
 bool AlertEngine::begin(fs::FS& fs, const char* path) {
+    // Create the mutex on first call (safe: scheduler is running by now).
+    if (!_mutex) {
+        _mutex = xSemaphoreCreateMutex();
+        if (!_mutex) {
+            // CRITICAL: without a mutex every AlertEngine operation is a no-op.
+            // This is only possible if the FreeRTOS heap is exhausted — extremely
+            // unlikely in normal operation, but the condition is visible via
+            // GET /api/alerts → { "error": "mutex_init_failed" } and here.
+            Serial.println("[AlertEngine] CRITICAL: mutex create FAILED — alert system disabled");
+            return false;
+        }
+    }
+
     _fs = &fs;
     strncpy(_path, path, sizeof(_path) - 1);
     _path[sizeof(_path) - 1] = '\0';
@@ -244,7 +263,15 @@ bool AlertEngine::hasToasts() const {
 
 // ---------------------------------------------------------------------------
 void AlertEngine::toJson(JsonDocument& doc) const {
-    if (!_mutex) return;
+    if (!_mutex) {
+        // Surface the failure so the UI can show a meaningful error instead of
+        // silently rendering an empty alerts panel.
+        doc["ok"]    = false;
+        doc["error"] = "mutex_init_failed";
+        doc["rules"].to<JsonArray>();
+        doc["history"].to<JsonArray>();
+        return;
+    }
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(200)) != pdTRUE) return;
 
     JsonArray rArr = doc["rules"].to<JsonArray>();
@@ -295,6 +322,7 @@ bool AlertEngine::fromJson(const uint8_t* body, size_t len) {
                                                (const char*)body, len);
     if (err) return false;
 
+    if (!_mutex) return false;
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) return false;
 
     _ruleCount = 0;
@@ -313,6 +341,7 @@ bool AlertEngine::fromJson(const uint8_t* body, size_t len) {
 
 // ---------------------------------------------------------------------------
 bool AlertEngine::snooze(const char* ruleId, uint32_t until_ts) {
+    if (!_mutex) return false;
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) return false;
 
     bool found = false;

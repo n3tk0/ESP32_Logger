@@ -86,7 +86,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
     size_t fsCount   = 0;
 
     // 1) Ring buffer (recent, in-memory)
-    if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    if (webDataMutex && xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
         ringCount = webRingBuf.copyRecent(raw, RING_SHARE, fromTs);
         xSemaphoreGive(webDataMutex);
     }
@@ -240,7 +240,7 @@ static void handleApiLatest(AsyncWebServerRequest* req) {
     }
 
     size_t copied = 0;
-    if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    if (webDataMutex && xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
         copied = webRingBuf.copyRecent(raw, MAX_RAW, 0);
         xSemaphoreGive(webDataMutex);
     }
