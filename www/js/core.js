@@ -391,7 +391,7 @@ function sidebarRailToggle() {
   // Class lives on <html> so theme-boot.js can restore it pre-paint without
   // waiting for <body> (gemini review PR #47 — avoids FOUC on reload).
   var isRail = document.documentElement.classList.toggle("sidebar-rail");
-  try { localStorage.setItem("sidebarRail", isRail ? "1" : "0"); } catch (e) {}
+  try { localStorage.setItem("esp32-sidebar-rail", isRail ? "1" : "0"); } catch (e) {}
   _sidebarRailSyncBtn(isRail);
 }
 
