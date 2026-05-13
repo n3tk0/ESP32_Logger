@@ -82,6 +82,22 @@ private:
     uint32_t    _lastReadMs[MAX_SENSORS] = {};   // millis() of last read
     int         _count = 0;
 
+    // ------------------------------------------------------------------
+    // Per-sensor 24-hour health tracking.
+    // Each HealthData holds 24 hourly buckets.  tickFiltered() writes to
+    // the current bucket; toJson() reads and serialises all 24.
+    // ------------------------------------------------------------------
+    struct HealthData {
+        uint32_t hourReads[24]  = {};   // successful reads per hour slot
+        uint32_t hourErrors[24] = {};   // failed reads per hour slot
+        uint32_t hourLatUs[24]  = {};   // accumulated latency (us) per slot
+        uint8_t  curSlot        = 0;    // index of the current write slot (0-23)
+        uint32_t slotStartMs    = 0;    // millis() when curSlot began (0 = unset)
+        uint32_t totalLatUs     = 0;    // all-time latency accumulator
+        uint32_t latSamples     = 0;    // all-time sample count
+    };
+    HealthData  _health[MAX_SENSORS];
+
     void _destroyAll();
     ISensor* _createPlugin(const char* type);
 };

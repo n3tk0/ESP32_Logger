@@ -31,6 +31,7 @@ void SensorManager::_destroyAll() {
     }
     _count = 0;
     memset(_lastReadMs, 0, sizeof(_lastReadMs));
+    memset(_health,     0, sizeof(_health));
 }
 
 // ---------------------------------------------------------------------------
@@ -126,9 +127,37 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
             tookMutex = (xSemaphoreTake(wireMutex, pdMS_TO_TICKS(100)) == pdTRUE);
         }
 
+        uint32_t t0us = micros();
         int n = s->readAll(readings, 4);
+        uint32_t latUs = (uint32_t)(micros() - t0us);
 
         if (tookMutex) xSemaphoreGive(wireMutex);
+
+        // ------------------------------------------------------------------
+        // Health tracking — rotate hourly bucket when ≥ 3600 s have elapsed
+        // ------------------------------------------------------------------
+        {
+            HealthData& h = _health[i];
+            if (h.slotStartMs == 0) h.slotStartMs = ms;   // first ever read
+            if ((ms - h.slotStartMs) >= 3600000UL) {
+                // Advance to next slot, clear its accumulators.
+                // Use +=3600000 (not =ms) so partial overruns don't drift.
+                h.curSlot = (h.curSlot + 1) % 24;
+                h.hourReads [h.curSlot] = 0;
+                h.hourErrors[h.curSlot] = 0;
+                h.hourLatUs [h.curSlot] = 0;
+                h.slotStartMs += 3600000UL;
+            }
+            if (n > 0) {
+                h.hourReads [h.curSlot]++;
+                h.hourLatUs [h.curSlot] += latUs;
+                h.totalLatUs += latUs;
+                h.latSamples++;
+            } else {
+                h.hourErrors[h.curSlot]++;
+            }
+        }
+
         if (n <= 0) {
             s->incErrorCount();
         }
@@ -213,7 +242,7 @@ void SensorManager::toJson(JsonArray arr) const {
     // paused for one short window and removes the partial-result hazard
     // where one sensor gets values and another doesn't because the 20 ms
     // try-take expired mid-loop.
-    struct Slot { JsonObject obj; ISensor* sensor; const char* metrics[8]; int mcount; };
+    struct Slot { JsonObject obj; ISensor* sensor; const char* metrics[8]; int mcount; int idx; };
     Slot slots[16];
     int  slotCount = 0;
 
@@ -235,6 +264,7 @@ void SensorManager::toJson(JsonArray arr) const {
         Slot& sl = slots[slotCount++];
         sl.obj    = o;
         sl.sensor = s;
+        sl.idx    = i;
         sl.mcount = s->getMetrics(sl.metrics, 8);
 
         JsonArray ma = o["metrics"].to<JsonArray>();
@@ -283,4 +313,45 @@ void SensorManager::toJson(JsonArray arr) const {
         }
     }
     xSemaphoreGive(webDataMutex);
+
+    // ------------------------------------------------------------------
+    // Health objects — appended outside the mutex (health arrays are
+    // written only from SensorTask; a torn read here is a best-effort
+    // display glitch, not a data-corruption risk).
+    // ------------------------------------------------------------------
+    uint32_t nowMs = millis();
+    for (int i = 0; i < slotCount; i++) {
+        const HealthData& h  = _health[slots[i].idx];
+        uint32_t  lastMs     = _lastReadMs[slots[i].idx];
+
+        uint32_t reads = 0, errors = 0, latSum = 0;
+        for (int b = 0; b < 24; b++) {
+            reads  += h.hourReads[b];
+            errors += h.hourErrors[b];
+            latSum += h.hourLatUs[b];
+        }
+        uint32_t total = reads + errors;
+        uint32_t avgLat = (total > 0) ? (latSum / total) : 0;
+        float uptime = (total > 0) ? (100.0f * (float)reads / (float)total) : 100.0f;
+
+        JsonObject ho = slots[i].obj["health"].to<JsonObject>();
+        ho["reads_24h"]        = reads;
+        ho["errors_24h"]       = errors;
+        ho["avg_latency_us"]   = avgLat;
+        ho["last_read_ms_ago"] = (lastMs > 0) ? (nowMs - lastMs) : 0;
+        ho["uptime_pct_24h"]   = serialized(String(uptime, 1));
+
+        // Buckets oldest → newest (curSlot+1 is the oldest slot)
+        JsonArray barr = ho["uptime_buckets_24h"].to<JsonArray>();
+        uint8_t slot = (h.curSlot + 1) % 24;
+        for (int b = 0; b < 24; b++) {
+            uint32_t r = h.hourReads[slot];
+            uint32_t e = h.hourErrors[slot];
+            if (r == 0 && e == 0)      barr.add("unknown");
+            else if (e == 0)           barr.add("ok");
+            else if (e * 4 < r)        barr.add("warn");   // <25% error rate
+            else                       barr.add("err");
+            slot = (slot + 1) % 24;
+        }
+    }
 }

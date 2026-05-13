@@ -19,6 +19,8 @@
 #include "../core/ModuleRegistry.h"  // Pass 5 phase 3: /api/modules
 #include "../managers/ConfigManager.h" // saveConfig() after module update
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
+#include "../alerts/AlertEngine.h"    // GET/POST /api/alerts, snooze, toasts
+#include <Wire.h>                     // POST /api/i2c_scan
 
 // Forward-declared in Logger.ino — accessible here because this file is
 // compiled in the same sketch scope.
@@ -871,6 +873,113 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/alerts — returns current rules + in-RAM history as JSON
+// ---------------------------------------------------------------------------
+static void handleApiAlertsGet(AsyncWebServerRequest* req) {
+    JsonDocument doc;
+    alertEngine.toJson(doc);
+    AsyncResponseStream* resp =
+        req->beginResponseStream("application/json");
+    serializeJson(doc, *resp);
+    req->send(resp);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/alerts — replace the whole rules document and persist it
+// ---------------------------------------------------------------------------
+static void handleApiAlertsSave(AsyncWebServerRequest* req,
+                                uint8_t* data, size_t len) {
+    if (!alertEngine.fromJson(data, len)) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"invalid JSON or save failed\"}");
+        return;
+    }
+    req->send(200, "application/json", "{\"ok\":true}");
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/alerts/snooze — body: {"rule_id":"...","until_ts":1234567890}
+// ---------------------------------------------------------------------------
+static void handleApiAlertsSnooze(AsyncWebServerRequest* req,
+                                  uint8_t* data, size_t len) {
+    JsonDocument doc;
+    if (deserializeJson(doc, (const char*)data, len) != DeserializationError::Ok) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"invalid JSON\"}");
+        return;
+    }
+    const char* ruleId  = doc["rule_id"]  | "";
+    uint32_t    until   = doc["until_ts"] | (uint32_t)0;
+
+    if (!ruleId[0]) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"rule_id required\"}");
+        return;
+    }
+    if (!alertEngine.snooze(ruleId, until)) {
+        req->send(404, "application/json",
+                  "{\"ok\":false,\"error\":\"rule not found\"}");
+        return;
+    }
+    req->send(200, "application/json", "{\"ok\":true}");
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/alerts/toasts — drain the pending toast notification queue
+// ---------------------------------------------------------------------------
+static void handleApiAlertsToasts(AsyncWebServerRequest* req) {
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    AlertToast toast;
+    while (alertEngine.popToast(toast)) {
+        JsonObject o = arr.add<JsonObject>();
+        o["rule_id"] = toast.rule_id;
+        o["name"]    = toast.name;
+        o["value"]   = toast.value;
+        o["ts"]      = toast.ts;
+    }
+    AsyncResponseStream* resp =
+        req->beginResponseStream("application/json");
+    serializeJson(doc, *resp);
+    req->send(resp);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/i2c_scan — scan the Wire bus and return detected addresses
+// ---------------------------------------------------------------------------
+static void handleApiI2cScan(AsyncWebServerRequest* req) {
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+
+    // Acquire the I2C bus mutex if available (same guard used by sensors)
+    extern SemaphoreHandle_t wireMutex;
+    bool tookMutex = false;
+    if (wireMutex) {
+        tookMutex = (xSemaphoreTake(wireMutex, pdMS_TO_TICKS(500)) == pdTRUE);
+    }
+    if (!tookMutex) {
+        req->send(503, "application/json",
+                  "{\"ok\":false,\"error\":\"bus busy\"}");
+        return;
+    }
+
+    for (uint8_t addr = 0x01; addr <= 0x7F; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+            char hex[7];
+            snprintf(hex, sizeof(hex), "0x%02X", addr);
+            arr.add(hex);
+        }
+    }
+    xSemaphoreGive(wireMutex);
+
+    AsyncResponseStream* resp =
+        req->beginResponseStream("application/json");
+    serializeJson(doc, *resp);
+    req->send(resp);
+}
+
+// ---------------------------------------------------------------------------
 void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/data",              HTTP_GET,  handleApiData);
     server.on("/api/latest",            HTTP_GET,  handleApiLatest);
@@ -924,6 +1033,39 @@ void registerApiRoutes(AsyncWebServer& server) {
             handleApiModuleEnable(r, id);
         });
     }
+
+    // Alert engine endpoints (4.2 — new IoT features)
+    server.on("/api/alerts",        HTTP_GET,  handleApiAlertsGet);
+    server.on("/api/alerts/toasts", HTTP_GET,  handleApiAlertsToasts);
+    server.on("/api/i2c_scan",      HTTP_POST, handleApiI2cScan);
+
+    // POST /api/alerts — whole-document replace
+    server.on("/api/alerts", HTTP_POST,
+        [](AsyncWebServerRequest* r) { /* body handled below */ },
+        nullptr,
+        [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
+           size_t index, size_t total) {
+            if (index != 0 || len != total) {
+                r->send(413, "application/json",
+                        "{\"ok\":false,\"error\":\"body too large\"}");
+                return;
+            }
+            handleApiAlertsSave(r, data, len);
+        });
+
+    // POST /api/alerts/snooze
+    server.on("/api/alerts/snooze", HTTP_POST,
+        [](AsyncWebServerRequest* r) { /* body handled below */ },
+        nullptr,
+        [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
+           size_t index, size_t total) {
+            if (index != 0 || len != total) {
+                r->send(413, "application/json",
+                        "{\"ok\":false,\"error\":\"body too large\"}");
+                return;
+            }
+            handleApiAlertsSnooze(r, data, len);
+        });
 
     // Pass 5 5.5 phase 1 — WiFi-specific helpers.  Registered only when the
     // wifi module is present so stripped-down builds don't pay the flash cost.
