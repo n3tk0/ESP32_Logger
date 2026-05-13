@@ -10,12 +10,27 @@ extern MqttExporter* g_mqttExporter;
 AlertEngine alertEngine;
 
 // ---------------------------------------------------------------------------
+// NOTE: global C++ constructors run via __libc_init_array() BEFORE
+// app_main() / the FreeRTOS scheduler starts on ESP32-C3.  Any
+// xSemaphoreCreate*() call at that point returns NULL because the heap
+// allocator is not yet ready.  We therefore defer mutex creation to
+// begin(), which is always called from application code after the
+// scheduler is running.
 AlertEngine::AlertEngine() {
-    _mutex = xSemaphoreCreateMutex();
+    _mutex = nullptr;   // created in begin()
 }
 
 // ---------------------------------------------------------------------------
 bool AlertEngine::begin(fs::FS& fs, const char* path) {
+    // Create the mutex on first call (safe: scheduler is running by now).
+    if (!_mutex) {
+        _mutex = xSemaphoreCreateMutex();
+        if (!_mutex) {
+            Serial.println("[AlertEngine] mutex create FAILED");
+            return false;
+        }
+    }
+
     _fs = &fs;
     strncpy(_path, path, sizeof(_path) - 1);
     _path[sizeof(_path) - 1] = '\0';
@@ -295,6 +310,7 @@ bool AlertEngine::fromJson(const uint8_t* body, size_t len) {
                                                (const char*)body, len);
     if (err) return false;
 
+    if (!_mutex) return false;
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) return false;
 
     _ruleCount = 0;
@@ -313,6 +329,7 @@ bool AlertEngine::fromJson(const uint8_t* body, size_t len) {
 
 // ---------------------------------------------------------------------------
 bool AlertEngine::snooze(const char* ruleId, uint32_t until_ts) {
+    if (!_mutex) return false;
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) return false;
 
     bool found = false;
