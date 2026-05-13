@@ -13,8 +13,16 @@
     var pref = localStorage.getItem("themeOverride") || "auto";
     var cls = "theme-" + (pref === "light" || pref === "dark" ? pref : "auto");
     document.documentElement.classList.add(cls);
+    // Set data-theme for the design-system CSS variables ([data-theme="dark"]).
+    // "auto" resolves against the OS preference; JS in core.js re-evaluates it
+    // once and sets the attribute definitively on first paint.
+    var dt = pref === "dark" ? "dark"
+           : pref === "light" ? "light"
+           : (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", dt);
   } catch (e) {
     document.documentElement.classList.add("theme-auto");
+    document.documentElement.setAttribute("data-theme", "light");
   }
   // Claude Design phase 4a — restore sidebar rail preference pre-paint to
   // avoid FOUC (body doesn't exist yet; attach to documentElement).

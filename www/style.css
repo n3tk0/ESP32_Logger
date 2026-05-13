@@ -19,6 +19,8 @@
   --shadow-sm:     0 1px 2px rgba(15,20,25,.04);
   --shadow-md:     0 6px 18px rgba(15,20,25,.08);
   --radius:        6px;
+  --radius-sm:     4px;
+  --radius-lg:     10px;
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --row-h:    40px;
@@ -129,6 +131,14 @@ button, a, [role="button"] { min-height: 24px; }
 [data-nav="top"] .app { grid-template-columns:1fr; grid-template-rows:54px 44px 1fr; grid-template-areas:"topbar" "topnav" "main"; }
 [data-nav="bottom"] .app { grid-template-columns:1fr; grid-template-rows:54px 1fr 56px; grid-template-areas:"topbar" "main" "botnav"; }
 
+@media (max-width:780px) {
+  .app { grid-template-columns:1fr; grid-template-rows:54px 1fr 56px; grid-template-areas:"topbar" "main" "botnav"; }
+  .sidebar { display:none; }
+  .sidebar.open { display:flex; position:fixed; inset:0 auto 0 0; width:280px; z-index:400; box-shadow:var(--shadow-md); }
+  .bottomnav { display:flex; }
+  .main { padding-bottom:calc(var(--gap) + 56px); }
+}
+
 .topbar {
   grid-area:topbar;
   background:var(--panel); border-bottom:1px solid var(--border);
@@ -141,7 +151,8 @@ button, a, [role="button"] { min-height: 24px; }
   background:linear-gradient(135deg, var(--accent), var(--accent-2));
   display:grid; place-items:center; color:#fff;
 }
-.logo-mark [data-lucide] { width:18px; height:18px; color:#fff; }
+.logo-mark [data-lucide], .logo-mark svg { width:18px; height:18px; color:#fff; }
+.logo-mark [data-icon] { font-size:0; } /* sized by the injected SVG */
 .logo-name { font-weight:600; font-size:14px; letter-spacing:-.01em; line-height:1.1; }
 .logo-meta { font-size:10.5px; color:var(--text-3); margin-top:2px; }
 
@@ -173,7 +184,7 @@ button, a, [role="button"] { min-height: 24px; }
   /* WCAG 2.5.8: 44×44 touch target */
 }
 .icon-btn:hover { background:var(--accent-soft); color:var(--accent); border-color:var(--accent); }
-.icon-btn [data-lucide] { width:14px; height:14px; }
+.icon-btn [data-lucide], .icon-btn svg { width:14px; height:14px; }
 
 /* SIDEBAR */
 .sidebar {
@@ -584,27 +595,21 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 
 /* ══════════════════════════════════════════════
    3. SIDEBAR RAIL MODE
+   JS toggles .sidebar-rail on <html>
    ══════════════════════════════════════════════ */
-.app.rail { grid-template-columns:52px 1fr; }
-.app.rail .sidebar { width:52px; padding:10px 6px; overflow:hidden; }
-.app.rail .nav-group,
-.app.rail .nav-item span:not(.ndot):not(.nbadge),
-.app.rail .nav-item .nbadge,
-.app.rail .sidebar-foot .mono,
-.app.rail .sidebar-stats .sstat span,
-.app.rail .logo-name,
-.app.rail .logo-meta { display:none; }
-.app.rail .nav-item { padding:0; justify-content:center; }
-.app.rail .sidebar-stats { grid-template-columns:1fr; }
-.app.rail .sstat { justify-content:center; padding:6px 4px; }
-.rail-toggle {
-  width:100%; height:28px; border:1px solid var(--border);
-  background:var(--panel-2); border-radius:4px;
-  display:flex; align-items:center; justify-content:center;
-  color:var(--text-3); cursor:pointer; margin-bottom:8px;
-}
-.rail-toggle:hover { color:var(--accent); border-color:var(--accent); }
-.rail-toggle [data-lucide] { width:13px; height:13px; }
+.sidebar-rail .app { grid-template-columns:52px 1fr; }
+.sidebar-rail .sidebar { width:52px; padding:10px 6px; overflow:hidden; }
+.sidebar-rail .nav-group,
+.sidebar-rail .nav-item span:not(.ndot):not(.nbadge),
+.sidebar-rail .nav-item .nbadge,
+.sidebar-rail .sidebar-foot .mono,
+.sidebar-rail .sidebar-stats .sstat span,
+.sidebar-rail .logo-name,
+.sidebar-rail .logo-meta { display:none; }
+.sidebar-rail .nav-item { padding:0; justify-content:center; }
+.sidebar-rail .sidebar-stats { grid-template-columns:1fr; }
+.sidebar-rail .sstat { justify-content:center; padding:6px 4px; }
+.sidebar-rail .kbd { display:none; }
 
 /* ══════════════════════════════════════════════
    4. CHART TOOLTIP
@@ -899,58 +904,234 @@ textarea.form-input { height:auto; padding:9px 11px; min-height:80px; }
 
 .sensors-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:var(--gap); }
 
+/* ══════════════════════════════════════════════
+   IOT EXTENSIONS — mode awareness, zones, AQI,
+   alerts, health, wizard, compare chips
+   (corresponds to design/iot-extensions.js)
+   ══════════════════════════════════════════════ */
+
+/* ── Mode-aware nav/page visibility ── */
+[data-mode="legacy"]     [data-mode-show]:not([data-mode-show~="legacy"])     { display:none !important; }
+[data-mode="continuous"] [data-mode-show]:not([data-mode-show~="continuous"]) { display:none !important; }
+[data-mode="hybrid"]     [data-mode-show]:not([data-mode-show~="hybrid"])     { display:none !important; }
+
+/* ── Mode pill (sidebar header) ── */
+.mode-pill {
+  display:inline-flex; align-items:center; gap:6px;
+  height:22px; padding:0 9px;
+  border:1px solid var(--accent);
+  background:var(--accent-soft); color:var(--accent);
+  font-size:10px; font-family:var(--mono); font-weight:700;
+  border-radius:11px; letter-spacing:.05em; text-transform:uppercase;
+  margin-top:6px;
+}
+.mode-pill [data-icon] { width:11px; height:11px; }
+
+/* ── Sensor zone sections ── */
+.zone-section { margin-bottom:var(--gap); }
+.zone-head {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:6px 4px 8px;
+  margin-bottom:8px;
+  border-bottom:1px solid var(--border);
+}
+.zone-title {
+  display:flex; align-items:center; gap:8px;
+  font-size:11px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.06em;
+  color:var(--text-2);
+}
+.zone-title [data-icon] { width:13px; height:13px; color:var(--accent); }
+.zone-meta { font-family:var(--mono); font-size:11px; color:var(--text-3); }
+
+/* ── Air Quality composite gauge ── */
+.aqi-card { display:grid; grid-template-columns:140px 1fr; gap:18px; padding:18px; }
+@media (max-width:600px) { .aqi-card { grid-template-columns:1fr; } }
+.aqi-gauge { position:relative; width:140px; height:140px; }
+.aqi-gauge svg { width:100%; height:100%; transform:rotate(-90deg); }
+.aqi-track { fill:none; stroke:var(--panel-3); stroke-width:14; }
+.aqi-fill  { fill:none; stroke:var(--ok); stroke-width:14; stroke-linecap:round; transition:stroke-dashoffset .6s, stroke .3s; }
+.aqi-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; }
+.aqi-score { font-family:var(--mono); font-size:32px; font-weight:700; line-height:1; }
+.aqi-label { font-size:10px; color:var(--text-3); text-transform:uppercase; letter-spacing:.06em; font-weight:600; }
+.aqi-quality { font-size:13px; font-weight:600; }
+.aqi-good { color:var(--ok); }
+.aqi-mod  { color:var(--warn); }
+.aqi-poor { color:var(--err); }
+.aqi-breakdown { display:flex; flex-direction:column; gap:8px; }
+.aqi-bar { display:grid; grid-template-columns:64px 1fr 56px; align-items:center; gap:10px; font-size:12px; }
+.aqi-bar-name { font-weight:500; }
+.aqi-bar-track { height:6px; background:var(--panel-3); border-radius:3px; overflow:hidden; }
+.aqi-bar-fill { height:100%; border-radius:3px; transition:width .4s; }
+.aqi-bar-val { font-family:var(--mono); font-size:11px; color:var(--text-3); text-align:right; }
+
+/* ── Energy tiles ── */
+.energy-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+@media (max-width:680px) { .energy-grid { grid-template-columns:1fr 1fr; } }
+.energy-tile {
+  padding:14px; border:1px solid var(--border); border-radius:var(--radius);
+  background:var(--panel-2);
+  display:flex; flex-direction:column; gap:4px; position:relative;
+}
+.energy-tile-l { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-3); font-weight:600; }
+.energy-tile-v { font-family:var(--mono); font-size:22px; font-weight:700; letter-spacing:-.01em; }
+.energy-tile-v .u { font-size:11px; color:var(--text-3); margin-left:3px; font-family:var(--sans); font-weight:500; }
+.energy-tile-trend { font-family:var(--mono); font-size:11px; color:var(--text-3); }
+.energy-tile.live::after {
+  content:""; width:8px; height:8px; border-radius:50%;
+  background:var(--accent); box-shadow:0 0 8px var(--accent);
+  position:absolute; top:10px; right:10px;
+  animation:pulse 1.5s ease-in-out infinite;
+}
+
+/* ── Alert rules ── */
+.alert-rule {
+  display:grid; grid-template-columns:24px 1fr auto auto;
+  gap:14px; align-items:center;
+  padding:12px var(--card-pad);
+  border-bottom:1px solid var(--border);
+}
+.alert-rule:last-child { border-bottom:0; }
+.alert-rule:hover { background:var(--panel-2); }
+.alert-rule .ar-state { width:8px; height:8px; border-radius:50%; background:var(--text-4); justify-self:center; }
+.alert-rule.armed   .ar-state { background:var(--ok);   box-shadow:0 0 6px var(--ok); }
+.alert-rule.firing  .ar-state { background:var(--err);  box-shadow:0 0 6px var(--err); animation:pulse 1s ease-in-out infinite; }
+.alert-rule.snoozed .ar-state { background:var(--warn); }
+.ar-name { font-weight:600; font-size:13px; }
+.ar-expr { font-family:var(--mono); font-size:11px; color:var(--text-3); margin-top:2px; }
+.ar-actions { display:flex; gap:4px; align-items:center; }
+.ar-meta { display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
+.ar-trips { font-family:var(--mono); font-size:11px; color:var(--text-3); }
+.ar-trips.warn { color:var(--warn); }
+.ar-last { font-size:10px; color:var(--text-4); font-family:var(--mono); }
+
+.alert-feed-row {
+  display:grid; grid-template-columns:auto 1fr auto;
+  gap:12px; align-items:center;
+  padding:10px var(--card-pad);
+  border-bottom:1px solid var(--border);
+  font-size:12px;
+}
+.alert-feed-row:last-child { border-bottom:0; }
+.af-time { font-family:var(--mono); font-size:11px; color:var(--text-3); }
+.af-name { font-weight:600; }
+.af-val  { font-family:var(--mono); color:var(--err); font-size:11px; }
+
+/* ── Sensor health tiles ── */
+.health-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:var(--gap); }
+.health-tile {
+  padding:14px; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+  display:flex; flex-direction:column; gap:8px;
+}
+.health-tile.warn { border-color:rgba(217,119,6,.4); }
+.health-tile.err  { border-color:rgba(220,38,38,.4); }
+.health-tile-head { display:flex; align-items:center; justify-content:space-between; }
+.health-name { font-weight:600; font-size:13px; display:flex; align-items:center; gap:6px; }
+.health-stats { display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; font-size:11px; }
+.health-stat { display:flex; flex-direction:column; gap:2px; }
+.health-stat-l { color:var(--text-3); font-size:10px; text-transform:uppercase; letter-spacing:.05em; }
+.health-stat-v { font-family:var(--mono); font-weight:600; color:var(--text-2); }
+.health-stat-v.warn { color:var(--warn); }
+.health-stat-v.err  { color:var(--err); }
+.health-uptime-bar { height:24px; display:flex; gap:2px; border-radius:3px; overflow:hidden; background:var(--panel-3); }
+.health-uptime-bar > span { flex:1; min-width:2px; }
+.health-uptime-bar > span.ok      { background:var(--ok); }
+.health-uptime-bar > span.warn    { background:var(--warn); }
+.health-uptime-bar > span.err     { background:var(--err); }
+.health-uptime-bar > span.unknown { background:var(--panel-3); }
+
+/* ── Quick-add Sensor Wizard (modal) ── */
+.modal-backdrop {
+  position:fixed; inset:0; z-index:600;
+  background:rgba(0,0,0,.55); backdrop-filter:blur(3px);
+  display:none; align-items:center; justify-content:center;
+  padding:20px;
+}
+.modal-backdrop.visible { display:flex; }
+.modal {
+  background:var(--panel); border:1px solid var(--border-2);
+  border-radius:var(--radius-lg); box-shadow:var(--shadow-md);
+  width:100%; max-width:540px; max-height:90vh;
+  display:flex; flex-direction:column; overflow:hidden;
+}
+.modal-head {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 18px; border-bottom:1px solid var(--border);
+}
+.modal-title { font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px; }
+.modal-body { padding:18px; overflow-y:auto; flex:1; }
+.modal-foot {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:12px 18px; border-top:1px solid var(--border); background:var(--panel-2);
+}
+
+.wiz-steps { display:flex; gap:6px; margin-bottom:18px; }
+.wiz-dot { flex:1; height:4px; border-radius:2px; background:var(--panel-3); }
+.wiz-dot.done   { background:var(--ok); }
+.wiz-dot.active { background:var(--accent); }
+.wiz-step { display:none; }
+.wiz-step.active { display:block; }
+
+.wiz-type-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; }
+.wiz-type-card {
+  padding:12px; border:1px solid var(--border); border-radius:6px;
+  background:var(--panel-2); cursor:pointer; transition:.1s;
+  display:flex; flex-direction:column; gap:6px; min-height:76px;
+}
+.wiz-type-card:hover { border-color:var(--border-2); }
+.wiz-type-card.selected { border-color:var(--accent); background:var(--accent-soft); }
+.wiz-type-card [data-icon] { width:18px; height:18px; color:var(--accent); }
+.wiz-type-name { font-weight:600; font-size:12px; }
+.wiz-type-meta { font-size:10px; color:var(--text-3); font-family:var(--mono); }
+
+/* ── Compare mode chips ── */
+.compare-chips {
+  display:flex; gap:4px; flex-wrap:wrap;
+  padding:6px 16px; border-top:1px solid var(--border); font-size:11px;
+}
+.cmp-chip {
+  display:inline-flex; align-items:center; gap:5px;
+  padding:3px 8px; border:1px solid var(--border); border-radius:12px;
+  background:var(--panel-2); font-size:11px;
+}
+.cmp-dot { width:8px; height:8px; border-radius:50%; }
+.cmp-chip-rm { background:0; border:0; color:var(--text-3); cursor:pointer; padding:0; line-height:1; }
+.cmp-chip-rm:hover { color:var(--err); }
+.cmp-add {
+  height:22px; padding:0 8px; border:1px dashed var(--border-2);
+  background:transparent; border-radius:11px;
+  font-size:11px; color:var(--text-3); cursor:pointer;
+  display:inline-flex; align-items:center; gap:4px;
+}
+.cmp-add:hover { color:var(--accent); border-color:var(--accent); }
+.cmp-add [data-icon] { width:11px; height:11px; }
+
+/* ── kb-help-sheet (used by core.js keyboard shortcut overlay) ── */
+.kb-help-sheet {
+  position:fixed; inset:0; z-index:900;
+  background:rgba(0,0,0,.55); backdrop-filter:blur(3px);
+  display:flex; align-items:center; justify-content:center;
+}
+.kb-help-card {
+  background:var(--panel); border:1px solid var(--border-2);
+  border-radius:var(--radius-lg); padding:24px 28px;
+  min-width:300px; box-shadow:var(--shadow-md);
+}
+.kb-help-title { font-size:14px; font-weight:700; margin-bottom:14px; }
+.kb-help-list  { list-style:none; display:flex; flex-direction:column; gap:6px; }
+.kb-help-list li { display:flex; align-items:center; gap:8px; font-size:13px; }
+.kb-help-list kbd { font-family:var(--mono); font-size:11px; font-weight:700; background:var(--panel-3); border:1px solid var(--border-2); border-radius:3px; padding:2px 6px; }
+.kb-help-list span { color:var(--text-2); }
+.kb-help-hint { margin-top:14px; font-size:11px; color:var(--text-3); text-align:center; }
+
 .sidebar-rail .sidebar { width:52px!important; }
 
 .skip-link    { position:absolute; top:-40px; left:0; background:var(--accent); color:#fff; padding:8px 16px; z-index:1000; }
 .skip-link:focus { top:0; }
 
-/* Shell: HTML keeps separate <aside.sidebar> + <main.main-content> instead
-   of the design's .app grid wrapper, so emulate the same layout without
-   changing the markup. */
-body { margin:0; }
-.sidebar {
-  position:fixed; top:0; left:0; bottom:0; width:228px; z-index:20;
-  border-right:1px solid var(--border);
-  display:flex; flex-direction:column;
-}
-.sidebar-header { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); min-height:54px; }
-.sidebar-header .logo { font-weight:600; font-size:14px; flex:1; }
-.sidebar-rail-btn { width:28px; height:28px; border:1px solid var(--border); background:var(--panel-2); border-radius:4px; display:grid; place-items:center; color:var(--text-3); }
-.nav-section { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-4); font-weight:700; padding:14px 14px 6px; }
-.sidebar nav { padding:0 8px; }
-.sidebar .nav-item { padding:0 10px; }
+/* .nav-section is a legacy alias for .nav-group */
+.nav-section { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-4); font-weight:700; padding:14px 10px 6px; }
 .sidebar .nav-item .icon { width:15px; height:15px; }
-
-.main-content { margin-left:228px; padding:var(--gap); min-height:100vh; }
-.app-header   { position:sticky; top:0; left:0; right:0; height:54px; background:var(--panel); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:14px; padding:0 14px; z-index:10; margin-left:228px; }
-
-.bottom-nav   { display:none; position:fixed; bottom:0; left:0; right:0; height:56px; background:var(--panel); border-top:1px solid var(--border); z-index:30; }
-.bottom-nav .nav-item { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; height:auto; padding:0; border-radius:0; color:var(--text-3); font-size:10px; font-weight:500; border-top:2px solid transparent; }
-.bottom-nav .nav-item.active { color:var(--accent); border-top-color:var(--accent); background:transparent; }
-.bottom-nav .nav-item .icon { width:18px; height:18px; }
-
-@media (max-width:780px) {
-  .sidebar { display:none; }
-  .main-content, .app-header { margin-left:0; }
-  .bottom-nav { display:flex; }
-  .main-content { padding-bottom:72px; }
-  .hide-desktop { display:flex !important; }
-}
-@media (min-width:781px) {
-  .app-header.hide-desktop { display:none; }
-}
-
-.sidebar-rail .sidebar { width:52px; padding:0; }
-.sidebar-rail .sidebar nav { padding:0 4px; }
-.sidebar-rail .sidebar .nav-section,
-.sidebar-rail .sidebar .nav-item span:not(.icon),
-.sidebar-rail .sidebar .logo,
-.sidebar-rail .sidebar #sidebarLogo,
-.sidebar-rail .sidebar #sidebarRailBtn span { display:none; }
-.sidebar-rail .sidebar .nav-item { padding:0; justify-content:center; }
-.sidebar-rail .sidebar-header { padding:8px; min-height:42px; }
-.sidebar-rail .main-content,
-.sidebar-rail .app-header { margin-left:52px; }
 
 #bottomNav { /* legacy id */ }
 .app-header .logo img { height:28px; }
