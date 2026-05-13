@@ -433,12 +433,15 @@ def s8_upload_http(cfg: dict[str, Any]) -> int:
         print(_yellow(f"  Deleted {deleted} file(s)" + (f", {wfail} failed" if wfail else "") + "."))
         print()
 
-    # Ensure /www and all immediate subdirectories exist on device.
-    # Discovered dynamically so new subdirs (e.g. fonts/) are picked up
-    # automatically without editing this script.
+    # Ensure /www and the full directory tree exist on device before uploading.
+    # Mirrors rglob("*") used below — handles arbitrarily nested layouts such as
+    # www/fonts/, www/assets/icons/, etc. without manual maintenance.
     _http_mkdir(base, "/", "www")
-    for sub in sorted(p.name for p in DATA_WWW.iterdir() if p.is_dir()):
-        _http_mkdir(base, "/www", sub)
+    for dpath in sorted(p for p in DATA_WWW.rglob("*") if p.is_dir()):
+        rel    = dpath.relative_to(DATA_WWW)   # e.g. PosixPath("assets/fonts")
+        parts  = rel.parts                      # ("assets", "fonts")
+        parent = "/www/" + "/".join(parts[:-1]) if len(parts) > 1 else "/www"
+        _http_mkdir(base, parent, parts[-1])
     time.sleep(0.3)
 
     # Upload files — filtered by upload_filter setting
