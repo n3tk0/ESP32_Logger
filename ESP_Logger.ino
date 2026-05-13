@@ -143,6 +143,7 @@
 #  include "src/export/WebhookExporter.h"
 #endif
 #include "src/web/ApiHandlers.h"
+#include "src/serial/SerialProvisioner.h"
 #include "src/alerts/AlertEngine.h"
 
 // ============================================================================
@@ -738,6 +739,10 @@ void loop() {
     // operation.  A panic or hardware-watchdog reset before then triggers
     // a bootloader-level rollback to the previous slot.
     OtaManager::tick(millis());
+    // ── Serial WiFi provisioner (deploy.py [W] option) ────────────────────────
+    // Non-blocking except during active wifi_scan (~2 s) and wifi_connect (≤20 s).
+    // Listens for {"cmd":"..."} JSON lines; replies prefixed with >>SP<<.
+    serialProvisioner.tick();
     // ── Captive-portal DNS pump (no-op when AP mode is off) ───────────────────
     // The DNS responder is non-blocking; we just need to drain the queue once
     // per loop iteration so phones get prompt replies and the OS-level portal
