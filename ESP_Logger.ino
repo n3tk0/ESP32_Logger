@@ -599,7 +599,20 @@ void setup() {
         if (g_platformMode != PLATFORM_LEGACY) {
             _initPlatform();
         } else {
-            // Even in legacy mode, register API routes so /api/sensors works
+            // Legacy mode: no sensor pipeline, no FreeRTOS tasks.
+            // BUT the shared mutexes must still exist so that API handlers
+            // (e.g. /api/readings, /api/latest) can safely take/give them
+            // instead of asserting on a NULL handle at queue.c:1545.
+            // TaskManager::init() is intentionally NOT called here — it would
+            // start SensorTask/StorageTask/etc. which are meaningless without
+            // a valid platform_config.json.
+            webDataMutex = xSemaphoreCreateMutex();
+            configMutex  = xSemaphoreCreateMutex();
+            wireMutex    = xSemaphoreCreateMutex();
+            fsMutex      = xSemaphoreCreateMutex();
+            if (!webDataMutex || !configMutex || !wireMutex || !fsMutex) {
+                Serial.println("[Setup] WARNING: mutex creation failed in legacy mode");
+            }
             if (activeFS) alertEngine.begin(*activeFS);
             registerApiRoutes(server);
         }
