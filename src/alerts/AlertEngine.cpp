@@ -26,7 +26,11 @@ bool AlertEngine::begin(fs::FS& fs, const char* path) {
     if (!_mutex) {
         _mutex = xSemaphoreCreateMutex();
         if (!_mutex) {
-            Serial.println("[AlertEngine] mutex create FAILED");
+            // CRITICAL: without a mutex every AlertEngine operation is a no-op.
+            // This is only possible if the FreeRTOS heap is exhausted — extremely
+            // unlikely in normal operation, but the condition is visible via
+            // GET /api/alerts → { "error": "mutex_init_failed" } and here.
+            Serial.println("[AlertEngine] CRITICAL: mutex create FAILED — alert system disabled");
             return false;
         }
     }
@@ -259,7 +263,15 @@ bool AlertEngine::hasToasts() const {
 
 // ---------------------------------------------------------------------------
 void AlertEngine::toJson(JsonDocument& doc) const {
-    if (!_mutex) return;
+    if (!_mutex) {
+        // Surface the failure so the UI can show a meaningful error instead of
+        // silently rendering an empty alerts panel.
+        doc["ok"]    = false;
+        doc["error"] = "mutex_init_failed";
+        doc["rules"].to<JsonArray>();
+        doc["history"].to<JsonArray>();
+        return;
+    }
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(200)) != pdTRUE) return;
 
     JsonArray rArr = doc["rules"].to<JsonArray>();

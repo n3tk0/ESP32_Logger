@@ -442,7 +442,9 @@ static void _initPlatform() {
 #endif
 
     // Initialise AlertEngine — loads /alerts.json from LittleFS if present
-    if (activeFS) alertEngine.begin(*activeFS);
+    if (activeFS && !alertEngine.begin(*activeFS)) {
+        Serial.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
+    }
 
     // Register new API routes (sensor data + config)
     registerApiRoutes(server);
@@ -613,7 +615,9 @@ void setup() {
             if (!webDataMutex || !configMutex || !wireMutex || !fsMutex) {
                 Serial.println("[Setup] WARNING: mutex creation failed in legacy mode");
             }
-            if (activeFS) alertEngine.begin(*activeFS);
+            if (activeFS && !alertEngine.begin(*activeFS)) {
+                Serial.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
+            }
             registerApiRoutes(server);
         }
 
