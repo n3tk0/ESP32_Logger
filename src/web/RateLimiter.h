@@ -32,8 +32,11 @@ public:
     }
 
 private:
-    static inline uint32_t _tokens     = MAX_TOKENS;
-    static inline uint32_t _lastRefill = 0;
+    // Defined out-of-line in RateLimiter.cpp.  `static inline` initialisers
+    // in the header would require C++17 and arduino-esp32 currently defaults
+    // to C++14 — moving the definitions keeps the warning-free build.
+    static uint32_t _tokens;
+    static uint32_t _lastRefill;
 };
 
 // Sends a 429 response and returns true if over budget (caller should return
