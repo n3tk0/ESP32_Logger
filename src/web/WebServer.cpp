@@ -1681,7 +1681,7 @@ void setupWebServer() {
                 if (fm["calibrationMultiplier"].is<float>())        config.flowMeter.calibrationMultiplier        = fm["calibrationMultiplier"];
                 if (fm["monitoringWindowSecs"].is<int>())           config.flowMeter.monitoringWindowSecs         = fm["monitoringWindowSecs"];
                 if (fm["firstLoopMonitoringWindowSecs"].is<int>())  config.flowMeter.firstLoopMonitoringWindowSecs= fm["firstLoopMonitoringWindowSecs"];
-                else if (fm["firstLoopWindow"].is<int>())           config.flowMeter.firstLoopMonitoringWindowSecs= fm["firstLoopWindow"] | 6;
+                else if (fm["firstLoopWindow"].is<int>())           config.flowMeter.firstLoopMonitoringWindowSecs= fm["firstLoopWindow"];
             }
             if (doc["datalog"].is<JsonObject>()) {
                 JsonObject dl = doc["datalog"];
