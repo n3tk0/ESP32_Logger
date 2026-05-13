@@ -143,6 +143,7 @@
 #  include "src/export/WebhookExporter.h"
 #endif
 #include "src/web/ApiHandlers.h"
+#include "src/alerts/AlertEngine.h"
 
 // ============================================================================
 // PLATFORM MODE & SLEEP GLOBALS
@@ -440,6 +441,9 @@ static void _initPlatform() {
     if (g_mqttExporter) g_mqttExporter->publishHaDiscovery();
 #endif
 
+    // Initialise AlertEngine — loads /alerts.json from LittleFS if present
+    if (activeFS) alertEngine.begin(*activeFS);
+
     // Register new API routes (sensor data + config)
     registerApiRoutes(server);
 
@@ -596,6 +600,7 @@ void setup() {
             _initPlatform();
         } else {
             // Even in legacy mode, register API routes so /api/sensors works
+            if (activeFS) alertEngine.begin(*activeFS);
             registerApiRoutes(server);
         }
 

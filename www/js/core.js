@@ -251,12 +251,16 @@ function applyStatus(d) {
                                 : "auto");
       html.classList.remove("theme-light", "theme-dark", "theme-auto");
       html.classList.add("theme-" + effective);
+      // Keep the design-system [data-theme] attribute in sync so CSS variables
+      // that use [data-theme="dark"] selectors work alongside the legacy classes.
       if (effective === "dark") {
         actDark = true;
+        html.setAttribute("data-theme", "dark");
       } else if (effective === "auto") {
         actDark =
           window.matchMedia &&
           window.matchMedia("(prefers-color-scheme: dark)").matches;
+        html.setAttribute("data-theme", actDark ? "dark" : "light");
         // Add listener to hot-reload if OS theme changes while in auto mode
         if (!window._actDarkListenerAppended) {
           window
@@ -270,6 +274,9 @@ function applyStatus(d) {
             });
           window._actDarkListenerAppended = true;
         }
+      } else {
+        // effective === "light"
+        html.setAttribute("data-theme", "light");
       }
       _themeUpdateToggleIcon(effective);
     }
@@ -323,11 +330,18 @@ function applyStatus(d) {
 // Only updates fields present in the supplied object
 function updateFooter(d) {
   if (d.boot !== undefined && d.boot !== null) setEl("footer-boot", d.boot);
-  if (d.cpu !== undefined && d.cpu !== null) setEl("footer-cpu", d.cpu);
-  if (d.heap !== undefined && d.heapTotal !== undefined)
+  if (d.cpu !== undefined && d.cpu !== null) {
+    setEl("footer-cpu", d.cpu);
+    setEl("sstat-cpu", d.cpu + " MHz");
+  }
+  if (d.heap !== undefined && d.heapTotal !== undefined) {
     setEl("footer-heap", fmtBytes(d.heap) + " / " + fmtBytes(d.heapTotal));
-  if (d.network !== undefined && d.network !== null)
+    setEl("sstat-storage", fmtBytes(d.heap) + " free");
+  }
+  if (d.network !== undefined && d.network !== null) {
     setEl("footer-net", d.network);
+    setEl("sstat-wifi", d.network);
+  }
   if (d.ip !== undefined && d.ip !== null) setEl("footer-ip", d.ip);
   if (d.chip !== undefined && d.chip !== null) setEl("footer-chip", d.chip);
   if (d.version !== undefined && d.version !== null)
@@ -344,6 +358,11 @@ function _themeApplyOverride(mode) {
   var html = document.documentElement;
   html.classList.remove("theme-light", "theme-dark", "theme-auto");
   html.classList.add("theme-" + mode);
+  // Keep design-system [data-theme] in sync
+  var dt = mode === "dark" ? "dark"
+         : mode === "light" ? "light"
+         : (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  html.setAttribute("data-theme", dt);
   try { localStorage.setItem("themeOverride", mode); } catch (e) {}
   _themeUpdateToggleIcon(mode);
 }
@@ -372,7 +391,7 @@ function sidebarRailToggle() {
   // Class lives on <html> so theme-boot.js can restore it pre-paint without
   // waiting for <body> (gemini review PR #47 — avoids FOUC on reload).
   var isRail = document.documentElement.classList.toggle("sidebar-rail");
-  try { localStorage.setItem("sidebarRail", isRail ? "1" : "0"); } catch (e) {}
+  try { localStorage.setItem("esp32-sidebar-rail", isRail ? "1" : "0"); } catch (e) {}
   _sidebarRailSyncBtn(isRail);
 }
 
@@ -394,8 +413,8 @@ document.addEventListener("DOMContentLoaded", function () {
 // we don't trigger the SPA hash router (gemini review PR #47).  Focuses
 // whichever <main class="page active"> is currently visible.
 function skipToContent() {
-  var target = document.querySelector("main.page.active") ||
-               document.querySelector("main.page");
+  var target = document.querySelector(".page.active") ||
+               document.querySelector(".page");
   if (!target) return;
   if (target.getAttribute("tabindex") === null) {
     target.setAttribute("tabindex", "-1");
@@ -520,7 +539,7 @@ function navigateTo(page) {
     document.querySelectorAll(".page").forEach(function (p) {
       p.classList.remove("active");
     });
-    document.querySelectorAll(".nav-item, .bottom-nav a").forEach(function (a) {
+    document.querySelectorAll(".nav-item, .bnav").forEach(function (a) {
       a.classList.remove("active");
     });
 

@@ -2,6 +2,7 @@
 #include "TaskManager.h"
 #include "../pipeline/DataPipeline.h"
 #include "../core/SensorTypes.h"
+#include "../alerts/AlertEngine.h"
 #include <math.h>
 
 // ---------------------------------------------------------------------------
@@ -47,6 +48,13 @@ void processingTaskFunc(void* /*param*/) {
         if (xSemaphoreTake(webDataMutex, 0) == pdTRUE) {
             webRingBuf.push(r);
             xSemaphoreGive(webDataMutex);
+        }
+
+        // Alert evaluation — only for plausible readings (QUALITY_ERROR is
+        // already the guard above; evaluate() will still run for warn-quality
+        // readings so borderline values can trigger user-defined thresholds).
+        if (r.quality != QUALITY_ERROR) {
+            alertEngine.evaluate(r, r.timestamp);
         }
 
         // Forward to storage (always, even errors — raw data is immutable)

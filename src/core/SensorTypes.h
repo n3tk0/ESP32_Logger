@@ -93,6 +93,22 @@ inline TimeBucket parseBucket(const char* s) {
     return BUCKET_5MIN;
 }
 
+// ============================================================================
+// SENSOR HEALTH
+// Per-sensor 24-hour uptime and latency statistics.
+// Populated by SensorManager::tickFiltered(); exposed via /api/sensors.
+// ============================================================================
+struct SensorHealth {
+    uint32_t reads_24h;       // total successful reads in the last 24 h
+    uint32_t errors_24h;      // total failed reads in the last 24 h
+    uint32_t avg_latency_us;  // mean read latency in microseconds
+    uint32_t last_read_ms_ago;// millis() since last successful read
+    float    uptime_pct_24h;  // 0-100
+    // 24-element hourly bucket string: 'o'=ok, 'w'=warn, 'e'=err, '?'=unknown
+    // Index 0 = oldest hour, index 23 = current hour.  Null-terminated.
+    char     buckets[25];
+};
+
 // Parse "lttb" / "avg" / "min" / "max" / "raw" / "sum"
 inline AggMode parseMode(const char* s) {
     if (!s) return AGG_LTTB;
