@@ -229,6 +229,7 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     print(_bold("  ── Actions " + "─" * 51))
     print(f"  {_cyan('[r]')}  Run  {_dim(f'({enabled_list})')}")
     print(f"  {_cyan('[s]')}  Save as default")
+    print(f"  {_cyan('[W]')}  WiFi provision  via serial COM port")
     print(f"  {_cyan('[q]')}  Quit")
     print()
 
@@ -303,6 +304,9 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             steps = set(cfg.get("steps", []))
             steps ^= {n}  # toggle
             cfg["steps"] = sorted(steps)
+
+        elif ch == "w":
+            s_wifi_provision(cfg)
 
         elif choice.upper() in PRESETS:
             cfg["steps"] = list(PRESETS[choice.upper()][1])
@@ -572,6 +576,255 @@ def s9_monitor(cfg: dict[str, Any], pio: str) -> int:
     if cfg.get("port"):
         cmd += ["--port", cfg["port"]]
     return _run(cmd)
+
+
+# ── WiFi provisioner via serial ────────────────────────────────────────────────
+
+def _monitor_baud() -> int:
+    """Read monitor_speed from platformio.ini; fall back to 115200."""
+    try:
+        txt = (ROOT / "platformio.ini").read_text()
+        m = re.search(r"^\s*monitor_speed\s*=\s*(\d+)", txt, re.MULTILINE)
+        if m:
+            return int(m.group(1))
+    except OSError:
+        pass
+    return 115200
+
+
+def s_wifi_provision(cfg: dict[str, Any]) -> None:
+    """Interactive WiFi provisioner via serial COM port (deploy.py [W])."""
+    _hdr("W · wifi-provision", "Switch device from AP → Client via serial")
+
+    # ── Check pyserial ────────────────────────────────────────────────────────
+    try:
+        import serial          # type: ignore  # noqa: F401
+        import serial.tools.list_ports  # type: ignore
+        import serial as _serial
+    except ImportError:
+        print(_red("  pyserial is not installed."))
+        print(_dim("  Install it with:  pip install pyserial"))
+        input(_dim("  Press Enter to return to menu… "))
+        return
+
+    import getpass as _getpass
+
+    port = cfg.get("port") or _detect_port()
+    if not port:
+        print(_red("  No serial port found. Connect the device and set port via [p]."))
+        input(_dim("  Press Enter to return to menu… "))
+        return
+
+    baud = _monitor_baud()
+    print(f"  Port: {_bold(port)}   Baud: {_bold(baud)}")
+    print()
+
+    # ── Open port ─────────────────────────────────────────────────────────────
+    try:
+        ser = _serial.Serial(port, baud, timeout=1)
+        ser.reset_input_buffer()
+    except Exception as exc:
+        print(_red(f"  Cannot open {port}: {exc}"))
+        input(_dim("  Press Enter to return to menu… "))
+        return
+
+    PREFIX = ">>SP<<"  # must match SERIAL_RESP_PREFIX in SerialProvisioner.h
+
+    def _send_recv(obj: dict, timeout_s: float = 10.0) -> "dict | None":
+        """Send JSON command, wait for a >>SP<<-prefixed response line."""
+        line = json.dumps(obj, separators=(",", ":")) + "\n"
+        ser.write(line.encode())
+        ser.flush()
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            try:
+                raw = ser.readline().decode(errors="replace").strip()
+            except Exception:
+                return None
+            if not raw:
+                continue
+            if raw.startswith(PREFIX):
+                payload = raw[len(PREFIX):]
+                try:
+                    return json.loads(payload)
+                except Exception:
+                    return None
+            # Non-SP line = firmware log — print dimmed for visibility
+            print(_dim(f"    {raw}"))
+        return None  # timeout
+
+    # ── Ping ──────────────────────────────────────────────────────────────────
+    print(_dim("  Pinging device…"), end=" ", flush=True)
+    resp = _send_recv({"cmd": "ping"}, timeout_s=5)
+    if not resp or not resp.get("ok"):
+        print(_red("✗"))
+        print()
+        print(_red("  No response from device."))
+        print(_dim("  • Make sure the firmware is flashed (step 5+6)."))
+        print(_dim("  • The device must not be in deep sleep."))
+        print(_dim("  • Try pressing the reset button and retrying."))
+        ser.close()
+        input(_dim("  Press Enter to return to menu… "))
+        return
+
+    print(_green("✓"))
+    mode = resp.get("mode", "?")
+    if resp.get("ip"):
+        print(f"  Mode: {_bold(mode)}   IP: {_bold(resp['ip'])}")
+    elif resp.get("ap_ip"):
+        print(f"  Mode: {_bold(mode)}   AP IP: {_bold(resp['ap_ip'])}")
+    else:
+        print(f"  Mode: {_bold(mode)}")
+    print()
+
+    # ── Scan ──────────────────────────────────────────────────────────────────
+    print(_bold("  Scanning for WiFi networks…"), end=" ", flush=True)
+    # wifi_scan sends an intermediate {"ok":"scanning"} ACK within ~100 ms,
+    # then the real result after 2-4 s.  We read both in sequence.
+    ser.write((json.dumps({"cmd": "wifi_scan"}, separators=(",", ":")) + "\n").encode())
+    ser.flush()
+
+    nets: list[dict] = []
+    scan_ok = False
+    deadline = time.time() + 15.0
+    while time.time() < deadline:
+        try:
+            raw = ser.readline().decode(errors="replace").strip()
+        except Exception:
+            break
+        if not raw:
+            continue
+        if raw.startswith(PREFIX):
+            r = {}
+            try:
+                r = json.loads(raw[len(PREFIX):])
+            except Exception:
+                pass
+            if r.get("ok") == "scanning":
+                print(_dim("(scanning…)"), end=" ", flush=True)
+                continue
+            if r.get("ok") is True:
+                nets = r.get("nets", [])
+                scan_ok = True
+                break
+            # ok==false
+            print(_red("✗"))
+            print(_red(f"  Scan failed: {r.get('err', '?')}"))
+            ser.close()
+            input(_dim("  Press Enter to return to menu… "))
+            return
+        else:
+            print(_dim(f"\n    {raw}"), end=" ", flush=True)
+
+    if not scan_ok:
+        print(_red("✗ (timeout)"))
+        ser.close()
+        input(_dim("  Press Enter to return to menu… "))
+        return
+
+    print(_green(f"✓  {len(nets)} network(s) found"))
+    print()
+
+    if not nets:
+        print(_yellow("  No WiFi networks found — is the antenna connected?"))
+        ser.close()
+        input(_dim("  Press Enter to return to menu… "))
+        return
+
+    # ── Display network list ───────────────────────────────────────────────────
+    print(f"  {'#':>3}  {'SSID':<34}  {'Signal':>9}  Security")
+    print("  " + "─" * 60)
+    for i, net in enumerate(nets):
+        ssid = (net.get("ssid") or "")[:34]
+        rssi = int(net.get("rssi", -99))
+        enc  = net.get("enc", 1)
+        lock = "🔒 WPA/2" if enc else "  open  "
+        # Colour signal strength
+        if rssi >= -60:
+            sig = _green(f"{rssi:>4} dBm")
+        elif rssi >= -75:
+            sig = _yellow(f"{rssi:>4} dBm")
+        else:
+            sig = _red(f"{rssi:>4} dBm")
+        print(f"  {i + 1:>3}  {ssid:<34}  {sig}  {lock}")
+    print()
+
+    # ── Select network ────────────────────────────────────────────────────────
+    try:
+        sel = input(_bold("  Select network (number or type SSID): ")).strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        ser.close()
+        return
+
+    # Resolve to SSID string
+    chosen_ssid = ""
+    chosen_enc  = 1
+    try:
+        idx = int(sel) - 1
+        if 0 <= idx < len(nets):
+            chosen_ssid = nets[idx].get("ssid", "")
+            chosen_enc  = nets[idx].get("enc", 1)
+    except ValueError:
+        chosen_ssid = sel  # user typed SSID directly
+        # Try to look up enc from scan results
+        for n in nets:
+            if n.get("ssid") == chosen_ssid:
+                chosen_enc = n.get("enc", 1)
+                break
+
+    if not chosen_ssid:
+        print(_red("  Invalid selection."))
+        ser.close()
+        input(_dim("  Press Enter to return to menu… "))
+        return
+
+    # ── Password ──────────────────────────────────────────────────────────────
+    if chosen_enc == 0:
+        chosen_pass = ""
+        print(f"  Connecting to {_bold(chosen_ssid)} (open network)…")
+    else:
+        try:
+            chosen_pass = _getpass.getpass(f"  Password for \"{chosen_ssid}\": ")
+        except (KeyboardInterrupt, EOFError):
+            print()
+            ser.close()
+            return
+        if not chosen_pass:
+            print(_yellow("  Empty password — treating as open network."))
+        print(f"  Connecting to {_bold(chosen_ssid)}…")
+
+    # ── Connect ───────────────────────────────────────────────────────────────
+    print(_dim("  (waiting up to 20 s for association…)"))
+    resp = _send_recv(
+        {"cmd": "wifi_connect", "ssid": chosen_ssid, "pass": chosen_pass},
+        timeout_s=25.0,
+    )
+
+    print()
+    if resp is None:
+        print(_red("  ✗ No response — the device may have crashed or reset."))
+    elif resp.get("ok"):
+        ip = resp.get("ip", "?")
+        gw = resp.get("gw", "?")
+        print(_green(f"  ✓ Connected to {chosen_ssid}"))
+        print(_green(f"    IP:      {ip}"))
+        print(_green(f"    Gateway: {gw}"))
+        print()
+        print(_dim(f"  Web UI:  http://{ip}"))
+        print(_dim("  The device is now reachable on your local network."))
+        print(_dim("  Use the web UI to save WiFi credentials permanently."))
+        # Update saved device IP so step 8 (HTTP deploy) targets the new address
+        cfg["device_ip"] = ip
+        save_cfg(cfg)
+    else:
+        err = resp.get("err", "unknown")
+        print(_red(f"  ✗ Connection failed: {err}"))
+        print(_dim("  Device has restored AP mode — you can still connect via AP."))
+
+    ser.close()
+    print()
+    input(_dim("  Press Enter to return to menu… "))
 
 
 # ── Orchestrator ───────────────────────────────────────────────────────────────
