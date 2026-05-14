@@ -252,3 +252,22 @@ Files: `tasks/TaskManager.h`, `tasks/SensorTask.*`, `tasks/SlowSensorTask.*`
 
 ---
 
+## Phase 11 — FreeRTOS Pipeline Tasks
+
+Files: `tasks/ProcessingTask.*`, `tasks/StorageTask.*`, `tasks/ExportTask.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 11.1 | M | ProcessingTask.cpp:14-26 — `isPlausible()` only validates temperature/humidity/pressure/pm25/pm10/tvoc/eco2/flow_rate/wind_speed. Missing entirely: voltage, current, uv_index, lux/light, distance, soil_moisture, AND `co2` (SCD4x emits `co2`, not `eco2`). Catch-all `return true` at L25 means these never get QUALITY_ERROR flagged. | Add per-metric bounds for every metric a registered plugin emits; reject by default (`return false`) for unknown metrics; log unknown-metric exactly once. | Pending |
+| 11.2 | L | ProcessingTask.cpp:17 — Pressure bounds 500..1200 assume `hPa`. A plugin emitting Pa (101325) is silently rejected. SensorReading has no unit-aware validator. | Either canonicalise units at plugin level OR include unit in the plausibility key. | Pending |
+| 11.3 | M | ProcessingTask.cpp:42-51 — `webRingBuf.push(r)` runs even when `r.quality == QUALITY_ERROR`. UI dashboard displays error values mixed with good data. | Guard: `if (r.quality != QUALITY_ERROR && webDataMutex && xSemaphoreTake(...)) { push; give; }`. | Pending |
+| 11.4 | M | ProcessingTask.cpp:57 — `alertEngine.evaluate(r, r.timestamp)` passes timestamp which can be 0 (SensorTask fallback, see 10.3). AlertEngine.Rule.condFirstMetTs=0 collides with that → first trigger at ts=0 makes second reading at ts=1 elapse "1 s" → false short-duration trigger. | Skip evaluate when `r.timestamp < 1000000000` (no real wall-clock); also ensure SensorTask never emits ts=0 (tied to 10.3 +1 fix). | Pending |
+| 11.5 | M | StorageTask.cpp:32-33 — `StorageTaskParam cfg = p ? *p : StorageTaskParam{};` copies params at task start. `/api/config/platform` reload of logger.* fields doesn't propagate (csvLoggingEnabled, aggregationIntervalSec, humidityCorrection, kappa). Same staleness class as 10.1. | Re-read from `*p` once per outer loop iteration, or signal task via task-notification on reload. | Pending |
+| 11.6 | H | StorageTask.cpp:91-95 — Inner drain loop `while (xQueueReceive(...100ms) == pdTRUE)` can run for many seconds under sustained sensor burst. Each iteration blocks up to 100 ms; with continuous input the loop never falls through. Outer-loop heartbeat at L84 thus never refreshes → C4 watchdog (30 s) fires under legitimate high-throughput conditions. | Cap inner drain: `int drained = 0; while (... && drained++ < 32) ...;` then fall through every outer iteration. Or refresh heartbeat inside the inner loop. | Pending |
+| 11.7 | L | StorageTask.cpp:91 — `feedEpoch = nowEpochSafe()` computed ONCE before the drain loop. All items in a multi-second burst share the same timestamp regardless of arrival order. FlowRunLogger duration accounting blurred. | Compute per-item inside the loop, or use the SensorReading's own `r.timestamp` where valid. | Pending |
+| 11.8 | H | ExportTask.cpp:31, 42 — `exportManager.sendAll(batch, batchCount)` blocks on TLS/HTTP/MQTT. With 5 enabled exporters × ~30 s socket timeout = up to 150 s blocked. ExportTask heartbeat at L22 only refreshes between iterations → C4 watchdog (30 s) false-positive restart during WiFi outages. | Refresh heartbeat between exporters inside sendAll (callback hook); or use a per-exporter shorter timeout (5 s). | Pending |
+| 11.9 | L | ExportTask.cpp:38-45 — Two flush paths (full-batch at L29-34 + batchFull/timeout at L38-44) are correct but slightly redundant. Maintenance footgun. | Consolidate into one decision-point after L35. | Pending |
+| 11.10 | I | ProcessingTask.h / StorageTask.h / ExportTask.h — trivial declarations or POD struct (StorageTaskParam). | [MODULE SAFE for headers] | N/A |
+
+---
+
