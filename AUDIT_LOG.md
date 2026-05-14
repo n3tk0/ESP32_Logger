@@ -703,3 +703,168 @@ All 31 phases complete. Total findings: **~340** across all severity levels.
 
 ---
 
+## FINAL PHASE — System Architecture Risks (Cross-Boundary / Systemic)
+
+Scope: zoomed-out audit of the "glue" between subsystems. Findings are systemic — they do NOT show up in any single-file review but emerge when tracing a transaction across modules.
+
+### A — Mutex Topology & Deadlock Analysis
+
+**Mutex inventory (acquirer → holder time)**
+- `fsMutex`: protected by ~6 acquirers (StorageTask portMAX_DELAY, web /upload 5000ms, /delete 500ms, /mkdir 500ms, /move 500ms, factory_reset 2000ms-bypassed, saveConfig 3000ms-bypassed); **violated by ~12 writers** that never acquire it (RtcManager.backupBootCount 8.8, DataLogger.flushLogBufferToFS 9.9, OtaManager._logOtaEvent 9.12, FlowRunLogger._closeRun 12.10, AlertEngine._save 15.9, ExportManager._spoolBatch 18.3 / _drainSpool 18.6, moduleRegistry.saveAll 1.9 / 6.15, plus _writeResetLog and various ad-hoc opens).
+- `configMutex`: 2 acquirers (handleConfigPlatform 2000ms, handleApiBackup 500ms). SensorTask reads `_sensors[]` WITHOUT it (3.19).
+- `webDataMutex`: ProcessingTask try-take-0 (2.8), ApiHandlers 50ms, SensorManager.toJson 50ms.
+- `wireMutex`: SensorManager.tickFiltered 100ms with SILENT fallthrough on timeout (15.4).
+- Class-local `_mutex`: AlertEngine try-take-0 in hot path (15.7) / portMAX_DELAY in _dispatch (15.8); LiveAggregator portMAX_DELAY; FlowRunLogger portMAX_DELAY.
+
+**FA.1 (H) — fsMutex is theatrical, not protective.** ~12 mutex-bypass writers + saveConfig "proceed even on timeout" + factory_reset "give without take" means the LittleFS allocator regularly sees concurrent calls from multiple tasks. Classic deadlock is avoided ONLY because the lock is mostly absent. Replacing the bypass sites with proper acquire could expose latent lock-order bugs. Fix sequencing: first add bypass-site acquires with timeouts, then run for weeks under load, then tighten portMAX_DELAY holders.
+
+**FA.2 (H) — Priority inversion at TASK_PRIO_EXPORT=TASK_PRIO_STORAGE=1.** Both tasks run at priority 1. ExportTask's TLS sendAll blocks for up to 35s per exporter × 5 exporters = 175s (11.8). During that window, StorageTask is NOT preempted (same priority, cooperative yield only) but its own portMAX_DELAY on fsMutex + drain-loop heartbeat starvation (11.6) compounds. ProcessingTask at priority 2 preempts both, fills `storageQueue` past depth 32, drops silently (2.9). The cascade hits the C4 watchdog within 30s regardless of which task wedges.
+
+**FA.3 (M) — Implicit lock-order: configMutex → fsMutex → wireMutex → webDataMutex → class-local _mutex.** No code enforces this order; reviewers must trace each new locking site by hand. The most fragile junction: AlertEngine._dispatch (15.8) holds `_mutex` while calling MqttExporter.send → potential to enter MQTT_Mini network paths that today don't lock but easily could in a future revision, creating a deadlock against handleApiAlertsSave (which holds `_mutex` 1000ms and would call back into AlertEngine via shared globals if any cycle is introduced).
+
+**FA.4 (M) — webDataMutex try-take-0 in producer (ProcessingTask 2.8) means readers (ApiHandlers / SensorManager.toJson) effectively race the writer.** No deadlock — but no isolation either; ring buffer torn reads (12.12-12.13) are the visible symptom. Calling this "lock-protected" misleads new contributors.
+
+### B — ISR ↔ Task ↔ Flash Cross-Context Races
+
+**FB.1 (M) — LittleFS flash erase (10-50 ms/sector) suspends non-IRAM code.** All registered ISRs (`onFlowPulse`, `WaterFlowSensor::_isr`, `RainSensor::_isr`, `WindSensor::_isr`) are correctly `IRAM_ATTR` — they fire during erase. BUT the I2C / 1-Wire bit-banging paths (Wire.cpp, DS18B20_Mini timing, DS1302 ThreeWire timing) are NOT in IRAM. During flash erase, a SensorTask mid-read sees micro-stalls of 10-50 ms. Combined with 17.11 (1-Wire reads without `noInterrupts()`) and 17.13 (DS1302 ThreeWire without mutex), a sustained CSV-write storm produces flaky temperature readings whenever the FS happens to be erasing.
+
+**FB.2 (M) — pulseCount ↔ legacy state machine race window.** `onFlowPulse` ISR increments `pulseCount` (single 32-bit aligned write — atomic on RV32). Main loop reads via `noInterrupts() / interrupts()` guard (ESP_Logger.ino:917-920). Window: between L920 `interrupts()` and L922 use, a pulse can arrive and increment past the snapshot. The captured `currentPulses` is correct, but the new pulse is now in `pulseCount` AND ALSO will be counted in the NEXT cycle (since pulseCount = 0 was the capture-clear). Result: occasional under-counted cycles. Mitigated by very short window; flagged as systemic atomicity gap.
+
+**FB.3 (M) — ISR-installed handlers + reloadConfig dangling-`this`.** SensorManager.reloadConfig calls `_destroyAll` → `delete sensors[i]` → frees the object. WaterFlow/Rain/Wind ISRs were installed via `gpio_isr_handler_add(pin, _isr, this)`; the `this` pointer is now dangling. Next pulse fires the IRAM ISR with corrupted memory → SIGSEGV at IRAM. Already individually flagged (2.6, 23.2-23.3) but combined effect: ANY runtime config reload from the web UI with ISR-driven sensors enabled = guaranteed crash on next pulse.
+
+**FB.4 (L) — ISR_DEBOUNCE_MICROS = 1000 vs runtime-configurable isrDebounceUs.** Two separate debounce constants for what should be one configurable value (Phase 1 #1.18 + Phase 2 #2.13). Buttons use polling-debounce (no ISR), flow uses 1ms hardcoded — so neither code path ever reads the runtime `isrDebounceUs`. Dead variable that misleads future maintainers into thinking debounce is web-configurable.
+
+### C — Perfect Storm Cascade Trace
+
+Scenario: simultaneously (a) WiFi drops mid-batch, (b) LittleFS reaches 100% full, (c) flow sensor still pulsing at 5 Hz.
+
+**T+0 — Trigger:**
+- WiFi.status() → WL_DISCONNECTED. ExportTask's `_sendWithRetry` first call returns false.
+- StorageTask is mid-`primary.appendRow` holding `fsMutex` (portMAX_DELAY).
+- Sensor ISR keeps incrementing `pulseCount` / `_pulses`.
+
+**T+1s to T+35s — Exporter blocking + queue saturation:**
+- ExportTask retry chain: delay(5000) + delay(10000) + delay(20000) = 35 s of `vTaskDelay` (18.1).
+- ExportTask heartbeat NOT refreshed (11.8); after 30 s, C4 watchdog (`MAX_SILENCE_MS=30000`) detects stale heartbeat → sets `shouldRestart = true`.
+- During the 35 s window:
+  - ProcessingTask consumes from `sensorQueue`, tries to forward to `exportQueue` with timeout=0 → silent drops once queue depth (32) saturates (2.9). `g_queueDrops` increments but the counter is `volatile uint32_t`-not-atomic (2.10) so increments race.
+  - ProcessingTask forwards to `storageQueue` with timeout=50ms → eventually drops once StorageTask falls behind (StorageTask is busy mid-`appendRow` on a now-full FS).
+
+**T+30s — C4 watchdog triggers restart:**
+- `loop()` sees `shouldRestart=true`. Calls `OtaManager::confirm()` (ESP_Logger.ino:783).
+- **FC.1 (CRITICAL) — Inadvertent OTA confirmation of a broken image.** If the running firmware was in PENDING_VERIFY state (just OTA'd) and triggered the watchdog due to a crash bug, `OtaManager::confirm()` at L783 marks the broken image VALID before reboot. The rollback watchdog window (90 s) effectively never fires because the watchdog reset path always confirms. **A crash-bug that takes >30 s to trigger but <90 s gets PERMANENTLY confirmed instead of rolled back.**
+- After confirm: `safeWiFiShutdown()` → `delay(100)` → `ESP.restart()`.
+
+**T+33s — Cold reboot:**
+- Reset reason = `ESP_RST_TASK_WDT`. _writeResetLog (ESP_Logger.ino:302) tries `activeFS->open("/reset_log.txt", FILE_APPEND)` → succeeds-but-write-returns-0 (FS full). Boot loop diagnostic lost forever.
+- `loadConfig` reads `/config.bin` (exists, succeeds).
+- `migrateConfig` end-of-function calls `saveConfig()` (ConfigManager.cpp:352). saveConfig opens `/config.tmp` → write returns 0 → rename fails. `config.version` is updated in RAM but the on-disk file stays at old version. **FC.2 (H) — infinite migration on every boot when FS full.**
+- `_initPlatform` registers sensors, calls `TaskManager::init`. JSON parse of `/platform_config.json` succeeds (file still readable). Tasks spawn. SCD4xSensor.init blocks 5.1 s (22.1).
+- `OtaManager::boot()` runs AFTER initHardware/initRtc (ESP_Logger.ino:543, see also 1.14 / 8.10): if previous firmware was PENDING_VERIFY, it RE-arms the 90 s deadline. `tick()` will confirm again at T+33+90 = T+123 s if the watchdog doesn't fire first. So:
+  - With Arduino IDE bootloader (no `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`), the OTA state stays `PENDING_VERIFY` across watchdog resets. Each boot re-arms 90 s. **The image never actually rolls back via the bootloader.** OtaManager.cpp:57-60 documents this but the audit-log comments imply rollback works — design/doc mismatch (already 9.14).
+- AlertEngine.begin reads `/alerts.json`. **FC.3 (H) — alerts.json may have been truncated to 0 bytes by a non-atomic save during the previous cycle (15.9).** Parse error → returns false → alertEngine has 0 rules. User's alert configuration silently lost.
+- saveConfig() inside migrateConfig fails silently. Boot completes with stale config.version.
+
+**T+33s onwards — Steady-state failure:**
+- All the conditions persist: WiFi still disconnected, FS still full, ISR still pulsing.
+- ExportTask retries again. C4 fires again at T+63 s. shouldRestart=true. Reboot.
+- **FC.4 (CRITICAL) — Restart loop with no progress.** No retry-counter, no exponential boot-time backoff. Boot every ~33 s indefinitely. Each cycle: 5.1 s SCD4xSensor delay, plus other init overhead, plus the cascading failures.
+- Each boot increments `bootCount` (via `backupBootCount` which writes to `/bootcount.bin` non-atomically — 8.6). Eventually `/bootcount.bin` corrupts; next `restoreBootCount` reads partial bytes into bootCount (8.7) → unbounded values.
+- After enough cycles, LittleFS wear-leveling consumes the same physical sectors → bricks the flash.
+
+**FC.5 (H) — No circuit breaker.** Every "shouldRestart=true" path leads back through `loop()`. There is no:
+- Backoff timer ("wait 5 minutes before next restart if last 3 resets were within 30 s")
+- Safe-mode boot ("if reset_reason == TASK_WDT 5× consecutive, skip TaskManager::init and serve only the failsafe UI")
+- Manual recovery beacon ("after N failed boots, AP up with default password regardless of config")
+
+The shipped device, once in this cascade, requires USB recovery — which a remote deployment cannot perform.
+
+### D — State-Synchronisation Risks (Multiple Sources of Truth)
+
+**FD.1 (H) — 7 distinct storage locations for device state, no documented precedence:**
+
+| Source | Contents | Authority |
+|---|---|---|
+| `/config.bin` | DeviceConfig binary | Asserted authoritative (saveConfig comment) |
+| `/config/modules.json` | Module IModule slices | "Shadow" of /config.bin per Pass 5 |
+| `/platform_config.json` | Sensor + exporter config | Authoritative for sensor pipeline |
+| `/alerts.json` | AlertEngine rules + history | Authoritative for alerts |
+| ESP32 NVS | WiFi creds (via `WiFi.persistent=true`) | Independent — SerialProvisioner 14.7 |
+| DS1302 SRAM | bootCount (5 bytes) | Authoritative on warm boot |
+| `/bootcount.bin` | bootCount backup | Fallback when DS1302 magic invalid |
+
+No code enforces the asserted precedence. A user uploading `/config/modules.json` directly via `/upload` gets silently overwritten on next saveConfig (13.10). A serial-provisioned WiFi connection (14.8) doesn't update `/config.bin` → `/export_settings` shows stale creds. **The system has no "single source of truth"; every restart is a state-merging gamble.**
+
+**FD.2 (M) — No WiFi-state coordinator.** Five mutating sites (connectToWiFi legacy, startAPMode legacy, wifiTestTaskFn web 3.11, _cmdConnect serial 14.10, safeWiFiShutdown) plus NVS persistence — all can change `WiFi.mode()` / `WiFi.status()` concurrently. No central state machine, no "wifiBusy" flag. Concurrent ops are race-prone.
+
+**FD.3 (M) — No time-source coordinator.** Each task picks its own epoch from `Rtc->GetDateTime() / time(nullptr) / millis()/1000`. After an NTP correction, in-flight readings tagged with the old timestamp arrive at LiveAggregator which already advanced `_lastFlushEpoch` to the new epoch → 12.7 cascade. The same epoch-jump scenario invalidates SensorHealth bucket rotation (SensorManager.cpp:142-153 advances `slotStartMs += ONE_HOUR_MS`; an epoch backward-jump would temporarily peg curSlot until clock recovers).
+
+### E — Validation / Data-Flow Cross-Boundary Failures
+
+**FE.1 (H) — Every user-controlled string crosses 4-6 module boundaries with ZERO validation/escape boundary.**
+
+Trace: theme color field
+1. POST `/save_theme` (WebServer.cpp:1142) → SAFE_STRNCPY into `config.theme.primaryColor[8]` — no hex validation.
+2. saveConfig → `/config.bin` (binary).
+3. Subsequent boot → loadConfig reads binary → no validation on load.
+4. /export_settings → JSON `o["primaryColor"] = config.theme.primaryColor` — raw pointer.
+5. settings.js renders into `<input type="color">` (frontend validates hex but read path bypasses).
+6. /api/status → SPA injects into `#themeVars` `<style>` via JS — CSS injection vector if value contains `;}` (27.5).
+
+Same pattern: chartLocalPath (26.3) → `<script src=>`; sensorId (5.17) → JSON exports; webhook URL (18.9) → HTTPS request; OSM access_token (19.14) → Authorization header. **The codebase has no validation taxonomy.** Each new field adds a new attack-surface line.
+
+**FE.2 (H) — IModule contract `bool load(JsonObjectConst)` is dead.** Every implementation returns true unconditionally (13.2 / 14.1). Even if a module rejected the payload, `ModuleRegistry.cpp:78` discards the return (6.12). Validation cannot be added retrofitting one site — both ends are broken.
+
+### F — Failure-Mode Coverage Gaps
+
+**FF.1 (M) — _writeResetLog can't function when FS full.** The diagnostic path that would tell an operator "boot loop in progress" is the FIRST casualty of full-FS. Combined with no remote telemetry (LittleFS log is local-only), a deployed unit stuck in restart loop is invisible to ops.
+
+**FF.2 (M) — Watchdog reset doesn't cancel pending OTA verify.** FC.1 expansion: the OTA pending-verify window is supposed to detect "image crashes the device". But on Arduino IDE bootloader, every watchdog reset RESTORES `PENDING_VERIFY` instead of marking the image invalid. The 90 s `tick()` deadline auto-confirms after one quiet boot — which any image can achieve by simply not crashing in the first 90 s, even if it crashes every 91 s afterward.
+
+**FF.3 (M) — Heartbeat starvation paths are everywhere.** 11.6 (StorageTask drain loop), 11.8 (ExportTask sendAll), 17.5 (BME280 infinite wait), 22.1 (SCD4x 5.1 s init), 24.1 / 24.6 (HC-SR04 / ZMPT / ZMCT blocking SensorTask), 14.9 (SerialProvisioner blocking scan), 17.13 (DS1302 unsynchronised reads). 30 s C4 threshold is too tight given the documented operations that legitimately approach or exceed it.
+
+**FF.4 (H) — No graceful-shutdown contract.** TaskManager::shutdown is 3 s drain + 500 ms hard wait. AsyncTCP, AsyncEventSource, MqttExporter, HTTPClient (TLS), and FS-writes all have longer worst-case completion windows. `ESP.restart()` is fire-and-forget at the OS level — any in-flight TLS session dies ungracefully, MQTT clients see unclean disconnect (LWT fires even on user-initiated reboot), brokers/subscribers receive misleading "offline" state.
+
+### G — Hardware Defaults Compound Software Risks
+
+**FG.1 (H) — Default pin assignments in `platform_config.json` and `Config.h::DefaultPins` are systematically wrong on the supported hardware:**
+
+| Pin | Default Use | Reality on ESP32-C3 SuperMini |
+|---|---|---|
+| GPIO0 | ZMPT101B ADC (24.8) | Strap pin (boot mode select) |
+| GPIO1 | ZMCT103C ADC (31.3) | UART0 TX |
+| GPIO2 | DS18B20 1-Wire (31.2) | Strap pin |
+| GPIO3 | SoilMoisture ADC (31.2) | Strap pin |
+| GPIO8 | WindSensor pulse (31.2) | Strap pin |
+| GPIO9 | RainSensor pulse (31.1) | Strap pin (CRITICAL soft-brick) |
+| GPIO10-13 | SD SPI (5.8) | SPI flash bus on C3 |
+| GPIO18-19 | EarlyGPIO snapshot includes (1.2) | USB D+/D- |
+| GPIO21 | Flow sensor default (5.7) | USB D+ on SuperMini |
+
+A user who picks any default-configured sensor and enables it inherits a hardware-induced failure. Combined with FE.2 (validation contract dead), the firmware cannot refuse the invalid config.
+
+**FG.2 (M) — `sanitizeWakeConfig` (ConfigManager.cpp) only validates RTC wake pins and a few SD pins. It does NOT touch the sensor plugin pins read from `platform_config.json`.** Pin conflict detection lives only in `_checkPinConflicts` (ESP_Logger.ino:324) which warns about flow-sensor pin collisions only — not strap pins, not USB pins, not SPI flash pins.
+
+### H — Performance Death Spirals
+
+**FH.1 (M) — Datalog growth slows every flush.** `countFileLines` (9.7) re-scans the entire log byte-by-byte before every append. A 1 MB log file means 1 MB sequential read per flush. Combined with `trimLogFile` (9.8) which copy-moves every retained byte after trimming, each flush of a near-full log can stall the calling task for seconds.
+
+**FH.2 (M) — Spool drain duplicate-send amplifier.** `_drainSpool` (18.2) on partial-batch failure preserves the spool file but does NOT remove already-sent batches → next drain re-sends them. For a non-idempotent exporter (HTTP POST with side-effects), one transient network glitch produces exponential duplicate uploads.
+
+**FH.3 (L) — innerHTML reflow per-navigation.** Each SPA page navigation rebuilds large `innerHTML` strings (26.9). Reflow cost scales with sensor count. On devices with many configured sensors, the UI becomes visibly sluggish after a few minutes of polling.
+
+### I — Top Systemic Remediations (Ranked by Reachability vs Severity)
+
+1. **Add a restart-circuit-breaker** (FC.4): track `consecutiveResets` in RTC RAM; after 3 within 60 s, enter safe-mode (AP-only, no sensor pipeline, serve failsafe UI). Single ~30-line patch in ESP_Logger.ino:setup.
+2. **Move `OtaManager::confirm()` out of the shouldRestart path** (FC.1): only confirm after a successful uptime threshold, NOT on every restart. Crashes-then-restarts must NOT confirm broken images.
+3. **Make all fsMutex acquirers consistent** (FA.1): every LittleFS write call site acquires the mutex with bounded timeout (2 s) and bails on timeout. Removes the "mutex theatre" — either the protection holds or the bypass goes silent.
+4. **Centralise hardware-default sanity** (FG.1, FG.2): add a `validateAllPinsForTarget()` at boot that scans every plugin's configured pin against per-target strap/UART/USB/flash lookups. Refuse to enable any sensor with a hardware-incompatible pin; log clearly.
+5. **Implement a state-version contract for IModule.load()** (FE.2): change the signature to `enum class LoadResult { Ok, ValidationFailed, NoChange }` and force ModuleRegistry to honour the return. Sites where load() currently returns `true` unconditionally compile-fail with the new type.
+6. **Single time-source service** (FD.3): one `epoch_now()` function used by every task; backward-jump detection + flush of dependent state.
+7. **Reset-log rotation** (FF.1): cap `/reset_log.txt` at 8 KB with .bak rotation so full-FS doesn't kill the diagnostic surface.
+8. **Document the storage-precedence model** (FD.1): even without code changes, a single INSTRUCTIONS.md table mapping "this field lives in source X, shadowed in source Y" prevents the user-edit-overwritten silent-loss class of bugs (13.10).
+
+[END OF AUDIT — Final Phase]
+
+---
+
