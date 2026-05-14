@@ -481,3 +481,41 @@ Files: `sensors/plugins/SDS011Sensor.*`, `PMS5003Sensor.*`, `ENS160Sensor.*`, `S
 
 ---
 
+## Phase 22 — CO2 & Light Sensor Plugins (SCD4x / VEML6075 / VEML7700 / BH1750)
+
+Files: `sensors/plugins/SCD4xSensor.*`, `VEML6075Sensor.*`, `VEML7700Sensor.*`, `BH1750Sensor.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 22.1 | H | SCD4xSensor.cpp:63-69 — `_sendCmd(CMD_START_PERIODIC); delay(5100);` blocks 5.1 s in `init()`. With 4+ sensors at staggered init delays, total boot time can exceed OtaManager::boot arm window (tied to 1.14 / 8.10). Pending-verify firmware that crashes before sensor init finishes never gets rolled back. | Don't `delay(5100)` — set `_ready=false` and let first readAll's `_dataReady()` gate. Or move OtaManager::boot earlier per 1.14. | Pending |
+| 22.2 | M | SCD4xSensor.cpp:70 — `_ready = true` set after CMD_START_PERIODIC send succeeds with NO confirmation the device is actually in periodic mode. Subsequent `_dataReady()` may always return false; reads silently fail. | After init delay, check `_dataReady()`; refuse to mark `_ready=true` on failure. | Pending |
+| 22.3 | M | SCD4xSensor.cpp:94 — `co2 = _calCo2.apply((float)words[0]);` — raw uint16 (0..65535) silently accepted. SCD40 max 2000 ppm, SCD41 max 5000 ppm. ProcessingTask `isPlausible` has no `co2` case (11.1) → garbage reaches AlertEngine. | Range-check `400 <= words[0] <= 5000`; add co2 to isPlausible (fix 11.1 in tandem). | Pending |
+| 22.4 | H | VEML6075Sensor.h:51 + VEML7700Sensor.h:55 — BOTH use I2C ADDR=0x10 (fixed, no override). The two cannot coexist on the same bus. No conflict detection; user enabling both gets silent device-confusion (whichever device ACKs the address services every read/write). | Reject second plugin registration with the same fixed address; surface via Serial + sensor.status="error". | Pending |
+| 22.5 | M | VEML7700Sensor.cpp:97 + L100-106 — `lux = _calLux.apply(als * _resolution)` at L97. Then L100-104 high-lux non-linear correction recomputes from the already-calibrated value, and L105 calls `_calLux.apply(lux)` AGAIN. Result: calibration **offset added twice, scale squared** for lux > 1000. | Apply non-linear correction to raw `als*_resolution` BEFORE calibration: `if (rawLux > 1000) rawLux = poly(rawLux); lux = _calLux.apply(rawLux);`. | Pending |
+| 22.6 | M | VEML7700Sensor.cpp:90-95 — `readAll` bails on ANY register read failure (line 94 or 95 returns 0). Single transient I2C error skips a whole 5 s read cycle. Same class as 21.9 / 22.x. | Retry once after 10 ms before bailing. | Pending |
+| 22.7 | L | VEML6075Sensor.cpp:39-42 — Device-ID mismatch logged but ignored ("continue anyway — some modules don't expose ID"). Allows misconfigured sensors at other addresses to silently report garbage. | Make strict-ID opt-out via config flag (default opt-IN). | Pending |
+| 22.8 | L | BH1750Sensor.cpp:42-49 — `_sendCmd(CMD_RESET)` and `_sendCmd(_modeCmd)` return values DISCARDED. If RESET or mode-set fails after POWER_ON, init proceeds and `_ready=true`. First read may return garbage. | Check returns; on any failure return false. | Pending |
+| 22.9 | I | All Phase-22 plugins call `Wire.begin(sda, scl)` in init — inherits 20.1 race. | See 20.1. | N/A |
+| 22.10 | I | SCD4xSensor.h, VEML6075Sensor.h, VEML7700Sensor.h, BH1750Sensor.h — trivial declarations + static metric arrays. | [MODULE SAFE for headers beyond items above] | N/A |
+
+---
+
+## Phase 23 — Flow & Weather Sensor Plugins (WaterFlow / YFS201 / Rain / Wind)
+
+Files: `sensors/plugins/WaterFlowSensor.*`, `YFS201Sensor.h`, `RainSensor.*`, `WindSensor.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 23.1 | C | RainSensor.cpp:24 + RainSensor.h:44 — Default `_pin=9` with `pinMode(_pin, INPUT_PULLUP)`. **GPIO9 is an ESP32-C3 boot-strap pin** — held LOW at power-on selects SPI download mode. A typical tipping-bucket reed switch pulls to GND when closed; if the bucket happens to be in the tipped state at power-on, the device boots into download mode → soft-brick until next manual reboot. | Change default `_pin` to a non-strap GPIO (e.g. 4 or 10); document strap-pin avoidance prominently in INSTRUCTIONS.md and the sensor schema. | Pending |
+| 23.2 | M | YFS201Sensor.h — Header file for a class with **NO `.cpp` implementation**. ESP_Logger.ino:387-388 registers `"yfs201"` via the `WaterFlowSensor` factory lambda, NOT `YFS201Sensor`. The header would only matter if some code path called `new YFS201Sensor`, which would then fail to link. Dead code; misleads future maintainers. | Delete `src/sensors/plugins/YFS201Sensor.h`. | Pending |
+| 23.3 | H | RainSensor.cpp:25-28 + WindSensor.cpp:30-33 — Same `gpio_isr_handler_add(pin, _isr, this)` without destructor cleanup as 2.6. `SensorManager::reloadConfig → _destroyAll → delete _sensors[i]` frees the object; next pulse fires the IRAM ISR on a dangling `this` → crash. Extends 2.6 to two more sensor classes. | Add `~RainSensor()` / `~WindSensor()` calling `gpio_isr_handler_remove((gpio_num_t)_pin);`. | Pending |
+| 23.4 | M | WindSensor.cpp:61 — `delay(_sampleWindowMs)` defaults to 3000 ms; `getReadIntervalMs() = _sampleWindowMs`. Net duty cycle = 100% — SlowSensorTask spends every 3 s blocked on wind reads, starving SDS011/PMS5003 (same task). | Decouple sample window from poll interval (e.g. sample 1× per 30 s), or cap window at 1 s default. | Pending |
+| 23.5 | M | WindSensor.cpp:53-86 — `_pulses = 0` at L58 then `delay(3000)` at L61 with interrupts ENABLED, then `count = _pulses` at L64. A pulse arriving between L64 read and L72 use is NOT counted in THIS sample but will be the next. Subtle off-by-one drift in continuous wind. | Acceptable for low-precision wind; document or use atomic snapshot at start AND end of window. | Pending |
+| 23.6 | L | WindSensor.cpp:76 — `analogRead(_dirPin)` single sample mapped directly to angle. Noisy ADC produces jittery wind direction. | 8-sample average; or median-of-3. | Pending |
+| 23.7 | L | RainSensor.cpp:54-55 — Instantaneous `rain_rate` computed from a single inter-tip interval. One tip in 30 min produces SAME rate as 3 tips in 30 min. | Accumulate tip count over a rolling window; `rate = window_tips × mm_per_tip × (3600 / window_sec)`. | Pending |
+| 23.8 | I | WaterFlowSensor.cpp:39-41 — ISR install pattern flagged in 2.6 / 17.x; restated as the 23.3 fix scope must also include WaterFlowSensor's destructor. | See 2.6 / 23.3. | Pending |
+| 23.9 | I | All ISR-driven sensors share the static-bool `_isrServiceInstalled` pattern (WaterFlow L39, Rain L26, Wind L31). Idempotent install across plugins. OK. | [Acceptable] | N/A |
+| 23.10 | I | WaterFlowSensor.h / YFS201Sensor.h / RainSensor.h / WindSensor.h — trivial declarations beyond items above. | [MODULE SAFE for headers beyond 23.x findings] | N/A |
+
+---
+
