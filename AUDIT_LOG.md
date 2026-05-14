@@ -398,3 +398,50 @@ Files: `drivers/MQTT_Mini.h`, `drivers/BME280_Mini.h`, `drivers/BME688_Mini.h`, 
 
 ---
 
+## Phase 18 — Export Framework
+
+Files: `export/IExporter.h`, `export/ExportManager.*`, `export/HttpExporter.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 18.1 | H | ExportManager.cpp:68-72 `_sendWithRetry` — exponential backoff: default 3 retries × 5 s base = 5+10+20 = **35 s blocking** per exporter. With 5 exporters enabled = up to **175 s blocked**. ExportTask heartbeat starves; C4 watchdog (30 s) fires false-positive reset. Tied to 11.8. | Cap total retry budget per sendAll call to ~15 s; refresh heartbeat between retries; or move retry to a state-machine across multiple ticks. | Pending |
+| 18.2 | M | ExportManager.cpp:165-176 `_drainSpool` — On a batched failure (line 165 break), spool file is preserved. Batches already successfully sent in earlier iterations are NOT removed from the file. Next drain re-reads same lines → duplicate sends. Non-idempotent exporters (HTTP POST with side effects) see duplicates. | Track byte offset of last successfully-sent line; rewrite spool with only un-sent tail; or use a 2-file rotation (in-flight / pending). | Pending |
+| 18.3 | M | ExportManager.cpp:86-123 `_spoolBatch` — opens `/spool/<name>.jsonl` for append without `fsMutex`. Race against ConfigManager, StorageTask, RtcManager.backupBootCount, AlertEngine._save, etc. Same family as 8.8 / 9.9 / 9.12 / 12.10 / 15.9. | Acquire fsMutex around the open/write/close block. | Pending |
+| 18.4 | M | ExportManager.cpp:97-106 — Size-cap check then append is TOCTOU race. Two concurrent `_spoolBatch` calls can both pass the cap check and both append, exceeding MAX_SPOOL_BYTES. | Single read of file size under fsMutex; abort if over cap before opening for write. | Pending |
+| 18.5 | L | ExportManager.cpp:114-117 `r[i].toJsonLine(line, sizeof(line))` — writes UNESCAPED strings (5.17). Sensor IDs containing `"` or `\` produce malformed JSON lines; later `_drainSpool::deserializeJson` (L152) silently drops them with `continue`. Data loss without user signal. | Fix 5.17 at SensorTypes.h level; or escape at toJsonLine call site here. | Pending |
+| 18.6 | L | ExportManager.cpp:174 — `_spoolFS->remove(path);` no fsMutex. Race vs concurrent `_spoolBatch` append. | Acquire fsMutex around the remove call. | Pending |
+| 18.7 | L | IExporter.h:27-28 — `maxRetries() = 3`, `retryDelayMs() = 5000` as defaults. Combined with sequential per-exporter dispatch, cumulative blocking exceeds C4 watchdog window. Tuning required. | Defaults: `maxRetries=1`, `retryDelayMs=2000`. | Pending |
+| 18.8 | H | HttpExporter.cpp:14-21 — User-supplied header values copied verbatim via `strncpy(_hdrVals[...], kv.value().as<const char*>() ?: "", ...)`. NO CRLF stripping. A platform_config.json entry like `"X-Foo":"a\r\nHost: evil.com"` injects extra headers into the outbound HTTPClient request → **HTTP header injection / request smuggling**. | Reject any header value containing `\r`, `\n`, or `\0`. | Pending |
+| 18.9 | H | HttpExporter.cpp:51 — `http.begin(_url)` accepts `https://` URLs but NO certificate verification configured. HTTPClient defaults to insecure mode in this construction; no `setCACert`/`setInsecure` exposed. **Plaintext credentials / MITM risk** on the exporter's HTTP traffic. Same applies to WebhookExporter, SensorCommunityExporter, OpenSenseMapExporter. | Add `setCACert` config option; or `setInsecure()` with an explicit opt-in macro for dev builds; fail closed by default on HTTPS URLs without cert. | Pending |
+| 18.10 | M | HttpExporter.cpp:33-35 — `new char[bodyLen]` without `std::nothrow`. On heap pressure → `bad_alloc` → abort. Same family as ApiHandlers.cpp:236. | `new(std::nothrow) char[bodyLen]`; on nullptr return false. | Pending |
+| 18.11 | M | HttpExporter.cpp:42-46 — Body built via snprintf `%s` for sensorId/sensorType/metric/unit with NO JSON escaping. Same JSON injection class as 5.17 / 18.5. Malicious sensor id in platform_config.json corrupts the POST body. | JSON-escape strings before snprintf. | Pending |
+| 18.12 | I | IExporter.h interface is clean; risk surface fully delegated to implementations. | [MODULE SAFE] | N/A |
+
+---
+
+## Phase 19 — Cloud Exporters (MQTT / Webhook / SensorCommunity / OpenSenseMap)
+
+Files: `export/MqttExporter.*`, `export/WebhookExporter.*`, `export/SensorCommunityExporter.*`, `export/OpenSenseMapExporter.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 19.1 | M | MqttExporter.cpp:79-82 `send()` — On single-reading publish failure, sets `allOk=false` but CONTINUES publishing remaining readings, then returns false. ExportManager's retry path resends the WHOLE batch → already-published readings re-published. Idempotency violation. | On first failure: break early, mark allOk=false, return immediately. Caller's retry resends only unsent tail. | Pending |
+| 19.2 | H | MqttExporter — Plaintext MQTT only (via MQTT_Mini at port 1883). Restates 17.2 from exporter perspective. Username/password sent in clear in CONNECT packet; subsequent PUBLISH payloads in clear. | Add TLS variant (WiFiClientSecure) for cloud broker deployments. | Pending |
+| 19.3 | M | MqttExporter.cpp:13-22 — `broker`/`topicPrefix`/`clientId`/`username`/`password` copied via strncpy from JSON without sanitization. CONNECT packet builder in MQTT_Mini reads these verbatim. A `topic_prefix` with `\0` or non-printable bytes corrupts every PUBLISH topic. | Reject non-printable chars (< 0x20 or 0x7F) in topic-related fields. | Pending |
+| 19.4 | L | MqttExporter.cpp:166 — `_publishDiscoveryOne(s->getId(), s->getName(), mNames[m], "", dc)` passes **empty unit** literal. HA discovery payload omits `unit_of_measurement` → HA sensors render raw numbers without units. | Extend ISensor to expose getMetricUnit(metric) → pass it through to discovery. | Pending |
+| 19.5 | L | MqttExporter.cpp:170 — `delay(20)` per metric publish during HA discovery. With 8 sensors × 4 metrics = 640 ms blocking. Runs once at boot via ESP_Logger.ino:442; OK there, but exposed via `/api/mqtt/ha_discovery` POST (ApiHandlers.cpp:438-449) where it blocks the AsyncTCP worker. | Replace `delay` with `vTaskDelay`; for the API path, schedule discovery to run from loop() via a flag. | Pending |
+| 19.6 | L | WebhookExporter.cpp:18-19 — `condition` field defaults silently to `"above"` when not exactly `"above"` or `"below"`. A typo like `"abve"` is accepted with no validation error. | Reject unknown condition strings; return false from init() per IModule contract. | Pending |
+| 19.7 | M | WebhookExporter.cpp:60-78 — Sequential HTTP POSTs blocking ExportTask. Multiple rule breaches in one batch fire sequentially; each POST blocks ~500 ms. C4 starvation amplified per 11.8. | Cap firings per batch to 1; queue rest for next sendAll cycle. | Pending |
+| 19.8 | M | WebhookExporter.cpp:35-43 — Body built via snprintf `%s` for sensor_id/metric with NO JSON escaping. Same injection class as 18.11. | JSON-escape strings before snprintf. | Pending |
+| 19.9 | H | WebhookExporter.cpp:31 — `http.begin(_url)` HTTPS with no cert verification. Same as 18.9. | Tied to 18.9. | Pending |
+| 19.10 | M | WebhookExporter as a whole — semantically OVERLAPS with AlertEngine (Phase 15). Two parallel threshold-alert systems with different storage (RAM rules in webhook config vs alerts.json), different delivery channels (HTTP-only here, MQTT/toast in alerts), and no coordination. Double-firing if same threshold set in both. Confusing UX. | Choose one canonical alert engine; refactor WebhookExporter to consume AlertEngine fired events via a hook. | Pending |
+| 19.11 | H | SensorCommunityExporter.cpp:24 — `http.begin(API_URL)` HTTPS without cert verification. Same as 18.9. | Tied to 18.9. | Pending |
+| 19.12 | L | SensorCommunityExporter.cpp:47-54 — Picks the FIRST occurrence of each metric across all readings in the batch. Multi-sensor setups with two BME280s upload only one sensor's data. | Either upload each sensor as a separate POST, or aggregate (avg) across same-metric readings. | Pending |
+| 19.13 | L | SensorCommunityExporter.cpp:80 — `pres * 100.0f` assumes plugin emits pressure in hPa. Plugin emitting Pa (BME280_Mini.h:85 returns Pa directly per Bosch formula) would be multiplied AGAIN by 100 → 100× wrong upload. Tied to 11.2 (no unit-aware contract). | Inspect r.unit and convert based on it; or document hPa requirement. | Pending |
+| 19.14 | H | OpenSenseMapExporter.cpp:9, 73 — `access_token` stored plaintext in platform_config.json; sent in `Authorization: Bearer ...` header. Same `/export_settings` exposure as WiFi creds (3.7 family). Plus HTTPS to api.opensensemap.org without cert verification (18.9 family). Combined: token visible via /download AND vulnerable to MITM. | (a) Mask token in /export_settings response; (b) require explicit `?include_secrets=1` opt-in. (c) Add cert verification per 18.9. | Pending |
+| 19.15 | M | OpenSenseMapExporter.cpp:44-46 — `new char[bodyLen]` without `std::nothrow`. Same family as 18.10. | `new(std::nothrow)`. | Pending |
+| 19.16 | L | OpenSenseMapExporter.cpp:67 — `snprintf(url, 128, "%s%s/data", API_BASE, _boxId);` — `_boxId` from user config is concatenated into URL path without validation. Malicious boxId like `abc/../../../other-box` could redirect uploads (HTTPClient may or may not normalize). | Validate _boxId against `^[a-f0-9]{24}$` (openSenseMap ID format). | Pending |
+| 19.17 | I | All exporter `init()` paths copy raw user-supplied strings into char arrays via strncpy without explicit NUL termination — works only because the receiving buffers are zero-initialized at declaration. Brittle if a future refactor adds non-trivial constructors. | Add explicit `_buf[sizeof(_buf)-1] = '\0';` after every strncpy. | Pending |
+
+---
+
