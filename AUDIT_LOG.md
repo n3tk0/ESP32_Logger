@@ -445,3 +445,39 @@ Files: `export/MqttExporter.*`, `export/WebhookExporter.*`, `export/SensorCommun
 
 ---
 
+## Phase 20 — Environmental Sensor Plugins (BME280 / BME688 / DS18B20)
+
+Files: `sensors/plugins/BME280Sensor.*`, `BME688Sensor.*`, `DS18B20Sensor.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 20.1 | M | BME280Sensor.cpp:12-16 + BME688Sensor.cpp:12 (+ all I2C plugins) — Every sensor's `init()` calls `Wire.begin(sda, scl)` if pins are specified. If two sensors in platform_config.json specify **different** SDA/SCL, the LAST init wins; previously-initialised sensors now address the wrong bus. Bus reconfiguration race. | Centralise I2C bus setup once at boot (e.g. `HardwareManager::initI2C` reading first sensor's pins); plugins should NOT call Wire.begin themselves. | Pending |
+| 20.2 | M | BME688Sensor.cpp:47 — `if (!_ready \|\| maxOut < 4) return 0;` — strict 4-metric requirement. Caller with maxOut=3 (e.g. when one slot was used by another sensor in the same tick) drops ALL data instead of returning the 3 available. Wastes the entire forced-mode read. | Write up to `min(4, maxOut)` metrics; return that count. | Pending |
+| 20.3 | M | DS18B20Sensor.cpp:36 — `_ready = true` set when `count == 0` with comment "bus may have device connect later." False premise: `DS18B20_Mini._count` is set ONLY inside `begin()`. Hot-plugged sensors are never detected without a manual re-init. Comment misleads. | Either remove the "_ready=true" path (return false on no devices), OR add a `rescan()` method called periodically by readAll. | Pending |
+| 20.4 | L | BME280Sensor.cpp:62 vs 71-73 — Inconsistent use of `_makeReading` helper at L62-63 vs direct `SensorReading::make` at L71-73. Maintainer confusion; both produce the same output today. | Use one pattern. | Pending |
+| 20.5 | L | DS18B20Sensor.cpp:59-60 — `requestTemperatures(); delay(conversionTimeMs());` blocks SlowSensorTask up to 760 ms. Acceptable per `isBlocking()=true`, but the subsequent `getTempC()` reads in `DS18B20_Mini` carry the 17.11 noInterrupts timing risk. | Tied to 17.11; fix in driver level. | Pending |
+| 20.6 | I | All I2C sensor plugins rely on SensorManager wrapping their reads with `wireMutex` (15.4 family). `init()` paths run at boot single-threaded (loadAndInit calls per sensor sequentially) so init-time bus access is safe; runtime reads are guarded by SensorManager. OK. | [Acceptable] | N/A |
+| 20.7 | I | Headers (BME280Sensor.h, BME688Sensor.h, DS18B20Sensor.h) — trivial declarations + getMetrics with static const arrays returned. | [MODULE SAFE for headers] | N/A |
+
+---
+
+## Phase 21 — Air Quality Sensor Plugins (SDS011 / PMS5003 / ENS160 / SGP30)
+
+Files: `sensors/plugins/SDS011Sensor.*`, `PMS5003Sensor.*`, `ENS160Sensor.*`, `SGP30Sensor.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 21.1 | H | SDS011Sensor.cpp:26 + PMS5003Sensor.cpp:15 — BOTH set `_serial = &Serial1` and call `Serial1.begin(baud, SERIAL_8N1, rx, tx)`. ESP32-C3 has only ONE hardware UART besides USB-CDC (Serial1). If user enables both in platform_config.json, the second init reconfigures Serial1 (different baud and pins), **silently breaking the first**. Same UART cannot serve two devices simultaneously. | Mutually exclusive: refuse to register the second if the first is already on Serial1; OR document UART-share limitation in INSTRUCTIONS.md. | Pending |
+| 21.2 | M | SDS011Sensor.cpp:67-74 `_drainBuffer` — 100 ms busy loop in `init()` (called at boot from `_initPlatform`). Combined with other sensor init delays, contributes to multi-second boot stretch BEFORE OtaManager::tick begins (compounds 1.14 / 8.10 / 9.x ordering risks). | Replace `delay(10)` with `vTaskDelay`; cap drain at 50 ms. | Pending |
+| 21.3 | L | SDS011Sensor.cpp:37-45 — Hardware Working Period config command sent fire-and-forget; NO ACK frame check. Sensor may silently refuse to switch modes; user thinks `work_period_min=5` is active when sensor stays continuous. | Read response frame within 1 s; verify checksum + work-period byte; log warning on mismatch. | Pending |
+| 21.4 | L | SDS011Sensor.cpp:36-45 — Command checksum sums bytes 2..16 (line 38-39) per Nova Fitness spec. Buffer initializer at L37 sets cmd[17] to 0 but is then OVERWRITTEN by checksum at L40. Correct, but the read-once initializer is dead. Cosmetic. | Drop the `0` placeholder in initializer (use `{}` rest). | Pending |
+| 21.5 | M | PMS5003Sensor.cpp:28-39 `_readFrame` — 2 s deadline loop with `delay(5)` and NO `g_taskHeartbeat[TASK_IDX_SLOW_SENSOR]` refresh. SDS011's L115 DOES refresh during a similar wait. Inconsistent; if MAX_SILENCE_MS were ever tightened below 30 s, PMS5003 reads would trip the C4 watchdog. | Add `g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();` at top of the loop body. | Pending |
+| 21.6 | M | ENS160Sensor.cpp:64-81 `readAll` — Does NOT call `_waitReady` (NEW_DATA bit) before reading TVOC/eCO2 registers. If sensor isn't fully ready (warmup, transient), reads stale/garbage values that pass `isPlausible` (tvoc 0..65535, eco2 400..65535). | Call `_waitReady(200)` at top; on failure return 0; OR mark readings as QUALITY_ESTIMATED. | Pending |
+| 21.7 | L | ENS160Sensor.cpp:79 — AQI emitted as float with unit "". ProcessingTask `isPlausible` has no AQI check → catch-all returns true. Garbage AQI (>5) passes validation and reaches AlertEngine. | Add bounds check `if (aqi < 1 \|\| aqi > 5)` → mark QUALITY_ERROR; add `aqi` case to ProcessingTask.isPlausible. | Pending |
+| 21.8 | L | SGP30Sensor.cpp:43-78 `init` — Sequence: get_feat → IAQ_INIT. After IAQ_INIT, first 15 s of readings are baseline-only. Class correctly marks these as `QUALITY_ESTIMATED` (L96). But the comment in the header (L11-13) says "first 15 readings return baseline" — at 30 s interval, that's 7.5 minutes of estimated readings. Doc/code mismatch. | Update comment: "First reading after init returns estimated; switches to GOOD after 15 s warmup elapses." | Pending |
+| 21.9 | M | SGP30Sensor.cpp:33-41 `_measure` — On I2C failure (single transient noise byte → CRC mismatch in `_readWords`), returns false → `readAll` returns 0. NO retry within one call. Combined with SensorTask interval, one transient noise burst skips an entire 30 s cycle. | Retry once after 10 ms on CRC failure. | Pending |
+| 21.10 | L | SDS011Sensor.cpp:113-115 — `g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();` manual refresh inside `read()` and `readAll()` blocking waits. Direct write to a global volatile array from sensor plugin code violates encapsulation (the heartbeat is a TaskManager concern). Acceptable today since plugins know they're on SlowSensorTask. | Provide a `SensorPlatform::tickHeartbeat()` helper that hides the array. | Pending |
+| 21.11 | I | All UART/I2C plugin headers — trivial declarations, static metric arrays, calibration members. | [MODULE SAFE for headers] | N/A |
+
+---
+
