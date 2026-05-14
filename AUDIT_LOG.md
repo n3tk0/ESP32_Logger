@@ -868,3 +868,110 @@ A user who picks any default-configured sensor and enables it inherits a hardwar
 
 ---
 
+## REFACTORING & OPTIMIZATION OPPORTUNITIES
+
+Switched from "Auditor" to "Senior Refactoring Engineer". Structural improvements grouped by category. NO code changes yet — these are candidates for a follow-up cleanup pass.
+
+### R1. Dead Code Elimination
+
+- **`src/sensors/plugins/YFS201Sensor.h`** — header for a class with NO `.cpp` implementation; `ESP_Logger.ino:387-388` registers `"yfs201"` via the `WaterFlowSensor` factory lambda instead. Orphan file → **delete**.
+- **`src/storage/HybridStorage.*`** — entire module never referenced from anywhere (verified via grep). `begin()`/`primary()`/`secondary()`/`mirrorWrite()` all dead. Mirror logic actually lives in TaskManager.cpp. **Delete both files** (~2-3 KB flash reclaimed).
+- **`HardwareManager.cpp:8-22`** `onFFButton`/`onPFButton` IRAM ISRs declared with `IRAM_ATTR` but never registered via `attachInterrupt` anywhere. Holds IRAM forever for no reason. Plus `volatile bool ffPressed/pfPressed` globals (Globals.h:78-79) and `lastFFInterrupt/lastPFInterrupt` are also write-only.
+- **`StorageManager.cpp:91-123` `generateDatalogFileOptions`** + **`L126-153 countDatalogFiles`** + **`L85-89 getStorageBarColor`** — all declared/defined, **zero callers** (verified). Plus 8.2's HTML-injection risk if revived. Delete from `.h` and `.cpp`.
+- **`HardwareManager.cpp:56-60`** `isPinSafe` lambda defined inside `initHardware()` but never invoked. Dead-defensive code.
+- **`ESP_Logger.ino:485`** `isrDebounceUs = config.hardware.debounceMs * 1000UL;` — assigns a value only read by ISRs that are never attached (above). Dead assignment + dead global at Globals.cpp:75.
+- **`src/arduino_build_flags.h`** — deprecated 28-line shim that just `#include "setup.h"`. Comment says "kept only so older sketches still compile". If no current code in the tree includes it directly, delete with a release-note breaking-change.
+- **`IModule.h:54`** `virtual void tick(uint32_t nowMs) {}` — never called from any caller. Either wire it into the main loop or delete the virtual.
+- **`ModuleRegistry.cpp:130-138 startAll()`** — function defined but never called from `setup()` (6.11). Either invoke it or delete.
+- **`Config.h:232`** `uint8_t _reserved_lang;` — explicitly named "reserved", permanently burned byte. Repurpose as a feature-flag byte or document.
+- **`setup.h:114-122`** `DEFAULT_SDA` / `DEFAULT_SCL` / `DEFAULT_FLOW_PIN` macros — declared but never referenced in src/ (5.1). Plus disagree with Config.h DefaultPins (FG.1). Delete.
+- **`setup.h:222`** `TEST_MODE_BLINK_MS` macro — defined but `config.flowMeter.blinkDuration` is used everywhere instead.
+- **`OtaModule.cpp:5-8`** `load(JsonObjectConst /*cfg*/) { return true; }` — empty body, IModule contract minimum. Acceptable but worth wrapping in a `class StatelessModule : public IModule` base to eliminate the boilerplate.
+- **`SDS011Sensor.cpp:37`** `uint8_t cmd[19] = {0xAA, 0xB4, 0x08, 0x01, (uint8_t)work, 0,0,0,0,0,0,0,0,0,0, 0xFF, 0xFF, 0, 0xAB};` — element at index 17 set to `0` then OVERWRITTEN at L40 with checksum. Dead initializer value.
+- **`AlertEngine::hasToasts() const`** declared in .h (AlertEngine.h:62), exposed but never called from src/ (verified). Hoist to private or delete.
+- **All `#ifdef SENSOR_*_ENABLED` blocks** in ESP_Logger.ino:73-126 + 355-411 + setup.h:36-89. With most sensors commented out in setup.h, the `#ifdef` blocks correctly DCE the code, but the registration lambdas at L355-411 add ~20 lines of preprocessor noise. Consider a `static SensorRegistration<XSensor> r("x");` self-registration pattern.
+
+### R2. DRY Violations (Duplicated Logic)
+
+- **`nowEpochSafe()` duplicated 3× verbatim** — SensorTask.cpp:17-28, SlowSensorTask.cpp:14-25, StorageTask.cpp:17-25. **Plus inline equivalents** at WebServer.cpp:611-613, ApiHandlers.cpp:44. **5 copies of "RTC → NTP → millis fallback" logic.** Extract to `pipeline/TimeSource.h::uint32_t epochNow();`. Eliminates the FD.3 systemic risk while reducing flash by ~200 bytes.
+- **`Lock` RAII helper duplicated** in LiveAggregator.cpp:11-23 AND FlowRunLogger.cpp:6-16 (identical class). Extract to `pipeline/MutexGuard.h`.
+- **`copyStr(char* dst, size_t n, const char* src)` helper** in DataLogModule.cpp:7-9 AND ThemeModule.cpp:7-9. Duplicate; extract to `utils/StringUtils.h`.
+- **`SAFE_STRCPY` macro at ConfigManager.cpp:12 vs `SAFE_STRNCPY` at WebServer.cpp:45** — same pattern, different names, different files. Consolidate.
+- **I2C `_writeReg / _readReg / _readBlock` helper trio** is privately implemented in BME280_Mini.h, BME688_Mini.h, ENS160Sensor.cpp, VEML6075Sensor.cpp, VEML7700Sensor.cpp, BH1750Sensor.cpp, SCD4xSensor.cpp, SGP30Sensor.cpp — **8 copies**. Extract a shared `I2cBus` helper class. Also reduces footgun count for 22.x I2C-error handling (each duplicate gets to ignore endTransmission return value independently).
+- **Sensirion CRC-8 (poly 0x31, init 0xFF)** implemented twice: SGP30Sensor.cpp:4-11 + SCD4xSensor.cpp:4-12. Centralise in `utils/SensirionCrc.h`.
+- **`Wire.begin(sda, scl) if (sda>=0 && scl>=0) else Wire.begin()`** pattern duplicated in **8 sensor plugins** (BME280, BME688, ENS160, SCD4x, SGP30, VEML6075, VEML7700, BH1750). Already creates the 20.1 race. Extract a single `bus::setupI2C(sda, scl)` that's idempotent + thread-safe.
+- **`gpio_isr_handler_add` + `static bool _isrServiceInstalled` + destructor cleanup** triple (which 3 plugins each implement and 2 forget — see 2.6 / 23.2-23.3). Extract `IsrPin` RAII class that handles install AND removal in dtor.
+- **"Open + 16 KB size cap + JsonDocument parse" pattern** in ModuleRegistry.cpp:46-64, ExportManager.cpp:16-35, SensorManager.cpp:41-58, HybridStorage.cpp:15-27 (dead), ApiHandlers.cpp:855-868, ESP_Logger.ino:264-275 / 329-330. **6 near-identical sites**. Extract `bool loadJsonFile(fs::FS&, const char* path, JsonDocument& doc, size_t maxBytes = 16384);`.
+- **Atomic-write-via-tmp+rename pattern**: ConfigManager.cpp (config.bin) and ModuleRegistry.cpp (modules.json) implement it. AlertEngine._save (15.9), DataLogger.flush (9.8 trimLogFile), FlowRunLogger._closeRun (12.11), CsvLogger._rotate (16.1), backupBootCount (8.6) all DO NOT. Extract `bool atomicWrite(fs::FS&, const char* path, std::function<bool(File&)> writerFn);`. Single utility prevents the systemic non-atomic class of bugs.
+- **IPv4 "A.B.C.D" parser** in WiFiModule.cpp:8-16 AND WebServer.cpp:1251-1258 (`parseIP` lambda). Extract `bool parseIPv4(const char* s, uint8_t out[4]);`.
+- **Timestamp priority logic** (`RTC valid → NTP → millis`) — see TimeSource refactor above.
+- **`AsyncResponseStream + serializeJson + req->send(resp)` boilerplate** appears 20+ times in ApiHandlers.cpp and WebServer.cpp. The `sendJsonResponse(req, doc)` helper at WebServer.cpp:62 already exists but most callers don't use it. **Audit + migrate all 20+ sites** to one helper.
+- **`if (rateLimit429(r)) return; if (csrfBlock(r)) return;` doubled guard** at the top of every mutating handler (~12 sites). Wrap in a single `if (!requireMutatingAuth(r)) return;` helper. Forces consistent ordering, prevents the 3.x family of "added rateLimit but forgot CSRF" bugs.
+- **`req->hasParam("X", true)` + `req->getParam("X", true)->value().toInt()/.toFloat()/.c_str()`** triple is repeated 60+ times across /save_hardware, /save_datalog, /save_network. Extract `getIntParam(r, "X", default)`, `getFloatParam`, `getStringParam`. Halves the line count of save handlers.
+- **`(EnumType)(cfg["x"] | (int)current)` cast** appears in every IModule.load() (WiFi/Theme/DataLog/Time). Plus 13.3 / 13.9 / 14.2 / 14.3 / 14.6 flagged the missing range checks. Extract `template<typename E> bool loadEnum(JsonObjectConst, const char* key, E& out, int min, int max);`.
+- **`new T[N]` without `std::nothrow`** at ApiHandlers.cpp:236, HttpExporter.cpp:34, OpenSenseMapExporter.cpp:45, AggregationEngine.cpp:210. Extract `template<typename T> T* allocOr500(size_t n, AsyncWebServerRequest* r);`.
+- **Default theme colour SAFE_STRCPY chains** in ConfigManager.cpp:213-232 (`loadDefaultConfig`) AND 96-112 (`applyDefaults`). Two near-identical chains × 14 fields. Define a PROGMEM table `static const struct { size_t offset; const char* defaultValue; } themeDefaults[] = { ... };` walked by one function.
+- **Sensor plugin factory boilerplate** in ESP_Logger.ino:355-411 — 19 sensor types × identical `sensorManager.registerPlugin("X", []()->ISensor*{ return new XSensor(); });`. Replace with a macro `REGISTER_SENSOR(type, Class)` or self-registration via a global ctor (uses static-init order — needs care).
+
+### R3. Memory / Flash Optimization
+
+- **`SensorReading` is ~72 B** with implicit compiler alignment (no `#pragma pack`). Three FreeRTOS queues + ring buffer = 6.2 KB + 14.4 KB queue/RAM cost. Plus /api/data path allocates `SensorReading[300]` twice (~44 KB transient). **Could shrink by removing the redundant `sensorType[12]` field** (always derivable from sensorId via SensorManager lookup) — saves 16 B/reading → ~5 KB across queues + ring buffer.
+- **`#pragma pack(push, 1)` on DeviceConfig in Config.h** is good for on-disk size but forces unaligned float access on RV32 (5.10). Remove the pack and bump CONFIG_VERSION; trade 30 B extra disk for cycle savings on every config read.
+- **PROGMEM under-utilization**:
+  - `SDS011Sensor.cpp:37` `cmd[19]` config command — should be `static const uint8_t cmd[] PROGMEM` + `memcpy_P`.
+  - `BME688_Mini.h:250-261` `lookupK1[]` / `lookupK2[]` const arrays are NOT `PROGMEM` → consume DRAM. ~256 B reclaimable.
+  - `Sensor::getMetrics` returns `static const char* m[] = { ... }` in every plugin — already in .rodata (good).
+- **ConfigManager.cpp duplicated string literals**: every theme color hex `"#275673"` etc. appears at L213 + L98 = two copies in flash. ~14 colors × ~8 chars = 112 B reclaimable.
+- **StorageTask stack allocation** `char headerBuf[1024] + char rowBuf[1024]` = 2 KB on STACK_STORAGE_TASK=8192 (25% of budget). Make member fields of `class StorageTask` so the buffers move to BSS and the stack frees up for other callees.
+- **ZMPT/ZMCT `alloca(sizeof(int)*500) = 2000 B`** on SensorTask stack 4096 (24.7). Pre-allocate as a class member.
+- **`String getRtcTimeString() / getRtcDateTimeString()`** return Arduino String → heap alloc per call. Called from JSON serialisation in hot paths. Change to `void getRtcTimeStr(char* out, size_t n);`. ~12 B/call savings × frequent.
+- **`Globals.h:50-52`** `extern String wakeUpButtonStr / cycleStartedBy` — Arduino String members with heap-allocated internal buffers, mutated cross-task (6.3). Convert to `char[16]` arrays.
+- **`Arduino String` use in `Utils.cpp`** (sanitizePath/sanitizeFilename, urlEncode, deleteRecursive's vector<String>) — every call allocates short-lived strings. Convert to `std::string_view` or caller-supplied buffers in hot paths.
+- **`std::vector<String> stack` in `deleteRecursive` (Utils.cpp:85)** + `std::vector<String> dirs` in `StorageManager.cpp:97, 130` — vectors of String are heap-on-heap. Could use a fixed-size stack array with depth cap (also addresses 7.4 OOM risk).
+- **`std::unique_ptr<char[]>` allocation in WebServer.cpp:755-756** (`lastLines`, `lineBuf`) — pattern is good (already heap-aware) but could be a single combined buffer to halve allocation calls.
+- **`Slot slots[16]` in SensorManager.toJson:248** — ~60 B × 16 = 960 B stack. Acceptable but member-field promotion would let the slot array survive across calls and avoid re-allocation.
+- **`AlertToast _toasts[8]` ring buffer** is 80 B × 8 = 640 B BSS per AlertEngine instance. OK.
+- **Each sensor plugin's `static const char* m[] = { ... }` in getMetrics** is fine (.rodata), but a single consolidated `enum Metric` table indexed by uint8_t would let `SensorReading::metric` shrink from `char[16]` to `uint8_t` (-15 B/reading × queues = ~3 KB).
+
+### R4. Include Cleanup
+
+- **`Globals.h` pulls heavy headers**: `<LittleFS.h>`, `<FS.h>`, `<SD.h>`, `<ESPAsyncWebServer.h>`, `<drivers/DS1302_Mini.h>`. Every TU paying for these. Most callers don't need `<SD.h>` or `<ESPAsyncWebServer.h>`. Split into:
+  - `Globals.h` — bare-minimum extern declarations
+  - `GlobalsWeb.h` — pulls AsyncWebServer for handlers
+  - `GlobalsStorage.h` — pulls LittleFS/SD for storage code
+- **`ApiHandlers.h`** declares one function (`registerApiRoutes(AsyncWebServer&)`) but includes `<ESPAsyncWebServer.h>`. Forward-declare `class AsyncWebServer;` instead — caller already includes the full header.
+- **`WebServer.h`** includes `<ESPAsyncWebServer.h>`, `<ArduinoJson.h>`, `<functional>`. Forward-declare `class AsyncWebServerRequest;` and `class JsonDocument;` (the latter is harder in ArduinoJson v7 but doable via the public alias).
+- **`TaskManager.h:5`** `#include <FS.h>` — only `init(fs::FS&)` needs it. Forward-declare `namespace fs { class FS; }`.
+- **Sensor plugin headers**: Each `*Sensor.h` includes `<Wire.h>` because of `TwoWire* _wire` member. Move the include to `*Sensor.cpp` and forward-declare in the header (TwoWire is a class — easy forward decl).
+- **`HttpExporter.h`** includes `<HTTPClient.h>` but only the .cpp uses `HTTPClient http;`. Move include to .cpp.
+- **`WebhookExporter.h` / `SensorCommunityExporter.h` / `OpenSenseMapExporter.h`** all include `<HTTPClient.h>` in the header for the same reason. Same fix.
+- **`MqttExporter.h`** includes `<WiFiClient.h>` and `MQTT_Mini.h` — both are member types so the include is mandatory. OK.
+- **`ESP_Logger.ino`** includes ~30 headers individually. Build flag `SENSOR_X_ENABLED` gating is correct, but the long include list duplicates the registration list at L355-411. A single `sensors/all.h` aggregator (also build-flag-gated) would reduce churn.
+- **No circular includes detected** via grep. Good baseline.
+
+### R5. Other Structural Improvements
+
+- **`CsrfToken` and `RateLimiter` are static-method classes** with module-globals. Convert to free functions in a `csrf::` / `ratelimit::` namespace; cleaner intent, no class boilerplate.
+- **`Handlers` event-dispatcher map in core.js** has 30+ registrations spread across 4 files. Adopt a single `registerHandlers({...})` call at the end of each file (some files already do this). Document the security invariant (25.4) directly above each registration block.
+- **Settings pages are 80% boilerplate HTML** (page-head, form, cards, save button). Server-side could generate them from a single template + per-page metadata. Or use the schema-driven Modules pattern (currently only powers settings_modules.html) for the rest, retiring the legacy per-page HTML.
+- **`#if PLATFORM_LEGACY_BUILD`** wraps DataLogger.cpp entirely (good pattern). Could expand to wrap the legacy state-machine in ESP_Logger.ino (~150 lines) the same way — saves flash on non-legacy builds.
+- **`saveConfig()` + `moduleRegistry.saveAll()` are called as a pair** in ~5 sites (1.9 / 6.15). Combine into a single `persistConfig()` that locks once and writes both.
+- **The 6 default-pin tables** (DefaultPins, _checkPinConflicts, sanitizeWakeConfig, isPinSafe, platform_config.json, the various plugin defaults) should consolidate into a single per-target pin map (cpp const struct) consulted by all validation paths. Centralises FG.1 / FG.2 fixes.
+- **Default `platform_config.json` ships in /www/** but should logically live in /src/defaults/ as a `const char* PROGMEM` and be written to LittleFS only if absent at boot.
+
+### Estimated Impact
+
+| Category | Files / Lines Reduced | Flash | DRAM | Notes |
+|---|---|---|---|---|
+| R1 (dead code) | ~12 files, ~600 LOC | ~5-8 KB | ~1 KB | Quick wins; no behavior change |
+| R2 (DRY) | ~20 sites consolidated | ~3-5 KB | — | Improves maintainability + fixes systemic bugs (atomicWrite eliminates 9.8/12.11/15.9/16.1 family) |
+| R3 (memory) | — | ~2 KB | ~10-15 KB | Significant heap headroom; enables more concurrent web sessions |
+| R4 (includes) | — | — | — | Faster compile, cleaner public surface |
+| R5 (structural) | — | ~2-4 KB | — | Reduces boilerplate; eases future feature additions |
+
+**Highest-leverage refactor: `atomicWrite()` extraction (R2).** Single helper retroactively fixes 5+ flagged bugs (8.6, 9.8, 12.11, 15.9, 16.1) and prevents the entire "non-atomic FS write" class going forward.
+
+[END OF REFACTORING PHASE]
+
+---
+
