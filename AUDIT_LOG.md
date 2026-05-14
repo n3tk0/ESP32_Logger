@@ -358,3 +358,43 @@ Files: `sensors/ISensor.h`, `sensors/SensorManager.*`, `alerts/AlertEngine.*`
 
 ---
 
+## Phase 16 — Storage Backends + RTC Driver
+
+Files: `storage/CsvLogger.*`, `storage/HybridStorage.*`, `drivers/DS1302_Mini.h`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 16.1 | H | CsvLogger.cpp:67-76 `_rotate` — `_fs->remove(bak); _fs->rename(path, bak);` non-atomic. Power loss in the gap leaves NEITHER file present (primary CSV gone). Same class as 9.8, 12.11. | LittleFS rename overwrites atomically — drop the explicit `remove(bak)` call. | Pending |
+| 16.2 | M | HybridStorage entire module is DEAD CODE — `begin()`/`primary()`/`secondary()`/`mirrorWrite()` are never called from anywhere (verified via grep across src/ and ESP_Logger.ino). Mirror functionality lives instead in TaskManager.cpp:115-126. Module is linked into firmware (~2-3 KB flash bloat) and misleads maintainers into thinking it's the active mirror path. | Delete `src/storage/HybridStorage.*` OR wire it into TaskManager to replace the inline mirror block. | Pending |
+| 16.3 | L | HybridStorage.cpp:39 — `SD.begin(_sdCS)` with default `pinSdCS=10` collides with C3 SPI flash pin range (per 5.8). Dead code mitigates impact, but if revived would inherit 5.8. | Tied to 5.8; document or fix in tandem. | Pending |
+| 16.4 | L | HybridStorage.cpp:69-90 `mirrorWrite` — no `fsMutex` acquire; concurrent caller would race against StorageTask, ConfigManager, etc. Dead code today; flagged if revived. | Acquire fsMutex around the open/write/close blocks. | Pending |
+| 16.5 | L | DS1302_Mini.h:226 — `SetDateTime` writes `_dec2bcd(year - 2000)`. For year ≥ 2100, `(100/10)<<4 \| 100%10 = 0xA0` is invalid BCD. DS1302 hardware behavior on invalid BCD is unspecified; may corrupt time. | Clamp year to 2000..2099, or return error for out-of-range. | Pending |
+| 16.6 | I | DS1302_Mini.h:137-159 — `writeByte`/`readByte` bit-banged at ~1 MHz (delayMicroseconds(1) per phase). Well within DS1302 max SCLK spec. Acceptable. | [No action] | N/A |
+| 16.7 | I | CsvLogger.h / HybridStorage.h — trivial header surfaces; principal risk in `.cpp`. | [MODULE SAFE for headers beyond items above] | N/A |
+
+---
+
+## Phase 17 — Mini Drivers (MQTT, BME280, BME688, DS18B20)
+
+Files: `drivers/MQTT_Mini.h`, `drivers/BME280_Mini.h`, `drivers/BME688_Mini.h`, `drivers/DS18B20_Mini.h`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 17.1 | M | MQTT_Mini.h:63 — On `remaining + 5 > sizeof(buf)` overflow, sets `_state=-4` and returns false WITHOUT calling `_tcp->stop()`. TCP connection to broker leaks; next connect attempt may collide. | Add `_tcp->stop();` before return false at L63. | Pending |
+| 17.2 | H | MQTT_Mini.h — NO TLS support. Credentials + sensor data sent plaintext on port 1883. For non-LAN deployments (e.g. cloud broker over internet) every payload + auth is sniffable. | Add `WiFiClientSecure` variant + setCACert path; expose via setup.h flag `EXPORT_MQTT_TLS_ENABLED`. | Pending |
+| 17.3 | M | MQTT_Mini.h:98-105 — CONNACK wait blocks calling task up to 5 s (`delay(10)` × 500). Called from ExportTask normally (acceptable); if ever invoked from AsyncTCP worker (alert path 15.8) the whole web stalls. | Use non-blocking poll with FreeRTOS task yield; document the blocking contract on the function. | Pending |
+| 17.4 | L | MQTT_Mini.h:122 — `publish()` accepts arbitrary uint16_t topic+payload lengths (up to 65 535). WiFiClient internal TCP buffer is typically 4-5 KB; oversized payload gets chunked but each `_tcp->write` may short-write. | Add `if (topicLen + payloadLen > 4096) return false;` guard. | Pending |
+| 17.5 | M | BME280_Mini.h:36 — `while ((_read8(0xF3) & 0x01) != 0) delay(1);` — wait for NVM copy with NO timeout. If chip hangs (broken sensor, I2C noise), infinite loop hangs boot. | Add `for (int i = 0; i < 100; i++) { if (... == 0) break; delay(1); }` then return false on timeout. | Pending |
+| 17.6 | M | BME280_Mini.h:66, 88 — `readPressure()` and `readHumidity()` rely on `_t_fine` set by previous `readTemperature()` call. No assertion or guard; out-of-order calls produce garbage values. Plugin code must always call temp first. | Make readPressure/Humidity call readTemperature internally if `_t_fine == 0`; or expose `readAll()` that sequences them. | Pending |
+| 17.7 | L | BME280_Mini.h:160-204 — `_read8`/`_read16`/`_read24`/`_readBlock` discard `Wire.endTransmission()` return code AND don't verify `requestFrom` count matches. I2C error returns 0xFF on the bus → silently parsed as normal data. | Check `endTransmission != 0` and `requestFrom == len`; on error return sentinel NaN; have plugin convert to QUALITY_ERROR. | Pending |
+| 17.8 | M | BME688_Mini.h:167-194 — Calibration register decoding uses magic indices into coeff1[]. Comments at L168-170 admit re-derivation from Bosch datasheet. No tests vs official BSEC reference; gas resistance compensation may be miscalculated for some sensors. | Cross-check every coefficient index against Bosch BME68x driver source; add a self-test against a known reading. | Pending |
+| 17.9 | L | BME688_Mini.h:269-282 `_calcHeaterRes` — int32 intermediate arithmetic can overflow at max target temperature (400 °C). Bosch's own reference driver carries the same risk. Heater calibration may be off-by-N for high-temp settings. | Promote to int64 for the var2 calculation. | Pending |
+| 17.10 | M | BME688_Mini.h:83-88 — `performReading` blocks up to 1 s polling status register. Plugin must declare `isBlocking()=true`; if not, SensorTask path stalls every other sensor. To verify in Phase 20. | Verify BME688Sensor::isBlocking() returns true. | Pending |
+| 17.11 | H | DS18B20_Mini.h:134-143 `_readBit` — Critical timing window (`delayMicroseconds(3) + delayMicroseconds(10) + delayMicroseconds(53)`) executed WITHOUT `noInterrupts()` / `portDISABLE_INTERRUPTS()`. FreeRTOS scheduler tick (1 ms on ESP32-C3 default) preempting between assert and sample corrupts the bit → CRC failure at best, wrong temperature at worst. 1-Wire is timing-critical. | Wrap each `_writeBit`/`_readBit` (and ideally each 8-bit byte op) in `portDISABLE_INTERRUPTS()` / `portENABLE_INTERRUPTS()`. Note: also disables WiFi ISRs briefly; should be acceptable for ~70 μs windows. | Pending |
+| 17.12 | L | DS18B20_Mini.h:38 — Config register write `((res-9)&3)<<5 \| 0x1F` leaves bit 7 in a non-spec state (datasheet "reserved must be 1"). Most chips tolerate; some clones may not. | Use `0x9F` (sets bit 7) instead of `0x1F`. | Pending |
+| 17.13 | M | DS1302_Mini.h ThreeWire — bit-banged access from multiple call sites (main loop, SensorTask, SlowSensorTask, StorageTask, WebServer handlers) with NO mutex protecting shared CE/IO/SCLK pins. Concurrent reads of the time registers can interleave at the bit level, returning garbage. Less critical than 17.11 (no scheduler-preemption hazard within a single read window because RTC reads are slow), but inter-task races corrupt the burst-read. | Add a `rtcMutex` semaphore; require every Rtc->* call to take it (timeout 100 ms). | Pending |
+| 17.14 | L | MQTT_Mini.h general — Plain MQTT 3.1.1 publish-only; no SUBSCRIBE / SUB-ACK handling. Documented "publish-only" design. Future RPC features blocked. | Document explicitly in header. | N/A |
+| 17.15 | I | Mini-driver headers are inline implementations; risk surface fully audited in this phase. Caller (plugin) must check return codes and call sequence. | [MODULE SAFE for headers beyond items above] | N/A |
+
+---
+
