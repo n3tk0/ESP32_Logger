@@ -519,3 +519,46 @@ Files: `sensors/plugins/WaterFlowSensor.*`, `YFS201Sensor.h`, `RainSensor.*`, `W
 
 ---
 
+## Phase 24 — Distance / Soil / AC-Power Sensor Plugins (HC-SR04 / Soil / ZMPT101B / ZMCT103C)
+
+Files: `sensors/plugins/HCSR04Sensor.*`, `SoilMoistureSensor.*`, `ZMPT101BSensor.*`, `ZMCT103CSensor.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 24.1 | H | HCSR04Sensor.h — Plugin does NOT override `isBlocking()` → inherits `false` from ISensor.h:77 → dispatched on **SensorTask** (fast path). `pulseIn(_echoPin, HIGH, 30000)` at .cpp:35 blocks up to 30 ms per read; starves all I2C sensors sharing the same tick. | Override `bool isBlocking() const override { return true; }`. | Pending |
+| 24.2 | M | HCSR04Sensor.cpp:35 — `pulseIn` runs without `noInterrupts()` / `portDISABLE_INTERRUPTS()`. FreeRTOS scheduler tick (~1 ms) preempting the 30 ms wait corrupts the measurement → ~17 cm error per preemption. Same class as 17.11. | Wrap in interrupt-disabled context; brief WiFi/AsyncTCP stall is acceptable for 30 ms. | Pending |
+| 24.3 | L | HCSR04Sensor.cpp:40 — Speed of sound hardcoded 0.034 cm/µs (~20 °C). 2-3 % error over 0-40 °C. | Optional: read BME280 temperature; `c = 331.3 + 0.606*T` m/s. | Pending |
+| 24.4 | M | HC-SR04 hardware mismatch — module datasheet 5 V; ESP32-C3 GPIO 3.3 V. Many C3 boards tolerate 5 V on input but out-of-spec. | Document required level-shifter on echo pin. | Pending |
+| 24.5 | M | SoilMoistureSensor.cpp:24 — `pinMode(_pin, INPUT)` with NO `analogSetPinAttenuation()`. ESP32-C3 default attenuation caps ADC at ~1.5 V; capacitive soil output up to 3.0 V → top half of range wasted, "dry air" reads clipped at saturation. | Add `analogSetPinAttenuation(_pin, ADC_11db);` before `pinMode`. | Pending |
+| 24.6 | H | ZMPT101BSensor + ZMCT103CSensor — NEITHER overrides `isBlocking()`. Defaults `_samples=200 × _samplePeriodUs=100` = 20 ms block on SensorTask per read; with both enabled + I2C in same tick, ProcessingTask throughput collapses. | Override `isBlocking()=true` in both headers. | Pending |
+| 24.7 | M | ZMPT101BSensor.cpp:46 + ZMCT103CSensor.cpp:46 — `alloca(sizeof(int) * 500)` = 2000 B worst-case stack alloc per call. STACK_SENSOR_TASK=4096 minus caller's frame leaves little headroom. | Pre-allocate `int _buf[500]` as member, or cap _samples at 250. | Pending |
+| 24.8 | M | ZMPT/ZMCT/Soil default `_pin = 0 / 1 / 0`. **GPIO0 is an ESP32-C3 strap pin** (boot mode select). Analog signal present at power-on can alter boot mode. Same risk class as 23.3 (RainSensor GPIO9). | Change defaults to non-strap ADC pins (GPIO3 / GPIO4). | Pending |
+| 24.9 | L | ZMPT/ZMCT default `factor=1.0` — produces raw ADC RMS count as "Vrms"/"Arms". AlertEngine rules `voltage_vrms > 230` never fire until calibrated. | Surface "uncalibrated" warning in /api/sensors when factor==1.0 AND value>0. | Pending |
+| 24.10 | L | ZMPT/ZMCT — 20 ms window = exactly 1 cycle at 50 Hz; at 60 Hz = 1.2 cycles → partial-cycle bias ≈ 1 % stddev error. | Auto-detect frequency via zero-crossings, or document 50 Hz target. | Pending |
+| 24.11 | I | ZMPT/ZMCT use `ADC_11db` constant; deprecated in ESP-IDF 5.x in favour of `ADC_ATTEN_DB_12`. Compiles with warning. | Switch to `ADC_ATTEN_DB_12`. | Pending |
+| 24.12 | I | All Phase 24 plugin headers — trivial declarations + static metric arrays. | [MODULE SAFE for headers beyond items above] | N/A |
+
+---
+
+## Phase 25 — Frontend Bootstrap (theme-boot, icons, core.js core)
+
+Files: `www/js/theme-boot.js`, `www/js/icons.js`, `www/js/core.js` (bootstrap section L1-170)
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 25.1 | I | theme-boot.js:39-51 — Whitelist-validates `accent`/`density`/`theme` values from localStorage; rejects unknown values silently. Defends against localStorage poisoning via XSS or browser extensions. Best practice. | [MODULE SAFE — model of correct defensive coding for the UI] | N/A |
+| 25.2 | M | icons.js:163-173 + L186 — `svg(name)` interpolates `name` into `data-lucide="' + name + '"` string template, then L186 inserts via `el.innerHTML`. The L181 whitelist (`if (!ICON_PATHS[name]) continue`) prevents arbitrary names from reaching the template TODAY. Any future change that bypasses the whitelist (e.g. lazy-fetched icons, raw passthrough) would expose stored XSS via the `name` interpolation. | Replace string concat with `setAttribute('data-lucide', name)` on a DOM-constructed `<svg>`; document the whitelist invariant in a comment. | Pending |
+| 25.3 | L | icons.js:175-188 `swap` queries `[data-icon]` and overwrites innerHTML on every page navigation. Reflow cost on large pages. | Cache rendered icons in a Map keyed by name; the L183-185 "already swapped" check handles repeats but not first-paint cost. | Pending |
+| 25.4 | I | core.js:67 `var Handlers = Object.create(null);` — null-prototype map. Defends against prototype-pollution where an attacker controlling JSON could inject `__proto__` keys. Best practice. | [MODULE SAFE] | N/A |
+| 25.5 | M | core.js:80-87 `JSON.parse(raw)` of `data-args` attribute — try/catch wrapped but NO LENGTH CAP. Markup-injected `data-args="...1MB JSON..."` heap-pressures the browser parser. Server-side values are bounded today; future injected dynamic markup could exceed. | Reject when `raw.length > 4096` before parse. | Pending |
+| 25.6 | L | core.js:74 — `t = ev.target.closest("[data-" + eventName + "]")` finds NEAREST ancestor; outer ancestors with same handler are silently shadowed. May be intentional but undocumented. | Add comment clarifying single-fire bubble policy. | Pending |
+| 25.7 | L | core.js:100-103 — Document-level submit listener with capture=true runs `_dispatchEvent("submit")(ev)` for EVERY submit even when no `[data-submit]` ancestor exists. Wasted closure call. | Inline the closest check before invoking dispatcher. | Pending |
+| 25.8 | M | core.js:156-157 `showPopup(id) / hidePopup(id)` — Sets `style.display` by id with NO id-whitelist. Caller-supplied id is trusted. Today only registered Handlers can call these (25.4 whitelist mitigates), but defense-in-depth gap. | Add `LEGAL_POPUP_IDS = ['restartPopup','popup','movePopup',...]` whitelist inside showPopup. | Pending |
+| 25.9 | L | core.js:29-42 — Module globals (`liveTimer`, `liveES`, `currentPage`, `filesEditMode`, `CFG`, `ST`, ...) declared at file scope, polluting `window`. Multiple JS files share globals per architecture comment L4-14; accidental name collisions silently overwrite. | Wrap each file's state in an IIFE with a single `window.WL_*` export object. | Pending |
+| 25.10 | I | theme-boot.js — Loaded synchronously in `<head>` to prevent FOUC. Adds ~5-10 ms to first paint. Acceptable, documented. | [Acceptable] | N/A |
+| 25.11 | I | core.js, icons.js — Both use strict mode (`"use strict";`). theme-boot.js uses safe constructs only. Consistent enough. | [Acceptable] | N/A |
+
+---
+
+---
+
