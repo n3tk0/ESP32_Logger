@@ -187,3 +187,25 @@ Files: `utils/Utils.*`, `web/CsrfToken.*`, `web/RateLimiter.*`, `web/WebServer.h
 
 ---
 
+## Phase 8 — HW / Storage / RTC / WiFi Manager Headers
+
+Files: `managers/HardwareManager.*`, `managers/StorageManager.h` (+ cpp re-pass), `managers/RtcManager.*`, `managers/WiFiManager.h`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 8.1 | H | HardwareManager.cpp:36-48 `debounceButton` — `lastFFDebounceTime`/`lastPFDebounceTime` initialised to 0 in Globals.cpp:60-61. First call from loop() sees `millis() - 0 > debounceMs` always TRUE. If pin reads ACTIVE on power-on (button held during boot), counter immediately latches → spurious cycle start. | Initialise `lastFFDebounceTime = lastPFDebounceTime = millis()` in initHardware() AFTER pinMode. Also seed `last*ButtonState` from current digitalRead. | Pending |
+| 8.2 | H | StorageManager.cpp:91-123 `generateDatalogFileOptions` — builds raw `<option>` HTML by concatenating `fullPath` with no HTML-escaping. Filename containing `"`, `<`, `>`, `&`, or `'` breaks markup or injects script. **Dead code today** (no callers — verified via grep) but linked into firmware and still re-enabled by legacy paths. | Delete `generateDatalogFileOptions` + `countDatalogFiles` from `.cpp/.h` (also dead). Or escape via `htmlEscape()` helper. | Pending |
+| 8.3 | M | StorageManager.cpp:91-152 — `std::vector<String> dirs` recursion stack uncapped. Same OOM risk as Utils.cpp `deleteRecursive` (7.4). | Cap recursion depth via `if (dirs.size() > 256) break;`. | Pending |
+| 8.4 | M | StorageManager.cpp:85-89 `getStorageBarColor` — declared/defined, **no callers** (grep clean). Dead. | Delete from `.cpp/.h`. | Pending |
+| 8.5 | H | RtcManager.cpp:36-67 `initRtc` — calls `Rtc->SetIsWriteProtected(false)` at line 36 but **never re-enables write protection** at the end of init. RTC stays writable forever; any code path with `Rtc->SetDateTime` is unguarded against accidental writes (compare to WebServer.cpp:1316 RAII guard in `/set_time`). | After RTC init success, `Rtc->SetIsWriteProtected(true);`. WiFiManager.cpp:179-186 and `/set_time` already wrap their writes in unprotect/write/protect cycles. | Pending |
+| 8.6 | H | RtcManager.cpp:78-80 `backupBootCount` — opens `/bootcount.bin` in `"w"` (truncate) mode and writes raw 4 bytes. NO atomic write (no `.tmp` + rename). Power loss mid-write = empty or 1-3 byte file. Next `restoreBootCount` reads truncated bytes → corrupt counter. | Mirror saveConfig pattern: write to `/bootcount.tmp`, fsync via close, `LittleFS.rename(tmp, BOOTCOUNT_BACKUP_FILE)`. | Pending |
+| 8.7 | M | RtcManager.cpp:93-96 `restoreBootCount` — discards `f.read()` return value. On short file (truncated by 8.6 power-loss scenario), partial overwrite of `bootCount`; remaining bytes keep old stack/BSS state. | `size_t n = f.read(...); if (n != sizeof(bootCount)) bootCount = 0;` | Pending |
+| 8.8 | M | RtcManager.cpp:71-80 `backupBootCount` — does not acquire `fsMutex` despite writing LittleFS. Race vs `saveConfig` (already taking it) and `StorageTask.appendRow`. | `if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000)) == pdTRUE) { ...; xSemaphoreGive(fsMutex); }`. | Pending |
+| 8.9 | L | RtcManager.cpp:212-215 — ESP32/S2/S3 EXT1 wake path silently `return` when wakeupMode != ACTIVE_HIGH. User configures ACTIVE_LOW → device never wakes from GPIO. No status reported. | Set `statusMessage = "EXT1 wake requires ACTIVE_HIGH on this chip"` so the UI surfaces it. | Pending |
+| 8.10 | M | RtcManager.cpp:53-56 — 3-iter retry loop calls `delay(10) + delay(10) + delay(100) = 120ms` per iteration × 3 = up to 360ms during `initRtc`. Runs BEFORE OtaManager::boot (ESP_Logger.ino:543). If a pending-verify image hangs here, rollback watchdog never arms. Tied to 1.14. | Move OtaManager::boot earlier (before initHardware/initRtc) per 1.14, OR add a heartbeat write inside the retry loop. | Pending |
+| 8.11 | I | HardwareManager.cpp:26 — `ISR_DEBOUNCE_MICROS=1000` caps pulse rate at 1000 Hz ≈ 133 L/min for YF-S201 (450 pulses/L). Adequate for residential but undocumented. | Add `// Caps max measurable flow at ~133 L/min for YF-S201, ~100 L/min for YF-S403` comment near ISR. | Pending |
+| 8.12 | I | RtcManager.cpp:30-33 — `new ThreeWire(...)` and `new RtcDS1302(...)` without `std::nothrow`. Bad_alloc on heap-pressured boot aborts. | `new(std::nothrow)`; on failure set `rtcValid=false; return;`. | Pending |
+| 8.13 | I | HardwareManager.h / StorageManager.h / RtcManager.h / WiFiManager.h — trivial declarations; risk surface is in the corresponding .cpp files. | [MODULE SAFE for headers] | N/A |
+
+---
+
