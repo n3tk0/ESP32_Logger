@@ -233,3 +233,22 @@ Files: `managers/ConfigManager.*`, `managers/OtaManager.*`, `managers/DataLogger
 
 ---
 
+## Phase 10 — FreeRTOS Sensor Tasks
+
+Files: `tasks/TaskManager.h`, `tasks/SensorTask.*`, `tasks/SlowSensorTask.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 10.1 | M | SensorTask.cpp:13 — `uint32_t pollMs = sensorManager.minReadIntervalMs();` fetched ONCE at task start. `/api/config/platform` reload mutates sensor intervals but SensorTask's local `pollMs` stays stale forever → reads lag (or run too fast) until reboot. | Re-read `minReadIntervalMs()` inside the loop, OR signal task via task-notification when reload happens. | Pending |
+| 10.2 | M | SensorTask.cpp:13, 32 — If `sensorManager.count()==0` or `minReadIntervalMs()` returns 0, `vTaskDelay(pdMS_TO_TICKS(0))` becomes a yield-only busy-loop. Empty sensor config → 100% CPU on SensorTask + cache-thrashes the C4 watchdog clock. | Clamp: `if (pollMs < 50) pollMs = 50;` after the call; verify SensorManager guarantees a floor. | Pending |
+| 10.3 | L | SensorTask.cpp:28, SlowSensorTask.cpp:25 — fallback `ts = millis()/1000` returns 0 for the first second of uptime. SensorTypes.h:21 reserves `ts=0` as "unknown" and LiveAggregator uses `_lastFlushEpoch==0` as "first call" sentinel. Collision during first 1 s after boot. | Bump: `ts = (millis()/1000UL) + 1;` to avoid 0 in the fallback path. | Pending |
+| 10.4 | L | SlowSensorTask.cpp:31 — Hardcoded 500 ms outer poll. Not configurable, not data-driven. For SDS011 with 60-90 s internal cycles, 180 wakeups per useful read. Minor energy waste. | Compute from slow-sensor min interval, or expose a setup.h macro `SLOW_SENSOR_TICK_MS`. | Pending |
+| 10.5 | L | SlowSensorTask.cpp:28 — Blocking sensor read (1.5-3 s for SDS011/PMS5003) runs WITHOUT refreshing `g_taskHeartbeat[TASK_IDX_SLOW_SENSOR]`. Current MAX_SILENCE_MS=30 s tolerates it; any future tightening would false-trip C4 watchdog. | Refresh heartbeat halfway through blocking reads via callback from the plugin, OR raise MAX_SILENCE_MS comment-doc. | Pending |
+| 10.6 | M | TaskManager.h:30-34 — `static TaskHandle_t hSensor/hSlowSensor/hProcess/hStorage/hExport` declared PUBLIC. Any TU can write `TaskManager::hSensor = nullptr` and silently break `checkHealth`/diagnostics. | Make private; expose via `static TaskHandle_t getHandle(TaskIndex)` accessor. | Pending |
+| 10.7 | M | TaskManager.h:36 — `static volatile bool running;` — volatile gives no-cache but no cross-task memory ordering. Tasks may observe stale `running==true` for several cycles after main sets false → late shutdown. | `static std::atomic<bool> running;` with `running.store(false, std::memory_order_release)` on shutdown. | Pending |
+| 10.8 | M | TaskManager.h:25 / TaskManager.cpp:193 — `checkHealth()` inspects heartbeat staleness only. A crashed task's heartbeat byte holds whatever it last wrote; 30 s pass before watchdog fires. | Add fast path: `if (handle && eTaskGetState(handle) == eDeleted) return false;` before heartbeat check. | Pending |
+| 10.9 | I | SensorTask.cpp:30 — passes `sensorQueue` directly to `sensorManager.tickFiltered`; manager iterates sensor table without configMutex (already 3.19 / will revisit Phase 15). | See 3.19. | Pending |
+| 10.10 | I | TaskManager.h / SensorTask.h / SlowSensorTask.h — header surface is small; principal risk in `.cpp` (already covered Phase 2 + this phase). | [MODULE SAFE for headers] | N/A |
+
+---
+
