@@ -636,3 +636,70 @@ Files: `www/pages/settings_datalog.html`, `settings_flowmeter.html`, `settings_t
 
 ---
 
+## Phase 30 — Settings HTML (Export / Modules / OTA)
+
+Files: `www/pages/settings_export.html`, `settings_modules.html`, `update.html`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 30.1 | M | settings_export.html — Most text inputs lack `maxlength` matching backend buffer sizes: L35 `topic_prefix` (backend `_topicPrefix[33]`), L39 `client_id` (`_clientId[33]`), L45 `username` (`_username[33]`), L49 `password` (`_password[65]`), L78 `http url` (`_url[129]`), L131 `osm token` (`_token[65]`). Backend strncpy truncates silently; UI mismatch. Same family as 29.4. | Add `maxlength` matching exporter `.h` buffer sizes. | Pending |
+| 30.2 | H | settings_export.html:82 — `<input id="exp-http-auth">` for HTTP Authorization header. Free-form text. Combined with HttpExporter.cpp:14-21 copying header values verbatim (18.8), `Token X\r\nHost: evil.com` injects extra headers → request smuggling. | Strip `\r\n\0` client AND server side per 18.8. | Pending |
+| 30.3 | H | settings_export.html:78 — `<input id="exp-http-url">` HTTPS URL, NO pattern. User pastes any URL; HttpExporter (18.9) loads without cert verification. Direct exploit surface for MITM. | Validate against `^https?://...$` pattern; require explicit "insecure HTTP OK" checkbox for `http://`. | Pending |
+| 30.4 | H | settings_export.html:131 — OSM access token as `<input type="password">`. Populated by expLoad from /export_settings cleartext (19.14). DevTools "Inspect Element" reveals `input.value`. Same as 28.1. | Mask via JS placeholder; fetch via `?include_secrets=1`. | Pending |
+| 30.5 | M | settings_export.html:142 — `<button data-click="expSave">` outside any `<form>`. Same family as 29.2 — bypasses form-submit CSRF flow. | Audit expSave; ensure CSRF token append. | Pending |
+| 30.6 | L | settings_export.html:29 — `<input type="number" id="exp-mqtt-port" value="1883">` no `min`/`max`. User can submit 0/-1/65536+. Backend reads via `| 1883` cast to uint16 — values >65535 wrap. | Add `min="1" max="65535"`. | Pending |
+| 30.7 | L | settings_export.html:55, L87, L108 — Interval inputs lack `min`. User can set 0 → flood mode. Backend no validation. | Add `min="1000"`. | Pending |
+| 30.8 | I | settings_modules.html — Tab strip populated from /api/modules; per-module form renders from server-supplied schema. Uses `data-click="modulesSelect"`. **Single mutating-save point via Modules.save (settings.js:1665).** Good pattern. | [MODULE SAFE for the modules-page shell] | N/A |
+| 30.9 | I | update.html:50 `<form data-submit="otaUpload">` — dispatcher used. CSRF gap is in settings.js otaUpload (4.5), not HTML. | See 4.5. | N/A |
+| 30.10 | I | update.html:61 `accept=".bin" required` — frontend hint only; backend magic-byte check (3.3) + client SHA-256 (4.13) are the real guards. | [Acceptable] | N/A |
+
+---
+
+## Phase 31 — Static Configuration & Changelog
+
+Files: `www/platform_config.json`, `www/changelog.txt`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 31.1 | C | platform_config.json:226-228 — `"rain"` sensor `"pin": 9`. **GPIO9 is ESP32-C3 boot-strap pin** — reed switch closed at power-on selects SPI download mode (soft-brick). **23.3 INSTANTIATED in shipped default config**. User enabling rain on first boot has a 50/50 brick chance depending on bucket position. | Change default to a non-strap GPIO (e.g. 4 or 10). | Pending |
+| 31.2 | H | platform_config.json — Multiple sensors default to ESP32-C3 strap pins: L242 `wind` pin=8 (strap), L273 `ds18b20` pin=2 (strap), L213 `soil_1` pin=3 (strap), L286 `zmpt101b` pin=0 (strap). User enabling any inherits 23.3 / 24.8 boot-mode interference. | Change defaults to non-strap GPIOs per ESP32-C3 datasheet (4/5/6/7/10). | Pending |
+| 31.3 | H | platform_config.json:301 — `"zmct103c"` `"pin": 1`. **GPIO1 is UART0 TX** on ESP32-C3 (and USB CDC in CDC-on-Boot mode swaps it). Conflicts with Serial console and programming. | Change default to GPIO3 (ADC1_CH3) or another non-UART ADC pin. | Pending |
+| 31.4 | M | platform_config.json:12, L26 — `flow_main` and `flow_large` both default `"pin": 21`. **GPIO21 is USB D+ on ESP32-C3 SuperMini** (5.7). Default flow sensor pin breaks USB CDC; flow_large/flow_main also collide with each other but harmless since enabled=false. | Change default; document SuperMini variant in INSTRUCTIONS.md. | Pending |
+| 31.5 | M | platform_config.json:91-93, L105-107 — `sds011` AND `pms5003` both default `"uart_rx": 20`. ESP32-C3 has one UART besides USB-CDC; 21.1 instantiated. | Default one of them to `-1` (disabled UART) so user must explicitly pick. | Pending |
+| 31.6 | M | platform_config.json:39-44, L54-60, L70-75 — `bme280`, `bmp280`, `bme688` ALL default `sda=6, scl=7, address=0x76`. Identical I2C address — only ONE can init. Plus pins conflict with DS1302 RTC defaults (5.9 family). | Stagger addresses (bme280=0x76, bmp280/bme688=0x77); move I2C pins to non-RTC GPIOs (e.g. 8/9 for SuperMini). | Pending |
+| 31.7 | M | platform_config.json:164-167, L178-183 — `veml6075` and `veml7700` both default `sda=6, scl=7`. Both drivers have **fixed I2C address 0x10** (22.4) → cannot coexist. JSON has no way to express the exclusion. | Add documentation `_comment`; or pick exclusion-aware defaults. | Pending |
+| 31.8 | L | platform_config.json:382-399 — `"_comment"` keys in `sleep.*` sections. ArduinoJson parses them as data (no `#` comment syntax in JSON). Inflates parsed-doc memory by ~250 B per parse. Backend ignores the keys. | Move comments to a sidecar markdown doc. | Pending |
+| 31.9 | L | platform_config.json:362-369 — `webhook.rules` demo entry uses `"sensor_id": "temp_indoor"` which does NOT match any default-enabled sensor. With webhook enabled, the rule never fires. Misleading default. | Either empty the rules array, OR change sensor_id to match a real default sensor. | Pending |
+| 31.10 | I | platform_config.json — All sensors default `enabled: false` except flow_main. Conservative defaults minimise out-of-box conflicts. | [MODULE SAFE — conservative defaults] | N/A |
+| 31.11 | L | changelog.txt:1 — Title `"## v4.2.0"` matches Config.h VERSION but conflicts with `"v5.1.0"` banner in ESP_Logger.ino:2 / project comments (5.6). Version drift. | Pick one canonical version; align Config.h + ESP_Logger.ino banner + changelog + docs. | Pending |
+| 31.12 | I | changelog.txt — Plain text rendered via /api/changelog; settings.js parses `##` headers as Markdown. No XSS risk (static text). | [MODULE SAFE] | N/A |
+
+---
+
+## Audit Coverage Summary
+
+All 31 phases complete. Total findings: **~340** across all severity levels.
+
+| Severity | Count (approx) | Notes |
+|---|---|---|
+| **C** (Critical) | ~6 | Default-config GPIO9 rain pin (31.1), config.bin download leak (3.6), factory_reset assert (3.13), startAll never called (6.11), pages.js stored XSS (26.1), webhook overlap (multiple) |
+| **H** (High) | ~50 | OTA without CSRF, plaintext credential exposure, CDN script with no SRI, fsMutex bypass family, UAF on sensor reload, MQTT/HTTP no TLS, ZMPT/HC-SR04/SCD4x blocking SensorTask, etc. |
+| **M** (Medium) | ~140 | Validation gaps, race conditions, missing maxlength, missing isBlocking() overrides, partial-batch duplicates, theme bgColor name mismatch, etc. |
+| **L** (Low) / **I** (Info) | ~150 | Cosmetic / defense-in-depth / documented design choices / [MODULE SAFE] notes |
+
+**Highest-impact remediation priorities:**
+1. Change RainSensor default pin (31.1) — single config edit prevents soft-brick.
+2. Protect `/config.bin` and `/alerts.json` from /download (3.6, 7.1).
+3. Mask plaintext credentials in /export_settings (3.7, 19.14, 28.1, 30.4).
+4. Add CSRF/rate-limit to /factory_reset, /restart, /do_update, /backup_bootcount (3.1-3.4).
+5. Fix WaterFlow/Rain/Wind ISR cleanup (2.6, 23.2-23.3) — UAF on reloadConfig.
+6. Fix VEML6075/VEML7700 I2C address conflict (22.4) and centralise Wire.begin (20.1).
+7. Override isBlocking()=true on HCSR04/ZMPT/ZMCT (24.1, 24.6) — SensorTask starvation.
+8. Add SRI hash + path validation on uPlot CDN load (26.2, 26.3, 29.6).
+9. Fix theme bgColor/textColor field-name mismatch (29.1) — silent save failure.
+10. Implement `moduleRegistry.startAll()` (6.11) — modules don't get their start() called.
+
+[END OF AUDIT — Phase 31]
+
+---
+
