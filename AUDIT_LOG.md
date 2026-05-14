@@ -209,3 +209,27 @@ Files: `managers/HardwareManager.*`, `managers/StorageManager.h` (+ cpp re-pass)
 
 ---
 
+## Phase 9 — Config / OTA / DataLog Managers
+
+Files: `managers/ConfigManager.*`, `managers/OtaManager.*`, `managers/DataLogger.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 9.1 | M | ConfigManager.cpp:40-46 — `if (config.datalog.maxEntries == 0)` resets FIVE unrelated fields (maxEntries, includeBootCount, includeExtraPresses, postCorrectionEnabled, timestampFilename). User cannot validly set maxEntries=0 to disable rotation without losing other settings. | Split into per-field zero checks; or use a dedicated `if (!datalog_initialised)` magic flag. | Pending |
+| 9.2 | M | ConfigManager.cpp:119, 137 — `isRtcWakePinC3` and `isSafePinC3` hardcoded for ESP32-C3 pin ranges (≤5 for wake, !=11..17 for safe). ESP32-S3/S2 builds get false-invalid verdicts and reset to wrong defaults. | Gate via `#if CONFIG_IDF_TARGET_ESP32C3 ... #elif CONFIG_IDF_TARGET_ESP32S3 ...` with per-target pin tables. | Pending |
+| 9.3 | H | ConfigManager.cpp:441-449 — Migration path copies header preamble (`magic`..`resetBootCountAction`) byte-for-byte via `memcpy(&config, rawBuf, headerSize)` with NO per-field version guard. If a pre-v6 binary had different layout (no `_reserved_lang` byte, different field order), every subsequent byte is shifted. SAFE_COPY's partial-copy branch can also leave strings non-NUL-terminated. No tests for cross-version migration. | Add per-version offset tables; for unrecognised pre-v6 layout, refuse to migrate and reset to defaults. Verify via fuzz tests of older config blobs. | Pending |
+| 9.4 | M | ConfigManager.cpp:194 `regenerateDeviceId` — bypasses fsMutex (same as 1.8), no CSRF on the API surface (4.x), and produces a deviceId change without reboot → external API consumers cache stale id. | Acquire fsMutex; require explicit user-initiated regen flow that warns about stale caches; bump a `deviceIdGeneration` counter clients can watch. | Pending |
+| 9.5 | L | ConfigManager.cpp:352 `migrateConfig` ends with `saveConfig()` during setup() before fsMutex exists. Today benign (single-threaded). If migrate is ever called outside setup, race. | Add comment "migrate must run pre-task-init". | Pending |
+| 9.6 | I | ConfigManager.cpp:21-113 `applyDefaults` long sequential `if !strlen()/badFloat()` chain. Maintainability concern only. | Split into per-section helper functions. | Pending |
+| 9.7 | M | DataLogger.cpp:12-21 `countFileLines` — reads entire log byte-by-byte BEFORE every flush (called from line 69). O(file-size) per flush. On a 1 MB log, every cycle re-reads 1 MB. | Cache line count in RTC RAM or compute incrementally; only re-scan after rotation. | Pending |
+| 9.8 | H | DataLogger.cpp:50-51 `trimLogFile` — `fs->remove(path); fs->rename(tmpPath, path);` is non-atomic. Power loss in the gap leaves NEITHER file present, losing the entire datalog history. Contrast with ConfigManager/ModuleRegistry which use rename-over-existing. | LittleFS rename overwrites atomically — drop the `remove` and just `rename(tmpPath, path)`. | Pending |
+| 9.9 | M | DataLogger.cpp:73 `flushLogBufferToFS` — opens FILE_APPEND without fsMutex. Called from loop() AND from `/flush_logs` (AsyncTCP worker, WebServer.cpp:1364). Race vs StorageTask.appendRow, saveConfig, RtcManager.backupBootCount (8.8). | Acquire fsMutex (timeout 2000ms); return false on timeout so caller can retry. | Pending |
+| 9.10 | L | DataLogger.cpp:60-65 — `folder` directory created without isPathProtected check. Malicious or careless config can target `/_setup` etc. | Validate against isPathProtected before mkdir; reject save_datalog with 400 if invalid. | Pending |
+| 9.11 | L | DataLogger.cpp:174-180 — When `logBufferCount >= LOG_BATCH_SIZE` and flush failed, silently shifts array dropping oldest entry. No counter, no log. RTC slow memory backup loses data unobserved. | Increment a `g_logDrops` counter; expose via `/api/diag`. | Pending |
+| 9.12 | M | OtaManager.cpp:25-34 `_logOtaEvent` — writes `/reset_log.txt` without fsMutex. Races against StorageTask, saveConfig, datalog flush. | Same fix family as 9.9 / 8.8 — acquire fsMutex. | Pending |
+| 9.13 | L | OtaManager.cpp:114-128 `confirm()` — failure is permanent. Subsequent `tick()` calls keep retrying `esp_ota_mark_app_valid_cancel_rollback` every loop iteration, wasting CPU. | After first confirm failure, set `s_confirmFailed = true` and skip retries; log once. | Pending |
+| 9.14 | L | OtaManager.cpp:132-148 `rollback()` — `esp_ota_mark_app_invalid_rollback_and_reboot` does NOT verify target partition has a valid image. If both slots corrupt, device bricks on reboot. Standard ESP-IDF behavior; out of scope of this firmware but worth documenting. | Pre-validate target via `esp_ota_get_state_partition(prev, &state)` before invoking rollback. | Pending |
+| 9.15 | I | ConfigManager.h / OtaManager.h / DataLogger.h — trivial declarations. | [MODULE SAFE for headers] | N/A |
+
+---
+
