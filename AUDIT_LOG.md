@@ -295,3 +295,23 @@ Files: `pipeline/DataPipeline.h`, `pipeline/AggregationEngine.*`, `pipeline/Live
 
 ---
 
+## Phase 13 — IModule Adapters (Network / OTA / Theme)
+
+Files: `modules/WiFiModule.*`, `modules/OtaModule.*`, `modules/ThemeModule.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 13.1 | M | WiFiModule.cpp:8-16 `parseIPv4` — leaves `out[]` untouched on malformed input. User POSTs `{"staticIP":"junk"}` → save returns success, value unchanged. Silent acceptance: UI shows save-success but underlying field never updated. | Return bool; caller (load()) propagates as validation failure → IModule.h:42 contract. Explicit `if (a < 0 \|\| a > 255 \|\| ...)` instead of the bitwise-OR trick at L12. | Pending |
+| 13.2 | M | WiFiModule.cpp:42-57 + ThemeModule.cpp:36-53 — `load()` always returns `true` regardless of validation outcome. Out-of-range enums, malformed strings, invalid IPs all silently accepted. IModule.h:42 validation contract unused. Compounds with ModuleRegistry.cpp:78 which discards load() return anyway (already 6.12). | Per field: return false on parse failure; aggregate to caller. Fix 6.12 in tandem so registry honours it. | Pending |
+| 13.3 | L | WiFiModule.cpp:44 — `n.wifiMode = (WiFiModeType)(cfg["wifiMode"] \| (int)n.wifiMode);` — no range check on enum. User can set wifiMode=99; downstream code falls into AP-mode fallback without user-visible signal. | Validate `int v; if (v == 0 \|\| v == 1) n.wifiMode = (WiFiModeType)v; else return false;`. | Pending |
+| 13.4 | L | WiFiModule.cpp:70-73 — `String(buf)` per IP × 4 = four short-lived heap allocations per save(). ArduinoJson v7 accepts `const char*` directly without the String wrapper. | `cfg["staticIP"] = (const char*)buf;` style — but careful with buffer lifetime; the assignment must happen before `buf` is reused for the next IP. Use a 4-row stack array of buffers. | Pending |
+| 13.5 | M | OtaModule + IModule default `_enabled=true` — OTA "enabled" toggle has no semantic effect (no `start()` / `stop()` implementation). UI displays a switch that does nothing; user toggling it sets the boolean in modules.json but nothing in the firmware reads it. | Either implement `start()` to actually arm/disarm OTA route registration, OR override `isEnabled()` to always return true and `setEnabled()` as no-op. | Pending |
+| 13.6 | L | OtaModule.cpp:11-18 — `save()` writes live status (running partition, pendingVerify, rollbackCapable) into modules.json on every saveConfig(). State churn pollutes the shadow file; LittleFS rewrites the file even when no user-config actually changed. | Move informational fields out of `save()`; expose them via `/api/modules/ota` GET only (via toDetailJson hook). | Pending |
+| 13.7 | H | ThemeModule.cpp:36-53 — Color and path fields (primaryColor, …, lightBgColor, logoSource[129], faviconPath[33], chartLocalPath) accept ANY string with NO validation. A POST `/api/modules/theme` with `{"primaryColor":"javascript:alert(1)"}` or `{"logoSource":"\"><script>...</script>"}` is stored verbatim. Combined with `/export_settings` round-trip back to the UI, stored XSS if the UI ever uses innerHTML/style with the raw value. Defense-in-depth gap. | Validate: color fields must match `^#[0-9a-fA-F]{6}$`; logoSource must be relative path or http(s):// URL; reject `javascript:`/`data:text/html` URIs. | Pending |
+| 13.8 | M | ThemeModule.cpp — load/save covers only ~13 of ~20 theme fields. **Missing: ffColor, pfColor, otherColor, storageBarColor, storageBar70Color, storageBar90Color, storageBarBorder, boardDiagramPath.** `/api/modules/theme` cannot edit them while `/save_theme` can. Two endpoints diverge on the same struct. | Add missing fields to both schema string AND load/save; OR delete them from ThemeConfig if truly unused. | Pending |
+| 13.9 | L | ThemeModule.cpp:38-41 — enum casts (mode, chartSource, chartLabelFormat) with no range check. `mode=99` stored verbatim → unknown enum value in switch statements downstream. | Validate against known enum values. | Pending |
+| 13.10 | L | modules.json shadow vs config.bin precedence — config.bin is authoritative; modules.json shadow rewritten on every saveConfig(). If user manually edits /config/modules.json via /upload, next save silently overwrites. No documented precedence model surfaced to user; restore-from-modules.json path doesn't exist. | Document the model in INSTRUCTIONS.md / settings UI; OR implement two-way sync where modules.json edits trigger config.bin update. | Pending |
+| 13.11 | I | WiFiModule.h / OtaModule.h / ThemeModule.h — trivial declarations + Meyers singletons. | [MODULE SAFE for headers] | N/A |
+
+---
+
