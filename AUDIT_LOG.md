@@ -315,3 +315,46 @@ Files: `modules/WiFiModule.*`, `modules/OtaModule.*`, `modules/ThemeModule.*`
 
 ---
 
+## Phase 14 — IModule Adapters (DataLog / Time) + Serial Provisioner
+
+Files: `modules/DataLogModule.*`, `modules/TimeModule.*`, `serial/SerialProvisioner.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 14.1 | M | DataLogModule.cpp:50-71 — `load()` always returns true; same 13.2 family. Out-of-range enums, unbounded numerics, NaN floats silently accepted. | Per-field validation; return false on any rejection; aggregate via ModuleRegistry honouring load() return (tied to 6.12). | Pending |
+| 14.2 | M | DataLogModule.cpp:55 — `rotation` enum cast without range check. ROTATION_SIZE=4 is max; `99` stored verbatim, then downstream switch defaults. | Validate against enum range 0..4. | Pending |
+| 14.3 | L | DataLogModule.cpp:62-65 — Four uint8_t enum fields (dateFormat/timeFormat/endFormat/volumeFormat) cast from int with no range check. | Validate each against schema option count. | Pending |
+| 14.4 | M | DataLogModule.cpp:52-53 — `folder` accepted without `isPathProtected` check. User can POST `{"folder":"_setup"}` via /api/modules/datalog; DataLogger.cpp:60-65 then mkdirs the protected path. Tied to 9.10. | Validate folder against `isPathProtected` and `sanitizePath` on load. | Pending |
+| 14.5 | L | DataLogModule.cpp:68-69 — `pfToFfThreshold`/`ffToPfThreshold` accept NaN/Inf via JSON. `applyDefaults` catches at next saveConfig but JSON-direct path bypasses validation. | Add `isfinite()` check; reject or clamp to [0.1, 1000]. | Pending |
+| 14.6 | L | TimeModule.cpp:22-23 — narrowing cast `(int8_t)(cfg[...] \| ...)` truncates out-of-range silently. Schema says timezone -12..+14 but JSON `99` is stored as `99` (int8_t holds), then later wraps on math. | Range-check before cast. | Pending |
+| 14.7 | M | SerialProvisioner.cpp:144 — `WiFi.begin(ssid, pass)` writes credentials to ESP32 NVS by default. NVS persists across reboots INDEPENDENT of config.bin. Two sources of truth diverge. After `/factory_reset` wipes LittleFS, NVS creds still auto-connect on next boot. | Either `WiFi.persistent(false)` before begin(), OR mirror NVS writes into `config.network.client*` and saveConfig. | Pending |
+| 14.8 | M | SerialProvisioner.cpp:134-179 — On successful connect, does NOT update `config.network.clientSSID/clientPassword`. Device runs on NVS creds while config.bin shows stale values; `/export_settings` returns wrong network info; UI confused. | After WL_CONNECTED, write back to config and saveConfig(). | Pending |
+| 14.9 | M | SerialProvisioner.cpp:93 — `WiFi.scanNetworks(false, ...)` BLOCKING for 2-4 s. `tick()` runs from main loop (ESP_Logger.ino:745). Blocks OtaManager::tick (90s OTA confirm window can be eaten), SSE publishLiveEvent, all main-loop tickers, watchdog refresh. | Use async scan (`scanNetworks(true)`), poll `scanComplete()` across multiple ticks. | Pending |
+| 14.10 | M | SerialProvisioner.cpp + ApiHandlers.cpp:618-647 wifiTestTaskFn — both invoke `WiFi.begin`/`WiFi.mode` without coordination. Concurrent serial-connect + web-wifi-test → undefined radio state, can disconnect the AP serving the request. | Add a single `g_wifiOpInFlight` flag; reject concurrent ops with 409. | Pending |
+| 14.11 | L | SerialProvisioner.cpp:33-35 — Overflow path silently resets buffer; no error response. Host has no signal that a long command was truncated. | Emit `{"ok":false,"err":"line_too_long"}` then reset. | Pending |
+| 14.12 | L | SerialProvisioner runs unconditionally every loop iteration (ESP_Logger.ino:745) on every boot — even in deployed devices with USB plugged into a power adapter. Extra UART/USB-CDC attack surface (physical-access required, but any access can drive WiFi mode changes). | Gate via `setup.h` macro `SERIAL_PROVISIONER_ENABLED` (off by default in non-dev builds). | Pending |
+| 14.13 | I | DataLogModule.h / TimeModule.h / SerialProvisioner.h — trivial declarations + Meyers singletons. | [MODULE SAFE for headers] | N/A |
+
+---
+
+## Phase 15 — Sensor Framework & Alerts
+
+Files: `sensors/ISensor.h`, `sensors/SensorManager.*`, `alerts/AlertEngine.*`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 15.1 | L | ISensor.h:11-22 `CalibrationAxis::load` — no validation that `scale != 0` or `!isnan(offset/scale)`. User config `{"scale":0}` produces constant `offset` for every reading; `{"scale":"NaN"}` poisons every read. | Reject scale==0 and non-finite values; fall back to defaults. | Pending |
+| 15.2 | I | ISensor.h:90 `setId` — `strncpy(_id, id, sizeof(_id)-1)` relies on `_id[]` being zero-initialised by the protected default-init (`char _id[17] = {}`). Safe today; brittle if subclass adds custom ctor that skips the brace-init. | Add an explicit `_id[sizeof(_id)-1] = '\0';` after strncpy. | Pending |
+| 15.3 | H | SensorManager.cpp:39 + 195-197 — `reloadConfig` calls `_destroyAll()` (frees `_sensors[]`) while SensorTask iterates the same array WITHOUT configMutex on the reader side. Use-after-free on the freed plugin pointers. Restates 3.19 with the producer-side context. | Acquire configMutex around `tickFiltered` body; OR signal a quiesce flag SensorTask honours before destroyAll. | Pending |
+| 15.4 | M | SensorManager.cpp:126-128 — `wireMutex` acquire with 100 ms timeout; on failure `tookMutex=false` and code PROCEEDS to `s->readAll()` WITHOUT lock. Silent fallback to unlocked I2C bus → bus contention with concurrent plugins. | On mutex timeout, skip this sensor's read for the tick; increment a `g_busSkips` counter. | Pending |
+| 15.5 | L | SensorManager.cpp:74 — `if (!sensor["enabled"]) continue;` defaults to FALSE when the JSON key is missing. User omitting `enabled` silently disables the sensor. | Default to true: `bool en = sensor["enabled"] \| true;`. | Pending |
+| 15.6 | M | SensorManager.cpp:281 + 326-364 — `toJson` builds the per-sensor skeleton BEFORE taking webDataMutex; if mutex acquire fails (50 ms timeout), function early-returns leaving rules + skeleton fields populated but `last_values`/`spark`/`health` blocks missing. UI receives a partial response with no error signal. | On mutex-take failure, emit `o["partial"] = true` per sensor so UI can flag stale data. | Pending |
+| 15.7 | M | AlertEngine.cpp:139 — `evaluate` uses `xSemaphoreTake(_mutex, 0)` (non-blocking). On contention with toJson/fromJson/snooze, evaluation is SILENTLY SKIPPED. Sensor readings during web-API activity miss alert checks; no counter exposed. | Use short timeout (5 ms) and increment `g_alertEvalDrops` on failure. | Pending |
+| 15.8 | H | AlertEngine.cpp:192-218 `_dispatch` — calls `g_mqttExporter->send(&ar, 1)` WHILE HOLDING `_mutex`. `send()` does TLS network I/O blocking seconds; violates the L185 contract "no blocking I/O". Also risks deadlock if MqttExporter ever takes its own mutex in evaluate path. | Queue the alert into a side ring; have a separate task drain it without holding _mutex. | Pending |
+| 15.9 | M | AlertEngine.cpp:402-406 `_save` — `_fs->open(_path, FILE_WRITE)` truncates immediately; non-atomic write. Power loss mid-save = corrupt alerts.json. No fsMutex either. Same class as 8.6 / 9.8 / 6.14. | Write to `.tmp`, then atomic rename. Acquire fsMutex around the open/serialize/close/rename block. | Pending |
+| 15.10 | M | AlertEngine.cpp:155-156 — `(rule.duration_s == 0) \|\| ((nowTs - rule.condFirstMetTs) >= rule.duration_s)`. When nowTs=0 (SensorTask fallback per 10.3) and condFirstMetTs=0, subtraction=0, condition immediately satisfied → false-positive trigger on pre-NTP readings. Tied to 11.4. | Skip evaluate when `nowTs < 1000000000` (no wall clock). | Pending |
+| 15.11 | L | AlertEngine.cpp:69, 331 — `ALERT_MAX_RULES=8` silently truncates oversized rule arrays at parse. UI POST with 10 rules loses the 9th and 10th with no error. | Return false from fromJson when input exceeds cap; surface 413 to client. | Pending |
+| 15.12 | M | AlertEngine.cpp:319-340 `fromJson` — sets `_ruleCount = 0` BEFORE parsing, then commits via `_save()`. If JSON body has missing/empty `rules` array (e.g. UI sends `{}`), ALL existing rules wiped without warning. No separate DELETE endpoint exists, so a malformed PUT body silently destroys the rules. | Parse into a temp `Rule[ALERT_MAX_RULES]`, only commit + save if successful AND newRuleCount > 0 (unless explicit `{"rules":[]}` opt-in). | Pending |
+
+---
+
