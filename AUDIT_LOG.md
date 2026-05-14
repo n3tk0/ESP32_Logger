@@ -599,5 +599,40 @@ Files: `www/js/settings.js`, `www/index.html`, `www/style.css`
 
 ---
 
+## Phase 28 — Settings HTML (Device / Hardware / Network / Time)
+
+Files: `www/pages/settings_device.html`, `settings_hardware.html`, `settings_network.html`, `settings_time.html`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 28.1 | M | settings_network.html:44, L81 — `<input type="password">` for apPassword/clientPassword populated from `/export_settings` returning cleartext credentials (3.7 family). DevTools "Inspect Element" reveals `input.value`; browser autofill also exposes them. | Mask via JS placeholder `"***"`; require explicit "Show" toggle that fetches via `?include_secrets=1`. Also fix 3.7 server-side. | Pending |
+| 28.2 | M | settings_network.html:72-78 — `<div id="wifiList">` populated by `netScanWifi`. SSIDs are user-controlled (any visible AP); malicious SSID `<img src=x onerror=...>` would inject via innerHTML if settings.js renders without `esc()`. Verify the render path. | Audit settings.js `netScanWifi`; ensure SSID rendering uses `esc()` or textContent. | Pending |
+| 28.3 | M | settings_time.html:93 — `<form action="/backup_bootcount" method="POST">` is a **NATIVE POST form** that bypasses the SPA's `data-submit` dispatcher and CSRF-token injection (core.js:865). Backend lacks CSRF on this endpoint (3.4 family) so it works today; if backend CSRF were added per 3.4, this form would 403. Inconsistent attack surface. | Convert to `<form data-submit="timeBackupBoot">`; add `timeBackupBoot` Handler in settings.js. | Pending |
+| 28.4 | L | settings_hardware.html:13 — `<img src="" data-error="hideParent">` populated by hwInit from `config.theme.boardDiagramPath`. Browser blocks `javascript:` for img src; CSP `img-src 'self' data:` blocks external URLs. Safe in practice. | [Acceptable] | N/A |
+| 28.5 | I | settings_device.html:70-89 `<div id="sysInfo">` populated via innerHTML in sdInit; escape fix lives at JS layer per 27.1. | See 27.1. | Pending |
+| 28.6 | I | All four Phase-28 HTML files use `data-click`/`data-submit` dispatcher (except 28.3). No inline event handlers. Good CSP posture. | [MODULE SAFE] | N/A |
+| 28.7 | L | settings_device.html:17, 25 — `maxlength="32"` / `"12"` match Config.h:230-231 buffer sizes. Frontend caps align with backend strncpy. Good. | [Acceptable] | N/A |
+| 28.8 | L | settings_network.html:94-97 — Hidden inputs cache "current" connection details, NOT submitted (no `name`). UI state only. | [Acceptable] | N/A |
+| 28.9 | I | settings_time.html:80 — `data-change="submitParentForm"` on RTC-protect checkbox triggers auto-submit on toggle. Acceptable UX. | [Acceptable] | N/A |
+
+---
+
+## Phase 29 — Settings HTML (Datalog / Flowmeter / Theme / Core Logic)
+
+Files: `www/pages/settings_datalog.html`, `settings_flowmeter.html`, `settings_theme.html`, `settings_corelogic.html`
+
+| # | Severity | Issue | Fix | Status |
+|---|---|---|---|---|
+| 29.1 | M | settings_theme.html:40-43 — Form fields `name="bgColor"` and `name="textColor"`. Backend WebServer.cpp:1149-1152 reads `lightBgColor`/`darkBgColor`/`lightTextColor`/`darkTextColor` (per Config.h:117-120). **The form values are silently dropped** on save. UI reads back the correct fields via `/export_settings` so the page appears to save, but bg/text changes never persist. Functional bug. | Rename inputs to match: split into `lightBgColor`+`darkBgColor` and `lightTextColor`+`darkTextColor`. | Pending |
+| 29.2 | L | settings_corelogic.html — All controls live OUTSIDE any `<form>`. Save triggered via `data-click="clSave"` (custom handler). Verify clSave includes CSRF token append; otherwise mutating save 403s once CSRF is enforced. | Audit clSave in settings.js / sensors.js; add CSRF token if missing. | Pending |
+| 29.3 | M | settings_corelogic.html:157-160 — Export quick-enable checkboxes (MQTT/HTTP/SC/OSM). Hint says "Full configuration in Export settings". The checkboxes need to write `config.export.<name>.enabled` — verify clSave maps them correctly; otherwise state never persists. | Audit clSave's export-section handling. | Pending |
+| 29.4 | L | settings_theme.html:75-79 — Text inputs for `logoSource[129]`, `faviconPath[33]`, `boardDiagramPath[65]` have NO `maxlength`. User can paste > buffer size; backend strncpy truncates silently. UI shows full string while persisted value is truncated → confusing UX. | Add `maxlength="128"` / `"32"` / `"64"` matching Config.h buffer sizes. | Pending |
+| 29.5 | L | settings_theme.html:75, 78 — `logoSource`/`faviconPath`/`boardDiagramPath` accept ANY string. Backend lacks path validation (13.7). CSP `img-src 'self' data:` blocks external loads at runtime, but a malicious URL like `https://evil.com/track.png` is persisted. | Add `pattern="^/[\\w./-]+$"`; server-side validate per 13.7. | Pending |
+| 29.6 | M | settings_theme.html:99 `<input name="chartLocalPath">` — text input with NO pattern. Combined with pages.js:74 loading this verbatim into `<script src>` (26.3), this is the user-facing injection point for the chart-CDN XSS vector. | Add `pattern="^/[a-zA-Z0-9._-]+\\.js(\\.gz)?$"` client-side; server-side reject protocol-relative `//host/x.js` per 26.3. | Pending |
+| 29.7 | I | settings_datalog.html — Numeric `min`/`max` attributes align with backend `constrain()` calls in WebServer.cpp:1177-1189. Good. | [Acceptable] | N/A |
+| 29.8 | I | settings_datalog.html:16 `<select name="currentFile">` — populated by dlInit (settings.js:1068-1073) using `opt.textContent = f.path` + `opt.value = f.path` (not innerHTML). DOM-native escaping makes filename injection safe. **Good pattern**. | [MODULE SAFE — model of safe option rendering] | N/A |
+| 29.9 | L | settings_flowmeter.html:24, 29 — `<input type="number" name="pulsesPerLiter">` and `name="calibrationMultiplier"` have NO `min` attribute. User can submit 0 or negative; backend applyDefaults catches `< 1.0f` (ConfigManager.cpp:25) but only on next config load. No immediate UI feedback. | Add `min="1" step="0.1"` (pulsesPerLiter), `min="0.01"` (multiplier). | Pending |
+| 29.10 | I | settings_theme.html — Uses native `<input type="color">` (L37-63) which browsers restrict to `#RRGGBB` hex. **Partial frontend mitigation** for 13.7's color-validation gap. Direct API POST still bypasses. | [Acceptable frontend mitigation] | N/A |
+
 ---
 
