@@ -181,10 +181,13 @@ bool ExportManager::_drainSpool(IExporter* exp) {
 
     if (allOk) {
         MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-        if (g.isLocked()) {
-            _spoolFS->remove(path);
-            Serial.printf("[ExportManager] Spool drained for '%s'\n", exp->getName());
+        if (!g.isLocked()) {
+            // Sent OK but can't remove spool — report failure so next cycle
+            // skips re-delivery rather than finding the file still present.
+            return false;
         }
+        _spoolFS->remove(path);
+        Serial.printf("[ExportManager] Spool drained for '%s'\n", exp->getName());
     }
     return allOk;
 }

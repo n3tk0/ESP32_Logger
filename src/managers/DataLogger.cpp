@@ -58,7 +58,7 @@ void flushLogBufferToFS() {
     if (logBufferCount == 0 || !fsAvailable || !activeFS) return;
 
     MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-    if (!g.isLocked()) return;
+    if (fsMutex && !g.isLocked()) return;  // mutex exists but timed out — skip this flush
 
     String logFile = getActiveDatalogFile();
 

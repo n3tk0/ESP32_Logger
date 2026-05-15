@@ -12,7 +12,7 @@ SemaphoreHandle_t fsMutex      = nullptr;
 // Queue drop counter (incremented on xQueueSend failure)
 volatile uint32_t g_queueDrops = 0;
 // Ring push drop counter (incremented when webDataMutex times out)
-volatile uint32_t g_ringPushDrops = 0;
+std::atomic<uint32_t> g_ringPushDrops{0};
 
 // Task heartbeat timestamps (C4)
 volatile uint32_t g_taskHeartbeat[TASK_COUNT] = {};
