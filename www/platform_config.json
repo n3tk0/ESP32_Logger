@@ -225,7 +225,7 @@
       "type": "rain",
       "enabled": false,
       "interface": "pulse",
-      "pin": 9,
+      "pin": 4,
       "mm_per_pulse": 0.2794,
       "read_interval_ms": 60000,
       "calibration": {

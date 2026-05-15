@@ -1,3 +1,17 @@
+## v4.2.1 - Safe-mode + OTA rollback hardening
+- [Breaking] RainSensor default pin moved from GPIO 9 → GPIO 4. GPIO 9 is
+  an ESP32-C3 bootstrap pin; a tipped bucket at power-on triggers SPI
+  download mode (soft-brick). Existing deployments using the default
+  pin MUST rewire to GPIO 4 OR explicitly set `"pin": 9` in
+  platform_config.json (not recommended).
+- [Fixed] Restart circuit breaker: 3 consecutive watchdog/panic resets
+  without a 60-s healthy uptime now boots into AP-only safe mode for
+  OTA recovery instead of looping until flash wears out (AUDIT FC.4).
+- [Fixed] OTA auto-confirmation removed from restart / deep-sleep paths.
+  A pending-verify image that crashes within 90 s now rolls back instead
+  of being silently confirmed (AUDIT FC.1). Legacy-mode users may need
+  to /api/ota/confirm manually if the device sleeps before 90 s uptime.
+
 ## v4.2.0 - Production audit hardening
 - [Fixed] Implemented crash-safe configuration writes, division-by-zero guards, and resolved numerous memory and bounds-checking vulnerabilities.
 - [Optimized] Improved memory and file efficiency using tail-seek for endpoints, safe string replacements, and better variable localization.

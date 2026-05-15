@@ -41,7 +41,8 @@ private:
 
     float    _mmPerTip   = 0.2794f;
     uint32_t _intervalMs = 60000;
-    int      _pin        = 9;
+    int      _pin        = 4;   // GPIO4 — non-strap, RTC-capable ADC1_CH4
+                                  // (was 9: ESP32-C3 bootstrap pin, AUDIT 31.1)
 
     CalibrationAxis _calRate;
     CalibrationAxis _calTotal;

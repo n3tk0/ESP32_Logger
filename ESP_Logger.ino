@@ -173,13 +173,13 @@ static uint32_t g_hybridIdleStart = 0;       // millis() when STATE_IDLE began
 // Shuts down FreeRTOS tasks for continuous/hybrid before sleeping.
 // ============================================================================
 static void _doSleep() {
-    // Confirm any pending OTA before sleeping.  Without this, a fresh OTA
-    // install in legacy mode (which sleeps within ~2 s of wake) would never
-    // reach the 90 s tick() deadline before the device reset, and the
-    // bootloader would roll a perfectly healthy image back on the next
-    // wake (codex review PR #49).  confirm() is idempotent — no-op when
-    // already confirmed or no pending verify.
-    OtaManager::confirm();
+    // Pillar 3.8 / AUDIT FC.1: do NOT auto-confirm pending OTA on sleep
+    // paths.  A buggy image that triggers fast-sleep-then-watchdog cycles
+    // would otherwise confirm itself instead of being rolled back.  The
+    // 90-s OtaManager::tick() in loop() is the ONLY auto-confirm path.
+    // Trade-off: legacy mode (sleep within ~2 s of wake) may never reach
+    // 90 s of uptime and so never confirms.  Users must either run >=90 s
+    // continuous mode at least once, or hit /api/ota/confirm manually.
 
     // Give platform tasks a chance to finish current work
     if (g_platformMode != PLATFORM_LEGACY && TaskManager::running) {
@@ -477,6 +477,28 @@ void setup() {
 
     Serial.begin(115200);
     delay(100);
+
+    // ── Restart circuit breaker (Pillar 3.7 / AUDIT FC.4) ─────────────────────
+    // If we've seen ≥3 non-graceful resets without a 60-s healthy uptime
+    // between them, boot into SAFE_MODE: AP + web only, no sensor pipeline.
+    {
+        esp_reset_reason_t reason = esp_reset_reason();
+        if (g_resetMagic != RESET_GUARD_MAGIC) {
+            // Cold boot — RTC slow memory undefined, initialise.
+            g_resetMagic         = RESET_GUARD_MAGIC;
+            g_consecutiveResets  = 0;
+        } else if (reason != ESP_RST_POWERON && reason != ESP_RST_DEEPSLEEP) {
+            // Crash-style reset (WDT, PANIC, brownout, software). Count it.
+            g_consecutiveResets++;
+        }
+        if (g_consecutiveResets >= 3) {
+            g_safeMode = true;
+            Serial.printf("\n[SafeMode] %u consecutive resets — entering "
+                          "AP-only safe mode (sensor pipeline skipped)\n",
+                          (unsigned)g_consecutiveResets);
+        }
+    }
+
     DBGF("\n\n=== ESP32 Water Logger %s ===\n", getVersionString().c_str());
     DBGF("Early GPIO bitmask: 0x%08X\n", earlyGPIO_bitmask);
 
@@ -556,6 +578,13 @@ void setup() {
                        (wifiTrigState != expectedActive) &&
                        (wakeUpButtonStr != "WIFI");
 
+    // Safe-mode override: force AP + web, ignore client mode + online mode.
+    if (g_safeMode) {
+        apModeTriggered          = true;
+        onlineLoggerMode         = false;
+        config.network.wifiMode  = WIFIMODE_AP;
+    }
+
     // ── WiFi + Web Server ─────────────────────────────────────────────────────
     g_platformMode = _detectPlatformMode();
 
@@ -598,11 +627,14 @@ void setup() {
             DBGF("Auto NTP: %s\n", ok ? "OK" : "FAIL");
         }
 
-        // Platform v5.0: start sensor pipeline in continuous/hybrid mode
-        if (g_platformMode != PLATFORM_LEGACY) {
+        // Platform v5.0: start sensor pipeline in continuous/hybrid mode.
+        // SAFE_MODE (Pillar 3.7) forces the legacy-style minimal-mutex branch
+        // so we have a working web server but ZERO sensor / exporter tasks
+        // — the goal is OTA recovery, not data collection.
+        if (!g_safeMode && g_platformMode != PLATFORM_LEGACY) {
             _initPlatform();
         } else {
-            // Legacy mode: no sensor pipeline, no FreeRTOS tasks.
+            // Legacy OR safe-mode: no sensor pipeline, no FreeRTOS tasks.
             // BUT the shared mutexes must still exist so that API handlers
             // (e.g. /api/readings, /api/latest) can safely take/give them
             // instead of asserting on a NULL handle at queue.c:1545.
@@ -614,9 +646,10 @@ void setup() {
             wireMutex    = xSemaphoreCreateMutex();
             fsMutex      = xSemaphoreCreateMutex();
             if (!webDataMutex || !configMutex || !wireMutex || !fsMutex) {
-                Serial.println("[Setup] WARNING: mutex creation failed in legacy mode");
+                Serial.println("[Setup] WARNING: mutex creation failed");
             }
-            if (activeFS && !alertEngine.begin(*activeFS)) {
+            // Skip AlertEngine in safe-mode (minimises surface).
+            if (!g_safeMode && activeFS && !alertEngine.begin(*activeFS)) {
                 Serial.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
             }
             registerApiRoutes(server);
@@ -650,8 +683,9 @@ void setup() {
         }
 
         // Platform v5.0: start sensor pipeline on normal boot when configured
-        // for continuous or hybrid mode (no web server routes needed here)
-        if (g_platformMode != PLATFORM_LEGACY) {
+        // for continuous or hybrid mode (no web server routes needed here).
+        // Skip in safe-mode per Pillar 3.7.
+        if (!g_safeMode && g_platformMode != PLATFORM_LEGACY) {
             _initPlatform();
         }
     }
@@ -664,7 +698,12 @@ void setup() {
         // H2: non-blocking active window — poll in 100ms steps so shouldRestart is honoured
         uint32_t windowEnd = millis() + g_hybridActiveMs;
         while (millis() < windowEnd) {
-            if (shouldRestart) { OtaManager::confirm(); safeWiFiShutdown(); delay(100); ESP.restart(); }
+            if (shouldRestart) {
+                g_consecutiveResets = 0;   // user-initiated, not a crash
+                safeWiFiShutdown();
+                delay(100);
+                ESP.restart();
+            }
             delay(100);
         }
         flushLogBufferToFS();
@@ -673,8 +712,7 @@ void setup() {
         TaskManager::shutdown();
         DBGF("[Hybrid] Timer cycle done — sleeping %us\n", g_hybridSleepMs / 1000);
         Serial.flush();
-        // Confirm pending OTA before deep-sleep — same reason as _doSleep().
-        OtaManager::confirm();
+        // Pillar 3.8: no implicit OtaManager::confirm() before deep-sleep.
         esp_deep_sleep_start();
         // unreachable — execution resumes from setup() after wakeup
     }
@@ -739,6 +777,19 @@ void loop() {
     // operation.  A panic or hardware-watchdog reset before then triggers
     // a bootloader-level rollback to the previous slot.
     OtaManager::tick(millis());
+
+    // ── Restart circuit breaker — clear counter after healthy uptime ──────────
+    // 60 s without a watchdog/panic = this image boots cleanly.  Reset the
+    // counter so the NEXT crash starts the 3-reset window from scratch.
+    // (Pillar 3.7 / AUDIT FC.4)
+    {
+        static bool s_resetCounterCleared = false;
+        if (!s_resetCounterCleared && millis() > 60000) {
+            g_consecutiveResets   = 0;
+            s_resetCounterCleared = true;
+        }
+    }
+
     // ── Serial WiFi provisioner (deploy.py [W] option) ────────────────────────
     // Non-blocking except during active wifi_scan (~2 s) and wifi_connect (≤20 s).
     // Listens for {"cmd":"..."} JSON lines; replies prefixed with >>SP<<.
@@ -779,8 +830,12 @@ void loop() {
     if (shouldRestart && millis() - restartTimer > 2000) {
         DBGLN("Restarting...");
         Serial.flush();
-        // Confirm pending OTA before deliberate reboot — see _doSleep().
-        OtaManager::confirm();
+        // Pillar 3.8 / AUDIT FC.1: NEVER auto-confirm a PENDING_VERIFY OTA on
+        // the restart path — a buggy image that triggers watchdog resets
+        // would otherwise get itself confirmed instead of rolled back.  Only
+        // OtaManager::tick() (90-s deadline) may confirm.  User-initiated
+        // restart is not a crash → zero the safe-mode counter.
+        g_consecutiveResets = 0;
         safeWiFiShutdown();   // ← КЛЮЧОВО: изчиства WiFi преди рестарт
         delay(100);
         ESP.restart();

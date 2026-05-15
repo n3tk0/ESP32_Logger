@@ -1393,6 +1393,7 @@ void setupWebServer() {
             DBGLN("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
         }
         if (fsMutex) xSemaphoreGive(fsMutex);   // FS1
+        g_consecutiveResets = 0;                // user-initiated wipe, not a crash
         safeWiFiShutdown();
         delay(300);
         ESP.restart();
