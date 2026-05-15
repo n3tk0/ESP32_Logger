@@ -13,7 +13,7 @@ void IRAM_ATTR RainSensor::_isr(void* arg) {
 
 bool RainSensor::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]          | true;
-    _pin        = cfg["pin"]              | 4;   // GPIO4 — non-strap (was 9, AUDIT 31.1)
+    _pin        = cfg["pin"]              | 10;  // GPIO10 — non-strap (was 9, AUDIT 31.1)
     _mmPerTip   = cfg["mm_per_pulse"]     | 0.2794f;
     _intervalMs = cfg["read_interval_ms"] | 60000;
 

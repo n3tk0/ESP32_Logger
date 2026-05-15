@@ -41,8 +41,13 @@ private:
 
     float    _mmPerTip   = 0.2794f;
     uint32_t _intervalMs = 60000;
-    int      _pin        = 4;   // GPIO4 — non-strap, RTC-capable ADC1_CH4
-                                  // (was 9: ESP32-C3 bootstrap pin, AUDIT 31.1)
+    int      _pin        = 10;  // GPIO10 — non-strap, free on C3 SuperMini.
+                                  // Was 9 (strap pin, AUDIT 31.1). 4 considered
+                                  // but conflicts with DefaultPins::WAKEUP_PF
+                                  // and setup.h:DEFAULT_FLOW_PIN. 10 only
+                                  // overlaps SD_CS, which is already unusable
+                                  // on C3 (SD MOSI/MISO/SCK on flash bus,
+                                  // AUDIT 5.8).
 
     CalibrationAxis _calRate;
     CalibrationAxis _calTotal;

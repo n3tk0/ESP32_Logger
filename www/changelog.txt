@@ -1,8 +1,8 @@
 ## v4.2.1 - Safe-mode + OTA rollback hardening
-- [Breaking] RainSensor default pin moved from GPIO 9 → GPIO 4. GPIO 9 is
-  an ESP32-C3 bootstrap pin; a tipped bucket at power-on triggers SPI
+- [Breaking] RainSensor default pin moved from GPIO 9 → GPIO 10. GPIO 9
+  is an ESP32-C3 bootstrap pin; a tipped bucket at power-on triggers SPI
   download mode (soft-brick). Existing deployments using the default
-  pin MUST rewire to GPIO 4 OR explicitly set `"pin": 9` in
+  pin MUST rewire to GPIO 10 OR explicitly set `"pin": 9` in
   platform_config.json (not recommended).
 - [Fixed] Restart circuit breaker: 3 consecutive watchdog/panic resets
   without a 60-s healthy uptime now boots into AP-only safe mode for

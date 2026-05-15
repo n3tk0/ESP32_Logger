@@ -484,10 +484,16 @@ void setup() {
     {
         esp_reset_reason_t reason = esp_reset_reason();
         if (g_resetMagic != RESET_GUARD_MAGIC) {
-            // Cold boot — RTC slow memory undefined, initialise.
+            // Cold boot OR user-initiated restart (which invalidates magic
+            // before ESP.restart() so this branch zeroes the counter on the
+            // next boot regardless of reset reason).
             g_resetMagic         = RESET_GUARD_MAGIC;
             g_consecutiveResets  = 0;
-        } else if (reason != ESP_RST_POWERON && reason != ESP_RST_DEEPSLEEP) {
+        } else if (reason == ESP_RST_POWERON || reason == ESP_RST_DEEPSLEEP) {
+            // Graceful boot/wake — clear counter so a future crash starts
+            // the 3-reset window fresh.
+            g_consecutiveResets  = 0;
+        } else {
             // Crash-style reset (WDT, PANIC, brownout, software). Count it.
             g_consecutiveResets++;
         }
@@ -699,7 +705,11 @@ void setup() {
         uint32_t windowEnd = millis() + g_hybridActiveMs;
         while (millis() < windowEnd) {
             if (shouldRestart) {
-                g_consecutiveResets = 0;   // user-initiated, not a crash
+                // Invalidate magic so the next boot's setup() takes the
+                // cold-boot branch and zeroes the counter regardless of
+                // ESP_RST_SW. Setting g_consecutiveResets=0 alone is
+                // insufficient — setup() would increment it on the SW reset.
+                g_resetMagic = 0;
                 safeWiFiShutdown();
                 delay(100);
                 ESP.restart();
@@ -833,9 +843,13 @@ void loop() {
         // Pillar 3.8 / AUDIT FC.1: NEVER auto-confirm a PENDING_VERIFY OTA on
         // the restart path — a buggy image that triggers watchdog resets
         // would otherwise get itself confirmed instead of rolled back.  Only
-        // OtaManager::tick() (90-s deadline) may confirm.  User-initiated
-        // restart is not a crash → zero the safe-mode counter.
-        g_consecutiveResets = 0;
+        // OtaManager::tick() (90-s deadline) may confirm.
+        //
+        // User-initiated restart is not a crash → invalidate the safe-mode
+        // magic so the next boot zeroes the counter even though the reset
+        // reason will be ESP_RST_SW. Three rapid /restart presses must NOT
+        // trip safe-mode.
+        g_resetMagic = 0;
         safeWiFiShutdown();   // ← КЛЮЧОВО: изчиства WiFi преди рестарт
         delay(100);
         ESP.restart();
