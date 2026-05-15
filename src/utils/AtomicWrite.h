@@ -57,9 +57,12 @@ bool atomicWrite(fs::FS&           fs,
 
     // ── Build tmp path ──────────────────────────────────────────────────────
     // Reserve room for a 5-char ".tmp" suffix + NUL. LittleFS path length cap
-    // is target-specific; 95 bytes covers every documented path in this
-    // codebase (longest is /spool/sensor_community.jsonl at ~30 chars).
-    constexpr size_t TMP_PATH_MAX = 100;
+    // is target-specific; longest documented in-codebase path is
+    // /spool/sensor_community.jsonl (~30 chars). 256 bytes (standard legacy
+    // POSIX PATH_MAX) gives headroom for SD long-filename extensions and
+    // future deep nesting without approaching the MIG 3.1 ≥1 KB stack
+    // threshold.
+    constexpr size_t TMP_PATH_MAX = 256;
     char tmpPath[TMP_PATH_MAX];
     int  n = snprintf(tmpPath, sizeof(tmpPath), "%s.tmp", path);
     if (n <= 0 || n >= (int)sizeof(tmpPath)) return false;
@@ -118,7 +121,9 @@ inline void atomicWriteRecover(fs::FS&           fs,
 {
     if (path == nullptr || path[0] == '\0') return;
 
-    constexpr size_t TMP_PATH_MAX = 100;
+    // 256-byte buffer matches atomicWrite() above; same SD/long-filename
+    // headroom argument applies.
+    constexpr size_t TMP_PATH_MAX = 256;
     char tmpPath[TMP_PATH_MAX];
     int  n = snprintf(tmpPath, sizeof(tmpPath), "%s.tmp", path);
     if (n <= 0 || n >= (int)sizeof(tmpPath)) return;
