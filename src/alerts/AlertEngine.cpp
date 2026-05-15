@@ -1,4 +1,5 @@
 #include "AlertEngine.h"
+#include "../utils/MutexGuard.h"
 #include <LittleFS.h>
 #include "../export/MqttExporter.h"
 
@@ -136,7 +137,8 @@ uint8_t AlertEngine::_parseActions(JsonArrayConst arr) const {
 // ---------------------------------------------------------------------------
 void AlertEngine::evaluate(const SensorReading& r, uint32_t nowTs) {
     if (!_mutex) return;
-    if (xSemaphoreTake(_mutex, 0) != pdTRUE) return;  // non-blocking in hot path
+    MutexGuard g(_mutex, pdMS_TO_TICKS(5));
+    if (!g.isLocked()) return;
 
     for (int i = 0; i < _ruleCount; i++) {
         Rule& rule = _rules[i];
@@ -166,8 +168,6 @@ void AlertEngine::evaluate(const SensorReading& r, uint32_t nowTs) {
             rule.firing         = false;
         }
     }
-
-    xSemaphoreGive(_mutex);
 }
 
 // ---------------------------------------------------------------------------

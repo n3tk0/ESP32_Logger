@@ -1,6 +1,8 @@
 #include "OtaManager.h"
 #include "../core/Globals.h"
 #include "../setup.h"               // OTA_CONFIRM_TIMEOUT_MS
+#include "../pipeline/DataPipeline.h"
+#include "../utils/MutexGuard.h"
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 #include <esp_system.h>
@@ -24,6 +26,8 @@ static char s_previousLabel[8] = "";
 // ---------------------------------------------------------------------------
 static void _logOtaEvent(const char* event) {
     if (!littleFsAvailable) return;
+    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+    if (!g.isLocked()) return;
     File f = LittleFS.open("/reset_log.txt", FILE_APPEND);
     if (!f) return;
     char line[80];

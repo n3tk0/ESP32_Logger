@@ -5,6 +5,8 @@
 #include "../core/Globals.h"
 #include "StorageManager.h"
 #include "RtcManager.h"
+#include "../pipeline/DataPipeline.h"
+#include "../utils/MutexGuard.h"
 #include <LittleFS.h>
 #include <math.h>
 
@@ -54,6 +56,9 @@ static void trimLogFile(fs::FS* fs, const String& path, int maxEntries, int curr
 
 void flushLogBufferToFS() {
     if (logBufferCount == 0 || !fsAvailable || !activeFS) return;
+
+    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+    if (!g.isLocked()) return;
 
     String logFile = getActiveDatalogFile();
 

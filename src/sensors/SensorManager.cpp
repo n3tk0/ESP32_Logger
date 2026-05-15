@@ -1,4 +1,5 @@
 #include "SensorManager.h"
+#include "../utils/MutexGuard.h"
 #include <LittleFS.h>
 #include "../pipeline/DataPipeline.h"  // wireMutex (#14)
 
@@ -122,16 +123,23 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
         // Serialise I2C bus access for non-blocking sensors (#14).
         // Blocking sensors (UART-based: SDS011, PMS5003, Wind) manage their own
         // bus, so only lock for non-blocking I2C reads.
-        bool tookMutex = false;
+        int n = 0;
+        uint32_t t0us = 0, latUs = 0;
         if (!blocking && wireMutex) {
-            tookMutex = (xSemaphoreTake(wireMutex, pdMS_TO_TICKS(100)) == pdTRUE);
+            MutexGuard wg(wireMutex, pdMS_TO_TICKS(100));
+            if (!wg.isLocked()) {
+                Serial.println("[SensorManager] wireMutex busy — skipping sensor read");
+                continue;
+            }
+            t0us = micros();
+            n = s->readAll(readings, 4);
+            latUs = (uint32_t)(micros() - t0us);
+            // wg releases wireMutex here, before health tracking
+        } else {
+            t0us = micros();
+            n = s->readAll(readings, 4);
+            latUs = (uint32_t)(micros() - t0us);
         }
-
-        uint32_t t0us = micros();
-        int n = s->readAll(readings, 4);
-        uint32_t latUs = (uint32_t)(micros() - t0us);
-
-        if (tookMutex) xSemaphoreGive(wireMutex);
 
         // ------------------------------------------------------------------
         // Health tracking — rotate hourly buckets for every elapsed hour.
