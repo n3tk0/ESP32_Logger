@@ -16,7 +16,7 @@ These are **Standard Operating Procedures (SOPs)**, not suggestions. A pull requ
 When two or more mutexes are held simultaneously, they MUST be acquired in this fixed order:
 
 ```
-configMutex  →  fsMutex  →  wireMutex  →  webDataMutex  →  class-local _mutex
+configMutex  →  fsMutex  →  wireMutex  →  rtcMutex  →  webDataMutex  →  class-local _mutex
 ```
 
 - Reverse-order acquisition is FORBIDDEN.

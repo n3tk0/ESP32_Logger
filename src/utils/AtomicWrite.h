@@ -86,15 +86,24 @@ bool atomicWrite(fs::FS&           fs,
 
     // ── Atomic rename ───────────────────────────────────────────────────────
     // LittleFS rename overwrites the destination atomically when it exists,
-    // so we deliberately do NOT remove(path) first — doing so opens a window
-    // where neither file is present if power drops between remove and rename
-    // (see AUDIT 9.8 / 12.11 / 16.1 for the bugs this prevents).
-    if (!fs.rename(tmpPath, path)) {
-        fs.remove(tmpPath);
-        return false;
+    // so we attempt rename FIRST without a prior remove — that's the path
+    // that preserves the AUDIT 9.8 / 12.11 / 16.1 invariant on LittleFS.
+    if (fs.rename(tmpPath, path)) return true;
+
+    // SD / FAT compatibility fallback: rename-over-existing FAILS on FAT
+    // filesystems. We only reach this branch on LittleFS if the FS is in
+    // an unexpected state; on SD it's the normal path when `path` already
+    // exists. The fallback (remove + rename) IS NOT atomic on SD — a power
+    // loss between remove and rename loses the target file. This is
+    // unavoidable on FAT (the FS itself doesn't support atomic rename-over).
+    // LittleFS callers never lose atomicity because the first rename above
+    // succeeded.
+    if (fs.exists(path) && fs.remove(path) && fs.rename(tmpPath, path)) {
+        return true;
     }
 
-    return true;
+    fs.remove(tmpPath);
+    return false;
 }
 
 /// Crash-recovery helper: at startup, scan for a stale `{path}.tmp` left
@@ -104,7 +113,7 @@ bool atomicWrite(fs::FS&           fs,
 /// Mirrors ModuleRegistry::loadAll(36-44) recovery pattern, factored out.
 inline void atomicWriteRecover(fs::FS&           fs,
                                 const char*       path,
-                                SemaphoreHandle_t fsMutex = nullptr,
+                                SemaphoreHandle_t fsMutex,
                                 TickType_t        timeout = pdMS_TO_TICKS(2000))
 {
     if (path == nullptr || path[0] == '\0') return;
@@ -114,6 +123,11 @@ inline void atomicWriteRecover(fs::FS&           fs,
     int  n = snprintf(tmpPath, sizeof(tmpPath), "%s.tmp", path);
     if (n <= 0 || n >= (int)sizeof(tmpPath)) return;
 
+    // Pillar 1.3: Every LittleFS / SD write call site MUST acquire fsMutex.
+    // The mutex parameter is REQUIRED (no default). Callers that genuinely
+    // run pre-scheduler (e.g. early boot before TaskManager::init creates
+    // the mutex) must pass an explicit `nullptr` AND that fact must be
+    // documented at the call site as a Pillar 1.3 exemption.
     MutexGuard guard(fsMutex, timeout);
     if (fsMutex != nullptr && !guard.isLocked()) return;
 

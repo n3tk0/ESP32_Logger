@@ -3,29 +3,38 @@
 // ============================================================================
 #include "IsrPin.h"
 
+#include <atomic>
 #include <esp_err.h>
+#include <esp_intr_alloc.h>
 
 // ---------------------------------------------------------------------------
 namespace {
     // Process-lifetime flag — gpio_install_isr_service is idempotent inside
     // ESP-IDF (returns ESP_ERR_INVALID_STATE on the 2nd+ call) but doing the
     // check once here avoids that error path.
-    volatile bool g_isrServiceInstalled = false;
+    //
+    // std::atomic<bool> is used (not plain volatile) so the flag is correct
+    // on dual-core targets (ESP32, ESP32-S3). On the C3 (UNICORE) the atomic
+    // ops are single instructions and add no overhead vs volatile.
+    std::atomic<bool> g_isrServiceInstalled{false};
 }
 
 void IsrPin::_ensureServiceInstalled() noexcept {
-    if (g_isrServiceInstalled) return;
+    // Acquire ordering on the load synchronizes-with the release store below.
+    if (g_isrServiceInstalled.load(std::memory_order_acquire)) return;
 
-    // intr_alloc_flags = 0 → default (level 1, normal priority).
-    // The ESP-IDF documentation calls this safe to run before the scheduler
-    // is up. The "0 flags" path is what every plugin in this codebase used
-    // before consolidation.
-    esp_err_t err = gpio_install_isr_service(0);
+    // Install with ESP_INTR_FLAG_IRAM so the shared dispatcher is resident
+    // in IRAM. Required for any IRAM_ATTR handler to fire while flash cache
+    // is disabled (e.g. during LittleFS write/erase or OTA flash).
+    //
+    // If another component already installed the service WITHOUT IRAM flag,
+    // ESP-IDF returns ESP_ERR_INVALID_STATE and the dispatcher's IRAM-safety
+    // is whatever that prior installer chose. We flip the flag regardless so
+    // we don't retry forever; the deployment must avoid such double-install.
+    esp_err_t err = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
 
-    // ESP_OK on first call; ESP_ERR_INVALID_STATE if a prior call (e.g. by
-    // some other library) already installed it. Either is acceptable.
     if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
-        g_isrServiceInstalled = true;
+        g_isrServiceInstalled.store(true, std::memory_order_release);
     }
 }
 
