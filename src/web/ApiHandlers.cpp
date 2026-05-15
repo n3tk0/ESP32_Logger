@@ -19,6 +19,7 @@
 #include "../core/ModuleRegistry.h"  // Pass 5 phase 3: /api/modules
 #include "../managers/ConfigManager.h" // saveConfig() after module update
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
+#include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
 #include "../alerts/AlertEngine.h"    // GET/POST /api/alerts, snooze, toasts
 #include <Wire.h>                     // POST /api/i2c_scan
 
@@ -530,7 +531,7 @@ static void handleApiModuleDetail(AsyncWebServerRequest* req, const String& id) 
 // project already parses JSON bodies this way elsewhere.
 static void handleApiModuleUpdate(AsyncWebServerRequest* req, const String& id,
                                    uint8_t* data, size_t len) {
-    if (rateLimit429(req)) return;
+    if (!requireMutatingAuth(req)) return;
     IModule* mod = moduleRegistry.getById(id.c_str());
     if (!mod) {
         req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
@@ -691,7 +692,7 @@ static void handleApiWifiScan(AsyncWebServerRequest* req) {
 // GET to retrieve the result.  Body: {"ssid":"...","password":"..."}.
 static void handleApiWifiTest(AsyncWebServerRequest* req,
                               uint8_t* data, size_t len) {
-    if (rateLimit429(req)) return;
+    if (!requireMutatingAuth(req)) return;
 
     JsonDocument body;
     if (deserializeJson(body, data, len)) {
@@ -1004,7 +1005,12 @@ void registerApiRoutes(AsyncWebServer& server) {
         String base = String("/api/modules/") + moduleRegistry.get(i)->getId();
         server.on(base.c_str(), HTTP_GET, handleApiModulesDispatch);
         server.on(base.c_str(), HTTP_POST,
-            [](AsyncWebServerRequest* r) { /* body handled below */ },
+            [](AsyncWebServerRequest* r) {
+                if (!requireMutatingAuth(r)) return;
+                // TODO: JSON-body CSRF — CsrfToken::require() only reads form/query
+                // params, so JSON callers must include ?csrf=... in the query string
+                // until X-CSRF-Token header support lands.
+            },
             nullptr,
             [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
                size_t index, size_t total) {
@@ -1041,7 +1047,12 @@ void registerApiRoutes(AsyncWebServer& server) {
 
     // POST /api/alerts — whole-document replace
     server.on("/api/alerts", HTTP_POST,
-        [](AsyncWebServerRequest* r) { /* body handled below */ },
+        [](AsyncWebServerRequest* r) {
+            if (!requireMutatingAuth(r)) return;
+            // TODO: JSON-body CSRF — CsrfToken::require() only reads form/query
+            // params, so JSON callers must include ?csrf=... in the query string
+            // until X-CSRF-Token header support lands.
+        },
         nullptr,
         [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
            size_t index, size_t total) {
@@ -1055,7 +1066,12 @@ void registerApiRoutes(AsyncWebServer& server) {
 
     // POST /api/alerts/snooze
     server.on("/api/alerts/snooze", HTTP_POST,
-        [](AsyncWebServerRequest* r) { /* body handled below */ },
+        [](AsyncWebServerRequest* r) {
+            if (!requireMutatingAuth(r)) return;
+            // TODO: JSON-body CSRF — CsrfToken::require() only reads form/query
+            // params, so JSON callers must include ?csrf=... in the query string
+            // until X-CSRF-Token header support lands.
+        },
         nullptr,
         [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
            size_t index, size_t total) {
@@ -1074,7 +1090,12 @@ void registerApiRoutes(AsyncWebServer& server) {
         server.on("/api/modules/wifi/scan", HTTP_GET,  handleApiWifiScan);
         server.on("/api/modules/wifi/test", HTTP_GET,  handleApiWifiTestPoll);
         server.on("/api/modules/wifi/test", HTTP_POST,
-            [](AsyncWebServerRequest* r) { /* body handled below */ },
+            [](AsyncWebServerRequest* r) {
+                if (!requireMutatingAuth(r)) return;
+                // TODO: JSON-body CSRF — CsrfToken::require() only reads form/query
+                // params, so JSON callers must include ?csrf=... in the query string
+                // until X-CSRF-Token header support lands.
+            },
             nullptr,
             [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
                size_t index, size_t total) {

@@ -28,6 +28,7 @@
 #include "ApiHandlers.h"
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "CsrfToken.h"                 // Pass 7 CSRF on mutating routes
+#include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
 #include "../pipeline/DataPipeline.h"   // fsMutex (FS1)
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -908,6 +909,7 @@ void setupWebServer() {
     // /api/regen-id alias is kept for one release for backwards compat.
     // =========================================================================
     auto nextIdHandler = [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
         String mac = WiFi.macAddress();
         mac.replace(":", "");
         String newId = mac.substring(mac.length() - 8);
@@ -1068,8 +1070,7 @@ void setupWebServer() {
     // =========================================================================
 
     server.on("/save_device", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (rateLimit429(r)) return;
-        if (csrfBlock(r)) return;
+        if (!requireMutatingAuth(r)) return;
         if (r->hasParam("deviceName", true))
             SAFE_STRNCPY(config.deviceName, r->getParam("deviceName", true)->value().c_str(), sizeof(config.deviceName));
         if (r->hasParam("deviceId", true)) {
@@ -1085,8 +1086,7 @@ void setupWebServer() {
     });
 
     server.on("/save_flowmeter", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (rateLimit429(r)) return;
-        if (csrfBlock(r)) return;
+        if (!requireMutatingAuth(r)) return;
 #if !defined(SENSOR_WATERFLOW_ENABLED)
         // Chunk G: feature compiled out — return 410 Gone so the UI can
         // surface a meaningful error if it's still bookmarked or cached.
@@ -1115,8 +1115,7 @@ void setupWebServer() {
     });
 
     server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (rateLimit429(r)) return;
-        if (csrfBlock(r)) return;
+        if (!requireMutatingAuth(r)) return;
         if (r->hasParam("storageType", true))    config.hardware.storageType    = (StorageType)r->getParam("storageType", true)->value().toInt();
         if (r->hasParam("wakeupMode", true))     config.hardware.wakeupMode     = (WakeupMode)r->getParam("wakeupMode", true)->value().toInt();
         if (r->hasParam("pinWifiTrigger", true)) config.hardware.pinWifiTrigger = r->getParam("pinWifiTrigger", true)->value().toInt();
@@ -1140,8 +1139,7 @@ void setupWebServer() {
     });
 
     server.on("/save_theme", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (rateLimit429(r)) return;
-        if (csrfBlock(r)) return;
+        if (!requireMutatingAuth(r)) return;
         if (r->hasParam("themeMode", true))        config.theme.mode           = (ThemeMode)r->getParam("themeMode", true)->value().toInt();
         config.theme.showIcons = r->hasParam("showIcons", true);
         if (r->hasParam("primaryColor", true))     SAFE_STRNCPY(config.theme.primaryColor,      r->getParam("primaryColor", true)->value().c_str(), sizeof(config.theme.primaryColor));
@@ -1168,8 +1166,7 @@ void setupWebServer() {
     });
 
     server.on("/save_datalog", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (rateLimit429(r)) return;
-        if (csrfBlock(r)) return;
+        if (!requireMutatingAuth(r)) return;
         if (r->hasParam("currentFile", true))  SAFE_STRNCPY(config.datalog.currentFile, r->getParam("currentFile", true)->value().c_str(), sizeof(config.datalog.currentFile));
         if (r->hasParam("prefix", true))       SAFE_STRNCPY(config.datalog.prefix,      r->getParam("prefix", true)->value().c_str(), sizeof(config.datalog.prefix));
         if (r->hasParam("folder", true))       SAFE_STRNCPY(config.datalog.folder,      r->getParam("folder", true)->value().c_str(), sizeof(config.datalog.folder));
@@ -1239,8 +1236,7 @@ void setupWebServer() {
     });
 
     server.on("/save_network", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (rateLimit429(r)) return;
-        if (csrfBlock(r)) return;
+        if (!requireMutatingAuth(r)) return;
         if (r->hasParam("wifiMode", true))       config.network.wifiMode = (WiFiModeType)r->getParam("wifiMode", true)->value().toInt();
         if (r->hasParam("apSSID", true))         SAFE_STRNCPY(config.network.apSSID,         r->getParam("apSSID", true)->value().c_str(), sizeof(config.network.apSSID));
         if (r->hasParam("apPassword", true))     SAFE_STRNCPY(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), sizeof(config.network.apPassword));
@@ -1271,8 +1267,7 @@ void setupWebServer() {
     });
 
     server.on("/save_time", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (rateLimit429(r)) return;
-        if (csrfBlock(r)) return;
+        if (!requireMutatingAuth(r)) return;
         if (r->hasParam("ntpServer", true)) SAFE_STRNCPY(config.network.ntpServer, r->getParam("ntpServer", true)->value().c_str(), sizeof(config.network.ntpServer));
         if (r->hasParam("timezone", true))  config.network.timezone = r->getParam("timezone", true)->value().toInt();
         saveConfig();
@@ -1334,6 +1329,7 @@ void setupWebServer() {
     // connection. Instead we set g_pendingNtpSync and the main loop picks it
     // up on its next iteration. Clients poll /api/time_sync_status.
     server.on("/sync_time", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
         if (g_pendingNtpSync != 0) {
             r->send(202, "application/json", "{\"ok\":true,\"pending\":true,\"running\":true}");
             return;
@@ -1353,6 +1349,7 @@ void setupWebServer() {
     });
 
     server.on("/rtc_protect", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
         if (Rtc) {
             bool protect = r->hasParam("protect", true);
             Rtc->SetIsWriteProtected(protect);
@@ -1361,16 +1358,19 @@ void setupWebServer() {
     });
 
     server.on("/flush_logs", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
         flushLogBufferToFS();
         r->send(200, "application/json", "{\"ok\":true}");
     });
 
     server.on("/backup_bootcount", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
         backupBootCount();
         r->send(200, "application/json", "{\"ok\":true}");
     });
 
     server.on("/restore_bootcount", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
         uint32_t old = bootCount;
         restoreBootCount();
         String j = "{\"ok\":true,\"old\":" + String(old) + ",\"new\":" + String(bootCount) + "}";
@@ -1381,6 +1381,7 @@ void setupWebServer() {
     // FACTORY RESET  – formats LittleFS, erases config, restarts
     // =========================================================================
     server.on("/factory_reset", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
         r->send(200, "application/json", "{\"ok\":true}");
         DBGLN("[FACTORY RESET] Formatting LittleFS…");
         // Short timeout keeps the AsyncTCP worker responsive; factory reset
@@ -1406,7 +1407,7 @@ void setupWebServer() {
     // RESTART
     // =========================================================================
     server.on("/restart", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (rateLimit429(r)) return;
+        if (!requireMutatingAuth(r)) return;
         r->send(200, "application/json", "{\"ok\":true}");
         shouldRestart = true;
         restartTimer  = millis();
@@ -1435,7 +1436,7 @@ void setupWebServer() {
 
     // Accept both GET (legacy web.js compat) and POST (preferred)
     auto deleteHandler = [](AsyncWebServerRequest *r) {
-        if (rateLimit429(r)) return;
+        if (!requireMutatingAuth(r)) return;
         if (!r->hasParam("path") && !r->hasParam("path", true)) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing path\"}"); return; }
         // Prefer POST param; fall back to query — sanitizePath rejects "..",
         // control chars, backslash, and NUL, returning "" on any violation.
@@ -1469,7 +1470,7 @@ void setupWebServer() {
     server.on("/delete", HTTP_POST, deleteHandler);
 
     server.on("/mkdir", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (rateLimit429(r)) return;
+        if (!requireMutatingAuth(r)) return;
         fs::FS* targetFS = getCurrentViewFS();
         if (!r->hasParam("name") || !targetFS) { r->send(400, "text/plain", "Missing name"); return; }
         String dirRaw  = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
@@ -1491,7 +1492,7 @@ void setupWebServer() {
     });
 
     server.on("/move_file", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (rateLimit429(r)) return;
+        if (!requireMutatingAuth(r)) return;
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         String src     = r->hasParam("src")     ? sanitizePath(r->getParam("src")->value())     : "";
         String newName = r->hasParam("newName") ? sanitizeFilename(r->getParam("newName")->value()) : "";
@@ -1527,7 +1528,7 @@ void setupWebServer() {
     struct UploadCtx { File file; bool mutexHeld; bool failed; };
     server.on("/upload", HTTP_POST,
         [](AsyncWebServerRequest *r) {
-            if (rateLimit429(r)) return;
+            if (!requireMutatingAuth(r)) return;
             UploadCtx* ctx = (UploadCtx*)r->_tempObject;
             if (ctx) {
                 if (ctx->file) ctx->file.close();
@@ -1657,6 +1658,7 @@ void setupWebServer() {
     static String _importBuf;
     server.on("/import_settings", HTTP_POST,
         [](AsyncWebServerRequest *r) {
+            if (!requireMutatingAuth(r)) return;
             if (_importBuf.isEmpty()) { r->send(400, "text/plain", "No data"); return; }
             JsonDocument doc;
             DeserializationError err = deserializeJson(doc, _importBuf);
@@ -1752,6 +1754,7 @@ void setupWebServer() {
     // WIFI SCAN
     // =========================================================================
     server.on("/wifi_scan_start", HTTP_GET, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
         WiFi.mode(WIFI_AP_STA);
         WiFi.scanDelete();
         WiFi.scanNetworks(true);
@@ -1814,6 +1817,7 @@ void setupWebServer() {
 
         server.on("/do_update", HTTP_POST,
             [](AsyncWebServerRequest *r) {
+                if (!requireMutatingAuth(r)) return;
                 OtaCtx* ctx = static_cast<OtaCtx*>(r->_tempObject);
                 bool rejected    = ctx ? ctx->rejected    : true;
                 bool shaMismatch = ctx ? ctx->shaMismatch : false;
