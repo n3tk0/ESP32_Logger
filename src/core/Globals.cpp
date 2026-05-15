@@ -111,3 +111,11 @@ volatile uint32_t g_lastWebActivity = 0;
 // Deferred NTP sync — driven from loop() so /sync_time never blocks AsyncTCP
 volatile uint8_t g_pendingNtpSync    = 0;
 volatile int8_t  g_lastNtpSyncResult = 0;
+
+// ============================================================================
+// Restart circuit breaker — state persists across software resets, NOT power.
+// See Globals.h header block for protocol. (Pillar 3.7 / AUDIT FC.4)
+// ============================================================================
+RTC_DATA_ATTR uint32_t g_resetMagic         = 0;
+RTC_DATA_ATTR uint32_t g_consecutiveResets  = 0;
+bool                    g_safeMode          = false;

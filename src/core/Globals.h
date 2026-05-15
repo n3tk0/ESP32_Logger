@@ -128,3 +128,20 @@ extern volatile uint32_t g_lastWebActivity;
 // g_lastNtpSyncResult:   0 = unknown, 1 = ok, -1 = fail
 extern volatile uint8_t g_pendingNtpSync;
 extern volatile int8_t  g_lastNtpSyncResult;
+
+// ============================================================================
+// RESTART CIRCUIT BREAKER (Pillar 3.7 / AUDIT FC.4)
+// ----------------------------------------------------------------------------
+// Counts consecutive non-graceful resets in RTC slow memory. If 3+ resets
+// happen without a 60-second healthy uptime in between, setup() enters
+// SAFE_MODE: skips _initPlatform / legacy state-machine, brings up WiFi AP
+// + web server only, so the user can OTA-recover.
+//
+// RESET_GUARD_MAGIC distinguishes a real warm boot (magic preserved) from a
+// cold boot where RTC slow memory contents are undefined.
+// ============================================================================
+constexpr uint32_t RESET_GUARD_MAGIC = 0x57415445;  // "WATE"
+
+extern RTC_DATA_ATTR uint32_t g_resetMagic;
+extern RTC_DATA_ATTR uint32_t g_consecutiveResets;
+extern bool                    g_safeMode;

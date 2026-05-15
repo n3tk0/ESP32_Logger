@@ -1393,6 +1393,10 @@ void setupWebServer() {
             DBGLN("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
         }
         if (fsMutex) xSemaphoreGive(fsMutex);   // FS1
+        // Invalidate safe-mode magic so the next boot zeroes the counter
+        // regardless of the ESP_RST_SW reset reason. /factory_reset is a
+        // user-initiated wipe, NOT a crash.
+        g_resetMagic = 0;
         safeWiFiShutdown();
         delay(300);
         ESP.restart();
