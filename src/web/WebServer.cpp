@@ -1525,17 +1525,20 @@ void setupWebServer() {
 
     // Upload handler: per-request state in _tempObject tracks file handle
     // AND mutex-held flag so that client abort (onDisconnect) can release both.
-    struct UploadCtx { File file; bool mutexHeld; bool failed; };
+    struct UploadCtx { File file; bool mutexHeld; bool failed; bool authFailed = false; };
     server.on("/upload", HTTP_POST,
         [](AsyncWebServerRequest *r) {
-            if (!requireMutatingAuth(r)) return;
+            // Auth was checked in onUpload at index==0 (onUpload fires before
+            // onRequest in ESPAsyncWebServer). Only clean up + send response here.
             UploadCtx* ctx = (UploadCtx*)r->_tempObject;
             if (ctx) {
                 if (ctx->file) ctx->file.close();
                 if (ctx->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
-                bool failed = ctx->failed;
+                bool failed    = ctx->failed;
+                bool authFailed = ctx->authFailed;
                 delete ctx;
                 r->_tempObject = nullptr;
+                if (authFailed) return;  // 403 already sent in onUpload
                 if (failed) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Upload failed\"}"); return; }
             }
             r->send(200, "application/json", "{\"ok\":true}");
@@ -1549,6 +1552,14 @@ void setupWebServer() {
                     if (old->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
                     delete old;
                     request->_tempObject = nullptr;
+                }
+
+                // Auth check here — onUpload fires before onRequest in
+                // ESPAsyncWebServer, so checking in onRequest is too late to
+                // prevent unauthorized file writes.
+                if (!requireMutatingAuth(request)) {
+                    request->_tempObject = new (std::nothrow) UploadCtx{File(), false, false, true};
+                    return;
                 }
 
                 String upDirRaw = request->hasParam("path")
@@ -1805,6 +1816,7 @@ void setupWebServer() {
             bool rejected     = false;
             bool shaMismatch  = false;
             bool shaActive    = false;
+            bool authFailed   = false;
             String expectedSha;
             mbedtls_sha256_context sha;
             ~OtaCtx() {
@@ -1817,8 +1829,14 @@ void setupWebServer() {
 
         server.on("/do_update", HTTP_POST,
             [](AsyncWebServerRequest *r) {
-                if (!requireMutatingAuth(r)) return;
+                // Auth was checked in onUpload at index==0 (onUpload fires before
+                // onRequest in ESPAsyncWebServer). Only send the result here.
                 OtaCtx* ctx = static_cast<OtaCtx*>(r->_tempObject);
+                if (ctx && ctx->authFailed) {
+                    delete ctx;
+                    r->_tempObject = nullptr;
+                    return;  // 403 already sent in onUpload
+                }
                 bool rejected    = ctx ? ctx->rejected    : true;
                 bool shaMismatch = ctx ? ctx->shaMismatch : false;
 
@@ -1869,6 +1887,14 @@ void setupWebServer() {
 
                     DBGF("OTA start: %s\n", filename.c_str());
 
+                    // Auth check here — onUpload fires before onRequest in
+                    // ESPAsyncWebServer, so checking in onRequest is too late
+                    // to prevent unauthorized flash writes.
+                    if (!requireMutatingAuth(req)) {
+                        ctx->authFailed = true;
+                        return;
+                    }
+
                     // Expected hash arrives as a query param (header-free
                     // for client simplicity).  Empty → verification skipped.
                     if (req->hasParam("sha256")) {
@@ -1903,7 +1929,7 @@ void setupWebServer() {
                 }
 
                 OtaCtx* ctx = static_cast<OtaCtx*>(req->_tempObject);
-                if (!ctx || ctx->rejected) return;
+                if (!ctx || ctx->authFailed || ctx->rejected) return;
 
                 if (Update.write(data, len) != len) Update.printError(Serial);
                 if (ctx->shaActive) {
