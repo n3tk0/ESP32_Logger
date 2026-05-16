@@ -11,6 +11,7 @@ void sensorTaskFunc(void* /*param*/) {
 
     // C1: compute poll interval from sensor config (min 50ms, default 1s)
     uint32_t pollMs = sensorManager.minReadIntervalMs();
+    if (pollMs < 50) pollMs = 50;
 
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_SENSOR] = millis();   // C4 heartbeat

@@ -53,6 +53,7 @@ bool DataLogModule::load(JsonObjectConst cfg) {
     copyStr(d.folder, sizeof(d.folder), cfg["folder"] | (const char*)nullptr);
 
     d.rotation              = (DatalogRotation)(cfg["rotation"] | (int)d.rotation);
+    if ((int)d.rotation < 0 || (int)d.rotation > 4) d.rotation = (DatalogRotation)0;
     d.maxSizeKB             = cfg["maxSizeKB"]  | d.maxSizeKB;
     d.maxEntries            = cfg["maxEntries"] | d.maxEntries;
     d.timestampFilename     = cfg["timestampFilename"]   | d.timestampFilename;
@@ -60,13 +61,19 @@ bool DataLogModule::load(JsonObjectConst cfg) {
     d.includeBootCount      = cfg["includeBootCount"]    | d.includeBootCount;
     d.includeExtraPresses   = cfg["includeExtraPresses"] | d.includeExtraPresses;
     d.dateFormat            = (uint8_t)(cfg["dateFormat"]   | (int)d.dateFormat);
+    if (d.dateFormat > 4) d.dateFormat = 0;
     d.timeFormat            = (uint8_t)(cfg["timeFormat"]   | (int)d.timeFormat);
+    if (d.timeFormat > 2) d.timeFormat = 0;
     d.endFormat             = (uint8_t)(cfg["endFormat"]    | (int)d.endFormat);
+    if (d.endFormat > 2) d.endFormat = 0;
     d.volumeFormat          = (uint8_t)(cfg["volumeFormat"] | (int)d.volumeFormat);
+    if (d.volumeFormat > 3) d.volumeFormat = 0;
     d.manualPressThresholdMs= cfg["manualPressThresholdMs"] | d.manualPressThresholdMs;
     d.postCorrectionEnabled = cfg["postCorrectionEnabled"]  | d.postCorrectionEnabled;
     d.pfToFfThreshold       = cfg["pfToFfThreshold"] | d.pfToFfThreshold;
+    if (!(d.pfToFfThreshold >= 0.1f && d.pfToFfThreshold <= 1000.0f)) d.pfToFfThreshold = 4.5f;
     d.ffToPfThreshold       = cfg["ffToPfThreshold"] | d.ffToPfThreshold;
+    if (!(d.ffToPfThreshold >= 0.1f && d.ffToPfThreshold <= 1000.0f)) d.ffToPfThreshold = 3.7f;
     return true;
 }
 

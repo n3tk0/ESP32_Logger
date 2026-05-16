@@ -223,7 +223,10 @@ public:
         _w.writeByte(_dec2bcd(dt.Day()));
         _w.writeByte(_dec2bcd(dt.Month()));
         _w.writeByte(0x01); // day-of-week (not used but required)
-        _w.writeByte(_dec2bcd(dt.Year() - 2000));
+        uint16_t year = dt.Year();
+        if (year < 2000) year = 2000;
+        if (year > 2099) year = 2099;
+        _w.writeByte(_dec2bcd((uint8_t)(year - 2000)));
         _w.writeByte(0x00); // write-protect off
         _w.endTransaction();
     }

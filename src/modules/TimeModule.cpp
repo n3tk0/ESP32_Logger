@@ -20,6 +20,7 @@ bool TimeModule::load(JsonObjectConst cfg) {
     const char* ntp = cfg["ntpServer"] | (const char*)nullptr;
     if (ntp) strlcpy(n.ntpServer, ntp, sizeof(n.ntpServer));
     n.timezone       = (int8_t)(cfg["timezone"]       | (int)n.timezone);
+    if (n.timezone < -12 || n.timezone > 14) n.timezone = 0;
     n.dstOffsetHours = (int8_t)(cfg["dstOffsetHours"] | (int)n.dstOffsetHours);
     return true;
 }

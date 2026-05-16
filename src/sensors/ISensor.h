@@ -17,6 +17,10 @@ struct CalibrationAxis {
         if (!c.isNull()) {
             offset = c["offset"] | 0.0f;
             scale  = c["scale"]  | 1.0f;
+            if (scale == 0.0f || !isfinite(scale) || !isfinite(offset)) {
+                scale = 1.0f;
+                offset = 0.0f;
+            }
         }
     }
 };
