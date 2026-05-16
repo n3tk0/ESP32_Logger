@@ -1525,7 +1525,7 @@ void setupWebServer() {
 
     // Upload handler: per-request state in _tempObject tracks file handle
     // AND mutex-held flag so that client abort (onDisconnect) can release both.
-    struct UploadCtx { File file; bool mutexHeld; bool failed; bool authFailed = false; };
+    struct UploadCtx { File file; bool mutexHeld; bool failed; bool authFailed; };
     server.on("/upload", HTTP_POST,
         [](AsyncWebServerRequest *r) {
             // Auth was checked in onUpload at index==0 (onUpload fires before
@@ -1568,7 +1568,7 @@ void setupWebServer() {
                 String upDir = sanitizePath(upDirRaw);
                 if (upDir.isEmpty()) {
                     DBGF("Upload: invalid path '%s'\n", upDirRaw.c_str());
-                    auto* ctx = new UploadCtx{File(), false, true};
+                    auto* ctx = new UploadCtx{File(), false, true, false};
                     request->_tempObject = ctx;
                     return;
                 }
@@ -1576,7 +1576,7 @@ void setupWebServer() {
                 String safeName = sanitizeFilename(filename);
                 if (safeName.isEmpty()) {
                     DBGF("Upload: invalid filename '%s'\n", filename.c_str());
-                    auto* ctx = new UploadCtx{File(), false, true};
+                    auto* ctx = new UploadCtx{File(), false, true, false};
                     request->_tempObject = ctx;
                     return;
                 }
@@ -1591,7 +1591,7 @@ void setupWebServer() {
                                    : (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
                 if (!targetFS) {
                     DBGLN("Upload: no filesystem available");
-                    auto* ctx = new UploadCtx{File(), false, true};
+                    auto* ctx = new UploadCtx{File(), false, true, false};
                     request->_tempObject = ctx;
                     return;
                 }
@@ -1599,7 +1599,7 @@ void setupWebServer() {
                 String upPath = buildPath(upDir, safeName);
                 if (!wantSD && isPathProtected(upPath)) {
                     DBGF("Upload: refusing protected path %s\n", upPath.c_str());
-                    auto* ctx = new UploadCtx{File(), false, true};
+                    auto* ctx = new UploadCtx{File(), false, true, false};
                     request->_tempObject = ctx;
                     return;
                 }
@@ -1612,7 +1612,7 @@ void setupWebServer() {
                     if (free < need) {
                         DBGF("Upload: disk full (free=%u need=%u)\n",
                                       (unsigned)free, (unsigned)need);
-                        auto* ctx = new UploadCtx{File(), false, true};
+                        auto* ctx = new UploadCtx{File(), false, true, false};
                         request->_tempObject = ctx;
                         return;
                     }
@@ -1620,7 +1620,7 @@ void setupWebServer() {
 
                 DBGF("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
 
-                auto* ctx = new UploadCtx{File(), false, false};
+                auto* ctx = new UploadCtx{File(), false, false, false};
                 if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
                     ctx->mutexHeld = true;
                 }
