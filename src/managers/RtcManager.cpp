@@ -1,5 +1,7 @@
 #include "RtcManager.h"
 #include "../core/Globals.h"
+#include "../utils/AtomicWrite.h"
+#include "../pipeline/DataPipeline.h"
 #include <LittleFS.h>
 #include <esp_sleep.h>
 #include <driver/gpio.h>
@@ -75,8 +77,9 @@ void backupBootCount() {
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 2), (uint8_t)((bootCount >>  8) & 0xFF));
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 3), (uint8_t)( bootCount        & 0xFF));
     }
-    File f = LittleFS.open(BOOTCOUNT_BACKUP_FILE, "w");
-    if (f) { f.write((uint8_t*)&bootCount, sizeof(bootCount)); f.close(); }
+    atomicWrite(LittleFS, BOOTCOUNT_BACKUP_FILE, [](File& f) -> bool {
+        return f.write((uint8_t*)&bootCount, sizeof(bootCount)) == sizeof(bootCount);
+    }, fsMutex);
 }
 
 void restoreBootCount() {

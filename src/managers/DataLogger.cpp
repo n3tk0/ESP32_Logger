@@ -3,10 +3,11 @@
 #if PLATFORM_LEGACY_BUILD
 
 #include "../core/Globals.h"
+#include "../utils/AtomicWrite.h"
+#include "../utils/MutexGuard.h"
+#include "../pipeline/DataPipeline.h"
 #include "StorageManager.h"
 #include "RtcManager.h"
-#include "../pipeline/DataPipeline.h"
-#include "../utils/MutexGuard.h"
 #include <LittleFS.h>
 #include <math.h>
 
@@ -23,35 +24,33 @@ static int countFileLines(fs::FS* fs, const String& path) {
 }
 
 // Trim oldest entries from the file to stay within maxEntries limit
-static void trimLogFile(fs::FS* fs, const String& path, int maxEntries, int currentLines, int newEntries) {
+static bool trimLogFile(fs::FS* fs, const String& path, int maxEntries, int currentLines, int newEntries) {
     int totalAfterAppend = currentLines + newEntries;
-    if (maxEntries <= 0 || totalAfterAppend <= maxEntries) return;
+    if (maxEntries <= 0 || totalAfterAppend <= maxEntries) return true;
 
     int linesToSkip = totalAfterAppend - maxEntries;
-    if (linesToSkip <= 0) return;
+    if (linesToSkip <= 0) return true;
 
-    String tmpPath = path + ".tmp";
-    File src = fs->open(path, "r");
-    if (!src) return;
-    File dst = fs->open(tmpPath, "w");
-    if (!dst) { src.close(); return; }
-
-    int skipped = 0;
-    while (src.available() && skipped < linesToSkip) {
-        char c = src.read();
-        if (c == '\n') skipped++;
-    }
-    // Copy remaining lines
-    uint8_t buf[256];
-    while (src.available()) {
-        size_t n = src.read(buf, sizeof(buf));
-        if (n > 0) dst.write(buf, n);
-    }
-    src.close();
-    dst.close();
-    fs->remove(path);
-    fs->rename(tmpPath, path);
-    DBGF("Trimmed %d old entries from %s\n", linesToSkip, path.c_str());
+    // Caller (flushLogBufferToFS) already holds fsMutex — pass nullptr to
+    // avoid self-deadlock on the non-recursive mutex.
+    bool ok = atomicWrite(*fs, path.c_str(), [&](File& dst) -> bool {
+        File src = fs->open(path, "r");
+        if (!src) return false;
+        int skipped = 0;
+        while (src.available() && skipped < linesToSkip) {
+            char c = src.read();
+            if (c == '\n') skipped++;
+        }
+        uint8_t buf[256];
+        while (src.available()) {
+            size_t n = src.read(buf, sizeof(buf));
+            if (n > 0 && dst.write(buf, n) != n) { src.close(); return false; }
+        }
+        src.close();
+        return true;
+    }, nullptr);
+    if (ok) DBGF("Trimmed %d old entries from %s\n", linesToSkip, path.c_str());
+    return ok;
 }
 
 void flushLogBufferToFS() {

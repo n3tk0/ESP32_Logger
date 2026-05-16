@@ -1,5 +1,6 @@
 #include "FlowRunLogger.h"
 #include "../utils/MutexGuard.h"
+#include "../pipeline/DataPipeline.h"
 #include <math.h>
 #include <string.h>
 
@@ -59,8 +60,19 @@ void FlowRunLogger::_enforceSizeRotation() {
     if (sz > (size_t)_maxSizeKB * 1024UL) {
         char bak[96];
         snprintf(bak, sizeof(bak), "%s.bak", path);
-        _fs->remove(bak);
-        _fs->rename(path, bak);
+        MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
+        if (!guard.isLocked()) {
+            Serial.printf("[FlowRunLogger] rotation skipped for %s (mutex timeout)\n", path);
+            return;
+        }
+        if (_fs->rename(path, bak)) {
+            // success — LittleFS overwrote atomically
+        } else if (_fs->exists(bak) && _fs->remove(bak) && _fs->rename(path, bak)) {
+            // SD/FAT fallback — non-atomic but works
+        } else {
+            Serial.printf("[FlowRunLogger] rotation failed for %s\n", path);
+            return;
+        }
         Serial.printf("[FlowRunLogger] rotated %s -> %s\n", path, bak);
     }
 }

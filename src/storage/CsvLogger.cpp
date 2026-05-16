@@ -1,5 +1,7 @@
 #include "CsvLogger.h"
 #include "../pipeline/LiveAggregator.h"   // ROW_BUF_BYTES — must match aggregator
+#include "../utils/MutexGuard.h"
+#include "../pipeline/DataPipeline.h"
 #include <string.h>
 #include <time.h>
 
@@ -70,8 +72,19 @@ void CsvLogger::_rotate(const char* path) {
     // length bumps don't silently truncate the backup name.
     char bak[96];
     snprintf(bak, sizeof(bak), "%s.bak", path);
-    _fs->remove(bak);             // discard previous .bak if any
-    _fs->rename(path, bak);
+    MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
+    if (!guard.isLocked()) {
+        Serial.printf("[CsvLogger] rotation skipped for %s (mutex timeout)\n", path);
+        return;
+    }
+    if (_fs->rename(path, bak)) {
+        // success — LittleFS overwrote atomically
+    } else if (_fs->exists(bak) && _fs->remove(bak) && _fs->rename(path, bak)) {
+        // SD/FAT fallback — non-atomic but works
+    } else {
+        Serial.printf("[CsvLogger] rotation failed for %s\n", path);
+        return;
+    }
     Serial.printf("[CsvLogger] rotated %s -> %s\n", path, bak);
 }
 
