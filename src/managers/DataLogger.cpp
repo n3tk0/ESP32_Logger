@@ -4,6 +4,7 @@
 
 #include "../core/Globals.h"
 #include "../utils/AtomicWrite.h"
+#include "../utils/MutexGuard.h"
 #include "../pipeline/DataPipeline.h"
 #include "StorageManager.h"
 #include "RtcManager.h"
@@ -30,6 +31,8 @@ static bool trimLogFile(fs::FS* fs, const String& path, int maxEntries, int curr
     int linesToSkip = totalAfterAppend - maxEntries;
     if (linesToSkip <= 0) return true;
 
+    // Caller (flushLogBufferToFS) already holds fsMutex — pass nullptr to
+    // avoid self-deadlock on the non-recursive mutex.
     bool ok = atomicWrite(*fs, path.c_str(), [&](File& dst) -> bool {
         File src = fs->open(path, "r");
         if (!src) return false;
@@ -45,13 +48,16 @@ static bool trimLogFile(fs::FS* fs, const String& path, int maxEntries, int curr
         }
         src.close();
         return true;
-    }, fsMutex);
+    }, nullptr);
     if (ok) DBGF("Trimmed %d old entries from %s\n", linesToSkip, path.c_str());
     return ok;
 }
 
 void flushLogBufferToFS() {
     if (logBufferCount == 0 || !fsAvailable || !activeFS) return;
+
+    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+    if (fsMutex && !g.isLocked()) return;  // mutex exists but timed out — skip this flush
 
     String logFile = getActiveDatalogFile();
 

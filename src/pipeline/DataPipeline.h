@@ -25,6 +25,8 @@ extern SemaphoreHandle_t fsMutex;       // LittleFS write serialisation (FS1)
 
 // Drop counter — incremented whenever a queue send fails (finding #3)
 extern volatile uint32_t g_queueDrops;
+// Drop counter — incremented when webRingBuf push is skipped due to mutex contention
+extern std::atomic<uint32_t> g_ringPushDrops;
 
 // Task health heartbeat (C4) — each task writes millis() here every loop
 enum TaskIndex : uint8_t {

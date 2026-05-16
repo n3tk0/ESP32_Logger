@@ -7,14 +7,12 @@
 namespace {
 class Lock {
 public:
-    Lock(SemaphoreHandle_t s) : _s(s), _held(false) {
-        if (_s) _held = (xSemaphoreTake(_s, portMAX_DELAY) == pdTRUE);
-    }
-    ~Lock() { if (_s && _held) xSemaphoreGive(_s); }
-    bool ok() const { return _s == nullptr || _held; }
+    Lock(SemaphoreHandle_t s, TickType_t t = pdMS_TO_TICKS(2000))
+        : _s(s), _g(s, t) {}
+    bool ok() const { return _s == nullptr || _g.isLocked(); }
 private:
     SemaphoreHandle_t _s;
-    bool _held;
+    MutexGuard _g;
 };
 }  // namespace
 

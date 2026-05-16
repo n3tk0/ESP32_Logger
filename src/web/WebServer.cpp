@@ -29,6 +29,7 @@
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "CsrfToken.h"                 // Pass 7 CSRF on mutating routes
 #include "../pipeline/DataPipeline.h"   // fsMutex (FS1)
+#include "../utils/MutexGuard.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Update.h>
@@ -1383,16 +1384,14 @@ void setupWebServer() {
     server.on("/factory_reset", HTTP_POST, [](AsyncWebServerRequest *r) {
         r->send(200, "application/json", "{\"ok\":true}");
         DBGLN("[FACTORY RESET] Formatting LittleFS…");
-        // Short timeout keeps the AsyncTCP worker responsive; factory reset
-        // restarts the chip regardless so blocking the worker longer buys us
-        // nothing.
-        if (fsMutex) xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000));   // FS1
-        if (LittleFS.format()) {
-            DBGLN("[FACTORY RESET] LittleFS formatted OK – restarting");
-        } else {
-            DBGLN("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
+        {
+            MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+            if (LittleFS.format()) {
+                DBGLN("[FACTORY RESET] LittleFS formatted OK – restarting");
+            } else {
+                DBGLN("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
+            }
         }
-        if (fsMutex) xSemaphoreGive(fsMutex);   // FS1
         // Invalidate safe-mode magic so the next boot zeroes the counter
         // regardless of the ESP_RST_SW reset reason. /factory_reset is a
         // user-initiated wipe, NOT a crash.

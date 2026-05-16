@@ -5,6 +5,7 @@
 #include "../pipeline/FlowRunLogger.h"
 #include "../storage/CsvLogger.h"
 #include "../core/Globals.h"   // Rtc for epoch fallback
+#include "../utils/MutexGuard.h"
 #include <time.h>
 
 namespace {
@@ -96,9 +97,8 @@ void storageTaskFunc(void* param) {
 
         uint32_t epoch = nowEpochSafe();
         if (flowRunActive) {
-            if (fsMutex) xSemaphoreTake(fsMutex, portMAX_DELAY);
-            flowRunLog.tick(epoch);
-            if (fsMutex) xSemaphoreGive(fsMutex);
+            MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+            if (g.isLocked()) flowRunLog.tick(epoch);
         }
 
         if (!writingEnabled) continue;
@@ -106,10 +106,11 @@ void storageTaskFunc(void* param) {
         uint32_t rowTs = 0;
         if (agg.buildRowIfDue(epoch, rowBuf, sizeof(rowBuf), &rowTs)) {
             if (agg.buildHeader(headerBuf, sizeof(headerBuf)) > 0) {
-                if (fsMutex) xSemaphoreTake(fsMutex, portMAX_DELAY);
-                primary.appendRow(rowTs, headerBuf, rowBuf);
-                if (mirrorActive) mirror.appendRow(rowTs, headerBuf, rowBuf);
-                if (fsMutex) xSemaphoreGive(fsMutex);
+                MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+                if (g.isLocked()) {
+                    primary.appendRow(rowTs, headerBuf, rowBuf);
+                    if (mirrorActive) mirror.appendRow(rowTs, headerBuf, rowBuf);
+                }
             }
         }
     }
@@ -119,10 +120,11 @@ void storageTaskFunc(void* param) {
         uint32_t rowTs = 0;
         if (agg.flushNow(nowEpochSafe(), rowBuf, sizeof(rowBuf), &rowTs)) {
             if (agg.buildHeader(headerBuf, sizeof(headerBuf)) > 0) {
-                if (fsMutex) xSemaphoreTake(fsMutex, portMAX_DELAY);
-                primary.appendRow(rowTs, headerBuf, rowBuf);
-                if (mirrorActive) mirror.appendRow(rowTs, headerBuf, rowBuf);
-                if (fsMutex) xSemaphoreGive(fsMutex);
+                MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+                if (g.isLocked()) {
+                    primary.appendRow(rowTs, headerBuf, rowBuf);
+                    if (mirrorActive) mirror.appendRow(rowTs, headerBuf, rowBuf);
+                }
             }
         }
     }

@@ -1,5 +1,7 @@
 #include "ExportManager.h"
 #include "../setup.h"
+#include "../pipeline/DataPipeline.h"
+#include "../utils/MutexGuard.h"
 #include <string.h>
 
 ExportManager exportManager;
@@ -87,6 +89,13 @@ void ExportManager::_spoolBatch(IExporter* exp,
                                  const SensorReading* r, size_t n) {
     if (!_spoolFS || !r || n == 0) return;
 
+    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+    if (!g.isLocked()) {
+        Serial.printf("[ExportManager] fsMutex timeout — dropping spool batch for '%s'\n",
+                      exp->getName());
+        return;
+    }
+
     char path[48];
     snprintf(path, sizeof(path), "/spool/%s.jsonl", exp->getName());
 
@@ -171,8 +180,25 @@ bool ExportManager::_drainSpool(IExporter* exp) {
     if (count > 0 && allOk) allOk = exp->send(batch, count);
 
     if (allOk) {
-        _spoolFS->remove(path);
-        Serial.printf("[ExportManager] Spool drained for '%s'\n", exp->getName());
+        // We've already sent — failing to remove here means the next drain
+        // cycle will re-send (duplicate delivery). Retry with backoff before
+        // giving up.
+        bool removed = false;
+        for (int attempt = 0; attempt < 5 && !removed; attempt++) {
+            MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+            if (g.isLocked()) {
+                _spoolFS->remove(path);
+                removed = true;
+                Serial.printf("[ExportManager] Spool drained for '%s'\n", exp->getName());
+            } else if (attempt < 4) {
+                vTaskDelay(pdMS_TO_TICKS(200));
+            }
+        }
+        if (!removed) {
+            Serial.printf("[ExportManager] WARN: sent OK but spool remove failed for '%s' — next cycle will duplicate\n",
+                          exp->getName());
+            return false;
+        }
     }
     return allOk;
 }
