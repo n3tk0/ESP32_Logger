@@ -53,6 +53,7 @@ bool DataLogModule::load(JsonObjectConst cfg) {
     copyStr(d.folder, sizeof(d.folder), cfg["folder"] | (const char*)nullptr);
 
     d.rotation              = (DatalogRotation)(cfg["rotation"] | (int)d.rotation);
+    if ((int)d.rotation < 0 || (int)d.rotation > 4) d.rotation = (DatalogRotation)0;
     d.maxSizeKB             = cfg["maxSizeKB"]  | d.maxSizeKB;
     d.maxEntries            = cfg["maxEntries"] | d.maxEntries;
     d.timestampFilename     = cfg["timestampFilename"]   | d.timestampFilename;

@@ -322,7 +322,7 @@ Files: `modules/DataLogModule.*`, `modules/TimeModule.*`, `serial/SerialProvisio
 | # | Severity | Issue | Fix | Status |
 |---|---|---|---|---|
 | 14.1 | M | DataLogModule.cpp:50-71 — `load()` always returns true; same 13.2 family. Out-of-range enums, unbounded numerics, NaN floats silently accepted. | Per-field validation; return false on any rejection; aggregate via ModuleRegistry honouring load() return (tied to 6.12). | Pending |
-| 14.2 | M | DataLogModule.cpp:55 — `rotation` enum cast without range check. ROTATION_SIZE=4 is max; `99` stored verbatim, then downstream switch defaults. | Validate against enum range 0..4. | Pending |
+| 14.2 | M | DataLogModule.cpp:55 — `rotation` enum cast without range check. ROTATION_SIZE=4 is max; `99` stored verbatim, then downstream switch defaults. | Validate against enum range 0..4. | Fixed (R10 PR pending) |
 | 14.3 | L | DataLogModule.cpp:62-65 — Four uint8_t enum fields (dateFormat/timeFormat/endFormat/volumeFormat) cast from int with no range check. | Validate each against schema option count. | Pending |
 | 14.4 | M | DataLogModule.cpp:52-53 — `folder` accepted without `isPathProtected` check. User can POST `{"folder":"_setup"}` via /api/modules/datalog; DataLogger.cpp:60-65 then mkdirs the protected path. Tied to 9.10. | Validate folder against `isPathProtected` and `sanitizePath` on load. | Pending |
 | 14.5 | L | DataLogModule.cpp:68-69 — `pfToFfThreshold`/`ffToPfThreshold` accept NaN/Inf via JSON. `applyDefaults` catches at next saveConfig but JSON-direct path bypasses validation. | Add `isfinite()` check; reject or clamp to [0.1, 1000]. | Pending |
