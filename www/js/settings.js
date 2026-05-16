@@ -58,21 +58,28 @@ function sdInit() {
 
 function regenDevId() {
   if (!confirm("Generate new ID based on MAC address?")) return;
-  fetch("/api/regen-id", { method: "POST" })
-    .then(function (r) {
-      return r.text();
-    })
-    .then(function (id) {
-      var inp = document.getElementById("sd-devId");
-      if (inp) {
-        inp.value = id.trim();
-        inp.disabled = false;
-      }
-      showToast("New ID generated: " + id.trim() + ". Click Save to apply.", "success");
-    })
-    .catch(function (e) {
-      showToast("Error: " + e, "error");
-    });
+  getCsrfToken().then(function (token) {
+    var url = "/api/regen-id" + (token ? "?csrf=" + encodeURIComponent(token) : "");
+    fetch(url, { method: "POST" })
+      .then(function (r) {
+        if (r.status === 403) {
+          window.__csrfToken = null;
+          throw new Error("CSRF token rejected — refresh the page and retry");
+        }
+        return r.text();
+      })
+      .then(function (id) {
+        var inp = document.getElementById("sd-devId");
+        if (inp) {
+          inp.value = id.trim();
+          inp.disabled = false;
+        }
+        showToast("New ID generated: " + id.trim() + ". Click Save to apply.", "success");
+      })
+      .catch(function (e) {
+        showToast("Error: " + e, "error");
+      });
+  });
 }
 
 // Matches original: function toggleManualId(id)
