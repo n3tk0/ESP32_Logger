@@ -71,7 +71,9 @@ bool DataLogModule::load(JsonObjectConst cfg) {
     d.manualPressThresholdMs= cfg["manualPressThresholdMs"] | d.manualPressThresholdMs;
     d.postCorrectionEnabled = cfg["postCorrectionEnabled"]  | d.postCorrectionEnabled;
     d.pfToFfThreshold       = cfg["pfToFfThreshold"] | d.pfToFfThreshold;
+    if (!(d.pfToFfThreshold >= 0.1f && d.pfToFfThreshold <= 1000.0f)) d.pfToFfThreshold = 1.0f;
     d.ffToPfThreshold       = cfg["ffToPfThreshold"] | d.ffToPfThreshold;
+    if (!(d.ffToPfThreshold >= 0.1f && d.ffToPfThreshold <= 1000.0f)) d.ffToPfThreshold = 1.0f;
     return true;
 }
 
