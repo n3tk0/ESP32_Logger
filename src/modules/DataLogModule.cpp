@@ -61,9 +61,13 @@ bool DataLogModule::load(JsonObjectConst cfg) {
     d.includeBootCount      = cfg["includeBootCount"]    | d.includeBootCount;
     d.includeExtraPresses   = cfg["includeExtraPresses"] | d.includeExtraPresses;
     d.dateFormat            = (uint8_t)(cfg["dateFormat"]   | (int)d.dateFormat);
+    if (d.dateFormat > 4) d.dateFormat = 0;
     d.timeFormat            = (uint8_t)(cfg["timeFormat"]   | (int)d.timeFormat);
+    if (d.timeFormat > 2) d.timeFormat = 0;
     d.endFormat             = (uint8_t)(cfg["endFormat"]    | (int)d.endFormat);
+    if (d.endFormat > 2) d.endFormat = 0;
     d.volumeFormat          = (uint8_t)(cfg["volumeFormat"] | (int)d.volumeFormat);
+    if (d.volumeFormat > 3) d.volumeFormat = 0;
     d.manualPressThresholdMs= cfg["manualPressThresholdMs"] | d.manualPressThresholdMs;
     d.postCorrectionEnabled = cfg["postCorrectionEnabled"]  | d.postCorrectionEnabled;
     d.pfToFfThreshold       = cfg["pfToFfThreshold"] | d.pfToFfThreshold;
