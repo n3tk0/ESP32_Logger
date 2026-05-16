@@ -30,9 +30,8 @@ static bool trimLogFile(fs::FS* fs, const String& path, int maxEntries, int curr
     int linesToSkip = totalAfterAppend - maxEntries;
     if (linesToSkip <= 0) return true;
 
-    String srcPath = path;   // capture before atomicWrite owns tmp
     bool ok = atomicWrite(*fs, path.c_str(), [&](File& dst) -> bool {
-        File src = fs->open(srcPath, "r");
+        File src = fs->open(path, "r");
         if (!src) return false;
         int skipped = 0;
         while (src.available() && skipped < linesToSkip) {
