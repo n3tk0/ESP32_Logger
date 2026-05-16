@@ -22,8 +22,14 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 
-inline void sendJsonResponse(AsyncWebServerRequest* r, JsonDocument& doc) {
+inline void sendJsonResponse(AsyncWebServerRequest* r, const JsonDocument& doc) {
     AsyncResponseStream* resp = r->beginResponseStream("application/json");
+    if (!resp) {
+        // beginResponseStream allocates on the heap; bail with 500 rather than
+        // crashing on a null dereference (Pillar 3.1: no silent OOM fallback).
+        r->send(500, "application/json", "{\"ok\":false,\"error\":\"oom\"}");
+        return;
+    }
     serializeJson(doc, *resp);
     r->send(resp);
 }
