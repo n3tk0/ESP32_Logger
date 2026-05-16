@@ -891,7 +891,7 @@ function settingsSave(ev, url, form, restart) {
           showMsg(
             msgId,
             "<div class='alert alert-error'>❌ " +
-              (r.error || "Unknown error") + "</div>",
+              esc(r.error || "Unknown error") + "</div>",
             true,
           );
         }

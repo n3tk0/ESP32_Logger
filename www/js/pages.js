@@ -217,19 +217,19 @@ function dbLoadCards() {
 function dbBuildCardHtml(p) {
   var key = dbCardKey(p.id, p.metric);
   return ''
-    + '<div class="sensor-card-mini" data-key="' + key + '">'
+    + '<div class="sensor-card-mini" data-key="' + esc(key) + '">'
     +   '<div class="sensor-card-mini-header">'
-    +     '<span class="sensor-card-mini-name" title="' + p.id + '">' + (p.name || p.id) + '</span>'
-    +     '<span class="sensor-card-mini-metric">' + p.metric + '</span>'
+    +     '<span class="sensor-card-mini-name" title="' + esc(p.id) + '">' + esc(p.name || p.id) + '</span>'
+    +     '<span class="sensor-card-mini-metric">' + esc(p.metric) + '</span>'
     +   '</div>'
     +   '<div class="sensor-card-mini-value">'
-    +     '<span class="value" data-card-value="' + key + '">--</span>'
-    +     '<span class="unit" data-card-unit="' + key + '"></span>'
+    +     '<span class="value" data-card-value="' + esc(key) + '">--</span>'
+    +     '<span class="unit" data-card-unit="' + esc(key) + '"></span>'
     +   '</div>'
-    +   '<div class="sensor-card-mini-spark" data-card-spark="' + key + '"></div>'
+    +   '<div class="sensor-card-mini-spark" data-card-spark="' + esc(key) + '"></div>'
     +   '<div class="sensor-card-mini-foot">'
-    +     '<span class="ts" data-card-ts="' + key + '">—</span>'
-    +     '<span class="quality" data-card-q="' + key + '"></span>'
+    +     '<span class="ts" data-card-ts="' + esc(key) + '">—</span>'
+    +     '<span class="quality" data-card-q="' + esc(key) + '"></span>'
     +   '</div>'
     + '</div>';
 }
