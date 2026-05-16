@@ -707,7 +707,7 @@ function clRenderSensors(sensors) {
         '<div style="font-size:.8rem;color:var(--text-muted)">' +
         esc(typeLabel) +
         " · " +
-        pinInfo +
+        esc(pinInfo) +
         "</div>" +
         "</div>" +
         '<button type="button" class="btn" data-click="clEditSensor" data-args="[' +
