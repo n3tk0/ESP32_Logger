@@ -3,6 +3,7 @@
 #include "../pipeline/DataPipeline.h"
 #include "../core/SensorTypes.h"
 #include "../alerts/AlertEngine.h"
+#include "../utils/MutexGuard.h"
 #include <math.h>
 
 // ---------------------------------------------------------------------------
@@ -44,10 +45,14 @@ void processingTaskFunc(void* /*param*/) {
             // Still log errors to storage (with q=3) but skip export
         }
 
-        // Write to web ring buffer (non-blocking, best-effort)
-        if (webDataMutex && xSemaphoreTake(webDataMutex, 0) == pdTRUE) {
-            webRingBuf.push(r);
-            xSemaphoreGive(webDataMutex);
+        // Write to web ring buffer (short timeout; drop on contention)
+        {
+            MutexGuard g(webDataMutex, pdMS_TO_TICKS(5));
+            if (g.isLocked()) {
+                webRingBuf.push(r);
+            } else {
+                g_ringPushDrops++;
+            }
         }
 
         // Alert evaluation — only for plausible readings (QUALITY_ERROR is

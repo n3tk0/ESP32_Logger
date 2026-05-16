@@ -2,6 +2,7 @@
 #include "../core/Globals.h"
 #include "../core/ModuleRegistry.h"     // Pass 5: shadow modules.json on save
 #include "../pipeline/DataPipeline.h"   // fsMutex
+#include "../utils/MutexGuard.h"
 #include <LittleFS.h>
 #include "esp_mac.h"
 #include <math.h>
@@ -520,13 +521,15 @@ bool saveConfig() {
     config.magic   = CONFIG_STRUCT_MAGIC;
     config.version = CONFIG_VERSION;
 
-    // Serialise with every other FS writer.  A 3 s timeout is long enough that
-    // any legitimate FS op in flight will finish, but short enough that a
-    // genuinely stuck mutex does not wedge the caller (often an async handler).
-    // If the mutex is unavailable we still attempt the save — a stale config
-    // is worse than a rare unserialised write that LittleFS will serialise
-    // internally anyway.
-    bool held = (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(3000)) == pdTRUE);
+    // Serialise with every other FS writer.  3 s timeout is long enough that
+    // any legitimate FS op in flight will finish.  On timeout, return false —
+    // the caller retries on the next opportunity; we must not write without
+    // the lock (Pillar 1 of refactoring guidelines).
+    MutexGuard g(fsMutex, pdMS_TO_TICKS(3000));
+    if (!g.isLocked()) {
+        DBGLN("Config save: fsMutex timeout — skipping write");
+        return false;
+    }
 
     // Crash-safe write: write to temp file, then rename over the real one.
     // If power is lost during write, the original config.bin remains intact.
@@ -535,7 +538,6 @@ bool saveConfig() {
     File f = LittleFS.open(TMP_FILE, "w");
     if (!f) {
         DBGLN("Failed to open config temp file");
-        if (held) xSemaphoreGive(fsMutex);
         return false;
     }
     size_t written = f.write((uint8_t*)&config, sizeof(DeviceConfig));
@@ -544,24 +546,21 @@ bool saveConfig() {
     if (written != sizeof(DeviceConfig)) {
         DBGLN("Config write incomplete");
         LittleFS.remove(TMP_FILE);
-        if (held) xSemaphoreGive(fsMutex);
         return false;
     }
 
     // Atomic rename: LittleFS rename overwrites the destination
     if (!LittleFS.rename(TMP_FILE, CONFIG_FILE)) {
         DBGLN("Config rename failed");
-        if (held) xSemaphoreGive(fsMutex);
         return false;
     }
 
-    if (held) xSemaphoreGive(fsMutex);
-
     // Pass 5 phase 2: shadow the subset of DeviceConfig that IModule adapters
-    // track into /config/modules.json.  Failures here are non-fatal — config.bin
-    // is authoritative; modules.json is a secondary view for the new UI.
+    // track into /config/modules.json.  Run while fsMutex is still held so
+    // saveAll's LittleFS writes are serialised (audit 1.9).
     moduleRegistry.saveAll(LittleFS);
 
+    // g releases fsMutex here on return
     DBGLN("Config saved");
     return true;
 }

@@ -1,25 +1,17 @@
 #include "LiveAggregator.h"
+#include "../utils/MutexGuard.h"
 #include <math.h>
 #include <string.h>
 
-// ---------------------------------------------------------------------------
-// RAII guard for the internal semaphore.  Falls through silently when the
-// semaphore could not be created (the caller still gets correct semantics on
-// single-threaded boards but loses cross-task safety).
-// ---------------------------------------------------------------------------
 namespace {
 class Lock {
 public:
-    Lock(SemaphoreHandle_t s, TickType_t timeout = portMAX_DELAY)
-        : _s(s), _held(false)
-    {
-        if (_s) _held = (xSemaphoreTake(_s, timeout) == pdTRUE);
-    }
-    ~Lock() { if (_s && _held) xSemaphoreGive(_s); }
-    bool ok() const { return _s == nullptr || _held; }
+    Lock(SemaphoreHandle_t s, TickType_t t = pdMS_TO_TICKS(2000))
+        : _s(s), _g(s, t) {}
+    bool ok() const { return _s == nullptr || _g.isLocked(); }
 private:
     SemaphoreHandle_t _s;
-    bool              _held;
+    MutexGuard _g;
 };
 }
 

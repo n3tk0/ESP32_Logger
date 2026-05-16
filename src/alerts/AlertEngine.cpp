@@ -1,4 +1,6 @@
 #include "AlertEngine.h"
+#include "../utils/MutexGuard.h"
+#include "../utils/AtomicWrite.h"
 #include <LittleFS.h>
 #include "../export/MqttExporter.h"
 
@@ -136,7 +138,8 @@ uint8_t AlertEngine::_parseActions(JsonArrayConst arr) const {
 // ---------------------------------------------------------------------------
 void AlertEngine::evaluate(const SensorReading& r, uint32_t nowTs) {
     if (!_mutex) return;
-    if (xSemaphoreTake(_mutex, 0) != pdTRUE) return;  // non-blocking in hot path
+    MutexGuard g(_mutex, pdMS_TO_TICKS(5));
+    if (!g.isLocked()) return;
 
     for (int i = 0; i < _ruleCount; i++) {
         Rule& rule = _rules[i];
@@ -166,8 +169,6 @@ void AlertEngine::evaluate(const SensorReading& r, uint32_t nowTs) {
             rule.firing         = false;
         }
     }
-
-    xSemaphoreGive(_mutex);
 }
 
 // ---------------------------------------------------------------------------
@@ -399,9 +400,10 @@ bool AlertEngine::_save() const {
         ho["outcome"] = "fired";
     }
 
-    File f = _fs->open(_path, FILE_WRITE);
-    if (!f) return false;
-    serializeJson(doc, f);
-    f.close();
-    return true;
+    // TODO: tied to AUDIT 15.9 — AlertEngine needs fsMutex wiring in a follow-up
+    return atomicWrite(*_fs, _path, [&](File& f) -> bool {
+        size_t want = measureJson(doc);
+        size_t got  = serializeJson(doc, f);
+        return got > 0 && got == want;
+    }, /*fsMutex*/ nullptr);
 }

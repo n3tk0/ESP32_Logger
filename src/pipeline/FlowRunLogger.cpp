@@ -1,18 +1,18 @@
 #include "FlowRunLogger.h"
+#include "../utils/MutexGuard.h"
+#include "../pipeline/DataPipeline.h"
 #include <math.h>
 #include <string.h>
 
 namespace {
 class Lock {
 public:
-    Lock(SemaphoreHandle_t s) : _s(s), _held(false) {
-        if (_s) _held = (xSemaphoreTake(_s, portMAX_DELAY) == pdTRUE);
-    }
-    ~Lock() { if (_s && _held) xSemaphoreGive(_s); }
-    bool ok() const { return _s == nullptr || _held; }
+    Lock(SemaphoreHandle_t s, TickType_t t = pdMS_TO_TICKS(2000))
+        : _s(s), _g(s, t) {}
+    bool ok() const { return _s == nullptr || _g.isLocked(); }
 private:
     SemaphoreHandle_t _s;
-    bool _held;
+    MutexGuard _g;
 };
 }  // namespace
 
@@ -60,8 +60,19 @@ void FlowRunLogger::_enforceSizeRotation() {
     if (sz > (size_t)_maxSizeKB * 1024UL) {
         char bak[96];
         snprintf(bak, sizeof(bak), "%s.bak", path);
-        _fs->remove(bak);
-        _fs->rename(path, bak);
+        MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
+        if (!guard.isLocked()) {
+            Serial.printf("[FlowRunLogger] rotation skipped for %s (mutex timeout)\n", path);
+            return;
+        }
+        if (_fs->rename(path, bak)) {
+            // success — LittleFS overwrote atomically
+        } else if (_fs->exists(bak) && _fs->remove(bak) && _fs->rename(path, bak)) {
+            // SD/FAT fallback — non-atomic but works
+        } else {
+            Serial.printf("[FlowRunLogger] rotation failed for %s\n", path);
+            return;
+        }
         Serial.printf("[FlowRunLogger] rotated %s -> %s\n", path, bak);
     }
 }
