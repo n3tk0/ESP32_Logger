@@ -35,14 +35,18 @@ bool WaterFlowSensor::init(JsonObjectConst cfg) {
     _calVolume.load(cal, "volume");
 
     pinMode(_pin, INPUT_PULLUP);
+
+    // Initialise counters BEFORE attaching the ISR — otherwise a pulse
+    // arriving between attach() and the reset below would be lost when
+    // _pulses is cleared. (gemini-code-assist PR #81 review.)
+    _pulses        = 0;
+    _lastPulseSnap = 0;
+    _lastReadMs    = millis();
+
     if (!_isrPin.attach((uint8_t)_pin, GPIO_INTR_NEGEDGE, &WaterFlowSensor::_isr, this)) {
         Serial.printf("[%s] ERROR: ISR attach failed on pin %d\n", getType(), _pin);
         return false;
     }
-
-    _pulses        = 0;
-    _lastPulseSnap = 0;
-    _lastReadMs    = millis();
 
     Serial.printf("[%s] pin=%d ppl=%.1f cal=%.2f\n",
                   getType(), _pin, _pulsesPerLiter, _calibration);
