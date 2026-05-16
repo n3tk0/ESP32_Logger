@@ -4,6 +4,7 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <functional>
+#include "../utils/JsonResponse.h"  // sendJsonResponse — shared with ApiHandlers
 
 /**
  * WebServer модул – архитектура на обслужването
@@ -55,5 +56,4 @@ void publishLiveEvent();
 String getModeDisplay();
 String getNetworkDisplay();
 
-void sendJsonResponse(AsyncWebServerRequest* r, JsonDocument& doc);
 void sendRestartPage(AsyncWebServerRequest* r, const char* message);
