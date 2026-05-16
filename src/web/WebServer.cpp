@@ -61,12 +61,6 @@ String getNetworkDisplay() {
     return String(strlen(config.network.apSSID) > 0 ? config.network.apSSID : config.deviceName);
 }
 
-void sendJsonResponse(AsyncWebServerRequest *r, JsonDocument &doc) {
-    AsyncResponseStream *resp = r->beginResponseStream("application/json");
-    serializeJson(doc, *resp);
-    r->send(resp);
-}
-
 const char RESTART_HEAD[] PROGMEM = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>Restarting</title><style>body{font-family:-apple-system,sans-serif;display:flex;justify-content:center;align-items:center;"
     "min-height:100vh;margin:0;background:#f0f2f5}.popup{background:#fff;border-radius:16px;padding:2rem;text-align:center;"

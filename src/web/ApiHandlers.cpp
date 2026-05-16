@@ -20,6 +20,7 @@
 #include "../managers/ConfigManager.h" // saveConfig() after module update
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
+#include "../utils/JsonResponse.h"     // R9: sendJsonResponse helper
 #include "../alerts/AlertEngine.h"    // GET/POST /api/alerts, snooze, toasts
 #include <Wire.h>                     // POST /api/i2c_scan
 
@@ -295,10 +296,7 @@ static void handleApiSensors(AsyncWebServerRequest* req) {
     JsonArray arr = doc["sensors"].to<JsonArray>();
     sensorManager.toJson(arr);
 
-    AsyncResponseStream* response =
-        req->beginResponseStream("application/json");
-    serializeJson(doc, *response);
-    req->send(response);
+    sendJsonResponse(req, doc);
 }
 
 // ---------------------------------------------------------------------------
@@ -370,10 +368,7 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     ota["pending_verify"]   = OtaManager::isPendingVerify();
     ota["rollback_capable"] = OtaManager::isRollbackCapable();
 
-    AsyncResponseStream* response =
-        req->beginResponseStream("application/json");
-    serializeJson(doc, *response);
-    req->send(response);
+    sendJsonResponse(req, doc);
 }
 
 // ---------------------------------------------------------------------------
@@ -427,10 +422,7 @@ static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
         r["value"]  = readings[i].value;
         r["unit"]   = readings[i].unit;
     }
-    AsyncResponseStream* response =
-        req->beginResponseStream("application/json");
-    serializeJson(doc, *response);
-    req->send(response);
+    sendJsonResponse(req, doc);
 }
 
 // ---------------------------------------------------------------------------
@@ -462,10 +454,7 @@ static void handleOtaStatus(AsyncWebServerRequest* req) {
     // Zero when not pending or already confirmed; lets the UI surface a
     // "Confirming in N s" banner on the Update page.
     doc["confirm_in_ms"]      = OtaManager::millisUntilConfirm();
-    AsyncResponseStream* response =
-        req->beginResponseStream("application/json");
-    serializeJson(doc, *response);
-    req->send(response);
+    sendJsonResponse(req, doc);
 }
 
 // ---------------------------------------------------------------------------
@@ -507,9 +496,7 @@ static void handleApiModulesIndex(AsyncWebServerRequest* req) {
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
     moduleRegistry.toIndexJson(arr);
-    AsyncResponseStream* resp = req->beginResponseStream("application/json");
-    serializeJson(doc, *resp);
-    req->send(resp);
+    sendJsonResponse(req, doc);
 }
 
 // GET /api/modules/:id → {id,name,enabled,hasUI,config,schema?}
@@ -521,9 +508,7 @@ static void handleApiModuleDetail(AsyncWebServerRequest* req, const String& id) 
         req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
         return;
     }
-    AsyncResponseStream* resp = req->beginResponseStream("application/json");
-    serializeJson(doc, *resp);
-    req->send(resp);
+    sendJsonResponse(req, doc);
 }
 
 // POST /api/modules/:id with JSON body → load() + persist.
@@ -591,9 +576,7 @@ static void handleApiModuleEnable(AsyncWebServerRequest* req, const String& id) 
     outDoc["ok"] = true;
     outDoc["enabled"] = on;
     outDoc["restartRequired"] = restartRequired;
-    AsyncResponseStream* resp = req->beginResponseStream("application/json");
-    serializeJson(outDoc, *resp);
-    req->send(resp);
+    sendJsonResponse(req, outDoc);
 }
 
 // ---------------------------------------------------------------------------
@@ -685,9 +668,7 @@ static void handleApiWifiScan(AsyncWebServerRequest* req) {
         WiFi.scanDelete();   // free slots so the next GET triggers a new scan
     }
 
-    AsyncResponseStream* resp = req->beginResponseStream("application/json");
-    serializeJson(doc, *resp);
-    req->send(resp);
+    sendJsonResponse(req, doc);
 }
 
 // POST /api/modules/wifi/test  — kicks off a credential probe in a worker
@@ -765,9 +746,7 @@ static void handleApiWifiTestPoll(AsyncWebServerRequest* req) {
             doc["state"] = "idle";
             break;
     }
-    AsyncResponseStream* resp = req->beginResponseStream("application/json");
-    serializeJson(doc, *resp);
-    req->send(resp);
+    sendJsonResponse(req, doc);
 }
 
 // Dispatcher — ESPAsyncWebServer's on() does exact-match only, so we register
@@ -885,10 +864,7 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
 static void handleApiAlertsGet(AsyncWebServerRequest* req) {
     JsonDocument doc;
     alertEngine.toJson(doc);
-    AsyncResponseStream* resp =
-        req->beginResponseStream("application/json");
-    serializeJson(doc, *resp);
-    req->send(resp);
+    sendJsonResponse(req, doc);
 }
 
 // ---------------------------------------------------------------------------
@@ -953,10 +929,7 @@ static void handleApiAlertsToasts(AsyncWebServerRequest* req) {
         o["value"]   = toast.value;
         o["ts"]      = toast.ts;
     }
-    AsyncResponseStream* resp =
-        req->beginResponseStream("application/json");
-    serializeJson(doc, *resp);
-    req->send(resp);
+    sendJsonResponse(req, doc);
 }
 
 // ---------------------------------------------------------------------------
@@ -988,10 +961,7 @@ static void handleApiI2cScan(AsyncWebServerRequest* req) {
     }
     xSemaphoreGive(wireMutex);
 
-    AsyncResponseStream* resp =
-        req->beginResponseStream("application/json");
-    serializeJson(doc, *resp);
-    req->send(resp);
+    sendJsonResponse(req, doc);
 }
 
 // ---------------------------------------------------------------------------
