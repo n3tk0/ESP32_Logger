@@ -42,6 +42,7 @@ const char WIFI_SCHEMA[] PROGMEM =
 bool WiFiModule::load(JsonObjectConst cfg) {
     NetworkConfig& n = config.network;
     n.wifiMode       = (WiFiModeType)(cfg["wifiMode"] | (int)n.wifiMode);
+    if ((int)n.wifiMode < 0 || (int)n.wifiMode > 1) n.wifiMode = WIFIMODE_AP;
     n.useStaticIP    = cfg["useStaticIP"] | n.useStaticIP;
 
     const char* ssid = cfg["clientSSID"] | (const char*)nullptr;
