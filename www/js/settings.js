@@ -35,22 +35,22 @@ function sdInit() {
       if (info) {
         info.innerHTML =
           '<div><strong>Firmware</strong><div class="text-primary">' +
-          (d.version || "-") +
+          esc(d.version || "-") +
           "</div></div>" +
           "<div><strong>Boot Count</strong><div>" +
-          (d.boot || 0) +
+          esc(d.boot || 0) +
           "</div></div>" +
           "<div><strong>Mode</strong><div>" +
-          (d.mode || "-") +
+          esc(d.mode || "-") +
           "</div></div>" +
           "<div><strong>Free Heap</strong><div>" +
           fmtBytes(d.heap) +
           "</div></div>" +
           "<div><strong>CPU</strong><div>" +
-          (d.cpu || "-") +
+          esc(d.cpu || "-") +
           " MHz</div></div>" +
           "<div><strong>Chip</strong><div>" +
-          (d.chip || "-") +
+          esc(d.chip || "-") +
           "</div></div>";
       }
     });
@@ -1470,7 +1470,7 @@ function otaUpload() {
           otaShowPopup(
             "alert-triangle",
             "Update Failed",
-            resp.message || "Unknown error",
+            esc(resp.message || "Unknown error"),
             false,
             true,
           );
@@ -1505,7 +1505,7 @@ function otaUpload() {
       otaShowPopup(
         "alert-triangle",
         "Upload Error",
-        "Server returned: " + xhr.statusText,
+        "Server returned: " + esc(xhr.statusText),
         false,
         true,
       );
