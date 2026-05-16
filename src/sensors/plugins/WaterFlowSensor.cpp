@@ -35,10 +35,10 @@ bool WaterFlowSensor::init(JsonObjectConst cfg) {
     _calVolume.load(cal, "volume");
 
     pinMode(_pin, INPUT_PULLUP);
-    static bool _isrServiceInstalled = false;
-    if (!_isrServiceInstalled) { gpio_install_isr_service(0); _isrServiceInstalled = true; }
-    gpio_set_intr_type((gpio_num_t)_pin, GPIO_INTR_NEGEDGE);
-    gpio_isr_handler_add((gpio_num_t)_pin, _isr, this);
+    if (!_isrPin.attach((uint8_t)_pin, GPIO_INTR_NEGEDGE, &WaterFlowSensor::_isr, this)) {
+        Serial.printf("[%s] ERROR: ISR attach failed on pin %d\n", getType(), _pin);
+        return false;
+    }
 
     _pulses        = 0;
     _lastPulseSnap = 0;
