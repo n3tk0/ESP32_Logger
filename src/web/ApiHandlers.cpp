@@ -532,6 +532,9 @@ static void handleApiModuleDetail(AsyncWebServerRequest* req, const String& id) 
 static void handleApiModuleUpdate(AsyncWebServerRequest* req, const String& id,
                                    uint8_t* data, size_t len) {
     if (!requireMutatingAuth(req)) return;
+    // TODO: JSON-body CSRF — CsrfToken::require() only reads form/query
+    // params, so JSON callers must include ?csrf=... in the query string
+    // until X-CSRF-Token header support lands.
     IModule* mod = moduleRegistry.getById(id.c_str());
     if (!mod) {
         req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
@@ -693,6 +696,9 @@ static void handleApiWifiScan(AsyncWebServerRequest* req) {
 static void handleApiWifiTest(AsyncWebServerRequest* req,
                               uint8_t* data, size_t len) {
     if (!requireMutatingAuth(req)) return;
+    // TODO: JSON-body CSRF — CsrfToken::require() only reads form/query
+    // params, so JSON callers must include ?csrf=... in the query string
+    // until X-CSRF-Token header support lands.
 
     JsonDocument body;
     if (deserializeJson(body, data, len)) {
