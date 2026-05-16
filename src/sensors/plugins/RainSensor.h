@@ -1,5 +1,6 @@
 #pragma once
 #include "../ISensor.h"
+#include "../../utils/IsrPin.h"
 
 // ============================================================================
 // RainSensor — tipping-bucket rain gauge (pulse + time-delta calculation)
@@ -53,4 +54,9 @@ private:
     CalibrationAxis _calTotal;
 
     static constexpr uint32_t ISR_DEBOUNCE_US = 20000; // 20ms debounce
+
+    // MUST be the LAST member — its destructor runs first during ~RainSensor()
+    // and detaches the ISR before any other field is freed. See
+    // REFACTORING_GUIDELINES Pillar 4.6 and AUDIT 23.3.
+    IsrPin _isrPin;
 };

@@ -1,5 +1,6 @@
 #pragma once
 #include "../ISensor.h"
+#include "../../utils/IsrPin.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -70,4 +71,9 @@ private:
     CalibrationAxis _calVolume; // applied to volume
 
     static constexpr unsigned long ISR_DEBOUNCE_US = 1000; // 1ms
+
+    // MUST be the LAST member — its destructor runs first during ~plugin()
+    // and detaches the ISR before any other field is freed. See
+    // REFACTORING_GUIDELINES Pillar 4.6 and AUDIT 2.6.
+    IsrPin _isrPin;
 };
