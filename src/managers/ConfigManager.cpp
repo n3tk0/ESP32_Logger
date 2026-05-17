@@ -359,7 +359,11 @@ void migrateConfig(uint8_t fromVersion) {
 // ============================================================================
 bool loadConfig() {
     // ── Mount LittleFS ────────────────────────────────────────────────────────
-    if (LittleFS.begin(true, "/littlefs", 10, "spiffs")) {
+    // R12 / AUDIT 1.7: formatOnFail=FALSE. Previously a transient mount fault
+    // silently nuked the partition. Now we keep the on-disk bytes intact and
+    // let setup() trip safe mode + serve the failsafe UI so the user can
+    // explicitly request a wipe via the "Format Filesystem" button.
+    if (LittleFS.begin(false, "/littlefs", 10, "spiffs")) {
         littleFsAvailable = true;
     } else {
         Serial.println("[CFG] LittleFS mount failed – using hardcoded defaults");

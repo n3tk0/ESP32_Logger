@@ -72,11 +72,9 @@ extern int           lastFFButtonState, lastPFButtonState;
 // ISR STATE
 // ============================================================================
 extern volatile uint32_t     pulseCount;
-extern volatile unsigned long lastFFInterrupt;
-extern volatile unsigned long lastPFInterrupt;
+// R12 / AUDIT 1.5: lastFFInterrupt / lastPFInterrupt / ffPressed / pfPressed
+// removed with the dead onFFButton / onPFButton ISRs (HardwareManager.cpp).
 extern volatile unsigned long lastFlowInterrupt;
-extern volatile bool          ffPressed;
-extern volatile bool          pfPressed;
 extern volatile bool          flowSensorPulseDetected;
 extern volatile uint32_t isrDebounceUs;         // I1: uint32_t = atomic on RISC-V
 

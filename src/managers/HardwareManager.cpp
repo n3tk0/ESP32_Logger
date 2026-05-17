@@ -5,22 +5,9 @@
 // ============================================================================
 // ISR HANDLERS
 // ============================================================================
-void IRAM_ATTR onFFButton() {
-    unsigned long now = micros();
-    if (now - lastFFInterrupt > isrDebounceUs) {
-        lastFFInterrupt = now;
-        ffPressed = true;
-    }
-}
-
-void IRAM_ATTR onPFButton() {
-    unsigned long now = micros();
-    if (now - lastPFInterrupt > isrDebounceUs) {
-        lastPFInterrupt = now;
-        pfPressed = true;
-    }
-}
-
+// R12 / AUDIT 1.5: onFFButton + onPFButton removed.  They were never
+// attachInterrupt'd anywhere; the ffPressed / pfPressed flags they
+// touched were write-only.  Buttons run via polled debounceButton().
 void IRAM_ATTR onFlowPulse() {
     unsigned long now = micros();
     if (now - lastFlowInterrupt > ISR_DEBOUNCE_MICROS) {
@@ -69,7 +56,9 @@ void initHardware() {
         pinMode(config.hardware.pinWakeupPF,    INPUT_PULLUP);
         pinMode(config.hardware.pinWifiTrigger, INPUT_PULLUP);
     }
-    pinMode(config.hardware.pinFlowSensor, INPUT);
+    // R12 / AUDIT 1.3: INPUT_PULLUP for YF-S201 — the sensor is an open-
+    // collector hall effect and needs the internal pull-up to be readable.
+    pinMode(config.hardware.pinFlowSensor, INPUT_PULLUP);
 
     // Init RTC
     initRtc();

@@ -451,8 +451,17 @@ static void _initPlatform() {
     // Register new API routes (sensor data + config)
     registerApiRoutes(server);
 
-    // Start FreeRTOS task pipeline
-    if (activeFS) TaskManager::init(*activeFS);
+    // Start FreeRTOS task pipeline.
+    // R12 / AUDIT 2.1 + 1.6: bool return is now actually checked.  A failed
+    // init() leaks nothing (cleanupPartialInit ran) but also leaves the
+    // mutexes / queues NULL.  Trip safe mode so the web stack still starts
+    // (PROGMEM failsafe + restart button) but ApiHandlers won't dispatch
+    // mutating endpoints that would xSemaphoreTake(NULL) → assert.
+    if (activeFS && !TaskManager::init(*activeFS)) {
+        g_safeMode = true;
+        Serial.println("[SafeMode] TaskManager::init failed — entering safe mode "
+                       "(sensor pipeline skipped)");
+    }
 
     DBGF("Platform ready. Sensors: %d  Exporters: %d\n",
                   sensorManager.count(), exportManager.count());
@@ -465,13 +474,30 @@ void setup() {
     // ── Early GPIO snapshot (< 1ms) ──────────────────────────────────────────
     // Capture ALL GPIO states BEFORE any delays.
     // Reed switches are momentary; magnet may pass within 50–200 ms.
+    //
+    // R12 / AUDIT 1.1: pinMode each scanned pin to INPUT_PULLUP BEFORE
+    // digitalRead so the bitmask reflects the wired signal, not the
+    // floating-input garbage that previously poisoned earlyGPIO_bitmask
+    // on cold boot. INPUT_PULLUP also matches the operating mode the
+    // button / reed-switch handlers use later.
+    //
+    // R12 / AUDIT 1.2: GPIO 18-19 are USB D+/D- on the C3 SuperMini and
+    // any C3 build with USB CDC on Boot. A plugged-in USB cable drives
+    // those lines and skews the bitmask. Skip them under those builds;
+    // GPIO 20-21 are still scanned (board exposes them as user IO).
     {
         earlyGPIO_bitmask = 0;
-        for (uint8_t pin = 0; pin <= 10; pin++)
+        for (uint8_t pin = 0; pin <= 10; pin++) {
+            pinMode(pin, INPUT_PULLUP);
             if (digitalRead(pin)) earlyGPIO_bitmask |= (1UL << pin);
-        // L1: include pins 18-21 (SuperMini exposes 18-19)
-        for (uint8_t pin = 18; pin <= 21; pin++)
+        }
+        for (uint8_t pin = 18; pin <= 21; pin++) {
+#if defined(CONFIG_IDF_TARGET_ESP32C3) && defined(ARDUINO_USB_CDC_ON_BOOT)
+            if (pin == 18 || pin == 19) continue;   // USB D-/D+
+#endif
+            pinMode(pin, INPUT_PULLUP);
             if (digitalRead(pin)) earlyGPIO_bitmask |= (1UL << pin);
+        }
         earlyGPIO_captured = true;
         earlyGPIO_millis   = millis();
     }
@@ -514,6 +540,16 @@ void setup() {
     isrDebounceUs = (uint32_t)config.hardware.debounceMs * 1000UL;   // I1
 
     initStorage();
+
+    // R12 / AUDIT 1.7: with formatOnFail=false, a corrupt LittleFS leaves
+    // littleFsAvailable=false. Trip safe mode so we boot AP-only with the
+    // PROGMEM failsafe UI (no LittleFS-backed assets needed) and the user
+    // can decide to wipe the partition via the explicit "Format" button.
+    if (!littleFsAvailable) {
+        g_safeMode = true;
+        Serial.println("[SafeMode] LittleFS mount failed — entering safe mode "
+                       "(use failsafe UI to format if needed)");
+    }
 
     // R11: load board profile from /board_profile.txt (nullptr → first-run
     // wizard required; FirstRunGate in WebServer.cpp redirects all non-

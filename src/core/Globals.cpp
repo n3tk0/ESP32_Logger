@@ -66,11 +66,10 @@ int           lastPFButtonState = LOW;
 // ISR STATE
 // ============================================================================
 volatile uint32_t     pulseCount            = 0;
-volatile unsigned long lastFFInterrupt      = 0;
-volatile unsigned long lastPFInterrupt      = 0;
+// R12 / AUDIT 1.5: lastFFInterrupt / lastPFInterrupt / ffPressed / pfPressed
+// were touched only by the dead onFFButton / onPFButton ISRs (now deleted).
+// Removed alongside their ISRs.
 volatile unsigned long lastFlowInterrupt    = 0;
-volatile bool         ffPressed             = false;
-volatile bool         pfPressed             = false;
 volatile bool         flowSensorPulseDetected = false;
 volatile uint32_t isrDebounceUs         = 100000;
 
