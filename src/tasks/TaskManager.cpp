@@ -29,10 +29,17 @@ static StorageTaskParam mirrorParam;
 static char s_logDir[48] = "/logs";
 
 // ---------------------------------------------------------------------------
-// R12: Clean up everything created by init() so a failed call leaves the
-// TaskManager in the same state as before init was attempted. Idempotent.
-// AUDIT 2.2 — was previously leaking queues/mutexes/tasks on every early
-// return and leaving running=true on a half-built world.
+// R12: Clean up partially-built task/queue state so a failed init() doesn't
+// leak FreeRTOS objects.  Idempotent.
+//
+// IMPORTANT — does NOT delete mutexes.  Per AUDIT 1.6 the mutexes must
+// SURVIVE an init failure: the caller trips g_safeMode and lets the web
+// stack continue, where ApiHandlers may xSemaphoreTake(fsMutex) etc.
+// Tearing them down here would re-introduce the NULL-mutex crash 1.6
+// originally addressed.  Mutexes are cheap and persistent.
+//
+// AUDIT 2.2 — was previously leaking queues/tasks on every early return
+// and leaving running=true on a half-built world.
 static void _cleanupPartialInit() {
     // Tasks first — handles must be deleted before the queues they read.
     if (TaskManager::hSensor)     { vTaskDelete(TaskManager::hSensor);     TaskManager::hSensor     = nullptr; }
@@ -43,10 +50,7 @@ static void _cleanupPartialInit() {
     if (sensorQueue)  { vQueueDelete(sensorQueue);  sensorQueue  = nullptr; }
     if (storageQueue) { vQueueDelete(storageQueue); storageQueue = nullptr; }
     if (exportQueue)  { vQueueDelete(exportQueue);  exportQueue  = nullptr; }
-    if (webDataMutex) { vSemaphoreDelete(webDataMutex); webDataMutex = nullptr; }
-    if (configMutex)  { vSemaphoreDelete(configMutex);  configMutex  = nullptr; }
-    if (wireMutex)    { vSemaphoreDelete(wireMutex);    wireMutex    = nullptr; }
-    if (fsMutex)      { vSemaphoreDelete(fsMutex);      fsMutex      = nullptr; }
+    // Mutexes intentionally left alive — see comment above.
     TaskManager::running = false;
 }
 
@@ -221,12 +225,19 @@ void TaskManager::shutdown() {
                                 &hStorage, &hExport };
     for (TaskHandle_t* hp : handles) {
         if (*hp == nullptr) continue;
+        bool deleted = false;
         while (millis() < waitDeadline) {
-            if (eTaskGetState(*hp) == eDeleted) break;
+            if (eTaskGetState(*hp) == eDeleted) { deleted = true; break; }
             vTaskDelay(pdMS_TO_TICKS(STEP_MS));
         }
-        // Whether deleted-by-self-call or timed-out, drop the handle so a
-        // subsequent init() starts from a known nullptr state.
+        // R12 Gemini MEDIUM: if the task didn't self-delete within budget
+        // it's stuck in blocking I/O (e.g. SDS011 frame wait). Force-delete
+        // so a re-init doesn't end up with two instances of the same task
+        // racing for the same queues / mutexes.
+        if (!deleted) {
+            Serial.println("[TaskManager] shutdown: task timeout — forcing vTaskDelete");
+            vTaskDelete(*hp);
+        }
         *hp = nullptr;
     }
 }

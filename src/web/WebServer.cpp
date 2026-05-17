@@ -1512,7 +1512,20 @@ void setupWebServer() {
     server.on("/api/format_filesystem", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (!requireMutatingAuth(r)) return;
         Serial.println("[Format] /api/format_filesystem — wiping LittleFS");
-        bool ok = LittleFS.format();
+        // R12 Gemini HIGH: acquire fsMutex around the long destructive op.
+        // Without it, a concurrent StorageTask write or web-handler read
+        // can race the format and corrupt the partition mid-erase.
+        // 30 s timeout — format takes ~5-15 s on 4 MB LittleFS.
+        bool ok = false;
+        {
+            MutexGuard g(fsMutex, pdMS_TO_TICKS(30000));
+            if (fsMutex && !g.isLocked()) {
+                r->send(503, "application/json",
+                        "{\"ok\":false,\"error\":\"fs busy\"}");
+                return;
+            }
+            ok = LittleFS.format();
+        }
         if (!ok) {
             Serial.println("[Format] FAILED");
             r->send(500, "application/json",
