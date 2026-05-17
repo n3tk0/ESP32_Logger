@@ -19,6 +19,7 @@
 #include "WebServer.h"
 #include "../setup.h"                   // WEB_BASIC_AUTH_* macros
 #include "../core/Globals.h"
+#include "../core/BoardProfiles.h"      // R11: g_boardProfile + isPinAllowed
 #include "../managers/ConfigManager.h"
 #include "../managers/WiFiManager.h"
 #include "../managers/StorageManager.h"
@@ -1149,19 +1150,43 @@ void setupWebServer() {
 
     server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (!requireMutatingAuth(r)) return;
+        // R11: validate every pin parameter against the active board profile
+        // before assigning. PIN_UNSET / -1 is accepted (means "unconfigured").
+        // First violation aborts the save with a 400; partial assignment is
+        // never persisted (saveConfig runs only at the end).
+        auto setPin = [&](const char* name, uint8_t& dest) -> bool {
+            if (!r->hasParam(name, true)) return true;
+            int v = r->getParam(name, true)->value().toInt();
+            if (v == -1) { dest = PIN_UNSET; return true; }
+            if (v < 0 || v > 255) {
+                r->send(400, "application/json",
+                        "{\"ok\":false,\"error\":\"pin out of range\"}");
+                return false;
+            }
+            if (!isPinAllowed(g_boardProfile, (uint8_t)v, PIN_PURPOSE_GENERIC)) {
+                char body[180];
+                snprintf(body, sizeof(body),
+                         "{\"ok\":false,\"error\":\"%s = GPIO%d rejected: %s\"}",
+                         name, v, pinRejectReason(g_boardProfile, (uint8_t)v));
+                r->send(400, "application/json", body);
+                return false;
+            }
+            dest = (uint8_t)v;
+            return true;
+        };
         if (r->hasParam("storageType", true))    config.hardware.storageType    = (StorageType)r->getParam("storageType", true)->value().toInt();
         if (r->hasParam("wakeupMode", true))     config.hardware.wakeupMode     = (WakeupMode)r->getParam("wakeupMode", true)->value().toInt();
-        if (r->hasParam("pinWifiTrigger", true)) config.hardware.pinWifiTrigger = r->getParam("pinWifiTrigger", true)->value().toInt();
-        if (r->hasParam("pinWakeupFF", true))    config.hardware.pinWakeupFF    = r->getParam("pinWakeupFF", true)->value().toInt();
-        if (r->hasParam("pinWakeupPF", true))    config.hardware.pinWakeupPF    = r->getParam("pinWakeupPF", true)->value().toInt();
-        if (r->hasParam("pinFlowSensor", true))  config.hardware.pinFlowSensor  = r->getParam("pinFlowSensor", true)->value().toInt();
-        if (r->hasParam("pinRtcCE", true))       config.hardware.pinRtcCE       = r->getParam("pinRtcCE", true)->value().toInt();
-        if (r->hasParam("pinRtcIO", true))       config.hardware.pinRtcIO       = r->getParam("pinRtcIO", true)->value().toInt();
-        if (r->hasParam("pinRtcSCLK", true))     config.hardware.pinRtcSCLK     = r->getParam("pinRtcSCLK", true)->value().toInt();
-        if (r->hasParam("pinSdCS", true))        config.hardware.pinSdCS        = r->getParam("pinSdCS", true)->value().toInt();
-        if (r->hasParam("pinSdMOSI", true))      config.hardware.pinSdMOSI      = r->getParam("pinSdMOSI", true)->value().toInt();
-        if (r->hasParam("pinSdMISO", true))      config.hardware.pinSdMISO      = r->getParam("pinSdMISO", true)->value().toInt();
-        if (r->hasParam("pinSdSCK", true))       config.hardware.pinSdSCK       = r->getParam("pinSdSCK", true)->value().toInt();
+        if (!setPin("pinWifiTrigger", config.hardware.pinWifiTrigger)) return;
+        if (!setPin("pinWakeupFF",    config.hardware.pinWakeupFF))    return;
+        if (!setPin("pinWakeupPF",    config.hardware.pinWakeupPF))    return;
+        if (!setPin("pinFlowSensor",  config.hardware.pinFlowSensor))  return;
+        if (!setPin("pinRtcCE",       config.hardware.pinRtcCE))       return;
+        if (!setPin("pinRtcIO",       config.hardware.pinRtcIO))       return;
+        if (!setPin("pinRtcSCLK",     config.hardware.pinRtcSCLK))     return;
+        if (!setPin("pinSdCS",        config.hardware.pinSdCS))        return;
+        if (!setPin("pinSdMOSI",      config.hardware.pinSdMOSI))      return;
+        if (!setPin("pinSdMISO",      config.hardware.pinSdMISO))      return;
+        if (!setPin("pinSdSCK",       config.hardware.pinSdSCK))       return;
         if (r->hasParam("cpuFreqMHz", true))     config.hardware.cpuFreqMHz     = r->getParam("cpuFreqMHz", true)->value().toInt();
         if (r->hasParam("debounceMs", true))     config.hardware.debounceMs     = constrain(r->getParam("debounceMs", true)->value().toInt(), 20, 500);
         if (r->hasParam("debugMode", true))      config.hardware.debugMode      = r->getParam("debugMode", true)->value() == "1";
