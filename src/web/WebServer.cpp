@@ -26,6 +26,7 @@
 #include "../managers/DataLogger.h"
 #include "../utils/Utils.h"
 #include "ApiHandlers.h"
+#include "FirstRunHandler.h"            // R11 first-run wizard backend
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "CsrfToken.h"                 // Pass 7 CSRF on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
@@ -356,6 +357,7 @@ void setupWebServer() {
     // reachable on a fresh device even when Basic Auth is compiled in —
     // setting credentials is part of the wizard's job (a later phase).
     server.addHandler(&s_firstRunGate);
+    registerFirstRunRoutes();
     if (g_setupRequired) DBGLN("Web server: first-run wizard required");
 
 #if WEB_BASIC_AUTH_ENABLED
