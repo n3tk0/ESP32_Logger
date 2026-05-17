@@ -1187,6 +1187,39 @@ void setupWebServer() {
         if (!setPin("pinSdMOSI",      config.hardware.pinSdMOSI))      return;
         if (!setPin("pinSdMISO",      config.hardware.pinSdMISO))      return;
         if (!setPin("pinSdSCK",       config.hardware.pinSdSCK))       return;
+        // Duplicate-pin check (Gemini medium on PR #87). After every
+        // setPin above succeeded, scan the final config for any two
+        // assigned pins on the same GPIO and refuse the whole save.
+        {
+            struct PinRef { const char* name; uint8_t value; };
+            PinRef refs[] = {
+                {"pinWifiTrigger", config.hardware.pinWifiTrigger},
+                {"pinWakeupFF",    config.hardware.pinWakeupFF},
+                {"pinWakeupPF",    config.hardware.pinWakeupPF},
+                {"pinFlowSensor",  config.hardware.pinFlowSensor},
+                {"pinRtcCE",       config.hardware.pinRtcCE},
+                {"pinRtcIO",       config.hardware.pinRtcIO},
+                {"pinRtcSCLK",     config.hardware.pinRtcSCLK},
+                {"pinSdCS",        config.hardware.pinSdCS},
+                {"pinSdMOSI",      config.hardware.pinSdMOSI},
+                {"pinSdMISO",      config.hardware.pinSdMISO},
+                {"pinSdSCK",       config.hardware.pinSdSCK},
+            };
+            constexpr int N = sizeof(refs) / sizeof(refs[0]);
+            for (int i = 0; i < N; i++) {
+                if (refs[i].value == PIN_UNSET) continue;
+                for (int j = i + 1; j < N; j++) {
+                    if (refs[j].value == refs[i].value) {
+                        char body[180];
+                        snprintf(body, sizeof(body),
+                                 "{\"ok\":false,\"error\":\"duplicate pin: %s and %s both = GPIO%u\"}",
+                                 refs[i].name, refs[j].name, refs[i].value);
+                        r->send(400, "application/json", body);
+                        return;
+                    }
+                }
+            }
+        }
         if (r->hasParam("cpuFreqMHz", true))     config.hardware.cpuFreqMHz     = r->getParam("cpuFreqMHz", true)->value().toInt();
         if (r->hasParam("debounceMs", true))     config.hardware.debounceMs     = constrain(r->getParam("debounceMs", true)->value().toInt(), 20, 500);
         if (r->hasParam("debugMode", true))      config.hardware.debugMode      = r->getParam("debugMode", true)->value() == "1";

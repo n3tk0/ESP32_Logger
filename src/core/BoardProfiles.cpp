@@ -42,71 +42,76 @@
 
 namespace {
 
+// Note: positional initialisers (not designated `.field = …`) so the
+// toolchain's C++ standard mode doesn't matter — arduino-esp32 defaults
+// to gnu++17 / gnu++20 across versions and we want this file to compile
+// on every supported one. Field order matches BoardProfile in the header.
+
 // --- Seeed XIAO ESP32-C3 -----------------------------------------------------
 const BoardProfile XIAO_C3 = {
-    .id           = BOARD_XIAO_C3,
-    .name         = "Seeed XIAO ESP32-C3",
-    .shortId      = "xiao_c3",
-    .maxGpio      = 21,
-    .strapPins    = { 2, 8, 9, PIN_UNSET },
-    .usbPins      = { 18, 19, PIN_UNSET },
-    .flashPins    = { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
-    .reservedPins = { 20, 21, PIN_UNSET },
+    BOARD_XIAO_C3,
+    "Seeed XIAO ESP32-C3",
+    "xiao_c3",
+    21,
+    { 2, 8, 9, PIN_UNSET },
+    { 18, 19, PIN_UNSET },
+    { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
+    { 20, 21, PIN_UNSET },
 };
 
 // --- Generic "ESP32-C3 SuperMini" --------------------------------------------
 // Same C3 silicon; some clones break out GPIO 8 to a status LED, others
 // don't. Same restriction set as XIAO C3 for safety.
 const BoardProfile SUPERMINI_C3 = {
-    .id           = BOARD_SUPERMINI_C3,
-    .name         = "ESP32-C3 SuperMini",
-    .shortId      = "supermini_c3",
-    .maxGpio      = 21,
-    .strapPins    = { 2, 8, 9, PIN_UNSET },
-    .usbPins      = { 18, 19, PIN_UNSET },
-    .flashPins    = { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
-    .reservedPins = { 20, 21, PIN_UNSET },
+    BOARD_SUPERMINI_C3,
+    "ESP32-C3 SuperMini",
+    "supermini_c3",
+    21,
+    { 2, 8, 9, PIN_UNSET },
+    { 18, 19, PIN_UNSET },
+    { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
+    { 20, 21, PIN_UNSET },
 };
 
 // --- Bare ESP32-C3 module ----------------------------------------------------
 // No board-specific quirks; same chip constraints. USB CDC may or may not
 // be enabled depending on build config — keep 18/19 restricted to be safe.
 const BoardProfile GENERIC_C3 = {
-    .id           = BOARD_GENERIC_C3,
-    .name         = "Generic ESP32-C3",
-    .shortId      = "generic_c3",
-    .maxGpio      = 21,
-    .strapPins    = { 2, 8, 9, PIN_UNSET },
-    .usbPins      = { 18, 19, PIN_UNSET },
-    .flashPins    = { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
-    .reservedPins = { 20, 21, PIN_UNSET },
+    BOARD_GENERIC_C3,
+    "Generic ESP32-C3",
+    "generic_c3",
+    21,
+    { 2, 8, 9, PIN_UNSET },
+    { 18, 19, PIN_UNSET },
+    { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
+    { 20, 21, PIN_UNSET },
 };
 
 // --- Bare ESP32-S3 module ----------------------------------------------------
 // Wider GPIO range. Strap pins per S3 TRM. Flash range varies by package;
 // use the most defensive set (octal flash + octal PSRAM = 26-37).
 const BoardProfile GENERIC_S3 = {
-    .id           = BOARD_GENERIC_S3,
-    .name         = "Generic ESP32-S3",
-    .shortId      = "generic_s3",
-    .maxGpio      = 48,
-    .strapPins    = { 0, 3, 45, 46, PIN_UNSET },
-    .usbPins      = { 19, 20, PIN_UNSET },
-    .flashPins    = { 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, PIN_UNSET },
-    .reservedPins = { 43, 44, PIN_UNSET },
+    BOARD_GENERIC_S3,
+    "Generic ESP32-S3",
+    "generic_s3",
+    48,
+    { 0, 3, 45, 46, PIN_UNSET },
+    { 19, 20, PIN_UNSET },
+    { 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, PIN_UNSET },
+    { 43, 44, PIN_UNSET },
 };
 
 // --- Custom (user accepts responsibility) ------------------------------------
 // Empty restriction lists. isPinAllowed() short-circuits on this id.
 const BoardProfile CUSTOM = {
-    .id           = BOARD_CUSTOM,
-    .name         = "Custom — full responsibility",
-    .shortId      = "custom",
-    .maxGpio      = 48,                         // S3 upper bound; permissive
-    .strapPins    = { PIN_UNSET },
-    .usbPins      = { PIN_UNSET },
-    .flashPins    = { PIN_UNSET },
-    .reservedPins = { PIN_UNSET },
+    BOARD_CUSTOM,
+    "Custom \xE2\x80\x94 full responsibility",  // UTF-8 em dash
+    "custom",
+    48,                       // S3 upper bound; permissive
+    { PIN_UNSET },
+    { PIN_UNSET },
+    { PIN_UNSET },
+    { PIN_UNSET },
 };
 
 const BoardProfile* const ALL_PROFILES[] = {

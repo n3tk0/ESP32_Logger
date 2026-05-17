@@ -10,9 +10,41 @@
 #include "../core/BoardProfiles.h"
 #include "../core/Config.h"
 #include "../managers/ConfigManager.h"
+#include "../utils/AtomicWrite.h"
 #include "../utils/JsonResponse.h"
+#include "../pipeline/DataPipeline.h"   // fsMutex
 
 namespace {
+
+// ---------------------------------------------------------------------------
+// Updates the top-level "mode" field in /platform_config.json without
+// disturbing the rest of the file. Read-modify-write under atomicWrite so
+// a crash mid-update never leaves a truncated config.
+//
+// Mirrors how _detectPlatformMode() in ESP_Logger.ino consumes the file —
+// any value other than "continuous" or "hybrid" is interpreted as legacy.
+bool persistPlatformMode(const char* mode) {
+    if (!fsAvailable || !activeFS) return false;
+    constexpr const char* PATH        = "/platform_config.json";
+    constexpr size_t      MAX_SIZE    = 16 * 1024;
+
+    JsonDocument doc;
+    if (activeFS->exists(PATH)) {
+        File f = activeFS->open(PATH, FILE_READ);
+        if (!f) return false;
+        if (f.size() > MAX_SIZE) { f.close(); return false; }
+        DeserializationError err = deserializeJson(doc, f);
+        f.close();
+        if (err) return false;
+    }
+    doc["mode"] = mode;
+
+    return atomicWrite(*activeFS, PATH, [&](File& dst) -> bool {
+        size_t want    = measureJson(doc);
+        size_t written = serializeJson(doc, dst);
+        return written == want;
+    }, fsMutex);
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/board-profiles
@@ -177,6 +209,16 @@ void handlePostFirstRun(AsyncWebServerRequest* req,
     }
     saveConfig();
 
+    // Persist the operating mode pick into /platform_config.json so that
+    // _detectPlatformMode() on the next boot reflects the user's choice.
+    // Without this the device reverts to "legacy" regardless of the wizard
+    // (Gemini HIGH on PR #87).
+    if (!persistPlatformMode(modeStr)) {
+        req->send(500, "application/json",
+                  "{\"ok\":false,\"error\":\"failed to write /platform_config.json\"}");
+        return;
+    }
+
     g_setupRequired = false;
 
     // Schedule reboot — same mechanism used by /restart elsewhere.
@@ -209,14 +251,35 @@ void registerFirstRunRoutes() {
         [](AsyncWebServerRequest* r) { /* see onBody */ },
         // Upload callback (none)
         nullptr,
-        // Body callback — single-shot, no chunking accepted
+        // Body callback — accumulates chunks via _tempObject so chunked
+        // delivery from low-MTU clients doesn't get rejected. Payload is
+        // bounded at 4 KB; oversized bodies abort early.
         [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
            size_t index, size_t total) {
-            if (index != 0 || len != total) {
+            constexpr size_t MAX_BODY = 4 * 1024;
+            if (total > MAX_BODY) {
                 r->send(413, "application/json",
                         "{\"ok\":false,\"error\":\"body too large\"}");
                 return;
             }
-            handlePostFirstRun(r, data, len);
+            if (index == 0) {
+                r->_tempObject = new (std::nothrow) String();
+                if (!r->_tempObject) {
+                    r->send(500, "application/json",
+                            "{\"ok\":false,\"error\":\"out_of_memory\"}");
+                    return;
+                }
+                static_cast<String*>(r->_tempObject)->reserve(total);
+            }
+            String* buf = static_cast<String*>(r->_tempObject);
+            if (!buf) return;   // earlier OOM
+            buf->concat(reinterpret_cast<const char*>(data), len);
+            if (index + len >= total) {
+                handlePostFirstRun(r,
+                                   (uint8_t*)buf->c_str(),
+                                   buf->length());
+                delete buf;
+                r->_tempObject = nullptr;
+            }
         });
 }
