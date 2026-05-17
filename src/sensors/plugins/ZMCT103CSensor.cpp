@@ -1,4 +1,5 @@
 #include "ZMCT103CSensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include <math.h>
 
 bool ZMCT103CSensor::init(JsonObjectConst cfg) {
@@ -15,6 +16,7 @@ bool ZMCT103CSensor::init(JsonObjectConst cfg) {
     JsonObjectConst cal = cfg["calibration"];
     _calCurrent.load(cal, "current_arms");
 
+    if (!validateAttachPin(_pin, "zmct103c", "pin")) return false;
     analogSetPinAttenuation(_pin, ADC_11db); // full-scale ~3.3 V
     pinMode(_pin, INPUT);
     _ready = true;

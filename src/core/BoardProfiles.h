@@ -109,6 +109,20 @@ bool isPinAllowed(const BoardProfile* profile,
 /// to a static string; do not free.
 const char* pinRejectReason(const BoardProfile* profile, uint8_t pin);
 
+/// Runtime guard called by sensor plugin init() functions before they
+/// configure GPIOs or install ISRs. Returns true if the pin is safe to
+/// attach on the active board profile (g_boardProfile). On false, logs
+/// a Serial line like:
+///
+///   [rain.pin] init refused: pin not assigned
+///   [wind.pin] init refused: GPIO9 = bootstrap pin (boot mode risk)
+///
+/// `sensorId` and `fieldName` show up verbatim in the log; pass short
+/// identifiers (sensor type name + field name). Accepts `int` so plugin
+/// code that loaded the value via `cfg["pin"] | -1` can pass directly
+/// without an extra cast — values < 0 short-circuit to "not assigned".
+bool validateAttachPin(int pin, const char* sensorId, const char* fieldName);
+
 // --- Persistence -------------------------------------------------------------
 //
 // The active profile is stored in /board_profile.txt — a tiny key=value

@@ -167,6 +167,29 @@ bool isPinAllowed(const BoardProfile* profile, uint8_t pin, PinPurpose /*purpose
     return true;
 }
 
+bool validateAttachPin(int pin, const char* sensorId, const char* fieldName) {
+    if (pin < 0 || pin == (int)PIN_UNSET) {
+        Serial.printf("[%s.%s] init refused: pin not assigned\n",
+                      sensorId ? sensorId : "?",
+                      fieldName ? fieldName : "pin");
+        return false;
+    }
+    if (pin > 255) {
+        Serial.printf("[%s.%s] init refused: GPIO%d out of range\n",
+                      sensorId ? sensorId : "?",
+                      fieldName ? fieldName : "pin", pin);
+        return false;
+    }
+    if (!isPinAllowed(g_boardProfile, (uint8_t)pin, PIN_PURPOSE_GENERIC)) {
+        Serial.printf("[%s.%s] init refused: GPIO%d = %s\n",
+                      sensorId ? sensorId : "?",
+                      fieldName ? fieldName : "pin", pin,
+                      pinRejectReason(g_boardProfile, (uint8_t)pin));
+        return false;
+    }
+    return true;
+}
+
 const char* pinRejectReason(const BoardProfile* profile, uint8_t pin) {
     if (profile == nullptr)        return "no board profile selected";
     if (pin == PIN_UNSET)          return "pin not assigned";

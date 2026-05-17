@@ -1,4 +1,5 @@
 #include "PMS5003Sensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 bool PMS5003Sensor::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]           | true;
@@ -11,6 +12,9 @@ bool PMS5003Sensor::init(JsonObjectConst cfg) {
     _calPm1.load(cal, "pm1");
     _calPm25.load(cal, "pm25");
     _calPm10.load(cal, "pm10");
+
+    if (!validateAttachPin(rx, "pms5003", "uart_rx")) return false;
+    if (tx >= 0 && !validateAttachPin(tx, "pms5003", "uart_tx")) return false;
 
     _serial = &Serial1;
     _serial->begin(baud, SERIAL_8N1, rx, tx);

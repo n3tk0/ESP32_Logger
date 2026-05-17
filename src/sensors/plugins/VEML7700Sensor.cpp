@@ -1,4 +1,5 @@
 #include "VEML7700Sensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 bool VEML7700Sensor::_writeReg(uint8_t reg, uint16_t val) {
     Wire.beginTransmission(ADDR);
@@ -58,8 +59,9 @@ bool VEML7700Sensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (sda >= 0 && scl >= 0) Wire.begin((int8_t)sda, (int8_t)scl);
-    else                       Wire.begin();
+    if (!validateAttachPin(sda, "veml7700", "sda")) return false;
+    if (!validateAttachPin(scl, "veml7700", "scl")) return false;
+    Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
     _calLux.load(cal, "lux");

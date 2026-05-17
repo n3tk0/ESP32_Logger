@@ -1,4 +1,5 @@
 #include "HCSR04Sensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 bool HCSR04Sensor::init(JsonObjectConst cfg) {
     _enabled       = cfg["enabled"]           | true;
@@ -10,6 +11,8 @@ bool HCSR04Sensor::init(JsonObjectConst cfg) {
     JsonObjectConst cal = cfg["calibration"];
     _calDistance.load(cal, "distance");
 
+    if (!validateAttachPin(_trigPin, "hcsr04", "trig_pin")) return false;
+    if (!validateAttachPin(_echoPin, "hcsr04", "echo_pin")) return false;
     pinMode(_trigPin, OUTPUT);
     pinMode(_echoPin, INPUT);
     digitalWrite(_trigPin, LOW);

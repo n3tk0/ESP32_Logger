@@ -1,4 +1,5 @@
 #include "WindSensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 void IRAM_ATTR WindSensor::_isr(void* arg) {
     WindSensor* self = static_cast<WindSensor*>(arg);
@@ -26,6 +27,7 @@ bool WindSensor::init(JsonObjectConst cfg) {
     JsonObjectConst cal = cfg["calibration"];
     _calSpeed.load(cal, "wind_speed");
 
+    if (!validateAttachPin(_pin, "wind", "pin")) return false;
     pinMode(_pin, INPUT_PULLUP);
     if (!_isrPin.attach((uint8_t)_pin, GPIO_INTR_NEGEDGE, &WindSensor::_isr, this)) {
         Serial.printf("[Wind] ERROR: ISR attach failed on pin %d\n", _pin);

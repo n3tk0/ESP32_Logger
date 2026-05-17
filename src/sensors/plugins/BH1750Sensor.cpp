@@ -1,4 +1,5 @@
 #include "BH1750Sensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 bool BH1750Sensor::_sendCmd(uint8_t cmd) {
     Wire.beginTransmission(_addr);
@@ -33,8 +34,9 @@ bool BH1750Sensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (sda >= 0 && scl >= 0) Wire.begin((int8_t)sda, (int8_t)scl);
-    else                       Wire.begin();
+    if (!validateAttachPin(sda, "bh1750", "sda")) return false;
+    if (!validateAttachPin(scl, "bh1750", "scl")) return false;
+    Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
     _calLux.load(cal, "lux");
