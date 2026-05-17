@@ -474,13 +474,30 @@ void setup() {
     // ── Early GPIO snapshot (< 1ms) ──────────────────────────────────────────
     // Capture ALL GPIO states BEFORE any delays.
     // Reed switches are momentary; magnet may pass within 50–200 ms.
+    //
+    // R12 / AUDIT 1.1: pinMode each scanned pin to INPUT_PULLUP BEFORE
+    // digitalRead so the bitmask reflects the wired signal, not the
+    // floating-input garbage that previously poisoned earlyGPIO_bitmask
+    // on cold boot. INPUT_PULLUP also matches the operating mode the
+    // button / reed-switch handlers use later.
+    //
+    // R12 / AUDIT 1.2: GPIO 18-19 are USB D+/D- on the C3 SuperMini and
+    // any C3 build with USB CDC on Boot. A plugged-in USB cable drives
+    // those lines and skews the bitmask. Skip them under those builds;
+    // GPIO 20-21 are still scanned (board exposes them as user IO).
     {
         earlyGPIO_bitmask = 0;
-        for (uint8_t pin = 0; pin <= 10; pin++)
+        for (uint8_t pin = 0; pin <= 10; pin++) {
+            pinMode(pin, INPUT_PULLUP);
             if (digitalRead(pin)) earlyGPIO_bitmask |= (1UL << pin);
-        // L1: include pins 18-21 (SuperMini exposes 18-19)
-        for (uint8_t pin = 18; pin <= 21; pin++)
+        }
+        for (uint8_t pin = 18; pin <= 21; pin++) {
+#if defined(CONFIG_IDF_TARGET_ESP32C3) && defined(ARDUINO_USB_CDC_ON_BOOT)
+            if (pin == 18 || pin == 19) continue;   // USB D-/D+
+#endif
+            pinMode(pin, INPUT_PULLUP);
             if (digitalRead(pin)) earlyGPIO_bitmask |= (1UL << pin);
+        }
         earlyGPIO_captured = true;
         earlyGPIO_millis   = millis();
     }
