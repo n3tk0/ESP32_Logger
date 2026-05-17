@@ -319,8 +319,44 @@ public:
 static AsyncAuthGateHandler s_authGate;
 #endif
 
+// R11 first-run gate. When g_setupRequired is true (no board profile
+// selected), this handler is registered BEFORE the auth gate and claims
+// every request whose URL is not in the wizard whitelist. It redirects
+// to /firstrun so the user can pick a board + assign pins before the
+// rest of the firmware is exposed.
+//
+// Whitelisted (allowed through while setup is required):
+//   - /firstrun, /firstrun.html         (wizard page)
+//   - /api/firstrun                     (POST handler that saves profile)
+//   - /api/board-profiles               (GET profile list for the wizard)
+//   - static asset extensions           (CSS, JS, fonts, favicon)
+class FirstRunGateHandler : public AsyncWebHandler {
+public:
+    bool canHandle(AsyncWebServerRequest* r) override {
+        if (!g_setupRequired) return false;
+        const String& url = r->url();
+        if (url == "/firstrun" || url == "/firstrun.html")        return false;
+        if (url.startsWith("/api/firstrun"))                       return false;
+        if (url.startsWith("/api/board-profiles"))                 return false;
+        if (url.endsWith(".css")  || url.endsWith(".js"))          return false;
+        if (url.endsWith(".woff2")|| url.endsWith(".ico"))         return false;
+        if (url.endsWith(".png")  || url.endsWith(".svg"))         return false;
+        return true;
+    }
+    void handleRequest(AsyncWebServerRequest* r) override {
+        r->redirect("/firstrun");
+    }
+};
+static FirstRunGateHandler s_firstRunGate;
+
 void setupWebServer() {
     DBGLN("Setting up web server...");
+
+    // R11: first-run gate runs before auth gate. The wizard must be
+    // reachable on a fresh device even when Basic Auth is compiled in —
+    // setting credentials is part of the wizard's job (a later phase).
+    server.addHandler(&s_firstRunGate);
+    if (g_setupRequired) DBGLN("Web server: first-run wizard required");
 
 #if WEB_BASIC_AUTH_ENABLED
     // Must be registered FIRST — handlers are matched in insertion order and

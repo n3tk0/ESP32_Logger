@@ -105,6 +105,7 @@ PlatformMode g_platformMode = PLATFORM_LEGACY;
 // initStorage().  nullptr until the first-run wizard saves a selection.
 // ============================================================================
 const BoardProfile* g_boardProfile = nullptr;
+bool                g_setupRequired = false;
 
 // ============================================================================
 // PLATFORM SLEEP CONTROL

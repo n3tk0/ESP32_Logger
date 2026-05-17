@@ -115,6 +115,12 @@ extern PlatformMode g_platformMode;
 struct BoardProfile;
 extern const BoardProfile* g_boardProfile;
 
+// True if the first-run wizard must complete before normal operation.
+// Set during setup() if g_boardProfile == nullptr; cleared when the user
+// successfully POSTs /api/firstrun. While true, the web server redirects
+// all non-wizard routes to /firstrun.
+extern bool g_setupRequired;
+
 // ============================================================================
 // PLATFORM SLEEP CONTROL
 // ============================================================================

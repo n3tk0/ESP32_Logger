@@ -516,8 +516,10 @@ void setup() {
     initStorage();
 
     // R11: load board profile from /board_profile.txt (nullptr → first-run
-    // wizard required; the redirect is wired in setupWebServer).
-    g_boardProfile = BoardProfiles::load();
+    // wizard required; FirstRunGate in WebServer.cpp redirects all non-
+    // wizard routes to /firstrun while g_setupRequired is true).
+    g_boardProfile  = BoardProfiles::load();
+    g_setupRequired = (g_boardProfile == nullptr);
     Serial.printf("[BoardProfile] %s\n",
                   g_boardProfile ? g_boardProfile->name
                                  : "none — first-run wizard required");
