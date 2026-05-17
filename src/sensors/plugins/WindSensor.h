@@ -49,7 +49,7 @@ private:
     float    _pulsesPerRev   = 1.0f;
     float    _metersPerRev   = 0.5f;
     uint32_t _sampleWindowMs = 3000;
-    int      _pin            = 8;
+    int      _pin            = -1;  // R11: -1 = unset; refuse to attach
 
     // AH49E direction sensor
     int      _dirPin    = -1;   // analog pin, -1 = disabled

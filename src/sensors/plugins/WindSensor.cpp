@@ -11,7 +11,7 @@ void IRAM_ATTR WindSensor::_isr(void* arg) {
 
 bool WindSensor::init(JsonObjectConst cfg) {
     _enabled        = cfg["enabled"]          | true;
-    _pin            = cfg["pin"]              | 8;
+    _pin            = cfg["pin"]              | -1;  // R11: unset → init refuses
     _pulsesPerRev   = cfg["pulses_per_rev"]   | 1.0f;
     _metersPerRev   = cfg["meters_per_rev"]   | 0.5f;
     _sampleWindowMs = cfg["sample_window_ms"] | 3000;

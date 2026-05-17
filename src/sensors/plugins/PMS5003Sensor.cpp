@@ -3,7 +3,7 @@
 bool PMS5003Sensor::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]           | true;
     _intervalMs = cfg["read_interval_ms"]  | 30000;
-    int rx      = cfg["uart_rx"]           | 20;
+    int rx      = cfg["uart_rx"]           | -1;  // R11: unset → init refuses
     int tx      = cfg["uart_tx"]           | -1;
     int baud    = cfg["baud"]              | 9600;
 

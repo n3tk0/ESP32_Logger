@@ -2,7 +2,7 @@
 
 bool SoilMoistureSensor::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]          | true;
-    _pin        = cfg["pin"]              | 0;
+    _pin        = cfg["pin"]              | -1;  // R11: unset → init refuses
     _dryValue   = cfg["dry_value"]        | 3300;
     _wetValue   = cfg["wet_value"]        | 1500;
     _samples    = cfg["adc_samples"]      | 16;

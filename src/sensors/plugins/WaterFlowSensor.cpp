@@ -13,7 +13,7 @@ void IRAM_ATTR WaterFlowSensor::_isr(void* arg) {
 // ---------------------------------------------------------------------------
 bool WaterFlowSensor::init(JsonObjectConst cfg) {
     _enabled        = cfg["enabled"]           | true;
-    _pin            = cfg["pin"]               | 21;
+    _pin            = cfg["pin"]               | -1;  // R11: unset → init refuses
     _pulsesPerLiter = cfg["pulses_per_liter"]  | _defaultPPL;
     _calibration    = cfg["calibration"]       | 1.0f;
     _intervalMs     = cfg["read_interval_ms"]  | 1000;

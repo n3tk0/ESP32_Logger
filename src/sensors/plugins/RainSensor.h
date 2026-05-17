@@ -42,13 +42,10 @@ private:
 
     float    _mmPerTip   = 0.2794f;
     uint32_t _intervalMs = 60000;
-    int      _pin        = 10;  // GPIO10 — non-strap, free on C3 SuperMini.
-                                  // Was 9 (strap pin, AUDIT 31.1). 4 considered
-                                  // but conflicts with DefaultPins::WAKEUP_PF
-                                  // and setup.h:DEFAULT_FLOW_PIN. 10 only
-                                  // overlaps SD_CS, which is already unusable
-                                  // on C3 (SD MOSI/MISO/SCK on flash bus,
-                                  // AUDIT 5.8).
+    int      _pin        = -1;  // R11: -1 = unset; wizard / sensor UI must assign.
+                                  // Closes AUDIT 23.1 (was hardcoded 10 → board-
+                                  // specific guess); pin choice now validated
+                                  // against the active BoardProfile.
 
     CalibrationAxis _calRate;
     CalibrationAxis _calTotal;

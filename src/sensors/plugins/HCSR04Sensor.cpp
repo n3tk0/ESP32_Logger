@@ -2,8 +2,8 @@
 
 bool HCSR04Sensor::init(JsonObjectConst cfg) {
     _enabled       = cfg["enabled"]           | true;
-    _trigPin       = cfg["trig_pin"]          | 5;
-    _echoPin       = cfg["echo_pin"]          | 4;
+    _trigPin       = cfg["trig_pin"]          | -1;  // R11: unset → init refuses
+    _echoPin       = cfg["echo_pin"]          | -1;
     _maxDistanceCm = cfg["max_distance_cm"]   | 400.0f;
     _intervalMs    = cfg["read_interval_ms"]  | 1000;
 

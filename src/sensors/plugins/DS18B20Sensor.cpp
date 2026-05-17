@@ -21,7 +21,7 @@ bool DS18B20Sensor::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]          | true;
     _intervalMs = cfg["read_interval_ms"] | 5000;
     _resolution = (uint8_t)(cfg["resolution"] | 12);
-    int pin     = cfg["pin"] | 2;
+    int pin     = cfg["pin"] | -1;  // R11: unset → init refuses
 
     if (_resolution < 9)  _resolution = 9;
     if (_resolution > 12) _resolution = 12;

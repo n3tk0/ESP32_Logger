@@ -38,7 +38,7 @@ public:
     }
 
 private:
-    int      _pin           = 1;
+    int      _pin           = -1;  // R11: -1 = unset; refuse to attach
     float    _currentFactor = 1.0f; // multiply ADC RMS count → Arms
     int      _samples       = 200;
     uint32_t _samplePeriodUs = 100;

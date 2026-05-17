@@ -5,7 +5,7 @@
 bool SDS011Sensor::init(JsonObjectConst cfg) {
     _enabled = cfg["enabled"] | true;
 
-    int rxPin = cfg["uart_rx"] | 20;
+    int rxPin = cfg["uart_rx"] | -1;  // R11: unset → init refuses
     int txPin = cfg["uart_tx"] | -1;
     int baud  = cfg["baud"]    | 9600;
     int work  = cfg["work_period_min"] | 1;

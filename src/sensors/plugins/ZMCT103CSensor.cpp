@@ -3,7 +3,7 @@
 
 bool ZMCT103CSensor::init(JsonObjectConst cfg) {
     _enabled        = cfg["enabled"]          | true;
-    _pin            = cfg["pin"]              | 1;
+    _pin            = cfg["pin"]              | -1;  // R11: unset → init refuses
     _currentFactor  = cfg["current_factor"]   | 1.0f;
     _samples        = cfg["adc_samples"]      | 200;
     _samplePeriodUs = cfg["sample_period_us"] | 100;
