@@ -58,6 +58,12 @@ enum BoardProfileId : uint8_t {
 // MAX_RESTRICTED_PINS is sized for the worst case (S3 has many).
 constexpr uint8_t MAX_RESTRICTED_PINS = 16;
 
+// Upper bound for the number of registered board profiles. Callers use
+// this to size on-stack arrays for listProfiles(). BoardProfiles.cpp has
+// a static_assert against ALL_PROFILES_COUNT to catch a silent overflow
+// if the profile list grows past this cap (Gemini PR #87 review).
+constexpr uint8_t MAX_PROFILES = 16;
+
 struct BoardProfile {
     BoardProfileId  id;
     const char*     name;          // human-readable, shown in wizard

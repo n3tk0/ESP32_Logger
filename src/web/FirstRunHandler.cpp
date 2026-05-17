@@ -23,8 +23,8 @@ void handleGetBoardProfiles(AsyncWebServerRequest* req) {
     JsonDocument doc;
     JsonArray arr = doc["profiles"].to<JsonArray>();
 
-    const BoardProfile* list[8];
-    uint8_t n = listProfiles(list, 8);
+    const BoardProfile* list[MAX_PROFILES];
+    uint8_t n = listProfiles(list, MAX_PROFILES);
     for (uint8_t i = 0; i < n; i++) {
         const BoardProfile* p = list[i];
         JsonObject o    = arr.add<JsonObject>();
@@ -99,51 +99,59 @@ void handlePostFirstRun(AsyncWebServerRequest* req,
     bool legacyPipeline = (strcmp(modeStr, "legacy") == 0 ||
                           strcmp(modeStr, "hybrid") == 0);
 
-    // ---- Pin validation (only required for legacy/hybrid; continuous
-    // mode configures sensor pins individually in /settings/sensors) -----
-    struct PinAssignment { const char* key; uint8_t value; };
+    // Pin layout:
+    //   - Always-required-in-all-modes: WiFi-trigger button + the two wake-
+    //     up buttons. These run the device's physical UI in EVERY mode —
+    //     including continuous — so the wizard must collect them. (Fix for
+    //     Gemini HIGH review on PR #87 — leaving them PIN_UNSET in
+    //     continuous mode broke buttons + AP-mode trigger.)
+    //   - Legacy/hybrid only: flow sensor + DS1302 RTC trio.
+    //
+    // Per-pin policy: PIN_UNSET allowed (user may legitimately skip an
+    // optional feature); strap/USB/flash/reserved pins rejected with a
+    // specific reason; duplicates rejected regardless of profile.
+    struct PinAssignment { const char* key; uint8_t value; bool legacyOnly; };
     PinAssignment pins[] = {
-        { "wifiTrigger", (uint8_t)(doc["pins"]["wifiTrigger"] | (int)PIN_UNSET) },
-        { "wakeupFF",    (uint8_t)(doc["pins"]["wakeupFF"]    | (int)PIN_UNSET) },
-        { "wakeupPF",    (uint8_t)(doc["pins"]["wakeupPF"]    | (int)PIN_UNSET) },
-        { "flowSensor",  (uint8_t)(doc["pins"]["flowSensor"]  | (int)PIN_UNSET) },
-        { "rtcCE",       (uint8_t)(doc["pins"]["rtcCE"]       | (int)PIN_UNSET) },
-        { "rtcIO",       (uint8_t)(doc["pins"]["rtcIO"]       | (int)PIN_UNSET) },
-        { "rtcSCLK",     (uint8_t)(doc["pins"]["rtcSCLK"]     | (int)PIN_UNSET) },
+        { "wifiTrigger", (uint8_t)(doc["pins"]["wifiTrigger"] | (int)PIN_UNSET), false },
+        { "wakeupFF",    (uint8_t)(doc["pins"]["wakeupFF"]    | (int)PIN_UNSET), false },
+        { "wakeupPF",    (uint8_t)(doc["pins"]["wakeupPF"]    | (int)PIN_UNSET), false },
+        { "flowSensor",  (uint8_t)(doc["pins"]["flowSensor"]  | (int)PIN_UNSET), true  },
+        { "rtcCE",       (uint8_t)(doc["pins"]["rtcCE"]       | (int)PIN_UNSET), true  },
+        { "rtcIO",       (uint8_t)(doc["pins"]["rtcIO"]       | (int)PIN_UNSET), true  },
+        { "rtcSCLK",     (uint8_t)(doc["pins"]["rtcSCLK"]     | (int)PIN_UNSET), true  },
     };
     constexpr int N_PINS = sizeof(pins) / sizeof(pins[0]);
 
-    if (legacyPipeline) {
-        // Per-pin: reject if assigned (!= PIN_UNSET) AND fails board rules.
-        // Unassigned (PIN_UNSET) is allowed here — user may legitimately
-        // leave optional features (e.g. RTC, WiFi-trigger) unconfigured.
-        // The runtime guard in commit 8 will refuse to attach an unassigned
-        // pin at use time, surfacing a clear error.
-        for (int i = 0; i < N_PINS; i++) {
-            if (pins[i].value == PIN_UNSET) continue;
-            if (!isPinAllowed(profile, pins[i].value, PIN_PURPOSE_GENERIC)) {
+    // Per-pin validation — applied to every supplied pin regardless of mode.
+    // Continuous-only deployments may legitimately leave the legacy-only pins
+    // at PIN_UNSET; runtime guard catches a use attempt.
+    auto inScope = [&](const PinAssignment& p) -> bool {
+        return legacyPipeline || !p.legacyOnly;
+    };
+    for (int i = 0; i < N_PINS; i++) {
+        if (!inScope(pins[i])) continue;
+        if (pins[i].value == PIN_UNSET) continue;
+        if (!isPinAllowed(profile, pins[i].value, PIN_PURPOSE_GENERIC)) {
+            char body[160];
+            snprintf(body, sizeof(body),
+                     "{\"ok\":false,\"error\":\"pin %s = GPIO%u rejected: %s\"}",
+                     pins[i].key, pins[i].value,
+                     pinRejectReason(profile, pins[i].value));
+            req->send(400, "application/json", body);
+            return;
+        }
+    }
+    for (int i = 0; i < N_PINS; i++) {
+        if (!inScope(pins[i]) || pins[i].value == PIN_UNSET) continue;
+        for (int j = i + 1; j < N_PINS; j++) {
+            if (!inScope(pins[j]) || pins[j].value == PIN_UNSET) continue;
+            if (pins[j].value == pins[i].value) {
                 char body[160];
                 snprintf(body, sizeof(body),
-                         "{\"ok\":false,\"error\":\"pin %s = GPIO%u rejected: %s\"}",
-                         pins[i].key, pins[i].value,
-                         pinRejectReason(profile, pins[i].value));
+                         "{\"ok\":false,\"error\":\"duplicate pin: %s and %s both = GPIO%u\"}",
+                         pins[i].key, pins[j].key, pins[i].value);
                 req->send(400, "application/json", body);
                 return;
-            }
-        }
-        // Duplicate detection. Two pins assigned to the same GPIO is always
-        // an error, even on BOARD_CUSTOM.
-        for (int i = 0; i < N_PINS; i++) {
-            if (pins[i].value == PIN_UNSET) continue;
-            for (int j = i + 1; j < N_PINS; j++) {
-                if (pins[j].value == pins[i].value) {
-                    char body[160];
-                    snprintf(body, sizeof(body),
-                             "{\"ok\":false,\"error\":\"duplicate pin: %s and %s both = GPIO%u\"}",
-                             pins[i].key, pins[j].key, pins[i].value);
-                    req->send(400, "application/json", body);
-                    return;
-                }
             }
         }
     }
@@ -156,16 +164,18 @@ void handlePostFirstRun(AsyncWebServerRequest* req,
     }
     g_boardProfile = profile;
 
+    // Always persist the universal-pin trio (WiFi-trigger + buttons).
+    // Legacy-only pins are persisted only when the mode owns them.
+    config.hardware.pinWifiTrigger = pins[0].value;
+    config.hardware.pinWakeupFF    = pins[1].value;
+    config.hardware.pinWakeupPF    = pins[2].value;
     if (legacyPipeline) {
-        config.hardware.pinWifiTrigger = pins[0].value;
-        config.hardware.pinWakeupFF    = pins[1].value;
-        config.hardware.pinWakeupPF    = pins[2].value;
         config.hardware.pinFlowSensor  = pins[3].value;
         config.hardware.pinRtcCE       = pins[4].value;
         config.hardware.pinRtcIO       = pins[5].value;
         config.hardware.pinRtcSCLK     = pins[6].value;
-        saveConfig();
     }
+    saveConfig();
 
     g_setupRequired = false;
 

@@ -117,6 +117,8 @@ const BoardProfile* const ALL_PROFILES[] = {
     &CUSTOM,
 };
 constexpr uint8_t ALL_PROFILES_COUNT = sizeof(ALL_PROFILES) / sizeof(ALL_PROFILES[0]);
+static_assert(ALL_PROFILES_COUNT <= MAX_PROFILES,
+              "Profile list exceeds MAX_PROFILES — bump MAX_PROFILES in BoardProfiles.h");
 
 bool inList(const uint8_t* list, uint8_t pin) {
     for (uint8_t i = 0; i < MAX_RESTRICTED_PINS && list[i] != PIN_UNSET; i++) {

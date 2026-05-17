@@ -5,14 +5,19 @@
 (function () {
   "use strict";
 
+  // legacyOnly: hidden when mode is "continuous" (those pins only matter
+  // for the legacy flow pipeline). Always-shown pins (WiFi-trigger,
+  // buttons) drive the device's physical UI in every mode and must be
+  // collected even in continuous mode — leaving them unset breaks the
+  // AP-trigger button and post-correction buttons.
   var PIN_FIELDS = [
-    { key: "wifiTrigger", label: "WiFi-trigger button",     required: false },
-    { key: "wakeupFF",    label: "Wakeup (FF / manual)",    required: false },
-    { key: "wakeupPF",    label: "Wakeup (PF / auto)",      required: false },
-    { key: "flowSensor",  label: "Flow sensor input",       required: true  },
-    { key: "rtcCE",       label: "RTC chip-enable (DS1302)",required: false },
-    { key: "rtcIO",       label: "RTC data IO",             required: false },
-    { key: "rtcSCLK",     label: "RTC clock",               required: false },
+    { key: "wifiTrigger", label: "WiFi-trigger button",      required: false, legacyOnly: false },
+    { key: "wakeupFF",    label: "Wakeup (FF / manual)",     required: false, legacyOnly: false },
+    { key: "wakeupPF",    label: "Wakeup (PF / auto)",       required: false, legacyOnly: false },
+    { key: "flowSensor",  label: "Flow sensor input",        required: true,  legacyOnly: true  },
+    { key: "rtcCE",       label: "RTC chip-enable (DS1302)", required: false, legacyOnly: true  },
+    { key: "rtcIO",       label: "RTC data IO",              required: false, legacyOnly: true  },
+    { key: "rtcSCLK",     label: "RTC clock",                required: false, legacyOnly: true  },
   ];
 
   // Escape any text we render into the DOM. The profile name / pin
@@ -83,13 +88,16 @@
       var labelEl = document.createElement("label");
       labelEl.textContent = f.label + (f.required ? " *" : "");
       labelEl.setAttribute("for", "pin-" + f.key);
+      labelEl.dataset.legacyOnly = f.legacyOnly ? "1" : "0";
       var input = document.createElement("input");
       input.type = "number"; input.id = "pin-" + f.key;
       input.min = -1; input.max = 48; input.value = -1;
       input.dataset.key = f.key;
+      input.dataset.legacyOnly = f.legacyOnly ? "1" : "0";
       input.oninput = function () { revalidatePin(f.key); };
       var msg = document.createElement("div");
       msg.id = "msg-" + f.key; msg.className = "ok";
+      msg.dataset.legacyOnly = f.legacyOnly ? "1" : "0";
       grid.appendChild(labelEl);
       grid.appendChild(input);
       grid.appendChild(msg);
@@ -145,8 +153,14 @@
 
   function onModeChange() {
     var mode = $("mode").value;
-    var show = (mode === "legacy" || mode === "hybrid");
-    $("pinsStep").classList.toggle("hidden", !show);
+    var legacy = (mode === "legacy" || mode === "hybrid");
+    // Show/hide ONLY the legacy-only pin rows. Universal pins (buttons +
+    // WiFi-trigger) stay visible in continuous mode so the wizard still
+    // collects them — those drive the device's physical UI in every mode.
+    var els = document.querySelectorAll('[data-legacy-only="1"]');
+    for (var i = 0; i < els.length; i++) {
+      els[i].style.display = legacy ? "" : "none";
+    }
   }
 
   function showStatus(msg, kind) {
@@ -166,23 +180,24 @@
     var mode = $("mode").value;
     var body = { profile: profile.id, mode: mode, pins: {} };
 
-    if (mode === "legacy" || mode === "hybrid") {
-      var allOk = true;
-      PIN_FIELDS.forEach(function (f) {
-        var pin = parseInt($("pin-" + f.key).value, 10);
-        if (isNaN(pin)) pin = -1;
-        if (f.required && pin === -1) {
-          $("msg-" + f.key).className = "err";
-          $("msg-" + f.key).textContent = "required";
-          allOk = false;
-        }
-        // Validation feedback already on screen from oninput; trust those.
-        var msgEl = $("msg-" + f.key);
-        if (msgEl && msgEl.className === "err") allOk = false;
-        body.pins[f.key] = pin;
-      });
-      if (!allOk) { showStatus("Fix the highlighted pins above.", "err"); return; }
-    }
+    var legacy = (mode === "legacy" || mode === "hybrid");
+    var allOk = true;
+    PIN_FIELDS.forEach(function (f) {
+      // Skip legacy-only fields in continuous mode — they're hidden from
+      // the UI and the backend ignores them for non-legacy modes anyway.
+      if (f.legacyOnly && !legacy) return;
+      var pin = parseInt($("pin-" + f.key).value, 10);
+      if (isNaN(pin)) pin = -1;
+      if (f.required && pin === -1) {
+        $("msg-" + f.key).className = "err";
+        $("msg-" + f.key).textContent = "required";
+        allOk = false;
+      }
+      var msgEl = $("msg-" + f.key);
+      if (msgEl && msgEl.className === "err") allOk = false;
+      body.pins[f.key] = pin;
+    });
+    if (!allOk) { showStatus("Fix the highlighted pins above.", "err"); return; }
 
     $("saveBtn").disabled = true;
     showStatus("Saving and rebooting…", "ok");
