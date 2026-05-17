@@ -4,6 +4,11 @@
 #include "BoardProfiles.h"
 
 #include <string.h>
+#include <Arduino.h>
+#include <LittleFS.h>
+#include "../utils/AtomicWrite.h"
+#include "../pipeline/DataPipeline.h"   // fsMutex
+#include "Globals.h"                    // activeFS, fsAvailable, g_boardProfile
 
 // Pin-restriction tables. Sentinel-terminated with PIN_UNSET. Verified
 // against the Espressif ESP32-C3 / ESP32-S3 technical reference manuals
@@ -173,3 +178,55 @@ const char* pinRejectReason(const BoardProfile* profile, uint8_t pin) {
     if (inList(profile->reservedPins, pin)) return "reserved (UART0 console)";
     return "ok";
 }
+
+// ============================================================================
+// Persistence — /board_profile.txt
+// ============================================================================
+namespace BoardProfiles {
+
+constexpr const char* kPath        = "/board_profile.txt";
+constexpr size_t      kMaxFileSize = 256;   // tiny key=value file
+
+const BoardProfile* load() {
+    if (!fsAvailable || !activeFS) return nullptr;
+    if (!activeFS->exists(kPath))  return nullptr;
+
+    File f = activeFS->open(kPath, FILE_READ);
+    if (!f) return nullptr;
+    if (f.size() == 0 || f.size() > kMaxFileSize) { f.close(); return nullptr; }
+
+    char buf[kMaxFileSize + 1];
+    size_t n = f.read(reinterpret_cast<uint8_t*>(buf), kMaxFileSize);
+    f.close();
+    buf[n] = '\0';
+
+    // Find profile=<shortId>
+    char shortId[32] = {0};
+    char* p = strstr(buf, "profile=");
+    if (!p) return nullptr;
+    p += 8;
+    size_t i = 0;
+    while (*p && *p != '\n' && *p != '\r' && i < sizeof(shortId) - 1) {
+        shortId[i++] = *p++;
+    }
+    shortId[i] = '\0';
+
+    return getProfileByShortId(shortId);
+}
+
+bool save(const BoardProfile* profile) {
+    if (!profile)                return false;
+    if (!fsAvailable || !activeFS) return false;
+
+    char body[128];
+    int n = snprintf(body, sizeof(body),
+                     "profile=%s\nversion=1\n", profile->shortId);
+    if (n <= 0 || n >= (int)sizeof(body)) return false;
+
+    return atomicWrite(*activeFS, kPath, [&](File& dst) -> bool {
+        return dst.write(reinterpret_cast<const uint8_t*>(body), (size_t)n)
+               == (size_t)n;
+    }, fsMutex);
+}
+
+}  // namespace BoardProfiles

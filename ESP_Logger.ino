@@ -50,6 +50,7 @@
 #include <WiFi.h>           // for WiFi.setSleep() in continuous mode
 
 #include "src/core/Globals.h"
+#include "src/core/BoardProfiles.h"   // R11: pin-rules registry loaded after initStorage
 #include "src/core/ModuleRegistry.h"  // Pass 5: unified module registry (phase 1 = empty)
 #include "src/modules/WiFiModule.h"    // Pass 5 phase 2
 #include "src/modules/OtaModule.h"     // Pass 5 phase 2
@@ -513,6 +514,13 @@ void setup() {
     isrDebounceUs = (uint32_t)config.hardware.debounceMs * 1000UL;   // I1
 
     initStorage();
+
+    // R11: load board profile from /board_profile.txt (nullptr → first-run
+    // wizard required; the redirect is wired in setupWebServer).
+    g_boardProfile = BoardProfiles::load();
+    Serial.printf("[BoardProfile] %s\n",
+                  g_boardProfile ? g_boardProfile->name
+                                 : "none — first-run wizard required");
 
     // Pass 5 phase 2: register IModule adapters for WiFi/OTA/theme and
     // hydrate them from /config/modules.json.  config.bin still wins when

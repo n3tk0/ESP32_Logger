@@ -101,6 +101,12 @@ unsigned long lastLoggingCycleStartTime = 0;
 PlatformMode g_platformMode = PLATFORM_LEGACY;
 
 // ============================================================================
+// BOARD PROFILE — populated by BoardProfiles::load() in setup() after
+// initStorage().  nullptr until the first-run wizard saves a selection.
+// ============================================================================
+const BoardProfile* g_boardProfile = nullptr;
+
+// ============================================================================
 // PLATFORM SLEEP CONTROL
 // ============================================================================
 uint8_t g_sleepMode = 0;

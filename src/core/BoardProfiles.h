@@ -108,3 +108,29 @@ bool isPinAllowed(const BoardProfile* profile,
 /// allowed, or "no board profile" if profile is nullptr. The pointer is
 /// to a static string; do not free.
 const char* pinRejectReason(const BoardProfile* profile, uint8_t pin);
+
+// --- Persistence -------------------------------------------------------------
+//
+// The active profile is stored in /board_profile.txt — a tiny key=value
+// text file (not config.bin) so a factory reset of user config preserves
+// the hardware identity. Format:
+//
+//   profile=xiao_c3
+//   version=1
+//
+// `version` is the file-schema version (not the profile id); future
+// fields can be appended without breaking older firmware.
+
+namespace BoardProfiles {
+
+    /// Reads /board_profile.txt and returns the matching profile pointer,
+    /// or nullptr if the file is missing, malformed, or names an unknown
+    /// profile. Call once at boot, after initStorage. Idempotent.
+    const BoardProfile* load();
+
+    /// Writes the profile shortId to /board_profile.txt atomically. Returns
+    /// true on success. Used by the first-run wizard's POST /api/firstrun
+    /// handler.
+    bool save(const BoardProfile* profile);
+
+}  // namespace BoardProfiles
