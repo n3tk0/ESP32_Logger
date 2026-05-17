@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 Logger — First-Run Setup</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  body { background: var(--bg, #1a1a1a); color: var(--text, #e0e0e0);
+         font-family: -apple-system, system-ui, sans-serif;
+         margin: 0; padding: 2rem 1rem; }
+  .wizard { max-width: 720px; margin: 0 auto; }
+  .wizard h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+  .wizard .sub { opacity: .65; margin-bottom: 1.5rem; }
+  .step { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+          border-radius: 12px; padding: 1.25rem 1.5rem; margin-bottom: 1rem; }
+  .step h2 { font-size: 1.1rem; margin: 0 0 1rem; }
+  .step .hint { font-size: .85rem; opacity: .6; margin-top: .35rem; }
+  .step label { display: block; margin-bottom: .35rem; font-weight: 500; }
+  .step select, .step input { width: 100%; padding: .5rem .75rem; border-radius: 6px;
+          border: 1px solid rgba(255,255,255,.15); background: rgba(0,0,0,.3);
+          color: inherit; font-size: 1rem; box-sizing: border-box; }
+  .step input[type="number"] { width: 6rem; }
+  .pin-grid { display: grid; grid-template-columns: 1fr auto auto; gap: .5rem 1rem;
+              align-items: center; margin-top: .5rem; }
+  .pin-grid .err { color: #ff6b6b; font-size: .8rem; }
+  .pin-grid .ok { color: #6bcf7f; font-size: .8rem; }
+  .actions { display: flex; gap: .75rem; justify-content: flex-end; margin-top: 1.5rem; }
+  .btn { padding: .6rem 1.25rem; border-radius: 6px; border: 0; font-size: 1rem;
+         cursor: pointer; background: rgba(255,255,255,.1); color: inherit; }
+  .btn-primary { background: #4a90e2; color: #fff; }
+  .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+  .disclaimer { background: rgba(255,180,0,.1); border: 1px solid rgba(255,180,0,.3);
+                padding: .75rem 1rem; border-radius: 6px; margin: .75rem 0;
+                font-size: .9rem; }
+  .disclaimer label { font-weight: normal; cursor: pointer; }
+  .status { padding: .75rem 1rem; border-radius: 6px; margin-top: 1rem; display: none; }
+  .status.err { background: rgba(255,80,80,.15); border: 1px solid rgba(255,80,80,.4); }
+  .status.ok { background: rgba(80,200,120,.15); border: 1px solid rgba(80,200,120,.4); }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wizard">
+  <h1>First-run Setup</h1>
+  <div class="sub">Welcome. Pick your board and assign pins before the logger starts.</div>
+
+  <div class="step">
+    <h2>1. Select your board</h2>
+    <label for="profile">Board profile</label>
+    <select id="profile">
+      <option value="">— Loading profiles… —</option>
+    </select>
+    <div class="hint" id="profileHint"></div>
+    <div class="disclaimer hidden" id="customDisclaimer">
+      <label>
+        <input type="checkbox" id="customAck">
+        I select <strong>Custom</strong> and accept that pin validation is
+        disabled. By continuing you accept full responsibility for any
+        boot-mode or hardware damage caused by unsafe pin assignments.
+      </label>
+    </div>
+  </div>
+
+  <div class="step">
+    <h2>2. Operating mode</h2>
+    <label for="mode">Mode</label>
+    <select id="mode">
+      <option value="legacy">Legacy — single flow meter with deep sleep</option>
+      <option value="continuous">Continuous — always-on sensor pipeline</option>
+      <option value="hybrid">Hybrid — both flow + sensor pipeline</option>
+    </select>
+    <div class="hint">
+      Legacy and Hybrid require GPIO pin assignments for the flow pipeline.
+      Continuous configures sensors individually in the main UI later.
+    </div>
+  </div>
+
+  <div class="step" id="pinsStep">
+    <h2>3. Pin assignments <span style="opacity:.6;font-weight:normal;font-size:.85rem">(legacy / hybrid only)</span></h2>
+    <div class="hint">
+      Leave any optional field at -1 to skip. Each pin is validated
+      against the selected board's restriction list.
+    </div>
+    <div class="pin-grid" id="pinGrid">
+      <!-- populated by JS -->
+    </div>
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <div class="actions">
+    <button class="btn btn-primary" id="saveBtn">Save &amp; reboot</button>
+  </div>
+</div>
+
+<script src="/js/firstrun.js"></script>
+</body>
+</html>

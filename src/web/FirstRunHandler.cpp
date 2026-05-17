@@ -4,6 +4,7 @@
 #include "FirstRunHandler.h"
 
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 
 #include "../core/Globals.h"
 #include "../core/BoardProfiles.h"
@@ -183,6 +184,13 @@ void handlePostFirstRun(AsyncWebServerRequest* req,
 // ---------------------------------------------------------------------------
 void registerFirstRunRoutes() {
     extern AsyncWebServer server;
+
+    // /firstrun → /www/firstrun.html. serveStatic maps /firstrun.html
+    // directly; this alias lets the FirstRunGate redirect target work
+    // without forcing users to type the extension.
+    server.on("/firstrun", HTTP_GET, [](AsyncWebServerRequest* r) {
+        r->send(LittleFS, "/www/firstrun.html", "text/html");
+    });
 
     server.on("/api/board-profiles", HTTP_GET, handleGetBoardProfiles);
 
