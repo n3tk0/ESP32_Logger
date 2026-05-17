@@ -515,6 +515,16 @@ void setup() {
 
     initStorage();
 
+    // R12 / AUDIT 1.7: with formatOnFail=false, a corrupt LittleFS leaves
+    // littleFsAvailable=false. Trip safe mode so we boot AP-only with the
+    // PROGMEM failsafe UI (no LittleFS-backed assets needed) and the user
+    // can decide to wipe the partition via the explicit "Format" button.
+    if (!littleFsAvailable) {
+        g_safeMode = true;
+        Serial.println("[SafeMode] LittleFS mount failed — entering safe mode "
+                       "(use failsafe UI to format if needed)");
+    }
+
     // R11: load board profile from /board_profile.txt (nullptr → first-run
     // wizard required; FirstRunGate in WebServer.cpp redirects all non-
     // wizard routes to /firstrun while g_setupRequired is true).

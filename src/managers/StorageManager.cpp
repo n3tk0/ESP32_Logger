@@ -8,8 +8,13 @@
 
 bool initStorage() {
     DBGLN("Init LittleFS...");
-    // Explicitly using "spiffs" label for maximum compatibility on ESP32
-    if (!littleFsAvailable && LittleFS.begin(true, "/littlefs", 10, "spiffs")) {
+    // R12 / AUDIT 1.7: formatOnFail=FALSE. A transient mount failure used to
+    // silently reformat the partition (deleting user config, board profile,
+    // and platform_config.json). Now we leave the FS untouched and let the
+    // device fall through to safe mode where the user can decide whether to
+    // wipe via the failsafe UI (/api/format_filesystem button).
+    // Explicitly using "spiffs" label for maximum compatibility on ESP32.
+    if (!littleFsAvailable && LittleFS.begin(false, "/littlefs", 10, "spiffs")) {
         littleFsAvailable = true;
     }
     if (littleFsAvailable) {
