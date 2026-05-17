@@ -106,6 +106,22 @@ extern String        currentDir;
 extern PlatformMode g_platformMode;
 
 // ============================================================================
+// BOARD PROFILE (R11 — pin-rules registry, AUDIT 5.x / 23.1 / 31.x family)
+// ----------------------------------------------------------------------------
+// Loaded once at boot from /board_profile.txt.  nullptr means no profile
+// is selected — the first-run wizard must run before pin assignments can
+// be validated. See src/core/BoardProfiles.h for the validator API.
+// ============================================================================
+struct BoardProfile;
+extern const BoardProfile* g_boardProfile;
+
+// True if the first-run wizard must complete before normal operation.
+// Set during setup() if g_boardProfile == nullptr; cleared when the user
+// successfully POSTs /api/firstrun. While true, the web server redirects
+// all non-wizard routes to /firstrun.
+extern bool g_setupRequired;
+
+// ============================================================================
 // PLATFORM SLEEP CONTROL
 // ============================================================================
 // 0 = deep sleep allowed (legacy default)

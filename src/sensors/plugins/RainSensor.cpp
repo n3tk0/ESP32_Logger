@@ -1,4 +1,5 @@
 #include "RainSensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 void IRAM_ATTR RainSensor::_isr(void* arg) {
     RainSensor* self = static_cast<RainSensor*>(arg);
@@ -13,7 +14,7 @@ void IRAM_ATTR RainSensor::_isr(void* arg) {
 
 bool RainSensor::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]          | true;
-    _pin        = cfg["pin"]              | 10;  // GPIO10 — non-strap (was 9, AUDIT 31.1)
+    _pin        = cfg["pin"]              | -1;  // R11: unset → init refuses (closes AUDIT 23.1)
     _mmPerTip   = cfg["mm_per_pulse"]     | 0.2794f;
     _intervalMs = cfg["read_interval_ms"] | 60000;
 
@@ -21,6 +22,7 @@ bool RainSensor::init(JsonObjectConst cfg) {
     _calRate.load(cal, "rain_rate");
     _calTotal.load(cal, "rain_total");
 
+    if (!validateAttachPin(_pin, "rain", "pin")) return false;
     pinMode(_pin, INPUT_PULLUP);
     if (!_isrPin.attach((uint8_t)_pin, GPIO_INTR_NEGEDGE, &RainSensor::_isr, this)) {
         Serial.printf("[Rain] ERROR: ISR attach failed on pin %d\n", _pin);

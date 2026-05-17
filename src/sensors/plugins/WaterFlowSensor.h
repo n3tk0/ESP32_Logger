@@ -65,7 +65,7 @@ private:
     float       _pulsesPerLiter = 450.0f;
     float       _calibration    = 1.0f;  // legacy volume multiplier
     uint32_t    _intervalMs     = 1000;
-    int         _pin            = 21;
+    int         _pin            = -1;  // R11: -1 = unset; refuse to attach
 
     CalibrationAxis _calFlow;   // applied to flow_rate
     CalibrationAxis _calVolume; // applied to volume

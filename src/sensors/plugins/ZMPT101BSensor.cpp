@@ -1,9 +1,10 @@
 #include "ZMPT101BSensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include <math.h>
 
 bool ZMPT101BSensor::init(JsonObjectConst cfg) {
     _enabled        = cfg["enabled"]          | true;
-    _pin            = cfg["pin"]              | 0;
+    _pin            = cfg["pin"]              | -1;  // R11: unset → init refuses
     _voltageFactor  = cfg["voltage_factor"]   | 1.0f;
     _samples        = cfg["adc_samples"]      | 200;
     _samplePeriodUs = cfg["sample_period_us"] | 100;
@@ -15,6 +16,7 @@ bool ZMPT101BSensor::init(JsonObjectConst cfg) {
     JsonObjectConst cal = cfg["calibration"];
     _calVoltage.load(cal, "voltage_vrms");
 
+    if (!validateAttachPin(_pin, "zmpt101b", "pin")) return false;
     analogSetPinAttenuation(_pin, ADC_11db); // full-scale ~3.3 V
     pinMode(_pin, INPUT);
     _ready = true;

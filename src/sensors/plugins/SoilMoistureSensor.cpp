@@ -1,8 +1,9 @@
 #include "SoilMoistureSensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 bool SoilMoistureSensor::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]          | true;
-    _pin        = cfg["pin"]              | 0;
+    _pin        = cfg["pin"]              | -1;  // R11: unset → init refuses
     _dryValue   = cfg["dry_value"]        | 3300;
     _wetValue   = cfg["wet_value"]        | 1500;
     _samples    = cfg["adc_samples"]      | 16;
@@ -21,6 +22,7 @@ bool SoilMoistureSensor::init(JsonObjectConst cfg) {
     JsonObjectConst cal = cfg["calibration"];
     _calMoisture.load(cal, "moisture");
 
+    if (!validateAttachPin(_pin, "soil_moisture", "pin")) return false;
     pinMode(_pin, INPUT);
     _ready = true;
     Serial.printf("[SoilMoisture] pin=%d dry=%d wet=%d samples=%d\n",

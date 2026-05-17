@@ -7,6 +7,10 @@
 // every file that includes Config.h transparently gets them too.
 #include "../setup.h"
 
+// PIN_UNSET sentinel + BoardProfile forward decl. Header is stdint-only;
+// no transitive heavy includes.
+#include "BoardProfiles.h"
+
 // ============================================================================
 // VERSION  –  single source of truth
 // ============================================================================
@@ -53,20 +57,29 @@ constexpr const char* DEFAULT_NTP_SERVER     = "pool.ntp.org";
 #define RTC_RAM_MAGIC_VALUE     0xBC
 
 // ============================================================================
-// DEFAULT PIN DEFINITIONS – XIAO ESP32-C3
+// DEFAULT PIN DEFINITIONS — R11: all unset, wizard must assign
+// ----------------------------------------------------------------------------
+// Was hardcoded XIAO-C3-specific values that collided with strap pins
+// (5, 8, 9), SPI flash bus (10-13), and USB CDC (18, 19, 21). Closes
+// AUDIT 5.3, 5.7, 5.8, 5.9, 23.1, 31.2, 31.3.
+//
+// New devices boot with every pin == PIN_UNSET → g_setupRequired=true
+// → first-run wizard runs. Existing devices keep their saved config.bin
+// values; the wizard scans them against the chosen board profile and
+// flags violations.
 // ============================================================================
 namespace DefaultPins {
-    constexpr uint8_t WIFI_TRIGGER = 2;
-    constexpr uint8_t WAKEUP_FF   = 3;
-    constexpr uint8_t WAKEUP_PF   = 4;
-    constexpr uint8_t FLOW_SENSOR = 21;
-    constexpr uint8_t RTC_CE      = 5;
-    constexpr uint8_t RTC_IO      = 6;
-    constexpr uint8_t RTC_SCLK   = 7;
-    constexpr uint8_t SD_CS       = 10;
-    constexpr uint8_t SD_MOSI     = 11;
-    constexpr uint8_t SD_MISO     = 12;
-    constexpr uint8_t SD_SCK      = 13;
+    constexpr uint8_t WIFI_TRIGGER = PIN_UNSET;
+    constexpr uint8_t WAKEUP_FF    = PIN_UNSET;
+    constexpr uint8_t WAKEUP_PF    = PIN_UNSET;
+    constexpr uint8_t FLOW_SENSOR  = PIN_UNSET;
+    constexpr uint8_t RTC_CE       = PIN_UNSET;
+    constexpr uint8_t RTC_IO       = PIN_UNSET;
+    constexpr uint8_t RTC_SCLK     = PIN_UNSET;
+    constexpr uint8_t SD_CS        = PIN_UNSET;
+    constexpr uint8_t SD_MOSI      = PIN_UNSET;
+    constexpr uint8_t SD_MISO      = PIN_UNSET;
+    constexpr uint8_t SD_SCK       = PIN_UNSET;
 }
 
 // ============================================================================

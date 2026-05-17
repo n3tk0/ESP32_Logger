@@ -1,4 +1,5 @@
 #include "ENS160Sensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 bool ENS160Sensor::_writeReg(uint8_t reg, uint8_t val) {
     Wire.beginTransmission(_addr);
@@ -36,8 +37,9 @@ bool ENS160Sensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (sda >= 0 && scl >= 0) Wire.begin((int8_t)sda, (int8_t)scl);
-    else                       Wire.begin();
+    if (!validateAttachPin(sda, "ens160", "sda")) return false;
+    if (!validateAttachPin(scl, "ens160", "scl")) return false;
+    Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
     _calTvoc.load(cal, "tvoc");

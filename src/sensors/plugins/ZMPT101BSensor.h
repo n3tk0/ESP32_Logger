@@ -38,7 +38,7 @@ public:
     }
 
 private:
-    int      _pin          = 0;
+    int      _pin          = -1;  // R11: -1 = unset; refuse to attach
     float    _voltageFactor = 1.0f; // multiply ADC RMS count → Vrms
     int      _samples      = 200;
     uint32_t _samplePeriodUs = 100;

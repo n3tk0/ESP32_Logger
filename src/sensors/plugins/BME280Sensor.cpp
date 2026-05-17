@@ -1,4 +1,5 @@
 #include "BME280Sensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 // ---------------------------------------------------------------------------
 bool BME280Sensor::init(JsonObjectConst cfg) {
@@ -8,12 +9,9 @@ bool BME280Sensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-
-    if (sda >= 0 && scl >= 0) {
-        Wire.begin((int8_t)sda, (int8_t)scl);
-    } else {
-        Wire.begin();
-    }
+    if (!validateAttachPin(sda, "bme280", "sda")) return false;
+    if (!validateAttachPin(scl, "bme280", "scl")) return false;
+    Wire.begin((int8_t)sda, (int8_t)scl);
 
     _ready = _bme.begin(_addr, &Wire);
     if (!_ready) {

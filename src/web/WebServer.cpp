@@ -19,6 +19,7 @@
 #include "WebServer.h"
 #include "../setup.h"                   // WEB_BASIC_AUTH_* macros
 #include "../core/Globals.h"
+#include "../core/BoardProfiles.h"      // R11: g_boardProfile + isPinAllowed
 #include "../managers/ConfigManager.h"
 #include "../managers/WiFiManager.h"
 #include "../managers/StorageManager.h"
@@ -26,6 +27,7 @@
 #include "../managers/DataLogger.h"
 #include "../utils/Utils.h"
 #include "ApiHandlers.h"
+#include "FirstRunHandler.h"            // R11 first-run wizard backend
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "CsrfToken.h"                 // Pass 7 CSRF on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
@@ -319,8 +321,45 @@ public:
 static AsyncAuthGateHandler s_authGate;
 #endif
 
+// R11 first-run gate. When g_setupRequired is true (no board profile
+// selected), this handler is registered BEFORE the auth gate and claims
+// every request whose URL is not in the wizard whitelist. It redirects
+// to /firstrun so the user can pick a board + assign pins before the
+// rest of the firmware is exposed.
+//
+// Whitelisted (allowed through while setup is required):
+//   - /firstrun, /firstrun.html         (wizard page)
+//   - /api/firstrun                     (POST handler that saves profile)
+//   - /api/board-profiles               (GET profile list for the wizard)
+//   - static asset extensions           (CSS, JS, fonts, favicon)
+class FirstRunGateHandler : public AsyncWebHandler {
+public:
+    bool canHandle(AsyncWebServerRequest* r) override {
+        if (!g_setupRequired) return false;
+        const String& url = r->url();
+        if (url == "/firstrun" || url == "/firstrun.html")        return false;
+        if (url.startsWith("/api/firstrun"))                       return false;
+        if (url.startsWith("/api/board-profiles"))                 return false;
+        if (url.endsWith(".css")  || url.endsWith(".js"))          return false;
+        if (url.endsWith(".woff2")|| url.endsWith(".ico"))         return false;
+        if (url.endsWith(".png")  || url.endsWith(".svg"))         return false;
+        return true;
+    }
+    void handleRequest(AsyncWebServerRequest* r) override {
+        r->redirect("/firstrun");
+    }
+};
+static FirstRunGateHandler s_firstRunGate;
+
 void setupWebServer() {
     DBGLN("Setting up web server...");
+
+    // R11: first-run gate runs before auth gate. The wizard must be
+    // reachable on a fresh device even when Basic Auth is compiled in —
+    // setting credentials is part of the wizard's job (a later phase).
+    server.addHandler(&s_firstRunGate);
+    registerFirstRunRoutes();
+    if (g_setupRequired) DBGLN("Web server: first-run wizard required");
 
 #if WEB_BASIC_AUTH_ENABLED
     // Must be registered FIRST — handlers are matched in insertion order and
@@ -1111,19 +1150,76 @@ void setupWebServer() {
 
     server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (!requireMutatingAuth(r)) return;
+        // R11: validate every pin parameter against the active board profile
+        // before assigning. PIN_UNSET / -1 is accepted (means "unconfigured").
+        // First violation aborts the save with a 400; partial assignment is
+        // never persisted (saveConfig runs only at the end).
+        auto setPin = [&](const char* name, uint8_t& dest) -> bool {
+            if (!r->hasParam(name, true)) return true;
+            int v = r->getParam(name, true)->value().toInt();
+            if (v == -1) { dest = PIN_UNSET; return true; }
+            if (v < 0 || v > 255) {
+                r->send(400, "application/json",
+                        "{\"ok\":false,\"error\":\"pin out of range\"}");
+                return false;
+            }
+            if (!isPinAllowed(g_boardProfile, (uint8_t)v, PIN_PURPOSE_GENERIC)) {
+                char body[180];
+                snprintf(body, sizeof(body),
+                         "{\"ok\":false,\"error\":\"%s = GPIO%d rejected: %s\"}",
+                         name, v, pinRejectReason(g_boardProfile, (uint8_t)v));
+                r->send(400, "application/json", body);
+                return false;
+            }
+            dest = (uint8_t)v;
+            return true;
+        };
         if (r->hasParam("storageType", true))    config.hardware.storageType    = (StorageType)r->getParam("storageType", true)->value().toInt();
         if (r->hasParam("wakeupMode", true))     config.hardware.wakeupMode     = (WakeupMode)r->getParam("wakeupMode", true)->value().toInt();
-        if (r->hasParam("pinWifiTrigger", true)) config.hardware.pinWifiTrigger = r->getParam("pinWifiTrigger", true)->value().toInt();
-        if (r->hasParam("pinWakeupFF", true))    config.hardware.pinWakeupFF    = r->getParam("pinWakeupFF", true)->value().toInt();
-        if (r->hasParam("pinWakeupPF", true))    config.hardware.pinWakeupPF    = r->getParam("pinWakeupPF", true)->value().toInt();
-        if (r->hasParam("pinFlowSensor", true))  config.hardware.pinFlowSensor  = r->getParam("pinFlowSensor", true)->value().toInt();
-        if (r->hasParam("pinRtcCE", true))       config.hardware.pinRtcCE       = r->getParam("pinRtcCE", true)->value().toInt();
-        if (r->hasParam("pinRtcIO", true))       config.hardware.pinRtcIO       = r->getParam("pinRtcIO", true)->value().toInt();
-        if (r->hasParam("pinRtcSCLK", true))     config.hardware.pinRtcSCLK     = r->getParam("pinRtcSCLK", true)->value().toInt();
-        if (r->hasParam("pinSdCS", true))        config.hardware.pinSdCS        = r->getParam("pinSdCS", true)->value().toInt();
-        if (r->hasParam("pinSdMOSI", true))      config.hardware.pinSdMOSI      = r->getParam("pinSdMOSI", true)->value().toInt();
-        if (r->hasParam("pinSdMISO", true))      config.hardware.pinSdMISO      = r->getParam("pinSdMISO", true)->value().toInt();
-        if (r->hasParam("pinSdSCK", true))       config.hardware.pinSdSCK       = r->getParam("pinSdSCK", true)->value().toInt();
+        if (!setPin("pinWifiTrigger", config.hardware.pinWifiTrigger)) return;
+        if (!setPin("pinWakeupFF",    config.hardware.pinWakeupFF))    return;
+        if (!setPin("pinWakeupPF",    config.hardware.pinWakeupPF))    return;
+        if (!setPin("pinFlowSensor",  config.hardware.pinFlowSensor))  return;
+        if (!setPin("pinRtcCE",       config.hardware.pinRtcCE))       return;
+        if (!setPin("pinRtcIO",       config.hardware.pinRtcIO))       return;
+        if (!setPin("pinRtcSCLK",     config.hardware.pinRtcSCLK))     return;
+        if (!setPin("pinSdCS",        config.hardware.pinSdCS))        return;
+        if (!setPin("pinSdMOSI",      config.hardware.pinSdMOSI))      return;
+        if (!setPin("pinSdMISO",      config.hardware.pinSdMISO))      return;
+        if (!setPin("pinSdSCK",       config.hardware.pinSdSCK))       return;
+        // Duplicate-pin check (Gemini medium on PR #87). After every
+        // setPin above succeeded, scan the final config for any two
+        // assigned pins on the same GPIO and refuse the whole save.
+        {
+            struct PinRef { const char* name; uint8_t value; };
+            PinRef refs[] = {
+                {"pinWifiTrigger", config.hardware.pinWifiTrigger},
+                {"pinWakeupFF",    config.hardware.pinWakeupFF},
+                {"pinWakeupPF",    config.hardware.pinWakeupPF},
+                {"pinFlowSensor",  config.hardware.pinFlowSensor},
+                {"pinRtcCE",       config.hardware.pinRtcCE},
+                {"pinRtcIO",       config.hardware.pinRtcIO},
+                {"pinRtcSCLK",     config.hardware.pinRtcSCLK},
+                {"pinSdCS",        config.hardware.pinSdCS},
+                {"pinSdMOSI",      config.hardware.pinSdMOSI},
+                {"pinSdMISO",      config.hardware.pinSdMISO},
+                {"pinSdSCK",       config.hardware.pinSdSCK},
+            };
+            constexpr int N = sizeof(refs) / sizeof(refs[0]);
+            for (int i = 0; i < N; i++) {
+                if (refs[i].value == PIN_UNSET) continue;
+                for (int j = i + 1; j < N; j++) {
+                    if (refs[j].value == refs[i].value) {
+                        char body[180];
+                        snprintf(body, sizeof(body),
+                                 "{\"ok\":false,\"error\":\"duplicate pin: %s and %s both = GPIO%u\"}",
+                                 refs[i].name, refs[j].name, refs[i].value);
+                        r->send(400, "application/json", body);
+                        return;
+                    }
+                }
+            }
+        }
         if (r->hasParam("cpuFreqMHz", true))     config.hardware.cpuFreqMHz     = r->getParam("cpuFreqMHz", true)->value().toInt();
         if (r->hasParam("debounceMs", true))     config.hardware.debounceMs     = constrain(r->getParam("debounceMs", true)->value().toInt(), 20, 500);
         if (r->hasParam("debugMode", true))      config.hardware.debugMode      = r->getParam("debugMode", true)->value() == "1";

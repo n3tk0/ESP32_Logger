@@ -1,4 +1,5 @@
 #include "SGP30Sensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 // CRC-8 (polynomial 0x31, init 0xFF) per Sensirion datasheet
 uint8_t SGP30Sensor::_crc8(uint8_t d1, uint8_t d2) {
@@ -46,8 +47,9 @@ bool SGP30Sensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (sda >= 0 && scl >= 0) Wire.begin((int8_t)sda, (int8_t)scl);
-    else                       Wire.begin();
+    if (!validateAttachPin(sda, "sgp30", "sda")) return false;
+    if (!validateAttachPin(scl, "sgp30", "scl")) return false;
+    Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
     _calTvoc.load(cal, "tvoc");

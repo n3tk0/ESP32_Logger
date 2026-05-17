@@ -513,35 +513,72 @@ var CL_SENSOR_TYPES = [
   { value: "wind", label: "Wind speed (anemometer)", iface: "pulse" },
 ];
 
-// XIAO ESP32-C3 — exposed GPIO pins with board labels.
-// Only ADC-capable pins (GPIO 0-5) should be used for analog sensors.
+// R11: GPIO pin list + per-pin warnings are derived from the active
+// board profile (fetched from /api/board-profiles on page load). The
+// hardcoded XIAO C3 fallback below is used only if the API call fails
+// or the response is malformed — keeps the sensors page functional
+// during partial-init or pre-R11 builds.
 var CL_GPIO_PINS = [
-    { gpio: 0,  label: 'GPIO0  — D0/A0',      adc: true  },
-    { gpio: 1,  label: 'GPIO1  — D1/A1',      adc: true  },
-    { gpio: 2,  label: 'GPIO2  — D2/A2',      adc: true  },
-    { gpio: 3,  label: 'GPIO3  — D3/A3',      adc: true  },
-    { gpio: 4,  label: 'GPIO4  — D4/A4',      adc: true  },
-    { gpio: 5,  label: 'GPIO5  — D5/A5',      adc: true  },
-    { gpio: 6,  label: 'GPIO6  — D4/SDA',     adc: false },
-    { gpio: 7,  label: 'GPIO7  — D5/SCL',     adc: false },
-    { gpio: 8,  label: 'GPIO8  — D8/SCK',     adc: false },
-    { gpio: 9,  label: 'GPIO9  — D9/MISO',    adc: false },
-    { gpio: 10, label: 'GPIO10 — D10/MOSI',   adc: false },
-    { gpio: 20, label: 'GPIO20 — D7/RX',      adc: false },
-    { gpio: 21, label: 'GPIO21 — D6/TX',      adc: false }
+    { gpio: 0,  label: 'GPIO0',  adc: true  },
+    { gpio: 1,  label: 'GPIO1',  adc: true  },
+    { gpio: 2,  label: 'GPIO2',  adc: true  },
+    { gpio: 3,  label: 'GPIO3',  adc: true  },
+    { gpio: 4,  label: 'GPIO4',  adc: true  },
+    { gpio: 5,  label: 'GPIO5',  adc: true  },
+    { gpio: 6,  label: 'GPIO6',  adc: false },
+    { gpio: 7,  label: 'GPIO7',  adc: false },
+    { gpio: 8,  label: 'GPIO8',  adc: false },
+    { gpio: 9,  label: 'GPIO9',  adc: false },
+    { gpio: 10, label: 'GPIO10', adc: false },
+    { gpio: 20, label: 'GPIO20', adc: false },
+    { gpio: 21, label: 'GPIO21', adc: false }
 ];
 
-// Known system/reserved pins on XIAO ESP32-C3 default config — shown as warnings.
-var CL_SYSTEM_PINS = {
-    2:  'WiFi trigger',
-    3:  'Wakeup FF btn',
-    4:  'Wakeup PF btn',
-    5:  'RTC CE',
-    6:  'RTC IO / SDA',
-    7:  'RTC SCLK / SCL',
-    10: 'SD CS',
-    21: 'Flow sensor'
-};
+// Populated from the active profile by clLoadBoardProfile().  Keys are
+// GPIO numbers; values are a short reason string ("strap", "USB", etc).
+var CL_SYSTEM_PINS = {};
+
+// Active board profile descriptor (from /api/board-profiles → "active").
+// null until the fetch resolves; treated as "no validation" until then.
+window._r11Profile = null;
+
+// One-shot fetch of the active board profile. Refreshes CL_GPIO_PINS so
+// the pin selector knows the right GPIO range, and CL_SYSTEM_PINS so it
+// can show profile-aware warnings. Safe to call multiple times.
+function clLoadBoardProfile() {
+    return fetch('/api/board-profiles', { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            var activeId = (data.active && data.active.id) || '';
+            var profile  = (data.profiles || []).find(function (p) { return p.id === activeId; });
+            if (!profile) return;
+            window._r11Profile = profile;
+
+            // Rebuild GPIO list within the profile's range.  ADC range
+            // on C3/S3 is GPIO 0-5 / 1-10 respectively; keep the simple
+            // "<= 10 is potentially ADC" heuristic — sensor plugins
+            // perform their own analogRead validity check at runtime.
+            var pins = [];
+            for (var g = 0; g <= profile.maxGpio; g++) {
+                pins.push({ gpio: g, label: 'GPIO' + g, adc: (g <= 10) });
+            }
+            CL_GPIO_PINS = pins;
+
+            // Build warnings map from restriction lists.
+            CL_SYSTEM_PINS = {};
+            (profile.strapPins    || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'strap pin (boot risk)'; });
+            (profile.usbPins      || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'USB CDC'; });
+            (profile.flashPins    || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'SPI flash bus'; });
+            (profile.reservedPins || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'UART0 console'; });
+        })
+        .catch(function () {
+            // Silent — fallback table above keeps the UI alive on legacy
+            // builds or transient API failures.
+        });
+}
+// Fire the fetch as soon as the script loads.  No await — the selector
+// re-renders on every popup open and will pick up the populated data.
+if (typeof window !== 'undefined') clLoadBoardProfile();
 
 // Returns a map { gpioNum: [sensorId, ...] } of pins in use,
 // excluding the sensor at excludeIdx (so editing a sensor doesn't block its own pins).

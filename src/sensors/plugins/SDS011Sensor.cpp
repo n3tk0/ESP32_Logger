@@ -1,11 +1,12 @@
 #include "SDS011Sensor.h"
 #include "../../pipeline/DataPipeline.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 // ---------------------------------------------------------------------------
 bool SDS011Sensor::init(JsonObjectConst cfg) {
     _enabled = cfg["enabled"] | true;
 
-    int rxPin = cfg["uart_rx"] | 20;
+    int rxPin = cfg["uart_rx"] | -1;  // R11: unset → init refuses
     int txPin = cfg["uart_tx"] | -1;
     int baud  = cfg["baud"]    | 9600;
     int work  = cfg["work_period_min"] | 1;
@@ -22,6 +23,9 @@ bool SDS011Sensor::init(JsonObjectConst cfg) {
     JsonObjectConst cal = cfg["calibration"];
     _calPm25.load(cal, "pm25");
     _calPm10.load(cal, "pm10");
+
+    if (!validateAttachPin(rxPin, "sds011", "uart_rx")) return false;
+    if (txPin >= 0 && !validateAttachPin(txPin, "sds011", "uart_tx")) return false;
 
     _serial = &Serial1;
     if (txPin >= 0) {

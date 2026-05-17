@@ -1,4 +1,5 @@
 #include "SCD4xSensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 // CRC-8 per Sensirion: poly=0x31, init=0xFF
 uint8_t SCD4xSensor::_crc8(const uint8_t* data, size_t len) {
@@ -47,8 +48,9 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (sda >= 0 && scl >= 0) Wire.begin((int8_t)sda, (int8_t)scl);
-    else                       Wire.begin();
+    if (!validateAttachPin(sda, "scd4x", "sda")) return false;
+    if (!validateAttachPin(scl, "scd4x", "scl")) return false;
+    Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
     _calCo2.load(cal, "co2");

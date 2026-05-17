@@ -1,4 +1,5 @@
 #include "WaterFlowSensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 // ---------------------------------------------------------------------------
 void IRAM_ATTR WaterFlowSensor::_isr(void* arg) {
@@ -13,7 +14,7 @@ void IRAM_ATTR WaterFlowSensor::_isr(void* arg) {
 // ---------------------------------------------------------------------------
 bool WaterFlowSensor::init(JsonObjectConst cfg) {
     _enabled        = cfg["enabled"]           | true;
-    _pin            = cfg["pin"]               | 21;
+    _pin            = cfg["pin"]               | -1;  // R11: unset → init refuses
     _pulsesPerLiter = cfg["pulses_per_liter"]  | _defaultPPL;
     _calibration    = cfg["calibration"]       | 1.0f;
     _intervalMs     = cfg["read_interval_ms"]  | 1000;
@@ -34,6 +35,7 @@ bool WaterFlowSensor::init(JsonObjectConst cfg) {
     _calFlow.load(cal, "flow_rate");
     _calVolume.load(cal, "volume");
 
+    if (!validateAttachPin(_pin, getType(), "pin")) return false;
     pinMode(_pin, INPUT_PULLUP);
 
     // Initialise counters BEFORE attaching the ISR — otherwise a pulse

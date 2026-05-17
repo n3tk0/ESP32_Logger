@@ -37,7 +37,7 @@ public:
     }
 
 private:
-    int      _pin        = 0;
+    int      _pin        = -1;  // R11: -1 = unset; refuse to attach
     int      _dryValue   = 3300; // ADC value in dry air
     int      _wetValue   = 1500; // ADC value in water
     int      _samples    = 16;

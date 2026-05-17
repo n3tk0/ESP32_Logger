@@ -1,4 +1,5 @@
 #include "DS18B20Sensor.h"
+#include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 // Metric names for up to 8 sensors: "temperature", "temperature_1" ... "temperature_7"
 const char* DS18B20Sensor::_metricName(int idx) {
@@ -21,7 +22,7 @@ bool DS18B20Sensor::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]          | true;
     _intervalMs = cfg["read_interval_ms"] | 5000;
     _resolution = (uint8_t)(cfg["resolution"] | 12);
-    int pin     = cfg["pin"] | 2;
+    int pin     = cfg["pin"] | -1;  // R11: unset → init refuses
 
     if (_resolution < 9)  _resolution = 9;
     if (_resolution > 12) _resolution = 12;
@@ -29,6 +30,7 @@ bool DS18B20Sensor::init(JsonObjectConst cfg) {
     JsonObjectConst cal = cfg["calibration"];
     _calTemp.load(cal, "temperature");
 
+    if (!validateAttachPin(pin, "ds18b20", "pin")) return false;
     _ready = _ds.begin((uint8_t)pin, _resolution);
     int count = _ds.deviceCount();
     if (count == 0) {
