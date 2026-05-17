@@ -29,20 +29,59 @@ static StorageTaskParam mirrorParam;
 static char s_logDir[48] = "/logs";
 
 // ---------------------------------------------------------------------------
+// R12: Clean up everything created by init() so a failed call leaves the
+// TaskManager in the same state as before init was attempted. Idempotent.
+// AUDIT 2.2 — was previously leaking queues/mutexes/tasks on every early
+// return and leaving running=true on a half-built world.
+static void _cleanupPartialInit() {
+    // Tasks first — handles must be deleted before the queues they read.
+    if (TaskManager::hSensor)     { vTaskDelete(TaskManager::hSensor);     TaskManager::hSensor     = nullptr; }
+    if (TaskManager::hSlowSensor) { vTaskDelete(TaskManager::hSlowSensor); TaskManager::hSlowSensor = nullptr; }
+    if (TaskManager::hProcess)    { vTaskDelete(TaskManager::hProcess);    TaskManager::hProcess    = nullptr; }
+    if (TaskManager::hStorage)    { vTaskDelete(TaskManager::hStorage);    TaskManager::hStorage    = nullptr; }
+    if (TaskManager::hExport)     { vTaskDelete(TaskManager::hExport);     TaskManager::hExport     = nullptr; }
+    if (sensorQueue)  { vQueueDelete(sensorQueue);  sensorQueue  = nullptr; }
+    if (storageQueue) { vQueueDelete(storageQueue); storageQueue = nullptr; }
+    if (exportQueue)  { vQueueDelete(exportQueue);  exportQueue  = nullptr; }
+    if (webDataMutex) { vSemaphoreDelete(webDataMutex); webDataMutex = nullptr; }
+    if (configMutex)  { vSemaphoreDelete(configMutex);  configMutex  = nullptr; }
+    if (wireMutex)    { vSemaphoreDelete(wireMutex);    wireMutex    = nullptr; }
+    if (fsMutex)      { vSemaphoreDelete(fsMutex);      fsMutex      = nullptr; }
+    TaskManager::running = false;
+}
+
 bool TaskManager::init(fs::FS& fs) {
-    running = true;
+    // AUDIT 2.3: do NOT set running=true here. Tasks + queues + mutexes are
+    // built below; if any step fails, half-built state would have left
+    // running=true with NULL queues, racing the rest of the system.
+    // running is set ONLY at the bottom, just before return true.
 
     // Zero heartbeats — stale values survive warm reboots (RTC_SW_CPU_RST)
     // and cause immediate false-positive watchdog triggers (#C4).
     for (int i = 0; i < TASK_COUNT; i++) g_taskHeartbeat[i] = 0;
 
+    // ── Mutexes FIRST ────────────────────────────────────────────────────
+    // AUDIT 1.6: mutex creation precedes everything else so even a later
+    // queue/task failure still leaves a valid synchronisation surface for
+    // ApiHandlers / WebServer that may try to xSemaphoreTake(fsMutex) etc.
+    webDataMutex = xSemaphoreCreateMutex();
+    configMutex  = xSemaphoreCreateMutex();
+    wireMutex    = xSemaphoreCreateMutex();   // I2C bus serialisation (#14)
+    fsMutex      = xSemaphoreCreateMutex();   // FS write serialisation (FS1)
+
+    if (!webDataMutex || !configMutex || !wireMutex || !fsMutex) {
+        Serial.println("[TaskManager] Mutex creation FAILED");
+        _cleanupPartialInit();
+        return false;
+    }
+
+    // ── Queues ───────────────────────────────────────────────────────────
     // Dynamic queue depth: scale sensor queue to actual sensor count × 4 metrics
     // so one full tick cycle never drops readings (#3.5)
     int sCount    = sensorManager.count();
     int dynSDepth = (sCount > 0) ? max((int)QUEUE_SENSOR_DEPTH, sCount * 4)
                                  : (int)QUEUE_SENSOR_DEPTH;
 
-    // Create queues
     sensorQueue  = xQueueCreate((UBaseType_t)dynSDepth, sizeof(SensorReading));
     storageQueue = xQueueCreate(QUEUE_STORAGE_DEPTH,    sizeof(SensorReading));
     exportQueue  = xQueueCreate(QUEUE_EXPORT_DEPTH,     sizeof(SensorReading));
@@ -51,17 +90,7 @@ bool TaskManager::init(fs::FS& fs) {
 
     if (!sensorQueue || !storageQueue || !exportQueue) {
         Serial.println("[TaskManager] Queue creation FAILED");
-        return false;
-    }
-
-    // Create mutexes
-    webDataMutex = xSemaphoreCreateMutex();
-    configMutex  = xSemaphoreCreateMutex();
-    wireMutex    = xSemaphoreCreateMutex();   // I2C bus serialisation (#14)
-    fsMutex      = xSemaphoreCreateMutex();   // FS write serialisation (FS1)
-
-    if (!webDataMutex || !configMutex || !wireMutex || !fsMutex) {
-        Serial.println("[TaskManager] Mutex creation FAILED");
+        _cleanupPartialInit();
         return false;
     }
 
@@ -125,36 +154,42 @@ bool TaskManager::init(fs::FS& fs) {
         }
     }
 
-    // Create tasks — all on core 0 (ESP32-C3 is unicore; dual-core ESP32
-    // can assign WebTask to core 1 by changing tskNO_AFFINITY to 1)
+    // ── Tasks ────────────────────────────────────────────────────────────
+    // AUDIT 2.4: consumers (StorageTask, ExportTask) MUST exist before any
+    // producer enqueues data — otherwise the storage / export queues fill
+    // to depth and producers drop readings until the consumers come up.
+    // Order: storage → export → fast sensors → slow sensors → process.
     BaseType_t r;
-
-    r = xTaskCreatePinnedToCore(sensorTaskFunc,     "SensorTask",
-                                STACK_SENSOR_TASK,  nullptr,
-                                TASK_PRIO_SENSOR,   &hSensor,   0);
-    if (r != pdPASS) { Serial.println("[TaskManager] SensorTask FAILED"); return false; }
-
-    r = xTaskCreatePinnedToCore(slowSensorTaskFunc,     "SlowSensorTask",
-                                STACK_SLOW_SENSOR_TASK, nullptr,
-                                TASK_PRIO_SLOW_SENSOR,  &hSlowSensor, 0);
-    if (r != pdPASS) { Serial.println("[TaskManager] SlowSensorTask FAILED"); return false; }
-
-    r = xTaskCreatePinnedToCore(processingTaskFunc, "ProcessTask",
-                                STACK_PROCESS_TASK, nullptr,
-                                TASK_PRIO_PROCESS,  &hProcess,  0);
-    if (r != pdPASS) { Serial.println("[TaskManager] ProcessTask FAILED"); return false; }
 
     r = xTaskCreatePinnedToCore(storageTaskFunc,    "StorageTask",
                                 STACK_STORAGE_TASK, &storageParam,
                                 TASK_PRIO_STORAGE,  &hStorage,  0);
-    if (r != pdPASS) { Serial.println("[TaskManager] StorageTask FAILED"); return false; }
+    if (r != pdPASS) { Serial.println("[TaskManager] StorageTask FAILED"); _cleanupPartialInit(); return false; }
 
     r = xTaskCreatePinnedToCore(exportTaskFunc,     "ExportTask",
                                 STACK_EXPORT_TASK,  nullptr,
                                 TASK_PRIO_EXPORT,   &hExport,   0);
-    if (r != pdPASS) { Serial.println("[TaskManager] ExportTask FAILED"); return false; }
+    if (r != pdPASS) { Serial.println("[TaskManager] ExportTask FAILED"); _cleanupPartialInit(); return false; }
+
+    r = xTaskCreatePinnedToCore(sensorTaskFunc,     "SensorTask",
+                                STACK_SENSOR_TASK,  nullptr,
+                                TASK_PRIO_SENSOR,   &hSensor,   0);
+    if (r != pdPASS) { Serial.println("[TaskManager] SensorTask FAILED"); _cleanupPartialInit(); return false; }
+
+    r = xTaskCreatePinnedToCore(slowSensorTaskFunc,     "SlowSensorTask",
+                                STACK_SLOW_SENSOR_TASK, nullptr,
+                                TASK_PRIO_SLOW_SENSOR,  &hSlowSensor, 0);
+    if (r != pdPASS) { Serial.println("[TaskManager] SlowSensorTask FAILED"); _cleanupPartialInit(); return false; }
+
+    r = xTaskCreatePinnedToCore(processingTaskFunc, "ProcessTask",
+                                STACK_PROCESS_TASK, nullptr,
+                                TASK_PRIO_PROCESS,  &hProcess,  0);
+    if (r != pdPASS) { Serial.println("[TaskManager] ProcessTask FAILED"); _cleanupPartialInit(); return false; }
 
     Serial.println("[TaskManager] All tasks started");
+
+    // AUDIT 2.3: running=true ONLY now, after every resource is built.
+    running = true;
     return true;
 }
 
@@ -174,15 +209,26 @@ void TaskManager::shutdown() {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 
-    // Hard wait for task stacks to unwind
-    vTaskDelay(pdMS_TO_TICKS(500));
-
-    // Null out handles — tasks self-delete via vTaskDelete(nullptr)
-    hSensor     = nullptr;
-    hSlowSensor = nullptr;
-    hProcess    = nullptr;
-    hStorage    = nullptr;
-    hExport     = nullptr;
+    // AUDIT 2.5: hard wait used to be 500 ms — exactly the SlowSensorTask
+    // poll interval, so a task could wake post-shutdown into freed memory.
+    // Poll eTaskGetState() == eDeleted on each task with a budget that
+    // covers worst-case poll (1.5 × 500 ms slow-sensor) plus blocking sensor
+    // reads (SDS011 / PMS5003 ~2 s). 4 s ceiling.
+    constexpr uint32_t WAIT_MS  = 4000;
+    constexpr uint32_t STEP_MS  = 50;
+    uint32_t waitDeadline = millis() + WAIT_MS;
+    TaskHandle_t* handles[] = { &hSensor, &hSlowSensor, &hProcess,
+                                &hStorage, &hExport };
+    for (TaskHandle_t* hp : handles) {
+        if (*hp == nullptr) continue;
+        while (millis() < waitDeadline) {
+            if (eTaskGetState(*hp) == eDeleted) break;
+            vTaskDelay(pdMS_TO_TICKS(STEP_MS));
+        }
+        // Whether deleted-by-self-call or timed-out, drop the handle so a
+        // subsequent init() starts from a known nullptr state.
+        *hp = nullptr;
+    }
 }
 
 // ---------------------------------------------------------------------------

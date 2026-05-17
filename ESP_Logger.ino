@@ -451,8 +451,17 @@ static void _initPlatform() {
     // Register new API routes (sensor data + config)
     registerApiRoutes(server);
 
-    // Start FreeRTOS task pipeline
-    if (activeFS) TaskManager::init(*activeFS);
+    // Start FreeRTOS task pipeline.
+    // R12 / AUDIT 2.1 + 1.6: bool return is now actually checked.  A failed
+    // init() leaks nothing (cleanupPartialInit ran) but also leaves the
+    // mutexes / queues NULL.  Trip safe mode so the web stack still starts
+    // (PROGMEM failsafe + restart button) but ApiHandlers won't dispatch
+    // mutating endpoints that would xSemaphoreTake(NULL) → assert.
+    if (activeFS && !TaskManager::init(*activeFS)) {
+        g_safeMode = true;
+        Serial.println("[SafeMode] TaskManager::init failed — entering safe mode "
+                       "(sensor pipeline skipped)");
+    }
 
     DBGF("Platform ready. Sensors: %d  Exporters: %d\n",
                   sensorManager.count(), exportManager.count());
