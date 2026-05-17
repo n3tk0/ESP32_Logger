@@ -69,8 +69,12 @@ void processingTaskFunc(void* /*param*/) {
 
         // Forward to export (only good data)
         if (r.quality != QUALITY_ERROR) {
-            if (xQueueSend(exportQueue, &r, 0) != pdTRUE) {
-                g_queueDrops++;  // exportQueue full — count silent drop (#3)
+            // R12 / AUDIT 2.9: was timeout 0 → silent drops on every WiFi
+            // backpressure event. 10ms matches the storageQueue path above
+            // and is short enough not to starve other sensors' enqueues.
+            // Drops still counted via g_queueDrops for /api/diag visibility.
+            if (xQueueSend(exportQueue, &r, pdMS_TO_TICKS(10)) != pdTRUE) {
+                g_queueDrops++;
             }
         }
     }
