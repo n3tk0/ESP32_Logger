@@ -222,8 +222,10 @@ void handlePostFirstRun(AsyncWebServerRequest* req,
     g_setupRequired = false;
 
     // Schedule reboot — same mechanism used by /restart elsewhere.
-    extern bool          shouldRestart;
-    extern unsigned long restartTimer;
+    // shouldRestart + restartTimer are extern'd via Globals.h (already
+    // included). Earlier in-function `extern` declarations resolved to
+    // the surrounding anonymous-namespace scope and linked to a phantom
+    // symbol — Gemini PR #87 CI failure.
     shouldRestart  = true;
     restartTimer   = millis();
 
