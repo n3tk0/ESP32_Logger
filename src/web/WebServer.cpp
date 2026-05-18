@@ -1806,14 +1806,15 @@ void setupWebServer() {
     // =========================================================================
     // IMPORT SETTINGS
     // =========================================================================
-    static String _importBuf;
     server.on("/import_settings", HTTP_POST,
         [](AsyncWebServerRequest *r) {
             if (!requireMutatingAuth(r)) return;
-            if (_importBuf.isEmpty()) { r->send(400, "text/plain", "No data"); return; }
+            String* buf = static_cast<String*>(r->_tempObject);
+            if (!buf || buf->isEmpty()) { r->send(400, "text/plain", "No data"); return; }
             JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, _importBuf);
-            _importBuf = String();   // release heap buffer, not just clear
+            DeserializationError err = deserializeJson(doc, *buf);
+            delete buf;
+            r->_tempObject = nullptr;
             if (err) { r->send(400, "text/plain", String("JSON error: ") + err.c_str()); return; }
 
             if (doc["deviceName"].is<const char*>()) SAFE_STRNCPY(config.deviceName, doc["deviceName"], sizeof(config.deviceName));
@@ -1891,13 +1892,21 @@ void setupWebServer() {
             // Content-Length cannot trigger a huge heap allocation.
             constexpr size_t kImportMax = 8192;
             if (!index) {
-                _importBuf = "";
+                String* buf = new (std::nothrow) String();
+                if (!buf) {
+                    req->send(500, "application/json",
+                              "{\"ok\":false,\"error\":\"out_of_memory\"}");
+                    return;
+                }
                 size_t hint = req->contentLength() > 0 ? req->contentLength() : 4096;
                 if (hint > kImportMax) hint = kImportMax;
-                _importBuf.reserve(hint);
+                buf->reserve(hint);
+                req->_tempObject = buf;
             }
-            if (_importBuf.length() + len > kImportMax) return; // Hard cap
-            _importBuf.concat((const char*)data, len);
+            String* buf = static_cast<String*>(req->_tempObject);
+            if (!buf) return;
+            if (buf->length() + len > kImportMax) return; // Hard cap
+            buf->concat((const char*)data, len);
         }
     );
 
