@@ -59,6 +59,14 @@
             <label class="check"><input type="checkbox" id="exp-mqtt-retain"><span>Retain messages</span></label>
           </div>
         </div>
+        <div class="field">
+          <label class="field-label">Connection Security</label>
+          <select id="exp-mqtt-tls" class="input">
+            <option value="plain">Plaintext (port 1883)</option>
+            <option value="tls">TLS (port 8883)</option>
+          </select>
+          <p class="hint">TLS uses <code>WiFiClientSecure</code> with no cert verification (no CA bundle on device). Use for cloud brokers where encryption matters; plaintext is fine for local LAN.</p>
+        </div>
       </div>
     </div>
 

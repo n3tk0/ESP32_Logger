@@ -1131,6 +1131,8 @@ function expLoad() {
     _setVal("exp-mqtt-pass", m.password || "");
     _setVal("exp-mqtt-interval", m.interval_ms || 60000);
     _setVal("exp-mqtt-retain", m.retain || false, true);
+    var tlsEl = document.getElementById("exp-mqtt-tls");
+    if (tlsEl) tlsEl.value = m.use_tls ? "tls" : "plain";
 
     // HTTP
     var h = exp.http || {};
@@ -1219,6 +1221,7 @@ function expSave() {
       10,
     ),
     retain: !!(document.getElementById("exp-mqtt-retain") || {}).checked,
+    use_tls: (document.getElementById("exp-mqtt-tls") || {}).value === "tls",
     qos: 0,
   };
 
