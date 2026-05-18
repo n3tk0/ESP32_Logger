@@ -1497,9 +1497,9 @@ void setupWebServer() {
         // regardless of the ESP_RST_SW reset reason. /factory_reset is a
         // user-initiated wipe, NOT a crash.
         g_resetMagic = 0;
-        safeWiFiShutdown();
-        delay(300);
-        ESP.restart();
+        g_pendingWiFiShutdown = true;
+        shouldRestart = true;
+        restartTimer  = millis();
     });
 
     // =========================================================================

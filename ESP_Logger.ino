@@ -879,6 +879,12 @@ void loop() {
         }
     }
 
+    // ── Deferred WiFi shutdown (R13 3.15) ────────────────────────────────────
+    if (g_pendingWiFiShutdown) {
+        g_pendingWiFiShutdown = false;
+        safeWiFiShutdown();
+    }
+
     // ── Restart check ─────────────────────────────────────────────────────────
     // ПОПРАВКА: използваме safeWiFiShutdown() преди ESP.restart()
     // Това изчиства WiFi radio state и предотвратява "phantom WiFi pin" проблема:
