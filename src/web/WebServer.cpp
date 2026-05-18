@@ -1340,6 +1340,11 @@ void setupWebServer() {
         if (!requireMutatingAuth(r)) return;
         if (r->hasParam("wifiMode", true))       config.network.wifiMode = (WiFiModeType)r->getParam("wifiMode", true)->value().toInt();
         if (r->hasParam("apSSID", true))         SAFE_STRNCPY(config.network.apSSID,         r->getParam("apSSID", true)->value().c_str(), sizeof(config.network.apSSID));
+        // R13 follow-up (Codex P1 on PR #89): /export_settings masks
+        // passwords as "***". The SPA round-trips that value back here
+        // on any unrelated save; without this guard the real password
+        // would be overwritten with "***". Treat "***" as the
+        // keep-existing sentinel.
         if (r->hasParam("apPassword", true)     && r->getParam("apPassword", true)->value()     != "***") SAFE_STRNCPY(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), sizeof(config.network.apPassword));
         if (r->hasParam("clientSSID", true))     SAFE_STRNCPY(config.network.clientSSID,     r->getParam("clientSSID", true)->value().c_str(), sizeof(config.network.clientSSID));
         if (r->hasParam("clientPassword", true) && r->getParam("clientPassword", true)->value() != "***") SAFE_STRNCPY(config.network.clientPassword, r->getParam("clientPassword", true)->value().c_str(), sizeof(config.network.clientPassword));
@@ -1898,6 +1903,11 @@ void setupWebServer() {
                 if (hint > kImportMax) hint = kImportMax;
                 buf->reserve(hint);
                 req->_tempObject = buf;
+                // R13 follow-up (Codex P2 on PR #89): client disconnect
+                // before the request callback fires would leak the heap
+                // buffer. onDisconnect runs even on aborts; freeing here
+                // makes the success path's delete a no-op (delete on
+                // nullptr is well-defined).
                 req->onDisconnect([req]() {
                     delete static_cast<String*>(req->_tempObject);
                     req->_tempObject = nullptr;
