@@ -73,9 +73,18 @@ bool ThemeModule::load(JsonObjectConst cfg) {
     auto loadPath = [&](char* dst, size_t n, const char* key) {
         const char* v = cfg[key] | (const char*)nullptr;
         if (!v) return;
-        String clean = sanitizePath(String(v));
-        if (clean.length() == 0 || isPathProtected(clean)) return;
-        copyStr(dst, n, clean.c_str());
+        String val(v);
+        if (val.startsWith("http://") || val.startsWith("https://")) {
+            // External URL: reject control chars and quotes, accept as-is
+            for (size_t i = 0; i < val.length(); i++) {
+                if ((unsigned char)val[i] < 0x20 || val[i] == '"' || val[i] == '\'') return;
+            }
+            copyStr(dst, n, v);
+        } else {
+            String clean = sanitizePath(val);
+            if (clean.length() == 0 || isPathProtected(clean)) return;
+            copyStr(dst, n, clean.c_str());
+        }
     };
     loadPath(t.chartLocalPath, sizeof(t.chartLocalPath), "chartLocalPath");
     loadPath(t.logoSource,     sizeof(t.logoSource),     "logoSource");
