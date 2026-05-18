@@ -2,6 +2,7 @@
 #include "IExporter.h"
 #include "../drivers/MQTT_Mini.h"
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 
 // ============================================================================
 // MqttExporter — publishes readings to MQTT broker.
@@ -51,4 +52,5 @@ private:
     bool     _retain          = false;
     bool     _haDiscovery     = false;
     char     _deviceId[13]    = {};
+    bool     _useTls          = false;
 };

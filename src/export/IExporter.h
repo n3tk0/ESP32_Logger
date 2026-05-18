@@ -25,7 +25,7 @@ public:
 
     // Retry policy (used by ExportManager)
     virtual uint8_t     maxRetries()   const { return 3; }
-    virtual uint32_t    retryDelayMs() const { return 5000; }
+    virtual uint32_t    retryDelayMs() const { return 1000; }
 
     // Minimum ms between sendAll() calls for this exporter.
     // 0 = no throttle (send every batch). Set via "interval_ms" in config.

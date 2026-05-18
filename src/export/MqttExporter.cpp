@@ -19,6 +19,7 @@ bool MqttExporter::init(JsonObjectConst cfg) {
     _qos         = cfg["qos"]          | 0;
     _retain      = cfg["retain"]       | false;
     _haDiscovery = cfg["ha_discovery"] | false;
+    _useTls      = cfg["use_tls"]      | false;
     strncpy(_deviceId, config.deviceId, sizeof(_deviceId)-1);
 
     // MQTT_Mini only supports QoS 0 (publish-only). Zero silently.
@@ -37,8 +38,8 @@ bool MqttExporter::init(JsonObjectConst cfg) {
     _client.setServer(_broker, _port);
     _client.setKeepAlive(60);
 
-    Serial.printf("[MQTT] broker=%s:%d prefix=%s\n",
-                  _broker, _port, _topicPrefix);
+    Serial.printf("[MQTT] broker=%s:%d prefix=%s tls=%s\n",
+                  _broker, _port, _topicPrefix, _useTls ? "yes" : "no");
     return true;
 }
 
@@ -73,11 +74,31 @@ bool MqttExporter::_publish(const SensorReading& r) {
 
 bool MqttExporter::send(const SensorReading* readings, size_t count) {
     if (!_enabled || count == 0) return true;
-    if (!_connect()) return false;
 
+    if (_useTls) {
+        WiFiClientSecure secureClient;
+        // R15: no CA store bundled — setInsecure() until 19.x rollout
+        //       adds opt-in cert pinning in a follow-up phase
+        secureClient.setInsecure();
+        _client.setClient(secureClient);
+        if (!_connect()) {
+            _client.setClient(_wifiClient);
+            return false;
+        }
+        bool allOk = true;
+        for (size_t i = 0; i < count; i++) {
+            _client.loop();
+            if (!_publish(readings[i])) allOk = false;
+        }
+        _client.disconnect();
+        _client.setClient(_wifiClient);
+        return allOk;
+    }
+
+    if (!_connect()) return false;
     bool allOk = true;
     for (size_t i = 0; i < count; i++) {
-        _client.loop(); // keep connection alive
+        _client.loop();
         if (!_publish(readings[i])) allOk = false;
     }
     return allOk;
@@ -149,8 +170,18 @@ bool MqttExporter::_publishDiscoveryOne(const char* sensorId, const char* sensor
 
 void MqttExporter::publishHaDiscovery() {
     if (!_enabled || !_haDiscovery) return;
+
+    WiFiClientSecure secureClient;
+    if (_useTls) {
+        // R15: no CA store bundled — setInsecure() until 19.x rollout
+        //       adds opt-in cert pinning in a follow-up phase
+        secureClient.setInsecure();
+        _client.setClient(secureClient);
+    }
+
     if (!_connect()) {
         Serial.println("[MQTT] HA discovery: not connected");
+        if (_useTls) _client.setClient(_wifiClient);
         return;
     }
     Serial.println("[MQTT] Publishing HA discovery payloads…");
@@ -171,4 +202,9 @@ void MqttExporter::publishHaDiscovery() {
         }
     }
     Serial.printf("[MQTT] HA discovery: %d topics published\n", published);
+
+    if (_useTls) {
+        _client.disconnect();
+        _client.setClient(_wifiClient);
+    }
 }

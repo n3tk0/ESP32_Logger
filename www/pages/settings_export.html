@@ -59,6 +59,14 @@
             <label class="check"><input type="checkbox" id="exp-mqtt-retain"><span>Retain messages</span></label>
           </div>
         </div>
+        <div class="field">
+          <label class="field-label">Connection Security</label>
+          <select id="exp-mqtt-tls" class="input">
+            <option value="plain">Plaintext (port 1883)</option>
+            <option value="tls">TLS (port 8883)</option>
+          </select>
+          <p class="hint">TLS uses <code>WiFiClientSecure</code> with no cert verification (no CA bundle on device). Use for cloud brokers where encryption matters; plaintext is fine for local LAN.</p>
+        </div>
       </div>
     </div>
 
@@ -75,12 +83,19 @@
         </p>
         <div class="field">
           <label class="field-label">URL</label>
-          <input type="text" id="exp-http-url" class="input" placeholder="http://192.168.1.100:8086/api/v2/write">
+          <input type="url" id="exp-http-url" class="input" placeholder="http://192.168.1.100:8086/api/v2/write"
+            pattern="https?://[A-Za-z0-9._\-/:?#=&amp;%~,+]+"
+            maxlength="128"
+            title="Must be a valid http:// or https:// URL">
+          <p class="hint">HTTPS endpoints use TLS without certificate verification (no bundled CA store). Self-signed certs work; MITM is possible on unprotected networks.</p>
         </div>
         <div class="field">
           <label class="field-label">Authorization Header (optional)</label>
-          <input type="text" id="exp-http-auth" class="input" placeholder="Token mytoken  or  Bearer xyz">
-          <p class="hint">Sent as <code>Authorization: …</code></p>
+          <input type="text" id="exp-http-auth" class="input" placeholder="Token mytoken  or  Bearer xyz"
+            pattern="[A-Za-z0-9 _\-]+"
+            maxlength="128"
+            title="Header value: alphanumeric, dash, underscore, space only. Newlines/colons not allowed (CRLF injection risk).">
+          <p class="hint">Sent as <code>Authorization: …</code>. Most APIs use <code>Bearer &lt;token&gt;</code> or <code>Basic &lt;base64&gt;</code>. CRLF characters are rejected client-side; backend double-checks (HttpExporter).</p>
         </div>
         <div class="field">
           <label class="field-label">Send Interval (ms)</label>
@@ -128,7 +143,11 @@
           </div>
           <div class="field">
             <label class="field-label">Access Token</label>
-            <input type="password" id="exp-osm-token" class="input" autocomplete="new-password">
+            <input type="password" id="exp-osm-token" class="input" autocomplete="new-password"
+              pattern="[A-Za-z0-9]{20,64}"
+              maxlength="64"
+              title="OpenSenseMap access token: alphanumeric, 20-128 chars.">
+            <p class="hint">&#9888; Tokens stored on device in plaintext (LittleFS). Treat this device like a long-lived API key holder; revoke and rotate via opensensemap.org if the device is lost or re-flashed.</p>
           </div>
         </div>
         <p class="hint" style="margin-bottom:.5rem">Sensor IDs — copy from your senseBox sensors:</p>

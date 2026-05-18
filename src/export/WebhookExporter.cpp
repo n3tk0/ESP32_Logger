@@ -1,4 +1,5 @@
 #include "WebhookExporter.h"
+#include <WiFiClientSecure.h>
 
 bool WebhookExporter::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]     | false;
@@ -28,7 +29,16 @@ bool WebhookExporter::init(JsonObjectConst cfg) {
 
 bool WebhookExporter::_fireRule(const Rule& rule, float value, uint32_t ts) {
     HTTPClient http;
-    http.begin(_url);
+    bool isHttps = strncmp(_url, "https://", 8) == 0;
+    WiFiClientSecure secureClient;
+    if (isHttps) {
+        // R15: no CA store bundled — setInsecure() until 19.x rollout
+        //       adds opt-in cert pinning in a follow-up phase
+        secureClient.setInsecure();
+        http.begin(secureClient, _url);
+    } else {
+        http.begin(_url);
+    }
     http.addHeader("Content-Type", "application/json");
 
     char body[256];
