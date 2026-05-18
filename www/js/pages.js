@@ -881,17 +881,21 @@ function filesUpload() {
 function filesMkdir() {
   var name = document.getElementById("newFolder");
   if (!name || !name.value.trim()) return;
-  fetch(
-    "/mkdir?name=" +
-      encodeURIComponent(name.value.trim()) +
-      "&dir=" +
-      encodeURIComponent(currentFilesDir) +
-      "&storage=" +
-      currentFilesStorage,
-    { method: "POST" },
-  ).then(function () {
-    name.value = "";
-    filesRender();
+  getCsrfToken().then(function (token) {
+    var url = "/mkdir?name=" + encodeURIComponent(name.value.trim()) +
+              "&dir=" + encodeURIComponent(currentFilesDir) +
+              "&storage=" + currentFilesStorage +
+              (token ? "&csrf=" + encodeURIComponent(token) : "");
+    fetch(url, { method: "POST" })
+      .then(function (r) {
+        if (r.status === 403) {
+          window.__csrfToken = null;
+          throw new Error("CSRF token rejected — refresh page");
+        }
+        name.value = "";
+        filesRender();
+      })
+      .catch(function (e) { showToast("Error: " + e, "error"); });
   });
 }
 
@@ -914,14 +918,21 @@ function filesApplyMove() {
     "&storage=" +
     currentFilesStorage;
   if (destDir) url += "&destDir=" + encodeURIComponent(destDir);
-  fetch(url, { method: "POST" })
-    .then(function () {
-      document.getElementById("movePopup").style.display = "none";
-      filesRender();
-    })
-    .catch(function (e) {
-      showToast("Error: " + e, "error");
-    });
+  getCsrfToken().then(function (token) {
+    if (token) url += "&csrf=" + encodeURIComponent(token);
+    fetch(url, { method: "POST" })
+      .then(function (r) {
+        if (r.status === 403) {
+          window.__csrfToken = null;
+          throw new Error("CSRF token rejected — refresh page");
+        }
+        document.getElementById("movePopup").style.display = "none";
+        filesRender();
+      })
+      .catch(function (e) {
+        showToast("Error: " + e, "error");
+      });
+  });
 }
 
 // ============================================================================
