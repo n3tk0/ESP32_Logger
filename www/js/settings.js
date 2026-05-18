@@ -1258,6 +1258,19 @@ function settingsImport() {
 // ══ OTA UPDATE ══
 // ============================================================================
 function otaInit() {
+  if (!window.crypto || !window.crypto.subtle) {
+    var warn = document.getElementById("ota-subtle-warn");
+    if (!warn) {
+      warn = document.createElement("p");
+      warn.id = "ota-subtle-warn";
+      warn.style.cssText = "color:#b45309;background:#fef3c7;padding:8px 12px;" +
+                           "border-radius:4px;margin:8px 0;font-size:.875rem";
+      warn.textContent = "⚠ SHA-256 verification unavailable on plain HTTP " +
+                         "(Secure Context required). Upload will proceed without integrity check.";
+      var btn = document.getElementById("otaUploadBtn");
+      if (btn && btn.parentNode) btn.parentNode.insertBefore(warn, btn);
+    }
+  }
   fetch("/api/status")
     .then(function (r) {
       return r.json();
