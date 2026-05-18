@@ -68,9 +68,16 @@ String sanitizeFilename(const String& filename) {
 
 bool isPathProtected(const String& path) {
     if (path.isEmpty()) return false;
-    if (path == "/config.bin")      return true;
-    if (path == "/bootcount.bin")   return true;
-    if (path == "/reset_log.txt")   return true;
+    if (path == "/config.bin")              return true;
+    if (path == "/bootcount.bin")           return true;
+    if (path == "/reset_log.txt")           return true;
+    if (path == "/board_profile.txt")       return true;  // R11
+    if (path == "/platform_config.json")    return true;  // R5 — reveals MQTT/OSM secrets
+    if (path == "/alerts.json")             return true;  // R5
+    if (path == "/config/modules.json")     return true;  // R5 phase 3
+    if (path == "/config.tmp")              return true;  // atomic-write scratch
+    if (path == "/platform_config.tmp")     return true;
+    if (path == "/board_profile.tmp")       return true;
     if (path.startsWith("/_setup/") || path == "/_setup") return true;
     return false;
 }
