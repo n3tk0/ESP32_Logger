@@ -1,5 +1,6 @@
 #include "OpenSenseMapExporter.h"
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 
 bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
     _enabled = cfg["enabled"] | false;
@@ -22,7 +23,10 @@ bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
         }
     }
 
-    Serial.printf("[OSM] boxId=%s sensors=%d\n", _boxId, _sensorIdCount);
+    char tokenMask[12] = "(none)";
+    if (_token[0]) snprintf(tokenMask, sizeof(tokenMask), "%.6s...", _token);
+    Serial.printf("[OSM] boxId=%s sensors=%d token=%s\n",
+                  _boxId, _sensorIdCount, tokenMask);
     return true;
 }
 
@@ -67,7 +71,11 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
         snprintf(url, sizeof(url), "%s%s/data", API_BASE, _boxId);
 
         HTTPClient http;
-        http.begin(url);
+        WiFiClientSecure secureClient;
+        // R15: no CA store bundled — setInsecure() until 19.x rollout
+        //       adds opt-in cert pinning in a follow-up phase
+        secureClient.setInsecure();
+        http.begin(secureClient, url);
         http.addHeader("Content-Type",  "application/json");
         char authHeader[80];
         snprintf(authHeader, sizeof(authHeader), "Bearer %s", _token);
