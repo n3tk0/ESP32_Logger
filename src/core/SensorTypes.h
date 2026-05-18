@@ -53,11 +53,33 @@ struct SensorReading {
     // Serialise to compact JSON line (no trailing newline)
     // Caller provides buffer of at least 128 bytes.
     int toJsonLine(char* buf, size_t bufLen) const {
-        return snprintf(buf, bufLen,
-            "{\"ts\":%lu,\"id\":\"%s\",\"sensor\":\"%s\","
-            "\"metric\":\"%s\",\"value\":%.4g,\"unit\":\"%s\",\"q\":%u}",
-            (unsigned long)timestamp, sensorId, sensorType,
-            metric, value, unit, (unsigned)quality);
+        size_t n = 0;
+        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0,
+                              "{\"ts\":%lu,\"id\":", (unsigned long)timestamp);
+        n += (size_t)_appendJsonEscaped(buf + n, bufLen > n ? bufLen - n : 0, sensorId);
+        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0, ",\"sensor\":");
+        n += (size_t)_appendJsonEscaped(buf + n, bufLen > n ? bufLen - n : 0, sensorType);
+        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0, ",\"metric\":");
+        n += (size_t)_appendJsonEscaped(buf + n, bufLen > n ? bufLen - n : 0, metric);
+        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0, ",\"value\":%.4g,\"unit\":", value);
+        n += (size_t)_appendJsonEscaped(buf + n, bufLen > n ? bufLen - n : 0, unit);
+        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0, ",\"q\":%u}", (unsigned)quality);
+        return (n >= bufLen) ? -1 : (int)n;
+    }
+
+private:
+    static int _appendJsonEscaped(char* out, size_t cap, const char* s) {
+        size_t n = 0;
+        if (cap > 0) out[n++] = '"';
+        for (; s && *s && n + 7 < cap; s++) {
+            unsigned char c = (unsigned char)*s;
+            if      (c == '"')  { out[n++] = '\\'; out[n++] = '"'; }
+            else if (c == '\\') { out[n++] = '\\'; out[n++] = '\\'; }
+            else if (c < 0x20) { n += (size_t)snprintf(out + n, cap - n, "\\u%04x", c); }
+            else                { out[n++] = (char)c; }
+        }
+        if (n < cap) out[n++] = '"';
+        return (int)n;
     }
 };
 
