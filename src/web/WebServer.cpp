@@ -1056,9 +1056,18 @@ void setupWebServer() {
         JsonObject net = doc["network"].to<JsonObject>();
         net["wifiMode"]       = (int)config.network.wifiMode;
         net["apSSID"]         = strlen(config.network.apSSID)         ? config.network.apSSID         : DEFAULT_AP_SSID;
-        net["apPassword"]     = config.network.apPassword;
+        const char* apPw = "***";
+        const char* clPw = "***";
+#if WEB_BASIC_AUTH_ENABLED
+        if (r->hasParam("reveal_secrets") &&
+            r->getParam("reveal_secrets")->value() == "1") {
+            apPw = config.network.apPassword;
+            clPw = config.network.clientPassword;
+        }
+#endif
+        net["apPassword"]     = apPw;
         net["clientSSID"]     = config.network.clientSSID;
-        net["clientPassword"] = config.network.clientPassword;
+        net["clientPassword"] = clPw;
         net["ntpServer"]      = strlen(config.network.ntpServer)      ? config.network.ntpServer      : DEFAULT_NTP_SERVER;
         net["timezone"]       = config.network.timezone;
         net["useStaticIP"]    = config.network.useStaticIP;
