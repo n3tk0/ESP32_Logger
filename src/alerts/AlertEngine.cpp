@@ -181,12 +181,13 @@ void AlertEngine::evaluate(const SensorReading& r, uint32_t nowTs) {
         }
 
         // Snapshot pending alerts to stack-local; clear under lock so a
-        // concurrent evaluate() starts fresh.
+        // Snapshot pending alerts to stack-local. The buffer was zeroed
+        // at the top of the locked block (line ~152) so subsequent
+        // evaluate() calls already start fresh — no second reset needed.
         stagedCount = _pendingMqttCount;
         if (stagedCount > PENDING_MQTT_MAX) stagedCount = PENDING_MQTT_MAX;
         memcpy(stagedMqtt, _pendingMqtt,
                (size_t)stagedCount * sizeof(SensorReading));
-        _pendingMqttCount = 0;
     } // _mutex released
 
 #ifdef EXPORT_MQTT_ENABLED
