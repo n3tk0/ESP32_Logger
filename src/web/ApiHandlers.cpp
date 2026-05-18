@@ -235,7 +235,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
 // ---------------------------------------------------------------------------
 static void handleApiLatest(AsyncWebServerRequest* req) {
     constexpr size_t MAX_RAW = 500;
-    SensorReading* raw = new SensorReading[MAX_RAW];
+    SensorReading* raw = new (std::nothrow) SensorReading[MAX_RAW];
     if (!raw) {
         req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
         return;
