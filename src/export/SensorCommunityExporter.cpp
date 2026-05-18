@@ -1,6 +1,7 @@
 #include "SensorCommunityExporter.h"
 #include "../core/Globals.h"
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 
 bool SensorCommunityExporter::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]      | false;
@@ -21,7 +22,11 @@ bool SensorCommunityExporter::_postPin(const char* pin,
     snprintf(sensorHeader, sizeof(sensorHeader), "esp32-%s", _deviceId);
 
     HTTPClient http;
-    http.begin(API_URL);
+    WiFiClientSecure secureClient;
+    // R15: no CA store bundled — setInsecure() until 19.x rollout
+    //       adds opt-in cert pinning in a follow-up phase
+    secureClient.setInsecure();
+    http.begin(secureClient, API_URL);
     http.addHeader("Content-Type",  "application/json");
     http.addHeader("X-Pin",         pin);
     http.addHeader("X-Sensor",      sensorHeader);
