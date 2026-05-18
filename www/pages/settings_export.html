@@ -87,8 +87,11 @@
         </div>
         <div class="field">
           <label class="field-label">Authorization Header (optional)</label>
-          <input type="text" id="exp-http-auth" class="input" placeholder="Token mytoken  or  Bearer xyz">
-          <p class="hint">Sent as <code>Authorization: …</code></p>
+          <input type="text" id="exp-http-auth" class="input" placeholder="Token mytoken  or  Bearer xyz"
+            pattern="[A-Za-z0-9 _\-]+"
+            maxlength="256"
+            title="Header value: alphanumeric, dash, underscore, space only. Newlines/colons not allowed (CRLF injection risk).">
+          <p class="hint">Sent as <code>Authorization: …</code>. Most APIs use <code>Bearer &lt;token&gt;</code> or <code>Basic &lt;base64&gt;</code>. CRLF characters are rejected client-side; backend double-checks (HttpExporter).</p>
         </div>
         <div class="field">
           <label class="field-label">Send Interval (ms)</label>
