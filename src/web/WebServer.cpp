@@ -1673,7 +1673,6 @@ void setupWebServer() {
             UploadCtx* ctx = (UploadCtx*)r->_tempObject;
             if (ctx) {
                 if (ctx->file) ctx->file.close();
-                if (ctx->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
                 bool failed    = ctx->failed;
                 bool authFailed = ctx->authFailed;
                 delete ctx;
@@ -1689,7 +1688,6 @@ void setupWebServer() {
                 UploadCtx* old = (UploadCtx*)request->_tempObject;
                 if (old) {
                     if (old->file) old->file.close();
-                    if (old->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
                     delete old;
                     request->_tempObject = nullptr;
                 }
@@ -1761,24 +1759,22 @@ void setupWebServer() {
                 DBGF("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
 
                 auto* ctx = new UploadCtx{File(), false, false, false};
-                if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
-                    ctx->mutexHeld = true;
+                {
+                    MutexGuard g(fsMutex, pdMS_TO_TICKS(5000));
+                    if (upDir != "/") targetFS->mkdir(upDir);
+                    ctx->file = targetFS->open(upPath, FILE_WRITE);
                 }
-                if (upDir != "/") targetFS->mkdir(upDir);
-                ctx->file = targetFS->open(upPath, FILE_WRITE);
                 if (!ctx->file) {
                     DBGF("Upload: cannot open %s for write\n", upPath.c_str());
-                    if (ctx->mutexHeld && fsMutex) { xSemaphoreGive(fsMutex); ctx->mutexHeld = false; }
                     ctx->failed = true;
                 }
                 request->_tempObject = ctx;
 
-                // Release FS mutex + close partial file if the client aborts.
+                // Close partial file if the client aborts mid-upload.
                 request->onDisconnect([request]() {
                     UploadCtx* c = (UploadCtx*)request->_tempObject;
                     if (!c) return;
                     if (c->file) c->file.close();
-                    if (c->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
                     delete c;
                     request->_tempObject = nullptr;
                 });
@@ -1786,6 +1782,7 @@ void setupWebServer() {
 
             UploadCtx* ctx = (UploadCtx*)request->_tempObject;
             if (ctx && ctx->file && !ctx->failed && len) {
+                MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
                 if (ctx->file.write(data, len) != len) {
                     DBGLN("Upload: short write (disk full?)");
                     ctx->failed = true;
@@ -1798,7 +1795,6 @@ void setupWebServer() {
                                   filename.c_str(), (unsigned)(index + len));
                     ctx->file.close();
                 }
-                if (ctx->mutexHeld && fsMutex) { xSemaphoreGive(fsMutex); ctx->mutexHeld = false; }
             }
         }
     );
