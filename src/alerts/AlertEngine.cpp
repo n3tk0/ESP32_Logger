@@ -138,37 +138,64 @@ uint8_t AlertEngine::_parseActions(JsonArrayConst arr) const {
 // ---------------------------------------------------------------------------
 void AlertEngine::evaluate(const SensorReading& r, uint32_t nowTs) {
     if (!_mutex) return;
-    MutexGuard g(_mutex, pdMS_TO_TICKS(5));
-    if (!g.isLocked()) return;
 
-    for (int i = 0; i < _ruleCount; i++) {
-        Rule& rule = _rules[i];
-        if (!rule.enabled) continue;
-        if (rule.snooze_until && nowTs < rule.snooze_until) continue;
+    // R14 / AUDIT 15.8: stage MQTT-bound alerts inside the locked block
+    // (via _dispatch → _pendingMqtt[]), then drain them WITHOUT _mutex
+    // held so the MQTT publish (TLS network I/O, seconds) can never
+    // block another evaluate() or risk deadlock against the exporter.
+    SensorReading stagedMqtt[PENDING_MQTT_MAX];
+    int           stagedCount = 0;
+    {
+        MutexGuard g(_mutex, pdMS_TO_TICKS(5));
+        if (!g.isLocked()) return;
 
-        // Does this reading match the rule's sensor + metric?
-        if (strcmp(r.sensorId, rule.sensor) != 0) continue;
-        if (strcmp(r.metric,   rule.metric) != 0) continue;
+        _pendingMqttCount = 0;   // start with empty staging slot
 
-        bool cond = _evalOp(r.value, rule.op, rule.threshold);
+        for (int i = 0; i < _ruleCount; i++) {
+            Rule& rule = _rules[i];
+            if (!rule.enabled) continue;
+            if (rule.snooze_until && nowTs < rule.snooze_until) continue;
 
-        if (cond) {
-            if (rule.condFirstMetTs == 0) rule.condFirstMetTs = nowTs;
+            // Does this reading match the rule's sensor + metric?
+            if (strcmp(r.sensorId, rule.sensor) != 0) continue;
+            if (strcmp(r.metric,   rule.metric) != 0) continue;
 
-            bool durationMet = (rule.duration_s == 0) ||
-                               ((nowTs - rule.condFirstMetTs) >= rule.duration_s);
+            bool cond = _evalOp(r.value, rule.op, rule.threshold);
 
-            if (!rule.firing && durationMet) {
-                rule.firing      = true;
-                rule.lastFiredTs = nowTs;
-                _dispatch(rule, r.value, nowTs);
+            if (cond) {
+                if (rule.condFirstMetTs == 0) rule.condFirstMetTs = nowTs;
+
+                bool durationMet = (rule.duration_s == 0) ||
+                                   ((nowTs - rule.condFirstMetTs) >= rule.duration_s);
+
+                if (!rule.firing && durationMet) {
+                    rule.firing      = true;
+                    rule.lastFiredTs = nowTs;
+                    _dispatch(rule, r.value, nowTs);
+                }
+            } else {
+                // Condition cleared — reset state
+                rule.condFirstMetTs = 0;
+                rule.firing         = false;
             }
-        } else {
-            // Condition cleared — reset state
-            rule.condFirstMetTs = 0;
-            rule.firing         = false;
         }
+
+        // Snapshot pending alerts to stack-local; clear under lock so a
+        // concurrent evaluate() starts fresh.
+        stagedCount = _pendingMqttCount;
+        if (stagedCount > PENDING_MQTT_MAX) stagedCount = PENDING_MQTT_MAX;
+        memcpy(stagedMqtt, _pendingMqtt,
+               (size_t)stagedCount * sizeof(SensorReading));
+        _pendingMqttCount = 0;
+    } // _mutex released
+
+#ifdef EXPORT_MQTT_ENABLED
+    // Publish staged alerts AFTER releasing the lock. send() takes
+    // arbitrary count; one call dispatches all alerts from this tick.
+    if (g_mqttExporter && stagedCount > 0) {
+        g_mqttExporter->send(stagedMqtt, (size_t)stagedCount);
     }
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -192,30 +219,23 @@ void AlertEngine::_dispatch(const Rule& rule, float val, uint32_t ts) {
 
 #ifdef EXPORT_MQTT_ENABLED
     if ((rule.actions & ACTION_MQTT) && g_mqttExporter) {
-        // Build a compact JSON payload and publish.
-        // We cannot call MqttExporter::send() here (it's not thread-safe for
-        // arbitrary strings), so we publish directly via the underlying
-        // MQTT_Mini client through a synthesised SensorReading that the
-        // exporter's normal send() path can handle.
-        // Build topic: <prefix>/alerts/<rule_id>
-        char topic[80];
-        char payload[128];
-        snprintf(payload, sizeof(payload),
-                 "{\"rule_id\":\"%s\",\"value\":%.4g,\"ts\":%lu}",
-                 rule.id, (double)val, (unsigned long)ts);
-        // We don't have direct access to _topicPrefix here, so we publish a
-        // synthetic SensorReading via the exporter's public send() interface.
-        // Encode the alert as metric="alert" so the exporter routes it to
-        //   <prefix>/device/<dev>/sensor/<rule_id>/alert
-        SensorReading ar;
-        strncpy(ar.sensorId,   rule.id,   sizeof(ar.sensorId)   - 1);
-        strncpy(ar.sensorType, "alert",   sizeof(ar.sensorType) - 1);
-        strncpy(ar.metric,     "fired",   sizeof(ar.metric)     - 1);
-        strncpy(ar.unit,       "",        sizeof(ar.unit)       - 1);
-        ar.value     = val;
-        ar.timestamp = ts;
-        ar.quality   = QUALITY_GOOD;
-        g_mqttExporter->send(&ar, 1);
+        // R14 / AUDIT 15.8: stage the SensorReading into _pendingMqtt[]
+        // INSTEAD of calling g_mqttExporter->send() directly. The send is
+        // performed by the evaluate() caller after _mutex is released
+        // (seconds-long TLS network I/O while holding the alert mutex
+        // blocks every other evaluate() and risks deadlock if the
+        // exporter ever takes its own lock).
+        if (_pendingMqttCount < PENDING_MQTT_MAX) {
+            SensorReading& ar = _pendingMqtt[_pendingMqttCount++];
+            memset(&ar, 0, sizeof(ar));
+            strncpy(ar.sensorId,   rule.id,   sizeof(ar.sensorId)   - 1);
+            strncpy(ar.sensorType, "alert",   sizeof(ar.sensorType) - 1);
+            strncpy(ar.metric,     "fired",   sizeof(ar.metric)     - 1);
+            ar.unit[0]   = '\0';
+            ar.value     = val;
+            ar.timestamp = ts;
+            ar.quality   = QUALITY_GOOD;
+        }
     }
 #endif
 }

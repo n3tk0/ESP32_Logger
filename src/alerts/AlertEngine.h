@@ -109,6 +109,16 @@ private:
 
     SemaphoreHandle_t _mutex = nullptr;
 
+    // R14 / AUDIT 15.8: pending MQTT alerts to drain WITHOUT _mutex held.
+    // _dispatch (called under lock) stages the SensorReading here; the
+    // evaluate() caller drains the buffer after releasing the mutex so
+    // the seconds-long MQTT publish never holds the alert lock.
+    // Sized for the worst case where every rule fires in one evaluate
+    // call; in practice 1-2 fire per pass.
+    static constexpr int PENDING_MQTT_MAX = 8;
+    SensorReading _pendingMqtt[PENDING_MQTT_MAX];
+    int           _pendingMqttCount = 0;
+
     // ---- Helpers ------------------------------------------------------------
     bool  _evalOp(float val, const char* op, float threshold) const;
     void  _dispatch(const Rule& rule, float val, uint32_t ts);
