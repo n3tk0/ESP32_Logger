@@ -112,6 +112,16 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
 
     SensorReading readings[4];
 
+    // R14 / AUDIT 3.19 + 15.3: hold configMutex for the read iteration so
+    // a concurrent reloadConfig() can't _destroyAll() the sensor pointer
+    // array we're iterating. Reload acquires the same mutex with a longer
+    // timeout (see SensorManager::reloadConfig). Bounded 1 s take here —
+    // if reload is mid-flight we skip this tick rather than spin.
+    MutexGuard sg(configMutex, pdMS_TO_TICKS(1000));
+    if (configMutex && !sg.isLocked()) {
+        return 0;   // reload in flight; skip silently, retry next tick
+    }
+
     for (int i = 0; i < _count; i++) {
         ISensor* s = _sensors[i];
         if (!s || !s->isEnabled()) continue;
@@ -201,6 +211,16 @@ int SensorManager::tick(QueueHandle_t sensorQueue, uint32_t now) {
 
 // ---------------------------------------------------------------------------
 bool SensorManager::reloadConfig(fs::FS& fs, const char* cfgPath) {
+    // R14 / AUDIT 3.19 + 15.3: writer-side companion of tickFiltered's
+    // 1 s read-side acquire. Longer timeout (8 s) covers SDS011/PMS5003
+    // blocking reads (~2 s each), I2C bus serialisation, and the worst-
+    // case SCD4x init delay (5.1 s). If we can't acquire, the existing
+    // sensor table stays valid; caller surfaces the failure to the user.
+    MutexGuard sg(configMutex, pdMS_TO_TICKS(8000));
+    if (configMutex && !sg.isLocked()) {
+        Serial.println("[SensorManager] reloadConfig: configMutex timeout — aborted");
+        return false;
+    }
     return loadAndInit(fs, cfgPath);
 }
 
