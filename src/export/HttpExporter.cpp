@@ -1,5 +1,6 @@
 #include "HttpExporter.h"
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 
 static bool _isValidHeaderName(const char* s) {
     if (!s || !*s) return false;
@@ -72,7 +73,16 @@ bool HttpExporter::send(const SensorReading* readings, size_t count) {
     pos += snprintf(body + pos, bodyLen - pos, "]");
 
     HTTPClient http;
-    http.begin(_url);
+    bool isHttps = strncmp(_url, "https://", 8) == 0;
+    WiFiClientSecure secureClient;
+    if (isHttps) {
+        // R15: no CA store bundled — setInsecure() until 19.x rollout
+        //       adds opt-in cert pinning in a follow-up phase
+        secureClient.setInsecure();
+        http.begin(secureClient, _url);
+    } else {
+        http.begin(_url);
+    }
     http.addHeader("Content-Type", "application/json");
     for (int i = 0; i < _hdrCount; i++) {
         http.addHeader(_hdrKeys[i], _hdrVals[i]);
@@ -82,6 +92,8 @@ bool HttpExporter::send(const SensorReading* readings, size_t count) {
     bool ok  = (code >= 200 && code < 300);
     if (!ok) {
         Serial.printf("[HTTP] POST failed, code=%d\n", code);
+    } else {
+        Serial.printf("[HTTP] sent to %s\n", _url);
     }
     http.end();
     delete[] body;
