@@ -72,8 +72,9 @@ bool ThemeModule::load(JsonObjectConst cfg) {
 
     auto loadPath = [&](char* dst, size_t n, const char* key) {
         const char* v = cfg[key] | (const char*)nullptr;
-        if (!v) return;
+        if (!v) return;           // key absent — keep existing
         String val(v);
+        if (val.length() == 0) { copyStr(dst, n, ""); return; }  // explicit clear
         if (val.startsWith("http://") || val.startsWith("https://")) {
             // External URL: reject control chars and quotes, accept as-is
             for (size_t i = 0; i < val.length(); i++) {
