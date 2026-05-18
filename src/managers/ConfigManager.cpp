@@ -440,6 +440,21 @@ bool loadConfig() {
             return false;
         }
 
+        // Reject unrecognised source versions — byte layouts before v6 differ.
+        uint8_t rawVersion = (got >= 5) ? rawBuf[sizeof(uint32_t)] : 0;
+        constexpr uint8_t KNOWN_MIGRATABLE[] = {6, 7, 8, 9, 10, 11, 12};
+        bool versionKnown = false;
+        for (uint8_t v : KNOWN_MIGRATABLE) {
+            if (rawVersion == v) { versionKnown = true; break; }
+        }
+        if (!versionKnown) {
+            Serial.printf("[CFG] Unknown source version %u — resetting to defaults\n", rawVersion);
+            free(rawBuf);
+            loadDefaultConfig();
+            saveConfig();
+            return true;
+        }
+
         // Start from safe defaults then overlay whatever bytes we have
         loadDefaultConfig();
 
