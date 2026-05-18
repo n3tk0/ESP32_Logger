@@ -617,18 +617,23 @@ void setup() {
     OtaManager::boot();
 
     // ── Wake reason ───────────────────────────────────────────────────────────
-    wakeUpButtonStr = getWakeupReason();
-    DBGF("Wake reason: %s\n", wakeUpButtonStr.c_str());
+    // R14 / AUDIT 6.3: wakeUpButtonStr is now char[16]; copy from the
+    // String returned by getWakeupReason() with strlcpy null-terminate.
+    {
+        String reason = getWakeupReason();
+        strlcpy(wakeUpButtonStr, reason.c_str(), sizeof(wakeUpButtonStr));
+    }
+    DBGF("Wake reason: %s\n", wakeUpButtonStr);
 
     int  wifiTrigState  = digitalRead(config.hardware.pinWifiTrigger);
 
     apModeTriggered = (wifiTrigState == expectedActive) ||
-                      (wakeUpButtonStr == "WIFI")       ||
+                      (strcmp(wakeUpButtonStr, "WIFI") == 0)       ||
                       config.forceWebServer;
 
     onlineLoggerMode = config.forceWebServer &&
                        (wifiTrigState != expectedActive) &&
-                       (wakeUpButtonStr != "WIFI");
+                       (strcmp(wakeUpButtonStr, "WIFI") != 0);
 
     // Safe-mode override: force AP + web, ignore client mode + online mode.
     if (g_safeMode) {
@@ -651,7 +656,7 @@ void setup() {
     // Exception: hybrid timer wake keeps its headless sensor cycle so WiFi doesn't delay readings.
     // If wifiMode=CLIENT and connection fails, the existing fallback below starts AP mode.
     if (g_platformMode != PLATFORM_LEGACY && !apModeTriggered) {
-        bool isHybridTimerWake = (g_platformMode == PLATFORM_HYBRID && wakeUpButtonStr == "TIMER");
+        bool isHybridTimerWake = (g_platformMode == PLATFORM_HYBRID && strcmp(wakeUpButtonStr, "TIMER") == 0);
         if (!isHybridTimerWake) {
             apModeTriggered = true;
             DBGLN("Non-legacy: auto-activating web server");
@@ -745,7 +750,7 @@ void setup() {
     // ── Hybrid timer wakeup: quick headless sensor cycle → back to sleep ─────
     // When the hybrid periodic timer fires, skip the full web/flow cycle:
     // just let sensor tasks run for g_hybridActiveMs, flush data, then re-sleep.
-    if (g_platformMode == PLATFORM_HYBRID && !apModeTriggered && wakeUpButtonStr == "TIMER") {
+    if (g_platformMode == PLATFORM_HYBRID && !apModeTriggered && strcmp(wakeUpButtonStr, "TIMER") == 0) {
         DBGF("[Hybrid] Timer wake: sensor window %ums...\n", g_hybridActiveMs);
         // H2: non-blocking active window — poll in 100ms steps so shouldRestart is honoured
         uint32_t windowEnd = millis() + g_hybridActiveMs;
@@ -785,7 +790,9 @@ void setup() {
     cycleStartTime  = millis();
     stateStartTime  = millis();
     lastFlowPulseTime = 0;
-    cycleStartedBy  = wakeUpButtonStr.length() > 0 ? wakeUpButtonStr : "BOOT";
+    strlcpy(cycleStartedBy,
+            wakeUpButtonStr[0] != '\0' ? wakeUpButtonStr : "BOOT",
+            sizeof(cycleStartedBy));
 
     int currentFFState = digitalRead(config.hardware.pinWakeupFF);
     int currentPFState = digitalRead(config.hardware.pinWakeupPF);
@@ -800,18 +807,18 @@ void setup() {
     // flow state machine has no pulse source and must stay in STATE_IDLE.
     if (g_platformMode != PLATFORM_LEGACY) {
         loggingState = STATE_IDLE;
-    } else if (wakeUpButtonStr == "FF_BTN") {
-        cycleButtonSet = true; cycleStartedBy = "FF_BTN";
+    } else if (strcmp(wakeUpButtonStr, "FF_BTN") == 0) {
+        cycleButtonSet = true; strlcpy(cycleStartedBy, "FF_BTN", sizeof(cycleStartedBy));
         loggingState   = STATE_WAIT_FLOW;
-    } else if (wakeUpButtonStr == "PF_BTN") {
-        cycleButtonSet = true; cycleStartedBy = "PF_BTN";
+    } else if (strcmp(wakeUpButtonStr, "PF_BTN") == 0) {
+        cycleButtonSet = true; strlcpy(cycleStartedBy, "PF_BTN", sizeof(cycleStartedBy));
         loggingState   = STATE_WAIT_FLOW;
     } else if (onlineLoggerMode) {
         if (currentFFState == expectedActive) {
-            cycleStartedBy = "FF_BTN"; cycleButtonSet = true;
+            strlcpy(cycleStartedBy, "FF_BTN", sizeof(cycleStartedBy)); cycleButtonSet = true;
             loggingState   = STATE_WAIT_FLOW;
         } else if (currentPFState == expectedActive) {
-            cycleStartedBy = "PF_BTN"; cycleButtonSet = true;
+            strlcpy(cycleStartedBy, "PF_BTN", sizeof(cycleStartedBy)); cycleButtonSet = true;
             loggingState   = STATE_WAIT_FLOW;
         } else {
             loggingState = STATE_IDLE;
@@ -993,7 +1000,7 @@ void loop() {
 
         case STATE_IDLE:
             if (g_platformMode == PLATFORM_LEGACY && highCountFF > 0) {
-                cycleStartedBy = "FF_BTN"; cycleButtonSet = true;
+                strlcpy(cycleStartedBy, "FF_BTN", sizeof(cycleStartedBy)); cycleButtonSet = true;
                 loggingState   = STATE_WAIT_FLOW;
                 stateStartTime = millis(); cycleStartTime = millis();
                 if (onlineLoggerMode && Rtc) {
@@ -1002,7 +1009,7 @@ void loop() {
                 }
                 highCountFF = 0; highCountPF = 0;
             } else if (g_platformMode == PLATFORM_LEGACY && highCountPF > 0) {
-                cycleStartedBy = "PF_BTN"; cycleButtonSet = true;
+                strlcpy(cycleStartedBy, "PF_BTN", sizeof(cycleStartedBy)); cycleButtonSet = true;
                 loggingState   = STATE_WAIT_FLOW;
                 stateStartTime = millis(); cycleStartTime = millis();
                 if (onlineLoggerMode && Rtc) {
@@ -1055,15 +1062,19 @@ void loop() {
                 if (config.datalog.postCorrectionEnabled &&
                     highCountFF == 0 && highCountPF == 0 &&
                     corrVol > 0 && !extendedHold) {
-                    const char* orig = cycleStartedBy.c_str();
+                    // R14 / AUDIT 6.3: copy the original BEFORE mutating
+                    // cycleStartedBy below — a const char* into the
+                    // global buffer would otherwise observe the new value.
+                    char orig[16];
+                    strlcpy(orig, cycleStartedBy, sizeof(orig));
                     bool corrected = false;
-                    if (cycleStartedBy == "PF_BTN" && corrVol >= config.datalog.pfToFfThreshold) {
-                        cycleStartedBy = "FF_BTN";
-                        if (!onlineLoggerMode) wakeUpButtonStr = "FF_BTN";
+                    if (strcmp(cycleStartedBy, "PF_BTN") == 0 && corrVol >= config.datalog.pfToFfThreshold) {
+                        strlcpy(cycleStartedBy, "FF_BTN", sizeof(cycleStartedBy));
+                        if (!onlineLoggerMode) strlcpy(wakeUpButtonStr, "FF_BTN", sizeof(wakeUpButtonStr));
                         corrected = true;
-                    } else if (cycleStartedBy == "FF_BTN" && corrVol <= config.datalog.ffToPfThreshold) {
-                        cycleStartedBy = "PF_BTN";
-                        if (!onlineLoggerMode) wakeUpButtonStr = "PF_BTN";
+                    } else if (strcmp(cycleStartedBy, "FF_BTN") == 0 && corrVol <= config.datalog.ffToPfThreshold) {
+                        strlcpy(cycleStartedBy, "PF_BTN", sizeof(cycleStartedBy));
+                        if (!onlineLoggerMode) strlcpy(wakeUpButtonStr, "PF_BTN", sizeof(wakeUpButtonStr));
                         corrected = true;
                     }
                     if (corrected && fsAvailable && activeFS) {
@@ -1087,7 +1098,7 @@ void loop() {
                                 "#:%d|bitmask:0x%08lX|early:FF=%d,PF=%d,WIFI=%d|held:%lums|CORR:%s->%s|L:%.2f",
                                 bootCount, earlyGPIO_bitmask,
                                 ffSnap, pfSnap, wifiSnap,
-                                buttonHeldMs, orig, cycleStartedBy.c_str(), corrVol);
+                                buttonHeldMs, orig, cycleStartedBy, corrVol);
                             btnLog.println(line);
                             btnLog.close();
                         }
@@ -1101,7 +1112,7 @@ void loop() {
             if (onlineLoggerMode) {
                 noInterrupts(); cycleTotalPulses += currentPulses; interrupts();  // L2: already cleared above
                 highCountFF = 0; highCountPF = 0;
-                cycleStartedBy = "IDLE"; cycleButtonSet = false;
+                strlcpy(cycleStartedBy, "IDLE", sizeof(cycleStartedBy)); cycleButtonSet = false;
                 loggingState   = STATE_IDLE;
                 stateStartTime = millis(); cycleStartTime = millis();
                 lastFlowPulseTime = 0;

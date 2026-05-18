@@ -47,8 +47,14 @@ extern RTC_DATA_ATTR bool     bootcount_restore;
 // WAKE / CYCLE STATE
 // ============================================================================
 extern uint32_t currentWakeTimestamp;
-extern String   wakeUpButtonStr;
-extern String   cycleStartedBy;
+// R14 / AUDIT 6.3: char[] instead of String. These are mutated from
+// loop() and read by AsyncTCP workers — a String buffer pointer
+// triple is not safe across that cross-task boundary. Fixed char
+// arrays mean reads see at-worst a partially-updated byte sequence,
+// not a freed pointer. Writers use strncpy + explicit null-terminate;
+// readers compare with strcmp.
+extern char     wakeUpButtonStr[16];
+extern char     cycleStartedBy[16];
 extern bool     cycleButtonSet;
 extern unsigned long cycleStartTime;
 extern volatile uint32_t cycleTotalPulses;
