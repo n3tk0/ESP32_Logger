@@ -1898,6 +1898,10 @@ void setupWebServer() {
                 if (hint > kImportMax) hint = kImportMax;
                 buf->reserve(hint);
                 req->_tempObject = buf;
+                req->onDisconnect([req]() {
+                    delete static_cast<String*>(req->_tempObject);
+                    req->_tempObject = nullptr;
+                });
             }
             String* buf = static_cast<String*>(req->_tempObject);
             if (!buf) return;
