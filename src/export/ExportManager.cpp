@@ -220,6 +220,13 @@ void ExportManager::sendAll(const SensorReading* readings, size_t count) {
         uint32_t nowMs = millis();
         if (interval > 0 && (nowMs - _lastSentMs[i]) < interval) continue;
 
+        // R14 / AUDIT 11.8: refresh ExportTask heartbeat BEFORE each
+        // exporter's network call. With 5 enabled exporters × ~30 s TLS
+        // timeout = up to 150 s of blocking I/O inside this loop; without
+        // an inner heartbeat refresh the C4 watchdog (30 s) false-positive
+        // restarts during legitimate WiFi outages or slow brokers.
+        g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
+
         // Drain any spooled backlog before sending new live data (#4.7)
         _drainSpool(_exporters[i]);
 

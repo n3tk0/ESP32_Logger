@@ -90,7 +90,14 @@ void storageTaskFunc(void* param) {
         // aggregator must be skipped — it would otherwise accumulate sum/
         // count forever (no flush ever resets them in drain-only mode).
         uint32_t feedEpoch = nowEpochSafe();
-        while (xQueueReceive(storageQueue, &r, pdMS_TO_TICKS(100)) == pdTRUE) {
+        // R14 / AUDIT 11.6: cap inner drain at 32 readings per outer
+        // iteration so the heartbeat refresh at line 85 happens at least
+        // every 32 × 100 ms = 3.2 s worst-case. Under sustained sensor
+        // burst the old unbounded loop could spin for the full 30-s
+        // watchdog window without ever updating g_taskHeartbeat.
+        int drained = 0;
+        while (drained++ < 32 &&
+               xQueueReceive(storageQueue, &r, pdMS_TO_TICKS(100)) == pdTRUE) {
             if (writingEnabled) agg.feed(r);
             if (flowRunActive)  flowRunLog.feed(r, feedEpoch);
         }
