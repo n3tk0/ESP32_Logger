@@ -114,9 +114,12 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
         Serial.printf("[ModuleRegistry] cannot open %s for write\n", tmp.c_str());
         return false;
     }
-    size_t n = serializeJson(doc, f);
+    size_t want    = measureJson(doc);
+    size_t written = serializeJson(doc, f);
     f.close();
-    if (n == 0) {
+    if (written == 0 || written < want) {
+        Serial.printf("[ModuleRegistry] save TRUNCATED: %u of %u bytes — discarding\n",
+                      (unsigned)written, (unsigned)want);
         fs.remove(tmp.c_str());
         return false;
     }
