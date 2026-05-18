@@ -39,8 +39,8 @@ RTC_DATA_ATTR bool     bootcount_restore = true;
 // WAKE / CYCLE STATE
 // ============================================================================
 uint32_t     currentWakeTimestamp = 0;
-String       wakeUpButtonStr      = "";
-String       cycleStartedBy       = "BOOT";
+char         wakeUpButtonStr[16]  = "";
+char         cycleStartedBy[16]   = "BOOT";
 bool         cycleButtonSet       = false;
 unsigned long cycleStartTime      = 0;
 volatile uint32_t cycleTotalPulses = 0;

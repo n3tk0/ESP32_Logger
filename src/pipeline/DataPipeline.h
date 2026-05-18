@@ -47,14 +47,22 @@ template<size_t N>
 class RingBuffer {
 public:
     void push(const SensorReading& r) {
+        // R14 / AUDIT 12.12: ordering matters across the SPSC boundary.
+        //  1. write the data slot
+        //  2. publish _head with release  → reader's acquire load of
+        //     _head synchronises-with this store, so when a reader sees
+        //     the new head it ALSO sees the data write that precedes it
+        //  3. update _tail (also release) AFTER the head publish — a
+        //     reader observing the new _tail before the new _head could
+        //     otherwise compute a `start` index that points at the slot
+        //     mid-write and read torn data
         size_t h = _head.load(std::memory_order_relaxed);
-        _buf[h % N] = r;
         size_t newH = h + 1;
-        // Advance tail if buffer is full (drop oldest)
-        if (newH - _tail.load(std::memory_order_relaxed) > N) {
-            _tail.store(newH - N, std::memory_order_relaxed);
+        _buf[h % N] = r;                                          // 1
+        _head.store(newH, std::memory_order_release);             // 2
+        if (newH - _tail.load(std::memory_order_relaxed) > N) {   // 3 — full?
+            _tail.store(newH - N, std::memory_order_release);
         }
-        _head.store(newH, std::memory_order_release);
     }
 
     size_t copyRecent(SensorReading* out, size_t maxOut,
