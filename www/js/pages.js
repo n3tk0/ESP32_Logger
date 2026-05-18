@@ -248,7 +248,7 @@ function dbLoadSparkSeries(p) {
           + "&metric=" + encodeURIComponent(p.metric)
           + "&from=" + from + "&to=" + now
           + "&agg=" + bucket + "&mode=lttb&limit=60";
-  return fetch(url)
+  return fetchWithTimeout(url)
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
       var pts = (d && d.data) || [];
@@ -288,7 +288,7 @@ function dbMountSparkChart(key, xs, ys) {
 }
 
 function dbRefreshLatest() {
-  fetch("/api/latest")
+  fetchWithTimeout("/api/latest")
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
       var status = document.getElementById("db-poll-status");
@@ -1012,7 +1012,7 @@ function liveSetRate() {
 // Polling fallback — kept identical in shape to the original upd() so the
 // liveRender() body works for both EventSource and fetch results.
 function liveUpdate() {
-  fetch("/api/live")
+  fetchWithTimeout("/api/live")
     .then(function (r) {
       return r.json();
     })
@@ -1113,7 +1113,7 @@ registerHandlers({
 // cache; liveLogsFilterClear() resets the input + re-renders.
 var _liveLogsCache = [];
 function liveLogsUpdate() {
-  fetch("/api/recent_logs")
+  fetchWithTimeout("/api/recent_logs")
     .then(function (r) {
       return r.json();
     })
