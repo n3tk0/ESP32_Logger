@@ -811,18 +811,22 @@ function filesToggleEdit() {
 
 function filesDelete(path) {
   if (!confirm("Delete " + path + "?")) return;
-  fetch(
-    "/delete?path=" +
-      encodeURIComponent(path) +
-      "&storage=" +
-      currentFilesStorage,
-  )
-    .then(function () {
-      filesRender();
-    })
-    .catch(function (e) {
-      showToast("Error: " + e, "error");
-    });
+  getCsrfToken().then(function (token) {
+    var url = "/delete?path=" + encodeURIComponent(path) +
+              "&storage=" + currentFilesStorage +
+              (token ? "&csrf=" + encodeURIComponent(token) : "");
+    fetch(url, { method: "POST" })
+      .then(function (r) {
+        if (r.status === 403) {
+          window.__csrfToken = null;
+          throw new Error("CSRF token rejected — refresh page");
+        }
+        filesRender();
+      })
+      .catch(function (e) {
+        showToast("Error: " + e, "error");
+      });
+  });
 }
 
 function filesUpload() {
