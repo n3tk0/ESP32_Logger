@@ -1,6 +1,25 @@
 #include "HttpExporter.h"
 #include <WiFi.h>
 
+static bool _isValidHeaderName(const char* s) {
+    if (!s || !*s) return false;
+    for (const char* p = s; *p; p++) {
+        char c = *p;
+        bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                  (c >= '0' && c <= '9') || c == '-' || c == '_';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+static bool _isValidHeaderValue(const char* s) {
+    if (!s) return false;
+    for (const char* p = s; *p; p++) {
+        if (*p == '\r' || *p == '\n') return false;
+    }
+    return true;
+}
+
 bool HttpExporter::init(JsonObjectConst cfg) {
     _enabled = cfg["enabled"] | false;
     if (!_enabled) return true;
@@ -13,9 +32,14 @@ bool HttpExporter::init(JsonObjectConst cfg) {
     if (!headers.isNull()) {
         for (auto kv : headers) {
             if (_hdrCount >= 4) break;
-            strncpy(_hdrKeys[_hdrCount], kv.key().c_str(),    sizeof(_hdrKeys[0])-1);
-            strncpy(_hdrVals[_hdrCount], kv.value().as<const char*>() ?: "",
-                    sizeof(_hdrVals[0])-1);
+            const char* k = kv.key().c_str();
+            const char* v = kv.value().as<const char*>() ?: "";
+            if (!_isValidHeaderName(k) || !_isValidHeaderValue(v)) {
+                Serial.printf("[HTTP] rejected header '%s': invalid name or CRLF in value\n", k);
+                continue;
+            }
+            strncpy(_hdrKeys[_hdrCount], k, sizeof(_hdrKeys[0])-1);
+            strncpy(_hdrVals[_hdrCount], v, sizeof(_hdrVals[0])-1);
             _hdrCount++;
         }
     }
