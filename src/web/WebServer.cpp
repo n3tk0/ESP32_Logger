@@ -1547,6 +1547,11 @@ void setupWebServer() {
         if (!r->hasParam("file")) { r->send(400, "text/plain", "No file"); return; }
         String path = sanitizePath(r->getParam("file")->value());
         if (path.isEmpty() || path == "/") { r->send(400, "text/plain", "Invalid path"); return; }
+        if (isPathProtected(path)) {
+            r->send(403, "application/json",
+                    "{\"ok\":false,\"error\":\"protected path\"}");
+            return;
+        }
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         fs::FS* targetFS = (storage == "sdcard" && sdAvailable) ? (fs::FS*)&SD :
                            (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
