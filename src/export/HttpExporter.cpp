@@ -40,7 +40,9 @@ bool HttpExporter::init(JsonObjectConst cfg) {
                 continue;
             }
             strncpy(_hdrKeys[_hdrCount], k, sizeof(_hdrKeys[0])-1);
+            _hdrKeys[_hdrCount][sizeof(_hdrKeys[0])-1] = '\0';
             strncpy(_hdrVals[_hdrCount], v, sizeof(_hdrVals[0])-1);
+            _hdrVals[_hdrCount][sizeof(_hdrVals[0])-1] = '\0';
             _hdrCount++;
         }
     }
