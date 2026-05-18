@@ -143,7 +143,11 @@
           </div>
           <div class="field">
             <label class="field-label">Access Token</label>
-            <input type="password" id="exp-osm-token" class="input" autocomplete="new-password">
+            <input type="password" id="exp-osm-token" class="input" autocomplete="new-password"
+              pattern="[A-Za-z0-9]{20,128}"
+              maxlength="128"
+              title="OpenSenseMap access token: alphanumeric, 20-128 chars.">
+            <p class="hint">&#9888; Tokens stored on device in plaintext (LittleFS). Treat this device like a long-lived API key holder; revoke and rotate via opensensemap.org if the device is lost or re-flashed.</p>
           </div>
         </div>
         <p class="hint" style="margin-bottom:.5rem">Sensor IDs — copy from your senseBox sensors:</p>
