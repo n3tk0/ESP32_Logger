@@ -1132,7 +1132,13 @@ function expLoad() {
     _setVal("exp-mqtt-interval", m.interval_ms || 60000);
     _setVal("exp-mqtt-retain", m.retain || false, true);
     var tlsEl = document.getElementById("exp-mqtt-tls");
-    if (tlsEl) tlsEl.value = m.use_tls ? "tls" : "plain";
+    if (tlsEl) {
+      tlsEl.value = m.use_tls ? "tls" : "plain";
+      tlsEl.onchange = function () {
+        var portEl = document.getElementById("exp-mqtt-port");
+        if (portEl) portEl.value = this.value === "tls" ? "8883" : "1883";
+      };
+    }
 
     // HTTP
     var h = exp.http || {};

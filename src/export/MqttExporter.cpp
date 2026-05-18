@@ -170,8 +170,18 @@ bool MqttExporter::_publishDiscoveryOne(const char* sensorId, const char* sensor
 
 void MqttExporter::publishHaDiscovery() {
     if (!_enabled || !_haDiscovery) return;
+
+    WiFiClientSecure secureClient;
+    if (_useTls) {
+        // R15: no CA store bundled — setInsecure() until 19.x rollout
+        //       adds opt-in cert pinning in a follow-up phase
+        secureClient.setInsecure();
+        _client.setClient(secureClient);
+    }
+
     if (!_connect()) {
         Serial.println("[MQTT] HA discovery: not connected");
+        if (_useTls) _client.setClient(_wifiClient);
         return;
     }
     Serial.println("[MQTT] Publishing HA discovery payloads…");
@@ -192,4 +202,9 @@ void MqttExporter::publishHaDiscovery() {
         }
     }
     Serial.printf("[MQTT] HA discovery: %d topics published\n", published);
+
+    if (_useTls) {
+        _client.disconnect();
+        _client.setClient(_wifiClient);
+    }
 }
