@@ -68,18 +68,32 @@ struct SensorReading {
     }
 
 private:
+    // Returns would-be byte count (snprintf semantics) so callers can detect
+    // truncation by accumulating the total and comparing against bufLen.
     static int _appendJsonEscaped(char* out, size_t cap, const char* s) {
-        size_t n = 0;
-        if (cap > 0) out[n++] = '"';
-        for (; s && *s && n + 7 < cap; s++) {
+        size_t a = 0;   // actual write cursor (stays within cap)
+        size_t w = 0;   // would-be total (returned)
+        if (a < cap) out[a++] = '"';
+        w++;
+        for (; s && *s; s++) {
             unsigned char c = (unsigned char)*s;
-            if      (c == '"')  { out[n++] = '\\'; out[n++] = '"'; }
-            else if (c == '\\') { out[n++] = '\\'; out[n++] = '\\'; }
-            else if (c < 0x20) { n += (size_t)snprintf(out + n, cap - n, "\\u%04x", c); }
-            else                { out[n++] = (char)c; }
+            if (c == '"') {
+                if (a + 1 < cap) { out[a++] = '\\'; out[a++] = '"'; }
+                w += 2;
+            } else if (c == '\\') {
+                if (a + 1 < cap) { out[a++] = '\\'; out[a++] = '\\'; }
+                w += 2;
+            } else if (c < 0x20) {
+                if (a + 5 < cap) a += (size_t)snprintf(out + a, cap - a, "\\u%04x", c);
+                w += 6;
+            } else {
+                if (a < cap) out[a++] = (char)c;
+                w++;
+            }
         }
-        if (n < cap) out[n++] = '"';
-        return (int)n;
+        if (a < cap) out[a++] = '"';
+        w++;
+        return (int)w;
     }
 };
 
