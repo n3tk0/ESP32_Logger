@@ -143,6 +143,10 @@ extern volatile uint32_t g_lastWebActivity;
 extern volatile uint8_t g_pendingNtpSync;
 extern volatile int8_t  g_lastNtpSyncResult;
 
+// g_pendingWiFiShutdown: set by async handlers that need safeWiFiShutdown();
+//                        loop() calls it so AsyncTCP worker is never blocked.
+extern volatile bool g_pendingWiFiShutdown;
+
 // ============================================================================
 // RESTART CIRCUIT BREAKER (Pillar 3.7 / AUDIT FC.4)
 // ----------------------------------------------------------------------------

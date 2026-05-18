@@ -248,7 +248,7 @@ function dbLoadSparkSeries(p) {
           + "&metric=" + encodeURIComponent(p.metric)
           + "&from=" + from + "&to=" + now
           + "&agg=" + bucket + "&mode=lttb&limit=60";
-  return fetch(url)
+  return fetchWithTimeout(url)
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
       var pts = (d && d.data) || [];
@@ -288,7 +288,7 @@ function dbMountSparkChart(key, xs, ys) {
 }
 
 function dbRefreshLatest() {
-  fetch("/api/latest")
+  fetchWithTimeout("/api/latest")
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
       var status = document.getElementById("db-poll-status");
@@ -811,18 +811,22 @@ function filesToggleEdit() {
 
 function filesDelete(path) {
   if (!confirm("Delete " + path + "?")) return;
-  fetch(
-    "/delete?path=" +
-      encodeURIComponent(path) +
-      "&storage=" +
-      currentFilesStorage,
-  )
-    .then(function () {
-      filesRender();
-    })
-    .catch(function (e) {
-      showToast("Error: " + e, "error");
-    });
+  getCsrfToken().then(function (token) {
+    var url = "/delete?path=" + encodeURIComponent(path) +
+              "&storage=" + currentFilesStorage +
+              (token ? "&csrf=" + encodeURIComponent(token) : "");
+    fetch(url, { method: "POST" })
+      .then(function (r) {
+        if (r.status === 403) {
+          window.__csrfToken = null;
+          throw new Error("CSRF token rejected — refresh page");
+        }
+        filesRender();
+      })
+      .catch(function (e) {
+        showToast("Error: " + e, "error");
+      });
+  });
 }
 
 function filesUpload() {
@@ -877,17 +881,21 @@ function filesUpload() {
 function filesMkdir() {
   var name = document.getElementById("newFolder");
   if (!name || !name.value.trim()) return;
-  fetch(
-    "/mkdir?name=" +
-      encodeURIComponent(name.value.trim()) +
-      "&dir=" +
-      encodeURIComponent(currentFilesDir) +
-      "&storage=" +
-      currentFilesStorage,
-    { method: "POST" },
-  ).then(function () {
-    name.value = "";
-    filesRender();
+  getCsrfToken().then(function (token) {
+    var url = "/mkdir?name=" + encodeURIComponent(name.value.trim()) +
+              "&dir=" + encodeURIComponent(currentFilesDir) +
+              "&storage=" + currentFilesStorage +
+              (token ? "&csrf=" + encodeURIComponent(token) : "");
+    fetch(url, { method: "POST" })
+      .then(function (r) {
+        if (r.status === 403) {
+          window.__csrfToken = null;
+          throw new Error("CSRF token rejected — refresh page");
+        }
+        name.value = "";
+        filesRender();
+      })
+      .catch(function (e) { showToast("Error: " + e, "error"); });
   });
 }
 
@@ -910,14 +918,21 @@ function filesApplyMove() {
     "&storage=" +
     currentFilesStorage;
   if (destDir) url += "&destDir=" + encodeURIComponent(destDir);
-  fetch(url, { method: "POST" })
-    .then(function () {
-      document.getElementById("movePopup").style.display = "none";
-      filesRender();
-    })
-    .catch(function (e) {
-      showToast("Error: " + e, "error");
-    });
+  getCsrfToken().then(function (token) {
+    if (token) url += "&csrf=" + encodeURIComponent(token);
+    fetch(url, { method: "POST" })
+      .then(function (r) {
+        if (r.status === 403) {
+          window.__csrfToken = null;
+          throw new Error("CSRF token rejected — refresh page");
+        }
+        document.getElementById("movePopup").style.display = "none";
+        filesRender();
+      })
+      .catch(function (e) {
+        showToast("Error: " + e, "error");
+      });
+  });
 }
 
 // ============================================================================
@@ -997,7 +1012,7 @@ function liveSetRate() {
 // Polling fallback — kept identical in shape to the original upd() so the
 // liveRender() body works for both EventSource and fetch results.
 function liveUpdate() {
-  fetch("/api/live")
+  fetchWithTimeout("/api/live")
     .then(function (r) {
       return r.json();
     })
@@ -1098,7 +1113,7 @@ registerHandlers({
 // cache; liveLogsFilterClear() resets the input + re-renders.
 var _liveLogsCache = [];
 function liveLogsUpdate() {
-  fetch("/api/recent_logs")
+  fetchWithTimeout("/api/recent_logs")
     .then(function (r) {
       return r.json();
     })

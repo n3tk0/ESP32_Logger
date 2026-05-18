@@ -600,10 +600,19 @@
             (data.rules || []).forEach(function (rule) {
               if (rule.id === ruleId) rule.enabled = cb.checked;
             });
-            return fetch("/api/alerts", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(data)
+            return getCsrfToken().then(function (token) {
+              var url = "/api/alerts" + (token ? "?csrf=" + encodeURIComponent(token) : "");
+              return fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data)
+              }).then(function (r) {
+                if (r.status === 403) {
+                  window.__csrfToken = null;
+                  throw new Error("CSRF token rejected — refresh page");
+                }
+                return r;
+              });
             });
           })
           .catch(function () { cb.checked = !cb.checked; }); // revert on error
@@ -705,8 +714,9 @@
     fetch("/api/sensors")
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
-        if (!data || !Array.isArray(data)) return;
-        renderHealthGrid(data);
+        var sensors = (data && data.sensors) || [];
+        if (!sensors.length) return;
+        renderHealthGrid(sensors);
       })
       .catch(function () {
         var grid = document.getElementById("health-grid");

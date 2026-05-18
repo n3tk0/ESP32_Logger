@@ -1056,9 +1056,18 @@ void setupWebServer() {
         JsonObject net = doc["network"].to<JsonObject>();
         net["wifiMode"]       = (int)config.network.wifiMode;
         net["apSSID"]         = strlen(config.network.apSSID)         ? config.network.apSSID         : DEFAULT_AP_SSID;
-        net["apPassword"]     = config.network.apPassword;
+        const char* apPw = "***";
+        const char* clPw = "***";
+#if WEB_BASIC_AUTH_ENABLED
+        if (r->hasParam("reveal_secrets") &&
+            r->getParam("reveal_secrets")->value() == "1") {
+            apPw = config.network.apPassword;
+            clPw = config.network.clientPassword;
+        }
+#endif
+        net["apPassword"]     = apPw;
         net["clientSSID"]     = config.network.clientSSID;
-        net["clientPassword"] = config.network.clientPassword;
+        net["clientPassword"] = clPw;
         net["ntpServer"]      = strlen(config.network.ntpServer)      ? config.network.ntpServer      : DEFAULT_NTP_SERVER;
         net["timezone"]       = config.network.timezone;
         net["useStaticIP"]    = config.network.useStaticIP;
@@ -1331,9 +1340,14 @@ void setupWebServer() {
         if (!requireMutatingAuth(r)) return;
         if (r->hasParam("wifiMode", true))       config.network.wifiMode = (WiFiModeType)r->getParam("wifiMode", true)->value().toInt();
         if (r->hasParam("apSSID", true))         SAFE_STRNCPY(config.network.apSSID,         r->getParam("apSSID", true)->value().c_str(), sizeof(config.network.apSSID));
-        if (r->hasParam("apPassword", true))     SAFE_STRNCPY(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), sizeof(config.network.apPassword));
+        // R13 follow-up (Codex P1 on PR #89): /export_settings masks
+        // passwords as "***". The SPA round-trips that value back here
+        // on any unrelated save; without this guard the real password
+        // would be overwritten with "***". Treat "***" as the
+        // keep-existing sentinel.
+        if (r->hasParam("apPassword", true)     && r->getParam("apPassword", true)->value()     != "***") SAFE_STRNCPY(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), sizeof(config.network.apPassword));
         if (r->hasParam("clientSSID", true))     SAFE_STRNCPY(config.network.clientSSID,     r->getParam("clientSSID", true)->value().c_str(), sizeof(config.network.clientSSID));
-        if (r->hasParam("clientPassword", true)) SAFE_STRNCPY(config.network.clientPassword, r->getParam("clientPassword", true)->value().c_str(), sizeof(config.network.clientPassword));
+        if (r->hasParam("clientPassword", true) && r->getParam("clientPassword", true)->value() != "***") SAFE_STRNCPY(config.network.clientPassword, r->getParam("clientPassword", true)->value().c_str(), sizeof(config.network.clientPassword));
         config.network.useStaticIP = r->hasParam("useStaticIP", true);
 
         auto parseIP = [&](const char* param, uint8_t* dst) {
@@ -1488,9 +1502,9 @@ void setupWebServer() {
         // regardless of the ESP_RST_SW reset reason. /factory_reset is a
         // user-initiated wipe, NOT a crash.
         g_resetMagic = 0;
-        safeWiFiShutdown();
-        delay(300);
-        ESP.restart();
+        g_pendingWiFiShutdown = true;
+        shouldRestart = true;
+        restartTimer  = millis();
     });
 
     // =========================================================================
@@ -1547,6 +1561,11 @@ void setupWebServer() {
         if (!r->hasParam("file")) { r->send(400, "text/plain", "No file"); return; }
         String path = sanitizePath(r->getParam("file")->value());
         if (path.isEmpty() || path == "/") { r->send(400, "text/plain", "Invalid path"); return; }
+        if (isPathProtected(path)) {
+            r->send(403, "application/json",
+                    "{\"ok\":false,\"error\":\"protected path\"}");
+            return;
+        }
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
         fs::FS* targetFS = (storage == "sdcard" && sdAvailable) ? (fs::FS*)&SD :
                            (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
@@ -1659,7 +1678,6 @@ void setupWebServer() {
             UploadCtx* ctx = (UploadCtx*)r->_tempObject;
             if (ctx) {
                 if (ctx->file) ctx->file.close();
-                if (ctx->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
                 bool failed    = ctx->failed;
                 bool authFailed = ctx->authFailed;
                 delete ctx;
@@ -1675,7 +1693,6 @@ void setupWebServer() {
                 UploadCtx* old = (UploadCtx*)request->_tempObject;
                 if (old) {
                     if (old->file) old->file.close();
-                    if (old->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
                     delete old;
                     request->_tempObject = nullptr;
                 }
@@ -1747,24 +1764,22 @@ void setupWebServer() {
                 DBGF("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
 
                 auto* ctx = new UploadCtx{File(), false, false, false};
-                if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
-                    ctx->mutexHeld = true;
+                {
+                    MutexGuard g(fsMutex, pdMS_TO_TICKS(5000));
+                    if (upDir != "/") targetFS->mkdir(upDir);
+                    ctx->file = targetFS->open(upPath, FILE_WRITE);
                 }
-                if (upDir != "/") targetFS->mkdir(upDir);
-                ctx->file = targetFS->open(upPath, FILE_WRITE);
                 if (!ctx->file) {
                     DBGF("Upload: cannot open %s for write\n", upPath.c_str());
-                    if (ctx->mutexHeld && fsMutex) { xSemaphoreGive(fsMutex); ctx->mutexHeld = false; }
                     ctx->failed = true;
                 }
                 request->_tempObject = ctx;
 
-                // Release FS mutex + close partial file if the client aborts.
+                // Close partial file if the client aborts mid-upload.
                 request->onDisconnect([request]() {
                     UploadCtx* c = (UploadCtx*)request->_tempObject;
                     if (!c) return;
                     if (c->file) c->file.close();
-                    if (c->mutexHeld && fsMutex) xSemaphoreGive(fsMutex);
                     delete c;
                     request->_tempObject = nullptr;
                 });
@@ -1772,6 +1787,7 @@ void setupWebServer() {
 
             UploadCtx* ctx = (UploadCtx*)request->_tempObject;
             if (ctx && ctx->file && !ctx->failed && len) {
+                MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
                 if (ctx->file.write(data, len) != len) {
                     DBGLN("Upload: short write (disk full?)");
                     ctx->failed = true;
@@ -1784,7 +1800,6 @@ void setupWebServer() {
                                   filename.c_str(), (unsigned)(index + len));
                     ctx->file.close();
                 }
-                if (ctx->mutexHeld && fsMutex) { xSemaphoreGive(fsMutex); ctx->mutexHeld = false; }
             }
         }
     );
@@ -1792,14 +1807,15 @@ void setupWebServer() {
     // =========================================================================
     // IMPORT SETTINGS
     // =========================================================================
-    static String _importBuf;
     server.on("/import_settings", HTTP_POST,
         [](AsyncWebServerRequest *r) {
             if (!requireMutatingAuth(r)) return;
-            if (_importBuf.isEmpty()) { r->send(400, "text/plain", "No data"); return; }
+            String* buf = static_cast<String*>(r->_tempObject);
+            if (!buf || buf->isEmpty()) { r->send(400, "text/plain", "No data"); return; }
             JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, _importBuf);
-            _importBuf = String();   // release heap buffer, not just clear
+            DeserializationError err = deserializeJson(doc, *buf);
+            delete buf;
+            r->_tempObject = nullptr;
             if (err) { r->send(400, "text/plain", String("JSON error: ") + err.c_str()); return; }
 
             if (doc["deviceName"].is<const char*>()) SAFE_STRNCPY(config.deviceName, doc["deviceName"], sizeof(config.deviceName));
@@ -1877,13 +1893,30 @@ void setupWebServer() {
             // Content-Length cannot trigger a huge heap allocation.
             constexpr size_t kImportMax = 8192;
             if (!index) {
-                _importBuf = "";
+                String* buf = new (std::nothrow) String();
+                if (!buf) {
+                    req->send(500, "application/json",
+                              "{\"ok\":false,\"error\":\"out_of_memory\"}");
+                    return;
+                }
                 size_t hint = req->contentLength() > 0 ? req->contentLength() : 4096;
                 if (hint > kImportMax) hint = kImportMax;
-                _importBuf.reserve(hint);
+                buf->reserve(hint);
+                req->_tempObject = buf;
+                // R13 follow-up (Codex P2 on PR #89): client disconnect
+                // before the request callback fires would leak the heap
+                // buffer. onDisconnect runs even on aborts; freeing here
+                // makes the success path's delete a no-op (delete on
+                // nullptr is well-defined).
+                req->onDisconnect([req]() {
+                    delete static_cast<String*>(req->_tempObject);
+                    req->_tempObject = nullptr;
+                });
             }
-            if (_importBuf.length() + len > kImportMax) return; // Hard cap
-            _importBuf.concat((const char*)data, len);
+            String* buf = static_cast<String*>(req->_tempObject);
+            if (!buf) return;
+            if (buf->length() + len > kImportMax) return; // Hard cap
+            buf->concat((const char*)data, len);
         }
     );
 

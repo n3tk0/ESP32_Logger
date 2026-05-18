@@ -24,6 +24,18 @@
 "use strict";
 
 // ============================================================================
+// FETCH WITH TIMEOUT (R13 4.8)
+// ============================================================================
+function fetchWithTimeout(url, opts, timeoutMs) {
+  opts = opts || {};
+  var ctrl = new AbortController();
+  var t = setTimeout(function () { ctrl.abort(); }, timeoutMs || 15000);
+  opts.signal = ctrl.signal;
+  return fetch(url, opts).finally(function () { clearTimeout(t); });
+}
+window.fetchWithTimeout = fetchWithTimeout;
+
+// ============================================================================
 // GLOBALS
 // ============================================================================
 var ST = {}; // cached /api/status payload
@@ -172,14 +184,14 @@ function backdropClose(ev) {
 window.addEventListener("DOMContentLoaded", function () {
   installEventDispatcher();
   Promise.all([
-    fetch("/api/status")
+    fetchWithTimeout("/api/status")
       .then(function (r) {
         return r.json();
       })
       .catch(function () {
         return {};
       }),
-    fetch("/export_settings")
+    fetchWithTimeout("/export_settings")
       .then(function (r) {
         return r.json();
       })
@@ -640,7 +652,7 @@ function applyCapsToSettingsHub() {
     if (fm) fm.style.display = caps.flowmeter === false ? "none" : "";
   }
   if (ST && ST.caps) { apply(ST.caps); return; }
-  fetch("/api/status")
+  fetchWithTimeout("/api/status")
     .then(function (r) { return r.json(); })
     .then(function (s) { ST = s; apply(s.caps || {}); })
     .catch(function () {});
@@ -1144,7 +1156,7 @@ function confirmRestart() {
       "Redirecting in <strong>" + s + "</strong> seconds…";
     if (bar) bar.style.width = (5 - s) * 20 + "%";
     if (s <= 0) {
-      fetch("/restart", { method: "POST" }).finally(function () {
+      fetchWithTimeout("/restart", { method: "POST" }, 10000).finally(function () {
         location.hash = "dashboard";
         location.reload();
       });

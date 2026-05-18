@@ -121,24 +121,23 @@ static void handleApiData(AsyncWebServerRequest* req) {
                           (mode != AGG_RAW) &&
                           (bucket != BUCKET_RAW);
 
-    SensorReading* agg     = new(std::nothrow) SensorReading[limit + 1];
+    SensorReading* agg    = nullptr;
     size_t         aggCount = 0;
     bool           truncated = false;
-
-    if (!agg) {
-        delete[] raw;
-        req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
-        return;
-    }
 
     if (historicalPath && activeFS) {
         // FS-backed history is migrating to wide CSV — chunk F will land a
         // dedicated CSV-streaming endpoint.  Until then this path returns
         // zero historical rows; recent data still flows from the ring buffer.
-        aggCount = 0;
         delete[] raw;
         raw = nullptr;
     } else {
+        agg = new(std::nothrow) SensorReading[limit + 1];
+        if (!agg) {
+            delete[] raw;
+            req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
+            return;
+        }
         // FS query disabled until the wide-CSV reader ships (chunk F).
         fsCount = 0;
 
@@ -235,7 +234,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
 // ---------------------------------------------------------------------------
 static void handleApiLatest(AsyncWebServerRequest* req) {
     constexpr size_t MAX_RAW = 500;
-    SensorReading* raw = new SensorReading[MAX_RAW];
+    SensorReading* raw = new (std::nothrow) SensorReading[MAX_RAW];
     if (!raw) {
         req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
         return;

@@ -68,16 +68,16 @@ Files: `src/tasks/*`, `src/pipeline/*`, `src/sensors/plugins/WaterFlowSensor.cpp
 | 3.3 | C | WebServer.cpp:1811 `/do_update` (OTA) — no CSRF, no rate limit. | `requireMutatingAuth` added to request callback (R5); body callback unchanged per policy. | Fixed (#80) |
 | 3.4 | H | WebServer.cpp:1336 `/sync_time`, 1355 `/rtc_protect`, 1363 `/flush_logs`, 1368 `/backup_bootcount`, 1373 `/restore_bootcount` — no rate limit, no CSRF. | `requireMutatingAuth` added as first statement to all five (R5). | Fixed (#80) |
 | 3.5 | H | WebServer.cpp:1750 `/wifi_scan_start`, 1757 `/wifi_scan_result` — no CSRF; mutates WiFi mode. | `requireMutatingAuth` added to `/wifi_scan_start` (R5); `/wifi_scan_result` is read-only, untouched. | Fixed (#80) |
-| 3.6 | C | WebServer.cpp:1415 `/download` — does not call `isPathProtected`. `/download?file=/config.bin` leaks WiFi creds. | After sanitizePath: `if (isPathProtected(path)) { r->send(403,...); return; }` | Pending |
-| 3.7 | C | WebServer.cpp:1022-1024 `/export_settings` — emits `apPassword`/`clientPassword` plaintext. | Replace passwords with `"***"` mask; require explicit opt-in param to include them. | Pending |
-| 3.8 | C | ApiHandlers.cpp:236 — `new SensorReading[MAX_RAW]` without `std::nothrow`. bad_alloc → abort. | Use `new(std::nothrow)` and null-check. | Pending |
-| 3.9 | H | ApiHandlers.cpp:73-130 — `raw` AND `agg` both allocated even when historicalPath sets aggCount=0. ~34 KB transient peak. | Allocate `agg` only after path decision; defer `raw` allocation when ring is empty. | Pending |
+| 3.6 | C | WebServer.cpp:1415 `/download` — does not call `isPathProtected`. `/download?file=/config.bin` leaks WiFi creds. | After sanitizePath: `if (isPathProtected(path)) { r->send(403,...); return; }` | Fixed (R13 PR pending) |
+| 3.7 | C | WebServer.cpp:1022-1024 `/export_settings` — emits `apPassword`/`clientPassword` plaintext. | Replace passwords with `"***"` mask; require explicit opt-in param to include them. | Fixed (R13 PR pending) |
+| 3.8 | C | ApiHandlers.cpp:236 — `new SensorReading[MAX_RAW]` without `std::nothrow`. bad_alloc → abort. | Use `new(std::nothrow)` and null-check. | Fixed (R13 PR pending) |
+| 3.9 | H | ApiHandlers.cpp:73-130 — `raw` AND `agg` both allocated even when historicalPath sets aggCount=0. ~34 KB transient peak. | Allocate `agg` only after path decision; defer `raw` allocation when ring is empty. | Fixed (R13 PR pending) |
 | 3.10 | M | ApiHandlers.cpp:53-58 — sensorFilter/metricFilter c_str() captured but inconsistent with the lifetime fix applied to agg/mode at line 106-112. | Apply the same copy-to-local-buffer pattern. | Pending |
 | 3.11 | M | ApiHandlers.cpp:611-647 wifi-test — globals updated without atomic_thread_fence. Reader can see WT_SUCCESS with stale ip/rssi. | `std::atomic<WifiTestState> g_wtState;` with release/acquire. | Pending |
-| 3.12 | H | WebServer.cpp:1653 `static String _importBuf` — shared across concurrent /import_settings uploads. Interleave corrupts JSON. Never reset on disconnect. | Move to `request->_tempObject`; clear on disconnect. | Pending |
+| 3.12 | H | WebServer.cpp:1653 `static String _importBuf` — shared across concurrent /import_settings uploads. Interleave corrupts JSON. Never reset on disconnect. | Move to `request->_tempObject`; clear on disconnect. | Fixed (R13 PR pending) |
 | 3.13 | C | WebServer.cpp:1389 `/factory_reset` — `xSemaphoreTake(fsMutex, 2000)` return value discarded; unconditional `xSemaphoreGive` at 1395 asserts on un-held mutex. | Capture return; only give if take succeeded. | Fixed (#79) |
-| 3.14 | H | WebServer.cpp:1608 — Upload fsMutex held for entire body (potentially MB). | Take mutex per chunk write only; release between writes. | Pending |
-| 3.15 | H | WebServer.cpp:1396 `safeWiFiShutdown()` runs from AsyncTCP worker with 300ms of delays + WIFI_OFF. Tears down own netif. | Schedule via `shouldRestart=true` flag; perform shutdown from loop(). | Pending |
+| 3.14 | H | WebServer.cpp:1608 — Upload fsMutex held for entire body (potentially MB). | Take mutex per chunk write only; release between writes. | Fixed (R13 PR pending) |
+| 3.15 | H | WebServer.cpp:1396 `safeWiFiShutdown()` runs from AsyncTCP worker with 300ms of delays + WIFI_OFF. Tears down own netif. | Schedule via `shouldRestart=true` flag; perform shutdown from loop(). | Fixed (R13 PR pending) |
 | 3.16 | M | ApiHandlers.cpp:488-493 `/api/ota/rollback` — `delay(200)` on AsyncTCP worker. | Use deferred flag like NTP sync pattern. | Pending |
 | 3.17 | M | WebServer.cpp:1289-1330 `/set_time` — ~120ms of `delay()` in RTC writes from AsyncTCP worker. | Move RTC mutation to loop() deferred handler. | Pending |
 | 3.18 | M | WebServer.cpp:1422 `/download` TOCTOU between exists() and beginResponse(). | Null-check `resp` before `addHeader`. | Pending |
@@ -91,19 +91,19 @@ Files: `src/tasks/*`, `src/pipeline/*`, `src/sensors/plugins/WaterFlowSensor.cpp
 
 | # | Severity | Issue | Fix | Status |
 |---|---|---|---|---|
-| 4.1 | C | iot-extensions.js:705-715 — `/api/sensors` returns `{sensors:[...]}` but populateHealthPage expects raw Array. Health page renders nothing. | `var sensors = (data && data.sensors) || []; if (!sensors.length) return; renderHealthGrid(sensors);` | Pending |
+| 4.1 | C | iot-extensions.js:705-715 — `/api/sensors` returns `{sensors:[...]}` but populateHealthPage expects raw Array. Health page renders nothing. | `var sensors = (data && data.sensors) || []; if (!sensors.length) return; renderHealthGrid(sensors);` | Fixed (R13 PR pending) |
 | 4.2 | M | sensors.js:104 — reads `d.last_sweep_ms` which backend never emits. | Emit `last_sweep_ms` from SensorManager::toJson; OR remove the UI label. | Pending |
-| 4.3 | C | pages.js:812-822 `filesDelete` — sends GET to /delete (backend only registers POST). All Files-page deletions silently 405. | Add `{ method: "POST" }` to fetch options. | Pending |
-| 4.4 | H | pages.js:812,877,901,865 — file ops send no CSRF token (matches backend gap from 3.4). | Add CSRF param + retry logic on 403. | Pending |
+| 4.3 | C | pages.js:812-822 `filesDelete` — sends GET to /delete (backend only registers POST). All Files-page deletions silently 405. | Add `{ method: "POST" }` to fetch options. | Fixed (R13 PR pending) |
+| 4.4 | H | pages.js:812,877,901,865 — file ops send no CSRF token (matches backend gap from 3.4). | Add CSRF param + retry logic on 403. | Fixed (R13 PR pending) |
 | 4.5 | C | settings.js:1525 `/do_update` — no CSRF. otaInit and otaUpload run without CSRF auth. | Backend: `requireMutatingAuth` added to `/do_update` request callback (R5). Frontend FormData CSRF append still pending. | Partial (#80) — frontend csrf append still needed |
 | 4.6 | H | settings.js:1665 `Modules.save` — JSON body, no `csrf` param. CsrfToken::require can't find param in JSON bodies. | Backend: `requireMutatingAuth` added to JSON-body endpoint request callbacks with TODO comment (R5). `?csrf=...` query-string workaround documented; X-CSRF-Token header support still pending. | Partial (#80) — JSON-body CSRF via header still pending |
-| 4.7 | C | iot-extensions.js:603 POST /api/alerts — no CSRF token. Whole alert ruleset can be replaced unauthenticated. | Add `csrf` param; backend should also call `csrfBlock`. | Pending |
-| 4.8 | H | All `fetch()` / `XMLHttpRequest` — no AbortController, no `xhr.timeout`. UI hangs forever on backend deadlocks. | Wrap fetches in `Promise.race(fetch, timeout(15000))`; set `xhr.timeout = 60000` for uploads. | Pending |
+| 4.7 | C | iot-extensions.js:603 POST /api/alerts — no CSRF token. Whole alert ruleset can be replaced unauthenticated. | Add `csrf` param; backend should also call `csrfBlock`. | Fixed (R13 PR pending) |
+| 4.8 | H | All `fetch()` / `XMLHttpRequest` — no AbortController, no `xhr.timeout`. UI hangs forever on backend deadlocks. | Wrap fetches in `Promise.race(fetch, timeout(15000))`; set `xhr.timeout = 60000` for uploads. | Fixed (R13 PR pending) |
 | 4.9 | M | settings.js:1404 otaUpload XHR — no timeout. Mid-flash crash hangs UI. | `xhr.timeout = 120000; xhr.ontimeout = function() { ... }` | Pending |
 | 4.10 | M | pages.js:1000 `/api/live` polling — no in-flight guard. Backend stall queues many requests. | Track `liveInFlight`; skip tick if previous unfinished. | Pending |
 | 4.11 | M | pages.js:963-980 EventSource — no client-side keepalive. Silent stall not detected. | Reset a 10s timer on each event; on timeout close+reopen. | Pending |
 | 4.12 | M | core.js:438-451 CSRF cache — only `settingsSave` retries on 403. Other call sites do not. | Centralize: every mutating fetch uses a `postWithCsrf()` helper. | Pending |
-| 4.13 | H | settings.js:1349 `_otaSha256` — SubtleCrypto unavailable on `http://` (Secure Context spec). AP mode always returns empty hash → server skips SHA-256 verification silently. | Detect missing SubtleCrypto; warn user; require manual hash entry; OR fall back to JS-side SHA implementation. | Pending |
+| 4.13 | H | settings.js:1349 `_otaSha256` — SubtleCrypto unavailable on `http://` (Secure Context spec). AP mode always returns empty hash → server skips SHA-256 verification silently. | Detect missing SubtleCrypto; warn user; require manual hash entry; OR fall back to JS-side SHA implementation. | Fixed (R13 PR pending) |
 | 4.14 | M | WebServer.cpp:1278 `/save_time` — writes timezone but never `dstOffsetHours`. UI never reads/writes it. DST stuck at 0. | Add `dstOffsetHours` param parse + UI input. | Pending |
 | 4.15 | L | settings.js (network init) — `/export_settings` leaks plaintext passwords into hidden form fields. DevTools reveals. | Tied to 3.7; once masked, UI must request unmask explicitly. | Pending |
 | 4.16 | L | pages.js:686 — filelist `truncated` flag from backend never read in UI. >500 files: silent partial list. | Render "showing first 500" banner when `d.truncated`. | Pending |
