@@ -705,8 +705,9 @@
     fetch("/api/sensors")
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
-        if (!data || !Array.isArray(data)) return;
-        renderHealthGrid(data);
+        var sensors = (data && data.sensors) || [];
+        if (!sensors.length) return;
+        renderHealthGrid(sensors);
       })
       .catch(function () {
         var grid = document.getElementById("health-grid");
