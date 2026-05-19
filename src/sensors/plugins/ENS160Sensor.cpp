@@ -39,6 +39,11 @@ bool ENS160Sensor::init(JsonObjectConst cfg) {
     int scl = cfg["scl"] | -1;
     if (!validateAttachPin(sda, "ens160", "sda")) return false;
     if (!validateAttachPin(scl, "ens160", "scl")) return false;
+    extern bool _claimI2cAddress(uint8_t, const char*);
+    if (!_claimI2cAddress(_addr, getType())) {
+        Serial.printf("[ENS160] I2C address 0x%02X already claimed — refusing init\n", _addr);
+        return false;
+    }
     Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];

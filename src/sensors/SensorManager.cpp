@@ -17,6 +17,19 @@ bool _claimSerial1(const char* who) {
 }
 
 // ---------------------------------------------------------------------------
+// I2C address ownership arbitration (row 22.4).
+// Tracks which plugin claimed each 7-bit I2C address so that two sensors
+// with the same fixed address refuse to co-initialise rather than silently
+// corrupting each other's reads.
+static const char* _i2cOwners[128] = {};
+
+bool _claimI2cAddress(uint8_t addr, const char* who) {
+    if (addr >= 128) return false;
+    if (_i2cOwners[addr] == nullptr) { _i2cOwners[addr] = who; return true; }
+    return (strcmp(_i2cOwners[addr], who) == 0);
+}
+
+// ---------------------------------------------------------------------------
 bool SensorManager::registerPlugin(const char* type, SensorFactory factory) {
     if (_pluginCount >= MAX_PLUGINS) return false;
     strncpy(_plugins[_pluginCount].type, type, sizeof(_plugins[0].type) - 1);
