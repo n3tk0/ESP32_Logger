@@ -324,10 +324,23 @@ static void handleConfigPlatform(AsyncWebServerRequest* req) {
 static void handleApiDiag(AsyncWebServerRequest* req) {
     JsonDocument doc;
 
-    // Heap
+    // Heap (legacy top-level fields kept for backwards compat)
     doc["free_heap"]     = (uint32_t)ESP.getFreeHeap();
     doc["min_free_heap"] = (uint32_t)ESP.getMinFreeHeap();
     doc["queue_drops"]   = (uint32_t)g_queueDrops;
+
+    // R19.A — heap sub-object
+    {
+        JsonObject heap = doc["heap"].to<JsonObject>();
+        heap["free"]         = ESP.getFreeHeap();
+        heap["min"]          = ESP.getMinFreeHeap();
+        heap["largestBlock"] = ESP.getMaxAllocHeap();
+        uint32_t fr  = ESP.getFreeHeap();
+        uint32_t lg  = ESP.getMaxAllocHeap();
+        int      pct = (fr > 0) ? (int)(100 - (100ULL * lg) / fr) : 0;
+        if (pct < 0) pct = 0;
+        heap["fragPct"] = pct;
+    }
 
     // Queues
     JsonObject queues = doc["queues"].to<JsonObject>();
