@@ -31,6 +31,7 @@ extern MqttExporter* g_mqttExporter;
 #endif
 #include "../tasks/TaskManager.h"  // task handles for /api/diag
 #include "../managers/OtaManager.h"
+#include "../utils/MutexGuard.h"   // R19.D: guarded /reset_log.txt read
 
 // ---------------------------------------------------------------------------
 // GET /api/data
@@ -396,6 +397,37 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     ota["previous"]         = OtaManager::previousPartitionLabel();
     ota["pending_verify"]   = OtaManager::isPendingVerify();
     ota["rollback_capable"] = OtaManager::isRollbackCapable();
+
+    // R19.D — tail of /reset_log.txt (last ≤16 lines)
+    JsonArray rl = doc["resetLog"].to<JsonArray>();
+    if (fsAvailable && activeFS && fsMutex) {
+        MutexGuard g(fsMutex, pdMS_TO_TICKS(1000));
+        if (g.isLocked() && activeFS->exists("/reset_log.txt")) {
+            File f = activeFS->open("/reset_log.txt", FILE_READ);
+            if (f && f.size() <= 8 * 1024) {
+                String buf;
+                buf.reserve((size_t)f.size());
+                while (f.available()) buf += (char)f.read();
+                f.close();
+                // Tail: keep only the last 16 lines
+                int newlines = 0;
+                for (int i = (int)buf.length() - 1; i >= 0; i--) {
+                    if (buf[i] == '\n') newlines++;
+                    if (newlines > 16) { buf = buf.substring(i + 1); break; }
+                }
+                int start = 0;
+                for (int i = 0; i < (int)buf.length(); i++) {
+                    if (buf[i] == '\n') {
+                        if (i > start) rl.add(buf.substring(start, i));
+                        start = i + 1;
+                    }
+                }
+                if (start < (int)buf.length()) rl.add(buf.substring(start));
+            } else if (f) {
+                f.close();
+            }
+        }
+    }
 
     sendJsonResponse(req, doc);
 }
