@@ -28,7 +28,17 @@ function dbLoadUPlot(cb) {
 
   var th = ST.theme || CFG.theme || {};
   var preferLocal = th.chartSource === 0 || th.chartSource === "0";
-  var localSrc = th.chartLocalPath || "/uPlot.iife.min.js";
+
+  function _safeChartPath(s) {
+    if (!s || typeof s !== "string") return null;
+    if (s.length > 128) return null;
+    if (s.indexOf('"') >= 0 || s.indexOf("'") >= 0 ||
+        s.indexOf('<') >= 0 || s.indexOf('>') >= 0 ||
+        s.indexOf('\n') >= 0 || s.indexOf('\r') >= 0) return null;
+    if (!s.startsWith('/') && !s.startsWith('http')) return null;
+    return s;
+  }
+  var localSrc = _safeChartPath(th.chartLocalPath) || "/uPlot.iife.min.js";
   var cdnSrc   = "https://cdn.jsdelivr.net/npm/uplot@1/dist/uPlot.iife.min.js";
   var localCss = "/uPlot.min.css";
   var cdnCss   = "https://cdn.jsdelivr.net/npm/uplot@1/dist/uPlot.min.css";
