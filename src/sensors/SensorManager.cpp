@@ -57,6 +57,10 @@ void SensorManager::_destroyAll() {
     _count = 0;
     memset(_lastReadMs, 0, sizeof(_lastReadMs));
     memset(_health,     0, sizeof(_health));
+    // Reset arbitration tables so a reload or a failed-init doesn't
+    // permanently block re-claiming the same resource.
+    _serial1Owner = nullptr;
+    memset(_i2cOwners, 0, sizeof(_i2cOwners));
 }
 
 // ---------------------------------------------------------------------------
