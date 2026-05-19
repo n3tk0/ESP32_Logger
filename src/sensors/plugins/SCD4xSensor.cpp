@@ -88,7 +88,7 @@ bool SCD4xSensor::read(SensorReading& out) {
 
 int SCD4xSensor::readAll(SensorReading* out, int maxOut) {
     if (!_ready || maxOut < 3) return 0;
-    if (millis() < _warmupUntilMs) return 0;   // still warming up
+    if ((int32_t)(millis() - _warmupUntilMs) < 0) return 0;   // still warming up
 
     if (!_dataReady()) return 0;
 
