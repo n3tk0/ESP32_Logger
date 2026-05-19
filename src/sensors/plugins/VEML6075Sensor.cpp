@@ -1,5 +1,6 @@
 #include "VEML6075Sensor.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
+#include "../SensorManager.h"        // R17: _claim/_release helpers
 
 bool VEML6075Sensor::_writeReg16(uint8_t reg, uint16_t val) {
     Wire.beginTransmission(ADDR);
@@ -29,7 +30,6 @@ bool VEML6075Sensor::init(JsonObjectConst cfg) {
     int scl = cfg["scl"] | -1;
     if (!validateAttachPin(sda, "veml6075", "sda")) return false;
     if (!validateAttachPin(scl, "veml6075", "scl")) return false;
-    extern bool _claimI2cAddress(uint8_t, const char*);
     if (!_claimI2cAddress(ADDR, getType())) {
         Serial.printf("[VEML6075] I2C address 0x%02X already claimed — refusing init\n", ADDR);
         return false;

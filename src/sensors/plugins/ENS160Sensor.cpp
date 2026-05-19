@@ -1,5 +1,6 @@
 #include "ENS160Sensor.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
+#include "../SensorManager.h"        // R17: _claim/_release helpers
 
 bool ENS160Sensor::_writeReg(uint8_t reg, uint8_t val) {
     Wire.beginTransmission(_addr);
@@ -39,7 +40,6 @@ bool ENS160Sensor::init(JsonObjectConst cfg) {
     int scl = cfg["scl"] | -1;
     if (!validateAttachPin(sda, "ens160", "sda")) return false;
     if (!validateAttachPin(scl, "ens160", "scl")) return false;
-    extern bool _claimI2cAddress(uint8_t, const char*);
     if (!_claimI2cAddress(_addr, getType())) {
         Serial.printf("[ENS160] I2C address 0x%02X already claimed — refusing init\n", _addr);
         return false;

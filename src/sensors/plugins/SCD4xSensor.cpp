@@ -1,5 +1,6 @@
 #include "SCD4xSensor.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
+#include "../SensorManager.h"        // R17: _claim/_release helpers
 
 // CRC-8 per Sensirion: poly=0x31, init=0xFF
 uint8_t SCD4xSensor::_crc8(const uint8_t* data, size_t len) {
@@ -50,7 +51,6 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
     int scl = cfg["scl"] | -1;
     if (!validateAttachPin(sda, "scd4x", "sda")) return false;
     if (!validateAttachPin(scl, "scd4x", "scl")) return false;
-    extern bool _claimI2cAddress(uint8_t, const char*);
     if (!_claimI2cAddress(ADDR, getType())) {
         Serial.printf("[SCD4x] I2C address 0x%02X already claimed — refusing init\n", ADDR);
         return false;

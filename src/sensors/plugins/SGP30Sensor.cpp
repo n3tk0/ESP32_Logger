@@ -1,5 +1,6 @@
 #include "SGP30Sensor.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
+#include "../SensorManager.h"        // R17: _claim/_release helpers
 
 // CRC-8 (polynomial 0x31, init 0xFF) per Sensirion datasheet
 uint8_t SGP30Sensor::_crc8(uint8_t d1, uint8_t d2) {
@@ -49,7 +50,6 @@ bool SGP30Sensor::init(JsonObjectConst cfg) {
     int scl = cfg["scl"] | -1;
     if (!validateAttachPin(sda, "sgp30", "sda")) return false;
     if (!validateAttachPin(scl, "sgp30", "scl")) return false;
-    extern bool _claimI2cAddress(uint8_t, const char*);
     if (!_claimI2cAddress(ADDR, getType())) {
         Serial.printf("[SGP30] I2C address 0x%02X already claimed — refusing init\n", ADDR);
         return false;

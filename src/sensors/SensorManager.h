@@ -7,6 +7,25 @@
 #include "ISensor.h"
 
 // ============================================================================
+// Cross-plugin resource arbitration (R17 rows 21.1, 22.4).
+//
+// Plugins that share scarce hardware resources (Serial1, fixed I2C addresses)
+// claim ownership before configuring the bus. The second plugin attempting
+// to claim the same resource refuses to init, preventing silent collisions.
+//
+// Release helpers run from SensorManager's failure path so a plugin whose
+// init() failed AFTER claiming a resource doesn't permanently block another
+// plugin from claiming it. Same applies on reloadConfig() via _destroyAll().
+//
+// `who` is `ISensor::getType()` — a stable string literal per plugin type.
+// ============================================================================
+bool _claimSerial1(const char* who);
+void _releaseSerial1(const char* who);
+
+bool _claimI2cAddress(uint8_t addr, const char* who);
+void _releaseI2cClaims(const char* who);
+
+// ============================================================================
 // SensorManager — plugin registry and tick dispatcher
 //
 // Usage:

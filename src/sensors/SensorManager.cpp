@@ -16,6 +16,16 @@ bool _claimSerial1(const char* who) {
     return (strcmp(_serial1Owner, who) == 0);
 }
 
+// Releases the Serial1 claim if `who` matches. Called from
+// SensorManager::loadAndInit() when a plugin's init() returns false
+// AFTER it claimed the bus — otherwise the claim would persist and
+// block subsequent plugins from using Serial1. (Codex P2 on PR #93.)
+void _releaseSerial1(const char* who) {
+    if (_serial1Owner && strcmp(_serial1Owner, who) == 0) {
+        _serial1Owner = nullptr;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // I2C address ownership arbitration (row 22.4).
 // Tracks which plugin claimed each 7-bit I2C address so that two sensors
@@ -27,6 +37,19 @@ bool _claimI2cAddress(uint8_t addr, const char* who) {
     if (addr >= 128) return false;
     if (_i2cOwners[addr] == nullptr) { _i2cOwners[addr] = who; return true; }
     return (strcmp(_i2cOwners[addr], who) == 0);
+}
+
+// Releases every I2C-address claim held by `who`. Same rationale as
+// _releaseSerial1: a plugin that claimed an address then failed init
+// (e.g. device not present) must not poison that address for other
+// plugins. (Codex P2 on PR #93.)
+void _releaseI2cClaims(const char* who) {
+    if (!who) return;
+    for (int i = 0; i < 128; i++) {
+        if (_i2cOwners[i] && strcmp(_i2cOwners[i], who) == 0) {
+            _i2cOwners[i] = nullptr;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +147,12 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
             Serial.printf("[SensorManager] Sensor '%s' (%s) ready\n", id, type);
         } else {
             Serial.printf("[SensorManager] Sensor '%s' init FAILED\n", id);
+            // R17 follow-up (Codex P2 on PR #93): release any claims this
+            // plugin made on Serial1 / I2C addresses before init failed —
+            // otherwise the claim outlives the (deleted) instance and
+            // permanently blocks subsequent plugins on the same resource.
+            _releaseSerial1(s->getType());
+            _releaseI2cClaims(s->getType());
             delete s;
         }
     }

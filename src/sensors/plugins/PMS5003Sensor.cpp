@@ -1,5 +1,6 @@
 #include "PMS5003Sensor.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
+#include "../SensorManager.h"        // R17: _claim/_release helpers
 
 bool PMS5003Sensor::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]           | true;
@@ -15,8 +16,6 @@ bool PMS5003Sensor::init(JsonObjectConst cfg) {
 
     if (!validateAttachPin(rx, "pms5003", "uart_rx")) return false;
     if (tx >= 0 && !validateAttachPin(tx, "pms5003", "uart_tx")) return false;
-
-    extern bool _claimSerial1(const char*);
     if (!_claimSerial1(getType())) {
         Serial.println("[PMS5003] Serial1 already owned by another sensor — refusing init");
         return false;
