@@ -575,6 +575,7 @@ void setup() {
             moduleRegistry.saveAll(*activeFS);  // seed from current DeviceConfig
         }
     }
+    moduleRegistry.startAll();  // AUDIT 6.11: complete IModule lifecycle post-load
 
     int expectedActive = (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH) ? HIGH : LOW;
 

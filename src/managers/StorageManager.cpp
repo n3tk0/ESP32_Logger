@@ -93,6 +93,22 @@ const char* getStorageBarColor(int percent) {
     return config.theme.storageBarColor;
 }
 
+static String _escHtml(const String& s) {
+    String r; r.reserve(s.length());
+    for (size_t i = 0; i < s.length(); i++) {
+        char c = s[i];
+        switch (c) {
+            case '&':  r += "&amp;";  break;
+            case '<':  r += "&lt;";   break;
+            case '>':  r += "&gt;";   break;
+            case '"':  r += "&quot;"; break;
+            case '\'': r += "&#39;";  break;
+            default:   r += c;        break;
+        }
+    }
+    return r;
+}
+
 String generateDatalogFileOptions() {
     if (!fsAvailable || !activeFS) return "<option>No storage</option>";
     String html = "";
@@ -114,12 +130,13 @@ String generateDatalogFileOptions() {
         while (File entry = dir.openNextFile()) {
             String name = String(entry.name());
             String fullPath = path == "/" ? "/" + name : path + "/" + name;
-            
+
             if (entry.isDirectory()) {
                 dirs.push_back(fullPath);
             } else if (name.endsWith(".txt") || name.endsWith(".log") || name.endsWith(".csv")) {
-                String sel = (fullPath == currentFile) ? "selected" : "";
-                html += "<option value='" + fullPath + "' " + sel + ">" + fullPath + "</option>";
+                String esc = _escHtml(fullPath);
+                String sel = (fullPath == currentFile) ? " selected" : "";
+                html += "<option value='" + esc + "'" + sel + ">" + esc + "</option>";
             }
             entry.close();
         }

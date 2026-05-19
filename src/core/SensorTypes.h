@@ -53,11 +53,47 @@ struct SensorReading {
     // Serialise to compact JSON line (no trailing newline)
     // Caller provides buffer of at least 128 bytes.
     int toJsonLine(char* buf, size_t bufLen) const {
-        return snprintf(buf, bufLen,
-            "{\"ts\":%lu,\"id\":\"%s\",\"sensor\":\"%s\","
-            "\"metric\":\"%s\",\"value\":%.4g,\"unit\":\"%s\",\"q\":%u}",
-            (unsigned long)timestamp, sensorId, sensorType,
-            metric, value, unit, (unsigned)quality);
+        size_t n = 0;
+        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0,
+                              "{\"ts\":%lu,\"id\":", (unsigned long)timestamp);
+        n += (size_t)_appendJsonEscaped(buf + n, bufLen > n ? bufLen - n : 0, sensorId);
+        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0, ",\"sensor\":");
+        n += (size_t)_appendJsonEscaped(buf + n, bufLen > n ? bufLen - n : 0, sensorType);
+        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0, ",\"metric\":");
+        n += (size_t)_appendJsonEscaped(buf + n, bufLen > n ? bufLen - n : 0, metric);
+        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0, ",\"value\":%.4g,\"unit\":", value);
+        n += (size_t)_appendJsonEscaped(buf + n, bufLen > n ? bufLen - n : 0, unit);
+        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0, ",\"q\":%u}", (unsigned)quality);
+        return (n >= bufLen) ? -1 : (int)n;
+    }
+
+private:
+    // Returns would-be byte count (snprintf semantics) so callers can detect
+    // truncation by accumulating the total and comparing against bufLen.
+    static int _appendJsonEscaped(char* out, size_t cap, const char* s) {
+        size_t a = 0;   // actual write cursor (stays within cap)
+        size_t w = 0;   // would-be total (returned)
+        if (a < cap) out[a++] = '"';
+        w++;
+        for (; s && *s; s++) {
+            unsigned char c = (unsigned char)*s;
+            if (c == '"') {
+                if (a + 1 < cap) { out[a++] = '\\'; out[a++] = '"'; }
+                w += 2;
+            } else if (c == '\\') {
+                if (a + 1 < cap) { out[a++] = '\\'; out[a++] = '\\'; }
+                w += 2;
+            } else if (c < 0x20) {
+                if (a + 5 < cap) a += (size_t)snprintf(out + a, cap - a, "\\u%04x", c);
+                w += 6;
+            } else {
+                if (a < cap) out[a++] = (char)c;
+                w++;
+            }
+        }
+        if (a < cap) out[a++] = '"';
+        w++;
+        return (int)w;
     }
 };
 

@@ -1,11 +1,24 @@
 #include "ThemeModule.h"
 #include "../core/Globals.h"
 #include "../core/Config.h"
+#include "../utils/Utils.h"
 
 namespace {
 
 void copyStr(char* dst, size_t n, const char* src) {
     if (src) strlcpy(dst, src, n);
+}
+
+static bool _isHexColor(const char* s) {
+    if (!s || s[0] != '#') return false;
+    size_t n = strlen(s);
+    if (n != 4 && n != 7) return false;
+    for (size_t i = 1; i < n; i++) {
+        char c = s[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+            return false;
+    }
+    return true;
 }
 
 // PROGMEM schema — drives Form.bind() in the new Settings UI (phase 4).
@@ -40,15 +53,43 @@ bool ThemeModule::load(JsonObjectConst cfg) {
     t.chartSource      = (ChartSource)(cfg["chartSource"] | (int)t.chartSource);
     t.chartLabelFormat = (ChartLabelFormat)(cfg["chartLabelFormat"] | (int)t.chartLabelFormat);
 
-    copyStr(t.primaryColor,      sizeof(t.primaryColor),      cfg["primaryColor"]      | (const char*)nullptr);
-    copyStr(t.secondaryColor,    sizeof(t.secondaryColor),    cfg["secondaryColor"]    | (const char*)nullptr);
-    copyStr(t.lightBgColor,      sizeof(t.lightBgColor),      cfg["lightBgColor"]      | (const char*)nullptr);
-    copyStr(t.lightTextColor,    sizeof(t.lightTextColor),    cfg["lightTextColor"]    | (const char*)nullptr);
-    copyStr(t.darkBgColor,       sizeof(t.darkBgColor),       cfg["darkBgColor"]       | (const char*)nullptr);
-    copyStr(t.darkTextColor,     sizeof(t.darkTextColor),     cfg["darkTextColor"]     | (const char*)nullptr);
-    copyStr(t.chartLocalPath,    sizeof(t.chartLocalPath),    cfg["chartLocalPath"]    | (const char*)nullptr);
-    copyStr(t.logoSource,        sizeof(t.logoSource),        cfg["logoSource"]        | (const char*)nullptr);
-    copyStr(t.faviconPath,       sizeof(t.faviconPath),       cfg["faviconPath"]       | (const char*)nullptr);
+    bool warnedColor = false;
+    auto loadColor = [&](char* dst, size_t n, const char* key) {
+        const char* v = cfg[key] | (const char*)nullptr;
+        if (!v) return;
+        if (_isHexColor(v)) { copyStr(dst, n, v); }
+        else if (!warnedColor) {
+            Serial.printf("[ThemeModule] rejected invalid color for %s\n", key);
+            warnedColor = true;
+        }
+    };
+    loadColor(t.primaryColor,   sizeof(t.primaryColor),   "primaryColor");
+    loadColor(t.secondaryColor, sizeof(t.secondaryColor), "secondaryColor");
+    loadColor(t.lightBgColor,   sizeof(t.lightBgColor),   "lightBgColor");
+    loadColor(t.lightTextColor, sizeof(t.lightTextColor), "lightTextColor");
+    loadColor(t.darkBgColor,    sizeof(t.darkBgColor),    "darkBgColor");
+    loadColor(t.darkTextColor,  sizeof(t.darkTextColor),  "darkTextColor");
+
+    auto loadPath = [&](char* dst, size_t n, const char* key) {
+        const char* v = cfg[key] | (const char*)nullptr;
+        if (!v) return;           // key absent — keep existing
+        String val(v);
+        if (val.length() == 0) { copyStr(dst, n, ""); return; }  // explicit clear
+        if (val.startsWith("http://") || val.startsWith("https://")) {
+            // External URL: reject control chars and quotes, accept as-is
+            for (size_t i = 0; i < val.length(); i++) {
+                if ((unsigned char)val[i] < 0x20 || val[i] == '"' || val[i] == '\'') return;
+            }
+            copyStr(dst, n, v);
+        } else {
+            String clean = sanitizePath(val);
+            if (clean.length() == 0 || isPathProtected(clean)) return;
+            copyStr(dst, n, clean.c_str());
+        }
+    };
+    loadPath(t.chartLocalPath, sizeof(t.chartLocalPath), "chartLocalPath");
+    loadPath(t.logoSource,     sizeof(t.logoSource),     "logoSource");
+    loadPath(t.faviconPath,    sizeof(t.faviconPath),    "faviconPath");
     return true;
 }
 

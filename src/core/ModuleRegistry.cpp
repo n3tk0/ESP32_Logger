@@ -70,14 +70,21 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
     JsonObjectConst modules = doc["modules"].as<JsonObjectConst>();
     if (modules.isNull()) return true;  // empty-but-valid file
 
+    int failed = 0;
     for (int i = 0; i < _count; i++) {
         JsonObjectConst slice = modules[_modules[i]->getId()].as<JsonObjectConst>();
         if (slice.isNull()) continue;
         bool en = slice["enabled"] | true;
         _modules[i]->setEnabled(en);
-        _modules[i]->load(slice);
+        if (!_modules[i]->load(slice)) {
+            Serial.printf("[ModuleRegistry] load FAILED for %s\n", _modules[i]->getId());
+            failed++;
+        }
     }
-    return true;
+    if (failed > 0) {
+        Serial.printf("[ModuleRegistry] %d module(s) failed to load — defaults retained\n", failed);
+    }
+    return (failed == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -107,9 +114,12 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
         Serial.printf("[ModuleRegistry] cannot open %s for write\n", tmp.c_str());
         return false;
     }
-    size_t n = serializeJson(doc, f);
+    size_t want    = measureJson(doc);
+    size_t written = serializeJson(doc, f);
     f.close();
-    if (n == 0) {
+    if (written == 0 || written < want) {
+        Serial.printf("[ModuleRegistry] save TRUNCATED: %u of %u bytes — discarding\n",
+                      (unsigned)written, (unsigned)want);
         fs.remove(tmp.c_str());
         return false;
     }
