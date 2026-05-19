@@ -330,15 +330,16 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     doc["min_free_heap"] = (uint32_t)ESP.getMinFreeHeap();
     doc["queue_drops"]   = (uint32_t)g_queueDrops;
 
-    // R19.A — heap sub-object
+    // R19.A — heap sub-object (snapshot all values once for consistency)
     {
+        uint32_t fr = ESP.getFreeHeap();
+        uint32_t mn = ESP.getMinFreeHeap();
+        uint32_t lg = ESP.getMaxAllocHeap();
         JsonObject heap = doc["heap"].to<JsonObject>();
-        heap["free"]         = ESP.getFreeHeap();
-        heap["min"]          = ESP.getMinFreeHeap();
-        heap["largestBlock"] = ESP.getMaxAllocHeap();
-        uint32_t fr  = ESP.getFreeHeap();
-        uint32_t lg  = ESP.getMaxAllocHeap();
-        int      pct = (fr > 0) ? (int)(100 - (100ULL * lg) / fr) : 0;
+        heap["free"]         = fr;
+        heap["min"]          = mn;
+        heap["largestBlock"] = lg;
+        int pct = (fr > 0) ? (int)(100 - (100ULL * lg) / fr) : 0;
         if (pct < 0) pct = 0;
         heap["fragPct"] = pct;
     }
@@ -398,6 +399,14 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     ota["pending_verify"]   = OtaManager::isPendingVerify();
     ota["rollback_capable"] = OtaManager::isRollbackCapable();
 
+    // uptime + network.ip for the failsafe banner (and general observability)
+    doc["uptime"] = (uint32_t)(millis() / 1000UL);
+    {
+        JsonObject net = doc["network"].to<JsonObject>();
+        net["ip"] = wifiConnectedAsClient ? WiFi.localIP().toString()
+                                          : WiFi.softAPIP().toString();
+    }
+
     // R19.D — tail of /reset_log.txt (last ≤16 lines)
     JsonArray rl = doc["resetLog"].to<JsonArray>();
     if (fsAvailable && activeFS && fsMutex) {
@@ -405,9 +414,7 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         if (g.isLocked() && activeFS->exists("/reset_log.txt")) {
             File f = activeFS->open("/reset_log.txt", FILE_READ);
             if (f && f.size() <= 8 * 1024) {
-                String buf;
-                buf.reserve((size_t)f.size());
-                while (f.available()) buf += (char)f.read();
+                String buf = f.readString();
                 f.close();
                 // Tail: keep only the last 16 lines
                 int newlines = 0;
@@ -418,11 +425,17 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
                 int start = 0;
                 for (int i = 0; i < (int)buf.length(); i++) {
                     if (buf[i] == '\n') {
-                        if (i > start) rl.add(buf.substring(start, i));
+                        String line = buf.substring(start, i);
+                        line.trim();
+                        if (line.length() > 0) rl.add(line);
                         start = i + 1;
                     }
                 }
-                if (start < (int)buf.length()) rl.add(buf.substring(start));
+                if (start < (int)buf.length()) {
+                    String line = buf.substring(start);
+                    line.trim();
+                    if (line.length() > 0) rl.add(line);
+                }
             } else if (f) {
                 f.close();
             }
