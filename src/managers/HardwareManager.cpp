@@ -22,6 +22,9 @@ void IRAM_ATTR onFlowPulse() {
 // ============================================================================
 void debounceButton(uint8_t pin, int& last, int& stable,
                     unsigned long& lastTime, int& count) {
+    // Seed lastTime on first call so the first edge doesn't bypass debounce.
+    // Globals initialises lastTime to 0; treat 0 as uninitialised.
+    if (lastTime == 0) lastTime = millis();
     int reading = digitalRead(pin);
     if (reading != last) { lastTime = millis(); last = reading; }
 
