@@ -94,6 +94,7 @@
       input.min = -1; input.max = 48; input.value = -1;
       input.dataset.key = f.key;
       input.dataset.legacyOnly = f.legacyOnly ? "1" : "0";
+      if (f.required) input.setAttribute("aria-required", "true");
       input.oninput = function () { revalidatePin(f.key); };
       var msg = document.createElement("div");
       msg.id = "msg-" + f.key; msg.className = "ok";
