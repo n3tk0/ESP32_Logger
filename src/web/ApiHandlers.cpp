@@ -382,6 +382,14 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     tasks["storage"]    = stackWords(TaskManager::hStorage);
     tasks["export"]     = stackWords(TaskManager::hExport);
 
+    // R19.C — drop and reset counters
+    {
+        JsonObject c = doc["counters"].to<JsonObject>();
+        c["queueDrops"]    = (uint32_t)g_queueDrops;
+        c["ringPushDrops"] = g_ringPushDrops.load();
+        c["resets"]        = (uint32_t)g_consecutiveResets;
+    }
+
     // OTA rollback info
     JsonObject ota = doc["ota"].to<JsonObject>();
     ota["running"]          = OtaManager::runningPartitionLabel();
