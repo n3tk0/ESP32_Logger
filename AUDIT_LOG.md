@@ -975,3 +975,18 @@ Switched from "Auditor" to "Senior Refactoring Engineer". Structural improvement
 
 ---
 
+
+
+## R19 — Diagnostics & Observability (PR pending)
+
+Pure-exposure pass: no new counters added. Surfaces existing internals into `/api/diag` as four new sub-objects.
+
+| Sub-task | Change | Rows closed |
+|---|---|---|
+| 19.A | `heap` sub-object (free, min, largestBlock, fragPct) | none direct |
+| 19.B | camelCase aliases in existing `tasks` sub-object | none direct |
+| 19.C | `counters` sub-object (queueDrops, ringPushDrops, resets) | none direct |
+| 19.D | `resetLog` array — tail of /reset_log.txt (≤16 lines) | none direct |
+| 19.E | Failsafe page diagnostic banner (IP · uptime · free heap · resets) | none direct |
+
+**Note:** Row 9.11 (expose `g_logDrops` via `/api/diag`) requires adding a new counter first — deferred to R19.2.
