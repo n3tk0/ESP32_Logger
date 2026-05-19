@@ -16,6 +16,12 @@ bool PMS5003Sensor::init(JsonObjectConst cfg) {
     if (!validateAttachPin(rx, "pms5003", "uart_rx")) return false;
     if (tx >= 0 && !validateAttachPin(tx, "pms5003", "uart_tx")) return false;
 
+    extern bool _claimSerial1(const char*);
+    if (!_claimSerial1(getType())) {
+        Serial.println("[PMS5003] Serial1 already owned by another sensor — refusing init");
+        return false;
+    }
+
     _serial = &Serial1;
     _serial->begin(baud, SERIAL_8N1, rx, tx);
     delay(100);

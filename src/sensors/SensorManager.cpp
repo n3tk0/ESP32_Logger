@@ -6,6 +6,17 @@
 SensorManager sensorManager;
 
 // ---------------------------------------------------------------------------
+// Serial1 ownership arbitration (row 21.1).
+// Only one sensor plugin may initialise Serial1; the second call from a
+// different plugin returns false so init() can refuse to proceed.
+static const char* _serial1Owner = nullptr;
+
+bool _claimSerial1(const char* who) {
+    if (_serial1Owner == nullptr) { _serial1Owner = who; return true; }
+    return (strcmp(_serial1Owner, who) == 0);
+}
+
+// ---------------------------------------------------------------------------
 bool SensorManager::registerPlugin(const char* type, SensorFactory factory) {
     if (_pluginCount >= MAX_PLUGINS) return false;
     strncpy(_plugins[_pluginCount].type, type, sizeof(_plugins[0].type) - 1);
