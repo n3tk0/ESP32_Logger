@@ -35,7 +35,7 @@ function dbLoadUPlot(cb) {
     if (s.indexOf('"') >= 0 || s.indexOf("'") >= 0 ||
         s.indexOf('<') >= 0 || s.indexOf('>') >= 0 ||
         s.indexOf('\n') >= 0 || s.indexOf('\r') >= 0) return null;
-    if (!s.startsWith('/') && !s.startsWith('http')) return null;
+    if (s.startsWith('//') || (!s.startsWith('/') && !s.startsWith('http'))) return null;
     return s;
   }
   var localSrc = _safeChartPath(th.chartLocalPath) || "/uPlot.iife.min.js";
