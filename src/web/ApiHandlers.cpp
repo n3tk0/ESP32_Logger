@@ -372,6 +372,15 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         tasks["StorageTask"]    = (uint32_t)uxTaskGetStackHighWaterMark(TaskManager::hStorage);
     if (TaskManager::hExport)
         tasks["ExportTask"]     = (uint32_t)uxTaskGetStackHighWaterMark(TaskManager::hExport);
+    // R19.B — camelCase aliases (value = words remaining; ×4 → bytes on 32-bit)
+    auto stackWords = [](TaskHandle_t h) -> uint32_t {
+        return h ? (uint32_t)uxTaskGetStackHighWaterMark(h) : 0;
+    };
+    tasks["sensor"]     = stackWords(TaskManager::hSensor);
+    tasks["slowSensor"] = stackWords(TaskManager::hSlowSensor);
+    tasks["process"]    = stackWords(TaskManager::hProcess);
+    tasks["storage"]    = stackWords(TaskManager::hStorage);
+    tasks["export"]     = stackWords(TaskManager::hExport);
 
     // OTA rollback info
     JsonObject ota = doc["ota"].to<JsonObject>();
