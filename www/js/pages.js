@@ -38,10 +38,13 @@ function dbLoadUPlot(cb) {
     if (s.startsWith('//') || (!s.startsWith('/') && !s.startsWith('http'))) return null;
     return s;
   }
+  var CDN_VERSION = "1.6.32";
+  var CDN_JS_SRI  = "sha384-Gx3t0zdBAuQOuvvmaLZj7HKEiSgWTAs+VdtNY7wt19QDPTDQjFIwAuXDj0zeN00c";
+  var CDN_CSS_SRI = "sha384-IfV0B7MIOYuO95kO9G5ySKPz/85zqFNOAs8iy4tkK5zd9izhJAB8b7lHrwYqqmYE";
   var localSrc = _safeChartPath(th.chartLocalPath) || "/uPlot.iife.min.js";
-  var cdnSrc   = "https://cdn.jsdelivr.net/npm/uplot@1/dist/uPlot.iife.min.js";
+  var cdnSrc   = "https://cdn.jsdelivr.net/npm/uplot@" + CDN_VERSION + "/dist/uPlot.iife.min.js";
   var localCss = "/uPlot.min.css";
-  var cdnCss   = "https://cdn.jsdelivr.net/npm/uplot@1/dist/uPlot.min.css";
+  var cdnCss   = "https://cdn.jsdelivr.net/npm/uplot@" + CDN_VERSION + "/dist/uPlot.min.css";
 
   function fire() {
     _uPlotLoaded = true;
@@ -69,12 +72,20 @@ function dbLoadUPlot(cb) {
   var link = document.createElement("link");
   link.rel  = "stylesheet";
   link.href = preferLocal ? localCss : cdnCss;
+  if (!preferLocal) {
+    link.integrity   = CDN_CSS_SRI;
+    link.crossOrigin = "anonymous";
+  }
   link.onerror = function () {
     var fallbackCss = preferLocal ? cdnCss : localCss;
     if (fallbackCss && link.href !== fallbackCss) {
       var link2 = document.createElement("link");
       link2.rel  = "stylesheet";
       link2.href = fallbackCss;
+      if (fallbackCss === cdnCss) {
+        link2.integrity   = CDN_CSS_SRI;
+        link2.crossOrigin = "anonymous";
+      }
       document.head.appendChild(link2);
     }
   };
@@ -92,9 +103,11 @@ function dbLoadUPlot(cb) {
       return;
     }
     var s2 = document.createElement("script");
-    s2.src = cdnSrc;
-    s2.onload = fire;
-    s2.onerror = _giveUp;
+    s2.src         = cdnSrc;
+    s2.integrity   = CDN_JS_SRI;
+    s2.crossOrigin = "anonymous";
+    s2.onload      = fire;
+    s2.onerror     = _giveUp;
     document.head.appendChild(s2);
   };
   document.head.appendChild(s);
