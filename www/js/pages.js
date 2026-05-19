@@ -70,8 +70,9 @@ function dbLoadUPlot(cb) {
   };
   document.head.appendChild(link);
 
+  // Always try local first; fall back to CDN only on 404 (local missing).
   var s = document.createElement("script");
-  s.src = preferLocal ? localSrc : cdnSrc;
+  s.src = localSrc;
   s.onload = fire;
   s.onerror = function () {
     var isOffline = (ST.wifi === "ap") || (CFG.network && CFG.network.wifiMode === 0);
@@ -81,7 +82,7 @@ function dbLoadUPlot(cb) {
       return;
     }
     var s2 = document.createElement("script");
-    s2.src = preferLocal ? cdnSrc : localSrc;
+    s2.src = cdnSrc;
     s2.onload = fire;
     s2.onerror = _giveUp;
     document.head.appendChild(s2);
