@@ -11,7 +11,7 @@
 var PCFG = null; // cached platform config object
 
 function pcfgLoad(cb) {
-  fetch("/api/platform_config")
+  fetchWithTimeout("/api/platform_config", {}, 15000)
     .then(function (r) {
       return r.ok ? r.json() : null;
     })
@@ -41,11 +41,11 @@ function pcfgLoad(cb) {
 
 function pcfgSave(obj, cb) {
   var body = JSON.stringify(obj, null, 2);
-  fetch("/save_platform", {
+  fetchWithTimeout("/save_platform", {
     method: "POST",
     headers: { "Content-Type": "application/octet-stream" },
     body: body,
-  })
+  }, 30000)
     .then(function (r) {
       return r.json();
     })
@@ -82,7 +82,7 @@ function sensorsLoad() {
     return d + "d";
   }
 
-  fetch("/api/sensors")
+  fetchWithTimeout("/api/sensors", {}, 15000)
     .then(function (r) {
       return r.ok ? r.json() : null;
     })
@@ -327,8 +327,8 @@ function sensorChartLoad() {
   if (msg) msg.textContent = "Loading…";
 
   // Fetch primary (and optionally secondary) data
-  var fetches = [fetch(url1).then(function (r) { return r.ok ? r.json() : null; })];
-  if (url2) fetches.push(fetch(url2).then(function (r) { return r.ok ? r.json() : null; }));
+  var fetches = [fetchWithTimeout(url1, {}, 15000).then(function (r) { return r.ok ? r.json() : null; })];
+  if (url2) fetches.push(fetchWithTimeout(url2, {}, 15000).then(function (r) { return r.ok ? r.json() : null; }));
 
   Promise.all(fetches)
     .then(function (results) {
@@ -482,7 +482,7 @@ document.addEventListener("DOMContentLoaded", function () {
         metricSel.innerHTML = '<option value="">— metric —</option>';
         return;
       }
-      fetch("/api/sensors")
+      fetchWithTimeout("/api/sensors", {}, 15000)
         .then(function (r) { return r.json(); })
         .then(function (d) {
           var s = (d.sensors || []).find(function (s) { return s.id === sid; });
@@ -546,7 +546,7 @@ window._r11Profile = null;
 // the pin selector knows the right GPIO range, and CL_SYSTEM_PINS so it
 // can show profile-aware warnings. Safe to call multiple times.
 function clLoadBoardProfile() {
-    return fetch('/api/board-profiles', { credentials: 'same-origin' })
+    return fetchWithTimeout('/api/board-profiles', { credentials: 'same-origin' }, 15000)
         .then(function (r) { return r.json(); })
         .then(function (data) {
             var activeId = (data.active && data.active.id) || '';
@@ -1071,7 +1071,7 @@ function clSave() {
       }
       // Trigger restart so new mode takes effect
       setTimeout(function () {
-        fetch("/api/platform_reload", { method: "POST" }).catch(function () {});
+        fetchWithTimeout("/api/platform_reload", { method: "POST" }, 30000).catch(function () {});
       }, 500);
     } else {
       if (msg) {
@@ -1288,7 +1288,7 @@ function expSave() {
         msg.className = "";
       }
       setTimeout(function () {
-        fetch("/api/platform_reload", { method: "POST" }).catch(function () {});
+        fetchWithTimeout("/api/platform_reload", { method: "POST" }, 30000).catch(function () {});
       }, 500);
     } else {
       if (msg) {
