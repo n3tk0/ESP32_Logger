@@ -66,6 +66,7 @@ size_t AggregationEngine::lttb(const SensorReading* in,  size_t inLen,
         // Find point in current bucket with max triangle area
         double maxArea = -1.0;
         size_t maxIdx  = rangeStart;
+        if (rangeStart >= rangeEnd) continue;
         for (size_t j = rangeStart; j < rangeEnd; j++) {
             double area = _triangleArea(in[a], in[j], avgPoint);
             if (area > maxArea) { maxArea = area; maxIdx = j; }
