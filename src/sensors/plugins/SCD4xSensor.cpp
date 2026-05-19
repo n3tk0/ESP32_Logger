@@ -67,10 +67,10 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
         return false;
     }
 
-    // Wait for first measurement (SCD40 needs ~5s)
-    delay(5100);
+    // Defer the 5.1 s warm-up out of init(); readAll() gates on _warmupUntilMs.
+    _warmupUntilMs = millis() + 5100;
     _ready = true;
-    Serial.println("[SCD4x] Ready");
+    Serial.println("[SCD4x] Started — first reading in ~5s");
     return true;
 }
 
@@ -83,6 +83,7 @@ bool SCD4xSensor::read(SensorReading& out) {
 
 int SCD4xSensor::readAll(SensorReading* out, int maxOut) {
     if (!_ready || maxOut < 3) return 0;
+    if (millis() < _warmupUntilMs) return 0;   // still warming up
 
     if (!_dataReady()) return 0;
 

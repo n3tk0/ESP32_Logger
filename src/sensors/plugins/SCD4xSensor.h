@@ -47,8 +47,9 @@ private:
     bool    _dataReady();
     static  uint8_t _crc8(const uint8_t* data, size_t len);
 
-    uint32_t _intervalMs = 5000;
-    bool     _ready      = false;
+    uint32_t _intervalMs    = 5000;
+    bool     _ready         = false;
+    uint32_t _warmupUntilMs = 0;
 
     CalibrationAxis _calCo2;
     CalibrationAxis _calTemp;
