@@ -46,7 +46,9 @@ size_t AggregationEngine::lttb(const SensorReading* in,  size_t inLen,
 
         // Average of next bucket (the "C" reference point)
         double avgX = 0, avgY = 0;
-        size_t avgLen = nextBucketEnd - nextBucketStart;
+        size_t avgLen = (nextBucketEnd > nextBucketStart)
+                        ? (nextBucketEnd - nextBucketStart) : 0;
+        if (avgLen == 0) continue;
         for (size_t j = nextBucketStart; j < nextBucketEnd; j++) {
             avgX += in[j].timestamp;
             avgY += in[j].value;
