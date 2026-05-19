@@ -16,7 +16,7 @@ function sdInit() {
   if (clEl) clEl.classList.add("hidden");
   if (chev) chev.style.transform = "";
 
-  fetch("/api/status")
+  fetchWithTimeout("/api/status", {}, 15000)
     .then(function (r) {
       return r.json();
     })
@@ -60,7 +60,7 @@ function regenDevId() {
   if (!confirm("Generate new ID based on MAC address?")) return;
   getCsrfToken().then(function (token) {
     var url = "/api/regen-id" + (token ? "?csrf=" + encodeURIComponent(token) : "");
-    fetch(url, { method: "POST" })
+    fetchWithTimeout(url, { method: "POST" }, 30000)
       .then(function (r) {
         if (r.status === 403) {
           window.__csrfToken = null;
@@ -131,7 +131,7 @@ function changelogLoad() {
   if (!el) return;
   el.innerHTML = "<div class='text-muted' style='padding:.5rem'>Loading…</div>";
 
-  fetch("/api/changelog")
+  fetchWithTimeout("/api/changelog", {}, 15000)
     .then(function (r) {
       if (!r.ok) throw new Error("not found");
       return r.text();
@@ -161,12 +161,12 @@ function changelogLoad() {
               : "background:var(--border);color:var(--text-muted)") +
             '">' +
             "<strong>" +
-            ver +
+            esc(ver) +
             "</strong>" +
             '<ul style="margin:.5rem 0 0 1rem;padding:0;font-size:.9rem">';
           inVer = true;
         } else if (line.indexOf("-") === 0 && inVer) {
-          html += "<li>" + line.substring(1).trim() + "</li>";
+          html += "<li>" + esc(line.substring(1).trim()) + "</li>";
         }
       });
 
@@ -188,7 +188,7 @@ function changelogLoad() {
 // ══ SETTINGS: FLOW METER ══
 // ============================================================================
 function sfInit() {
-  fetch("/export_settings")
+  fetchWithTimeout("/export_settings", {}, 15000)
     .then(function (r) {
       return r.json();
     })
@@ -201,7 +201,7 @@ function sfInit() {
       setVal("sf-fl", fm.firstLoopMonitoringWindowSecs);
       setChk("sf-test", fm.testMode);
       setVal("sf-blink", fm.blinkDuration);
-      fetch("/api/status")
+      fetchWithTimeout("/api/status", {}, 15000)
         .then(function (r2) {
           return r2.json();
         })
@@ -279,7 +279,7 @@ var HW_SCHEMA = {
 };
 
 function hwInit() {
-  fetch("/export_settings")
+  fetchWithTimeout("/export_settings", {}, 15000)
     .then(function (r) { return r.json(); })
     .then(function (d) {
       CFG = d;
@@ -339,7 +339,7 @@ function thInit() {
   }
   _syncSeg("th-density-seg", "comfortable", "uiDensity");
   _syncSeg("th-accent-seg",  "cyan",        "accentColor");
-  fetch("/export_settings")
+  fetchWithTimeout("/export_settings", {}, 15000)
     .then(function (r) {
       return r.json();
     })
@@ -477,7 +477,7 @@ function themeSave(e, form) {
   function _sendTheme(isRetry) {
     getCsrfToken().then(function (token) {
       if (token) fd.set("csrf", token);
-      fetch("/save_theme", { method: "POST", body: fd })
+      fetchWithTimeout("/save_theme", { method: "POST", body: fd }, 30000)
         .then(function (r) {
           if (r.status === 403 && !isRetry) {
             window.__csrfToken = null;
@@ -565,7 +565,7 @@ function themeRestoreDefault() {
   function _sendRestore(isRetry) {
     getCsrfToken().then(function (token) {
       if (token) fd.set("csrf", token);
-      fetch("/save_theme", { method: "POST", body: fd })
+      fetchWithTimeout("/save_theme", { method: "POST", body: fd }, 30000)
         .then(function (r) {
           if (r.status === 403 && !isRetry) {
             window.__csrfToken = null;
@@ -596,7 +596,7 @@ function themeRestoreDefault() {
 // ══ SETTINGS: NETWORK ══
 // ============================================================================
 function netInit() {
-  fetch("/api/status")
+  fetchWithTimeout("/api/status", {}, 15000)
     .then(function (r) {
       return r.json();
     })
@@ -626,7 +626,7 @@ function netInit() {
       }
       netToggleStatic(); // Trigger UI update based on new loaded current properties
     });
-  fetch("/export_settings")
+  fetchWithTimeout("/export_settings", {}, 15000)
     .then(function (r) {
       return r.json();
     })
@@ -738,12 +738,12 @@ function netScanWifi() {
   list.innerHTML = "<div class='list-item'>🔍 Scanning…</div>";
   list.style.display = "block";
   netScanRetries = 0;
-  fetch("/wifi_scan_start").then(function () {
+  fetchWithTimeout("/wifi_scan_start", {}, 15000).then(function () {
     setTimeout(netCheckScan, 2000);
   });
 }
 function netCheckScan() {
-  fetch("/wifi_scan_result")
+  fetchWithTimeout("/wifi_scan_result", {}, 15000)
     .then(function (r) {
       return r.json();
     })
@@ -812,7 +812,7 @@ function netTestPoll(out, tries) {
     out.style.color = "var(--danger)";
     return;
   }
-  fetch("/api/modules/wifi/test")
+  fetchWithTimeout("/api/modules/wifi/test", {}, 15000)
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (d.state === "success") {
@@ -847,11 +847,11 @@ function netTestWifi() {
   }
   if (netTestPollTimer) { clearTimeout(netTestPollTimer); netTestPollTimer = null; }
   if (out) { out.textContent = "🧪 Testing… (up to 8s)"; out.style.color = "var(--text-muted)"; }
-  fetch("/api/modules/wifi/test", {
+  fetchWithTimeout("/api/modules/wifi/test", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ssid: ssid, password: pass })
-  })
+  }, 30000)
     .then(function (r) { return r.json().then(function (d) { return { status: r.status, body: d }; }); })
     .then(function (resp) {
       if (!out) return;
@@ -873,7 +873,7 @@ function netTestWifi() {
 // ══ SETTINGS: TIME ══
 // ============================================================================
 function timeInit() {
-  fetch("/api/status")
+  fetchWithTimeout("/api/status", {}, 15000)
     .then(function (r) {
       return r.json();
     })
@@ -929,7 +929,7 @@ function timeInit() {
       if (dateEl && !dateEl.value)
         dateEl.value = new Date().toISOString().slice(0, 10);
     });
-  fetch("/export_settings")
+  fetchWithTimeout("/export_settings", {}, 15000)
     .then(function (r) {
       return r.json();
     })
@@ -945,7 +945,7 @@ function timeSetManual(ev) {
   ev.preventDefault();
   var form = ev.target;
   var fd = new FormData(form);
-  fetch("/set_time", { method: "POST", body: fd })
+  fetchWithTimeout("/set_time", { method: "POST", body: fd }, 30000)
     .then(function (r) {
       return r.json();
     })
@@ -970,7 +970,7 @@ function timeSyncNTP(ev) {
     "<div class='alert alert-info'>⏳ Syncing from NTP…</div>",
     true,
   );
-  fetch("/sync_time", { method: "POST" })
+  fetchWithTimeout("/sync_time", { method: "POST" }, 30000)
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d.ok) {
@@ -984,7 +984,7 @@ function timeSyncNTP(ev) {
       var attempts = 0;
       var poll = function () {
         attempts++;
-        fetch("/api/time_sync_status")
+        fetchWithTimeout("/api/time_sync_status", {}, 15000)
           .then(function (r2) { return r2.json(); })
           .then(function (s) {
             if (s.result === 1) {
@@ -1017,10 +1017,10 @@ function timeRtcProtect(ev) {
   var fd = new FormData();
   var chk = document.getElementById("time-rtcProt");
   if (chk && chk.checked) fd.append("protect", "1");
-  fetch("/rtc_protect", { method: "POST", body: fd });
+  fetchWithTimeout("/rtc_protect", { method: "POST", body: fd }, 30000);
 }
 function timeFlushLogs() {
-  fetch("/flush_logs", { method: "POST" }).then(function () {
+  fetchWithTimeout("/flush_logs", { method: "POST" }, 30000).then(function () {
     showMsg(
       "time-msg",
       "<div class='alert alert-success'>✅ Log buffer flushed</div>",
@@ -1029,7 +1029,7 @@ function timeFlushLogs() {
   });
 }
 function timeBackupBoot() {
-  fetch("/backup_bootcount", { method: "POST" }).then(function () {
+  fetchWithTimeout("/backup_bootcount", { method: "POST" }, 30000).then(function () {
     showMsg(
       "time-msg",
       "<div class='alert alert-success'>✅ Boot count backed up</div>",
@@ -1039,7 +1039,7 @@ function timeBackupBoot() {
 }
 function timeRestoreBoot() {
   if (!confirm("Restore boot count from backup?")) return;
-  fetch("/restore_bootcount", { method: "POST" })
+  fetchWithTimeout("/restore_bootcount", { method: "POST" }, 30000)
     .then(function (r) {
       return r.json();
     })
@@ -1063,7 +1063,7 @@ function timeRestoreBoot() {
 // ══ SETTINGS: DATALOG ══
 // ============================================================================
 function dlInit() {
-  fetch("/api/filelist?filter=log&recursive=1")
+  fetchWithTimeout("/api/filelist?filter=log&recursive=1", {}, 15000)
     .then(function (r) {
       return r.json();
     })
@@ -1078,7 +1078,7 @@ function dlInit() {
         opt.textContent = f.path;
         sel.appendChild(opt);
       });
-      fetch("/export_settings")
+      fetchWithTimeout("/export_settings", {}, 15000)
         .then(function (r2) {
           return r2.json();
         })
@@ -1127,7 +1127,7 @@ function dlInit() {
 function dlLoadFiles() {
   var el = document.getElementById("dl-files");
   if (!el) return;
-  fetch("/api/filelist?filter=log&recursive=1")
+  fetchWithTimeout("/api/filelist?filter=log&recursive=1", {}, 15000)
     .then(function (r) {
       return r.json();
     })
@@ -1144,7 +1144,7 @@ function dlLoadFiles() {
         html +=
           "<div class='list-item'><span>" +
           (isCur ? "<strong class='text-success'>✓ " : "") +
-          f.path +
+          esc(f.path) +
           ' <small class="text-muted">(' +
           fmtBytes(f.size) +
           ")</small>" +
@@ -1168,9 +1168,9 @@ function dlLoadFiles() {
 // Uses storage=internal explicitly — matches original failsafe fix
 function dlDeleteFile(path) {
   if (!confirm("Delete " + path + "?")) return;
-  fetch("/delete?path=" + encodeURIComponent(path) + "&storage=internal", {
+  fetchWithTimeout("/delete?path=" + encodeURIComponent(path) + "&storage=internal", {
     method: "POST",
-  }).then(function () {
+  }, 30000).then(function () {
     dlLoadFiles();
   });
 }
@@ -1271,7 +1271,7 @@ function otaInit() {
       if (btn && btn.parentNode) btn.parentNode.insertBefore(warn, btn);
     }
   }
-  fetch("/api/status")
+  fetchWithTimeout("/api/status", {}, 15000)
     .then(function (r) {
       return r.json();
     })
@@ -1675,18 +1675,18 @@ var Modules = (function () {
   }
 
   function loadList() {
-    return fetch("/api/modules").then(function (r) { return r.json(); });
+    return fetchWithTimeout("/api/modules", {}, 15000).then(function (r) { return r.json(); });
   }
   function loadDetail(id) {
-    return fetch("/api/modules/" + encodeURIComponent(id))
+    return fetchWithTimeout("/api/modules/" + encodeURIComponent(id), {}, 15000)
       .then(function (r) { return r.json(); });
   }
   function save(id, body) {
-    return fetch("/api/modules/" + encodeURIComponent(id), {
+    return fetchWithTimeout("/api/modules/" + encodeURIComponent(id), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
-    }).then(function (r) { return r.json(); });
+    }, 30000).then(function (r) { return r.json(); });
   }
 
   function renderTabs(list) {

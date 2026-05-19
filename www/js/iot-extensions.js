@@ -297,7 +297,7 @@
     }
 
     // Fetch latest sensor readings
-    fetch("/api/latest")
+    fetchWithTimeout("/api/latest", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data) return;
@@ -409,7 +409,7 @@
 
   function ovFillWater(data) {
     // Water stats come from the live endpoint for legacy/hybrid
-    fetch("/api/status")
+    fetchWithTimeout("/api/status", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d) return;
@@ -520,7 +520,7 @@
 
   // Fetch GET /api/alerts and render rules + history from real firmware data.
   function _loadAlertsData() {
-    fetch("/api/alerts")
+    fetchWithTimeout("/api/alerts", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function (data) {
         _renderAlertRules(data.rules  || []);
@@ -594,7 +594,7 @@
       cb.addEventListener("change", function () {
         var ruleId = cb.dataset.ruleId;
         // Re-fetch, flip enabled, save back
-        fetch("/api/alerts")
+        fetchWithTimeout("/api/alerts", {}, 15000)
           .then(function (r) { return r.json(); })
           .then(function (data) {
             (data.rules || []).forEach(function (rule) {
@@ -602,11 +602,11 @@
             });
             return getCsrfToken().then(function (token) {
               var url = "/api/alerts" + (token ? "?csrf=" + encodeURIComponent(token) : "");
-              return fetch(url, {
+              return fetchWithTimeout(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(data)
-              }).then(function (r) {
+              }, 30000).then(function (r) {
                 if (r.status === 403) {
                   window.__csrfToken = null;
                   throw new Error("CSRF token rejected — refresh page");
@@ -711,7 +711,7 @@
   }
 
   function populateHealthPage() {
-    fetch("/api/sensors")
+    fetchWithTimeout("/api/sensors", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         var sensors = (data && data.sensors) || [];
@@ -1123,7 +1123,7 @@
       var fd = new FormData();
       fd.append("add_sensor", JSON.stringify(obj));
       if (token) fd.append("csrf", token);
-      fetch("/save_corelogic", { method: "POST", body: fd })
+      fetchWithTimeout("/save_corelogic", { method: "POST", body: fd }, 30000)
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (res) {
           if (res && res.ok) {
