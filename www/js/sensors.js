@@ -43,7 +43,7 @@ function pcfgSave(obj, cb) {
   var body = JSON.stringify(obj, null, 2);
   fetchWithTimeout("/save_platform", {
     method: "POST",
-    headers: { "Content-Type": "application/octet-stream" },
+    headers: { "Content-Type": "application/json" },
     body: body,
   }, 30000)
     .then(function (r) {
