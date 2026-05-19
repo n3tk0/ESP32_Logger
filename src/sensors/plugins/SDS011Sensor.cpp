@@ -1,6 +1,7 @@
 #include "SDS011Sensor.h"
 #include "../../pipeline/DataPipeline.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
+#include "../SensorManager.h"        // R17: _claim/_release helpers
 
 // ---------------------------------------------------------------------------
 bool SDS011Sensor::init(JsonObjectConst cfg) {
@@ -26,6 +27,10 @@ bool SDS011Sensor::init(JsonObjectConst cfg) {
 
     if (!validateAttachPin(rxPin, "sds011", "uart_rx")) return false;
     if (txPin >= 0 && !validateAttachPin(txPin, "sds011", "uart_tx")) return false;
+    if (!_claimSerial1(this)) {
+        Serial.println("[SDS011] Serial1 already owned by another sensor — refusing init");
+        return false;
+    }
 
     _serial = &Serial1;
     if (txPin >= 0) {

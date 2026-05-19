@@ -6,6 +6,39 @@
 SensorManager sensorManager;
 
 // ---------------------------------------------------------------------------
+// Serial1 ownership arbitration (row 21.1).
+// Only one sensor plugin may initialise Serial1; the second call from a
+// different plugin returns false so init() can refuse to proceed.
+static ISensor* _serial1Owner = nullptr;
+
+bool _claimSerial1(ISensor* who) {
+    if (_serial1Owner == nullptr) { _serial1Owner = who; return true; }
+    return (_serial1Owner == who);
+}
+void _releaseSerial1(ISensor* who) {
+    if (_serial1Owner == who) _serial1Owner = nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// I2C address ownership arbitration (row 22.4).
+// Tracks which plugin claimed each 7-bit I2C address so that two sensors
+// with the same fixed address refuse to co-initialise rather than silently
+// corrupting each other's reads.
+static ISensor* _i2cOwners[128] = {};
+
+bool _claimI2cAddress(uint8_t addr, ISensor* who) {
+    if (addr >= 128) return false;
+    if (_i2cOwners[addr] == nullptr) { _i2cOwners[addr] = who; return true; }
+    return (_i2cOwners[addr] == who);
+}
+void _releaseI2cClaims(ISensor* who) {
+    if (!who) return;
+    for (int i = 0; i < 128; i++) {
+        if (_i2cOwners[i] == who) _i2cOwners[i] = nullptr;
+    }
+}
+
+// ---------------------------------------------------------------------------
 bool SensorManager::registerPlugin(const char* type, SensorFactory factory) {
     if (_pluginCount >= MAX_PLUGINS) return false;
     strncpy(_plugins[_pluginCount].type, type, sizeof(_plugins[0].type) - 1);
@@ -33,6 +66,10 @@ void SensorManager::_destroyAll() {
     _count = 0;
     memset(_lastReadMs, 0, sizeof(_lastReadMs));
     memset(_health,     0, sizeof(_health));
+    // Reset arbitration tables so a reload or a failed-init doesn't
+    // permanently block re-claiming the same resource.
+    _serial1Owner = nullptr;
+    memset(_i2cOwners, 0, sizeof(_i2cOwners));
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +133,12 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
             Serial.printf("[SensorManager] Sensor '%s' (%s) ready\n", id, type);
         } else {
             Serial.printf("[SensorManager] Sensor '%s' init FAILED\n", id);
+            // R17 follow-up (Codex P2 on PR #93): release any claims this
+            // plugin made on Serial1 / I2C addresses before init failed —
+            // otherwise the claim outlives the (deleted) instance and
+            // permanently blocks subsequent plugins on the same resource.
+            _releaseSerial1(s);
+            _releaseI2cClaims(s);
             delete s;
         }
     }

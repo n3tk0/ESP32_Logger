@@ -1,5 +1,6 @@
 #include "VEML7700Sensor.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
+#include "../SensorManager.h"        // R17: _claim/_release helpers
 
 bool VEML7700Sensor::_writeReg(uint8_t reg, uint16_t val) {
     Wire.beginTransmission(ADDR);
@@ -61,6 +62,10 @@ bool VEML7700Sensor::init(JsonObjectConst cfg) {
     int scl = cfg["scl"] | -1;
     if (!validateAttachPin(sda, "veml7700", "sda")) return false;
     if (!validateAttachPin(scl, "veml7700", "scl")) return false;
+    if (!_claimI2cAddress(ADDR, this)) {
+        Serial.printf("[VEML7700] I2C address 0x%02X already claimed — refusing init\n", ADDR);
+        return false;
+    }
     Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];

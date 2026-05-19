@@ -118,6 +118,7 @@ private:
     }
 
     void _writeBit(bool bit) {
+        portDISABLE_INTERRUPTS();
         pinMode(_pin, OUTPUT);
         digitalWrite(_pin, LOW);
         if (bit) {
@@ -129,9 +130,11 @@ private:
             pinMode(_pin, INPUT_PULLUP);
             delayMicroseconds(10);
         }
+        portENABLE_INTERRUPTS();
     }
 
     bool _readBit() {
+        portDISABLE_INTERRUPTS();
         pinMode(_pin, OUTPUT);
         digitalWrite(_pin, LOW);
         delayMicroseconds(3);
@@ -139,6 +142,7 @@ private:
         delayMicroseconds(10);
         bool bit = digitalRead(_pin);
         delayMicroseconds(53);
+        portENABLE_INTERRUPTS();
         return bit;
     }
 

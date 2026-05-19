@@ -30,6 +30,7 @@ public:
     const char* getType() const override { return "zmpt101b"; }
     const char* getName() const override { return "ZMPT101B AC Voltage"; }
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
+    bool        isBlocking() const override { return true; }  // 200×100µs = 20 ms ADC window
     int getMetrics(const char** out, int maxOut) const override {
         static const char* m[] = { "voltage_vrms", "voltage_raw" };
         int n = 2; if (n > maxOut) n = maxOut;

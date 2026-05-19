@@ -1,5 +1,6 @@
 #include "SCD4xSensor.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
+#include "../SensorManager.h"        // R17: _claim/_release helpers
 
 // CRC-8 per Sensirion: poly=0x31, init=0xFF
 uint8_t SCD4xSensor::_crc8(const uint8_t* data, size_t len) {
@@ -50,6 +51,10 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
     int scl = cfg["scl"] | -1;
     if (!validateAttachPin(sda, "scd4x", "sda")) return false;
     if (!validateAttachPin(scl, "scd4x", "scl")) return false;
+    if (!_claimI2cAddress(ADDR, this)) {
+        Serial.printf("[SCD4x] I2C address 0x%02X already claimed — refusing init\n", ADDR);
+        return false;
+    }
     Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
@@ -67,10 +72,10 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
         return false;
     }
 
-    // Wait for first measurement (SCD40 needs ~5s)
-    delay(5100);
+    // Defer the 5.1 s warm-up out of init(); readAll() gates on _warmupUntilMs.
+    _warmupUntilMs = millis() + 5100;
     _ready = true;
-    Serial.println("[SCD4x] Ready");
+    Serial.println("[SCD4x] Started — first reading in ~5s");
     return true;
 }
 
@@ -83,6 +88,7 @@ bool SCD4xSensor::read(SensorReading& out) {
 
 int SCD4xSensor::readAll(SensorReading* out, int maxOut) {
     if (!_ready || maxOut < 3) return 0;
+    if ((int32_t)(millis() - _warmupUntilMs) < 0) return 0;   // still warming up
 
     if (!_dataReady()) return 0;
 

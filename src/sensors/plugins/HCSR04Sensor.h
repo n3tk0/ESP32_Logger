@@ -26,6 +26,7 @@ public:
     const char* getType() const override { return "hcsr04"; }
     const char* getName() const override { return "HC-SR04 Distance"; }
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
+    bool        isBlocking() const override { return true; }  // pulseIn blocks up to 30 ms
     int getMetrics(const char** out, int maxOut) const override {
         static const char* m[] = { "distance" };
         int n = 1; if (n > maxOut) n = maxOut;

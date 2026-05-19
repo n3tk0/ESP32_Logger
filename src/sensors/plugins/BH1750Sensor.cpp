@@ -1,5 +1,6 @@
 #include "BH1750Sensor.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
+#include "../SensorManager.h"        // R17: _claim/_release helpers
 
 bool BH1750Sensor::_sendCmd(uint8_t cmd) {
     Wire.beginTransmission(_addr);
@@ -36,6 +37,10 @@ bool BH1750Sensor::init(JsonObjectConst cfg) {
     int scl = cfg["scl"] | -1;
     if (!validateAttachPin(sda, "bh1750", "sda")) return false;
     if (!validateAttachPin(scl, "bh1750", "scl")) return false;
+    if (!_claimI2cAddress(_addr, this)) {
+        Serial.printf("[BH1750] I2C address 0x%02X already claimed — refusing init\n", _addr);
+        return false;
+    }
     Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
