@@ -161,12 +161,12 @@ function changelogLoad() {
               : "background:var(--border);color:var(--text-muted)") +
             '">' +
             "<strong>" +
-            ver +
+            esc(ver) +
             "</strong>" +
             '<ul style="margin:.5rem 0 0 1rem;padding:0;font-size:.9rem">';
           inVer = true;
         } else if (line.indexOf("-") === 0 && inVer) {
-          html += "<li>" + line.substring(1).trim() + "</li>";
+          html += "<li>" + esc(line.substring(1).trim()) + "</li>";
         }
       });
 
@@ -1144,7 +1144,7 @@ function dlLoadFiles() {
         html +=
           "<div class='list-item'><span>" +
           (isCur ? "<strong class='text-success'>✓ " : "") +
-          f.path +
+          esc(f.path) +
           ' <small class="text-muted">(' +
           fmtBytes(f.size) +
           ")</small>" +
