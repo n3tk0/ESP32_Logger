@@ -9,21 +9,14 @@ SensorManager sensorManager;
 // Serial1 ownership arbitration (row 21.1).
 // Only one sensor plugin may initialise Serial1; the second call from a
 // different plugin returns false so init() can refuse to proceed.
-static const char* _serial1Owner = nullptr;
+static ISensor* _serial1Owner = nullptr;
 
-bool _claimSerial1(const char* who) {
+bool _claimSerial1(ISensor* who) {
     if (_serial1Owner == nullptr) { _serial1Owner = who; return true; }
-    return (strcmp(_serial1Owner, who) == 0);
+    return (_serial1Owner == who);
 }
-
-// Releases the Serial1 claim if `who` matches. Called from
-// SensorManager::loadAndInit() when a plugin's init() returns false
-// AFTER it claimed the bus — otherwise the claim would persist and
-// block subsequent plugins from using Serial1. (Codex P2 on PR #93.)
-void _releaseSerial1(const char* who) {
-    if (_serial1Owner && strcmp(_serial1Owner, who) == 0) {
-        _serial1Owner = nullptr;
-    }
+void _releaseSerial1(ISensor* who) {
+    if (_serial1Owner == who) _serial1Owner = nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -31,24 +24,17 @@ void _releaseSerial1(const char* who) {
 // Tracks which plugin claimed each 7-bit I2C address so that two sensors
 // with the same fixed address refuse to co-initialise rather than silently
 // corrupting each other's reads.
-static const char* _i2cOwners[128] = {};
+static ISensor* _i2cOwners[128] = {};
 
-bool _claimI2cAddress(uint8_t addr, const char* who) {
+bool _claimI2cAddress(uint8_t addr, ISensor* who) {
     if (addr >= 128) return false;
     if (_i2cOwners[addr] == nullptr) { _i2cOwners[addr] = who; return true; }
-    return (strcmp(_i2cOwners[addr], who) == 0);
+    return (_i2cOwners[addr] == who);
 }
-
-// Releases every I2C-address claim held by `who`. Same rationale as
-// _releaseSerial1: a plugin that claimed an address then failed init
-// (e.g. device not present) must not poison that address for other
-// plugins. (Codex P2 on PR #93.)
-void _releaseI2cClaims(const char* who) {
+void _releaseI2cClaims(ISensor* who) {
     if (!who) return;
     for (int i = 0; i < 128; i++) {
-        if (_i2cOwners[i] && strcmp(_i2cOwners[i], who) == 0) {
-            _i2cOwners[i] = nullptr;
-        }
+        if (_i2cOwners[i] == who) _i2cOwners[i] = nullptr;
     }
 }
 
@@ -151,8 +137,8 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
             // plugin made on Serial1 / I2C addresses before init failed —
             // otherwise the claim outlives the (deleted) instance and
             // permanently blocks subsequent plugins on the same resource.
-            _releaseSerial1(s->getType());
-            _releaseI2cClaims(s->getType());
+            _releaseSerial1(s);
+            _releaseI2cClaims(s);
             delete s;
         }
     }

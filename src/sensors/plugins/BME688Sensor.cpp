@@ -13,7 +13,7 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
     int scl = cfg["scl"] | -1;
     if (!validateAttachPin(sda, "bme688", "sda")) return false;
     if (!validateAttachPin(scl, "bme688", "scl")) return false;
-    if (!_claimI2cAddress(_addr, getType())) {
+    if (!_claimI2cAddress(_addr, this)) {
         Serial.printf("[BME688] I2C address 0x%02X already claimed — refusing init\n", _addr);
         return false;
     }

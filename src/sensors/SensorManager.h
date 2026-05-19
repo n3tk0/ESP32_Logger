@@ -10,20 +10,22 @@
 // Cross-plugin resource arbitration (R17 rows 21.1, 22.4).
 //
 // Plugins that share scarce hardware resources (Serial1, fixed I2C addresses)
-// claim ownership before configuring the bus. The second plugin attempting
+// claim ownership before configuring the bus.  The second plugin attempting
 // to claim the same resource refuses to init, preventing silent collisions.
+//
+// Uses the sensor instance pointer (not type string) so that two enabled
+// sensors of the same plugin type each get unique identity — a type-string
+// check would allow both to pass the strcmp test simultaneously.
 //
 // Release helpers run from SensorManager's failure path so a plugin whose
 // init() failed AFTER claiming a resource doesn't permanently block another
 // plugin from claiming it. Same applies on reloadConfig() via _destroyAll().
-//
-// `who` is `ISensor::getType()` — a stable string literal per plugin type.
 // ============================================================================
-bool _claimSerial1(const char* who);
-void _releaseSerial1(const char* who);
+bool _claimSerial1(ISensor* who);
+void _releaseSerial1(ISensor* who);
 
-bool _claimI2cAddress(uint8_t addr, const char* who);
-void _releaseI2cClaims(const char* who);
+bool _claimI2cAddress(uint8_t addr, ISensor* who);
+void _releaseI2cClaims(ISensor* who);
 
 // ============================================================================
 // SensorManager — plugin registry and tick dispatcher

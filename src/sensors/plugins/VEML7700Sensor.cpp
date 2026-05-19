@@ -62,7 +62,7 @@ bool VEML7700Sensor::init(JsonObjectConst cfg) {
     int scl = cfg["scl"] | -1;
     if (!validateAttachPin(sda, "veml7700", "sda")) return false;
     if (!validateAttachPin(scl, "veml7700", "scl")) return false;
-    if (!_claimI2cAddress(ADDR, getType())) {
+    if (!_claimI2cAddress(ADDR, this)) {
         Serial.printf("[VEML7700] I2C address 0x%02X already claimed — refusing init\n", ADDR);
         return false;
     }

@@ -51,7 +51,7 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
     int scl = cfg["scl"] | -1;
     if (!validateAttachPin(sda, "scd4x", "sda")) return false;
     if (!validateAttachPin(scl, "scd4x", "scl")) return false;
-    if (!_claimI2cAddress(ADDR, getType())) {
+    if (!_claimI2cAddress(ADDR, this)) {
         Serial.printf("[SCD4x] I2C address 0x%02X already claimed — refusing init\n", ADDR);
         return false;
     }
