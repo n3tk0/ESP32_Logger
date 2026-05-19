@@ -449,7 +449,7 @@ var _csrfFetch = null;
 function getCsrfToken() {
   if (window.__csrfToken) return Promise.resolve(window.__csrfToken);
   if (_csrfFetch) return _csrfFetch;
-  _csrfFetch = fetch("/api/csrf-token", { credentials: "same-origin" })
+  _csrfFetch = fetchWithTimeout("/api/csrf-token", { credentials: "same-origin" }, 15000)
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
       if (d && d.token) window.__csrfToken = d.token;
@@ -496,7 +496,7 @@ function loadPagePartial(page) {
   if (_inflightPartials[page]) return _inflightPartials[page];
 
   var url = "/pages/" + page + ".html";
-  var p = fetch(url)
+  var p = fetchWithTimeout(url, {}, 15000)
     .then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.text();
