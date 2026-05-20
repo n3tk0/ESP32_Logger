@@ -78,7 +78,7 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
         return false;
     }
     delay(1);
-    { uint16_t dummy; _readWords(&dummy, 1); }  // drain status response
+    { uint16_t dummy; if (!_readWords(&dummy, 1)) return false; }  // drain; fail if comms broken
 
     // Defer the 5.1 s warm-up out of init(); readAll() gates on _warmupUntilMs.
     _warmupUntilMs = millis() + 5100;

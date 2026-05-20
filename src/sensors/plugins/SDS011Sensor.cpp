@@ -43,7 +43,7 @@ bool SDS011Sensor::init(JsonObjectConst cfg) {
 
     // Configure SDS011 Hardware Working Period
     if (txPin >= 0) {
-        uint8_t cmd[19] = {0xAA, 0xB4, 0x08, 0x01, (uint8_t)work, 0,0,0,0,0,0,0,0,0,0, 0xFF, 0xFF, {}, 0xAB};
+        uint8_t cmd[19] = {0xAA, 0xB4, 0x08, 0x01, (uint8_t)work, 0,0,0,0,0,0,0,0,0,0, 0xFF, 0xFF, 0, 0xAB};
         uint8_t sum = 0;
         for (int i = 2; i <= 16; i++) sum += cmd[i];
         cmd[17] = sum;
@@ -59,6 +59,8 @@ bool SDS011Sensor::init(JsonObjectConst cfg) {
                 uint8_t b = _serial->read();
                 if (pos == 0 && b != 0xAA) continue;
                 ack[pos++] = b;
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(1));
             }
         }
         if (pos == 10) {

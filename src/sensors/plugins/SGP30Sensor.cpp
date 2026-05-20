@@ -38,7 +38,7 @@ bool SGP30Sensor::_measure(uint16_t& tvoc, uint16_t& eco2) {
     uint16_t words[2];
     if (!_readWords(words, 2)) {
         // Retry once after 10 ms on transient CRC/I2C failure
-        delay(10);
+        vTaskDelay(pdMS_TO_TICKS(10));
         if (!_readWords(words, 2)) return false;
     }
     eco2 = words[0];
