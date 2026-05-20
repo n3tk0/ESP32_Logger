@@ -18,6 +18,13 @@ public:
     bool load(JsonObjectConst cfg) override;
     void save(JsonObject cfg)      const override;
 
+    // R20: WiFi cannot be hot-restarted from a web handler — bringing the
+    // radio down would close the very TCP connection serving this request.
+    // start() returns false so /api/modules/wifi/enable + /restart correctly
+    // report restartRequired=true; the caller (UI or operator) must
+    // explicitly reboot via POST /restart to apply the new config.
+    bool start() override { return false; }
+
     const char* schema() const override;
 
     static WiFiModule& instance() { static WiFiModule m; return m; }

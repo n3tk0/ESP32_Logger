@@ -34,6 +34,16 @@ void TimeModule::save(JsonObject cfg) const {
 }
 
 // ---------------------------------------------------------------------------
+// R20: hot-start hook — queues a non-blocking NTP sync. The actual sync
+// runs from loop() (driven by g_pendingNtpSync) so a /api/modules/time/
+// restart call returns immediately instead of holding the AsyncTCP
+// worker for the round trip + DNS lookup + UDP exchange.
+bool TimeModule::start() {
+    g_pendingNtpSync = 1;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 const char* TimeModule::schema() const {
     return TIME_SCHEMA;
 }

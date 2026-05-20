@@ -654,6 +654,37 @@ static void handleApiModuleEnable(AsyncWebServerRequest* req, const String& id) 
 }
 
 // ---------------------------------------------------------------------------
+// R20 — POST /api/modules/:id/restart
+// Calls module.stop() then module.start() without changing the enabled flag.
+// Modules whose start() returns false (e.g. WiFi: can't bring the radio
+// down on the AsyncTCP worker) report restartRequired=true so the caller
+// knows to POST /restart for a device reboot.
+// ---------------------------------------------------------------------------
+static void handleApiModuleRestart(AsyncWebServerRequest* req, const String& id) {
+    if (!requireMutatingAuth(req)) return;
+    IModule* mod = moduleRegistry.getById(id.c_str());
+    if (!mod) {
+        req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
+        return;
+    }
+
+    bool restartRequired = false;
+    if (mod->isEnabled()) {
+        mod->stop();
+        if (!mod->start()) restartRequired = true;
+    } else {
+        // Disabled modules: still allow the call but report nothing happened.
+        restartRequired = false;
+    }
+
+    JsonDocument outDoc;
+    outDoc["ok"]              = true;
+    outDoc["id"]              = mod->getId();
+    outDoc["restartRequired"] = restartRequired;
+    sendJsonResponse(req, outDoc);
+}
+
+// ---------------------------------------------------------------------------
 // WiFi scan + credential-test endpoints (Pass 5 5.5 phase 1).
 //
 // Both endpoints are fully async-safe — no call inside an AsyncWebServer
@@ -1088,8 +1119,31 @@ void registerApiRoutes(AsyncWebServer& server) {
             String url = r->url();
             const char* prefix = "/api/modules/";
             String id = url.substring(strlen(prefix));
+            // Strip query string before the suffix check — a URL like
+            // /api/modules/wifi/enable?on=1 would otherwise leave the
+            // query in `id` and break the endsWith.
+            int q = id.indexOf('?');
+            if (q >= 0) id.remove(q);
             if (id.endsWith("/enable")) id.remove(id.length() - strlen("/enable"));
             handleApiModuleEnable(r, id);
+        });
+
+        // R20 — POST /api/modules/:id/restart
+        // Calls module.stop() + start() without changing the enabled flag.
+        // restartRequired=true in the response means start() reported it
+        // can't be hot-restarted from a web handler (e.g. WiFi); the caller
+        // should POST /restart for a device reboot.
+        String restartPath = base + "/restart";
+        server.on(restartPath.c_str(), HTTP_POST, [](AsyncWebServerRequest* r) {
+            String url = r->url();
+            const char* prefix = "/api/modules/";
+            String id = url.substring(strlen(prefix));
+            // Query-string strip — Gemini HIGH on PR #97. Same fix as
+            // /enable above.
+            int q = id.indexOf('?');
+            if (q >= 0) id.remove(q);
+            if (id.endsWith("/restart")) id.remove(id.length() - strlen("/restart"));
+            handleApiModuleRestart(r, id);
         });
     }
 
