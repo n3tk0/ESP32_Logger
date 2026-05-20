@@ -26,8 +26,8 @@ void initRtc() {
 
     if (!pinsValid) { rtcValid = false; return; }
 
-    if (rtcWire) { delete rtcWire; rtcWire = nullptr; }
     if (Rtc)     { delete Rtc;     Rtc     = nullptr; }
+    if (rtcWire) { delete rtcWire; rtcWire = nullptr; }
 
     rtcWire = new ThreeWire(config.hardware.pinRtcIO,
                             config.hardware.pinRtcSCLK,
