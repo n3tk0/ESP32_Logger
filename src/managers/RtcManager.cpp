@@ -233,6 +233,7 @@ void configureWakeup() {
 
     if (config.hardware.wakeupMode != WAKEUP_GPIO_ACTIVE_HIGH) {
         DBGLN("WAKEUP CONFIG: EXT1 wake requires ACTIVE_HIGH on ESP32/S2/S3");
+        statusMessage = "EXT1 wake requires ACTIVE_HIGH on this chip";
         return;
     }
 
