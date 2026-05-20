@@ -67,15 +67,29 @@ void initRtc() {
     } else {
         DBGLN("RTC: Could not set time. Use web UI.");
     }
+
+    // R22 / AUDIT 8.5: re-enable write protection after init. Without this,
+    // the RTC stays writable forever and any stray Rtc->SetDateTime path
+    // would succeed silently. /set_time + WiFiManager NTP path each wrap
+    // their writes in their own unprotect/write/protect cycle, so this
+    // post-init protect doesn't break them.
+    Rtc->SetIsWriteProtected(true);
 }
 
 void backupBootCount() {
     if (Rtc) {
+        // R22 follow-up (Gemini HIGH + Codex P2 on PR #99): initRtc now
+        // re-enables write protection, so SetMemory needs its own
+        // unprotect/write/protect cycle — same pattern /set_time and
+        // syncTimeFromNTP use. Without this, SetMemory silently no-ops
+        // and bootCount drifts away from the RTC RAM copy.
+        Rtc->SetIsWriteProtected(false);
         Rtc->SetMemory((uint8_t)RTC_RAM_MAGIC_ADDR, (uint8_t)RTC_RAM_MAGIC_VALUE);
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR),     (uint8_t)((bootCount >> 24) & 0xFF));
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 1), (uint8_t)((bootCount >> 16) & 0xFF));
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 2), (uint8_t)((bootCount >>  8) & 0xFF));
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 3), (uint8_t)( bootCount        & 0xFF));
+        Rtc->SetIsWriteProtected(true);
     }
     atomicWrite(LittleFS, BOOTCOUNT_BACKUP_FILE, [](File& f) -> bool {
         return f.write((uint8_t*)&bootCount, sizeof(bootCount)) == sizeof(bootCount);

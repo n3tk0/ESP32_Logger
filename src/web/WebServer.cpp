@@ -308,6 +308,25 @@ static void fmtIP(const uint8_t* ip, char* buf16) {
 // WEB SERVER SETUP
 // ============================================================================
 #if WEB_BASIC_AUTH_ENABLED
+// R22 / AUDIT 5.3: refuse to compile when Basic Auth is enabled with the
+// shipped placeholder admin/admin credentials. Operators MUST override
+// both WEB_BASIC_AUTH_USER and WEB_BASIC_AUTH_PASS at build time (via
+// platformio.ini build_flags or a custom setup.h) before flashing an
+// internet-exposed build.
+//
+// Uses string_view for a compile-time comparison (project is on gnu++17 —
+// see R11 designated-initializer rewrite for the toolchain note). Lives
+// inside the WEB_BASIC_AUTH_ENABLED block so other configurations that
+// don't compile auth in still build cleanly with the placeholder defaults.
+#include <string_view>
+static_assert(
+    std::string_view{WEB_BASIC_AUTH_USER} != "admin" ||
+    std::string_view{WEB_BASIC_AUTH_PASS} != "admin",
+    "Override the default Basic Auth credentials before enabling "
+    "WEB_BASIC_AUTH_ENABLED. Set WEB_BASIC_AUTH_USER and "
+    "WEB_BASIC_AUTH_PASS in setup.h or via -D build flags. "
+    "Shipping admin/admin in production is a known critical (AUDIT 5.3).");
+
 // Front-door handler: when Basic Auth is compiled in, this handler is
 // registered FIRST, so it's matched before anything else. It only claims
 // the request when the client is NOT authenticated, which makes us return
