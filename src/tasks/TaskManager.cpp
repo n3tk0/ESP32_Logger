@@ -17,7 +17,7 @@ TaskHandle_t      TaskManager::hSlowSensor = nullptr;
 TaskHandle_t      TaskManager::hProcess    = nullptr;
 TaskHandle_t      TaskManager::hStorage    = nullptr;
 TaskHandle_t      TaskManager::hExport     = nullptr;
-volatile bool     TaskManager::running     = false;
+std::atomic<bool> TaskManager::running(false);
 
 // Storage task needs a persistent param (lives for task lifetime)
 static StorageTaskParam storageParam;
@@ -199,7 +199,7 @@ bool TaskManager::init(fs::FS& fs) {
 
 // ---------------------------------------------------------------------------
 void TaskManager::shutdown() {
-    running = false;
+    running.store(false, std::memory_order_release);
 
     // Wait for sensor queues to drain (up to 3s) before hard timeout.
     // Prevents storageQueue data loss when sensor pipeline is still writing.
