@@ -123,6 +123,7 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
             allOk = false;
         }
     }
+    if (!allOk) return false;
 
     // Crash-safe write: serialize to a sibling .new file, fsync via close,
     // then rename over the real target.  A power loss during write leaves
