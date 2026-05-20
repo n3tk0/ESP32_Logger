@@ -62,7 +62,7 @@ bool TaskManager::init(fs::FS& fs) {
 
     // Zero heartbeats — stale values survive warm reboots (RTC_SW_CPU_RST)
     // and cause immediate false-positive watchdog triggers (#C4).
-    for (int i = 0; i < TASK_COUNT; i++) g_taskHeartbeat[i] = 0;
+    for (int i = 0; i < TASK_COUNT; i++) g_taskHeartbeat[i] = millis();
 
     // ── Mutexes FIRST ────────────────────────────────────────────────────
     // AUDIT 1.6: mutex creation precedes everything else so even a later
@@ -257,7 +257,6 @@ bool TaskManager::checkHealth() {
     if (now < GRACE_PERIOD_MS) return true;
     for (int i = 0; i < TASK_COUNT; i++) {
         uint32_t hb = g_taskHeartbeat[i];
-        if (hb == 0) continue;   // task has not started yet
         if (now - hb > MAX_SILENCE_MS) {
             Serial.printf("[Watchdog] Task %d stuck (%lums)\n", i, now - hb);
             return false;
