@@ -97,8 +97,8 @@ function _dispatchEvent(eventName) {
     var raw = t.getAttribute("data-args");
     if (raw) {
       try {
-        if (raw.length > 4096) { console.warn("data-args too large on", t); args = []; }
-        else args = JSON.parse(raw);
+        if (raw.length > 4096) { console.warn("data-args too large on", t); return; }
+        args = JSON.parse(raw);
         // Accept a scalar/object for convenience (data-args="5" or '{"x":1}')
         // by wrapping it; fn.apply strictly requires an array.
         if (args !== null && !Array.isArray(args)) args = [args];
@@ -172,7 +172,7 @@ function submitParentForm() {
 // Popup helpers. Replace inline style="display:flex/none" mutation.
 // Named hidePopup (not closePopup) because settings.js defines its own
 // zero-arg closePopup() tied to id="popup" that we don't want to shadow.
-var LEGAL_POPUP_IDS = ["restartPopup", "popup", "movePopup", "sapPopup", "sepPopup", "otaPopup", "sensorPopup", "kbPopup"];
+var LEGAL_POPUP_IDS = ["restartPopup", "popup", "movePopup", "sensor-add-popup", "sensor-edit-popup", "sensorPopup", "kbPopup"];
 function showPopup(id) {
   if (LEGAL_POPUP_IDS.indexOf(id) === -1) { console.warn("showPopup: unknown id", id); return; }
   var el = document.getElementById(id); if (el) el.style.display = "flex";

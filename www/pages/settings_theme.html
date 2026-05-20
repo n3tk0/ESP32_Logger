@@ -77,13 +77,13 @@
             /file.png</p>
           <div class="field"><label class="field-label">Logo Path</label><input type="text" name="logoSource"
               id="th-logo" placeholder="/logo.png" class="input" maxlength="128"
-              pattern="^/[\w.\-/]+$" title="Must start with / and contain only path-safe characters"></div>
+              pattern="^/([\w.\-](\/[\w.\-]+)*)?$" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
           <div class="field"><label class="field-label">Favicon</label><input type="text" name="faviconPath"
               id="th-favicon" placeholder="/favicon.ico" class="input" maxlength="32"
-              pattern="^/[\w.\-/]+$" title="Must start with / and contain only path-safe characters"></div>
+              pattern="^/([\w.\-](\/[\w.\-]+)*)?$" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
           <div class="field"><label class="field-label">Board Diagram</label><input type="text"
               name="boardDiagramPath" id="th-board" placeholder="/xiao_esp32_c3_board.jpg" class="input" maxlength="64"
-              pattern="^/[\w.\-/]+$" title="Must start with / and contain only path-safe characters"></div>
+              pattern="^/([\w.\-](\/[\w.\-]+)*)?$" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
         </div>
       </div>
 
