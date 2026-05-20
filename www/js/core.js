@@ -307,15 +307,20 @@ function applyStatus(d) {
       _themeUpdateToggleIcon(effective);
     }
 
+    // Sanitize a CSS value to prevent injection via ; { } */ sequences.
+    function _safeCssVal(v) {
+      if (!v || typeof v !== "string") return "";
+      return v.replace(/[;{}\/*]/g, "");
+    }
     var vars = ":root{";
-    if (th.primaryColor) vars += "--primary:" + th.primaryColor + ";";
-    if (th.secondaryColor) vars += "--secondary:" + th.secondaryColor + ";";
+    if (th.primaryColor) vars += "--primary:" + _safeCssVal(th.primaryColor) + ";";
+    if (th.secondaryColor) vars += "--secondary:" + _safeCssVal(th.secondaryColor) + ";";
     if (actDark) {
-      if (th.darkBgColor) vars += "--bg:" + th.darkBgColor + ";";
-      if (th.darkTextColor) vars += "--text:" + th.darkTextColor + ";";
+      if (th.darkBgColor) vars += "--bg:" + _safeCssVal(th.darkBgColor) + ";";
+      if (th.darkTextColor) vars += "--text:" + _safeCssVal(th.darkTextColor) + ";";
     } else {
-      if (th.lightBgColor) vars += "--bg:" + th.lightBgColor + ";";
-      if (th.lightTextColor) vars += "--text:" + th.lightTextColor + ";";
+      if (th.lightBgColor) vars += "--bg:" + _safeCssVal(th.lightBgColor) + ";";
+      if (th.lightTextColor) vars += "--text:" + _safeCssVal(th.lightTextColor) + ";";
     }
     vars += "}";
     var style = document.getElementById("themeVars");
