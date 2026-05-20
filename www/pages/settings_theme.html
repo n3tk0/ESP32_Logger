@@ -76,11 +76,14 @@
           <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem">Supported: PNG, JPG, GIF, SVG, ICO. Path:
             /file.png</p>
           <div class="field"><label class="field-label">Logo Path</label><input type="text" name="logoSource"
-              id="th-logo" placeholder="/logo.png" class="input" maxlength="128"></div>
+              id="th-logo" placeholder="/logo.png" class="input" maxlength="128"
+              pattern="^/[\w.\-/]+$" title="Must start with / and contain only path-safe characters"></div>
           <div class="field"><label class="field-label">Favicon</label><input type="text" name="faviconPath"
-              id="th-favicon" placeholder="/favicon.ico" class="input" maxlength="32"></div>
+              id="th-favicon" placeholder="/favicon.ico" class="input" maxlength="32"
+              pattern="^/[\w.\-/]+$" title="Must start with / and contain only path-safe characters"></div>
           <div class="field"><label class="field-label">Board Diagram</label><input type="text"
-              name="boardDiagramPath" id="th-board" placeholder="/xiao_esp32_c3_board.jpg" class="input" maxlength="64"></div>
+              name="boardDiagramPath" id="th-board" placeholder="/xiao_esp32_c3_board.jpg" class="input" maxlength="64"
+              pattern="^/[\w.\-/]+$" title="Must start with / and contain only path-safe characters"></div>
         </div>
       </div>
 
