@@ -165,6 +165,12 @@ void FlowRunLogger::_closeRun(uint32_t endTs) {
     bool isNew = !_fs || !_fs->exists(path);
 
     if (_fs) {
+        MutexGuard fsLock(fsMutex, pdMS_TO_TICKS(2000));
+        if (!fsLock.isLocked()) {
+            Serial.println("[FlowRunLogger] fsMutex timeout — dropping run");
+            _state = IDLE;
+            return;
+        }
         File f = _fs->open(path, FILE_APPEND);
         if (!f) {
             Serial.printf("[FlowRunLogger] open FAILED: %s\n", path);

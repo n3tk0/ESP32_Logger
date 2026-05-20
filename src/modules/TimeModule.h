@@ -15,7 +15,7 @@ public:
     const char* getName() const override { return "Time"; }
 
     bool load(JsonObjectConst cfg) override;
-    void save(JsonObject cfg)      const override;
+    bool save(JsonObject cfg)      const override;
 
     // R20: start() schedules an NTP sync via the existing g_pendingNtpSync
     // flag — loop() picks it up off the AsyncTCP worker so the request

@@ -13,7 +13,7 @@ public:
     const char* getName() const override { return "Data log"; }
 
     bool load(JsonObjectConst cfg) override;
-    void save(JsonObject cfg)      const override;
+    bool save(JsonObject cfg)      const override;
 
     const char* schema() const override;
 

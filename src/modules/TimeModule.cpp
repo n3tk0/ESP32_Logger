@@ -26,11 +26,12 @@ bool TimeModule::load(JsonObjectConst cfg) {
 }
 
 // ---------------------------------------------------------------------------
-void TimeModule::save(JsonObject cfg) const {
+bool TimeModule::save(JsonObject cfg) const {
     const NetworkConfig& n = config.network;
     cfg["ntpServer"]      = n.ntpServer;
     cfg["timezone"]       = (int)n.timezone;
     cfg["dstOffsetHours"] = (int)n.dstOffsetHours;
+    return true;
 }
 
 // ---------------------------------------------------------------------------

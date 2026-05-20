@@ -26,8 +26,8 @@ void initRtc() {
 
     if (!pinsValid) { rtcValid = false; return; }
 
-    if (rtcWire) { delete rtcWire; rtcWire = nullptr; }
     if (Rtc)     { delete Rtc;     Rtc     = nullptr; }
+    if (rtcWire) { delete rtcWire; rtcWire = nullptr; }
 
     rtcWire = new ThreeWire(config.hardware.pinRtcIO,
                             config.hardware.pinRtcSCLK,
@@ -44,8 +44,9 @@ void initRtc() {
                    test.Day()   >= 1   && test.Day()   <= 31);
 
     if (!timeOk) {
-        DBGLN("RTC: Time invalid, setting compile time...");
-        RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
+        DBGLN("RTC: Time invalid, setting baseline 2024-01-01...");
+        statusMessage = "RTC time invalid — set via web UI";
+        RtcDateTime compiled = RtcDateTime(2024, 1, 1, 0, 0, 0);
         for (int i = 0; i < 3 && !timeOk; i++) {
             Rtc->SetIsWriteProtected(false);
             delay(10);
@@ -84,11 +85,11 @@ void backupBootCount() {
         // syncTimeFromNTP use. Without this, SetMemory silently no-ops
         // and bootCount drifts away from the RTC RAM copy.
         Rtc->SetIsWriteProtected(false);
-        Rtc->SetMemory((uint8_t)RTC_RAM_MAGIC_ADDR, (uint8_t)RTC_RAM_MAGIC_VALUE);
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR),     (uint8_t)((bootCount >> 24) & 0xFF));
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 1), (uint8_t)((bootCount >> 16) & 0xFF));
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 2), (uint8_t)((bootCount >>  8) & 0xFF));
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 3), (uint8_t)( bootCount        & 0xFF));
+        Rtc->SetMemory((uint8_t)RTC_RAM_MAGIC_ADDR, (uint8_t)RTC_RAM_MAGIC_VALUE);
         Rtc->SetIsWriteProtected(true);
     }
     atomicWrite(LittleFS, BOOTCOUNT_BACKUP_FILE, [](File& f) -> bool {
@@ -109,7 +110,11 @@ void restoreBootCount() {
         }
     }
     File f = LittleFS.open(BOOTCOUNT_BACKUP_FILE, "r");
-    if (f) { f.read((uint8_t*)&bootCount, sizeof(bootCount)); f.close(); }
+    if (f) {
+        size_t n = f.read((uint8_t*)&bootCount, sizeof(bootCount));
+        if (n != sizeof(bootCount)) bootCount = 0;
+        f.close();
+    }
     DBGF("Bootcount from flash: %d\n", bootCount);
 }
 
@@ -228,6 +233,7 @@ void configureWakeup() {
 
     if (config.hardware.wakeupMode != WAKEUP_GPIO_ACTIVE_HIGH) {
         DBGLN("WAKEUP CONFIG: EXT1 wake requires ACTIVE_HIGH on ESP32/S2/S3");
+        statusMessage = "EXT1 wake requires ACTIVE_HIGH on this chip";
         return;
     }
 

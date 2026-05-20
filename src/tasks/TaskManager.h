@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <atomic>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <FS.h>
@@ -33,5 +34,5 @@ public:
     static TaskHandle_t hExport;
 
     // Signals tasks to exit their loops
-    static volatile bool running;
+    static std::atomic<bool> running;
 };

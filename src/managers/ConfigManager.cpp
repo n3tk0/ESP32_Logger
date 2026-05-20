@@ -38,13 +38,7 @@ static void applyDefaults() {
     if (badFloat(config.datalog.ffToPfThreshold)) config.datalog.ffToPfThreshold = 3.7f;
     if (config.datalog.maxSizeKB       == 0) config.datalog.maxSizeKB       = 1024;
     
-    if (config.datalog.maxEntries == 0) {
-        config.datalog.maxEntries = 10000;
-        config.datalog.includeBootCount = true;
-        config.datalog.includeExtraPresses = true;
-        config.datalog.postCorrectionEnabled = true;
-        config.datalog.timestampFilename = true;
-    }
+    if (config.datalog.maxEntries == 0) config.datalog.maxEntries = 10000;
     
     if (config.datalog.manualPressThresholdMs == 0) config.datalog.manualPressThresholdMs = 500;
     if (!strlen(config.datalog.prefix))       SAFE_STRCPY(config.datalog.prefix,      DEFAULT_DATALOG_PREFIX);
@@ -117,11 +111,25 @@ static void applyDefaults() {
 // SANITIZE WAKE CONFIG
 // ============================================================================
 static bool sanitizeWakeConfig() {
-    auto isRtcWakePinC3 = [](uint8_t pin) -> bool { return pin <= 5; };
+#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S2
+    auto isRtcWakePin = [](uint8_t pin) -> bool { return pin <= 21; };
+    auto isSafePin    = [](uint8_t pin) -> bool { return pin <= 48; };
+#elif CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6
+    auto isRtcWakePin = [](uint8_t pin) -> bool { return pin <= 5; };
+    auto isSafePin    = [](uint8_t pin) -> bool { return pin <= 21 && !(pin >= 11 && pin <= 17); };
+#elif CONFIG_IDF_TARGET_ESP32
+    // Original ESP32: RTC wake GPIOs go up to 39; avoid internal flash pins 6-11.
+    auto isRtcWakePin = [](uint8_t pin) -> bool { return pin <= 39 && !(pin >= 6 && pin <= 11); };
+    auto isSafePin    = [](uint8_t pin) -> bool { return pin <= 39 && !(pin >= 6 && pin <= 11); };
+#else
+    // Unknown target: use permissive limits to avoid false-positive resets.
+    auto isRtcWakePin = [](uint8_t pin) -> bool { return pin <= 39; };
+    auto isSafePin    = [](uint8_t pin) -> bool { return pin <= 48; };
+#endif
 
-    bool invalidPins = !isRtcWakePinC3(config.hardware.pinWakeupFF) ||
-                       !isRtcWakePinC3(config.hardware.pinWakeupPF) ||
-                       !isRtcWakePinC3(config.hardware.pinWifiTrigger);
+    bool invalidPins = !isRtcWakePin(config.hardware.pinWakeupFF) ||
+                       !isRtcWakePin(config.hardware.pinWakeupPF) ||
+                       !isRtcWakePin(config.hardware.pinWifiTrigger);
     bool duplicatePins = (config.hardware.pinWakeupFF == config.hardware.pinWakeupPF) ||
                          (config.hardware.pinWakeupFF == config.hardware.pinWifiTrigger) ||
                          (config.hardware.pinWakeupPF == config.hardware.pinWifiTrigger);
@@ -135,16 +143,14 @@ static bool sanitizeWakeConfig() {
         changed = true;
     }
 
-    auto isSafePinC3 = [](uint8_t pin) -> bool { return pin <= 21 && !(pin >= 11 && pin <= 17); };
-
-    if (!isSafePinC3(config.hardware.pinFlowSensor) || config.hardware.pinFlowSensor == 0) {
+    if (!isSafePin(config.hardware.pinFlowSensor) || config.hardware.pinFlowSensor == 0) {
         config.hardware.pinFlowSensor = DefaultPins::FLOW_SENSOR;
         changed = true;
     }
 
-    if (!isSafePinC3(config.hardware.pinRtcCE) || 
-        !isSafePinC3(config.hardware.pinRtcIO) || 
-        !isSafePinC3(config.hardware.pinRtcSCLK)) {
+    if (!isSafePin(config.hardware.pinRtcCE) ||
+        !isSafePin(config.hardware.pinRtcIO) ||
+        !isSafePin(config.hardware.pinRtcSCLK)) {
         config.hardware.pinRtcCE   = DefaultPins::RTC_CE;
         config.hardware.pinRtcIO   = DefaultPins::RTC_IO;
         config.hardware.pinRtcSCLK = DefaultPins::RTC_SCLK;
@@ -351,6 +357,7 @@ void migrateConfig(uint8_t fromVersion) {
     }
     config.version = CONFIG_VERSION;
     config.hardware.version = CONFIG_VERSION;
+    // migrate must run pre-task-init: fsMutex is nullptr here; saveConfig is safe but not locked.
     saveConfig();
 }
 

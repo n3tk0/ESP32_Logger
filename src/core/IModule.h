@@ -40,7 +40,7 @@ public:
     //           Called by the registry when persisting modules.json.
     // ------------------------------------------------------------------
     virtual bool load(JsonObjectConst cfg) = 0;
-    virtual void save(JsonObject cfg) const = 0;
+    virtual bool save(JsonObject cfg) const = 0;
 
     // ------------------------------------------------------------------
     // Optional lifecycle hooks.  Default no-op keeps phase-1 wrappers tiny.
@@ -73,6 +73,14 @@ public:
     //       {"id":"staticIP","type":"ipv4","showIf":"useStaticIP"}
     //   ]}
     virtual const char* schema() const  { return nullptr; }
+
+    // Called at registration time (ModuleRegistry::add) to catch malformed
+    // PROGMEM schemas at boot rather than at first UI render.
+    static bool validateSchema(const char* s) {
+        if (!s) return true;
+        JsonDocument doc;
+        return deserializeJson(doc, s) == DeserializationError::Ok;
+    }
 
 protected:
     bool _enabled = true;

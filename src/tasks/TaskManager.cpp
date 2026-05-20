@@ -17,7 +17,7 @@ TaskHandle_t      TaskManager::hSlowSensor = nullptr;
 TaskHandle_t      TaskManager::hProcess    = nullptr;
 TaskHandle_t      TaskManager::hStorage    = nullptr;
 TaskHandle_t      TaskManager::hExport     = nullptr;
-volatile bool     TaskManager::running     = false;
+std::atomic<bool> TaskManager::running(false);
 
 // Storage task needs a persistent param (lives for task lifetime)
 static StorageTaskParam storageParam;
@@ -62,7 +62,7 @@ bool TaskManager::init(fs::FS& fs) {
 
     // Zero heartbeats — stale values survive warm reboots (RTC_SW_CPU_RST)
     // and cause immediate false-positive watchdog triggers (#C4).
-    for (int i = 0; i < TASK_COUNT; i++) g_taskHeartbeat[i] = 0;
+    for (int i = 0; i < TASK_COUNT; i++) g_taskHeartbeat[i] = millis();
 
     // ── Mutexes FIRST ────────────────────────────────────────────────────
     // AUDIT 1.6: mutex creation precedes everything else so even a later
@@ -199,7 +199,7 @@ bool TaskManager::init(fs::FS& fs) {
 
 // ---------------------------------------------------------------------------
 void TaskManager::shutdown() {
-    running = false;
+    running.store(false, std::memory_order_release);
 
     // Wait for sensor queues to drain (up to 3s) before hard timeout.
     // Prevents storageQueue data loss when sensor pipeline is still writing.
@@ -255,9 +255,16 @@ bool TaskManager::checkHealth() {
     constexpr uint32_t MAX_SILENCE_MS  = 30000;
     uint32_t now = millis();
     if (now < GRACE_PERIOD_MS) return true;
+    TaskHandle_t taskHandles[TASK_COUNT] = {
+        hSensor, hSlowSensor, hProcess, hStorage, hExport
+    };
     for (int i = 0; i < TASK_COUNT; i++) {
+        TaskHandle_t h = taskHandles[i];
+        if (h && eTaskGetState(h) == eDeleted) {
+            Serial.printf("[Watchdog] Task %d deleted unexpectedly\n", i);
+            return false;
+        }
         uint32_t hb = g_taskHeartbeat[i];
-        if (hb == 0) continue;   // task has not started yet
         if (now - hb > MAX_SILENCE_MS) {
             Serial.printf("[Watchdog] Task %d stuck (%lums)\n", i, now - hb);
             return false;

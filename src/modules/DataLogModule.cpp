@@ -78,7 +78,7 @@ bool DataLogModule::load(JsonObjectConst cfg) {
 }
 
 // ---------------------------------------------------------------------------
-void DataLogModule::save(JsonObject cfg) const {
+bool DataLogModule::save(JsonObject cfg) const {
     const DatalogConfig& d = config.datalog;
     cfg["prefix"]                 = d.prefix;
     cfg["folder"]                 = d.folder;
@@ -97,6 +97,7 @@ void DataLogModule::save(JsonObject cfg) const {
     cfg["postCorrectionEnabled"]  = d.postCorrectionEnabled;
     cfg["pfToFfThreshold"]        = d.pfToFfThreshold;
     cfg["ffToPfThreshold"]        = d.ffToPfThreshold;
+    return true;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,6 @@
 #include "ModuleRegistry.h"
+#include "../pipeline/DataPipeline.h"
+#include "../utils/MutexGuard.h"
 #include <LittleFS.h>
 
 ModuleRegistry moduleRegistry;
@@ -12,6 +14,10 @@ bool ModuleRegistry::add(IModule* mod) {
     }
     if (getById(mod->getId()) != nullptr) {
         Serial.printf("[ModuleRegistry] duplicate id: %s\n", mod->getId());
+        return false;
+    }
+    if (!IModule::validateSchema(mod->schema())) {
+        Serial.printf("[ModuleRegistry] invalid schema for %s\n", mod->getId());
         return false;
     }
     _modules[_count++] = mod;
@@ -53,9 +59,11 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
     // Realistic worst case is a few KB (see MAX_FILE_BYTES rationale in .h).
     size_t sz = f.size();
     if (sz > MAX_FILE_BYTES) {
-        Serial.printf("[ModuleRegistry] %s too large (%u B, cap %u) — ignoring\n",
+        Serial.printf("[ModuleRegistry] %s too large (%u B, cap %u) — quarantining\n",
                       path, (unsigned)sz, (unsigned)MAX_FILE_BYTES);
         f.close();
+        fs.rename(path, "/config/modules.json.corrupt");
+        saveAll(fs, path);
         return false;
     }
 
@@ -63,7 +71,9 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
     DeserializationError err = deserializeJson(doc, f);
     f.close();
     if (err) {
-        Serial.printf("[ModuleRegistry] parse error: %s\n", err.c_str());
+        Serial.printf("[ModuleRegistry] parse error: %s — quarantining\n", err.c_str());
+        fs.rename(path, "/config/modules.json.corrupt");
+        saveAll(fs, path);
         return false;
     }
 
@@ -91,6 +101,12 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
 bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
     if (_count == 0) return true;  // phase-1 no-op
 
+    MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
+    if (fsMutex && !guard.isLocked()) {
+        Serial.println("[ModuleRegistry] saveAll: fsMutex timeout");
+        return false;
+    }
+
     // Ensure /config exists (LittleFS auto-creates intermediate dirs on some
     // cores but not reliably — mkdir is cheap if already present).
     fs.mkdir("/config");
@@ -98,11 +114,16 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
     JsonDocument doc;
     doc["version"] = 1;
     JsonObject modules = doc["modules"].to<JsonObject>();
+    bool allOk = true;
     for (int i = 0; i < _count; i++) {
         JsonObject slice = modules[_modules[i]->getId()].to<JsonObject>();
         slice["enabled"] = _modules[i]->isEnabled();
-        _modules[i]->save(slice);
+        if (!_modules[i]->save(slice)) {
+            Serial.printf("[ModuleRegistry] save() failed for %s\n", _modules[i]->getId());
+            allOk = false;
+        }
     }
+    if (!allOk) return false;
 
     // Crash-safe write: serialize to a sibling .new file, fsync via close,
     // then rename over the real target.  A power loss during write leaves
@@ -126,8 +147,11 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
     // LittleFS rename() overwrites the destination atomically when it
     // exists, so we deliberately DON'T remove() first — doing so would
     // create a window where neither file is present if power drops
-    // between remove and rename.  The loadAll() recovery path still GC's
-    // a stale .new in case rename itself fails mid-operation.
+    // between remove and rename.  On SD/FAT, rename-over-existing fails,
+    // so we probe the FS type and remove first only on non-LittleFS.
+    if (&fs != static_cast<fs::FS*>(&LittleFS) && fs.exists(path)) {
+        fs.remove(path);
+    }
     if (!fs.rename(tmp.c_str(), path)) {
         Serial.printf("[ModuleRegistry] rename %s -> %s failed\n", tmp.c_str(), path);
         fs.remove(tmp.c_str());
@@ -167,7 +191,7 @@ bool ModuleRegistry::toDetailJson(const char* id, JsonObject out) const {
     out["enabled"] = m->isEnabled();
     out["hasUI"]   = m->hasUI();
     JsonObject cfg = out["config"].to<JsonObject>();
-    m->save(cfg);
+    (void)m->save(cfg);
     const char* s = m->schema();
     if (s) out["schema"] = (const __FlashStringHelper*)s;
     return true;
