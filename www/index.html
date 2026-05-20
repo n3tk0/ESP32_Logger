@@ -763,15 +763,17 @@
     JS modules are plain scripts in shared global scope; load order matters:
     core.js defines globals/utils/nav, the others depend on them.
   -->
-  <script src="/js/core.js"></script>
-  <script src="/js/icons.js"></script>
-  <script src="/js/pages.js"></script>
-  <script src="/js/settings.js"></script>
-  <script src="/js/sensors.js"></script>
+  <!-- defer preserves load order while unblocking first paint; load order is
+       still guaranteed because deferred scripts execute in document order. -->
+  <script src="/js/core.js" defer></script>
+  <script src="/js/icons.js" defer></script>
+  <script src="/js/pages.js" defer></script>
+  <script src="/js/settings.js" defer></script>
+  <script src="/js/sensors.js" defer></script>
   <!-- IoT extensions: Overview / Alerts / Health pages, sensor zones,
        compare mode, wizard, platform-mode awareness. Loaded last so it can
        depend on everything defined above. -->
-  <script src="/js/iot-extensions.js"></script>
+  <script src="/js/iot-extensions.js" defer></script>
 
 </body>
 
