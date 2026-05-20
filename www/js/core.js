@@ -89,7 +89,10 @@ function _dispatchEvent(eventName) {
     if (!t) return;
     var name = t.getAttribute("data-" + eventName);
     var fn = Handlers[name];
-    if (typeof fn !== "function") return;
+    if (typeof fn !== "function") {
+      console.warn("_dispatchEvent: no handler registered for", JSON.stringify(name), "on", t);
+      return;
+    }
     var args;
     var raw = t.getAttribute("data-args");
     if (raw) {
