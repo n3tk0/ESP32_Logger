@@ -59,9 +59,11 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
     // Realistic worst case is a few KB (see MAX_FILE_BYTES rationale in .h).
     size_t sz = f.size();
     if (sz > MAX_FILE_BYTES) {
-        Serial.printf("[ModuleRegistry] %s too large (%u B, cap %u) — ignoring\n",
+        Serial.printf("[ModuleRegistry] %s too large (%u B, cap %u) — quarantining\n",
                       path, (unsigned)sz, (unsigned)MAX_FILE_BYTES);
         f.close();
+        fs.rename(path, "/config/modules.json.corrupt");
+        saveAll(fs, path);
         return false;
     }
 
