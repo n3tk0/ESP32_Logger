@@ -20,6 +20,7 @@
 #include "../setup.h"                   // WEB_BASIC_AUTH_* macros
 #include "../core/Globals.h"
 #include "../core/BoardProfiles.h"      // R11: g_boardProfile + isPinAllowed
+#include "../modules/OtaModule.h"       // R20: /do_update respects OtaModule.enabled
 #include "../managers/ConfigManager.h"
 #include "../managers/WiFiManager.h"
 #include "../managers/StorageManager.h"
@@ -2053,6 +2054,17 @@ void setupWebServer() {
                     // to prevent unauthorized flash writes.
                     if (!requireMutatingAuth(req)) {
                         ctx->authFailed = true;
+                        return;
+                    }
+
+                    // R20 / AUDIT 13.5: OtaModule's enabled flag now actually
+                    // gates the upload path. Toggling /api/modules/ota/enable
+                    // off refuses subsequent /do_update requests with 503.
+                    // Closes the "enable switch with no semantic effect" bug.
+                    if (!OtaModule::instance().isEnabled()) {
+                        ctx->authFailed = true;   // reuses the rejection path
+                        req->send(503, "application/json",
+                                  "{\"ok\":false,\"error\":\"OTA disabled in /api/modules/ota\"}");
                         return;
                     }
 
