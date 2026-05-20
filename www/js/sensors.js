@@ -24,20 +24,14 @@ function pcfgLoad(cb) {
 
 function pcfgSave(obj, cb) {
   var body = JSON.stringify(obj, null, 2);
-  fetchWithTimeout("/save_platform", {
+  postWithCsrf("/save_platform", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body,
   }, 30000)
-    .then(function (r) {
-      return r.json();
-    })
-    .then(function (d) {
-      if (cb) cb(d.ok, d.error || "");
-    })
-    .catch(function (e) {
-      if (cb) cb(false, String(e));
-    });
+    .then(function (r) { return r.json(); })
+    .then(function (d) { if (cb) cb(d.ok, d.error || ""); })
+    .catch(function (e) { if (cb) cb(false, String(e)); });
 }
 
 // ============================================================================
