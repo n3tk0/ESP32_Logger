@@ -94,7 +94,8 @@ function _dispatchEvent(eventName) {
     var raw = t.getAttribute("data-args");
     if (raw) {
       try {
-        args = JSON.parse(raw);
+        if (raw.length > 4096) { console.warn("data-args too large on", t); args = []; }
+        else args = JSON.parse(raw);
         // Accept a scalar/object for convenience (data-args="5" or '{"x":1}')
         // by wrapping it; fn.apply strictly requires an array.
         if (args !== null && !Array.isArray(args)) args = [args];
