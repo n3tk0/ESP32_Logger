@@ -67,7 +67,9 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
     DeserializationError err = deserializeJson(doc, f);
     f.close();
     if (err) {
-        Serial.printf("[ModuleRegistry] parse error: %s\n", err.c_str());
+        Serial.printf("[ModuleRegistry] parse error: %s — quarantining\n", err.c_str());
+        fs.rename(path, "/config/modules.json.corrupt");
+        saveAll(fs, path);
         return false;
     }
 
