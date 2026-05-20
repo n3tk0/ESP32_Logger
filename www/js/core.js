@@ -83,6 +83,8 @@ function registerHandlers(obj) {
 
 function _dispatchEvent(eventName) {
   return function (ev) {
+    // closest() stops at the NEAREST ancestor — outer ancestors with the same
+    // data-* attribute are intentionally shadowed (single-fire bubble policy).
     var t = ev.target.closest("[data-" + eventName + "]");
     if (!t) return;
     var name = t.getAttribute("data-" + eventName);
