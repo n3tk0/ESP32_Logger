@@ -352,6 +352,7 @@ void migrateConfig(uint8_t fromVersion) {
     }
     config.version = CONFIG_VERSION;
     config.hardware.version = CONFIG_VERSION;
+    // migrate must run pre-task-init: fsMutex is nullptr here; saveConfig is safe but not locked.
     saveConfig();
 }
 
