@@ -74,6 +74,14 @@ public:
     //   ]}
     virtual const char* schema() const  { return nullptr; }
 
+    // Called at registration time (ModuleRegistry::add) to catch malformed
+    // PROGMEM schemas at boot rather than at first UI render.
+    static bool validateSchema(const char* s) {
+        if (!s) return true;
+        JsonDocument doc;
+        return deserializeJson(doc, s) == DeserializationError::Ok;
+    }
+
 protected:
     bool _enabled = true;
 };

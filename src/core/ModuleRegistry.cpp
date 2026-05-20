@@ -14,6 +14,10 @@ bool ModuleRegistry::add(IModule* mod) {
         Serial.printf("[ModuleRegistry] duplicate id: %s\n", mod->getId());
         return false;
     }
+    if (!IModule::validateSchema(mod->schema())) {
+        Serial.printf("[ModuleRegistry] invalid schema for %s\n", mod->getId());
+        return false;
+    }
     _modules[_count++] = mod;
     return true;
 }
