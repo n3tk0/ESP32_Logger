@@ -1111,9 +1111,9 @@ function liveRender(d) {
 
   var modeEl = document.getElementById("mode");
   if (modeEl) {
-    if (d.mode === "online") modeEl.innerHTML = "🌐 Online Logger";
-    else if (d.mode === "webonly") modeEl.innerHTML = "📡 Web Only";
-    else modeEl.innerHTML = "📊 Logging";
+    if (d.mode === "online") modeEl.textContent = "🌐 Online Logger";
+    else if (d.mode === "webonly") modeEl.textContent = "📡 Web Only";
+    else modeEl.textContent = "📊 Logging";
   }
 
   if (d.time) setEl("headerTime", d.time.split(" ")[1] || d.time);
