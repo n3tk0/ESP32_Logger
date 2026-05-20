@@ -38,13 +38,7 @@ static void applyDefaults() {
     if (badFloat(config.datalog.ffToPfThreshold)) config.datalog.ffToPfThreshold = 3.7f;
     if (config.datalog.maxSizeKB       == 0) config.datalog.maxSizeKB       = 1024;
     
-    if (config.datalog.maxEntries == 0) {
-        config.datalog.maxEntries = 10000;
-        config.datalog.includeBootCount = true;
-        config.datalog.includeExtraPresses = true;
-        config.datalog.postCorrectionEnabled = true;
-        config.datalog.timestampFilename = true;
-    }
+    if (config.datalog.maxEntries == 0) config.datalog.maxEntries = 10000;
     
     if (config.datalog.manualPressThresholdMs == 0) config.datalog.manualPressThresholdMs = 500;
     if (!strlen(config.datalog.prefix))       SAFE_STRCPY(config.datalog.prefix,      DEFAULT_DATALOG_PREFIX);
