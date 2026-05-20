@@ -110,7 +110,11 @@ void restoreBootCount() {
         }
     }
     File f = LittleFS.open(BOOTCOUNT_BACKUP_FILE, "r");
-    if (f) { f.read((uint8_t*)&bootCount, sizeof(bootCount)); f.close(); }
+    if (f) {
+        size_t n = f.read((uint8_t*)&bootCount, sizeof(bootCount));
+        if (n != sizeof(bootCount)) bootCount = 0;
+        f.close();
+    }
     DBGF("Bootcount from flash: %d\n", bootCount);
 }
 
