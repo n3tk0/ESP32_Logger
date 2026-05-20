@@ -481,6 +481,27 @@ function getCsrfToken() {
 // Warm the cache early so the first mutating request doesn't pay a round-trip.
 getCsrfToken();
 
+// Mutating helper: appends ?csrf=<token> to url and retries once on 403.
+// Usage: postWithCsrf(url, opts, timeoutMs).then(r => r.json())
+function postWithCsrf(url, opts, timeoutMs) {
+  opts = opts || {};
+  opts.method = opts.method || "POST";
+  return getCsrfToken().then(function (token) {
+    var u = token ? url + (url.indexOf("?") >= 0 ? "&" : "?") + "csrf=" + encodeURIComponent(token) : url;
+    return fetchWithTimeout(u, opts, timeoutMs || 15000).then(function (r) {
+      if (r.status === 403) {
+        window.__csrfToken = null;
+        return getCsrfToken().then(function (t) {
+          var u2 = t ? url + (url.indexOf("?") >= 0 ? "&" : "?") + "csrf=" + encodeURIComponent(t) : url;
+          return fetchWithTimeout(u2, opts, timeoutMs || 15000);
+        });
+      }
+      return r;
+    });
+  });
+}
+window.postWithCsrf = postWithCsrf;
+
 // ============================================================================
 // NAVIGATION
 // ============================================================================
