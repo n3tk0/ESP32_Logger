@@ -76,9 +76,9 @@ bool SDS011Sensor::_parseFrame(const uint8_t* buf) {
 void SDS011Sensor::_drainBuffer() {
     if (!_serial) return;
     unsigned long t = millis();
-    while (millis() - t < 100) {
+    while (millis() - t < 50) {
         while (_serial->available()) _serial->read();
-        delay(10);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
