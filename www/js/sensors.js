@@ -98,17 +98,12 @@ function sensorsLoad() {
       if (msg) msg.textContent = "";
 
       // Update page subtitle with live counts
-      var nowMs = Date.now();
-      var errCount    = d.sensors.filter(function(s) { return s.status === "error"; }).length;
-      var okCount     = d.sensors.filter(function(s) { return s.status === "ok"; }).length;
-      var sweepAge    = (d.last_sweep_ms && d.last_sweep_ms > 0)
-                          ? Math.round((nowMs - d.last_sweep_ms) / 100) / 10
-                          : null;
+      var errCount = d.sensors.filter(function(s) { return s.status === "error"; }).length;
+      var okCount  = d.sensors.filter(function(s) { return s.status === "ok"; }).length;
       var sub = document.getElementById("sensors-sub");
       if (sub) {
         var parts = [okCount + " active"];
         if (errCount) parts.push(errCount + " errored");
-        if (sweepAge != null) parts.push("last sweep " + sweepAge + "s ago");
         sub.textContent = parts.join(" · ");
       }
 
