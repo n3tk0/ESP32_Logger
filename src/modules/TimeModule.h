@@ -17,6 +17,11 @@ public:
     bool load(JsonObjectConst cfg) override;
     void save(JsonObject cfg)      const override;
 
+    // R20: start() schedules an NTP sync via the existing g_pendingNtpSync
+    // flag — loop() picks it up off the AsyncTCP worker so the request
+    // returns immediately. Returns true (no reboot needed).
+    bool start() override;
+
     const char* schema() const override;
 
     static TimeModule& instance() { static TimeModule m; return m; }
