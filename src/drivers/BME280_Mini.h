@@ -69,7 +69,7 @@ public:
     }
 
     float readPressure() {
-        // Must call readTemperature() first to set _t_fine
+        if (_t_fine == 0) readTemperature();  // guard: ensure compensation is ready
         int32_t adc_P = _read24(0xF7) >> 4;
         if (adc_P == 0x80000) return NAN;
 
@@ -92,7 +92,7 @@ public:
 
     float readHumidity() {
         if (!_isBME280) return NAN;
-        // Must call readTemperature() first to set _t_fine
+        if (_t_fine == 0) readTemperature();  // guard: ensure compensation is ready
         int16_t adc_H = _read16(0xFD);
 
         int32_t v_x1_u32r = _t_fine - 76800;
