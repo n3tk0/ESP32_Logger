@@ -36,6 +36,7 @@ public:
     const char* getType() const override { return "bme688"; }
     const char* getName() const override { return "BME688 Environmental+Gas"; }
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
+    bool        isBlocking() const override { return true; }  // performReading() blocks up to 1 s
     int getMetrics(const char** out, int maxOut) const override {
         static const char* m[] = { "temperature", "humidity", "pressure", "gas_resistance" };
         int n = 4; if (n > maxOut) n = maxOut;
