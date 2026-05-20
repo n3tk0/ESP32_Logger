@@ -67,6 +67,13 @@ void initRtc() {
     } else {
         DBGLN("RTC: Could not set time. Use web UI.");
     }
+
+    // R22 / AUDIT 8.5: re-enable write protection after init. Without this,
+    // the RTC stays writable forever and any stray Rtc->SetDateTime path
+    // would succeed silently. /set_time + WiFiManager NTP path each wrap
+    // their writes in their own unprotect/write/protect cycle, so this
+    // post-init protect doesn't break them.
+    Rtc->SetIsWriteProtected(true);
 }
 
 void backupBootCount() {
