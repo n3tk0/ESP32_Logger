@@ -4,6 +4,46 @@ Persistent record of findings across all audit phases. Severity scale: **C**riti
 
 ---
 
+## Refactor phase summary (R1–R20)
+
+Cumulative status of the R-pass refactor program. "Rows closed" counts audit
+table entries updated to `Fixed (#NN)` or `Fixed (R<X> PR pending)`. R1
+shipped helpers used by later passes and closed no rows directly.
+Row counts derived from `grep -c "Fixed (#<NN>)" AUDIT_LOG.md`; rows still
+labeled `Fixed (R<X> PR pending)` (R18 row 26.2, R20 row 13.5) are counted
+separately.
+
+| Phase | PR | Theme | Rows closed |
+|---|---|---|---:|
+| R1  | #76 | Bedrock helpers (MutexGuard, AtomicWrite, IsrPin, RequireAuth) | — |
+| R2  | #77 | Critical safety (OTA confirm, circuit breaker, RainSensor pin) | 1 |
+| R3  | #78 | Atomic file write (atomicWrite helper + all FS write sites) | 5 |
+| R4  | #79 | Mutex hygiene (bounded timeouts, fsMutex/configMutex universality) | 12 |
+| R5  | #80 | HTTP auth sweep (requireMutatingAuth on all mutating handlers) | 5 |
+| R6  | #81 | ISR safety (IsrPin RAII in all gpio_isr_handler_add sites) | 2 |
+| R7  | #82 | Frontend HTML escape (esc() on all innerHTML interpolations) | 6 |
+| R8  | #83 | Dead code removal (~600 LOC) | 4 |
+| R9  | #84 | DRY consolidation (JsonResponse helper; 12 handler sites migrated) | 1 |
+| R10 | #85 | Validation / numeric clamps at all API boundaries | 8 |
+| R11 | #87 | Board profiles (PIN_UNSET sentinel, wizard, isPinAllowed) | 6 |
+| R12 | #88 | Boot + init hardening (TaskManager all-or-nothing, LittleFS mount) | 12 |
+| R13 | #89 | API criticals (path-guard, credential masking, allocation safety) | 13 |
+| R14 | #90 | Concurrency hardening (SensorManager reload, AlertEngine staging) | 7 |
+| R15 | #91 | TLS + auth hardening (exporter TLS opt-in, JSON-body CSRF header) | 11 |
+| R16 | #92 | Validation contract completeness | 8 |
+| R17 | #93 | Sensor hygiene + math fixes | 10 |
+| R18 | #95 | A11y + uPlot SRI (failsafe + firstrun a11y; CDN version-pin) | 1 |
+| R19 | #96 | Diagnostics observability (/api/diag heap, tasks, counters, resetLog) | — |
+| R20 | #97 | Module lifecycle (OtaModule kill switch; WiFi/Time honest start()) | 1 |
+| **Total** | | | **113** |
+
+Row count notes: 111 rows carry `Fixed (#NN)` labels; rows 26.2 and 13.5 carry
+`Fixed (R18 PR pending)` and `Fixed (R20 PR pending)` respectively (label
+cleanup deferred). Run `grep -c "Fixed (#"` per PR number to recount after
+a label-normalisation pass.
+
+---
+
 ## Phase 1 — setup() / Hardware Init / LittleFS / RTC
 
 Files: `ESP_Logger.ino`, `src/managers/HardwareManager.*`, `src/managers/StorageManager.*`, `src/managers/RtcManager.*`, `src/managers/ConfigManager.*`, `src/core/Globals.*`

@@ -9,6 +9,167 @@ These are **Standard Operating Procedures (SOPs)**, not suggestions. A pull requ
 
 ---
 
+## Architecture map
+
+Source tree layout (see comment block in `ESP_Logger.ino`):
+
+```
+src/
+├── core/         Config structs, enums, BoardProfiles, IModule interface
+├── managers/     ConfigManager, HardwareManager, OtaManager, StorageManager, RtcManager
+├── modules/      IModule adapters: WiFi, OTA, Time, Theme, DataLog
+├── sensors/      ISensor + SensorManager + plugins/  (19 plugin classes)
+├── pipeline/     DataPipeline queues, AggregationEngine (LTTB), LiveAggregator
+├── storage/      JsonLogger (JSON Lines), CsvLogger (wide-CSV)
+├── export/       IExporter, MQTT / HTTP / Webhook / SC / OSM exporters
+├── tasks/        TaskManager, 4 FreeRTOS tasks (Sensor, Process, Storage, Export)
+├── alerts/       AlertEngine + toast ring buffer
+├── drivers/      Internal mini drivers (BME280, BME688, DS18B20, MQTT, DS1302)
+├── utils/        MutexGuard, AtomicWrite, IsrPin, JsonResponse
+└── web/          WebServer, ApiHandlers, RequireAuth, FirstRunHandler
+www/
+├── js/           core.js, iot-extensions.js, sensors.js, settings.js, pages.js
+└── pages/        Per-settings HTML fragments
+```
+
+---
+
+## Shipped helpers
+
+Each helper below MUST be used at every qualifying call site; do not
+reimplement inline.
+
+| Helper | File | Contract |
+|---|---|---|
+| `MutexGuard` | `src/utils/MutexGuard.h` | RAII acquire/release of a `SemaphoreHandle_t` with bounded timeout; caller MUST check `isLocked()` |
+| `AtomicWrite` | `src/utils/AtomicWrite.h` | Write-to-tmp → rename pattern for LittleFS; reverts on failure |
+| `IsrPin` | `src/utils/IsrPin.h` | RAII wrapper around `gpio_isr_handler_add/remove`; MUST be the last member of any ISR-owning class |
+| `RequireAuth` | `src/web/RequireAuth.h` | Rate-limit + CSRF check for mutating handlers; first statement must be `if (!requireMutatingAuth(req)) return;` |
+| `JsonResponse` | `src/utils/JsonResponse.h` | Serialize `JsonDocument` to `AsyncResponseStream` and send; use for all standard JSON responses |
+| `BoardProfiles` | `src/core/BoardProfiles.h` | Pin-restriction registry; `isPinAllowed()` and `validateAttachPin()` are the gate for all GPIO assignments |
+| `fetchWithTimeout` | `www/js/core.js:29` | Fetch with AbortController timeout (default 15 s); use on every API call |
+| `getCsrfToken` | `www/js/core.js:449` | Returns a cached promise for the current CSRF token; required before every POST |
+| `escapeHtml` / `esc` | `www/js/core.js:799` | HTML-escape for `innerHTML` interpolation; required on every user-controlled string |
+
+---
+
+## Module lifecycle (R20)
+
+`IModule` (`src/core/IModule.h`) defines the contract for all runtime
+subsystems with persisted config:
+
+- `load(cfg)` — merge JSON into in-memory state; called at boot and on
+  `POST /api/modules/:id`.
+- `save(cfg)` — serialise state to JSON for persistence.
+- `start()` — bring the module online with current config. Returns `false`
+  if a device reboot is required to apply the change (e.g. WiFiModule,
+  which cannot tear down the radio from the AsyncTCP worker thread).
+- `stop()` — release resources.
+
+`POST /api/modules/:id/restart` calls `stop()` then `start()` without
+changing the enabled flag (`src/web/ApiHandlers.cpp:657`). If `start()`
+returns `false`, the response includes `"restartRequired":true` and the
+caller must POST `/restart`.
+
+Modules that currently override `start()`:
+- `WiFiModule::start()` — always returns `false` (reboot required)
+  (`src/modules/WiFiModule.h:26`)
+- `TimeModule::start()` — queues an NTP sync task, returns `true`
+  (`src/modules/TimeModule.h:23`)
+
+`POST /api/modules/:id/enable?on=0` sets the enabled flag only; a subsequent
+`/restart` or `/api/modules/:id/restart` is needed for most modules to act on it.
+
+---
+
+## Concurrency patterns (R14)
+
+### SensorManager reload
+
+`SensorManager::tickFiltered` acquires `configMutex` before iterating
+`_sensors[]`. `reloadConfig` acquires the same mutex in write-mode. This
+prevents use-after-free when a reload deletes a plugin while the sensor task
+is iterating (`AUDIT 3.19`, fixed in R14, `src/pipeline/DataPipeline.h:22`).
+
+### AlertEngine MQTT publish
+
+`AlertEngine::evaluate()` stages MQTT publish payloads into `_pendingMqtt[]`
+while holding `_mutex`, then releases the mutex and drains the array outside
+it. This prevents holding `_mutex` during a blocking MQTT network call
+(`src/alerts/AlertEngine.h:112-114`).
+
+### RingBuffer ordering
+
+Writers hold `webDataMutex` for the push. Readers hold the same mutex.
+A producer that cannot acquire the mutex within 5 ms increments
+`g_ringPushDrops` and drops the reading rather than blocking the sensor task
+(`AUDIT 2.8`, `src/pipeline/DataPipeline.h`).
+
+---
+
+## Pin assignment (R11 + R17)
+
+- `PIN_UNSET` (0xFF) is the sentinel for "no pin chosen" in every
+  `uint8_t` GPIO field (`src/core/BoardProfiles.h:28`).
+- Every sensor plugin's `init()` MUST call `validateAttachPin(pin, sensorId,
+  fieldName)` before `pinMode` or `gpio_isr_handler_add`. On failure, log
+  the reject reason and return `false`.
+- `isPinAllowed(profile, pin, purpose)` returns `false` for `PIN_UNSET`,
+  strap, USB, flash, and reserved pins (`src/core/BoardProfiles.h`).
+- Serial1 ownership: `_claimSerial1(who)` / `_releaseSerial1(who)` in
+  `src/sensors/SensorManager.cpp:14` prevent two UART sensors from binding
+  the same hardware serial port.
+- I2C address ownership: `_claimI2cAddress(addr, who)` /
+  `_releaseI2cClaims(who)` in `src/sensors/SensorManager.cpp:29` prevent
+  two sensors from sharing a fixed I2C address.
+
+---
+
+## Validation contracts
+
+- `requireMutatingAuth(req)` (`src/web/RequireAuth.h`) — FIRST statement in
+  every mutating HTTP handler; performs rate-limit check then CSRF check.
+- Numeric clamps and `isPinAllowed` — R10 (`PR #85`) applied min/max guards
+  to all numeric config fields at the `/save_*` boundary.
+- JSON escape — `toJsonLine` and all exporter `send()` methods MUST route
+  user-controlled strings through the JSON escape helper (Pillar 2.7).
+- `isPathProtected(path)` — returns `true` for config, spool, and temp files;
+  MUST be consulted by `/download`, `/delete`, and `/move_file`
+  (Pillar 2.4, `src/web/WebServer.cpp`).
+- HTML escape — every `innerHTML` interpolation MUST use `esc()` from
+  `www/js/core.js:799` (Pillar 2.8).
+
+---
+
+## Frontend conventions
+
+- `fetchWithTimeout(url, opts, timeoutMs)` (`www/js/core.js:29`) — use on
+  every API call. Default 15 s; 30 s for writes; 60 s for imports/exports.
+- `getCsrfToken()` (`www/js/core.js:449`) — required before every mutating
+  POST. Passes the token as a `?csrf=` query parameter.
+- `esc(s)` (`www/js/core.js:799`) — required on every `innerHTML`
+  interpolation of server-supplied data.
+- CDN script loading — `<script src>` from CDN MUST include
+  `integrity="sha384-..."` and `crossorigin="anonymous"`. Version MUST be
+  pinned (not a range). uPlot is pinned to `1.6.32` with SRI hashes in
+  `www/js/pages.js:42-43` (R18).
+
+---
+
+## Deferred / out of scope
+
+The following items were identified in the audit but not yet resolved:
+
+- Bundled CA store for HTTPS exporters — `setInsecure()` is used until a CA
+  store ships (audit 15.2 / REFACTORING_GUIDELINES Pillar 2.9).
+- `WiFi.persistent` / NVS divergence — AP credentials written to NVS by the
+  Arduino SDK can diverge from `config.bin` after a factory reset (audit 14.7).
+- Test scaffold — no automated test harness exists; CI is build-only.
+- SPA accessibility full pass — only the failsafe page and firstrun wizard
+  have received WCAG 2.2 attention (R18); the rest of the SPA is untouched.
+
+---
+
 ## Pillar 1 — Concurrency & FreeRTOS
 
 ### 1.1 Lock-ordering invariant
@@ -243,25 +404,29 @@ Implementation contract:
 
 ### 4.1 GPIO defaults
 
-Per-target pin maps live in `src/hardware/PinMap_<target>.h` (new file). For ESP32-C3 SuperMini:
+R11 replaced the `src/hardware/PinMap_<target>.h` proposal with
+`src/core/BoardProfiles.h`. All new pins default to `PIN_UNSET` (0xFF); the
+first-run wizard collects GPIO assignments validated against the chosen
+profile. Forbidden pin sets per profile are defined in
+`src/core/BoardProfiles.cpp` (strap, USB, flash, reserved lists).
 
-- **FORBIDDEN as defaults:** GPIO 0, 2, 8, 9 (strap pins), 1 (UART0 TX), 11-17 (SPI flash bus), 18-21 (USB CDC).
-- **Safe ADC defaults:** GPIO 3, 4, 5 (ADC1 channels 3/4/0 — but verify 3 is non-strap on C3; double-check datasheet before assignment).
-- **Safe wake pins:** GPIO 3, 4, 5 (RTC GPIO range 0-5, minus strap).
-- **Safe digital I/O:** GPIO 4, 5, 6, 7, 10.
-
-`platform_config.json` shipped defaults MUST come from this map. (Closes FG.1.)
+`DefaultPins` namespace in `src/core/Config.h` initialises every hardware
+config field to `PIN_UNSET`. Devices with a saved `config.bin` keep their
+stored values; new devices run the wizard before any sensor starts.
 
 ### 4.2 Pin validator
 
-A single function `bool validatePin(int pin, PinUsage usage)` MUST be consulted at:
-- `SensorManager::loadAndInit` per-sensor (rejects invalid → sensor skipped + Serial warning + status="error")
-- `ConfigManager::sanitizeWakeConfig` per wake pin (existing path; extend to sensor pins)
-- Any new `/save_*` handler that accepts a pin number
+The R11 implementation (`src/core/BoardProfiles.h`) provides:
+- `isPinAllowed(profile, pin, purpose)` — returns `false` for `PIN_UNSET`,
+  strap, USB, flash, and reserved pins.
+- `validateAttachPin(pin, sensorId, fieldName)` — runtime guard called by
+  every plugin `init()`; logs a descriptive rejection reason and returns
+  `false` on invalid pins.
 
-PinUsage enum covers: WAKE, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN, ADC, I2C_SDA, I2C_SCL, UART_TX, UART_RX, SPI_CS, SPI_MOSI, SPI_MISO, SPI_SCK, ONE_WIRE.
-
-The validator MUST reject strap-pin assignments unless the build flag `ALLOW_STRAP_PINS=1` is set AND the call site documents the workaround.
+These replace the proposed `validatePin(int, PinUsage)` and are already
+wired into `SensorManager` and the first-run wizard. The `PinPurpose` enum
+(`src/core/BoardProfiles.h:26`) covers generic, digital in/out, analog,
+I2C, UART, and pulse roles.
 
 ### 4.3 Input pull resistors
 
