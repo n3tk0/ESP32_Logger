@@ -70,6 +70,7 @@ bool ENS160Sensor::read(SensorReading& out) {
 
 int ENS160Sensor::readAll(SensorReading* out, int maxOut) {
     if (!_ready || maxOut < 3) return 0;
+    if (!_waitReady(200)) return 0;
 
     uint8_t aqi = 0;
     uint8_t tvocBuf[2], eco2Buf[2];
