@@ -362,34 +362,10 @@ function thInit() {
       setVal("th-primary", th.primaryColor || "#275673");
       setVal("th-secondary", th.secondaryColor || "#4a5568");
       window._thData = th;
-      function updateColorPickers(m) {
-        var isD =
-          m === 1 ||
-          (m === 2 &&
-            window.matchMedia &&
-            window.matchMedia("(prefers-color-scheme: dark)").matches);
-        setVal(
-          "th-bg",
-          isD
-            ? window._thData.darkBgColor || "#0f172a"
-            : window._thData.lightBgColor || "#f0f2f5",
-        );
-        setVal(
-          "th-text",
-          isD
-            ? window._thData.darkTextColor || "#e2e8f0"
-            : window._thData.lightTextColor || "#2d3748",
-        );
-      }
-      updateColorPickers(mode);
-
-      var modeSelect = document.getElementById("th-mode");
-      if (modeSelect && !window._modeListenerAppended) {
-        modeSelect.addEventListener("change", function (e) {
-          updateColorPickers(parseInt(e.target.value));
-        });
-        window._modeListenerAppended = true;
-      }
+      setVal("th-lightBg",   th.lightBgColor   || "#f0f2f5");
+      setVal("th-darkBg",    th.darkBgColor    || "#0f172a");
+      setVal("th-lightText", th.lightTextColor || "#2d3748");
+      setVal("th-darkText",  th.darkTextColor  || "#e2e8f0");
       setVal("th-ff", th.ffColor || "#275673");
       setVal("th-pf", th.pfColor || "#7eb0d5");
       setVal("th-other", th.otherColor || "#a0aec0");
@@ -417,34 +393,6 @@ function themeSave(e, form) {
   if (e && e.preventDefault) e.preventDefault();
   if (!form) form = e && e.target;
   var fd = new FormData(form);
-
-  var mode = parseInt(fd.get("themeMode") || "0");
-  var isDark =
-    mode === 1 ||
-    (mode === 2 &&
-      window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches);
-
-  var currentBg = fd.get("bgColor") || "";
-  var currentText = fd.get("textColor") || "";
-  fd.delete("bgColor");
-  fd.delete("textColor");
-
-  if (isDark) {
-    fd.append("darkBgColor", currentBg);
-    fd.append("darkTextColor", currentText);
-    if (window._thData && window._thData.lightBgColor)
-      fd.append("lightBgColor", window._thData.lightBgColor);
-    if (window._thData && window._thData.lightTextColor)
-      fd.append("lightTextColor", window._thData.lightTextColor);
-  } else {
-    fd.append("lightBgColor", currentBg);
-    fd.append("lightTextColor", currentText);
-    if (window._thData && window._thData.darkBgColor)
-      fd.append("darkBgColor", window._thData.darkBgColor);
-    if (window._thData && window._thData.darkTextColor)
-      fd.append("darkTextColor", window._thData.darkTextColor);
-  }
 
   var defs = {
     primaryColor: "#275673",
