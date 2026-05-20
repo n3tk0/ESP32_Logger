@@ -989,6 +989,17 @@ function liveInit() {
   liveLogsTimer = setInterval(liveLogsUpdate, 3000);
 }
 
+var _liveKeepaliveTimer = null;
+
+function _liveResetKeepalive() {
+  if (_liveKeepaliveTimer) clearTimeout(_liveKeepaliveTimer);
+  _liveKeepaliveTimer = setTimeout(function () {
+    // No SSE event in 10 s — close and reopen the channel.
+    if (liveES) { try { liveES.close(); } catch (e) {} liveES = null; }
+    liveStartTransport();
+  }, 10000);
+}
+
 function liveStartTransport() {
   // Always do one immediate fetch so the page is populated before the first
   // SSE tick (server pushes at 1 Hz).
@@ -1004,7 +1015,9 @@ function liveStartTransport() {
     liveStartPolling(500);
     return;
   }
+  _liveResetKeepalive();
   liveES.addEventListener("live", function (ev) {
+    _liveResetKeepalive();
     try { liveRender(JSON.parse(ev.data)); } catch (e) {}
   });
   liveES.onerror = function () {
