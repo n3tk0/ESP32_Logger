@@ -1119,6 +1119,11 @@ void registerApiRoutes(AsyncWebServer& server) {
             String url = r->url();
             const char* prefix = "/api/modules/";
             String id = url.substring(strlen(prefix));
+            // Strip query string before the suffix check — a URL like
+            // /api/modules/wifi/enable?on=1 would otherwise leave the
+            // query in `id` and break the endsWith.
+            int q = id.indexOf('?');
+            if (q >= 0) id.remove(q);
             if (id.endsWith("/enable")) id.remove(id.length() - strlen("/enable"));
             handleApiModuleEnable(r, id);
         });
@@ -1133,6 +1138,10 @@ void registerApiRoutes(AsyncWebServer& server) {
             String url = r->url();
             const char* prefix = "/api/modules/";
             String id = url.substring(strlen(prefix));
+            // Query-string strip — Gemini HIGH on PR #97. Same fix as
+            // /enable above.
+            int q = id.indexOf('?');
+            if (q >= 0) id.remove(q);
             if (id.endsWith("/restart")) id.remove(id.length() - strlen("/restart"));
             handleApiModuleRestart(r, id);
         });

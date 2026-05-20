@@ -2061,10 +2061,16 @@ void setupWebServer() {
                     // gates the upload path. Toggling /api/modules/ota/enable
                     // off refuses subsequent /do_update requests with 503.
                     // Closes the "enable switch with no semantic effect" bug.
+                    //
+                    // Response shape matches the existing /do_update contract
+                    // (success + message — see line 2012 and the doOta()
+                    // frontend at line 198). Using {ok, error} would render
+                    // as "undefined" in the upload UI (Codex P2 on PR #97).
                     if (!OtaModule::instance().isEnabled()) {
                         ctx->authFailed = true;   // reuses the rejection path
                         req->send(503, "application/json",
-                                  "{\"ok\":false,\"error\":\"OTA disabled in /api/modules/ota\"}");
+                                  "{\"success\":false,\"message\":"
+                                  "\"OTA disabled in /api/modules/ota\"}");
                         return;
                     }
 
