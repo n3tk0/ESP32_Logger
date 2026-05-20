@@ -1543,6 +1543,14 @@ function otaUpload() {
     formData.append("firmware", file);
     var url = sha ? "/do_update?sha256=" + sha : "/do_update";
     xhr.open("POST", url);
+    xhr.timeout = 120000;
+    xhr.ontimeout = function () {
+      if (progressDiv) progressDiv.style.display = "none";
+      otaShowPopup("alert-triangle", "Upload Timeout",
+        "No response from device after 120 s — check connection and retry.", false, true);
+      uploadBtn.disabled = false;
+      fileInput.disabled = false;
+    };
     xhr.send(formData);
   });   // end _otaSha256().then
 }
