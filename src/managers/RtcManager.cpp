@@ -84,11 +84,11 @@ void backupBootCount() {
         // syncTimeFromNTP use. Without this, SetMemory silently no-ops
         // and bootCount drifts away from the RTC RAM copy.
         Rtc->SetIsWriteProtected(false);
-        Rtc->SetMemory((uint8_t)RTC_RAM_MAGIC_ADDR, (uint8_t)RTC_RAM_MAGIC_VALUE);
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR),     (uint8_t)((bootCount >> 24) & 0xFF));
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 1), (uint8_t)((bootCount >> 16) & 0xFF));
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 2), (uint8_t)((bootCount >>  8) & 0xFF));
         Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 3), (uint8_t)( bootCount        & 0xFF));
+        Rtc->SetMemory((uint8_t)RTC_RAM_MAGIC_ADDR, (uint8_t)RTC_RAM_MAGIC_VALUE);
         Rtc->SetIsWriteProtected(true);
     }
     atomicWrite(LittleFS, BOOTCOUNT_BACKUP_FILE, [](File& f) -> bool {
