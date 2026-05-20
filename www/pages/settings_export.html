@@ -32,21 +32,21 @@
         <div class="form-grid">
           <div class="field">
             <label class="field-label">Topic Prefix</label>
-            <input type="text" id="exp-mqtt-prefix" class="input" value="waterlogger">
+            <input type="text" id="exp-mqtt-prefix" class="input" value="waterlogger" maxlength="32">
           </div>
           <div class="field">
             <label class="field-label">Client ID (leave blank = auto)</label>
-            <input type="text" id="exp-mqtt-clientid" class="input" placeholder="wl-DEVICEID">
+            <input type="text" id="exp-mqtt-clientid" class="input" placeholder="wl-DEVICEID" maxlength="32">
           </div>
         </div>
         <div class="form-grid">
           <div class="field">
             <label class="field-label">Username</label>
-            <input type="text" id="exp-mqtt-user" class="input" autocomplete="off">
+            <input type="text" id="exp-mqtt-user" class="input" autocomplete="off" maxlength="32">
           </div>
           <div class="field">
             <label class="field-label">Password</label>
-            <input type="password" id="exp-mqtt-pass" class="input" autocomplete="new-password">
+            <input type="password" id="exp-mqtt-pass" class="input" autocomplete="new-password" maxlength="64">
           </div>
         </div>
         <div class="form-grid">
