@@ -9,34 +9,17 @@
 // PLATFORM CONFIG  (platform_config.json management)
 // ============================================================================
 var PCFG = null; // cached platform config object
+var _pcfgFetch = null; // in-flight Promise (dedup concurrent loads)
+
+var _PCFG_DEFAULT = { version: 1, mode: "legacy", sensors: [], aggregation: {}, export: {}, storage: {} };
 
 function pcfgLoad(cb) {
-  fetchWithTimeout("/api/platform_config", {}, 15000)
-    .then(function (r) {
-      return r.ok ? r.json() : null;
-    })
-    .then(function (d) {
-      PCFG = d || {
-        version: 1,
-        mode: "legacy",
-        sensors: [],
-        aggregation: {},
-        export: {},
-        storage: {},
-      };
-      if (cb) cb(PCFG);
-    })
-    .catch(function () {
-      PCFG = {
-        version: 1,
-        mode: "legacy",
-        sensors: [],
-        aggregation: {},
-        export: {},
-        storage: {},
-      };
-      if (cb) cb(PCFG);
-    });
+  if (_pcfgFetch) { _pcfgFetch.then(function () { if (cb) cb(PCFG); }); return; }
+  _pcfgFetch = fetchWithTimeout("/api/platform_config", {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) { PCFG = d || Object.assign({}, _PCFG_DEFAULT); })
+    .catch(function () { PCFG = Object.assign({}, _PCFG_DEFAULT); })
+    .finally(function () { _pcfgFetch = null; if (cb) cb(PCFG); });
 }
 
 function pcfgSave(obj, cb) {
