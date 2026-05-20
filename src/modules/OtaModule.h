@@ -19,7 +19,7 @@ public:
     const char* getName() const override { return "OTA update"; }
 
     bool load(JsonObjectConst cfg) override;
-    void save(JsonObject cfg)      const override;
+    bool save(JsonObject cfg)      const override;
 
     // Informational module — no form for phase 2.
     const char* schema() const override { return nullptr; }

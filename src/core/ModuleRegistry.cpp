@@ -98,10 +98,14 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
     JsonDocument doc;
     doc["version"] = 1;
     JsonObject modules = doc["modules"].to<JsonObject>();
+    bool allOk = true;
     for (int i = 0; i < _count; i++) {
         JsonObject slice = modules[_modules[i]->getId()].to<JsonObject>();
         slice["enabled"] = _modules[i]->isEnabled();
-        _modules[i]->save(slice);
+        if (!_modules[i]->save(slice)) {
+            Serial.printf("[ModuleRegistry] save() failed for %s\n", _modules[i]->getId());
+            allOk = false;
+        }
     }
 
     // Crash-safe write: serialize to a sibling .new file, fsync via close,
@@ -167,7 +171,7 @@ bool ModuleRegistry::toDetailJson(const char* id, JsonObject out) const {
     out["enabled"] = m->isEnabled();
     out["hasUI"]   = m->hasUI();
     JsonObject cfg = out["config"].to<JsonObject>();
-    m->save(cfg);
+    (void)m->save(cfg);
     const char* s = m->schema();
     if (s) out["schema"] = (const __FlashStringHelper*)s;
     return true;

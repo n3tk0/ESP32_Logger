@@ -58,7 +58,7 @@ bool WiFiModule::load(JsonObjectConst cfg) {
 }
 
 // ---------------------------------------------------------------------------
-void WiFiModule::save(JsonObject cfg) const {
+bool WiFiModule::save(JsonObject cfg) const {
     const NetworkConfig& n = config.network;
     cfg["wifiMode"]       = (int)n.wifiMode;
     cfg["clientSSID"]     = n.clientSSID;
@@ -72,6 +72,7 @@ void WiFiModule::save(JsonObject cfg) const {
     formatIPv4(n.gateway,  buf, sizeof(buf)); cfg["gateway"]  = String(buf);
     formatIPv4(n.subnet,   buf, sizeof(buf)); cfg["subnet"]   = String(buf);
     formatIPv4(n.dns,      buf, sizeof(buf)); cfg["dns"]      = String(buf);
+    return true;
 }
 
 // ---------------------------------------------------------------------------

@@ -40,7 +40,7 @@ public:
     //           Called by the registry when persisting modules.json.
     // ------------------------------------------------------------------
     virtual bool load(JsonObjectConst cfg) = 0;
-    virtual void save(JsonObject cfg) const = 0;
+    virtual bool save(JsonObject cfg) const = 0;
 
     // ------------------------------------------------------------------
     // Optional lifecycle hooks.  Default no-op keeps phase-1 wrappers tiny.

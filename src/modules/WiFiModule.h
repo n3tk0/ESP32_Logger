@@ -16,7 +16,7 @@ public:
     const char* getName() const override { return "Wi-Fi"; }
 
     bool load(JsonObjectConst cfg) override;
-    void save(JsonObject cfg)      const override;
+    bool save(JsonObject cfg)      const override;
 
     // R20: WiFi cannot be hot-restarted from a web handler — bringing the
     // radio down would close the very TCP connection serving this request.

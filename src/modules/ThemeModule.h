@@ -15,7 +15,7 @@ public:
     const char* getName() const override { return "Theme"; }
 
     bool load(JsonObjectConst cfg) override;
-    void save(JsonObject cfg)      const override;
+    bool save(JsonObject cfg)      const override;
 
     const char* schema() const override;
 

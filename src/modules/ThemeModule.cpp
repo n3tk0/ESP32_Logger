@@ -94,7 +94,7 @@ bool ThemeModule::load(JsonObjectConst cfg) {
 }
 
 // ---------------------------------------------------------------------------
-void ThemeModule::save(JsonObject cfg) const {
+bool ThemeModule::save(JsonObject cfg) const {
     const ThemeConfig& t = config.theme;
     cfg["mode"]             = (int)t.mode;
     cfg["showIcons"]        = t.showIcons;
@@ -109,6 +109,7 @@ void ThemeModule::save(JsonObject cfg) const {
     cfg["chartLocalPath"]   = t.chartLocalPath;
     cfg["logoSource"]       = t.logoSource;
     cfg["faviconPath"]      = t.faviconPath;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
