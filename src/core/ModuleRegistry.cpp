@@ -1,4 +1,6 @@
 #include "ModuleRegistry.h"
+#include "../pipeline/DataPipeline.h"
+#include "../utils/MutexGuard.h"
 #include <LittleFS.h>
 
 ModuleRegistry moduleRegistry;
@@ -96,6 +98,12 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
 // ---------------------------------------------------------------------------
 bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
     if (_count == 0) return true;  // phase-1 no-op
+
+    MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
+    if (fsMutex && !guard.isLocked()) {
+        Serial.println("[ModuleRegistry] saveAll: fsMutex timeout");
+        return false;
+    }
 
     // Ensure /config exists (LittleFS auto-creates intermediate dirs on some
     // cores but not reliably — mkdir is cheap if already present).
