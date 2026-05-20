@@ -44,8 +44,9 @@ void initRtc() {
                    test.Day()   >= 1   && test.Day()   <= 31);
 
     if (!timeOk) {
-        DBGLN("RTC: Time invalid, setting compile time...");
-        RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
+        DBGLN("RTC: Time invalid, setting baseline 2024-01-01...");
+        statusMessage = "RTC time invalid — set via web UI";
+        RtcDateTime compiled = RtcDateTime(2024, 1, 1, 0, 0, 0);
         for (int i = 0; i < 3 && !timeOk; i++) {
             Rtc->SetIsWriteProtected(false);
             delay(10);
