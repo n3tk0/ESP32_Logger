@@ -31,6 +31,7 @@ extern MqttExporter* g_mqttExporter;
 #endif
 #include "../tasks/TaskManager.h"  // task handles for /api/diag
 #include "../managers/OtaManager.h"
+#include "../utils/MutexGuard.h"   // R19.D: guarded /reset_log.txt read
 
 // ---------------------------------------------------------------------------
 // GET /api/data
@@ -324,10 +325,24 @@ static void handleConfigPlatform(AsyncWebServerRequest* req) {
 static void handleApiDiag(AsyncWebServerRequest* req) {
     JsonDocument doc;
 
-    // Heap
+    // Heap (legacy top-level fields kept for backwards compat)
     doc["free_heap"]     = (uint32_t)ESP.getFreeHeap();
     doc["min_free_heap"] = (uint32_t)ESP.getMinFreeHeap();
     doc["queue_drops"]   = (uint32_t)g_queueDrops;
+
+    // R19.A — heap sub-object (snapshot all values once for consistency)
+    {
+        uint32_t fr = ESP.getFreeHeap();
+        uint32_t mn = ESP.getMinFreeHeap();
+        uint32_t lg = ESP.getMaxAllocHeap();
+        JsonObject heap = doc["heap"].to<JsonObject>();
+        heap["free"]         = fr;
+        heap["min"]          = mn;
+        heap["largestBlock"] = lg;
+        int pct = (fr > 0) ? (int)(100 - (100ULL * lg) / fr) : 0;
+        if (pct < 0) pct = 0;
+        heap["fragPct"] = pct;
+    }
 
     // Queues
     JsonObject queues = doc["queues"].to<JsonObject>();
@@ -359,6 +374,23 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         tasks["StorageTask"]    = (uint32_t)uxTaskGetStackHighWaterMark(TaskManager::hStorage);
     if (TaskManager::hExport)
         tasks["ExportTask"]     = (uint32_t)uxTaskGetStackHighWaterMark(TaskManager::hExport);
+    // R19.B — camelCase aliases (value = words remaining; ×4 → bytes on 32-bit)
+    auto stackWords = [](TaskHandle_t h) -> uint32_t {
+        return h ? (uint32_t)uxTaskGetStackHighWaterMark(h) : 0;
+    };
+    tasks["sensor"]     = stackWords(TaskManager::hSensor);
+    tasks["slowSensor"] = stackWords(TaskManager::hSlowSensor);
+    tasks["process"]    = stackWords(TaskManager::hProcess);
+    tasks["storage"]    = stackWords(TaskManager::hStorage);
+    tasks["export"]     = stackWords(TaskManager::hExport);
+
+    // R19.C — drop and reset counters
+    {
+        JsonObject c = doc["counters"].to<JsonObject>();
+        c["queueDrops"]    = (uint32_t)g_queueDrops;
+        c["ringPushDrops"] = g_ringPushDrops.load();
+        c["resets"]        = (uint32_t)g_consecutiveResets;
+    }
 
     // OTA rollback info
     JsonObject ota = doc["ota"].to<JsonObject>();
@@ -366,6 +398,49 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     ota["previous"]         = OtaManager::previousPartitionLabel();
     ota["pending_verify"]   = OtaManager::isPendingVerify();
     ota["rollback_capable"] = OtaManager::isRollbackCapable();
+
+    // uptime + network.ip for the failsafe banner (and general observability)
+    doc["uptime"] = (uint32_t)(millis() / 1000UL);
+    {
+        JsonObject net = doc["network"].to<JsonObject>();
+        net["ip"] = wifiConnectedAsClient ? WiFi.localIP().toString()
+                                          : WiFi.softAPIP().toString();
+    }
+
+    // R19.D — tail of /reset_log.txt (last ≤16 lines)
+    JsonArray rl = doc["resetLog"].to<JsonArray>();
+    if (fsAvailable && activeFS && fsMutex) {
+        MutexGuard g(fsMutex, pdMS_TO_TICKS(1000));
+        if (g.isLocked() && activeFS->exists("/reset_log.txt")) {
+            File f = activeFS->open("/reset_log.txt", FILE_READ);
+            if (f && f.size() <= 8 * 1024) {
+                String buf = f.readString();
+                f.close();
+                // Tail: keep only the last 16 lines
+                int newlines = 0;
+                for (int i = (int)buf.length() - 1; i >= 0; i--) {
+                    if (buf[i] == '\n') newlines++;
+                    if (newlines > 16) { buf = buf.substring(i + 1); break; }
+                }
+                int start = 0;
+                for (int i = 0; i < (int)buf.length(); i++) {
+                    if (buf[i] == '\n') {
+                        String line = buf.substring(start, i);
+                        line.trim();
+                        if (line.length() > 0) rl.add(line);
+                        start = i + 1;
+                    }
+                }
+                if (start < (int)buf.length()) {
+                    String line = buf.substring(start);
+                    line.trim();
+                    if (line.length() > 0) rl.add(line);
+                }
+            } else if (f) {
+                f.close();
+            }
+        }
+    }
 
     sendJsonResponse(req, doc);
 }

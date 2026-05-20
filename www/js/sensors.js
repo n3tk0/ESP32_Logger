@@ -40,7 +40,8 @@ function pcfgLoad(cb) {
 }
 
 function pcfgSave(obj, cb) {
-fetchWithTimeout("/save_platform", {
+  var body = JSON.stringify(obj, null, 2);
+  fetchWithTimeout("/save_platform", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body,
