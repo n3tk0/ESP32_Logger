@@ -1033,9 +1033,13 @@ function liveSetRate() {
     liveStartPolling(rate);
 }
 
+var _liveInFlight = false;
+
 // Polling fallback — kept identical in shape to the original upd() so the
 // liveRender() body works for both EventSource and fetch results.
 function liveUpdate() {
+  if (_liveInFlight) return;
+  _liveInFlight = true;
   fetchWithTimeout("/api/live")
     .then(function (r) {
       return r.json();
@@ -1047,7 +1051,8 @@ function liveUpdate() {
         conn.textContent = "● Disconnected";
         conn.className = "text-danger";
       }
-    });
+    })
+    .finally(function () { _liveInFlight = false; });
 }
 
 function liveRender(d) {
