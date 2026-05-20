@@ -169,8 +169,15 @@ function submitParentForm() {
 // Popup helpers. Replace inline style="display:flex/none" mutation.
 // Named hidePopup (not closePopup) because settings.js defines its own
 // zero-arg closePopup() tied to id="popup" that we don't want to shadow.
-function showPopup(id) { var el = document.getElementById(id); if (el) el.style.display = "flex"; }
-function hidePopup(id) { var el = document.getElementById(id); if (el) el.style.display = "none"; }
+var LEGAL_POPUP_IDS = ["restartPopup", "popup", "movePopup", "sapPopup", "sepPopup", "otaPopup", "sensorPopup", "kbPopup"];
+function showPopup(id) {
+  if (LEGAL_POPUP_IDS.indexOf(id) === -1) { console.warn("showPopup: unknown id", id); return; }
+  var el = document.getElementById(id); if (el) el.style.display = "flex";
+}
+function hidePopup(id) {
+  if (LEGAL_POPUP_IDS.indexOf(id) === -1) { console.warn("hidePopup: unknown id", id); return; }
+  var el = document.getElementById(id); if (el) el.style.display = "none";
+}
 
 // Backdrop click-to-close. Attach to the .popup-overlay. The default action
 // hides the overlay; if data-backdrop-fn is set, that window-level function is
