@@ -117,9 +117,14 @@ static bool sanitizeWakeConfig() {
 #elif CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6
     auto isRtcWakePin = [](uint8_t pin) -> bool { return pin <= 5; };
     auto isSafePin    = [](uint8_t pin) -> bool { return pin <= 21 && !(pin >= 11 && pin <= 17); };
+#elif CONFIG_IDF_TARGET_ESP32
+    // Original ESP32: RTC wake GPIOs go up to 39; avoid internal flash pins 6-11.
+    auto isRtcWakePin = [](uint8_t pin) -> bool { return pin <= 39 && !(pin >= 6 && pin <= 11); };
+    auto isSafePin    = [](uint8_t pin) -> bool { return pin <= 39 && !(pin >= 6 && pin <= 11); };
 #else
-    auto isRtcWakePin = [](uint8_t pin) -> bool { return pin <= 5; };
-    auto isSafePin    = [](uint8_t pin) -> bool { return pin <= 21 && !(pin >= 11 && pin <= 17); };
+    // Unknown target: use permissive limits to avoid false-positive resets.
+    auto isRtcWakePin = [](uint8_t pin) -> bool { return pin <= 39; };
+    auto isSafePin    = [](uint8_t pin) -> bool { return pin <= 48; };
 #endif
 
     bool invalidPins = !isRtcWakePin(config.hardware.pinWakeupFF) ||
