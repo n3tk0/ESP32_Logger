@@ -4,15 +4,15 @@
 
 namespace {
 
-// Parse "a.b.c.d" → 4-byte array.  Leaves target untouched on malformed input.
-void parseIPv4(const char* s, uint8_t out[4]) {
-    if (!s) return;
+// Parse "a.b.c.d" → 4-byte array.  Returns false on malformed input (target untouched).
+bool parseIPv4(const char* s, uint8_t out[4]) {
+    if (!s) return true;  // absent field is not a validation error
     int a, b, c, d;
-    if (sscanf(s, "%d.%d.%d.%d", &a, &b, &c, &d) == 4 &&
-        (a | b | c | d) >= 0 && a <= 255 && b <= 255 && c <= 255 && d <= 255) {
-        out[0] = (uint8_t)a; out[1] = (uint8_t)b;
-        out[2] = (uint8_t)c; out[3] = (uint8_t)d;
-    }
+    if (sscanf(s, "%d.%d.%d.%d", &a, &b, &c, &d) != 4) return false;
+    if (a < 0 || a > 255 || b < 0 || b > 255 || c < 0 || c > 255 || d < 0 || d > 255) return false;
+    out[0] = (uint8_t)a; out[1] = (uint8_t)b;
+    out[2] = (uint8_t)c; out[3] = (uint8_t)d;
+    return true;
 }
 
 void formatIPv4(const uint8_t in[4], char* out, size_t n) {
@@ -50,11 +50,12 @@ bool WiFiModule::load(JsonObjectConst cfg) {
     const char* pw = cfg["clientPassword"] | (const char*)nullptr;
     if (pw) strlcpy(n.clientPassword, pw, sizeof(n.clientPassword));
 
-    parseIPv4(cfg["staticIP"] | (const char*)nullptr, n.staticIP);
-    parseIPv4(cfg["gateway"]  | (const char*)nullptr, n.gateway);
-    parseIPv4(cfg["subnet"]   | (const char*)nullptr, n.subnet);
-    parseIPv4(cfg["dns"]      | (const char*)nullptr, n.dns);
-    return true;
+    bool ok = true;
+    ok &= parseIPv4(cfg["staticIP"] | (const char*)nullptr, n.staticIP);
+    ok &= parseIPv4(cfg["gateway"]  | (const char*)nullptr, n.gateway);
+    ok &= parseIPv4(cfg["subnet"]   | (const char*)nullptr, n.subnet);
+    ok &= parseIPv4(cfg["dns"]      | (const char*)nullptr, n.dns);
+    return ok;
 }
 
 // ---------------------------------------------------------------------------
