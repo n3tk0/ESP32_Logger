@@ -32,8 +32,13 @@ public:
         _write8(0xE0, 0xB6);
         delay(10);
 
-        // Wait for NVM copy
-        while ((_read8(0xF3) & 0x01) != 0) delay(1);
+        // Wait for NVM copy (up to 100 ms; return false if sensor hangs)
+        bool nvm_ready = false;
+        for (int i = 0; i < 100; i++) {
+            if ((_read8(0xF3) & 0x01) == 0) { nvm_ready = true; break; }
+            delay(1);
+        }
+        if (!nvm_ready) return false;
 
         // Read calibration data
         _readCalibration();
