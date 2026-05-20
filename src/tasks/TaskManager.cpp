@@ -255,7 +255,15 @@ bool TaskManager::checkHealth() {
     constexpr uint32_t MAX_SILENCE_MS  = 30000;
     uint32_t now = millis();
     if (now < GRACE_PERIOD_MS) return true;
+    TaskHandle_t taskHandles[TASK_COUNT] = {
+        hSensor, hSlowSensor, hProcess, hStorage, hExport
+    };
     for (int i = 0; i < TASK_COUNT; i++) {
+        TaskHandle_t h = taskHandles[i];
+        if (h && eTaskGetState(h) == eDeleted) {
+            Serial.printf("[Watchdog] Task %d deleted unexpectedly\n", i);
+            return false;
+        }
         uint32_t hb = g_taskHeartbeat[i];
         if (now - hb > MAX_SILENCE_MS) {
             Serial.printf("[Watchdog] Task %d stuck (%lums)\n", i, now - hb);
