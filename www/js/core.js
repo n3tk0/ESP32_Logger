@@ -112,7 +112,8 @@ function installEventDispatcher() {
   // Every form submit in this app is AJAX; preventDefault unconditionally so
   // handlers don't each have to remember to block the native POST navigation.
   document.addEventListener("submit", function (ev) {
-    if (ev.target.closest("[data-submit]")) ev.preventDefault();
+    if (!ev.target.closest("[data-submit]")) return;
+    ev.preventDefault();
     _dispatchEvent("submit")(ev);
   }, true);
   // onerror does not bubble: wire direct listeners on every [data-error] node
