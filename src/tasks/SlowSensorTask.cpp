@@ -22,7 +22,8 @@ void slowSensorTaskFunc(void* /*param*/) {
             time_t sysT = time(nullptr);
             if (sysT > 1000000000L) ts = (uint32_t)sysT;
         }
-        if (ts == 0) ts = (uint32_t)(millis() / 1000UL);
+        // +1 avoids ts=0 (reserved sentinel).  (AUDIT 10.3)
+        if (ts == 0) ts = (uint32_t)(millis() / 1000UL) + 1;
 
         // Only dispatch blocking sensors (SDS011, PMS5003, WindSensor)
         sensorManager.tickFiltered(sensorQueue, ts, true);

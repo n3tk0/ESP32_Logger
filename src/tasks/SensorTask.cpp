@@ -26,7 +26,9 @@ void sensorTaskFunc(void* /*param*/) {
             time_t sysT = time(nullptr);
             if (sysT > 1000000000L) ts = (uint32_t)sysT;
         }
-        if (ts == 0) ts = (uint32_t)(millis() / 1000UL);
+        // +1 avoids ts=0 (reserved as "unknown" by SensorTypes.h and
+        // LiveAggregator._lastFlushEpoch sentinel).  (AUDIT 10.3)
+        if (ts == 0) ts = (uint32_t)(millis() / 1000UL) + 1;
 
         sensorManager.tickFiltered(sensorQueue, ts, false);
 
