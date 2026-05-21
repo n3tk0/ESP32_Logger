@@ -19,7 +19,7 @@ const char DATALOG_SCHEMA[] PROGMEM =
                      "{\"v\":4,\"l\":\"By size\"}]},"
       "{\"id\":\"maxSizeKB\",\"type\":\"int\",\"min\":0,\"max\":1048576,\"label\":\"Max size (KB)\","
         "\"showIf\":{\"rotation\":4}},"
-      "{\"id\":\"maxEntries\",\"type\":\"int\",\"min\":0,\"max\":65535,\"label\":\"Max entries\"},"
+      "{\"id\":\"maxEntries\",\"type\":\"int\",\"min\":10,\"max\":65535,\"label\":\"Max entries\"},"
       "{\"id\":\"timestampFilename\",\"type\":\"bool\",\"label\":\"Timestamp in filename\"},"
       "{\"id\":\"includeDeviceId\",\"type\":\"bool\",\"label\":\"Include device ID\"},"
       "{\"id\":\"includeBootCount\",\"type\":\"bool\",\"label\":\"Include boot count\"},"

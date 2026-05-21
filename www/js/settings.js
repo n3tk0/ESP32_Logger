@@ -1027,6 +1027,7 @@ function dlInit() {
           var msGrp = document.getElementById("maxSizeGroup");
           if (msGrp) msGrp.style.display = dl.rotation == 4 ? "block" : "none";
           setVal("dl-maxSize", dl.maxSizeKB || 500);
+          setVal("dl-maxEntries", dl.maxEntries || 10000);
           setVal("dl-date", dl.dateFormat !== undefined ? dl.dateFormat : 1);
           setVal("dl-time", dl.timeFormat !== undefined ? dl.timeFormat : 0);
           setVal("dl-end", dl.endFormat !== undefined ? dl.endFormat : 0);

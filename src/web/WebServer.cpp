@@ -1047,6 +1047,7 @@ void setupWebServer() {
         JsonObject dl = doc["datalog"].to<JsonObject>();
         dl["rotation"]               = (int)config.datalog.rotation;
         dl["maxSizeKB"]              = config.datalog.maxSizeKB > 0 ? config.datalog.maxSizeKB : 1024;
+        dl["maxEntries"]             = config.datalog.maxEntries > 0 ? config.datalog.maxEntries : 10000;
         dl["folder"]                 = config.datalog.folder;
         dl["timestampFilename"]      = config.datalog.timestampFilename;
         dl["includeDeviceId"]        = config.datalog.includeDeviceId;
@@ -1323,7 +1324,7 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         }
         if (r->hasParam("rotation", true))     config.datalog.rotation    = (DatalogRotation)r->getParam("rotation", true)->value().toInt();
         if (r->hasParam("maxSizeKB", true))    config.datalog.maxSizeKB   = constrain(r->getParam("maxSizeKB", true)->value().toInt(), 10, 10000);
-        if (r->hasParam("maxEntries", true))   config.datalog.maxEntries  = constrain(r->getParam("maxEntries", true)->value().toInt(), 10, 100000);
+        if (r->hasParam("maxEntries", true))   config.datalog.maxEntries  = constrain(r->getParam("maxEntries", true)->value().toInt(), 10, 65535);
         config.datalog.timestampFilename   = r->hasParam("timestampFilename", true);
         config.datalog.includeDeviceId     = r->hasParam("includeDeviceId", true);
         if (r->hasParam("dateFormat", true))   config.datalog.dateFormat   = r->getParam("dateFormat", true)->value().toInt();
@@ -1982,7 +1983,7 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                 JsonObject dl = doc["datalog"];
                 if (dl["rotation"].is<int>())               config.datalog.rotation               = (DatalogRotation)(int)dl["rotation"];
                 if (dl["maxSizeKB"].is<int>())              config.datalog.maxSizeKB              = constrain(dl["maxSizeKB"].as<int>(), 10, 10000);
-                if (dl["maxEntries"].is<int>())             config.datalog.maxEntries             = constrain(dl["maxEntries"].as<int>(), 10, 100000);
+                if (dl["maxEntries"].is<int>())             config.datalog.maxEntries             = constrain(dl["maxEntries"].as<int>(), 10, 65535);
                 if (dl["dateFormat"].is<int>())             config.datalog.dateFormat             = dl["dateFormat"];
                 if (dl["timeFormat"].is<int>())             config.datalog.timeFormat             = dl["timeFormat"];
                 if (dl["endFormat"].is<int>())              config.datalog.endFormat              = dl["endFormat"];

@@ -76,6 +76,14 @@
               <input type="number" name="maxSizeKB" id="dl-maxSize" min="10" max="10000" class="input">
             </div>
           </div>
+          <div class="field">
+            <label class="field-label">Max entries (lines)</label>
+            <input type="number" name="maxEntries" id="dl-maxEntries"
+                   min="10" max="65535" step="100" class="input">
+            <p class="hint">Cap the line count of the active log; oldest lines are
+              trimmed on the next append once the limit is exceeded. Default 10000;
+              hardware ceiling 65535 (uint16 storage).</p>
+          </div>
         </div>
       </div>
 
