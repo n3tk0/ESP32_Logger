@@ -995,15 +995,11 @@ function liveInit() {
 
   var hint = document.getElementById("stateHint");
   if (hint) {
-    var fm = CFG.flowMeter || {};
-    var fl = fm.firstLoopMonitoringWindowSecs || "?";
-    var win = fm.monitoringWindowSecs || "?";
+    // monitoringWindowSecs / firstLoopMonitoringWindowSecs were removed when
+    // the flowmeter UI was consolidated into the per-sensor cards. The
+    // generic state-machine outline still applies to legacy mode.
     hint.textContent =
-      "🔧 IDLE → 🟡 WAIT_FLOW (" +
-      fl +
-      "s) → 🟢 MONITORING (" +
-      win +
-      "s idle) → Logging";
+      "🔧 IDLE → 🟡 WAIT_FLOW → 🟢 MONITORING → Logging";
   }
 
   // Prefer Server-Sent Events; fall back to polling on error / unsupported.

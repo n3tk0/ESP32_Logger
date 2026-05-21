@@ -26,6 +26,14 @@ public:
     // Software watchdog (C4): returns false if any task is stuck (>30s no heartbeat)
     static bool checkHealth();
 
+    // Re-read platform_config.json and refresh the in-memory storageParam
+    // fields that StorageTask polls every aggregation tick (currently SDS011
+    // humidity correction).  Called from TaskManager::init() at boot and from
+    // /api/config/platform after sensorManager.reloadConfig() so live UI edits
+    // propagate without a reboot.
+    // Caller must hold configMutex.
+    static void refreshStorageFromPlatform(fs::FS& fs);
+
     // Task handles (public for diagnostics / watchdog)
     static TaskHandle_t hSensor;
     static TaskHandle_t hSlowSensor;
