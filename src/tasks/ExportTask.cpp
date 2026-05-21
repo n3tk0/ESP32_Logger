@@ -45,10 +45,8 @@ void exportTaskFunc(void* /*param*/) {
         }
     }
 
-    // Flush remaining
-    if (batchCount > 0) {
-        exportManager.sendAll(batch, batchCount);
-    }
+    // Skip flush-on-exit: sendAll blocks TLS HTTP inside the task-exit path and
+    // ESP.restart() can race the TLS connection close.  (AUDIT 2.18)
 
     Serial.println("[ExportTask] stopped");
     vTaskDelete(nullptr);
