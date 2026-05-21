@@ -897,8 +897,8 @@ void loop() {
     // /set_time updates the POSIX clock immediately and stores the time
     // components here.  The actual DS1302 register writes (3 × delay) run from
     // loop() where blocking is acceptable.
-    if (g_pendingRtcSet && Rtc) {
-        g_pendingRtcSet = false;
+    if (g_pendingRtcSet.load(std::memory_order_acquire) && Rtc) {
+        g_pendingRtcSet.store(false, std::memory_order_relaxed);
         PendingRtcSet t = g_pendingRtcTime;
         Rtc->SetIsWriteProtected(false); delay(10);
         Rtc->SetIsRunning(true);         delay(10);
@@ -910,8 +910,8 @@ void loop() {
     // ── Deferred OTA rollback (AUDIT 3.16) ───────────────────────────────────
     // /api/ota/rollback sets this flag after sending its 200 response so the
     // AsyncTCP worker is never blocked by delay() waiting for transmission.
-    if (g_pendingOtaRollback) {
-        g_pendingOtaRollback = false;
+    if (g_pendingOtaRollback.load(std::memory_order_acquire)) {
+        g_pendingOtaRollback.store(false, std::memory_order_relaxed);
         OtaManager::rollback();
         // rollback() normally resets the device; if it returns, trigger the
         // normal restart path so the device doesn't hang.

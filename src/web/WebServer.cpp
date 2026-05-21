@@ -1439,7 +1439,7 @@ void setupWebServer() {
             if (Rtc) {
                 g_pendingRtcTime = { (uint16_t)yr, (uint8_t)mo, (uint8_t)dy,
                                      (uint8_t)hr, (uint8_t)mi };
-                g_pendingRtcSet  = true;
+                g_pendingRtcSet.store(true, std::memory_order_release);
             }
             r->send(200, "application/json", "{\"ok\":true}");
         } else {

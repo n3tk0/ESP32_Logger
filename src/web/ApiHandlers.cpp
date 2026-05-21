@@ -560,7 +560,7 @@ static void handleOtaRollback(AsyncWebServerRequest* req) {
               "{\"ok\":true,\"message\":\"Rolling back and restarting...\"}");
     // Set a flag consumed by loop() — avoids delay(200) blocking the AsyncTCP
     // worker while waiting for the response to be transmitted.  (AUDIT 3.16)
-    g_pendingOtaRollback = true;
+    g_pendingOtaRollback.store(true, std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------
