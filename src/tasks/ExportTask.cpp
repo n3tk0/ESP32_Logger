@@ -21,27 +21,19 @@ void exportTaskFunc(void* /*param*/) {
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_EXPORT] = millis();   // C4 heartbeat
 
-        // Short timeout so the task responds to running=false within 100ms,
-        // allowing shutdown() to flush the final batch before the hard wait expires.
+        // Short timeout so the task responds to running=false within 100ms.
         bool got = xQueueReceive(exportQueue, &r,
                                   pdMS_TO_TICKS(100)) == pdTRUE;
-        if (got) {
-            if (batchCount >= EXPORT_BATCH_SIZE) {
-                // Flush full batch before accepting new reading
-                exportManager.sendAll(batch, batchCount);
-                batchCount  = 0;
-                lastFlushMs = millis();
-            }
-            batch[batchCount++] = r;
-        }
+        // Guard against overflow (batchCount should never reach EXPORT_BATCH_SIZE
+        // here, but be defensive).  (AUDIT 11.9: single decision-point)
+        if (got && batchCount < EXPORT_BATCH_SIZE) batch[batchCount++] = r;
 
-        bool batchFull     = (batchCount >= EXPORT_BATCH_SIZE);
-        bool timeoutElapsed= (millis() - lastFlushMs) >= EXPORT_FLUSH_INTERVAL_MS;
-
-        if ((batchFull || timeoutElapsed) && batchCount > 0) {
+        if (batchCount > 0 &&
+            (batchCount >= EXPORT_BATCH_SIZE ||
+             millis() - lastFlushMs >= EXPORT_FLUSH_INTERVAL_MS)) {
             exportManager.sendAll(batch, batchCount);
-            batchCount   = 0;
-            lastFlushMs  = millis();
+            batchCount  = 0;
+            lastFlushMs = millis();
         }
     }
 
