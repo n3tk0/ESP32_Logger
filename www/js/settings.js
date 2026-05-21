@@ -1021,12 +1021,12 @@ function dlInit() {
           if (curFile) sel.value = curFile;
           setVal("dl-prefix", dl.prefix || "datalog");
           setVal("dl-folder", dl.folder || "");
+          setChk("dl-tsFile", dl.timestampFilename || false);
+          setChk("dl-devId",  dl.includeDeviceId || false);
           setVal("dl-rotation", dl.rotation !== undefined ? dl.rotation : 0);
           var msGrp = document.getElementById("maxSizeGroup");
           if (msGrp) msGrp.style.display = dl.rotation == 4 ? "block" : "none";
           setVal("dl-maxSize", dl.maxSizeKB || 500);
-          setChk("dl-tsFile", dl.timestampFilename || false);
-          setChk("dl-devId", dl.includeDeviceId || false);
           setVal("dl-date", dl.dateFormat !== undefined ? dl.dateFormat : 1);
           setVal("dl-time", dl.timeFormat !== undefined ? dl.timeFormat : 0);
           setVal("dl-end", dl.endFormat !== undefined ? dl.endFormat : 0);
@@ -1487,6 +1487,74 @@ function otaUpload() {
   });   // end _otaSha256().then
 }
 
+// Set the active log file to whatever the #curFile dropdown selected.
+// Decoupled from /save_datalog so switching the active file doesn't
+// silently re-submit (and clamp) every format/rotation field.
+function dlSwitchFile() {
+  var sel = document.getElementById("curFile");
+  if (!sel || !sel.value) {
+    showMsg("dl-msg", "<div class='alert alert-error'>❌ Select a file first</div>", true);
+    return;
+  }
+  var path = sel.value;
+  getCsrfToken().then(function (token) {
+    var fd = new FormData();
+    fd.append("path", path);
+    if (token) fd.append("csrf", token);
+    fetchWithTimeout("/api/datalog/switch", { method: "POST", body: fd }, 15000)
+      .then(function (r) { return r.json(); })
+      .then(function (resp) {
+        if (resp.ok) {
+          showMsg("dl-msg",
+            "<div class='alert alert-success'>✅ Switched active file to " + esc(path) + "</div>", true);
+          dlLoadFiles();
+        } else {
+          showMsg("dl-msg",
+            "<div class='alert alert-error'>❌ " + esc(resp.error || "Switch failed") + "</div>", true);
+        }
+      })
+      .catch(function () {
+        showMsg("dl-msg", "<div class='alert alert-error'>❌ Network error</div>", true);
+      });
+  });
+}
+
+// Create a new log file from the Filename card values and switch to it.
+// Doesn't persist any other datalog field; the user is expected to have
+// hit Save before Create if they edited prefix/folder/flags.
+function dlCreateFile() {
+  var prefix = getVal("dl-prefix") || "";
+  if (!prefix) {
+    showMsg("dl-msg", "<div class='alert alert-error'>❌ Prefix required</div>", true);
+    return;
+  }
+  getCsrfToken().then(function (token) {
+    var fd = new FormData();
+    fd.append("prefix", prefix);
+    fd.append("folder", getVal("dl-folder") || "");
+    if (document.getElementById("dl-tsFile") && document.getElementById("dl-tsFile").checked)
+      fd.append("timestampFilename", "1");
+    if (document.getElementById("dl-devId") && document.getElementById("dl-devId").checked)
+      fd.append("includeDeviceId", "1");
+    if (token) fd.append("csrf", token);
+    fetchWithTimeout("/api/datalog/create", { method: "POST", body: fd }, 15000)
+      .then(function (r) { return r.json(); })
+      .then(function (resp) {
+        if (resp.ok) {
+          showMsg("dl-msg",
+            "<div class='alert alert-success'>✅ Created and switched to " + esc(resp.file || "") + "</div>", true);
+          dlInit();
+        } else {
+          showMsg("dl-msg",
+            "<div class='alert alert-error'>❌ " + esc(resp.error || "Create failed") + "</div>", true);
+        }
+      })
+      .catch(function () {
+        showMsg("dl-msg", "<div class='alert alert-error'>❌ Network error</div>", true);
+      });
+  });
+}
+
 function dlToggleMaxSize() {
   var mg = document.getElementById("maxSizeGroup"),
     rot = document.getElementById("dl-rotation");
@@ -1750,6 +1818,8 @@ registerHandlers({
   timeFlushLogs: timeFlushLogs,
   timeRestoreBoot: timeRestoreBoot,
   dlDeleteFile: dlDeleteFile,
+  dlSwitchFile: dlSwitchFile,
+  dlCreateFile: dlCreateFile,
   dlUpdatePreview: dlUpdatePreview,
   dlToggleMaxSize: dlToggleMaxSize,
   dlTogglePcFields: dlTogglePcFields,

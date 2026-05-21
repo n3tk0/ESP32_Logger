@@ -1344,42 +1344,118 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
             config.logger.aggregationIntervalSec = constrain(r->getParam("aggregationIntervalSec", true)->value().toInt(), 5, 3600);
 
         saveConfig();
+        // The "create" + "switch" actions were lifted out of this endpoint
+        // so they no longer share the same submit with the bulk format /
+        // rotation form. See /api/datalog/create and /api/datalog/switch.
+        r->send(200, "application/json", "{\"ok\":true}");
+    });
 
-        String action = r->hasParam("action", true) ? r->getParam("action", true)->value() : "";
-        if (action == "create" && fsAvailable && activeFS) {
-            String folder = String(config.datalog.folder);
-            if (folder.length() > 0 && !folder.startsWith("/")) folder = "/" + folder;
-            if (folder.length() > 0 && !folder.endsWith("/"))   folder += "/";
-            if (folder.length() == 0) folder = "/";
-            if (folder != "/" && !activeFS->exists(folder)) activeFS->mkdir(folder);
-
-            String newFile = folder + String(config.datalog.prefix);
-            if (config.datalog.includeDeviceId && strlen(config.deviceId) > 0)
-                newFile += "_" + String(config.deviceId);
-            if (config.datalog.timestampFilename) {
-                if (Rtc) {
-                    RtcDateTime now = Rtc->GetDateTime();
-                    char buf[20];
-                    snprintf(buf, sizeof(buf), "_%04d%02d%02d_%02d%02d%02d",
-                        now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second());
-                    newFile += buf;
-                } else {
-                    newFile += "_" + String(millis());
-                }
-            }
-            newFile += ".txt";
-            File f = activeFS->open(newFile, "w");
-            if (f) {
-                f.close();
-                SAFE_STRNCPY(config.datalog.currentFile, newFile.c_str(), sizeof(config.datalog.currentFile));
-                saveConfig();
-                r->send(200, "application/json", "{\"ok\":true,\"file\":\"" + newFile + "\"}");
-                return;
-            } else {
-                r->send(500, "application/json", "{\"ok\":false,\"error\":\"Failed to create file\"}");
+    // POST /api/datalog/create  body: prefix + folder + flags + (optional) action=switch
+    // Creates a new log file from prefix/folder/timestamp+deviceId flags
+    // without saving any other datalog settings. If action=switch, also sets
+    // it as the active file. Decoupled from /save_datalog so users editing
+    // format/rotation fields can't accidentally create a file on submit.
+    server.on("/api/datalog/create", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
+        if (!fsAvailable || !activeFS) {
+            r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
+            return;
+        }
+        if (!r->hasParam("prefix", true)) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"prefix required\"}");
+            return;
+        }
+        String prefix = r->getParam("prefix", true)->value();
+        // Same prefix rules as /save_datalog (kept in sync — see the inline
+        // isSafePrefix lambda in that handler).
+        if (prefix.length() == 0 || prefix.length() > 32 || prefix == "." || prefix == "..") {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix\"}");
+            return;
+        }
+        for (size_t i = 0; i < prefix.length(); i++) {
+            char c = prefix[i];
+            if (c == '/' || c == '\\' || c == '\0' || (unsigned char)c < 0x20 || c == 0x7f) {
+                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix\"}");
                 return;
             }
         }
+        String folder = r->hasParam("folder", true) ? r->getParam("folder", true)->value() : "";
+        if (folder.length() > 0) {
+            folder = sanitizePath(folder);
+            if (folder.length() == 0) {
+                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid folder\"}");
+                return;
+            }
+            if (!folder.endsWith("/")) folder += "/";
+        } else {
+            folder = "/";
+        }
+        if (folder != "/" && !activeFS->exists(folder)) activeFS->mkdir(folder);
+
+        bool incDeviceId = r->hasParam("includeDeviceId", true);
+        bool timestampFn = r->hasParam("timestampFilename", true);
+
+        String newFile = folder + prefix;
+        if (incDeviceId && strlen(config.deviceId) > 0)
+            newFile += "_" + String(config.deviceId);
+        if (timestampFn) {
+            if (Rtc) {
+                RtcDateTime now = Rtc->GetDateTime();
+                char buf[20];
+                snprintf(buf, sizeof(buf), "_%04d%02d%02d_%02d%02d%02d",
+                    now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second());
+                newFile += buf;
+            } else {
+                newFile += "_" + String(millis());
+            }
+        }
+        newFile += ".txt";
+
+        File f = activeFS->open(newFile, "w");
+        if (!f) {
+            r->send(500, "application/json", "{\"ok\":false,\"error\":\"Failed to create file\"}");
+            return;
+        }
+        f.close();
+
+        // Make this the active file unless caller explicitly opts out via
+        // ?switch=0; default behaviour mirrors the pre-split UX where the
+        // newly-created file became current.
+        bool switchToNew = !r->hasParam("switch", true) ||
+                            r->getParam("switch", true)->value() != "0";
+        if (switchToNew) {
+            SAFE_STRNCPY(config.datalog.currentFile, newFile.c_str(), sizeof(config.datalog.currentFile));
+            saveConfig();
+        }
+
+        String body = String("{\"ok\":true,\"file\":\"") + newFile + "\"}";
+        r->send(200, "application/json", body);
+    });
+
+    // POST /api/datalog/switch  body: path
+    // Sets config.datalog.currentFile to an EXISTING log file. Pure
+    // active-file pointer change; doesn't touch any other datalog field.
+    server.on("/api/datalog/switch", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
+        if (!fsAvailable || !activeFS) {
+            r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
+            return;
+        }
+        if (!r->hasParam("path", true)) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"path required\"}");
+            return;
+        }
+        String path = sanitizePath(r->getParam("path", true)->value());
+        if (path.length() == 0) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid path\"}");
+            return;
+        }
+        if (!activeFS->exists(path)) {
+            r->send(404, "application/json", "{\"ok\":false,\"error\":\"file not found\"}");
+            return;
+        }
+        SAFE_STRNCPY(config.datalog.currentFile, path.c_str(), sizeof(config.datalog.currentFile));
+        saveConfig();
         r->send(200, "application/json", "{\"ok\":true}");
     });
 

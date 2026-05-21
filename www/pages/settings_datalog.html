@@ -5,22 +5,38 @@
       </div>
     </div>
 
-    <form data-submit="settingsSaveForm" data-save-url="/save_datalog" novalidate>
-      <div id="dl-msg"></div>
-      <!-- Active File -->
-      <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="file-text"></span> Current File</div></div>
-        <div class="card-body">
-          <div class="field">
-            <label class="field-label">Select file</label>
-            <select name="currentFile" id="curFile" class="input">
+    <div id="dl-msg"></div>
+
+    <!-- Active File (standalone — actions don't share submit with bulk save) -->
+    <div class="card">
+      <div class="card-head"><div class="card-title"><span data-icon="file-text"></span> Current File</div></div>
+      <div class="card-body">
+        <div class="field">
+          <label class="field-label">Select file</label>
+          <div style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap">
+            <select id="curFile" class="input" style="flex:1;min-width:180px">
               <option value="">Loading...</option>
             </select>
+            <button type="button" data-click="dlSwitchFile" class="btn"><span data-icon="check"></span> Switch</button>
+            <button type="button" data-click="dlCreateFile" class="btn primary"
+                    title="Create a new file using the Filename settings below; the new file becomes the active log target.">
+              <span data-icon="plus"></span> Create &amp; Switch
+            </button>
           </div>
-          <div class="form-grid mt-1">
+          <p class="hint" style="margin-top:.4rem">Create uses the Filename settings (prefix, folder, timestamp, device ID) from below. Save those first if you've edited them.</p>
+        </div>
+      </div>
+    </div>
+
+    <form data-submit="settingsSaveForm" data-save-url="/save_datalog" novalidate>
+      <!-- Filename -->
+      <div class="card">
+        <div class="card-head"><div class="card-title"><span data-icon="file"></span> Filename</div></div>
+        <div class="card-body">
+          <div class="form-grid">
             <div class="field">
               <label class="field-label">Prefix</label>
-              <input type="text" name="prefix" id="dl-prefix" placeholder="datalog" class="input">
+              <input type="text" name="prefix" id="dl-prefix" placeholder="datalog" maxlength="32" class="input">
             </div>
             <div class="field">
               <label class="field-label">Folder</label>
@@ -29,7 +45,14 @@
               </p>
             </div>
           </div>
-          <button type="submit" name="action" value="create" class="btn primary"><span data-icon="plus"></span> Create</button>
+          <div class="field">
+            <label class="field-label"><input type="checkbox" name="timestampFilename" id="dl-tsFile" value="1">
+              Timestamp filename</label>
+          </div>
+          <div class="field">
+            <label class="field-label"><input type="checkbox" name="includeDeviceId" id="dl-devId" value="1"> Device ID
+              in filename</label>
+          </div>
         </div>
       </div>
 
@@ -52,14 +75,6 @@
               <label class="field-label">Max Size (KB)</label>
               <input type="number" name="maxSizeKB" id="dl-maxSize" min="10" max="10000" class="input">
             </div>
-          </div>
-          <div class="field">
-            <label class="field-label"><input type="checkbox" name="timestampFilename" id="dl-tsFile" value="1">
-              Timestamp filename</label>
-          </div>
-          <div class="field">
-            <label class="field-label"><input type="checkbox" name="includeDeviceId" id="dl-devId" value="1"> Device ID
-              in filename</label>
           </div>
         </div>
       </div>
