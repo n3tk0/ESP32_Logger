@@ -418,8 +418,16 @@ function dbApplyFilters() {
   dbProcessData(dbRawData);
 }
 
+// Cancellation token for dbProcessData (PR #105 review, Codex P2): each
+// call bumps the counter; in-flight chunked runs check their own captured
+// version against this on every chunk and bail out if a newer call has
+// started, so a user who edits the filter mid-parse can't end up with a
+// stale callback overwriting dbFilteredData / chart state.
+var _dbProcessVersion = 0;
+
 // Matches original: function processData(data) — exact port of .ino embedded JS
 function dbProcessData(data) {
+  var myVersion = ++_dbProcessVersion;
   var lines = data.trim().split("\n");
   var filtered = [];
   var startVal = getVal("startDate");
@@ -437,6 +445,7 @@ function dbProcessData(data) {
   var idx = 0;
 
   function processChunk() {
+    if (myVersion !== _dbProcessVersion) return; // superseded; bail silently
     var end = Math.min(idx + CHUNK_SIZE, lines.length);
     for (; idx < end; idx++) {
       var p = lines[idx].split("|");
@@ -534,6 +543,9 @@ function dbProcessData(data) {
     if (idx < lines.length) {
       setTimeout(processChunk, 0);
     } else {
+      // Final guard: another dbProcessData() call may have bumped the
+      // version between the last chunk's check and this completion path.
+      if (myVersion !== _dbProcessVersion) return;
       dbFilteredData = filtered;
       setEl("db-totalVol", tVol.toFixed(2) + " L");
       setEl("db-eventCount", filtered.length);
