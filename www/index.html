@@ -66,6 +66,28 @@
         <span class="pill mono" id="headerTime">--:--</span>
       </div>
       <div style="display:flex;gap:6px">
+        <span class="accent-picker" id="accentPicker">
+          <button type="button" class="icon-btn" id="accentPickerBtn"
+                  data-click="accentPickerToggle"
+                  title="Change accent color"
+                  aria-label="Change accent color"
+                  aria-haspopup="true"
+                  aria-expanded="false">
+            <span data-icon="palette"></span>
+          </button>
+          <span class="accent-picker-pop" role="menu" aria-label="Accent color">
+            <button type="button" class="accent-swatch" data-accent="cyan"   data-click="setAccent" data-args='["cyan"]'   aria-label="Cyan"></button>
+            <button type="button" class="accent-swatch" data-accent="amber"  data-click="setAccent" data-args='["amber"]'  aria-label="Amber"></button>
+            <button type="button" class="accent-swatch" data-accent="green"  data-click="setAccent" data-args='["green"]'  aria-label="Green"></button>
+            <button type="button" class="accent-swatch" data-accent="violet" data-click="setAccent" data-args='["violet"]' aria-label="Violet"></button>
+          </span>
+        </span>
+        <button type="button" class="icon-btn" id="densityToggleBtn"
+                data-click="quickDensityToggle"
+                title="Toggle compact density"
+                aria-label="Toggle compact density">
+          <span data-icon="rows-3"></span>
+        </button>
         <button type="button" class="icon-btn" id="themeToggleBtn"
                 data-click="quickThemeToggle"
                 title="Toggle dark/light theme"
@@ -99,22 +121,17 @@
         <a href="#sensors" data-page="sensors" class="nav-item" data-click="navPage">
           <span class="icon" data-icon="gauge"></span><span>Sensors</span>
         </a>
-        <a href="#live" data-page="live" class="nav-item" data-click="navPage" data-mode-show="legacy hybrid">
-          <span class="icon" data-icon="activity"></span><span>Live</span>
-        </a>
         <a href="#logs" data-page="logs" class="nav-item" data-click="navPage" data-mode-show="legacy hybrid">
           <span class="icon" data-icon="book-text"></span><span>Logs</span>
         </a>
         <a href="#files" data-page="files" class="nav-item" data-click="navPage">
           <span class="icon" data-icon="folder"></span><span>Files</span>
         </a>
-        <!-- Alerts + Health: IoT-first pages (continuous / hybrid) -->
+        <!-- Alerts: IoT-first page (continuous / hybrid).  Health diagnostics
+             merged into the Sensors page as a "Diagnostics" card type. -->
         <a href="#alerts" data-page="alerts" class="nav-item" data-click="navPage" data-mode-show="continuous hybrid">
           <span class="icon" data-icon="bell-ring"></span><span>Alerts</span>
           <span class="nbadge" id="alerts-badge" style="display:none">0</span>
-        </a>
-        <a href="#health" data-page="health" class="nav-item" data-click="navPage" data-mode-show="continuous hybrid">
-          <span class="icon" data-icon="heart-pulse"></span><span>Health</span>
         </a>
         <div class="nav-group">System</div>
         <a href="#settings" data-page="settings" class="nav-item" data-click="navPage">
@@ -149,9 +166,6 @@
       </a>
       <a href="#alerts" data-page="alerts" class="bnav" data-click="navPage" data-mode-show="continuous hybrid">
         <span data-icon="bell-ring"></span><span>Alerts</span>
-      </a>
-      <a href="#live" data-page="live" class="bnav" data-click="navPage" data-mode-show="legacy hybrid">
-        <span data-icon="activity"></span><span>Live</span>
       </a>
       <a href="#files" data-page="files" class="bnav" data-click="navPage">
         <span data-icon="folder"></span><span>Files</span>
@@ -804,9 +818,12 @@
   <script src="/js/pages.js" defer></script>
   <script src="/js/settings.js" defer></script>
   <script src="/js/sensors.js" defer></script>
-  <!-- IoT extensions: Overview / Alerts / Health pages, sensor zones,
-       compare mode, wizard, platform-mode awareness. Loaded last so it can
-       depend on everything defined above. -->
+  <!-- Editable card deck (drag-reorder, masonry, library tray).  Used by
+       Overview / Sensors / Alerts via iot-extensions.js. -->
+  <script src="/js/editable-deck.js" defer></script>
+  <!-- IoT extensions: Overview / Alerts pages, sensor zones, compare mode,
+       wizard, platform-mode awareness, editable card decks.  Loaded last so
+       it can depend on everything defined above. -->
   <script src="/js/iot-extensions.js" defer></script>
 
 </body>

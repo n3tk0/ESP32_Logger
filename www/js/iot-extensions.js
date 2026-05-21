@@ -1,11 +1,15 @@
 /**
  * /www/js/iot-extensions.js  —  IoT-first UI extensions
  *
- * Adds platform-mode awareness, Overview / Alerts / Health pages,
- * sensor zone grouping, compare-mode chips, and the 4-step Add-Sensor wizard.
+ * Adds platform-mode awareness, Overview + Alerts pages (built as editable
+ * card decks), sensor-diagnostics card (formerly the Health page), sensor
+ * zone grouping, compare-mode chips, the 4-step Add-Sensor wizard, and a
+ * live-cycle section injected into the Sensors page when a flow-meter is
+ * wired (legacy / hybrid modes).
  *
  * Depends on: core.js (ST, CFG, navigateTo, showToast, registerHandlers,
- *             Icons.swap, emptyState), icons.js, sensors.js (sensorsLoad).
+ *             Icons.swap, emptyState), icons.js, sensors.js (sensorsLoad),
+ *             editable-deck.js (EditableDeck.mount).
  * Load order: after all other scripts in index.html.
  */
 
@@ -114,7 +118,7 @@
   if (typeof LAZY_PAGES !== "undefined") {
     LAZY_PAGES.overview = 2;
     LAZY_PAGES.alerts   = 2;
-    LAZY_PAGES.health   = 2;
+    // Health page removed: diagnostics merged into Sensors as a deck card.
   }
 
   // Patch loadPagePartial to skip our sentinel pages
@@ -130,8 +134,8 @@
   function buildPages(mode) {
     buildOverviewPage();
     buildAlertsPage();
-    buildHealthPage();
     buildWizardModal();
+    injectSensorsLiveCycle(mode);
 
     // Set default active page based on mode if no hash
     var hash = location.hash.replace("#", "");
@@ -143,8 +147,170 @@
   }
 
   // ── Overview page ──────────────────────────────────────────────────────────
+  // Built as an editable card deck (drag-reorder, resize, hide/library tray,
+  // localStorage-persisted layout).  Each card type is registered with a
+  // `render()` that returns the card's HTML; data is populated by ID-targeted
+  // helpers (ovFillEnvironment etc.) AFTER every deck render.
+  var _overviewDeck = null;
+  var _overviewLastData = null;     // cached /api/latest payload
+  var _overviewStatusData = null;   // cached /api/status payload
+
+  // Registry: id → { title, icon, render(card) → HTML string }
+  var OVERVIEW_REGISTRY = {
+    aqi: {
+      title: "Air Quality Index", icon: "wind",
+      render: function () {
+        return '<div class="card">' +
+          '<div class="card-head">' +
+            '<div class="card-title"><span data-icon="wind"></span> Air Quality Index</div>' +
+            '<span class="badge ok" id="aqi-badge">GOOD</span>' +
+          '</div>' +
+          '<div class="card-body" style="padding:0">' +
+            '<div class="aqi-card">' +
+              '<div class="aqi-gauge">' +
+                '<svg viewBox="0 0 120 120">' +
+                  '<circle class="aqi-track" cx="60" cy="60" r="50"/>' +
+                  '<circle class="aqi-fill" id="aqi-arc" cx="60" cy="60" r="50" stroke-dasharray="314" stroke-dashoffset="220"/>' +
+                '</svg>' +
+                '<div class="aqi-center">' +
+                  '<div class="aqi-label">AQI</div>' +
+                  '<div class="aqi-score" id="aqi-score">—</div>' +
+                  '<div class="aqi-quality" id="aqi-quality">—</div>' +
+                '</div>' +
+              '</div>' +
+              '<div class="aqi-breakdown" id="aqi-breakdown">' +
+                '<div class="aqi-bar"><div class="aqi-bar-name">PM2.5</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-pm25" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-pm25v">—</div></div>' +
+                '<div class="aqi-bar"><div class="aqi-bar-name">PM10</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-pm10" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-pm10v">—</div></div>' +
+                '<div class="aqi-bar"><div class="aqi-bar-name">TVOC</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-tvoc" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-tvocv">—</div></div>' +
+                '<div class="aqi-bar"><div class="aqi-bar-name">eCO₂</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-eco2" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-eco2v">—</div></div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      },
+    },
+    environment: {
+      title: "Environment", icon: "thermometer",
+      render: function () {
+        return '<div class="card">' +
+          '<div class="card-head">' +
+            '<div class="card-title"><span data-icon="thermometer"></span> Environment</div>' +
+            '<span class="mono" style="font-size:11px;color:var(--text-3)" id="ov-env-src">—</span>' +
+          '</div>' +
+          '<div class="card-body">' +
+            '<div class="grid grid-3" style="gap:10px" id="ov-env-kpis">' +
+              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="thermometer"></span> Temp</div><div class="kpi-v"><span class="num" id="ov-temp">—</span><span class="unit">°C</span></div><div class="kpi-d" id="ov-temp-d">—</div></div>' +
+              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="droplet"></span> Humidity</div><div class="kpi-v"><span class="num" id="ov-hum">—</span><span class="unit">%</span></div><div class="kpi-d" id="ov-hum-d">—</div></div>' +
+              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="gauge"></span> Pressure</div><div class="kpi-v"><span class="num" id="ov-pres">—</span><span class="unit">hPa</span></div><div class="kpi-d" id="ov-pres-d">—</div></div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      },
+    },
+    energy: {
+      title: "Energy", icon: "zap",
+      render: function () {
+        return '<div class="card">' +
+          '<div class="card-head">' +
+            '<div class="card-title"><span data-icon="zap"></span> Energy</div>' +
+            '<span class="mono" style="font-size:11px;color:var(--text-3)" id="ov-energy-src">—</span>' +
+          '</div>' +
+          '<div class="card-body">' +
+            '<div class="energy-grid" id="ov-energy-grid">' +
+              '<div class="energy-tile live"><div class="energy-tile-l">Voltage</div><div class="energy-tile-v"><span id="ov-volt">—</span><span class="u">V</span></div><div class="energy-tile-trend" id="ov-volt-t">—</div></div>' +
+              '<div class="energy-tile live"><div class="energy-tile-l">Current</div><div class="energy-tile-v"><span id="ov-amp">—</span><span class="u">A</span></div><div class="energy-tile-trend" id="ov-amp-t">—</div></div>' +
+              '<div class="energy-tile live"><div class="energy-tile-l">Power</div><div class="energy-tile-v"><span id="ov-power">—</span><span class="u">W</span></div><div class="energy-tile-trend" id="ov-pf-t">—</div></div>' +
+              '<div class="energy-tile"><div class="energy-tile-l">Today</div><div class="energy-tile-v"><span id="ov-kwh-day">—</span><span class="u">kWh</span></div><div class="energy-tile-trend" id="ov-kwh-day-t">—</div></div>' +
+              '<div class="energy-tile"><div class="energy-tile-l">This week</div><div class="energy-tile-v"><span id="ov-kwh-week">—</span><span class="u">kWh</span></div><div class="energy-tile-trend" id="ov-kwh-week-t">—</div></div>' +
+              '<div class="energy-tile"><div class="energy-tile-l">This month</div><div class="energy-tile-v"><span id="ov-kwh-month">—</span><span class="u">kWh</span></div><div class="energy-tile-trend" id="ov-kwh-month-t">—</div></div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      },
+    },
+    water: {
+      title: "Water (today)", icon: "droplets",
+      render: function () {
+        return '<div class="card" data-mode-show="hybrid">' +
+          '<div class="card-head"><div class="card-title"><span data-icon="droplets"></span> Water</div></div>' +
+          '<div class="card-body" style="display:flex;flex-direction:column;gap:14px">' +
+            '<div><div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Today</div>' +
+            '<div class="mono" style="font-size:28px;font-weight:700"><span id="ov-water-today">—</span><span style="font-size:13px;color:var(--text-3);margin-left:4px">L</span></div></div>' +
+            '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--text-3)">Events</span><span class="mono" id="ov-water-events">—</span></div>' +
+          '</div>' +
+        '</div>';
+      },
+    },
+    outdoor: {
+      title: "Outdoor", icon: "cloud-rain",
+      render: function () {
+        return '<div class="card">' +
+          '<div class="card-head"><div class="card-title"><span data-icon="cloud-rain"></span> Outdoor</div></div>' +
+          '<div class="card-body" style="display:flex;flex-direction:column;gap:14px">' +
+            '<div><div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Rain today</div>' +
+            '<div class="mono" style="font-size:28px;font-weight:700"><span id="ov-rain">—</span><span style="font-size:13px;color:var(--text-3);margin-left:4px">mm</span></div></div>' +
+            '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--text-3)">Wind</span><span class="mono" id="ov-wind">—</span></div>' +
+          '</div>' +
+        '</div>';
+      },
+    },
+    alertFeed: {
+      title: "Recent alerts", icon: "bell",
+      render: function () {
+        return '<div class="card">' +
+          '<div class="card-head">' +
+            '<div class="card-title"><span data-icon="bell"></span> Recent alerts</div>' +
+            '<a class="mono" style="font-size:11px;color:var(--accent);cursor:pointer" data-click="navPage" data-page="alerts">View all →</a>' +
+          '</div>' +
+          '<div class="card-body" style="padding:0" id="ov-alert-feed">' +
+            '<div class="empty" style="padding:20px"><span class="empty-title">No alerts</span></div>' +
+          '</div>' +
+        '</div>';
+      },
+    },
+    sensorsList: {
+      title: "Active sensors", icon: "thermometer",
+      render: function () {
+        return '<div class="card">' +
+          '<div class="card-head">' +
+            '<div class="card-title"><span data-icon="thermometer"></span> Active sensors</div>' +
+            '<a class="mono" style="font-size:11px;color:var(--accent);cursor:pointer" data-click="navPage" data-page="sensors">All sensors →</a>' +
+          '</div>' +
+          '<div class="card-body" id="ov-sensors-list" style="display:flex;flex-direction:column;gap:6px">' +
+            '<div class="empty" style="padding:20px"><span class="empty-title">Loading…</span></div>' +
+          '</div>' +
+        '</div>';
+      },
+    },
+    diagnostics: {
+      title: "Sensor diagnostics", icon: "heart-pulse",
+      render: function () {
+        return '<div class="card">' +
+          '<div class="card-head">' +
+            '<div class="card-title"><span data-icon="heart-pulse"></span> Sensor diagnostics</div>' +
+            '<span class="mono" style="font-size:11px;color:var(--text-3)" id="hl-summary">—</span>' +
+          '</div>' +
+          '<div class="card-body" id="ov-diagnostics-body">' +
+            '<div class="health-grid" id="health-grid">' +
+              '<div class="empty" style="padding:20px"><span class="empty-title">Loading sensor health…</span></div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      },
+    },
+  };
+
+  var OVERVIEW_DEFAULTS = [
+    { id: "aqi",         span: 6 },
+    { id: "environment", span: 6 },
+    { id: "energy",      span: 8 },
+    { id: "outdoor",     span: 4 },
+    { id: "alertFeed",   span: 6 },
+    { id: "sensorsList", span: 6 },
+  ];
+
   function buildOverviewPage() {
-    if (document.getElementById("page-overview")) return; // already built
+    if (document.getElementById("page-overview")) return;
 
     var page = document.createElement("main");
     page.className = "main-content page";
@@ -152,139 +318,47 @@
     page.setAttribute("data-mode-show", "continuous hybrid");
     page.setAttribute("role", "main");
 
-    page.innerHTML = [
-      '<div class="page-head">',
-        '<div>',
-          '<h1 class="page-title"><span data-icon="layout-grid"></span> Overview</h1>',
-          '<div class="page-sub" id="ov-sub">IoT sensor dashboard · loading…</div>',
-        '</div>',
-        '<div class="page-actions">',
-          '<div class="seg" role="group" aria-label="Time range">',
-            '<button class="active" aria-pressed="true" onclick="ovSetRange(3600)">1h</button>',
-            '<button aria-pressed="false" onclick="ovSetRange(86400)">24h</button>',
-            '<button aria-pressed="false" onclick="ovSetRange(604800)">7d</button>',
-          '</div>',
-          '<button class="btn" id="ovAddSensorBtn"><span data-icon="plus"></span> Add sensor</button>',
-        '</div>',
-      '</div>',
-
-      // AQI + Environment row
-      '<div class="grid grid-12">',
-        '<div class="card span-6">',
-          '<div class="card-head">',
-            '<div class="card-title"><span data-icon="wind"></span> Air Quality Index</div>',
-            '<span class="badge ok" id="aqi-badge">GOOD</span>',
-          '</div>',
-          '<div class="card-body" style="padding:0">',
-            '<div class="aqi-card">',
-              '<div class="aqi-gauge">',
-                '<svg viewBox="0 0 120 120">',
-                  '<circle class="aqi-track" cx="60" cy="60" r="50"/>',
-                  '<circle class="aqi-fill" id="aqi-arc" cx="60" cy="60" r="50" stroke-dasharray="314" stroke-dashoffset="220"/>',
-                '</svg>',
-                '<div class="aqi-center">',
-                  '<div class="aqi-label">AQI</div>',
-                  '<div class="aqi-score" id="aqi-score">—</div>',
-                  '<div class="aqi-quality" id="aqi-quality">—</div>',
-                '</div>',
-              '</div>',
-              '<div class="aqi-breakdown" id="aqi-breakdown">',
-                '<div class="aqi-bar"><div class="aqi-bar-name">PM2.5</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-pm25" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-pm25v">—</div></div>',
-                '<div class="aqi-bar"><div class="aqi-bar-name">PM10</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-pm10" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-pm10v">—</div></div>',
-                '<div class="aqi-bar"><div class="aqi-bar-name">TVOC</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-tvoc" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-tvocv">—</div></div>',
-                '<div class="aqi-bar"><div class="aqi-bar-name">eCO₂</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-eco2" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-eco2v">—</div></div>',
-              '</div>',
-            '</div>',
-          '</div>',
-        '</div>',
-
-        '<div class="card span-6">',
-          '<div class="card-head">',
-            '<div class="card-title"><span data-icon="thermometer"></span> Environment</div>',
-            '<span class="mono" style="font-size:11px;color:var(--text-3)" id="ov-env-src">—</span>',
-          '</div>',
-          '<div class="card-body">',
-            '<div class="grid grid-3" style="gap:10px" id="ov-env-kpis">',
-              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="thermometer"></span> Temp</div><div class="kpi-v"><span class="num" id="ov-temp">—</span><span class="unit">°C</span></div><div class="kpi-d" id="ov-temp-d">—</div></div>',
-              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="droplet"></span> Humidity</div><div class="kpi-v"><span class="num" id="ov-hum">—</span><span class="unit">%</span></div><div class="kpi-d" id="ov-hum-d">—</div></div>',
-              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="gauge"></span> Pressure</div><div class="kpi-v"><span class="num" id="ov-pres">—</span><span class="unit">hPa</span></div><div class="kpi-d" id="ov-pres-d">—</div></div>',
-            '</div>',
-          '</div>',
-        '</div>',
-      '</div>',
-
-      // Energy + Water/Outdoor row
-      '<div class="grid grid-12" style="margin-top:var(--gap)">',
-        '<div class="card span-8">',
-          '<div class="card-head">',
-            '<div class="card-title"><span data-icon="zap"></span> Energy</div>',
-            '<span class="mono" style="font-size:11px;color:var(--text-3)" id="ov-energy-src">—</span>',
-          '</div>',
-          '<div class="card-body">',
-            '<div class="energy-grid" id="ov-energy-grid">',
-              '<div class="energy-tile live"><div class="energy-tile-l">Voltage</div><div class="energy-tile-v"><span id="ov-volt">—</span><span class="u">V</span></div><div class="energy-tile-trend" id="ov-volt-t">—</div></div>',
-              '<div class="energy-tile live"><div class="energy-tile-l">Current</div><div class="energy-tile-v"><span id="ov-amp">—</span><span class="u">A</span></div><div class="energy-tile-trend" id="ov-amp-t">—</div></div>',
-              '<div class="energy-tile live"><div class="energy-tile-l">Power</div><div class="energy-tile-v"><span id="ov-power">—</span><span class="u">W</span></div><div class="energy-tile-trend" id="ov-pf-t">—</div></div>',
-              '<div class="energy-tile"><div class="energy-tile-l">Today</div><div class="energy-tile-v"><span id="ov-kwh-day">—</span><span class="u">kWh</span></div><div class="energy-tile-trend" id="ov-kwh-day-t">—</div></div>',
-              '<div class="energy-tile"><div class="energy-tile-l">This week</div><div class="energy-tile-v"><span id="ov-kwh-week">—</span><span class="u">kWh</span></div><div class="energy-tile-trend" id="ov-kwh-week-t">—</div></div>',
-              '<div class="energy-tile"><div class="energy-tile-l">This month</div><div class="energy-tile-v"><span id="ov-kwh-month">—</span><span class="u">kWh</span></div><div class="energy-tile-trend" id="ov-kwh-month-t">—</div></div>',
-            '</div>',
-          '</div>',
-        '</div>',
-
-        '<div class="card span-4" data-mode-show="hybrid">',
-          '<div class="card-head"><div class="card-title"><span data-icon="droplets"></span> Water</div></div>',
-          '<div class="card-body" style="display:flex;flex-direction:column;gap:14px">',
-            '<div><div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Today</div>',
-            '<div class="mono" style="font-size:28px;font-weight:700"><span id="ov-water-today">—</span><span style="font-size:13px;color:var(--text-3);margin-left:4px">L</span></div></div>',
-            '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--text-3)">Events</span><span class="mono" id="ov-water-events">—</span></div>',
-          '</div>',
-        '</div>',
-
-        '<div class="card span-4" data-mode-show="continuous">',
-          '<div class="card-head"><div class="card-title"><span data-icon="cloud-rain"></span> Outdoor</div></div>',
-          '<div class="card-body" style="display:flex;flex-direction:column;gap:14px">',
-            '<div><div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Rain today</div>',
-            '<div class="mono" style="font-size:28px;font-weight:700"><span id="ov-rain">—</span><span style="font-size:13px;color:var(--text-3);margin-left:4px">mm</span></div></div>',
-            '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--text-3)">Wind</span><span class="mono" id="ov-wind">—</span></div>',
-          '</div>',
-        '</div>',
-      '</div>',
-
-      // Alerts feed + Sensor snapshot
-      '<div class="grid grid-12" style="margin-top:var(--gap)">',
-        '<div class="card span-6">',
-          '<div class="card-head">',
-            '<div class="card-title"><span data-icon="bell"></span> Recent alerts</div>',
-            '<a class="mono" style="font-size:11px;color:var(--accent);cursor:pointer" data-click="navPage" data-page="alerts">View all →</a>',
-          '</div>',
-          '<div class="card-body" style="padding:0" id="ov-alert-feed">',
-            '<div class="empty" style="padding:20px"><span class="empty-title">No alerts</span></div>',
-          '</div>',
-        '</div>',
-        '<div class="card span-6">',
-          '<div class="card-head">',
-            '<div class="card-title"><span data-icon="thermometer"></span> Active sensors</div>',
-            '<a class="mono" style="font-size:11px;color:var(--accent);cursor:pointer" data-click="navPage" data-page="sensors">All sensors →</a>',
-          '</div>',
-          '<div class="card-body" id="ov-sensors-list" style="display:flex;flex-direction:column;gap:6px">',
-            '<div class="empty" style="padding:20px"><span class="empty-title">Loading…</span></div>',
-          '</div>',
-        '</div>',
-      '</div>',
-    ].join("");
+    page.innerHTML =
+      '<div class="page-head">' +
+        '<div>' +
+          '<h1 class="page-title"><span data-icon="layout-grid"></span> Overview</h1>' +
+          '<div class="page-sub" id="ov-sub">IoT sensor dashboard · loading…</div>' +
+        '</div>' +
+        '<div class="page-actions">' +
+          '<div class="page-actions-deck" data-role="deck-toolbar"></div>' +
+          '<button class="btn" id="ovAddSensorBtn"><span data-icon="plus"></span> Add sensor</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="deck" id="overview-deck"></div>';
 
     document.body.insertBefore(page, document.getElementById("toastContainer") || null);
     reIcons(page);
 
-    // Bind Add sensor button
     var addBtn = document.getElementById("ovAddSensorBtn");
-    if (addBtn) {
-      addBtn.addEventListener("click", function () { openWizard(); });
-    }
+    if (addBtn) addBtn.addEventListener("click", function () { openWizard(); });
 
-    // Populate with real data once ST/CFG available
+    _overviewDeck = window.EditableDeck.mount({
+      pageId:   "overview",
+      container: document.getElementById("overview-deck"),
+      registry:  OVERVIEW_REGISTRY,
+      defaults:  OVERVIEW_DEFAULTS,
+      toolbar:   page.querySelector('[data-role="deck-toolbar"]'),
+      onEdit:    function () { /* re-apply cached data after render */
+        if (_overviewLastData)   _applyOverviewData(_overviewLastData);
+        if (_overviewStatusData) ovFillWaterCached(_overviewStatusData);
+        ovFillAlertFeed();
+        if (_overviewHealthData) renderHealthGrid(_overviewHealthData);
+      },
+    });
+
     populateOverview();
+  }
+
+  function _applyOverviewData(data) {
+    ovFillEnvironment(data);
+    ovFillEnergy(data);
+    ovFillAQI(data);
+    ovFillSensorList(data);
   }
 
   /** Populate Overview with real /api/latest data. */
@@ -296,21 +370,20 @@
       sub.textContent = sc + " sensors · live readings";
     }
 
-    // Fetch latest sensor readings
+    // Fetch latest sensor readings.  Cache the response so the deck can
+    // re-apply it after toggling edit mode (which rebuilds the DOM).
     fetchWithTimeout("/api/latest", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data) return;
-        ovFillEnvironment(data);
-        ovFillEnergy(data);
-        ovFillAQI(data);
-        ovFillWater(data);
-        ovFillSensorList(data);
+        _overviewLastData = data;
+        _applyOverviewData(data);
       })
       .catch(function () {});
 
-    // Populate alert feed from the live log if available
+    ovFillWater();        // fetches /api/status, caches into _overviewStatusData
     ovFillAlertFeed();
+    populateDiagnostics(); // fetches /api/sensors, caches into _overviewHealthData
   }
 
   function ovFillEnvironment(data) {
@@ -407,18 +480,23 @@
     }
   }
 
-  function ovFillWater(data) {
-    // Water stats come from the live endpoint for legacy/hybrid
+  function ovFillWater() {
+    // Water stats come from the live endpoint for legacy/hybrid.  Cache so we
+    // can re-apply after the deck re-renders (edit-mode toggle).
     fetchWithTimeout("/api/status", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d) return;
-        var today = document.getElementById("ov-water-today");
-        var events = document.getElementById("ov-water-events");
-        if (today && d.todayVol !== undefined) today.textContent = d.todayVol.toFixed(2);
-        if (events && d.todayEvents !== undefined) events.textContent = d.todayEvents + " events";
+        _overviewStatusData = d;
+        ovFillWaterCached(d);
       })
       .catch(function () {});
+  }
+  function ovFillWaterCached(d) {
+    var today = document.getElementById("ov-water-today");
+    var events = document.getElementById("ov-water-events");
+    if (today && d.todayVol !== undefined) today.textContent = d.todayVol.toFixed(2);
+    if (events && d.todayEvents !== undefined) events.textContent = d.todayEvents + " events";
   }
 
   function ovFillSensorList(data) {
@@ -457,6 +535,72 @@
   }
 
   // ── Alerts page ────────────────────────────────────────────────────────────
+  // Same editable-deck treatment as Overview: each card type registered with
+  // a render(), populated by ID after every deck render.
+  var _alertsDeck = null;
+  var _alertsData = null;   // cached /api/alerts payload
+
+  var ALERTS_REGISTRY = {
+    kpiRules: {
+      title: "Rules KPI", icon: "list-checks",
+      render: function () {
+        return '<div class="kpi"><div class="kpi-l"><span data-icon="list-checks"></span> Rules</div><div class="kpi-v"><span class="num" id="al-total">—</span></div><div class="kpi-d" id="al-rule-d">—</div></div>';
+      },
+    },
+    kpiFiring: {
+      title: "Firing KPI", icon: "alert-triangle",
+      render: function () {
+        return '<div class="kpi"><div class="kpi-l"><span data-icon="alert-triangle"></span> Firing</div><div class="kpi-v" style="color:var(--err)"><span class="num" id="al-firing">0</span></div><div class="kpi-d">right now</div></div>';
+      },
+    },
+    kpiToday: {
+      title: "Last 24 h KPI", icon: "clock",
+      render: function () {
+        return '<div class="kpi"><div class="kpi-l"><span data-icon="clock"></span> Last 24 h</div><div class="kpi-v"><span class="num" id="al-day-trips">0</span></div><div class="kpi-d">trips</div></div>';
+      },
+    },
+    kpiSnoozed: {
+      title: "Snoozed KPI", icon: "bell-off",
+      render: function () {
+        return '<div class="kpi"><div class="kpi-l"><span data-icon="bell-off"></span> Snoozed</div><div class="kpi-v"><span class="num" id="al-snoozed">0</span></div><div class="kpi-d">—</div></div>';
+      },
+    },
+    rules: {
+      title: "Rules list", icon: "list-checks",
+      render: function () {
+        return '<div class="card">' +
+          '<div class="card-head">' +
+            '<div class="card-title"><span data-icon="list-checks"></span> Rules</div>' +
+            '<input class="input" placeholder="Filter rules…" id="al-filter" style="width:200px;height:28px"/>' +
+          '</div>' +
+          '<div class="card-body" style="padding:0" id="al-rules">' +
+            '<div class="empty" style="padding:24px"><span class="empty-title">Loading…</span></div>' +
+          '</div>' +
+        '</div>';
+      },
+    },
+    history: {
+      title: "Trigger history", icon: "history",
+      render: function () {
+        return '<div class="card">' +
+          '<div class="card-head"><div class="card-title"><span data-icon="history"></span> Trigger history</div></div>' +
+          '<div class="card-body" style="padding:0" id="al-history">' +
+            '<div class="empty" style="padding:24px"><span class="empty-title">Loading…</span></div>' +
+          '</div>' +
+        '</div>';
+      },
+    },
+  };
+
+  var ALERTS_DEFAULTS = [
+    { id: "kpiRules",   span: 3 },
+    { id: "kpiFiring",  span: 3 },
+    { id: "kpiToday",   span: 3 },
+    { id: "kpiSnoozed", span: 3 },
+    { id: "rules",      span: 12 },
+    { id: "history",    span: 12 },
+  ];
+
   function buildAlertsPage() {
     if (document.getElementById("page-alerts")) return;
 
@@ -466,56 +610,53 @@
     page.setAttribute("data-mode-show", "continuous hybrid");
     page.setAttribute("role", "main");
 
-    page.innerHTML = [
-      '<div class="page-head">',
-        '<div>',
-          '<h1 class="page-title"><span data-icon="bell-ring"></span> Alerts</h1>',
-          '<div class="page-sub">Threshold rules across all sensors</div>',
-        '</div>',
-        '<div class="page-actions">',
-          '<button class="btn primary"><span data-icon="plus"></span> New rule</button>',
-        '</div>',
-      '</div>',
-
-      '<div class="grid grid-4">',
-        '<div class="kpi"><div class="kpi-l"><span data-icon="list-checks"></span> Rules</div><div class="kpi-v"><span class="num" id="al-total">—</span></div><div class="kpi-d" id="al-rule-d">—</div></div>',
-        '<div class="kpi"><div class="kpi-l"><span data-icon="alert-triangle"></span> Firing</div><div class="kpi-v" style="color:var(--err)"><span class="num" id="al-firing">0</span></div><div class="kpi-d">right now</div></div>',
-        '<div class="kpi"><div class="kpi-l"><span data-icon="clock"></span> Last 24 h</div><div class="kpi-v"><span class="num" id="al-day-trips">0</span></div><div class="kpi-d">trips</div></div>',
-        '<div class="kpi"><div class="kpi-l"><span data-icon="bell-off"></span> Snoozed</div><div class="kpi-v"><span class="num" id="al-snoozed">0</span></div><div class="kpi-d">—</div></div>',
-      '</div>',
-
-      '<div class="card" style="margin-top:var(--gap)">',
-        '<div class="card-head">',
-          '<div class="card-title"><span data-icon="list-checks"></span> Rules</div>',
-          '<input class="input" placeholder="Filter rules…" id="al-filter" style="width:200px;height:28px"/>',
-        '</div>',
-        '<div class="card-body" style="padding:0" id="al-rules">',
-          '<div class="empty" style="padding:24px"><span class="empty-title">Loading…</span></div>',
-        '</div>',
-      '</div>',
-
-      '<div class="card" style="margin-top:var(--gap)">',
-        '<div class="card-head"><div class="card-title"><span data-icon="history"></span> Trigger history</div></div>',
-        '<div class="card-body" style="padding:0" id="al-history">',
-          '<div class="empty" style="padding:24px"><span class="empty-title">Loading…</span></div>',
-        '</div>',
-      '</div>',
-    ].join("");
+    page.innerHTML =
+      '<div class="page-head">' +
+        '<div>' +
+          '<h1 class="page-title"><span data-icon="bell-ring"></span> Alerts</h1>' +
+          '<div class="page-sub">Threshold rules across all sensors</div>' +
+        '</div>' +
+        '<div class="page-actions">' +
+          '<div class="page-actions-deck" data-role="deck-toolbar"></div>' +
+          '<button class="btn primary"><span data-icon="plus"></span> New rule</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="deck" id="alerts-deck"></div>';
 
     document.body.insertBefore(page, document.getElementById("toastContainer") || null);
     reIcons(page);
 
-    // Filter input — wired up after API data populates the rules container
-    var fi = document.getElementById("al-filter");
-    if (fi) fi.addEventListener("input", function () {
-      var q = fi.value.toLowerCase();
-      page.querySelectorAll(".alert-rule").forEach(function (r) {
-        r.style.display = r.textContent.toLowerCase().indexOf(q) !== -1 ? "" : "none";
-      });
+    _alertsDeck = window.EditableDeck.mount({
+      pageId:   "alerts",
+      container: document.getElementById("alerts-deck"),
+      registry:  ALERTS_REGISTRY,
+      defaults:  ALERTS_DEFAULTS,
+      toolbar:   page.querySelector('[data-role="deck-toolbar"]'),
+      onEdit:    function () {
+        // Re-bind the filter input + re-apply cached data after every render.
+        _bindAlertsFilter();
+        if (_alertsData) {
+          _renderAlertRules(_alertsData.rules || []);
+          _renderAlertHistory(_alertsData.history || []);
+        }
+      },
     });
 
-    // Fetch live data from /api/alerts immediately after page is in DOM
+    _bindAlertsFilter();
     _loadAlertsData();
+  }
+
+  function _bindAlertsFilter() {
+    var fi = document.getElementById("al-filter");
+    if (!fi || fi.dataset.bound === "1") return;
+    fi.dataset.bound = "1";
+    fi.addEventListener("input", function () {
+      var q = fi.value.toLowerCase();
+      var rules = document.querySelectorAll(".alert-rule");
+      for (var i = 0; i < rules.length; i++) {
+        rules[i].style.display = rules[i].textContent.toLowerCase().indexOf(q) !== -1 ? "" : "none";
+      }
+    });
   }
 
   // Fetch GET /api/alerts and render rules + history from real firmware data.
@@ -523,6 +664,7 @@
     fetchWithTimeout("/api/alerts", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function (data) {
+        _alertsData = data;
         _renderAlertRules(data.rules  || []);
         _renderAlertHistory(data.history || []);
       })
@@ -666,56 +808,18 @@
     return Math.floor(diff / 86400) + " d ago";
   }
 
-  // ── Health page ────────────────────────────────────────────────────────────
-  function buildHealthPage() {
-    if (document.getElementById("page-health")) return;
+  // ── Sensor diagnostics (formerly the Health page) ──────────────────────────
+  // The standalone /health page was removed; the same content is now offered
+  // as a deck card type (id "diagnostics") on the Overview page.  Logic for
+  // fetching, rendering, and summarising lives here so the card can call it.
+  var _overviewHealthData = null;
 
-    var page = document.createElement("main");
-    page.className = "main-content page";
-    page.id = "page-health";
-    page.setAttribute("data-mode-show", "continuous hybrid");
-    page.setAttribute("role", "main");
-
-    page.innerHTML = [
-      '<div class="page-head">',
-        '<div>',
-          '<h1 class="page-title"><span data-icon="heart-pulse"></span> Sensor health</h1>',
-          '<div class="page-sub">Diagnostics, retry counts, uptime per sensor</div>',
-        '</div>',
-        '<div class="page-actions">',
-          '<button class="btn"><span data-icon="refresh-cw"></span> Refresh</button>',
-        '</div>',
-      '</div>',
-
-      '<div class="grid grid-4">',
-        '<div class="kpi"><div class="kpi-l"><span data-icon="activity"></span> Up</div><div class="kpi-v" style="color:var(--ok)"><span class="num" id="hl-up">—</span></div><div class="kpi-d up" id="hl-up-d">—</div></div>',
-        '<div class="kpi"><div class="kpi-l"><span data-icon="clock"></span> Stale</div><div class="kpi-v" style="color:var(--warn)"><span class="num" id="hl-stale">0</span></div><div class="kpi-d" id="hl-stale-d">—</div></div>',
-        '<div class="kpi"><div class="kpi-l"><span data-icon="x-circle"></span> Errored</div><div class="kpi-v" style="color:var(--err)"><span class="num" id="hl-err">0</span></div><div class="kpi-d" id="hl-err-d">—</div></div>',
-        '<div class="kpi"><div class="kpi-l"><span data-icon="refresh-cw"></span> Retries (24h)</div><div class="kpi-v"><span class="num" id="hl-retries">0</span></div><div class="kpi-d">total</div></div>',
-      '</div>',
-
-      '<div class="health-grid" style="margin-top:var(--gap)" id="health-grid">',
-        '<div class="empty" style="padding:32px"><span class="empty-title">Loading sensor health…</span></div>',
-      '</div>',
-    ].join("");
-
-    document.body.insertBefore(page, document.getElementById("toastContainer") || null);
-    reIcons(page);
-
-    // Refresh button
-    page.querySelector(".btn").addEventListener("click", function () {
-      populateHealthPage();
-    });
-
-    populateHealthPage();
-  }
-
-  function populateHealthPage() {
+  function populateDiagnostics() {
     fetchWithTimeout("/api/sensors", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         var sensors = (data && data.sensors) || [];
-        if (!sensors.length) return;
+        _overviewHealthData = sensors;
         renderHealthGrid(sensors);
       })
       .catch(function () {
@@ -791,6 +895,10 @@
     }).join("");
 
     reIcons(grid);
+    // Old standalone Health page had per-state KPI tiles; the merged
+    // Diagnostics card on Overview keeps the grid only and shows a single
+    // summary line in the card head.  Both are tolerated: setEl no-ops on
+    // missing IDs, so the old tiles update only when they exist.
     setEl("hl-up",      upCount);
     setEl("hl-up-d",    upCount + " of " + sensors.length);
     setEl("hl-stale",   staleCount);
@@ -798,6 +906,96 @@
     setEl("hl-err",     errCount);
     setEl("hl-err-d",   errNames.slice(0, 2).join(", ") || "—");
     setEl("hl-retries", totalRetries);
+    setEl("hl-summary",
+      sensors.length + " sensors · " +
+      upCount + " up · " +
+      staleCount + " stale · " +
+      errCount + " errored");
+  }
+
+  // ─── Sensors page: live-cycle section (merged from removed Live page) ────
+  // The standalone Live page was removed; its current-cycle + state-machine
+  // cards now mount at the top of the Sensors page in legacy / hybrid modes
+  // (i.e. whenever a flow-meter is wired).  In continuous mode the section
+  // is skipped — there's nothing to display.
+  function injectSensorsLiveCycle(mode) {
+    if (mode === "continuous") return;
+    var sensorsPage = document.getElementById("page-sensors");
+    if (!sensorsPage) return;
+    if (document.getElementById("sensors-live-cycle")) return;
+
+    var section = document.createElement("section");
+    section.id = "sensors-live-cycle";
+    section.className = "sensors-live-cycle";
+    section.style.marginBottom = "var(--gap)";
+    section.innerHTML =
+      '<div class="grid grid-12">' +
+        '<div class="card span-8">' +
+          '<div class="card-head">' +
+            '<div class="card-title"><span data-icon="droplets"></span> Current cycle</div>' +
+            '<span class="badge acc mono">CYCLE #<span id="live-cycle-num">—</span></span>' +
+          '</div>' +
+          '<div class="card-body">' +
+            '<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;justify-content:space-between">' +
+              '<div class="bigstat"><div class="bigstat-l">Volume</div><div class="bigstat-v mono"><span id="live-liters">0.00</span><span>L</span></div></div>' +
+              '<div class="bigstat"><div class="bigstat-l">Pulses</div><div class="bigstat-v mono" id="live-pulses">0</div></div>' +
+              '<div class="bigstat"><div class="bigstat-l">Duration</div><div class="bigstat-v mono"><span id="live-cycleTime">0</span><span>s</span></div></div>' +
+              '<div class="bigstat"><div class="bigstat-l">Trigger</div><div class="bigstat-v" style="color:var(--accent)" id="live-trigger">–</div></div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="card span-4">' +
+          '<div class="card-head"><div class="card-title"><span data-icon="git-branch"></span> State machine</div></div>' +
+          '<div class="card-body" style="display:flex;flex-direction:column;gap:12px">' +
+            '<div id="sensors-live-state-wrap">' +
+              '<div id="state-mirror" class="badge dim">–</div>' +
+              '<div class="mono" style="font-size:11px;color:var(--text-3);margin-top:8px">Live feed from the legacy flow-meter pipeline. Open <a href="#live" data-click="navPage" data-page="live" data-args="[]">the full Live page</a> for the timer + log.</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    // Mount it as the first child of the Sensors page, after .page-head.
+    var head = sensorsPage.querySelector(".page-head");
+    if (head && head.nextSibling) sensorsPage.insertBefore(section, head.nextSibling);
+    else sensorsPage.appendChild(section);
+    reIcons(section);
+
+    // Hook the existing /api/live stream so values update.  We piggy-back on
+    // the same SSE that the Live page uses (core.js sets up liveES); if it's
+    // not active we fall back to a 2 s poll of /api/status.
+    _wireLiveCycleMirror();
+  }
+
+  function _wireLiveCycleMirror() {
+    function applyStatus(d) {
+      if (!d) return;
+      setEl("live-cycle-num",  d.cycleNum     !== undefined ? d.cycleNum : "—");
+      setEl("live-liters",     d.liters       !== undefined ? d.liters.toFixed(2) : "0.00");
+      setEl("live-pulses",     d.pulses       !== undefined ? d.pulses : 0);
+      setEl("live-cycleTime",  d.cycleTime    !== undefined ? d.cycleTime : 0);
+      setEl("live-trigger",    d.trigger      || "–");
+      var sm = document.getElementById("state-mirror");
+      if (sm && d.state) sm.textContent = String(d.state).toUpperCase();
+    }
+
+    // Poll only when Sensors is the active page; cheap and CSP-friendly.
+    var timer = null;
+    function startPolling() {
+      if (timer) return;
+      timer = setInterval(function () {
+        if (!document.getElementById("sensors-live-cycle")) {
+          clearInterval(timer); timer = null; return;
+        }
+        var sensorsPage = document.getElementById("page-sensors");
+        if (!sensorsPage || !sensorsPage.classList.contains("active")) return;
+        fetchWithTimeout("/api/status", {}, 8000)
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(applyStatus)
+          .catch(function () {});
+      }, 2000);
+    }
+    startPolling();
   }
 
   // ─── Sensor zone grouping ─────────────────────────────────────────────────
@@ -1162,12 +1360,12 @@
   // Try immediately too (script loads at end of body, so DOM is ready)
   registerHandlers({ clAddSensor: openWizard });
 
-  // ─── Keyboard shortcuts for new pages (G O / G A / G H) ──────────────────
+  // ─── Keyboard shortcuts for new pages (G O / G A) ─────────────────────────
   // core.js already handles G+D/L/S/F/C/U. We hook the same keydown so the
   // two-key sequences share the same timing context.
   (function () {
     var gWait = false, gTimer = null;
-    var extraMap = { o: "overview", a: "alerts", h: "health" };
+    var extraMap = { o: "overview", a: "alerts" };
 
     document.addEventListener("keydown", function (ev) {
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
@@ -1193,7 +1391,7 @@
 
   // ─── KB shortcut hints for new nav items ──────────────────────────────────
   function addKbdHints() {
-    var hints = { overview: ["G","O"], alerts: ["G","A"], health: ["G","H"] };
+    var hints = { overview: ["G","O"], alerts: ["G","A"] };
     Object.keys(hints).forEach(function (page) {
       var item = document.querySelector('.nav-item[data-page="' + page + '"]');
       if (!item || item.querySelector(".kbd")) return;

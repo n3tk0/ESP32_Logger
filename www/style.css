@@ -1337,3 +1337,318 @@ textarea.form-input { height:auto; padding:9px 11px; min-height:80px; }
   background: var(--warn);
   transition: width .3s;
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * EDITABLE DECK  —  drag-reorder, span chips, hide/show, library tray, masonry
+ * Used by Overview / Sensors / Alerts pages.  See www/js/editable-deck.js.
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+.deck { position: relative; min-height: 40px; }
+
+/* ── Live mode: masonry-packed; slots are absolutely positioned ─────────────
+   The packer (packMasonry) writes left / top / width inline. We add a
+   transition so reorders and span changes animate. */
+.deck.live > .deck-slot {
+  position: absolute;
+  transition: left .18s ease, top .18s ease, width .18s ease;
+}
+
+/* ── Editing mode: thumbnails in a plain 12-col grid (no masonry) ───────── */
+.deck.editing { display: block; }
+.deck-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: var(--gap);
+  grid-auto-flow: row dense;
+}
+.deck.editing .deck-slot {
+  align-self: start;
+  min-width: 0;
+}
+
+.deck-thumb {
+  background: var(--panel-2);
+  border: 1px dashed var(--border-2, var(--border));
+  border-radius: var(--radius, 6px);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 96px;
+  transition: border-color .12s, background .12s, opacity .12s;
+  user-select: none;
+}
+.deck-thumb:hover { border-color: var(--accent); background: var(--accent-soft); }
+.deck-thumb.dragging { opacity: .35; }
+.deck-thumb.dropover {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.thumb-chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.thumb-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px;
+  min-width: 0;
+}
+.thumb-body [data-lucide] {
+  width: 18px; height: 18px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.thumb-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+.thumb-span {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-3);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.edit-grip {
+  cursor: grab;
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-3);
+  touch-action: none;
+}
+.edit-grip:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.edit-grip:active { cursor: grabbing; }
+.edit-grip [data-lucide] { width: 14px; height: 14px; }
+
+.edit-spans {
+  display: inline-flex;
+  gap: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px;
+}
+.edit-span {
+  background: transparent;
+  border: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  width: 22px; height: 22px;
+  color: var(--text-3);
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
+}
+.edit-span:hover { color: var(--text); }
+.edit-span.active { background: var(--accent-soft); color: var(--accent); }
+
+.edit-hide {
+  margin-left: auto;
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.edit-hide:hover { color: var(--err); border-color: rgba(220,38,38,.4); background: rgba(220,38,38,.06); }
+.edit-hide [data-lucide] { width: 14px; height: 14px; }
+
+/* ── Tray (HIDDEN + ADD CARD) ──────────────────────────────────────────── */
+.deck-tray {
+  margin-top: 20px;
+  padding: 18px;
+  background: var(--panel-2);
+  border: 1px dashed var(--border-2, var(--border));
+  border-radius: var(--radius, 6px);
+}
+.deck-tray-section + .deck-tray-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.deck-tray-eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--text-3);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.deck-tray-hint {
+  font-size: 12px;
+  color: var(--text-3);
+  font-style: italic;
+}
+.deck-tray-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.deck-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 6px 0 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.deck-chip:hover { border-color: var(--accent); color: var(--accent); }
+.deck-chip [data-lucide] { width: 13px; height: 13px; }
+.deck-chip-add {
+  width: 22px; height: 22px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 50%;
+  display: grid; place-items: center;
+  margin-left: 2px;
+}
+.deck-chip-add [data-lucide] { width: 12px; height: 12px; }
+
+/* ── Drag ghost (follows pointer) ──────────────────────────────────────── */
+.deck-ghost {
+  position: fixed;
+  top: 0; left: 0;
+  transform: translate(8px, 8px);
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  z-index: 9999;
+  font-family: var(--sans);
+}
+body.deck-dragging { cursor: grabbing !important; }
+body.deck-dragging * { cursor: grabbing !important; }
+
+/* ── Editing badge in page-head ─────────────────────────────────────────── */
+.deck-editing-badge { height: 28px; display: inline-flex; align-items: center; padding: 0 10px; }
+
+/* Wrapper inside .page-actions so deck toolbar buttons sit alongside other
+   page-actions children without an extra flex box messing up wrapping. */
+.page-actions-deck { display: contents; }
+
+/* ── Mobile refinements for the deck ───────────────────────────────────── */
+@media (max-width: 780px) {
+  .deck-edit-grid {
+    grid-template-columns: 1fr;
+  }
+  .deck-edit-grid .deck-slot { grid-column: span 1 !important; }
+  /* Span chips overflow horizontally rather than wrap; keep grip + hide visible. */
+  .edit-spans { overflow-x: auto; max-width: 60vw; }
+  .deck-thumb { height: auto; min-height: 80px; }
+}
+@media (max-width: 640px) {
+  .deck-edit-grid { gap: 10px; }
+  .deck-tray { padding: 14px; }
+  .deck-tray-chips { gap: 6px; }
+  .deck-chip { font-size: 11px; height: 30px; }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * STICKY PAGE HEAD  —  keeps KPIs scannable on long pages
+ * ════════════════════════════════════════════════════════════════════════════ */
+.page-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  padding: var(--gap) 0 10px;
+  margin: calc(-1 * var(--gap)) 0 var(--gap);
+  border-bottom: 1px solid transparent;
+  transition: border-color .12s, box-shadow .12s;
+}
+.page-head.is-stuck {
+  border-bottom-color: var(--border);
+  box-shadow: 0 1px 0 var(--bg), 0 4px 12px rgba(15,20,25,.04);
+}
+[data-theme="dark"] .page-head.is-stuck {
+  box-shadow: 0 1px 0 var(--bg), 0 4px 12px rgba(0,0,0,.3);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * TOPBAR QUICK TOGGLES  —  accent picker + density toggle
+ * ════════════════════════════════════════════════════════════════════════════ */
+.accent-picker {
+  position: relative;
+  display: inline-block;
+}
+.accent-picker-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  display: none;
+  gap: 6px;
+  z-index: 100;
+  box-shadow: var(--shadow-md);
+}
+.accent-picker.open .accent-picker-pop { display: flex; }
+.accent-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  background: var(--swatch);
+  transition: transform .1s, border-color .1s;
+}
+.accent-swatch:hover { transform: scale(1.1); border-color: var(--text-3); }
+.accent-swatch.active { border-color: var(--text); }
+.accent-swatch[data-accent="cyan"]   { --swatch: #0891b2; }
+.accent-swatch[data-accent="amber"]  { --swatch: #d97706; }
+.accent-swatch[data-accent="green"]  { --swatch: #16a34a; }
+.accent-swatch[data-accent="violet"] { --swatch: #7c3aed; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * MOBILE POLISH  —  bottomnav, topbar density, page-actions wrap
+ * ════════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 780px) {
+  .page-head { padding-top: 10px; flex-direction: column; align-items: stretch; }
+  .page-head > div:first-child { width: 100%; }
+  .page-actions { width: 100%; justify-content: flex-start; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .page-actions::-webkit-scrollbar { height: 4px; }
+  .page-actions .btn, .page-actions .btn-mini { flex-shrink: 0; }
+  /* Bigger bottom-nav hit targets */
+  .bnav { min-height: 56px; padding: 6px 4px; }
+  .bnav span:not([data-lucide]):not([data-icon]) { font-size: 10px; }
+}
+@media (max-width: 640px) {
+  .page-title { font-size: 18px; }
+  /* Tighten KPI tiles on narrow screens */
+  .kpi { padding: 12px; }
+  .kpi-v { font-size: 22px; }
+}

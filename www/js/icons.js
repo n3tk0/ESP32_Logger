@@ -157,7 +157,49 @@
     "layers":
       '<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"></path>' +
       '<path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"></path>' +
-      '<path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"></path>'
+      '<path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"></path>',
+
+    /* ── Editable-deck + topbar (Claude Design phase 6 / handoff) ─────── */
+    "grip-vertical":
+      '<circle cx="9" cy="5" r="1"></circle>' +
+      '<circle cx="9" cy="12" r="1"></circle>' +
+      '<circle cx="9" cy="19" r="1"></circle>' +
+      '<circle cx="15" cy="5" r="1"></circle>' +
+      '<circle cx="15" cy="12" r="1"></circle>' +
+      '<circle cx="15" cy="19" r="1"></circle>',
+    "eye-off":
+      '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"></path>' +
+      '<path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"></path>' +
+      '<path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"></path>' +
+      '<line x1="2" x2="22" y1="2" y2="22"></line>',
+    "sliders-horizontal":
+      '<line x1="21" x2="14" y1="4" y2="4"></line>' +
+      '<line x1="10" x2="3" y1="4" y2="4"></line>' +
+      '<line x1="21" x2="12" y1="12" y2="12"></line>' +
+      '<line x1="8" x2="3" y1="12" y2="12"></line>' +
+      '<line x1="21" x2="16" y1="20" y2="20"></line>' +
+      '<line x1="12" x2="3" y1="20" y2="20"></line>' +
+      '<line x1="14" x2="14" y1="2" y2="6"></line>' +
+      '<line x1="8" x2="8" y1="10" y2="14"></line>' +
+      '<line x1="16" x2="16" y1="18" y2="22"></line>',
+    "rows-3":
+      '<rect width="18" height="18" x="3" y="3" rx="2"></rect>' +
+      '<path d="M21 9H3"></path>' +
+      '<path d="M21 15H3"></path>',
+    "layout-grid":
+      '<rect width="7" height="7" x="3" y="3" rx="1"></rect>' +
+      '<rect width="7" height="7" x="14" y="3" rx="1"></rect>' +
+      '<rect width="7" height="7" x="14" y="14" rx="1"></rect>' +
+      '<rect width="7" height="7" x="3" y="14" rx="1"></rect>',
+    "bell-ring":
+      '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path>' +
+      '<path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path>' +
+      '<path d="M4 2C2.8 3.7 2 5.7 2 8"></path>' +
+      '<path d="M22 8c0-2.3-.8-4.3-2-6"></path>',
+    "book-text":
+      '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path>' +
+      '<path d="M8 7h6"></path>' +
+      '<path d="M8 11h8"></path>'
   };
 
   function svg(name) {

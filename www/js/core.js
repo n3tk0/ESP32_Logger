@@ -415,6 +415,127 @@ function quickThemeToggle() {
   _themeApplyOverride(next);
 }
 
+// ── Compact-density toggle (topbar) ────────────────────────────────────────
+// Cycles between comfortable (default) and compact via [data-density] on
+// <html>.  Mirrors the theme-toggle pattern; persists to localStorage so
+// the choice survives a reload.
+function quickDensityToggle() {
+  var root = document.documentElement;
+  var curr = root.getAttribute("data-density") || "comfortable";
+  var next = curr === "compact" ? "comfortable" : "compact";
+  root.setAttribute("data-density", next);
+  try { localStorage.setItem("density", next); } catch (e) {}
+  _densitySyncBtn(next);
+}
+function _densitySyncBtn(d) {
+  var btn = document.getElementById("densityToggleBtn");
+  if (!btn) return;
+  btn.title = "Density: " + d + " (click to switch)";
+  btn.setAttribute("aria-label", btn.title);
+}
+
+// ── Accent color picker (topbar) ───────────────────────────────────────────
+// One-click popup with four swatches.  Sets [data-accent] on <html>; the
+// CSS in colors_and_type already handles the rest.
+function accentPickerToggle() {
+  var picker = document.getElementById("accentPicker");
+  if (!picker) return;
+  var open = picker.classList.toggle("open");
+  var btn = document.getElementById("accentPickerBtn");
+  if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+function setAccent(name) {
+  var allowed = { cyan:1, amber:1, green:1, violet:1 };
+  if (!allowed[name]) return;
+  document.documentElement.setAttribute("data-accent", name);
+  try { localStorage.setItem("accent", name); } catch (e) {}
+  // Mark the active swatch
+  var pop = document.querySelectorAll(".accent-swatch");
+  for (var i = 0; i < pop.length; i++) {
+    pop[i].classList.toggle("active", pop[i].dataset.accent === name);
+  }
+  // Close the popup after picking
+  var picker = document.getElementById("accentPicker");
+  if (picker) picker.classList.remove("open");
+  var btn = document.getElementById("accentPickerBtn");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+}
+
+// Close accent picker on outside click
+document.addEventListener("click", function (e) {
+  var picker = document.getElementById("accentPicker");
+  if (!picker || !picker.classList.contains("open")) return;
+  if (picker.contains(e.target)) return;
+  picker.classList.remove("open");
+  var btn = document.getElementById("accentPickerBtn");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+});
+
+// Restore persisted density + accent on script load (DOM is ready — this
+// script is at the bottom of <body>).  theme-boot.js handles theme; these
+// two are not visually-critical pre-paint so it's safe to apply here.
+(function _restoreDensityAndAccent() {
+  try {
+    var d = localStorage.getItem("density");
+    if (d === "compact" || d === "comfortable") {
+      document.documentElement.setAttribute("data-density", d);
+    }
+    var a = localStorage.getItem("accent");
+    if (a && /^(cyan|amber|green|violet)$/.test(a)) {
+      document.documentElement.setAttribute("data-accent", a);
+    }
+  } catch (e) {}
+  // Sync UI affordances after DOM is parsed
+  function sync() {
+    _densitySyncBtn(document.documentElement.getAttribute("data-density") || "comfortable");
+    var acc = document.documentElement.getAttribute("data-accent") || "cyan";
+    var swatches = document.querySelectorAll(".accent-swatch");
+    for (var i = 0; i < swatches.length; i++) {
+      swatches[i].classList.toggle("active", swatches[i].dataset.accent === acc);
+    }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", sync);
+  } else {
+    sync();
+  }
+})();
+
+// ── Sticky page-head shadow observer ───────────────────────────────────────
+// IntersectionObserver detects when the page-head is "stuck" (its top has
+// scrolled past the main container's top edge) and adds .is-stuck so the
+// CSS can paint a divider + soft shadow.  Avoids the scroll-handler tax.
+(function _stickyPageHead() {
+  if (typeof IntersectionObserver === "undefined") return;
+  // Re-attach observers when nav changes the active page.  We don't know
+  // the exact moment .page-head is mounted, so use a MutationObserver on
+  // <main> as a low-cost proxy.
+  var main = document.getElementById("main-content") || document.querySelector(".main");
+  if (!main) return;
+  var io = null;
+  function attach() {
+    if (io) try { io.disconnect(); } catch (e) {}
+    var heads = document.querySelectorAll(".page.active .page-head");
+    if (!heads.length) return;
+    io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        // When the sentinel above the page-head is no longer intersecting,
+        // we're scrolled past it and the head is "stuck".
+        e.target.classList.toggle("is-stuck", e.intersectionRatio < 1);
+      });
+    }, { threshold: [1], root: main });
+    Array.prototype.forEach.call(heads, function (h) { io.observe(h); });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", attach);
+  } else {
+    attach();
+  }
+  // Re-attach when pages swap active class
+  var mo = new MutationObserver(function () { attach(); });
+  mo.observe(main, { attributes: true, subtree: true, attributeFilter: ["class"] });
+})();
+
 // Collapsible sidebar rail (Claude Design phase 4a).  Toggles 60px rail
 // width on desktop only; mobile ignores the class since the bottom-nav
 // handles navigation there.  Preference persists across reloads.
@@ -1204,6 +1325,9 @@ function confirmRestart() {
 registerHandlers({
   navPage: navPage,
   quickThemeToggle: quickThemeToggle,
+  quickDensityToggle: quickDensityToggle,
+  accentPickerToggle: accentPickerToggle,
+  setAccent: setAccent,
   sidebarRailToggle: sidebarRailToggle,
   skipToContent: skipToContent,
   showPopup: showPopup,
