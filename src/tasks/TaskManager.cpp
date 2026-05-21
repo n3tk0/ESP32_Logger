@@ -54,6 +54,34 @@ static void _cleanupPartialInit() {
     TaskManager::running = false;
 }
 
+// PR #105 follow-up: factored out so /api/config/platform can re-apply SDS011
+// humidity correction live.  StorageTask polls *p (= storageParam) every
+// aggregation tick (see StorageTask.cpp:87-94) and re-arms its LiveAggregator
+// from p->humidityCorrection*, so mutating storageParam here is enough — no
+// task restart required.  Caller must hold configMutex.
+void TaskManager::refreshStorageFromPlatform(fs::FS& fs) {
+    storageParam.humidityCorrectionEnabled = false;
+    storageParam.humidityCorrectionKappa   = 0.35f;   // codebase default
+
+    File cfgFile = fs.open("/platform_config.json", FILE_READ);
+    if (!cfgFile) return;
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, cfgFile);
+    cfgFile.close();
+    if (err) return;
+
+    JsonArrayConst sensors = doc["sensors"].as<JsonArrayConst>();
+    for (JsonObjectConst sensor : sensors) {
+        if (strcmp(sensor["type"] | "", "sds011") == 0) {
+            storageParam.humidityCorrectionEnabled =
+                sensor["humidityCorrectionEnabled"] | false;
+            float k = sensor["humidityCorrectionKappa"] | 0.35f;
+            storageParam.humidityCorrectionKappa = (k > 0.0f) ? k : 0.35f;
+            break;
+        }
+    }
+}
+
 bool TaskManager::init(fs::FS& fs) {
     // AUDIT 2.3: do NOT set running=true here. Tasks + queues + mutexes are
     // built below; if any step fails, half-built state would have left
@@ -98,7 +126,10 @@ bool TaskManager::init(fs::FS& fs) {
         return false;
     }
 
-    // Parse storage config from platform_config.json (#8)
+    // Parse storage config from platform_config.json (#8).  Storage knobs
+    // (log_dir / max_size_kb / rotate_daily) are read-once at boot; SDS011
+    // humidity correction is refactored into refreshStorageFromPlatform()
+    // so /api/config/platform can re-apply it live.
     {
         File cfgFile = fs.open("/platform_config.json", FILE_READ);
         if (cfgFile) {
@@ -115,6 +146,7 @@ bool TaskManager::init(fs::FS& fs) {
             cfgFile.close();
         }
     }
+    refreshStorageFromPlatform(fs);
     storageParam.fs     = &fs;
     storageParam.logDir = s_logDir;
 
@@ -122,9 +154,6 @@ bool TaskManager::init(fs::FS& fs) {
     storageParam.csvLoggingEnabled         = config.logger.csvLoggingEnabled;
     storageParam.aggregationIntervalSec    = config.logger.aggregationIntervalSec
                                                 ? config.logger.aggregationIntervalSec : 60;
-    storageParam.humidityCorrectionEnabled = config.logger.humidityCorrectionEnabled;
-    storageParam.humidityCorrectionKappa   = (config.logger.humidityCorrectionKappa > 0.0f)
-                                                ? config.logger.humidityCorrectionKappa : 0.35f;
 
     // FlowRunLogger: per-fill flowmeter logging.  Active in PLATFORM_HYBRID
     // only — PLATFORM_LEGACY uses DataLogger.cpp's run logger and

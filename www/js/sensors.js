@@ -898,13 +898,24 @@ function clEditSensor(idx) {
       html += '<div class="field"><label class="field-label">Working Period (minutes)</label>' +
               '<input type="number" min="0" max="30" name="work_period_min" class="input" value="' + (s.work_period_min !== undefined ? s.work_period_min : 1) + '">' +
               '<p class="hint">0 = Continuous. 1-30 = Sensor sleeps and wakes automatically.</p></div>';
+      html += '<div class="field" style="margin-top:10px"><label style="display:flex;align-items:center;gap:6px;cursor:pointer">' +
+              '<input type="checkbox" name="humidityCorrectionEnabled"' + (s.humidityCorrectionEnabled ? ' checked' : '') + '> Enable Humidity Correction</label>' +
+              '<p class="hint">Requires a humidity sensor in the stream.</p></div>';
+      html += '<div class="field"><label class="field-label">Correction &kappa; (Köhler)</label>' +
+              '<input type="number" step="0.05" min="0" max="2" name="humidityCorrectionKappa" class="input" value="' + (s.humidityCorrectionKappa !== undefined ? s.humidityCorrectionKappa : 0.35) + '"></div>';
     }
   } else if (s.interface === "pulse") {
     html += '<div class="field"><label class="field-label">Pin</label><input type="number" name="pin" class="input" value="' + (s.pin !== undefined ? s.pin : 9) + '"></div>';
+    if (s.type === "yfs201") {
+      html += '<div class="form-grid">' +
+              '<div class="field"><label class="field-label">Pulses/Liter</label><input type="number" step="0.1" name="pulses_per_liter" class="input" value="' + (s.pulses_per_liter !== undefined ? s.pulses_per_liter : 450) + '"></div>' +
+              '<div class="field"><label class="field-label">Multiplier</label><input type="number" step="0.1" name="calibration" class="input" value="' + (s.calibration !== undefined ? s.calibration : 1.0) + '"></div>' +
+              '</div>';
+    }
   }
 
   // Support for custom JSON fields (advanced)
-  var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "uart_rx", "uart_tx", "baud", "pin", "work_period_min"];
+  var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "uart_rx", "uart_tx", "baud", "pin", "work_period_min", "pulses_per_liter", "calibration", "humidityCorrectionEnabled", "humidityCorrectionKappa"];
   var advObj = {};
   for (var k in s) {
     if (stdKeys.indexOf(k) === -1) advObj[k] = s[k];
@@ -944,9 +955,15 @@ function clSaveEditedSensor() {
     s.baud = parseInt(fd.get("baud") || 9600, 10);
     if (s.type === "sds011") {
       s.work_period_min = parseInt(fd.get("work_period_min") || 1, 10);
+      s.humidityCorrectionEnabled = fd.get("humidityCorrectionEnabled") === "on";
+      s.humidityCorrectionKappa = parseFloat(fd.get("humidityCorrectionKappa") || 0.35);
     }
   } else if (s.interface === "pulse") {
     s.pin = parseInt(fd.get("pin") || 9, 10);
+    if (s.type === "yfs201") {
+      s.pulses_per_liter = parseFloat(fd.get("pulses_per_liter") || 450.0);
+      s.calibration = parseFloat(fd.get("calibration") || 1.0);
+    }
   }
 
   var adv = fd.get("advanced");

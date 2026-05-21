@@ -197,8 +197,9 @@ function sfInit() {
       var fm = d.flowMeter || {};
       setVal("sf-ppl", fm.pulsesPerLiter);
       setVal("sf-cal", fm.calibrationMultiplier);
-      setVal("sf-win", fm.monitoringWindowSecs);
-      setVal("sf-fl", fm.firstLoopMonitoringWindowSecs);
+      // monitoringWindowSecs / firstLoopMonitoringWindowSecs removed from
+      // backend during WebUI consolidation. The Timing card was also
+      // removed from settings_flowmeter.html.
       setChk("sf-test", fm.testMode);
       setVal("sf-blink", fm.blinkDuration);
       fetchWithTimeout("/api/status", {}, 15000)
@@ -1063,10 +1064,9 @@ function dlInit() {
             lg.csvLoggingEnabled === undefined ? true : lg.csvLoggingEnabled);
           setVal("lg-aggSec",
             lg.aggregationIntervalSec !== undefined ? lg.aggregationIntervalSec : 60);
-          setChk("lg-humCorr",
-            lg.humidityCorrectionEnabled || false);
-          setVal("lg-kappa",
-            lg.humidityCorrectionKappa !== undefined ? lg.humidityCorrectionKappa : 0.35);
+          // humidityCorrectionEnabled / humidityCorrectionKappa moved to the
+          // per-sensor SDS011 card (www/js/sensors.js); the lg-humCorr /
+          // lg-kappa inputs no longer exist on the datalog page.
         });
     });
   dlLoadFiles();

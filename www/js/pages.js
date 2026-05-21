@@ -433,106 +433,117 @@ function dbProcessData(data) {
     tFF = 0,
     tPF = 0;
 
-  lines.forEach(function (line) {
-    var p = line.split("|");
-    if (p.length < 2) return;
-    var dateStr = "",
-      timeStr = "",
-      endStr = "",
-      boot = "",
-      reason = "",
-      vol = 0,
-      ff = 0,
-      pf = 0,
-      i = 0;
+  var CHUNK_SIZE = 500;
+  var idx = 0;
 
-    // Auto-detect date format (DD/MM/YYYY ┬╖ DD.MM.YYYY ┬╖ YYYY-MM-DD)
-    if (
-      p[0].match(/\d{2}[\/\.\-]\d{2}[\/\.\-]\d{4}/) ||
-      p[0].match(/\d{4}\-\d{2}\-\d{2}/)
-    ) {
-      dateStr = p[0];
-      i = 1;
-    }
-    if (p[i] && p[i].indexOf(":") >= 0) {
-      timeStr = p[i];
-      i++;
-    }
-    if (p[i] && (p[i].indexOf(":") >= 0 || p[i].match(/^\d+s$/))) {
-      endStr = p[i];
-      i++;
-    }
-    if (p[i] && p[i].indexOf("#:") === 0) {
-      boot = p[i].substring(2);
-      i++;
-    }
-    if (
-      p[i] &&
-      (p[i].indexOf("FF") >= 0 || p[i].indexOf("PF") >= 0 || p[i] === "IDLE")
-    ) {
-      reason = p[i];
-      i++;
-    }
-    if (p[i]) {
-      var vs = p[i].replace("L:", "").replace(",", ".");
-      vol = parseFloat(vs) || 0;
-      i++;
-    }
-    if (p[i] && p[i].indexOf("FF") === 0) {
-      ff = parseInt(p[i].replace("FF", "")) || 0;
-      i++;
-    }
-    if (p[i] && p[i].indexOf("PF") === 0) {
-      pf = parseInt(p[i].replace("PF", "")) || 0;
+  function processChunk() {
+    var end = Math.min(idx + CHUNK_SIZE, lines.length);
+    for (; idx < end; idx++) {
+      var p = lines[idx].split("|");
+      if (p.length < 2) continue;
+      var dateStr = "",
+        timeStr = "",
+        endStr = "",
+        boot = "",
+        reason = "",
+        vol = 0,
+        ff = 0,
+        pf = 0,
+        i = 0;
+
+      // Auto-detect date format (DD/MM/YYYY ┬╖ DD.MM.YYYY ┬╖ YYYY-MM-DD)
+      if (
+        p[0].match(/\d{2}[\/\.\-]\d{2}[\/\.\-]\d{4}/) ||
+        p[0].match(/\d{4}\-\d{2}\-\d{2}/)
+      ) {
+        dateStr = p[0];
+        i = 1;
+      }
+      if (p[i] && p[i].indexOf(":") >= 0) {
+        timeStr = p[i];
+        i++;
+      }
+      if (p[i] && (p[i].indexOf(":") >= 0 || p[i].match(/^\d+s$/))) {
+        endStr = p[i];
+        i++;
+      }
+      if (p[i] && p[i].indexOf("#:") === 0) {
+        boot = p[i].substring(2);
+        i++;
+      }
+      if (
+        p[i] &&
+        (p[i].indexOf("FF") >= 0 || p[i].indexOf("PF") >= 0 || p[i] === "IDLE")
+      ) {
+        reason = p[i];
+        i++;
+      }
+      if (p[i]) {
+        var vs = p[i].replace("L:", "").replace(",", ".");
+        vol = parseFloat(vs) || 0;
+        i++;
+      }
+      if (p[i] && p[i].indexOf("FF") === 0) {
+        ff = parseInt(p[i].replace("FF", "")) || 0;
+        i++;
+      }
+      if (p[i] && p[i].indexOf("PF") === 0) {
+        pf = parseInt(p[i].replace("PF", "")) || 0;
+      }
+
+      var entryDate = "";
+      if (dateStr) {
+        var m;
+        if ((m = dateStr.match(/(\d{2})[\/\.](\d{2})[\/\.](\d{4})/)))
+          entryDate = m[3] + "-" + m[2] + "-" + m[1];
+        else if ((m = dateStr.match(/(\d{4})\-(\d{2})\-(\d{2})/)))
+          entryDate = m[1] + "-" + m[2] + "-" + m[3];
+      }
+
+      // Filters — exact logic from original .ino
+      if (startVal && entryDate && entryDate < startVal) continue;
+      if (endVal && entryDate && entryDate > endVal) continue;
+      if (
+        filterType === "BTN" &&
+        reason.indexOf("FF") < 0 &&
+        reason.indexOf("PF") < 0
+      )
+        continue;
+      if (filterType === "FF" && reason.indexOf("FF") < 0) continue;
+      if (filterType === "PF" && reason.indexOf("PF") < 0) continue;
+      if (pressType === "EXTRA" && ff === 0 && pf === 0) continue;
+      if (pressType === "NONE" && (ff > 0 || pf > 0)) continue;
+      if (excZ && vol === 0) continue;
+
+      tFF += ff;
+      tPF += pf;
+      tVol += vol;
+      var fullTime = timeStr + (endStr ? "-" + endStr : "");
+      filtered.push({
+        date: dateStr || "N/A",
+        time: timeStr,
+        fullTime: fullTime,
+        boot: boot,
+        vol: vol,
+        reason: reason,
+        ff: ff,
+        pf: pf,
+      });
     }
 
-    var entryDate = "";
-    if (dateStr) {
-      var m;
-      if ((m = dateStr.match(/(\d{2})[\/\.](\d{2})[\/\.](\d{4})/)))
-        entryDate = m[3] + "-" + m[2] + "-" + m[1];
-      else if ((m = dateStr.match(/(\d{4})\-(\d{2})\-(\d{2})/)))
-        entryDate = m[1] + "-" + m[2] + "-" + m[3];
+    if (idx < lines.length) {
+      setTimeout(processChunk, 0);
+    } else {
+      dbFilteredData = filtered;
+      setEl("db-totalVol", tVol.toFixed(2) + " L");
+      setEl("db-eventCount", filtered.length);
+      setEl("db-totalFF", tFF);
+      setEl("db-totalPF", tPF);
+      dbRenderChart(filtered);
     }
+  }
 
-    // Filters — exact logic from original .ino
-    if (startVal && entryDate && entryDate < startVal) return;
-    if (endVal && entryDate && entryDate > endVal) return;
-    if (
-      filterType === "BTN" &&
-      reason.indexOf("FF") < 0 &&
-      reason.indexOf("PF") < 0
-    )
-      return;
-    if (filterType === "FF" && reason.indexOf("FF") < 0) return;
-    if (filterType === "PF" && reason.indexOf("PF") < 0) return;
-    if (pressType === "EXTRA" && ff === 0 && pf === 0) return;
-    if (pressType === "NONE" && (ff > 0 || pf > 0)) return;
-    if (excZ && vol === 0) return;
-
-    tFF += ff;
-    tPF += pf;
-    tVol += vol;
-    var fullTime = timeStr + (endStr ? "-" + endStr : "");
-    filtered.push({
-      date: dateStr || "N/A",
-      time: timeStr,
-      fullTime: fullTime,
-      boot: boot,
-      vol: vol,
-      reason: reason,
-      ff: ff,
-      pf: pf,
-    });
-  });
-
-  dbFilteredData = filtered;
-  // Element IDs match original: totalVol, eventCount, totalFF, totalPF
-  setEl("db-totalVol", tVol.toFixed(2) + " L");
-  setEl("db-eventCount", filtered.length);
-  setEl("db-totalFF", tFF);
-  setEl("db-totalPF", tPF);
-  dbRenderChart(filtered);
+  processChunk();
 }
 
 // uPlot port of the legacy bar chart.  uPlot is a time-series engine, so
@@ -690,7 +701,7 @@ function filesInit() {
   var hw = CFG.hardware || {};
   currentFilesStorage = hw.defaultStorageView === 1 ? "sdcard" : "internal";
   var list = document.getElementById("list");
-  if (list && list.innerHTML.trim().length === 0) list.innerHTML = "<div class='list-item text-muted'>Loading…</div>";
+  if (list && list.innerHTML.trim().length === 0) list.innerHTML = "<div style='padding:14px;color:var(--text-3)'>Loading…</div>";
   filesRender();
 }
 
@@ -704,6 +715,13 @@ function filesRender() {
       '<button data-click="filesSetStorage" data-args=\'["sdcard"]\' class="' +
       (currentFilesStorage === "sdcard" ? "active" : "") +
       '"><span data-icon="hard-drive"></span> SD Card</button>';
+  }
+
+  var list = document.getElementById("list");
+  if (list) {
+    list.style.opacity = "0.5";
+    list.style.pointerEvents = "none";
+    list.style.transition = "opacity 0.15s ease";
   }
 
   fetch(
@@ -743,6 +761,8 @@ function filesRender() {
 
       var list = document.getElementById("list");
       if (!list) return;
+      list.style.opacity = "1";
+      list.style.pointerEvents = "auto";
       var files = d.files || [];
       if (!files.length) {
         list.innerHTML = "";
@@ -808,9 +828,12 @@ function filesRender() {
     })
     .catch(function (e) {
       var list = document.getElementById("list");
-      if (list)
+      if (list) {
+        list.style.opacity = "1";
+        list.style.pointerEvents = "auto";
         list.innerHTML =
           '<div style="padding:14px;color:var(--err)">Error: ' + esc(String(e)) + "</div>";
+      }
     });
 }
 
@@ -972,15 +995,11 @@ function liveInit() {
 
   var hint = document.getElementById("stateHint");
   if (hint) {
-    var fm = CFG.flowMeter || {};
-    var fl = fm.firstLoopMonitoringWindowSecs || "?";
-    var win = fm.monitoringWindowSecs || "?";
+    // monitoringWindowSecs / firstLoopMonitoringWindowSecs were removed when
+    // the flowmeter UI was consolidated into the per-sensor cards. The
+    // generic state-machine outline still applies to legacy mode.
     hint.textContent =
-      "🔧 IDLE → 🟡 WAIT_FLOW (" +
-      fl +
-      "s) → 🟢 MONITORING (" +
-      win +
-      "s idle) → Logging";
+      "🔧 IDLE → 🟡 WAIT_FLOW → 🟢 MONITORING → Logging";
   }
 
   // Prefer Server-Sent Events; fall back to polling on error / unsupported.

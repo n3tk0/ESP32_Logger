@@ -321,6 +321,10 @@ static void handleConfigPlatform(AsyncWebServerRequest* req) {
     if (configMutex && xSemaphoreTake(configMutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
         bool sensorsOk   = sensorManager.reloadConfig(*activeFS);
         bool exportersOk = exportManager.reloadConfig(*activeFS);
+        // Propagate StorageTask-visible knobs (SDS011 humidity correction).
+        // StorageTask re-reads storageParam every aggregation tick, so this
+        // is enough to apply changes live without a reboot.
+        TaskManager::refreshStorageFromPlatform(*activeFS);
         xSemaphoreGive(configMutex);
         if (sensorsOk && exportersOk) req->send(200, "application/json", "{\"ok\":true}");
         else                          req->send(500, "application/json", "{\"ok\":false,\"error\":\"reload failed\"}");

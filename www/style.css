@@ -361,6 +361,7 @@ button, a, [role="button"] { min-height: 24px; }
 @media (max-width:600px) { .form-grid { grid-template-columns:1fr; } }
 .color-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
 @media (max-width:600px) { .color-grid { grid-template-columns:repeat(2,1fr); } }
+@media (max-width:400px) { .color-grid { grid-template-columns:1fr; } }
 .field { display:flex; flex-direction:column; gap:5px; }
 .field label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--text-3); }
 .field .hint { font-size:11px; color:var(--text-3); }

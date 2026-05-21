@@ -200,24 +200,6 @@
                 min="5" max="3600" step="5" value="60">
               <p class="hint">Default 60 s. Range 5–3600 s.</p>
             </div>
-            <div class="field">
-              <label class="field-label">
-                Humidity-correction κ (Köhler)
-                <span class="help-tip" title="κ-Köhler correction factor for SDS011 PM2.5/PM10 readings: corrected = raw / (1 + κ·RH/(100−RH)). Typical κ ≈ 0.35.">ℹ️</span>
-              </label>
-              <input type="number" name="humidityCorrectionKappa" id="lg-kappa" class="input"
-                min="0" max="2" step="0.05" value="0.35">
-              <p class="hint">Only applied when humidity correction is enabled.</p>
-            </div>
-          </div>
-          <div class="field">
-            <label class="field-label">
-              <input type="checkbox" name="humidityCorrectionEnabled" id="lg-humCorr" value="1">
-              Enable SDS011 humidity correction
-            </label>
-            <p class="hint">Requires a BME280 (or compatible) humidity sensor in the
-              same readings stream. Correction is applied at write-time only — raw
-              readings are unchanged.</p>
           </div>
         </div>
       </div>
