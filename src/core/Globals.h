@@ -165,8 +165,8 @@ struct PendingRtcSet {
     uint16_t year;
     uint8_t  month, day, hour, minute;
 };
-extern volatile bool       g_pendingRtcSet;
-extern volatile PendingRtcSet g_pendingRtcTime;
+extern volatile bool  g_pendingRtcSet;
+extern PendingRtcSet  g_pendingRtcTime;  // protected by g_pendingRtcSet flag
 
 // ============================================================================
 // RESTART CIRCUIT BREAKER (Pillar 3.7 / AUDIT FC.4)
