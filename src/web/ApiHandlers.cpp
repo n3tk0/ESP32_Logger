@@ -5,6 +5,7 @@
 #include <time.h>                      // /api/backup created_at (Pass 5 5.7)
 #include <freertos/task.h>
 #include <new>                            // std::nothrow
+#include <atomic>
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/AggregationEngine.h"
 #include "../sensors/SensorManager.h"
@@ -706,10 +707,14 @@ static void handleApiModuleRestart(AsyncWebServerRequest* req, const String& id)
 // ---------------------------------------------------------------------------
 
 // ── WiFi test state machine ─────────────────────────────────────────────────
+// g_wtState written from wifiTestTaskFn (separate FreeRTOS task, potentially
+// on the other core) and read/consumed from AsyncTCP worker — requires
+// release/acquire ordering so ip/rssi writes are visible to the reader before
+// it observes WT_SUCCESS.  (AUDIT 3.11)
 enum WifiTestState : uint8_t {
     WT_IDLE = 0, WT_RUNNING, WT_SUCCESS, WT_FAILED
 };
-static volatile WifiTestState g_wtState = WT_IDLE;
+static std::atomic<WifiTestState> g_wtState{WT_IDLE};
 static char     g_wtSsid[33]        = "";
 static char     g_wtPassword[65]    = "";
 static int32_t  g_wtRssi            = 0;
@@ -733,10 +738,12 @@ static void wifiTestTaskFn(void* /*arg*/) {
     if (WiFi.status() == WL_CONNECTED) {
         g_wtRssi = WiFi.RSSI();
         strlcpy(g_wtIp, WiFi.localIP().toString().c_str(), sizeof(g_wtIp));
-        g_wtState = WT_SUCCESS;
+        // release-store: ip/rssi writes above are visible to any thread that
+        // observes WT_SUCCESS via an acquire-load.
+        g_wtState.store(WT_SUCCESS, std::memory_order_release);
     } else {
         strlcpy(g_wtError, "timeout or auth failure", sizeof(g_wtError));
-        g_wtState = WT_FAILED;
+        g_wtState.store(WT_FAILED, std::memory_order_release);
     }
 
     // Tear down the probe connection but keep stored NVS creds intact —
@@ -808,7 +815,7 @@ static void handleApiWifiTest(AsyncWebServerRequest* req,
                   "{\"ok\":false,\"error\":\"missing ssid\"}");
         return;
     }
-    if (g_wtState == WT_RUNNING) {
+    if (g_wtState.load(std::memory_order_relaxed) == WT_RUNNING) {
         req->send(409, "application/json",
                   "{\"ok\":false,\"error\":\"test already running\"}");
         return;
@@ -819,12 +826,14 @@ static void handleApiWifiTest(AsyncWebServerRequest* req,
     g_wtRssi  = 0;
     g_wtIp[0] = '\0';
     g_wtError[0] = '\0';
-    g_wtState = WT_RUNNING;
+    // Task creation provides the barrier that makes ssid/pw visible to the
+    // newly spawned task; relaxed store is sufficient here.
+    g_wtState.store(WT_RUNNING, std::memory_order_relaxed);
 
     BaseType_t rc = xTaskCreate(wifiTestTaskFn, "wifiTest", 4096,
                                  nullptr, 1, nullptr);
     if (rc != pdPASS) {
-        g_wtState = WT_IDLE;
+        g_wtState.store(WT_IDLE, std::memory_order_relaxed);
         req->send(500, "application/json",
                   "{\"ok\":false,\"error\":\"cannot spawn task\"}");
         return;
@@ -840,7 +849,9 @@ static void handleApiWifiTest(AsyncWebServerRequest* req,
 static void handleApiWifiTestPoll(AsyncWebServerRequest* req) {
     JsonDocument doc;
     doc["ok"] = true;
-    switch (g_wtState) {
+    // acquire-load: synchronises-with the release-store in wifiTestTaskFn so
+    // g_wtRssi / g_wtIp / g_wtError are visible when SUCCESS/FAILED is seen.
+    switch (g_wtState.load(std::memory_order_acquire)) {
         case WT_RUNNING:
             doc["state"] = "running";
             break;
@@ -848,12 +859,12 @@ static void handleApiWifiTestPoll(AsyncWebServerRequest* req) {
             doc["state"] = "success";
             doc["rssi"]  = g_wtRssi;
             doc["ip"]    = g_wtIp;
-            g_wtState = WT_IDLE;    // consume
+            g_wtState.store(WT_IDLE, std::memory_order_relaxed);  // consume
             break;
         case WT_FAILED:
             doc["state"] = "failed";
             doc["error"] = g_wtError;
-            g_wtState = WT_IDLE;    // consume
+            g_wtState.store(WT_IDLE, std::memory_order_relaxed);  // consume
             break;
         case WT_IDLE:
         default:
