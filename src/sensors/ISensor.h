@@ -91,7 +91,13 @@ public:
 
     // Sensor instance id (set by SensorManager from JSON "id" field)
     const char* getId() const { return _id; }
-    void        setId(const char* id) { strncpy(_id, id, sizeof(_id)-1); }
+    void        setId(const char* id) {
+        // R28 / AUDIT 15.2: explicit terminator. The default-init relies on
+        // `_id[17] = {}` zeroing the buffer; if a subclass ever adds a ctor
+        // that skips that brace-init, strncpy alone leaves _id unterminated.
+        strncpy(_id, id, sizeof(_id)-1);
+        _id[sizeof(_id)-1] = '\0';
+    }
 
     // Last successful read timestamp (Unix epoch)
     uint32_t    lastReadTs()               const { return _lastReadTs; }

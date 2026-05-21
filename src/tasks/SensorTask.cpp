@@ -9,12 +9,14 @@
 void sensorTaskFunc(void* /*param*/) {
     Serial.println("[SensorTask] started");
 
-    // C1: compute poll interval from sensor config (min 50ms, default 1s)
-    uint32_t pollMs = sensorManager.minReadIntervalMs();
-    if (pollMs < 50) pollMs = 50;
-
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_SENSOR] = millis();   // C4 heartbeat
+
+        // R28 / AUDIT 10.1: re-read poll interval each iteration so
+        // /api/config/platform reloads pick up new sensor intervals without
+        // a reboot. minReadIntervalMs() is an in-memory scan; cheap at 1Hz.
+        uint32_t pollMs = sensorManager.minReadIntervalMs();
+        if (pollMs < 50) pollMs = 50;
 
         // Timestamp priority: hardware RTC → NTP system clock → millis monotonic
         uint32_t ts = 0;

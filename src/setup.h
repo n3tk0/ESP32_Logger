@@ -202,6 +202,18 @@
 #  define STACK_EXPORT_TASK      8192   // WiFi + TLS + JSON serialisation
 #endif
 
+// R28 / AUDIT 5.5: compile-time DRAM budget guard.  ESP32-C3 has 400 KB SRAM
+// total; the task stacks below are allocated from DRAM at task creation.
+// 50 KB is the headroom ceiling we want to keep for heap (JsonDocument,
+// AsyncWebServer connections, sensor buffers).  Tripping this assert means
+// someone bumped a stack — re-budget before merging.
+static_assert(
+    STACK_SENSOR_TASK + STACK_PROCESS_TASK + STACK_SLOW_SENSOR_TASK +
+    STACK_STORAGE_TASK + STACK_EXPORT_TASK < 50000,
+    "Sum of task stack sizes exceeds the 50 KB DRAM budget for ESP32-C3. "
+    "Reduce one of STACK_SENSOR_TASK / STACK_PROCESS_TASK / "
+    "STACK_SLOW_SENSOR_TASK / STACK_STORAGE_TASK / STACK_EXPORT_TASK.");
+
 // Queue depths (items = SensorReading, ~80 bytes each)
 #ifndef QUEUE_SENSOR_DEPTH
 #  define QUEUE_SENSOR_DEPTH  20

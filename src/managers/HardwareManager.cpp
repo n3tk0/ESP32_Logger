@@ -8,6 +8,11 @@
 // R12 / AUDIT 1.5: onFFButton + onPFButton removed.  They were never
 // attachInterrupt'd anywhere; the ffPressed / pfPressed flags they
 // touched were write-only.  Buttons run via polled debounceButton().
+// R28 / AUDIT 8.11: ISR_DEBOUNCE_MICROS=1000 caps pulse rate at ~1 kHz.
+//   YF-S201 (~450 pulses/L) → max measurable ~133 L/min.
+//   YF-S403 (~600 pulses/L) → max measurable ~100 L/min.
+// Residential use is well below these; bump ISR_DEBOUNCE_MICROS in setup.h
+// only if a higher-flow meter (or low-PPL meter) is wired up.
 void IRAM_ATTR onFlowPulse() {
     unsigned long now = micros();
     if (now - lastFlowInterrupt > ISR_DEBOUNCE_MICROS) {

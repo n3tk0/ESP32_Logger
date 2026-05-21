@@ -15,7 +15,13 @@ bool WindSensor::init(JsonObjectConst cfg) {
     _pin            = cfg["pin"]              | -1;  // R11: unset → init refuses
     _pulsesPerRev   = cfg["pulses_per_rev"]   | 1.0f;
     _metersPerRev   = cfg["meters_per_rev"]   | 0.5f;
-    _sampleWindowMs = cfg["sample_window_ms"] | 3000;
+    // R28 / AUDIT 23.4: window default 1000ms (was 3000); decoupled poll
+    // interval lets ops set e.g. 30s schedule + 1s window without starving
+    // SlowSensorTask. Back-compat: omitting poll_interval_ms falls back to
+    // sample_window_ms so existing configs see the same cadence.
+    _sampleWindowMs = cfg["sample_window_ms"] | 1000;
+    _pollIntervalMs = cfg["poll_interval_ms"] | _sampleWindowMs;
+    if (_pollIntervalMs < _sampleWindowMs) _pollIntervalMs = _sampleWindowMs;
     _dirPin         = cfg["dir_pin"]          | -1;
     _dirMinVal      = cfg["dir_min_val"]      | 0;
     _dirMaxVal      = cfg["dir_max_val"]      | 4095;
@@ -39,8 +45,9 @@ bool WindSensor::init(JsonObjectConst cfg) {
         Serial.printf("[Wind] speed pin=%d  dir pin=%d  dir_range=[%d,%d]\n",
                       _pin, _dirPin, _dirMinVal, _dirMaxVal);
     } else {
-        Serial.printf("[Wind] speed pin=%d ppr=%.1f mpr=%.2f window=%ums\n",
-                      _pin, _pulsesPerRev, _metersPerRev, _sampleWindowMs);
+        Serial.printf("[Wind] speed pin=%d ppr=%.1f mpr=%.2f window=%ums poll=%ums\n",
+                      _pin, _pulsesPerRev, _metersPerRev,
+                      _sampleWindowMs, _pollIntervalMs);
     }
     return true;
 }

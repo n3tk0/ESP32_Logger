@@ -1,5 +1,7 @@
 /**************************************************************************************************
- * PROJECT: ESP32 Multi-Sensor Water Usage Logger v5.1.0
+ * PROJECT: ESP32 Multi-Sensor Water Usage Logger
+ *          (version is defined in src/core/Config.h — VERSION_MAJOR/MINOR/PATCH;
+ *           use getVersionString() at runtime, never hard-code here)
  * TARGET:  XIAO ESP32-C3 / ESP32-C3 Super Mini (RISC-V) / generic ESP32
  * AUTHOR:  Petko Georgiev
  *
