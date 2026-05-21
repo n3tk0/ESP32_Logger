@@ -54,8 +54,9 @@ void processingTaskFunc(void* /*param*/) {
             // Still log errors to storage (with q=3) but skip export
         }
 
-        // Write to web ring buffer (short timeout; drop on contention)
-        {
+        // Write to web ring buffer — skip error readings so the dashboard
+        // never mixes bad values with good ones.  (AUDIT 11.3)
+        if (r.quality != QUALITY_ERROR) {
             MutexGuard g(webDataMutex, pdMS_TO_TICKS(5));
             if (g.isLocked()) {
                 webRingBuf.push(r);
@@ -64,10 +65,11 @@ void processingTaskFunc(void* /*param*/) {
             }
         }
 
-        // Alert evaluation — only for plausible readings (QUALITY_ERROR is
-        // already the guard above; evaluate() will still run for warn-quality
-        // readings so borderline values can trigger user-defined thresholds).
-        if (r.quality != QUALITY_ERROR) {
+        // Alert evaluation — skip when timestamp has no real wall-clock value
+        // (ts < 1e9 means we're in millis-fallback territory; AlertEngine's
+        // duration accounting would false-trip on ~1 s "elapsed" intervals).
+        // Also skip QUALITY_ERROR readings.  (AUDIT 11.4)
+        if (r.quality != QUALITY_ERROR && r.timestamp >= 1000000000u) {
             alertEngine.evaluate(r, r.timestamp);
         }
 
