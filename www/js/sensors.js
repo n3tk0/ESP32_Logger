@@ -75,6 +75,7 @@ function sensorsLoad() {
       if (msg) msg.textContent = "";
 
       // Update page subtitle with live counts
+      var nowMs = Date.now();
       var errCount = d.sensors.filter(function(s) { return s.status === "error"; }).length;
       var okCount  = d.sensors.filter(function(s) { return s.status === "ok"; }).length;
       var sub = document.getElementById("sensors-sub");
