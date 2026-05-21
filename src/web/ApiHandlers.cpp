@@ -53,12 +53,21 @@ static void handleApiData(AsyncWebServerRequest* req) {
                       ? (uint32_t)req->getParam("to")->value().toInt()
                       : now;
 
-    const char* sensorFilter = req->hasParam("sensor")
-                               ? req->getParam("sensor")->value().c_str()
-                               : nullptr;
-    const char* metricFilter = req->hasParam("metric")
-                               ? req->getParam("metric")->value().c_str()
-                               : nullptr;
+    // Copy filter strings to local buffers — AsyncWebParameter::value() is a
+    // String whose c_str() may dangle after the param object is freed during
+    // async response streaming.  (AUDIT 3.10)
+    char sensorFilterBuf[33] = "";
+    char metricFilterBuf[24] = "";
+    if (req->hasParam("sensor")) {
+        strncpy(sensorFilterBuf, req->getParam("sensor")->value().c_str(),
+                sizeof(sensorFilterBuf) - 1);
+    }
+    if (req->hasParam("metric")) {
+        strncpy(metricFilterBuf, req->getParam("metric")->value().c_str(),
+                sizeof(metricFilterBuf) - 1);
+    }
+    const char* sensorFilter = sensorFilterBuf[0] ? sensorFilterBuf : nullptr;
+    const char* metricFilter = metricFilterBuf[0] ? metricFilterBuf : nullptr;
 
     TimeBucket bucket = parseBucket(req->hasParam("agg")
                         ? req->getParam("agg")->value().c_str() : "5m");
