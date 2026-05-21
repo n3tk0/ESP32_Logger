@@ -1007,12 +1007,15 @@ function dlInit() {
   }
   if (ST && ST.caps && ST.caps.platformMode !== undefined) {
     _hidePcIfNotLegacy(ST.caps.platformMode);
+    if (ST.time) _dlSetDeviceOffsetFromIso(ST.time);
   } else {
     fetchWithTimeout("/api/status", {}, 15000)
       .then(function (r) { return r.json(); })
       .then(function (s) {
         ST = s;
         _hidePcIfNotLegacy((s.caps && s.caps.platformMode) || 0);
+        if (s.time) _dlSetDeviceOffsetFromIso(s.time);
+        dlUpdatePreview();
       })
       .catch(function () { /* leave card visible if status unreachable */ });
   }
@@ -1119,10 +1122,25 @@ function dlDeleteFile(path) {
   });
 }
 
+// Offset (ms) between device RTC and browser clock; applied so the preview
+// renders in *device* time, not browser-local time. Captured once per
+// dlInit() from /api/status -> caps/runtime "time". Falls back to 0 (use
+// browser clock) if the device clock isn't reachable or parseable.
+var _dlDeviceOffsetMs = 0;
+function _dlSetDeviceOffsetFromIso(iso) {
+  // Server emits "YYYY-MM-DD HH:MM:SS" (RtcManager getRtcDateTimeString).
+  if (!iso || typeof iso !== "string") return;
+  var m = iso.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/);
+  if (!m) return;
+  // Treat as local (RTC doesn't carry tz); compare against the same scale.
+  var dev = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]).getTime();
+  _dlDeviceOffsetMs = dev - Date.now();
+}
+
 // Matches original: function updatePreview()
 function dlUpdatePreview() {
   var p = [],
-    d = new Date();
+    d = new Date(Date.now() + _dlDeviceOffsetMs);
   var df = getVal("dl-date"),
     tf = getVal("dl-time"),
     ef = getVal("dl-end");
