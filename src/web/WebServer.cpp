@@ -1588,7 +1588,10 @@ void setupWebServer() {
                            (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
         if (targetFS && targetFS->exists(path)) {
             String filename = path.substring(path.lastIndexOf('/') + 1);
+            // Null-check resp: exists() → beginResponse() has a TOCTOU window;
+            // the file may be deleted between the two calls.  (AUDIT 3.18)
             AsyncWebServerResponse *resp = r->beginResponse(*targetFS, path, "application/octet-stream");
+            if (!resp) { r->send(404, "text/plain", "Not found"); return; }
             resp->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
             r->send(resp);
         } else {
