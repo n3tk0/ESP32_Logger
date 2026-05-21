@@ -6,6 +6,7 @@
 #include <esp_sleep.h>
 #include <driver/gpio.h>
 #include <time.h>
+#include <new>
 
 void initRtc() {
     DBGLN("Init RTC...");
@@ -29,10 +30,26 @@ void initRtc() {
     if (Rtc)     { delete Rtc;     Rtc     = nullptr; }
     if (rtcWire) { delete rtcWire; rtcWire = nullptr; }
 
-    rtcWire = new ThreeWire(config.hardware.pinRtcIO,
-                            config.hardware.pinRtcSCLK,
-                            config.hardware.pinRtcCE);
-    Rtc = new RtcDS1302<ThreeWire>(*rtcWire);
+    // R28 / AUDIT 8.12: nothrow allocation.  On heap-pressured boot a throwing
+    // `new` aborts — preferable to keep going with rtcValid=false so the rest
+    // of the system can still run (NTP fallback path covers timekeeping).
+    rtcWire = new(std::nothrow) ThreeWire(config.hardware.pinRtcIO,
+                                          config.hardware.pinRtcSCLK,
+                                          config.hardware.pinRtcCE);
+    if (!rtcWire) {
+        DBGLN("RTC: alloc ThreeWire failed");
+        statusMessage = "RTC alloc failed (low heap)";
+        rtcValid = false;
+        return;
+    }
+    Rtc = new(std::nothrow) RtcDS1302<ThreeWire>(*rtcWire);
+    if (!Rtc) {
+        DBGLN("RTC: alloc RtcDS1302 failed");
+        statusMessage = "RTC alloc failed (low heap)";
+        delete rtcWire; rtcWire = nullptr;
+        rtcValid = false;
+        return;
+    }
     Rtc->Begin();
 
     if (Rtc->GetIsWriteProtected()) Rtc->SetIsWriteProtected(false);

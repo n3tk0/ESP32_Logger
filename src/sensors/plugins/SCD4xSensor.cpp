@@ -106,6 +106,14 @@ int SCD4xSensor::readAll(SensorReading* out, int maxOut) {
     uint16_t words[3];
     if (!_readWords(words, 3)) return 0;
 
+    // R28 / AUDIT 22.3: range-check raw CO2 word before calibration.
+    // SCD40 measures 400..2000 ppm, SCD41 up to 5000 ppm; uint16 raw can hold
+    // 0..65535. Out-of-range words signal a stale/corrupt sample (NACK,
+    // CRC-passed-but-stale frame) — drop the whole reading rather than feed
+    // garbage to AlertEngine. (Plausibility net for co2 already in
+    // ProcessingTask::isPlausible covers post-cal values.)
+    if (words[0] < 400 || words[0] > 5000) return 0;
+
     // CO2: raw uint16 in ppm
     float co2  = _calCo2.apply((float)words[0]);
 

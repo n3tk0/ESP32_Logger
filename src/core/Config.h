@@ -14,9 +14,13 @@
 // ============================================================================
 // VERSION  –  single source of truth
 // ============================================================================
+// R28 / AUDIT 31.11: Config.h is the canonical source. ESP_Logger.ino's banner
+// comment and www/changelog.txt's top entry must reference this same triple.
+// Bumped 4.2.0 -> 4.2.1 to match the latest changelog entry (safe-mode + OTA
+// rollback hardening), which previously diverged from Config.h.
 #define VERSION_MAJOR 4
 #define VERSION_MINOR 2
-#define VERSION_PATCH 0
+#define VERSION_PATCH 1
 
 // Inline so every translation unit that includes Config.h gets the same
 // string without needing Utils.h

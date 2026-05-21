@@ -2,6 +2,11 @@
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include <math.h>
 
+// R28 / AUDIT 24.11: see ZMPT101BSensor.cpp — IDF 5.x renamed ADC_11db.
+#ifndef ADC_ATTEN_DB_12
+#  define ADC_ATTEN_DB_12 ADC_11db
+#endif
+
 bool ZMCT103CSensor::init(JsonObjectConst cfg) {
     _enabled        = cfg["enabled"]          | true;
     _pin            = cfg["pin"]              | -1;  // R11: unset → init refuses
@@ -17,7 +22,7 @@ bool ZMCT103CSensor::init(JsonObjectConst cfg) {
     _calCurrent.load(cal, "current_arms");
 
     if (!validateAttachPin(_pin, "zmct103c", "pin")) return false;
-    analogSetPinAttenuation(_pin, ADC_11db); // full-scale ~3.3 V
+    analogSetPinAttenuation(_pin, ADC_ATTEN_DB_12); // full-scale ~3.1 V
     pinMode(_pin, INPUT);
     _ready = true;
 

@@ -5,6 +5,7 @@
 #include <LittleFS.h>
 #include <FS.h>
 #include <SD.h>
+#include <atomic>
 #include "../drivers/DS1302_Mini.h"
 #include <ESPAsyncWebServer.h>
 
@@ -77,12 +78,14 @@ extern int           lastFFButtonState, lastPFButtonState;
 // ============================================================================
 // ISR STATE
 // ============================================================================
-extern volatile uint32_t     pulseCount;
+// R28 / AUDIT 2.13 + 6.4: std::atomic<uint32_t> — flow ISR increments racing
+// loop()/web reads. fetch_add(relaxed) on RISC-V emits an aligned word add;
+// exchange(0) in loop() replaces the noInterrupts/interrupts read-clear pair.
+extern std::atomic<uint32_t> pulseCount;
 // R12 / AUDIT 1.5: lastFFInterrupt / lastPFInterrupt / ffPressed / pfPressed
 // removed with the dead onFFButton / onPFButton ISRs (HardwareManager.cpp).
 extern volatile unsigned long lastFlowInterrupt;
 extern volatile bool          flowSensorPulseDetected;
-extern volatile uint32_t isrDebounceUs;         // I1: uint32_t = atomic on RISC-V
 
 // ============================================================================
 // STATE MACHINE

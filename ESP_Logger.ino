@@ -1,5 +1,7 @@
 /**************************************************************************************************
- * PROJECT: ESP32 Multi-Sensor Water Usage Logger v5.1.0
+ * PROJECT: ESP32 Multi-Sensor Water Usage Logger
+ *          (version is defined in src/core/Config.h — VERSION_MAJOR/MINOR/PATCH;
+ *           use getVersionString() at runtime, never hard-code here)
  * TARGET:  XIAO ESP32-C3 / ESP32-C3 Super Mini (RISC-V) / generic ESP32
  * AUTHOR:  Petko Georgiev
  *
@@ -537,8 +539,6 @@ void setup() {
 
     loadConfig();
 
-    isrDebounceUs = (uint32_t)config.hardware.debounceMs * 1000UL;   // I1
-
     initStorage();
 
     // R12 / AUDIT 1.7: with formatOnFail=false, a corrupt LittleFS leaves
@@ -1016,7 +1016,7 @@ void loop() {
     if (config.flowMeter.testMode) {
         static bool pinConfigured = false;
         if (!pinConfigured) { pinMode(config.hardware.pinWifiTrigger, OUTPUT); pinConfigured = true; }
-        if (pulseCount > 0 && lastFlowPulseTime > 0) {
+        if (pulseCount.load(std::memory_order_relaxed) > 0 && lastFlowPulseTime > 0) {
             if      (millis() - lastFlowPulseTime < 100 && config.flowMeter.blinkDuration > 0) digitalWrite(config.hardware.pinWifiTrigger, (millis() / config.flowMeter.blinkDuration) % 2);
             else if (millis() - lastFlowPulseTime < TEST_MODE_HOLD_MS) digitalWrite(config.hardware.pinWifiTrigger, HIGH);
             else    digitalWrite(config.hardware.pinWifiTrigger, LOW);
@@ -1056,7 +1056,7 @@ void loop() {
             break;
 
         case STATE_WAIT_FLOW:
-            if (pulseCount > 0) {
+            if (pulseCount.load(std::memory_order_relaxed) > 0) {
                 loggingState   = STATE_MONITORING;
                 stateStartTime = millis();
             } else if (millis() - stateStartTime >= BUTTON_WAIT_FLOW_MS) {
@@ -1071,11 +1071,10 @@ void loop() {
             break;
 
         case STATE_DONE: {
-            // L2: single atomic read+clear — eliminates race between here and addLogEntry
-            noInterrupts();
-            uint32_t currentPulses = pulseCount;
-            pulseCount = 0;
-            interrupts();
+            // R28 / AUDIT 6.4: exchange(0) is the atomic read-clear; the
+            // previous noInterrupts/interrupts pair around volatile uint32_t
+            // is no longer needed since pulseCount is std::atomic<uint32_t>.
+            uint32_t currentPulses = pulseCount.exchange(0, std::memory_order_relaxed);
 
             bool hasActivity = (currentPulses > 0 || highCountFF > 0 || highCountPF > 0);
 

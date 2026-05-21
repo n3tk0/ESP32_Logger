@@ -1,6 +1,11 @@
 #include "SoilMoistureSensor.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
+// R28 / AUDIT 24.11: see ZMPT101BSensor.cpp — IDF 5.x renamed ADC_11db.
+#ifndef ADC_ATTEN_DB_12
+#  define ADC_ATTEN_DB_12 ADC_11db
+#endif
+
 bool SoilMoistureSensor::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]          | true;
     _pin        = cfg["pin"]              | -1;  // R11: unset → init refuses
@@ -23,6 +28,11 @@ bool SoilMoistureSensor::init(JsonObjectConst cfg) {
     _calMoisture.load(cal, "moisture");
 
     if (!validateAttachPin(_pin, "soil_moisture", "pin")) return false;
+    // R28 / AUDIT 24.5: capacitive soil sensors swing up to ~3.0 V. Default
+    // ADC attenuation on ESP32-C3 caps the readable range near 1.5 V, so the
+    // "dry air" end clips. ADC_ATTEN_DB_12 widens the range to ~3.1 V before
+    // clipping (legacy alias ADC_11db; see 24.11).
+    analogSetPinAttenuation(_pin, ADC_ATTEN_DB_12);
     pinMode(_pin, INPUT);
     _ready = true;
     Serial.printf("[SoilMoisture] pin=%d dry=%d wet=%d samples=%d\n",
