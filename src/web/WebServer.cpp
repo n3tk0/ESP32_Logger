@@ -1337,16 +1337,30 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (r->hasParam("ffToPfThreshold", true))        config.datalog.ffToPfThreshold        = max(0.1f, r->getParam("ffToPfThreshold", true)->value().toFloat());
         if (r->hasParam("manualPressThresholdMs", true)) config.datalog.manualPressThresholdMs = r->getParam("manualPressThresholdMs", true)->value().toInt();
 
-        // Wide-CSV pipeline knobs (config.logger.*).  Applied on next StorageTask
-        // restart — see TaskManager::init().
-        config.logger.csvLoggingEnabled         = r->hasParam("csvLoggingEnabled", true);
-        if (r->hasParam("aggregationIntervalSec", true))
-            config.logger.aggregationIntervalSec = constrain(r->getParam("aggregationIntervalSec", true)->value().toInt(), 5, 3600);
+        // Wide-CSV pipeline knobs (config.logger.*) live on the sensors page
+        // now (POST /save_sensorlog).  This handler used to also accept them
+        // alongside the flow-meter datalog fields, but conflating the two
+        // sublogs in one form was confusing — see the dedicated endpoint
+        // below.
 
         saveConfig();
         // The "create" + "switch" actions were lifted out of this endpoint
         // so they no longer share the same submit with the bulk format /
         // rotation form. See /api/datalog/create and /api/datalog/switch.
+        r->send(200, "application/json", "{\"ok\":true}");
+    });
+
+    // POST /save_sensorlog — wide-CSV pipeline knobs (config.logger.*).
+    // Backs the "Sensor CSV logging" card on the Sensors page; split out of
+    // /save_datalog so the flow-meter event log and the sensor-CSV pipeline
+    // each have their own form + endpoint.
+    server.on("/save_sensorlog", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
+        config.logger.csvLoggingEnabled = r->hasParam("csvLoggingEnabled", true);
+        if (r->hasParam("aggregationIntervalSec", true))
+            config.logger.aggregationIntervalSec = constrain(
+                r->getParam("aggregationIntervalSec", true)->value().toInt(), 5, 3600);
+        saveConfig();
         r->send(200, "application/json", "{\"ok\":true}");
     });
 

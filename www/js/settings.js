@@ -1041,16 +1041,6 @@ function dlInit() {
           setVal("dl-ffpf", dl.ffToPfThreshold);
           setVal("dl-hold", dl.manualPressThresholdMs);
           dlUpdatePreview();
-
-          // Wide-CSV pipeline knobs (config.logger.*)
-          var lg = cfg.logger || {};
-          setChk("lg-csvEnabled",
-            lg.csvLoggingEnabled === undefined ? true : lg.csvLoggingEnabled);
-          setVal("lg-aggSec",
-            lg.aggregationIntervalSec !== undefined ? lg.aggregationIntervalSec : 60);
-          // humidityCorrectionEnabled / humidityCorrectionKappa moved to the
-          // per-sensor SDS011 card (www/js/sensors.js); the lg-humCorr /
-          // lg-kappa inputs no longer exist on the datalog page.
         });
     });
   dlLoadFiles();
@@ -1485,6 +1475,25 @@ function otaUpload() {
     };
     xhr.send(formData);
   });   // end _otaSha256().then
+}
+
+// ============================================================================
+// ══ SETTINGS: SENSOR LOGGING (wide-CSV pipeline) ══
+// ============================================================================
+// Split out of the Data Log page (PR #105 follow-up) — the wide-CSV pipeline
+// is the per-sensor metric store, conceptually independent from the legacy
+// flow-meter event log that the Data Log page configures.
+function slInit() {
+  fetchWithTimeout("/export_settings", {}, 15000)
+    .then(function (r) { return r.json(); })
+    .then(function (cfg) {
+      CFG = cfg;
+      var lg = cfg.logger || {};
+      setChk("sl-csvEnabled",
+        lg.csvLoggingEnabled === undefined ? true : lg.csvLoggingEnabled);
+      setVal("sl-aggSec",
+        lg.aggregationIntervalSec !== undefined ? lg.aggregationIntervalSec : 60);
+    });
 }
 
 // Set the active log file to whatever the #curFile dropdown selected.

@@ -637,6 +637,46 @@
             <div id="sc-msg" style="font-size:.8rem;color:var(--text-3);margin-top:4px"></div>
           </div>
         </div>
+
+        <!-- Wide-CSV pipeline (moved from Data Log) -->
+        <form data-submit="settingsSaveForm" data-save-url="/save_sensorlog"
+              style="margin-top:1rem" novalidate>
+          <div id="sl-msg"></div>
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title"><span data-icon="line-chart"></span> Sensor CSV logging</div>
+            </div>
+            <div class="card-body">
+              <p class="hint" style="margin-bottom:1rem">
+                Wide-CSV stores sensor readings as one row per aggregation
+                window with one column per active sensor metric. The header
+                is rebuilt dynamically when sensors are added or removed;
+                the per-day file rotates automatically on schema change.
+                Independent of the flow-meter event log on the Data Log page.
+              </p>
+              <div class="field">
+                <label class="field-label">
+                  <input type="checkbox" name="csvLoggingEnabled" id="sl-csvEnabled" value="1">
+                  Enable CSV logging
+                </label>
+                <p class="hint">Master switch. When off, sensor readings are still
+                  streamed to the live UI but never written to flash/SD.</p>
+              </div>
+              <div class="form-grid">
+                <div class="field">
+                  <label class="field-label">
+                    Aggregation interval (seconds)
+                    <span class="help-tip" title="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files.">ℹ️</span>
+                  </label>
+                  <input type="number" name="aggregationIntervalSec" id="sl-aggSec" class="input"
+                    min="5" max="3600" step="5" value="60">
+                  <p class="hint">Default 60 s. Range 5–3600 s.</p>
+                </div>
+              </div>
+              <button type="submit" class="btn primary"><span data-icon="save"></span> Save</button>
+            </div>
+          </div>
+        </form>
       </section>
 
     </main><!-- /.main -->

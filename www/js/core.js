@@ -896,6 +896,7 @@ var PAGE_MSG_IDS = {
   settings_network: "net-msg",
   settings_time: "time-msg",
   settings_datalog: "dl-msg",
+  sensors:          "sl-msg",
 };
 
 function settingsSave(ev, url, form, restart) {

@@ -45,6 +45,11 @@ function sensorsLoad() {
   if (msg) msg.textContent = "Loading…";
   if (grid) grid.innerHTML = "";
 
+  // Hydrate the inline "Sensor CSV logging" card if it's mounted on this
+  // page. Defined in settings.js; safe to call even if the card isn't
+  // present (the fetch just populates IDs that aren't there).
+  if (typeof slInit === "function") slInit();
+
   // Phase 5c-4 — short relative-time formatter for sensor freshness pills.
   // Falls through "5s" → "3m" → "2h" → "1d" so the staleness signal stays
   // legible at a glance.
