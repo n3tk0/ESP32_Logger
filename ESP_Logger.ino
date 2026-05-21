@@ -898,8 +898,11 @@ void loop() {
     // components here.  The actual DS1302 register writes (3 × delay) run from
     // loop() where blocking is acceptable.
     if (g_pendingRtcSet.load(std::memory_order_acquire) && Rtc) {
-        g_pendingRtcSet.store(false, std::memory_order_relaxed);
+        // Copy struct BEFORE clearing the flag so a concurrent /set_time can't
+        // write g_pendingRtcTime between the flag-clear and the struct-read.
+        // (Codex review: clear-then-read leaves a race window.)
         PendingRtcSet t = g_pendingRtcTime;
+        g_pendingRtcSet.store(false, std::memory_order_relaxed);
         Rtc->SetIsWriteProtected(false); delay(10);
         Rtc->SetIsRunning(true);         delay(10);
         RtcDateTime dt(t.year, t.month, t.day, t.hour, t.minute, 0);
