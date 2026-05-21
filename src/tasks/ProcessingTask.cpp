@@ -23,6 +23,14 @@ static bool isPlausible(const SensorReading& r) {
     if (strcmp(m, "aqi")         == 0) return (r.value >= 1.0f  && r.value <= 5.0f);
     if (strcmp(m, "flow_rate")   == 0) return (r.value >= 0.0f  && r.value < 1000.0f);
     if (strcmp(m, "wind_speed")  == 0) return (r.value >= 0.0f  && r.value < 150.0f);
+    if (strcmp(m, "co2")         == 0) return (r.value >= 400.0f && r.value < 10000.0f);
+    if (strcmp(m, "voltage")     == 0) return (r.value >= 0.0f  && r.value < 1000.0f);
+    if (strcmp(m, "current")     == 0) return (r.value >= 0.0f  && r.value < 1000.0f);
+    if (strcmp(m, "uv_index")    == 0) return (r.value >= 0.0f  && r.value <= 20.0f);
+    if (strcmp(m, "lux")         == 0) return (r.value >= 0.0f  && r.value < 150000.0f);
+    if (strcmp(m, "light")       == 0) return (r.value >= 0.0f  && r.value < 150000.0f);
+    if (strcmp(m, "distance")    == 0) return (r.value >= 0.0f  && r.value < 50000.0f);
+    if (strcmp(m, "soil_moisture")== 0) return (r.value >= 0.0f && r.value <= 100.0f);
     // Unknown metric — pass through
     return true;
 }
