@@ -3,6 +3,7 @@
 #include "../sensors/SensorManager.h"
 #include "../pipeline/DataPipeline.h"
 #include "../core/Globals.h"  // Rtc, rtcValid
+#include "../setup.h"         // SLOW_SENSOR_TICK_MS
 #include <time.h>
 
 // ---------------------------------------------------------------------------
@@ -25,11 +26,15 @@ void slowSensorTaskFunc(void* /*param*/) {
         // +1 avoids ts=0 (reserved sentinel).  (AUDIT 10.3)
         if (ts == 0) ts = (uint32_t)(millis() / 1000UL) + 1;
 
-        // Only dispatch blocking sensors (SDS011, PMS5003, WindSensor)
+        // Only dispatch blocking sensors (SDS011, PMS5003, WindSensor).
+        // tickFiltered can block 1.5-3 s for UART frame waits; refresh the
+        // heartbeat afterwards so the 30-s watchdog isn't false-tripped if
+        // the polling cadence is ever tightened.  (AUDIT 10.5)
         sensorManager.tickFiltered(sensorQueue, ts, true);
+        g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();
 
-        // Slow sensors have their own read intervals; poll every 500ms
-        vTaskDelay(pdMS_TO_TICKS(500));
+        // Poll cadence — configurable via SLOW_SENSOR_TICK_MS.  (AUDIT 10.4)
+        vTaskDelay(pdMS_TO_TICKS(SLOW_SENSOR_TICK_MS));
     }
 
     Serial.println("[SlowSensorTask] stopped");
