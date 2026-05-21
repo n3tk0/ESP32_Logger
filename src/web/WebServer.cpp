@@ -1273,9 +1273,47 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
 
     server.on("/save_datalog", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (!requireMutatingAuth(r)) return;
-        if (r->hasParam("currentFile", true))  SAFE_STRNCPY(config.datalog.currentFile, r->getParam("currentFile", true)->value().c_str(), sizeof(config.datalog.currentFile));
-        if (r->hasParam("prefix", true))       SAFE_STRNCPY(config.datalog.prefix,      r->getParam("prefix", true)->value().c_str(), sizeof(config.datalog.prefix));
-        if (r->hasParam("folder", true))       SAFE_STRNCPY(config.datalog.folder,      r->getParam("folder", true)->value().c_str(), sizeof(config.datalog.folder));
+        // Filename-component validator for prefix: no slashes, no traversal,
+        // no control chars. Used for the bare prefix string only — folder /
+        // currentFile go through sanitizePath().
+        auto isSafePrefix = [](const String& s) -> bool {
+            if (s.length() == 0 || s.length() > 32) return false;
+            for (size_t i = 0; i < s.length(); i++) {
+                char c = s[i];
+                if (c == '/' || c == '\\' || c == '\0' || (unsigned char)c < 0x20 || c == 0x7f) return false;
+            }
+            if (s == "." || s == "..") return false;
+            return true;
+        };
+        if (r->hasParam("currentFile", true)) {
+            String cf = sanitizePath(r->getParam("currentFile", true)->value());
+            if (cf.length() == 0) {
+                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid currentFile path\"}");
+                return;
+            }
+            SAFE_STRNCPY(config.datalog.currentFile, cf.c_str(), sizeof(config.datalog.currentFile));
+        }
+        if (r->hasParam("prefix", true)) {
+            String pf = r->getParam("prefix", true)->value();
+            if (!isSafePrefix(pf)) {
+                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix (no slashes, control chars, or ..)\"}");
+                return;
+            }
+            SAFE_STRNCPY(config.datalog.prefix, pf.c_str(), sizeof(config.datalog.prefix));
+        }
+        if (r->hasParam("folder", true)) {
+            String fld = r->getParam("folder", true)->value();
+            if (fld.length() == 0) {
+                config.datalog.folder[0] = '\0';
+            } else {
+                String fs = sanitizePath(fld);
+                if (fs.length() == 0) {
+                    r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid folder path\"}");
+                    return;
+                }
+                SAFE_STRNCPY(config.datalog.folder, fs.c_str(), sizeof(config.datalog.folder));
+            }
+        }
         if (r->hasParam("rotation", true))     config.datalog.rotation    = (DatalogRotation)r->getParam("rotation", true)->value().toInt();
         if (r->hasParam("maxSizeKB", true))    config.datalog.maxSizeKB   = constrain(r->getParam("maxSizeKB", true)->value().toInt(), 10, 10000);
         if (r->hasParam("maxEntries", true))   config.datalog.maxEntries  = constrain(r->getParam("maxEntries", true)->value().toInt(), 10, 100000);
