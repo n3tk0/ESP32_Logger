@@ -185,40 +185,6 @@ function changelogLoad() {
 }
 
 // ============================================================================
-// ══ SETTINGS: FLOW METER ══
-// ============================================================================
-function sfInit() {
-  fetchWithTimeout("/export_settings", {}, 15000)
-    .then(function (r) {
-      return r.json();
-    })
-    .then(function (d) {
-      CFG = d;
-      var fm = d.flowMeter || {};
-      setVal("sf-ppl", fm.pulsesPerLiter);
-      setVal("sf-cal", fm.calibrationMultiplier);
-      // monitoringWindowSecs / firstLoopMonitoringWindowSecs removed from
-      // backend during WebUI consolidation. The Timing card was also
-      // removed from settings_flowmeter.html.
-      setChk("sf-test", fm.testMode);
-      setVal("sf-blink", fm.blinkDuration);
-      fetchWithTimeout("/api/status", {}, 15000)
-        .then(function (r2) {
-          return r2.json();
-        })
-        .then(function (s) {
-          setEl("sf-boot", s.boot);
-          // Chunk G: redirect to settings hub when this build was
-          // compiled without SENSOR_WATERFLOW_ENABLED.  The page is
-          // already hidden in the hub but a hash-jump still lands here.
-          if (s.caps && s.caps.flowmeter === false) {
-            location.hash = "#settings";
-          }
-        });
-    });
-}
-
-// ============================================================================
 // ══ SETTINGS: HARDWARE ══
 // ============================================================================
 // First settings page migrated to schema-driven Form.bind (Pass 4 A3).
@@ -276,6 +242,16 @@ var HW_SCHEMA = {
             ["160", "160 MHz"],
         ]},
     ]},
+    // Flow-meter LED diagnostics, migrated here when the standalone
+    // settings_flowmeter page was retired (PR #105 follow-up). The fields
+    // live on config.flowMeter; hwInit() merges them into the binding object.
+    { title: "💧 Flow Meter Test Mode", fields: [
+        { name: "testMode", label: "Enable LED blink on flow pulse", type: "checkbox",
+          hint: "Drives the WiFi-trigger pin while pulses are detected. Useful for verifying flow-sensor wiring." },
+        { name: "blinkDuration", label: "Blink duration (ms)", type: "number",
+          min: 50, max: 2000,
+          hint: "Controls how fast the indicator LED blinks while active." },
+    ]},
   ],
 };
 
@@ -289,6 +265,14 @@ function hwInit() {
         storageType: 0, wakeupMode: 0, debounceMs: 100, cpuFreqMHz: 80,
       };
       for (var k in defaults) if (hw[k] === undefined) hw[k] = defaults[k];
+
+      // Flow-meter diagnostics migrated from settings_flowmeter (PR #105).
+      // Merge fm.testMode / fm.blinkDuration into the binding object so the
+      // unified hardware form renders them. /save_hardware already accepts
+      // both params and writes them back into config.flowMeter.
+      var fm = d.flowMeter || {};
+      hw.testMode      = !!fm.testMode;
+      hw.blinkDuration = fm.blinkDuration > 0 ? fm.blinkDuration : 250;
 
       Form.bind("hw-host", HW_SCHEMA, hw);
 
@@ -1012,6 +996,30 @@ function timeRestoreBoot() {
 // ══ SETTINGS: DATALOG ══
 // ============================================================================
 function dlInit() {
+  // Post-Correction (PF↔FF) is a PLATFORM_LEGACY-only feature: it relies on
+  // 2-button toilet event semantics that PLATFORM_HYBRID / CONTINUOUS don't
+  // have. Hide the card outside legacy mode. ST.caps.platformMode is
+  // populated by /api/status (cached in ST after the dashboard loads).
+  function _hidePcIfNotLegacy(mode) {
+    var card = document.getElementById("dl-pcCard");
+    if (!card) return;
+    card.style.display = (mode === 0) ? "" : "none";
+  }
+  if (ST && ST.caps && ST.caps.platformMode !== undefined) {
+    _hidePcIfNotLegacy(ST.caps.platformMode);
+    if (ST.time) _dlSetDeviceOffsetFromIso(ST.time);
+  } else {
+    fetchWithTimeout("/api/status", {}, 15000)
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        ST = s;
+        _hidePcIfNotLegacy((s.caps && s.caps.platformMode) || 0);
+        if (s.time) _dlSetDeviceOffsetFromIso(s.time);
+        dlUpdatePreview();
+      })
+      .catch(function () { /* leave card visible if status unreachable */ });
+  }
+
   fetchWithTimeout("/api/filelist?filter=log&recursive=1", {}, 15000)
     .then(function (r) {
       return r.json();
@@ -1037,18 +1045,19 @@ function dlInit() {
           if (curFile) sel.value = curFile;
           setVal("dl-prefix", dl.prefix || "datalog");
           setVal("dl-folder", dl.folder || "");
+          setChk("dl-tsFile", dl.timestampFilename || false);
+          setChk("dl-devId",  dl.includeDeviceId || false);
           setVal("dl-rotation", dl.rotation !== undefined ? dl.rotation : 0);
           var msGrp = document.getElementById("maxSizeGroup");
           if (msGrp) msGrp.style.display = dl.rotation == 4 ? "block" : "none";
           setVal("dl-maxSize", dl.maxSizeKB || 500);
-          setChk("dl-tsFile", dl.timestampFilename || false);
-          setChk("dl-devId", dl.includeDeviceId || false);
+          setVal("dl-maxEntries", dl.maxEntries || 10000);
           setVal("dl-date", dl.dateFormat !== undefined ? dl.dateFormat : 1);
           setVal("dl-time", dl.timeFormat !== undefined ? dl.timeFormat : 0);
           setVal("dl-end", dl.endFormat !== undefined ? dl.endFormat : 0);
-          setVal("dl-boot", dl.includeBootCount ? "1" : "0");
+          setChk("dl-boot", !!dl.includeBootCount);
           setVal("dl-vol", dl.volumeFormat !== undefined ? dl.volumeFormat : 0);
-          setVal("dl-extra", dl.includeExtraPresses ? "1" : "0");
+          setChk("dl-extra", !!dl.includeExtraPresses);
           setChk("dl-pcEnabled", dl.postCorrectionEnabled);
           var pcF = document.getElementById("pcFields");
           if (pcF)
@@ -1057,16 +1066,6 @@ function dlInit() {
           setVal("dl-ffpf", dl.ffToPfThreshold);
           setVal("dl-hold", dl.manualPressThresholdMs);
           dlUpdatePreview();
-
-          // Wide-CSV pipeline knobs (config.logger.*)
-          var lg = cfg.logger || {};
-          setChk("lg-csvEnabled",
-            lg.csvLoggingEnabled === undefined ? true : lg.csvLoggingEnabled);
-          setVal("lg-aggSec",
-            lg.aggregationIntervalSec !== undefined ? lg.aggregationIntervalSec : 60);
-          // humidityCorrectionEnabled / humidityCorrectionKappa moved to the
-          // per-sensor SDS011 card (www/js/sensors.js); the lg-humCorr /
-          // lg-kappa inputs no longer exist on the datalog page.
         });
     });
   dlLoadFiles();
@@ -1123,10 +1122,25 @@ function dlDeleteFile(path) {
   });
 }
 
+// Offset (ms) between device RTC and browser clock; applied so the preview
+// renders in *device* time, not browser-local time. Captured once per
+// dlInit() from /api/status -> caps/runtime "time". Falls back to 0 (use
+// browser clock) if the device clock isn't reachable or parseable.
+var _dlDeviceOffsetMs = 0;
+function _dlSetDeviceOffsetFromIso(iso) {
+  // Server emits "YYYY-MM-DD HH:MM:SS" (RtcManager getRtcDateTimeString).
+  if (!iso || typeof iso !== "string") return;
+  var m = iso.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/);
+  if (!m) return;
+  // Treat as local (RTC doesn't carry tz); compare against the same scale.
+  var dev = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]).getTime();
+  _dlDeviceOffsetMs = dev - Date.now();
+}
+
 // Matches original: function updatePreview()
 function dlUpdatePreview() {
   var p = [],
-    d = new Date();
+    d = new Date(Date.now() + _dlDeviceOffsetMs);
   var df = getVal("dl-date"),
     tf = getVal("dl-time"),
     ef = getVal("dl-end");
@@ -1152,13 +1166,15 @@ function dlUpdatePreview() {
   p.push(tStr);
   if (ef === "0") p.push(tStr);
   else if (ef === "1") p.push("45s");
-  if (getVal("dl-boot") === "1") p.push("#:1234");
+  var bootEl  = document.getElementById("dl-boot");
+  var extraEl = document.getElementById("dl-extra");
+  if (bootEl && bootEl.checked) p.push("#:1234");
   p.push("FF_BTN");
   var vf = getVal("dl-vol");
   if (vf === "0") p.push("L:2,50");
   else if (vf === "1") p.push("L:2.50");
   else if (vf === "2") p.push("2.50");
-  if (getVal("dl-extra") === "1") {
+  if (extraEl && extraEl.checked) {
     p.push("FF0");
     p.push("PF1");
   }
@@ -1503,6 +1519,93 @@ function otaUpload() {
   });   // end _otaSha256().then
 }
 
+// ============================================================================
+// ══ SETTINGS: SENSOR LOGGING (wide-CSV pipeline) ══
+// ============================================================================
+// Split out of the Data Log page (PR #105 follow-up) — the wide-CSV pipeline
+// is the per-sensor metric store, conceptually independent from the legacy
+// flow-meter event log that the Data Log page configures.
+function slInit() {
+  fetchWithTimeout("/export_settings", {}, 15000)
+    .then(function (r) { return r.json(); })
+    .then(function (cfg) {
+      CFG = cfg;
+      var lg = cfg.logger || {};
+      setChk("sl-csvEnabled",
+        lg.csvLoggingEnabled === undefined ? true : lg.csvLoggingEnabled);
+      setVal("sl-aggSec",
+        lg.aggregationIntervalSec !== undefined ? lg.aggregationIntervalSec : 60);
+    });
+}
+
+// Set the active log file to whatever the #curFile dropdown selected.
+// Decoupled from /save_datalog so switching the active file doesn't
+// silently re-submit (and clamp) every format/rotation field.
+function dlSwitchFile() {
+  var sel = document.getElementById("curFile");
+  if (!sel || !sel.value) {
+    showMsg("dl-msg", "<div class='alert alert-error'>❌ Select a file first</div>", true);
+    return;
+  }
+  var path = sel.value;
+  getCsrfToken().then(function (token) {
+    var fd = new FormData();
+    fd.append("path", path);
+    if (token) fd.append("csrf", token);
+    fetchWithTimeout("/api/datalog/switch", { method: "POST", body: fd }, 15000)
+      .then(function (r) { return r.json(); })
+      .then(function (resp) {
+        if (resp.ok) {
+          showMsg("dl-msg",
+            "<div class='alert alert-success'>✅ Switched active file to " + esc(path) + "</div>", true);
+          dlLoadFiles();
+        } else {
+          showMsg("dl-msg",
+            "<div class='alert alert-error'>❌ " + esc(resp.error || "Switch failed") + "</div>", true);
+        }
+      })
+      .catch(function () {
+        showMsg("dl-msg", "<div class='alert alert-error'>❌ Network error</div>", true);
+      });
+  });
+}
+
+// Create a new log file from the Filename card values and switch to it.
+// Doesn't persist any other datalog field; the user is expected to have
+// hit Save before Create if they edited prefix/folder/flags.
+function dlCreateFile() {
+  var prefix = getVal("dl-prefix") || "";
+  if (!prefix) {
+    showMsg("dl-msg", "<div class='alert alert-error'>❌ Prefix required</div>", true);
+    return;
+  }
+  getCsrfToken().then(function (token) {
+    var fd = new FormData();
+    fd.append("prefix", prefix);
+    fd.append("folder", getVal("dl-folder") || "");
+    if (document.getElementById("dl-tsFile") && document.getElementById("dl-tsFile").checked)
+      fd.append("timestampFilename", "1");
+    if (document.getElementById("dl-devId") && document.getElementById("dl-devId").checked)
+      fd.append("includeDeviceId", "1");
+    if (token) fd.append("csrf", token);
+    fetchWithTimeout("/api/datalog/create", { method: "POST", body: fd }, 15000)
+      .then(function (r) { return r.json(); })
+      .then(function (resp) {
+        if (resp.ok) {
+          showMsg("dl-msg",
+            "<div class='alert alert-success'>✅ Created and switched to " + esc(resp.file || "") + "</div>", true);
+          dlInit();
+        } else {
+          showMsg("dl-msg",
+            "<div class='alert alert-error'>❌ " + esc(resp.error || "Create failed") + "</div>", true);
+        }
+      })
+      .catch(function () {
+        showMsg("dl-msg", "<div class='alert alert-error'>❌ Network error</div>", true);
+      });
+  });
+}
+
 function dlToggleMaxSize() {
   var mg = document.getElementById("maxSizeGroup"),
     rot = document.getElementById("dl-rotation");
@@ -1766,6 +1869,8 @@ registerHandlers({
   timeFlushLogs: timeFlushLogs,
   timeRestoreBoot: timeRestoreBoot,
   dlDeleteFile: dlDeleteFile,
+  dlSwitchFile: dlSwitchFile,
+  dlCreateFile: dlCreateFile,
   dlUpdatePreview: dlUpdatePreview,
   dlToggleMaxSize: dlToggleMaxSize,
   dlTogglePcFields: dlTogglePcFields,

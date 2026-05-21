@@ -5,22 +5,38 @@
       </div>
     </div>
 
-    <form data-submit="settingsSaveForm" data-save-url="/save_datalog" novalidate>
-      <div id="dl-msg"></div>
-      <!-- Active File -->
-      <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="file-text"></span> Current File</div></div>
-        <div class="card-body">
-          <div class="field">
-            <label class="field-label">Select file</label>
-            <select name="currentFile" id="curFile" class="input">
+    <div id="dl-msg"></div>
+
+    <!-- Active File (standalone — actions don't share submit with bulk save) -->
+    <div class="card">
+      <div class="card-head"><div class="card-title"><span data-icon="file-text"></span> Current File</div></div>
+      <div class="card-body">
+        <div class="field">
+          <label class="field-label">Select file</label>
+          <div style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap">
+            <select id="curFile" class="input" style="flex:1;min-width:180px">
               <option value="">Loading...</option>
             </select>
+            <button type="button" data-click="dlSwitchFile" class="btn"><span data-icon="check"></span> Switch</button>
+            <button type="button" data-click="dlCreateFile" class="btn primary"
+                    title="Create a new file using the Filename settings below; the new file becomes the active log target.">
+              <span data-icon="plus"></span> Create &amp; Switch
+            </button>
           </div>
-          <div class="form-grid mt-1">
+          <p class="hint" style="margin-top:.4rem">Create uses the Filename settings (prefix, folder, timestamp, device ID) from below. Save those first if you've edited them.</p>
+        </div>
+      </div>
+    </div>
+
+    <form data-submit="settingsSaveForm" data-save-url="/save_datalog" novalidate>
+      <!-- Filename -->
+      <div class="card">
+        <div class="card-head"><div class="card-title"><span data-icon="file"></span> Filename</div></div>
+        <div class="card-body">
+          <div class="form-grid">
             <div class="field">
               <label class="field-label">Prefix</label>
-              <input type="text" name="prefix" id="dl-prefix" placeholder="datalog" class="input">
+              <input type="text" name="prefix" id="dl-prefix" placeholder="datalog" maxlength="32" class="input">
             </div>
             <div class="field">
               <label class="field-label">Folder</label>
@@ -29,7 +45,14 @@
               </p>
             </div>
           </div>
-          <button type="submit" name="action" value="create" class="btn primary"><span data-icon="plus"></span> Create</button>
+          <div class="field">
+            <label class="field-label"><input type="checkbox" name="timestampFilename" id="dl-tsFile" value="1">
+              Timestamp filename</label>
+          </div>
+          <div class="field">
+            <label class="field-label"><input type="checkbox" name="includeDeviceId" id="dl-devId" value="1"> Device ID
+              in filename</label>
+          </div>
         </div>
       </div>
 
@@ -54,12 +77,12 @@
             </div>
           </div>
           <div class="field">
-            <label class="field-label"><input type="checkbox" name="timestampFilename" id="dl-tsFile" value="1">
-              Timestamp filename</label>
-          </div>
-          <div class="field">
-            <label class="field-label"><input type="checkbox" name="includeDeviceId" id="dl-devId" value="1"> Device ID
-              in filename</label>
+            <label class="field-label">Max entries (lines)</label>
+            <input type="number" name="maxEntries" id="dl-maxEntries"
+                   min="10" max="65535" step="100" class="input">
+            <p class="hint">Cap the line count of the active log; oldest lines are
+              trimmed on the next append once the limit is exceeded. Default 10000;
+              hardware ceiling 65535 (uint16 storage).</p>
           </div>
         </div>
       </div>
@@ -96,13 +119,6 @@
               </select>
             </div>
             <div class="field" style="min-width:80px">
-              <label class="field-label">Boot#</label>
-              <select name="includeBootCount" id="dl-boot" class="input" data-change="dlUpdatePreview">
-                <option value="1">On</option>
-                <option value="0">Off</option>
-              </select>
-            </div>
-            <div class="field" style="min-width:80px">
               <label class="field-label">Volume</label>
               <select name="volumeFormat" id="dl-vol" class="input" data-change="dlUpdatePreview">
                 <option value="0">L:0,00</option>
@@ -111,14 +127,13 @@
                 <option value="3">Off</option>
               </select>
             </div>
-            <div class="field" style="min-width:80px">
-              <label class="field-label">FF/PF</label>
-              <select name="includeExtraPresses" id="dl-extra" class="input"
-                data-change="dlUpdatePreview">
-                <option value="1">On</option>
-                <option value="0">Off</option>
-              </select>
-            </div>
+          </div>
+          <div class="field" style="margin-top:.5rem">
+            <label><input type="checkbox" name="includeBootCount" id="dl-boot" value="1"
+                          data-change="dlUpdatePreview"> Include boot count</label>
+            &nbsp;&nbsp;
+            <label><input type="checkbox" name="includeExtraPresses" id="dl-extra" value="1"
+                          data-change="dlUpdatePreview"> Include FF/PF extra-press counters</label>
           </div>
           <div class="mt-1">
             <label class="field-label">Preview:</label>
@@ -129,8 +144,10 @@
         </div>
       </div>
 
-      <!-- Post-Correction -->
-      <div class="card">
+      <!-- Post-Correction (PLATFORM_LEGACY only; dlInit hides this on
+           PLATFORM_HYBRID / PLATFORM_CONTINUOUS where the 2-button
+           FF/PF correction doesn't apply). -->
+      <div class="card" id="dl-pcCard">
         <div class="card-head"><div class="card-title"><span data-icon="refresh-cw"></span> Post-Correction</div></div>
         <div class="card-body">
           <div class="field">
@@ -157,7 +174,7 @@
             </div>
             <div class="field">
               <label class="field-label">Button Hold Threshold (ms)</label>
-              <input type="number" step="50" name="manualPressThresholdMs" id="dl-hold" min="0" max="5000"
+              <input type="number" step="50" name="manualPressThresholdMs" id="dl-hold" min="0" max="60000"
                 class="input">
               <p class="hint">Held longer than this → correction skipped. 0 = disabled.</p>
             </div>
@@ -169,38 +186,6 @@
         <div class="card-head"><div class="card-title"><span data-icon="folder"></span> Log Files</div></div>
         <div class="card-body">
           <div id="dl-files" class="text-muted" style="font-size:0.9rem">Loading...</div>
-        </div>
-      </div>
-
-      <!-- Wide-CSV Pipeline (sensor logging) -->
-      <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="line-chart"></span> CSV Pipeline (Sensor Logging)</div></div>
-        <div class="card-body">
-          <p class="hint" style="margin-bottom:1rem">
-            Wide-CSV stores sensor readings as one row per aggregation window
-            with one column per active sensor metric. Header is rebuilt
-            dynamically when sensors are added or removed; the per-day file is
-            rotated automatically on schema change.
-          </p>
-          <div class="field">
-            <label class="field-label">
-              <input type="checkbox" name="csvLoggingEnabled" id="lg-csvEnabled" value="1">
-              Enable CSV logging
-            </label>
-            <p class="hint">Master switch. When off, sensor readings are still
-              streamed to the live UI but never written to flash/SD.</p>
-          </div>
-          <div class="form-grid">
-            <div class="field">
-              <label class="field-label">
-                Aggregation Interval (seconds)
-                <span class="help-tip" title="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files.">ℹ️</span>
-              </label>
-              <input type="number" name="aggregationIntervalSec" id="lg-aggSec" class="input"
-                min="5" max="3600" step="5" value="60">
-              <p class="hint">Default 60 s. Range 5–3600 s.</p>
-            </div>
-          </div>
         </div>
       </div>
 

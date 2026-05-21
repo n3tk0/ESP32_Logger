@@ -516,7 +516,6 @@ function nav(el) {
 // inlined in index.html for fast first paint.
 var LAZY_PAGES = {
   settings_device:    1,
-  settings_flowmeter: 1,
   settings_hardware:  1,
   settings_datalog:   1,
   settings_corelogic: 1,
@@ -640,9 +639,6 @@ function pageInit(page) {
     case "settings_device":
       sdInit();
       break;
-    case "settings_flowmeter":
-      sfInit();
-      break;
     case "settings_hardware":
       hwInit();
       break;
@@ -686,16 +682,10 @@ function pageInit(page) {
 // SENSOR_WATERFLOW_ENABLED.  Pulls capability flags from ST.caps (cached
 // from /api/status) — falls back to a fresh fetch if the cache is empty.
 function applyCapsToSettingsHub() {
-  function apply(caps) {
-    if (!caps) return;
-    var fm = document.getElementById("settings-card-flowmeter");
-    if (fm) fm.style.display = caps.flowmeter === false ? "none" : "";
-  }
-  if (ST && ST.caps) { apply(ST.caps); return; }
-  fetchWithTimeout("/api/status")
-    .then(function (r) { return r.json(); })
-    .then(function (s) { ST = s; apply(s.caps || {}); })
-    .catch(function () {});
+  // PR #105 follow-up: settings-card-flowmeter tile was retired (the
+  // standalone page is gone; flow-meter knobs now live on the YF-S201
+  // sensor card + hardware/device pages). Function retained as a no-op
+  // hook so any future capability-driven hiding can land here.
 }
 
 // ============================================================================
@@ -901,12 +891,12 @@ function showMsg(containerId, html, autoClear) {
 
 var PAGE_MSG_IDS = {
   settings_device: "sd-msg",
-  settings_flowmeter: "sf-msg",
   settings_hardware: "hw-msg",
   settings_theme: "th-msg",
   settings_network: "net-msg",
   settings_time: "time-msg",
   settings_datalog: "dl-msg",
+  sensors:          "sl-msg",
 };
 
 function settingsSave(ev, url, form, restart) {

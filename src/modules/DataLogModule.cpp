@@ -19,7 +19,7 @@ const char DATALOG_SCHEMA[] PROGMEM =
                      "{\"v\":4,\"l\":\"By size\"}]},"
       "{\"id\":\"maxSizeKB\",\"type\":\"int\",\"min\":0,\"max\":1048576,\"label\":\"Max size (KB)\","
         "\"showIf\":{\"rotation\":4}},"
-      "{\"id\":\"maxEntries\",\"type\":\"int\",\"min\":0,\"max\":65535,\"label\":\"Max entries\"},"
+      "{\"id\":\"maxEntries\",\"type\":\"int\",\"min\":10,\"max\":65535,\"label\":\"Max entries\"},"
       "{\"id\":\"timestampFilename\",\"type\":\"bool\",\"label\":\"Timestamp in filename\"},"
       "{\"id\":\"includeDeviceId\",\"type\":\"bool\",\"label\":\"Include device ID\"},"
       "{\"id\":\"includeBootCount\",\"type\":\"bool\",\"label\":\"Include boot count\"},"
@@ -47,15 +47,30 @@ const char DATALOG_SCHEMA[] PROGMEM =
 } // namespace
 
 // ---------------------------------------------------------------------------
+// Single source of truth for "load JSON -> config.datalog" — used by both
+// /save_datalog (form -> JsonDocument -> here) and /import_settings (file
+// -> JsonObject -> here). PR #105 follow-up: clamp ranges that previously
+// lived only in the HTTP handler are mirrored here so the JSON path
+// applies the same bounds.  Path-traversal validation stays at the HTTP
+// boundary — load() trusts that prefix/folder/currentFile have already
+// been sanitized (no slashes in prefix, sanitizePath()'d folder /
+// currentFile).
 bool DataLogModule::load(JsonObjectConst cfg) {
     DatalogConfig& d = config.datalog;
-    copyStr(d.prefix, sizeof(d.prefix), cfg["prefix"] | (const char*)nullptr);
-    copyStr(d.folder, sizeof(d.folder), cfg["folder"] | (const char*)nullptr);
+    copyStr(d.prefix,       sizeof(d.prefix),       cfg["prefix"]      | (const char*)nullptr);
+    copyStr(d.folder,       sizeof(d.folder),       cfg["folder"]      | (const char*)nullptr);
+    copyStr(d.currentFile,  sizeof(d.currentFile),  cfg["currentFile"] | (const char*)nullptr);
 
     d.rotation              = (DatalogRotation)(cfg["rotation"] | (int)d.rotation);
     if ((int)d.rotation < 0 || (int)d.rotation > 4) d.rotation = (DatalogRotation)0;
-    d.maxSizeKB             = cfg["maxSizeKB"]  | d.maxSizeKB;
-    d.maxEntries            = cfg["maxEntries"] | d.maxEntries;
+    if (cfg["maxSizeKB"].is<int>()) {
+        int v = cfg["maxSizeKB"].as<int>();
+        d.maxSizeKB  = (v < 10) ? 10 : (v > 10000 ? 10000 : (uint32_t)v);
+    }
+    if (cfg["maxEntries"].is<int>()) {
+        int v = cfg["maxEntries"].as<int>();
+        d.maxEntries = (v < 10) ? 10 : (v > 65535 ? 65535 : (uint16_t)v);
+    }
     d.timestampFilename     = cfg["timestampFilename"]   | d.timestampFilename;
     d.includeDeviceId       = cfg["includeDeviceId"]     | d.includeDeviceId;
     d.includeBootCount      = cfg["includeBootCount"]    | d.includeBootCount;
@@ -68,7 +83,10 @@ bool DataLogModule::load(JsonObjectConst cfg) {
     if (d.endFormat > 2) d.endFormat = 0;
     d.volumeFormat          = (uint8_t)(cfg["volumeFormat"] | (int)d.volumeFormat);
     if (d.volumeFormat > 3) d.volumeFormat = 0;
-    d.manualPressThresholdMs= cfg["manualPressThresholdMs"] | d.manualPressThresholdMs;
+    if (cfg["manualPressThresholdMs"].is<int>()) {
+        int v = cfg["manualPressThresholdMs"].as<int>();
+        d.manualPressThresholdMs = (v < 0) ? 0 : (v > 60000 ? 60000 : (uint16_t)v);
+    }
     d.postCorrectionEnabled = cfg["postCorrectionEnabled"]  | d.postCorrectionEnabled;
     d.pfToFfThreshold       = cfg["pfToFfThreshold"] | d.pfToFfThreshold;
     if (!(d.pfToFfThreshold >= 0.1f && d.pfToFfThreshold <= 1000.0f)) d.pfToFfThreshold = 4.5f;

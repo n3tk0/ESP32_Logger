@@ -28,7 +28,6 @@
  *   POST /save_hardware     – записва HW настройки (→ restart)
  *   POST /save_network      – записва мрежови настройки (→ restart)
  *   POST /save_datalog      – записва datalog настройки
- *   POST /save_flowmeter    – записва flowmeter настройки
  *   POST /save_theme        – записва theme настройки
  *   POST /upload?dir=/www/  – качване на файл в LittleFS
  *   GET  /download?path=... – сваляне на файл

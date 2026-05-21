@@ -21,6 +21,7 @@
 #include "../core/Globals.h"
 #include "../core/BoardProfiles.h"      // R11: g_boardProfile + isPinAllowed
 #include "../modules/OtaModule.h"       // R20: /do_update respects OtaModule.enabled
+#include "../modules/DataLogModule.h"  // /save_datalog delegates to DataLogModule::load()
 #include "../managers/ConfigManager.h"
 #include "../managers/WiFiManager.h"
 #include "../managers/StorageManager.h"
@@ -553,7 +554,6 @@ void setupWebServer() {
     server.on("/live",               HTTP_GET, spaRedirect);
     server.on("/settings",           HTTP_GET, spaRedirect);
     server.on("/settings_device",    HTTP_GET, spaRedirect);
-    server.on("/settings_flowmeter", HTTP_GET, spaRedirect);
     server.on("/settings_hardware",  HTTP_GET, spaRedirect);
     server.on("/settings_theme",     HTTP_GET, spaRedirect);
     server.on("/settings_time",      HTTP_GET, spaRedirect);
@@ -978,11 +978,10 @@ void setupWebServer() {
     // =========================================================================
     // EXPORT SETTINGS
     // Keys consumed by web.js:
-    //   sfInit:  flowMeter{pulsesPerLiter, calibrationMultiplier, monitoringWindowSecs,
-    //                       firstLoopMonitoringWindowSecs, testMode, blinkDuration}
     //   hwInit:  hardware{storageType, pinSdCS, pinSdMOSI, pinSdMISO, pinSdSCK,
     //                      wakeupMode, debounceMs, pinWifiTrigger, pinWakeupFF,
     //                      pinWakeupPF, pinFlowSensor, pinRtcCE, pinRtcIO, pinRtcSCLK, cpuFreqMHz}
+    //            (also flowMeter.testMode / blinkDuration after PR #105 follow-up)
     //   thInit:  theme{mode, showIcons, primaryColor, secondaryColor, bgColor, textColor,
     //                   ffColor, pfColor, otherColor, storageBarColor, storageBar70Color,
     //                   storageBar90Color, storageBarBorder, logoSource, faviconPath,
@@ -1049,6 +1048,7 @@ void setupWebServer() {
         JsonObject dl = doc["datalog"].to<JsonObject>();
         dl["rotation"]               = (int)config.datalog.rotation;
         dl["maxSizeKB"]              = config.datalog.maxSizeKB > 0 ? config.datalog.maxSizeKB : 1024;
+        dl["maxEntries"]             = config.datalog.maxEntries > 0 ? config.datalog.maxEntries : 10000;
         dl["folder"]                 = config.datalog.folder;
         dl["timestampFilename"]      = config.datalog.timestampFilename;
         dl["includeDeviceId"]        = config.datalog.includeDeviceId;
@@ -1142,36 +1142,20 @@ void setupWebServer() {
         config.forceWebServer = r->hasParam("forceWebServer", true);
         if (r->hasParam("defaultStorageView", true))
             config.hardware.defaultStorageView = r->getParam("defaultStorageView", true)->value().toInt();
-        saveConfig();
-        r->send(200, "application/json", "{\"ok\":true}");
-    });
-
-    server.on("/save_flowmeter", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-#if !defined(SENSOR_WATERFLOW_ENABLED)
-        // Chunk G: feature compiled out — return 410 Gone so the UI can
-        // surface a meaningful error if it's still bookmarked or cached.
-        r->send(410, "application/json",
-                "{\"ok\":false,\"error\":\"flowmeter not built into this firmware\"}");
-        return;
-#endif
-        if (r->hasParam("pulsesPerLiter", true)) {
-            float v = r->getParam("pulsesPerLiter", true)->value().toFloat();
-            config.flowMeter.pulsesPerLiter = (v >= 1.0f && isfinite(v)) ? v : 450.0f;
-        }
-        if (r->hasParam("calibrationMultiplier", true)) {
-            float v = r->getParam("calibrationMultiplier", true)->value().toFloat();
-            config.flowMeter.calibrationMultiplier = (v > 0.0f && isfinite(v)) ? v : 1.0f;
-        }
-        config.flowMeter.testMode = r->hasParam("testMode", true);
-        if (r->hasParam("blinkDuration", true))
-            config.flowMeter.blinkDuration = max(50L, r->getParam("blinkDuration", true)->value().toInt());
+        // PR #105 follow-up: Reset Boot Count migrated from /save_flowmeter
+        // (page retired) to the System Info card on settings_device.
         if (r->hasParam("resetBootCount", true)) { bootCount = 0; backupBootCount(); }
         saveConfig();
         r->send(200, "application/json", "{\"ok\":true}");
     });
 
-    server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
+    // PR #105 follow-up: /save_flowmeter endpoint retired together with the
+    // standalone settings_flowmeter page. pulsesPerLiter / calibrationMultiplier
+    // now live on the YF-S201 sensor card (POST /api/config/platform);
+    // testMode + blinkDuration moved to /save_hardware; resetBootCount moved
+    // to /save_device (System Info card).
+
+server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (!requireMutatingAuth(r)) return;
         // R11: validate every pin parameter against the active board profile
         // before assigning. PIN_UNSET / -1 is accepted (means "unconfigured").
@@ -1254,7 +1238,10 @@ void setupWebServer() {
             config.flowMeter.testMode = false;
         }
         if (r->hasParam("blinkDuration", true)) {
-            config.flowMeter.blinkDuration = r->getParam("blinkDuration", true)->value().toInt();
+            // PR #105 review (Gemini medium): restore the lower-bound clamp
+            // the original /save_flowmeter handler had — values < 50 ms make
+            // the LED timing-loop in ESP_Logger.ino spin too tight.
+            config.flowMeter.blinkDuration = max(50L, (long)r->getParam("blinkDuration", true)->value().toInt());
         }
         saveConfig();
         sendRestartPage(r, "Device is restarting with new hardware settings.");
@@ -1291,68 +1278,215 @@ void setupWebServer() {
 
     server.on("/save_datalog", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (!requireMutatingAuth(r)) return;
-        if (r->hasParam("currentFile", true))  SAFE_STRNCPY(config.datalog.currentFile, r->getParam("currentFile", true)->value().c_str(), sizeof(config.datalog.currentFile));
-        if (r->hasParam("prefix", true))       SAFE_STRNCPY(config.datalog.prefix,      r->getParam("prefix", true)->value().c_str(), sizeof(config.datalog.prefix));
-        if (r->hasParam("folder", true))       SAFE_STRNCPY(config.datalog.folder,      r->getParam("folder", true)->value().c_str(), sizeof(config.datalog.folder));
-        if (r->hasParam("rotation", true))     config.datalog.rotation    = (DatalogRotation)r->getParam("rotation", true)->value().toInt();
-        if (r->hasParam("maxSizeKB", true))    config.datalog.maxSizeKB   = constrain(r->getParam("maxSizeKB", true)->value().toInt(), 10, 10000);
-        if (r->hasParam("maxEntries", true))   config.datalog.maxEntries  = constrain(r->getParam("maxEntries", true)->value().toInt(), 10, 100000);
-        config.datalog.timestampFilename   = r->hasParam("timestampFilename", true);
-        config.datalog.includeDeviceId     = r->hasParam("includeDeviceId", true);
-        if (r->hasParam("dateFormat", true))   config.datalog.dateFormat   = r->getParam("dateFormat", true)->value().toInt();
-        if (r->hasParam("timeFormat", true))   config.datalog.timeFormat   = r->getParam("timeFormat", true)->value().toInt();
-        if (r->hasParam("endFormat", true))    config.datalog.endFormat    = r->getParam("endFormat", true)->value().toInt();
-        if (r->hasParam("volumeFormat", true)) config.datalog.volumeFormat = r->getParam("volumeFormat", true)->value().toInt();
-        config.datalog.includeBootCount    = r->hasParam("includeBootCount", true)    && r->getParam("includeBootCount", true)->value()    == "1";
-        config.datalog.includeExtraPresses = r->hasParam("includeExtraPresses", true) && r->getParam("includeExtraPresses", true)->value() == "1";
-        config.datalog.postCorrectionEnabled = r->hasParam("postCorrectionEnabled", true);
-        if (r->hasParam("pfToFfThreshold", true))        config.datalog.pfToFfThreshold        = max(0.1f, r->getParam("pfToFfThreshold", true)->value().toFloat());
-        if (r->hasParam("ffToPfThreshold", true))        config.datalog.ffToPfThreshold        = max(0.1f, r->getParam("ffToPfThreshold", true)->value().toFloat());
-        if (r->hasParam("manualPressThresholdMs", true)) config.datalog.manualPressThresholdMs = r->getParam("manualPressThresholdMs", true)->value().toInt();
 
-        // Wide-CSV pipeline knobs (config.logger.*).  Applied on next StorageTask
-        // restart — see TaskManager::init().
-        config.logger.csvLoggingEnabled         = r->hasParam("csvLoggingEnabled", true);
-        if (r->hasParam("aggregationIntervalSec", true))
-            config.logger.aggregationIntervalSec = constrain(r->getParam("aggregationIntervalSec", true)->value().toInt(), 5, 3600);
+        // ----- Path validation at the HTTP boundary --------------------------
+        // DataLogModule::load() trusts that prefix/folder/currentFile have
+        // already been sanitised; the gates below keep that contract honest
+        // and return HTTP 400 with field-specific messages if they fail.
+        auto isSafePrefix = [](const String& s) -> bool {
+            if (s.length() == 0 || s.length() > 32) return false;
+            for (size_t i = 0; i < s.length(); i++) {
+                char c = s[i];
+                if (c == '/' || c == '\\' || c == '\0' || (unsigned char)c < 0x20 || c == 0x7f) return false;
+            }
+            if (s == "." || s == "..") return false;
+            return true;
+        };
+        String safeCurrentFile;
+        String safePrefix;
+        String safeFolder;
+        bool   haveCurrentFile = false, havePrefix = false, haveFolder = false;
+        if (r->hasParam("currentFile", true)) {
+            safeCurrentFile = sanitizePath(r->getParam("currentFile", true)->value());
+            if (safeCurrentFile.length() == 0) {
+                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid currentFile path\"}");
+                return;
+            }
+            if (!fsAvailable || !activeFS || !activeFS->exists(safeCurrentFile)) {
+                r->send(400, "application/json", "{\"ok\":false,\"error\":\"currentFile does not exist\"}");
+                return;
+            }
+            haveCurrentFile = true;
+        }
+        if (r->hasParam("prefix", true)) {
+            safePrefix = r->getParam("prefix", true)->value();
+            if (!isSafePrefix(safePrefix)) {
+                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix (no slashes, control chars, or ..)\"}");
+                return;
+            }
+            havePrefix = true;
+        }
+        if (r->hasParam("folder", true)) {
+            String fld = r->getParam("folder", true)->value();
+            if (fld.length() > 0) {
+                safeFolder = sanitizePath(fld);
+                if (safeFolder.length() == 0) {
+                    r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid folder path\"}");
+                    return;
+                }
+            } // else: empty folder = root, fine
+            haveFolder = true;
+        }
+
+        // ----- Project form params into a JsonDocument & delegate -----------
+        // DataLogModule::load() is the single source of truth for clamps,
+        // enum bounds, and assignment to config.datalog. Both /save_datalog
+        // (here) and /import_settings call it, so format-field drift across
+        // entry points is impossible by construction.
+        JsonDocument doc;
+        JsonObject cfg = doc.to<JsonObject>();
+        if (haveCurrentFile)                       cfg["currentFile"]            = safeCurrentFile;
+        if (havePrefix)                            cfg["prefix"]                 = safePrefix;
+        if (haveFolder)                            cfg["folder"]                 = safeFolder;
+        if (r->hasParam("rotation", true))         cfg["rotation"]               = r->getParam("rotation", true)->value().toInt();
+        if (r->hasParam("maxSizeKB", true))        cfg["maxSizeKB"]              = r->getParam("maxSizeKB", true)->value().toInt();
+        if (r->hasParam("maxEntries", true))       cfg["maxEntries"]             = r->getParam("maxEntries", true)->value().toInt();
+        cfg["timestampFilename"]                   = r->hasParam("timestampFilename", true);
+        cfg["includeDeviceId"]                     = r->hasParam("includeDeviceId", true);
+        cfg["includeBootCount"]                    = r->hasParam("includeBootCount", true);
+        cfg["includeExtraPresses"]                 = r->hasParam("includeExtraPresses", true);
+        if (r->hasParam("dateFormat", true))       cfg["dateFormat"]             = r->getParam("dateFormat", true)->value().toInt();
+        if (r->hasParam("timeFormat", true))       cfg["timeFormat"]             = r->getParam("timeFormat", true)->value().toInt();
+        if (r->hasParam("endFormat", true))        cfg["endFormat"]              = r->getParam("endFormat", true)->value().toInt();
+        if (r->hasParam("volumeFormat", true))     cfg["volumeFormat"]           = r->getParam("volumeFormat", true)->value().toInt();
+        cfg["postCorrectionEnabled"]               = r->hasParam("postCorrectionEnabled", true);
+        if (r->hasParam("pfToFfThreshold", true))         cfg["pfToFfThreshold"]        = r->getParam("pfToFfThreshold", true)->value().toFloat();
+        if (r->hasParam("ffToPfThreshold", true))         cfg["ffToPfThreshold"]        = r->getParam("ffToPfThreshold", true)->value().toFloat();
+        if (r->hasParam("manualPressThresholdMs", true))  cfg["manualPressThresholdMs"] = r->getParam("manualPressThresholdMs", true)->value().toInt();
+
+        // ArduinoJson v7 doesn't expose .as<>() on JsonObject — but
+        // JsonObject is implicitly convertible to JsonObjectConst, which is
+        // what DataLogModule::load() expects.
+        DataLogModule::instance().load(cfg);
+
+        // Wide-CSV pipeline knobs (config.logger.*) live on the sensors page
+        // now (POST /save_sensorlog). The "create" / "switch" file actions
+        // moved to /api/datalog/{create,switch}.
 
         saveConfig();
+        r->send(200, "application/json", "{\"ok\":true}");
+    });
 
-        String action = r->hasParam("action", true) ? r->getParam("action", true)->value() : "";
-        if (action == "create" && fsAvailable && activeFS) {
-            String folder = String(config.datalog.folder);
-            if (folder.length() > 0 && !folder.startsWith("/")) folder = "/" + folder;
-            if (folder.length() > 0 && !folder.endsWith("/"))   folder += "/";
-            if (folder.length() == 0) folder = "/";
-            if (folder != "/" && !activeFS->exists(folder)) activeFS->mkdir(folder);
+    // POST /save_sensorlog — wide-CSV pipeline knobs (config.logger.*).
+    // Backs the "Sensor CSV logging" card on the Sensors page; split out of
+    // /save_datalog so the flow-meter event log and the sensor-CSV pipeline
+    // each have their own form + endpoint.
+    server.on("/save_sensorlog", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
+        config.logger.csvLoggingEnabled = r->hasParam("csvLoggingEnabled", true);
+        if (r->hasParam("aggregationIntervalSec", true))
+            config.logger.aggregationIntervalSec = constrain(
+                r->getParam("aggregationIntervalSec", true)->value().toInt(), 5, 3600);
+        saveConfig();
+        r->send(200, "application/json", "{\"ok\":true}");
+    });
 
-            String newFile = folder + String(config.datalog.prefix);
-            if (config.datalog.includeDeviceId && strlen(config.deviceId) > 0)
-                newFile += "_" + String(config.deviceId);
-            if (config.datalog.timestampFilename) {
-                if (Rtc) {
-                    RtcDateTime now = Rtc->GetDateTime();
-                    char buf[20];
-                    snprintf(buf, sizeof(buf), "_%04d%02d%02d_%02d%02d%02d",
-                        now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second());
-                    newFile += buf;
-                } else {
-                    newFile += "_" + String(millis());
-                }
-            }
-            newFile += ".txt";
-            File f = activeFS->open(newFile, "w");
-            if (f) {
-                f.close();
-                SAFE_STRNCPY(config.datalog.currentFile, newFile.c_str(), sizeof(config.datalog.currentFile));
-                saveConfig();
-                r->send(200, "application/json", "{\"ok\":true,\"file\":\"" + newFile + "\"}");
-                return;
-            } else {
-                r->send(500, "application/json", "{\"ok\":false,\"error\":\"Failed to create file\"}");
+    // POST /api/datalog/create  body: prefix + folder + flags + (optional) action=switch
+    // Creates a new log file from prefix/folder/timestamp+deviceId flags
+    // without saving any other datalog settings. If action=switch, also sets
+    // it as the active file. Decoupled from /save_datalog so users editing
+    // format/rotation fields can't accidentally create a file on submit.
+    server.on("/api/datalog/create", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
+        if (!fsAvailable || !activeFS) {
+            r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
+            return;
+        }
+        if (!r->hasParam("prefix", true)) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"prefix required\"}");
+            return;
+        }
+        String prefix = r->getParam("prefix", true)->value();
+        // Same prefix rules as /save_datalog (kept in sync — see the inline
+        // isSafePrefix lambda in that handler).
+        if (prefix.length() == 0 || prefix.length() > 32 || prefix == "." || prefix == "..") {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix\"}");
+            return;
+        }
+        for (size_t i = 0; i < prefix.length(); i++) {
+            char c = prefix[i];
+            if (c == '/' || c == '\\' || c == '\0' || (unsigned char)c < 0x20 || c == 0x7f) {
+                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix\"}");
                 return;
             }
         }
+        String folder = r->hasParam("folder", true) ? r->getParam("folder", true)->value() : "";
+        if (folder.length() > 0) {
+            folder = sanitizePath(folder);
+            if (folder.length() == 0) {
+                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid folder\"}");
+                return;
+            }
+            if (!folder.endsWith("/")) folder += "/";
+        } else {
+            folder = "/";
+        }
+        if (folder != "/" && !activeFS->exists(folder)) activeFS->mkdir(folder);
+
+        bool incDeviceId = r->hasParam("includeDeviceId", true);
+        bool timestampFn = r->hasParam("timestampFilename", true);
+
+        String newFile = folder + prefix;
+        if (incDeviceId && strlen(config.deviceId) > 0)
+            newFile += "_" + String(config.deviceId);
+        if (timestampFn) {
+            if (Rtc) {
+                RtcDateTime now = Rtc->GetDateTime();
+                char buf[20];
+                snprintf(buf, sizeof(buf), "_%04d%02d%02d_%02d%02d%02d",
+                    now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second());
+                newFile += buf;
+            } else {
+                newFile += "_" + String(millis());
+            }
+        }
+        newFile += ".txt";
+
+        File f = activeFS->open(newFile, "w");
+        if (!f) {
+            r->send(500, "application/json", "{\"ok\":false,\"error\":\"Failed to create file\"}");
+            return;
+        }
+        f.close();
+
+        // Make this the active file unless caller explicitly opts out via
+        // ?switch=0; default behaviour mirrors the pre-split UX where the
+        // newly-created file became current.
+        bool switchToNew = !r->hasParam("switch", true) ||
+                            r->getParam("switch", true)->value() != "0";
+        if (switchToNew) {
+            SAFE_STRNCPY(config.datalog.currentFile, newFile.c_str(), sizeof(config.datalog.currentFile));
+            saveConfig();
+        }
+
+        String body = String("{\"ok\":true,\"file\":\"") + newFile + "\"}";
+        r->send(200, "application/json", body);
+    });
+
+    // POST /api/datalog/switch  body: path
+    // Sets config.datalog.currentFile to an EXISTING log file. Pure
+    // active-file pointer change; doesn't touch any other datalog field.
+    server.on("/api/datalog/switch", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;
+        if (!fsAvailable || !activeFS) {
+            r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
+            return;
+        }
+        if (!r->hasParam("path", true)) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"path required\"}");
+            return;
+        }
+        String path = sanitizePath(r->getParam("path", true)->value());
+        if (path.length() == 0) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid path\"}");
+            return;
+        }
+        if (!activeFS->exists(path)) {
+            r->send(404, "application/json", "{\"ok\":false,\"error\":\"file not found\"}");
+            return;
+        }
+        SAFE_STRNCPY(config.datalog.currentFile, path.c_str(), sizeof(config.datalog.currentFile));
+        saveConfig();
         r->send(200, "application/json", "{\"ok\":true}");
     });
 
@@ -1865,7 +1999,7 @@ void setupWebServer() {
                 JsonObject dl = doc["datalog"];
                 if (dl["rotation"].is<int>())               config.datalog.rotation               = (DatalogRotation)(int)dl["rotation"];
                 if (dl["maxSizeKB"].is<int>())              config.datalog.maxSizeKB              = constrain(dl["maxSizeKB"].as<int>(), 10, 10000);
-                if (dl["maxEntries"].is<int>())             config.datalog.maxEntries             = constrain(dl["maxEntries"].as<int>(), 10, 100000);
+                if (dl["maxEntries"].is<int>())             config.datalog.maxEntries             = constrain(dl["maxEntries"].as<int>(), 10, 65535);
                 if (dl["dateFormat"].is<int>())             config.datalog.dateFormat             = dl["dateFormat"];
                 if (dl["timeFormat"].is<int>())             config.datalog.timeFormat             = dl["timeFormat"];
                 if (dl["endFormat"].is<int>())              config.datalog.endFormat              = dl["endFormat"];
