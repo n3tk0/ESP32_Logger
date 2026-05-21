@@ -118,6 +118,7 @@ volatile uint32_t g_lastWebActivity = 0;
 volatile uint8_t g_pendingNtpSync    = 0;
 volatile int8_t  g_lastNtpSyncResult = 0;
 volatile bool    g_pendingWiFiShutdown = false;
+volatile bool    g_pendingOtaRollback  = false;
 
 // ============================================================================
 // Restart circuit breaker — state persists across software resets, NOT power.

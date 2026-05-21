@@ -558,13 +558,9 @@ static void handleOtaConfirm(AsyncWebServerRequest* req) {
 static void handleOtaRollback(AsyncWebServerRequest* req) {
     req->send(200, "application/json",
               "{\"ok\":true,\"message\":\"Rolling back and restarting...\"}");
-    // Delay rollback so the response is sent first
-    shouldRestart = false;  // prevent normal restart path
-    delay(200);
-    OtaManager::rollback();
-    // If rollback() returns (shouldn't normally), fall back to restart
-    shouldRestart = true;
-    restartTimer  = millis();
+    // Set a flag consumed by loop() — avoids delay(200) blocking the AsyncTCP
+    // worker while waiting for the response to be transmitted.  (AUDIT 3.16)
+    g_pendingOtaRollback = true;
 }
 
 // ---------------------------------------------------------------------------

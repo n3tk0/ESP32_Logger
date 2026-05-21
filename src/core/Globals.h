@@ -153,6 +153,11 @@ extern volatile int8_t  g_lastNtpSyncResult;
 //                        loop() calls it so AsyncTCP worker is never blocked.
 extern volatile bool g_pendingWiFiShutdown;
 
+// g_pendingOtaRollback: set by /api/ota/rollback after sending the 200 response;
+//                       loop() calls OtaManager::rollback() so the response is
+//                       fully transmitted before the ESP resets.  (AUDIT 3.16)
+extern volatile bool g_pendingOtaRollback;
+
 // ============================================================================
 // RESTART CIRCUIT BREAKER (Pillar 3.7 / AUDIT FC.4)
 // ----------------------------------------------------------------------------

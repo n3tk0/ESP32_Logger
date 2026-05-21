@@ -893,6 +893,18 @@ void loop() {
         safeWiFiShutdown();
     }
 
+    // ── Deferred OTA rollback (AUDIT 3.16) ───────────────────────────────────
+    // /api/ota/rollback sets this flag after sending its 200 response so the
+    // AsyncTCP worker is never blocked by delay() waiting for transmission.
+    if (g_pendingOtaRollback) {
+        g_pendingOtaRollback = false;
+        OtaManager::rollback();
+        // rollback() normally resets the device; if it returns, trigger the
+        // normal restart path so the device doesn't hang.
+        shouldRestart = true;
+        restartTimer  = millis();
+    }
+
     // ── Restart check ─────────────────────────────────────────────────────────
     // ПОПРАВКА: използваме safeWiFiShutdown() преди ESP.restart()
     // Това изчиства WiFi radio state и предотвратява "phantom WiFi pin" проблема:
