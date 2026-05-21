@@ -970,9 +970,21 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
 
     // Each section is best-effort — a missing file just leaves the key off
     // the response.  Restore code (future) must cope with absent keys.
-    inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
-    inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
-    inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+    // Acquire fsMutex around all three reads so StorageTask / saveConfig can't
+    // write a file mid-read.  Lock ordering: configMutex (already held) →
+    // fsMutex — consistent with saveConfig which takes only fsMutex.  (AUDIT 3.20)
+    if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
+        inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
+        inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+        xSemaphoreGive(fsMutex);
+    } else {
+        // Best-effort on timeout — files may be mid-write but we still send
+        // whatever was deserialized rather than returning 503.
+        inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
+        inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
+        inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+    }
 
     serializeJson(doc, *resp);
     xSemaphoreGive(configMutex);
