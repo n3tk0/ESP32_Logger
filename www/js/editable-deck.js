@@ -269,7 +269,20 @@
         reset.className = "btn";
         reset.innerHTML = '<span data-icon="rotate-ccw"></span> Reset';
         reset.addEventListener("click", function () {
-          if (confirm("Reset this page's layout to defaults?")) resetLayout();
+          // Snapshot current layout, reset immediately, give the user an
+          // 8 s undo window via the standard toast helper.
+          var snapshot = cards.map(function (c) { return { id:c.id, span:c.span, hidden:c.hidden }; });
+          resetLayout();
+          if (typeof showUndoToast === "function") {
+            showUndoToast(
+              "Layout reset",
+              "Restored defaults — press Undo to revert",
+              function () {
+                cards = snapshot;
+                persist(); render();
+              }
+            );
+          }
         });
         var done = document.createElement("button");
         done.type = "button";

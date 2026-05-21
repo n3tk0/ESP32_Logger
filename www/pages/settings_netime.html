@@ -1,0 +1,29 @@
+<!-- ════════════════════════════════════════════════════════════════════════
+     Settings → Network & Time (aggregator subpage)
+     WiFi + NTP are connectivity-adjacent and both small; grouping them
+     halves the time-to-find on the Settings hub for fresh users.
+     ════════════════════════════════════════════════════════════════════ -->
+<section class="page" id="page-settings_netime">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title"><span data-icon="wifi"></span> Network &amp; Time</h1>
+      <div class="page-sub">WiFi · AP · hostname · NTP · timezone</div>
+    </div>
+    <div class="page-actions">
+      <a href="#settings" data-page="settings" data-click="navPage" class="btn"><span data-icon="chevron-left"></span> All settings</a>
+    </div>
+  </div>
+
+  <div class="grid grid-auto">
+    <div class="set-card" data-click="showSubpage" data-args='["settings_network"]'>
+      <div class="set-card-icon"><span data-icon="wifi"></span></div>
+      <div class="set-card-t">Network</div>
+      <div class="set-card-d">WiFi · AP · hostname · scan</div>
+    </div>
+    <div class="set-card" data-click="showSubpage" data-args='["settings_time"]'>
+      <div class="set-card-icon"><span data-icon="clock"></span></div>
+      <div class="set-card-t">Time sync</div>
+      <div class="set-card-d">NTP server · timezone · RTC</div>
+    </div>
+  </div>
+</section>

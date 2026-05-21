@@ -88,6 +88,12 @@
                 aria-label="Toggle compact density">
           <span data-icon="rows-3"></span>
         </button>
+        <button type="button" class="icon-btn" id="quickSettingsBtn"
+                data-click="quickSettingsOpen"
+                title="Quick settings (,)"
+                aria-label="Open quick settings">
+          <span data-icon="sliders-horizontal"></span>
+        </button>
         <button type="button" class="icon-btn" id="themeToggleBtn"
                 data-click="quickThemeToggle"
                 title="Toggle dark/light theme"
@@ -496,57 +502,65 @@
           </div>
         </div>
 
-        <div class="grid grid-auto" id="settings-grid">
-          <div class="set-card" data-click="showSubpage" data-args='["settings_device"]'>
-            <div class="set-card-icon"><span data-icon="smartphone"></span></div>
-            <div class="set-card-t">Device</div>
-            <div class="set-card-d">Name, ID, default storage view</div>
+        <!-- Settings hub: 10 cards collapsed to 6 in 3 grouped sections.
+             Hardware + Core logic + Modules → Platform (aggregator subpage).
+             Network + Time → Network & Time (aggregator subpage).
+             Theme moved into the topbar / quick-settings drawer.  Legacy
+             URLs (#settings_theme, #settings_hardware, …) still work — the
+             subpages were not removed. -->
+        <div id="settings-grid">
+          <div class="settings-section">
+            <div class="settings-section-head">DEVICE</div>
+            <div class="grid grid-auto">
+              <div class="set-card" data-click="showSubpage" data-args='["settings_device"]'>
+                <div class="set-card-icon"><span data-icon="smartphone"></span></div>
+                <div class="set-card-t">Device</div>
+                <div class="set-card-d">Name · ID · default storage view</div>
+              </div>
+              <div class="set-card" data-click="showSubpage" data-args='["settings_platform"]'>
+                <div class="set-card-icon"><span data-icon="cpu"></span></div>
+                <div class="set-card-t">Platform</div>
+                <div class="set-card-d">Mode · pins · sensors · modules</div>
+              </div>
+            </div>
           </div>
-          <div class="set-card" data-click="showSubpage" data-args='["settings_hardware"]'>
-            <div class="set-card-icon"><span data-icon="cpu"></span></div>
-            <div class="set-card-t">Hardware</div>
-            <div class="set-card-d">Pins, board diagram, transports</div>
+
+          <div class="settings-section">
+            <div class="settings-section-head">CONNECTIVITY</div>
+            <div class="grid grid-auto">
+              <div class="set-card" data-click="showSubpage" data-args='["settings_netime"]'>
+                <div class="set-card-icon"><span data-icon="wifi"></span></div>
+                <div class="set-card-t">Network &amp; Time</div>
+                <div class="set-card-d">WiFi · AP · hostname · NTP · timezone</div>
+              </div>
+              <div class="set-card" data-click="showSubpage" data-args='["settings_export"]'>
+                <div class="set-card-icon"><span data-icon="cloud-upload"></span></div>
+                <div class="set-card-t">Export</div>
+                <div class="set-card-d">MQTT · HTTP · openSenseMap · webhook</div>
+              </div>
+            </div>
           </div>
-          <div class="set-card" data-click="showSubpage" data-args='["settings_datalog"]'>
-            <div class="set-card-icon"><span data-icon="file-text"></span></div>
-            <div class="set-card-t">Data log</div>
-            <div class="set-card-d">Rotation, retention, format</div>
+
+          <div class="settings-section">
+            <div class="settings-section-head">STORAGE</div>
+            <div class="grid grid-auto">
+              <div class="set-card" data-click="showSubpage" data-args='["settings_datalog"]'>
+                <div class="set-card-icon"><span data-icon="file-text"></span></div>
+                <div class="set-card-t">Data log</div>
+                <div class="set-card-d">Rotation · retention · format</div>
+              </div>
+              <div class="set-card" data-click="showSubpage" data-args='["files"]'>
+                <div class="set-card-icon"><span data-icon="folder"></span></div>
+                <div class="set-card-t">Files</div>
+                <div class="set-card-d">Browse SD / LittleFS</div>
+              </div>
+            </div>
           </div>
-          <div class="set-card" data-click="showSubpage" data-args='["settings_corelogic"]'>
-            <div class="set-card-icon"><span data-icon="puzzle"></span></div>
-            <div class="set-card-t">Core logic</div>
-            <div class="set-card-d">Operating mode, sensors, aggregation</div>
-          </div>
-          <div class="set-card" data-click="showSubpage" data-args='["settings_export"]'>
-            <div class="set-card-icon"><span data-icon="cloud-upload"></span></div>
-            <div class="set-card-t">Export</div>
-            <div class="set-card-d">MQTT, HTTP, openSenseMap</div>
-          </div>
-          <div class="set-card" data-click="showSubpage" data-args='["settings_theme"]'>
-            <div class="set-card-icon"><span data-icon="palette"></span></div>
-            <div class="set-card-t">Theme</div>
-            <div class="set-card-d">Colors, density, accent</div>
-          </div>
-          <div class="set-card" data-click="showSubpage" data-args='["settings_network"]'>
-            <div class="set-card-icon"><span data-icon="wifi"></span></div>
-            <div class="set-card-t">Network</div>
-            <div class="set-card-d">WiFi, AP, hostname</div>
-          </div>
-          <div class="set-card" data-click="showSubpage" data-args='["settings_time"]'>
-            <div class="set-card-icon"><span data-icon="clock"></span></div>
-            <div class="set-card-t">Time sync</div>
-            <div class="set-card-d">NTP server, timezone, RTC</div>
-          </div>
-          <div class="set-card" data-click="showSubpage" data-args='["files"]'>
-            <div class="set-card-icon"><span data-icon="folder"></span></div>
-            <div class="set-card-t">Files</div>
-            <div class="set-card-d">Browse SD / LittleFS</div>
-          </div>
-          <div class="set-card" data-click="showSubpage" data-args='["settings_modules"]'>
-            <div class="set-card-icon"><span data-icon="layers"></span></div>
-            <div class="set-card-t">Modules <span class="badge dim" style="margin-left:6px">preview</span></div>
-            <div class="set-card-d">Optional plug-in features</div>
-          </div>
+
+          <p class="hint" style="margin-top:var(--gap)">
+            Looking for theme, accent, or density? They live in the topbar now (<span data-icon="palette"></span>) and quick-settings drawer (<kbd>,</kbd>).
+            Press <kbd>⌘K</kbd> / <kbd>Ctrl K</kbd> to search every setting field.
+          </p>
         </div>
         <div id="settings-no-match" class="empty" style="display:none">
           <div class="empty-icon"><span data-icon="search"></span></div>
@@ -821,6 +835,9 @@
   <!-- Editable card deck (drag-reorder, masonry, library tray).  Used by
        Overview / Sensors / Alerts via iot-extensions.js. -->
   <script src="/js/editable-deck.js" defer></script>
+  <!-- Streamlining surfaces: command palette (⌘K) + quick-settings drawer. -->
+  <script src="/js/command-palette.js" defer></script>
+  <script src="/js/quick-settings.js" defer></script>
   <!-- IoT extensions: Overview / Alerts pages, sensor zones, compare mode,
        wizard, platform-mode awareness, editable card decks.  Loaded last so
        it can depend on everything defined above. -->

@@ -645,6 +645,8 @@ var LAZY_PAGES = {
   settings_network:   1,
   settings_time:      1,
   settings_modules:   1,
+  settings_platform:  1, // aggregator: hardware + core logic + modules
+  settings_netime:    1, // aggregator: network + time
   update:             1,
 };
 var _loadedPartials = {};   // page name → true once injected
@@ -892,6 +894,95 @@ function showToast(a, b, c) {
   close.addEventListener("click", dismiss);
   setTimeout(dismiss, 3000);
 }
+
+// showUndoToast(title, msg, onUndo, opts?)
+// Wraps showToast with an "Undo" affordance for low-risk destructive
+// actions (delete file, remove sensor, reset layout).  The action is taken
+// optimistically — caller already removed the data — and onUndo() is
+// called only if the user clicks Undo before the toast (8 s default) drains.
+//   opts.duration  override the 8 000 ms default
+//   opts.onCommit  fires on dismiss (timeout or close) when undo was NOT clicked
+function showUndoToast(title, msg, onUndo, opts) {
+  opts = opts || {};
+  var duration = opts.duration || 8000;
+  var container = document.getElementById("toastContainer");
+  if (!container) return;
+
+  var el = document.createElement("div");
+  el.className = "toast toast-info toast-undo";
+  el.setAttribute("role", "status");
+  el.setAttribute("aria-live", "polite");
+
+  var iconSpan = document.createElement("span");
+  iconSpan.className = "toast-icon";
+  iconSpan.setAttribute("data-icon", "info");
+  el.appendChild(iconSpan);
+
+  var body = document.createElement("div");
+  body.className = "toast-body";
+  var titleEl = document.createElement("div");
+  titleEl.className = "toast-title";
+  titleEl.textContent = title || "";
+  body.appendChild(titleEl);
+  if (msg) {
+    var msgEl = document.createElement("div");
+    msgEl.className = "toast-msg";
+    msgEl.textContent = msg;
+    body.appendChild(msgEl);
+  }
+  el.appendChild(body);
+
+  var undoBtn = document.createElement("button");
+  undoBtn.type = "button";
+  undoBtn.className = "btn-mini toast-undo-btn";
+  undoBtn.textContent = "Undo";
+  el.appendChild(undoBtn);
+
+  var close = document.createElement("button");
+  close.type = "button";
+  close.className = "toast-close";
+  close.setAttribute("aria-label", "Dismiss notification");
+  var closeIcon = document.createElement("span");
+  closeIcon.setAttribute("data-icon", "x");
+  close.appendChild(closeIcon);
+  el.appendChild(close);
+
+  var countdown = document.createElement("div");
+  countdown.className = "toast-countdown";
+  countdown.style.animationDuration = duration + "ms";
+  el.appendChild(countdown);
+
+  container.appendChild(el);
+  if (window.Icons && Icons.swap) Icons.swap(el);
+
+  var dismissed = false;
+  var undone   = false;
+  var timer    = null;
+
+  function dismiss(committed) {
+    if (dismissed) return;
+    dismissed = true;
+    clearTimeout(timer);
+    if (committed && !undone && typeof opts.onCommit === "function") {
+      try { opts.onCommit(); } catch (e) {}
+    }
+    el.classList.add("toast-dismissing");
+    setTimeout(function () {
+      if (container.contains(el)) container.removeChild(el);
+    }, 260);
+  }
+
+  undoBtn.addEventListener("click", function () {
+    undone = true;
+    if (typeof onUndo === "function") {
+      try { onUndo(); } catch (e) {}
+    }
+    dismiss(false);
+  });
+  close.addEventListener("click", function () { dismiss(true); });
+  timer = setTimeout(function () { dismiss(true); }, duration);
+}
+window.showUndoToast = showUndoToast;
 
 // emptyState(opts) — returns DOM for the design's structured empty state.
 // opts: { icon, title, msg, ctaText, ctaPage }.  Title is required;
@@ -1390,7 +1481,11 @@ registerHandlers({
       '<div class="kb-help-card">' +
         '<div class="kb-help-title">Keyboard shortcuts</div>' +
         '<ul class="kb-help-list">' +
+          '<li><kbd>⌘</kbd> <kbd>K</kbd><span>Command palette (also <kbd>Ctrl K</kbd> or <kbd>/</kbd>)</span></li>' +
+          '<li><kbd>,</kbd><span>Quick settings drawer</span></li>' +
           '<li><kbd>G</kbd> <kbd>D</kbd><span>Dashboard</span></li>' +
+          '<li><kbd>G</kbd> <kbd>O</kbd><span>Overview</span></li>' +
+          '<li><kbd>G</kbd> <kbd>A</kbd><span>Alerts</span></li>' +
           '<li><kbd>G</kbd> <kbd>L</kbd><span>Live</span></li>' +
           '<li><kbd>G</kbd> <kbd>F</kbd><span>Files</span></li>' +
           '<li><kbd>G</kbd> <kbd>C</kbd><span>Sensors</span></li>' +
