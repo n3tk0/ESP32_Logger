@@ -21,6 +21,7 @@
 #include "../core/Globals.h"
 #include "../core/BoardProfiles.h"      // R11: g_boardProfile + isPinAllowed
 #include "../modules/OtaModule.h"       // R20: /do_update respects OtaModule.enabled
+#include "../modules/DataLogModule.h"  // /save_datalog delegates to DataLogModule::load()
 #include "../managers/ConfigManager.h"
 #include "../managers/WiFiManager.h"
 #include "../managers/StorageManager.h"
@@ -1274,9 +1275,11 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
 
     server.on("/save_datalog", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (!requireMutatingAuth(r)) return;
-        // Filename-component validator for prefix: no slashes, no traversal,
-        // no control chars. Used for the bare prefix string only — folder /
-        // currentFile go through sanitizePath().
+
+        // ----- Path validation at the HTTP boundary --------------------------
+        // DataLogModule::load() trusts that prefix/folder/currentFile have
+        // already been sanitised; the gates below keep that contract honest
+        // and return HTTP 400 with field-specific messages if they fail.
         auto isSafePrefix = [](const String& s) -> bool {
             if (s.length() == 0 || s.length() > 32) return false;
             for (size_t i = 0; i < s.length(); i++) {
@@ -1286,72 +1289,75 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
             if (s == "." || s == "..") return false;
             return true;
         };
+        String safeCurrentFile;
+        String safePrefix;
+        String safeFolder;
+        bool   haveCurrentFile = false, havePrefix = false, haveFolder = false;
         if (r->hasParam("currentFile", true)) {
-            String cf = sanitizePath(r->getParam("currentFile", true)->value());
-            if (cf.length() == 0) {
+            safeCurrentFile = sanitizePath(r->getParam("currentFile", true)->value());
+            if (safeCurrentFile.length() == 0) {
                 r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid currentFile path\"}");
                 return;
             }
-            // Require the file to exist on the active filesystem before we
-            // route writes to it. Switching to a deleted/non-existent path
-            // would silently misroute the next data-log line until reboot.
-            if (!fsAvailable || !activeFS || !activeFS->exists(cf)) {
+            if (!fsAvailable || !activeFS || !activeFS->exists(safeCurrentFile)) {
                 r->send(400, "application/json", "{\"ok\":false,\"error\":\"currentFile does not exist\"}");
                 return;
             }
-            SAFE_STRNCPY(config.datalog.currentFile, cf.c_str(), sizeof(config.datalog.currentFile));
+            haveCurrentFile = true;
         }
         if (r->hasParam("prefix", true)) {
-            String pf = r->getParam("prefix", true)->value();
-            if (!isSafePrefix(pf)) {
+            safePrefix = r->getParam("prefix", true)->value();
+            if (!isSafePrefix(safePrefix)) {
                 r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix (no slashes, control chars, or ..)\"}");
                 return;
             }
-            SAFE_STRNCPY(config.datalog.prefix, pf.c_str(), sizeof(config.datalog.prefix));
+            havePrefix = true;
         }
         if (r->hasParam("folder", true)) {
             String fld = r->getParam("folder", true)->value();
-            if (fld.length() == 0) {
-                config.datalog.folder[0] = '\0';
-            } else {
-                String fs = sanitizePath(fld);
-                if (fs.length() == 0) {
+            if (fld.length() > 0) {
+                safeFolder = sanitizePath(fld);
+                if (safeFolder.length() == 0) {
                     r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid folder path\"}");
                     return;
                 }
-                SAFE_STRNCPY(config.datalog.folder, fs.c_str(), sizeof(config.datalog.folder));
-            }
+            } // else: empty folder = root, fine
+            haveFolder = true;
         }
-        if (r->hasParam("rotation", true))     config.datalog.rotation    = (DatalogRotation)r->getParam("rotation", true)->value().toInt();
-        if (r->hasParam("maxSizeKB", true))    config.datalog.maxSizeKB   = constrain(r->getParam("maxSizeKB", true)->value().toInt(), 10, 10000);
-        if (r->hasParam("maxEntries", true))   config.datalog.maxEntries  = constrain(r->getParam("maxEntries", true)->value().toInt(), 10, 65535);
-        config.datalog.timestampFilename   = r->hasParam("timestampFilename", true);
-        config.datalog.includeDeviceId     = r->hasParam("includeDeviceId", true);
-        if (r->hasParam("dateFormat", true))   config.datalog.dateFormat   = r->getParam("dateFormat", true)->value().toInt();
-        if (r->hasParam("timeFormat", true))   config.datalog.timeFormat   = r->getParam("timeFormat", true)->value().toInt();
-        if (r->hasParam("endFormat", true))    config.datalog.endFormat    = r->getParam("endFormat", true)->value().toInt();
-        if (r->hasParam("volumeFormat", true)) config.datalog.volumeFormat = r->getParam("volumeFormat", true)->value().toInt();
-        // PR #105 follow-up: page UI switched from "On/Off" dropdowns to
-        // checkboxes — checkboxes only submit when checked, so hasParam
-        // alone is now the right test (matches timestampFilename /
-        // includeDeviceId / postCorrectionEnabled in this same handler).
-        config.datalog.includeBootCount    = r->hasParam("includeBootCount", true);
-        config.datalog.includeExtraPresses = r->hasParam("includeExtraPresses", true);
-        config.datalog.postCorrectionEnabled = r->hasParam("postCorrectionEnabled", true);
-        if (r->hasParam("pfToFfThreshold", true))        config.datalog.pfToFfThreshold        = max(0.1f, r->getParam("pfToFfThreshold", true)->value().toFloat());
-        if (r->hasParam("ffToPfThreshold", true))        config.datalog.ffToPfThreshold        = max(0.1f, r->getParam("ffToPfThreshold", true)->value().toFloat());
-        if (r->hasParam("manualPressThresholdMs", true)) config.datalog.manualPressThresholdMs = r->getParam("manualPressThresholdMs", true)->value().toInt();
+
+        // ----- Project form params into a JsonDocument & delegate -----------
+        // DataLogModule::load() is the single source of truth for clamps,
+        // enum bounds, and assignment to config.datalog. Both /save_datalog
+        // (here) and /import_settings call it, so format-field drift across
+        // entry points is impossible by construction.
+        JsonDocument doc;
+        JsonObject cfg = doc.to<JsonObject>();
+        if (haveCurrentFile)                       cfg["currentFile"]            = safeCurrentFile;
+        if (havePrefix)                            cfg["prefix"]                 = safePrefix;
+        if (haveFolder)                            cfg["folder"]                 = safeFolder;
+        if (r->hasParam("rotation", true))         cfg["rotation"]               = r->getParam("rotation", true)->value().toInt();
+        if (r->hasParam("maxSizeKB", true))        cfg["maxSizeKB"]              = r->getParam("maxSizeKB", true)->value().toInt();
+        if (r->hasParam("maxEntries", true))       cfg["maxEntries"]             = r->getParam("maxEntries", true)->value().toInt();
+        cfg["timestampFilename"]                   = r->hasParam("timestampFilename", true);
+        cfg["includeDeviceId"]                     = r->hasParam("includeDeviceId", true);
+        cfg["includeBootCount"]                    = r->hasParam("includeBootCount", true);
+        cfg["includeExtraPresses"]                 = r->hasParam("includeExtraPresses", true);
+        if (r->hasParam("dateFormat", true))       cfg["dateFormat"]             = r->getParam("dateFormat", true)->value().toInt();
+        if (r->hasParam("timeFormat", true))       cfg["timeFormat"]             = r->getParam("timeFormat", true)->value().toInt();
+        if (r->hasParam("endFormat", true))        cfg["endFormat"]              = r->getParam("endFormat", true)->value().toInt();
+        if (r->hasParam("volumeFormat", true))     cfg["volumeFormat"]           = r->getParam("volumeFormat", true)->value().toInt();
+        cfg["postCorrectionEnabled"]               = r->hasParam("postCorrectionEnabled", true);
+        if (r->hasParam("pfToFfThreshold", true))         cfg["pfToFfThreshold"]        = r->getParam("pfToFfThreshold", true)->value().toFloat();
+        if (r->hasParam("ffToPfThreshold", true))         cfg["ffToPfThreshold"]        = r->getParam("ffToPfThreshold", true)->value().toFloat();
+        if (r->hasParam("manualPressThresholdMs", true))  cfg["manualPressThresholdMs"] = r->getParam("manualPressThresholdMs", true)->value().toInt();
+
+        DataLogModule::instance().load(cfg.as<JsonObjectConst>());
 
         // Wide-CSV pipeline knobs (config.logger.*) live on the sensors page
-        // now (POST /save_sensorlog).  This handler used to also accept them
-        // alongside the flow-meter datalog fields, but conflating the two
-        // sublogs in one form was confusing — see the dedicated endpoint
-        // below.
+        // now (POST /save_sensorlog). The "create" / "switch" file actions
+        // moved to /api/datalog/{create,switch}.
 
         saveConfig();
-        // The "create" + "switch" actions were lifted out of this endpoint
-        // so they no longer share the same submit with the bulk format /
-        // rotation form. See /api/datalog/create and /api/datalog/switch.
         r->send(200, "application/json", "{\"ok\":true}");
     });
 
