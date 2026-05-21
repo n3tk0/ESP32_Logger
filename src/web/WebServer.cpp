@@ -1238,7 +1238,10 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
             config.flowMeter.testMode = false;
         }
         if (r->hasParam("blinkDuration", true)) {
-            config.flowMeter.blinkDuration = r->getParam("blinkDuration", true)->value().toInt();
+            // PR #105 review (Gemini medium): restore the lower-bound clamp
+            // the original /save_flowmeter handler had — values < 50 ms make
+            // the LED timing-loop in ESP_Logger.ino spin too tight.
+            config.flowMeter.blinkDuration = max(50L, (long)r->getParam("blinkDuration", true)->value().toInt());
         }
         saveConfig();
         sendRestartPage(r, "Device is restarting with new hardware settings.");
@@ -1351,7 +1354,10 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (r->hasParam("ffToPfThreshold", true))         cfg["ffToPfThreshold"]        = r->getParam("ffToPfThreshold", true)->value().toFloat();
         if (r->hasParam("manualPressThresholdMs", true))  cfg["manualPressThresholdMs"] = r->getParam("manualPressThresholdMs", true)->value().toInt();
 
-        DataLogModule::instance().load(cfg.as<JsonObjectConst>());
+        // ArduinoJson v7 doesn't expose .as<>() on JsonObject — but
+        // JsonObject is implicitly convertible to JsonObjectConst, which is
+        // what DataLogModule::load() expects.
+        DataLogModule::instance().load(cfg);
 
         // Wide-CSV pipeline knobs (config.logger.*) live on the sensors page
         // now (POST /save_sensorlog). The "create" / "switch" file actions
