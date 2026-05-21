@@ -144,8 +144,10 @@
         </div>
       </div>
 
-      <!-- Post-Correction -->
-      <div class="card">
+      <!-- Post-Correction (PLATFORM_LEGACY only; dlInit hides this on
+           PLATFORM_HYBRID / PLATFORM_CONTINUOUS where the 2-button
+           FF/PF correction doesn't apply). -->
+      <div class="card" id="dl-pcCard">
         <div class="card-head"><div class="card-title"><span data-icon="refresh-cw"></span> Post-Correction</div></div>
         <div class="card-body">
           <div class="field">

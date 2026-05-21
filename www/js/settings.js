@@ -996,6 +996,27 @@ function timeRestoreBoot() {
 // ══ SETTINGS: DATALOG ══
 // ============================================================================
 function dlInit() {
+  // Post-Correction (PF↔FF) is a PLATFORM_LEGACY-only feature: it relies on
+  // 2-button toilet event semantics that PLATFORM_HYBRID / CONTINUOUS don't
+  // have. Hide the card outside legacy mode. ST.caps.platformMode is
+  // populated by /api/status (cached in ST after the dashboard loads).
+  function _hidePcIfNotLegacy(mode) {
+    var card = document.getElementById("dl-pcCard");
+    if (!card) return;
+    card.style.display = (mode === 0) ? "" : "none";
+  }
+  if (ST && ST.caps && ST.caps.platformMode !== undefined) {
+    _hidePcIfNotLegacy(ST.caps.platformMode);
+  } else {
+    fetchWithTimeout("/api/status", {}, 15000)
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        ST = s;
+        _hidePcIfNotLegacy((s.caps && s.caps.platformMode) || 0);
+      })
+      .catch(function () { /* leave card visible if status unreachable */ });
+  }
+
   fetchWithTimeout("/api/filelist?filter=log&recursive=1", {}, 15000)
     .then(function (r) {
       return r.json();
