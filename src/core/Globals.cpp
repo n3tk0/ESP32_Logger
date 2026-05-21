@@ -118,6 +118,9 @@ volatile uint32_t g_lastWebActivity = 0;
 volatile uint8_t g_pendingNtpSync    = 0;
 volatile int8_t  g_lastNtpSyncResult = 0;
 volatile bool    g_pendingWiFiShutdown = false;
+std::atomic<bool> g_pendingOtaRollback{false};
+std::atomic<bool> g_pendingRtcSet{false};
+PendingRtcSet     g_pendingRtcTime = {};
 
 // ============================================================================
 // Restart circuit breaker — state persists across software resets, NOT power.

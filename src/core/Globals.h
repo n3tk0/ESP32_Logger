@@ -144,6 +144,7 @@ extern volatile uint32_t g_lastWebActivity;
 // ============================================================================
 // DEFERRED ACTIONS (executed from loop() so async handlers don't block)
 // ============================================================================
+#include <atomic>
 // g_pendingNtpSync:      0 = idle, 1 = requested, 2 = running
 // g_lastNtpSyncResult:   0 = unknown, 1 = ok, -1 = fail
 extern volatile uint8_t g_pendingNtpSync;
@@ -152,6 +153,23 @@ extern volatile int8_t  g_lastNtpSyncResult;
 // g_pendingWiFiShutdown: set by async handlers that need safeWiFiShutdown();
 //                        loop() calls it so AsyncTCP worker is never blocked.
 extern volatile bool g_pendingWiFiShutdown;
+
+// g_pendingOtaRollback / g_pendingRtcSet: std::atomic<bool> so writer (AsyncTCP
+// task) and reader (main loop, potentially on a different core) see consistent
+// state without relying on volatile alone.  release-store pairs with
+// acquire-load so any data written before the flag (g_pendingRtcTime struct)
+// is visible to the reader.  (AUDIT 3.16 / 3.17)
+extern std::atomic<bool> g_pendingOtaRollback;
+
+// g_pendingRtcSet: /set_time updates the POSIX clock immediately (non-blocking)
+// then sets this flag so loop() performs the hardware RTC writes (3 × delay)
+// without blocking the AsyncTCP worker.  (AUDIT 3.17)
+struct PendingRtcSet {
+    uint16_t year;
+    uint8_t  month, day, hour, minute;
+};
+extern std::atomic<bool> g_pendingRtcSet;
+extern PendingRtcSet     g_pendingRtcTime;  // written before release-store above
 
 // ============================================================================
 // RESTART CIRCUIT BREAKER (Pillar 3.7 / AUDIT FC.4)

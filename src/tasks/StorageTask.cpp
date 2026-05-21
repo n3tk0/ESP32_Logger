@@ -84,12 +84,22 @@ void storageTaskFunc(void* param) {
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_STORAGE] = millis();
 
+        // Re-read live config knobs from *p so a /api/config/platform reload
+        // propagates without a task restart.  (AUDIT 11.5)
+        if (p) {
+            agg.setIntervalSec(p->aggregationIntervalSec
+                                   ? p->aggregationIntervalSec : 60);
+            agg.setHumidityCorrection(p->humidityCorrectionEnabled,
+                                       p->humidityCorrectionKappa > 0.0f
+                                           ? p->humidityCorrectionKappa : 0.35f);
+            writingEnabled = p->csvLoggingEnabled && (p->fs != nullptr);
+        }
+
         // Drain available readings into the aggregator (and the run logger
         // when active).  The 100 ms wait keeps the heartbeat fresh while
         // still draining bursts.  When CSV writing is disabled the
         // aggregator must be skipped — it would otherwise accumulate sum/
         // count forever (no flush ever resets them in drain-only mode).
-        uint32_t feedEpoch = nowEpochSafe();
         // R14 / AUDIT 11.6: cap inner drain at 32 readings per outer
         // iteration so the heartbeat refresh at line 85 happens at least
         // every 32 × 100 ms = 3.2 s worst-case. Under sustained sensor
@@ -99,7 +109,13 @@ void storageTaskFunc(void* param) {
         while (drained++ < 32 &&
                xQueueReceive(storageQueue, &r, pdMS_TO_TICKS(100)) == pdTRUE) {
             if (writingEnabled) agg.feed(r);
-            if (flowRunActive)  flowRunLog.feed(r, feedEpoch);
+            // Use the reading's own timestamp for FlowRunLogger duration
+            // accounting; fall back to nowEpochSafe() only when ts is absent.
+            // (AUDIT 11.7)
+            if (flowRunActive) {
+                uint32_t feedTs = (r.timestamp > 0) ? r.timestamp : nowEpochSafe();
+                flowRunLog.feed(r, feedTs);
+            }
         }
 
         uint32_t epoch = nowEpochSafe();
@@ -113,10 +129,16 @@ void storageTaskFunc(void* param) {
         uint32_t rowTs = 0;
         if (agg.buildRowIfDue(epoch, rowBuf, sizeof(rowBuf), &rowTs)) {
             if (agg.buildHeader(headerBuf, sizeof(headerBuf)) > 0) {
-                MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-                if (g.isLocked()) {
-                    primary.appendRow(rowTs, headerBuf, rowBuf);
-                    if (mirrorActive) mirror.appendRow(rowTs, headerBuf, rowBuf);
+                // Release fsMutex between primary and mirror so a slow SD write
+                // (50-100 ms) doesn't block the mutex for the full dual-write
+                // window.  (AUDIT 2.16)
+                {
+                    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+                    if (g.isLocked()) primary.appendRow(rowTs, headerBuf, rowBuf);
+                }
+                if (mirrorActive) {
+                    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+                    if (g.isLocked()) mirror.appendRow(rowTs, headerBuf, rowBuf);
                 }
             }
         }

@@ -1433,20 +1433,15 @@ void setupWebServer() {
             settimeofday(&tv, nullptr);
             rtcValid = true;
 
-            bool ok = true;
+            // Defer hardware RTC writes to loop() — three delay() calls sum to
+            // ~120 ms and block the AsyncTCP worker for every concurrent request.
+            // (AUDIT 3.17)
             if (Rtc) {
-                // RAII guard: re-enable RTC write protection on every exit path.
-                struct RtcWriteGuard {
-                    ~RtcWriteGuard() { if (Rtc) Rtc->SetIsWriteProtected(true); }
-                } guard;
-                RtcDateTime dt(yr, mo, dy, hr, mi, 0);
-                Rtc->SetIsWriteProtected(false); delay(10);
-                Rtc->SetIsRunning(true); delay(10);
-                Rtc->SetDateTime(dt); delay(100);
-                RtcDateTime v = Rtc->GetDateTime();
-                ok = (v.Year() == yr && v.Month() == mo && v.Day() == dy);
+                g_pendingRtcTime = { (uint16_t)yr, (uint8_t)mo, (uint8_t)dy,
+                                     (uint8_t)hr, (uint8_t)mi };
+                g_pendingRtcSet.store(true, std::memory_order_release);
             }
-            r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"RTC write failed\"}");
+            r->send(200, "application/json", "{\"ok\":true}");
         } else {
             r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing date or time\"}");
         }
@@ -1593,7 +1588,10 @@ void setupWebServer() {
                            (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
         if (targetFS && targetFS->exists(path)) {
             String filename = path.substring(path.lastIndexOf('/') + 1);
+            // Null-check resp: exists() → beginResponse() has a TOCTOU window;
+            // the file may be deleted between the two calls.  (AUDIT 3.18)
             AsyncWebServerResponse *resp = r->beginResponse(*targetFS, path, "application/octet-stream");
+            if (!resp) { r->send(404, "text/plain", "Not found"); return; }
             resp->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
             r->send(resp);
         } else {

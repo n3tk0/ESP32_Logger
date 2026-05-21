@@ -185,6 +185,11 @@
 #ifndef STACK_SLOW_SENSOR_TASK
 #  define STACK_SLOW_SENSOR_TASK 4096   // Blocking sensor reads (UART + delay)
 #endif
+// SlowSensorTask outer poll cadence.  Override to reduce duty-cycle for
+// sensors whose internal measurement window is >> 500 ms.  (AUDIT 10.4)
+#ifndef SLOW_SENSOR_TICK_MS
+#  define SLOW_SENSOR_TICK_MS    500
+#endif
 #ifndef STACK_STORAGE_TASK
 #  define STACK_STORAGE_TASK     8192   // LiveAggregator (~2.4 KB) + StorageTask
                                         // local row/header buffers (2 KB) +

@@ -5,6 +5,7 @@
 #include <time.h>                      // /api/backup created_at (Pass 5 5.7)
 #include <freertos/task.h>
 #include <new>                            // std::nothrow
+#include <atomic>
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/AggregationEngine.h"
 #include "../sensors/SensorManager.h"
@@ -53,12 +54,21 @@ static void handleApiData(AsyncWebServerRequest* req) {
                       ? (uint32_t)req->getParam("to")->value().toInt()
                       : now;
 
-    const char* sensorFilter = req->hasParam("sensor")
-                               ? req->getParam("sensor")->value().c_str()
-                               : nullptr;
-    const char* metricFilter = req->hasParam("metric")
-                               ? req->getParam("metric")->value().c_str()
-                               : nullptr;
+    // Copy filter strings to local buffers — AsyncWebParameter::value() is a
+    // String whose c_str() may dangle after the param object is freed during
+    // async response streaming.  (AUDIT 3.10)
+    char sensorFilterBuf[33] = "";
+    char metricFilterBuf[24] = "";
+    if (req->hasParam("sensor")) {
+        strncpy(sensorFilterBuf, req->getParam("sensor")->value().c_str(),
+                sizeof(sensorFilterBuf) - 1);
+    }
+    if (req->hasParam("metric")) {
+        strncpy(metricFilterBuf, req->getParam("metric")->value().c_str(),
+                sizeof(metricFilterBuf) - 1);
+    }
+    const char* sensorFilter = sensorFilterBuf[0] ? sensorFilterBuf : nullptr;
+    const char* metricFilter = metricFilterBuf[0] ? metricFilterBuf : nullptr;
 
     TimeBucket bucket = parseBucket(req->hasParam("agg")
                         ? req->getParam("agg")->value().c_str() : "5m");
@@ -548,13 +558,9 @@ static void handleOtaConfirm(AsyncWebServerRequest* req) {
 static void handleOtaRollback(AsyncWebServerRequest* req) {
     req->send(200, "application/json",
               "{\"ok\":true,\"message\":\"Rolling back and restarting...\"}");
-    // Delay rollback so the response is sent first
-    shouldRestart = false;  // prevent normal restart path
-    delay(200);
-    OtaManager::rollback();
-    // If rollback() returns (shouldn't normally), fall back to restart
-    shouldRestart = true;
-    restartTimer  = millis();
+    // Set a flag consumed by loop() — avoids delay(200) blocking the AsyncTCP
+    // worker while waiting for the response to be transmitted.  (AUDIT 3.16)
+    g_pendingOtaRollback.store(true, std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------
@@ -697,10 +703,14 @@ static void handleApiModuleRestart(AsyncWebServerRequest* req, const String& id)
 // ---------------------------------------------------------------------------
 
 // ── WiFi test state machine ─────────────────────────────────────────────────
+// g_wtState written from wifiTestTaskFn (separate FreeRTOS task, potentially
+// on the other core) and read/consumed from AsyncTCP worker — requires
+// release/acquire ordering so ip/rssi writes are visible to the reader before
+// it observes WT_SUCCESS.  (AUDIT 3.11)
 enum WifiTestState : uint8_t {
     WT_IDLE = 0, WT_RUNNING, WT_SUCCESS, WT_FAILED
 };
-static volatile WifiTestState g_wtState = WT_IDLE;
+static std::atomic<WifiTestState> g_wtState{WT_IDLE};
 static char     g_wtSsid[33]        = "";
 static char     g_wtPassword[65]    = "";
 static int32_t  g_wtRssi            = 0;
@@ -724,10 +734,12 @@ static void wifiTestTaskFn(void* /*arg*/) {
     if (WiFi.status() == WL_CONNECTED) {
         g_wtRssi = WiFi.RSSI();
         strlcpy(g_wtIp, WiFi.localIP().toString().c_str(), sizeof(g_wtIp));
-        g_wtState = WT_SUCCESS;
+        // release-store: ip/rssi writes above are visible to any thread that
+        // observes WT_SUCCESS via an acquire-load.
+        g_wtState.store(WT_SUCCESS, std::memory_order_release);
     } else {
         strlcpy(g_wtError, "timeout or auth failure", sizeof(g_wtError));
-        g_wtState = WT_FAILED;
+        g_wtState.store(WT_FAILED, std::memory_order_release);
     }
 
     // Tear down the probe connection but keep stored NVS creds intact —
@@ -799,7 +811,7 @@ static void handleApiWifiTest(AsyncWebServerRequest* req,
                   "{\"ok\":false,\"error\":\"missing ssid\"}");
         return;
     }
-    if (g_wtState == WT_RUNNING) {
+    if (g_wtState.load(std::memory_order_relaxed) == WT_RUNNING) {
         req->send(409, "application/json",
                   "{\"ok\":false,\"error\":\"test already running\"}");
         return;
@@ -810,12 +822,14 @@ static void handleApiWifiTest(AsyncWebServerRequest* req,
     g_wtRssi  = 0;
     g_wtIp[0] = '\0';
     g_wtError[0] = '\0';
-    g_wtState = WT_RUNNING;
+    // Task creation provides the barrier that makes ssid/pw visible to the
+    // newly spawned task; relaxed store is sufficient here.
+    g_wtState.store(WT_RUNNING, std::memory_order_relaxed);
 
     BaseType_t rc = xTaskCreate(wifiTestTaskFn, "wifiTest", 4096,
                                  nullptr, 1, nullptr);
     if (rc != pdPASS) {
-        g_wtState = WT_IDLE;
+        g_wtState.store(WT_IDLE, std::memory_order_relaxed);
         req->send(500, "application/json",
                   "{\"ok\":false,\"error\":\"cannot spawn task\"}");
         return;
@@ -831,7 +845,9 @@ static void handleApiWifiTest(AsyncWebServerRequest* req,
 static void handleApiWifiTestPoll(AsyncWebServerRequest* req) {
     JsonDocument doc;
     doc["ok"] = true;
-    switch (g_wtState) {
+    // acquire-load: synchronises-with the release-store in wifiTestTaskFn so
+    // g_wtRssi / g_wtIp / g_wtError are visible when SUCCESS/FAILED is seen.
+    switch (g_wtState.load(std::memory_order_acquire)) {
         case WT_RUNNING:
             doc["state"] = "running";
             break;
@@ -839,12 +855,12 @@ static void handleApiWifiTestPoll(AsyncWebServerRequest* req) {
             doc["state"] = "success";
             doc["rssi"]  = g_wtRssi;
             doc["ip"]    = g_wtIp;
-            g_wtState = WT_IDLE;    // consume
+            g_wtState.store(WT_IDLE, std::memory_order_relaxed);  // consume
             break;
         case WT_FAILED:
             doc["state"] = "failed";
             doc["error"] = g_wtError;
-            g_wtState = WT_IDLE;    // consume
+            g_wtState.store(WT_IDLE, std::memory_order_relaxed);  // consume
             break;
         case WT_IDLE:
         default:
@@ -954,9 +970,21 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
 
     // Each section is best-effort — a missing file just leaves the key off
     // the response.  Restore code (future) must cope with absent keys.
-    inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
-    inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
-    inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+    // Acquire fsMutex around all three reads so StorageTask / saveConfig can't
+    // write a file mid-read.  Lock ordering: configMutex (already held) →
+    // fsMutex — consistent with saveConfig which takes only fsMutex.  (AUDIT 3.20)
+    if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
+        inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
+        inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+        xSemaphoreGive(fsMutex);
+    } else {
+        // Best-effort on timeout — files may be mid-write but we still send
+        // whatever was deserialized rather than returning 503.
+        inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
+        inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
+        inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+    }
 
     serializeJson(doc, *resp);
     xSemaphoreGive(configMutex);

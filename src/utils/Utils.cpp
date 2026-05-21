@@ -27,6 +27,11 @@ String sanitizePath(const String& path) {
 
     for (size_t i = 0; i < path.length(); i++) {
         char c = path[i];
+        // Reject ASCII control characters (< 0x20), DEL (0x7f), backslash and
+        // NUL.  Bytes 0x80-0xFF (UTF-8 multi-byte lead/continuation) are
+        // permitted by design — LittleFS stores paths as raw bytes and UTF-8
+        // filenames are valid; if that changes, add `|| (unsigned char)c > 0x7e`.
+        // (AUDIT 7.2)
         if (c == '\\' || c == '\0' || (unsigned char)c < 0x20 || c == 0x7f) {
             return "";
         }
@@ -54,7 +59,10 @@ String sanitizePath(const String& path) {
 
 String sanitizeFilename(const String& filename) {
     if (filename.isEmpty()) return "";
-    if (filename.length() > 64) return "";
+    // 96-char cap gives headroom for the longest generated names:
+    // prefix + device-id + timestamp + ".txt" can reach ~50-60 chars.
+    // (AUDIT 7.3)
+    if (filename.length() > 96) return "";
     if (filename == "." || filename == "..") return "";
 
     for (size_t i = 0; i < filename.length(); i++) {
@@ -95,6 +103,10 @@ bool deleteRecursive(fs::FS& fs, const String& path) {
     bool overallOk = true;
 
     while (!stack.empty()) {
+        // Abort on suspiciously deep trees to prevent OOM on the AsyncTCP
+        // worker stack (typically ~4 KB).  (AUDIT 7.4)
+        if (stack.size() > 256) return false;
+
         Pending cur = stack.back();   // peek
 
         File entry = fs.open(cur.path);
