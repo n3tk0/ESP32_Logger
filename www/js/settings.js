@@ -185,40 +185,6 @@ function changelogLoad() {
 }
 
 // ============================================================================
-// ══ SETTINGS: FLOW METER ══
-// ============================================================================
-function sfInit() {
-  fetchWithTimeout("/export_settings", {}, 15000)
-    .then(function (r) {
-      return r.json();
-    })
-    .then(function (d) {
-      CFG = d;
-      var fm = d.flowMeter || {};
-      setVal("sf-ppl", fm.pulsesPerLiter);
-      setVal("sf-cal", fm.calibrationMultiplier);
-      // monitoringWindowSecs / firstLoopMonitoringWindowSecs removed from
-      // backend during WebUI consolidation. The Timing card was also
-      // removed from settings_flowmeter.html.
-      setChk("sf-test", fm.testMode);
-      setVal("sf-blink", fm.blinkDuration);
-      fetchWithTimeout("/api/status", {}, 15000)
-        .then(function (r2) {
-          return r2.json();
-        })
-        .then(function (s) {
-          setEl("sf-boot", s.boot);
-          // Chunk G: redirect to settings hub when this build was
-          // compiled without SENSOR_WATERFLOW_ENABLED.  The page is
-          // already hidden in the hub but a hash-jump still lands here.
-          if (s.caps && s.caps.flowmeter === false) {
-            location.hash = "#settings";
-          }
-        });
-    });
-}
-
-// ============================================================================
 // ══ SETTINGS: HARDWARE ══
 // ============================================================================
 // First settings page migrated to schema-driven Form.bind (Pass 4 A3).
@@ -276,6 +242,16 @@ var HW_SCHEMA = {
             ["160", "160 MHz"],
         ]},
     ]},
+    // Flow-meter LED diagnostics, migrated here when the standalone
+    // settings_flowmeter page was retired (PR #105 follow-up). The fields
+    // live on config.flowMeter; hwInit() merges them into the binding object.
+    { title: "💧 Flow Meter Test Mode", fields: [
+        { name: "testMode", label: "Enable LED blink on flow pulse", type: "checkbox",
+          hint: "Drives the WiFi-trigger pin while pulses are detected. Useful for verifying flow-sensor wiring." },
+        { name: "blinkDuration", label: "Blink duration (ms)", type: "number",
+          min: 50, max: 2000,
+          hint: "Controls how fast the indicator LED blinks while active." },
+    ]},
   ],
 };
 
@@ -289,6 +265,14 @@ function hwInit() {
         storageType: 0, wakeupMode: 0, debounceMs: 100, cpuFreqMHz: 80,
       };
       for (var k in defaults) if (hw[k] === undefined) hw[k] = defaults[k];
+
+      // Flow-meter diagnostics migrated from settings_flowmeter (PR #105).
+      // Merge fm.testMode / fm.blinkDuration into the binding object so the
+      // unified hardware form renders them. /save_hardware already accepts
+      // both params and writes them back into config.flowMeter.
+      var fm = d.flowMeter || {};
+      hw.testMode      = !!fm.testMode;
+      hw.blinkDuration = fm.blinkDuration > 0 ? fm.blinkDuration : 250;
 
       Form.bind("hw-host", HW_SCHEMA, hw);
 

@@ -553,7 +553,6 @@ void setupWebServer() {
     server.on("/live",               HTTP_GET, spaRedirect);
     server.on("/settings",           HTTP_GET, spaRedirect);
     server.on("/settings_device",    HTTP_GET, spaRedirect);
-    server.on("/settings_flowmeter", HTTP_GET, spaRedirect);
     server.on("/settings_hardware",  HTTP_GET, spaRedirect);
     server.on("/settings_theme",     HTTP_GET, spaRedirect);
     server.on("/settings_time",      HTTP_GET, spaRedirect);
@@ -978,11 +977,10 @@ void setupWebServer() {
     // =========================================================================
     // EXPORT SETTINGS
     // Keys consumed by web.js:
-    //   sfInit:  flowMeter{pulsesPerLiter, calibrationMultiplier, monitoringWindowSecs,
-    //                       firstLoopMonitoringWindowSecs, testMode, blinkDuration}
     //   hwInit:  hardware{storageType, pinSdCS, pinSdMOSI, pinSdMISO, pinSdSCK,
     //                      wakeupMode, debounceMs, pinWifiTrigger, pinWakeupFF,
     //                      pinWakeupPF, pinFlowSensor, pinRtcCE, pinRtcIO, pinRtcSCLK, cpuFreqMHz}
+    //            (also flowMeter.testMode / blinkDuration after PR #105 follow-up)
     //   thInit:  theme{mode, showIcons, primaryColor, secondaryColor, bgColor, textColor,
     //                   ffColor, pfColor, otherColor, storageBarColor, storageBar70Color,
     //                   storageBar90Color, storageBarBorder, logoSource, faviconPath,
@@ -1142,36 +1140,20 @@ void setupWebServer() {
         config.forceWebServer = r->hasParam("forceWebServer", true);
         if (r->hasParam("defaultStorageView", true))
             config.hardware.defaultStorageView = r->getParam("defaultStorageView", true)->value().toInt();
-        saveConfig();
-        r->send(200, "application/json", "{\"ok\":true}");
-    });
-
-    server.on("/save_flowmeter", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-#if !defined(SENSOR_WATERFLOW_ENABLED)
-        // Chunk G: feature compiled out — return 410 Gone so the UI can
-        // surface a meaningful error if it's still bookmarked or cached.
-        r->send(410, "application/json",
-                "{\"ok\":false,\"error\":\"flowmeter not built into this firmware\"}");
-        return;
-#endif
-        if (r->hasParam("pulsesPerLiter", true)) {
-            float v = r->getParam("pulsesPerLiter", true)->value().toFloat();
-            config.flowMeter.pulsesPerLiter = (v >= 1.0f && isfinite(v)) ? v : 450.0f;
-        }
-        if (r->hasParam("calibrationMultiplier", true)) {
-            float v = r->getParam("calibrationMultiplier", true)->value().toFloat();
-            config.flowMeter.calibrationMultiplier = (v > 0.0f && isfinite(v)) ? v : 1.0f;
-        }
-        config.flowMeter.testMode = r->hasParam("testMode", true);
-        if (r->hasParam("blinkDuration", true))
-            config.flowMeter.blinkDuration = max(50L, r->getParam("blinkDuration", true)->value().toInt());
+        // PR #105 follow-up: Reset Boot Count migrated from /save_flowmeter
+        // (page retired) to the System Info card on settings_device.
         if (r->hasParam("resetBootCount", true)) { bootCount = 0; backupBootCount(); }
         saveConfig();
         r->send(200, "application/json", "{\"ok\":true}");
     });
 
-    server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
+    // PR #105 follow-up: /save_flowmeter endpoint retired together with the
+    // standalone settings_flowmeter page. pulsesPerLiter / calibrationMultiplier
+    // now live on the YF-S201 sensor card (POST /api/config/platform);
+    // testMode + blinkDuration moved to /save_hardware; resetBootCount moved
+    // to /save_device (System Info card).
+
+server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (!requireMutatingAuth(r)) return;
         // R11: validate every pin parameter against the active board profile
         // before assigning. PIN_UNSET / -1 is accepted (means "unconfigured").
