@@ -158,6 +158,16 @@ extern volatile bool g_pendingWiFiShutdown;
 //                       fully transmitted before the ESP resets.  (AUDIT 3.16)
 extern volatile bool g_pendingOtaRollback;
 
+// g_pendingRtcSet: /set_time updates the POSIX clock immediately (non-blocking)
+// then sets this struct so loop() performs the hardware RTC writes (3 × delay)
+// without blocking the AsyncTCP worker.  (AUDIT 3.17)
+struct PendingRtcSet {
+    uint16_t year;
+    uint8_t  month, day, hour, minute;
+};
+extern volatile bool       g_pendingRtcSet;
+extern volatile PendingRtcSet g_pendingRtcTime;
+
 // ============================================================================
 // RESTART CIRCUIT BREAKER (Pillar 3.7 / AUDIT FC.4)
 // ----------------------------------------------------------------------------

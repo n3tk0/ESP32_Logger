@@ -893,6 +893,20 @@ void loop() {
         safeWiFiShutdown();
     }
 
+    // ── Deferred RTC hardware write (AUDIT 3.17) ─────────────────────────────
+    // /set_time updates the POSIX clock immediately and stores the time
+    // components here.  The actual DS1302 register writes (3 × delay) run from
+    // loop() where blocking is acceptable.
+    if (g_pendingRtcSet && Rtc) {
+        g_pendingRtcSet = false;
+        PendingRtcSet t = g_pendingRtcTime;
+        Rtc->SetIsWriteProtected(false); delay(10);
+        Rtc->SetIsRunning(true);         delay(10);
+        RtcDateTime dt(t.year, t.month, t.day, t.hour, t.minute, 0);
+        Rtc->SetDateTime(dt);            delay(100);
+        Rtc->SetIsWriteProtected(true);
+    }
+
     // ── Deferred OTA rollback (AUDIT 3.16) ───────────────────────────────────
     // /api/ota/rollback sets this flag after sending its 200 response so the
     // AsyncTCP worker is never blocked by delay() waiting for transmission.
