@@ -113,10 +113,16 @@ void storageTaskFunc(void* param) {
         uint32_t rowTs = 0;
         if (agg.buildRowIfDue(epoch, rowBuf, sizeof(rowBuf), &rowTs)) {
             if (agg.buildHeader(headerBuf, sizeof(headerBuf)) > 0) {
-                MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-                if (g.isLocked()) {
-                    primary.appendRow(rowTs, headerBuf, rowBuf);
-                    if (mirrorActive) mirror.appendRow(rowTs, headerBuf, rowBuf);
+                // Release fsMutex between primary and mirror so a slow SD write
+                // (50-100 ms) doesn't block the mutex for the full dual-write
+                // window.  (AUDIT 2.16)
+                {
+                    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+                    if (g.isLocked()) primary.appendRow(rowTs, headerBuf, rowBuf);
+                }
+                if (mirrorActive) {
+                    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+                    if (g.isLocked()) mirror.appendRow(rowTs, headerBuf, rowBuf);
                 }
             }
         }
