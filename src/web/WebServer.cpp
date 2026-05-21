@@ -1291,6 +1291,13 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                 r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid currentFile path\"}");
                 return;
             }
+            // Require the file to exist on the active filesystem before we
+            // route writes to it. Switching to a deleted/non-existent path
+            // would silently misroute the next data-log line until reboot.
+            if (!fsAvailable || !activeFS || !activeFS->exists(cf)) {
+                r->send(400, "application/json", "{\"ok\":false,\"error\":\"currentFile does not exist\"}");
+                return;
+            }
             SAFE_STRNCPY(config.datalog.currentFile, cf.c_str(), sizeof(config.datalog.currentFile));
         }
         if (r->hasParam("prefix", true)) {
