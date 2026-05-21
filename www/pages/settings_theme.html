@@ -37,10 +37,14 @@
                 id="th-primary" class="input"></div>
             <div class="field"><label class="field-label">Secondary</label><input type="color" name="secondaryColor"
                 id="th-secondary" class="input"></div>
-            <div class="field"><label class="field-label">Background</label><input type="color" name="bgColor"
-                id="th-bg" class="input"></div>
-            <div class="field"><label class="field-label">Text</label><input type="color" name="textColor"
-                id="th-text" class="input"></div>
+            <div class="field"><label class="field-label">Background (Light)</label><input type="color" name="lightBgColor"
+                id="th-lightBg" class="input"></div>
+            <div class="field"><label class="field-label">Background (Dark)</label><input type="color" name="darkBgColor"
+                id="th-darkBg" class="input"></div>
+            <div class="field"><label class="field-label">Text (Light)</label><input type="color" name="lightTextColor"
+                id="th-lightText" class="input"></div>
+            <div class="field"><label class="field-label">Text (Dark)</label><input type="color" name="darkTextColor"
+                id="th-darkText" class="input"></div>
           </div>
           <h4 class="mt-2">Chart</h4>
           <div class="color-grid" style="grid-template-columns:repeat(3,1fr)">
@@ -72,11 +76,14 @@
           <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem">Supported: PNG, JPG, GIF, SVG, ICO. Path:
             /file.png</p>
           <div class="field"><label class="field-label">Logo Path</label><input type="text" name="logoSource"
-              id="th-logo" placeholder="/logo.png" class="input"></div>
+              id="th-logo" placeholder="/logo.png" class="input" maxlength="128"
+              pattern="^/([\w.\-](\/[\w.\-]+)*)?$" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
           <div class="field"><label class="field-label">Favicon</label><input type="text" name="faviconPath"
-              id="th-favicon" placeholder="/favicon.ico" class="input"></div>
+              id="th-favicon" placeholder="/favicon.ico" class="input" maxlength="32"
+              pattern="^/([\w.\-](\/[\w.\-]+)*)?$" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
           <div class="field"><label class="field-label">Board Diagram</label><input type="text"
-              name="boardDiagramPath" id="th-board" placeholder="/xiao_esp32_c3_board.jpg" class="input"></div>
+              name="boardDiagramPath" id="th-board" placeholder="/xiao_esp32_c3_board.jpg" class="input" maxlength="64"
+              pattern="^/([\w.\-](\/[\w.\-]+)*)?$" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
         </div>
       </div>
 
@@ -96,7 +103,8 @@
           <div id="chartPathRow" style="display:none">
             <div class="field">
               <label class="field-label">Local Path</label>
-              <input type="text" name="chartLocalPath" id="th-chartPath" placeholder="/uPlot.iife.min.js" class="input">
+              <input type="text" name="chartLocalPath" id="th-chartPath" placeholder="/uPlot.iife.min.js" class="input"
+                pattern="^/[a-zA-Z0-9._\-]+\.js(\.gz)?$" title="Local path only: /filename.js or /filename.js.gz (no protocol-relative or external URLs)">
             </div>
           </div>
           <div class="field mt-1">

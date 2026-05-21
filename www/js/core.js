@@ -83,15 +83,21 @@ function registerHandlers(obj) {
 
 function _dispatchEvent(eventName) {
   return function (ev) {
+    // closest() stops at the NEAREST ancestor — outer ancestors with the same
+    // data-* attribute are intentionally shadowed (single-fire bubble policy).
     var t = ev.target.closest("[data-" + eventName + "]");
     if (!t) return;
     var name = t.getAttribute("data-" + eventName);
     var fn = Handlers[name];
-    if (typeof fn !== "function") return;
+    if (typeof fn !== "function") {
+      console.warn("_dispatchEvent: no handler registered for", JSON.stringify(name), "on", t);
+      return;
+    }
     var args;
     var raw = t.getAttribute("data-args");
     if (raw) {
       try {
+        if (raw.length > 4096) { console.warn("data-args too large on", t); return; }
         args = JSON.parse(raw);
         // Accept a scalar/object for convenience (data-args="5" or '{"x":1}')
         // by wrapping it; fn.apply strictly requires an array.
@@ -110,7 +116,8 @@ function installEventDispatcher() {
   // Every form submit in this app is AJAX; preventDefault unconditionally so
   // handlers don't each have to remember to block the native POST navigation.
   document.addEventListener("submit", function (ev) {
-    if (ev.target.closest("[data-submit]")) ev.preventDefault();
+    if (!ev.target.closest("[data-submit]")) return;
+    ev.preventDefault();
     _dispatchEvent("submit")(ev);
   }, true);
   // onerror does not bubble: wire direct listeners on every [data-error] node
@@ -165,8 +172,15 @@ function submitParentForm() {
 // Popup helpers. Replace inline style="display:flex/none" mutation.
 // Named hidePopup (not closePopup) because settings.js defines its own
 // zero-arg closePopup() tied to id="popup" that we don't want to shadow.
-function showPopup(id) { var el = document.getElementById(id); if (el) el.style.display = "flex"; }
-function hidePopup(id) { var el = document.getElementById(id); if (el) el.style.display = "none"; }
+var LEGAL_POPUP_IDS = ["restartPopup", "popup", "movePopup", "sensor-add-popup", "sensor-edit-popup", "sensorPopup", "kbPopup"];
+function showPopup(id) {
+  if (LEGAL_POPUP_IDS.indexOf(id) === -1) { console.warn("showPopup: unknown id", id); return; }
+  var el = document.getElementById(id); if (el) el.style.display = "flex";
+}
+function hidePopup(id) {
+  if (LEGAL_POPUP_IDS.indexOf(id) === -1) { console.warn("hidePopup: unknown id", id); return; }
+  var el = document.getElementById(id); if (el) el.style.display = "none";
+}
 
 // Backdrop click-to-close. Attach to the .popup-overlay. The default action
 // hides the overlay; if data-backdrop-fn is set, that window-level function is
@@ -293,15 +307,20 @@ function applyStatus(d) {
       _themeUpdateToggleIcon(effective);
     }
 
+    // Sanitize a CSS value to prevent injection via ; { } */ sequences.
+    function _safeCssVal(v) {
+      if (!v || typeof v !== "string") return "";
+      return v.replace(/[;{}\/*]/g, "");
+    }
     var vars = ":root{";
-    if (th.primaryColor) vars += "--primary:" + th.primaryColor + ";";
-    if (th.secondaryColor) vars += "--secondary:" + th.secondaryColor + ";";
+    if (th.primaryColor) vars += "--primary:" + _safeCssVal(th.primaryColor) + ";";
+    if (th.secondaryColor) vars += "--secondary:" + _safeCssVal(th.secondaryColor) + ";";
     if (actDark) {
-      if (th.darkBgColor) vars += "--bg:" + th.darkBgColor + ";";
-      if (th.darkTextColor) vars += "--text:" + th.darkTextColor + ";";
+      if (th.darkBgColor) vars += "--bg:" + _safeCssVal(th.darkBgColor) + ";";
+      if (th.darkTextColor) vars += "--text:" + _safeCssVal(th.darkTextColor) + ";";
     } else {
-      if (th.lightBgColor) vars += "--bg:" + th.lightBgColor + ";";
-      if (th.lightTextColor) vars += "--text:" + th.lightTextColor + ";";
+      if (th.lightBgColor) vars += "--bg:" + _safeCssVal(th.lightBgColor) + ";";
+      if (th.lightTextColor) vars += "--text:" + _safeCssVal(th.lightTextColor) + ";";
     }
     vars += "}";
     var style = document.getElementById("themeVars");
@@ -461,6 +480,27 @@ function getCsrfToken() {
 }
 // Warm the cache early so the first mutating request doesn't pay a round-trip.
 getCsrfToken();
+
+// Mutating helper: appends ?csrf=<token> to url and retries once on 403.
+// Usage: postWithCsrf(url, opts, timeoutMs).then(r => r.json())
+function postWithCsrf(url, opts, timeoutMs) {
+  opts = opts || {};
+  opts.method = opts.method || "POST";
+  return getCsrfToken().then(function (token) {
+    var u = token ? url + (url.indexOf("?") >= 0 ? "&" : "?") + "csrf=" + encodeURIComponent(token) : url;
+    return fetchWithTimeout(u, opts, timeoutMs || 15000).then(function (r) {
+      if (r.status === 403) {
+        window.__csrfToken = null;
+        return getCsrfToken().then(function (t) {
+          var u2 = t ? url + (url.indexOf("?") >= 0 ? "&" : "?") + "csrf=" + encodeURIComponent(t) : url;
+          return fetchWithTimeout(u2, opts, timeoutMs || 15000);
+        });
+      }
+      return r;
+    });
+  });
+}
+window.postWithCsrf = postWithCsrf;
 
 // ============================================================================
 // NAVIGATION

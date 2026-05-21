@@ -9,52 +9,29 @@
 // PLATFORM CONFIG  (platform_config.json management)
 // ============================================================================
 var PCFG = null; // cached platform config object
+var _pcfgFetch = null; // in-flight Promise (dedup concurrent loads)
+
+var _PCFG_DEFAULT = { version: 1, mode: "legacy", sensors: [], aggregation: {}, export: {}, storage: {} };
 
 function pcfgLoad(cb) {
-  fetchWithTimeout("/api/platform_config", {}, 15000)
-    .then(function (r) {
-      return r.ok ? r.json() : null;
-    })
-    .then(function (d) {
-      PCFG = d || {
-        version: 1,
-        mode: "legacy",
-        sensors: [],
-        aggregation: {},
-        export: {},
-        storage: {},
-      };
-      if (cb) cb(PCFG);
-    })
-    .catch(function () {
-      PCFG = {
-        version: 1,
-        mode: "legacy",
-        sensors: [],
-        aggregation: {},
-        export: {},
-        storage: {},
-      };
-      if (cb) cb(PCFG);
-    });
+  if (_pcfgFetch) { _pcfgFetch.then(function () { if (cb) cb(PCFG); }); return; }
+  _pcfgFetch = fetchWithTimeout("/api/platform_config", {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) { PCFG = d || Object.assign({}, _PCFG_DEFAULT); })
+    .catch(function () { PCFG = Object.assign({}, _PCFG_DEFAULT); })
+    .finally(function () { _pcfgFetch = null; if (cb) cb(PCFG); });
 }
 
 function pcfgSave(obj, cb) {
   var body = JSON.stringify(obj, null, 2);
-  fetchWithTimeout("/save_platform", {
+  postWithCsrf("/save_platform", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body,
   }, 30000)
-    .then(function (r) {
-      return r.json();
-    })
-    .then(function (d) {
-      if (cb) cb(d.ok, d.error || "");
-    })
-    .catch(function (e) {
-      if (cb) cb(false, String(e));
-    });
+    .then(function (r) { return r.json(); })
+    .then(function (d) { if (cb) cb(d.ok, d.error || ""); })
+    .catch(function (e) { if (cb) cb(false, String(e)); });
 }
 
 // ============================================================================
@@ -99,16 +76,12 @@ function sensorsLoad() {
 
       // Update page subtitle with live counts
       var nowMs = Date.now();
-      var errCount    = d.sensors.filter(function(s) { return s.status === "error"; }).length;
-      var okCount     = d.sensors.filter(function(s) { return s.status === "ok"; }).length;
-      var sweepAge    = (d.last_sweep_ms && d.last_sweep_ms > 0)
-                          ? Math.round((nowMs - d.last_sweep_ms) / 100) / 10
-                          : null;
+      var errCount = d.sensors.filter(function(s) { return s.status === "error"; }).length;
+      var okCount  = d.sensors.filter(function(s) { return s.status === "ok"; }).length;
       var sub = document.getElementById("sensors-sub");
       if (sub) {
         var parts = [okCount + " active"];
         if (errCount) parts.push(errCount + " errored");
-        if (sweepAge != null) parts.push("last sweep " + sweepAge + "s ago");
         sub.textContent = parts.join(" · ");
       }
 

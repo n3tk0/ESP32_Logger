@@ -989,6 +989,17 @@ function liveInit() {
   liveLogsTimer = setInterval(liveLogsUpdate, 3000);
 }
 
+var _liveKeepaliveTimer = null;
+
+function _liveResetKeepalive() {
+  if (_liveKeepaliveTimer) clearTimeout(_liveKeepaliveTimer);
+  _liveKeepaliveTimer = setTimeout(function () {
+    // No SSE event in 10 s — close and reopen the channel.
+    if (liveES) { try { liveES.close(); } catch (e) {} liveES = null; }
+    liveStartTransport();
+  }, 10000);
+}
+
 function liveStartTransport() {
   // Always do one immediate fetch so the page is populated before the first
   // SSE tick (server pushes at 1 Hz).
@@ -1004,7 +1015,9 @@ function liveStartTransport() {
     liveStartPolling(500);
     return;
   }
+  _liveResetKeepalive();
   liveES.addEventListener("live", function (ev) {
+    _liveResetKeepalive();
     try { liveRender(JSON.parse(ev.data)); } catch (e) {}
   });
   liveES.onerror = function () {
@@ -1033,9 +1046,13 @@ function liveSetRate() {
     liveStartPolling(rate);
 }
 
+var _liveInFlight = false;
+
 // Polling fallback — kept identical in shape to the original upd() so the
 // liveRender() body works for both EventSource and fetch results.
 function liveUpdate() {
+  if (_liveInFlight) return;
+  _liveInFlight = true;
   fetchWithTimeout("/api/live")
     .then(function (r) {
       return r.json();
@@ -1047,7 +1064,8 @@ function liveUpdate() {
         conn.textContent = "● Disconnected";
         conn.className = "text-danger";
       }
-    });
+    })
+    .finally(function () { _liveInFlight = false; });
 }
 
 function liveRender(d) {
@@ -1093,9 +1111,9 @@ function liveRender(d) {
 
   var modeEl = document.getElementById("mode");
   if (modeEl) {
-    if (d.mode === "online") modeEl.innerHTML = "🌐 Online Logger";
-    else if (d.mode === "webonly") modeEl.innerHTML = "📡 Web Only";
-    else modeEl.innerHTML = "📊 Logging";
+    if (d.mode === "online") modeEl.textContent = "🌐 Online Logger";
+    else if (d.mode === "webonly") modeEl.textContent = "📡 Web Only";
+    else modeEl.textContent = "📊 Logging";
   }
 
   if (d.time) setEl("headerTime", d.time.split(" ")[1] || d.time);

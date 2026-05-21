@@ -21,13 +21,13 @@
           <div class="form-grid">
             <div class="field">
               <label class="field-label">Pulses/Liter</label>
-              <input type="number" step="0.1" name="pulsesPerLiter" id="sf-ppl" class="input" value="">
+              <input type="number" step="0.1" min="1" name="pulsesPerLiter" id="sf-ppl" class="input" value="">
               <p class="hint">Number of flow sensor pulses per liter. Check your sensor datasheet (e.g., YF-S201 =
                 450).</p>
             </div>
             <div class="field">
               <label class="field-label">Multiplier</label>
-              <input type="number" step="0.01" name="calibrationMultiplier" id="sf-cal" class="input" value="">
+              <input type="number" step="0.01" min="0.01" name="calibrationMultiplier" id="sf-cal" class="input" value="">
               <p class="hint">Fine-tune measured volume. 1.0 = no adjustment. Adjust up/down based on comparison
                 with a known volume.</p>
             </div>
