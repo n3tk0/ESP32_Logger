@@ -70,6 +70,7 @@ bool ENS160Sensor::read(SensorReading& out) {
 
 int ENS160Sensor::readAll(SensorReading* out, int maxOut) {
     if (!_ready || maxOut < 3) return 0;
+    if (!_waitReady(200)) return 0;
 
     uint8_t aqi = 0;
     uint8_t tvocBuf[2], eco2Buf[2];
@@ -81,8 +82,9 @@ int ENS160Sensor::readAll(SensorReading* out, int maxOut) {
     float tvoc = _calTvoc.apply((float)((tvocBuf[1] << 8) | tvocBuf[0]));
     float eco2 = _calEco2.apply((float)((eco2Buf[1] << 8) | eco2Buf[0]));
 
+    SensorQuality aqiQ = (aqi >= 1 && aqi <= 5) ? QUALITY_GOOD : QUALITY_ERROR;
     out[0] = SensorReading::make(0, _id, getType(), "tvoc",  tvoc,       "ppb");
     out[1] = SensorReading::make(0, _id, getType(), "eco2",  eco2,       "ppm");
-    out[2] = SensorReading::make(0, _id, getType(), "aqi",   (float)aqi, "");
+    out[2] = SensorReading::make(0, _id, getType(), "aqi",   (float)aqi, "", aqiQ);
     return 3;
 }

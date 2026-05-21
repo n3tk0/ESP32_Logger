@@ -71,6 +71,14 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
         Serial.println("[SCD4x] Not found at 0x62");
         return false;
     }
+    // Confirm sensor is still responsive; data not ready yet is normal
+    delay(1);
+    if (!_sendCmd(CMD_GET_DATA_READY_STATUS)) {
+        Serial.println("[SCD4x] No I2C ACK after start_periodic — refusing ready");
+        return false;
+    }
+    delay(1);
+    { uint16_t dummy; if (!_readWords(&dummy, 1)) return false; }  // drain; fail if comms broken
 
     // Defer the 5.1 s warm-up out of init(); readAll() gates on _warmupUntilMs.
     _warmupUntilMs = millis() + 5100;

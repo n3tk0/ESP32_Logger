@@ -32,8 +32,13 @@ public:
         _write8(0xE0, 0xB6);
         delay(10);
 
-        // Wait for NVM copy
-        while ((_read8(0xF3) & 0x01) != 0) delay(1);
+        // Wait for NVM copy (up to 100 ms; return false if sensor hangs)
+        bool nvm_ready = false;
+        for (int i = 0; i < 100; i++) {
+            if ((_read8(0xF3) & 0x01) == 0) { nvm_ready = true; break; }
+            delay(1);
+        }
+        if (!nvm_ready) return false;
 
         // Read calibration data
         _readCalibration();
@@ -64,7 +69,7 @@ public:
     }
 
     float readPressure() {
-        // Must call readTemperature() first to set _t_fine
+        if (_t_fine == 0) readTemperature();  // guard: ensure compensation is ready
         int32_t adc_P = _read24(0xF7) >> 4;
         if (adc_P == 0x80000) return NAN;
 
@@ -87,7 +92,7 @@ public:
 
     float readHumidity() {
         if (!_isBME280) return NAN;
-        // Must call readTemperature() first to set _t_fine
+        if (_t_fine == 0) readTemperature();  // guard: ensure compensation is ready
         int16_t adc_H = _read16(0xFD);
 
         int32_t v_x1_u32r = _t_fine - 76800;

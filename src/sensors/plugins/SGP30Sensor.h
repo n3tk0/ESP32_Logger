@@ -9,7 +9,7 @@
 // Produces 2 metrics: tvoc (ppb), eco2 (ppm)
 //
 // Note: SGP30 requires 15s warmup after power-on.
-//       First 15 readings return baseline values (400ppm eCO2, 0ppb TVOC).
+//       First reading after init returns estimated quality; switches to GOOD after 15 s.
 //       Humidity compensation: not implemented (requires external RH sensor).
 // ============================================================================
 class SGP30Sensor : public ISensor {

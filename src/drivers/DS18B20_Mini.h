@@ -34,8 +34,8 @@ public:
             _write(0x4E);  // Write Scratchpad
             _write(0x00);  // TH (unused)
             _write(0x00);  // TL (unused)
-            // Config register: bits 6:5 = resolution - 9
-            _write(((_resolution - 9) & 0x03) << 5 | 0x1F);
+            // Config register: bits 6:5 = resolution - 9; bit 7 must be 1 per datasheet
+            _write(((_resolution - 9) & 0x03) << 5 | 0x9F);
         }
 
         return _count > 0;

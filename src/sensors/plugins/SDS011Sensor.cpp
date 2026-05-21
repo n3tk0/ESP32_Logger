@@ -49,7 +49,28 @@ bool SDS011Sensor::init(JsonObjectConst cfg) {
         cmd[17] = sum;
         _serial->write(cmd, 19);
         _serial->flush();
-        delay(100);
+
+        // Verify ACK frame: AA C5 08 01 {period} ... {checksum} AB (10 bytes)
+        uint8_t ack[10] = {};
+        unsigned long dl = millis() + 1000;
+        int pos = 0;
+        while (millis() < dl && pos < 10) {
+            if (_serial->available()) {
+                uint8_t b = _serial->read();
+                if (pos == 0 && b != 0xAA) continue;
+                ack[pos++] = b;
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(1));
+            }
+        }
+        if (pos == 10) {
+            uint8_t asum = 0;
+            for (int i = 2; i < 8; i++) asum += ack[i];
+            if (ack[1] != 0xC5 || ack[2] != 0x08 || ack[8] != asum || ack[4] != (uint8_t)work)
+                Serial.printf("[SDS011] Work-period ACK mismatch (got period=%u)\n", ack[4]);
+        } else {
+            Serial.println("[SDS011] No work-period ACK received");
+        }
         _drainBuffer();
     }
 
@@ -76,9 +97,9 @@ bool SDS011Sensor::_parseFrame(const uint8_t* buf) {
 void SDS011Sensor::_drainBuffer() {
     if (!_serial) return;
     unsigned long t = millis();
-    while (millis() - t < 100) {
+    while (millis() - t < 50) {
         while (_serial->available()) _serial->read();
-        delay(10);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 

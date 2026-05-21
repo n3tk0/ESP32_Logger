@@ -51,7 +51,7 @@ bool BME688Sensor::read(SensorReading& out) {
 }
 
 int BME688Sensor::readAll(SensorReading* out, int maxOut) {
-    if (!_ready || maxOut < 4) return 0;
+    if (!_ready || maxOut < 1) return 0;
 
     // performReading() triggers a new forced-mode reading and waits for it
     if (!_bme.performReading()) return 0;
@@ -61,9 +61,10 @@ int BME688Sensor::readAll(SensorReading* out, int maxOut) {
     float p = _calPressure.apply(_bme.pressure / 100.0f);
     float g = _calGas.apply((float)_bme.gas_resistance);
 
-    out[0] = SensorReading::make(0, _id, getType(), "temperature",    t, "C");
-    out[1] = SensorReading::make(0, _id, getType(), "humidity",       h, "%");
-    out[2] = SensorReading::make(0, _id, getType(), "pressure",       p, "hPa");
-    out[3] = SensorReading::make(0, _id, getType(), "gas_resistance", g, "Ohm");
-    return 4;
+    int n = (maxOut < 4) ? maxOut : 4;
+    if (n > 0) out[0] = SensorReading::make(0, _id, getType(), "temperature",    t, "C");
+    if (n > 1) out[1] = SensorReading::make(0, _id, getType(), "humidity",       h, "%");
+    if (n > 2) out[2] = SensorReading::make(0, _id, getType(), "pressure",       p, "hPa");
+    if (n > 3) out[3] = SensorReading::make(0, _id, getType(), "gas_resistance", g, "Ohm");
+    return n;
 }

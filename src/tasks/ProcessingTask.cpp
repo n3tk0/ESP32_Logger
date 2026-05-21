@@ -20,6 +20,7 @@ static bool isPlausible(const SensorReading& r) {
     if (strcmp(m, "pm10")        == 0) return (r.value >= 0.0f  && r.value < 2000.0f);
     if (strcmp(m, "tvoc")        == 0) return (r.value >= 0.0f  && r.value < 65535.0f);
     if (strcmp(m, "eco2")        == 0) return (r.value >= 400.0f&& r.value < 65535.0f);
+    if (strcmp(m, "aqi")         == 0) return (r.value >= 1.0f  && r.value <= 5.0f);
     if (strcmp(m, "flow_rate")   == 0) return (r.value >= 0.0f  && r.value < 1000.0f);
     if (strcmp(m, "wind_speed")  == 0) return (r.value >= 0.0f  && r.value < 150.0f);
     // Unknown metric — pass through

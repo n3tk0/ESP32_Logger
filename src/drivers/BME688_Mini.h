@@ -272,9 +272,9 @@ private:
         if (targetTempC > 400) targetTempC = 400;
 
         int32_t var1 = (((int32_t)25 - (int32_t)_par_GH3) * 1000) / 20;
-        int32_t var2 = (((int32_t)_par_GH1 * 1000) + 784) *
-                       (((((int32_t)_par_GH2 + 154009) * targetTempC * 5) / 100) + 3276800) / 10;
-        int32_t var3 = var1 + (var2 / 2);
+        int64_t var2 = ((int64_t)(((int32_t)_par_GH1 * 1000) + 784)) *
+                       (((int64_t)(((int32_t)_par_GH2 + 154009) * targetTempC * 5) / 100) + 3276800) / 10;
+        int32_t var3 = var1 + (int32_t)(var2 / 2);
         int32_t var4 = (var3 / (_res_heat_range + 4));
         int32_t var5 = (131 * _res_heat_val) + 65536;
         int32_t heatr_res_x100 = (int32_t)(((var4 / var5) - 250) * 34);

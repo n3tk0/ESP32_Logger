@@ -1,6 +1,7 @@
 #include "PMS5003Sensor.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
+#include "../../pipeline/DataPipeline.h"  // g_taskHeartbeat / TASK_IDX_SLOW_SENSOR
 
 bool PMS5003Sensor::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]           | true;
@@ -35,6 +36,7 @@ bool PMS5003Sensor::_readFrame() {
 
     int pos = 0;
     while (millis() < deadline) {
+        g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();
         if (!_serial->available()) { delay(5); continue; }
         uint8_t b = _serial->read();
         if (pos == 0 && b != START1) continue;
