@@ -1031,9 +1031,9 @@ function dlInit() {
           setVal("dl-date", dl.dateFormat !== undefined ? dl.dateFormat : 1);
           setVal("dl-time", dl.timeFormat !== undefined ? dl.timeFormat : 0);
           setVal("dl-end", dl.endFormat !== undefined ? dl.endFormat : 0);
-          setVal("dl-boot", dl.includeBootCount ? "1" : "0");
+          setChk("dl-boot", !!dl.includeBootCount);
           setVal("dl-vol", dl.volumeFormat !== undefined ? dl.volumeFormat : 0);
-          setVal("dl-extra", dl.includeExtraPresses ? "1" : "0");
+          setChk("dl-extra", !!dl.includeExtraPresses);
           setChk("dl-pcEnabled", dl.postCorrectionEnabled);
           var pcF = document.getElementById("pcFields");
           if (pcF)
@@ -1127,13 +1127,15 @@ function dlUpdatePreview() {
   p.push(tStr);
   if (ef === "0") p.push(tStr);
   else if (ef === "1") p.push("45s");
-  if (getVal("dl-boot") === "1") p.push("#:1234");
+  var bootEl  = document.getElementById("dl-boot");
+  var extraEl = document.getElementById("dl-extra");
+  if (bootEl && bootEl.checked) p.push("#:1234");
   p.push("FF_BTN");
   var vf = getVal("dl-vol");
   if (vf === "0") p.push("L:2,50");
   else if (vf === "1") p.push("L:2.50");
   else if (vf === "2") p.push("2.50");
-  if (getVal("dl-extra") === "1") {
+  if (extraEl && extraEl.checked) {
     p.push("FF0");
     p.push("PF1");
   }

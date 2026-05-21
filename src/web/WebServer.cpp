@@ -1331,8 +1331,12 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (r->hasParam("timeFormat", true))   config.datalog.timeFormat   = r->getParam("timeFormat", true)->value().toInt();
         if (r->hasParam("endFormat", true))    config.datalog.endFormat    = r->getParam("endFormat", true)->value().toInt();
         if (r->hasParam("volumeFormat", true)) config.datalog.volumeFormat = r->getParam("volumeFormat", true)->value().toInt();
-        config.datalog.includeBootCount    = r->hasParam("includeBootCount", true)    && r->getParam("includeBootCount", true)->value()    == "1";
-        config.datalog.includeExtraPresses = r->hasParam("includeExtraPresses", true) && r->getParam("includeExtraPresses", true)->value() == "1";
+        // PR #105 follow-up: page UI switched from "On/Off" dropdowns to
+        // checkboxes — checkboxes only submit when checked, so hasParam
+        // alone is now the right test (matches timestampFilename /
+        // includeDeviceId / postCorrectionEnabled in this same handler).
+        config.datalog.includeBootCount    = r->hasParam("includeBootCount", true);
+        config.datalog.includeExtraPresses = r->hasParam("includeExtraPresses", true);
         config.datalog.postCorrectionEnabled = r->hasParam("postCorrectionEnabled", true);
         if (r->hasParam("pfToFfThreshold", true))        config.datalog.pfToFfThreshold        = max(0.1f, r->getParam("pfToFfThreshold", true)->value().toFloat());
         if (r->hasParam("ffToPfThreshold", true))        config.datalog.ffToPfThreshold        = max(0.1f, r->getParam("ffToPfThreshold", true)->value().toFloat());

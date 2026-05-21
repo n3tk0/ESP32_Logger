@@ -119,13 +119,6 @@
               </select>
             </div>
             <div class="field" style="min-width:80px">
-              <label class="field-label">Boot#</label>
-              <select name="includeBootCount" id="dl-boot" class="input" data-change="dlUpdatePreview">
-                <option value="1">On</option>
-                <option value="0">Off</option>
-              </select>
-            </div>
-            <div class="field" style="min-width:80px">
               <label class="field-label">Volume</label>
               <select name="volumeFormat" id="dl-vol" class="input" data-change="dlUpdatePreview">
                 <option value="0">L:0,00</option>
@@ -134,14 +127,13 @@
                 <option value="3">Off</option>
               </select>
             </div>
-            <div class="field" style="min-width:80px">
-              <label class="field-label">FF/PF</label>
-              <select name="includeExtraPresses" id="dl-extra" class="input"
-                data-change="dlUpdatePreview">
-                <option value="1">On</option>
-                <option value="0">Off</option>
-              </select>
-            </div>
+          </div>
+          <div class="field" style="margin-top:.5rem">
+            <label><input type="checkbox" name="includeBootCount" id="dl-boot" value="1"
+                          data-change="dlUpdatePreview"> Include boot count</label>
+            &nbsp;&nbsp;
+            <label><input type="checkbox" name="includeExtraPresses" id="dl-extra" value="1"
+                          data-change="dlUpdatePreview"> Include FF/PF extra-press counters</label>
           </div>
           <div class="mt-1">
             <label class="field-label">Preview:</label>
