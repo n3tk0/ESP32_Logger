@@ -19,7 +19,13 @@ bool WindSensor::init(JsonObjectConst cfg) {
     // interval lets ops set e.g. 30s schedule + 1s window without starving
     // SlowSensorTask. Back-compat: omitting poll_interval_ms falls back to
     // sample_window_ms so existing configs see the same cadence.
+    // PR #106 follow-up (Gemini M): clamp window to [50ms, 10000ms].
+    //   - 0 would div-by-zero at windowSec below (NaN speed).
+    //   - >10s blocks SlowSensorTask longer than the task watchdog (30s nominal
+    //     but headroom-conscious — 10s is well clear).
     _sampleWindowMs = cfg["sample_window_ms"] | 1000;
+    if (_sampleWindowMs < 50)    _sampleWindowMs = 50;
+    if (_sampleWindowMs > 10000) _sampleWindowMs = 10000;
     _pollIntervalMs = cfg["poll_interval_ms"] | _sampleWindowMs;
     if (_pollIntervalMs < _sampleWindowMs) _pollIntervalMs = _sampleWindowMs;
     _dirPin         = cfg["dir_pin"]          | -1;

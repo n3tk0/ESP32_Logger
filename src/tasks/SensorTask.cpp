@@ -14,7 +14,9 @@ void sensorTaskFunc(void* /*param*/) {
 
         // R28 / AUDIT 10.1: re-read poll interval each iteration so
         // /api/config/platform reloads pick up new sensor intervals without
-        // a reboot. minReadIntervalMs() is an in-memory scan; cheap at 1Hz.
+        // a reboot. minReadIntervalMs() acquires configMutex internally
+        // (added in PR #106 follow-up) so the iteration is safe against a
+        // concurrent reloadConfig() rebuilding _sensors[].
         uint32_t pollMs = sensorManager.minReadIntervalMs();
         if (pollMs < 50) pollMs = 50;
 
