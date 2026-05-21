@@ -3,6 +3,7 @@
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
 #include <atomic>
+#include <string.h>
 #include "../core/SensorTypes.h"
 
 // ============================================================================
@@ -128,7 +129,9 @@ public:
             }
         }
         if (count < maxOut && count > 0) {
-            for (size_t i = 0; i < count; i++) out[i] = out[maxOut - count + i];
+            // Source [maxOut-count .. maxOut-1] overlaps dest [0 .. count-1] when
+            // count > maxOut/2 — memmove handles the overlap correctly.
+            memmove(out, out + maxOut - count, count * sizeof(float));
         }
         return count;
     }
