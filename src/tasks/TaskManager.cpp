@@ -111,6 +111,18 @@ bool TaskManager::init(fs::FS& fs) {
                     storageParam.maxSizeKB   = st["max_size_kb"]   | 512;
                     storageParam.rotateDaily = st["rotate_daily"]  | true;
                 }
+                
+                // Parse humidity correction from the first SDS011 sensor
+                storageParam.humidityCorrectionEnabled = false;
+                storageParam.humidityCorrectionKappa = 0.45f;
+                JsonArray sensors = doc["sensors"].as<JsonArray>();
+                for (JsonObject sensor : sensors) {
+                    if (strcmp(sensor["type"] | "", "sds011") == 0) {
+                        storageParam.humidityCorrectionEnabled = sensor["humidityCorrectionEnabled"] | false;
+                        storageParam.humidityCorrectionKappa = sensor["humidityCorrectionKappa"] | 0.45f;
+                        break;
+                    }
+                }
             }
             cfgFile.close();
         }
@@ -122,9 +134,6 @@ bool TaskManager::init(fs::FS& fs) {
     storageParam.csvLoggingEnabled         = config.logger.csvLoggingEnabled;
     storageParam.aggregationIntervalSec    = config.logger.aggregationIntervalSec
                                                 ? config.logger.aggregationIntervalSec : 60;
-    storageParam.humidityCorrectionEnabled = config.logger.humidityCorrectionEnabled;
-    storageParam.humidityCorrectionKappa   = (config.logger.humidityCorrectionKappa > 0.0f)
-                                                ? config.logger.humidityCorrectionKappa : 0.35f;
 
     // FlowRunLogger: per-fill flowmeter logging.  Active in PLATFORM_HYBRID
     // only — PLATFORM_LEGACY uses DataLogger.cpp's run logger and

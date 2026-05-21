@@ -25,8 +25,7 @@ static void applyDefaults() {
     // ── Flow meter ────────────────────────────────────────────────────────────
     if (badFloat(config.flowMeter.pulsesPerLiter))            config.flowMeter.pulsesPerLiter            = 450.0f;
     if (badFloat(config.flowMeter.calibrationMultiplier))     config.flowMeter.calibrationMultiplier     = 1.0f;
-    if (config.flowMeter.monitoringWindowSecs      <= 0) config.flowMeter.monitoringWindowSecs      = 3;
-    if (config.flowMeter.firstLoopMonitoringWindowSecs <= 0) config.flowMeter.firstLoopMonitoringWindowSecs = 6;
+    // Obsolete window settings removed
     if (config.flowMeter.blinkDuration             <= 0) config.flowMeter.blinkDuration             = 250;
 
     // ── Hardware ──────────────────────────────────────────────────────────────
@@ -49,8 +48,6 @@ static void applyDefaults() {
         config.logger.aggregationIntervalSec = 60;
     if (config.logger.aggregationIntervalSec > 3600)
         config.logger.aggregationIntervalSec = 3600;
-    if (badFloat(config.logger.humidityCorrectionKappa))
-        config.logger.humidityCorrectionKappa = 0.35f;
 
     // ── Network ───────────────────────────────────────────────────────────────
     if (!strlen(config.network.apSSID))     SAFE_STRCPY(config.network.apSSID,    DEFAULT_AP_SSID);
@@ -263,8 +260,6 @@ void loadDefaultConfig() {
     // Flow meter
     config.flowMeter.pulsesPerLiter                = 450.0f;
     config.flowMeter.calibrationMultiplier         = 1.0f;
-    config.flowMeter.monitoringWindowSecs          = 3;
-    config.flowMeter.firstLoopMonitoringWindowSecs = 6;
     config.flowMeter.testMode                      = false;
     config.flowMeter.blinkDuration                 = 250;
 
@@ -313,8 +308,6 @@ void loadDefaultConfig() {
     // Logger (v13 wide-CSV pipeline)
     config.logger.csvLoggingEnabled         = true;
     config.logger.aggregationIntervalSec    = 60;
-    config.logger.humidityCorrectionEnabled = false;
-    config.logger.humidityCorrectionKappa   = 0.35f;
 }
 
 // ============================================================================
@@ -352,8 +345,6 @@ void migrateConfig(uint8_t fromVersion) {
         // top-level LoggerConfig appended at the end of DeviceConfig.
         config.logger.csvLoggingEnabled         = true;
         config.logger.aggregationIntervalSec    = 60;
-        config.logger.humidityCorrectionEnabled = false;
-        config.logger.humidityCorrectionKappa   = 0.35f;
     }
     config.version = CONFIG_VERSION;
     config.hardware.version = CONFIG_VERSION;

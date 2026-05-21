@@ -1043,8 +1043,6 @@ void setupWebServer() {
         JsonObject fm = doc["flowMeter"].to<JsonObject>();
         fm["pulsesPerLiter"]                = config.flowMeter.pulsesPerLiter > 0    ? config.flowMeter.pulsesPerLiter    : 450.0f;
         fm["calibrationMultiplier"]         = config.flowMeter.calibrationMultiplier ? config.flowMeter.calibrationMultiplier : 1.0f;
-        fm["monitoringWindowSecs"]          = config.flowMeter.monitoringWindowSecs > 0 ? config.flowMeter.monitoringWindowSecs : 3;
-        fm["firstLoopMonitoringWindowSecs"] = config.flowMeter.firstLoopMonitoringWindowSecs > 0 ? config.flowMeter.firstLoopMonitoringWindowSecs : 6;
         fm["testMode"]                      = config.flowMeter.testMode;
         fm["blinkDuration"]                 = config.flowMeter.blinkDuration > 0 ? config.flowMeter.blinkDuration : 250;
 
@@ -1071,8 +1069,6 @@ void setupWebServer() {
         JsonObject lg = doc["logger"].to<JsonObject>();
         lg["csvLoggingEnabled"]         = config.logger.csvLoggingEnabled;
         lg["aggregationIntervalSec"]    = config.logger.aggregationIntervalSec ? config.logger.aggregationIntervalSec : 60;
-        lg["humidityCorrectionEnabled"] = config.logger.humidityCorrectionEnabled;
-        lg["humidityCorrectionKappa"]   = config.logger.humidityCorrectionKappa > 0.0f ? config.logger.humidityCorrectionKappa : 0.35f;
 
         // ── Network ───────────────────────────────────────────────────────────
         JsonObject net = doc["network"].to<JsonObject>();
@@ -1168,10 +1164,6 @@ void setupWebServer() {
             float v = r->getParam("calibrationMultiplier", true)->value().toFloat();
             config.flowMeter.calibrationMultiplier = (v > 0.0f && isfinite(v)) ? v : 1.0f;
         }
-        if (r->hasParam("monitoringWindowSecs", true))
-            config.flowMeter.monitoringWindowSecs = max(1L, r->getParam("monitoringWindowSecs", true)->value().toInt());
-        if (r->hasParam("firstLoopWindowSecs", true))
-            config.flowMeter.firstLoopMonitoringWindowSecs = max(1L, r->getParam("firstLoopWindowSecs", true)->value().toInt());
         config.flowMeter.testMode = r->hasParam("testMode", true);
         if (r->hasParam("blinkDuration", true))
             config.flowMeter.blinkDuration = max(50L, r->getParam("blinkDuration", true)->value().toInt());
@@ -1255,6 +1247,16 @@ void setupWebServer() {
         if (r->hasParam("cpuFreqMHz", true))     config.hardware.cpuFreqMHz     = r->getParam("cpuFreqMHz", true)->value().toInt();
         if (r->hasParam("debounceMs", true))     config.hardware.debounceMs     = constrain(r->getParam("debounceMs", true)->value().toInt(), 20, 500);
         if (r->hasParam("debugMode", true))      config.hardware.debugMode      = r->getParam("debugMode", true)->value() == "1";
+        
+        // Chunk G: move testMode / blinkDuration to hardware page
+        if (r->hasParam("testMode", true)) {
+            config.flowMeter.testMode = r->getParam("testMode", true)->value() == "on" || r->getParam("testMode", true)->value() == "1";
+        } else {
+            config.flowMeter.testMode = false;
+        }
+        if (r->hasParam("blinkDuration", true)) {
+            config.flowMeter.blinkDuration = r->getParam("blinkDuration", true)->value().toInt();
+        }
         saveConfig();
         sendRestartPage(r, "Device is restarting with new hardware settings.");
         shouldRestart = true;
@@ -1312,11 +1314,8 @@ void setupWebServer() {
         // Wide-CSV pipeline knobs (config.logger.*).  Applied on next StorageTask
         // restart — see TaskManager::init().
         config.logger.csvLoggingEnabled         = r->hasParam("csvLoggingEnabled", true);
-        config.logger.humidityCorrectionEnabled = r->hasParam("humidityCorrectionEnabled", true);
         if (r->hasParam("aggregationIntervalSec", true))
             config.logger.aggregationIntervalSec = constrain(r->getParam("aggregationIntervalSec", true)->value().toInt(), 5, 3600);
-        if (r->hasParam("humidityCorrectionKappa", true))
-            config.logger.humidityCorrectionKappa = constrain(r->getParam("humidityCorrectionKappa", true)->value().toFloat(), 0.0f, 2.0f);
 
         saveConfig();
 
@@ -1862,9 +1861,6 @@ void setupWebServer() {
                 JsonObject fm = doc["flowMeter"];
                 if (fm["pulsesPerLiter"].is<float>())               config.flowMeter.pulsesPerLiter               = fm["pulsesPerLiter"];
                 if (fm["calibrationMultiplier"].is<float>())        config.flowMeter.calibrationMultiplier        = fm["calibrationMultiplier"];
-                if (fm["monitoringWindowSecs"].is<int>())           config.flowMeter.monitoringWindowSecs         = fm["monitoringWindowSecs"];
-                if (fm["firstLoopMonitoringWindowSecs"].is<int>())  config.flowMeter.firstLoopMonitoringWindowSecs= fm["firstLoopMonitoringWindowSecs"];
-                else if (fm["firstLoopWindow"].is<int>())           config.flowMeter.firstLoopMonitoringWindowSecs= fm["firstLoopWindow"];
             }
             if (doc["datalog"].is<JsonObject>()) {
                 JsonObject dl = doc["datalog"];
@@ -1901,9 +1897,7 @@ void setupWebServer() {
             if (doc["logger"].is<JsonObject>()) {
                 JsonObject lg = doc["logger"];
                 if (lg["csvLoggingEnabled"].is<bool>())         config.logger.csvLoggingEnabled         = lg["csvLoggingEnabled"];
-                if (lg["humidityCorrectionEnabled"].is<bool>()) config.logger.humidityCorrectionEnabled = lg["humidityCorrectionEnabled"];
                 if (lg["aggregationIntervalSec"].is<int>())     config.logger.aggregationIntervalSec    = constrain(lg["aggregationIntervalSec"].as<int>(), 5, 3600);
-                if (lg["humidityCorrectionKappa"].is<float>())  config.logger.humidityCorrectionKappa   = constrain(lg["humidityCorrectionKappa"].as<float>(), 0.0f, 2.0f);
             }
             saveConfig();
             r->send(200, "text/plain", "OK");

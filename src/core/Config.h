@@ -172,8 +172,7 @@ struct DatalogConfig {
 struct FlowMeterConfig {
     float pulsesPerLiter;
     float calibrationMultiplier;
-    int monitoringWindowSecs;
-    int firstLoopMonitoringWindowSecs;
+    int obsolete_windows[2]; // formerly monitoringWindowSecs and firstLoopMonitoringWindowSecs
     bool testMode;
     int blinkDuration;
     uint8_t reserved[8];
@@ -212,8 +211,7 @@ struct HardwareConfig {
 struct LoggerConfig {
     bool     csvLoggingEnabled;          // wide-CSV pipeline kill switch (default on)
     uint16_t aggregationIntervalSec;     // RAM aggregator flush cadence (sec)
-    bool     humidityCorrectionEnabled;  // SDS011 k-Köhler correction
-    float    humidityCorrectionKappa;    // default 0.35
+    uint8_t  obsolete_humidityCorrection[5]; // formerly humidityCorrectionEnabled (1) + Kappa (4)
     uint8_t  reserved[16];               // future v13+ fields without ABI break
 };
 
