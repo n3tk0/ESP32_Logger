@@ -143,6 +143,8 @@ private:
 };
 
 // Ring buffer for recent readings served by /api/data.
-// 200 entries ≈ 14KB — enough for ~30min at 10s with 3 sensors.
-constexpr size_t WEB_RING_SIZE = 200;
+// Size is derived from a 16 KB budget so the comment stays correct as
+// SensorReading grows.  With sizeof(SensorReading) ≈ 72 B this yields ~227
+// entries — enough for ~30 min at 10 s with 3 sensors.
+constexpr size_t WEB_RING_SIZE = (16u * 1024u) / sizeof(SensorReading);
 extern RingBuffer<WEB_RING_SIZE> webRingBuf;
