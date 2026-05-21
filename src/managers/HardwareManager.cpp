@@ -11,7 +11,10 @@
 void IRAM_ATTR onFlowPulse() {
     unsigned long now = micros();
     if (now - lastFlowInterrupt > ISR_DEBOUNCE_MICROS) {
-        pulseCount++;
+        // R28 / AUDIT 2.13: relaxed fetch_add — increment is independent of
+        // surrounding loads; loop() exchange(0) provides the read-modify-write
+        // barrier when consuming the count.
+        pulseCount.fetch_add(1, std::memory_order_relaxed);
         lastFlowInterrupt = now;
         flowSensorPulseDetected = true;
     }

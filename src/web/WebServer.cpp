@@ -97,9 +97,8 @@ void sendRestartPage(AsyncWebServerRequest *r, const char* message) {
 static AsyncEventSource liveEvents("/api/events");
 
 static void buildLiveSnapshot(JsonDocument& doc) {
-    noInterrupts();
-    uint32_t safePulses = pulseCount;
-    interrupts();
+    // R28 / AUDIT 6.4: atomic load replaces noInterrupts/interrupts barrier.
+    uint32_t safePulses = pulseCount.load(std::memory_order_relaxed);
 
     doc["time"]      = getRtcDateTimeString();
     doc["chip"]      = ESP.getChipModel();
