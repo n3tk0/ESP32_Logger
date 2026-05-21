@@ -2,6 +2,13 @@
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include <math.h>
 
+// R28 / AUDIT 24.11: ADC_11db is deprecated in IDF 5.x (Arduino Core 3.x) in
+// favour of ADC_ATTEN_DB_12 (same 0..3.1 V range). On older Arduino Core 2.x
+// (IDF 4.x) the new symbol isn't defined, so fall back to ADC_11db.
+#ifndef ADC_ATTEN_DB_12
+#  define ADC_ATTEN_DB_12 ADC_11db
+#endif
+
 bool ZMPT101BSensor::init(JsonObjectConst cfg) {
     _enabled        = cfg["enabled"]          | true;
     _pin            = cfg["pin"]              | -1;  // R11: unset → init refuses
@@ -17,7 +24,7 @@ bool ZMPT101BSensor::init(JsonObjectConst cfg) {
     _calVoltage.load(cal, "voltage_vrms");
 
     if (!validateAttachPin(_pin, "zmpt101b", "pin")) return false;
-    analogSetPinAttenuation(_pin, ADC_11db); // full-scale ~3.3 V
+    analogSetPinAttenuation(_pin, ADC_ATTEN_DB_12); // full-scale ~3.1 V
     pinMode(_pin, INPUT);
     _ready = true;
 

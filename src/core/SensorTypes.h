@@ -100,6 +100,10 @@ private:
 // ============================================================================
 // AGGREGATION ENUMS  (used by AggregationEngine + /api/data endpoint)
 // ============================================================================
+// R28 / AUDIT 5.19: APPEND-ONLY; never renumber or reorder.  These values are
+// persisted as integers inside platform.json (per-metric aggregation mode).
+// Inserting a new mode in the middle would silently reassign every stored
+// config — pin new modes at the end of the enum.
 enum AggMode : uint8_t {
     AGG_RAW  = 0,   // Pass-through, no reduction
     AGG_AVG  = 1,   // Arithmetic mean per bucket

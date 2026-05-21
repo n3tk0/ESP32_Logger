@@ -269,6 +269,17 @@ bool SensorManager::reloadConfig(fs::FS& fs, const char* cfgPath) {
 
 // ---------------------------------------------------------------------------
 uint32_t SensorManager::minReadIntervalMs() const {
+    // R28 follow-up (PR #106 Codex P1 + Gemini High): hold configMutex while
+    // iterating _sensors[]. SensorTask now re-reads this every loop iteration
+    // (audit row 10.1); without the lock a concurrent reloadConfig() can
+    // _destroyAll() the array mid-walk → UAF. Bounded 200 ms take — if reload
+    // is mid-flight return a safe default so SensorTask keeps ticking at 1 Hz
+    // until the next iteration.
+    MutexGuard sg(configMutex, pdMS_TO_TICKS(200));
+    if (configMutex && !sg.isLocked()) {
+        return 1000;   // reload in flight; safe fallback cadence
+    }
+
     uint32_t minMs = 1000;  // default 1s if no sensors
     for (int i = 0; i < _count; i++) {
         if (!_sensors[i] || !_sensors[i]->isEnabled()) continue;

@@ -9,7 +9,9 @@
 //   "pin"              — anemometer GPIO (default 8)
 //   "pulses_per_rev"   — hall pulses per revolution (default 1.0)
 //   "meters_per_rev"   — effective circumference in m (default 0.5)
-//   "sample_window_ms" — counting window for speed (default 3000)
+//   "sample_window_ms" — counting window for speed (default 1000)
+//   "poll_interval_ms" — schedule interval (default = sample_window_ms; set
+//                        larger e.g. 30000 to free SlowSensorTask between samples)
 //   "calibration": {"wind_speed": {"offset": 0.0, "scale": 1.0}}
 //
 // Direction config keys (optional — omit dir_pin to disable):
@@ -30,7 +32,9 @@ public:
 
     const char* getType() const override { return "wind"; }
     const char* getName() const override { return "Wind Speed/Direction"; }
-    uint32_t    getReadIntervalMs() const override { return _sampleWindowMs; }
+    // R28 / AUDIT 23.4: schedule interval decoupled from sample window so the
+    // SlowSensorTask isn't 100%-duty-cycle blocked by the in-read delay().
+    uint32_t    getReadIntervalMs() const override { return _pollIntervalMs; }
     bool        isBlocking()        const override { return true; }
     int getMetrics(const char** out, int maxOut) const override {
         static const char* m[] = { "wind_speed", "wind_direction" };
@@ -48,7 +52,8 @@ private:
 
     float    _pulsesPerRev   = 1.0f;
     float    _metersPerRev   = 0.5f;
-    uint32_t _sampleWindowMs = 3000;
+    uint32_t _sampleWindowMs = 1000;     // in-read counting window (blocking)
+    uint32_t _pollIntervalMs = 1000;     // R28 23.4: SlowSensorTask schedule
     int      _pin            = -1;  // R11: -1 = unset; refuse to attach
 
     // AH49E direction sensor

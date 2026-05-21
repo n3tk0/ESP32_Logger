@@ -65,13 +65,15 @@ int           lastPFButtonState = LOW;
 // ============================================================================
 // ISR STATE
 // ============================================================================
-volatile uint32_t     pulseCount            = 0;
+std::atomic<uint32_t> pulseCount{0};
 // R12 / AUDIT 1.5: lastFFInterrupt / lastPFInterrupt / ffPressed / pfPressed
 // were touched only by the dead onFFButton / onPFButton ISRs (now deleted).
 // Removed alongside their ISRs.
 volatile unsigned long lastFlowInterrupt    = 0;
 volatile bool         flowSensorPulseDetected = false;
-volatile uint32_t isrDebounceUs         = 100000;
+// R28 / AUDIT 6.6: isrDebounceUs removed — write-only sibling of the deleted
+// onFFButton/onPFButton ISRs.  Flow ISR uses the compile-time constant
+// ISR_DEBOUNCE_MICROS directly.
 
 // ============================================================================
 // STATE MACHINE
