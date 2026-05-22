@@ -29,10 +29,12 @@
 //   ESP32-S3 (8 MB embedded): GPIO 26-32 (octal flash) or 26-37 (octal PSRAM)
 //
 // USB CDC — when USB-Serial-JTAG is enabled (default on Arduino C3/S3
-// builds), these pins are not usable for GPIO:
+// builds), these pins are not usable for GPIO. These are now handled
+// dynamically by validatePin() at runtime, allowing users to toggle
+// USB CDC ON/OFF via the deploy tool. See UsbCdcModule.
 //
-//   ESP32-C3: GPIO 18 (D-), 19 (D+)
-//   ESP32-S3: GPIO 19 (D-), 20 (D+)
+//   ESP32-C3: GPIO 18 (D-), 19 (D+)  [checked by validatePin() at runtime]
+//   ESP32-S3: GPIO 19 (D-), 20 (D+)  [checked by validatePin() at runtime]
 //
 // Reserved — UART0 console (Serial.printf debug output). These pins work
 // as GPIO if the user accepts losing serial debug output, so we list them
@@ -49,13 +51,15 @@ namespace {
 // on every supported one. Field order matches BoardProfile in the header.
 
 // --- Seeed XIAO ESP32-C3 -----------------------------------------------------
+// USB CDC (pins 18/19) is now handled by validatePin() at runtime, not statically.
+// This allows USB CDC to be toggled ON/OFF via deploy tool without changing profiles.
 const BoardProfile XIAO_C3 = {
     BOARD_XIAO_C3,
     "Seeed XIAO ESP32-C3",
     "xiao_c3",
     21,
     { 2, 8, 9, PIN_UNSET },
-    { 18, 19, PIN_UNSET },
+    { PIN_UNSET },  // USB CDC handled by validatePin() dynamically
     { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
     { 20, 21, PIN_UNSET },
 };
@@ -63,27 +67,29 @@ const BoardProfile XIAO_C3 = {
 // --- Generic "ESP32-C3 SuperMini" --------------------------------------------
 // Same C3 silicon; some clones break out GPIO 8 to a status LED, others
 // don't. Same restriction set as XIAO C3 for safety.
+// USB CDC (pins 18/19) is now handled by validatePin() at runtime.
 const BoardProfile SUPERMINI_C3 = {
     BOARD_SUPERMINI_C3,
     "ESP32-C3 SuperMini",
     "supermini_c3",
     21,
     { 2, 8, 9, PIN_UNSET },
-    { 18, 19, PIN_UNSET },
+    { PIN_UNSET },  // USB CDC handled by validatePin() dynamically
     { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
     { 20, 21, PIN_UNSET },
 };
 
 // --- Bare ESP32-C3 module ----------------------------------------------------
-// No board-specific quirks; same chip constraints. USB CDC may or may not
-// be enabled depending on build config — keep 18/19 restricted to be safe.
+// No board-specific quirks; same chip constraints.
+// USB CDC (pins 18/19) is now handled by validatePin() at runtime,
+// allowing it to be toggled ON/OFF via deploy tool.
 const BoardProfile GENERIC_C3 = {
     BOARD_GENERIC_C3,
     "Generic ESP32-C3",
     "generic_c3",
     21,
     { 2, 8, 9, PIN_UNSET },
-    { 18, 19, PIN_UNSET },
+    { PIN_UNSET },  // USB CDC handled by validatePin() dynamically
     { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
     { 20, 21, PIN_UNSET },
 };
@@ -91,13 +97,14 @@ const BoardProfile GENERIC_C3 = {
 // --- Bare ESP32-S3 module ----------------------------------------------------
 // Wider GPIO range. Strap pins per S3 TRM. Flash range varies by package;
 // use the most defensive set (octal flash + octal PSRAM = 26-37).
+// USB CDC (pins 19/20) is now handled by validatePin() at runtime.
 const BoardProfile GENERIC_S3 = {
     BOARD_GENERIC_S3,
     "Generic ESP32-S3",
     "generic_s3",
     48,
     { 0, 3, 45, 46, PIN_UNSET },
-    { 19, 20, PIN_UNSET },
+    { PIN_UNSET },  // USB CDC handled by validatePin() dynamically
     { 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, PIN_UNSET },
     { 43, 44, PIN_UNSET },
 };
@@ -217,7 +224,7 @@ const char* pinRejectReason(const BoardProfile* profile, uint8_t pin) {
     if (pin > profile->maxGpio)    return "GPIO out of range for board";
     if (profile->id == BOARD_CUSTOM) return "ok";
     if (inList(profile->strapPins,    pin)) return "bootstrap pin (boot mode risk)";
-    if (inList(profile->usbPins,      pin)) return "USB CDC pin (D+/D-)";
+    // Note: USB CDC pins are checked dynamically by validatePin(), not here
     if (inList(profile->flashPins,    pin)) return "SPI flash bus pin";
     if (inList(profile->reservedPins, pin)) return "reserved (UART0 console)";
     return "ok";
