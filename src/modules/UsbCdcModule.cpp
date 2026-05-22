@@ -40,8 +40,17 @@ void UsbCdcModule::printStatus() const {
         return;
     }
 
+    // Show actual hardware state from build-time flag, not NVS preference
+    bool hwEnabled = false;
+#if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT == 1
+    hwEnabled = true;
+#endif
+
     String board = getBoardName();
-    String status = enabled_ ? "ON (locked for serial)" : "OFF (GPIO available)";
+    String status = hwEnabled ? "ON (locked for serial)" : "OFF (GPIO available)";
+    if (hwEnabled != enabled_) {
+        status += " [Recompile required to apply change]";
+    }
     String pins = getAffectedPins();
 
     Serial.println();
@@ -52,7 +61,7 @@ void UsbCdcModule::printStatus() const {
         Serial.printf("│ Affected pins:    %s\n", pins.c_str());
     }
     Serial.println("│");
-    if (enabled_) {
+    if (hwEnabled) {
         Serial.println("│ ✓ Serial over USB available (easy debugging)");
         Serial.println("│ ✗ GPIO pins locked for USB communication");
     } else {

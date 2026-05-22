@@ -98,11 +98,12 @@ const BoardProfile GENERIC_C3 = {
 // Wider GPIO range. Strap pins per S3 TRM. Flash range varies by package;
 // use the most defensive set (octal flash + octal PSRAM = 26-37).
 // USB CDC (pins 19/20) is now handled by validatePin() at runtime.
+// GPIO pins are indexed 0-47 (48 total), so maxGpio is 47
 const BoardProfile GENERIC_S3 = {
     BOARD_GENERIC_S3,
     "Generic ESP32-S3",
     "generic_s3",
-    48,
+    47,
     { 0, 3, 45, 46, PIN_UNSET },
     { PIN_UNSET },  // USB CDC handled by validatePin() dynamically
     { 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, PIN_UNSET },

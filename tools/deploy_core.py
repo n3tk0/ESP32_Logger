@@ -193,6 +193,7 @@ class DeployManager:
         # Find the section for our environment and modify USB CDC flags
         in_env_section = False
         flag_found_in_section = False
+        in_build_flags = False
         modified = False
         result = []
 
@@ -201,6 +202,7 @@ class DeployManager:
             if line.strip().startswith(f"[env:{env}]"):
                 in_env_section = True
                 flag_found_in_section = False
+                in_build_flags = False
                 result.append(line)
                 continue
 
@@ -208,6 +210,11 @@ class DeployManager:
             if in_env_section and line.strip().startswith("[env:"):
                 in_env_section = False
                 flag_found_in_section = False
+                in_build_flags = False
+
+            # Exit multi-line build_flags block when we hit non-indented line (key=value)
+            if in_build_flags and line and line[0] not in (' ', '\t'):
+                in_build_flags = False
 
             # Modify USB CDC flag if in target environment
             if in_env_section and "-DARDUINO_USB_CDC_ON_BOOT=" in line:
@@ -221,16 +228,20 @@ class DeployManager:
                 result.append(line)
                 continue
 
-            # If we're in build_flags and USB CDC flag doesn't exist, add it
+            # Start of build_flags section - check if flag exists or needs to be added
             if (in_env_section and line.strip().startswith("build_flags") and
                 not flag_found_in_section and "-DARDUINO_USB_CDC_ON_BOOT" not in line):
                 result.append(line)
-                # Add USB CDC flag on next line if it's a multi-line build_flags
-                if "=" in line and line.rstrip().endswith(("\\", "-I.")):
+                in_build_flags = True
+                # If this is a multi-line block (ends with = or contains indented values)
+                if line.rstrip().endswith("="):
+                    # Multi-line format: build_flags =\n    ${...}\n    -D...
+                    # Add USB CDC flag as next indented line
                     usb_flag = "-DARDUINO_USB_CDC_ON_BOOT=1" if usb_cdc else "-DARDUINO_USB_CDC_ON_BOOT=0"
                     result.append(f"    {usb_flag}")
                     modified = True
                     flag_found_in_section = True
+                    in_build_flags = False
                 continue
 
             result.append(line)

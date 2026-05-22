@@ -185,7 +185,7 @@ String urlEncode(const String& v) {
 bool validatePin(int pin, const String& usage) {
     // Check for valid pin range. ESP32-C3 has 22 GPIO (0-21), S3 has 48 (0-47).
     // Note: validateAttachPin() performs stricter checks against the board profile's maxGpio
-    if (pin < 0 || pin > 48) {
+    if (pin < 0 || pin >= 48) {
         Serial.printf("[validatePin] INVALID: Pin %d out of range (usage: %s)\n", pin, usage.c_str());
         return false;
     }
@@ -199,17 +199,9 @@ bool validatePin(int pin, const String& usage) {
         return false;
     }
 
-    // ── Reserved pins (ESP32 common reserved) ────────────────────────────
-    // GPIO 0, 2, 5 (usually reserved for boot/flash)
-    // GPIO 12, 13 (usually reserved for PSRAM on boards with PSRAM)
-    // GPIO 25-27 (DAC channels, often used for internal purposes)
-    // These are board-specific; for now we allow all but log a warning
-    if (pin == 0 || pin == 2 || pin == 5) {
-        Serial.printf("[validatePin] WARNING: Pin %d is often reserved for boot/FLASH (usage: %s)\n", pin, usage.c_str());
-        // Don't reject; let sensor manager decide
-    }
-
     // ── Allowed ────────────────────────────────────────────────────────────
+    // Board profile validation in validateAttachPin() handles strap pins and other
+    // board-specific restrictions, so we don't duplicate those checks here
     Serial.printf("[validatePin] OK: Pin %d valid for %s\n", pin, usage.c_str());
     return true;
 }
