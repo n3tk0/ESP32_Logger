@@ -27,14 +27,19 @@
   // newly-added sensors show up without a reload.
   var STATIC_ITEMS = [
     // Pages
-    { id: "p-overview",  group: "Page", title: "Overview",          icon: "layout-grid",      kw: "home iot",                 act: function () { navigateTo("overview");  } },
-    { id: "p-dashboard", group: "Page", title: "Dashboard",         icon: "layout-dashboard", kw: "water legacy",             act: function () { navigateTo("dashboard"); } },
-    { id: "p-sensors",   group: "Page", title: "Sensors",           icon: "thermometer",      kw: "readings env",             act: function () { navigateTo("sensors");   } },
-    { id: "p-alerts",    group: "Page", title: "Alerts",            icon: "bell-ring",        kw: "rules notifications",      act: function () { navigateTo("alerts");    } },
-    { id: "p-logs",      group: "Page", title: "Log viewer",        icon: "book-text",        kw: "flowmeter",                act: function () { navigateTo("logs");      } },
-    { id: "p-files",     group: "Page", title: "Files",             icon: "folder",           kw: "browser littlefs sd",      act: function () { navigateTo("files");     } },
-    { id: "p-settings",  group: "Page", title: "Settings",          icon: "settings",         kw: "options",                  act: function () { navigateTo("settings");  } },
-    { id: "p-update",    group: "Page", title: "Firmware update",   icon: "cloud-upload",     kw: "ota upload",               act: function () { navigateTo("update");    } },
+    // `modes` mirrors the sidebar's data-mode-show convention.  Items with
+    // a modes array are filtered against the current platform mode at
+    // buildItems() time — otherwise an Overview / Alerts hit in legacy
+    // mode would mark the hidden page as active and leave the user
+    // staring at a blank main panel (codex review PR #108).
+    { id: "p-overview",  group: "Page", title: "Overview",          icon: "layout-grid",      kw: "home iot",            modes: ["continuous","hybrid"], act: function () { navigateTo("overview");  } },
+    { id: "p-dashboard", group: "Page", title: "Dashboard",         icon: "layout-dashboard", kw: "water legacy",        modes: ["legacy","hybrid"],     act: function () { navigateTo("dashboard"); } },
+    { id: "p-sensors",   group: "Page", title: "Sensors",           icon: "thermometer",      kw: "readings env",                                        act: function () { navigateTo("sensors");   } },
+    { id: "p-alerts",    group: "Page", title: "Alerts",            icon: "bell-ring",        kw: "rules notifications", modes: ["continuous","hybrid"], act: function () { navigateTo("alerts");    } },
+    { id: "p-logs",      group: "Page", title: "Log viewer",        icon: "book-text",        kw: "flowmeter",           modes: ["legacy","hybrid"],     act: function () { navigateTo("logs");      } },
+    { id: "p-files",     group: "Page", title: "Files",             icon: "folder",           kw: "browser littlefs sd",                                 act: function () { navigateTo("files");     } },
+    { id: "p-settings",  group: "Page", title: "Settings",          icon: "settings",         kw: "options",                                             act: function () { navigateTo("settings");  } },
+    { id: "p-update",    group: "Page", title: "Firmware update",   icon: "cloud-upload",     kw: "ota upload",                                          act: function () { navigateTo("update");    } },
 
     // Settings sub-pages
     { id: "s-device",   group: "Settings", title: "Device",          icon: "settings", kw: "name id",                 act: function () { location.hash = "settings_device";   } },
@@ -66,7 +71,14 @@
   ];
 
   function buildItems() {
-    var items = STATIC_ITEMS.slice();
+    // Filter out items whose `modes` array doesn't include the current
+    // platform mode.  Read mode from <html data-mode="…"> set by
+    // iot-extensions.js / theme-boot.js; default "continuous" matches
+    // the firmware's default (codex review PR #108).
+    var mode = document.documentElement.getAttribute("data-mode") || "continuous";
+    var items = STATIC_ITEMS.filter(function (it) {
+      return !it.modes || it.modes.indexOf(mode) !== -1;
+    });
 
     // Sensors from current platform config
     if (window.PCFG && PCFG.sensors && PCFG.sensors.length) {

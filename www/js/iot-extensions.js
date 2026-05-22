@@ -946,19 +946,26 @@
     section.id = "sensors-live-cycle";
     section.className = "sensors-live-cycle";
     section.style.marginBottom = "var(--gap)";
+    // Use `slc-` (sensors-live-cycle) prefix on every ID so the injected
+    // Sensors card doesn't collide with the matching nodes in #page-live
+    // (which carry the same semantic IDs `live-liters`, `live-pulses`, …).
+    // getElementById returns first-match in document order, and the legacy
+    // Live section parses before this card injects — without unique IDs
+    // the Sensors mirror would stay stale while the hidden Live page nodes
+    // got the updates (codex review PR #108).
     section.innerHTML =
       '<div class="grid grid-12">' +
         '<div class="card span-8">' +
           '<div class="card-head">' +
             '<div class="card-title"><span data-icon="droplets"></span> Current cycle</div>' +
-            '<span class="badge dim mono" id="live-cycle-state">IDLE</span>' +
+            '<span class="badge dim mono" id="slc-state">IDLE</span>' +
           '</div>' +
           '<div class="card-body">' +
             '<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;justify-content:space-between">' +
-              '<div class="bigstat"><div class="bigstat-l">Volume</div><div class="bigstat-v mono"><span id="live-liters">0.00</span><span>L</span></div></div>' +
-              '<div class="bigstat"><div class="bigstat-l">Pulses</div><div class="bigstat-v mono" id="live-pulses">0</div></div>' +
-              '<div class="bigstat"><div class="bigstat-l">Duration</div><div class="bigstat-v mono"><span id="live-cycleTime">0</span><span>s</span></div></div>' +
-              '<div class="bigstat"><div class="bigstat-l">Trigger</div><div class="bigstat-v" style="color:var(--accent)" id="live-trigger">–</div></div>' +
+              '<div class="bigstat"><div class="bigstat-l">Volume</div><div class="bigstat-v mono"><span id="slc-liters">0.00</span><span>L</span></div></div>' +
+              '<div class="bigstat"><div class="bigstat-l">Pulses</div><div class="bigstat-v mono" id="slc-pulses">0</div></div>' +
+              '<div class="bigstat"><div class="bigstat-l">Duration</div><div class="bigstat-v mono"><span id="slc-cycleTime">0</span><span>s</span></div></div>' +
+              '<div class="bigstat"><div class="bigstat-l">Trigger</div><div class="bigstat-v" style="color:var(--accent)" id="slc-trigger">–</div></div>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -966,7 +973,7 @@
           '<div class="card-head"><div class="card-title"><span data-icon="git-branch"></span> State machine</div></div>' +
           '<div class="card-body" style="display:flex;flex-direction:column;gap:12px">' +
             '<div id="sensors-live-state-wrap">' +
-              '<div id="state-mirror" class="badge dim">–</div>' +
+              '<div id="slc-state-mirror" class="badge dim">–</div>' +
               '<div class="mono" style="font-size:11px;color:var(--text-3);margin-top:8px">Live feed from the legacy flow-meter pipeline. Open <a href="#live" data-click="navPage" data-page="live" data-args="[]">the full Live page</a> for the timer + log.</div>' +
             '</div>' +
           '</div>' +
@@ -995,14 +1002,15 @@
 
   function _liveCycleApply(d) {
     if (!d) return;
-    setEl("live-liters",    typeof d.liters    === "number" ? d.liters.toFixed(2) : "0.00");
-    setEl("live-pulses",    d.pulses     !== undefined ? d.pulses    : 0);
-    setEl("live-cycleTime", d.cycleTime  !== undefined ? d.cycleTime : 0);
-    setEl("live-trigger",   d.trigger    || "–");
-    var stateBadge = document.getElementById("live-cycle-state");
-    if (stateBadge && d.state) stateBadge.textContent = String(d.state).toUpperCase();
-    var sm = document.getElementById("state-mirror");
-    if (sm && d.state) sm.textContent = String(d.state).toUpperCase();
+    setEl("slc-liters",    typeof d.liters   === "number" ? d.liters.toFixed(2) : "0.00");
+    setEl("slc-pulses",    d.pulses    !== undefined ? d.pulses    : 0);
+    setEl("slc-cycleTime", d.cycleTime !== undefined ? d.cycleTime : 0);
+    setEl("slc-trigger",   d.trigger   || "–");
+    if (d.state) {
+      var s = String(d.state).toUpperCase();
+      setEl("slc-state",        s);
+      setEl("slc-state-mirror", s);
+    }
   }
 
   function _liveCyclePageVisible() {
