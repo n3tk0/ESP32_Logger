@@ -245,9 +245,37 @@ Uses PlatformIO build macros defined in `platformio.ini`:
 - Run `nvs_flash_erase()` in setup to reset NVS
 - Verify first-run setup completed successfully
 
+## Integration with Pin Validation (Pillar 4.2)
+
+USB CDC conflict detection is **centralized** in the `validatePin()` utility function per Pillar 4.2 and 4.11 architectural standards.
+
+**Do NOT:**
+- Scatter `usbCdc.conflictsWith()` checks across sensor plugins
+- Use compile-time macros for pin selection (pins are loaded from JSON)
+- Implement automatic pin remapping (physical wires don't move)
+
+**DO:**
+- Call `validatePin(pin, usage)` in SensorManager when initializing pins
+- Let sensor initialization fail gracefully if pins are invalid
+- Log clear error messages explaining the conflict
+
+**Example:**
+```cpp
+// In SensorManager.cpp
+if (!validatePin(config.pin, "I2C_SDA")) {
+    Serial.println("ERROR: Pin reserved for USB CDC");
+    return false;  // Skip this sensor
+}
+```
+
+See `src/utils/PIN_VALIDATION_GUIDE.md` for complete integration guide.
+
 ## See Also
 
-- `src/modules/UsbCdcModule.h` — Header with full API
+- `src/modules/UsbCdcModule.h` — USB CDC detection API
 - `src/modules/UsbCdcModule.cpp` — Implementation
+- `src/utils/Utils.h` — Central `validatePin()` function
+- `src/utils/PIN_VALIDATION_GUIDE.md` — SensorManager integration guide
 - `tools/deploy.py` — Deploy tool for toggling USB CDC
+- `tools/DEPLOY.md` — User-facing documentation
 - `platformio.ini` — Build flag configuration

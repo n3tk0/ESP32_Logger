@@ -35,6 +35,13 @@ public:
     /// Check if USB CDC on boot is currently enabled
     bool isUsbCdcEnabled() const { return enabled_; }
 
+    /// Check if a specific pin is locked by USB CDC (for validatePin integration)
+    /// Returns true if pin is reserved for USB and USB CDC is enabled
+    bool isUsbPinLocked(int pin) const;
+
+    /// Get the list of USB-reserved pins for this board (as string for logging)
+    String getUsbPins() const;
+
     /// Print current USB CDC status and pin information to Serial
     void printStatus() const;
 

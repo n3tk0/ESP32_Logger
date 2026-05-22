@@ -85,6 +85,30 @@ String UsbCdcModule::getAffectedPins() const {
 #endif
 }
 
+bool UsbCdcModule::isUsbPinLocked(int pin) const {
+    if (!enabled_) {
+        return false;  // USB CDC disabled, no pins locked
+    }
+
+#if defined(ARDUINO_SEEED_XIAO_ESP32C3) || defined(ARDUINO_ESP32C3_DEV)
+    return (pin == 18 || pin == 19);
+#elif defined(ARDUINO_ESP32S3_DEV)
+    return (pin == 19 || pin == 20);
+#else
+    return false;
+#endif
+}
+
+String UsbCdcModule::getUsbPins() const {
+#if defined(ARDUINO_SEEED_XIAO_ESP32C3) || defined(ARDUINO_ESP32C3_DEV)
+    return "18,19";
+#elif defined(ARDUINO_ESP32S3_DEV)
+    return "19,20";
+#else
+    return "";
+#endif
+}
+
 bool UsbCdcModule::isUsbCdcSupported() const {
 #if defined(ARDUINO_SEEED_XIAO_ESP32C3) || defined(ARDUINO_ESP32C3_DEV) || defined(ARDUINO_ESP32S3_DEV)
     return true;

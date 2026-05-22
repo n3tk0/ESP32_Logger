@@ -38,3 +38,24 @@ bool deleteRecursive(fs::FS& fs, const String& path);
 // are url-decoded) need re-encoding before they go back into a Location
 // header.  Centralised here so future call sites don't reinvent it.
 String urlEncode(const String& v);
+
+// ---- Pin validation (Pillar 4.2 / 4.11) ----
+// Centralized pin validation that integrates USB CDC conflict detection.
+// Returns true if pin is valid for the given usage, false if pin is reserved
+// or invalid (e.g., used by USB CDC).
+//
+// Usage:
+//   if (!validatePin(pin, "I2C_SDA")) {
+//       log("ERROR: Pin reserved or invalid");
+//       return false;  // SensorManager skips sensor
+//   }
+//
+// Checks performed:
+//   • USB CDC conflict (if USB CDC enabled and pin is 18/19 on ESP32-C3 or 19/20 on S3)
+//   • Future: board-specific reserved pins
+//   • Future: already-in-use pins
+bool validatePin(int pin, const String& usage);
+
+// Get a human-readable string of USB-reserved pins (for error messages)
+// Returns "18,19" on ESP32-C3, "19,20" on ESP32-S3, "" if not supported
+String getUsbReservedPins();
