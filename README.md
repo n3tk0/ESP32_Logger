@@ -1,14 +1,42 @@
+<div align="center">
+
 # ESP32 Logger
 
-Multi-sensor environmental logging platform for embedded ESP32 targets.
-Ships firmware for three boards: `xiao_esp32c3`, `esp32c3_supermini`, `esp32s3`
-(see `platformio.ini`).
+**Multi-sensor environmental logging platform for embedded ESP32 targets.**
+
+Firmware for `xiao_esp32c3`, `esp32c3_supermini`, and `esp32s3` — water flow, air quality, weather, and power monitoring with on-device web UI, MQTT/HTTP/sensor.community/openSenseMap exporters, and OTA updates.
+
+[![Build Firmware](https://github.com/n3tk0/ESP32_Logger/actions/workflows/build-firmware.yml/badge.svg)](https://github.com/n3tk0/ESP32_Logger/actions/workflows/build-firmware.yml)
+[![Build Bootloader](https://github.com/n3tk0/ESP32_Logger/actions/workflows/build-bootloader.yml/badge.svg)](https://github.com/n3tk0/ESP32_Logger/actions/workflows/build-bootloader.yml)
+[![Platform](https://img.shields.io/badge/platform-ESP32%20%7C%20ESP32--C3%20%7C%20ESP32--S3-blue)](https://platformio.org/)
+[![Framework](https://img.shields.io/badge/framework-Arduino%20%7C%20FreeRTOS-00979D)](https://www.arduino.cc/)
+[![PlatformIO](https://img.shields.io/badge/built%20with-PlatformIO-orange?logo=platformio)](https://platformio.org/)
+[![License](https://img.shields.io/badge/license-See%20LICENSE-lightgrey)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/n3tk0/ESP32_Logger)](https://github.com/n3tk0/ESP32_Logger/commits/main)
+
+</div>
+
+---
+
+## Table of contents
+
+- [Features](#features)
+- [Supported boards](#supported-boards)
+- [Quick start](#quick-start)
+- [Project structure](#project-structure)
+- [Documentation](#documentation)
+- [Hardware](#hardware)
+- [Contributing](#contributing)
+- [License](#license)
+- [Support the project](#support-the-project)
 
 ---
 
 ## Features
 
-**Sensors** (toggled via `#ifdef SENSOR_*_ENABLED` in `src/setup.h`):
+### Sensors
+
+Toggled via `#ifdef SENSOR_*_ENABLED` in `src/setup.h`. Default build enables only `SENSOR_BME280_ENABLED` and `SENSOR_SDS011_ENABLED`; all others are commented out.
 
 | Macro | Sensor | Interface |
 |---|---|---|
@@ -31,22 +59,23 @@ Ships firmware for three boards: `xiao_esp32c3`, `esp32c3_supermini`, `esp32s3`
 | `SENSOR_ZMPT101B_ENABLED` | ZMPT101B AC voltage | ADC |
 | `SENSOR_ZMCT103C_ENABLED` | ZMCT103C AC current | ADC |
 
-Default build (`src/setup.h`) enables only `SENSOR_BME280_ENABLED` and
-`SENSOR_SDS011_ENABLED`; all others are commented out.
+### Exporters
 
-**Exporters** (toggled via `#ifdef EXPORT_*_ENABLED` in `src/setup.h`):
-- MQTT (`EXPORT_MQTT_ENABLED`)
-- Generic HTTP POST (`EXPORT_HTTP_ENABLED`)
-- sensor.community (`EXPORT_SENSORCOMMUNITY_ENABLED`)
-- openSenseMap (`EXPORT_OPENSENSEMAP_ENABLED`)
-- Webhook — Discord/Slack/IFTTT (`EXPORT_WEBHOOK_ENABLED`)
+Toggled via `#ifdef EXPORT_*_ENABLED` in `src/setup.h`. All five are enabled by default.
 
-All five are enabled by default.
+- **MQTT** (`EXPORT_MQTT_ENABLED`)
+- **Generic HTTP POST** (`EXPORT_HTTP_ENABLED`)
+- **sensor.community** (`EXPORT_SENSORCOMMUNITY_ENABLED`)
+- **openSenseMap** (`EXPORT_OPENSENSEMAP_ENABLED`)
+- **Webhook** — Discord / Slack / IFTTT (`EXPORT_WEBHOOK_ENABLED`)
 
-**Operating modes** (`PlatformMode` enum in `src/core/Config.h`):
-- `legacy` — deep-sleep water logger; FF/PF button triggers, RTC RAM log buffer
-- `continuous` — FreeRTOS sensor/processing/storage/export pipeline, no deep sleep
-- `hybrid` — legacy water logger + FreeRTOS pipeline running concurrently
+### Operating modes
+
+Selected via `PlatformMode` enum in `src/core/Config.h`:
+
+- **`legacy`** — deep-sleep water logger; FF/PF button triggers, RTC RAM log buffer
+- **`continuous`** — FreeRTOS sensor/processing/storage/export pipeline, no deep sleep
+- **`hybrid`** — legacy water logger + FreeRTOS pipeline running concurrently
 
 ---
 
@@ -54,10 +83,10 @@ All five are enabled by default.
 
 | Board id | Display name | Max GPIO | Notes |
 |---|---|---|---|
-| `xiao_c3` | Seeed XIAO ESP32-C3 | 21 | Strap: 2,8,9. Flash: 11–17. USB CDC: 18,19. UART0: 20,21 |
+| `xiao_c3` | Seeed XIAO ESP32-C3 | 21 | Strap: 2, 8, 9. Flash: 11–17. USB CDC: 18, 19. UART0: 20, 21 |
 | `supermini_c3` | ESP32-C3 SuperMini | 21 | Same restrictions as XIAO C3; USB CDC on boot (`-DARDUINO_USB_CDC_ON_BOOT=1`) |
 | `generic_c3` | Generic ESP32-C3 | 21 | Same chip constraints; USB CDC may or may not be enabled |
-| `generic_s3` | Generic ESP32-S3 | 48 | Strap: 0,3,45,46. Flash: 26–37 (octal). USB CDC: 19,20. UART0: 43,44 |
+| `generic_s3` | Generic ESP32-S3 | 48 | Strap: 0, 3, 45, 46. Flash: 26–37 (octal). USB CDC: 19, 20. UART0: 43, 44 |
 | `custom` | Custom — full responsibility | 48 | No pin validation; user accepts all restrictions |
 
 Source: `src/core/BoardProfiles.cpp` profile definitions.
@@ -66,54 +95,121 @@ Source: `src/core/BoardProfiles.cpp` profile definitions.
 
 ## Quick start
 
-1. **Clone the repo**
+**1. Clone the repo**
 
-   ```bash
-   git clone https://github.com/n3tk0/esp32_logger.git
-   cd esp32_logger
-   ```
+```bash
+git clone https://github.com/n3tk0/esp32_logger.git
+cd esp32_logger
+```
 
-2. **Build firmware** — choose one environment from `platformio.ini`:
+**2. Build firmware** — choose one environment from `platformio.ini`:
 
-   ```bash
-   pio run -e xiao_esp32c3        # Seeed XIAO ESP32-C3 (default)
-   pio run -e esp32c3_supermini   # ESP32-C3 SuperMini
-   pio run -e esp32s3             # ESP32-S3 DevKitC-1 (8 MB)
-   ```
+```bash
+pio run -e xiao_esp32c3        # Seeed XIAO ESP32-C3 (default)
+pio run -e esp32c3_supermini   # ESP32-C3 SuperMini
+pio run -e esp32s3             # ESP32-S3 DevKitC-1 (8 MB)
+```
 
-3. **Upload firmware and LittleFS image**
+**3. Upload firmware and LittleFS image**
 
-   ```bash
-   pio run -e xiao_esp32c3 --target upload
-   pio run -e xiao_esp32c3 --target uploadfs
-   ```
+```bash
+pio run -e xiao_esp32c3 --target upload
+pio run -e xiao_esp32c3 --target uploadfs
+```
 
-   `tools/build_web.py` must be run first to produce the LittleFS image from
-   `www/` (minifies and gzip-compresses JS/CSS into `dist/www/`).
+`tools/build_web.py` must be run first to produce the LittleFS image from `www/` (minifies and gzip-compresses JS/CSS into `dist/www/`).
 
-4. **Connect to the device AP**
+**4. Connect to the device AP**
 
-   Default SSID: `WaterLogger`  
-   Default password: `water12345`  
-   (Source: `DEFAULT_AP_SSID` / `DEFAULT_AP_PASSWORD` in `src/core/Config.h`)
+| Setting | Default |
+|---|---|
+| SSID | `WaterLogger` |
+| Password | `water12345` |
 
-5. **Open the first-run wizard**
+Defined in `DEFAULT_AP_SSID` / `DEFAULT_AP_PASSWORD` in `src/core/Config.h`.
 
-   Navigate to `http://192.168.4.1/firstrun` (AP-mode IP).  
-   Select a board profile, choose an operating mode, and assign GPIO pins.
-   The device reboots with the saved configuration.
+**5. Open the first-run wizard**
+
+Navigate to `http://192.168.4.1/firstrun` (AP-mode IP). Select a board profile, choose an operating mode, and assign GPIO pins. The device reboots with the saved configuration.
+
+---
+
+## Project structure
+
+```
+ESP32_Logger/
+├── ESP_Logger.ino          # Arduino entry point
+├── platformio.ini          # Build environments for all 3 boards
+├── partitions_balanced.csv # OTA-capable 4 MB partition table
+│
+├── src/                    # Firmware source
+│   ├── core/               # Config, board profiles, module registry
+│   ├── managers/           # Storage, Wi-Fi, OTA, RTC, hardware
+│   ├── modules/            # Pluggable runtime modules
+│   ├── sensors/            # Sensor plugins + manager
+│   ├── pipeline/           # Aggregation + flow-run logger
+│   ├── tasks/              # FreeRTOS tasks
+│   ├── export/             # MQTT/HTTP/community exporters
+│   ├── web/                # HTTP API + auth + CSRF
+│   └── ...
+│
+├── www/                    # Web UI (HTML/CSS/JS, served from LittleFS)
+├── tools/                  # Build, flash, deploy, and provisioning scripts
+├── scripts/                # PlatformIO pre-build hooks
+├── schematics/             # Hardware schematics and reference designs
+├── docs/                   # Architecture, audit log, operating guide
+└── .github/workflows/      # CI: firmware + bootloader builds
+```
 
 ---
 
 ## Documentation
 
-- [INSTRUCTIONS.md](INSTRUCTIONS.md) — operating the device after first boot
-- [REFACTORING_GUIDELINES.md](REFACTORING_GUIDELINES.md) — architecture
-  invariants and SOPs for code changes
-- [AUDIT_LOG.md](AUDIT_LOG.md) — security/architecture audit findings (R1–R20)
+Full documentation lives in [`docs/`](docs/):
+
+- **[INSTRUCTIONS.md](docs/INSTRUCTIONS.md)** — operating the device after first boot (sensors, exporters, OTA, safe mode, diagnostics, troubleshooting)
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — module layout, task model, data pipeline
+- **[REFACTORING_GUIDELINES.md](docs/REFACTORING_GUIDELINES.md)** — architecture invariants and SOPs for code changes
+- **[AUDIT_LOG.md](docs/AUDIT_LOG.md)** — security/architecture audit findings (R1–R20)
+- **[FUTURE_UPDATES.md](docs/FUTURE_UPDATES.md)** — roadmap
+- **[USB_CDC_IMPLEMENTATION_SUMMARY.md](docs/USB_CDC_IMPLEMENTATION_SUMMARY.md)** — USB CDC toggle implementation
+
+---
+
+## Hardware
+
+Reference schematics (KiCad PDFs) for the water-flow build are in [`schematics/`](schematics/):
+
+- `Flow_meter_diagram_rev.1.pdf` – `rev.3.pdf` — revision history
+- [`schematics/README.md`](schematics/README.md) — wiring notes
+
+---
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening a PR:
+
+1. Read [`docs/REFACTORING_GUIDELINES.md`](docs/REFACTORING_GUIDELINES.md) for architectural invariants.
+2. Make sure the firmware still builds for all three CI targets (`xiao_esp32c3`, `esp32c3_supermini`, `esp32s3`) — the workflows in `.github/workflows/` run automatically on PRs.
+3. Keep changes scoped; large refactors should be split.
 
 ---
 
 ## License
 
-See LICENSE.
+See [LICENSE](LICENSE).
+
+---
+
+<div align="center">
+
+## Support the project
+
+If ESP32 Logger is useful to you, consider supporting development.
+Every contribution helps cover hardware, certifications, and time spent maintaining the project.
+
+[![Donate via Revolut](https://img.shields.io/badge/Donate-Revolut-0075EB?style=for-the-badge&logo=revolut&logoColor=white)](https://revolut.me/petk0g)
+
+Thank you for your support.
+
+</div>

@@ -15,3 +15,14 @@ www_gz/
 # Python bytecode cache (e.g. tools/__pycache__/)
 __pycache__/
 *.pyc
+
+# Arduino IDE build output (compiled firmware/bootloader binaries)
+build/
+
+# Stale firmware/bootloader artefacts at tools/ root — produced by CI,
+# not source of truth (see tools/flash_bootloader/ for the Rust source).
+tools/*.bin
+tools/*.exe
+
+# Rust target directory for the flash_bootloader crate
+tools/flash_bootloader/target/
