@@ -336,13 +336,11 @@ Configuration:
         self.log_text.delete("1.0", "end")
 
     def _log(self, msg: str, end: str = "\n") -> None:
-        """Log message to GUI."""
-        if end == "":
-            self.log_text.insert("end", msg)
-        else:
+        """Log message to GUI (thread-safe). Uses root.after() to update on main thread."""
+        def append():
             self.log_text.insert("end", msg + end)
-        self.log_text.see("end")
-        self.root.update()
+            self.log_text.see("end")
+        self.root.after(0, append)
 
     def _on_run(self) -> None:
         """Run selected steps in a background thread."""

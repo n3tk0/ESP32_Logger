@@ -209,10 +209,33 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
 # ── Step implementations (delegated to DeployManager) ──────────────────────────
 
 def s_wifi_provision(cfg: dict[str, Any]) -> None:
-    """WiFi provisioning via serial (placeholder)."""
-    print(_red("  WiFi provisioning is not implemented in the CLI version yet."))
-    print(_dim("  Please use the GUI version: python3 deploy_gui.py"))
-    input(_dim("  Press Enter to return to menu… "))
+    """WiFi provisioning via serial."""
+    manager = DeployManager(cfg)
+
+    def _input(prompt: str) -> str:
+        try:
+            return input(_bold(f"  {prompt}"))
+        except (KeyboardInterrupt, EOFError):
+            return ""
+
+    def _getpass(prompt: str) -> str:
+        try:
+            import getpass
+            return getpass.getpass(_bold(f"  {prompt}"))
+        except (KeyboardInterrupt, EOFError):
+            return ""
+
+    success = manager.provision_wifi(
+        input_fn=_input,
+        getpass_fn=_getpass,
+    )
+
+    if not success:
+        print()
+    try:
+        input(_dim("  Press Enter to return to menu… "))
+    except (KeyboardInterrupt, EOFError):
+        pass
 
 
 # ── Orchestrator ───────────────────────────────────────────────────────────────
