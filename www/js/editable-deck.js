@@ -180,16 +180,37 @@
       rectCache = null;
     }
 
-    grip.addEventListener("pointerdown", function (e) {
-      // Ignore right/middle clicks
-      if (e.button && e.button !== 0) return;
-      startX = e.clientX; startY = e.clientY;
-      pointerId = e.pointerId;
-      try { grip.setPointerCapture(e.pointerId); } catch (err) {}
-      grip.addEventListener("pointermove", onMove);
-      grip.addEventListener("pointerup", onUp);
-      grip.addEventListener("pointercancel", onUp);
-    });
+    // Pointer Events (preferred, single API for mouse / touch / pen) with
+    // a mousedown fallback for older browsers — captive-portal clients on
+    // 2014-era Android stock browsers don't ship PointerEvent.  We only
+    // wire one of the two paths to avoid a double-fire on modern browsers.
+    if ("PointerEvent" in window) {
+      grip.addEventListener("pointerdown", function (e) {
+        if (e.button && e.button !== 0) return;
+        startX = e.clientX; startY = e.clientY;
+        pointerId = e.pointerId;
+        try { grip.setPointerCapture(e.pointerId); } catch (err) {}
+        grip.addEventListener("pointermove", onMove);
+        grip.addEventListener("pointerup", onUp);
+        grip.addEventListener("pointercancel", onUp);
+      });
+    } else {
+      // Mouse-only fallback.  No touch support here — phones without
+      // PointerEvent are vanishingly rare, and span chips / hide / library
+      // tray still work for them.
+      grip.addEventListener("mousedown", function (e) {
+        if (e.button !== 0) return;
+        startX = e.clientX; startY = e.clientY;
+        function moveBridge(ev) { onMove(ev); }
+        function upBridge() {
+          document.removeEventListener("mousemove", moveBridge);
+          document.removeEventListener("mouseup", upBridge);
+          onUp();
+        }
+        document.addEventListener("mousemove", moveBridge);
+        document.addEventListener("mouseup", upBridge);
+      });
+    }
   }
 
   // ── Deck instance ──────────────────────────────────────────────────────────

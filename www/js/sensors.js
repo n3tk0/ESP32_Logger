@@ -64,10 +64,10 @@ function sensorsLoad() {
     return d + "d";
   }
 
-  fetchWithTimeout("/api/sensors", {}, 15000)
-    .then(function (r) {
-      return r.ok ? r.json() : null;
-    })
+  // Force a fresh fetch here — this is the Sensors page main load, the
+  // operator is explicitly looking at this data and expects it current.
+  getSensors({ maxAgeMs: 0 })
+    .catch(function () { return null; })
     .then(function (d) {
       if (!d || !d.sensors || d.sensors.length === 0) {
         if (msg)
@@ -460,8 +460,7 @@ document.addEventListener("DOMContentLoaded", function () {
         metricSel.innerHTML = '<option value="">— metric —</option>';
         return;
       }
-      fetchWithTimeout("/api/sensors", {}, 15000)
-        .then(function (r) { return r.json(); })
+      getSensors()
         .then(function (d) {
           var s = (d.sensors || []).find(function (s) { return s.id === sid; });
           if (s && s.metrics) {

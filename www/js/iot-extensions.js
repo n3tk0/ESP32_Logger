@@ -733,33 +733,38 @@
       '</div>';
     }).join("");
 
-    // Wire toggle checkboxes to POST /api/alerts with updated rule
+    // Wire toggle checkboxes to POST /api/alerts with the updated rule.
+    // Uses the cached _alertsData (filled by _loadAlertsData) instead of
+    // re-fetching the whole config before posting it back — halves the
+    // round-trips on every toggle.
     rc.querySelectorAll('input[data-rule-id]').forEach(function (cb) {
       cb.addEventListener("change", function () {
         var ruleId = cb.dataset.ruleId;
-        // Re-fetch, flip enabled, save back
-        fetchWithTimeout("/api/alerts", {}, 15000)
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            (data.rules || []).forEach(function (rule) {
-              if (rule.id === ruleId) rule.enabled = cb.checked;
-            });
-            return getCsrfToken().then(function (token) {
-              var url = "/api/alerts" + (token ? "?csrf=" + encodeURIComponent(token) : "");
-              return fetchWithTimeout(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(data)
-              }, 30000).then(function (r) {
-                if (r.status === 403) {
-                  window.__csrfToken = null;
-                  throw new Error("CSRF token rejected — refresh page");
-                }
-                return r;
-              });
-            });
-          })
-          .catch(function () { cb.checked = !cb.checked; }); // revert on error
+        if (!_alertsData) { cb.checked = !cb.checked; return; }
+        // Mutate the cache so subsequent toggles + the next re-render see
+        // the new state without another GET.
+        (_alertsData.rules || []).forEach(function (rule) {
+          if (rule.id === ruleId) rule.enabled = cb.checked;
+        });
+        getCsrfToken().then(function (token) {
+          var url = "/api/alerts" + (token ? "?csrf=" + encodeURIComponent(token) : "");
+          return fetchWithTimeout(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(_alertsData),
+          }, 30000);
+        }).then(function (r) {
+          if (r && r.status === 403) {
+            window.__csrfToken = null;
+            throw new Error("CSRF token rejected — refresh page");
+          }
+        }).catch(function () {
+          // Revert the optimistic mutation on failure
+          (_alertsData.rules || []).forEach(function (rule) {
+            if (rule.id === ruleId) rule.enabled = !cb.checked;
+          });
+          cb.checked = !cb.checked;
+        });
       });
     });
 
@@ -817,8 +822,7 @@
   var _overviewHealthData = null;
 
   function populateDiagnostics() {
-    fetchWithTimeout("/api/sensors", {}, 15000)
-      .then(function (r) { return r.ok ? r.json() : null; })
+    getSensors()
       .then(function (data) {
         var sensors = (data && data.sensors) || [];
         _overviewHealthData = sensors;

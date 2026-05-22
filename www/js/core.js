@@ -35,6 +35,32 @@ function fetchWithTimeout(url, opts, timeoutMs) {
 }
 window.fetchWithTimeout = fetchWithTimeout;
 
+// Same single-flight pattern for /api/sensors — three call sites all want
+// the same payload (Overview Diagnostics card, the Sensors page grid, and
+// the Sensor-chart metric dropdown).  Default 5 s cache window.
+var _sensorsCache    = null;
+var _sensorsFetchedAt = 0;
+var _sensorsInflight  = null;
+function getSensors(opts) {
+  opts = opts || {};
+  var maxAge = (opts.maxAgeMs !== undefined) ? opts.maxAgeMs : 5000;
+  var now = Date.now();
+  if (_sensorsCache && _sensorsFetchedAt && (now - _sensorsFetchedAt) < maxAge) {
+    return Promise.resolve(_sensorsCache);
+  }
+  if (_sensorsInflight) return _sensorsInflight;
+  _sensorsInflight = fetchWithTimeout("/api/sensors", {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (data) {
+      _sensorsCache = data;
+      _sensorsFetchedAt = Date.now();
+      return data;
+    })
+    .finally(function () { _sensorsInflight = null; });
+  return _sensorsInflight;
+}
+window.getSensors = getSensors;
+
 // getStatus({maxAgeMs}) — single-flight cache around /api/status.
 // Many pages (5 settings sub-pages + 2 IoT-extensions sites) all call the
 // same endpoint within seconds of each other.  This funnels them through
