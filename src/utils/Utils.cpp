@@ -1,6 +1,7 @@
 #include "Utils.h"
 #include <FS.h>
 #include <vector>
+#include "../modules/UsbCdcModule.h"
 
 // getVersionString() is defined inline in Config.h – removed from here.
 
@@ -174,4 +175,37 @@ String urlEncode(const String& v) {
         out += buf;
     }
     return out;
+}
+
+// ============================================================================
+// PIN VALIDATION (Pillar 4.2 / 4.11)
+// Centralized validation for sensor pins that integrates USB CDC detection
+// ============================================================================
+
+bool validatePin(int pin, const String& usage) {
+    // Check for valid pin range. ESP32-C3 has 22 GPIO (0-21), S3 has 48 (0-47).
+    // Note: validateAttachPin() performs stricter checks against the board profile's maxGpio
+    if (pin < 0 || pin >= 48) {
+        Serial.printf("[validatePin] INVALID: Pin %d out of range (usage: %s)\n", pin, usage.c_str());
+        return false;
+    }
+
+    // ── USB CDC Conflict Detection ─────────────────────────────────────────
+    // If USB CDC is enabled, pins 18/19 (ESP32-C3) or 19/20 (ESP32-S3) are locked
+    if (usbCdc.isUsbPinLocked(pin)) {
+        Serial.printf("[validatePin] CONFLICT: Pin %d reserved for USB CDC (usage: %s)\n", pin, usage.c_str());
+        Serial.printf("              USB pins on this board: %s\n", usbCdc.getUsbPins().c_str());
+        Serial.printf("              Disable USB CDC in deploy tool before using these pins\n");
+        return false;
+    }
+
+    // ── Allowed ────────────────────────────────────────────────────────────
+    // Board profile validation in validateAttachPin() handles strap pins and other
+    // board-specific restrictions, so we don't duplicate those checks here
+    Serial.printf("[validatePin] OK: Pin %d valid for %s\n", pin, usage.c_str());
+    return true;
+}
+
+String getUsbReservedPins() {
+    return usbCdc.getUsbPins();
 }

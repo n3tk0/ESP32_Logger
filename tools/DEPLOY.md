@@ -162,6 +162,46 @@ Settings are saved to `.flash_tool.json` in the project root:
 - **steps** — Selected workflow steps
 - **upload_filter** — Which files to upload (all/gz/plain)
 - **wipe_before_upload** — Delete /www before uploading (safety)
+- **usb_cdc_on_boot** — USB CDC (serial over USB) on boot for ESP32-C3
+  - **ON** (default) — USB pins locked for serial communication
+  - **OFF** — USB pins (GPIO 18/19) available for general use
+
+#### USB CDC on Boot (ESP32-C3, ESP32-S3)
+
+Several ESP32 boards support configurable USB CDC (serial over USB). You can choose to enable or disable it to control which GPIO pins are available.
+
+**Supported Boards:**
+- ESP32-C3 SuperMini (GPIO 18/19) ← Most common
+- XIAO ESP32-C3 (GPIO 18/19)
+- Generic ESP32-C3 (GPIO 18/19)
+- ESP32-S3 (GPIO 19/20)
+
+**Configuration Options:**
+
+- **USB CDC ON** (Default) — Uses GPIO 18/19 (or 19/20 on S3) for USB serial
+  - ✓ Easy serial debugging via USB cable
+  - ✓ Python scripts can read/write via serial port
+  - ✗ GPIO pins locked for USB communication
+
+- **USB CDC OFF** — Frees GPIO 18/19 (or 19/20) for general use
+  - ✓ GPIO pins available for sensors/I2C/SPI/etc.
+  - ✓ More GPIO expansion options
+  - ✗ Can't use USB serial (must use HTTP logs or UART)
+
+**Workflow:**
+
+1. **Deploy Tool** — Toggle [U] in CLI menu or checkbox in GUI before compilation
+2. **Compilation** — Build flags automatically applied to platformio.ini
+3. **Firmware Runtime** — On first boot, device detects configuration and prompts for confirmation
+4. **Non-volatile Storage** — User preference saved to device NVS (persists across reboots)
+
+**Firmware Features:**
+
+- **First-run Setup** — Interactive menu on device's first boot
+- **Board Detection** — Automatically detects which board is running
+- **Pin Information** — Shows affected GPIO pins for each board
+- **Persistent Configuration** — Setting survives firmware updates and reboots
+- **Runtime Status** — Firmware prints current USB CDC configuration at boot
 
 ## Building a Standalone Executable
 
