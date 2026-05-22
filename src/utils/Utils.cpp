@@ -217,4 +217,3 @@ bool validatePin(int pin, const String& usage) {
 String getUsbReservedPins() {
     return usbCdc.getUsbPins();
 }
-}
