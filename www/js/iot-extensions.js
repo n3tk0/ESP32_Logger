@@ -229,14 +229,14 @@
       },
     },
     water: {
-      title: "Water (today)", icon: "droplets",
+      title: "Water (live)", icon: "droplets",
       render: function () {
-        return '<div class="card" data-mode-show="hybrid">' +
+        return '<div class="card" data-mode-show="legacy hybrid">' +
           '<div class="card-head"><div class="card-title"><span data-icon="droplets"></span> Water</div></div>' +
           '<div class="card-body" style="display:flex;flex-direction:column;gap:14px">' +
-            '<div><div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Today</div>' +
+            '<div><div class="form-label">Current cycle</div>' +
             '<div class="mono" style="font-size:28px;font-weight:700"><span id="ov-water-today">—</span><span style="font-size:13px;color:var(--text-3);margin-left:4px">L</span></div></div>' +
-            '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--text-3)">Events</span><span class="mono" id="ov-water-events">—</span></div>' +
+            '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--text-3)">Total pulses</span><span class="mono" id="ov-water-events">—</span></div>' +
           '</div>' +
         '</div>';
       },
@@ -481,9 +481,11 @@
   }
 
   function ovFillWater() {
-    // Water stats come from the live endpoint for legacy/hybrid.  Cache so we
-    // can re-apply after the deck re-renders (edit-mode toggle).
-    fetchWithTimeout("/api/status", {}, 15000)
+    // Pull from /api/live — that endpoint has `liters` (current cycle) and
+    // `totalPulses` (cumulative this boot).  The previous code read
+    // `todayVol`/`todayEvents` from /api/status, but the firmware never
+    // emits those fields, so the card always showed "—".
+    fetchWithTimeout("/api/live", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d) return;
@@ -493,10 +495,10 @@
       .catch(function () {});
   }
   function ovFillWaterCached(d) {
-    var today = document.getElementById("ov-water-today");
-    var events = document.getElementById("ov-water-events");
-    if (today && d.todayVol !== undefined) today.textContent = d.todayVol.toFixed(2);
-    if (events && d.todayEvents !== undefined) events.textContent = d.todayEvents + " events";
+    var today  = document.getElementById("ov-water-today");
+    var pulses = document.getElementById("ov-water-events");
+    if (today  && typeof d.liters      === "number") today.textContent  = d.liters.toFixed(2);
+    if (pulses && d.totalPulses !== undefined)       pulses.textContent = d.totalPulses;
   }
 
   function ovFillSensorList(data) {
@@ -933,7 +935,7 @@
         '<div class="card span-8">' +
           '<div class="card-head">' +
             '<div class="card-title"><span data-icon="droplets"></span> Current cycle</div>' +
-            '<span class="badge acc mono">CYCLE #<span id="live-cycle-num">—</span></span>' +
+            '<span class="badge dim mono" id="live-cycle-state">IDLE</span>' +
           '</div>' +
           '<div class="card-body">' +
             '<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;justify-content:space-between">' +
@@ -967,35 +969,88 @@
     _wireLiveCycleMirror();
   }
 
-  function _wireLiveCycleMirror() {
-    function applyStatus(d) {
-      if (!d) return;
-      setEl("live-cycle-num",  d.cycleNum     !== undefined ? d.cycleNum : "—");
-      setEl("live-liters",     d.liters       !== undefined ? d.liters.toFixed(2) : "0.00");
-      setEl("live-pulses",     d.pulses       !== undefined ? d.pulses : 0);
-      setEl("live-cycleTime",  d.cycleTime    !== undefined ? d.cycleTime : 0);
-      setEl("live-trigger",    d.trigger      || "–");
-      var sm = document.getElementById("state-mirror");
-      if (sm && d.state) sm.textContent = String(d.state).toUpperCase();
-    }
+  // SSE-first: the firmware pushes a `live` event on /api/events at 1 Hz with
+  // the full snapshot (pulses, liters, cycleTime, trigger, state, …).  Falls
+  // back to /api/live polling when EventSource is unavailable or fails.
+  // Sleeps entirely when the Sensors page isn't visible (document.hidden or
+  // the page is not .active) to save CPU + bandwidth on the AP.
+  var _liveCycleES    = null;
+  var _liveCycleTimer = null;
 
-    // Poll only when Sensors is the active page; cheap and CSP-friendly.
-    var timer = null;
-    function startPolling() {
-      if (timer) return;
-      timer = setInterval(function () {
-        if (!document.getElementById("sensors-live-cycle")) {
-          clearInterval(timer); timer = null; return;
-        }
-        var sensorsPage = document.getElementById("page-sensors");
-        if (!sensorsPage || !sensorsPage.classList.contains("active")) return;
-        fetchWithTimeout("/api/status", {}, 8000)
-          .then(function (r) { return r.ok ? r.json() : null; })
-          .then(applyStatus)
-          .catch(function () {});
-      }, 2000);
+  function _liveCycleApply(d) {
+    if (!d) return;
+    setEl("live-liters",    typeof d.liters    === "number" ? d.liters.toFixed(2) : "0.00");
+    setEl("live-pulses",    d.pulses     !== undefined ? d.pulses    : 0);
+    setEl("live-cycleTime", d.cycleTime  !== undefined ? d.cycleTime : 0);
+    setEl("live-trigger",   d.trigger    || "–");
+    var stateBadge = document.getElementById("live-cycle-state");
+    if (stateBadge && d.state) stateBadge.textContent = String(d.state).toUpperCase();
+    var sm = document.getElementById("state-mirror");
+    if (sm && d.state) sm.textContent = String(d.state).toUpperCase();
+  }
+
+  function _liveCyclePageVisible() {
+    if (document.hidden) return false;
+    var sensorsPage = document.getElementById("page-sensors");
+    return sensorsPage && sensorsPage.classList.contains("active");
+  }
+
+  function _liveCycleStop() {
+    if (_liveCycleES)    { try { _liveCycleES.close(); } catch (e) {} _liveCycleES = null; }
+    if (_liveCycleTimer) { clearInterval(_liveCycleTimer); _liveCycleTimer = null; }
+  }
+
+  function _liveCycleStart() {
+    if (!document.getElementById("sensors-live-cycle")) return;
+    if (_liveCycleES || _liveCycleTimer) return; // already running
+
+    // Prefer SSE — single TCP connection, 1 Hz push.  No retry storm; the
+    // browser handles reconnect natively, and we listen for visibility/page
+    // changes to teardown cleanly.
+    if (typeof EventSource !== "undefined") {
+      try {
+        _liveCycleES = new EventSource("/api/events");
+        _liveCycleES.addEventListener("live", function (ev) {
+          try { _liveCycleApply(JSON.parse(ev.data)); } catch (e) {}
+        });
+        _liveCycleES.onerror = function () {
+          // Browser will auto-retry; if it stays errored we drop to polling
+          // after a short grace.  No-op here: the readyState transition is
+          // observable, but a simple timeout keeps the code small.
+        };
+      } catch (e) { _liveCycleES = null; }
     }
-    startPolling();
+    // Polling fallback fires only when SSE is unavailable.  4 s instead of
+    // the old 2 s — paired with SSE for fresh devices, this is a low-cost
+    // safety net, not the primary transport.
+    if (!_liveCycleES) {
+      _liveCycleTimer = setInterval(function () {
+        if (!_liveCyclePageVisible()) return;
+        fetchWithTimeout("/api/live", {}, 8000)
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(_liveCycleApply)
+          .catch(function () {});
+      }, 4000);
+    }
+  }
+
+  function _wireLiveCycleMirror() {
+    _liveCycleStart();
+    // Pause / resume on tab visibility — keeps an idle laptop or backgrounded
+    // phone from streaming when nothing is watching.
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) _liveCycleStop();
+      else if (_liveCyclePageVisible()) _liveCycleStart();
+    });
+    // Also re-evaluate when the SPA swaps pages — cheap MutationObserver.
+    var main = document.getElementById("main-content") || document.querySelector(".main");
+    if (main) {
+      var mo = new MutationObserver(function () {
+        if (_liveCyclePageVisible()) _liveCycleStart();
+        else _liveCycleStop();
+      });
+      mo.observe(main, { attributes: true, subtree: true, attributeFilter: ["class"] });
+    }
   }
 
   // ─── Sensor zone grouping ─────────────────────────────────────────────────

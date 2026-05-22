@@ -177,13 +177,25 @@ function dbDestroyAllCharts() {
 
 function dbStartPolling() {
   if (dbPollTimer) return;
-  dbPollTimer = setInterval(dbRefreshLatest, DB_POLL_MS);
+  dbPollTimer = setInterval(function () {
+    // Page Visibility gate: skip the round-trip when the tab is hidden so
+    // a backgrounded phone / minimised laptop doesn't keep waking the AP.
+    if (document.hidden) return;
+    dbRefreshLatest();
+  }, DB_POLL_MS);
 }
 
 function dbStopPolling() {
   if (dbPollTimer) { clearInterval(dbPollTimer); dbPollTimer = null; }
   dbDestroyAllCharts();
 }
+
+// When the tab returns to foreground while the dashboard is active, do one
+// immediate refresh instead of waiting up to DB_POLL_MS for the next tick.
+document.addEventListener("visibilitychange", function () {
+  if (document.hidden) return;
+  if (currentPage === "dashboard" && dbPollTimer) dbRefreshLatest();
+});
 
 // Build the card grid from /api/sensors, then fetch a sparkline series
 // (/api/data) per (sensor, metric) and seed each card chart.  Once cards

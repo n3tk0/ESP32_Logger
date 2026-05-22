@@ -16,10 +16,7 @@ function sdInit() {
   if (clEl) clEl.classList.add("hidden");
   if (chev) chev.style.transform = "";
 
-  fetchWithTimeout("/api/status", {}, 15000)
-    .then(function (r) {
-      return r.json();
-    })
+  getStatus()
     .then(function (d) {
       ST = d;
       setVal("sd-devName", d.device || d.deviceName);
@@ -529,10 +526,7 @@ function themeRestoreDefault() {
 // ══ SETTINGS: NETWORK ══
 // ============================================================================
 function netInit() {
-  fetchWithTimeout("/api/status", {}, 15000)
-    .then(function (r) {
-      return r.json();
-    })
+  getStatus()
     .then(function (d) {
       ST = d;
       setEl(
@@ -806,10 +800,7 @@ function netTestWifi() {
 // ══ SETTINGS: TIME ══
 // ============================================================================
 function timeInit() {
-  fetchWithTimeout("/api/status", {}, 15000)
-    .then(function (r) {
-      return r.json();
-    })
+  getStatus()
     .then(function (d) {
       ST = d;
       setEl("time-rtcTime", d.time || "--:--:--");
@@ -1009,9 +1000,8 @@ function dlInit() {
     _hidePcIfNotLegacy(ST.caps.platformMode);
     if (ST.time) _dlSetDeviceOffsetFromIso(ST.time);
   } else {
-    fetchWithTimeout("/api/status", {}, 15000)
-      .then(function (r) { return r.json(); })
-      .then(function (s) {
+    getStatus()
+    .then(function (s) {
         ST = s;
         _hidePcIfNotLegacy((s.caps && s.caps.platformMode) || 0);
         if (s.time) _dlSetDeviceOffsetFromIso(s.time);
@@ -1235,10 +1225,7 @@ function otaInit() {
       if (btn && btn.parentNode) btn.parentNode.insertBefore(warn, btn);
     }
   }
-  fetchWithTimeout("/api/status", {}, 15000)
-    .then(function (r) {
-      return r.json();
-    })
+  getStatus()
     .then(function (d) {
       ST = d;
       setEl("ota-currentVer", d.version || "--");

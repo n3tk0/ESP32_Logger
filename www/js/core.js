@@ -35,11 +35,40 @@ function fetchWithTimeout(url, opts, timeoutMs) {
 }
 window.fetchWithTimeout = fetchWithTimeout;
 
+// getStatus({maxAgeMs}) — single-flight cache around /api/status.
+// Many pages (5 settings sub-pages + 2 IoT-extensions sites) all call the
+// same endpoint within seconds of each other.  This funnels them through
+// a shared cache + dedupe so the ESP only answers once per `maxAgeMs`
+// window.  Default is 5 s — small enough that no UI feels stale, large
+// enough to collapse a settings-sub-page navigation burst into one round
+// trip.  Pass {maxAgeMs:0} to force-refresh.
+function getStatus(opts) {
+  opts = opts || {};
+  var maxAge = (opts.maxAgeMs !== undefined) ? opts.maxAgeMs : 5000;
+  var now = Date.now();
+  if (ST && _stFetchedAt && (now - _stFetchedAt) < maxAge) {
+    return Promise.resolve(ST);
+  }
+  if (_stInflight) return _stInflight;
+  _stInflight = fetchWithTimeout("/api/status", {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (data) {
+      ST = data;
+      _stFetchedAt = Date.now();
+      return data;
+    })
+    .finally(function () { _stInflight = null; });
+  return _stInflight;
+}
+window.getStatus = getStatus;
+
 // ============================================================================
 // GLOBALS
 // ============================================================================
 var ST = {}; // cached /api/status payload
 var CFG = {}; // cached /export_settings payload
+var _stFetchedAt = 0;     // ms epoch when ST was last filled
+var _stInflight  = null;  // dedupe concurrent callers
 var dbChart = null; // uPlot instance on dashboard
 var dbRawData = ""; // raw log text for dashboard
 var dbFilteredData = []; // filtered, parsed rows
@@ -215,6 +244,7 @@ window.addEventListener("DOMContentLoaded", function () {
   ]).then(function (results) {
     ST = results[0];
     CFG = results[1];
+    _stFetchedAt = Date.now();   // seed the cache used by getStatus()
     applyStatus(ST);
     var hash = location.hash.replace("#", "") || "dashboard";
     navigateTo(hash);
