@@ -166,11 +166,21 @@ class DeployManager:
     def _configure_usb_cdc(self) -> None:
         """Dynamically configure USB CDC on boot flag in platformio.ini before compilation.
 
-        For ESP32-C3 SuperMini, toggling this controls whether USB pins are used for
-        serial communication (enabled) or freed up for GPIO (disabled).
+        For ESP32-C3 and ESP32-S3 boards, toggling this controls whether USB pins are
+        used for serial communication (enabled) or freed up for GPIO (disabled).
+
+        Supported boards:
+        - ESP32-C3 SuperMini (GPIO 18/19)
+        - ESP32-S3 (GPIO 19/20)
+        - XIAO ESP32-C3 (GPIO 18/19)
         """
         env = self.cfg.get("env", "esp32c3_supermini")
         usb_cdc = self.cfg.get("usb_cdc_on_boot", True)
+
+        # Check if this environment supports USB CDC configuration
+        supported_envs = {"esp32c3_supermini", "esp32s3", "xiao_esp32c3"}
+        if env not in supported_envs:
+            return  # No USB CDC configuration for this board
 
         # Read platformio.ini
         ini_file = ROOT / "platformio.ini"

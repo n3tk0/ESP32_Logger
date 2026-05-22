@@ -201,7 +201,17 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
         elif choice == "U":          # uppercase U — USB CDC toggle
             cfg["usb_cdc_on_boot"] = not cfg.get("usb_cdc_on_boot", True)
             state = _green("ON") if cfg["usb_cdc_on_boot"] else _dim("OFF")
-            hint = _dim("(USB pins locked for serial)") if cfg["usb_cdc_on_boot"] else _dim("(USB pins available as GPIO)")
+
+            # Show board-specific pin info
+            env_name = cfg.get("env", "esp32c3_supermini").lower()
+            if "esp32c3" in env_name:
+                pins = "GPIO 18/19"
+            elif "esp32s3" in env_name:
+                pins = "GPIO 19/20"
+            else:
+                pins = "USB pins"
+
+            hint = _dim(f"({pins} locked for serial)") if cfg["usb_cdc_on_boot"] else _dim(f"({pins} available as GPIO)")
             print(_dim(f"  → USB CDC on boot: ") + state + " " + hint)
             time.sleep(0.5)
 

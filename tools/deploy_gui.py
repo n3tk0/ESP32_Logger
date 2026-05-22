@@ -167,15 +167,32 @@ class DeployerGUI:
         )
         wipe_check.pack(anchor="w", pady=(0, 8))
 
-        # USB CDC toggle (ESP32-C3)
+        # USB CDC toggle (ESP32-C3, S3)
         self.usb_cdc_var = ctk.BooleanVar(value=self.cfg.get("usb_cdc_on_boot", True))
         usb_cdc_check = ctk.CTkCheckBox(
             sect,
-            text="USB CDC on boot (ESP32-C3)",
+            text="USB CDC on boot",
             variable=self.usb_cdc_var,
             command=lambda: self._save_setting("usb_cdc_on_boot", None, self.usb_cdc_var.get()),
         )
-        usb_cdc_check.pack(anchor="w", pady=(0, 10))
+        usb_cdc_check.pack(anchor="w", pady=(0, 2))
+
+        # USB CDC info label
+        env_name = self.cfg.get("env", "esp32c3_supermini")
+        if "esp32c3" in env_name.lower():
+            usb_info = "Controls GPIO 18/19 for USB"
+        elif "esp32s3" in env_name.lower():
+            usb_info = "Controls GPIO 19/20 for USB"
+        else:
+            usb_info = "Toggle USB CDC on boot"
+
+        info_label = ctk.CTkLabel(
+            sect,
+            text=usb_info,
+            font=("Helvetica", 8),
+            text_color="#666666",
+        )
+        info_label.pack(anchor="w", pady=(0, 10), padx=(20, 0))
 
     def _build_steps_section(self, sidebar: ctk.CTkFrame) -> None:
         """Step toggles."""
