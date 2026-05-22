@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include "../utils/AtomicWrite.h"
+#include "../utils/Utils.h"             // validatePin (USB CDC integration)
 #include "../pipeline/DataPipeline.h"   // fsMutex
 #include "Globals.h"                    // activeFS, fsAvailable, g_boardProfile
 
@@ -187,6 +188,19 @@ bool validateAttachPin(int pin, const char* sensorId, const char* fieldName) {
                       fieldName ? fieldName : "pin", pin);
         return false;
     }
+
+    // ── Centralized pin validation (Pillar 4.2/4.11) ────────────────────
+    // Includes USB CDC runtime conflict detection
+    String usage = String(sensorId) + "." + String(fieldName);
+    if (!validatePin(pin, usage)) {
+        // validatePin() already logged the conflict details
+        Serial.printf("[%s.%s] init refused: GPIO%d validation failed\n",
+                      sensorId ? sensorId : "?",
+                      fieldName ? fieldName : "pin", pin);
+        return false;
+    }
+
+    // ── Board profile static validation ──────────────────────────────────
     if (!isPinAllowed(g_boardProfile, (uint8_t)pin, PIN_PURPOSE_GENERIC)) {
         Serial.printf("[%s.%s] init refused: GPIO%d = %s\n",
                       sensorId ? sensorId : "?",
