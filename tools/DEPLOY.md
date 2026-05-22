@@ -65,7 +65,31 @@ pip install customtkinter platformio pyserial
 ## Usage
 
 ### GUI (Recommended)
+
+**Option A: Standalone Executable (No Python needed)**
+
+Build once, distribute to any user:
+
 ```bash
+# Build the executable
+./tools/build_exe.sh          # macOS/Linux
+tools\build_exe.bat           # Windows
+
+# Run the executable
+./dist/ESP32_Deploy           # macOS/Linux
+.\dist\ESP32_Deploy.exe       # Windows
+```
+
+This creates a single `.exe` file (Windows) or app bundle (macOS) that includes everything:
+- Python interpreter
+- All dependencies (customtkinter, pyserial, platformio)
+- Your application code
+- No installation needed — just run!
+
+**Option B: From Python Source**
+
+```bash
+pip install -r tools/requirements.txt
 python3 tools/deploy_gui.py
 ```
 
@@ -138,6 +162,68 @@ Settings are saved to `.flash_tool.json` in the project root:
 - **steps** — Selected workflow steps
 - **upload_filter** — Which files to upload (all/gz/plain)
 - **wipe_before_upload** — Delete /www before uploading (safety)
+
+## Building a Standalone Executable
+
+### Quick Start
+
+```bash
+# Install PyInstaller
+pip install pyinstaller
+
+# Build the executable
+./tools/build_exe.sh          # macOS/Linux
+tools\build_exe.bat           # Windows
+```
+
+The executable will be in `dist/ESP32_Deploy.exe` (Windows) or `dist/ESP32_Deploy` (macOS/Linux).
+
+### What's Included
+
+The standalone executable bundles:
+- Python interpreter (embedded)
+- CustomTkinter (GUI framework)
+- PySerial (serial communication)
+- PlatformIO (firmware compilation)
+- All application code
+
+**Result:** A single file users can just run. No Python installation required.
+
+### Customization
+
+Edit `tools/deploy_gui.spec` to:
+- Add an application icon: `icon='path/to/icon.ico'`
+- Show/hide console window: `console=True/False`
+- Change app name: `name='YourName'`
+- Optimize for size: Add `--onefile` for single-file build
+
+### File Size
+
+- Executable: ~150-200 MB
+- Compressed: ~50-70 MB
+
+### Distribution
+
+1. **Single File**: Share `dist/ESP32_Deploy.exe` directly
+2. **Installer**: Wrap with NSIS or Inno Setup for auto-updates
+3. **GitHub Releases**: Upload to releases page for one-click downloads
+4. **Portable**: Users can run from USB without installation
+
+### Troubleshooting
+
+**Antivirus false positive:**
+- Some antivirus software flags PyInstaller executables
+- Add to whitelist or code-sign the executable
+- Consider using a code signing certificate for distribution
+
+**Serial port not detected:**
+- Ensure pyserial is included (it is by default)
+- On Linux, user may need: `sudo usermod -a -G dialout $USER`
+
+**Large file size:**
+- Normal for PyInstaller (includes Python + all deps)
+- Use UPX for compression (enabled in spec file)
+- Consider distributing as installer instead
 
 ## Extending the System
 
