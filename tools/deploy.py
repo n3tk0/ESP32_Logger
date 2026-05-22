@@ -91,6 +91,7 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     port_disp = cfg.get("port") or _dim("auto-detect")
     uf   = cfg.get("upload_filter", "all")
     wipe = cfg.get("wipe_before_upload", False)
+    usb_cdc = cfg.get("usb_cdc_on_boot", True)
     for key, label, val in [
         ("e", "PlatformIO env ", cfg.get("env", "")),
         ("p", "Serial port    ", port_disp),
@@ -99,6 +100,7 @@ def _print_menu(cfg: dict[str, Any]) -> None:
         ("b", "Baud rate      ", str(cfg.get("baud", 921600))),
         ("u", "HTTP upload    ", _UPLOAD_FILTER_LABELS.get(uf, uf)),
         ("w", "Wipe /www first", _green("YES — delete all before upload") if wipe else _dim("no")),
+        ("U", "USB CDC on boot", _green("ON — locked for serial") if usb_cdc else _dim("OFF — GPIO available")),
     ]:
         print(f"  {_cyan(f'[{key}]')}  {label}: {_bold(val)}")
     print()
@@ -194,6 +196,13 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             cfg["wipe_before_upload"] = not cfg.get("wipe_before_upload", False)
             state = _green("ON") if cfg["wipe_before_upload"] else _dim("off")
             print(_dim(f"  → Wipe /www before upload: ") + state)
+            time.sleep(0.5)
+
+        elif choice == "U":          # uppercase U — USB CDC toggle
+            cfg["usb_cdc_on_boot"] = not cfg.get("usb_cdc_on_boot", True)
+            state = _green("ON") if cfg["usb_cdc_on_boot"] else _dim("OFF")
+            hint = _dim("(USB pins locked for serial)") if cfg["usb_cdc_on_boot"] else _dim("(USB pins available as GPIO)")
+            print(_dim(f"  → USB CDC on boot: ") + state + " " + hint)
             time.sleep(0.5)
 
         elif ch in {str(n) for n in STEP_NAMES}:

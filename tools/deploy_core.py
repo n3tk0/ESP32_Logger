@@ -62,6 +62,7 @@ DEFAULT_CFG: dict[str, Any] = {
     "steps":                [1, 3, 5, 6, 7],
     "upload_filter":        "all",
     "wipe_before_upload":   False,
+    "usb_cdc_on_boot":      True,  # ESP32-C3: USB serial CDC enabled by default
 }
 
 _UPLOAD_FILTERS = ["all", "gz", "plain"]
@@ -162,7 +163,68 @@ class DeployManager:
         if self.on_step_complete:
             self.on_step_complete(step, rc)
 
-    def _run_cmd(self, cmd: list[str]) -> int:
+    def _configure_usb_cdc(self) -> None:
+        """Dynamically configure USB CDC on boot flag in platformio.ini before compilation.
+
+        For ESP32-C3 SuperMini, toggling this controls whether USB pins are used for
+        serial communication (enabled) or freed up for GPIO (disabled).
+        """
+        env = self.cfg.get("env", "esp32c3_supermini")
+        usb_cdc = self.cfg.get("usb_cdc_on_boot", True)
+
+        # Read platformio.ini
+        ini_file = ROOT / "platformio.ini"
+        if not ini_file.is_file():
+            return
+
+        content = ini_file.read_text()
+        lines = content.split("\n")
+
+        # Find the section for our environment and modify USB CDC flags
+        in_env_section = False
+        modified = False
+        result = []
+
+        for line in lines:
+            # Check if we're entering the target environment section
+            if line.strip().startswith(f"[env:{env}]"):
+                in_env_section = True
+                result.append(line)
+                continue
+
+            # Check if we're leaving the environment section (new section starts)
+            if in_env_section and line.strip().startswith("[env:"):
+                in_env_section = False
+
+            # Modify USB CDC flag if in target environment
+            if in_env_section and "-DARDUINO_USB_CDC_ON_BOOT=" in line:
+                # Replace existing flag
+                if usb_cdc:
+                    line = line.replace("-DARDUINO_USB_CDC_ON_BOOT=0", "-DARDUINO_USB_CDC_ON_BOOT=1")
+                    if "-DARDUINO_USB_CDC_ON_BOOT=1" not in line:
+                        line = line.replace("-DARDUINO_USB_CDC_ON_BOOT=1", "-DARDUINO_USB_CDC_ON_BOOT=1")
+                else:
+                    line = line.replace("-DARDUINO_USB_CDC_ON_BOOT=1", "-DARDUINO_USB_CDC_ON_BOOT=0")
+                modified = True
+                result.append(line)
+                continue
+
+            # If we're in build_flags and USB CDC flag doesn't exist, add it
+            if (in_env_section and line.strip().startswith("build_flags") and
+                "-DARDUINO_USB_CDC_ON_BOOT" not in content[max(0, content.find(line) - 200):content.find(line) + len(line)]):
+                result.append(line)
+                # Add USB CDC flag on next line if it's a multi-line build_flags
+                if "=" in line and line.rstrip().endswith(("\\", "-I.")):
+                    usb_flag = "-DARDUINO_USB_CDC_ON_BOOT=1" if usb_cdc else "-DARDUINO_USB_CDC_ON_BOOT=0"
+                    result.append(f"    {usb_flag}")
+                    modified = True
+                continue
+
+            result.append(line)
+
+        # Only write if we made changes
+        if modified:
+            ini_file.write_text("\n".join(result))
         """Run a subprocess command and stream output to callback."""
         self._log(f"$ {shlex.join(cmd)}")
         try:
@@ -251,6 +313,8 @@ class DeployManager:
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
             return 1
+        # Configure USB CDC flag before compilation
+        self._configure_usb_cdc()
         rc = self._run_cmd([self.pio, "run", "-e", self.cfg["env"]])
         if rc == 0:
             self._log("✓ Firmware compiled.")

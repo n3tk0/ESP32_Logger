@@ -162,6 +162,23 @@ Settings are saved to `.flash_tool.json` in the project root:
 - **steps** — Selected workflow steps
 - **upload_filter** — Which files to upload (all/gz/plain)
 - **wipe_before_upload** — Delete /www before uploading (safety)
+- **usb_cdc_on_boot** — USB CDC (serial over USB) on boot for ESP32-C3
+  - **ON** (default) — USB pins locked for serial communication
+  - **OFF** — USB pins (GPIO 18/19) available for general use
+
+#### USB CDC on Boot (ESP32-C3 SuperMini)
+
+The ESP32-C3 SuperMini has a multiplexed USB interface. You can choose:
+
+- **USB CDC ON** — Uses GPIO 18/19 for USB serial communication (default)
+  - ✓ Easy serial debugging via USB
+  - ✗ GPIO 18/19 cannot be used for sensors/IO
+
+- **USB CDC OFF** — Frees GPIO 18/19 for GPIO use
+  - ✓ GPIO 18/19 available for sensors/I2C/etc.
+  - ✗ Cannot use USB serial (must use UART or HTTP for logs)
+
+Toggle this option in the deploy tool before compilation. The flag is automatically applied during the build process.
 
 ## Building a Standalone Executable
 
