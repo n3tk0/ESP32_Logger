@@ -111,9 +111,11 @@
     // Theme
     panel.querySelectorAll("[data-theme]").forEach(function (b) {
       b.addEventListener("click", function () {
-        var mode = b.dataset.theme;
-        document.documentElement.setAttribute("data-theme", mode);
-        try { localStorage.setItem("themeOverride", mode); } catch (e) {}
+        // Centralized setter — also updates the topbar toggle icon, the
+        // theme-X class on <html>, and persists.  Without this we used to
+        // set only data-theme + storage, leaving the icon out of sync
+        // (gemini review PR #108).
+        if (window.setTheme) setTheme(b.dataset.theme);
         syncToggles();
       });
     });

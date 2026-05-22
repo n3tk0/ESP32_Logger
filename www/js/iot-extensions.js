@@ -756,10 +756,14 @@
         });
         getCsrfToken().then(function (token) {
           var url = "/api/alerts" + (token ? "?csrf=" + encodeURIComponent(token) : "");
+          // Send only the rules array — the backend's fromJson() reads
+          // doc["rules"] and ignores everything else, so we save bandwidth
+          // and memory on the ESP by stripping the (potentially large)
+          // history feed (gemini review PR #108).
           return fetchWithTimeout(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(_alertsData),
+            body: JSON.stringify({ rules: _alertsData.rules }),
           }, 30000);
         }).then(function (r) {
           if (r && r.status === 403) {
@@ -1016,34 +1020,43 @@
     if (!document.getElementById("sensors-live-cycle")) return;
     if (_liveCycleES || _liveCycleTimer) return; // already running
 
-    // Prefer SSE — single TCP connection, 1 Hz push.  No retry storm; the
-    // browser handles reconnect natively, and we listen for visibility/page
-    // changes to teardown cleanly.
+    // Prefer SSE — single TCP connection, 1 Hz push.  Track a small error
+    // counter: if the browser fails to reconnect 3 times in a row (server
+    // 404, CSP block, captive-portal redirect, …) we close SSE and degrade
+    // to polling so the card doesn't sit frozen (gemini review PR #108).
     if (typeof EventSource !== "undefined") {
       try {
         _liveCycleES = new EventSource("/api/events");
+        var errCount = 0;
         _liveCycleES.addEventListener("live", function (ev) {
+          errCount = 0;
           try { _liveCycleApply(JSON.parse(ev.data)); } catch (e) {}
         });
         _liveCycleES.onerror = function () {
-          // Browser will auto-retry; if it stays errored we drop to polling
-          // after a short grace.  No-op here: the readyState transition is
-          // observable, but a simple timeout keeps the code small.
+          errCount++;
+          if (errCount < 3) return;  // let the browser keep auto-retrying
+          try { _liveCycleES.close(); } catch (e) {}
+          _liveCycleES = null;
+          _startLiveCyclePolling();
         };
       } catch (e) { _liveCycleES = null; }
     }
-    // Polling fallback fires only when SSE is unavailable.  4 s instead of
-    // the old 2 s — paired with SSE for fresh devices, this is a low-cost
-    // safety net, not the primary transport.
-    if (!_liveCycleES) {
-      _liveCycleTimer = setInterval(function () {
-        if (!_liveCyclePageVisible()) return;
-        fetchWithTimeout("/api/live", {}, 8000)
-          .then(function (r) { return r.ok ? r.json() : null; })
-          .then(_liveCycleApply)
-          .catch(function () {});
-      }, 4000);
-    }
+    // Polling fallback — used when SSE is unavailable up-front and when
+    // SSE persistently errors (see onerror handler above).  4 s instead of
+    // the old 2 s; paired with SSE on fresh devices it's a safety net,
+    // not the primary transport.
+    if (!_liveCycleES) _startLiveCyclePolling();
+  }
+
+  function _startLiveCyclePolling() {
+    if (_liveCycleTimer) return;
+    _liveCycleTimer = setInterval(function () {
+      if (!_liveCyclePageVisible()) return;
+      fetchWithTimeout("/api/live", {}, 8000)
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(_liveCycleApply)
+        .catch(function () {});
+    }, 4000);
   }
 
   function _wireLiveCycleMirror() {

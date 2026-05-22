@@ -43,10 +43,12 @@
     { id: "s-datalog",  group: "Settings", title: "Data log",        icon: "file-text", kw: "rotation retention csv",  act: function () { location.hash = "settings_datalog"; } },
     { id: "s-export",   group: "Settings", title: "Export",          icon: "cloud-upload", kw: "mqtt http opensensemap webhook", act: function () { location.hash = "settings_export";  } },
 
-    // Actions — theme
-    { id: "a-theme-dark",  group: "Action", title: "Switch to dark theme",  icon: "moon",  kw: "appearance", act: function () { document.documentElement.setAttribute("data-theme","dark");  try{localStorage.setItem("themeOverride","dark");}catch(e){} } },
-    { id: "a-theme-light", group: "Action", title: "Switch to light theme", icon: "sun",   kw: "appearance", act: function () { document.documentElement.setAttribute("data-theme","light"); try{localStorage.setItem("themeOverride","light");}catch(e){} } },
-    { id: "a-theme-auto",  group: "Action", title: "Theme follows OS",      icon: "moon",  kw: "auto",       act: function () { document.documentElement.setAttribute("data-theme","auto"); try{localStorage.setItem("themeOverride","auto");}catch(e){} } },
+    // Actions — theme.  Delegate to core.setTheme() so the data-theme
+    // attribute, the theme-X class on <html>, localStorage, AND the topbar
+    // toggle icon all update in one place (gemini review PR #108).
+    { id: "a-theme-dark",  group: "Action", title: "Switch to dark theme",  icon: "moon", kw: "appearance", act: function () { window.setTheme && setTheme("dark");  } },
+    { id: "a-theme-light", group: "Action", title: "Switch to light theme", icon: "sun",  kw: "appearance", act: function () { window.setTheme && setTheme("light"); } },
+    { id: "a-theme-auto",  group: "Action", title: "Theme follows OS",      icon: "moon", kw: "auto",       act: function () { window.setTheme && setTheme("auto");  } },
     // Actions — accent
     { id: "a-accent-cyan",   group: "Action", title: "Accent: cyan",   icon: "palette", kw: "color theme default", act: function () { window.setAccent && setAccent("cyan");   } },
     { id: "a-accent-amber",  group: "Action", title: "Accent: amber",  icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("amber");  } },
@@ -78,10 +80,22 @@
           kw: (s.zone || "") + " " + (s.interface || ""),
           act: function () {
             navigateTo("sensors");
-            // Edit modal opens after the page finishes mounting
-            setTimeout(function () {
-              if (typeof clEditSensor === "function") clEditSensor(idx);
-            }, 250);
+            // Wait for the actual sensor row to render before opening edit —
+            // sensorsLoad is async (fetches /api/sensors) and on slower
+            // devices the 250 ms blanket timeout we used to ship missed
+            // the window.  Poll for the row up to ~2 s; clEditSensor
+            // gracefully falls back to the modal if the row never
+            // appears (gemini review PR #108).
+            var attempts = 0;
+            (function waitForRow() {
+              if (typeof clEditSensor !== "function") return;
+              var row = document.querySelector(
+                '.sensor-list-row[data-sensor-idx="' + idx + '"]'
+              );
+              if (row || attempts >= 20) { clEditSensor(idx); return; }
+              attempts++;
+              setTimeout(waitForRow, 100);
+            })();
           },
         });
       });

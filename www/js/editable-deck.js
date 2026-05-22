@@ -355,7 +355,16 @@
           resizeObserver.observe(n);
         });
       } else {
-        window.addEventListener("resize", function () { packMasonry(container); });
+        // Old browsers without ResizeObserver: fall back to a window resize
+        // listener.  Wrap it in a fake-observer shim so the existing
+        // disconnect() path in renderLive() / renderEditing() removes it
+        // cleanly — without this the handler accumulates on every render
+        // and leaks (gemini review PR #108).
+        var handleResize = function () { packMasonry(container); };
+        window.addEventListener("resize", handleResize);
+        resizeObserver = {
+          disconnect: function () { window.removeEventListener("resize", handleResize); },
+        };
       }
     }
 

@@ -462,6 +462,15 @@ function _themeUpdateToggleIcon(mode) {
   btn.title = "Theme: " + mode + " (click to change)";
 }
 
+// Public alias — other modules (command-palette, quick-settings) call this
+// so the data-theme attribute, class list, localStorage, AND topbar button
+// icon all update in one place (gemini review PR #108).
+function setTheme(mode) {
+  if (mode !== "light" && mode !== "dark" && mode !== "auto") return;
+  _themeApplyOverride(mode);
+}
+window.setTheme = setTheme;
+
 function quickThemeToggle() {
   var current;
   try { current = localStorage.getItem("themeOverride") || "auto"; }
@@ -588,7 +597,15 @@ document.addEventListener("click", function (e) {
     attach();
   }
   // Re-attach when pages swap active class
-  var mo = new MutationObserver(function () { attach(); });
+  // Re-attach when pages swap active class.  Filter to .page targets only —
+  // observing the full subtree fires on every pulsing badge, sensor-card
+  // update, and chart tween, which is wasted work (gemini review PR #108).
+  var mo = new MutationObserver(function (records) {
+    for (var i = 0; i < records.length; i++) {
+      var t = records[i].target;
+      if (t && t.classList && t.classList.contains("page")) { attach(); return; }
+    }
+  });
   mo.observe(main, { attributes: true, subtree: true, attributeFilter: ["class"] });
 })();
 
