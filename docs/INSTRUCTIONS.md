@@ -3,7 +3,7 @@
 This document covers first boot, operating mode selection, sensor and exporter
 configuration, OTA updates, safe mode recovery, diagnostics, and common
 troubleshooting scenarios. It assumes firmware has been flashed and the device
-is running. For build and flash instructions see [README.md](README.md).
+is running. For build and flash instructions see [README.md](../README.md).
 
 ---
 
