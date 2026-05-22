@@ -192,6 +192,7 @@ class DeployManager:
 
         # Find the section for our environment and modify USB CDC flags
         in_env_section = False
+        flag_found_in_section = False
         modified = False
         result = []
 
@@ -199,35 +200,37 @@ class DeployManager:
             # Check if we're entering the target environment section
             if line.strip().startswith(f"[env:{env}]"):
                 in_env_section = True
+                flag_found_in_section = False
                 result.append(line)
                 continue
 
             # Check if we're leaving the environment section (new section starts)
             if in_env_section and line.strip().startswith("[env:"):
                 in_env_section = False
+                flag_found_in_section = False
 
             # Modify USB CDC flag if in target environment
             if in_env_section and "-DARDUINO_USB_CDC_ON_BOOT=" in line:
                 # Replace existing flag
                 if usb_cdc:
                     line = line.replace("-DARDUINO_USB_CDC_ON_BOOT=0", "-DARDUINO_USB_CDC_ON_BOOT=1")
-                    if "-DARDUINO_USB_CDC_ON_BOOT=1" not in line:
-                        line = line.replace("-DARDUINO_USB_CDC_ON_BOOT=1", "-DARDUINO_USB_CDC_ON_BOOT=1")
                 else:
                     line = line.replace("-DARDUINO_USB_CDC_ON_BOOT=1", "-DARDUINO_USB_CDC_ON_BOOT=0")
                 modified = True
+                flag_found_in_section = True
                 result.append(line)
                 continue
 
             # If we're in build_flags and USB CDC flag doesn't exist, add it
             if (in_env_section and line.strip().startswith("build_flags") and
-                "-DARDUINO_USB_CDC_ON_BOOT" not in content[max(0, content.find(line) - 200):content.find(line) + len(line)]):
+                not flag_found_in_section and "-DARDUINO_USB_CDC_ON_BOOT" not in line):
                 result.append(line)
                 # Add USB CDC flag on next line if it's a multi-line build_flags
                 if "=" in line and line.rstrip().endswith(("\\", "-I.")):
                     usb_flag = "-DARDUINO_USB_CDC_ON_BOOT=1" if usb_cdc else "-DARDUINO_USB_CDC_ON_BOOT=0"
                     result.append(f"    {usb_flag}")
                     modified = True
+                    flag_found_in_section = True
                 continue
 
             result.append(line)

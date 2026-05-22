@@ -183,9 +183,9 @@ String urlEncode(const String& v) {
 // ============================================================================
 
 bool validatePin(int pin, const String& usage) {
-    // Check for valid pin range (ESP32 has 28 GPIO pins: 0-27)
-    // Note: Some pins are reserved for boot, FLASH, UART, etc.
-    if (pin < 0 || pin > 27) {
+    // Check for valid pin range. ESP32-C3 has 22 GPIO (0-21), S3 has 48 (0-47).
+    // Note: validateAttachPin() performs stricter checks against the board profile's maxGpio
+    if (pin < 0 || pin > 48) {
         Serial.printf("[validatePin] INVALID: Pin %d out of range (usage: %s)\n", pin, usage.c_str());
         return false;
     }

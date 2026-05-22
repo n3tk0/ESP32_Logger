@@ -86,9 +86,11 @@ String UsbCdcModule::getAffectedPins() const {
 }
 
 bool UsbCdcModule::isUsbPinLocked(int pin) const {
-    if (!enabled_) {
-        return false;  // USB CDC disabled, no pins locked
-    }
+    // Actual pin lock status is determined by the build-time flag ARDUINO_USB_CDC_ON_BOOT
+    // NVS preference (enabled_) is for future recompiles, not current hardware state
+#if !defined(ARDUINO_USB_CDC_ON_BOOT) || (ARDUINO_USB_CDC_ON_BOOT != 1)
+    return false;  // USB CDC disabled at build time, no pins locked
+#endif
 
 #if defined(ARDUINO_SEEED_XIAO_ESP32C3) || defined(ARDUINO_ESP32C3_DEV)
     return (pin == 18 || pin == 19);
@@ -164,7 +166,11 @@ void UsbCdcModule::firstRunSetup() {
     Serial.println("      ✓ USB pins available for GPIO/sensors");
     Serial.println("      ✗ No USB serial (use HTTP or UART logs)");
     Serial.println();
+#if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
     Serial.println("Current setting: USB CDC ON (build time)");
+#else
+    Serial.println("Current setting: USB CDC OFF (build time)");
+#endif
     Serial.println("Enter 1 or 2 (default 1): ");
 
     // Wait for user input with timeout
