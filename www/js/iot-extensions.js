@@ -112,20 +112,22 @@
     }
   }
 
-  // ─── LAZY_PAGES: tell core.js these pages are NOT fetched from /pages/ ────
-  // They are injected by buildPages() below. We mark them with the special
-  // sentinel value 2 so loadPagePartial() skips the fetch but still resolves.
+  // ─── LAZY_PAGES sentinels ────────────────────────────────────────────────
+  // core.js treats LAZY_PAGES[page] = 1 as "fetch /pages/<page>.html and
+  // inject", and skips the fetch entirely when the value is the constant
+  // INJECTED below.  Overview + Alerts are built in JS by buildPages(),
+  // not stored on flash as partials, so we use the INJECTED marker.
+  var INJECTED = 2;
   if (typeof LAZY_PAGES !== "undefined") {
-    LAZY_PAGES.overview = 2;
-    LAZY_PAGES.alerts   = 2;
+    LAZY_PAGES.overview = INJECTED;
+    LAZY_PAGES.alerts   = INJECTED;
     // Health page removed: diagnostics merged into Sensors as a deck card.
   }
-
-  // Patch loadPagePartial to skip our sentinel pages
+  // Wrap loadPagePartial so the INJECTED sentinel short-circuits the fetch.
   if (typeof loadPagePartial === "function") {
     var _origLoad = loadPagePartial;
     window.loadPagePartial = function (page) {
-      if (LAZY_PAGES[page] === 2) return Promise.resolve();
+      if (LAZY_PAGES[page] === INJECTED) return Promise.resolve();
       return _origLoad(page);
     };
   }
@@ -717,8 +719,14 @@
         return '<span class="badge dim" title="' + esc(a) + '">' + esc(a) + '</span>';
       }).join("");
 
-      return '<div class="alert-rule ' + state + '" data-id="' + esc(r.id || "") + '">' +
-        '<span class="ar-state" aria-label="' + state + '"></span>' +
+      // role="group" + aria-label gives screen readers a single
+      // announcement per row ("Rule X · firing") instead of reading the
+      // state dot, the title, the expression, and the meta column
+      // separately as disconnected fragments.
+      var ariaLabel = (r.name || r.id || "Rule") + " · " + state;
+      return '<div class="alert-rule ' + state + '" role="group" ' +
+              'aria-label="' + esc(ariaLabel) + '" data-id="' + esc(r.id || "") + '">' +
+        '<span class="ar-state" aria-hidden="true"></span>' +
         '<div><div class="ar-name">' + esc(r.name || r.id || "Rule") + '</div>' +
           '<div class="ar-expr">' + expr + '</div></div>' +
         '<div class="ar-meta">' +

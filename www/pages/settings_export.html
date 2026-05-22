@@ -21,37 +21,37 @@
         </p>
         <div class="form-grid">
           <div class="field">
-            <label class="field-label">Broker Host</label>
+            <label class="field-label" for="exp-mqtt-host">Broker Host</label>
             <input type="text" id="exp-mqtt-host" class="input" placeholder="192.168.1.100">
           </div>
           <div class="field">
-            <label class="field-label">Port</label>
+            <label class="field-label" for="exp-mqtt-port">Port</label>
             <input type="number" id="exp-mqtt-port" class="input" value="1883">
           </div>
         </div>
         <div class="form-grid">
           <div class="field">
-            <label class="field-label">Topic Prefix</label>
+            <label class="field-label" for="exp-mqtt-prefix">Topic Prefix</label>
             <input type="text" id="exp-mqtt-prefix" class="input" value="waterlogger" maxlength="32">
           </div>
           <div class="field">
-            <label class="field-label">Client ID (leave blank = auto)</label>
+            <label class="field-label" for="exp-mqtt-clientid">Client ID (leave blank = auto)</label>
             <input type="text" id="exp-mqtt-clientid" class="input" placeholder="wl-DEVICEID" maxlength="32">
           </div>
         </div>
         <div class="form-grid">
           <div class="field">
-            <label class="field-label">Username</label>
+            <label class="field-label" for="exp-mqtt-user">Username</label>
             <input type="text" id="exp-mqtt-user" class="input" autocomplete="off" maxlength="32">
           </div>
           <div class="field">
-            <label class="field-label">Password</label>
+            <label class="field-label" for="exp-mqtt-pass">Password</label>
             <input type="password" id="exp-mqtt-pass" class="input" autocomplete="new-password" maxlength="64">
           </div>
         </div>
         <div class="form-grid">
           <div class="field">
-            <label class="field-label">Send Interval (ms)</label>
+            <label class="field-label" for="exp-mqtt-interval">Send Interval (ms)</label>
             <input type="number" id="exp-mqtt-interval" class="input" value="60000" step="1000">
             <p class="hint">How often to flush batched readings. Default 60 000 ms.</p>
           </div>
@@ -60,7 +60,7 @@
           </div>
         </div>
         <div class="field">
-          <label class="field-label">Connection Security</label>
+          <label class="field-label" for="exp-mqtt-tls">Connection Security</label>
           <select id="exp-mqtt-tls" class="input">
             <option value="plain">Plaintext (port 1883)</option>
             <option value="tls">TLS (port 8883)</option>
@@ -82,7 +82,7 @@
           Compatible with InfluxDB v2 (<code>/api/v2/write</code>), Grafana, custom servers.
         </p>
         <div class="field">
-          <label class="field-label">URL</label>
+          <label class="field-label" for="exp-http-url">URL</label>
           <input type="url" id="exp-http-url" class="input" placeholder="http://192.168.1.100:8086/api/v2/write"
             pattern="https?://[A-Za-z0-9._\-/:?#=&amp;%~,+]+"
             maxlength="128"
@@ -90,7 +90,7 @@
           <p class="hint">HTTPS endpoints use TLS without certificate verification (no bundled CA store). Self-signed certs work; MITM is possible on unprotected networks.</p>
         </div>
         <div class="field">
-          <label class="field-label">Authorization Header (optional)</label>
+          <label class="field-label" for="exp-http-auth">Authorization Header (optional)</label>
           <input type="text" id="exp-http-auth" class="input" placeholder="Token mytoken  or  Bearer xyz"
             pattern="[A-Za-z0-9 _\-]+"
             maxlength="128"
@@ -98,7 +98,7 @@
           <p class="hint">Sent as <code>Authorization: …</code>. Most APIs use <code>Bearer &lt;token&gt;</code> or <code>Basic &lt;base64&gt;</code>. CRLF characters are rejected client-side; backend double-checks (HttpExporter).</p>
         </div>
         <div class="field">
-          <label class="field-label">Send Interval (ms)</label>
+          <label class="field-label" for="exp-http-interval">Send Interval (ms)</label>
           <input type="number" id="exp-http-interval" class="input" value="60000" step="1000">
         </div>
       </div>
@@ -119,7 +119,7 @@
           Send interval must be ≥ 145 seconds (API requirement).
         </p>
         <div class="field" style="margin-top:.75rem">
-          <label class="field-label">Send Interval (ms)</label>
+          <label class="field-label" for="exp-sc-interval">Send Interval (ms)</label>
           <input type="number" id="exp-sc-interval" class="input" value="145000" min="145000">
         </div>
       </div>
@@ -138,11 +138,11 @@
         </p>
         <div class="form-grid">
           <div class="field">
-            <label class="field-label">Box ID</label>
+            <label class="field-label" for="exp-osm-boxid">Box ID</label>
             <input type="text" id="exp-osm-boxid" class="input" placeholder="5f3a...">
           </div>
           <div class="field">
-            <label class="field-label">Access Token</label>
+            <label class="field-label" for="exp-osm-token">Access Token</label>
             <input type="password" id="exp-osm-token" class="input" autocomplete="new-password"
               pattern="[A-Za-z0-9]{20,64}"
               maxlength="64"

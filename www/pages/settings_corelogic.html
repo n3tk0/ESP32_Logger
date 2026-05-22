@@ -48,14 +48,14 @@
         <div id="cl-sleep-cont" style="display:none">
           <div class="form-grid">
             <div class="field">
-              <label class="field-label">
+              <label class="field-label" for="cl-cont-idle">
                 Idle timeout (ms)
                 <span class="help-tip" title="Milliseconds without activity before CPU + WiFi power is reduced.">ℹ️</span>
               </label>
               <input type="number" id="cl-cont-idle" class="input" value="300000" min="5000" max="3600000" step="1000">
             </div>
             <div class="field">
-              <label class="field-label">
+              <label class="field-label" for="cl-cont-cpu">
                 Idle CPU (MHz)
                 <span class="help-tip" title="CPU frequency while idle. Active frequency is always 160 MHz.">ℹ️</span>
               </label>
@@ -79,21 +79,21 @@
         <div id="cl-sleep-hyb" style="display:none">
           <div class="form-grid">
             <div class="field">
-              <label class="field-label">
+              <label class="field-label" for="cl-hyb-idle">
                 Idle before sleep (ms)
                 <span class="help-tip" title="Milliseconds of inactivity in STATE_IDLE before entering deep sleep.">ℹ️</span>
               </label>
               <input type="number" id="cl-hyb-idle" class="input" value="120000" min="5000" max="600000" step="1000" data-input="clUpdateHybCycle">
             </div>
             <div class="field">
-              <label class="field-label">
+              <label class="field-label" for="cl-hyb-sleep">
                 Sleep duration (ms)
                 <span class="help-tip" title="Deep sleep duration. Timer wakeup fires sensors after this interval.">ℹ️</span>
               </label>
               <input type="number" id="cl-hyb-sleep" class="input" value="60000" min="5000" max="3600000" step="1000" data-input="clUpdateHybCycle">
             </div>
             <div class="field">
-              <label class="field-label">
+              <label class="field-label" for="cl-hyb-active">
                 Active window (ms)
                 <span class="help-tip" title="How long sensor tasks run on timer wake before going back to sleep.">ℹ️</span>
               </label>
@@ -114,7 +114,7 @@
       <div class="card-body">
         <div class="form-grid">
           <div class="field">
-            <label class="field-label">Default Mode</label>
+            <label class="field-label" for="cl-aggmode">Default Mode</label>
             <select id="cl-aggmode" class="input">
               <option value="lttb">LTTB (recommended)</option>
               <option value="avg">Average</option>
@@ -123,7 +123,7 @@
             </select>
           </div>
           <div class="field">
-            <label class="field-label">Default Bucket (min)</label>
+            <label class="field-label" for="cl-aggbucket">Default Bucket (min)</label>
             <select id="cl-aggbucket" class="input">
               <option value="0">Raw</option>
               <option value="1">1 minute</option>
@@ -133,12 +133,12 @@
             </select>
           </div>
           <div class="field">
-            <label class="field-label">Max Points</label>
+            <label class="field-label" for="cl-maxpoints">Max Points</label>
             <input type="number" id="cl-maxpoints" class="input" value="500" min="50" max="5000">
           </div>
         </div>
         <div class="field">
-          <label class="field-label">Raw Retention (days)</label>
+          <label class="field-label" for="cl-retention">Raw Retention (days)</label>
           <input type="number" id="cl-retention" class="input" value="7" min="1" max="365">
           <p class="hint">Raw log files older than this are deleted automatically.</p>
         </div>

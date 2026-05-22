@@ -1025,8 +1025,9 @@ function filesApplyMove() {
 
 // ============================================================================
 // ══ PAGE: LIVE ══
-// Matches original: function upd() polling /api/live every 500ms
-//                   function updLogs() polling /api/recent_logs every 3s
+// Transport: EventSource("/api/events") at 1 Hz with polling fallback.
+// `liveLogsUpdate` polls /api/recent_logs every 3 s (separate channel
+// from the SSE snapshot — the log feed is a tail buffer, not a stream).
 // ============================================================================
 function liveInit() {
   if (ST.chip) setEl("live-chip", ST.chip);

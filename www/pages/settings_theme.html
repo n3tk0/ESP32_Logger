@@ -33,37 +33,37 @@
         <div class="card-head"><div class="card-title"><span data-icon="palette"></span> Colors</div></div>
         <div class="card-body">
           <div class="color-grid">
-            <div class="field"><label class="field-label">Primary</label><input type="color" name="primaryColor"
+            <div class="field"><label class="field-label" for="th-primary">Primary</label><input type="color" name="primaryColor"
                 id="th-primary" class="input"></div>
-            <div class="field"><label class="field-label">Secondary</label><input type="color" name="secondaryColor"
+            <div class="field"><label class="field-label" for="th-secondary">Secondary</label><input type="color" name="secondaryColor"
                 id="th-secondary" class="input"></div>
-            <div class="field"><label class="field-label">Background (Light)</label><input type="color" name="lightBgColor"
+            <div class="field"><label class="field-label" for="th-lightBg">Background (Light)</label><input type="color" name="lightBgColor"
                 id="th-lightBg" class="input"></div>
-            <div class="field"><label class="field-label">Background (Dark)</label><input type="color" name="darkBgColor"
+            <div class="field"><label class="field-label" for="th-darkBg">Background (Dark)</label><input type="color" name="darkBgColor"
                 id="th-darkBg" class="input"></div>
-            <div class="field"><label class="field-label">Text (Light)</label><input type="color" name="lightTextColor"
+            <div class="field"><label class="field-label" for="th-lightText">Text (Light)</label><input type="color" name="lightTextColor"
                 id="th-lightText" class="input"></div>
-            <div class="field"><label class="field-label">Text (Dark)</label><input type="color" name="darkTextColor"
+            <div class="field"><label class="field-label" for="th-darkText">Text (Dark)</label><input type="color" name="darkTextColor"
                 id="th-darkText" class="input"></div>
           </div>
           <h4 class="mt-2">Chart</h4>
           <div class="color-grid" style="grid-template-columns:repeat(3,1fr)">
-            <div class="field"><label class="field-label">Full Flush</label><input type="color" name="ffColor"
+            <div class="field"><label class="field-label" for="th-ff">Full Flush</label><input type="color" name="ffColor"
                 id="th-ff" class="input"></div>
-            <div class="field"><label class="field-label">Part Flush</label><input type="color" name="pfColor"
+            <div class="field"><label class="field-label" for="th-pf">Part Flush</label><input type="color" name="pfColor"
                 id="th-pf" class="input"></div>
-            <div class="field"><label class="field-label">Other</label><input type="color" name="otherColor"
+            <div class="field"><label class="field-label" for="th-other">Other</label><input type="color" name="otherColor"
                 id="th-other" class="input"></div>
           </div>
           <h4 class="mt-2">Storage Bar</h4>
           <div class="color-grid">
-            <div class="field"><label class="field-label">Normal</label><input type="color" name="storageBarColor"
+            <div class="field"><label class="field-label" for="th-bar">Normal</label><input type="color" name="storageBarColor"
                 id="th-bar" class="input"></div>
-            <div class="field"><label class="field-label">70%+</label><input type="color" name="storageBar70Color"
+            <div class="field"><label class="field-label" for="th-bar70">70%+</label><input type="color" name="storageBar70Color"
                 id="th-bar70" class="input"></div>
-            <div class="field"><label class="field-label">90%+</label><input type="color" name="storageBar90Color"
+            <div class="field"><label class="field-label" for="th-bar90">90%+</label><input type="color" name="storageBar90Color"
                 id="th-bar90" class="input"></div>
-            <div class="field"><label class="field-label">Border</label><input type="color" name="storageBarBorder"
+            <div class="field"><label class="field-label" for="th-barB">Border</label><input type="color" name="storageBarBorder"
                 id="th-barB" class="input"></div>
           </div>
         </div>
@@ -75,13 +75,13 @@
         <div class="card-body">
           <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem">Supported: PNG, JPG, GIF, SVG, ICO. Path:
             /file.png</p>
-          <div class="field"><label class="field-label">Logo Path</label><input type="text" name="logoSource"
+          <div class="field"><label class="field-label" for="th-logo">Logo Path</label><input type="text" name="logoSource"
               id="th-logo" placeholder="/logo.png" class="input" maxlength="128"
               pattern="^/([\w.\-](\/[\w.\-]+)*)?$" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
-          <div class="field"><label class="field-label">Favicon</label><input type="text" name="faviconPath"
+          <div class="field"><label class="field-label" for="th-favicon">Favicon</label><input type="text" name="faviconPath"
               id="th-favicon" placeholder="/favicon.ico" class="input" maxlength="32"
               pattern="^/([\w.\-](\/[\w.\-]+)*)?$" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
-          <div class="field"><label class="field-label">Board Diagram</label><input type="text"
+          <div class="field"><label class="field-label" for="th-board">Board Diagram</label><input type="text"
               name="boardDiagramPath" id="th-board" placeholder="/xiao_esp32_c3_board.jpg" class="input" maxlength="64"
               pattern="^/([\w.\-](\/[\w.\-]+)*)?$" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
         </div>
@@ -92,7 +92,7 @@
         <div class="card-head"><div class="card-title"><span data-icon="line-chart"></span> Chart Source</div></div>
         <div class="card-body">
           <div class="field">
-            <label class="field-label">uPlot Library</label>
+            <label class="field-label" for="th-chartSrc">uPlot Library</label>
             <select name="chartSource" id="th-chartSrc" class="input"
               data-change="themeToggleChartPath">
               <option value="0">Local File</option>
@@ -102,13 +102,13 @@
           </div>
           <div id="chartPathRow" style="display:none">
             <div class="field">
-              <label class="field-label">Local Path</label>
+              <label class="field-label" for="th-chartPath">Local Path</label>
               <input type="text" name="chartLocalPath" id="th-chartPath" placeholder="/uPlot.iife.min.js" class="input"
                 pattern="^/[a-zA-Z0-9._\-]+\.js(\.gz)?$" title="Local path only: /filename.js or /filename.js.gz (no protocol-relative or external URLs)">
             </div>
           </div>
           <div class="field mt-1">
-            <label class="field-label">Dashboard Column Labels</label>
+            <label class="field-label" for="th-labelFmt">Dashboard Column Labels</label>
             <select name="chartLabelFormat" id="th-labelFmt" class="input">
               <option value="0">Date + Time</option>
               <option value="1">Boot Count (#1234)</option>
