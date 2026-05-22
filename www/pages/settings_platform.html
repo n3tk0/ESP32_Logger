@@ -1,0 +1,41 @@
+<!-- ════════════════════════════════════════════════════════════════════════
+     Settings → Platform (aggregator subpage)
+     Replaces three separate Settings hub cards (Hardware / Core logic /
+     Modules) with one entry-point.  Links out to the full detail pages.
+     The split was a small-screen pain point: tapping a card → drilling
+     into a detail page → backing out → tapping the next one wastes time
+     when configuring the platform end-to-end.
+     ════════════════════════════════════════════════════════════════════ -->
+<section class="page" id="page-settings_platform">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title"><span data-icon="cpu"></span> Platform</h1>
+      <div class="page-sub">Operating mode · pins · sensors · modules</div>
+    </div>
+    <div class="page-actions">
+      <a href="#settings" data-page="settings" data-click="navPage" class="btn"><span data-icon="chevron-left"></span> All settings</a>
+    </div>
+  </div>
+
+  <div class="grid grid-auto">
+    <div class="set-card" data-click="showSubpage" data-args='["settings_corelogic"]'>
+      <div class="set-card-icon"><span data-icon="layers"></span></div>
+      <div class="set-card-t">Core logic</div>
+      <div class="set-card-d">Operating mode · sensor pipeline · aggregation</div>
+    </div>
+    <div class="set-card" data-click="showSubpage" data-args='["settings_hardware"]'>
+      <div class="set-card-icon"><span data-icon="cpu"></span></div>
+      <div class="set-card-t">Hardware</div>
+      <div class="set-card-d">Pins · board diagram · transports</div>
+    </div>
+    <div class="set-card" data-click="showSubpage" data-args='["settings_modules"]'>
+      <div class="set-card-icon"><span data-icon="layers"></span></div>
+      <div class="set-card-t">Modules <span class="badge dim" style="margin-left:6px">preview</span></div>
+      <div class="set-card-d">Optional plug-in features</div>
+    </div>
+  </div>
+
+  <p class="hint" style="margin-top:var(--gap)">
+    Tip: search across every setting field with <kbd>⌘K</kbd> / <kbd>Ctrl K</kbd>.
+  </p>
+</section>

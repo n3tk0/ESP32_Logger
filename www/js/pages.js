@@ -177,13 +177,25 @@ function dbDestroyAllCharts() {
 
 function dbStartPolling() {
   if (dbPollTimer) return;
-  dbPollTimer = setInterval(dbRefreshLatest, DB_POLL_MS);
+  dbPollTimer = setInterval(function () {
+    // Page Visibility gate: skip the round-trip when the tab is hidden so
+    // a backgrounded phone / minimised laptop doesn't keep waking the AP.
+    if (document.hidden) return;
+    dbRefreshLatest();
+  }, DB_POLL_MS);
 }
 
 function dbStopPolling() {
   if (dbPollTimer) { clearInterval(dbPollTimer); dbPollTimer = null; }
   dbDestroyAllCharts();
 }
+
+// When the tab returns to foreground while the dashboard is active, do one
+// immediate refresh instead of waiting up to DB_POLL_MS for the next tick.
+document.addEventListener("visibilitychange", function () {
+  if (document.hidden) return;
+  if (currentPage === "dashboard" && dbPollTimer) dbRefreshLatest();
+});
 
 // Build the card grid from /api/sensors, then fetch a sparkline series
 // (/api/data) per (sensor, metric) and seed each card chart.  Once cards
@@ -869,7 +881,24 @@ function filesToggleEdit() {
 }
 
 function filesDelete(path) {
-  if (!confirm("Delete " + path + "?")) return;
+  // Undo flow: defer the DELETE request for 8 s.  If the user clicks Undo,
+  // the request is never sent.  Matches Gmail-style "undo send" — the row
+  // stays visible during the window which makes it obvious what's pending.
+  var name = path.split("/").pop() || path;
+  if (typeof showUndoToast === "function") {
+    showUndoToast(
+      "Will delete " + name,
+      "Press Undo to keep the file",
+      function () { /* user clicked Undo — no-op */ },
+      { onCommit: function () { _filesPerformDelete(path); } }
+    );
+  } else {
+    if (!confirm("Delete " + path + "?")) return;
+    _filesPerformDelete(path);
+  }
+}
+
+function _filesPerformDelete(path) {
   getCsrfToken().then(function (token) {
     var url = "/delete?path=" + encodeURIComponent(path) +
               "&storage=" + currentFilesStorage +
@@ -996,8 +1025,9 @@ function filesApplyMove() {
 
 // ============================================================================
 // ══ PAGE: LIVE ══
-// Matches original: function upd() polling /api/live every 500ms
-//                   function updLogs() polling /api/recent_logs every 3s
+// Transport: EventSource("/api/events") at 1 Hz with polling fallback.
+// `liveLogsUpdate` polls /api/recent_logs every 3 s (separate channel
+// from the SSE snapshot — the log feed is a tail buffer, not a stream).
 // ============================================================================
 function liveInit() {
   if (ST.chip) setEl("live-chip", ST.chip);

@@ -64,10 +64,10 @@ function sensorsLoad() {
     return d + "d";
   }
 
-  fetchWithTimeout("/api/sensors", {}, 15000)
-    .then(function (r) {
-      return r.ok ? r.json() : null;
-    })
+  // Force a fresh fetch here — this is the Sensors page main load, the
+  // operator is explicitly looking at this data and expects it current.
+  getSensors({ maxAgeMs: 0 })
+    .catch(function () { return null; })
     .then(function (d) {
       if (!d || !d.sensors || d.sensors.length === 0) {
         if (msg)
@@ -460,8 +460,7 @@ document.addEventListener("DOMContentLoaded", function () {
         metricSel.innerHTML = '<option value="">— metric —</option>';
         return;
       }
-      fetchWithTimeout("/api/sensors", {}, 15000)
-        .then(function (r) { return r.json(); })
+      getSensors()
         .then(function (d) {
           var s = (d.sensors || []).find(function (s) { return s.id === sid; });
           if (s && s.metrics) {
@@ -704,7 +703,7 @@ function clRenderSensors(sensors) {
               ? "Pin:" + (s.pin || "?")
               : "";
       return (
-        '<div class="sensor-list-row" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border)">' +
+        '<div class="sensor-list-row" data-sensor-idx="' + i + '" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border)">' +
         '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:0 0 auto">' +
         '<input type="checkbox" data-change="clToggleSensor" data-args="[' +
         i +
@@ -745,16 +744,29 @@ function clToggleSensor(idx, enabled) {
 
 function clRemoveSensor(idx) {
   if (!PCFG || !PCFG.sensors) return;
-  if (
-    !confirm(
-      'Remove sensor "' +
-        (PCFG.sensors[idx].id || PCFG.sensors[idx].type) +
-        '"?',
-    )
-  )
-    return;
-  PCFG.sensors.splice(idx, 1);
+  var sensor = PCFG.sensors[idx];
+  if (!sensor) return;
+  var name = sensor.id || sensor.type || "sensor";
+  // Optimistic remove with undo.  Pull the sensor out of PCFG and re-render
+  // immediately; on commit the next clSave call will persist; on undo,
+  // splice it back in at the original index.
+  var removed = PCFG.sensors.splice(idx, 1)[0];
   clRenderSensors(PCFG.sensors);
+
+  if (typeof showUndoToast === "function") {
+    showUndoToast(
+      "Removed " + name,
+      "Press Undo to restore (save on the page to persist)",
+      function () {
+        // Re-insert at original index — clamp in case the list shrank.
+        var insertAt = Math.min(idx, PCFG.sensors.length);
+        PCFG.sensors.splice(insertAt, 0, removed);
+        clRenderSensors(PCFG.sensors);
+      }
+    );
+  } else if (window.showToast) {
+    showToast("Removed " + name, "ok");
+  }
 }
 
 function clMoveSensor(idx, dir) {
@@ -858,18 +870,10 @@ function _sepPinSelect(elemId, currentVal, usedPins, allowNone, adcOnly) {
     return '<select id="' + elemId + '" class="input">' + opts + '</select>';
 }
 
-function clEditSensor(idx) {
-  if (!PCFG || !PCFG.sensors) return;
-  window.clCurrentEditingSensor = idx;
-  var s = PCFG.sensors[idx];
-  
-  var b = document.getElementById("sensorPopupBody");
-  var t = document.getElementById("sensorPopupTitle");
-  var f = document.getElementById("sensorPopupFooter");
-  var btn = document.getElementById("sensorPopupSaveBtn");
-  
-  t.textContent = "Edit Sensor: " + (s.id || s.type);
-  
+// Build the inner HTML for the sensor-edit form.  Called by both the popup
+// path (mobile / fallback) and the inline expander (desktop) so the two
+// surfaces stay in lockstep.
+function _clBuildEditFormHtml(s) {
   var html = '<form id="sensorEditForm" data-submit="clSaveEditedSensor">';
   
   // ID
@@ -931,10 +935,65 @@ function clEditSensor(idx) {
           '<p class="hint">Additional parameters applied directly to this sensor. Keep as {} if unsure.</p></div>';
 
   html += '</form>';
-  
-  b.innerHTML = html;
+  return html;
+}
+
+// Inline-edit mount point for desktop (≥780 px).  Expands a panel below
+// the row, replacing the modal popup for less context loss.  Falls back
+// to the popup on mobile and when the row can't be located.
+function _clEditInline(idx, s) {
+  var row = document.querySelector('.sensor-list-row[data-sensor-idx="' + idx + '"]');
+  if (!row) return false;
+  // Close any open expander first
+  document.querySelectorAll(".sensor-inline-edit").forEach(function (n) { n.remove(); });
+
+  var panel = document.createElement("div");
+  panel.className = "sensor-inline-edit";
+  panel.setAttribute("data-sensor-idx", idx);
+  panel.innerHTML =
+    '<div class="sensor-inline-head">' +
+      '<div class="sensor-inline-title">Edit · <span class="mono">' + esc(s.id || s.type) + '</span></div>' +
+      '<button type="button" class="btn-mini" data-role="close" aria-label="Close"><span data-icon="x"></span></button>' +
+    '</div>' +
+    '<div class="sensor-inline-body">' + _clBuildEditFormHtml(s) + '</div>' +
+    '<div class="sensor-inline-foot">' +
+      '<button type="button" class="btn" data-role="cancel">Cancel</button>' +
+      '<button type="button" class="btn primary" data-role="save"><span data-icon="save"></span> Save</button>' +
+    '</div>';
+
+  // Mount immediately after the row so the expander shows in flow
+  row.parentNode.insertBefore(panel, row.nextSibling);
+  if (window.Icons && Icons.swap) Icons.swap(panel);
+
+  function dismiss() { panel.remove(); window.clCurrentEditingSensor = -1; }
+  panel.querySelector('[data-role="close"]').addEventListener("click", dismiss);
+  panel.querySelector('[data-role="cancel"]').addEventListener("click", dismiss);
+  panel.querySelector('[data-role="save"]').addEventListener("click", function () {
+    clSaveEditedSensor();
+    dismiss();
+  });
+  return true;
+}
+
+function clEditSensor(idx) {
+  if (!PCFG || !PCFG.sensors) return;
+  window.clCurrentEditingSensor = idx;
+  var s = PCFG.sensors[idx];
+
+  // Inline on desktop (≥ 780 px); modal popup on mobile or when the row
+  // can't be located (e.g. when invoked from the command palette before
+  // the Core Logic page has rendered yet).
+  var canInline = window.innerWidth >= 780 &&
+    document.querySelector('.sensor-list-row[data-sensor-idx="' + idx + '"]');
+  if (canInline && _clEditInline(idx, s)) return;
+
+  var b = document.getElementById("sensorPopupBody");
+  var t = document.getElementById("sensorPopupTitle");
+  var f = document.getElementById("sensorPopupFooter");
+  var btn = document.getElementById("sensorPopupSaveBtn");
+  t.textContent = "Edit Sensor: " + (s.id || s.type);
+  b.innerHTML = _clBuildEditFormHtml(s);
   f.style.display = "flex";
-  
   btn.onclick = clSaveEditedSensor;
   document.getElementById("sensorPopup").style.display = "flex";
 }

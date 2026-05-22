@@ -35,11 +35,11 @@
         <div class="card-body">
           <div class="form-grid">
             <div class="field">
-              <label class="field-label">Prefix</label>
+              <label class="field-label" for="dl-prefix">Prefix</label>
               <input type="text" name="prefix" id="dl-prefix" placeholder="datalog" maxlength="32" class="input">
             </div>
             <div class="field">
-              <label class="field-label">Folder</label>
+              <label class="field-label" for="dl-folder">Folder</label>
               <input type="text" name="folder" id="dl-folder" placeholder="/" class="input">
               <p class="text-muted" style="font-size:.75rem;margin-top:2px">Leave empty for root, or /logs for subfolder
               </p>
@@ -72,12 +72,12 @@
               </select>
             </div>
             <div class="field" id="maxSizeGroup" style="display:none">
-              <label class="field-label">Max Size (KB)</label>
+              <label class="field-label" for="dl-maxSize">Max Size (KB)</label>
               <input type="number" name="maxSizeKB" id="dl-maxSize" min="10" max="10000" class="input">
             </div>
           </div>
           <div class="field">
-            <label class="field-label">Max entries (lines)</label>
+            <label class="field-label" for="dl-maxEntries">Max entries (lines)</label>
             <input type="number" name="maxEntries" id="dl-maxEntries"
                    min="10" max="65535" step="100" class="input">
             <p class="hint">Cap the line count of the active log; oldest lines are
@@ -93,7 +93,7 @@
         <div class="card-body">
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
             <div class="field" style="min-width:100px">
-              <label class="field-label">Date</label>
+              <label class="field-label" for="dl-date">Date</label>
               <select name="dateFormat" id="dl-date" class="input" data-change="dlUpdatePreview">
                 <option value="0">Off</option>
                 <option value="1">DD/MM/YYYY</option>
@@ -103,7 +103,7 @@
               </select>
             </div>
             <div class="field" style="min-width:90px">
-              <label class="field-label">Start</label>
+              <label class="field-label" for="dl-time">Start</label>
               <select name="timeFormat" id="dl-time" class="input" data-change="dlUpdatePreview">
                 <option value="0">HH:MM:SS</option>
                 <option value="1">HH:MM</option>
@@ -111,7 +111,7 @@
               </select>
             </div>
             <div class="field" style="min-width:80px">
-              <label class="field-label">End</label>
+              <label class="field-label" for="dl-end">End</label>
               <select name="endFormat" id="dl-end" class="input" data-change="dlUpdatePreview">
                 <option value="0">Time</option>
                 <option value="1">Duration</option>
@@ -119,7 +119,7 @@
               </select>
             </div>
             <div class="field" style="min-width:80px">
-              <label class="field-label">Volume</label>
+              <label class="field-label" for="dl-vol">Volume</label>
               <select name="volumeFormat" id="dl-vol" class="input" data-change="dlUpdatePreview">
                 <option value="0">L:0,00</option>
                 <option value="1">L:0.00</option>
@@ -160,20 +160,20 @@
           <div id="pcFields" style="display:none">
             <div class="form-grid">
               <div class="field">
-                <label class="field-label">PF → FF Threshold (L)</label>
+                <label class="field-label" for="dl-pfff">PF → FF Threshold (L)</label>
                 <input type="number" step="0.1" name="pfToFfThreshold" id="dl-pfff" min="0.1" max="20"
                   class="input">
                 <p class="hint">PF_BTN with volume ≥ this → corrected to FF_BTN</p>
               </div>
               <div class="field">
-                <label class="field-label">FF → PF Threshold (L)</label>
+                <label class="field-label" for="dl-ffpf">FF → PF Threshold (L)</label>
                 <input type="number" step="0.1" name="ffToPfThreshold" id="dl-ffpf" min="0.1" max="20"
                   class="input">
                 <p class="hint">FF_BTN with volume ≤ this → corrected to PF_BTN</p>
               </div>
             </div>
             <div class="field">
-              <label class="field-label">Button Hold Threshold (ms)</label>
+              <label class="field-label" for="dl-hold">Button Hold Threshold (ms)</label>
               <input type="number" step="50" name="manualPressThresholdMs" id="dl-hold" min="0" max="60000"
                 class="input">
               <p class="hint">Held longer than this → correction skipped. 0 = disabled.</p>

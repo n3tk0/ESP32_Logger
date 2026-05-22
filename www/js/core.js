@@ -35,11 +35,66 @@ function fetchWithTimeout(url, opts, timeoutMs) {
 }
 window.fetchWithTimeout = fetchWithTimeout;
 
+// Same single-flight pattern for /api/sensors — three call sites all want
+// the same payload (Overview Diagnostics card, the Sensors page grid, and
+// the Sensor-chart metric dropdown).  Default 5 s cache window.
+var _sensorsCache    = null;
+var _sensorsFetchedAt = 0;
+var _sensorsInflight  = null;
+function getSensors(opts) {
+  opts = opts || {};
+  var maxAge = (opts.maxAgeMs !== undefined) ? opts.maxAgeMs : 5000;
+  var now = Date.now();
+  if (_sensorsCache && _sensorsFetchedAt && (now - _sensorsFetchedAt) < maxAge) {
+    return Promise.resolve(_sensorsCache);
+  }
+  if (_sensorsInflight) return _sensorsInflight;
+  _sensorsInflight = fetchWithTimeout("/api/sensors", {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (data) {
+      _sensorsCache = data;
+      _sensorsFetchedAt = Date.now();
+      return data;
+    })
+    .finally(function () { _sensorsInflight = null; });
+  return _sensorsInflight;
+}
+window.getSensors = getSensors;
+
+// getStatus({maxAgeMs}) — single-flight cache around /api/status.
+// Many pages (5 settings sub-pages + 2 IoT-extensions sites) all call the
+// same endpoint within seconds of each other.  This funnels them through
+// a shared cache + dedupe so the ESP only answers once per `maxAgeMs`
+// window.  Default is 5 s — small enough that no UI feels stale, large
+// enough to collapse a settings-sub-page navigation burst into one round
+// trip.  Pass {maxAgeMs:0} to force-refresh.
+function getStatus(opts) {
+  opts = opts || {};
+  var maxAge = (opts.maxAgeMs !== undefined) ? opts.maxAgeMs : 5000;
+  var now = Date.now();
+  if (ST && _stFetchedAt && (now - _stFetchedAt) < maxAge) {
+    return Promise.resolve(ST);
+  }
+  if (_stInflight) return _stInflight;
+  _stInflight = fetchWithTimeout("/api/status", {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (data) {
+      ST = data;
+      _stFetchedAt = Date.now();
+      return data;
+    })
+    .finally(function () { _stInflight = null; });
+  return _stInflight;
+}
+window.getStatus = getStatus;
+
 // ============================================================================
 // GLOBALS
 // ============================================================================
 var ST = {}; // cached /api/status payload
 var CFG = {}; // cached /export_settings payload
+var _stFetchedAt = 0;     // ms epoch when ST was last filled
+var _stInflight  = null;  // dedupe concurrent callers
 var dbChart = null; // uPlot instance on dashboard
 var dbRawData = ""; // raw log text for dashboard
 var dbFilteredData = []; // filtered, parsed rows
@@ -215,6 +270,7 @@ window.addEventListener("DOMContentLoaded", function () {
   ]).then(function (results) {
     ST = results[0];
     CFG = results[1];
+    _stFetchedAt = Date.now();   // seed the cache used by getStatus()
     applyStatus(ST);
     var hash = location.hash.replace("#", "") || "dashboard";
     navigateTo(hash);
@@ -406,6 +462,15 @@ function _themeUpdateToggleIcon(mode) {
   btn.title = "Theme: " + mode + " (click to change)";
 }
 
+// Public alias — other modules (command-palette, quick-settings) call this
+// so the data-theme attribute, class list, localStorage, AND topbar button
+// icon all update in one place (gemini review PR #108).
+function setTheme(mode) {
+  if (mode !== "light" && mode !== "dark" && mode !== "auto") return;
+  _themeApplyOverride(mode);
+}
+window.setTheme = setTheme;
+
 function quickThemeToggle() {
   var current;
   try { current = localStorage.getItem("themeOverride") || "auto"; }
@@ -414,6 +479,135 @@ function quickThemeToggle() {
   var next = current === "auto" ? "dark" : (current === "dark" ? "light" : "auto");
   _themeApplyOverride(next);
 }
+
+// ── Compact-density toggle (topbar) ────────────────────────────────────────
+// Cycles between comfortable (default) and compact via [data-density] on
+// <html>.  Mirrors the theme-toggle pattern; persists to localStorage so
+// the choice survives a reload.
+function quickDensityToggle() {
+  var root = document.documentElement;
+  var curr = root.getAttribute("data-density") || "comfortable";
+  var next = curr === "compact" ? "comfortable" : "compact";
+  root.setAttribute("data-density", next);
+  try { localStorage.setItem("density", next); } catch (e) {}
+  _densitySyncBtn(next);
+}
+function _densitySyncBtn(d) {
+  var btn = document.getElementById("densityToggleBtn");
+  if (!btn) return;
+  btn.title = "Density: " + d + " (click to switch)";
+  btn.setAttribute("aria-label", btn.title);
+}
+
+// ── Accent color picker (topbar) ───────────────────────────────────────────
+// One-click popup with four swatches.  Sets [data-accent] on <html>; the
+// CSS in colors_and_type already handles the rest.
+function accentPickerToggle() {
+  var picker = document.getElementById("accentPicker");
+  if (!picker) return;
+  var open = picker.classList.toggle("open");
+  var btn = document.getElementById("accentPickerBtn");
+  if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+function setAccent(name) {
+  var allowed = { cyan:1, amber:1, green:1, violet:1 };
+  if (!allowed[name]) return;
+  document.documentElement.setAttribute("data-accent", name);
+  try { localStorage.setItem("accent", name); } catch (e) {}
+  // Mark the active swatch
+  var pop = document.querySelectorAll(".accent-swatch");
+  for (var i = 0; i < pop.length; i++) {
+    pop[i].classList.toggle("active", pop[i].dataset.accent === name);
+  }
+  // Close the popup after picking
+  var picker = document.getElementById("accentPicker");
+  if (picker) picker.classList.remove("open");
+  var btn = document.getElementById("accentPickerBtn");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+}
+
+// Close accent picker on outside click
+document.addEventListener("click", function (e) {
+  var picker = document.getElementById("accentPicker");
+  if (!picker || !picker.classList.contains("open")) return;
+  if (picker.contains(e.target)) return;
+  picker.classList.remove("open");
+  var btn = document.getElementById("accentPickerBtn");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+});
+
+// Restore persisted density + accent on script load (DOM is ready — this
+// script is at the bottom of <body>).  theme-boot.js handles theme; these
+// two are not visually-critical pre-paint so it's safe to apply here.
+(function _restoreDensityAndAccent() {
+  try {
+    var d = localStorage.getItem("density");
+    if (d === "compact" || d === "comfortable") {
+      document.documentElement.setAttribute("data-density", d);
+    }
+    var a = localStorage.getItem("accent");
+    if (a && /^(cyan|amber|green|violet)$/.test(a)) {
+      document.documentElement.setAttribute("data-accent", a);
+    }
+  } catch (e) {}
+  // Sync UI affordances after DOM is parsed
+  function sync() {
+    _densitySyncBtn(document.documentElement.getAttribute("data-density") || "comfortable");
+    var acc = document.documentElement.getAttribute("data-accent") || "cyan";
+    var swatches = document.querySelectorAll(".accent-swatch");
+    for (var i = 0; i < swatches.length; i++) {
+      swatches[i].classList.toggle("active", swatches[i].dataset.accent === acc);
+    }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", sync);
+  } else {
+    sync();
+  }
+})();
+
+// ── Sticky page-head shadow observer ───────────────────────────────────────
+// IntersectionObserver detects when the page-head is "stuck" (its top has
+// scrolled past the main container's top edge) and adds .is-stuck so the
+// CSS can paint a divider + soft shadow.  Avoids the scroll-handler tax.
+(function _stickyPageHead() {
+  if (typeof IntersectionObserver === "undefined") return;
+  // Re-attach observers when nav changes the active page.  We don't know
+  // the exact moment .page-head is mounted, so use a MutationObserver on
+  // <main> as a low-cost proxy.
+  var main = document.getElementById("main-content") || document.querySelector(".main");
+  if (!main) return;
+  var io = null;
+  function attach() {
+    if (io) try { io.disconnect(); } catch (e) {}
+    var heads = document.querySelectorAll(".page.active .page-head");
+    if (!heads.length) return;
+    io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        // When the sentinel above the page-head is no longer intersecting,
+        // we're scrolled past it and the head is "stuck".
+        e.target.classList.toggle("is-stuck", e.intersectionRatio < 1);
+      });
+    }, { threshold: [1], root: main });
+    Array.prototype.forEach.call(heads, function (h) { io.observe(h); });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", attach);
+  } else {
+    attach();
+  }
+  // Re-attach when pages swap active class
+  // Re-attach when pages swap active class.  Filter to .page targets only —
+  // observing the full subtree fires on every pulsing badge, sensor-card
+  // update, and chart tween, which is wasted work (gemini review PR #108).
+  var mo = new MutationObserver(function (records) {
+    for (var i = 0; i < records.length; i++) {
+      var t = records[i].target;
+      if (t && t.classList && t.classList.contains("page")) { attach(); return; }
+    }
+  });
+  mo.observe(main, { attributes: true, subtree: true, attributeFilter: ["class"] });
+})();
 
 // Collapsible sidebar rail (Claude Design phase 4a).  Toggles 60px rail
 // width on desktop only; mobile ignores the class since the bottom-nav
@@ -524,6 +718,8 @@ var LAZY_PAGES = {
   settings_network:   1,
   settings_time:      1,
   settings_modules:   1,
+  settings_platform:  1, // aggregator: hardware + core logic + modules
+  settings_netime:    1, // aggregator: network + time
   update:             1,
 };
 var _loadedPartials = {};   // page name → true once injected
@@ -771,6 +967,95 @@ function showToast(a, b, c) {
   close.addEventListener("click", dismiss);
   setTimeout(dismiss, 3000);
 }
+
+// showUndoToast(title, msg, onUndo, opts?)
+// Wraps showToast with an "Undo" affordance for low-risk destructive
+// actions (delete file, remove sensor, reset layout).  The action is taken
+// optimistically — caller already removed the data — and onUndo() is
+// called only if the user clicks Undo before the toast (8 s default) drains.
+//   opts.duration  override the 8 000 ms default
+//   opts.onCommit  fires on dismiss (timeout or close) when undo was NOT clicked
+function showUndoToast(title, msg, onUndo, opts) {
+  opts = opts || {};
+  var duration = opts.duration || 8000;
+  var container = document.getElementById("toastContainer");
+  if (!container) return;
+
+  var el = document.createElement("div");
+  el.className = "toast toast-info toast-undo";
+  el.setAttribute("role", "status");
+  el.setAttribute("aria-live", "polite");
+
+  var iconSpan = document.createElement("span");
+  iconSpan.className = "toast-icon";
+  iconSpan.setAttribute("data-icon", "info");
+  el.appendChild(iconSpan);
+
+  var body = document.createElement("div");
+  body.className = "toast-body";
+  var titleEl = document.createElement("div");
+  titleEl.className = "toast-title";
+  titleEl.textContent = title || "";
+  body.appendChild(titleEl);
+  if (msg) {
+    var msgEl = document.createElement("div");
+    msgEl.className = "toast-msg";
+    msgEl.textContent = msg;
+    body.appendChild(msgEl);
+  }
+  el.appendChild(body);
+
+  var undoBtn = document.createElement("button");
+  undoBtn.type = "button";
+  undoBtn.className = "btn-mini toast-undo-btn";
+  undoBtn.textContent = "Undo";
+  el.appendChild(undoBtn);
+
+  var close = document.createElement("button");
+  close.type = "button";
+  close.className = "toast-close";
+  close.setAttribute("aria-label", "Dismiss notification");
+  var closeIcon = document.createElement("span");
+  closeIcon.setAttribute("data-icon", "x");
+  close.appendChild(closeIcon);
+  el.appendChild(close);
+
+  var countdown = document.createElement("div");
+  countdown.className = "toast-countdown";
+  countdown.style.animationDuration = duration + "ms";
+  el.appendChild(countdown);
+
+  container.appendChild(el);
+  if (window.Icons && Icons.swap) Icons.swap(el);
+
+  var dismissed = false;
+  var undone   = false;
+  var timer    = null;
+
+  function dismiss(committed) {
+    if (dismissed) return;
+    dismissed = true;
+    clearTimeout(timer);
+    if (committed && !undone && typeof opts.onCommit === "function") {
+      try { opts.onCommit(); } catch (e) {}
+    }
+    el.classList.add("toast-dismissing");
+    setTimeout(function () {
+      if (container.contains(el)) container.removeChild(el);
+    }, 260);
+  }
+
+  undoBtn.addEventListener("click", function () {
+    undone = true;
+    if (typeof onUndo === "function") {
+      try { onUndo(); } catch (e) {}
+    }
+    dismiss(false);
+  });
+  close.addEventListener("click", function () { dismiss(true); });
+  timer = setTimeout(function () { dismiss(true); }, duration);
+}
+window.showUndoToast = showUndoToast;
 
 // emptyState(opts) — returns DOM for the design's structured empty state.
 // opts: { icon, title, msg, ctaText, ctaPage }.  Title is required;
@@ -1204,6 +1489,9 @@ function confirmRestart() {
 registerHandlers({
   navPage: navPage,
   quickThemeToggle: quickThemeToggle,
+  quickDensityToggle: quickDensityToggle,
+  accentPickerToggle: accentPickerToggle,
+  setAccent: setAccent,
   sidebarRailToggle: sidebarRailToggle,
   skipToContent: skipToContent,
   showPopup: showPopup,
@@ -1266,7 +1554,11 @@ registerHandlers({
       '<div class="kb-help-card">' +
         '<div class="kb-help-title">Keyboard shortcuts</div>' +
         '<ul class="kb-help-list">' +
+          '<li><kbd>⌘</kbd> <kbd>K</kbd><span>Command palette (also <kbd>Ctrl K</kbd> or <kbd>/</kbd>)</span></li>' +
+          '<li><kbd>,</kbd><span>Quick settings drawer</span></li>' +
           '<li><kbd>G</kbd> <kbd>D</kbd><span>Dashboard</span></li>' +
+          '<li><kbd>G</kbd> <kbd>O</kbd><span>Overview</span></li>' +
+          '<li><kbd>G</kbd> <kbd>A</kbd><span>Alerts</span></li>' +
           '<li><kbd>G</kbd> <kbd>L</kbd><span>Live</span></li>' +
           '<li><kbd>G</kbd> <kbd>F</kbd><span>Files</span></li>' +
           '<li><kbd>G</kbd> <kbd>C</kbd><span>Sensors</span></li>' +
