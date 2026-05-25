@@ -192,11 +192,11 @@ function sensorsLoad() {
             }
 
             // Age indicator: only show ✓ when sensor is active and has a timestamp
-            var refMs = s.last_read_ms || 0;
+            var ageRefMs = s.last_read_ms || 0;
             var ageIcon = "", ageColor = "inherit";
             if (stateClass === " err")        { ageIcon = "⊘"; ageColor = "var(--err)"; }
             else if (stateClass === " stale") { ageIcon = "⚠"; ageColor = "var(--warn)"; }
-            else if (refMs && stateClass !== " dis") { ageIcon = "✓"; ageColor = "var(--ok)"; }
+            else if (ageRefMs && stateClass !== " dis") { ageIcon = "✓"; ageColor = "var(--ok)"; }
 
             return (
               '<div class="sensor' + stateClass + '" data-sensor-name="' + esc(((s.name || '') + ' ' + (s.id || '')).toLowerCase().trim()) + '">' +
@@ -465,7 +465,7 @@ document.addEventListener("DOMContentLoaded", function () {
           var s = (d.sensors || []).find(function (s) { return s.id === sid; });
           if (s && s.metrics) {
             metricSel.innerHTML = s.metrics
-              .map(function (m) { return '<option value="' + m + '">' + m + "</option>"; })
+              .map(function (m) { return '<option value="' + esc(m) + '">' + esc(m) + "</option>"; })
               .join("");
           }
         })
@@ -556,23 +556,6 @@ function clLoadBoardProfile() {
 // Fire the fetch as soon as the script loads.  No await — the selector
 // re-renders on every popup open and will pick up the populated data.
 if (typeof window !== 'undefined') clLoadBoardProfile();
-
-// Returns a map { gpioNum: [sensorId, ...] } of pins in use,
-// excluding the sensor at excludeIdx (so editing a sensor doesn't block its own pins).
-function clGetUsedPins(excludeIdx) {
-    var used = {};
-    if(!PCFG || !PCFG.sensors) return used;
-    PCFG.sensors.forEach(function(s, i) {
-        if(i === excludeIdx) return;
-        [s.sda, s.scl, s.pin, s.uart_rx, s.uart_tx].forEach(function(p) {
-            if(p !== undefined && p !== null && p >= 0) {
-                if(!used[p]) used[p] = [];
-                used[p].push(s.id || s.type);
-            }
-        });
-    });
-    return used;
-}
 
 // Single source of truth for sleep-config defaults (mirrors Logger.ino initial values).
 var CL_SLEEP_DEFAULTS = {
@@ -769,106 +752,7 @@ function clRemoveSensor(idx) {
   }
 }
 
-function clMoveSensor(idx, dir) {
-    if(!PCFG || !PCFG.sensors) return;
-    var j = idx + dir;
-    if(j < 0 || j >= PCFG.sensors.length) return;
-    var tmp = PCFG.sensors[idx];
-    PCFG.sensors[idx] = PCFG.sensors[j];
-    PCFG.sensors[j] = tmp;
-    clRenderSensors(PCFG.sensors);
-}
-
-function clDupSensor(idx) {
-    if(!PCFG || !PCFG.sensors) return;
-    var copy = JSON.parse(JSON.stringify(PCFG.sensors[idx]));
-    copy.id = copy.id + '_copy';
-    PCFG.sensors.splice(idx + 1, 0, copy);
-    clRenderSensors(PCFG.sensors);
-}
-
-// ============================================================================
-// SENSOR ADD POPUP
-// ============================================================================
-var SAP_selectedType = null;
-
-function clAddSensor() {
-  var b = document.getElementById("sensorPopupBody");
-  var t = document.getElementById("sensorPopupTitle");
-  var f = document.getElementById("sensorPopupFooter");
-  
-  t.textContent = "Select Sensor Type";
-  var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
-  CL_SENSOR_TYPES.forEach(function(st) {
-    html += '<button class="btn" style="text-align:left;height:auto;padding:10px;display:flex;flex-direction:column;gap:4px" data-click="clDoAddSensor" data-args="' + esc(JSON.stringify([st.value])) + '">'
-          + '<strong style="color:var(--text)">' + esc(st.value) + '</strong><span style="font-size:0.8rem;color:var(--text-muted)">' + esc(st.label) + '</span></button>';
-  });
-  html += '</div>';
-  b.innerHTML = html;
-  f.style.display = "none";
-  document.getElementById("sensorPopup").style.display = "flex";
-}
-
-function clDoAddSensor(type) {
-  var info = CL_SENSOR_TYPES.find(function (t) { return t.value === type; });
-  if (!info) return;
-  if (!PCFG) PCFG = { sensors: [] };
-  if (!PCFG.sensors) PCFG.sensors = [];
-  var newS = {
-    id: type + "_" + (PCFG.sensors.length + 1),
-    type: type,
-    enabled: true,
-    interface: info.iface,
-  };
-  if (info.iface === "i2c") {
-    newS.sda = 6;
-    newS.scl = 7;
-    newS.read_interval_ms = 10000;
-  }
-  if (info.iface === "uart") {
-    newS.uart_rx = 20;
-    newS.uart_tx = -1;
-    newS.baud = 9600;
-  }
-  if (info.iface === "pulse") {
-    newS.pin = 9;
-    newS.read_interval_ms = 5000;
-  }
-  PCFG.sensors.push(newS);
-  
-  window.clCurrentEditingSensor = PCFG.sensors.length - 1;
-  clEditSensor(window.clCurrentEditingSensor);
-  clRenderSensors(PCFG.sensors);
-}
-
 window.clCurrentEditingSensor = -1;
-
-// Build a GPIO pin <select>.
-// allowNone = true adds a "— Not connected —" option for value -1.
-// adcOnly   = true hides non-ADC pins (for analog sensors).
-// usedPins  = map returned by clGetUsedPins(). Used pins are shown disabled + labelled.
-function _sepPinSelect(elemId, currentVal, usedPins, allowNone, adcOnly) {
-    var opts = '';
-    if(allowNone) {
-        var selNone = (currentVal === -1 || currentVal === undefined || currentVal === null) ? ' selected' : '';
-        opts += '<option value="-1"' + selNone + '>— Not connected —</option>';
-    }
-    CL_GPIO_PINS.forEach(function(p) {
-        if(adcOnly && !p.adc) return;
-        var usedBy    = usedPins ? usedPins[p.gpio] : null;
-        var sysLabel  = CL_SYSTEM_PINS[p.gpio];
-        var isSelected = (Number(currentVal) === p.gpio);
-        var isDisabled = usedBy && !isSelected;
-        var suffix = '';
-        if(usedBy)   suffix += '  ✗ ' + usedBy.join(', ');
-        if(sysLabel) suffix += '  ⚠ ' + sysLabel;
-        opts += '<option value="' + p.gpio + '"'
-            + (isSelected  ? ' selected' : '')
-            + (isDisabled  ? ' disabled' : '')
-            + '>' + p.label + suffix + '</option>';
-    });
-    return '<select id="' + elemId + '" class="input">' + opts + '</select>';
-}
 
 // Build the inner HTML for the sensor-edit form.  Called by both the popup
 // path (mobile / fallback) and the inline expander (desktop) so the two

@@ -26,12 +26,6 @@
   var THUMB_HEIGHT   = 96;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-  function esc(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" })[c];
-    });
-  }
-
   function reIcons(el) {
     if (window.Icons && Icons.swap) Icons.swap(el || document.body);
   }

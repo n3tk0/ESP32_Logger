@@ -255,7 +255,6 @@
         </div>
 
         <div id="logsErrorMsg" class="alert alert-error" style="display:none"></div>
-        <div id="db-error"     class="alert alert-error" style="display:none"></div>
 
         <div class="grid grid-4" style="margin-top:var(--gap)">
           <div class="kpi">
@@ -766,35 +765,6 @@
     </div>
   </div>
 
-  <!-- ═══ SENSOR ADD POPUP ═══ -->
-  <div id="sensor-add-popup" class="popup-overlay" style="display:none" data-click="backdropClose" data-backdrop-fn="sapClose">
-    <div class="popup-content" style="max-width:520px;text-align:left;width:92%">
-      <div style="font-size:1.2rem;font-weight:700;margin-bottom:.25rem">+ Add Sensor</div>
-      <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:1rem">Select a sensor type, then set an ID.</p>
-      <div id="sap-type-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:.4rem;margin-bottom:1rem"></div>
-      <div class="field" style="margin-bottom:1rem">
-        <label class="field-label">Sensor ID <span style="font-weight:400;color:var(--text-muted)">(unique name)</span></label>
-        <input type="text" id="sap-id" class="input" placeholder="e.g. bme280_roof">
-      </div>
-      <div style="display:flex;gap:.5rem">
-        <button class="btn primary" data-click="sapConfirm">Add &amp; Configure</button>
-        <button class="btn" data-click="sapClose">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ═══ SENSOR EDIT POPUP ═══ -->
-  <div id="sensor-edit-popup" class="popup-overlay" style="display:none" data-click="backdropClose" data-backdrop-fn="sepClose">
-    <div class="popup-content" style="max-width:520px;text-align:left;width:92%;max-height:88vh;overflow-y:auto">
-      <div style="font-size:1.2rem;font-weight:700;margin-bottom:1rem"><span data-icon="pencil"></span> Edit Sensor</div>
-      <div id="sep-fields"></div>
-      <div style="display:flex;gap:.5rem;margin-top:1.25rem">
-        <button class="btn primary" data-click="sepConfirm"><span data-icon="save"></span> Save</button>
-        <button class="btn" data-click="sepClose">Cancel</button>
-      </div>
-    </div>
-  </div>
-
   <!-- ═══ KEYBOARD SHORTCUTS POPUP ═══ -->
   <div id="kbPopup" class="popup-overlay" style="display:none" data-click="backdropClose">
     <div class="popup-content" style="max-width:420px;text-align:left">
@@ -818,8 +788,7 @@
   </div>
 
   <!-- ═══ TOAST ═══ -->
-  <div id="toast"></div>
-  <div id="toastContainer" class="toast-container"></div>
+  <div id="toastContainer" class="toast-rack"></div>
 
   <!--
     JS modules are plain scripts in shared global scope; load order matters:
