@@ -1248,8 +1248,6 @@ registerHandlers({
   sensorChartLoad: sensorChartLoad,
   clToggleSensor: clToggleSensor,
   clRemoveSensor: clRemoveSensor,
-  clAddSensor: clAddSensor,
-  clDoAddSensor: clDoAddSensor,
   clEditSensor: clEditSensor,
   clSaveEditedSensor: clSaveEditedSensor,
   clSave: clSave,
