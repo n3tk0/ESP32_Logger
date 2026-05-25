@@ -343,7 +343,6 @@ function thInit() {
 
       setVal("th-primary", th.primaryColor || "#275673");
       setVal("th-secondary", th.secondaryColor || "#4a5568");
-      window._thData = th;
       setVal("th-lightBg",   th.lightBgColor   || "#f0f2f5");
       setVal("th-darkBg",    th.darkBgColor    || "#0f172a");
       setVal("th-lightText", th.lightTextColor || "#2d3748");
@@ -569,7 +568,7 @@ function netInit() {
       setVal("net-apSN", net.apSubnet || "");
       setVal("net-cSSID", net.clientSSID);
       setVal("net-cPass", net.clientPassword || "");
-      setChk("net-staticCheck", net.useStaticIP);
+      setChk("staticCheck", net.useStaticIP);
       setVal("net-ip2", net.staticIP || "0.0.0.0");
       setVal("net-gw", net.gateway || "0.0.0.0");
       setVal("net-sn", net.subnet || "0.0.0.0");
@@ -1668,9 +1667,12 @@ var Modules = (function () {
     var showIf = f.showIf
       ? ' data-showif="' + esc(JSON.stringify(f.showIf)) + '"'
       : "";
+    var labelHtml = (f.type !== "bool" && f.label)
+      ? '<label class="field-label">' + escAttr(f.label) + '</label>'
+      : '';
     return (
       '<div class="field" data-field="' + escAttr(id) + '"' + showIf + '>' +
-        (f.label ? '<label class="field-label">' + escAttr(f.label) + '</label>' : '') +
+        labelHtml +
         input +
       '</div>'
     );
@@ -1854,6 +1856,7 @@ registerHandlers({
   timeSyncNTP: timeSyncNTP,
   timeRtcProtect: timeRtcProtect,
   timeFlushLogs: timeFlushLogs,
+  timeBackupBoot: timeBackupBoot,
   timeRestoreBoot: timeRestoreBoot,
   dlDeleteFile: dlDeleteFile,
   dlSwitchFile: dlSwitchFile,

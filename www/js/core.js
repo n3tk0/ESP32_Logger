@@ -227,7 +227,7 @@ function submitParentForm() {
 // Popup helpers. Replace inline style="display:flex/none" mutation.
 // Named hidePopup (not closePopup) because settings.js defines its own
 // zero-arg closePopup() tied to id="popup" that we don't want to shadow.
-var LEGAL_POPUP_IDS = ["restartPopup", "popup", "movePopup", "sensor-add-popup", "sensor-edit-popup", "sensorPopup", "kbPopup"];
+var LEGAL_POPUP_IDS = ["restartPopup", "popup", "movePopup", "sensorPopup", "kbPopup"];
 function showPopup(id) {
   if (LEGAL_POPUP_IDS.indexOf(id) === -1) { console.warn("showPopup: unknown id", id); return; }
   var el = document.getElementById(id); if (el) el.style.display = "flex";
@@ -382,7 +382,6 @@ function applyStatus(d) {
     var style = document.getElementById("themeVars");
     if (style) style.textContent = vars;
 
-    // Dashboard legend dot colors — matches original inline style in .ino
     // Dashboard legend dot colors — matches original inline style in .ino
     setElStyle("db-legendFF", "background", th.ffColor || "var(--ff-color)");
     setElStyle("db-legendPF", "background", th.pfColor || "var(--pf-color)");
@@ -866,22 +865,8 @@ function pageInit(page) {
       modulesInit();
       break;
     case "settings":
-      // Chunk G: hide settings cards for build-time-disabled features.
-      // /api/status fills ST.caps; if it isn't loaded yet, kick a fetch
-      // and re-apply once it lands.
-      applyCapsToSettingsHub();
       break;
   }
-}
-
-// Hide the Flow Meter settings card when the firmware was built without
-// SENSOR_WATERFLOW_ENABLED.  Pulls capability flags from ST.caps (cached
-// from /api/status) — falls back to a fresh fetch if the cache is empty.
-function applyCapsToSettingsHub() {
-  // PR #105 follow-up: settings-card-flowmeter tile was retired (the
-  // standalone page is gone; flow-meter knobs now live on the YF-S201
-  // sensor card + hardware/device pages). Function retained as a no-op
-  // hook so any future capability-driven hiding can land here.
 }
 
 // ============================================================================
@@ -1445,20 +1430,6 @@ var Form = (function () {
 // ============================================================================
 // RESTART POPUP
 // ============================================================================
-function showRestartPopup() {
-  setEl("rPopIcon", "🔄");
-  setEl("rPopTitle", "Restart Device?");
-  setEl(
-    "rPopMsg",
-    "The device will restart. Any unsaved changes will be lost.",
-  );
-  document.getElementById("rPopProgress").style.display = "none";
-  document.getElementById("rPopButtons").style.display = "flex";
-  document.getElementById("restartPopup").style.display = "flex";
-}
-function closeRestart() {
-  document.getElementById("restartPopup").style.display = "none";
-}
 function confirmRestart() {
   document.getElementById("rPopButtons").style.display = "none";
   document.getElementById("rPopProgress").style.display = "block";

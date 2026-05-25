@@ -587,22 +587,9 @@ function dbRenderChart(data) {
   var rootStyle = getComputedStyle(document.documentElement);
   var ffColor =
     th.ffColor || rootStyle.getPropertyValue("--ff-color").trim() || "#275673";
-  var pfColor =
-    th.pfColor || rootStyle.getPropertyValue("--pf-color").trim() || "#7eb0d5";
-  var otherColor =
-    th.otherColor || rootStyle.getPropertyValue("--other-color").trim() || "#a0aec0";
 
-  // Synthetic x-axis: bar index → ts within session.  Real RTC times exist on
-  // each entry but the legacy TXT logs don't always carry full ISO dates, so
-  // we sequence them.  Chunk F's smart dashboard reads from CSV and uses
-  // real epochs.
   var xs = data.map(function (_, i) { return i; });
   var ys = data.map(function (d) { return d.vol; });
-  var clr = data.map(function (d) {
-    if (d.reason.indexOf("FF") >= 0) return ffColor;
-    if (d.reason.indexOf("PF") >= 0) return pfColor;
-    return otherColor;
-  });
 
   // uPlot custom paths: vertical bars from baseline to value, one color per bar.
   function barPaths(u, seriesIdx) {
@@ -618,17 +605,6 @@ function dbRenderChart(data) {
     }
     return { fill: fill, stroke: null };
   }
-
-  // Per-bar fill: uPlot doesn't natively colorize per-point in a single
-  // series, so draw each colored group as its own series using `bands`.
-  // For simplicity here we use a single series with the FF color and emit
-  // distinct colored series only when the dataset has both kinds.
-  var colorGroups = {};
-  data.forEach(function (d, i) {
-    var c = clr[i];
-    if (!colorGroups[c]) colorGroups[c] = [];
-    colorGroups[c].push(i);
-  });
 
   var lblFmt = th.chartLabelFormat !== undefined ? th.chartLabelFormat : 0;
   function formatLabel(i) {
@@ -663,11 +639,6 @@ function dbRenderChart(data) {
     legend: { show: true },
   }, seriesData, ctx);
 
-  // Bars are uniformly colored via `paths`; per-bar coloring is too costly
-  // for a single-series uPlot. For Chunk F's smart dashboard we'll move to
-  // proper time-series scatter/line which doesn't need per-point colors.
-  void colorGroups;  // kept for potential future overlay-by-color rendering
-  void pfColor; void otherColor;
 }
 
 // Matches original: function exportCSV()

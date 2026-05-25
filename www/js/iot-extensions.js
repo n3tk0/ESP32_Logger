@@ -673,7 +673,7 @@
         _renderAlertHistory(data.history || []);
       })
       .catch(function (err) {
-        var msg = '<div class="empty" style="padding:24px"><span class="empty-title">Failed to load alerts (' + err + ')</span></div>';
+        var msg = '<div class="empty" style="padding:24px"><span class="empty-title">Failed to load alerts (' + esc(String(err)) + ')</span></div>';
         var rc = document.getElementById("al-rules");
         var hc = document.getElementById("al-history");
         if (rc) rc.innerHTML = msg;
@@ -810,7 +810,7 @@
       return '<div class="alert-feed-row">' +
         '<span class="af-time">' + esc(_relTime(h.ts)) + '</span>' +
         '<div><div class="af-name">' + esc(h.rule_id || "") + '</div>' +
-          '<div class="af-val">' + (h.value !== undefined ? h.value : "") + '</div></div>' +
+          '<div class="af-val">' + esc(h.value !== undefined ? h.value : "") + '</div></div>' +
         '<span class="badge ' + esc(h.outcome || "ok") + '">' + esc((h.outcome || "ok").toUpperCase()) + '</span>' +
       '</div>';
     }).join("");
@@ -913,17 +913,6 @@
     }).join("");
 
     reIcons(grid);
-    // Old standalone Health page had per-state KPI tiles; the merged
-    // Diagnostics card on Overview keeps the grid only and shows a single
-    // summary line in the card head.  Both are tolerated: setEl no-ops on
-    // missing IDs, so the old tiles update only when they exist.
-    setEl("hl-up",      upCount);
-    setEl("hl-up-d",    upCount + " of " + sensors.length);
-    setEl("hl-stale",   staleCount);
-    setEl("hl-stale-d", staleNames.slice(0, 2).join(", ") || "—");
-    setEl("hl-err",     errCount);
-    setEl("hl-err-d",   errNames.slice(0, 2).join(", ") || "—");
-    setEl("hl-retries", totalRetries);
     setEl("hl-summary",
       sensors.length + " sensors · " +
       upCount + " up · " +
@@ -1438,15 +1427,7 @@
   }
 
   // Register openWizard / closeWizard in the handler registry
-  registerHandlers({ openSensorWizard: openWizard });
-
-  // Wire the existing "Add sensor" button on page-sensors and clAddSensor
-  document.addEventListener("DOMContentLoaded", function () {
-    // clAddSensor is registered in sensors.js; we override it with our wizard
-    registerHandlers({ clAddSensor: openWizard });
-  });
-  // Try immediately too (script loads at end of body, so DOM is ready)
-  registerHandlers({ clAddSensor: openWizard });
+  registerHandlers({ openSensorWizard: openWizard, clAddSensor: openWizard });
 
   // ─── Keyboard shortcuts for new pages (G O / G A) ─────────────────────────
   // core.js already handles G+D/L/S/F/C/U. We hook the same keydown so the
