@@ -227,7 +227,7 @@ function submitParentForm() {
 // Popup helpers. Replace inline style="display:flex/none" mutation.
 // Named hidePopup (not closePopup) because settings.js defines its own
 // zero-arg closePopup() tied to id="popup" that we don't want to shadow.
-var LEGAL_POPUP_IDS = ["restartPopup", "popup", "movePopup", "sensor-add-popup", "sensor-edit-popup", "sensorPopup", "kbPopup"];
+var LEGAL_POPUP_IDS = ["restartPopup", "popup", "movePopup", "sensorPopup", "kbPopup"];
 function showPopup(id) {
   if (LEGAL_POPUP_IDS.indexOf(id) === -1) { console.warn("showPopup: unknown id", id); return; }
   var el = document.getElementById(id); if (el) el.style.display = "flex";
