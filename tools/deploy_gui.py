@@ -15,7 +15,6 @@ Features:
 """
 
 import re
-import serial.tools.list_ports
 import sys
 import threading
 import tkinter as tk
@@ -30,6 +29,13 @@ except ImportError:
     print("Error: customtkinter is not installed.")
     print("Install it with: pip install customtkinter")
     sys.exit(1)
+
+# Gracefully handle missing pyserial
+try:
+    import serial.tools.list_ports
+    HAS_PYSERIAL = True
+except ImportError:
+    HAS_PYSERIAL = False
 
 # Add tools dir to path for imports
 TOOLS = Path(__file__).resolve().parent
@@ -72,7 +78,6 @@ class DeployerGUI:
         self.manager: Optional[DeployManager] = None
         self.running = False
         self.step_vars: dict[int, tk.BooleanVar] = {}
-        self.pending_saves: dict[str, any] = {}  # Track pending saves
 
         # Setup UI
         self._build_ui()
@@ -460,6 +465,14 @@ Log Colors:
 
     def _refresh_ports(self) -> None:
         """Refresh and display available serial ports."""
+        if not HAS_PYSERIAL:
+            messagebox.showerror(
+                "Missing Dependency",
+                "The 'pyserial' package is required for serial port detection.\n\n"
+                "Please install it using:\n  pip install pyserial"
+            )
+            return
+
         ports = [port.device for port in serial.tools.list_ports.comports()]
 
         if not ports:
@@ -491,6 +504,12 @@ Log Colors:
         if self.running:
             messagebox.showwarning("Already Running", "Steps are already running.")
             return
+
+        # Sync all entry fields to config before running (in case user didn't click away)
+        self._save_setting("env", self.env_entry)
+        self._save_setting("port", self.port_entry)
+        self._save_setting("device_ip", self.ip_entry)
+        self._save_setting("baud", self.baud_entry, int_val=True)
 
         steps = self.cfg.get("steps", [])
         if not steps:
@@ -544,11 +563,11 @@ Log Colors:
         return response
 
     def _on_wifi(self) -> None:
-        """Real WiFi provisioning modal."""
+        """Real WiFi provisioning modal with active provisioning."""
         # Create modal dialog
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("WiFi Provisioning")
-        dialog.geometry("400x250")
+        dialog.geometry("400x280")
         dialog.resizable(False, False)
 
         # Make dialog modal
@@ -568,6 +587,15 @@ Log Colors:
             font=("Helvetica", 14, "bold")
         )
         header.pack(pady=(15, 10), padx=20)
+
+        # Info
+        info = ctk.CTkLabel(
+            dialog,
+            text="Connect device via USB, then enter WiFi credentials:",
+            font=("Helvetica", 9),
+            text_color="gray"
+        )
+        info.pack(anchor="w", padx=20, pady=(0, 10))
 
         # SSID field
         ctk.CTkLabel(dialog, text="SSID:", font=("Helvetica", 10)).pack(anchor="w", padx=20, pady=(10, 2))
@@ -595,26 +623,43 @@ Log Colors:
                 messagebox.showwarning("Missing Password", "Please enter the WiFi password.")
                 return
 
-            # Store in config and trigger provisioning step
-            self.cfg["wifi_ssid"] = ssid
-            self.cfg["wifi_password"] = password
-            save_cfg(self.cfg)
-
             dialog.destroy()
 
-            messagebox.showinfo(
-                "Provisioning",
-                f"WiFi credentials saved:\n  SSID: {ssid}\n\n"
-                f"Connect the device to USB and select the 'Provision WiFi' step "
-                f"in the deployment process."
-            )
+            # Run provisioning in background thread
+            def run_provision():
+                self._log("\n" + "=" * 60)
+                self._log("WiFi Provisioning Started")
+                self._log("=" * 60)
+                self._log(f"Connecting to: {ssid}\n")
+
+                try:
+                    manager = DeployManager(self.cfg)
+                    manager.on_step_output = self._log
+
+                    # Call provision_wifi with lambda callbacks that use entered credentials
+                    success = manager.provision_wifi(
+                        input_fn=lambda _: ssid,
+                        getpass_fn=lambda _: password
+                    )
+
+                    self._log("\n" + "=" * 60)
+                    if success:
+                        self._log("✓ WiFi Provisioning successful!")
+                    else:
+                        self._log("✗ WiFi Provisioning failed. Check device connection and credentials.")
+                    self._log("=" * 60 + "\n")
+                except Exception as exc:
+                    self._log(f"\n✗ Error: {exc}\n")
+
+            thread = threading.Thread(target=run_provision, daemon=True)
+            thread.start()
 
         cancel_btn = ctk.CTkButton(button_frame, text="Cancel", command=dialog.destroy)
         cancel_btn.pack(side="right", padx=(5, 0))
 
         provision_btn = ctk.CTkButton(
             button_frame,
-            text="Save & Close",
+            text="Start Provisioning",
             command=provision
         )
         provision_btn.pack(side="right")
