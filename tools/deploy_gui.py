@@ -14,7 +14,6 @@ Features:
   • Native CustomTkinter theming (no hardcoded colors)
 """
 
-import re
 import sys
 import threading
 import tkinter as tk
@@ -285,8 +284,9 @@ class DeployerGUI:
         self.log_text.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
         # Configure text tags for syntax highlighting
+        # CTkTextbox.tag_config delegates to tk.Text which uses 'foreground', not 'text_color'
         for tag, color in LOG_COLORS.items():
-            self.log_text.tag_config(tag, text_color=color)
+            self.log_text.tag_config(tag, foreground=color)
 
         # Clear button
         clear_btn = ctk.CTkButton(
@@ -545,7 +545,7 @@ Log Colors:
                 self._log(f"\nERROR: {exc}\n")
             finally:
                 self.running = False
-                self.run_btn.configure(state="normal", text="▶ RUN")
+                self.root.after(0, lambda: self.run_btn.configure(state="normal", text="▶ RUN"))
 
         thread = threading.Thread(target=run_in_bg, daemon=True)
         thread.start()
