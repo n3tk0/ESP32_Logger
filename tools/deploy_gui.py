@@ -259,7 +259,7 @@ class DeployerGUI:
     def _build_tabs(self, parent: ctk.CTkFrame) -> None:
         """Tabbed interface on the right."""
         self.tab_view = ctk.CTkTabview(parent)
-        self.tab_view.grid(row=0, column=1, fill="both", expand=True, sticky="nsew")
+        self.tab_view.grid(row=0, column=1, sticky="nsew")
 
         # Logs tab
         self._build_logs_tab()
