@@ -113,8 +113,7 @@ class DeployerGUI:
             width=280,
             orientation="vertical"
         )
-        sidebar.grid(row=0, column=0, fill="both", sticky="nsew", padx=(0, 10))
-        sidebar.grid_propagate(True)
+        sidebar.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
 
         # ── Settings Section (Essential Only) ─────────────────────────────────
         self._build_settings_section(sidebar)
