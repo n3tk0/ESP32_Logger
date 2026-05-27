@@ -11,8 +11,9 @@ Output: dist/deploy_gui.exe (Windows) or dist/deploy_gui (macOS/Linux)
 import sys
 from pathlib import Path
 
-# Determine the project root
-ROOT = Path(__file__).parent.parent
+# SPECPATH is set by PyInstaller to the directory containing this spec file.
+# __file__ is NOT available in the spec namespace on all platforms.
+ROOT = Path(SPECPATH).parent
 
 a = Analysis(
     [str(ROOT / 'tools' / 'deploy_gui.py')],
