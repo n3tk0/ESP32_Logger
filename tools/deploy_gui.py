@@ -4,6 +4,14 @@ tools/deploy_gui.py — Modern GUI for ESP32 Logger deployment.
 
 Built with CustomTkinter for a professional, native-looking interface.
 Shares deployment logic with deploy.py via deploy_core.py.
+
+Features:
+  • Responsive scrollable layout that works on any screen size
+  • Dynamic serial port detection with refresh button
+  • Rich text logging with syntax highlighting
+  • Real WiFi provisioning modal
+  • Optimized disk I/O (save on focus-out, not keystroke)
+  • Native CustomTkinter theming (no hardcoded colors)
 """
 
 import sys
@@ -20,6 +28,13 @@ except ImportError:
     print("Error: customtkinter is not installed.")
     print("Install it with: pip install customtkinter")
     sys.exit(1)
+
+# Gracefully handle missing pyserial
+try:
+    import serial.tools.list_ports
+    HAS_PYSERIAL = True
+except ImportError:
+    HAS_PYSERIAL = False
 
 # Add tools dir to path for imports
 TOOLS = Path(__file__).resolve().parent
@@ -41,13 +56,21 @@ from deploy_core import (
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
+# Log text tag colors (accessible in dark mode)
+LOG_COLORS = {
+    "error": "#ff6b6b",      # Red
+    "success": "#51cf66",    # Green
+    "warning": "#ffd93d",    # Yellow
+    "info": "#aaaaaa",       # Gray
+}
+
 
 class DeployerGUI:
     def __init__(self, root: ctk.CTk):
         self.root = root
         self.root.title("ESP32 Logger — Deploy & Flash Tool")
-        self.root.geometry("1000x700")
-        self.root.minsize(800, 600)
+        self.root.geometry("1100x750")
+        self.root.minsize(900, 650)
 
         # Load config
         self.cfg = load_cfg()
@@ -59,9 +82,9 @@ class DeployerGUI:
         self._build_ui()
 
     def _build_ui(self) -> None:
-        """Build the main UI."""
+        """Build the main UI with responsive layout."""
         # Header
-        header = ctk.CTkFrame(self.root, fg_color="#1a1a1a")
+        header = ctk.CTkFrame(self.root)
         header.pack(side="top", fill="x", padx=0, pady=0)
 
         title = ctk.CTkLabel(
@@ -74,20 +97,26 @@ class DeployerGUI:
         # Main content area with sidebar + tabs
         main_container = ctk.CTkFrame(self.root)
         main_container.pack(side="top", fill="both", expand=True, padx=10, pady=10)
+        main_container.grid_columnconfigure(1, weight=1)
+        main_container.grid_rowconfigure(0, weight=1)
 
-        # Left sidebar (Settings + Steps)
+        # Left sidebar (compact, essential settings only)
         self._build_sidebar(main_container)
 
         # Right side (Tabbed interface)
         self._build_tabs(main_container)
 
     def _build_sidebar(self, parent: ctk.CTkFrame) -> None:
-        """Build left sidebar with settings and step toggles."""
-        sidebar = ctk.CTkFrame(parent, width=250, fg_color="#242424")
-        sidebar.pack(side="left", fill="both", padx=(0, 10))
-        sidebar.pack_propagate(False)
+        """Build left sidebar with essential settings and controls."""
+        sidebar = ctk.CTkScrollableFrame(
+            parent,
+            width=280,
+            orientation="vertical"
+        )
+        sidebar.grid(row=0, column=0, fill="both", sticky="nsew", padx=(0, 10))
+        sidebar.grid_propagate(True)
 
-        # ── Settings Section ───────────────────────────────────────────────────
+        # ── Settings Section (Essential Only) ─────────────────────────────────
         self._build_settings_section(sidebar)
 
         # ── Steps Section ──────────────────────────────────────────────────────
@@ -99,12 +128,12 @@ class DeployerGUI:
         # ── Action Buttons Section ─────────────────────────────────────────────
         self._build_actions_section(sidebar)
 
-    def _build_settings_section(self, sidebar: ctk.CTkFrame) -> None:
-        """Settings configuration area."""
-        sect = ctk.CTkFrame(sidebar, fg_color="#2a2a2a")
+    def _build_settings_section(self, sidebar: ctk.CTkScrollableFrame) -> None:
+        """Essential settings (Environment, Port, Chip). Advanced in Config tab."""
+        sect = ctk.CTkFrame(sidebar)
         sect.pack(fill="x", padx=10, pady=(10, 0))
 
-        label = ctk.CTkLabel(sect, text="⚙️  Settings", font=("Helvetica", 12, "bold"))
+        label = ctk.CTkLabel(sect, text="⚙️  Essential Settings", font=("Helvetica", 12, "bold"))
         label.pack(anchor="w", pady=(10, 5))
 
         # Environment
@@ -112,23 +141,32 @@ class DeployerGUI:
         self.env_entry = ctk.CTkEntry(sect, placeholder_text=detect_env())
         self.env_entry.insert(0, self.cfg.get("env", ""))
         self.env_entry.pack(fill="x", pady=(0, 8))
-        self.env_entry.bind("<KeyRelease>", lambda _: self._save_setting("env", self.env_entry))
+        self.env_entry.bind("<FocusOut>", lambda _: self._save_setting("env", self.env_entry))
 
-        # Port
-        ctk.CTkLabel(sect, text="Serial Port:", font=("Helvetica", 10)).pack(anchor="w")
-        self.port_entry = ctk.CTkEntry(sect, placeholder_text="auto-detect")
+        # Port with Refresh button
+        port_frame = ctk.CTkFrame(sect)
+        port_frame.pack(fill="x", pady=(0, 8))
+
+        ctk.CTkLabel(port_frame, text="Serial Port:", font=("Helvetica", 10)).pack(anchor="w")
+
+        port_input_frame = ctk.CTkFrame(port_frame)
+        port_input_frame.pack(fill="x")
+
+        self.port_entry = ctk.CTkEntry(port_input_frame, placeholder_text="auto-detect")
         self.port_entry.insert(0, self.cfg.get("port", ""))
-        self.port_entry.pack(fill="x", pady=(0, 8))
-        self.port_entry.bind("<KeyRelease>", lambda _: self._save_setting("port", self.port_entry))
+        self.port_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.port_entry.bind("<FocusOut>", lambda _: self._save_setting("port", self.port_entry))
 
-        # Device IP
-        ctk.CTkLabel(sect, text="Device IP:", font=("Helvetica", 10)).pack(anchor="w")
-        self.ip_entry = ctk.CTkEntry(sect)
-        self.ip_entry.insert(0, self.cfg.get("device_ip", "192.168.4.1"))
-        self.ip_entry.pack(fill="x", pady=(0, 8))
-        self.ip_entry.bind("<KeyRelease>", lambda _: self._save_setting("device_ip", self.ip_entry))
+        refresh_btn = ctk.CTkButton(
+            port_input_frame,
+            text="🔄",
+            command=self._refresh_ports,
+            width=35,
+            font=("Helvetica", 10)
+        )
+        refresh_btn.pack(side="right")
 
-        # Chip
+        # Chip Type
         ctk.CTkLabel(sect, text="Chip Type:", font=("Helvetica", 10)).pack(anchor="w")
         self.chip_var = ctk.StringVar(value=self.cfg.get("chip", "esp32c3"))
         chip_menu = ctk.CTkOptionMenu(
@@ -137,66 +175,21 @@ class DeployerGUI:
             variable=self.chip_var,
             command=lambda v: self._save_setting("chip", None, v),
         )
-        chip_menu.pack(fill="x", pady=(0, 8))
+        chip_menu.pack(fill="x", pady=(0, 10))
 
-        # Baud rate
-        ctk.CTkLabel(sect, text="Baud Rate:", font=("Helvetica", 10)).pack(anchor="w")
-        self.baud_entry = ctk.CTkEntry(sect)
-        self.baud_entry.insert(0, str(self.cfg.get("baud", 921600)))
-        self.baud_entry.pack(fill="x", pady=(0, 8))
-        self.baud_entry.bind("<KeyRelease>", lambda _: self._save_setting("baud", self.baud_entry, int_val=True))
-
-        # Upload filter
-        ctk.CTkLabel(sect, text="Upload Filter:", font=("Helvetica", 10)).pack(anchor="w")
-        self.filter_var = ctk.StringVar(value=self.cfg.get("upload_filter", "all"))
-        filter_menu = ctk.CTkOptionMenu(
-            sect,
-            values=_UPLOAD_FILTERS,
-            variable=self.filter_var,
-            command=lambda v: self._save_setting("upload_filter", None, v),
-        )
-        filter_menu.pack(fill="x", pady=(0, 8))
-
-        # Wipe toggle
-        self.wipe_var = ctk.BooleanVar(value=self.cfg.get("wipe_before_upload", False))
-        wipe_check = ctk.CTkCheckBox(
-            sect,
-            text="Wipe /www before upload",
-            variable=self.wipe_var,
-            command=lambda: self._save_setting("wipe_before_upload", None, self.wipe_var.get()),
-        )
-        wipe_check.pack(anchor="w", pady=(0, 8))
-
-        # USB CDC toggle (ESP32-C3, S3)
-        self.usb_cdc_var = ctk.BooleanVar(value=self.cfg.get("usb_cdc_on_boot", True))
-        usb_cdc_check = ctk.CTkCheckBox(
-            sect,
-            text="USB CDC on boot",
-            variable=self.usb_cdc_var,
-            command=lambda: self._save_setting("usb_cdc_on_boot", None, self.usb_cdc_var.get()),
-        )
-        usb_cdc_check.pack(anchor="w", pady=(0, 2))
-
-        # USB CDC info label
-        env_name = self.cfg.get("env", "esp32c3_supermini")
-        if "esp32c3" in env_name.lower():
-            usb_info = "Controls GPIO 18/19 for USB"
-        elif "esp32s3" in env_name.lower():
-            usb_info = "Controls GPIO 19/20 for USB"
-        else:
-            usb_info = "Toggle USB CDC on boot"
-
+        # Info: Advanced settings in Configuration tab
         info_label = ctk.CTkLabel(
             sect,
-            text=usb_info,
+            text="💡 Advanced settings (IP, Baud, Upload Filter, USB CDC) are in the Configuration tab →",
             font=("Helvetica", 8),
-            text_color="#666666",
+            text_color="gray",
+            wraplength=250
         )
-        info_label.pack(anchor="w", pady=(0, 10), padx=(20, 0))
+        info_label.pack(anchor="w", pady=(0, 5))
 
-    def _build_steps_section(self, sidebar: ctk.CTkFrame) -> None:
+    def _build_steps_section(self, sidebar: ctk.CTkScrollableFrame) -> None:
         """Step toggles."""
-        sect = ctk.CTkFrame(sidebar, fg_color="#2a2a2a")
+        sect = ctk.CTkFrame(sidebar)
         sect.pack(fill="x", padx=10, pady=10)
 
         label = ctk.CTkLabel(sect, text="📋 Steps", font=("Helvetica", 12, "bold"))
@@ -208,16 +201,16 @@ class DeployerGUI:
             self.step_vars[n] = var
             check = ctk.CTkCheckBox(
                 sect,
-                text=f"{n}. {name[:30]}…" if len(name) > 30 else f"{n}. {name}",
+                text=f"{n}. {name[:28]}…" if len(name) > 28 else f"{n}. {name}",
                 variable=var,
                 font=("Helvetica", 9),
                 command=self._update_steps,
             )
             check.pack(anchor="w", pady=2)
 
-    def _build_presets_section(self, sidebar: ctk.CTkFrame) -> None:
+    def _build_presets_section(self, sidebar: ctk.CTkScrollableFrame) -> None:
         """Preset buttons."""
-        sect = ctk.CTkFrame(sidebar, fg_color="#2a2a2a")
+        sect = ctk.CTkFrame(sidebar)
         sect.pack(fill="x", padx=10, pady=10)
 
         label = ctk.CTkLabel(sect, text="⚡ Presets", font=("Helvetica", 12, "bold"))
@@ -235,9 +228,9 @@ class DeployerGUI:
             )
             btn.pack(fill="x", pady=3)
 
-    def _build_actions_section(self, sidebar: ctk.CTkFrame) -> None:
+    def _build_actions_section(self, sidebar: ctk.CTkScrollableFrame) -> None:
         """Action buttons."""
-        sect = ctk.CTkFrame(sidebar, fg_color="#2a2a2a")
+        sect = ctk.CTkFrame(sidebar)
         sect.pack(fill="x", padx=10, pady=10)
 
         self.run_btn = ctk.CTkButton(
@@ -245,8 +238,6 @@ class DeployerGUI:
             text="▶ RUN",
             command=self._on_run,
             font=("Helvetica", 12, "bold"),
-            fg_color="#1f8f3b",
-            hover_color="#16732e",
         )
         self.run_btn.pack(fill="x", pady=5)
 
@@ -263,23 +254,25 @@ class DeployerGUI:
             text="📡 WiFi Provision",
             command=self._on_wifi,
             font=("Helvetica", 10),
-            fg_color="#4a5f8f",
         )
         wifi_btn.pack(fill="x", pady=3)
 
     def _build_tabs(self, parent: ctk.CTkFrame) -> None:
         """Tabbed interface on the right."""
-        self.tab_view = ctk.CTkTabview(parent, fg_color="#242424")
-        self.tab_view.pack(side="right", fill="both", expand=True)
+        self.tab_view = ctk.CTkTabview(parent)
+        self.tab_view.grid(row=0, column=1, fill="both", expand=True, sticky="nsew")
 
         # Logs tab
         self._build_logs_tab()
 
-        # Summary tab
-        self._build_summary_tab()
+        # Configuration tab (advanced settings)
+        self._build_config_tab()
+
+        # Info tab
+        self._build_info_tab()
 
     def _build_logs_tab(self) -> None:
-        """Output/logs viewer."""
+        """Output/logs viewer with syntax highlighting."""
         tab = self.tab_view.add("📋 Logs")
         tab.grid_rowconfigure(0, weight=1)
         tab.grid_columnconfigure(0, weight=1)
@@ -287,9 +280,13 @@ class DeployerGUI:
         self.log_text = ctk.CTkTextbox(
             tab,
             font=("Courier", 10),
-            text_color="#aaaaaa",
         )
         self.log_text.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        # Configure text tags for syntax highlighting
+        # CTkTextbox.tag_config delegates to tk.Text which uses 'foreground', not 'text_color'
+        for tag, color in LOG_COLORS.items():
+            self.log_text.tag_config(tag, foreground=color)
 
         # Clear button
         clear_btn = ctk.CTkButton(
@@ -300,8 +297,83 @@ class DeployerGUI:
         )
         clear_btn.grid(row=1, column=0, sticky="e", padx=5, pady=5)
 
-    def _build_summary_tab(self) -> None:
-        """Summary/info tab."""
+    def _build_config_tab(self) -> None:
+        """Configuration tab with advanced settings."""
+        tab = self.tab_view.add("⚙️ Configuration")
+
+        # Create scrollable frame for settings
+        settings_frame = ctk.CTkScrollableFrame(tab, orientation="vertical")
+        settings_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Device IP
+        ctk.CTkLabel(settings_frame, text="Device IP:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 2))
+        self.ip_entry = ctk.CTkEntry(settings_frame)
+        self.ip_entry.insert(0, self.cfg.get("device_ip", "192.168.4.1"))
+        self.ip_entry.pack(fill="x", pady=(0, 10))
+        self.ip_entry.bind("<FocusOut>", lambda _: self._save_setting("device_ip", self.ip_entry))
+
+        # Baud rate
+        ctk.CTkLabel(settings_frame, text="Baud Rate:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 2))
+        self.baud_entry = ctk.CTkEntry(settings_frame)
+        self.baud_entry.insert(0, str(self.cfg.get("baud", 921600)))
+        self.baud_entry.pack(fill="x", pady=(0, 10))
+        self.baud_entry.bind("<FocusOut>", lambda _: self._save_setting("baud", self.baud_entry, int_val=True))
+
+        # Upload filter
+        ctk.CTkLabel(settings_frame, text="Upload Filter:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 2))
+        self.filter_var = ctk.StringVar(value=self.cfg.get("upload_filter", "all"))
+        filter_menu = ctk.CTkOptionMenu(
+            settings_frame,
+            values=_UPLOAD_FILTERS,
+            variable=self.filter_var,
+            command=lambda v: self._save_setting("upload_filter", None, v),
+        )
+        filter_menu.pack(fill="x", pady=(0, 10))
+
+        # Wipe toggle
+        self.wipe_var = ctk.BooleanVar(value=self.cfg.get("wipe_before_upload", False))
+        wipe_check = ctk.CTkCheckBox(
+            settings_frame,
+            text="Wipe /www before upload",
+            variable=self.wipe_var,
+            command=lambda: self._save_setting("wipe_before_upload", None, self.wipe_var.get()),
+            font=("Helvetica", 10)
+        )
+        wipe_check.pack(anchor="w", pady=(10, 10))
+
+        # USB CDC toggle (ESP32-C3, S3)
+        ctk.CTkLabel(settings_frame, text="USB CDC Configuration:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 5))
+
+        self.usb_cdc_var = ctk.BooleanVar(value=self.cfg.get("usb_cdc_on_boot", True))
+        usb_cdc_check = ctk.CTkCheckBox(
+            settings_frame,
+            text="USB CDC on boot",
+            variable=self.usb_cdc_var,
+            command=lambda: self._save_setting("usb_cdc_on_boot", None, self.usb_cdc_var.get()),
+            font=("Helvetica", 10)
+        )
+        usb_cdc_check.pack(anchor="w", pady=(0, 5))
+
+        # USB CDC info label
+        env_name = self.cfg.get("env", "esp32c3_supermini")
+        if "esp32c3" in env_name.lower():
+            usb_info = "Controls GPIO 18/19 for USB (deploy tool toggles this at compile time)"
+        elif "esp32s3" in env_name.lower():
+            usb_info = "Controls GPIO 19/20 for USB (deploy tool toggles this at compile time)"
+        else:
+            usb_info = "Toggle USB CDC on boot (deploy tool toggles this at compile time)"
+
+        info_label = ctk.CTkLabel(
+            settings_frame,
+            text=usb_info,
+            font=("Helvetica", 8),
+            text_color="gray",
+            wraplength=400
+        )
+        info_label.pack(anchor="w", pady=(0, 10), padx=(20, 0))
+
+    def _build_info_tab(self) -> None:
+        """Info/help tab."""
         tab = self.tab_view.add("ℹ️ Info")
 
         info_text = ctk.CTkTextbox(tab, font=("Helvetica", 10))
@@ -331,11 +403,20 @@ Keyboard Shortcuts:
 Configuration:
   Settings are saved to .flash_tool.json in the project root.
   They persist between sessions.
+
+  Essential settings are in the left sidebar.
+  Advanced settings (IP, Baud, USB CDC) are in the ⚙️ Configuration tab.
+
+Log Colors:
+  🟢 Green  = Success
+  🔴 Red    = Error
+  🟡 Yellow = Warning
+  ⚪ Gray   = Info
 """)
         info_text.configure(state="disabled")
 
     def _save_setting(self, key: str, widget=None, val=None, int_val: bool = False) -> None:
-        """Save a setting to config."""
+        """Save a setting to config (debounced on focus-out)."""
         if widget:
             val = widget.get()
         if key == "baud" and val and int_val:
@@ -362,18 +443,73 @@ Configuration:
         """Clear log text."""
         self.log_text.delete("1.0", "end")
 
+    def _colorize_log(self, msg: str) -> tuple[str, str]:
+        """Determine log color based on message content."""
+        msg_lower = msg.lower()
+        if any(x in msg_lower for x in ["error", "failed", "traceback", "exception", "✗"]):
+            return msg, "error"
+        elif any(x in msg_lower for x in ["success", "✓", "completed", "ready", "done"]):
+            return msg, "success"
+        elif any(x in msg_lower for x in ["warning", "warn", "note"]):
+            return msg, "warning"
+        else:
+            return msg, "info"
+
     def _log(self, msg: str, end: str = "\n") -> None:
-        """Log message to GUI (thread-safe). Uses root.after() to update on main thread."""
+        """Log message to GUI with syntax highlighting (thread-safe)."""
         def append():
-            self.log_text.insert("end", msg + end)
+            text, tag = self._colorize_log(msg)
+            self.log_text.insert("end", text + end, tag)
             self.log_text.see("end")
         self.root.after(0, append)
+
+    def _refresh_ports(self) -> None:
+        """Refresh and display available serial ports."""
+        if not HAS_PYSERIAL:
+            messagebox.showerror(
+                "Missing Dependency",
+                "The 'pyserial' package is required for serial port detection.\n\n"
+                "Please install it using:\n  pip install pyserial"
+            )
+            return
+
+        ports = [port.device for port in serial.tools.list_ports.comports()]
+
+        if not ports:
+            messagebox.showinfo("No Ports", "No serial ports detected.")
+            return
+
+        # Create a simple selection dialog
+        port_str = "\n".join(ports)
+        if len(ports) == 1:
+            # Auto-select if only one port
+            selected = ports[0]
+        else:
+            # Show simple dialog with options
+            dialog = ctk.CTkInputDialog(
+                text=f"Available ports:\n\n{port_str}\n\nEnter port name:",
+                title="Select Serial Port"
+            )
+            selected = dialog.get_input()
+            if not selected:
+                return
+
+        self.port_entry.delete(0, "end")
+        self.port_entry.insert(0, selected)
+        self._save_setting("port", self.port_entry)
+        messagebox.showinfo("Port Selected", f"Selected: {selected}")
 
     def _on_run(self) -> None:
         """Run selected steps in a background thread."""
         if self.running:
             messagebox.showwarning("Already Running", "Steps are already running.")
             return
+
+        # Sync all entry fields to config before running (in case user didn't click away)
+        self._save_setting("env", self.env_entry)
+        self._save_setting("port", self.port_entry)
+        self._save_setting("device_ip", self.ip_entry)
+        self._save_setting("baud", self.baud_entry, int_val=True)
 
         steps = self.cfg.get("steps", [])
         if not steps:
@@ -409,7 +545,7 @@ Configuration:
                 self._log(f"\nERROR: {exc}\n")
             finally:
                 self.running = False
-                self.run_btn.configure(state="normal", text="▶ RUN")
+                self.root.after(0, lambda: self.run_btn.configure(state="normal", text="▶ RUN"))
 
         thread = threading.Thread(target=run_in_bg, daemon=True)
         thread.start()
@@ -427,13 +563,109 @@ Configuration:
         return response
 
     def _on_wifi(self) -> None:
-        """WiFi provisioning (placeholder for now)."""
-        messagebox.showinfo(
-            "WiFi Provisioning",
-            "WiFi provisioning via serial is not yet implemented in the GUI.\n\n"
-            "For now, use: python3 deploy.py [W]\n\n"
-            "Or you can manually connect the device to WiFi via the web UI.",
+        """Real WiFi provisioning modal with active provisioning."""
+        # Create modal dialog
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("WiFi Provisioning")
+        dialog.geometry("400x280")
+        dialog.resizable(False, False)
+
+        # Make dialog modal
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Center on parent
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        # Header
+        header = ctk.CTkLabel(
+            dialog,
+            text="📡 WiFi Provisioning",
+            font=("Helvetica", 14, "bold")
         )
+        header.pack(pady=(15, 10), padx=20)
+
+        # Info
+        info = ctk.CTkLabel(
+            dialog,
+            text="Connect device via USB, then enter WiFi credentials:",
+            font=("Helvetica", 9),
+            text_color="gray"
+        )
+        info.pack(anchor="w", padx=20, pady=(0, 10))
+
+        # SSID field
+        ctk.CTkLabel(dialog, text="SSID:", font=("Helvetica", 10)).pack(anchor="w", padx=20, pady=(10, 2))
+        ssid_entry = ctk.CTkEntry(dialog, placeholder_text="Network name")
+        ssid_entry.pack(fill="x", padx=20, pady=(0, 10))
+
+        # Password field
+        ctk.CTkLabel(dialog, text="Password:", font=("Helvetica", 10)).pack(anchor="w", padx=20, pady=(10, 2))
+        password_entry = ctk.CTkEntry(dialog, placeholder_text="Password", show="•")
+        password_entry.pack(fill="x", padx=20, pady=(0, 15))
+
+        # Buttons
+        button_frame = ctk.CTkFrame(dialog)
+        button_frame.pack(fill="x", padx=20, pady=10)
+
+        def provision():
+            ssid = ssid_entry.get().strip()
+            password = password_entry.get().strip()
+
+            if not ssid:
+                messagebox.showwarning("Missing SSID", "Please enter the WiFi network name.")
+                return
+
+            if not password:
+                messagebox.showwarning("Missing Password", "Please enter the WiFi password.")
+                return
+
+            dialog.destroy()
+
+            # Run provisioning in background thread
+            def run_provision():
+                self._log("\n" + "=" * 60)
+                self._log("WiFi Provisioning Started")
+                self._log("=" * 60)
+                self._log(f"Connecting to: {ssid}\n")
+
+                try:
+                    manager = DeployManager(self.cfg)
+                    manager.on_step_output = self._log
+
+                    # Call provision_wifi with lambda callbacks that use entered credentials
+                    success = manager.provision_wifi(
+                        input_fn=lambda _: ssid,
+                        getpass_fn=lambda _: password
+                    )
+
+                    self._log("\n" + "=" * 60)
+                    if success:
+                        self._log("✓ WiFi Provisioning successful!")
+                    else:
+                        self._log("✗ WiFi Provisioning failed. Check device connection and credentials.")
+                    self._log("=" * 60 + "\n")
+                except Exception as exc:
+                    self._log(f"\n✗ Error: {exc}\n")
+
+            thread = threading.Thread(target=run_provision, daemon=True)
+            thread.start()
+
+        cancel_btn = ctk.CTkButton(button_frame, text="Cancel", command=dialog.destroy)
+        cancel_btn.pack(side="right", padx=(5, 0))
+
+        provision_btn = ctk.CTkButton(
+            button_frame,
+            text="Start Provisioning",
+            command=provision
+        )
+        provision_btn.pack(side="right")
+
+        # Focus on SSID field
+        ssid_entry.focus()
 
     def _save_config(self) -> None:
         """Save configuration."""
