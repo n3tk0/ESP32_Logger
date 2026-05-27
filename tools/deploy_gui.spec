@@ -22,12 +22,14 @@ a = Analysis(
     hiddenimports=[
         'customtkinter',
         'pyserial',
-        'platformio',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludedimports=[],
+    # PlatformIO is an external CLI tool (~500MB+ with toolchains) that cannot
+    # be bundled. The deploy GUI invokes it via subprocess; users must install
+    # PlatformIO separately (pip install platformio, or get the installer).
+    excludedimports=['platformio'],
     noarchive=False,
 )
 
