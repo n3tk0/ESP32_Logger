@@ -271,6 +271,16 @@ void registerFirstRunRoutes() {
                             "{\"ok\":false,\"error\":\"out_of_memory\"}");
                     return;
                 }
+                // Register the abort cleaner IMMEDIATELY after allocation: a
+                // client that disconnects before the final body chunk arrives
+                // would otherwise orphan this buffer (the success path's delete
+                // at the end of this callback would never run).  delete on a
+                // null _tempObject is well-defined, so this is also safe after
+                // the normal-completion delete below.
+                r->onDisconnect([r]() {
+                    delete static_cast<String*>(r->_tempObject);
+                    r->_tempObject = nullptr;
+                });
                 static_cast<String*>(r->_tempObject)->reserve(total);
             }
             String* buf = static_cast<String*>(r->_tempObject);

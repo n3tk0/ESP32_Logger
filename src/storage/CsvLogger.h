@@ -36,6 +36,11 @@ public:
 
     const char* directory() const { return _dir; }
 
+    // True once begin() has bound a filesystem.  StorageTask uses this to
+    // lazily initialise the logger when CSV logging is toggled on at runtime
+    // (begin() was never called at boot because logging started disabled).
+    bool isInitialized() const { return _fs != nullptr; }
+
 private:
     fs::FS*  _fs        = nullptr;
     char     _dir[33]   = "/logs";

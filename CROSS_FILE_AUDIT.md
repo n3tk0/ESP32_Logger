@@ -130,6 +130,14 @@ were produced with word-boundary search (`rg -nw '<symbol>' src ESP_Logger.ino`)
   on a fragmentation-sensitive ESP32-C3. Consider `const char*`/caller-supplied buffers for
   the live path. No by-value `String` *parameters* cross boundaries (checked — none found).
 
+### ML-4 — `/api/firstrun` body buffer: same abort-leak as ML-2 (added after review)
+- **File:** `web/FirstRunHandler.cpp:267-285` (POST body-accumulation callback).
+- **Detail:** at `index == 0` a `String*` is allocated into `r->_tempObject` and is `delete`d
+  only when the final chunk arrives (`index + len >= total`). No `onDisconnect` cleaner was
+  registered, so a client that aborts before the final chunk orphans the buffer — identical
+  to ML-2. The earlier pass mis-classified this handler as safe; corrected here.
+- **Fix:** register the disconnect cleaner immediately after allocation (same pattern as ML-2).
+
 > **Verified safe (no action needed):**
 > - **FreeRTOS queues** pass `SensorReading` **by value**; the struct is pure POD (fixed
 >   `char[]`, scalars, no internal pointers — `core/SensorTypes.h:19-31`), so no stack-lifetime
@@ -190,7 +198,7 @@ virtual/inline signatures); `CsvLogger.h`, `FlowRunLogger.h`, `Utils.h`, `Atomic
 |----------|-----------------|------------------|
 | Dead code | 12 (all grep-verified, 0 call sites) | n/a — cleanup |
 | Contract mismatch | 5 (1 actionable: CM-1) | **CM-1** silent storage failure |
-| Memory lifecycle | 2 active (ML-1, ML-2) + 1 low (ML-3) | **ML-1** abort-race ctx/File leak |
+| Memory lifecycle | 3 active (ML-1, ML-2, ML-4) + 1 low (ML-3) | **ML-1** abort-race ctx/File leak |
 | Header bloat | 16 movable includes across ~14 files | build-time only |
 
 **Top three to address first:** CM-1 (silent log-write failure on `mkdir`/FS error),

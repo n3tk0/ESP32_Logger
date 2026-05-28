@@ -78,6 +78,11 @@ void storageTaskFunc(void* param) {
         Serial.println("[StorageTask] No filesystem — drain-only mode");
     }
 
+    // Tracks whether primary.begin() has succeeded.  Mirrors writingEnabled at
+    // boot, but is needed separately so a runtime enable (below) can lazily
+    // initialise the logger exactly once without re-running begin() every loop.
+    bool primaryReady = writingEnabled;
+
     Serial.printf("[StorageTask] interval=%us humCorr=%d kappa=%.2f writing=%d runLog=%d\n",
                   (unsigned)agg.intervalSec(),
                   agg.humidityCorrection() ? 1 : 0,
@@ -100,7 +105,30 @@ void storageTaskFunc(void* param) {
             agg.setHumidityCorrection(p->humidityCorrectionEnabled,
                                        p->humidityCorrectionKappa > 0.0f
                                            ? p->humidityCorrectionKappa : 0.35f);
-            writingEnabled = p->csvLoggingEnabled && (p->fs != nullptr);
+
+            bool wantWrite = p->csvLoggingEnabled && (p->fs != nullptr);
+            // Lazy init: CSV logging can be toggled on at runtime even though it
+            // started disabled (begin() was never called at boot, so _fs is
+            // still null).  Without this, appendRow() would fail silently — the
+            // same silent-failure class as CM-1.  Attempt begin() exactly once
+            // on the off→on edge (isInitialized() stays true afterwards, even if
+            // the dir could not be created, so we neither retry nor spin).
+            if (wantWrite && !primary.isInitialized()) {
+                primaryReady = primary.begin(*p->fs,
+                                             cfg.logDir    ? cfg.logDir    : "/logs",
+                                             cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024);
+                if (primaryReady) {
+                    Serial.println("[StorageTask] CSV logging enabled at runtime");
+                    if (cfg.mirrorFS && mirror.begin(*cfg.mirrorFS,
+                                                     cfg.logDir    ? cfg.logDir    : "/logs",
+                                                     cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024)) {
+                        mirrorActive = true;
+                    }
+                } else {
+                    Serial.println("[StorageTask] runtime log dir unavailable — drain-only mode");
+                }
+            }
+            writingEnabled = wantWrite && primaryReady;
         }
 
         // Drain available readings into the aggregator (and the run logger

@@ -1837,6 +1837,13 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                 r->_tempObject = nullptr;
                 if (authFailed) return;  // 403 already sent in onUpload
                 if (failed) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Upload failed\"}"); return; }
+            } else {
+                // No context means onUpload either could not allocate UploadCtx
+                // (OOM) or never ran (no multipart file part).  Report the
+                // failure instead of falsely returning 200 OK.
+                r->send(500, "application/json",
+                        "{\"ok\":false,\"error\":\"Upload context unavailable\"}");
+                return;
             }
             r->send(200, "application/json", "{\"ok\":true}");
         },
