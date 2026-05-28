@@ -144,24 +144,12 @@ bool inList(const uint8_t* list, uint8_t pin) {
 }  // namespace
 
 // ----------------------------------------------------------------------------
-const BoardProfile* getProfileById(BoardProfileId id) {
-    if (id == BOARD_NONE) return nullptr;
-    for (uint8_t i = 0; i < ALL_PROFILES_COUNT; i++) {
-        if (ALL_PROFILES[i]->id == id) return ALL_PROFILES[i];
-    }
-    return nullptr;
-}
-
 const BoardProfile* getProfileByShortId(const char* shortId) {
     if (shortId == nullptr || *shortId == '\0') return nullptr;
     for (uint8_t i = 0; i < ALL_PROFILES_COUNT; i++) {
         if (strcmp(ALL_PROFILES[i]->shortId, shortId) == 0) return ALL_PROFILES[i];
     }
     return nullptr;
-}
-
-uint8_t listProfilesCount() {
-    return ALL_PROFILES_COUNT;
 }
 
 uint8_t listProfiles(const BoardProfile** out, uint8_t outCap) {

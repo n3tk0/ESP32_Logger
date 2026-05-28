@@ -79,18 +79,12 @@ struct BoardProfile {
 
 // --- Profile lookups ---------------------------------------------------------
 
-/// Returns the profile descriptor for `id`, or nullptr if id is BOARD_NONE
-/// or unknown. BOARD_CUSTOM returns a valid pointer with empty restriction
-/// lists — isPinAllowed() always returns true for that profile.
-const BoardProfile* getProfileById(BoardProfileId id);
-
 /// Returns the profile matching `shortId` (e.g. "xiao_c3"), or nullptr.
 const BoardProfile* getProfileByShortId(const char* shortId);
 
-/// Returns the count of registered profiles (including BOARD_CUSTOM).
-/// `out[]` must be sized for at least listProfilesCount() entries.
+/// Fills `out[]` with up to `outCap` registered profile pointers (including
+/// BOARD_CUSTOM) and returns the number written.
 uint8_t listProfiles(const BoardProfile** out, uint8_t outCap);
-uint8_t listProfilesCount();
 
 // --- Validation --------------------------------------------------------------
 

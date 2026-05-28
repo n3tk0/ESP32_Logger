@@ -14,7 +14,7 @@ void exportTaskFunc(void* /*param*/) {
 
     // EXPORT_BATCH_SIZE / EXPORT_FLUSH_INTERVAL_MS are configured in setup.h.
     SensorReading batch[EXPORT_BATCH_SIZE];
-    int           batchCount  = 0;
+    size_t        batchCount  = 0;   // CM-4: match sendAll(…, size_t count)
     uint32_t      lastFlushMs = millis();
 
     SensorReading r;

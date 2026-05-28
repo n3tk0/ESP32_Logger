@@ -1,6 +1,6 @@
 #pragma once
 #include "IExporter.h"
-#include <HTTPClient.h>
+// <HTTPClient.h> moved to OpenSenseMapExporter.cpp — not referenced in this header.
 
 // ============================================================================
 // OpenSenseMapExporter — sends data to openSenseMap.org REST API.

@@ -19,6 +19,7 @@
 #include "WebServer.h"
 #include "../setup.h"                   // WEB_BASIC_AUTH_* macros
 #include "../core/Globals.h"
+#include <SD.h>                         // (fs::FS*)&SD — no longer pulled via Globals.h
 #include "../core/BoardProfiles.h"      // R11: g_boardProfile + isPinAllowed
 #include "../modules/OtaModule.h"       // R20: /do_update respects OtaModule.enabled
 #include "../modules/DataLogModule.h"  // /save_datalog delegates to DataLogModule::load()
@@ -1849,11 +1850,29 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                     request->_tempObject = nullptr;
                 }
 
+                // ML-1: allocate the per-request context ONCE and register the
+                // disconnect cleaner IMMEDIATELY — before any validation can
+                // early-return.  Previously each validation-failure path
+                // allocated its own UploadCtx and returned without registering
+                // onDisconnect, so a client abort during validation leaked the
+                // ctx (the framework reclaims _tempObject via free(), which
+                // skips ~UploadCtx and never closes the File).
+                auto* ctx = new (std::nothrow) UploadCtx{File(), false, false, false};
+                request->_tempObject = ctx;
+                if (!ctx) { DBGLN("Upload: ctx alloc failed"); return; }
+                request->onDisconnect([request]() {
+                    UploadCtx* c = (UploadCtx*)request->_tempObject;
+                    if (!c) return;
+                    if (c->file) c->file.close();
+                    delete c;
+                    request->_tempObject = nullptr;
+                });
+
                 // Auth check here — onUpload fires before onRequest in
                 // ESPAsyncWebServer, so checking in onRequest is too late to
                 // prevent unauthorized file writes.
                 if (!requireMutatingAuth(request)) {
-                    request->_tempObject = new (std::nothrow) UploadCtx{File(), false, false, true};
+                    ctx->authFailed = true;
                     return;
                 }
 
@@ -1863,16 +1882,14 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                 String upDir = sanitizePath(upDirRaw);
                 if (upDir.isEmpty()) {
                     DBGF("Upload: invalid path '%s'\n", upDirRaw.c_str());
-                    auto* ctx = new UploadCtx{File(), false, true, false};
-                    request->_tempObject = ctx;
+                    ctx->failed = true;
                     return;
                 }
 
                 String safeName = sanitizeFilename(filename);
                 if (safeName.isEmpty()) {
                     DBGF("Upload: invalid filename '%s'\n", filename.c_str());
-                    auto* ctx = new UploadCtx{File(), false, true, false};
-                    request->_tempObject = ctx;
+                    ctx->failed = true;
                     return;
                 }
 
@@ -1886,16 +1903,14 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                                    : (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
                 if (!targetFS) {
                     DBGLN("Upload: no filesystem available");
-                    auto* ctx = new UploadCtx{File(), false, true, false};
-                    request->_tempObject = ctx;
+                    ctx->failed = true;
                     return;
                 }
 
                 String upPath = buildPath(upDir, safeName);
                 if (!wantSD && isPathProtected(upPath)) {
                     DBGF("Upload: refusing protected path %s\n", upPath.c_str());
-                    auto* ctx = new UploadCtx{File(), false, true, false};
-                    request->_tempObject = ctx;
+                    ctx->failed = true;
                     return;
                 }
 
@@ -1907,15 +1922,13 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                     if (free < need) {
                         DBGF("Upload: disk full (free=%u need=%u)\n",
                                       (unsigned)free, (unsigned)need);
-                        auto* ctx = new UploadCtx{File(), false, true, false};
-                        request->_tempObject = ctx;
+                        ctx->failed = true;
                         return;
                     }
                 }
 
                 DBGF("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
 
-                auto* ctx = new UploadCtx{File(), false, false, false};
                 {
                     MutexGuard g(fsMutex, pdMS_TO_TICKS(5000));
                     if (upDir != "/") targetFS->mkdir(upDir);
@@ -1925,16 +1938,6 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                     DBGF("Upload: cannot open %s for write\n", upPath.c_str());
                     ctx->failed = true;
                 }
-                request->_tempObject = ctx;
-
-                // Close partial file if the client aborts mid-upload.
-                request->onDisconnect([request]() {
-                    UploadCtx* c = (UploadCtx*)request->_tempObject;
-                    if (!c) return;
-                    if (c->file) c->file.close();
-                    delete c;
-                    request->_tempObject = nullptr;
-                });
             }
 
             UploadCtx* ctx = (UploadCtx*)request->_tempObject;
@@ -2046,19 +2049,22 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                               "{\"ok\":false,\"error\":\"out_of_memory\"}");
                     return;
                 }
-                size_t hint = req->contentLength() > 0 ? req->contentLength() : 4096;
-                if (hint > kImportMax) hint = kImportMax;
-                buf->reserve(hint);
+                // ML-2: publish the pointer and register the disconnect cleaner
+                // IMMEDIATELY after allocation — before reserve() — so there is
+                // no window in which an abort could leak the buffer.
+                // R13 follow-up (Codex P2 on PR #89): client disconnect before
+                // the request callback fires would otherwise leak the heap
+                // buffer. onDisconnect runs even on aborts; freeing here makes
+                // the success path's delete a no-op (delete on nullptr is
+                // well-defined).
                 req->_tempObject = buf;
-                // R13 follow-up (Codex P2 on PR #89): client disconnect
-                // before the request callback fires would leak the heap
-                // buffer. onDisconnect runs even on aborts; freeing here
-                // makes the success path's delete a no-op (delete on
-                // nullptr is well-defined).
                 req->onDisconnect([req]() {
                     delete static_cast<String*>(req->_tempObject);
                     req->_tempObject = nullptr;
                 });
+                size_t hint = req->contentLength() > 0 ? req->contentLength() : 4096;
+                if (hint > kImportMax) hint = kImportMax;
+                buf->reserve(hint);
             }
             String* buf = static_cast<String*>(req->_tempObject);
             if (!buf) return;

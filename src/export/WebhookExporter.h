@@ -1,6 +1,6 @@
 #pragma once
 #include "IExporter.h"
-#include <HTTPClient.h>
+// <HTTPClient.h> moved to WebhookExporter.cpp — not referenced in this header.
 
 // ============================================================================
 // WebhookExporter — fires an HTTP POST when a sensor metric crosses a threshold.

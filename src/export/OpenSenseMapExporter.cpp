@@ -1,4 +1,5 @@
 #include "OpenSenseMapExporter.h"
+#include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 

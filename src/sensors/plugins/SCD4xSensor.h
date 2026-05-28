@@ -1,6 +1,6 @@
 #pragma once
 #include "../ISensor.h"
-#include <Wire.h>
+// <Wire.h> moved to the .cpp — not referenced in this header.
 
 // ============================================================================
 // SCD40 / SCD41 — CO2 / Temperature / Humidity sensor (I2C, Sensirion)

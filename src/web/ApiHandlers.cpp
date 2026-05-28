@@ -74,11 +74,15 @@ static void handleApiData(AsyncWebServerRequest* req) {
                         ? req->getParam("agg")->value().c_str() : "5m");
     AggMode    mode   = parseMode(req->hasParam("mode")
                         ? req->getParam("mode")->value().c_str() : "lttb");
-    size_t     limit  = req->hasParam("limit")
-                        ? (size_t)req->getParam("limit")->value().toInt()
-                        : 250;
-    if (limit < 1) limit = 250;
-    if (limit > 300) limit = 300; // Cap to 300 to prevent OOM on ESP32-C3 (~24KB)
+    // CM-2: parse + validate as a SIGNED long first.  Casting toInt() straight
+    // to size_t turned a negative "limit" into a multi-GB value that the
+    // `< 1` guard could never catch; validate the sign before the cast.
+    long limitRaw = req->hasParam("limit")
+                    ? req->getParam("limit")->value().toInt()
+                    : 250;
+    if (limitRaw < 1)   limitRaw = 250;
+    if (limitRaw > 300) limitRaw = 300; // Cap to 300 to prevent OOM on ESP32-C3 (~24KB)
+    size_t limit = (size_t)limitRaw;
 
     // --- Fetch raw data ---
     // Strategy: first try in-memory ring buffer (recent data),

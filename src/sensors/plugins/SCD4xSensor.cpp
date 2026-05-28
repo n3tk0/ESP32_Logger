@@ -1,4 +1,5 @@
 #include "SCD4xSensor.h"
+#include <Wire.h>
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
 

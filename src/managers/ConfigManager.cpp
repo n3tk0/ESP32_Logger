@@ -189,15 +189,6 @@ String generateDeviceId() {
     return String(id);
 }
 
-void regenerateDeviceId() {
-    uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    char id[13];
-    snprintf(id, sizeof(id), "%02X%02X%02X%02X", mac[2], mac[3], mac[4], mac[5]);
-    strncpy(config.deviceId, id, sizeof(config.deviceId) - 1);
-    saveConfig();
-}
-
 // ============================================================================
 // LOAD DEFAULTS
 // ============================================================================

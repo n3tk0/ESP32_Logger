@@ -1,6 +1,6 @@
 #pragma once
 #include "../ISensor.h"
-#include <Wire.h>
+// <Wire.h> moved to BME280Sensor.cpp (also pulled transitively via BME280_Mini.h).
 #include "../../drivers/BME280_Mini.h"
 
 // ============================================================================

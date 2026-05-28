@@ -1,6 +1,6 @@
 #pragma once
 #include "../ISensor.h"
-#include <Wire.h>
+// <Wire.h> moved to the .cpp — not referenced in this header.
 
 // ============================================================================
 // ENS160 — TVOC / eCO2 / AQI sensor (I2C, ScioSense)

@@ -54,15 +54,23 @@ void storageTaskFunc(void* param) {
     }
 
     if (writingEnabled) {
-        primary.begin(*cfg.fs,
-                      cfg.logDir    ? cfg.logDir    : "/logs",
-                      cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024);
-        if (cfg.mirrorFS) {
-            mirror.begin(*cfg.mirrorFS,
-                         cfg.logDir    ? cfg.logDir    : "/logs",
-                         cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024);
-            mirrorActive = true;
-            Serial.println("[StorageTask] Mirror write active");
+        // CM-1: begin() now reports whether the log directory is usable.  If
+        // mkdir failed (full / read-only / corrupt FS) stop pretending to log
+        // and fall through to drain-only mode instead of silently dropping rows.
+        if (!primary.begin(*cfg.fs,
+                           cfg.logDir    ? cfg.logDir    : "/logs",
+                           cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024)) {
+            writingEnabled = false;
+            Serial.println("[StorageTask] primary log dir unavailable — drain-only mode");
+        } else if (cfg.mirrorFS) {
+            if (mirror.begin(*cfg.mirrorFS,
+                             cfg.logDir    ? cfg.logDir    : "/logs",
+                             cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024)) {
+                mirrorActive = true;
+                Serial.println("[StorageTask] Mirror write active");
+            } else {
+                Serial.println("[StorageTask] mirror log dir unavailable — mirror disabled");
+            }
         }
     } else if (!cfg.csvLoggingEnabled) {
         Serial.println("[StorageTask] CSV logging disabled — drain-only mode");

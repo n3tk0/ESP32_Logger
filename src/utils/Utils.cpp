@@ -5,13 +5,6 @@
 
 // getVersionString() is defined inline in Config.h – removed from here.
 
-String formatFileSize(uint64_t bytes) {
-    if (bytes >= 1073741824ULL) return String(bytes / 1073741824.0, 2) + " GB";
-    if (bytes >= 1048576)       return String(bytes / 1048576.0, 1) + " MB";
-    if (bytes >= 1024)          return String(bytes / 1024.0, 1) + " KB";
-    return String((unsigned long)bytes) + " B";
-}
-
 String buildPath(const String& dir, const String& name) {
     if (dir == "/" || dir.isEmpty()) return "/" + name;
     return dir + "/" + name;
@@ -204,8 +197,4 @@ bool validatePin(int pin, const String& usage) {
     // board-specific restrictions, so we don't duplicate those checks here
     Serial.printf("[validatePin] OK: Pin %d valid for %s\n", pin, usage.c_str());
     return true;
-}
-
-String getUsbReservedPins() {
-    return usbCdc.getUsbPins();
 }

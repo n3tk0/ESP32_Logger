@@ -2,9 +2,12 @@
 
 #include "Config.h"
 #include <Arduino.h>
-#include <LittleFS.h>
+// Header-bloat audit: <FS.h> stays (fs::FS is referenced by many consumers of
+// this central header), but the heavy concrete FS backends <LittleFS.h> and
+// <SD.h> are not needed here — only the `extern fs::FS* activeFS` pointer and
+// bool availability flags are declared.  Files that touch the LittleFS / SD
+// global objects include those headers directly.
 #include <FS.h>
-#include <SD.h>
 #include <atomic>
 #include "../drivers/DS1302_Mini.h"
 #include <ESPAsyncWebServer.h>

@@ -1,7 +1,9 @@
 #pragma once
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <FS.h>
+// StorageTaskParam holds only fs::FS* pointers — a forward declaration is
+// enough here; <FS.h> belongs in the .cpp (header-bloat audit).
+namespace fs { class FS; }
 
 // ============================================================================
 // StorageTask — drains storageQueue and persists sensor readings as wide CSV.
