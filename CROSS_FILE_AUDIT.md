@@ -158,7 +158,7 @@ Each was confirmed by reading the header's public surface.
 | 4 | `export/OpenSenseMapExporter.h:3` | `<HTTPClient.h>` | none in decls | **Move to `.cpp`** |
 | 5 | `export/SensorCommunityExporter.h:3` | `<HTTPClient.h>` | none in decls | **Move to `.cpp`** |
 | 6 | `core/Globals.h:6` | `<FS.h>` | only `extern fs::FS* activeFS;` (pointer) | **Forward-declare** `namespace fs { class FS; }` |
-| 7 | `core/Globals.h:5,7` | `<LittleFS.h>`, `<SD.h>` | none — only back `bool sdAvailable/littleFsAvailable` flags | **Move to `Globals.cpp`** |
+| 7 | `core/Globals.h:5,7` | `<LittleFS.h>`, `<SD.h>` | none — only backing `bool sdAvailable/littleFsAvailable` flags | **Move to `Globals.cpp`** |
 | 8 | `sensors/plugins/ENS160Sensor.h:3` | `<Wire.h>` | none in decls (driver internals only) | **Move to `.cpp`** |
 | 9 | `sensors/plugins/BH1750Sensor.h:3` | `<Wire.h>` | none in decls | **Move to `.cpp`** |
 | 10 | `sensors/plugins/SCD4xSensor.h:3` | `<Wire.h>` | none in decls | **Move to `.cpp`** |
