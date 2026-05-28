@@ -81,7 +81,10 @@ void storageTaskFunc(void* param) {
     // Tracks whether primary.begin() has succeeded.  Mirrors writingEnabled at
     // boot, but is needed separately so a runtime enable (below) can lazily
     // initialise the logger exactly once without re-running begin() every loop.
-    bool primaryReady = writingEnabled;
+    bool primaryReady  = writingEnabled;
+    // Previous value of wantWrite, so the loop can detect the off→on edge and
+    // attempt (re)initialisation only on the transition — not every iteration.
+    bool lastWantWrite = writingEnabled;
 
     Serial.printf("[StorageTask] interval=%us humCorr=%d kappa=%.2f writing=%d runLog=%d\n",
                   (unsigned)agg.intervalSec(),
@@ -107,13 +110,15 @@ void storageTaskFunc(void* param) {
                                            ? p->humidityCorrectionKappa : 0.35f);
 
             bool wantWrite = p->csvLoggingEnabled && (p->fs != nullptr);
+            bool offToOn   = wantWrite && !lastWantWrite;
+            lastWantWrite  = wantWrite;
             // Lazy init: CSV logging can be toggled on at runtime even though it
             // started disabled (begin() was never called at boot, so _fs is
             // still null).  Without this, appendRow() would fail silently — the
-            // same silent-failure class as CM-1.  Attempt begin() exactly once
-            // on the off→on edge (isInitialized() stays true afterwards, even if
-            // the dir could not be created, so we neither retry nor spin).
-            if (wantWrite && !primary.isInitialized()) {
+            // same silent-failure class as CM-1.  Trigger only on the off→on
+            // edge so a failed begin() (missing/corrupt FS) is not retried every
+            // loop iteration; the user can retry by toggling the setting again.
+            if (offToOn && !primary.isInitialized()) {
                 primaryReady = primary.begin(*p->fs,
                                              cfg.logDir    ? cfg.logDir    : "/logs",
                                              cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024);

@@ -14,6 +14,11 @@ bool CsvLogger::begin(fs::FS& fs, const char* dir, uint32_t maxSizeKB) {
     }
     _maxSizeKB = maxSizeKB ? maxSizeKB : 1024;
     bool dirReady = _ensureDir();
+    // On dir-creation failure, drop the FS binding so isInitialized() reports
+    // false.  This lets StorageTask retry begin() if the user toggles CSV
+    // logging off and on again at runtime (e.g. after reseating an SD card),
+    // instead of being stuck in drain-only mode until the next reboot.
+    if (!dirReady) _fs = nullptr;
     Serial.printf("[CsvLogger] dir=%s maxKB=%lu ready=%d\n",
                   _dir, (unsigned long)_maxSizeKB, dirReady ? 1 : 0);
     return dirReady;
