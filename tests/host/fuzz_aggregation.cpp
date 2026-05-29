@@ -33,7 +33,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     size_t inLen = avail / 2;
     if (inLen > CAP) inLen = CAP;
 
-    static SensorReading in[CAP];
+    SensorReading in[CAP];   // stack-local: keeps the harness thread-safe for
+                             // parallel libFuzzer jobs
     uint32_t ts = 0;
     for (size_t i = 0; i < inLen; i++) {
         // Monotonic-ish timestamps with fuzz-controlled gaps; values from bytes.
@@ -47,8 +48,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                                             bucket, mode, maxPoints);
 
     FUZZ_CHECK(n <= outMax, "aggregate() returned more than outMaxLen");
-    if (mode == AGG_LTTB) FUZZ_CHECK(n <= maxPoints || n <= outMax,
-                                     "LTTB result exceeded maxPoints");
+    // LTTB must honour the downsampling cap directly (assert the real bound,
+    // not a tautology that outMax already guarantees).
+    if (mode == AGG_LTTB) FUZZ_CHECK(n <= maxPoints, "LTTB result exceeded maxPoints");
     return 0;
 }
 

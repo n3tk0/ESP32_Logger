@@ -42,6 +42,8 @@ static void test_spsc_publish_visibility() {
                 if (out[k].timestamp != (uint32_t)out[k].value)
                     mismatches.fetch_add(1, std::memory_order_relaxed);
             if (producerDone.load(std::memory_order_acquire) && n == (size_t)N) break;
+            std::this_thread::yield();   // avoid starving the producer on
+                                         // single-core / loaded CI runners
         }
     });
 

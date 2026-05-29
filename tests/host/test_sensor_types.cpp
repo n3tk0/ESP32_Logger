@@ -38,6 +38,11 @@ static void test_toJsonLine_control_char() {
     int n = r.toJsonLine(buf, sizeof(buf));
     CHECK(n > 0);
     CHECK(std::strstr(buf, "\\u000a") != nullptr);
+    // Guard against a boundary truncation embedding a NUL mid-line: the line
+    // must be fully formed through the trailing fields and closing brace.
+    CHECK(std::strstr(buf, ",\"metric\":\"m\"") != nullptr);
+    CHECK(buf[n - 1] == '}');
+    CHECK_EQ((size_t)n, std::strlen(buf));   // no embedded NUL
 }
 
 static void test_toJsonLine_truncation() {

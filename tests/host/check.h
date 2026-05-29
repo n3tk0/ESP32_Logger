@@ -22,9 +22,11 @@ inline int& failed() { static int f = 0; return f; }
 
 #define CHECK_STREQ(a, b) do {                                                 \
     ht::total()++;                                                             \
-    if (std::strcmp((a), (b)) != 0) { ht::failed()++;                          \
+    const char* _sa = (a); const char* _sb = (b);                             \
+    bool _bad = (!_sa || !_sb) ? (_sa != _sb) : (std::strcmp(_sa, _sb) != 0);  \
+    if (_bad) { ht::failed()++;                                                \
         std::printf("  [FAIL] %s:%d\n        expected: \"%s\"\n        actual:   \"%s\"\n", \
-                    __FILE__, __LINE__, (b), (a)); }                           \
+                    __FILE__, __LINE__, _sb ? _sb : "(null)", _sa ? _sa : "(null)"); } \
 } while (0)
 
 #define CHECK_EQ(a, b) do {                                                    \

@@ -62,13 +62,15 @@ public:
         return pos == std::string::npos ? -1 : (int)pos;
     }
 
-    // [begin, end) with Arduino-style clamping.
+    // [begin, end) with Arduino-style clamping (and begin/end swap to match
+    // Arduino's String::substring when begin > end).
     String substring(int begin, int end) const {
         int len = (int)_s.size();
         if (begin < 0) begin = 0;
-        if (begin > len) return String();
-        if (end < 0 || end > len) end = len;
-        if (end < begin) end = begin;
+        if (end   < 0) end   = 0;
+        if (begin > len) begin = len;
+        if (end   > len) end   = len;
+        if (begin > end) { int t = begin; begin = end; end = t; }
         return String(_s.substr((size_t)begin, (size_t)(end - begin)));
     }
     String substring(int begin) const { return substring(begin, (int)_s.size()); }
