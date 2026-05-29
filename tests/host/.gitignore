@@ -1,0 +1,11 @@
+# Host-test build artifacts (compiled per CI run / local run)
+*.bin
+*.asan
+*.tsan
+*.fz
+*.libfuzz
+*.b
+*.out
+*.o
+crash-*
+

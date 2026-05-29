@@ -1,0 +1,119 @@
+# Fast, deterministic host tests + static analysis.
+#
+# These run the platform-independent logic in src/ on the build host (no board,
+# no emulator), under plain, ASan+UBSan and TSan builds, plus a report-only
+# cppcheck pass.  Complements build-firmware.yml (which only proves the 3 board
+# targets compile).
+#
+# Triggers: PRs to main, pushes touching src/ or the tests, and manual dispatch.
+
+name: Tests
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'tests/host/**'
+      - '.github/workflows/tests.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/host/**'
+      - '.github/workflows/tests.yml'
+  workflow_dispatch:
+
+jobs:
+  host-tests:
+    name: host-tests (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: plain
+            flags: ''
+          - name: asan-ubsan
+            flags: '-fsanitize=address,undefined -fno-omit-frame-pointer'
+          - name: tsan
+            flags: '-fsanitize=thread'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & run host tests (${{ matrix.name }})
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: |
+          set -e
+          fail=0
+          for f in tests/host/test_*.cpp; do
+            bin="${f%.cpp}.bin"
+            echo "::group::compile $f (${{ matrix.name }})"
+            g++ -std=gnu++17 -Wall -Wextra -O1 -g -pthread \
+                -I tests/host/shims -I. ${{ matrix.flags }} \
+                "$f" -o "$bin"
+            echo "::endgroup::"
+            echo "::group::run $bin"
+            "./$bin" || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail
+
+  fuzz:
+    name: fuzz (seeded, asan-ubsan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & run seeded fuzz drivers
+        # Deterministic, seeded property-fuzzing under ASan+UBSan — no libFuzzer
+        # / compiler-rt dependency, so it is reproducible and never flaky.  The
+        # same files expose an LLVMFuzzerTestOneInput entry point for opt-in
+        # coverage-guided fuzzing locally (see tests/host/README.md).
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -e
+          for f in tests/host/fuzz_*.cpp; do
+            bin="${f%.cpp}.fz"
+            echo "::group::build & run $f"
+            g++ -std=gnu++17 -Wall -Wextra -O1 -g -DFUZZ_STANDALONE \
+                -fsanitize=address,undefined -fno-omit-frame-pointer \
+                -I tests/host/shims -I. "$f" -o "$bin"
+            "./$bin"
+            echo "::endgroup::"
+          done
+
+  cppcheck:
+    name: cppcheck (report-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: Static analysis of src/ (informational)
+        # Report-only for now: this is a large existing codebase, so we surface
+        # findings without gating the PR.  Flip to `--error-exitcode=1` (drop
+        # `|| true`) once the baseline is clean.
+        run: |
+          cppcheck --version
+          cppcheck \
+            --enable=warning,performance,portability,style \
+            --inline-suppr \
+            --suppress=missingInclude \
+            --suppress=missingIncludeSystem \
+            --suppress=unusedFunction \
+            --language=c++ --std=c++17 \
+            -I src \
+            src 2>&1 | tee cppcheck.log || true
+
+      - name: Upload cppcheck report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cppcheck-report
+          path: cppcheck.log

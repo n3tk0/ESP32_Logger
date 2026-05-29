@@ -84,7 +84,11 @@ private:
                 if (a + 1 < cap) { out[a++] = '\\'; out[a++] = '\\'; }
                 w += 2;
             } else if (c < 0x20) {
-                if (a + 5 < cap) a += (size_t)snprintf(out + a, cap - a, "\\u%04x", c);
+                // \uXXXX is 6 chars; snprintf needs a 7th byte for its NUL, so
+                // only emit when >=7 bytes remain (a+6 < cap).  The old a+5
+                // guard let snprintf truncate the escape and leave an embedded
+                // NUL at the buffer boundary.
+                if (a + 6 < cap) a += (size_t)snprintf(out + a, cap - a, "\\u%04x", c);
                 w += 6;
             } else {
                 if (a < cap) out[a++] = (char)c;
