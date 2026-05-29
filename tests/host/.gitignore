@@ -2,5 +2,10 @@
 *.bin
 *.asan
 *.tsan
+*.fz
+*.libfuzz
+*.b
 *.out
 *.o
+crash-*
+

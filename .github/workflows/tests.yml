@@ -60,6 +60,32 @@ jobs:
           done
           exit $fail
 
+  fuzz:
+    name: fuzz (seeded, asan-ubsan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & run seeded fuzz drivers
+        # Deterministic, seeded property-fuzzing under ASan+UBSan — no libFuzzer
+        # / compiler-rt dependency, so it is reproducible and never flaky.  The
+        # same files expose an LLVMFuzzerTestOneInput entry point for opt-in
+        # coverage-guided fuzzing locally (see tests/host/README.md).
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -e
+          for f in tests/host/fuzz_*.cpp; do
+            bin="${f%.cpp}.fz"
+            echo "::group::build & run $f"
+            g++ -std=gnu++17 -Wall -Wextra -O1 -g -DFUZZ_STANDALONE \
+                -fsanitize=address,undefined -fno-omit-frame-pointer \
+                -I tests/host/shims -I. "$f" -o "$bin"
+            "./$bin"
+            echo "::endgroup::"
+          done
+
   cppcheck:
     name: cppcheck (report-only)
     runs-on: ubuntu-latest

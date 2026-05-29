@@ -13,8 +13,20 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_sensor_types.cpp` | `SensorReading::toJsonLine()` (format, JSON escaping, truncation), `parseMode()`, `parseBucket()` |
 | `test_ringbuffer.cpp` | `RingBuffer<N>` single-thread correctness: ordering, overflow, `fromTs` filter, `findLast`, `collectMetricSeries` |
 | `test_ringbuffer_concurrency.cpp` | `RingBuffer<N>` SPSC acquire/release visibility (ThreadSanitizer target) |
+| `test_aggregation.cpp` | `AggregationEngine` — `lttb()` (endpoint preservation, bounds), `bucket()` (raw/avg/min/max/sum), `aggregate()` pipeline bounds |
+| `test_pathutils.cpp` | security-critical `Utils.cpp` helpers — `sanitizePath`, `sanitizeFilename`, `isPathProtected`, `buildPath`, `urlEncode` |
 
-Only header-only logic is exercised, so no firmware `.cpp` is linked.
+Fuzz targets (random-input property checks):
+
+| File | Target / invariants |
+|------|---------------------|
+| `fuzz_pathutils.cpp` | `sanitizePath`/`sanitizeFilename`: output is rooted, contains no `..` / `//` / `\` / control bytes, and `sanitizePath` is idempotent |
+| `fuzz_aggregation.cpp` | `aggregate()`: output count never exceeds `outMaxLen` / `maxPoints` (ASan/UBSan catch internal OOB / UB) |
+
+Some suites (`test_aggregation`, `test_pathutils`, the fuzz targets) `#include` the
+`.cpp` under test directly so each stays a single self-contained binary; the few
+firmware globals they don't exercise (`Serial`, `usbCdc`) are stubbed in the
+test TU. The rest exercise header-only logic.
 
 ## How it builds
 
@@ -45,5 +57,20 @@ g++ -std=gnu++17 -g -pthread -fsanitize=thread \
     -I tests/host/shims -I. tests/host/test_ringbuffer_concurrency.cpp -o rbc.bin && ./rbc.bin
 ```
 
-CI runs all three suites under plain, ASan+UBSan, and TSan builds
-(`.github/workflows/tests.yml`).
+### Fuzzing
+
+The `fuzz_*.cpp` files run two ways:
+
+```bash
+# Seeded driver under g++ + ASan/UBSan (what CI runs — deterministic, no extra deps)
+g++ -std=gnu++17 -g -O1 -DFUZZ_STANDALONE -fsanitize=address,undefined \
+    -I tests/host/shims -I. tests/host/fuzz_pathutils.cpp -o fz && ./fz
+
+# Coverage-guided libFuzzer (opt-in; needs clang + compiler-rt fuzzer runtime)
+clang++ -std=gnu++17 -g -O1 -fsanitize=fuzzer,address,undefined \
+    -I tests/host/shims -I. tests/host/fuzz_pathutils.cpp -o lf && ./lf -max_total_time=30
+```
+
+CI (`.github/workflows/tests.yml`) runs every `test_*` suite under plain,
+ASan+UBSan and TSan, the seeded fuzz drivers under ASan+UBSan, and a
+report-only cppcheck pass.
