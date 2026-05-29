@@ -67,14 +67,17 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
 // ---------------------------------------------------------------------------
 bool ExportManager::_sendWithRetry(IExporter* exp,
                                     const SensorReading* r, size_t n) {
-    for (int attempt = 0; attempt <= exp->maxRetries(); attempt++) {
+    // CM-3: maxRetries() is uint8_t — promote it explicitly to int so the
+    // loop bound comparison is unambiguously signed/signed.
+    const int maxRetries = (int)exp->maxRetries();
+    for (int attempt = 0; attempt <= maxRetries; attempt++) {
         if (attempt > 0) {
             uint32_t delayMs = exp->retryDelayMs() * (1 << (attempt - 1));
             vTaskDelay(pdMS_TO_TICKS(delayMs));
         }
         if (exp->send(r, n)) return true;
         Serial.printf("[ExportManager] '%s' retry %d/%d\n",
-                      exp->getName(), attempt + 1, exp->maxRetries());
+                      exp->getName(), attempt + 1, maxRetries);
     }
     // All retries exhausted — spool for later retry (#4.7)
     _spoolBatch(exp, r, n);
@@ -167,7 +170,11 @@ bool ExportManager::_drainSpool(IExporter* exp) {
         strncpy(sr.metric,     doc["metric"] | "", sizeof(sr.metric)-1);
         sr.value   = doc["value"] | 0.0f;
         strncpy(sr.unit,       doc["unit"]   | "", sizeof(sr.unit)-1);
-        sr.quality = (SensorQuality)(doc["q"] | 0);
+        // CM-5: clamp untrusted spool-file value to a defined enumerator
+        // (0..QUALITY_ERROR) instead of blindly casting an arbitrary int.
+        int q = doc["q"] | 0;
+        if (q < 0 || q > QUALITY_ERROR) q = QUALITY_ERROR;
+        sr.quality = (SensorQuality)q;
         count++;
 
         if (count >= EXPORT_SPOOL_BATCH) {

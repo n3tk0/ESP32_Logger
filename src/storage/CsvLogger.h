@@ -20,7 +20,10 @@
 // ============================================================================
 class CsvLogger {
 public:
-    void begin(fs::FS& fs, const char* dir, uint32_t maxSizeKB);
+    // Returns true once the log directory exists (or was created).  A false
+    // return means the filesystem rejected mkdir (full / read-only / corrupt)
+    // and no row will ever be written — the caller MUST disable writing.
+    bool begin(fs::FS& fs, const char* dir, uint32_t maxSizeKB);
 
     // `epoch` is used to pick the file name (UTC day).  `headerLine` is the
     // expected first line of the file (without trailing newline).  `row` is
@@ -33,12 +36,17 @@ public:
 
     const char* directory() const { return _dir; }
 
+    // True once begin() has bound a filesystem.  StorageTask uses this to
+    // lazily initialise the logger when CSV logging is toggled on at runtime
+    // (begin() was never called at boot because logging started disabled).
+    bool isInitialized() const { return _fs != nullptr; }
+
 private:
     fs::FS*  _fs        = nullptr;
     char     _dir[33]   = "/logs";
     uint32_t _maxSizeKB = 1024;
 
-    void _ensureDir();
+    bool _ensureDir();
     void _buildPath(char* pathBuf, size_t len, uint32_t epoch) const;
     void _getDate(uint32_t epoch, char* dateBuf /*[12]*/) const;
     bool _readFirstLine(const char* path, char* buf, size_t bufLen) const;

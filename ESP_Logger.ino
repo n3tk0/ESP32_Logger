@@ -50,6 +50,7 @@
 #include <esp_sleep.h>
 #include <esp_system.h>     // esp_reset_reason()
 #include <WiFi.h>           // for WiFi.setSleep() in continuous mode
+#include <LittleFS.h>       // setSpoolFS(&LittleFS) — no longer pulled via Globals.h
 
 #include "src/core/Globals.h"
 #include "src/core/BoardProfiles.h"   // R11: pin-rules registry loaded after initStorage

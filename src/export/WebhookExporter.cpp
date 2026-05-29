@@ -1,4 +1,5 @@
 #include "WebhookExporter.h"
+#include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 
 bool WebhookExporter::init(JsonObjectConst cfg) {

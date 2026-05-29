@@ -23,4 +23,3 @@ bool syncTimeFromNTP();
 // responder is non-blocking: tickCaptivePortalDNS() must be called from
 // the main loop so DNS queries actually get serviced.
 void tickCaptivePortalDNS();
-bool isCaptivePortalDNSRunning();

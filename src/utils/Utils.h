@@ -5,9 +5,6 @@
 
 // getVersionString() is defined inline in Config.h – do NOT redeclare here.
 
-// ---- String helpers ----
-String formatFileSize(uint64_t bytes);
-
 // ---- Path helpers ----
 String buildPath(const String& dir, const String& name);
 
@@ -55,7 +52,3 @@ String urlEncode(const String& v);
 //   • Future: board-specific reserved pins
 //   • Future: already-in-use pins
 bool validatePin(int pin, const String& usage);
-
-// Get a human-readable string of USB-reserved pins (for error messages)
-// Returns "18,19" on ESP32-C3, "19,20" on ESP32-S3, "" if not supported
-String getUsbReservedPins();

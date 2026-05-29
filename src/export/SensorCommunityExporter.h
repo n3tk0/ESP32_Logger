@@ -1,6 +1,6 @@
 #pragma once
 #include "IExporter.h"
-#include <HTTPClient.h>
+// <HTTPClient.h> moved to SensorCommunityExporter.cpp — not referenced in this header.
 
 // ============================================================================
 // SensorCommunityExporter — sends data to https://api.sensor.community

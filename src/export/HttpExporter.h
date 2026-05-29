@@ -1,6 +1,6 @@
 #pragma once
 #include "IExporter.h"
-#include <HTTPClient.h>
+// <HTTPClient.h> moved to HttpExporter.cpp — not referenced in this header.
 
 // ============================================================================
 // HttpExporter — POSTs readings to any HTTP endpoint as JSON array.

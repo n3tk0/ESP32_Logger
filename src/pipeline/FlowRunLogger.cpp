@@ -204,16 +204,3 @@ void FlowRunLogger::_closeRun(uint32_t endTs) {
     _flowCount     = 0;
     _volumeStart   = NAN;
 }
-
-// ---------------------------------------------------------------------------
-bool FlowRunLogger::isRunning() const {
-    Lock lk(_mutex);
-    if (!lk.ok()) return false;
-    return _state == RUNNING;
-}
-
-uint32_t FlowRunLogger::runStartEpoch() const {
-    Lock lk(_mutex);
-    if (!lk.ok()) return 0;
-    return _runStart;
-}

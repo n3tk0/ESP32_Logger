@@ -1,4 +1,5 @@
 #include "HttpExporter.h"
+#include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 

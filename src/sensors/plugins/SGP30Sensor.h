@@ -1,6 +1,6 @@
 #pragma once
 #include "../ISensor.h"
-#include <Wire.h>
+// <Wire.h> moved to the .cpp — not referenced in this header.
 
 // ============================================================================
 // SGP30 — TVOC / eCO2 sensor (I2C, Sensirion)

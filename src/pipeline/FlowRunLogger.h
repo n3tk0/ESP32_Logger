@@ -52,9 +52,6 @@ public:
     // flow has been below the threshold for idleTimeoutSec.
     void tick(uint32_t epoch);
 
-    bool     isRunning() const;
-    uint32_t runStartEpoch() const;
-
 private:
     enum State : uint8_t { IDLE = 0, RUNNING = 1 };
 

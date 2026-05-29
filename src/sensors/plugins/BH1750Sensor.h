@@ -1,6 +1,6 @@
 #pragma once
 #include "../ISensor.h"
-#include <Wire.h>
+// <Wire.h> moved to the .cpp — not referenced in this header.
 
 // ============================================================================
 // BH1750 — Digital ambient light sensor (I2C)

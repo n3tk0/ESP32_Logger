@@ -2,8 +2,9 @@
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
-#include <ArduinoJson.h>
 #include <functional>
+// <ArduinoJson.h> is not referenced by any declaration in this header and is
+// already pulled in transitively via JsonResponse.h below (header-bloat audit).
 #include "../utils/JsonResponse.h"  // sendJsonResponse — shared with ApiHandlers
 
 /**

@@ -4,7 +4,6 @@
 #include <LittleFS.h>
 #include <SD.h>
 #include <SPI.h>
-#include <vector>
 
 bool initStorage() {
     DBGLN("Init LittleFS...");
@@ -85,92 +84,4 @@ void getStorageInfo(uint64_t& used, uint64_t& total, int& percent,
         total = LittleFS.totalBytes();
     }
     if (total > 0) percent = (used * 100ULL) / total;
-}
-
-const char* getStorageBarColor(int percent) {
-    if (percent >= 90) return config.theme.storageBar90Color;
-    if (percent >= 70) return config.theme.storageBar70Color;
-    return config.theme.storageBarColor;
-}
-
-static String _escHtml(const String& s) {
-    String r; r.reserve(s.length());
-    for (size_t i = 0; i < s.length(); i++) {
-        char c = s[i];
-        switch (c) {
-            case '&':  r += "&amp;";  break;
-            case '<':  r += "&lt;";   break;
-            case '>':  r += "&gt;";   break;
-            case '"':  r += "&quot;"; break;
-            case '\'': r += "&#39;";  break;
-            default:   r += c;        break;
-        }
-    }
-    return r;
-}
-
-String generateDatalogFileOptions() {
-    if (!fsAvailable || !activeFS) return "<option>No storage</option>";
-    String html = "";
-    String currentFile = getActiveDatalogFile();
-
-    std::vector<String> dirs;
-    dirs.push_back("/");
-
-    while (!dirs.empty()) {
-        String path = dirs.back();
-        dirs.pop_back();
-
-        File dir = activeFS->open(path);
-        if (!dir || !dir.isDirectory()) {
-            if (dir) dir.close();
-            continue;
-        }
-
-        while (File entry = dir.openNextFile()) {
-            String name = String(entry.name());
-            String fullPath = path == "/" ? "/" + name : path + "/" + name;
-
-            if (entry.isDirectory()) {
-                dirs.push_back(fullPath);
-            } else if (name.endsWith(".txt") || name.endsWith(".log") || name.endsWith(".csv")) {
-                String esc = _escHtml(fullPath);
-                String sel = (fullPath == currentFile) ? " selected" : "";
-                html += "<option value='" + esc + "'" + sel + ">" + esc + "</option>";
-            }
-            entry.close();
-        }
-        dir.close();
-    }
-    return html.length() > 0 ? html : "<option value='/datalog.txt'>datalog.txt</option>";
-}
-
-int countDatalogFiles() {
-    if (!fsAvailable || !activeFS) return 0;
-    int count = 0;
-    
-    std::vector<String> dirs;
-    dirs.push_back("/");
-
-    while (!dirs.empty()) {
-        String path = dirs.back();
-        dirs.pop_back();
-
-        File dir = activeFS->open(path);
-        if (!dir || !dir.isDirectory()) {
-            if (dir) dir.close();
-            continue;
-        }
-
-        while (File entry = dir.openNextFile()) {
-            String name = String(entry.name());
-            String fullPath = path == "/" ? "/" + name : path + "/" + name;
-            
-            if (entry.isDirectory()) dirs.push_back(fullPath);
-            else if (name.endsWith(".txt") || name.endsWith(".log") || name.endsWith(".csv")) count++;
-            entry.close();
-        }
-        dir.close();
-    }
-    return count;
 }

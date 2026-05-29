@@ -1,5 +1,6 @@
 #include "SensorCommunityExporter.h"
 #include "../core/Globals.h"
+#include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 

@@ -144,28 +144,6 @@ static bool _sysClockTm(struct tm* out) {
     return true;
 }
 
-String getRtcTimeString() {
-    if (Rtc) {
-        RtcDateTime now = Rtc->GetDateTime();
-        if (now.Year() >= 2020 && now.Month() != 0) {
-            char buf[10];
-            snprintf(buf, sizeof(buf), "%02u:%02u:%02u",
-                     now.Hour(), now.Minute(), now.Second());
-            return String(buf);
-        }
-        return "Set Time";
-    }
-    // No hardware RTC — fall back to system clock (NTP or manual settimeofday)
-    struct tm ti;
-    if (_sysClockTm(&ti)) {
-        char buf[10];
-        snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
-                 ti.tm_hour, ti.tm_min, ti.tm_sec);
-        return String(buf);
-    }
-    return "No RTC";
-}
-
 String getRtcDateTimeString() {
     if (Rtc) {
         RtcDateTime now = Rtc->GetDateTime();

@@ -155,10 +155,6 @@ void tickCaptivePortalDNS() {
     if (s_dnsRunning) s_dnsServer.processNextRequest();
 }
 
-bool isCaptivePortalDNSRunning() {
-    return s_dnsRunning;
-}
-
 bool syncTimeFromNTP() {
     if (!wifiConnectedAsClient) { DBGLN("NTP: No WiFi"); return false; }
 

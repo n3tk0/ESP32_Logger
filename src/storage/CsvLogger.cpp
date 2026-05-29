@@ -6,22 +6,34 @@
 #include <time.h>
 
 // ---------------------------------------------------------------------------
-void CsvLogger::begin(fs::FS& fs, const char* dir, uint32_t maxSizeKB) {
+bool CsvLogger::begin(fs::FS& fs, const char* dir, uint32_t maxSizeKB) {
     _fs = &fs;
     if (dir && *dir) {
         strncpy(_dir, dir, sizeof(_dir) - 1);
         _dir[sizeof(_dir) - 1] = '\0';
     }
     _maxSizeKB = maxSizeKB ? maxSizeKB : 1024;
-    _ensureDir();
-    Serial.printf("[CsvLogger] dir=%s maxKB=%lu\n",
-                  _dir, (unsigned long)_maxSizeKB);
+    bool dirReady = _ensureDir();
+    // On dir-creation failure, drop the FS binding so isInitialized() reports
+    // false.  This lets StorageTask retry begin() if the user toggles CSV
+    // logging off and on again at runtime (e.g. after reseating an SD card),
+    // instead of being stuck in drain-only mode until the next reboot.
+    if (!dirReady) _fs = nullptr;
+    Serial.printf("[CsvLogger] dir=%s maxKB=%lu ready=%d\n",
+                  _dir, (unsigned long)_maxSizeKB, dirReady ? 1 : 0);
+    return dirReady;
 }
 
 // ---------------------------------------------------------------------------
-void CsvLogger::_ensureDir() {
-    if (!_fs) return;
-    if (!_fs->exists(_dir)) _fs->mkdir(_dir);
+// Returns true if the directory exists or was created successfully.  mkdir()
+// failure is no longer swallowed (CM-1): it is reported so begin()/StorageTask
+// can stop pretending the device is logging.
+bool CsvLogger::_ensureDir() {
+    if (!_fs) return false;
+    if (_fs->exists(_dir)) return true;
+    if (_fs->mkdir(_dir))  return true;
+    Serial.printf("[CsvLogger] mkdir failed for %s — logging disabled\n", _dir);
+    return false;
 }
 
 // ---------------------------------------------------------------------------
