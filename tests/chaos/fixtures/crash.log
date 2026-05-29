@@ -1,0 +1,9 @@
+@TLM_BOOT {"reset":1,"heap":210000}
+@TLM {"ms":1000,"heap":205000,"minheap":205000,"rssi":-50,"wifi":3,"safe":0,"reset":1}
+@CHAOS heap_pressure alloc=ok
+@TLM {"ms":2000,"heap":9000,"minheap":9000,"rssi":-50,"wifi":3,"safe":0,"reset":1}
+Guru Meditation Error: Core 0 panic'ed (StoreProhibited). Exception was unhandled.
+Backtrace: 0x40081abc 0x40081def
+rst:0x3 (SW_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+rst:0x3 (SW_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+rst:0x3 (SW_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)

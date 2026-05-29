@@ -1,0 +1,84 @@
+# Phase 3 — Chaos / boot-smoke resilience testing.
+#
+# Two jobs:
+#   1. validator-selftest (GATING) — proves tests/chaos/validate_chaos.py works
+#      by running it against known-good / known-bad fixtures.  No board, no
+#      Wokwi, no secret required, so it is safe to gate on.
+#   2. chaos-sim (NON-GATING, continue-on-error) — builds the dedicated
+#      [env:chaos_simulator] firmware and runs it in the Wokwi emulator, piping
+#      serial output through the validator.  Stays green/neutral until BOTH the
+#      [env:chaos_simulator] PlatformIO env (see tests/chaos/README.md) AND the
+#      WOKWI_CLI_TOKEN repo secret are added; flip continue-on-error off then.
+#
+# Triggers: manual dispatch + weekly schedule (chaos soak is long; we don't run
+# it on every PR).  The cheap validator-selftest also runs on PRs that touch it.
+
+name: Chaos Test
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1"   # Mondays 04:00 UTC
+  pull_request:
+    paths:
+      - 'tests/chaos/**'
+      - '.github/workflows/chaos-test.yml'
+
+jobs:
+  validator-selftest:
+    name: validator self-test (gating)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: good fixture must PASS
+        run: |
+          python3 tests/chaos/validate_chaos.py \
+            --input tests/chaos/fixtures/good.log --require-chaos
+      - name: crash fixture must FAIL
+        run: |
+          if python3 tests/chaos/validate_chaos.py \
+               --input tests/chaos/fixtures/crash.log; then
+            echo "::error::validator passed a crash log — detection broken"
+            exit 1
+          fi
+          echo "crash fixture correctly rejected"
+
+  chaos-sim:
+    name: chaos sim (non-gating until env+token)
+    runs-on: ubuntu-latest
+    continue-on-error: true          # flip off once env + WOKWI_CLI_TOKEN exist
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build chaos_simulator firmware
+        run: pio run -e chaos_simulator
+
+      - name: Install Wokwi CLI
+        run: curl -L https://wokwi.com/ci/install.sh | sh
+
+      - name: Run firmware in Wokwi (3 min) and capture serial
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          wokwi-cli . --timeout 180000 --serial-log-file chaos-serial.log
+
+      - name: Validate survival invariants
+        run: |
+          python3 tests/chaos/validate_chaos.py \
+            --input chaos-serial.log --require-chaos --min-heap 15000
+
+      - name: Upload serial capture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-serial-log
+          path: chaos-serial.log

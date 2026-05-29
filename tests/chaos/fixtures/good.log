@@ -1,0 +1,17 @@
+@TLM_BOOT {"reset":1,"heap":210000}
+@TLM {"ms":1000,"heap":205000,"minheap":205000,"rssi":-50,"wifi":3,"safe":0,"reset":1}
+@CHAOS begin seed=0x5eed1234 duration_ms=150000
+@TLM {"ms":2000,"heap":204000,"minheap":204000,"rssi":-51,"wifi":3,"safe":0,"reset":1}
+@CHAOS wifi_drop
+@TLM {"ms":3000,"heap":203500,"minheap":203500,"rssi":0,"wifi":6,"safe":0,"reset":1}
+@CHAOS wifi_reconnect_requested
+@TLM {"ms":8000,"heap":203000,"minheap":188000,"rssi":-52,"wifi":3,"safe":0,"reset":1}
+@CHAOS heap_pressure alloc=ok
+@TLM {"ms":12000,"heap":188000,"minheap":188000,"rssi":-52,"wifi":3,"safe":0,"reset":1}
+@CHAOS heap_pressure_end
+@CHAOS mutex_starve_start
+@TLM {"ms":15000,"heap":203000,"minheap":188000,"rssi":-53,"wifi":3,"safe":0,"reset":1}
+@CHAOS mutex_starve_end
+@TLM {"ms":20000,"heap":203200,"minheap":188000,"rssi":-50,"wifi":3,"safe":0,"reset":1}
+@CHAOS done
+@TLM {"ms":25000,"heap":203500,"minheap":188000,"rssi":-50,"wifi":3,"safe":0,"reset":1}
