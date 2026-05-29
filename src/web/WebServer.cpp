@@ -1972,6 +1972,16 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
     server.on("/import_settings", HTTP_POST,
         [](AsyncWebServerRequest *r) {
             if (!requireMutatingAuth(r)) return;
+            // (void*)1 is the OOM sentinel set by the body callback when the
+            // accumulation buffer could not be allocated.  Report the 500 here
+            // (exactly once); the body callback deliberately does NOT send, so
+            // we avoid a double response that would corrupt the AsyncTCP
+            // connection.
+            if (r->_tempObject == reinterpret_cast<void*>(1)) {
+                r->_tempObject = nullptr;
+                r->send(500, "application/json", "{\"ok\":false,\"error\":\"out_of_memory\"}");
+                return;
+            }
             String* buf = static_cast<String*>(r->_tempObject);
             if (!buf || buf->isEmpty()) { r->send(400, "text/plain", "No data"); return; }
             JsonDocument doc;
@@ -2052,8 +2062,11 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
             if (!index) {
                 String* buf = new (std::nothrow) String();
                 if (!buf) {
-                    req->send(500, "application/json",
-                              "{\"ok\":false,\"error\":\"out_of_memory\"}");
+                    // Flag OOM with a sentinel instead of sending here: the
+                    // request-completion handler emits the single 500.  Sending
+                    // from both callbacks would double-respond and corrupt the
+                    // AsyncTCP connection.
+                    req->_tempObject = reinterpret_cast<void*>(1);
                     return;
                 }
                 // ML-2: publish the pointer and register the disconnect cleaner
@@ -2066,13 +2079,16 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                 // well-defined).
                 req->_tempObject = buf;
                 req->onDisconnect([req]() {
-                    delete static_cast<String*>(req->_tempObject);
+                    // Never delete the OOM sentinel (it is not a real pointer).
+                    if (req->_tempObject != reinterpret_cast<void*>(1))
+                        delete static_cast<String*>(req->_tempObject);
                     req->_tempObject = nullptr;
                 });
                 size_t hint = req->contentLength() > 0 ? req->contentLength() : 4096;
                 if (hint > kImportMax) hint = kImportMax;
                 buf->reserve(hint);
             }
+            if (req->_tempObject == reinterpret_cast<void*>(1)) return;  // OOM already flagged
             String* buf = static_cast<String*>(req->_tempObject);
             if (!buf) return;
             if (buf->length() + len > kImportMax) return; // Hard cap
