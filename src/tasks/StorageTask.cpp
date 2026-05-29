@@ -119,14 +119,18 @@ void storageTaskFunc(void* param) {
             // edge so a failed begin() (missing/corrupt FS) is not retried every
             // loop iteration; the user can retry by toggling the setting again.
             if (offToOn && !primary.isInitialized()) {
+                // Use the LIVE config (p->), not the boot snapshot (cfg), so a
+                // runtime change to logDir/maxSizeKB/mirrorFS is honoured when
+                // logging is toggled on.  These reads are intentionally
+                // lock-free, matching the other p-> reads above.
                 primaryReady = primary.begin(*p->fs,
-                                             cfg.logDir    ? cfg.logDir    : "/logs",
-                                             cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024);
+                                             p->logDir    ? p->logDir    : "/logs",
+                                             p->maxSizeKB > 0 ? p->maxSizeKB : 1024);
                 if (primaryReady) {
                     Serial.println("[StorageTask] CSV logging enabled at runtime");
-                    if (cfg.mirrorFS && mirror.begin(*cfg.mirrorFS,
-                                                     cfg.logDir    ? cfg.logDir    : "/logs",
-                                                     cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024)) {
+                    if (p->mirrorFS && mirror.begin(*p->mirrorFS,
+                                                     p->logDir    ? p->logDir    : "/logs",
+                                                     p->maxSizeKB > 0 ? p->maxSizeKB : 1024)) {
                         mirrorActive = true;
                     }
                 } else {
