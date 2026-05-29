@@ -30,8 +30,9 @@ start-up), so a red CI run is replayable with the same fault schedule.
 - ⏳ **Not yet wired into the firmware build** (the 3 edits below). These touch
   large production files and were intentionally left for a verified pass — apply
   them, then build `chaos_simulator` and run the workflow.
-- ⏳ Wokwi job is **non-gating** until the `[env:chaos_simulator]` env exists and
-  the `WOKWI_CLI_TOKEN` secret is added (free token: https://wokwi.com/ci).
+- ⏳ Wokwi job **skips cleanly** (no red ❌) until the `[env:chaos_simulator]` env
+  exists and the `WOKWI_CLI_TOKEN` secret is added (free token:
+  https://wokwi.com/ci); it auto-enables once the secret is present.
 
 ## Integration — the 3 edits to enable it
 
@@ -71,12 +72,12 @@ Once per **`loop()`** iteration (e.g. near the top, after `OtaManager::tick`):
 
 In a normal build all three lines expand to no-ops, so they are safe to commit.
 
-### 3. Add the Wokwi token + flip the job to gating
+### 3. Add the Wokwi token
 
-1. Create a free token at https://wokwi.com/ci and add it as the
-   `WOKWI_CLI_TOKEN` repository secret.
-2. In `.github/workflows/chaos-test.yml`, remove `continue-on-error: true` from
-   the `chaos-sim` job to make it gating.
+Create a free token at https://wokwi.com/ci and add it as the `WOKWI_CLI_TOKEN`
+repository secret. That's it — the workflow's `gate` job detects the secret and
+the `chaos-sim` job switches itself on (it **skips cleanly** when the secret is
+absent, so it never shows a red ❌ before then).
 
 ## Run locally
 
