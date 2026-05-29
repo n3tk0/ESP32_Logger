@@ -150,6 +150,12 @@
 #include "src/serial/SerialProvisioner.h"
 #include "src/alerts/AlertEngine.h"
 
+// Phase 3 chaos/telemetry hooks — self-guarded headers that expand to no-ops
+// unless ENABLE_CHAOS_TELEMETRY / ENABLE_CHAOS_MONKEY are defined (only by the
+// [env:chaos_simulator] build).  See tests/chaos/README.md.
+#include "src/chaos/ChaosTelemetry.h"
+#include "src/chaos/ChaosMonkey.h"
+
 // ============================================================================
 // PLATFORM MODE & SLEEP GLOBALS
 // ============================================================================
@@ -830,12 +836,21 @@ void setup() {
     }
 
     DBGLN("Setup complete!");
+
+    // Phase 3 — start survival telemetry and (chaos build only) fault injection.
+    // No-ops in a normal build; active only under [env:chaos_simulator].
+    CHAOS_TELEMETRY_BEGIN();
+    CHAOS_MONKEY_BEGIN();
 }
 
 // ============================================================================
 // LOOP
 // ============================================================================
 void loop() {
+    // Phase 3 — emit a structured @TLM telemetry snapshot (rate-limited inside).
+    // No-op in a normal build.
+    CHAOS_TELEMETRY_TICK();
+
     // ── OTA rollback watchdog ────────────────────────────────────────────────
     // No-op once the running image is confirmed; while pending, confirms
     // automatically after OTA_CONFIRM_TIMEOUT_MS (default 90 s) of stable
