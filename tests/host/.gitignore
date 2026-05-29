@@ -1,0 +1,6 @@
+# Host-test build artifacts (compiled per CI run / local run)
+*.bin
+*.asan
+*.tsan
+*.out
+*.o
