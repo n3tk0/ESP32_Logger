@@ -53,6 +53,27 @@ static void test_toJsonLine_truncation() {
     CHECK_EQ(n, -1);   // signals truncation, never a bogus positive length
 }
 
+// Sweep every buffer size against a reading whose id holds a control char
+// (forces a \uXXXX escape, the boundary case that motivated the a+6 guard in
+// _appendJsonEscaped).  Invariant for ALL sizes: either toJsonLine reports
+// truncation (-1), or it returns a length with NO embedded NUL (strlen == n)
+// and a well-formed line ('{' ... '}').
+static void test_toJsonLine_buffer_sweep() {
+    char id[4] = { 'a', '\n', 'b', '\0' };
+    SensorReading r = SensorReading::make(123u, id, "bme280", "temp",
+                                          1.0f, "C", QUALITY_GOOD);
+    char buf[200];
+    bool ok = true;
+    for (size_t cap = 1; cap <= sizeof(buf); cap++) {
+        int n = r.toJsonLine(buf, cap);
+        if (n < 0) continue;                       // truncation reported — fine
+        if ((size_t)n != strlen(buf)) ok = false;  // embedded NUL on "success"
+        if ((size_t)n >= cap)         ok = false;   // must fit when not -1
+        if (buf[0] != '{' || buf[n-1] != '}') ok = false;
+    }
+    CHECK(ok);
+}
+
 static void test_parseMode() {
     CHECK_EQ(parseMode("raw"),  AGG_RAW);
     CHECK_EQ(parseMode("avg"),  AGG_AVG);
@@ -79,6 +100,7 @@ int main() {
     RUN(test_toJsonLine_escaping);
     RUN(test_toJsonLine_control_char);
     RUN(test_toJsonLine_truncation);
+    RUN(test_toJsonLine_buffer_sweep);
     RUN(test_parseMode);
     RUN(test_parseBucket);
     return SUMMARY();
