@@ -650,6 +650,21 @@ void setup() {
         config.network.wifiMode  = WIFIMODE_AP;
     }
 
+    // First-run override: when no board profile is selected the device has no
+    // valid pins (every DefaultPins entry is PIN_UNSET) and cannot do useful
+    // logging — the user MUST complete the wizard first. Without this the
+    // legacy path below sees apModeTriggered=false (wifi-trigger pin is unset,
+    // forceWebServer defaults to false) and the loop() STATE_IDLE branch deep-
+    // sleeps after ~2 s, so the AP + /firstrun wizard never comes up and the
+    // device appears dead. Force AP + web exactly like safe-mode so the wizard
+    // is reachable. (FirstRunGate in WebServer.cpp then redirects all non-
+    // wizard routes to /firstrun while g_setupRequired is true.)
+    if (g_setupRequired) {
+        apModeTriggered          = true;
+        onlineLoggerMode         = false;
+        config.network.wifiMode  = WIFIMODE_AP;
+    }
+
     // ── WiFi + Web Server ─────────────────────────────────────────────────────
     g_platformMode = _detectPlatformMode();
 
@@ -732,7 +747,10 @@ void setup() {
             // Skip Arduino attachInterrupt when platform mode is active:
             // WaterFlowSensor::init() already registers the ISR via
             // gpio_isr_handler_add(); dual registration causes a panic (#6).
-            if (g_platformMode == PLATFORM_LEGACY) {
+            // Also skip when the flow pin is unset (first-run wizard not yet
+            // completed) — attachInterrupt on an invalid GPIO can abort.
+            if (g_platformMode == PLATFORM_LEGACY &&
+                config.hardware.pinFlowSensor != PIN_UNSET) {
                 attachInterrupt(digitalPinToInterrupt(config.hardware.pinFlowSensor),
                                 onFlowPulse, FALLING);
             }
@@ -742,7 +760,9 @@ void setup() {
         DBGLN("=== Normal Logging Mode ===");
         setCpuFrequencyMhz(config.hardware.cpuFreqMHz);
         // Guard: skip Arduino ISR when WaterFlowSensor is handling the pin (#6)
-        if (g_platformMode == PLATFORM_LEGACY) {
+        // or when the flow pin is unset (first-run wizard not yet completed).
+        if (g_platformMode == PLATFORM_LEGACY &&
+            config.hardware.pinFlowSensor != PIN_UNSET) {
             attachInterrupt(digitalPinToInterrupt(config.hardware.pinFlowSensor),
                             onFlowPulse, FALLING);
         }
