@@ -45,6 +45,19 @@ jobs:
             exit 1
           fi
           echo "crash fixture correctly rejected"
+      - name: wokwi-survival fixture must PASS in Wokwi mode (no AP)
+        run: |
+          python3 tests/chaos/validate_chaos.py \
+            --input tests/chaos/fixtures/wokwi_survival.log --require-chaos
+      - name: wokwi-survival fixture must FAIL in strict HIL mode (never reconnected)
+        run: |
+          if python3 tests/chaos/validate_chaos.py \
+               --input tests/chaos/fixtures/wokwi_survival.log \
+               --require-chaos --wifi-can-connect; then
+            echo "::error::strict --wifi-can-connect passed a never-reconnect log"
+            exit 1
+          fi
+          echo "strict reconnect mode correctly rejected the no-AP survival log"
 
   gate:
     name: chaos sim gate (token check)
