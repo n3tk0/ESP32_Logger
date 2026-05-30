@@ -272,7 +272,7 @@ If it is still flagged:
 - **Report the false positive** to Microsoft:
   https://www.microsoft.com/en-us/wdsi/filesubmission — getting it whitelisted
   upstream helps all users.
-- **Run from source instead** (no exe): `python tools/deploy_gui.py`. This never
+- **Run from source instead** (no exe): `python3 tools/deploy_gui.py`. This never
   trips antivirus because it's plain Python.
 - **For public distribution, code-sign the executable.** An Authenticode (ideally
   EV) certificate is the only thing that reliably stops Defender/SmartScreen

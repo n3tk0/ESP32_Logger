@@ -19,7 +19,9 @@ ROOT = Path(SPECPATH).parent
 # Embedding product metadata reduces antivirus false positives by making the
 # binary look like a published app rather than an anonymous PyInstaller stub.
 _version_file = ROOT / 'tools' / 'version_info.txt'
-version_info = str(_version_file) if sys.platform == 'win32' and _version_file.is_file() else None
+if sys.platform == 'win32' and not _version_file.is_file():
+    raise FileNotFoundError(f"Required Windows version info file not found: {_version_file}")
+version_info = str(_version_file) if sys.platform == 'win32' else None
 
 a = Analysis(
     [str(ROOT / 'tools' / 'deploy_gui.py')],
