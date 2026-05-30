@@ -51,13 +51,17 @@ void debounceButton(uint8_t pin, int& last, int& stable,
 void initHardware() {
     DBGLN("Init hardware...");
 
-    // PIN_UNSET (0xFF) and out-of-range / strap-bus pins must never reach
+    // PIN_UNSET (0xFF) and completely out-of-range values must never reach
     // pinMode() — on a fresh device (first-run wizard) every pin is PIN_UNSET,
     // and pinMode() on an invalid GPIO is at best a silent no-op and at worst
-    // an abort. Skip any pin that isn't a usable user GPIO.
+    // an abort. This is only a defensive last-resort bound: strap/flash/
+    // duplicate rules are already enforced per active board profile via
+    // isPinAllowed() at config-save time. Hard-coding the C3-only range here
+    // (p > 21, 11-17) would wrongly skip valid pins on generic ESP32 (<=39)
+    // and ESP32-S3 (<=47), leaving e.g. the flow sensor without its pull-up
+    // while attachInterrupt still attaches. Use the widest supported bound.
     auto isPinSafe = [](int p) {
-        if (p < 0 || p > 21) return false;
-        if (p >= 11 && p <= 17) return false;
+        if (p < 0 || p > 48 || p == PIN_UNSET) return false;
         return true;
     };
 
