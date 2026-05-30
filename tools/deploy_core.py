@@ -249,6 +249,8 @@ class DeployManager:
         # Only write if we made changes
         if modified:
             ini_file.write_text("\n".join(result))
+
+    def _run_cmd(self, cmd) -> int:
         """Run a subprocess command and stream output to callback."""
         self._log(f"$ {shlex.join(cmd)}")
         try:
