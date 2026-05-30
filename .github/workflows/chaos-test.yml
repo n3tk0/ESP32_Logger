@@ -71,6 +71,14 @@ jobs:
             exit 1
           fi
           echo "strict-safe-mode correctly rejected the boot-safe log"
+      - name: post-drop crash fixture must FAIL (no survival after wifi_drop)
+        run: |
+          if python3 tests/chaos/validate_chaos.py \
+               --input tests/chaos/fixtures/post_drop_crash.log --require-chaos; then
+            echo "::error::validator missed a crash immediately after a wifi_drop"
+            exit 1
+          fi
+          echo "post-drop crash correctly rejected"
 
   gate:
     name: chaos sim gate (token check)

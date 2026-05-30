@@ -39,6 +39,9 @@ RST_RE  = re.compile(r"^\s*rst:0x", re.IGNORECASE)
 
 def parse(lines):
     boots, tlm, crashes, chaos = [], [], [], []
+    # Chronological event stream so checks can reason about ORDER (e.g. how much
+    # telemetry came *after* a chaos fault), not just global counts.
+    events = []
     rst_count = 0
     for ln in lines:
         for m in CRASH_MARKERS:
@@ -49,16 +52,25 @@ def parse(lines):
             rst_count += 1
         if "@CHAOS" in ln:
             chaos.append(ln.strip())
+            events.append(("chaos", ln.strip()))
         mb = BOOT_RE.search(ln)
         if mb:
-            try: boots.append(json.loads(mb.group(1)))
-            except json.JSONDecodeError: pass
+            try:
+                val = json.loads(mb.group(1))
+                boots.append(val)
+                events.append(("boot", val))
+            except json.JSONDecodeError:
+                pass
             continue
         mt = TLM_RE.search(ln)
         if mt:
-            try: tlm.append(json.loads(mt.group(1)))
-            except json.JSONDecodeError: pass
-    return boots, tlm, crashes, chaos, rst_count
+            try:
+                val = json.loads(mt.group(1))
+                tlm.append(val)
+                events.append(("tlm", val))
+            except json.JSONDecodeError:
+                pass
+    return boots, tlm, crashes, chaos, rst_count, events
 
 
 def main():
@@ -86,11 +98,11 @@ def main():
     # with UnicodeDecodeError mid-run.
     if args.input:
         with open(args.input, "r", encoding="utf-8", errors="replace") as f:
-            boots, tlm, crashes, chaos, rst_count = parse(f)
+            boots, tlm, crashes, chaos, rst_count, events = parse(f)
     else:
         if hasattr(sys.stdin, "reconfigure"):
             sys.stdin.reconfigure(errors="replace")
-        boots, tlm, crashes, chaos, rst_count = parse(sys.stdin)
+        boots, tlm, crashes, chaos, rst_count, events = parse(sys.stdin)
 
     failures = []
 
@@ -146,11 +158,18 @@ def main():
             # Emulator (Wokwi) has no AP, so the device can never show
             # WL_CONNECTED — "reconnect" is unverifiable here.  The meaningful
             # property is SURVIVAL: the firmware keeps emitting telemetry AFTER
-            # a wifi_drop and isn't crashed/reset by it.
-            drop_idx = next((i for i, c in enumerate(chaos) if "wifi_drop" in c), None)
-            if drop_idx is not None and len(tlm) < 3:
-                failures.append("WiFi dropped by chaos but device produced no "
-                                "further telemetry (did not survive the drop)")
+            # a wifi_drop and isn't crashed/reset by it.  Count telemetry that
+            # came *after* the drop in the chronological stream — using the
+            # total tlm count would pass even on an immediate post-drop crash,
+            # since many samples were emitted before the drop.
+            drop_idx = next((i for i, ev in enumerate(events)
+                             if ev[0] == "chaos" and "wifi_drop" in ev[1]), None)
+            if drop_idx is not None:
+                post_drop_tlm = sum(1 for ev in events[drop_idx:] if ev[0] == "tlm")
+                if post_drop_tlm < 3:
+                    failures.append("WiFi dropped by chaos but device produced fewer "
+                                    "than 3 telemetry updates afterward (did not "
+                                    "survive the drop)")
 
     # --- report ---
     print(f"parsed: boots={len(boots)} tlm={len(tlm)} chaos={len(chaos)} "
