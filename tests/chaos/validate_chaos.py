@@ -74,6 +74,11 @@ def main():
                     help="environment has a reachable AP (real HIL): require WiFi "
                          "to stably RECONNECT after a drop.  Omit for Wokwi, which "
                          "has no AP — then only post-drop SURVIVAL is checked.")
+    ap.add_argument("--strict-safe-mode", action="store_true",
+                    help="fully-provisioned image (FS present): fail if the device "
+                         "is in safe mode at the end.  Omit for a bare Wokwi image "
+                         "with no LittleFS partition — then only a chaos-induced "
+                         "healthy->safe transition fails.")
     args = ap.parse_args()
 
     # Serial captures routinely contain non-UTF-8 noise (boot garbage, partial
@@ -108,10 +113,21 @@ def main():
         if lo < args.min_heap:
             failures.append(f"heap floor breached: min {lo} < {args.min_heap}")
 
-    # 5. Did not get stuck permanently in safe mode (allowed transiently).
+    # 5. Safe mode: the regression we care about is the device being driven
+    #    HEALTHY -> SAFE by the injected chaos.  A device that is ALREADY in
+    #    safe mode from boot (e.g. the Wokwi image has no LittleFS partition to
+    #    mount) and stays stable is a known environment limitation, not a
+    #    resilience failure — only flag a chaos-induced transition into safe
+    #    mode.  (--strict-safe-mode restores the "never safe at the end" check
+    #    for a fully-provisioned image.)
     safes = [t.get("safe", 0) for t in tlm]
-    if safes and len(safes) >= 5 and all(safes[-5:]):
-        failures.append("device ended STUCK in safe mode (last 5 samples safe=1)")
+    if safes:
+        booted_safe = safes[0] == 1
+        if args.strict_safe_mode:
+            if len(safes) >= 5 and all(safes[-5:]):
+                failures.append("device ended STUCK in safe mode (last 5 samples safe=1)")
+        elif not booted_safe and any(safes):
+            failures.append("chaos drove the device from healthy into SAFE mode")
 
     # 6. Chaos-specific.
     if args.require_chaos:

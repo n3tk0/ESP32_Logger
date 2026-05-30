@@ -1,0 +1,222 @@
+ESP-ROM:esp32c3-api1-20210207
+Build:Feb  7 2021
+rst:0x1 (POWERON),boot:0xc (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fcd6100,len:0x420
+load:0x403ce000,len:0x90c
+load:0x403d0000,len:0x2370
+entry 0x403ce000
+E (158) esp_littlefs: partition "spiffs" could not be found
+E (159) esp_littlefs: Failed to initialize LittleFS
+[   663][E][LittleFS.cpp:98] begin(): Mounting LittleFS failed! Error: 261
+[CFG] LittleFS mount failed – using hardcoded defaults
+E (175) esp_littlefs: partition "spiffs" could not be found
+E (176) esp_littlefs: Failed to initialize LittleFS
+[   682][E][LittleFS.cpp:98] begin(): Mounting LittleFS failed! Error: 261
+ERR: No storage available!
+[SafeMode] LittleFS mount failed — entering safe mode (use failsafe UI to format if needed)
+[BoardProfile] none — first-run wizard required
+[ModuleRegistry] wifi start() requested restart
+[   752][E][esp32-hal-gpio.c:102] __pinMode(): Invalid pin selected
+[   762][E][esp32-hal-gpio.c:102] __pinMode(): Invalid pin selected
+[   768][E][esp32-hal-gpio.c:102] __pinMode(): Invalid pin selected
+[   775][E][esp32-hal-gpio.c:102] __pinMode(): Invalid pin selected
+[   781][E][vfs_api.cpp:24] open(): File system is not mounted
+[   787][E][vfs_api.cpp:24] open(): File system is not mounted
+E (290) esp_ota_ops: not found otadata
+[  2582][E][vfs_api.cpp:24] open(): File system is not mounted
+[  2588][E][vfs_api.cpp:24] open(): File system is not mounted
+@TLM_BOOT {"reset":1,"heap":154704}
+@CHAOS begin seed=0x5eed1234 duration_ms=150000
+@TLM {"ms":2630,"heap":150236,"minheap":150236,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":3631,"heap":150236,"minheap":148760,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":4694,"heap":150236,"minheap":148736,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":5749,"heap":150236,"minheap":148736,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":6758,"heap":150236,"minheap":148736,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":7758,"heap":150236,"minheap":148736,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":8758,"heap":150236,"minheap":148736,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":9758,"heap":150236,"minheap":148736,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":10775,"heap":150236,"minheap":148728,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":11782,"heap":150236,"minheap":148728,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":12822,"heap":150236,"minheap":148728,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":13851,"heap":150236,"minheap":148728,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":14905,"heap":150236,"minheap":148728,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":15909,"heap":150236,"minheap":148728,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":16909,"heap":150236,"minheap":148728,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":17917,"heap":150236,"minheap":148728,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":18960,"heap":150236,"minheap":148728,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":20016,"heap":150236,"minheap":148728,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS heap_pressure alloc=ok
+@TLM {"ms":21024,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":22024,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":23024,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":24024,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":25032,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS heap_pressure_end
+@TLM {"ms":26039,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":27087,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":28117,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":29171,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":30176,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":31184,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":32193,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":33227,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":34282,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":35291,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":36359,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":37360,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS wifi_drop
+@TLM {"ms":38382,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":39389,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":40442,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":41468,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS wifi_reconnect_requested
+@TLM {"ms":42517,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":43576,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":44578,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":45586,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":46593,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":47600,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":48608,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":49673,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":50711,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":51718,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":52767,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":53796,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":54851,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS wifi_drop
+@TLM {"ms":55856,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":56864,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":57873,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS wifi_reconnect_requested
+@TLM {"ms":58915,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":59961,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":60970,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":61970,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":62970,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":63970,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":64978,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":65985,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":67033,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":68062,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":69117,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":70121,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":71130,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS mutex_starve_start
+@TLM {"ms":72139,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":73172,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS mutex_starve_end
+@TLM {"ms":74228,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":75236,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":76236,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":77236,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":78236,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":79244,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":80251,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":81299,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":82328,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":83383,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":84388,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":85396,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":86405,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":87438,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS mutex_starve_start
+@TLM {"ms":88494,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":89502,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":90502,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS mutex_starve_end
+@TLM {"ms":91502,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":92502,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":93510,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":94517,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":95566,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":96594,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":97649,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":98654,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":99663,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":100671,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS heap_pressure alloc=ok
+@TLM {"ms":101709,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":102760,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":103764,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":104769,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":105773,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS heap_pressure_end
+@TLM {"ms":106779,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":107781,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":108784,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":109838,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":110861,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":111916,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":112920,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":113924,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":114928,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":115971,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS mutex_starve_start
+@TLM {"ms":117026,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":118035,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":119035,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS mutex_starve_end
+@TLM {"ms":120035,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":121035,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":122042,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":123050,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":124098,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":125127,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":126182,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":127186,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":128195,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":129204,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":130237,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":131293,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":132301,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":133301,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS heap_pressure alloc=ok
+@TLM {"ms":134301,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":135301,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":136309,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":137316,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":138364,"heap":134860,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS heap_pressure_end
+@TLM {"ms":139393,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":140448,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":141452,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":142461,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":143470,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":144503,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":145559,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":146567,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":147567,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":148567,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":149567,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":150575,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":151582,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":152631,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":153660,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":154715,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":155719,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS mutex_starve_start
+@TLM {"ms":156728,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":157736,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":158769,"heap":150236,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@CHAOS mutex_starve_end
+@CHAOS done
+@TLM {"ms":159826,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":160834,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":161834,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":162834,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":163834,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":164842,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":165849,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":166897,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":167926,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":168981,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":169985,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":170994,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":172003,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":173036,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":174092,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":175100,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":176100,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}
+@TLM {"ms":177100,"heap":154704,"minheap":133360,"rssi":0,"wifi":255,"safe":1,"reset":1}

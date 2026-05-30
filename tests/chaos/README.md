@@ -9,7 +9,15 @@ ESP32_Logger firmware, runnable in the Wokwi emulator under GitHub Actions.
 |------|------|
 | `src/chaos/ChaosTelemetry.h` | Emits machine-parseable `@TLM` survival snapshots (heap, WiFi, safe-mode, reset reason). Gated by `ENABLE_CHAOS_TELEMETRY`. |
 | `src/chaos/ChaosMonkey.h` | Seeded fault injector: WiFi flapping, mutex starvation, heap pressure. Gated by `ENABLE_CHAOS_MONKEY`. |
-| `tests/chaos/validate_chaos.py` | Parses a serial capture and asserts survival invariants (no crash, heap floor, post-drop WiFi survival, no permanent safe-mode, no boot loop). `--wifi-can-connect` upgrades the WiFi check to require a *stable reconnect* (real HIL with an AP); omit it for Wokwi, which has no AP. |
+| `tests/chaos/validate_chaos.py` | Parses a serial capture and asserts survival invariants (no crash, heap floor, post-drop WiFi survival, no chaos-induced safe mode, no boot loop). Flags for a fully-provisioned/HIL environment: `--wifi-can-connect` (require a stable WiFi *reconnect* — omit for Wokwi, which has no AP) and `--strict-safe-mode` (fail if safe at the end — omit for a bare Wokwi image with no LittleFS partition, where only a chaos-induced *healthy→safe* transition fails). |
+
+> **Wokwi note:** `wokwi-cli` flashes only `firmware.bin`, not the partition
+> table, so there is no LittleFS partition to mount — the firmware boots into
+> safe mode (correctly) and runs there.  The default validator flags treat that
+> boot-time degraded-but-stable state as acceptable and still assert full
+> survival under chaos.  A follow-up can flash a real LittleFS image into the
+> sim (`wokwi.toml` `[[flash]]` partitions) for a "full boot" run; then add
+> `--strict-safe-mode` to the validator call.
 | `tests/chaos/fixtures/` | `good.log` / `crash.log` — validator self-test corpus. |
 | `wokwi.toml`, `diagram.json` (repo root) | Minimal ESP32-C3 Wokwi setup (root so `wokwi-cli .` finds them). |
 | `.github/workflows/chaos-test.yml` | Gating validator self-test + non-gating Wokwi sim job. |

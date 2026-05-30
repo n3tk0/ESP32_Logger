@@ -58,6 +58,19 @@ jobs:
             exit 1
           fi
           echo "strict reconnect mode correctly rejected the no-AP survival log"
+      - name: real Wokwi run (boot-safe + survived chaos) must PASS
+        run: |
+          python3 tests/chaos/validate_chaos.py \
+            --input tests/chaos/fixtures/wokwi_boot_safe_survival.log --require-chaos
+      - name: real Wokwi run must FAIL under --strict-safe-mode (ended safe)
+        run: |
+          if python3 tests/chaos/validate_chaos.py \
+               --input tests/chaos/fixtures/wokwi_boot_safe_survival.log \
+               --require-chaos --strict-safe-mode; then
+            echo "::error::--strict-safe-mode passed a log that ended in safe mode"
+            exit 1
+          fi
+          echo "strict-safe-mode correctly rejected the boot-safe log"
 
   gate:
     name: chaos sim gate (token check)
