@@ -106,10 +106,14 @@ def main():
         if not chaos:
             failures.append("--require-chaos set but no @CHAOS markers seen")
         dropped = any("wifi_drop" in c for c in chaos)
-        # WiFi status 3 == WL_CONNECTED in arduino-esp32.
-        recovered = any(t.get("wifi") == 3 for t in tlm[len(tlm)//2:]) if tlm else False
+        # WiFi status 3 == WL_CONNECTED in arduino-esp32.  Require STABLE
+        # end-state recovery: the last few samples must all be connected.  (An
+        # "any in the second half" check passes even when WiFi drops late and
+        # never reconnects, since the early part of that window is still up.)
+        recovered = (len(tlm) >= 5 and all(t.get("wifi") == 3 for t in tlm[-5:]))
         if dropped and not recovered:
-            failures.append("WiFi dropped by chaos but never reconnected (no wifi==3 later)")
+            failures.append("WiFi dropped by chaos but not stably reconnected "
+                            "at end of run (last 5 samples not all wifi==3)")
 
     # --- report ---
     print(f"parsed: boots={len(boots)} tlm={len(tlm)} chaos={len(chaos)} "

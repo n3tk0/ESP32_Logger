@@ -57,6 +57,11 @@
 class ChaosMonkey {
 public:
     static void begin() {
+        // Idempotent: never spawn a second injector task if begin() is somehow
+        // called twice (re-init / logic error).
+        static bool started = false;
+        if (started) return;
+        started = true;
         xTaskCreatePinnedToCore(_run, "chaos", 4096, nullptr,
                                 1 /* low prio */, nullptr, 0);
     }

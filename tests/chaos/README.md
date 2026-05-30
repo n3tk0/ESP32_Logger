@@ -11,7 +11,7 @@ ESP32_Logger firmware, runnable in the Wokwi emulator under GitHub Actions.
 | `src/chaos/ChaosMonkey.h` | Seeded fault injector: WiFi flapping, mutex starvation, heap pressure. Gated by `ENABLE_CHAOS_MONKEY`. |
 | `tests/chaos/validate_chaos.py` | Parses a serial capture and asserts survival invariants (no crash, heap floor, WiFi recovery, no permanent safe-mode, no boot loop). |
 | `tests/chaos/fixtures/` | `good.log` / `crash.log` — validator self-test corpus. |
-| `wokwi/diagram.json`, `wokwi/wokwi.toml` | Minimal ESP32-C3 Wokwi setup. |
+| `wokwi.toml`, `diagram.json` (repo root) | Minimal ESP32-C3 Wokwi setup (root so `wokwi-cli .` finds them). |
 | `.github/workflows/chaos-test.yml` | Gating validator self-test + non-gating Wokwi sim job. |
 
 ## Safety model

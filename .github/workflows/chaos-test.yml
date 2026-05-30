@@ -88,7 +88,17 @@ jobs:
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
-          wokwi-cli . --timeout 180000 --serial-log-file chaos-serial.log
+          # wokwi.toml / diagram.json live at the repo root, so run from "." .
+          # wokwi-cli exits non-zero when it hits --timeout (expected for a soak
+          # run with no explicit exit scenario), so don't let that fail the job —
+          # the validator below is the real gate.  We DO fail if no serial was
+          # captured at all (that means the sim never started).
+          wokwi-cli . --timeout 180000 --serial-log-file chaos-serial.log || true
+          if [ ! -s chaos-serial.log ]; then
+            echo "::error::no serial output captured — Wokwi sim did not run"
+            exit 1
+          fi
+          echo "captured $(wc -l < chaos-serial.log) serial lines"
 
       - name: Validate survival invariants
         run: |
