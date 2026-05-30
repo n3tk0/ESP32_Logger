@@ -251,10 +251,32 @@ Edit `tools/deploy_gui.spec` to:
 
 ### Troubleshooting
 
-**Antivirus false positive:**
-- Some antivirus software flags PyInstaller executables
-- Add to whitelist or code-sign the executable
-- Consider using a code signing certificate for distribution
+**Antivirus false positive (e.g. `Behavior:Win32/DefenseEvasion.A!ml`):**
+
+PyInstaller `.exe` files are commonly flagged by Windows Defender and other
+antivirus engines. This is a **false positive** — the build is not malware. The
+heuristics trigger because:
+- PyInstaller's onefile bootloader unpacks itself to a temp dir at runtime
+  (looks like "self-extracting" behavior), and
+- the tool legitimately spawns subprocesses (`pio`, `esptool`).
+
+The spec file already minimizes this by:
+- **disabling UPX compression** (`upx=False`) — packed executables are the
+  single biggest heuristic trigger, and
+- **embedding Windows version metadata** (`version_info.txt`) so the binary
+  looks like a published app rather than an anonymous stub.
+
+If it is still flagged:
+- **Restore from quarantine** and add an exclusion: Windows Security →
+  Virus & threat protection → Manage settings → Exclusions → add the `.exe`.
+- **Report the false positive** to Microsoft:
+  https://www.microsoft.com/en-us/wdsi/filesubmission — getting it whitelisted
+  upstream helps all users.
+- **Run from source instead** (no exe): `python tools/deploy_gui.py`. This never
+  trips antivirus because it's plain Python.
+- **For public distribution, code-sign the executable.** An Authenticode (ideally
+  EV) certificate is the only thing that reliably stops Defender/SmartScreen
+  warnings. Sign in CI with `signtool` using a cert stored in GitHub secrets.
 
 **Serial port not detected:**
 - Ensure pyserial is included (it is by default)
@@ -262,8 +284,9 @@ Edit `tools/deploy_gui.spec` to:
 
 **Large file size:**
 - Normal for PyInstaller (includes Python + all deps)
-- Use UPX for compression (enabled in spec file)
-- Consider distributing as installer instead
+- UPX compression is intentionally **disabled** to avoid antivirus false
+  positives (see above) — this trades a larger file for fewer AV problems
+- Consider distributing as an installer instead
 
 ## Extending the System
 
