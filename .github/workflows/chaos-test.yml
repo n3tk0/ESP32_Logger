@@ -69,6 +69,7 @@ jobs:
     needs: gate
     if: ${{ needs.gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 12       # backstop: build (~2m) + Wokwi soak (3m) + slack
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -89,11 +90,15 @@ jobs:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
           # wokwi.toml / diagram.json live at the repo root, so run from "." .
-          # wokwi-cli exits non-zero when it hits --timeout (expected for a soak
-          # run with no explicit exit scenario), so don't let that fail the job —
-          # the validator below is the real gate.  We DO fail if no serial was
-          # captured at all (that means the sim never started).
-          wokwi-cli . --timeout 180000 --serial-log-file chaos-serial.log || true
+          # --timeout makes wokwi-cli stop the sim after 180 s, but if it ever
+          # hangs (waiting on input, network, etc.) that internal timeout won't
+          # fire — so wrap it in a hard wall-clock `timeout` as a backstop and
+          # SIGKILL after a grace period.  wokwi-cli exits non-zero when it hits
+          # its --timeout (expected for a soak run with no exit scenario), and
+          # `timeout` exits 124 if it had to kill it; neither should fail the
+          # job here — the validator below is the real gate.
+          timeout --kill-after=30s 240s \
+            wokwi-cli . --timeout 180000 --serial-log-file chaos-serial.log || true
           if [ ! -s chaos-serial.log ]; then
             echo "::error::no serial output captured — Wokwi sim did not run"
             exit 1
