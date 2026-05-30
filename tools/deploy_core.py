@@ -250,22 +250,24 @@ class DeployManager:
         if modified:
             ini_file.write_text("\n".join(result))
 
-    def _run_cmd(self, cmd) -> int:
+    def _run_cmd(self, cmd: list[str]) -> int:
         """Run a subprocess command and stream output to callback."""
         self._log(f"$ {shlex.join(cmd)}")
         try:
-            process = subprocess.Popen(
+            # Context manager guarantees the process is reaped and its pipes
+            # are closed even if the logging callback raises or we're interrupted.
+            with subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-            )
-            if process.stdout:
-                for line in process.stdout:
-                    self._log(line, end="")
-            process.wait()
-            return process.returncode
+            ) as process:
+                if process.stdout:
+                    for line in process.stdout:
+                        self._log(line, end="")
+                process.wait()
+                return process.returncode
         except Exception as exc:
             self._log(f"Error: {exc}")
             return 1
