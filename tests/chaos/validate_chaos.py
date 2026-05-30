@@ -72,8 +72,16 @@ def main():
                     help="also require @CHAOS markers + WiFi recovery after a drop")
     args = ap.parse_args()
 
-    data = open(args.input) if args.input else sys.stdin
-    boots, tlm, crashes, chaos, rst_count = parse(data)
+    # Serial captures routinely contain non-UTF-8 noise (boot garbage, partial
+    # frames, line glitches); decode leniently so the validator never crashes
+    # with UnicodeDecodeError mid-run.
+    if args.input:
+        with open(args.input, "r", encoding="utf-8", errors="replace") as f:
+            boots, tlm, crashes, chaos, rst_count = parse(f)
+    else:
+        if hasattr(sys.stdin, "reconfigure"):
+            sys.stdin.reconfigure(errors="replace")
+        boots, tlm, crashes, chaos, rst_count = parse(sys.stdin)
 
     failures = []
 
