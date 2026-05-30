@@ -27,14 +27,14 @@ start-up), so a red CI run is replayable with the same fault schedule.
 
 - ✅ Self-contained pieces (headers, validator, fixtures, Wokwi config, workflow) — committed.
 - ✅ `validate_chaos.py` verified locally: `good.log` → pass, `crash.log` → fail.
-- ⏳ **Not yet wired into the firmware build** (the 3 edits below). These touch
-  large production files and were intentionally left for a verified pass — apply
-  them, then build `chaos_simulator` and run the workflow.
-- ⏳ Wokwi job **skips cleanly** (no red ❌) until the `[env:chaos_simulator]` env
-  exists and the `WOKWI_CLI_TOKEN` secret is added (free token:
-  https://wokwi.com/ci); it auto-enables once the secret is present.
+- ✅ **Wired into the firmware build.** The 3 integration edits below are applied:
+  `[env:chaos_simulator]` exists in `platformio.ini`, and `ESP_Logger.ino`
+  includes the chaos headers + calls the hooks. Normal builds are unaffected
+  (the hooks expand to no-ops). Kept in this README as a reference / changelog.
+- ✅ Wokwi job auto-enables once `WOKWI_CLI_TOKEN` is set; it skips cleanly
+  (no red ❌) when the secret is absent (free token: https://wokwi.com/ci).
 
-## Integration — the 3 edits to enable it
+## Integration — the 3 edits (already applied; kept for reference)
 
 ### 1. `platformio.ini` — add the chaos build env
 
