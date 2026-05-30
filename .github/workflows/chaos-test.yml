@@ -1,0 +1,152 @@
+# Phase 3 — Chaos / boot-smoke resilience testing.
+#
+# Jobs:
+#   1. validator-selftest (GATING) — proves tests/chaos/validate_chaos.py works
+#      against known-good / known-bad fixtures.  No board, no Wokwi, no secret,
+#      so it is safe to gate on.
+#   2. gate — reads whether the WOKWI_CLI_TOKEN secret is configured (secrets
+#      can't be used in a job-level `if:`, so we surface it as an output).
+#   3. chaos-sim — builds [env:chaos_simulator] and runs it in Wokwi, validating
+#      the serial capture.  SKIPS cleanly (neutral, no red X) until the secret
+#      exists; once it does, this job runs and gates.
+#
+# Triggers: manual dispatch + weekly schedule (chaos soak is long; not per-PR).
+# The cheap validator-selftest also runs on PRs that touch these files.
+
+name: Chaos Test
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1"   # Mondays 04:00 UTC
+  pull_request:
+    paths:
+      - 'tests/chaos/**'
+      - '.github/workflows/chaos-test.yml'
+
+jobs:
+  validator-selftest:
+    name: validator self-test (gating)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: good fixture must PASS
+        run: |
+          python3 tests/chaos/validate_chaos.py \
+            --input tests/chaos/fixtures/good.log --require-chaos
+      - name: crash fixture must FAIL
+        run: |
+          if python3 tests/chaos/validate_chaos.py \
+               --input tests/chaos/fixtures/crash.log; then
+            echo "::error::validator passed a crash log — detection broken"
+            exit 1
+          fi
+          echo "crash fixture correctly rejected"
+      - name: wokwi-survival fixture must PASS in Wokwi mode (no AP)
+        run: |
+          python3 tests/chaos/validate_chaos.py \
+            --input tests/chaos/fixtures/wokwi_survival.log --require-chaos
+      - name: wokwi-survival fixture must FAIL in strict HIL mode (never reconnected)
+        run: |
+          if python3 tests/chaos/validate_chaos.py \
+               --input tests/chaos/fixtures/wokwi_survival.log \
+               --require-chaos --wifi-can-connect; then
+            echo "::error::strict --wifi-can-connect passed a never-reconnect log"
+            exit 1
+          fi
+          echo "strict reconnect mode correctly rejected the no-AP survival log"
+      - name: real Wokwi run (boot-safe + survived chaos) must PASS
+        run: |
+          python3 tests/chaos/validate_chaos.py \
+            --input tests/chaos/fixtures/wokwi_boot_safe_survival.log --require-chaos
+      - name: real Wokwi run must FAIL under --strict-safe-mode (ended safe)
+        run: |
+          if python3 tests/chaos/validate_chaos.py \
+               --input tests/chaos/fixtures/wokwi_boot_safe_survival.log \
+               --require-chaos --strict-safe-mode; then
+            echo "::error::--strict-safe-mode passed a log that ended in safe mode"
+            exit 1
+          fi
+          echo "strict-safe-mode correctly rejected the boot-safe log"
+      - name: post-drop crash fixture must FAIL (no survival after wifi_drop)
+        run: |
+          if python3 tests/chaos/validate_chaos.py \
+               --input tests/chaos/fixtures/post_drop_crash.log --require-chaos; then
+            echo "::error::validator missed a crash immediately after a wifi_drop"
+            exit 1
+          fi
+          echo "post-drop crash correctly rejected"
+
+  gate:
+    name: chaos sim gate (token check)
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          if [ -n "$WOKWI_CLI_TOKEN" ]; then
+            echo "enabled=true"  >> "$GITHUB_OUTPUT"
+            echo "Wokwi token present — chaos-sim will run."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "No WOKWI_CLI_TOKEN secret — chaos-sim will skip (see tests/chaos/README.md)."
+          fi
+
+  chaos-sim:
+    name: chaos sim
+    needs: gate
+    if: ${{ needs.gate.outputs.enabled == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12       # backstop: build (~2m) + Wokwi soak (3m) + slack
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build chaos_simulator firmware
+        run: pio run -e chaos_simulator
+
+      - name: Install Wokwi CLI
+        run: curl -L https://wokwi.com/ci/install.sh | sh
+
+      - name: Run firmware in Wokwi (3 min) and capture serial
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          # wokwi.toml / diagram.json live at the repo root, so run from "." .
+          # --timeout makes wokwi-cli stop the sim after 180 s, but if it ever
+          # hangs (waiting on input, network, etc.) that internal timeout won't
+          # fire — so wrap it in a hard wall-clock `timeout` as a backstop and
+          # SIGKILL after a grace period.  wokwi-cli exits non-zero when it hits
+          # its --timeout (expected for a soak run with no exit scenario), and
+          # `timeout` exits 124 if it had to kill it; neither should fail the
+          # job here — the validator below is the real gate.
+          timeout --kill-after=30s 240s \
+            wokwi-cli . --timeout 180000 --serial-log-file chaos-serial.log || true
+          if [ ! -s chaos-serial.log ]; then
+            echo "::error::no serial output captured — Wokwi sim did not run"
+            exit 1
+          fi
+          echo "captured $(wc -l < chaos-serial.log) serial lines"
+
+      - name: Validate survival invariants
+        run: |
+          python3 tests/chaos/validate_chaos.py \
+            --input chaos-serial.log --require-chaos --min-heap 15000
+
+      - name: Upload serial capture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-serial-log
+          path: chaos-serial.log

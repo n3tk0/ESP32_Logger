@@ -1,0 +1,14 @@
+# Wokwi simulator config for the chaos / boot-smoke CI run.
+#
+# Paths are relative to the repo root (wokwi-cli is invoked from there in the
+# workflow).  The firmware + ELF are produced by the PlatformIO
+# [env:chaos_simulator] build before wokwi-cli runs.
+#
+# NOTE: requires a free Wokwi CI token (https://wokwi.com/ci) stored as the
+# WOKWI_CLI_TOKEN repository secret.  Until that secret exists the chaos
+# workflow is non-gating (continue-on-error), so nothing goes red.
+
+[wokwi]
+version = 1
+firmware = ".pio/build/chaos_simulator/firmware.bin"
+elf      = ".pio/build/chaos_simulator/firmware.elf"

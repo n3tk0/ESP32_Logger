@@ -1,0 +1,12 @@
+@TLM_BOOT {"reset":1,"heap":200000}
+@TLM {"ms":1000,"heap":199000,"minheap":199000,"rssi":-50,"wifi":3,"safe":0,"reset":1}
+@CHAOS begin seed=0x5eed1234 duration_ms=150000
+@TLM {"ms":2000,"heap":198000,"minheap":198000,"rssi":-50,"wifi":3,"safe":0,"reset":1}
+@TLM {"ms":3000,"heap":198000,"minheap":198000,"rssi":-50,"wifi":3,"safe":0,"reset":1}
+@TLM {"ms":4000,"heap":198000,"minheap":198000,"rssi":-50,"wifi":3,"safe":0,"reset":1}
+@TLM {"ms":5000,"heap":198000,"minheap":198000,"rssi":-51,"wifi":3,"safe":0,"reset":1}
+@TLM {"ms":6000,"heap":198000,"minheap":198000,"rssi":-51,"wifi":3,"safe":0,"reset":1}
+@CHAOS wifi_drop
+@TLM {"ms":7000,"heap":197500,"minheap":197500,"rssi":0,"wifi":6,"safe":0,"reset":1}
+Guru Meditation Error: Core 0 panic'ed (StoreProhibited).
+Backtrace: 0x40081abc 0x40081def
