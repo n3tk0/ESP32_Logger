@@ -250,7 +250,7 @@ class DeployManager:
         if modified:
             ini_file.write_text("\n".join(result))
 
-    def _run_cmd(self, cmd) -> int:
+    def _run_cmd(self, cmd: list[str]) -> int:
         """Run a subprocess command and stream output to callback."""
         self._log(f"$ {shlex.join(cmd)}")
         try:
@@ -261,14 +261,29 @@ class DeployManager:
                 text=True,
                 bufsize=1,
             )
-            if process.stdout:
-                for line in process.stdout:
-                    self._log(line, end="")
-            process.wait()
-            return process.returncode
         except Exception as exc:
             self._log(f"Error: {exc}")
             return 1
+
+        # Don't use Popen as a context manager: its __exit__ calls wait()
+        # without terminating first, so a KeyboardInterrupt (or an exception
+        # from the logging callback) would block forever on a still-running
+        # child. Instead, terminate the child on any exception, then re-raise.
+        try:
+            if process.stdout:
+                for line in process.stdout:
+                    self._log(line, end="")
+            return process.wait()
+        except BaseException:
+            process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            raise
+        finally:
+            if process.stdout:
+                process.stdout.close()
 
     # ── Step implementations ───────────────────────────────────────────────────
 
