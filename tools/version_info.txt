@@ -25,7 +25,7 @@ VSVersionInfo(
                     StringStruct("FileDescription", "ESP32 Logger Deploy & Flash Tool"),
                     StringStruct("FileVersion", "1.0.0.0"),
                     StringStruct("InternalName", "ESP32_Deploy"),
-                    StringStruct("LegalCopyright", "Open source - MIT License"),
+                    StringStruct("LegalCopyright", "Open source project"),
                     StringStruct("OriginalFilename", "ESP32_Deploy.exe"),
                     StringStruct("ProductName", "ESP32 Logger Deploy Tool"),
                     StringStruct("ProductVersion", "1.0.0.0"),
