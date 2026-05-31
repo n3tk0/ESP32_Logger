@@ -49,8 +49,10 @@ public:
     // — before `running` is set true at the end of init(). They would observe
     // running==false, print "started"/"stopped" and vTaskDelete themselves,
     // leaving dead handles whose heartbeats never update (false watchdog trips).
-    // Tasks block on this gate until init() finishes wiring everything up; it is
-    // set false by shutdown() so it never masks a real stop request.
+    // Tasks block on this gate until init() finishes wiring everything up.
+    // shutdown() also opens it (sets it true) so a task still parked at startup
+    // observes running==false and exits cleanly instead of waiting out the
+    // waitForStart() timeout.
     static std::atomic<bool> startGate;
 
     // Block the calling task until init() opens the start gate (or asks all

@@ -33,11 +33,12 @@ bool TaskManager::waitForStart() {
     // normal path init() opens the gate within microseconds. On the failure
     // path _cleanupPartialInit() force-deletes these handles, so this loop is
     // only a safety net.
+    bool opened = false;
     for (int i = 0; i < 1000; i++) {            // up to ~10 s
-        if (startGate.load(std::memory_order_acquire)) break;
+        if (startGate.load(std::memory_order_acquire)) { opened = true; break; }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    return startGate.load(std::memory_order_acquire) && running.load();
+    return opened && running.load(std::memory_order_acquire);
 }
 
 // Storage task needs a persistent param (lives for task lifetime)
