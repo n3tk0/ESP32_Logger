@@ -15,6 +15,14 @@ from pathlib import Path
 # __file__ is NOT available in the spec namespace on all platforms.
 ROOT = Path(SPECPATH).parent
 
+# Windows version-info resource. Only meaningful on Windows; harmless elsewhere.
+# Embedding product metadata reduces antivirus false positives by making the
+# binary look like a published app rather than an anonymous PyInstaller stub.
+_version_file = ROOT / 'tools' / 'version_info.txt'
+if sys.platform == 'win32' and not _version_file.is_file():
+    raise FileNotFoundError(f"Required Windows version info file not found: {_version_file}")
+version_info = str(_version_file) if sys.platform == 'win32' else None
+
 a = Analysis(
     [str(ROOT / 'tools' / 'deploy_gui.py')],
     pathex=[str(ROOT / 'tools')],
@@ -47,7 +55,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX compression is the single most common antivirus false-positive
+    # trigger (heuristics flag packed executables as malware). Disable it.
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,  # Hide console window (True for debugging)
@@ -55,4 +65,6 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=None,  # Optional: add icon path here
+    version=version_info,  # Windows version metadata (see version_info.txt)
 )
+
