@@ -9,6 +9,11 @@
 void sensorTaskFunc(void* /*param*/) {
     Serial.println("[SensorTask] started");
 
+    // Wait until init() has finished building the pipeline and opened the start
+    // gate. Without this the scheduler preempts init() here (this task is higher
+    // priority than loop), running is still false, and the task self-deletes.
+    if (!TaskManager::waitForStart()) { Serial.println("[SensorTask] stopped"); vTaskDelete(nullptr); return; }
+
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_SENSOR] = millis();   // C4 heartbeat
 

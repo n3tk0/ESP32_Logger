@@ -1016,7 +1016,12 @@ void loop() {
         }
 
         // C4: software watchdog
-        if (!TaskManager::checkHealth()) {
+        // Stamp restartTimer only on the rising edge. Re-stamping every
+        // iteration (this runs ~every 10ms) keeps millis()-restartTimer pinned
+        // below the 2000ms graceful-reboot threshold, so the reboot never fires
+        // and the device floods "[Watchdog] Task N stuck" forever instead of
+        // recovering.
+        if (!TaskManager::checkHealth() && !shouldRestart) {
             shouldRestart = true; restartTimer = millis();
         }
         delay(10);
@@ -1027,8 +1032,9 @@ void loop() {
     if (apModeTriggered && !onlineLoggerMode) {
         // Hybrid: still manage power if idle
         if (g_platformMode == PLATFORM_HYBRID) _manageContinuousPower();
-        // C4: software watchdog in hybrid/web mode
-        if (g_platformMode != PLATFORM_LEGACY && !TaskManager::checkHealth()) {
+        // C4: software watchdog in hybrid/web mode — rising-edge only so the
+        // 2000ms graceful-reboot window can actually elapse (see note above).
+        if (g_platformMode != PLATFORM_LEGACY && !TaskManager::checkHealth() && !shouldRestart) {
             shouldRestart = true; restartTimer = millis();
         }
         delay(10);

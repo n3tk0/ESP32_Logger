@@ -12,6 +12,11 @@
 void exportTaskFunc(void* /*param*/) {
     Serial.println("[ExportTask] started");
 
+    // See SensorTask: park until init() opens the start gate. ExportTask shares
+    // loop's priority so it wouldn't preempt today, but gating it keeps every
+    // pipeline task consistent and safe if priorities are ever retuned.
+    if (!TaskManager::waitForStart()) { Serial.println("[ExportTask] stopped"); vTaskDelete(nullptr); return; }
+
     // EXPORT_BATCH_SIZE / EXPORT_FLUSH_INTERVAL_MS are configured in setup.h.
     SensorReading batch[EXPORT_BATCH_SIZE];
     size_t        batchCount  = 0;   // CM-4: match sendAll(…, size_t count)

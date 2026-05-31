@@ -10,6 +10,10 @@
 void slowSensorTaskFunc(void* /*param*/) {
     Serial.println("[SlowSensorTask] started");
 
+    // See SensorTask: park until init() opens the start gate so a higher-prio
+    // task can't self-delete by observing running==false mid-init.
+    if (!TaskManager::waitForStart()) { Serial.println("[SlowSensorTask] stopped"); vTaskDelete(nullptr); return; }
+
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();   // C4 heartbeat
 

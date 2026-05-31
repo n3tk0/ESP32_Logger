@@ -43,4 +43,20 @@ public:
 
     // Signals tasks to exit their loops
     static std::atomic<bool> running;
+
+    // Startup latch (AUDIT 2.3 follow-up): on a single-core target the higher-
+    // priority sensor/process tasks preempt init() the instant they are created
+    // — before `running` is set true at the end of init(). They would observe
+    // running==false, print "started"/"stopped" and vTaskDelete themselves,
+    // leaving dead handles whose heartbeats never update (false watchdog trips).
+    // Tasks block on this gate until init() finishes wiring everything up.
+    // shutdown() also opens it (sets it true) so a task still parked at startup
+    // observes running==false and exits cleanly instead of waiting out the
+    // waitForStart() timeout.
+    static std::atomic<bool> startGate;
+
+    // Block the calling task until init() opens the start gate (or asks all
+    // tasks to stop). Returns true if the task should run, false if it should
+    // exit immediately (init failed / shutdown raced startup).
+    static bool waitForStart();
 };

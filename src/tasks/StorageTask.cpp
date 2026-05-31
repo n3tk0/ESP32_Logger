@@ -30,6 +30,11 @@ uint32_t nowEpochSafe() {
 // ---------------------------------------------------------------------------
 void storageTaskFunc(void* param) {
     Serial.println("[StorageTask] started");
+
+    // See SensorTask: park until init() opens the start gate before touching
+    // the filesystem, so a shutdown that races startup exits before doing work.
+    if (!TaskManager::waitForStart()) { Serial.println("[StorageTask] stopped"); vTaskDelete(nullptr); return; }
+
     auto* p = static_cast<StorageTaskParam*>(param);
     StorageTaskParam cfg = p ? *p : StorageTaskParam{};
 

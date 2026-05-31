@@ -39,6 +39,10 @@ static bool isPlausible(const SensorReading& r) {
 void processingTaskFunc(void* /*param*/) {
     Serial.println("[ProcessingTask] started");
 
+    // See SensorTask: park until init() opens the start gate so a higher-prio
+    // task can't self-delete by observing running==false mid-init.
+    if (!TaskManager::waitForStart()) { Serial.println("[ProcessingTask] stopped"); vTaskDelete(nullptr); return; }
+
     SensorReading r;
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_PROCESS] = millis();   // C4 heartbeat
