@@ -18,6 +18,27 @@ TaskHandle_t      TaskManager::hProcess    = nullptr;
 TaskHandle_t      TaskManager::hStorage    = nullptr;
 TaskHandle_t      TaskManager::hExport     = nullptr;
 std::atomic<bool> TaskManager::running(false);
+std::atomic<bool> TaskManager::startGate(false);
+
+// ---------------------------------------------------------------------------
+// waitForStart() — block a freshly-created pipeline task until init() has
+// finished building every queue/mutex and opened the gate. Without this the
+// higher-priority sensor/process tasks (prio 2-3 vs loop's prio 1) preempt
+// init() the moment they are created, observe running==false, and self-delete.
+// Returns false if shutdown() ran before the gate opened (task should exit).
+// ---------------------------------------------------------------------------
+bool TaskManager::waitForStart() {
+    // Cap the wait so a never-opened gate (e.g. init aborted between this
+    // task's creation and opening the gate) can't wedge a task forever. On the
+    // normal path init() opens the gate within microseconds. On the failure
+    // path _cleanupPartialInit() force-deletes these handles, so this loop is
+    // only a safety net.
+    for (int i = 0; i < 1000; i++) {            // up to ~10 s
+        if (startGate.load(std::memory_order_acquire)) break;
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return startGate.load(std::memory_order_acquire) && running.load();
+}
 
 // Storage task needs a persistent param (lives for task lifetime)
 static StorageTaskParam storageParam;
@@ -51,7 +72,8 @@ static void _cleanupPartialInit() {
     if (storageQueue) { vQueueDelete(storageQueue); storageQueue = nullptr; }
     if (exportQueue)  { vQueueDelete(exportQueue);  exportQueue  = nullptr; }
     // Mutexes intentionally left alive — see comment above.
-    TaskManager::running = false;
+    TaskManager::running   = false;
+    TaskManager::startGate = false;  // never leave the gate open on a failed init
 }
 
 // PR #105 follow-up: factored out so /api/config/platform can re-apply SDS011
@@ -87,6 +109,12 @@ bool TaskManager::init(fs::FS& fs) {
     // built below; if any step fails, half-built state would have left
     // running=true with NULL queues, racing the rest of the system.
     // running is set ONLY at the bottom, just before return true.
+
+    // Keep the start gate closed until every queue/mutex/task is built. Tasks
+    // created below block in waitForStart() until we open it, so a high-prio
+    // task can't preempt us, see running==false, and self-delete. (AUDIT 2.3
+    // follow-up — see waitForStart()/startGate.)
+    startGate = false;
 
     // Zero heartbeats — stale values survive warm reboots (RTC_SW_CPU_RST)
     // and cause immediate false-positive watchdog triggers (#C4).
@@ -223,12 +251,21 @@ bool TaskManager::init(fs::FS& fs) {
 
     // AUDIT 2.3: running=true ONLY now, after every resource is built.
     running = true;
+    // Re-seed heartbeats to "now" so the up-to-10s any task may have spent
+    // parked in waitForStart() doesn't count against the 30s silence budget.
+    for (int i = 0; i < TASK_COUNT; i++) g_taskHeartbeat[i] = millis();
+    // Open the gate LAST: tasks parked in waitForStart() now observe both
+    // running==true and startGate==true and enter their work loops.
+    startGate.store(true, std::memory_order_release);
     return true;
 }
 
 // ---------------------------------------------------------------------------
 void TaskManager::shutdown() {
     running.store(false, std::memory_order_release);
+    // Release any task still parked at startup so it observes running==false
+    // and exits cleanly instead of waiting out the full waitForStart() timeout.
+    startGate.store(true, std::memory_order_release);
 
     // Wait for sensor queues to drain (up to 3s) before hard timeout.
     // Prevents storageQueue data loss when sensor pipeline is still writing.
