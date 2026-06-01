@@ -156,7 +156,13 @@ void tickCaptivePortalDNS() {
 }
 
 bool syncTimeFromNTP() {
-    if (!wifiConnectedAsClient) { DBGLN("NTP: No WiFi"); return false; }
+    // wifiConnectedAsClient is sticky (only cleared when we fall back to AP),
+    // so also check the live link: a bare STA drop leaves the flag true while
+    // WiFi.status() is disconnected. Without this, the 10 s wait loop below
+    // would block the main loop every retry while the link is actually down.
+    if (!wifiConnectedAsClient || WiFi.status() != WL_CONNECTED) {
+        DBGLN("NTP: No WiFi"); return false;
+    }
 
     // A blank/garbage server (e.g. left empty by a config migration) makes
     // configTime() a no-op, so the sync silently times out even on a fully

@@ -921,7 +921,10 @@ void loop() {
     {
         static uint32_t s_lastNtpRetry = 0;
         const uint32_t NTP_RETRY_INTERVAL_MS = 60000;  // 1 min between attempts
-        if (wifiConnectedAsClient && !rtcValid && g_pendingNtpSync == 0) {
+        // wifiConnectedAsClient is sticky, so confirm the live link too —
+        // otherwise a bare STA drop would keep enqueuing syncs.
+        bool clientLinkUp = wifiConnectedAsClient && WiFi.status() == WL_CONNECTED;
+        if (clientLinkUp && !rtcValid && g_pendingNtpSync == 0) {
             uint32_t nowMs = millis();
             if (s_lastNtpRetry == 0) {
                 s_lastNtpRetry = nowMs;  // start the timer; first retry after the interval
@@ -929,7 +932,7 @@ void loop() {
                 s_lastNtpRetry = nowMs;
                 g_pendingNtpSync = 1;    // handled by the block above next iteration
             }
-        } else if (!wifiConnectedAsClient || rtcValid) {
+        } else if (!clientLinkUp || rtcValid) {
             // Reset on disconnect (or once time is valid) so a reconnect gets a
             // fresh stabilization window instead of firing a blocking sync the
             // instant the link returns, before DNS/IP are ready.
