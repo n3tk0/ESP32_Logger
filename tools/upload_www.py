@@ -13,6 +13,16 @@ except Exception as e:
     print(f"NOT reachable: {e}")
     sys.exit(1)
 
+# Mutating endpoints (/upload, /delete, /mkdir) require the per-boot CSRF
+# token as a ?csrf= param, else they 403. Fetch it once and pass it along.
+CSRF = ""
+try:
+    CSRF = requests.get(f"{BASE}/api/csrf-token", timeout=3).json().get("token", "") or ""
+    print("Fetched CSRF token" if CSRF else "WARN: no CSRF token returned")
+except Exception as e:
+    print(f"WARN: could not fetch CSRF token ({e}); requests may 403")
+_csrf = f"&csrf={CSRF}" if CSRF else ""
+
 # Clean old www files
 print("Cleaning /www/...")
 for sub in ["/", "/js/", "/pages/"]:
@@ -21,7 +31,7 @@ for sub in ["/", "/js/", "/pages/"]:
         for f in r.json().get("files", []):
             if not f.get("isDir"):
                 p = f["path"]
-                requests.post(f"{BASE}/delete?path={p}&storage=internal", timeout=5)
+                requests.post(f"{BASE}/delete?path={p}&storage=internal{_csrf}", timeout=5)
                 print(f"  DEL {p}")
     except:
         pass
@@ -34,7 +44,7 @@ for d in ["/www", "/www/js", "/www/pages"]:
     name = parts[-1]
     parent = "/" + "/".join(parts[:-1]) if len(parts) > 1 else "/"
     try:
-        r = requests.post(f"{BASE}/mkdir?name={name}&dir={parent}&storage=internal", timeout=5)
+        r = requests.post(f"{BASE}/mkdir?name={name}&dir={parent}&storage=internal{_csrf}", timeout=5)
         print(f"  MKDIR {d} -> {r.status_code}")
     except Exception as e:
         print(f"  MKDIR {d} -> {e}")
@@ -56,7 +66,7 @@ for root, dirs, files in os.walk(DIST):
         # Send path as query param (more reliable than form data for ESPAsyncWebServer)
         with open(fpath, "rb") as f:
             r = requests.post(
-                f"{BASE}/upload?path={upload_dir}&storage=internal",
+                f"{BASE}/upload?path={upload_dir}&storage=internal{_csrf}",
                 files={"file": (fname, f)},
                 timeout=30,
             )
