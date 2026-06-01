@@ -217,16 +217,23 @@ function sensorsLoad() {
                   + "&from=" + from + "&to=" + now 
                   + "&agg=raw&mode=lttb&limit=32";
           fetchWithTimeout(url, {}, 5000)
-            .then(function(r) { return r.json(); })
+            .then(function(r) {
+              if (!r.ok) throw new Error("HTTP error " + r.status);
+              return r.json();
+            })
             .then(function(res) {
               if (res && res.data && res.data.length >= 2) {
                 var min = Infinity, max = -Infinity;
-                var xs = [], ys = [];
+                var ys = [];
                 res.data.forEach(function(pt) {
-                  if (pt.v < min) min = pt.v;
-                  if (pt.v > max) max = pt.v;
-                  ys.push(pt.v);
+                  var val = Number(pt.v);
+                  if (!isNaN(val)) {
+                    if (val < min) min = val;
+                    if (val > max) max = val;
+                    ys.push(val);
+                  }
                 });
+                if (ys.length < 2) return;
                 var range = max - min;
                 if (range < 1e-9) range = 1;
                 var stepX = 100 / (ys.length - 1);
@@ -239,7 +246,9 @@ function sensorsLoad() {
                 svg.innerHTML = '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>';
               }
             })
-            .catch(function(){});
+            .catch(function(err) {
+              console.error("Failed to fetch sparkline data:", err);
+            });
         });
       }
 

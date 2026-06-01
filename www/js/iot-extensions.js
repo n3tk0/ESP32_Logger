@@ -406,6 +406,7 @@
     ovFillEnvironment(normalized);
     ovFillEnergy(normalized);
     ovFillAQI(normalized);
+    ovFillOutdoor(normalized);
     ovFillSensorList(normalized);
     ovFillSensorCards(data);
   }
@@ -539,6 +540,26 @@
       fill("aqi-tvoc", "aqi-tvocv", voc.tvoc || voc.TVOC, 500, "ppb");
       fill("aqi-eco2", "aqi-eco2v", co2 ? (co2.co2 || co2.eCO2) : (voc.eco2 || voc.eCO2), 2000, "ppm");
     }
+  }
+
+  function ovFillOutdoor(data) {
+    var binding = _getBinding("outdoor");
+    var outdoorSensor = null;
+    if (Array.isArray(data)) {
+      data.forEach(function (s) {
+        if (binding && s.id === binding) { outdoorSensor = s; return; }
+        if (!binding && !outdoorSensor && s.readings &&
+            (s.id.indexOf("out") !== -1 || s.id.indexOf("weather") !== -1 || s.id.indexOf("rain") !== -1)) {
+          outdoorSensor = s;
+        }
+      });
+    }
+    if (!outdoorSensor) return;
+    var r = outdoorSensor.readings || {};
+    var rainEl = document.getElementById("ov-rain");
+    var windEl = document.getElementById("ov-wind");
+    if (rainEl && r.rain !== undefined) rainEl.textContent = typeof r.rain === "number" ? r.rain.toFixed(1) : r.rain;
+    if (windEl && r.wind !== undefined) windEl.textContent = typeof r.wind === "number" ? r.wind.toFixed(1) : r.wind;
   }
 
   function ovFillWater() {
@@ -698,8 +719,17 @@
       var cardId = "sensor__" + it.id + "__" + it.metric;
       var vEl = document.getElementById("ov-sm-" + cardId + "-v");
       var uEl = document.getElementById("ov-sm-" + cardId + "-u");
-      if (vEl && it.value !== undefined) {
-        vEl.textContent = typeof it.value === "number" ? Number(it.value).toPrecision(4) : String(it.value);
+      if (vEl && it.value !== undefined && it.value !== null) {
+        var val = Number(it.value);
+        if (!isNaN(val)) {
+          var s = val.toFixed(2);
+          if (s.indexOf('.') !== -1) {
+            s = s.replace(/\.?0+$/, '');
+          }
+          vEl.textContent = s;
+        } else {
+          vEl.textContent = String(it.value);
+        }
       }
       if (uEl && it.unit) uEl.textContent = it.unit;
     });
