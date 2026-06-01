@@ -736,11 +736,14 @@ function loadPagePartial(page) {
       return r.text();
     })
     .then(function (html) {
-      // Inject as the last child of <body> so it becomes a sibling of the
-      // other .page elements and the existing .active toggle logic finds it.
-      var host = document.createElement("div");
+      // Inject into <main id="main-content"> so the partial becomes a real
+      // sibling of the inlined .page sections and lands inside the .app CSS
+      // grid's "main" area. Appending to <body> puts it OUTSIDE the grid, so
+      // it renders below the full-height app — i.e. below the sidebar.
+      var host  = document.createElement("div");
       host.innerHTML = html;
-      while (host.firstChild) document.body.appendChild(host.firstChild);
+      var mount = document.getElementById("main-content") || document.body;
+      while (host.firstChild) mount.appendChild(host.firstChild);
       _loadedPartials[page] = true;
       // click/change/submit/input delegate from document already catch events
       // inside the new nodes; onerror does not bubble, so wire those directly.

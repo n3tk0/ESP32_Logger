@@ -79,6 +79,10 @@
   var _modeApplied = false;
   function tryApplyMode() {
     if (_modeApplied) return;
+    // May be invoked early (synchronously from the loadPagePartial wrapper on a
+    // direct #overview/#alerts load) before the poll interval fires — cancel it
+    // so it doesn't run a redundant second pass.
+    if (_modeTimer) { clearInterval(_modeTimer); _modeTimer = null; }
     var m = readMode();
     _modeApplied = true;
     applyMode(m);
@@ -127,7 +131,17 @@
   if (typeof loadPagePartial === "function") {
     var _origLoad = loadPagePartial;
     window.loadPagePartial = function (page) {
-      if (LAZY_PAGES[page] === INJECTED) return Promise.resolve();
+      if (LAZY_PAGES[page] === INJECTED) {
+        // overview/alerts are built by buildPages() inside tryApplyMode(),
+        // which is normally deferred to the CFG-poll interval. On a direct load
+        // or reload of #overview/#alerts, core.js calls navigateTo()
+        // synchronously right after populating CFG — before that interval fires
+        // — so the page element wouldn't exist yet and the router would fall
+        // back to the settings hub. Build them now, synchronously, so the
+        // element is present before navigateTo's promise resolves.
+        if (!_modeApplied) tryApplyMode();
+        return Promise.resolve();
+      }
       return _origLoad(page);
     };
   }
@@ -314,11 +328,10 @@
   function buildOverviewPage() {
     if (document.getElementById("page-overview")) return;
 
-    var page = document.createElement("main");
-    page.className = "main-content page";
+    var page = document.createElement("section");
+    page.className = "page";
     page.id = "page-overview";
     page.setAttribute("data-mode-show", "continuous hybrid");
-    page.setAttribute("role", "main");
 
     page.innerHTML =
       '<div class="page-head">' +
@@ -333,7 +346,10 @@
       '</div>' +
       '<div class="deck" id="overview-deck"></div>';
 
-    document.body.insertBefore(page, document.getElementById("toastContainer") || null);
+    // Mount inside <main id="main-content"> (the grid's "main" area), not
+    // <body> — otherwise the page renders outside the .app grid, below the
+    // sidebar. Matches where the inlined .page sections live.
+    (document.getElementById("main-content") || document.body).appendChild(page);
     reIcons(page);
 
     var addBtn = document.getElementById("ovAddSensorBtn");
@@ -608,11 +624,10 @@
   function buildAlertsPage() {
     if (document.getElementById("page-alerts")) return;
 
-    var page = document.createElement("main");
-    page.className = "main-content page";
+    var page = document.createElement("section");
+    page.className = "page";
     page.id = "page-alerts";
     page.setAttribute("data-mode-show", "continuous hybrid");
-    page.setAttribute("role", "main");
 
     page.innerHTML =
       '<div class="page-head">' +
@@ -627,7 +642,10 @@
       '</div>' +
       '<div class="deck" id="alerts-deck"></div>';
 
-    document.body.insertBefore(page, document.getElementById("toastContainer") || null);
+    // Mount inside <main id="main-content"> (the grid's "main" area), not
+    // <body> — otherwise the page renders outside the .app grid, below the
+    // sidebar. Matches where the inlined .page sections live.
+    (document.getElementById("main-content") || document.body).appendChild(page);
     reIcons(page);
 
     _alertsDeck = window.EditableDeck.mount({
