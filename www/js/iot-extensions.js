@@ -1434,7 +1434,10 @@
           body: JSON.stringify(cfg),
         }, 30000);
       })
-      .then(function (r) { return r && r.ok ? r.json() : null; })
+      // Parse the body even on a non-2xx response so the server's own error
+      // (e.g. {ok:false,error:"busy"} on 503) surfaces instead of a generic
+      // fallback message.
+      .then(function (r) { return r ? r.json() : null; })
       .then(function (res) {
         if (res && res.ok) {
           closeWizard();
