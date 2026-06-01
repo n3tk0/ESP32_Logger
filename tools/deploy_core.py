@@ -417,6 +417,12 @@ class DeployManager:
             self._emit_complete(8, 1)
             return 1
 
+        # Fetch the per-boot CSRF token. The mutating endpoints (/upload,
+        # /delete, /mkdir) reject any request without a matching token with
+        # HTTP 403 {"error":"csrf"}; the SPA injects it on every call, so the
+        # deploy tooling must do the same.
+        self._csrf_token = self._fetch_csrf(base)
+
         # Optional wipe
         if self.cfg.get("wipe_before_upload"):
             self._log("Wiping /www on device…")
@@ -483,6 +489,30 @@ class DeployManager:
         self._emit_complete(8, 1)
         return 1
 
+    def _fetch_csrf(self, base: str) -> str:
+        """Fetch the per-boot CSRF token required by mutating endpoints.
+
+        Returns '' if the endpoint is unavailable (e.g. older firmware), so
+        callers degrade gracefully rather than crashing — the request will
+        still 403 in that case, but the failure mode is unchanged.
+        """
+        try:
+            with urllib.request.urlopen(f"{base}/api/csrf-token", timeout=4) as resp:
+                data = json.loads(resp.read().decode())
+            tok = data.get("token", "") if isinstance(data, dict) else ""
+            if isinstance(tok, str) and tok:
+                self._log("Fetched CSRF token.")
+                return tok
+            self._log("⚠ CSRF token endpoint returned no token.")
+        except Exception as exc:
+            self._log(f"⚠ Could not fetch CSRF token ({exc}); uploads may be rejected (403).")
+        return ""
+
+    def _csrf_qs(self) -> str:
+        """'&csrf=<token>' query-string fragment, or '' when no token is held."""
+        tok = getattr(self, "_csrf_token", "")
+        return f"&csrf={urllib.parse.quote(tok)}" if tok else ""
+
     def _http_wipe_www(self, base: str) -> tuple[int, int]:
         """Delete every file under /www on the device."""
         self._log("Fetching file list from device…")
@@ -507,7 +537,7 @@ class DeployManager:
             disp = path if path.startswith("/") else "/" + path
             self._log(f"  🗑  {disp:<52} … ", end="")
             try:
-                del_url = f"{base}/delete?path={urllib.parse.quote(disp)}&storage=internal"
+                del_url = f"{base}/delete?path={urllib.parse.quote(disp)}&storage=internal{self._csrf_qs()}"
                 req = urllib.request.Request(del_url, data=b"", method="POST")
                 with urllib.request.urlopen(req, timeout=6):
                     pass
@@ -521,7 +551,8 @@ class DeployManager:
         return deleted, failed
 
     def _http_mkdir(self, base: str, parent: str, name: str) -> None:
-        url = f"{base}/mkdir?name={name}&dir={parent}&storage=internal"
+        q = urllib.parse.quote
+        url = f"{base}/mkdir?name={q(name)}&dir={q(parent)}&storage=internal{self._csrf_qs()}"
         try:
             req = urllib.request.Request(url, data=b"", method="POST")
             with urllib.request.urlopen(req, timeout=5):
@@ -542,7 +573,7 @@ class DeployManager:
             f'Content-Disposition: form-data; name="file"; filename="{fname}"\r\n'
             f"Content-Type: {ct}\r\n\r\n"
         ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
-        url = f"{base}/upload?path={upload_dir}&storage=internal"
+        url = f"{base}/upload?path={urllib.parse.quote(upload_dir)}&storage=internal{self._csrf_qs()}"
         req = urllib.request.Request(
             url, data=body, method="POST",
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
