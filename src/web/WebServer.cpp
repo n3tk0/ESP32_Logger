@@ -2112,7 +2112,17 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         JsonArray nets = doc["networks"].to<JsonArray>();
         int n = WiFi.scanComplete();
         if      (n == WIFI_SCAN_RUNNING) { doc["scanning"] = true; }
-        else if (n == WIFI_SCAN_FAILED)  { doc["error"] = "Scan failed"; }
+        else if (n == WIFI_SCAN_FAILED || n < 0) {
+            // On the ESP32-C3 in AP mode scanComplete() frequently reports
+            // FAILED on the first poll (no scan pending / radio still settling
+            // after the AP_STA switch). Re-kick a fresh async scan and tell the
+            // client we're still scanning instead of dead-ending on "Scan
+            // failed" — matches the self-healing /api/modules/wifi/scan path.
+            WiFi.mode(WIFI_AP_STA);
+            WiFi.scanDelete();
+            WiFi.scanNetworks(/*async=*/true);
+            doc["scanning"] = true;
+        }
         else if (n >= 0) {
             for (int i = 0; i < n && i < 20; i++) {
                 JsonObject net = nets.add<JsonObject>();
