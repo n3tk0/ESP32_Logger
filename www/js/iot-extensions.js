@@ -394,6 +394,7 @@
     var items = (data && data.items) || [];
     var map = {};
     items.forEach(function (it) {
+      if (!it) return;
       if (!map[it.id]) map[it.id] = { id: it.id, type: it.type || "", readings: {}, units: {} };
       map[it.id].readings[it.metric] = it.value;
       map[it.id].units[it.metric] = it.unit;
@@ -668,7 +669,7 @@
     // Build the set of valid dynamic cards for the CURRENT sensor list.
     var valid = {};
     sensors.forEach(function (s) {
-      if (s.status === "disabled") return;
+      if (!s || s.status === "disabled") return;
       (s.metrics || []).forEach(function (m) {
         valid["sensor__" + s.id + "__" + m] = { name: s.name || s.id, metric: m };
       });
@@ -727,6 +728,7 @@
     var items = (data && data.items) || [];
     if (!items.length && Array.isArray(data)) {
       data.forEach(function (s) {
+        if (!s) return;
         var r = s.readings || {};
         Object.keys(r).forEach(function (m) {
           items.push({ id: s.id, metric: m, value: r[m], unit: (s.units && s.units[m]) || "" });
@@ -734,6 +736,7 @@
       });
     }
     items.forEach(function (it) {
+      if (!it) return;
       var cardId = "sensor__" + it.id + "__" + it.metric;
       var vEl = document.getElementById("ov-sm-" + cardId + "-v");
       var uEl = document.getElementById("ov-sm-" + cardId + "-u");

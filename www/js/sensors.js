@@ -93,6 +93,7 @@ function sensorsLoad() {
       if (grid) {
         var html = [];
         d.sensors.forEach(function (s) {
+          if (!s) return;
           var metrics = (s.metrics && s.metrics.length > 0) ? s.metrics : [""];
           
           metrics.forEach(function (m, mIdx) {
@@ -233,6 +234,7 @@ function sensorsLoad() {
               if (!res || !res.data || res.data.length < 2) return;
               var min = Infinity, max = -Infinity, ys = [];
               res.data.forEach(function (pt) {
+                if (!pt || pt.v === undefined) return;
                 var val = Number(pt.v);
                 if (!isNaN(val)) { if (val < min) min = val; if (val > max) max = val; ys.push(val); }
               });
