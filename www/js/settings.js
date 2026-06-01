@@ -664,7 +664,10 @@ function netScanWifi() {
   list.innerHTML = "<div class='list-item'>🔍 Scanning…</div>";
   list.style.display = "block";
   netScanRetries = 0;
-  fetchWithTimeout("/wifi_scan_start", {}, 15000).then(function () {
+  // /wifi_scan_start is behind requireMutatingAuth (CSRF), so it must be
+  // called with a token — a plain GET 403s and the scan never starts (this
+  // was the root cause of the perpetual "Scan failed").
+  postWithCsrf("/wifi_scan_start", { method: "GET" }, 15000).then(function () {
     setTimeout(netCheckScan, 2000);
   });
 }
@@ -686,11 +689,23 @@ function netCheckScan() {
           setTimeout(netCheckScan, 1000);
         } else list.innerHTML = "<div class='list-item'>⏱️ Scan timeout</div>";
       } else if (d.error) {
-        list.innerHTML = "";
-        var errRow = document.createElement("div");
-        errRow.className = "list-item";
-        errRow.textContent = "❌ " + d.error;
-        list.appendChild(errRow);
+        // FAILED is common on the first poll (radio still settling after the
+        // AP_STA switch). Re-kick the guarded start and keep polling within
+        // the retry budget instead of dead-ending on the error.
+        netScanRetries++;
+        if (netScanRetries < 10) {
+          list.innerHTML =
+            "<div class='list-item'>🔍 Scanning… (" + netScanRetries + ")</div>";
+          postWithCsrf("/wifi_scan_start", { method: "GET" }, 15000).then(
+            function () { setTimeout(netCheckScan, 1200); }
+          );
+        } else {
+          list.innerHTML = "";
+          var errRow = document.createElement("div");
+          errRow.className = "list-item";
+          errRow.textContent = "❌ " + d.error;
+          list.appendChild(errRow);
+        }
       } else if (!d.networks || !d.networks.length) {
         list.innerHTML = "<div class='list-item'>📶 No networks found</div>";
       } else {

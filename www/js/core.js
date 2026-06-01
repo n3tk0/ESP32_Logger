@@ -750,8 +750,11 @@ function loadPagePartial(page) {
       // would otherwise never be replaced with SVGs (blank icons on Network,
       // Hardware, etc.). Swap the freshly-injected page element now.
       if (window.Icons && Icons.swap) {
+        // A valid partial always contains its #page-<name> element, so scope
+        // the swap to it — never fall back to document.body (that would
+        // re-scan every icon already in the SPA on each navigation).
         var injected = document.getElementById("page-" + page);
-        Icons.swap(injected || document.body);
+        if (injected) Icons.swap(injected);
       }
     })
     .catch(function (e) {
