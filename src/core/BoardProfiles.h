@@ -123,6 +123,14 @@ const char* pinRejectReason(const BoardProfile* profile, uint8_t pin);
 /// without an extra cast — values < 0 short-circuit to "not assigned".
 bool validateAttachPin(int pin, const char* sensorId, const char* fieldName);
 
+/// Per-sensor "allow restricted pins" override. SensorManager sets this from
+/// the sensor's `allow_unsafe_pins` config flag right before calling init(),
+/// and clears it afterwards. While set, validateAttachPin() downgrades a
+/// strapping- or reserved-pin refusal to a warning and allows the pin (those
+/// are usable with correct wiring, e.g. I2C pull-ups). Flash-bus and
+/// out-of-range pins are NEVER overridable. Default false.
+extern bool g_pinAllowUnsafe;
+
 // --- Persistence -------------------------------------------------------------
 //
 // The active profile is stored in /board_profile.txt — a tiny key=value

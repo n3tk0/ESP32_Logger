@@ -2,6 +2,7 @@
 #include "../utils/MutexGuard.h"
 #include <LittleFS.h>
 #include "../pipeline/DataPipeline.h"  // wireMutex (#14)
+#include "../core/BoardProfiles.h"     // g_pinAllowUnsafe (per-sensor pin override)
 
 SensorManager sensorManager;
 
@@ -125,7 +126,14 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         }
 
         s->setId(id);
-        if (s->init(sensor)) {
+        // Per-sensor pin override: while set, validateAttachPin() downgrades a
+        // strapping/reserved-pin refusal to a warning (flash/out-of-range stay
+        // hard-blocked). Cleared right after init so it can't leak to anything
+        // else that validates pins.
+        g_pinAllowUnsafe = sensor["allow_unsafe_pins"] | false;
+        bool initOk = s->init(sensor);
+        g_pinAllowUnsafe = false;
+        if (initOk) {
             _sensors[_count]    = s;
             _lastReadMs[_count] = 0;
             _count++;
@@ -203,6 +211,7 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
             constexpr uint32_t ONE_HOUR_MS = 3600UL * 1000UL;
             HealthData& h = _health[i];
             if (h.slotStartMs == 0) h.slotStartMs = ms;   // first ever read
+            if (h.firstSeenMs == 0) h.firstSeenMs = ms;   // stable init reference
             while ((ms - h.slotStartMs) >= ONE_HOUR_MS) {
                 // Advance to next slot, clear its accumulators.
                 // Use += ONE_HOUR_MS (not =ms) so overruns don't accumulate drift.
@@ -212,18 +221,45 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                 h.hourLatUs [h.curSlot] = 0;
                 h.slotStartMs += ONE_HOUR_MS;
             }
+            // A periodic ("duty-cycled") sensor is asleep between wake cycles,
+            // so most polls legitimately return nothing. Treat an empty poll as
+            // an expected sleep — neither a read nor an error — UNLESS the
+            // sensor is overdue (silent for >2 expected data intervals since its
+            // last success), which signals a real fault. _lastReadMs[i] is the
+            // last SUCCESSFUL read (updated below, after this block).
+            bool expectedSleep = false;
+            if (n <= 0 && !s->countEmptyReadAsError()) {
+                // Reference = last successful read, or the sensor's first-seen
+                // time before it has ever read. NOT slotStartMs: that rotates
+                // hourly, so for a work period >= 30 min (dataIntervalMs*2 >= 1h)
+                // it would keep the sensor "expected-sleeping" forever and never
+                // flag a dead/failed sensor. firstSeenMs is set once and zeroed
+                // only on reload (_destroyAll), so it stays a stable per-instance
+                // reference.
+                uint32_t ref  = (_lastReadMs[i] != 0) ? _lastReadMs[i] : h.firstSeenMs;
+                expectedSleep = (ms - ref) <= (s->dataIntervalMs() * 2);
+            }
+
             if (n > 0) {
                 h.hourReads [h.curSlot]++;
                 h.hourLatUs [h.curSlot] += latUs;
                 h.totalLatUs += latUs;
                 h.latSamples++;
-            } else {
-                h.hourErrors[h.curSlot]++;
+                // Recovered: clear a prior 'overdue' fault so status returns OK.
+                if (s->isPeriodic()) s->resetErrorCount();
+            } else if (!expectedSleep) {
+                // Rate-limit overdue errors for a periodic sensor to one per
+                // expected data interval, so a dead sensor records ~1 missed
+                // reading per period instead of one per 1 s poll — otherwise a
+                // 10-min outage would log ~600 errors and crush uptime%.
+                // Continuous sensors (countEmptyReadAsError) count every miss.
+                if (s->countEmptyReadAsError() || (ms - h.lastErrorMs) >= s->dataIntervalMs()) {
+                    h.hourErrors[h.curSlot]++;
+                    s->incErrorCount();
+                    h.lastErrorMs = ms;
+                }
             }
-        }
-
-        if (n <= 0) {
-            s->incErrorCount();
+            // expectedSleep: leave every counter untouched (neutral poll).
         }
         if (n > 0) {
             for (int j = 0; j < n; j++) {
@@ -344,6 +380,12 @@ void SensorManager::toJson(JsonArray arr) const {
         // Phase 5c-4 — exposes read_interval_ms so the UI can compute
         // staleness (entry is "stale" once age > 2× this interval).
         o["read_interval_ms"] = s->getReadIntervalMs();
+        // data_interval_ms is the expected spacing between actual readings (the
+        // work period for a duty-cycled sensor; == read interval otherwise). The
+        // UI bases its freshness window on this, and shows a "sleeping" state for
+        // periodic sensors so an intentional sleep isn't read as "stale".
+        o["data_interval_ms"] = s->dataIntervalMs();
+        o["periodic"]         = s->isPeriodic();
         o["status"]       = s->isEnabled() ? (s->errorCount() > 0 ? "error" : "ok") : "disabled";
 
         Slot& sl = slots[slotCount++];

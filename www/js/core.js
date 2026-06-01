@@ -695,6 +695,52 @@ function postWithCsrf(url, opts, timeoutMs) {
 }
 window.postWithCsrf = postWithCsrf;
 
+// ── Board restricted-pin helper (sensor pin warnings) ───────────────────────
+// Caches the ACTIVE board's restricted-pin sets from /api/board-profiles so the
+// sensor wizard + editor can warn when a chosen GPIO is risky.
+var _boardPinsCache = null;
+function getBoardPins() {
+  if (_boardPinsCache) return Promise.resolve(_boardPinsCache);
+  var EMPTY = { strap: [], flash: [], reserved: [], usb: [], maxGpio: 255 };
+  return fetchWithTimeout("/api/board-profiles", {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (!d || !d.profiles) return EMPTY;
+      var activeId = d.active && d.active.id;
+      var p = null;
+      for (var i = 0; i < d.profiles.length; i++) {
+        if (d.profiles[i].id === activeId) { p = d.profiles[i]; break; }
+      }
+      if (!p) return EMPTY;
+      _boardPinsCache = {
+        strap:    p.strapPins    || [],
+        flash:    p.flashPins    || [],
+        reserved: p.reservedPins || [],
+        usb:      p.usbPins      || [],
+        maxGpio:  (typeof p.maxGpio === "number") ? p.maxGpio : 255,
+      };
+      return _boardPinsCache;
+    })
+    .catch(function () { return EMPTY; });
+}
+// Classify a pin against the board. Returns null if safe, else
+// { reason, hard } — hard=true means it can NOT be overridden (flash bus /
+// out of range); hard=false is risky-but-usable-with-pull-ups (strapping /
+// reserved / USB), matching firmware's allow_unsafe_pins semantics.
+function pinRisk(pins, pinVal) {
+  var pin = parseInt(pinVal, 10);
+  if (isNaN(pin) || pin < 0) return null;
+  if ((pins.flash || []).indexOf(pin) >= 0) return { reason: "SPI flash-bus pin", hard: true };
+  if (pin > pins.maxGpio)                    return { reason: "GPIO out of range for board", hard: true };
+  if ((pins.strap || []).indexOf(pin) >= 0)  return { reason: "bootstrap/strapping pin (boot-mode risk)", hard: false };
+  if ((pins.reserved || []).indexOf(pin) >= 0) return { reason: "reserved (UART0 console)", hard: false };
+  if ((pins.usb || []).indexOf(pin) >= 0)    return { reason: "USB D+/D- pin", hard: false };
+  return null;
+}
+window.getBoardPins = getBoardPins;
+window.pinRisk = pinRisk;
+
+
 // ============================================================================
 // NAVIGATION
 // ============================================================================

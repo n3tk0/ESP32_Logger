@@ -665,37 +665,55 @@
   }
 
   function _registerDynamicSensorCards(sensors) {
-    var count = 0;
+    // Build the set of valid dynamic cards for the CURRENT sensor list.
+    var valid = {};
     sensors.forEach(function (s) {
       if (s.status === "disabled") return;
       (s.metrics || []).forEach(function (m) {
-        var cardId = "sensor__" + s.id + "__" + m;
-        if (OVERVIEW_REGISTRY[cardId]) return;
-        count++;
-        var sId = s.id, sName = s.name || s.id, sType = s.type || "";
-        OVERVIEW_REGISTRY[cardId] = {
-          title: sName + " · " + m,
-          icon: _metricIcon(m),
-          render: function () {
-            return '<div class="card ov-metric-card">' +
-              '<div class="card-head">' +
-                '<div class="card-title"><span data-icon="' + esc(_metricIcon(m)) + '"></span> ' + esc(m) + '</div>' +
-                '<span class="mono" style="font-size:11px;color:var(--text-3)">' + esc(sName) + '</span>' +
-              '</div>' +
-              '<div class="card-body ov-metric-body">' +
-                '<div>' +
-                  '<div class="ov-metric-value" id="ov-sm-' + esc(cardId) + '-v">—</div>' +
-                  '<div class="ov-metric-unit" id="ov-sm-' + esc(cardId) + '-u"></div>' +
-                '</div>' +
-              '</div>' +
-            '</div>';
-          },
-        };
+        valid["sensor__" + s.id + "__" + m] = { name: s.name || s.id, metric: m };
       });
     });
-    // Reload deck so previously-saved dynamic cards appear, and new ones
-    // show up in the Add Card library tray.
-    if (count > 0 && _overviewDeck && _overviewDeck.reloadCards) {
+
+    var changed = 0;
+
+    // Prune dynamic cards whose sensor/metric no longer exists (removed,
+    // disabled, or renamed) so the Add-Card tray and saved layouts don't keep
+    // stale tiles. Only touches the dynamic "sensor__" namespace.
+    Object.keys(OVERVIEW_REGISTRY).forEach(function (k) {
+      if (k.indexOf("sensor__") === 0 && !valid[k]) {
+        delete OVERVIEW_REGISTRY[k];
+        changed++;
+      }
+    });
+
+    // Register newly-seen sensor metrics.
+    Object.keys(valid).forEach(function (cardId) {
+      if (OVERVIEW_REGISTRY[cardId]) return;
+      changed++;
+      var sName = valid[cardId].name, m = valid[cardId].metric;
+      OVERVIEW_REGISTRY[cardId] = {
+        title: sName + " · " + m,
+        icon: _metricIcon(m),
+        render: function () {
+          return '<div class="card ov-metric-card">' +
+            '<div class="card-head">' +
+              '<div class="card-title"><span data-icon="' + esc(_metricIcon(m)) + '"></span> ' + esc(m) + '</div>' +
+              '<span class="mono" style="font-size:11px;color:var(--text-3)">' + esc(sName) + '</span>' +
+            '</div>' +
+            '<div class="card-body ov-metric-body">' +
+              '<div>' +
+                '<div class="ov-metric-value" id="ov-sm-' + esc(cardId) + '-v">—</div>' +
+                '<div class="ov-metric-unit" id="ov-sm-' + esc(cardId) + '-u"></div>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        },
+      };
+    });
+
+    // Reload deck so previously-saved dynamic cards appear / pruned ones drop,
+    // and the Add Card library tray reflects the current sensor set.
+    if (changed > 0 && _overviewDeck && _overviewDeck.reloadCards) {
       _overviewDeck.reloadCards();
       if (_overviewLastData)   _applyOverviewData(_overviewLastData);
       if (_overviewStatusData) ovFillWaterCached(_overviewStatusData);
@@ -1492,6 +1510,11 @@
               // Always shown
               '<div class="field"><label for="wiz-int">Read interval (ms)</label><input id="wiz-int" class="input mono" type="number" value="10000" min="500"/></div>' +
             '</div>' +
+            // Restricted-pin warning + per-sensor override (populated by wizUpdatePinWarn)
+            '<div id="wiz-pinwarn" style="display:none;margin-top:10px;padding:8px 10px;border-radius:6px;font-size:12px"></div>' +
+            '<label id="wiz-unsafe-wrap" style="display:none;align-items:center;gap:6px;cursor:pointer;margin-top:8px;font-size:12px">' +
+              '<input type="checkbox" id="wiz-unsafe"> Use this pin anyway (I\'ve added proper pull-ups)' +
+            '</label>' +
           '</div>' +
           // Step 4
           '<div class="wiz-step" data-step="4">' +
@@ -1537,6 +1560,11 @@
     var ifaceSel = wiz.querySelector("#wiz-iface");
     if (ifaceSel) ifaceSel.addEventListener("change", wizUpdateIfaceFields);
     wizUpdateIfaceFields();
+    // Live restricted-pin warning as the user edits any pin field.
+    ["wiz-sda", "wiz-scl", "wiz-rx", "wiz-tx", "wiz-pin"].forEach(function (id) {
+      var el = wiz.querySelector("#" + id);
+      if (el) el.addEventListener("input", wizUpdatePinWarn);
+    });
 
     wiz.querySelector("#wizClose").addEventListener("click", closeWizard);
     wiz.addEventListener("click", function (e) { if (e.target === wiz) closeWizard(); });
@@ -1586,6 +1614,41 @@
       var list = (el.getAttribute("data-if") || "").split(" ");
       el.style.display = (list.indexOf(iface) >= 0) ? "" : "none";
     });
+    wizUpdatePinWarn();
+  }
+
+  // Warn when a chosen GPIO is a strapping/reserved/flash pin for this board,
+  // and reveal the per-sensor override for the (soft) risky-but-usable cases.
+  function wizUpdatePinWarn() {
+    if (!_wizardEl || typeof getBoardPins !== "function") return;
+    var warn = document.getElementById("wiz-pinwarn");
+    var wrap = document.getElementById("wiz-unsafe-wrap");
+    if (!warn) return;
+    var iface = ((document.getElementById("wiz-iface") || {}).value || "I2C").toLowerCase();
+    var ids = iface === "i2c"  ? ["wiz-sda", "wiz-scl"]
+            : iface === "uart" ? ["wiz-rx", "wiz-tx"]
+            : ["wiz-pin"];
+    getBoardPins().then(function (pins) {
+      var msgs = [], hard = false, soft = false;
+      ids.forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el || el.value === "") return;
+        var risk = pinRisk(pins, el.value);
+        if (risk) {
+          msgs.push("GPIO" + parseInt(el.value, 10) + " — " + risk.reason);
+          if (risk.hard) hard = true; else soft = true;
+        }
+      });
+      if (!msgs.length) { warn.style.display = "none"; if (wrap) wrap.style.display = "none"; return; }
+      warn.style.display = "";
+      warn.style.background = hard ? "rgba(220,38,38,.12)" : "rgba(217,119,6,.14)";
+      warn.style.color      = hard ? "var(--err)" : "var(--warn)";
+      warn.innerHTML = "⚠ " + msgs.join(" · ") +
+        (hard ? " — this pin can't be used (hardware-reserved); pick another."
+              : " — usable only with proper pull-ups; the device may fail to boot if held LOW at reset.");
+      // Override applies only to soft risks with no hard blocker present.
+      if (wrap) wrap.style.display = (soft && !hard) ? "flex" : "none";
+    });
   }
 
   function buildWizReview() {
@@ -1614,6 +1677,9 @@
       interface:        iface,
       read_interval_ms: parseInt(intVal, 10),
     };
+    if ((document.getElementById("wiz-unsafe") || {}).checked) {
+      obj.allow_unsafe_pins = true;   // user opted into a strapping/reserved pin
+    }
 
     // Interface-specific pins/keys — must match the SensorManager plugin schema.
     if (iface === "i2c") {
