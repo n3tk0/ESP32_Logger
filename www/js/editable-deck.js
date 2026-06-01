@@ -68,7 +68,6 @@
     var width = container.clientWidth;
     if (width <= 0) return;
     var colW = (width - GAP * (COLUMNS - 1)) / COLUMNS;
-    var tops = new Array(COLUMNS).fill(0);
 
     // First pass: set widths and clear explicit heights so natural height is measured.
     slots.forEach(function (slot) {
@@ -80,39 +79,36 @@
     // eslint-disable-next-line no-unused-expressions
     container.offsetHeight;
 
-    // Second pass: place each card at the lowest available column position,
-    // recording its natural height and row assignment.
-    var placements = [];
+    // Second pass: group left-to-right into logical rows
+    var rows = [];
+    var currentRow = [];
+    var currentCol = 0;
+
     slots.forEach(function (slot) {
       var span = Math.max(1, Math.min(COLUMNS, +slot.dataset.span || 4));
-      var bestCol = 0, bestTop = Infinity;
-      for (var c = 0; c <= COLUMNS - span; c++) {
-        var t = 0;
-        for (var k = c; k < c + span; k++) if (tops[k] > t) t = tops[k];
-        if (t < bestTop) { bestTop = t; bestCol = c; }
+      
+      // Wrap to next row if this card exceeds remaining columns
+      if (currentCol > 0 && currentCol + span > COLUMNS) {
+        rows.push(currentRow);
+        currentRow = [];
+        currentCol = 0;
       }
-      slot.style.left = (bestCol * (colW + GAP)) + "px";
-      slot.style.top  = bestTop + "px";
+      
       var naturalH = slot.offsetHeight;
-      placements.push({ slot: slot, top: bestTop, height: naturalH });
-      var newTop = bestTop + naturalH + GAP;
-      for (var i = bestCol; i < bestCol + span; i++) tops[i] = newTop;
+      currentRow.push({ slot: slot, span: span, height: naturalH, col: currentCol });
+      currentCol += span;
     });
+    if (currentRow.length > 0) {
+      rows.push(currentRow);
+    }
 
-    // Third pass: group by row (same top), equalize heights, then recompute tops.
-    var rowMap = {};
-    placements.forEach(function (p) {
-      var key = Math.round(p.top);
-      if (!rowMap[key]) rowMap[key] = [];
-      rowMap[key].push(p);
-    });
-    var rowKeys = Object.keys(rowMap).map(Number).sort(function (a, b) { return a - b; });
+    // Third pass: position cards with equalized row heights
     var cumTop = 0;
-    rowKeys.forEach(function (key) {
-      var row = rowMap[key];
+    rows.forEach(function (row) {
       var maxH = 0;
       row.forEach(function (p) { if (p.height > maxH) maxH = p.height; });
       row.forEach(function (p) {
+        p.slot.style.left   = (p.col * (colW + GAP)) + "px";
         p.slot.style.top    = cumTop + "px";
         p.slot.style.height = maxH + "px";
       });
