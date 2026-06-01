@@ -541,8 +541,15 @@ bool saveConfig() {
     // silently skipping the modules.json write. The old "run while held" comment
     // was wrong: saveAll already serialises its own writes.
     {
+        // fsMutex is null until TaskManager::init() creates it. saveConfig()
+        // legitimately runs before that (config migration in loadConfig() —
+        // see the pre-task-init note at its call site), single-threaded, so no
+        // lock is needed yet. Only treat a FAILED take as fatal; a null handle
+        // means "no concurrency to guard against, proceed" — same pattern as
+        // ModuleRegistry::saveAll(). Without this, early-boot/migration saves
+        // silently no-op.
         MutexGuard g(fsMutex, pdMS_TO_TICKS(3000));
-        if (!g.isLocked()) {
+        if (fsMutex && !g.isLocked()) {
             DBGLN("Config save: fsMutex timeout — skipping write");
             return false;
         }
