@@ -1411,24 +1411,50 @@
     try { obj = pre ? JSON.parse(pre.textContent) : null; } catch (e) { obj = null; }
     if (!obj) { showToast("Parse error", "Could not read sensor config", "err"); return; }
 
-    // POST to /save_corelogic — same endpoint as Core Logic page uses
-    getCsrfToken().then(function (token) {
-      var fd = new FormData();
-      fd.append("add_sensor", JSON.stringify(obj));
-      if (token) fd.append("csrf", token);
-      fetchWithTimeout("/save_corelogic", { method: "POST", body: fd }, 30000)
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (res) {
-          if (res && res.ok) {
-            closeWizard();
-            showToast("Sensor added", obj.id + " · pipeline reloading", "ok");
-            setTimeout(function () { if (typeof sensorsLoad === "function") sensorsLoad(); }, 2000);
-          } else {
-            showToast("Save failed", (res && res.error) || "Check firmware logs", "err");
-          }
-        })
-        .catch(function () { showToast("Network error", "Could not reach /save_corelogic", "err"); });
-    });
+    // Sensors live in platform_config.json, not the binary config, and there is
+    // no single-sensor endpoint (the old /save_corelogic + add_sensor never
+    // existed → 404). Mirror the Core Logic page: fetch the current platform
+    // config, append/replace the sensor in its `sensors` array, and POST the
+    // whole document to /save_platform via postWithCsrf (handles the csrf token
+    // + 403 retry, same as pcfgSave()).
+    fetchWithTimeout("/api/platform_config", {}, 15000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (cfg) {
+        if (!cfg || typeof cfg !== "object") throw new Error("platform config unavailable");
+        if (!Array.isArray(cfg.sensors)) cfg.sensors = [];
+        // Replace a sensor with the same id if present, else append.
+        var idx = -1;
+        for (var i = 0; i < cfg.sensors.length; i++) {
+          if (cfg.sensors[i] && cfg.sensors[i].id === obj.id) { idx = i; break; }
+        }
+        if (idx >= 0) cfg.sensors[idx] = obj; else cfg.sensors.push(obj);
+        return postWithCsrf("/save_platform", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(cfg),
+        }, 30000);
+      })
+      // Parse the body even on a non-2xx response so the server's own error
+      // (e.g. {ok:false,error:"busy"} on 503) surfaces instead of a generic
+      // fallback message.
+      .then(function (r) { return r ? r.json() : null; })
+      .then(function (res) {
+        if (res && res.ok) {
+          closeWizard();
+          showToast("Sensor added", obj.id + " · device restarting to apply", "ok");
+          // /save_platform only writes platform_config.json — the running
+          // pipeline keeps the old config until reloaded. Mirror the Core Logic
+          // page: signal a reload (sets shouldRestart server-side; not CSRF-
+          // gated). Refresh the list once the device is back up.
+          fetchWithTimeout("/api/platform_reload", { method: "POST" }, 30000).catch(function () {});
+          setTimeout(function () { if (typeof sensorsLoad === "function") sensorsLoad(); }, 6000);
+        } else {
+          showToast("Save failed", (res && res.error) || "Check firmware logs", "err");
+        }
+      })
+      .catch(function (e) {
+        showToast("Save failed", (e && e.message) ? e.message : "Could not reach device", "err");
+      });
   }
 
   function openWizard() {
