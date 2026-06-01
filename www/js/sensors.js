@@ -140,13 +140,23 @@ function sensorsLoad() {
             // available (per-metric ts > sensor last_read_ts).
             var stateClass = "";
             var ageStr = "—";
+            var sleeping = false;
             var refMs = 0;
             if (primaryTs)         refMs = primaryTs * 1000;
             else if (s.last_read_ts) refMs = s.last_read_ts * 1000;
-            if (refMs && s.read_interval_ms) {
+            // Freshness window = data_interval_ms (the work period for a
+            // duty-cycled sensor; == poll interval otherwise). A periodic sensor
+            // between wake cycles is "sleeping" (working as intended), not stale.
+            var freshMs = s.data_interval_ms || s.read_interval_ms;
+            if (refMs && freshMs) {
               var ageMs = nowMs - refMs;
               ageStr = _sensorFmtAge(ageMs) + " ago";
-              if (ageMs > s.read_interval_ms * 2) stateClass = " stale";
+              if (ageMs > freshMs * 2) {
+                stateClass = " stale";
+              } else if (s.periodic && ageMs > s.read_interval_ms) {
+                sleeping = true;
+                ageStr = "sleeping · " + ageStr;
+              }
             }
             if (s.status === "error")    stateClass = " err";
             if (s.status === "disabled") stateClass = " dis";
@@ -196,6 +206,7 @@ function sensorsLoad() {
             var ageIcon = "", ageColor = "inherit";
             if (stateClass === " err")        { ageIcon = "⊘"; ageColor = "var(--err)"; }
             else if (stateClass === " stale") { ageIcon = "⚠"; ageColor = "var(--warn)"; }
+            else if (sleeping)                { ageIcon = "💤"; ageColor = "var(--text-3)"; }
             else if (ageRefMs && stateClass !== " dis") { ageIcon = "✓"; ageColor = "var(--ok)"; }
 
             return (

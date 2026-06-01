@@ -212,18 +212,30 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                 h.hourLatUs [h.curSlot] = 0;
                 h.slotStartMs += ONE_HOUR_MS;
             }
+            // A periodic ("duty-cycled") sensor is asleep between wake cycles,
+            // so most polls legitimately return nothing. Treat an empty poll as
+            // an expected sleep — neither a read nor an error — UNLESS the
+            // sensor is overdue (silent for >2 expected data intervals since its
+            // last success), which signals a real fault. _lastReadMs[i] is the
+            // last SUCCESSFUL read (updated below, after this block).
+            bool expectedSleep = false;
+            if (n <= 0 && !s->countEmptyReadAsError()) {
+                uint32_t ref    = (_lastReadMs[i] != 0) ? _lastReadMs[i] : h.slotStartMs;
+                expectedSleep   = (ms - ref) <= (s->dataIntervalMs() * 2);
+            }
+
             if (n > 0) {
                 h.hourReads [h.curSlot]++;
                 h.hourLatUs [h.curSlot] += latUs;
                 h.totalLatUs += latUs;
                 h.latSamples++;
-            } else {
+                // Recovered: clear a prior 'overdue' fault so status returns OK.
+                if (s->isPeriodic()) s->resetErrorCount();
+            } else if (!expectedSleep) {
                 h.hourErrors[h.curSlot]++;
+                s->incErrorCount();
             }
-        }
-
-        if (n <= 0) {
-            s->incErrorCount();
+            // expectedSleep: leave every counter untouched (neutral poll).
         }
         if (n > 0) {
             for (int j = 0; j < n; j++) {
@@ -344,6 +356,12 @@ void SensorManager::toJson(JsonArray arr) const {
         // Phase 5c-4 — exposes read_interval_ms so the UI can compute
         // staleness (entry is "stale" once age > 2× this interval).
         o["read_interval_ms"] = s->getReadIntervalMs();
+        // data_interval_ms is the expected spacing between actual readings (the
+        // work period for a duty-cycled sensor; == read interval otherwise). The
+        // UI bases its freshness window on this, and shows a "sleeping" state for
+        // periodic sensors so an intentional sleep isn't read as "stale".
+        o["data_interval_ms"] = s->dataIntervalMs();
+        o["periodic"]         = s->isPeriodic();
         o["status"]       = s->isEnabled() ? (s->errorCount() > 0 ? "error" : "ok") : "disabled";
 
         Slot& sl = slots[slotCount++];
