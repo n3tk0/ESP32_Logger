@@ -79,6 +79,10 @@
   var _modeApplied = false;
   function tryApplyMode() {
     if (_modeApplied) return;
+    // May be invoked early (synchronously from the loadPagePartial wrapper on a
+    // direct #overview/#alerts load) before the poll interval fires — cancel it
+    // so it doesn't run a redundant second pass.
+    if (_modeTimer) { clearInterval(_modeTimer); _modeTimer = null; }
     var m = readMode();
     _modeApplied = true;
     applyMode(m);
@@ -127,7 +131,17 @@
   if (typeof loadPagePartial === "function") {
     var _origLoad = loadPagePartial;
     window.loadPagePartial = function (page) {
-      if (LAZY_PAGES[page] === INJECTED) return Promise.resolve();
+      if (LAZY_PAGES[page] === INJECTED) {
+        // overview/alerts are built by buildPages() inside tryApplyMode(),
+        // which is normally deferred to the CFG-poll interval. On a direct load
+        // or reload of #overview/#alerts, core.js calls navigateTo()
+        // synchronously right after populating CFG — before that interval fires
+        // — so the page element wouldn't exist yet and the router would fall
+        // back to the settings hub. Build them now, synchronously, so the
+        // element is present before navigateTo's promise resolves.
+        if (!_modeApplied) tryApplyMode();
+        return Promise.resolve();
+      }
       return _origLoad(page);
     };
   }
