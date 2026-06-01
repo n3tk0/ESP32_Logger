@@ -533,42 +533,59 @@ bool saveConfig() {
     // any legitimate FS op in flight will finish.  On timeout, return false —
     // the caller retries on the next opportunity; we must not write without
     // the lock (Pillar 1 of refactoring guidelines).
-    MutexGuard g(fsMutex, pdMS_TO_TICKS(3000));
-    if (!g.isLocked()) {
-        DBGLN("Config save: fsMutex timeout — skipping write");
-        return false;
-    }
+    //
+    // SCOPED: the guard must be released BEFORE moduleRegistry.saveAll() below.
+    // fsMutex is a plain (non-recursive) mutex, and saveAll() takes fsMutex
+    // itself — calling it while still holding the lock self-deadlocks until
+    // saveAll's 2 s timeout fires ("[ModuleRegistry] saveAll: fsMutex timeout"),
+    // silently skipping the modules.json write. The old "run while held" comment
+    // was wrong: saveAll already serialises its own writes.
+    {
+        // fsMutex is null until TaskManager::init() creates it. saveConfig()
+        // legitimately runs before that (config migration in loadConfig() —
+        // see the pre-task-init note at its call site), single-threaded, so no
+        // lock is needed yet. Only treat a FAILED take as fatal; a null handle
+        // means "no concurrency to guard against, proceed" — same pattern as
+        // ModuleRegistry::saveAll(). Without this, early-boot/migration saves
+        // silently no-op.
+        MutexGuard g(fsMutex, pdMS_TO_TICKS(3000));
+        if (fsMutex && !g.isLocked()) {
+            DBGLN("Config save: fsMutex timeout — skipping write");
+            return false;
+        }
 
-    // Crash-safe write: write to temp file, then rename over the real one.
-    // If power is lost during write, the original config.bin remains intact.
-    static const char* TMP_FILE = "/config.tmp";
+        // Crash-safe write: write to temp file, then rename over the real one.
+        // If power is lost during write, the original config.bin remains intact.
+        static const char* TMP_FILE = "/config.tmp";
 
-    File f = LittleFS.open(TMP_FILE, "w");
-    if (!f) {
-        DBGLN("Failed to open config temp file");
-        return false;
-    }
-    size_t written = f.write((uint8_t*)&config, sizeof(DeviceConfig));
-    f.close();
+        File f = LittleFS.open(TMP_FILE, "w");
+        if (!f) {
+            DBGLN("Failed to open config temp file");
+            return false;
+        }
+        size_t written = f.write((uint8_t*)&config, sizeof(DeviceConfig));
+        f.close();
 
-    if (written != sizeof(DeviceConfig)) {
-        DBGLN("Config write incomplete");
-        LittleFS.remove(TMP_FILE);
-        return false;
-    }
+        if (written != sizeof(DeviceConfig)) {
+            DBGLN("Config write incomplete");
+            LittleFS.remove(TMP_FILE);
+            return false;
+        }
 
-    // Atomic rename: LittleFS rename overwrites the destination
-    if (!LittleFS.rename(TMP_FILE, CONFIG_FILE)) {
-        DBGLN("Config rename failed");
-        return false;
+        // Atomic rename: LittleFS rename overwrites the destination
+        if (!LittleFS.rename(TMP_FILE, CONFIG_FILE)) {
+            DBGLN("Config rename failed");
+            return false;
+        }
+        // g releases fsMutex here at end of scope.
     }
 
     // Pass 5 phase 2: shadow the subset of DeviceConfig that IModule adapters
-    // track into /config/modules.json.  Run while fsMutex is still held so
-    // saveAll's LittleFS writes are serialised (audit 1.9).
+    // track into /config/modules.json.  Called AFTER releasing fsMutex above —
+    // saveAll() acquires fsMutex internally (audit 1.9), so it must not be
+    // invoked while we still hold it.
     moduleRegistry.saveAll(LittleFS);
 
-    // g releases fsMutex here on return
     DBGLN("Config saved");
     return true;
 }
