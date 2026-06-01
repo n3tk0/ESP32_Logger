@@ -30,13 +30,14 @@
     if (window.Icons && Icons.swap) Icons.swap(el || document.body);
   }
 
-  function loadCards(pageId, defaults) {
+  function loadCards(pageId, defaults, registry) {
     try {
       var raw = localStorage.getItem(STORAGE_PREFIX + pageId);
       if (raw) {
         var parsed = JSON.parse(raw);
         var known = {};
         defaults.forEach(function (d) { known[d.id] = true; });
+        if (registry) Object.keys(registry).forEach(function (k) { known[k] = true; });
         var filtered = parsed.filter(function (c) { return known[c.id]; });
         var have = {};
         filtered.forEach(function (c) { have[c.id] = true; });
@@ -67,34 +68,54 @@
     var width = container.clientWidth;
     if (width <= 0) return;
     var colW = (width - GAP * (COLUMNS - 1)) / COLUMNS;
-    var tops = new Array(COLUMNS).fill(0);
 
-    // First pass: set widths so heights are measured at the correct width.
+    // First pass: set widths and clear explicit heights so natural height is measured.
     slots.forEach(function (slot) {
       var span = Math.max(1, Math.min(COLUMNS, +slot.dataset.span || 4));
       slot.style.width = (span * colW + (span - 1) * GAP) + "px";
+      slot.style.height = "";
     });
     // Force layout flush before measuring.
     // eslint-disable-next-line no-unused-expressions
     container.offsetHeight;
 
+    // Second pass: group left-to-right into logical rows
+    var rows = [];
+    var currentRow = [];
+    var currentCol = 0;
+
     slots.forEach(function (slot) {
       var span = Math.max(1, Math.min(COLUMNS, +slot.dataset.span || 4));
-      var bestCol = 0, bestTop = Infinity;
-      for (var c = 0; c <= COLUMNS - span; c++) {
-        var t = 0;
-        for (var k = c; k < c + span; k++) if (tops[k] > t) t = tops[k];
-        if (t < bestTop) { bestTop = t; bestCol = c; }
+      
+      // Wrap to next row if this card exceeds remaining columns
+      if (currentCol > 0 && currentCol + span > COLUMNS) {
+        rows.push(currentRow);
+        currentRow = [];
+        currentCol = 0;
       }
-      slot.style.left = (bestCol * (colW + GAP)) + "px";
-      slot.style.top  = bestTop + "px";
-      var newTop = bestTop + slot.offsetHeight + GAP;
-      for (var i = bestCol; i < bestCol + span; i++) tops[i] = newTop;
+      
+      var naturalH = slot.offsetHeight;
+      currentRow.push({ slot: slot, span: span, height: naturalH, col: currentCol });
+      currentCol += span;
+    });
+    if (currentRow.length > 0) {
+      rows.push(currentRow);
+    }
+
+    // Third pass: position cards with equalized row heights
+    var cumTop = 0;
+    rows.forEach(function (row) {
+      var maxH = 0;
+      row.forEach(function (p) { if (p.height > maxH) maxH = p.height; });
+      row.forEach(function (p) {
+        p.slot.style.left   = (p.col * (colW + GAP)) + "px";
+        p.slot.style.top    = cumTop + "px";
+        p.slot.style.height = maxH + "px";
+      });
+      cumTop += maxH + GAP;
     });
 
-    var totalH = 0;
-    for (var j = 0; j < tops.length; j++) if (tops[j] > totalH) totalH = tops[j];
-    container.style.height = Math.max(0, totalH - GAP) + "px";
+    container.style.height = Math.max(0, cumTop - GAP) + "px";
   }
 
   // Pointer-events drag-reorder. Lifts the dragged slot (CSS class) and walks
@@ -216,7 +237,7 @@
     var toolbarSlot = opts.toolbar; // element to inject Customise/Done/Reset into
     var editingHooks = opts.onEdit || function () {}; // notified when editing toggles
 
-    var cards = loadCards(pageId, defaults);
+    var cards = loadCards(pageId, defaults, registry);
     var editing = false;
     var resizeObserver = null;
 
@@ -495,6 +516,10 @@
         editing = !!v; renderToolbar(); render(); editingHooks(editing);
       },
       repack: function () { if (!editing) packMasonry(container); },
+      reloadCards: function () {
+        cards = loadCards(pageId, defaults, registry);
+        render();
+      },
     };
   }
 

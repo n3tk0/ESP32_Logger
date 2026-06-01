@@ -91,14 +91,17 @@ function sensorsLoad() {
       }
 
       if (grid) {
-        grid.innerHTML = d.sensors
-          .map(function (s) {
-            // Sparkline path from `s.spark` (oldest → newest values).  We
-            // map the series onto a 100×36 viewBox using min/max so a flat
-            // line shows mid-card; the stroke path is what makes the card
-            // feel like it has a "history" backdrop.
+        var html = [];
+        d.sensors.forEach(function (s) {
+          if (!s) return;
+          var metrics = (s.metrics && s.metrics.length > 0) ? s.metrics : [""];
+          
+          metrics.forEach(function (m, mIdx) {
+            // Sparkline path from `s.spark` for primary metric.
+            // Secondary metrics get a placeholder with .s-spark-lazy.
             var sparkSvg = "";
-            var spark = s.spark || [];
+            var spark = (mIdx === 0) ? (s.spark || []) : [];
+            
             if (spark.length >= 2) {
               var min = Infinity, max = -Infinity;
               for (var i = 0; i < spark.length; i++) {
@@ -112,7 +115,6 @@ function sensorsLoad() {
               var pts = "";
               for (var j = 0; j < spark.length; j++) {
                 var x = (j * stepX).toFixed(1);
-                // 4 px top padding, 32 px bottom — matches design height
                 var y = (32 - ((+spark[j] - min) / range) * 28).toFixed(1);
                 pts += (j ? " " : "") + x + "," + y;
               }
@@ -120,29 +122,31 @@ function sensorsLoad() {
                 '<svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true">' +
                 '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>' +
                 "</svg>";
+            } else if (mIdx > 0 && m) {
+              sparkSvg = '<svg class="s-spark s-spark-lazy" data-sensor="' + esc(s.id) + '" data-metric="' + esc(m) + '" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg>';
+            } else {
+              sparkSvg = '<svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg>';
             }
 
-            // Pick the "primary" metric to drive the big value display.
-            var primary = (s.metrics && s.metrics[0]) || null;
-            var primaryLv = primary && s.last_values ? s.last_values[primary] : null;
-            var primaryVal = "", primaryUnit = "", primaryTs = 0;
-            if (primaryLv !== undefined && primaryLv !== null) {
-              if (typeof primaryLv === "object") {
-                primaryVal  = primaryLv.v !== undefined ? String(primaryLv.v) : "";
-                primaryUnit = primaryLv.u || "";
-                primaryTs   = primaryLv.ts || 0;
+            // Metric Value
+            var lv = m && s.last_values ? s.last_values[m] : null;
+            var val = "", unit = "", ts = 0;
+            if (lv !== undefined && lv !== null) {
+              if (typeof lv === "object") {
+                val  = lv.v !== undefined ? String(lv.v) : "";
+                unit = lv.u || "";
+                ts   = lv.ts || 0;
               } else {
-                primaryVal = String(primaryLv);
+                val = String(lv);
               }
             }
 
-            // Card-level staleness — picks the most accurate timestamp
-            // available (per-metric ts > sensor last_read_ts).
+            // Card-level staleness
             var stateClass = "";
             var ageStr = "—";
             var sleeping = false;
             var refMs = 0;
-            if (primaryTs)         refMs = primaryTs * 1000;
+            if (ts) refMs = ts * 1000;
             else if (s.last_read_ts) refMs = s.last_read_ts * 1000;
             // Freshness window = data_interval_ms (the work period for a
             // duty-cycled sensor; == poll interval otherwise). A periodic sensor
@@ -161,8 +165,6 @@ function sensorsLoad() {
             if (s.status === "error")    stateClass = " err";
             if (s.status === "disabled") stateClass = " dis";
 
-            // Status badge — matches the design's small uppercase pill
-            // (.badge.ok / .err / dim) instead of the prior .badge-ok pattern.
             var badgeClass =
               s.status === "ok" ? "ok" :
               s.status === "disabled" ? "dim" : "err";
@@ -170,38 +172,13 @@ function sensorsLoad() {
               s.status === "ok" ? "OK" :
               s.status === "disabled" ? "OFF" : "ERR";
 
-            // Secondary metric badges: every metric that isn't the primary,
-            // rendered with their value+unit when available.
-            var metricBadges = (s.metrics || [])
-              .filter(function (m) { return m !== primary; })
-              .map(function (m) {
-                var lv = s.last_values && s.last_values[m];
-                var v = "", u = "";
-                if (lv !== undefined && lv !== null) {
-                  if (typeof lv === "object") {
-                    v = lv.v !== undefined ? String(lv.v) : "";
-                    u = lv.u || "";
-                  } else {
-                    v = String(lv);
-                  }
-                }
-                var label = esc(m) + (v ? " " + esc(v) : "") + (u ? " " + esc(u) : "");
-                return '<span class="badge dim">' + label + "</span>";
-              })
-              .join("");
-
-            // Footer: last-read age + transport hint.  We don't know the
-            // exact bus from /api/sensors, so fall back to type when missing.
             var transport = s.transport || s.type || "";
-
-            // Error detail chip (e.g. "I2C ACK FAILED") from status_detail field
             var errChip = "";
             if (s.status === "error" && s.status_detail) {
               errChip = '<div class="s-metrics"><span class="badge err" style="font-size:10px">' +
                         esc(s.status_detail) + '</span></div>';
             }
 
-            // Age indicator: only show ✓ when sensor is active and has a timestamp
             var ageRefMs = s.last_read_ms || 0;
             var ageIcon = "", ageColor = "inherit";
             if (stateClass === " err")        { ageIcon = "⊘"; ageColor = "var(--err)"; }
@@ -209,22 +186,23 @@ function sensorsLoad() {
             else if (sleeping)                { ageIcon = "💤"; ageColor = "var(--text-3)"; }
             else if (ageRefMs && stateClass !== " dis") { ageIcon = "✓"; ageColor = "var(--ok)"; }
 
-            return (
-              '<div class="sensor' + stateClass + '" data-sensor-name="' + esc(((s.name || '') + ' ' + (s.id || '')).toLowerCase().trim()) + '">' +
+            var cardName = esc(s.name) + (m && metrics.length > 1 ? " (" + esc(m) + ")" : "");
+            
+            html.push(
+              '<div class="sensor' + stateClass + '" data-sensor-name="' + esc((cardName + ' ' + (s.id || '')).toLowerCase().trim()) + '">' +
                 '<div class="s-head">' +
                   '<div>' +
-                    '<div class="s-name">' + esc(s.name) + '</div>' +
+                    '<div class="s-name">' + cardName + '</div>' +
                     '<div class="s-id">' + esc(s.id) +
                       (transport ? ' · ' + esc(transport) : '') + '</div>' +
                   '</div>' +
                   '<span class="badge ' + badgeClass + '">' + badgeText + '</span>' +
                 '</div>' +
                 '<div class="s-val">' +
-                  '<span class="n">' + (primaryVal ? esc(primaryVal) : "—") + '</span>' +
-                  (primaryUnit ? '<span class="u">' + esc(primaryUnit) + '</span>' : '') +
+                  '<span class="n">' + (val ? esc(val) : "—") + '</span>' +
+                  (unit ? '<span class="u">' + esc(unit) + '</span>' : '') +
                 '</div>' +
                 sparkSvg +
-                (metricBadges ? '<div class="s-metrics">' + metricBadges + '</div>' : '') +
                 errChip +
                 '<div class="s-foot">' +
                   '<span style="color:' + ageColor + '">' + ageIcon + ' ' + ageStr + '</span>' +
@@ -232,8 +210,55 @@ function sensorsLoad() {
                 '</div>' +
               '</div>'
             );
-          })
-          .join("");
+          });
+        });
+        grid.innerHTML = html.join("");
+
+        // Fetch missing sparklines for secondary metrics. Throttle to a small
+        // concurrency — ESPAsyncWebServer has a tiny connection pool, so firing
+        // one /api/data request per metric at once causes timeouts/contention.
+        var lazySparks = [].slice.call(grid.querySelectorAll(".s-spark-lazy"));
+        function _drawLazySpark(svg) {
+          var sId = svg.getAttribute("data-sensor");
+          var mId = svg.getAttribute("data-metric");
+          if (!sId || !mId) return Promise.resolve();
+          var now  = Math.floor(Date.now() / 1000);
+          var from = now - 3600; // last 1 hour
+          var url = "/api/data?sensor=" + encodeURIComponent(sId)
+                  + "&metric=" + encodeURIComponent(mId)
+                  + "&from=" + from + "&to=" + now
+                  + "&agg=raw&mode=lttb&limit=32";
+          return fetchWithTimeout(url, {}, 5000)
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function (res) {
+              if (!res || !res.data || res.data.length < 2) return;
+              var min = Infinity, max = -Infinity, ys = [];
+              res.data.forEach(function (pt) {
+                if (!pt || pt.v === undefined) return;
+                var val = Number(pt.v);
+                if (!isNaN(val)) { if (val < min) min = val; if (val > max) max = val; ys.push(val); }
+              });
+              if (ys.length < 2) return;
+              var range = max - min;
+              if (range < 1e-9) range = 1;
+              var stepX = 100 / (ys.length - 1), pts = "";
+              for (var j = 0; j < ys.length; j++) {
+                var x = (j * stepX).toFixed(1);
+                var y = (32 - ((ys[j] - min) / range) * 28).toFixed(1);
+                pts += (j ? " " : "") + x + "," + y;
+              }
+              svg.innerHTML = '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>';
+            })
+            .catch(function (err) { console.error("Failed to fetch sparkline data:", err); });
+        }
+        // Worker pool: at most MAX_PARALLEL requests in flight; each worker pulls
+        // the next pending sparkline when its request settles.
+        var MAX_PARALLEL = 3, qi = 0;
+        function _nextSpark() {
+          if (qi >= lazySparks.length) return;
+          _drawLazySpark(lazySparks[qi++]).then(_nextSpark);
+        }
+        for (var w = 0; w < Math.min(MAX_PARALLEL, lazySparks.length); w++) _nextSpark();
       }
 
       // Populate chart sensor selectors (primary + overlay)

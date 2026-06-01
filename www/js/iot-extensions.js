@@ -170,6 +170,17 @@
   var _overviewDeck = null;
   var _overviewLastData = null;     // cached /api/latest payload
   var _overviewStatusData = null;   // cached /api/status payload
+  var _overviewSensorList = null;   // cached /api/sensors list
+
+  // ── Sensor-to-card binding (persisted in localStorage) ──────────────────────
+  var OV_BIND_KEY = "esp32logger.overview.bindings";
+  function _loadBindings() { try { return JSON.parse(localStorage.getItem(OV_BIND_KEY)) || {}; } catch (e) { return {}; } }
+  function _saveBinding(cardId, sensorId) {
+    var b = _loadBindings();
+    if (sensorId) b[cardId] = sensorId; else delete b[cardId];
+    try { localStorage.setItem(OV_BIND_KEY, JSON.stringify(b)); } catch (e) {}
+  }
+  function _getBinding(cardId) { return _loadBindings()[cardId] || ""; }
 
   // Registry: id → { title, icon, render(card) → HTML string }
   var OVERVIEW_REGISTRY = {
@@ -179,7 +190,10 @@
         return '<div class="card">' +
           '<div class="card-head">' +
             '<div class="card-title"><span data-icon="wind"></span> Air Quality Index</div>' +
-            '<span class="badge ok" id="aqi-badge">GOOD</span>' +
+            '<div style="display:flex;align-items:center;gap:6px">' +
+              '<select class="ov-sensor-pick" id="ov-aqi-pick" data-card-bind="aqi" title="Assign PM sensor"><option value="">Auto</option></select>' +
+              '<span class="badge ok" id="aqi-badge">GOOD</span>' +
+            '</div>' +
           '</div>' +
           '<div class="card-body" style="padding:0">' +
             '<div class="aqi-card">' +
@@ -211,7 +225,7 @@
         return '<div class="card">' +
           '<div class="card-head">' +
             '<div class="card-title"><span data-icon="thermometer"></span> Environment</div>' +
-            '<span class="mono" style="font-size:11px;color:var(--text-3)" id="ov-env-src">—</span>' +
+            '<select class="ov-sensor-pick" id="ov-env-pick" data-card-bind="environment" title="Assign sensor"><option value="">Auto</option></select>' +
           '</div>' +
           '<div class="card-body">' +
             '<div class="grid grid-3" style="gap:10px" id="ov-env-kpis">' +
@@ -229,7 +243,7 @@
         return '<div class="card">' +
           '<div class="card-head">' +
             '<div class="card-title"><span data-icon="zap"></span> Energy</div>' +
-            '<span class="mono" style="font-size:11px;color:var(--text-3)" id="ov-energy-src">—</span>' +
+            '<select class="ov-sensor-pick" id="ov-energy-pick" data-card-bind="energy" title="Assign sensor"><option value="">Auto</option></select>' +
           '</div>' +
           '<div class="card-body">' +
             '<div class="energy-grid" id="ov-energy-grid">' +
@@ -248,7 +262,8 @@
       title: "Water (live)", icon: "droplets",
       render: function () {
         return '<div class="card" data-mode-show="legacy hybrid">' +
-          '<div class="card-head"><div class="card-title"><span data-icon="droplets"></span> Water</div></div>' +
+          '<div class="card-head"><div class="card-title"><span data-icon="droplets"></span> Water</div>' +
+            '<select class="ov-sensor-pick" id="ov-water-pick" data-card-bind="water" title="Assign sensor"><option value="">Auto</option></select></div>' +
           '<div class="card-body" style="display:flex;flex-direction:column;gap:14px">' +
             '<div><div class="form-label">Current cycle</div>' +
             '<div class="mono" style="font-size:28px;font-weight:700"><span id="ov-water-today">—</span><span style="font-size:13px;color:var(--text-3);margin-left:4px">L</span></div></div>' +
@@ -261,7 +276,8 @@
       title: "Outdoor", icon: "cloud-rain",
       render: function () {
         return '<div class="card">' +
-          '<div class="card-head"><div class="card-title"><span data-icon="cloud-rain"></span> Outdoor</div></div>' +
+          '<div class="card-head"><div class="card-title"><span data-icon="cloud-rain"></span> Outdoor</div>' +
+            '<select class="ov-sensor-pick" id="ov-outdoor-pick" data-card-bind="outdoor" title="Assign sensor"><option value="">Auto</option></select></div>' +
           '<div class="card-body" style="display:flex;flex-direction:column;gap:14px">' +
             '<div><div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Rain today</div>' +
             '<div class="mono" style="font-size:28px;font-weight:700"><span id="ov-rain">—</span><span style="font-size:13px;color:var(--text-3);margin-left:4px">mm</span></div></div>' +
@@ -366,30 +382,44 @@
         if (_overviewStatusData) ovFillWaterCached(_overviewStatusData);
         ovFillAlertFeed();
         if (_overviewHealthData) renderHealthGrid(_overviewHealthData);
+        if (_overviewSensorList) _populateSensorPickers(_overviewSensorList);
       },
     });
 
     populateOverview();
   }
 
+  function _normalizeLatest(data) {
+    if (Array.isArray(data)) return data;
+    var items = (data && data.items) || [];
+    var map = {};
+    items.forEach(function (it) {
+      if (!it) return;
+      if (!map[it.id]) map[it.id] = { id: it.id, type: it.type || "", readings: {}, units: {} };
+      map[it.id].readings[it.metric] = it.value;
+      map[it.id].units[it.metric] = it.unit;
+    });
+    return Object.keys(map).map(function (k) { return map[k]; });
+  }
+
   function _applyOverviewData(data) {
-    ovFillEnvironment(data);
-    ovFillEnergy(data);
-    ovFillAQI(data);
-    ovFillSensorList(data);
+    var normalized = _normalizeLatest(data);
+    ovFillEnvironment(normalized);
+    ovFillEnergy(normalized);
+    ovFillAQI(normalized);
+    ovFillOutdoor(normalized);
+    ovFillSensorList(normalized);
+    ovFillSensorCards(data);
   }
 
   /** Populate Overview with real /api/latest data. */
   function populateOverview() {
-    // Sub-heading from ST
     var sub = document.getElementById("ov-sub");
     if (sub && window.ST) {
       var sc = (window.ST.sensorCount !== undefined ? window.ST.sensorCount : "?");
       sub.textContent = sc + " sensors · live readings";
     }
 
-    // Fetch latest sensor readings.  Cache the response so the deck can
-    // re-apply it after toggling edit mode (which rebuilds the DOM).
     fetchWithTimeout("/api/latest", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
@@ -399,26 +429,41 @@
       })
       .catch(function () {});
 
-    ovFillWater();        // fetches /api/status, caches into _overviewStatusData
+    ovFillWater();
     ovFillAlertFeed();
-    populateDiagnostics(); // fetches /api/sensors, caches into _overviewHealthData
+
+    // Fetch sensor list — populates pickers, dynamic cards, AND diagnostics
+    getSensors()
+      .then(function (data) {
+        var sensors = (data && data.sensors) || [];
+        _overviewSensorList = sensors;
+        _overviewHealthData = sensors;
+        _populateSensorPickers(sensors);
+        _registerDynamicSensorCards(sensors);
+        renderHealthGrid(sensors);
+      })
+      .catch(function () {
+        var grid = document.getElementById("health-grid");
+        if (grid) {
+          grid.innerHTML = "";
+          grid.appendChild(emptyState({ icon: "heart-pulse", title: "Unable to load", msg: "Could not reach /api/sensors." }));
+        }
+      });
   }
 
   function ovFillEnvironment(data) {
-    // Look for first bme280/bme688 sensor in data
+    var binding = _getBinding("environment");
     var envSensor = null;
-    var envId = "";
     if (Array.isArray(data)) {
       data.forEach(function (s) {
-        if (!envSensor && s.readings &&
+        if (binding && s.id === binding) { envSensor = s; return; }
+        if (!binding && !envSensor && s.readings &&
             (s.id.indexOf("bme") !== -1 || s.id.indexOf("env") !== -1 ||
              s.type === "bme280" || s.type === "bme688")) {
-          envSensor = s; envId = s.id;
+          envSensor = s;
         }
       });
     }
-    var src = document.getElementById("ov-env-src");
-    if (src) src.textContent = envId || "No env sensor";
     if (!envSensor) return;
     var r = envSensor.readings || {};
     var t = document.getElementById("ov-temp");
@@ -430,19 +475,18 @@
   }
 
   function ovFillEnergy(data) {
+    var binding = _getBinding("energy");
     var energySensor = null;
-    var energyId = "";
     if (Array.isArray(data)) {
       data.forEach(function (s) {
-        if (!energySensor && s.readings &&
+        if (binding && s.id === binding) { energySensor = s; return; }
+        if (!binding && !energySensor && s.readings &&
             (s.type === "zmct103c" || s.type === "zmpt101b" ||
              s.id.indexOf("power") !== -1 || s.id.indexOf("energy") !== -1)) {
-          energySensor = s; energyId = s.id;
+          energySensor = s;
         }
       });
     }
-    var src = document.getElementById("ov-energy-src");
-    if (src) src.textContent = energyId || "No energy sensor";
     if (!energySensor) return;
     var r = energySensor.readings || {};
     var setE = function (id, v, suffix) {
@@ -455,11 +499,12 @@
   }
 
   function ovFillAQI(data) {
-    // Try to get PM / VOC / CO2 data
+    var binding = _getBinding("aqi");
     var pm = null, voc = null, co2 = null;
     if (Array.isArray(data)) {
       data.forEach(function (s) {
-        if (!pm  && s.readings && (s.type === "sds011" || s.type === "pms5003")) pm  = s.readings;
+        if (binding && s.id === binding && s.readings) { pm = s.readings; return; }
+        if (!binding && !pm  && s.readings && (s.type === "sds011" || s.type === "pms5003")) pm  = s.readings;
         if (!voc && s.readings && (s.type === "sgp30"  || s.type === "ens160"))  voc = s.readings;
         if (!co2 && s.readings && (s.type === "scd4x"  || s.type === "scd30"))   co2 = s.readings;
       });
@@ -496,6 +541,26 @@
       fill("aqi-tvoc", "aqi-tvocv", voc.tvoc || voc.TVOC, 500, "ppb");
       fill("aqi-eco2", "aqi-eco2v", co2 ? (co2.co2 || co2.eCO2) : (voc.eco2 || voc.eCO2), 2000, "ppm");
     }
+  }
+
+  function ovFillOutdoor(data) {
+    var binding = _getBinding("outdoor");
+    var outdoorSensor = null;
+    if (Array.isArray(data)) {
+      data.forEach(function (s) {
+        if (binding && s.id === binding) { outdoorSensor = s; return; }
+        if (!binding && !outdoorSensor && s.readings &&
+            (s.id.indexOf("out") !== -1 || s.id.indexOf("weather") !== -1 || s.id.indexOf("rain") !== -1)) {
+          outdoorSensor = s;
+        }
+      });
+    }
+    if (!outdoorSensor) return;
+    var r = outdoorSensor.readings || {};
+    var rainEl = document.getElementById("ov-rain");
+    var windEl = document.getElementById("ov-wind");
+    if (rainEl && r.rain !== undefined) rainEl.textContent = typeof r.rain === "number" ? r.rain.toFixed(1) : r.rain;
+    if (windEl && r.wind !== undefined) windEl.textContent = typeof r.wind === "number" ? r.wind.toFixed(1) : r.wind;
   }
 
   function ovFillWater() {
@@ -552,6 +617,143 @@
     if (feed) {
       feed.innerHTML = '<div class="empty" style="padding:20px"><span class="empty-title">No recent alerts</span></div>';
     }
+  }
+
+  // ── Sensor picker & dynamic card helpers ────────────────────────────────────
+
+  function _metricIcon(metric) {
+    var m = (metric || "").toLowerCase();
+    if (m === "temperature" || m === "temp") return "thermometer";
+    if (m === "humidity" || m === "hum") return "droplet";
+    if (m === "pressure" || m === "pres") return "gauge";
+    if (m === "voltage" || m === "volt") return "zap";
+    if (m === "current" || m === "amp") return "zap";
+    if (m === "power" || m === "watt") return "zap";
+    if (m.indexOf("pm") !== -1 || m === "dust") return "wind";
+    if (m === "co2" || m === "eco2") return "cloud";
+    if (m === "tvoc" || m === "voc") return "wind";
+    if (m === "rain" || m === "rainfall") return "cloud-rain";
+    if (m === "wind" || m === "windspeed") return "wind";
+    if (m === "light" || m === "lux") return "sun";
+    if (m === "soil" || m === "moisture") return "droplets";
+    return "activity";
+  }
+
+  function _populateSensorPickers(sensors) {
+    var picks = document.querySelectorAll(".ov-sensor-pick");
+    if (!picks.length) return;
+    var bindings = _loadBindings();
+    for (var i = 0; i < picks.length; i++) {
+      var sel = picks[i];
+      var cardId = sel.dataset.cardBind;
+      var saved = bindings[cardId] || "";
+      sel.innerHTML = '<option value="">Auto</option>';
+      sensors.forEach(function (s) {
+        var opt = document.createElement("option");
+        opt.value = s.id;
+        opt.textContent = (s.name || s.id) + " (" + (s.type || "?") + ")";
+        if (s.id === saved) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      if (!sel.dataset.wired) {
+        sel.dataset.wired = "1";
+        sel.addEventListener("change", function () {
+          _saveBinding(this.dataset.cardBind, this.value);
+          if (_overviewLastData) _applyOverviewData(_overviewLastData);
+        });
+      }
+    }
+  }
+
+  function _registerDynamicSensorCards(sensors) {
+    // Build the set of valid dynamic cards for the CURRENT sensor list.
+    var valid = {};
+    sensors.forEach(function (s) {
+      if (!s || s.status === "disabled") return;
+      (s.metrics || []).forEach(function (m) {
+        valid["sensor__" + s.id + "__" + m] = { name: s.name || s.id, metric: m };
+      });
+    });
+
+    var changed = 0;
+
+    // Prune dynamic cards whose sensor/metric no longer exists (removed,
+    // disabled, or renamed) so the Add-Card tray and saved layouts don't keep
+    // stale tiles. Only touches the dynamic "sensor__" namespace.
+    Object.keys(OVERVIEW_REGISTRY).forEach(function (k) {
+      if (k.indexOf("sensor__") === 0 && !valid[k]) {
+        delete OVERVIEW_REGISTRY[k];
+        changed++;
+      }
+    });
+
+    // Register newly-seen sensor metrics.
+    Object.keys(valid).forEach(function (cardId) {
+      if (OVERVIEW_REGISTRY[cardId]) return;
+      changed++;
+      var sName = valid[cardId].name, m = valid[cardId].metric;
+      OVERVIEW_REGISTRY[cardId] = {
+        title: sName + " · " + m,
+        icon: _metricIcon(m),
+        render: function () {
+          return '<div class="card ov-metric-card">' +
+            '<div class="card-head">' +
+              '<div class="card-title"><span data-icon="' + esc(_metricIcon(m)) + '"></span> ' + esc(m) + '</div>' +
+              '<span class="mono" style="font-size:11px;color:var(--text-3)">' + esc(sName) + '</span>' +
+            '</div>' +
+            '<div class="card-body ov-metric-body">' +
+              '<div>' +
+                '<div class="ov-metric-value" id="ov-sm-' + esc(cardId) + '-v">—</div>' +
+                '<div class="ov-metric-unit" id="ov-sm-' + esc(cardId) + '-u"></div>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        },
+      };
+    });
+
+    // Reload deck so previously-saved dynamic cards appear / pruned ones drop,
+    // and the Add Card library tray reflects the current sensor set.
+    if (changed > 0 && _overviewDeck && _overviewDeck.reloadCards) {
+      _overviewDeck.reloadCards();
+      if (_overviewLastData)   _applyOverviewData(_overviewLastData);
+      if (_overviewStatusData) ovFillWaterCached(_overviewStatusData);
+      ovFillAlertFeed();
+      if (_overviewHealthData) renderHealthGrid(_overviewHealthData);
+      if (_overviewSensorList) _populateSensorPickers(_overviewSensorList);
+    }
+  }
+
+  function ovFillSensorCards(data) {
+    var items = (data && data.items) || [];
+    if (!items.length && Array.isArray(data)) {
+      data.forEach(function (s) {
+        if (!s) return;
+        var r = s.readings || {};
+        Object.keys(r).forEach(function (m) {
+          items.push({ id: s.id, metric: m, value: r[m], unit: (s.units && s.units[m]) || "" });
+        });
+      });
+    }
+    items.forEach(function (it) {
+      if (!it) return;
+      var cardId = "sensor__" + it.id + "__" + it.metric;
+      var vEl = document.getElementById("ov-sm-" + cardId + "-v");
+      var uEl = document.getElementById("ov-sm-" + cardId + "-u");
+      if (vEl && it.value !== undefined && it.value !== null) {
+        var val = Number(it.value);
+        if (!isNaN(val)) {
+          var s = val.toFixed(2);
+          if (s.indexOf('.') !== -1) {
+            s = s.replace(/\.?0+$/, '');
+          }
+          vEl.textContent = s;
+        } else {
+          vEl.textContent = String(it.value);
+        }
+      }
+      if (uEl && it.unit) uEl.textContent = it.unit;
+    });
   }
 
   // ── Alerts page ────────────────────────────────────────────────────────────

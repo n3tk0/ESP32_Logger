@@ -875,6 +875,28 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .aqi-bar-fill { height:100%; border-radius:3px; transition:width .4s; }
 .aqi-bar-val { font-family:var(--mono); font-size:11px; color:var(--text-3); text-align:right; }
 
+/* ── Overview sensor assignment picker ── */
+.ov-sensor-pick {
+  height:26px; padding:0 6px;
+  font-size:11px; font-family:var(--mono);
+  background:var(--panel-2); border:1px solid var(--border);
+  border-radius:4px; color:var(--text-2);
+  max-width:170px; cursor:pointer;
+}
+.ov-sensor-pick:hover { border-color:var(--accent); }
+.ov-sensor-pick:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+
+/* ── Dynamic sensor metric card (overview library) ── */
+.ov-metric-body {
+  display:flex; align-items:center; justify-content:center;
+  padding:20px; text-align:center;
+}
+.ov-metric-value {
+  font-family:var(--mono); font-size:32px; font-weight:700;
+  letter-spacing:-.02em; line-height:1;
+}
+.ov-metric-unit { font-size:12px; color:var(--text-3); margin-top:4px; }
+
 /* ── Energy tiles ── */
 .energy-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
 @media (max-width:680px) { .energy-grid { grid-template-columns:1fr 1fr; } }
@@ -1320,8 +1342,17 @@ body.cmd-palette-open, body.qsp-open { overflow: hidden; }
 /* Live mode: masonry-packed via JS; slots are absolutely positioned. */
 .deck.live > .deck-slot {
   position: absolute;
-  transition: left .18s ease, top .18s ease, width .18s ease;
+  transition: left .18s ease, top .18s ease, width .18s ease, height .18s ease;
+  display: flex;
+  flex-direction: column;
 }
+.deck.live > .deck-slot > .card,
+.deck.live > .deck-slot > .kpi {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.deck.live > .deck-slot > .card > .card-body { flex: 1; }
 /* Editing mode: thumbnails in a plain 12-col grid (no masonry). */
 .deck.editing { display: block; }
 .deck-edit-grid {
