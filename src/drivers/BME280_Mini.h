@@ -5,6 +5,7 @@
 // ============================================================================
 #pragma once
 #include <Wire.h>
+#include <ArduinoJson.h>
 
 class BME280_Mini {
 public:
@@ -52,8 +53,8 @@ public:
         return true;
     }
 
+    bool isBME280() const { return _isBME280; }
     uint8_t chipId() const { return _chipId; }
-    bool    isBME280() const { return _isBME280; }
 
     float readTemperature() {
         int32_t adc_T = _read24(0xFA) >> 4;
@@ -93,21 +94,27 @@ public:
     float readHumidity() {
         if (!_isBME280) return NAN;
         if (_t_fine == 0) readTemperature();  // guard: ensure compensation is ready
-        int16_t adc_H = _read16(0xFD);
+        int32_t adc_H = _read16(0xFD);
+        if (adc_H == 0x8000) return NAN;      // skipped/disabled
 
-        int32_t v_x1_u32r = _t_fine - 76800;
-        v_x1_u32r = (((((adc_H << 14) - (((int32_t)_dig_H4) << 20) -
-                        (((int32_t)_dig_H5) * v_x1_u32r)) +
-                       ((int32_t)16384)) >> 15) *
-                     (((((((v_x1_u32r * ((int32_t)_dig_H6)) >> 10) *
-                          (((v_x1_u32r * ((int32_t)_dig_H3)) >> 11) +
-                           ((int32_t)32768))) >> 10) +
-                        ((int32_t)2097152)) * ((int32_t)_dig_H2) + 8192) >> 14));
-        v_x1_u32r = (v_x1_u32r - (((((v_x1_u32r >> 15) * (v_x1_u32r >> 15)) >> 7) *
-                                    ((int32_t)_dig_H1)) >> 4));
-        v_x1_u32r = (v_x1_u32r < 0) ? 0 : v_x1_u32r;
-        v_x1_u32r = (v_x1_u32r > 419430400) ? 419430400 : v_x1_u32r;
-        return (float)(v_x1_u32r >> 12) / 1024.0f;
+
+        int32_t var1, var2, var3, var4, var5;
+        var1 = _t_fine - ((int32_t)76800);
+        var2 = (int32_t)(adc_H * 16384);
+        var3 = (int32_t)(((int32_t)_dig_H4) * 1048576);
+        var4 = ((int32_t)_dig_H5) * var1;
+        var5 = (((var2 - var3) - var4) + (int32_t)16384) / 32768;
+        var2 = (var1 * ((int32_t)_dig_H6)) / 1024;
+        var3 = (var1 * ((int32_t)_dig_H3)) / 2048;
+        var4 = ((var2 * (var3 + (int32_t)32768)) / 1024) + (int32_t)2097152;
+        var2 = ((var4 * ((int32_t)_dig_H2)) + 8192) / 16384;
+        var3 = var5 * var2;
+        var4 = ((var3 / 32768) * (var3 / 32768)) / 128;
+        var5 = var3 - ((var4 * ((int32_t)_dig_H1)) / 16);
+        var5 = (var5 < 0 ? 0 : var5);
+        var5 = (var5 > 419430400 ? 419430400 : var5);
+        uint32_t H = (uint32_t)(var5 / 4096);
+        return (float)H / 1024.0f;
     }
 
 private:
@@ -118,20 +125,20 @@ private:
     int32_t  _t_fine = 0;
 
     // Temperature calibration
-    uint16_t _dig_T1;
-    int16_t  _dig_T2, _dig_T3;
+    uint16_t _dig_T1 = 0;
+    int16_t  _dig_T2 = 0, _dig_T3 = 0;
     // Pressure calibration
-    uint16_t _dig_P1;
-    int16_t  _dig_P2, _dig_P3, _dig_P4, _dig_P5;
-    int16_t  _dig_P6, _dig_P7, _dig_P8, _dig_P9;
+    uint16_t _dig_P1 = 0;
+    int16_t  _dig_P2 = 0, _dig_P3 = 0, _dig_P4 = 0, _dig_P5 = 0;
+    int16_t  _dig_P6 = 0, _dig_P7 = 0, _dig_P8 = 0, _dig_P9 = 0;
     // Humidity calibration (BME280 only)
-    uint8_t  _dig_H1, _dig_H3;
-    int16_t  _dig_H2, _dig_H4, _dig_H5;
-    int8_t   _dig_H6;
+    uint8_t  _dig_H1 = 0, _dig_H3 = 0;
+    int16_t  _dig_H2 = 0, _dig_H4 = 0, _dig_H5 = 0;
+    int8_t   _dig_H6 = 0;
 
     void _readCalibration() {
         // Temperature + pressure: registers 0x88..0x9F (26 bytes)
-        uint8_t buf[26];
+        uint8_t buf[26] = {0};
         _readBlock(0x88, buf, 26);
 
         _dig_T1 = (uint16_t)(buf[1] << 8 | buf[0]);
@@ -152,12 +159,14 @@ private:
 
         // Humidity: 0xA1 (1 byte) + 0xE1..0xE7 (7 bytes)
         _dig_H1 = _read8(0xA1);
-        uint8_t hbuf[7];
+        uint8_t hbuf[7] = {0};
         _readBlock(0xE1, hbuf, 7);
         _dig_H2 = (int16_t)(hbuf[1] << 8 | hbuf[0]);
         _dig_H3 = hbuf[2];
-        _dig_H4 = (int16_t)((int8_t)hbuf[3] << 4 | (hbuf[4] & 0x0F));
-        _dig_H5 = (int16_t)((int8_t)hbuf[5] << 4 | (hbuf[4] >> 4));
+        // dig_H4: 12-bit signed, [11:4] in 0xE4 (hbuf[3]), [3:0] in lower nibble of 0xE5 (hbuf[4])
+        _dig_H4 = ((int16_t)(int8_t)hbuf[3] << 4) | (hbuf[4] & 0x0F);
+        // dig_H5: 12-bit signed, [3:0] in upper nibble of 0xE5 (hbuf[4]), [11:4] in 0xE6 (hbuf[5])
+        _dig_H5 = ((int16_t)(int8_t)hbuf[5] << 4) | (hbuf[4] >> 4);
         _dig_H6 = (int8_t)hbuf[6];
     }
 
