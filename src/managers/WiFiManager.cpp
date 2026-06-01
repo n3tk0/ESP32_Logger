@@ -156,9 +156,20 @@ void tickCaptivePortalDNS() {
 }
 
 bool syncTimeFromNTP() {
-    if (!wifiConnectedAsClient) { DBGLN("NTP: No WiFi"); return false; }
+    // wifiConnectedAsClient is sticky (only cleared when we fall back to AP),
+    // so also check the live link: a bare STA drop leaves the flag true while
+    // WiFi.status() is disconnected. Without this, the 10 s wait loop below
+    // would block the main loop every retry while the link is actually down.
+    if (!wifiConnectedAsClient || WiFi.status() != WL_CONNECTED) {
+        DBGLN("NTP: No WiFi"); return false;
+    }
 
-    configTime(config.network.timezone * 3600, config.network.dstOffsetHours * 3600, config.network.ntpServer);
+    // A blank/garbage server (e.g. left empty by a config migration) makes
+    // configTime() a no-op, so the sync silently times out even on a fully
+    // connected client with internet. Fall back to the build default.
+    const char* ntp = config.network.ntpServer[0] ? config.network.ntpServer
+                                                   : DEFAULT_NTP_SERVER;
+    configTime(config.network.timezone * 3600, config.network.dstOffsetHours * 3600, ntp);
 
     time_t now = 0;
     struct tm ti = {0};

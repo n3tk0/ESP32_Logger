@@ -211,8 +211,91 @@
       '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>' +
       '<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>',
     "zap":
-      '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"></path>'
+      '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"></path>',
+    "smartphone":
+      '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"></rect>' +
+      '<path d="M12 18h.01"></path>',
+    "tag":
+      '<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path>' +
+      '<circle cx="7.5" cy="7.5" r=".5" fill="currentColor"></circle>',
+    "circle":
+      '<circle cx="12" cy="12" r="10"></circle>',
+    "image":
+      '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect>' +
+      '<circle cx="9" cy="9" r="2"></circle>' +
+      '<path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path>',
+    "archive":
+      '<rect width="20" height="5" x="2" y="3" rx="1"></rect>' +
+      '<path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>' +
+      '<path d="M10 12h4"></path>',
+    "printer":
+      '<path d="M6 9V2h12v7"></path>' +
+      '<path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>' +
+      '<rect width="12" height="8" x="6" y="14"></rect>',
+    "laptop":
+      '<path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"></path>',
+    "cloud-fog":
+      '<path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>' +
+      '<path d="M16 17H7"></path>' +
+      '<path d="M17 21H9"></path>',
+    "sliders":
+      '<line x1="4" x2="4" y1="21" y2="14"></line>' +
+      '<line x1="4" x2="4" y1="10" y2="3"></line>' +
+      '<line x1="12" x2="12" y1="21" y2="12"></line>' +
+      '<line x1="12" x2="12" y1="8" y2="3"></line>' +
+      '<line x1="20" x2="20" y1="21" y2="16"></line>' +
+      '<line x1="20" x2="20" y1="12" y2="3"></line>' +
+      '<line x1="2" x2="6" y1="14" y2="14"></line>' +
+      '<line x1="10" x2="14" y1="8" y2="8"></line>' +
+      '<line x1="18" x2="22" y1="16" y2="16"></line>',
+    "arrow-left":
+      '<path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path>',
+    "arrow-right":
+      '<path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path>',
+    "bell-off":
+      '<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"></path>' +
+      '<path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"></path>' +
+      '<path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path>' +
+      '<path d="m2 2 20 20"></path>',
+    "cloud-rain":
+      '<path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>' +
+      '<path d="M16 14v6"></path><path d="M8 14v6"></path><path d="M12 16v6"></path>',
+    "droplet":
+      '<path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"></path>',
+    "git-branch":
+      '<line x1="6" x2="6" y1="3" y2="15"></line>' +
+      '<circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle>' +
+      '<path d="M18 9a9 9 0 0 1-9 9"></path>',
+    "grid":
+      '<rect width="18" height="18" x="3" y="3" rx="2"></rect>' +
+      '<path d="M3 9h18"></path><path d="M3 15h18"></path>' +
+      '<path d="M9 3v18"></path><path d="M15 3v18"></path>',
+    "heart-pulse":
+      '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"></path>' +
+      '<path d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"></path>',
+    "history":
+      '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>' +
+      '<path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path>',
+    "list-checks":
+      '<path d="m3 17 2 2 4-4"></path><path d="m3 7 2 2 4-4"></path>' +
+      '<path d="M13 6h8"></path><path d="M13 12h8"></path><path d="M13 18h8"></path>',
+    "plus-circle":
+      '<circle cx="12" cy="12" r="10"></circle>' +
+      '<path d="M8 12h8"></path><path d="M12 8v8"></path>',
+    "wind":
+      '<path d="M12.8 19.6A2 2 0 1 0 14 16H2"></path>' +
+      '<path d="M17.5 8a2.5 2.5 0 1 1 2 4H2"></path>' +
+      '<path d="M9.8 4.4A2 2 0 1 1 11 8H2"></path>'
   };
+
+  // Aliases — names referenced by the UI for which we don't ship a dedicated
+  // glyph yet. Map each to the closest existing icon so it renders instead of
+  // showing blank. Assigned after the literal so the source paths exist.
+  ICON_PATHS["puzzle"]       = ICON_PATHS["layers"];
+  ICON_PATHS["satellite"]    = ICON_PATHS["globe"];
+  ICON_PATHS["memory-stick"] = ICON_PATHS["cpu"];
+  ICON_PATHS["microchip"]    = ICON_PATHS["cpu"];
+  ICON_PATHS["file-archive"] = ICON_PATHS["archive"];
 
   function svg(name) {
     var body = ICON_PATHS[name];

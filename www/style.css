@@ -302,7 +302,10 @@ button, a, [role="button"] { min-height: 24px; }
 .grid-3 { grid-template-columns:repeat(3,1fr); }
 .grid-2 { grid-template-columns:repeat(2,1fr); }
 .grid-12 { grid-template-columns:repeat(12,1fr); }
-.grid-auto { grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); }
+/* auto-FIT (not auto-fill): collapse empty trailing tracks so the cards
+   stretch to fill the row instead of leaving dead space on wide settings
+   pages. Used only by the settings hub / aggregator grids. */
+.grid-auto { grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
 /* Span helpers — the editable-deck registers ALLOWED_SPANS = [3,4,6,8,12]
    so every value needs a class.  Previously only 4/6/8 had rules and span
    3/12 silently fell back to auto-placement (gemini review PR #108). */
@@ -574,7 +577,7 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .sidebar-rail .app { grid-template-columns:52px 1fr; }
 .sidebar-rail .sidebar { width:52px; padding:10px 6px; overflow:hidden; }
 .sidebar-rail .nav-group,
-.sidebar-rail .nav-item span:not(.ndot):not(.nbadge),
+.sidebar-rail .nav-item span:not(.icon):not(.ndot):not(.nbadge),
 .sidebar-rail .nav-item .nbadge,
 .sidebar-rail .sidebar-foot .mono,
 .sidebar-rail .sidebar-stats .sstat span,
@@ -1555,6 +1558,12 @@ body.deck-dragging * { cursor: grabbing !important; }
  * SETTINGS HUB  —  grouped sections (10 cards → 6 in 3 groups)
  * ════════════════════════════════════════════════════════════════════════════ */
 .settings-section + .settings-section { margin-top: 22px; }
+
+/* Settings detail pages (settings_device, settings_network, …) stack multiple
+   .card groups vertically with no wrapping grid, so they touched edge-to-edge.
+   Give consecutive cards breathing room. Scoped by page id so the dashboard /
+   logs grids (which space cards via their own grid gap) are unaffected. */
+[id^="page-settings_"] .card + .card { margin-top: var(--gap); }
 
 /* ════════════════════════════════════════════════════════════════════════════
  * INLINE SENSOR EDIT  —  expands below the row on desktop (≥ 780 px)

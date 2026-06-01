@@ -53,6 +53,11 @@ static void applyDefaults() {
     if (!strlen(config.network.apSSID))     SAFE_STRCPY(config.network.apSSID,    DEFAULT_AP_SSID);
     if (!strlen(config.network.apPassword)) SAFE_STRCPY(config.network.apPassword, DEFAULT_AP_PASSWORD);
     if (!strlen(config.network.ntpServer)) SAFE_STRCPY(config.network.ntpServer, DEFAULT_NTP_SERVER);
+    // Clamp out-of-range time offsets from a corrupted/migrated config. Note
+    // timezone 0 is a valid value (UTC), so we only reset values outside the
+    // real-world range rather than treating 0 as "unset".
+    if (config.network.timezone < -12 || config.network.timezone > 14) config.network.timezone = 2;
+    if (config.network.dstOffsetHours < 0 || config.network.dstOffsetHours > 2) config.network.dstOffsetHours = 0;
 
     if (!config.network.apIP[0]) {
         config.network.apIP[0]=192; config.network.apIP[1]=168;
