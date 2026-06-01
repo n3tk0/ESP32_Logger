@@ -118,6 +118,9 @@ private:
                                         // Stable init reference for the periodic
                                         // "overdue" check (slotStartMs rotates
                                         // hourly so it can't serve that role).
+        uint32_t lastErrorMs    = 0;    // millis() of last recorded error; rate-
+                                        // limits overdue errors on periodic sensors
+                                        // to one per data interval.
         uint32_t totalLatUs     = 0;    // all-time latency accumulator
         uint32_t latSamples     = 0;    // all-time sample count
     };

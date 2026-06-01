@@ -248,8 +248,16 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                 // Recovered: clear a prior 'overdue' fault so status returns OK.
                 if (s->isPeriodic()) s->resetErrorCount();
             } else if (!expectedSleep) {
-                h.hourErrors[h.curSlot]++;
-                s->incErrorCount();
+                // Rate-limit overdue errors for a periodic sensor to one per
+                // expected data interval, so a dead sensor records ~1 missed
+                // reading per period instead of one per 1 s poll — otherwise a
+                // 10-min outage would log ~600 errors and crush uptime%.
+                // Continuous sensors (countEmptyReadAsError) count every miss.
+                if (s->countEmptyReadAsError() || (ms - h.lastErrorMs) >= s->dataIntervalMs()) {
+                    h.hourErrors[h.curSlot]++;
+                    s->incErrorCount();
+                    h.lastErrorMs = ms;
+                }
             }
             // expectedSleep: leave every counter untouched (neutral poll).
         }
