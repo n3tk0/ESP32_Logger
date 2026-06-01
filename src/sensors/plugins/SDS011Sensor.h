@@ -33,11 +33,15 @@ public:
         return n;
     }
 
-    void incErrorCount() override {
-        // In periodic mode, empty reads are expected (sensor only sends once
-        // per period).  Only count errors in continuous mode where every poll
-        // should produce data.
-        if (_hwPeriodMin == 0) ISensor::incErrorCount();
+    // Periodic-mode hooks (see ISensor). In hw-periodic mode the sensor sleeps
+    // between bursts, so empty polls are expected and the data spacing is the
+    // work period (minutes), not the 1 s poll cadence. SensorManager only flags
+    // an error once the sensor is overdue, so we no longer need to override
+    // incErrorCount() to blanket-suppress (that masked a genuinely dead sensor).
+    bool     isPeriodic() const override            { return _hwPeriodMin > 0; }
+    bool     countEmptyReadAsError() const override { return _hwPeriodMin == 0; }
+    uint32_t dataIntervalMs() const override {
+        return _hwPeriodMin > 0 ? (uint32_t)_hwPeriodMin * 60000UL : _readIntervalMs;
     }
 
 private:

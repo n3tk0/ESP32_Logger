@@ -114,6 +114,13 @@ private:
         uint32_t hourLatUs[24]  = {};   // accumulated latency (us) per slot
         uint8_t  curSlot        = 0;    // index of the current write slot (0-23)
         uint32_t slotStartMs    = 0;    // millis() when curSlot began (0 = unset)
+        uint32_t firstSeenMs    = 0;    // millis() of first poll; never advanced.
+                                        // Stable init reference for the periodic
+                                        // "overdue" check (slotStartMs rotates
+                                        // hourly so it can't serve that role).
+        uint32_t lastErrorMs    = 0;    // millis() of last recorded error; rate-
+                                        // limits overdue errors on periodic sensors
+                                        // to one per data interval.
         uint32_t totalLatUs     = 0;    // all-time latency accumulator
         uint32_t latSamples     = 0;    // all-time sample count
     };

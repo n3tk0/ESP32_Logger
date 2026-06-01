@@ -80,6 +80,21 @@ public:
     // so they do not stall the main SensorTask tick loop.
     virtual bool isBlocking() const { return false; }
 
+    // Periodic ("duty-cycled") sensors sleep between measurement bursts to save
+    // hardware life (e.g. SDS011 in hw-periodic mode parks its fan/laser). While
+    // asleep, polls legitimately return no data — the health accounting uses
+    // these hooks so the expected gaps aren't flagged as faults:
+    //   isPeriodic()            — true while the sensor duty-cycles.
+    //   countEmptyReadAsError() — false when an empty poll is an expected sleep
+    //                             (still counted once the sensor is "overdue",
+    //                             see SensorManager::tickFiltered).
+    //   dataIntervalMs()        — expected spacing between actual readings; used
+    //                             for the UI freshness window and overdue check.
+    //                             Defaults to the poll interval (continuous).
+    virtual bool     isPeriodic() const            { return false; }
+    virtual bool     countEmptyReadAsError() const { return true; }
+    virtual uint32_t dataIntervalMs() const        { return getReadIntervalMs(); }
+
     // Returns metric names this sensor produces (e.g. "temperature", "humidity").
     // Fills out[] with up to maxOut pointers to static string literals.
     // Returns the number of metrics filled.

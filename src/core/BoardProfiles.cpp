@@ -11,6 +11,11 @@
 #include "../pipeline/DataPipeline.h"   // fsMutex
 #include "Globals.h"                    // activeFS, fsAvailable, g_boardProfile
 
+// Per-sensor "allow restricted pins" override (see BoardProfiles.h). Set by
+// SensorManager around each sensor's init(); single-threaded init context.
+bool g_pinAllowUnsafe = false;
+
+
 // Pin-restriction tables. Sentinel-terminated with PIN_UNSET. Verified
 // against the Espressif ESP32-C3 / ESP32-S3 technical reference manuals
 // and the Seeed XIAO ESP32-C3 datasheet (rev 2024-02).
@@ -198,11 +203,28 @@ bool validateAttachPin(int pin, const char* sensorId, const char* fieldName) {
 
     // ── Board profile static validation ──────────────────────────────────
     if (!isPinAllowed(g_boardProfile, (uint8_t)pin, PIN_PURPOSE_GENERIC)) {
-        Serial.printf("[%s.%s] init refused: GPIO%d = %s\n",
+        const char* reason = pinRejectReason(g_boardProfile, (uint8_t)pin);
+        // allow_unsafe_pins (per-sensor) can override a strapping- or
+        // reserved-pin refusal — those are usable with correct wiring (e.g. an
+        // I2C pull-up holds a C3 strap pin HIGH, its safe boot level). Flash-bus
+        // and out-of-range pins never work, so they stay hard-blocked.
+        bool canOverride = g_pinAllowUnsafe
+                        && g_boardProfile != nullptr
+                        && g_boardProfile->id != BOARD_CUSTOM
+                        && (uint8_t)pin <= g_boardProfile->maxGpio
+                        && !inList(g_boardProfile->flashPins, (uint8_t)pin);
+        if (!canOverride) {
+            Serial.printf("[%s.%s] init refused: GPIO%d = %s%s\n",
+                          sensorId ? sensorId : "?",
+                          fieldName ? fieldName : "pin", pin, reason,
+                          g_pinAllowUnsafe ? " (cannot be overridden)" : "");
+            return false;
+        }
+        Serial.printf("[%s.%s] WARNING: GPIO%d = %s — allowed via allow_unsafe_pins; "
+                      "ensure proper pull-ups, the device may fail to boot if this pin "
+                      "is held LOW at reset\n",
                       sensorId ? sensorId : "?",
-                      fieldName ? fieldName : "pin", pin,
-                      pinRejectReason(g_boardProfile, (uint8_t)pin));
-        return false;
+                      fieldName ? fieldName : "pin", pin, reason);
     }
     return true;
 }
