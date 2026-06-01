@@ -745,6 +745,17 @@ function loadPagePartial(page) {
       // click/change/submit/input delegate from document already catch events
       // inside the new nodes; onerror does not bubble, so wire those directly.
       wireLateErrorHandlers(document);
+      // icons.js only runs swap() once on DOMContentLoaded. Lazily-injected
+      // page partials load afterwards, so their <span data-icon> placeholders
+      // would otherwise never be replaced with SVGs (blank icons on Network,
+      // Hardware, etc.). Swap the freshly-injected page element now.
+      if (window.Icons && Icons.swap) {
+        // A valid partial always contains its #page-<name> element, so scope
+        // the swap to it — never fall back to document.body (that would
+        // re-scan every icon already in the SPA on each navigation).
+        var injected = document.getElementById("page-" + page);
+        if (injected) Icons.swap(injected);
+      }
     })
     .catch(function (e) {
       console.error("loadPagePartial(" + page + ") failed:", e);

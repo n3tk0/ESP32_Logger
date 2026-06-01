@@ -2101,7 +2101,9 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
     // =========================================================================
     server.on("/wifi_scan_start", HTTP_GET, [](AsyncWebServerRequest *r) {
         if (!requireMutatingAuth(r)) return;
-        WiFi.mode(WIFI_AP_STA);
+        // Only widen AP → AP_STA so the AP stays up; leave a client-only
+        // device in STA (it can scan without broadcasting an AP).
+        if (WiFi.getMode() == WIFI_AP) WiFi.mode(WIFI_AP_STA);
         WiFi.scanDelete();
         WiFi.scanNetworks(true);
         r->send(200, "text/plain", "OK");
@@ -2110,6 +2112,10 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
     server.on("/wifi_scan_result", HTTP_GET, [](AsyncWebServerRequest *r) {
         JsonDocument doc;
         JsonArray nets = doc["networks"].to<JsonArray>();
+        // Read-only on purpose: this endpoint is polled with a plain GET and
+        // is NOT behind requireMutatingAuth, so it must never start radio work.
+        // The (CSRF-guarded) /wifi_scan_start owns starting/re-kicking scans;
+        // the client re-triggers it if this reports an error.
         int n = WiFi.scanComplete();
         if      (n == WIFI_SCAN_RUNNING) { doc["scanning"] = true; }
         else if (n == WIFI_SCAN_FAILED)  { doc["error"] = "Scan failed"; }
