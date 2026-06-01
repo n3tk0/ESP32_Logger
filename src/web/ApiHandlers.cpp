@@ -24,8 +24,6 @@
 #include "../utils/JsonResponse.h"     // R9: sendJsonResponse helper
 #include "../alerts/AlertEngine.h"    // GET/POST /api/alerts, snooze, toasts
 #include <Wire.h>                     // POST /api/i2c_scan
-#include "../sensors/plugins/BME280Sensor.h"  // /api/bme280_debug
-
 // Forward-declared in Logger.ino — accessible here because this file is
 // compiled in the same sketch scope.
 #ifdef EXPORT_MQTT_ENABLED

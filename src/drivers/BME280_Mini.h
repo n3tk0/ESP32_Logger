@@ -5,7 +5,6 @@
 // ============================================================================
 #pragma once
 #include <Wire.h>
-#include <ArduinoJson.h>
 
 class BME280_Mini {
 public:
@@ -164,9 +163,11 @@ private:
         _dig_H2 = (int16_t)(hbuf[1] << 8 | hbuf[0]);
         _dig_H3 = hbuf[2];
         // dig_H4: 12-bit signed, [11:4] in 0xE4 (hbuf[3]), [3:0] in lower nibble of 0xE5 (hbuf[4])
-        _dig_H4 = ((int16_t)(int8_t)hbuf[3] << 4) | (hbuf[4] & 0x0F);
+        _dig_H4 = (int16_t)((uint16_t)hbuf[3] << 4 | (hbuf[4] & 0x0F));
+        _dig_H4 = (int16_t)(_dig_H4 << 4) >> 4;
         // dig_H5: 12-bit signed, [3:0] in upper nibble of 0xE5 (hbuf[4]), [11:4] in 0xE6 (hbuf[5])
-        _dig_H5 = ((int16_t)(int8_t)hbuf[5] << 4) | (hbuf[4] >> 4);
+        _dig_H5 = (int16_t)((uint16_t)hbuf[5] << 4 | (hbuf[4] >> 4));
+        _dig_H5 = (int16_t)(_dig_H5 << 4) >> 4;
         _dig_H6 = (int8_t)hbuf[6];
     }
 
