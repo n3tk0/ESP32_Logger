@@ -1297,10 +1297,18 @@
           // Step 3
           '<div class="wiz-step" data-step="3">' +
             '<div class="form-grid">' +
-              '<div class="field"><label for="wiz-iface">Interface</label><select id="wiz-iface" class="input"><option>I2C</option><option>UART</option><option>GPIO</option><option>ADC</option><option>1-Wire</option></select></div>' +
-              '<div class="field"><label for="wiz-addr">I2C Address</label><input id="wiz-addr" class="input mono" value="0x76"/></div>' +
-              '<div class="field"><label for="wiz-sda">SDA pin</label><input id="wiz-sda" class="input mono" type="number" value="6"/></div>' +
-              '<div class="field"><label for="wiz-scl">SCL pin</label><input id="wiz-scl" class="input mono" type="number" value="7"/></div>' +
+              '<div class="field"><label for="wiz-iface">Interface</label><select id="wiz-iface" class="input"><option>I2C</option><option>UART</option><option>Pulse</option><option>GPIO</option><option>ADC</option><option>1-Wire</option></select></div>' +
+              // I2C fields
+              '<div class="field wiz-if" data-if="i2c"><label for="wiz-addr">I2C Address</label><input id="wiz-addr" class="input mono" value="0x76"/></div>' +
+              '<div class="field wiz-if" data-if="i2c"><label for="wiz-sda">SDA pin</label><input id="wiz-sda" class="input mono" type="number" value="6"/></div>' +
+              '<div class="field wiz-if" data-if="i2c"><label for="wiz-scl">SCL pin</label><input id="wiz-scl" class="input mono" type="number" value="7"/></div>' +
+              // UART fields
+              '<div class="field wiz-if" data-if="uart"><label for="wiz-rx">RX pin</label><input id="wiz-rx" class="input mono" type="number" value="4"/></div>' +
+              '<div class="field wiz-if" data-if="uart"><label for="wiz-tx">TX pin <span style="color:var(--text-3)">(optional)</span></label><input id="wiz-tx" class="input mono" type="number" placeholder="—"/></div>' +
+              '<div class="field wiz-if" data-if="uart"><label for="wiz-baud">Baud</label><input id="wiz-baud" class="input mono" type="number" value="9600"/></div>' +
+              // GPIO / ADC / 1-Wire: single data pin
+              '<div class="field wiz-if" data-if="pulse gpio adc 1-wire"><label for="wiz-pin">Data pin</label><input id="wiz-pin" class="input mono" type="number" value="4"/></div>' +
+              // Always shown
               '<div class="field"><label for="wiz-int">Read interval (ms)</label><input id="wiz-int" class="input mono" type="number" value="10000" min="500"/></div>' +
             '</div>' +
           '</div>' +
@@ -1331,11 +1339,23 @@
         if (id && id.value === "new_sensor") id.value = c.dataset.type + "_1";
         var nm = document.getElementById("wiz-name");
         if (nm) nm.value = c.querySelector(".wiz-type-name").textContent + " sensor";
+        // Pre-select the interface from the card's meta ("I2C · …",
+        // "UART · …", "Pulse") so the right pin fields show on the next step.
+        var metaEl = c.querySelector(".wiz-type-meta");
+        var meta = ((metaEl && metaEl.textContent) || "").split("·")[0].trim().toUpperCase();
+        var ifMap = { "I2C": "I2C", "UART": "UART", "PULSE": "Pulse", "ADC": "ADC", "1-WIRE": "1-Wire" };
+        var ifaceEl = document.getElementById("wiz-iface");
+        if (ifaceEl && ifMap[meta]) { ifaceEl.value = ifMap[meta]; wizUpdateIfaceFields(); }
       });
     });
     // Select first by default
     var first = wiz.querySelector(".wiz-type-card");
     if (first) first.classList.add("selected");
+
+    // Interface → show only the relevant pin fields (and refresh once now).
+    var ifaceSel = wiz.querySelector("#wiz-iface");
+    if (ifaceSel) ifaceSel.addEventListener("change", wizUpdateIfaceFields);
+    wizUpdateIfaceFields();
 
     wiz.querySelector("#wizClose").addEventListener("click", closeWizard);
     wiz.addEventListener("click", function (e) { if (e.target === wiz) closeWizard(); });
@@ -1375,6 +1395,18 @@
     }
   }
 
+  // Show only the pin/config fields that belong to the selected interface.
+  function wizUpdateIfaceFields() {
+    if (!_wizardEl) return;
+    var ifaceEl = _wizardEl.querySelector("#wiz-iface");
+    if (!ifaceEl) return;
+    var iface = (ifaceEl.value || "I2C").toLowerCase();   // i2c|uart|gpio|adc|1-wire
+    _wizardEl.querySelectorAll(".wiz-if").forEach(function (el) {
+      var list = (el.getAttribute("data-if") || "").split(" ");
+      el.style.display = (list.indexOf(iface) >= 0) ? "" : "none";
+    });
+  }
+
   function buildWizReview() {
     var typeCard = _wizardEl.querySelector(".wiz-type-card.selected");
     var typeVal  = typeCard ? typeCard.dataset.type : "unknown";
@@ -1382,24 +1414,41 @@
     var zoneVal  = (document.getElementById("wiz-zone")  || {}).value || "indoor";
     var nameVal  = (document.getElementById("wiz-name")  || {}).value || "";
     var ifaceVal = (document.getElementById("wiz-iface") || {}).value || "I2C";
-    var addrVal  = (document.getElementById("wiz-addr")  || {}).value || "0x76";
-    var sdaVal   = (document.getElementById("wiz-sda")   || {}).value || "6";
-    var sclVal   = (document.getElementById("wiz-scl")   || {}).value || "7";
     var intVal   = (document.getElementById("wiz-int")   || {}).value || "10000";
-    var addrNum  = parseInt(addrVal, 16) || parseInt(addrVal, 10) || 0;
+    var iface    = ifaceVal.toLowerCase();
+
+    // Read an integer field by id; return `def` when blank/missing/non-numeric.
+    function pinVal(id, def) {
+      var v = (document.getElementById(id) || {}).value;
+      var n = parseInt(v, 10);
+      return isNaN(n) ? def : n;
+    }
 
     var obj = {
-      id:                 idVal,
-      type:               typeVal,
-      zone:               zoneVal,
-      name:               nameVal,
-      enabled:            true,
-      interface:          ifaceVal.toLowerCase(),
-      sda:                parseInt(sdaVal, 10),
-      scl:                parseInt(sclVal, 10),
-      address:            addrNum,
-      read_interval_ms:   parseInt(intVal, 10),
+      id:               idVal,
+      type:             typeVal,
+      zone:             zoneVal,
+      name:             nameVal,
+      enabled:          true,
+      interface:        iface,
+      read_interval_ms: parseInt(intVal, 10),
     };
+
+    // Interface-specific pins/keys — must match the SensorManager plugin schema.
+    if (iface === "i2c") {
+      var addrVal = (document.getElementById("wiz-addr") || {}).value || "0x76";
+      obj.address = parseInt(addrVal, 16) || parseInt(addrVal, 10) || 0;
+      obj.sda     = pinVal("wiz-sda", -1);
+      obj.scl     = pinVal("wiz-scl", -1);
+    } else if (iface === "uart") {
+      obj.uart_rx = pinVal("wiz-rx", -1);   // required by SDS011/PMS5003 plugins
+      obj.uart_tx = pinVal("wiz-tx", -1);   // optional (-1 = RX-only)
+      obj.baud    = pinVal("wiz-baud", 9600);
+    } else {
+      // gpio (pulse) / adc / 1-wire — single data pin
+      obj.pin     = pinVal("wiz-pin", -1);
+    }
+
     var pre = document.getElementById("wiz-json");
     if (pre) pre.textContent = JSON.stringify(obj, null, 2);
   }
