@@ -1441,8 +1441,13 @@
       .then(function (res) {
         if (res && res.ok) {
           closeWizard();
-          showToast("Sensor added", obj.id + " · pipeline reloading", "ok");
-          setTimeout(function () { if (typeof sensorsLoad === "function") sensorsLoad(); }, 2000);
+          showToast("Sensor added", obj.id + " · device restarting to apply", "ok");
+          // /save_platform only writes platform_config.json — the running
+          // pipeline keeps the old config until reloaded. Mirror the Core Logic
+          // page: signal a reload (sets shouldRestart server-side; not CSRF-
+          // gated). Refresh the list once the device is back up.
+          fetchWithTimeout("/api/platform_reload", { method: "POST" }, 30000).catch(function () {});
+          setTimeout(function () { if (typeof sensorsLoad === "function") sensorsLoad(); }, 6000);
         } else {
           showToast("Save failed", (res && res.error) || "Check firmware logs", "err");
         }
