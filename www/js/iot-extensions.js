@@ -1341,7 +1341,8 @@
         if (nm) nm.value = c.querySelector(".wiz-type-name").textContent + " sensor";
         // Pre-select the interface from the card's meta ("I2C · …",
         // "UART · …", "Pulse") so the right pin fields show on the next step.
-        var meta = (c.querySelector(".wiz-type-meta").textContent || "").split("·")[0].trim().toUpperCase();
+        var metaEl = c.querySelector(".wiz-type-meta");
+        var meta = ((metaEl && metaEl.textContent) || "").split("·")[0].trim().toUpperCase();
         var ifMap = { "I2C": "I2C", "UART": "UART", "PULSE": "GPIO", "ADC": "ADC", "1-WIRE": "1-Wire" };
         var ifaceEl = document.getElementById("wiz-iface");
         if (ifaceEl && ifMap[meta]) { ifaceEl.value = ifMap[meta]; wizUpdateIfaceFields(); }
