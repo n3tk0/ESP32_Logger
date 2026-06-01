@@ -314,11 +314,10 @@
   function buildOverviewPage() {
     if (document.getElementById("page-overview")) return;
 
-    var page = document.createElement("main");
-    page.className = "main-content page";
+    var page = document.createElement("section");
+    page.className = "page";
     page.id = "page-overview";
     page.setAttribute("data-mode-show", "continuous hybrid");
-    page.setAttribute("role", "main");
 
     page.innerHTML =
       '<div class="page-head">' +
@@ -333,7 +332,10 @@
       '</div>' +
       '<div class="deck" id="overview-deck"></div>';
 
-    document.body.insertBefore(page, document.getElementById("toastContainer") || null);
+    // Mount inside <main id="main-content"> (the grid's "main" area), not
+    // <body> — otherwise the page renders outside the .app grid, below the
+    // sidebar. Matches where the inlined .page sections live.
+    (document.getElementById("main-content") || document.body).appendChild(page);
     reIcons(page);
 
     var addBtn = document.getElementById("ovAddSensorBtn");
@@ -608,11 +610,10 @@
   function buildAlertsPage() {
     if (document.getElementById("page-alerts")) return;
 
-    var page = document.createElement("main");
-    page.className = "main-content page";
+    var page = document.createElement("section");
+    page.className = "page";
     page.id = "page-alerts";
     page.setAttribute("data-mode-show", "continuous hybrid");
-    page.setAttribute("role", "main");
 
     page.innerHTML =
       '<div class="page-head">' +
@@ -627,7 +628,10 @@
       '</div>' +
       '<div class="deck" id="alerts-deck"></div>';
 
-    document.body.insertBefore(page, document.getElementById("toastContainer") || null);
+    // Mount inside <main id="main-content"> (the grid's "main" area), not
+    // <body> — otherwise the page renders outside the .app grid, below the
+    // sidebar. Matches where the inlined .page sections live.
+    (document.getElementById("main-content") || document.body).appendChild(page);
     reIcons(page);
 
     _alertsDeck = window.EditableDeck.mount({
