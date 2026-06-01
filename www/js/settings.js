@@ -908,7 +908,7 @@ function timeSyncNTP(ev) {
     "<div class='alert alert-info'>⏳ Syncing from NTP…</div>",
     true,
   );
-  fetchWithTimeout("/sync_time", { method: "POST" }, 30000)
+  postWithCsrf("/sync_time", { method: "POST" }, 30000)
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d.ok) {
@@ -955,10 +955,10 @@ function timeRtcProtect(ev) {
   var fd = new FormData();
   var chk = document.getElementById("time-rtcProt");
   if (chk && chk.checked) fd.append("protect", "1");
-  fetchWithTimeout("/rtc_protect", { method: "POST", body: fd }, 30000);
+  postWithCsrf("/rtc_protect", { method: "POST", body: fd }, 30000);
 }
 function timeFlushLogs() {
-  fetchWithTimeout("/flush_logs", { method: "POST" }, 30000).then(function () {
+  postWithCsrf("/flush_logs", { method: "POST" }, 30000).then(function () {
     showMsg(
       "time-msg",
       "<div class='alert alert-success'>✅ Log buffer flushed</div>",
@@ -967,7 +967,7 @@ function timeFlushLogs() {
   });
 }
 function timeBackupBoot() {
-  fetchWithTimeout("/backup_bootcount", { method: "POST" }, 30000).then(function () {
+  postWithCsrf("/backup_bootcount", { method: "POST" }, 30000).then(function () {
     showMsg(
       "time-msg",
       "<div class='alert alert-success'>✅ Boot count backed up</div>",
@@ -977,7 +977,7 @@ function timeBackupBoot() {
 }
 function timeRestoreBoot() {
   if (!confirm("Restore boot count from backup?")) return;
-  fetchWithTimeout("/restore_bootcount", { method: "POST" }, 30000)
+  postWithCsrf("/restore_bootcount", { method: "POST" }, 30000)
     .then(function (r) {
       return r.json();
     })
