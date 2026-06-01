@@ -203,6 +203,7 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
             constexpr uint32_t ONE_HOUR_MS = 3600UL * 1000UL;
             HealthData& h = _health[i];
             if (h.slotStartMs == 0) h.slotStartMs = ms;   // first ever read
+            if (h.firstSeenMs == 0) h.firstSeenMs = ms;   // stable init reference
             while ((ms - h.slotStartMs) >= ONE_HOUR_MS) {
                 // Advance to next slot, clear its accumulators.
                 // Use += ONE_HOUR_MS (not =ms) so overruns don't accumulate drift.
@@ -220,8 +221,15 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
             // last SUCCESSFUL read (updated below, after this block).
             bool expectedSleep = false;
             if (n <= 0 && !s->countEmptyReadAsError()) {
-                uint32_t ref    = (_lastReadMs[i] != 0) ? _lastReadMs[i] : h.slotStartMs;
-                expectedSleep   = (ms - ref) <= (s->dataIntervalMs() * 2);
+                // Reference = last successful read, or the sensor's first-seen
+                // time before it has ever read. NOT slotStartMs: that rotates
+                // hourly, so for a work period >= 30 min (dataIntervalMs*2 >= 1h)
+                // it would keep the sensor "expected-sleeping" forever and never
+                // flag a dead/failed sensor. firstSeenMs is set once and zeroed
+                // only on reload (_destroyAll), so it stays a stable per-instance
+                // reference.
+                uint32_t ref  = (_lastReadMs[i] != 0) ? _lastReadMs[i] : h.firstSeenMs;
+                expectedSleep = (ms - ref) <= (s->dataIntervalMs() * 2);
             }
 
             if (n > 0) {
