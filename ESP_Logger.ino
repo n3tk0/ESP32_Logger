@@ -929,6 +929,11 @@ void loop() {
                 s_lastNtpRetry = nowMs;
                 g_pendingNtpSync = 1;    // handled by the block above next iteration
             }
+        } else if (!wifiConnectedAsClient || rtcValid) {
+            // Reset on disconnect (or once time is valid) so a reconnect gets a
+            // fresh stabilization window instead of firing a blocking sync the
+            // instant the link returns, before DNS/IP are ready.
+            s_lastNtpRetry = 0;
         }
     }
 
