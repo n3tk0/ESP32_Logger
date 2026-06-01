@@ -2,6 +2,7 @@
 #include "../utils/MutexGuard.h"
 #include <LittleFS.h>
 #include "../pipeline/DataPipeline.h"  // wireMutex (#14)
+#include "../core/BoardProfiles.h"     // g_pinAllowUnsafe (per-sensor pin override)
 
 SensorManager sensorManager;
 
@@ -125,7 +126,14 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         }
 
         s->setId(id);
-        if (s->init(sensor)) {
+        // Per-sensor pin override: while set, validateAttachPin() downgrades a
+        // strapping/reserved-pin refusal to a warning (flash/out-of-range stay
+        // hard-blocked). Cleared right after init so it can't leak to anything
+        // else that validates pins.
+        g_pinAllowUnsafe = sensor["allow_unsafe_pins"] | false;
+        bool initOk = s->init(sensor);
+        g_pinAllowUnsafe = false;
+        if (initOk) {
             _sensors[_count]    = s;
             _lastReadMs[_count] = 0;
             _count++;

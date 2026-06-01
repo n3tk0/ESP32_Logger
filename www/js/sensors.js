@@ -819,7 +819,14 @@ function _clBuildEditFormHtml(s) {
   }
 
   // Support for custom JSON fields (advanced)
-  var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "uart_rx", "uart_tx", "baud", "pin", "work_period_min", "pulses_per_liter", "calibration", "humidityCorrectionEnabled", "humidityCorrectionKappa"];
+  // Restricted-pin warning + per-sensor override (populated by clWirePinWarn).
+  html += '<div id="sensor-pinwarn" style="display:none;margin-top:1rem;padding:8px 10px;border-radius:6px;font-size:12px"></div>';
+  html += '<label id="sensor-unsafe-wrap" style="display:' + (s.allow_unsafe_pins ? 'flex' : 'none') +
+          ';align-items:center;gap:6px;cursor:pointer;margin-top:8px;font-size:12px">' +
+          '<input type="checkbox" name="allow_unsafe_pins"' + (s.allow_unsafe_pins ? ' checked' : '') +
+          '> Use restricted pin anyway (proper pull-ups added)</label>';
+
+  var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "uart_rx", "uart_tx", "baud", "pin", "work_period_min", "pulses_per_liter", "calibration", "humidityCorrectionEnabled", "humidityCorrectionKappa", "allow_unsafe_pins"];
   var advObj = {};
   for (var k in s) {
     if (stdKeys.indexOf(k) === -1) advObj[k] = s[k];
@@ -836,6 +843,47 @@ function _clBuildEditFormHtml(s) {
 // Inline-edit mount point for desktop (≥780 px).  Expands a panel below
 // the row, replacing the modal popup for less context loss.  Falls back
 // to the popup on mobile and when the row can't be located.
+// Live restricted-pin warning for the sensor edit form (both inline + popup
+// mounts). Warns when a pin field holds a strapping/reserved/flash GPIO and
+// reveals the allow_unsafe_pins checkbox for the soft (override-able) cases.
+function clWirePinWarn() {
+  if (typeof getBoardPins !== "function") return;
+  var form = document.getElementById("sensorEditForm");
+  if (!form) return;
+  var sel = 'input[name="sda"],input[name="scl"],input[name="uart_rx"],input[name="uart_tx"],input[name="pin"]';
+  function refresh() {
+    var warn = document.getElementById("sensor-pinwarn");
+    var wrap = document.getElementById("sensor-unsafe-wrap");
+    var chk  = form.querySelector('input[name="allow_unsafe_pins"]');
+    if (!warn) return;
+    getBoardPins().then(function (pins) {
+      var msgs = [], hard = false, soft = false;
+      form.querySelectorAll(sel).forEach(function (el) {
+        if (el.value === "") return;
+        var risk = pinRisk(pins, el.value);
+        if (risk) {
+          msgs.push("GPIO" + parseInt(el.value, 10) + " — " + risk.reason);
+          if (risk.hard) hard = true; else soft = true;
+        }
+      });
+      if (!msgs.length) {
+        warn.style.display = "none";
+        if (wrap && !(chk && chk.checked)) wrap.style.display = "none";
+        return;
+      }
+      warn.style.display = "";
+      warn.style.background = hard ? "rgba(220,38,38,.12)" : "rgba(217,119,6,.14)";
+      warn.style.color      = hard ? "var(--err)" : "var(--warn)";
+      warn.innerHTML = "⚠ " + msgs.join(" · ") +
+        (hard ? " — can't be used (hardware-reserved); pick another pin."
+              : " — usable only with proper pull-ups; the device may fail to boot if held LOW at reset.");
+      if (wrap) wrap.style.display = ((soft && !hard) || (chk && chk.checked)) ? "flex" : "none";
+    });
+  }
+  form.querySelectorAll(sel).forEach(function (el) { el.addEventListener("input", refresh); });
+  refresh();
+}
+
 function _clEditInline(idx, s) {
   var row = document.querySelector('.sensor-list-row[data-sensor-idx="' + idx + '"]');
   if (!row) return false;
@@ -859,6 +907,7 @@ function _clEditInline(idx, s) {
   // Mount immediately after the row so the expander shows in flow
   row.parentNode.insertBefore(panel, row.nextSibling);
   if (window.Icons && Icons.swap) Icons.swap(panel);
+  clWirePinWarn();
 
   function dismiss() { panel.remove(); window.clCurrentEditingSensor = -1; }
   panel.querySelector('[data-role="close"]').addEventListener("click", dismiss);
@@ -891,6 +940,7 @@ function clEditSensor(idx) {
   f.style.display = "flex";
   btn.onclick = clSaveEditedSensor;
   document.getElementById("sensorPopup").style.display = "flex";
+  clWirePinWarn();
 }
 
 function clSaveEditedSensor() {
@@ -924,6 +974,9 @@ function clSaveEditedSensor() {
       s.calibration = parseFloat(fd.get("calibration") || 1.0);
     }
   }
+
+  s.allow_unsafe_pins = fd.get("allow_unsafe_pins") === "on";
+  if (!s.allow_unsafe_pins) delete s.allow_unsafe_pins;   // keep config tidy
 
   var adv = fd.get("advanced");
   if (adv && adv !== "{}") {
