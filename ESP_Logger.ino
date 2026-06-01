@@ -704,6 +704,7 @@ void setup() {
         if (wifiConnectedAsClient && !rtcValid) {
             bool ok = syncTimeFromNTP();
             if (ok) rtcValid = true;
+            g_lastNtpSyncResult = ok ? 1 : -1;
             DBGF("Auto NTP: %s\n", ok ? "OK" : "FAIL");
         }
 
@@ -910,6 +911,25 @@ void loop() {
         if (ok) rtcValid = true;
         g_lastNtpSyncResult = ok ? 1 : -1;
         g_pendingNtpSync    = 0;
+    }
+
+    // Auto-retry NTP while we lack a valid clock. The boot sync fires only
+    // once; if it failed (DNS not ready, SNTP slow within its window) there was
+    // previously no further attempt until the user pressed /sync_time. Re-queue
+    // periodically as long as we're a connected client without valid time, so
+    // the clock self-heals. Stops as soon as a sync succeeds (rtcValid = true).
+    {
+        static uint32_t s_lastNtpRetry = 0;
+        const uint32_t NTP_RETRY_INTERVAL_MS = 60000;  // 1 min between attempts
+        if (wifiConnectedAsClient && !rtcValid && g_pendingNtpSync == 0) {
+            uint32_t nowMs = millis();
+            if (s_lastNtpRetry == 0) {
+                s_lastNtpRetry = nowMs;  // start the timer; first retry after the interval
+            } else if (nowMs - s_lastNtpRetry >= NTP_RETRY_INTERVAL_MS) {
+                s_lastNtpRetry = nowMs;
+                g_pendingNtpSync = 1;    // handled by the block above next iteration
+            }
+        }
     }
 
     // ── SSE live heartbeat (1 Hz) ─────────────────────────────────────────────
