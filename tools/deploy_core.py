@@ -498,7 +498,8 @@ class DeployManager:
         """
         try:
             with urllib.request.urlopen(f"{base}/api/csrf-token", timeout=4) as resp:
-                tok = json.loads(resp.read().decode()).get("token", "")
+                data = json.loads(resp.read().decode())
+            tok = data.get("token", "") if isinstance(data, dict) else ""
             if isinstance(tok, str) and tok:
                 self._log("Fetched CSRF token.")
                 return tok
@@ -550,7 +551,8 @@ class DeployManager:
         return deleted, failed
 
     def _http_mkdir(self, base: str, parent: str, name: str) -> None:
-        url = f"{base}/mkdir?name={name}&dir={parent}&storage=internal{self._csrf_qs()}"
+        q = urllib.parse.quote
+        url = f"{base}/mkdir?name={q(name)}&dir={q(parent)}&storage=internal{self._csrf_qs()}"
         try:
             req = urllib.request.Request(url, data=b"", method="POST")
             with urllib.request.urlopen(req, timeout=5):
@@ -571,7 +573,7 @@ class DeployManager:
             f'Content-Disposition: form-data; name="file"; filename="{fname}"\r\n'
             f"Content-Type: {ct}\r\n\r\n"
         ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
-        url = f"{base}/upload?path={upload_dir}&storage=internal{self._csrf_qs()}"
+        url = f"{base}/upload?path={urllib.parse.quote(upload_dir)}&storage=internal{self._csrf_qs()}"
         req = urllib.request.Request(
             url, data=body, method="POST",
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
