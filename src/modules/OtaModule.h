@@ -17,6 +17,10 @@ class OtaModule : public IModule {
 public:
     const char* getId()   const override { return "ota"; }
     const char* getName() const override { return "OTA update"; }
+    const char* getDescription() const override {
+        return "Firmware updates and A/B rollback (running/previous partition).";
+    }
+    void statusJson(JsonObject out) const override;
 
     bool load(JsonObjectConst cfg) override;
     bool save(JsonObject cfg)      const override;

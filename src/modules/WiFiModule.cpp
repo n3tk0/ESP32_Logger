@@ -1,6 +1,7 @@
 #include "WiFiModule.h"
 #include "../core/Globals.h"
 #include "../core/Config.h"
+#include <WiFi.h>
 
 namespace {
 
@@ -22,18 +23,21 @@ void formatIPv4(const uint8_t in[4], char* out, size_t n) {
 // PROGMEM schema — drives Form.bind() in the new Settings UI (phase 4).
 const char WIFI_SCHEMA[] PROGMEM =
     "{\"fields\":["
-      "{\"id\":\"wifiMode\",\"type\":\"enum\",\"label\":\"Mode\","
+      "{\"id\":\"wifiMode\",\"type\":\"enum\",\"label\":\"Mode\",\"group\":\"Connection\","
+        "\"help\":\"Access Point hosts its own network; Client joins an existing one.\","
         "\"options\":[{\"v\":0,\"l\":\"Access Point\"},{\"v\":1,\"l\":\"Client\"}]},"
-      "{\"id\":\"clientSSID\",\"type\":\"string\",\"max\":32,\"label\":\"SSID\","
+      "{\"id\":\"clientSSID\",\"type\":\"string\",\"max\":32,\"label\":\"SSID\",\"group\":\"Connection\","
         "\"showIf\":{\"wifiMode\":1}},"
-      "{\"id\":\"clientPassword\",\"type\":\"password\",\"max\":64,\"label\":\"Password\","
+      "{\"id\":\"clientPassword\",\"type\":\"password\",\"max\":64,\"label\":\"Password\",\"group\":\"Connection\","
+        "\"help\":\"Leave blank to keep the currently stored password.\","
         "\"showIf\":{\"wifiMode\":1}},"
-      "{\"id\":\"useStaticIP\",\"type\":\"bool\",\"label\":\"Use static IP\","
+      "{\"id\":\"useStaticIP\",\"type\":\"bool\",\"label\":\"Use static IP\",\"group\":\"Static IP\","
+        "\"help\":\"Off = DHCP. On = use the fixed addresses below.\","
         "\"showIf\":{\"wifiMode\":1}},"
-      "{\"id\":\"staticIP\",\"type\":\"ipv4\",\"label\":\"IP\",\"showIf\":\"useStaticIP\"},"
-      "{\"id\":\"gateway\",\"type\":\"ipv4\",\"label\":\"Gateway\",\"showIf\":\"useStaticIP\"},"
-      "{\"id\":\"subnet\",\"type\":\"ipv4\",\"label\":\"Subnet\",\"showIf\":\"useStaticIP\"},"
-      "{\"id\":\"dns\",\"type\":\"ipv4\",\"label\":\"DNS\",\"showIf\":\"useStaticIP\"}"
+      "{\"id\":\"staticIP\",\"type\":\"ipv4\",\"label\":\"IP\",\"group\":\"Static IP\",\"showIf\":\"useStaticIP\"},"
+      "{\"id\":\"gateway\",\"type\":\"ipv4\",\"label\":\"Gateway\",\"group\":\"Static IP\",\"showIf\":\"useStaticIP\"},"
+      "{\"id\":\"subnet\",\"type\":\"ipv4\",\"label\":\"Subnet\",\"group\":\"Static IP\",\"showIf\":\"useStaticIP\"},"
+      "{\"id\":\"dns\",\"type\":\"ipv4\",\"label\":\"DNS\",\"group\":\"Static IP\",\"showIf\":\"useStaticIP\"}"
     "]}";
 
 } // namespace
@@ -79,4 +83,27 @@ bool WiFiModule::save(JsonObject cfg) const {
 // ---------------------------------------------------------------------------
 const char* WiFiModule::schema() const {
     return WIFI_SCHEMA;
+}
+
+// ---------------------------------------------------------------------------
+// Live status chip — reports the actual radio state (SSID · IP · RSSI in
+// client mode, AP IP in AP mode).  WiFi.* getters are cheap, non-blocking.
+void WiFiModule::statusJson(JsonObject out) const {
+    if (!isEnabled()) return;                       // UI shows "disabled"
+    const NetworkConfig& n = config.network;
+    if (n.wifiMode == WIFIMODE_CLIENT) {
+        if (WiFi.status() == WL_CONNECTED) {
+            String t = WiFi.SSID();
+            if (t.length()) t += " \xC2\xB7 ";
+            t += WiFi.localIP().toString();
+            long rssi = WiFi.RSSI();
+            if (rssi != 0) { t += " \xC2\xB7 "; t += String(rssi); t += " dBm"; }
+            out["text"] = t;  out["tone"] = "ok";
+        } else {
+            out["text"] = "not connected";  out["tone"] = "warn";
+        }
+    } else {  // Access-Point mode
+        out["text"] = String("AP \xC2\xB7 ") + WiFi.softAPIP().toString();
+        out["tone"] = "ok";
+    }
 }

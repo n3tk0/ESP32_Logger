@@ -14,6 +14,10 @@ class WiFiModule : public IModule {
 public:
     const char* getId()   const override { return "wifi"; }
     const char* getName() const override { return "Wi-Fi"; }
+    const char* getDescription() const override {
+        return "Station/AP connection, credentials and static-IP settings.";
+    }
+    void statusJson(JsonObject out) const override;
 
     bool load(JsonObjectConst cfg) override;
     bool save(JsonObject cfg)      const override;

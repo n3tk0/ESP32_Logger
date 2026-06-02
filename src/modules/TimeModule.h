@@ -13,6 +13,10 @@ class TimeModule : public IModule {
 public:
     const char* getId()   const override { return "time"; }
     const char* getName() const override { return "Time"; }
+    const char* getDescription() const override {
+        return "NTP sync, timezone and DST for the clock and log timestamps.";
+    }
+    void statusJson(JsonObject out) const override;
 
     bool load(JsonObjectConst cfg) override;
     bool save(JsonObject cfg)      const override;
