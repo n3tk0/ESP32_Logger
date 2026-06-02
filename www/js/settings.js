@@ -1718,6 +1718,7 @@ var Modules = (function () {
     if (!_list.length) { host.innerHTML = '<div class="mod-empty">No modules registered.</div>'; return; }
     host.innerHTML = "";
     _list.forEach(function (m) {
+      if (!m || !m.id) return;
       var row = document.createElement("div");
       row.className = "mod-row" + (m.id === current ? " active" : "");
       row.setAttribute("data-mod", m.id);
@@ -1737,7 +1738,7 @@ var Modules = (function () {
         select(m.id);
       });
       var chk = row.querySelector(".mod-row-switch input");
-      chk.addEventListener("change", function () { toggle(m.id, this.checked); });
+      if (chk) chk.addEventListener("change", function () { toggle(m.id, this.checked); });
       host.appendChild(row);
     });
   }
@@ -1841,6 +1842,7 @@ var Modules = (function () {
   function collect(form, schema) {
     var out = {};
     (schema.fields || []).forEach(function (f) {
+      if (!f || !f.id) return;
       var el = form.elements[f.id];
       if (!el) return;
       if (f.type === "bool")        out[f.id] = el.checked;
@@ -1870,6 +1872,7 @@ var Modules = (function () {
 
     var fieldsHtml = "", lastGroup = null;
     (schema.fields || []).forEach(function (f) {
+      if (!f || !f.id) return;
       var g = f.group || "";
       if (g !== lastGroup) { if (g) fieldsHtml += '<div class="mod-group-head">' + escAttr(g) + '</div>'; lastGroup = g; }
       fieldsHtml += renderField(f, detail.config || {});
@@ -1891,12 +1894,14 @@ var Modules = (function () {
     _icons(host);
 
     var form = _el("mod-form");
+    if (!form) return;
     applyShowIf(form);
     var saveBtn = _el("mod-save"), dirtyEl = _el("mod-dirty");
     function markDirty() { if (!_dirty) { _dirty = true; if (saveBtn) saveBtn.disabled = false; if (dirtyEl) dirtyEl.style.display = ""; } }
     form.addEventListener("input", markDirty);
     form.addEventListener("change", markDirty);
-    _el("mod-reset").addEventListener("click", function () { _dirty = false; select(detail.id, true); });
+    var resetBtn = _el("mod-reset");
+    if (resetBtn) resetBtn.addEventListener("click", function () { _dirty = false; select(detail.id, true); });
 
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
@@ -1921,8 +1926,8 @@ var Modules = (function () {
     });
   }
 
-  function loadList()   { return fetchWithTimeout("/api/modules", {}, 15000).then(function (r) { return r.ok ? r.json() : null; }); }
-  function loadDetail(id) { return fetchWithTimeout("/api/modules/" + encodeURIComponent(id), {}, 15000).then(function (r) { return r.ok ? r.json() : null; }); }
+  function loadList()   { return fetchWithTimeout("/api/modules", {}, 15000).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }); }
+  function loadDetail(id) { return fetchWithTimeout("/api/modules/" + encodeURIComponent(id), {}, 15000).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }); }
   function save(id, body) {
     // POST /api/modules/:id is CSRF-gated and reads the token from the query
     // string only — postWithCsrf appends ?csrf=<token> and retries once on 403.
