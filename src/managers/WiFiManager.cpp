@@ -177,7 +177,7 @@ bool syncTimeFromNTP() {
     while (ti.tm_year < (2020 - 1900) && retry < 20) {
         delay(500);
         time(&now);
-        localtime_r(&now, &ti);
+        gmtime_r(&now, &ti);
         retry++;
     }
     if (ti.tm_year < (2020 - 1900)) { DBGLN("NTP: Failed"); return false; }

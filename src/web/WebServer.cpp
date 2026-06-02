@@ -1711,7 +1711,7 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (!r->hasParam("file")) { r->send(400, "text/plain", "No file"); return; }
         String path = sanitizePath(r->getParam("file")->value());
         if (path.isEmpty() || path == "/") { r->send(400, "text/plain", "Invalid path"); return; }
-        if (isPathProtected(path)) {
+        if (isPathProtected(path) && !isPathDownloadAllowed(path)) {
             r->send(403, "application/json",
                     "{\"ok\":false,\"error\":\"protected path\"}");
             return;
@@ -1721,6 +1721,19 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                            (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
         if (targetFS && targetFS->exists(path)) {
             String filename = path.substring(path.lastIndexOf('/') + 1);
+            
+            // Handle 0-byte files explicitly because ESPAsyncWebServer's beginResponse(FS)
+            // returns nullptr for them, resulting in a spurious 404.
+            File f = targetFS->open(path, "r");
+            if (f && !f.isDirectory() && f.size() == 0) {
+                f.close();
+                AsyncWebServerResponse *resp = r->beginResponse(200, "application/octet-stream", "");
+                resp->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+                r->send(resp);
+                return;
+            }
+            if (f) f.close();
+
             // Null-check resp: exists() → beginResponse() has a TOCTOU window;
             // the file may be deleted between the two calls.  (AUDIT 3.18)
             AsyncWebServerResponse *resp = r->beginResponse(*targetFS, path, "application/octet-stream");

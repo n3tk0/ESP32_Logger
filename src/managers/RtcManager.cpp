@@ -140,7 +140,7 @@ void restoreBootCount() {
 static bool _sysClockTm(struct tm* out) {
     time_t t = time(nullptr);
     if (t <= 1000000000L) return false;
-    gmtime_r(&t, out);
+    localtime_r(&t, out);
     return true;
 }
 
@@ -148,10 +148,14 @@ String getRtcDateTimeString() {
     if (Rtc) {
         RtcDateTime now = Rtc->GetDateTime();
         if (now.Year() >= 2020 && now.Month() != 0) {
+            // RTC stores UTC (after NTP sync); convert to local for display.
+            time_t epoch = (time_t)now.Unix32Time();
+            struct tm ti;
+            localtime_r(&epoch, &ti);
             char buf[32];
-            snprintf(buf, sizeof(buf), "%04u-%02u-%02u %02u:%02u:%02u",
-                     now.Year(), now.Month(), now.Day(),
-                     now.Hour(), now.Minute(), now.Second());
+            snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
+                     ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
+                     ti.tm_hour, ti.tm_min, ti.tm_sec);
             return String(buf);
         }
         return "Not Set - Use Manual Set";

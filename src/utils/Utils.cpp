@@ -84,6 +84,15 @@ bool isPathProtected(const String& path) {
     return false;
 }
 
+// Diagnostic files that are write-protected (isPathProtected=true) but safe
+// to download — they contain no secrets, only crash/debug info the user needs.
+bool isPathDownloadAllowed(const String& path) {
+    if (path == "/reset_log.txt")        return true;
+    if (path == "/board_profile.txt")    return true;
+    if (path == "/alerts.json")          return true;
+    return false;
+}
+
 // Iterative deletion using an explicit work-stack on the heap.
 // The previous recursive version called itself on every sub-directory, which
 // risked blowing the ~4 KB AsyncTCP worker stack on deep trees.  This version

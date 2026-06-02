@@ -44,11 +44,11 @@ void CsvLogger::_getDate(uint32_t epoch, char* dateBuf) const {
         snprintf(dateBuf, 12, "day-%06lu", (unsigned long)day);
         return;
     }
-    // gmtime_r: thread-safe variant.  CsvLogger is currently called only from
-    // StorageTask but the web UI may share time funcs in future chunks.
+    // localtime_r: thread-safe variant.  Uses the timezone/DST configured via
+    // configTime() so CSV files rotate at local midnight, not UTC midnight.
     time_t t = (time_t)epoch;
     struct tm tmStorage;
-    struct tm* tmInfo = gmtime_r(&t, &tmStorage);
+    struct tm* tmInfo = localtime_r(&t, &tmStorage);
     if (tmInfo) {
         strftime(dateBuf, 12, "%Y-%m-%d", tmInfo);
     } else {
