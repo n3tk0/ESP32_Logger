@@ -7,9 +7,12 @@ namespace {
 // PROGMEM schema — drives Form.bind() in the new Settings UI (phase 4).
 const char TIME_SCHEMA[] PROGMEM =
     "{\"fields\":["
-      "{\"id\":\"ntpServer\",\"type\":\"string\",\"max\":64,\"label\":\"NTP server\"},"
-      "{\"id\":\"timezone\",\"type\":\"int\",\"min\":-12,\"max\":14,\"label\":\"Timezone (h from UTC)\"},"
-      "{\"id\":\"dstOffsetHours\",\"type\":\"int\",\"min\":0,\"max\":2,\"label\":\"DST offset (h)\"}"
+      "{\"id\":\"ntpServer\",\"type\":\"string\",\"max\":64,\"label\":\"NTP server\",\"group\":\"NTP\","
+        "\"help\":\"Hostname queried at boot and on a manual sync (e.g. pool.ntp.org).\"},"
+      "{\"id\":\"timezone\",\"type\":\"int\",\"min\":-12,\"max\":14,\"label\":\"Timezone\",\"unit\":\"h\","
+        "\"help\":\"Hours from UTC. Timestamps are stored in UTC and displayed in this zone.\"},"
+      "{\"id\":\"dstOffsetHours\",\"type\":\"int\",\"min\":0,\"max\":2,\"label\":\"DST offset\",\"unit\":\"h\","
+        "\"help\":\"Extra hours added while daylight saving is in effect.\"}"
     "]}";
 
 } // namespace
@@ -47,4 +50,16 @@ bool TimeModule::start() {
 // ---------------------------------------------------------------------------
 const char* TimeModule::schema() const {
     return TIME_SCHEMA;
+}
+
+// ---------------------------------------------------------------------------
+// Live status chip — reuses the same NTP-sync globals as /api/time_sync_status
+// (g_pendingNtpSync: 0 idle/1 requested/2 running; g_lastNtpSyncResult: 0
+// unknown/1 ok/-1 fail).  Reading volatiles only — safe on the AsyncTCP worker.
+void TimeModule::statusJson(JsonObject out) const {
+    if (!isEnabled()) return;                       // UI shows "disabled"
+    if (g_pendingNtpSync != 0)        { out["text"] = "syncing\xE2\x80\xA6"; out["tone"] = "dim";  return; }
+    if (g_lastNtpSyncResult == 1)     { out["text"] = "synced";             out["tone"] = "ok";   return; }
+    if (g_lastNtpSyncResult == -1)    { out["text"] = "sync failed";        out["tone"] = "warn"; return; }
+    out["text"] = "not synced yet"; out["tone"] = "dim";
 }

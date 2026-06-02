@@ -13,6 +13,10 @@ class ThemeModule : public IModule {
 public:
     const char* getId()   const override { return "theme"; }
     const char* getName() const override { return "Theme"; }
+    const char* getDescription() const override {
+        return "WebUI appearance: light/dark mode, colors and chart source.";
+    }
+    void statusJson(JsonObject out) const override;
 
     bool load(JsonObjectConst cfg) override;
     bool save(JsonObject cfg)      const override;

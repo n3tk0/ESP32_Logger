@@ -24,23 +24,24 @@ static bool _isHexColor(const char* s) {
 // PROGMEM schema — drives Form.bind() in the new Settings UI (phase 4).
 const char THEME_SCHEMA[] PROGMEM =
     "{\"fields\":["
-      "{\"id\":\"mode\",\"type\":\"enum\",\"label\":\"Mode\","
+      "{\"id\":\"mode\",\"type\":\"enum\",\"label\":\"Mode\",\"group\":\"Appearance\","
         "\"options\":[{\"v\":0,\"l\":\"Light\"},{\"v\":1,\"l\":\"Dark\"},{\"v\":2,\"l\":\"Auto\"}]},"
-      "{\"id\":\"showIcons\",\"type\":\"bool\",\"label\":\"Show icons\"},"
-      "{\"id\":\"primaryColor\",\"type\":\"color\",\"label\":\"Primary\"},"
-      "{\"id\":\"secondaryColor\",\"type\":\"color\",\"label\":\"Secondary\"},"
-      "{\"id\":\"lightBgColor\",\"type\":\"color\",\"label\":\"Light BG\"},"
-      "{\"id\":\"lightTextColor\",\"type\":\"color\",\"label\":\"Light text\"},"
-      "{\"id\":\"darkBgColor\",\"type\":\"color\",\"label\":\"Dark BG\"},"
-      "{\"id\":\"darkTextColor\",\"type\":\"color\",\"label\":\"Dark text\"},"
-      "{\"id\":\"chartSource\",\"type\":\"enum\",\"label\":\"Chart source\","
+      "{\"id\":\"showIcons\",\"type\":\"bool\",\"label\":\"Show icons\",\"group\":\"Appearance\"},"
+      "{\"id\":\"primaryColor\",\"type\":\"color\",\"label\":\"Primary\",\"group\":\"Colors\"},"
+      "{\"id\":\"secondaryColor\",\"type\":\"color\",\"label\":\"Secondary\",\"group\":\"Colors\"},"
+      "{\"id\":\"lightBgColor\",\"type\":\"color\",\"label\":\"Light BG\",\"group\":\"Colors\"},"
+      "{\"id\":\"lightTextColor\",\"type\":\"color\",\"label\":\"Light text\",\"group\":\"Colors\"},"
+      "{\"id\":\"darkBgColor\",\"type\":\"color\",\"label\":\"Dark BG\",\"group\":\"Colors\"},"
+      "{\"id\":\"darkTextColor\",\"type\":\"color\",\"label\":\"Dark text\",\"group\":\"Colors\"},"
+      "{\"id\":\"chartSource\",\"type\":\"enum\",\"label\":\"Chart source\",\"group\":\"Charts\","
+        "\"help\":\"Local serves uPlot from flash (works offline); CDN loads it from the internet.\","
         "\"options\":[{\"v\":0,\"l\":\"Local\"},{\"v\":1,\"l\":\"CDN\"}]},"
-      "{\"id\":\"chartLocalPath\",\"type\":\"string\",\"max\":64,\"label\":\"Chart JS path\","
+      "{\"id\":\"chartLocalPath\",\"type\":\"string\",\"max\":64,\"label\":\"Chart JS path\",\"group\":\"Charts\","
         "\"showIf\":{\"chartSource\":0}},"
-      "{\"id\":\"chartLabelFormat\",\"type\":\"enum\",\"label\":\"Chart labels\","
+      "{\"id\":\"chartLabelFormat\",\"type\":\"enum\",\"label\":\"Chart labels\",\"group\":\"Charts\","
         "\"options\":[{\"v\":0,\"l\":\"Date/time\"},{\"v\":1,\"l\":\"Boot #\"},{\"v\":2,\"l\":\"Both\"}]},"
-      "{\"id\":\"logoSource\",\"type\":\"string\",\"max\":128,\"label\":\"Logo\"},"
-      "{\"id\":\"faviconPath\",\"type\":\"string\",\"max\":32,\"label\":\"Favicon\"}"
+      "{\"id\":\"logoSource\",\"type\":\"string\",\"max\":128,\"label\":\"Logo\",\"group\":\"Branding\"},"
+      "{\"id\":\"faviconPath\",\"type\":\"string\",\"max\":32,\"label\":\"Favicon\",\"group\":\"Branding\"}"
     "]}";
 
 } // namespace
@@ -115,4 +116,19 @@ bool ThemeModule::save(JsonObject cfg) const {
 // ---------------------------------------------------------------------------
 const char* ThemeModule::schema() const {
     return THEME_SCHEMA;
+}
+
+// ---------------------------------------------------------------------------
+// Live status chip — current mode + chart source.  Config-only, cheap.
+void ThemeModule::statusJson(JsonObject out) const {
+    if (!isEnabled()) return;                       // UI shows "disabled"
+    static const char* const MODE[] = { "light", "dark", "auto" };
+    const ThemeConfig& t = config.theme;
+    int m = (int)t.mode;
+    if (m < 0 || m > 2) m = 0;
+    String s = MODE[m];
+    s += " \xC2\xB7 ";
+    s += (t.chartSource == CHART_CDN) ? "CDN charts" : "local charts";
+    out["text"] = s;
+    out["tone"] = "ok";
 }

@@ -179,6 +179,11 @@ void ModuleRegistry::toIndexJson(JsonArray arr) const {
         o["name"]    = _modules[i]->getName();
         o["enabled"] = _modules[i]->isEnabled();
         o["hasUI"]   = _modules[i]->hasUI();
+        const char* desc = _modules[i]->getDescription();
+        if (desc && desc[0]) o["description"] = desc;
+        JsonObject st = o["status"].to<JsonObject>();
+        _modules[i]->statusJson(st);
+        if (st.size() == 0) o.remove("status");   // no live signal → UI fallback
     }
 }
 
@@ -190,6 +195,11 @@ bool ModuleRegistry::toDetailJson(const char* id, JsonObject out) const {
     out["name"]    = m->getName();
     out["enabled"] = m->isEnabled();
     out["hasUI"]   = m->hasUI();
+    const char* desc = m->getDescription();
+    if (desc && desc[0]) out["description"] = desc;
+    JsonObject st = out["status"].to<JsonObject>();
+    m->statusJson(st);
+    if (st.size() == 0) out.remove("status");
     JsonObject cfg = out["config"].to<JsonObject>();
     (void)m->save(cfg);
     const char* s = m->schema();

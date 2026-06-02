@@ -11,6 +11,10 @@ class DataLogModule : public IModule {
 public:
     const char* getId()   const override { return "datalog"; }
     const char* getName() const override { return "Data log"; }
+    const char* getDescription() const override {
+        return "CSV logging: filename, rotation, retention and column formats.";
+    }
+    void statusJson(JsonObject out) const override;
 
     bool load(JsonObjectConst cfg) override;
     bool save(JsonObject cfg)      const override;

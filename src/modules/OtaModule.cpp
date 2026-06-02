@@ -17,3 +17,18 @@ bool OtaModule::save(JsonObject cfg) const {
     cfg["rollbackCapable"]  = OtaManager::isRollbackCapable();
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// Live status chip — running partition + pending-verify flag.  OtaManager
+// getters read cached partition info, so this is cheap.
+void OtaModule::statusJson(JsonObject out) const {
+    if (!isEnabled()) return;                       // UI shows "disabled"
+    String t = OtaManager::runningPartitionLabel();
+    if (OtaManager::isPendingVerify()) {
+        t += " \xC2\xB7 pending verify";
+        out["tone"] = "warn";
+    } else {
+        out["tone"] = "ok";
+    }
+    out["text"] = t;
+}

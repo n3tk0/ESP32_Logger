@@ -1699,8 +1699,17 @@ var Modules = (function () {
       .then(function (a) { return { st: a[0] || {}, time: a[1] || {} }; });
   }
 
-  // Short status chip for a module. Falls back to enabled/disabled.
+  // Short status chip for a module. Prefers the firmware-provided live status
+  // (/api/modules → m.status = {text,tone}); falls back to the best-effort
+  // client heuristic, then to enabled/disabled.
   function _status(m) {
+    if (m && m.status && m.status.text) {
+      var tone = m.status.tone;
+      if (tone !== "ok" && tone !== "warn" && tone !== "err" && tone !== "dim") {
+        tone = m.enabled ? "ok" : "dim";
+      }
+      return { text: m.status.text, tone: tone };
+    }
     var st = _ctx.st || {}, t = _ctx.time || {};
     if (m.id === "wifi") {
       if (st.ip && st.ip !== "0.0.0.0") {
@@ -1739,6 +1748,7 @@ var Modules = (function () {
           '<div class="mod-row-name">' + escAttr(m.name) +
             (m.hasUI ? "" : ' <span class="badge dim" style="font-size:9px">status</span>') +
           '</div>' +
+          (m.description ? '<div class="mod-row-desc">' + escAttr(m.description) + '</div>' : '') +
           '<div class="mod-row-status">' + _chip(s) + '</div>' +
         '</div>' +
         '<label class="switch mod-row-switch" title="Enable / disable">' +
@@ -1871,8 +1881,11 @@ var Modules = (function () {
     var host = _el("mod-host");
     if (!host) return;
 
+    var descHtml = detail.description
+      ? '<p class="mod-detail-desc">' + escAttr(detail.description) + '</p>' : "";
+
     if (!detail.hasUI || !detail.schema) {
-      host.innerHTML =
+      host.innerHTML = descHtml +
         '<p class="hint">This module has no configurable form — it is managed by the enable toggle and runs with built-in defaults.</p>' +
         (detail.config ? '<pre class="mod-config">' + esc(JSON.stringify(detail.config, null, 2)) + '</pre>' : "");
       return;
@@ -1889,7 +1902,7 @@ var Modules = (function () {
       fieldsHtml += renderField(f, detail.config || {});
     });
 
-    host.innerHTML =
+    host.innerHTML = descHtml +
       '<form id="mod-form" novalidate>' +
         '<div class="field mod-bool">' +
           '<label class="switch"><input type="checkbox" id="mod-enabled" name="__enabled"' + (detail.enabled ? " checked" : "") + '><span></span></label>' +

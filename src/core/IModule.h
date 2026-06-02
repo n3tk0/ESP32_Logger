@@ -30,6 +30,10 @@ public:
     // Human-readable display name for the settings tab strip.
     virtual const char* getName() const = 0;
 
+    // Optional one-line description shown under the module name in the manager.
+    // Keep it short (≤ ~80 chars). Default "" means "no subtitle".
+    virtual const char* getDescription() const { return ""; }
+
     // ------------------------------------------------------------------
     // Config round-trip
     //   load(): merge fields from `cfg` into this module's in-memory state.
@@ -57,6 +61,16 @@ public:
     // module reports start() == true after re-enable).
     virtual bool isEnabled() const      { return _enabled; }
     virtual void setEnabled(bool e)     { _enabled = e; }
+
+    // Optional live status for the manager's status chip.  Populate `out`:
+    //     out["text"] = "synced";          // short, human-readable
+    //     out["tone"] = "ok"|"warn"|"err"|"dim";
+    // Leave `out` empty to let the UI fall back to its enabled/disabled chip.
+    // MUST be cheap and non-blocking — it runs on the AsyncTCP worker during
+    // GET /api/modules (one call per module per request).  No FS scans, no
+    // network round-trips.  Convention: return early when !isEnabled() so the
+    // UI shows a plain "disabled" chip.
+    virtual void statusJson(JsonObject out) const { (void)out; }
 
     // True if this module exposes a form to the UI.  When false the tab
     // is still listed but shows only an enable/disable switch.
