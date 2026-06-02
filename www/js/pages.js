@@ -918,6 +918,9 @@ function filesUpload() {
       }
     };
     xhr.onload = function () {
+      // Non-200 (e.g. 403 stale CSRF, 507 full FS) must surface, not silently
+      // advance to the next file as a false success.
+      if (xhr.status !== 200) { xhr.onerror(); return; }
       i++;
       next();
     };

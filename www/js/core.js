@@ -1504,10 +1504,12 @@ function confirmRestart() {
     if (s <= 0) {
       // /restart is CSRF-gated — use postWithCsrf so the device actually
       // restarts instead of silently 403-ing.
-      postWithCsrf("/restart", { method: "POST" }, 10000).finally(function () {
-        location.hash = "dashboard";
-        location.reload();
-      });
+      postWithCsrf("/restart", { method: "POST" }, 10000)
+        .catch(function () { /* device is rebooting — the dropped connection is expected */ })
+        .finally(function () {
+          location.hash = "dashboard";
+          location.reload();
+        });
     } else {
       s--;
       setTimeout(tick, 1000);
