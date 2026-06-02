@@ -503,6 +503,7 @@
     var pm = null, voc = null, co2 = null;
     if (Array.isArray(data)) {
       data.forEach(function (s) {
+        if (!s) return;   // guard against null/undefined entries in the payload
         if (binding && s.id === binding && s.readings) { pm = s.readings; return; }
         if (!binding && !pm  && s.readings && (s.type === "sds011" || s.type === "pms5003" || s.type === "sps30")) pm  = s.readings;
         if (!voc && s.readings && (s.type === "sgp30"  || s.type === "ens160"))  voc = s.readings;
