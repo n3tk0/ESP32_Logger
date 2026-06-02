@@ -56,4 +56,17 @@ namespace OtaManager {
     // False when using Arduino IDE's default pre-built bootloader.
     // Manual rollback via rollback() still works regardless.
     bool isRollbackCapable();
+
+    // ── Auto-confirm policy (configurable via OtaModule / modules.json) ──────
+    // setConfirmPolicy() is called from OtaModule::load() during
+    // moduleRegistry.loadAll(), which runs before boot() in setup(), so the
+    // configured window/flag applies to the current boot's pending image too.
+    //   autoConfirmMs  — stability window before tick() auto-confirms.
+    //   requireManual  — when true, tick() NEVER auto-confirms; the firmware
+    //                    stays pending until POST /api/ota/confirm (or it
+    //                    rolls back on the next crash). Use for unattended
+    //                    fleets that must verify remotely.
+    void     setConfirmPolicy(uint32_t autoConfirmMs, bool requireManual);
+    uint32_t autoConfirmMs();          // current window (defaults to OTA_CONFIRM_TIMEOUT_MS)
+    bool     requireManualConfirm();   // current flag
 }
