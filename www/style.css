@@ -1660,3 +1660,55 @@ body.deck-dragging * { cursor: grabbing !important; }
   .deck-tray-chips  { gap: 6px; }
   .deck-chip        { font-size: 11px; height: 30px; }
 }
+
+/* ════════════════════════════════════════════════
+   MODULES — schema-driven module manager
+   ════════════════════════════════════════════════ */
+.mod-layout { display:grid; grid-template-columns:300px 1fr; gap:var(--gap); align-items:start; }
+@media (max-width:760px) { .mod-layout { grid-template-columns:1fr; } }
+
+.mod-empty { padding:18px 12px; color:var(--text-3); font-size:13px; text-align:center; }
+
+.mod-row {
+  display:flex; align-items:center; gap:10px;
+  padding:9px 10px; border-radius:var(--radius-sm);
+  border:1px solid transparent; cursor:pointer; transition:.12s;
+}
+.mod-row + .mod-row { margin-top:2px; }
+.mod-row:hover  { background:var(--panel-2); }
+.mod-row.active { background:var(--accent-soft); border-color:var(--accent); }
+.mod-row-main   { flex:1; min-width:0; }
+.mod-row-name   { font-weight:600; font-size:13px; }
+.mod-row-status { margin-top:3px; }
+.mod-row-switch { flex:0 0 auto; }
+
+.mod-chip {
+  display:inline-block; max-width:100%; font-size:10.5px; line-height:1.5;
+  padding:1px 7px; border-radius:10px; font-family:var(--mono);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom;
+}
+.mod-chip.ok   { background:var(--accent-soft); color:var(--accent); }
+.mod-chip.warn { background:rgba(217,119,6,.15); color:var(--warn); }
+.mod-chip.dim  { background:var(--panel-2); color:var(--text-3); }
+
+.mod-group-head {
+  font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--text-3); font-weight:600; margin:18px 0 8px;
+  padding-bottom:4px; border-bottom:1px solid var(--border);
+}
+.mod-help { font-size:11px; color:var(--text-3); margin:3px 0 0; }
+
+.mod-bool { display:flex; align-items:center; gap:10px; }
+.mod-bool-label { font-size:13px; }
+
+.mod-field-unit { display:flex; align-items:center; gap:8px; }
+.mod-field-unit .input { flex:1; min-width:0; }
+.mod-unit { font-size:12px; color:var(--text-3); font-family:var(--mono); white-space:nowrap; }
+
+.mod-actions { display:flex; align-items:center; gap:10px; margin-top:18px; flex-wrap:wrap; }
+.mod-dirty   { font-size:11px; color:var(--warn); }
+.mod-config  {
+  font-family:var(--mono); font-size:11.5px; line-height:1.6;
+  background:var(--panel-2); border:1px solid var(--border);
+  border-radius:var(--radius-sm); padding:12px; overflow:auto; white-space:pre-wrap; margin-top:10px;
+}
