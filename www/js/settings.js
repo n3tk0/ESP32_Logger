@@ -1948,6 +1948,66 @@ var Modules = (function () {
         setMsg('<div class="alert alert-error">Network error while saving.</div>');
       });
     });
+
+    // OTA gets a read-only status + actions panel below its settings form.
+    if (detail.id === "ota") _renderOtaActions(host, detail.config || {});
+  }
+
+  // ── OTA-only status & actions panel (partition info + confirm/rollback) ─────
+  function _renderOtaActions(host, cfg) {
+    function row(k, v) {
+      return '<div class="mod-ota-row"><span>' + escAttr(k) + '</span><b>' + escAttr(v) + '</b></div>';
+    }
+    var pending = !!cfg.pendingVerify;
+    var cdSec   = (typeof cfg.confirmInMs === "number" && cfg.confirmInMs > 0)
+                    ? Math.ceil(cfg.confirmInMs / 1000) : 0;
+    var panel = document.createElement("div");
+    panel.className = "mod-ota-panel";
+    panel.innerHTML =
+      '<div class="mod-group-head">Partition &amp; rollback</div>' +
+      row("Running", cfg.running || "?") +
+      row("Previous", cfg.previous || "—") +
+      row("Rollback on crash", cfg.rollbackCapable ? "supported" : "manual only") +
+      (pending
+        ? '<div class="alert alert-warning">New firmware pending verification' +
+            (cdSec > 0 ? ' — auto-confirms in ' + cdSec + ' s.'
+                       : ' — manual confirm required.') + '</div>'
+        : '<div class="alert alert-success">Current firmware confirmed.</div>') +
+      '<div class="mod-actions">' +
+        (pending ? '<button type="button" class="btn primary" id="ota-confirm">Confirm now</button>' : '') +
+        ((cfg.rollbackCapable || (cfg.previous && cfg.previous !== "—"))
+            ? '<button type="button" class="btn" id="ota-rollback">Roll back</button>' : '') +
+      '</div>';
+    host.appendChild(panel);
+
+    var cBtn = _el("ota-confirm");
+    if (cBtn) cBtn.addEventListener("click", function () {
+      cBtn.disabled = true;
+      // /api/ota/confirm is not CSRF-gated; postWithCsrf's ?csrf= is harmless.
+      postWithCsrf("/api/ota/confirm", { method: "POST" }, 15000)
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (d) {
+          setMsg(d && d.ok
+            ? '<div class="alert alert-success">Firmware confirmed.</div>'
+            : '<div class="alert alert-error">Confirm failed.</div>');
+          select("ota", true);
+        })
+        .catch(function () { cBtn.disabled = false; setMsg('<div class="alert alert-error">Network error.</div>'); });
+    });
+
+    var rBtn = _el("ota-rollback");
+    if (rBtn) rBtn.addEventListener("click", function () {
+      if (!confirm("Roll back to the previous firmware and restart now?")) return;
+      rBtn.disabled = true;
+      postWithCsrf("/api/ota/rollback", { method: "POST" }, 15000)
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function () {
+          setMsg('<div class="alert alert-info">Rolling back and restarting… reconnect in ~10 s.</div>');
+        })
+        .catch(function () {
+          setMsg('<div class="alert alert-info">Rollback requested; the device may be restarting.</div>');
+        });
+    });
   }
 
   function loadList()   { return fetchWithTimeout("/api/modules", {}, 15000).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }); }

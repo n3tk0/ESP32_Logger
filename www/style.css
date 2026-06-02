@@ -1701,6 +1701,14 @@ body.deck-dragging * { cursor: grabbing !important; }
 }
 .mod-help { font-size:11px; color:var(--text-3); margin:3px 0 0; }
 
+.mod-ota-panel { margin-top:18px; padding-top:14px; border-top:1px solid var(--border); }
+.mod-ota-row {
+  display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+  font-size:12px; padding:3px 0;
+}
+.mod-ota-row span { color:var(--text-3); }
+.mod-ota-row b    { font-family:var(--mono); }
+
 .mod-bool { display:flex; align-items:center; gap:10px; }
 .mod-bool-label { font-size:13px; }
 
