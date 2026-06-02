@@ -1648,99 +1648,189 @@ function closePopup() {
 }
 
 // ============================================================================
-// Pass 5 phase 4 — schema-driven settings via /api/modules
+// Pass 5 phase 4 — schema-driven module manager via /api/modules
 // ----------------------------------------------------------------------------
-// Each module reports a compact JSON schema (see audit §5.4).  Field types:
-//   string | password | int | bool | ipv4 | color | enum
-// Optional keys: min, max, label, options (for enum), showIf (string or object).
+// Module-manager UI: a list of installed modules (name + live status chip +
+// enable/disable toggle) on the left, and the selected module's schema-driven
+// config form on the right.
+//   GET  /api/modules            → [{id,name,enabled,hasUI}, ...]
+//   GET  /api/modules/:id        → {id,name,enabled,hasUI,config,schema?}
+//   POST /api/modules/:id?csrf=  → {enabled, config}      (save; CSRF in query)
+//   POST /api/modules/:id/enable?on=1                     (fast toggle)
+// Schema field types: string | password | int | float | ipv4 | bool | color |
+//   enum.  Optional keys: min, max, step, label, help, unit, group, options
+//   (enum), showIf (string | {field:value}), pattern, required, default.
+// Per-module status is derived best-effort from /api/status + the NTP sync
+// status; modules without a live signal fall back to enabled/disabled.
 // ============================================================================
 var Modules = (function () {
-  var current = null;  // currently selected module id
+  var current = null;               // selected module id
+  var _ctx    = { st: {}, time: {} }; // cached status context
+  var _list   = [];                 // cached module index
+  var _detail = null;               // cached detail of current module
+  var _dirty  = false;              // unsaved changes in the detail form
 
   function escAttr(v) { return esc(String(v == null ? "" : v)); }
+  function _el(id) { return document.getElementById(id); }
+  function _icons(el) { if (window.Icons && Icons.swap && el) Icons.swap(el); }
+  function setMsg(html) { var el = _el("mod-msg"); if (el) el.innerHTML = html || ""; }
+  function _find(id) { for (var i = 0; i < _list.length; i++) if (_list[i].id === id) return _list[i]; return null; }
+  function _name(id) { var m = _find(id); return m ? m.name : id; }
 
+  // ── status context (best-effort, from existing endpoints) ──────────────────
+  function _fetchCtx() {
+    function get(u) {
+      return fetchWithTimeout(u, {}, 15000)
+        .then(function (r) { return r.ok ? r.json() : {}; })
+        .catch(function () { return {}; });
+    }
+    return Promise.all([get("/api/status"), get("/api/time_sync_status")])
+      .then(function (a) { return { st: a[0] || {}, time: a[1] || {} }; });
+  }
+
+  // Short status chip for a module. Falls back to enabled/disabled.
+  function _status(m) {
+    var st = _ctx.st || {}, t = _ctx.time || {};
+    if (m.id === "wifi") {
+      if (st.ip && st.ip !== "0.0.0.0") {
+        var bits = [];
+        if (st.ssid) bits.push(st.ssid);
+        bits.push(st.ip);
+        if (st.rssi != null && st.rssi !== 0) bits.push(st.rssi + " dBm");
+        return { text: bits.join(" · "), tone: "ok" };
+      }
+      return { text: "not connected", tone: m.enabled ? "warn" : "dim" };
+    }
+    if (m.id === "time") {
+      if (t.result === 1)  return { text: "synced",      tone: "ok" };
+      if (t.result === -1) return { text: "sync failed", tone: "warn" };
+      return { text: m.enabled ? "not synced yet" : "off", tone: "dim" };
+    }
+    return m.enabled ? { text: "enabled", tone: "ok" } : { text: "disabled", tone: "dim" };
+  }
+
+  function _chip(s) { return '<span class="mod-chip ' + s.tone + '">' + escAttr(s.text) + '</span>'; }
+
+  // ── module list ────────────────────────────────────────────────────────────
+  function renderList() {
+    var host = _el("mod-list");
+    if (!host) return;
+    if (!_list.length) { host.innerHTML = '<div class="mod-empty">No modules registered.</div>'; return; }
+    host.innerHTML = "";
+    _list.forEach(function (m) {
+      var row = document.createElement("div");
+      row.className = "mod-row" + (m.id === current ? " active" : "");
+      row.setAttribute("data-mod", m.id);
+      var s = _status(m);
+      row.innerHTML =
+        '<div class="mod-row-main">' +
+          '<div class="mod-row-name">' + escAttr(m.name) +
+            (m.hasUI ? "" : ' <span class="badge dim" style="font-size:9px">status</span>') +
+          '</div>' +
+          '<div class="mod-row-status">' + _chip(s) + '</div>' +
+        '</div>' +
+        '<label class="switch mod-row-switch" title="Enable / disable">' +
+          '<input type="checkbox"' + (m.enabled ? " checked" : "") + '><span></span>' +
+        '</label>';
+      row.addEventListener("click", function (ev) {
+        if (ev.target.closest(".mod-row-switch")) return;   // toggle handled separately
+        select(m.id);
+      });
+      var chk = row.querySelector(".mod-row-switch input");
+      chk.addEventListener("change", function () { toggle(m.id, this.checked); });
+      host.appendChild(row);
+    });
+  }
+
+  // ── enable / disable (no CSRF; rate-limited endpoint) ──────────────────────
+  function toggle(id, on) {
+    setMsg("");
+    var m = _find(id);
+    fetchWithTimeout("/api/modules/" + encodeURIComponent(id) + "/enable?on=" + (on ? "1" : "0"),
+                     { method: "POST" }, 15000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (res) {
+        if (!res || !res.ok) {
+          if (m) m.enabled = !on;       // revert
+          renderList();
+          setMsg('<div class="alert alert-error">Could not ' + (on ? "enable" : "disable") + ' ' + escAttr(_name(id)) + '.</div>');
+          return;
+        }
+        if (m) m.enabled = on;
+        if (current === id && _detail) { _detail.enabled = on; var en = _el("mod-enabled"); if (en) en.checked = on; }
+        // refresh status chips after a toggle (may change wifi/time state)
+        _fetchCtx().then(function (c) { _ctx = c; renderList(); });
+        if (res.restartRequired) {
+          setMsg('<div class="alert alert-info">' + escAttr(_name(id)) + ' ' + (on ? "enabled" : "disabled") +
+                 ' — a restart is required to fully apply.</div>');
+        }
+      })
+      .catch(function () {
+        if (m) m.enabled = !on;
+        renderList();
+        setMsg('<div class="alert alert-error">Network error toggling ' + escAttr(_name(id)) + '.</div>');
+      });
+  }
+
+  // ── field rendering (richer) ────────────────────────────────────────────────
   function renderField(f, data) {
     var id = f.id;
-    var val = (data && id in data) ? data[id] : "";
-    var cls = "input";
+    var val = (data && id in data) ? data[id] : (f.default != null ? f.default : "");
+    var name = escAttr(id);
     var input;
 
     if (f.type === "bool") {
-      // Let bool fall through to the shared showIf/wrapper tail below so
-      // checkboxes honour conditional visibility (e.g. WiFiModule's
-      // `useStaticIP` toggling the IPv4 field group).
-      input =
-        '<label class="field-label">' +
-          '<input type="checkbox" name="' + escAttr(id) + '"' +
-          (val ? " checked" : "") + '> ' + escAttr(f.label || id) +
-        '</label>';
+      // Rendered as a switch + label in the wrapper tail below.
+      input = '<label class="switch"><input type="checkbox" name="' + name + '"' + (val ? " checked" : "") + '><span></span></label>';
     } else if (f.type === "enum") {
-      var opts = (f.options || []).map(function (o) {
-        return '<option value="' + escAttr(o.v) + '"' +
-               (String(val) === String(o.v) ? " selected" : "") + '>' +
-               escAttr(o.l) + '</option>';
-      }).join("");
-      input = '<select class="' + cls + ' input" name="' +
-              escAttr(id) + '">' + opts + '</select>';
+      input = '<select class="input" name="' + name + '">' + (f.options || []).map(function (o) {
+        return '<option value="' + escAttr(o.v) + '"' + (String(val) === String(o.v) ? " selected" : "") + '>' + escAttr(o.l) + '</option>';
+      }).join("") + '</select>';
     } else if (f.type === "color") {
-      input = '<input type="color" class="' + cls + '" name="' +
-              escAttr(id) + '" value="' + escAttr(val) + '">';
+      input = '<input type="color" class="input" name="' + name + '" value="' + escAttr(val) + '">';
     } else if (f.type === "password") {
-      input = '<input type="password" class="' + cls + '" name="' +
-              escAttr(id) + '" value="' + escAttr(val) + '"' +
-              (f.max ? ' maxlength="' + Number(f.max) + '"' : '') + '>';
-    } else if (f.type === "int") {
-      input = '<input type="number" class="' + cls + '" name="' +
-              escAttr(id) + '" value="' + escAttr(val) + '"' +
+      input = '<input type="password" class="input" name="' + name + '" value="' + escAttr(val) + '"' +
+              (f.max ? ' maxlength="' + Number(f.max) + '"' : '') + (f.required ? " required" : "") + '>';
+    } else if (f.type === "int" || f.type === "float") {
+      var step = f.type === "float" ? (f.step != null ? Number(f.step) : "any") : (f.step != null ? Number(f.step) : 1);
+      input = '<input type="number" class="input" name="' + name + '" value="' + escAttr(val) + '" step="' + step + '"' +
               (f.min != null ? ' min="' + Number(f.min) + '"' : '') +
-              (f.max != null ? ' max="' + Number(f.max) + '"' : '') + '>';
+              (f.max != null ? ' max="' + Number(f.max) + '"' : '') + (f.required ? " required" : "") + '>';
     } else {
-      // string (default) or ipv4 — both just text inputs with validation.
       var pattern = f.type === "ipv4"
-        ? ' pattern="^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"'
-        : "";
-      input = '<input type="text" class="' + cls + '" name="' +
-              escAttr(id) + '" value="' + escAttr(val) + '"' +
-              (f.max ? ' maxlength="' + Number(f.max) + '"' : '') +
-              pattern + '>';
+        ? ' pattern="^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$" title="IPv4 address (e.g. 192.168.1.10)"'
+        : (f.pattern ? ' pattern="' + escAttr(f.pattern) + '"' : "");
+      input = '<input type="text" class="input" name="' + name + '" value="' + escAttr(val) + '"' +
+              (f.max ? ' maxlength="' + Number(f.max) + '"' : '') + (f.required ? " required" : "") + pattern + '>';
     }
-    var showIf = f.showIf
-      ? ' data-showif="' + esc(JSON.stringify(f.showIf)) + '"'
-      : "";
-    var labelHtml = (f.type !== "bool" && f.label)
-      ? '<label class="field-label">' + escAttr(f.label) + '</label>'
-      : '';
-    return (
-      '<div class="field" data-field="' + escAttr(id) + '"' + showIf + '>' +
-        labelHtml +
-        input +
-      '</div>'
-    );
+
+    if (f.unit && f.type !== "bool") {
+      input = '<div class="mod-field-unit">' + input + '<span class="mod-unit">' + escAttr(f.unit) + '</span></div>';
+    }
+    var showIf = f.showIf ? ' data-showif="' + esc(JSON.stringify(f.showIf)) + '"' : "";
+    var help = f.help ? '<p class="mod-help">' + escAttr(f.help) + '</p>' : "";
+
+    if (f.type === "bool") {
+      return '<div class="field mod-bool" data-field="' + name + '"' + showIf + '>' +
+               input + '<span class="mod-bool-label">' + escAttr(f.label || id) + '</span>' + help + '</div>';
+    }
+    var labelHtml = f.label ? '<label class="field-label">' + escAttr(f.label) + '</label>' : "";
+    return '<div class="field" data-field="' + name + '"' + showIf + '>' + labelHtml + input + help + '</div>';
   }
 
   // Evaluate showIf spec against current form values.
-  // spec = "otherField"  → truthy when that field is truthy.
-  // spec = { field: value } → value-match.
   function applyShowIf(form) {
     var groups = form.querySelectorAll("[data-showif]");
     if (!groups.length) return;
-    function vOf(name) {
-      var el = form.elements[name];
-      if (!el) return "";
-      return el.type === "checkbox" ? (el.checked ? "1" : "") : el.value;
-    }
+    function vOf(n) { var el = form.elements[n]; if (!el) return ""; return el.type === "checkbox" ? (el.checked ? "1" : "") : el.value; }
     function match(spec) {
       if (typeof spec === "string") return !!vOf(spec);
-      for (var k in spec) {
-        if (String(vOf(k)) !== String(spec[k])) return false;
-      }
+      for (var k in spec) { if (String(vOf(k)) !== String(spec[k])) return false; }
       return true;
     }
     function refresh() {
       groups.forEach(function (g) {
-        var spec;
-        try { spec = JSON.parse(g.getAttribute("data-showif")); }
-        catch (e) { return; }
+        var spec; try { spec = JSON.parse(g.getAttribute("data-showif")); } catch (e) { return; }
         g.style.display = match(spec) ? "" : "none";
       });
     }
@@ -1753,127 +1843,136 @@ var Modules = (function () {
     (schema.fields || []).forEach(function (f) {
       var el = form.elements[f.id];
       if (!el) return;
-      var v;
-      if (f.type === "bool")       v = el.checked;
-      else if (f.type === "int")   v = el.value === "" ? 0 : parseInt(el.value, 10);
-      else                         v = el.value;
-      out[f.id] = v;
+      if (f.type === "bool")        out[f.id] = el.checked;
+      else if (f.type === "int")    out[f.id] = el.value === "" ? 0 : parseInt(el.value, 10);
+      else if (f.type === "float")  out[f.id] = el.value === "" ? 0 : parseFloat(el.value);
+      else                          out[f.id] = el.value;
     });
     return out;
   }
 
-  function loadList() {
-    return fetchWithTimeout("/api/modules", {}, 15000).then(function (r) { return r.json(); });
-  }
-  function loadDetail(id) {
-    return fetchWithTimeout("/api/modules/" + encodeURIComponent(id), {}, 15000)
-      .then(function (r) { return r.json(); });
-  }
-  function save(id, body) {
-    return fetchWithTimeout("/api/modules/" + encodeURIComponent(id), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    }, 30000).then(function (r) { return r.json(); });
-  }
-
-  function renderTabs(list) {
-    var host = document.getElementById("mod-tabs");
-    if (!host) return;
-    host.innerHTML = list.map(function (m) {
-      var active = (current === m.id) ? " active" : "";
-      return (
-        '<button class="btn tab' + active + '"' +
-        ' data-click="modulesSelect"' +
-        ' data-args="' + esc(JSON.stringify([m.id])) + '">' +
-          escAttr(m.name) +
-          (m.enabled ? "" : " <span class='badge'>off</span>") +
-        '</button>'
-      );
-    }).join(" ");
-  }
-
   function renderDetail(detail) {
-    var host = document.getElementById("mod-host");
+    _detail = detail; _dirty = false;
+    var title = _el("mod-detail-title");
+    if (title) { title.innerHTML = '<span data-icon="sliders"></span> ' + escAttr(detail.name); _icons(title); }
+    var host = _el("mod-host");
     if (!host) return;
+
     if (!detail.hasUI || !detail.schema) {
       host.innerHTML =
-        '<p class="hint">' +
-          'This module has no form. ' +
-          (detail.config
-            ? '<pre>' + esc(JSON.stringify(detail.config, null, 2)) + '</pre>'
-            : "") +
-        '</p>';
+        '<p class="hint">This module has no configurable form — it is managed by the enable toggle and runs with built-in defaults.</p>' +
+        (detail.config ? '<pre class="mod-config">' + esc(JSON.stringify(detail.config, null, 2)) + '</pre>' : "");
       return;
     }
     var schema;
     try { schema = JSON.parse(detail.schema); }
-    catch (e) {
-      host.innerHTML = '<p class="hint">Bad schema JSON.</p>';
-      return;
-    }
-    var fields = (schema.fields || [])
-      .map(function (f) { return renderField(f, detail.config || {}); })
-      .join("");
+    catch (e) { host.innerHTML = '<p class="hint">Bad schema JSON.</p>'; return; }
+
+    var fieldsHtml = "", lastGroup = null;
+    (schema.fields || []).forEach(function (f) {
+      var g = f.group || "";
+      if (g !== lastGroup) { if (g) fieldsHtml += '<div class="mod-group-head">' + escAttr(g) + '</div>'; lastGroup = g; }
+      fieldsHtml += renderField(f, detail.config || {});
+    });
+
     host.innerHTML =
-      '<form id="mod-form">' +
-        '<div class="field">' +
-          '<label class="field-label">' +
-            '<input type="checkbox" name="__enabled"' +
-            (detail.enabled ? " checked" : "") + '> Enabled' +
-          '</label>' +
+      '<form id="mod-form" novalidate>' +
+        '<div class="field mod-bool">' +
+          '<label class="switch"><input type="checkbox" id="mod-enabled" name="__enabled"' + (detail.enabled ? " checked" : "") + '><span></span></label>' +
+          '<span class="mod-bool-label">Module enabled</span>' +
         '</div>' +
-        fields +
-        '<button type="submit" class="btn primary">💾 Save</button>' +
+        fieldsHtml +
+        '<div class="mod-actions">' +
+          '<button type="submit" class="btn primary" id="mod-save" disabled><span data-icon="save"></span> Save</button>' +
+          '<button type="button" class="btn" id="mod-reset">Reset</button>' +
+          '<span class="mod-dirty" id="mod-dirty" style="display:none">unsaved changes</span>' +
+        '</div>' +
       '</form>';
-    var form = document.getElementById("mod-form");
+    _icons(host);
+
+    var form = _el("mod-form");
     applyShowIf(form);
+    var saveBtn = _el("mod-save"), dirtyEl = _el("mod-dirty");
+    function markDirty() { if (!_dirty) { _dirty = true; if (saveBtn) saveBtn.disabled = false; if (dirtyEl) dirtyEl.style.display = ""; } }
+    form.addEventListener("input", markDirty);
+    form.addEventListener("change", markDirty);
+    _el("mod-reset").addEventListener("click", function () { _dirty = false; select(detail.id, true); });
+
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
-      var msg = document.getElementById("mod-msg");
-      var body = {
-        enabled: form.elements["__enabled"].checked,
-        config:  collect(form, schema)
-      };
+      if (!form.checkValidity()) { form.reportValidity(); return; }
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
+      var body = { enabled: form.elements["__enabled"].checked, config: collect(form, schema) };
       save(detail.id, body).then(function (res) {
-        if (msg) {
-          msg.innerHTML = res && res.ok
-            ? '<div class="alert alert-success">Saved ' + escAttr(detail.id) + '</div>'
-            : '<div class="alert alert-error">' +
-                escAttr((res && res.error) || "save failed") +
-              '</div>';
+        if (res && res.ok) {
+          _dirty = false; if (dirtyEl) dirtyEl.style.display = "none";
+          if (saveBtn) { saveBtn.innerHTML = '<span data-icon="save"></span> Save'; _icons(saveBtn); }
+          setMsg('<div class="alert alert-success">Saved ' + escAttr(detail.name) + '.</div>');
+          var m = _find(detail.id); if (m) m.enabled = body.enabled;
+          _fetchCtx().then(function (c) { _ctx = c; renderList(); });
+        } else {
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<span data-icon="save"></span> Save'; _icons(saveBtn); }
+          setMsg('<div class="alert alert-error">' + escAttr((res && res.error) || "Save failed") + '.</div>');
         }
+      }).catch(function () {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<span data-icon="save"></span> Save'; _icons(saveBtn); }
+        setMsg('<div class="alert alert-error">Network error while saving.</div>');
       });
     });
   }
 
-  function select(id) {
-    current = id;
-    var msg = document.getElementById("mod-msg");
-    if (msg) msg.innerHTML = "";
-    loadDetail(id).then(renderDetail);
-    loadList().then(renderTabs);  // refresh highlight
+  function loadList()   { return fetchWithTimeout("/api/modules", {}, 15000).then(function (r) { return r.ok ? r.json() : null; }); }
+  function loadDetail(id) { return fetchWithTimeout("/api/modules/" + encodeURIComponent(id), {}, 15000).then(function (r) { return r.ok ? r.json() : null; }); }
+  function save(id, body) {
+    // POST /api/modules/:id is CSRF-gated and reads the token from the query
+    // string only — postWithCsrf appends ?csrf=<token> and retries once on 403.
+    return postWithCsrf("/api/modules/" + encodeURIComponent(id),
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, 30000)
+      .then(function (r) { return r.json(); });
   }
 
-  function init() {
-    loadList().then(function (list) {
-      if (!list || !list.length) {
-        var h = document.getElementById("mod-host");
-        if (h) h.innerHTML = '<p class="hint">No modules registered.</p>';
-        return;
-      }
-      current = list[0].id;
-      renderTabs(list);
-      select(list[0].id);
+  function select(id, force) {
+    if (!force && _dirty && id !== current && !confirm("Discard unsaved changes?")) { renderList(); return; }
+    current = id; _dirty = false;
+    setMsg("");
+    renderList();
+    var host = _el("mod-host"); if (host) host.innerHTML = '<p class="hint">Loading…</p>';
+    loadDetail(id).then(function (d) {
+      if (!d) { if (host) host.innerHTML = '<p class="hint">Could not load this module.</p>'; return; }
+      renderDetail(d);
+    }).catch(function () {
+      var h = _el("mod-host"); if (h) h.innerHTML = '<p class="hint">Could not load this module.</p>';
     });
   }
 
-  return { init: init, select: select };
+  function init() {
+    current = null; _dirty = false; _detail = null;
+    var list = _el("mod-list");
+    if (list) list.innerHTML = '<div class="mod-empty">Loading…</div>';
+    setMsg("");
+    Promise.all([loadList(), _fetchCtx()]).then(function (a) {
+      var l = a[0];
+      _ctx = a[1] || { st: {}, time: {} };
+      if (!l || !l.length) {
+        _list = [];
+        if (list) list.innerHTML = '<div class="mod-empty">No modules registered.</div>';
+        var host = _el("mod-host"); if (host) host.innerHTML = '<p class="hint">No modules to configure.</p>';
+        return;
+      }
+      _list = l;
+      renderList();
+      select(l[0].id);
+    }).catch(function () {
+      if (list) list.innerHTML = '<div class="mod-empty">Could not reach <code>/api/modules</code>.</div>';
+    });
+  }
+
+  return { init: init, select: select, toggle: toggle };
 })();
 
-// Event-dispatcher entry points
-function modulesInit()       { Modules.init(); }
-function modulesSelect(id)   { Modules.select(id); }
+// Event-dispatcher entry points (modulesInit is called by pageInit)
+function modulesInit() { Modules.init(); }
+function modulesSelect(id) { Modules.select(id); }
 
 // Enrol markup-reachable handlers.  See core.js::Handlers for the whitelist
 // rationale.  modulesInit is called internally by pageInit, not via markup,
