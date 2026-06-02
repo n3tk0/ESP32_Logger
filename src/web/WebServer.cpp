@@ -2324,6 +2324,9 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         );
     }
 
+    // =========================================================================
+    // STATIC FILE FALLBACK (not found handler)
+    // =========================================================================
     server.onNotFound([touchActivity](AsyncWebServerRequest *r) {
         touchActivity();   // C2: track web activity for idle power management
         String path = r->url();
