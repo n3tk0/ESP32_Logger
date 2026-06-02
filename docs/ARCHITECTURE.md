@@ -532,6 +532,68 @@ New functionality configured via `/platform_config.json` (JSON, human-editable).
 
 Accepts updated `platform_config.json` body; reloads sensors & exporters live.
 
+### `GET /api/modules`
+
+Schema-driven module manager. Each registered `IModule` (currently `wifi`,
+`ota`, `theme`, `datalog`, `time`) is listed; the manager UI renders the index
+as a row list with a description, a live status chip and an enable toggle.
+
+```json
+[
+  {
+    "id": "wifi",
+    "name": "Wi-Fi",
+    "enabled": true,
+    "hasUI": true,
+    "description": "Station/AP connection, credentials and static-IP settings.",
+    "status": { "text": "MyNet · 192.168.1.20 · -58 dBm", "tone": "ok" }
+  },
+  {
+    "id": "ota",
+    "name": "OTA update",
+    "enabled": true,
+    "hasUI": false,
+    "description": "Firmware updates and A/B rollback (running/previous partition).",
+    "status": { "text": "app0", "tone": "ok" }
+  }
+]
+```
+
+`description` and `status` are optional. A module omits `status` when it has no
+live signal (the UI then shows a plain enabled/disabled chip); by convention a
+disabled module also returns no status. `tone` ∈ `ok | warn | err | dim`. Both
+come from the `IModule` hooks `getDescription()` and `statusJson(JsonObject)`;
+`statusJson()` must be cheap and non-blocking — it runs on the AsyncTCP worker,
+once per module per request (no FS scans, no network round-trips).
+
+### `GET /api/modules/:id`
+
+Adds the per-module `config` object plus the PROGMEM `schema` string that drives
+the settings form:
+
+```json
+{
+  "id": "time", "name": "Time", "enabled": true, "hasUI": true,
+  "description": "NTP sync, timezone and DST for the clock and log timestamps.",
+  "status": { "text": "synced", "tone": "ok" },
+  "config": { "ntpServer": "pool.ntp.org", "timezone": 1, "dstOffsetHours": 0 },
+  "schema": "{\"fields\":[ … ]}"
+}
+```
+
+Schema field keys: `id`, `type` (`string`/`int`/`float`/`bool`/`enum`/`color`/
+`password`/`ipv4`), `label`, `min`/`max`/`step`, `unit` (suffix shown after the
+input), `group` (renders a section heading), `help` (hint under the field),
+`showIf` (conditional visibility — `"otherField"` or `{"field":value}`), and
+`options` (for `enum`). Mutating routes (CSRF token in the query string for the
+JSON body):
+
+| Route | Purpose |
+|---|---|
+| `POST /api/modules/:id?csrf=…` | Save `{enabled, config}` and persist |
+| `POST /api/modules/:id/enable?on=1` | Fast enable/disable (rate-limited) |
+| `POST /api/modules/:id/restart` | `stop()` + `start()` without changing enable |
+
 ---
 
 ## 7. Export Formats
@@ -602,12 +664,24 @@ ISR shared state (existing pattern, unchanged):
 
 ```
 Priority:
-  1. DS1302 RTC (valid + set)  →  authoritative
-  2. NTP synced                →  write to RTC, use for timestamps
+  1. DS1302 RTC (valid + set)  →  authoritative source for timestamps
+  2. NTP synced                →  write epoch to RTC (UTC), use for timestamps
   3. Neither                   →  relative from millis(), quality=ESTIMATED
 
-NTP sync: on boot (if WiFi), then every 24h in continuous mode.
-Format: Unix epoch uint32_t (seconds since 1970-01-01 UTC)
+Storage:  everything is stored in UTC — log timestamps, RTC contents and the
+          /api/data epochs. After an NTP sync the RTC is written from
+          gmtime_r(), so it always holds UTC regardless of the configured zone.
+Display:  all human-facing paths convert with localtime_r(). The zone is set via
+          configTime(timezone*3600, dstOffsetHours*3600, ntpServer).
+NTP sync: on boot (if WiFi client) and then self-healing — while the link is up
+          and the clock is not yet valid, loop() re-queues a sync every 60 s
+          until one succeeds. Manual sync: POST /sync_time (CSRF) → poll
+          /api/time_sync_status. A blank ntpServer falls back to
+          DEFAULT_NTP_SERVER.
+Format:   Unix epoch uint32_t (seconds since 1970-01-01 UTC)
+
+Migration note: a device whose RTC was set by older (local-time) firmware shows
+a doubled offset until the next NTP sync rewrites the RTC in UTC.
 ```
 
 ---

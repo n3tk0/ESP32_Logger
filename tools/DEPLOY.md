@@ -113,6 +113,14 @@ python3 tools/deploy.py --run
 
 ## Workflow Steps
 
+> **Charts (uPlot):** the dashboard/log charts load `uPlot.iife.min.js` +
+> `uPlot.min.css` from LittleFS first and only fall back to the jsDelivr CDN.
+> Both files are vendored in `www/` (pinned to the `CDN_VERSION` in
+> `www/js/pages.js`), so charts render even in offline / AP-only mode. To
+> refresh or re-pin them run `tools/fetch_uplot.sh [version]`; the build-web
+> step below then produces their `.gz` siblings, which the ESP serves with
+> `Content-Encoding: gzip`.
+
 1. **Build web assets** — Minify and gzip `www/` → `data/www/`
 2. **Flash bootloader** — Rollback-enabled bootloader via esptool
 3. **Erase chip flash** — Full wipe (config, logs, LittleFS)

@@ -42,6 +42,17 @@ Track planned improvements and known gaps here. Check off items when completed.
 
 ---
 
+## WebUI — Modules & Charts
+
+- [x] Schema-driven module manager (`/api/modules`) — list + detail form with `group`/`unit`/`help`/`showIf` fields
+- [x] Per-module live status chip from firmware (`IModule::statusJson`) — Wi-Fi link, NTP sync, datalog rotation, theme mode, OTA partition
+- [x] Per-module one-line description (`IModule::getDescription`) shown in the manager list + detail
+- [x] Offline / AP-mode charts — uPlot (`uPlot.iife.min.js` + `uPlot.min.css`) vendored in `www/`, CDN only as fallback
+- [x] Log download fixes — duplicate `Content-Disposition` header (`ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION`), 0-byte files, protected-diagnostic exemption
+- [x] Log Viewer passes `storage` explicitly on file list + download
+
+---
+
 ## Firmware — Sensor Plugins
 
 - [x] Implement ZMPT101B plugin (RMS voltage via ADC sampling)
@@ -81,4 +92,4 @@ Track planned improvements and known gaps here. Check off items when completed.
 
 ---
 
-_Last updated: 2026-04-09_
+_Last updated: 2026-06-02_
