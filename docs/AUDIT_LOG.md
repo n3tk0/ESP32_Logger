@@ -1031,3 +1031,27 @@ Pure-exposure pass: no new counters added. Surfaces existing internals into `/ap
 | 19.E | Failsafe page diagnostic banner (IP · uptime · free heap · resets) | none direct |
 
 **Note:** Row 9.11 (expose `g_logDrops` via `/api/diag`) requires adding a new counter first — deferred to R19.2.
+
+---
+
+## Post-R19 — Web/UX correctness, downloads & time (#130–#142)
+
+Targeted fixes from the WebUI hardening pass. Severity reflects user/data impact.
+
+| # | Sev | Area | Issue | Resolution |
+|---|---|---|---|---|
+| W.1 | M | `/download` | Duplicate `Content-Disposition` — `AsyncFileResponse` emits its own (`inline`) and the handler added a second (`attachment`); Chromium/Edge reject the reply (`ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION`), so every non-empty file download failed. | `beginResponse(fs, path, type, /*download=*/true)` and drop the manual header. Fixed (#141) |
+| W.2 | L | `/download` | 0-byte files → `beginResponse(FS)` returns `nullptr` → spurious 404 (empty/fresh crash logs). | Explicit 0-byte branch (200 + attachment), null-checked. Fixed (#141) |
+| W.3 | M | `isPathProtected` / `/download` | Protected diagnostics (`reset_log.txt`, `board_profile.txt`, `alerts.json`) were undownloadable. | `isPathDownloadAllowed()` exemption for read-only diagnostics. Fixed (#141) |
+| W.4 | M | Time | RTC was written in local time **and** display re-applied the offset → doubled offset. | RTC stored in UTC (`gmtime_r`); all display via `localtime_r`. Fixed (#141) |
+| W.5 | M | loop() NTP | Boot sync fired once; no retry if it failed (DNS not ready / slow SNTP). | Self-heal: re-queue every 60 s while link-up and clock invalid. Fixed (#132) |
+| W.6 | H | CSRF | `/restart`, `/import_settings`, SPA OTA `/do_update`, file `/upload` posted without a CSRF token (broke the action under the token gate). | Route through `postWithCsrf` / append `?csrf=`. Fixed (#140) |
+| W.7 | L | pages.js (logs) | File-list/download omitted `storage`; a non-2xx JSON body rendered "No log files found" instead of an error. | Pass `storage` explicitly; throw on `!r.ok`. Fixed (#142) |
+| W.8 | L | charts | uPlot local asset never committed → blank charts in offline/AP mode (CDN unreachable). | Vendored `uPlot.iife.min.js` + `uPlot.min.css` 1.6.32 in `www/`. Fixed (#142) |
+
+**Modules manager enrichment (#142, feature):** `IModule` gained
+`getDescription()` + `statusJson(JsonObject)`; `/api/modules` now emits
+`description` + live `status{text,tone}` and the per-module schemas carry
+`group`/`unit`/`help`. No new attack surface — `statusJson()` reads cached
+config / `WiFi.*` / NTP globals only and runs on the existing authenticated GET
+path (no FS scans, no blocking).

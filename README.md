@@ -77,6 +77,16 @@ Selected via `PlatformMode` enum in `src/core/Config.h`:
 - **`continuous`** — FreeRTOS sensor/processing/storage/export pipeline, no deep sleep
 - **`hybrid`** — legacy water logger + FreeRTOS pipeline running concurrently
 
+### Web UI
+
+On-device single-page app served from LittleFS (no internet required):
+
+- **Dashboard & log charts** — uPlot time-series; `uPlot.*` is vendored in `www/` so charts render in offline / AP-only mode (CDN is fallback only)
+- **Module manager** — schema-driven settings for Wi-Fi, time/NTP, data log, theme and OTA, each with a live status chip and enable toggle (`/api/modules`)
+- **Sensors** — add/edit/calibrate/reorder with pin-conflict guards; live read-now test
+- **OTA, diagnostics, file browser** — rollback-capable updates, `/api/diag` observability, and CSV/log download
+- First-run wizard, dark/light themes, CSRF-protected mutating endpoints
+
 ---
 
 ## Supported boards
@@ -170,7 +180,7 @@ Full documentation lives in [`docs/`](docs/):
 - **[INSTRUCTIONS.md](docs/INSTRUCTIONS.md)** — operating the device after first boot (sensors, exporters, OTA, safe mode, diagnostics, troubleshooting)
 - **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — module layout, task model, data pipeline
 - **[REFACTORING_GUIDELINES.md](docs/REFACTORING_GUIDELINES.md)** — architecture invariants and SOPs for code changes
-- **[AUDIT_LOG.md](docs/AUDIT_LOG.md)** — security/architecture audit findings (R1–R20)
+- **[AUDIT_LOG.md](docs/AUDIT_LOG.md)** — security/architecture audit findings (R1–R20 + post-R19 web/UX fixes)
 - **[FUTURE_UPDATES.md](docs/FUTURE_UPDATES.md)** — roadmap
 - **[USB_CDC_IMPLEMENTATION_SUMMARY.md](docs/USB_CDC_IMPLEMENTATION_SUMMARY.md)** — USB CDC toggle implementation
 
