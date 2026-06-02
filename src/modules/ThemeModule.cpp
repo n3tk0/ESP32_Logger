@@ -121,6 +121,7 @@ const char* ThemeModule::schema() const {
 // ---------------------------------------------------------------------------
 // Live status chip — current mode + chart source.  Config-only, cheap.
 void ThemeModule::statusJson(JsonObject out) const {
+    if (!isEnabled()) return;                       // UI shows "disabled"
     static const char* const MODE[] = { "light", "dark", "auto" };
     const ThemeConfig& t = config.theme;
     int m = (int)t.mode;
