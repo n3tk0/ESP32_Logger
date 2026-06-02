@@ -60,6 +60,8 @@
 #include "src/modules/ThemeModule.h"   // Pass 5 phase 2
 #include "src/modules/DataLogModule.h" // Pass 5 phase 2b
 #include "src/modules/TimeModule.h"    // Pass 5 phase 2b
+#include "src/modules/UsbCdcModule.h"       // global usbCdc (USB-CDC NVS pref)
+#include "src/modules/UsbCdcConfigModule.h" // IModule adapter for the manager
 #include "src/managers/ConfigManager.h"
 #include "src/managers/HardwareManager.h"
 #include "src/managers/StorageManager.h"
@@ -576,6 +578,11 @@ void setup() {
     moduleRegistry.add(&ThemeModule::instance());
     moduleRegistry.add(&DataLogModule::instance());
     moduleRegistry.add(&TimeModule::instance());
+    // USB-CDC preference module. begin() (with its interactive first-run setup)
+    // isn't called in the headless runtime, so refresh the cached NVS value
+    // before loadAll/saveAll seed the modules.json shadow from it.
+    usbCdc.syncFromNvs();
+    moduleRegistry.add(&UsbCdcConfigModule::instance());
     if (fsAvailable && activeFS) {
         moduleRegistry.loadAll(*activeFS);
         if (!activeFS->exists(ModuleRegistry::DEFAULT_PATH)) {
