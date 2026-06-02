@@ -369,7 +369,12 @@ function dbRefreshLatest() {
 function logsInit() {
   dbLoadUPlot(function () {
     fetch("/api/filelist?filter=log&recursive=1&storage=" + encodeURIComponent(currentFilesStorage))
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        // Throw on non-2xx so an error JSON body ({"ok":false,...}) lands in
+        // .catch instead of falsely rendering "No log files found".
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
       .then(function (d) {
         var sel = document.getElementById("fileSelect");
         if (!sel) return;
