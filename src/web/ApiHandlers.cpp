@@ -24,7 +24,6 @@
 #include "../utils/JsonResponse.h"     // R9: sendJsonResponse helper
 #include "../alerts/AlertEngine.h"    // GET/POST /api/alerts, snooze, toasts
 #include <Wire.h>                     // POST /api/i2c_scan
-
 // Forward-declared in Logger.ino — accessible here because this file is
 // compiled in the same sketch scope.
 #ifdef EXPORT_MQTT_ENABLED
@@ -1104,6 +1103,7 @@ static void handleApiI2cScan(AsyncWebServerRequest* req) {
 
     sendJsonResponse(req, doc);
 }
+
 
 // ---------------------------------------------------------------------------
 void registerApiRoutes(AsyncWebServer& server) {
