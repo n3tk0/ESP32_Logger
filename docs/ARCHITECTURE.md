@@ -585,8 +585,10 @@ Schema field keys: `id`, `type` (`string`/`int`/`float`/`bool`/`enum`/`color`/
 `password`/`ipv4`), `label`, `min`/`max`/`step`, `unit` (suffix shown after the
 input), `group` (renders a section heading), `help` (hint under the field),
 `showIf` (conditional visibility — `"otherField"` or `{"field":value}`), and
-`options` (for `enum`). Mutating routes (CSRF token in the query string for the
-JSON body):
+`options` (required for `enum` — an array of `{"v":<value>,"l":"<label>"}`
+objects, e.g. `[{"v":0,"l":"Light"},{"v":1,"l":"Dark"}]`; `v` is the stored
+value, `l` the display label). Mutating routes (CSRF token in the query string
+for the JSON body):
 
 | Route | Purpose |
 |---|---|
