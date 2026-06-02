@@ -140,8 +140,7 @@ void restoreBootCount() {
 static bool _sysClockTm(struct tm* out) {
     time_t t = time(nullptr);
     if (t <= 1000000000L) return false;
-    localtime_r(&t, out);
-    return true;
+    return localtime_r(&t, out) != nullptr;
 }
 
 String getRtcDateTimeString() {
@@ -150,7 +149,7 @@ String getRtcDateTimeString() {
         if (now.Year() >= 2020 && now.Month() != 0) {
             // RTC stores UTC (after NTP sync); convert to local for display.
             time_t epoch = (time_t)now.Unix32Time();
-            struct tm ti;
+            struct tm ti = {0};
             localtime_r(&epoch, &ti);
             char buf[32];
             snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",

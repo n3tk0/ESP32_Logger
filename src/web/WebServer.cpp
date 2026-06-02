@@ -1728,6 +1728,10 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
             if (f && !f.isDirectory() && f.size() == 0) {
                 f.close();
                 AsyncWebServerResponse *resp = r->beginResponse(200, "application/octet-stream", "");
+                if (!resp) {
+                    r->send(500, "application/json", "{\"ok\":false,\"error\":\"out_of_memory\"}");
+                    return;
+                }
                 resp->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
                 r->send(resp);
                 return;
