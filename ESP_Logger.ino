@@ -459,9 +459,6 @@ static void _initPlatform() {
         Serial.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
     }
 
-    // Register new API routes (sensor data + config)
-    registerApiRoutes(server);
-
     // Start FreeRTOS task pipeline.
     // R12 / AUDIT 2.1 + 1.6: bool return is now actually checked.  A failed
     // init() leaks nothing (cleanupPartialInit ran) but also leaves the
@@ -742,14 +739,12 @@ void setup() {
             }
         }
 
-        // Register API routes AFTER moduleRegistry.add() (above) so the
-        // per-module /api/modules/:id detail/enable/restart routes are created
-        // with moduleRegistry.count() > 0.  The earlier registerApiRoutes()
-        // call ran before the modules were added (count() == 0), so it set up
-        // the /api/modules index but NONE of the per-module routes.  This pass
-        // adds them in every mode — previously only the legacy/safe-mode
-        // else-branch re-registered, leaving continuous/hybrid builds with a
-        // module list but no working configuration forms.
+        // Register all API routes once here — after moduleRegistry.add() (so
+        // the per-module /api/modules/:id detail/enable/restart routes are
+        // created with count() > 0) and after both setup paths above. Both the
+        // continuous (_initPlatform) and legacy/safe branches reach this point,
+        // so a single registration covers every mode without duplicating
+        // handlers on the AsyncWebServer.
         registerApiRoutes(server);
 
         // Start the AsyncTCP listener now that EVERY route is registered.

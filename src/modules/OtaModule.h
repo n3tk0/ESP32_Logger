@@ -1,5 +1,6 @@
 #pragma once
 #include "../core/IModule.h"
+#include "../setup.h"   // OTA_CONFIRM_TIMEOUT_MS (default auto-confirm window)
 
 // ============================================================================
 // OtaModule — IModule adapter over OtaManager (Pass 5).
@@ -28,7 +29,9 @@ public:
     static OtaModule& instance() { static OtaModule m; return m; }
 
 private:
-    // Defaults mirror OtaManager's historical compile-time behavior.
-    uint16_t _autoConfirmSec       = 90;     // OTA_CONFIRM_TIMEOUT_MS / 1000
+    // Default mirrors the compile-time OTA stability window so a board built
+    // with a custom OTA_CONFIRM_TIMEOUT_MS isn't silently reset to 90 s when
+    // modules.json is first seeded from this member.
+    uint16_t _autoConfirmSec       = (uint16_t)(OTA_CONFIRM_TIMEOUT_MS / 1000);
     bool     _requireManualConfirm = false;
 };
