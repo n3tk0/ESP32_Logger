@@ -368,8 +368,13 @@ function dbRefreshLatest() {
 // ============================================================================
 function logsInit() {
   dbLoadUPlot(function () {
-    fetch("/api/filelist?filter=log&recursive=1")
-      .then(function (r) { return r.json(); })
+    fetch("/api/filelist?filter=log&recursive=1&storage=" + encodeURIComponent(currentFilesStorage))
+      .then(function (r) {
+        // Throw on non-2xx so an error JSON body ({"ok":false,...}) lands in
+        // .catch instead of falsely rendering "No log files found".
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
       .then(function (d) {
         var sel = document.getElementById("fileSelect");
         if (!sel) return;
@@ -404,7 +409,10 @@ function dbLoadData() {
   if (!file || file === "No log files found") return;
   var err = document.getElementById("logsErrorMsg");
   if (err) err.style.display = "none";
-  fetch("/download?file=" + encodeURIComponent(file))
+  // Pass storage explicitly so the load/download targets the same FS the list
+  // came from (was relying on the server's currentStorageView).
+  fetch("/download?file=" + encodeURIComponent(file) +
+        "&storage=" + encodeURIComponent(currentFilesStorage))
     .then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.text();

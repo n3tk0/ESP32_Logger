@@ -1711,7 +1711,7 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         if (!r->hasParam("file")) { r->send(400, "text/plain", "No file"); return; }
         String path = sanitizePath(r->getParam("file")->value());
         if (path.isEmpty() || path == "/") { r->send(400, "text/plain", "Invalid path"); return; }
-        if (isPathProtected(path)) {
+        if (isPathProtected(path) && !isPathDownloadAllowed(path)) {
             r->send(403, "application/json",
                     "{\"ok\":false,\"error\":\"protected path\"}");
             return;
@@ -1721,11 +1721,35 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                            (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
         if (targetFS && targetFS->exists(path)) {
             String filename = path.substring(path.lastIndexOf('/') + 1);
+            
+            // Handle 0-byte files explicitly because ESPAsyncWebServer's beginResponse(FS)
+            // returns nullptr for them, resulting in a spurious 404.
+            File f = targetFS->open(path, "r");
+            if (f && !f.isDirectory() && f.size() == 0) {
+                f.close();
+                AsyncWebServerResponse *resp = r->beginResponse(200, "application/octet-stream", "");
+                if (!resp) {
+                    r->send(500, "application/json", "{\"ok\":false,\"error\":\"out_of_memory\"}");
+                    return;
+                }
+                resp->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+                r->send(resp);
+                return;
+            }
+            if (f) f.close();
+
+            // Pass download=true so AsyncFileResponse emits its own single
+            // "Content-Disposition: attachment; filename=..." header.  Previously
+            // we let it default to download=false (which emits an "inline"
+            // disposition) and then added our own "attachment" header on top —
+            // producing TWO Content-Disposition headers, which Chromium/Edge
+            // reject outright with ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION
+            // (every non-empty file failed to download).
             // Null-check resp: exists() → beginResponse() has a TOCTOU window;
             // the file may be deleted between the two calls.  (AUDIT 3.18)
-            AsyncWebServerResponse *resp = r->beginResponse(*targetFS, path, "application/octet-stream");
+            AsyncWebServerResponse *resp =
+                r->beginResponse(*targetFS, path, "application/octet-stream", true);
             if (!resp) { r->send(404, "text/plain", "Not found"); return; }
-            resp->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
             r->send(resp);
         } else {
             r->send(404, "text/plain", "Not found");

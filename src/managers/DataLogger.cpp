@@ -78,9 +78,14 @@ void flushLogBufferToFS() {
     if (!f) { Serial.println("ERR: Can't open datalog"); return; }
 
     for (int i = 0; i < logBufferCount; i++) {
-        RtcDateTime wakeTime, sleepTime;
-        wakeTime.InitWithUnix32Time(logBuffer[i].wakeTimestamp);
-        sleepTime.InitWithUnix32Time(logBuffer[i].sleepTimestamp);
+        // Convert UTC epochs to local time for display in log entries.
+        struct tm wakeTm = {0}, sleepTm = {0};
+        {
+            time_t wt = (time_t)logBuffer[i].wakeTimestamp;
+            time_t st = (time_t)logBuffer[i].sleepTimestamp;
+            if (wt > 0) localtime_r(&wt, &wakeTm);
+            if (st > 0) localtime_r(&st, &sleepTm);
+        }
 
         String line;
         line.reserve(120);
@@ -90,13 +95,13 @@ void flushLogBufferToFS() {
             char dateBuf[12];
             switch (config.datalog.dateFormat) {
                 case DATE_DDMMYYYY:
-                    snprintf(dateBuf, 12, "%02u/%02u/%04u", wakeTime.Day(), wakeTime.Month(), wakeTime.Year()); break;
+                    snprintf(dateBuf, 12, "%02d/%02d/%04d", wakeTm.tm_mday, wakeTm.tm_mon + 1, wakeTm.tm_year + 1900); break;
                 case DATE_MMDDYYYY:
-                    snprintf(dateBuf, 12, "%02u/%02u/%04u", wakeTime.Month(), wakeTime.Day(), wakeTime.Year()); break;
+                    snprintf(dateBuf, 12, "%02d/%02d/%04d", wakeTm.tm_mon + 1, wakeTm.tm_mday, wakeTm.tm_year + 1900); break;
                 case DATE_YYYYMMDD:
-                    snprintf(dateBuf, 12, "%04u-%02u-%02u", wakeTime.Year(), wakeTime.Month(), wakeTime.Day()); break;
+                    snprintf(dateBuf, 12, "%04d-%02d-%02d", wakeTm.tm_year + 1900, wakeTm.tm_mon + 1, wakeTm.tm_mday); break;
                 case DATE_DDMMYYYY_DOT:
-                    snprintf(dateBuf, 12, "%02u.%02u.%04u", wakeTime.Day(), wakeTime.Month(), wakeTime.Year()); break;
+                    snprintf(dateBuf, 12, "%02d.%02d.%04d", wakeTm.tm_mday, wakeTm.tm_mon + 1, wakeTm.tm_year + 1900); break;
                 default: dateBuf[0] = 0;
             }
             line += dateBuf;
@@ -106,13 +111,13 @@ void flushLogBufferToFS() {
         char timeBuf[12];
         switch (config.datalog.timeFormat) {
             case TIME_HHMMSS:
-                snprintf(timeBuf, 12, "%02u:%02u:%02u", wakeTime.Hour(), wakeTime.Minute(), wakeTime.Second()); break;
+                snprintf(timeBuf, 12, "%02d:%02d:%02d", wakeTm.tm_hour, wakeTm.tm_min, wakeTm.tm_sec); break;
             case TIME_HHMM:
-                snprintf(timeBuf, 12, "%02u:%02u", wakeTime.Hour(), wakeTime.Minute()); break;
+                snprintf(timeBuf, 12, "%02d:%02d", wakeTm.tm_hour, wakeTm.tm_min); break;
             case TIME_12H: {
-                uint8_t h = wakeTime.Hour() % 12; if (!h) h = 12;
-                snprintf(timeBuf, 12, "%u:%02u:%02u%s", h, wakeTime.Minute(), wakeTime.Second(),
-                         wakeTime.Hour() < 12 ? "AM" : "PM");
+                int h = wakeTm.tm_hour % 12; if (!h) h = 12;
+                snprintf(timeBuf, 12, "%d:%02d:%02d%s", h, wakeTm.tm_min, wakeTm.tm_sec,
+                         wakeTm.tm_hour < 12 ? "AM" : "PM");
                 break;
             }
         }
@@ -125,13 +130,13 @@ void flushLogBufferToFS() {
             if (config.datalog.endFormat == END_TIME) {
                 switch (config.datalog.timeFormat) {
                     case TIME_HHMMSS:
-                        snprintf(timeBuf, 12, "%02u:%02u:%02u", sleepTime.Hour(), sleepTime.Minute(), sleepTime.Second()); break;
+                        snprintf(timeBuf, 12, "%02d:%02d:%02d", sleepTm.tm_hour, sleepTm.tm_min, sleepTm.tm_sec); break;
                     case TIME_HHMM:
-                        snprintf(timeBuf, 12, "%02u:%02u", sleepTime.Hour(), sleepTime.Minute()); break;
+                        snprintf(timeBuf, 12, "%02d:%02d", sleepTm.tm_hour, sleepTm.tm_min); break;
                     case TIME_12H: {
-                        uint8_t h = sleepTime.Hour() % 12; if (!h) h = 12;
-                        snprintf(timeBuf, 12, "%u:%02u:%02u%s", h, sleepTime.Minute(), sleepTime.Second(),
-                                 sleepTime.Hour() < 12 ? "AM" : "PM");
+                        int h = sleepTm.tm_hour % 12; if (!h) h = 12;
+                        snprintf(timeBuf, 12, "%d:%02d:%02d%s", h, sleepTm.tm_min, sleepTm.tm_sec,
+                                 sleepTm.tm_hour < 12 ? "AM" : "PM");
                         break;
                     }
                 }

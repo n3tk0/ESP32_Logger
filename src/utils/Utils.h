@@ -24,6 +24,9 @@ String sanitizeFilename(const String& filename);
 // modify or delete (config blob, boot-count, reset log, recovery bundle).
 bool isPathProtected(const String& path);
 
+// True if a protected path is safe to download (e.g. diagnostic files).
+bool isPathDownloadAllowed(const String& path);
+
 // ---- FS helpers ----
 bool deleteRecursive(fs::FS& fs, const String& path);
 
