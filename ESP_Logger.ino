@@ -60,6 +60,8 @@
 #include "src/modules/ThemeModule.h"   // Pass 5 phase 2
 #include "src/modules/DataLogModule.h" // Pass 5 phase 2b
 #include "src/modules/TimeModule.h"    // Pass 5 phase 2b
+#include "src/modules/UsbCdcModule.h"       // global usbCdc (USB-CDC NVS pref)
+#include "src/modules/UsbCdcConfigModule.h" // IModule adapter for the manager
 #include "src/managers/ConfigManager.h"
 #include "src/managers/HardwareManager.h"
 #include "src/managers/StorageManager.h"
@@ -457,9 +459,6 @@ static void _initPlatform() {
         Serial.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
     }
 
-    // Register new API routes (sensor data + config)
-    registerApiRoutes(server);
-
     // Start FreeRTOS task pipeline.
     // R12 / AUDIT 2.1 + 1.6: bool return is now actually checked.  A failed
     // init() leaks nothing (cleanupPartialInit ran) but also leaves the
@@ -576,6 +575,11 @@ void setup() {
     moduleRegistry.add(&ThemeModule::instance());
     moduleRegistry.add(&DataLogModule::instance());
     moduleRegistry.add(&TimeModule::instance());
+    // USB-CDC preference module. begin() (with its interactive first-run setup)
+    // isn't called in the headless runtime, so refresh the cached NVS value
+    // before loadAll/saveAll seed the modules.json shadow from it.
+    usbCdc.syncFromNvs();
+    moduleRegistry.add(&UsbCdcConfigModule::instance());
     if (fsAvailable && activeFS) {
         moduleRegistry.loadAll(*activeFS);
         if (!activeFS->exists(ModuleRegistry::DEFAULT_PATH)) {
@@ -733,15 +737,20 @@ void setup() {
             if (!g_safeMode && activeFS && !alertEngine.begin(*activeFS)) {
                 Serial.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
             }
-            registerApiRoutes(server);
         }
 
+        // Register all API routes once here — after moduleRegistry.add() (so
+        // the per-module /api/modules/:id detail/enable/restart routes are
+        // created with count() > 0) and after both setup paths above. Both the
+        // continuous (_initPlatform) and legacy/safe branches reach this point,
+        // so a single registration covers every mode without duplicating
+        // handlers on the AsyncWebServer.
+        registerApiRoutes(server);
+
         // Start the AsyncTCP listener now that EVERY route is registered.
-        // server.begin() must run AFTER both setupWebServer() and
-        // registerApiRoutes() (called either directly above or from inside
-        // _initPlatform).  Adding routes after begin() corrupts the handler
-        // list and produces null-deref crashes on the first incoming
-        // request.
+        // server.begin() must run AFTER setupWebServer() + registerApiRoutes();
+        // adding routes after begin() corrupts the handler list and produces
+        // null-deref crashes on the first incoming request.
         startWebServer();
 
         if (onlineLoggerMode) {

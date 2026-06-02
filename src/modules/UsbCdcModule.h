@@ -57,6 +57,19 @@ public:
     /// Get first-run status (true if firmware is running for first time on this device)
     bool isFirstRun() const { return first_run_; }
 
+    /// Persist the USB-CDC-on-boot preference to NVS. Takes effect on the next
+    /// firmware recompile/flash (the actual mode is a compile-time build flag).
+    void setUsbCdcEnabled(bool enabled);
+
+    /// Reload the cached preference from NVS. begin() (which also runs the
+    /// interactive first-run setup) is not called in the headless runtime, so
+    /// the module manager calls this to read the stored preference on demand.
+    void syncFromNvs();
+
+    /// True if USB CDC is actually active on THIS build (compile-time
+    /// ARDUINO_USB_CDC_ON_BOOT flag), independent of the NVS preference.
+    bool isUsbCdcActiveAtBoot() const;
+
 private:
     bool enabled_;
     bool first_run_;

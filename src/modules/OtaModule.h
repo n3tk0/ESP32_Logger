@@ -1,17 +1,16 @@
 #pragma once
 #include "../core/IModule.h"
+#include "../setup.h"   // OTA_CONFIRM_TIMEOUT_MS (default auto-confirm window)
 
 // ============================================================================
-// OtaModule — IModule adapter over OtaManager (Pass 5, phase 2).
+// OtaModule — IModule adapter over OtaManager (Pass 5).
 //
-// OTA has almost no persistent configuration in DeviceConfig — rollback state
-// lives in the ESP-IDF otadata partition, confirmation is time-based.  This
-// adapter is therefore mostly informational: it exposes the running/previous
-// partition labels and rollback capability as read-only config fields.
-//
-// hasUI() returns false for now (schema is nullptr); the registry lists the
-// module in the tab strip but the UI only shows an enable/disable switch +
-// the informational block that already lives at /update.
+// Persisted state lives in modules.json (NOT config.bin — its binary layout is
+// version-locked): the auto-confirm window and the "require manual confirm"
+// flag, fed into OtaManager::setConfirmPolicy() at load(). The read-only
+// partition/rollback info is also serialised so /api/modules/ota carries it,
+// and the manager UI renders a status + actions panel (Confirm / Rollback) on
+// top of the schema form.
 // ============================================================================
 class OtaModule : public IModule {
 public:
@@ -25,8 +24,14 @@ public:
     bool load(JsonObjectConst cfg) override;
     bool save(JsonObject cfg)      const override;
 
-    // Informational module — no form for phase 2.
-    const char* schema() const override { return nullptr; }
+    const char* schema() const override;
 
     static OtaModule& instance() { static OtaModule m; return m; }
+
+private:
+    // Default mirrors the compile-time OTA stability window so a board built
+    // with a custom OTA_CONFIRM_TIMEOUT_MS isn't silently reset to 90 s when
+    // modules.json is first seeded from this member.
+    uint16_t _autoConfirmSec       = (uint16_t)(OTA_CONFIRM_TIMEOUT_MS / 1000);
+    bool     _requireManualConfirm = false;
 };

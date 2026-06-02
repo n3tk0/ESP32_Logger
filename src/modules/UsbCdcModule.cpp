@@ -72,6 +72,25 @@ void UsbCdcModule::printStatus() const {
     Serial.println();
 }
 
+void UsbCdcModule::setUsbCdcEnabled(bool enabled) {
+    if (!isUsbCdcSupported()) return;
+    if (enabled == enabled_) return;   // unchanged → skip the NVS write
+    saveToNvs(enabled);                // persists to NVS + updates enabled_
+}
+
+void UsbCdcModule::syncFromNvs() {
+    if (!isUsbCdcSupported()) return;
+    loadFromNvs();
+}
+
+bool UsbCdcModule::isUsbCdcActiveAtBoot() const {
+#if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT == 1
+    return true;
+#else
+    return false;
+#endif
+}
+
 String UsbCdcModule::getBoardName() const {
 #if defined(ARDUINO_SEEED_XIAO_ESP32C3)
     return "Seeed XIAO ESP32-C3";

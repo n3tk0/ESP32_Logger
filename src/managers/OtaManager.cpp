@@ -19,6 +19,11 @@ static bool s_confirmed     = false;
 static bool s_rollbackCapable = false;   // true only if bootloader supports rollback
 static uint32_t s_pendingDeadline = 0;   // millis() when watchdog auto-confirms
 
+// Configurable auto-confirm policy (set by OtaModule::load from modules.json).
+// Defaults preserve the historical behavior (compile-time window, auto-confirm).
+static uint32_t s_autoConfirmMs        = (uint32_t)OTA_CONFIRM_TIMEOUT_MS;
+static bool     s_requireManualConfirm = false;
+
 // Cache partition labels so they survive the lifetime of the program
 static char s_runningLabel[8]  = "";
 static char s_previousLabel[8] = "";
@@ -67,10 +72,14 @@ void OtaManager::boot() {
         if (state == ESP_OTA_IMG_PENDING_VERIFY) {
             s_pending          = true;
             s_rollbackCapable  = true;
-            s_pendingDeadline  = millis() + (uint32_t)OTA_CONFIRM_TIMEOUT_MS;
-            Serial.printf("[OTA] Firmware pending verify on %s — confirming in %us\n",
-                          s_runningLabel,
-                          (unsigned)(OTA_CONFIRM_TIMEOUT_MS / 1000));
+            s_pendingDeadline  = millis() + s_autoConfirmMs;
+            if (s_requireManualConfirm) {
+                Serial.printf("[OTA] Firmware pending verify on %s — manual confirm required "
+                              "(POST /api/ota/confirm)\n", s_runningLabel);
+            } else {
+                Serial.printf("[OTA] Firmware pending verify on %s — confirming in %us\n",
+                              s_runningLabel, (unsigned)(s_autoConfirmMs / 1000));
+            }
             _logOtaEvent("PENDING_VERIFY");
         } else if (state == ESP_OTA_IMG_VALID) {
             s_confirmed = true;
@@ -96,13 +105,16 @@ void OtaManager::boot() {
 // ---------------------------------------------------------------------------
 void OtaManager::tick(uint32_t nowMs) {
     if (s_confirmed || !s_pending) return;
+    // Manual-confirm mode: never auto-confirm. The image stays pending until
+    // an explicit /api/ota/confirm, or rolls back on the next crash.
+    if (s_requireManualConfirm) return;
     // millis() wraps at ~49.7 days; using signed difference makes the
     // comparison wrap-safe (positive ⇒ deadline still in the future,
     // ≤ 0 ⇒ deadline reached/passed).
     int32_t remaining = (int32_t)(s_pendingDeadline - nowMs);
     if (remaining <= 0) {
         Serial.printf("[OTA] Stability window elapsed (%us) — confirming\n",
-                      (unsigned)(OTA_CONFIRM_TIMEOUT_MS / 1000));
+                      (unsigned)(s_autoConfirmMs / 1000));
         confirm();
     }
 }
@@ -110,9 +122,19 @@ void OtaManager::tick(uint32_t nowMs) {
 // ---------------------------------------------------------------------------
 uint32_t OtaManager::millisUntilConfirm() {
     if (s_confirmed || !s_pending) return 0;
+    if (s_requireManualConfirm) return 0;   // no countdown — awaiting manual confirm
     int32_t remaining = (int32_t)(s_pendingDeadline - millis());
     return (remaining > 0) ? (uint32_t)remaining : 0;
 }
+
+// ---------------------------------------------------------------------------
+void OtaManager::setConfirmPolicy(uint32_t autoConfirmMs, bool requireManual) {
+    if (autoConfirmMs > 0) s_autoConfirmMs = autoConfirmMs;
+    s_requireManualConfirm = requireManual;
+}
+
+uint32_t OtaManager::autoConfirmMs()        { return s_autoConfirmMs; }
+bool     OtaManager::requireManualConfirm() { return s_requireManualConfirm; }
 
 // ---------------------------------------------------------------------------
 bool OtaManager::confirm() {

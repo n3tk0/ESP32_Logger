@@ -1847,7 +1847,18 @@ var Modules = (function () {
     function vOf(n) { var el = form.elements[n]; if (!el) return ""; return el.type === "checkbox" ? (el.checked ? "1" : "") : el.value; }
     function match(spec) {
       if (typeof spec === "string") return !!vOf(spec);
-      for (var k in spec) { if (String(vOf(k)) !== String(spec[k])) return false; }
+      for (var k in spec) {
+        var el = form.elements[k];
+        var want = spec[k];
+        // Boolean spec against a checkbox: compare checked state directly. An
+        // unchecked checkbox's vOf() is "" (not "false"), so a plain string
+        // compare would never match {field:false}.
+        if (el && el.type === "checkbox" && typeof want === "boolean") {
+          if (el.checked !== want) return false;
+        } else if (String(vOf(k)) !== String(want)) {
+          return false;
+        }
+      }
       return true;
     }
     function refresh() {
@@ -1947,6 +1958,84 @@ var Modules = (function () {
         if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<span data-icon="save"></span> Save'; _icons(saveBtn); }
         setMsg('<div class="alert alert-error">Network error while saving.</div>');
       });
+    });
+
+    // OTA gets a read-only status + actions panel below its settings form.
+    if (detail.id === "ota") _renderOtaActions(host, detail.config || {});
+  }
+
+  // ── OTA-only status & actions panel (partition info + confirm/rollback) ─────
+  function _renderOtaActions(host, cfg) {
+    function row(k, v) {
+      return '<div class="mod-ota-row"><span>' + escAttr(k) + '</span><b>' + escAttr(v) + '</b></div>';
+    }
+    var pending = !!cfg.pendingVerify;
+    var cdSec   = (typeof cfg.confirmInMs === "number" && cfg.confirmInMs > 0)
+                    ? Math.ceil(cfg.confirmInMs / 1000) : 0;
+    var panel = document.createElement("div");
+    panel.className = "mod-ota-panel";
+    panel.innerHTML =
+      '<div class="mod-group-head">Partition &amp; rollback</div>' +
+      row("Running", cfg.running || "?") +
+      row("Previous", cfg.previous || "—") +
+      row("Rollback on crash", cfg.rollbackCapable ? "supported" : "manual only") +
+      (pending
+        ? '<div class="alert alert-warning">New firmware pending verification' +
+            (cdSec > 0 ? ' — auto-confirms in ' + cdSec + ' s.'
+                       : ' — manual confirm required.') + '</div>'
+        : '<div class="alert alert-success">Current firmware confirmed.</div>') +
+      '<div class="mod-actions">' +
+        (pending ? '<button type="button" class="btn primary" id="ota-confirm">Confirm now</button>' : '') +
+        ((cfg.rollbackCapable || (cfg.previous && cfg.previous !== "—"))
+            ? '<button type="button" class="btn" id="ota-rollback">Roll back</button>' : '') +
+      '</div>';
+    host.appendChild(panel);
+
+    var cBtn = _el("ota-confirm");
+    if (cBtn) cBtn.addEventListener("click", function () {
+      cBtn.disabled = true;
+      // /api/ota/confirm is not CSRF-gated; postWithCsrf's ?csrf= is harmless.
+      postWithCsrf("/api/ota/confirm", { method: "POST" }, 15000)
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json().catch(function () { return {}; });
+        })
+        .then(function (d) {
+          if (d && d.ok === false) throw new Error(d.error || "Confirm failed");
+          setMsg('<div class="alert alert-success">Firmware confirmed.</div>');
+          select("ota", true);
+        })
+        .catch(function (err) {
+          cBtn.disabled = false;
+          setMsg('<div class="alert alert-error">Confirm failed: ' +
+                 esc(err && err.message ? err.message : String(err)) + '</div>');
+        });
+    });
+
+    var rBtn = _el("ota-rollback");
+    if (rBtn) rBtn.addEventListener("click", function () {
+      if (!confirm("Roll back to the previous firmware and restart now?")) return;
+      rBtn.disabled = true;
+      postWithCsrf("/api/ota/rollback", { method: "POST" }, 15000)
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json().catch(function () { return {}; });
+        })
+        .then(function (d) {
+          if (d && d.ok === false) throw new Error(d.error || "Rollback failed");
+          setMsg('<div class="alert alert-info">Rolling back and restarting… reconnect in ~10 s.</div>');
+        })
+        .catch(function (err) {
+          // A successful rollback restarts the device and aborts this request,
+          // so a network error here is expected. Only an explicit HTTP status
+          // means the request was actually rejected.
+          if (err && err.message && err.message.indexOf("HTTP") === 0) {
+            rBtn.disabled = false;
+            setMsg('<div class="alert alert-error">Rollback failed: ' + esc(err.message) + '</div>');
+          } else {
+            setMsg('<div class="alert alert-info">Rollback requested; the device may be restarting.</div>');
+          }
+        });
     });
   }
 
