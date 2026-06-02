@@ -733,15 +733,22 @@ void setup() {
             if (!g_safeMode && activeFS && !alertEngine.begin(*activeFS)) {
                 Serial.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
             }
-            registerApiRoutes(server);
         }
 
+        // Register API routes AFTER moduleRegistry.add() (above) so the
+        // per-module /api/modules/:id detail/enable/restart routes are created
+        // with moduleRegistry.count() > 0.  The earlier registerApiRoutes()
+        // call ran before the modules were added (count() == 0), so it set up
+        // the /api/modules index but NONE of the per-module routes.  This pass
+        // adds them in every mode — previously only the legacy/safe-mode
+        // else-branch re-registered, leaving continuous/hybrid builds with a
+        // module list but no working configuration forms.
+        registerApiRoutes(server);
+
         // Start the AsyncTCP listener now that EVERY route is registered.
-        // server.begin() must run AFTER both setupWebServer() and
-        // registerApiRoutes() (called either directly above or from inside
-        // _initPlatform).  Adding routes after begin() corrupts the handler
-        // list and produces null-deref crashes on the first incoming
-        // request.
+        // server.begin() must run AFTER setupWebServer() + registerApiRoutes();
+        // adding routes after begin() corrupts the handler list and produces
+        // null-deref crashes on the first incoming request.
         startWebServer();
 
         if (onlineLoggerMode) {
