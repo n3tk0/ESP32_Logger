@@ -519,6 +519,7 @@ var CL_SENSOR_TYPES = [
   { value: "bme280", label: "BME280 (temp/humidity/pressure)", iface: "i2c" },
   { value: "sds011", label: "SDS011 (PM2.5/PM10)", iface: "uart" },
   { value: "pms5003", label: "PMS5003 (PM1/2.5/10)", iface: "uart" },
+  { value: "sps30", label: "Sensirion SPS30 (PM1/2.5/4/10)", iface: "i2c" },
   { value: "yfs201", label: "YF-S201/YF-S403 (water flow)", iface: "pulse" },
   { value: "ens160", label: "ENS160 (TVOC/eCO2)", iface: "i2c" },
   { value: "sgp30", label: "SGP30 (TVOC/eCO2)", iface: "i2c" },

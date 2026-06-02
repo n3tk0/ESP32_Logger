@@ -504,7 +504,7 @@
     if (Array.isArray(data)) {
       data.forEach(function (s) {
         if (binding && s.id === binding && s.readings) { pm = s.readings; return; }
-        if (!binding && !pm  && s.readings && (s.type === "sds011" || s.type === "pms5003")) pm  = s.readings;
+        if (!binding && !pm  && s.readings && (s.type === "sds011" || s.type === "pms5003" || s.type === "sps30")) pm  = s.readings;
         if (!voc && s.readings && (s.type === "sgp30"  || s.type === "ens160"))  voc = s.readings;
         if (!co2 && s.readings && (s.type === "scd4x"  || s.type === "scd30"))   co2 = s.readings;
       });
@@ -1455,6 +1455,7 @@
       ["bme688",  "thermometer-sun", "BME688",    "I2C · 4-in-1"],
       ["sds011",  "cloud-fog",       "SDS011",    "UART · PM2.5/10"],
       ["pms5003", "cloud-fog",       "PMS5003",   "UART · PM1/2.5/10"],
+      ["sps30",   "cloud-fog",       "SPS30",     "I2C · PM1/2.5/4/10"],
       ["sgp30",   "wind",            "SGP30",     "I2C · TVOC/eCO₂"],
       ["ens160",  "wind",            "ENS160",    "I2C · AQI/TVOC"],
       ["scd4x",   "leaf",            "SCD4x",     "I2C · CO₂"],

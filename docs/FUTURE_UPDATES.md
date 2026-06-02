@@ -61,6 +61,7 @@ Track planned improvements and known gaps here. Check off items when completed.
 - [x] Add soil_moisture sensor to platform_config.json example
 - [x] DS18B20 multi-sensor support (up to 8 sensors on one OneWire bus)
 - [x] VEML7700 lux calibration support (CalibrationAxis _calLux + _calWhite)
+- [x] Sensirion SPS30 PM sensor (I2C, float format) — PM1/2.5/4/10 mass concentrations
 
 ---
 
