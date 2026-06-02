@@ -1738,11 +1738,18 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
             }
             if (f) f.close();
 
+            // Pass download=true so AsyncFileResponse emits its own single
+            // "Content-Disposition: attachment; filename=..." header.  Previously
+            // we let it default to download=false (which emits an "inline"
+            // disposition) and then added our own "attachment" header on top —
+            // producing TWO Content-Disposition headers, which Chromium/Edge
+            // reject outright with ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION
+            // (every non-empty file failed to download).
             // Null-check resp: exists() → beginResponse() has a TOCTOU window;
             // the file may be deleted between the two calls.  (AUDIT 3.18)
-            AsyncWebServerResponse *resp = r->beginResponse(*targetFS, path, "application/octet-stream");
+            AsyncWebServerResponse *resp =
+                r->beginResponse(*targetFS, path, "application/octet-stream", true);
             if (!resp) { r->send(404, "text/plain", "Not found"); return; }
-            resp->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
             r->send(resp);
         } else {
             r->send(404, "text/plain", "Not found");
