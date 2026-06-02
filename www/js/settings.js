@@ -1243,8 +1243,13 @@ function settingsImport() {
     showToast("Import failed", "error");
     if (prog) prog.style.display = "none";
   };
-  xhr.open("POST", "/import_settings");
-  xhr.send(fd);
+  // /import_settings is CSRF-gated — include the token (accepted as a form
+  // field) so the import isn't rejected with 403.
+  getCsrfToken().then(function (token) {
+    if (token) fd.append("csrf", token);
+    xhr.open("POST", "/import_settings");
+    xhr.send(fd);
+  });
 }
 
 // ============================================================================
@@ -1531,17 +1536,23 @@ function otaUpload() {
 
     var formData = new FormData();
     formData.append("firmware", file);
-    var url = sha ? "/do_update?sha256=" + sha : "/do_update";
-    xhr.open("POST", url);
-    xhr.timeout = 120000;
-    xhr.ontimeout = function () {
-      if (progressDiv) progressDiv.style.display = "none";
-      otaShowPopup("alert-triangle", "Upload Timeout",
-        "No response from device after 120 s — check connection and retry.", false, true);
-      uploadBtn.disabled = false;
-      fileInput.disabled = false;
-    };
-    xhr.send(formData);
+    // /do_update is CSRF-gated (token read from the query string) — append it
+    // alongside sha256 so the OTA isn't rejected with 403.
+    getCsrfToken().then(function (token) {
+      var qs = [];
+      if (sha)   qs.push("sha256=" + encodeURIComponent(sha));
+      if (token) qs.push("csrf=" + encodeURIComponent(token));
+      xhr.open("POST", "/do_update" + (qs.length ? "?" + qs.join("&") : ""));
+      xhr.timeout = 120000;
+      xhr.ontimeout = function () {
+        if (progressDiv) progressDiv.style.display = "none";
+        otaShowPopup("alert-triangle", "Upload Timeout",
+          "No response from device after 120 s — check connection and retry.", false, true);
+        uploadBtn.disabled = false;
+        fileInput.disabled = false;
+      };
+      xhr.send(formData);
+    });
   });   // end _otaSha256().then
 }
 

@@ -925,14 +925,15 @@ function filesUpload() {
       showToast("Upload failed: " + files[i].name, "error");
       if (prog) prog.style.display = "none";
     };
-    xhr.open(
-      "POST",
-      "/upload?path=" +
-        encodeURIComponent(currentFilesDir) +
-        "&storage=" +
-        encodeURIComponent(currentFilesStorage),
-    );
-    xhr.send(fd);
+    // /upload is CSRF-gated — append the token to the query string so the
+    // file-browser upload isn't rejected with 403.
+    getCsrfToken().then(function (token) {
+      var url = "/upload?path=" + encodeURIComponent(currentFilesDir) +
+                "&storage=" + encodeURIComponent(currentFilesStorage);
+      if (token) url += "&csrf=" + encodeURIComponent(token);
+      xhr.open("POST", url);
+      xhr.send(fd);
+    });
   }
   next();
 }

@@ -1502,7 +1502,9 @@ function confirmRestart() {
       "Redirecting in <strong>" + s + "</strong> seconds…";
     if (bar) bar.style.width = (5 - s) * 20 + "%";
     if (s <= 0) {
-      fetchWithTimeout("/restart", { method: "POST" }, 10000).finally(function () {
+      // /restart is CSRF-gated — use postWithCsrf so the device actually
+      // restarts instead of silently 403-ing.
+      postWithCsrf("/restart", { method: "POST" }, 10000).finally(function () {
         location.hash = "dashboard";
         location.reload();
       });
