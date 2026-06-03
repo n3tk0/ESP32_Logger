@@ -530,6 +530,8 @@ document.addEventListener("DOMContentLoaded", function () {
 // ============================================================================
 var CL_SENSOR_TYPES = [
   { value: "bme280", label: "BME280 (temp/humidity/pressure)", iface: "i2c" },
+  { value: "bme688", label: "BME688 (T/H/P + gas + IAQ)", iface: "i2c" },
+  { value: "bme680", label: "BME680 (T/H/P + gas + IAQ)", iface: "i2c" },
   { value: "sds011", label: "SDS011 (PM2.5/PM10)", iface: "uart" },
   { value: "pms5003", label: "PMS5003 (PM1/2.5/10)", iface: "uart" },
   { value: "sps30", label: "Sensirion SPS30 (PM1/2.5/4/10)", iface: "i2c" },

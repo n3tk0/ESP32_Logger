@@ -526,7 +526,7 @@
         if (binding && s.id === binding) { envSensor = s; return; }
         if (!binding && !envSensor && s.readings &&
             (s.id.indexOf("bme") !== -1 || s.id.indexOf("env") !== -1 ||
-             s.type === "bme280" || s.type === "bme688")) {
+             s.type === "bme280" || s.type === "bme688" || s.type === "bme680")) {
           envSensor = s;
         }
       });
@@ -1597,7 +1597,8 @@
 
     var typeCards = [
       ["bme280",  "thermometer",     "BME280",    "I2C · T/H/P"],
-      ["bme688",  "thermometer-sun", "BME688",    "I2C · 4-in-1"],
+      ["bme688",  "thermometer-sun", "BME688",    "I2C · T/H/P/gas/IAQ"],
+      ["bme680",  "thermometer-sun", "BME680",    "I2C · T/H/P/gas/IAQ"],
       ["sds011",  "cloud-fog",       "SDS011",    "UART · PM2.5/10"],
       ["pms5003", "cloud-fog",       "PMS5003",   "UART · PM1/2.5/10"],
       ["sps30",   "cloud-fog",       "SPS30",     "I2C · PM1/2.5/4/10"],

@@ -372,7 +372,8 @@ static void _initPlatform() {
     sensorManager.registerPlugin("bmp280",  []()->ISensor*{ return new BME280Sensor(); });
 #endif
 #ifdef SENSOR_BME688_ENABLED
-    sensorManager.registerPlugin("bme688",  []()->ISensor*{ return new BME688Sensor(); });
+    sensorManager.registerPlugin("bme688",  []()->ISensor*{ return new BME688Sensor("bme688"); });
+    sensorManager.registerPlugin("bme680",  []()->ISensor*{ return new BME688Sensor("bme680"); });
 #endif
 #ifdef SENSOR_SDS011_ENABLED
     sensorManager.registerPlugin("sds011",  []()->ISensor*{ return new SDS011Sensor(); });
