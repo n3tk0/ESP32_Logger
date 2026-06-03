@@ -504,8 +504,8 @@
         }
         area += " L 100,36 Z";
         svg.innerHTML =
-          '<path d="' + area + '" fill="currentColor" opacity="0.15"></path>' +
-          '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.55"></polyline>';
+          '<path d="' + area + '" fill="currentColor" opacity="0.13"></path>' +
+          '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1" opacity="0.55" vector-effect="non-scaling-stroke"></polyline>';
       })
       .catch(function () { svg.dataset.drawnFor = ""; });  // allow retry on failure
   }
@@ -806,10 +806,8 @@
               '<span class="mono" style="font-size:11px;color:var(--text-3)">' + esc(sName) + '</span>' +
             '</div>' +
             '<div class="card-body ov-metric-body">' +
-              '<div>' +
-                '<div class="ov-metric-value" id="ov-sm-' + esc(cardId) + '-v">—</div>' +
-                '<div class="ov-metric-unit" id="ov-sm-' + esc(cardId) + '-u"></div>' +
-              '</div>' +
+              '<span class="ov-metric-value" id="ov-sm-' + esc(cardId) + '-v">—</span>' +
+              '<span class="ov-metric-unit" id="ov-sm-' + esc(cardId) + '-u"></span>' +
             '</div>' +
             '<svg class="metric-spark-bg ov-card-spark" data-sensor="' + esc(sId) + '" data-metric="' + esc(m) + '" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg>' +
           '</div>';
