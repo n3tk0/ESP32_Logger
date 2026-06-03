@@ -1098,13 +1098,24 @@
     var staleNames = [], errNames = [];
 
     grid.innerHTML = sensors.map(function (s) {
-      var state = s.error ? "err" : s.stale ? "warn" : s.disabled ? "disabled" : "ok";
-      var uptime = s.uptime_pct !== undefined ? s.uptime_pct : (state === "err" ? 0 : state === "warn" ? 80 : 99);
-      var reads   = s.reads   || 0;
-      var errors  = s.errors  || 0;
-      var retries = s.retries || 0;
-      var avgLat  = s.avg_latency_ms !== undefined ? s.avg_latency_ms.toFixed(1) + " ms" : "—";
-      var lastSeen = s.age_s !== undefined ? s.age_s + "s ago" : "—";
+      // /api/sensors nests health metrics inside s.health.*  with different
+      // field names than the legacy flat layout the renderer originally expected.
+      var h = s.health || {};
+      var state = s.status === "err"    ? "err"
+                : s.status === "stale"  ? "warn"
+                : s.enabled === false   ? "disabled"
+                : "ok";
+      var uptime  = h.uptime_pct_24h  !== undefined ? h.uptime_pct_24h
+                  : (state === "err" ? 0 : state === "warn" ? 80 : 99);
+      var reads   = h.reads_24h   || 0;
+      var errors  = h.errors_24h  || 0;
+      // API has no explicit retry counter; surface lifetime error_count instead.
+      var retries = s.error_count  || 0;
+      // avg_latency_us is in microseconds — convert to ms for display.
+      var avgLat  = h.avg_latency_us !== undefined
+                  ? (h.avg_latency_us / 1000).toFixed(2) + " ms" : "—";
+      var lastSeen = h.last_read_ms_ago !== undefined
+                  ? Math.round(h.last_read_ms_ago / 1000) + "s ago" : "—";
 
       if (state === "ok")   upCount++;
       if (state === "warn") { staleCount++; staleNames.push(s.id); }
