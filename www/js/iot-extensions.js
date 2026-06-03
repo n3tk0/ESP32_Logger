@@ -1378,10 +1378,13 @@
       zoneMap[z].push(s.id);
     });
 
-    // Collect existing sensor cards by data-sid attribute
+    // Collect existing sensor cards by data-sid attribute.
+    // Multiple cards can share the same data-sid (one per metric), so keep an array.
     var existing = {};
     grid.querySelectorAll("[data-sid]").forEach(function (c) {
-      existing[c.dataset.sid] = c;
+      var sid = c.dataset.sid;
+      if (!existing[sid]) existing[sid] = [];
+      existing[sid].push(c);
     });
 
     if (!Object.keys(existing).length) return;
@@ -1392,9 +1395,19 @@
 
     var ZONE_ICONS = { indoor:"home", outdoor:"sun", utility:"wrench", other:"grid" };
 
+    // Helper: flatten arrays of cards for a list of sensor ids
+    function _cardsFor(ids) {
+      return ids.reduce(function (acc, id) {
+        return existing[id] ? acc.concat(existing[id]) : acc;
+      }, []);
+    }
+
     Object.keys(zoneMap).forEach(function (zone) {
-      var cards = zoneMap[zone].map(function (id) { return existing[id]; }).filter(Boolean);
+      var cards = _cardsFor(zoneMap[zone]);
       if (!cards.length) return;
+
+      // Sensor count = unique data-sid values in this zone
+      var uniqueIds = zoneMap[zone].filter(function (id) { return existing[id]; });
 
       var sec = document.createElement("div");
       sec.className = "zone-section";
@@ -1404,28 +1417,28 @@
             '<span data-icon="' + (ZONE_ICONS[zone] || "grid") + '"></span>' +
             zone.charAt(0).toUpperCase() + zone.slice(1) +
           '</div>' +
-          '<div class="zone-meta">' + cards.length + ' sensor' + (cards.length !== 1 ? 's' : '') + '</div>' +
+          '<div class="zone-meta">' + uniqueIds.length + ' sensor' + (uniqueIds.length !== 1 ? 's' : '') + '</div>' +
         '</div>' +
         '<div class="sensors-grid zone-cards"></div>';
 
       var cardGrid = sec.querySelector(".zone-cards");
       cards.forEach(function (c) { cardGrid.appendChild(c); });
 
-      // Sensors without a zone entry go to "other" implicitly
       grid.appendChild(sec);
     });
 
-    // Any cards not assigned to a zone
-    var unzoned = Object.keys(existing).filter(function (id) {
+    // Any cards not assigned to any zone
+    var unzonedIds = Object.keys(existing).filter(function (id) {
       return !sensors.find(function (s) { return s.id === id; });
-    }).map(function (id) { return existing[id]; }).filter(Boolean);
+    });
+    var unzoned = _cardsFor(unzonedIds);
     if (unzoned.length) {
       var sec2 = document.createElement("div");
       sec2.className = "zone-section";
       sec2.innerHTML =
         '<div class="zone-head">' +
           '<div class="zone-title"><span data-icon="grid"></span> Other</div>' +
-          '<div class="zone-meta">' + unzoned.length + ' sensor' + (unzoned.length !== 1 ? 's' : '') + '</div>' +
+          '<div class="zone-meta">' + unzonedIds.length + ' sensor' + (unzonedIds.length !== 1 ? 's' : '') + '</div>' +
         '</div>' +
         '<div class="sensors-grid zone-cards"></div>';
       var cg2 = sec2.querySelector(".zone-cards");

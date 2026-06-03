@@ -172,12 +172,29 @@ function sensorsLoad() {
               s.status === "ok" ? "OK" :
               s.status === "disabled" ? "OFF" : "ERR";
 
-            var transport = s.transport || s.type || "";
-            var errChip = "";
+            // Only show transport if it adds information beyond the type/id the
+            // user already sees.  "sds011 · sds011" is redundant; "sds011 · UART1" is useful.
+            var rawTransport = s.transport || "";
+            var transport = (rawTransport && rawTransport !== s.id && rawTransport !== s.type)
+                            ? rawTransport : "";
+
+            // s-metrics: error detail chip, or secondary-metric badges when healthy
+            var metricsChip = "";
             if ((s.status === "err" || s.status === "error") && s.status_detail) {
-              errChip = '<div class="s-metrics"><span class="badge err" style="font-size:10px">' +
-                        esc(s.status_detail) + '</span></div>';
+              metricsChip = '<div class="s-metrics"><span class="badge err" style="font-size:10px">' +
+                            esc(s.status_detail) + '</span></div>';
+            } else if (s.last_values && metrics.length > 1) {
+              // Show the other metrics of this sensor as dim badges
+              var otherBadges = metrics.filter(function (om) { return om !== m; }).map(function (om) {
+                var lv = s.last_values[om];
+                if (!lv || lv.v === undefined) return "";
+                return '<span class="badge dim" style="font-size:10px">' +
+                       esc(om) + ': ' + esc(String(lv.v)) +
+                       (lv.u ? ' ' + esc(lv.u) : '') + '</span>';
+              }).filter(Boolean).join(" ");
+              if (otherBadges) metricsChip = '<div class="s-metrics" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">' + otherBadges + '</div>';
             }
+            var errChip = metricsChip; // keep the old variable name used below
 
             var ageRefMs = s.last_read_ms || 0;
             var ageIcon = "", ageColor = "inherit";
@@ -194,7 +211,7 @@ function sensorsLoad() {
                   '<div>' +
                     '<div class="s-name">' + cardName + '</div>' +
                     '<div class="s-id">' + esc(s.id) +
-                      (transport ? ' · ' + esc(transport) : '') + '</div>' +
+                      (transport ? ' · ' + esc(transport) : (s.type && s.type !== s.id ? ' · ' + esc(s.type) : '')) + '</div>' +
                   '</div>' +
                   '<span class="badge ' + badgeClass + '">' + badgeText + '</span>' +
                 '</div>' +
@@ -206,7 +223,7 @@ function sensorsLoad() {
                 errChip +
                 '<div class="s-foot">' +
                   '<span style="color:' + ageColor + '">' + ageIcon + ' ' + ageStr + '</span>' +
-                  '<span>' + esc(transport) + '</span>' +
+                  (transport ? '<span>' + esc(transport) + '</span>' : '') +
                 '</div>' +
               '</div>'
             );
