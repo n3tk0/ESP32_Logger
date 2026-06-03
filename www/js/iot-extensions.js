@@ -229,9 +229,9 @@
           '</div>' +
           '<div class="card-body">' +
             '<div class="grid grid-3" style="gap:10px" id="ov-env-kpis">' +
-              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="thermometer"></span> Temp</div><div class="kpi-v"><span class="num" id="ov-temp">—</span><span class="unit">°C</span></div><div class="kpi-d" id="ov-temp-d">—</div></div>' +
-              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="droplet"></span> Humidity</div><div class="kpi-v"><span class="num" id="ov-hum">—</span><span class="unit">%</span></div><div class="kpi-d" id="ov-hum-d">—</div></div>' +
-              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="gauge"></span> Pressure</div><div class="kpi-v"><span class="num" id="ov-pres">—</span><span class="unit">hPa</span></div><div class="kpi-d" id="ov-pres-d">—</div></div>' +
+              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="thermometer"></span> Temp</div><div class="kpi-v"><span class="num" id="ov-temp">—</span><span class="unit">°C</span></div><div class="kpi-d" id="ov-temp-d">—</div><svg class="metric-spark-bg" id="ov-temp-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg></div>' +
+              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="droplet"></span> Humidity</div><div class="kpi-v"><span class="num" id="ov-hum">—</span><span class="unit">%</span></div><div class="kpi-d" id="ov-hum-d">—</div><svg class="metric-spark-bg" id="ov-hum-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg></div>' +
+              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="gauge"></span> Pressure</div><div class="kpi-v"><span class="num" id="ov-pres">—</span><span class="unit">hPa</span></div><div class="kpi-d" id="ov-pres-d">—</div><svg class="metric-spark-bg" id="ov-pres-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg></div>' +
             '</div>' +
           '</div>' +
         '</div>';
@@ -451,6 +451,73 @@
       });
   }
 
+  // ── Background sparkline drawer for Overview metric tiles ──────────────────
+  // Throttled worker pool — the ESP's connection pool is tiny, so we keep at
+  // most OV_SPARK_MAX /api/data requests in flight. Each placeholder is drawn
+  // once per (sensor::metric); the dataset guard avoids refetching on every poll.
+  var _ovSparkQueue = [];
+  var _ovSparkActive = 0;
+  var OV_SPARK_MAX = 2;
+
+  function _ovQueueSpark(svg, sensorId, metric) {
+    if (!svg || !sensorId || !metric) return;
+    var key = sensorId + "::" + metric;
+    if (svg.dataset.drawnFor === key) return;  // already drawn for this binding
+    svg.dataset.drawnFor = key;
+    _ovSparkQueue.push({ svg: svg, sensorId: sensorId, metric: metric });
+    _ovSparkPump();
+  }
+
+  function _ovSparkPump() {
+    while (_ovSparkActive < OV_SPARK_MAX && _ovSparkQueue.length) {
+      var job = _ovSparkQueue.shift();
+      _ovSparkActive++;
+      _ovFetchSpark(job.svg, job.sensorId, job.metric)
+        .then(function () { _ovSparkActive--; _ovSparkPump(); });
+    }
+  }
+
+  function _ovFetchSpark(svg, sensorId, metric) {
+    var now = Math.floor(Date.now() / 1000), from = now - 3600;
+    var url = "/api/data?sensor=" + encodeURIComponent(sensorId) +
+              "&metric=" + encodeURIComponent(metric) +
+              "&from=" + from + "&to=" + now + "&agg=raw&mode=lttb&limit=40";
+    return fetchWithTimeout(url, {}, 6000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (res) {
+        if (!res || !res.data || res.data.length < 2) return;
+        var min = Infinity, max = -Infinity, ys = [];
+        res.data.forEach(function (pt) {
+          if (pt && pt.v !== undefined) {
+            var v = Number(pt.v);
+            if (!isNaN(v)) { if (v < min) min = v; if (v > max) max = v; ys.push(v); }
+          }
+        });
+        if (ys.length < 2) return;
+        var range = max - min; if (range < 1e-9) range = 1;
+        var stepX = 100 / (ys.length - 1), line = "", area = "M 0,36";
+        for (var j = 0; j < ys.length; j++) {
+          var x = (j * stepX).toFixed(1);
+          var y = (34 - ((ys[j] - min) / range) * 30).toFixed(1);
+          line += (j ? " " : "") + x + "," + y;
+          area += " L " + x + "," + y;
+        }
+        area += " L 100,36 Z";
+        svg.innerHTML =
+          '<path d="' + area + '" fill="currentColor" opacity="0.15"></path>' +
+          '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.55"></polyline>';
+      })
+      .catch(function () { svg.dataset.drawnFor = ""; });  // allow retry on failure
+  }
+
+  // Scan the overview deck for dynamic-card spark placeholders and draw them.
+  function ovDrawCardSparks() {
+    var nodes = document.querySelectorAll(".ov-card-spark[data-sensor]");
+    [].forEach.call(nodes, function (svg) {
+      _ovQueueSpark(svg, svg.getAttribute("data-sensor"), svg.getAttribute("data-metric"));
+    });
+  }
+
   function ovFillEnvironment(data) {
     var binding = _getBinding("environment");
     var envSensor = null;
@@ -472,6 +539,13 @@
     if (t && r.temperature !== undefined) t.textContent = r.temperature.toFixed(1);
     if (h && r.humidity !== undefined) h.textContent = Math.round(r.humidity);
     if (p && r.pressure !== undefined) p.textContent = Math.round(r.pressure);
+
+    // Draw background sparklines now that the bound sensor id is known
+    if (envSensor.id) {
+      _ovQueueSpark(document.getElementById("ov-temp-spark"), envSensor.id, "temperature");
+      _ovQueueSpark(document.getElementById("ov-hum-spark"),  envSensor.id, "humidity");
+      _ovQueueSpark(document.getElementById("ov-pres-spark"), envSensor.id, "pressure");
+    }
   }
 
   function ovFillEnergy(data) {
@@ -701,7 +775,7 @@
     sensors.forEach(function (s) {
       if (!s || s.status === "disabled") return;
       (s.metrics || []).forEach(function (m) {
-        valid["sensor__" + s.id + "__" + m] = { name: s.name || s.id, metric: m };
+        valid["sensor__" + s.id + "__" + m] = { name: s.name || s.id, metric: m, id: s.id };
       });
     });
 
@@ -721,7 +795,7 @@
     Object.keys(valid).forEach(function (cardId) {
       if (OVERVIEW_REGISTRY[cardId]) return;
       changed++;
-      var sName = valid[cardId].name, m = valid[cardId].metric;
+      var sName = valid[cardId].name, m = valid[cardId].metric, sId = valid[cardId].id;
       OVERVIEW_REGISTRY[cardId] = {
         title: sName + " · " + m,
         icon: _metricIcon(m),
@@ -737,6 +811,7 @@
                 '<div class="ov-metric-unit" id="ov-sm-' + esc(cardId) + '-u"></div>' +
               '</div>' +
             '</div>' +
+            '<svg class="metric-spark-bg ov-card-spark" data-sensor="' + esc(sId) + '" data-metric="' + esc(m) + '" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg>' +
           '</div>';
         },
       };
@@ -784,6 +859,9 @@
       }
       if (uEl && it.unit) uEl.textContent = it.unit;
     });
+
+    // Draw background sparklines for any dynamic sensor-metric cards on the deck
+    ovDrawCardSparks();
   }
 
   // ── Alerts page ────────────────────────────────────────────────────────────
