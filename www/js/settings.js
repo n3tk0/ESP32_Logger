@@ -1144,10 +1144,14 @@ function dlLoadFiles() {
 // Uses storage=internal explicitly — matches original failsafe fix
 function dlDeleteFile(path) {
   if (!confirm("Delete " + path + "?")) return;
-  fetchWithTimeout("/delete?path=" + encodeURIComponent(path) + "&storage=internal", {
-    method: "POST",
-  }, 30000).then(function () {
-    dlLoadFiles();
+  getCsrfToken().then(function (token) {
+    fetchWithTimeout(
+      "/delete?path=" + encodeURIComponent(path) + "&storage=internal&csrf=" + encodeURIComponent(token),
+      { method: "POST" },
+      30000
+    ).then(function () {
+      dlLoadFiles();
+    });
   });
 }
 

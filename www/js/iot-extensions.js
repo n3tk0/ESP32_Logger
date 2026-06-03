@@ -612,12 +612,41 @@
   }
 
   function ovFillAlertFeed() {
-    // This would ideally fetch from /api/alerts; use empty state for now
-    // since the alerts backend is not yet implemented on the firmware side.
     var feed = document.getElementById("ov-alert-feed");
-    if (feed) {
-      feed.innerHTML = '<div class="empty" style="padding:20px"><span class="empty-title">No recent alerts</span></div>';
+    if (!feed) return;
+
+    // Use already-loaded cache if available; otherwise fetch from /api/alerts
+    var history = _alertsData && _alertsData.history;
+    if (history) {
+      _renderOverviewAlertFeed(feed, history);
+    } else {
+      fetchWithTimeout("/api/alerts", {}, 10000)
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (data) {
+            _alertsData = data;
+            _renderOverviewAlertFeed(feed, data.history || []);
+          }
+        })
+        .catch(function () {});
     }
+  }
+
+  function _renderOverviewAlertFeed(feed, history) {
+    if (!history || !history.length) {
+      feed.innerHTML = '<div class="empty" style="padding:20px"><span class="empty-title">No recent alerts</span></div>';
+      return;
+    }
+    // Newest first, capped at 5 rows
+    feed.innerHTML = history.slice().reverse().slice(0, 5).map(function (h) {
+      return '<div class="alert-feed-row">' +
+        '<span class="af-time">' + esc(_relTime(h.ts)) + '</span>' +
+        '<div><div class="af-name">' + esc(h.rule_id || "") + '</div>' +
+          '<div class="af-val">' + esc(h.value !== undefined ? String(h.value) : "") + '</div></div>' +
+        '<span class="badge ' + esc(h.outcome || "ok") + '">' +
+          esc((h.outcome || "ok").toUpperCase()) + '</span>' +
+      '</div>';
+    }).join("");
   }
 
   // ── Sensor picker & dynamic card helpers ────────────────────────────────────
@@ -1013,12 +1042,23 @@
       badge.textContent = firing || "";
       badge.style.display = firing ? "" : "none";
     }
+    // Keep the topbar bell badge in sync
+    var tbadge = document.getElementById("topbar-alert-badge");
+    if (tbadge) {
+      tbadge.textContent = firing || "0";
+      tbadge.style.display = firing ? "" : "none";
+    }
   }
 
-  // Render the history feed from API data.
+  // Render the history feed from API data and update the "Last 24 h" KPI.
   function _renderAlertHistory(history) {
     var hc = document.getElementById("al-history");
     if (!hc) return;
+
+    // Count trips in the last 24 h regardless of list length
+    var cutoff = Math.floor(Date.now() / 1000) - 86400;
+    var trips24 = (history || []).filter(function (h) { return h.ts && h.ts >= cutoff; }).length;
+    setEl("al-day-trips", trips24);
 
     if (!history.length) {
       hc.innerHTML = '<div class="empty" style="padding:24px">' +

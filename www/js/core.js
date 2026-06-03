@@ -422,7 +422,12 @@ function updateFooter(d) {
   }
   if (d.heap !== undefined && d.heapTotal !== undefined) {
     setEl("footer-heap", fmtBytes(d.heap) + " / " + fmtBytes(d.heapTotal));
-    setEl("sstat-storage", fmtBytes(d.heap) + " free");
+    // sstat-storage sits under a hard-drive icon — show FS usage, not heap
+    if (d.fsUsed !== undefined && d.fsTotal !== undefined) {
+      setEl("sstat-storage", fmtBytes(d.fsUsed) + " / " + fmtBytes(d.fsTotal));
+    } else {
+      setEl("sstat-storage", fmtBytes(d.heap) + " free");
+    }
   }
   if (d.network !== undefined && d.network !== null) {
     setEl("footer-net", d.network);

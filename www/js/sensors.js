@@ -81,7 +81,7 @@ function sensorsLoad() {
 
       // Update page subtitle with live counts
       var nowMs = Date.now();
-      var errCount = d.sensors.filter(function(s) { return s.status === "error"; }).length;
+      var errCount = d.sensors.filter(function(s) { return s.status === "err" || s.status === "error"; }).length;
       var okCount  = d.sensors.filter(function(s) { return s.status === "ok"; }).length;
       var sub = document.getElementById("sensors-sub");
       if (sub) {
@@ -162,7 +162,7 @@ function sensorsLoad() {
                 ageStr = "sleeping · " + ageStr;
               }
             }
-            if (s.status === "error")    stateClass = " err";
+            if (s.status === "err" || s.status === "error") stateClass = " err";
             if (s.status === "disabled") stateClass = " dis";
 
             var badgeClass =
@@ -174,7 +174,7 @@ function sensorsLoad() {
 
             var transport = s.transport || s.type || "";
             var errChip = "";
-            if (s.status === "error" && s.status_detail) {
+            if ((s.status === "err" || s.status === "error") && s.status_detail) {
               errChip = '<div class="s-metrics"><span class="badge err" style="font-size:10px">' +
                         esc(s.status_detail) + '</span></div>';
             }
@@ -189,7 +189,7 @@ function sensorsLoad() {
             var cardName = esc(s.name) + (m && metrics.length > 1 ? " (" + esc(m) + ")" : "");
             
             html.push(
-              '<div class="sensor' + stateClass + '" data-sensor-name="' + esc((cardName + ' ' + (s.id || '')).toLowerCase().trim()) + '">' +
+              '<div class="sensor' + stateClass + '" data-sensor-name="' + esc((cardName + ' ' + (s.id || '')).toLowerCase().trim()) + '" data-sid="' + esc(s.id || '') + '">' +
                 '<div class="s-head">' +
                   '<div>' +
                     '<div class="s-name">' + cardName + '</div>' +
@@ -407,7 +407,7 @@ function sensorChartLoad() {
       if (elMin) elMin.textContent = minVal !== Infinity ? fmt(minVal) : "—";
       if (elAvg) elAvg.textContent = fmt(avgVal);
       if (elMax) elMax.textContent = maxVal !== -Infinity ? fmt(maxVal) : "—";
-      if (elPts) elPts.textContent = d1.count;
+      if (elPts) elPts.textContent = d1.count !== undefined ? d1.count : "—";
 
       var infoStr = d1.agg + " · " + d1.mode;
       if (hasDual) infoStr += " + overlay";
@@ -510,6 +510,13 @@ document.addEventListener("DOMContentLoaded", function () {
   }
   bindSensorMetricSync("sc-sensor", "sc-metric");
   bindSensorMetricSync("sc-sensor2", "sc-metric2");
+
+  // If the sensor selector already has a value (e.g. after a soft-nav back to this
+  // page), fire a synthetic change so the metric list populates immediately.
+  (function () {
+    var sel = document.getElementById("sc-sensor");
+    if (sel && sel.value) sel.dispatchEvent(new Event("change", { bubbles: true }));
+  }());
 });
 
 // ============================================================================
