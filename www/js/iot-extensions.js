@@ -414,11 +414,8 @@
 
   /** Populate Overview with real /api/latest data. */
   function populateOverview() {
-    var sub = document.getElementById("ov-sub");
-    if (sub && window.ST) {
-      var sc = (window.ST.sensorCount !== undefined ? window.ST.sensorCount : "?");
-      sub.textContent = sc + " sensors · live readings";
-    }
+    // Subtitle is updated below once getSensors() resolves — /api/status does
+    // not include a sensorCount field so we cannot read it here up-front.
 
     fetchWithTimeout("/api/latest", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -441,6 +438,9 @@
         _populateSensorPickers(sensors);
         _registerDynamicSensorCards(sensors);
         renderHealthGrid(sensors);
+        // Update subtitle now that we know the real sensor count
+        var sub = document.getElementById("ov-sub");
+        if (sub) sub.textContent = sensors.length + " sensor" + (sensors.length !== 1 ? "s" : "") + " · live readings";
       })
       .catch(function () {
         var grid = document.getElementById("health-grid");

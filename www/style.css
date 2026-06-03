@@ -1444,7 +1444,10 @@ body.deck-dragging * { cursor: grabbing !important; }
  * STICKY PAGE HEAD  —  keeps KPIs scannable on long pages
  * ════════════════════════════════════════════════════════════════════════════ */
 .page-head {
-  position: sticky; top: 0; z-index: 5;
+  /* top: calc(-1 * var(--gap)) compensates for the negative margin-top so the
+   * border-box sticks flush at the scroll-container edge (no gap where
+   * underlying content bleeds through above the stuck header). */
+  position: sticky; top: calc(-1 * var(--gap)); z-index: 5;
   background: var(--bg);
   padding: var(--gap) 0 10px;
   margin: calc(-1 * var(--gap)) 0 var(--gap);
@@ -1650,6 +1653,18 @@ body.deck-dragging * { cursor: grabbing !important; }
   .deck-edit-grid .deck-slot       { grid-column: span 1 !important; }
   .edit-spans                      { overflow-x: auto; max-width: 60vw; }
   .deck-thumb                      { height: auto; min-height: 80px; }
+
+  /* ── Cascade fix ───────────────────────────────────────────────────────────
+   * The base .sidebar{display:flex} (line ~240) and .bottomnav{display:none}
+   * (line ~276) appear AFTER the original mobile block in the file, so they
+   * win the cascade and break the mobile layout (blank .main, no bottom-nav).
+   * Repeating the overrides here — where they are last in the file — restores
+   * correct mobile behaviour.
+   * ── Rail mode: collapse to 1-col even when .sidebar-rail is active ──────── */
+  .sidebar                { display: none; }
+  .bottomnav              { display: flex; }
+  .sidebar-rail .app      { grid-template-columns: 1fr; }
+  .sidebar-rail .sidebar  { display: none; }
 }
 @media (max-width: 640px) {
   .page-title       { font-size: 18px; }
@@ -1659,6 +1674,11 @@ body.deck-dragging * { cursor: grabbing !important; }
   .deck-tray        { padding: 14px; }
   .deck-tray-chips  { gap: 6px; }
   .deck-chip        { font-size: 11px; height: 30px; }
+
+  /* Hide non-essential topbar controls on very narrow viewports to prevent
+   * horizontal overflow (6 × 44 px icon buttons + logo > 500 px minimum). */
+  #accentPicker,
+  #densityToggleBtn { display: none; }
 }
 
 /* ════════════════════════════════════════════════
