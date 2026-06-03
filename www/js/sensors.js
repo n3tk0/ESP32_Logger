@@ -81,8 +81,8 @@ function sensorsLoad() {
 
       // Update page subtitle with live counts
       var nowMs = Date.now();
-      var errCount = d.sensors.filter(function(s) { return s.status === "err" || s.status === "error"; }).length;
-      var okCount  = d.sensors.filter(function(s) { return s.status === "ok"; }).length;
+      var errCount = d.sensors.filter(function(s) { return s && (s.status === "err" || s.status === "error"); }).length;
+      var okCount  = d.sensors.filter(function(s) { return s && s.status === "ok"; }).length;
       var sub = document.getElementById("sensors-sub");
       if (sub) {
         var parts = [okCount + " active"];

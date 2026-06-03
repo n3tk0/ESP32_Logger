@@ -483,9 +483,9 @@
               "&metric=" + encodeURIComponent(metric) +
               "&from=" + from + "&to=" + now + "&agg=raw&mode=lttb&limit=40";
     return fetchWithTimeout(url, {}, 6000)
-      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function (res) {
-        if (!res || !res.data || res.data.length < 2) return;
+        if (!res || !Array.isArray(res.data) || res.data.length < 2) return;
         var min = Infinity, max = -Infinity, ys = [];
         res.data.forEach(function (pt) {
           if (pt && pt.v !== undefined) {
@@ -695,7 +695,7 @@
       _renderOverviewAlertFeed(feed, history);
     } else {
       fetchWithTimeout("/api/alerts", {}, 10000)
-        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
         .then(function (data) {
           if (data) {
             _alertsData = data;
@@ -713,6 +713,7 @@
     }
     // Newest first, capped at 5 rows
     feed.innerHTML = history.slice().reverse().slice(0, 5).map(function (h) {
+      if (!h) return "";
       return '<div class="alert-feed-row">' +
         '<span class="af-time">' + esc(_relTime(h.ts)) + '</span>' +
         '<div><div class="af-name">' + esc(h.rule_id || "") + '</div>' +
@@ -1133,7 +1134,7 @@
 
     // Count trips in the last 24 h regardless of list length
     var cutoff = Math.floor(Date.now() / 1000) - 86400;
-    var trips24 = (history || []).filter(function (h) { return h.ts && h.ts >= cutoff; }).length;
+    var trips24 = (history || []).filter(function (h) { return h && h.ts && h.ts >= cutoff; }).length;
     setEl("al-day-trips", trips24);
 
     if (!history.length) {
@@ -1214,10 +1215,13 @@
     var staleNames = [], errNames = [];
 
     grid.innerHTML = sensors.map(function (s) {
+      if (!s) return "";
       // /api/sensors nests health metrics inside s.health.*  with different
       // field names than the legacy flat layout the renderer originally expected.
       var h = s.health || {};
-      var state = s.status === "err"    ? "err"
+      // Firmware reports a failing sensor as status:"error" (SensorManager::toJson);
+      // accept "err" too for forward-compat. Otherwise errored sensors render "ok".
+      var state = (s.status === "err" || s.status === "error") ? "err"
                 : s.status === "stale"  ? "warn"
                 : s.enabled === false   ? "disabled"
                 : "ok";
@@ -1505,7 +1509,7 @@
 
     // Any cards not assigned to any zone
     var unzonedIds = Object.keys(existing).filter(function (id) {
-      return !sensors.find(function (s) { return s.id === id; });
+      return !sensors.find(function (s) { return s && s.id === id; });
     });
     var unzoned = _cardsFor(unzonedIds);
     if (unzoned.length) {

@@ -1149,9 +1149,15 @@ function dlDeleteFile(path) {
       "/delete?path=" + encodeURIComponent(path) + "&storage=internal&csrf=" + encodeURIComponent(token),
       { method: "POST" },
       30000
-    ).then(function () {
+    ).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      showToast("File deleted", path, "ok");
       dlLoadFiles();
+    }).catch(function (err) {
+      showToast("Delete failed", (err && err.message) || "Network error", "err");
     });
+  }).catch(function () {
+    showToast("Delete failed", "Could not get CSRF token", "err");
   });
 }
 
