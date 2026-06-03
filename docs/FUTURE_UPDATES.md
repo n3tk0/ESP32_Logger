@@ -61,6 +61,7 @@ Track planned improvements and known gaps here. Check off items when completed.
 - [x] Add soil_moisture sensor to platform_config.json example
 - [x] DS18B20 multi-sensor support (up to 8 sensors on one OneWire bus)
 - [x] VEML7700 lux calibration support (CalibrationAxis _calLux + _calWhite)
+- [x] BME680/688 IAQ air-quality index (humidity + self-calibrating gas baseline; heuristic, no BSEC) + `bme680` plugin id
 
 ---
 

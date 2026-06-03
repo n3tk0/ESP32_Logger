@@ -1452,7 +1452,8 @@
 
     var typeCards = [
       ["bme280",  "thermometer",     "BME280",    "I2C · T/H/P"],
-      ["bme688",  "thermometer-sun", "BME688",    "I2C · 4-in-1"],
+      ["bme688",  "thermometer-sun", "BME688",    "I2C · T/H/P/gas/IAQ"],
+      ["bme680",  "thermometer-sun", "BME680",    "I2C · T/H/P/gas/IAQ"],
       ["sds011",  "cloud-fog",       "SDS011",    "UART · PM2.5/10"],
       ["pms5003", "cloud-fog",       "PMS5003",   "UART · PM1/2.5/10"],
       ["sgp30",   "wind",            "SGP30",     "I2C · TVOC/eCO₂"],

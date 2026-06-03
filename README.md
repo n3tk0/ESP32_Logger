@@ -41,7 +41,7 @@ Toggled via `#ifdef SENSOR_*_ENABLED` in `src/setup.h`. Default build enables on
 | Macro | Sensor | Interface |
 |---|---|---|
 | `SENSOR_BME280_ENABLED` | BME280/BMP280 temp/humidity/pressure | I2C |
-| `SENSOR_BME688_ENABLED` | BME680/688 + gas resistance | I2C |
+| `SENSOR_BME688_ENABLED` | BME680/688 temp/humidity/pressure + gas + IAQ | I2C |
 | `SENSOR_DS18B20_ENABLED` | DS18B20 temperature (1-Wire) | GPIO |
 | `SENSOR_SDS011_ENABLED` | SDS011 PM2.5/PM10 | UART |
 | `SENSOR_PMS5003_ENABLED` | PMS5003 PM1/2.5/10 | UART |

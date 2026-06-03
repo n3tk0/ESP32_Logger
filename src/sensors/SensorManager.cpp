@@ -161,7 +161,8 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
     int pushed = 0;
     uint32_t ms = millis();
 
-    SensorReading readings[4];
+    // Up to 6 metrics per sensor per tick (BME68x emits 5: T/H/P/gas/IAQ).
+    SensorReading readings[6];
 
     // R14 / AUDIT 3.19 + 15.3: hold configMutex for the read iteration so
     // a concurrent reloadConfig() can't _destroyAll() the sensor pointer
@@ -193,12 +194,12 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                 continue;
             }
             t0us = micros();
-            n = s->readAll(readings, 4);
+            n = s->readAll(readings, 6);
             latUs = (uint32_t)(micros() - t0us);
             // wg releases wireMutex here, before health tracking
         } else {
             t0us = micros();
-            n = s->readAll(readings, 4);
+            n = s->readAll(readings, 6);
             latUs = (uint32_t)(micros() - t0us);
         }
 
