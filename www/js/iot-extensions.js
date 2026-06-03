@@ -459,7 +459,7 @@
         if (binding && s.id === binding) { envSensor = s; return; }
         if (!binding && !envSensor && s.readings &&
             (s.id.indexOf("bme") !== -1 || s.id.indexOf("env") !== -1 ||
-             s.type === "bme280" || s.type === "bme688")) {
+             s.type === "bme280" || s.type === "bme688" || s.type === "bme680")) {
           envSensor = s;
         }
       });
