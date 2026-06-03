@@ -834,7 +834,7 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
   background:var(--accent-soft); color:var(--accent);
   font-size:10px; font-family:var(--mono); font-weight:700;
   border-radius:11px; letter-spacing:.05em; text-transform:uppercase;
-  margin-top:6px;
+  /* margin-top removed — was pulling the pill below the flex baseline */
 }
 .mode-pill [data-icon] { width:11px; height:11px; }
 

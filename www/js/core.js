@@ -403,6 +403,12 @@ function applyStatus(d) {
   //   footer-version: Board: <chip> – Firmware: <version>
   updateFooter(d);
 
+  // Topbar logo-meta: chip model · IP address (matches design spec)
+  var logoMeta = document.getElementById("logo-meta");
+  if (logoMeta && (d.chip || d.ip)) {
+    logoMeta.textContent = (d.chip || "ESP32") + " · " + (d.ip || "--");
+  }
+
   // Mobile header
   setEl("headerNet", d.network);
   var timePart = (d.time || "").split(" ")[1] || d.time || "--:--";
