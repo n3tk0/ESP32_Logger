@@ -1457,24 +1457,9 @@ body.deck-dragging * { cursor: grabbing !important; }
 .page-actions-deck { display: contents; }
 
 /* ════════════════════════════════════════════════════════════════════════════
- * STICKY PAGE HEAD  —  keeps KPIs scannable on long pages
+ * PAGE HEAD  —  scrolls with the page content (intentionally NOT sticky).
+ * Layout is governed by the base .page-head rule above.
  * ════════════════════════════════════════════════════════════════════════════ */
-.page-head {
-  /* top: calc(-1 * var(--gap)) compensates for the negative margin-top so the
-   * border-box sticks flush at the scroll-container edge (no gap where
-   * underlying content bleeds through above the stuck header). */
-  position: sticky; top: calc(-1 * var(--gap)); z-index: 5;
-  background: var(--bg);
-  padding: var(--gap) 0 10px;
-  margin: calc(-1 * var(--gap)) 0 var(--gap);
-  border-bottom: 1px solid transparent;
-  transition: border-color .12s, box-shadow .12s;
-}
-.page-head.is-stuck {
-  border-bottom-color: var(--border);
-  box-shadow: 0 1px 0 var(--bg), 0 4px 12px rgba(15,20,25,.04);
-}
-[data-theme="dark"] .page-head.is-stuck { box-shadow: 0 1px 0 var(--bg), 0 4px 12px rgba(0,0,0,.3); }
 
 /* ════════════════════════════════════════════════════════════════════════════
  * ACCENT PICKER  (topbar popup)

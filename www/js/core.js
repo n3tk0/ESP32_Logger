@@ -576,11 +576,12 @@ document.addEventListener("click", function (e) {
   }
 })();
 
-// ── Sticky page-head shadow observer ───────────────────────────────────────
-// IntersectionObserver detects when the page-head is "stuck" (its top has
-// scrolled past the main container's top edge) and adds .is-stuck so the
-// CSS can paint a divider + soft shadow.  Avoids the scroll-handler tax.
+// ── Sticky page-head shadow observer (DISABLED) ─────────────────────────────
+// Page headers intentionally scroll with the content now, so the .is-stuck
+// observer below is short-circuited. Kept for history; the early return makes
+// it a no-op without removing the surrounding structure.
 (function _stickyPageHead() {
+  return; // page-head is non-sticky — observer disabled
   if (typeof IntersectionObserver === "undefined") return;
   // Re-attach observers when nav changes the active page.  We don't know
   // the exact moment .page-head is mounted, so use a MutationObserver on
