@@ -81,8 +81,8 @@ function sensorsLoad() {
 
       // Update page subtitle with live counts
       var nowMs = Date.now();
-      var errCount = d.sensors.filter(function(s) { return s.status === "error"; }).length;
-      var okCount  = d.sensors.filter(function(s) { return s.status === "ok"; }).length;
+      var errCount = d.sensors.filter(function(s) { return s && (s.status === "err" || s.status === "error"); }).length;
+      var okCount  = d.sensors.filter(function(s) { return s && s.status === "ok"; }).length;
       var sub = document.getElementById("sensors-sub");
       if (sub) {
         var parts = [okCount + " active"];
@@ -162,7 +162,7 @@ function sensorsLoad() {
                 ageStr = "sleeping · " + ageStr;
               }
             }
-            if (s.status === "error")    stateClass = " err";
+            if (s.status === "err" || s.status === "error") stateClass = " err";
             if (s.status === "disabled") stateClass = " dis";
 
             var badgeClass =
@@ -172,9 +172,15 @@ function sensorsLoad() {
               s.status === "ok" ? "OK" :
               s.status === "disabled" ? "OFF" : "ERR";
 
-            var transport = s.transport || s.type || "";
+            // Only show transport if it adds information beyond the type/id the
+            // user already sees.  "sds011 · sds011" is redundant; "sds011 · UART1" is useful.
+            var rawTransport = s.transport || "";
+            var transport = (rawTransport && rawTransport !== s.id && rawTransport !== s.type)
+                            ? rawTransport : "";
+
+            // s-metrics: error detail chip only (each metric is its own card)
             var errChip = "";
-            if (s.status === "error" && s.status_detail) {
+            if ((s.status === "err" || s.status === "error") && s.status_detail) {
               errChip = '<div class="s-metrics"><span class="badge err" style="font-size:10px">' +
                         esc(s.status_detail) + '</span></div>';
             }
@@ -189,12 +195,12 @@ function sensorsLoad() {
             var cardName = esc(s.name) + (m && metrics.length > 1 ? " (" + esc(m) + ")" : "");
             
             html.push(
-              '<div class="sensor' + stateClass + '" data-sensor-name="' + esc((cardName + ' ' + (s.id || '')).toLowerCase().trim()) + '">' +
+              '<div class="sensor' + stateClass + '" data-sensor-name="' + esc((cardName + ' ' + (s.id || '')).toLowerCase().trim()) + '" data-sid="' + esc(s.id || '') + '">' +
                 '<div class="s-head">' +
                   '<div>' +
                     '<div class="s-name">' + cardName + '</div>' +
                     '<div class="s-id">' + esc(s.id) +
-                      (transport ? ' · ' + esc(transport) : '') + '</div>' +
+                      (transport ? ' · ' + esc(transport) : (s.type && s.type !== s.id ? ' · ' + esc(s.type) : '')) + '</div>' +
                   '</div>' +
                   '<span class="badge ' + badgeClass + '">' + badgeText + '</span>' +
                 '</div>' +
@@ -206,7 +212,7 @@ function sensorsLoad() {
                 errChip +
                 '<div class="s-foot">' +
                   '<span style="color:' + ageColor + '">' + ageIcon + ' ' + ageStr + '</span>' +
-                  '<span>' + esc(transport) + '</span>' +
+                  (transport ? '<span>' + esc(transport) + '</span>' : '') +
                 '</div>' +
               '</div>'
             );
@@ -407,7 +413,7 @@ function sensorChartLoad() {
       if (elMin) elMin.textContent = minVal !== Infinity ? fmt(minVal) : "—";
       if (elAvg) elAvg.textContent = fmt(avgVal);
       if (elMax) elMax.textContent = maxVal !== -Infinity ? fmt(maxVal) : "—";
-      if (elPts) elPts.textContent = d1.count;
+      if (elPts) elPts.textContent = d1.count !== undefined ? d1.count : "—";
 
       var infoStr = d1.agg + " · " + d1.mode;
       if (hasDual) infoStr += " + overlay";
@@ -510,6 +516,13 @@ document.addEventListener("DOMContentLoaded", function () {
   }
   bindSensorMetricSync("sc-sensor", "sc-metric");
   bindSensorMetricSync("sc-sensor2", "sc-metric2");
+
+  // If the sensor selector already has a value (e.g. after a soft-nav back to this
+  // page), fire a synthetic change so the metric list populates immediately.
+  (function () {
+    var sel = document.getElementById("sc-sensor");
+    if (sel && sel.value) sel.dispatchEvent(new Event("change", { bubbles: true }));
+  }());
 });
 
 // ============================================================================

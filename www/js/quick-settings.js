@@ -180,11 +180,13 @@
     var st = window.ST || {};
     var cfg = window.CFG || {};
     set("hostname", st.hostname || (cfg.device && cfg.device.hostname) || "—");
-    set("wifi",     st.ssid     || st.wifi     || "—");
+    // /api/status uses "network" for the SSID+band label (e.g. "MonkeyNet:2")
+    set("wifi",     st.network  || st.ssid     || st.wifi  || "—");
     set("ip",       st.ip       || "—");
     set("mode",     (cfg.platform && cfg.platform.mode) || document.documentElement.dataset.mode || "—");
     set("fw",       st.version  || st.fw       || "—");
-    set("uptime",   formatUptime(st.uptime));
+    // /api/status has no uptime-in-seconds field; show boot count instead
+    set("uptime",   st.boot !== undefined ? "Boot #" + st.boot : formatUptime(st.uptime));
     set("heap",     st.heap     ? (st.heap + " B") : "—");
   }
 

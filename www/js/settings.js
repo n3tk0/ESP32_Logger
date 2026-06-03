@@ -1144,10 +1144,20 @@ function dlLoadFiles() {
 // Uses storage=internal explicitly — matches original failsafe fix
 function dlDeleteFile(path) {
   if (!confirm("Delete " + path + "?")) return;
-  fetchWithTimeout("/delete?path=" + encodeURIComponent(path) + "&storage=internal", {
-    method: "POST",
-  }, 30000).then(function () {
-    dlLoadFiles();
+  getCsrfToken().then(function (token) {
+    fetchWithTimeout(
+      "/delete?path=" + encodeURIComponent(path) + "&storage=internal&csrf=" + encodeURIComponent(token),
+      { method: "POST" },
+      30000
+    ).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      showToast("File deleted", path, "ok");
+      dlLoadFiles();
+    }).catch(function (err) {
+      showToast("Delete failed", (err && err.message) || "Network error", "err");
+    });
+  }).catch(function () {
+    showToast("Delete failed", "Could not get CSRF token", "err");
   });
 }
 

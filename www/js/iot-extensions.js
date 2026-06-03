@@ -229,9 +229,9 @@
           '</div>' +
           '<div class="card-body">' +
             '<div class="grid grid-3" style="gap:10px" id="ov-env-kpis">' +
-              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="thermometer"></span> Temp</div><div class="kpi-v"><span class="num" id="ov-temp">—</span><span class="unit">°C</span></div><div class="kpi-d" id="ov-temp-d">—</div></div>' +
-              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="droplet"></span> Humidity</div><div class="kpi-v"><span class="num" id="ov-hum">—</span><span class="unit">%</span></div><div class="kpi-d" id="ov-hum-d">—</div></div>' +
-              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="gauge"></span> Pressure</div><div class="kpi-v"><span class="num" id="ov-pres">—</span><span class="unit">hPa</span></div><div class="kpi-d" id="ov-pres-d">—</div></div>' +
+              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="thermometer"></span> Temp</div><div class="kpi-v"><span class="num" id="ov-temp">—</span><span class="unit">°C</span></div><div class="kpi-d" id="ov-temp-d">—</div><svg class="metric-spark-bg" id="ov-temp-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg></div>' +
+              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="droplet"></span> Humidity</div><div class="kpi-v"><span class="num" id="ov-hum">—</span><span class="unit">%</span></div><div class="kpi-d" id="ov-hum-d">—</div><svg class="metric-spark-bg" id="ov-hum-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg></div>' +
+              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="gauge"></span> Pressure</div><div class="kpi-v"><span class="num" id="ov-pres">—</span><span class="unit">hPa</span></div><div class="kpi-d" id="ov-pres-d">—</div><svg class="metric-spark-bg" id="ov-pres-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg></div>' +
             '</div>' +
           '</div>' +
         '</div>';
@@ -414,11 +414,8 @@
 
   /** Populate Overview with real /api/latest data. */
   function populateOverview() {
-    var sub = document.getElementById("ov-sub");
-    if (sub && window.ST) {
-      var sc = (window.ST.sensorCount !== undefined ? window.ST.sensorCount : "?");
-      sub.textContent = sc + " sensors · live readings";
-    }
+    // Subtitle is updated below once getSensors() resolves — /api/status does
+    // not include a sensorCount field so we cannot read it here up-front.
 
     fetchWithTimeout("/api/latest", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -441,6 +438,9 @@
         _populateSensorPickers(sensors);
         _registerDynamicSensorCards(sensors);
         renderHealthGrid(sensors);
+        // Update subtitle now that we know the real sensor count
+        var sub = document.getElementById("ov-sub");
+        if (sub) sub.textContent = sensors.length + " sensor" + (sensors.length !== 1 ? "s" : "") + " · live readings";
       })
       .catch(function () {
         var grid = document.getElementById("health-grid");
@@ -449,6 +449,73 @@
           grid.appendChild(emptyState({ icon: "heart-pulse", title: "Unable to load", msg: "Could not reach /api/sensors." }));
         }
       });
+  }
+
+  // ── Background sparkline drawer for Overview metric tiles ──────────────────
+  // Throttled worker pool — the ESP's connection pool is tiny, so we keep at
+  // most OV_SPARK_MAX /api/data requests in flight. Each placeholder is drawn
+  // once per (sensor::metric); the dataset guard avoids refetching on every poll.
+  var _ovSparkQueue = [];
+  var _ovSparkActive = 0;
+  var OV_SPARK_MAX = 2;
+
+  function _ovQueueSpark(svg, sensorId, metric) {
+    if (!svg || !sensorId || !metric) return;
+    var key = sensorId + "::" + metric;
+    if (svg.dataset.drawnFor === key) return;  // already drawn for this binding
+    svg.dataset.drawnFor = key;
+    _ovSparkQueue.push({ svg: svg, sensorId: sensorId, metric: metric });
+    _ovSparkPump();
+  }
+
+  function _ovSparkPump() {
+    while (_ovSparkActive < OV_SPARK_MAX && _ovSparkQueue.length) {
+      var job = _ovSparkQueue.shift();
+      _ovSparkActive++;
+      _ovFetchSpark(job.svg, job.sensorId, job.metric)
+        .then(function () { _ovSparkActive--; _ovSparkPump(); });
+    }
+  }
+
+  function _ovFetchSpark(svg, sensorId, metric) {
+    var now = Math.floor(Date.now() / 1000), from = now - 3600;
+    var url = "/api/data?sensor=" + encodeURIComponent(sensorId) +
+              "&metric=" + encodeURIComponent(metric) +
+              "&from=" + from + "&to=" + now + "&agg=raw&mode=lttb&limit=40";
+    return fetchWithTimeout(url, {}, 6000)
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (res) {
+        if (!res || !Array.isArray(res.data) || res.data.length < 2) return;
+        var min = Infinity, max = -Infinity, ys = [];
+        res.data.forEach(function (pt) {
+          if (pt && pt.v !== undefined) {
+            var v = Number(pt.v);
+            if (!isNaN(v)) { if (v < min) min = v; if (v > max) max = v; ys.push(v); }
+          }
+        });
+        if (ys.length < 2) return;
+        var range = max - min; if (range < 1e-9) range = 1;
+        var stepX = 100 / (ys.length - 1), line = "", area = "M 0,36";
+        for (var j = 0; j < ys.length; j++) {
+          var x = (j * stepX).toFixed(1);
+          var y = (34 - ((ys[j] - min) / range) * 30).toFixed(1);
+          line += (j ? " " : "") + x + "," + y;
+          area += " L " + x + "," + y;
+        }
+        area += " L 100,36 Z";
+        svg.innerHTML =
+          '<path d="' + area + '" fill="currentColor" opacity="0.13"></path>' +
+          '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1" opacity="0.55" vector-effect="non-scaling-stroke"></polyline>';
+      })
+      .catch(function () { svg.dataset.drawnFor = ""; });  // allow retry on failure
+  }
+
+  // Scan the overview deck for dynamic-card spark placeholders and draw them.
+  function ovDrawCardSparks() {
+    var nodes = document.querySelectorAll(".ov-card-spark[data-sensor]");
+    [].forEach.call(nodes, function (svg) {
+      _ovQueueSpark(svg, svg.getAttribute("data-sensor"), svg.getAttribute("data-metric"));
+    });
   }
 
   function ovFillEnvironment(data) {
@@ -472,6 +539,13 @@
     if (t && r.temperature !== undefined) t.textContent = r.temperature.toFixed(1);
     if (h && r.humidity !== undefined) h.textContent = Math.round(r.humidity);
     if (p && r.pressure !== undefined) p.textContent = Math.round(r.pressure);
+
+    // Draw background sparklines now that the bound sensor id is known
+    if (envSensor.id) {
+      _ovQueueSpark(document.getElementById("ov-temp-spark"), envSensor.id, "temperature");
+      _ovQueueSpark(document.getElementById("ov-hum-spark"),  envSensor.id, "humidity");
+      _ovQueueSpark(document.getElementById("ov-pres-spark"), envSensor.id, "pressure");
+    }
   }
 
   function ovFillEnergy(data) {
@@ -612,12 +686,42 @@
   }
 
   function ovFillAlertFeed() {
-    // This would ideally fetch from /api/alerts; use empty state for now
-    // since the alerts backend is not yet implemented on the firmware side.
     var feed = document.getElementById("ov-alert-feed");
-    if (feed) {
-      feed.innerHTML = '<div class="empty" style="padding:20px"><span class="empty-title">No recent alerts</span></div>';
+    if (!feed) return;
+
+    // Use already-loaded cache if available; otherwise fetch from /api/alerts
+    var history = _alertsData && _alertsData.history;
+    if (history) {
+      _renderOverviewAlertFeed(feed, history);
+    } else {
+      fetchWithTimeout("/api/alerts", {}, 10000)
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (data) {
+          if (data) {
+            _alertsData = data;
+            _renderOverviewAlertFeed(feed, data.history || []);
+          }
+        })
+        .catch(function () {});
     }
+  }
+
+  function _renderOverviewAlertFeed(feed, history) {
+    if (!history || !history.length) {
+      feed.innerHTML = '<div class="empty" style="padding:20px"><span class="empty-title">No recent alerts</span></div>';
+      return;
+    }
+    // Newest first, capped at 5 rows
+    feed.innerHTML = history.slice().reverse().slice(0, 5).map(function (h) {
+      if (!h) return "";
+      return '<div class="alert-feed-row">' +
+        '<span class="af-time">' + esc(_relTime(h.ts)) + '</span>' +
+        '<div><div class="af-name">' + esc(h.rule_id || "") + '</div>' +
+          '<div class="af-val">' + esc(h.value !== undefined ? String(h.value) : "") + '</div></div>' +
+        '<span class="badge ' + esc(h.outcome || "ok") + '">' +
+          esc((h.outcome || "ok").toUpperCase()) + '</span>' +
+      '</div>';
+    }).join("");
   }
 
   // ── Sensor picker & dynamic card helpers ────────────────────────────────────
@@ -672,7 +776,7 @@
     sensors.forEach(function (s) {
       if (!s || s.status === "disabled") return;
       (s.metrics || []).forEach(function (m) {
-        valid["sensor__" + s.id + "__" + m] = { name: s.name || s.id, metric: m };
+        valid["sensor__" + s.id + "__" + m] = { name: s.name || s.id, metric: m, id: s.id };
       });
     });
 
@@ -692,7 +796,7 @@
     Object.keys(valid).forEach(function (cardId) {
       if (OVERVIEW_REGISTRY[cardId]) return;
       changed++;
-      var sName = valid[cardId].name, m = valid[cardId].metric;
+      var sName = valid[cardId].name, m = valid[cardId].metric, sId = valid[cardId].id;
       OVERVIEW_REGISTRY[cardId] = {
         title: sName + " · " + m,
         icon: _metricIcon(m),
@@ -703,11 +807,10 @@
               '<span class="mono" style="font-size:11px;color:var(--text-3)">' + esc(sName) + '</span>' +
             '</div>' +
             '<div class="card-body ov-metric-body">' +
-              '<div>' +
-                '<div class="ov-metric-value" id="ov-sm-' + esc(cardId) + '-v">—</div>' +
-                '<div class="ov-metric-unit" id="ov-sm-' + esc(cardId) + '-u"></div>' +
-              '</div>' +
+              '<span class="ov-metric-value" id="ov-sm-' + esc(cardId) + '-v">—</span>' +
+              '<span class="ov-metric-unit" id="ov-sm-' + esc(cardId) + '-u"></span>' +
             '</div>' +
+            '<svg class="metric-spark-bg ov-card-spark" data-sensor="' + esc(sId) + '" data-metric="' + esc(m) + '" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg>' +
           '</div>';
         },
       };
@@ -755,6 +858,9 @@
       }
       if (uEl && it.unit) uEl.textContent = it.unit;
     });
+
+    // Draw background sparklines for any dynamic sensor-metric cards on the deck
+    ovDrawCardSparks();
   }
 
   // ── Alerts page ────────────────────────────────────────────────────────────
@@ -1013,12 +1119,23 @@
       badge.textContent = firing || "";
       badge.style.display = firing ? "" : "none";
     }
+    // Keep the topbar bell badge in sync
+    var tbadge = document.getElementById("topbar-alert-badge");
+    if (tbadge) {
+      tbadge.textContent = firing || "0";
+      tbadge.style.display = firing ? "" : "none";
+    }
   }
 
-  // Render the history feed from API data.
+  // Render the history feed from API data and update the "Last 24 h" KPI.
   function _renderAlertHistory(history) {
     var hc = document.getElementById("al-history");
     if (!hc) return;
+
+    // Count trips in the last 24 h regardless of list length
+    var cutoff = Math.floor(Date.now() / 1000) - 86400;
+    var trips24 = (history || []).filter(function (h) { return h && h.ts && h.ts >= cutoff; }).length;
+    setEl("al-day-trips", trips24);
 
     if (!history.length) {
       hc.innerHTML = '<div class="empty" style="padding:24px">' +
@@ -1098,13 +1215,27 @@
     var staleNames = [], errNames = [];
 
     grid.innerHTML = sensors.map(function (s) {
-      var state = s.error ? "err" : s.stale ? "warn" : s.disabled ? "disabled" : "ok";
-      var uptime = s.uptime_pct !== undefined ? s.uptime_pct : (state === "err" ? 0 : state === "warn" ? 80 : 99);
-      var reads   = s.reads   || 0;
-      var errors  = s.errors  || 0;
-      var retries = s.retries || 0;
-      var avgLat  = s.avg_latency_ms !== undefined ? s.avg_latency_ms.toFixed(1) + " ms" : "—";
-      var lastSeen = s.age_s !== undefined ? s.age_s + "s ago" : "—";
+      if (!s) return "";
+      // /api/sensors nests health metrics inside s.health.*  with different
+      // field names than the legacy flat layout the renderer originally expected.
+      var h = s.health || {};
+      // Firmware reports a failing sensor as status:"error" (SensorManager::toJson);
+      // accept "err" too for forward-compat. Otherwise errored sensors render "ok".
+      var state = (s.status === "err" || s.status === "error") ? "err"
+                : s.status === "stale"  ? "warn"
+                : s.enabled === false   ? "disabled"
+                : "ok";
+      var uptime  = h.uptime_pct_24h  !== undefined ? h.uptime_pct_24h
+                  : (state === "err" ? 0 : state === "warn" ? 80 : 99);
+      var reads   = h.reads_24h   || 0;
+      var errors  = h.errors_24h  || 0;
+      // API has no explicit retry counter; surface lifetime error_count instead.
+      var retries = s.error_count  || 0;
+      // avg_latency_us is in microseconds — convert to ms for display.
+      var avgLat  = h.avg_latency_us !== undefined
+                  ? (h.avg_latency_us / 1000).toFixed(2) + " ms" : "—";
+      var lastSeen = h.last_read_ms_ago !== undefined
+                  ? Math.round(h.last_read_ms_ago / 1000) + "s ago" : "—";
 
       if (state === "ok")   upCount++;
       if (state === "warn") { staleCount++; staleNames.push(s.id); }
@@ -1327,10 +1458,13 @@
       zoneMap[z].push(s.id);
     });
 
-    // Collect existing sensor cards by data-sid attribute
+    // Collect existing sensor cards by data-sid attribute.
+    // Multiple cards can share the same data-sid (one per metric), so keep an array.
     var existing = {};
     grid.querySelectorAll("[data-sid]").forEach(function (c) {
-      existing[c.dataset.sid] = c;
+      var sid = c.dataset.sid;
+      if (!existing[sid]) existing[sid] = [];
+      existing[sid].push(c);
     });
 
     if (!Object.keys(existing).length) return;
@@ -1341,9 +1475,19 @@
 
     var ZONE_ICONS = { indoor:"home", outdoor:"sun", utility:"wrench", other:"grid" };
 
+    // Helper: flatten arrays of cards for a list of sensor ids
+    function _cardsFor(ids) {
+      return ids.reduce(function (acc, id) {
+        return existing[id] ? acc.concat(existing[id]) : acc;
+      }, []);
+    }
+
     Object.keys(zoneMap).forEach(function (zone) {
-      var cards = zoneMap[zone].map(function (id) { return existing[id]; }).filter(Boolean);
+      var cards = _cardsFor(zoneMap[zone]);
       if (!cards.length) return;
+
+      // Sensor count = unique data-sid values in this zone
+      var uniqueIds = zoneMap[zone].filter(function (id) { return existing[id]; });
 
       var sec = document.createElement("div");
       sec.className = "zone-section";
@@ -1353,28 +1497,28 @@
             '<span data-icon="' + (ZONE_ICONS[zone] || "grid") + '"></span>' +
             zone.charAt(0).toUpperCase() + zone.slice(1) +
           '</div>' +
-          '<div class="zone-meta">' + cards.length + ' sensor' + (cards.length !== 1 ? 's' : '') + '</div>' +
+          '<div class="zone-meta">' + uniqueIds.length + ' sensor' + (uniqueIds.length !== 1 ? 's' : '') + '</div>' +
         '</div>' +
         '<div class="sensors-grid zone-cards"></div>';
 
       var cardGrid = sec.querySelector(".zone-cards");
       cards.forEach(function (c) { cardGrid.appendChild(c); });
 
-      // Sensors without a zone entry go to "other" implicitly
       grid.appendChild(sec);
     });
 
-    // Any cards not assigned to a zone
-    var unzoned = Object.keys(existing).filter(function (id) {
-      return !sensors.find(function (s) { return s.id === id; });
-    }).map(function (id) { return existing[id]; }).filter(Boolean);
+    // Any cards not assigned to any zone
+    var unzonedIds = Object.keys(existing).filter(function (id) {
+      return !sensors.find(function (s) { return s && s.id === id; });
+    });
+    var unzoned = _cardsFor(unzonedIds);
     if (unzoned.length) {
       var sec2 = document.createElement("div");
       sec2.className = "zone-section";
       sec2.innerHTML =
         '<div class="zone-head">' +
           '<div class="zone-title"><span data-icon="grid"></span> Other</div>' +
-          '<div class="zone-meta">' + unzoned.length + ' sensor' + (unzoned.length !== 1 ? 's' : '') + '</div>' +
+          '<div class="zone-meta">' + unzonedIds.length + ' sensor' + (unzonedIds.length !== 1 ? 's' : '') + '</div>' +
         '</div>' +
         '<div class="sensors-grid zone-cards"></div>';
       var cg2 = sec2.querySelector(".zone-cards");

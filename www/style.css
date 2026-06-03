@@ -834,7 +834,7 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
   background:var(--accent-soft); color:var(--accent);
   font-size:10px; font-family:var(--mono); font-weight:700;
   border-radius:11px; letter-spacing:.05em; text-transform:uppercase;
-  margin-top:6px;
+  /* margin-top removed — was pulling the pill below the flex baseline */
 }
 .mode-pill [data-icon] { width:11px; height:11px; }
 
@@ -888,14 +888,30 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 
 /* ── Dynamic sensor metric card (overview library) ── */
 .ov-metric-body {
-  display:flex; align-items:center; justify-content:center;
-  padding:20px; text-align:center;
+  display:flex; align-items:baseline; justify-content:flex-start; gap:5px;
+  padding:16px 14px 22px;
 }
 .ov-metric-value {
-  font-family:var(--mono); font-size:32px; font-weight:700;
+  font-family:var(--mono); font-size:28px; font-weight:600;
   letter-spacing:-.02em; line-height:1;
 }
-.ov-metric-unit { font-size:12px; color:var(--text-3); margin-top:4px; }
+.ov-metric-unit { font-size:12px; color:var(--text-3); }
+
+/* ── Background sparkline behind Overview metric tiles ──
+   Mirrors the Sensors-page card look: a faint filled graph anchored to the
+   bottom of the card, with the value/label text floating on top. */
+.metric-spark-bg {
+  position:absolute; left:0; right:0; bottom:0;
+  width:100%; height:62%;
+  color:var(--accent);
+  pointer-events:none; z-index:0;
+}
+.ov-metric-card { position:relative; }
+/* Keep card text above the background graph */
+.kpi > .kpi-l, .kpi > .kpi-v, .kpi > .kpi-d,
+.ov-metric-card > .card-head, .ov-metric-card > .ov-metric-body {
+  position:relative; z-index:1;
+}
 
 /* ── Energy tiles ── */
 .energy-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
@@ -1441,21 +1457,9 @@ body.deck-dragging * { cursor: grabbing !important; }
 .page-actions-deck { display: contents; }
 
 /* ════════════════════════════════════════════════════════════════════════════
- * STICKY PAGE HEAD  —  keeps KPIs scannable on long pages
+ * PAGE HEAD  —  scrolls with the page content (intentionally NOT sticky).
+ * Layout is governed by the base .page-head rule above.
  * ════════════════════════════════════════════════════════════════════════════ */
-.page-head {
-  position: sticky; top: 0; z-index: 5;
-  background: var(--bg);
-  padding: var(--gap) 0 10px;
-  margin: calc(-1 * var(--gap)) 0 var(--gap);
-  border-bottom: 1px solid transparent;
-  transition: border-color .12s, box-shadow .12s;
-}
-.page-head.is-stuck {
-  border-bottom-color: var(--border);
-  box-shadow: 0 1px 0 var(--bg), 0 4px 12px rgba(15,20,25,.04);
-}
-[data-theme="dark"] .page-head.is-stuck { box-shadow: 0 1px 0 var(--bg), 0 4px 12px rgba(0,0,0,.3); }
 
 /* ════════════════════════════════════════════════════════════════════════════
  * ACCENT PICKER  (topbar popup)
@@ -1650,6 +1654,18 @@ body.deck-dragging * { cursor: grabbing !important; }
   .deck-edit-grid .deck-slot       { grid-column: span 1 !important; }
   .edit-spans                      { overflow-x: auto; max-width: 60vw; }
   .deck-thumb                      { height: auto; min-height: 80px; }
+
+  /* ── Cascade fix ───────────────────────────────────────────────────────────
+   * The base .sidebar{display:flex} (line ~240) and .bottomnav{display:none}
+   * (line ~276) appear AFTER the original mobile block in the file, so they
+   * win the cascade and break the mobile layout (blank .main, no bottom-nav).
+   * Repeating the overrides here — where they are last in the file — restores
+   * correct mobile behaviour.
+   * ── Rail mode: collapse to 1-col even when .sidebar-rail is active ──────── */
+  .sidebar                { display: none; }
+  .bottomnav              { display: flex; }
+  .sidebar-rail .app      { grid-template-columns: 1fr; }
+  .sidebar-rail .sidebar  { display: none; }
 }
 @media (max-width: 640px) {
   .page-title       { font-size: 18px; }
@@ -1659,6 +1675,11 @@ body.deck-dragging * { cursor: grabbing !important; }
   .deck-tray        { padding: 14px; }
   .deck-tray-chips  { gap: 6px; }
   .deck-chip        { font-size: 11px; height: 30px; }
+
+  /* Hide non-essential topbar controls on very narrow viewports to prevent
+   * horizontal overflow (6 × 44 px icon buttons + logo > 500 px minimum). */
+  #accentPicker,
+  #densityToggleBtn { display: none; }
 }
 
 /* ════════════════════════════════════════════════

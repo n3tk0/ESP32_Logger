@@ -403,6 +403,12 @@ function applyStatus(d) {
   //   footer-version: Board: <chip> – Firmware: <version>
   updateFooter(d);
 
+  // Topbar logo-meta: chip model · IP address (matches design spec)
+  var logoMeta = document.getElementById("logo-meta");
+  if (logoMeta && (d.chip || d.ip)) {
+    logoMeta.textContent = (d.chip || "ESP32") + " · " + (d.ip || "--");
+  }
+
   // Mobile header
   setEl("headerNet", d.network);
   var timePart = (d.time || "").split(" ")[1] || d.time || "--:--";
@@ -422,7 +428,12 @@ function updateFooter(d) {
   }
   if (d.heap !== undefined && d.heapTotal !== undefined) {
     setEl("footer-heap", fmtBytes(d.heap) + " / " + fmtBytes(d.heapTotal));
-    setEl("sstat-storage", fmtBytes(d.heap) + " free");
+    // sstat-storage sits under a hard-drive icon — show FS usage, not heap
+    if (d.fsUsed !== undefined && d.fsTotal !== undefined) {
+      setEl("sstat-storage", fmtBytes(d.fsUsed) + " / " + fmtBytes(d.fsTotal));
+    } else {
+      setEl("sstat-storage", fmtBytes(d.heap) + " free");
+    }
   }
   if (d.network !== undefined && d.network !== null) {
     setEl("footer-net", d.network);
@@ -565,11 +576,12 @@ document.addEventListener("click", function (e) {
   }
 })();
 
-// ── Sticky page-head shadow observer ───────────────────────────────────────
-// IntersectionObserver detects when the page-head is "stuck" (its top has
-// scrolled past the main container's top edge) and adds .is-stuck so the
-// CSS can paint a divider + soft shadow.  Avoids the scroll-handler tax.
+// ── Sticky page-head shadow observer (DISABLED) ─────────────────────────────
+// Page headers intentionally scroll with the content now, so the .is-stuck
+// observer below is short-circuited. Kept for history; the early return makes
+// it a no-op without removing the surrounding structure.
 (function _stickyPageHead() {
+  return; // page-head is non-sticky — observer disabled
   if (typeof IntersectionObserver === "undefined") return;
   // Re-attach observers when nav changes the active page.  We don't know
   // the exact moment .page-head is mounted, so use a MutationObserver on
