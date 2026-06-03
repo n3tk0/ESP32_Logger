@@ -1119,16 +1119,81 @@ void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/ota/confirm",       HTTP_POST, handleOtaConfirm);
     server.on("/api/ota/rollback",      HTTP_POST, handleOtaRollback);
 
-    // Pass 5 phase 3: generic module CRUD
-    server.on("/api/modules", HTTP_GET, handleApiModulesIndex);
+    // Pass 5 5.5 phase 1 — WiFi-specific helpers. Registered BEFORE the generic
+    // per-module routes below: the fork prefix-matches, so the per-module GET
+    // "/api/modules/wifi" would otherwise swallow "/api/modules/wifi/scan" and
+    // "/api/modules/wifi/test". Only registered when the wifi module is present
+    // so stripped-down builds don't pay the flash cost.
+    if (moduleRegistry.getById("wifi")) {
+        server.on("/api/modules/wifi/scan", HTTP_GET,  handleApiWifiScan);
+        server.on("/api/modules/wifi/test", HTTP_GET,  handleApiWifiTestPoll);
+        server.on("/api/modules/wifi/test", HTTP_POST,
+            [](AsyncWebServerRequest* r) { /* auth + body handled in onBody below */ },
+            nullptr,
+            [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
+               size_t index, size_t total) {
+                if (index != 0 || len != total) {
+                    r->send(413, "application/json",
+                            "{\"ok\":false,\"error\":\"body too large\"}");
+                    return;
+                }
+                handleApiWifiTest(r, data, len);
+            });
+    }
 
-    // Per-module routes (ESPAsyncWebServer does exact-match only; iterating is
-    // cheap with MAX_MODULES = 16).  POST uses onBody so the full JSON payload
-    // is buffered before the dispatcher runs.  ESPAsyncWebServer copies the
-    // URL string internally, so a stack-local String is fine here.
+    // Pass 5 phase 3: generic module CRUD.
+    //
+    // IMPORTANT — route ordering vs. prefix matching:
+    // The esphome ESPAsyncWebServer fork PREFIX-matches handlers
+    // (canHandle ≈ `url == uri || url.startsWith(uri + "/")`), NOT exact-match
+    // as an earlier comment here assumed. Handlers are tried in registration
+    // order and the first whose canHandle() passes wins, so MORE-SPECIFIC paths
+    // MUST be registered BEFORE shorter ones:
+    //   • "/api/modules" registered first would swallow "/api/modules/<id>" —
+    //     the detail/form GET would return the whole index array, so the UI
+    //     shows "no configurable form".
+    //   • "/api/modules/<id>" registered before "<id>/enable" / "<id>/restart"
+    //     would swallow those POSTs.
+    // Hence: per-module enable/restart first, then "/api/modules/<id>", and the
+    // "/api/modules" index LAST.
     for (int i = 0; i < moduleRegistry.count(); i++) {
         String base = String("/api/modules/") + moduleRegistry.get(i)->getId();
+
+        // POST /api/modules/:id/enable — flip a module without the full config
+        // blob. Registered first so it isn't shadowed by /api/modules/:id POST.
+        String enablePath = base + "/enable";
+        server.on(enablePath.c_str(), HTTP_POST, [](AsyncWebServerRequest* r) {
+            String url = r->url();
+            String id = url.substring(strlen("/api/modules/"));
+            // Strip query string before the suffix check — a URL like
+            // /api/modules/wifi/enable?on=1 would otherwise leave the query in
+            // `id` and break the endsWith.
+            int q = id.indexOf('?');
+            if (q >= 0) id.remove(q);
+            if (id.endsWith("/enable")) id.remove(id.length() - strlen("/enable"));
+            handleApiModuleEnable(r, id);
+        });
+
+        // R20 — POST /api/modules/:id/restart — stop() + start() without
+        // changing the enabled flag. restartRequired=true means start() can't
+        // hot-restart from a web handler (e.g. WiFi) — caller POSTs /restart.
+        String restartPath = base + "/restart";
+        server.on(restartPath.c_str(), HTTP_POST, [](AsyncWebServerRequest* r) {
+            String url = r->url();
+            String id = url.substring(strlen("/api/modules/"));
+            int q = id.indexOf('?');
+            if (q >= 0) id.remove(q);
+            if (id.endsWith("/restart")) id.remove(id.length() - strlen("/restart"));
+            handleApiModuleRestart(r, id);
+        });
+
+        // GET /api/modules/:id — detail object + PROGMEM schema (drives the form)
         server.on(base.c_str(), HTTP_GET, handleApiModulesDispatch);
+
+        // POST /api/modules/:id — save {enabled, config}. Body buffered via
+        // onBody. Registered AFTER enable/restart so it doesn't prefix-swallow
+        // them. ESPAsyncWebServer copies the URL internally, so stack-local
+        // Strings are fine here.
         server.on(base.c_str(), HTTP_POST,
             [](AsyncWebServerRequest* r) { /* auth + body handled in onBody below */ },
             nullptr,
@@ -1147,41 +1212,11 @@ void registerApiRoutes(AsyncWebServer& server) {
                 int q = id.indexOf('?'); if (q >= 0) id.remove(q);
                 handleApiModuleUpdate(r, id, data, len);
             });
-
-        // Dedicated enable/disable endpoint — lets the UI flip a module
-        // without sending the whole config blob.
-        String enablePath = base + "/enable";
-        server.on(enablePath.c_str(), HTTP_POST, [](AsyncWebServerRequest* r) {
-            String url = r->url();
-            const char* prefix = "/api/modules/";
-            String id = url.substring(strlen(prefix));
-            // Strip query string before the suffix check — a URL like
-            // /api/modules/wifi/enable?on=1 would otherwise leave the
-            // query in `id` and break the endsWith.
-            int q = id.indexOf('?');
-            if (q >= 0) id.remove(q);
-            if (id.endsWith("/enable")) id.remove(id.length() - strlen("/enable"));
-            handleApiModuleEnable(r, id);
-        });
-
-        // R20 — POST /api/modules/:id/restart
-        // Calls module.stop() + start() without changing the enabled flag.
-        // restartRequired=true in the response means start() reported it
-        // can't be hot-restarted from a web handler (e.g. WiFi); the caller
-        // should POST /restart for a device reboot.
-        String restartPath = base + "/restart";
-        server.on(restartPath.c_str(), HTTP_POST, [](AsyncWebServerRequest* r) {
-            String url = r->url();
-            const char* prefix = "/api/modules/";
-            String id = url.substring(strlen(prefix));
-            // Query-string strip — Gemini HIGH on PR #97. Same fix as
-            // /enable above.
-            int q = id.indexOf('?');
-            if (q >= 0) id.remove(q);
-            if (id.endsWith("/restart")) id.remove(id.length() - strlen("/restart"));
-            handleApiModuleRestart(r, id);
-        });
     }
+
+    // Index LAST — the per-module GET routes above must be tried first so
+    // "/api/modules/<id>" resolves to the detail handler, not this index.
+    server.on("/api/modules", HTTP_GET, handleApiModulesIndex);
 
     // Alert engine endpoints (4.2 — new IoT features)
     server.on("/api/alerts",        HTTP_GET,  handleApiAlertsGet);
@@ -1215,24 +1250,4 @@ void registerApiRoutes(AsyncWebServer& server) {
             }
             handleApiAlertsSnooze(r, data, len);
         });
-
-    // Pass 5 5.5 phase 1 — WiFi-specific helpers.  Registered only when the
-    // wifi module is present so stripped-down builds don't pay the flash cost.
-    // All three endpoints are fully async-safe (see handler comments).
-    if (moduleRegistry.getById("wifi")) {
-        server.on("/api/modules/wifi/scan", HTTP_GET,  handleApiWifiScan);
-        server.on("/api/modules/wifi/test", HTTP_GET,  handleApiWifiTestPoll);
-        server.on("/api/modules/wifi/test", HTTP_POST,
-            [](AsyncWebServerRequest* r) { /* auth + body handled in onBody below */ },
-            nullptr,
-            [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
-               size_t index, size_t total) {
-                if (index != 0 || len != total) {
-                    r->send(413, "application/json",
-                            "{\"ok\":false,\"error\":\"body too large\"}");
-                    return;
-                }
-                handleApiWifiTest(r, data, len);
-            });
-    }
 }

@@ -48,6 +48,9 @@
 //#ifndef SENSOR_PMS5003_ENABLED
 //#  define SENSOR_PMS5003_ENABLED      // PMS5003 PM (UART)
 //#endif
+//#ifndef SENSOR_SPS30_ENABLED
+//#  define SENSOR_SPS30_ENABLED        // Sensirion SPS30 PM1/2.5/4/10 (I2C)
+//#endif
 //#ifndef SENSOR_ENS160_ENABLED
 //#  define SENSOR_ENS160_ENABLED       // ENS160 air quality (I2C)
 //#endif

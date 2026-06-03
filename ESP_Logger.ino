@@ -32,7 +32,7 @@
  *   ESPAsyncWebServer           (esphome/lacamera)>= 3.1   -> WebServer
  *   AsyncTCP                    (me-no-dev)       >= 1.1   -> WebServer
  *
- * Всички сензорни драйвери (BME280, BME688, DS18B20, SDS011, PMS5003, ENS160,
+ * Всички сензорни драйвери (BME280, BME688, DS18B20, SDS011, PMS5003, SPS30, ENS160,
  * SGP30, SCD4x, VEML6075, VEML7700, BH1750, HC-SR04, ZMPT101B, ZMCT103C,
  * WaterFlow, Rain, Wind, Soil) са вградени mini drivers — НЕ изискват
  * допълнителни библиотеки. MQTT използва вграден lightweight клиент.
@@ -83,6 +83,9 @@
 #endif
 #ifdef SENSOR_PMS5003_ENABLED
 #  include "src/sensors/plugins/PMS5003Sensor.h"
+#endif
+#ifdef SENSOR_SPS30_ENABLED
+#  include "src/sensors/plugins/SPS30Sensor.h"
 #endif
 #ifdef SENSOR_WATERFLOW_ENABLED
 #  include "src/sensors/plugins/WaterFlowSensor.h"   // replaces YFS201Sensor (YF-S201 + YF-S403)
@@ -377,6 +380,9 @@ static void _initPlatform() {
 #endif
 #ifdef SENSOR_PMS5003_ENABLED
     sensorManager.registerPlugin("pms5003", []()->ISensor*{ return new PMS5003Sensor(); });
+#endif
+#ifdef SENSOR_SPS30_ENABLED
+    sensorManager.registerPlugin("sps30",   []()->ISensor*{ return new SPS30Sensor(); });
 #endif
 #ifdef SENSOR_ENS160_ENABLED
     sensorManager.registerPlugin("ens160",  []()->ISensor*{ return new ENS160Sensor(); });
