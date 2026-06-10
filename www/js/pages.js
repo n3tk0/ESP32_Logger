@@ -209,7 +209,7 @@ function dbLoadCards() {
   if (loading) loading.style.display = "";
   grid.style.display = "none";
 
-  fetch("/api/sensors")
+  fetchWithTimeout("/api/sensors", {}, 15000)
     .then(function (r) { return r.json(); })
     .then(function (d) {
       var sensors = (d && d.sensors) || [];
@@ -695,6 +695,29 @@ function dbExportCSV() {
   URL.revokeObjectURL(url);
 }
 
+// Export the dashboard uPlot canvas as a PNG. uPlot draws axes + series on a
+// single canvas (the DOM legend is excluded); we composite it onto an opaque
+// background so dark-mode exports don't come out transparent.
+function dbExportPNG() {
+  var src = dbChart && dbChart.ctx && dbChart.ctx.canvas;
+  if (!src) {
+    showToast("No chart to export — load data first", "error");
+    return;
+  }
+  var out = document.createElement("canvas");
+  out.width = src.width;
+  out.height = src.height;
+  var ctx = out.getContext("2d");
+  var panel = getComputedStyle(document.documentElement).getPropertyValue("--panel").trim();
+  ctx.fillStyle = panel || "#ffffff";
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(src, 0, 0);
+  var a = document.createElement("a");
+  a.download = (ST.deviceId || "logger") + "_chart_" + new Date().toISOString().slice(0, 10) + ".png";
+  a.href = out.toDataURL("image/png");
+  a.click();
+}
+
 // ============================================================================
 // ══ PAGE: FILES ══
 // ============================================================================
@@ -1013,10 +1036,9 @@ function filesApplyMove() {
 // from the SSE snapshot — the log feed is a tail buffer, not a stream).
 // ============================================================================
 function liveInit() {
+  // Only live-chip exists in the markup — the old live-cpu/live-ip/live-net
+  // setEl calls wrote to non-existent IDs and were removed.
   if (ST.chip) setEl("live-chip", ST.chip);
-  if (ST.cpu) setEl("live-cpu", ST.cpu);
-  if (ST.ip) setEl("live-ip", ST.ip);
-  if (ST.network) setEl("live-net", ST.network);
 
   var hint = document.getElementById("stateHint");
   if (hint) {
@@ -1112,6 +1134,12 @@ function liveUpdate() {
     .finally(function () { _liveInFlight = false; });
 }
 
+// Rolling flow-rate history for the Current-cycle chart (pulses/tick deltas)
+var _liveFlowBuf = [];
+var _liveFlowPrevPulses = null;
+var _liveRingState = null;   // state name when the countdown started
+var _liveRingTotal = 0;      // initial stateRemaining for that state
+
 function liveRender(d) {
   if (!d) return;
   var conn = document.getElementById("conn");
@@ -1149,6 +1177,48 @@ function liveRender(d) {
   if (remEl)
     remEl.textContent = d.stateRemaining >= 0 ? d.stateRemaining + "s" : "-";
 
+  // State-machine countdown ring. Total duration isn't in the payload, so we
+  // capture the first stateRemaining seen after each state change and treat it
+  // as 100%. Ring empties as the countdown runs; full when no timer is active.
+  var ring = document.getElementById("stateRing");
+  if (ring) {
+    var rem = +d.stateRemaining;
+    if (!(rem >= 0)) {
+      _liveRingState = null;
+      ring.setAttribute("stroke-dashoffset", "0");        // idle: full ring
+    } else {
+      if (d.state !== _liveRingState || rem > _liveRingTotal) {
+        _liveRingState = d.state;
+        _liveRingTotal = rem || 1;
+      }
+      var frac = Math.max(0, Math.min(1, rem / _liveRingTotal));
+      ring.setAttribute("stroke-dashoffset", String(Math.round(150 * (1 - frac))));
+    }
+  }
+
+  // Current-cycle flow chart: plot pulses-per-tick deltas as a rolling line.
+  var flow = document.getElementById("flowPath");
+  if (flow) {
+    var pulses = +d.pulses || 0;
+    var delta = _liveFlowPrevPulses === null ? 0 : pulses - _liveFlowPrevPulses;
+    _liveFlowPrevPulses = pulses;
+    if (delta < 0) delta = 0;                  // counter reset = new cycle
+    _liveFlowBuf.push(delta);
+    if (_liveFlowBuf.length > 60) _liveFlowBuf.shift();
+    var peak = 1;
+    for (var fi = 0; fi < _liveFlowBuf.length; fi++)
+      if (_liveFlowBuf[fi] > peak) peak = _liveFlowBuf[fi];
+    var n = _liveFlowBuf.length, fpts = "";
+    var fstep = n > 1 ? 600 / (n - 1) : 600;
+    for (var fj = 0; fj < n; fj++) {
+      var fx = (fj * fstep).toFixed(1);
+      var fy = (70 - (_liveFlowBuf[fj] / peak) * 60).toFixed(1);
+      fpts += (fj ? " " : "") + fx + "," + fy;
+    }
+    if (n === 1) fpts += " 600," + (70 - (_liveFlowBuf[0] / peak) * 60).toFixed(1);
+    flow.setAttribute("points", fpts);
+  }
+
   liveBtn("live-ff",   d.ff,   "Pressed", "Released", "live-on",   "live-idle");
   liveBtn("live-pf",   d.pf,   "Pressed", "Released", "live-on",   "live-idle");
   liveBtn("live-wifi", d.wifi, "Pressed", "Released", "live-wifi", "live-idle");
@@ -1179,6 +1249,7 @@ registerHandlers({
   dbLoadData: dbLoadData,
   dbApplyFilters: dbApplyFilters,
   dbExportCSV: dbExportCSV,
+  dbExportPNG: dbExportPNG,
   filesSetStorage: filesSetStorage,
   filesEnterDir: filesEnterDir,
   filesGoUp: filesGoUp,
@@ -1250,17 +1321,18 @@ function _liveLogsRender() {
   html +=
     '<tr style="background:var(--bg)"><th style="padding:6px;text-align:left">Time</th><th>Trigger</th><th>Volume</th><th>+FF</th><th>+PF</th></tr>';
   rows.forEach(function (l) {
+    var trig = String(l.trigger || "");   // log rows may lack a trigger field
     var color =
-      l.trigger.indexOf("FF") >= 0
+      trig.indexOf("FF") >= 0
         ? ffC
-        : l.trigger.indexOf("PF") >= 0
+        : trig.indexOf("PF") >= 0
           ? pfC
           : otC;
     var bg = hexToRgba(color, 0.15);
     html +=
       '<tr style="background:' + bg + '">' +
       '<td style="padding:6px">' + esc(l.time) + "</td>" +
-      '<td style="color:' + color + ';font-weight:bold;text-align:center">' + esc(l.trigger) + "</td>" +
+      '<td style="color:' + color + ';font-weight:bold;text-align:center">' + esc(trig) + "</td>" +
       '<td style="text-align:center">' + esc(l.volume) + "</td>" +
       '<td style="text-align:center">' + esc(l.ff) + "</td>" +
       '<td style="text-align:center">' + esc(l.pf) + "</td></tr>";
