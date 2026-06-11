@@ -210,7 +210,10 @@ function dbLoadCards() {
   grid.style.display = "none";
 
   fetchWithTimeout("/api/sensors", {}, 15000)
-    .then(function (r) { return r.json(); })
+    .then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
     .then(function (d) {
       var sensors = (d && d.sensors) || [];
       // Each sensor exposes one or more metrics — we render one card per

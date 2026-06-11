@@ -1230,17 +1230,31 @@
   }
 
   function _ruleModalSave() {
-    var name   = (document.getElementById("rule-name").value || "").trim();
-    var sensor = document.getElementById("rule-sensor").value;
-    var metric = document.getElementById("rule-metric").value;
-    var op     = document.getElementById("rule-op").value;
-    var valStr = document.getElementById("rule-value").value;
-    var dur    = parseInt(document.getElementById("rule-duration").value, 10) || 0;
+    var nameEl   = document.getElementById("rule-name");
+    var sensorEl = document.getElementById("rule-sensor");
+    var metricEl = document.getElementById("rule-metric");
+    var opEl     = document.getElementById("rule-op");
+    var valEl    = document.getElementById("rule-value");
+    var durEl    = document.getElementById("rule-duration");
+    var toastEl  = document.getElementById("rule-act-toast");
+    var mqttEl   = document.getElementById("rule-act-mqtt");
+    if (!sensorEl || !metricEl || !valEl) {
+      showToast("Error", "Rule form is missing — reopen the dialog", "err");
+      return;
+    }
+    var name   = ((nameEl && nameEl.value) || "").trim();
+    var sensor = sensorEl.value;
+    var metric = metricEl.value;
+    var op     = (opEl && opEl.value) || ">";
+    var valStr = valEl.value;
+    // min="0" on the input doesn't stop typed negatives (no native form
+    // submit) — clamp so duration_s never goes negative into the uint32.
+    var dur    = Math.max(0, parseInt((durEl && durEl.value) || "0", 10) || 0);
     if (!sensor || !metric) { showToast("Missing field", "Pick a sensor and metric", "warn"); return; }
     if (valStr === "" || isNaN(+valStr)) { showToast("Missing field", "Enter a numeric threshold", "warn"); return; }
     var actions = [];
-    if (document.getElementById("rule-act-toast").checked) actions.push("toast");
-    if (document.getElementById("rule-act-mqtt").checked)  actions.push("mqtt");
+    if (toastEl && toastEl.checked) actions.push("toast");
+    if (mqttEl && mqttEl.checked)   actions.push("mqtt");
     if (!actions.length) actions = ["toast"];   // matches the firmware default
 
     // id must fit the firmware's 16-char field: short slug + base36 suffix
@@ -1258,8 +1272,14 @@
     var btn = document.getElementById("rule-save");
     if (btn) btn.disabled = true;
 
+    // Non-ok GET must throw — a parseable error body ({ok:false,...}) would
+    // otherwise be treated as the rules doc and the POST below would replace
+    // the device's entire rule set with just the new rule.
     (_alertsData ? Promise.resolve(_alertsData)
-                 : fetchWithTimeout("/api/alerts", {}, 15000).then(function (r) { return r.json(); }))
+                 : fetchWithTimeout("/api/alerts", {}, 15000).then(function (r) {
+                     if (!r.ok) throw new Error("HTTP " + r.status);
+                     return r.json();
+                   }))
       .then(function (data) {
         _alertsData = data || { rules: [], history: [] };
         _alertsData.rules = _alertsData.rules || [];
