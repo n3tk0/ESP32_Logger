@@ -946,7 +946,7 @@
         '</div>' +
         '<div class="page-actions">' +
           '<div class="page-actions-deck" data-role="deck-toolbar"></div>' +
-          '<button class="btn primary"><span data-icon="plus"></span> New rule</button>' +
+          '<button class="btn primary" data-click="alNewRule"><span data-icon="plus"></span> New rule</button>' +
         '</div>' +
       '</div>' +
       '<div class="deck" id="alerts-deck"></div>';
@@ -1152,6 +1152,164 @@
         '<span class="badge ' + esc(h.outcome || "ok") + '">' + esc((h.outcome || "ok").toUpperCase()) + '</span>' +
       '</div>';
     }).join("");
+  }
+
+  // ── "New rule" editor modal ────────────────────────────────────────────────
+  // Whole-document replace: firmware's POST /api/alerts re-parses doc["rules"]
+  // and persists, so we append locally and post the full array back.
+  var ALERT_MAX_RULES = 8;   // mirrors firmware ALERT_MAX_RULES
+
+  function _ruleModalClose() {
+    var ov = document.getElementById("rule-modal");
+    if (ov) ov.remove();
+    document.removeEventListener("keydown", _ruleModalEsc);
+  }
+  function _ruleModalEsc(e) { if (e.key === "Escape") _ruleModalClose(); }
+
+  function alNewRule() {
+    if (_alertsData && (_alertsData.rules || []).length >= ALERT_MAX_RULES) {
+      showToast("Rule limit reached", "Firmware stores at most " + ALERT_MAX_RULES + " rules — delete one first", "warn");
+      return;
+    }
+    _ruleModalClose();
+    var ov = document.createElement("div");
+    ov.className = "popup-overlay active";
+    ov.id = "rule-modal";
+    ov.innerHTML =
+      '<div class="popup-content" style="width:min(480px,92vw)" role="dialog" aria-modal="true" aria-label="New alert rule">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">' +
+          '<div style="font-weight:600;display:flex;align-items:center;gap:8px"><span data-icon="bell-plus"></span> New rule</div>' +
+          '<button type="button" class="btn-mini" id="rule-cancel-x" aria-label="Close"><span data-icon="x"></span></button>' +
+        '</div>' +
+        '<div class="form-grid">' +
+          '<div class="field" style="grid-column:1/-1"><label>Rule name</label><input class="input" id="rule-name" maxlength="32" placeholder="e.g. High PM2.5"></div>' +
+          '<div class="field"><label>Sensor</label><select class="input" id="rule-sensor"><option value="">Loading…</option></select></div>' +
+          '<div class="field"><label>Metric</label><select class="input" id="rule-metric"><option value="">— metric —</option></select></div>' +
+          '<div class="field"><label>Condition</label><select class="input" id="rule-op">' +
+            '<option value="&gt;">above (&gt;)</option><option value="&gt;=">at or above (&ge;)</option>' +
+            '<option value="&lt;">below (&lt;)</option><option value="&lt;=">at or below (&le;)</option>' +
+            '<option value="==">equals (=)</option></select></div>' +
+          '<div class="field"><label>Threshold value</label><input class="input mono" id="rule-value" type="number" step="any" placeholder="0.0"></div>' +
+          '<div class="field"><label>Sustained for (s)</label><input class="input mono" id="rule-duration" type="number" min="0" step="1" value="0"><div class="hint">0 = trigger immediately</div></div>' +
+          '<div class="field"><label>Actions</label><div style="display:flex;gap:14px;align-items:center;height:34px">' +
+            '<label class="check"><input type="checkbox" id="rule-act-toast" checked><span>Toast</span></label>' +
+            '<label class="check"><input type="checkbox" id="rule-act-mqtt"><span>MQTT</span></label></div></div>' +
+        '</div>' +
+        '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">' +
+          '<button type="button" class="btn" id="rule-cancel">Cancel</button>' +
+          '<button type="button" class="btn primary" id="rule-save"><span data-icon="check"></span> Create rule</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    reIcons(ov);
+    document.addEventListener("keydown", _ruleModalEsc);
+    ov.addEventListener("click", function (e) { if (e.target === ov) _ruleModalClose(); });
+    document.getElementById("rule-cancel").addEventListener("click", _ruleModalClose);
+    document.getElementById("rule-cancel-x").addEventListener("click", _ruleModalClose);
+
+    // Sensor dropdown + dependent metric dropdown
+    var sensorSel = document.getElementById("rule-sensor");
+    var metricSel = document.getElementById("rule-metric");
+    var sensorsCache = [];
+    getSensors().then(function (d) {
+      sensorsCache = (d && d.sensors) || [];
+      sensorSel.innerHTML = '<option value="">— sensor —</option>' + sensorsCache.map(function (s) {
+        return '<option value="' + esc(s.id) + '">' + esc(s.name || s.id) + '</option>';
+      }).join("");
+    }).catch(function () {
+      sensorSel.innerHTML = '<option value="">(failed to load sensors)</option>';
+    });
+    sensorSel.addEventListener("change", function () {
+      var s = sensorsCache.filter(function (x) { return x.id === sensorSel.value; })[0];
+      metricSel.innerHTML = (s && s.metrics && s.metrics.length)
+        ? s.metrics.map(function (m) { return '<option value="' + esc(m) + '">' + esc(m) + '</option>'; }).join("")
+        : '<option value="">— metric —</option>';
+    });
+
+    document.getElementById("rule-save").addEventListener("click", _ruleModalSave);
+  }
+
+  function _ruleModalSave() {
+    var nameEl   = document.getElementById("rule-name");
+    var sensorEl = document.getElementById("rule-sensor");
+    var metricEl = document.getElementById("rule-metric");
+    var opEl     = document.getElementById("rule-op");
+    var valEl    = document.getElementById("rule-value");
+    var durEl    = document.getElementById("rule-duration");
+    var toastEl  = document.getElementById("rule-act-toast");
+    var mqttEl   = document.getElementById("rule-act-mqtt");
+    if (!sensorEl || !metricEl || !valEl) {
+      showToast("Error", "Rule form is missing — reopen the dialog", "err");
+      return;
+    }
+    var name   = ((nameEl && nameEl.value) || "").trim();
+    var sensor = sensorEl.value;
+    var metric = metricEl.value;
+    var op     = (opEl && opEl.value) || ">";
+    var valStr = valEl.value;
+    // min="0" on the input doesn't stop typed negatives (no native form
+    // submit) — clamp so duration_s never goes negative into the uint32.
+    var dur    = Math.max(0, parseInt((durEl && durEl.value) || "0", 10) || 0);
+    if (!sensor || !metric) { showToast("Missing field", "Pick a sensor and metric", "warn"); return; }
+    if (valStr === "" || isNaN(+valStr)) { showToast("Missing field", "Enter a numeric threshold", "warn"); return; }
+    var actions = [];
+    if (toastEl && toastEl.checked) actions.push("toast");
+    if (mqttEl && mqttEl.checked)   actions.push("mqtt");
+    if (!actions.length) actions = ["toast"];   // matches the firmware default
+
+    // id must fit the firmware's 16-char field: short slug + base36 suffix
+    var slug = (name || metric).toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 9);
+    var id = (slug || "rule") + "_" + Date.now().toString(36).slice(-5);
+
+    var rule = {
+      id: id,
+      name: name || (sensor + "." + metric + " " + op + " " + valStr),
+      enabled: true, snooze_until: 0,
+      expr: { sensor: sensor, metric: metric, op: op, value: +valStr, duration_s: dur },
+      actions: actions,
+    };
+
+    var btn = document.getElementById("rule-save");
+    if (btn) btn.disabled = true;
+
+    // Non-ok GET must throw — a parseable error body ({ok:false,...}) would
+    // otherwise be treated as the rules doc and the POST below would replace
+    // the device's entire rule set with just the new rule.
+    (_alertsData ? Promise.resolve(_alertsData)
+                 : fetchWithTimeout("/api/alerts", {}, 15000).then(function (r) {
+                     if (!r.ok) throw new Error("HTTP " + r.status);
+                     return r.json();
+                   }))
+      .then(function (data) {
+        _alertsData = data || { rules: [], history: [] };
+        _alertsData.rules = _alertsData.rules || [];
+        if (_alertsData.rules.length >= ALERT_MAX_RULES) throw new Error("Rule limit reached (" + ALERT_MAX_RULES + ")");
+        _alertsData.rules.push(rule);
+        return getCsrfToken();
+      })
+      .then(function (token) {
+        var url = "/api/alerts" + (token ? "?csrf=" + encodeURIComponent(token) : "");
+        return fetchWithTimeout(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rules: _alertsData.rules }),
+        }, 30000);
+      })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error || "save failed");
+        _ruleModalClose();
+        _renderAlertRules(_alertsData.rules);
+        showToast("Rule created", rule.name, "ok");
+      })
+      .catch(function (e) {
+        // Roll back the optimistic append so a retry doesn't duplicate
+        if (_alertsData && _alertsData.rules) {
+          _alertsData.rules = _alertsData.rules.filter(function (r2) { return r2.id !== rule.id; });
+        }
+        if (btn) btn.disabled = false;
+        showToast("Save failed", (e && e.message) || "Could not reach device", "err");
+      });
   }
 
   // Format a unix timestamp as a relative time string ("3 min ago", "2 h ago").
@@ -1917,7 +2075,7 @@
   }
 
   // Register openWizard / closeWizard in the handler registry
-  registerHandlers({ openSensorWizard: openWizard, clAddSensor: openWizard });
+  registerHandlers({ openSensorWizard: openWizard, clAddSensor: openWizard, alNewRule: alNewRule });
 
   // ─── Keyboard shortcuts for new pages (G O / G A) ─────────────────────────
   // core.js already handles G+D/L/S/F/C/U. We hook the same keydown so the
