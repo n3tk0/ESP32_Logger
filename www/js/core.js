@@ -904,7 +904,6 @@ function navigateTo(page) {
       });
 
     pageInit(page);
-    applySettingsFlash();
   });
 }
 
@@ -1267,6 +1266,21 @@ var PAGE_MSG_IDS = {
 function settingsSave(ev, url, form, restart) {
   if (ev) ev.preventDefault();
 
+  // Pending state: disable the submit button + swap its label for a spinner
+  // while the ESP round-trip is in flight (guards against double-submits on
+  // slow links). Restart-flagged saves keep the spinner — the device is
+  // rebooting and the restart flow owns the rest of the UX.
+  var submitBtn = form && form.querySelector('button[type="submit"]');
+  function setPending(on) {
+    if (!submitBtn) return;
+    submitBtn.disabled = on;
+    submitBtn.classList.toggle("btn-loading", on);
+  }
+  function msgIdForPage() {
+    return PAGE_MSG_IDS[currentPage] ||
+      currentPage.replace("settings_", "") + "-msg";
+  }
+
   function doPost(token, isRetry) {
     var fd = new FormData(form);
     if (token) fd.append("csrf", token);
@@ -1280,57 +1294,50 @@ function settingsSave(ev, url, form, restart) {
         getCsrfToken().then(function (t) { doPost(t, true); });
         return;
       }
+      setPending(false);
       try {
         var r = JSON.parse(xhr.responseText);
-        var msgId =
-          PAGE_MSG_IDS[currentPage] ||
-          currentPage.replace("settings_", "") + "-msg";
         if (r.ok) {
-          sessionStorage.setItem(
-            "settingsFlash",
-            JSON.stringify({
-              page: currentPage,
-              html: "<div class='alert alert-success'>✅ Settings saved successfully</div>",
-            }),
-          );
-          setTimeout(function () { location.reload(); }, 300);
+          // No full-page reload: the form already shows what was saved.
+          // Confirm via toast, then re-sync the shared caches (CFG +
+          // /api/status) and app chrome that other pages read from.
+          showToast("Settings saved", "ok");
+          fetchWithTimeout("/export_settings")
+            .then(function (res) { return res.json(); })
+            .then(function (cfg) { CFG = cfg; })
+            .catch(function () {});
+          getStatus({ maxAgeMs: 0 })
+            .then(function (d) { applyStatus(d); })
+            .catch(function () {});
         } else {
           showMsg(
-            msgId,
-            "<div class='alert alert-error'>❌ " +
+            msgIdForPage(),
+            "<div class='alert alert-error'>" +
               esc(r.error || "Unknown error") + "</div>",
             true,
           );
         }
-      } catch (e) {}
+      } catch (e) {
+        showMsg(
+          msgIdForPage(),
+          "<div class='alert alert-error'>Malformed response from device</div>",
+          true,
+        );
+      }
     };
     xhr.onerror = function () {
-      var msgId =
-        PAGE_MSG_IDS[currentPage] ||
-        currentPage.replace("settings_", "") + "-msg";
+      setPending(false);
       showMsg(
-        msgId,
-        "<div class='alert alert-error'>❌ Network error</div>",
+        msgIdForPage(),
+        "<div class='alert alert-error'>Network error — settings not saved</div>",
         true,
       );
     };
     xhr.send(fd);
   }
 
+  setPending(true);
   getCsrfToken().then(function (token) { doPost(token, false); });
-}
-
-function applySettingsFlash() {
-  var raw = sessionStorage.getItem("settingsFlash");
-  if (!raw) return;
-  sessionStorage.removeItem("settingsFlash");
-  try {
-    var f = JSON.parse(raw);
-    if (!f || !f.page || !f.html) return;
-    var msgId =
-      PAGE_MSG_IDS[f.page] || f.page.replace("settings_", "") + "-msg";
-    showMsg(msgId, f.html, true);
-  } catch (e) {}
 }
 
 // ============================================================================

@@ -67,8 +67,9 @@ function dbLoadUPlot(cb) {
     }
   }
 
-  // Stylesheet: try preferred source, fall back to the other on error.
-  // Best-effort — uPlot renders without its CSS (just loses some grid styling).
+  // Stylesheet: best-effort — uPlot renders without its CSS (just loses some
+  // grid styling). CDN mode falls back to the local copy; Local mode never
+  // reaches out to the internet.
   var link = document.createElement("link");
   link.rel  = "stylesheet";
   link.href = preferLocal ? localCss : cdnCss;
@@ -77,28 +78,23 @@ function dbLoadUPlot(cb) {
     link.crossOrigin = "anonymous";
   }
   link.onerror = function () {
-    var fallbackCss = preferLocal ? cdnCss : localCss;
-    if (fallbackCss && link.href !== fallbackCss) {
-      var link2 = document.createElement("link");
-      link2.rel  = "stylesheet";
-      link2.href = fallbackCss;
-      if (fallbackCss === cdnCss) {
-        link2.integrity   = CDN_CSS_SRI;
-        link2.crossOrigin = "anonymous";
-      }
-      document.head.appendChild(link2);
-    }
+    if (preferLocal) return;
+    var link2 = document.createElement("link");
+    link2.rel  = "stylesheet";
+    link2.href = localCss;
+    document.head.appendChild(link2);
   };
   document.head.appendChild(link);
 
-  // Always try local first; fall back to CDN only on 404 (local missing).
+  // Script: always try the local copy first (faster, works in captive-portal
+  // AP mode). The jsdelivr CDN is used only when the user explicitly selected
+  // "CDN" in Theme → Chart source — a missing local file no longer triggers a
+  // silent external request against the Local (default) preference.
   var s = document.createElement("script");
   s.src = localSrc;
   s.onload = fire;
   s.onerror = function () {
-    var isOffline = (ST.wifi === "ap") || (CFG.network && CFG.network.wifiMode === 0);
-    if (isOffline) {
-      showToast("Offline AP mode: upload uPlot.iife.min.js(.gz) to LittleFS.", "error");
+    if (preferLocal) {
       _giveUp();
       return;
     }
