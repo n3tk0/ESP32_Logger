@@ -154,7 +154,7 @@ function changelogLoad() {
           html +=
             '<div style="margin-top:.5rem;padding:.5rem;border-radius:4px;' +
             (isCur
-              ? "background:var(--primary);color:#fff"
+              ? "background:var(--accent);color:var(--accent-fg)"
               : "background:var(--border);color:var(--text-muted)") +
             '">' +
             "<strong>" +
@@ -2105,7 +2105,28 @@ function modulesSelect(id) { Modules.select(id); }
 // Enrol markup-reachable handlers.  See core.js::Handlers for the whitelist
 // rationale.  modulesInit is called internally by pageInit, not via markup,
 // so it is left out here.
+// Settings-hub filter — #settings-search shipped with no handler, so typing
+// in it did nothing. Matches card title/description text; hides sections
+// whose cards all miss and shows the #settings-no-match empty state.
+function settingsHubFilter() {
+  var q = (this.value || "").trim().toLowerCase();
+  var any = false;
+  document.querySelectorAll("#settings-grid .set-card").forEach(function (c) {
+    var hit = !q || c.textContent.toLowerCase().indexOf(q) !== -1;
+    c.classList.toggle("search-hide", !!q && !hit);
+    c.classList.toggle("search-match", !!q && hit);
+    if (hit) any = true;
+  });
+  document.querySelectorAll("#settings-grid .settings-section").forEach(function (sec) {
+    var visible = sec.querySelector(".set-card:not(.search-hide)");
+    sec.style.display = visible ? "" : "none";
+  });
+  var nomatch = document.getElementById("settings-no-match");
+  if (nomatch) nomatch.style.display = any ? "none" : "";
+}
+
 registerHandlers({
+  settingsHubFilter: settingsHubFilter,
   regenDevId: regenDevId,
   toggleManualId: toggleManualId,
   changelogToggle: changelogToggle,
