@@ -401,7 +401,44 @@ button, a, [role="button"] { min-height: 24px; }
 }
 select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%237d8896' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>"); background-repeat:no-repeat; background-position:right 10px center; padding-right:28px; }
 .check { display:inline-flex; align-items:center; gap:7px; font-size:12px; cursor:pointer; user-select:none; }
-.check input { width:14px; height:14px; accent-color:var(--accent); }
+.check input { width:16px; height:16px; accent-color:var(--accent); }
+
+/* Native file inputs — style the picker button like a .btn so upload forms
+   don't break the design system. */
+.input[type="file"] { display:flex; align-items:center; padding:0 8px 0 0; }
+.input[type="file"]::file-selector-button {
+  height:100%; margin-right:10px; padding:0 12px;
+  background:var(--panel-2); color:var(--text);
+  border:0; border-right:1px solid var(--border);
+  font-family:inherit; font-size:12.5px; font-weight:500; cursor:pointer;
+}
+.input[type="file"]::file-selector-button:hover { background:var(--panel-3); }
+
+/* Inline help tooltip — replaces the title-only ℹ️ emoji, which was
+   unreachable by keyboard and touch. */
+.help-tip {
+  position:relative;
+  display:inline-flex; align-items:center; justify-content:center;
+  width:16px; height:16px; border-radius:50%;
+  background:var(--panel-3); border:1px solid var(--border);
+  color:var(--text-3); font-size:10px; font-weight:700;
+  font-family:var(--mono); font-style:normal;
+  cursor:help; user-select:none; vertical-align:text-bottom;
+  text-transform:none; letter-spacing:0;
+}
+.help-tip:hover, .help-tip:focus-visible { color:var(--accent); border-color:var(--accent); }
+.help-tip::after {
+  content:attr(data-tip);
+  position:absolute; bottom:calc(100% + 7px); left:50%; transform:translateX(-50%);
+  width:max-content; max-width:240px; padding:6px 9px;
+  background:var(--panel); color:var(--text-2);
+  border:1px solid var(--border); border-radius:var(--radius-sm);
+  box-shadow:var(--shadow-md);
+  font-size:11px; font-weight:400; font-family:var(--sans);
+  line-height:1.45; text-align:left; white-space:normal;
+  opacity:0; pointer-events:none; transition:opacity .12s; z-index:60;
+}
+.help-tip:hover::after, .help-tip:focus-visible::after { opacity:1; }
 
 .btn {
   display:inline-flex; align-items:center; gap:6px;
@@ -532,6 +569,9 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .switch span::before { content:""; position:absolute; left:2px; top:2px; width:12px; height:12px; background:#fff; border-radius:50%; transition:.15s; box-shadow:0 1px 2px rgba(0,0,0,.2); }
 .switch input:checked + span { background:var(--accent); border-color:var(--accent); }
 .switch input:checked + span::before { left:16px; }
+/* The real checkbox is opacity:0/width:0, so :focus-visible never painted a
+   ring — surface it on the visual track instead. */
+.switch input:focus-visible + span { outline:3px solid var(--accent); outline-offset:2px; }
 
 /* SETTINGS HUB */
 .set-card { display:flex; flex-direction:column; gap:6px; padding:18px; background:var(--panel); border:1px solid var(--border); border-radius:6px; cursor:pointer; transition:.12s; }
@@ -867,6 +907,7 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
   font-size:10px; font-family:var(--mono); font-weight:700;
   border-radius:11px; letter-spacing:.05em; text-transform:uppercase;
   /* margin-top removed — was pulling the pill below the flex baseline */
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .mode-pill [data-icon] { width:11px; height:11px; }
 

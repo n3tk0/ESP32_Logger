@@ -250,10 +250,15 @@ function submitParentForm() {
 // Popup helpers. Replace inline style="display:flex/none" mutation.
 // Named hidePopup (not closePopup) because settings.js defines its own
 // zero-arg closePopup() tied to id="popup" that we don't want to shadow.
-var LEGAL_POPUP_IDS = ["restartPopup", "popup", "movePopup", "sensorPopup", "kbPopup"];
+var LEGAL_POPUP_IDS = ["restartPopup", "popup", "movePopup", "sensorPopup"];
 function showPopup(id) {
   if (LEGAL_POPUP_IDS.indexOf(id) === -1) { console.warn("showPopup: unknown id", id); return; }
-  var el = document.getElementById(id); if (el) el.style.display = "flex";
+  var el = document.getElementById(id); if (!el) return;
+  el.style.display = "flex";
+  // Move focus into the dialog (WCAG 2.4.3) — first field, else first button.
+  var f = el.querySelector("input:not([type=hidden]), select, textarea") ||
+          el.querySelector("button");
+  if (f) f.focus();
 }
 function hidePopup(id) {
   if (LEGAL_POPUP_IDS.indexOf(id) === -1) { console.warn("hidePopup: unknown id", id); return; }
@@ -1535,7 +1540,8 @@ var Form = (function () {
 function confirmRestart() {
   document.getElementById("rPopButtons").style.display = "none";
   document.getElementById("rPopProgress").style.display = "block";
-  setEl("rPopIcon", "⏳");
+  var rIcon = document.getElementById("rPopIcon");
+  if (rIcon && window.Icons) rIcon.innerHTML = Icons.svg("clock");
   setEl("rPopTitle", "Restarting…");
   var s = 5,
     bar = document.getElementById("rPopBar");

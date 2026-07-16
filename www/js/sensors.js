@@ -189,7 +189,7 @@ function sensorsLoad() {
             var ageIcon = "", ageColor = "inherit";
             if (stateClass === " err")        { ageIcon = "⊘"; ageColor = "var(--err)"; }
             else if (stateClass === " stale") { ageIcon = "⚠"; ageColor = "var(--warn)"; }
-            else if (sleeping)                { ageIcon = "💤"; ageColor = "var(--text-3)"; }
+            else if (sleeping)                { ageIcon = "☾"; ageColor = "var(--text-3)"; }
             else if (ageRefMs && stateClass !== " dis") { ageIcon = "✓"; ageColor = "var(--ok)"; }
 
             var cardName = esc(s.name) + (m && metrics.length > 1 ? " (" + esc(m) + ")" : "");
@@ -1039,7 +1039,7 @@ function clSave() {
   var msg = document.getElementById("cl-msg") || document.getElementById("ss-msg");
   if (!PCFG) {
     if (msg) {
-      msg.textContent = "❌ No config loaded";
+      msg.textContent = "✗ No config loaded";
       msg.className = "alert alert-danger";
     }
     return;
@@ -1109,7 +1109,7 @@ function clSave() {
   pcfgSave(PCFG, function (ok, err) {
     if (ok) {
       if (msg) {
-        msg.textContent = "✅ Saved! Restarting device…";
+        msg.textContent = "✓ Saved! Restarting device…";
         msg.className = "";
       }
       // Trigger restart so new mode takes effect
@@ -1118,7 +1118,7 @@ function clSave() {
       }, 500);
     } else {
       if (msg) {
-        msg.textContent = "❌ Save failed: " + err;
+        msg.textContent = "✗ Save failed: " + err;
         msg.className = "";
       }
     }
@@ -1327,7 +1327,7 @@ function expSave() {
   pcfgSave(PCFG, function (ok, err) {
     if (ok) {
       if (msg) {
-        msg.textContent = "✅ Saved! Restarting…";
+        msg.textContent = "✓ Saved! Restarting…";
         msg.className = "";
       }
       setTimeout(function () {
@@ -1335,7 +1335,7 @@ function expSave() {
       }, 500);
     } else {
       if (msg) {
-        msg.textContent = "❌ " + err;
+        msg.textContent = "✗ " + err;
         msg.className = "";
       }
     }
