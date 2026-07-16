@@ -285,6 +285,8 @@ button, a, [role="button"] { min-height: 24px; }
 .sstat [data-lucide] { width:11px; height:11px; flex-shrink:0; }
 .sstat.ok { color:var(--ok); border-color:rgba(22,163,74,.3); background:rgba(22,163,74,.06); }
 [data-theme="dark"] .sstat.ok { background:rgba(74,222,128,.06); border-color:rgba(74,222,128,.25); }
+.sstat.err { color:var(--err); border-color:rgba(220,38,38,.3); background:rgba(220,38,38,.06); }
+[data-theme="dark"] .sstat.err { background:rgba(248,113,113,.06); border-color:rgba(248,113,113,.25); }
 [data-nav="top"] .sidebar, [data-nav="bottom"] .sidebar { display:none; }
 
 /* TOP NAV */
@@ -446,7 +448,9 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 /* BIG STAT (live) */
 .bigstat { display:flex; flex-direction:column; gap:4px; }
 .bigstat-v { font-size:30px; font-weight:600; letter-spacing:-.02em; line-height:1; }
-.bigstat-v span { font-size:14px; color:var(--text-3); margin-left:3px; font-family:var(--sans); font-weight:500; }
+/* Only the .u unit suffix shrinks — a bare `span` selector also caught the
+   value spans (#live-liters, #live-cycleTime), rendering them at 14px grey. */
+.bigstat-v .u { font-size:14px; color:var(--text-3); margin-left:3px; font-family:var(--sans); font-weight:500; }
 
 /* STATE MACHINE */
 .sm-timer { display:flex; align-items:center; justify-content:space-between; padding:14px; border:1px solid var(--border); border-radius:6px; background:var(--panel-2); }
@@ -1193,6 +1197,7 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
   position: relative;
   height: 48px;
   margin: 0 -3px;
+  overflow: hidden;  /* a mis-sized uPlot canvas must never cover the footer */
 }
 
 .sensor-card-mini-empty {

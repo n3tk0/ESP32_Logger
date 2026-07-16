@@ -35,6 +35,25 @@ function fetchWithTimeout(url, opts, timeoutMs) {
 }
 window.fetchWithTimeout = fetchWithTimeout;
 
+// ── Connection state chip (sidebar footer) ─────────────────────────────────
+// Previously the "Online" chip was static HTML that never changed. Every
+// successful/failed round-trip through the shared fetch helpers now reports
+// here; the SSE channel in pages.js does too.
+var _connOnline = null;
+function setConnState(ok) {
+  ok = !!ok;
+  if (_connOnline === ok) return;
+  _connOnline = ok;
+  var chip = document.getElementById("sstat-conn");
+  var label = document.getElementById("sstat-conn-label");
+  if (chip) {
+    chip.classList.toggle("ok", ok);
+    chip.classList.toggle("err", !ok);
+  }
+  if (label) label.textContent = ok ? "Online" : "Offline";
+}
+window.setConnState = setConnState;
+
 // Same single-flight pattern for /api/sensors — three call sites all want
 // the same payload (Overview Diagnostics card, the Sensors page grid, and
 // the Sensor-chart metric dropdown).  Default 5 s cache window.
@@ -54,8 +73,10 @@ function getSensors(opts) {
     .then(function (data) {
       _sensorsCache = data;
       _sensorsFetchedAt = Date.now();
+      setConnState(true);
       return data;
     })
+    .catch(function (e) { setConnState(false); return Promise.reject(e); })
     .finally(function () { _sensorsInflight = null; });
   return _sensorsInflight;
 }
@@ -81,8 +102,10 @@ function getStatus(opts) {
     .then(function (data) {
       ST = data;
       _stFetchedAt = Date.now();
+      setConnState(true);
       return data;
     })
+    .catch(function (e) { setConnState(false); return Promise.reject(e); })
     .finally(function () { _stInflight = null; });
   return _stInflight;
 }

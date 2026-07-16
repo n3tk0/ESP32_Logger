@@ -152,7 +152,7 @@
           <div class="sstat"><span data-icon="wifi"></span><span id="sstat-wifi">--</span></div>
           <div class="sstat"><span data-icon="cpu"></span><span id="sstat-cpu">--</span></div>
           <div class="sstat"><span data-icon="hard-drive"></span><span id="sstat-storage">--</span></div>
-          <div class="sstat ok"><span data-icon="circle"></span><span>Online</span></div>
+          <div class="sstat ok" id="sstat-conn"><span data-icon="circle"></span><span id="sstat-conn-label">Online</span></div>
         </div>
         <div class="mono" style="color:var(--text-3);font-size:11px">FW <span id="footer-ver">--</span> · Boot #<span id="footer-boot">--</span></div>
         <div class="mono" style="color:var(--text-4);font-size:10px;margin-top:2px">© Petko Georgiev</div>
@@ -201,7 +201,7 @@
                 <option value="86400">Last 24 h</option>
               </select>
             </label>
-            <span id="db-poll-status" class="badge" style="font-size:10px">⏳</span>
+            <span id="db-poll-status" class="badge dim" style="font-size:10px">…</span>
             <button class="btn-mini" data-click="dbRefreshNow" title="Refresh now"><span data-icon="refresh-cw"></span></button>
           </div>
         </div>
@@ -365,7 +365,7 @@
               <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;justify-content:space-between">
                 <div class="bigstat">
                   <div class="bigstat-l">Volume</div>
-                  <div class="bigstat-v mono"><span id="live-liters">0.00</span><span>L</span></div>
+                  <div class="bigstat-v mono"><span id="live-liters">0.00</span><span class="u">L</span></div>
                 </div>
                 <div class="bigstat">
                   <div class="bigstat-l">Pulses</div>
@@ -373,7 +373,7 @@
                 </div>
                 <div class="bigstat">
                   <div class="bigstat-l">Duration</div>
-                  <div class="bigstat-v mono"><span id="live-cycleTime">0</span><span>s</span></div>
+                  <div class="bigstat-v mono"><span id="live-cycleTime">0</span><span class="u">s</span></div>
                 </div>
                 <div class="bigstat">
                   <div class="bigstat-l">Trigger</div>
@@ -432,9 +432,9 @@
         </div>
 
         <div class="grid grid-4" style="margin-top:var(--gap)">
-          <div class="kpi"><div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="cpu" class="lucide lucide-cpu"><rect width="16" height="16" x="4" y="4" rx="2"></rect><rect width="6" height="6" x="9" y="9" rx="1"></rect><path d="M15 2v2"></path><path d="M15 20v2"></path><path d="M2 15h2"></path><path d="M2 9h2"></path><path d="M20 15h2"></path><path d="M20 9h2"></path><path d="M9 2v2"></path><path d="M9 20v2"></path></svg> CPU</div><div class="kpi-v"><span class="num" id="live-chip">–</span></div><div class="bar"><span style="width:100%"></span></div></div>
-          <div class="kpi"><div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="memory-stick" class="lucide lucide-memory-stick"><path d="M6 19v-3"></path><path d="M10 19v-3"></path><path d="M14 19v-3"></path><path d="M18 19v-3"></path><path d="M8 11V9"></path><path d="M16 11V9"></path><path d="M12 11V9"></path><path d="M2 15h20"></path><path d="M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v1.1a2 2 0 0 0 0 3.837V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5.1a2 2 0 0 0 0-3.837Z"></path></svg> RAM</div><div class="kpi-v"><span class="num" id="live-heap" style="font-size:20px">–</span> <span class="unit">/ <span id="live-heapTotal">–</span></span></div><div class="bar"><span style="width:50%"></span></div></div>
-          <div class="kpi"><div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="hard-drive" class="lucide lucide-hard-drive"><line x1="22" x2="2" y1="12" y2="12"></line><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path><line x1="6" x2="6.01" y1="16" y2="16"></line><line x1="10" x2="10.01" y1="16" y2="16"></line></svg> Storage</div><div class="kpi-v"><span class="num" id="live-storage" style="font-size:18px">–</span><span class="unit"></span></div><div class="bar"><span style="width:60%"></span></div></div>
+          <div class="kpi"><div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="cpu" class="lucide lucide-cpu"><rect width="16" height="16" x="4" y="4" rx="2"></rect><rect width="6" height="6" x="9" y="9" rx="1"></rect><path d="M15 2v2"></path><path d="M15 20v2"></path><path d="M2 15h2"></path><path d="M2 9h2"></path><path d="M20 15h2"></path><path d="M20 9h2"></path><path d="M9 2v2"></path><path d="M9 20v2"></path></svg> CPU</div><div class="kpi-v"><span class="num" id="live-chip">–</span></div><div style="color:var(--text-3);font-size:11px">SoC model</div></div>
+          <div class="kpi"><div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="memory-stick" class="lucide lucide-memory-stick"><path d="M6 19v-3"></path><path d="M10 19v-3"></path><path d="M14 19v-3"></path><path d="M18 19v-3"></path><path d="M8 11V9"></path><path d="M16 11V9"></path><path d="M12 11V9"></path><path d="M2 15h20"></path><path d="M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v1.1a2 2 0 0 0 0 3.837V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5.1a2 2 0 0 0 0-3.837Z"></path></svg> RAM</div><div class="kpi-v"><span class="num" id="live-heap" style="font-size:20px">–</span> <span class="unit">/ <span id="live-heapTotal">–</span></span></div><div class="bar"><span id="live-heapBar" style="width:0%"></span></div></div>
+          <div class="kpi"><div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="hard-drive" class="lucide lucide-hard-drive"><line x1="22" x2="2" y1="12" y2="12"></line><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path><line x1="6" x2="6.01" y1="16" y2="16"></line><line x1="10" x2="10.01" y1="16" y2="16"></line></svg> Storage</div><div class="kpi-v"><span class="num" id="live-storage" style="font-size:18px">–</span><span class="unit"></span></div><div class="bar"><span id="live-storageBar" style="width:0%"></span></div></div>
           <div class="kpi"><div class="kpi-l"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="clock" class="lucide lucide-clock"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> Uptime</div><div class="kpi-v mono" style="font-size:22px"><span id="live-uptime">–</span><span style="font-size:14px;color:var(--text-3)">s</span></div><div style="color:var(--text-3);font-size:11px">Boot <span id="live-boot">–</span></div></div>
         </div>
       </section>
