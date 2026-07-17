@@ -23,6 +23,8 @@ bool SoilMoistureSensor::init(JsonObjectConst cfg) {
         _dryValue = _wetValue;
         _wetValue = tmp;
     }
+    // Guarantee a nonzero span so the moisture map never divides by zero → NaN.
+    if (_dryValue == _wetValue) _dryValue = _wetValue + 1;
 
     JsonObjectConst cal = cfg["calibration"];
     _calMoisture.load(cal, "moisture");

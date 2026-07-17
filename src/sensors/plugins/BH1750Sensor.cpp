@@ -28,7 +28,7 @@ bool BH1750Sensor::init(JsonObjectConst cfg) {
         _divider  = 2.4f; // 0.5 lx resolution
     } else if (strcmp(mode, "L") == 0) {
         _modeCmd  = CMD_CONT_L;
-        _divider  = 0.3f; // 4 lx resolution (~1.2/4)
+        _divider  = 1.2f; // L mode: same 1.2 count/lx conversion as H (1 lx resolution)
     } else {
         _modeCmd  = CMD_CONT_H;
         _divider  = 1.2f;
