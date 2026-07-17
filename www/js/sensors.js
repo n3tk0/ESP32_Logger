@@ -1114,7 +1114,7 @@ function clSave() {
       }
       // Trigger restart so new mode takes effect
       setTimeout(function () {
-        fetchWithTimeout("/api/platform_reload", { method: "POST" }, 30000).catch(function () {});
+        postWithCsrf("/api/platform_reload", { method: "POST" }, 30000).catch(function () {});
       }, 500);
     } else {
       if (msg) {
@@ -1331,7 +1331,7 @@ function expSave() {
         msg.className = "";
       }
       setTimeout(function () {
-        fetchWithTimeout("/api/platform_reload", { method: "POST" }, 30000).catch(function () {});
+        postWithCsrf("/api/platform_reload", { method: "POST" }, 30000).catch(function () {});
       }, 500);
     } else {
       if (msg) {

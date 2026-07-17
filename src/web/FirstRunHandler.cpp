@@ -258,6 +258,16 @@ void registerFirstRunRoutes() {
         // bounded at 4 KB; oversized bodies abort early.
         [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
            size_t index, size_t total) {
+            // First-run provisioning only: once setup has completed this
+            // endpoint rewrites board profile / pin map / platform mode and
+            // reboots, so an unauthenticated caller could brick an in-service
+            // device. Gate on the same flag /firstrun advertises. Checked at
+            // index==0 so a multi-chunk body can't double-send the response.
+            if (index == 0 && !g_setupRequired) {
+                r->send(403, "application/json",
+                        "{\"ok\":false,\"error\":\"setup already complete\"}");
+                return;
+            }
             constexpr size_t MAX_BODY = 4 * 1024;
             if (total > MAX_BODY) {
                 r->send(413, "application/json",

@@ -204,7 +204,7 @@ function fsClAddSensor(){var tp=prompt('Sensor type:\n'+FS_SENSOR_TYPES.map(func
 function fsClEditSensor(i){if(!FS_PCFG||!FS_PCFG.sensors)return;var s=FS_PCFG.sensors[i];var j=prompt('Edit sensor JSON:',JSON.stringify(s));if(!j)return;try{var ns=JSON.parse(j);var PK=['pin','sda','scl','uart_rx','uart_tx','trig_pin','echo_pin'];var used={};FS_PCFG.sensors.forEach(function(x,xi){if(xi===i)return;PK.forEach(function(k){if(x[k]!=null&&x[k]>=0)used[x[k]]=(used[x[k]]||[]).concat(x.id||x.type)})});var cfls=[];PK.forEach(function(k){if(ns[k]!=null&&ns[k]>=0&&used[ns[k]])cfls.push('GPIO'+ns[k]+' ('+k+') used by: '+used[ns[k]].join(', '))});if(cfls.length)alert('\u26a0\ufe0f Pin conflict:\n'+cfls.join('\n'));FS_PCFG.sensors[i]=ns;fsClRenderSensors(FS_PCFG.sensors)}catch(e){alert('Invalid JSON: '+e.message)}}
 function fsClRemoveSensor(i){if(!FS_PCFG||!FS_PCFG.sensors)return;if(!confirm('Remove "'+( FS_PCFG.sensors[i].id||FS_PCFG.sensors[i].type)+'"?'))return;FS_PCFG.sensors.splice(i,1);fsClRenderSensors(FS_PCFG.sensors)}
 function fsSlpChk(){var s=document.getElementById('cl-sleep'),w=document.getElementById('cl-slp-warn');if(s&&w)w.className=(s.value==='online')?'warn-box show':'warn-box'}
-function fsClSave(){var m=document.getElementById('cl-msg');if(!FS_PCFG){if(m){m.textContent='No config \u2014 click Reload first.';m.className='msg err'}return}var mE=document.getElementById('cl-mode'),sE=document.getElementById('cl-sleep');if(mE)FS_PCFG.mode=mE.value;if(sE)FS_PCFG.sleep_mode=sE.value;if(m){m.textContent='Saving\u2026';m.className='msg inf'}var x=new XMLHttpRequest();x.open('POST','/save_platform');x.setRequestHeader('Content-Type','application/json');x.onload=function(){try{var r=JSON.parse(x.responseText);if(r&&r.ok){if(m){m.textContent='\u2705 Saved! Restarting\u2026';m.className='msg ok'}setTimeout(function(){fetch('/api/platform_reload',{method:'POST'}).catch(function(){});setTimeout(function(){location.reload()},5000)},300)}else{if(m){m.textContent='\u274c Save failed';m.className='msg err'}}}catch(e){if(m){m.textContent='\u274c '+e;m.className='msg err'}}};x.onerror=function(){if(m){m.textContent='\u274c Network error';m.className='msg err'}};x.send(JSON.stringify(FS_PCFG))}
+function fsClSave(){var m=document.getElementById('cl-msg');if(!FS_PCFG){if(m){m.textContent='No config \u2014 click Reload first.';m.className='msg err'}return}var mE=document.getElementById('cl-mode'),sE=document.getElementById('cl-sleep');if(mE)FS_PCFG.mode=mE.value;if(sE)FS_PCFG.sleep_mode=sE.value;if(m){m.textContent='Saving\u2026';m.className='msg inf'}fetch('/api/csrf-token',{credentials:'same-origin'}).then(function(r){return r.json()}).catch(function(){return{}}).then(function(tok){var q=tok&&tok.token?('?csrf='+encodeURIComponent(tok.token)):'';var x=new XMLHttpRequest();x.open('POST','/save_platform'+q);x.setRequestHeader('Content-Type','application/json');x.onload=function(){try{var r=JSON.parse(x.responseText);if(r&&r.ok){if(m){m.textContent='\u2705 Saved! Restarting\u2026';m.className='msg ok'}setTimeout(function(){fetch('/api/platform_reload'+q,{method:'POST'}).catch(function(){});setTimeout(function(){location.reload()},5000)},300)}else{if(m){m.textContent='\u274c Save failed';m.className='msg err'}}}catch(e){if(m){m.textContent='\u274c '+e;m.className='msg err'}}};x.onerror=function(){if(m){m.textContent='\u274c Network error';m.className='msg err'}};x.send(JSON.stringify(FS_PCFG))})}
 function fsAddSensor(){var j=prompt("Add sensor JSON:","{\"type\":\"bme280\",\"enabled\":true}");if(j){try{var o=JSON.parse(j);if(!FS_PCFG)FS_PCFG={};if(!FS_PCFG.sensors)FS_PCFG.sensors=[];FS_PCFG.sensors.push(o);fsClLoad()}catch(e){alert("Invalid JSON: "+e)}}}
 function fsEditSensor(i){if(!FS_PCFG||!FS_PCFG.sensors)return;var j=prompt("Edit sensor JSON:",JSON.stringify(FS_PCFG.sensors[i]));if(j){try{FS_PCFG.sensors[i]=JSON.parse(j);fsClLoad()}catch(e){alert("Invalid JSON: "+e)}}}
 function fsRmSensor(i){if(!FS_PCFG||!FS_PCFG.sensors)return;if(confirm("Remove sensor?")){FS_PCFG.sensors.splice(i,1);fsClLoad()}}
@@ -918,7 +918,10 @@ void setupWebServer() {
         JsonArray files = doc["files"].to<JsonArray>();
 
         String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
-        String dir     = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
+        // sanitizePath() rejects "..", backslash, control chars, NUL (returns
+        // "") — mirrors /download, /delete, /move_file. Without it a caller
+        // could enumerate arbitrary directories (e.g. /config) by traversal.
+        String dir     = sanitizePath(r->hasParam("dir") ? r->getParam("dir")->value() : "/");
         String filter  = r->hasParam("filter")  ? r->getParam("filter")->value()  : "";
         bool recursive = r->hasParam("recursive");
 
@@ -1539,7 +1542,7 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
     // TIME MANAGEMENT
     // =========================================================================
     server.on("/set_time", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (rateLimit429(r)) return;
+        if (!requireMutatingAuth(r)) return;   // was rate-limit only — add CSRF
         if (loggingState != STATE_IDLE && loggingState != STATE_DONE) {
             r->send(409, "application/json", "{\"ok\":false,\"error\":\"Busy\"}");
             return;
@@ -2504,13 +2507,12 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         server.on("/save_platform", HTTP_POST,
             [pcfgCleanup](AsyncWebServerRequest *r) {
                 if (rateLimit429(r)) { pcfgCleanup(); return; }
-                // Note: CSRF deliberately NOT checked here — this route
-                // takes a raw application/json body, so onRequest fires
-                // without form params being populated; querying for `csrf`
-                // would 403 every legitimate save.  Adding query-string
-                // CSRF would require updating both the SPA and the
-                // PROGMEM failsafe HTML.  Tracked as a follow-up; the
-                // route still has rate-limit protection in the meantime.
+                // CSRF: the token rides in the query string (?csrf=…), which
+                // CsrfToken::require() reads independently of the raw JSON
+                // body — so both the SPA (postWithCsrf) and the PROGMEM
+                // failsafe page (which now fetches + appends the token) pass,
+                // while a cross-site POST without the token is rejected.
+                if (!CsrfToken::require(r)) { pcfgCleanup(); return; }
                 if (!fsAvailable || !activeFS) {
                     pcfgCleanup();
                     r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
@@ -2568,6 +2570,7 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
     // API: PLATFORM RELOAD — trigger live sensor/exporter reload after save
     // =========================================================================
     server.on("/api/platform_reload", HTTP_POST, [](AsyncWebServerRequest *r) {
+        if (!requireMutatingAuth(r)) return;   // was unprotected — reboots device
         // Signal to main loop / TaskManager to reload configs
         // Full reload requires restart; signal shouldRestart
         shouldRestart = true;
