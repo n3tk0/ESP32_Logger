@@ -56,24 +56,44 @@ bool HttpExporter::send(const SensorReading* readings, size_t count) {
     if (!_enabled || count == 0 || _url[0] == '\0') return true;
     if (WiFi.status() != WL_CONNECTED) return false;
 
-    // Build JSON array body
-    // Each reading ~80 bytes; allocate dynamically for large batches
-    size_t bodyLen = count * 90 + 32;
+    // Build JSON array body.
+    // Worst-case per reading = 63B fixed template + ts(10) + sensorId(16) +
+    // sensorType(11) + metric(15) + value(~12 for %.4g) + unit(11) +
+    // quality(3) = ~139B. Budget 160B/reading gives margin, plus 32B for the
+    // "[" / "]" framing and NUL. (Verified: tests/host/test_httpexporter_bufsize.cpp.)
+    static const size_t BYTES_PER_READING = 160;
+    size_t bodyLen = count * BYTES_PER_READING + 32;
     char*  body    = new char[bodyLen];
     if (!body) return false;
 
+    // Overflow-proof append helper: after each snprintf, clamp on error or when
+    // the result would not fit the remaining space, so pos never exceeds bodyLen.
+    // Returns false when the append had to be truncated.
     size_t pos = 0;
-    pos += snprintf(body + pos, bodyLen - pos, "[");
-    for (size_t i = 0; i < count; i++) {
+    auto appendOk = [&](int written) -> bool {
+        size_t remaining = bodyLen - pos;
+        if (written < 0 || (size_t)written >= remaining) {
+            body[bodyLen - 1] = '\0';   // keep buffer NUL-terminated
+            return false;
+        }
+        pos += written;
+        return true;
+    };
+
+    bool full = appendOk(snprintf(body + pos, bodyLen - pos, "["));
+    for (size_t i = 0; full && i < count; i++) {
         const SensorReading& r = readings[i];
-        if (i > 0) pos += snprintf(body + pos, bodyLen - pos, ",");
-        pos += snprintf(body + pos, bodyLen - pos,
+        if (i > 0) {
+            full = appendOk(snprintf(body + pos, bodyLen - pos, ","));
+            if (!full) break;
+        }
+        full = appendOk(snprintf(body + pos, bodyLen - pos,
             "{\"ts\":%lu,\"id\":\"%s\",\"sensor\":\"%s\","
             "\"metric\":\"%s\",\"value\":%.4g,\"unit\":\"%s\",\"q\":%u}",
             (unsigned long)r.timestamp, r.sensorId, r.sensorType,
-            r.metric, r.value, r.unit, (unsigned)r.quality);
+            r.metric, r.value, r.unit, (unsigned)r.quality));
     }
-    pos += snprintf(body + pos, bodyLen - pos, "]");
+    if (full) appendOk(snprintf(body + pos, bodyLen - pos, "]"));
 
     HTTPClient http;
     bool isHttps = strncmp(_url, "https://", 8) == 0;
