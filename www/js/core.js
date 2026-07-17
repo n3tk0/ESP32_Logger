@@ -1292,11 +1292,31 @@ function settingsSave(ev, url, form, restart) {
     var xhr = new XMLHttpRequest();
     xhr.open("POST", url);
     xhr.onload = function () {
-      if (restart) return;
       // 403 csrf mismatch — clear cache and retry once with a fresh token.
+      // Checked before the restart bail-out so restart-tagged forms get the
+      // retry too instead of dying silently on a stale token.
       if (xhr.status === 403 && !isRetry) {
         window.__csrfToken = null;
         getCsrfToken().then(function (t) { doPost(t, true); });
+        return;
+      }
+      if (restart) {
+        // On success the device reboots and the restart flow owns the UX —
+        // keep the button pending. But a validation rejection (e.g. 400 for
+        // a duplicate pin from /save_hardware) means no reboot is coming:
+        // surface the error and re-enable the form.
+        var rr = null;
+        try { rr = JSON.parse(xhr.responseText); } catch (e) {}
+        if (xhr.status >= 400 || (rr && rr.ok === false)) {
+          setPending(false);
+          showMsg(
+            msgIdForPage(),
+            "<div class='alert alert-error'>" +
+              esc((rr && rr.error) || "Save rejected (HTTP " + xhr.status + ")") +
+              "</div>",
+            true,
+          );
+        }
         return;
       }
       setPending(false);
@@ -1308,7 +1328,7 @@ function settingsSave(ev, url, form, restart) {
           // /api/status) and app chrome that other pages read from.
           showToast("Settings saved", "ok");
           fetchWithTimeout("/export_settings")
-            .then(function (res) { return res.json(); })
+            .then(function (res) { return res.ok ? res.json() : Promise.reject(res.status); })
             .then(function (cfg) { CFG = cfg; })
             .catch(function () {});
           getStatus({ maxAgeMs: 0 })

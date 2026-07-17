@@ -754,7 +754,7 @@ function netTestPoll(out, tries) {
     return;
   }
   fetchWithTimeout("/api/modules/wifi/test", {}, 15000)
-    .then(function (r) { return r.json(); })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
     .then(function (d) {
       if (d.state === "success") {
         out.textContent = "✓ Connected (" + d.rssi + " dBm, " + d.ip + ")";
@@ -909,7 +909,7 @@ function timeSyncNTP(ev) {
     true,
   );
   postWithCsrf("/sync_time", { method: "POST" }, 30000)
-    .then(function (r) { return r.json(); })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
     .then(function (d) {
       if (!d.ok) {
         showMsg("time-msg",

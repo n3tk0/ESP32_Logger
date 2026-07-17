@@ -334,7 +334,7 @@ function dbMountSparkChart(key, xs, ys) {
 
 function dbRefreshLatest() {
   fetchWithTimeout("/api/latest")
-    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
     .then(function (d) {
       if (typeof setConnState === "function") setConnState(true);
       var status = document.getElementById("db-poll-status");
@@ -1133,11 +1133,16 @@ function liveUpdate() {
   if (_liveInFlight) return;
   _liveInFlight = true;
   fetchWithTimeout("/api/live")
-    .then(function (r) {
-      return r.json();
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (d) {
+      // Polling is the SSE fallback — a working poll must clear the offline
+      // chip that the EventSource error handler set, or it sticks at
+      // "Offline" while live telemetry visibly updates.
+      if (typeof setConnState === "function") setConnState(true);
+      liveRender(d);
     })
-    .then(liveRender)
     .catch(function () {
+      if (typeof setConnState === "function") setConnState(false);
       var conn = document.getElementById("conn");
       if (conn) {
         conn.textContent = "● Disconnected";
