@@ -77,6 +77,7 @@ void flushLogBufferToFS() {
     File f = activeFS->open(logFile, FILE_APPEND);
     if (!f) { Serial.println("ERR: Can't open datalog"); return; }
 
+    bool allWritten = true;
     for (int i = 0; i < logBufferCount; i++) {
         // Convert UTC epochs to local time for display in log entries.
         struct tm wakeTm = {0}, sleepTm = {0};
@@ -169,12 +170,22 @@ void flushLogBufferToFS() {
             line += "|PF" + String(logBuffer[i].pfCount);
         }
 
-        f.println(line);
+        // println appends CRLF; a short write means the FS is full/failing.
+        if (f.println(line) != line.length() + 2) allWritten = false;
     }
 
     f.close();
     int cnt = logBufferCount;
-    logBufferCount = 0;
+    // Only clear the buffer if every entry made it to disk, so failed entries
+    // are retried on the next flush instead of being lost.
+    if (allWritten) {
+        logBufferCount = 0;
+    } else {
+        Serial.println("ERR: datalog write failed — retaining buffer for retry");
+    }
+    // backupBootCount() re-acquires fsMutex internally; release ours first so we
+    // don't self-deadlock on the non-recursive mutex (H3 discipline).
+    g.release();
     backupBootCount();
     DBGF("Flushed %d entries to %s\n", cnt, logFile.c_str());
 }

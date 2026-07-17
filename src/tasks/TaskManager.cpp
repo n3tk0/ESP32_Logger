@@ -83,26 +83,32 @@ static void _cleanupPartialInit() {
 // from p->humidityCorrection*, so mutating storageParam here is enough — no
 // task restart required.  Caller must hold configMutex.
 void TaskManager::refreshStorageFromPlatform(fs::FS& fs) {
-    storageParam.humidityCorrectionEnabled = false;
-    storageParam.humidityCorrectionKappa   = 0.35f;   // codebase default
+    // Resolve into locals first, then publish to storageParam with the enable
+    // flag LAST.  StorageTask reads these fields unlocked, so it must never
+    // observe a transient "disabled" window while the real values are applied.
+    bool  humEnabled = false;
+    float humKappa   = 0.35f;   // codebase default
 
     File cfgFile = fs.open("/platform_config.json", FILE_READ);
-    if (!cfgFile) return;
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, cfgFile);
-    cfgFile.close();
-    if (err) return;
-
-    JsonArrayConst sensors = doc["sensors"].as<JsonArrayConst>();
-    for (JsonObjectConst sensor : sensors) {
-        if (strcmp(sensor["type"] | "", "sds011") == 0) {
-            storageParam.humidityCorrectionEnabled =
-                sensor["humidityCorrectionEnabled"] | false;
-            float k = sensor["humidityCorrectionKappa"] | 0.35f;
-            storageParam.humidityCorrectionKappa = (k > 0.0f) ? k : 0.35f;
-            break;
+    if (cfgFile) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, cfgFile);
+        cfgFile.close();
+        if (!err) {
+            JsonArrayConst sensors = doc["sensors"].as<JsonArrayConst>();
+            for (JsonObjectConst sensor : sensors) {
+                if (strcmp(sensor["type"] | "", "sds011") == 0) {
+                    humEnabled = sensor["humidityCorrectionEnabled"] | false;
+                    float k    = sensor["humidityCorrectionKappa"] | 0.35f;
+                    humKappa   = (k > 0.0f) ? k : 0.35f;
+                    break;
+                }
+            }
         }
     }
+
+    storageParam.humidityCorrectionKappa   = humKappa;
+    storageParam.humidityCorrectionEnabled = humEnabled;   // enable flag set LAST
 }
 
 bool TaskManager::init(fs::FS& fs) {

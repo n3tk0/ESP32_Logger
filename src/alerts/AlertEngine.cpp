@@ -1,6 +1,7 @@
 #include "AlertEngine.h"
 #include "../utils/MutexGuard.h"
 #include "../utils/AtomicWrite.h"
+#include "../pipeline/DataPipeline.h"   // global fsMutex — serialise FS writes
 #include <LittleFS.h>
 #include "../export/MqttExporter.h"
 
@@ -421,10 +422,11 @@ bool AlertEngine::_save() const {
         ho["outcome"] = "fired";
     }
 
-    // TODO: tied to AUDIT 15.9 — AlertEngine needs fsMutex wiring in a follow-up
+    // AUDIT 15.9: _save() runs on the web/async task — pass the global fsMutex so
+    // atomicWrite serialises against StorageTask and all other FS writers.
     return atomicWrite(*_fs, _path, [&](File& f) -> bool {
         size_t want = measureJson(doc);
         size_t got  = serializeJson(doc, f);
         return got > 0 && got == want;
-    }, /*fsMutex*/ nullptr);
+    }, fsMutex);
 }

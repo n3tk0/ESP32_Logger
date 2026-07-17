@@ -368,7 +368,8 @@ bool loadConfig() {
     // ── Recover interrupted crash-safe write ─────────────────────────────────
     if (!LittleFS.exists(CONFIG_FILE) && LittleFS.exists("/config.tmp")) {
         Serial.println("[CFG] Recovering config from temp file");
-        LittleFS.rename("/config.tmp", CONFIG_FILE);
+        if (!LittleFS.rename("/config.tmp", CONFIG_FILE))
+            Serial.println("[CFG] config.tmp recovery rename FAILED");
     } else if (LittleFS.exists("/config.tmp")) {
         LittleFS.remove("/config.tmp");   // stale temp, real file exists
     }
@@ -389,8 +390,9 @@ bool loadConfig() {
     if (fileSize == 0 || fileSize > sizeof(DeviceConfig) * 2) {
         Serial.printf("[CFG] Bad file size %u – using hardcoded defaults\n", fileSize);
         f.close();
+        // Transient fault (spurious size): boot on in-memory defaults but do NOT
+        // overwrite the on-disk file, so a retry next boot can still recover it.
         loadDefaultConfig();
-        saveConfig();
         return false;
     }
 
@@ -402,8 +404,10 @@ bool loadConfig() {
 
         if (got != sizeof(DeviceConfig) || tmp.magic != CONFIG_STRUCT_MAGIC) {
             Serial.println("[CFG] Magic mismatch / short read – using hardcoded defaults");
+            // Transient fault (short read / bad magic): boot on in-memory defaults
+            // but do NOT overwrite the on-disk file, so a retry next boot can still
+            // recover it.
             loadDefaultConfig();
-            saveConfig();
             return false;
         }
         memcpy(&config, &tmp, sizeof(DeviceConfig));
@@ -415,8 +419,9 @@ bool loadConfig() {
         if (!rawBuf) {
             Serial.println("[CFG] malloc failed – using hardcoded defaults");
             f.close();
+            // Transient fault (RAM pressure, file intact): boot on in-memory
+            // defaults but do NOT overwrite the on-disk file.
             loadDefaultConfig();
-            saveConfig();
             return false;
         }
 
@@ -429,8 +434,10 @@ bool loadConfig() {
         if (got != fileSize || fileMagic != CONFIG_STRUCT_MAGIC) {
             free(rawBuf);
             Serial.println("[CFG] Corrupt file – using hardcoded defaults");
+            // Transient fault (short read / bad magic): boot on in-memory defaults
+            // but do NOT overwrite the on-disk file, so a retry next boot can still
+            // recover it.
             loadDefaultConfig();
-            saveConfig();
             return false;
         }
 
@@ -480,8 +487,9 @@ bool loadConfig() {
         // fileSize > sizeof(DeviceConfig) — shouldn't happen, treat as corrupt
         f.close();
         Serial.println("[CFG] Oversized config file – using hardcoded defaults");
+        // Transient fault (spurious size): boot on in-memory defaults but do NOT
+        // overwrite the on-disk file, so a retry next boot can still recover it.
         loadDefaultConfig();
-        saveConfig();
         return false;
     }
 
