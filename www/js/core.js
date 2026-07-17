@@ -35,6 +35,25 @@ function fetchWithTimeout(url, opts, timeoutMs) {
 }
 window.fetchWithTimeout = fetchWithTimeout;
 
+// ── Connection state chip (sidebar footer) ─────────────────────────────────
+// Previously the "Online" chip was static HTML that never changed. Every
+// successful/failed round-trip through the shared fetch helpers now reports
+// here; the SSE channel in pages.js does too.
+var _connOnline = null;
+function setConnState(ok) {
+  ok = !!ok;
+  if (_connOnline === ok) return;
+  _connOnline = ok;
+  var chip = document.getElementById("sstat-conn");
+  var label = document.getElementById("sstat-conn-label");
+  if (chip) {
+    chip.classList.toggle("ok", ok);
+    chip.classList.toggle("err", !ok);
+  }
+  if (label) label.textContent = ok ? "Online" : "Offline";
+}
+window.setConnState = setConnState;
+
 // Same single-flight pattern for /api/sensors — three call sites all want
 // the same payload (Overview Diagnostics card, the Sensors page grid, and
 // the Sensor-chart metric dropdown).  Default 5 s cache window.
@@ -54,8 +73,10 @@ function getSensors(opts) {
     .then(function (data) {
       _sensorsCache = data;
       _sensorsFetchedAt = Date.now();
+      setConnState(true);
       return data;
     })
+    .catch(function (e) { setConnState(false); return Promise.reject(e); })
     .finally(function () { _sensorsInflight = null; });
   return _sensorsInflight;
 }
@@ -81,8 +102,10 @@ function getStatus(opts) {
     .then(function (data) {
       ST = data;
       _stFetchedAt = Date.now();
+      setConnState(true);
       return data;
     })
+    .catch(function (e) { setConnState(false); return Promise.reject(e); })
     .finally(function () { _stInflight = null; });
   return _stInflight;
 }
@@ -227,10 +250,15 @@ function submitParentForm() {
 // Popup helpers. Replace inline style="display:flex/none" mutation.
 // Named hidePopup (not closePopup) because settings.js defines its own
 // zero-arg closePopup() tied to id="popup" that we don't want to shadow.
-var LEGAL_POPUP_IDS = ["restartPopup", "popup", "movePopup", "sensorPopup", "kbPopup"];
+var LEGAL_POPUP_IDS = ["restartPopup", "popup", "movePopup", "sensorPopup"];
 function showPopup(id) {
   if (LEGAL_POPUP_IDS.indexOf(id) === -1) { console.warn("showPopup: unknown id", id); return; }
-  var el = document.getElementById(id); if (el) el.style.display = "flex";
+  var el = document.getElementById(id); if (!el) return;
+  el.style.display = "flex";
+  // Move focus into the dialog (WCAG 2.4.3) — first field, else first button.
+  var f = el.querySelector("input:not([type=hidden]), select, textarea") ||
+          el.querySelector("button");
+  if (f) f.focus();
 }
 function hidePopup(id) {
   if (LEGAL_POPUP_IDS.indexOf(id) === -1) { console.warn("hidePopup: unknown id", id); return; }
@@ -881,7 +909,6 @@ function navigateTo(page) {
       });
 
     pageInit(page);
-    applySettingsFlash();
   });
 }
 
@@ -1244,70 +1271,98 @@ var PAGE_MSG_IDS = {
 function settingsSave(ev, url, form, restart) {
   if (ev) ev.preventDefault();
 
+  // Pending state: disable the submit button + swap its label for a spinner
+  // while the ESP round-trip is in flight (guards against double-submits on
+  // slow links). Restart-flagged saves keep the spinner — the device is
+  // rebooting and the restart flow owns the rest of the UX.
+  var submitBtn = form && form.querySelector('button[type="submit"]');
+  function setPending(on) {
+    if (!submitBtn) return;
+    submitBtn.disabled = on;
+    submitBtn.classList.toggle("btn-loading", on);
+  }
+  function msgIdForPage() {
+    return PAGE_MSG_IDS[currentPage] ||
+      currentPage.replace("settings_", "") + "-msg";
+  }
+
   function doPost(token, isRetry) {
     var fd = new FormData(form);
     if (token) fd.append("csrf", token);
     var xhr = new XMLHttpRequest();
     xhr.open("POST", url);
     xhr.onload = function () {
-      if (restart) return;
       // 403 csrf mismatch — clear cache and retry once with a fresh token.
+      // Checked before the restart bail-out so restart-tagged forms get the
+      // retry too instead of dying silently on a stale token.
       if (xhr.status === 403 && !isRetry) {
         window.__csrfToken = null;
         getCsrfToken().then(function (t) { doPost(t, true); });
         return;
       }
+      if (restart) {
+        // On success the device reboots and the restart flow owns the UX —
+        // keep the button pending. But a validation rejection (e.g. 400 for
+        // a duplicate pin from /save_hardware) means no reboot is coming:
+        // surface the error and re-enable the form.
+        var rr = null;
+        try { rr = JSON.parse(xhr.responseText); } catch (e) {}
+        if (xhr.status >= 400 || (rr && rr.ok === false)) {
+          setPending(false);
+          showMsg(
+            msgIdForPage(),
+            "<div class='alert alert-error'>" +
+              esc((rr && rr.error) || "Save rejected (HTTP " + xhr.status + ")") +
+              "</div>",
+            true,
+          );
+        }
+        return;
+      }
+      setPending(false);
       try {
         var r = JSON.parse(xhr.responseText);
-        var msgId =
-          PAGE_MSG_IDS[currentPage] ||
-          currentPage.replace("settings_", "") + "-msg";
         if (r.ok) {
-          sessionStorage.setItem(
-            "settingsFlash",
-            JSON.stringify({
-              page: currentPage,
-              html: "<div class='alert alert-success'>✅ Settings saved successfully</div>",
-            }),
-          );
-          setTimeout(function () { location.reload(); }, 300);
+          // No full-page reload: the form already shows what was saved.
+          // Confirm via toast, then re-sync the shared caches (CFG +
+          // /api/status) and app chrome that other pages read from.
+          showToast("Settings saved", "ok");
+          fetchWithTimeout("/export_settings")
+            .then(function (res) { return res.ok ? res.json() : Promise.reject(res.status); })
+            .then(function (cfg) { CFG = cfg; })
+            .catch(function () {});
+          getStatus({ maxAgeMs: 0 })
+            .then(function (d) { applyStatus(d); })
+            .catch(function () {});
         } else {
           showMsg(
-            msgId,
-            "<div class='alert alert-error'>❌ " +
+            msgIdForPage(),
+            "<div class='alert alert-error'>" +
               esc(r.error || "Unknown error") + "</div>",
             true,
           );
         }
-      } catch (e) {}
+      } catch (e) {
+        showMsg(
+          msgIdForPage(),
+          "<div class='alert alert-error'>Malformed response from device</div>",
+          true,
+        );
+      }
     };
     xhr.onerror = function () {
-      var msgId =
-        PAGE_MSG_IDS[currentPage] ||
-        currentPage.replace("settings_", "") + "-msg";
+      setPending(false);
       showMsg(
-        msgId,
-        "<div class='alert alert-error'>❌ Network error</div>",
+        msgIdForPage(),
+        "<div class='alert alert-error'>Network error — settings not saved</div>",
         true,
       );
     };
     xhr.send(fd);
   }
 
+  setPending(true);
   getCsrfToken().then(function (token) { doPost(token, false); });
-}
-
-function applySettingsFlash() {
-  var raw = sessionStorage.getItem("settingsFlash");
-  if (!raw) return;
-  sessionStorage.removeItem("settingsFlash");
-  try {
-    var f = JSON.parse(raw);
-    if (!f || !f.page || !f.html) return;
-    var msgId =
-      PAGE_MSG_IDS[f.page] || f.page.replace("settings_", "") + "-msg";
-    showMsg(msgId, f.html, true);
-  } catch (e) {}
 }
 
 // ============================================================================
@@ -1505,7 +1560,8 @@ var Form = (function () {
 function confirmRestart() {
   document.getElementById("rPopButtons").style.display = "none";
   document.getElementById("rPopProgress").style.display = "block";
-  setEl("rPopIcon", "⏳");
+  var rIcon = document.getElementById("rPopIcon");
+  if (rIcon && window.Icons) rIcon.innerHTML = Icons.svg("clock");
   setEl("rPopTitle", "Restarting…");
   var s = 5,
     bar = document.getElementById("rPopBar");

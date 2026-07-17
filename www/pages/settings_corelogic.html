@@ -50,14 +50,14 @@
             <div class="field">
               <label class="field-label" for="cl-cont-idle">
                 Idle timeout (ms)
-                <span class="help-tip" title="Milliseconds without activity before CPU + WiFi power is reduced.">ℹ️</span>
+                <span class="help-tip" tabindex="0" role="note" aria-label="Milliseconds without activity before CPU + WiFi power is reduced." data-tip="Milliseconds without activity before CPU + WiFi power is reduced.">i</span>
               </label>
               <input type="number" id="cl-cont-idle" class="input" value="300000" min="5000" max="3600000" step="1000">
             </div>
             <div class="field">
               <label class="field-label" for="cl-cont-cpu">
                 Idle CPU (MHz)
-                <span class="help-tip" title="CPU frequency while idle. Active frequency is always 160 MHz.">ℹ️</span>
+                <span class="help-tip" tabindex="0" role="note" aria-label="CPU frequency while idle. Active frequency is always 160 MHz." data-tip="CPU frequency while idle. Active frequency is always 160 MHz.">i</span>
               </label>
               <select id="cl-cont-cpu" class="input">
                 <option value="80">80 MHz</option>
@@ -69,7 +69,7 @@
             <label class="field-label" style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
               <input type="checkbox" id="cl-cont-modem" checked>
               Modem sleep when idle
-              <span class="help-tip" title="Enable WiFi modem sleep after idle timeout (~20-50 mA saving).">ℹ️</span>
+              <span class="help-tip" tabindex="0" role="note" aria-label="Enable WiFi modem sleep after idle timeout (~20-50 mA saving)." data-tip="Enable WiFi modem sleep after idle timeout (~20-50 mA saving).">i</span>
             </label>
             <p class="hint">WiFi modem sleeps between data bursts, wakes automatically on requests.</p>
           </div>
@@ -81,21 +81,21 @@
             <div class="field">
               <label class="field-label" for="cl-hyb-idle">
                 Idle before sleep (ms)
-                <span class="help-tip" title="Milliseconds of inactivity in STATE_IDLE before entering deep sleep.">ℹ️</span>
+                <span class="help-tip" tabindex="0" role="note" aria-label="Milliseconds of inactivity in STATE_IDLE before entering deep sleep." data-tip="Milliseconds of inactivity in STATE_IDLE before entering deep sleep.">i</span>
               </label>
               <input type="number" id="cl-hyb-idle" class="input" value="120000" min="5000" max="600000" step="1000" data-input="clUpdateHybCycle">
             </div>
             <div class="field">
               <label class="field-label" for="cl-hyb-sleep">
                 Sleep duration (ms)
-                <span class="help-tip" title="Deep sleep duration. Timer wakeup fires sensors after this interval.">ℹ️</span>
+                <span class="help-tip" tabindex="0" role="note" aria-label="Deep sleep duration. Timer wakeup fires sensors after this interval." data-tip="Deep sleep duration. Timer wakeup fires sensors after this interval.">i</span>
               </label>
               <input type="number" id="cl-hyb-sleep" class="input" value="60000" min="5000" max="3600000" step="1000" data-input="clUpdateHybCycle">
             </div>
             <div class="field">
               <label class="field-label" for="cl-hyb-active">
                 Active window (ms)
-                <span class="help-tip" title="How long sensor tasks run on timer wake before going back to sleep.">ℹ️</span>
+                <span class="help-tip" tabindex="0" role="note" aria-label="How long sensor tasks run on timer wake before going back to sleep." data-tip="How long sensor tasks run on timer wake before going back to sleep.">i</span>
               </label>
               <input type="number" id="cl-hyb-active" class="input" value="30000" min="1000" max="300000" step="1000" data-input="clUpdateHybCycle">
             </div>

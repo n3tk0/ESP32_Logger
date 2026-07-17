@@ -67,8 +67,9 @@ function dbLoadUPlot(cb) {
     }
   }
 
-  // Stylesheet: try preferred source, fall back to the other on error.
-  // Best-effort — uPlot renders without its CSS (just loses some grid styling).
+  // Stylesheet: best-effort — uPlot renders without its CSS (just loses some
+  // grid styling). CDN mode falls back to the local copy; Local mode never
+  // reaches out to the internet.
   var link = document.createElement("link");
   link.rel  = "stylesheet";
   link.href = preferLocal ? localCss : cdnCss;
@@ -77,28 +78,23 @@ function dbLoadUPlot(cb) {
     link.crossOrigin = "anonymous";
   }
   link.onerror = function () {
-    var fallbackCss = preferLocal ? cdnCss : localCss;
-    if (fallbackCss && link.href !== fallbackCss) {
-      var link2 = document.createElement("link");
-      link2.rel  = "stylesheet";
-      link2.href = fallbackCss;
-      if (fallbackCss === cdnCss) {
-        link2.integrity   = CDN_CSS_SRI;
-        link2.crossOrigin = "anonymous";
-      }
-      document.head.appendChild(link2);
-    }
+    if (preferLocal) return;
+    var link2 = document.createElement("link");
+    link2.rel  = "stylesheet";
+    link2.href = localCss;
+    document.head.appendChild(link2);
   };
   document.head.appendChild(link);
 
-  // Always try local first; fall back to CDN only on 404 (local missing).
+  // Script: always try the local copy first (faster, works in captive-portal
+  // AP mode). The jsdelivr CDN is used only when the user explicitly selected
+  // "CDN" in Theme → Chart source — a missing local file no longer triggers a
+  // silent external request against the Local (default) preference.
   var s = document.createElement("script");
   s.src = localSrc;
   s.onload = fire;
   s.onerror = function () {
-    var isOffline = (ST.wifi === "ap") || (CFG.network && CFG.network.wifiMode === 0);
-    if (isOffline) {
-      showToast("Offline AP mode: upload uPlot.iife.min.js(.gz) to LittleFS.", "error");
+    if (preferLocal) {
       _giveUp();
       return;
     }
@@ -310,7 +306,7 @@ function dbMountSparkChart(key, xs, ys) {
   }
   host.innerHTML = "";
   var rootStyle = getComputedStyle(document.documentElement);
-  var stroke = rootStyle.getPropertyValue("--primary").trim() || "#275673";
+  var stroke = rootStyle.getPropertyValue("--accent").trim() || "#275673";
   dbCardCharts[key] = new uPlot({
     width:  host.clientWidth || 200,
     height: host.clientHeight || 48,
@@ -324,16 +320,27 @@ function dbMountSparkChart(key, xs, ys) {
       { stroke: stroke, width: 1.5, points: { show: false }, fill: stroke + "22" },
     ],
   }, [xs, ys], host);
+  // Cards can be built while the page is display:none (host measures 0×0 and
+  // the 200×48 fallback sticks, bleeding over the card footer once shown).
+  // Re-sync to the real box on the next frame.
+  requestAnimationFrame(function () {
+    var u = dbCardCharts[key];
+    var w = host.clientWidth, h = host.clientHeight;
+    if (u && w && h && (u.width !== w || u.height !== h)) {
+      try { u.setSize({ width: w, height: h }); } catch (e) {}
+    }
+  });
 }
 
 function dbRefreshLatest() {
   fetchWithTimeout("/api/latest")
-    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
     .then(function (d) {
+      if (typeof setConnState === "function") setConnState(true);
       var status = document.getElementById("db-poll-status");
       if (status) {
-        status.textContent = "✅ " + new Date().toLocaleTimeString();
-        status.className = "text-success";
+        status.textContent = "✓ " + new Date().toLocaleTimeString();
+        status.className = "badge ok";
       }
       var items = (d && d.items) || [];
       items.forEach(function (it) {
@@ -356,10 +363,11 @@ function dbRefreshLatest() {
       });
     })
     .catch(function () {
+      if (typeof setConnState === "function") setConnState(false);
       var status = document.getElementById("db-poll-status");
       if (status) {
-        status.textContent = "⚠️ offline";
-        status.className = "text-warning";
+        status.textContent = "offline";
+        status.className = "badge err";
       }
     });
 }
@@ -1087,6 +1095,7 @@ function liveStartTransport() {
   _liveResetKeepalive();
   liveES.addEventListener("live", function (ev) {
     _liveResetKeepalive();
+    if (typeof setConnState === "function") setConnState(true);
     try { liveRender(JSON.parse(ev.data)); } catch (e) {}
   });
   liveES.onerror = function () {
@@ -1097,6 +1106,7 @@ function liveStartTransport() {
       conn.textContent = "● Reconnecting…";
       conn.className = "text-warning";
     }
+    if (typeof setConnState === "function") setConnState(false);
     if (!liveTimer) liveStartPolling(1000);
   };
 }
@@ -1123,11 +1133,16 @@ function liveUpdate() {
   if (_liveInFlight) return;
   _liveInFlight = true;
   fetchWithTimeout("/api/live")
-    .then(function (r) {
-      return r.json();
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (d) {
+      // Polling is the SSE fallback — a working poll must clear the offline
+      // chip that the EventSource error handler set, or it sticks at
+      // "Offline" while live telemetry visibly updates.
+      if (typeof setConnState === "function") setConnState(true);
+      liveRender(d);
     })
-    .then(liveRender)
     .catch(function () {
+      if (typeof setConnState === "function") setConnState(false);
       var conn = document.getElementById("conn");
       if (conn) {
         conn.textContent = "● Disconnected";
@@ -1164,6 +1179,17 @@ function liveRender(d) {
   setEl("live-uptime", d.uptime);
   if (d.fsTotal)
     setEl("live-storage", fmtBytes(d.fsUsed) + "/" + fmtBytes(d.fsTotal));
+  // RAM/storage meter fills. d.heap is FREE heap, so the bar shows the used
+  // fraction; > 85 % turns the fill amber via .bar > span.warn.
+  function _fillBar(id, used, total) {
+    var el = document.getElementById(id);
+    if (!el || !total) return;
+    var pct = Math.max(0, Math.min(100, Math.round(used / total * 100)));
+    el.style.width = pct + "%";
+    el.classList.toggle("warn", pct > 85);
+  }
+  if (d.heapTotal) _fillBar("live-heapBar", d.heapTotal - d.heap, d.heapTotal);
+  if (d.fsTotal)   _fillBar("live-storageBar", d.fsUsed, d.fsTotal);
 
   var stClasses = {
     IDLE:       "sm-idle",

@@ -154,7 +154,7 @@ function changelogLoad() {
           html +=
             '<div style="margin-top:.5rem;padding:.5rem;border-radius:4px;' +
             (isCur
-              ? "background:var(--primary);color:#fff"
+              ? "background:var(--accent);color:var(--accent-fg)"
               : "background:var(--border);color:var(--text-muted)") +
             '">' +
             "<strong>" +
@@ -703,7 +703,7 @@ function netCheckScan() {
           list.innerHTML = "";
           var errRow = document.createElement("div");
           errRow.className = "list-item";
-          errRow.textContent = "❌ " + d.error;
+          errRow.textContent = "✗ " + d.error;
           list.appendChild(errRow);
         }
       } else if (!d.networks || !d.networks.length) {
@@ -737,7 +737,7 @@ function netCheckScan() {
       l.innerHTML = "";
       var row = document.createElement("div");
       row.className = "list-item";
-      row.textContent = "❌ Error: " + e;
+      row.textContent = "✗ Error: " + e;
       l.appendChild(row);
     });
 }
@@ -749,18 +749,18 @@ var netTestPollTimer = null;
 function netTestPoll(out, tries) {
   if (!out) return;
   if (tries > 20) {          // 20×600ms ≈ 12s — safely over the 8s server cap
-    out.textContent = "❌ Timed out waiting for result";
+    out.textContent = "✗ Timed out waiting for result";
     out.style.color = "var(--danger)";
     return;
   }
   fetchWithTimeout("/api/modules/wifi/test", {}, 15000)
-    .then(function (r) { return r.json(); })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
     .then(function (d) {
       if (d.state === "success") {
-        out.textContent = "✅ Connected (" + d.rssi + " dBm, " + d.ip + ")";
+        out.textContent = "✓ Connected (" + d.rssi + " dBm, " + d.ip + ")";
         out.style.color = "var(--success)";
       } else if (d.state === "failed") {
-        out.textContent = "❌ " + (d.error || "Failed to connect");
+        out.textContent = "✗ " + (d.error || "Failed to connect");
         out.style.color = "var(--danger)";
       } else if (d.state === "running") {
         netTestPollTimer = setTimeout(function () {
@@ -772,7 +772,7 @@ function netTestPoll(out, tries) {
       }
     })
     .catch(function (e) {
-      out.textContent = "❌ " + e;
+      out.textContent = "✗ " + e;
       out.style.color = "var(--danger)";
     });
 }
@@ -799,13 +799,13 @@ function netTestWifi() {
       if (resp.status === 202) {
         netTestPoll(out, 0);
       } else {
-        out.textContent = "❌ " + (resp.body.error || "Start failed");
+        out.textContent = "✗ " + (resp.body.error || "Start failed");
         out.style.color = "var(--danger)";
       }
     })
     .catch(function (e) {
       if (!out) return;
-      out.textContent = "❌ " + e;
+      out.textContent = "✗ " + e;
       out.style.color = "var(--danger)";
     });
 }
@@ -834,13 +834,13 @@ function timeInit() {
         var src = d.timeSource || "unknown";
         if (src === "rtc") {
           status.className = "alert alert-success";
-          status.innerHTML = "✅ RTC";
+          status.innerHTML = "✓ RTC";
         } else if (src === "ntp") {
           status.className = "alert alert-success";
-          status.innerHTML = "✅ NTP";
+          status.innerHTML = "✓ NTP";
         } else {
           status.className = "alert alert-" + (rtcPresent ? "error" : "warning");
-          status.innerHTML = rtcPresent ? "❌ RTC Error" : "⚠️ Time not set";
+          status.innerHTML = rtcPresent ? "✗ RTC Error" : "⚠ Time not set";
         }
       }
       var detail = document.getElementById("rtcDetail");
@@ -860,8 +860,8 @@ function timeInit() {
           d.wifi === "client" ? "alert alert-success" : "alert alert-warning";
         ntpSt.innerHTML =
           d.wifi === "client"
-            ? "✅ WiFi Connected – NTP available"
-            : "⚠️ Not connected (AP mode) – NTP unavailable";
+            ? "✓ WiFi Connected – NTP available"
+            : "⚠ Not connected (AP mode) – NTP unavailable";
       }
       var dateEl = document.getElementById("date");
       if (dateEl && !dateEl.value)
@@ -891,8 +891,8 @@ function timeSetManual(ev) {
       showMsg(
         "time-msg",
         d.ok
-          ? "<div class='alert alert-success'>✅ Time set!</div>"
-          : "<div class='alert alert-error'>❌ " +
+          ? "<div class='alert alert-success'>✓ Time set!</div>"
+          : "<div class='alert alert-error'>✗ " +
               (d.error || "Failed") +
               "</div>",
         true,
@@ -905,15 +905,15 @@ function timeSyncNTP(ev) {
   if (ev) ev.preventDefault();
   showMsg(
     "time-msg",
-    "<div class='alert alert-info'>⏳ Syncing from NTP…</div>",
+    "<div class='alert alert-info'>Syncing from NTP…</div>",
     true,
   );
   postWithCsrf("/sync_time", { method: "POST" }, 30000)
-    .then(function (r) { return r.json(); })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
     .then(function (d) {
       if (!d.ok) {
         showMsg("time-msg",
-          "<div class='alert alert-error'>❌ NTP sync failed to start</div>",
+          "<div class='alert alert-error'>✗ NTP sync failed to start</div>",
           true);
         return;
       }
@@ -927,18 +927,18 @@ function timeSyncNTP(ev) {
           .then(function (s) {
             if (s.result === 1) {
               showMsg("time-msg",
-                "<div class='alert alert-success'>✅ Time synced!</div>",
+                "<div class='alert alert-success'>✓ Time synced!</div>",
                 true);
               timeInit();
             } else if (s.result === -1) {
               showMsg("time-msg",
-                "<div class='alert alert-error'>❌ NTP sync failed</div>",
+                "<div class='alert alert-error'>✗ NTP sync failed</div>",
                 true);
             } else if (attempts < 30) {
               setTimeout(poll, 500);
             } else {
               showMsg("time-msg",
-                "<div class='alert alert-error'>❌ NTP sync timed out</div>",
+                "<div class='alert alert-error'>✗ NTP sync timed out</div>",
                 true);
             }
           })
@@ -950,7 +950,7 @@ function timeSyncNTP(ev) {
     })
     .catch(function () {
       showMsg("time-msg",
-        "<div class='alert alert-error'>❌ Network error — could not start sync</div>",
+        "<div class='alert alert-error'>✗ Network error — could not start sync</div>",
         true);
     });
 }
@@ -969,14 +969,14 @@ function timeFlushLogs() {
       showMsg(
         "time-msg",
         d.ok
-          ? "<div class='alert alert-success'>✅ Log buffer flushed</div>"
-          : "<div class='alert alert-error'>❌ " + (d.error || "Flush failed") + "</div>",
+          ? "<div class='alert alert-success'>✓ Log buffer flushed</div>"
+          : "<div class='alert alert-error'>✗ " + (d.error || "Flush failed") + "</div>",
         true,
       );
     })
     .catch(function () {
       showMsg("time-msg",
-        "<div class='alert alert-error'>❌ Network error — flush failed</div>", true);
+        "<div class='alert alert-error'>✗ Network error — flush failed</div>", true);
     });
 }
 function timeBackupBoot() {
@@ -986,14 +986,14 @@ function timeBackupBoot() {
       showMsg(
         "time-msg",
         d.ok
-          ? "<div class='alert alert-success'>✅ Boot count backed up</div>"
-          : "<div class='alert alert-error'>❌ " + (d.error || "Backup failed") + "</div>",
+          ? "<div class='alert alert-success'>✓ Boot count backed up</div>"
+          : "<div class='alert alert-error'>✗ " + (d.error || "Backup failed") + "</div>",
         true,
       );
     })
     .catch(function () {
       showMsg("time-msg",
-        "<div class='alert alert-error'>❌ Network error — backup failed</div>", true);
+        "<div class='alert alert-error'>✗ Network error — backup failed</div>", true);
     });
 }
 function timeRestoreBoot() {
@@ -1006,19 +1006,19 @@ function timeRestoreBoot() {
       showMsg(
         "time-msg",
         d.ok
-          ? "<div class='alert alert-success'>✅ Restored: " +
+          ? "<div class='alert alert-success'>✓ Restored: " +
               d.old +
               " → " +
               d["new"] +
               "</div>"
-          : "<div class='alert alert-error'>❌ Restore failed</div>",
+          : "<div class='alert alert-error'>✗ Restore failed</div>",
         true,
       );
       if (d.ok) timeInit();
     })
     .catch(function () {
       showMsg("time-msg",
-        "<div class='alert alert-error'>❌ Network error — restore failed</div>", true);
+        "<div class='alert alert-error'>✗ Network error — restore failed</div>", true);
     });
 }
 
@@ -1591,7 +1591,7 @@ function slInit() {
 function dlSwitchFile() {
   var sel = document.getElementById("curFile");
   if (!sel || !sel.value) {
-    showMsg("dl-msg", "<div class='alert alert-error'>❌ Select a file first</div>", true);
+    showMsg("dl-msg", "<div class='alert alert-error'>✗ Select a file first</div>", true);
     return;
   }
   var path = sel.value;
@@ -1604,15 +1604,15 @@ function dlSwitchFile() {
       .then(function (resp) {
         if (resp.ok) {
           showMsg("dl-msg",
-            "<div class='alert alert-success'>✅ Switched active file to " + esc(path) + "</div>", true);
+            "<div class='alert alert-success'>✓ Switched active file to " + esc(path) + "</div>", true);
           dlLoadFiles();
         } else {
           showMsg("dl-msg",
-            "<div class='alert alert-error'>❌ " + esc(resp.error || "Switch failed") + "</div>", true);
+            "<div class='alert alert-error'>✗ " + esc(resp.error || "Switch failed") + "</div>", true);
         }
       })
       .catch(function () {
-        showMsg("dl-msg", "<div class='alert alert-error'>❌ Network error</div>", true);
+        showMsg("dl-msg", "<div class='alert alert-error'>✗ Network error</div>", true);
       });
   });
 }
@@ -1623,7 +1623,7 @@ function dlSwitchFile() {
 function dlCreateFile() {
   var prefix = getVal("dl-prefix") || "";
   if (!prefix) {
-    showMsg("dl-msg", "<div class='alert alert-error'>❌ Prefix required</div>", true);
+    showMsg("dl-msg", "<div class='alert alert-error'>✗ Prefix required</div>", true);
     return;
   }
   getCsrfToken().then(function (token) {
@@ -1640,15 +1640,15 @@ function dlCreateFile() {
       .then(function (resp) {
         if (resp.ok) {
           showMsg("dl-msg",
-            "<div class='alert alert-success'>✅ Created and switched to " + esc(resp.file || "") + "</div>", true);
+            "<div class='alert alert-success'>✓ Created and switched to " + esc(resp.file || "") + "</div>", true);
           dlInit();
         } else {
           showMsg("dl-msg",
-            "<div class='alert alert-error'>❌ " + esc(resp.error || "Create failed") + "</div>", true);
+            "<div class='alert alert-error'>✗ " + esc(resp.error || "Create failed") + "</div>", true);
         }
       })
       .catch(function () {
-        showMsg("dl-msg", "<div class='alert alert-error'>❌ Network error</div>", true);
+        showMsg("dl-msg", "<div class='alert alert-error'>✗ Network error</div>", true);
       });
   });
 }
@@ -2105,7 +2105,28 @@ function modulesSelect(id) { Modules.select(id); }
 // Enrol markup-reachable handlers.  See core.js::Handlers for the whitelist
 // rationale.  modulesInit is called internally by pageInit, not via markup,
 // so it is left out here.
+// Settings-hub filter — #settings-search shipped with no handler, so typing
+// in it did nothing. Matches card title/description text; hides sections
+// whose cards all miss and shows the #settings-no-match empty state.
+function settingsHubFilter() {
+  var q = (this.value || "").trim().toLowerCase();
+  var any = false;
+  document.querySelectorAll("#settings-grid .set-card").forEach(function (c) {
+    var hit = !q || c.textContent.toLowerCase().indexOf(q) !== -1;
+    c.classList.toggle("search-hide", !!q && !hit);
+    c.classList.toggle("search-match", !!q && hit);
+    if (hit) any = true;
+  });
+  document.querySelectorAll("#settings-grid .settings-section").forEach(function (sec) {
+    var visible = sec.querySelector(".set-card:not(.search-hide)");
+    sec.style.display = visible ? "" : "none";
+  });
+  var nomatch = document.getElementById("settings-no-match");
+  if (nomatch) nomatch.style.display = any ? "none" : "";
+}
+
 registerHandlers({
+  settingsHubFilter: settingsHubFilter,
   regenDevId: regenDevId,
   toggleManualId: toggleManualId,
   changelogToggle: changelogToggle,

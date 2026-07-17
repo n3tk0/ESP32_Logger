@@ -288,14 +288,28 @@
       '<path d="M9.8 4.4A2 2 0 1 1 11 8H2"></path>'
   };
 
+  // Late additions (moved here from raw inline SVGs in index.html).
+  ICON_PATHS["terminal"] =
+    '<polyline points="4 17 10 11 4 5"></polyline>' +
+    '<line x1="12" x2="20" y1="19" y2="19"></line>';
+  ICON_PATHS["circle-dot"] =
+    '<circle cx="12" cy="12" r="10"></circle>' +
+    '<circle cx="12" cy="12" r="1"></circle>';
+  ICON_PATHS["memory-stick"] =
+    '<path d="M6 19v-3"></path><path d="M10 19v-3"></path>' +
+    '<path d="M14 19v-3"></path><path d="M18 19v-3"></path>' +
+    '<path d="M8 11V9"></path><path d="M16 11V9"></path>' +
+    '<path d="M12 11V9"></path><path d="M2 15h20"></path>' +
+    '<path d="M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v1.1a2 2 0 0 0 0 3.837V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5.1a2 2 0 0 0 0-3.837Z"></path>';
+
   // Aliases — names referenced by the UI for which we don't ship a dedicated
   // glyph yet. Map each to the closest existing icon so it renders instead of
   // showing blank. Assigned after the literal so the source paths exist.
   ICON_PATHS["puzzle"]       = ICON_PATHS["layers"];
   ICON_PATHS["satellite"]    = ICON_PATHS["globe"];
-  ICON_PATHS["memory-stick"] = ICON_PATHS["cpu"];
   ICON_PATHS["microchip"]    = ICON_PATHS["cpu"];
   ICON_PATHS["file-archive"] = ICON_PATHS["archive"];
+  ICON_PATHS["bell-plus"]    = ICON_PATHS["plus-circle"];
 
   function svg(name) {
     var body = ICON_PATHS[name];

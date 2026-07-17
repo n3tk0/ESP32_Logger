@@ -68,10 +68,14 @@
     var width = container.clientWidth;
     if (width <= 0) return;
     var colW = (width - GAP * (COLUMNS - 1)) / COLUMNS;
+    // Below ~560px a span-4/6 card would be under 180px wide — unusably
+    // cramped. Stack every card full-width instead (mirrors the CSS grids'
+    // single-column phone breakpoint).
+    var forceFull = width < 560;
 
     // First pass: set widths and clear explicit heights so natural height is measured.
     slots.forEach(function (slot) {
-      var span = Math.max(1, Math.min(COLUMNS, +slot.dataset.span || 4));
+      var span = forceFull ? COLUMNS : Math.max(1, Math.min(COLUMNS, +slot.dataset.span || 4));
       slot.style.width = (span * colW + (span - 1) * GAP) + "px";
       slot.style.height = "";
     });
@@ -85,8 +89,8 @@
     var currentCol = 0;
 
     slots.forEach(function (slot) {
-      var span = Math.max(1, Math.min(COLUMNS, +slot.dataset.span || 4));
-      
+      var span = forceFull ? COLUMNS : Math.max(1, Math.min(COLUMNS, +slot.dataset.span || 4));
+
       // Wrap to next row if this card exceeds remaining columns
       if (currentCol > 0 && currentCol + span > COLUMNS) {
         rows.push(currentRow);
