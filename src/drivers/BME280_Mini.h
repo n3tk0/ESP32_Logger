@@ -184,6 +184,7 @@ private:
         _wire->write(reg);
         _wire->endTransmission(false);
         _wire->requestFrom(_addr, (uint8_t)1);
+        if (_wire->available() < 1) return 0xFF;  // short read → invalid chip id / status
         return _wire->read();
     }
 
@@ -192,6 +193,7 @@ private:
         _wire->write(reg);
         _wire->endTransmission(false);
         _wire->requestFrom(_addr, (uint8_t)2);
+        if (_wire->available() < 2) return 0x8000;  // short read → humidity skip sentinel
         uint16_t val = (uint16_t)_wire->read() << 8;
         val |= _wire->read();
         return val;
@@ -202,6 +204,7 @@ private:
         _wire->write(reg);
         _wire->endTransmission(false);
         _wire->requestFrom(_addr, (uint8_t)3);
+        if (_wire->available() < 3) return 0x800000;  // short read → (>>4)=0x80000 skip sentinel
         int32_t val = (int32_t)_wire->read() << 16;
         val |= (int32_t)_wire->read() << 8;
         val |= _wire->read();

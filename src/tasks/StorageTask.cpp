@@ -184,11 +184,17 @@ void storageTaskFunc(void* param) {
                 // window.  (AUDIT 2.16)
                 {
                     MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-                    if (g.isLocked()) primary.appendRow(rowTs, headerBuf, rowBuf);
+                    if (g.isLocked() && !primary.appendRow(rowTs, headerBuf, rowBuf)) {
+                        Serial.printf("[StorageTask] primary row LOST ts=%lu\n", (unsigned long)rowTs);
+                        g_queueDrops++;
+                    }
                 }
                 if (mirrorActive) {
                     MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-                    if (g.isLocked()) mirror.appendRow(rowTs, headerBuf, rowBuf);
+                    if (g.isLocked() && !mirror.appendRow(rowTs, headerBuf, rowBuf)) {
+                        Serial.printf("[StorageTask] mirror row LOST ts=%lu\n", (unsigned long)rowTs);
+                        g_queueDrops++;
+                    }
                 }
             }
         }
@@ -201,8 +207,14 @@ void storageTaskFunc(void* param) {
             if (agg.buildHeader(headerBuf, sizeof(headerBuf)) > 0) {
                 MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
                 if (g.isLocked()) {
-                    primary.appendRow(rowTs, headerBuf, rowBuf);
-                    if (mirrorActive) mirror.appendRow(rowTs, headerBuf, rowBuf);
+                    if (!primary.appendRow(rowTs, headerBuf, rowBuf)) {
+                        Serial.printf("[StorageTask] final primary row LOST ts=%lu\n", (unsigned long)rowTs);
+                        g_queueDrops++;
+                    }
+                    if (mirrorActive && !mirror.appendRow(rowTs, headerBuf, rowBuf)) {
+                        Serial.printf("[StorageTask] final mirror row LOST ts=%lu\n", (unsigned long)rowTs);
+                        g_queueDrops++;
+                    }
                 }
             }
         }

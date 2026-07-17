@@ -149,8 +149,8 @@ void SerialProvisioner::_cmdConnect(const char* ssid, const char* pass) {
     // • Exit early on terminal failure states so we don't spin the full timeout
     //   when the password is wrong or the SSID no longer exists.
     constexpr uint32_t TIMEOUT_MS = 20000;
-    uint32_t deadline = millis() + TIMEOUT_MS;
-    while (millis() < deadline) {
+    uint32_t start = millis();
+    while (millis() - start < TIMEOUT_MS) {
         wl_status_t st = (wl_status_t)WiFi.status();
         if (st == WL_CONNECTED)      break;
         if (st == WL_CONNECT_FAILED) break;   // wrong password

@@ -50,14 +50,17 @@ bool VEML7700Sensor::init(JsonObjectConst cfg) {
 
     if (_gain > 3) _gain = 0;
 
-    // Map integration time to register bits [5:2]
-    uint8_t itBits = 0b1000; // default 100ms
-    if      (_intMs <= 25)  itBits = 0b1100;
-    else if (_intMs <= 50)  itBits = 0b1000;
-    else if (_intMs <= 100) itBits = 0b0000;
-    else if (_intMs <= 200) itBits = 0b0001;
-    else if (_intMs <= 400) itBits = 0b0010;
-    else                    itBits = 0b0011; // 800ms
+    // Map integration time to register bits [5:2]. effIntMs is the actual
+    // programmed IT after snapping — the lux scale must use this, not the raw
+    // requested _intMs, or non-standard requests get a wrong resolution.
+    uint8_t  itBits   = 0b0000; // 100ms
+    uint16_t effIntMs = 100;
+    if      (_intMs <= 25)  { itBits = 0b1100; effIntMs = 25;  }
+    else if (_intMs <= 50)  { itBits = 0b1000; effIntMs = 50;  }
+    else if (_intMs <= 100) { itBits = 0b0000; effIntMs = 100; }
+    else if (_intMs <= 200) { itBits = 0b0001; effIntMs = 200; }
+    else if (_intMs <= 400) { itBits = 0b0010; effIntMs = 400; }
+    else                    { itBits = 0b0011; effIntMs = 800; }
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
@@ -81,10 +84,10 @@ bool VEML7700Sensor::init(JsonObjectConst cfg) {
     }
     delay(_intMs + 10);
 
-    _resolution = _lookupResolution(_gain, _intMs);
+    _resolution = _lookupResolution(_gain, effIntMs);
     _ready = true;
     Serial.printf("[VEML7700] Ready gain=%d IT=%dms res=%.5f\n",
-                  _gain, _intMs, _resolution);
+                  _gain, effIntMs, _resolution);
     return true;
 }
 

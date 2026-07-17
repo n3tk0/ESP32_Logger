@@ -52,19 +52,32 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
 
     size_t pos    = 0;
     int    mapped = 0;
-    pos += snprintf(body + pos, bodyLen - pos, "[");
+    // Overflow-proof append: clamp so pos never advances past bodyLen (H1).
+    auto appendOk = [&](int written) -> bool {
+        size_t remaining = bodyLen - pos;
+        if (written < 0 || (size_t)written >= remaining) {
+            body[bodyLen - 1] = '\0';
+            return false;
+        }
+        pos += written;
+        return true;
+    };
 
-    for (size_t i = 0; i < count; i++) {
+    bool full = appendOk(snprintf(body + pos, bodyLen - pos, "["));
+    for (size_t i = 0; full && i < count; i++) {
         const char* sid = _lookupSensorId(readings[i].metric);
         if (!sid || sid[0] == '\0') continue;
 
-        if (mapped > 0) pos += snprintf(body + pos, bodyLen - pos, ",");
-        pos += snprintf(body + pos, bodyLen - pos,
+        if (mapped > 0) {
+            full = appendOk(snprintf(body + pos, bodyLen - pos, ","));
+            if (!full) break;
+        }
+        full = appendOk(snprintf(body + pos, bodyLen - pos,
             "{\"sensor\":\"%s\",\"value\":\"%.4g\"}",
-            sid, readings[i].value);
+            sid, readings[i].value));
         mapped++;
     }
-    pos += snprintf(body + pos, bodyLen - pos, "]");
+    if (full) appendOk(snprintf(body + pos, bodyLen - pos, "]"));
 
     bool ok = true;
     if (mapped > 0) {

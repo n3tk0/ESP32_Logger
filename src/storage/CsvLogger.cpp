@@ -84,11 +84,7 @@ void CsvLogger::_rotate(const char* path) {
     // length bumps don't silently truncate the backup name.
     char bak[96];
     snprintf(bak, sizeof(bak), "%s.bak", path);
-    MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
-    if (!guard.isLocked()) {
-        Serial.printf("[CsvLogger] rotation skipped for %s (mutex timeout)\n", path);
-        return;
-    }
+    // Caller (StorageTask) holds fsMutex; this runs under it — must NOT re-acquire (non-recursive).
     if (_fs->rename(path, bak)) {
         // success — LittleFS overwrote atomically
     } else if (_fs->exists(bak) && _fs->remove(bak) && _fs->rename(path, bak)) {

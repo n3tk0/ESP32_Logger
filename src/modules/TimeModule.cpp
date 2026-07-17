@@ -25,6 +25,7 @@ bool TimeModule::load(JsonObjectConst cfg) {
     n.timezone       = (int8_t)(cfg["timezone"]       | (int)n.timezone);
     if (n.timezone < -12 || n.timezone > 14) n.timezone = 0;
     n.dstOffsetHours = (int8_t)(cfg["dstOffsetHours"] | (int)n.dstOffsetHours);
+    if (n.dstOffsetHours < 0 || n.dstOffsetHours > 2) n.dstOffsetHours = 0;
     return true;
 }
 

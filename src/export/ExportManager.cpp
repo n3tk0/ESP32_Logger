@@ -213,11 +213,11 @@ bool ExportManager::_drainSpool(IExporter* exp) {
 // ---------------------------------------------------------------------------
 void ExportManager::sendAll(const SensorReading* readings, size_t count) {
     // EXPORT_MAX_SENDALL_MS is the per-call circuit breaker (setup.h).
-    uint32_t deadline = millis() + EXPORT_MAX_SENDALL_MS;
+    uint32_t start = millis();
 
     for (int i = 0; i < _count; i++) {
         if (!_exporters[i]->isEnabled()) continue;
-        if (millis() > deadline) {
+        if (millis() - start > EXPORT_MAX_SENDALL_MS) {
             Serial.printf("[ExportManager] circuit breaker: skipping '%s'\n",
                           _exporters[i]->getName());
             break;

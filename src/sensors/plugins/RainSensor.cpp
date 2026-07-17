@@ -47,15 +47,24 @@ int RainSensor::readAll(SensorReading* out, int maxOut) {
     noInterrupts();
     uint32_t tips       = _tips;
     uint32_t intervalUs = _lastIntervalUs;
+    uint32_t lastTipUs  = _lastTipUs;
     interrupts();
 
     float total = _calTotal.apply((float)tips * _mmPerTip);
 
-    // Instantaneous rate: if last tip was recent, extrapolate to mm/h
+    // Instantaneous rate: extrapolate the last inter-tip interval to mm/h, but
+    // decay to zero once rain stops. If no tip has arrived for more than twice
+    // the last interval, the bucket has clearly stopped tipping, so report 0
+    // instead of holding a stale rate forever. The window scales with rain
+    // intensity (mirrors WaterFlowSensor's self-clearing per-window delta) and
+    // uses rollover-safe unsigned micros() subtraction.
     float rate = 0.0f;
     if (intervalUs > 0 && intervalUs < 3600000000UL) {
-        float rawRate = _mmPerTip * 3600000000.0f / (float)intervalUs;
-        rate = _calRate.apply(rawRate);
+        uint32_t sinceLastTipUs = (uint32_t)micros() - lastTipUs;
+        if ((uint64_t)sinceLastTipUs <= 2ULL * (uint64_t)intervalUs) {
+            float rawRate = _mmPerTip * 3600000000.0f / (float)intervalUs;
+            rate = _calRate.apply(rawRate);
+        }
     }
 
     out[0] = SensorReading::make(0, _id, getType(), "rain_rate",  rate,  "mm/h");
