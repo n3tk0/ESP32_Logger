@@ -40,7 +40,7 @@ const char* CsrfToken::get() {
     return s_token;
 }
 
-bool CsrfToken::require(AsyncWebServerRequest* req) {
+bool CsrfToken::valid(AsyncWebServerRequest* req) {
     ensureToken();
     // ESPAsyncWebServer drops custom request headers unless individual
     // handlers opt in via addInterestingHeader; rather than touch every
@@ -54,10 +54,11 @@ bool CsrfToken::require(AsyncWebServerRequest* req) {
     } else if (req->hasParam("csrf")) {       // query string
         supplied = req->getParam("csrf")->value();
     }
+    return (supplied.length() == 32 && secureEq(supplied.c_str(), s_token));
+}
 
-    if (supplied.length() == 32 && secureEq(supplied.c_str(), s_token)) {
-        return true;
-    }
+bool CsrfToken::require(AsyncWebServerRequest* req) {
+    if (valid(req)) return true;
 
     // Reject — same shape as the rate-limit 429 so client error handling
     // can be uniform.

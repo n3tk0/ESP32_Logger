@@ -883,7 +883,7 @@ function timeSetManual(ev) {
   ev.preventDefault();
   var form = ev.target;
   var fd = new FormData(form);
-  fetchWithTimeout("/set_time", { method: "POST", body: fd }, 30000)
+  postWithCsrf("/set_time", { method: "POST", body: fd }, 30000)
     .then(function (r) {
       return r.json();
     })
@@ -1778,7 +1778,7 @@ var Modules = (function () {
   function toggle(id, on) {
     setMsg("");
     var m = _find(id);
-    fetchWithTimeout("/api/modules/" + encodeURIComponent(id) + "/enable?on=" + (on ? "1" : "0"),
+    postWithCsrf("/api/modules/" + encodeURIComponent(id) + "/enable?on=" + (on ? "1" : "0"),
                      { method: "POST" }, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (res) {

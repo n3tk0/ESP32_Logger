@@ -2050,7 +2050,7 @@
           // pipeline keeps the old config until reloaded. Mirror the Core Logic
           // page: signal a reload (sets shouldRestart server-side; not CSRF-
           // gated). Refresh the list once the device is back up.
-          fetchWithTimeout("/api/platform_reload", { method: "POST" }, 30000).catch(function () {});
+          postWithCsrf("/api/platform_reload", { method: "POST" }, 30000).catch(function () {});
           setTimeout(function () { if (typeof sensorsLoad === "function") sensorsLoad(); }, 6000);
         } else {
           showToast("Save failed", (res && res.error) || "Check firmware logs", "err");

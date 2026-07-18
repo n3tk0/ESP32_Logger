@@ -316,6 +316,7 @@ static void handleApiSensors(AsyncWebServerRequest* req) {
 // POST /api/config/platform — reload platform_config.json
 // ---------------------------------------------------------------------------
 static void handleConfigPlatform(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
     if (!activeFS) {
         req->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
         return;
@@ -520,6 +521,7 @@ static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
 // POST /api/mqtt/ha_discovery — trigger HA MQTT discovery payloads on demand
 // ---------------------------------------------------------------------------
 static void handleMqttHaDiscovery(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
 #ifdef EXPORT_MQTT_ENABLED
     if (!g_mqttExporter) {
         req->send(503, "application/json", "{\"ok\":false,\"error\":\"mqtt not initialised\"}");
@@ -552,6 +554,7 @@ static void handleOtaStatus(AsyncWebServerRequest* req) {
 // POST /api/ota/confirm — confirm current firmware as stable
 // ---------------------------------------------------------------------------
 static void handleOtaConfirm(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
     if (OtaManager::confirm()) {
         req->send(200, "application/json", "{\"ok\":true}");
     } else {
@@ -563,6 +566,7 @@ static void handleOtaConfirm(AsyncWebServerRequest* req) {
 // POST /api/ota/rollback — revert to previous firmware partition and restart
 // ---------------------------------------------------------------------------
 static void handleOtaRollback(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
     req->send(200, "application/json",
               "{\"ok\":true,\"message\":\"Rolling back and restarting...\"}");
     // Set a flag consumed by loop() — avoids delay(200) blocking the AsyncTCP
@@ -638,7 +642,7 @@ static void handleApiModuleUpdate(AsyncWebServerRequest* req, const String& id,
 // flag; the next saveConfig() persists it and the caller can reboot via
 // /restart if needed (audit Pass 5 5.3 "enable endpoint").
 static void handleApiModuleEnable(AsyncWebServerRequest* req, const String& id) {
-    if (rateLimit429(req)) return;
+    if (!requireMutatingAuth(req)) return;   // was rate-limit only — add CSRF
     IModule* mod = moduleRegistry.getById(id.c_str());
     if (!mod) {
         req->send(404, "application/json", "{\"ok\":false,\"error\":\"unknown module\"}");
@@ -1076,6 +1080,7 @@ static void handleApiAlertsToasts(AsyncWebServerRequest* req) {
 // POST /api/i2c_scan — scan the Wire bus and return detected addresses
 // ---------------------------------------------------------------------------
 static void handleApiI2cScan(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
