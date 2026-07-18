@@ -26,6 +26,13 @@ namespace CsrfToken {
     // and returns true ("blocked") if not — caller should `return` straight
     // after.  Mirrors the rateLimit429() shape from RateLimiter.h.
     bool require(AsyncWebServerRequest* req);
+
+    // Same check as require() but sends NO response — returns true iff the
+    // token matches.  Use where the 403 must be emitted elsewhere, e.g. an
+    // onBody streaming callback that cannot own the request's single response
+    // (the request handler runs only after the full body, so the CSRF check
+    // must happen in onBody to guard against pre-handler state mutation).
+    bool valid(AsyncWebServerRequest* req);
 }
 
 // Convenience — usage at the top of a mutating handler:

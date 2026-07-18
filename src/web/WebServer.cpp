@@ -204,7 +204,7 @@ function fsClAddSensor(){var tp=prompt('Sensor type:\n'+FS_SENSOR_TYPES.map(func
 function fsClEditSensor(i){if(!FS_PCFG||!FS_PCFG.sensors)return;var s=FS_PCFG.sensors[i];var j=prompt('Edit sensor JSON:',JSON.stringify(s));if(!j)return;try{var ns=JSON.parse(j);var PK=['pin','sda','scl','uart_rx','uart_tx','trig_pin','echo_pin'];var used={};FS_PCFG.sensors.forEach(function(x,xi){if(xi===i)return;PK.forEach(function(k){if(x[k]!=null&&x[k]>=0)used[x[k]]=(used[x[k]]||[]).concat(x.id||x.type)})});var cfls=[];PK.forEach(function(k){if(ns[k]!=null&&ns[k]>=0&&used[ns[k]])cfls.push('GPIO'+ns[k]+' ('+k+') used by: '+used[ns[k]].join(', '))});if(cfls.length)alert('\u26a0\ufe0f Pin conflict:\n'+cfls.join('\n'));FS_PCFG.sensors[i]=ns;fsClRenderSensors(FS_PCFG.sensors)}catch(e){alert('Invalid JSON: '+e.message)}}
 function fsClRemoveSensor(i){if(!FS_PCFG||!FS_PCFG.sensors)return;if(!confirm('Remove "'+( FS_PCFG.sensors[i].id||FS_PCFG.sensors[i].type)+'"?'))return;FS_PCFG.sensors.splice(i,1);fsClRenderSensors(FS_PCFG.sensors)}
 function fsSlpChk(){var s=document.getElementById('cl-sleep'),w=document.getElementById('cl-slp-warn');if(s&&w)w.className=(s.value==='online')?'warn-box show':'warn-box'}
-function fsClSave(){var m=document.getElementById('cl-msg');if(!FS_PCFG){if(m){m.textContent='No config \u2014 click Reload first.';m.className='msg err'}return}var mE=document.getElementById('cl-mode'),sE=document.getElementById('cl-sleep');if(mE)FS_PCFG.mode=mE.value;if(sE)FS_PCFG.sleep_mode=sE.value;if(m){m.textContent='Saving\u2026';m.className='msg inf'}fetch('/api/csrf-token',{credentials:'same-origin'}).then(function(r){return r.json()}).catch(function(){return{}}).then(function(tok){var q=tok&&tok.token?('?csrf='+encodeURIComponent(tok.token)):'';var x=new XMLHttpRequest();x.open('POST','/save_platform'+q);x.setRequestHeader('Content-Type','application/json');x.onload=function(){try{var r=JSON.parse(x.responseText);if(r&&r.ok){if(m){m.textContent='\u2705 Saved! Restarting\u2026';m.className='msg ok'}setTimeout(function(){fetch('/api/platform_reload'+q,{method:'POST'}).catch(function(){});setTimeout(function(){location.reload()},5000)},300)}else{if(m){m.textContent='\u274c Save failed';m.className='msg err'}}}catch(e){if(m){m.textContent='\u274c '+e;m.className='msg err'}}};x.onerror=function(){if(m){m.textContent='\u274c Network error';m.className='msg err'}};x.send(JSON.stringify(FS_PCFG))})}
+function fsClSave(){var m=document.getElementById('cl-msg');if(!FS_PCFG){if(m){m.textContent='No config \u2014 click Reload first.';m.className='msg err'}return}var mE=document.getElementById('cl-mode'),sE=document.getElementById('cl-sleep');if(mE)FS_PCFG.mode=mE.value;if(sE)FS_PCFG.sleep_mode=sE.value;if(m){m.textContent='Saving\u2026';m.className='msg inf'}fetch('/api/csrf-token',{credentials:'same-origin'}).then(function(r){return r.json()}).catch(function(){return{}}).then(function(tok){var q=tok&&tok.token?('?csrf='+encodeURIComponent(tok.token)):'';var x=new XMLHttpRequest();x.open('POST','/save_platform'+q);x.setRequestHeader('Content-Type','application/json');x.onload=function(){try{var r=JSON.parse(x.responseText);if(r&&r.ok){if(m){m.textContent='\u2705 Saved! Restarting\u2026';m.className='msg ok'}setTimeout(function(){fetch('/api/platform_reload'+q,{method:'POST'}).then(function(res){if(!res.ok)throw new Error('HTTP '+res.status);setTimeout(function(){location.reload()},5000)}).catch(function(e){if(e&&e.message&&e.message.indexOf('HTTP')===0){if(m){m.textContent='❌ Reload failed: '+e.message;m.className='msg err'}}else{setTimeout(function(){location.reload()},5000)}})},300)}else{if(m){m.textContent='\u274c Save failed';m.className='msg err'}}}catch(e){if(m){m.textContent='\u274c '+e;m.className='msg err'}}};x.onerror=function(){if(m){m.textContent='\u274c Network error';m.className='msg err'}};x.send(JSON.stringify(FS_PCFG))})}
 function fsAddSensor(){var j=prompt("Add sensor JSON:","{\"type\":\"bme280\",\"enabled\":true}");if(j){try{var o=JSON.parse(j);if(!FS_PCFG)FS_PCFG={};if(!FS_PCFG.sensors)FS_PCFG.sensors=[];FS_PCFG.sensors.push(o);fsClLoad()}catch(e){alert("Invalid JSON: "+e)}}}
 function fsEditSensor(i){if(!FS_PCFG||!FS_PCFG.sensors)return;var j=prompt("Edit sensor JSON:",JSON.stringify(FS_PCFG.sensors[i]));if(j){try{FS_PCFG.sensors[i]=JSON.parse(j);fsClLoad()}catch(e){alert("Invalid JSON: "+e)}}}
 function fsRmSensor(i){if(!FS_PCFG||!FS_PCFG.sensors)return;if(confirm("Remove sensor?")){FS_PCFG.sensors.splice(i,1);fsClLoad()}}
@@ -922,6 +922,13 @@ void setupWebServer() {
         // "") — mirrors /download, /delete, /move_file. Without it a caller
         // could enumerate arbitrary directories (e.g. /config) by traversal.
         String dir     = sanitizePath(r->hasParam("dir") ? r->getParam("dir")->value() : "/");
+        // sanitizePath() returns "" for a rejected/traversal path; reject
+        // explicitly with 400 like /download, /delete, /mkdir, /move_file
+        // rather than letting scanDir() open an empty path.
+        if (dir.isEmpty()) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid dir\"}");
+            return;
+        }
         String filter  = r->hasParam("filter")  ? r->getParam("filter")->value()  : "";
         bool recursive = r->hasParam("recursive");
 
@@ -2488,6 +2495,7 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
         static File s_pcfgFile;
         static bool s_pcfgMutexHeld = false;
         static bool s_pcfgComplete  = false;
+        static bool s_pcfgAuthFail  = false;   // CSRF failed in onBody (index==0)
         static constexpr const char* PCFG_PATH = "/platform_config.json";
         static constexpr const char* PCFG_TMP  = "/platform_config.tmp";
 
@@ -2506,13 +2514,19 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
 
         server.on("/save_platform", HTTP_POST,
             [pcfgCleanup](AsyncWebServerRequest *r) {
+                // CSRF is enforced in the onBody callback below (index==0),
+                // BEFORE the file is written — the onBody runs incrementally
+                // as chunks arrive, whereas THIS handler runs only after the
+                // whole body is received, i.e. after the config would already
+                // be overwritten.  Here we just emit the single response for
+                // the outcome onBody recorded.
+                if (s_pcfgAuthFail) {
+                    s_pcfgAuthFail = false;
+                    pcfgCleanup();
+                    r->send(403, "application/json", "{\"ok\":false,\"error\":\"csrf\"}");
+                    return;
+                }
                 if (rateLimit429(r)) { pcfgCleanup(); return; }
-                // CSRF: the token rides in the query string (?csrf=…), which
-                // CsrfToken::require() reads independently of the raw JSON
-                // body — so both the SPA (postWithCsrf) and the PROGMEM
-                // failsafe page (which now fetches + appends the token) pass,
-                // while a cross-site POST without the token is rejected.
-                if (!CsrfToken::require(r)) { pcfgCleanup(); return; }
                 if (!fsAvailable || !activeFS) {
                     pcfgCleanup();
                     r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
@@ -2526,6 +2540,13 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                 if (!fsAvailable || !activeFS) return;
                 if (index == 0) {
                     s_pcfgComplete = false;
+                    s_pcfgAuthFail = false;
+                    // CSRF FIRST — before opening the tmp file / taking the FS
+                    // mutex — so a cross-site POST can't mutate config at all.
+                    // Non-sending check: the request handler emits the 403 so
+                    // there's exactly one response. Swallow the rest of the
+                    // body without touching the filesystem.
+                    if (!CsrfToken::valid(r)) { s_pcfgAuthFail = true; return; }
                     if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
                         s_pcfgMutexHeld = true;
                     }
@@ -2539,6 +2560,10 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
                     // Release FS mutex + discard partial tmp if the client aborts.
                     r->onDisconnect(pcfgCleanup);
                 }
+                // CSRF failed at index 0 — ignore every remaining chunk so a
+                // multi-chunk unauthorized body never reaches the write/rename
+                // below (no file was opened; the rename must not run either).
+                if (s_pcfgAuthFail) return;
                 if (s_pcfgFile) {
                     s_pcfgFile.write(data, len);
                 }
