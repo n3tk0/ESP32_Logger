@@ -470,131 +470,229 @@ New functionality configured via `/platform_config.json` (JSON, human-editable).
 
 ## 6. Local API Reference
 
-### `GET /api/data`
+> **This section is verified in CI.** `tools/check_api_docs.py` extracts every
+> route registered in `src/web/` and fails the build if any is missing from the
+> endpoint index below. When you add a `server.on(...)` route, add a row here
+> (or allow-list it in the script if it is a captive-portal/SPA route).
 
-| Param  | Values                           | Default |
-|--------|----------------------------------|---------|
-| from   | Unix timestamp                   | now-24h |
-| to     | Unix timestamp                   | now     |
-| sensor | sensor id (e.g. "env_indoor")   | all     |
-| metric | metric name (e.g. "pm25")       | all     |
+### 6.1 Authentication & CSRF
+
+Read-only (`GET`) endpoints are open on the local network. **Mutating routes go
+through `requireMutatingAuth()` = rate-limit + CSRF.** The CSRF token is a
+per-boot 128-bit value from `GET /api/csrf-token`, supplied as a **`?csrf=`
+query parameter** (`CsrfToken::require()` reads the token from a form field *or*
+the query string, so JSON-body routes are covered too). The SPA's
+`postWithCsrf()` / `settingsSave()` helpers attach it automatically; the PROGMEM
+failsafe page fetches it before each mutating call.
+
+`WEB_BASIC_AUTH_ENABLED` (compile-time) is an **orthogonal** layer — HTTP Basic
+Auth enforced by a handler gate registered first — and applies whether or not it
+is compiled in; the CSRF/rate-limit layer above is always present.
+
+The **Auth** column in the index uses:
+
+| Tag | Meaning |
+|---|---|
+| `read` | Read-only; no CSRF (a few side-effecting GETs are marked `CSRF`) |
+| `CSRF` | `requireMutatingAuth` — rate-limit **and** a valid `?csrf=` token |
+| `first-run` | Allowed only while `g_setupRequired` (provisioning); 403 afterwards |
+
+### 6.2 Endpoint index
+
+**System & status**
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/status` | read | Full snapshot (identity + runtime + theme) |
+| GET | `/api/identity` | read | Device id / name / board / firmware |
+| GET | `/api/runtime` | read | Heap, uptime, boot count, FS usage |
+| GET | `/api/live` | read | Live legacy water-cycle snapshot (polled) |
+| GET | `/api/diag` | read | Diagnostics / observability blob (R19) |
+| GET | `/api/recent_logs` | read | Tail of the in-RAM log ring |
+| GET | `/api/changelog` | read | Bundled `changelog.txt` |
+| GET | `/api/csrf-token` | read | Issues the per-boot CSRF token |
+| GET | `/api/theme` | read | Current theme tokens |
+
+**Sensors & data**
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/sensors` | read | Registered sensors + status |
+| GET | `/api/sensors/read_now` | read | Force a synchronous read of all sensors |
+| GET | `/api/latest` | read | Latest value per sensor/metric |
+| GET | `/api/data` | read | Aggregated time-series (params in §6.3) |
+| GET | `/api/backup` | read | Download a full config/data backup |
+
+**Alerts**
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/alerts` | read | Alert rules + engine state |
+| GET | `/api/alerts/toasts` | read | Pending alert toasts |
+| POST | `/api/alerts` | CSRF | Replace the whole alert-rule document |
+| POST | `/api/alerts/snooze` | CSRF | Snooze a firing alert |
+
+**Modules**
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/modules` | read | Module index (status chips) |
+| GET | `/api/modules/:id` | read | Module detail + config + schema |
+| POST | `/api/modules/:id` | CSRF | Save `{enabled, config}` |
+| POST | `/api/modules/:id/enable` | CSRF | Fast enable/disable (`?on=1`) |
+| POST | `/api/modules/:id/restart` | CSRF | `stop()` + `start()` without changing enable |
+| GET | `/api/modules/wifi/scan` | read | Cached Wi-Fi scan results |
+| GET | `/api/modules/wifi/test` | read | Poll a Wi-Fi credential-test result (rate-limited) |
+| POST | `/api/modules/wifi/test` | CSRF | Start a Wi-Fi credential test |
+| GET | `/wifi_scan_start` | CSRF | Kick off an async Wi-Fi scan (side-effecting GET) |
+| GET | `/wifi_scan_result` | read | Poll async Wi-Fi scan results |
+
+**Platform & settings**
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/platform_config` | read | Raw `platform_config.json` |
+| POST | `/api/config/platform` | CSRF | Reload sensors + exporters from config |
+| POST | `/api/platform_reload` | CSRF | Trigger live reload + restart |
+| POST | `/save_platform` | CSRF | Write `platform_config.json` (streamed JSON body) |
+| POST | `/save_device` | CSRF | Device name / id / storage view |
+| POST | `/save_hardware` | CSRF | Pin map / hardware config |
+| POST | `/save_network` | CSRF | Wi-Fi / AP / hostname |
+| POST | `/save_time` | CSRF | NTP / timezone / DST |
+| POST | `/save_theme` | CSRF | Theme / accent / density / chart source |
+| POST | `/save_datalog` | CSRF | Flow-log rotation / retention / format |
+| POST | `/save_sensorlog` | CSRF | Sensor CSV logging config |
+| POST | `/api/next-id` | CSRF | Generate a device id from the MAC |
+| POST | `/api/regen-id` | CSRF | Legacy alias of `/api/next-id` |
+| GET | `/export_settings` | read | Download all settings as JSON |
+| POST | `/import_settings` | CSRF | Restore settings from an uploaded JSON |
+| POST | `/api/mqtt/ha_discovery` | CSRF | Publish Home Assistant MQTT discovery |
+
+**Time**
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| POST | `/set_time` | CSRF | Set the RTC clock manually |
+| POST | `/sync_time` | CSRF | Trigger an NTP sync |
+| GET | `/api/time_sync_status` | read | Poll the NTP sync result |
+| POST | `/rtc_protect` | CSRF | Toggle RTC write-protect |
+
+**Data log & boot counter**
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/datalog/create` | CSRF | Create a new datalog file |
+| POST | `/api/datalog/switch` | CSRF | Switch the active datalog file |
+| POST | `/flush_logs` | CSRF | Flush the RAM log buffer to the FS |
+| POST | `/backup_bootcount` | CSRF | Persist the boot counter to the FS |
+| POST | `/restore_bootcount` | CSRF | Restore the boot counter from the FS |
+
+**Files & storage**
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/filelist` | read | List a directory (sanitized `dir` param) |
+| GET | `/download` | read | Download a file |
+| POST | `/delete` | CSRF | Delete a file |
+| POST | `/mkdir` | CSRF | Create a directory |
+| POST | `/move_file` | CSRF | Move / rename a file |
+| POST | `/upload` | CSRF | Upload a file (multipart) |
+| POST | `/api/format_filesystem` | CSRF | Format LittleFS (safe-mode recovery) |
+| POST | `/factory_reset` | CSRF | Wipe config + reboot |
+
+**OTA & firmware**
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/ota/status` | read | Running/previous partition + rollback state |
+| POST | `/api/ota/confirm` | CSRF | Mark the current firmware stable |
+| POST | `/api/ota/rollback` | CSRF | Revert to the previous partition + reboot |
+| POST | `/do_update` | CSRF | Upload a firmware `.bin` |
+| POST | `/restart` | CSRF | Reboot the device |
+
+**Diagnostics & provisioning**
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/i2c_scan` | CSRF | Scan the I2C bus |
+| GET | `/firstrun` | read | Serve the first-run wizard HTML |
+| GET | `/api/board-profiles` | read | Available board profiles |
+| POST | `/api/firstrun` | first-run | Provision board / pins / mode (only while `g_setupRequired`) |
+
+### 6.3 Selected payloads
+
+**`GET /api/data`** — aggregated time-series query.
+
+| Param  | Values                          | Default |
+|--------|---------------------------------|---------|
+| from   | Unix timestamp                  | now-24h |
+| to     | Unix timestamp                  | now     |
+| sensor | sensor id (e.g. `env_indoor`)   | all     |
+| metric | metric name (e.g. `pm25`)       | all     |
 | agg    | raw, 1m, 5m, 1h, 1d             | 5m      |
-| mode   | raw, avg, min, max, lttb         | lttb    |
-| limit  | 1–5000                           | 500     |
-
-**Example response:**
+| mode   | raw, avg, min, max, lttb        | lttb    |
+| limit  | 1–5000                          | 500     |
 
 ```json
 {
-  "from": 1710000000,
-  "to":   1710086400,
-  "agg":  "5m",
-  "mode": "lttb",
-  "sensor": "env_indoor",
-  "metric": "temperature",
-  "count": 287,
+  "from": 1710000000, "to": 1710086400, "agg": "5m", "mode": "lttb",
+  "sensor": "env_indoor", "metric": "temperature", "count": 287,
   "data": [
     {"ts": 1710000000, "v": 20.1},
-    {"ts": 1710000300, "v": 20.4},
-    {"ts": 1710000600, "v": 21.2}
+    {"ts": 1710000300, "v": 20.4}
   ]
 }
 ```
 
-### `GET /api/sensors`
+**`GET /api/sensors`**
 
 ```json
 {
   "sensors": [
     {
-      "id": "env_indoor",
-      "type": "bme280",
-      "name": "BME280 Environmental",
-      "enabled": true,
-      "last_read_ts": 1710086380,
-      "metrics": ["temperature","humidity","pressure"],
-      "status": "ok"
-    },
-    {
-      "id": "flow_main",
-      "type": "yfs201",
-      "name": "YF-S201 Water Flow",
-      "enabled": true,
-      "last_read_ts": 1710086390,
-      "metrics": ["flow_rate","volume"],
-      "status": "ok"
+      "id": "env_indoor", "type": "bme280", "name": "BME280 Environmental",
+      "enabled": true, "last_read_ts": 1710086380,
+      "metrics": ["temperature","humidity","pressure"], "status": "ok"
     }
   ]
 }
 ```
 
-### `POST /api/config/platform`
-
-Accepts updated `platform_config.json` body; reloads sensors & exporters live.
-
-### `GET /api/modules`
-
-Schema-driven module manager. Each registered `IModule` (currently `wifi`,
-`ota`, `theme`, `datalog`, `time`) is listed; the manager UI renders the index
-as a row list with a description, a live status chip and an enable toggle.
+**`GET /api/modules`** — schema-driven module manager. Each registered `IModule`
+(`wifi`, `ota`, `theme`, `datalog`, `time`) is listed with a description, a live
+status chip and an enable toggle.
 
 ```json
 [
   {
-    "id": "wifi",
-    "name": "Wi-Fi",
-    "enabled": true,
-    "hasUI": true,
+    "id": "wifi", "name": "Wi-Fi", "enabled": true, "hasUI": true,
     "description": "Station/AP connection, credentials and static-IP settings.",
     "status": { "text": "MyNet · 192.168.1.20 · -58 dBm", "tone": "ok" }
-  },
-  {
-    "id": "ota",
-    "name": "OTA update",
-    "enabled": true,
-    "hasUI": false,
-    "description": "Firmware updates and A/B rollback (running/previous partition).",
-    "status": { "text": "app0", "tone": "ok" }
   }
 ]
 ```
 
-`description` and `status` are optional. A module omits `status` when it has no
-live signal (the UI then shows a plain enabled/disabled chip); by convention a
-disabled module also returns no status. `tone` ∈ `ok | warn | err | dim`. Both
-come from the `IModule` hooks `getDescription()` and `statusJson(JsonObject)`;
+`description` and `status` are optional (a module omits `status` when it has no
+live signal; a disabled module returns none). `tone` ∈ `ok | warn | err | dim`.
+Both come from the `IModule` hooks `getDescription()` and `statusJson(JsonObject)`;
 `statusJson()` must be cheap and non-blocking — it runs on the AsyncTCP worker,
 once per module per request (no FS scans, no network round-trips).
 
-### `GET /api/modules/:id`
-
-Adds the per-module `config` object plus the PROGMEM `schema` string that drives
-the settings form:
+**`GET /api/modules/:id`** adds the per-module `config` object plus the PROGMEM
+`schema` string that drives the settings form:
 
 ```json
 {
   "id": "time", "name": "Time", "enabled": true, "hasUI": true,
-  "description": "NTP sync, timezone and DST for the clock and log timestamps.",
-  "status": { "text": "synced", "tone": "ok" },
   "config": { "ntpServer": "pool.ntp.org", "timezone": 1, "dstOffsetHours": 0 },
   "schema": "{\"fields\":[ … ]}"
 }
 ```
 
 Schema field keys: `id`, `type` (`string`/`int`/`float`/`bool`/`enum`/`color`/
-`password`/`ipv4`), `label`, `min`/`max`/`step`, `unit` (suffix shown after the
-input), `group` (renders a section heading), `help` (hint under the field),
-`showIf` (conditional visibility — `"otherField"` or `{"field":value}`), and
-`options` (required for `enum` — an array of `{"v":<value>,"l":"<label>"}`
-objects, e.g. `[{"v":0,"l":"Light"},{"v":1,"l":"Dark"}]`; `v` is the stored
-value, `l` the display label). Mutating routes (CSRF token in the query string
-for the JSON body):
-
-| Route | Purpose |
-|---|---|
-| `POST /api/modules/:id?csrf=…` | Save `{enabled, config}` and persist |
-| `POST /api/modules/:id/enable?on=1` | Fast enable/disable (rate-limited) |
-| `POST /api/modules/:id/restart` | `stop()` + `start()` without changing enable |
+`password`/`ipv4`), `label`, `min`/`max`/`step`, `unit`, `group`, `help`,
+`showIf` (`"otherField"` or `{"field":value}`), and `options` (required for
+`enum` — `{"v":<value>,"l":"<label>"}` objects; `v` is stored, `l` is displayed).
 
 ---
 
@@ -651,14 +749,49 @@ FreeRTOS queue (built-in thread safety):
   exportQueue    ProcessingTask → ExportTask
 
 Mutexes:
+  fsMutex        serializes ALL filesystem writes (see below) — the single
+                 most safety-critical lock in the firmware
   webDataMutex   ProcessingTask (write) ↔ WebTask (read) ring buffer
   configMutex    Web /api/config/platform POST ↔ SensorTask reload
+  wireMutex      shared I2C bus (SensorManager reads ↔ /api/i2c_scan)
 
 ISR shared state (existing pattern, unchanged):
   volatile pulseCount   — ISR writes, SensorTask reads
   volatile flowDetected — ISR sets, SensorTask clears
   Critical sections: noInterrupts() / interrupts()
 ```
+
+### 8.1 `fsMutex` — filesystem write serialization
+
+Every writer to LittleFS/SD takes `fsMutex` (via the RAII `MutexGuard`, or the
+`atomicWrite(fs, path, …, fsMutex)` helper). This includes `CsvLogger`,
+`FlowRunLogger`, `ConfigManager` (`saveConfig`/crash-recovery), `AlertEngine`
+(`_save()`), `DataLogger`, the boot-counter backup, and the streamed
+`/save_platform` upload. Concurrent unserialized writes can interleave a
+`tmp` open + `rename` against a log append and corrupt the filesystem, so a new
+FS writer **must** hold `fsMutex`.
+
+**Lock-ordering rule (critical — violating it deadlocks the StorageTask):**
+
+`fsMutex` is a **plain, non-recursive** FreeRTOS mutex (`xSemaphoreCreateMutex`).
+A task that already holds it must **not** re-acquire it deeper in the call
+stack — `xSemaphoreTake` on a non-recursive mutex you already own blocks until
+the 2 s timeout and returns `pdFALSE`.
+
+- `StorageTask` takes `fsMutex` once per tick, then calls `CsvLogger::appendRow`
+  and `flowRunLog.tick()` **under that lock**. Their internal helpers
+  (`CsvLogger::_rotate`, `FlowRunLogger::_closeRun` /`_enforceSizeRotation`)
+  therefore run with the lock already held and **must not** re-take it. (Two
+  such self-deadlocks were fixed in the #151 audit — they had silently disabled
+  CSV rotation and dropped every flow run.)
+- A helper reachable **both** with and without the lock held (e.g.
+  `RtcManager::backupBootCount`, called from web handlers *and* from
+  `DataLogger::flushLogBufferToFS` which already holds `fsMutex`) keeps its own
+  `atomicWrite(…, fsMutex)`; the holding caller releases its guard
+  (`MutexGuard::release()`) before invoking it. Do not make the callee
+  lock-agnostic — fix it at the one call site that double-locks.
+- `AlertEngine::_save()` runs on the AsyncTCP web task; it passes `fsMutex` to
+  `atomicWrite` (previously `nullptr`, which raced StorageTask writes).
 
 ---
 

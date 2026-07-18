@@ -15,11 +15,15 @@ on:
       - 'src/**'
       - 'tests/host/**'
       - '.github/workflows/tests.yml'
+      - 'docs/ARCHITECTURE.md'
+      - 'tools/check_api_docs.py'
   pull_request:
     paths:
       - 'src/**'
       - 'tests/host/**'
       - '.github/workflows/tests.yml'
+      - 'docs/ARCHITECTURE.md'
+      - 'tools/check_api_docs.py'
   workflow_dispatch:
 
 jobs:
@@ -117,3 +121,14 @@ jobs:
         with:
           name: cppcheck-report
           path: cppcheck.log
+
+  api-docs:
+    name: api-docs (route coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify docs/ARCHITECTURE.md §6 covers every registered route
+        # Fails if a route registered via server.on(...) in src/web/ has no row
+        # in the API reference table (the table had drifted to ~10% coverage).
+        run: python3 tools/check_api_docs.py
