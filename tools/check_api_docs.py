@@ -47,31 +47,42 @@ DYNAMIC = {
     "base.c_str()":        "/api/modules/:id",
 }
 
-REG_RE = re.compile(r'server\.on\(\s*(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_.()]*))\s*,\s*HTTP_(GET|POST|PUT|DELETE)')
+# `\s*` between tokens spans newlines, so this matches registrations wrapped
+# across lines (e.g. by clang-format) as well as single-line ones.
+REG_RE = re.compile(
+    r'server\.on\s*\(\s*(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_.()]*))\s*,\s*HTTP_(GET|POST|PUT|DELETE)'
+)
+
+
+def _strip_comments(text):
+    """Remove C/C++ comments so commented-out registrations aren't matched.
+    Block comments first (non-greedy), then line comments. The server.on(...)
+    call sites contain no string literals with `//` or `/*`, so this is safe
+    for route extraction (the mangled PROGMEM HTML/CSS blobs hold no routes)."""
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+    text = re.sub(r'//[^\n]*', '', text)
+    return text
 
 
 def extract_routes():
     routes = set()
     for rel in WEB_FILES:
         path = os.path.join(ROOT, rel)
+        if not os.path.exists(path):
+            continue
         with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                stripped = line.lstrip()
-                if stripped.startswith("//") or stripped.startswith("*"):
-                    continue
-                m = REG_RE.search(line)
-                if not m:
-                    continue
-                literal, ident, method = m.group(1), m.group(2), m.group(3)
-                if literal is not None:
-                    route = literal
-                elif ident in DYNAMIC:
-                    route = DYNAMIC[ident]
-                else:
-                    # Unknown non-literal registration target — surface it so a
-                    # new dynamic pattern can't slip through unnoticed.
-                    route = f"<dynamic:{ident}>"
-                routes.add((method, route))
+            content = _strip_comments(fh.read())
+        for m in REG_RE.finditer(content):
+            literal, ident, method = m.group(1), m.group(2), m.group(3)
+            if literal is not None:
+                route = literal
+            elif ident in DYNAMIC:
+                route = DYNAMIC[ident]
+            else:
+                # Unknown non-literal registration target — surface it so a
+                # new dynamic pattern can't slip through unnoticed.
+                route = f"<dynamic:{ident}>"
+            routes.add((method, route))
     return routes
 
 
@@ -81,7 +92,8 @@ def documented_routes():
       - inline prose: `POST /sync_time`
     """
     doc = os.path.join(ROOT, DOC)
-    text = open(doc, encoding="utf-8").read()
+    with open(doc, encoding="utf-8") as fh:
+        text = fh.read()
     documented = set()
     # Table-row form: a bare METHOD cell followed by a `/path` cell.
     for m in re.finditer(r'\|\s*(GET|POST|PUT|DELETE)\s*\|\s*`(/[^\s`?]+)`', text):
