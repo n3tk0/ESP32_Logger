@@ -1055,3 +1055,62 @@ Targeted fixes from the WebUI hardening pass. Severity reflects user/data impact
 `group`/`unit`/`help`. No new attack surface — `statusJson()` reads cached
 config / `WiFi.*` / NTP globals only and runs on the existing authenticated GET
 path (no FS scans, no blocking).
+
+---
+
+## Post-R20 — WebUI facelift & accessibility (#150)
+
+UI/UX + accessibility pass over `www/` (no firmware changes). Verified with
+Playwright screenshots across 9 pages × light/dark × 1440 px / 375 px, plus
+programmatic WCAG-contrast and layout measurement.
+
+| # | Sev | Area | Issue | Resolution |
+|---|---|---|---|---|
+| U.1 | H | theme / a11y | Unscoped `[data-accent]` overrides forced the dark palette onto the light theme; accent text/buttons ran ~1.8:1 (WCAG fail) on white. | Theme-scoped accent variables (`[data-theme="light"][data-accent=…]`) ≥ 4.5:1 + `--accent-fg` token. Fixed (#150) |
+| U.2 | H | responsive | Every page overflowed to ~658 px at a 375 px viewport (topbar min-content propagated through `1fr` grid). | `minmax(0,1fr)` columns + `min-width:0` chain; deck masonry stacks < 560 px. `scrollWidth==375`. Fixed (#150) |
+| U.3 | M | correctness | Sidebar "Online" chip was static HTML; Live-page CPU/RAM/storage meters were hardcoded widths. | Chip driven by fetch/SSE round-trips (`setConnState`); meters compute real fill. Fixed (#150) |
+| U.4 | M | correctness | `.bigstat-v span` shrank the value spans, not just units — Live volume/duration rendered tiny/grey. | Unit suffix uses an explicit `.u` class. Fixed (#150) |
+| U.5 | M | async UX | Settings saves did a full `location.reload()`; uPlot loader silently fell back to the jsdelivr CDN under the default "Local" preference. | No-reload saves w/ pending state; CDN only when explicitly selected. Fixed (#150) |
+| U.6 | L | consistency/a11y | Raw pasted SVGs + functional emoji; title-only `ℹ️` help-tips unreachable by keyboard/touch; popups without `role=dialog`/focus. | One `data-icon` system; accessible tooltips; dialog ARIA + focus; switch focus rings. Fixed (#150) |
+| U.7 | L | size | Dead CSS, unused compat tokens, oversized favicon (15.4 KB) / board photo (68 KB). | Purged; images recompressed. `www/` −41.8 KB. Fixed (#150) |
+
+## Post-R20 — Firmware backend audit (#151)
+
+Whole-`src/` audit (six parallel per-subsystem passes). Each finding required a
+concrete failure scenario. Verified: `pio run` links all three boards; host
+suites pass (incl. a new `test_httpexporter_bufsize.cpp`).
+
+| # | Sev | Area | Issue | Resolution |
+|---|---|---|---|---|
+| B.1 | H | `HttpExporter` | Body buffer sized `count*90+32`, but a worst-case reading serializes to ~139 B → a 20-item batch overran the heap; `snprintf`-return accumulation then underflowed the length arg. | 160 B/reading budget + overflow-proof append clamp; host test pins the math. Fixed (#151) |
+| B.2 | H | `CsvLogger` / `FlowRunLogger` | `_rotate()` / `_closeRun()` re-acquired the non-recursive `fsMutex` their `StorageTask` caller already held → rotation never ran (unbounded file + column corruption) and **every flow run dropped** after a 2 s stall. | Run under the caller's lock; `DataLogger` releases before `backupBootCount`. Fixed (#151) — see ARCHITECTURE §8.1 |
+| B.3 | H | `ConfigManager` | Any transient load fault (short read, flipped magic bit) ran `loadDefaults()+saveConfig()`, wiping a recoverable `config.bin` in the same boot. | Transient-fault paths load defaults in RAM only; on-disk file left intact. Fixed (#151) |
+| B.4 | H | `AlertEngine` | `_save()` wrote LittleFS with a `nullptr` mutex → web-task rule edits raced StorageTask flushes → FS corruption. | Serialize on `fsMutex`. Fixed (#151) |
+| B.5 | M | `ExportManager` | `millis() > start + MAX` circuit breaker wrapped near the 49.7-day rollover → all exporters skipped ~30 s. | Elapsed-form unsigned subtraction (same in `SerialProvisioner`). Fixed (#151) |
+| B.6 | M | `BME280_Mini` | No `Wire.available()` check → a dead sensor returned finite `0xFF`-derived garbage and stayed "OK". | Short read → NaN/skip sentinel. Fixed (#151) |
+| B.7 | M | sensors | BH1750 L-mode 4× lux error; SoilMoisture `dry==wet` → NaN; RainSensor rate never decayed; VEML7700 scale from un-quantized IT. | Corrected divider / span guard / decay window / effective-IT lookup. Fixed (#151) |
+| B.8 | M | `StorageTask`/`DataLogger` | `appendRow()` bool + `println` result discarded → silent data loss on a full FS. | Honor returns; log + count losses; retain datalog buffer for retry. Fixed (#151) |
+
+**Partial-flush retry (review follow-up, #151):** the initial datalog retry
+retained the whole buffer on any write failure, re-writing already-persisted
+lines (duplicates); now breaks on first failure and shifts only the unwritten
+remainder to the front.
+
+## Post-R20 — Web auth / CSRF hardening (#152)
+
+Deferred web-auth cluster from the #151 audit. The CSRF token rides in the query
+string (`?csrf=`), which `CsrfToken::require()` reads regardless of body type.
+
+| # | Sev | Area | Issue | Resolution |
+|---|---|---|---|---|
+| C.1 | H | `/api/platform_reload` | Zero protection — a cross-site `fetch` rebooted the device on every visit. | `requireMutatingAuth`. Fixed (#152) |
+| C.2 | H | OTA | `/api/ota/rollback` + `/api/ota/confirm` unprotected — CSRF could downgrade firmware / defeat the rollback watchdog. | `requireMutatingAuth`. Fixed (#152) |
+| C.3 | H | `/save_platform` | **CSRF bypass:** the guard sat in the request handler, but ESPAsyncWebServer runs `onBody` (which writes + renames the config) *first* — so the file was overwritten before the 403. | Non-sending `CsrfToken::valid()` checked in `onBody` at `index==0` before any write; static sentinel → request handler emits the single 403. Fixed (#152) |
+| C.4 | M | mutating routes | `/api/config/platform`, `/api/mqtt/ha_discovery`, `/api/i2c_scan` unprotected; `/set_time`, `/save_platform`, `/api/modules/:id/enable` were rate-limit-only. | Full CSRF on all. Fixed (#152) |
+| C.5 | M | `/api/firstrun` | Provisioning endpoint (rewrites board/pins/mode + reboots) was callable after setup. | 403 once `g_setupRequired` is false. Fixed (#152) |
+| C.6 | M | `/api/filelist` | `dir` param passed to `scanDir()` without `sanitizePath()` → directory-traversal enumeration. | Sanitize + reject empty with 400 (mirrors other file routes). Fixed (#152) |
+
+**Client sync (#152):** the three raw callers (`platform_reload` ×3,
+`modules/:id/enable`, `set_time`) moved to `postWithCsrf`; the PROGMEM failsafe
+recovery page's `fsClSave()` now fetches + appends the token so recovery still
+works under the new guards.

@@ -181,7 +181,7 @@ Full documentation lives in [`docs/`](docs/):
 - **[INSTRUCTIONS.md](docs/INSTRUCTIONS.md)** — operating the device after first boot (sensors, exporters, OTA, safe mode, diagnostics, troubleshooting)
 - **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — module layout, task model, data pipeline
 - **[REFACTORING_GUIDELINES.md](docs/REFACTORING_GUIDELINES.md)** — architecture invariants and SOPs for code changes
-- **[AUDIT_LOG.md](docs/AUDIT_LOG.md)** — security/architecture audit findings (R1–R20 + post-R19 web/UX fixes)
+- **[AUDIT_LOG.md](docs/AUDIT_LOG.md)** — security/architecture audit findings (R1–R20 + post-R20 rounds: WebUI #150, backend #151, web-auth/CSRF #152)
 - **[FUTURE_UPDATES.md](docs/FUTURE_UPDATES.md)** — roadmap
 - **[USB_CDC_IMPLEMENTATION_SUMMARY.md](docs/USB_CDC_IMPLEMENTATION_SUMMARY.md)** — USB CDC toggle implementation
 
