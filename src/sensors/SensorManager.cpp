@@ -3,6 +3,7 @@
 #include <LittleFS.h>
 #include "../pipeline/DataPipeline.h"  // wireMutex (#14)
 #include "../core/BoardProfiles.h"     // g_pinAllowUnsafe (per-sensor pin override)
+#include "ReadingCache.h"              // latest-value table (cross-sensor lookups)
 
 SensorManager sensorManager;
 
@@ -71,6 +72,10 @@ void SensorManager::_destroyAll() {
     // permanently block re-claiming the same resource.
     _serial1Owner = nullptr;
     memset(_i2cOwners, 0, sizeof(_i2cOwners));
+    // Drop cached values too: entries for sensors that no longer exist would
+    // otherwise keep answering get() with an ever-growing age instead of
+    // "unknown", which reads the same as a live-but-stale sensor.
+    readingCache.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -161,8 +166,12 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
     int pushed = 0;
     uint32_t ms = millis();
 
-    // Up to 6 metrics per sensor per tick (BME68x emits 5: T/H/P/gas/IAQ).
-    SensorReading readings[6];
+    // Up to 8 metrics per sensor per tick.  The fattest producer is BME68x at
+    // 7 (T/H/P/gas/IAQ + dew_point + humidity_ambient); SPS30 emits 5
+    // (4 × PM + device_status).  Keep this >= the largest getMetrics() count
+    // of any registered plugin — readAll() silently truncates otherwise.
+    SensorReading readings[8];
+    constexpr int MAX_METRICS_PER_TICK = 8;
 
     // R14 / AUDIT 3.19 + 15.3: hold configMutex for the read iteration so
     // a concurrent reloadConfig() can't _destroyAll() the sensor pointer
@@ -194,12 +203,12 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                 continue;
             }
             t0us = micros();
-            n = s->readAll(readings, 6);
+            n = s->readAll(readings, MAX_METRICS_PER_TICK);
             latUs = (uint32_t)(micros() - t0us);
             // wg releases wireMutex here, before health tracking
         } else {
             t0us = micros();
-            n = s->readAll(readings, 6);
+            n = s->readAll(readings, MAX_METRICS_PER_TICK);
             latUs = (uint32_t)(micros() - t0us);
         }
 
@@ -267,6 +276,12 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                 readings[j].timestamp = now;
                 strncpy(readings[j].sensorId,   s->getId(),   sizeof(readings[j].sensorId)   - 1);
                 strncpy(readings[j].sensorType, s->getType(), sizeof(readings[j].sensorType) - 1);
+
+                // Publish to the latest-value table BEFORE queueing. Consumers
+                // that need cross-sensor values (BME688's ambient-RH reference,
+                // HeaterModule's control inputs) read it here rather than off
+                // the queue, so a backed-up sensorQueue can't starve them.
+                readingCache.put(readings[j]);
 
                 if (xQueueSend(queue, &readings[j], 0) != pdTRUE) {
                     extern volatile uint32_t g_queueDrops;

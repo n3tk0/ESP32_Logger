@@ -62,6 +62,9 @@
 #include "src/modules/TimeModule.h"    // Pass 5 phase 2b
 #include "src/modules/UsbCdcModule.h"       // global usbCdc (USB-CDC NVS pref)
 #include "src/modules/UsbCdcConfigModule.h" // IModule adapter for the manager
+#ifdef MODULE_HEATER_ENABLED
+#  include "src/modules/HeaterModule.h"     // enclosure heater (actuator)
+#endif
 #include "src/managers/ConfigManager.h"
 #include "src/managers/HardwareManager.h"
 #include "src/managers/StorageManager.h"
@@ -587,6 +590,12 @@ void setup() {
     // before loadAll/saveAll seed the modules.json shadow from it.
     usbCdc.syncFromNvs();
     moduleRegistry.add(&UsbCdcConfigModule::instance());
+#ifdef MODULE_HEATER_ENABLED
+    // Registered before loadAll() so its saved pin/setpoints are hydrated from
+    // modules.json.  It stays disabled until the user enables it and assigns a
+    // pin; ProcessingTask drives the control loop from there.
+    moduleRegistry.add(&HeaterModule::instance());
+#endif
     if (fsAvailable && activeFS) {
         moduleRegistry.loadAll(*activeFS);
         if (!activeFS->exists(ModuleRegistry::DEFAULT_PATH)) {

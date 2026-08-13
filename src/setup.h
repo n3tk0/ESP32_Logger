@@ -91,6 +91,13 @@
 //#  define SENSOR_ZMCT103C_ENABLED     // ZMCT103C AC current (ADC)
 //#endif
 
+// Actuators.  OFF by default and opt-in for a reason: this one drives a
+// MOSFET gate from a PWM pin.  Enabling it only compiles the module in — it
+// stays disabled and unattached until a pin is assigned in the UI.
+//#ifndef MODULE_HEATER_ENABLED
+//#  define MODULE_HEATER_ENABLED       // Enclosure heater (frost/condensation)
+//#endif
+
 // Cloud / network exporters
 #ifndef EXPORT_MQTT_ENABLED
 #  define EXPORT_MQTT_ENABLED            // Internal MQTT driver

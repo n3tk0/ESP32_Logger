@@ -1,6 +1,8 @@
 #include "BME688Sensor.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
+#include "../ReadingCache.h"         // ambient temperature reference
+#include "../../utils/Psychrometrics.h"
 
 bool BME688Sensor::init(JsonObjectConst cfg) {
     _enabled      = cfg["enabled"]            | true;
@@ -8,6 +10,14 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
     _addr         = (uint8_t)(cfg["address"]  | 0x76);
     _heaterTemp   = cfg["heater_temp"]        | 320;
     _heaterDurMs  = cfg["heater_duration_ms"] | 150;
+
+    // Ambient temperature reference for the humidity correction.
+    const char* ambSensor = cfg["ambient_temp_sensor"] | "";
+    strlcpy(_ambientSensor, ambSensor, sizeof(_ambientSensor));
+    const char* ambMetric = cfg["ambient_temp_metric"] | "temperature";
+    strlcpy(_ambientMetric, ambMetric, sizeof(_ambientMetric));
+    _ambientMaxAgeMs = cfg["ambient_max_age_ms"] | 60000;
+    _ambientWarned   = false;
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
@@ -38,16 +48,49 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
     _bme.setGasHeater(_heaterTemp, _heaterDurMs);
 
     _ready = true;
-    Serial.printf("[BME688] Ready at 0x%02X heater=%d°C/%dms\n",
-                  _addr, _heaterTemp, _heaterDurMs);
+    Serial.printf("[BME688] Ready at 0x%02X heater=%d°C/%dms ambient_ref=%s\n",
+                  _addr, _heaterTemp, _heaterDurMs,
+                  _ambientSensor[0] ? _ambientSensor : "(self)");
     return true;
 }
 
 bool BME688Sensor::read(SensorReading& out) {
-    SensorReading buf[4];
-    if (readAll(buf, 4) < 1) return false;
+    SensorReading buf[7];
+    if (readAll(buf, 7) < 1) return false;
     out = buf[0];
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Air temperature to express the humidity against. Falls back to `fallbackC`
+// (this sensor's own calibrated temperature) whenever the configured reference
+// is missing, stale or implausible — a frozen last-known value would be worse
+// than an admittedly self-heated one, because it looks equally healthy.
+float BME688Sensor::_ambientTempC(float fallbackC) const {
+    if (_ambientSensor[0] == '\0') return fallbackC;
+
+    float    refC  = 0.0f;
+    uint32_t ageMs = 0;
+    if (!readingCache.get(_ambientSensor, _ambientMetric, refC, ageMs)) {
+        if (!_ambientWarned) {
+            Serial.printf("[BME688] ambient ref '%s/%s' not seen yet — using own temperature\n",
+                          _ambientSensor, _ambientMetric);
+            _ambientWarned = true;
+        }
+        return fallbackC;
+    }
+    if (ageMs > _ambientMaxAgeMs) {
+        if (!_ambientWarned) {
+            Serial.printf("[BME688] ambient ref '%s/%s' stale (%lums) — using own temperature\n",
+                          _ambientSensor, _ambientMetric, (unsigned long)ageMs);
+            _ambientWarned = true;
+        }
+        return fallbackC;
+    }
+    if (!Psychro::isValidTemp(refC)) return fallbackC;
+
+    _ambientWarned = false;   // arm the next warning
+    return refC;
 }
 
 int BME688Sensor::readAll(SensorReading* out, int maxOut) {
@@ -57,18 +100,30 @@ int BME688Sensor::readAll(SensorReading* out, int maxOut) {
     if (!_bme.performReading()) return 0;
 
     float rawGas = (float)_bme.gas_resistance;          // Ω, uncalibrated
-    float t   = _calTemp.apply(_bme.temperature);
+    float tDie = _bme.temperature;                      // die temperature, uncalibrated
+    float t   = _calTemp.apply(tDie);
     float h   = _calHumidity.apply(_bme.humidity);
     float p   = _calPressure.apply(_bme.pressure / 100.0f);
     float g   = _calGas.apply(rawGas);
     float iaq = _computeIaq(h, rawGas);                 // 0..500 (lower = cleaner)
 
-    int n = (maxOut < 5) ? maxOut : 5;
-    if (n > 0) out[0] = SensorReading::make(0, _id, getType(), "temperature",    t,   "C");
-    if (n > 1) out[1] = SensorReading::make(0, _id, getType(), "humidity",       h,   "%");
-    if (n > 2) out[2] = SensorReading::make(0, _id, getType(), "pressure",       p,   "hPa");
-    if (n > 3) out[3] = SensorReading::make(0, _id, getType(), "gas_resistance", g,   "Ohm");
-    if (n > 4) out[4] = SensorReading::make(0, _id, getType(), "iaq",            iaq, "");
+    // Dew point pairs the RH with the temperature it was measured AT — the raw
+    // die temperature, not the calibrated one. Pairing it with a corrected
+    // temperature would bake the self-heating error into the dew point, which
+    // is the one figure that is supposed to be free of it.
+    float dew  = Psychro::dewPointC(tDie, h);
+    float hAmb = isfinite(dew) ? Psychro::rhAtTempC(dew, _ambientTempC(t)) : NAN;
+
+    int n = 0;
+    if (n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "temperature",    t,   "C");
+    if (n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "humidity",       h,   "%");
+    if (n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "pressure",       p,   "hPa");
+    if (n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "gas_resistance", g,   "Ohm");
+    if (n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "iaq",            iaq, "");
+    // Derived metrics are dropped rather than emitted as NaN when the inputs
+    // are out of range: a NaN would land in storage as a permanent null.
+    if (isfinite(dew)  && n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "dew_point",        dew,  "C");
+    if (isfinite(hAmb) && n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "humidity_ambient", hAmb, "%");
     return n;
 }
 
