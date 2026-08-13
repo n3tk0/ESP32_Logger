@@ -1,9 +1,13 @@
 #include "ProcessingTask.h"
 #include "TaskManager.h"
+#include "../setup.h"          // MODULE_HEATER_ENABLED (compile-time toggle)
 #include "../pipeline/DataPipeline.h"
 #include "../core/SensorTypes.h"
 #include "../alerts/AlertEngine.h"
 #include "../utils/MutexGuard.h"
+#ifdef MODULE_HEATER_ENABLED
+#  include "../modules/HeaterModule.h"
+#endif
 #include <math.h>
 
 // ---------------------------------------------------------------------------
@@ -15,6 +19,12 @@ static bool isPlausible(const SensorReading& r) {
     const char* m = r.metric;
     if (strcmp(m, "temperature") == 0) return (r.value > -50.0f && r.value < 100.0f);
     if (strcmp(m, "humidity")    == 0) return (r.value >= 0.0f  && r.value <= 100.0f);
+    // Same bounds as their parent metrics — derived, but from the same physics.
+    if (strcmp(m, "dew_point")        == 0) return (r.value > -50.0f && r.value < 100.0f);
+    if (strcmp(m, "humidity_ambient") == 0) return (r.value >= 0.0f  && r.value <= 100.0f);
+    // Fault bitfield, not a measurement: any value is meaningful, including 0.
+    // Bounded only against a corrupt frame (SPS30Sensor packs 4 bits).
+    if (strcmp(m, "device_status")    == 0) return (r.value >= 0.0f  && r.value <= 255.0f);
     if (strcmp(m, "pressure")    == 0) return (r.value > 500.0f && r.value < 1200.0f);
     if (strcmp(m, "pm25")        == 0) return (r.value >= 0.0f  && r.value < 2000.0f);
     if (strcmp(m, "pm10")        == 0) return (r.value >= 0.0f  && r.value < 2000.0f);
@@ -46,6 +56,15 @@ void processingTaskFunc(void* /*param*/) {
     SensorReading r;
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_PROCESS] = millis();   // C4 heartbeat
+
+#ifdef MODULE_HEATER_ENABLED
+        // Heater control loop. Deliberately placed BEFORE the queue receive so
+        // it still runs on the 100 ms timeout path: its most important job is
+        // the fail-safe that forces the output off when the enclosure probe
+        // goes silent, and that is exactly the case where no readings arrive to
+        // drive the loop. Internally rate-limited to 1 Hz.
+        HeaterModule::instance().tick(millis());
+#endif
 
         // Block up to 100ms waiting for a reading
         if (xQueueReceive(sensorQueue, &r, pdMS_TO_TICKS(100)) != pdTRUE) {

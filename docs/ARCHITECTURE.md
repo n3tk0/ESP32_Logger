@@ -341,6 +341,11 @@ sensorQueue
     ▼
 ProcessingTask
     ├── Normalizer (unit conversion, range check, 3σ spike filter)
+    ├── HeaterModule::tick()  (MODULE_HEATER_ENABLED, 1 Hz)
+    │     Runs BEFORE the queue receive so it also fires on the 100 ms
+    │     timeout path — the stale-probe fail-safe has to keep working
+    │     precisely when no readings are arriving. Reads its control
+    │     inputs from ReadingCache, not from the queue.
     ├── In-memory ring buffer per metric (last 1000 pts, lock-free SPSC)
     │                   │
     │              webDataMutex  ←── WebTask reads for /api/data
@@ -754,6 +759,22 @@ Mutexes:
   webDataMutex   ProcessingTask (write) ↔ WebTask (read) ring buffer
   configMutex    Web /api/config/platform POST ↔ SensorTask reload
   wireMutex      shared I2C bus (SensorManager reads ↔ /api/i2c_scan)
+  HeaterModule
+  ::_hwMutex     LEDC attach/detach bookkeeping. tick() runs on
+                 ProcessingTask while stop()/start() arrive on the AsyncTCP
+                 worker via /api/modules/heater/{enable,restart}. Held only
+                 around attach/detach — never around a blocking call. stop()
+                 de-energises the gate BEFORE taking it, so the safety
+                 guarantee never depends on acquiring a lock.
+
+Spinlock (portMUX):
+  ReadingCache   latest value per (sensorId, metric). Written from
+                 SensorTask AND SlowSensorTask inside tickFiltered, read by
+                 BME688Sensor (for its ambient-temperature reference) and
+                 HeaterModule. Deliberately NOT a FreeRTOS mutex and
+                 deliberately not configMutex: BME688Sensor reads the cache
+                 from inside tickFiltered, which already holds configMutex,
+                 so a second take of that non-recursive mutex would deadlock.
 
 ISR shared state (existing pattern, unchanged):
   volatile pulseCount   — ISR writes, SensorTask reads

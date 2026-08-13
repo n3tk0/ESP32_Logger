@@ -41,11 +41,11 @@ Toggled via `#ifdef SENSOR_*_ENABLED` in `src/setup.h`. Default build enables on
 | Macro | Sensor | Interface |
 |---|---|---|
 | `SENSOR_BME280_ENABLED` | BME280/BMP280 temp/humidity/pressure | I2C |
-| `SENSOR_BME688_ENABLED` | BME680/688 temp/humidity/pressure + gas + IAQ | I2C |
+| `SENSOR_BME688_ENABLED` | BME680/688 temp/humidity/pressure + gas + IAQ + dew point | I2C |
 | `SENSOR_DS18B20_ENABLED` | DS18B20 temperature (1-Wire) | GPIO |
 | `SENSOR_SDS011_ENABLED` | SDS011 PM2.5/PM10 | UART |
 | `SENSOR_PMS5003_ENABLED` | PMS5003 PM1/2.5/10 | UART |
-| `SENSOR_SPS30_ENABLED` | Sensirion SPS30 PM1/2.5/4/10 | I2C |
+| `SENSOR_SPS30_ENABLED` | Sensirion SPS30 PM1/2.5/4/10 + fan/laser health | I2C |
 | `SENSOR_ENS160_ENABLED` | ENS160 TVOC/eCO2/AQI | I2C |
 | `SENSOR_SGP30_ENABLED` | SGP30 TVOC/eCO2 | I2C |
 | `SENSOR_SCD4X_ENABLED` | SCD40/41 CO2/temp/humidity | I2C |
@@ -59,6 +59,26 @@ Toggled via `#ifdef SENSOR_*_ENABLED` in `src/setup.h`. Default build enables on
 | `SENSOR_HCSR04_ENABLED` | HC-SR04 ultrasonic distance | GPIO |
 | `SENSOR_ZMPT101B_ENABLED` | ZMPT101B AC voltage | ADC |
 | `SENSOR_ZMCT103C_ENABLED` | ZMCT103C AC current | ADC |
+
+### Actuators
+
+| Macro | Module | Interface |
+|---|---|---|
+| `MODULE_HEATER_ENABLED` | Enclosure heater — frost and condensation protection | GPIO/PWM |
+
+Off by default. Drives a MOSFET gate to hold a sensor enclosure above both a
+frost setpoint and the measured dew point, which is what keeps an SPS30 inside
+its `-10 °C..+60 °C` operating range and keeps condensation off its optics
+through a winter.
+
+The control loop runs on `ProcessingTask` at 1 Hz and forces the output off
+whenever its temperature probe goes stale, the enclosure exceeds the
+over-temperature cutoff, or the module is disabled. Duty ramps from zero on
+every on-edge so a cold PTC's inrush does not trip the supply.
+
+The software interlocks do not replace the hardware ones: the gate still needs
+a pull-down so the heater is off while the ESP32 is in reset, and the element
+still needs an in-line thermal fuse.
 
 ### Exporters
 
@@ -83,7 +103,7 @@ Selected via `PlatformMode` enum in `src/core/Config.h`:
 On-device single-page app served from LittleFS (no internet required):
 
 - **Dashboard & log charts** — uPlot time-series; `uPlot.*` is vendored in `www/` so charts render in offline / AP-only mode (CDN is fallback only)
-- **Module manager** — schema-driven settings for Wi-Fi, time/NTP, data log, theme and OTA, each with a live status chip and enable toggle (`/api/modules`)
+- **Module manager** — schema-driven settings for Wi-Fi, time/NTP, data log, theme, OTA and the enclosure heater, each with a live status chip and enable toggle (`/api/modules`)
 - **Sensors** — add/edit/calibrate/reorder with pin-conflict guards; live read-now test
 - **OTA, diagnostics, file browser** — rollback-capable updates, `/api/diag` observability, and CSV/log download
 - First-run wizard, dark/light themes, CSRF-protected mutating endpoints
