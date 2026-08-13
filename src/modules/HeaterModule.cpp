@@ -172,15 +172,25 @@ void HeaterModule::stop() {
 }
 
 // ---------------------------------------------------------------------------
-// Drives the gate to its inactive level via plain GPIO. Works regardless of
-// whether LEDC currently owns the pin: on ESP32 a digitalWrite to a
-// LEDC-attached pin detaches the LEDC output for that GPIO, so this is a hard
-// off rather than a request. Deliberately touches no shared bookkeeping.
+// Hard off: drives the gate to its inactive level, whether or not LEDC
+// currently owns the pin. Touches no shared bookkeeping, so it is safe from
+// any task and without the hardware mutex.
+//
+// Only ever drives _ownedPin. If the board profile rejected the configured
+// pin, _ownedPin stays -1 and this is a no-op: nothing was energised, so
+// there is nothing to switch off. Falling back to the raw _pin here would
+// mean a misconfigured heater drives a flash or strapping pin on every tick
+// — the disabled path calls _forceOff() before the 1 Hz rate limit, so that
+// would be at the full ProcessingTask loop rate.
 void HeaterModule::_safeOffNow() {
-    const int pin = (_attachedPin >= 0) ? _attachedPin : _pin;
-    if (pin < 0) return;
-    pinMode(pin, OUTPUT);
-    digitalWrite(pin, _invert ? HIGH : LOW);
+    if (_ownedPin < 0) return;
+    // Park the LEDC duty at its inactive level BEFORE taking the pin back as
+    // plain GPIO. Whether pinMode() detaches the peripheral differs by core
+    // version — 3.x's peripheral manager releases the pin, 2.x's gpio_config
+    // does not reliably do so — and a hard-off path must not depend on that.
+    if (_attached && _attachedPin == _ownedPin) _applyDuty(0);
+    pinMode(_ownedPin, OUTPUT);
+    digitalWrite(_ownedPin, _invert ? HIGH : LOW);
 }
 
 // ---------------------------------------------------------------------------
@@ -203,12 +213,17 @@ bool HeaterModule::_attachPin() {
     _detachPin();
     if (_pin < 0) return false;
 
+    // Board-profile gate. On rejection nothing is driven and no ownership is
+    // taken, so the hard-off path leaves this pin alone from here on.
     if (!validateAttachPin(_pin, "heater", "pin")) return false;
 
     // Park the pin at the inactive level before LEDC takes it over, so the
     // gate is never left floating between pinMode and the first duty write.
+    // Ownership is recorded at the same moment the pin is first driven — if
+    // ledcAttach fails below, _safeOffNow() must still be able to hold it low.
     pinMode(_pin, OUTPUT);
     digitalWrite(_pin, _invert ? HIGH : LOW);
+    _ownedPin = _pin;
 
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
     if (!ledcAttach((uint8_t)_pin, _pwmFreqHz, PWM_RESOLUTION_BITS)) {
@@ -234,20 +249,26 @@ bool HeaterModule::_attachPin() {
 
 // ---------------------------------------------------------------------------
 void HeaterModule::_detachPin() {
-    if (_attachedPin < 0) return;
-    if (_attached) {
+    if (_attached && _attachedPin >= 0) {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
         ledcDetach((uint8_t)_attachedPin);
 #else
         ledcDetachPin((uint8_t)_attachedPin);
 #endif
     }
-    // Leave the pin driven to the inactive level, not floating: a floating
-    // gate on a power MOSFET can drift into partial conduction.
-    pinMode(_attachedPin, OUTPUT);
-    digitalWrite(_attachedPin, _invert ? HIGH : LOW);
     _attached    = false;
     _attachedPin = -1;
+
+    // Release ownership only after leaving the pin driven to its inactive
+    // level, not floating: a floating gate on a power MOSFET can drift into
+    // partial conduction. Keyed off _ownedPin rather than _attachedPin so a
+    // pin that was validated and driven but never reached LEDC (ledcAttach
+    // failure) is still parked and released.
+    if (_ownedPin >= 0) {
+        pinMode(_ownedPin, OUTPUT);
+        digitalWrite(_ownedPin, _invert ? HIGH : LOW);
+        _ownedPin = -1;
+    }
 }
 
 // ---------------------------------------------------------------------------

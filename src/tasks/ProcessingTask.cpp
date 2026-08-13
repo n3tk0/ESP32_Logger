@@ -113,6 +113,14 @@ void processingTaskFunc(void* /*param*/) {
         }
     }
 
+#ifdef MODULE_HEATER_ENABLED
+    // The task that drives the actuator leaves it safe when it stops. This is
+    // the second of two guards — TaskManager::shutdown() also stops the heater
+    // up front — because the loop can also end without shutdown() being the
+    // cause, and because stop() is idempotent so the overlap costs nothing.
+    HeaterModule::instance().stop();
+#endif
+
     Serial.println("[ProcessingTask] stopped");
     vTaskDelete(nullptr);
 }

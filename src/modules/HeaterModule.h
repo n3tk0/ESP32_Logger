@@ -100,10 +100,16 @@ private:
 
     void  _applyDuty(uint8_t pct);
     void  _forceOff(Fault reason);
-    // Unconditional, lock-free drive of the gate to its inactive level using
-    // plain GPIO. Correct whether or not LEDC currently owns the pin, so it is
-    // safe to call from any task at any point — including when the hardware
-    // mutex cannot be acquired.
+    // Lock-free drive of the gate to its inactive level using plain GPIO.
+    // Correct whether or not LEDC currently owns the pin, so it is safe to
+    // call from any task at any point — including when the hardware mutex
+    // cannot be acquired.
+    //
+    // Drives _ownedPin and ONLY _ownedPin. It must never fall back to the
+    // configured _pin: when the board profile rejects a pin, nothing has been
+    // driven and there is nothing to switch off, so touching it would defeat
+    // the very guard that rejected it — and on a flash or strapping pin,
+    // crash the device.
     void  _safeOffNow();
     bool  _attachPin();     // caller must hold _hwMutex
     void  _detachPin();     // caller must hold _hwMutex
@@ -135,6 +141,12 @@ private:
     SemaphoreHandle_t _hwMutex = nullptr;
     bool     _attached      = false;
     int      _attachedPin   = -1;               // pin currently held by LEDC
+    // Pin this module has validated against the board profile and taken
+    // ownership of. Set only after validateAttachPin() passes — which happens
+    // BEFORE ledcAttach, so a failed LEDC attach still leaves the pin owned
+    // and switchable off. Distinct from _attachedPin, which tracks only the
+    // narrower "LEDC currently drives this" state.
+    int      _ownedPin      = -1;
     bool     _reconfigure   = true;             // pin/PWM setup pending in tick()
     bool     _heating       = false;
     uint8_t  _dutyPct       = 0;
