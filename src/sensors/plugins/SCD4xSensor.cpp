@@ -1,5 +1,5 @@
 #include "SCD4xSensor.h"
-#include <Wire.h>
+#include "../I2CBus.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
 
@@ -15,19 +15,19 @@ uint8_t SCD4xSensor::_crc8(const uint8_t* data, size_t len) {
 }
 
 bool SCD4xSensor::_sendCmd(uint16_t cmd) {
-    Wire.beginTransmission(ADDR);
-    Wire.write(cmd >> 8);
-    Wire.write(cmd & 0xFF);
-    return Wire.endTransmission() == 0;
+    _wire->beginTransmission(ADDR);
+    _wire->write(cmd >> 8);
+    _wire->write(cmd & 0xFF);
+    return _wire->endTransmission() == 0;
 }
 
 bool SCD4xSensor::_readWords(uint16_t* words, int count) {
-    Wire.requestFrom((int)ADDR, count * 3);
+    _wire->requestFrom((int)ADDR, count * 3);
     for (int i = 0; i < count; i++) {
-        if (Wire.available() < 3) return false;
-        uint8_t msb = Wire.read();
-        uint8_t lsb = Wire.read();
-        uint8_t crc = Wire.read();
+        if (_wire->available() < 3) return false;
+        uint8_t msb = _wire->read();
+        uint8_t lsb = _wire->read();
+        uint8_t crc = _wire->read();
         uint8_t buf[2] = { msb, lsb };
         if (_crc8(buf, 2) != crc) return false;
         words[i] = ((uint16_t)msb << 8) | lsb;
@@ -50,13 +50,16 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (!validateAttachPin(sda, "scd4x", "sda")) return false;
-    if (!validateAttachPin(scl, "scd4x", "scl")) return false;
-    if (!_claimI2cAddress(ADDR, this)) {
-        Serial.printf("[SCD4x] I2C address 0x%02X already claimed — refusing init\n", ADDR);
+    // I2C bus selection. acquire() validates both pins against the board
+    // profile, rejects a bus this chip does not have, and refuses a bus
+    // already brought up on different pins.
+    _bus  = (uint8_t)(cfg["bus"] | 0);
+    _wire = I2CBus::acquire(_bus, sda, scl, "scd4x");
+    if (!_wire) return false;
+    if (!_claimI2cAddress(_bus, ADDR, this)) {
+        Serial.printf("[SCD4x] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
         return false;
     }
-    Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
     _calCo2.load(cal, "co2");

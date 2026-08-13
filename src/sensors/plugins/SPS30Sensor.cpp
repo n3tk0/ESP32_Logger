@@ -1,5 +1,5 @@
 #include "SPS30Sensor.h"
-#include <Wire.h>
+#include "../I2CBus.h"
 #include <string.h>
 #include <math.h>
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
@@ -17,23 +17,23 @@ uint8_t SPS30Sensor::_crc8(const uint8_t* data, size_t len) {
 }
 
 bool SPS30Sensor::_sendCmd(uint16_t cmd) {
-    Wire.beginTransmission(ADDR);
-    Wire.write(cmd >> 8);
-    Wire.write(cmd & 0xFF);
-    return Wire.endTransmission() == 0;
+    _wire->beginTransmission(ADDR);
+    _wire->write(cmd >> 8);
+    _wire->write(cmd & 0xFF);
+    return _wire->endTransmission() == 0;
 }
 
 // Command + one 16-bit argument word, each followed by its CRC (used to start
 // measurement with the float output format).
 bool SPS30Sensor::_sendCmdArg(uint16_t cmd, uint16_t arg) {
     uint8_t a[2] = { (uint8_t)(arg >> 8), (uint8_t)(arg & 0xFF) };
-    Wire.beginTransmission(ADDR);
-    Wire.write(cmd >> 8);
-    Wire.write(cmd & 0xFF);
-    Wire.write(a[0]);
-    Wire.write(a[1]);
-    Wire.write(_crc8(a, 2));
-    return Wire.endTransmission() == 0;
+    _wire->beginTransmission(ADDR);
+    _wire->write(cmd >> 8);
+    _wire->write(cmd & 0xFF);
+    _wire->write(a[0]);
+    _wire->write(a[1]);
+    _wire->write(_crc8(a, 2));
+    return _wire->endTransmission() == 0;
 }
 
 // Command + a 32-bit argument sent as two CRC-tagged words (auto-clean
@@ -41,21 +41,21 @@ bool SPS30Sensor::_sendCmdArg(uint16_t cmd, uint16_t arg) {
 bool SPS30Sensor::_sendCmdArg32(uint16_t cmd, uint32_t arg) {
     uint8_t hi[2] = { (uint8_t)(arg >> 24), (uint8_t)(arg >> 16) };
     uint8_t lo[2] = { (uint8_t)(arg >> 8),  (uint8_t)(arg & 0xFF) };
-    Wire.beginTransmission(ADDR);
-    Wire.write(cmd >> 8);
-    Wire.write(cmd & 0xFF);
-    Wire.write(hi[0]); Wire.write(hi[1]); Wire.write(_crc8(hi, 2));
-    Wire.write(lo[0]); Wire.write(lo[1]); Wire.write(_crc8(lo, 2));
-    return Wire.endTransmission() == 0;
+    _wire->beginTransmission(ADDR);
+    _wire->write(cmd >> 8);
+    _wire->write(cmd & 0xFF);
+    _wire->write(hi[0]); _wire->write(hi[1]); _wire->write(_crc8(hi, 2));
+    _wire->write(lo[0]); _wire->write(lo[1]); _wire->write(_crc8(lo, 2));
+    return _wire->endTransmission() == 0;
 }
 
 bool SPS30Sensor::_readWords(uint16_t* words, int count) {
-    Wire.requestFrom((int)ADDR, count * 3);
+    _wire->requestFrom((int)ADDR, count * 3);
     for (int i = 0; i < count; i++) {
-        if (Wire.available() < 3) return false;
-        uint8_t msb = Wire.read();
-        uint8_t lsb = Wire.read();
-        uint8_t crc = Wire.read();
+        if (_wire->available() < 3) return false;
+        uint8_t msb = _wire->read();
+        uint8_t lsb = _wire->read();
+        uint8_t crc = _wire->read();
         uint8_t buf[2] = { msb, lsb };
         if (_crc8(buf, 2) != crc) return false;
         words[i] = ((uint16_t)msb << 8) | lsb;
@@ -160,13 +160,16 @@ bool SPS30Sensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (!validateAttachPin(sda, "sps30", "sda")) return false;
-    if (!validateAttachPin(scl, "sps30", "scl")) return false;
-    if (!_claimI2cAddress(ADDR, this)) {
-        Serial.printf("[SPS30] I2C address 0x%02X already claimed — refusing init\n", ADDR);
+    // I2C bus selection. acquire() validates both pins against the board
+    // profile, rejects a bus this chip does not have, and refuses a bus
+    // already brought up on different pins.
+    _bus  = (uint8_t)(cfg["bus"] | 0);
+    _wire = I2CBus::acquire(_bus, sda, scl, "sps30");
+    if (!_wire) return false;
+    if (!_claimI2cAddress(_bus, ADDR, this)) {
+        Serial.printf("[SPS30] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
         return false;
     }
-    Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
     _calPm1.load(cal,  "pm1");

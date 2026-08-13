@@ -1,12 +1,16 @@
 #pragma once
 #include "../ISensor.h"
-// <Wire.h> moved to the .cpp — not referenced in this header.
+#include <Wire.h>   // TwoWire (resolved bus handle stored below)
 
 // ============================================================================
 // BH1750 — Digital ambient light sensor (I2C)
 //
 // Config keys:
 //   "sda", "scl"       — I2C pins
+//   "bus"                  — I2C controller: 0 (default) or 1. Devices with
+//                            the same fixed address must sit on different
+//                            buses. Bus 1 needs a chip with two I2C
+//                            controllers (S3/ESP32; the C3 has one).
 //   "address"          — 0x23 (ADDR=LOW, default) or 0x5C (ADDR=HIGH)
 //   "mode"             — "H" = high res 1 lx (default), "H2" = 0.5 lx, "L" = 4 lx
 //   "read_interval_ms" — polling interval (default 2000)
@@ -31,6 +35,10 @@ public:
     }
 
 private:
+    // Resolved I2C bus. Every transfer goes through _wire rather than the
+    // global Wire, so this sensor can sit on either controller.
+    uint8_t  _bus  = 0;
+    TwoWire* _wire = nullptr;
     bool _sendCmd(uint8_t cmd);
     bool _readLux(float& lux);
 

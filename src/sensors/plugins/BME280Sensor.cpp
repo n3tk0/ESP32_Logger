@@ -1,5 +1,5 @@
 #include "BME280Sensor.h"
-#include <Wire.h>
+#include "../I2CBus.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
 
@@ -11,15 +11,18 @@ bool BME280Sensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (!validateAttachPin(sda, "bme280", "sda")) return false;
-    if (!validateAttachPin(scl, "bme280", "scl")) return false;
-    if (!_claimI2cAddress(_addr, this)) {
-        Serial.printf("[BME280] I2C address 0x%02X already claimed — refusing init\n", _addr);
+    // I2C bus selection. acquire() validates both pins against the board
+    // profile, rejects a bus this chip does not have, and refuses a bus
+    // already brought up on different pins.
+    _bus  = (uint8_t)(cfg["bus"] | 0);
+    _wire = I2CBus::acquire(_bus, sda, scl, "bme280");
+    if (!_wire) return false;
+    if (!_claimI2cAddress(_bus, _addr, this)) {
+        Serial.printf("[BME280] I2C address 0x%02X already claimed on bus %u — refusing init\n", _addr, (unsigned)_bus);
         return false;
     }
-    Wire.begin((int8_t)sda, (int8_t)scl);
 
-    _ready = _bme.begin(_addr, &Wire);
+    _ready = _bme.begin(_addr, _wire);
     if (!_ready) {
         Serial.printf("[BME280] Not found at 0x%02X\n", _addr);
         return false;

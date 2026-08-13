@@ -1,6 +1,6 @@
 #pragma once
 #include "../ISensor.h"
-#include <Wire.h>
+#include <Wire.h>   // TwoWire
 #include "../../drivers/BME688_Mini.h"
 
 // ============================================================================
@@ -11,6 +11,10 @@
 //
 // Config keys:
 //   "sda", "scl"           — I2C pins
+//   "bus"                  — I2C controller: 0 (default) or 1. Devices with
+//                            the same fixed address must sit on different
+//                            buses. Bus 1 needs a chip with two I2C
+//                            controllers (S3/ESP32; the C3 has one).
 //   "address"              — 0x76 (default) or 0x77
 //   "read_interval_ms"     — polling interval (default 10000)
 //   "heater_temp"          — gas heater target °C (default 320)
@@ -92,6 +96,10 @@ public:
     }
 
 private:
+    // Resolved I2C bus. Every transfer goes through _wire rather than the
+    // global Wire, so this sensor can sit on either controller.
+    uint8_t  _bus  = 0;
+    TwoWire* _wire = nullptr;
     // IAQ (Indoor Air Quality) — derived 0..500 index (lower = cleaner air,
     // BSEC convention) from humidity + a self-calibrating gas-resistance
     // baseline. Heuristic only (no Bosch BSEC); accuracy ramps up over the

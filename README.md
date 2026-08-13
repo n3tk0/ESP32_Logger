@@ -49,8 +49,8 @@ Toggled via `#ifdef SENSOR_*_ENABLED` in `src/setup.h`. Default build enables on
 | `SENSOR_ENS160_ENABLED` | ENS160 TVOC/eCO2/AQI | I2C |
 | `SENSOR_SGP30_ENABLED` | SGP30 TVOC/eCO2 | I2C |
 | `SENSOR_SCD4X_ENABLED` | SCD40/41 CO2/temp/humidity | I2C |
-| `SENSOR_VEML6075_ENABLED` | VEML6075 UV-A/B/index | I2C |
-| `SENSOR_VEML7700_ENABLED` | VEML7700 ambient light | I2C |
+| `SENSOR_VEML6075_ENABLED` | VEML6075 UV-A/B/index | I2C (0x10) |
+| `SENSOR_VEML7700_ENABLED` | VEML7700 ambient light | I2C (0x10) |
 | `SENSOR_BH1750_ENABLED` | BH1750 lux | I2C |
 | `SENSOR_WATERFLOW_ENABLED` | YF-S201/YF-S403 water flow | GPIO/ISR |
 | `SENSOR_RAIN_ENABLED` | Tipping-bucket rain gauge | GPIO/ISR |
@@ -59,6 +59,24 @@ Toggled via `#ifdef SENSOR_*_ENABLED` in `src/setup.h`. Default build enables on
 | `SENSOR_HCSR04_ENABLED` | HC-SR04 ultrasonic distance | GPIO |
 | `SENSOR_ZMPT101B_ENABLED` | ZMPT101B AC voltage | ADC |
 | `SENSOR_ZMCT103C_ENABLED` | ZMCT103C AC current | ADC |
+
+### I2C buses
+
+Each I2C sensor takes a `"bus"` key (`0` by default, or `1`) alongside its
+`sda`/`scl` pins. Devices with a fixed, non-selectable address have to go on
+different buses to coexist — VEML6075 and VEML7700 are both hard-wired to
+`0x10`, so that pair needs one on each.
+
+Bus 1 exists only on parts with two I2C controllers (ESP32-S3, classic ESP32).
+The ESP32-C3 has one, and a sensor configured for bus 1 there is refused at
+init with an explicit log line rather than failing as "not found".
+
+A bus is brought up once, by the first sensor that claims it. A later sensor
+asking for the same bus with *different* pins is refused instead of silently
+moving the peripheral out from under the sensors already on it. `GET /api/diag`
+reports which controllers exist and which are up, on which pins.
+
+A second bus needs its own pull-up resistors, not just its own pins.
 
 ### Actuators
 
