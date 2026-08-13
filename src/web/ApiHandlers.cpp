@@ -1114,15 +1114,11 @@ static void handleApiI2cScan(AsyncWebServerRequest* req) {
     if (req->hasParam("bus", true))      bus = (uint8_t)req->getParam("bus", true)->value().toInt();
     else if (req->hasParam("bus"))       bus = (uint8_t)req->getParam("bus")->value().toInt();
 
+    // Safe to check without the lock: the controller count is a compile-time
+    // property of the chip and never changes.
     if (bus >= I2CBus::hardwareBusCount()) {
         req->send(400, "application/json",
                   "{\"ok\":false,\"error\":\"bus not available on this chip\"}");
-        return;
-    }
-    TwoWire* wire = I2CBus::get(bus);
-    if (!wire) {
-        req->send(409, "application/json",
-                  "{\"ok\":false,\"error\":\"bus not configured — assign an I2C sensor to it first\"}");
         return;
     }
 
@@ -1139,6 +1135,18 @@ static void handleApiI2cScan(AsyncWebServerRequest* req) {
     if (!tookMutex) {
         req->send(503, "application/json",
                   "{\"ok\":false,\"error\":\"bus busy\"}");
+        return;
+    }
+
+    // Resolve the handle only AFTER the lock. A config reload takes wireMutex
+    // and calls I2CBus::resetAll(), which end()s the peripheral and frees the
+    // driver's rx/tx buffers — so a pointer fetched before blocking on the
+    // mutex could name a bus that was torn down while we waited.
+    TwoWire* wire = I2CBus::get(bus);
+    if (!wire) {
+        xSemaphoreGive(wireMutex);
+        req->send(409, "application/json",
+                  "{\"ok\":false,\"error\":\"bus not configured — assign an I2C sensor to it first\"}");
         return;
     }
 
