@@ -56,6 +56,36 @@ extern volatile uint32_t g_taskHeartbeat[TASK_COUNT];
 #  define LOGGER_PSRAM_AVAILABLE 0
 #endif
 
+// ---------------------------------------------------------------------------
+// Backward-scan limits for the two lookup helpers.
+//
+// findLast() and collectMetricSeries() walk back from the newest entry until
+// they find what they need. When the metric is ABSENT from the ring — a sensor
+// stuck on QUALITY_ERROR is never pushed at all (ProcessingTask) — they walk
+// the whole thing.
+//
+// That was self-limiting while capacity was ~227. It is not any more: /api/sensors
+// calls findLast() once per metric (up to 16 sensors x 8 metrics = 128 calls)
+// and collectMetricSeries() once per sensor, all inside ONE webDataMutex hold —
+// the same mutex ProcessingTask takes with a 5 ms timeout before every push,
+// counting failures as g_ringPushDrops. An unbounded scan over a 58 000-entry
+// PSRAM ring would turn a missing metric into dropped readings.
+//
+// The limits below keep the worst case near the old cost (~29 000 iterations):
+//   128 x 256 + 16 x 2048 = ~66 000 strcmp pairs.
+// ---------------------------------------------------------------------------
+
+// findLast: the newest value for a metric sits within roughly one read cycle
+// of the head (~19 entries for a 5-sensor build), so 256 is already generous
+// — and it exceeds the old whole-ring capacity, so behaviour on the internal
+// budget is unchanged.
+constexpr size_t RING_SCAN_LIMIT_LAST = 256;
+
+// collectMetricSeries: needs SPARK_MAX (32) samples of ONE metric, which are
+// interleaved with every other metric — ~32 x 19 = 608 entries for a 5-sensor
+// build. 2048 leaves headroom for denser configurations while staying bounded.
+constexpr size_t RING_SCAN_LIMIT_SERIES = 2048;
+
 // ============================================================================
 // RingBuffer — SPSC ring buffer (finding #17: proper acquire/release atomics)
 // Producer: ProcessingTask (push).  Consumer: WebTask (copyRecent, read-only).
@@ -201,6 +231,11 @@ public:
         size_t h = _head.load(std::memory_order_acquire);
         size_t t = _tail.load(std::memory_order_relaxed);
         size_t start = (h > N) ? (h - N) : t;
+        // Bounded: see RING_SCAN_LIMIT_LAST. A metric older than this many
+        // entries is reported as absent, which is what the freshness UI wants
+        // anyway — and the bound exceeds the whole internal-budget ring, so
+        // nothing changes on a board without PSRAM.
+        if ((h - start) > RING_SCAN_LIMIT_LAST) start = h - RING_SCAN_LIMIT_LAST;
         for (size_t i = h; i > start; ) {
             --i;
             const SensorReading& e = _buf[i % N];
@@ -223,6 +258,9 @@ public:
         size_t h = _head.load(std::memory_order_acquire);
         size_t t = _tail.load(std::memory_order_relaxed);
         size_t start = (h > N) ? (h - N) : t;
+        // Bounded: see RING_SCAN_LIMIT_SERIES. Caps the cost when the metric
+        // is absent; a sparkline simply comes back shorter.
+        if ((h - start) > RING_SCAN_LIMIT_SERIES) start = h - RING_SCAN_LIMIT_SERIES;
 
         // Walk backward, append to a temp at decreasing indices so the
         // final compaction yields oldest → newest with one memmove.

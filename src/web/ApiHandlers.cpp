@@ -94,10 +94,20 @@ static void handleApiData(AsyncWebServerRequest* req) {
         return;
     }
 
-    // Reserve up to 200 slots for the ring buffer; give all remaining slots to
-    // the filesystem query.  When the ring is empty (historical request) the
-    // full MAX_RAW budget is available for FS rows instead of a fixed 300-cap.
-    constexpr size_t RING_SHARE = 200;
+    // Slots given to the ring buffer. The split with the filesystem query is
+    // moot while that path is disabled (see "chunk F" below, fsCount = 0), so
+    // the ring gets the whole budget instead of leaving 100 slots reserved for
+    // rows that never arrive. Restore a split when the CSV reader lands.
+    //
+    // NOTE: this bounds chart depth to MAX_RAW readings regardless of how deep
+    // the ring itself is. A PSRAM-backed ring holds tens of thousands of
+    // entries, but a single /api/data request still only sees the newest
+    // MAX_RAW of them — roughly 2.5 min for a build emitting ~19 metrics every
+    // 10 s. Serving hours in one request needs aggregation that accumulates
+    // per bucket while scanning the ring, rather than materialising raw
+    // readings into this array first; that is the same work chunk F implies
+    // for the FS side and is deliberately not attempted here.
+    constexpr size_t RING_SHARE = MAX_RAW;
 
     size_t ringCount = 0;
     size_t fsCount   = 0;
@@ -157,7 +167,12 @@ static void handleApiData(AsyncWebServerRequest* req) {
         fsCount = 0;
 
         size_t rawCount = ringCount + fsCount;
-        truncated = (rawCount >= MAX_RAW);
+        // Report truncation when the ring hit its share too, not just when the
+        // combined array filled. With RING_SHARE == MAX_RAW these coincide, but
+        // stating both keeps the flag honest if the split is reintroduced —
+        // otherwise the response claims completeness while the ring still holds
+        // readings inside the requested range.
+        truncated = (rawCount >= MAX_RAW) || (ringCount >= RING_SHARE);
 
         // Merge: insertion-sort by timestamp + dedup by (ts, sensorId, metric) (#4)
         if (fsCount > 0 && ringCount > 0) {

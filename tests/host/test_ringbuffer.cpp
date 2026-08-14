@@ -127,6 +127,50 @@ static void test_copyRecent_window_with_fromTs() {
     CHECK(out[3].value == 63.0f);
 }
 
+// findLast / collectMetricSeries walk backward from the head and are bounded by
+// RING_SCAN_LIMIT_*, so a metric that stopped reporting longer ago than the
+// limit reads as absent. That bound is what stops /api/sensors from walking a
+// 58 000-entry PSRAM ring once per missing metric while holding webDataMutex.
+static void test_scan_limits_bound_backward_walk() {
+    RingBuffer rb;
+    CHECK(rb.begin(4096, /*preferPsram=*/false));
+
+    // "old" reports once, then goes quiet behind a wall of other readings.
+    rb.push(mk("s", "old", 1.0f, 1));
+    for (int i = 0; i < 3000; i++) rb.push(mk("s", "new", (float)i, (uint32_t)(i + 2)));
+
+    SensorReading r;
+    // Beyond RING_SCAN_LIMIT_LAST (256) → reported absent, not found.
+    CHECK(!rb.findLast("s", "old", r));
+    // The recent metric is still found immediately.
+    CHECK(rb.findLast("s", "new", r));
+    CHECK(r.value == 2999.0f);
+
+    // Same bound applies to the sparkline series: "old" has no samples inside
+    // RING_SCAN_LIMIT_SERIES (2048), so it comes back empty rather than
+    // costing a full-ring scan.
+    float spark[8];
+    CHECK_EQ(rb.collectMetricSeries("s", "old", spark, 8), (size_t)0);
+    // ...while the live metric fills the request from the newest end.
+    CHECK_EQ(rb.collectMetricSeries("s", "new", spark, 8), (size_t)8);
+    CHECK(spark[7] == 2999.0f);
+}
+
+// A metric within the limit is still found after the ring has wrapped, so the
+// bound does not weaken normal operation on the small internal-RAM ring
+// (capacity 227 < RING_SCAN_LIMIT_LAST, i.e. behaviour there is unchanged).
+static void test_scan_limits_leave_small_ring_unchanged() {
+    RingBuffer rb;
+    CHECK(rb.begin(227, /*preferPsram=*/false));
+    rb.push(mk("s", "rare", 42.0f, 1));
+    for (int i = 0; i < 200; i++) rb.push(mk("s", "busy", (float)i, (uint32_t)(i + 2)));
+
+    SensorReading r;
+    // 201 entries back — inside both the ring and the 256-entry limit.
+    CHECK(rb.findLast("s", "rare", r));
+    CHECK(r.value == 42.0f);
+}
+
 int main() {
     RUN(test_push_and_copy_order);
     RUN(test_overflow_keeps_most_recent);
@@ -135,5 +179,7 @@ int main() {
     RUN(test_collectMetricSeries_chronological);
     RUN(test_copyRecent_window_is_newest);
     RUN(test_copyRecent_window_with_fromTs);
+    RUN(test_scan_limits_bound_backward_walk);
+    RUN(test_scan_limits_leave_small_ring_unchanged);
     return SUMMARY();
 }
