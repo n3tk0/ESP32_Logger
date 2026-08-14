@@ -4,6 +4,8 @@
 #include <freertos/semphr.h>
 #include <atomic>
 #include <string.h>
+#include <stdlib.h>   // malloc/free for the runtime-sized ring
+#include <new>        // placement new
 #include "../core/SensorTypes.h"
 
 // ============================================================================
@@ -40,14 +42,102 @@ enum TaskIndex : uint8_t {
 };
 extern volatile uint32_t g_taskHeartbeat[TASK_COUNT];
 
+// PSRAM support is compiled in only when the board actually has it AND the
+// toolchain provides the allocator header.  __has_include keeps the host unit
+// tests (which build this header against tests/host/shims) on the plain-malloc
+// path without needing a separate mock.
+#if defined(BOARD_HAS_PSRAM) && defined(__has_include)
+#  if __has_include(<esp_heap_caps.h>)
+#    include <esp_heap_caps.h>
+#    define LOGGER_PSRAM_AVAILABLE 1
+#  endif
+#endif
+#ifndef LOGGER_PSRAM_AVAILABLE
+#  define LOGGER_PSRAM_AVAILABLE 0
+#endif
+
 // ============================================================================
 // RingBuffer — SPSC ring buffer (finding #17: proper acquire/release atomics)
 // Producer: ProcessingTask (push).  Consumer: WebTask (copyRecent, read-only).
+//
+// Capacity is a RUNTIME property, set once by begin().  It used to be a
+// template parameter backed by a fixed array, which pinned the buffer to
+// internal SRAM and to a size the ESP32-C3 could afford.  That mattered more
+// than it looks: FS-backed history is not wired up yet (see ApiHandlers —
+// "FS query disabled until the wide-CSV reader ships"), so this ring is the
+// ONLY source of chart data.  Its depth is literally how far back the
+// dashboard can see.
+//
+// At the old 16 KB budget that was ~227 entries.  A build emitting ~19 metrics
+// on a 10 s cadence fills that in about two minutes.  On a board with PSRAM the
+// same ring can hold hours instead, which is the entire point of allocating it
+// off-chip.
+//
+// begin() MUST be called before any push/read.  Until it is, every method is a
+// safe no-op — the accessors are reachable from the web task from the moment
+// the server is up, which can precede pipeline bring-up.
+//
+// PSRAM caveat: this buffer is touched from tasks only.  It must never be read
+// or written from an ISR (the project has IRAM_ATTR handlers for flow, rain and
+// wind) — PSRAM is unreachable whenever the flash cache is disabled.
 // ============================================================================
-template<size_t N>
 class RingBuffer {
 public:
+    RingBuffer() = default;
+    ~RingBuffer() { _release(); }
+
+    RingBuffer(const RingBuffer&)            = delete;
+    RingBuffer& operator=(const RingBuffer&) = delete;
+
+    // ------------------------------------------------------------------
+    // begin()
+    //   Allocates storage for `capacity` readings.  When `preferPsram` is set
+    //   and PSRAM is present, the allocation is attempted there first and
+    //   falls back to internal heap on failure.
+    //
+    //   Returns false if no allocation succeeded; the buffer then stays in its
+    //   safe no-op state rather than half-initialised.
+    //
+    //   Calling begin() twice releases the previous allocation.  Not safe to
+    //   call while producers or consumers are running.
+    // ------------------------------------------------------------------
+    bool begin(size_t capacity, bool preferPsram = true) {
+        _release();
+        if (capacity == 0) return false;
+
+        const size_t bytes = capacity * sizeof(SensorReading);
+
+#if LOGGER_PSRAM_AVAILABLE
+        if (preferPsram) {
+            _buf = (SensorReading*)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+            if (_buf) _inPsram = true;
+        }
+#else
+        (void)preferPsram;
+#endif
+        if (!_buf) _buf = (SensorReading*)malloc(bytes);
+        if (!_buf) return false;
+
+        // Placement-new, not memset: SensorReading has a user-provided default
+        // constructor, so raw malloc'd bytes are not yet a constructed object.
+        // The constructor does happen to zero-fill, but reaching that result by
+        // memset over a non-trivial type is exactly what -Wclass-memaccess
+        // objects to — and it would silently stop being equivalent the moment
+        // the struct gains a member that needs real initialisation.
+        for (size_t i = 0; i < capacity; i++) new (&_buf[i]) SensorReading();
+
+        _cap = capacity;
+        _head.store(0, std::memory_order_relaxed);
+        _tail.store(0, std::memory_order_relaxed);
+        return true;
+    }
+
+    size_t capacity() const { return _cap; }
+    bool   isPsram()  const { return _inPsram; }
+
     void push(const SensorReading& r) {
+        if (!_buf) return;
+        const size_t N = _cap;
         // R14 / AUDIT 12.12: ordering matters across the SPSC boundary.
         //  1. write the data slot
         //  2. publish _head with release  → reader's acquire load of
@@ -69,9 +159,23 @@ public:
     size_t copyRecent(SensorReading* out, size_t maxOut,
                       uint32_t fromTs = 0) const
     {
-        size_t h     = _head.load(std::memory_order_acquire);
-        size_t t     = _tail.load(std::memory_order_relaxed);
-        size_t start = (h > N) ? (h - N) : t;
+        if (!_buf) return 0;
+        const size_t N = _cap;
+        size_t h      = _head.load(std::memory_order_acquire);
+        size_t t      = _tail.load(std::memory_order_relaxed);
+        size_t oldest = (h > N) ? (h - N) : t;
+
+        // Anchor the window to the NEWEST end of the ring.
+        //
+        // Scanning forward from `oldest` and stopping once maxOut entries are
+        // copied returns the OLDEST maxOut entries — the opposite of what the
+        // name promises. That was invisible while capacity (227) was smaller
+        // than every caller's maxOut (200-500), so the whole ring always fit.
+        // Once the ring can hold tens of thousands of entries it would mean
+        // /api/latest serving readings hours out of date as "latest".
+        size_t start = oldest;
+        if ((h - oldest) > maxOut) start = h - maxOut;
+
         size_t copied = 0;
         for (size_t i = start; i < h && copied < maxOut; i++) {
             const SensorReading& entry = _buf[i % N];
@@ -83,6 +187,7 @@ public:
     }
 
     size_t size() const {
+        if (!_buf) return 0;
         size_t h = _head.load(std::memory_order_relaxed);
         size_t t = _tail.load(std::memory_order_relaxed);
         return (h >= t) ? (h - t) : 0;
@@ -91,6 +196,8 @@ public:
     // Scan backwards for the most recent entry matching sensorId + metric
     bool findLast(const char* sensorId, const char* metric,
                   SensorReading& out) const {
+        if (!_buf) return false;
+        const size_t N = _cap;
         size_t h = _head.load(std::memory_order_acquire);
         size_t t = _tail.load(std::memory_order_relaxed);
         size_t start = (h > N) ? (h - N) : t;
@@ -111,7 +218,8 @@ public:
     // sparklines without a separate endpoint.  Returns the number written.
     size_t collectMetricSeries(const char* sensorId, const char* metric,
                                 float* out, size_t maxOut) const {
-        if (maxOut == 0) return 0;
+        if (maxOut == 0 || !_buf) return 0;
+        const size_t N = _cap;
         size_t h = _head.load(std::memory_order_acquire);
         size_t t = _tail.load(std::memory_order_relaxed);
         size_t start = (h > N) ? (h - N) : t;
@@ -137,14 +245,64 @@ public:
     }
 
 private:
-    SensorReading _buf[N] = {};
+    void _release() {
+        // SensorReading is trivially destructible (no user destructor, all
+        // members are scalars/arrays), so the placement-new'd elements need no
+        // explicit destructor calls before the storage goes back.
+        if (_buf) { free(_buf); _buf = nullptr; }
+        _cap     = 0;
+        _inPsram = false;
+        _head.store(0, std::memory_order_relaxed);
+        _tail.store(0, std::memory_order_relaxed);
+    }
+
+    // heap_caps_malloc'd PSRAM and plain malloc'd internal RAM are both
+    // released with free() on ESP-IDF, so one path covers each case.
+    SensorReading* _buf     = nullptr;
+    size_t         _cap     = 0;
+    bool           _inPsram = false;
     std::atomic<size_t> _head{0};
     std::atomic<size_t> _tail{0};
 };
 
-// Ring buffer for recent readings served by /api/data.
-// Size is derived from a 16 KB budget so the comment stays correct as
-// SensorReading grows.  With sizeof(SensorReading) ≈ 72 B this yields ~227
-// entries — enough for ~30 min at 10 s with 3 sensors.
-constexpr size_t WEB_RING_SIZE = (16u * 1024u) / sizeof(SensorReading);
-extern RingBuffer<WEB_RING_SIZE> webRingBuf;
+// ---------------------------------------------------------------------------
+// Ring-buffer sizing budgets.  Both are byte budgets rather than entry counts
+// so the arithmetic stays correct as SensorReading grows.
+// ---------------------------------------------------------------------------
+
+// Internal-SRAM fallback: what the buffer gets with no PSRAM.  Unchanged from
+// the pre-PSRAM behaviour (~227 entries at sizeof(SensorReading) ≈ 72 B), so
+// the ESP32-C3 targets keep exactly the footprint they were tuned for.
+constexpr size_t WEB_RING_BYTES_INTERNAL = 16u * 1024u;
+
+// PSRAM budget.  4 MB of an 8 MB part is ~58 000 entries — roughly 8 hours for
+// a build emitting ~19 metrics every 10 s.  Deliberately not the whole chip:
+// PSRAM is a general allocator here, and leaving half free keeps room for
+// anything else that wants it (large JSON documents, future FS caches) rather
+// than making this one consumer the reason an unrelated allocation fails.
+#ifndef WEB_RING_BYTES_PSRAM
+#  define WEB_RING_BYTES_PSRAM (4u * 1024u * 1024u)
+#endif
+
+// Never claim more than this share of the PSRAM actually reported at boot —
+// protects the 2 MB and 4 MB variants of the same board from having the whole
+// chip swallowed by the ring.
+constexpr uint8_t WEB_RING_PSRAM_MAX_PCT = 50;
+
+// Global web ring buffer.  Sized and allocated by webRingBufInit() at boot;
+// every accessor is a safe no-op until then.
+extern RingBuffer webRingBuf;
+
+// ---------------------------------------------------------------------------
+// webRingBufInit()
+//   Chooses a capacity and allocates the ring.  Call once from setup(), before
+//   the pipeline tasks start and before the web server can serve /api/data.
+//
+//   With PSRAM: min(WEB_RING_BYTES_PSRAM, WEB_RING_PSRAM_MAX_PCT % of free
+//   PSRAM).  Without, or if the PSRAM allocation fails: the internal budget.
+//   Logs the outcome — capacity, byte size and which memory it landed in.
+//
+//   Returns false only if even the internal fallback could not be allocated,
+//   which leaves the dashboard without history but does not stop the logger.
+// ---------------------------------------------------------------------------
+bool webRingBufInit();

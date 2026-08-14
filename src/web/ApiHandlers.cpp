@@ -236,7 +236,10 @@ static void handleApiData(AsyncWebServerRequest* req) {
 //   sensor's display name from SensorManager.  Designed to be cheap enough
 //   to poll every 60 s from the dashboard:
 //   - single mutex acquire
-//   - single full-ring scan (O(N) where N ≤ WEB_RING_SIZE = 500)
+//   - scan bounded by MAX_RAW (500) readings copied out of the ring, NOT by
+//     the ring's own capacity — which is now a runtime value and, on a PSRAM
+//     board, tens of thousands of entries. copyRecent() stops at maxOut, so
+//     the cost of this endpoint does not grow with the ring.
 //   - JsonDocument sized for ≤ 32 (sensor, metric) pairs
 //
 // Response shape:
@@ -364,6 +367,23 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     }
 
     // Queues
+    // PSRAM + ring-buffer state. First stop when the dashboard shows less
+    // history than expected: "size" of 0 on a board that has PSRAM fitted
+    // almost always means the build is compiled for the wrong SPI mode
+    // (octal parts need board_build.arduino.memory_type = qio_opi), and the
+    // ring then silently falls back to the small internal-RAM budget.
+    {
+        JsonObject psram = doc["psram"].to<JsonObject>();
+        psram["size"] = (uint32_t)ESP.getPsramSize();
+        psram["free"] = (uint32_t)ESP.getFreePsram();
+
+        JsonObject ring = doc["ring"].to<JsonObject>();
+        ring["capacity"] = (uint32_t)webRingBuf.capacity();
+        ring["used"]     = (uint32_t)webRingBuf.size();
+        ring["bytes"]    = (uint32_t)(webRingBuf.capacity() * sizeof(SensorReading));
+        ring["psram"]    = webRingBuf.isPsram();
+    }
+
     // I2C bus state — which controllers this chip has and which the current
     // sensor config actually brought up. The first thing to check when a
     // sensor on a second bus reports "not found": an unconfigured bus 1 means

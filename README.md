@@ -78,6 +78,35 @@ reports which controllers exist and which are up, on which pins.
 
 A second bus needs its own pull-up resistors, not just its own pins.
 
+### Memory and history depth
+
+FS-backed history is not wired up yet, so the in-memory ring buffer is the only
+source of chart data — its depth is literally how far back the dashboard can
+see. Capacity is chosen at boot:
+
+| Memory | Budget | Entries | ~History at 19 metrics / 10 s |
+|---|---|---|---|
+| Internal SRAM (C3, or S3 without PSRAM) | 16 KB | ~227 | ~2 min |
+| PSRAM (S3 with `-DBOARD_HAS_PSRAM`) | 4 MB, capped at 50 % of free PSRAM | ~58 000 | ~8 h |
+
+PSRAM is volatile — a reboot loses it. It extends the live dashboard, it does
+not replace CSV logging to flash.
+
+`GET /api/diag` reports `psram` (size/free) and `ring` (capacity, used, bytes,
+whether it landed in PSRAM). A `psram.size` of 0 on a board that has PSRAM
+fitted almost always means the build targets the wrong SPI mode — see below.
+
+**Octal PSRAM (`…R8` modules) needs `board_build.arduino.memory_type = qio_opi`.**
+The stock `esp32-s3-devkitc-1` definition builds for `qio_qspi`, which cannot
+talk to an octal part; the RAM is then silently absent with only a line in the
+boot log. Boards with *quad* PSRAM need `qio_qspi` instead — the mirror-image
+failure. The `esp32s3` env in `platformio.ini` is configured for octal
+(N16R8) and also uses the full 16 MB flash.
+
+The ring is touched from tasks only. It must never be read or written from an
+ISR — PSRAM is unreachable whenever the flash cache is disabled, and this
+project has `IRAM_ATTR` handlers for flow, rain and wind.
+
 ### Actuators
 
 | Macro | Module | Interface |

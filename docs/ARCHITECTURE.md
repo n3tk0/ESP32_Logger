@@ -346,7 +346,10 @@ ProcessingTask
     │     timeout path — the stale-probe fail-safe has to keep working
     │     precisely when no readings are arriving. Reads its control
     │     inputs from ReadingCache, not from the queue.
-    ├── In-memory ring buffer per metric (last 1000 pts, lock-free SPSC)
+    ├── In-memory ring buffer (lock-free SPSC, runtime capacity:
+    │     16 KB internal SRAM, or up to 4 MB in PSRAM when present —
+    │     see webRingBufInit(). Currently the ONLY source of chart
+    │     history, since the FS query path is not wired up yet.)
     │                   │
     │              webDataMutex  ←── WebTask reads for /api/data
     │

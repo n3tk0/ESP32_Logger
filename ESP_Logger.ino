@@ -555,6 +555,12 @@ void setup() {
 
     loadConfig();
 
+    // Allocate the web ring buffer before anything can push to or read from it.
+    // Done here rather than in TaskManager::init() because legacy mode never
+    // starts the task pipeline, yet still serves /api/sensors sparklines from
+    // this buffer.
+    webRingBufInit();
+
     initStorage();
 
     // R12 / AUDIT 1.7: with formatOnFail=false, a corrupt LittleFS leaves
