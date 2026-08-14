@@ -9,7 +9,7 @@
 # Outputs:
 #   - firmware-esp32c3.bin           (XIAO ESP32-C3, 4MB, production target)
 #   - firmware-esp32c3_supermini.bin (ESP32-C3 Super Mini, 4MB, native USB JTAG)
-#   - firmware-esp32s3.bin           (ESP32-S3, 8MB)
+#   - firmware-esp32s3.bin           (ESP32-S3, 16MB + 8MB octal PSRAM)
 
 name: Build Firmware
 
@@ -52,8 +52,8 @@ jobs:
             app_max: 1572864    # 0x180000 = 1,536 KB (from partitions_balanced.csv)
           - env: esp32s3
             name: esp32s3
-            flash: 8MB
-            app_max: 3342336    # 0x330000 = 3,264 KB (PlatformIO default_8MB)
+            flash: 16MB
+            app_max: 6553600    # 0x640000 = 6,400 KB (PlatformIO default_16MB)
 
     steps:
       - name: Checkout repository

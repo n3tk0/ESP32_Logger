@@ -185,7 +185,7 @@ cd esp32_logger
 ```bash
 pio run -e xiao_esp32c3        # Seeed XIAO ESP32-C3 (default)
 pio run -e esp32c3_supermini   # ESP32-C3 SuperMini
-pio run -e esp32s3             # ESP32-S3 DevKitC-1 (8 MB)
+pio run -e esp32s3             # ESP32-S3 DevKitC-1 / N16R8 (16 MB flash, 8 MB octal PSRAM)
 ```
 
 **3. Upload firmware and LittleFS image**
