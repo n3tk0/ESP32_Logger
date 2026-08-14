@@ -4,6 +4,7 @@
 #include "../pipeline/DataPipeline.h"  // wireMutex (#14)
 #include "../core/BoardProfiles.h"     // g_pinAllowUnsafe (per-sensor pin override)
 #include "ReadingCache.h"              // latest-value table (cross-sensor lookups)
+#include "I2CBus.h"                    // per-bus arbitration + reset on reload
 
 SensorManager sensorManager;
 
@@ -26,17 +27,23 @@ void _releaseSerial1(ISensor* who) {
 // Tracks which plugin claimed each 7-bit I2C address so that two sensors
 // with the same fixed address refuse to co-initialise rather than silently
 // corrupting each other's reads.
-static ISensor* _i2cOwners[128] = {};
+//
+// Scoped PER BUS: an address only collides with another device on the same
+// wire. This is what lets VEML6075 and VEML7700 — both hard-wired to 0x10 with
+// no address-select pin — run at the same time, one on each controller.
+static ISensor* _i2cOwners[I2CBus::MAX_BUSES][128] = {};
 
-bool _claimI2cAddress(uint8_t addr, ISensor* who) {
-    if (addr >= 128) return false;
-    if (_i2cOwners[addr] == nullptr) { _i2cOwners[addr] = who; return true; }
-    return (_i2cOwners[addr] == who);
+bool _claimI2cAddress(uint8_t bus, uint8_t addr, ISensor* who) {
+    if (bus >= I2CBus::MAX_BUSES || addr >= 128) return false;
+    if (_i2cOwners[bus][addr] == nullptr) { _i2cOwners[bus][addr] = who; return true; }
+    return (_i2cOwners[bus][addr] == who);
 }
 void _releaseI2cClaims(ISensor* who) {
     if (!who) return;
-    for (int i = 0; i < 128; i++) {
-        if (_i2cOwners[i] == who) _i2cOwners[i] = nullptr;
+    for (int b = 0; b < I2CBus::MAX_BUSES; b++) {
+        for (int i = 0; i < 128; i++) {
+            if (_i2cOwners[b][i] == who) _i2cOwners[b][i] = nullptr;
+        }
     }
 }
 
@@ -72,6 +79,29 @@ void SensorManager::_destroyAll() {
     // permanently block re-claiming the same resource.
     _serial1Owner = nullptr;
     memset(_i2cOwners, 0, sizeof(_i2cOwners));
+    // Release the I2C controllers as well: the recorded pin assignment would
+    // otherwise outlive the sensors that asked for it and refuse the new
+    // config's pins as a conflict.
+    //
+    // Under wireMutex, because resetAll() calls TwoWire::end(), which deinits
+    // the peripheral AND frees the driver's rx/tx buffers. /api/i2c_scan walks
+    // 127 addresses holding only wireMutex, so without this the buffers could
+    // be freed mid-scan.
+    //
+    // Lock order is configMutex → wireMutex, matching tickFiltered (callers of
+    // _destroyAll already hold configMutex). i2c_scan takes wireMutex alone, so
+    // no cycle exists.
+    {
+        MutexGuard wg(wireMutex, pdMS_TO_TICKS(1000));
+        if (wireMutex && !wg.isLocked()) {
+            // A scan holds the bus for ~130 ms at worst, so a 1 s timeout means
+            // something is genuinely wrong. Resetting anyway is the lesser evil:
+            // leaving the registry claiming buses the new config never brought
+            // up would refuse every subsequent pin assignment.
+            Serial.println("[SensorManager] _destroyAll: wireMutex timeout — resetting I2C anyway");
+        }
+        I2CBus::resetAll();
+    }
     // Drop cached values too: entries for sensors that no longer exist would
     // otherwise keep answering get() with an ever-growing age instead of
     // "unknown", which reads the same as a live-but-stale sensor.

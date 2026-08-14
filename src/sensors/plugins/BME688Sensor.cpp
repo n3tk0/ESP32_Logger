@@ -1,5 +1,6 @@
 #include "BME688Sensor.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
+#include "../I2CBus.h"
 #include "../SensorManager.h"        // R17: _claim/_release helpers
 #include "../ReadingCache.h"         // ambient temperature reference
 #include "../../utils/Psychrometrics.h"
@@ -21,13 +22,16 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (!validateAttachPin(sda, "bme688", "sda")) return false;
-    if (!validateAttachPin(scl, "bme688", "scl")) return false;
-    if (!_claimI2cAddress(_addr, this)) {
-        Serial.printf("[BME688] I2C address 0x%02X already claimed — refusing init\n", _addr);
+    // I2C bus selection. acquire() validates both pins against the board
+    // profile, rejects a bus this chip does not have, and refuses a bus
+    // already brought up on different pins.
+    _bus  = (uint8_t)(cfg["bus"] | 0);
+    _wire = I2CBus::acquire(_bus, sda, scl, "bme688");
+    if (!_wire) return false;
+    if (!_claimI2cAddress(_bus, _addr, this)) {
+        Serial.printf("[BME688] I2C address 0x%02X already claimed on bus %u — refusing init\n", _addr, (unsigned)_bus);
         return false;
     }
-    Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
     _calTemp.load(cal, "temperature");
@@ -35,7 +39,7 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
     _calPressure.load(cal, "pressure");
     _calGas.load(cal, "gas_resistance");
 
-    if (!_bme.begin(_addr, &Wire)) {
+    if (!_bme.begin(_addr, _wire)) {
         Serial.printf("[BME688] Not found at 0x%02X\n", _addr);
         return false;
     }

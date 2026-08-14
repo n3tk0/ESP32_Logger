@@ -5,6 +5,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include "ISensor.h"
+#include "I2CBus.h"   // I2CBus::MAX_BUSES for the per-bus address table
 
 // ============================================================================
 // Cross-plugin resource arbitration (R17 rows 21.1, 22.4).
@@ -24,7 +25,7 @@
 bool _claimSerial1(ISensor* who);
 void _releaseSerial1(ISensor* who);
 
-bool _claimI2cAddress(uint8_t addr, ISensor* who);
+bool _claimI2cAddress(uint8_t bus, uint8_t addr, ISensor* who);
 void _releaseI2cClaims(ISensor* who);
 
 // ============================================================================

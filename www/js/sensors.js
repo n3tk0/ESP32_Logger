@@ -731,7 +731,8 @@ function clRenderSensors(sensors) {
         ).label || s.type;
       var pinInfo =
         s.interface === "i2c"
-          ? "SDA:" + (s.sda || "?") + " SCL:" + (s.scl || "?")
+          ? "SDA:" + (s.sda || "?") + " SCL:" + (s.scl || "?") +
+            (s.bus ? " Bus:" + s.bus : "")
           : s.interface === "uart"
             ? "RX:" + (s.uart_rx || "?")
             : s.interface === "pulse"
@@ -824,10 +825,19 @@ function _clBuildEditFormHtml(s) {
           '<input type="number" step="100" name="read_interval_ms" class="input" value="' + (s.read_interval_ms || 10000) + '"></div>';
 
   if (s.interface === "i2c") {
+    var busVal = (s.bus !== undefined ? s.bus : 0);
     html += '<div class="form-grid">' +
             '<div class="field"><label class="field-label">SDA Pin</label><input type="number" name="sda" class="input" value="' + (s.sda !== undefined ? s.sda : 6) + '"></div>' +
             '<div class="field"><label class="field-label">SCL Pin</label><input type="number" name="scl" class="input" value="' + (s.scl !== undefined ? s.scl : 7) + '"></div>' +
-            '</div>';
+            '</div>' +
+            '<div class="field"><label class="field-label">I2C Bus</label>' +
+            '<select name="bus" class="input">' +
+              '<option value="0"' + (busVal === 0 ? " selected" : "") + '>Bus 0 (default)</option>' +
+              '<option value="1"' + (busVal === 1 ? " selected" : "") + '>Bus 1 (second controller)</option>' +
+            '</select>' +
+            '<div class="hint">Put devices with the same fixed address on different buses — e.g. VEML6075 and VEML7700 are both 0x10 and cannot share one. ' +
+            'Bus 1 needs a chip with two I2C controllers (ESP32-S3, ESP32); the ESP32-C3 has only bus 0. ' +
+            'Each bus needs its own SDA/SCL pins and its own pull-ups.</div></div>';
   } else if (s.interface === "uart") {
     html += '<div class="form-grid">' +
             '<div class="field"><label class="field-label">RX Pin</label><input type="number" name="uart_rx" class="input" value="' + (s.uart_rx !== undefined ? s.uart_rx : 20) + '"></div>' +
@@ -867,7 +877,7 @@ function _clBuildEditFormHtml(s) {
           '<input type="checkbox" name="allow_unsafe_pins"' + (s.allow_unsafe_pins ? ' checked' : '') +
           '> Use restricted pin anyway (proper pull-ups added)</label>';
 
-  var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "uart_rx", "uart_tx", "baud", "pin", "work_period_min", "pulses_per_liter", "calibration", "humidityCorrectionEnabled", "humidityCorrectionKappa", "allow_unsafe_pins"];
+  var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "bus", "uart_rx", "uart_tx", "baud", "pin", "work_period_min", "pulses_per_liter", "calibration", "humidityCorrectionEnabled", "humidityCorrectionKappa", "allow_unsafe_pins"];
   var advObj = {};
   for (var k in s) {
     if (stdKeys.indexOf(k) === -1) advObj[k] = s[k];
@@ -999,6 +1009,8 @@ function clSaveEditedSensor() {
   if (s.interface === "i2c") {
     s.sda = parseInt(fd.get("sda") || 6, 10);
     s.scl = parseInt(fd.get("scl") || 7, 10);
+    s.bus = parseInt(fd.get("bus") || 0, 10);
+    if (!(s.bus === 0 || s.bus === 1)) s.bus = 0;
   } else if (s.interface === "uart") {
     s.uart_rx = parseInt(fd.get("uart_rx") || 20, 10);
     s.uart_tx = parseInt(fd.get("uart_tx") || -1, 10);

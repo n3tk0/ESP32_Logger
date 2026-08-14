@@ -619,7 +619,7 @@ The **Auth** column in the index uses:
 
 | Method | Route | Auth | Purpose |
 |---|---|---|---|
-| POST | `/api/i2c_scan` | CSRF | Scan the I2C bus |
+| POST | `/api/i2c_scan` | CSRF | Scan an I2C bus (`?bus=N`, default 0; the bus must already be configured by a sensor) |
 | GET | `/firstrun` | read | Serve the first-run wizard HTML |
 | GET | `/api/board-profiles` | read | Available board profiles |
 | POST | `/api/firstrun` | first-run | Provision board / pins / mode (only while `g_setupRequired`) |
@@ -758,7 +758,12 @@ Mutexes:
                  most safety-critical lock in the firmware
   webDataMutex   ProcessingTask (write) ↔ WebTask (read) ring buffer
   configMutex    Web /api/config/platform POST ↔ SensorTask reload
-  wireMutex      shared I2C bus (SensorManager reads ↔ /api/i2c_scan)
+  wireMutex      ALL I2C buses (SensorManager reads ↔ /api/i2c_scan).
+                 Deliberately one lock for both controllers rather than
+                 one each: two buses really can run concurrently, but the
+                 transfers are short and seconds apart, so the contention
+                 is irrelevant and a single lock keeps the scan endpoint
+                 and the sensor tasks trivially correct against each other.
   HeaterModule
   ::_hwMutex     LEDC attach/detach bookkeeping. tick() runs on
                  ProcessingTask while stop()/start() arrive on the AsyncTCP

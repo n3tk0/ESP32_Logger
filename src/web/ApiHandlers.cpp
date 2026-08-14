@@ -24,6 +24,7 @@
 #include "../utils/JsonResponse.h"     // R9: sendJsonResponse helper
 #include "../alerts/AlertEngine.h"    // GET/POST /api/alerts, snooze, toasts
 #include <Wire.h>                     // POST /api/i2c_scan
+#include "../sensors/I2CBus.h"        // bus registry for /api/i2c_scan
 // Forward-declared in Logger.ino — accessible here because this file is
 // compiled in the same sketch scope.
 #ifdef EXPORT_MQTT_ENABLED
@@ -363,6 +364,25 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     }
 
     // Queues
+    // I2C bus state — which controllers this chip has and which the current
+    // sensor config actually brought up. The first thing to check when a
+    // sensor on a second bus reports "not found": an unconfigured bus 1 means
+    // no sensor claimed it, and a bus count of 1 means the chip cannot have it.
+    {
+        JsonObject i2c = doc["i2c"].to<JsonObject>();
+        i2c["controllers"] = I2CBus::hardwareBusCount();
+        JsonArray buses = i2c["buses"].to<JsonArray>();
+        for (uint8_t b = 0; b < I2CBus::hardwareBusCount(); b++) {
+            JsonObject o = buses.add<JsonObject>();
+            o["bus"] = b;
+            o["up"]  = I2CBus::isConfigured(b);
+            if (I2CBus::isConfigured(b)) {
+                o["sda"] = I2CBus::sdaOf(b);
+                o["scl"] = I2CBus::sclOf(b);
+            }
+        }
+    }
+
     JsonObject queues = doc["queues"].to<JsonObject>();
     if (sensorQueue) {
         JsonObject q = queues["sensor"].to<JsonObject>();
@@ -1077,14 +1097,36 @@ static void handleApiAlertsToasts(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/i2c_scan — scan the Wire bus and return detected addresses
+// POST /api/i2c_scan[?bus=N] — scan an I2C bus and return detected addresses
+//
+// `bus` defaults to 0. Only buses a sensor has already brought up can be
+// scanned: the pins are a property of the sensor config, so there is nothing
+// to scan on a bus nobody has claimed. Scanning an unconfigured bus would mean
+// guessing pins and calling begin() behind the sensor task's back.
+//
+// The response stays a bare array of address strings for backwards
+// compatibility with the existing UI.
 // ---------------------------------------------------------------------------
 static void handleApiI2cScan(AsyncWebServerRequest* req) {
     if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
+
+    uint8_t bus = 0;
+    if (req->hasParam("bus", true))      bus = (uint8_t)req->getParam("bus", true)->value().toInt();
+    else if (req->hasParam("bus"))       bus = (uint8_t)req->getParam("bus")->value().toInt();
+
+    // Safe to check without the lock: the controller count is a compile-time
+    // property of the chip and never changes.
+    if (bus >= I2CBus::hardwareBusCount()) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"bus not available on this chip\"}");
+        return;
+    }
+
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
-    // Acquire the I2C bus mutex if available (same guard used by sensors)
+    // Acquire the I2C bus mutex if available (same guard used by sensors).
+    // One mutex covers every bus — see I2CBus.h on why that is deliberate.
     extern SemaphoreHandle_t wireMutex;
     bool tookMutex = false;
     if (wireMutex) {
@@ -1096,9 +1138,21 @@ static void handleApiI2cScan(AsyncWebServerRequest* req) {
         return;
     }
 
+    // Resolve the handle only AFTER the lock. A config reload takes wireMutex
+    // and calls I2CBus::resetAll(), which end()s the peripheral and frees the
+    // driver's rx/tx buffers — so a pointer fetched before blocking on the
+    // mutex could name a bus that was torn down while we waited.
+    TwoWire* wire = I2CBus::get(bus);
+    if (!wire) {
+        xSemaphoreGive(wireMutex);
+        req->send(409, "application/json",
+                  "{\"ok\":false,\"error\":\"bus not configured — assign an I2C sensor to it first\"}");
+        return;
+    }
+
     for (uint8_t addr = 0x01; addr <= 0x7F; addr++) {
-        Wire.beginTransmission(addr);
-        if (Wire.endTransmission() == 0) {
+        wire->beginTransmission(addr);
+        if (wire->endTransmission() == 0) {
             char hex[7];
             snprintf(hex, sizeof(hex), "0x%02X", addr);
             arr.add(hex);
