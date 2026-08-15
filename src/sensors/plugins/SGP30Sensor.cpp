@@ -1,5 +1,5 @@
 #include "SGP30Sensor.h"
-#include <Wire.h>
+#include "../I2CBus.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
 
@@ -14,19 +14,19 @@ uint8_t SGP30Sensor::_crc8(uint8_t d1, uint8_t d2) {
 }
 
 bool SGP30Sensor::_sendCommand(uint16_t cmd) {
-    Wire.beginTransmission(ADDR);
-    Wire.write(cmd >> 8);
-    Wire.write(cmd & 0xFF);
-    return Wire.endTransmission() == 0;
+    _wire->beginTransmission(ADDR);
+    _wire->write(cmd >> 8);
+    _wire->write(cmd & 0xFF);
+    return _wire->endTransmission() == 0;
 }
 
 bool SGP30Sensor::_readWords(uint16_t* words, int count) {
-    Wire.requestFrom((int)ADDR, count * 3);
+    _wire->requestFrom((int)ADDR, count * 3);
     for (int i = 0; i < count; i++) {
-        if (Wire.available() < 3) return false;
-        uint8_t msb = Wire.read();
-        uint8_t lsb = Wire.read();
-        uint8_t crc = Wire.read();
+        if (_wire->available() < 3) return false;
+        uint8_t msb = _wire->read();
+        uint8_t lsb = _wire->read();
+        uint8_t crc = _wire->read();
         if (crc != _crc8(msb, lsb)) return false;
         words[i] = ((uint16_t)msb << 8) | lsb;
     }
@@ -53,13 +53,16 @@ bool SGP30Sensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (!validateAttachPin(sda, "sgp30", "sda")) return false;
-    if (!validateAttachPin(scl, "sgp30", "scl")) return false;
-    if (!_claimI2cAddress(ADDR, this)) {
-        Serial.printf("[SGP30] I2C address 0x%02X already claimed — refusing init\n", ADDR);
+    // I2C bus selection. acquire() validates both pins against the board
+    // profile, rejects a bus this chip does not have, and refuses a bus
+    // already brought up on different pins.
+    _bus  = (uint8_t)(cfg["bus"] | 0);
+    _wire = I2CBus::acquire(_bus, sda, scl, "sgp30");
+    if (!_wire) return false;
+    if (!_claimI2cAddress(_bus, ADDR, this)) {
+        Serial.printf("[SGP30] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
         return false;
     }
-    Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
     _calTvoc.load(cal, "tvoc");

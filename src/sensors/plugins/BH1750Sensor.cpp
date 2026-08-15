@@ -1,18 +1,18 @@
 #include "BH1750Sensor.h"
-#include <Wire.h>
+#include "../I2CBus.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
 
 bool BH1750Sensor::_sendCmd(uint8_t cmd) {
-    Wire.beginTransmission(_addr);
-    Wire.write(cmd);
-    return Wire.endTransmission() == 0;
+    _wire->beginTransmission(_addr);
+    _wire->write(cmd);
+    return _wire->endTransmission() == 0;
 }
 
 bool BH1750Sensor::_readLux(float& lux) {
-    Wire.requestFrom((int)_addr, 2);
-    if (Wire.available() < 2) return false;
-    uint16_t raw = ((uint16_t)Wire.read() << 8) | Wire.read();
+    _wire->requestFrom((int)_addr, 2);
+    if (_wire->available() < 2) return false;
+    uint16_t raw = ((uint16_t)_wire->read() << 8) | _wire->read();
     lux = _calLux.apply((float)raw / _divider);
     return true;
 }
@@ -36,13 +36,16 @@ bool BH1750Sensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (!validateAttachPin(sda, "bh1750", "sda")) return false;
-    if (!validateAttachPin(scl, "bh1750", "scl")) return false;
-    if (!_claimI2cAddress(_addr, this)) {
-        Serial.printf("[BH1750] I2C address 0x%02X already claimed — refusing init\n", _addr);
+    // I2C bus selection. acquire() validates both pins against the board
+    // profile, rejects a bus this chip does not have, and refuses a bus
+    // already brought up on different pins.
+    _bus  = (uint8_t)(cfg["bus"] | 0);
+    _wire = I2CBus::acquire(_bus, sda, scl, "bh1750");
+    if (!_wire) return false;
+    if (!_claimI2cAddress(_bus, _addr, this)) {
+        Serial.printf("[BH1750] I2C address 0x%02X already claimed on bus %u — refusing init\n", _addr, (unsigned)_bus);
         return false;
     }
-    Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
     _calLux.load(cal, "lux");

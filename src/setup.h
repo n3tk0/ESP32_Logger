@@ -91,6 +91,13 @@
 //#  define SENSOR_ZMCT103C_ENABLED     // ZMCT103C AC current (ADC)
 //#endif
 
+// Actuators.  OFF by default and opt-in for a reason: this one drives a
+// MOSFET gate from a PWM pin.  Enabling it only compiles the module in — it
+// stays disabled and unattached until a pin is assigned in the UI.
+//#ifndef MODULE_HEATER_ENABLED
+//#  define MODULE_HEATER_ENABLED       // Enclosure heater (frost/condensation)
+//#endif
+
 // Cloud / network exporters
 #ifndef EXPORT_MQTT_ENABLED
 #  define EXPORT_MQTT_ENABLED            // Internal MQTT driver
@@ -119,6 +126,18 @@
 #endif
 #ifndef DEFAULT_SCL
 #  define DEFAULT_SCL        9
+#endif
+// Second I2C controller. Only reachable on parts with SOC_I2C_NUM == 2
+// (ESP32-S3, classic ESP32) — the ESP32-C3 has a single controller and a
+// sensor configured for bus 1 there is refused at init with an explicit log
+// line. Pins are per-sensor config ("bus", "sda", "scl" in
+// platform_config.json); these are only the fallbacks offered by the UI.
+// A second bus needs its own pull-ups, not just its own pins.
+#ifndef DEFAULT_SDA1
+#  define DEFAULT_SDA1      10
+#endif
+#ifndef DEFAULT_SCL1
+#  define DEFAULT_SCL1      11
 #endif
 #ifndef DEFAULT_FLOW_PIN
 #  define DEFAULT_FLOW_PIN  4

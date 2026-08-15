@@ -1,6 +1,6 @@
 #pragma once
 #include "../ISensor.h"
-// <Wire.h> moved to the .cpp — not referenced in this header.
+#include <Wire.h>   // TwoWire (resolved bus handle stored below)
 
 // ============================================================================
 // SCD40 / SCD41 — CO2 / Temperature / Humidity sensor (I2C, Sensirion)
@@ -13,6 +13,10 @@
 //
 // Config keys:
 //   "sda", "scl"           — I2C pins
+//   "bus"                  — I2C controller: 0 (default) or 1. Devices with
+//                            the same fixed address must sit on different
+//                            buses. Bus 1 needs a chip with two I2C
+//                            controllers (S3/ESP32; the C3 has one).
 //   "read_interval_ms"     — how often to request a fresh reading (default 5000)
 //   "calibration": {
 //       "co2":         {"offset": 0.0, "scale": 1.0},
@@ -42,6 +46,10 @@ public:
     }
 
 private:
+    // Resolved I2C bus. Every transfer goes through _wire rather than the
+    // global Wire, so this sensor can sit on either controller.
+    uint8_t  _bus  = 0;
+    TwoWire* _wire = nullptr;
     bool    _sendCmd(uint16_t cmd);
     bool    _readWords(uint16_t* words, int count);
     bool    _dataReady();

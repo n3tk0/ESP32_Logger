@@ -1,24 +1,24 @@
 #include "VEML6075Sensor.h"
-#include <Wire.h>
+#include "../I2CBus.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
 
 bool VEML6075Sensor::_writeReg16(uint8_t reg, uint16_t val) {
-    Wire.beginTransmission(ADDR);
-    Wire.write(reg);
-    Wire.write(val & 0xFF);
-    Wire.write(val >> 8);
-    return Wire.endTransmission() == 0;
+    _wire->beginTransmission(ADDR);
+    _wire->write(reg);
+    _wire->write(val & 0xFF);
+    _wire->write(val >> 8);
+    return _wire->endTransmission() == 0;
 }
 
 bool VEML6075Sensor::_readReg16(uint8_t reg, uint16_t& val) {
-    Wire.beginTransmission(ADDR);
-    Wire.write(reg);
-    if (Wire.endTransmission(false) != 0) return false;
-    Wire.requestFrom((int)ADDR, 2);
-    if (Wire.available() < 2) return false;
-    uint8_t lo = Wire.read();
-    uint8_t hi = Wire.read();
+    _wire->beginTransmission(ADDR);
+    _wire->write(reg);
+    if (_wire->endTransmission(false) != 0) return false;
+    _wire->requestFrom((int)ADDR, 2);
+    if (_wire->available() < 2) return false;
+    uint8_t lo = _wire->read();
+    uint8_t hi = _wire->read();
     val = ((uint16_t)hi << 8) | lo;
     return true;
 }
@@ -29,13 +29,16 @@ bool VEML6075Sensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (!validateAttachPin(sda, "veml6075", "sda")) return false;
-    if (!validateAttachPin(scl, "veml6075", "scl")) return false;
-    if (!_claimI2cAddress(ADDR, this)) {
-        Serial.printf("[VEML6075] I2C address 0x%02X already claimed — refusing init\n", ADDR);
+    // I2C bus selection. acquire() validates both pins against the board
+    // profile, rejects a bus this chip does not have, and refuses a bus
+    // already brought up on different pins.
+    _bus  = (uint8_t)(cfg["bus"] | 0);
+    _wire = I2CBus::acquire(_bus, sda, scl, "veml6075");
+    if (!_wire) return false;
+    if (!_claimI2cAddress(_bus, ADDR, this)) {
+        Serial.printf("[VEML6075] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
         return false;
     }
-    Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
     _calUva.load(cal, "uva");

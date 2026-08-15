@@ -341,7 +341,19 @@ sensorQueue
     ▼
 ProcessingTask
     ├── Normalizer (unit conversion, range check, 3σ spike filter)
-    ├── In-memory ring buffer per metric (last 1000 pts, lock-free SPSC)
+    ├── HeaterModule::tick()  (MODULE_HEATER_ENABLED, 1 Hz)
+    │     Runs BEFORE the queue receive so it also fires on the 100 ms
+    │     timeout path — the stale-probe fail-safe has to keep working
+    │     precisely when no readings are arriving. Reads its control
+    │     inputs from ReadingCache, not from the queue.
+    ├── In-memory ring buffer (lock-free SPSC, runtime capacity:
+    │     16 KB internal SRAM, or up to 4 MB in PSRAM when present —
+    │     see webRingBufInit(). Currently the only store of recent
+    │     readings, since the FS query path is not wired up yet.
+    │     /api/latest and sparklines read its newest end directly;
+    │     /api/data still caps a request at 300 raw readings.
+    │     Backward scans are bounded by RING_SCAN_LIMIT_* so a metric
+    │     missing from a large ring cannot stall webDataMutex.)
     │                   │
     │              webDataMutex  ←── WebTask reads for /api/data
     │
@@ -614,7 +626,7 @@ The **Auth** column in the index uses:
 
 | Method | Route | Auth | Purpose |
 |---|---|---|---|
-| POST | `/api/i2c_scan` | CSRF | Scan the I2C bus |
+| POST | `/api/i2c_scan` | CSRF | Scan an I2C bus (`?bus=N`, default 0; the bus must already be configured by a sensor) |
 | GET | `/firstrun` | read | Serve the first-run wizard HTML |
 | GET | `/api/board-profiles` | read | Available board profiles |
 | POST | `/api/firstrun` | first-run | Provision board / pins / mode (only while `g_setupRequired`) |
@@ -753,7 +765,28 @@ Mutexes:
                  most safety-critical lock in the firmware
   webDataMutex   ProcessingTask (write) ↔ WebTask (read) ring buffer
   configMutex    Web /api/config/platform POST ↔ SensorTask reload
-  wireMutex      shared I2C bus (SensorManager reads ↔ /api/i2c_scan)
+  wireMutex      ALL I2C buses (SensorManager reads ↔ /api/i2c_scan).
+                 Deliberately one lock for both controllers rather than
+                 one each: two buses really can run concurrently, but the
+                 transfers are short and seconds apart, so the contention
+                 is irrelevant and a single lock keeps the scan endpoint
+                 and the sensor tasks trivially correct against each other.
+  HeaterModule
+  ::_hwMutex     LEDC attach/detach bookkeeping. tick() runs on
+                 ProcessingTask while stop()/start() arrive on the AsyncTCP
+                 worker via /api/modules/heater/{enable,restart}. Held only
+                 around attach/detach — never around a blocking call. stop()
+                 de-energises the gate BEFORE taking it, so the safety
+                 guarantee never depends on acquiring a lock.
+
+Spinlock (portMUX):
+  ReadingCache   latest value per (sensorId, metric). Written from
+                 SensorTask AND SlowSensorTask inside tickFiltered, read by
+                 BME688Sensor (for its ambient-temperature reference) and
+                 HeaterModule. Deliberately NOT a FreeRTOS mutex and
+                 deliberately not configMutex: BME688Sensor reads the cache
+                 from inside tickFiltered, which already holds configMutex,
+                 so a second take of that non-recursive mutex would deadlock.
 
 ISR shared state (existing pattern, unchanged):
   volatile pulseCount   — ISR writes, SensorTask reads

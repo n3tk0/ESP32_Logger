@@ -1,23 +1,23 @@
 #include "ENS160Sensor.h"
-#include <Wire.h>
+#include "../I2CBus.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
 
 bool ENS160Sensor::_writeReg(uint8_t reg, uint8_t val) {
-    Wire.beginTransmission(_addr);
-    Wire.write(reg);
-    Wire.write(val);
-    return Wire.endTransmission() == 0;
+    _wire->beginTransmission(_addr);
+    _wire->write(reg);
+    _wire->write(val);
+    return _wire->endTransmission() == 0;
 }
 
 bool ENS160Sensor::_readRegs(uint8_t reg, uint8_t* buf, size_t len) {
-    Wire.beginTransmission(_addr);
-    Wire.write(reg);
-    if (Wire.endTransmission(false) != 0) return false;
-    Wire.requestFrom((int)_addr, (int)len);
+    _wire->beginTransmission(_addr);
+    _wire->write(reg);
+    if (_wire->endTransmission(false) != 0) return false;
+    _wire->requestFrom((int)_addr, (int)len);
     for (size_t i = 0; i < len; i++) {
-        if (!Wire.available()) return false;
-        buf[i] = Wire.read();
+        if (!_wire->available()) return false;
+        buf[i] = _wire->read();
     }
     return true;
 }
@@ -39,13 +39,16 @@ bool ENS160Sensor::init(JsonObjectConst cfg) {
 
     int sda = cfg["sda"] | -1;
     int scl = cfg["scl"] | -1;
-    if (!validateAttachPin(sda, "ens160", "sda")) return false;
-    if (!validateAttachPin(scl, "ens160", "scl")) return false;
-    if (!_claimI2cAddress(_addr, this)) {
-        Serial.printf("[ENS160] I2C address 0x%02X already claimed — refusing init\n", _addr);
+    // I2C bus selection. acquire() validates both pins against the board
+    // profile, rejects a bus this chip does not have, and refuses a bus
+    // already brought up on different pins.
+    _bus  = (uint8_t)(cfg["bus"] | 0);
+    _wire = I2CBus::acquire(_bus, sda, scl, "ens160");
+    if (!_wire) return false;
+    if (!_claimI2cAddress(_bus, _addr, this)) {
+        Serial.printf("[ENS160] I2C address 0x%02X already claimed on bus %u — refusing init\n", _addr, (unsigned)_bus);
         return false;
     }
-    Wire.begin((int8_t)sda, (int8_t)scl);
 
     JsonObjectConst cal = cfg["calibration"];
     _calTvoc.load(cal, "tvoc");

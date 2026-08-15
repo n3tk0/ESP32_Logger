@@ -41,16 +41,16 @@ Toggled via `#ifdef SENSOR_*_ENABLED` in `src/setup.h`. Default build enables on
 | Macro | Sensor | Interface |
 |---|---|---|
 | `SENSOR_BME280_ENABLED` | BME280/BMP280 temp/humidity/pressure | I2C |
-| `SENSOR_BME688_ENABLED` | BME680/688 temp/humidity/pressure + gas + IAQ | I2C |
+| `SENSOR_BME688_ENABLED` | BME680/688 temp/humidity/pressure + gas + IAQ + dew point | I2C |
 | `SENSOR_DS18B20_ENABLED` | DS18B20 temperature (1-Wire) | GPIO |
 | `SENSOR_SDS011_ENABLED` | SDS011 PM2.5/PM10 | UART |
 | `SENSOR_PMS5003_ENABLED` | PMS5003 PM1/2.5/10 | UART |
-| `SENSOR_SPS30_ENABLED` | Sensirion SPS30 PM1/2.5/4/10 | I2C |
+| `SENSOR_SPS30_ENABLED` | Sensirion SPS30 PM1/2.5/4/10 + fan/laser health | I2C |
 | `SENSOR_ENS160_ENABLED` | ENS160 TVOC/eCO2/AQI | I2C |
 | `SENSOR_SGP30_ENABLED` | SGP30 TVOC/eCO2 | I2C |
 | `SENSOR_SCD4X_ENABLED` | SCD40/41 CO2/temp/humidity | I2C |
-| `SENSOR_VEML6075_ENABLED` | VEML6075 UV-A/B/index | I2C |
-| `SENSOR_VEML7700_ENABLED` | VEML7700 ambient light | I2C |
+| `SENSOR_VEML6075_ENABLED` | VEML6075 UV-A/B/index | I2C (0x10) |
+| `SENSOR_VEML7700_ENABLED` | VEML7700 ambient light | I2C (0x10) |
 | `SENSOR_BH1750_ENABLED` | BH1750 lux | I2C |
 | `SENSOR_WATERFLOW_ENABLED` | YF-S201/YF-S403 water flow | GPIO/ISR |
 | `SENSOR_RAIN_ENABLED` | Tipping-bucket rain gauge | GPIO/ISR |
@@ -59,6 +59,90 @@ Toggled via `#ifdef SENSOR_*_ENABLED` in `src/setup.h`. Default build enables on
 | `SENSOR_HCSR04_ENABLED` | HC-SR04 ultrasonic distance | GPIO |
 | `SENSOR_ZMPT101B_ENABLED` | ZMPT101B AC voltage | ADC |
 | `SENSOR_ZMCT103C_ENABLED` | ZMCT103C AC current | ADC |
+
+### I2C buses
+
+Each I2C sensor takes a `"bus"` key (`0` by default, or `1`) alongside its
+`sda`/`scl` pins. Devices with a fixed, non-selectable address have to go on
+different buses to coexist — VEML6075 and VEML7700 are both hard-wired to
+`0x10`, so that pair needs one on each.
+
+Bus 1 exists only on parts with two I2C controllers (ESP32-S3, classic ESP32).
+The ESP32-C3 has one, and a sensor configured for bus 1 there is refused at
+init with an explicit log line rather than failing as "not found".
+
+A bus is brought up once, by the first sensor that claims it. A later sensor
+asking for the same bus with *different* pins is refused instead of silently
+moving the peripheral out from under the sensors already on it. `GET /api/diag`
+reports which controllers exist and which are up, on which pins.
+
+A second bus needs its own pull-up resistors, not just its own pins.
+
+### Memory and history depth
+
+FS-backed history is not wired up yet, so the in-memory ring buffer is the only
+store of recent readings. Its capacity is chosen at boot:
+
+| Memory | Budget | Entries | ~Retention at 19 metrics / 10 s |
+|---|---|---|---|
+| Internal SRAM (C3, or S3 without PSRAM) | 16 KB | ~227 | ~2 min |
+| PSRAM (`esp32s3_n16r8`) | 4 MB, capped at 50 % of free PSRAM | ~58 000 | ~8 h |
+
+**What the extra depth reaches today:** `/api/latest`, the per-card sparklines,
+and anything else asking for recent values — those all read the newest end of
+the ring and benefit immediately.
+
+**What it does not reach yet:** `/api/data` charts. That endpoint materialises
+raw readings into a fixed 300-entry array before aggregating, so one request
+sees the newest ~300 readings (~2.5 min) no matter how deep the ring is.
+Serving hours in a single request needs aggregation that accumulates per bucket
+while scanning the ring instead of copying raw readings out first — the same
+work the planned CSV reader ("chunk F") implies for the filesystem side.
+
+PSRAM is volatile — a reboot loses it. It extends live retention, it does not
+replace CSV logging to flash.
+
+`GET /api/diag` reports `psram` (size/free) and `ring` (capacity, used, bytes,
+whether it landed in PSRAM). A `psram.size` of 0 on a board that has PSRAM
+fitted almost always means the build targets the wrong SPI mode — see below.
+
+**Octal PSRAM (`…R8` modules) needs `board_build.arduino.memory_type = qio_opi`.**
+The stock `esp32-s3-devkitc-1` definition builds for `qio_qspi`, which cannot
+talk to an octal part; the RAM is then silently absent with only a line in the
+boot log. Boards with *quad* PSRAM (`…R2`, `…R8V`) need `qio_qspi` instead — the
+mirror-image failure.
+
+This is why N16R8 is a **separate `esp32s3_n16r8` env** rather than a change to
+`esp32s3`: the 16 MB partition table puts LittleFS past the end of an 8 MB
+part, so flashing it to a stock DevKitC-1-N8 fails to mount and boots into safe
+mode. Build `esp32s3` for 8 MB boards, `esp32s3_n16r8` for 16 MB + PSRAM ones.
+
+The ring is touched from tasks only. It must never be read or written from an
+ISR — PSRAM is unreachable whenever the flash cache is disabled, and this
+project has `IRAM_ATTR` handlers for flow, rain and wind. It is also allocated
+only on the continuous/hybrid path; legacy and safe mode never start the task
+that fills it, so they leave it unallocated rather than reserving megabytes for
+a buffer nothing writes to.
+
+### Actuators
+
+| Macro | Module | Interface |
+|---|---|---|
+| `MODULE_HEATER_ENABLED` | Enclosure heater — frost and condensation protection | GPIO/PWM |
+
+Off by default. Drives a MOSFET gate to hold a sensor enclosure above both a
+frost setpoint and the measured dew point, which is what keeps an SPS30 inside
+its `-10 °C..+60 °C` operating range and keeps condensation off its optics
+through a winter.
+
+The control loop runs on `ProcessingTask` at 1 Hz and forces the output off
+whenever its temperature probe goes stale, the enclosure exceeds the
+over-temperature cutoff, or the module is disabled. Duty ramps from zero on
+every on-edge so a cold PTC's inrush does not trip the supply.
+
+The software interlocks do not replace the hardware ones: the gate still needs
+a pull-down so the heater is off while the ESP32 is in reset, and the element
+still needs an in-line thermal fuse.
 
 ### Exporters
 
@@ -83,7 +167,7 @@ Selected via `PlatformMode` enum in `src/core/Config.h`:
 On-device single-page app served from LittleFS (no internet required):
 
 - **Dashboard & log charts** — uPlot time-series; `uPlot.*` is vendored in `www/` so charts render in offline / AP-only mode (CDN is fallback only)
-- **Module manager** — schema-driven settings for Wi-Fi, time/NTP, data log, theme and OTA, each with a live status chip and enable toggle (`/api/modules`)
+- **Module manager** — schema-driven settings for Wi-Fi, time/NTP, data log, theme, OTA and the enclosure heater, each with a live status chip and enable toggle (`/api/modules`)
 - **Sensors** — add/edit/calibrate/reorder with pin-conflict guards; live read-now test
 - **OTA, diagnostics, file browser** — rollback-capable updates, `/api/diag` observability, and CSV/log download
 - First-run wizard, dark/light themes, CSRF-protected mutating endpoints
@@ -118,7 +202,8 @@ cd esp32_logger
 ```bash
 pio run -e xiao_esp32c3        # Seeed XIAO ESP32-C3 (default)
 pio run -e esp32c3_supermini   # ESP32-C3 SuperMini
-pio run -e esp32s3             # ESP32-S3 DevKitC-1 (8 MB)
+pio run -e esp32s3             # ESP32-S3 DevKitC-1 (8 MB flash, no PSRAM)
+pio run -e esp32s3_n16r8       # ESP32-S3 N16R8 (16 MB flash, 8 MB octal PSRAM)
 ```
 
 **3. Upload firmware and LittleFS image**

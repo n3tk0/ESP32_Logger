@@ -62,6 +62,9 @@
 #include "src/modules/TimeModule.h"    // Pass 5 phase 2b
 #include "src/modules/UsbCdcModule.h"       // global usbCdc (USB-CDC NVS pref)
 #include "src/modules/UsbCdcConfigModule.h" // IModule adapter for the manager
+#ifdef MODULE_HEATER_ENABLED
+#  include "src/modules/HeaterModule.h"     // enclosure heater (actuator)
+#endif
 #include "src/managers/ConfigManager.h"
 #include "src/managers/HardwareManager.h"
 #include "src/managers/StorageManager.h"
@@ -587,6 +590,12 @@ void setup() {
     // before loadAll/saveAll seed the modules.json shadow from it.
     usbCdc.syncFromNvs();
     moduleRegistry.add(&UsbCdcConfigModule::instance());
+#ifdef MODULE_HEATER_ENABLED
+    // Registered before loadAll() so its saved pin/setpoints are hydrated from
+    // modules.json.  It stays disabled until the user enables it and assigns a
+    // pin; ProcessingTask drives the control loop from there.
+    moduleRegistry.add(&HeaterModule::instance());
+#endif
     if (fsAvailable && activeFS) {
         moduleRegistry.loadAll(*activeFS);
         if (!activeFS->exists(ModuleRegistry::DEFAULT_PATH)) {
@@ -724,6 +733,14 @@ void setup() {
         // so we have a working web server but ZERO sensor / exporter tasks
         // — the goal is OTA recovery, not data collection.
         if (!g_safeMode && g_platformMode != PLATFORM_LEGACY) {
+            // Allocate the web ring buffer before the pipeline starts — this is
+            // the only path that ever pushes to it (ProcessingTask). Legacy and
+            // safe mode start no tasks, so the ring would stay permanently
+            // empty there; allocating anyway would reserve megabytes of PSRAM
+            // and construct every slot on each safe-mode boot for nothing.
+            // Until this runs every RingBuffer accessor is a documented no-op,
+            // so an early /api/sensors request is served as an empty ring.
+            webRingBufInit();
             _initPlatform();
         } else {
             // Legacy OR safe-mode: no sensor pipeline, no FreeRTOS tasks.

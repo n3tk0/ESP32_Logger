@@ -7,6 +7,9 @@
 #include "../pipeline/DataPipeline.h"
 #include "../sensors/SensorManager.h"  // sensorManager.count() for dynamic queue sizing
 #include "../core/Globals.h"            // sdAvailable, littleFsAvailable, activeFS
+#ifdef MODULE_HEATER_ENABLED
+#  include "../modules/HeaterModule.h"
+#endif
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <SD.h>
@@ -269,6 +272,26 @@ bool TaskManager::init(fs::FS& fs) {
 
 // ---------------------------------------------------------------------------
 void TaskManager::shutdown() {
+#ifdef MODULE_HEATER_ENABLED
+    // De-energise the heater FIRST, before anything else in the teardown.
+    //
+    // ProcessingTask owns the control loop, so the moment `running` goes false
+    // nothing is checking the enclosure temperature any more — yet this
+    // function then waits up to 3 s for the queues to drain plus up to 4 s for
+    // the tasks to exit. Leaving the last LEDC duty applied across that window
+    // would mean heating with the over-temperature interlock switched off.
+    //
+    // It also covers the force-delete path below: a task stuck in blocking I/O
+    // is killed with vTaskDelete and never reaches its own exit handler, so
+    // relying on ProcessingTask to clean up after itself is not sufficient.
+    //
+    // The callers are the deep-sleep paths (_doSleep, hybrid timer cycle).
+    // GPIOs go high-impedance on deep sleep and the gate pull-down takes over
+    // from there, but that is the hardware backstop — the software interlock
+    // should not be silently skipped on the way to it.
+    HeaterModule::instance().stop();
+#endif
+
     running.store(false, std::memory_order_release);
     // Release any task still parked at startup so it observes running==false
     // and exits cleanly instead of waiting out the full waitForStart() timeout.

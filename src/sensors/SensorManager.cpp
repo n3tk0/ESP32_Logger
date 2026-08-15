@@ -3,6 +3,8 @@
 #include <LittleFS.h>
 #include "../pipeline/DataPipeline.h"  // wireMutex (#14)
 #include "../core/BoardProfiles.h"     // g_pinAllowUnsafe (per-sensor pin override)
+#include "ReadingCache.h"              // latest-value table (cross-sensor lookups)
+#include "I2CBus.h"                    // per-bus arbitration + reset on reload
 
 SensorManager sensorManager;
 
@@ -25,17 +27,23 @@ void _releaseSerial1(ISensor* who) {
 // Tracks which plugin claimed each 7-bit I2C address so that two sensors
 // with the same fixed address refuse to co-initialise rather than silently
 // corrupting each other's reads.
-static ISensor* _i2cOwners[128] = {};
+//
+// Scoped PER BUS: an address only collides with another device on the same
+// wire. This is what lets VEML6075 and VEML7700 — both hard-wired to 0x10 with
+// no address-select pin — run at the same time, one on each controller.
+static ISensor* _i2cOwners[I2CBus::MAX_BUSES][128] = {};
 
-bool _claimI2cAddress(uint8_t addr, ISensor* who) {
-    if (addr >= 128) return false;
-    if (_i2cOwners[addr] == nullptr) { _i2cOwners[addr] = who; return true; }
-    return (_i2cOwners[addr] == who);
+bool _claimI2cAddress(uint8_t bus, uint8_t addr, ISensor* who) {
+    if (bus >= I2CBus::MAX_BUSES || addr >= 128) return false;
+    if (_i2cOwners[bus][addr] == nullptr) { _i2cOwners[bus][addr] = who; return true; }
+    return (_i2cOwners[bus][addr] == who);
 }
 void _releaseI2cClaims(ISensor* who) {
     if (!who) return;
-    for (int i = 0; i < 128; i++) {
-        if (_i2cOwners[i] == who) _i2cOwners[i] = nullptr;
+    for (int b = 0; b < I2CBus::MAX_BUSES; b++) {
+        for (int i = 0; i < 128; i++) {
+            if (_i2cOwners[b][i] == who) _i2cOwners[b][i] = nullptr;
+        }
     }
 }
 
@@ -71,6 +79,33 @@ void SensorManager::_destroyAll() {
     // permanently block re-claiming the same resource.
     _serial1Owner = nullptr;
     memset(_i2cOwners, 0, sizeof(_i2cOwners));
+    // Release the I2C controllers as well: the recorded pin assignment would
+    // otherwise outlive the sensors that asked for it and refuse the new
+    // config's pins as a conflict.
+    //
+    // Under wireMutex, because resetAll() calls TwoWire::end(), which deinits
+    // the peripheral AND frees the driver's rx/tx buffers. /api/i2c_scan walks
+    // 127 addresses holding only wireMutex, so without this the buffers could
+    // be freed mid-scan.
+    //
+    // Lock order is configMutex → wireMutex, matching tickFiltered (callers of
+    // _destroyAll already hold configMutex). i2c_scan takes wireMutex alone, so
+    // no cycle exists.
+    {
+        MutexGuard wg(wireMutex, pdMS_TO_TICKS(1000));
+        if (wireMutex && !wg.isLocked()) {
+            // A scan holds the bus for ~130 ms at worst, so a 1 s timeout means
+            // something is genuinely wrong. Resetting anyway is the lesser evil:
+            // leaving the registry claiming buses the new config never brought
+            // up would refuse every subsequent pin assignment.
+            Serial.println("[SensorManager] _destroyAll: wireMutex timeout — resetting I2C anyway");
+        }
+        I2CBus::resetAll();
+    }
+    // Drop cached values too: entries for sensors that no longer exist would
+    // otherwise keep answering get() with an ever-growing age instead of
+    // "unknown", which reads the same as a live-but-stale sensor.
+    readingCache.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -161,8 +196,12 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
     int pushed = 0;
     uint32_t ms = millis();
 
-    // Up to 6 metrics per sensor per tick (BME68x emits 5: T/H/P/gas/IAQ).
-    SensorReading readings[6];
+    // Up to 8 metrics per sensor per tick.  The fattest producer is BME68x at
+    // 7 (T/H/P/gas/IAQ + dew_point + humidity_ambient); SPS30 emits 5
+    // (4 × PM + device_status).  Keep this >= the largest getMetrics() count
+    // of any registered plugin — readAll() silently truncates otherwise.
+    SensorReading readings[8];
+    constexpr int MAX_METRICS_PER_TICK = 8;
 
     // R14 / AUDIT 3.19 + 15.3: hold configMutex for the read iteration so
     // a concurrent reloadConfig() can't _destroyAll() the sensor pointer
@@ -194,12 +233,12 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                 continue;
             }
             t0us = micros();
-            n = s->readAll(readings, 6);
+            n = s->readAll(readings, MAX_METRICS_PER_TICK);
             latUs = (uint32_t)(micros() - t0us);
             // wg releases wireMutex here, before health tracking
         } else {
             t0us = micros();
-            n = s->readAll(readings, 6);
+            n = s->readAll(readings, MAX_METRICS_PER_TICK);
             latUs = (uint32_t)(micros() - t0us);
         }
 
@@ -267,6 +306,12 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                 readings[j].timestamp = now;
                 strncpy(readings[j].sensorId,   s->getId(),   sizeof(readings[j].sensorId)   - 1);
                 strncpy(readings[j].sensorType, s->getType(), sizeof(readings[j].sensorType) - 1);
+
+                // Publish to the latest-value table BEFORE queueing. Consumers
+                // that need cross-sensor values (BME688's ambient-RH reference,
+                // HeaterModule's control inputs) read it here rather than off
+                // the queue, so a backed-up sensorQueue can't starve them.
+                readingCache.put(readings[j]);
 
                 if (xQueueSend(queue, &readings[j], 0) != pdTRUE) {
                     extern volatile uint32_t g_queueDrops;
@@ -400,8 +445,11 @@ void SensorManager::toJson(JsonArray arr) const {
     }
 
     // Single critical section: scan the ring buffer for every metric of
-    // every sensor under one lock acquisition.  ~16 sensors × 8 metrics ×
-    // 200-entry strcmp is well under 1 ms on the C3.
+    // every sensor under one lock acquisition.  Cost is bounded by
+    // RING_SCAN_LIMIT_LAST / RING_SCAN_LIMIT_SERIES rather than by ring
+    // capacity — without those the same loop would walk a 58 000-entry PSRAM
+    // ring once per missing metric, while ProcessingTask waits 5 ms for this
+    // very mutex before dropping a reading.
     // Guard against legacy / early-boot path where mutexes are still nullptr.
     if (!webDataMutex || xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) != pdTRUE) return;
     for (int i = 0; i < slotCount; i++) {

@@ -1,10 +1,12 @@
 #pragma once
 #include "../ISensor.h"
-// <Wire.h> moved to the .cpp — not referenced in this header.
+#include <Wire.h>   // TwoWire (resolved bus handle stored below)
 
 // ============================================================================
 // ENS160 — TVOC / eCO2 / AQI sensor (I2C, ScioSense)
 // Config keys: "sda", "scl", "address" (0x52 or 0x53), "read_interval_ms"
+// "bus" selects the I2C controller: 0 (default) or 1. Bus 1 needs a chip with
+// two I2C controllers (ESP32-S3 / ESP32; the C3 has one).
 // Produces 3 metrics: tvoc (ppb), eco2 (ppm), aqi (1-5)
 // Requires Adafruit_ENS160 or ScioSense_ENS160 library.
 // ============================================================================
@@ -25,6 +27,10 @@ public:
     }
 
 private:
+    // Resolved I2C bus. Every transfer goes through _wire rather than the
+    // global Wire, so this sensor can sit on either controller.
+    uint8_t  _bus  = 0;
+    TwoWire* _wire = nullptr;
     // Use raw I2C registers to avoid library dependency issues.
     // Based on ScioSense ENS160 datasheet (v1.3).
     bool    _writeReg(uint8_t reg, uint8_t val);

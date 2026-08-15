@@ -24,6 +24,7 @@
 #include "../utils/JsonResponse.h"     // R9: sendJsonResponse helper
 #include "../alerts/AlertEngine.h"    // GET/POST /api/alerts, snooze, toasts
 #include <Wire.h>                     // POST /api/i2c_scan
+#include "../sensors/I2CBus.h"        // bus registry for /api/i2c_scan
 // Forward-declared in Logger.ino — accessible here because this file is
 // compiled in the same sketch scope.
 #ifdef EXPORT_MQTT_ENABLED
@@ -93,10 +94,20 @@ static void handleApiData(AsyncWebServerRequest* req) {
         return;
     }
 
-    // Reserve up to 200 slots for the ring buffer; give all remaining slots to
-    // the filesystem query.  When the ring is empty (historical request) the
-    // full MAX_RAW budget is available for FS rows instead of a fixed 300-cap.
-    constexpr size_t RING_SHARE = 200;
+    // Slots given to the ring buffer. The split with the filesystem query is
+    // moot while that path is disabled (see "chunk F" below, fsCount = 0), so
+    // the ring gets the whole budget instead of leaving 100 slots reserved for
+    // rows that never arrive. Restore a split when the CSV reader lands.
+    //
+    // NOTE: this bounds chart depth to MAX_RAW readings regardless of how deep
+    // the ring itself is. A PSRAM-backed ring holds tens of thousands of
+    // entries, but a single /api/data request still only sees the newest
+    // MAX_RAW of them — roughly 2.5 min for a build emitting ~19 metrics every
+    // 10 s. Serving hours in one request needs aggregation that accumulates
+    // per bucket while scanning the ring, rather than materialising raw
+    // readings into this array first; that is the same work chunk F implies
+    // for the FS side and is deliberately not attempted here.
+    constexpr size_t RING_SHARE = MAX_RAW;
 
     size_t ringCount = 0;
     size_t fsCount   = 0;
@@ -156,7 +167,12 @@ static void handleApiData(AsyncWebServerRequest* req) {
         fsCount = 0;
 
         size_t rawCount = ringCount + fsCount;
-        truncated = (rawCount >= MAX_RAW);
+        // Report truncation when the ring hit its share too, not just when the
+        // combined array filled. With RING_SHARE == MAX_RAW these coincide, but
+        // stating both keeps the flag honest if the split is reintroduced —
+        // otherwise the response claims completeness while the ring still holds
+        // readings inside the requested range.
+        truncated = (rawCount >= MAX_RAW) || (ringCount >= RING_SHARE);
 
         // Merge: insertion-sort by timestamp + dedup by (ts, sensorId, metric) (#4)
         if (fsCount > 0 && ringCount > 0) {
@@ -235,7 +251,10 @@ static void handleApiData(AsyncWebServerRequest* req) {
 //   sensor's display name from SensorManager.  Designed to be cheap enough
 //   to poll every 60 s from the dashboard:
 //   - single mutex acquire
-//   - single full-ring scan (O(N) where N ≤ WEB_RING_SIZE = 500)
+//   - scan bounded by MAX_RAW (500) readings copied out of the ring, NOT by
+//     the ring's own capacity — which is now a runtime value and, on a PSRAM
+//     board, tens of thousands of entries. copyRecent() stops at maxOut, so
+//     the cost of this endpoint does not grow with the ring.
 //   - JsonDocument sized for ≤ 32 (sensor, metric) pairs
 //
 // Response shape:
@@ -363,6 +382,42 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     }
 
     // Queues
+    // PSRAM + ring-buffer state. First stop when the dashboard shows less
+    // history than expected: "size" of 0 on a board that has PSRAM fitted
+    // almost always means the build is compiled for the wrong SPI mode
+    // (octal parts need board_build.arduino.memory_type = qio_opi), and the
+    // ring then silently falls back to the small internal-RAM budget.
+    {
+        JsonObject psram = doc["psram"].to<JsonObject>();
+        psram["size"] = (uint32_t)ESP.getPsramSize();
+        psram["free"] = (uint32_t)ESP.getFreePsram();
+
+        JsonObject ring = doc["ring"].to<JsonObject>();
+        ring["capacity"] = (uint32_t)webRingBuf.capacity();
+        ring["used"]     = (uint32_t)webRingBuf.size();
+        ring["bytes"]    = (uint32_t)(webRingBuf.capacity() * sizeof(SensorReading));
+        ring["psram"]    = webRingBuf.isPsram();
+    }
+
+    // I2C bus state — which controllers this chip has and which the current
+    // sensor config actually brought up. The first thing to check when a
+    // sensor on a second bus reports "not found": an unconfigured bus 1 means
+    // no sensor claimed it, and a bus count of 1 means the chip cannot have it.
+    {
+        JsonObject i2c = doc["i2c"].to<JsonObject>();
+        i2c["controllers"] = I2CBus::hardwareBusCount();
+        JsonArray buses = i2c["buses"].to<JsonArray>();
+        for (uint8_t b = 0; b < I2CBus::hardwareBusCount(); b++) {
+            JsonObject o = buses.add<JsonObject>();
+            o["bus"] = b;
+            o["up"]  = I2CBus::isConfigured(b);
+            if (I2CBus::isConfigured(b)) {
+                o["sda"] = I2CBus::sdaOf(b);
+                o["scl"] = I2CBus::sclOf(b);
+            }
+        }
+    }
+
     JsonObject queues = doc["queues"].to<JsonObject>();
     if (sensorQueue) {
         JsonObject q = queues["sensor"].to<JsonObject>();
@@ -1077,14 +1132,36 @@ static void handleApiAlertsToasts(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/i2c_scan — scan the Wire bus and return detected addresses
+// POST /api/i2c_scan[?bus=N] — scan an I2C bus and return detected addresses
+//
+// `bus` defaults to 0. Only buses a sensor has already brought up can be
+// scanned: the pins are a property of the sensor config, so there is nothing
+// to scan on a bus nobody has claimed. Scanning an unconfigured bus would mean
+// guessing pins and calling begin() behind the sensor task's back.
+//
+// The response stays a bare array of address strings for backwards
+// compatibility with the existing UI.
 // ---------------------------------------------------------------------------
 static void handleApiI2cScan(AsyncWebServerRequest* req) {
     if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
+
+    uint8_t bus = 0;
+    if (req->hasParam("bus", true))      bus = (uint8_t)req->getParam("bus", true)->value().toInt();
+    else if (req->hasParam("bus"))       bus = (uint8_t)req->getParam("bus")->value().toInt();
+
+    // Safe to check without the lock: the controller count is a compile-time
+    // property of the chip and never changes.
+    if (bus >= I2CBus::hardwareBusCount()) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"bus not available on this chip\"}");
+        return;
+    }
+
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
-    // Acquire the I2C bus mutex if available (same guard used by sensors)
+    // Acquire the I2C bus mutex if available (same guard used by sensors).
+    // One mutex covers every bus — see I2CBus.h on why that is deliberate.
     extern SemaphoreHandle_t wireMutex;
     bool tookMutex = false;
     if (wireMutex) {
@@ -1096,9 +1173,21 @@ static void handleApiI2cScan(AsyncWebServerRequest* req) {
         return;
     }
 
+    // Resolve the handle only AFTER the lock. A config reload takes wireMutex
+    // and calls I2CBus::resetAll(), which end()s the peripheral and frees the
+    // driver's rx/tx buffers — so a pointer fetched before blocking on the
+    // mutex could name a bus that was torn down while we waited.
+    TwoWire* wire = I2CBus::get(bus);
+    if (!wire) {
+        xSemaphoreGive(wireMutex);
+        req->send(409, "application/json",
+                  "{\"ok\":false,\"error\":\"bus not configured — assign an I2C sensor to it first\"}");
+        return;
+    }
+
     for (uint8_t addr = 0x01; addr <= 0x7F; addr++) {
-        Wire.beginTransmission(addr);
-        if (Wire.endTransmission() == 0) {
+        wire->beginTransmission(addr);
+        if (wire->endTransmission() == 0) {
             char hex[7];
             snprintf(hex, sizeof(hex), "0x%02X", addr);
             arr.add(hex);
