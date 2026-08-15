@@ -71,6 +71,9 @@
       var summary = "Strap: " + (state.selectedProfile.strapPins.join(",") || "none") +
                     "  •  USB: " + (state.selectedProfile.usbPins.join(",") || "none") +
                     "  •  max GPIO: " + state.selectedProfile.maxGpio;
+      // Only board-specific profiles carry this; older firmware omits the key.
+      var absent = state.selectedProfile.absentPins || [];
+      if (absent.length) summary += "  •  no header pad: " + absent.join(",");
       hint.textContent = summary;
       disc.classList.add("hidden");
       $("customAck").checked = false;
@@ -121,6 +124,7 @@
     if (inList(profile.usbPins,      pin)) return { ok: false, reason: "USB CDC pin (D+/D-)" };
     if (inList(profile.flashPins,    pin)) return { ok: false, reason: "SPI flash bus pin" };
     if (inList(profile.reservedPins, pin)) return { ok: false, reason: "UART0 console (you would lose serial debug)" };
+    if (inList(profile.absentPins,   pin)) return { ok: false, reason: "not broken out on this board" };
     return { ok: true, reason: "ok" };
   }
 

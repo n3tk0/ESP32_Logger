@@ -55,6 +55,10 @@ jobs:
             name: esp32s3
             flash: 8MB
             app_max: 3342336    # 0x330000 = 3,264 KB (PlatformIO default_8MB)
+          - env: xiao_esp32s3
+            name: xiao_esp32s3
+            flash: 8MB
+            app_max: 3342336    # 0x330000 = 3,264 KB (PlatformIO default_8MB)
           - env: esp32s3_n16r8
             name: esp32s3_n16r8
             flash: 16MB

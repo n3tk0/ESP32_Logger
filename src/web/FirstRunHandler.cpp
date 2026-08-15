@@ -74,6 +74,7 @@ void handleGetBoardProfiles(AsyncWebServerRequest* req) {
         fill("usbPins",      p->usbPins);
         fill("flashPins",    p->flashPins);
         fill("reservedPins", p->reservedPins);
+        fill("absentPins",   p->absentPins);
     }
 
     JsonObject active = doc["active"].to<JsonObject>();

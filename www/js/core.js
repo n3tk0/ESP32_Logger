@@ -741,7 +741,7 @@ window.postWithCsrf = postWithCsrf;
 var _boardPinsCache = null;
 function getBoardPins() {
   if (_boardPinsCache) return Promise.resolve(_boardPinsCache);
-  var EMPTY = { strap: [], flash: [], reserved: [], usb: [], maxGpio: 255 };
+  var EMPTY = { strap: [], flash: [], reserved: [], usb: [], absent: [], maxGpio: 255 };
   return fetchWithTimeout("/api/board-profiles", {}, 15000)
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
@@ -757,6 +757,7 @@ function getBoardPins() {
         flash:    p.flashPins    || [],
         reserved: p.reservedPins || [],
         usb:      p.usbPins      || [],
+        absent:   p.absentPins   || [],
         maxGpio:  (typeof p.maxGpio === "number") ? p.maxGpio : 255,
       };
       return _boardPinsCache;
@@ -775,6 +776,9 @@ function pinRisk(pins, pinVal) {
   if ((pins.strap || []).indexOf(pin) >= 0)  return { reason: "bootstrap/strapping pin (boot-mode risk)", hard: false };
   if ((pins.reserved || []).indexOf(pin) >= 0) return { reason: "reserved (UART0 console)", hard: false };
   if ((pins.usb || []).indexOf(pin) >= 0)    return { reason: "USB D+/D- pin", hard: false };
+  // Soft, like the firmware: the GPIO exists and works, it just has no header
+  // pad on this carrier — module pads and B2B connectors can still reach it.
+  if ((pins.absent || []).indexOf(pin) >= 0) return { reason: "not broken out on this board", hard: false };
   return null;
 }
 window.getBoardPins = getBoardPins;

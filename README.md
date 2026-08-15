@@ -4,7 +4,7 @@
 
 **Multi-sensor environmental logging platform for embedded ESP32 targets.**
 
-Firmware for `xiao_esp32c3`, `esp32c3_supermini`, and `esp32s3` — water flow, air quality, weather, and power monitoring with on-device web UI, MQTT/HTTP/sensor.community/openSenseMap exporters, and OTA updates.
+Firmware for `xiao_esp32c3`, `esp32c3_supermini`, `esp32s3`, `xiao_esp32s3` and `esp32s3_n16r8` — water flow, air quality, weather, and power monitoring with on-device web UI, MQTT/HTTP/sensor.community/openSenseMap exporters, and OTA updates.
 
 [![Build Firmware](https://github.com/n3tk0/ESP32_Logger/actions/workflows/build-firmware.yml/badge.svg)](https://github.com/n3tk0/ESP32_Logger/actions/workflows/build-firmware.yml)
 [![Build Bootloader](https://github.com/n3tk0/ESP32_Logger/actions/workflows/build-bootloader.yml/badge.svg)](https://github.com/n3tk0/ESP32_Logger/actions/workflows/build-bootloader.yml)
@@ -203,8 +203,16 @@ cd esp32_logger
 pio run -e xiao_esp32c3        # Seeed XIAO ESP32-C3 (default)
 pio run -e esp32c3_supermini   # ESP32-C3 SuperMini
 pio run -e esp32s3             # ESP32-S3 DevKitC-1 (8 MB flash, no PSRAM)
+pio run -e xiao_esp32s3        # Seeed XIAO ESP32-S3 (8 MB flash, 8 MB PSRAM)
 pio run -e esp32s3_n16r8       # ESP32-S3 N16R8 (16 MB flash, 8 MB octal PSRAM)
 ```
+
+On the XIAO ESP32-S3 the PSRAM ring buffer is active out of the box — the Seeed
+board definition already supplies `-DBOARD_HAS_PSRAM` and `qio_opi`, unlike the
+generic DevKitC-1 profile that `esp32s3_n16r8` has to configure by hand. Pick
+the **Seeed XIAO ESP32-S3** board profile in the first-run wizard: the header
+breaks out only GPIO 1–9 and 43/44, and the profile is what stops the pin
+pickers from offering the GPIOs that never leave the module.
 
 **3. Upload firmware and LittleFS image**
 
@@ -286,7 +294,7 @@ Reference schematics (KiCad PDFs) for the water-flow build are in [`schematics/`
 Issues and pull requests are welcome. Before opening a PR:
 
 1. Read [`docs/REFACTORING_GUIDELINES.md`](docs/REFACTORING_GUIDELINES.md) for architectural invariants.
-2. Make sure the firmware still builds for all three CI targets (`xiao_esp32c3`, `esp32c3_supermini`, `esp32s3`) — the workflows in `.github/workflows/` run automatically on PRs.
+2. Make sure the firmware still builds for all five CI targets (`xiao_esp32c3`, `esp32c3_supermini`, `esp32s3`, `xiao_esp32s3`, `esp32s3_n16r8`) — the workflows in `.github/workflows/` run automatically on PRs.
 3. Keep changes scoped; large refactors should be split.
 
 ---

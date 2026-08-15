@@ -58,7 +58,7 @@ namespace {
 // --- Seeed XIAO ESP32-C3 -----------------------------------------------------
 // USB CDC (pins 18/19) is now handled by validatePin() at runtime, not statically.
 // This allows USB CDC to be toggled ON/OFF via deploy tool without changing profiles.
-const BoardProfile XIAO_C3 = {
+constexpr BoardProfile XIAO_C3 = {
     BOARD_XIAO_C3,
     "Seeed XIAO ESP32-C3",
     "xiao_c3",
@@ -67,13 +67,14 @@ const BoardProfile XIAO_C3 = {
     { PIN_UNSET },  // USB CDC handled by validatePin() dynamically
     { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
     { 20, 21, PIN_UNSET },
+    { PIN_UNSET },  // absentPins: generic/legacy profile — see header
 };
 
 // --- Generic "ESP32-C3 SuperMini" --------------------------------------------
 // Same C3 silicon; some clones break out GPIO 8 to a status LED, others
 // don't. Same restriction set as XIAO C3 for safety.
 // USB CDC (pins 18/19) is now handled by validatePin() at runtime.
-const BoardProfile SUPERMINI_C3 = {
+constexpr BoardProfile SUPERMINI_C3 = {
     BOARD_SUPERMINI_C3,
     "ESP32-C3 SuperMini",
     "supermini_c3",
@@ -82,13 +83,14 @@ const BoardProfile SUPERMINI_C3 = {
     { PIN_UNSET },  // USB CDC handled by validatePin() dynamically
     { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
     { 20, 21, PIN_UNSET },
+    { PIN_UNSET },  // absentPins: generic/legacy profile — see header
 };
 
 // --- Bare ESP32-C3 module ----------------------------------------------------
 // No board-specific quirks; same chip constraints.
 // USB CDC (pins 18/19) is now handled by validatePin() at runtime,
 // allowing it to be toggled ON/OFF via deploy tool.
-const BoardProfile GENERIC_C3 = {
+constexpr BoardProfile GENERIC_C3 = {
     BOARD_GENERIC_C3,
     "Generic ESP32-C3",
     "generic_c3",
@@ -97,6 +99,7 @@ const BoardProfile GENERIC_C3 = {
     { PIN_UNSET },  // USB CDC handled by validatePin() dynamically
     { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
     { 20, 21, PIN_UNSET },
+    { PIN_UNSET },  // absentPins: generic/legacy profile — see header
 };
 
 // --- Bare ESP32-S3 module ----------------------------------------------------
@@ -104,7 +107,7 @@ const BoardProfile GENERIC_C3 = {
 // use the most defensive set (octal flash + octal PSRAM = 26-37).
 // USB CDC (pins 19/20) is now handled by validatePin() at runtime.
 // GPIO pins are indexed 0-47 (48 total), so maxGpio is 47
-const BoardProfile GENERIC_S3 = {
+constexpr BoardProfile GENERIC_S3 = {
     BOARD_GENERIC_S3,
     "Generic ESP32-S3",
     "generic_s3",
@@ -113,11 +116,43 @@ const BoardProfile GENERIC_S3 = {
     { PIN_UNSET },  // USB CDC handled by validatePin() dynamically
     { 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, PIN_UNSET },
     { 43, 44, PIN_UNSET },
+    { PIN_UNSET },  // absentPins: generic/legacy profile — see header
+};
+
+// --- Seeed XIAO ESP32-S3 -----------------------------------------------------
+// Same S3 silicon as GENERIC_S3, but the thumb-sized carrier routes only
+// eleven GPIOs to the castellated header:
+//
+//   D0=1  D1=2  D2=3  D3=4  D4=5  D5=6  D6=43  D7=44  D8=7  D9=8  D10=9
+//
+// maxGpio is therefore 44, which also disposes of the 45/46 straps and 47/48.
+// Everything the silicon has between the header pins is listed in absentPins
+// so the wizard stops offering GPIOs that do not leave the module — the
+// failure mode otherwise is a sensor that never answers and never logs why.
+//
+// GPIO 3 (D2) IS broken out but stays in strapPins: it is the S3's JTAG-source
+// strap, same as on the generic profile. GPIO 19/20 (USB D-/D+) go to the USB-C
+// connector and are checked dynamically by validatePin(), not listed here.
+// Flash + octal PSRAM claim 26-37; the module has both, so the full range
+// applies rather than the flash-only subset.
+constexpr BoardProfile XIAO_S3 = {
+    BOARD_XIAO_S3,
+    "Seeed XIAO ESP32-S3",
+    "xiao_s3",
+    44,
+    { 0, 3, PIN_UNSET },
+    { PIN_UNSET },  // USB CDC handled by validatePin() dynamically
+    { 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, PIN_UNSET },
+    { 43, 44, PIN_UNSET },
+    // Not routed to the header. 10-11 and several of 12-18 reach the camera/SD
+    // B2B connector on the XIAO S3 Sense, which is why these stay overridable
+    // via allow_unsafe_pins rather than being hard-blocked.
+    { 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 38, 39, 40, 41, 42, PIN_UNSET },
 };
 
 // --- Custom (user accepts responsibility) ------------------------------------
 // Empty restriction lists. isPinAllowed() short-circuits on this id.
-const BoardProfile CUSTOM = {
+constexpr BoardProfile CUSTOM = {
     BOARD_CUSTOM,
     "Custom \xE2\x80\x94 full responsibility",  // UTF-8 em dash
     "custom",
@@ -126,6 +161,7 @@ const BoardProfile CUSTOM = {
     { PIN_UNSET },
     { PIN_UNSET },
     { PIN_UNSET },
+    { PIN_UNSET },  // absentPins: generic/legacy profile — see header
 };
 
 const BoardProfile* const ALL_PROFILES[] = {
@@ -133,11 +169,44 @@ const BoardProfile* const ALL_PROFILES[] = {
     &SUPERMINI_C3,
     &GENERIC_C3,
     &GENERIC_S3,
+    &XIAO_S3,
     &CUSTOM,
 };
 constexpr uint8_t ALL_PROFILES_COUNT = sizeof(ALL_PROFILES) / sizeof(ALL_PROFILES[0]);
 static_assert(ALL_PROFILES_COUNT <= MAX_PROFILES,
               "Profile list exceeds MAX_PROFILES — bump MAX_PROFILES in BoardProfiles.h");
+
+// A list initialised with exactly MAX_RESTRICTED_PINS entries compiles fine
+// and reads correctly — inList() stops at the cap — but has nowhere left to
+// put the terminator, so the next pin appended to it walks off the end.
+// Catch that at build time rather than paying flash for permanent slack.
+// Written as single-return recursion, not a loop: arduino-esp32 2.x compiles
+// this project as -std=gnu++11, where a constexpr function body may only be a
+// return statement. (The note above about gnu++17/20 describes newer cores.)
+constexpr bool terminatedFrom(const uint8_t (&list)[MAX_RESTRICTED_PINS], uint8_t i) {
+    return i >= MAX_RESTRICTED_PINS ? false
+         : (list[i] == PIN_UNSET    ? true
+                                    : terminatedFrom(list, (uint8_t)(i + 1)));
+}
+constexpr bool terminated(const uint8_t (&list)[MAX_RESTRICTED_PINS]) {
+    return terminatedFrom(list, 0);
+}
+constexpr bool allTerminated(const BoardProfile& p) {
+    return terminated(p.strapPins)    && terminated(p.usbPins)
+        && terminated(p.flashPins)    && terminated(p.reservedPins)
+        && terminated(p.absentPins);
+}
+#define ASSERT_TERMINATED(profile)                                            \
+    static_assert(allTerminated(profile),                                     \
+                  #profile " has a pin list with no room for PIN_UNSET — "     \
+                  "shorten it or bump MAX_RESTRICTED_PINS in BoardProfiles.h")
+ASSERT_TERMINATED(XIAO_C3);
+ASSERT_TERMINATED(SUPERMINI_C3);
+ASSERT_TERMINATED(GENERIC_C3);
+ASSERT_TERMINATED(GENERIC_S3);
+ASSERT_TERMINATED(XIAO_S3);
+ASSERT_TERMINATED(CUSTOM);
+#undef ASSERT_TERMINATED
 
 bool inList(const uint8_t* list, uint8_t pin) {
     for (uint8_t i = 0; i < MAX_RESTRICTED_PINS && list[i] != PIN_UNSET; i++) {
@@ -173,6 +242,7 @@ bool isPinAllowed(const BoardProfile* profile, uint8_t pin, PinPurpose /*purpose
     if (inList(profile->usbPins,      pin)) return false;
     if (inList(profile->flashPins,    pin)) return false;
     if (inList(profile->reservedPins, pin)) return false;
+    if (inList(profile->absentPins,   pin)) return false;
     return true;
 }
 
@@ -238,6 +308,7 @@ const char* pinRejectReason(const BoardProfile* profile, uint8_t pin) {
     // Note: USB CDC pins are checked dynamically by validatePin(), not here
     if (inList(profile->flashPins,    pin)) return "SPI flash bus pin";
     if (inList(profile->reservedPins, pin)) return "reserved (UART0 console)";
+    if (inList(profile->absentPins,   pin)) return "not broken out on this board";
     return "ok";
 }
 
