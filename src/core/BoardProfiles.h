@@ -50,12 +50,23 @@ enum BoardProfileId : uint8_t {
     BOARD_SUPERMINI_C3  = 2,   // generic "ESP32-C3 SuperMini" clone
     BOARD_GENERIC_C3    = 3,   // bare ESP32-C3 module
     BOARD_GENERIC_S3    = 4,   // bare ESP32-S3 module
+    BOARD_XIAO_S3       = 5,   // Seeed XIAO ESP32-S3
     BOARD_CUSTOM        = 99,  // user accepts full responsibility; no validation
 };
 
 // Pin-restriction sets per profile. Variable-length arrays in C++ at
 // namespace scope mean we use fixed caps and sentinel-terminate.
 // MAX_RESTRICTED_PINS is sized for the worst case (S3 has many).
+//
+// An over-long initialiser is a compile error ("too many initializers"), but a
+// list filled to exactly MAX_RESTRICTED_PINS with no room for the sentinel is
+// NOT — inList() stops at the cap and the list still reads correctly today,
+// while any later append silently walks past the end. BoardProfiles.cpp
+// static_asserts that every list is sentinel-terminated instead of buying
+// slack here: the cap is per-list per-profile, so raising it by 8 costs ~240
+// bytes of flash on targets that are already at 93 %.
+//
+// Longest list in use: xiao_s3's absentPins, 15 entries + sentinel.
 constexpr uint8_t MAX_RESTRICTED_PINS = 16;
 
 // Upper bound for the number of registered board profiles. Callers use
@@ -75,6 +86,18 @@ struct BoardProfile {
     uint8_t         usbPins     [MAX_RESTRICTED_PINS];  // CDC USB D+/D-
     uint8_t         flashPins   [MAX_RESTRICTED_PINS];  // SPI flash bus
     uint8_t         reservedPins[MAX_RESTRICTED_PINS];  // UART0 console, etc.
+    // GPIOs the silicon has but this particular board does not route to a
+    // header pin. Electrically fine — there is simply nothing to solder to,
+    // so offering them in the wizard produces a sensor that never responds
+    // and never errors. Overridable (like strap/reserved) because module
+    // pads and B2B connectors do exist: the XIAO S3 Sense carries several of
+    // its "absent" GPIOs to the camera/SD connector.
+    //
+    // Only populated for profiles named after a specific board. A generic
+    // module profile cannot know the carrier, and existing profiles are left
+    // empty on purpose — filling them in would newly refuse pins that
+    // deployed devices are already configured with.
+    uint8_t         absentPins  [MAX_RESTRICTED_PINS];
 };
 
 // --- Profile lookups ---------------------------------------------------------

@@ -599,6 +599,7 @@ function clLoadBoardProfile() {
             (profile.usbPins      || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'USB CDC'; });
             (profile.flashPins    || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'SPI flash bus'; });
             (profile.reservedPins || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'UART0 console'; });
+            (profile.absentPins   || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'not broken out'; });
         })
         .catch(function () {
             // Silent — fallback table above keeps the UI alive on legacy
