@@ -346,7 +346,14 @@ ProcessingTask
     │     timeout path — the stale-probe fail-safe has to keep working
     │     precisely when no readings are arriving. Reads its control
     │     inputs from ReadingCache, not from the queue.
-    ├── In-memory ring buffer per metric (last 1000 pts, lock-free SPSC)
+    ├── In-memory ring buffer (lock-free SPSC, runtime capacity:
+    │     16 KB internal SRAM, or up to 4 MB in PSRAM when present —
+    │     see webRingBufInit(). Currently the only store of recent
+    │     readings, since the FS query path is not wired up yet.
+    │     /api/latest and sparklines read its newest end directly;
+    │     /api/data still caps a request at 300 raw readings.
+    │     Backward scans are bounded by RING_SCAN_LIMIT_* so a metric
+    │     missing from a large ring cannot stall webDataMutex.)
     │                   │
     │              webDataMutex  ←── WebTask reads for /api/data
     │

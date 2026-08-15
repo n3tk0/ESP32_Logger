@@ -78,6 +78,52 @@ reports which controllers exist and which are up, on which pins.
 
 A second bus needs its own pull-up resistors, not just its own pins.
 
+### Memory and history depth
+
+FS-backed history is not wired up yet, so the in-memory ring buffer is the only
+store of recent readings. Its capacity is chosen at boot:
+
+| Memory | Budget | Entries | ~Retention at 19 metrics / 10 s |
+|---|---|---|---|
+| Internal SRAM (C3, or S3 without PSRAM) | 16 KB | ~227 | ~2 min |
+| PSRAM (`esp32s3_n16r8`) | 4 MB, capped at 50 % of free PSRAM | ~58 000 | ~8 h |
+
+**What the extra depth reaches today:** `/api/latest`, the per-card sparklines,
+and anything else asking for recent values — those all read the newest end of
+the ring and benefit immediately.
+
+**What it does not reach yet:** `/api/data` charts. That endpoint materialises
+raw readings into a fixed 300-entry array before aggregating, so one request
+sees the newest ~300 readings (~2.5 min) no matter how deep the ring is.
+Serving hours in a single request needs aggregation that accumulates per bucket
+while scanning the ring instead of copying raw readings out first — the same
+work the planned CSV reader ("chunk F") implies for the filesystem side.
+
+PSRAM is volatile — a reboot loses it. It extends live retention, it does not
+replace CSV logging to flash.
+
+`GET /api/diag` reports `psram` (size/free) and `ring` (capacity, used, bytes,
+whether it landed in PSRAM). A `psram.size` of 0 on a board that has PSRAM
+fitted almost always means the build targets the wrong SPI mode — see below.
+
+**Octal PSRAM (`…R8` modules) needs `board_build.arduino.memory_type = qio_opi`.**
+The stock `esp32-s3-devkitc-1` definition builds for `qio_qspi`, which cannot
+talk to an octal part; the RAM is then silently absent with only a line in the
+boot log. Boards with *quad* PSRAM (`…R2`, `…R8V`) need `qio_qspi` instead — the
+mirror-image failure.
+
+This is why N16R8 is a **separate `esp32s3_n16r8` env** rather than a change to
+`esp32s3`: the 16 MB partition table puts LittleFS past the end of an 8 MB
+part, so flashing it to a stock DevKitC-1-N8 fails to mount and boots into safe
+mode. Build `esp32s3` for 8 MB boards, `esp32s3_n16r8` for 16 MB + PSRAM ones.
+
+The ring is touched from tasks only. It must never be read or written from an
+ISR — PSRAM is unreachable whenever the flash cache is disabled, and this
+project has `IRAM_ATTR` handlers for flow, rain and wind. It is also allocated
+only on the continuous/hybrid path; legacy and safe mode never start the task
+that fills it, so they leave it unallocated rather than reserving megabytes for
+a buffer nothing writes to.
+
 ### Actuators
 
 | Macro | Module | Interface |
@@ -156,7 +202,8 @@ cd esp32_logger
 ```bash
 pio run -e xiao_esp32c3        # Seeed XIAO ESP32-C3 (default)
 pio run -e esp32c3_supermini   # ESP32-C3 SuperMini
-pio run -e esp32s3             # ESP32-S3 DevKitC-1 (8 MB)
+pio run -e esp32s3             # ESP32-S3 DevKitC-1 (8 MB flash, no PSRAM)
+pio run -e esp32s3_n16r8       # ESP32-S3 N16R8 (16 MB flash, 8 MB octal PSRAM)
 ```
 
 **3. Upload firmware and LittleFS image**

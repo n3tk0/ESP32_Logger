@@ -1,4 +1,4 @@
-// Concurrency test for the SPSC RingBuffer<N> in src/pipeline/DataPipeline.h.
+// Concurrency test for the SPSC RingBuffer in src/pipeline/DataPipeline.h.
 //
 // One producer thread pushes, one consumer thread reads concurrently.  This is
 // the ThreadSanitizer target: it exercises the acquire/release ordering between
@@ -21,7 +21,10 @@ static SensorReading mk(float value, uint32_t ts) {
 
 static void test_spsc_publish_visibility() {
     constexpr int N = 256;
-    RingBuffer<N> rb;
+    RingBuffer rb;
+    // Internal-RAM path: begin() must run before either thread starts, since
+    // it is explicitly documented as unsafe to call alongside producers.
+    CHECK(rb.begin(N, /*preferPsram=*/false));
 
     std::atomic<bool> producerDone{false};
     std::atomic<int>  mismatches{0};   // torn / stale reads seen by consumer

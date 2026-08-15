@@ -445,8 +445,11 @@ void SensorManager::toJson(JsonArray arr) const {
     }
 
     // Single critical section: scan the ring buffer for every metric of
-    // every sensor under one lock acquisition.  ~16 sensors × 8 metrics ×
-    // 200-entry strcmp is well under 1 ms on the C3.
+    // every sensor under one lock acquisition.  Cost is bounded by
+    // RING_SCAN_LIMIT_LAST / RING_SCAN_LIMIT_SERIES rather than by ring
+    // capacity — without those the same loop would walk a 58 000-entry PSRAM
+    // ring once per missing metric, while ProcessingTask waits 5 ms for this
+    // very mutex before dropping a reading.
     // Guard against legacy / early-boot path where mutexes are still nullptr.
     if (!webDataMutex || xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) != pdTRUE) return;
     for (int i = 0; i < slotCount; i++) {

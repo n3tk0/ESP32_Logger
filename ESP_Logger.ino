@@ -733,6 +733,14 @@ void setup() {
         // so we have a working web server but ZERO sensor / exporter tasks
         // — the goal is OTA recovery, not data collection.
         if (!g_safeMode && g_platformMode != PLATFORM_LEGACY) {
+            // Allocate the web ring buffer before the pipeline starts — this is
+            // the only path that ever pushes to it (ProcessingTask). Legacy and
+            // safe mode start no tasks, so the ring would stay permanently
+            // empty there; allocating anyway would reserve megabytes of PSRAM
+            // and construct every slot on each safe-mode boot for nothing.
+            // Until this runs every RingBuffer accessor is a documented no-op,
+            // so an early /api/sensors request is served as an empty ring.
+            webRingBufInit();
             _initPlatform();
         } else {
             // Legacy OR safe-mode: no sensor pipeline, no FreeRTOS tasks.
