@@ -11,12 +11,14 @@
 // other. The page is served to one reader on one shelf; nobody needs to
 // change its language without a reflash.
 //
-// WHY THE DATE IS ASSEMBLED BY HAND
-// ---------------------------------
-// strftime("%A %e %B") would give English names from the C locale, and the
-// ESP32's newlib has no bg_BG locale to switch to — setlocale() there accepts
-// only "C". So the weekday and month tables live here and the masthead date is
-// built from them.
+// WHY THE NAMES ARE TABLES AND NOT strftime
+// -----------------------------------------
+// strftime("%a") would give English names from the C locale, and the ESP32's
+// newlib has no bg_BG locale to switch to — setlocale() there accepts only
+// "C". So the weekday names live here.
+//
+// The long weekday and month tables that used to sit alongside these went with
+// the masthead; `git log` has them if a date line ever wants a home again.
 //
 // CYRILLIC ON THE TARGET
 // ----------------------
@@ -39,18 +41,6 @@
 #  define KD_T(en, bg) en
 #endif
 
-// tm_wday counts from Sunday.
-inline const char* kdWeekdayLong(int wday) {
-    static const char* N[7] = {
-#if defined(KINDLE_LANG_BG)
-        "неделя", "понеделник", "вторник", "сряда", "четвъртък", "петък", "събота"
-#else
-        "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
-#endif
-    };
-    return N[(wday < 0 || wday > 6) ? 0 : wday];
-}
-
 // Monday-based index, for the week strip.
 inline const char* kdWeekdayShort(int mondayIdx) {
     static const char* N[7] = {
@@ -61,20 +51,6 @@ inline const char* kdWeekdayShort(int mondayIdx) {
 #endif
     };
     return N[(mondayIdx < 0 || mondayIdx > 6) ? 0 : mondayIdx];
-}
-
-// tm_mon counts from January.
-inline const char* kdMonth(int mon) {
-    static const char* N[12] = {
-#if defined(KINDLE_LANG_BG)
-        "януари", "февруари", "март", "април", "май", "юни",
-        "юли", "август", "септември", "октомври", "ноември", "декември"
-#else
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"
-#endif
-    };
-    return N[(mon < 0 || mon > 11) ? 0 : mon];
 }
 
 // Weekday abbreviation for a forecast column, N days ahead of `wday`.

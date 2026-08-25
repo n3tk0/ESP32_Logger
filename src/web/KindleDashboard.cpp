@@ -97,18 +97,20 @@ static Tendency pressureTendency(const TrendRing::Hour* h) {
 // ---------------------------------------------------------------------------
 // The trend chart
 // ---------------------------------------------------------------------------
-// Two series over 24 hours. The outdoor series is drawn as a hatched BAND
-// between its hourly min and max with the mean as a solid line through it;
-// indoor is a dashed mean line only.
+// Two series over 24 hours. The outdoor series is drawn as a BAND between its
+// hourly min and max with the mean as a solid line through it; indoor is a
+// dashed mean line only.
 //
 // The band is the point. TrendRing keeps min/max per hour precisely so an
 // overnight excursion is visible, and a mean-only line throws that away — a
 // night that dipped to -3 and recovered by dawn looks identical to one that
 // sat at +2. It also costs nothing: the data was already being stored.
 //
-// Hatching rather than a flat grey fill: 16-level e-ink dithers mid-greys
-// into visible noise at this size, while a hard-edged 1px diagonal rule
-// renders cleanly and reads as "range" the way a printed chart does.
+// The band is a flat #d8d8d8 wash with a #8f8f8f outline. It was hatched at
+// first, on the belief that 16-level e-ink dithers mid-greys into noise at
+// this size; that was wrong. Flat, well-separated tones each land on their own
+// level and render solid, and over a wash the hatch was texture on texture —
+// two bands that nearly touch read as one muddy mass.
 //
 // Gaps break both the band and the lines instead of interpolating. A flat
 // line through a four-hour outage reads as "it was steady", which is a lie.
@@ -328,11 +330,6 @@ static void handleKindle(AsyncWebServerRequest* req) {
               grey levels — the dithering that argued against greys here comes
               from gradients and from tones too close together, not from flat
               well-separated fills. Spaced this far apart each renders solid. */
-           ".mast{border-bottom:3px solid #000;padding-bottom:5px;margin-bottom:2px}"
-           ".mast-sub{border-bottom:1px solid #777;height:3px;margin-bottom:16px}"
-           ".place{font-size:15px;letter-spacing:5px;text-transform:uppercase}"
-           ".when{color:#444}"
-           ".when{font-size:14px;text-align:right;letter-spacing:1px;color:#444}"
            ".hero td{padding:2px 0 6px}"
            /* Two classes, not one: .hero td above is (0,1,1) and would otherwise
               outrank a bare .sep (0,1,0), zeroing this padding and letting the
@@ -350,9 +347,21 @@ static void handleKindle(AsyncWebServerRequest* req) {
            "line-height:1;position:relative;top:12px}"
            ".sub{font-size:15px;margin-top:6px;line-height:1.45;color:#444}"
            ".dim{color:#777}"
+           /* Right column, upper two thirds. Fixed height rather than
+              line-height alone, for the same reason .big has one: it is what
+              keeps the divider below it level with the left column's text. */
+           ".clock{font-size:96px;line-height:104px;height:116px;padding-top:12px;"
+           "letter-spacing:-4px}"
+           ".clock-x{font-size:44px;line-height:104px;height:116px;color:#777;"
+           "letter-spacing:0}"
+           ".inrule{border-top:1px solid #aaa;margin-bottom:7px}"
+           ".in-t{font-size:40px;line-height:1.05;letter-spacing:-1px}"
+           ".in-d{font-size:19px;vertical-align:top;letter-spacing:0;"
+           "position:relative;top:5px}"
+           ".in-h{font-size:15px;color:#444;letter-spacing:0;margin-left:12px}"
            /* Three rules on the page, so a few px each is what keeps the
               footer above the 800px fold. Measured, not guessed. */
-           ".rule{border-top:1px solid #aaa;margin:13px 0 10px}"
+           ".rule{border-top:1px solid #aaa;margin:19px 0 14px}"
            ".sec{font-size:12px;letter-spacing:4px;text-transform:uppercase;"
            "margin-bottom:8px;color:#777}"
            ".ico{vertical-align:top;padding-top:4px}"
@@ -377,7 +386,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
            ".note{font-size:15px;font-style:italic;text-align:center;"
            "padding:36px 0;color:#777}"
            ".wk{margin-top:2px}"
-           ".wd{width:14.28%;text-align:center;padding:5px 0 4px;background:#f4f4f4}"
+           ".wd{width:14.28%;text-align:center;padding:8px 0 7px;background:#f4f4f4}"
            ".wd-we{background:#e4e4e4}"
            ".wd-n{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#777}"
            ".wd-d{font-size:24px;line-height:1.15}"
@@ -389,35 +398,11 @@ static void handleKindle(AsyncWebServerRequest* req) {
            "font-size:12px;color:#555;letter-spacing:.5px}"
            "</style></head><body>");
 
-    // Masthead
-    p += F("<div class=\"mast\"><table><tr><td class=\"place\">");
-    p += (config.deviceName[0] ? config.deviceName : KD_T("Weather", "Времето"));
-    p += F("</td><td class=\"when\">");
-    if (now > 1000000000u) {
-        const time_t when_t = (time_t)now;
-        struct tm tmv;
-        if (localtime_r(&when_t, &tmv) != nullptr) {
-            // Assembled rather than strftime'd: the C locale would give
-            // English names whatever the build language, and newlib on this
-            // part has no bg_BG to switch to.
-            p += kdWeekdayLong(tmv.tm_wday);
-            p += ' ';
-            p += tmv.tm_mday;
-            p += ' ';
-            p += kdMonth(tmv.tm_mon);
-            p += F(" &middot; ");
-            char hm[8];
-            snprintf(hm, sizeof(hm), "%02d:%02d", tmv.tm_hour, tmv.tm_min);
-            p += hm;
-        } else {
-            p += F(KD_T("time unavailable", "часът не е наличен"));
-        }
-    } else {
-        p += F(KD_T("clock not set", "часовникът не е сверен"));
-    }
-    p += F("</td></tr></table></div><div class=\"mast-sub\"></div>");
+    // No masthead. The place name never changed and the date is carried by the
+    // week strip at the foot, so the row was two lines of furniture above the
+    // only two numbers the page exists to show. The hero row is the masthead.
 
-    // The two temperatures
+    // Outside on the left, clock over inside on the right
     p += F("<table class=\"hero\"><tr><td width=\"50%\">"
            "<div class=\"lab\">" KD_T("Outside", "Навън") "</div><div class=\"");
     fmtTemp(buf, sizeof(buf), outT.value);
@@ -451,25 +436,45 @@ static void handleKindle(AsyncWebServerRequest* req) {
         p += F(KD_T("<span class=\"dim\">no reading &mdash; check the node</span>",
                     "<span class=\"dim\">няма данни &mdash; провери възела</span>"));
     }
-    p += F("</div></td><td width=\"50%\" class=\"sep\">"
-           "<div class=\"lab\">" KD_T("Inside", "Вътре") "</div><div class=\"");
-    fmtTemp(buf, sizeof(buf), inT.value);
-    p += bigClass(buf); p += F("\">"); p += buf;
-    p += F("<span class=\"deg\">&deg;</span></div><div class=\"sub\">");
-    if (inT.ok) {
-        float mn, mx;
-        if (haveIn && windowExtremes(tIn, mn, mx)) {
-            fmtTemp(buf, sizeof(buf), mn); p += buf;
-            p += F(KD_T(" to ", " до ")); fmtTemp(buf, sizeof(buf), mx); p += buf;
-            p += F(KD_T("&deg; today<br>", "&deg; днес<br>"));
+    p += F("</div></td><td width=\"50%\" class=\"sep\">");
+
+    // Upper two thirds: the time. An e-ink panel on a shelf is read across a
+    // room, and until now the only clock was 14px of grey at the top corner.
+    if (now > 1000000000u) {
+        const time_t when_t = (time_t)now;
+        struct tm tmv;
+        if (localtime_r(&when_t, &tmv) != nullptr) {
+            char hm[8];
+            snprintf(hm, sizeof(hm), "%02d:%02d", tmv.tm_hour, tmv.tm_min);
+            p += F("<div class=\"clock\">"); p += hm; p += F("</div>");
+        } else {
+            p += F("<div class=\"clock-x\">" KD_T("no time", "няма час") "</div>");
         }
-        if (inH.ok) { fmtInt(buf, sizeof(buf), inH.value); p += buf; p += F(KD_T("% humidity", "% влажност")); }
-        p += F("<span class=\"dim\">");
-        appendAge(p, inT.ts, now);
-        p += F("</span>");
     } else {
-        p += F(KD_T("<span class=\"dim\">no reading</span>",
-                    "<span class=\"dim\">няма данни</span>"));
+        // Not "--:--": a plausible-looking blank clock invites the reader to
+        // wonder what time it is, where "clock not set" names the fault.
+        p += F("<div class=\"clock-x\">" KD_T("clock not set", "часът не е сверен") "</div>");
+    }
+
+    // Lower third: inside temperature and humidity. The 24 h inside range went
+    // with the clock — the dashed line on the chart already carries it, and it
+    // was the least-read figure on the page.
+    p += F("<div class=\"inrule\"></div>"
+           "<div class=\"lab\">" KD_T("Inside", "Вътре") "</div><div class=\"in-t\">");
+    if (inT.ok) {
+        fmtTemp(buf, sizeof(buf), inT.value); p += buf;
+        p += F("<span class=\"in-d\">&deg;</span>");
+        if (inH.ok) {
+            p += F("<span class=\"in-h\">");
+            fmtInt(buf, sizeof(buf), inH.value); p += buf;
+            p += F(KD_T("% humidity", "% влажност"));
+            p += F("<span class=\"dim\">");
+            appendAge(p, inT.ts, now);
+            p += F("</span></span>");
+        }
+    } else {
+        p += F(KD_T("<span class=\"in-h\" style=\"margin:0;color:#777\">no reading</span>",
+                    "<span class=\"in-h\" style=\"margin:0;color:#777\">няма данни</span>"));
     }
     p += F("</div></td></tr></table>");
 

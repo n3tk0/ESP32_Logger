@@ -38,6 +38,26 @@ The panel is 1072×1448 at 300 ppi, but the browser reports roughly **600×800
 CSS pixels** at devicePixelRatio 2, and that is what the layout targets. Newer
 readers have more room and get more margin.
 
+## The top of the page
+
+There is no masthead. The place name never changed and the date is carried by
+the week strip at the foot, so the row was two lines of furniture standing above
+the only two numbers the page exists to show. The hero row is the masthead.
+
+The right half is split about two-to-one:
+
+- **the clock**, at 96 px — an e-ink panel on a shelf is read from across a
+  room, and the time used to be 14 px of grey in a corner;
+- **inside temperature and humidity** below a hairline.
+
+The inside 24-hour range went with the masthead. The dashed line on the chart
+already carries it, and it was the least-read figure on the page.
+
+The two columns are different shapes, so their numerals are aligned by a fixed
+box height on both (`.big`, `.clock`) plus a 12 px nudge on the clock, which has
+no label above it to push it down. Getting this by eye is what made an earlier
+version look ragged; it is measured in the browser instead.
+
 ### Language
 
 ```ini
@@ -45,10 +65,10 @@ readers have more room and get more margin.
 ```
 
 A compile-time switch, so a single-language build pays nothing for the other —
-the unused literal is discarded. The masthead date is assembled from tables in
-`DashboardStrings.h` rather than by `strftime`: the C locale would give English
-names whatever the build language, and newlib on this part has no `bg_BG` to
-switch to.
+the unused literal is discarded. The weekday names in the week strip come from
+tables in `DashboardStrings.h` rather than from `strftime`: the C locale would
+give English names whatever the build language, and newlib on this part has no
+`bg_BG` to switch to.
 
 Cyrillic depends on the reader's fallback font. The page declares UTF-8 and
 names the device's serif faces first, but Bookerly's Cyrillic coverage varies
