@@ -2,6 +2,9 @@
 #include "TaskManager.h"
 #include "../setup.h"          // MODULE_HEATER_ENABLED (compile-time toggle)
 #include "../pipeline/DataPipeline.h"
+#ifdef FEATURE_KINDLE_DASHBOARD
+#  include "../pipeline/TrendRing.h"
+#endif
 #include "../core/SensorTypes.h"
 #include "../alerts/AlertEngine.h"
 #include "../utils/MutexGuard.h"
@@ -87,6 +90,16 @@ void processingTaskFunc(void* /*param*/) {
                 g_ringPushDrops++;
             }
         }
+
+#ifdef FEATURE_KINDLE_DASHBOARD
+        // Fold into the 24-hour hourly grid. Deliberately OUTSIDE the
+        // webDataMutex block above: TrendRing has its own spinlock, and a
+        // reading dropped from the web ring because the mutex was busy is
+        // still a real measurement that the long-horizon trend should keep.
+        if (r.quality != QUALITY_ERROR) {
+            trendRing.add(r);
+        }
+#endif
 
         // Alert evaluation — skip when timestamp has no real wall-clock value
         // (ts < 1e9 means we're in millis-fallback territory; AlertEngine's

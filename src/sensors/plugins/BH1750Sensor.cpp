@@ -12,7 +12,10 @@ bool BH1750Sensor::_sendCmd(uint8_t cmd) {
 bool BH1750Sensor::_readLux(float& lux) {
     _wire->requestFrom((int)_addr, 2);
     if (_wire->available() < 2) return false;
-    uint16_t raw = ((uint16_t)_wire->read() << 8) | _wire->read();
+    // Unsequenced operands otherwise — see the note in node/src/sensors.cpp.
+    const uint8_t hi = (uint8_t)_wire->read();
+    const uint8_t lo = (uint8_t)_wire->read();
+    uint16_t raw = ((uint16_t)hi << 8) | lo;
     lux = _calLux.apply((float)raw / _divider);
     return true;
 }

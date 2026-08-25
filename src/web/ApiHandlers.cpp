@@ -18,6 +18,7 @@
 // the in-memory ring buffer only — historical FS queries return 0 rows.
 #include "../core/Globals.h"         // config, activeFS
 #include "../core/ModuleRegistry.h"  // Pass 5 phase 3: /api/modules
+#include "IngestHandler.h"           // POST /api/ingest (FEATURE_REMOTE_NODES)
 #include "../managers/ConfigManager.h" // saveConfig() after module update
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
@@ -1201,6 +1202,9 @@ static void handleApiI2cScan(AsyncWebServerRequest* req) {
 
 // ---------------------------------------------------------------------------
 void registerApiRoutes(AsyncWebServer& server) {
+#ifdef FEATURE_REMOTE_NODES
+    registerIngestHandler(server);
+#endif
     server.on("/api/data",              HTTP_GET,  handleApiData);
     server.on("/api/latest",            HTTP_GET,  handleApiLatest);
     server.on("/api/sensors",           HTTP_GET,  handleApiSensors);

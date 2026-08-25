@@ -65,6 +65,12 @@
 #ifdef MODULE_HEATER_ENABLED
 #  include "src/modules/HeaterModule.h"     // enclosure heater (actuator)
 #endif
+#ifdef MODULE_FORECAST_ENABLED
+#  include "src/modules/ForecastModule.h"   // HTTPS weather forecast
+#endif
+#ifdef FEATURE_KINDLE_DASHBOARD
+#  include "src/web/KindleDashboard.h"      // GET /kindle (e-ink dashboard)
+#endif
 #include "src/managers/ConfigManager.h"
 #include "src/managers/HardwareManager.h"
 #include "src/managers/StorageManager.h"
@@ -80,6 +86,9 @@
 // Existing sensors (upgraded) — each guarded by arduino_build_flags.h toggles
 #ifdef SENSOR_BME280_ENABLED
 #  include "src/sensors/plugins/BME280Sensor.h"
+#endif
+#ifdef FEATURE_REMOTE_NODES
+#  include "src/sensors/plugins/RemoteNodeSensor.h"
 #endif
 #ifdef SENSOR_SDS011_ENABLED
 #  include "src/sensors/plugins/SDS011Sensor.h"
@@ -374,6 +383,11 @@ static void _initPlatform() {
     sensorManager.registerPlugin("bme280",  []()->ISensor*{ return new BME280Sensor(); });
     sensorManager.registerPlugin("bmp280",  []()->ISensor*{ return new BME280Sensor(); });
 #endif
+#ifdef FEATURE_REMOTE_NODES
+    // Not wired to this board — values arrive via POST /api/ingest and are
+    // drained on the normal sensor tick. See RemoteNodeSensor.h.
+    sensorManager.registerPlugin("remote",  []()->ISensor*{ return new RemoteNodeSensor(); });
+#endif
 #ifdef SENSOR_BME688_ENABLED
     sensorManager.registerPlugin("bme688",  []()->ISensor*{ return new BME688Sensor("bme688"); });
     sensorManager.registerPlugin("bme680",  []()->ISensor*{ return new BME688Sensor("bme680"); });
@@ -596,6 +610,9 @@ void setup() {
     // pin; ProcessingTask drives the control loop from there.
     moduleRegistry.add(&HeaterModule::instance());
 #endif
+#ifdef MODULE_FORECAST_ENABLED
+    moduleRegistry.add(&forecastModule);
+#endif
     if (fsAvailable && activeFS) {
         moduleRegistry.loadAll(*activeFS);
         if (!activeFS->exists(ModuleRegistry::DEFAULT_PATH)) {
@@ -741,6 +758,13 @@ void setup() {
             // Until this runs every RingBuffer accessor is a documented no-op,
             // so an early /api/sensors request is served as an empty ring.
             webRingBufInit();
+            #ifdef FEATURE_KINDLE_DASHBOARD
+            // Before _initPlatform(), which starts ProcessingTask: an untracked
+            // series silently drops every reading that arrives before track() is
+            // called, and route registration is far enough downstream to lose a
+            // visible slice of the first hour.
+            kindleTrackTrends();
+            #endif
             _initPlatform();
         } else {
             // Legacy OR safe-mode: no sensor pipeline, no FreeRTOS tasks.
@@ -770,6 +794,11 @@ void setup() {
         // so a single registration covers every mode without duplicating
         // handlers on the AsyncWebServer.
         registerApiRoutes(server);
+#ifdef FEATURE_KINDLE_DASHBOARD
+        // Registered before startWebServer() with everything else: adding a
+        // route after server.begin() corrupts the handler list.
+        registerKindleDashboard(server);
+#endif
 
         // Start the AsyncTCP listener now that EVERY route is registered.
         // server.begin() must run AFTER setupWebServer() + registerApiRoutes();
@@ -805,6 +834,12 @@ void setup() {
         // for continuous or hybrid mode (no web server routes needed here).
         // Skip in safe-mode per Pillar 3.7.
         if (!g_safeMode && g_platformMode != PLATFORM_LEGACY) {
+#ifdef FEATURE_KINDLE_DASHBOARD
+            // Same reason as the web-mode path above: track before the task
+            // that feeds the ring exists. track() is idempotent, so a boot
+            // that reaches both call sites costs nothing.
+            kindleTrackTrends();
+#endif
             _initPlatform();
         }
     }

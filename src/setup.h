@@ -98,6 +98,30 @@
 //#  define MODULE_HEATER_ENABLED       // Enclosure heater (frost/condensation)
 //#endif
 
+// Remote sensor nodes.  Compiles in POST /api/ingest and the "remote" sensor
+// plugin, so satellite boards (see node/ for the ESP8266 reference client)
+// can push readings into this device's pipeline.  A remote sensor is then
+// configured like any other, with "type":"remote".
+//
+// CHANGE THE TOKEN before putting this on a network you share.  It is the
+// only thing between the pipeline and anything else that can reach port 80:
+//   -DFEATURE_REMOTE_NODES -DINGEST_TOKEN='"your-token-here"'
+//#ifndef FEATURE_REMOTE_NODES
+//#  define FEATURE_REMOTE_NODES        // POST /api/ingest + "remote" sensor
+//#endif
+
+// Kindle dashboard — GET /kindle.  A server-rendered, JavaScript-free page
+// sized for a 6" e-ink reader's browser.  See docs/KINDLE_DASHBOARD.md.
+//#ifndef FEATURE_KINDLE_DASHBOARD
+//#  define FEATURE_KINDLE_DASHBOARD
+//#endif
+
+// Weather forecast client.  Fetches a short forecast over HTTPS for the
+// Kindle dashboard to sit alongside the measured values.
+//#ifndef MODULE_FORECAST_ENABLED
+//#  define MODULE_FORECAST_ENABLED
+//#endif
+
 // Cloud / network exporters
 #ifndef EXPORT_MQTT_ENABLED
 #  define EXPORT_MQTT_ENABLED            // Internal MQTT driver

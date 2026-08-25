@@ -26,3 +26,6 @@ tools/*.exe
 
 # Rust target directory for the flash_bootloader crate
 tools/flash_bootloader/target/
+
+# Transient build log written by the node CI matrix
+node/build.log

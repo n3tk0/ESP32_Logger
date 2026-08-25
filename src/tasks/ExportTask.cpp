@@ -1,5 +1,8 @@
 #include "ExportTask.h"
 #include "TaskManager.h"
+#ifdef MODULE_FORECAST_ENABLED
+#  include "../modules/ForecastModule.h"
+#endif
 #include "../setup.h"
 #include "../pipeline/DataPipeline.h"
 #include "../export/ExportManager.h"
@@ -25,6 +28,25 @@ void exportTaskFunc(void* /*param*/) {
     SensorReading r;
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_EXPORT] = millis();   // C4 heartbeat
+
+#ifdef MODULE_FORECAST_ENABLED
+        // The forecast fetch lives here, not on ProcessingTask, for two
+        // reasons that both end in a crash otherwise:
+        //
+        //   Stack. It runs WiFiClientSecure + HTTPClient + getString() + a
+        //   JSON parse. STACK_EXPORT_TASK is 8192 and is commented "WiFi +
+        //   TLS + JSON serialisation" precisely for this shape of work;
+        //   STACK_PROCESS_TASK is 6144 and would likely abort on the canary.
+        //
+        //   Watchdog. It blocks. Every task stamps a heartbeat at the top of
+        //   its loop and TaskManager reboots the device after MAX_SILENCE_MS
+        //   (30 s) of silence, so a blocking call has to finish well inside
+        //   that — see the timeout and redirect limits in ForecastModule.
+        //
+        // ProcessingTask additionally drives the heater fail-safe and drains
+        // sensorQueue (depth 20); stalling it there loses readings too.
+        forecastModule.tick(millis());
+#endif
 
         // Short timeout so the task responds to running=false within 100ms.
         bool got = xQueueReceive(exportQueue, &r,

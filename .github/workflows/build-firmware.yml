@@ -10,7 +10,9 @@
 #   - firmware-esp32c3.bin           (XIAO ESP32-C3, 4MB, production target)
 #   - firmware-esp32c3_supermini.bin (ESP32-C3 Super Mini, 4MB, native USB JTAG)
 #   - firmware-esp32s3.bin           (ESP32-S3 DevKitC-1, 8MB)
+#   - firmware-xiao_esp32s3.bin      (Seeed XIAO ESP32-S3, 8MB + 8MB PSRAM)
 #   - firmware-esp32s3_n16r8.bin     (ESP32-S3 N16R8, 16MB + 8MB octal PSRAM)
+#   - firmware-node-esp8266.bin      (ESP8266 satellite node, built from node/)
 
 name: Build Firmware
 
@@ -23,6 +25,7 @@ on:
       - '*.ino'
       - 'platformio.ini'
       - 'partitions_balanced.csv'
+      - 'node/**'
       - '.github/workflows/build-firmware.yml'
   pull_request:
     paths:
@@ -32,6 +35,7 @@ on:
       - '*.ino'
       - 'platformio.ini'
       - 'partitions_balanced.csv'
+      - 'node/**'
   workflow_dispatch:
   release:
     types: [created]
@@ -106,6 +110,224 @@ jobs:
         with:
           name: firmware-${{ matrix.name }}
           path: output/firmware-${{ matrix.name }}.bin
+
+  # Builds with the optional features turned ON, and turns them on the way
+  # setup.h documents rather than with -D flags.  That distinction is the
+  # whole point of the job: a feature macro passed with -D reaches every
+  # translation unit from the command line, so a .cpp that guards its body on
+  # the macro but forgets to include setup.h still compiles -- and only the
+  # setup.h path fails to link.  A -D-based job would pass while the
+  # documented path was broken.
+  #
+  # Note what this does NOT catch: registration calls missing from the tracked
+  # sketch.  Their absence is not a compile or link error, just a feature that
+  # silently never runs.  scripts/copy_sketch.py guards that case instead, by
+  # refusing to build when the generated sketch has been edited.
+  build-features:
+    name: build (xiao_esp32c3, all features via setup.h)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Enable optional features in setup.h
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+          p = 'src/setup.h'
+          s = open(p).read()
+          names = ['FEATURE_REMOTE_NODES',
+                   'FEATURE_KINDLE_DASHBOARD',
+                   'MODULE_FORECAST_ENABLED',
+                   'MODULE_HEATER_ENABLED']
+          for n in names:
+              # Uncomment the guarded block for this macro. Failing loudly when
+              # the pattern is gone matters: a silently-unmatched edit would
+              # leave this job building the OFF path and reporting success.
+              pat = re.compile(r'//(#ifndef ' + n + r'\n)//(#\s*define ' + n + r'[^\n]*\n)//(#endif)')
+              s, k = pat.subn(r'\1\2\3', s)
+              if k != 1:
+                  sys.exit(f'setup.h: could not enable {n} (matched {k} times) '
+                           f'-- the toggle block changed shape, fix this job')
+          open(p, 'w').write(s)
+          print('enabled:', ', '.join(names))
+          EOF
+
+      - name: Build with features enabled
+        run: pio run -e xiao_esp32c3
+
+      # KINDLE_PAGE_W rescales every size on the dashboard through kdPx(). At
+      # the default 600 that function is the identity, so a default-only build
+      # exercises none of the arithmetic and a broken rescale would ship
+      # unnoticed. 1072 is the other value the docs tell people to try.
+      #
+      # The range guard is checked too, by asserting a value below the floor
+      # actually fails: a #error nobody has ever seen fire is a #error that may
+      # not work.
+      - name: Build at a non-default layout width
+        run: |
+          set -o pipefail
+          PLATFORMIO_BUILD_FLAGS="-DKINDLE_PAGE_W=1072 -DKINDLE_LANG_BG" \
+            pio run -e xiao_esp32c3 2>&1 | tail -20
+
+      - name: An out-of-range layout width must not build
+        run: |
+          if PLATFORMIO_BUILD_FLAGS="-DKINDLE_PAGE_W=200" pio run -e xiao_esp32c3 >/dev/null 2>&1; then
+            echo "::error::KINDLE_PAGE_W=200 built, but the range guard should have rejected it"
+            exit 1
+          fi
+          echo "range guard rejected KINDLE_PAGE_W=200, as it should"
+
+      - name: Rebuild at the default width for the size report
+        run: pio run -e xiao_esp32c3
+
+      - name: Report size
+        run: |
+          # This config is the deliberate worst case -- every optional feature
+          # on a 4 MB C3 -- and nobody ships it, so it sits near the ceiling by
+          # nature (~97% at the time this job was added). Exceeding the
+          # partition is still a hard failure, because such an image would not
+          # flash; the warning below is the early signal.
+          SIZE=$(stat -c%s .pio/build/xiao_esp32c3/firmware.bin)
+          MAX=1572864
+          PCT=$((SIZE * 100 / MAX))
+          REMAIN=$(( (MAX - SIZE) / 1024 ))
+          echo "=== xiao_esp32c3, all features on ==="
+          echo "Firmware size: $(( SIZE / 1024 )) KB / $(( MAX / 1024 )) KB (${PCT}% used, ${REMAIN} KB free)"
+          if [ "$SIZE" -gt "$MAX" ]; then
+            echo "::error::Firmware exceeds app partition with all features on! ${SIZE} > ${MAX} bytes"
+            exit 1
+          elif [ "$PCT" -ge 98 ]; then
+            echo "::warning::All-features build uses ${PCT}% — only ${REMAIN} KB free"
+          fi
+
+  # The ESP8266 satellite is a separate PlatformIO project with its own
+  # platformio.ini, so `pio run` in the repo root never touches it and the
+  # matrix above cannot cover it.  Without this job a break in node/ ships
+  # unnoticed -- including one caused by editing the BME280_Mini driver the
+  # two firmwares share.
+  #
+  # The sensor set is chosen at build time, so building only the default
+  # (BMx280) would check one of seven shapes.  The matrix walks the
+  # combinations that exercise a different code path: each driver at least
+  # once, both pulse modes, and the two selections that require disabling the
+  # default sensor.
+  build-node:
+    name: build (esp8266 node, ${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            disable: ''
+            flags: ''
+          - name: bme688
+            disable: NODE_SENSOR_BMX280
+            flags: -DNODE_SENSOR_BME688
+          - name: ds18b20-only
+            disable: NODE_SENSOR_BMX280
+            flags: -DNODE_SENSOR_DS18B20 -DNODE_DS18B20_METRIC='"temperature"'
+          - name: light-and-rain
+            disable: ''
+            flags: -DNODE_SENSOR_BH1750 -DNODE_SENSOR_PULSE
+          - name: water-flow
+            disable: ''
+            flags: -DNODE_SENSOR_PULSE -DPULSE_MODE_RAIN=0
+          - name: dust
+            disable: ''
+            flags: -DNODE_SENSOR_SDS011
+          # Nine metrics against the collector's eight-per-tick ceiling. This
+          # entry exists to prove the guard fires, not to ship a config --
+          # expect_warning turns a missing warning into a failure, so the
+          # check cannot rot into a no-op the way an unasserted warning would.
+          - name: over-budget
+            disable: ''
+            flags: -DNODE_SENSOR_BH1750 -DNODE_SENSOR_SDS011 -DNODE_SENSOR_PULSE
+            expect_warning: 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      # The toggles are #ifndef-guarded in a header, so -U cannot switch one
+      # off -- the header defines it right back, and PlatformIO emits every -D
+      # before any -U regardless.  Comment the block out instead, and fail if
+      # the pattern is gone rather than silently building the default set.
+      - name: Disable default sensors (${{ matrix.disable }})
+        if: matrix.disable != ''
+        run: |
+          python3 - <<'EOF'
+          import os, re, sys
+          p = 'node/src/node_config.h'
+          s = open(p).read()
+          for name in os.environ['DISABLE'].split():
+              pat = re.compile(r'(?m)^#ifndef ' + name + r'\n#  define ' + name
+                               + r'([^\n]*)\n#endif')
+              s, k = pat.subn(lambda m: '//#ifndef ' + name + '\n//#  define '
+                              + name + m.group(1) + '\n//#endif', s, count=1)
+              if k != 1:
+                  sys.exit(f'node_config.h: could not disable {name} '
+                           f'(matched {k} times) -- the toggle block changed shape')
+              print('disabled', name)
+          open(p, 'w').write(s)
+          EOF
+        env:
+          DISABLE: ${{ matrix.disable }}
+
+      - name: Build node firmware
+        working-directory: node
+        env:
+          PLATFORMIO_BUILD_FLAGS: ${{ matrix.flags }}
+        run: |
+          # pipefail is NOT on by default in an Actions `run` block, so without
+          # it `pio run | tee` reports tee's exit status and a failed build
+          # would pass this step.
+          set -o pipefail
+          pio run 2>&1 | tee build.log
+
+      - name: Check the metric-budget guard fired
+        if: matrix.expect_warning == 'true'
+        working-directory: node
+        run: |
+          if grep -q "emits more than 8 metrics" build.log; then
+            echo "metric-budget warning present, as expected"
+          else
+            echo "::error::Set exceeds the 8-metric ceiling but node_config.h did not warn - the guard has stopped working"
+            exit 1
+          fi
+
+      - name: Report size
+        working-directory: node
+        run: |
+          SIZE=$(stat -c%s .pio/build/nodemcuv2/firmware.bin)
+          echo "=== esp8266 node (${{ matrix.name }}) ==="
+          echo "Firmware size: $(( SIZE / 1024 )) KB"
+
+      # Only the default selection is a shippable artifact; the rest exist to
+      # prove they compile.
+      - name: Upload artifact
+        if: matrix.name == 'default'
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-node-esp8266
+          path: node/.pio/build/nodemcuv2/firmware.bin
 
   attach-to-release:
     needs: build
