@@ -64,8 +64,10 @@ without changing anything.
    station as failed; too loose and a dead node keeps publishing a plausible
    frozen value.
 
-3. **Configure the node.** Either edit `src/node_config.h` (and keep it out of
-   git) or override from `platformio.ini`:
+3. **Configure the node.** Flash it, then use the setup portal (below) — or
+   bake the values in at build time, which is still supported. Either edit
+   `src/node_config.h` (and keep it out of git) or override from
+   `platformio.ini`:
 
    ```ini
    build_flags =
@@ -93,6 +95,55 @@ without changing anything.
    pio device monitor
    ```
 
+## Setup portal
+
+Settings live in `/config.json` on the node's LittleFS. The values in
+`node_config.h` are no longer the configuration — they are the **defaults**
+that seed it on a blank filesystem, so building with `-D` flags works exactly
+as it did before the portal existed.
+
+To configure without a cable: join the node's `esp-node-XXXX` network
+(password `configure` by default — change `PORTAL_AP_PASS`). A phone normally
+pops the "sign in to network" prompt straight into the form; otherwise open
+`http://192.168.4.1`.
+
+The form covers WiFi, collector address and port, ingest token, optional Basic
+Auth, node id, post interval and altitude. Saving writes the config and
+restarts.
+
+Password fields come back **empty** and mean "keep the saved one". The stored
+passphrase is never rendered into the page — putting it in the page source
+would expose it to anyone who reaches the portal.
+
+### When the portal opens — and when it closes
+
+This is the part that matters for a node on a wall:
+
+| Situation | Portal behaviour |
+|---|---|
+| No usable config saved | Runs until configured. There is nothing else the node could be doing. |
+| **FLASH** button held through reset | Runs until configured. The deliberate "let me in" path. |
+| Config saved but WiFi keeps failing | Runs for **5 minutes**, then closes and retries the saved network. Repeats. |
+
+That third row is the important one. A portal that stayed up whenever WiFi was
+down would turn a router reboot at 3 am into a node still parked in AP mode
+the next afternoon, having missed a night of readings waiting for someone who
+was asleep. Time-boxing it means the node self-heals when the router comes
+back, while still being reachable in that window if the credentials genuinely
+changed.
+
+Two clean association failures are required before the portal is offered — one
+is usually a transient the next cycle clears, and tearing the radio down to
+raise an AP costs a posting interval.
+
+### Security
+
+The AP is WPA2, not open. It only exists while the node cannot reach its
+network, but an open AP in that window would let anyone in range repoint the
+node at their own collector. **Change `PORTAL_AP_PASS` from the default.**
+
+Outside the portal the node runs no server and listens on no port.
+
 ## Altitude and pressure
 
 Station pressure falls about 12 Pa per metre near sea level, so a node 300 m
@@ -111,7 +162,8 @@ Leave `ALTITUDE_M` at 0 and only `pressure` is sent.
 | Situation | Behaviour |
 |-----------|-----------|
 | Sensor missing at boot | Retries the probe on every post cycle — a cold breakout that fails its first probe recovers without a power cycle |
-| WiFi down | Gives up the association attempt after 20 s, powers the radio down, retries next cycle |
+| WiFi down | Gives up the association attempt after 20 s, powers the radio down, retries next cycle. After two consecutive failures it offers the setup portal for 5 minutes, then goes back to retrying |
+| Config lost or corrupt | Falls back to the compiled-in defaults; if those are incomplete, the portal comes up and waits |
 | Collector unreachable | Logs the error and drops that sample; there is no local buffer |
 | Wrong token | Collector answers 401; the message is printed on the serial monitor |
 
