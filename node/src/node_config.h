@@ -222,10 +222,21 @@
 // One counter serving both jobs: a tipping-bucket reed switch and a hall-
 // effect flow sensor differ only in scale and in what the numbers are called.
 //
-// D6 = GPIO12 is free of boot straps. If DS18B20 is also enabled, give them
-// different pins.
+// GPIO4 (D2) is free of boot straps and of the pins the other sensors default
+// to. It previously defaulted to 13, which is SDS011_TX_PIN — SoftwareSerial
+// claimed the pin as TX and then attachInterrupt() was layered on top of it.
+// That combination compiles cleanly and only fails on hardware, which is the
+// worst place to find it, so the defaults are now distinct by construction:
+//
+//   4  pulse        5  I2C SCL (and 4 is I2C SDA — see below)
+//   12 1-Wire      13  SDS011 TX      14 SDS011 RX
+//
+// Note 4 is also the I2C SDA default: a build with BOTH an I2C sensor and the
+// pulse input still needs one of them moved in the portal. There is no
+// assignment that avoids every clash on eleven usable GPIOs — the point is
+// that the common single-extra-sensor cases now work untouched.
 #ifndef PULSE_PIN
-#  define PULSE_PIN 13
+#  define PULSE_PIN 4
 #endif
 
 // "rain" -> rain_rate (mm/h) + rain_total (mm)

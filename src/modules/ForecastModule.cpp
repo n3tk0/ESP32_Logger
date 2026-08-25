@@ -124,9 +124,13 @@ static String httpsGet(const char* url) {
 
     HTTPClient http;
     if (!http.begin(client, url)) return String();
-    http.setTimeout(8000);
-    // Some providers redirect between regional hosts.
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    // Every task stamps a watchdog heartbeat at the top of its loop and
+    // TaskManager reboots after 30 s of silence, so this blocking call must
+    // finish comfortably inside that. Redirect following is NOT enabled: the
+    // default limit is 10 hops, and 10 x this timeout is several times the
+    // watchdog window. Neither provider redirects, so the multiplier bought
+    // nothing and risked a reboot loop on a misbehaving one.
+    http.setTimeout(6000);
 
     String body;
     const int code = http.GET();

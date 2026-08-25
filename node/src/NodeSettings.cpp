@@ -126,11 +126,10 @@ bool settingsSave(const NodeSettings& s) {
         LittleFS.remove(TMP_PATH);
         return false;
     }
-    if (!LittleFS.remove(CFG_PATH) && LittleFS.exists(CFG_PATH)) {
-        Serial.println("[cfg] cannot replace existing config");
-        LittleFS.remove(TMP_PATH);
-        return false;
-    }
+    // No remove() first: LittleFS::rename already replaces the destination
+    // atomically. Deleting the good config and then renaming opened exactly
+    // the window this temp-file dance exists to close — a brownout in between
+    // left the node with no config at all.
     if (!LittleFS.rename(TMP_PATH, CFG_PATH)) {
         Serial.println("[cfg] rename failed");
         return false;

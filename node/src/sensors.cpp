@@ -347,7 +347,13 @@ int sensorsRead(const NodeSettings& s, NodeReading* out, int maxOut) {
     if (s_bhOk) {
         Wire.requestFrom((int)s_bhAddr, 2);
         if (Wire.available() >= 2) {
-            const uint16_t raw = ((uint16_t)Wire.read() << 8) | Wire.read();
+            // Two separate statements on purpose: `(read() << 8) | read()`
+            // leaves the operand order unsequenced, and a right-first
+            // evaluation swaps the bytes into a value that still looks like a
+            // plausible lux reading.
+            const uint8_t hi = (uint8_t)Wire.read();
+            const uint8_t lo = (uint8_t)Wire.read();
+            const uint16_t raw = ((uint16_t)hi << 8) | lo;
             add(out, n, maxOut, "lux", (float)raw / BH1750_DIVIDER, "lx");
         }
     }

@@ -51,27 +51,40 @@ static bool authorised(AsyncWebServerRequest* req) {
 
 static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
                              size_t len, size_t index, size_t total) {
-    if (rateLimit429(req)) return;
+    // Shape checks FIRST, and they answer only on the opening segment.
+    //
+    // ESPAsyncWebServer calls this once per segment of a chunked body. Every
+    // req->send() overwrites the request's response object — leaking the
+    // previous one — and writes another HTTP response onto the same socket,
+    // so replying per segment corrupts the connection. Answering on index 0
+    // and staying silent afterwards is what keeps that to one response.
+    //
+    // The size check has to come before the single-chunk check too: a body
+    // larger than the cap is exactly what arrives split, so testing it second
+    // made its own error message unreachable.
+    if (total > INGEST_MAX_BODY) {
+        if (index == 0) {
+            req->send(413, "application/json",
+                      "{\"ok\":false,\"error\":\"body too large\"}");
+        }
+        return;
+    }
+    if (index != 0 || len != total) {
+        if (index == 0) {
+            req->send(413, "application/json",
+                      "{\"ok\":false,\"error\":\"body must arrive in one chunk\"}");
+        }
+        return;
+    }
 
+    // Auth before the rate limiter: the bucket is device-wide, so checking it
+    // first let an unauthenticated caller drain it and lock out the real node.
     if (!authorised(req)) {
         req->send(401, "application/json",
                   "{\"ok\":false,\"error\":\"bad or missing ingest token\"}");
         return;
     }
-
-    // Single-chunk only, like the module-config endpoint: reassembling a
-    // chunked body would mean holding partial state per connection on a
-    // task that must not block.
-    if (index != 0 || len != total) {
-        req->send(413, "application/json",
-                  "{\"ok\":false,\"error\":\"body must arrive in one chunk\"}");
-        return;
-    }
-    if (total > INGEST_MAX_BODY) {
-        req->send(413, "application/json",
-                  "{\"ok\":false,\"error\":\"body too large\"}");
-        return;
-    }
+    if (rateLimit429(req)) return;
 
     JsonDocument body;
     if (deserializeJson(body, data, len)) {

@@ -758,6 +758,13 @@ void setup() {
             // Until this runs every RingBuffer accessor is a documented no-op,
             // so an early /api/sensors request is served as an empty ring.
             webRingBufInit();
+            #ifdef FEATURE_KINDLE_DASHBOARD
+            // Before _initPlatform(), which starts ProcessingTask: an untracked
+            // series silently drops every reading that arrives before track() is
+            // called, and route registration is far enough downstream to lose a
+            // visible slice of the first hour.
+            kindleTrackTrends();
+            #endif
             _initPlatform();
         } else {
             // Legacy OR safe-mode: no sensor pipeline, no FreeRTOS tasks.
@@ -791,9 +798,6 @@ void setup() {
         // Registered before startWebServer() with everything else: adding a
         // route after server.begin() corrupts the handler list.
         registerKindleDashboard(server);
-        // Declare the trend series before ProcessingTask starts feeding the
-        // ring, so the first hour of data is not silently discarded.
-        kindleTrackTrends();
 #endif
 
         // Start the AsyncTCP listener now that EVERY route is registered.
@@ -830,6 +834,12 @@ void setup() {
         // for continuous or hybrid mode (no web server routes needed here).
         // Skip in safe-mode per Pillar 3.7.
         if (!g_safeMode && g_platformMode != PLATFORM_LEGACY) {
+#ifdef FEATURE_KINDLE_DASHBOARD
+            // Same reason as the web-mode path above: track before the task
+            // that feeds the ring exists. track() is idempotent, so a boot
+            // that reaches both call sites costs nothing.
+            kindleTrackTrends();
+#endif
             _initPlatform();
         }
     }
