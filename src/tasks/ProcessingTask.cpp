@@ -11,6 +11,9 @@
 #ifdef MODULE_HEATER_ENABLED
 #  include "../modules/HeaterModule.h"
 #endif
+#ifdef MODULE_FORECAST_ENABLED
+#  include "../modules/ForecastModule.h"
+#endif
 #include <math.h>
 
 // ---------------------------------------------------------------------------
@@ -67,6 +70,17 @@ void processingTaskFunc(void* /*param*/) {
         // goes silent, and that is exactly the case where no readings arrive to
         // drive the loop. Internally rate-limited to 1 Hz.
         HeaterModule::instance().tick(millis());
+#endif
+#ifdef MODULE_FORECAST_ENABLED
+        // Dispatched by name, like the heater above: nothing in this codebase
+        // walks ModuleRegistry calling tick(), so a module that is registered
+        // but never named here simply never runs.
+        //
+        // Safe from this task despite doing a blocking HTTPS GET — the fetch
+        // is rate-limited to once every interval_min (>= 10 minutes) and this
+        // loop's only deadline is the 100 ms queue receive below, which is a
+        // timeout rather than a schedule.
+        forecastModule.tick(millis());
 #endif
 
         // Block up to 100ms waiting for a reading

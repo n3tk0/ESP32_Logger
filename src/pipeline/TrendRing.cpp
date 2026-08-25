@@ -1,5 +1,10 @@
 #include "TrendRing.h"
 
+// The feature macro lives in setup.h and nothing in TrendRing.h's include
+// chain reaches it, so without this the guard below is always false and
+// enabling the feature in setup.h yields an undefined reference to trendRing.
+#include "../setup.h"
+
 #if defined(FEATURE_KINDLE_DASHBOARD)
 
 #include <math.h>

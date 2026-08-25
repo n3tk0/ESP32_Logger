@@ -1,5 +1,9 @@
 #include "RemoteNodeSensor.h"
 
+// See TrendRing.cpp: the guard below needs setup.h, which ISensor.h's include
+// chain does not reach.
+#include "../../setup.h"
+
 #ifdef FEATURE_REMOTE_NODES
 
 #include <string.h>

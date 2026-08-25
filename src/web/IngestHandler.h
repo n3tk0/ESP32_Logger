@@ -10,7 +10,7 @@
 // Request body:
 //   {
 //     "node": "balcony",
-//     "ts":   1723800000,          // optional; 0/absent = collector stamps
+//     "ts":   0,                   // optional; see the note below
 //     "readings": [
 //       { "metric": "temperature", "value": 12.34, "unit": "C"   },
 //       { "metric": "pressure",    "value": 1013.2, "unit": "hPa" },

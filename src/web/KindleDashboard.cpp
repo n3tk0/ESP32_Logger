@@ -264,11 +264,19 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // ── Footer ──────────────────────────────────────────────────────────────
     p += F("<div class=\"foot\">");
     if (now > 1000000000u) {
+        // Convert, do not reinterpret. time_t is 32-bit in this toolchain
+        // today, so casting the address happens to work — but it is the sort
+        // of thing that becomes a garbage date the day the SDK widens time_t,
+        // with nothing at the call site to hint why.
+        const time_t when_t = (time_t)now;
         struct tm tmv;
-        localtime_r((time_t*)&now, &tmv);
         char when[32];
-        strftime(when, sizeof(when), "%a %d %b %H:%M", &tmv);
-        p += when;
+        if (localtime_r(&when_t, &tmv) != nullptr &&
+            strftime(when, sizeof(when), "%a %d %b %H:%M", &tmv) > 0) {
+            p += when;
+        } else {
+            p += F("time unavailable");
+        }
     } else {
         p += F("clock not set");
     }

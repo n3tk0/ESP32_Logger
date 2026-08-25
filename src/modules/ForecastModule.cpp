@@ -18,6 +18,10 @@ ForecastModule forecastModule;
 // drizzle" versus "light drizzle" is a distinction the reader cannot act on,
 // and both mean "take a coat".
 static const char* wmoSummary(int code) {
+    // -1 is the sentinel both fetch paths use for a missing or unmappable
+    // condition. It must be rejected before the ranges below, or it satisfies
+    // `code <= 2` and an unknown sky renders as a confident "Partly cloudy".
+    if (code < 0)                  return "Unknown";
     if (code == 0)                 return "Clear";
     if (code <= 2)                 return "Partly cloudy";
     if (code == 3)                 return "Overcast";

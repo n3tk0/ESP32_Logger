@@ -1,5 +1,9 @@
 #include "RemoteIngest.h"
 
+// See TrendRing.cpp: the guard below needs setup.h, which RemoteIngest.h's
+// include chain does not reach.
+#include "../setup.h"
+
 #ifdef FEATURE_REMOTE_NODES
 
 #include <math.h>
@@ -79,7 +83,9 @@ int RemoteIngest::drain(const char* nodeId, SensorReading* out, int maxOut,
         copyClamped(r.metric, sizeof(r.metric), _e[i].metric);
         copyClamped(r.unit,   sizeof(r.unit),   _e[i].unit);
         r.value     = _e[i].value;
-        r.timestamp = _e[i].ts;   // 0 → SensorManager stamps its own clock
+        // Carried through, though SensorManager overwrites it moments
+        // later — see the note on put() in the header.
+        r.timestamp = _e[i].ts;
         r.quality   = (staleAfterMs > 0 && age > staleAfterMs)
                     ? QUALITY_ERROR
                     : QUALITY_GOOD;

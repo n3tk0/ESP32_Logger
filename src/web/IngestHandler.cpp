@@ -93,10 +93,11 @@ static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
         return;
     }
 
-    // A node with no clock sends ts 0 (or omits it) and the collector stamps
-    // its own time when the reading is drained. A node WITH a clock is
-    // trusted for the timestamp, because it knows when it sampled — which
-    // matters once a node buffers through a WiFi outage.
+    // Stored, but not authoritative: SensorManager stamps the collector's
+    // clock over every reading once the plugin returns, remote or wired. The
+    // reference node has no RTC and sends 0, so nothing is lost today — but
+    // do not read this field as "the node's sampling time is preserved".
+    // See RemoteIngest::put().
     const uint32_t ts = body["ts"] | 0UL;
 
     int stored = 0, rejected = 0;

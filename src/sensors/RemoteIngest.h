@@ -55,9 +55,17 @@ public:
     /// Record one pushed metric for `nodeId`. Overwrites the previous value
     /// for the same (nodeId, metric) pair, otherwise claims a free slot.
     ///
-    /// `ts` is the node's own Unix timestamp, or 0 when it has no clock —
-    /// the collector substitutes its own time at drain in that case, which
-    /// is the common case for an ESP8266 with no RTC and no NTP.
+    /// `ts` is accepted and stored, but NOT currently honoured downstream:
+    /// SensorManager::tickFiltered() stamps every reading with the
+    /// collector's own clock after the plugin returns, for remote and wired
+    /// sensors alike. It is kept here rather than dropped because the field
+    /// is the only place a node's sampling time could survive, and making it
+    /// authoritative later is a one-line change in SensorManager — but until
+    /// that change, treat readings as timestamped on arrival.
+    ///
+    /// This matters little today: the reference node has no RTC and no NTP,
+    /// so it sends 0 anyway. It would matter for a node that buffers through
+    /// an outage, which is also not implemented (see node/README.md).
     ///
     /// Non-finite values are rejected so a garbage sample cannot poison a
     /// series or occupy the last free slot. Returns false when the table is

@@ -112,7 +112,13 @@ static void handleRoot() {
 }
 
 static void handleSave() {
-    NodeSettings& s = *s_target;
+    // Build into a COPY. Writing straight into the caller's settings would
+    // leave them corrupted on the validation and write-failure paths below:
+    // portalRun() promises to return with `s` unmodified, and a node that
+    // fell back to retrying its saved network would instead be running
+    // against a half-applied config from RAM until the next power cycle,
+    // even though flash still holds a good one.
+    NodeSettings s = *s_target;
 
     auto text = [&](const char* field, char* dst, size_t len) {
         if (!s_http.hasArg(field)) return;
@@ -172,6 +178,9 @@ static void handleSave() {
                       "flash. <a href=\"/\">Back</a></p>"));
         return;
     }
+
+    // Only now that it is safely on flash does the caller's copy change.
+    *s_target = s;
 
     s_http.send(200, "text/html",
                 F("<!DOCTYPE html><meta charset=\"utf-8\">"
