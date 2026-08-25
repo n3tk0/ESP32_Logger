@@ -50,6 +50,23 @@ public:
         PROVIDER_OWM        = 1,
     };
 
+    // What the three outlook columns step through.
+    enum Outlook : uint8_t {
+        OUTLOOK_HOURLY = 0,   // +3 h, +6 h, +9 h
+        OUTLOOK_DAILY  = 1,   // tomorrow, +2 days, +3 days
+    };
+
+    // One outlook column. `lowC` is NAN in hourly mode, where a single hour
+    // has no range to report — the renderer keys off that rather than a
+    // separate flag.
+    struct Period {
+        bool  valid = false;
+        char  label[8] = {0};   // "21:00" or "Wed"
+        float tempC = NAN;
+        float lowC  = NAN;
+        int   code  = -1;
+    };
+
     // Cached forecast. Written by tick() on the module task, read by the
     // dashboard renderer on the AsyncTCP task.
     struct Data {
@@ -61,6 +78,7 @@ public:
         int      code     = -1;    // WMO code (Open-Meteo) or mapped OWM id
         uint32_t fetchedAt = 0;    // Unix seconds
         char     summary[24] = {0};
+        Period   outlook[3];
     };
 
     const char* getId()   const override { return "forecast"; }
@@ -81,8 +99,13 @@ private:
     bool _fetch();
     bool _fetchOpenMeteo();
     bool _fetchOwm();
+    /// Fills d.outlook from OWM's 3-hourly list, collapsing to days when the
+    /// configured mode asks for it. Separate request from the current-weather
+    /// one, because OWM serves them from different endpoints.
+    bool _fetchOwmOutlook(Data& d);
 
     Provider _provider     = PROVIDER_OPEN_METEO;
+    Outlook  _outlook      = OUTLOOK_HOURLY;
     float    _lat          = 0.0f;
     float    _lon          = 0.0f;
     char     _apiKey[40]   = {0};

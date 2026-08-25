@@ -103,12 +103,45 @@ Configure via the module UI or `modules.json`:
   "forecast": {
     "enabled": true,
     "provider": "open-meteo",
+    "outlook": "hourly",
     "lat": 42.6977,
     "lon": 23.3219,
     "interval_min": 30
   }
 }
 ```
+
+### The three outlook columns
+
+`outlook` chooses what the right-hand side of the forecast row steps through:
+
+| Value | Columns | Shows |
+|---|---|---|
+| `hourly` (default) | +3 h, +6 h, +9 h | temperature at that hour |
+| `daily` | tomorrow, +2, +3 days | that day's high / low |
+
+An hour has no range to report, so hourly columns print one figure — printing
+`11° / 11°` would imply a precision the slot does not have.
+
+**Open-Meteo** serves both from one request. `forecast_hours` anchors the
+hourly array on the current hour rather than local midnight, which is what
+makes indices 3/6/9 mean +3/+6/+9 h without any date arithmetic on the device.
+
+**OpenWeatherMap's free tier does not have a daily endpoint**, and splits what
+Open-Meteo returns in one response across two: `/weather` for current
+conditions, `/forecast` for the 3-hourly list. So the OWM path makes two
+requests back to back — together about 12 s worst case against ExportTask's 30 s
+watchdog, which is why the per-request timeout is 6 s and redirect following is
+off.
+
+In `daily` mode the OWM days are **aggregated from that same 3-hourly list**:
+high and low per local day, with the condition taken from the slot nearest
+midday. Nearest-midday rather than first-of-day on purpose — an early-hours
+shower should not make an otherwise sunny day render as rain. `cnt=24` bounds
+how much JSON lands in heap.
+
+If the outlook request fails the current conditions are still shown: three
+empty columns are a smaller loss than a blank forecast block.
 
 `interval_min` is clamped to 10–360. A forecast does not change faster than
 that, and the floor is what keeps a misconfigured device off a provider's
@@ -134,6 +167,22 @@ across nearby stations **at this moment**, not today's high and low. They are
 shown as-is rather than relabelled — inventing a daily range the API did not
 supply would be worse than a narrow one. Open-Meteo's daily fields are the
 real thing, which is one more reason it is the default.
+
+## Week strip
+
+The foot of the page carries the current week with today inverted. It fills
+space that was empty at 695 of 800 px and answers the question a static panel
+on a shelf is otherwise bad at: what day is it.
+
+Monday-first. `tm_wday` counts from Sunday, so the column index is
+`(wday + 6) % 7`; getting that backwards misplaces today on Sundays only,
+which is the sort of bug that survives a casual look. The days either side are
+walked on the epoch rather than on `tm_mday`, so month and year ends are
+correct for free.
+
+Today is marked by inverting the cell rather than outlining it: a filled block
+is the one mark that stays unambiguous after e-ink dithering, where a thin
+ring can read as a smudge.
 
 ## TLS
 

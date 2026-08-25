@@ -239,6 +239,46 @@ static void appendAge(String& out, uint32_t ts, uint32_t now) {
     else           { out += (mins / 60); out += F(" h old"); }
 }
 
+
+// ---------------------------------------------------------------------------
+// Week strip
+// ---------------------------------------------------------------------------
+// The current week with today inverted. It fills the foot of the page, which
+// was empty at 695 of 800 px, and answers the question an e-ink panel on a
+// shelf is otherwise bad at: what day is it.
+//
+// Monday-first, the local convention. tm_wday counts from Sunday, so the
+// shift is (wday + 6) % 7 rather than wday itself — getting that backwards
+// puts today in the wrong column on Sundays only, which is exactly the sort
+// of bug that survives a casual look.
+static void appendWeek(String& out, uint32_t now) {
+    if (now < 1000000000u) return;
+
+    const time_t t = (time_t)now;
+    struct tm tmv;
+    if (localtime_r(&t, &tmv) == nullptr) return;
+
+    const int todayIdx = (tmv.tm_wday + 6) % 7;      // 0 = Monday
+
+    // Walk back to Monday in whole days. Doing it on the epoch rather than on
+    // tm_mday keeps month and year ends correct for free.
+    static const char* NAMES[7] = { "Mon","Tue","Wed","Thu","Fri","Sat","Sun" };
+    out += F("<div class=\"rule\"></div><table class=\"wk\"><tr>");
+    for (int i = 0; i < 7; i++) {
+        const time_t day = t + (time_t)(i - todayIdx) * 86400;
+        struct tm dv;
+        if (localtime_r(&day, &dv) == nullptr) continue;
+        out += F("<td class=\"");
+        out += (i == todayIdx) ? F("wd wd-now") : F("wd");
+        out += F("\"><div class=\"wd-n\">");
+        out += NAMES[i];
+        out += F("</div><div class=\"wd-d\">");
+        out += dv.tm_mday;
+        out += F("</div></td>");
+    }
+    out += F("</tr></table>");
+}
+
 // ---------------------------------------------------------------------------
 // The page
 // ---------------------------------------------------------------------------
@@ -305,12 +345,19 @@ static void handleKindle(AsyncWebServerRequest* req) {
            "line-height:1;position:relative;top:12px}"
            ".sub{font-size:15px;margin-top:6px;line-height:1.45}"
            ".dim{color:#555}"
-           ".rule{border-top:1px solid #000;margin:16px 0 12px}"
+           /* Three rules on the page, so a few px each is what keeps the
+              footer above the 800px fold. Measured, not guessed. */
+           ".rule{border-top:1px solid #000;margin:13px 0 10px}"
            ".sec{font-size:12px;letter-spacing:4px;text-transform:uppercase;"
            "margin-bottom:8px}"
-           ".ico{vertical-align:top;padding-top:2px}"
-           ".fc{font-size:32px;line-height:1.05;padding-left:14px}"
-           ".fc-hi{font-size:32px;text-align:right;line-height:1.05;white-space:nowrap}"
+           ".ico{vertical-align:top;padding-top:4px}"
+           ".fc{font-size:28px;line-height:1.1;padding-left:12px}"
+           ".fc-t{font-size:30px;margin-top:1px}"
+           /* Equal thirds of the right half; nowrap so a two-part daily
+              figure never breaks across lines. */
+           ".per{width:88px;text-align:center;vertical-align:top;white-space:nowrap}"
+           ".per-l{font-size:11px;letter-spacing:2px;text-transform:uppercase;margin-bottom:1px}"
+           ".per-t{font-size:19px;margin-top:-2px}"
            ".chart{display:block;margin:2px auto 0}"
            ".grid{stroke:#999;stroke-width:1}"
            ".base{stroke:#000;stroke-width:1}"
@@ -322,7 +369,15 @@ static void handleKindle(AsyncWebServerRequest* req) {
            ".key td{padding-top:2px}"
            ".note{font-size:15px;font-style:italic;text-align:center;"
            "padding:36px 0;color:#555}"
-           ".foot{border-top:1px solid #000;margin-top:16px;padding-top:6px;"
+           ".wk{margin-top:2px}"
+           ".wd{width:14.28%;text-align:center;padding:5px 0 4px}"
+           ".wd-n{font-size:11px;letter-spacing:2px;text-transform:uppercase}"
+           ".wd-d{font-size:24px;line-height:1.15}"
+           /* Inverted rather than outlined: a filled block is the one
+              mark that stays unambiguous after e-ink dithering, where a
+              thin ring can read as a smudge. */
+           ".wd-now{background:#000;color:#fff}"
+           ".foot{border-top:1px solid #000;margin-top:11px;padding-top:5px;"
            "font-size:12px;color:#555;letter-spacing:.5px}"
            "</style></head><body>");
 
@@ -419,6 +474,8 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // than as something competing with the two temperatures.
     appendForecastSection(p);
 #endif
+
+    appendWeek(p, now);
 
     p += F("<div class=\"foot\">Measured on site &middot; refreshes every ");
     p += (KINDLE_REFRESH_SEC / 60);
