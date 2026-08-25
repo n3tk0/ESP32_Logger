@@ -1,7 +1,7 @@
 # Sensor node (ESP8266)
 
-A satellite board that reads one BME280/BMP280 and POSTs the values to an
-ESP32_Logger collector. No data storage, no display, and — outside the setup
+A satellite board that reads one or more environment sensors and POSTs the
+values to an ESP32_Logger collector. No data storage, no display, and — outside the setup
 portal — no server and no listening port. Everything that looks at this node's
 data looks at the collector.
 
@@ -13,29 +13,94 @@ ESP8266 with 80 KB of RAM and no RTOS, and none of it is needed to read one
 I2C sensor and make one HTTP request.
 
 What *is* shared is the part that has to agree between the two devices: the
-BME280/BMP280 driver at `../src/drivers/BME280_Mini.h`. It is header-only and
-speaks nothing but `Wire`, so the node includes it unmodified. Same
-compensation maths on both ends, one place to fix it.
+sensor drivers in `../src/drivers/`, included unmodified. Same compensation
+maths on both ends, one place to fix it.
 
-The metric names and units match the collector's own BME280 plugin exactly —
+Metric names and units match the collector's own plugins exactly —
 `temperature`/`C`, `humidity`/`%`, `pressure`/`hPa` — so a remote reading and
 a wired one are the same series shape downstream.
 
 ## Hardware
 
-NodeMCU V3 (CH340) + BME280 or BMP280 breakout.
+NodeMCU V3 (CH340) plus whichever sensors you selected at build time.
 
-| Breakout | NodeMCU V3 | GPIO |
-|----------|-----------|------|
-| VCC      | 3V3       | —    |
-| GND      | GND       | —    |
-| SDA      | D2        | 4    |
-| SCL      | D1        | 5    |
+| Breakout | NodeMCU V3 | GPIO | Sensor |
+|----------|-----------|------|--------|
+| VCC      | 3V3       | —    | all    |
+| GND      | GND       | —    | all    |
+| SDA      | D2        | 4    | BMx280 / BME688 |
+| SCL      | D1        | 5    | BMx280 / BME688 |
+| DQ       | D6        | 12   | DS18B20 (+ 4.7 kΩ to 3V3) |
+
+These are only the **defaults** — the setup portal lets you change them per
+device, and shows only the pins whose sensor is in the build.
 
 A BMP280 has no humidity sensor; the node detects which chip is fitted and
-simply omits the humidity metric. Both I2C addresses (0x76 and 0x77) are
-probed, so a breakout that shipped with SDO strapped the other way works
-without changing anything.
+omits the humidity metric. Both I2C addresses (0x76 and 0x77) are probed, so a
+breakout that shipped with SDO strapped the other way works untouched.
+
+## Choosing sensors at build time
+
+Same idea as the collector's `setup.h`: only what you enable is compiled in.
+Edit the `NODE_SENSOR_*` block in `src/node_config.h`.
+
+| Toggle | Driver | Metrics |
+|---|---|---|
+| `NODE_SENSOR_BMX280` (default) | `BME280_Mini` | `temperature`, `humidity`, `pressure`, `pressure_sea` |
+| `NODE_SENSOR_BME688` | `BME688_Mini` | the above plus `gas_resistance` |
+| `NODE_SENSOR_DS18B20` | `DS18B20_Mini` | `probe_temp`, `probe_temp_1`, … (up to 8 on one pin) |
+
+All three drivers are the collector's own, included unmodified from
+`../src/drivers/`, so the compensation maths cannot drift between a wired
+sensor and a remote one.
+
+Measured cost on `nodemcuv2`:
+
+| Build | Flash |
+|---|---|
+| DS18B20 only | 365 947 (35.0 %) |
+| BMx280 only | 373 071 (35.7 %) |
+| BMx280 + DS18B20 | 375 335 (35.9 %) |
+| BME688 + DS18B20 | 375 543 (36.0 %) |
+
+### Two constraints worth knowing
+
+**BMx280 and BME688 are mutually exclusive** and enabling both is a compile
+error. They do the same job and publish the same metric names, and the
+collector's ingest table is keyed by `(node, metric)` — the second to post
+would silently overwrite the first.
+
+**DS18B20 publishes under `probe_temp`, not `temperature`,** for the same
+reason: alongside a BMx280 the two would collide. On a DS18B20-only node
+nothing collides and you may prefer the plain name so the series matches a
+wired DS18B20 elsewhere:
+
+```ini
+-DNODE_DS18B20_METRIC='"temperature"'
+```
+
+Keep that name at 10 characters or fewer — `SensorReading::metric` is 16 bytes
+and the multi-probe `_1` suffix needs the room.
+
+### Turning the default off
+
+`-U` will not do it. The toggles use `#ifndef`/`#define`, so a `-U` on the
+command line is undone by the header — and PlatformIO emits every `-D` before
+any `-U` anyway. Comment the block out in `node_config.h` instead, exactly as
+the collector's `setup.h` works.
+
+### Adding a fourth sensor
+
+Everything sensor-specific lives in `src/sensors.cpp` behind three functions,
+so main.cpp does not grow an `#ifdef` per driver. A new sensor is one
+self-contained edit there, a toggle in `node_config.h`, and — if it needs a
+pin — a field in `NodeSettings` plus a `row()` in the portal's guarded block.
+
+Note that `DS18B20_Mini.h` needs a small shim on this part: it guards its
+1-Wire timing with FreeRTOS `portDISABLE_INTERRUPTS`, which the ESP8266 core
+does not define. `sensors.cpp` maps it onto `noInterrupts()` rather than
+changing the shared driver. The critical sections are one bit each (~70 µs),
+short enough not to disturb WiFi — a whole-frame lock would not be.
 
 ## Setup
 
@@ -109,8 +174,14 @@ pops the "sign in to network" prompt straight into the form; otherwise open
 `http://192.168.4.1`.
 
 The form covers WiFi, collector address and port, ingest token, optional Basic
-Auth, node id, post interval and altitude. Saving writes the config and
-restarts.
+Auth, **sensor pins**, node id, post interval and altitude. Saving writes the
+config and restarts.
+
+The pin fields shown depend on what is in the build: an I2C pair when a
+BMx280/BME688 is compiled in, a 1-Wire pin when DS18B20 is. Offering a control
+for a driver that is not present would be a control that does nothing, which
+is worse than no control. GPIO numbers outside 0-16 are rejected and keep the
+previous value.
 
 Password fields come back **empty** and mean "keep the saved one". The stored
 passphrase is never rendered into the page — putting it in the page source

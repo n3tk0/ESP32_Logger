@@ -1,13 +1,14 @@
 // ============================================================================
-// ESP32_Logger sensor node — ESP8266 + BME280/BMP280
+// ESP32_Logger sensor node — ESP8266 satellite
 //
-// Reads one I2C environment sensor and POSTs the values to an ESP32_Logger
-// collector's /api/ingest. That is the whole job: no storage, no display, and
-// — outside the setup portal — no server and no listening port.
+// Reads whatever sensors this build selected (see node_config.h) and POSTs
+// the values to an ESP32_Logger collector's /api/ingest. That is the whole
+// job: no storage, no display, and — outside the setup portal — no server and
+// no listening port.
 //
-// Metric names and units match the collector's own BME280 plugin exactly
-// ("temperature"/C, "humidity"/%, "pressure"/hPa) so a remote reading and a
-// wired one are the same series shape downstream.
+// Everything sensor-specific lives in sensors.cpp, so this file has no #ifdef
+// per driver. Metric names and units match the collector's own plugins
+// exactly, so a remote reading and a wired one are the same series shape.
 //
 // See README.md in this directory for wiring and setup.
 // ============================================================================
@@ -15,45 +16,20 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
-#include <Wire.h>
 #include <ArduinoJson.h>
 
 #include "node_config.h"
 #include "NodeSettings.h"
 #include "ConfigPortal.h"
+#include "sensors.h"
 
-// The collector's driver, used unmodified. It speaks only Wire, so it is as
-// portable as the bus is — and sharing it means the compensation maths cannot
-// drift between the two devices.
-#include "src/drivers/BME280_Mini.h"
-
-static BME280_Mini  s_bmx;
 static NodeSettings s_cfg;
-static bool         s_sensorReady = false;
-static uint32_t     s_lastPost    = 0;
-static bool         s_postedOnce  = false;
+static uint32_t     s_lastPost   = 0;
+static bool         s_postedOnce = false;
 
 // Consecutive failed association attempts. Drives how long the portal is
 // offered before falling back to another retry.
 static uint8_t s_wifiFailures = 0;
-
-// ---------------------------------------------------------------------------
-// Sea-level pressure
-// ---------------------------------------------------------------------------
-// Station pressure falls about 12 Pa per metre of altitude near sea level, so
-// a node 300 m up reads ~35 hPa below what a forecast quotes. The barometric
-// formula converts one to the other; without it, comparing the node's reading
-// against a forecast's "1013 hPa" is comparing two different quantities.
-//
-// Both are published when altitude is set, because they answer different
-// questions: station pressure is what this box actually experiences (the one
-// to trend), sea-level pressure is what compares against everyone else.
-static float toSeaLevel(float stationHpa, float tempC, float altitudeM) {
-    if (altitudeM == 0.0f) return NAN;
-    return stationHpa * powf(1.0f - (0.0065f * altitudeM)
-                                    / (tempC + 0.0065f * altitudeM + 273.15f),
-                             -5.257f);
-}
 
 // ---------------------------------------------------------------------------
 // WiFi
@@ -112,68 +88,29 @@ static bool ensureWifi() {
 }
 
 // ---------------------------------------------------------------------------
-// Sensor
-// ---------------------------------------------------------------------------
-static bool initSensor() {
-    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-
-    // Breakouts strap SDO either way; try the configured address first, then
-    // the other one, so a board that shipped as 0x77 still works untouched.
-    const uint8_t candidates[2] = { BMX280_ADDR,
-                                    (uint8_t)(BMX280_ADDR == 0x76 ? 0x77 : 0x76) };
-    for (uint8_t i = 0; i < 2; i++) {
-        if (s_bmx.begin(candidates[i], &Wire)) {
-            Serial.printf("[sensor] %s at 0x%02X (chip 0x%02X)\n",
-                          s_bmx.isBME280() ? "BME280" : "BMP280",
-                          candidates[i], s_bmx.chipId());
-            return true;
-        }
-    }
-    Serial.println("[sensor] no BME280/BMP280 found on either address");
-    return false;
-}
-
-// ---------------------------------------------------------------------------
 // Post
 // ---------------------------------------------------------------------------
-static void addReading(JsonArray arr, const char* metric, float value,
-                       const char* unit) {
-    if (!isfinite(value)) return;   // omit rather than send a NaN the JSON cannot carry
-    JsonObject o = arr.add<JsonObject>();
-    o["metric"] = metric;
-    o["value"]  = value;
-    o["unit"]   = unit;
-}
-
 static bool postReadings() {
-    const float tempC       = s_bmx.readTemperature();
-    const float pressurePa  = s_bmx.readPressure();
-    const float humidityPct = s_bmx.readHumidity();   // NAN on a BMP280
-
-    if (!isfinite(tempC) && !isfinite(pressurePa)) {
-        Serial.println("[sensor] read failed, skipping post");
+    NodeReading vals[NODE_MAX_READINGS];
+    const int n = sensorsRead(s_cfg, vals, NODE_MAX_READINGS);
+    if (n == 0) {
+        Serial.println("[sensor] nothing to send this cycle");
         return false;
     }
 
     JsonDocument doc;
     doc["node"] = s_cfg.nodeId;
     // No RTC and no NTP client on this node: send 0 and let the collector
-    // stamp its own clock at drain. It has NTP and is the one whose timeline
-    // the readings are stored against.
+    // stamp its own clock. It has NTP and is the one whose timeline the
+    // readings are stored against.
     doc["ts"] = 0;
 
     JsonArray readings = doc["readings"].to<JsonArray>();
-    addReading(readings, "temperature", tempC, "C");
-    addReading(readings, "humidity",    humidityPct, "%");
-
-    const float hPa = isfinite(pressurePa) ? pressurePa / 100.0f : NAN;
-    addReading(readings, "pressure", hPa, "hPa");
-    addReading(readings, "pressure_sea",
-               toSeaLevel(hPa, tempC, s_cfg.altitudeM), "hPa");
-
-    if (readings.size() == 0) {
-        Serial.println("[sensor] nothing finite to send");
-        return false;
+    for (int i = 0; i < n; i++) {
+        JsonObject o = readings.add<JsonObject>();
+        o["metric"] = vals[i].metric;
+        o["value"]  = vals[i].value;
+        o["unit"]   = vals[i].unit;
     }
 
     String body;
@@ -198,7 +135,8 @@ static bool postReadings() {
 
     const int code = http.POST(body);
     if (code > 0) {
-        Serial.printf("[post] %d %s\n", code, http.getString().c_str());
+        Serial.printf("[post] %d metrics -> %d %s\n",
+                      n, code, http.getString().c_str());
     } else {
         Serial.printf("[post] failed: %s\n", http.errorToString(code).c_str());
     }
@@ -234,7 +172,8 @@ void setup() {
                   s_cfg.nodeId, s_cfg.host, (unsigned)s_cfg.port,
                   (unsigned long)(s_cfg.intervalMs / 1000UL));
 
-    s_sensorReady = initSensor();
+    sensorsBegin(s_cfg);
+    Serial.printf("sensors: %s\n", sensorsDescribe());
     ensureWifi();
 }
 
@@ -249,10 +188,11 @@ void loop() {
     s_lastPost   = now;
     s_postedOnce = true;
 
-    // Retry the sensor rather than requiring a power cycle: a breakout on a
-    // cold balcony can fail its first probe and come back a minute later.
-    if (!s_sensorReady) s_sensorReady = initSensor();
-    if (!s_sensorReady) return;
+    // Retry rather than requiring a power cycle: a breakout on a cold balcony
+    // can fail its first probe and answer a minute later. sensorsBegin() only
+    // re-probes what is not already up.
+    if (!sensorsReady()) sensorsBegin(s_cfg);
+    if (!sensorsReady()) return;
 
     if (!ensureWifi()) return;
 

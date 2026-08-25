@@ -36,6 +36,13 @@ struct NodeSettings {
     uint32_t intervalMs    = 60000;
     float    altitudeM     = 0.0f;
 
+    // Sensor wiring. Defaults come from node_config.h; the portal overrides
+    // them per device, and only shows the fields whose sensor is actually
+    // compiled into this build.
+    uint8_t  i2cSda        = 4;
+    uint8_t  i2cScl        = 5;
+    uint8_t  oneWirePin    = 12;
+
     /// True once an SSID and a collector host are both present — the minimum
     /// for the node to have anything to do. Anything less and the portal has
     /// to run, because there is no fallback that could work.

@@ -1,5 +1,8 @@
 #include "ConfigPortal.h"
 
+// The NODE_SENSOR_* selection decides which pin fields the form shows.
+#include "node_config.h"
+
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <DNSServer.h>
@@ -97,6 +100,24 @@ static void handleRoot() {
     row(p, "bpass", "Basic auth password", String(), "password",
         s.basicPass[0] ? "Leave empty to keep the saved password." : "");
 
+    // Only sensors actually compiled into this build get pin fields. Offering
+    // a 1-Wire pin on a build with no DS18B20 driver would be a control that
+    // does nothing, which is worse than no control at all.
+#if defined(NODE_SENSOR_BMX280) || defined(NODE_SENSOR_BME688)
+    p += F("<h2>Sensor pins</h2>");
+    row(p, "sda", "I2C SDA (GPIO)", String(s.i2cSda), "number",
+        "NodeMCU V3: D2 = GPIO4, D1 = GPIO5.");
+    row(p, "scl", "I2C SCL (GPIO)", String(s.i2cScl), "number", "");
+#endif
+#if defined(NODE_SENSOR_DS18B20)
+#  if !defined(NODE_SENSOR_BMX280) && !defined(NODE_SENSOR_BME688)
+    p += F("<h2>Sensor pins</h2>");
+#  endif
+    row(p, "ow", "1-Wire data (GPIO)", String(s.oneWirePin), "number",
+        "Needs a 4.7k pull-up to 3V3. Avoid GPIO0 and GPIO2 — both are boot "
+        "straps.");
+#endif
+
     p += F("<h2>This node</h2>");
     row(p, "nodeid", "Node id", esc(s.nodeId), "text",
         "Must match the \"node\" field of the collector's remote sensor.");
@@ -161,6 +182,18 @@ static void handleSave() {
     if (s_http.hasArg("alt")) {
         s.altitudeM = s_http.arg("alt").toFloat();
     }
+
+    // GPIO numbers. The ESP8266 has 0-16; anything outside that is a typo, and
+    // silently accepting it would produce a sensor that never initialises with
+    // no clue why. Out-of-range keeps the previous value.
+    auto pin = [&](const char* field, uint8_t& dst) {
+        if (!s_http.hasArg(field)) return;
+        const long v = s_http.arg(field).toInt();
+        if (v >= 0 && v <= 16) dst = (uint8_t)v;
+    };
+    pin("sda", s.i2cSda);
+    pin("scl", s.i2cScl);
+    pin("ow",  s.oneWirePin);
 
     if (!s.isComplete()) {
         s_http.send(400, "text/html",

@@ -27,6 +27,9 @@ static void applyDefaults(NodeSettings& s) {
     s.port       = COLLECTOR_PORT;
     s.intervalMs = POST_INTERVAL_MS;
     s.altitudeM  = ALTITUDE_M;
+    s.i2cSda     = I2C_SDA_PIN;
+    s.i2cScl     = I2C_SCL_PIN;
+    s.oneWirePin = ONEWIRE_PIN;
 
     // The placeholder SSID from node_config.h is not a network. Treating it
     // as one would make isComplete() true and send the node into a retry loop
@@ -74,6 +77,9 @@ bool settingsLoad(NodeSettings& out) {
     out.port       = doc["port"]       | out.port;
     out.intervalMs = doc["intervalMs"] | out.intervalMs;
     out.altitudeM  = doc["altitudeM"]  | out.altitudeM;
+    out.i2cSda     = doc["i2cSda"]     | out.i2cSda;
+    out.i2cScl     = doc["i2cScl"]     | out.i2cScl;
+    out.oneWirePin = doc["oneWirePin"] | out.oneWirePin;
 
     return true;
 }
@@ -90,6 +96,9 @@ bool settingsSave(const NodeSettings& s) {
     doc["basicPass"]  = s.basicPass;
     doc["intervalMs"] = s.intervalMs;
     doc["altitudeM"]  = s.altitudeM;
+    doc["i2cSda"]     = s.i2cSda;
+    doc["i2cScl"]     = s.i2cScl;
+    doc["oneWirePin"] = s.oneWirePin;
 
     // Temp file + rename: a brownout partway through leaves the previous
     // config intact rather than a truncated one. Writing CFG_PATH directly
