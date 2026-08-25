@@ -145,6 +145,24 @@ static void appendChart(String& out,
     out += F("\" viewBox=\"0 0 "); out += CHART_W; out += ' '; out += CHART_H;
     out += F("\">");
 
+    // Three-hourly verticals, drawn first so the band and lines cover them.
+    // They are the ruler that lets the eye carry a point on the curve down to
+    // the hour axis, which six-hourly labels alone do not: between two labels
+    // there was nothing to count against. Lighter than the horizontals on
+    // purpose — this is scaffolding, not data.
+    for (int i = 0; i < TrendRing::HOURS; i += 3) {
+        out += F("<line class=\"vgrid\" x1=\""); out += KD_X(i);
+        out += F("\" y1=\""); out += T;
+        out += F("\" x2=\""); out += KD_X(i);
+        out += F("\" y2=\""); out += B; out += F("\"/>");
+    }
+    // 24 hours is not a multiple of 3 from the right-hand end, and "now" is
+    // the one hour always worth a line of its own.
+    out += F("<line class=\"vgrid\" x1=\""); out += KD_X(TrendRing::HOURS - 1);
+    out += F("\" y1=\""); out += T;
+    out += F("\" x2=\""); out += KD_X(TrendRing::HOURS - 1);
+    out += F("\" y2=\""); out += B; out += F("\"/>");
+
     // Five horizontal rules, the lowest doubling as the baseline. Three
     // made the scale too coarse to read a couple of degrees off.
     for (int k = 0; k <= 4; k++) {
@@ -346,11 +364,30 @@ static void handleKindle(AsyncWebServerRequest* req) {
            ".deg{font-size:30px;letter-spacing:0;vertical-align:top;"
            "line-height:1;position:relative;top:12px}"
            ".sub{font-size:15px;margin-top:6px;line-height:1.45;color:#444}"
+           ".sub-t{margin-top:1px}"
            ".dim{color:#777}"
+           /* Temperature and humidity are one reading of one parcel of air,
+              so they share a baseline and a slash rather than a line break. */
+           ".slash{font-size:44px;color:#aaa;letter-spacing:0;padding:0 7px;"
+           "position:relative;top:-5px}"
+           ".hum-o{font-size:44px;color:#444;letter-spacing:-1px}"
+           /* A six-glyph reading ("-12.4") already drops to .big4; the pair
+              beside it has to come down too or "100%" runs off the column. */
+           ".big4 .slash{font-size:34px;padding:0 5px;top:-4px}"
+           ".big4 .hum-o{font-size:34px}"
+           /* The absolute pressure is the one figure here compared against
+              memory rather than against the page; at 15px it was set as a
+              footnote to the humidity. */
+           ".pres{font-size:34px;line-height:1.15;margin-top:5px;"
+           "letter-spacing:-1px}"
+           ".pres-u{font-size:17px;color:#777;letter-spacing:0}"
            /* Right column, upper two thirds. Fixed height rather than
               line-height alone, for the same reason .big has one: it is what
               keeps the divider below it level with the left column's text. */
-           ".clock{font-size:96px;line-height:104px;height:116px;padding-top:12px;"
+           /* Height set so the divider lands two thirds of the way down the cell
+              the left column sizes: at 116px the inside block finished 24px
+              short of the bottom and left a hole under it. */
+           ".clock{font-size:96px;line-height:104px;height:139px;padding-top:12px;"
            "letter-spacing:-4px}"
            ".clock-x{font-size:44px;line-height:104px;height:116px;color:#777;"
            "letter-spacing:0}"
@@ -358,10 +395,12 @@ static void handleKindle(AsyncWebServerRequest* req) {
            ".in-t{font-size:40px;line-height:1.05;letter-spacing:-1px}"
            ".in-d{font-size:19px;vertical-align:top;letter-spacing:0;"
            "position:relative;top:5px}"
-           ".in-h{font-size:15px;color:#444;letter-spacing:0;margin-left:12px}"
+           ".slash-i{font-size:26px;padding:0 5px;top:-2px}"
+           ".hum-i{font-size:30px;color:#444}"
+           ".in-age{font-size:13px;letter-spacing:0;margin-left:10px}"
            /* Three rules on the page, so a few px each is what keeps the
               footer above the 800px fold. Measured, not guessed. */
-           ".rule{border-top:1px solid #aaa;margin:19px 0 14px}"
+           ".rule{border-top:1px solid #aaa;margin:18px 0 13px}"
            ".sec{font-size:12px;letter-spacing:4px;text-transform:uppercase;"
            "margin-bottom:8px;color:#777}"
            ".ico{vertical-align:top;padding-top:4px}"
@@ -376,6 +415,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
            ".per-t{font-size:19px;margin-top:-2px;padding-bottom:5px}"
            ".chart{display:block;margin:2px auto 0}"
            ".grid{stroke:#c4c4c4;stroke-width:1}"
+           ".vgrid{stroke:#d5d5d5;stroke-width:1}"
            ".base{stroke:#777;stroke-width:1}"
            ".ax{font-size:11px;fill:#777;font-family:Bookerly,Georgia,serif}"
            ".band{fill:#d8d8d8;stroke:#8f8f8f;stroke-width:1}"
@@ -407,27 +447,23 @@ static void handleKindle(AsyncWebServerRequest* req) {
            "<div class=\"lab\">" KD_T("Outside", "Навън") "</div><div class=\"");
     fmtTemp(buf, sizeof(buf), outT.value);
     p += bigClass(buf); p += F("\">"); p += buf;
-    p += F("<span class=\"deg\">&deg;</span></div><div class=\"sub\">");
+    p += F("<span class=\"deg\">&deg;</span>");
+    // Humidity rides on the temperature's baseline, a slash between them. It
+    // is the same measurement of the same air at the same instant, so a line
+    // break was putting a paragraph boundary through one reading.
+    if (outH.ok) {
+        p += F("<span class=\"slash\">/</span><span class=\"hum-o\">");
+        fmtInt(buf, sizeof(buf), outH.value); p += buf; p += F("%</span>");
+    }
+    p += F("</div><div class=\"sub\">");
     if (outT.ok) {
         float mn, mx;
         if (haveOut && windowExtremes(tOut, mn, mx)) {
-            // The 24 h span in words, so the night's low is not only readable
-            // off the chart.
+            // The 24 h span in figures, so the night's low is not only
+            // readable off the chart.
             fmtTemp(buf, sizeof(buf), mn); p += buf;
             p += F(KD_T(" to ", " до ")); fmtTemp(buf, sizeof(buf), mx); p += buf;
-            p += F(KD_T("&deg; today<br>", "&deg; днес<br>"));
-        }
-        if (outH.ok) { fmtInt(buf, sizeof(buf), outH.value); p += buf; p += F(KD_T("% humidity", "% влажност")); }
-        if (outH.ok && outP.ok) p += F(" &middot; ");
-        if (outP.ok) { fmtInt(buf, sizeof(buf), outP.value); p += buf; p += F(" hPa"); }
-        if (haveP) {
-            const Tendency t = pressureTendency(tPress);
-            if (t.have) {
-                p += F("<br>"); p += t.arrow; p += F(" "); p += t.word;
-                p += F(" <span class=\"dim\">(");
-                if (t.delta >= 0) p += F("+");
-                p += String(t.delta, 1); p += F(" hPa/3h)</span>");
-            }
+            p += F("&deg;");
         }
         p += F("<span class=\"dim\">");
         appendAge(p, outT.ts, now);
@@ -436,7 +472,26 @@ static void handleKindle(AsyncWebServerRequest* req) {
         p += F(KD_T("<span class=\"dim\">no reading &mdash; check the node</span>",
                     "<span class=\"dim\">няма данни &mdash; провери възела</span>"));
     }
-    p += F("</div></td><td width=\"50%\" class=\"sep\">");
+    p += F("</div>");
+
+    // Pressure gets its own size. The absolute figure is the one number here
+    // that a reader compares against memory rather than against the page, and
+    // at 15px it was set as a footnote to the humidity.
+    if (outP.ok) {
+        p += F("<div class=\"pres\">");
+        fmtInt(buf, sizeof(buf), outP.value); p += buf;
+        p += F("<span class=\"pres-u\"> hPa</span></div>");
+    }
+    if (haveP) {
+        const Tendency t = pressureTendency(tPress);
+        if (t.have) {
+            p += F("<div class=\"sub sub-t\">"); p += t.arrow; p += F(" "); p += t.word;
+            p += F(" <span class=\"dim\">(");
+            if (t.delta >= 0) p += F("+");
+            p += String(t.delta, 1); p += F(" hPa/3h)</span></div>");
+        }
+    }
+    p += F("</td><td width=\"50%\" class=\"sep\">");
 
     // Upper two thirds: the time. An e-ink panel on a shelf is read across a
     // room, and until now the only clock was 14px of grey at the top corner.
@@ -465,16 +520,15 @@ static void handleKindle(AsyncWebServerRequest* req) {
         fmtTemp(buf, sizeof(buf), inT.value); p += buf;
         p += F("<span class=\"in-d\">&deg;</span>");
         if (inH.ok) {
-            p += F("<span class=\"in-h\">");
-            fmtInt(buf, sizeof(buf), inH.value); p += buf;
-            p += F(KD_T("% humidity", "% влажност"));
-            p += F("<span class=\"dim\">");
-            appendAge(p, inT.ts, now);
-            p += F("</span></span>");
+            p += F("<span class=\"slash slash-i\">/</span><span class=\"hum-i\">");
+            fmtInt(buf, sizeof(buf), inH.value); p += buf; p += F("%</span>");
         }
+        p += F("<span class=\"in-age dim\">");
+        appendAge(p, inT.ts, now);
+        p += F("</span>");
     } else {
-        p += F(KD_T("<span class=\"in-h\" style=\"margin:0;color:#777\">no reading</span>",
-                    "<span class=\"in-h\" style=\"margin:0;color:#777\">няма данни</span>"));
+        p += F("<span class=\"in-age dim\">"
+               KD_T("no reading", "няма данни") "</span>");
     }
     p += F("</div></td></tr></table>");
 

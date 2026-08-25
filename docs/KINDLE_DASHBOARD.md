@@ -53,10 +53,30 @@ The right half is split about two-to-one:
 The inside 24-hour range went with the masthead. The dashed line on the chart
 already carries it, and it was the least-read figure on the page.
 
+### Temperature and humidity share a line
+
+`8.4° / 71%`, on one baseline, humidity at half the size. They are one
+measurement of one parcel of air at one instant, and a line break between them
+was putting a paragraph boundary through a single reading. The same pairing
+runs inside, at 40 px and 30 px.
+
+The slash forces a width check: `-12.4° / 100%` is the widest this line can
+get. A reading of four or more glyphs already drops to the smaller `.big4`
+face, and `.big4 .hum-o` brings the pair down with it — without that rule the
+humidity runs off the column in a hard frost. It is measured in the browser at
+the device's viewport, not estimated.
+
+### Pressure has its own size
+
+34 px, on its own line, with the tendency underneath unchanged. The absolute
+figure is the one number on the page a reader compares against memory rather
+than against the page, and at 15 px it was set as a footnote to the humidity.
+
 The two columns are different shapes, so their numerals are aligned by a fixed
 box height on both (`.big`, `.clock`) plus a 12 px nudge on the clock, which has
-no label above it to push it down. Getting this by eye is what made an earlier
-version look ragged; it is measured in the browser instead.
+no label above it to push it down. `.clock`'s height also sets where the divider
+falls — two thirds down the cell the left column sizes. Getting this by eye is
+what made an earlier version look ragged; it is measured in the browser instead.
 
 ### Language
 
@@ -130,6 +150,14 @@ exactly the excursion you want to see.
 Hours with no reading **break the line** rather than interpolating across the
 gap. A flat line through a four-hour outage reads as "it was steady", which is
 a lie the chart should not tell.
+
+Vertical rules every three hours give the eye something to count against. The
+hour labels are six-hourly — closer together they crowd — so between two of
+them there was nothing to carry a point on the curve down to. They are drawn
+first, so the band and the lines cover them, and lighter than the horizontals
+because they are scaffolding rather than data. `#d5d5d5` rather than something
+fainter: the panel quantises to 16 levels and a near-white rule rounds away to
+nothing.
 
 The grid fills as readings arrive: expect a partial chart for the first day
 after a reboot, and the section says so rather than drawing an empty box.
