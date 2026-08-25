@@ -279,9 +279,31 @@ static void appendWeek(String& out, uint32_t now) {
 
     const int todayIdx = (tmv.tm_wday + 6) % 7;      // 0 = Monday
 
+    // The month, set as a section heading like the two above it. The day
+    // numbers alone say which day it is but not which month, which the
+    // masthead used to answer.
+    //
+    // A week can straddle two months, and then one name is a lie about half
+    // the row — so name both. Taken from Monday and Sunday rather than from
+    // today, since today may be either side of the boundary.
+    struct tm mv, sv;
+    const time_t monday = t - (time_t)todayIdx * 86400;
+    const time_t sunday = monday + 6 * 86400;
+    if (localtime_r(&monday, &mv) != nullptr && localtime_r(&sunday, &sv) != nullptr) {
+        out += F("<div class=\"rule\"></div><div class=\"sec sec-wk\">");
+        out += kdMonth(mv.tm_mon);
+        if (sv.tm_mon != mv.tm_mon) {
+            out += F(" &ndash; ");
+            out += kdMonth(sv.tm_mon);
+        }
+        out += F("</div>");
+    } else {
+        out += F("<div class=\"rule\"></div>");
+    }
+
     // Walk back to Monday in whole days. Doing it on the epoch rather than on
     // tm_mday keeps month and year ends correct for free.
-    out += F("<div class=\"rule\"></div><table class=\"wk\"><tr>");
+    out += F("<table class=\"wk\"><tr>");
     for (int i = 0; i < 7; i++) {
         const time_t day = t + (time_t)(i - todayIdx) * 86400;
         struct tm dv;
@@ -400,7 +422,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
            ".in-age{font-size:13px;letter-spacing:0;margin-left:10px}"
            /* Three rules on the page, so a few px each is what keeps the
               footer above the 800px fold. Measured, not guessed. */
-           ".rule{border-top:1px solid #aaa;margin:18px 0 13px}"
+           ".rule{border-top:1px solid #aaa;margin:14px 0 10px}"
            ".sec{font-size:12px;letter-spacing:4px;text-transform:uppercase;"
            "margin-bottom:8px;color:#777}"
            ".ico{vertical-align:top;padding-top:4px}"
@@ -425,6 +447,10 @@ static void handleKindle(AsyncWebServerRequest* req) {
            ".key td{padding-top:2px}"
            ".note{font-size:15px;font-style:italic;text-align:center;"
            "padding:36px 0;color:#777}"
+           /* Tighter under its heading than the two sections above: the
+              strip is a row of blocks, not a paragraph, and the extra gap
+              was what pushed the footer below the fold. */
+           ".sec-wk{margin-bottom:3px}"
            ".wk{margin-top:2px}"
            ".wd{width:14.28%;text-align:center;padding:8px 0 7px;background:#f4f4f4}"
            ".wd-we{background:#e4e4e4}"

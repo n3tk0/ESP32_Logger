@@ -247,9 +247,15 @@ real thing, which is one more reason it is the default.
 
 ## Week strip
 
-The foot of the page carries the current week with today inverted. It fills
-space that was empty at 695 of 800 px and answers the question a static panel
-on a shelf is otherwise bad at: what day is it.
+The foot of the page carries the current week with today inverted, under a
+month heading set like the two section headings above it. It answers the
+question a static panel on a shelf is otherwise bad at: what day is it.
+
+The day numbers alone say which day but not which month, which is what the
+masthead used to answer. A week can straddle two months, and then one name is
+wrong about half the row, so both are named — `НОЕМВРИ – ДЕКЕМВРИ`. They are
+read off Monday and Sunday rather than off today, because today may be either
+side of the boundary.
 
 Monday-first. `tm_wday` counts from Sunday, so the column index is
 `(wday + 6) % 7`; getting that backwards misplaces today on Sundays only,

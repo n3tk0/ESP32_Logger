@@ -17,8 +17,8 @@
 // newlib has no bg_BG locale to switch to — setlocale() there accepts only
 // "C". So the weekday names live here.
 //
-// The long weekday and month tables that used to sit alongside these went with
-// the masthead; `git log` has them if a date line ever wants a home again.
+// The long weekday names that used to sit alongside these went with the
+// masthead; `git log` has them if a date line ever wants a home again.
 //
 // CYRILLIC ON THE TARGET
 // ----------------------
@@ -51,6 +51,22 @@ inline const char* kdWeekdayShort(int mondayIdx) {
 #endif
     };
     return N[(mondayIdx < 0 || mondayIdx > 6) ? 0 : mondayIdx];
+}
+
+// tm_mon counts from January. Set uppercase by CSS, so these stay lower case —
+// Bulgarian month names are not capitalised in running text, and text-transform
+// is what makes the section heading match the two above it.
+inline const char* kdMonth(int mon) {
+    static const char* N[12] = {
+#if defined(KINDLE_LANG_BG)
+        "януари", "февруари", "март", "април", "май", "юни",
+        "юли", "август", "септември", "октомври", "ноември", "декември"
+#else
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+#endif
+    };
+    return N[(mon < 0 || mon > 11) ? 0 : mon];
 }
 
 // Weekday abbreviation for a forecast column, N days ahead of `wday`.
