@@ -16,9 +16,10 @@
 #  include "../modules/ForecastModule.h"
 #endif
 
-// Layout constants, in CSS pixels. 600 wide is the Paperwhite 3's usable
-// viewport; everything is sized off that rather than percentages, because
-// percentage widths inside tables behave inconsistently on that browser.
+// Layout constants, in CSS pixels. 600 is the width this page pins with its
+// own viewport meta, not a width the device reports — see KindleDashboard.h.
+// Everything is sized off it rather than in percentages, because percentage
+// widths inside tables behave inconsistently on that browser.
 static constexpr int PAGE_W  = 600;
 static constexpr int CHART_W = 560;
 static constexpr int CHART_H = 200;
@@ -325,15 +326,16 @@ static void appendWeek(String& out, uint32_t now) {
 // The page
 // ---------------------------------------------------------------------------
 // Set like a printed almanac rather than a screen UI, because the medium is
-// paper in every way that matters: reflective, static, monochrome, redrawn in
-// full or not at all. So — rules instead of boxes, a masthead instead of a
-// header bar, letterspaced small caps instead of chips, and the reader's own
-// serif faces (Bookerly and Caecilia ship on the device) instead of a webfont
-// that would cost bytes to render worse.
+// paper in every way that matters: reflective, static, greyscale, redrawn in
+// full or not at all. So — rules instead of boxes, letterspaced small caps
+// instead of chips, and the reader's own serif faces (Bookerly and Caecilia
+// ship on the device) instead of a webfont that would cost bytes to render
+// worse.
 //
-// Nothing here uses flexbox, grid, CSS variables or calc(): the Paperwhite 3's
-// browser is a 2012 WebKit and supports none of them. Tables and blocks with
-// literal pixel values are what survives.
+// Nothing here uses flexbox, grid, CSS variables or calc(). A current PQ94WIF
+// on firmware 5.16.4 or later would support them; an older one would not, and
+// tables with literal pixel values render the same on both. See the header for
+// why that trade is made in favour of the old browser.
 static void handleKindle(AsyncWebServerRequest* req) {
     const Latest outT = latestOf(KINDLE_OUTDOOR_SENSOR, "temperature");
     const Latest outH = latestOf(KINDLE_OUTDOOR_SENSOR, "humidity");

@@ -6,12 +6,12 @@ a short forecast for the part a sensor cannot know.
 
 Point the Kindle's experimental browser at `http://<collector-ip>/kindle`.
 
-![The dashboard rendered at the Paperwhite 3's viewport](images/kindle-dashboard.png)
+![The dashboard rendered at the target viewport](images/kindle-dashboard.png)
 
-Rendered at the device's real viewport — 600×800 CSS px at devicePixelRatio 2 —
-through a greyscale filter, which is how every layout decision in this document
-was checked. The figures are synthetic; the stylesheet is extracted from
-`KindleDashboard.cpp` at render time so the picture cannot drift from the code.
+Rendered at 600×800 CSS px through a greyscale filter, which is how every
+layout decision in this document was checked. The figures are synthetic; the
+stylesheet is extracted from `KindleDashboard.cpp` at render time so the picture
+cannot drift from the code.
 
 ## Enabling it
 
@@ -55,20 +55,45 @@ reading is missed. Making them editable at runtime means discarding 24 hours of
 history on every save, which is a worse trade than editing one line and
 reflashing on the rare occasion a sensor is renamed.
 
-## What the target browser can't do
+## The target
 
-The Paperwhite 3 (model PQ94WIF, 2015) runs a WebKit build from around 2012.
-No `fetch`, no `Promise`, no ES6, no flexbox, no CSS grid. So the page:
+**Kindle Paperwhite 4** — 10th generation, 2018, model **PQ94WIF** — and any
+other reader with the same 6" panel: 1072×1448 at 300 ppi.
+
+> An earlier version of this document called PQ94WIF a 7th-generation 2015
+> Paperwhite 3. That was wrong; it is the 10th generation. Nothing in the
+> layout depended on it — both readers have the same panel — but the browser
+> claim below did.
+
+### Where 600×800 comes from
+
+Not from a reported viewport. The page pins its own layout width with
+`<meta name="viewport" content="width=600">`, so the browser scales 600 CSS px
+across the panel's 1072 device px — about 1.79× — and the 1448 px of height
+works out to roughly **810 CSS px** at that same scale. That is the entire
+derivation, and it is why the page is measured against an 800 px budget: it
+holds for any 1072×1448 reader whatever `devicePixelRatio` reports.
+
+### Why it is built for an old browser anyway
+
+The Experimental Browser is WebKit, but *which* WebKit depends on firmware.
+Older builds report a user agent in the 531–534 range — 2010–2011 vintage, with
+no `fetch`, no `Promise`, no ES6, no flexbox, no CSS grid. Firmware **5.16.4**
+modernised it on the 10th and 11th generation, so an up-to-date PQ94WIF would
+in fact handle rather more than this page uses.
+
+It is still built for the old one, because doing so costs nothing and the
+alternative is a page whose correctness depends on the reader's firmware
+version. So the page:
 
 - is rendered server-side and ships **zero JavaScript**;
-- lays out with tables and blocks, because those work;
+- lays out with tables and blocks, because those work on both;
 - draws the trend chart as **inline SVG path data** — no canvas, no charting
   library, nothing to execute;
 - refreshes with `<meta http-equiv="refresh">`, not a timer.
 
-The panel is 1072×1448 at 300 ppi, but the browser reports roughly **600×800
-CSS pixels** at devicePixelRatio 2, and that is what the layout targets. Newer
-readers have more room and get more margin.
+None of that is a sacrifice on this medium. A panel that repaints in full or
+not at all has no use for a script that updates part of itself.
 
 ## The top of the page
 

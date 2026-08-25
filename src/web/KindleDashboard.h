@@ -5,28 +5,50 @@
 //
 // TARGET
 // ------
-// Kindle Paperwhite 3 (model PQ94WIF, 2015) and anything newer. The panel is
-// 1072×1448 at 300 ppi, but the browser reports roughly 600×800 CSS pixels at
-// devicePixelRatio 2, and 600×800 is what this page is laid out for. Newer
-// readers have more room and simply get more margin.
+// Kindle Paperwhite 4 — 10th generation, 2018, model PQ94WIF — and any other
+// reader with the same 6" panel: 1072×1448 at 300 ppi.
 //
-// WHAT THAT BROWSER CANNOT DO
-// ---------------------------
-// It is a WebKit build from around 2012. No fetch, no Promise, no ES6, no
-// flexbox, no CSS grid, no web fonts worth the bytes. So:
+// WHERE 600×800 COMES FROM
+// ------------------------
+// It is not a reported viewport. The page pins the layout width itself with
+// <meta name="viewport" content="width=600">, so the browser scales 600 CSS px
+// across the panel's 1072 device px — about 1.79× — and the 1448 px of height
+// then works out to roughly 810 CSS px at that same scale. That is the whole
+// derivation, and it is why the page is measured against an 800 px budget: it
+// holds for any 1072×1448 reader regardless of what devicePixelRatio says.
+//
+// WHY IT IS BUILT FOR AN OLD BROWSER ANYWAY
+// -----------------------------------------
+// The Experimental Browser is WebKit, but which WebKit depends on firmware.
+// Older builds report a user agent in the 531–534 range, which is 2010–2011
+// vintage: no fetch, no Promise, no ES6, no flexbox, no CSS grid. Firmware
+// 5.16.4 modernised it on the 10th and 11th generation, so an up-to-date
+// PQ94WIF would in fact handle a good deal more than this page uses.
+//
+// It is still built for the old one, because the cost of doing so is zero and
+// the alternative is a page whose correctness depends on the reader's firmware
+// version. So:
 //
 //   • the page is rendered server-side and ships zero JavaScript;
-//   • layout is tables and blocks, because those are what actually work;
+//   • layout is tables and blocks, because those work everywhere;
 //   • the trend chart is inline SVG, drawn here as path data — no canvas,
 //     no charting library, nothing to execute;
 //   • it refreshes with <meta http-equiv="refresh">, not a timer.
 //
-// WHY GRAYSCALE IS NOT JUST A PALETTE CHOICE
-// ------------------------------------------
-// The panel is 16-level grayscale, and mid greys dither into visible noise at
-// this size. Everything here is black, white, or one of two greys chosen to
-// stay distinguishable after dithering. Two lines on one chart are told apart
-// by dash pattern, not by shade, because shade does not survive.
+// None of that is a sacrifice on this medium. A panel that repaints in full or
+// not at all has no use for a script that updates part of itself.
+//
+// THE GREYS
+// ---------
+// The panel has 16 real grey levels and the page uses six tones plus two
+// washes. An earlier version of this file argued for pure black and white on
+// the grounds that mid greys dither into noise at this size; that was wrong.
+// The dithering worth avoiding comes from gradients and from tones too close
+// together, not from flat, well-separated fills.
+//
+// The two chart lines are still told apart by dash pattern as well as shade,
+// because redundant coding costs nothing and survives a panel with its
+// contrast turned down.
 //
 // REFRESH CADENCE
 // ---------------
