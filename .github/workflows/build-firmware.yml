@@ -10,7 +10,9 @@
 #   - firmware-esp32c3.bin           (XIAO ESP32-C3, 4MB, production target)
 #   - firmware-esp32c3_supermini.bin (ESP32-C3 Super Mini, 4MB, native USB JTAG)
 #   - firmware-esp32s3.bin           (ESP32-S3 DevKitC-1, 8MB)
+#   - firmware-xiao_esp32s3.bin      (Seeed XIAO ESP32-S3, 8MB + 8MB PSRAM)
 #   - firmware-esp32s3_n16r8.bin     (ESP32-S3 N16R8, 16MB + 8MB octal PSRAM)
+#   - firmware-node-esp8266.bin      (ESP8266 satellite node, built from node/)
 
 name: Build Firmware
 
@@ -23,6 +25,7 @@ on:
       - '*.ino'
       - 'platformio.ini'
       - 'partitions_balanced.csv'
+      - 'node/**'
       - '.github/workflows/build-firmware.yml'
   pull_request:
     paths:
@@ -32,6 +35,7 @@ on:
       - '*.ino'
       - 'platformio.ini'
       - 'partitions_balanced.csv'
+      - 'node/**'
   workflow_dispatch:
   release:
     types: [created]
@@ -106,6 +110,43 @@ jobs:
         with:
           name: firmware-${{ matrix.name }}
           path: output/firmware-${{ matrix.name }}.bin
+
+  # The ESP8266 satellite is a separate PlatformIO project with its own
+  # platformio.ini, so `pio run` in the repo root never touches it and the
+  # matrix above cannot cover it.  Without this job a break in node/ ships
+  # unnoticed -- including one caused by editing the BME280_Mini driver the
+  # two firmwares share.
+  build-node:
+    name: build (esp8266 node)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build node firmware
+        working-directory: node
+        run: pio run
+
+      - name: Report size
+        working-directory: node
+        run: |
+          SIZE=$(stat -c%s .pio/build/nodemcuv2/firmware.bin)
+          echo "=== esp8266 node ==="
+          echo "Firmware size: $(( SIZE / 1024 )) KB"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-node-esp8266
+          path: node/.pio/build/nodemcuv2/firmware.bin
 
   attach-to-release:
     needs: build
