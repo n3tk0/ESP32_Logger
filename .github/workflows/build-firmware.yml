@@ -189,9 +189,46 @@ jobs:
   # matrix above cannot cover it.  Without this job a break in node/ ships
   # unnoticed -- including one caused by editing the BME280_Mini driver the
   # two firmwares share.
+  #
+  # The sensor set is chosen at build time, so building only the default
+  # (BMx280) would check one of seven shapes.  The matrix walks the
+  # combinations that exercise a different code path: each driver at least
+  # once, both pulse modes, and the two selections that require disabling the
+  # default sensor.
   build-node:
-    name: build (esp8266 node)
+    name: build (esp8266 node, ${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            disable: ''
+            flags: ''
+          - name: bme688
+            disable: NODE_SENSOR_BMX280
+            flags: -DNODE_SENSOR_BME688
+          - name: ds18b20-only
+            disable: NODE_SENSOR_BMX280
+            flags: -DNODE_SENSOR_DS18B20 -DNODE_DS18B20_METRIC='"temperature"'
+          - name: light-and-rain
+            disable: ''
+            flags: -DNODE_SENSOR_BH1750 -DNODE_SENSOR_PULSE
+          - name: water-flow
+            disable: ''
+            flags: -DNODE_SENSOR_PULSE -DPULSE_MODE_RAIN=0
+          - name: dust
+            disable: ''
+            flags: -DNODE_SENSOR_SDS011
+          # Nine metrics against the collector's eight-per-tick ceiling. This
+          # entry exists to prove the guard fires, not to ship a config --
+          # expect_warning turns a missing warning into a failure, so the
+          # check cannot rot into a no-op the way an unasserted warning would.
+          - name: over-budget
+            disable: ''
+            flags: -DNODE_SENSOR_BH1750 -DNODE_SENSOR_SDS011 -DNODE_SENSOR_PULSE
+            expect_warning: 'true'
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -204,18 +241,64 @@ jobs:
       - name: Install PlatformIO
         run: pip install --upgrade platformio
 
+      # The toggles are #ifndef-guarded in a header, so -U cannot switch one
+      # off -- the header defines it right back, and PlatformIO emits every -D
+      # before any -U regardless.  Comment the block out instead, and fail if
+      # the pattern is gone rather than silently building the default set.
+      - name: Disable default sensors (${{ matrix.disable }})
+        if: matrix.disable != ''
+        run: |
+          python3 - <<'EOF'
+          import os, re, sys
+          p = 'node/src/node_config.h'
+          s = open(p).read()
+          for name in os.environ['DISABLE'].split():
+              pat = re.compile(r'(?m)^#ifndef ' + name + r'\n#  define ' + name
+                               + r'([^\n]*)\n#endif')
+              s, k = pat.subn(lambda m: '//#ifndef ' + name + '\n//#  define '
+                              + name + m.group(1) + '\n//#endif', s, count=1)
+              if k != 1:
+                  sys.exit(f'node_config.h: could not disable {name} '
+                           f'(matched {k} times) -- the toggle block changed shape')
+              print('disabled', name)
+          open(p, 'w').write(s)
+          EOF
+        env:
+          DISABLE: ${{ matrix.disable }}
+
       - name: Build node firmware
         working-directory: node
-        run: pio run
+        env:
+          PLATFORMIO_BUILD_FLAGS: ${{ matrix.flags }}
+        run: |
+          # pipefail is NOT on by default in an Actions `run` block, so without
+          # it `pio run | tee` reports tee's exit status and a failed build
+          # would pass this step.
+          set -o pipefail
+          pio run 2>&1 | tee build.log
+
+      - name: Check the metric-budget guard fired
+        if: matrix.expect_warning == 'true'
+        working-directory: node
+        run: |
+          if grep -q "emits more than 8 metrics" build.log; then
+            echo "metric-budget warning present, as expected"
+          else
+            echo "::error::Set exceeds the 8-metric ceiling but node_config.h did not warn - the guard has stopped working"
+            exit 1
+          fi
 
       - name: Report size
         working-directory: node
         run: |
           SIZE=$(stat -c%s .pio/build/nodemcuv2/firmware.bin)
-          echo "=== esp8266 node ==="
+          echo "=== esp8266 node (${{ matrix.name }}) ==="
           echo "Firmware size: $(( SIZE / 1024 )) KB"
 
+      # Only the default selection is a shippable artifact; the rest exist to
+      # prove they compile.
       - name: Upload artifact
+        if: matrix.name == 'default'
         uses: actions/upload-artifact@v4
         with:
           name: firmware-node-esp8266
