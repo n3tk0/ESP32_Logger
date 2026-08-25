@@ -42,6 +42,9 @@ struct NodeSettings {
     uint8_t  i2cSda        = 4;
     uint8_t  i2cScl        = 5;
     uint8_t  oneWirePin    = 12;
+    uint8_t  pulsePin      = 13;
+    uint8_t  sdsRx         = 14;
+    uint8_t  sdsTx         = 13;
 
     /// True once an SSID and a collector host are both present — the minimum
     /// for the node to have anything to do. Anything less and the portal has

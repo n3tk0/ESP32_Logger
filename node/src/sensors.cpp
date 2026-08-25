@@ -33,7 +33,12 @@
 #  include "src/drivers/DS18B20_Mini.h"
 #endif
 
-#if defined(NODE_SENSOR_BMX280) || defined(NODE_SENSOR_BME688)
+#if defined(NODE_SENSOR_SDS011)
+#  include <SoftwareSerial.h>
+#endif
+
+#if defined(NODE_SENSOR_BMX280) || defined(NODE_SENSOR_BME688) || \
+    defined(NODE_SENSOR_BH1750)
 #  define NODE_HAS_I2C 1
 #endif
 
@@ -51,6 +56,45 @@ static bool        s_bme688Ok = false;
 #if defined(NODE_SENSOR_DS18B20)
 static DS18B20_Mini s_ds;
 static int          s_dsCount = 0;
+#endif
+
+#if defined(NODE_SENSOR_BH1750)
+static bool s_bhOk = false;
+// Continuous high-resolution mode; 1.2 counts per lux, per the datasheet and
+// matching the collector's BH1750 plugin so the two agree.
+static constexpr uint8_t  BH1750_CMD_POWER_ON  = 0x01;
+static constexpr uint8_t  BH1750_CMD_CONT_HRES = 0x10;
+static constexpr float    BH1750_DIVIDER       = 1.2f;
+static uint8_t            s_bhAddr             = BH1750_ADDR;
+#endif
+
+#if defined(NODE_SENSOR_SDS011)
+static SoftwareSerial s_sds;
+static bool  s_sdsOk    = false;
+static float s_sdsPm25  = NAN;
+static float s_sdsPm10  = NAN;
+#endif
+
+#if defined(NODE_SENSOR_PULSE)
+// Touched by the ISR, so volatile and read under a brief interrupt lock.
+static volatile uint32_t s_pulses      = 0;
+static volatile uint32_t s_lastPulseUs = 0;
+static uint32_t          s_lastDrainMs = 0;
+static float             s_pulseTotal  = 0.0f;
+static bool              s_pulseOk     = false;
+
+// Must live in IRAM: the ESP8266 services interrupts while the flash cache is
+// busy, and an ISR in flash faults the moment it is called during a read.
+static void IRAM_ATTR pulseIsr() {
+    const uint32_t now = micros();
+#if PULSE_DEBOUNCE_US > 0
+    // Contact bounce on a reed switch arrives as a burst; anything closer
+    // than the debounce window is the same tip.
+    if ((uint32_t)(now - s_lastPulseUs) < PULSE_DEBOUNCE_US) return;
+#endif
+    s_lastPulseUs = now;
+    s_pulses++;
+}
 #endif
 
 static char s_describe[64] = "none";
@@ -152,6 +196,72 @@ int sensorsBegin(const NodeSettings& s) {
     }
 #endif
 
+#if defined(NODE_SENSOR_BH1750)
+    if (!s_bhOk) {
+        // ADDR low is 0x23, ADDR high 0x5C. Probe the configured one first,
+        // then the other, for the same reason the BMx280 does.
+        const uint8_t cand[2] = { BH1750_ADDR,
+                                  (uint8_t)(BH1750_ADDR == 0x23 ? 0x5C : 0x23) };
+        for (uint8_t i = 0; i < 2 && !s_bhOk; i++) {
+            Wire.beginTransmission(cand[i]);
+            Wire.write(BH1750_CMD_POWER_ON);
+            if (Wire.endTransmission() == 0) {
+                Wire.beginTransmission(cand[i]);
+                Wire.write(BH1750_CMD_CONT_HRES);
+                if (Wire.endTransmission() == 0) {
+                    s_bhOk   = true;
+                    s_bhAddr = cand[i];
+                    // First continuous conversion takes up to 180 ms.
+                    delay(200);
+                    Serial.printf("[sensor] BH1750 at 0x%02X\n", cand[i]);
+                }
+            }
+        }
+        if (!s_bhOk) Serial.println("[sensor] no BH1750 on either address");
+    }
+    if (s_bhOk) {
+        ok++;
+        strncat(s_describe, s_describe[0] ? ", BH1750" : "BH1750",
+                sizeof(s_describe) - strlen(s_describe) - 1);
+    }
+#endif
+
+#if defined(NODE_SENSOR_SDS011)
+    if (!s_sdsOk) {
+        s_sds.begin(9600, SWSERIAL_8N1, s.sdsRx, s.sdsTx, false);
+        // No handshake to confirm: the SDS011 simply streams a frame a second
+        // once powered. Treat the port as up and let readiness be decided by
+        // whether a valid frame arrives before the first post.
+        s_sdsOk = true;
+        Serial.printf("[sensor] SDS011 listening on RX=GPIO%u TX=GPIO%u\n",
+                      s.sdsRx, s.sdsTx);
+    }
+    if (s_sdsOk) {
+        ok++;
+        strncat(s_describe, s_describe[0] ? ", SDS011" : "SDS011",
+                sizeof(s_describe) - strlen(s_describe) - 1);
+    }
+#endif
+
+#if defined(NODE_SENSOR_PULSE)
+    if (!s_pulseOk) {
+        pinMode(s.pulsePin, INPUT_PULLUP);
+        attachInterrupt(digitalPinToInterrupt(s.pulsePin), pulseIsr, FALLING);
+        s_lastDrainMs = millis();
+        s_pulseOk     = true;
+        Serial.printf("[sensor] pulse input on GPIO%u (%s, %g per pulse)\n",
+                      s.pulsePin,
+                      PULSE_MODE_RAIN ? "rain" : "flow",
+                      (double)PULSE_UNITS_PER_PULSE);
+    }
+    if (s_pulseOk) {
+        ok++;
+        strncat(s_describe, s_describe[0] ? (PULSE_MODE_RAIN ? ", rain" : ", flow")
+                                          : (PULSE_MODE_RAIN ? "rain"   : "flow"),
+                sizeof(s_describe) - strlen(s_describe) - 1);
+    }
+#endif
+
     if (s_describe[0] == '\0') {
         strncpy(s_describe, "none", sizeof(s_describe) - 1);
         s_describe[sizeof(s_describe) - 1] = '\0';
@@ -169,6 +279,15 @@ bool sensorsReady() {
 #endif
 #if defined(NODE_SENSOR_DS18B20)
     if (s_dsCount > 0) n++;
+#endif
+#if defined(NODE_SENSOR_BH1750)
+    if (s_bhOk)       n++;
+#endif
+#if defined(NODE_SENSOR_SDS011)
+    if (s_sdsOk)      n++;
+#endif
+#if defined(NODE_SENSOR_PULSE)
+    if (s_pulseOk)    n++;
 #endif
     return n > 0;
 }
@@ -221,6 +340,83 @@ int sensorsRead(const NodeSettings& s, NodeReading* out, int maxOut) {
         add(out, n, maxOut, "gas_resistance", s_bme688.gas_resistance, "Ohm");
         add(out, n, maxOut, "pressure_sea",
             toSeaLevel(hPa, s_bme688.temperature, s.altitudeM), "hPa");
+    }
+#endif
+
+#if defined(NODE_SENSOR_BH1750)
+    if (s_bhOk) {
+        Wire.requestFrom((int)s_bhAddr, 2);
+        if (Wire.available() >= 2) {
+            const uint16_t raw = ((uint16_t)Wire.read() << 8) | Wire.read();
+            add(out, n, maxOut, "lux", (float)raw / BH1750_DIVIDER, "lx");
+        }
+    }
+#endif
+
+#if defined(NODE_SENSOR_SDS011)
+    if (s_sdsOk) {
+        // Drain whatever arrived since the last post and keep the newest
+        // complete frame. The sensor streams at 1 Hz and the node posts once
+        // a minute, so the buffer holds many; the latest is the one to send.
+        // Frame: AA C0 pm25L pm25H pm10L pm10H id1 id2 sum AB, values in
+        // tenths of a ug/m3 — matching the collector's SDS011 plugin.
+        static uint8_t frame[10];
+        static uint8_t pos = 0;
+        while (s_sds.available()) {
+            const uint8_t b = (uint8_t)s_sds.read();
+            if (pos == 0 && b != 0xAA) continue;
+            frame[pos++] = b;
+            if (pos < 10) continue;
+            pos = 0;
+            if (frame[1] != 0xC0 || frame[9] != 0xAB) continue;
+            uint8_t sum = 0;
+            for (int i = 2; i <= 7; i++) sum += frame[i];
+            if (sum != frame[8]) continue;          // corrupt frame, drop it
+            s_sdsPm25 = (float)((frame[3] << 8) | frame[2]) / 10.0f;
+            s_sdsPm10 = (float)((frame[5] << 8) | frame[4]) / 10.0f;
+        }
+        add(out, n, maxOut, "pm25", s_sdsPm25, "ug/m3");
+        add(out, n, maxOut, "pm10", s_sdsPm10, "ug/m3");
+    }
+#endif
+
+#if defined(NODE_SENSOR_PULSE)
+    if (s_pulseOk) {
+        // Take and clear the count in one interrupt-off window so a pulse
+        // arriving mid-read is counted exactly once — in the next interval
+        // rather than neither.
+        noInterrupts();
+        const uint32_t pulses = s_pulses;
+        s_pulses = 0;
+        interrupts();
+
+        const uint32_t nowMs   = millis();
+        const uint32_t elapsed = nowMs - s_lastDrainMs;   // wrap-safe
+        s_lastDrainMs = nowMs;
+
+        const float units = (float)pulses * PULSE_UNITS_PER_PULSE;
+        s_pulseTotal += units;
+
+        // Rate as an average over the interval just ended, not extrapolated
+        // from the gap between the last two pulses. For a node posting once a
+        // minute the average is the honest number; extrapolation would report
+        // a downpour from one tip that happened to land near the deadline.
+        float rate = NAN;
+        if (elapsed > 0) {
+#if PULSE_MODE_RAIN
+            rate = units * 3600000.0f / (float)elapsed;    // mm per hour
+#else
+            rate = units * 60000.0f / (float)elapsed;      // litres per minute
+#endif
+        }
+
+#if PULSE_MODE_RAIN
+        add(out, n, maxOut, "rain_rate",  rate,          "mm/h");
+        add(out, n, maxOut, "rain_total", s_pulseTotal,  "mm");
+#else
+        add(out, n, maxOut, "flow_rate",  rate,          "L/min");
+        add(out, n, maxOut, "flow_total", s_pulseTotal,  "L");
+#endif
     }
 #endif
 

@@ -30,6 +30,9 @@ static void applyDefaults(NodeSettings& s) {
     s.i2cSda     = I2C_SDA_PIN;
     s.i2cScl     = I2C_SCL_PIN;
     s.oneWirePin = ONEWIRE_PIN;
+    s.pulsePin   = PULSE_PIN;
+    s.sdsRx      = SDS011_RX_PIN;
+    s.sdsTx      = SDS011_TX_PIN;
 
     // The placeholder SSID from node_config.h is not a network. Treating it
     // as one would make isComplete() true and send the node into a retry loop
@@ -80,6 +83,9 @@ bool settingsLoad(NodeSettings& out) {
     out.i2cSda     = doc["i2cSda"]     | out.i2cSda;
     out.i2cScl     = doc["i2cScl"]     | out.i2cScl;
     out.oneWirePin = doc["oneWirePin"] | out.oneWirePin;
+    out.pulsePin   = doc["pulsePin"]   | out.pulsePin;
+    out.sdsRx      = doc["sdsRx"]      | out.sdsRx;
+    out.sdsTx      = doc["sdsTx"]      | out.sdsTx;
 
     return true;
 }
@@ -99,6 +105,9 @@ bool settingsSave(const NodeSettings& s) {
     doc["i2cSda"]     = s.i2cSda;
     doc["i2cScl"]     = s.i2cScl;
     doc["oneWirePin"] = s.oneWirePin;
+    doc["pulsePin"]   = s.pulsePin;
+    doc["sdsRx"]      = s.sdsRx;
+    doc["sdsTx"]      = s.sdsTx;
 
     // Temp file + rename: a brownout partway through leaves the previous
     // config intact rather than a truncated one. Writing CFG_PATH directly

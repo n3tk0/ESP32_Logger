@@ -84,12 +84,76 @@
 //#ifndef NODE_SENSOR_DS18B20
 //#  define NODE_SENSOR_DS18B20       // DS18B20 (1-Wire), up to 8 on one pin
 //#endif
+//#ifndef NODE_SENSOR_BH1750
+//#  define NODE_SENSOR_BH1750        // BH1750 ambient light (I2C) -> lux
+//#endif
+//#ifndef NODE_SENSOR_SDS011
+//#  define NODE_SENSOR_SDS011        // SDS011 particulate (UART) -> pm25, pm10
+//#endif
+//#ifndef NODE_SENSOR_PULSE
+//#  define NODE_SENSOR_PULSE         // Reed/hall pulse input -> rain or water flow
+//#endif
 
 // BMX280 and BME688 do the same job and publish the same metric names, so
 // enabling both would have them overwrite each other in the collector's
 // ingest table, which is keyed by (node, metric). They are alternatives.
 #if defined(NODE_SENSOR_BMX280) && defined(NODE_SENSOR_BME688)
 #  error "Enable NODE_SENSOR_BMX280 or NODE_SENSOR_BME688, not both — they publish the same metrics"
+#endif
+
+// ── Metric budget ───────────────────────────────────────────────────────────
+// The collector drains a remote node through the ordinary plugin path, and
+// SensorManager hands every plugin a fixed array of 8 readings per tick
+// (MAX_METRICS_PER_TICK). A node publishing more than that is not an error
+// anywhere — the surplus is simply not copied, which is exactly the kind of
+// silent loss that is painful to diagnose from the dashboard end.
+//
+// So count what this build will emit and say so at compile time. How many
+// DS18B20 probes are on the wire cannot be known here; set
+// NODE_DS18B20_EXPECTED if you run more than one.
+#ifndef NODE_DS18B20_EXPECTED
+#  define NODE_DS18B20_EXPECTED 1
+#endif
+
+// Per-sensor metric counts. Spelled out with #ifdef rather than defined()
+// inside the sum: using defined() in a macro body is undefined behaviour and
+// GCC warns about it (-Wexpansion-to-defined).
+#ifdef NODE_SENSOR_BMX280
+#  define NODE_MC_BMX280  4      // temperature, humidity, pressure, pressure_sea
+#else
+#  define NODE_MC_BMX280  0
+#endif
+#ifdef NODE_SENSOR_BME688
+#  define NODE_MC_BME688  5      // the above plus gas_resistance
+#else
+#  define NODE_MC_BME688  0
+#endif
+#ifdef NODE_SENSOR_BH1750
+#  define NODE_MC_BH1750  1      // lux
+#else
+#  define NODE_MC_BH1750  0
+#endif
+#ifdef NODE_SENSOR_SDS011
+#  define NODE_MC_SDS011  2      // pm25, pm10
+#else
+#  define NODE_MC_SDS011  0
+#endif
+#ifdef NODE_SENSOR_PULSE
+#  define NODE_MC_PULSE   2      // rate, total
+#else
+#  define NODE_MC_PULSE   0
+#endif
+#ifdef NODE_SENSOR_DS18B20
+#  define NODE_MC_DS18B20 NODE_DS18B20_EXPECTED
+#else
+#  define NODE_MC_DS18B20 0
+#endif
+
+#define NODE_METRIC_COUNT (NODE_MC_BMX280 + NODE_MC_BME688 + NODE_MC_BH1750 + \
+                           NODE_MC_SDS011 + NODE_MC_PULSE  + NODE_MC_DS18B20)
+
+#if NODE_METRIC_COUNT > 8
+#  warning "This sensor set emits more than 8 metrics; the collector copies only the first 8 per tick and drops the rest silently. Split the sensors across two nodes, or trim the set."
 #endif
 
 // ── I2C pins ────────────────────────────────────────────────────────────────
@@ -130,6 +194,68 @@
 // multi-probe suffix needs the room.
 #ifndef NODE_DS18B20_METRIC
 #  define NODE_DS18B20_METRIC "probe_temp"
+#endif
+
+// ── BH1750 (light) ──────────────────────────────────────────────────────────
+// 0x23 with ADDR low (the usual breakout), 0x5C with ADDR high. Shares the
+// I2C pins above.
+#ifndef BH1750_ADDR
+#  define BH1750_ADDR 0x23
+#endif
+
+// ── SDS011 (particulate) ────────────────────────────────────────────────────
+// The ESP8266's only hardware UART is the console, so the SDS011 is read over
+// SoftwareSerial. 9600 baud is slow enough for that to be reliable, but the
+// pins must be interrupt-capable: GPIO16 cannot be used for RX.
+//
+// D5 = GPIO14, D7 = GPIO13. Wire the SDS011's TXD to RX_PIN.
+// TX_PIN is only needed to put the sensor into duty-cycle mode; leave it as
+// is and the node just listens to the 1 Hz stream the sensor sends by default.
+#ifndef SDS011_RX_PIN
+#  define SDS011_RX_PIN 14
+#endif
+#ifndef SDS011_TX_PIN
+#  define SDS011_TX_PIN 13
+#endif
+
+// ── Pulse input (rain gauge / water flow) ───────────────────────────────────
+// One counter serving both jobs: a tipping-bucket reed switch and a hall-
+// effect flow sensor differ only in scale and in what the numbers are called.
+//
+// D6 = GPIO12 is free of boot straps. If DS18B20 is also enabled, give them
+// different pins.
+#ifndef PULSE_PIN
+#  define PULSE_PIN 13
+#endif
+
+// "rain" -> rain_rate (mm/h) + rain_total (mm)
+// "flow" -> flow_rate (L/min) + flow_total (L)
+#ifndef PULSE_MODE_RAIN
+#  define PULSE_MODE_RAIN 1         // set to 0 for flow
+#endif
+
+// How much of the measured quantity one pulse represents.
+//   rain: mm per bucket tip. 0.2794 = the common 0.011" tipping bucket.
+//   flow: litres per pulse. A YF-S201 is ~450 pulses/litre -> 0.00222.
+#ifndef PULSE_UNITS_PER_PULSE
+#  if PULSE_MODE_RAIN
+#    define PULSE_UNITS_PER_PULSE 0.2794f
+#  else
+#    define PULSE_UNITS_PER_PULSE 0.00222f
+#  endif
+#endif
+
+// Minimum microseconds between accepted pulses, to reject contact bounce.
+// A reed switch on a rain gauge bounces for a few ms and tips at most a few
+// times a second, so 10 ms is generous. A hall flow sensor can legitimately
+// produce hundreds of pulses a second, and any debounce large enough to help
+// a reed switch would silently cap the flow reading — so it defaults to 0.
+#ifndef PULSE_DEBOUNCE_US
+#  if PULSE_MODE_RAIN
+#    define PULSE_DEBOUNCE_US 10000UL
+#  else
+#    define PULSE_DEBOUNCE_US 0UL
+#  endif
 #endif
 
 // Height of the sensor above sea level, in metres. Used only to report

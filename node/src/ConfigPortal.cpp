@@ -103,19 +103,33 @@ static void handleRoot() {
     // Only sensors actually compiled into this build get pin fields. Offering
     // a 1-Wire pin on a build with no DS18B20 driver would be a control that
     // does nothing, which is worse than no control at all.
-#if defined(NODE_SENSOR_BMX280) || defined(NODE_SENSOR_BME688)
+#if defined(NODE_SENSOR_BMX280) || defined(NODE_SENSOR_BME688) || \
+    defined(NODE_SENSOR_BH1750) || defined(NODE_SENSOR_DS18B20) || \
+    defined(NODE_SENSOR_PULSE)  || defined(NODE_SENSOR_SDS011)
     p += F("<h2>Sensor pins</h2>");
+#endif
+
+#if defined(NODE_SENSOR_BMX280) || defined(NODE_SENSOR_BME688) || \
+    defined(NODE_SENSOR_BH1750)
     row(p, "sda", "I2C SDA (GPIO)", String(s.i2cSda), "number",
-        "NodeMCU V3: D2 = GPIO4, D1 = GPIO5.");
+        "Shared by every I2C sensor. NodeMCU V3: D2 = GPIO4, D1 = GPIO5.");
     row(p, "scl", "I2C SCL (GPIO)", String(s.i2cScl), "number", "");
 #endif
 #if defined(NODE_SENSOR_DS18B20)
-#  if !defined(NODE_SENSOR_BMX280) && !defined(NODE_SENSOR_BME688)
-    p += F("<h2>Sensor pins</h2>");
-#  endif
     row(p, "ow", "1-Wire data (GPIO)", String(s.oneWirePin), "number",
         "Needs a 4.7k pull-up to 3V3. Avoid GPIO0 and GPIO2 — both are boot "
         "straps.");
+#endif
+#if defined(NODE_SENSOR_PULSE)
+    row(p, "pulse", "Pulse input (GPIO)", String(s.pulsePin), "number",
+        PULSE_MODE_RAIN ? "Rain gauge reed switch, to GND."
+                        : "Hall flow sensor signal line.");
+#endif
+#if defined(NODE_SENSOR_SDS011)
+    row(p, "sdsrx", "SDS011 RX (GPIO)", String(s.sdsRx), "number",
+        "Wire the sensor's TXD here. GPIO16 will not work — it cannot raise "
+        "interrupts.");
+    row(p, "sdstx", "SDS011 TX (GPIO)", String(s.sdsTx), "number", "");
 #endif
 
     p += F("<h2>This node</h2>");
@@ -191,9 +205,12 @@ static void handleSave() {
         const long v = s_http.arg(field).toInt();
         if (v >= 0 && v <= 16) dst = (uint8_t)v;
     };
-    pin("sda", s.i2cSda);
-    pin("scl", s.i2cScl);
-    pin("ow",  s.oneWirePin);
+    pin("sda",   s.i2cSda);
+    pin("scl",   s.i2cScl);
+    pin("ow",    s.oneWirePin);
+    pin("pulse", s.pulsePin);
+    pin("sdsrx", s.sdsRx);
+    pin("sdstx", s.sdsTx);
 
     if (!s.isComplete()) {
         s_http.send(400, "text/html",

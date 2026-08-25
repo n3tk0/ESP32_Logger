@@ -28,9 +28,11 @@ NodeMCU V3 (CH340) plus whichever sensors you selected at build time.
 |----------|-----------|------|--------|
 | VCC      | 3V3       | —    | all    |
 | GND      | GND       | —    | all    |
-| SDA      | D2        | 4    | BMx280 / BME688 |
-| SCL      | D1        | 5    | BMx280 / BME688 |
+| SDA      | D2        | 4    | BMx280 / BME688 / BH1750 |
+| SCL      | D1        | 5    | BMx280 / BME688 / BH1750 |
 | DQ       | D6        | 12   | DS18B20 (+ 4.7 kΩ to 3V3) |
+| signal   | D7        | 13   | rain gauge / hall flow sensor |
+| TXD      | D5        | 14   | SDS011 (sensor's TXD → node's RX) |
 
 These are only the **defaults** — the setup portal lets you change them per
 device, and shows only the pins whose sensor is in the build.
@@ -44,24 +46,96 @@ breakout that shipped with SDO strapped the other way works untouched.
 Same idea as the collector's `setup.h`: only what you enable is compiled in.
 Edit the `NODE_SENSOR_*` block in `src/node_config.h`.
 
-| Toggle | Driver | Metrics |
+| Toggle | Interface | Metrics | Count |
+|---|---|---|---|
+| `NODE_SENSOR_BMX280` (default) | I2C | `temperature`, `humidity`, `pressure`, `pressure_sea` | 4 |
+| `NODE_SENSOR_BME688` | I2C | the above plus `gas_resistance` | 5 |
+| `NODE_SENSOR_DS18B20` | 1-Wire | `probe_temp`, `probe_temp_1`, … | 1–8 |
+| `NODE_SENSOR_BH1750` | I2C | `lux` | 1 |
+| `NODE_SENSOR_SDS011` | UART | `pm25`, `pm10` | 2 |
+| `NODE_SENSOR_PULSE` | GPIO interrupt | `rain_rate`+`rain_total`, or `flow_rate`+`flow_total` | 2 |
+
+The BMx280, BME688 and DS18B20 drivers are the collector's own, included
+unmodified from `../src/drivers/`, so the compensation maths cannot drift
+between a wired sensor and a remote one. BH1750, SDS011 and the pulse counter
+have no shared driver to reuse — their device logic lives in the collector's
+plugins, entangled with `ISensor` — so they are implemented directly in
+`sensors.cpp`, matching the collector's frame parsing, scaling and metric
+names.
+
+### The 8-metric ceiling
+
+The collector drains a remote node through the ordinary plugin path, and
+`SensorManager` hands every plugin a fixed array of **8 readings per tick**.
+A node publishing more is not an error anywhere — the surplus is simply not
+copied, silently.
+
+So the build counts what your selection emits and warns when it exceeds 8:
+
+```
+warning: #warning "This sensor set emits more than 8 metrics; the collector
+copies only the first 8 per tick and drops the rest silently."
+```
+
+Set `NODE_DS18B20_EXPECTED` if you run more than one probe, so the count is
+right. If you need more than 8, split the sensors across two nodes with
+different `NODE_ID`s — the collector treats each as its own series.
+
+### Pulse input: rain or water
+
+One counter serves both, because a tipping-bucket reed switch and a hall-
+effect flow sensor differ only in scale and in what the numbers are called.
+
+```ini
+-DNODE_SENSOR_PULSE
+-DPULSE_MODE_RAIN=1              ; 0 for flow
+-DPULSE_UNITS_PER_PULSE=0.2794f  ; mm per tip, or litres per pulse
+-DPULSE_PIN=13
+```
+
+| Mode | Metrics | Typical scale |
 |---|---|---|
-| `NODE_SENSOR_BMX280` (default) | `BME280_Mini` | `temperature`, `humidity`, `pressure`, `pressure_sea` |
-| `NODE_SENSOR_BME688` | `BME688_Mini` | the above plus `gas_resistance` |
-| `NODE_SENSOR_DS18B20` | `DS18B20_Mini` | `probe_temp`, `probe_temp_1`, … (up to 8 on one pin) |
+| rain (`=1`) | `rain_rate` mm/h, `rain_total` mm | 0.2794 mm per tip (0.011″ bucket) |
+| flow (`=0`) | `flow_rate` L/min, `flow_total` L | 0.00222 L per pulse (YF-S201, ~450/L) |
 
-All three drivers are the collector's own, included unmodified from
-`../src/drivers/`, so the compensation maths cannot drift between a wired
-sensor and a remote one.
+Debounce defaults differ on purpose: **10 ms for rain, 0 for flow**. A reed
+switch bounces for a few milliseconds and tips at most a few times a second,
+so 10 ms is generous. A hall flow sensor legitimately produces hundreds of
+pulses a second, and any debounce large enough to help a reed switch would
+silently cap the reading.
 
-Measured cost on `nodemcuv2`:
+The rate is the **average over the interval just ended**, not extrapolated
+from the gap between the last two pulses. For a node posting once a minute
+the average is the honest number; extrapolation would report a downpour from
+one tip that happened to land near the deadline.
+
+`*_total` accumulates since boot and **resets on reboot** — the node has no
+persistent counter. Trend the rate; treat the total as a since-power-on figure.
+
+### SDS011 notes
+
+The ESP8266's only hardware UART is the console, so the sensor is read over
+SoftwareSerial at 9600 baud. The RX pin must be interrupt-capable — **GPIO16
+will not work**. The node only listens: the SDS011 streams a frame a second by
+default, and the newest complete, checksum-valid frame is what gets posted.
+
+Its laser and fan have a rated life of about 8000 hours of continuous running.
+This firmware does not duty-cycle it; for a permanent installation you would
+want to.
+
+Measured cost on `nodemcuv2` (1 044 464 bytes available):
 
 | Build | Flash |
 |---|---|
 | DS18B20 only | 365 947 (35.0 %) |
-| BMx280 only | 373 071 (35.7 %) |
+| BMx280 only (default) | 373 363 (35.7 %) |
+| BMx280 + BH1750 | 373 831 (35.8 %) |
+| BMx280 + pulse | 374 659 (35.9 %) |
 | BMx280 + DS18B20 | 375 335 (35.9 %) |
-| BME688 + DS18B20 | 375 543 (36.0 %) |
+| BMx280 + SDS011 | 380 139 (36.4 %) |
+| everything at once | 383 139 (36.7 %) |
+
+Flash is not the constraint here — the 8-metric ceiling is.
 
 ### Two constraints worth knowing
 
