@@ -51,6 +51,92 @@ static int owmToWmo(int id) {
     return -1;
 }
 
+
+// ---------------------------------------------------------------------------
+// Condition glyph
+// ---------------------------------------------------------------------------
+// Drawn here rather than fetched from the provider. Open-Meteo and OWM both
+// publish icon URLs, but serving one would mean the device downloading a
+// remote image, holding it in RAM and proxying it to the reader — and their
+// icons are colour raster art, which dithers to mush on a 16-level grey panel.
+// A stroke-only glyph is a few hundred bytes of markup, costs no traffic, and
+// is the same drawing language as the rest of the page.
+//
+// Cloud is one filled-white path (so the strokes behind it do not show
+// through) plus the same path stroked on top; everything else is line work.
+static const char CLOUD[] PROGMEM =
+    "<path d=\"M20 45C11 45 11 32 20 31C20 19 37 17 40 27C50 25 54 39 45 45Z\" fill=\"#fff\"/>"
+    "<path d=\"M20 45C11 45 11 32 20 31C20 19 37 17 40 27C50 25 54 39 45 45\" fill=\"none\"/>";
+
+static const char SUN_FULL[] PROGMEM =
+    "<circle cx=\"32\" cy=\"32\" r=\"11\" fill=\"#fff\"/>"
+    "<line x1=\"47\" y1=\"32\" x2=\"52\" y2=\"32\"/><line x1=\"43\" y1=\"43\" x2=\"46\" y2=\"46\"/>"
+    "<line x1=\"32\" y1=\"47\" x2=\"32\" y2=\"52\"/><line x1=\"21\" y1=\"43\" x2=\"18\" y2=\"46\"/>"
+    "<line x1=\"17\" y1=\"32\" x2=\"12\" y2=\"32\"/><line x1=\"21\" y1=\"21\" x2=\"18\" y2=\"18\"/>"
+    "<line x1=\"32\" y1=\"17\" x2=\"32\" y2=\"12\"/><line x1=\"43\" y1=\"21\" x2=\"46\" y2=\"18\"/>";
+
+static const char SUN_SMALL[] PROGMEM =
+    "<circle cx=\"22\" cy=\"22\" r=\"7\" fill=\"#fff\"/>"
+    "<line x1=\"33\" y1=\"22\" x2=\"38\" y2=\"22\"/><line x1=\"30\" y1=\"30\" x2=\"33\" y2=\"33\"/>"
+    "<line x1=\"22\" y1=\"33\" x2=\"22\" y2=\"38\"/><line x1=\"14\" y1=\"30\" x2=\"11\" y2=\"33\"/>"
+    "<line x1=\"11\" y1=\"22\" x2=\"6\" y2=\"22\"/><line x1=\"14\" y1=\"14\" x2=\"11\" y2=\"11\"/>"
+    "<line x1=\"22\" y1=\"11\" x2=\"22\" y2=\"6\"/><line x1=\"30\" y1=\"14\" x2=\"33\" y2=\"11\"/>";
+
+// Six-pointed, not eight: at this size a fourth pair of arms closes the gaps
+// and the flake renders as a blob.
+static void flake(String& o, int cx) {
+    o += F("<line x1=\""); o += cx - 3; o += F("\" y1=\"54\" x2=\""); o += cx + 3; o += F("\" y2=\"54\"/>");
+    o += F("<line x1=\""); o += cx - 2; o += F("\" y1=\"51\" x2=\""); o += cx + 2; o += F("\" y2=\"57\"/>");
+    o += F("<line x1=\""); o += cx + 2; o += F("\" y1=\"51\" x2=\""); o += cx - 2; o += F("\" y2=\"57\"/>");
+}
+
+static void slant(String& o, int x, int len) {
+    o += F("<line x1=\""); o += x; o += F("\" y1=\"50\" x2=\""); o += x - (len / 2);
+    o += F("\" y2=\""); o += 50 + len; o += F("\"/>");
+}
+
+void appendWeatherIcon(String& out, int code, int px) {
+    out += F("<svg viewBox=\"0 0 64 64\" width=\""); out += px;
+    out += F("\" height=\""); out += px;
+    out += F("\" stroke=\"#000\" stroke-width=\"2.4\" stroke-linecap=\"round\" "
+             "stroke-linejoin=\"round\" fill=\"none\">");
+
+    if (code < 0) {
+        out += F("<circle cx=\"32\" cy=\"32\" r=\"14\" fill=\"#fff\"/>"
+                 "<text x=\"32\" y=\"40\" text-anchor=\"middle\" font-size=\"22\" "
+                 "font-family=\"Georgia,serif\" stroke=\"none\" fill=\"#000\">?</text>");
+    } else if (code == 0) {
+        out += FPSTR(SUN_FULL);
+    } else if (code <= 2) {
+        out += FPSTR(SUN_SMALL); out += FPSTR(CLOUD);
+    } else if (code == 3) {
+        out += FPSTR(CLOUD);
+    } else if (code == 45 || code == 48) {
+        out += FPSTR(CLOUD);
+        out += F("<line x1=\"16\" y1=\"51\" x2=\"48\" y2=\"51\"/>"
+                 "<line x1=\"16\" y1=\"56\" x2=\"48\" y2=\"56\"/>");
+    } else if (code >= 51 && code <= 57) {
+        out += FPSTR(CLOUD);
+        for (int i = 0; i < 3; i++) slant(out, 22 + i * 11, 5);
+    } else if (code >= 61 && code <= 67) {
+        out += FPSTR(CLOUD);
+        for (int i = 0; i < 3; i++) slant(out, 22 + i * 11, 10);
+    } else if (code >= 71 && code <= 77) {
+        out += FPSTR(CLOUD);
+        for (int i = 0; i < 3; i++) flake(out, 22 + i * 13);
+    } else if (code >= 80 && code <= 82) {
+        out += FPSTR(CLOUD);
+        slant(out, 26, 10); slant(out, 37, 10);
+    } else if (code == 85 || code == 86) {
+        out += FPSTR(CLOUD);
+        slant(out, 24, 10); flake(out, 40);
+    } else {                       // >= 95, thunderstorm
+        out += FPSTR(CLOUD);
+        out += F("<path d=\"M34 48L26 58h7l-3 8 10-12h-7l4-6z\" fill=\"#fff\"/>");
+    }
+    out += F("</svg>");
+}
+
 // ---------------------------------------------------------------------------
 bool ForecastModule::load(JsonObjectConst cfg) {
     const char* prov = cfg["provider"] | "open-meteo";
@@ -263,21 +349,16 @@ void appendForecastSection(String& out) {
     const ForecastModule::Data d = forecastModule.snapshot();
     if (!d.valid) return;
 
-    // Set as a lead paragraph under a rule, matching the dashboard's print
-    // idiom — the condition is the headline, the day's range sits opposite it
-    // like a stock quote. No box: a border here would be the only screen-UI
-    // element on an otherwise typeset page.
+    // Sits at the foot of the page: the measured values are what the reader
+    // came for, and the forecast is the supporting note. A glyph carries the
+    // condition faster than the word at across-the-room distance, so it leads
+    // the row and the word stays as its caption.
     out += F("<div class=\"rule\"></div><div class=\"sec\">Forecast</div>"
-             "<table><tr><td width=\"58%\" class=\"fc\">");
+             "<table><tr><td width=\"64\" class=\"ico\">");
+    appendWeatherIcon(out, d.code, 56);
+    out += F("</td><td class=\"fc\">");
     out += d.summary;
-    out += F("</td><td width=\"42%\" class=\"fc-hi\">");
-    if (isfinite(d.highC) && isfinite(d.lowC)) {
-        out += (int)lroundf(d.highC);
-        out += F("&deg; / ");
-        out += (int)lroundf(d.lowC);
-        out += F("&deg;");
-    }
-    out += F("</td></tr><tr><td class=\"sub\">");
+    out += F("<div class=\"sub\">");
     if (isfinite(d.windKph)) {
         out += F("wind ");
         out += (int)(d.windKph + 0.5f);
@@ -294,8 +375,14 @@ void appendForecastSection(String& out) {
         else             { out += (ageMin / 60); out += F(" h old"); }
         out += F("</span>");
     }
-    out += F("</td><td class=\"sub\" style=\"text-align:right\">"
-             "<span class=\"dim\">high / low</span></td></tr></table>");
+    out += F("</div></td><td class=\"fc-hi\">");
+    if (isfinite(d.highC) && isfinite(d.lowC)) {
+        out += (int)lroundf(d.highC);
+        out += F("&deg; / ");
+        out += (int)lroundf(d.lowC);
+        out += F("&deg;<div class=\"sub dim\">high / low</div>");
+    }
+    out += F("</td></tr></table>");
 }
 
 #endif  // MODULE_FORECAST_ENABLED

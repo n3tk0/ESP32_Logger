@@ -289,7 +289,10 @@ static void handleKindle(AsyncWebServerRequest* req) {
            ".place{font-size:15px;letter-spacing:5px;text-transform:uppercase}"
            ".when{font-size:14px;text-align:right;letter-spacing:1px}"
            ".hero td{padding:2px 0 6px}"
-           ".sep{border-left:1px solid #000;padding-left:20px}"
+           /* Two classes, not one: .hero td above is (0,1,1) and would otherwise
+              outrank a bare .sep (0,1,0), zeroing this padding and letting the
+              rule sit against the first glyph of the inside reading. */
+           ".hero .sep{border-left:1px solid #000;padding-left:30px}"
            ".lab{font-size:12px;letter-spacing:4px;text-transform:uppercase;"
            "margin-bottom:2px}"
            ".big{font-size:92px;line-height:88px;height:88px;letter-spacing:-3px}"
@@ -305,8 +308,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
            ".rule{border-top:1px solid #000;margin:16px 0 12px}"
            ".sec{font-size:12px;letter-spacing:4px;text-transform:uppercase;"
            "margin-bottom:8px}"
-           ".fc{font-size:34px;line-height:1.05}"
-           ".fc-hi{font-size:34px;text-align:right;line-height:1.05}"
+           ".ico{vertical-align:top;padding-top:2px}"
+           ".fc{font-size:32px;line-height:1.05;padding-left:14px}"
+           ".fc-hi{font-size:32px;text-align:right;line-height:1.05;white-space:nowrap}"
            ".chart{display:block;margin:2px auto 0}"
            ".grid{stroke:#999;stroke-width:1}"
            ".base{stroke:#000;stroke-width:1}"
@@ -395,10 +399,6 @@ static void handleKindle(AsyncWebServerRequest* req) {
     }
     p += F("</div></td></tr></table>");
 
-#ifdef MODULE_FORECAST_ENABLED
-    appendForecastSection(p);
-#endif
-
     p += F("<div class=\"rule\"></div><div class=\"sec\">Last 24 hours</div>");
     appendChart(p, tOut, tIn, haveOut, haveIn);
     if (haveOut || haveIn) {
@@ -412,6 +412,13 @@ static void handleKindle(AsyncWebServerRequest* req) {
                "stroke-dasharray=\"7 5\"/></svg> inside"
                "</td></tr></table>");
     }
+
+#ifdef MODULE_FORECAST_ENABLED
+    // Last, deliberately: the measured values are what the reader came for and
+    // the forecast is the supporting note, so it reads as a footnote rather
+    // than as something competing with the two temperatures.
+    appendForecastSection(p);
+#endif
 
     p += F("<div class=\"foot\">Measured on site &middot; refreshes every ");
     p += (KINDLE_REFRESH_SEC / 60);

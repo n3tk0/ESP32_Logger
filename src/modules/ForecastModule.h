@@ -101,4 +101,9 @@ extern ForecastModule forecastModule;
 /// Kindle renderer does not need to know the provider details.
 void appendForecastSection(String& out);
 
+/// Draws a stroke-only condition glyph for a WMO code at `px` square.
+/// Exposed for the dashboard; see the note in the .cpp on why the icon is
+/// drawn rather than fetched from the provider.
+void appendWeatherIcon(String& out, int code, int px);
+
 #endif  // MODULE_FORECAST_ENABLED
