@@ -111,6 +111,79 @@ jobs:
           name: firmware-${{ matrix.name }}
           path: output/firmware-${{ matrix.name }}.bin
 
+  # Builds with the optional features turned ON, and turns them on the way
+  # setup.h documents rather than with -D flags.  That distinction is the
+  # whole point of the job: a feature macro passed with -D reaches every
+  # translation unit from the command line, so a .cpp that guards its body on
+  # the macro but forgets to include setup.h still compiles -- and only the
+  # setup.h path fails to link.  A -D-based job would pass while the
+  # documented path was broken.
+  #
+  # Note what this does NOT catch: registration calls missing from the tracked
+  # sketch.  Their absence is not a compile or link error, just a feature that
+  # silently never runs.  scripts/copy_sketch.py guards that case instead, by
+  # refusing to build when the generated sketch has been edited.
+  build-features:
+    name: build (xiao_esp32c3, all features via setup.h)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Enable optional features in setup.h
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+          p = 'src/setup.h'
+          s = open(p).read()
+          names = ['FEATURE_REMOTE_NODES',
+                   'FEATURE_KINDLE_DASHBOARD',
+                   'MODULE_FORECAST_ENABLED',
+                   'MODULE_HEATER_ENABLED']
+          for n in names:
+              # Uncomment the guarded block for this macro. Failing loudly when
+              # the pattern is gone matters: a silently-unmatched edit would
+              # leave this job building the OFF path and reporting success.
+              pat = re.compile(r'//(#ifndef ' + n + r'\n)//(#\s*define ' + n + r'[^\n]*\n)//(#endif)')
+              s, k = pat.subn(r'\1\2\3', s)
+              if k != 1:
+                  sys.exit(f'setup.h: could not enable {n} (matched {k} times) '
+                           f'-- the toggle block changed shape, fix this job')
+          open(p, 'w').write(s)
+          print('enabled:', ', '.join(names))
+          EOF
+
+      - name: Build with features enabled
+        run: pio run -e xiao_esp32c3
+
+      - name: Report size
+        run: |
+          # This config is the deliberate worst case -- every optional feature
+          # on a 4 MB C3 -- and nobody ships it, so it sits near the ceiling by
+          # nature (~97% at the time this job was added). Exceeding the
+          # partition is still a hard failure, because such an image would not
+          # flash; the warning below is the early signal.
+          SIZE=$(stat -c%s .pio/build/xiao_esp32c3/firmware.bin)
+          MAX=1572864
+          PCT=$((SIZE * 100 / MAX))
+          REMAIN=$(( (MAX - SIZE) / 1024 ))
+          echo "=== xiao_esp32c3, all features on ==="
+          echo "Firmware size: $(( SIZE / 1024 )) KB / $(( MAX / 1024 )) KB (${PCT}% used, ${REMAIN} KB free)"
+          if [ "$SIZE" -gt "$MAX" ]; then
+            echo "::error::Firmware exceeds app partition with all features on! ${SIZE} > ${MAX} bytes"
+            exit 1
+          elif [ "$PCT" -ge 98 ]; then
+            echo "::warning::All-features build uses ${PCT}% — only ${REMAIN} KB free"
+          fi
+
   # The ESP8266 satellite is a separate PlatformIO project with its own
   # platformio.ini, so `pio run` in the repo root never touches it and the
   # matrix above cannot cover it.  Without this job a break in node/ ships
