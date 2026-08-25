@@ -10,6 +10,7 @@
 #include "../pipeline/TrendRing.h"
 #include "../utils/MutexGuard.h"
 #include "../core/Globals.h"
+#include "DashboardStrings.h"
 
 #ifdef MODULE_FORECAST_ENABLED
 #  include "../modules/ForecastModule.h"
@@ -85,11 +86,11 @@ static Tendency pressureTendency(const TrendRing::Hour* h) {
 
     t.delta = (now.sum / now.count) - (then.sum / then.count);
     t.have  = true;
-    if      (t.delta >=  1.6f) { t.word = "rising fast";  t.arrow = "&#8593;"; }
-    else if (t.delta >=  0.5f) { t.word = "rising";       t.arrow = "&#8599;"; }
-    else if (t.delta >  -0.5f) { t.word = "steady";       t.arrow = "&#8594;"; }
-    else if (t.delta >  -1.6f) { t.word = "falling";      t.arrow = "&#8600;"; }
-    else                       { t.word = "falling fast"; t.arrow = "&#8595;"; }
+    if      (t.delta >=  1.6f) { t.word = KD_T("rising fast",  "расте бързо"); t.arrow = "&#8593;"; }
+    else if (t.delta >=  0.5f) { t.word = KD_T("rising",       "расте");       t.arrow = "&#8599;"; }
+    else if (t.delta >  -0.5f) { t.word = KD_T("steady",       "без промяна"); t.arrow = "&#8594;"; }
+    else if (t.delta >  -1.6f) { t.word = KD_T("falling",      "пада");        t.arrow = "&#8600;"; }
+    else                       { t.word = KD_T("falling fast", "пада бързо");  t.arrow = "&#8595;"; }
     return t;
 }
 
@@ -120,7 +121,8 @@ static void appendChart(String& out,
         if (haveB && b[i].count) { if (b[i].min < lo) lo = b[i].min; if (b[i].max > hi) hi = b[i].max; }
     }
     if (lo > hi) {
-        out += F("<p class=\"note\">The 24 hour record fills as readings arrive.</p>");
+        out += F(KD_T("<p class=\"note\">The 24 hour record fills as readings arrive.</p>",
+                      "<p class=\"note\">24-часовият запис се попълва с постъпването на данни.</p>"));
         return;
     }
     float pad = (hi - lo) * 0.06f;
@@ -139,10 +141,7 @@ static void appendChart(String& out,
     out += F("<svg class=\"chart\" width=\""); out += CHART_W;
     out += F("\" height=\""); out += CHART_H;
     out += F("\" viewBox=\"0 0 "); out += CHART_W; out += ' '; out += CHART_H;
-    out += F("\"><defs><pattern id=\"h\" width=\"4\" height=\"4\" "
-             "patternUnits=\"userSpaceOnUse\" patternTransform=\"rotate(45)\">"
-             "<line x1=\"0\" y1=\"0\" x2=\"0\" y2=\"4\" stroke=\"#000\" "
-             "stroke-width=\"1\"/></pattern></defs>");
+    out += F("\">");
 
     // Five horizontal rules, the lowest doubling as the baseline. Three
     // made the scale too coarse to read a couple of degrees off.
@@ -210,7 +209,7 @@ static void appendChart(String& out,
     // Leaving it bare made the axis read as if it stopped five hours ago.
     out += F("<text class=\"ax\" x=\""); out += KD_X(TrendRing::HOURS - 1);
     out += F("\" y=\""); out += CHART_H - 8;
-    out += F("\" text-anchor=\"end\">now</text>");
+    out += F("\" text-anchor=\"end\">" KD_T("now", "сега") "</text>");
 
     #undef KD_X
     #undef KD_Y
@@ -235,8 +234,8 @@ static void appendAge(String& out, uint32_t ts, uint32_t now) {
     const uint32_t mins = (now - ts) / 60u;
     if (mins < 2) return;                       // fresh; saying so is noise
     out += F(" &middot; ");
-    if (mins < 60) { out += mins; out += F(" min old"); }
-    else           { out += (mins / 60); out += F(" h old"); }
+    if (mins < 60) { out += mins; out += F(KD_T(" min old", " мин"));  }
+    else           { out += (mins / 60); out += F(KD_T(" h old", " ч")); }
 }
 
 
@@ -262,16 +261,17 @@ static void appendWeek(String& out, uint32_t now) {
 
     // Walk back to Monday in whole days. Doing it on the epoch rather than on
     // tm_mday keeps month and year ends correct for free.
-    static const char* NAMES[7] = { "Mon","Tue","Wed","Thu","Fri","Sat","Sun" };
     out += F("<div class=\"rule\"></div><table class=\"wk\"><tr>");
     for (int i = 0; i < 7; i++) {
         const time_t day = t + (time_t)(i - todayIdx) * 86400;
         struct tm dv;
         if (localtime_r(&day, &dv) == nullptr) continue;
         out += F("<td class=\"");
-        out += (i == todayIdx) ? F("wd wd-now") : F("wd");
+        if (i == todayIdx)   out += F("wd wd-now");
+        else if (i >= 5)     out += F("wd wd-we");   // Sat, Sun
+        else                 out += F("wd");
         out += F("\"><div class=\"wd-n\">");
-        out += NAMES[i];
+        out += kdWeekdayShort(i);
         out += F("</div><div class=\"wd-d\">");
         out += dv.tm_mday;
         out += F("</div></td>");
@@ -324,17 +324,22 @@ static void handleKindle(AsyncWebServerRequest* req) {
            "*{box-sizing:border-box}"
            "table{width:100%;border-collapse:collapse}"
            "td{vertical-align:top;padding:0}"
+           /* Palette: #000 #444 #777 #aaa #d8d8d8 #fff. The panel has 16 real
+              grey levels — the dithering that argued against greys here comes
+              from gradients and from tones too close together, not from flat
+              well-separated fills. Spaced this far apart each renders solid. */
            ".mast{border-bottom:3px solid #000;padding-bottom:5px;margin-bottom:2px}"
-           ".mast-sub{border-bottom:1px solid #000;height:3px;margin-bottom:16px}"
+           ".mast-sub{border-bottom:1px solid #777;height:3px;margin-bottom:16px}"
            ".place{font-size:15px;letter-spacing:5px;text-transform:uppercase}"
-           ".when{font-size:14px;text-align:right;letter-spacing:1px}"
+           ".when{color:#444}"
+           ".when{font-size:14px;text-align:right;letter-spacing:1px;color:#444}"
            ".hero td{padding:2px 0 6px}"
            /* Two classes, not one: .hero td above is (0,1,1) and would otherwise
               outrank a bare .sep (0,1,0), zeroing this padding and letting the
               rule sit against the first glyph of the inside reading. */
-           ".hero .sep{border-left:1px solid #000;padding-left:30px}"
+           ".hero .sep{border-left:1px solid #aaa;padding-left:30px}"
            ".lab{font-size:12px;letter-spacing:4px;text-transform:uppercase;"
-           "margin-bottom:2px}"
+           "margin-bottom:2px;color:#777}"
            ".big{font-size:92px;line-height:88px;height:88px;letter-spacing:-3px}"
            /* Fixed height, not line-height alone: the two columns use
               different sizes, and without it the text under the smaller
@@ -343,41 +348,44 @@ static void handleKindle(AsyncWebServerRequest* req) {
            ".big4{font-size:74px;letter-spacing:-2px}"
            ".deg{font-size:30px;letter-spacing:0;vertical-align:top;"
            "line-height:1;position:relative;top:12px}"
-           ".sub{font-size:15px;margin-top:6px;line-height:1.45}"
-           ".dim{color:#555}"
+           ".sub{font-size:15px;margin-top:6px;line-height:1.45;color:#444}"
+           ".dim{color:#777}"
            /* Three rules on the page, so a few px each is what keeps the
               footer above the 800px fold. Measured, not guessed. */
-           ".rule{border-top:1px solid #000;margin:13px 0 10px}"
+           ".rule{border-top:1px solid #aaa;margin:13px 0 10px}"
            ".sec{font-size:12px;letter-spacing:4px;text-transform:uppercase;"
-           "margin-bottom:8px}"
+           "margin-bottom:8px;color:#777}"
            ".ico{vertical-align:top;padding-top:4px}"
            ".fc{font-size:28px;line-height:1.1;padding-left:12px}"
-           ".fc-t{font-size:30px;margin-top:1px}"
+           ".fc-t{font-size:30px;margin-top:1px;color:#000}"
            /* Equal thirds of the right half; nowrap so a two-part daily
               figure never breaks across lines. */
-           ".per{width:88px;text-align:center;vertical-align:top;white-space:nowrap}"
-           ".per-l{font-size:11px;letter-spacing:2px;text-transform:uppercase;margin-bottom:1px}"
-           ".per-t{font-size:19px;margin-top:-2px}"
+           ".per{width:88px;text-align:center;vertical-align:top;white-space:nowrap;"
+           "background:#f0f0f0;border-left:4px solid #fff}"
+           ".per-l{font-size:11px;letter-spacing:2px;text-transform:uppercase;"
+           "margin-bottom:1px;color:#777;padding-top:4px}"
+           ".per-t{font-size:19px;margin-top:-2px;padding-bottom:5px}"
            ".chart{display:block;margin:2px auto 0}"
-           ".grid{stroke:#999;stroke-width:1}"
-           ".base{stroke:#000;stroke-width:1}"
-           ".ax{font-size:11px;fill:#000;font-family:Bookerly,Georgia,serif}"
-           ".band{fill:url(#h);stroke:#000;stroke-width:1}"
+           ".grid{stroke:#c4c4c4;stroke-width:1}"
+           ".base{stroke:#777;stroke-width:1}"
+           ".ax{font-size:11px;fill:#777;font-family:Bookerly,Georgia,serif}"
+           ".band{fill:#d8d8d8;stroke:#8f8f8f;stroke-width:1}"
            ".l-out{fill:none;stroke:#000;stroke-width:3}"
-           ".l-in{fill:none;stroke:#000;stroke-width:2;stroke-dasharray:7 5}"
-           ".key{font-size:13px;margin-top:2px}"
+           ".l-in{fill:none;stroke:#777;stroke-width:2;stroke-dasharray:7 5}"
+           ".key{font-size:13px;margin-top:2px;color:#444}"
            ".key td{padding-top:2px}"
            ".note{font-size:15px;font-style:italic;text-align:center;"
-           "padding:36px 0;color:#555}"
+           "padding:36px 0;color:#777}"
            ".wk{margin-top:2px}"
-           ".wd{width:14.28%;text-align:center;padding:5px 0 4px}"
-           ".wd-n{font-size:11px;letter-spacing:2px;text-transform:uppercase}"
+           ".wd{width:14.28%;text-align:center;padding:5px 0 4px;background:#f4f4f4}"
+           ".wd-we{background:#e4e4e4}"
+           ".wd-n{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#777}"
            ".wd-d{font-size:24px;line-height:1.15}"
            /* Inverted rather than outlined: a filled block is the one
               mark that stays unambiguous after e-ink dithering, where a
               thin ring can read as a smudge. */
            ".wd-now{background:#000;color:#fff}"
-           ".foot{border-top:1px solid #000;margin-top:11px;padding-top:5px;"
+           ".foot{border-top:1px solid #aaa;margin-top:11px;padding-top:5px;"
            "font-size:12px;color:#555;letter-spacing:.5px}"
            "</style></head><body>");
 
@@ -388,21 +396,30 @@ static void handleKindle(AsyncWebServerRequest* req) {
     if (now > 1000000000u) {
         const time_t when_t = (time_t)now;
         struct tm tmv;
-        char when[48];
-        if (localtime_r(&when_t, &tmv) != nullptr &&
-            strftime(when, sizeof(when), "%A %e %B &middot; %H:%M", &tmv) > 0) {
-            p += when;
+        if (localtime_r(&when_t, &tmv) != nullptr) {
+            // Assembled rather than strftime'd: the C locale would give
+            // English names whatever the build language, and newlib on this
+            // part has no bg_BG to switch to.
+            p += kdWeekdayLong(tmv.tm_wday);
+            p += ' ';
+            p += tmv.tm_mday;
+            p += ' ';
+            p += kdMonth(tmv.tm_mon);
+            p += F(" &middot; ");
+            char hm[8];
+            snprintf(hm, sizeof(hm), "%02d:%02d", tmv.tm_hour, tmv.tm_min);
+            p += hm;
         } else {
-            p += F("time unavailable");
+            p += F(KD_T("time unavailable", "часът не е наличен"));
         }
     } else {
-        p += F("clock not set");
+        p += F(KD_T("clock not set", "часовникът не е сверен"));
     }
     p += F("</td></tr></table></div><div class=\"mast-sub\"></div>");
 
     // The two temperatures
     p += F("<table class=\"hero\"><tr><td width=\"50%\">"
-           "<div class=\"lab\">Outside</div><div class=\"");
+           "<div class=\"lab\">" KD_T("Outside", "Навън") "</div><div class=\"");
     fmtTemp(buf, sizeof(buf), outT.value);
     p += bigClass(buf); p += F("\">"); p += buf;
     p += F("<span class=\"deg\">&deg;</span></div><div class=\"sub\">");
@@ -412,10 +429,10 @@ static void handleKindle(AsyncWebServerRequest* req) {
             // The 24 h span in words, so the night's low is not only readable
             // off the chart.
             fmtTemp(buf, sizeof(buf), mn); p += buf;
-            p += F(" to "); fmtTemp(buf, sizeof(buf), mx); p += buf;
-            p += F("&deg; today<br>");
+            p += F(KD_T(" to ", " до ")); fmtTemp(buf, sizeof(buf), mx); p += buf;
+            p += F(KD_T("&deg; today<br>", "&deg; днес<br>"));
         }
-        if (outH.ok) { fmtInt(buf, sizeof(buf), outH.value); p += buf; p += F("% humidity"); }
+        if (outH.ok) { fmtInt(buf, sizeof(buf), outH.value); p += buf; p += F(KD_T("% humidity", "% влажност")); }
         if (outH.ok && outP.ok) p += F(" &middot; ");
         if (outP.ok) { fmtInt(buf, sizeof(buf), outP.value); p += buf; p += F(" hPa"); }
         if (haveP) {
@@ -431,10 +448,11 @@ static void handleKindle(AsyncWebServerRequest* req) {
         appendAge(p, outT.ts, now);
         p += F("</span>");
     } else {
-        p += F("<span class=\"dim\">no reading &mdash; check the node</span>");
+        p += F(KD_T("<span class=\"dim\">no reading &mdash; check the node</span>",
+                    "<span class=\"dim\">няма данни &mdash; провери възела</span>"));
     }
     p += F("</div></td><td width=\"50%\" class=\"sep\">"
-           "<div class=\"lab\">Inside</div><div class=\"");
+           "<div class=\"lab\">" KD_T("Inside", "Вътре") "</div><div class=\"");
     fmtTemp(buf, sizeof(buf), inT.value);
     p += bigClass(buf); p += F("\">"); p += buf;
     p += F("<span class=\"deg\">&deg;</span></div><div class=\"sub\">");
@@ -442,19 +460,20 @@ static void handleKindle(AsyncWebServerRequest* req) {
         float mn, mx;
         if (haveIn && windowExtremes(tIn, mn, mx)) {
             fmtTemp(buf, sizeof(buf), mn); p += buf;
-            p += F(" to "); fmtTemp(buf, sizeof(buf), mx); p += buf;
-            p += F("&deg; today<br>");
+            p += F(KD_T(" to ", " до ")); fmtTemp(buf, sizeof(buf), mx); p += buf;
+            p += F(KD_T("&deg; today<br>", "&deg; днес<br>"));
         }
-        if (inH.ok) { fmtInt(buf, sizeof(buf), inH.value); p += buf; p += F("% humidity"); }
+        if (inH.ok) { fmtInt(buf, sizeof(buf), inH.value); p += buf; p += F(KD_T("% humidity", "% влажност")); }
         p += F("<span class=\"dim\">");
         appendAge(p, inT.ts, now);
         p += F("</span>");
     } else {
-        p += F("<span class=\"dim\">no reading</span>");
+        p += F(KD_T("<span class=\"dim\">no reading</span>",
+                    "<span class=\"dim\">няма данни</span>"));
     }
     p += F("</div></td></tr></table>");
 
-    p += F("<div class=\"rule\"></div><div class=\"sec\">Last 24 hours</div>");
+    p += F("<div class=\"rule\"></div><div class=\"sec\">" KD_T("Last 24 hours", "Последните 24 часа") "</div>");
     appendChart(p, tOut, tIn, haveOut, haveIn);
     if (haveOut || haveIn) {
         p += F("<table class=\"key\"><tr><td>"
@@ -464,7 +483,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
                "</td><td style=\"text-align:right\">"
                "<svg width=\"26\" height=\"9\"><line x1=\"0\" y1=\"5\" x2=\"26\" "
                "y2=\"5\" stroke=\"#000\" stroke-width=\"2\" "
-               "stroke-dasharray=\"7 5\"/></svg> inside"
+               "stroke-dasharray=\"7 5\"/></svg> " KD_T("inside", "вътре")
                "</td></tr></table>");
     }
 
@@ -477,9 +496,10 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     appendWeek(p, now);
 
-    p += F("<div class=\"foot\">Measured on site &middot; refreshes every ");
+    p += F(KD_T("<div class=\"foot\">Measured on site &middot; refreshes every ",
+                "<div class=\"foot\">Измерено на място &middot; обновява се на "));
     p += (KINDLE_REFRESH_SEC / 60);
-    p += F(" minutes</div></body></html>");
+    p += F(KD_T(" minutes</div></body></html>", " минути</div></body></html>"));
 
     AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
     // The meta tag drives the refresh, so nothing may be served from cache: an

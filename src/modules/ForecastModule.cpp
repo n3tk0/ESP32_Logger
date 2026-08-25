@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <math.h>
+#include "../web/DashboardStrings.h"
 
 ForecastModule forecastModule;
 
@@ -21,18 +22,18 @@ static const char* wmoSummary(int code) {
     // -1 is the sentinel both fetch paths use for a missing or unmappable
     // condition. It must be rejected before the ranges below, or it satisfies
     // `code <= 2` and an unknown sky renders as a confident "Partly cloudy".
-    if (code < 0)                  return "Unknown";
-    if (code == 0)                 return "Clear";
-    if (code <= 2)                 return "Partly cloudy";
-    if (code == 3)                 return "Overcast";
-    if (code == 45 || code == 48)  return "Fog";
-    if (code >= 51 && code <= 57)  return "Drizzle";
-    if (code >= 61 && code <= 67)  return "Rain";
-    if (code >= 71 && code <= 77)  return "Snow";
-    if (code >= 80 && code <= 82)  return "Showers";
-    if (code == 85 || code == 86)  return "Snow showers";
-    if (code >= 95)                return "Thunderstorm";
-    return "Unknown";
+    if (code < 0)                  return KD_T("Unknown",       "Неизвестно");
+    if (code == 0)                 return KD_T("Clear",         "Ясно");
+    if (code <= 2)                 return KD_T("Partly cloudy", "Променливо");
+    if (code == 3)                 return KD_T("Overcast",      "Облачно");
+    if (code == 45 || code == 48)  return KD_T("Fog",           "Мъгла");
+    if (code >= 51 && code <= 57)  return KD_T("Drizzle",       "Ръмеж");
+    if (code >= 61 && code <= 67)  return KD_T("Rain",          "Дъжд");
+    if (code >= 71 && code <= 77)  return KD_T("Snow",          "Сняг");
+    if (code >= 80 && code <= 82)  return KD_T("Showers",       "Превалявания");
+    if (code == 85 || code == 86)  return KD_T("Snow showers",  "Снеговалеж");
+    if (code >= 95)                return KD_T("Thunderstorm",  "Гръмотевици");
+    return KD_T("Unknown", "Неизвестно");
 }
 
 // OpenWeatherMap uses its own ids; map them onto the same WMO buckets so the
@@ -143,14 +144,13 @@ void appendWeatherIcon(String& out, int code, int px) {
 // arrays are always anchored on today, so the offset is all that is needed and
 // there is no timezone of theirs to reconcile with ours.
 static void weekdayLabel(char* out, size_t n, int daysAhead) {
-    static const char* NAMES[7] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
     const time_t now = (time_t)time(nullptr);
     struct tm tmv;
     if (now < 1000000000 || localtime_r(&now, &tmv) == nullptr) {
         snprintf(out, n, "+%dd", daysAhead);
         return;
     }
-    snprintf(out, n, "%s", NAMES[(tmv.tm_wday + daysAhead) % 7]);
+    snprintf(out, n, "%s", kdWeekdayAhead(tmv.tm_wday, daysAhead));
 }
 
 // ---------------------------------------------------------------------------
@@ -529,7 +529,7 @@ void appendForecastSection(String& out) {
     // columns stepping forward. Reading order matches the question order,
     // "what is it like" then "what is coming", and keeps the outlook from
     // competing with the measured temperatures higher up the page.
-    out += F("<div class=\"rule\"></div><div class=\"sec\">Forecast</div>"
+    out += F("<div class=\"rule\"></div><div class=\"sec\">" KD_T("Forecast", "Прогноза") "</div>"
              "<table><tr><td width=\"56\" class=\"ico\">");
     appendWeatherIcon(out, d.code, 52);
     out += F("</td><td class=\"fc\">");
@@ -543,7 +543,7 @@ void appendForecastSection(String& out) {
     }
     out += F("<div class=\"sub\">");
     if (isfinite(d.windKph)) {
-        out += F("wind ");
+        out += F(KD_T("wind ", "вятър "));
         out += (int)(d.windKph + 0.5f);
         out += F(" km/h");
     }
@@ -554,8 +554,8 @@ void appendForecastSection(String& out) {
         const uint32_t ageMin = (now - d.fetchedAt) / 60u;
         if (isfinite(d.windKph)) out += F(" &middot; ");
         out += F("<span class=\"dim\">");
-        if (ageMin < 60) { out += ageMin; out += F(" min old"); }
-        else             { out += (ageMin / 60); out += F(" h old"); }
+        if (ageMin < 60) { out += ageMin; out += F(KD_T(" min old", " мин")); }
+        else             { out += (ageMin / 60); out += F(KD_T(" h old", " ч")); }
         out += F("</span>");
     }
     out += F("</div></td>");

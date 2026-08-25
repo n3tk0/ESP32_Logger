@@ -61,7 +61,9 @@ public:
     // separate flag.
     struct Period {
         bool  valid = false;
-        char  label[8] = {0};   // "21:00" or "Wed"
+        // 12, not 8: a Cyrillic two-letter abbreviation is four UTF-8
+        // bytes, and "21:00" plus a terminator already wants six.
+        char  label[12] = {0};  // "21:00" or "ср"
         float tempC = NAN;
         float lowC  = NAN;
         int   code  = -1;

@@ -38,12 +38,41 @@ The panel is 1072×1448 at 300 ppi, but the browser reports roughly **600×800
 CSS pixels** at devicePixelRatio 2, and that is what the layout targets. Newer
 readers have more room and get more margin.
 
-### Why it is grayscale, and why the two lines differ by dash
+### Language
 
-16-level grayscale dithers mid-greys into visible noise at this size. Two
-temperature lines on one chart are told apart by **dash pattern**, not shade,
-because shade does not survive dithering. The only grey on the page is the
-chart's gridline, chosen light enough to read as a rule rather than a line.
+```ini
+-DKINDLE_LANG_BG    ; Bulgarian; omit for English
+```
+
+A compile-time switch, so a single-language build pays nothing for the other —
+the unused literal is discarded. The masthead date is assembled from tables in
+`DashboardStrings.h` rather than by `strftime`: the C locale would give English
+names whatever the build language, and newlib on this part has no `bg_BG` to
+switch to.
+
+Cyrillic depends on the reader's fallback font. The page declares UTF-8 and
+names the device's serif faces first, but Bookerly's Cyrillic coverage varies
+by firmware — if a Bulgarian build shows boxes, that is the font, not the
+encoding.
+
+### The greys
+
+The palette is `#000 #444 #777 #aaa #d8d8d8 #fff` plus two panel washes.
+
+An earlier version of this page was pure black and white, on the reasoning
+that "16-level e-ink dithers mid-greys into visible noise". That was
+over-cautious and made the page poorer. The panel has **16 real grey levels**;
+the dithering worth avoiding comes from gradients and from tones too close
+together, not from flat, well-separated fills. Spaced this far apart, each
+tone lands on its own level and renders solid.
+
+The min/max band was originally hatched for the same wrong reason. With a flat
+wash doing the job, the hatch was texture over texture — two bands that nearly
+touch read as one muddy mass — so it is gone.
+
+The two chart lines are still told apart by **dash pattern as well as** shade,
+because redundant coding costs nothing and survives a panel with its contrast
+turned down.
 
 ### Refresh cadence
 
