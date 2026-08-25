@@ -8,6 +8,7 @@
 #include <WiFiClientSecure.h>
 #include <math.h>
 #include "../web/DashboardStrings.h"
+#include "../web/KindleDashboard.h"   // kdPx(): the glyphs scale with the page
 
 ForecastModule forecastModule;
 
@@ -563,7 +564,7 @@ void appendForecastSection(String& out) {
     // competing with the measured temperatures higher up the page.
     out += F("<div class=\"rule\"></div><div class=\"sec\">" KD_T("Forecast", "Прогноза") "</div>"
              "<table><tr><td width=\"56\" class=\"ico\">");
-    appendWeatherIcon(out, d.code, 52);
+    appendWeatherIcon(out, d.code, kdPx(52));
     out += F("</td><td class=\"fc\">");
     out += d.summary;
     if (isfinite(d.highC) && isfinite(d.lowC)) {
@@ -597,7 +598,7 @@ void appendForecastSection(String& out) {
         out += F("<td class=\"per\">");
         if (pd.valid) {
             out += F("<div class=\"per-l\">"); out += pd.label; out += F("</div>");
-            appendWeatherIcon(out, pd.code, 34);
+            appendWeatherIcon(out, pd.code, kdPx(34));
             out += F("<div class=\"per-t\">");
             out += (int)lroundf(pd.tempC);
             out += F("&deg;");

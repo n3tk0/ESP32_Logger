@@ -65,14 +65,58 @@ other reader with the same 6" panel: 1072×1448 at 300 ppi.
 > layout depended on it — both readers have the same panel — but the browser
 > claim below did.
 
-### Where 600×800 comes from
+### Choosing the layout width
 
-Not from a reported viewport. The page pins its own layout width with
-`<meta name="viewport" content="width=600">`, so the browser scales 600 CSS px
-across the panel's 1072 device px — about 1.79× — and the 1448 px of height
-works out to roughly **810 CSS px** at that same scale. That is the entire
-derivation, and it is why the page is measured against an 800 px budget: it
-holds for any 1072×1448 reader whatever `devicePixelRatio` reports.
+```ini
+-DKINDLE_PAGE_W=600    ; default
+```
+
+Every size on the page is written as the figure it was tuned at for a 600 px
+layout and passed through `kdPx()`, which rescales it to `KINDLE_PAGE_W` and
+rounds. Proportions are identical at any width; only the pixel grid changes. At
+600 `kdPx()` is the identity, so the default build is unchanged.
+
+**Where 600×800 came from:** not a reported viewport. The page pins its own
+layout width in the viewport meta, so the browser scales that width across the
+panel's 1072 device px and the 1448 px of height follows the same ratio — at
+600 that is about 1.79× and roughly **810 CSS px** of height, which is where the
+800 px budget comes from.
+
+**Why the width is a knob.** At 600 the browser scales the whole page by 1.79.
+Type survives that — it is rasterised at the final size, not upscaled — but a
+1 px rule becomes 1.79 device px and lands soft across two rows of pixels.
+Laying out at the panel's own pixel count keeps hairlines on the grid.
+
+Whether that helps depends on what the reader's browser reports for its
+viewport and `devicePixelRatio`, which no amount of reasoning settles.
+
+### `GET /kindle/probe`
+
+Load it on the reader and read the numbers off:
+
+- `innerWidth`, `innerHeight`, `devicePixelRatio` and `screen` — printed by the
+  one piece of JavaScript in this whole feature, because those numbers are only
+  knowable from inside the browser;
+- the **user agent**, taken from the request header and printed server-side, so
+  a firmware that runs no script still tells you which browser it is;
+- a **ruler** of fixed-width bars needing no script at all: whichever bar
+  reaches the right edge without overflowing names the value to build with.
+
+| Value | Try it when |
+|---|---|
+| `600` | default; works on any firmware |
+| `536` | the probe reports `devicePixelRatio` 2 |
+| `1072` | the probe reports 1 |
+
+Below 320 or above 2400 the build fails rather than rendering something that
+was never measured. All three values above are checked at the device's viewport
+before release: 792 of 810 at 600, 703 of 724 at 536, 1410 of 1448 at 1072, and
+no horizontal overflow at any of them.
+
+An earlier attempt at this got the chart wrong — the SVG kept its 600-px size
+while everything around it scaled, which at 536 pushed the page 40 px wider than
+the screen. That is the failure mode to watch for when adding anything with a
+hard pixel size: it looks right at the default and only breaks off it.
 
 ### Why it is built for an old browser anyway
 

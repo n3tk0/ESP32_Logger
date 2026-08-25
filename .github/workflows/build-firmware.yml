@@ -164,6 +164,31 @@ jobs:
       - name: Build with features enabled
         run: pio run -e xiao_esp32c3
 
+      # KINDLE_PAGE_W rescales every size on the dashboard through kdPx(). At
+      # the default 600 that function is the identity, so a default-only build
+      # exercises none of the arithmetic and a broken rescale would ship
+      # unnoticed. 1072 is the other value the docs tell people to try.
+      #
+      # The range guard is checked too, by asserting a value below the floor
+      # actually fails: a #error nobody has ever seen fire is a #error that may
+      # not work.
+      - name: Build at a non-default layout width
+        run: |
+          set -o pipefail
+          PLATFORMIO_BUILD_FLAGS="-DKINDLE_PAGE_W=1072 -DKINDLE_LANG_BG" \
+            pio run -e xiao_esp32c3 2>&1 | tail -20
+
+      - name: An out-of-range layout width must not build
+        run: |
+          if PLATFORMIO_BUILD_FLAGS="-DKINDLE_PAGE_W=200" pio run -e xiao_esp32c3 >/dev/null 2>&1; then
+            echo "::error::KINDLE_PAGE_W=200 built, but the range guard should have rejected it"
+            exit 1
+          fi
+          echo "range guard rejected KINDLE_PAGE_W=200, as it should"
+
+      - name: Rebuild at the default width for the size report
+        run: pio run -e xiao_esp32c3
+
       - name: Report size
         run: |
           # This config is the deliberate worst case -- every optional feature

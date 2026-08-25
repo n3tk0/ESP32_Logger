@@ -11,11 +11,11 @@
 // WHERE 600×800 COMES FROM
 // ------------------------
 // It is not a reported viewport. The page pins the layout width itself with
-// <meta name="viewport" content="width=600">, so the browser scales 600 CSS px
-// across the panel's 1072 device px — about 1.79× — and the 1448 px of height
-// then works out to roughly 810 CSS px at that same scale. That is the whole
-// derivation, and it is why the page is measured against an 800 px budget: it
-// holds for any 1072×1448 reader regardless of what devicePixelRatio says.
+// its viewport meta, so the browser scales that width across the panel's 1072
+// device px and the 1448 px of height works out to the same ratio: at the
+// default 600 that is about 1.79× and roughly 810 CSS px of height, which is
+// where the 800 px budget comes from. The width is a build-time knob — see
+// KINDLE_PAGE_W below and GET /kindle/probe.
 //
 // WHY IT IS BUILT FOR AN OLD BROWSER ANYWAY
 // -----------------------------------------
@@ -61,6 +61,56 @@
 
 #include "../setup.h"
 
+// ---------------------------------------------------------------------------
+// Layout width
+// ---------------------------------------------------------------------------
+// The width the page declares in its viewport meta, and the unit every size in
+// the stylesheet is expressed in. 600 is the default and what all the tuning
+// was done at; every other value is that layout multiplied by PAGE_W/600 and
+// rounded, so the proportions are identical and only the pixel grid changes.
+//
+// WHY THIS IS A KNOB AND NOT A CONSTANT
+// -------------------------------------
+// At 600 on a 1072 px panel the browser scales the whole page by about 1.79.
+// Type survives that — it is rasterised at the final size, not upscaled — but
+// a 1 px rule becomes 1.79 device px and lands soft across two rows of pixels.
+// Laying out at the panel's own pixel count instead keeps hairlines on the
+// grid.
+//
+// Whether that helps depends on what the reader's browser reports for its
+// viewport and devicePixelRatio, which no amount of reasoning here can settle.
+// GET /kindle/probe prints both off the device; pick the value from that.
+//
+//   600   default. Scaled up by the browser. Works on any firmware.
+//   536   1072 / 2 — try this if the probe reports devicePixelRatio 2.
+//   1072  the panel's own pixel count — try this if the probe reports 1.
+//
+// The vertical budget follows the same ratio: the page is laid out to fit
+// PAGE_W * 1448 / 1072 tall, which is 810 at 600 and 1448 at 1072.
+#ifndef KINDLE_PAGE_W
+#  define KINDLE_PAGE_W 600
+#endif
+#if KINDLE_PAGE_W < 320 || KINDLE_PAGE_W > 2400
+#  error "KINDLE_PAGE_W is outside the range this layout has been checked over"
+#endif
+
+// Rescales a number tuned at the 600 px layout onto KINDLE_PAGE_W. Sizes are
+// written throughout as the figures the design was measured at and passed
+// through here, so the source stays readable as the design and the build
+// decides which pixel grid it lands on.
+//
+// Rounds half away from zero: several of these are negative (letter-spacing, a
+// superscript's offset) and C's truncation would pull them toward zero and
+// quietly loosen the tracking as the page grew.
+//
+// Outside the FEATURE_KINDLE_DASHBOARD guard on purpose — ForecastModule draws
+// its condition glyphs through this and can be built with the dashboard off.
+constexpr int kdPx(int n) {
+    return (n >= 0) ? ( n * KINDLE_PAGE_W + 300) / 600
+                    : -((-n * KINDLE_PAGE_W + 300) / 600);
+}
+
+
 #ifdef FEATURE_KINDLE_DASHBOARD
 
 class AsyncWebServer;
@@ -84,7 +134,7 @@ class AsyncWebServer;
 /// before ProcessingTask starts, so no readings are missed.
 void kindleTrackTrends();
 
-/// Registers GET /kindle on `server`.
+/// Registers GET /kindle and GET /kindle/probe on `server`.
 void registerKindleDashboard(AsyncWebServer& server);
 
 #endif  // FEATURE_KINDLE_DASHBOARD

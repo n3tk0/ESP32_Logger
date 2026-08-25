@@ -16,13 +16,9 @@
 #  include "../modules/ForecastModule.h"
 #endif
 
-// Layout constants, in CSS pixels. 600 is the width this page pins with its
-// own viewport meta, not a width the device reports — see KindleDashboard.h.
-// Everything is sized off it rather than in percentages, because percentage
-// widths inside tables behave inconsistently on that browser.
-static constexpr int PAGE_W  = 600;
-static constexpr int CHART_W = 560;
-static constexpr int CHART_H = 200;
+static constexpr int PAGE_W  = KINDLE_PAGE_W;
+static constexpr int CHART_W = kdPx(560);
+static constexpr int CHART_H = kdPx(200);
 
 // ---------------------------------------------------------------------------
 // Reading the current values
@@ -133,7 +129,7 @@ static void appendChart(String& out,
     lo -= pad; hi += pad;
     const float span = hi - lo;
 
-    const int L = 40, R = CHART_W - 4, T = 10, B = CHART_H - 26;
+    const int L = kdPx(40), R = CHART_W - kdPx(4), T = kdPx(10), B = CHART_H - kdPx(26);
     const float dx = (float)(R - L) / (float)(TrendRing::HOURS - 1);
 
     // Local lambdas would be tidier, but this file targets a toolchain shared
@@ -173,8 +169,8 @@ static void appendChart(String& out,
         out += F("\" x1=\""); out += L; out += F("\" y1=\""); out += y;
         out += F("\" x2=\""); out += R; out += F("\" y2=\""); out += y; out += F("\"/>");
         char lbl[12]; fmtInt(lbl, sizeof(lbl), v);
-        out += F("<text class=\"ax\" x=\""); out += L - 7;
-        out += F("\" y=\""); out += y + 4;
+        out += F("<text class=\"ax\" x=\""); out += L - kdPx(7);
+        out += F("\" y=\""); out += y + kdPx(4);
         out += F("\" text-anchor=\"end\">"); out += lbl; out += F("</text>");
     }
 
@@ -221,7 +217,7 @@ static void appendChart(String& out,
 
     for (int i = 0; i < TrendRing::HOURS; i += 6) {
         out += F("<text class=\"ax\" x=\""); out += KD_X(i);
-        out += F("\" y=\""); out += CHART_H - 8;
+        out += F("\" y=\""); out += CHART_H - kdPx(8);
         out += F("\" text-anchor=\"middle\">-");
         out += (TrendRing::HOURS - 1 - i);
         out += F("h</text>");
@@ -229,12 +225,31 @@ static void appendChart(String& out,
     // The right-hand edge is now, and the stride above never lands on it.
     // Leaving it bare made the axis read as if it stopped five hours ago.
     out += F("<text class=\"ax\" x=\""); out += KD_X(TrendRing::HOURS - 1);
-    out += F("\" y=\""); out += CHART_H - 8;
+    out += F("\" y=\""); out += CHART_H - kdPx(8);
     out += F("\" text-anchor=\"end\">" KD_T("now", "сега") "</text>");
 
     #undef KD_X
     #undef KD_Y
     out += F("</svg>");
+}
+
+// One legend swatch. It has to be drawn with the same stroke as the line it
+// stands for — .l-out #000/3, .l-in #777/2 dashed — or the key describes a
+// chart the reader is not looking at, which is exactly what it did before.
+// Emitted rather than written as a literal so it scales with the page.
+static void appendKeySwatch(String& out, const char* colour, int width, bool dashed) {
+    out += F("<svg width=\"");  out += kdPx(26);
+    out += F("\" height=\"");   out += kdPx(9);
+    out += F("\"><line x1=\"0\" y1=\""); out += kdPx(5);
+    out += F("\" x2=\"");       out += kdPx(26);
+    out += F("\" y2=\"");       out += kdPx(5);
+    out += F("\" stroke=\"");   out += colour;
+    out += F("\" stroke-width=\""); out += kdPx(width);
+    if (dashed) {
+        out += F("\" stroke-dasharray=\""); out += kdPx(7);
+        out += ' ';                         out += kdPx(5);
+    }
+    out += F("\"/></svg>");
 }
 
 // Smallest and largest hourly extreme across the window, for the caption.
@@ -361,110 +376,223 @@ static void handleKindle(AsyncWebServerRequest* req) {
     p += PAGE_W;
     p += F("\"><meta http-equiv=\"refresh\" content=\"");
     p += KINDLE_REFRESH_SEC;
-    p += F("\"><title>" KD_T("Weather", "Времето") "</title><style>"
-           "body{font-family:Bookerly,Caecilia,Georgia,'Times New Roman',serif;"
-           "margin:0;padding:20px 18px;background:#fff;color:#000;"
-           "-webkit-text-size-adjust:none}"
-           "*{box-sizing:border-box}"
-           "table{width:100%;border-collapse:collapse}"
-           "td{vertical-align:top;padding:0}"
-           /* Palette: #000 #444 #777 #aaa #d8d8d8 #fff. The panel has 16 real
-              grey levels — the dithering that argued against greys here comes
-              from gradients and from tones too close together, not from flat
-              well-separated fills. Spaced this far apart each renders solid. */
-           ".hero td{padding:2px 0 6px}"
-           /* Two classes, not one: .hero td above is (0,1,1) and would otherwise
-              outrank a bare .sep (0,1,0), zeroing this padding and letting the
-              rule sit against the first glyph of the inside reading. */
-           ".hero .sep{border-left:1px solid #aaa;padding-left:30px}"
-           ".lab{font-size:12px;letter-spacing:4px;text-transform:uppercase;"
-           "margin-bottom:2px;color:#777}"
-           ".big{font-size:92px;line-height:88px;height:88px;letter-spacing:-3px}"
-           /* Fixed height, not line-height alone: the two columns use
-              different sizes, and without it the text under the smaller
-              numeral starts higher and the column rule looks ragged. */
-           /* Four glyphs ("21.0", "-8.4") overrun a 280px column at 92px. */
-           ".big4{font-size:74px;letter-spacing:-2px}"
-           ".deg{font-size:30px;letter-spacing:0;vertical-align:top;"
-           "line-height:1;position:relative;top:12px}"
-           ".sub{font-size:15px;margin-top:6px;line-height:1.45;color:#444}"
-           ".sub-t{margin-top:1px}"
-           ".dim{color:#777}"
-           /* Temperature and humidity are one reading of one parcel of air,
-              so they share a baseline and a slash rather than a line break. */
-           ".slash{font-size:44px;color:#aaa;letter-spacing:0;padding:0 7px;"
-           "position:relative;top:-5px}"
-           ".hum-o{font-size:44px;color:#444;letter-spacing:-1px}"
-           /* A six-glyph reading ("-12.4") already drops to .big4; the pair
-              beside it has to come down too or "100%" runs off the column. */
-           ".big4 .slash{font-size:34px;padding:0 5px;top:-4px}"
-           ".big4 .hum-o{font-size:34px}"
-           /* The absolute pressure is the one figure here compared against
-              memory rather than against the page; at 15px it was set as a
-              footnote to the humidity. */
-           ".pres{font-size:34px;line-height:1.15;margin-top:5px;"
-           "letter-spacing:-1px}"
-           ".pres-u{font-size:17px;color:#777;letter-spacing:0}"
-           /* Right column, upper two thirds. Fixed height rather than
-              line-height alone, for the same reason .big has one: it is what
-              keeps the divider below it level with the left column's text. */
-           /* Height set so the divider lands two thirds of the way down the cell
-              the left column sizes: at 116px the inside block finished 24px
-              short of the bottom and left a hole under it. */
-           ".clock{font-size:96px;line-height:104px;height:139px;padding-top:12px;"
-           "letter-spacing:-4px}"
-           ".clock-x{font-size:44px;line-height:104px;height:116px;color:#777;"
-           "letter-spacing:0}"
-           ".inrule{border-top:1px solid #aaa;margin-bottom:7px}"
-           ".in-t{font-size:40px;line-height:1.05;letter-spacing:-1px}"
-           ".in-d{font-size:19px;vertical-align:top;letter-spacing:0;"
-           "position:relative;top:5px}"
-           ".slash-i{font-size:26px;padding:0 5px;top:-2px}"
-           ".hum-i{font-size:30px;color:#444}"
-           ".in-age{font-size:13px;letter-spacing:0;margin-left:10px}"
-           /* Three rules on the page, so a few px each is what keeps the
-              footer above the 800px fold. Measured, not guessed. */
-           ".rule{border-top:1px solid #aaa;margin:14px 0 10px}"
-           ".sec{font-size:12px;letter-spacing:4px;text-transform:uppercase;"
-           "margin-bottom:8px;color:#777}"
-           ".ico{vertical-align:top;padding-top:4px}"
-           ".fc{font-size:28px;line-height:1.1;padding-left:12px}"
-           ".fc-t{font-size:30px;margin-top:1px;color:#000}"
-           /* Equal thirds of the right half; nowrap so a two-part daily
-              figure never breaks across lines. */
-           ".per{width:88px;text-align:center;vertical-align:top;white-space:nowrap;"
-           "background:#f0f0f0;border-left:4px solid #fff}"
-           ".per-l{font-size:11px;letter-spacing:2px;text-transform:uppercase;"
-           "margin-bottom:1px;color:#777;padding-top:4px}"
-           ".per-t{font-size:19px;margin-top:-2px;padding-bottom:5px}"
-           ".chart{display:block;margin:2px auto 0}"
-           ".grid{stroke:#c4c4c4;stroke-width:1}"
-           ".vgrid{stroke:#d5d5d5;stroke-width:1}"
-           ".base{stroke:#777;stroke-width:1}"
-           ".ax{font-size:11px;fill:#777;font-family:Bookerly,Georgia,serif}"
-           ".band{fill:#d8d8d8;stroke:#8f8f8f;stroke-width:1}"
-           ".l-out{fill:none;stroke:#000;stroke-width:3}"
-           ".l-in{fill:none;stroke:#777;stroke-width:2;stroke-dasharray:7 5}"
-           ".key{font-size:13px;margin-top:2px;color:#444}"
-           ".key td{padding-top:2px}"
-           ".note{font-size:15px;font-style:italic;text-align:center;"
-           "padding:36px 0;color:#777}"
-           /* Tighter under its heading than the two sections above: the
-              strip is a row of blocks, not a paragraph, and the extra gap
-              was what pushed the footer below the fold. */
-           ".sec-wk{margin-bottom:3px}"
-           ".wk{margin-top:2px}"
-           ".wd{width:14.28%;text-align:center;padding:8px 0 7px;background:#f4f4f4}"
-           ".wd-we{background:#e4e4e4}"
-           ".wd-n{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#777}"
-           ".wd-d{font-size:24px;line-height:1.15}"
-           /* Inverted rather than outlined: a filled block is the one
-              mark that stays unambiguous after e-ink dithering, where a
-              thin ring can read as a smudge. */
-           ".wd-now{background:#000;color:#fff}"
-           ".foot{border-top:1px solid #aaa;margin-top:11px;padding-top:5px;"
-           "font-size:12px;color:#555;letter-spacing:.5px}"
-           "</style></head><body>");
+    p += F("\"><title>" KD_T("Weather", "Времето") "</title><style>");
+
+    // The stylesheet, emitted rather than stored as one literal: every number
+    // in it is a 600-px-layout figure passed through kdPx(). KD_S is a literal
+    // fragment, KD_N a scaled number — reading a line as "fragment, number,
+    // fragment" is how to check one against the design it came from.
+    #define KD_S(lit) p += F(lit)
+    #define KD_N(n)   p += kdPx(n)
+
+    KD_S("body{font-family:Bookerly,Caecilia,Georgia,'Times New Roman',serif;"
+         "margin:0;padding:");                 KD_N(20);
+    KD_S("px ");                               KD_N(18);
+    KD_S("px;background:#fff;color:#000;-webkit-text-size-adjust:none}"
+         "*{box-sizing:border-box}"
+         "table{width:100%;border-collapse:collapse}"
+         "td{vertical-align:top;padding:0}");
+
+    // Palette: #000 #444 #777 #aaa #d8d8d8 #fff. The panel has 16 real grey
+    // levels — the dithering that argued against greys here comes from
+    // gradients and from tones too close together, not from flat
+    // well-separated fills. Spaced this far apart each renders solid.
+    KD_S(".hero td{padding:");                 KD_N(2);
+    KD_S("px 0 ");                             KD_N(6);
+    KD_S("px}");
+
+    // Two classes, not one: .hero td above is (0,1,1) and would otherwise
+    // outrank a bare .sep (0,1,0), zeroing this padding and letting the rule
+    // sit against the first glyph of the inside reading.
+    KD_S(".hero .sep{border-left:");           KD_N(1);
+    KD_S("px solid #aaa;padding-left:");       KD_N(30);
+    KD_S("px}");
+
+    KD_S(".lab{font-size:");                   KD_N(12);
+    KD_S("px;letter-spacing:");                KD_N(4);
+    KD_S("px;text-transform:uppercase;margin-bottom:"); KD_N(2);
+    KD_S("px;color:#777}");
+
+    // Fixed height, not line-height alone: the two columns use different
+    // sizes, and without it the text under the smaller numeral starts higher
+    // and the column rule looks ragged.
+    KD_S(".big{font-size:");                   KD_N(92);
+    KD_S("px;line-height:");                   KD_N(88);
+    KD_S("px;height:");                        KD_N(88);
+    KD_S("px;letter-spacing:");                KD_N(-3);
+    KD_S("px}");
+
+    // Four glyphs ("21.0", "-8.4") overrun the column at the larger size.
+    KD_S(".big4{font-size:");                  KD_N(74);
+    KD_S("px;letter-spacing:");                KD_N(-2);
+    KD_S("px}");
+
+    KD_S(".deg{font-size:");                   KD_N(30);
+    KD_S("px;letter-spacing:0;vertical-align:top;line-height:1;"
+         "position:relative;top:");            KD_N(12);
+    KD_S("px}");
+
+    KD_S(".sub{font-size:");                   KD_N(15);
+    KD_S("px;margin-top:");                    KD_N(6);
+    KD_S("px;line-height:1.45;color:#444}");
+    KD_S(".sub-t{margin-top:");                KD_N(1);
+    KD_S("px}");
+    KD_S(".dim{color:#777}");
+
+    // Temperature and humidity are one reading of one parcel of air, so they
+    // share a baseline and a slash rather than a line break.
+    KD_S(".slash{font-size:");                 KD_N(44);
+    KD_S("px;color:#aaa;letter-spacing:0;padding:0 "); KD_N(7);
+    KD_S("px;position:relative;top:");         KD_N(-5);
+    KD_S("px}");
+    KD_S(".hum-o{font-size:");                 KD_N(44);
+    KD_S("px;color:#444;letter-spacing:");     KD_N(-1);
+    KD_S("px}");
+
+    // A six-glyph reading ("-12.4") already drops to .big4; the pair beside it
+    // has to come down too or "100%" runs off the column.
+    KD_S(".big4 .slash{font-size:");           KD_N(34);
+    KD_S("px;padding:0 ");                     KD_N(5);
+    KD_S("px;top:");                           KD_N(-4);
+    KD_S("px}");
+    KD_S(".big4 .hum-o{font-size:");           KD_N(34);
+    KD_S("px}");
+
+    // The absolute pressure is the one figure here compared against memory
+    // rather than against the page; at 15px it was set as a footnote to the
+    // humidity.
+    KD_S(".pres{font-size:");                  KD_N(34);
+    KD_S("px;line-height:1.15;margin-top:");   KD_N(5);
+    KD_S("px;letter-spacing:");                KD_N(-1);
+    KD_S("px}");
+    KD_S(".pres-u{font-size:");                KD_N(17);
+    KD_S("px;color:#777;letter-spacing:0}");
+
+    // Right column, upper two thirds. Fixed height rather than line-height
+    // alone, for the same reason .big has one: it is what keeps the divider
+    // below it level with the left column's text. The height is set so the
+    // divider lands two thirds of the way down the cell the left column sizes
+    // — at 116 the inside block finished short and left a hole under it.
+    KD_S(".clock{font-size:");                 KD_N(96);
+    KD_S("px;line-height:");                   KD_N(104);
+    KD_S("px;height:");                        KD_N(139);
+    KD_S("px;padding-top:");                   KD_N(12);
+    KD_S("px;letter-spacing:");                KD_N(-4);
+    KD_S("px}");
+    KD_S(".clock-x{font-size:");               KD_N(44);
+    KD_S("px;line-height:");                   KD_N(104);
+    KD_S("px;height:");                        KD_N(116);
+    KD_S("px;color:#777;letter-spacing:0}");
+
+    KD_S(".inrule{border-top:");               KD_N(1);
+    KD_S("px solid #aaa;margin-bottom:");      KD_N(7);
+    KD_S("px}");
+    KD_S(".in-t{font-size:");                  KD_N(40);
+    KD_S("px;line-height:1.05;letter-spacing:"); KD_N(-1);
+    KD_S("px}");
+    KD_S(".in-d{font-size:");                  KD_N(19);
+    KD_S("px;vertical-align:top;letter-spacing:0;position:relative;top:"); KD_N(5);
+    KD_S("px}");
+    KD_S(".slash-i{font-size:");               KD_N(26);
+    KD_S("px;padding:0 ");                     KD_N(5);
+    KD_S("px;top:");                           KD_N(-2);
+    KD_S("px}");
+    KD_S(".hum-i{font-size:");                 KD_N(30);
+    KD_S("px;color:#444}");
+    KD_S(".in-age{font-size:");                KD_N(13);
+    KD_S("px;letter-spacing:0;margin-left:");  KD_N(10);
+    KD_S("px}");
+
+    // Three rules on the page, so a few px each is what keeps the footer above
+    // the fold. Measured, not guessed.
+    KD_S(".rule{border-top:");                 KD_N(1);
+    KD_S("px solid #aaa;margin:");             KD_N(14);
+    KD_S("px 0 ");                             KD_N(10);
+    KD_S("px}");
+    KD_S(".sec{font-size:");                   KD_N(12);
+    KD_S("px;letter-spacing:");                KD_N(4);
+    KD_S("px;text-transform:uppercase;margin-bottom:"); KD_N(8);
+    KD_S("px;color:#777}");
+
+    KD_S(".ico{vertical-align:top;padding-top:"); KD_N(4);
+    KD_S("px}");
+    KD_S(".fc{font-size:");                    KD_N(28);
+    KD_S("px;line-height:1.1;padding-left:");  KD_N(12);
+    KD_S("px}");
+    KD_S(".fc-t{font-size:");                  KD_N(30);
+    KD_S("px;margin-top:");                    KD_N(1);
+    KD_S("px;color:#000}");
+
+    // Equal thirds of the right half; nowrap so a two-part daily figure never
+    // breaks across lines.
+    KD_S(".per{width:");                       KD_N(88);
+    KD_S("px;text-align:center;vertical-align:top;white-space:nowrap;"
+         "background:#f0f0f0;border-left:");   KD_N(4);
+    KD_S("px solid #fff}");
+    KD_S(".per-l{font-size:");                 KD_N(11);
+    KD_S("px;letter-spacing:");                KD_N(2);
+    KD_S("px;text-transform:uppercase;margin-bottom:"); KD_N(1);
+    KD_S("px;color:#777;padding-top:");        KD_N(4);
+    KD_S("px}");
+    KD_S(".per-t{font-size:");                 KD_N(19);
+    KD_S("px;margin-top:");                    KD_N(-2);
+    KD_S("px;padding-bottom:");                KD_N(5);
+    KD_S("px}");
+
+    KD_S(".chart{display:block;margin:");      KD_N(2);
+    KD_S("px auto 0}");
+    KD_S(".grid{stroke:#c4c4c4;stroke-width:"); KD_N(1);
+    KD_S("}.vgrid{stroke:#d5d5d5;stroke-width:"); KD_N(1);
+    KD_S("}.base{stroke:#777;stroke-width:");  KD_N(1);
+    KD_S("}.ax{font-size:");                   KD_N(11);
+    KD_S("px;fill:#777;font-family:Bookerly,Georgia,serif}");
+    KD_S(".band{fill:#d8d8d8;stroke:#8f8f8f;stroke-width:"); KD_N(1);
+    KD_S("}.l-out{fill:none;stroke:#000;stroke-width:"); KD_N(3);
+    KD_S("}.l-in{fill:none;stroke:#777;stroke-width:"); KD_N(2);
+    KD_S(";stroke-dasharray:");                KD_N(7);
+    KD_S(" ");                                 KD_N(5);
+    KD_S("}");
+
+    KD_S(".key{font-size:");                   KD_N(13);
+    KD_S("px;margin-top:");                    KD_N(2);
+    KD_S("px;color:#444}");
+    KD_S(".key td{padding-top:");              KD_N(2);
+    KD_S("px}");
+    KD_S(".note{font-size:");                  KD_N(15);
+    KD_S("px;font-style:italic;text-align:center;padding:"); KD_N(36);
+    KD_S("px 0;color:#777}");
+
+    // Tighter under its heading than the two sections above: the strip is a
+    // row of blocks, not a paragraph, and the extra gap was what pushed the
+    // footer below the fold.
+    KD_S(".sec-wk{margin-bottom:");            KD_N(3);
+    KD_S("px}");
+    KD_S(".wk{margin-top:");                   KD_N(2);
+    KD_S("px}");
+    KD_S(".wd{width:14.28%;text-align:center;padding:"); KD_N(8);
+    KD_S("px 0 ");                             KD_N(7);
+    KD_S("px;background:#f4f4f4}");
+    KD_S(".wd-we{background:#e4e4e4}");
+    KD_S(".wd-n{font-size:");                  KD_N(11);
+    KD_S("px;letter-spacing:");                KD_N(2);
+    KD_S("px;text-transform:uppercase;color:#777}");
+    KD_S(".wd-d{font-size:");                  KD_N(24);
+    KD_S("px;line-height:1.15}");
+
+    // Inverted rather than outlined: a filled block is the one mark that stays
+    // unambiguous after e-ink dithering, where a thin ring can read as a smudge.
+    KD_S(".wd-now{background:#000;color:#fff}");
+
+    KD_S(".foot{border-top:");                 KD_N(1);
+    KD_S("px solid #aaa;margin-top:");         KD_N(11);
+    KD_S("px;padding-top:");                   KD_N(5);
+    KD_S("px;font-size:");                     KD_N(12);
+    KD_S("px;color:#555;letter-spacing:.5px}");
+
+    #undef KD_S
+    #undef KD_N
+
+    p += F("</style></head><body>");
 
     // No masthead. The place name never changed and the date is carried by the
     // week strip at the foot, so the row was two lines of furniture above the
@@ -566,19 +694,16 @@ static void handleKindle(AsyncWebServerRequest* req) {
         // The two swatches must be drawn with the same stroke as the lines they
         // stand for — .l-out #000/3, .l-in #777/2 dashed — or the key describes
         // a chart the reader is not looking at.
-        p += F("<table class=\"key\"><tr><td>"
-               "<svg width=\"26\" height=\"9\"><line x1=\"0\" y1=\"5\" x2=\"26\" "
-               "y2=\"5\" stroke=\"#000\" stroke-width=\"3\"/></svg> "
-               KD_T("outside mean", "средно навън")
+        p += F("<table class=\"key\"><tr><td>");
+        appendKeySwatch(p, "#000", 3, false);
+        p += F(" " KD_T("outside mean", "средно навън")
                "<span class=\"dim\">"
                KD_T(", shaded band = hourly low to high",
                     ", сивото е час. мин&ndash;макс")
                "</span>"
-               "</td><td style=\"text-align:right\">"
-               "<svg width=\"26\" height=\"9\"><line x1=\"0\" y1=\"5\" x2=\"26\" "
-               "y2=\"5\" stroke=\"#777\" stroke-width=\"2\" "
-               "stroke-dasharray=\"7 5\"/></svg> " KD_T("inside", "вътре")
-               "</td></tr></table>");
+               "</td><td style=\"text-align:right\">");
+        appendKeySwatch(p, "#777", 2, true);
+        p += F(" " KD_T("inside", "вътре") "</td></tr></table>");
     }
 
 #ifdef MODULE_FORECAST_ENABLED
@@ -610,8 +735,82 @@ void kindleTrackTrends() {
     trendRing.track(KINDLE_OUTDOOR_SENSOR, "humidity");
 }
 
+// ---------------------------------------------------------------------------
+// GET /kindle/probe — what to set KINDLE_PAGE_W to
+// ---------------------------------------------------------------------------
+// The right layout width depends on what the reader's browser reports for its
+// viewport and devicePixelRatio, and that is a question only the device can
+// answer. Rather than guess, load this on the reader and read the numbers off.
+//
+// This is the one page here that uses JavaScript, because the numbers it exists
+// to print are only knowable from inside the browser. It degrades: the user
+// agent comes from the request header and is printed server-side, so an older
+// firmware that runs nothing still tells you which browser it is.
+//
+// The ruler underneath needs no script at all. Each bar is a fixed pixel width
+// declared under a viewport pinned to the width it is testing, so whichever bar
+// reaches the right edge names the value to build with.
+static void handleKindleProbe(AsyncWebServerRequest* req) {
+    String p;
+    p.reserve(2600);
+
+    p += F("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+           "<meta name=\"viewport\" content=\"width=");
+    p += PAGE_W;
+    p += F("\"><title>Kindle probe</title><style>"
+           "body{font-family:Bookerly,Georgia,serif;margin:0;padding:16px;"
+           "background:#fff;color:#000;-webkit-text-size-adjust:none}"
+           "h1{font-size:20px;margin:0 0 10px}"
+           "p,li{font-size:15px;line-height:1.5}"
+           "b{font-size:19px}"
+           ".bar{background:#d8d8d8;border-left:2px solid #000;margin-bottom:3px;"
+           "font-size:12px;padding:2px 4px;white-space:nowrap}"
+           "</style></head><body><h1>Layout probe</h1>");
+
+    p += F("<p>This build is <b>KINDLE_PAGE_W=");
+    p += PAGE_W;
+    p += F("</b>.</p><p id=\"r\">If this line does not change, this browser "
+           "runs no JavaScript &mdash; use the ruler below instead.</p>"
+           "<script>document.getElementById('r').innerHTML="
+           "'innerWidth <b>'+window.innerWidth+'</b> &middot; innerHeight <b>'"
+           "+window.innerHeight+'</b><br>devicePixelRatio <b>'"
+           "+(window.devicePixelRatio||1)+'</b> &middot; screen '"
+           "+screen.width+'&times;'+screen.height;</script>");
+
+    // Server-side, so it survives a browser that will not run the script.
+    p += F("<p>User agent:<br>");
+    if (req->hasHeader("User-Agent")) {
+        String ua = req->header("User-Agent");
+        ua.replace("<", "&lt;");
+        p += ua;
+    } else {
+        p += F("(not sent)");
+    }
+    p += F("</p>");
+
+    // 320 is below anything this layout supports and 1072 is the panel's own
+    // pixel count; a bar that overflows tells you as much as one that fits.
+    p += F("<p>The first bar that reaches the right edge without overflowing is "
+           "the width to build with:</p>");
+    static const int CANDIDATES[] = { 1072, 800, 768, 700, 600, 536, 480, 400 };
+    for (unsigned i = 0; i < sizeof(CANDIDATES) / sizeof(CANDIDATES[0]); i++) {
+        p += F("<div class=\"bar\" style=\"width:");
+        p += CANDIDATES[i];
+        p += F("px\">");
+        p += CANDIDATES[i];
+        p += F("</div>");
+    }
+
+    p += F("<p><a href=\"/kindle\">back to the dashboard</a></p></body></html>");
+
+    AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
+    res->addHeader("Cache-Control", "no-store");
+    req->send(res);
+}
+
 void registerKindleDashboard(AsyncWebServer& server) {
     server.on("/kindle", HTTP_GET, handleKindle);
+    server.on("/kindle/probe", HTTP_GET, handleKindleProbe);
 }
 
 #endif  // FEATURE_KINDLE_DASHBOARD
