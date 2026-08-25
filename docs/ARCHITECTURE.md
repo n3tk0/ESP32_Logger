@@ -534,6 +534,17 @@ The **Auth** column in the index uses:
 | GET | `/api/latest` | read | Latest value per sensor/metric |
 | GET | `/api/data` | read | Aggregated time-series (params in §6.3) |
 | GET | `/api/backup` | read | Download a full config/data backup |
+| POST | `/api/ingest` | token | Accept readings pushed by a remote node (`FEATURE_REMOTE_NODES`) |
+| GET | `/kindle` | read | Server-rendered e-ink dashboard (`FEATURE_KINDLE_DASHBOARD`) |
+
+`/api/ingest` is the one mutating route that does **not** go through
+`requireMutatingAuth()`. That chain checks a CSRF token, which exists to stop a
+browser being made to issue a state-changing request on the strength of
+credentials it carries automatically. A sensor node has no cookie jar, no
+session and no origin, so there is nothing for CSRF to protect and no way for
+the node to obtain a token. It is gated by the shared `INGEST_TOKEN` (header
+`X-Ingest-Token` or `?token=`), the same rate limiter as every other mutating
+route, and whatever Basic Auth is compiled in globally.
 
 **Alerts**
 
