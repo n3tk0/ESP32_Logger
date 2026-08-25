@@ -317,7 +317,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     p += PAGE_W;
     p += F("\"><meta http-equiv=\"refresh\" content=\"");
     p += KINDLE_REFRESH_SEC;
-    p += F("\"><title>Weather</title><style>"
+    p += F("\"><title>" KD_T("Weather", "Времето") "</title><style>"
            "body{font-family:Bookerly,Caecilia,Georgia,'Times New Roman',serif;"
            "margin:0;padding:20px 18px;background:#fff;color:#000;"
            "-webkit-text-size-adjust:none}"
@@ -391,7 +391,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     // Masthead
     p += F("<div class=\"mast\"><table><tr><td class=\"place\">");
-    p += (config.deviceName[0] ? config.deviceName : "Weather");
+    p += (config.deviceName[0] ? config.deviceName : KD_T("Weather", "Времето"));
     p += F("</td><td class=\"when\">");
     if (now > 1000000000u) {
         const time_t when_t = (time_t)now;
@@ -476,13 +476,20 @@ static void handleKindle(AsyncWebServerRequest* req) {
     p += F("<div class=\"rule\"></div><div class=\"sec\">" KD_T("Last 24 hours", "Последните 24 часа") "</div>");
     appendChart(p, tOut, tIn, haveOut, haveIn);
     if (haveOut || haveIn) {
+        // The two swatches must be drawn with the same stroke as the lines they
+        // stand for — .l-out #000/3, .l-in #777/2 dashed — or the key describes
+        // a chart the reader is not looking at.
         p += F("<table class=\"key\"><tr><td>"
                "<svg width=\"26\" height=\"9\"><line x1=\"0\" y1=\"5\" x2=\"26\" "
-               "y2=\"5\" stroke=\"#000\" stroke-width=\"3\"/></svg> outside mean"
-               "<span class=\"dim\">, hatched band = hourly low to high</span>"
+               "y2=\"5\" stroke=\"#000\" stroke-width=\"3\"/></svg> "
+               KD_T("outside mean", "средно навън")
+               "<span class=\"dim\">"
+               KD_T(", shaded band = hourly low to high",
+                    ", сивото е час. мин&ndash;макс")
+               "</span>"
                "</td><td style=\"text-align:right\">"
                "<svg width=\"26\" height=\"9\"><line x1=\"0\" y1=\"5\" x2=\"26\" "
-               "y2=\"5\" stroke=\"#000\" stroke-width=\"2\" "
+               "y2=\"5\" stroke=\"#777\" stroke-width=\"2\" "
                "stroke-dasharray=\"7 5\"/></svg> " KD_T("inside", "вътре")
                "</td></tr></table>");
     }
