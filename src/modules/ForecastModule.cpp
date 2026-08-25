@@ -263,39 +263,39 @@ void appendForecastSection(String& out) {
     const ForecastModule::Data d = forecastModule.snapshot();
     if (!d.valid) return;
 
-    out += F("<h2>Forecast</h2><div class=\"card\">");
-    out += F("<table class=\"row\"><tr><td width=\"55%\">"
-             "<div style=\"font-size:30px\">");
+    // Set as a lead paragraph under a rule, matching the dashboard's print
+    // idiom — the condition is the headline, the day's range sits opposite it
+    // like a stock quote. No box: a border here would be the only screen-UI
+    // element on an otherwise typeset page.
+    out += F("<div class=\"rule\"></div><div class=\"sec\">Forecast</div>"
+             "<table><tr><td width=\"58%\" class=\"fc\">");
     out += d.summary;
-    out += F("</div>");
-
-    if (isfinite(d.windKph)) {
-        out += F("<div class=\"sub\">wind ");
-        out += (int)(d.windKph + 0.5f);
-        out += F(" km/h</div>");
-    }
-    out += F("</td><td width=\"45%\" style=\"text-align:right\">");
-
+    out += F("</td><td width=\"42%\" class=\"fc-hi\">");
     if (isfinite(d.highC) && isfinite(d.lowC)) {
-        out += F("<div style=\"font-size:30px\">");
         out += (int)lroundf(d.highC);
         out += F("&deg; / ");
         out += (int)lroundf(d.lowC);
-        out += F("&deg;</div><div class=\"sub\">high / low</div>");
+        out += F("&deg;");
     }
-    out += F("</td></tr></table>");
-
-    // Age, not the fetch time: "3 h ago" answers "should I believe this?"
-    // without the reader doing arithmetic against a clock.
+    out += F("</td></tr><tr><td class=\"sub\">");
+    if (isfinite(d.windKph)) {
+        out += F("wind ");
+        out += (int)(d.windKph + 0.5f);
+        out += F(" km/h");
+    }
+    // Age, not the fetch time: it answers "should I believe this?" without the
+    // reader doing arithmetic against a clock.
     const uint32_t now = (uint32_t)time(nullptr);
     if (d.fetchedAt > 0 && now > d.fetchedAt) {
         const uint32_t ageMin = (now - d.fetchedAt) / 60u;
-        out += F("<div class=\"sub\">forecast ");
+        if (isfinite(d.windKph)) out += F(" &middot; ");
+        out += F("<span class=\"dim\">");
         if (ageMin < 60) { out += ageMin; out += F(" min old"); }
         else             { out += (ageMin / 60); out += F(" h old"); }
-        out += F("</div>");
+        out += F("</span>");
     }
-    out += F("</div>");
+    out += F("</td><td class=\"sub\" style=\"text-align:right\">"
+             "<span class=\"dim\">high / low</span></td></tr></table>");
 }
 
 #endif  // MODULE_FORECAST_ENABLED
