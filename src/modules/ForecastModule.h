@@ -79,7 +79,10 @@ public:
         float    windKph  = NAN;
         int      code     = -1;    // WMO code (Open-Meteo) or mapped OWM id
         uint32_t fetchedAt = 0;    // Unix seconds
-        char     summary[24] = {0};
+        // 40, not 24: "Превалявания" is 24 bytes of UTF-8 on its own, and
+        // strncpy(dst, src, sizeof-1) would cut it after 23 — mid-character,
+        // which shows on the panel as one broken glyph and nothing else.
+        char     summary[40] = {0};
         Period   outlook[3];
     };
 
@@ -88,6 +91,10 @@ public:
     const char* getDescription() const override {
         return "Short forecast from Open-Meteo or OpenWeatherMap";
     }
+
+    /// Drives the settings form under Modules → Weather forecast. Without it
+    /// hasUI() is false and the module offers only an on/off switch.
+    const char* schema() const override;
 
     bool load(JsonObjectConst cfg) override;
     bool save(JsonObject cfg) const override;

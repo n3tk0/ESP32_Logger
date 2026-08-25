@@ -6,6 +6,13 @@ a short forecast for the part a sensor cannot know.
 
 Point the Kindle's experimental browser at `http://<collector-ip>/kindle`.
 
+![The dashboard rendered at the Paperwhite 3's viewport](images/kindle-dashboard.png)
+
+Rendered at the device's real viewport — 600×800 CSS px at devicePixelRatio 2 —
+through a greyscale filter, which is how every layout decision in this document
+was checked. The figures are synthetic; the stylesheet is extracted from
+`KindleDashboard.cpp` at render time so the picture cannot drift from the code.
+
 ## Enabling it
 
 ```ini
@@ -22,6 +29,31 @@ build_flags =
 The two sensor names are instance ids from `platform_config.json`. Typically
 `outdoor` is a remote node (see [`node/`](../node/README.md)) and `indoor` is a
 locally wired BME280.
+
+## What is set where
+
+The split is not arbitrary: anything that changes what the page *is* costs
+flash whether you use it or not, so it is chosen at build time; anything that
+changes what the page *says* is runtime.
+
+| Setting | Where | Why |
+|---|---|---|
+| dashboard on/off | `setup.h` / `-DFEATURE_KINDLE_DASHBOARD` | the whole renderer is compiled out when off |
+| `KINDLE_OUTDOOR_SENSOR`, `KINDLE_INDOOR_SENSOR` | build flag | also names the four `TrendRing` series registered at boot |
+| `KINDLE_REFRESH_SEC` | build flag | one number in a `<meta>` tag |
+| `KINDLE_LANG_BG` | build flag | a single-language build pays nothing for the other |
+| provider, key, lat/lon, outlook, interval | **the collector's web UI** | Settings → Modules → Weather forecast |
+
+The forecast row is the part you will actually want to change after flashing —
+coordinates, and whether the three columns step in hours or days — so it is a
+module with a config schema like any other. Nothing about the forecast needs a
+reflash.
+
+The sensor ids are compile-time because `kindleTrackTrends()` registers them
+with `TrendRing` once in `setup()`, before `ProcessingTask` starts, so that no
+reading is missed. Making them editable at runtime means discarding 24 hours of
+history on every save, which is a worse trade than editing one line and
+reflashing on the rare occasion a sensor is renamed.
 
 ## What the target browser can't do
 

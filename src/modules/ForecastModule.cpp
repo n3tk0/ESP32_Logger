@@ -11,6 +11,38 @@
 
 ForecastModule forecastModule;
 
+namespace {
+
+// Drives the form under Settings → Modules → Weather forecast. Without it
+// hasUI() is false and the module manager offers only an on/off switch, which
+// left the coordinates reachable only by POSTing raw JSON at /api/modules.
+//
+// The labels stay English: this is the collector's own admin UI, which is
+// English throughout, and KINDLE_LANG_BG is about the panel on the shelf.
+const char FORECAST_SCHEMA[] PROGMEM =
+    "{\"fields\":["
+      "{\"id\":\"provider\",\"type\":\"enum\",\"label\":\"Provider\",\"group\":\"Source\","
+        "\"options\":[{\"v\":\"open-meteo\",\"l\":\"Open-Meteo (no key)\"},"
+                     "{\"v\":\"owm\",\"l\":\"OpenWeatherMap\"}],"
+        "\"help\":\"Open-Meteo needs no account and serves the current conditions and the outlook from one request. OpenWeatherMap needs a key and two.\"},"
+      "{\"id\":\"api_key\",\"type\":\"password\",\"max\":39,\"label\":\"API key\",\"group\":\"Source\","
+        "\"showIf\":{\"provider\":\"owm\"},"
+        "\"help\":\"OpenWeatherMap only. The free tier allows about 1000 calls a day, which the 10-minute interval floor keeps you inside.\"},"
+      "{\"id\":\"lat\",\"type\":\"float\",\"min\":-90,\"max\":90,\"step\":0.0001,\"label\":\"Latitude\",\"unit\":\"\\u00b0\",\"group\":\"Location\","
+        "\"help\":\"Required. Both coordinates at 0 is read as 'not set up yet' and no request is made.\"},"
+      "{\"id\":\"lon\",\"type\":\"float\",\"min\":-180,\"max\":180,\"step\":0.0001,\"label\":\"Longitude\",\"unit\":\"\\u00b0\",\"group\":\"Location\"},"
+      "{\"id\":\"outlook\",\"type\":\"enum\",\"label\":\"Outlook columns\",\"group\":\"Dashboard\","
+        "\"options\":[{\"v\":\"hourly\",\"l\":\"Next hours (+3, +6, +9)\"},"
+                     "{\"v\":\"daily\",\"l\":\"Next days (tomorrow .. +3)\"}],"
+        "\"help\":\"What the three columns on the right of the /kindle forecast row step through. Hourly prints one figure per column; daily prints that day's high and low.\"},"
+      "{\"id\":\"interval_min\",\"type\":\"int\",\"min\":10,\"max\":360,\"label\":\"Fetch interval\",\"unit\":\"min\",\"group\":\"Dashboard\","
+        "\"help\":\"Clamped to 10-360. A forecast does not move faster than that, and the floor is what keeps a misconfigured device off a provider's rate limit.\"}"
+    "]}";
+
+}  // namespace
+
+const char* ForecastModule::schema() const { return FORECAST_SCHEMA; }
+
 // ---------------------------------------------------------------------------
 // WMO weather codes → a word that fits the dashboard.
 // ---------------------------------------------------------------------------
