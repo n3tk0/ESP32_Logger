@@ -1,8 +1,9 @@
 # Sensor node (ESP8266)
 
 A satellite board that reads one BME280/BMP280 and POSTs the values to an
-ESP32_Logger collector. No web server, no storage, no display — everything
-that looks at this node's data looks at the collector.
+ESP32_Logger collector. No data storage, no display, and — outside the setup
+portal — no server and no listening port. Everything that looks at this node's
+data looks at the collector.
 
 ## Why this is not a fork of the collector firmware
 
