@@ -44,7 +44,7 @@ changes what the page *says* is runtime.
 |---|---|---|
 | dashboard on/off | `setup.h` / `-DFEATURE_KINDLE_DASHBOARD` | the whole renderer is compiled out when off |
 | `KINDLE_OUTDOOR_SENSOR`, `KINDLE_INDOOR_SENSOR` | build flag | also names the four `TrendRing` series registered at boot |
-| `KINDLE_REFRESH_SEC`, `KINDLE_REFRESH_MIN_SEC`, `KINDLE_DATA_PERIOD_SEC`, `KINDLE_FOLLOW_DATA` | build flag | they only set numbers in a `<meta>` tag |
+| `KINDLE_REFRESH_SEC`, `KINDLE_REFRESH_MIN_SEC`, `KINDLE_DATA_PERIOD_SEC`, `KINDLE_FOLLOW_DATA`, `KINDLE_CLOCK_PIN_REFRESH`, `KINDLE_CLOCK_SYNC_GUARD_SEC` | build flag | they only set numbers in a `<meta>` tag |
 | `KINDLE_PAGE_W` | build flag | rescales every size in the stylesheet |
 | `KINDLE_LANG_BG` | build flag | a single-language build pays nothing for the other |
 | provider, key, lat/lon, outlook, interval | **the collector's web UI** | Settings → Modules → Weather forecast |
@@ -230,6 +230,7 @@ Three ways, and one of them is not what it sounds like.
 -DKINDLE_DATA_PERIOD_SEC=60    ; how often readings are expected
 -DKINDLE_FOLLOW_DATA=1         ; 0 for the old fixed interval
 -DKINDLE_CLOCK_PIN_REFRESH=1   ; 0 lets the clock go stale between reloads
+-DKINDLE_CLOCK_SYNC_GUARD_SEC=20 ; never reload sooner than this after rendering
 ```
 
 ### 1. The reader asks
@@ -238,6 +239,12 @@ A **refresh** button in the footer. A link, not a script, so a five-way pad
 reaches it as readily as a fingertip. Sized to 128×46 device px — 44 px is the
 smallest thing worth aiming at on a touch panel, and it is measured rather than
 assumed.
+
+> **Route order is load-bearing.** `AsyncCallbackWebHandler::canHandle` matches
+> a URL that *starts with* its uri plus `/`, and the first registered handler
+> that matches wins. `/kindle` registered before `/kindle/probe` and
+> `/kindle/clear` swallowed both, and the sub-pages silently rendered the
+> dashboard instead. The children are registered first.
 
 ### 2. The reader asks for a clean panel
 
@@ -284,12 +291,36 @@ displays the previous minute for 58 seconds out of every 60 — a clock that is
 wrong most of the time. Landing on :00 makes the displayed minute change when
 the minute changes.
 
-It is deliberately **not** a plain `min()` of the two demands. A data delay that
-happens to fall a second or two short of the boundary costs the same repaint but
-steals the alignment, so it has to be at least five seconds earlier before it is
-worth breaking the clock's cadence for. The property is checked exhaustively:
-from every one of the 60 seconds in a minute, the next reload lands on a
-boundary.
+It is deliberately **not** a plain `min()` of the two demands, and getting that
+wrong produced two bugs at opposite ends of the same minute:
+
+- at **:58** the boundary is 2 s away, the sync guard pushes the clock's request
+  past it, and a data path floored at 60 undercut it by two seconds — locking
+  the page permanently to the :58 offset;
+- requiring the data to be five seconds earlier fixed that end and broke the
+  other: from **:41 to :54** the guard pushes the clock to 79…66 s, the data's
+  60 clears the margin, and the alignment is stolen again.
+
+So the test is not *&#34;is the data earlier&#34;* but *&#34;does the data genuinely need a
+faster cadence than one repaint a minute&#34;*. Anything asking for 60 s or more
+wants what the clock wants, and the clock's version lands on the boundary.
+
+`tests/host/test_refresh_cadence.cpp` checks this exhaustively — from every one
+of the 60 seconds in a minute, the next reload lands on a boundary — and runs in
+CI under all three sanitiser modes. The second bug above was found by that test,
+not by reading the code.
+
+`KINDLE_CLOCK_SYNC_GUARD_SEC` (20 s) is what stops a nearly-arrived boundary
+turning into a second flash moments after the page loaded; below it, the
+following boundary is taken instead. It is separate from
+`KINDLE_REFRESH_MIN_SEC`, which floors the **data** path only — the clock cannot
+honour a 60 s floor *and* align from a cold load, so the first reload after a
+fresh load may come in 20–79 s before the cadence settles.
+
+**An unsynced device does not pin.** The page prints &#34;clock not set&#34; rather than
+a time, so there is no clock to keep honest; pinning there would defeat the
+backoff entirely and repaint every minute forever waiting on a node that is not
+coming back.
 
 **At the default settings the clock always wins.** The data floor is 60 s and
 the clock never asks for more than 60, so `KINDLE_FOLLOW_DATA` changes nothing

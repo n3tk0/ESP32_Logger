@@ -11,6 +11,7 @@
 #include "../utils/MutexGuard.h"
 #include "../core/Globals.h"
 #include "DashboardStrings.h"
+#include "RefreshCadence.h"
 
 #ifdef MODULE_FORECAST_ENABLED
 #  include "../modules/ForecastModule.h"
@@ -252,93 +253,6 @@ static void appendKeySwatch(String& out, const char* colour, int width, bool das
     out += F("\"/></svg>");
 }
 
-// ---------------------------------------------------------------------------
-// How long until this page reloads itself
-// ---------------------------------------------------------------------------
-// A prediction, not a subscription — see the header. The page knows when the
-// newest reading landed and how often readings are expected, so it aims its
-// own reload just after the next one is due.
-//
-// The three cases below exist because "no reading yet" and "the node died"
-// both look like "the data is old", and neither should make an e-ink panel
-// flash every minute forever waiting for something that is not coming.
-//
-// AND THEN THERE IS THE CLOCK
-// ---------------------------
-// The clock is rendered server-side, so it is right at the moment it is
-// painted and goes stale from there. A clock showing minutes is therefore a
-// standing demand for a repaint every minute, and it does not care what the
-// data is doing.
-//
-// So the delay is the smaller of the two demands, and the clock's is aimed at
-// the next minute boundary rather than "60 seconds from now": that way the
-// displayed minute changes when the minute actually changes, the way a clock
-// is supposed to, instead of at some arbitrary offset.
-//
-// At the default settings the clock always wins — the data floor is 60 s and
-// the clock never asks for more than 60 — so KINDLE_FOLLOW_DATA does nothing
-// unless the clock is unpinned or KINDLE_REFRESH_MIN_SEC is dropped below a
-// minute. That is stated rather than hidden: the shape of the data logic is
-// still right, it is simply not the binding constraint while a minute clock
-// is on the page.
-#if KINDLE_CLOCK_PIN_REFRESH
-static uint32_t clockDelaySec(uint32_t now) {
-    uint32_t toBoundary = 60u - (now % 60u);     // 1..60
-    // Landing within a couple of seconds of this render means flashing twice
-    // in a breath, so give up on this boundary and take the next one. After
-    // the first load the cadence settles onto a steady 60 s on the minute.
-    if (toBoundary < 3u) toBoundary += 60u;
-    return toBoundary;
-}
-#endif
-
-static uint32_t refreshDelaySec(uint32_t newestTs, uint32_t now) {
-#if KINDLE_CLOCK_PIN_REFRESH
-    const uint32_t clockWants = clockDelaySec(now);
-#else
-    const uint32_t clockWants = 0xFFFFFFFFu;     // the clock makes no demand
-#endif
-
-    // Not a plain min(). Landing at :58 rather than :00 costs the same repaint
-    // but shows the previous minute for 58 seconds of every minute, so a data
-    // delay that merely happens to fall a second or two short of the boundary
-    // must not steal the alignment. It has to be meaningfully earlier — five
-    // seconds — before it is worth breaking the clock's cadence for.
-    #define KD_MIN_CLOCK(d) (((d) + 5u < clockWants) ? (uint32_t)(d) : clockWants)
-    (void)now;   // unused when both the clock and the data path are off
-
-#if KINDLE_FOLLOW_DATA
-    if (newestTs != 0 && now >= newestTs) {
-        const uint32_t age    = now - newestTs;
-        const uint32_t period = KINDLE_DATA_PERIOD_SEC;
-
-        uint32_t d;
-        if (age < period) {
-            // Land a few seconds after the reading is due rather than exactly
-            // on it: arriving early means rendering the value we already show
-            // and paying for a repaint that changed nothing.
-            d = period - age + 4;
-        } else if (age < period * 2) {
-            // Late, but one missed post is ordinary. Look again soon.
-            d = KINDLE_REFRESH_MIN_SEC;
-        } else {
-            // Two periods with nothing is a source that is down. Back off to
-            // the ceiling; the page already says the reading is stale, and
-            // flashing at it will not bring the node back.
-            return KD_MIN_CLOCK((uint32_t)KINDLE_REFRESH_SEC);
-        }
-
-        if (d < KINDLE_REFRESH_MIN_SEC) d = KINDLE_REFRESH_MIN_SEC;
-        if (d > KINDLE_REFRESH_SEC)     d = KINDLE_REFRESH_SEC;
-        return KD_MIN_CLOCK(d);
-    }
-#else
-    (void)newestTs;
-#endif
-    return KD_MIN_CLOCK((uint32_t)KINDLE_REFRESH_SEC);
-    #undef KD_MIN_CLOCK
-}
-
 // Smallest and largest hourly extreme across the window, for the caption.
 static bool windowExtremes(const TrendRing::Hour* h, float& mn, float& mx) {
     mn = 1e9f; mx = -1e9f;
@@ -464,7 +378,11 @@ static void handleKindle(AsyncWebServerRequest* req) {
     p += F("\"><meta http-equiv=\"refresh\" content=\"");
     // Newest of the two sensors: the page is current if either one is, and
     // waiting on the slower of the pair would show a stale outdoor reading.
-    p += refreshDelaySec(outT.ts > inT.ts ? outT.ts : inT.ts, now);
+    // The clock only makes its once-a-minute demand when it is actually drawn
+    // — an unsynced device prints "clock not set" and has nothing to keep
+    // fresh, so it must be allowed to back off like any other stale source.
+    p += kdRefreshDelaySec(outT.ts > inT.ts ? outT.ts : inT.ts, now,
+                           now > KINDLE_MIN_REAL_TS);
     p += F("\"><title>" KD_T("Weather", "Времето") "</title><style>");
 
     // The stylesheet, emitted rather than stored as one literal: every number
@@ -963,10 +881,16 @@ static void handleKindleClear(AsyncWebServerRequest* req) {
     req->send(res);
 }
 
+// ORDER IS LOAD-BEARING. AsyncCallbackWebHandler::canHandle matches when the
+// request URL equals its uri OR starts with uri + "/", and _attachHandler
+// takes the first handler that matches, in registration order. So "/kindle"
+// registered first swallows "/kindle/probe" and "/kindle/clear": both were
+// silently unreachable, and the pages simply rendered the dashboard instead.
+// The children go first.
 void registerKindleDashboard(AsyncWebServer& server) {
-    server.on("/kindle", HTTP_GET, handleKindle);
     server.on("/kindle/probe", HTTP_GET, handleKindleProbe);
     server.on("/kindle/clear", HTTP_GET, handleKindleClear);
+    server.on("/kindle",       HTTP_GET, handleKindle);
 }
 
 #endif  // FEATURE_KINDLE_DASHBOARD
