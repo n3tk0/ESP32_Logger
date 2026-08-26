@@ -51,6 +51,7 @@ from deploy_core import (
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
+from pio_envs import chip_for, env_info, environments, env_names, usb_pins
 
 # ── Theme configuration ─────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
@@ -135,12 +136,29 @@ class DeployerGUI:
         label = ctk.CTkLabel(sect, text="⚙️  Essential Settings", font=("Helvetica", 12, "bold"))
         label.pack(anchor="w", pady=(10, 5))
 
-        # Environment
+        # Environment — a list read from platformio.ini, not a text field.
+        # Typed free text let a nonexistent env through to pio, which failed
+        # minutes later with a message that did not say what was wrong.
         ctk.CTkLabel(sect, text="PlatformIO Env:", font=("Helvetica", 10)).pack(anchor="w")
-        self.env_entry = ctk.CTkEntry(sect, placeholder_text=detect_env())
-        self.env_entry.insert(0, self.cfg.get("env", ""))
-        self.env_entry.pack(fill="x", pady=(0, 8))
-        self.env_entry.bind("<FocusOut>", lambda _: self._save_setting("env", self.env_entry))
+        names = env_names() or [detect_env()]
+        current = self.cfg.get("env") or detect_env()
+        if current not in names:
+            names = [current] + names       # keep an unknown saved env visible
+        self.env_var = ctk.StringVar(value=current)
+        ctk.CTkOptionMenu(
+            sect,
+            values=names,
+            variable=self.env_var,
+            command=self._on_env_change,
+        ).pack(fill="x", pady=(0, 2))
+
+        # What that env actually is. The chip is derived from it, never typed:
+        # an env and a chip that could disagree was a way to write a C3
+        # bootloader onto an S3.
+        self.board_label = ctk.CTkLabel(
+            sect, text="", font=("Helvetica", 8), text_color="gray",
+            wraplength=250, justify="left")
+        self.board_label.pack(anchor="w", pady=(0, 8))
 
         # Port with Refresh button
         port_frame = ctk.CTkFrame(sect)
@@ -164,17 +182,6 @@ class DeployerGUI:
             font=("Helvetica", 10)
         )
         refresh_btn.pack(side="right")
-
-        # Chip Type
-        ctk.CTkLabel(sect, text="Chip Type:", font=("Helvetica", 10)).pack(anchor="w")
-        self.chip_var = ctk.StringVar(value=self.cfg.get("chip", "esp32c3"))
-        chip_menu = ctk.CTkOptionMenu(
-            sect,
-            values=["esp32c3", "esp32c3_supermini", "esp32"],
-            variable=self.chip_var,
-            command=lambda v: self._save_setting("chip", None, v),
-        )
-        chip_menu.pack(fill="x", pady=(0, 10))
 
         # Info: Advanced settings in Configuration tab
         info_label = ctk.CTkLabel(
@@ -344,32 +351,27 @@ class DeployerGUI:
         ctk.CTkLabel(settings_frame, text="USB CDC Configuration:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 5))
 
         self.usb_cdc_var = ctk.BooleanVar(value=self.cfg.get("usb_cdc_on_boot", True))
-        usb_cdc_check = ctk.CTkCheckBox(
+        self.usb_cdc_check = ctk.CTkCheckBox(
             settings_frame,
             text="USB CDC on boot",
             variable=self.usb_cdc_var,
             command=lambda: self._save_setting("usb_cdc_on_boot", None, self.usb_cdc_var.get()),
             font=("Helvetica", 10)
         )
-        usb_cdc_check.pack(anchor="w", pady=(0, 5))
+        self.usb_cdc_check.pack(anchor="w", pady=(0, 5))
 
-        # USB CDC info label
-        env_name = self.cfg.get("env", "esp32c3_supermini")
-        if "esp32c3" in env_name.lower():
-            usb_info = "Controls GPIO 18/19 for USB (deploy tool toggles this at compile time)"
-        elif "esp32s3" in env_name.lower():
-            usb_info = "Controls GPIO 19/20 for USB (deploy tool toggles this at compile time)"
-        else:
-            usb_info = "Toggle USB CDC on boot (deploy tool toggles this at compile time)"
-
-        info_label = ctk.CTkLabel(
+        # Filled in by _refresh_env_labels(), which reads the chip family
+        # rather than pattern-matching the env NAME for "esp32c3" / "esp32s3"
+        # as this used to — a test no board is obliged to pass.
+        self.usb_info_label = ctk.CTkLabel(
             settings_frame,
-            text=usb_info,
+            text="",
             font=("Helvetica", 8),
             text_color="gray",
             wraplength=400
         )
-        info_label.pack(anchor="w", pady=(0, 10), padx=(20, 0))
+        self.usb_info_label.pack(anchor="w", pady=(0, 10), padx=(20, 0))
+        self._refresh_env_labels()
 
     def _build_info_tab(self) -> None:
         """Info/help tab."""
@@ -413,6 +415,39 @@ Log Colors:
   ⚪ Gray   = Info
 """)
         info_text.configure(state="disabled")
+
+    def _on_env_change(self, name: str) -> None:
+        """Environment picked: persist it, re-derive the chip, refresh labels."""
+        self.cfg["env"] = name
+        self.cfg["chip"] = chip_for(name)
+        save_cfg(self.cfg)
+        self._refresh_env_labels()
+
+    def _refresh_env_labels(self) -> None:
+        """Show what the selected env resolves to, and whether its USB CDC
+        flag can be toggled. Both answers come from platformio.ini and the
+        chip family, so a new board needs no change here."""
+        info = env_info(self.cfg.get("env", ""))
+        board = getattr(self, "board_label", None)
+        if board is not None:
+            board.configure(
+                text=f"{info.board or 'unknown board'} · {info.chip} · "
+                     f"{info.flash_size or 'flash ?'} · {info.partitions or 'default parts'}")
+        usb = getattr(self, "usb_info_label", None)
+        if usb is not None:
+            pins = usb_pins(info.chip)
+            if not info.supports_usb_cdc:
+                txt = (f"[env:{info.name}] has no -DARDUINO_USB_CDC_ON_BOOT of its own — "
+                       "it inherits one. Toggle it in the env it extends.")
+            elif pins:
+                txt = (f"{pins} are the USB D-/D+ pair on {info.chip}. On: serial console. "
+                       "Off: free as GPIO. Applied at compile time.")
+            else:
+                txt = "Toggle USB CDC on boot (applied at compile time)."
+            usb.configure(text=txt)
+        check = getattr(self, "usb_cdc_check", None)
+        if check is not None:
+            check.configure(state="normal" if info.supports_usb_cdc else "disabled")
 
     def _save_setting(self, key: str, widget=None, val=None, int_val: bool = False) -> None:
         """Save a setting to config (debounced on focus-out)."""
@@ -505,7 +540,10 @@ Log Colors:
             return
 
         # Sync all entry fields to config before running (in case user didn't click away)
-        self._save_setting("env", self.env_entry)
+        # env comes from the option menu, which persists on change; the chip
+        # is re-derived here so a config edited by hand cannot flash the
+        # wrong bootloader.
+        self._on_env_change(self.env_var.get())
         self._save_setting("port", self.port_entry)
         self._save_setting("device_ip", self.ip_entry)
         self._save_setting("baud", self.baud_entry, int_val=True)

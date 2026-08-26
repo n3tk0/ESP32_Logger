@@ -23,6 +23,14 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+# The board list is derived from platformio.ini, never hardcoded here — see
+# tools/pio_envs.py for why. sys.path juggling because these tools are run
+# both as `python3 tools/deploy.py` and from a PyInstaller bundle.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pio_envs import (  # noqa: E402
+    chip_for, default_env, env_info, env_names, environments, usb_pins,
+)
+
 # ── Project layout ────────────────────────────────────────────────────────────
 ROOT     = Path(__file__).resolve().parent.parent
 WWW_SRC  = ROOT / "www"
@@ -74,15 +82,14 @@ _UPLOAD_FILTER_LABELS = {
 
 
 def detect_env() -> str:
-    """Auto-detect PlatformIO environment from platformio.ini."""
-    try:
-        txt = (ROOT / "platformio.ini").read_text()
-        m = re.search(r"^\[env:([^\]]+)\]", txt, re.MULTILINE)
-        if m:
-            return m.group(1).strip()
-    except OSError:
-        pass
-    return "esp32c3_supermini"
+    """The project's default PlatformIO environment.
+
+    Previously this took the FIRST [env:…] in the file, which is not the same
+    question: reordering platformio.ini would have silently changed what the
+    deploy tool flashed. It now honours [platformio] default_envs, and skips
+    the test-only builds.
+    """
+    return default_env()
 
 
 def detect_port() -> str:
@@ -117,6 +124,12 @@ def load_cfg() -> dict[str, Any]:
             pass
     if not cfg.get("env"):
         cfg["env"] = detect_env()
+    # The chip follows the env, always. It used to be a free-text field kept
+    # next to it, so a saved config could name esp32s3 as the environment and
+    # esp32c3 as the chip — and step 2 would then write a C3 bootloader to an
+    # S3. There is no board for which the two legitimately disagree, so it is
+    # derived rather than remembered.
+    cfg["chip"] = chip_for(cfg["env"])
     if not cfg.get("port"):
         cfg["port"] = detect_port()
     return cfg
@@ -164,91 +177,99 @@ class DeployManager:
             self.on_step_complete(step, rc)
 
     def _configure_usb_cdc(self) -> None:
-        """Dynamically configure USB CDC on boot flag in platformio.ini before compilation.
+        """Rewrite -DARDUINO_USB_CDC_ON_BOOT in platformio.ini before compiling.
 
-        For ESP32-C3 and ESP32-S3 boards, toggling this controls whether USB pins are
-        used for serial communication (enabled) or freed up for GPIO (disabled).
+        On the C3 and S3 the USB Serial/JTAG pins are either the serial console
+        or general GPIO — never both — and which one is a compile-time decision.
+        Toggling here is what lets the wizard offer those pins.
 
-        Supported boards:
-        - ESP32-C3 SuperMini (GPIO 18/19)
-        - ESP32-S3 (GPIO 19/20)
-        - XIAO ESP32-C3 (GPIO 18/19)
+        Which envs can be toggled is read from platformio.ini rather than
+        listed here: the env must carry its own -DARDUINO_USB_CDC_ON_BOOT line,
+        because this rewrites the flag in place. An env that inherits the flag
+        through `extends` (esp32s3_n16r8 does) has nothing here to rewrite, and
+        editing its parent would quietly change a second board too — so it is
+        reported instead of guessed at.
         """
-        env = self.cfg.get("env", "esp32c3_supermini")
+        env = self.cfg.get("env") or detect_env()
         usb_cdc = self.cfg.get("usb_cdc_on_boot", True)
 
-        # Check if this environment supports USB CDC configuration
-        supported_envs = {"esp32c3_supermini", "esp32s3", "xiao_esp32c3"}
-        if env not in supported_envs:
-            return  # No USB CDC configuration for this board
+        info = env_info(env)
+        if not info.supports_usb_cdc:
+            pins = usb_pins(info.chip)
+            if pins:
+                self._log(f"  ! USB CDC toggle skipped: [env:{env}] has no "
+                          f"-DARDUINO_USB_CDC_ON_BOOT of its own (it inherits one). "
+                          f"{pins} stay as the flag in its parent env leaves them.")
+            return
 
-        # Read platformio.ini
         ini_file = ROOT / "platformio.ini"
         if not ini_file.is_file():
             return
 
-        content = ini_file.read_text()
-        lines = content.split("\n")
+        want = f"-DARDUINO_USB_CDC_ON_BOOT={'1' if usb_cdc else '0'}"
+        lines = ini_file.read_text().split("\n")
 
-        # Find the section for our environment and modify USB CDC flags
-        in_env_section = False
-        flag_found_in_section = False
-        in_build_flags = False
+        # The section runs from its header to the NEXT section header of any
+        # kind. The previous version ended it only at another "[env:", so with
+        # the target env last in the file it ran to EOF and rewrote whatever it
+        # found on the way — including the "; Set -DARDUINO_USB_CDC_ON_BOOT=0
+        # to free GPIO…" comments that document the other boards.
+        start = end = None
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if start is None:
+                if stripped == f"[env:{env}]":
+                    start = i
+                continue
+            if stripped.startswith("["):
+                end = i
+                break
+        if start is None:
+            return
+        if end is None:
+            end = len(lines)
+
+        # Rewrite the flag where it already is. Comment lines are skipped: a
+        # line beginning with ; or # is documentation, not a build flag, and
+        # editing it silently rewrote the file's own explanation of itself.
         modified = False
-        result = []
-
-        for line in lines:
-            # Check if we're entering the target environment section
-            if line.strip().startswith(f"[env:{env}]"):
-                in_env_section = True
-                flag_found_in_section = False
-                in_build_flags = False
-                result.append(line)
+        found = False
+        for i in range(start, end):
+            stripped = lines[i].lstrip()
+            if stripped.startswith((";", "#")):
                 continue
-
-            # Check if we're leaving the environment section (new section starts)
-            if in_env_section and line.strip().startswith("[env:"):
-                in_env_section = False
-                flag_found_in_section = False
-                in_build_flags = False
-
-            # Exit multi-line build_flags block when we hit non-indented line (key=value)
-            if in_build_flags and line and line[0] not in (' ', '\t'):
-                in_build_flags = False
-
-            # Modify USB CDC flag if in target environment
-            if in_env_section and "-DARDUINO_USB_CDC_ON_BOOT=" in line:
-                # Replace existing flag
-                if usb_cdc:
-                    line = line.replace("-DARDUINO_USB_CDC_ON_BOOT=0", "-DARDUINO_USB_CDC_ON_BOOT=1")
-                else:
-                    line = line.replace("-DARDUINO_USB_CDC_ON_BOOT=1", "-DARDUINO_USB_CDC_ON_BOOT=0")
+            if "-DARDUINO_USB_CDC_ON_BOOT=" not in lines[i]:
+                continue
+            found = True
+            new = re.sub(r"-DARDUINO_USB_CDC_ON_BOOT=[01]", want, lines[i])
+            if new != lines[i]:
+                lines[i] = new
                 modified = True
-                flag_found_in_section = True
-                result.append(line)
-                continue
 
-            # Start of build_flags section - check if flag exists or needs to be added
-            if (in_env_section and line.strip().startswith("build_flags") and
-                not flag_found_in_section and "-DARDUINO_USB_CDC_ON_BOOT" not in line):
-                result.append(line)
-                in_build_flags = True
-                # If this is a multi-line block (ends with = or contains indented values)
-                if line.rstrip().endswith("="):
-                    # Multi-line format: build_flags =\n    ${...}\n    -D...
-                    # Add USB CDC flag as next indented line
-                    usb_flag = "-DARDUINO_USB_CDC_ON_BOOT=1" if usb_cdc else "-DARDUINO_USB_CDC_ON_BOOT=0"
-                    result.append(f"    {usb_flag}")
+        # Nothing to rewrite: add the flag as the first entry of build_flags.
+        #
+        # This branch used to fire even when the flag WAS present, because it
+        # only checked whether the flag had been seen BEFORE the build_flags
+        # line — and in every env here the flag comes after it. The result was
+        # one more duplicate -DARDUINO_USB_CDC_ON_BOOT appended to the block on
+        # every single run of the deploy tool.
+        if not found:
+            for i in range(start, end):
+                stripped = lines[i].lstrip()
+                if stripped.startswith((";", "#")):
+                    continue
+                if stripped.startswith("build_flags") and lines[i].rstrip().endswith("="):
+                    lines.insert(i + 1, f"    {want}")
                     modified = True
-                    flag_found_in_section = True
-                    in_build_flags = False
-                continue
+                    break
+            else:
+                self._log(f"  ! USB CDC toggle skipped: [env:{env}] has no "
+                          f"multi-line build_flags block to add the flag to.")
+                return
 
-            result.append(line)
-
-        # Only write if we made changes
         if modified:
-            ini_file.write_text("\n".join(result))
+            ini_file.write_text("\n".join(lines))
+            self._log(f"  platformio.ini: [env:{env}] {want}")
 
     def _run_cmd(self, cmd: list[str]) -> int:
         """Run a subprocess command and stream output to callback."""

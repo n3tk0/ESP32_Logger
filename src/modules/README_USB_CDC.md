@@ -28,10 +28,24 @@ When the firmware runs on a device for the first time, the USB CDC module:
 4. Saves the preference to NVS for future boots
 
 ### Board Detection
-Automatically detects the board type from PlatformIO build macros:
-- `ARDUINO_SEEED_XIAO_ESP32C3`
-- `ARDUINO_ESP32C3_DEV`
-- `ARDUINO_ESP32S3_DEV`
+Keyed off the **chip family**, not the board:
+
+- `CONFIG_IDF_TARGET_ESP32C3` -> USB D-/D+ on GPIO 18/19
+- `CONFIG_IDF_TARGET_ESP32S3` -> USB D-/D+ on GPIO 19/20
+
+The board's own name is reported from `ARDUINO_BOARD`, which every board
+definition sets, so a new board needs no change here.
+
+> **This used to test board macros — `ARDUINO_SEEED_XIAO_ESP32C3`,
+> `ARDUINO_ESP32C3_DEV`, `ARDUINO_ESP32S3_DEV` — and answered "board not
+> supported" for anything else.** Two of those three are defined by no board
+> in this project: the Seeed board sets `ARDUINO_XIAO_ESP32C3` (no `SEEED_`),
+> and `esp32-c3-devkitm-1` sets no `_DEV` macro at all. The module was
+> therefore inert on both C3 targets — including the production XIAO C3 — and
+> on the XIAO S3, printing "This board does not support USB CDC configuration"
+> at boot while `validatePin()` let GPIO 18/19 through as if they were free.
+> Only the S3 DevKitC path ever worked. Asking the silicon instead is both
+> correct and something a new board cannot get wrong.
 
 ### Status Reporting
 Prints a clear status banner at boot showing:
@@ -211,12 +225,13 @@ prefs.end();
 ```
 
 ### Board Detection
-Uses PlatformIO build macros defined in `platformio.ini`:
-```ini
--DARDUINO_SEEED_XIAO_ESP32C3
--DARDUINO_ESP32C3_DEV
--DARDUINO_ESP32S3_DEV
+Uses the IDF target macro the framework defines for the part being built:
+```c
+CONFIG_IDF_TARGET_ESP32C3   // GPIO 18 = D-, 19 = D+
+CONFIG_IDF_TARGET_ESP32S3   // GPIO 19 = D-, 20 = D+
 ```
+Nothing in `platformio.ini` needs to declare it, and nothing needs adding
+when a board is.
 
 ### Pin Mappings
 

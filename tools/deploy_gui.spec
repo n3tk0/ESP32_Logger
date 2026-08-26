@@ -31,6 +31,11 @@ a = Analysis(
     hiddenimports=[
         'customtkinter',
         'pyserial',
+        # Both GUI and core import it at module scope, but naming it here
+        # keeps the board list working if either import is ever moved into a
+        # function — an env list that silently comes back empty in the frozen
+        # build and nowhere else is a bad afternoon.
+        'pio_envs',
     ],
     hookspath=[],
     hooksconfig={},

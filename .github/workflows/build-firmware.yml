@@ -9,6 +9,7 @@
 # Outputs:
 #   - firmware-esp32c3.bin           (XIAO ESP32-C3, 4MB, production target)
 #   - firmware-esp32c3_supermini.bin (ESP32-C3 Super Mini, 4MB, native USB JTAG)
+#   - firmware-lolin_c3_pico.bin     (WEMOS LOLIN C3 PICO, 4MB, native USB JTAG)
 #   - firmware-esp32s3.bin           (ESP32-S3 DevKitC-1, 8MB)
 #   - firmware-xiao_esp32s3.bin      (Seeed XIAO ESP32-S3, 8MB + 8MB PSRAM)
 #   - firmware-esp32s3_n16r8.bin     (ESP32-S3 N16R8, 16MB + 8MB octal PSRAM)
@@ -24,6 +25,7 @@ on:
       - 'lib/**'
       - '*.ino'
       - 'platformio.ini'
+      - 'boards/**'
       - 'partitions_balanced.csv'
       - 'node/**'
       - '.github/workflows/build-firmware.yml'
@@ -34,6 +36,7 @@ on:
       - 'lib/**'
       - '*.ino'
       - 'platformio.ini'
+      - 'boards/**'
       - 'partitions_balanced.csv'
       - 'node/**'
   workflow_dispatch:
@@ -53,6 +56,10 @@ jobs:
             app_max: 1572864    # 0x180000 = 1,536 KB (from partitions_balanced.csv)
           - env: esp32c3_supermini
             name: esp32c3_supermini
+            flash: 4MB
+            app_max: 1572864    # 0x180000 = 1,536 KB (from partitions_balanced.csv)
+          - env: lolin_c3_pico
+            name: lolin_c3_pico
             flash: 4MB
             app_max: 1572864    # 0x180000 = 1,536 KB (from partitions_balanced.csv)
           - env: esp32s3
@@ -349,6 +356,12 @@ jobs:
           name: firmware-esp32c3_supermini
           path: firmware/
 
+      - name: Download LOLIN C3 PICO firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-lolin_c3_pico
+          path: firmware/
+
       - name: Download ESP32-S3 firmware
         uses: actions/download-artifact@v4
         with:
@@ -361,4 +374,5 @@ jobs:
           files: |
             firmware/firmware-esp32c3.bin
             firmware/firmware-esp32c3_supermini.bin
+            firmware/firmware-lolin_c3_pico.bin
             firmware/firmware-esp32s3.bin

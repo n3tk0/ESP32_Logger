@@ -18,6 +18,10 @@ on:
       - 'docs/ARCHITECTURE.md'
       - 'tools/check_api_docs.py'
       - 'tools/check_metric_names.py'
+      - 'tools/pio_envs.py'
+      - 'tools/check_pio_envs.py'
+      - 'platformio.ini'
+      - 'boards/**'
   pull_request:
     paths:
       - 'src/**'
@@ -26,6 +30,10 @@ on:
       - 'docs/ARCHITECTURE.md'
       - 'tools/check_api_docs.py'
       - 'tools/check_metric_names.py'
+      - 'tools/pio_envs.py'
+      - 'tools/check_pio_envs.py'
+      - 'platformio.ini'
+      - 'boards/**'
   workflow_dispatch:
 
 jobs:
@@ -141,6 +149,25 @@ jobs:
         # against the full name misses. "humidity_ambient" (16 chars into
         # char[16]) shipped broken this way; this stops the next one.
         run: python3 tools/check_metric_names.py
+
+      - name: Verify the deploy tools see every board in platformio.ini
+        # tools/pio_envs.py is where the flash tools get their board list. An
+        # env its parser cannot see is a board the tool will not offer, and
+        # nothing else would say so.
+        run: python3 tools/check_pio_envs.py
+
+      - name: Verify that check actually fails on an unreachable env
+        run: |
+          set -e
+          cp platformio.ini platformio.ini.orig
+          printf '\n[env:ci_probe_env]\n' >> platformio.ini
+          if python3 tools/check_pio_envs.py; then
+            mv platformio.ini.orig platformio.ini
+            echo "::error::check_pio_envs.py accepted an env with no board"
+            exit 1
+          fi
+          mv platformio.ini.orig platformio.ini
+          echo "env guard fires as expected"
 
       - name: Verify the truncation guard actually fails on a bad name
         # A guard that cannot fail is not a guard. Plant an over-long metric

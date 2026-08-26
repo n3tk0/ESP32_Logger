@@ -21,8 +21,24 @@ Both share identical business logic via `deploy_core.py`, ensuring consistency a
 │  • Configuration management                      │
 │  • Step implementations                          │
 │  • HTTP upload, WiFi provisioning, etc.          │
+├──────────────────────────────────────────────────┤
+│      pio_envs.py  (what boards exist at all)     │
+│           reads platformio.ini directly           │
 └──────────────────────────────────────────────────┘
 ```
+
+### Adding a board
+
+Add an `[env:…]` to `platformio.ini`. That is the whole procedure — the CLI
+list, the GUI dropdown, the chip the bootloader step uses and the USB CDC
+toggle all derive from it through `pio_envs.py`.
+
+It did not use to be. The board list was written out in four places — the CLI
+chip prompt, the GUI dropdowns, `deploy_core`'s `supported_envs` set and
+`flash_clean`'s fallback — each listed a different subset, and all four had
+gone stale: `xiao_esp32s3` and `esp32s3_n16r8` had been buildable for weeks
+while the deploy tools would not offer them. `tools/check_pio_envs.py` runs in
+CI to keep the derivation honest, with a negative control proving it can fail.
 
 ### Files
 
@@ -162,9 +178,17 @@ Settings are saved to `.flash_tool.json` in the project root:
 
 ### Settings
 
-- **env** — PlatformIO environment (auto-detected from platformio.ini)
+- **env** — PlatformIO environment. Picked from a list read out of
+  `platformio.ini`, so adding an `[env:…]` there is all it takes for a board
+  to appear in both the CLI and the GUI. Defaults to `[platformio]
+  default_envs`.
 - **port** — Serial port for USB connection (auto-detected)
-- **chip** — Device type (esp32c3, esp32c3_supermini, esp32)
+- **chip** — **Derived from the env, not chosen.** It is re-resolved from the
+  board definition on every load and written back here for readability.
+  Editing it by hand has no effect. It used to be a free-text field beside the
+  environment, which let a saved config say `esp32s3` for the env and
+  `esp32c3` for the chip — and step 2 would then write a C3 bootloader to an
+  S3.
 - **baud** — Serial baud rate (default: 921600)
 - **device_ip** — Device IP for HTTP deploy (default: 192.168.4.1)
 - **steps** — Selected workflow steps
@@ -176,13 +200,22 @@ Settings are saved to `.flash_tool.json` in the project root:
 
 #### USB CDC on Boot (ESP32-C3, ESP32-S3)
 
-Several ESP32 boards support configurable USB CDC (serial over USB). You can choose to enable or disable it to control which GPIO pins are available.
+The USB Serial/JTAG pins are either the serial console or general GPIO, never
+both, and which one is decided at compile time. The toggle rewrites
+`-DARDUINO_USB_CDC_ON_BOOT` in the env's own `build_flags` before the build.
 
-**Supported Boards:**
-- ESP32-C3 SuperMini (GPIO 18/19) ← Most common
-- XIAO ESP32-C3 (GPIO 18/19)
-- Generic ESP32-C3 (GPIO 18/19)
-- ESP32-S3 (GPIO 19/20)
+**Which pins** comes from the chip family, not from a list of boards:
+
+| Chip | USB D- | USB D+ |
+|---|---|---|
+| ESP32-C3 (XIAO C3, Super Mini, LOLIN C3 PICO) | GPIO 18 | GPIO 19 |
+| ESP32-S3 (DevKitC-1, XIAO S3, N16R8) | GPIO 19 | GPIO 20 |
+
+**Which envs can be toggled** is read from `platformio.ini`: the env needs its
+own `-DARDUINO_USB_CDC_ON_BOOT` line, because the flag is rewritten in place.
+`esp32s3_n16r8` inherits its flag through `extends`, so the tool says so and
+declines rather than editing `esp32s3` — which would have changed a second
+board silently. Toggle it in the parent env instead.
 
 **Configuration Options:**
 

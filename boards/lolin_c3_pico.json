@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "WEMOS LOLIN C3 PICO — project-local board definition.",
+    "",
+    "WHY THIS FILE EXISTS: platform espressif32 7.0.1 ships lolin_c3_mini but",
+    "no lolin_c3_pico, and the pinned Arduino core (2.0.17) has no",
+    "variants/lolin_c3_pico either. Upstream added both in arduino-esp32 3.x.",
+    "PlatformIO reads boards/ in the project root, so the board can be named",
+    "correctly here without waiting for the core bump.",
+    "",
+    "WHY variant lolin_c3_mini: the two boards have the SAME pin map. Compared",
+    "against upstream variants/lolin_c3_pico/pins_arduino.h and the",
+    "CircuitPython board definitions, both give SDA=8, SCL=10, RGB LED=7,",
+    "RX=20, TX=21, SCK=1, MISO=0, MOSI=4, SS=5, A0..A5=GPIO0..5. They differ",
+    "in form factor and connectors (the PICO has JST battery + LOLIN I2C, the",
+    "Mini has the shield header), which no variant header describes.",
+    "",
+    "WHEN THE CORE IS UPGRADED to arduino-esp32 3.x: set variant to",
+    "lolin_c3_pico, or delete this file and use the platform's own board id.",
+    "Check the pin map still matches before doing either.",
+    "",
+    "ARDUINO_LOLIN_C3_MINI is deliberately kept alongside the PICO macro: the",
+    "variant is the Mini's, so code that keys off the board macro should see",
+    "the board whose pins_arduino.h it actually got. Nothing in this project",
+    "keys off either (USB pin locking keys off the chip family instead — see",
+    "src/modules/UsbCdcModule.cpp)."
+  ],
+  "build": {
+    "arduino": {
+      "ldscript": "esp32c3_out.ld"
+    },
+    "core": "esp32",
+    "extra_flags": [
+      "-DARDUINO_LOLIN_C3_PICO",
+      "-DARDUINO_LOLIN_C3_MINI",
+      "-DARDUINO_USB_MODE=1",
+      "-DARDUINO_USB_CDC_ON_BOOT=1"
+    ],
+    "f_cpu": "160000000L",
+    "f_flash": "80000000L",
+    "flash_mode": "qio",
+    "hwids": [
+      [
+        "0X303A",
+        "0x1001"
+      ]
+    ],
+    "mcu": "esp32c3",
+    "variant": "lolin_c3_mini"
+  },
+  "connectivity": [
+    "wifi",
+    "bluetooth"
+  ],
+  "debug": {
+    "openocd_target": "esp32c3.cfg"
+  },
+  "frameworks": [
+    "arduino",
+    "espidf"
+  ],
+  "name": "WEMOS LOLIN C3 PICO",
+  "upload": {
+    "flash_size": "4MB",
+    "maximum_ram_size": 327680,
+    "maximum_size": 4194304,
+    "require_upload_port": true,
+    "speed": 921600
+  },
+  "url": "https://www.wemos.cc/en/latest/c3/c3_pico.html",
+  "vendor": "WEMOS"
+}

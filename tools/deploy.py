@@ -33,6 +33,7 @@ from deploy_core import (
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
+from pio_envs import chip_for, environments, env_names, env_info, usb_pins
 
 # ── Project layout ────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent
@@ -92,15 +93,26 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     uf   = cfg.get("upload_filter", "all")
     wipe = cfg.get("wipe_before_upload", False)
     usb_cdc = cfg.get("usb_cdc_on_boot", True)
+    # The board is what the env says it is, so it is shown rather than asked
+    # for. A chip that could disagree with the environment was a way to write
+    # a C3 bootloader onto an S3.
+    info = env_info(cfg.get("env", ""))
+    env_disp = f"{info.name} {_dim(f'({info.board}, {info.chip}, {info.flash_size})')}" \
+        if info.board else cfg.get("env", "")
+    if not usb_cdc and info.supports_usb_cdc:
+        usb_state = _dim(f"OFF — {usb_pins(info.chip) or 'USB pins'} free as GPIO")
+    elif info.supports_usb_cdc:
+        usb_state = _green(f"ON — {usb_pins(info.chip) or 'USB pins'} locked for serial")
+    else:
+        usb_state = _dim("not togglable for this env — see the parent env")
     for key, label, val in [
-        ("e", "PlatformIO env ", cfg.get("env", "")),
+        ("e", "PlatformIO env ", env_disp),
         ("p", "Serial port    ", port_disp),
         ("i", "Device IP      ", cfg.get("device_ip", "")),
-        ("c", "Chip type      ", cfg.get("chip", "")),
         ("b", "Baud rate      ", str(cfg.get("baud", 921600))),
         ("u", "HTTP upload    ", _UPLOAD_FILTER_LABELS.get(uf, uf)),
         ("w", "Wipe /www first", _green("YES — delete all before upload") if wipe else _dim("no")),
-        ("U", "USB CDC on boot", _green("ON — locked for serial") if usb_cdc else _dim("OFF — GPIO available")),
+        ("U", "USB CDC on boot", usb_state),
     ]:
         print(f"  {_cyan(f'[{key}]')}  {label}: {_bold(val)}")
     print()
@@ -154,9 +166,24 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             time.sleep(0.7)
 
         elif ch == "e":
-            v = _prompt("PlatformIO env", cfg.get("env", ""))
-            if v:
+            # A numbered pick out of platformio.ini, not free text: typing an
+            # env name that does not exist used to be accepted here and only
+            # failed several minutes later, inside pio.
+            envs = environments()
+            print()
+            for i, e in enumerate(envs, 1):
+                cur = _green(" ←") if e.name == cfg.get("env") else ""
+                print(f"  {_cyan(f'[{i}]')}  {e.name:<20} "
+                      f"{_dim(f'{e.board}, {e.chip}, {e.flash_size}')}{cur}")
+            v = _prompt("Environment (number, or name)", "")
+            if v.isdigit() and 1 <= int(v) <= len(envs):
+                cfg["env"] = envs[int(v) - 1].name
+            elif v in env_names():
                 cfg["env"] = v
+            elif v:
+                print(_red(f"  No [env:{v}] in platformio.ini — unchanged."))
+                time.sleep(1.2)
+            cfg["chip"] = chip_for(cfg["env"])
 
         elif ch == "p":
             detected = _detect_port()
@@ -167,12 +194,6 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             v = _prompt("Device IP", cfg.get("device_ip", "192.168.4.1"))
             if v:
                 cfg["device_ip"] = v
-
-        elif ch == "c":
-            print(_dim("  Choices: esp32c3  esp32c3_supermini  esp32"))
-            v = _prompt("Chip type", cfg.get("chip", "esp32c3"))
-            if v:
-                cfg["chip"] = v
 
         elif ch == "b":
             v = _prompt("Baud rate", str(cfg.get("baud", 921600)))
@@ -199,20 +220,22 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             time.sleep(0.5)
 
         elif choice == "U":          # uppercase U — USB CDC toggle
+            # The pins come from the chip family, which is what the firmware
+            # keys off too (src/modules/UsbCdcModule.cpp). Guessing them from
+            # the env NAME, as this used to, was wrong for any env whose name
+            # did not spell out the part.
+            info = env_info(cfg.get("env", ""))
+            if not info.supports_usb_cdc:
+                print(_yellow(f"  → [env:{info.name}] has no -DARDUINO_USB_CDC_ON_BOOT "
+                              f"of its own; toggle it in the env it extends."))
+                time.sleep(1.5)
+                continue
             cfg["usb_cdc_on_boot"] = not cfg.get("usb_cdc_on_boot", True)
             state = _green("ON") if cfg["usb_cdc_on_boot"] else _dim("OFF")
-
-            # Show board-specific pin info
-            env_name = cfg.get("env", "esp32c3_supermini").lower()
-            if "esp32c3" in env_name:
-                pins = "GPIO 18/19"
-            elif "esp32s3" in env_name:
-                pins = "GPIO 19/20"
-            else:
-                pins = "USB pins"
-
-            hint = _dim(f"({pins} locked for serial)") if cfg["usb_cdc_on_boot"] else _dim(f"({pins} available as GPIO)")
-            print(_dim(f"  → USB CDC on boot: ") + state + " " + hint)
+            pins = usb_pins(info.chip) or "USB pins"
+            hint = _dim(f"({pins} locked for serial)") if cfg["usb_cdc_on_boot"] \
+                else _dim(f"({pins} available as GPIO)")
+            print(_dim("  → USB CDC on boot: ") + state + " " + hint)
             time.sleep(0.5)
 
         elif ch in {str(n) for n in STEP_NAMES}:
