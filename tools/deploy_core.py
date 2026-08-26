@@ -28,12 +28,16 @@ from typing import Any, Callable, Optional
 # both as `python3 tools/deploy.py` and from a PyInstaller bundle.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pio_envs import (  # noqa: E402
-    chip_for, default_env, defaults_for, env_info, env_names, environments,
-    ports_for, usb_pins,
+    ROOT as _PIO_ROOT, chip_for, default_env, defaults_for, env_info,
+    env_names, environments, ports_for, usb_pins,
 )
 
 # ── Project layout ────────────────────────────────────────────────────────────
-ROOT     = Path(__file__).resolve().parent.parent
+# Taken from pio_envs rather than computed again: under PyInstaller the two
+# would otherwise disagree, and the failure is silent — the board list would
+# come from the real platformio.ini while the USB CDC rewrite edited a copy
+# inside the extraction directory and the config saved beside it.
+ROOT     = _PIO_ROOT
 WWW_SRC  = ROOT / "www"
 DATA_WWW = ROOT / "data" / "www"
 TOOLS    = ROOT / "tools"
@@ -216,15 +220,46 @@ def env_defaults_note(cfg: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _pinned_keys() -> set:
-    """Derived keys the saved config overrides with a concrete value."""
-    if not CFG_FILE.is_file():
-        return set()
+def pinned_keys(cfg: dict[str, Any]) -> set:
+    """Derived keys whose LIVE value differs from what the environment says.
+
+    Takes the config in hand rather than re-reading .flash_tool.json. The
+    on-disk version answers a different question — what was pinned when the
+    file was last written — so a baud pinned earlier in the same session was
+    invisible: the menu labelled it as coming from the env, and the next board
+    switch overwrote it.
+
+    Same rule save_cfg() uses, so what the menu marks as pinned and what
+    survives a switch cannot disagree.
+    """
     try:
-        saved = json.loads(CFG_FILE.read_text())
+        d = defaults_for(cfg.get("env") or detect_env())
     except Exception:
         return set()
-    return {k for k in _ENV_DERIVED if saved.get(k) is not None}
+    return {k for k in _ENV_DERIVED
+            if cfg.get(k) is not None and cfg.get(k) != d.get(k)}
+
+
+def _pinned_keys() -> set:                       # backwards-compatible shim
+    """Deprecated: reads the file, so it cannot see the current session."""
+    return pinned_keys(load_cfg())
+
+
+def adopt_env_defaults(cfg: dict[str, Any], pinned: set | None = None) -> None:
+    """Re-derive everything the environment states, in place.
+
+    Called when the environment changes. Values in `pinned` are left alone;
+    pass the set from BEFORE the switch, since pinned_keys() compares against
+    whichever env is current.
+    """
+    pinned = set() if pinned is None else pinned
+    d = defaults_for(cfg["env"])
+    cfg["chip"] = d["chip"]
+    for key in _ENV_DERIVED:
+        if key not in pinned:
+            cfg[key] = d[key]
+    cfg["usb_cdc_on_boot"] = d["usb_cdc_on_boot"] \
+        if d["usb_cdc_on_boot"] is not None else True
 
 
 def save_cfg(cfg: dict[str, Any]) -> None:
@@ -251,6 +286,17 @@ def save_cfg(cfg: dict[str, Any]) -> None:
             out[key] = None
     out.pop("chip", None)
     out.pop("usb_cdc_on_boot", None)
+
+    # The port gets the same treatment for the same reason. load_cfg() fills
+    # in whatever auto-detection found, and writing that back pinned it — so
+    # the very first save froze one device path into the config and the new
+    # VID:PID ranking never ran again. Store it only when the user picked
+    # something detection would not have.
+    try:
+        if not out.get("port") or out["port"] == detect_port(out.get("env")):
+            out["port"] = None      # "" and "what detection finds" both mean auto
+    except Exception:
+        pass
 
     try:
         CFG_FILE.write_text(json.dumps(out, indent=2) + "\n")
@@ -441,7 +487,13 @@ class DeployManager:
         if not script.is_file():
             self._log("ERROR: flash_bootloader.py not found in tools/")
             return 2
-        cmd = [sys.executable, str(script), "--chip", self.cfg["chip"], "--baud", str(self.cfg["baud"])]
+        # Pass the ENV name, not the chip family. flash_bootloader resolves the
+        # chip from it and — crucially — the flash size, which the chip alone
+        # cannot give: esp32s3 and esp32s3_n16r8 are the same silicon with 8
+        # and 16 MB behind it, and the size lands in the bootloader image
+        # header.
+        cmd = [sys.executable, str(script), "--chip", self.cfg["env"],
+               "--baud", str(self.cfg["baud"])]
         if self.cfg.get("port"):
             cmd += ["--port", self.cfg["port"]]
         rc = self._run_cmd(cmd)

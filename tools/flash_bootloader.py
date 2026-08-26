@@ -124,6 +124,29 @@ def resolve_chip(name):
     return CHIP_ALIASES.get(name, name)
 
 
+def resolve_flash_size(name, chip_cfg):
+    """Flash size for `name`, preferring what platformio.ini says.
+
+    The per-chip default cannot be right for every board of that family:
+    esp32s3 here means 8 MB, but esp32s3_n16r8 aliases onto it and carries 16.
+    Writing a bootloader whose image header claims the wrong size is exactly
+    the sort of thing that boots today and confuses flash detection later.
+
+    Falls back to the chip default when the name is not an env, or when
+    pio_envs is unavailable (this script is also used standalone).
+    """
+    try:
+        sys.path.insert(0, SCRIPT_DIR)
+        from pio_envs import env_info, env_names
+        if name in env_names(include_all=True):
+            size = env_info(name).flash_size
+            if size:
+                return size
+    except Exception:
+        pass
+    return chip_cfg["flash_size"]
+
+
 def find_binary(chip, name):
     """Locate a pre-built binary for the given chip."""
     search_chip = resolve_chip(chip)
@@ -140,6 +163,7 @@ def find_binary(chip, name):
 
 def flash(port, chip, bootloader_only=False, baud=921600):
     """Flash bootloader (and optionally partition table) via esptool."""
+    requested = chip                 # may be an env/board name
     chip = resolve_chip(chip)
     cfg = CHIP_CONFIG.get(chip)
     if not cfg:
@@ -157,6 +181,7 @@ def flash(port, chip, bootloader_only=False, baud=921600):
         return False
 
     pt_bin = find_binary(chip, "partition-table.bin")
+    flash_size = resolve_flash_size(requested, cfg)
 
     cmd = [
         sys.executable, "-m", "esptool",
@@ -166,7 +191,7 @@ def flash(port, chip, bootloader_only=False, baud=921600):
         "write_flash",
         "--flash_mode", cfg["flash_mode"],
         "--flash_freq", cfg["flash_freq"],
-        "--flash_size", cfg["flash_size"],
+        "--flash_size", flash_size,
         cfg["bootloader_addr"], bl_bin,
     ]
 
@@ -174,6 +199,8 @@ def flash(port, chip, bootloader_only=False, baud=921600):
         cmd.extend([cfg["partition_addr"], pt_bin])
 
     print(f"Chip:       {chip}")
+    print(f"Flash size: {flash_size}"
+          + ("" if flash_size == cfg["flash_size"] else f"  (from [env:{requested}])"))
     print(f"Port:       {port}")
     print(f"Bootloader: {bl_bin} @ {cfg['bootloader_addr']}")
     if pt_bin and not bootloader_only:
@@ -213,8 +240,17 @@ def main():
         description="Flash a rollback-enabled bootloader to an ESP32 device."
     )
     parser.add_argument("--port", "-p", help="Serial port (auto-detect if omitted)")
-    parser.add_argument("--chip", "-c", choices=list(CHIP_CONFIG.keys()),
-                        help="Chip type (auto-detect if omitted)")
+    # The alias names must be accepted here too. argparse validates `choices`
+    # before any of our code runs, so listing only CHIP_CONFIG rejected every
+    # board name in CHIP_ALIASES with exit 2 — including the one the deploy
+    # tool passes for the default env — while the error text below advertised
+    # them as accepted.
+    parser.add_argument("--chip", "-c",
+                        choices=list(CHIP_CONFIG.keys()) + list(CHIP_ALIASES.keys()),
+                        metavar="CHIP",
+                        help="Chip family (%s) or board/env name (%s). "
+                             "Auto-detected if omitted."
+                             % (", ".join(CHIP_CONFIG), ", ".join(CHIP_ALIASES)))
     parser.add_argument("--baud", "-b", type=int, default=921600, help="Flash baud rate")
     parser.add_argument("--bootloader-only", action="store_true",
                         help="Flash bootloader only (skip partition table)")

@@ -23,7 +23,19 @@
     "variant is the Mini's, so code that keys off the board macro should see",
     "the board whose pins_arduino.h it actually got. Nothing in this project",
     "keys off either (USB pin locking keys off the chip family instead — see",
-    "src/modules/UsbCdcModule.cpp)."
+    "src/modules/UsbCdcModule.cpp).",
+    "",
+    "NO -DARDUINO_USB_CDC_ON_BOOT HERE, unlike lolin_c3_mini.json upstream.",
+    "The env sets it, and the deploy tool rewrites it there; a copy in the",
+    "board definition means every unit compiles with a GCC macro-redefinition",
+    "warning the moment the two disagree, which is exactly when the toggle is",
+    "used. ARDUINO_USB_MODE=1 stays: nothing toggles it.",
+    "",
+    "hwids use a LOWERCASE 0x prefix. PlatformIO's normalize_board_hwid()",
+    "(device/finder.py) does .replace(\"0x\", \"\") and only then .upper(), so an",
+    "upstream-style \"0X303A\" never matches a detected port and `pio run -t",
+    "upload` falls back to guessing the last USB device. lolin_c3_mini.json",
+    "has the capital-X form; this does not."
   ],
   "build": {
     "arduino": {
@@ -33,15 +45,14 @@
     "extra_flags": [
       "-DARDUINO_LOLIN_C3_PICO",
       "-DARDUINO_LOLIN_C3_MINI",
-      "-DARDUINO_USB_MODE=1",
-      "-DARDUINO_USB_CDC_ON_BOOT=1"
+      "-DARDUINO_USB_MODE=1"
     ],
     "f_cpu": "160000000L",
     "f_flash": "80000000L",
     "flash_mode": "qio",
     "hwids": [
       [
-        "0X303A",
+        "0x303A",
         "0x1001"
       ]
     ],

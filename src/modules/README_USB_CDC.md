@@ -38,14 +38,29 @@ definition sets, so a new board needs no change here.
 
 > **This used to test board macros — `ARDUINO_SEEED_XIAO_ESP32C3`,
 > `ARDUINO_ESP32C3_DEV`, `ARDUINO_ESP32S3_DEV` — and answered "board not
-> supported" for anything else.** Two of those three are defined by no board
-> in this project: the Seeed board sets `ARDUINO_XIAO_ESP32C3` (no `SEEED_`),
-> and `esp32-c3-devkitm-1` sets no `_DEV` macro at all. The module was
-> therefore inert on both C3 targets — including the production XIAO C3 — and
-> on the XIAO S3, printing "This board does not support USB CDC configuration"
-> at boot while `validatePin()` let GPIO 18/19 through as if they were free.
-> Only the S3 DevKitC path ever worked. Asking the silicon instead is both
-> correct and something a new board cannot get wrong.
+> supported" for anything else.** Both XIAO targets fell outside that list,
+> so the module was inert on them:
+>
+> | env | board macro | old test |
+> |---|---|---|
+> | `xiao_esp32c3` | `ARDUINO_XIAO_ESP32C3` | no match — **inert** |
+> | `xiao_esp32s3` | `ARDUINO_XIAO_ESP32S3` | no match — **inert** |
+> | `lolin_c3_pico` | its own | no match — would have been |
+> | `esp32c3_supermini` | `ARDUINO_ESP32C3_DEV` | matched — worked |
+> | `esp32s3`, `esp32s3_n16r8` | `ARDUINO_ESP32S3_DEV` | matched — worked |
+>
+> Seeed's macro is `ARDUINO_XIAO_ESP32C3`, with no `SEEED_` — so the board the
+> first branch was written for never matched it. On the two inert targets, one
+> of them the production XIAO C3, boot printed "This board does not support USB
+> CDC configuration" while `validatePin()` let GPIO 18/19 through as if they
+> were free. Asking the silicon instead is both correct and something a new
+> board cannot get wrong.
+>
+> (An earlier revision of this note claimed `esp32-c3-devkitm-1` sets no `_DEV`
+> macro and that four targets were affected. It does set one; the mistake came
+> from a check that iterated that board's `extra_flags` — a JSON *string*
+> there, a list everywhere else — character by character. The table above was
+> re-derived with a `#pragma message` probe compiled for each env.)
 
 ### Status Reporting
 Prints a clear status banner at boot showing:

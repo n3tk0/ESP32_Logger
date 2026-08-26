@@ -29,16 +29,29 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-INI = ROOT / "platformio.ini"
+def _project_root() -> Path:
+    """The project root, as every tool in this directory must agree on it.
 
-# Frozen by PyInstaller, __file__ lives in an extraction directory that has no
-# platformio.ini above it. The deploy tools are run from the project root in
-# that case, so fall back to the working directory rather than reporting no
-# boards at all.
-if not INI.is_file() and (Path.cwd() / "platformio.ini").is_file():
-    ROOT = Path.cwd()
-    INI = ROOT / "platformio.ini"
+    Frozen by PyInstaller, __file__ lives in an extraction directory with no
+    platformio.ini above it, and the tools are then run from the project root.
+
+    This must resolve to the SAME directory deploy_core.ROOT does, or the
+    result is worse than not working: the board list would come from the real
+    platformio.ini while the USB CDC rewrite wrote to a file under the
+    extraction directory and the config saved beside it — silently, with every
+    step reporting success. So the two are set from one function, and
+    deploy_core imports it rather than computing its own.
+    """
+    here = Path(__file__).resolve().parent.parent
+    if (here / "platformio.ini").is_file():
+        return here
+    if (Path.cwd() / "platformio.ini").is_file():
+        return Path.cwd()
+    return here
+
+
+ROOT = _project_root()
+INI = ROOT / "platformio.ini"
 
 # Envs that build but must never be offered as a flash target.
 # The value is shown to the user when something asks for one by name.
@@ -213,11 +226,17 @@ def _board_json(board: str) -> dict:
 
 
 def _chip_hint(board: str) -> str:
+    """Guess the chip from a board id whose JSON is not available locally.
+
+    Returns "" rather than guessing "esp32" for an id that names no part: a
+    board that does not exist should surface as "no chip", not as the one
+    family whose bootloader offset differs from every board here.
+    """
     low = board.lower()
     for needle, chip in _CHIP_HINTS:
         if needle in low:
             return chip
-    return "esp32"
+    return ""
 
 
 # --------------------------------------------------------------------------
@@ -232,7 +251,15 @@ def _info(sections: dict[str, dict[str, str]], name: str) -> EnvInfo:
     board = _value(sections, name, "board")
     js = _board_json(board)
     upload_js = js.get("upload", {}) or {}
-    chip = (js.get("build", {}) or {}).get("mcu", "") or _chip_hint(board)
+    # The hint is a guess for a board whose JSON is not on this machine (a
+    # platform not downloaded yet). It must NOT stand in for a board that does
+    # not exist: it used to answer "esp32" for anything unrecognised, which
+    # made check_pio_envs' `if not e.chip` guard unreachable and let a typo'd
+    # board name pass CI as an ESP32 — bootloader offset 0x1000, wrong for
+    # every part this project uses.
+    chip = (js.get("build", {}) or {}).get("mcu", "")
+    if not chip:
+        chip = _chip_hint(board) if board else ""
     flash = _value(sections, name, "board_upload.flash_size") \
         or upload_js.get("flash_size", "")
 

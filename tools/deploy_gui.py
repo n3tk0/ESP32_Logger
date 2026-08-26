@@ -392,7 +392,7 @@ class DeployerGUI:
             wraplength=400
         )
         self.usb_info_label.pack(anchor="w", pady=(0, 10), padx=(20, 0))
-        self._refresh_env_labels()
+        self._refresh_env_labels(sync_cdc=True)
 
     def _build_info_tab(self) -> None:
         """Info/help tab."""
@@ -449,9 +449,9 @@ Log Colors:
         self.cfg["env"] = name
         save_cfg(self.cfg)
         self.cfg = load_cfg()
-        self._refresh_env_labels()
+        self._refresh_env_labels(sync_cdc=True)
 
-    def _refresh_env_labels(self) -> None:
+    def _refresh_env_labels(self, sync_cdc: bool = False) -> None:
         """Show what the selected env resolves to, and whether its USB CDC
         flag can be toggled. Both answers come from platformio.ini and the
         chip family, so a new board needs no change here."""
@@ -476,9 +476,13 @@ Log Colors:
         check = getattr(self, "usb_cdc_check", None)
         if check is not None:
             check.configure(state="normal" if info.supports_usb_cdc else "disabled")
+        # Only re-read the checkbox from the ini when the ENVIRONMENT changed.
+        # Doing it on every refresh meant that toggling CDC off and then
+        # touching the baud field snapped the checkbox back to the ini value,
+        # because editing baud refreshes these labels.
         var = getattr(self, "usb_cdc_var", None)
-        if var is not None and info.usb_cdc_on_boot is not None:
-            var.set(info.usb_cdc_on_boot)   # the ini is the truth, not memory
+        if sync_cdc and var is not None and info.usb_cdc_on_boot is not None:
+            var.set(info.usb_cdc_on_boot)
 
         # The two baud fields and the note under them.
         d = defaults_for(info.name) if info.board else None
@@ -608,15 +612,22 @@ Log Colors:
             messagebox.showwarning("Already Running", "Steps are already running.")
             return
 
-        # Sync all entry fields to config before running (in case user didn't click away)
-        # env comes from the option menu, which persists on change; the chip
-        # is re-derived here so a config edited by hand cannot flash the
-        # wrong bootloader.
-        self._on_env_change(self.env_var.get())
+        # Sync the entry fields the user may not have blurred out of.
+        #
+        # This must NOT go through _on_env_change(): that reloads the config
+        # from disk, and neither the USB CDC checkbox nor an un-blurred baud
+        # entry is on disk — so calling it here silently discarded both, and
+        # the GUI's USB CDC toggle could never reach the build. The env is
+        # already persisted by the option menu's own callback; all that is
+        # needed here is to re-derive the chip from it.
         self._save_setting("port", self.port_entry)
         self._save_setting("device_ip", self.ip_entry)
         self._save_setting("baud", self.baud_entry, int_val=True)
         self._save_setting("monitor_speed", self.monitor_entry, int_val=True)
+        self.cfg["env"] = self.env_var.get()
+        self.cfg["chip"] = chip_for(self.cfg["env"])
+        # The checkbox is the live intent; the build step writes it to the ini.
+        self.cfg["usb_cdc_on_boot"] = bool(self.usb_cdc_var.get())
 
         steps = self.cfg.get("steps", [])
         if not steps:

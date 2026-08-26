@@ -96,12 +96,22 @@ bool UsbCdcModule::isUsbCdcActiveAtBoot() const {
 //
 // This used to test board macros — ARDUINO_SEEED_XIAO_ESP32C3,
 // ARDUINO_ESP32C3_DEV, ARDUINO_ESP32S3_DEV — and answered "no USB pins, none
-// locked" for every board outside that list. Two supported targets already
-// fell outside it (the XIAO S3 defines ARDUINO_XIAO_ESP32S3, the LOLIN C3
-// PICO defines its own), so on those the UI reported the USB D+/D- pair as
-// free while USB CDC was compiled in. That is precisely the "sensor never
-// answers and never logs why" failure the board profiles exist to prevent,
-// and every new board would have re-introduced it.
+// locked" for every board outside that list. Both XIAO targets fell outside
+// it, verified with a #pragma message probe on each env rather than by
+// reading board JSON:
+//
+//   xiao_esp32c3       ARDUINO_XIAO_ESP32C3          no match  -> INERT
+//   xiao_esp32s3       ARDUINO_XIAO_ESP32S3          no match  -> INERT
+//   lolin_c3_pico      (its own)                     no match  -> would be
+//   esp32c3_supermini  ARDUINO_ESP32C3_DEV           matched   -> worked
+//   esp32s3(_n16r8)    ARDUINO_ESP32S3_DEV           matched   -> worked
+//
+// Seeed's macro is ARDUINO_XIAO_ESP32C3, with no SEEED_ — so the very board
+// the first branch was written for never matched it. On those the UI reported
+// the USB D-/D+ pair as free while USB CDC was compiled in and holding it,
+// which is precisely the "sensor never answers and never logs why" failure
+// the board profiles exist to prevent, and every new board would have
+// re-introduced it.
 //
 // USB Serial/JTAG is fixed in the pad ring of each part:
 //   ESP32-C3:  GPIO18 = D-, GPIO19 = D+

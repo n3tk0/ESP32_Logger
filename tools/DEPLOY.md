@@ -212,12 +212,12 @@ values you pinned survive the switch.
   the selected env (its own value, then what it `extends`, then `[env]`). The
   provisioner used to take the first `monitor_speed` anywhere in the file,
   which is right only until one env overrides the shared one.
-- **chip** — **Derived from the env, not chosen.** It is re-resolved from the
-  board definition on every load and written back here for readability.
-  Editing it by hand has no effect. It used to be a free-text field beside the
-  environment, which let a saved config say `esp32s3` for the env and
-  `esp32c3` for the chip — and step 2 would then write a C3 bootloader to an
-  S3.
+- **chip** — **Derived from the env, and not stored in this file at all.** It
+  is re-resolved from the board definition on every load; adding it by hand
+  has no effect, because `save_cfg()` drops it again. It used to be a
+  free-text field beside the environment, which let a saved config say
+  `esp32s3` for the env and `esp32c3` for the chip — and step 2 would then
+  write a C3 bootloader to an S3.
 - **baud** — Upload speed, from the env's `upload_speed` (falling back to
   the board definition's `upload.speed`). Used by the bootloader step;
   `pio run -t upload` reads the same value from the ini directly.

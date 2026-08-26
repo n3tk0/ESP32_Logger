@@ -28,7 +28,8 @@ from deploy_core import (
     save_cfg,
     detect_port,
     detect_env,
-    _pinned_keys,
+    adopt_env_defaults,
+    pinned_keys,
     STEP_NAMES,
     PRESETS,
     _UPLOAD_FILTERS,
@@ -112,7 +113,7 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     # Values the project already states get their provenance shown beside them,
     # so it is obvious which numbers are the env's and which someone pinned.
     d = defaults_for(info.name) if info.board else {}
-    pinned = _pinned_keys()
+    pinned = pinned_keys(cfg)
 
     def _derived(key: str, val) -> str:
         if not d:
@@ -198,24 +199,22 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
                 print(f"  {_cyan(f'[{i}]')}  {e.name:<20} "
                       f"{_dim(f'{e.board}, {e.chip}, {e.flash_size}')}{cur}")
             v = _prompt("Environment (number, or name)", "")
+            picked = None
             if v.isdigit() and 1 <= int(v) <= len(envs):
-                cfg["env"] = envs[int(v) - 1].name
+                picked = envs[int(v) - 1].name
             elif v in env_names():
-                cfg["env"] = v
+                picked = v
             elif v:
                 print(_red(f"  No [env:{v}] in platformio.ini — unchanged."))
                 time.sleep(1.2)
-            # Everything the new board states about itself comes with it. Only
-            # values the user pinned survive the switch; carrying the previous
-            # board's baud across silently is how you flash an S3 at a rate
-            # meant for something else.
-            d = defaults_for(cfg["env"])
-            cfg["chip"] = d["chip"]
-            for k in ("baud", "monitor_speed"):
-                if k not in _pinned_keys():
-                    cfg[k] = d[k]
-            cfg["usb_cdc_on_boot"] = d["usb_cdc_on_boot"] \
-                if d["usb_cdc_on_boot"] is not None else True
+            # Only re-derive when the environment actually changed. Doing it
+            # unconditionally meant backing out of this prompt with a blank
+            # line still reset baud, monitor speed and the CDC state — a menu
+            # that changes settings when you decline to change anything.
+            if picked and picked != cfg.get("env"):
+                was_pinned = pinned_keys(cfg)   # measured against the OLD env
+                cfg["env"] = picked
+                adopt_env_defaults(cfg, was_pinned)
 
         elif ch == "p":
             # Ports are ranked by the board's own USB IDs, so the right one is
@@ -259,6 +258,27 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
                     print(_red("  Not a number — unchanged."))
             time.sleep(0.8)
 
+        elif choice == "U":          # uppercase U — USB CDC toggle
+            # Tested BEFORE the lowercase branch. `ch = choice.lower()` above
+            # means `elif ch == "u"` also matches "U", so with that branch
+            # first this one could never run and pressing U cycled the upload
+            # filter instead. The [W]/[w] pair below is ordered correctly and
+            # was the model for this fix. Predates this branch.
+            info = env_info(cfg.get("env", ""))
+            if not info.supports_usb_cdc:
+                print(_yellow(f"  → [env:{info.name}] has no -DARDUINO_USB_CDC_ON_BOOT "
+                              f"of its own; toggle it in the env it extends."))
+                time.sleep(1.5)
+                continue
+            cfg["usb_cdc_on_boot"] = not cfg.get("usb_cdc_on_boot", True)
+            state = _green("ON") if cfg["usb_cdc_on_boot"] else _dim("OFF")
+            pins = usb_pins(info.chip) or "USB pins"
+            hint = _dim(f"({pins} locked for serial)") if cfg["usb_cdc_on_boot"] \
+                else _dim(f"({pins} available as GPIO)")
+            print(_dim("  → USB CDC on boot: ") + state + " " + hint)
+            print(_dim("    Applied to platformio.ini by the next compile step."))
+            time.sleep(0.9)
+
         elif ch == "u":
             cur = cfg.get("upload_filter", "all")
             nxt = _UPLOAD_FILTERS[((_UPLOAD_FILTERS.index(cur) + 1) % len(_UPLOAD_FILTERS))
@@ -274,25 +294,6 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             cfg["wipe_before_upload"] = not cfg.get("wipe_before_upload", False)
             state = _green("ON") if cfg["wipe_before_upload"] else _dim("off")
             print(_dim(f"  → Wipe /www before upload: ") + state)
-            time.sleep(0.5)
-
-        elif choice == "U":          # uppercase U — USB CDC toggle
-            # The pins come from the chip family, which is what the firmware
-            # keys off too (src/modules/UsbCdcModule.cpp). Guessing them from
-            # the env NAME, as this used to, was wrong for any env whose name
-            # did not spell out the part.
-            info = env_info(cfg.get("env", ""))
-            if not info.supports_usb_cdc:
-                print(_yellow(f"  → [env:{info.name}] has no -DARDUINO_USB_CDC_ON_BOOT "
-                              f"of its own; toggle it in the env it extends."))
-                time.sleep(1.5)
-                continue
-            cfg["usb_cdc_on_boot"] = not cfg.get("usb_cdc_on_boot", True)
-            state = _green("ON") if cfg["usb_cdc_on_boot"] else _dim("OFF")
-            pins = usb_pins(info.chip) or "USB pins"
-            hint = _dim(f"({pins} locked for serial)") if cfg["usb_cdc_on_boot"] \
-                else _dim(f"({pins} available as GPIO)")
-            print(_dim("  → USB CDC on boot: ") + state + " " + hint)
             time.sleep(0.5)
 
         elif ch in {str(n) for n in STEP_NAMES}:
