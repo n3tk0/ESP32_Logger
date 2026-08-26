@@ -677,7 +677,7 @@ route, and whatever Basic Auth is compiled in globally.
     {
       "id": "env_indoor", "type": "bme280", "name": "BME280 Environmental",
       "enabled": true, "last_read_ts": 1710086380,
-      "metrics": ["temperature","humidity","pressure"], "status": "ok"
+      "metrics": ["temperature","humidity","pressure","dew_point","humidity_ambient"], "status": "ok"
     }
   ]
 }

@@ -34,6 +34,38 @@ The two sensor names are instance ids from `platform_config.json`. Typically
 `outdoor` is a remote node (see [`node/`](../node/README.md)) and `indoor` is a
 locally wired BME280.
 
+### The indoor sensor is usually on the collector, and that biases it
+
+A BME280 bolted to the board running WiFi reads warm — a couple of degrees is
+ordinary, more in a closed enclosure. Two consequences, and only one of them is
+obvious.
+
+**Temperature** is fixed with a calibration offset, measured against a reference
+thermometer after the board has been running an hour:
+
+```json
+"calibration": { "temperature": { "offset": -2.5 } }
+```
+
+**Humidity is not**, and an offset cannot fix it. Relative humidity is relative
+*to* a temperature: the same air reads lower RH the warmer the sensor measuring
+it, around 6 % relative per °C. Correcting only the temperature reports a room
+drier than it is.
+
+So `BME280Sensor` also publishes **`humidity_ambient`** — the RH implied by the
+dew point, re-expressed at the true ambient temperature. The dew point is what
+makes this work: it is a property of the air's absolute moisture and does not
+change because the sensor measuring it is warm. With the temperature offset
+above configured, the correction follows from it automatically.
+
+**This page prefers `humidity_ambient` and falls back to `humidity`.** A sensor
+with no correction configured still shows a figure, and where there is no
+self-heating the two are the same number — `rhAtTempC(dewPointC(T, RH), T)`
+recovers `RH` exactly, which `tests/host/test_psychrometrics.cpp` asserts.
+
+The best fix is still to get the sensor off the board: 10–15 cm of wire away
+from the regulator, and none of the above is needed.
+
 ## What is set where
 
 The split is not arbitrary: anything that changes what the page *is* costs

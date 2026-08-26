@@ -44,6 +44,23 @@ static Latest latestOf(const char* sensorId, const char* metric) {
     return out;
 }
 
+// The humidity to show, preferring the self-heating-corrected figure.
+//
+// A BME280 or BME688 on a board that runs WiFi reads warm, and relative
+// humidity is relative TO a temperature — so a warm sensor reports a room
+// drier than it is. Both plugins publish "humidity_ambient": the same air
+// re-expressed at the true ambient temperature, by way of a dew point that is
+// invariant under heating the sensor.
+//
+// Falling back to the raw figure rather than showing nothing: a sensor with no
+// correction configured, or one whose derived pair was dropped as out of
+// range, still has a humidity worth printing.
+static Latest humidityOf(const char* sensorId) {
+    Latest corrected = latestOf(sensorId, "humidity_ambient");
+    if (corrected.ok) return corrected;
+    return latestOf(sensorId, "humidity");
+}
+
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
@@ -354,10 +371,10 @@ static void appendWeek(String& out, uint32_t now) {
 // why that trade is made in favour of the old browser.
 static void handleKindle(AsyncWebServerRequest* req) {
     const Latest outT = latestOf(KINDLE_OUTDOOR_SENSOR, "temperature");
-    const Latest outH = latestOf(KINDLE_OUTDOOR_SENSOR, "humidity");
+    const Latest outH = humidityOf(KINDLE_OUTDOOR_SENSOR);
     const Latest outP = latestOf(KINDLE_OUTDOOR_SENSOR, "pressure");
     const Latest inT  = latestOf(KINDLE_INDOOR_SENSOR,  "temperature");
-    const Latest inH  = latestOf(KINDLE_INDOOR_SENSOR,  "humidity");
+    const Latest inH  = humidityOf(KINDLE_INDOOR_SENSOR);
 
     const uint32_t now = (uint32_t)time(nullptr);
 
