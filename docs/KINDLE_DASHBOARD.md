@@ -70,6 +70,28 @@ other reader with the same 6" panel: 1072×1448 at 300 ppi.
 > layout depended on it — both readers have the same panel — but the browser
 > claim below did.
 
+### It also suits a basic Kindle, by coincidence
+
+**Kindle (7th generation, 2014)** — the entry-level model, 6" at **800×600 and
+167 ppi**, 16 grey levels, infrared touch, Pearl e-paper, **no front light**.
+
+Its panel *is* 600×800 at `devicePixelRatio` 1, so the default
+`KINDLE_PAGE_W=600` maps one CSS pixel to one device pixel with no browser
+scaling at all — the hairline softening the width knob exists to avoid does not
+arise there.
+
+And the two targets come out the same physical size. A Paperwhite spreads 600
+CSS px across 1072 device px at 300 ppi, which is 0.151 mm per CSS px; the
+Kindle 7 maps them 1:1 at 167 ppi, which is 0.152 mm. The page occupies the same
+area of glass on both.
+
+Two things are worse on it, though: Pearl e-paper ghosts more than Carta, so
+`/kindle/clear` earns its keep; and with no front light a shelf dashboard needs
+room light to be read at all.
+
+Its firmware also predates 5.16.4, so the browser really is the old WebKit —
+there the zero-JavaScript rule below is a requirement rather than a choice.
+
 ### Choosing the layout width
 
 ```ini
@@ -236,9 +258,19 @@ Three ways, and one of them is not what it sounds like.
 ### 1. The reader asks
 
 A **refresh** button in the footer. A link, not a script, so a five-way pad
-reaches it as readily as a fingertip. Sized to 128×46 device px — 44 px is the
-smallest thing worth aiming at on a touch panel, and it is measured rather than
-assumed.
+reaches it as readily as a fingertip.
+
+It measures **72×26 CSS px**, which is about **11×4 mm** on any of the readers
+this page targets — a 300 ppi Paperwhite scaling 600 CSS px across 1072 device
+px and a 167 ppi Kindle 7 mapping them 1:1 both come to 0.15 mm per CSS px.
+
+> An earlier version of this page claimed "128×46 device px, and 44 px is the
+> smallest thing worth aiming at". That was wrong twice over: the 44 in the
+> usual guidance is CSS px on a phone — roughly **9 mm** — and 4 mm is under
+> half of it. The button is reachable with an infrared touch panel but it is not
+> generous. The page has no spare height at 796 of 800 to grow it without taking
+> the difference from the chart, which is a trade worth making deliberately
+> rather than by accident.
 
 > **Route order is load-bearing.** `AsyncCallbackWebHandler::canHandle` matches
 > a URL that *starts with* its uri plus `/`, and the first registered handler

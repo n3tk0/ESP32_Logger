@@ -597,10 +597,18 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S(".foot td{padding-top:");             KD_N(5);
     KD_S("px}");
 
-    // 44 device px is the smallest thing worth aiming at with a fingertip;
-    // at this layout that is kdPx(24) of height, which is what the padding
-    // buys. Boxed rather than underlined so the target is visible before it
-    // is touched, which on a panel with no hover state is the only chance.
+    // Boxed rather than underlined so the target is visible before it is
+    // touched, which on a panel with no hover state is the only chance.
+    //
+    // SIZE, HONESTLY: this comes to 72x26 CSS px, which is about 11x4 mm on
+    // any of the readers this page targets — a 300 ppi Paperwhite scaling 600
+    // CSS px across 1072 device px and a 167 ppi Kindle 7 mapping them 1:1
+    // work out to the same 0.15 mm per CSS px. An earlier version of this
+    // comment cited "44 device px" as the guideline met; that was wrong twice
+    // over. The 44 in the usual guidance is CSS px on a phone, roughly 9 mm,
+    // and 4 mm is under half of it. It is reachable with an infrared touch
+    // panel but it is not generous, and the page has no spare height at 796 of
+    // 800 to grow it without taking the difference from the chart.
     KD_S(".act{text-align:right;white-space:nowrap}");
     KD_S(".act a{display:inline-block;border:");  KD_N(1);
     KD_S("px solid #777;color:#000;text-decoration:none;padding:"); KD_N(4);
@@ -737,9 +745,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
     appendWeek(p, now);
 
     // The footer carries the two manual repaints. Links rather than anything
-    // scripted, so a five-way pad reaches them as readily as a fingertip, and
-    // padded to a real target: 44 device px is the smallest thing worth aiming
-    // at on a touch panel, which is kdPx(24) at this layout.
+    // scripted, so a five-way pad reaches them as readily as a fingertip. See
+    // the .act rule for what the padding actually buys, and for why the size
+    // is smaller than the usual touch guidance rather than meeting it.
     p += F("<table class=\"foot\"><tr><td>"
            KD_T("Measured on site", "Измерено на място"));
     p += F("</td><td class=\"act\"><a href=\"/kindle\">"
