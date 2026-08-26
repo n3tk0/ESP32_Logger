@@ -52,8 +52,8 @@ from deploy_core import (
     _UPLOAD_FILTER_LABELS,
 )
 from pio_envs import (
-    chip_for, defaults_for, env_info, environments, env_names, ports_for,
-    usb_pins,
+    INI, NO_PROJECT, chip_for, defaults_for, env_info, environments, env_names,
+    ports_for, usb_pins,
 )
 
 # ── Theme configuration ─────────────────────────────────────────────────────
@@ -84,6 +84,25 @@ class DeployerGUI:
 
         # Setup UI
         self._build_ui()
+        self.root.after(200, self._warn_if_no_project)
+
+    def _warn_if_no_project(self) -> None:
+        """Say so when there is no platformio.ini to read.
+
+        Every board list is empty in that state. Without this the tool opens
+        with a blank environment dropdown and no explanation, which reads as a
+        broken download rather than as a tool started in the wrong place — the
+        most likely first experience of the pre-built binary.
+        """
+        if not NO_PROJECT:
+            return
+        messagebox.showwarning(
+            "No PlatformIO project found",
+            "Could not find a platformio.ini, so there are no boards to offer.\n\n"
+            "Put this program inside your ESP32_Logger checkout (any "
+            "subdirectory will do), or start it from that directory, then "
+            "reopen it.\n\n"
+            f"Looked upward from:\n  {Path.cwd()}\n  {Path(sys.executable).parent}")
 
     def _build_ui(self) -> None:
         """Build the main UI with responsive layout."""
@@ -791,8 +810,64 @@ Log Colors:
         messagebox.showinfo("Saved", "Configuration saved to .flash_tool.json")
 
 
+def selftest() -> int:
+    """Print what this build can see, and exit. No window is opened.
+
+    Exists so a packaged binary can be CHECKED rather than merely started.
+    "The exe launches" says nothing about whether it found platformio.ini,
+    bundled pyserial, or can enumerate boards — and those are exactly the
+    things a frozen build breaks silently. CI runs this against the artifact
+    before publishing it.
+
+    Exit code 1 when no project was found, so a CI step can just assert on it.
+    """
+    lines = [
+        "ESP32 Deploy self-test",
+        f"  frozen build : {getattr(sys, 'frozen', False)}",
+        f"  executable   : {sys.executable}",
+        f"  working dir  : {Path.cwd()}",
+        f"  platformio.ini: {INI if not NO_PROJECT else '(NOT FOUND)'}",
+        f"  pyserial     : {'yes' if HAS_PYSERIAL else 'NO'}",
+    ]
+    rc = 0
+    try:
+        import customtkinter as _ctk
+        lines.append(f"  customtkinter: {_ctk.__version__}")
+    except Exception as exc:                      # pragma: no cover
+        lines.append(f"  customtkinter: FAILED ({exc})")
+        rc = 1
+    if NO_PROJECT:
+        lines.append("  environments : none — no platformio.ini above the "
+                     "working directory or the executable")
+        rc = 1
+    else:
+        envs = environments()
+        lines.append(f"  environments : {len(envs)}")
+        lines += [f"    {e.name:<20} {e.board:<24} {e.chip:<9} "
+                  f"{e.flash_size or '?':<6} upload={e.upload_speed}" for e in envs]
+
+    report = "\n".join(lines)
+    # A windowed PyInstaller build on Windows has no console: sys.stdout is
+    # None there and print() raises. So the report is also written beside the
+    # executable, which is the only way to read it on the platform where the
+    # binary is most likely to be double-clicked.
+    try:
+        print(report)
+    except Exception:
+        pass
+    try:
+        out = Path(sys.executable).parent / "deploy_selftest.txt"
+        out.write_text(report + "\n", encoding="utf-8")
+    except Exception:
+        pass
+    return rc
+
+
 def main() -> int:
     """Entry point."""
+    if "--selftest" in sys.argv:
+        return selftest()
+
     root = ctk.CTk()
     app = DeployerGUI(root)
 

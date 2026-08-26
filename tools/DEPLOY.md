@@ -275,31 +275,71 @@ board silently. Toggle it in the parent env instead.
 - **Persistent Configuration** — Setting survives firmware updates and reboots
 - **Runtime Status** — Firmware prints current USB CDC configuration at boot
 
-## Building a Standalone Executable
+## The standalone executable
 
-### Quick Start
+### Download it — you do not have to build it
+
+CI builds the binary on every change under `tools/`, so the published one never
+lags the scripts. Grab it from the **Build Deploy GUI** workflow: open the run
+for the commit you want on the [Actions
+tab](../../actions/workflows/build-gui-tools.yml) and take the artifact from
+its Summary page.
+
+| Artifact | Contains |
+|---|---|
+| `ESP32_Deploy-windows-<sha>` | `ESP32_Deploy-windows.exe` |
+| `ESP32_Deploy-linux-<sha>` | `ESP32_Deploy-linux` |
+| `ESP32_Deploy-macos-<sha>` | `ESP32_Deploy-macos` |
+
+Each also carries `selftest-<os>.txt` — what that exact binary reported about
+itself when CI checked it. The commit sha is in the artifact name so it is
+obvious which version of the deploy scripts you are holding.
+
+Releases get the three binaries attached as assets as well.
+
+**Put it in your `ESP32_Logger` folder** (any subdirectory works) or start it
+from there. It reads `platformio.ini` at runtime rather than bundling it —
+that is what makes the board list follow the project instead of the binary's
+build date. Started somewhere with no project above it, it says so in a dialog
+instead of showing an empty board list.
+
+On Linux: `chmod +x ESP32_Deploy-linux`. On macOS, the binary is unsigned, so
+Gatekeeper quarantines it: `xattr -d com.apple.quarantine ESP32_Deploy-macos`.
+
+Check any copy with:
 
 ```bash
-# Install PyInstaller
-pip install pyinstaller
+./ESP32_Deploy --selftest
+```
 
-# Build the executable
+which prints the project it found, whether pyserial made it into the bundle,
+and every environment it can offer — then exits without opening a window. On
+Windows the same report is written to `deploy_selftest.txt` next to the
+executable, because a windowed build there has no console to print to.
+
+### Building it yourself
+
+```bash
+pip install pyinstaller customtkinter pyserial
 ./tools/build_exe.sh          # macOS/Linux
 tools\build_exe.bat           # Windows
 ```
 
-The executable will be in `dist/ESP32_Deploy.exe` (Windows) or `dist/ESP32_Deploy` (macOS/Linux).
+Output: `dist/ESP32_Deploy.exe` (Windows) or `dist/ESP32_Deploy` (macOS and
+Linux — the spec has no `BUNDLE` section, so macOS gets a plain binary, not an
+`.app`). Linux also needs `python3-tk`, which customtkinter sits on top of.
 
-### What's Included
+### What is and is not in it
 
-The standalone executable bundles:
-- Python interpreter (embedded)
-- CustomTkinter (GUI framework)
-- PySerial (serial communication)
-- PlatformIO (firmware compilation)
-- All application code
+Bundled: the Python interpreter, CustomTkinter, pyserial, and all of
+`tools/` — `deploy_gui.py`, `deploy_core.py` and `pio_envs.py`.
 
-**Result:** A single file users can just run. No Python installation required.
+**Not bundled: PlatformIO.** It is a ~500 MB toolchain the spec explicitly
+excludes, and the tool shells out to it. Install it separately
+(`pip install platformio`). An earlier version of this document listed it as
+included; it never was.
+
+Also not bundled: your project. See above — that is deliberate.
 
 ### Customization
 

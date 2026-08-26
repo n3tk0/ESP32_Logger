@@ -26,32 +26,59 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+def _upwards(start: Path) -> Path | None:
+    """First directory at or above `start` that holds a platformio.ini."""
+    try:
+        start = start.resolve()
+    except OSError:
+        return None
+    for candidate in (start, *start.parents):
+        if (candidate / "platformio.ini").is_file():
+            return candidate
+    return None
+
 
 def _project_root() -> Path:
     """The project root, as every tool in this directory must agree on it.
 
-    Frozen by PyInstaller, __file__ lives in an extraction directory with no
-    platformio.ini above it, and the tools are then run from the project root.
+    Frozen by PyInstaller, __file__ lives in a temporary extraction directory
+    with no platformio.ini above it, so the source-checkout answer is not
+    available and the other two candidates are what remain: the directory the
+    user is in, or the directory they put the executable in. Both are searched
+    upwards, so running the tool from anywhere inside the project works rather
+    than only from its exact root — which is the difference between a
+    downloaded binary that works and one that shows an empty board list and
+    does not say why.
 
-    This must resolve to the SAME directory deploy_core.ROOT does, or the
-    result is worse than not working: the board list would come from the real
-    platformio.ini while the USB CDC rewrite wrote to a file under the
-    extraction directory and the config saved beside it — silently, with every
-    step reporting success. So the two are set from one function, and
-    deploy_core imports it rather than computing its own.
+    Whatever this returns, deploy_core imports it rather than computing its
+    own. The two disagreeing is worse than either being wrong: the board list
+    would come from the real platformio.ini while the USB CDC rewrite edited a
+    file somewhere else entirely, with every step reporting success.
     """
-    here = Path(__file__).resolve().parent.parent
-    if (here / "platformio.ini").is_file():
-        return here
-    if (Path.cwd() / "platformio.ini").is_file():
-        return Path.cwd()
-    return here
+    for candidate in (
+        Path(__file__).resolve().parent.parent,   # a source checkout
+        _upwards(Path.cwd()),                     # run from inside the project
+        # Frozen: where the user actually put the executable. sys.executable is
+        # the bundle itself, not the extraction directory, so dropping the exe
+        # into the project (or a subdirectory of it) is enough.
+        _upwards(Path(sys.executable).parent) if getattr(sys, "frozen", False) else None,
+    ):
+        if candidate is not None and (candidate / "platformio.ini").is_file():
+            return candidate
+    return Path.cwd()
 
 
 ROOT = _project_root()
 INI = ROOT / "platformio.ini"
+
+#: True when no platformio.ini was found at all. Callers should say so out
+#: loud: every board list is empty in that state, and an empty dropdown looks
+#: like a broken tool rather than a tool started in the wrong directory.
+NO_PROJECT = not INI.is_file()
 
 # Envs that build but must never be offered as a flash target.
 # The value is shown to the user when something asks for one by name.

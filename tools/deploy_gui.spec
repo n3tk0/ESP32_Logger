@@ -30,7 +30,13 @@ a = Analysis(
     datas=[],
     hiddenimports=[
         'customtkinter',
-        'pyserial',
+        # 'serial.tools.list_ports', NOT 'pyserial'. pyserial is the
+        # DISTRIBUTION name; the module is `serial`, and PyInstaller resolves
+        # hidden imports as modules — so the old entry logged
+        # "ERROR: Hidden import 'pyserial' not found" on every build and
+        # guaranteed nothing. Port enumeration survived only because
+        # deploy_gui imports it at module scope where the analyser sees it.
+        'serial.tools.list_ports',
         # Both GUI and core import it at module scope, but naming it here
         # keeps the board list working if either import is ever moved into a
         # function — an env list that silently comes back empty in the frozen
