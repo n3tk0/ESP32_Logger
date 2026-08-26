@@ -219,7 +219,10 @@ curl -X POST http://HOST/restart</pre>
 )HTML";
 
 static bool clientAcceptsGzip(AsyncWebServerRequest* r) {
-    AsyncWebHeader* h = r->getHeader("Accept-Encoding");
+    // const-qualified deliberately: the esphome fork returns AsyncWebHeader*
+    // and ESP32Async's returns const AsyncWebHeader*. Binding to the const
+    // pointer accepts both, and this use is read-only anyway.
+    const AsyncWebHeader* h = r->getHeader("Accept-Encoding");
     // No header means no stated preference. RFC 9110 permits any encoding in
     // that case, but the clients that omit it are the ones least able to cope
     // with a compressed body, so treat silence as "no".
@@ -342,6 +345,19 @@ static void fmtIP(const uint8_t* ip, char* buf16) {
 // ============================================================================
 // WEB SERVER SETUP
 // ============================================================================
+
+// AsyncWebHandler::canHandle() is `const` in ESP32Async/ESPAsyncWebServer and
+// non-const in esphome/ESPAsyncWebServer-esphome. One signature cannot satisfy
+// both, and `override` turns the mismatch into a hard error rather than a
+// silently-never-called method — which is the failure mode worth avoiding.
+// ASYNCWEBSERVER_VERSION_MAJOR exists only in the ESP32Async line (it comes
+// from its AsyncWebServerVersion.h), so it is the discriminator.
+#ifdef ASYNCWEBSERVER_VERSION_MAJOR
+#  define LOGGER_CANHANDLE_CV const
+#else
+#  define LOGGER_CANHANDLE_CV
+#endif
+
 #if WEB_BASIC_AUTH_ENABLED
 // R22 / AUDIT 5.3: refuse to compile when Basic Auth is enabled with the
 // shipped placeholder admin/admin credentials. Operators MUST override
@@ -369,7 +385,7 @@ static_assert(
 // through to the real handler chain.
 class AsyncAuthGateHandler : public AsyncWebHandler {
 public:
-    bool canHandle(AsyncWebServerRequest* r) override {
+    bool canHandle(AsyncWebServerRequest* r) LOGGER_CANHANDLE_CV override {
         return !r->authenticate(WEB_BASIC_AUTH_USER, WEB_BASIC_AUTH_PASS);
     }
     void handleRequest(AsyncWebServerRequest* r) override {
@@ -392,7 +408,7 @@ static AsyncAuthGateHandler s_authGate;
 //   - static asset extensions           (CSS, JS, fonts, favicon)
 class FirstRunGateHandler : public AsyncWebHandler {
 public:
-    bool canHandle(AsyncWebServerRequest* r) override {
+    bool canHandle(AsyncWebServerRequest* r) LOGGER_CANHANDLE_CV override {
         if (!g_setupRequired) return false;
         const String& url = r->url();
         if (url == "/firstrun" || url == "/firstrun.html")        return false;
