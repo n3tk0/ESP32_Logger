@@ -537,6 +537,7 @@ The **Auth** column in the index uses:
 | POST | `/api/ingest` | token | Accept readings pushed by a remote node (`FEATURE_REMOTE_NODES`) |
 | GET | `/kindle` | read | Server-rendered e-ink dashboard (`FEATURE_KINDLE_DASHBOARD`) |
 | GET | `/kindle/probe` | read | Reports the reader's viewport, DPR and user agent, to pick `KINDLE_PAGE_W` |
+| GET | `/kindle/clear` | read | Full-screen black/white frames to clear e-ink ghosting, then back to `/kindle` |
 
 `/api/ingest` is the one mutating route that does **not** go through
 `requireMutatingAuth()`. That chain checks a CSRF token, which exists to stop a

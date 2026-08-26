@@ -252,6 +252,49 @@ static void appendKeySwatch(String& out, const char* colour, int width, bool das
     out += F("\"/></svg>");
 }
 
+// ---------------------------------------------------------------------------
+// How long until this page reloads itself
+// ---------------------------------------------------------------------------
+// A prediction, not a subscription — see the header. The page knows when the
+// newest reading landed and how often readings are expected, so it aims its
+// own reload just after the next one is due.
+//
+// The three cases below exist because "no reading yet" and "the node died"
+// both look like "the data is old", and neither should make an e-ink panel
+// flash every minute forever waiting for something that is not coming.
+static uint32_t refreshDelaySec(uint32_t newestTs, uint32_t now) {
+#if KINDLE_FOLLOW_DATA
+    if (newestTs != 0 && now >= newestTs) {
+        const uint32_t age    = now - newestTs;
+        const uint32_t period = KINDLE_DATA_PERIOD_SEC;
+
+        uint32_t d;
+        if (age < period) {
+            // Land a few seconds after the reading is due rather than exactly
+            // on it: arriving early means rendering the value we already show
+            // and paying for a repaint that changed nothing.
+            d = period - age + 4;
+        } else if (age < period * 2) {
+            // Late, but one missed post is ordinary. Look again soon.
+            d = KINDLE_REFRESH_MIN_SEC;
+        } else {
+            // Two periods with nothing is a source that is down. Back off to
+            // the ceiling; the page already says the reading is stale, and
+            // flashing at it will not bring the node back.
+            return KINDLE_REFRESH_SEC;
+        }
+
+        if (d < KINDLE_REFRESH_MIN_SEC) d = KINDLE_REFRESH_MIN_SEC;
+        if (d > KINDLE_REFRESH_SEC)     d = KINDLE_REFRESH_SEC;
+        return d;
+    }
+#else
+    (void)newestTs;
+    (void)now;
+#endif
+    return KINDLE_REFRESH_SEC;
+}
+
 // Smallest and largest hourly extreme across the window, for the caption.
 static bool windowExtremes(const TrendRing::Hour* h, float& mn, float& mx) {
     mn = 1e9f; mx = -1e9f;
@@ -375,7 +418,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
            "<meta name=\"viewport\" content=\"width=");
     p += PAGE_W;
     p += F("\"><meta http-equiv=\"refresh\" content=\"");
-    p += KINDLE_REFRESH_SEC;
+    // Newest of the two sensors: the page is current if either one is, and
+    // waiting on the slower of the pair would show a stale outdoor reading.
+    p += refreshDelaySec(outT.ts > inT.ts ? outT.ts : inT.ts, now);
     p += F("\"><title>" KD_T("Weather", "Времето") "</title><style>");
 
     // The stylesheet, emitted rather than stored as one literal: every number
@@ -507,7 +552,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // the fold. Measured, not guessed.
     KD_S(".rule{border-top:");                 KD_N(1);
     KD_S("px solid #aaa;margin:");             KD_N(14);
-    KD_S("px 0 ");                             KD_N(10);
+    KD_S("px 0 ");                             KD_N(9);
     KD_S("px}");
     KD_S(".sec{font-size:");                   KD_N(12);
     KD_S("px;letter-spacing:");                KD_N(4);
@@ -584,10 +629,24 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S(".wd-now{background:#000;color:#fff}");
 
     KD_S(".foot{border-top:");                 KD_N(1);
-    KD_S("px solid #aaa;margin-top:");         KD_N(11);
-    KD_S("px;padding-top:");                   KD_N(5);
+    KD_S("px solid #aaa;margin-top:");         KD_N(7);
     KD_S("px;font-size:");                     KD_N(12);
     KD_S("px;color:#555;letter-spacing:.5px}");
+    KD_S(".foot td{padding-top:");             KD_N(5);
+    KD_S("px}");
+
+    // 44 device px is the smallest thing worth aiming at with a fingertip;
+    // at this layout that is kdPx(24) of height, which is what the padding
+    // buys. Boxed rather than underlined so the target is visible before it
+    // is touched, which on a panel with no hover state is the only chance.
+    KD_S(".act{text-align:right;white-space:nowrap}");
+    KD_S(".act a{display:inline-block;border:");  KD_N(1);
+    KD_S("px solid #777;color:#000;text-decoration:none;padding:"); KD_N(4);
+    KD_S("px ");                                  KD_N(12);
+    KD_S("px;margin-left:");                      KD_N(8);
+    KD_S("px;font-size:");                        KD_N(13);
+    KD_S("px;letter-spacing:");                   KD_N(1);
+    KD_S("px;background:#f4f4f4}");
 
     #undef KD_S
     #undef KD_N
@@ -715,10 +774,16 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     appendWeek(p, now);
 
-    p += F(KD_T("<div class=\"foot\">Measured on site &middot; refreshes every ",
-                "<div class=\"foot\">Измерено на място &middot; обновява се на "));
-    p += (KINDLE_REFRESH_SEC / 60);
-    p += F(KD_T(" minutes</div></body></html>", " минути</div></body></html>"));
+    // The footer carries the two manual repaints. Links rather than anything
+    // scripted, so a five-way pad reaches them as readily as a fingertip, and
+    // padded to a real target: 44 device px is the smallest thing worth aiming
+    // at on a touch panel, which is kdPx(24) at this layout.
+    p += F("<table class=\"foot\"><tr><td>"
+           KD_T("Measured on site", "Измерено на място"));
+    p += F("</td><td class=\"act\"><a href=\"/kindle\">"
+           KD_T("refresh", "обнови") "</a>"
+           "<a href=\"/kindle/clear\">" KD_T("clear", "изчисти") "</a>"
+           "</td></tr></table></body></html>");
 
     AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
     // The meta tag drives the refresh, so nothing may be served from cache: an
@@ -808,9 +873,56 @@ static void handleKindleProbe(AsyncWebServerRequest* req) {
     req->send(res);
 }
 
+// ---------------------------------------------------------------------------
+// GET /kindle/clear — drive the panel to both extremes, then come back
+// ---------------------------------------------------------------------------
+// E-ink keeps a ghost of what it drew before. A page of mostly-white text and
+// hairlines never asks the controller for a full waveform, so the ghost of a
+// heavier layout can sit under it for hours. What clears it is driving every
+// pixel to black and to white a few times, which is what the reader's own
+// "refresh" does and what no ordinary page can ask for.
+//
+// So this is a chain of full-screen frames, alternating, each meta-refreshing
+// to the next and the last one back to the dashboard. Four frames: fewer
+// leaves a faint ghost of the heaviest block, more is time spent staring at a
+// flashing screen for no further gain.
+//
+// The step is clamped rather than trusted. It arrives in a query string, so it
+// is reader-supplied, and an unbounded value would let a stray link build a
+// chain that never returns to the dashboard.
+static void handleKindleClear(AsyncWebServerRequest* req) {
+    static const int FRAMES = 4;
+
+    int step = 1;
+    if (req->hasParam("s")) {
+        step = req->getParam("s")->value().toInt();
+        if (step < 1)       step = 1;
+        if (step > FRAMES)  step = FRAMES;
+    }
+
+    const bool black = (step % 2) == 1;
+
+    String p;
+    p.reserve(500);
+    p += F("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+           "<meta name=\"viewport\" content=\"width=");
+    p += PAGE_W;
+    p += F("\"><meta http-equiv=\"refresh\" content=\"1;url=/kindle");
+    if (step < FRAMES) { p += F("/clear?s="); p += (step + 1); }
+    p += F("\"><title>...</title><style>html,body{margin:0;padding:0;height:100%;"
+           "background:");
+    p += black ? F("#000") : F("#fff");
+    p += F("}</style></head><body></body></html>");
+
+    AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
+    res->addHeader("Cache-Control", "no-store");
+    req->send(res);
+}
+
 void registerKindleDashboard(AsyncWebServer& server) {
     server.on("/kindle", HTTP_GET, handleKindle);
     server.on("/kindle/probe", HTTP_GET, handleKindleProbe);
+    server.on("/kindle/clear", HTTP_GET, handleKindleClear);
 }
 
 #endif  // FEATURE_KINDLE_DASHBOARD

@@ -21,9 +21,13 @@ build_flags =
     -DFEATURE_KINDLE_DASHBOARD
     -DKINDLE_OUTDOOR_SENSOR='"outdoor"'
     -DKINDLE_INDOOR_SENSOR='"indoor"'
-    -DKINDLE_REFRESH_SEC=300
     ; optional, adds the forecast section
     -DMODULE_FORECAST_ENABLED
+    ; see "When the panel repaints" below
+    -DKINDLE_REFRESH_SEC=300
+    -DKINDLE_REFRESH_MIN_SEC=60
+    -DKINDLE_DATA_PERIOD_SEC=60
+    -DKINDLE_FOLLOW_DATA=1
 ```
 
 The two sensor names are instance ids from `platform_config.json`. Typically
@@ -40,7 +44,8 @@ changes what the page *says* is runtime.
 |---|---|---|
 | dashboard on/off | `setup.h` / `-DFEATURE_KINDLE_DASHBOARD` | the whole renderer is compiled out when off |
 | `KINDLE_OUTDOOR_SENSOR`, `KINDLE_INDOOR_SENSOR` | build flag | also names the four `TrendRing` series registered at boot |
-| `KINDLE_REFRESH_SEC` | build flag | one number in a `<meta>` tag |
+| `KINDLE_REFRESH_SEC`, `KINDLE_REFRESH_MIN_SEC`, `KINDLE_DATA_PERIOD_SEC`, `KINDLE_FOLLOW_DATA` | build flag | they only set numbers in a `<meta>` tag |
+| `KINDLE_PAGE_W` | build flag | rescales every size in the stylesheet |
 | `KINDLE_LANG_BG` | build flag | a single-language build pays nothing for the other |
 | provider, key, lat/lon, outlook, interval | **the collector's web UI** | Settings → Modules → Weather forecast |
 
@@ -110,7 +115,7 @@ Load it on the reader and read the numbers off:
 
 Below 320 or above 2400 the build fails rather than rendering something that
 was never measured. All three values above are checked at the device's viewport
-before release: 792 of 810 at 600, 703 of 724 at 536, 1410 of 1448 at 1072, and
+before release: 796 of 810 at 600, 709 of 724 at 536, 1416 of 1448 at 1072, and
 no horizontal overflow at any of them.
 
 An earlier attempt at this got the chart wrong — the SVG kept its 600-px size
@@ -134,7 +139,7 @@ version. So the page:
 - lays out with tables and blocks, because those work on both;
 - draws the trend chart as **inline SVG path data** — no canvas, no charting
   library, nothing to execute;
-- refreshes with `<meta http-equiv="refresh">`, not a timer.
+- refreshes with `<meta http-equiv="refresh">`, not a script.
 
 None of that is a sacrifice on this medium. A panel that repaints in full or
 not at all has no use for a script that updates part of itself.
@@ -215,12 +220,62 @@ The two chart lines are still told apart by **dash pattern as well as** shade,
 because redundant coding costs nothing and survives a panel with its contrast
 turned down.
 
-### Refresh cadence
+## When the panel repaints
 
-Every page load repaints the whole panel — it flashes, and it costs battery.
-There is no partial update available to a web page. `KINDLE_REFRESH_SEC`
-defaults to 300, which is current enough for a device on a shelf without
-strobing. Below about 60 s the reader spends more time flashing than showing.
+Three ways, and one of them is not what it sounds like.
+
+```ini
+-DKINDLE_REFRESH_SEC=300       ; ceiling, and the fixed interval when following is off
+-DKINDLE_REFRESH_MIN_SEC=60    ; floor: never repaint more often than this
+-DKINDLE_DATA_PERIOD_SEC=60    ; how often readings are expected
+-DKINDLE_FOLLOW_DATA=1         ; 0 for the old fixed interval
+```
+
+### 1. The reader asks
+
+A **refresh** button in the footer. A link, not a script, so a five-way pad
+reaches it as readily as a fingertip. Sized to 128×46 device px — 44 px is the
+smallest thing worth aiming at on a touch panel, and it is measured rather than
+assumed.
+
+### 2. The reader asks for a clean panel
+
+E-ink keeps a ghost of what it drew before. A page of white and hairlines never
+asks the controller for a full waveform, so a heavier layout can sit faintly
+underneath for hours. **clear** walks `/kindle/clear` through four full-screen
+frames, alternating black and white, and returns to the dashboard. That is what
+actually resets the pixels; nothing an ordinary page draws will.
+
+The step number comes in a query string, so it is reader-supplied and clamped —
+otherwise a stray link could build a chain that never comes back.
+
+### 3. The page reloads itself — a timer, not a push
+
+**The collector cannot make the reader repaint.** A browser redraws when it
+loads a page, and it loads one only when it asks. Server-sent events or a socket
+would need JavaScript the older firmware does not have, and holding a request
+open on AsyncTCP until data arrives risks the one thing a device on a shelf must
+not do.
+
+So `KINDLE_FOLLOW_DATA` **predicts** instead. The page knows when the newest
+reading landed and how often readings are expected, and aims its own reload just
+after the next one is due:
+
+| Age of the newest reading | Reload in |
+|---|---|
+| less than one period | just after the next is due (+4 s), clamped to the floor |
+| one to two periods | the floor — late, but one missed post is ordinary |
+| over two periods | the ceiling — the source looks down, and flashing will not fix it |
+| no reading, or clock behind it | the ceiling |
+
+In practice the panel updates within a few seconds of new data without anything
+being pushed to it.
+
+**The cost, plainly.** Every reload repaints the whole panel: it flashes and it
+draws battery. Following a node that posts once a minute means flashing once a
+minute rather than once every five. That is a real trade, not a free win —
+`KINDLE_REFRESH_MIN_SEC` is the floor that keeps it from becoming a strobe, and
+`KINDLE_FOLLOW_DATA=0` restores the old fixed interval.
 
 ## The 24-hour trend needs its own storage
 

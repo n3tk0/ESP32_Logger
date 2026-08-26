@@ -125,9 +125,67 @@ class AsyncWebServer;
 #  define KINDLE_INDOOR_SENSOR  "indoor"
 #endif
 
-// Seconds between automatic page reloads.
+// ---------------------------------------------------------------------------
+// When the panel repaints
+// ---------------------------------------------------------------------------
+// There are three ways this page gets redrawn, and it is worth being precise
+// about which is which, because one of them is not what it sounds like.
+//
+// 1. The reader asks. A tap or a click on "refresh" in the footer. Works on a
+//    touch reader and on a five-way pad alike, because it is a link.
+//
+// 2. The reader asks for a clean panel. "clear" walks /kindle/clear through a
+//    few full-screen black and white frames and comes back. E-ink retains a
+//    ghost of what it drew before; driving the whole panel to both extremes is
+//    what clears it, and nothing a normal page draws does that.
+//
+// 3. The page reloads itself. This is a timer, not a push.
+//
+// THERE IS NO PUSH, AND WHY
+// -------------------------
+// The collector cannot make the reader repaint. A browser redraws when it
+// loads a page, and it only loads a page when it asks for one. Server-sent
+// events or a socket would need JavaScript the older firmware does not have,
+// and holding a request open on AsyncTCP until data arrives risks the one
+// thing this device must not do unattended.
+//
+// So KINDLE_FOLLOW_DATA predicts instead. The page knows when the newest
+// reading landed and roughly how often readings come, so it sets its own
+// reload to fire just after the next one is due. The panel then updates within
+// a few seconds of new data without anything being pushed to it.
+//
+// THE COST, STATED PLAINLY
+// ------------------------
+// Every reload repaints the whole panel: it flashes, and it costs battery.
+// Following a node that posts once a minute means flashing once a minute
+// rather than once every five, which is a real trade and not a free win.
+// KINDLE_REFRESH_MIN_SEC is the floor that keeps it from becoming a strobe.
+// Set KINDLE_FOLLOW_DATA to 0 for the old fixed-interval behaviour.
+
+// Ceiling: the longest the page will ever wait, and the fixed interval when
+// KINDLE_FOLLOW_DATA is off.
 #ifndef KINDLE_REFRESH_SEC
 #  define KINDLE_REFRESH_SEC 300
+#endif
+
+// Floor: the shortest gap between two repaints, however fresh the data is.
+#ifndef KINDLE_REFRESH_MIN_SEC
+#  define KINDLE_REFRESH_MIN_SEC 60
+#endif
+
+// How often readings are expected, in seconds. The node's posting interval —
+// 60 by default, see node/README.md. Only used to predict the next arrival.
+#ifndef KINDLE_DATA_PERIOD_SEC
+#  define KINDLE_DATA_PERIOD_SEC 60
+#endif
+
+// 1 = reload just after the next reading is due; 0 = fixed KINDLE_REFRESH_SEC.
+#ifndef KINDLE_FOLLOW_DATA
+#  define KINDLE_FOLLOW_DATA 1
+#endif
+
+#if KINDLE_REFRESH_MIN_SEC > KINDLE_REFRESH_SEC
+#  error "KINDLE_REFRESH_MIN_SEC exceeds KINDLE_REFRESH_SEC: the floor is above the ceiling"
 #endif
 
 /// Registers the trend series this page draws. Call once from setup(),
