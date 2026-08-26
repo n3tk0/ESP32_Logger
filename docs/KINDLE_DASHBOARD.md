@@ -9,9 +9,28 @@ Point the Kindle's experimental browser at `http://<collector-ip>/kindle`.
 ![The dashboard rendered at the target viewport](images/kindle-dashboard.png)
 
 Rendered at 600×800 CSS px through a greyscale filter, which is how every
-layout decision in this document was checked. The figures are synthetic; the
-stylesheet is extracted from `KindleDashboard.cpp` at render time so the picture
-cannot drift from the code.
+layout decision in this document was checked. It is the current page: hero row
+without a masthead, temperature paired with its humidity, three-hourly rules in
+the chart, the month above the week strip, and the two manual repaint links in
+the footer. The page comes to **796 of the 800 px** available.
+
+The figures are synthetic. The **stylesheet is extracted from the `KD_S`/`KD_N`
+calls in `KindleDashboard.cpp`** at render time rather than kept as a copy, so
+the picture cannot drift from the code on sizes, greys or spacing. The markup
+and the strings around it are the preview's own — that half *can* drift, and
+once did: a key row in an earlier render described a chart the firmware no
+longer drew. Re-render after touching the markup, and read the two side by
+side:
+
+```bash
+python3 tools/kindle_preview/preview.py hourly bg calm 600
+node    tools/kindle_preview/shot.mjs
+cp tools/kindle_preview/kindle.png docs/images/kindle-dashboard.png
+```
+
+The readings are seeded, so the same arguments give the same picture and a
+changed PNG means a changed page. See
+[`tools/kindle_preview/`](../tools/kindle_preview/README.md).
 
 ## Enabling it
 
@@ -348,8 +367,9 @@ after the next one is due:
 | over two periods | the ceiling — the source looks down, and flashing will not fix it |
 | no reading, or clock behind it | the ceiling |
 
-In practice the panel updates within a few seconds of new data without anything
-being pushed to it.
+That is the shape of the data path on its own. Read the next section before
+relying on it: with the clock on the page it is not the binding constraint at
+the default settings, and the panel follows the minute rather than the reading.
 
 ### …and the clock, which is usually the louder demand
 
