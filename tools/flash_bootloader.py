@@ -25,7 +25,13 @@ import glob
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BOOTLOADER_DIR = os.path.join(SCRIPT_DIR, "bootloader")
 
-# Bootloader flash addresses by chip family
+# Bootloader flash addresses by chip family.
+#
+# Keyed by CHIP, not by board: the bootloader offset is a property of the
+# silicon (0x0 on the RISC-V parts and the S3, 0x1000 on the original ESP32),
+# and every board of a family shares it. "esp32c3_supermini" is an ENVIRONMENT
+# name that ended up here as though it were a chip; it is kept only as an
+# alias so an older saved config still resolves.
 CHIP_CONFIG = {
     "esp32c3": {
         "bootloader_addr": "0x0",
@@ -34,14 +40,16 @@ CHIP_CONFIG = {
         "flash_freq":      "80m",
         "flash_size":      "4MB",
         "esptool_chip":    "esp32c3",
+        "native_usb":      True,
     },
-    "esp32c3_supermini": {
+    "esp32s3": {
         "bootloader_addr": "0x0",
         "partition_addr":  "0x8000",
         "flash_mode":      "dio",
         "flash_freq":      "80m",
-        "flash_size":      "4MB",
-        "esptool_chip":    "esp32c3",
+        "flash_size":      "8MB",
+        "esptool_chip":    "esp32s3",
+        "native_usb":      True,
     },
     "esp32": {
         "bootloader_addr": "0x1000",
@@ -50,7 +58,17 @@ CHIP_CONFIG = {
         "flash_freq":      "40m",
         "flash_size":      "4MB",
         "esptool_chip":    "esp32",
+        "native_usb":      False,
     },
+}
+
+# Board/env names that are not chips. Resolved before CHIP_CONFIG is consulted.
+CHIP_ALIASES = {
+    "esp32c3_supermini": "esp32c3",
+    "xiao_esp32c3":      "esp32c3",
+    "lolin_c3_pico":     "esp32c3",
+    "xiao_esp32s3":      "esp32s3",
+    "esp32s3_n16r8":     "esp32s3",
 }
 
 
@@ -85,14 +103,15 @@ def detect_chip(port):
             capture_output=True, text=True, timeout=10
         )
         output = result.stdout + result.stderr
+        # Chip family is all that matters here; which board carries it does
+        # not change the bootloader offset.
         if "ESP32-C3" in output:
-            # We can't automatically distinguish a standard ESP32-C3 from a Super Mini
-            # just by chip_id. We'll default to 'esp32c3' but the user can specify
-            # '--chip esp32c3_supermini' manually.
             return "esp32c3"
         elif "ESP32-S3" in output:
-            print("WARNING: ESP32-S3 detected. Using esp32c3 config (RISC-V).")
-            return "esp32c3"
+            # This used to answer "esp32c3" with the note "(RISC-V)". The S3 is
+            # Xtensa, not RISC-V, and the answer would have written a C3
+            # bootloader to an S3 — an image the ROM cannot start.
+            return "esp32s3"
         elif "ESP32" in output:
             return "esp32"
     except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -100,11 +119,38 @@ def detect_chip(port):
     return None
 
 
+def resolve_chip(name):
+    """Map a board/env name to its chip family; pass a chip through unchanged."""
+    return CHIP_ALIASES.get(name, name)
+
+
+def resolve_flash_size(name, chip_cfg):
+    """Flash size for `name`, preferring what platformio.ini says.
+
+    The per-chip default cannot be right for every board of that family:
+    esp32s3 here means 8 MB, but esp32s3_n16r8 aliases onto it and carries 16.
+    Writing a bootloader whose image header claims the wrong size is exactly
+    the sort of thing that boots today and confuses flash detection later.
+
+    Falls back to the chip default when the name is not an env, or when
+    pio_envs is unavailable (this script is also used standalone).
+    """
+    try:
+        sys.path.insert(0, SCRIPT_DIR)
+        from pio_envs import env_info, env_names
+        if name in env_names(include_all=True):
+            size = env_info(name).flash_size
+            if size:
+                return size
+    except Exception:
+        pass
+    return chip_cfg["flash_size"]
+
+
 def find_binary(chip, name):
     """Locate a pre-built binary for the given chip."""
-    # Special fallback for esp32c3_supermini
-    search_chip = "esp32c3" if chip == "esp32c3_supermini" else chip
-    
+    search_chip = resolve_chip(chip)
+
     path = os.path.join(BOOTLOADER_DIR, search_chip, name)
     if os.path.isfile(path):
         return path
@@ -117,18 +163,25 @@ def find_binary(chip, name):
 
 def flash(port, chip, bootloader_only=False, baud=921600):
     """Flash bootloader (and optionally partition table) via esptool."""
+    requested = chip                 # may be an env/board name
+    chip = resolve_chip(chip)
     cfg = CHIP_CONFIG.get(chip)
     if not cfg:
-        print(f"ERROR: Unsupported chip '{chip}'. Supported: {list(CHIP_CONFIG.keys())}")
+        print(f"ERROR: Unsupported chip '{chip}'. Supported: {list(CHIP_CONFIG.keys())}"
+              f" (board names accepted: {list(CHIP_ALIASES.keys())})")
         return False
 
     bl_bin = find_binary(chip, "bootloader.bin")
     if not bl_bin:
         print(f"ERROR: No bootloader.bin found for {chip} in {BOOTLOADER_DIR}/{chip}/")
         print("Run the GitHub Actions workflow to build it, or place it manually.")
+        if chip == "esp32s3":
+            print("NOTE: .github/workflows/build-bootloader.yml does not build an S3")
+            print("      bootloader yet — only the C3 and the original ESP32.")
         return False
 
     pt_bin = find_binary(chip, "partition-table.bin")
+    flash_size = resolve_flash_size(requested, cfg)
 
     cmd = [
         sys.executable, "-m", "esptool",
@@ -138,7 +191,7 @@ def flash(port, chip, bootloader_only=False, baud=921600):
         "write_flash",
         "--flash_mode", cfg["flash_mode"],
         "--flash_freq", cfg["flash_freq"],
-        "--flash_size", cfg["flash_size"],
+        "--flash_size", flash_size,
         cfg["bootloader_addr"], bl_bin,
     ]
 
@@ -146,15 +199,20 @@ def flash(port, chip, bootloader_only=False, baud=921600):
         cmd.extend([cfg["partition_addr"], pt_bin])
 
     print(f"Chip:       {chip}")
+    print(f"Flash size: {flash_size}"
+          + ("" if flash_size == cfg["flash_size"] else f"  (from [env:{requested}])"))
     print(f"Port:       {port}")
     print(f"Bootloader: {bl_bin} @ {cfg['bootloader_addr']}")
     if pt_bin and not bootloader_only:
         print(f"Partitions: {pt_bin} @ {cfg['partition_addr']}")
     print()
 
-    if chip == "esp32c3_supermini":
-        print("NOTE for ESP32-C3 Super Mini users:")
-        print("  Because it uses native USB, auto-reset into bootloader might fail.")
+    # Keyed off the silicon, not off one board name: every C3 and S3 board in
+    # this project talks over native USB Serial/JTAG, and they all share this
+    # failure mode. The Super Mini was simply the first one anybody hit it on.
+    if cfg["native_usb"]:
+        print("NOTE for boards with native USB (all C3 and S3 targets here):")
+        print("  Auto-reset into the bootloader can fail over USB Serial/JTAG.")
         print("  If flashing hangs at 'Connecting...', hold the BOOT button,")
         print("  click the RST button, and then release BOOT.")
         print()
@@ -182,8 +240,17 @@ def main():
         description="Flash a rollback-enabled bootloader to an ESP32 device."
     )
     parser.add_argument("--port", "-p", help="Serial port (auto-detect if omitted)")
-    parser.add_argument("--chip", "-c", choices=list(CHIP_CONFIG.keys()),
-                        help="Chip type (auto-detect if omitted)")
+    # The alias names must be accepted here too. argparse validates `choices`
+    # before any of our code runs, so listing only CHIP_CONFIG rejected every
+    # board name in CHIP_ALIASES with exit 2 — including the one the deploy
+    # tool passes for the default env — while the error text below advertised
+    # them as accepted.
+    parser.add_argument("--chip", "-c",
+                        choices=list(CHIP_CONFIG.keys()) + list(CHIP_ALIASES.keys()),
+                        metavar="CHIP",
+                        help="Chip family (%s) or board/env name (%s). "
+                             "Auto-detected if omitted."
+                             % (", ".join(CHIP_CONFIG), ", ".join(CHIP_ALIASES)))
     parser.add_argument("--baud", "-b", type=int, default=921600, help="Flash baud rate")
     parser.add_argument("--bootloader-only", action="store_true",
                         help="Flash bootloader only (skip partition table)")

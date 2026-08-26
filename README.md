@@ -4,7 +4,7 @@
 
 **Multi-sensor environmental logging platform for embedded ESP32 targets.**
 
-Firmware for `xiao_esp32c3`, `esp32c3_supermini`, `esp32s3`, `xiao_esp32s3` and `esp32s3_n16r8` — water flow, air quality, weather, and power monitoring with on-device web UI, MQTT/HTTP/sensor.community/openSenseMap exporters, and OTA updates.
+Firmware for `xiao_esp32c3`, `esp32c3_supermini`, `lolin_c3_pico`, `esp32s3`, `xiao_esp32s3` and `esp32s3_n16r8` — water flow, air quality, weather, and power monitoring with on-device web UI, MQTT/HTTP/sensor.community/openSenseMap exporters, and OTA updates.
 
 [![Build Firmware](https://github.com/n3tk0/ESP32_Logger/actions/workflows/build-firmware.yml/badge.svg)](https://github.com/n3tk0/ESP32_Logger/actions/workflows/build-firmware.yml)
 [![Build Bootloader](https://github.com/n3tk0/ESP32_Logger/actions/workflows/build-bootloader.yml/badge.svg)](https://github.com/n3tk0/ESP32_Logger/actions/workflows/build-bootloader.yml)
@@ -202,6 +202,7 @@ cd esp32_logger
 ```bash
 pio run -e xiao_esp32c3        # Seeed XIAO ESP32-C3 (default)
 pio run -e esp32c3_supermini   # ESP32-C3 SuperMini
+pio run -e lolin_c3_pico       # WEMOS LOLIN C3 PICO (4 MB, LOLIN I2C on GPIO 8/10)
 pio run -e esp32s3             # ESP32-S3 DevKitC-1 (8 MB flash, no PSRAM)
 pio run -e xiao_esp32s3        # Seeed XIAO ESP32-S3 (8 MB flash, 8 MB PSRAM)
 pio run -e esp32s3_n16r8       # ESP32-S3 N16R8 (16 MB flash, 8 MB octal PSRAM)
@@ -294,7 +295,7 @@ Reference schematics (KiCad PDFs) for the water-flow build are in [`schematics/`
 Issues and pull requests are welcome. Before opening a PR:
 
 1. Read [`docs/REFACTORING_GUIDELINES.md`](docs/REFACTORING_GUIDELINES.md) for architectural invariants.
-2. Make sure the firmware still builds for all five CI targets (`xiao_esp32c3`, `esp32c3_supermini`, `esp32s3`, `xiao_esp32s3`, `esp32s3_n16r8`) — the workflows in `.github/workflows/` run automatically on PRs.
+2. Make sure the firmware still builds for all six CI targets (`xiao_esp32c3`, `esp32c3_supermini`, `lolin_c3_pico`, `esp32s3`, `xiao_esp32s3`, `esp32s3_n16r8`) — the workflows in `.github/workflows/` run automatically on PRs.
 3. Keep changes scoped; large refactors should be split.
 
 ---

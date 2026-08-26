@@ -30,7 +30,6 @@ Run from the project root (where platformio.ini lives).
 """
 
 import argparse
-import re
 import shlex
 import shutil
 import subprocess
@@ -69,15 +68,21 @@ def _check_project_root() -> Path:
 
 
 def _default_env(root: Path) -> str:
-    """Return the first [env:NAME] from platformio.ini, or 'xiao_esp32c3' as fallback."""
+    """The project's default PlatformIO environment.
+
+    This used to take the FIRST [env:…] in platformio.ini, which answers a
+    different question: reordering the file, or adding a board above the
+    others, would have silently changed what this script erased and reflashed.
+    tools/pio_envs.py honours [platformio] default_envs and skips the
+    test-only builds.
+    """
     try:
-        text = (root / "platformio.ini").read_text()
-        m = re.search(r"^\[env:([^\]]+)\]", text, re.MULTILINE)
-        if m:
-            return m.group(1).strip()
-    except OSError:
-        pass
-    return "xiao_esp32c3"
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from pio_envs import default_env
+        return default_env()
+    except Exception:
+        # Never let a helper import take the flash tool down with it.
+        return "xiao_esp32c3"
 
 
 def _ensure_data_dir(root: Path) -> None:
@@ -139,7 +144,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-e", "--env", default=None,
-                    help="PlatformIO environment (default: first env in platformio.ini)")
+                    help="PlatformIO environment "
+                         "(default: [platformio] default_envs in platformio.ini)")
     ap.add_argument("--port", default=None,
                     help="Serial port (e.g. /dev/ttyACM0, COM5). "
                          "Omit to let PlatformIO auto-detect.")

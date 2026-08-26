@@ -23,8 +23,21 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+# The board list is derived from platformio.ini, never hardcoded here — see
+# tools/pio_envs.py for why. sys.path juggling because these tools are run
+# both as `python3 tools/deploy.py` and from a PyInstaller bundle.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pio_envs import (  # noqa: E402
+    ROOT as _PIO_ROOT, chip_for, default_env, defaults_for, env_info,
+    env_names, environments, ports_for, usb_pins,
+)
+
 # ── Project layout ────────────────────────────────────────────────────────────
-ROOT     = Path(__file__).resolve().parent.parent
+# Taken from pio_envs rather than computed again: under PyInstaller the two
+# would otherwise disagree, and the failure is silent — the board list would
+# come from the real platformio.ini while the USB CDC rewrite edited a copy
+# inside the extraction directory and the config saved beside it.
+ROOT     = _PIO_ROOT
 WWW_SRC  = ROOT / "www"
 DATA_WWW = ROOT / "data" / "www"
 TOOLS    = ROOT / "tools"
@@ -53,17 +66,28 @@ PRESETS: dict[str, tuple[str, list[int]]] = {
 }
 
 # ── Config defaults + persistence ─────────────────────────────────────────────
+#
+# `None` means "take it from the environment" — see load_cfg(). Anything the
+# project has already stated in platformio.ini or a board definition is not
+# copied here: a second copy of the upload speed is a second copy that drifts,
+# and this file used to hold three of them (chip, baud, USB CDC state).
 DEFAULT_CFG: dict[str, Any] = {
     "env":                  None,
-    "port":                 None,
-    "chip":                 "esp32c3",
-    "baud":                 921600,
+    "port":                 None,   # None = auto-detect, board USB IDs first
+    "chip":                 None,   # always derived from env; never pinnable
+    "baud":                 None,   # None = the env's upload_speed
+    "monitor_speed":        None,   # None = the env's monitor_speed
+    "usb_cdc_on_boot":      None,   # None = whatever the env's flag says now
     "device_ip":            "192.168.4.1",
     "steps":                [1, 3, 5, 6, 7],
     "upload_filter":        "all",
     "wipe_before_upload":   False,
-    "usb_cdc_on_boot":      True,  # ESP32-C3: USB serial CDC enabled by default
 }
+
+# Keys load_cfg() re-derives from the environment when they are None. `chip` is
+# absent on purpose: it is re-derived unconditionally, because an env and a
+# chip that disagree is how a C3 bootloader gets written to an S3.
+_ENV_DERIVED = ("baud", "monitor_speed")
 
 _UPLOAD_FILTERS = ["all", "gz", "plain"]
 _UPLOAD_FILTER_LABELS = {
@@ -74,19 +98,34 @@ _UPLOAD_FILTER_LABELS = {
 
 
 def detect_env() -> str:
-    """Auto-detect PlatformIO environment from platformio.ini."""
-    try:
-        txt = (ROOT / "platformio.ini").read_text()
-        m = re.search(r"^\[env:([^\]]+)\]", txt, re.MULTILINE)
-        if m:
-            return m.group(1).strip()
-    except OSError:
-        pass
-    return "esp32c3_supermini"
+    """The project's default PlatformIO environment.
+
+    Previously this took the FIRST [env:…] in the file, which is not the same
+    question: reordering platformio.ini would have silently changed what the
+    deploy tool flashed. It now honours [platformio] default_envs, and skips
+    the test-only builds.
+    """
+    return default_env()
 
 
-def detect_port() -> str:
-    """Auto-detect serial port."""
+def detect_port(env: str | None = None) -> str:
+    """Auto-detect the serial port, preferring one that matches the board.
+
+    With `env` given, ports whose USB VID:PID matches that board's `hwids` are
+    tried first. It matters as soon as more than one device is plugged in: a
+    collector and an ESP8266 node both show up as /dev/ttyUSB*, and "the first
+    one" is a coin toss that hands the firmware to whichever enumerated first.
+
+    Falls back to the old glob when pyserial is missing or nothing matches.
+    """
+    if env:
+        ranked = ports_for(env)
+        for device, _desc, matched in ranked:
+            if matched:
+                return device
+        if ranked:
+            return ranked[0][0]
+
     if sys.platform == "linux":
         pats = ["/dev/ttyACM*", "/dev/ttyUSB*"]
     elif sys.platform == "darwin":
@@ -108,7 +147,14 @@ def detect_port() -> str:
 
 
 def load_cfg() -> dict[str, Any]:
-    """Load configuration from file or use defaults."""
+    """Load configuration, taking everything derivable from the environment.
+
+    The rule: `null` in .flash_tool.json means "follow platformio.ini". A value
+    means the user pinned it deliberately. So the ordinary config is nearly
+    empty and a board switch carries its own settings with it — which is the
+    point, because the alternative was three numbers remembered here that could
+    each disagree with the project.
+    """
     cfg: dict[str, Any] = dict(DEFAULT_CFG)
     if CFG_FILE.is_file():
         try:
@@ -117,15 +163,143 @@ def load_cfg() -> dict[str, Any]:
             pass
     if not cfg.get("env"):
         cfg["env"] = detect_env()
+
+    env_defaults = defaults_for(cfg["env"])
+
+    # The chip follows the env, always. It used to be a free-text field kept
+    # next to it, so a saved config could name esp32s3 as the environment and
+    # esp32c3 as the chip — and step 2 would then write a C3 bootloader to an
+    # S3. There is no board for which the two legitimately disagree, so it is
+    # derived rather than remembered.
+    cfg["chip"] = env_defaults["chip"]
+
+    for key in _ENV_DERIVED:
+        if cfg.get(key) is None:
+            cfg[key] = env_defaults[key]
+
+    # USB CDC is a line in platformio.ini, not a preference of this tool. Read
+    # the current one rather than a remembered wish: a checkbox that says ON
+    # while the env's flag says 0 is describing a build that will not happen.
+    # A toggle sets this, the next compile writes it back to the ini, and the
+    # two agree again.
+    cfg["usb_cdc_on_boot"] = env_defaults["usb_cdc_on_boot"]
+    if cfg["usb_cdc_on_boot"] is None:
+        cfg["usb_cdc_on_boot"] = True   # env inherits its flag; nothing to show
+
     if not cfg.get("port"):
-        cfg["port"] = detect_port()
+        cfg["port"] = detect_port(cfg["env"])
     return cfg
 
 
-def save_cfg(cfg: dict[str, Any]) -> None:
-    """Save configuration to file."""
+def env_defaults_note(cfg: dict[str, Any]) -> list[str]:
+    """One line per derived setting, saying where its value came from.
+
+    Written for the tools to print: a number with no provenance is a number
+    someone will eventually override for no reason.
+    """
+    d = defaults_for(cfg.get("env") or detect_env())
+    pinned = _pinned_keys()
+    lines = [
+        f"board       {d['board']}  ({d['chip']}, {d['flash_size'] or 'flash ?'})",
+        f"partitions  {d['partitions'] or 'platform default'}"
+        f"   filesystem {d['filesystem'] or '-'}",
+    ]
+    for key, label, src in (("baud", "upload baud", d["baud_src"]),
+                            ("monitor_speed", "monitor baud", d["monitor_src"])):
+        if key in pinned:
+            lines.append(f"{label:<11} {cfg[key]}  (pinned here; env says {d[key]})")
+        else:
+            lines.append(f"{label:<11} {cfg[key]}  (from {src})")
+    if d["usb_cdc_on_boot"] is None:
+        lines.append(f"USB CDC     inherited by [env:{d['env']}]; "
+                     f"toggle it in the env it extends")
+    else:
+        state = "on" if d["usb_cdc_on_boot"] else "off"
+        lines.append(f"USB CDC     {state}  (from [env:{d['env']}] build_flags; "
+                     f"{d['usb_pins'] or 'no native USB'})")
+    return lines
+
+
+def pinned_keys(cfg: dict[str, Any]) -> set:
+    """Derived keys whose LIVE value differs from what the environment says.
+
+    Takes the config in hand rather than re-reading .flash_tool.json. The
+    on-disk version answers a different question — what was pinned when the
+    file was last written — so a baud pinned earlier in the same session was
+    invisible: the menu labelled it as coming from the env, and the next board
+    switch overwrote it.
+
+    Same rule save_cfg() uses, so what the menu marks as pinned and what
+    survives a switch cannot disagree.
+    """
     try:
-        CFG_FILE.write_text(json.dumps(cfg, indent=2) + "\n")
+        d = defaults_for(cfg.get("env") or detect_env())
+    except Exception:
+        return set()
+    return {k for k in _ENV_DERIVED
+            if cfg.get(k) is not None and cfg.get(k) != d.get(k)}
+
+
+def _pinned_keys() -> set:                       # backwards-compatible shim
+    """Deprecated: reads the file, so it cannot see the current session."""
+    return pinned_keys(load_cfg())
+
+
+def adopt_env_defaults(cfg: dict[str, Any], pinned: set | None = None) -> None:
+    """Re-derive everything the environment states, in place.
+
+    Called when the environment changes. Values in `pinned` are left alone;
+    pass the set from BEFORE the switch, since pinned_keys() compares against
+    whichever env is current.
+    """
+    pinned = set() if pinned is None else pinned
+    d = defaults_for(cfg["env"])
+    cfg["chip"] = d["chip"]
+    for key in _ENV_DERIVED:
+        if key not in pinned:
+            cfg[key] = d[key]
+    cfg["usb_cdc_on_boot"] = d["usb_cdc_on_boot"] \
+        if d["usb_cdc_on_boot"] is not None else True
+
+
+def save_cfg(cfg: dict[str, Any]) -> None:
+    """Save configuration, writing back only what the environment does not say.
+
+    Without this, saving would defeat the whole arrangement: load_cfg() fills
+    `baud` in from the env, and a naive round-trip would write that value back
+    as though the user had chosen it — pinning it, so the next board switch
+    would silently keep the old board's speed.
+
+    A derived key is written only when it DIFFERS from what the env says. The
+    chip and the USB CDC state are never written: both are read from the
+    project every time, and a stale copy of either is how the wrong bootloader
+    gets flashed or a checkbox describes a build that will not happen.
+    """
+    out = dict(cfg)
+    try:
+        env_defaults = defaults_for(cfg.get("env") or detect_env())
+    except Exception:
+        env_defaults = {}
+
+    for key in _ENV_DERIVED:
+        if key in env_defaults and out.get(key) == env_defaults[key]:
+            out[key] = None
+    out.pop("chip", None)
+    out.pop("usb_cdc_on_boot", None)
+
+    # The port gets the same treatment for the same reason. load_cfg() fills
+    # in whatever auto-detection found, and writing that back pinned it — so
+    # the very first save froze one device path into the config and the new
+    # VID:PID ranking never ran again. Store it only when the user picked
+    # something detection would not have.
+    try:
+        if not out.get("port") or out["port"] == detect_port(out.get("env")):
+            out["port"] = None      # "" and "what detection finds" both mean auto
+    except Exception:
+        pass
+
+    try:
+        CFG_FILE.write_text(json.dumps(out, indent=2) + "\n")
     except Exception as exc:
         print(f"Warning: could not save config: {exc}")
 
@@ -164,91 +338,99 @@ class DeployManager:
             self.on_step_complete(step, rc)
 
     def _configure_usb_cdc(self) -> None:
-        """Dynamically configure USB CDC on boot flag in platformio.ini before compilation.
+        """Rewrite -DARDUINO_USB_CDC_ON_BOOT in platformio.ini before compiling.
 
-        For ESP32-C3 and ESP32-S3 boards, toggling this controls whether USB pins are
-        used for serial communication (enabled) or freed up for GPIO (disabled).
+        On the C3 and S3 the USB Serial/JTAG pins are either the serial console
+        or general GPIO — never both — and which one is a compile-time decision.
+        Toggling here is what lets the wizard offer those pins.
 
-        Supported boards:
-        - ESP32-C3 SuperMini (GPIO 18/19)
-        - ESP32-S3 (GPIO 19/20)
-        - XIAO ESP32-C3 (GPIO 18/19)
+        Which envs can be toggled is read from platformio.ini rather than
+        listed here: the env must carry its own -DARDUINO_USB_CDC_ON_BOOT line,
+        because this rewrites the flag in place. An env that inherits the flag
+        through `extends` (esp32s3_n16r8 does) has nothing here to rewrite, and
+        editing its parent would quietly change a second board too — so it is
+        reported instead of guessed at.
         """
-        env = self.cfg.get("env", "esp32c3_supermini")
+        env = self.cfg.get("env") or detect_env()
         usb_cdc = self.cfg.get("usb_cdc_on_boot", True)
 
-        # Check if this environment supports USB CDC configuration
-        supported_envs = {"esp32c3_supermini", "esp32s3", "xiao_esp32c3"}
-        if env not in supported_envs:
-            return  # No USB CDC configuration for this board
+        info = env_info(env)
+        if not info.supports_usb_cdc:
+            pins = usb_pins(info.chip)
+            if pins:
+                self._log(f"  ! USB CDC toggle skipped: [env:{env}] has no "
+                          f"-DARDUINO_USB_CDC_ON_BOOT of its own (it inherits one). "
+                          f"{pins} stay as the flag in its parent env leaves them.")
+            return
 
-        # Read platformio.ini
         ini_file = ROOT / "platformio.ini"
         if not ini_file.is_file():
             return
 
-        content = ini_file.read_text()
-        lines = content.split("\n")
+        want = f"-DARDUINO_USB_CDC_ON_BOOT={'1' if usb_cdc else '0'}"
+        lines = ini_file.read_text().split("\n")
 
-        # Find the section for our environment and modify USB CDC flags
-        in_env_section = False
-        flag_found_in_section = False
-        in_build_flags = False
+        # The section runs from its header to the NEXT section header of any
+        # kind. The previous version ended it only at another "[env:", so with
+        # the target env last in the file it ran to EOF and rewrote whatever it
+        # found on the way — including the "; Set -DARDUINO_USB_CDC_ON_BOOT=0
+        # to free GPIO…" comments that document the other boards.
+        start = end = None
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if start is None:
+                if stripped == f"[env:{env}]":
+                    start = i
+                continue
+            if stripped.startswith("["):
+                end = i
+                break
+        if start is None:
+            return
+        if end is None:
+            end = len(lines)
+
+        # Rewrite the flag where it already is. Comment lines are skipped: a
+        # line beginning with ; or # is documentation, not a build flag, and
+        # editing it silently rewrote the file's own explanation of itself.
         modified = False
-        result = []
-
-        for line in lines:
-            # Check if we're entering the target environment section
-            if line.strip().startswith(f"[env:{env}]"):
-                in_env_section = True
-                flag_found_in_section = False
-                in_build_flags = False
-                result.append(line)
+        found = False
+        for i in range(start, end):
+            stripped = lines[i].lstrip()
+            if stripped.startswith((";", "#")):
                 continue
-
-            # Check if we're leaving the environment section (new section starts)
-            if in_env_section and line.strip().startswith("[env:"):
-                in_env_section = False
-                flag_found_in_section = False
-                in_build_flags = False
-
-            # Exit multi-line build_flags block when we hit non-indented line (key=value)
-            if in_build_flags and line and line[0] not in (' ', '\t'):
-                in_build_flags = False
-
-            # Modify USB CDC flag if in target environment
-            if in_env_section and "-DARDUINO_USB_CDC_ON_BOOT=" in line:
-                # Replace existing flag
-                if usb_cdc:
-                    line = line.replace("-DARDUINO_USB_CDC_ON_BOOT=0", "-DARDUINO_USB_CDC_ON_BOOT=1")
-                else:
-                    line = line.replace("-DARDUINO_USB_CDC_ON_BOOT=1", "-DARDUINO_USB_CDC_ON_BOOT=0")
+            if "-DARDUINO_USB_CDC_ON_BOOT=" not in lines[i]:
+                continue
+            found = True
+            new = re.sub(r"-DARDUINO_USB_CDC_ON_BOOT=[01]", want, lines[i])
+            if new != lines[i]:
+                lines[i] = new
                 modified = True
-                flag_found_in_section = True
-                result.append(line)
-                continue
 
-            # Start of build_flags section - check if flag exists or needs to be added
-            if (in_env_section and line.strip().startswith("build_flags") and
-                not flag_found_in_section and "-DARDUINO_USB_CDC_ON_BOOT" not in line):
-                result.append(line)
-                in_build_flags = True
-                # If this is a multi-line block (ends with = or contains indented values)
-                if line.rstrip().endswith("="):
-                    # Multi-line format: build_flags =\n    ${...}\n    -D...
-                    # Add USB CDC flag as next indented line
-                    usb_flag = "-DARDUINO_USB_CDC_ON_BOOT=1" if usb_cdc else "-DARDUINO_USB_CDC_ON_BOOT=0"
-                    result.append(f"    {usb_flag}")
+        # Nothing to rewrite: add the flag as the first entry of build_flags.
+        #
+        # This branch used to fire even when the flag WAS present, because it
+        # only checked whether the flag had been seen BEFORE the build_flags
+        # line — and in every env here the flag comes after it. The result was
+        # one more duplicate -DARDUINO_USB_CDC_ON_BOOT appended to the block on
+        # every single run of the deploy tool.
+        if not found:
+            for i in range(start, end):
+                stripped = lines[i].lstrip()
+                if stripped.startswith((";", "#")):
+                    continue
+                if stripped.startswith("build_flags") and lines[i].rstrip().endswith("="):
+                    lines.insert(i + 1, f"    {want}")
                     modified = True
-                    flag_found_in_section = True
-                    in_build_flags = False
-                continue
+                    break
+            else:
+                self._log(f"  ! USB CDC toggle skipped: [env:{env}] has no "
+                          f"multi-line build_flags block to add the flag to.")
+                return
 
-            result.append(line)
-
-        # Only write if we made changes
         if modified:
-            ini_file.write_text("\n".join(result))
+            ini_file.write_text("\n".join(lines))
+            self._log(f"  platformio.ini: [env:{env}] {want}")
 
     def _run_cmd(self, cmd: list[str]) -> int:
         """Run a subprocess command and stream output to callback."""
@@ -305,7 +487,13 @@ class DeployManager:
         if not script.is_file():
             self._log("ERROR: flash_bootloader.py not found in tools/")
             return 2
-        cmd = [sys.executable, str(script), "--chip", self.cfg["chip"], "--baud", str(self.cfg["baud"])]
+        # Pass the ENV name, not the chip family. flash_bootloader resolves the
+        # chip from it and — crucially — the flash size, which the chip alone
+        # cannot give: esp32s3 and esp32s3_n16r8 are the same silicon with 8
+        # and 16 MB behind it, and the size lands in the bootloader image
+        # header.
+        cmd = [sys.executable, str(script), "--chip", self.cfg["env"],
+               "--baud", str(self.cfg["baud"])]
         if self.cfg.get("port"):
             cmd += ["--port", self.cfg["port"]]
         rc = self._run_cmd(cmd)
@@ -613,18 +801,18 @@ class DeployManager:
             getpass_fn = getpass.getpass
 
         # Detect port
-        port = self.cfg.get("port") or detect_port()
+        port = self.cfg.get("port") or detect_port(self.cfg.get("env"))
         if not port:
             self._log("Error: No serial port found. Connect device and set port via settings.")
             return False
 
-        # Detect baud from platformio.ini
-        try:
-            txt = (ROOT / "platformio.ini").read_text()
-            m = re.search(r"^\s*monitor_speed\s*=\s*(\d+)", txt, re.MULTILINE)
-            baud = int(m.group(1)) if m else 115200
-        except OSError:
-            baud = 115200
+        # The monitor speed is resolved for THIS env (its own value, then what
+        # it extends, then [env]). It used to be the first `monitor_speed`
+        # anywhere in platformio.ini, which is the right number here only
+        # because no env overrides the shared one — the first env to do so
+        # would have had the provisioner talking at the wrong rate.
+        baud = self.cfg.get("monitor_speed") \
+            or defaults_for(self.cfg.get("env") or detect_env())["monitor_speed"]
 
         self._log(f"WiFi Provisioning via serial")
         self._log(f"Port: {port}   Baud: {baud}\n")

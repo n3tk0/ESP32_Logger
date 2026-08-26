@@ -91,23 +91,67 @@ bool UsbCdcModule::isUsbCdcActiveAtBoot() const {
 #endif
 }
 
+// ---------------------------------------------------------------------------
+// The USB pins are a property of the SILICON, not of the carrier board.
+//
+// This used to test board macros — ARDUINO_SEEED_XIAO_ESP32C3,
+// ARDUINO_ESP32C3_DEV, ARDUINO_ESP32S3_DEV — and answered "no USB pins, none
+// locked" for every board outside that list. Both XIAO targets fell outside
+// it, verified with a #pragma message probe on each env rather than by
+// reading board JSON:
+//
+//   xiao_esp32c3       ARDUINO_XIAO_ESP32C3          no match  -> INERT
+//   xiao_esp32s3       ARDUINO_XIAO_ESP32S3          no match  -> INERT
+//   lolin_c3_pico      (its own)                     no match  -> would be
+//   esp32c3_supermini  ARDUINO_ESP32C3_DEV           matched   -> worked
+//   esp32s3(_n16r8)    ARDUINO_ESP32S3_DEV           matched   -> worked
+//
+// Seeed's macro is ARDUINO_XIAO_ESP32C3, with no SEEED_ — so the very board
+// the first branch was written for never matched it. On those the UI reported
+// the USB D-/D+ pair as free while USB CDC was compiled in and holding it,
+// which is precisely the "sensor never answers and never logs why" failure
+// the board profiles exist to prevent, and every new board would have
+// re-introduced it.
+//
+// USB Serial/JTAG is fixed in the pad ring of each part:
+//   ESP32-C3:  GPIO18 = D-, GPIO19 = D+
+//   ESP32-S3:  GPIO19 = D-, GPIO20 = D+
+// so the chip-family macro is both the correct question and one no new board
+// can get wrong.
+//
+// The paired string forms are literals rather than runtime concatenations:
+// String() + int pulls in the conversion machinery at every call site, and on
+// the 4 MB C3 the all-features image has about ten kilobytes of headroom.
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+#  define LOGGER_USB_DM       18
+#  define LOGGER_USB_DP       19
+#  define LOGGER_USB_PINS_CSV "18,19"
+#  define LOGGER_USB_PINS_TXT "GPIO 18, 19 (USB D-/D+)"
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#  define LOGGER_USB_DM       19
+#  define LOGGER_USB_DP       20
+#  define LOGGER_USB_PINS_CSV "19,20"
+#  define LOGGER_USB_PINS_TXT "GPIO 19, 20 (USB D-/D+)"
+#endif
+
 String UsbCdcModule::getBoardName() const {
-#if defined(ARDUINO_SEEED_XIAO_ESP32C3)
-    return "Seeed XIAO ESP32-C3";
-#elif defined(ARDUINO_ESP32C3_DEV)
-    return "Generic ESP32-C3";
-#elif defined(ARDUINO_ESP32S3_DEV)
-    return "Generic ESP32-S3";
+    // ARDUINO_BOARD is set by every board definition in the core, so this
+    // names the actual board rather than falling back to "Unknown ESP32" for
+    // anything not on a hand-maintained list.
+#if defined(ARDUINO_BOARD)
+    return ARDUINO_BOARD;
+#elif defined(CONFIG_IDF_TARGET_ESP32C3)
+    return "ESP32-C3";
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+    return "ESP32-S3";
 #else
     return "Unknown ESP32";
 #endif
 }
 
 String UsbCdcModule::getAffectedPins() const {
-#if defined(ARDUINO_SEEED_XIAO_ESP32C3) || defined(ARDUINO_ESP32C3_DEV)
-    return "GPIO 18, 19 (USB D+/D-)";
-#elif defined(ARDUINO_ESP32S3_DEV)
-    return "GPIO 19, 20 (USB D+/D-)";
+#if defined(LOGGER_USB_DM)
+    return LOGGER_USB_PINS_TXT;
 #else
     return "";
 #endif
@@ -118,29 +162,23 @@ bool UsbCdcModule::isUsbPinLocked(int pin) const {
     // NVS preference (enabled_) is for future recompiles, not current hardware state
 #if !defined(ARDUINO_USB_CDC_ON_BOOT) || (ARDUINO_USB_CDC_ON_BOOT != 1)
     return false;  // USB CDC disabled at build time, no pins locked
-#endif
-
-#if defined(ARDUINO_SEEED_XIAO_ESP32C3) || defined(ARDUINO_ESP32C3_DEV)
-    return (pin == 18 || pin == 19);
-#elif defined(ARDUINO_ESP32S3_DEV)
-    return (pin == 19 || pin == 20);
+#elif defined(LOGGER_USB_DM)
+    return (pin == LOGGER_USB_DM || pin == LOGGER_USB_DP);
 #else
     return false;
 #endif
 }
 
 String UsbCdcModule::getUsbPins() const {
-#if defined(ARDUINO_SEEED_XIAO_ESP32C3) || defined(ARDUINO_ESP32C3_DEV)
-    return "18,19";
-#elif defined(ARDUINO_ESP32S3_DEV)
-    return "19,20";
+#if defined(LOGGER_USB_DM)
+    return LOGGER_USB_PINS_CSV;
 #else
     return "";
 #endif
 }
 
 bool UsbCdcModule::isUsbCdcSupported() const {
-#if defined(ARDUINO_SEEED_XIAO_ESP32C3) || defined(ARDUINO_ESP32C3_DEV) || defined(ARDUINO_ESP32S3_DEV)
+#if defined(LOGGER_USB_DM)
     return true;
 #else
     return false;
