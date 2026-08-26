@@ -229,6 +229,7 @@ Three ways, and one of them is not what it sounds like.
 -DKINDLE_REFRESH_MIN_SEC=60    ; floor: never repaint more often than this
 -DKINDLE_DATA_PERIOD_SEC=60    ; how often readings are expected
 -DKINDLE_FOLLOW_DATA=1         ; 0 for the old fixed interval
+-DKINDLE_CLOCK_PIN_REFRESH=1   ; 0 lets the clock go stale between reloads
 ```
 
 ### 1. The reader asks
@@ -271,11 +272,41 @@ after the next one is due:
 In practice the panel updates within a few seconds of new data without anything
 being pushed to it.
 
-**The cost, plainly.** Every reload repaints the whole panel: it flashes and it
-draws battery. Following a node that posts once a minute means flashing once a
-minute rather than once every five. That is a real trade, not a free win —
-`KINDLE_REFRESH_MIN_SEC` is the floor that keeps it from becoming a strobe, and
-`KINDLE_FOLLOW_DATA=0` restores the old fixed interval.
+### …and the clock, which is usually the louder demand
+
+The clock is rendered server-side. It is correct at the moment it is painted
+and stale from then on, so **a clock showing minutes is a standing demand for a
+repaint every minute** whatever the data is doing.
+
+`KINDLE_CLOCK_PIN_REFRESH=1` (default) aims the reload at the next **minute
+boundary**, and that is not cosmetic. A page that reloads at :58 of each minute
+displays the previous minute for 58 seconds out of every 60 — a clock that is
+wrong most of the time. Landing on :00 makes the displayed minute change when
+the minute changes.
+
+It is deliberately **not** a plain `min()` of the two demands. A data delay that
+happens to fall a second or two short of the boundary costs the same repaint but
+steals the alignment, so it has to be at least five seconds earlier before it is
+worth breaking the clock's cadence for. The property is checked exhaustively:
+from every one of the 60 seconds in a minute, the next reload lands on a
+boundary.
+
+**At the default settings the clock always wins.** The data floor is 60 s and
+the clock never asks for more than 60, so `KINDLE_FOLLOW_DATA` changes nothing
+unless pinning is off, or `KINDLE_REFRESH_MIN_SEC` drops below a minute with a
+node posting faster than that. Said out loud because it would otherwise look
+like the data logic is doing work it is not.
+
+### The cost, plainly
+
+Every reload repaints the whole panel: it flashes, and it draws battery. With
+the clock pinned that is **about 1440 page loads a day** — a reader on a
+charger, not one running a fortnight on its battery.
+
+`KINDLE_CLOCK_PIN_REFRESH=0` lets the clock go stale by up to
+`KINDLE_REFRESH_SEC` between reloads. For a 96 px clock read across a room that
+is a confident lie, so prefer lowering `KINDLE_REFRESH_SEC` to something the
+clock can live with over turning the pinning off.
 
 ## The 24-hour trend needs its own storage
 

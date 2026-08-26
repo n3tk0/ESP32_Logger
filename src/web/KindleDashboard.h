@@ -184,6 +184,31 @@ class AsyncWebServer;
 #  define KINDLE_FOLLOW_DATA 1
 #endif
 
+// THE CLOCK IS THE OTHER HALF OF THIS, AND USUALLY THE LOUDER ONE
+// ---------------------------------------------------------------
+// The clock is rendered server-side. It is correct at the moment it is painted
+// and stale from then on, so a clock showing minutes is a standing demand for
+// a repaint every minute no matter what the data is doing.
+//
+// With this on, the reload is aimed at the next minute boundary, so the
+// displayed minute changes when the minute changes rather than at some
+// arbitrary offset, and it is never more than about a minute behind.
+//
+// At the default settings this always wins: the data floor is 60 s and the
+// clock never asks for more than 60. KINDLE_FOLLOW_DATA therefore changes
+// nothing unless this is off, or KINDLE_REFRESH_MIN_SEC drops below a minute
+// with a node posting faster than that. Said out loud because it would
+// otherwise look like the data logic is doing work it is not.
+//
+// WHAT IT COSTS: about 1440 page loads a day, each a full panel repaint. That
+// is a reader on a charger, not one running on its battery for a fortnight.
+// Turn this off and the clock goes stale by up to KINDLE_REFRESH_SEC between
+// reloads — which for a 96 px clock on a shelf is a confident lie, so prefer
+// dropping KINDLE_REFRESH_SEC to something the clock can live with instead.
+#ifndef KINDLE_CLOCK_PIN_REFRESH
+#  define KINDLE_CLOCK_PIN_REFRESH 1
+#endif
+
 #if KINDLE_REFRESH_MIN_SEC > KINDLE_REFRESH_SEC
 #  error "KINDLE_REFRESH_MIN_SEC exceeds KINDLE_REFRESH_SEC: the floor is above the ceiling"
 #endif
