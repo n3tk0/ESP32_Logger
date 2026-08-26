@@ -183,7 +183,54 @@ void publishLiveEvent() {
 // available changes; the browser inflates it. Every browser that can reach
 // this device has supported Content-Encoding: gzip for twenty years, and the
 // firmware's own /www assets are already served the same way.
+//
+// Browsers are not the only clients that reach here, though. `curl` sends no
+// Accept-Encoding at all unless asked, and a rescue over curl is exactly the
+// scenario this page exists for — so a client that has not announced gzip
+// gets FAILSAFE_PLAIN below instead of 8 KB of binary on its terminal.
+
+// The no-gzip fallback: ~1 KB, no JavaScript, no compression. It carries the
+// two operations that actually recover a device — put a file into /www/, and
+// restart — as plain <form> POSTs, so it works in a text browser as well as
+// in curl. It is not a second copy of the UI and must not grow into one; the
+// flash it costs is taken straight out of what the compression saved.
+static const char FAILSAFE_PLAIN[] PROGMEM = R"HTML(<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Water Logger - Setup Mode</title></head><body>
+<h1>Water Logger &mdash; SETUP MODE</h1>
+<p>The normal UI is missing from <code>/www/</code>.</p>
+<p>The full recovery page is stored gzip-compressed to save flash. This client
+did not send <code>Accept-Encoding: gzip</code>, so this plain version is being
+served instead. For the full page:
+<code>curl --compressed http://HOST/setup</code></p>
+<h2>Upload a file to /www/</h2>
+<form method="POST" action="/upload" enctype="multipart/form-data">
+<input type="hidden" name="path" value="/www/">
+<input type="file" name="file"> <button type="submit">Upload</button>
+</form>
+<h2>Restart</h2>
+<form method="POST" action="/restart"><button type="submit">Restart</button></form>
+<h2>From a shell</h2>
+<pre>curl --compressed http://HOST/setup
+curl -F 'path=/www/' -F 'file=@index.html' http://HOST/upload
+curl -X POST http://HOST/restart</pre>
+</body></html>
+)HTML";
+
+static bool clientAcceptsGzip(AsyncWebServerRequest* r) {
+    AsyncWebHeader* h = r->getHeader("Accept-Encoding");
+    // No header means no stated preference. RFC 9110 permits any encoding in
+    // that case, but the clients that omit it are the ones least able to cope
+    // with a compressed body, so treat silence as "no".
+    return h && h->value().indexOf("gzip") >= 0;
+}
+
 static void sendFailsafePage(AsyncWebServerRequest* r) {
+    if (!clientAcceptsGzip(r)) {
+        r->send_P(200, "text/html", FAILSAFE_PLAIN);
+        return;
+    }
     AsyncWebServerResponse* resp = r->beginResponse_P(
         200, "text/html", FAILSAFE_HTML_GZ, FAILSAFE_HTML_GZ_LEN);
     if (!resp) {

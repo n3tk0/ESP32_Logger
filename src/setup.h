@@ -126,13 +126,18 @@
 // device with a card fitted can do.
 //
 // Comment the define out to drop `#include <SD.h>` and, with it, the FatFs
-// library the Arduino SD driver sits on.  MEASURED at ~21 KB of flash on the
-// C3 (libfatfs.a in the linker map) — spent whether or not a card is ever
-// fitted, on a partition a minimal build already fills to 93 %.
+// library and SD driver underneath it.  MEASURED at ~36 KB of flash on the
+// C3 — two `pio run -e xiao_esp32c3` builds of this default config, 1,471,408
+// bytes with and 1,434,320 without (37,088 saved); CI measures the same
+// 37,104 on the all-features build.  It is spent whether or not a card is
+// ever fitted, on a partition a minimal build already fills to 93 %.
 //
-// With this off: sdFs() returns nullptr, sdAvailable is pinned false, the
-// "sdcard" storage view is refused, and everything falls back to LittleFS.
-// See src/core/SdCompat.h.
+// With this off: sdFs() returns nullptr and sdAvailable stays false, so every
+// request naming storage=sdcard falls back to LittleFS — the same fallback a
+// card-capable build already takes when no card is fitted, so no call site
+// changes.  StorageManager says so once on the serial log at boot, and
+// /api/diag reports storage.sd_supported=false so the UI can tell "no card"
+// from "no driver".  See src/core/SdCompat.h.
 #ifndef FEATURE_SD_STORAGE
 #  define FEATURE_SD_STORAGE
 #endif

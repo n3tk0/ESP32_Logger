@@ -148,6 +148,12 @@ still needs an in-line thermal fuse.
 
 Toggled via `#ifdef EXPORT_*_ENABLED` in `src/setup.h`. All five are enabled by default.
 
+- **MQTT** (`EXPORT_MQTT_ENABLED`)
+- **Generic HTTP POST** (`EXPORT_HTTP_ENABLED`)
+- **sensor.community** (`EXPORT_SENSORCOMMUNITY_ENABLED`)
+- **openSenseMap** (`EXPORT_OPENSENSEMAP_ENABLED`)
+- **Webhook** — Discord / Slack / IFTTT (`EXPORT_WEBHOOK_ENABLED`)
+
 ### Flash budget
 
 The 4 MB C3 targets get a **1472 KB app partition** (×2, OTA-capable). A
@@ -157,21 +163,19 @@ exist specifically to buy it back, both measured on `xiao_esp32c3`:
 
 | | flash |
 |---|---|
-| `FEATURE_SD_STORAGE` off (`src/setup.h`) | **−35 KB** — drops `<SD.h>` and the FatFs library under it |
-| failsafe recovery page, stored gzipped | **−19 KB** — already on; see below |
+| `FEATURE_SD_STORAGE` off (`src/setup.h`) | **−36 KB** — drops `<SD.h>`, the FatFs library and the SD driver (37,088 bytes, two builds) |
+| failsafe recovery page, stored gzipped | **−18 KB** — already on; 27,622 B of PROGMEM text became 8,239 B of gzip plus a 1,035 B plain fallback |
 
 The failsafe page is the recovery UI served when LittleFS has no `/www`. It
 stays **linked into the firmware**, because that is the state it exists for —
 it cannot live on the filesystem it repairs. It is simply stored compressed
-(8 KB instead of 27 KB) and inflated by the browser. Source of truth is
+(8 KB instead of 27 KB) and inflated by the browser; clients that do not
+announce `Accept-Encoding: gzip` (curl, by default) get a ~1 KB plain-HTML
+fallback with the upload and restart forms instead of a binary dump, and
+`curl --compressed` gets the full page. Source of truth is
 `src/web/failsafe.html`; `scripts/gen_failsafe.py` turns it into the committed
-`src/web/FailsafeHtml.h`, and CI checks the two have not drifted.
-
-- **MQTT** (`EXPORT_MQTT_ENABLED`)
-- **Generic HTTP POST** (`EXPORT_HTTP_ENABLED`)
-- **sensor.community** (`EXPORT_SENSORCOMMUNITY_ENABLED`)
-- **openSenseMap** (`EXPORT_OPENSENSEMAP_ENABLED`)
-- **Webhook** — Discord / Slack / IFTTT (`EXPORT_WEBHOOK_ENABLED`)
+`src/web/FailsafeHtml.h`, and CI (`gen_failsafe.py --check`) verifies the
+committed header still inflates to that exact HTML.
 
 ### Operating modes
 

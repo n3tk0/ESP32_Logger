@@ -23,15 +23,34 @@ The saving only exists if the compressed form is what gets linked.
 
 The generated header IS COMMITTED. PlatformIO regenerates it on every build
 via extra_scripts, but the Arduino IDE path (Logger.ino in the project root)
-runs no scripts, so a gitignored header would break that build. CI checks the
-committed copy still matches the HTML — see tools/check_failsafe.py.
+runs no scripts, so a gitignored header would break that build. CI runs
+`--check` (see .github/workflows/tests.yml) so the committed copy cannot
+drift from the HTML.
+
+WHAT --check COMPARES, AND WHY IT IS NOT A BYTE COMPARE
+-------------------------------------------------------
+It INFLATES the committed header and compares that against failsafe.html.
+It deliberately does NOT compare the compressed bytes, because those are not
+a property of the input: zlib and zlib-ng emit different (both valid) streams
+for the same data at the same level, so a byte compare would fail on a
+perfectly correct header purely because CI's Python links a different zlib
+than the developer's. What has to hold is that the header inflates to the
+current page — that is what is checked, and it is implementation-independent.
+
+For the same reason a build regenerates the header only when the existing one
+does NOT inflate to the current HTML. Otherwise a build on a machine with a
+different zlib would rewrite a correct header and dirty the working tree.
 
 Usage:
-    python3 scripts/gen_failsafe.py           # regenerate the header
+    python3 scripts/gen_failsafe.py           # regenerate if stale
+    python3 scripts/gen_failsafe.py --force   # regenerate unconditionally
     python3 scripts/gen_failsafe.py --check   # exit 1 if it is stale
 """
+from __future__ import annotations
+
 import gzip
 import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -82,6 +101,7 @@ def render() -> str:
 
 #include <stdint.h>
 #include <stddef.h>
+#include <pgmspace.h>   // PROGMEM — do not rely on the includer pulling Arduino.h
 
 static const uint8_t FAILSAFE_HTML_GZ[] PROGMEM = {{
 {chr(10).join(body)}
@@ -91,23 +111,55 @@ static const size_t FAILSAFE_HTML_GZ_LEN = sizeof(FAILSAFE_HTML_GZ);
 """
 
 
+_BYTES_RE = re.compile(r"FAILSAFE_HTML_GZ\[\]\s*PROGMEM\s*=\s*\{(.*?)\};", re.S)
+
+
+def committed_payload() -> bytes:
+    """The gzip stream inside the committed header, or b'' if unreadable."""
+    if not OUT.is_file():
+        return b""
+    m = _BYTES_RE.search(OUT.read_text(encoding="utf-8"))
+    if not m:
+        return b""
+    return bytes(int(tok, 16) for tok in re.findall(r"0x([0-9a-fA-F]{2})", m.group(1)))
+
+
+def committed_is_current() -> tuple[bool, str]:
+    """True when the committed header inflates to exactly the current HTML."""
+    gz = committed_payload()
+    if not gz:
+        return False, "no FAILSAFE_HTML_GZ array found (header missing or edited)"
+    try:
+        inflated = gzip.decompress(gz)
+    except (OSError, EOFError) as exc:
+        return False, f"the stored bytes are not a valid gzip stream ({exc})"
+    raw = SRC.read_bytes()
+    if inflated != raw:
+        return False, (f"inflates to {len(inflated):,} bytes, but "
+                       f"{SRC.name} is now {len(raw):,} bytes")
+    return True, f"{len(gz):,} stored bytes inflate to {len(raw):,} bytes, byte-identical"
+
+
 def main() -> int:
     if not SRC.is_file():
         print(f"error: {SRC} not found")
         return 2
-    text = render()
+
+    ok, detail = committed_is_current()
 
     if "--check" in sys.argv:
-        current = OUT.read_text(encoding="utf-8") if OUT.is_file() else ""
-        if current == text:
-            print(f"OK: {OUT.relative_to(ROOT)} matches {SRC.relative_to(ROOT)}")
+        if ok:
+            print(f"OK: {OUT.relative_to(ROOT)} — {detail}")
             return 0
-        print(f"FAIL: {OUT.relative_to(ROOT)} is stale.\n"
-              f"  {SRC.relative_to(ROOT)} has changed since it was generated.\n"
+        print(f"FAIL: {OUT.relative_to(ROOT)} is stale — {detail}.\n"
               f"  Run: python3 scripts/gen_failsafe.py")
         return 1
 
-    OUT.write_text(text, encoding="utf-8")
+    if ok and "--force" not in sys.argv:
+        print(f"up to date: {OUT.relative_to(ROOT)} — {detail}")
+        return 0
+
+    OUT.write_text(render(), encoding="utf-8")
     print(f"wrote {OUT.relative_to(ROOT)}")
     return 0
 
