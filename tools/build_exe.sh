@@ -12,11 +12,15 @@ pip install pyinstaller -q
 echo "Building executable..."
 pyinstaller tools/deploy_gui.spec --clean -y
 
+# The spec has no BUNDLE section, so PyInstaller emits a plain binary on macOS
+# too — not an .app. This used to point at dist/ESP32_Deploy.app/Contents/...,
+# a path that has never existed.
 if [ "$(uname)" == "Darwin" ]; then
-    APP="dist/ESP32_Deploy.app/Contents/MacOS/ESP32_Deploy"
+    EXE="dist/ESP32_Deploy"
     echo ""
-    echo "✓ macOS app created: $APP"
-    echo "  Run: ./$APP"
+    echo "✓ macOS binary created: $EXE"
+    echo "  Run: ./$EXE"
+    echo "  If Gatekeeper blocks it: xattr -d com.apple.quarantine $EXE"
 elif [ "$(uname -s)" == "Linux" ]; then
     EXE="dist/ESP32_Deploy"
     echo ""

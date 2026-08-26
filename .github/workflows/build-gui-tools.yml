@@ -1,15 +1,29 @@
-# Build standalone executables for the ESP32 Deploy GUI tool.
+# Build the standalone ESP32 Deploy tool — the all-in-one binary that runs the
+# build/flash/upload workflow without a Python install.
 #
 # Triggers:
-#   - Manual dispatch (workflow_dispatch)
-#   - Release/tag creation (attaches binaries to release assets)
+#   - Any change under tools/ (the deploy scripts themselves), so updating them
+#     produces a fresh downloadable binary without anyone building it by hand.
+#     This is the point of the workflow; it used to fire only on releases and
+#     manual dispatch, so the published binary lagged the scripts indefinitely.
+#   - platformio.ini and boards/, because the tool reads both at RUNTIME rather
+#     than bundling them — a new board changes what the tool offers, and the
+#     self-test below asserts the binary can see it.
+#   - Manual dispatch and releases (attaches the binaries to release assets).
 #
-# Outputs:
-#   - ESP32_Deploy.exe       (Windows)
-#   - ESP32_Deploy-linux     (Linux)
+# Deliberately NOT on v* tag pushes: a `paths` filter applies to tag pushes
+# too, so a tag would build only when its commit happened to touch tools/ —
+# which looks like a flaky release. `release: [created]` covers it instead,
+# same as build-firmware.yml.
 #
-# The GUI tool (tools/deploy_gui.py) is compiled into a single-file
-# executable with PyInstaller so end users don't need Python installed.
+# Outputs, per run, downloadable from the run's Summary page:
+#   - ESP32_Deploy-windows-<sha>.exe
+#   - ESP32_Deploy-linux-<sha>
+#   - ESP32_Deploy-macos-<sha>
+#
+# The binary does NOT bundle PlatformIO (~500 MB with toolchains) and does not
+# bundle the project: it reads platformio.ini from the checkout it is run
+# against. Put it in the project directory, or run it from there.
 
 name: Build Deploy GUI
 
@@ -18,22 +32,46 @@ on:
   release:
     types: [created]
   push:
-    tags:
-      - 'v*'
+    branches: ['**']
+    paths:
+      - 'tools/**'
+      - 'platformio.ini'
+      - 'boards/**'
+      - '.github/workflows/build-gui-tools.yml'
+  pull_request:
+    paths:
+      - 'tools/**'
+      - 'platformio.ini'
+      - 'boards/**'
+      - '.github/workflows/build-gui-tools.yml'
+
+# The commit the artifacts are named after. On pull_request events github.sha
+# is the EPHEMERAL MERGE COMMIT, not the branch head — so naming artifacts with
+# it defeated the point of putting a sha there at all: it named a commit that
+# does not exist in the branch and cannot be checked out.
+env:
+  BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   build:
+    name: build (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
-            artifact: ESP32_Deploy.exe
+            label: windows
             binary: dist/ESP32_Deploy.exe
+            suffix: .exe
           - os: ubuntu-latest
-            artifact: ESP32_Deploy-linux
+            label: linux
             binary: dist/ESP32_Deploy
+            suffix: ''
+          - os: macos-latest
+            label: macos
+            binary: dist/ESP32_Deploy
+            suffix: ''
 
     steps:
       - name: Checkout repository
@@ -46,18 +84,23 @@ jobs:
           cache: 'pip'
           cache-dependency-path: tools/requirements.txt
 
-      - name: Install dependencies
+      # PlatformIO is in requirements.txt for people running the tools from
+      # source, but the spec deliberately excludes it from the bundle. Install
+      # only what the binary actually needs, so a broken PlatformIO release
+      # cannot fail this build.
+      - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r tools/requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller customtkinter pyserial
 
-      # Linux needs Tk libraries for customtkinter's underlying tkinter
+      # customtkinter is a tkinter wrapper, and the Ubuntu runner's Python has
+      # no tkinter unless this is installed. Xvfb is for the smoke test below:
+      # the GUI needs a display to open a window at all.
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk
+          sudo apt-get install -y python3-tk xvfb
 
       - name: Build executable
         run: pyinstaller tools/deploy_gui.spec --clean -y
@@ -73,40 +116,94 @@ jobs:
           SIZE=$(stat -c%s "${{ matrix.binary }}" 2>/dev/null || stat -f%z "${{ matrix.binary }}")
           echo "Binary size: $(( SIZE / 1024 / 1024 )) MB"
 
-      # Rename Linux binary so it has a distinct name in release assets
-      - name: Rename binary (Linux)
+      # "The exe launches" says nothing about whether it found platformio.ini,
+      # bundled pyserial, or can enumerate boards — and those are exactly what
+      # a frozen build breaks silently. --selftest reports all three and exits
+      # non-zero if it found no project, so this asserts the binary is useful
+      # rather than merely present.
+      - name: Self-test the binary against this checkout
+        shell: bash
+        run: |
+          set -o pipefail
+          "./${{ matrix.binary }}" --selftest 2>&1 | tee selftest.txt || {
+            echo "::error::--selftest failed; the binary cannot read the project"
+            cat dist/deploy_selftest.txt 2>/dev/null
+            exit 1
+          }
+          # Windowed builds have no stdout on Windows, so the report is also
+          # written beside the executable. Prefer whichever is non-empty.
+          if [ ! -s selftest.txt ] && [ -f dist/deploy_selftest.txt ]; then
+            cp dist/deploy_selftest.txt selftest.txt
+            cat selftest.txt
+          fi
+          EXPECTED=$(grep -c '^\[env:' platformio.ini)
+          FOUND=$(sed -n 's/^  environments : \([0-9]*\)$/\1/p' selftest.txt)
+          echo "platformio.ini has $EXPECTED [env:] sections; the binary sees $FOUND deployable"
+          if [ -z "$FOUND" ] || [ "$FOUND" -lt 1 ]; then
+            echo "::error::The binary enumerated no environments"
+            exit 1
+          fi
+          grep -q '  pyserial     : yes' selftest.txt || {
+            echo "::error::pyserial did not make it into the bundle — serial ports will not enumerate"
+            exit 1
+          }
+
+      # A window that fails to open is a binary nobody can use, and the
+      # self-test above never touches tkinter's display path.
+      - name: Smoke-test the GUI opens (Linux)
         if: runner.os == 'Linux'
-        run: mv dist/ESP32_Deploy dist/ESP32_Deploy-linux
+        run: |
+          set -e
+          timeout 20 xvfb-run -a "./${{ matrix.binary }}" > gui.log 2>&1 && rc=0 || rc=$?
+          # 124 is timeout killing a still-running process: the window stayed up.
+          if [ "$rc" != "124" ]; then
+            echo "::error::GUI exited on its own (rc=$rc) instead of staying open"
+            cat gui.log
+            exit 1
+          fi
+          echo "GUI opened and stayed up for 20 s"
+
+      - name: Stage the artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "${{ matrix.binary }}" "out/ESP32_Deploy-${{ matrix.label }}${{ matrix.suffix }}"
+          cp selftest.txt "out/selftest-${{ matrix.label }}.txt"
+          cp tools/DEPLOY.md out/ 2>/dev/null || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.artifact }}
+          # The sha is in the name so it is obvious which commit's deploy
+          # scripts a downloaded binary came from — the BRANCH head, not a
+          # merge commit nobody can check out. See BUILD_SHA above.
+          name: ESP32_Deploy-${{ matrix.label }}-${{ env.BUILD_SHA }}
+          path: out/
+          retention-days: 30
+          if-no-files-found: error
 
   attach-to-release:
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+    if: github.event_name == 'release'
     permissions:
       contents: write
 
     steps:
-      - name: Download Windows binary
+      - name: Download all binaries
         uses: actions/download-artifact@v4
         with:
-          name: ESP32_Deploy.exe
+          pattern: ESP32_Deploy-*-${{ env.BUILD_SHA }}
+          merge-multiple: true
           path: release/
 
-      - name: Download Linux binary
-        uses: actions/download-artifact@v4
-        with:
-          name: ESP32_Deploy-linux
-          path: release/
+      - name: List what will be attached
+        run: ls -lh release/
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/ESP32_Deploy.exe
+            release/ESP32_Deploy-windows.exe
             release/ESP32_Deploy-linux
+            release/ESP32_Deploy-macos
