@@ -844,7 +844,21 @@ def selftest() -> int:
         envs = environments()
         lines.append(f"  environments : {len(envs)}")
         lines += [f"    {e.name:<20} {e.board:<24} {e.chip:<9} "
-                  f"{e.flash_size or '?':<6} upload={e.upload_speed}" for e in envs]
+                  f"{e.flash_size or '?':<6} upload={e.upload_speed}"
+                  f"{'' if e.board_json_found else '   [no board JSON]'}"
+                  for e in envs]
+        # A bare "?" in the flash column is not self-explanatory, and the
+        # cause is worth naming: the board definition lives in an installed
+        # PlatformIO platform, so on a machine that has not downloaded it the
+        # chip is a guess from the board id and the flash size is unknown.
+        # That size ends up in the bootloader image header, so it is not
+        # cosmetic.
+        missing = [e.name for e in envs if not e.board_json_found]
+        if missing:
+            lines.append(
+                f"  NOTE: no board definition found for {', '.join(missing)} — "
+                "install PlatformIO and let it download the platform "
+                "(`pio pkg install`) for exact chip and flash size.")
 
     report = "\n".join(lines)
     # A windowed PyInstaller build on Windows has no console: sys.stdout is

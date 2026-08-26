@@ -128,6 +128,12 @@ class EnvInfo:
     # is the state the NEXT build will have, which is the only honest thing to
     # show in a checkbox.
     usb_cdc_on_boot: object = None
+    # False when the board's JSON could not be read: either a project-local
+    # boards/ file or an installed PlatformIO platform. Without it the chip is
+    # a guess from the board id and the flash size is unknown — which matters,
+    # because the flash size ends up in the bootloader image header. Recorded
+    # rather than left as an empty string so callers can say WHY it is empty.
+    board_json_found: bool = True
 
     @property
     def label(self) -> str:
@@ -326,6 +332,7 @@ def _info(sections: dict[str, dict[str, str]], name: str) -> EnvInfo:
         filesystem=_value(sections, name, "board_build.filesystem"),
         hwids=hwids,
         usb_cdc_on_boot=_own_cdc_flag(sections, name),
+        board_json_found=bool(js),
     )
 
 

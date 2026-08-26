@@ -45,6 +45,13 @@ on:
       - 'boards/**'
       - '.github/workflows/build-gui-tools.yml'
 
+# The commit the artifacts are named after. On pull_request events github.sha
+# is the EPHEMERAL MERGE COMMIT, not the branch head — so naming artifacts with
+# it defeated the point of putting a sha there at all: it named a commit that
+# does not exist in the branch and cannot be checked out.
+env:
+  BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
   build:
     name: build (${{ matrix.label }})
@@ -168,8 +175,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           # The sha is in the name so it is obvious which commit's deploy
-          # scripts a downloaded binary came from.
-          name: ESP32_Deploy-${{ matrix.label }}-${{ github.sha }}
+          # scripts a downloaded binary came from — the BRANCH head, not a
+          # merge commit nobody can check out. See BUILD_SHA above.
+          name: ESP32_Deploy-${{ matrix.label }}-${{ env.BUILD_SHA }}
           path: out/
           retention-days: 30
           if-no-files-found: error
@@ -185,7 +193,7 @@ jobs:
       - name: Download all binaries
         uses: actions/download-artifact@v4
         with:
-          pattern: ESP32_Deploy-*-${{ github.sha }}
+          pattern: ESP32_Deploy-*-${{ env.BUILD_SHA }}
           merge-multiple: true
           path: release/
 
