@@ -122,6 +122,26 @@
 //#  define MODULE_FORECAST_ENABLED
 //#endif
 
+// SD card storage.  ON by default, because turning it off changes what a
+// device with a card fitted can do.
+//
+// Comment the define out to drop `#include <SD.h>` and, with it, the FatFs
+// library and SD driver underneath it.  MEASURED at ~34 KB on the C3 — two
+// `pio run -e xiao_esp32c3` builds of this default config, 1,382,104 bytes of
+// app flash with and 1,347,102 without, so 35,002 off the number PlatformIO
+// checks against the partition.  It is spent whether or not a card is ever
+// fitted, on a partition a minimal build already fills to 92 %.
+//
+// With this off: sdFs() returns nullptr and sdAvailable stays false, so every
+// request naming storage=sdcard falls back to LittleFS — the same fallback a
+// card-capable build already takes when no card is fitted, so no call site
+// changes.  StorageManager says so once on the serial log at boot, and
+// /api/diag reports storage.sd_supported=false so the UI can tell "no card"
+// from "no driver".  See src/core/SdCompat.h.
+#ifndef FEATURE_SD_STORAGE
+#  define FEATURE_SD_STORAGE
+#endif
+
 // Cloud / network exporters
 #ifndef EXPORT_MQTT_ENABLED
 #  define EXPORT_MQTT_ENABLED            // Internal MQTT driver

@@ -264,9 +264,18 @@ Safe mode (`g_safeMode = true`) is set in three situations
 
 ### What is reachable in safe mode
 
-The embedded `FAILSAFE_HTML` page (PROGMEM, `src/web/WebServer.cpp:170`) is
-served for all routes. It provides: OTA upload, LittleFS file management, and
-the Format Filesystem and Factory Reset buttons.
+The embedded failsafe page is served for all routes by `sendFailsafePage()`
+(`src/web/WebServer.cpp:229`). It provides: OTA upload, LittleFS file
+management, and the Format Filesystem and Factory Reset buttons.
+
+It lives in PROGMEM, stored **gzipped** as `FAILSAFE_HTML_GZ`
+(`src/web/FailsafeHtml.h`, generated from `src/web/failsafe.html` by
+`scripts/gen_failsafe.py`) — 8 KB of flash instead of 27 KB. It is still
+linked into the firmware image, never read from the filesystem it exists to
+repair. A client that does not send `Accept-Encoding: gzip` — curl, unless
+given `--compressed` — is served `FAILSAFE_PLAIN` instead
+(`src/web/WebServer.cpp:197`): a ~1 KB JavaScript-free page carrying the
+upload and restart forms, so a shell rescue is not a binary dump.
 
 ### Format Filesystem button
 
@@ -297,13 +306,17 @@ profile, logs, and UI files; the first-run wizard runs after restart.
 | `resetLog` | Tail of `/reset_log.txt` (last ≤16 lines) |
 | `uptime` | Seconds since boot |
 | `network.ip` | Current IP address (client or AP) |
+| `storage.sd_supported` | False when the firmware was built with `FEATURE_SD_STORAGE` off — distinguishes "no driver" from "no card" |
+| `storage.sd_available` | True when a card is present and mounted right now |
+| `storage.littlefs` | True when LittleFS mounted |
+| `storage.view` | Active storage view: `sdcard` or `internal` |
 | `ota.running` | Running partition label |
 | `ota.pending_verify` | True if image not yet confirmed |
 | `ota.rollback_capable` | True if bootloader supports rollback |
 
 ### Failsafe diagnostic banner (R19)
 
-When the FAILSAFE_HTML page loads it polls `/api/diag` to display current IP,
+When the failsafe page loads it polls `/api/diag` to display current IP,
 uptime, free heap, and consecutive reset count at the top of the page.
 
 ### /reset_log.txt format

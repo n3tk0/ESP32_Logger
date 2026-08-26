@@ -216,6 +216,32 @@ jobs:
             echo "::warning::All-features build uses ${PCT}% — only ${REMAIN} KB free"
           fi
 
+      # FEATURE_SD_STORAGE is the one toggle whose purpose is buying flash
+      # back, so it is exercised on the build that actually needs it. This
+      # also keeps the SD-off code path compiling: every `&SD` goes through
+      # sdFs() now, and a missed one would only fail here.
+      - name: Build again with SD storage off, and report what it bought
+        run: |
+          set -e
+          BEFORE=$(stat -c%s .pio/build/xiao_esp32c3/firmware.bin)
+          python3 - <<'EOF'
+          import pathlib, sys
+          p = pathlib.Path('src/setup.h'); s = p.read_text()
+          on  = "#ifndef FEATURE_SD_STORAGE\n#  define FEATURE_SD_STORAGE\n#endif"
+          off = "//#ifndef FEATURE_SD_STORAGE\n//#  define FEATURE_SD_STORAGE\n//#endif"
+          if on not in s:
+              sys.exit('setup.h: FEATURE_SD_STORAGE block changed shape, fix this job')
+          p.write_text(s.replace(on, off))
+          EOF
+          pio run -e xiao_esp32c3
+          AFTER=$(stat -c%s .pio/build/xiao_esp32c3/firmware.bin)
+          echo "=== xiao_esp32c3, all features on, SD storage OFF ==="
+          echo "with SD: ${BEFORE} bytes -> without: ${AFTER} bytes (saved $(( BEFORE - AFTER )))"
+          if [ "$AFTER" -ge "$BEFORE" ]; then
+            echo "::error::Turning SD off did not shrink the image — the library is still linked"
+            exit 1
+          fi
+
   # The ESP8266 satellite is a separate PlatformIO project with its own
   # platformio.ini, so `pio run` in the repo root never touches it and the
   # matrix above cannot cover it.  Without this job a break in node/ ships

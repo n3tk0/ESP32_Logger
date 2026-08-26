@@ -34,6 +34,7 @@ extern MqttExporter* g_mqttExporter;
 #include "../tasks/TaskManager.h"  // task handles for /api/diag
 #include "../managers/OtaManager.h"
 #include "../utils/MutexGuard.h"   // R19.D: guarded /reset_log.txt read
+#include "../core/SdCompat.h"      // sdSupportCompiledIn() for /api/diag
 
 // ---------------------------------------------------------------------------
 // GET /api/data
@@ -464,6 +465,19 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         c["queueDrops"]    = (uint32_t)g_queueDrops;
         c["ringPushDrops"] = g_ringPushDrops.load();
         c["resets"]        = (uint32_t)g_consecutiveResets;
+    }
+
+    // Storage. sd_supported vs sd_available is the distinction that is
+    // otherwise invisible: "no card fitted" and "this firmware was built
+    // without SD support at all" both end up serving LittleFS, and only this
+    // field tells them apart. Without it, a build with FEATURE_SD_STORAGE off
+    // looks exactly like a broken card reader.
+    {
+        JsonObject st = doc["storage"].to<JsonObject>();
+        st["sd_supported"] = sdSupportCompiledIn();
+        st["sd_available"] = sdAvailable;
+        st["littlefs"]     = littleFsAvailable;
+        st["view"]         = currentStorageView;
     }
 
     // OTA rollback info
