@@ -9,9 +9,28 @@ Point the Kindle's experimental browser at `http://<collector-ip>/kindle`.
 ![The dashboard rendered at the target viewport](images/kindle-dashboard.png)
 
 Rendered at 600×800 CSS px through a greyscale filter, which is how every
-layout decision in this document was checked. The figures are synthetic; the
-stylesheet is extracted from `KindleDashboard.cpp` at render time so the picture
-cannot drift from the code.
+layout decision in this document was checked. It is the current page: hero row
+without a masthead, temperature paired with its humidity, three-hourly rules in
+the chart, the month above the week strip, and the two manual repaint links in
+the footer. The page comes to **796 of the 800 px** available.
+
+The figures are synthetic. The **stylesheet is extracted from the `KD_S`/`KD_N`
+calls in `KindleDashboard.cpp`** at render time rather than kept as a copy, so
+the picture cannot drift from the code on sizes, greys or spacing. The markup
+and the strings around it are the preview's own — that half *can* drift, and
+once did: a key row in an earlier render described a chart the firmware no
+longer drew. Re-render after touching the markup, and read the two side by
+side:
+
+```bash
+python3 tools/kindle_preview/preview.py hourly bg calm 600
+node    tools/kindle_preview/shot.mjs
+cp tools/kindle_preview/kindle.png docs/images/kindle-dashboard.png
+```
+
+The readings are seeded, so the same arguments give the same picture and a
+changed PNG means a changed page. See
+[`tools/kindle_preview/`](../tools/kindle_preview/README.md).
 
 ## Enabling it
 
@@ -21,14 +40,58 @@ build_flags =
     -DFEATURE_KINDLE_DASHBOARD
     -DKINDLE_OUTDOOR_SENSOR='"outdoor"'
     -DKINDLE_INDOOR_SENSOR='"indoor"'
-    -DKINDLE_REFRESH_SEC=300
     ; optional, adds the forecast section
     -DMODULE_FORECAST_ENABLED
+    ; see "When the panel repaints" below
+    -DKINDLE_REFRESH_SEC=300
+    -DKINDLE_REFRESH_MIN_SEC=60
+    -DKINDLE_DATA_PERIOD_SEC=60
+    -DKINDLE_FOLLOW_DATA=1
 ```
 
 The two sensor names are instance ids from `platform_config.json`. Typically
 `outdoor` is a remote node (see [`node/`](../node/README.md)) and `indoor` is a
 locally wired BME280.
+
+### The indoor sensor is usually on the collector, and that biases it
+
+A BME280 bolted to the board running WiFi reads warm — a couple of degrees is
+ordinary, more in a closed enclosure. Two consequences, and only one of them is
+obvious.
+
+**Temperature** is fixed with a calibration offset, measured against a reference
+thermometer after the board has been running an hour:
+
+```json
+"calibration": { "temperature": { "offset": -2.5 } }
+```
+
+**Humidity is not**, and an offset cannot fix it. Relative humidity is relative
+*to* a temperature: the same air reads lower RH the warmer the sensor measuring
+it, around 6 % relative per °C. Correcting only the temperature reports a room
+drier than it is.
+
+So `BME280Sensor` also publishes **`humidity_amb`** — the RH implied by the
+dew point, re-expressed at the true ambient temperature. The dew point is what
+makes this work: it is a property of the air's absolute moisture and does not
+change because the sensor measuring it is warm. With the temperature offset
+above configured, the correction follows from it automatically.
+
+**This page prefers `humidity_amb` and falls back to `humidity`.** A sensor with
+no correction configured still shows a figure — and publishes no `humidity_amb`
+at all, because there the two would be the same number:
+`rhAtTempC(dewPointC(T, RH), T)` recovers `RH` exactly, which
+`tests/host/test_psychrometrics.cpp` asserts. The metric appears once an
+`ambient_temp_sensor` or a temperature calibration gives it something to do.
+
+> The name is `humidity_amb`, not `humidity_ambient`. `SensorReading::metric`
+> is `char[16]` and `make()` copies 15 bytes, so the longer name was stored as
+> `humidity_ambien` and never matched a single `strcmp` — in `BME688Sensor`
+> from the day it shipped. `tools/check_metric_names.py` now fails the build on
+> a name that would truncate.
+
+The best fix is still to get the sensor off the board: 10–15 cm of wire away
+from the regulator, and none of the above is needed.
 
 ## What is set where
 
@@ -40,7 +103,8 @@ changes what the page *says* is runtime.
 |---|---|---|
 | dashboard on/off | `setup.h` / `-DFEATURE_KINDLE_DASHBOARD` | the whole renderer is compiled out when off |
 | `KINDLE_OUTDOOR_SENSOR`, `KINDLE_INDOOR_SENSOR` | build flag | also names the four `TrendRing` series registered at boot |
-| `KINDLE_REFRESH_SEC` | build flag | one number in a `<meta>` tag |
+| `KINDLE_REFRESH_SEC`, `KINDLE_REFRESH_MIN_SEC`, `KINDLE_DATA_PERIOD_SEC`, `KINDLE_FOLLOW_DATA`, `KINDLE_CLOCK_PIN_REFRESH`, `KINDLE_CLOCK_SYNC_GUARD_SEC` | build flag | they only set numbers in a `<meta>` tag |
+| `KINDLE_PAGE_W` | build flag | rescales every size in the stylesheet |
 | `KINDLE_LANG_BG` | build flag | a single-language build pays nothing for the other |
 | provider, key, lat/lon, outlook, interval | **the collector's web UI** | Settings → Modules → Weather forecast |
 
@@ -64,6 +128,28 @@ other reader with the same 6" panel: 1072×1448 at 300 ppi.
 > Paperwhite 3. That was wrong; it is the 10th generation. Nothing in the
 > layout depended on it — both readers have the same panel — but the browser
 > claim below did.
+
+### It also suits a basic Kindle, by coincidence
+
+**Kindle (7th generation, 2014)** — the entry-level model, 6" at **800×600 and
+167 ppi**, 16 grey levels, infrared touch, Pearl e-paper, **no front light**.
+
+Its panel *is* 600×800 at `devicePixelRatio` 1, so the default
+`KINDLE_PAGE_W=600` maps one CSS pixel to one device pixel with no browser
+scaling at all — the hairline softening the width knob exists to avoid does not
+arise there.
+
+And the two targets come out the same physical size. A Paperwhite spreads 600
+CSS px across 1072 device px at 300 ppi, which is 0.151 mm per CSS px; the
+Kindle 7 maps them 1:1 at 167 ppi, which is 0.152 mm. The page occupies the same
+area of glass on both.
+
+Two things are worse on it, though: Pearl e-paper ghosts more than Carta, so
+`/kindle/clear` earns its keep; and with no front light a shelf dashboard needs
+room light to be read at all.
+
+Its firmware also predates 5.16.4, so the browser really is the old WebKit —
+there the zero-JavaScript rule below is a requirement rather than a choice.
 
 ### Choosing the layout width
 
@@ -110,7 +196,7 @@ Load it on the reader and read the numbers off:
 
 Below 320 or above 2400 the build fails rather than rendering something that
 was never measured. All three values above are checked at the device's viewport
-before release: 792 of 810 at 600, 703 of 724 at 536, 1410 of 1448 at 1072, and
+before release: 796 of 810 at 600, 709 of 724 at 536, 1416 of 1448 at 1072, and
 no horizontal overflow at any of them.
 
 An earlier attempt at this got the chart wrong — the SVG kept its 600-px size
@@ -134,7 +220,7 @@ version. So the page:
 - lays out with tables and blocks, because those work on both;
 - draws the trend chart as **inline SVG path data** — no canvas, no charting
   library, nothing to execute;
-- refreshes with `<meta http-equiv="refresh">`, not a timer.
+- refreshes with `<meta http-equiv="refresh">`, not a script.
 
 None of that is a sacrifice on this medium. A panel that repaints in full or
 not at all has no use for a script that updates part of itself.
@@ -215,12 +301,135 @@ The two chart lines are still told apart by **dash pattern as well as** shade,
 because redundant coding costs nothing and survives a panel with its contrast
 turned down.
 
-### Refresh cadence
+## When the panel repaints
 
-Every page load repaints the whole panel — it flashes, and it costs battery.
-There is no partial update available to a web page. `KINDLE_REFRESH_SEC`
-defaults to 300, which is current enough for a device on a shelf without
-strobing. Below about 60 s the reader spends more time flashing than showing.
+Three ways, and one of them is not what it sounds like.
+
+```ini
+-DKINDLE_REFRESH_SEC=300       ; ceiling, and the fixed interval when following is off
+-DKINDLE_REFRESH_MIN_SEC=60    ; floor: never repaint more often than this
+-DKINDLE_DATA_PERIOD_SEC=60    ; how often readings are expected
+-DKINDLE_FOLLOW_DATA=1         ; 0 for the old fixed interval
+-DKINDLE_CLOCK_PIN_REFRESH=1   ; 0 lets the clock go stale between reloads
+-DKINDLE_CLOCK_SYNC_GUARD_SEC=20 ; never reload sooner than this after rendering
+```
+
+### 1. The reader asks
+
+A **refresh** button in the footer. A link, not a script, so a five-way pad
+reaches it as readily as a fingertip.
+
+It measures **72×26 CSS px**, which is about **11×4 mm** on any of the readers
+this page targets — a 300 ppi Paperwhite scaling 600 CSS px across 1072 device
+px and a 167 ppi Kindle 7 mapping them 1:1 both come to 0.15 mm per CSS px.
+
+> An earlier version of this page claimed "128×46 device px, and 44 px is the
+> smallest thing worth aiming at". That was wrong twice over: the 44 in the
+> usual guidance is CSS px on a phone — roughly **9 mm** — and 4 mm is under
+> half of it. The button is reachable with an infrared touch panel but it is not
+> generous. The page has no spare height at 796 of 800 to grow it without taking
+> the difference from the chart, which is a trade worth making deliberately
+> rather than by accident.
+
+> **Route order is load-bearing.** `AsyncCallbackWebHandler::canHandle` matches
+> a URL that *starts with* its uri plus `/`, and the first registered handler
+> that matches wins. `/kindle` registered before `/kindle/probe` and
+> `/kindle/clear` swallowed both, and the sub-pages silently rendered the
+> dashboard instead. The children are registered first.
+
+### 2. The reader asks for a clean panel
+
+E-ink keeps a ghost of what it drew before. A page of white and hairlines never
+asks the controller for a full waveform, so a heavier layout can sit faintly
+underneath for hours. **clear** walks `/kindle/clear` through four full-screen
+frames, alternating black and white, and returns to the dashboard. That is what
+actually resets the pixels; nothing an ordinary page draws will.
+
+The step number comes in a query string, so it is reader-supplied and clamped —
+otherwise a stray link could build a chain that never comes back.
+
+### 3. The page reloads itself — a timer, not a push
+
+**The collector cannot make the reader repaint.** A browser redraws when it
+loads a page, and it loads one only when it asks. Server-sent events or a socket
+would need JavaScript the older firmware does not have, and holding a request
+open on AsyncTCP until data arrives risks the one thing a device on a shelf must
+not do.
+
+So `KINDLE_FOLLOW_DATA` **predicts** instead. The page knows when the newest
+reading landed and how often readings are expected, and aims its own reload just
+after the next one is due:
+
+| Age of the newest reading | Reload in |
+|---|---|
+| less than one period | just after the next is due (+4 s), clamped to the floor |
+| one to two periods | the floor — late, but one missed post is ordinary |
+| over two periods | the ceiling — the source looks down, and flashing will not fix it |
+| no reading, or clock behind it | the ceiling |
+
+That is the shape of the data path on its own. Read the next section before
+relying on it: with the clock on the page it is not the binding constraint at
+the default settings, and the panel follows the minute rather than the reading.
+
+### …and the clock, which is usually the louder demand
+
+The clock is rendered server-side. It is correct at the moment it is painted
+and stale from then on, so **a clock showing minutes is a standing demand for a
+repaint every minute** whatever the data is doing.
+
+`KINDLE_CLOCK_PIN_REFRESH=1` (default) aims the reload at the next **minute
+boundary**, and that is not cosmetic. A page that reloads at :58 of each minute
+displays the previous minute for 58 seconds out of every 60 — a clock that is
+wrong most of the time. Landing on :00 makes the displayed minute change when
+the minute changes.
+
+It is deliberately **not** a plain `min()` of the two demands, and getting that
+wrong produced two bugs at opposite ends of the same minute:
+
+- at **:58** the boundary is 2 s away, the sync guard pushes the clock's request
+  past it, and a data path floored at 60 undercut it by two seconds — locking
+  the page permanently to the :58 offset;
+- requiring the data to be five seconds earlier fixed that end and broke the
+  other: from **:41 to :54** the guard pushes the clock to 79…66 s, the data's
+  60 clears the margin, and the alignment is stolen again.
+
+So the test is not *&#34;is the data earlier&#34;* but *&#34;does the data genuinely need a
+faster cadence than one repaint a minute&#34;*. Anything asking for 60 s or more
+wants what the clock wants, and the clock's version lands on the boundary.
+
+`tests/host/test_refresh_cadence.cpp` checks this exhaustively — from every one
+of the 60 seconds in a minute, the next reload lands on a boundary — and runs in
+CI under all three sanitiser modes. The second bug above was found by that test,
+not by reading the code.
+
+`KINDLE_CLOCK_SYNC_GUARD_SEC` (20 s) is what stops a nearly-arrived boundary
+turning into a second flash moments after the page loaded; below it, the
+following boundary is taken instead. It is separate from
+`KINDLE_REFRESH_MIN_SEC`, which floors the **data** path only — the clock cannot
+honour a 60 s floor *and* align from a cold load, so the first reload after a
+fresh load may come in 20–79 s before the cadence settles.
+
+**An unsynced device does not pin.** The page prints &#34;clock not set&#34; rather than
+a time, so there is no clock to keep honest; pinning there would defeat the
+backoff entirely and repaint every minute forever waiting on a node that is not
+coming back.
+
+**At the default settings the clock always wins.** The data floor is 60 s and
+the clock never asks for more than 60, so `KINDLE_FOLLOW_DATA` changes nothing
+unless pinning is off, or `KINDLE_REFRESH_MIN_SEC` drops below a minute with a
+node posting faster than that. Said out loud because it would otherwise look
+like the data logic is doing work it is not.
+
+### The cost, plainly
+
+Every reload repaints the whole panel: it flashes, and it draws battery. With
+the clock pinned that is **about 1440 page loads a day** — a reader on a
+charger, not one running a fortnight on its battery.
+
+`KINDLE_CLOCK_PIN_REFRESH=0` lets the clock go stale by up to
+`KINDLE_REFRESH_SEC` between reloads. For a 96 px clock read across a room that
+is a confident lie, so prefer lowering `KINDLE_REFRESH_SEC` to something the
+clock can live with over turning the pinning off.
 
 ## The 24-hour trend needs its own storage
 

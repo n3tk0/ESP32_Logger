@@ -1,5 +1,7 @@
 #include "BME280Sensor.h"
 #include "../I2CBus.h"
+#include "../ReadingCache.h"             // ambient temperature reference
+#include "../../utils/Psychrometrics.h"  // dew point / RH re-expression
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
 
@@ -39,11 +41,55 @@ bool BME280Sensor::init(JsonObjectConst cfg) {
     _calHumidity.load(cal, "humidity");
     _calPressure.load(cal, "pressure");
 
-    Serial.printf("[%s] ready at 0x%02X  cal_T(%.2f+%.2fx) cal_P(%.2f+%.2fx)\n",
+    const char* ambSensor = cfg["ambient_temp_sensor"] | "";
+    strlcpy(_ambientSensor, ambSensor, sizeof(_ambientSensor));
+    const char* ambMetric = cfg["ambient_temp_metric"] | "temperature";
+    strlcpy(_ambientMetric, ambMetric, sizeof(_ambientMetric));
+    _ambientMaxAgeMs = cfg["ambient_max_age_ms"] | 60000;
+
+    Serial.printf("[%s] ready at 0x%02X  cal_T(%.2f+%.2fx) cal_P(%.2f+%.2fx) ambient_ref=%s\n",
                   getType(), _addr,
                   _calTemp.offset, _calTemp.scale,
-                  _calPressure.offset, _calPressure.scale);
+                  _calPressure.offset, _calPressure.scale,
+                  _ambientSensor[0] ? _ambientSensor : "(self)");
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Air temperature to express the humidity against. Falls back to `fallbackC`
+// (this sensor's own calibrated temperature) whenever the configured reference
+// is missing, stale or implausible — a frozen last-known value would be worse
+// than an admittedly self-heated one, because it looks equally healthy.
+//
+// Lifted from BME688Sensor with the sensor name changed. The duplication is
+// deliberate: folding it into a shared helper would put a ReadingCache lookup
+// and a warning-latch in ISensor for the benefit of two plugins, and the next
+// sensor that wants it will want a different fallback.
+float BME280Sensor::_ambientTempC(float fallbackC) const {
+    if (_ambientSensor[0] == '\0') return fallbackC;
+
+    float    refC  = 0.0f;
+    uint32_t ageMs = 0;
+    if (!readingCache.get(_ambientSensor, _ambientMetric, refC, ageMs)) {
+        if (!_ambientWarned) {
+            Serial.printf("[%s] ambient ref '%s/%s' not seen yet — using own temperature\n",
+                          getType(), _ambientSensor, _ambientMetric);
+            _ambientWarned = true;
+        }
+        return fallbackC;
+    }
+    if (ageMs > _ambientMaxAgeMs) {
+        if (!_ambientWarned) {
+            Serial.printf("[%s] ambient ref '%s/%s' stale (%lums) — using own temperature\n",
+                          getType(), _ambientSensor, _ambientMetric, (unsigned long)ageMs);
+            _ambientWarned = true;
+        }
+        return fallbackC;
+    }
+    if (!Psychro::isValidTemp(refC)) return fallbackC;
+
+    _ambientWarned = false;   // arm the next warning
+    return refC;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +105,8 @@ bool BME280Sensor::read(SensorReading& out) {
 int BME280Sensor::readAll(SensorReading* out, int maxOut) {
     if (!_ready) return 0;
 
-    float t = _calTemp.apply(_bme.readTemperature());
+    const float tDie = _bme.readTemperature();       // uncalibrated, self-heated
+    float t = _calTemp.apply(tDie);
     float p = _calPressure.apply(_bme.readPressure() / 100.0f);
 
     if (isnan(t) || isnan(p)) return 0;
@@ -75,10 +122,31 @@ int BME280Sensor::readAll(SensorReading* out, int maxOut) {
     float h = _calHumidity.apply(_bme.readHumidity());
     if (isnan(h)) return 0;
 
-    out[0] = _makeReading(0, "temperature", t, "C");
-    out[1] = _makeReading(0, "humidity",    h, "%");
-    out[2] = _makeReading(0, "pressure",    p, "hPa");
-    return 3;
+    // Dew point pairs the RH with the temperature it was measured AT — the raw
+    // die temperature, not the calibrated one. Pairing it with a corrected
+    // temperature would bake the self-heating error into the dew point, which
+    // is the one figure that is supposed to be free of it.
+    const float dew  = Psychro::dewPointC(tDie, h);
+
+    // Only compute — and only publish — the corrected humidity when something
+    // is actually correcting. Unconfigured, _ambientTempC(t) returns tDie and
+    // rhAtTempC(dewPointC(tDie, h), tDie) is h by construction, so the metric
+    // would be a duplicate of "humidity" paid for in ring-buffer bytes.
+    const bool  corrected = _correctionConfigured();
+    const float hAmb = (corrected && isfinite(dew))
+                           ? Psychro::rhAtTempC(dew, _ambientTempC(t)) : NAN;
+
+    int n = 0;
+    out[n++] = _makeReading(0, "temperature", t, "C");
+    out[n++] = _makeReading(0, "humidity",    h, "%");
+    out[n++] = _makeReading(0, "pressure",    p, "hPa");
+    // Dew point stays unconditional: it is an ambient property in its own
+    // right, not a restatement of the humidity. Both are dropped rather than
+    // emitted as NaN when the inputs are out of range — a NaN would land in
+    // storage as a permanent null.
+    if (isfinite(dew)  && n < maxOut) out[n++] = _makeReading(0, "dew_point",    dew,  "C");
+    if (isfinite(hAmb) && n < maxOut) out[n++] = _makeReading(0, "humidity_amb", hAmb, "%");
+    return n;
 }
 
 // ---------------------------------------------------------------------------

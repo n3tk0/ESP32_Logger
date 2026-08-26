@@ -66,12 +66,22 @@
 //                      NOTE: heuristic, not a Bosch-BSEC gas classification — it
 //                      indicates overall air quality, not the specific gas type.
 //   "dew_point"        °C   — true ambient dew point; invariant under heating
-//   "humidity_ambient" %    — RH implied by that dew point at the ambient
+//   "humidity_amb"     %    — RH implied by that dew point at the ambient
 //                             reference temperature. This is the figure to
 //                             export to weather feeds.
 //
+// "humidity_amb" is emitted ONLY when a correction is actually configured —
+// an "ambient_temp_sensor", or a temperature calibration that moves the
+// number. With neither, the ambient reference IS the die temperature, the
+// dew-point round trip returns exactly what went in, and the metric would be
+// a bit-for-bit copy of "humidity" costing a ReadingCache slot, a CSV column
+// and a slice of the web ring buffer's fixed byte budget.
+//
 // The last two are omitted from a sample when the inputs are out of range
 // (e.g. a dead humidity element), rather than emitted as NaN.
+//
+// Metric names must fit SensorReading::metric (char[16] → 15 usable chars);
+// tools/check_metric_names.py fails the build on a name that would truncate.
 // ============================================================================
 class BME688Sensor : public ISensor {
 public:
@@ -89,8 +99,11 @@ public:
     bool        isBlocking() const override { return true; }  // performReading() blocks up to 1 s
     int getMetrics(const char** out, int maxOut) const override {
         static const char* m[] = { "temperature", "humidity", "pressure", "gas_resistance",
-                                   "iaq", "dew_point", "humidity_ambient" };
-        int n = 7; if (n > maxOut) n = maxOut;
+                                   "iaq", "dew_point", "humidity_amb" };
+        // Mirrors readAll(): the last entry only exists when a correction is
+        // configured. Advertising a metric that never arrives would leave a
+        // permanently empty MQTT discovery entity and an empty CSV column.
+        int n = _correctionConfigured() ? 7 : 6; if (n > maxOut) n = maxOut;
         for (int i = 0; i < n; i++) out[i] = m[i];
         return n;
     }
@@ -109,6 +122,15 @@ private:
     // Resolves the air temperature to express humidity against: the configured
     // reference sensor when it has a fresh reading, otherwise `fallbackC`.
     float _ambientTempC(float fallbackC) const;
+
+    // Whether the self-heating correction can move the number at all. With no
+    // reference sensor and an identity temperature calibration, the ambient
+    // reference is the die temperature the RH was measured at, so the
+    // dew-point round trip is the identity and humidity_amb == humidity.
+    bool _correctionConfigured() const {
+        return _ambientSensor[0] != '\0' ||
+               _calTemp.offset != 0.0f || _calTemp.scale != 1.0f;
+    }
 
     const char*  _type;                  // "bme688" or "bme680"
     BME688_Mini  _bme;

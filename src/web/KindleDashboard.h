@@ -125,10 +125,53 @@ class AsyncWebServer;
 #  define KINDLE_INDOOR_SENSOR  "indoor"
 #endif
 
-// Seconds between automatic page reloads.
-#ifndef KINDLE_REFRESH_SEC
-#  define KINDLE_REFRESH_SEC 300
-#endif
+// ---------------------------------------------------------------------------
+// When the panel repaints
+// ---------------------------------------------------------------------------
+// There are three ways this page gets redrawn, and it is worth being precise
+// about which is which, because one of them is not what it sounds like.
+//
+// 1. The reader asks. A tap or a click on "refresh" in the footer. Works on a
+//    touch reader and on a five-way pad alike, because it is a link.
+//
+// 2. The reader asks for a clean panel. "clear" walks /kindle/clear through a
+//    few full-screen black and white frames and comes back. E-ink retains a
+//    ghost of what it drew before; driving the whole panel to both extremes is
+//    what clears it, and nothing a normal page draws does that.
+//
+// 3. The page reloads itself. This is a timer, not a push.
+//
+// THERE IS NO PUSH, AND WHY
+// -------------------------
+// The collector cannot make the reader repaint. A browser redraws when it
+// loads a page, and it only loads a page when it asks for one. Server-sent
+// events or a socket would need JavaScript the older firmware does not have,
+// and holding a request open on AsyncTCP until data arrives risks the one
+// thing this device must not do unattended.
+//
+// So KINDLE_FOLLOW_DATA predicts instead. The page knows when the newest
+// reading landed and roughly how often readings come, so it sets its own
+// reload to fire just after the next one is due. The panel then updates within
+// a few seconds of new data without anything being pushed to it.
+//
+// THE COST, STATED PLAINLY
+// ------------------------
+// Every reload repaints the whole panel: it flashes, and it costs battery.
+// Following a node that posts once a minute means flashing once a minute
+// rather than once every five, which is a real trade and not a free win.
+// KINDLE_REFRESH_MIN_SEC is the floor that keeps it from becoming a strobe.
+// Set KINDLE_FOLLOW_DATA to 0 for the old fixed-interval behaviour.
+
+// The knobs themselves live in RefreshCadence.h, next to the function that
+// reads them, so a host test can set them without dragging in setup.h:
+//
+//   KINDLE_REFRESH_SEC        ceiling, and the fixed interval when following is off
+//   KINDLE_REFRESH_MIN_SEC    floor on the DATA path (not on the clock; see below)
+//   KINDLE_DATA_PERIOD_SEC    how often readings are expected
+//   KINDLE_FOLLOW_DATA        1 = predict the next reading; 0 = fixed interval
+//   KINDLE_CLOCK_PIN_REFRESH  1 = keep the clock honest; 0 = let it go stale
+//   KINDLE_CLOCK_SYNC_GUARD_SEC  never reload sooner than this after rendering
+#include "RefreshCadence.h"
 
 /// Registers the trend series this page draws. Call once from setup(),
 /// before ProcessingTask starts, so no readings are missed.

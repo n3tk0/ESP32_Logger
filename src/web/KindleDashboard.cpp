@@ -11,6 +11,7 @@
 #include "../utils/MutexGuard.h"
 #include "../core/Globals.h"
 #include "DashboardStrings.h"
+#include "RefreshCadence.h"
 
 #ifdef MODULE_FORECAST_ENABLED
 #  include "../modules/ForecastModule.h"
@@ -41,6 +42,24 @@ static Latest latestOf(const char* sensorId, const char* metric) {
         out.ok    = true;
     }
     return out;
+}
+
+// The humidity to show, preferring the self-heating-corrected figure.
+//
+// A BME280 or BME688 on a board that runs WiFi reads warm, and relative
+// humidity is relative TO a temperature — so a warm sensor reports a room
+// drier than it is. Both plugins publish "humidity_amb": the same air
+// re-expressed at the true ambient temperature, by way of a dew point that is
+// invariant under heating the sensor.
+//
+// Falling back to the raw figure rather than showing nothing: a sensor with no
+// correction configured publishes no corrected figure at all (it would be a
+// copy of the raw one), and one whose derived pair was dropped as out of range
+// still has a humidity worth printing.
+static Latest humidityOf(const char* sensorId) {
+    Latest corrected = latestOf(sensorId, "humidity_amb");
+    if (corrected.ok) return corrected;
+    return latestOf(sensorId, "humidity");
 }
 
 // ---------------------------------------------------------------------------
@@ -353,10 +372,10 @@ static void appendWeek(String& out, uint32_t now) {
 // why that trade is made in favour of the old browser.
 static void handleKindle(AsyncWebServerRequest* req) {
     const Latest outT = latestOf(KINDLE_OUTDOOR_SENSOR, "temperature");
-    const Latest outH = latestOf(KINDLE_OUTDOOR_SENSOR, "humidity");
+    const Latest outH = humidityOf(KINDLE_OUTDOOR_SENSOR);
     const Latest outP = latestOf(KINDLE_OUTDOOR_SENSOR, "pressure");
     const Latest inT  = latestOf(KINDLE_INDOOR_SENSOR,  "temperature");
-    const Latest inH  = latestOf(KINDLE_INDOOR_SENSOR,  "humidity");
+    const Latest inH  = humidityOf(KINDLE_INDOOR_SENSOR);
 
     const uint32_t now = (uint32_t)time(nullptr);
 
@@ -375,7 +394,13 @@ static void handleKindle(AsyncWebServerRequest* req) {
            "<meta name=\"viewport\" content=\"width=");
     p += PAGE_W;
     p += F("\"><meta http-equiv=\"refresh\" content=\"");
-    p += KINDLE_REFRESH_SEC;
+    // Newest of the two sensors: the page is current if either one is, and
+    // waiting on the slower of the pair would show a stale outdoor reading.
+    // The clock only makes its once-a-minute demand when it is actually drawn
+    // — an unsynced device prints "clock not set" and has nothing to keep
+    // fresh, so it must be allowed to back off like any other stale source.
+    p += kdRefreshDelaySec(outT.ts > inT.ts ? outT.ts : inT.ts, now,
+                           now > KINDLE_MIN_REAL_TS);
     p += F("\"><title>" KD_T("Weather", "Времето") "</title><style>");
 
     // The stylesheet, emitted rather than stored as one literal: every number
@@ -507,7 +532,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // the fold. Measured, not guessed.
     KD_S(".rule{border-top:");                 KD_N(1);
     KD_S("px solid #aaa;margin:");             KD_N(14);
-    KD_S("px 0 ");                             KD_N(10);
+    KD_S("px 0 ");                             KD_N(9);
     KD_S("px}");
     KD_S(".sec{font-size:");                   KD_N(12);
     KD_S("px;letter-spacing:");                KD_N(4);
@@ -584,10 +609,32 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S(".wd-now{background:#000;color:#fff}");
 
     KD_S(".foot{border-top:");                 KD_N(1);
-    KD_S("px solid #aaa;margin-top:");         KD_N(11);
-    KD_S("px;padding-top:");                   KD_N(5);
+    KD_S("px solid #aaa;margin-top:");         KD_N(7);
     KD_S("px;font-size:");                     KD_N(12);
     KD_S("px;color:#555;letter-spacing:.5px}");
+    KD_S(".foot td{padding-top:");             KD_N(5);
+    KD_S("px}");
+
+    // Boxed rather than underlined so the target is visible before it is
+    // touched, which on a panel with no hover state is the only chance.
+    //
+    // SIZE, HONESTLY: this comes to 72x26 CSS px, which is about 11x4 mm on
+    // any of the readers this page targets — a 300 ppi Paperwhite scaling 600
+    // CSS px across 1072 device px and a 167 ppi Kindle 7 mapping them 1:1
+    // work out to the same 0.15 mm per CSS px. An earlier version of this
+    // comment cited "44 device px" as the guideline met; that was wrong twice
+    // over. The 44 in the usual guidance is CSS px on a phone, roughly 9 mm,
+    // and 4 mm is under half of it. It is reachable with an infrared touch
+    // panel but it is not generous, and the page has no spare height at 796 of
+    // 800 to grow it without taking the difference from the chart.
+    KD_S(".act{text-align:right;white-space:nowrap}");
+    KD_S(".act a{display:inline-block;border:");  KD_N(1);
+    KD_S("px solid #777;color:#000;text-decoration:none;padding:"); KD_N(4);
+    KD_S("px ");                                  KD_N(12);
+    KD_S("px;margin-left:");                      KD_N(8);
+    KD_S("px;font-size:");                        KD_N(13);
+    KD_S("px;letter-spacing:");                   KD_N(1);
+    KD_S("px;background:#f4f4f4}");
 
     #undef KD_S
     #undef KD_N
@@ -715,10 +762,16 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     appendWeek(p, now);
 
-    p += F(KD_T("<div class=\"foot\">Measured on site &middot; refreshes every ",
-                "<div class=\"foot\">Измерено на място &middot; обновява се на "));
-    p += (KINDLE_REFRESH_SEC / 60);
-    p += F(KD_T(" minutes</div></body></html>", " минути</div></body></html>"));
+    // The footer carries the two manual repaints. Links rather than anything
+    // scripted, so a five-way pad reaches them as readily as a fingertip. See
+    // the .act rule for what the padding actually buys, and for why the size
+    // is smaller than the usual touch guidance rather than meeting it.
+    p += F("<table class=\"foot\"><tr><td>"
+           KD_T("Measured on site", "Измерено на място"));
+    p += F("</td><td class=\"act\"><a href=\"/kindle\">"
+           KD_T("refresh", "обнови") "</a>"
+           "<a href=\"/kindle/clear\">" KD_T("clear", "изчисти") "</a>"
+           "</td></tr></table></body></html>");
 
     AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
     // The meta tag drives the refresh, so nothing may be served from cache: an
@@ -808,9 +861,62 @@ static void handleKindleProbe(AsyncWebServerRequest* req) {
     req->send(res);
 }
 
+// ---------------------------------------------------------------------------
+// GET /kindle/clear — drive the panel to both extremes, then come back
+// ---------------------------------------------------------------------------
+// E-ink keeps a ghost of what it drew before. A page of mostly-white text and
+// hairlines never asks the controller for a full waveform, so the ghost of a
+// heavier layout can sit under it for hours. What clears it is driving every
+// pixel to black and to white a few times, which is what the reader's own
+// "refresh" does and what no ordinary page can ask for.
+//
+// So this is a chain of full-screen frames, alternating, each meta-refreshing
+// to the next and the last one back to the dashboard. Four frames: fewer
+// leaves a faint ghost of the heaviest block, more is time spent staring at a
+// flashing screen for no further gain.
+//
+// The step is clamped rather than trusted. It arrives in a query string, so it
+// is reader-supplied, and an unbounded value would let a stray link build a
+// chain that never returns to the dashboard.
+static void handleKindleClear(AsyncWebServerRequest* req) {
+    static const int FRAMES = 4;
+
+    int step = 1;
+    if (req->hasParam("s")) {
+        step = req->getParam("s")->value().toInt();
+        if (step < 1)       step = 1;
+        if (step > FRAMES)  step = FRAMES;
+    }
+
+    const bool black = (step % 2) == 1;
+
+    String p;
+    p.reserve(500);
+    p += F("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+           "<meta name=\"viewport\" content=\"width=");
+    p += PAGE_W;
+    p += F("\"><meta http-equiv=\"refresh\" content=\"1;url=/kindle");
+    if (step < FRAMES) { p += F("/clear?s="); p += (step + 1); }
+    p += F("\"><title>...</title><style>html,body{margin:0;padding:0;height:100%;"
+           "background:");
+    p += black ? F("#000") : F("#fff");
+    p += F("}</style></head><body></body></html>");
+
+    AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
+    res->addHeader("Cache-Control", "no-store");
+    req->send(res);
+}
+
+// ORDER IS LOAD-BEARING. AsyncCallbackWebHandler::canHandle matches when the
+// request URL equals its uri OR starts with uri + "/", and _attachHandler
+// takes the first handler that matches, in registration order. So "/kindle"
+// registered first swallows "/kindle/probe" and "/kindle/clear": both were
+// silently unreachable, and the pages simply rendered the dashboard instead.
+// The children go first.
 void registerKindleDashboard(AsyncWebServer& server) {
-    server.on("/kindle", HTTP_GET, handleKindle);
     server.on("/kindle/probe", HTTP_GET, handleKindleProbe);
+    server.on("/kindle/clear", HTTP_GET, handleKindleClear);
+    server.on("/kindle",       HTTP_GET, handleKindle);
 }
 
 #endif  // FEATURE_KINDLE_DASHBOARD

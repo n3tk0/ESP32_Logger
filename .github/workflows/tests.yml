@@ -17,6 +17,7 @@ on:
       - '.github/workflows/tests.yml'
       - 'docs/ARCHITECTURE.md'
       - 'tools/check_api_docs.py'
+      - 'tools/check_metric_names.py'
   pull_request:
     paths:
       - 'src/**'
@@ -24,6 +25,7 @@ on:
       - '.github/workflows/tests.yml'
       - 'docs/ARCHITECTURE.md'
       - 'tools/check_api_docs.py'
+      - 'tools/check_metric_names.py'
   workflow_dispatch:
 
 jobs:
@@ -132,3 +134,26 @@ jobs:
         # Fails if a route registered via server.on(...) in src/web/ has no row
         # in the API reference table (the table had drifted to ~10% coverage).
         run: python3 tools/check_api_docs.py
+
+      - name: Verify no metric/unit name is silently truncated
+        # SensorReading::make() strncpy's into fixed char arrays, so an
+        # over-long name is stored short with no error and every later strcmp()
+        # against the full name misses. "humidity_ambient" (16 chars into
+        # char[16]) shipped broken this way; this stops the next one.
+        run: python3 tools/check_metric_names.py
+
+      - name: Verify the truncation guard actually fails on a bad name
+        # A guard that cannot fail is not a guard. Plant an over-long metric
+        # name in the checkout, assert a non-zero exit, then restore the file.
+        run: |
+          set -e
+          f=src/sensors/plugins/BME280Sensor.cpp
+          cp "$f" "$f.orig"
+          sed -i 's/"dew_point"/"dew_point_ambient"/' "$f"
+          if python3 tools/check_metric_names.py; then
+            mv "$f.orig" "$f"
+            echo "::error::check_metric_names.py passed an over-long metric name"
+            exit 1
+          fi
+          mv "$f.orig" "$f"
+          echo "guard fires as expected"

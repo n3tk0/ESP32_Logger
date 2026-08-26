@@ -197,7 +197,7 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
     uint32_t ms = millis();
 
     // Up to 8 metrics per sensor per tick.  The fattest producer is BME68x at
-    // 7 (T/H/P/gas/IAQ + dew_point + humidity_ambient); SPS30 emits 5
+    // 7 (T/H/P/gas/IAQ + dew_point + humidity_amb); SPS30 emits 5
     // (4 × PM + device_status).  Keep this >= the largest getMetrics() count
     // of any registered plugin — readAll() silently truncates otherwise.
     SensorReading readings[8];
