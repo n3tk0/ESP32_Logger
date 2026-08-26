@@ -159,12 +159,13 @@ Toggled via `#ifdef EXPORT_*_ENABLED` in `src/setup.h`. All five are enabled by 
 The 4 MB C3 targets get a **1472 KB app partition** (×2, OTA-capable). A
 minimal build — BME280 + SDS011, five exporters, no optional features — sits
 around **1345 KB**, so the headroom is real but not generous. Two toggles
-exist specifically to buy it back, both measured on `xiao_esp32c3`:
+exist specifically to buy it back, both measured on `xiao_esp32c3` as app
+flash — the figure PlatformIO checks against the partition:
 
 | | flash |
 |---|---|
-| `FEATURE_SD_STORAGE` off (`src/setup.h`) | **−36 KB** — drops `<SD.h>`, the FatFs library and the SD driver (37,088 bytes, two builds) |
-| failsafe recovery page, stored gzipped | **−18 KB** — already on; 27,622 B of PROGMEM text became 8,239 B of gzip plus a 1,035 B plain fallback |
+| `FEATURE_SD_STORAGE` off (`src/setup.h`) | **−34 KB** — drops `<SD.h>`, the FatFs library and the SD driver (35,002 bytes, two builds) |
+| failsafe recovery page, stored gzipped | **−17 KB** — already on; 27,622 B of PROGMEM text became 8,239 B of gzip plus a 1,035 B plain fallback |
 
 The failsafe page is the recovery UI served when LittleFS has no `/www`. It
 stays **linked into the firmware**, because that is the state it exists for —
