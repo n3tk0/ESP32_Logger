@@ -18,6 +18,8 @@ on:
       - 'docs/ARCHITECTURE.md'
       - 'tools/check_api_docs.py'
       - 'tools/check_metric_names.py'
+      - 'scripts/gen_failsafe.py'
+      - 'src/web/failsafe.html'
       - 'tools/pio_envs.py'
       - 'tools/check_pio_envs.py'
       - 'platformio.ini'
@@ -30,6 +32,8 @@ on:
       - 'docs/ARCHITECTURE.md'
       - 'tools/check_api_docs.py'
       - 'tools/check_metric_names.py'
+      - 'scripts/gen_failsafe.py'
+      - 'src/web/failsafe.html'
       - 'tools/pio_envs.py'
       - 'tools/check_pio_envs.py'
       - 'platformio.ini'
@@ -149,6 +153,46 @@ jobs:
         # against the full name misses. "humidity_ambient" (16 chars into
         # char[16]) shipped broken this way; this stops the next one.
         run: python3 tools/check_metric_names.py
+
+      - name: Verify the committed failsafe header matches its HTML
+        # src/web/FailsafeHtml.h is generated from src/web/failsafe.html and
+        # COMMITTED, because the Arduino IDE build path runs no pre-scripts.
+        # A committed generated file is a file that can go stale, so the two
+        # are compared here rather than trusted.
+        run: python3 scripts/gen_failsafe.py --check
+
+      - name: Verify that check actually fails on a stale header
+        run: |
+          set -e
+          cp src/web/failsafe.html src/web/failsafe.html.orig
+          printf '<!-- ci probe -->' >> src/web/failsafe.html
+          if python3 scripts/gen_failsafe.py --check; then
+            mv src/web/failsafe.html.orig src/web/failsafe.html
+            echo "::error::gen_failsafe.py --check passed a stale header"
+            exit 1
+          fi
+          mv src/web/failsafe.html.orig src/web/failsafe.html
+          echo "failsafe drift guard fires as expected"
+
+      - name: Verify the gzipped page still inflates to the original
+        # The whole point of the failsafe page is that it works when nothing
+        # else does. Asserting the bytes that actually get linked round-trip
+        # to the source HTML is the check that matters; "it compiled" is not.
+        run: |
+          python3 - <<'EOF'
+          import re, gzip, pathlib, sys
+          h = pathlib.Path('src/web/FailsafeHtml.h').read_text()
+          body = h[h.index('FAILSAFE_HTML_GZ[] PROGMEM = {'):h.index('};')]
+          data = bytes(int(x, 16) for x in re.findall(r'0x([0-9a-f]{2}),', body))
+          original = pathlib.Path('src/web/failsafe.html').read_bytes()
+          got = gzip.decompress(data)
+          if got != original:
+              print(f'::error::linked bytes inflate to {len(got)} bytes, '
+                    f'source is {len(original)} — they differ')
+              sys.exit(1)
+          print(f'OK: {len(data):,} gzipped bytes inflate to '
+                f'{len(got):,} bytes, identical to failsafe.html')
+          EOF
 
       - name: Verify the deploy tools see every board in platformio.ini
         # tools/pio_envs.py is where the flash tools get their board list. An

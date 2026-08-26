@@ -2,7 +2,7 @@
 #include "../core/Globals.h"
 #include "../utils/Utils.h"
 #include <LittleFS.h>
-#include <SD.h>
+#include "../core/SdCompat.h"   // sdFs() — SD.h only when FEATURE_SD_STORAGE
 #include <SPI.h>
 
 bool initStorage() {
@@ -24,6 +24,7 @@ bool initStorage() {
     }
 
     if (config.hardware.storageType == STORAGE_SD_CARD) {
+#ifdef FEATURE_SD_STORAGE
         DBGLN("Init SD Card...");
         SPI.begin(config.hardware.pinSdSCK,  config.hardware.pinSdMISO,
                   config.hardware.pinSdMOSI, config.hardware.pinSdCS);
@@ -34,10 +35,18 @@ bool initStorage() {
             DBGLN("SD FAILED!");
             sdAvailable = false;
         }
+#else
+        // The config asks for a card but this firmware has no SD support.
+        // Say so once and fall through to LittleFS below, rather than
+        // leaving the user to wonder why storage silently went internal.
+        DBGLN("SD requested, but this build has FEATURE_SD_STORAGE off "
+              "- using LittleFS. See src/setup.h.");
+        sdAvailable = false;
+#endif
     }
 
     if (config.hardware.storageType == STORAGE_SD_CARD && sdAvailable) {
-        activeFS = &SD;
+        activeFS = sdFs();
         fsAvailable = true;
         currentStorageView = "sdcard";
     } else if (littleFsAvailable) {
@@ -54,7 +63,7 @@ bool initStorage() {
 }
 
 fs::FS* getCurrentViewFS() {
-    if (currentStorageView == "sdcard" && sdAvailable) return &SD;
+    if (currentStorageView == "sdcard" && sdAvailable) return sdFs();
     if (littleFsAvailable) return &LittleFS;
     return nullptr;
 }
@@ -77,8 +86,10 @@ void getStorageInfo(uint64_t& used, uint64_t& total, int& percent,
                 ? "sdcard" : "internal";
 
     if (sType == "sdcard" && sdAvailable) {
+#ifdef FEATURE_SD_STORAGE
         used  = SD.usedBytes();
         total = SD.cardSize();
+#endif
     } else if (sType == "internal" && littleFsAvailable) {
         used  = LittleFS.usedBytes();
         total = LittleFS.totalBytes();

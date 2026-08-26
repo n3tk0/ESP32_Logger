@@ -148,6 +148,25 @@ still needs an in-line thermal fuse.
 
 Toggled via `#ifdef EXPORT_*_ENABLED` in `src/setup.h`. All five are enabled by default.
 
+### Flash budget
+
+The 4 MB C3 targets get a **1472 KB app partition** (×2, OTA-capable). A
+minimal build — BME280 + SDS011, five exporters, no optional features — sits
+around **1345 KB**, so the headroom is real but not generous. Two toggles
+exist specifically to buy it back, both measured on `xiao_esp32c3`:
+
+| | flash |
+|---|---|
+| `FEATURE_SD_STORAGE` off (`src/setup.h`) | **−35 KB** — drops `<SD.h>` and the FatFs library under it |
+| failsafe recovery page, stored gzipped | **−19 KB** — already on; see below |
+
+The failsafe page is the recovery UI served when LittleFS has no `/www`. It
+stays **linked into the firmware**, because that is the state it exists for —
+it cannot live on the filesystem it repairs. It is simply stored compressed
+(8 KB instead of 27 KB) and inflated by the browser. Source of truth is
+`src/web/failsafe.html`; `scripts/gen_failsafe.py` turns it into the committed
+`src/web/FailsafeHtml.h`, and CI checks the two have not drifted.
+
 - **MQTT** (`EXPORT_MQTT_ENABLED`)
 - **Generic HTTP POST** (`EXPORT_HTTP_ENABLED`)
 - **sensor.community** (`EXPORT_SENSORCOMMUNITY_ENABLED`)

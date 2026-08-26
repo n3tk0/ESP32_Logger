@@ -12,7 +12,7 @@
 #endif
 #include <ArduinoJson.h>
 #include <LittleFS.h>
-#include <SD.h>
+#include "../core/SdCompat.h"   // sdFs() — SD.h only when FEATURE_SD_STORAGE
 
 // Static member definitions
 TaskHandle_t      TaskManager::hSensor     = nullptr;
@@ -215,9 +215,9 @@ bool TaskManager::init(fs::FS& fs) {
                 const char* stMode = doc2["storage"]["mode"] | "primary";
                 if (strcmp(stMode, "mirror") == 0 && sdAvailable && littleFsAvailable) {
                     // Primary is SD → mirror is LittleFS, or vice versa
-                    storageParam.mirrorFS = (&fs == &SD)
+                    storageParam.mirrorFS = (&fs == sdFs())
                                            ? static_cast<fs::FS*>(&LittleFS)
-                                           : static_cast<fs::FS*>(&SD);
+                                           : sdFs();
                     Serial.println("[TaskManager] Mirror write enabled (SD + LittleFS)");
                 }
             }

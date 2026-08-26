@@ -122,6 +122,21 @@
 //#  define MODULE_FORECAST_ENABLED
 //#endif
 
+// SD card storage.  ON by default, because turning it off changes what a
+// device with a card fitted can do.
+//
+// Comment the define out to drop `#include <SD.h>` and, with it, the FatFs
+// library the Arduino SD driver sits on.  MEASURED at ~21 KB of flash on the
+// C3 (libfatfs.a in the linker map) — spent whether or not a card is ever
+// fitted, on a partition a minimal build already fills to 93 %.
+//
+// With this off: sdFs() returns nullptr, sdAvailable is pinned false, the
+// "sdcard" storage view is refused, and everything falls back to LittleFS.
+// See src/core/SdCompat.h.
+#ifndef FEATURE_SD_STORAGE
+#  define FEATURE_SD_STORAGE
+#endif
+
 // Cloud / network exporters
 #ifndef EXPORT_MQTT_ENABLED
 #  define EXPORT_MQTT_ENABLED            // Internal MQTT driver
