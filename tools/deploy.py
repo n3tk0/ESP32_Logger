@@ -28,12 +28,16 @@ from deploy_core import (
     save_cfg,
     detect_port,
     detect_env,
+    _pinned_keys,
     STEP_NAMES,
     PRESETS,
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
-from pio_envs import chip_for, environments, env_names, env_info, usb_pins
+from pio_envs import (
+    chip_for, defaults_for, environments, env_names, env_info, ports_for,
+    usb_pins,
+)
 
 # ── Project layout ────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent
@@ -105,16 +109,34 @@ def _print_menu(cfg: dict[str, Any]) -> None:
         usb_state = _green(f"ON — {usb_pins(info.chip) or 'USB pins'} locked for serial")
     else:
         usb_state = _dim("not togglable for this env — see the parent env")
+    # Values the project already states get their provenance shown beside them,
+    # so it is obvious which numbers are the env's and which someone pinned.
+    d = defaults_for(info.name) if info.board else {}
+    pinned = _pinned_keys()
+
+    def _derived(key: str, val) -> str:
+        if not d:
+            return str(val)
+        if key in pinned:
+            return f"{val} {_yellow(f'(pinned; env says {d[key]})')}"
+        src = d["baud_src"] if key == "baud" else d["monitor_src"]
+        return f"{val} {_dim(f'(from {src})')}"
+
     for key, label, val in [
         ("e", "PlatformIO env ", env_disp),
         ("p", "Serial port    ", port_disp),
         ("i", "Device IP      ", cfg.get("device_ip", "")),
-        ("b", "Baud rate      ", str(cfg.get("baud", 921600))),
+        ("b", "Upload baud    ", _derived("baud", cfg.get("baud"))),
+        ("m", "Monitor baud   ", _derived("monitor_speed", cfg.get("monitor_speed"))),
         ("u", "HTTP upload    ", _UPLOAD_FILTER_LABELS.get(uf, uf)),
         ("w", "Wipe /www first", _green("YES — delete all before upload") if wipe else _dim("no")),
         ("U", "USB CDC on boot", usb_state),
     ]:
         print(f"  {_cyan(f'[{key}]')}  {label}: {_bold(val)}")
+    if d:
+        print(_dim(f"        partitions {d['partitions'] or 'platform default'}"
+                   f"   fs {d['filesystem'] or '-'}"
+                   f"   flash {d['flash_size'] or '?'}"))
     print()
 
     # Steps block
@@ -183,24 +205,59 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             elif v:
                 print(_red(f"  No [env:{v}] in platformio.ini — unchanged."))
                 time.sleep(1.2)
-            cfg["chip"] = chip_for(cfg["env"])
+            # Everything the new board states about itself comes with it. Only
+            # values the user pinned survive the switch; carrying the previous
+            # board's baud across silently is how you flash an S3 at a rate
+            # meant for something else.
+            d = defaults_for(cfg["env"])
+            cfg["chip"] = d["chip"]
+            for k in ("baud", "monitor_speed"):
+                if k not in _pinned_keys():
+                    cfg[k] = d[k]
+            cfg["usb_cdc_on_boot"] = d["usb_cdc_on_boot"] \
+                if d["usb_cdc_on_boot"] is not None else True
 
         elif ch == "p":
-            detected = _detect_port()
-            v = _prompt("Serial port (blank = auto-detect)", cfg.get("port") or detected)
-            cfg["port"] = v
+            # Ports are ranked by the board's own USB IDs, so the right one is
+            # first when a node and a collector are both plugged in.
+            ranked = ports_for(cfg["env"])
+            print()
+            if ranked:
+                for i, (dev, desc, match) in enumerate(ranked, 1):
+                    tag = _green(" ← matches this board") if match else ""
+                    print(f"  {_cyan(f'[{i}]')}  {dev:<18} {_dim(desc)}{tag}")
+            else:
+                print(_dim("  No USB serial ports found (or pyserial is not installed)."))
+            v = _prompt("Port (number, a path, or blank for auto-detect)", "").strip()
+            if v.isdigit() and 1 <= int(v) <= len(ranked):
+                cfg["port"] = ranked[int(v) - 1][0]
+            else:
+                cfg["port"] = v          # "" means auto-detect on the next load
 
         elif ch == "i":
             v = _prompt("Device IP", cfg.get("device_ip", "192.168.4.1"))
             if v:
                 cfg["device_ip"] = v
 
-        elif ch == "b":
-            v = _prompt("Baud rate", str(cfg.get("baud", 921600)))
-            try:
-                cfg["baud"] = int(v)
-            except ValueError:
-                pass
+        elif ch in ("b", "m"):
+            key = "baud" if ch == "b" else "monitor_speed"
+            what = "Upload baud" if ch == "b" else "Monitor baud"
+            d = defaults_for(cfg["env"])
+            src = d["baud_src"] if ch == "b" else d["monitor_src"]
+            print()
+            print(_dim(f"  {d[key]} from {src}. "
+                       f"Blank returns to that; a number pins it here."))
+            v = _prompt(what, "").strip()
+            if not v:
+                cfg[key] = d[key]          # save_cfg writes null, i.e. "follow the env"
+                print(_dim(f"  → following the environment: {d[key]}"))
+            else:
+                try:
+                    cfg[key] = int(v)
+                    print(_dim(f"  → pinned to {cfg[key]}"))
+                except ValueError:
+                    print(_red("  Not a number — unchanged."))
+            time.sleep(0.8)
 
         elif ch == "u":
             cur = cfg.get("upload_filter", "all")

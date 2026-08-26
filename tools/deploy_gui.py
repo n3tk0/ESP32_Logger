@@ -51,7 +51,10 @@ from deploy_core import (
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
-from pio_envs import chip_for, env_info, environments, env_names, usb_pins
+from pio_envs import (
+    chip_for, defaults_for, env_info, environments, env_names, ports_for,
+    usb_pins,
+)
 
 # ── Theme configuration ─────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
@@ -318,12 +321,30 @@ class DeployerGUI:
         self.ip_entry.pack(fill="x", pady=(0, 10))
         self.ip_entry.bind("<FocusOut>", lambda _: self._save_setting("device_ip", self.ip_entry))
 
-        # Baud rate
-        ctk.CTkLabel(settings_frame, text="Baud Rate:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 2))
-        self.baud_entry = ctk.CTkEntry(settings_frame)
-        self.baud_entry.insert(0, str(self.cfg.get("baud", 921600)))
-        self.baud_entry.pack(fill="x", pady=(0, 10))
+        # Upload and monitor baud. Both are already stated per environment in
+        # platformio.ini, so these fields start from there and only need
+        # touching to override — leave one empty and it follows the env again.
+        ctk.CTkLabel(settings_frame, text="Upload Baud:",
+                     font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 2))
+        self.baud_entry = ctk.CTkEntry(settings_frame, placeholder_text="from platformio.ini")
+        self.baud_entry.insert(0, str(self.cfg.get("baud") or ""))
+        self.baud_entry.pack(fill="x", pady=(0, 2))
         self.baud_entry.bind("<FocusOut>", lambda _: self._save_setting("baud", self.baud_entry, int_val=True))
+
+        ctk.CTkLabel(settings_frame, text="Monitor Baud:",
+                     font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 2))
+        self.monitor_entry = ctk.CTkEntry(settings_frame, placeholder_text="from platformio.ini")
+        self.monitor_entry.insert(0, str(self.cfg.get("monitor_speed") or ""))
+        self.monitor_entry.pack(fill="x", pady=(0, 2))
+        self.monitor_entry.bind(
+            "<FocusOut>",
+            lambda _: self._save_setting("monitor_speed", self.monitor_entry, int_val=True))
+
+        # Where those numbers come from, refreshed with the environment.
+        self.baud_info_label = ctk.CTkLabel(
+            settings_frame, text="", font=("Helvetica", 8), text_color="gray",
+            wraplength=400, justify="left")
+        self.baud_info_label.pack(anchor="w", pady=(0, 10))
 
         # Upload filter
         ctk.CTkLabel(settings_frame, text="Upload Filter:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 2))
@@ -417,10 +438,17 @@ Log Colors:
         info_text.configure(state="disabled")
 
     def _on_env_change(self, name: str) -> None:
-        """Environment picked: persist it, re-derive the chip, refresh labels."""
+        """Environment picked: persist it, then re-derive everything it states.
+
+        A board switch has to carry the board's own settings with it — chip,
+        upload speed, monitor speed, USB CDC state. Keeping the previous
+        board's numbers is how you flash an S3 with a C3's bootloader.
+        Anything the user pinned survives, because save_cfg() only stores a
+        derived key when it differs from the env.
+        """
         self.cfg["env"] = name
-        self.cfg["chip"] = chip_for(name)
         save_cfg(self.cfg)
+        self.cfg = load_cfg()
         self._refresh_env_labels()
 
     def _refresh_env_labels(self) -> None:
@@ -448,18 +476,49 @@ Log Colors:
         check = getattr(self, "usb_cdc_check", None)
         if check is not None:
             check.configure(state="normal" if info.supports_usb_cdc else "disabled")
+        var = getattr(self, "usb_cdc_var", None)
+        if var is not None and info.usb_cdc_on_boot is not None:
+            var.set(info.usb_cdc_on_boot)   # the ini is the truth, not memory
+
+        # The two baud fields and the note under them.
+        d = defaults_for(info.name) if info.board else None
+        note = getattr(self, "baud_info_label", None)
+        if d and note is not None:
+            note.configure(
+                text=(f"Upload {d['baud']} from {d['baud_src']} · "
+                      f"monitor {d['monitor_speed']} from {d['monitor_src']}. "
+                      f"Leave a field empty to follow the environment."))
+        for attr, key in (("baud_entry", "baud"), ("monitor_entry", "monitor_speed")):
+            entry = getattr(self, attr, None)
+            if entry is None or d is None:
+                continue
+            entry.delete(0, "end")
+            # Show a pinned override; leave it blank when the env answers, so
+            # the placeholder says where the number is coming from.
+            if self.cfg.get(key) is not None and self.cfg.get(key) != d[key]:
+                entry.insert(0, str(self.cfg[key]))
 
     def _save_setting(self, key: str, widget=None, val=None, int_val: bool = False) -> None:
         """Save a setting to config (debounced on focus-out)."""
         if widget:
             val = widget.get()
-        if key == "baud" and val and int_val:
-            try:
-                val = int(val)
-            except ValueError:
-                return
+        if int_val:
+            # Empty means "follow platformio.ini": save_cfg() writes null and
+            # load_cfg() fills the env's value back in. Previously the int
+            # conversion was gated on key == "baud", so any other numeric field
+            # would have been stored as a string.
+            if val in ("", None):
+                val = None
+            else:
+                try:
+                    val = int(val)
+                except ValueError:
+                    return
         self.cfg[key] = val
         save_cfg(self.cfg)
+        if key in ("baud", "monitor_speed"):
+            self.cfg = load_cfg()          # re-derive if the field was cleared
+            self._refresh_env_labels()
 
     def _update_steps(self) -> None:
         """Update selected steps from checkboxes."""
@@ -507,21 +566,31 @@ Log Colors:
             )
             return
 
-        ports = [port.device for port in serial.tools.list_ports.comports()]
+        # Ranked by the selected board's own USB VID:PID, best match first.
+        # Listing every port the OS knows about — including a motherboard's
+        # COM1 — and letting the user guess is how firmware ends up on the
+        # ESP8266 node instead of the collector.
+        ranked = ports_for(self.cfg.get("env") or detect_env())
 
-        if not ports:
-            messagebox.showinfo("No Ports", "No serial ports detected.")
+        if not ranked:
+            messagebox.showinfo(
+                "No Ports",
+                "No USB serial ports detected.\n\n"
+                "Non-USB ports (COM1, /dev/ttyS0) are not listed: no board is "
+                "behind one.")
             return
 
-        # Create a simple selection dialog
-        port_str = "\n".join(ports)
-        if len(ports) == 1:
-            # Auto-select if only one port
-            selected = ports[0]
+        matches = [r for r in ranked if r[2]]
+        if len(matches) == 1:
+            selected = matches[0][0]
+        elif len(ranked) == 1:
+            selected = ranked[0][0]
         else:
-            # Show simple dialog with options
+            listing = "\n".join(
+                f"{'* ' if match else '  '}{dev}  —  {desc}"
+                for dev, desc, match in ranked)
             dialog = ctk.CTkInputDialog(
-                text=f"Available ports:\n\n{port_str}\n\nEnter port name:",
+                text=f"Ports (* matches this board):\n\n{listing}\n\nEnter port name:",
                 title="Select Serial Port"
             )
             selected = dialog.get_input()
@@ -547,6 +616,7 @@ Log Colors:
         self._save_setting("port", self.port_entry)
         self._save_setting("device_ip", self.ip_entry)
         self._save_setting("baud", self.baud_entry, int_val=True)
+        self._save_setting("monitor_speed", self.monitor_entry, int_val=True)
 
         steps = self.cfg.get("steps", [])
         if not steps:

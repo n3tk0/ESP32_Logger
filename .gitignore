@@ -29,3 +29,7 @@ tools/flash_bootloader/target/
 
 # Transient build log written by the node CI matrix
 node/build.log
+
+# Per-machine deploy tool settings: a port, and any baud someone pinned.
+# Everything else it needs comes from platformio.ini (see tools/pio_envs.py).
+.flash_tool.json

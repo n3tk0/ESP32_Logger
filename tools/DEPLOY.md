@@ -30,8 +30,14 @@ Both share identical business logic via `deploy_core.py`, ensuring consistency a
 ### Adding a board
 
 Add an `[env:…]` to `platformio.ini`. That is the whole procedure — the CLI
-list, the GUI dropdown, the chip the bootloader step uses and the USB CDC
-toggle all derive from it through `pio_envs.py`.
+list, the GUI dropdown, the chip the bootloader step uses, the upload and
+monitor speeds, the partition table, the USB CDC toggle and the USB IDs the
+port detector matches on all derive from it through `pio_envs.py`.
+
+    python3 tools/pio_envs.py     # exactly what the tools will see
+
+prints every env with what it resolves to, and the settings the tools adopt
+for the default one.
 
 It did not use to be. The board list was written out in four places — the CLI
 chip prompt, the GUI dropdowns, `deploy_core`'s `supported_envs` set and
@@ -165,10 +171,10 @@ Settings are saved to `.flash_tool.json` in the project root:
 
 ```json
 {
-  "env": "esp32c3_supermini",
-  "port": "/dev/ttyUSB0",
-  "chip": "esp32c3",
-  "baud": 921600,
+  "env": "xiao_esp32c3",
+  "port": null,
+  "baud": null,
+  "monitor_speed": null,
   "device_ip": "192.168.4.1",
   "steps": [1, 3, 5, 6, 7],
   "upload_filter": "all",
@@ -176,20 +182,45 @@ Settings are saved to `.flash_tool.json` in the project root:
 }
 ```
 
+**`null` means "take it from `platformio.ini`".** That is the normal state, and
+it is why the file is nearly empty: the environment already states the upload
+speed, the monitor speed, the chip, the partition table and the USB CDC flag,
+so the tools read them instead of keeping a second copy. Put a number in and it
+is pinned — the menu then shows `921600 (pinned; env says 460800)` so an
+override never looks like a default. Clearing the field (or entering nothing at
+the CLI prompt) hands it back to the environment.
+
+`chip` and `usb_cdc_on_boot` are not written at all. Both are read from the
+project on every load, because a stale copy of the first flashes the wrong
+bootloader and a stale copy of the second puts a checkbox on screen describing
+a build that will not happen.
+
+Switching board therefore carries that board's settings with it, and only
+values you pinned survive the switch.
+
 ### Settings
 
 - **env** — PlatformIO environment. Picked from a list read out of
   `platformio.ini`, so adding an `[env:…]` there is all it takes for a board
   to appear in both the CLI and the GUI. Defaults to `[platformio]
   default_envs`.
-- **port** — Serial port for USB connection (auto-detected)
+- **port** — Serial port. Auto-detection ranks ports by the board definition's
+  own USB VID:PID, so with a collector and an ESP8266 node both plugged in the
+  right one comes first instead of whichever enumerated first. Non-USB ports
+  (`COM1`, `/dev/ttyS0`) are never offered — no board is behind one.
+- **monitor_speed** — Serial monitor / WiFi-provisioning speed, resolved for
+  the selected env (its own value, then what it `extends`, then `[env]`). The
+  provisioner used to take the first `monitor_speed` anywhere in the file,
+  which is right only until one env overrides the shared one.
 - **chip** — **Derived from the env, not chosen.** It is re-resolved from the
   board definition on every load and written back here for readability.
   Editing it by hand has no effect. It used to be a free-text field beside the
   environment, which let a saved config say `esp32s3` for the env and
   `esp32c3` for the chip — and step 2 would then write a C3 bootloader to an
   S3.
-- **baud** — Serial baud rate (default: 921600)
+- **baud** — Upload speed, from the env's `upload_speed` (falling back to
+  the board definition's `upload.speed`). Used by the bootloader step;
+  `pio run -t upload` reads the same value from the ini directly.
 - **device_ip** — Device IP for HTTP deploy (default: 192.168.4.1)
 - **steps** — Selected workflow steps
 - **upload_filter** — Which files to upload (all/gz/plain)

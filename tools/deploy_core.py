@@ -28,7 +28,8 @@ from typing import Any, Callable, Optional
 # both as `python3 tools/deploy.py` and from a PyInstaller bundle.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pio_envs import (  # noqa: E402
-    chip_for, default_env, env_info, env_names, environments, usb_pins,
+    chip_for, default_env, defaults_for, env_info, env_names, environments,
+    ports_for, usb_pins,
 )
 
 # ── Project layout ────────────────────────────────────────────────────────────
@@ -61,17 +62,28 @@ PRESETS: dict[str, tuple[str, list[int]]] = {
 }
 
 # ── Config defaults + persistence ─────────────────────────────────────────────
+#
+# `None` means "take it from the environment" — see load_cfg(). Anything the
+# project has already stated in platformio.ini or a board definition is not
+# copied here: a second copy of the upload speed is a second copy that drifts,
+# and this file used to hold three of them (chip, baud, USB CDC state).
 DEFAULT_CFG: dict[str, Any] = {
     "env":                  None,
-    "port":                 None,
-    "chip":                 "esp32c3",
-    "baud":                 921600,
+    "port":                 None,   # None = auto-detect, board USB IDs first
+    "chip":                 None,   # always derived from env; never pinnable
+    "baud":                 None,   # None = the env's upload_speed
+    "monitor_speed":        None,   # None = the env's monitor_speed
+    "usb_cdc_on_boot":      None,   # None = whatever the env's flag says now
     "device_ip":            "192.168.4.1",
     "steps":                [1, 3, 5, 6, 7],
     "upload_filter":        "all",
     "wipe_before_upload":   False,
-    "usb_cdc_on_boot":      True,  # ESP32-C3: USB serial CDC enabled by default
 }
+
+# Keys load_cfg() re-derives from the environment when they are None. `chip` is
+# absent on purpose: it is re-derived unconditionally, because an env and a
+# chip that disagree is how a C3 bootloader gets written to an S3.
+_ENV_DERIVED = ("baud", "monitor_speed")
 
 _UPLOAD_FILTERS = ["all", "gz", "plain"]
 _UPLOAD_FILTER_LABELS = {
@@ -92,8 +104,24 @@ def detect_env() -> str:
     return default_env()
 
 
-def detect_port() -> str:
-    """Auto-detect serial port."""
+def detect_port(env: str | None = None) -> str:
+    """Auto-detect the serial port, preferring one that matches the board.
+
+    With `env` given, ports whose USB VID:PID matches that board's `hwids` are
+    tried first. It matters as soon as more than one device is plugged in: a
+    collector and an ESP8266 node both show up as /dev/ttyUSB*, and "the first
+    one" is a coin toss that hands the firmware to whichever enumerated first.
+
+    Falls back to the old glob when pyserial is missing or nothing matches.
+    """
+    if env:
+        ranked = ports_for(env)
+        for device, _desc, matched in ranked:
+            if matched:
+                return device
+        if ranked:
+            return ranked[0][0]
+
     if sys.platform == "linux":
         pats = ["/dev/ttyACM*", "/dev/ttyUSB*"]
     elif sys.platform == "darwin":
@@ -115,7 +143,14 @@ def detect_port() -> str:
 
 
 def load_cfg() -> dict[str, Any]:
-    """Load configuration from file or use defaults."""
+    """Load configuration, taking everything derivable from the environment.
+
+    The rule: `null` in .flash_tool.json means "follow platformio.ini". A value
+    means the user pinned it deliberately. So the ordinary config is nearly
+    empty and a board switch carries its own settings with it — which is the
+    point, because the alternative was three numbers remembered here that could
+    each disagree with the project.
+    """
     cfg: dict[str, Any] = dict(DEFAULT_CFG)
     if CFG_FILE.is_file():
         try:
@@ -124,21 +159,101 @@ def load_cfg() -> dict[str, Any]:
             pass
     if not cfg.get("env"):
         cfg["env"] = detect_env()
+
+    env_defaults = defaults_for(cfg["env"])
+
     # The chip follows the env, always. It used to be a free-text field kept
     # next to it, so a saved config could name esp32s3 as the environment and
     # esp32c3 as the chip — and step 2 would then write a C3 bootloader to an
     # S3. There is no board for which the two legitimately disagree, so it is
     # derived rather than remembered.
-    cfg["chip"] = chip_for(cfg["env"])
+    cfg["chip"] = env_defaults["chip"]
+
+    for key in _ENV_DERIVED:
+        if cfg.get(key) is None:
+            cfg[key] = env_defaults[key]
+
+    # USB CDC is a line in platformio.ini, not a preference of this tool. Read
+    # the current one rather than a remembered wish: a checkbox that says ON
+    # while the env's flag says 0 is describing a build that will not happen.
+    # A toggle sets this, the next compile writes it back to the ini, and the
+    # two agree again.
+    cfg["usb_cdc_on_boot"] = env_defaults["usb_cdc_on_boot"]
+    if cfg["usb_cdc_on_boot"] is None:
+        cfg["usb_cdc_on_boot"] = True   # env inherits its flag; nothing to show
+
     if not cfg.get("port"):
-        cfg["port"] = detect_port()
+        cfg["port"] = detect_port(cfg["env"])
     return cfg
 
 
-def save_cfg(cfg: dict[str, Any]) -> None:
-    """Save configuration to file."""
+def env_defaults_note(cfg: dict[str, Any]) -> list[str]:
+    """One line per derived setting, saying where its value came from.
+
+    Written for the tools to print: a number with no provenance is a number
+    someone will eventually override for no reason.
+    """
+    d = defaults_for(cfg.get("env") or detect_env())
+    pinned = _pinned_keys()
+    lines = [
+        f"board       {d['board']}  ({d['chip']}, {d['flash_size'] or 'flash ?'})",
+        f"partitions  {d['partitions'] or 'platform default'}"
+        f"   filesystem {d['filesystem'] or '-'}",
+    ]
+    for key, label, src in (("baud", "upload baud", d["baud_src"]),
+                            ("monitor_speed", "monitor baud", d["monitor_src"])):
+        if key in pinned:
+            lines.append(f"{label:<11} {cfg[key]}  (pinned here; env says {d[key]})")
+        else:
+            lines.append(f"{label:<11} {cfg[key]}  (from {src})")
+    if d["usb_cdc_on_boot"] is None:
+        lines.append(f"USB CDC     inherited by [env:{d['env']}]; "
+                     f"toggle it in the env it extends")
+    else:
+        state = "on" if d["usb_cdc_on_boot"] else "off"
+        lines.append(f"USB CDC     {state}  (from [env:{d['env']}] build_flags; "
+                     f"{d['usb_pins'] or 'no native USB'})")
+    return lines
+
+
+def _pinned_keys() -> set:
+    """Derived keys the saved config overrides with a concrete value."""
+    if not CFG_FILE.is_file():
+        return set()
     try:
-        CFG_FILE.write_text(json.dumps(cfg, indent=2) + "\n")
+        saved = json.loads(CFG_FILE.read_text())
+    except Exception:
+        return set()
+    return {k for k in _ENV_DERIVED if saved.get(k) is not None}
+
+
+def save_cfg(cfg: dict[str, Any]) -> None:
+    """Save configuration, writing back only what the environment does not say.
+
+    Without this, saving would defeat the whole arrangement: load_cfg() fills
+    `baud` in from the env, and a naive round-trip would write that value back
+    as though the user had chosen it — pinning it, so the next board switch
+    would silently keep the old board's speed.
+
+    A derived key is written only when it DIFFERS from what the env says. The
+    chip and the USB CDC state are never written: both are read from the
+    project every time, and a stale copy of either is how the wrong bootloader
+    gets flashed or a checkbox describes a build that will not happen.
+    """
+    out = dict(cfg)
+    try:
+        env_defaults = defaults_for(cfg.get("env") or detect_env())
+    except Exception:
+        env_defaults = {}
+
+    for key in _ENV_DERIVED:
+        if key in env_defaults and out.get(key) == env_defaults[key]:
+            out[key] = None
+    out.pop("chip", None)
+    out.pop("usb_cdc_on_boot", None)
+
+    try:
+        CFG_FILE.write_text(json.dumps(out, indent=2) + "\n")
     except Exception as exc:
         print(f"Warning: could not save config: {exc}")
 
@@ -634,18 +749,18 @@ class DeployManager:
             getpass_fn = getpass.getpass
 
         # Detect port
-        port = self.cfg.get("port") or detect_port()
+        port = self.cfg.get("port") or detect_port(self.cfg.get("env"))
         if not port:
             self._log("Error: No serial port found. Connect device and set port via settings.")
             return False
 
-        # Detect baud from platformio.ini
-        try:
-            txt = (ROOT / "platformio.ini").read_text()
-            m = re.search(r"^\s*monitor_speed\s*=\s*(\d+)", txt, re.MULTILINE)
-            baud = int(m.group(1)) if m else 115200
-        except OSError:
-            baud = 115200
+        # The monitor speed is resolved for THIS env (its own value, then what
+        # it extends, then [env]). It used to be the first `monitor_speed`
+        # anywhere in platformio.ini, which is the right number here only
+        # because no env overrides the shared one — the first env to do so
+        # would have had the provisioner talking at the wrong rate.
+        baud = self.cfg.get("monitor_speed") \
+            or defaults_for(self.cfg.get("env") or detect_env())["monitor_speed"]
 
         self._log(f"WiFi Provisioning via serial")
         self._log(f"Port: {port}   Baud: {baud}\n")

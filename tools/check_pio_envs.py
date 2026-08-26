@@ -11,6 +11,8 @@ which is exactly the drift pio_envs.py was written to end.
 So this asserts, against a plain regex scan of the same file:
   - every [env:NAME] is reachable through pio_envs
   - each one resolves to a board, and that board resolves to a chip
+  - each one resolves an upload speed and a monitor speed, since the deploy
+    tools now take those from here rather than keeping their own copies
   - the default env is real
   - the flash tools can name a bootloader offset for every chip in use
 
@@ -52,6 +54,16 @@ def main() -> int:
                             f"reader cannot follow)")
         if not e.chip:
             problems.append(f"[env:{e.name}] resolves to no chip family")
+        # The deploy tools adopt these instead of keeping their own copies, so
+        # an env that resolves neither would quietly fall back to a built-in
+        # number — the drift this whole arrangement exists to end.
+        if not e.upload_speed:
+            problems.append(f"[env:{e.name}] resolves to no upload speed "
+                            f"(no `upload_speed`, and the board JSON has no "
+                            f"upload.speed)")
+        if not e.monitor_speed:
+            problems.append(f"[env:{e.name}] resolves to no monitor speed "
+                            f"(nothing in the env, its parents, or [env])")
 
     if default_env() not in raw:
         problems.append(f"default env {default_env()!r} is not an env in the ini")
@@ -75,7 +87,8 @@ def main() -> int:
     print(f"OK: {len(raw)} environment(s), all visible to the deploy tools:")
     for e in environments(include_all=True):
         flag = "" if e.deployable else "   (not offered as a flash target)"
-        print(f"  {e.name:<20} {e.board:<24} {e.chip:<9} {e.flash_size}{flag}")
+        print(f"  {e.name:<20} {e.board:<24} {e.chip:<9} {e.flash_size:<6} "
+              f"up={e.upload_speed} mon={e.monitor_speed}{flag}")
     return 0
 
 
