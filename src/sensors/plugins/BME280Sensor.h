@@ -53,13 +53,22 @@
 //
 // Produces up to 5 metrics (BME280) or 2 (BMP280):
 //   temperature (°C), humidity (%), pressure (hPa),
-//   dew_point (°C)        — true ambient dew point, invariant under heating
-//   humidity_ambient (%)  — RH implied by that dew point at the ambient
-//                           temperature; equals humidity when there is no
-//                           self-heating to correct for
+//   dew_point (°C)      — true ambient dew point, invariant under heating
+//   humidity_amb (%)    — RH implied by that dew point at the ambient
+//                         temperature
+//
+// "humidity_amb" is emitted ONLY when a correction is actually configured —
+// an "ambient_temp_sensor", or a temperature calibration that moves the
+// number. With neither, the ambient reference IS the die temperature, the
+// dew-point round trip returns exactly what went in, and the metric would be
+// a bit-for-bit copy of "humidity" costing a ReadingCache slot, a CSV column
+// and a slice of the web ring buffer's fixed byte budget.
 //
 // The derived pair is dropped rather than emitted as NaN when the inputs are
 // out of range, so a bad reading never lands in storage as a permanent null.
+//
+// Metric names must fit SensorReading::metric (char[16] → 15 usable chars);
+// tools/check_metric_names.py fails the build on a name that would truncate.
 // ============================================================================
 class BME280Sensor : public ISensor {
 public:
@@ -72,14 +81,18 @@ public:
     uint32_t    getReadIntervalMs() const override { return _intervalMs; }
     int getMetrics(const char** out, int maxOut) const override {
         static const char* mBME[] = { "temperature", "humidity", "pressure",
-                                      "dew_point", "humidity_ambient" };
+                                      "dew_point", "humidity_amb" };
         static const char* mBMP[] = { "temperature", "pressure" };
         if (_isBMP280) {
             int n = 2; if (n > maxOut) n = maxOut;
             for (int i = 0; i < n; i++) out[i] = mBMP[i];
             return n;
         }
-        int n = 5; if (n > maxOut) n = maxOut;
+        // Mirrors readAll(): the last entry only exists when a correction is
+        // configured. Advertising a metric that never arrives would leave a
+        // permanently empty MQTT discovery entity and an empty CSV column.
+        int n = _correctionConfigured() ? 5 : 4;
+        if (n > maxOut) n = maxOut;
         for (int i = 0; i < n; i++) out[i] = mBME[i];
         return n;
     }
@@ -110,6 +123,15 @@ private:
     /// True air temperature to express the humidity against, or `fallbackC`
     /// when the configured reference is missing, stale or implausible.
     float _ambientTempC(float fallbackC) const;
+
+    /// Whether the self-heating correction can move the number at all. With no
+    /// reference sensor and an identity temperature calibration, the ambient
+    /// reference is the die temperature the RH was measured at, so the
+    /// dew-point round trip is the identity and humidity_amb == humidity.
+    bool _correctionConfigured() const {
+        return _ambientSensor[0] != '\0' ||
+               _calTemp.offset != 0.0f || _calTemp.scale != 1.0f;
+    }
 
     SensorReading _makeReading(uint32_t ts, const char* metric,
                                float value, const char* unit) const;

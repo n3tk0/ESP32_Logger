@@ -24,7 +24,7 @@ static bool isPlausible(const SensorReading& r) {
     if (strcmp(m, "humidity")    == 0) return (r.value >= 0.0f  && r.value <= 100.0f);
     // Same bounds as their parent metrics — derived, but from the same physics.
     if (strcmp(m, "dew_point")        == 0) return (r.value > -50.0f && r.value < 100.0f);
-    if (strcmp(m, "humidity_ambient") == 0) return (r.value >= 0.0f  && r.value <= 100.0f);
+    if (strcmp(m, "humidity_amb")     == 0) return (r.value >= 0.0f  && r.value <= 100.0f);
     // Fault bitfield, not a measurement: any value is meaningful, including 0.
     // Bounded only against a corrupt frame (SPS30Sensor packs 4 bits).
     if (strcmp(m, "device_status")    == 0) return (r.value >= 0.0f  && r.value <= 255.0f);

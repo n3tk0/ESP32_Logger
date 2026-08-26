@@ -127,16 +127,25 @@ int BME280Sensor::readAll(SensorReading* out, int maxOut) {
     // temperature would bake the self-heating error into the dew point, which
     // is the one figure that is supposed to be free of it.
     const float dew  = Psychro::dewPointC(tDie, h);
-    const float hAmb = isfinite(dew) ? Psychro::rhAtTempC(dew, _ambientTempC(t)) : NAN;
+
+    // Only compute — and only publish — the corrected humidity when something
+    // is actually correcting. Unconfigured, _ambientTempC(t) returns tDie and
+    // rhAtTempC(dewPointC(tDie, h), tDie) is h by construction, so the metric
+    // would be a duplicate of "humidity" paid for in ring-buffer bytes.
+    const bool  corrected = _correctionConfigured();
+    const float hAmb = (corrected && isfinite(dew))
+                           ? Psychro::rhAtTempC(dew, _ambientTempC(t)) : NAN;
 
     int n = 0;
     out[n++] = _makeReading(0, "temperature", t, "C");
     out[n++] = _makeReading(0, "humidity",    h, "%");
     out[n++] = _makeReading(0, "pressure",    p, "hPa");
-    // Dropped rather than emitted as NaN when the inputs are out of range: a
-    // NaN would land in storage as a permanent null.
-    if (isfinite(dew)  && n < maxOut) out[n++] = _makeReading(0, "dew_point",        dew,  "C");
-    if (isfinite(hAmb) && n < maxOut) out[n++] = _makeReading(0, "humidity_ambient", hAmb, "%");
+    // Dew point stays unconditional: it is an ambient property in its own
+    // right, not a restatement of the humidity. Both are dropped rather than
+    // emitted as NaN when the inputs are out of range — a NaN would land in
+    // storage as a permanent null.
+    if (isfinite(dew)  && n < maxOut) out[n++] = _makeReading(0, "dew_point",    dew,  "C");
+    if (isfinite(hAmb) && n < maxOut) out[n++] = _makeReading(0, "humidity_amb", hAmb, "%");
     return n;
 }
 

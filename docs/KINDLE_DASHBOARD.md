@@ -52,16 +52,24 @@ thermometer after the board has been running an hour:
 it, around 6 % relative per °C. Correcting only the temperature reports a room
 drier than it is.
 
-So `BME280Sensor` also publishes **`humidity_ambient`** — the RH implied by the
+So `BME280Sensor` also publishes **`humidity_amb`** — the RH implied by the
 dew point, re-expressed at the true ambient temperature. The dew point is what
 makes this work: it is a property of the air's absolute moisture and does not
 change because the sensor measuring it is warm. With the temperature offset
 above configured, the correction follows from it automatically.
 
-**This page prefers `humidity_ambient` and falls back to `humidity`.** A sensor
-with no correction configured still shows a figure, and where there is no
-self-heating the two are the same number — `rhAtTempC(dewPointC(T, RH), T)`
-recovers `RH` exactly, which `tests/host/test_psychrometrics.cpp` asserts.
+**This page prefers `humidity_amb` and falls back to `humidity`.** A sensor with
+no correction configured still shows a figure — and publishes no `humidity_amb`
+at all, because there the two would be the same number:
+`rhAtTempC(dewPointC(T, RH), T)` recovers `RH` exactly, which
+`tests/host/test_psychrometrics.cpp` asserts. The metric appears once an
+`ambient_temp_sensor` or a temperature calibration gives it something to do.
+
+> The name is `humidity_amb`, not `humidity_ambient`. `SensorReading::metric`
+> is `char[16]` and `make()` copies 15 bytes, so the longer name was stored as
+> `humidity_ambien` and never matched a single `strcmp` — in `BME688Sensor`
+> from the day it shipped. `tools/check_metric_names.py` now fails the build on
+> a name that would truncate.
 
 The best fix is still to get the sensor off the board: 10–15 cm of wire away
 from the regulator, and none of the above is needed.

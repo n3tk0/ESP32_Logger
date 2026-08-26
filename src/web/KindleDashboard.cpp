@@ -48,15 +48,16 @@ static Latest latestOf(const char* sensorId, const char* metric) {
 //
 // A BME280 or BME688 on a board that runs WiFi reads warm, and relative
 // humidity is relative TO a temperature — so a warm sensor reports a room
-// drier than it is. Both plugins publish "humidity_ambient": the same air
+// drier than it is. Both plugins publish "humidity_amb": the same air
 // re-expressed at the true ambient temperature, by way of a dew point that is
 // invariant under heating the sensor.
 //
 // Falling back to the raw figure rather than showing nothing: a sensor with no
-// correction configured, or one whose derived pair was dropped as out of
-// range, still has a humidity worth printing.
+// correction configured publishes no corrected figure at all (it would be a
+// copy of the raw one), and one whose derived pair was dropped as out of range
+// still has a humidity worth printing.
 static Latest humidityOf(const char* sensorId) {
-    Latest corrected = latestOf(sensorId, "humidity_ambient");
+    Latest corrected = latestOf(sensorId, "humidity_amb");
     if (corrected.ok) return corrected;
     return latestOf(sensorId, "humidity");
 }

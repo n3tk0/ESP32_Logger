@@ -116,7 +116,14 @@ int BME688Sensor::readAll(SensorReading* out, int maxOut) {
     // temperature would bake the self-heating error into the dew point, which
     // is the one figure that is supposed to be free of it.
     float dew  = Psychro::dewPointC(tDie, h);
-    float hAmb = isfinite(dew) ? Psychro::rhAtTempC(dew, _ambientTempC(t)) : NAN;
+
+    // Only compute — and only publish — the corrected humidity when something
+    // is actually correcting. Unconfigured, _ambientTempC(t) returns tDie and
+    // rhAtTempC(dewPointC(tDie, h), tDie) is h by construction, so the metric
+    // would be a duplicate of "humidity" paid for in ring-buffer bytes.
+    const bool corrected = _correctionConfigured();
+    float hAmb = (corrected && isfinite(dew))
+                     ? Psychro::rhAtTempC(dew, _ambientTempC(t)) : NAN;
 
     int n = 0;
     if (n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "temperature",    t,   "C");
@@ -124,10 +131,12 @@ int BME688Sensor::readAll(SensorReading* out, int maxOut) {
     if (n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "pressure",       p,   "hPa");
     if (n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "gas_resistance", g,   "Ohm");
     if (n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "iaq",            iaq, "");
-    // Derived metrics are dropped rather than emitted as NaN when the inputs
-    // are out of range: a NaN would land in storage as a permanent null.
-    if (isfinite(dew)  && n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "dew_point",        dew,  "C");
-    if (isfinite(hAmb) && n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "humidity_ambient", hAmb, "%");
+    // Dew point stays unconditional: it is an ambient property in its own
+    // right, not a restatement of the humidity. Both are dropped rather than
+    // emitted as NaN when the inputs are out of range — a NaN would land in
+    // storage as a permanent null.
+    if (isfinite(dew)  && n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "dew_point",    dew,  "C");
+    if (isfinite(hAmb) && n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "humidity_amb", hAmb, "%");
     return n;
 }
 

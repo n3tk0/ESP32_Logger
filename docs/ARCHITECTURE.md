@@ -175,6 +175,16 @@ struct SensorReading {
 //  "metric":"temperature","value":21.4,"unit":"C","q":1}
 ```
 
+**These arrays are hard limits, and overrunning one is silent.**
+`SensorReading::make()` copies with `strncpy(dst, src, sizeof(dst) - 1)`, so a
+metric name of 16 characters is stored as 15 with no error at compile time or
+run time — and every later `strcmp()` against the full name then misses, which
+makes the metric look present (the plugin advertises it, MQTT discovery
+publishes it) while nothing ever reads it. `humidity_ambient` was exactly that
+and never worked. Budget **15 characters for `metric`**, 11 for `unit` and
+`sensorType`, 16 for `sensorId`; `tools/check_metric_names.py` (run in the
+`api-docs` CI job) fails the build on a literal that would truncate.
+
 ### 3.2 Sensor Interface (`src/sensors/ISensor.h`)
 
 ```cpp
@@ -677,11 +687,17 @@ route, and whatever Basic Auth is compiled in globally.
     {
       "id": "env_indoor", "type": "bme280", "name": "BME280 Environmental",
       "enabled": true, "last_read_ts": 1710086380,
-      "metrics": ["temperature","humidity","pressure","dew_point","humidity_ambient"], "status": "ok"
+      "metrics": ["temperature","humidity","pressure","dew_point","humidity_amb"], "status": "ok"
     }
   ]
 }
 ```
+
+`metrics` is what the sensor actually emits with its current configuration, not
+a fixed catalogue for the type: `humidity_amb` appears only when a self-heating
+correction is configured (`ambient_temp_sensor`, or a temperature calibration
+that moves the number). Without one it is dropped, because it would be a
+bit-for-bit copy of `humidity` — see §BME280/BME688 self-heating.
 
 **`GET /api/modules`** — schema-driven module manager. Each registered `IModule`
 (`wifi`, `ota`, `theme`, `datalog`, `time`) is listed with a description, a live
