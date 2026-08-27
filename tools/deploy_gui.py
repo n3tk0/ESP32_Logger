@@ -962,6 +962,24 @@ def selftest() -> int:
         # chip is a guess from the board id and the flash size is unknown.
         # That size ends up in the bootloader image header, so it is not
         # cosmetic.
+        # The optional feature list, for the same reason the env list is here.
+        # features.py reads src/setup.h through the project root, and a frozen
+        # build resolves that root differently — __file__ lands in a temporary
+        # extraction directory with no project above it. An empty feature list
+        # in a shipped executable would look exactly like a project with no
+        # optional features, and the first person to notice would be someone
+        # who could not find a checkbox they knew should be there.
+        try:
+            from features import optional_features as _opt
+            feats = _opt()
+            lines.append(f"  features     : {len(feats)}")
+            if not feats:
+                lines.append("    none found — src/setup.h unreadable from this build?")
+                rc = 1
+        except Exception as exc:
+            lines.append(f"  features     : FAILED ({exc})")
+            rc = 1
+
         missing = [e.name for e in envs if not e.board_json_found]
         if missing:
             lines.append(

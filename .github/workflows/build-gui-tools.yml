@@ -35,12 +35,16 @@ on:
     branches: ['**']
     paths:
       - 'tools/**'
+      - 'tests/gui/**'
+      - 'src/setup.h'
       - 'platformio.ini'
       - 'boards/**'
       - '.github/workflows/build-gui-tools.yml'
   pull_request:
     paths:
       - 'tools/**'
+      - 'tests/gui/**'
+      - 'src/setup.h'
       - 'platformio.ini'
       - 'boards/**'
       - '.github/workflows/build-gui-tools.yml'
@@ -136,6 +140,18 @@ jobs:
             cp dist/deploy_selftest.txt selftest.txt
             cat selftest.txt
           fi
+          # The feature list is derived from src/setup.h at runtime, so a
+          # frozen build that cannot reach the project reports zero — which
+          # looks identical to a project with no optional features. Assert on
+          # it here, where the difference is still visible.
+          FEATS=$(sed -n 's/^  features     : \([0-9]*\)$/\1/p' selftest.txt)
+          echo "the binary sees $FEATS optional build feature(s)"
+          if [ -z "$FEATS" ] || [ "$FEATS" -lt 1 ]; then
+            echo "::error::the packaged binary found no optional features; \
+          the deploy tools would offer an empty list"
+            exit 1
+          fi
+
           EXPECTED=$(grep -c '^\[env:' platformio.ini)
           FOUND=$(sed -n 's/^  environments : \([0-9]*\)$/\1/p' selftest.txt)
           echo "platformio.ini has $EXPECTED [env:] sections; the binary sees $FOUND deployable"
@@ -162,6 +178,16 @@ jobs:
             exit 1
           fi
           echo "GUI opened and stayed up for 20 s"
+
+      - name: Drive the GUI's build-feature widgets (Linux)
+        if: runner.os == 'Linux'
+        # Staying open for 20 s proves every widget constructed. It does not
+        # prove any of them does what it says: a checkbox wired to the wrong
+        # variable, a validation message that never updates, or an implied
+        # feature ticked in the config but not on screen all open a window that
+        # stays up perfectly. This clicks them and asserts on the
+        # PLATFORMIO_BUILD_FLAGS string the build would actually get.
+        run: xvfb-run -a python3 tests/gui/drive_deploy_gui.py
 
       - name: Stage the artifact
         shell: bash
