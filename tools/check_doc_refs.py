@@ -4,7 +4,8 @@ check_doc_refs.py — keep the documentation's pointers into the code honest.
 
 TWO RULES, AND THE SECOND IS THE POINT
 --------------------------------------
-1. Every source path a document names must exist.
+1. Every source path a document names must be TRACKED BY GIT — not merely
+   present in the working tree, where a build artifact can mask a bad link.
 
 2. No document may cite a LINE NUMBER.
 
@@ -39,6 +40,7 @@ Usage:
 """
 from __future__ import annotations
 
+import posixpath
 import re
 import subprocess
 import sys
@@ -68,9 +70,26 @@ def tracked_markdown() -> list[str]:
     return [p for p in out.split("\n") if p and p not in EXEMPT]
 
 
+def tracked_paths() -> set[str]:
+    """Every path git tracks, as repo-relative POSIX strings.
+
+    Existence is checked against THIS, not against the working tree, and the
+    difference is not academic: `src/ESP_Logger.ino` is a build-time copy that
+    scripts/copy_sketch.py makes from the sketch at the repository root, and it
+    is gitignored. A developer who has built once has that file on disk, so a
+    document citing it passes locally and fails in a fresh checkout -- which is
+    exactly what happened the first time this script ran in CI. Asking git
+    instead of the filesystem makes the check mean the same thing everywhere.
+    """
+    out = subprocess.run(["git", "ls-files"], cwd=ROOT,
+                         capture_output=True, text=True).stdout
+    return {p for p in out.split("\n") if p}
+
+
 def main() -> int:
     problems: list[str] = []
     paths = 0
+    tracked = tracked_paths()
 
     for rel in tracked_markdown():
         text = (ROOT / rel).read_text(encoding="utf-8", errors="replace")
@@ -93,13 +112,20 @@ def main() -> int:
             # ESP-IDF include, `builder/frameworks/espidf.py` lives inside the
             # PlatformIO platform package -- and this script has no business
             # asserting those exist here.
-            candidates = [ROOT / p, (ROOT / rel).parent / p]
-            if not any(c.exists() for c in candidates):
-                if p.split("/")[0] not in TOP_LEVEL:
-                    continue    # foreign tree, not a claim about this repo
-                line = text[:m.start()].count("\n") + 1
-                problems.append(f"{rel}:{line}  references a path that does not exist: {p}")
+            beside = posixpath.normpath(posixpath.join(posixpath.dirname(rel), p))
+            if p in tracked or beside in tracked:
+                paths += 1
+                continue
+            if p.split("/")[0] not in TOP_LEVEL:
+                continue        # foreign tree, not a claim about this repo
             paths += 1
+            line = text[:m.start()].count("\n") + 1
+            extra = ""
+            if (ROOT / p).exists():
+                extra = ("  (it exists in your working tree but git does not track it "
+                         "— a build artifact? cite the tracked source instead)")
+            problems.append(
+                f"{rel}:{line}  references a path git does not track: {p}{extra}")
 
     if problems:
         print(f"FAIL: {len(problems)} documentation reference problem(s).\n")

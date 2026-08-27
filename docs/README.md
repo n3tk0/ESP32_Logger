@@ -58,7 +58,7 @@ finds.
 **Never cite a line number.** Name the symbol instead:
 
 ```
-BAD   the OTA guard (`src/web/WebServer.cpp:2069`)
+BAD   the OTA guard (`src/web/WebServer.cpp:<line>`)
 GOOD  the OTA guard (`sendOtaDisabled()` in `src/web/WebServer.cpp`)
 ```
 

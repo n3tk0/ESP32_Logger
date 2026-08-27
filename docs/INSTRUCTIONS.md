@@ -11,7 +11,7 @@ is running. For build and flash instructions see [README.md](../README.md).
 
 On first boot the device has no saved board profile (`/board_profile.txt`
 absent), so `g_setupRequired = true` and all HTTP requests redirect to
-`/firstrun` (`FirstRunGateHandler` in `src/web/WebServer.cpp`; `g_setupRequired` is set in `src/ESP_Logger.ino`).
+`/firstrun` (`FirstRunGateHandler` in `src/web/WebServer.cpp`; `g_setupRequired` is set in `ESP_Logger.ino`).
 
 ### Stage 1 — Board profile
 
