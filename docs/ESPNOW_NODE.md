@@ -235,20 +235,40 @@ each sample giving it an honest timestamp. The node holds up to fourteen —
 one slot in the frame is always the live reading — and drops the **oldest**
 when that fills, because losing the start of an outage beats losing the end.
 
-**What the collector does with that burst is currently less than it should be,
-and this is the open question in the feature.** `RemoteIngest` holds one value
-per (node, metric) and overwrites, deliberately: a node posting faster than the
-collector ticks should overwrite rather than backlog. So a burst's older
-environmental readings are dropped at this end, and only the newest survives.
+### What the collector does with that burst
 
-The battery history is the exception and is genuinely preserved — every sample
-is folded into `BatteryHistory` by its own timestamp, and that is keyed by day
-rather than overwritten. The collector counts what it dropped
-(`EspNowIngestStats::historyCollapsed`) rather than hiding it.
+The newest sample goes into `RemoteIngest`'s mailbox slot — the live value, the
+one the dashboard reads. Everything the node buffered goes into a **separate
+queue** (`putHistorical()`), because the mailbox holds one value per
+(node, metric) and overwrites: fed through it, fourteen of fifteen readings
+were lost microseconds after arriving, which is what this code did at first.
 
-Making the rest survive means letting a remote reading keep its own timestamp
-instead of being stamped on arrival, which is a change to an invariant the
-HTTP node shares. It has not been made.
+Three changes were needed to make an outage stop being a gap, and each is
+somewhere different:
+
+| | |
+|---|---|
+| `RemoteIngest` | a queue beside the mailbox, drained oldest-first |
+| `SensorManager` | stamps a reading **only when its timestamp is zero**, so a plugin that knows when it measured keeps that time |
+| `ProcessingTask` | routes a backfilled reading to storage and the trend grid, but **not** to the live ring or to alerts |
+
+That last row is the one worth understanding. A backfilled reading is old by
+construction. In the live ring it would draw a chart line jumping backwards and
+read as the current measurement; fed to `AlertEngine`, which measures how long
+a condition has held, an hour of history arriving in one burst would either
+fire a duration rule instantly or clear one that is still true. An alert is a
+statement about now. The trend grid buckets by the reading's own hour, so a
+late arrival lands where it was measured — that is the chart where the gap
+closes.
+
+Latest values are drained **before** history, and that ordering is deliberate:
+history comes a few readings per tick, so ahead of the current value it would
+leave the dashboard showing nothing for minutes while a backlog cleared.
+
+The queue holds 64 readings — one node emptying a full buffer is fourteen
+samples of four metrics, or fifty-six. When it overflows it sheds the oldest
+and counts it in `EspNowIngestStats::historyCollapsed`, because a backlog that
+keeps overflowing is a tuning fact worth being able to see.
 
 Every field that can be missing has a reserved value meaning "not measured",
 mapped to NaN on the way out. A BMP280 has no humidity sensor, and reporting

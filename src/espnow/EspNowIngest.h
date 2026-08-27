@@ -107,11 +107,10 @@ struct EspNowIngestStats {
     uint32_t unknownNode;     ///< valid frame, no such node provisioned
     uint32_t replayed;        ///< duplicate or stale sequence number
     uint32_t ringFull;        ///< arrived faster than the tick drained
-    /// Buffered samples whose environmental values the mailbox could not keep.
-    /// RemoteIngest holds one value per (node, metric), so a burst's older
-    /// readings are overwritten by its newer ones. Counted rather than hidden:
-    /// a node spending airtime on readings dropped at this end should be
-    /// visible somewhere.
+    /// Backfilled readings dropped because the history queue was already
+    /// full and had to shed its oldest to take a newer one. A backlog that
+    /// keeps overflowing means the drain is too slow for the burst size —
+    /// a tuning fact, and one worth being able to see rather than guess at.
     uint32_t historyCollapsed;
     uint32_t acksSent;
     uint32_t discoverSeen;

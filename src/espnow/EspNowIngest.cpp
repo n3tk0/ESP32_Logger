@@ -533,38 +533,43 @@ void espnowIngestTick() {
         // reads today.
         const uint32_t base = f.msg.epoch ? f.msg.epoch : nowEpoch();
 
-        // WHAT SURVIVES A BURST, AND WHAT DOES NOT
+        // WHERE EACH SAMPLE GOES
         //
-        // RemoteIngest holds ONE value per (node, metric) and overwrites — it
-        // is a mailbox, not a queue, and deliberately so: a node posting faster
-        // than the collector ticks should overwrite rather than backlog.
-        // Feeding fifteen buffered temperatures through it therefore leaves
-        // one, the newest, and the loop that fed it all fifteen was doing
-        // fourteen writes whose only effect was to be overwritten microseconds
-        // later.
+        // The newest goes through RemoteIngest::put() — the mailbox slot, the
+        // live value, overwritten by whatever comes next. That is what the
+        // dashboard reads.
         //
-        // So the environmental history a node buffers through an outage is NOT
-        // preserved downstream today. The battery history IS: acceptFrame()
-        // folds every sample into BatteryHistory by its own timestamp, and
-        // that is keyed by day rather than overwritten.
+        // Everything the node buffered through an outage goes through
+        // putHistorical() instead, which queues rather than overwrites. Fed
+        // through put() they would have collapsed into the one slot and
+        // fourteen of fifteen readings would have been lost microseconds after
+        // arriving — which is what this code did until the timestamps were
+        // made authoritative end to end.
         //
-        // Making the rest survive means letting a remote reading keep its own
-        // timestamp instead of being stamped on arrival — see the note on
-        // RemoteIngest::put(). That is a change to an invariant the HTTP node
-        // shares, so it is not made quietly here.
-        //
-        // Until then the loss is counted rather than hidden.
+        // Their timestamps are the node's own and survive: SensorManager only
+        // stamps a reading whose timestamp is zero, and ProcessingTask keeps
+        // backfilled readings out of the live ring and out of alert
+        // evaluation while still folding them into storage and the trend grid.
         const uint8_t newest = (uint8_t)(f.msg.count - 1);
-        if (f.msg.count > 1) s_stats.historyCollapsed += (uint32_t)(f.msg.count - 1);
 
-        {
-            const EnvSample& s = f.msg.s[newest];
+        for (uint8_t i = 0; i < f.msg.count && i < ESPNOW_MAX_SAMPLES; i++) {
+            const EnvSample& s = f.msg.s[i];
             const uint32_t ts = (base > s.dt_s) ? base - s.dt_s : base;
 
             EspNowMetric m[EN_MAX_SAMPLE_METRICS];
             const int cnt = espnowExpandSample(s, m, EN_MAX_SAMPLE_METRICS);
-            for (int k = 0; k < cnt; k++)
-                remoteIngest.put(id, m[k].metric, m[k].value, m[k].unit, ts);
+            for (int k = 0; k < cnt; k++) {
+                if (i == newest) {
+                    remoteIngest.put(id, m[k].metric, m[k].value, m[k].unit, ts);
+                } else if (!remoteIngest.putHistorical(id, m[k].metric, m[k].value,
+                                                       m[k].unit, ts)) {
+                    // The queue was full and shed its oldest entry to take
+                    // this one. Counted, because a backlog that keeps
+                    // overflowing means the drain is too slow for the burst
+                    // size and that is a tuning fact, not a mystery.
+                    s_stats.historyCollapsed++;
+                }
+            }
         }
 
         // The two figures the collector derives rather than receives,

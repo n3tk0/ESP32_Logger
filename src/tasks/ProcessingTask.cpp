@@ -1,3 +1,4 @@
+#include <time.h>
 #include "ProcessingTask.h"
 #include "TaskManager.h"
 #include "../setup.h"          // MODULE_HEATER_ENABLED (compile-time toggle)
@@ -80,9 +81,31 @@ void processingTaskFunc(void* /*param*/) {
             // Still log errors to storage (with q=3) but skip export
         }
 
+        // ── Is this a reading from now, or one being backfilled? ────────
+        //
+        // A remote node that buffered through an outage hands over readings
+        // minutes or hours old, carrying their own timestamps (see the note in
+        // SensorManager where the stamp is applied). They belong in the record
+        // and NOT in the two places that mean "what is happening right now".
+        //
+        // The threshold is generous on purpose: a live reading is at most one
+        // sensor interval old, and the slowest configured interval here is
+        // well under two minutes. Anything older is history by construction,
+        // not a slow sensor.
+        const uint32_t nowEpoch = (uint32_t)time(nullptr);
+        const bool backfilled   = r.timestamp >= 1000000000u &&
+                                  nowEpoch    >= 1000000000u &&
+                                  (nowEpoch - r.timestamp) > 120u;
+
         // Write to web ring buffer — skip error readings so the dashboard
         // never mixes bad values with good ones.  (AUDIT 11.3)
-        if (r.quality != QUALITY_ERROR) {
+        //
+        // Backfilled readings are skipped too. This ring is the live view, in
+        // arrival order, and an hour-old value appended to the end of it would
+        // draw a chart line jumping backwards and would read as the current
+        // measurement. The record they belong to is storage and the trend
+        // grid, both of which key on the timestamp.
+        if (r.quality != QUALITY_ERROR && !backfilled) {
             MutexGuard g(webDataMutex, pdMS_TO_TICKS(5));
             if (g.isLocked()) {
                 webRingBuf.push(r);
@@ -96,6 +119,9 @@ void processingTaskFunc(void* /*param*/) {
         // webDataMutex block above: TrendRing has its own spinlock, and a
         // reading dropped from the web ring because the mutex was busy is
         // still a real measurement that the long-horizon trend should keep.
+        // Backfilled readings ARE folded in: TrendRing buckets by the
+        // reading's own hour, so a late arrival lands in the hour it was
+        // measured. This is the chart where an outage stops being a gap.
         if (r.quality != QUALITY_ERROR) {
             trendRing.add(r);
         }
@@ -105,7 +131,11 @@ void processingTaskFunc(void* /*param*/) {
         // (ts < 1e9 means we're in millis-fallback territory; AlertEngine's
         // duration accounting would false-trip on ~1 s "elapsed" intervals).
         // Also skip QUALITY_ERROR readings.  (AUDIT 11.4)
-        if (r.quality != QUALITY_ERROR && r.timestamp >= 1000000000u) {
+        // Backfilled readings are NOT evaluated. AlertEngine measures how long
+        // a condition has held, and feeding it an hour of history in one burst
+        // would either fire a duration rule instantly or clear one that is
+        // still true. An alert is a statement about now.
+        if (r.quality != QUALITY_ERROR && r.timestamp >= 1000000000u && !backfilled) {
             alertEngine.evaluate(r, r.timestamp);
         }
 
