@@ -9,14 +9,19 @@ node    tools/kindle_preview/shot.mjs                        # -> kindle.png
 cp tools/kindle_preview/kindle.png docs/images/kindle-dashboard.png
 ```
 
-Arguments, all optional: outlook (`hourly` | `daily`), language (`en` | `bg`),
-weather (`calm` | `cold`), `KINDLE_PAGE_W` (600, 536, 1072 …), and `warn`, which
-draws the low-battery badge the firmware only draws when an ESP-NOW node is
-actually running down. It is the fifth argument and off by default, so the
-default picture is the ordinary page rather than an alarmed one:
+Arguments, all optional and positional: outlook (`hourly` | `daily`), language
+(`en` | `bg`), weather (`calm` | `cold`), `KINDLE_PAGE_W` (600, 536, 1072 …),
+`warn`, and a clock style.
+
+`warn` draws the low-battery badge the firmware only draws when an ESP-NOW node
+is actually running down; it is off by default, so the default picture is the
+ordinary page rather than an alarmed one. The sixth argument is one of `plain`
+(default), `boxed`, `ruled` or `dated` — the runtime clock styles from
+**Settings → E-ink dashboard**. Pass `-` for an argument you want to skip.
 
 ```bash
 python3 tools/kindle_preview/preview.py hourly bg calm 600 warn
+python3 tools/kindle_preview/preview.py hourly bg calm 600 -    boxed
 ```
 
 The screenshot script takes an output path and a viewport, and prints the
@@ -36,6 +41,11 @@ and replays them through the same `kdPx()` rounding. Sizes, greys and spacing
 therefore cannot drift from the code, and the script refuses to run if the
 extraction yields less than 1500 characters — the emitter having changed shape
 should fail loudly rather than quietly render the wrong page.
+
+The clock-style overrides are extracted the same way, out of `kdSkinCss()` in
+`src/web/KindleSkin.h`. Each style claims to keep the block at the height the
+design fixed, and a claim like that is worth nothing unless the thing being
+measured is what the device actually emits.
 
 **The markup and the strings are this script's own**, and that half can drift.
 It has: an earlier render showed a chart key describing a hatched band the

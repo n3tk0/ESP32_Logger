@@ -810,6 +810,7 @@ var LAZY_PAGES = {
   settings_platform:  1, // aggregator: hardware + core logic + modules
   settings_netime:    1, // aggregator: network + time
   settings_espnow:    1, // ESP-NOW battery nodes
+  settings_kindle:    1, // the e-ink dashboard's appearance
   update:             1,
 };
 var _loadedPartials = {};   // page name → true once injected
@@ -970,6 +971,9 @@ function pageInit(page) {
       break;
     case "settings_espnow":
       espnowInit();
+      break;
+    case "settings_kindle":
+      kindleInit();
       break;
     case "settings":
       break;
@@ -1275,6 +1279,7 @@ var PAGE_MSG_IDS = {
   settings_datalog: "dl-msg",
   sensors:          "sl-msg",
   settings_espnow:  "en-msg",
+  settings_kindle:  "kd-msg",
 };
 
 function settingsSave(ev, url, form, restart) {

@@ -48,6 +48,26 @@ for m in re.finditer(r'KD_S\(\s*((?:"(?:[^"\\]|\\.)*"\s*)+)\)|KD_N\(\s*(-?\d+)\s
 if len(style) < 1500:
     raise SystemExit('stylesheet extraction produced %d chars — the emitter shape changed' % len(style))
 
+# ── The clock style, also extracted rather than copied ──────────────────────
+# config.kindle.clockStyle is a runtime setting, and its CSS is emitted by
+# kdSkinCss() in src/web/KindleSkin.h as overrides appended after the sheet
+# above. Each style claims to keep the block's total height at the 139 px the
+# design fixed — which is what keeps the hairline under the clock level with
+# the outdoor column — and that claim is only worth anything if it is measured.
+# So the arm is pulled out of the firmware and appended here the same way the
+# device would append it, and shot.mjs prints the resulting page height.
+CLOCK = sys.argv[6] if len(sys.argv) > 6 else 'plain'
+if CLOCK != 'plain':
+    arm = {'boxed': 'KCLOCK_BOXED', 'ruled': 'KCLOCK_RULED', 'dated': 'KCLOCK_DATED'}
+    if CLOCK not in arm:
+        raise SystemExit('unknown clock style %r (plain|boxed|ruled|dated)' % CLOCK)
+    skin_src = open(os.path.join(ROOT, 'src/web/KindleSkin.h')).read()
+    j0 = skin_src.index('case ' + arm[CLOCK] + ':')
+    j1 = skin_src.index('break;', j0)
+    blk = re.sub(r'//[^\n]*', '', skin_src[j0:j1])
+    for m in re.finditer(r'out \+= "((?:[^"\\]|\\.)*)"|out \+= kdPx\(\s*(-?\d+)\s*\)', blk):
+        style += m.group(1).replace('\\"', '"') if m.group(1) else str(kdpx(int(m.group(2))))
+
 
 S = {
  'en': dict(place='Balcony', when='Tuesday 25 November &middot; 17:40', out='Outside', ins='Inside',
@@ -186,6 +206,7 @@ body=('<table class="hero"><tr><td width="50%">'
  +' <span class="dim">('+HERO['d']+')</span></div>'
  '</td><td width="50%" class="sep">'
  '<div class="clock">17:40</div>'
+ +('<div class="clock-d">25 %s</div>'%S['mon'] if CLOCK=='dated' else '')+
  '<div class="inrule"></div>'
  '<div class="lab">'+S['ins']+'</div>'
  '<div class="in-t">21.0<span class="in-d">&deg;</span>'

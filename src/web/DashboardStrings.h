@@ -25,8 +25,9 @@
 // The page declares UTF-8 and the device's serif faces are named first, but
 // Bookerly's Cyrillic coverage varies by firmware. The stack therefore falls
 // through to the reader's own fallback; if a Bulgarian build renders boxes,
-// that is the font, not the encoding, and switching KINDLE_FONT_STACK to a
-// face the device definitely carries is the fix.
+// that is the font, not the encoding, and the fix is to pick a face the device
+// definitely carries — Settings → E-ink dashboard, which is a runtime setting
+// (config.kindle.face) and not a reflash.
 // ============================================================================
 #pragma once
 

@@ -1,0 +1,178 @@
+  <section class="page" id="page-settings_kindle">
+    <div class="page-head">
+      <div>
+        <h1 class="page-title"><span data-icon="book-text"></span> E-ink dashboard</h1>
+        <div class="page-sub"><a href="#settings">Settings</a> / E-ink dashboard</div>
+      </div>
+      <div class="page-actions">
+        <a class="btn" href="/kindle" target="_blank" rel="noopener">
+          <span data-icon="eye"></span> Open the page
+        </a>
+        <button class="btn" data-click="kindleRefresh"><span data-icon="refresh-cw"></span> Reload</button>
+      </div>
+    </div>
+
+    <div id="kd-msg"></div>
+
+    <div class="card">
+      <div class="card-body">
+        <p class="hint" style="margin:0">
+          <code>/kindle</code> is drawn on the collector and served to the
+          reader as finished HTML — there is no script on it and nothing to
+          configure from the reader itself, which is why these live here. A
+          change takes effect on the panel's next repaint.
+          <span id="kd-pagew"></span>
+        </p>
+      </div>
+    </div>
+
+    <div id="kd-form">
+      <!-- Typeface -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="book-text"></span> Typeface</div>
+        </div>
+        <div class="card-body">
+          <div class="field">
+            <label class="field-label" for="kd-face">Face</label>
+            <select id="kd-face" class="input" data-change="kindleFaceChanged">
+              <option value="0">Bookerly — the reader's own serif (default)</option>
+              <option value="1">Caecilia — the older Kindle slab</option>
+              <option value="2">Palatino</option>
+              <option value="3">Baskerville</option>
+              <option value="4">Helvetica — sans</option>
+              <option value="5">Futura — geometric sans</option>
+              <option value="6">Custom…</option>
+            </select>
+            <p class="hint">
+              Which faces a reader can actually reach depends on its firmware.
+              Every choice falls back to a generic family, so a face the device
+              does not carry renders in the browser's default rather than in
+              nothing.
+            </p>
+          </div>
+          <div class="field" id="kd-face-custom-row" style="display:none">
+            <label class="field-label" for="kd-face-custom">Font family list</label>
+            <input class="input" id="kd-face-custom" maxlength="47"
+                   placeholder="Amazon Ember,Bookerly,serif">
+            <p class="hint">
+              Written straight into the page's stylesheet, so it is filtered
+              down to letters, digits, spaces, commas, quotes and hyphens.
+              End it with a generic family.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Clock -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="clock"></span> Clock</div>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:190px">
+              <label class="field-label" for="kd-clock">Style</label>
+              <select id="kd-clock" class="input" data-change="kindleClockChanged">
+                <option value="0">Plain — large numerals</option>
+                <option value="1">Boxed — white on black</option>
+                <option value="2">Ruled — hairline above, wider tracking</option>
+                <option value="3">With the date beneath</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1;min-width:150px">
+              <label class="field-label" for="kd-time">Time</label>
+              <select id="kd-time" class="input">
+                <option value="0">09:05</option>
+                <option value="1">9:05</option>
+                <option value="2">9:05am</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1;min-width:150px">
+              <label class="field-label" for="kd-date">Date</label>
+              <select id="kd-date" class="input">
+                <option value="0">27 august</option>
+                <option value="1">august 27</option>
+                <option value="2">27.08.2026</option>
+                <option value="3">2026-08-27</option>
+              </select>
+              <p class="hint" id="kd-date-hint">Drawn only by the dated clock style.</p>
+            </div>
+          </div>
+          <p class="hint">
+            No style shows seconds. The panel repaints on a timer measured in
+            minutes, so a seconds field would be wrong the moment it was drawn.
+          </p>
+        </div>
+      </div>
+
+      <!-- Weight -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="sliders-horizontal"></span> Weight</div>
+        </div>
+        <div class="card-body">
+          <p class="hint" style="margin-top:0">
+            Which figures are set bold. Nothing is, by default: the page's sizes
+            already carry the hierarchy, and weight on top of them is for a
+            shelf far enough away that size alone stops being enough.
+          </p>
+          <div class="grid grid-auto" id="kd-bold"></div>
+        </div>
+      </div>
+
+      <!-- Blocks -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="eye"></span> What is drawn</div>
+        </div>
+        <div class="card-body">
+          <p class="hint" style="margin-top:0">
+            All on by default. Turning things off is for the reader who wants
+            the page to be two numbers and nothing else — every block removed
+            gives its height back to the ones above it.
+          </p>
+          <div class="grid grid-auto" id="kd-show"></div>
+        </div>
+      </div>
+
+      <!-- Units -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="gauge"></span> Units</div>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:190px">
+              <label class="field-label" for="kd-press">Pressure</label>
+              <select id="kd-press" class="input">
+                <option value="0">hPa — 1008</option>
+                <option value="1">mmHg — 756</option>
+                <option value="2">inHg — 29.77</option>
+              </select>
+              <p class="hint">The three-hour change follows the same unit.</p>
+            </div>
+            <div class="field" style="flex:1;min-width:190px">
+              <label class="field-label" for="kd-dec">Temperature</label>
+              <select id="kd-dec" class="input">
+                <option value="1">One decimal — 8.4°</option>
+                <option value="0">Whole degrees — 8°</option>
+              </select>
+              <p class="hint">Whole degrees set the big numerals wider apart.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body" style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn primary" data-click="kindleSave">
+            <span data-icon="save"></span> Save
+          </button>
+          <button class="btn" data-click="kindleDefaults">
+            <span data-icon="rotate-ccw"></span> Back to the built-in design
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>

@@ -53,7 +53,7 @@ constexpr const char* DEFAULT_DATALOG_PREFIX = "datalog";
 constexpr const char* DEFAULT_NTP_SERVER     = "pool.ntp.org";
 
 #define CONFIG_STRUCT_MAGIC  0xC0FFEE36
-#define CONFIG_VERSION       13
+#define CONFIG_VERSION       14
 
 // DS1302 RAM addresses for bootcount backup
 #define RTC_RAM_BOOTCOUNT_ADDR  0
@@ -104,6 +104,72 @@ enum DatalogRotation : uint8_t {
 enum ChartLabelFormat : uint8_t {
     LABEL_DATETIME = 0, LABEL_BOOTCOUNT = 1, LABEL_BOTH = 2
 };
+
+// ── Kindle dashboard appearance (v14) ───────────────────────────────────────
+// The page's proportions are not in here. Sizes, spacing and the greys were
+// measured against a 600 px layout and are what make the thing legible from
+// across a room; exposing them would mostly offer people a way to break it.
+// What is here is the set of choices with no single right answer: the face,
+// which numbers carry weight, how the time and the pressure are written, and
+// what the clock looks like.
+enum KindleFace : uint8_t {
+    KFACE_BOOKERLY = 0,     // the reader's own serif — the design default
+    KFACE_CAECILIA = 1,     // the older Kindle slab serif
+    KFACE_PALATINO = 2,
+    KFACE_BASKERVILLE = 3,
+    KFACE_HELVETICA = 4,    // sans
+    KFACE_FUTURA = 5,       // geometric sans, very open numerals
+    KFACE_CUSTOM = 6        // whatever faceCustom names
+};
+
+enum KindleClockStyle : uint8_t {
+    KCLOCK_PLAIN = 0,       // large numerals, as designed
+    KCLOCK_BOXED = 1,       // white on a black plate, like the current weekday
+    KCLOCK_RULED = 2,       // hairlines above and below, wider tracking
+    KCLOCK_DATED = 3        // plain, with the date beneath it
+};
+
+enum KindleTimeFormat : uint8_t {
+    KTIME_24 = 0,           // 09:05
+    KTIME_24_LEAN = 1,      // 9:05 — no leading zero
+    KTIME_12 = 2            // 9:05 am
+};
+
+enum KindleDateFormat : uint8_t {
+    KDATE_DAY_MONTH = 0,    // 27 august
+    KDATE_MONTH_DAY = 1,    // august 27
+    KDATE_NUMERIC = 2,      // 27.08.2026
+    KDATE_ISO = 3           // 2026-08-27
+};
+
+enum KindlePressureUnit : uint8_t {
+    KPRESS_HPA = 0, KPRESS_MMHG = 1, KPRESS_INHG = 2
+};
+
+// Which figures are set bold. A bitmask and not a single "emphasis" setting
+// because the answer depends on the shelf: a page read across a room wants the
+// outdoor temperature heavy, one read at a desk may want nothing heavy at all.
+constexpr uint16_t KBOLD_OUT_TEMP  = 0x0001;
+constexpr uint16_t KBOLD_OUT_HUM   = 0x0002;
+constexpr uint16_t KBOLD_PRESSURE  = 0x0004;
+constexpr uint16_t KBOLD_CLOCK     = 0x0008;
+constexpr uint16_t KBOLD_IN_TEMP   = 0x0010;
+constexpr uint16_t KBOLD_IN_HUM    = 0x0020;
+constexpr uint16_t KBOLD_FORECAST  = 0x0040;
+constexpr uint16_t KBOLD_WEEK      = 0x0080;
+constexpr uint16_t KBOLD_LABELS    = 0x0100;
+
+// Which blocks are drawn. Every one of these defaults to on; they exist for
+// the reader who wants the page to be two numbers and nothing else.
+constexpr uint16_t KSHOW_OUT_HUM   = 0x0001;
+constexpr uint16_t KSHOW_PRESSURE  = 0x0002;
+constexpr uint16_t KSHOW_TENDENCY  = 0x0004;
+constexpr uint16_t KSHOW_RANGE     = 0x0008;   // the 24 h low-to-high line
+constexpr uint16_t KSHOW_INSIDE    = 0x0010;
+constexpr uint16_t KSHOW_CHART     = 0x0020;
+constexpr uint16_t KSHOW_WEEK      = 0x0040;
+constexpr uint16_t KSHOW_BATTERY   = 0x0080;   // the low-battery badge
+constexpr uint16_t KSHOW_ALL       = 0x00FF;
 
 enum DateFormat   : uint8_t { DATE_OFF=0, DATE_DDMMYYYY=1, DATE_MMDDYYYY=2, DATE_YYYYMMDD=3, DATE_DDMMYYYY_DOT=4 };
 enum TimeFormat   : uint8_t { TIME_HHMMSS=0, TIME_HHMM=1, TIME_12H=2 };
@@ -239,6 +305,30 @@ struct NetworkConfig {
     uint8_t reserved[17]; // Reserved for alignment (one byte used for dstOffsetHours)
 };
 
+// KindleConfig — how GET /kindle is drawn (v14).
+//
+// PRESENT ON EVERY BUILD, including one without FEATURE_KINDLE_DASHBOARD.
+// config.bin is written by whichever firmware is running and read by whichever
+// firmware runs next, and those need not have the same feature set: a struct
+// whose LAYOUT depended on a build flag would mean two firmwares disagreeing
+// about where `network` starts. So the bytes are always here; only the code
+// that reads them is conditional.
+//
+// Appended at the end of DeviceConfig for the same reason LoggerConfig was —
+// see the note there. Future fields go in `reserved`.
+struct KindleConfig {
+    uint8_t  face;            // KindleFace
+    char     faceCustom[48];  // KFACE_CUSTOM: a raw CSS font-family list
+    uint16_t boldZones;       // KBOLD_* bitmask
+    uint16_t showFlags;       // KSHOW_* bitmask
+    uint8_t  clockStyle;      // KindleClockStyle
+    uint8_t  timeFormat;      // KindleTimeFormat
+    uint8_t  dateFormat;      // KindleDateFormat
+    uint8_t  pressureUnit;    // KindlePressureUnit
+    uint8_t  tempDecimals;    // 0 or 1
+    uint8_t  reserved[15];
+};
+
 struct DeviceConfig {
     uint32_t magic;
     uint8_t version;
@@ -252,7 +342,8 @@ struct DeviceConfig {
     FlowMeterConfig flowMeter;
     HardwareConfig hardware;
     NetworkConfig  network;
-    LoggerConfig   logger;     // appended in v13 — keep at the end
+    LoggerConfig   logger;     // appended in v13
+    KindleConfig   kindle;     // appended in v14 — keep at the end
 };
 
 struct LogEntry {

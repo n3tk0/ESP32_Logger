@@ -6,8 +6,8 @@ they are not compiled, so nothing catches a page that fetches a field the
 firmware does not send, or a button wired to a handler that was never
 registered in core.js's allowlist.
 
-The stub answers only what the ESP-NOW page needs. Everything else the SPA
-polls on boot gets an empty object, so the page under test is not competing
+The stub answers what the ESP-NOW and e-ink pages need. Everything else the
+SPA polls on boot gets an empty object, so the page under test is not competing
 with a wall of failed requests — and the routes it does NOT serve (a plain
 download link like /export_settings) 404 by design; the driver ignores those.
 
@@ -38,6 +38,24 @@ STATUS = {
               "discover_seen": 5, "discover_bad_sig": 1, "paired": 3},
 }
 
+# The e-ink dashboard's appearance, as GET /api/kindle/config returns it.
+# Deliberately NOT the defaults: a page that renders correctly only when every
+# value is zero is a page whose select boxes have never been proven to reflect
+# what the device holds.
+KINDLE = {
+    "face": 4,            # Helvetica
+    "face_custom": "",
+    "bold": 0x0009,       # outdoor temperature + clock
+    "show": 0x00FF - 0x0040,   # everything except the week strip
+    "clock_style": 3,     # dated
+    "time_format": 2,     # 12-hour
+    "date_format": 1,     # month first
+    "pressure_unit": 1,   # mmHg
+    "decimals": 0,
+    "page_w": 600,
+}
+
+
 class H(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=ROOT, **kw)
@@ -57,6 +75,8 @@ class H(http.server.SimpleHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path == "/api/espnow/status":
             return self._json(STATUS)
+        if path == "/api/kindle/config":
+            return self._json(KINDLE)
         if path == "/api/csrf-token":
             return self._json({"token": "test-token"})
         # Everything else the SPA polls on boot — answered emptily so the page
@@ -79,6 +99,17 @@ class H(http.server.SimpleHTTPRequestHandler):
                 if str(node["node_id"]) == body.get("node_id", [""])[0]:
                     if body.get("label"): node["id"] = body["label"][0]
                     if body.get("interval"): node["interval"] = int(body["interval"][0])
+            return self._json({"ok": True})
+        if path == "/api/kindle/config":
+            # Stored back, so the driver can assert that what it set is what a
+            # re-read returns — the round trip is the thing worth proving,
+            # since the page rebuilds itself from the GET after every save.
+            for k in ("face", "bold", "show", "clock_style", "time_format",
+                      "date_format", "pressure_unit", "decimals"):
+                if k in body:
+                    KINDLE[k] = int(body[k][0])
+            if "face_custom" in body:
+                KINDLE["face_custom"] = body["face_custom"][0]
             return self._json({"ok": True})
         if path == "/api/espnow/forget":
             STATUS["nodes"] = [x for x in STATUS["nodes"]

@@ -12,12 +12,14 @@ assert on what is painted.
 ```
 python3 tests/web/mock_device.py 8765 &
 python3 tests/web/drive_espnow_page.py
+python3 tests/web/drive_kindle_page.py
 ```
 
 | | |
 |---|---|
-| [`mock_device.py`](mock_device.py) | serves `www/` and stubs the ESP-NOW endpoints |
+| [`mock_device.py`](mock_device.py) | serves `www/` and stubs the endpoints the two pages use |
 | [`drive_espnow_page.py`](drive_espnow_page.py) | drives `#settings_espnow` in Chromium |
+| [`drive_kindle_page.py`](drive_kindle_page.py) | drives `#settings_kindle` in Chromium |
 
 Needs `pip install playwright` and a browser. `CHROMIUM_PATH` points the driver
 at an existing Chromium when one is already installed; without it Playwright
@@ -30,11 +32,21 @@ Rendering, and then behaviour: clicking the pairing button and watching the
 badge flip, renaming a node and watching the change round-trip through the API
 and re-render, forgetting one and watching it leave the list.
 
-The assertions that matter most are the two **nulls**. `/api/espnow/status`
-sends `null` for an unavailable RSSI — Arduino core 2.x hands the receive
-callback no signal information at all — and for a remaining life the battery
-model refuses to estimate. Both have to read as a dash. A zero in either would
-be a number somebody believes.
+On the ESP-NOW page the assertions that matter most are the two **nulls**.
+`/api/espnow/status` sends `null` for an unavailable RSSI — Arduino core 2.x
+hands the receive callback no signal information at all — and for a remaining
+life the battery model refuses to estimate. Both have to read as a dash. A zero
+in either would be a number somebody believes.
+
+On the e-ink settings page it is the **bitmasks**. Weight and visibility travel
+as two integers whose bits are defined in `src/core/Config.h` and repeated in
+`www/js/kindle.js`, and a page that reads a mask back correctly while writing
+the neighbouring bit looks perfect and silently toggles the wrong setting. So
+the driver sets bits in both directions, reads the mask back off the wire, and
+compares it against the exact value the firmware's constants say it should be.
+The mock also starts from a non-default configuration on purpose: a page that
+renders correctly only when every value is zero has never had its select boxes
+proven against anything.
 
 ## A note on the first run of this file
 

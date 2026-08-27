@@ -20,6 +20,7 @@
 #include "../core/ModuleRegistry.h"  // Pass 5 phase 3: /api/modules
 #include "IngestHandler.h"           // POST /api/ingest (FEATURE_REMOTE_NODES)
 #include "../espnow/EspNowIngest.h"   // GET/POST /api/espnow/* (FEATURE_ESPNOW_INGEST)
+#include "KindleSkin.h"               // GET/POST /api/kindle/config
 #include "../managers/ConfigManager.h" // saveConfig() after module update
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
@@ -507,6 +508,104 @@ static void handleEspnowForget(AsyncWebServerRequest* req) {
     req->send(200, "application/json", "{\"ok\":true}");
 }
 #endif  // FEATURE_ESPNOW_INGEST
+
+#ifdef FEATURE_KINDLE_DASHBOARD
+// ---------------------------------------------------------------------------
+// GET /api/kindle/config — how the e-ink dashboard is drawn
+// POST /api/kindle/config — change it
+// ---------------------------------------------------------------------------
+// The page itself has no settings interface and never will: it is served to a
+// reader with no JavaScript and a five-way pad, and a form there would be a
+// worse version of the one that already exists here. So the browser configures
+// it and the reader displays it.
+//
+// What is settable and what is not is argued in KindleSkin.h. Briefly: the
+// choices with no single right answer are here; the sizes and greys that were
+// measured are not.
+static void handleKindleConfigGet(AsyncWebServerRequest* req) {
+    KindleConfig k = config.kindle;
+    kdSkinClamp(k);
+
+    JsonDocument doc;
+    doc["face"]          = k.face;
+    doc["face_custom"]   = k.faceCustom;
+    doc["bold"]          = k.boldZones;
+    doc["show"]          = k.showFlags;
+    doc["clock_style"]   = k.clockStyle;
+    doc["time_format"]   = k.timeFormat;
+    doc["date_format"]   = k.dateFormat;
+    doc["pressure_unit"] = k.pressureUnit;
+    doc["decimals"]      = k.tempDecimals;
+
+    // The page's own width, read-only. It is a build-time constant (every size
+    // in the stylesheet is derived from it), and the settings page shows it so
+    // that "the layout is wrong on my reader" has somewhere to start rather
+    // than looking like a setting somebody forgot to expose.
+    doc["page_w"]        = KINDLE_PAGE_W;
+    sendJsonResponse(req, doc);
+}
+
+// A font-family list arrives as free text and ends up inside a stylesheet, so
+// it is filtered rather than trusted: letters, digits, spaces, commas, quotes
+// and hyphens are everything a family list can legitimately contain, and the
+// characters that would end the declaration and begin something else are not
+// in that set. Anything outside it is dropped, not rejected — a stray
+// semicolon is a typo, and losing the page over one is a worse answer than
+// ignoring it.
+static void kindleSanitiseFace(const String& in, char* out, size_t n) {
+    size_t j = 0;
+    for (size_t i = 0; i < in.length() && j + 1 < n; i++) {
+        const char c = in[i];
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') ||
+                        c == ' ' || c == ',' || c == '\'' || c == '-';
+        if (ok) out[j++] = c;
+    }
+    out[j] = '\0';
+}
+
+static void handleKindleConfigPost(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
+
+    KindleConfig k = config.kindle;
+
+    #define KD_PARAM(name, field) \
+        if (req->hasParam(name, true)) \
+            k.field = (decltype(k.field))req->getParam(name, true)->value().toInt()
+
+    KD_PARAM("face",          face);
+    KD_PARAM("bold",          boldZones);
+    KD_PARAM("show",          showFlags);
+    KD_PARAM("clock_style",   clockStyle);
+    KD_PARAM("time_format",   timeFormat);
+    KD_PARAM("date_format",   dateFormat);
+    KD_PARAM("pressure_unit", pressureUnit);
+    KD_PARAM("decimals",      tempDecimals);
+    #undef KD_PARAM
+
+    if (req->hasParam("face_custom", true))
+        kindleSanitiseFace(req->getParam("face_custom", true)->value(),
+                           k.faceCustom, sizeof(k.faceCustom));
+
+    // Clamped before it is stored, so an out-of-range value never reaches the
+    // renderer even by way of a config.bin somebody edited by hand.
+    kdSkinClamp(k);
+
+    // A custom face with nothing in the field would render the page in the
+    // browser's default rather than in anything chosen; the base stack is a
+    // better answer than a blank one.
+    if (k.face == KFACE_CUSTOM && k.faceCustom[0] == '\0') k.face = KFACE_BOOKERLY;
+
+    config.kindle = k;
+    if (!saveConfig()) {
+        req->send(500, "application/json", "{\"ok\":false,\"error\":\"save failed\"}");
+        return;
+    }
+    // No reload of anything: the dashboard reads config.kindle each time it
+    // renders, so the next repaint on the reader is the new page.
+    req->send(200, "application/json", "{\"ok\":true}");
+}
+#endif  // FEATURE_KINDLE_DASHBOARD
 
 // ---------------------------------------------------------------------------
 // POST /api/config/platform — reload platform_config.json
@@ -1406,6 +1505,10 @@ void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/espnow/pair",       HTTP_POST, handleEspnowPair);
     server.on("/api/espnow/node",       HTTP_POST, handleEspnowNode);
     server.on("/api/espnow/forget",     HTTP_POST, handleEspnowForget);
+#endif
+#ifdef FEATURE_KINDLE_DASHBOARD
+    server.on("/api/kindle/config",     HTTP_GET,  handleKindleConfigGet);
+    server.on("/api/kindle/config",     HTTP_POST, handleKindleConfigPost);
 #endif
     server.on("/api/mqtt/ha_discovery", HTTP_POST, handleMqttHaDiscovery);
     server.on("/api/ota/status",        HTTP_GET,  handleOtaStatus);

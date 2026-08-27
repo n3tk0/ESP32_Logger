@@ -106,6 +106,7 @@ changes what the page *says* is runtime.
 | `KINDLE_REFRESH_SEC`, `KINDLE_REFRESH_MIN_SEC`, `KINDLE_DATA_PERIOD_SEC`, `KINDLE_FOLLOW_DATA`, `KINDLE_CLOCK_PIN_REFRESH`, `KINDLE_CLOCK_SYNC_GUARD_SEC` | build flag | they only set numbers in a `<meta>` tag |
 | `KINDLE_PAGE_W` | build flag | rescales every size in the stylesheet |
 | `KINDLE_LANG_BG` | build flag | a single-language build pays nothing for the other |
+| face, weight, clock style, time/date/pressure format, which blocks are drawn | **the collector's web UI** | Settings → E-ink dashboard; see [Appearance](#appearance) |
 | provider, key, lat/lon, outlook, interval | **the collector's web UI** | Settings → Modules → Weather forecast |
 
 The forecast row is the part you will actually want to change after flashing —
@@ -332,6 +333,79 @@ touch read as one muddy mass — so it is gone.
 The two chart lines are still told apart by **dash pattern as well as** shade,
 because redundant coding costs nothing and survives a panel with its contrast
 turned down.
+
+## Appearance
+
+Everything above describes the page as it is drawn out of the box. Some of it
+can be changed afterwards, from **Settings → E-ink dashboard** in the
+collector's web interface — the page itself has no settings and never will,
+because it is served to a browser with no JavaScript and sometimes no touch
+panel, and a form there would be a worse version of the one that already
+exists.
+
+| | |
+|---|---|
+| **Face** | Bookerly (default), Caecilia, Palatino, Baskerville, Helvetica, Futura, or a font-family list of your own |
+| **Weight** | which figures are set bold — nine zones, none by default |
+| **Clock** | plain, boxed, ruled, or with the date beneath |
+| **Time** | `09:05`, `9:05`, `9:05am` |
+| **Date** | `27 august`, `august 27`, `27.08.2026`, `2026-08-27` |
+| **Pressure** | hPa, mmHg or inHg — the three-hour change follows it |
+| **Temperature** | one decimal or whole degrees |
+| **Blocks** | outside humidity, pressure, tendency, the 24 h range, the inside block, the chart, the week strip, the battery badge |
+
+The settings live in `config.kindle` (`src/core/Config.h`) and are read on
+every render, so a save takes effect on the panel's next repaint. They survive
+a reflash the way the rest of the configuration does, and they travel through
+settings export and import.
+
+### What is not settable, and why
+
+Sizes, spacing, the greys, and the page width. The first three are what make
+the page legible from across a room and were arrived at by measuring in a
+browser rather than by taste; offering them would mostly offer a way to break
+the page. The width stays `KINDLE_PAGE_W` because every size in the stylesheet
+is derived from it at compile time.
+
+### How it is emitted
+
+The stylesheet in `KindleDashboard.cpp` is a flat, unconditional run of
+`KD_S` / `KD_N` calls and stays that way; anything chosen is appended **after**
+it as overrides, by `kdSkinCss()` in `src/web/KindleSkin.h`. Two reasons, and
+the first is not cosmetic:
+
+1. `tools/kindle_preview/preview.py` reconstructs the sheet by reading those
+   calls out of the source. A branch in it would put every arm of every choice
+   into the extracted CSS at once, and the preview would quietly stop being a
+   picture of the page.
+2. Reading the sheet against the design means reading it top to bottom.
+
+A device on defaults emits an empty override block, which is also why the
+defaults are the design rather than something more opinionated: nobody's page
+changes appearance because the firmware learned it could.
+
+### The clock styles keep the same height
+
+Each of the four fits in the 139 px the design fixed for that block, which is
+what keeps the hairline under the clock level with the outdoor column's text.
+Boxed takes its breathing room out of its own height, ruled puts its border
+inside its padding, and the dated style takes 27 px from the clock rather than
+adding them beneath it. The page measures **796 of the 800 budget in all four**,
+with the hairline landing on the same pixel — measured in a browser through
+`preview.py`, which extracts the override arm from `KindleSkin.h` the same way
+it extracts the base sheet.
+
+### On the faces
+
+Which of them a reader can actually reach depends on its firmware; every stack
+ends in a generic family, so a face the device does not carry renders in the
+browser's default rather than in nothing. The widest line the page can produce
+is `-12° / 100%` in whole-degree mode, and it was checked against both a serif
+and a sans fallback in a desktop browser — that is a check of the layout, not
+of Bookerly, which is not installable here.
+
+A custom family list is written straight into the page's stylesheet, so it is
+filtered on the way in to letters, digits, spaces, commas, quotes and hyphens.
 
 ## When the panel repaints
 

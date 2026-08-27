@@ -304,6 +304,20 @@ void loadDefaultConfig() {
     // Logger (v13 wide-CSV pipeline)
     config.logger.csvLoggingEnabled         = true;
     config.logger.aggregationIntervalSec    = 60;
+
+    // Kindle dashboard (v14). The defaults ARE the design the page was tuned
+    // at — nothing bold, the reader's own serif, every block shown — so a
+    // device that has never visited the settings page renders exactly what
+    // docs/KINDLE_DASHBOARD.md describes.
+    config.kindle.face         = KFACE_BOOKERLY;
+    config.kindle.faceCustom[0] = '\0';
+    config.kindle.boldZones    = 0;
+    config.kindle.showFlags    = KSHOW_ALL;
+    config.kindle.clockStyle   = KCLOCK_PLAIN;
+    config.kindle.timeFormat   = KTIME_24;
+    config.kindle.dateFormat   = KDATE_DAY_MONTH;
+    config.kindle.pressureUnit = KPRESS_HPA;
+    config.kindle.tempDecimals = 1;
 }
 
 // ============================================================================
@@ -341,6 +355,21 @@ void migrateConfig(uint8_t fromVersion) {
         // top-level LoggerConfig appended at the end of DeviceConfig.
         config.logger.csvLoggingEnabled         = true;
         config.logger.aggregationIntervalSec    = 60;
+    }
+    if (fromVersion < 14) {
+        // The Kindle dashboard's appearance became a setting.  Every device
+        // upgrading into v14 has been rendering the built-in design, so the
+        // defaults are chosen to BE that design: the page must not change
+        // appearance because the firmware learned it could.
+        config.kindle.face          = KFACE_BOOKERLY;
+        config.kindle.faceCustom[0] = '\0';
+        config.kindle.boldZones     = 0;
+        config.kindle.showFlags     = KSHOW_ALL;
+        config.kindle.clockStyle    = KCLOCK_PLAIN;
+        config.kindle.timeFormat    = KTIME_24;
+        config.kindle.dateFormat    = KDATE_DAY_MONTH;
+        config.kindle.pressureUnit  = KPRESS_HPA;
+        config.kindle.tempDecimals  = 1;
     }
     config.version = CONFIG_VERSION;
     config.hardware.version = CONFIG_VERSION;
@@ -443,7 +472,7 @@ bool loadConfig() {
 
         // Reject unrecognised source versions — byte layouts before v6 differ.
         uint8_t rawVersion = (got >= 5) ? rawBuf[sizeof(uint32_t)] : 0;
-        constexpr uint8_t KNOWN_MIGRATABLE[] = {6, 7, 8, 9, 10, 11, 12};
+        constexpr uint8_t KNOWN_MIGRATABLE[] = {6, 7, 8, 9, 10, 11, 12, 13};
         bool versionKnown = false;
         for (uint8_t v : KNOWN_MIGRATABLE) {
             if (rawVersion == v) { versionKnown = true; break; }
@@ -475,6 +504,7 @@ bool loadConfig() {
         SAFE_COPY(hardware);
         SAFE_COPY(network);
         SAFE_COPY(logger);   // v13+; pre-v13 binaries fall through to defaults
+        SAFE_COPY(kindle);   // v14+; pre-v14 binaries fall through to defaults
 
         #undef SAFE_COPY
 

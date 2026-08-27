@@ -604,6 +604,26 @@ and `days` is null whenever `batteryDaysLeft()` refuses to answer — too little
 history, or a slope inside the noise. A zero in either would read as a
 measurement.
 
+**E-ink dashboard** (`FEATURE_KINDLE_DASHBOARD`)
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/kindle/config` | read | How `/kindle` is drawn, plus its build-time width |
+| POST | `/api/kindle/config` | CSRF | Face, weight, clock style, formats, which blocks are drawn |
+
+The page being configured has no settings of its own and never will: it is
+served to a reader with no JavaScript and, on some firmware, a five-way pad
+instead of a touch panel. So the browser configures it and the reader displays
+it. A save takes effect on the panel's next repaint — nothing is pushed, and
+nothing needs reloading, because the renderer reads `config.kindle` each time.
+
+What is settable is argued in `src/web/KindleSkin.h`: the choices with no
+single right answer (face, weight, clock, units) are, and the sizes and greys
+that were measured in a browser are not. `page_w` is reported read-only for the
+same reason — it is a build-time constant every size in the stylesheet is
+derived from, and a reader on which the layout looks wrong needs to know where
+the number came from rather than hunting for a control that does not exist.
+
 **Platform & settings**
 
 | Method | Route | Auth | Purpose |
