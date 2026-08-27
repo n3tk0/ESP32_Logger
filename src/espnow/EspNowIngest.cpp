@@ -418,7 +418,7 @@ static bool servicePendingDiscover() {
     taskENTER_CRITICAL(&s_nodeMux);
     // Reuse the slot this MAC already holds, so re-pairing a node the
     // collector already knows does not consume a second id.
-    EspNowNode* n = s_nodes.byMac(mac);
+    const EspNowNode* n = s_nodes.byMac(mac);
     if (!n) {
         for (uint8_t id = 1; id < 255 && !n; id++)
             if (!s_nodes.byId(id))
@@ -641,7 +641,7 @@ bool espnowRemoveNode(uint8_t nodeId) {
     bool found = false;
 
     taskENTER_CRITICAL(&s_nodeMux);
-    EspNowNode* n = s_nodes.byId(nodeId);
+    const EspNowNode* n = s_nodes.byId(nodeId);
     if (n) {
         memcpy(mac, n->mac, 6);
         s_nodes.remove(nodeId);

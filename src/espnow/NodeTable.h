@@ -234,8 +234,10 @@ static inline int espnowBatteryMetrics(const EspNowNode& n, EspNowMetric* out, i
     if (!out || maxOut <= 0 || n.lastMv == 0) return 0;
     int i = 0;
 
-    const uint8_t pct = batteryPercent(n.lastMv);
-    if (i < maxOut) out[i++] = {EN_METRIC_BATT_PCT, (float)pct, "%"};
+    // No bounds test on the first: maxOut > 0 is established above, so the
+    // slot exists. The second one needs it, because the first may have taken
+    // the only slot there was.
+    out[i++] = {EN_METRIC_BATT_PCT, (float)batteryPercent(n.lastMv), "%"};
 
     const int16_t days = batteryDaysLeft(n.batt, n.lastMv);
     if (days >= 0 && i < maxOut) out[i++] = {EN_METRIC_BATT_DAYS, (float)days, "d"};
