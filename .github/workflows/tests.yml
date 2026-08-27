@@ -18,6 +18,7 @@ on:
       - 'docs/ARCHITECTURE.md'
       - 'tools/check_api_docs.py'
       - 'tools/check_doc_refs.py'
+      - 'node_espnow/**'
       - '**/*.md'
       - 'tools/check_metric_names.py'
       - 'scripts/gen_failsafe.py'
@@ -34,6 +35,7 @@ on:
       - 'docs/ARCHITECTURE.md'
       - 'tools/check_api_docs.py'
       - 'tools/check_doc_refs.py'
+      - 'node_espnow/**'
       - '**/*.md'
       - 'tools/check_metric_names.py'
       - 'scripts/gen_failsafe.py'
@@ -121,6 +123,11 @@ jobs:
         # Report-only for now: this is a large existing codebase, so we surface
         # findings without gating the PR.  Flip to `--error-exitcode=1` (drop
         # `|| true`) once the baseline is clean.
+        #
+        # node_espnow/src is scanned too.  It shares three headers with the
+        # collector and its findings have been read; node/ is deliberately NOT
+        # here, because its baseline has not been, and adding an unreviewed
+        # baseline to a report nobody gates on is how a report stops being read.
         run: |
           cppcheck --version
           cppcheck \
@@ -130,8 +137,8 @@ jobs:
             --suppress=missingIncludeSystem \
             --suppress=unusedFunction \
             --language=c++ --std=c++17 \
-            -I src \
-            src 2>&1 | tee cppcheck.log || true
+            -I src -I node_espnow/src \
+            src node_espnow/src 2>&1 | tee cppcheck.log || true
 
       - name: Upload cppcheck report
         if: always()
