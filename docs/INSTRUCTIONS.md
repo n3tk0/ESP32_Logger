@@ -11,7 +11,7 @@ is running. For build and flash instructions see [README.md](../README.md).
 
 On first boot the device has no saved board profile (`/board_profile.txt`
 absent), so `g_setupRequired = true` and all HTTP requests redirect to
-`/firstrun` (`src/web/WebServer.cpp:328-356`, `ESP_Logger.ino:572`).
+`/firstrun` (`FirstRunGateHandler` in `src/web/WebServer.cpp`; `g_setupRequired` is set in `ESP_Logger.ino`).
 
 ### Stage 1 — Board profile
 
@@ -38,7 +38,7 @@ Source: `src/core/BoardProfiles.cpp` (profile structs).
 
 ### Stage 3 — Pin assignment (legacy and hybrid only)
 
-The wizard collects seven pin fields (`src/web/FirstRunHandler.cpp:146-154`):
+The wizard collects seven pin fields (the `PinAssignment` table in `handlePostFirstRun()`, `src/web/FirstRunHandler.cpp`):
 
 | Field | Purpose |
 |---|---|
@@ -51,7 +51,7 @@ The wizard collects seven pin fields (`src/web/FirstRunHandler.cpp:146-154`):
 | `rtcSCLK` | DS1302 serial clock |
 
 Pins are validated against the active board profile before being accepted
-(`src/web/FirstRunHandler.cpp:157-175`). Strap, USB, flash, and reserved pins
+(`handlePostFirstRun()` in `src/web/FirstRunHandler.cpp`). Strap, USB, flash, and reserved pins
 are rejected. Continuous-mode builds can leave `flowSensor`/RTC pins as
 `PIN_UNSET` (0xFF) if those features are not wired.
 
@@ -67,7 +67,7 @@ After the wizard submits `POST /api/firstrun`, the board profile is written to
 **When to pick it:** water usage logging where battery life matters.
 
 **Power profile:** deep sleep between button presses; wake on GPIO interrupt
-from FF or PF button. Sleep entered via `_doSleep()` (`ESP_Logger.ino:176`),
+from FF or PF button. Sleep entered via `_doSleep()` (`ESP_Logger.ino`),
 which calls `esp_deep_sleep_start()`. Sleep macros: `ISR_DEBOUNCE_MICROS`,
 `BUTTON_WAIT_FLOW_MS`, `FLOW_IDLE_TIMEOUT_MS` in `src/setup.h`.
 
@@ -81,7 +81,7 @@ pipe-delimited TXT output to LittleFS or SD.
 pipelines are needed.
 
 **Power profile:** no deep sleep; `loop()` drives OTA confirm watchdog and
-FreeRTOS tasks run permanently (`ESP_Logger.ino:919`). CPU at full frequency.
+FreeRTOS tasks run permanently (`ESP_Logger.ino`). CPU at full frequency.
 
 **What runs:** FreeRTOS pipeline — SensorTask (priority 3), SlowSensorTask
 (priority 2), ProcessingTask (priority 2), StorageTask (priority 1), ExportTask
@@ -94,7 +94,7 @@ sensor readings.
 
 **Power profile:** no deep sleep (the sensor pipeline requires continuous
 operation); deep sleep is blocked when hybrid mode is active
-(`ESP_Logger.ino:650`).
+(the hybrid timer-wake path in `setup()`, `ESP_Logger.ino`).
 
 **What runs:** both the legacy state machine and the FreeRTOS pipeline.
 Flow events are recorded by `FlowRunLogger`; other sensors feed the pipeline.
@@ -107,7 +107,7 @@ Flow events are recorded by `FlowRunLogger`; other sensors feed the pipeline.
 
 Navigate to **Settings → Core Logic** (or directly to `/settings/sensors`).
 Click **+ Add Sensor**, choose a sensor type, and assign pins. Before
-rendering the pin picker, `www/js/sensors.js:clLoadBoardProfile()` (line 548)
+rendering the pin picker, `clLoadBoardProfile()` in `www/js/sensors.js`
 fetches `/api/board-profiles` and builds a pin dropdown that contains only
 GPIOs allowed by the active board profile. Pins not allowed by the profile
 are excluded from the selector.
@@ -119,7 +119,7 @@ reboots to apply.
 
 Two sensors that share a fixed I2C address cannot coexist. When
 `SensorManager` initialises a plugin it calls `_claimI2cAddress(addr, who)`
-(`src/sensors/SensorManager.cpp:29`). If the address is already claimed by
+(`src/sensors/SensorManager.cpp`). If the address is already claimed by
 another plugin, the second sensor fails to init and logs:
 
 ```
@@ -171,7 +171,7 @@ Optional: `port` (default 1883), `topic_prefix` (default `waterlogger`),
 `use_tls`.
 
 TLS: when `use_tls=true`, a `WiFiClientSecure` is used
-(`src/export/MqttExporter.cpp:79`). No bundled CA store; connection is
+(`MqttExporter::send()`). No bundled CA store; connection is
 `setInsecure()` until a CA store is shipped (see REFACTORING_GUIDELINES.md §Deferred).
 
 ### HTTP
@@ -182,15 +182,15 @@ Minimum required fields (`src/export/HttpExporter.cpp:HttpExporter::init`):
 Optional: `method` (default `POST`), `headers` (up to 4 key-value pairs).
 
 TLS: HTTPS URLs automatically use `WiFiClientSecure` with `setInsecure()`
-(`src/export/HttpExporter.cpp:79-83`). Header names with non-alphanumeric
+(`HttpExporter::send()`). Header names with non-alphanumeric
 characters and header values containing CRLF are rejected at load time.
 
 ### Webhook
 
-Minimum required fields (`src/export/WebhookExporter.cpp:8`):
+Minimum required fields (`WebhookExporter::init()`):
 `enabled=true`, `url`.
 
-TLS: `https://` URLs use `WiFiClientSecure` (`src/export/WebhookExporter.cpp:33`).
+TLS: `https://` URLs use `WiFiClientSecure` (`WebhookExporter::_fireRule()`).
 Webhook failures do not block other exporters.
 
 ### SensorCommunity
@@ -199,14 +199,14 @@ Minimum required fields: `enabled=true`. The exporter derives the sensor chip
 ID from the device MAC address automatically. Requires SDS011 or compatible PM
 sensor readings in the pipeline.
 
-TLS: always uses `WiFiClientSecure` (`src/export/SensorCommunityExporter.cpp:25`).
+TLS: always uses `WiFiClientSecure` (`SensorCommunityExporter::_postPin()`).
 
 ### OpenSenseMap
 
-Minimum required fields (`src/export/OpenSenseMapExporter.cpp:9-10`):
+Minimum required fields (`OpenSenseMapExporter::init()`):
 `enabled=true`, `box_id`, `access_token`.
 
-TLS: uses `WiFiClientSecure` (`src/export/OpenSenseMapExporter.cpp:74`).
+TLS: uses `WiFiClientSecure` (`OpenSenseMapExporter::send()`).
 
 ---
 
@@ -214,14 +214,14 @@ TLS: uses `WiFiClientSecure` (`src/export/OpenSenseMapExporter.cpp:74`).
 
 ### Upload flow
 
-POST a `.bin` firmware file to `/do_update` (`src/web/WebServer.cpp:1992`).
+POST a `.bin` firmware file to `/do_update` (registered in `setupWebServer()`, `src/web/WebServer.cpp`).
 The handler streams the upload to the OTA partition via the Arduino OTA Update
 library. A `sha256=<64-hex>` query parameter triggers SHA-256 verification:
 the server hashes each chunk with `mbedtls/sha256.h` and compares the final
-digest at upload completion (`src/web/WebServer.cpp:1979`).
+digest at upload completion (`mbedtls_sha256_finish` in the `/do_update` upload handler).
 
 The upload endpoint returns 503 if the OTA module is disabled:
-`src/web/WebServer.cpp:2069`.
+the `OTA disabled in /api/modules/ota` guard in `src/web/WebServer.cpp`.
 
 ### Auto-confirm and rollback
 
@@ -229,16 +229,16 @@ After a successful flash, the device reboots into the new image with the
 partition state `ESP_OTA_IMG_PENDING_VERIFY`. `OtaManager::boot()` arms a
 90-second deadline (`OTA_CONFIRM_TIMEOUT_MS` from `src/setup.h`).
 `OtaManager::tick(millis())` is called every `loop()` iteration
-(`ESP_Logger.ino:843`). If the device stays up for 90 s the image is
+(`ESP_Logger.ino`). If the device stays up for 90 s the image is
 confirmed. A crash or hardware watchdog reset before then triggers a
 bootloader rollback to the previous partition
-(`src/managers/OtaManager.cpp:68-70`).
+(`OtaManager::boot()`).
 
 ### OTA kill switch (R20)
 
 `POST /api/modules/ota/enable?on=0&csrf=<token>` disables the OTA upload
 path. Subsequent `/do_update` requests return `{"ok":false,"error":"OTA
-disabled in /api/modules/ota"}` with HTTP 503 (`src/web/WebServer.cpp:2069`).
+disabled in /api/modules/ota"}` with HTTP 503 (the same guard in `src/web/WebServer.cpp`).
 Re-enable with `?on=1`.
 
 ---
@@ -248,7 +248,7 @@ Re-enable with `?on=1`.
 ### Triggers
 
 Safe mode (`g_safeMode = true`) is set in three situations
-(`ESP_Logger.ino:508-551`):
+(`setup()` in `ESP_Logger.ino`):
 
 1. **Circuit breaker**: `g_consecutiveResets >= 3` non-graceful resets
    (WDT, panic, brownout) without a 60-second clean uptime between them.
@@ -256,16 +256,16 @@ Safe mode (`g_safeMode = true`) is set in three situations
 
 2. **LittleFS mount failure**: `LittleFS.begin(formatOnFail=false)` returns
    false. The device boots AP-only with no file system access
-   (`ESP_Logger.ino:544-551`).
+   (`setup()` in `ESP_Logger.ino`).
 
 3. **TaskManager init failure**: if `TaskManager::init()` returns false
-   (`ESP_Logger.ino:458-461`), safe mode is triggered before any FreeRTOS
+   (`ESP_Logger.ino`), safe mode is triggered before any FreeRTOS
    task starts.
 
 ### What is reachable in safe mode
 
 The embedded failsafe page is served for all routes by `sendFailsafePage()`
-(`src/web/WebServer.cpp:229`). It provides: OTA upload, LittleFS file
+(`src/web/WebServer.cpp`). It provides: OTA upload, LittleFS file
 management, and the Format Filesystem and Factory Reset buttons.
 
 It lives in PROGMEM, stored **gzipped** as `FAILSAFE_HTML_GZ`
@@ -274,13 +274,13 @@ It lives in PROGMEM, stored **gzipped** as `FAILSAFE_HTML_GZ`
 linked into the firmware image, never read from the filesystem it exists to
 repair. A client that does not send `Accept-Encoding: gzip` — curl, unless
 given `--compressed` — is served `FAILSAFE_PLAIN` instead
-(`src/web/WebServer.cpp:197`): a ~1 KB JavaScript-free page carrying the
+(`src/web/WebServer.cpp`): a ~1 KB JavaScript-free page carrying the
 upload and restart forms, so a shell rescue is not a binary dump.
 
 ### Format Filesystem button
 
 Use **only** when the device is stuck in safe mode due to LittleFS corruption.
-Sends `POST /api/format_filesystem` (`src/web/WebServer.cpp:1529`), which
+Sends `POST /api/format_filesystem` (`h_post_api_format_filesystem()` in `src/web/WebServer.cpp`), which
 wipes the entire LittleFS partition and reboots. This erases all config, board
 profile, logs, and UI files; the first-run wizard runs after restart.
 
@@ -290,7 +290,7 @@ profile, logs, and UI files; the first-run wizard runs after restart.
 
 ### /api/diag fields (R19)
 
-`GET /api/diag` returns a JSON object (`src/web/ApiHandlers.cpp:325`,
+`GET /api/diag` returns a JSON object (`src/web/ApiHandlers.cpp`,
 `handleApiDiag`):
 
 | Field | Contents |
@@ -322,7 +322,7 @@ uptime, free heap, and consecutive reset count at the top of the page.
 ### /reset_log.txt format
 
 One line per reset: `<timestamp> boot=<N> reason=<string> gpio=<hex>`.
-Written in `_writeResetLog()` (`ESP_Logger.ino:316`).
+Written in `_writeResetLog()` (`ESP_Logger.ino`).
 
 ---
 
@@ -333,10 +333,10 @@ Written in `_writeResetLog()` (`ESP_Logger.ino:316`).
 **Remedy:** fetch `GET /api/diag` and check `counters.resets` and the
 `resetLog` array. If resets ≥ 3, the circuit breaker fired — identify the
 crash from `resetLog`. A clean power-cycle that stays up for 60 s clears the
-counter (`ESP_Logger.ino:850-853`). If `resetLog` shows a LittleFS mount
+counter (the reset-counter clear in `setup()`, `ESP_Logger.ino`). If `resetLog` shows a LittleFS mount
 error, use the Format Filesystem button in the failsafe UI.
 
-Source: `ESP_Logger.ino:508-551`.
+Source: `setup()` in `ESP_Logger.ino`.
 
 ### Sensor refuses to init: "pin not assigned"
 
@@ -353,7 +353,7 @@ Source: `src/core/BoardProfiles.h:validateAttachPin`.
 sensor supports one. VEML6075 and VEML7700 share fixed address `0x10` and
 cannot coexist on the same bus.
 
-Source: `src/sensors/SensorManager.cpp:29` (`_claimI2cAddress`).
+Source: `_claimI2cAddress()` in `src/sensors/SensorManager.cpp`.
 
 ### OTA upload returns 503
 
@@ -361,12 +361,12 @@ Source: `src/sensors/SensorManager.cpp:29` (`_claimI2cAddress`).
 `POST /api/modules/ota/enable?on=1&csrf=<token>`.
 Obtain the CSRF token from `GET /api/csrf-token`.
 
-Source: `src/web/WebServer.cpp:2069`.
+Source: the `OTA disabled in /api/modules/ota` guard in `src/web/WebServer.cpp`.
 
 ### WiFi save returns restartRequired: true
 
 **Remedy:** WiFi configuration cannot be applied live because
-`WiFiModule::start()` returns `false` (`src/modules/WiFiModule.h:26`).
+`WiFiModule::start()` returns `false` (`src/modules/WiFiModule.h`).
 POST to `/restart` to reboot with the new settings.
 
 ### First-run wizard keeps appearing after reboot

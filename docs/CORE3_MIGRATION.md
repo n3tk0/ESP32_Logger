@@ -53,8 +53,10 @@ Read as deltas:
   (see below).
 
 **Net effect of migrating today: +102,118 bytes, and free space falls from
-125,224 to 23,106.** The all-features build, which already sits at ~1,451,000,
-would not fit at all.
+125,224 to 23,106.** The all-features build would not fit at all.
+(That build was ~1,451,000 when this was measured; `-fno-exceptions` has since
+taken it to ~1,397,000, which does not change the comparison — both sides of
+the table moved by the same amount.)
 
 RAM improves slightly in every step. It was never the constraint.
 
