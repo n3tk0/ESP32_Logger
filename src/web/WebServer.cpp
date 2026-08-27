@@ -343,9 +343,6 @@ static void fmtIP(const uint8_t* ip, char* buf16) {
 }
 
 // ============================================================================
-// WEB SERVER SETUP
-
-// ============================================================================
 // ROUTE HANDLERS
 // ============================================================================
 // These are the bodies that used to be inline lambdas inside
@@ -360,6 +357,39 @@ static void fmtIP(const uint8_t* ip, char* buf16) {
 // stayed exactly where it was.  Registration ORDER decides which handler wins
 // (first canHandle() to match), so it must not be rearranged.
 // ============================================================================
+
+#ifdef UI_CDN_BASE
+// The CDN bootstrap page and its boot script.  These live at file scope
+// because the handlers that serve them do: they used to be statics inside
+// setupWebServer(), which compiled only while the handlers were lambdas
+// nested in the same function.  Hoisting the handlers out without moving
+// these broke every -DUI_CDN_BASE build and nothing noticed, because no
+// CI job set the flag.  One now does.
+static const char CDN_BOOTSTRAP_HTML[] PROGMEM =
+    "<!DOCTYPE html><html lang=\"en\" id=\"htmlRoot\"><head>"
+    "<meta charset=\"UTF-8\">"
+    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">"
+    "<title>Water Logger</title>"
+    "<link rel=\"stylesheet\" href=\"" UI_CDN_BASE "/style.css\">"
+    "<script src=\"" UI_CDN_BASE "/js/theme-boot.js\"></script>"
+    "</head><body>"
+    "<div id=\"cdnBoot\" style=\"font-family:sans-serif;padding:2rem;text-align:center\">"
+    "Loading UI from CDN…</div>"
+    "<script src=\"/cdn-boot.js\"></script>"
+    "</body></html>";
+
+// Boot script served from the device — `script-src 'self'` covers it
+// without needing 'unsafe-inline'.  Fetches the SPA HTML from the CDN
+// and replaces the bootstrap document; on failure, shows a link back
+// to the on-device UI.
+static const char CDN_BOOT_JS[] PROGMEM =
+    "fetch('" UI_CDN_BASE "/index.html').then(function(r){return r.text();})"
+    ".then(function(t){document.open();document.write(t);document.close();})"
+    ".catch(function(e){"
+      "document.getElementById('cdnBoot').innerHTML="
+        "'CDN unreachable. <a href=\"/?_local=1\">Use local UI</a>';"
+    "});";
+#endif
 
 #ifdef UI_CDN_BASE
 static void h_get_cdn_boot_js(AsyncWebServerRequest* r) {
@@ -1427,7 +1457,8 @@ static void h_post_api_platform_reload(AsyncWebServerRequest* r) {
     r->send(200, "application/json", "{\"ok\":true,\"restart\":true}");
 }
 
-
+// ============================================================================
+// WEB SERVER SETUP
 // ============================================================================
 
 // AsyncWebHandler::canHandle() is `const` in ESP32Async/ESPAsyncWebServer and
@@ -1598,30 +1629,7 @@ void setupWebServer() {
     // boot logic lives in /cdn-boot.js, served from the device itself so
     // script-src 'self' covers it.  Stylesheet / theme-boot loaded by
     // absolute CDN URL — the relaxed CSP whitelists UI_CDN_BASE.
-    static const char CDN_BOOTSTRAP_HTML[] PROGMEM =
-        "<!DOCTYPE html><html lang=\"en\" id=\"htmlRoot\"><head>"
-        "<meta charset=\"UTF-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">"
-        "<title>Water Logger</title>"
-        "<link rel=\"stylesheet\" href=\"" UI_CDN_BASE "/style.css\">"
-        "<script src=\"" UI_CDN_BASE "/js/theme-boot.js\"></script>"
-        "</head><body>"
-        "<div id=\"cdnBoot\" style=\"font-family:sans-serif;padding:2rem;text-align:center\">"
-        "Loading UI from CDN…</div>"
-        "<script src=\"/cdn-boot.js\"></script>"
-        "</body></html>";
 
-    // Boot script served from the device — `script-src 'self'` covers it
-    // without needing 'unsafe-inline'.  Fetches the SPA HTML from the CDN
-    // and replaces the bootstrap document; on failure, shows a link back
-    // to the on-device UI.
-    static const char CDN_BOOT_JS[] PROGMEM =
-        "fetch('" UI_CDN_BASE "/index.html').then(function(r){return r.text();})"
-        ".then(function(t){document.open();document.write(t);document.close();})"
-        ".catch(function(e){"
-          "document.getElementById('cdnBoot').innerHTML="
-            "'CDN unreachable. <a href=\"/?_local=1\">Use local UI</a>';"
-        "});";
 
     server.on("/cdn-boot.js", HTTP_GET, h_get_cdn_boot_js);
 #endif

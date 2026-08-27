@@ -22,9 +22,16 @@ Reproduce any row with `pio run -e x_core3_probe` (see `platformio.ini`).
 ## The numbers
 
 App flash on `xiao_esp32c3`, default `src/setup.h`, against the 1,507,328-byte
-app partition of `partitions_balanced.csv`. App flash — not `firmware.bin` — is
-the figure PlatformIO checks against the partition, so it is the one that
-decides whether a build fits.
+app partition (`app0`) of `partitions_balanced.csv`.
+
+**App flash is what PlatformIO prints and checks — it is NOT what decides
+whether a build fits.** That figure excludes `.eh_frame`, which is flashed
+anyway; with exceptions enabled it understated the image by 88,892 bytes.
+`firmware.bin` is the artifact that has to fit `app0`, and it is what the README
+and the CI size gates use. The table below is in app flash only because that is
+how it was measured at the time, and every row is measured the same way, so the
+deltas — the point of the table — are unaffected. Do not read the "free" column
+as headroom.
 
 | build | app flash | of partition | free | RAM |
 |---|---:|---:|---:|---:|

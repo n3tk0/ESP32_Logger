@@ -193,6 +193,19 @@ jobs:
           fi
           echo "range guard rejected KINDLE_PAGE_W=200, as it should"
 
+      # UI_CDN_BASE compiles a code path nothing else here reaches: the root
+      # handler serves a CDN bootstrap instead of LittleFS, and the CSP is
+      # rewritten to whitelist the origin. No job built it until now, and that
+      # gap cost a real break -- naming the route handlers moved them out of
+      # setupWebServer() while CDN_BOOTSTRAP_HTML and CDN_BOOT_JS stayed behind
+      # as function-local statics, so every -DUI_CDN_BASE build stopped
+      # compiling and every default build stayed green.
+      - name: Build with the CDN UI path compiled in
+        run: |
+          set -o pipefail
+          PLATFORMIO_BUILD_FLAGS='-DUI_CDN_BASE=\"https://example.com/v4\"' \
+            pio run -e xiao_esp32c3 2>&1 | tail -20
+
       - name: Rebuild at the default width for the size report
         run: pio run -e xiao_esp32c3
 

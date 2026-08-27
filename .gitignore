@@ -38,8 +38,12 @@ node/build.log
 # custom_sdkconfig: it materialises the resolved ESP-IDF config into the
 # project root. ~110 KB of machine-written output per env, regenerated on
 # every build — a build artifact, not a source of truth.
-sdkconfig.defaults
-sdkconfig.*
+# Anchored to the project root on purpose: an unanchored `sdkconfig.*` matches
+# at any depth and would swallow the TRACKED tools/bootloader/sdkconfig.defaults.*
+# family, so a new board's bootloader config would be silently skipped by
+# `git add`.
+/sdkconfig.defaults
+/sdkconfig.*
 
 # Same build: the ESP-IDF component manager materialises Arduino's declared
 # managed components into the project root (~174 MB of Zigbee, Matter,
@@ -47,5 +51,5 @@ sdkconfig.*
 # pulled in by the core's idf_component.yml, and stubbing them out is the
 # prerequisite for CONFIG_LWIP_IPV6=n. See docs/CORE3_MIGRATION.md).
 # .dummy/ is the placeholder component the platform generates alongside them.
-managed_components/
-.dummy/
+/managed_components/
+/.dummy/
