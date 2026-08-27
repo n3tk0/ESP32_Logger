@@ -10,10 +10,20 @@ cp tools/kindle_preview/kindle.png docs/images/kindle-dashboard.png
 ```
 
 Arguments, all optional: outlook (`hourly` | `daily`), language (`en` | `bg`),
-weather (`calm` | `cold`), and `KINDLE_PAGE_W` (600, 536, 1072 …). The screenshot
-script takes an output path and a viewport, and prints the rendered page height
-against the budget — the number to watch, since a page over 800 scrolls on a
-device with no scrollbar to say so.
+weather (`calm` | `cold`), `KINDLE_PAGE_W` (600, 536, 1072 …), and `warn`, which
+draws the low-battery badge the firmware only draws when an ESP-NOW node is
+actually running down. It is the fifth argument and off by default, so the
+default picture is the ordinary page rather than an alarmed one:
+
+```bash
+python3 tools/kindle_preview/preview.py hourly bg calm 600 warn
+```
+
+The screenshot script takes an output path and a viewport, and prints the
+rendered page height against the budget — the number to watch, since a page over
+800 scrolls on a device with no scrollbar to say so. The badge is a float and
+costs no height; 796 with it and 796 without is the check that it stays that
+way.
 
 Needs `playwright` and a Chromium; set `CHROMIUM_PATH` if yours is not at
 `/opt/pw-browsers/chromium`.

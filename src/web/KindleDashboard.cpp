@@ -12,6 +12,9 @@
 #include "../core/Globals.h"
 #include "DashboardStrings.h"
 #include "RefreshCadence.h"
+#ifdef FEATURE_ESPNOW_INGEST
+#  include "../espnow/EspNowIngest.h"   // espnowAnyBatteryWarn()
+#endif
 
 #ifdef MODULE_FORECAST_ENABLED
 #  include "../modules/ForecastModule.h"
@@ -271,6 +274,98 @@ static void appendKeySwatch(String& out, const char* colour, int width, bool das
     out += F("\"/></svg>");
 }
 
+// The battery warning badge.
+//
+// WHERE, AND WHY THERE
+// --------------------
+// Top right of the outdoor block, level with its label, in the only piece of
+// empty space on the page — right of the humidity figure and left of the
+// column rule. Everything else here is a measurement; the one thing that is
+// not competes with nothing.
+//
+// DRAWN, NOT TYPED
+// ----------------
+// Inline SVG rather than a character. The reader's font is whatever the device
+// firmware ships and its coverage varies; a glyph that renders as a box is
+// worse than no warning at all, because it reads as a rendering fault rather
+// than as a low battery. Every stroke here is a path, so it looks the same on
+// every firmware.
+//
+// A DARK FILL AND A HOLE THROUGH IT
+// ---------------------------------
+// The panel is greyscale and the page is otherwise light, so a solid black
+// plate is the only thing on it that reads as an alarm at arm's length. The
+// battery outline and the exclamation are cut OUT of it in white rather than
+// drawn on top: on a screen with no colour, inverted is the loudest a small
+// mark gets.
+static void appendBatteryBadge(String& out) {
+    const int w = kdPx(46), h = kdPx(22), r = kdPx(3);
+
+    out += F("<svg class=\"bw\" width=\""); out += w;
+    out += F("\" height=\"");                 out += h;
+    out += F("\" viewBox=\"0 0 ");            out += w;
+    out += ' ';                               out += h;
+    out += F("\">");
+
+    // The plate.
+    out += F("<rect x=\"0\" y=\"0\" width=\""); out += w;
+    out += F("\" height=\"");                     out += h;
+    out += F("\" rx=\"");                         out += r;
+    out += F("\" fill=\"#000\"/>");
+
+    // Battery body, knocked through in white: a filled shell with the inside
+    // punched back to black, which is a stroke drawn as two rects because an
+    // e-ink panel renders a 1 px stroke unevenly at this size.
+    const int bx = kdPx(7), by = kdPx(6), bw = kdPx(24), bh = kdPx(10), t2 = kdPx(2);
+    out += F("<rect x=\""); out += bx;
+    out += F("\" y=\"");   out += by;
+    out += F("\" width=\"");  out += bw;
+    out += F("\" height=\""); out += bh;
+    out += F("\" fill=\"#fff\"/>");
+    out += F("<rect x=\""); out += bx + t2;
+    out += F("\" y=\"");   out += by + t2;
+    out += F("\" width=\"");  out += bw - 2 * t2;
+    out += F("\" height=\""); out += bh - 2 * t2;
+    out += F("\" fill=\"#000\"/>");
+
+    // The terminal nub.
+    out += F("<rect x=\""); out += bx + bw;
+    out += F("\" y=\"");   out += by + kdPx(3);
+    out += F("\" width=\"");  out += kdPx(3);
+    out += F("\" height=\""); out += bh - kdPx(6);
+    out += F("\" fill=\"#fff\"/>");
+
+    // The exclamation, to the right of the cell. Two marks and a gap, so it
+    // survives being scaled down with KINDLE_PAGE_W.
+    const int ex = kdPx(38);
+    out += F("<rect x=\""); out += ex;
+    out += F("\" y=\"");   out += kdPx(5);
+    out += F("\" width=\"");  out += kdPx(3);
+    out += F("\" height=\""); out += kdPx(8);
+    out += F("\" fill=\"#fff\"/>");
+    out += F("<rect x=\""); out += ex;
+    out += F("\" y=\"");   out += kdPx(15);
+    out += F("\" width=\"");  out += kdPx(3);
+    out += F("\" height=\""); out += kdPx(3);
+    out += F("\" fill=\"#fff\"/>");
+
+    out += F("</svg>");
+}
+
+/// Whether any battery node is low enough to warrant the badge.
+///
+/// One place, so the renderer and the web interface cannot disagree about what
+/// counts as a warning: both ask the same espnowAnyBatteryWarn(), which is
+/// batteryShouldWarn() over the same history. A build without the radio has no
+/// battery nodes and no badge.
+static bool batteryWarningActive() {
+#ifdef FEATURE_ESPNOW_INGEST
+    return espnowAnyBatteryWarn();
+#else
+    return false;
+#endif
+}
+
 // Smallest and largest hourly extreme across the window, for the caption.
 static bool windowExtremes(const TrendRing::Hour* h, float& mn, float& mx) {
     mn = 1e9f; mx = -1e9f;
@@ -431,6 +526,12 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // sit against the first glyph of the inside reading.
     KD_S(".hero .sep{border-left:");           KD_N(1);
     KD_S("px solid #aaa;padding-left:");       KD_N(30);
+    KD_S("px}");
+
+    // The badge sits on the label's own line, pushed right. float and not
+    // flex: this page is built for a browser that may be WebKit 531, where
+    // flexbox does not exist. A float has worked since 1996.
+    KD_S(".bw{float:right;margin-top:"); KD_N(-2);
     KD_S("px}");
 
     KD_S(".lab{font-size:");                   KD_N(12);
@@ -647,7 +748,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     // Outside on the left, clock over inside on the right
     p += F("<table class=\"hero\"><tr><td width=\"50%\">"
-           "<div class=\"lab\">" KD_T("Outside", "Навън") "</div><div class=\"");
+           "<div class=\"lab\">" KD_T("Outside", "Навън"));
+    if (batteryWarningActive()) appendBatteryBadge(p);
+    p += F("</div><div class=\"");
     fmtTemp(buf, sizeof(buf), outT.value);
     p += bigClass(buf); p += F("\">"); p += buf;
     p += F("<span class=\"deg\">&deg;</span>");

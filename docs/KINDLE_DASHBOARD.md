@@ -265,6 +265,38 @@ no label above it to push it down. `.clock`'s height also sets where the divider
 falls — two thirds down the cell the left column sizes. Getting this by eye is
 what made an earlier version look ragged; it is measured in the browser instead.
 
+### The low-battery badge
+
+A build with `FEATURE_ESPNOW_INGEST` can have battery nodes outside, and a node
+whose cells are running down stops reporting without saying anything first. The
+page it stops appearing on is the one that ought to warn about it, so when
+`espnowAnyBatteryWarn()` is true a badge is drawn at the top right of the
+outdoor block, level with its label:
+
+![the badge](images/kindle-battery-badge.png)
+
+Three decisions, all of them about the medium:
+
+- **It is drawn, not typed.** Inline SVG rather than `🔋` or `⚠`. The reader's
+  font is whatever its firmware ships and Cyrillic coverage already varies
+  between them; a warning glyph that renders as a box is worse than no warning,
+  because it reads as a rendering fault rather than as a flat battery.
+- **It is inverted.** A solid black plate with the battery and the exclamation
+  knocked out of it in white. The rest of the page is light, the panel has no
+  colour to spend, and on a greyscale screen a small mark is loudest when it is
+  cut out of a dark field.
+- **It floats.** `.bw` is `float:right`, not flex — the same reason the whole
+  page lays out in tables. It also means the badge costs no height: the page
+  measures 796 px of the 800 budget with it and without it.
+
+Its geometry goes through `kdPx()` like everything else, so it scales with
+`KINDLE_PAGE_W` down to a Kindle 4's 536 px. The condition is
+`batteryWarningActive()`, which asks the ingest layer the same question the web
+interface asks — one rule for "low", not two that can disagree.
+
+A build without the radio compiles the badge out entirely; there is nothing on
+that firmware that could be low.
+
 ### Language
 
 ```ini

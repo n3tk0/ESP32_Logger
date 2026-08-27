@@ -20,6 +20,10 @@ lang = sys.argv[2] if len(sys.argv)>2 else 'en'
 scen = sys.argv[3] if len(sys.argv)>3 else 'calm'
 
 PAGE_W = int(sys.argv[4]) if len(sys.argv) > 4 else 600
+# 5th argument: draw the low-battery badge. Off by default, because the page
+# it is meant to represent usually has no warning on it and a preview that
+# always shows one would misrepresent the common case.
+WARN = len(sys.argv) > 5 and sys.argv[5] in ("warn", "1", "true")
 def kdpx(n):
     return (n * PAGE_W + 300) // 600 if n >= 0 else -((-n * PAGE_W + 300) // 600)
 
@@ -143,13 +147,36 @@ for lab,ic,t,lo2 in cols:
     per+=('<td class="per"><div class="per-l">%s</div>%s<div class="per-t">%d&deg;%s</div></td>'
           %(lab,ico(ic,kdpx(34)),t,extra))
 
+# The battery badge, replayed from appendBatteryBadge() in
+# src/web/KindleDashboard.cpp. A COPY, like the rest of the markup here and
+# unlike the stylesheet, which is extracted — see this directory's README for
+# which half of this preview can drift and which cannot. The arithmetic is the
+# same kdpx() the firmware uses, so at least the geometry cannot.
+def battery_badge():
+    w, h, r = kdpx(46), kdpx(22), kdpx(3)
+    bx, by, bw, bh, t2 = kdpx(7), kdpx(6), kdpx(24), kdpx(10), kdpx(2)
+    ex = kdpx(38)
+    return (
+        '<svg class="bw" width="%d" height="%d" viewBox="0 0 %d %d">' % (w, h, w, h) +
+        '<rect x="0" y="0" width="%d" height="%d" rx="%d" fill="#000"/>' % (w, h, r) +
+        '<rect x="%d" y="%d" width="%d" height="%d" fill="#fff"/>' % (bx, by, bw, bh) +
+        '<rect x="%d" y="%d" width="%d" height="%d" fill="#000"/>'
+            % (bx + t2, by + t2, bw - 2 * t2, bh - 2 * t2) +
+        '<rect x="%d" y="%d" width="%d" height="%d" fill="#fff"/>'
+            % (bx + bw, by + kdpx(3), kdpx(3), bh - kdpx(6)) +
+        '<rect x="%d" y="%d" width="%d" height="%d" fill="#fff"/>'
+            % (ex, kdpx(5), kdpx(3), kdpx(8)) +
+        '<rect x="%d" y="%d" width="%d" height="%d" fill="#fff"/>'
+            % (ex, kdpx(15), kdpx(3), kdpx(3)) +
+        '</svg>')
+
 wk=''
 for i,(n,dnum) in enumerate(list(zip(S['wd'],[24,25,26,27,28,29,30]))):
     cls='wd wd-now' if i==1 else ('wd wd-we' if i>=5 else 'wd')
     wk+='<td class="%s"><div class="wd-n">%s</div><div class="wd-d">%d</div></td>'%(cls,n,dnum)
 
 body=('<table class="hero"><tr><td width="50%">'
- '<div class="lab">'+S['out']+'</div>'
+ '<div class="lab">'+S['out']+(battery_badge() if WARN else '')+'</div>'
  '<div class="'+HERO['cls']+'">'+HERO['now']+'<span class="deg">&deg;</span>'
  '<span class="slash">/</span><span class="hum-o">'+HERO['hum']+'%</span></div>'
  '<div class="sub">'+HERO['lo']+S['to']+HERO['hi']+'&deg;'
