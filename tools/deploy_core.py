@@ -27,6 +27,7 @@ from typing import Any, Callable, Optional
 # tools/pio_envs.py for why. sys.path juggling because these tools are run
 # both as `python3 tools/deploy.py` and from a PyInstaller bundle.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from features import build_flags_for, is_known, optional_features
 from pio_envs import (  # noqa: E402
     ROOT as _PIO_ROOT, chip_for, default_env, defaults_for, env_info,
     env_names, environments, ports_for, usb_pins,
@@ -82,6 +83,22 @@ DEFAULT_CFG: dict[str, Any] = {
     "steps":                [1, 3, 5, 6, 7],
     "upload_filter":        "all",
     "wipe_before_upload":   False,
+
+    # Optional compile-time features, by macro name. Read from src/setup.h by
+    # tools/features.py rather than listed here, so adding one to the firmware
+    # is enough to make every tool offer it.
+    #
+    # These are applied through PLATFORMIO_BUILD_FLAGS and touch no file. The
+    # USB CDC toggle above has to rewrite platformio.ini because the flag it
+    # changes lives there, and the comments on _configure_usb_cdc() are a
+    # catalogue of what goes wrong when a tool edits the project's own source.
+    # Nothing here does, so an abandoned deploy leaves the checkout untouched.
+    "features":             [],
+
+    # The 16-byte key shared with an ESP-NOW battery node. Only meaningful with
+    # FEATURE_ESPNOW_INGEST, and the same value has to be flashed into the node
+    # or nothing pairs and nothing decrypts.
+    "espnow_lmk":           "",
 }
 
 # Keys load_cfg() re-derives from the environment when they are None. `chip` is
@@ -217,6 +234,21 @@ def env_defaults_note(cfg: dict[str, Any]) -> list[str]:
         state = "on" if d["usb_cdc_on_boot"] else "off"
         lines.append(f"USB CDC     {state}  (from [env:{d['env']}] build_flags; "
                      f"{d['usb_pins'] or 'no native USB'})")
+
+    feats = [m for m in (cfg.get("features") or []) if is_known(m)]
+    if feats:
+        lines.append(f"features    {', '.join(feats)}")
+        if "FEATURE_ESPNOW_INGEST" in feats:
+            lmk = cfg.get("espnow_lmk") or ""
+            if not lmk:
+                lines.append("ESP-NOW key not set  (build uses the default in "
+                             "setup.h — change it before it leaves the bench)")
+            elif len(lmk) != 16:
+                lines.append(f"ESP-NOW key {len(lmk)} chars  (must be exactly 16)")
+            else:
+                lines.append("ESP-NOW key set  (flash the SAME 16 bytes into the node)")
+    else:
+        lines.append("features    none  (setup.h defaults only)")
     return lines
 
 
@@ -432,7 +464,60 @@ class DeployManager:
             ini_file.write_text("\n".join(lines))
             self._log(f"  platformio.ini: [env:{env}] {want}")
 
-    def _run_cmd(self, cmd: list[str]) -> int:
+    def _pio_env(self) -> dict[str, str] | None:
+        """os.environ plus PLATFORMIO_BUILD_FLAGS, or None when nothing is set.
+
+        MUST be passed to EVERY `pio run`, not only the compile step. `pio run
+        -t upload` relinks before it flashes, so an upload that did not carry
+        the same flags would quietly rebuild the firmware WITHOUT the selected
+        features and flash that instead — a board that boots fine and is
+        missing exactly what the user asked for, with a successful compile step
+        scrolled off the screen above it.
+        """
+        wanted = [m for m in (self.cfg.get("features") or []) if is_known(m)]
+        extra: dict[str, str] = {}
+        if "FEATURE_ESPNOW_INGEST" in wanted and self.cfg.get("espnow_lmk"):
+            extra["ESPNOW_LMK"] = self.cfg["espnow_lmk"]
+
+        flags = build_flags_for(wanted, extra)
+        if not flags:
+            return None
+
+        env = dict(os.environ)
+        # Appended, not replaced: a developer who exported the variable for a
+        # reason keeps it, and PlatformIO concatenates the lot.
+        existing = env.get("PLATFORMIO_BUILD_FLAGS", "").strip()
+        env["PLATFORMIO_BUILD_FLAGS"] = f"{existing} {flags}".strip()
+        return env
+
+    def _log_build_flags(self) -> None:
+        """Say what the build will carry, before it carries it."""
+        wanted = [m for m in (self.cfg.get("features") or []) if is_known(m)]
+        unknown = [m for m in (self.cfg.get("features") or []) if not is_known(m)]
+
+        if unknown:
+            # A feature that used to exist and no longer does. Dropping it
+            # silently would leave the config claiming a build it is not
+            # getting, which is the same class of lie the USB CDC checkbox
+            # used to tell.
+            self._log(f"  ! ignoring unknown feature(s): {', '.join(unknown)} "
+                      f"— not declared in src/setup.h any more")
+        if not wanted:
+            self._log("  features: none (setup.h defaults only)")
+            return
+
+        self._log(f"  features: {', '.join(wanted)}")
+        if "FEATURE_ESPNOW_INGEST" in wanted:
+            lmk = self.cfg.get("espnow_lmk") or ""
+            if not lmk:
+                self._log("  ! ESP-NOW key not set here; the build falls back to "
+                          "the default in setup.h. Set it, and flash the SAME "
+                          "16 bytes into the node, or nothing will pair.")
+            elif len(lmk) != 16:
+                self._log(f"  ! ESP-NOW key is {len(lmk)} characters; it must be "
+                          f"exactly 16. The build will refuse it.")
+
+    def _run_cmd(self, cmd: list[str], env: dict[str, str] | None = None) -> int:
         """Run a subprocess command and stream output to callback."""
         self._log(f"$ {shlex.join(cmd)}")
         try:
@@ -442,6 +527,7 @@ class DeployManager:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                env=env,
             )
         except Exception as exc:
             self._log(f"Error: {exc}")
@@ -531,7 +617,8 @@ class DeployManager:
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
             return 1
-        rc = self._run_cmd([self.pio, "run", "-t", "clean", "-e", self.cfg["env"]])
+        rc = self._run_cmd([self.pio, "run", "-t", "clean", "-e", self.cfg["env"]],
+                           env=self._pio_env())
         if rc == 0:
             self._log("✓ Build artifacts cleaned.")
         self._emit_complete(4, rc)
@@ -544,7 +631,9 @@ class DeployManager:
             return 1
         # Configure USB CDC flag before compilation
         self._configure_usb_cdc()
-        rc = self._run_cmd([self.pio, "run", "-e", self.cfg["env"]])
+        self._log_build_flags()
+        rc = self._run_cmd([self.pio, "run", "-e", self.cfg["env"]],
+                           env=self._pio_env())
         if rc == 0:
             self._log("✓ Firmware compiled.")
         self._emit_complete(5, rc)
@@ -558,7 +647,11 @@ class DeployManager:
         cmd = [self.pio, "run", "-t", "upload", "-e", self.cfg["env"]]
         if self.cfg.get("port"):
             cmd += ["--upload-port", self.cfg["port"]]
-        rc = self._run_cmd(cmd)
+        # Same flags as the compile step. `pio run -t upload` relinks first, so
+        # flashing without them would rebuild the firmware WITHOUT the selected
+        # features and flash that — a board that boots fine and is missing
+        # exactly what was asked for.
+        rc = self._run_cmd(cmd, env=self._pio_env())
         if rc == 0:
             self._log("✓ Firmware flashed.")
         self._emit_complete(6, rc)
@@ -579,7 +672,7 @@ class DeployManager:
         cmd = [self.pio, "run", "-t", "uploadfs", "-e", self.cfg["env"]]
         if self.cfg.get("port"):
             cmd += ["--upload-port", self.cfg["port"]]
-        rc = self._run_cmd(cmd)
+        rc = self._run_cmd(cmd, env=self._pio_env())
         if rc == 0:
             self._log("✓ LittleFS image uploaded.")
         self._emit_complete(7, rc)

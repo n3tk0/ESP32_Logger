@@ -130,9 +130,12 @@
 //
 //   • WiFi modem sleep is forced OFF.  WIFI_PS_MIN_MODEM breaks ESP-NOW
 //     unicast — measured — while leaving broadcast working, so pairing would
-//     succeed and then no reading would ever arrive.  The sketch overrides the
-//     config value rather than trusting it, so a device cannot be configured
-//     into that state.  A mains-powered collector loses nothing by it.
+//     succeed and then no reading would ever arrive.  The sketch asks
+//     modemSleepAllowed() at each point of use rather than overriding the
+//     config once — a device with no sleep settings at all never reaches the
+//     parser that would have applied the override, which is how the first
+//     version of this reached exactly the state it existed to prevent.
+//     A mains-powered collector loses nothing by it.
 //#ifndef FEATURE_ESPNOW_INGEST
 //#  define FEATURE_ESPNOW_INGEST       // ESP-NOW receive path + pairing
 //#endif
@@ -146,13 +149,13 @@
 // Kindle dashboard — GET /kindle.  A server-rendered, JavaScript-free page
 // sized for a 6" e-ink reader's browser.  See docs/KINDLE_DASHBOARD.md.
 //#ifndef FEATURE_KINDLE_DASHBOARD
-//#  define FEATURE_KINDLE_DASHBOARD
+//#  define FEATURE_KINDLE_DASHBOARD   // GET /kindle e-ink dashboard
 //#endif
 
 // Weather forecast client.  Fetches a short forecast over HTTPS for the
 // Kindle dashboard to sit alongside the measured values.
 //#ifndef MODULE_FORECAST_ENABLED
-//#  define MODULE_FORECAST_ENABLED
+//#  define MODULE_FORECAST_ENABLED    // HTTPS weather forecast
 //#endif
 
 // SD card storage.  ON by default, because turning it off changes what a

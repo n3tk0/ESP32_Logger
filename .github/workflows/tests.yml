@@ -25,6 +25,8 @@ on:
       - 'src/web/failsafe.html'
       - 'tools/pio_envs.py'
       - 'tools/check_pio_envs.py'
+      - 'tools/features.py'
+      - 'tools/check_features.py'
       - 'platformio.ini'
       - 'boards/**'
   pull_request:
@@ -42,6 +44,8 @@ on:
       - 'src/web/failsafe.html'
       - 'tools/pio_envs.py'
       - 'tools/check_pio_envs.py'
+      - 'tools/features.py'
+      - 'tools/check_features.py'
       - 'platformio.ini'
       - 'boards/**'
   workflow_dispatch:
@@ -267,6 +271,45 @@ jobs:
         # env its parser cannot see is a board the tool will not offer, and
         # nothing else would say so.
         run: python3 tools/check_pio_envs.py
+
+      - name: Verify the deploy tools offer every feature setup.h declares
+        # tools/features.py parses src/setup.h with a regex, and the deploy CLI
+        # and GUI both read that list. A regex that quietly stops matching
+        # leaves a shorter menu and no error -- so it is compared against a
+        # second, dumber scan that shares none of its logic.
+        run: python3 tools/check_features.py
+
+      - name: Verify that check actually fails on a broken parser
+        run: |
+          set -e
+          cp tools/features.py tools/features.py.orig
+          # Require the '#' and 'define' to be adjacent. setup.h writes
+          # "#  define", so this matches nothing and the menu goes empty --
+          # exactly the silent failure the check exists for.
+          sed -i 's|#\\s\*define\\s+|#define\\s+|' tools/features.py
+          if python3 tools/check_features.py > /dev/null; then
+            mv tools/features.py.orig tools/features.py
+            echo "::error::check_features.py passed a parser that finds nothing"
+            exit 1
+          fi
+          mv tools/features.py.orig tools/features.py
+          echo "feature-list guard fires as expected"
+
+      - name: Verify a new feature reaches the deploy tools on its own
+        # The point of deriving the list from setup.h is that adding a feature
+        # is enough. Plant one and check it appears, so a future refactor that
+        # reintroduces a hand-maintained list is caught here.
+        run: |
+          set -e
+          cp src/setup.h src/setup.h.orig
+          printf '\n//#ifndef FEATURE_CI_PROBE\n//#  define FEATURE_CI_PROBE   // ci probe\n//#endif\n' >> src/setup.h
+          if ! python3 tools/features.py | grep -q FEATURE_CI_PROBE; then
+            mv src/setup.h.orig src/setup.h
+            echo "::error::a feature added to setup.h did not reach the deploy tools"
+            exit 1
+          fi
+          mv src/setup.h.orig src/setup.h
+          echo "a new setup.h feature reaches the tools with no other edit"
 
       - name: Verify that check actually fails on an unreachable env
         run: |

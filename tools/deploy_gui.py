@@ -51,6 +51,7 @@ from deploy_core import (
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
+from features import grouped, is_known, optional_features
 from pio_envs import (
     INI, NO_PROJECT, chip_for, defaults_for, env_info, environments, env_names,
     ports_for, usb_pins,
@@ -412,6 +413,114 @@ class DeployerGUI:
         )
         self.usb_info_label.pack(anchor="w", pady=(0, 10), padx=(20, 0))
         self._refresh_env_labels(sync_cdc=True)
+
+        self._build_feature_section(settings_frame)
+
+    def _build_feature_section(self, parent) -> None:
+        """Checkboxes for the optional compile-time features.
+
+        The list is read from src/setup.h through tools/features.py, so a
+        feature added to the firmware appears here without this file being
+        touched — the same arrangement pio_envs.py gives the board dropdown,
+        and for the same reason: four hand-maintained copies of one list is
+        four things to go stale, and they all did.
+
+        Only the off-by-default features are shown. A -D flag can switch those
+        on; it cannot switch off one that setup.h enables itself, and a
+        checkbox that cannot do what it says is worse than no checkbox.
+        """
+        ctk.CTkLabel(parent, text="Build features:",
+                     font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(14, 2))
+        ctk.CTkLabel(parent,
+                     text="Compiled in via PLATFORMIO_BUILD_FLAGS. No project "
+                          "file is edited, so an abandoned deploy leaves the "
+                          "checkout as it was.",
+                     font=("Helvetica", 8), text_color="gray",
+                     wraplength=420, justify="left").pack(anchor="w", padx=(20, 0))
+
+        selected = set(m for m in (self.cfg.get("features") or []) if is_known(m))
+        self.feature_vars: dict[str, ctk.BooleanVar] = {}
+
+        box = ctk.CTkScrollableFrame(parent, height=190)
+        box.pack(fill="x", expand=False, pady=(6, 4))
+
+        for group, rows in grouped(optional_features()).items():
+            ctk.CTkLabel(box, text=group,
+                         font=("Helvetica", 9, "bold")).pack(anchor="w", pady=(6, 0))
+            for f in rows:
+                var = ctk.BooleanVar(value=f.macro in selected)
+                self.feature_vars[f.macro] = var
+                label = f.macro.replace("SENSOR_", "").replace("_ENABLED", "")
+                if f.summary:
+                    label = f"{label}  —  {f.summary}"
+                ctk.CTkCheckBox(
+                    box, text=label, variable=var,
+                    command=lambda m=f.macro: self._on_feature_toggle(m),
+                    font=("Helvetica", 9),
+                ).pack(anchor="w", padx=(14, 0), pady=1)
+
+        # The ESP-NOW key. Shown always rather than hidden behind its feature:
+        # a field that appears and disappears as a checkbox is clicked is
+        # harder to find than one that is simply greyed out by irrelevance,
+        # and the warning below is the thing that most needs to be read.
+        ctk.CTkLabel(parent, text="ESP-NOW shared key (16 characters):",
+                     font=("Helvetica", 9)).pack(anchor="w", pady=(8, 2))
+        self.espnow_lmk_entry = ctk.CTkEntry(parent, width=260)
+        self.espnow_lmk_entry.insert(0, self.cfg.get("espnow_lmk") or "")
+        self.espnow_lmk_entry.pack(anchor="w")
+        self.espnow_lmk_entry.bind("<FocusOut>", lambda _: self._save_espnow_lmk())
+
+        self.espnow_lmk_note = ctk.CTkLabel(
+            parent, text="", font=("Helvetica", 8),
+            text_color="gray", wraplength=420, justify="left")
+        self.espnow_lmk_note.pack(anchor="w", padx=(20, 0), pady=(0, 10))
+        self._refresh_espnow_note()
+
+    def _on_feature_toggle(self, macro: str) -> None:
+        feats = [m for m, v in self.feature_vars.items() if v.get()]
+
+        # FEATURE_ESPNOW_INGEST implies FEATURE_REMOTE_NODES — setup.h defines
+        # it either way. Ticking it here as well keeps the box from describing
+        # a build different from the one that will happen.
+        if macro == "FEATURE_ESPNOW_INGEST" and macro in feats:
+            dep = self.feature_vars.get("FEATURE_REMOTE_NODES")
+            if dep is not None and not dep.get():
+                dep.set(True)
+                feats.append("FEATURE_REMOTE_NODES")
+
+        self._save_setting("features", None, feats)
+        self._refresh_espnow_note()
+
+    def _save_espnow_lmk(self) -> None:
+        key = self.espnow_lmk_entry.get().strip()
+        self._save_setting("espnow_lmk", None, key)
+        self._refresh_espnow_note()
+
+    def _refresh_espnow_note(self) -> None:
+        note = getattr(self, "espnow_lmk_note", None)
+        if note is None:
+            return
+        on = self.feature_vars.get("FEATURE_ESPNOW_INGEST")
+        key = (self.cfg.get("espnow_lmk") or "").strip()
+
+        if on is None or not on.get():
+            note.configure(text="Only used with FEATURE_ESPNOW_INGEST.",
+                           text_color="gray")
+        elif not key:
+            note.configure(
+                text="Not set — the build falls back to the default in setup.h. "
+                     "Change it before this leaves the bench.",
+                text_color="orange")
+        elif len(key) != 16:
+            note.configure(
+                text=f"{len(key)} characters — the firmware asserts on exactly 16, "
+                     f"so the build will fail.",
+                text_color="red")
+        else:
+            note.configure(
+                text="Flash the SAME 16 characters into the node "
+                     "(node_espnow/platformio.ini), or nothing will pair.",
+                text_color="gray")
 
     def _build_info_tab(self) -> None:
         """Info/help tab."""
