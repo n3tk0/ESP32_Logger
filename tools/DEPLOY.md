@@ -46,6 +46,13 @@ gone stale: `xiao_esp32s3` and `esp32s3_n16r8` had been buildable for weeks
 while the deploy tools would not offer them. `tools/check_pio_envs.py` runs in
 CI to keep the derivation honest, with a negative control proving it can fail.
 
+The optional **compile-time features** are derived the same way and for the
+same reason — `tools/features.py` reads them out of `src/setup.h`, so adding a
+guarded block there is all it takes for the feature to appear in both the CLI
+and the GUI. `tools/check_features.py` compares that parser against a second,
+dumber scan on every CI run, because a regex that quietly stops matching leaves
+a shorter menu and no error at all.
+
 ### Files
 
 - **`deploy_core.py`** — Core business logic, configuration, step implementations
@@ -228,6 +235,50 @@ values you pinned survive the switch.
 - **usb_cdc_on_boot** — USB CDC (serial over USB) on boot for ESP32-C3
   - **ON** (default) — USB pins locked for serial communication
   - **OFF** — USB pins (GPIO 18/19) available for general use
+- **features** — Optional compile-time features, by macro name. See below.
+- **espnow_lmk** — The 16-character key shared with an ESP-NOW battery node.
+  Only used when `FEATURE_ESPNOW_INGEST` is selected.
+
+#### Build features
+
+The `[F]` menu entry in the CLI and the checkbox list in the GUI's settings
+tab. Both read `src/setup.h` through `tools/features.py`, so there is no list
+here to keep in step.
+
+Selected features are passed as `PLATFORMIO_BUILD_FLAGS` and **no project file
+is edited**. That is a deliberate difference from the USB CDC toggle, which has
+to rewrite `platformio.ini` because the flag it changes lives there — and the
+comments on `_configure_usb_cdc()` are a catalogue of what goes wrong when a
+tool edits the project's own source: sections that ran to the end of the file,
+a duplicate flag appended on every single run, a build comment rewritten into
+nonsense. Nothing in the feature path touches a file, so a deploy you abandon
+halfway leaves the checkout exactly as it was.
+
+**Only the off-by-default features are offered.** A `-D` flag can switch those
+on; it cannot switch off one that `setup.h` enables itself, because the header
+writes `#ifndef X / #define X` and defines it again a line after any `-U`.
+Turning one of those off means editing `setup.h`, which is a source change a
+person should make deliberately. `python3 tools/features.py` prints both lists
+and says which is which.
+
+The flags go to **every** `pio run`, not only the compile step. `pio run -t
+upload` relinks before it flashes, so an upload that did not carry them would
+quietly rebuild the firmware *without* the selected features and flash that —
+a board that boots fine, missing exactly what was asked for, with the
+successful compile step scrolled off the screen above it.
+
+##### The ESP-NOW key
+
+`FEATURE_ESPNOW_INGEST` needs a 16-character shared secret, and the **same 16
+characters must be flashed into the node** (`node_espnow/platformio.ini`) or
+nothing pairs and nothing decrypts. Both tools say so, and both warn when the
+field is empty — in which case the build falls back to the placeholder in
+`setup.h`, which is fine on a bench and not fine on a shared network.
+
+The battery node itself is a separate PlatformIO project and is **not** flashed
+by these tools; it is built with `cd node_espnow && pio run -t upload`. Same for
+the ESP8266 node in `node/`. Both have their own `platformio.ini`, which is why
+`pio_envs.py` — which reads the root one — does not see them.
 
 #### USB CDC on Boot (ESP32-C3, ESP32-S3)
 

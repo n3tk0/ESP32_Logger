@@ -55,17 +55,15 @@ public:
     /// Record one pushed metric for `nodeId`. Overwrites the previous value
     /// for the same (nodeId, metric) pair, otherwise claims a free slot.
     ///
-    /// `ts` is accepted and stored, but NOT currently honoured downstream:
-    /// SensorManager::tickFiltered() stamps every reading with the
-    /// collector's own clock after the plugin returns, for remote and wired
-    /// sensors alike. It is kept here rather than dropped because the field
-    /// is the only place a node's sampling time could survive, and making it
-    /// authoritative later is a one-line change in SensorManager — but until
-    /// that change, treat readings as timestamped on arrival.
+    /// `ts` is honoured when it is real. SensorManager::tickFiltered() stamps
+    /// a reading only when its timestamp is zero, so a node that knows when it
+    /// measured keeps that time all the way to storage.
     ///
-    /// This matters little today: the reference node has no RTC and no NTP,
-    /// so it sends 0 anyway. It would matter for a node that buffers through
-    /// an outage, which is also not implemented (see node/README.md).
+    /// For THIS path that rarely matters — the ESP8266 reference node has no
+    /// clock and sends 0, and a live reading is current by definition. It
+    /// matters for putHistorical() below, which is the path a node uses to
+    /// hand over readings it buffered through an outage. Those are the ones
+    /// whose times would otherwise all collapse onto the moment they arrived.
     ///
     /// Non-finite values are rejected so a garbage sample cannot poison a
     /// series or occupy the last free slot. Returns false when the table is
@@ -73,17 +71,50 @@ public:
     bool put(const char* nodeId, const char* metric, float value,
              const char* unit, uint32_t ts);
 
+    /// Record one metric that was measured EARLIER and is only arriving now.
+    ///
+    /// The difference from put() is the whole point: put() is a mailbox slot
+    /// and overwrites, which is right for a node reporting faster than the
+    /// collector ticks. It is wrong for a node that buffered fifteen readings
+    /// through an outage and is handing them over — those are fifteen distinct
+    /// measurements, and overwriting them into one slot loses fourteen.
+    ///
+    /// So these queue instead. `ts` is authoritative here and is NOT stamped
+    /// over downstream: SensorManager keeps a timestamp a plugin supplied.
+    /// A reading with no usable clock is refused rather than queued, because a
+    /// backdated reading whose date is wrong is worse than a gap.
+    ///
+    /// Returns false when the queue is full, in which case the OLDEST entry is
+    /// dropped to make room — losing the start of an outage beats losing the
+    /// end of it, the same rule the node applies to its own buffer.
+    bool putHistorical(const char* nodeId, const char* metric, float value,
+                       const char* unit, uint32_t ts);
+
+    /// How many queued historical readings are still waiting to be drained.
+    int historyPending() const;
+
     /// Copy every metric held for `nodeId` into `out`, up to `maxOut`.
     /// Fills metric/value/unit/timestamp/quality only — SensorManager
     /// overwrites sensorId and sensorType from the plugin instance.
+    ///
+    /// Latest values come FIRST and queued history fills whatever room is
+    /// left. That ordering is deliberate and not arbitrary: history drains a
+    /// few readings per tick, so putting it first would leave the live
+    /// dashboard showing nothing current until an outage's backlog had
+    /// cleared — minutes of a frozen display to deliver readings nobody is
+    /// waiting on. Behind the current value, it trickles in unnoticed.
     ///
     /// `staleAfterMs` marks entries older than that as QUALITY_ERROR
     /// instead of dropping them: a dashboard showing a stale outdoor
     /// temperature with an age is more useful than one showing a gap, and
     /// ProcessingTask is what decides whether an errored reading is stored.
     /// Pass 0 to disable the staleness check.
+    /// NOT const, and that is the honest signature now: draining REMOVES the
+    /// queued history it returns. It was const while the mailbox only ever
+    /// copied out latest values; keeping the qualifier and making the members
+    /// mutable would have hidden a real change of meaning behind a keyword.
     int drain(const char* nodeId, SensorReading* out, int maxOut,
-              uint32_t staleAfterMs) const;
+              uint32_t staleAfterMs);
 
     /// millis() since the most recent put() for `nodeId`, or UINT32_MAX when
     /// the node has never reported. Used by the diagnostics endpoint and the
@@ -98,6 +129,25 @@ public:
     bool nodeIdAt(int index, char* out, size_t outLen) const;
 
 private:
+    /// Queued historical readings, across all nodes.
+    ///
+    /// Sized for one node emptying a full buffer: fourteen samples of four
+    /// metrics is fifty-six, and 64 × 40 bytes is 2.5 KB of static RAM on a
+    /// part with 320 KB. Two nodes recovering at the same moment will drop the
+    /// oldest of the two backlogs, which is the right thing to lose.
+#ifndef REMOTE_HISTORY_SLOTS
+#  define REMOTE_HISTORY_SLOTS 64
+#endif
+    static constexpr int MAX_HISTORY = REMOTE_HISTORY_SLOTS;
+
+    struct Hist {
+        char     nodeId[MAX_NODE_ID];
+        char     metric[MAX_METRIC];
+        char     unit[MAX_UNIT];
+        float    value;
+        uint32_t ts;
+    };
+
     struct Entry {
         char     nodeId[MAX_NODE_ID];
         char     metric[MAX_METRIC];
@@ -114,6 +164,9 @@ private:
     int _snapshotNodes(char (&out)[MAX_ENTRIES][MAX_NODE_ID]) const;
 
     Entry _e[MAX_ENTRIES] = {};
+    Hist  _h[MAX_HISTORY] = {};
+    int   _hHead = 0;      ///< next to drain
+    int   _hCount = 0;     ///< occupied slots
     mutable portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;
 };
 

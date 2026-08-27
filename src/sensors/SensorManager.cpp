@@ -303,7 +303,19 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
         }
         if (n > 0) {
             for (int j = 0; j < n; j++) {
-                readings[j].timestamp = now;
+                // Stamped on arrival ONLY when the plugin did not know.
+                //
+                // Almost none do: a wired sensor is read now, so `now` is the
+                // truth and every plugin leaves this zero. The exception is a
+                // remote node handing over readings it buffered through an
+                // outage — those were taken minutes or hours ago, and stamping
+                // them with `now` would collapse the whole outage onto one
+                // instant and file it under the wrong hour.
+                //
+                // This used to overwrite unconditionally, which made the node's
+                // buffering pointless: the readings arrived and were all dated
+                // the moment they arrived.
+                if (readings[j].timestamp == 0) readings[j].timestamp = now;
                 strncpy(readings[j].sensorId,   s->getId(),   sizeof(readings[j].sensorId)   - 1);
                 strncpy(readings[j].sensorType, s->getType(), sizeof(readings[j].sensorType) - 1);
 

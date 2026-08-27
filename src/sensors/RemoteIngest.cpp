@@ -63,8 +63,49 @@ bool RemoteIngest::put(const char* nodeId, const char* metric, float value,
     return stored;
 }
 
+bool RemoteIngest::putHistorical(const char* nodeId, const char* metric,
+                                 float value, const char* unit, uint32_t ts) {
+    if (nodeId == nullptr || *nodeId == '\0') return false;
+    if (metric == nullptr || *metric == '\0') return false;
+    if (!isfinite(value))                     return false;
+    // A backdated reading whose date is wrong is worse than a gap: it would be
+    // filed under an hour it did not happen in and quietly corrupt the record
+    // it was meant to complete.
+    if (ts < 1000000000u)                     return false;
+
+    bool dropped = false;
+
+    taskENTER_CRITICAL(&_mux);
+    if (_hCount >= MAX_HISTORY) {
+        // Full. Drop the OLDEST — losing the start of an outage beats losing
+        // the end of it, which is the same rule the node applies to its own
+        // buffer, and for the same reason: the recent readings are the ones
+        // that say what is happening now.
+        _hHead = (_hHead + 1) % MAX_HISTORY;
+        _hCount--;
+        dropped = true;
+    }
+    Hist& h = _h[(_hHead + _hCount) % MAX_HISTORY];
+    copyClamped(h.nodeId, MAX_NODE_ID, nodeId);
+    copyClamped(h.metric, MAX_METRIC,  metric);
+    copyClamped(h.unit,   MAX_UNIT,    unit);
+    h.value = value;
+    h.ts    = ts;
+    _hCount++;
+    taskEXIT_CRITICAL(&_mux);
+
+    return !dropped;
+}
+
+int RemoteIngest::historyPending() const {
+    taskENTER_CRITICAL(&_mux);
+    const int n = _hCount;
+    taskEXIT_CRITICAL(&_mux);
+    return n;
+}
+
 int RemoteIngest::drain(const char* nodeId, SensorReading* out, int maxOut,
-                        uint32_t staleAfterMs) const {
+                        uint32_t staleAfterMs) {
     if (nodeId == nullptr || out == nullptr || maxOut <= 0) return 0;
 
     const uint32_t now = millis();
@@ -90,6 +131,42 @@ int RemoteIngest::drain(const char* nodeId, SensorReading* out, int maxOut,
                     ? QUALITY_ERROR
                     : QUALITY_GOOD;
         n++;
+    }
+
+    // ── Queued history, oldest first, in whatever room is left ──────────────
+    //
+    // AFTER the latest values, deliberately. History drains a few readings per
+    // tick; ahead of the current value it would leave the live dashboard
+    // showing nothing for minutes while an outage's backlog cleared. Behind
+    // it, nobody notices.
+    //
+    // Entries for other nodes are stepped over and kept: each node's plugin
+    // drains its own, and a burst from one must not be discarded because
+    // another's tick reached the queue first.
+    int scanned = 0;
+    while (n < maxOut && scanned < _hCount) {
+        const int idx = (_hHead + scanned) % MAX_HISTORY;
+        if (!eq(_h[idx].nodeId, nodeId)) { scanned++; continue; }
+
+        SensorReading& r = out[n];
+        r = SensorReading();
+        copyClamped(r.metric, sizeof(r.metric), _h[idx].metric);
+        copyClamped(r.unit,   sizeof(r.unit),   _h[idx].unit);
+        r.value     = _h[idx].value;
+        r.timestamp = _h[idx].ts;      // authoritative; not stamped over
+        r.quality   = QUALITY_GOOD;
+        n++;
+
+        // Remove it by shifting the entries in front of it back one place.
+        // A linear move of at most MAX_HISTORY small structs, and it keeps the
+        // queue a simple ring rather than one with holes in it.
+        for (int k = scanned; k > 0; k--) {
+            const int dst = (_hHead + k) % MAX_HISTORY;
+            const int src = (_hHead + k - 1) % MAX_HISTORY;
+            _h[dst] = _h[src];
+        }
+        _hHead = (_hHead + 1) % MAX_HISTORY;
+        _hCount--;
     }
     taskEXIT_CRITICAL(&_mux);
 

@@ -110,16 +110,52 @@
 //#  define FEATURE_REMOTE_NODES        // POST /api/ingest + "remote" sensor
 //#endif
 
+// Battery nodes over ESP-NOW.  A second kind of remote node: deep-sleeping,
+// battery powered, no WiFi association and no HTTP.  Readings land in the same
+// RemoteIngest mailbox as POST /api/ingest, so everything downstream — filters,
+// ring buffer, exporters, dashboard — is shared.  See docs/ESPNOW_NODE.md.
+//
+// CHANGE THE KEY before putting this on a network you share.  It is a single
+// 16-byte secret shared by every node, and it is what both encrypts the link
+// and authorises a node to be adopted during pairing:
+//   -DFEATURE_ESPNOW_INGEST -DESPNOW_LMK='"16-byte-secret!!"'
+//
+// TWO CONSEQUENCES OF TURNING THIS ON, both deliberate:
+//
+//   • FEATURE_REMOTE_NODES is implied.  RemoteIngest is where the readings go
+//     and RemoteNodeSensor is what drains them; without both there is nowhere
+//     for an ESP-NOW reading to land.  (POST /api/ingest comes with it.  If
+//     that endpoint is unwanted on this device, set a long INGEST_TOKEN — it
+//     is refused without one.)
+//
+//   • WiFi modem sleep is forced OFF.  WIFI_PS_MIN_MODEM breaks ESP-NOW
+//     unicast — measured — while leaving broadcast working, so pairing would
+//     succeed and then no reading would ever arrive.  The sketch asks
+//     modemSleepAllowed() at each point of use rather than overriding the
+//     config once — a device with no sleep settings at all never reaches the
+//     parser that would have applied the override, which is how the first
+//     version of this reached exactly the state it existed to prevent.
+//     A mains-powered collector loses nothing by it.
+//#ifndef FEATURE_ESPNOW_INGEST
+//#  define FEATURE_ESPNOW_INGEST       // ESP-NOW receive path + pairing
+//#endif
+
+#ifdef FEATURE_ESPNOW_INGEST
+#  ifndef FEATURE_REMOTE_NODES
+#    define FEATURE_REMOTE_NODES
+#  endif
+#endif
+
 // Kindle dashboard — GET /kindle.  A server-rendered, JavaScript-free page
 // sized for a 6" e-ink reader's browser.  See docs/KINDLE_DASHBOARD.md.
 //#ifndef FEATURE_KINDLE_DASHBOARD
-//#  define FEATURE_KINDLE_DASHBOARD
+//#  define FEATURE_KINDLE_DASHBOARD   // GET /kindle e-ink dashboard
 //#endif
 
 // Weather forecast client.  Fetches a short forecast over HTTPS for the
 // Kindle dashboard to sit alongside the measured values.
 //#ifndef MODULE_FORECAST_ENABLED
-//#  define MODULE_FORECAST_ENABLED
+//#  define MODULE_FORECAST_ENABLED    // HTTPS weather forecast
 //#endif
 
 // SD card storage.  ON by default, because turning it off changes what a

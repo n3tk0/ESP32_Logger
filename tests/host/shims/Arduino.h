@@ -104,3 +104,28 @@ public:
     void begin(unsigned long) {}
 };
 extern HostSerial Serial;   // defined by the test TU that needs it
+
+// ----------------------------------------------------------------------------
+// FreeRTOS critical sections and millis(), for the few firmware .cpp files that
+// are otherwise pure logic.
+//
+// The spinlock is a no-op because the host tests are single-threaded: what they
+// exercise is what the critical section PROTECTS — the ordering and bookkeeping
+// inside it — not the mutual exclusion itself, which has no meaning with one
+// thread. A test that needed real concurrency would use the TSan build and a
+// real mutex, as tests/host/test_ringbuffer_concurrency.cpp does.
+//
+// millis() is settable, because code that ages entries against it needs time to
+// move on demand rather than at whatever rate the test host happens to run.
+// ----------------------------------------------------------------------------
+typedef int portMUX_TYPE;
+#define portMUX_INITIALIZER_UNLOCKED 0
+#define taskENTER_CRITICAL(mux)      ((void)(mux))
+#define taskEXIT_CRITICAL(mux)       ((void)(mux))
+#define taskENTER_CRITICAL_ISR(mux)  ((void)(mux))
+#define taskEXIT_CRITICAL_ISR(mux)   ((void)(mux))
+
+inline uint32_t& hostMillisRef() { static uint32_t m = 0; return m; }
+inline uint32_t  millis()                 { return hostMillisRef(); }
+inline void      hostSetMillis(uint32_t v) { hostMillisRef() = v; }
+inline void      hostAdvanceMillis(uint32_t d) { hostMillisRef() += d; }

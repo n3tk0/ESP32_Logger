@@ -35,6 +35,7 @@ from deploy_core import (
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
+from features import grouped, is_known, optional_features
 from pio_envs import (
     chip_for, defaults_for, environments, env_names, env_info, ports_for,
     usb_pins,
@@ -160,9 +161,101 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     print(_bold("  ── Actions " + "─" * 51))
     print(f"  {_cyan('[r]')}  Run  {_dim(f'({enabled_list})')}")
     print(f"  {_cyan('[s]')}  Save as default")
+    feats = [m for m in (cfg.get("features") or []) if is_known(m)]
+    fsum = _green(f"{len(feats)} selected") if feats else _dim("none")
+    print(f"  {_cyan('[F]')}  Build features  {fsum}  {_dim('(uppercase F)')}")
     print(f"  {_cyan('[W]')}  WiFi provision  via serial COM port  {_dim('(uppercase W)')}")
     print(f"  {_cyan('[q]')}  Quit")
     print()
+
+
+def _feature_menu(cfg: dict[str, Any]) -> None:
+    """Pick the optional compile-time features this build should carry.
+
+    The list comes from src/setup.h through tools/features.py, so a feature
+    added to the firmware shows up here without anyone remembering to add it.
+    Only the off-by-default ones appear: an -D flag can switch those on, and
+    cannot switch off one that setup.h enables itself.
+    """
+    while True:
+        opts = optional_features()
+        chosen = set(m for m in (cfg.get("features") or []) if is_known(m))
+
+        print()
+        print(_bold("  ── Build features " + "─" * 44))
+        print(_dim("  Compiled in through PLATFORMIO_BUILD_FLAGS. No file is edited."))
+        print()
+
+        index: list[str] = []
+        for group, rows in grouped(opts).items():
+            print(_bold(f"  {group}"))
+            for f in rows:
+                index.append(f.macro)
+                n = len(index)
+                tick = _green("✓") if f.macro in chosen else " "
+                label = f.macro.replace("SENSOR_", "").replace("_ENABLED", "")
+                print(f"  {_cyan(f'[{n:>2}]')} [{tick}] {label:<22} {_dim(f.summary)}")
+            print()
+
+        if "FEATURE_ESPNOW_INGEST" in chosen:
+            lmk = cfg.get("espnow_lmk") or ""
+            if not lmk:
+                shown = _yellow("not set — the build falls back to setup.h's default")
+            elif len(lmk) != 16:
+                shown = _red(f"{len(lmk)} characters — must be exactly 16")
+            else:
+                shown = _green("set") + _dim("  (flash the SAME 16 bytes into the node)")
+            print(f"  {_cyan('[k]')}  ESP-NOW key   {shown}")
+            print()
+
+        print(f"  {_cyan('[c]')}  Clear all      {_cyan('[b]')}  Back")
+        print()
+
+        try:
+            ans = input(_bold("  Choice: ")).strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return
+
+        low = ans.lower()
+        if low in ("b", "", "q"):
+            return
+        if low == "c":
+            cfg["features"] = []
+            continue
+        if low == "k" and "FEATURE_ESPNOW_INGEST" in chosen:
+            print(_dim("  16 characters exactly. Empty leaves setup.h's default in place."))
+            try:
+                key = input(_bold("  ESP-NOW key: ")).strip()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                continue
+            if key and len(key) != 16:
+                print(_red(f"  {len(key)} characters — the build asserts on 16. Unchanged."))
+                time.sleep(1.2)
+                continue
+            cfg["espnow_lmk"] = key
+            continue
+
+        if not ans.isdigit() or not (1 <= int(ans) <= len(index)):
+            continue
+        macro = index[int(ans) - 1]
+        feats = list(cfg.get("features") or [])
+        if macro in feats:
+            feats.remove(macro)
+        else:
+            feats.append(macro)
+        cfg["features"] = feats
+
+        # FEATURE_ESPNOW_INGEST implies FEATURE_REMOTE_NODES — setup.h defines
+        # it either way. Shown as selected so the menu does not describe a
+        # build different from the one that will happen.
+        if macro == "FEATURE_ESPNOW_INGEST" and macro in feats:
+            if "FEATURE_REMOTE_NODES" not in feats:
+                feats.append("FEATURE_REMOTE_NODES")
+                cfg["features"] = feats
+                print(_dim("  → FEATURE_REMOTE_NODES added: ESP-NOW ingest requires it."))
+                time.sleep(1.0)
 
 
 def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -286,6 +379,13 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             cfg["upload_filter"] = nxt
             print(_dim(f"  → {_UPLOAD_FILTER_LABELS[nxt]}"))
             time.sleep(0.5)
+
+        elif choice == "F":          # uppercase F — build features
+            # Uppercase, and tested before any lowercase branch, for the reason
+            # spelled out on [U] above: `ch = choice.lower()` makes a lowercase
+            # test match the uppercase key too, so an uppercase action placed
+            # after one can never run.
+            _feature_menu(cfg)
 
         elif choice == "W":          # uppercase W — WiFi provisioner
             s_wifi_provision(cfg)

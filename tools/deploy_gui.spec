@@ -42,6 +42,14 @@ a = Analysis(
         # function — an env list that silently comes back empty in the frozen
         # build and nowhere else is a bad afternoon.
         'pio_envs',
+        # Same reasoning, and one step more exposed: deploy_gui's selftest
+        # imports it inside a function, where the analyser only sees it
+        # because of the module-scope import above. Named here so moving
+        # either import cannot leave the frozen build with an empty feature
+        # list — which looks exactly like a project that has no optional
+        # features, and would be found by the first person hunting for a
+        # checkbox they knew should be there.
+        'features',
     ],
     hookspath=[],
     hooksconfig={},
