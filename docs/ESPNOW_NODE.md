@@ -1,0 +1,237 @@
+# The battery node, over ESP-NOW
+
+A second kind of sensor node: a XIAO ESP32-C3 with a BME280 and a 21700 cell,
+deep sleeping between measurements and reporting over ESP-NOW instead of WiFi.
+
+The existing ESP8266 node in [`../node/`](../node/README.md) is untouched by any
+of this. It stays awake, posts JSON to `POST /api/ingest`, and is not a battery
+design. This is the battery design, and it is a separate device, a separate
+firmware and a separate ingest path.
+
+**Status.** The wire format (`src/espnow/EspNowProto.h`) and the battery model
+(`src/power/BatteryModel.h`) are implemented and covered by host tests. The
+radio code, the node firmware and the dashboard badge are not written yet. This
+document describes the whole design, so the parts that do not exist are marked
+where they appear.
+
+---
+
+## 1. Why the node has to heal itself
+
+The failure this design has to survive is the router moving to another channel.
+It happens on its own — most consumer access points re-pick a channel on reboot,
+after a firmware update, or when their automatic channel selection decides the
+band got noisy.
+
+When it happens, the collector follows: it is a station, it reconnects, and it
+lands on the new channel. The node does not follow, because it was asleep. It
+wakes, transmits on the old channel, and nobody hears it.
+
+The obvious fix is to have the collector notice the silence and do something
+about it. **It cannot, and the reason is worth writing down so it does not get
+re-proposed.** To reach a node sitting on channel 6, the collector has to be on
+channel 6 — and it cannot be, because it is a station associated to an access
+point on channel 11 and moving off that channel drops the link. It could hop
+briefly, but the node is awake for roughly a third of a second per minute and at
+an unknown offset, so "briefly" means holding the wrong channel for a full wake
+interval. That is a minute with no WiFi, no web interface and no exporters,
+repeated until the node happens to be listening.
+
+So the collector cannot heal the link. What it *can* do is notice, and that is
+worth having on its own account:
+
+* it knows each node's expected interval from provisioning, so silence past
+  three intervals means something is wrong;
+* it can say so — a node marked offline on the web interface and on the Kindle
+  dashboard, rather than a stale reading that looks current.
+
+That is the collector's half of the job. The healing is the node's.
+
+## 2. The node's half: an acknowledgement it stays awake for
+
+After transmitting, the node holds the radio in receive for a short window and
+waits for an `AckMsg` from the collector.
+
+```
+wake → read sensors → send DATA → listen (≤ 30 ms, exits early on arrival) → sleep
+```
+
+Three things ride on that reply, and each pays for the window on its own:
+
+**Time.** The XIAO ESP32-C3 has no 32 kHz crystal fitted, so deep sleep is timed
+by the internal RC oscillator, which drifts by percent, not by parts per
+million. The node has no NTP either — it never associates to the access point.
+The `epoch` in the ACK is its only source of wall-clock time, and it needs one
+to timestamp readings it had to buffer.
+
+**Configuration.** `intervalS` lets the wake period be changed from the
+collector's web interface, without walking to a node that may be behind a wall
+or on a roof.
+
+**Liveness.** This is the part that heals the channel. The radio's own send
+callback already reports whether the frame was acknowledged at the MAC layer,
+which catches a wrong channel. The application-level ACK catches strictly more:
+a collector that was reflashed and lost its peer table answers at the MAC layer
+but has nothing to say, and only the missing `AckMsg` reveals it. That case is
+handled by `EN_ACK_REDISCOVER`, which sends the node back through provisioning
+rather than leaving it transmitting into a collector that will not decode it.
+
+### What the window costs
+
+Receive on an ESP32-C3 draws around 85 mA. A fixed 30 ms window at one wake per
+minute would be 1.0 mAh/day against a budget of about 9.7 — a tenth of the
+battery for something that normally completes in single-digit milliseconds.
+
+So the window is a **ceiling, not a duration**: the node leaves receive the
+moment the frame arrives. The collector replies straight from its receive
+callback with no filesystem or network work in between, so the usual turnaround
+is a few milliseconds and the average cost lands near 0.3 mAh/day. The 30 ms
+only gets spent on the wakes where the reply never comes — which are exactly the
+wakes that are about to trigger a rescan anyway.
+
+### And the rescan itself
+
+Three consecutive wakes with no reply, and the node does a passive scan for its
+access point, takes the channel it finds, stores it, and carries on.
+
+Two bounds on that, in opposite directions:
+
+* **At most once an hour.** A collector that is simply switched off would
+  otherwise make the node scan every single minute, and a scan is 1.5–2 s of
+  radio — an order of magnitude more than a normal wake. The hourly ceiling
+  turns a dead collector from a battery emergency into a rounding error.
+* **Immediately on the first eligible failure.** The ceiling is a rate limit,
+  not a schedule. A channel move at 14:03 is recovered at the next wake, not at
+  15:00, because the hour is measured from the last scan and not from a clock.
+  Losing an hour of readings to a router reboot would be the wrong trade.
+
+The node stores **both the BSSID and the SSID** of the access point. The BSSID
+is exact; the SSID is the fallback, because a mesh or a repeater changes the
+BSSID under you while the SSID stays put.
+
+## 3. Provisioning
+
+The shared key (LMK, 16 bytes) is set on both sides when the node is flashed and
+when it is added in the collector's web interface. That is what removes the
+chicken-and-egg problem of exchanging a key over a link that needs the key.
+
+```
+Node with no stored channel:
+    for ch in 1..13:  broadcast DISCOVER{mac, nodeId, nonce, HMAC}, wait ~120 ms
+
+Collector, only while a pairing window is open:
+    verify the HMAC against the configured keys
+    add the peer with its LMK
+    reply, unicast and encrypted:  WELCOME{nodeId, channel, ssid, bssid, interval, epoch}
+
+Node: store it all in NVS and sleep.
+```
+
+`DISCOVER` is broadcast, and broadcast cannot be encrypted, so it is signed
+instead — the first 8 bytes of HMAC-SHA256 over the frame. That proves the
+sender holds the key, which is what stops a stranger's node from being adopted
+by being carried past the house during a pairing window. It does not make the
+frame private: it is readable in the clear and leaks a MAC address. The pairing
+window being human-initiated and two minutes long is the rest of the defence.
+
+## 4. The wire format
+
+Defined once, in `src/espnow/EspNowProto.h`, and compiled by both sides — a
+change there is a change to both or it does not build. Layout is asserted at
+compile time and re-checked on the host by
+[`tests/host/test_espnow_proto.cpp`](../tests/host/test_espnow_proto.cpp).
+
+| message | direction | bytes | carries |
+|---|---|---|---|
+| `DataMsg`     | node → collector | 24 (1 sample) … 192 (15) | sequence, flags, node epoch, samples |
+| `AckMsg`      | collector → node | 14 | echoed sequence, channel, epoch, interval |
+| `DiscoverMsg` | node → broadcast | 22 | MAC, nonce, truncated HMAC |
+| `WelcomeMsg`  | collector → node | 51 | node id, channel, SSID, BSSID, interval |
+
+It is binary rather than JSON because ESP-NOW carries at most 250 bytes per
+frame and that is a MAC-layer limit, not a buffer. The JSON the ESP8266 node
+posts measures 237 bytes for a BME280 plus battery — inside the cap with 13
+bytes to spare, until an ingest token is added and it becomes 264 and does not
+fit at all.
+
+The saving is not the point. Fitting fifteen samples in one frame is the point:
+that is what lets a node that could not reach the collector keep its readings in
+RTC memory and send them as one burst when the link comes back, with `dt_s` on
+each sample giving it an honest timestamp. *(The buffering itself is not
+implemented yet; the format has room for it so that adding it later does not
+mean a protocol version bump.)*
+
+Every field that can be missing has a reserved value meaning "not measured",
+mapped to NaN on the way out. A BMP280 has no humidity sensor, and reporting
+that as `0 %RH` would be a reading the collector could not tell from a real one.
+
+## 5. Battery
+
+The node sends **millivolts and nothing else**. It has no history — it deep
+sleeps, and its RAM does not survive — and giving it one would mean writing
+flash daily on a device whose entire purpose is not to spend energy. The
+collector concludes; see `src/power/BatteryModel.h`.
+
+Voltage is read through a resistor divider, permanently connected. At 2×220 kΩ
+that is about 9.5 µA, which is under a percent of the budget at one-minute
+intervals and buys not having a MOSFET and a GPIO to switch it.
+
+Three figures come out, and they become readings like any other:
+
+| metric | note |
+|---|---|
+| `battery_voltage` | as sent |
+| `battery_percent` | piecewise-linear lithium curve, 0 % at the LDO's floor |
+| `battery_days` | linear fit over a fortnight of daily minima, or absent |
+
+`battery_days` and not `battery_days_left`, because `SensorReading::metric` is
+`char[16]` and a 17-character name would be stored truncated, silently, and
+never match anything again — which is exactly how `humidity_ambient` shipped
+broken. `tools/check_metric_names.py` exists because of that one.
+
+**0 % is 3.4 V, not the cell's 3.0 V.** The node runs from a 3.3 V LDO, and an
+LDO cannot regulate once its input reaches its dropout. The roughly 600 mAh the
+cell still holds below that point is unreachable, and counting it would
+overstate the remaining life by weeks.
+
+**The daily minimum, not the average.** Terminal voltage moves with load and
+with temperature, and a node on an unheated balcony swings several tenths of a
+volt for reasons that have nothing to do with charge. One figure per day — the
+lowest, measured under the radio's load — takes most of that out.
+
+**The model refuses to answer more often than people expect.** Fewer than five
+days of history, a flat trace, a rising one, or a slope inside the noise floor
+all return "unknown", and the dashboard prints a dash. A dash is a true
+statement; *412 days* extrapolated from four readings two millivolts apart is
+not, and it is worse than the dash because a reader believes it. This is why the
+warning fires on the percentage **or** the day count, either alone: a node whose
+history was lost still has to warn before it dies.
+
+## 6. What this costs the collector
+
+`FEATURE_ESPNOW_INGEST` turns modem sleep off at compile time. That is not
+tidiness — `WIFI_PS_MIN_MODEM` breaks ESP-NOW unicast, measured, while leaving
+broadcast working, which is the worst possible failure mode because pairing
+would succeed and then nothing would arrive. The collector is mains powered
+indoors and has nothing to gain from modem sleep anyway.
+
+ESP-NOW itself measured 8,128 bytes of firmware when linked in, because the WiFi
+stack it sits on is already there.
+
+## 7. Expected life
+
+| | one minute | thirty seconds |
+|---|---|---|
+| wake (~350 ms at ~60 mA average) | 8.4 mAh/day | 16.8 mAh/day |
+| ACK window, early exit, ~8 ms average | 0.3 | 0.6 |
+| deep sleep (~44 µA — the board, not the chip) | 1.06 | 1.06 |
+| divider | 0.23 | 0.23 |
+| **total** | **~10.0 mAh/day** | **~18.7 mAh/day** |
+| from 4312 mAh usable | ~430 days | ~230 days |
+
+At that scale the cell's own self-discharge stops being negligible: around 2 %
+a month over fourteen months is roughly a quarter of the capacity. Expect
+**10–11 months** at one-minute intervals and about seven at thirty seconds.
+
+Every figure above is a calculation, not a measurement. Nothing here has been
+run on hardware yet.
