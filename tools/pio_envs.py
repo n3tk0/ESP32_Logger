@@ -86,6 +86,9 @@ _NOT_DEPLOYABLE = {
     "chaos_simulator":
         "resilience-test build: it deliberately drops WiFi, starves mutexes "
         "and holds heap. Never flash it to a real device.",
+    "x_core3_probe":
+        "measurement build on Arduino core 3.x: it exists to price the "
+        "migration in flash bytes, not to run on hardware.",
 }
 
 # Fallback when a board's JSON cannot be found (no PlatformIO install, or a

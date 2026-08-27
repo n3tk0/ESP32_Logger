@@ -53,15 +53,15 @@ jobs:
           - env: xiao_esp32c3
             name: esp32c3
             flash: 4MB
-            app_max: 1572864    # 0x180000 = 1,536 KB (from partitions_balanced.csv)
+            app_max: 1507328    # 0x170000 = 1,472 KB = app0 SIZE in partitions_balanced.csv
           - env: esp32c3_supermini
             name: esp32c3_supermini
             flash: 4MB
-            app_max: 1572864    # 0x180000 = 1,536 KB (from partitions_balanced.csv)
+            app_max: 1507328    # 0x170000 = 1,472 KB = app0 SIZE in partitions_balanced.csv
           - env: lolin_c3_pico
             name: lolin_c3_pico
             flash: 4MB
-            app_max: 1572864    # 0x180000 = 1,536 KB (from partitions_balanced.csv)
+            app_max: 1507328    # 0x170000 = 1,472 KB = app0 SIZE in partitions_balanced.csv
           - env: esp32s3
             name: esp32s3
             flash: 8MB
@@ -193,6 +193,19 @@ jobs:
           fi
           echo "range guard rejected KINDLE_PAGE_W=200, as it should"
 
+      # UI_CDN_BASE compiles a code path nothing else here reaches: the root
+      # handler serves a CDN bootstrap instead of LittleFS, and the CSP is
+      # rewritten to whitelist the origin. No job built it until now, and that
+      # gap cost a real break -- naming the route handlers moved them out of
+      # setupWebServer() while CDN_BOOTSTRAP_HTML and CDN_BOOT_JS stayed behind
+      # as function-local statics, so every -DUI_CDN_BASE build stopped
+      # compiling and every default build stayed green.
+      - name: Build with the CDN UI path compiled in
+        run: |
+          set -o pipefail
+          PLATFORMIO_BUILD_FLAGS='-DUI_CDN_BASE=\"https://example.com/v4\"' \
+            pio run -e xiao_esp32c3 2>&1 | tail -20
+
       - name: Rebuild at the default width for the size report
         run: pio run -e xiao_esp32c3
 
@@ -200,11 +213,16 @@ jobs:
         run: |
           # This config is the deliberate worst case -- every optional feature
           # on a 4 MB C3 -- and nobody ships it, so it sits near the ceiling by
-          # nature (~97% at the time this job was added). Exceeding the
-          # partition is still a hard failure, because such an image would not
-          # flash; the warning below is the early signal.
+          # nature. Exceeding the partition is a hard failure, because such an
+          # image would not flash; the warning below is the early signal.
+          #
+          # MAX is app0's SIZE (0x170000), not app1's OFFSET (0x180000). Those
+          # differ by exactly 64 KB and this job used the wrong one, so it
+          # passed images that could not flash: at the commit before this fix
+          # the all-features build was 1,545,280 bytes and reported as
+          # "98% used, 26 KB free" while actually overflowing app0 by 37,952.
           SIZE=$(stat -c%s .pio/build/xiao_esp32c3/firmware.bin)
-          MAX=1572864
+          MAX=1507328
           PCT=$((SIZE * 100 / MAX))
           REMAIN=$(( (MAX - SIZE) / 1024 ))
           echo "=== xiao_esp32c3, all features on ==="

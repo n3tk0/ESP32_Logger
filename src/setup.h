@@ -127,10 +127,10 @@
 //
 // Comment the define out to drop `#include <SD.h>` and, with it, the FatFs
 // library and SD driver underneath it.  MEASURED at ~34 KB on the C3 — two
-// `pio run -e xiao_esp32c3` builds of this default config, 1,382,104 bytes of
-// app flash with and 1,347,102 without, so 35,002 off the number PlatformIO
-// checks against the partition.  It is spent whether or not a card is ever
-// fitted, on a partition a minimal build already fills to 92 %.
+// `pio run -e xiao_esp32c3` builds of this default config: firmware.bin is
+// 1,333,408 bytes with and 1,298,832 without, so 34,576 off the image that
+// has to fit app0 (0x170000 = 1,507,328).  It is spent whether or not a card
+// is ever fitted.
 //
 // With this off: sdFs() returns nullptr and sdAvailable stays false, so every
 // request naming storage=sdcard falls back to LittleFS — the same fallback a

@@ -156,16 +156,40 @@ Toggled via `#ifdef EXPORT_*_ENABLED` in `src/setup.h`. All five are enabled by 
 
 ### Flash budget
 
-The 4 MB C3 targets get a **1472 KB app partition** (×2, OTA-capable). A
-minimal build — BME280 + SDS011, five exporters, no optional features — sits
-around **1345 KB**, so the headroom is real but not generous. Two toggles
-exist specifically to buy it back, both measured on `xiao_esp32c3` as app
-flash — the figure PlatformIO checks against the partition:
+The 4 MB C3 targets get a **1472 KB app partition** (×2, OTA-capable). That is
+`app0` in `partitions_balanced.csv`, `0x170000` = **1,507,328 bytes**, and the
+number that has to fit inside it is `firmware.bin`.
+
+> **Measure `firmware.bin`, not PlatformIO's "used flash".** The size line
+> PlatformIO prints excludes `.eh_frame`, which is nonetheless flashed — with
+> exceptions enabled that was 88,892 bytes of difference. Until the
+> `-fno-exceptions` fix below, CI compounded the error from the other side: it
+> compared against `0x180000`, which is app1's *offset*, not app0's *size*.
+> Between them the all-features build was reported as "98% used, 26 KB free"
+> while actually overflowing the partition by 37,952 bytes.
+
+Current, `xiao_esp32c3`, `firmware.bin`:
+
+| build | image | free of 1,507,328 |
+|---|---:|---:|
+| default `src/setup.h` | 1,333,408 | 173,920 (88 %) |
+| every optional feature on | 1,397,200 | 110,128 (92 %) |
+
+Levers, all measured as `firmware.bin` deltas on `xiao_esp32c3`:
 
 | | flash |
 |---|---|
-| `FEATURE_SD_STORAGE` off (`src/setup.h`) | **−34 KB** — drops `<SD.h>`, the FatFs library and the SD driver (35,002 bytes, two builds) |
-| failsafe recovery page, stored gzipped | **−17 KB** — already on; 27,622 B of PROGMEM text became 8,239 B of gzip plus a 1,035 B plain fallback |
+| **`-fno-exceptions`** (`platformio.ini`, on) | **−137,328** — nothing here uses exceptions; this was pure unwinding metadata. See the comment on `build_flags`. |
+| `FEATURE_SD_STORAGE` off (`src/setup.h`) | **−34,576** — drops `<SD.h>`, the FatFs library and the SD driver |
+| failsafe recovery page, stored gzipped (on) | **−18,348** — 27,622 B of PROGMEM text became 8,239 B of gzip plus a 1,035 B plain fallback |
+| route handlers as named functions rather than lambdas (done) | **−1,504** — one `std::function` instantiation instead of 47 |
+
+The last one is listed for honesty rather than for its size: the estimate before
+it was made was −11 KB, from summing `_Function_handler` symbol sizes in the
+object file. Most of that turned out to be exception metadata that
+`-fno-exceptions` removes anyway, and the two changes overlap almost entirely.
+It stayed because it costs nothing and each route is now its own symbol in the
+linker map, so the next such question can be answered per handler.
 
 The failsafe page is the recovery UI served when LittleFS has no `/www`. It
 stays **linked into the firmware**, because that is the state it exists for —

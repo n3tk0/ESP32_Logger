@@ -219,7 +219,10 @@ curl -X POST http://HOST/restart</pre>
 )HTML";
 
 static bool clientAcceptsGzip(AsyncWebServerRequest* r) {
-    AsyncWebHeader* h = r->getHeader("Accept-Encoding");
+    // const-qualified deliberately: the esphome fork returns AsyncWebHeader*
+    // and ESP32Async's returns const AsyncWebHeader*. Binding to the const
+    // pointer accepts both, and this use is read-only anyway.
+    const AsyncWebHeader* h = r->getHeader("Accept-Encoding");
     // No header means no stated preference. RFC 9110 permits any encoding in
     // that case, but the clients that omit it are the ones least able to cope
     // with a compressed body, so treat silence as "no".
@@ -340,8 +343,1136 @@ static void fmtIP(const uint8_t* ip, char* buf16) {
 }
 
 // ============================================================================
+// ROUTE HANDLERS
+// ============================================================================
+// These are the bodies that used to be inline lambdas inside
+// setupWebServer().  They are named functions for one measured reason:
+// AsyncWebServer::on() takes std::function, every lambda is its own type, and
+// GCC therefore instantiated a separate _Function_handler for each one -- 47
+// copies of identical type-erasure code, 11,398 bytes.  Passing a plain
+// void(*)(AsyncWebServerRequest*) makes every registration construct
+// std::function from the same type, so one instantiation serves all of them.
+//
+// Nothing else changed: the bodies are verbatim, and each server.on() call
+// stayed exactly where it was.  Registration ORDER decides which handler wins
+// (first canHandle() to match), so it must not be rearranged.
+// ============================================================================
+
+#ifdef UI_CDN_BASE
+// The CDN bootstrap page and its boot script.  These live at file scope
+// because the handlers that serve them do: they used to be statics inside
+// setupWebServer(), which compiled only while the handlers were lambdas
+// nested in the same function.  Hoisting the handlers out without moving
+// these broke every -DUI_CDN_BASE build and nothing noticed, because no
+// CI job set the flag.  One now does.
+static const char CDN_BOOTSTRAP_HTML[] PROGMEM =
+    "<!DOCTYPE html><html lang=\"en\" id=\"htmlRoot\"><head>"
+    "<meta charset=\"UTF-8\">"
+    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">"
+    "<title>Water Logger</title>"
+    "<link rel=\"stylesheet\" href=\"" UI_CDN_BASE "/style.css\">"
+    "<script src=\"" UI_CDN_BASE "/js/theme-boot.js\"></script>"
+    "</head><body>"
+    "<div id=\"cdnBoot\" style=\"font-family:sans-serif;padding:2rem;text-align:center\">"
+    "Loading UI from CDN…</div>"
+    "<script src=\"/cdn-boot.js\"></script>"
+    "</body></html>";
+
+// Boot script served from the device — `script-src 'self'` covers it
+// without needing 'unsafe-inline'.  Fetches the SPA HTML from the CDN
+// and replaces the bootstrap document; on failure, shows a link back
+// to the on-device UI.
+static const char CDN_BOOT_JS[] PROGMEM =
+    "fetch('" UI_CDN_BASE "/index.html').then(function(r){return r.text();})"
+    ".then(function(t){document.open();document.write(t);document.close();})"
+    ".catch(function(e){"
+      "document.getElementById('cdnBoot').innerHTML="
+        "'CDN unreachable. <a href=\"/?_local=1\">Use local UI</a>';"
+    "});";
+#endif
+
+#ifdef UI_CDN_BASE
+static void h_get_cdn_boot_js(AsyncWebServerRequest* r) {
+    AsyncWebServerResponse* resp =
+        r->beginResponse_P(200, "application/javascript", CDN_BOOT_JS);
+    resp->addHeader("Cache-Control", "public, max-age=300");
+    r->send(resp);
+}
+#endif
+
+static void h_get_root(AsyncWebServerRequest* r) {
+#ifdef UI_CDN_BASE
+    // Build-time CDN opt-in: 1 KB bootstrap from PROGMEM loads the SPA
+    // from the hosted URL.  All API calls still target this device —
+    // only the static bundle moves off-flash.  ?_local=1 lets devs
+    // force the on-device copy when the CDN is unreachable.
+    if (!r->hasParam("_local")) {
+        r->send_P(200, "text/html", CDN_BOOTSTRAP_HTML);
+        return;
+    }
+#endif
+    if (littleFsAvailable && LittleFS.exists("/www/index.html.gz")) {
+        AsyncWebServerResponse* resp =
+            r->beginResponse(LittleFS, "/www/index.html.gz", "text/html");
+        if (resp) {
+            resp->addHeader("Content-Encoding", "gzip");
+            r->send(resp);
+            return;
+        }
+        // beginResponse can return null on low heap or a race with the
+        // file being removed between exists() and beginResponse() —
+        // fall through to the plain index.html / failsafe instead of
+        // dereferencing the null pointer (observed crash MEPC=0x42036bcc
+        // on first GET / after AP join).
+    }
+    if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
+        r->send(LittleFS, "/www/index.html", "text/html");
+        return;
+    }
+    sendFailsafePage(r);
+}
+
+static void h_get_setup(AsyncWebServerRequest* r) {
+    sendFailsafePage(r);
+}
+
+static void h_get_api_csrf_token(AsyncWebServerRequest* r) {
+    String body = "{\"token\":\"";
+    body += CsrfToken::get();
+    body += "\"}";
+    AsyncWebServerResponse* resp = r->beginResponse(200, "application/json", body);
+    resp->addHeader("Cache-Control", "no-store");
+    r->send(resp);
+}
+
+static void h_get_api_live(AsyncWebServerRequest* r) {
+    JsonDocument doc;
+    buildLiveSnapshot(doc);
+    sendJsonResponse(r, doc);
+}
+
+static void h_get_api_recent_logs(AsyncWebServerRequest* r) {
+    JsonDocument doc;
+    JsonArray logs = doc["logs"].to<JsonArray>();
+
+    uint32_t sinceBoot = 0;
+    bool hasSince = false;
+    if (r->hasParam("since")) {
+        sinceBoot = (uint32_t)r->getParam("since")->value().toInt();
+        hasSince  = true;
+    }
+    doc["bootCount"] = bootCount;  // client advances cursor from this
+
+    if (!fsAvailable || !activeFS) {
+        doc["error"] = "Storage not available";
+        sendJsonResponse(r, doc);
+        return;
+    }
+
+    String logFile = getActiveDatalogFile();
+    if (!activeFS->exists(logFile)) {
+        doc["error"] = "Log file not found";
+        sendJsonResponse(r, doc);
+        return;
+    }
+
+    File f = activeFS->open(logFile, "r");
+    if (!f) {
+        doc["error"] = "Cannot open file";
+        sendJsonResponse(r, doc);
+        return;
+    }
+
+    // Efficient tail-read: seek to last ~1KB of file instead of reading every line.
+    // Buffers moved to the heap — the previous on-stack `lastLines[5][160]` +
+    // `lineBuf[160]` (~960 B) ate most of the AsyncTCP worker's budget.
+    constexpr int    LR_LINES  = 5;
+    constexpr size_t LR_LINELN = 160;
+    auto lastLines = std::unique_ptr<char[]>(new (std::nothrow) char[LR_LINES * LR_LINELN]);
+    auto lineBuf   = std::unique_ptr<char[]>(new (std::nothrow) char[LR_LINELN]);
+    if (!lastLines || !lineBuf) {
+        f.close();
+        doc["error"] = "out of memory";
+        sendJsonResponse(r, doc);
+        return;
+    }
+    auto slot = [&](int k) { return lastLines.get() + (k * LR_LINELN); };
+
+    int lCount = 0;
+    size_t fSize = f.size();
+    const size_t TAIL_BYTES = 1024;
+
+    if (fSize > TAIL_BYTES) {
+        f.seek(fSize - TAIL_BYTES);
+        f.readStringUntil('\n');   // discard partial first line
+    }
+
+    while (f.available()) {
+        int i = 0;
+        while (f.available() && i < (int)LR_LINELN - 1) {
+            char c = f.read();
+            if (c == '\n' || c == '\r') break;
+            lineBuf[i++] = c;
+        }
+        lineBuf[i] = '\0';
+        // skip empty lines
+        if (i > 0) {
+            memcpy(slot(lCount % LR_LINES), lineBuf.get(), i + 1);
+            lCount++;
+        }
+    }
+    f.close();
+
+    int count = lCount < LR_LINES ? lCount : LR_LINES;
+    for (int i = 0; i < count; i++) {
+        int idx = (lCount - 1 - i) % LR_LINES;
+        char* lineStr = slot(idx);
+        
+        char* saveptr;
+        char* tokens[10];
+        int tCount = 0;
+        char* tok = strtok_r(lineStr, "|", &saveptr);
+        while (tok && tCount < 10) {
+            tokens[tCount++] = tok;
+            tok = strtok_r(NULL, "|", &saveptr);
+        }
+
+        if (tCount >= 7) {
+            // Opportunistic `?since=<bootcount>` filter — scan tokens for
+            // a `#:<n>` entry and skip if n <= sinceBoot.  If no such token
+            // exists (user disabled includeBootCount) the filter is a
+            // no-op and the entry is returned as before.
+            if (hasSince) {
+                bool skip = false;
+                for (int t = 0; t < tCount; t++) {
+                    if (tokens[t][0] == '#' && tokens[t][1] == ':') {
+                        uint32_t bc = (uint32_t)atoi(tokens[t] + 2);
+                        if (bc <= sinceBoot) skip = true;
+                        break;
+                    }
+                }
+                if (skip) continue;
+            }
+
+            JsonObject entry = logs.add<JsonObject>();
+            int tail = tCount - 1;
+
+            if (tCount >= 8) {
+                char timeBuf[80];
+                snprintf(timeBuf, sizeof(timeBuf), "%s %s-%s", tokens[0], tokens[1], tokens[2]);
+                entry["time"] = timeBuf;
+            } else {
+                char timeBuf[80];
+                snprintf(timeBuf, sizeof(timeBuf), "%s|%s", tokens[0], tokens[1]);
+                entry["time"] = timeBuf;
+            }
+
+            entry["trigger"] = tokens[tail - 3];
+            
+            char* vs = tokens[tail - 2];
+            if (strncmp(vs, "L:", 2) == 0) vs += 2;
+            for (char* p = vs; *p; p++) if (*p == ',') *p = '.';
+            char volBuf[32];
+            snprintf(volBuf, sizeof(volBuf), "%s L", vs);
+            entry["volume"] = volBuf;
+            
+            char* ffs = tokens[tail - 1];
+            if (strncmp(ffs, "FF", 2) == 0) ffs += 2;
+            entry["ff"] = atoi(ffs);
+            
+            char* pfs = tokens[tail];
+            if (strncmp(pfs, "PF", 2) == 0) pfs += 2;
+            entry["pf"] = atoi(pfs);
+        }
+    }
+    sendJsonResponse(r, doc);
+}
+
+static void h_get_api_filelist(AsyncWebServerRequest* r) {
+    JsonDocument doc;
+    JsonArray files = doc["files"].to<JsonArray>();
+
+    String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
+    // sanitizePath() rejects "..", backslash, control chars, NUL (returns
+    // "") — mirrors /download, /delete, /move_file. Without it a caller
+    // could enumerate arbitrary directories (e.g. /config) by traversal.
+    String dir     = sanitizePath(r->hasParam("dir") ? r->getParam("dir")->value() : "/");
+    // sanitizePath() returns "" for a rejected/traversal path; reject
+    // explicitly with 400 like /download, /delete, /mkdir, /move_file
+    // rather than letting scanDir() open an empty path.
+    if (dir.isEmpty()) {
+        r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid dir\"}");
+        return;
+    }
+    String filter  = r->hasParam("filter")  ? r->getParam("filter")->value()  : "";
+    bool recursive = r->hasParam("recursive");
+
+    fs::FS* targetFS = nullptr;
+    if (storage == "sdcard" && sdAvailable)              targetFS = sdFs();
+    else if (storage == "internal" && littleFsAvailable) targetFS = &LittleFS;
+    else if (littleFsAvailable)                          targetFS = &LittleFS;
+
+    if (targetFS) {
+        bool truncated = scanDir(*targetFS, dir, files, filter, recursive);
+        if (truncated) doc["truncated"] = true;
+        uint64_t used = 0, total = 0; int pct = 0;
+        getStorageInfo(used, total, pct, storage);
+        char uBuf[24], tBuf[24];
+        snprintf(uBuf, sizeof(uBuf), "%llu", (unsigned long long)used);
+        snprintf(tBuf, sizeof(tBuf), "%llu", (unsigned long long)total);
+        doc["used"]    = serialized(String(uBuf));
+        doc["total"]   = serialized(String(tBuf));
+        doc["percent"] = pct;
+    } else {
+        doc["error"] = "Storage not available";
+    }
+
+    doc["currentFile"] = getActiveDatalogFile();
+    sendJsonResponse(r, doc);
+}
+
+static void h_get_api_changelog(AsyncWebServerRequest* r) {
+    if (LittleFS.exists("/www/changelog.txt"))
+        r->send(LittleFS, "/www/changelog.txt", "text/plain");
+    else if (LittleFS.exists("/changelog.txt"))
+        r->send(LittleFS, "/changelog.txt", "text/plain");
+    else
+        r->send(404, "text/plain", "Changelog not found. Upload /www/changelog.txt");
+}
+
+static void h_get_export_settings(AsyncWebServerRequest* r) {
+    char ipBuf[16];
+
+    // Guarantee the payload is complete regardless of how config landed
+    // in memory — fillConfigDefaults() is idempotent, so callers still
+    // see their last-saved non-default values.  Audit Pass 4 F:
+    // "Remove duplicated fallback logic in /export_settings by running
+    // applyDefaults() before serialization."
+    fillConfigDefaults();
+
+    JsonDocument doc;
+
+    // ── Identity ──────────────────────────────────────────────────────────
+    doc["deviceName"]     = strlen(config.deviceName) ? config.deviceName : "Water Logger";
+    doc["deviceId"]       = config.deviceId;
+    doc["forceWebServer"] = config.forceWebServer;
+
+    // ── Theme ─────────────────────────────────────────────────────────────
+    JsonObject th = doc["theme"].to<JsonObject>();
+    th["mode"]              = (int)config.theme.mode;
+    th["primaryColor"]      = config.theme.primaryColor;
+    th["secondaryColor"]    = config.theme.secondaryColor;
+    th["lightBgColor"]      = config.theme.lightBgColor;
+    th["lightTextColor"]    = config.theme.lightTextColor;
+    th["darkBgColor"]       = config.theme.darkBgColor;
+    th["darkTextColor"]     = config.theme.darkTextColor;
+    th["ffColor"]           = config.theme.ffColor;
+    th["pfColor"]           = config.theme.pfColor;
+    th["otherColor"]        = config.theme.otherColor;
+    th["storageBarColor"]   = config.theme.storageBarColor;
+    th["storageBar70Color"] = config.theme.storageBar70Color;
+    th["storageBar90Color"] = config.theme.storageBar90Color;
+    th["storageBarBorder"]  = config.theme.storageBarBorder;
+    th["logoSource"]        = config.theme.logoSource;
+    th["faviconPath"]       = config.theme.faviconPath;
+    th["boardDiagramPath"]  = config.theme.boardDiagramPath;
+    th["chartSource"]       = (int)config.theme.chartSource;
+    th["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/uPlot.iife.min.js";
+    th["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
+    th["showIcons"]         = config.theme.showIcons;
+
+    // ── Flow Meter ────────────────────────────────────────────────────────
+    JsonObject fm = doc["flowMeter"].to<JsonObject>();
+    fm["pulsesPerLiter"]                = config.flowMeter.pulsesPerLiter > 0    ? config.flowMeter.pulsesPerLiter    : 450.0f;
+    fm["calibrationMultiplier"]         = config.flowMeter.calibrationMultiplier ? config.flowMeter.calibrationMultiplier : 1.0f;
+    fm["testMode"]                      = config.flowMeter.testMode;
+    fm["blinkDuration"]                 = config.flowMeter.blinkDuration > 0 ? config.flowMeter.blinkDuration : 250;
+
+    // ── Datalog ───────────────────────────────────────────────────────────
+    JsonObject dl = doc["datalog"].to<JsonObject>();
+    dl["rotation"]               = (int)config.datalog.rotation;
+    dl["maxSizeKB"]              = config.datalog.maxSizeKB > 0 ? config.datalog.maxSizeKB : 1024;
+    dl["maxEntries"]             = config.datalog.maxEntries > 0 ? config.datalog.maxEntries : 10000;
+    dl["folder"]                 = config.datalog.folder;
+    dl["timestampFilename"]      = config.datalog.timestampFilename;
+    dl["includeDeviceId"]        = config.datalog.includeDeviceId;
+    dl["prefix"]                 = strlen(config.datalog.prefix) ? config.datalog.prefix : "datalog";
+    dl["dateFormat"]             = (int)config.datalog.dateFormat;
+    dl["timeFormat"]             = (int)config.datalog.timeFormat;
+    dl["endFormat"]              = (int)config.datalog.endFormat;
+    dl["volumeFormat"]           = (int)config.datalog.volumeFormat;
+    dl["includeBootCount"]       = config.datalog.includeBootCount;
+    dl["includeExtraPresses"]    = config.datalog.includeExtraPresses;
+    dl["postCorrectionEnabled"]  = config.datalog.postCorrectionEnabled;
+    dl["pfToFfThreshold"]        = config.datalog.pfToFfThreshold > 0 ? config.datalog.pfToFfThreshold : 4.5f;
+    dl["ffToPfThreshold"]        = config.datalog.ffToPfThreshold > 0 ? config.datalog.ffToPfThreshold : 3.7f;
+    dl["manualPressThresholdMs"] = config.datalog.manualPressThresholdMs;
+
+    // ── Logger (wide-CSV pipeline) ────────────────────────────────────────
+    JsonObject lg = doc["logger"].to<JsonObject>();
+    lg["csvLoggingEnabled"]         = config.logger.csvLoggingEnabled;
+    lg["aggregationIntervalSec"]    = config.logger.aggregationIntervalSec ? config.logger.aggregationIntervalSec : 60;
+
+    // ── Network ───────────────────────────────────────────────────────────
+    JsonObject net = doc["network"].to<JsonObject>();
+    net["wifiMode"]       = (int)config.network.wifiMode;
+    net["apSSID"]         = strlen(config.network.apSSID)         ? config.network.apSSID         : DEFAULT_AP_SSID;
+    const char* apPw = "***";
+    const char* clPw = "***";
+#if WEB_BASIC_AUTH_ENABLED
+    if (r->hasParam("reveal_secrets") &&
+        r->getParam("reveal_secrets")->value() == "1") {
+        apPw = config.network.apPassword;
+        clPw = config.network.clientPassword;
+    }
+#endif
+    net["apPassword"]     = apPw;
+    net["clientSSID"]     = config.network.clientSSID;
+    net["clientPassword"] = clPw;
+    net["ntpServer"]      = strlen(config.network.ntpServer)      ? config.network.ntpServer      : DEFAULT_NTP_SERVER;
+    net["timezone"]       = config.network.timezone;
+    net["useStaticIP"]    = config.network.useStaticIP;
+
+    // AP network — uint8_t[4] arrays → "A.B.C.D" strings
+    fmtIP(config.network.apIP,      ipBuf); net["apIP"]      = ipBuf;
+    fmtIP(config.network.apGateway, ipBuf); net["apGateway"] = ipBuf;
+    fmtIP(config.network.apSubnet,  ipBuf); net["apSubnet"]  = ipBuf;
+
+    // Client static IP — uint8_t[4] arrays → "A.B.C.D" strings
+    fmtIP(config.network.staticIP, ipBuf); net["staticIP"] = ipBuf;
+    fmtIP(config.network.gateway,  ipBuf); net["gateway"]  = ipBuf;
+    fmtIP(config.network.subnet,   ipBuf); net["subnet"]   = ipBuf;
+    fmtIP(config.network.dns,      ipBuf); net["dns"]      = ipBuf;
+
+    // ── Hardware ──────────────────────────────────────────────────────────
+    JsonObject hw = doc["hardware"].to<JsonObject>();
+    hw["storageType"]        = (int)config.hardware.storageType;
+    hw["wakeupMode"]         = (int)config.hardware.wakeupMode;
+    hw["cpuFreqMHz"]         = config.hardware.cpuFreqMHz > 0 ? config.hardware.cpuFreqMHz : 80;
+    hw["defaultStorageView"] = config.hardware.defaultStorageView;
+    hw["debounceMs"]         = config.hardware.debounceMs > 0  ? config.hardware.debounceMs : 100;
+    hw["pinWifiTrigger"]     = config.hardware.pinWifiTrigger;
+    hw["pinWakeupFF"]        = config.hardware.pinWakeupFF;
+    hw["pinWakeupPF"]        = config.hardware.pinWakeupPF;
+    hw["pinFlowSensor"]      = config.hardware.pinFlowSensor;
+    hw["pinRtcCE"]           = config.hardware.pinRtcCE;
+    hw["pinRtcIO"]           = config.hardware.pinRtcIO;
+    hw["pinRtcSCLK"]         = config.hardware.pinRtcSCLK;
+    hw["pinSdCS"]            = config.hardware.pinSdCS;
+    hw["pinSdMOSI"]          = config.hardware.pinSdMOSI;
+    hw["pinSdMISO"]          = config.hardware.pinSdMISO;
+    hw["pinSdSCK"]           = config.hardware.pinSdSCK;
+
+    AsyncResponseStream *resp = r->beginResponseStream("application/json");
+    String fn = String(strlen(config.deviceName) ? config.deviceName : "device") + "_settings.json";
+    resp->addHeader("Content-Disposition", "attachment; filename=\"" + fn + "\"");
+    serializeJson(doc, *resp);
+    r->send(resp);
+}
+
+static void h_post_save_device(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    if (r->hasParam("deviceName", true))
+        SAFE_STRNCPY(config.deviceName, r->getParam("deviceName", true)->value().c_str(), sizeof(config.deviceName));
+    if (r->hasParam("deviceId", true)) {
+        String newId = r->getParam("deviceId", true)->value();
+        if (newId.length() > 0 && newId.length() <= 12)
+            SAFE_STRNCPY(config.deviceId, newId.c_str(), sizeof(config.deviceId));
+    }
+    config.forceWebServer = r->hasParam("forceWebServer", true);
+    if (r->hasParam("defaultStorageView", true))
+        config.hardware.defaultStorageView = r->getParam("defaultStorageView", true)->value().toInt();
+    // PR #105 follow-up: Reset Boot Count migrated from /save_flowmeter
+    // (page retired) to the System Info card on settings_device.
+    if (r->hasParam("resetBootCount", true)) { bootCount = 0; backupBootCount(); }
+    saveConfig();
+    r->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void h_post_save_hardware(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    // R11: validate every pin parameter against the active board profile
+    // before assigning. PIN_UNSET / -1 is accepted (means "unconfigured").
+    // First violation aborts the save with a 400; partial assignment is
+    // never persisted (saveConfig runs only at the end).
+    auto setPin = [&](const char* name, uint8_t& dest) -> bool {
+        if (!r->hasParam(name, true)) return true;
+        int v = r->getParam(name, true)->value().toInt();
+        if (v == -1) { dest = PIN_UNSET; return true; }
+        if (v < 0 || v > 255) {
+            r->send(400, "application/json",
+                    "{\"ok\":false,\"error\":\"pin out of range\"}");
+            return false;
+        }
+        if (!isPinAllowed(g_boardProfile, (uint8_t)v, PIN_PURPOSE_GENERIC)) {
+            char body[180];
+            snprintf(body, sizeof(body),
+                     "{\"ok\":false,\"error\":\"%s = GPIO%d rejected: %s\"}",
+                     name, v, pinRejectReason(g_boardProfile, (uint8_t)v));
+            r->send(400, "application/json", body);
+            return false;
+        }
+        dest = (uint8_t)v;
+        return true;
+    };
+    if (r->hasParam("storageType", true))    config.hardware.storageType    = (StorageType)r->getParam("storageType", true)->value().toInt();
+    if (r->hasParam("wakeupMode", true))     config.hardware.wakeupMode     = (WakeupMode)r->getParam("wakeupMode", true)->value().toInt();
+    if (!setPin("pinWifiTrigger", config.hardware.pinWifiTrigger)) return;
+    if (!setPin("pinWakeupFF",    config.hardware.pinWakeupFF))    return;
+    if (!setPin("pinWakeupPF",    config.hardware.pinWakeupPF))    return;
+    if (!setPin("pinFlowSensor",  config.hardware.pinFlowSensor))  return;
+    if (!setPin("pinRtcCE",       config.hardware.pinRtcCE))       return;
+    if (!setPin("pinRtcIO",       config.hardware.pinRtcIO))       return;
+    if (!setPin("pinRtcSCLK",     config.hardware.pinRtcSCLK))     return;
+    if (!setPin("pinSdCS",        config.hardware.pinSdCS))        return;
+    if (!setPin("pinSdMOSI",      config.hardware.pinSdMOSI))      return;
+    if (!setPin("pinSdMISO",      config.hardware.pinSdMISO))      return;
+    if (!setPin("pinSdSCK",       config.hardware.pinSdSCK))       return;
+    // Duplicate-pin check (Gemini medium on PR #87). After every
+    // setPin above succeeded, scan the final config for any two
+    // assigned pins on the same GPIO and refuse the whole save.
+    {
+        struct PinRef { const char* name; uint8_t value; };
+        PinRef refs[] = {
+            {"pinWifiTrigger", config.hardware.pinWifiTrigger},
+            {"pinWakeupFF",    config.hardware.pinWakeupFF},
+            {"pinWakeupPF",    config.hardware.pinWakeupPF},
+            {"pinFlowSensor",  config.hardware.pinFlowSensor},
+            {"pinRtcCE",       config.hardware.pinRtcCE},
+            {"pinRtcIO",       config.hardware.pinRtcIO},
+            {"pinRtcSCLK",     config.hardware.pinRtcSCLK},
+            {"pinSdCS",        config.hardware.pinSdCS},
+            {"pinSdMOSI",      config.hardware.pinSdMOSI},
+            {"pinSdMISO",      config.hardware.pinSdMISO},
+            {"pinSdSCK",       config.hardware.pinSdSCK},
+        };
+        constexpr int N = sizeof(refs) / sizeof(refs[0]);
+        for (int i = 0; i < N; i++) {
+            if (refs[i].value == PIN_UNSET) continue;
+            for (int j = i + 1; j < N; j++) {
+                if (refs[j].value == refs[i].value) {
+                    char body[180];
+                    snprintf(body, sizeof(body),
+                             "{\"ok\":false,\"error\":\"duplicate pin: %s and %s both = GPIO%u\"}",
+                             refs[i].name, refs[j].name, refs[i].value);
+                    r->send(400, "application/json", body);
+                    return;
+                }
+            }
+        }
+    }
+    if (r->hasParam("cpuFreqMHz", true))     config.hardware.cpuFreqMHz     = r->getParam("cpuFreqMHz", true)->value().toInt();
+    if (r->hasParam("debounceMs", true))     config.hardware.debounceMs     = constrain(r->getParam("debounceMs", true)->value().toInt(), 20, 500);
+    if (r->hasParam("debugMode", true))      config.hardware.debugMode      = r->getParam("debugMode", true)->value() == "1";
+    
+    // Chunk G: move testMode / blinkDuration to hardware page
+    if (r->hasParam("testMode", true)) {
+        config.flowMeter.testMode = r->getParam("testMode", true)->value() == "on" || r->getParam("testMode", true)->value() == "1";
+    } else {
+        config.flowMeter.testMode = false;
+    }
+    if (r->hasParam("blinkDuration", true)) {
+        // PR #105 review (Gemini medium): restore the lower-bound clamp
+        // the original /save_flowmeter handler had — values < 50 ms make
+        // the LED timing-loop in ESP_Logger.ino spin too tight.
+        config.flowMeter.blinkDuration = max(50L, (long)r->getParam("blinkDuration", true)->value().toInt());
+    }
+    saveConfig();
+    sendRestartPage(r, "Device is restarting with new hardware settings.");
+    shouldRestart = true;
+    restartTimer  = millis();
+}
+
+static void h_post_save_theme(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    if (r->hasParam("themeMode", true))        config.theme.mode           = (ThemeMode)r->getParam("themeMode", true)->value().toInt();
+    config.theme.showIcons = r->hasParam("showIcons", true);
+    if (r->hasParam("primaryColor", true))     SAFE_STRNCPY(config.theme.primaryColor,      r->getParam("primaryColor", true)->value().c_str(), sizeof(config.theme.primaryColor));
+    if (r->hasParam("secondaryColor", true))   SAFE_STRNCPY(config.theme.secondaryColor,    r->getParam("secondaryColor", true)->value().c_str(), sizeof(config.theme.secondaryColor));
+    if (r->hasParam("lightBgColor", true))     SAFE_STRNCPY(config.theme.lightBgColor,      r->getParam("lightBgColor", true)->value().c_str(), sizeof(config.theme.lightBgColor));
+    if (r->hasParam("lightTextColor", true))   SAFE_STRNCPY(config.theme.lightTextColor,    r->getParam("lightTextColor", true)->value().c_str(), sizeof(config.theme.lightTextColor));
+    if (r->hasParam("darkBgColor", true))      SAFE_STRNCPY(config.theme.darkBgColor,       r->getParam("darkBgColor", true)->value().c_str(), sizeof(config.theme.darkBgColor));
+    if (r->hasParam("darkTextColor", true))    SAFE_STRNCPY(config.theme.darkTextColor,     r->getParam("darkTextColor", true)->value().c_str(), sizeof(config.theme.darkTextColor));
+    if (r->hasParam("ffColor", true))          SAFE_STRNCPY(config.theme.ffColor,           r->getParam("ffColor", true)->value().c_str(), sizeof(config.theme.ffColor));
+    if (r->hasParam("pfColor", true))          SAFE_STRNCPY(config.theme.pfColor,           r->getParam("pfColor", true)->value().c_str(), sizeof(config.theme.pfColor));
+    if (r->hasParam("otherColor", true))       SAFE_STRNCPY(config.theme.otherColor,        r->getParam("otherColor", true)->value().c_str(), sizeof(config.theme.otherColor));
+    if (r->hasParam("storageBarColor", true))  SAFE_STRNCPY(config.theme.storageBarColor,   r->getParam("storageBarColor", true)->value().c_str(), sizeof(config.theme.storageBarColor));
+    if (r->hasParam("storageBar70Color", true))SAFE_STRNCPY(config.theme.storageBar70Color, r->getParam("storageBar70Color", true)->value().c_str(), sizeof(config.theme.storageBar70Color));
+    if (r->hasParam("storageBar90Color", true))SAFE_STRNCPY(config.theme.storageBar90Color, r->getParam("storageBar90Color", true)->value().c_str(), sizeof(config.theme.storageBar90Color));
+    if (r->hasParam("storageBarBorder", true)) SAFE_STRNCPY(config.theme.storageBarBorder,  r->getParam("storageBarBorder", true)->value().c_str(), sizeof(config.theme.storageBarBorder));
+    if (r->hasParam("logoSource", true))       SAFE_STRNCPY(config.theme.logoSource,        r->getParam("logoSource", true)->value().c_str(), sizeof(config.theme.logoSource));
+    if (r->hasParam("faviconPath", true))      SAFE_STRNCPY(config.theme.faviconPath,       r->getParam("faviconPath", true)->value().c_str(), sizeof(config.theme.faviconPath));
+    if (r->hasParam("boardDiagramPath", true)) SAFE_STRNCPY(config.theme.boardDiagramPath,  r->getParam("boardDiagramPath", true)->value().c_str(), sizeof(config.theme.boardDiagramPath));
+    if (r->hasParam("chartSource", true))      config.theme.chartSource      = (ChartSource)r->getParam("chartSource", true)->value().toInt();
+    if (r->hasParam("chartLocalPath", true))   SAFE_STRNCPY(config.theme.chartLocalPath,    r->getParam("chartLocalPath", true)->value().c_str(), sizeof(config.theme.chartLocalPath));
+    if (r->hasParam("chartLabelFormat", true)) config.theme.chartLabelFormat = (ChartLabelFormat)r->getParam("chartLabelFormat", true)->value().toInt();
+    saveConfig();
+    r->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void h_post_save_datalog(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+
+    // ----- Path validation at the HTTP boundary --------------------------
+    // DataLogModule::load() trusts that prefix/folder/currentFile have
+    // already been sanitised; the gates below keep that contract honest
+    // and return HTTP 400 with field-specific messages if they fail.
+    auto isSafePrefix = [](const String& s) -> bool {
+        if (s.length() == 0 || s.length() > 32) return false;
+        for (size_t i = 0; i < s.length(); i++) {
+            char c = s[i];
+            if (c == '/' || c == '\\' || c == '\0' || (unsigned char)c < 0x20 || c == 0x7f) return false;
+        }
+        if (s == "." || s == "..") return false;
+        return true;
+    };
+    String safeCurrentFile;
+    String safePrefix;
+    String safeFolder;
+    bool   haveCurrentFile = false, havePrefix = false, haveFolder = false;
+    if (r->hasParam("currentFile", true)) {
+        safeCurrentFile = sanitizePath(r->getParam("currentFile", true)->value());
+        if (safeCurrentFile.length() == 0) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid currentFile path\"}");
+            return;
+        }
+        if (!fsAvailable || !activeFS || !activeFS->exists(safeCurrentFile)) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"currentFile does not exist\"}");
+            return;
+        }
+        haveCurrentFile = true;
+    }
+    if (r->hasParam("prefix", true)) {
+        safePrefix = r->getParam("prefix", true)->value();
+        if (!isSafePrefix(safePrefix)) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix (no slashes, control chars, or ..)\"}");
+            return;
+        }
+        havePrefix = true;
+    }
+    if (r->hasParam("folder", true)) {
+        String fld = r->getParam("folder", true)->value();
+        if (fld.length() > 0) {
+            safeFolder = sanitizePath(fld);
+            if (safeFolder.length() == 0) {
+                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid folder path\"}");
+                return;
+            }
+        } // else: empty folder = root, fine
+        haveFolder = true;
+    }
+
+    // ----- Project form params into a JsonDocument & delegate -----------
+    // DataLogModule::load() is the single source of truth for clamps,
+    // enum bounds, and assignment to config.datalog. Both /save_datalog
+    // (here) and /import_settings call it, so format-field drift across
+    // entry points is impossible by construction.
+    JsonDocument doc;
+    JsonObject cfg = doc.to<JsonObject>();
+    if (haveCurrentFile)                       cfg["currentFile"]            = safeCurrentFile;
+    if (havePrefix)                            cfg["prefix"]                 = safePrefix;
+    if (haveFolder)                            cfg["folder"]                 = safeFolder;
+    if (r->hasParam("rotation", true))         cfg["rotation"]               = r->getParam("rotation", true)->value().toInt();
+    if (r->hasParam("maxSizeKB", true))        cfg["maxSizeKB"]              = r->getParam("maxSizeKB", true)->value().toInt();
+    if (r->hasParam("maxEntries", true))       cfg["maxEntries"]             = r->getParam("maxEntries", true)->value().toInt();
+    cfg["timestampFilename"]                   = r->hasParam("timestampFilename", true);
+    cfg["includeDeviceId"]                     = r->hasParam("includeDeviceId", true);
+    cfg["includeBootCount"]                    = r->hasParam("includeBootCount", true);
+    cfg["includeExtraPresses"]                 = r->hasParam("includeExtraPresses", true);
+    if (r->hasParam("dateFormat", true))       cfg["dateFormat"]             = r->getParam("dateFormat", true)->value().toInt();
+    if (r->hasParam("timeFormat", true))       cfg["timeFormat"]             = r->getParam("timeFormat", true)->value().toInt();
+    if (r->hasParam("endFormat", true))        cfg["endFormat"]              = r->getParam("endFormat", true)->value().toInt();
+    if (r->hasParam("volumeFormat", true))     cfg["volumeFormat"]           = r->getParam("volumeFormat", true)->value().toInt();
+    cfg["postCorrectionEnabled"]               = r->hasParam("postCorrectionEnabled", true);
+    if (r->hasParam("pfToFfThreshold", true))         cfg["pfToFfThreshold"]        = r->getParam("pfToFfThreshold", true)->value().toFloat();
+    if (r->hasParam("ffToPfThreshold", true))         cfg["ffToPfThreshold"]        = r->getParam("ffToPfThreshold", true)->value().toFloat();
+    if (r->hasParam("manualPressThresholdMs", true))  cfg["manualPressThresholdMs"] = r->getParam("manualPressThresholdMs", true)->value().toInt();
+
+    // ArduinoJson v7 doesn't expose .as<>() on JsonObject — but
+    // JsonObject is implicitly convertible to JsonObjectConst, which is
+    // what DataLogModule::load() expects.
+    DataLogModule::instance().load(cfg);
+
+    // Wide-CSV pipeline knobs (config.logger.*) live on the sensors page
+    // now (POST /save_sensorlog). The "create" / "switch" file actions
+    // moved to /api/datalog/{create,switch}.
+
+    saveConfig();
+    r->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void h_post_save_sensorlog(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    config.logger.csvLoggingEnabled = r->hasParam("csvLoggingEnabled", true);
+    if (r->hasParam("aggregationIntervalSec", true))
+        config.logger.aggregationIntervalSec = constrain(
+            r->getParam("aggregationIntervalSec", true)->value().toInt(), 5, 3600);
+    saveConfig();
+    r->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void h_post_api_datalog_create(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    if (!fsAvailable || !activeFS) {
+        r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
+        return;
+    }
+    if (!r->hasParam("prefix", true)) {
+        r->send(400, "application/json", "{\"ok\":false,\"error\":\"prefix required\"}");
+        return;
+    }
+    String prefix = r->getParam("prefix", true)->value();
+    // Same prefix rules as /save_datalog (kept in sync — see the inline
+    // isSafePrefix lambda in that handler).
+    if (prefix.length() == 0 || prefix.length() > 32 || prefix == "." || prefix == "..") {
+        r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix\"}");
+        return;
+    }
+    for (size_t i = 0; i < prefix.length(); i++) {
+        char c = prefix[i];
+        if (c == '/' || c == '\\' || c == '\0' || (unsigned char)c < 0x20 || c == 0x7f) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix\"}");
+            return;
+        }
+    }
+    String folder = r->hasParam("folder", true) ? r->getParam("folder", true)->value() : "";
+    if (folder.length() > 0) {
+        folder = sanitizePath(folder);
+        if (folder.length() == 0) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid folder\"}");
+            return;
+        }
+        if (!folder.endsWith("/")) folder += "/";
+    } else {
+        folder = "/";
+    }
+    if (folder != "/" && !activeFS->exists(folder)) activeFS->mkdir(folder);
+
+    bool incDeviceId = r->hasParam("includeDeviceId", true);
+    bool timestampFn = r->hasParam("timestampFilename", true);
+
+    String newFile = folder + prefix;
+    if (incDeviceId && strlen(config.deviceId) > 0)
+        newFile += "_" + String(config.deviceId);
+    if (timestampFn) {
+        if (Rtc) {
+            RtcDateTime now = Rtc->GetDateTime();
+            char buf[20];
+            snprintf(buf, sizeof(buf), "_%04d%02d%02d_%02d%02d%02d",
+                now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second());
+            newFile += buf;
+        } else {
+            newFile += "_" + String(millis());
+        }
+    }
+    newFile += ".txt";
+
+    File f = activeFS->open(newFile, "w");
+    if (!f) {
+        r->send(500, "application/json", "{\"ok\":false,\"error\":\"Failed to create file\"}");
+        return;
+    }
+    f.close();
+
+    // Make this the active file unless caller explicitly opts out via
+    // ?switch=0; default behaviour mirrors the pre-split UX where the
+    // newly-created file became current.
+    bool switchToNew = !r->hasParam("switch", true) ||
+                        r->getParam("switch", true)->value() != "0";
+    if (switchToNew) {
+        SAFE_STRNCPY(config.datalog.currentFile, newFile.c_str(), sizeof(config.datalog.currentFile));
+        saveConfig();
+    }
+
+    String body = String("{\"ok\":true,\"file\":\"") + newFile + "\"}";
+    r->send(200, "application/json", body);
+}
+
+static void h_post_api_datalog_switch(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    if (!fsAvailable || !activeFS) {
+        r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
+        return;
+    }
+    if (!r->hasParam("path", true)) {
+        r->send(400, "application/json", "{\"ok\":false,\"error\":\"path required\"}");
+        return;
+    }
+    String path = sanitizePath(r->getParam("path", true)->value());
+    if (path.length() == 0) {
+        r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid path\"}");
+        return;
+    }
+    if (!activeFS->exists(path)) {
+        r->send(404, "application/json", "{\"ok\":false,\"error\":\"file not found\"}");
+        return;
+    }
+    SAFE_STRNCPY(config.datalog.currentFile, path.c_str(), sizeof(config.datalog.currentFile));
+    saveConfig();
+    r->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void h_post_save_network(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    if (r->hasParam("wifiMode", true))       config.network.wifiMode = (WiFiModeType)r->getParam("wifiMode", true)->value().toInt();
+    if (r->hasParam("apSSID", true))         SAFE_STRNCPY(config.network.apSSID,         r->getParam("apSSID", true)->value().c_str(), sizeof(config.network.apSSID));
+    // R13 follow-up (Codex P1 on PR #89): /export_settings masks
+    // passwords as "***". The SPA round-trips that value back here
+    // on any unrelated save; without this guard the real password
+    // would be overwritten with "***". Treat "***" as the
+    // keep-existing sentinel.
+    if (r->hasParam("apPassword", true)     && r->getParam("apPassword", true)->value()     != "***") SAFE_STRNCPY(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), sizeof(config.network.apPassword));
+    if (r->hasParam("clientSSID", true))     SAFE_STRNCPY(config.network.clientSSID,     r->getParam("clientSSID", true)->value().c_str(), sizeof(config.network.clientSSID));
+    if (r->hasParam("clientPassword", true) && r->getParam("clientPassword", true)->value() != "***") SAFE_STRNCPY(config.network.clientPassword, r->getParam("clientPassword", true)->value().c_str(), sizeof(config.network.clientPassword));
+    config.network.useStaticIP = r->hasParam("useStaticIP", true);
+
+    auto parseIP = [&](const char* param, uint8_t* dst) {
+        if (r->hasParam(param, true)) {
+            uint8_t tmp[4];
+            if (sscanf(r->getParam(param, true)->value().c_str(), "%hhu.%hhu.%hhu.%hhu", &tmp[0], &tmp[1], &tmp[2], &tmp[3]) == 4) {
+                memcpy(dst, tmp, 4);
+            }
+        }
+    };
+    parseIP("staticIP",  config.network.staticIP);
+    parseIP("gateway",   config.network.gateway);
+    parseIP("subnet",    config.network.subnet);
+    parseIP("dns",       config.network.dns);
+    parseIP("apIP",      config.network.apIP);
+    parseIP("apGateway", config.network.apGateway);
+    parseIP("apSubnet",  config.network.apSubnet);
+
+    saveConfig();
+    sendRestartPage(r, "Device is restarting with new network settings.");
+    shouldRestart = true;
+    restartTimer  = millis();
+}
+
+static void h_post_save_time(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    if (r->hasParam("ntpServer", true)) SAFE_STRNCPY(config.network.ntpServer, r->getParam("ntpServer", true)->value().c_str(), sizeof(config.network.ntpServer));
+    if (r->hasParam("timezone", true))  config.network.timezone = r->getParam("timezone", true)->value().toInt();
+    saveConfig();
+    r->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void h_post_set_time(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;   // was rate-limit only — add CSRF
+    if (loggingState != STATE_IDLE && loggingState != STATE_DONE) {
+        r->send(409, "application/json", "{\"ok\":false,\"error\":\"Busy\"}");
+        return;
+    }
+    if (r->hasParam("date", true) && r->hasParam("time", true)) {
+        String ds = r->getParam("date", true)->value();
+        String ts = r->getParam("time", true)->value();
+        int yr = ds.substring(0,4).toInt(), mo = ds.substring(5,7).toInt(), dy = ds.substring(8,10).toInt();
+        int hr = ts.substring(0,2).toInt(), mi = ts.substring(3,5).toInt();
+
+        // Always set the POSIX system clock so time(nullptr) works even
+        // without hardware RTC.  Input is treated as UTC.  ESP32's newlib
+        // does not expose timegm(); we get UTC-mktime by saving TZ,
+        // forcing UTC0 around mktime(), then restoring.
+        struct tm ti = {};
+        ti.tm_year = yr - 1900; ti.tm_mon = mo - 1; ti.tm_mday = dy;
+        ti.tm_hour = hr; ti.tm_min = mi; ti.tm_sec = 0;
+        const char* prevTz = getenv("TZ");
+        setenv("TZ", "UTC0", 1); tzset();
+        time_t epoch = mktime(&ti);
+        if (prevTz) setenv("TZ", prevTz, 1); else unsetenv("TZ");
+        tzset();
+        struct timeval tv = { epoch, 0 };
+        settimeofday(&tv, nullptr);
+        rtcValid = true;
+
+        // Defer hardware RTC writes to loop() — three delay() calls sum to
+        // ~120 ms and block the AsyncTCP worker for every concurrent request.
+        // (AUDIT 3.17)
+        if (Rtc) {
+            g_pendingRtcTime = { (uint16_t)yr, (uint8_t)mo, (uint8_t)dy,
+                                 (uint8_t)hr, (uint8_t)mi };
+            g_pendingRtcSet.store(true, std::memory_order_release);
+        }
+        r->send(200, "application/json", "{\"ok\":true}");
+    } else {
+        r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing date or time\"}");
+    }
+}
+
+static void h_post_sync_time(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    if (g_pendingNtpSync != 0) {
+        r->send(202, "application/json", "{\"ok\":true,\"pending\":true,\"running\":true}");
+        return;
+    }
+    g_lastNtpSyncResult = 0;
+    g_pendingNtpSync    = 1;
+    r->send(202, "application/json", "{\"ok\":true,\"pending\":true}");
+}
+
+static void h_get_api_time_sync_status(AsyncWebServerRequest* r) {
+    String j = "{\"pending\":";
+    j += (g_pendingNtpSync != 0 ? "true" : "false");
+    j += ",\"result\":";
+    j += String((int)g_lastNtpSyncResult);  // 0=unknown, 1=ok, -1=fail
+    j += "}";
+    r->send(200, "application/json", j);
+}
+
+static void h_post_rtc_protect(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    if (Rtc) {
+        bool protect = r->hasParam("protect", true);
+        Rtc->SetIsWriteProtected(protect);
+    }
+    r->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void h_post_flush_logs(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    flushLogBufferToFS();
+    r->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void h_post_backup_bootcount(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    backupBootCount();
+    r->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void h_post_restore_bootcount(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    uint32_t old = bootCount;
+    restoreBootCount();
+    String j = "{\"ok\":true,\"old\":" + String(old) + ",\"new\":" + String(bootCount) + "}";
+    r->send(200, "application/json", j);
+}
+
+static void h_post_factory_reset(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    r->send(200, "application/json", "{\"ok\":true}");
+    DBGLN("[FACTORY RESET] Formatting LittleFS…");
+    {
+        MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+        if (LittleFS.format()) {
+            DBGLN("[FACTORY RESET] LittleFS formatted OK – restarting");
+        } else {
+            DBGLN("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
+        }
+    }
+    // Invalidate safe-mode magic so the next boot zeroes the counter
+    // regardless of the ESP_RST_SW reset reason. /factory_reset is a
+    // user-initiated wipe, NOT a crash.
+    g_resetMagic = 0;
+    g_pendingWiFiShutdown = true;
+    shouldRestart = true;
+    restartTimer  = millis();
+}
+
+static void h_post_restart(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    r->send(200, "application/json", "{\"ok\":true}");
+    shouldRestart = true;
+    restartTimer  = millis();
+}
+
+static void h_post_api_format_filesystem(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    Serial.println("[Format] /api/format_filesystem — wiping LittleFS");
+    // R12 Gemini HIGH: acquire fsMutex around the long destructive op.
+    // Without it, a concurrent StorageTask write or web-handler read
+    // can race the format and corrupt the partition mid-erase.
+    // 30 s timeout — format takes ~5-15 s on 4 MB LittleFS.
+    bool ok = false;
+    {
+        MutexGuard g(fsMutex, pdMS_TO_TICKS(30000));
+        if (fsMutex && !g.isLocked()) {
+            r->send(503, "application/json",
+                    "{\"ok\":false,\"error\":\"fs busy\"}");
+            return;
+        }
+        ok = LittleFS.format();
+    }
+    if (!ok) {
+        Serial.println("[Format] FAILED");
+        r->send(500, "application/json",
+                "{\"ok\":false,\"error\":\"format failed\"}");
+        return;
+    }
+    Serial.println("[Format] OK — rebooting");
+    r->send(200, "application/json",
+            "{\"ok\":true,\"message\":\"formatted, rebooting\"}");
+    shouldRestart = true;
+    restartTimer  = millis();
+}
+
+static void h_get_download(AsyncWebServerRequest* r) {
+    if (!r->hasParam("file")) { r->send(400, "text/plain", "No file"); return; }
+    String path = sanitizePath(r->getParam("file")->value());
+    if (path.isEmpty() || path == "/") { r->send(400, "text/plain", "Invalid path"); return; }
+    if (isPathProtected(path) && !isPathDownloadAllowed(path)) {
+        r->send(403, "application/json",
+                "{\"ok\":false,\"error\":\"protected path\"}");
+        return;
+    }
+    String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
+    fs::FS* targetFS = (storage == "sdcard" && sdAvailable) ? sdFs() :
+                       (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
+    if (targetFS && targetFS->exists(path)) {
+        String filename = path.substring(path.lastIndexOf('/') + 1);
+        
+        // Handle 0-byte files explicitly because ESPAsyncWebServer's beginResponse(FS)
+        // returns nullptr for them, resulting in a spurious 404.
+        File f = targetFS->open(path, "r");
+        if (f && !f.isDirectory() && f.size() == 0) {
+            f.close();
+            AsyncWebServerResponse *resp = r->beginResponse(200, "application/octet-stream", "");
+            if (!resp) {
+                r->send(500, "application/json", "{\"ok\":false,\"error\":\"out_of_memory\"}");
+                return;
+            }
+            resp->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+            r->send(resp);
+            return;
+        }
+        if (f) f.close();
+
+        // Pass download=true so AsyncFileResponse emits its own single
+        // "Content-Disposition: attachment; filename=..." header.  Previously
+        // we let it default to download=false (which emits an "inline"
+        // disposition) and then added our own "attachment" header on top —
+        // producing TWO Content-Disposition headers, which Chromium/Edge
+        // reject outright with ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION
+        // (every non-empty file failed to download).
+        // Null-check resp: exists() → beginResponse() has a TOCTOU window;
+        // the file may be deleted between the two calls.  (AUDIT 3.18)
+        AsyncWebServerResponse *resp =
+            r->beginResponse(*targetFS, path, "application/octet-stream", true);
+        if (!resp) { r->send(404, "text/plain", "Not found"); return; }
+        r->send(resp);
+    } else {
+        r->send(404, "text/plain", "Not found");
+    }
+}
+
+static void h_post_mkdir(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    fs::FS* targetFS = getCurrentViewFS();
+    if (!r->hasParam("name") || !targetFS) { r->send(400, "text/plain", "Missing name"); return; }
+    String dirRaw  = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
+    String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
+    if (storage == "sdcard" && sdAvailable) targetFS = sdFs();
+    else targetFS = &LittleFS;
+    String dir  = sanitizePath(dirRaw);
+    String name = sanitizeFilename(r->getParam("name")->value());
+    if (dir.isEmpty() || name.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid name or dir\"}"); return; }
+    String fp   = buildPath(dir, name);
+    // 500 ms cap: report busy rather than freeze the AsyncTCP worker.
+    if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+        r->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+        return;
+    }
+    bool ok = targetFS->mkdir(fp);
+    if (fsMutex) xSemaphoreGive(fsMutex);
+    r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"mkdir failed\"}");
+}
+
+static void h_post_move_file(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
+    String src     = r->hasParam("src")     ? sanitizePath(r->getParam("src")->value())     : "";
+    String newName = r->hasParam("newName") ? sanitizeFilename(r->getParam("newName")->value()) : "";
+    String destRaw = r->hasParam("destDir") ? r->getParam("destDir")->value() : "";
+    if (src.isEmpty() || newName.isEmpty() || src == "/") { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid src or newName\"}"); return; }
+    if (isPathProtected(src)) { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
+    fs::FS* targetFS = nullptr;
+    if (storage == "sdcard" && sdAvailable)              targetFS = sdFs();
+    else if (storage == "internal" && littleFsAvailable) targetFS = &LittleFS;
+    if (!targetFS) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"No storage\"}"); return; }
+    String dstDir;
+    if (destRaw.isEmpty()) {
+        dstDir = src.substring(0, src.lastIndexOf('/'));
+        if (dstDir.isEmpty()) dstDir = "/";
+    } else {
+        dstDir = sanitizePath(destRaw);
+        if (dstDir.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid destDir\"}"); return; }
+    }
+    String dstPath = buildPath(dstDir, newName);
+    if (isPathProtected(dstPath)) { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
+    // 500 ms cap: report busy rather than freeze the AsyncTCP worker.
+    if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+        r->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+        return;
+    }
+    bool ok = targetFS->rename(src, dstPath);
+    if (fsMutex) xSemaphoreGive(fsMutex);
+    r->send(200, "application/json", ok ? "{\"ok\":true,\"dst\":\"" + dstPath + "\"}" : "{\"ok\":false,\"error\":\"Rename failed\"}");
+}
+
+static void h_get_wifi_scan_start(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    // Only widen AP → AP_STA so the AP stays up; leave a client-only
+    // device in STA (it can scan without broadcasting an AP).
+    if (WiFi.getMode() == WIFI_AP) WiFi.mode(WIFI_AP_STA);
+    WiFi.scanDelete();
+    WiFi.scanNetworks(true);
+    r->send(200, "text/plain", "OK");
+}
+
+static void h_get_wifi_scan_result(AsyncWebServerRequest* r) {
+    JsonDocument doc;
+    JsonArray nets = doc["networks"].to<JsonArray>();
+    // Read-only on purpose: this endpoint is polled with a plain GET and
+    // is NOT behind requireMutatingAuth, so it must never start radio work.
+    // The (CSRF-guarded) /wifi_scan_start owns starting/re-kicking scans;
+    // the client re-triggers it if this reports an error.
+    int n = WiFi.scanComplete();
+    if      (n == WIFI_SCAN_RUNNING) { doc["scanning"] = true; }
+    else if (n == WIFI_SCAN_FAILED)  { doc["error"] = "Scan failed"; }
+    else if (n >= 0) {
+        for (int i = 0; i < n && i < 20; i++) {
+            JsonObject net = nets.add<JsonObject>();
+            net["ssid"]   = WiFi.SSID(i);
+            net["rssi"]   = WiFi.RSSI(i);
+            net["secure"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+        }
+        WiFi.scanDelete();
+    }
+    sendJsonResponse(r, doc);
+}
+
+static void h_get_api_platform_config(AsyncWebServerRequest* r) {
+    if (!fsAvailable || !activeFS || !activeFS->exists("/platform_config.json")) {
+        r->send(404, "application/json", "{\"ok\":false,\"error\":\"platform_config.json not found\"}");
+        return;
+    }
+    r->send(*activeFS, "/platform_config.json", "application/json");
+}
+
+static void h_post_api_platform_reload(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;   // was unprotected — reboots device
+    // Signal to main loop / TaskManager to reload configs
+    // Full reload requires restart; signal shouldRestart
+    shouldRestart = true;
+    restartTimer  = millis();
+    r->send(200, "application/json", "{\"ok\":true,\"restart\":true}");
+}
+
+// ============================================================================
 // WEB SERVER SETUP
 // ============================================================================
+
+// AsyncWebHandler::canHandle() is `const` in ESP32Async/ESPAsyncWebServer and
+// non-const in esphome/ESPAsyncWebServer-esphome. One signature cannot satisfy
+// both, and `override` turns the mismatch into a hard error rather than a
+// silently-never-called method — which is the failure mode worth avoiding.
+// ASYNCWEBSERVER_VERSION_MAJOR exists only in the ESP32Async line (it comes
+// from its AsyncWebServerVersion.h), so it is the discriminator.
+#ifdef ASYNCWEBSERVER_VERSION_MAJOR
+#  define LOGGER_CANHANDLE_CV const
+#else
+#  define LOGGER_CANHANDLE_CV
+#endif
+
 #if WEB_BASIC_AUTH_ENABLED
 // R22 / AUDIT 5.3: refuse to compile when Basic Auth is enabled with the
 // shipped placeholder admin/admin credentials. Operators MUST override
@@ -369,7 +1500,7 @@ static_assert(
 // through to the real handler chain.
 class AsyncAuthGateHandler : public AsyncWebHandler {
 public:
-    bool canHandle(AsyncWebServerRequest* r) override {
+    bool canHandle(AsyncWebServerRequest* r) LOGGER_CANHANDLE_CV override {
         return !r->authenticate(WEB_BASIC_AUTH_USER, WEB_BASIC_AUTH_PASS);
     }
     void handleRequest(AsyncWebServerRequest* r) override {
@@ -392,7 +1523,7 @@ static AsyncAuthGateHandler s_authGate;
 //   - static asset extensions           (CSS, JS, fonts, favicon)
 class FirstRunGateHandler : public AsyncWebHandler {
 public:
-    bool canHandle(AsyncWebServerRequest* r) override {
+    bool canHandle(AsyncWebServerRequest* r) LOGGER_CANHANDLE_CV override {
         if (!g_setupRequired) return false;
         const String& url = r->url();
         if (url == "/firstrun" || url == "/firstrun.html")        return false;
@@ -498,70 +1629,12 @@ void setupWebServer() {
     // boot logic lives in /cdn-boot.js, served from the device itself so
     // script-src 'self' covers it.  Stylesheet / theme-boot loaded by
     // absolute CDN URL — the relaxed CSP whitelists UI_CDN_BASE.
-    static const char CDN_BOOTSTRAP_HTML[] PROGMEM =
-        "<!DOCTYPE html><html lang=\"en\" id=\"htmlRoot\"><head>"
-        "<meta charset=\"UTF-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">"
-        "<title>Water Logger</title>"
-        "<link rel=\"stylesheet\" href=\"" UI_CDN_BASE "/style.css\">"
-        "<script src=\"" UI_CDN_BASE "/js/theme-boot.js\"></script>"
-        "</head><body>"
-        "<div id=\"cdnBoot\" style=\"font-family:sans-serif;padding:2rem;text-align:center\">"
-        "Loading UI from CDN…</div>"
-        "<script src=\"/cdn-boot.js\"></script>"
-        "</body></html>";
 
-    // Boot script served from the device — `script-src 'self'` covers it
-    // without needing 'unsafe-inline'.  Fetches the SPA HTML from the CDN
-    // and replaces the bootstrap document; on failure, shows a link back
-    // to the on-device UI.
-    static const char CDN_BOOT_JS[] PROGMEM =
-        "fetch('" UI_CDN_BASE "/index.html').then(function(r){return r.text();})"
-        ".then(function(t){document.open();document.write(t);document.close();})"
-        ".catch(function(e){"
-          "document.getElementById('cdnBoot').innerHTML="
-            "'CDN unreachable. <a href=\"/?_local=1\">Use local UI</a>';"
-        "});";
 
-    server.on("/cdn-boot.js", HTTP_GET, [](AsyncWebServerRequest *r) {
-        AsyncWebServerResponse* resp =
-            r->beginResponse_P(200, "application/javascript", CDN_BOOT_JS);
-        resp->addHeader("Cache-Control", "public, max-age=300");
-        r->send(resp);
-    });
+    server.on("/cdn-boot.js", HTTP_GET, h_get_cdn_boot_js);
 #endif
 
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
-#ifdef UI_CDN_BASE
-        // Build-time CDN opt-in: 1 KB bootstrap from PROGMEM loads the SPA
-        // from the hosted URL.  All API calls still target this device —
-        // only the static bundle moves off-flash.  ?_local=1 lets devs
-        // force the on-device copy when the CDN is unreachable.
-        if (!r->hasParam("_local")) {
-            r->send_P(200, "text/html", CDN_BOOTSTRAP_HTML);
-            return;
-        }
-#endif
-        if (littleFsAvailable && LittleFS.exists("/www/index.html.gz")) {
-            AsyncWebServerResponse* resp =
-                r->beginResponse(LittleFS, "/www/index.html.gz", "text/html");
-            if (resp) {
-                resp->addHeader("Content-Encoding", "gzip");
-                r->send(resp);
-                return;
-            }
-            // beginResponse can return null on low heap or a race with the
-            // file being removed between exists() and beginResponse() —
-            // fall through to the plain index.html / failsafe instead of
-            // dereferencing the null pointer (observed crash MEPC=0x42036bcc
-            // on first GET / after AP join).
-        }
-        if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
-            r->send(LittleFS, "/www/index.html", "text/html");
-            return;
-        }
-        sendFailsafePage(r);
-    });
+    server.on("/", HTTP_GET, h_get_root);
 
     // Always register the static tree so asset fetches (js/css/images) work
     // the moment `/www/` is populated.  5-min cache: reuses JS/CSS across
@@ -579,9 +1652,7 @@ void setupWebServer() {
         DBGLN("Web UI: FAILSAFE mode (upload /www/index.html to restore)");
     }
 
-    server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *r) {
-        sendFailsafePage(r);
-    });
+    server.on("/setup", HTTP_GET, h_get_setup);
 
     auto spaRedirect = [](AsyncWebServerRequest *r) { r->redirect("/"); };
     server.on("/dashboard",          HTTP_GET, spaRedirect);
@@ -767,14 +1838,7 @@ void setupWebServer() {
     // Pass 7 — per-boot CSRF token for the SPA to inject into mutating
     // calls.  Generated on first call from esp_random(); same token
     // returned for the lifetime of the firmware run.
-    server.on("/api/csrf-token", HTTP_GET, [](AsyncWebServerRequest *r) {
-        String body = "{\"token\":\"";
-        body += CsrfToken::get();
-        body += "\"}";
-        AsyncWebServerResponse* resp = r->beginResponse(200, "application/json", body);
-        resp->addHeader("Cache-Control", "no-store");
-        r->send(resp);
-    });
+    server.on("/api/csrf-token", HTTP_GET, h_get_api_csrf_token);
 
     server.on("/api/theme", HTTP_GET, [fillTheme](AsyncWebServerRequest *r) {
         JsonDocument doc;
@@ -790,11 +1854,7 @@ void setupWebServer() {
     // clients (or fallback when EventSource fails) keep polling /api/live.
     // Both paths build the same JSON snapshot via buildLiveSnapshot().
     // =========================================================================
-    server.on("/api/live", HTTP_GET, [](AsyncWebServerRequest *r) {
-        JsonDocument doc;
-        buildLiveSnapshot(doc);
-        sendJsonResponse(r, doc);
-    });
+    server.on("/api/live", HTTP_GET, h_get_api_live);
 
     // SSE channel — same payload, pushed at 1 Hz by publishLiveEvent().
     server.addHandler(&liveEvents);
@@ -807,200 +1867,17 @@ void setupWebServer() {
     // response always echoes the current bootCount so the client can advance
     // its cursor; if the logfile has no bootCount tokens (user disabled the
     // column, or legacy file) the filter degrades to a no-op.
-    server.on("/api/recent_logs", HTTP_GET, [](AsyncWebServerRequest *r) {
-        JsonDocument doc;
-        JsonArray logs = doc["logs"].to<JsonArray>();
-
-        uint32_t sinceBoot = 0;
-        bool hasSince = false;
-        if (r->hasParam("since")) {
-            sinceBoot = (uint32_t)r->getParam("since")->value().toInt();
-            hasSince  = true;
-        }
-        doc["bootCount"] = bootCount;  // client advances cursor from this
-
-        if (!fsAvailable || !activeFS) {
-            doc["error"] = "Storage not available";
-            sendJsonResponse(r, doc);
-            return;
-        }
-
-        String logFile = getActiveDatalogFile();
-        if (!activeFS->exists(logFile)) {
-            doc["error"] = "Log file not found";
-            sendJsonResponse(r, doc);
-            return;
-        }
-
-        File f = activeFS->open(logFile, "r");
-        if (!f) {
-            doc["error"] = "Cannot open file";
-            sendJsonResponse(r, doc);
-            return;
-        }
-
-        // Efficient tail-read: seek to last ~1KB of file instead of reading every line.
-        // Buffers moved to the heap — the previous on-stack `lastLines[5][160]` +
-        // `lineBuf[160]` (~960 B) ate most of the AsyncTCP worker's budget.
-        constexpr int    LR_LINES  = 5;
-        constexpr size_t LR_LINELN = 160;
-        auto lastLines = std::unique_ptr<char[]>(new (std::nothrow) char[LR_LINES * LR_LINELN]);
-        auto lineBuf   = std::unique_ptr<char[]>(new (std::nothrow) char[LR_LINELN]);
-        if (!lastLines || !lineBuf) {
-            f.close();
-            doc["error"] = "out of memory";
-            sendJsonResponse(r, doc);
-            return;
-        }
-        auto slot = [&](int k) { return lastLines.get() + (k * LR_LINELN); };
-
-        int lCount = 0;
-        size_t fSize = f.size();
-        const size_t TAIL_BYTES = 1024;
-
-        if (fSize > TAIL_BYTES) {
-            f.seek(fSize - TAIL_BYTES);
-            f.readStringUntil('\n');   // discard partial first line
-        }
-
-        while (f.available()) {
-            int i = 0;
-            while (f.available() && i < (int)LR_LINELN - 1) {
-                char c = f.read();
-                if (c == '\n' || c == '\r') break;
-                lineBuf[i++] = c;
-            }
-            lineBuf[i] = '\0';
-            // skip empty lines
-            if (i > 0) {
-                memcpy(slot(lCount % LR_LINES), lineBuf.get(), i + 1);
-                lCount++;
-            }
-        }
-        f.close();
-
-        int count = lCount < LR_LINES ? lCount : LR_LINES;
-        for (int i = 0; i < count; i++) {
-            int idx = (lCount - 1 - i) % LR_LINES;
-            char* lineStr = slot(idx);
-            
-            char* saveptr;
-            char* tokens[10];
-            int tCount = 0;
-            char* tok = strtok_r(lineStr, "|", &saveptr);
-            while (tok && tCount < 10) {
-                tokens[tCount++] = tok;
-                tok = strtok_r(NULL, "|", &saveptr);
-            }
-
-            if (tCount >= 7) {
-                // Opportunistic `?since=<bootcount>` filter — scan tokens for
-                // a `#:<n>` entry and skip if n <= sinceBoot.  If no such token
-                // exists (user disabled includeBootCount) the filter is a
-                // no-op and the entry is returned as before.
-                if (hasSince) {
-                    bool skip = false;
-                    for (int t = 0; t < tCount; t++) {
-                        if (tokens[t][0] == '#' && tokens[t][1] == ':') {
-                            uint32_t bc = (uint32_t)atoi(tokens[t] + 2);
-                            if (bc <= sinceBoot) skip = true;
-                            break;
-                        }
-                    }
-                    if (skip) continue;
-                }
-
-                JsonObject entry = logs.add<JsonObject>();
-                int tail = tCount - 1;
-
-                if (tCount >= 8) {
-                    char timeBuf[80];
-                    snprintf(timeBuf, sizeof(timeBuf), "%s %s-%s", tokens[0], tokens[1], tokens[2]);
-                    entry["time"] = timeBuf;
-                } else {
-                    char timeBuf[80];
-                    snprintf(timeBuf, sizeof(timeBuf), "%s|%s", tokens[0], tokens[1]);
-                    entry["time"] = timeBuf;
-                }
-
-                entry["trigger"] = tokens[tail - 3];
-                
-                char* vs = tokens[tail - 2];
-                if (strncmp(vs, "L:", 2) == 0) vs += 2;
-                for (char* p = vs; *p; p++) if (*p == ',') *p = '.';
-                char volBuf[32];
-                snprintf(volBuf, sizeof(volBuf), "%s L", vs);
-                entry["volume"] = volBuf;
-                
-                char* ffs = tokens[tail - 1];
-                if (strncmp(ffs, "FF", 2) == 0) ffs += 2;
-                entry["ff"] = atoi(ffs);
-                
-                char* pfs = tokens[tail];
-                if (strncmp(pfs, "PF", 2) == 0) pfs += 2;
-                entry["pf"] = atoi(pfs);
-            }
-        }
-        sendJsonResponse(r, doc);
-    });
+    server.on("/api/recent_logs", HTTP_GET, h_get_api_recent_logs);
 
     // =========================================================================
     // API: FILE LIST
     // =========================================================================
-    server.on("/api/filelist", HTTP_GET, [](AsyncWebServerRequest *r) {
-        JsonDocument doc;
-        JsonArray files = doc["files"].to<JsonArray>();
-
-        String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
-        // sanitizePath() rejects "..", backslash, control chars, NUL (returns
-        // "") — mirrors /download, /delete, /move_file. Without it a caller
-        // could enumerate arbitrary directories (e.g. /config) by traversal.
-        String dir     = sanitizePath(r->hasParam("dir") ? r->getParam("dir")->value() : "/");
-        // sanitizePath() returns "" for a rejected/traversal path; reject
-        // explicitly with 400 like /download, /delete, /mkdir, /move_file
-        // rather than letting scanDir() open an empty path.
-        if (dir.isEmpty()) {
-            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid dir\"}");
-            return;
-        }
-        String filter  = r->hasParam("filter")  ? r->getParam("filter")->value()  : "";
-        bool recursive = r->hasParam("recursive");
-
-        fs::FS* targetFS = nullptr;
-        if (storage == "sdcard" && sdAvailable)              targetFS = sdFs();
-        else if (storage == "internal" && littleFsAvailable) targetFS = &LittleFS;
-        else if (littleFsAvailable)                          targetFS = &LittleFS;
-
-        if (targetFS) {
-            bool truncated = scanDir(*targetFS, dir, files, filter, recursive);
-            if (truncated) doc["truncated"] = true;
-            uint64_t used = 0, total = 0; int pct = 0;
-            getStorageInfo(used, total, pct, storage);
-            char uBuf[24], tBuf[24];
-            snprintf(uBuf, sizeof(uBuf), "%llu", (unsigned long long)used);
-            snprintf(tBuf, sizeof(tBuf), "%llu", (unsigned long long)total);
-            doc["used"]    = serialized(String(uBuf));
-            doc["total"]   = serialized(String(tBuf));
-            doc["percent"] = pct;
-        } else {
-            doc["error"] = "Storage not available";
-        }
-
-        doc["currentFile"] = getActiveDatalogFile();
-        sendJsonResponse(r, doc);
-    });
+    server.on("/api/filelist", HTTP_GET, h_get_api_filelist);
 
     // =========================================================================
     // API: CHANGELOG
     // =========================================================================
-    server.on("/api/changelog", HTTP_GET, [](AsyncWebServerRequest *r) {
-        if (LittleFS.exists("/www/changelog.txt"))
-            r->send(LittleFS, "/www/changelog.txt", "text/plain");
-        else if (LittleFS.exists("/changelog.txt"))
-            r->send(LittleFS, "/changelog.txt", "text/plain");
-        else
-            r->send(404, "text/plain", "Changelog not found. Upload /www/changelog.txt");
-    });
+    server.on("/api/changelog", HTTP_GET, h_get_api_changelog);
 
     // =========================================================================
     // API: PREVIEW NEXT DEVICE ID
@@ -1041,158 +1918,13 @@ void setupWebServer() {
     //                     postCorrectionEnabled, pfToFfThreshold, ffToPfThreshold,
     //                     manualPressThresholdMs}
     // =========================================================================
-    server.on("/export_settings", HTTP_GET, [](AsyncWebServerRequest *r) {
-        char ipBuf[16];
-
-        // Guarantee the payload is complete regardless of how config landed
-        // in memory — fillConfigDefaults() is idempotent, so callers still
-        // see their last-saved non-default values.  Audit Pass 4 F:
-        // "Remove duplicated fallback logic in /export_settings by running
-        // applyDefaults() before serialization."
-        fillConfigDefaults();
-
-        JsonDocument doc;
-
-        // ── Identity ──────────────────────────────────────────────────────────
-        doc["deviceName"]     = strlen(config.deviceName) ? config.deviceName : "Water Logger";
-        doc["deviceId"]       = config.deviceId;
-        doc["forceWebServer"] = config.forceWebServer;
-
-        // ── Theme ─────────────────────────────────────────────────────────────
-        JsonObject th = doc["theme"].to<JsonObject>();
-        th["mode"]              = (int)config.theme.mode;
-        th["primaryColor"]      = config.theme.primaryColor;
-        th["secondaryColor"]    = config.theme.secondaryColor;
-        th["lightBgColor"]      = config.theme.lightBgColor;
-        th["lightTextColor"]    = config.theme.lightTextColor;
-        th["darkBgColor"]       = config.theme.darkBgColor;
-        th["darkTextColor"]     = config.theme.darkTextColor;
-        th["ffColor"]           = config.theme.ffColor;
-        th["pfColor"]           = config.theme.pfColor;
-        th["otherColor"]        = config.theme.otherColor;
-        th["storageBarColor"]   = config.theme.storageBarColor;
-        th["storageBar70Color"] = config.theme.storageBar70Color;
-        th["storageBar90Color"] = config.theme.storageBar90Color;
-        th["storageBarBorder"]  = config.theme.storageBarBorder;
-        th["logoSource"]        = config.theme.logoSource;
-        th["faviconPath"]       = config.theme.faviconPath;
-        th["boardDiagramPath"]  = config.theme.boardDiagramPath;
-        th["chartSource"]       = (int)config.theme.chartSource;
-        th["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/uPlot.iife.min.js";
-        th["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
-        th["showIcons"]         = config.theme.showIcons;
-
-        // ── Flow Meter ────────────────────────────────────────────────────────
-        JsonObject fm = doc["flowMeter"].to<JsonObject>();
-        fm["pulsesPerLiter"]                = config.flowMeter.pulsesPerLiter > 0    ? config.flowMeter.pulsesPerLiter    : 450.0f;
-        fm["calibrationMultiplier"]         = config.flowMeter.calibrationMultiplier ? config.flowMeter.calibrationMultiplier : 1.0f;
-        fm["testMode"]                      = config.flowMeter.testMode;
-        fm["blinkDuration"]                 = config.flowMeter.blinkDuration > 0 ? config.flowMeter.blinkDuration : 250;
-
-        // ── Datalog ───────────────────────────────────────────────────────────
-        JsonObject dl = doc["datalog"].to<JsonObject>();
-        dl["rotation"]               = (int)config.datalog.rotation;
-        dl["maxSizeKB"]              = config.datalog.maxSizeKB > 0 ? config.datalog.maxSizeKB : 1024;
-        dl["maxEntries"]             = config.datalog.maxEntries > 0 ? config.datalog.maxEntries : 10000;
-        dl["folder"]                 = config.datalog.folder;
-        dl["timestampFilename"]      = config.datalog.timestampFilename;
-        dl["includeDeviceId"]        = config.datalog.includeDeviceId;
-        dl["prefix"]                 = strlen(config.datalog.prefix) ? config.datalog.prefix : "datalog";
-        dl["dateFormat"]             = (int)config.datalog.dateFormat;
-        dl["timeFormat"]             = (int)config.datalog.timeFormat;
-        dl["endFormat"]              = (int)config.datalog.endFormat;
-        dl["volumeFormat"]           = (int)config.datalog.volumeFormat;
-        dl["includeBootCount"]       = config.datalog.includeBootCount;
-        dl["includeExtraPresses"]    = config.datalog.includeExtraPresses;
-        dl["postCorrectionEnabled"]  = config.datalog.postCorrectionEnabled;
-        dl["pfToFfThreshold"]        = config.datalog.pfToFfThreshold > 0 ? config.datalog.pfToFfThreshold : 4.5f;
-        dl["ffToPfThreshold"]        = config.datalog.ffToPfThreshold > 0 ? config.datalog.ffToPfThreshold : 3.7f;
-        dl["manualPressThresholdMs"] = config.datalog.manualPressThresholdMs;
-
-        // ── Logger (wide-CSV pipeline) ────────────────────────────────────────
-        JsonObject lg = doc["logger"].to<JsonObject>();
-        lg["csvLoggingEnabled"]         = config.logger.csvLoggingEnabled;
-        lg["aggregationIntervalSec"]    = config.logger.aggregationIntervalSec ? config.logger.aggregationIntervalSec : 60;
-
-        // ── Network ───────────────────────────────────────────────────────────
-        JsonObject net = doc["network"].to<JsonObject>();
-        net["wifiMode"]       = (int)config.network.wifiMode;
-        net["apSSID"]         = strlen(config.network.apSSID)         ? config.network.apSSID         : DEFAULT_AP_SSID;
-        const char* apPw = "***";
-        const char* clPw = "***";
-#if WEB_BASIC_AUTH_ENABLED
-        if (r->hasParam("reveal_secrets") &&
-            r->getParam("reveal_secrets")->value() == "1") {
-            apPw = config.network.apPassword;
-            clPw = config.network.clientPassword;
-        }
-#endif
-        net["apPassword"]     = apPw;
-        net["clientSSID"]     = config.network.clientSSID;
-        net["clientPassword"] = clPw;
-        net["ntpServer"]      = strlen(config.network.ntpServer)      ? config.network.ntpServer      : DEFAULT_NTP_SERVER;
-        net["timezone"]       = config.network.timezone;
-        net["useStaticIP"]    = config.network.useStaticIP;
-
-        // AP network — uint8_t[4] arrays → "A.B.C.D" strings
-        fmtIP(config.network.apIP,      ipBuf); net["apIP"]      = ipBuf;
-        fmtIP(config.network.apGateway, ipBuf); net["apGateway"] = ipBuf;
-        fmtIP(config.network.apSubnet,  ipBuf); net["apSubnet"]  = ipBuf;
-
-        // Client static IP — uint8_t[4] arrays → "A.B.C.D" strings
-        fmtIP(config.network.staticIP, ipBuf); net["staticIP"] = ipBuf;
-        fmtIP(config.network.gateway,  ipBuf); net["gateway"]  = ipBuf;
-        fmtIP(config.network.subnet,   ipBuf); net["subnet"]   = ipBuf;
-        fmtIP(config.network.dns,      ipBuf); net["dns"]      = ipBuf;
-
-        // ── Hardware ──────────────────────────────────────────────────────────
-        JsonObject hw = doc["hardware"].to<JsonObject>();
-        hw["storageType"]        = (int)config.hardware.storageType;
-        hw["wakeupMode"]         = (int)config.hardware.wakeupMode;
-        hw["cpuFreqMHz"]         = config.hardware.cpuFreqMHz > 0 ? config.hardware.cpuFreqMHz : 80;
-        hw["defaultStorageView"] = config.hardware.defaultStorageView;
-        hw["debounceMs"]         = config.hardware.debounceMs > 0  ? config.hardware.debounceMs : 100;
-        hw["pinWifiTrigger"]     = config.hardware.pinWifiTrigger;
-        hw["pinWakeupFF"]        = config.hardware.pinWakeupFF;
-        hw["pinWakeupPF"]        = config.hardware.pinWakeupPF;
-        hw["pinFlowSensor"]      = config.hardware.pinFlowSensor;
-        hw["pinRtcCE"]           = config.hardware.pinRtcCE;
-        hw["pinRtcIO"]           = config.hardware.pinRtcIO;
-        hw["pinRtcSCLK"]         = config.hardware.pinRtcSCLK;
-        hw["pinSdCS"]            = config.hardware.pinSdCS;
-        hw["pinSdMOSI"]          = config.hardware.pinSdMOSI;
-        hw["pinSdMISO"]          = config.hardware.pinSdMISO;
-        hw["pinSdSCK"]           = config.hardware.pinSdSCK;
-
-        AsyncResponseStream *resp = r->beginResponseStream("application/json");
-        String fn = String(strlen(config.deviceName) ? config.deviceName : "device") + "_settings.json";
-        resp->addHeader("Content-Disposition", "attachment; filename=\"" + fn + "\"");
-        serializeJson(doc, *resp);
-        r->send(resp);
-    });
+    server.on("/export_settings", HTTP_GET, h_get_export_settings);
 
     // =========================================================================
     // SAVE ENDPOINTS
     // =========================================================================
 
-    server.on("/save_device", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        if (r->hasParam("deviceName", true))
-            SAFE_STRNCPY(config.deviceName, r->getParam("deviceName", true)->value().c_str(), sizeof(config.deviceName));
-        if (r->hasParam("deviceId", true)) {
-            String newId = r->getParam("deviceId", true)->value();
-            if (newId.length() > 0 && newId.length() <= 12)
-                SAFE_STRNCPY(config.deviceId, newId.c_str(), sizeof(config.deviceId));
-        }
-        config.forceWebServer = r->hasParam("forceWebServer", true);
-        if (r->hasParam("defaultStorageView", true))
-            config.hardware.defaultStorageView = r->getParam("defaultStorageView", true)->value().toInt();
-        // PR #105 follow-up: Reset Boot Count migrated from /save_flowmeter
-        // (page retired) to the System Info card on settings_device.
-        if (r->hasParam("resetBootCount", true)) { bootCount = 0; backupBootCount(); }
-        saveConfig();
-        r->send(200, "application/json", "{\"ok\":true}");
-    });
+    server.on("/save_device", HTTP_POST, h_post_save_device);
 
     // PR #105 follow-up: /save_flowmeter endpoint retired together with the
     // standalone settings_flowmeter page. pulsesPerLiter / calibrationMultiplier
@@ -1200,516 +1932,64 @@ void setupWebServer() {
     // testMode + blinkDuration moved to /save_hardware; resetBootCount moved
     // to /save_device (System Info card).
 
-server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        // R11: validate every pin parameter against the active board profile
-        // before assigning. PIN_UNSET / -1 is accepted (means "unconfigured").
-        // First violation aborts the save with a 400; partial assignment is
-        // never persisted (saveConfig runs only at the end).
-        auto setPin = [&](const char* name, uint8_t& dest) -> bool {
-            if (!r->hasParam(name, true)) return true;
-            int v = r->getParam(name, true)->value().toInt();
-            if (v == -1) { dest = PIN_UNSET; return true; }
-            if (v < 0 || v > 255) {
-                r->send(400, "application/json",
-                        "{\"ok\":false,\"error\":\"pin out of range\"}");
-                return false;
-            }
-            if (!isPinAllowed(g_boardProfile, (uint8_t)v, PIN_PURPOSE_GENERIC)) {
-                char body[180];
-                snprintf(body, sizeof(body),
-                         "{\"ok\":false,\"error\":\"%s = GPIO%d rejected: %s\"}",
-                         name, v, pinRejectReason(g_boardProfile, (uint8_t)v));
-                r->send(400, "application/json", body);
-                return false;
-            }
-            dest = (uint8_t)v;
-            return true;
-        };
-        if (r->hasParam("storageType", true))    config.hardware.storageType    = (StorageType)r->getParam("storageType", true)->value().toInt();
-        if (r->hasParam("wakeupMode", true))     config.hardware.wakeupMode     = (WakeupMode)r->getParam("wakeupMode", true)->value().toInt();
-        if (!setPin("pinWifiTrigger", config.hardware.pinWifiTrigger)) return;
-        if (!setPin("pinWakeupFF",    config.hardware.pinWakeupFF))    return;
-        if (!setPin("pinWakeupPF",    config.hardware.pinWakeupPF))    return;
-        if (!setPin("pinFlowSensor",  config.hardware.pinFlowSensor))  return;
-        if (!setPin("pinRtcCE",       config.hardware.pinRtcCE))       return;
-        if (!setPin("pinRtcIO",       config.hardware.pinRtcIO))       return;
-        if (!setPin("pinRtcSCLK",     config.hardware.pinRtcSCLK))     return;
-        if (!setPin("pinSdCS",        config.hardware.pinSdCS))        return;
-        if (!setPin("pinSdMOSI",      config.hardware.pinSdMOSI))      return;
-        if (!setPin("pinSdMISO",      config.hardware.pinSdMISO))      return;
-        if (!setPin("pinSdSCK",       config.hardware.pinSdSCK))       return;
-        // Duplicate-pin check (Gemini medium on PR #87). After every
-        // setPin above succeeded, scan the final config for any two
-        // assigned pins on the same GPIO and refuse the whole save.
-        {
-            struct PinRef { const char* name; uint8_t value; };
-            PinRef refs[] = {
-                {"pinWifiTrigger", config.hardware.pinWifiTrigger},
-                {"pinWakeupFF",    config.hardware.pinWakeupFF},
-                {"pinWakeupPF",    config.hardware.pinWakeupPF},
-                {"pinFlowSensor",  config.hardware.pinFlowSensor},
-                {"pinRtcCE",       config.hardware.pinRtcCE},
-                {"pinRtcIO",       config.hardware.pinRtcIO},
-                {"pinRtcSCLK",     config.hardware.pinRtcSCLK},
-                {"pinSdCS",        config.hardware.pinSdCS},
-                {"pinSdMOSI",      config.hardware.pinSdMOSI},
-                {"pinSdMISO",      config.hardware.pinSdMISO},
-                {"pinSdSCK",       config.hardware.pinSdSCK},
-            };
-            constexpr int N = sizeof(refs) / sizeof(refs[0]);
-            for (int i = 0; i < N; i++) {
-                if (refs[i].value == PIN_UNSET) continue;
-                for (int j = i + 1; j < N; j++) {
-                    if (refs[j].value == refs[i].value) {
-                        char body[180];
-                        snprintf(body, sizeof(body),
-                                 "{\"ok\":false,\"error\":\"duplicate pin: %s and %s both = GPIO%u\"}",
-                                 refs[i].name, refs[j].name, refs[i].value);
-                        r->send(400, "application/json", body);
-                        return;
-                    }
-                }
-            }
-        }
-        if (r->hasParam("cpuFreqMHz", true))     config.hardware.cpuFreqMHz     = r->getParam("cpuFreqMHz", true)->value().toInt();
-        if (r->hasParam("debounceMs", true))     config.hardware.debounceMs     = constrain(r->getParam("debounceMs", true)->value().toInt(), 20, 500);
-        if (r->hasParam("debugMode", true))      config.hardware.debugMode      = r->getParam("debugMode", true)->value() == "1";
-        
-        // Chunk G: move testMode / blinkDuration to hardware page
-        if (r->hasParam("testMode", true)) {
-            config.flowMeter.testMode = r->getParam("testMode", true)->value() == "on" || r->getParam("testMode", true)->value() == "1";
-        } else {
-            config.flowMeter.testMode = false;
-        }
-        if (r->hasParam("blinkDuration", true)) {
-            // PR #105 review (Gemini medium): restore the lower-bound clamp
-            // the original /save_flowmeter handler had — values < 50 ms make
-            // the LED timing-loop in ESP_Logger.ino spin too tight.
-            config.flowMeter.blinkDuration = max(50L, (long)r->getParam("blinkDuration", true)->value().toInt());
-        }
-        saveConfig();
-        sendRestartPage(r, "Device is restarting with new hardware settings.");
-        shouldRestart = true;
-        restartTimer  = millis();
-    });
+server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
 
-    server.on("/save_theme", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        if (r->hasParam("themeMode", true))        config.theme.mode           = (ThemeMode)r->getParam("themeMode", true)->value().toInt();
-        config.theme.showIcons = r->hasParam("showIcons", true);
-        if (r->hasParam("primaryColor", true))     SAFE_STRNCPY(config.theme.primaryColor,      r->getParam("primaryColor", true)->value().c_str(), sizeof(config.theme.primaryColor));
-        if (r->hasParam("secondaryColor", true))   SAFE_STRNCPY(config.theme.secondaryColor,    r->getParam("secondaryColor", true)->value().c_str(), sizeof(config.theme.secondaryColor));
-        if (r->hasParam("lightBgColor", true))     SAFE_STRNCPY(config.theme.lightBgColor,      r->getParam("lightBgColor", true)->value().c_str(), sizeof(config.theme.lightBgColor));
-        if (r->hasParam("lightTextColor", true))   SAFE_STRNCPY(config.theme.lightTextColor,    r->getParam("lightTextColor", true)->value().c_str(), sizeof(config.theme.lightTextColor));
-        if (r->hasParam("darkBgColor", true))      SAFE_STRNCPY(config.theme.darkBgColor,       r->getParam("darkBgColor", true)->value().c_str(), sizeof(config.theme.darkBgColor));
-        if (r->hasParam("darkTextColor", true))    SAFE_STRNCPY(config.theme.darkTextColor,     r->getParam("darkTextColor", true)->value().c_str(), sizeof(config.theme.darkTextColor));
-        if (r->hasParam("ffColor", true))          SAFE_STRNCPY(config.theme.ffColor,           r->getParam("ffColor", true)->value().c_str(), sizeof(config.theme.ffColor));
-        if (r->hasParam("pfColor", true))          SAFE_STRNCPY(config.theme.pfColor,           r->getParam("pfColor", true)->value().c_str(), sizeof(config.theme.pfColor));
-        if (r->hasParam("otherColor", true))       SAFE_STRNCPY(config.theme.otherColor,        r->getParam("otherColor", true)->value().c_str(), sizeof(config.theme.otherColor));
-        if (r->hasParam("storageBarColor", true))  SAFE_STRNCPY(config.theme.storageBarColor,   r->getParam("storageBarColor", true)->value().c_str(), sizeof(config.theme.storageBarColor));
-        if (r->hasParam("storageBar70Color", true))SAFE_STRNCPY(config.theme.storageBar70Color, r->getParam("storageBar70Color", true)->value().c_str(), sizeof(config.theme.storageBar70Color));
-        if (r->hasParam("storageBar90Color", true))SAFE_STRNCPY(config.theme.storageBar90Color, r->getParam("storageBar90Color", true)->value().c_str(), sizeof(config.theme.storageBar90Color));
-        if (r->hasParam("storageBarBorder", true)) SAFE_STRNCPY(config.theme.storageBarBorder,  r->getParam("storageBarBorder", true)->value().c_str(), sizeof(config.theme.storageBarBorder));
-        if (r->hasParam("logoSource", true))       SAFE_STRNCPY(config.theme.logoSource,        r->getParam("logoSource", true)->value().c_str(), sizeof(config.theme.logoSource));
-        if (r->hasParam("faviconPath", true))      SAFE_STRNCPY(config.theme.faviconPath,       r->getParam("faviconPath", true)->value().c_str(), sizeof(config.theme.faviconPath));
-        if (r->hasParam("boardDiagramPath", true)) SAFE_STRNCPY(config.theme.boardDiagramPath,  r->getParam("boardDiagramPath", true)->value().c_str(), sizeof(config.theme.boardDiagramPath));
-        if (r->hasParam("chartSource", true))      config.theme.chartSource      = (ChartSource)r->getParam("chartSource", true)->value().toInt();
-        if (r->hasParam("chartLocalPath", true))   SAFE_STRNCPY(config.theme.chartLocalPath,    r->getParam("chartLocalPath", true)->value().c_str(), sizeof(config.theme.chartLocalPath));
-        if (r->hasParam("chartLabelFormat", true)) config.theme.chartLabelFormat = (ChartLabelFormat)r->getParam("chartLabelFormat", true)->value().toInt();
-        saveConfig();
-        r->send(200, "application/json", "{\"ok\":true}");
-    });
+    server.on("/save_theme", HTTP_POST, h_post_save_theme);
 
-    server.on("/save_datalog", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-
-        // ----- Path validation at the HTTP boundary --------------------------
-        // DataLogModule::load() trusts that prefix/folder/currentFile have
-        // already been sanitised; the gates below keep that contract honest
-        // and return HTTP 400 with field-specific messages if they fail.
-        auto isSafePrefix = [](const String& s) -> bool {
-            if (s.length() == 0 || s.length() > 32) return false;
-            for (size_t i = 0; i < s.length(); i++) {
-                char c = s[i];
-                if (c == '/' || c == '\\' || c == '\0' || (unsigned char)c < 0x20 || c == 0x7f) return false;
-            }
-            if (s == "." || s == "..") return false;
-            return true;
-        };
-        String safeCurrentFile;
-        String safePrefix;
-        String safeFolder;
-        bool   haveCurrentFile = false, havePrefix = false, haveFolder = false;
-        if (r->hasParam("currentFile", true)) {
-            safeCurrentFile = sanitizePath(r->getParam("currentFile", true)->value());
-            if (safeCurrentFile.length() == 0) {
-                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid currentFile path\"}");
-                return;
-            }
-            if (!fsAvailable || !activeFS || !activeFS->exists(safeCurrentFile)) {
-                r->send(400, "application/json", "{\"ok\":false,\"error\":\"currentFile does not exist\"}");
-                return;
-            }
-            haveCurrentFile = true;
-        }
-        if (r->hasParam("prefix", true)) {
-            safePrefix = r->getParam("prefix", true)->value();
-            if (!isSafePrefix(safePrefix)) {
-                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix (no slashes, control chars, or ..)\"}");
-                return;
-            }
-            havePrefix = true;
-        }
-        if (r->hasParam("folder", true)) {
-            String fld = r->getParam("folder", true)->value();
-            if (fld.length() > 0) {
-                safeFolder = sanitizePath(fld);
-                if (safeFolder.length() == 0) {
-                    r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid folder path\"}");
-                    return;
-                }
-            } // else: empty folder = root, fine
-            haveFolder = true;
-        }
-
-        // ----- Project form params into a JsonDocument & delegate -----------
-        // DataLogModule::load() is the single source of truth for clamps,
-        // enum bounds, and assignment to config.datalog. Both /save_datalog
-        // (here) and /import_settings call it, so format-field drift across
-        // entry points is impossible by construction.
-        JsonDocument doc;
-        JsonObject cfg = doc.to<JsonObject>();
-        if (haveCurrentFile)                       cfg["currentFile"]            = safeCurrentFile;
-        if (havePrefix)                            cfg["prefix"]                 = safePrefix;
-        if (haveFolder)                            cfg["folder"]                 = safeFolder;
-        if (r->hasParam("rotation", true))         cfg["rotation"]               = r->getParam("rotation", true)->value().toInt();
-        if (r->hasParam("maxSizeKB", true))        cfg["maxSizeKB"]              = r->getParam("maxSizeKB", true)->value().toInt();
-        if (r->hasParam("maxEntries", true))       cfg["maxEntries"]             = r->getParam("maxEntries", true)->value().toInt();
-        cfg["timestampFilename"]                   = r->hasParam("timestampFilename", true);
-        cfg["includeDeviceId"]                     = r->hasParam("includeDeviceId", true);
-        cfg["includeBootCount"]                    = r->hasParam("includeBootCount", true);
-        cfg["includeExtraPresses"]                 = r->hasParam("includeExtraPresses", true);
-        if (r->hasParam("dateFormat", true))       cfg["dateFormat"]             = r->getParam("dateFormat", true)->value().toInt();
-        if (r->hasParam("timeFormat", true))       cfg["timeFormat"]             = r->getParam("timeFormat", true)->value().toInt();
-        if (r->hasParam("endFormat", true))        cfg["endFormat"]              = r->getParam("endFormat", true)->value().toInt();
-        if (r->hasParam("volumeFormat", true))     cfg["volumeFormat"]           = r->getParam("volumeFormat", true)->value().toInt();
-        cfg["postCorrectionEnabled"]               = r->hasParam("postCorrectionEnabled", true);
-        if (r->hasParam("pfToFfThreshold", true))         cfg["pfToFfThreshold"]        = r->getParam("pfToFfThreshold", true)->value().toFloat();
-        if (r->hasParam("ffToPfThreshold", true))         cfg["ffToPfThreshold"]        = r->getParam("ffToPfThreshold", true)->value().toFloat();
-        if (r->hasParam("manualPressThresholdMs", true))  cfg["manualPressThresholdMs"] = r->getParam("manualPressThresholdMs", true)->value().toInt();
-
-        // ArduinoJson v7 doesn't expose .as<>() on JsonObject — but
-        // JsonObject is implicitly convertible to JsonObjectConst, which is
-        // what DataLogModule::load() expects.
-        DataLogModule::instance().load(cfg);
-
-        // Wide-CSV pipeline knobs (config.logger.*) live on the sensors page
-        // now (POST /save_sensorlog). The "create" / "switch" file actions
-        // moved to /api/datalog/{create,switch}.
-
-        saveConfig();
-        r->send(200, "application/json", "{\"ok\":true}");
-    });
+    server.on("/save_datalog", HTTP_POST, h_post_save_datalog);
 
     // POST /save_sensorlog — wide-CSV pipeline knobs (config.logger.*).
     // Backs the "Sensor CSV logging" card on the Sensors page; split out of
     // /save_datalog so the flow-meter event log and the sensor-CSV pipeline
     // each have their own form + endpoint.
-    server.on("/save_sensorlog", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        config.logger.csvLoggingEnabled = r->hasParam("csvLoggingEnabled", true);
-        if (r->hasParam("aggregationIntervalSec", true))
-            config.logger.aggregationIntervalSec = constrain(
-                r->getParam("aggregationIntervalSec", true)->value().toInt(), 5, 3600);
-        saveConfig();
-        r->send(200, "application/json", "{\"ok\":true}");
-    });
+    server.on("/save_sensorlog", HTTP_POST, h_post_save_sensorlog);
 
     // POST /api/datalog/create  body: prefix + folder + flags + (optional) action=switch
     // Creates a new log file from prefix/folder/timestamp+deviceId flags
     // without saving any other datalog settings. If action=switch, also sets
     // it as the active file. Decoupled from /save_datalog so users editing
     // format/rotation fields can't accidentally create a file on submit.
-    server.on("/api/datalog/create", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        if (!fsAvailable || !activeFS) {
-            r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
-            return;
-        }
-        if (!r->hasParam("prefix", true)) {
-            r->send(400, "application/json", "{\"ok\":false,\"error\":\"prefix required\"}");
-            return;
-        }
-        String prefix = r->getParam("prefix", true)->value();
-        // Same prefix rules as /save_datalog (kept in sync — see the inline
-        // isSafePrefix lambda in that handler).
-        if (prefix.length() == 0 || prefix.length() > 32 || prefix == "." || prefix == "..") {
-            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix\"}");
-            return;
-        }
-        for (size_t i = 0; i < prefix.length(); i++) {
-            char c = prefix[i];
-            if (c == '/' || c == '\\' || c == '\0' || (unsigned char)c < 0x20 || c == 0x7f) {
-                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix\"}");
-                return;
-            }
-        }
-        String folder = r->hasParam("folder", true) ? r->getParam("folder", true)->value() : "";
-        if (folder.length() > 0) {
-            folder = sanitizePath(folder);
-            if (folder.length() == 0) {
-                r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid folder\"}");
-                return;
-            }
-            if (!folder.endsWith("/")) folder += "/";
-        } else {
-            folder = "/";
-        }
-        if (folder != "/" && !activeFS->exists(folder)) activeFS->mkdir(folder);
-
-        bool incDeviceId = r->hasParam("includeDeviceId", true);
-        bool timestampFn = r->hasParam("timestampFilename", true);
-
-        String newFile = folder + prefix;
-        if (incDeviceId && strlen(config.deviceId) > 0)
-            newFile += "_" + String(config.deviceId);
-        if (timestampFn) {
-            if (Rtc) {
-                RtcDateTime now = Rtc->GetDateTime();
-                char buf[20];
-                snprintf(buf, sizeof(buf), "_%04d%02d%02d_%02d%02d%02d",
-                    now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second());
-                newFile += buf;
-            } else {
-                newFile += "_" + String(millis());
-            }
-        }
-        newFile += ".txt";
-
-        File f = activeFS->open(newFile, "w");
-        if (!f) {
-            r->send(500, "application/json", "{\"ok\":false,\"error\":\"Failed to create file\"}");
-            return;
-        }
-        f.close();
-
-        // Make this the active file unless caller explicitly opts out via
-        // ?switch=0; default behaviour mirrors the pre-split UX where the
-        // newly-created file became current.
-        bool switchToNew = !r->hasParam("switch", true) ||
-                            r->getParam("switch", true)->value() != "0";
-        if (switchToNew) {
-            SAFE_STRNCPY(config.datalog.currentFile, newFile.c_str(), sizeof(config.datalog.currentFile));
-            saveConfig();
-        }
-
-        String body = String("{\"ok\":true,\"file\":\"") + newFile + "\"}";
-        r->send(200, "application/json", body);
-    });
+    server.on("/api/datalog/create", HTTP_POST, h_post_api_datalog_create);
 
     // POST /api/datalog/switch  body: path
     // Sets config.datalog.currentFile to an EXISTING log file. Pure
     // active-file pointer change; doesn't touch any other datalog field.
-    server.on("/api/datalog/switch", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        if (!fsAvailable || !activeFS) {
-            r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
-            return;
-        }
-        if (!r->hasParam("path", true)) {
-            r->send(400, "application/json", "{\"ok\":false,\"error\":\"path required\"}");
-            return;
-        }
-        String path = sanitizePath(r->getParam("path", true)->value());
-        if (path.length() == 0) {
-            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid path\"}");
-            return;
-        }
-        if (!activeFS->exists(path)) {
-            r->send(404, "application/json", "{\"ok\":false,\"error\":\"file not found\"}");
-            return;
-        }
-        SAFE_STRNCPY(config.datalog.currentFile, path.c_str(), sizeof(config.datalog.currentFile));
-        saveConfig();
-        r->send(200, "application/json", "{\"ok\":true}");
-    });
+    server.on("/api/datalog/switch", HTTP_POST, h_post_api_datalog_switch);
 
-    server.on("/save_network", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        if (r->hasParam("wifiMode", true))       config.network.wifiMode = (WiFiModeType)r->getParam("wifiMode", true)->value().toInt();
-        if (r->hasParam("apSSID", true))         SAFE_STRNCPY(config.network.apSSID,         r->getParam("apSSID", true)->value().c_str(), sizeof(config.network.apSSID));
-        // R13 follow-up (Codex P1 on PR #89): /export_settings masks
-        // passwords as "***". The SPA round-trips that value back here
-        // on any unrelated save; without this guard the real password
-        // would be overwritten with "***". Treat "***" as the
-        // keep-existing sentinel.
-        if (r->hasParam("apPassword", true)     && r->getParam("apPassword", true)->value()     != "***") SAFE_STRNCPY(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), sizeof(config.network.apPassword));
-        if (r->hasParam("clientSSID", true))     SAFE_STRNCPY(config.network.clientSSID,     r->getParam("clientSSID", true)->value().c_str(), sizeof(config.network.clientSSID));
-        if (r->hasParam("clientPassword", true) && r->getParam("clientPassword", true)->value() != "***") SAFE_STRNCPY(config.network.clientPassword, r->getParam("clientPassword", true)->value().c_str(), sizeof(config.network.clientPassword));
-        config.network.useStaticIP = r->hasParam("useStaticIP", true);
+    server.on("/save_network", HTTP_POST, h_post_save_network);
 
-        auto parseIP = [&](const char* param, uint8_t* dst) {
-            if (r->hasParam(param, true)) {
-                uint8_t tmp[4];
-                if (sscanf(r->getParam(param, true)->value().c_str(), "%hhu.%hhu.%hhu.%hhu", &tmp[0], &tmp[1], &tmp[2], &tmp[3]) == 4) {
-                    memcpy(dst, tmp, 4);
-                }
-            }
-        };
-        parseIP("staticIP",  config.network.staticIP);
-        parseIP("gateway",   config.network.gateway);
-        parseIP("subnet",    config.network.subnet);
-        parseIP("dns",       config.network.dns);
-        parseIP("apIP",      config.network.apIP);
-        parseIP("apGateway", config.network.apGateway);
-        parseIP("apSubnet",  config.network.apSubnet);
-
-        saveConfig();
-        sendRestartPage(r, "Device is restarting with new network settings.");
-        shouldRestart = true;
-        restartTimer  = millis();
-    });
-
-    server.on("/save_time", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        if (r->hasParam("ntpServer", true)) SAFE_STRNCPY(config.network.ntpServer, r->getParam("ntpServer", true)->value().c_str(), sizeof(config.network.ntpServer));
-        if (r->hasParam("timezone", true))  config.network.timezone = r->getParam("timezone", true)->value().toInt();
-        saveConfig();
-        r->send(200, "application/json", "{\"ok\":true}");
-    });
+    server.on("/save_time", HTTP_POST, h_post_save_time);
 
     // =========================================================================
     // TIME MANAGEMENT
     // =========================================================================
-    server.on("/set_time", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;   // was rate-limit only — add CSRF
-        if (loggingState != STATE_IDLE && loggingState != STATE_DONE) {
-            r->send(409, "application/json", "{\"ok\":false,\"error\":\"Busy\"}");
-            return;
-        }
-        if (r->hasParam("date", true) && r->hasParam("time", true)) {
-            String ds = r->getParam("date", true)->value();
-            String ts = r->getParam("time", true)->value();
-            int yr = ds.substring(0,4).toInt(), mo = ds.substring(5,7).toInt(), dy = ds.substring(8,10).toInt();
-            int hr = ts.substring(0,2).toInt(), mi = ts.substring(3,5).toInt();
-
-            // Always set the POSIX system clock so time(nullptr) works even
-            // without hardware RTC.  Input is treated as UTC.  ESP32's newlib
-            // does not expose timegm(); we get UTC-mktime by saving TZ,
-            // forcing UTC0 around mktime(), then restoring.
-            struct tm ti = {};
-            ti.tm_year = yr - 1900; ti.tm_mon = mo - 1; ti.tm_mday = dy;
-            ti.tm_hour = hr; ti.tm_min = mi; ti.tm_sec = 0;
-            const char* prevTz = getenv("TZ");
-            setenv("TZ", "UTC0", 1); tzset();
-            time_t epoch = mktime(&ti);
-            if (prevTz) setenv("TZ", prevTz, 1); else unsetenv("TZ");
-            tzset();
-            struct timeval tv = { epoch, 0 };
-            settimeofday(&tv, nullptr);
-            rtcValid = true;
-
-            // Defer hardware RTC writes to loop() — three delay() calls sum to
-            // ~120 ms and block the AsyncTCP worker for every concurrent request.
-            // (AUDIT 3.17)
-            if (Rtc) {
-                g_pendingRtcTime = { (uint16_t)yr, (uint8_t)mo, (uint8_t)dy,
-                                     (uint8_t)hr, (uint8_t)mi };
-                g_pendingRtcSet.store(true, std::memory_order_release);
-            }
-            r->send(200, "application/json", "{\"ok\":true}");
-        } else {
-            r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing date or time\"}");
-        }
-    });
+    server.on("/set_time", HTTP_POST, h_post_set_time);
 
     // NTP sync can block up to ~10 seconds inside syncTimeFromNTP() (20 × 500 ms
     // retry loop). Doing that on the AsyncTCP worker stalls every other HTTP
     // connection. Instead we set g_pendingNtpSync and the main loop picks it
     // up on its next iteration. Clients poll /api/time_sync_status.
-    server.on("/sync_time", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        if (g_pendingNtpSync != 0) {
-            r->send(202, "application/json", "{\"ok\":true,\"pending\":true,\"running\":true}");
-            return;
-        }
-        g_lastNtpSyncResult = 0;
-        g_pendingNtpSync    = 1;
-        r->send(202, "application/json", "{\"ok\":true,\"pending\":true}");
-    });
+    server.on("/sync_time", HTTP_POST, h_post_sync_time);
 
-    server.on("/api/time_sync_status", HTTP_GET, [](AsyncWebServerRequest *r) {
-        String j = "{\"pending\":";
-        j += (g_pendingNtpSync != 0 ? "true" : "false");
-        j += ",\"result\":";
-        j += String((int)g_lastNtpSyncResult);  // 0=unknown, 1=ok, -1=fail
-        j += "}";
-        r->send(200, "application/json", j);
-    });
+    server.on("/api/time_sync_status", HTTP_GET, h_get_api_time_sync_status);
 
-    server.on("/rtc_protect", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        if (Rtc) {
-            bool protect = r->hasParam("protect", true);
-            Rtc->SetIsWriteProtected(protect);
-        }
-        r->send(200, "application/json", "{\"ok\":true}");
-    });
+    server.on("/rtc_protect", HTTP_POST, h_post_rtc_protect);
 
-    server.on("/flush_logs", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        flushLogBufferToFS();
-        r->send(200, "application/json", "{\"ok\":true}");
-    });
+    server.on("/flush_logs", HTTP_POST, h_post_flush_logs);
 
-    server.on("/backup_bootcount", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        backupBootCount();
-        r->send(200, "application/json", "{\"ok\":true}");
-    });
+    server.on("/backup_bootcount", HTTP_POST, h_post_backup_bootcount);
 
-    server.on("/restore_bootcount", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        uint32_t old = bootCount;
-        restoreBootCount();
-        String j = "{\"ok\":true,\"old\":" + String(old) + ",\"new\":" + String(bootCount) + "}";
-        r->send(200, "application/json", j);
-    });
+    server.on("/restore_bootcount", HTTP_POST, h_post_restore_bootcount);
 
     // =========================================================================
     // FACTORY RESET  – formats LittleFS, erases config, restarts
     // =========================================================================
-    server.on("/factory_reset", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        r->send(200, "application/json", "{\"ok\":true}");
-        DBGLN("[FACTORY RESET] Formatting LittleFS…");
-        {
-            MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-            if (LittleFS.format()) {
-                DBGLN("[FACTORY RESET] LittleFS formatted OK – restarting");
-            } else {
-                DBGLN("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
-            }
-        }
-        // Invalidate safe-mode magic so the next boot zeroes the counter
-        // regardless of the ESP_RST_SW reset reason. /factory_reset is a
-        // user-initiated wipe, NOT a crash.
-        g_resetMagic = 0;
-        g_pendingWiFiShutdown = true;
-        shouldRestart = true;
-        restartTimer  = millis();
-    });
+    server.on("/factory_reset", HTTP_POST, h_post_factory_reset);
 
     // =========================================================================
     // RESTART
     // =========================================================================
-    server.on("/restart", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        r->send(200, "application/json", "{\"ok\":true}");
-        shouldRestart = true;
-        restartTimer  = millis();
-    });
+    server.on("/restart", HTTP_POST, h_post_restart);
 
     // R12 / AUDIT 1.7: the only path that ever formats LittleFS.
     // Replaces the implicit formatOnFail=true behaviour with an explicit,
@@ -1717,88 +1997,13 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
     // "Format Filesystem" button when the user has decided the partition
     // is unrecoverable. Schedules a reboot after the format so the freshly
     // mounted FS is picked up by setup() on the next boot.
-    server.on("/api/format_filesystem", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        Serial.println("[Format] /api/format_filesystem — wiping LittleFS");
-        // R12 Gemini HIGH: acquire fsMutex around the long destructive op.
-        // Without it, a concurrent StorageTask write or web-handler read
-        // can race the format and corrupt the partition mid-erase.
-        // 30 s timeout — format takes ~5-15 s on 4 MB LittleFS.
-        bool ok = false;
-        {
-            MutexGuard g(fsMutex, pdMS_TO_TICKS(30000));
-            if (fsMutex && !g.isLocked()) {
-                r->send(503, "application/json",
-                        "{\"ok\":false,\"error\":\"fs busy\"}");
-                return;
-            }
-            ok = LittleFS.format();
-        }
-        if (!ok) {
-            Serial.println("[Format] FAILED");
-            r->send(500, "application/json",
-                    "{\"ok\":false,\"error\":\"format failed\"}");
-            return;
-        }
-        Serial.println("[Format] OK — rebooting");
-        r->send(200, "application/json",
-                "{\"ok\":true,\"message\":\"formatted, rebooting\"}");
-        shouldRestart = true;
-        restartTimer  = millis();
-    });
+    server.on("/api/format_filesystem", HTTP_POST, h_post_api_format_filesystem);
 
     // =========================================================================
     // FILE OPERATIONS
     // =========================================================================
 
-    server.on("/download", HTTP_GET, [](AsyncWebServerRequest *r) {
-        if (!r->hasParam("file")) { r->send(400, "text/plain", "No file"); return; }
-        String path = sanitizePath(r->getParam("file")->value());
-        if (path.isEmpty() || path == "/") { r->send(400, "text/plain", "Invalid path"); return; }
-        if (isPathProtected(path) && !isPathDownloadAllowed(path)) {
-            r->send(403, "application/json",
-                    "{\"ok\":false,\"error\":\"protected path\"}");
-            return;
-        }
-        String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
-        fs::FS* targetFS = (storage == "sdcard" && sdAvailable) ? sdFs() :
-                           (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
-        if (targetFS && targetFS->exists(path)) {
-            String filename = path.substring(path.lastIndexOf('/') + 1);
-            
-            // Handle 0-byte files explicitly because ESPAsyncWebServer's beginResponse(FS)
-            // returns nullptr for them, resulting in a spurious 404.
-            File f = targetFS->open(path, "r");
-            if (f && !f.isDirectory() && f.size() == 0) {
-                f.close();
-                AsyncWebServerResponse *resp = r->beginResponse(200, "application/octet-stream", "");
-                if (!resp) {
-                    r->send(500, "application/json", "{\"ok\":false,\"error\":\"out_of_memory\"}");
-                    return;
-                }
-                resp->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
-                r->send(resp);
-                return;
-            }
-            if (f) f.close();
-
-            // Pass download=true so AsyncFileResponse emits its own single
-            // "Content-Disposition: attachment; filename=..." header.  Previously
-            // we let it default to download=false (which emits an "inline"
-            // disposition) and then added our own "attachment" header on top —
-            // producing TWO Content-Disposition headers, which Chromium/Edge
-            // reject outright with ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION
-            // (every non-empty file failed to download).
-            // Null-check resp: exists() → beginResponse() has a TOCTOU window;
-            // the file may be deleted between the two calls.  (AUDIT 3.18)
-            AsyncWebServerResponse *resp =
-                r->beginResponse(*targetFS, path, "application/octet-stream", true);
-            if (!resp) { r->send(404, "text/plain", "Not found"); return; }
-            r->send(resp);
-        } else {
-            r->send(404, "text/plain", "Not found");
-        }
-    });
+    server.on("/download", HTTP_GET, h_get_download);
 
     // Accept both GET (legacy web.js compat) and POST (preferred)
     auto deleteHandler = [](AsyncWebServerRequest *r) {
@@ -1835,59 +2040,9 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
     };
     server.on("/delete", HTTP_POST, deleteHandler);
 
-    server.on("/mkdir", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        fs::FS* targetFS = getCurrentViewFS();
-        if (!r->hasParam("name") || !targetFS) { r->send(400, "text/plain", "Missing name"); return; }
-        String dirRaw  = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
-        String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
-        if (storage == "sdcard" && sdAvailable) targetFS = sdFs();
-        else targetFS = &LittleFS;
-        String dir  = sanitizePath(dirRaw);
-        String name = sanitizeFilename(r->getParam("name")->value());
-        if (dir.isEmpty() || name.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid name or dir\"}"); return; }
-        String fp   = buildPath(dir, name);
-        // 500 ms cap: report busy rather than freeze the AsyncTCP worker.
-        if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
-            r->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
-            return;
-        }
-        bool ok = targetFS->mkdir(fp);
-        if (fsMutex) xSemaphoreGive(fsMutex);
-        r->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"mkdir failed\"}");
-    });
+    server.on("/mkdir", HTTP_POST, h_post_mkdir);
 
-    server.on("/move_file", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
-        String src     = r->hasParam("src")     ? sanitizePath(r->getParam("src")->value())     : "";
-        String newName = r->hasParam("newName") ? sanitizeFilename(r->getParam("newName")->value()) : "";
-        String destRaw = r->hasParam("destDir") ? r->getParam("destDir")->value() : "";
-        if (src.isEmpty() || newName.isEmpty() || src == "/") { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid src or newName\"}"); return; }
-        if (isPathProtected(src)) { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
-        fs::FS* targetFS = nullptr;
-        if (storage == "sdcard" && sdAvailable)              targetFS = sdFs();
-        else if (storage == "internal" && littleFsAvailable) targetFS = &LittleFS;
-        if (!targetFS) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"No storage\"}"); return; }
-        String dstDir;
-        if (destRaw.isEmpty()) {
-            dstDir = src.substring(0, src.lastIndexOf('/'));
-            if (dstDir.isEmpty()) dstDir = "/";
-        } else {
-            dstDir = sanitizePath(destRaw);
-            if (dstDir.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid destDir\"}"); return; }
-        }
-        String dstPath = buildPath(dstDir, newName);
-        if (isPathProtected(dstPath)) { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
-        // 500 ms cap: report busy rather than freeze the AsyncTCP worker.
-        if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
-            r->send(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
-            return;
-        }
-        bool ok = targetFS->rename(src, dstPath);
-        if (fsMutex) xSemaphoreGive(fsMutex);
-        r->send(200, "application/json", ok ? "{\"ok\":true,\"dst\":\"" + dstPath + "\"}" : "{\"ok\":false,\"error\":\"Rename failed\"}");
-    });
+    server.on("/move_file", HTTP_POST, h_post_move_file);
 
     // Upload handler: per-request state in _tempObject tracks file handle
     // AND mutex-held flag so that client abort (onDisconnect) can release both.
@@ -2167,37 +2322,9 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
     // =========================================================================
     // WIFI SCAN
     // =========================================================================
-    server.on("/wifi_scan_start", HTTP_GET, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;
-        // Only widen AP → AP_STA so the AP stays up; leave a client-only
-        // device in STA (it can scan without broadcasting an AP).
-        if (WiFi.getMode() == WIFI_AP) WiFi.mode(WIFI_AP_STA);
-        WiFi.scanDelete();
-        WiFi.scanNetworks(true);
-        r->send(200, "text/plain", "OK");
-    });
+    server.on("/wifi_scan_start", HTTP_GET, h_get_wifi_scan_start);
 
-    server.on("/wifi_scan_result", HTTP_GET, [](AsyncWebServerRequest *r) {
-        JsonDocument doc;
-        JsonArray nets = doc["networks"].to<JsonArray>();
-        // Read-only on purpose: this endpoint is polled with a plain GET and
-        // is NOT behind requireMutatingAuth, so it must never start radio work.
-        // The (CSRF-guarded) /wifi_scan_start owns starting/re-kicking scans;
-        // the client re-triggers it if this reports an error.
-        int n = WiFi.scanComplete();
-        if      (n == WIFI_SCAN_RUNNING) { doc["scanning"] = true; }
-        else if (n == WIFI_SCAN_FAILED)  { doc["error"] = "Scan failed"; }
-        else if (n >= 0) {
-            for (int i = 0; i < n && i < 20; i++) {
-                JsonObject net = nets.add<JsonObject>();
-                net["ssid"]   = WiFi.SSID(i);
-                net["rssi"]   = WiFi.RSSI(i);
-                net["secure"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
-            }
-            WiFi.scanDelete();
-        }
-        sendJsonResponse(r, doc);
-    });
+    server.on("/wifi_scan_result", HTTP_GET, h_get_wifi_scan_result);
 
     // =========================================================================
     // OTA FIRMWARE UPDATE
@@ -2512,13 +2639,7 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
     // API: PLATFORM CONFIG  (GET = read, POST = write)
     // Used by Core Logic settings page to manage /platform_config.json
     // =========================================================================
-    server.on("/api/platform_config", HTTP_GET, [](AsyncWebServerRequest *r) {
-        if (!fsAvailable || !activeFS || !activeFS->exists("/platform_config.json")) {
-            r->send(404, "application/json", "{\"ok\":false,\"error\":\"platform_config.json not found\"}");
-            return;
-        }
-        r->send(*activeFS, "/platform_config.json", "application/json");
-    });
+    server.on("/api/platform_config", HTTP_GET, h_get_api_platform_config);
 
     // POST /save_platform — receives JSON body, writes to /platform_config.json
     // Crash-safe: streams into /platform_config.tmp, then renames on success.
@@ -2628,14 +2749,7 @@ server.on("/save_hardware", HTTP_POST, [](AsyncWebServerRequest *r) {
     // =========================================================================
     // API: PLATFORM RELOAD — trigger live sensor/exporter reload after save
     // =========================================================================
-    server.on("/api/platform_reload", HTTP_POST, [](AsyncWebServerRequest *r) {
-        if (!requireMutatingAuth(r)) return;   // was unprotected — reboots device
-        // Signal to main loop / TaskManager to reload configs
-        // Full reload requires restart; signal shouldRestart
-        shouldRestart = true;
-        restartTimer  = millis();
-        r->send(200, "application/json", "{\"ok\":true,\"restart\":true}");
-    });
+    server.on("/api/platform_reload", HTTP_POST, h_post_api_platform_reload);
 
     // server.begin() is intentionally NOT called here.  ESP_Logger.ino
     // registers additional API routes via registerApiRoutes() AFTER this
