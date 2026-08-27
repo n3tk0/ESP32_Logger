@@ -173,7 +173,7 @@ Current, `xiao_esp32c3`, `firmware.bin`:
 | build | image | free of 1,507,328 |
 |---|---:|---:|
 | default `src/setup.h` | 1,333,408 | 173,920 (88 %) |
-| every optional feature on | 1,397,200 | 110,128 (92 %) |
+| every optional feature on | 1,397,392 | 109,936 (92 %) |
 
 Levers, all measured as `firmware.bin` deltas on `xiao_esp32c3`:
 
@@ -318,14 +318,19 @@ ESP32_Logger/
 
 ## Documentation
 
-Full documentation lives in [`docs/`](docs/):
+**[`docs/README.md`](docs/README.md) indexes every document in the repository**,
+including the ones that live next to the code they describe. The main ones:
 
 - **[INSTRUCTIONS.md](docs/INSTRUCTIONS.md)** — operating the device after first boot (sensors, exporters, OTA, safe mode, diagnostics, troubleshooting)
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — module layout, task model, data pipeline
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — module layout, task model, data pipeline, API route reference
 - **[REFACTORING_GUIDELINES.md](docs/REFACTORING_GUIDELINES.md)** — architecture invariants and SOPs for code changes
-- **[AUDIT_LOG.md](docs/AUDIT_LOG.md)** — security/architecture audit findings (R1–R20 + post-R20 rounds: WebUI #150, backend #151, web-auth/CSRF #152)
-- **[FUTURE_UPDATES.md](docs/FUTURE_UPDATES.md)** — roadmap
-- **[USB_CDC_IMPLEMENTATION_SUMMARY.md](docs/USB_CDC_IMPLEMENTATION_SUMMARY.md)** — USB CDC toggle implementation
+- **[AUDIT_LOG.md](docs/AUDIT_LOG.md)** — security/architecture audit record (R1–R27)
+- **[CORE3_MIGRATION.md](docs/CORE3_MIGRATION.md)** — what moving to Arduino core 3.x would cost, measured
+- **[KINDLE_DASHBOARD.md](docs/KINDLE_DASHBOARD.md)** — the JavaScript-free e-ink dashboard
+- **[tools/DEPLOY.md](tools/DEPLOY.md)** — the flash and deploy tools
+
+Documents must not cite line numbers — name the symbol instead.
+`tools/check_doc_refs.py` enforces that in CI; the reasoning is in the index.
 
 ---
 

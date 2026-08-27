@@ -47,9 +47,9 @@ reimplement inline.
 | `RequireAuth` | `src/web/RequireAuth.h` | Rate-limit + CSRF check for mutating handlers; first statement must be `if (!requireMutatingAuth(req)) return;` |
 | `JsonResponse` | `src/utils/JsonResponse.h` | Serialize `JsonDocument` to `AsyncResponseStream` and send; use for all standard JSON responses |
 | `BoardProfiles` | `src/core/BoardProfiles.h` | Pin-restriction registry; `isPinAllowed()` and `validateAttachPin()` are the gate for all GPIO assignments |
-| `fetchWithTimeout` | `www/js/core.js:29` | Fetch with AbortController timeout (default 15 s); use on every API call |
-| `getCsrfToken` | `www/js/core.js:449` | Returns a cached promise for the current CSRF token; required before every POST |
-| `escapeHtml` / `esc` | `www/js/core.js:799` | HTML-escape for `innerHTML` interpolation; required on every user-controlled string |
+| `fetchWithTimeout` | `www/js/core.js` | Fetch with AbortController timeout (default 15 s); use on every API call |
+| `getCsrfToken` | `www/js/core.js` | Returns a cached promise for the current CSRF token; required before every POST |
+| `escapeHtml` / `esc` | `www/js/core.js` | HTML-escape for `innerHTML` interpolation; required on every user-controlled string |
 
 ---
 
@@ -67,15 +67,15 @@ subsystems with persisted config:
 - `stop()` — release resources.
 
 `POST /api/modules/:id/restart` calls `stop()` then `start()` without
-changing the enabled flag (`src/web/ApiHandlers.cpp:657`). If `start()`
+changing the enabled flag (`handleApiModuleRestart()` in `src/web/ApiHandlers.cpp`). If `start()`
 returns `false`, the response includes `"restartRequired":true` and the
 caller must POST `/restart`.
 
 Modules that currently override `start()`:
 - `WiFiModule::start()` — always returns `false` (reboot required)
-  (`src/modules/WiFiModule.h:26`)
+  (`src/modules/WiFiModule.h`)
 - `TimeModule::start()` — queues an NTP sync task, returns `true`
-  (`src/modules/TimeModule.h:23`)
+  (`src/modules/TimeModule.h`)
 
 `POST /api/modules/:id/enable?on=0` sets the enabled flag only; a subsequent
 `/restart` or `/api/modules/:id/restart` is needed for most modules to act on it.
@@ -89,14 +89,14 @@ Modules that currently override `start()`:
 `SensorManager::tickFiltered` acquires `configMutex` before iterating
 `_sensors[]`. `reloadConfig` acquires the same mutex in write-mode. This
 prevents use-after-free when a reload deletes a plugin while the sensor task
-is iterating (`AUDIT 3.19`, fixed in R14, `src/pipeline/DataPipeline.h:22`).
+is iterating (`AUDIT 3.19`, fixed in R14, `SensorManager::tickFiltered()` in `src/sensors/SensorManager.cpp`).
 
 ### AlertEngine MQTT publish
 
 `AlertEngine::evaluate()` stages MQTT publish payloads into `_pendingMqtt[]`
 while holding `_mutex`, then releases the mutex and drains the array outside
 it. This prevents holding `_mutex` during a blocking MQTT network call
-(`src/alerts/AlertEngine.h:112-114`).
+(`_pendingMqtt` in `src/alerts/AlertEngine.h`).
 
 ### RingBuffer ordering
 
@@ -110,17 +110,17 @@ A producer that cannot acquire the mutex within 5 ms increments
 ## Pin assignment (R11 + R17)
 
 - `PIN_UNSET` (0xFF) is the sentinel for "no pin chosen" in every
-  `uint8_t` GPIO field (`src/core/BoardProfiles.h:28`).
+  `uint8_t` GPIO field (`src/core/BoardProfiles.h`).
 - Every sensor plugin's `init()` MUST call `validateAttachPin(pin, sensorId,
   fieldName)` before `pinMode` or `gpio_isr_handler_add`. On failure, log
   the reject reason and return `false`.
 - `isPinAllowed(profile, pin, purpose)` returns `false` for `PIN_UNSET`,
   strap, USB, flash, and reserved pins (`src/core/BoardProfiles.h`).
 - Serial1 ownership: `_claimSerial1(who)` / `_releaseSerial1(who)` in
-  `src/sensors/SensorManager.cpp:14` prevent two UART sensors from binding
+  `src/sensors/SensorManager.cpp` prevent two UART sensors from binding
   the same hardware serial port.
 - I2C address ownership: `_claimI2cAddress(addr, who)` /
-  `_releaseI2cClaims(who)` in `src/sensors/SensorManager.cpp:29` prevent
+  `_releaseI2cClaims(who)` in `src/sensors/SensorManager.cpp` prevent
   two sensors from sharing a fixed I2C address.
 
 ---
@@ -137,22 +137,22 @@ A producer that cannot acquire the mutex within 5 ms increments
   MUST be consulted by `/download`, `/delete`, and `/move_file`
   (Pillar 2.4, `src/web/WebServer.cpp`).
 - HTML escape — every `innerHTML` interpolation MUST use `esc()` from
-  `www/js/core.js:799` (Pillar 2.8).
+  `www/js/core.js` (Pillar 2.8).
 
 ---
 
 ## Frontend conventions
 
-- `fetchWithTimeout(url, opts, timeoutMs)` (`www/js/core.js:29`) — use on
+- `fetchWithTimeout(url, opts, timeoutMs)` (`www/js/core.js`) — use on
   every API call. Default 15 s; 30 s for writes; 60 s for imports/exports.
-- `getCsrfToken()` (`www/js/core.js:449`) — required before every mutating
+- `getCsrfToken()` (`www/js/core.js`) — required before every mutating
   POST. Passes the token as a `?csrf=` query parameter.
-- `esc(s)` (`www/js/core.js:799`) — required on every `innerHTML`
+- `esc(s)` (`www/js/core.js`) — required on every `innerHTML`
   interpolation of server-supplied data.
 - CDN script loading — `<script src>` from CDN MUST include
   `integrity="sha384-..."` and `crossorigin="anonymous"`. Version MUST be
   pinned (not a range). uPlot is pinned to `1.6.32` with SRI hashes in
-  `www/js/pages.js:42-43` (R18).
+  `www/js/pages.js` (R18).
 
 ---
 
@@ -314,8 +314,8 @@ Validation failure MUST reject the entire save (return false / 400), not silentl
 ### 2.8 HTML escape contract (frontend)
 
 - Every `innerHTML` site that interpolates server data MUST wrap each value in `esc()`.
-- For option lists / dropdowns, prefer `opt.textContent = value; opt.value = value` (DOM-native escape) — see `settings.js:1068-1073` as the model.
-- The Handlers map (`core.js:67`) and null-prototype `Object.create(null)` pattern MUST remain. Any new event-dispatcher additions MUST go through `registerHandlers({...})` — no direct `window[name]` lookups.
+- For option lists / dropdowns, prefer `opt.textContent = value; opt.value = value` (DOM-native escape) — see `www/js/settings.js` as the model.
+- The Handlers map (`www/js/core.js`) and null-prototype `Object.create(null)` pattern MUST remain. Any new event-dispatcher additions MUST go through `registerHandlers({...})` — no direct `window[name]` lookups.
 
 ### 2.9 TLS / HTTPS posture
 
@@ -369,7 +369,7 @@ Implementation contract:
 ### 3.4 File-size guard
 
 - Every JSON file read MUST go through `loadJsonFile(fs, path, doc, maxBytes = 16384)`. Reject parse if `f.size() > maxBytes`.
-- `/upload` MUST check `LittleFS.totalBytes() - LittleFS.usedBytes() >= contentLength + 32 KB headroom` before accepting bytes (current check at WebServer.cpp:1593 is good — keep it).
+- `/upload` MUST check `LittleFS.totalBytes() - LittleFS.usedBytes() >= contentLength + 32 KB headroom` before accepting bytes (the disk-full guard in the `/upload` handler, `src/web/WebServer.cpp`, does this — keep it).
 
 ### 3.5 OOM / disk-full handling
 
@@ -425,7 +425,7 @@ The R11 implementation (`src/core/BoardProfiles.h`) provides:
 
 These replace the proposed `validatePin(int, PinUsage)` and are already
 wired into `SensorManager` and the first-run wizard. The `PinPurpose` enum
-(`src/core/BoardProfiles.h:26`) covers generic, digital in/out, analog,
+(`src/core/BoardProfiles.h`) covers generic, digital in/out, analog,
 I2C, UART, and pulse roles.
 
 ### 4.3 Input pull resistors

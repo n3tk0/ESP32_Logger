@@ -17,6 +17,8 @@ on:
       - '.github/workflows/tests.yml'
       - 'docs/ARCHITECTURE.md'
       - 'tools/check_api_docs.py'
+      - 'tools/check_doc_refs.py'
+      - '**/*.md'
       - 'tools/check_metric_names.py'
       - 'scripts/gen_failsafe.py'
       - 'src/web/failsafe.html'
@@ -31,6 +33,8 @@ on:
       - '.github/workflows/tests.yml'
       - 'docs/ARCHITECTURE.md'
       - 'tools/check_api_docs.py'
+      - 'tools/check_doc_refs.py'
+      - '**/*.md'
       - 'tools/check_metric_names.py'
       - 'scripts/gen_failsafe.py'
       - 'src/web/failsafe.html'
@@ -146,6 +150,38 @@ jobs:
         # Fails if a route registered via server.on(...) in src/web/ has no row
         # in the API reference table (the table had drifted to ~10% coverage).
         run: python3 tools/check_api_docs.py
+
+      - name: Verify the docs cite symbols, not line numbers
+        # Line citations rot silently and a reader cannot tell a stale one from
+        # their own confusion. When this check was added, all 53 file:line
+        # references in docs/ were wrong -- one of them written two days
+        # earlier and already off by three lines. Also checks that every source
+        # path a document names exists.
+        run: python3 tools/check_doc_refs.py
+
+      - name: Verify that check actually rejects a line citation
+        run: |
+          set -e
+          cp docs/INSTRUCTIONS.md docs/INSTRUCTIONS.md.orig
+          restore() { mv docs/INSTRUCTIONS.md.orig docs/INSTRUCTIONS.md; }
+
+          printf '\nci probe (`src/web/WebServer.cpp:123`).\n' >> docs/INSTRUCTIONS.md
+          if python3 tools/check_doc_refs.py; then
+            restore
+            echo "::error::check_doc_refs.py accepted a line-number citation"
+            exit 1
+          fi
+          cp docs/INSTRUCTIONS.md.orig docs/INSTRUCTIONS.md
+
+          printf '\nci probe (`src/web/NoSuchFile.cpp`).\n' >> docs/INSTRUCTIONS.md
+          if python3 tools/check_doc_refs.py; then
+            restore
+            echo "::error::check_doc_refs.py accepted a path that does not exist"
+            exit 1
+          fi
+
+          restore
+          echo "doc-reference guard fires on both a line citation and a missing path"
 
       - name: Verify no metric/unit name is silently truncated
         # SensorReading::make() strncpy's into fixed char arrays, so an
