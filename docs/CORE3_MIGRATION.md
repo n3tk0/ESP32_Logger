@@ -11,6 +11,14 @@ against numbers instead of impressions.
 
 Reproduce any row with `pio run -e x_core3_probe` (see `platformio.ini`).
 
+> **These figures predate `-fno-exceptions`.** They were taken with exceptions
+> enabled, before that flag was added to `[env] build_flags`, and are left as
+> measured rather than rewritten — every row was taken the same way, so the
+> deltas between them (the point of the table) still hold. Absolute numbers on
+> both sides are now ~137 KB smaller. The conclusion is unchanged and if
+> anything firmer: the core still costs ~223 KB, and the headroom that
+> `-fno-exceptions` just bought should not be spent on paying for it.
+
 ## The numbers
 
 App flash on `xiao_esp32c3`, default `src/setup.h`, against the 1,507,328-byte
