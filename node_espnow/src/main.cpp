@@ -48,7 +48,7 @@ static const uint32_t RTC_MAGIC = 0x4E4F4431;   // "NOD1"
 RTC_DATA_ATTR static uint32_t s_rtcMagic;
 RTC_DATA_ATTR static uint16_t s_seq;
 RTC_DATA_ATTR static uint8_t  s_failStreak;    ///< consecutive unanswered wakes
-RTC_DATA_ATTR static uint32_t s_lastScanS;     ///< epoch of the last channel scan
+RTC_DATA_ATTR static uint16_t s_wakesSinceScan; ///< see the rescan gate
 RTC_DATA_ATTR static uint32_t s_wakeCount;
 
 /// Readings the node could not deliver.
@@ -61,6 +61,33 @@ RTC_DATA_ATTR static uint32_t s_wakeCount;
 RTC_DATA_ATTR static EnvSample s_buf[ESPNOW_MAX_SAMPLES];
 RTC_DATA_ATTR static uint32_t  s_bufEpoch[ESPNOW_MAX_SAMPLES];
 RTC_DATA_ATTR static uint8_t   s_bufCount;
+
+// ---------------------------------------------------------------------------
+// The clock
+// ---------------------------------------------------------------------------
+
+/// Adopt a wall clock handed to us by the collector.
+static void adoptClock(uint32_t epoch) {
+    if (epoch < 1000000000u) return;
+    struct timeval tv = {};
+    tv.tv_sec = (time_t)epoch;
+    settimeofday(&tv, nullptr);
+}
+
+/// Wall clock, or 0 when there isn't one.
+///
+/// time() on a node that has never been told the time returns seconds since
+/// boot, which is a small number and not an epoch. Storing THAT as a sample's
+/// timestamp and later subtracting it from a real epoch produced an age of
+/// fifty-five years, clamped to the field's 65535 seconds — so a reading taken
+/// a minute ago shipped claiming to be eighteen hours old.
+///
+/// One function, so the guard cannot be applied at three call sites and
+/// forgotten at a fourth. It was.
+static inline uint32_t usableEpoch() {
+    const uint32_t t = (uint32_t)time(nullptr);
+    return (t >= 1000000000u) ? t : 0;
+}
 
 // ---------------------------------------------------------------------------
 // Persistent configuration
@@ -166,7 +193,11 @@ static void readSample(EnvSample& s, uint16_t vbat) {
     enClearSample(s);
     if (s_bmxOk) {
         s.t_c100   = enPackTemp(s_bmx.readTemperature());
-        s.press_pa = enPackPress(s_bmx.readPressure() * 100.0f);   // hPa → Pa
+        // readPressure() returns PASCALS already — see the comment on its
+        // return in BME280_Mini.h. Multiplying by 100 here put every reading
+        // past enPackPress()'s 200 kPa ceiling, so it stored the absent
+        // sentinel and the node reported no pressure at all, silently.
+        s.press_pa = enPackPress(s_bmx.readPressure());
         if (s_bmx.isBME280()) s.rh_x100 = enPackRh(s_bmx.readHumidity());
     }
     if (vbat) s.vbat_mv = enPackMv((float)vbat);
@@ -176,15 +207,23 @@ static void readSample(EnvSample& s, uint16_t vbat) {
 // The undelivered queue
 // ---------------------------------------------------------------------------
 
+/// Most samples the queue may hold.
+///
+/// ESPNOW_MAX_SAMPLES minus one, because the live reading needs the last slot
+/// in the frame. Sized at the full fifteen, the fifteenth buffered sample
+/// never fitted, was never sent, and was then cleared on the next ACK — so the
+/// queue silently dropped its NEWEST entry, which is the opposite of what the
+/// eviction rule below is for.
+static const uint8_t BUF_CAP = ESPNOW_MAX_SAMPLES - 1;
+
 static void bufferSample(const EnvSample& s, uint32_t epoch) {
-    if (s_bufCount >= ESPNOW_MAX_SAMPLES) {
+    if (s_bufCount >= BUF_CAP) {
         // Full: drop the oldest. Losing the beginning of an outage is better
         // than losing the end of it — the recent readings are the ones that
         // say what the weather is doing now.
-        memmove(&s_buf[0], &s_buf[1], sizeof(EnvSample) * (ESPNOW_MAX_SAMPLES - 1));
-        memmove(&s_bufEpoch[0], &s_bufEpoch[1],
-                sizeof(uint32_t) * (ESPNOW_MAX_SAMPLES - 1));
-        s_bufCount = ESPNOW_MAX_SAMPLES - 1;
+        memmove(&s_buf[0], &s_buf[1], sizeof(EnvSample) * (BUF_CAP - 1));
+        memmove(&s_bufEpoch[0], &s_bufEpoch[1], sizeof(uint32_t) * (BUF_CAP - 1));
+        s_bufCount = BUF_CAP - 1;
     }
     s_buf[s_bufCount]      = s;
     s_bufEpoch[s_bufCount] = epoch;
@@ -209,7 +248,7 @@ static uint8_t buildFrame(DataMsg& m, const EnvSample& live, uint32_t now,
     m.flags  = coldBoot ? EN_FLAG_FIRST_BOOT : 0;
 
     uint8_t n = 0;
-    for (uint8_t i = 0; i < s_bufCount && n < ESPNOW_MAX_SAMPLES - 1; i++) {
+    for (uint8_t i = 0; i < s_bufCount && n < BUF_CAP; i++) {
         m.s[n] = s_buf[i];
         uint32_t age = 0;
         if (now && s_bufEpoch[i] && now > s_bufEpoch[i]) age = now - s_bufEpoch[i];
@@ -256,11 +295,12 @@ void setup() {
         s_rtcMagic   = RTC_MAGIC;
         s_seq        = 0;
         s_failStreak = 0;
-        s_lastScanS  = 0;
+        s_wakesSinceScan = 0xFFFF;   // scan on the first eligible failure
         s_wakeCount  = 0;
         s_bufCount   = 0;
     }
     s_wakeCount++;
+    if (s_wakesSinceScan < 0xFFFF) s_wakesSinceScan++;
 
     loadLink();
 
@@ -275,7 +315,7 @@ void setup() {
 
     if (!linkBegin(s_link)) {
         Serial.println("[node] radio failed to start");
-        bufferSample(live, (uint32_t)time(nullptr));
+        bufferSample(live, usableEpoch());
         sleepNow(s_link.intervalS);
         return;
     }
@@ -283,7 +323,9 @@ void setup() {
     // ── Never provisioned: find a collector ─────────────────────────────────
     if (s_link.nodeId == 0) {
         Serial.println("[node] no collector known — sweeping for one");
-        if (linkPair(s_link)) {
+        uint32_t pairedEpoch = 0;
+        if (linkPair(s_link, &pairedEpoch)) {
+            adoptClock(pairedEpoch);
             saveLink();
             Serial.printf("[node] paired as node %u on channel %u\n",
                           s_link.nodeId, s_link.channel);
@@ -294,16 +336,16 @@ void setup() {
             // cell before anybody got to the collector.
             Serial.println("[node] nobody answered — is the collector's pairing window open?");
             linkEnd();
-            bufferSample(live, (uint32_t)time(nullptr));
+            bufferSample(live, usableEpoch());
             sleepNow(s_link.intervalS);
             return;
         }
     }
 
     // ── Report ──────────────────────────────────────────────────────────────
-    const uint32_t now = (uint32_t)time(nullptr);
+    const uint32_t now = usableEpoch();
     DataMsg m;
-    const uint8_t count = buildFrame(m, live, (now >= 1000000000u) ? now : 0, coldBoot);
+    const uint8_t count = buildFrame(m, live, now, coldBoot);
 
     LinkResult r = linkSend(s_link, m, count);
     Serial.printf("[node] sent %u sample(s) seq=%u -> sent=%d ack=%d waited=%lums\n",
@@ -319,11 +361,7 @@ void setup() {
         // 32 kHz crystal on this board, so deep sleep is timed by an RC
         // oscillator that drifts by percent. Resynchronising every wake is
         // what keeps a buffered burst's timestamps worth anything.
-        if (r.epoch >= 1000000000u) {
-            struct timeval tv = {};
-            tv.tv_sec = (time_t)r.epoch;
-            settimeofday(&tv, nullptr);
-        }
+        adoptClock(r.epoch);
         if (r.intervalS && r.intervalS != s_link.intervalS) {
             s_link.intervalS = r.intervalS;
             s_prefs.begin("espnow-node", false);
@@ -335,12 +373,13 @@ void setup() {
 
         if (r.rediscover) {
             Serial.println("[node] collector no longer knows us — pairing again");
-            if (linkPair(s_link)) saveLink();
+            uint32_t e = 0;
+            if (linkPair(s_link, &e)) { adoptClock(e); saveLink(); }
         }
     } else {
         s_seq++;                   // the frame went out; do not reuse its number
         if (s_failStreak < 255) s_failStreak++;
-        bufferSample(live, (now >= 1000000000u) ? now : 0);
+        bufferSample(live, usableEpoch());
 
         // ── Nobody answered. Go looking for where the network moved. ────────
         //
@@ -349,12 +388,19 @@ void setup() {
         // the hour. The ceiling exists for the other case — a collector simply
         // switched off — where scanning every minute would cost more radio
         // than reporting does.
+        // Counted in WAKES, not in seconds off the clock. The clock is the
+        // one thing here that can jump: settimeofday() moves it from a few
+        // hundred to 1.75 billion the first time a collector answers, and a
+        // rate limit measured against it is either bypassed or stuck depending
+        // on which side of that jump the two readings fell. Wakes are a count
+        // this node cannot get wrong.
+        const uint32_t iv = s_link.intervalS ? s_link.intervalS : NODE_INTERVAL_S;
+        const uint32_t wakesPerCeiling = (NODE_RESCAN_MIN_INTERVAL_S + iv - 1) / iv;
         const bool due = s_failStreak >= NODE_RESCAN_FAILS &&
-                         (s_lastScanS == 0 || now == 0 ||
-                          (now - s_lastScanS) >= NODE_RESCAN_MIN_INTERVAL_S);
+                         s_wakesSinceScan >= wakesPerCeiling;
 
         if (due) {
-            s_lastScanS = now;
+            s_wakesSinceScan = 0;
             const uint8_t ch = linkFindChannel(s_link);
             if (ch && ch != s_link.channel) {
                 Serial.printf("[node] access point moved to channel %u\n", ch);
@@ -369,7 +415,9 @@ void setup() {
                 Serial.println("[node] cannot find the network — sweeping for a collector");
                 NodeLink fresh = s_link;
                 fresh.nodeId = 0;
-                if (linkPair(fresh)) {
+                uint32_t e = 0;
+                if (linkPair(fresh, &e)) {
+                    adoptClock(e);
                     s_link = fresh;
                     saveLink();
                     s_failStreak = 0;

@@ -198,7 +198,7 @@ LinkResult linkSend(const NodeLink& link, const DataMsg& msg, uint8_t count) {
 // Pairing
 // ---------------------------------------------------------------------------
 
-bool linkPair(NodeLink& io) {
+bool linkPair(NodeLink& io, uint32_t* epochOut) {
     // A nonce per attempt so two sweeps are not byte-identical on the air.
     // esp_random() is the hardware RNG; it is seeded without WiFi being
     // associated, which matters because this runs before the node has a
@@ -219,6 +219,7 @@ bool linkPair(NodeLink& io) {
             continue;
         if (!s_haveWelcome) continue;
 
+        if (epochOut) *epochOut = s_welcome.epoch;
         io.nodeId    = s_welcome.nodeId;
         io.channel   = s_welcome.channel ? s_welcome.channel : ch;
         io.intervalS = s_welcome.intervalS ? s_welcome.intervalS

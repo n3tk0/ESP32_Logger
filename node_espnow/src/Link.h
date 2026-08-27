@@ -53,11 +53,16 @@ void linkEnd();
 LinkResult linkSend(const NodeLink& link, const DataMsg& msg, uint8_t count);
 
 /// Sweep the channels broadcasting a signed DISCOVER until a WELCOME for this
-/// node comes back. On success `io` holds everything the collector sent.
+/// node comes back. On success `io` holds everything the collector sent, and
+/// `epochOut` — if given — the collector's wall clock.
+///
+/// The clock is worth taking here and not only from an ACK: a freshly paired
+/// node that has to buffer before its first successful report would otherwise
+/// timestamp those readings with nothing.
 ///
 /// Costs up to NODE_MAX_CHANNEL × NODE_PAIR_DWELL_MS of radio — about 1.6 s
 /// for thirteen channels — so the caller rate-limits it.
-bool linkPair(NodeLink& io);
+bool linkPair(NodeLink& io, uint32_t* epochOut = nullptr);
 
 /// Passive scan for the stored access point. Returns its channel, or 0 when it
 /// is not on the air.

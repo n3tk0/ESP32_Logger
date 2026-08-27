@@ -20,9 +20,11 @@
 // ----------------------------
 // 1. Modem sleep OFF. WIFI_PS_MIN_MODEM breaks ESP-NOW unicast — measured —
 //    while leaving broadcast working, which is the worst possible failure
-//    mode: pairing succeeds and then no reading ever arrives. The sketch
-//    forces g_contModemSleep false when this feature is compiled in, so a
-//    device cannot be configured into that state.
+//    mode: pairing succeeds and then no reading ever arrives. The sketch's
+//    modemSleepAllowed() returns false whenever this feature is compiled in —
+//    asked at the point of use, not applied to the config once, because a
+//    device with no sleep settings at all never reaches the parser that would
+//    have applied it.
 //
 // 2. The channel is not ours to pick. ESP-NOW rides the STA interface and
 //    uses whatever channel the access point put us on. Peers are therefore
@@ -105,6 +107,12 @@ struct EspNowIngestStats {
     uint32_t unknownNode;     ///< valid frame, no such node provisioned
     uint32_t replayed;        ///< duplicate or stale sequence number
     uint32_t ringFull;        ///< arrived faster than the tick drained
+    /// Buffered samples whose environmental values the mailbox could not keep.
+    /// RemoteIngest holds one value per (node, metric), so a burst's older
+    /// readings are overwritten by its newer ones. Counted rather than hidden:
+    /// a node spending airtime on readings dropped at this end should be
+    /// visible somewhere.
+    uint32_t historyCollapsed;
     uint32_t acksSent;
     uint32_t discoverSeen;
     uint32_t discoverBadSig;

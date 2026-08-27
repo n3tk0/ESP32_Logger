@@ -393,7 +393,8 @@ static bool servicePendingDiscover() {
         return false;
     }
 
-    uint8_t assigned = 0;
+    uint8_t  assigned = 0;
+    uint16_t interval = ESPNOW_DEFAULT_INTERVAL_S;
     taskENTER_CRITICAL(&s_nodeMux);
     // Reuse the slot this MAC already holds, so re-pairing a node the
     // collector already knows does not consume a second id.
@@ -403,7 +404,7 @@ static bool servicePendingDiscover() {
             if (!s_nodes.byId(id))
                 n = s_nodes.add(mac, id, nullptr, ESPNOW_DEFAULT_INTERVAL_S);
     }
-    if (n) assigned = n->nodeId;
+    if (n) { assigned = n->nodeId; interval = n->intervalS; }
     taskEXIT_CRITICAL(&s_nodeMux);
 
     if (!assigned) {
@@ -412,7 +413,11 @@ static bool servicePendingDiscover() {
     }
 
     WelcomeMsg w{};
-    w.intervalS = ESPNOW_DEFAULT_INTERVAL_S;
+    // The node's OWN interval, not the default. Re-pairing a node whose wake
+    // period had been changed would otherwise hand it the default back while
+    // the collector's table went on expecting the configured one — so the node
+    // would report on one schedule and be judged offline against another.
+    w.intervalS = interval;
     w.epoch     = nowEpoch();
     w.channel   = currentChannel();
 
@@ -528,8 +533,32 @@ void espnowIngestTick() {
         // reads today.
         const uint32_t base = f.msg.epoch ? f.msg.epoch : nowEpoch();
 
-        for (uint8_t i = 0; i < f.msg.count && i < ESPNOW_MAX_SAMPLES; i++) {
-            const EnvSample& s = f.msg.s[i];
+        // WHAT SURVIVES A BURST, AND WHAT DOES NOT
+        //
+        // RemoteIngest holds ONE value per (node, metric) and overwrites — it
+        // is a mailbox, not a queue, and deliberately so: a node posting faster
+        // than the collector ticks should overwrite rather than backlog.
+        // Feeding fifteen buffered temperatures through it therefore leaves
+        // one, the newest, and the loop that fed it all fifteen was doing
+        // fourteen writes whose only effect was to be overwritten microseconds
+        // later.
+        //
+        // So the environmental history a node buffers through an outage is NOT
+        // preserved downstream today. The battery history IS: acceptFrame()
+        // folds every sample into BatteryHistory by its own timestamp, and
+        // that is keyed by day rather than overwritten.
+        //
+        // Making the rest survive means letting a remote reading keep its own
+        // timestamp instead of being stamped on arrival — see the note on
+        // RemoteIngest::put(). That is a change to an invariant the HTTP node
+        // shares, so it is not made quietly here.
+        //
+        // Until then the loss is counted rather than hidden.
+        const uint8_t newest = (uint8_t)(f.msg.count - 1);
+        if (f.msg.count > 1) s_stats.historyCollapsed += (uint32_t)(f.msg.count - 1);
+
+        {
+            const EnvSample& s = f.msg.s[newest];
             const uint32_t ts = (base > s.dt_s) ? base - s.dt_s : base;
 
             EspNowMetric m[EN_MAX_SAMPLE_METRICS];

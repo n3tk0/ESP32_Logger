@@ -114,12 +114,18 @@ Two bounds on that, in opposite directions:
 
 * **At most once an hour.** A collector that is simply switched off would
   otherwise make the node scan every single minute, and a scan is 1.5–2 s of
-  radio — an order of magnitude more than a normal wake. The hourly ceiling
-  turns a dead collector from a battery emergency into a rounding error.
+  radio — an order of magnitude more than a normal wake. The ceiling turns a
+  dead collector from a battery emergency into a rounding error.
 * **Immediately on the first eligible failure.** The ceiling is a rate limit,
   not a schedule. A channel move at 14:03 is recovered at the next wake, not at
-  15:00, because the hour is measured from the last scan and not from a clock.
-  Losing an hour of readings to a router reboot would be the wrong trade.
+  15:00. Losing an hour of readings to a router reboot would be the wrong trade.
+
+The ceiling is counted in **wakes**, not in seconds off the clock, and that is
+not an implementation detail. The clock is the one quantity on this node that
+jumps: `settimeofday()` moves it from a few hundred to 1.75 billion the first
+time a collector answers, and a limit measured against it is either bypassed
+entirely or stuck for weeks depending on which side of that jump its two
+readings fell. A count of wakes cannot be wrong about elapsed time.
 
 The node stores **both the BSSID and the SSID** of the access point. The BSSID
 is exact; the SSID is the fallback, because a mesh or a repeater changes the
@@ -146,11 +152,12 @@ Node with no stored channel:
     for ch in 1..13:  broadcast DISCOVER{mac, nodeId, nonce, HMAC}, wait ~120 ms
 
 Collector, only while a pairing window is open:
-    verify the HMAC against the configured keys
-    add the peer with its LMK
-    reply, unicast and encrypted:  WELCOME{nodeId, channel, ssid, bssid, interval, epoch}
+    verify the HMAC
+    reply, BROADCAST and in the clear, signed, addressed by a target field:
+        WELCOME{nodeId, channel, ssid, bssid, interval, epoch, target, tag}
+    only then add the peer with its LMK — from here on everything is encrypted
 
-Node: store it all in NVS and sleep.
+Node: check the target is us, check the tag, store it in NVS, sleep.
 ```
 
 **WELCOME is broadcast and signed, not unicast and encrypted, and that is
@@ -213,7 +220,7 @@ Comparing either numerically would silence a node or mark every node offline.
 | `DataMsg`     | node → collector | 24 (1 sample) … 192 (15) | sequence, flags, node epoch, samples |
 | `AckMsg`      | collector → node | 14 | echoed sequence, channel, epoch, interval |
 | `DiscoverMsg` | node → broadcast | 22 | MAC, nonce, truncated HMAC |
-| `WelcomeMsg`  | collector → node | 51 | node id, channel, SSID, BSSID, interval |
+| `WelcomeMsg`  | collector → broadcast | 65 | node id, channel, SSID, BSSID, interval, target, tag |
 
 It is binary rather than JSON because ESP-NOW carries at most 250 bytes per
 frame and that is a MAC-layer limit, not a buffer. The JSON the ESP8266 node
@@ -224,9 +231,24 @@ fit at all.
 The saving is not the point. Fitting fifteen samples in one frame is the point:
 that is what lets a node that could not reach the collector keep its readings in
 RTC memory and send them as one burst when the link comes back, with `dt_s` on
-each sample giving it an honest timestamp. *(The buffering itself is not
-implemented yet; the format has room for it so that adding it later does not
-mean a protocol version bump.)*
+each sample giving it an honest timestamp. The node holds up to fourteen —
+one slot in the frame is always the live reading — and drops the **oldest**
+when that fills, because losing the start of an outage beats losing the end.
+
+**What the collector does with that burst is currently less than it should be,
+and this is the open question in the feature.** `RemoteIngest` holds one value
+per (node, metric) and overwrites, deliberately: a node posting faster than the
+collector ticks should overwrite rather than backlog. So a burst's older
+environmental readings are dropped at this end, and only the newest survives.
+
+The battery history is the exception and is genuinely preserved — every sample
+is folded into `BatteryHistory` by its own timestamp, and that is keyed by day
+rather than overwritten. The collector counts what it dropped
+(`EspNowIngestStats::historyCollapsed`) rather than hiding it.
+
+Making the rest survive means letting a remote reading keep its own timestamp
+instead of being stamped on arrival, which is a change to an invariant the
+HTTP node shares. It has not been made.
 
 Every field that can be missing has a reserved value meaning "not measured",
 mapped to NaN on the way out. A BMP280 has no humidity sensor, and reporting
@@ -305,8 +327,12 @@ the one thing in the implementation most likely to need revisiting on a board.**
 
 ### Modem sleep
 
-Forced off when this feature is compiled in — the sketch overrides the stored
-config value rather than trusting it. `WIFI_PS_MIN_MODEM` breaks ESP-NOW
+Forced off when this feature is compiled in, and asked at the point of use
+rather than applied to the config once. That distinction is not pedantic: the
+first version overrode the value inside the `platform_config.json` parser,
+which returns early when the file has no `sleep` object — so the commonest
+configuration of all, no sleep settings at all, kept the default of `true` and
+reached exactly the state the override existed to prevent. `WIFI_PS_MIN_MODEM` breaks ESP-NOW
 unicast, measured, while leaving broadcast working: pairing would succeed and
 then no reading would ever arrive, with nothing in any log to say why. A
 mains-powered collector indoors loses nothing by it.
