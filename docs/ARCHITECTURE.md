@@ -582,6 +582,28 @@ route, and whatever Basic Auth is compiled in globally.
 | GET | `/wifi_scan_start` | CSRF | Kick off an async Wi-Fi scan (side-effecting GET) |
 | GET | `/wifi_scan_result` | read | Poll async Wi-Fi scan results |
 
+**ESP-NOW battery nodes** (`FEATURE_ESPNOW_INGEST`)
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/espnow/status` | read | Nodes, battery, last seen, and the drop counters |
+| POST | `/api/espnow/pair` | CSRF | Open a pairing window (`seconds`, 30–600) |
+| POST | `/api/espnow/node` | CSRF | Rename a node (`label`) or change its `interval` |
+| POST | `/api/espnow/forget` | CSRF | Drop a node's radio peer and its slot |
+
+The counters in `/api/espnow/status` are not decoration. "No readings are
+arriving" has several very different causes — a mismatched key, a moved
+channel, an unprovisioned node, frames arriving faster than the tick drains
+them — and from the outside they look identical. `malformed`,
+`unknown_node`, `replayed`, `ring_full` and `discover_bad_sig` are what tell
+them apart.
+
+Two fields are deliberately `null` rather than zero. `rssi` is unavailable on
+Arduino core 2.x (IDF 4.4 hands the receive callback no signal information),
+and `days` is null whenever `batteryDaysLeft()` refuses to answer — too little
+history, or a slope inside the noise. A zero in either would read as a
+measurement.
+
 **Platform & settings**
 
 | Method | Route | Auth | Purpose |

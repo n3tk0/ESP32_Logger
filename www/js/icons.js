@@ -21,6 +21,22 @@
       '<rect width="7" height="5" x="3" y="16" rx="1"></rect>',
     "folder":
       '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path>',
+    // Lucide "radio" and "battery-warning", added for the ESP-NOW battery-node
+    // page. Same 24×24 grid and stroke conventions as every entry here, so
+    // they inherit the sheet's sizing and currentColor without special-casing.
+    "radio":
+      '<path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"></path>' +
+      '<path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"></path>' +
+      '<circle cx="12" cy="12" r="2"></circle>' +
+      '<path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"></path>' +
+      '<path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"></path>',
+    "battery":
+      '<rect width="16" height="10" x="2" y="7" rx="2" ry="2"></rect>' +
+      '<line x1="22" x2="22" y1="11" y2="13"></line>',
+    "trash":
+      '<path d="M3 6h18"></path>' +
+      '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>' +
+      '<path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>',
     "activity":
       '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path>',
     "gauge":

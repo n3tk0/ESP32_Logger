@@ -809,6 +809,7 @@ var LAZY_PAGES = {
   settings_modules:   1,
   settings_platform:  1, // aggregator: hardware + core logic + modules
   settings_netime:    1, // aggregator: network + time
+  settings_espnow:    1, // ESP-NOW battery nodes
   update:             1,
 };
 var _loadedPartials = {};   // page name → true once injected
@@ -966,6 +967,9 @@ function pageInit(page) {
       break;
     case "settings_modules":
       modulesInit();
+      break;
+    case "settings_espnow":
+      espnowInit();
       break;
     case "settings":
       break;
@@ -1270,6 +1274,7 @@ var PAGE_MSG_IDS = {
   settings_time: "time-msg",
   settings_datalog: "dl-msg",
   sensors:          "sl-msg",
+  settings_espnow:  "en-msg",
 };
 
 function settingsSave(ev, url, form, restart) {

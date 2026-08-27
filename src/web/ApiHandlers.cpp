@@ -19,6 +19,7 @@
 #include "../core/Globals.h"         // config, activeFS
 #include "../core/ModuleRegistry.h"  // Pass 5 phase 3: /api/modules
 #include "IngestHandler.h"           // POST /api/ingest (FEATURE_REMOTE_NODES)
+#include "../espnow/EspNowIngest.h"   // GET/POST /api/espnow/* (FEATURE_ESPNOW_INGEST)
 #include "../managers/ConfigManager.h" // saveConfig() after module update
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
@@ -332,6 +333,180 @@ static void handleApiSensors(AsyncWebServerRequest* req) {
 
     sendJsonResponse(req, doc);
 }
+
+#ifdef FEATURE_ESPNOW_INGEST
+// ---------------------------------------------------------------------------
+// GET /api/espnow/status — the battery nodes, and why one is not reporting
+// ---------------------------------------------------------------------------
+// The counters matter as much as the node list. "No readings are arriving" has
+// several very different causes — wrong key, wrong channel, node not
+// provisioned, frames arriving faster than the tick drains them — and they are
+// indistinguishable from the outside without these.
+static void handleEspnowStatus(AsyncWebServerRequest* req) {
+    JsonDocument doc;
+
+    doc["pairing"] = espnowPairingActive();
+    doc["offline"] = espnowOfflineCount();
+    doc["warn"]    = espnowAnyBatteryWarn();
+
+    EspNowNode nodes[ESPNOW_MAX_NODES];
+    const int n = espnowCopyNodes(nodes, ESPNOW_MAX_NODES);
+    const uint32_t nowMs = millis();
+
+    JsonArray arr = doc["nodes"].to<JsonArray>();
+    for (int i = 0; i < n; i++) {
+        const EspNowNode& e = nodes[i];
+        JsonObject o = arr.add<JsonObject>();
+        o["id"]        = e.id;
+        o["node_id"]   = e.nodeId;
+        o["interval"]  = e.intervalS;
+        o["frames"]    = e.framesRx;
+        o["dropped"]   = e.framesDropped;
+        o["offline"]   = espnowNodeOffline(e, nowMs);
+
+        char mac[18];
+        snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 e.mac[0], e.mac[1], e.mac[2], e.mac[3], e.mac[4], e.mac[5]);
+        o["mac"] = mac;
+
+        // Seconds, not a millis() stamp: the browser has no way to reconcile
+        // the device's uptime clock with its own, and an age is what the page
+        // actually displays.
+        o["age_s"] = e.everSeen ? (uint32_t)((nowMs - e.lastSeenMs) / 1000u) : 0;
+        o["seen"]  = e.everSeen;
+
+        // rssi is 0 on Arduino core 2.x — IDF 4.4 hands the receive callback
+        // no signal information at all. Sent as null rather than 0 so the page
+        // can show "—" instead of a plausible-looking -0 dBm.
+        if (e.rssi) o["rssi"] = e.rssi; else o["rssi"] = nullptr;
+
+        if (e.lastMv) {
+            o["mv"]      = e.lastMv;
+            o["percent"] = batteryPercent(e.lastMv);
+            const int16_t days = batteryDaysLeft(e.batt, e.lastMv);
+            // -1 means the model refuses to answer — too little history, or a
+            // slope inside the noise. Null, so the page prints a dash rather
+            // than "-1 days".
+            if (days >= 0) o["days"] = days; else o["days"] = nullptr;
+            o["warn"] = espnowNodeBatteryWarn(e);
+        } else {
+            o["mv"] = nullptr; o["percent"] = nullptr;
+            o["days"] = nullptr; o["warn"] = false;
+        }
+    }
+
+    const EspNowIngestStats& s = espnowStats();
+    JsonObject st = doc["stats"].to<JsonObject>();
+    st["frames"]            = s.framesRx;
+    st["malformed"]         = s.malformed;
+    st["unknown_node"]      = s.unknownNode;
+    st["replayed"]          = s.replayed;
+    st["ring_full"]         = s.ringFull;
+    st["history_collapsed"] = s.historyCollapsed;
+    st["acks"]              = s.acksSent;
+    st["discover_seen"]     = s.discoverSeen;
+    st["discover_bad_sig"]  = s.discoverBadSig;
+    st["paired"]            = s.paired;
+
+    sendJsonResponse(req, doc);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/espnow/pair — open the pairing window
+// ---------------------------------------------------------------------------
+// The thing this whole page exists for. Until it was written, the only way to
+// adopt a second node was to power-cycle the collector: one with no nodes
+// listens for two minutes at boot, and that was the entire provisioning
+// interface.
+static void handleEspnowPair(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
+
+    uint32_t seconds = ESPNOW_BOOT_PAIRING_S;
+    if (req->hasParam("seconds", true))
+        seconds = (uint32_t)req->getParam("seconds", true)->value().toInt();
+    // Bounded at both ends. Zero would close the window the click opened, and
+    // a window left open for an hour is an hour in which any node holding the
+    // shared key can join.
+    if (seconds < 30)  seconds = 30;
+    if (seconds > 600) seconds = 600;
+
+    espnowBeginPairing(seconds);
+    JsonDocument doc;
+    doc["ok"] = true;
+    doc["seconds"] = seconds;
+    sendJsonResponse(req, doc);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/espnow/node — rename a node, or change its wake interval
+// ---------------------------------------------------------------------------
+// The label becomes SensorReading::sensorId, so renaming a node renames the
+// series it feeds. Worth knowing before doing it: history already stored under
+// the old name stays under the old name.
+static void handleEspnowNode(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;
+
+    if (!req->hasParam("node_id", true)) {
+        req->send(400, "application/json", "{\"ok\":false,\"error\":\"missing node_id\"}");
+        return;
+    }
+    const uint8_t id = (uint8_t)req->getParam("node_id", true)->value().toInt();
+
+    EspNowNode nodes[ESPNOW_MAX_NODES];
+    const int n = espnowCopyNodes(nodes, ESPNOW_MAX_NODES);
+    const EspNowNode* found = nullptr;
+    for (int i = 0; i < n; i++) if (nodes[i].nodeId == id) { found = &nodes[i]; break; }
+    if (!found) {
+        req->send(404, "application/json", "{\"ok\":false,\"error\":\"no such node\"}");
+        return;
+    }
+
+    char label[sizeof(found->id)];
+    strncpy(label, found->id, sizeof(label) - 1);
+    label[sizeof(label) - 1] = '\0';
+    if (req->hasParam("label", true)) {
+        const String v = req->getParam("label", true)->value();
+        if (v.length() > 0) {
+            strncpy(label, v.c_str(), sizeof(label) - 1);
+            label[sizeof(label) - 1] = '\0';
+        }
+    }
+
+    uint16_t interval = found->intervalS;
+    if (req->hasParam("interval", true)) {
+        const long v = req->getParam("interval", true)->value().toInt();
+        // 10 s is already an aggressive duty cycle for a cell; 18 hours is the
+        // widest the 16-bit field on the wire can carry.
+        if (v >= 10 && v <= 65535) interval = (uint16_t)v;
+    }
+
+    // add() updates an existing node rather than consuming a slot, so this is
+    // an edit and not a second registration.
+    if (!espnowAddNode(found->mac, id, label, interval)) {
+        req->send(500, "application/json", "{\"ok\":false,\"error\":\"update failed\"}");
+        return;
+    }
+    req->send(200, "application/json", "{\"ok\":true}");
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/espnow/forget — drop a node's radio peer and its slot
+// ---------------------------------------------------------------------------
+static void handleEspnowForget(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;
+
+    if (!req->hasParam("node_id", true)) {
+        req->send(400, "application/json", "{\"ok\":false,\"error\":\"missing node_id\"}");
+        return;
+    }
+    const uint8_t id = (uint8_t)req->getParam("node_id", true)->value().toInt();
+    if (!espnowRemoveNode(id)) {
+        req->send(404, "application/json", "{\"ok\":false,\"error\":\"no such node\"}");
+        return;
+    }
+    req->send(200, "application/json", "{\"ok\":true}");
+}
+#endif  // FEATURE_ESPNOW_INGEST
 
 // ---------------------------------------------------------------------------
 // POST /api/config/platform — reload platform_config.json
@@ -1226,6 +1401,12 @@ void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/diag",              HTTP_GET,  handleApiDiag);
     server.on("/api/backup",            HTTP_GET,  handleApiBackup);
     server.on("/api/config/platform",   HTTP_POST, handleConfigPlatform);
+#ifdef FEATURE_ESPNOW_INGEST
+    server.on("/api/espnow/status",     HTTP_GET,  handleEspnowStatus);
+    server.on("/api/espnow/pair",       HTTP_POST, handleEspnowPair);
+    server.on("/api/espnow/node",       HTTP_POST, handleEspnowNode);
+    server.on("/api/espnow/forget",     HTTP_POST, handleEspnowForget);
+#endif
     server.on("/api/mqtt/ha_discovery", HTTP_POST, handleMqttHaDiscovery);
     server.on("/api/ota/status",        HTTP_GET,  handleOtaStatus);
     server.on("/api/ota/confirm",       HTTP_POST, handleOtaConfirm);

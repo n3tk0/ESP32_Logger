@@ -81,15 +81,9 @@
 static_assert(sizeof(ESPNOW_LMK) == 17, "ESPNOW_LMK must be exactly 16 characters");
 static_assert(sizeof(ESPNOW_PMK) == 17, "ESPNOW_PMK must be exactly 16 characters");
 
-/// How long the collector listens for a node when it has none provisioned.
-///
-/// A collector that knows no nodes spends its first two minutes after boot
-/// willing to adopt one. That is the whole provisioning interface for now:
-/// power cycle the collector, then power the node. A button in the web
-/// interface is the obvious improvement and is not built yet.
-#ifndef ESPNOW_BOOT_PAIRING_S
-#  define ESPNOW_BOOT_PAIRING_S 120
-#endif
+// ESPNOW_BOOT_PAIRING_S now lives in EspNowIngest.h: the web interface's
+// pairing button defaults to the same duration, and two copies of a number
+// two files apart is one copy too many.
 
 static const char* NODES_FILE = "/espnow_nodes.bin";
 

@@ -23,6 +23,8 @@ on:
       - 'tools/check_metric_names.py'
       - 'scripts/gen_failsafe.py'
       - 'src/web/failsafe.html'
+      - 'www/**'
+      - 'tests/web/**'
       - 'tools/pio_envs.py'
       - 'tools/check_pio_envs.py'
       - 'tools/features.py'
@@ -42,6 +44,8 @@ on:
       - 'tools/check_metric_names.py'
       - 'scripts/gen_failsafe.py'
       - 'src/web/failsafe.html'
+      - 'www/**'
+      - 'tests/web/**'
       - 'tools/pio_envs.py'
       - 'tools/check_pio_envs.py'
       - 'tools/features.py'
@@ -150,6 +154,58 @@ jobs:
         with:
           name: cppcheck-report
           path: cppcheck.log
+
+  browser:
+    name: browser (settings pages)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('tests/web/*.py') }}
+
+      - name: Install Playwright + Chromium
+        run: |
+          pip install --quiet playwright
+          python3 -m playwright install --with-deps chromium
+
+      - name: Drive the ESP-NOW settings page
+        # The pages are not compiled, so nothing else in this repository
+        # notices a page that fetches a field the firmware does not send, uses
+        # an icon that is not in the sheet, or wires a button to a handler
+        # core.js never registered. Each of those opens a window that looks
+        # fine and does nothing.
+        run: |
+          python3 tests/web/mock_device.py 8765 &
+          sleep 2
+          MOCK_PORT=8765 python3 tests/web/drive_espnow_page.py
+
+      - name: Verify that check actually fails on a dead button
+        # A browser test that cannot fail is worth less than none, because a
+        # green tick on a page nobody opened is exactly the false comfort it
+        # was written to remove. Unregister the pairing handler and the click
+        # must stop doing anything.
+        run: |
+          set -e
+          cp www/js/espnow.js www/js/espnow.js.orig
+          sed -i 's/  espnowPair: espnowPair,//' www/js/espnow.js
+          python3 tests/web/mock_device.py 8766 &
+          sleep 2
+          if MOCK_PORT=8766 python3 tests/web/drive_espnow_page.py > /dev/null 2>&1; then
+            mv www/js/espnow.js.orig www/js/espnow.js
+            echo "::error::the browser test passed with the pairing button unwired"
+            exit 1
+          fi
+          mv www/js/espnow.js.orig www/js/espnow.js
+          echo "browser test fires on an unwired button"
 
   api-docs:
     name: api-docs (route coverage)

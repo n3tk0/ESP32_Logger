@@ -68,6 +68,16 @@ bool espnowIngestBegin();
 /// task where neither belongs.
 void espnowIngestTick();
 
+/// How long the collector listens for a node when it has none provisioned,
+/// and the default length of a window opened from the web interface.
+///
+/// In the header rather than the implementation because there are now two
+/// callers that must agree on it: the boot-time window, and POST
+/// /api/espnow/pair when it is asked to open one without a duration.
+#ifndef ESPNOW_BOOT_PAIRING_S
+#  define ESPNOW_BOOT_PAIRING_S 120
+#endif
+
 /// Open a pairing window for `seconds`. While it is open, a DISCOVER frame
 /// carrying a valid signature gets a node slot and a WELCOME reply. Outside
 /// it, DISCOVER is ignored — which is most of what stops a passing stranger's
