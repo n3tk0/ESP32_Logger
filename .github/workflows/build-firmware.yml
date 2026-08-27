@@ -152,6 +152,7 @@ jobs:
           p = 'src/setup.h'
           s = open(p).read()
           names = ['FEATURE_REMOTE_NODES',
+                   'FEATURE_ESPNOW_INGEST',
                    'FEATURE_KINDLE_DASHBOARD',
                    'MODULE_FORECAST_ENABLED',
                    'MODULE_HEATER_ENABLED']

@@ -8,11 +8,15 @@ of this. It stays awake, posts JSON to `POST /api/ingest`, and is not a battery
 design. This is the battery design, and it is a separate device, a separate
 firmware and a separate ingest path.
 
-**Status.** The wire format (`src/espnow/EspNowProto.h`) and the battery model
-(`src/power/BatteryModel.h`) are implemented and covered by host tests. The
-radio code, the node firmware and the dashboard badge are not written yet. This
-document describes the whole design, so the parts that do not exist are marked
-where they appear.
+**Status.** The collector side is implemented: the wire format
+(`src/espnow/EspNowProto.h`), the battery model (`src/power/BatteryModel.h`),
+the node bookkeeping (`src/espnow/NodeTable.h`) and the radio itself
+(`src/espnow/EspNowIngest.cpp`), behind `FEATURE_ESPNOW_INGEST`. The node
+firmware and the dashboard warning badge are not written yet.
+
+Nothing has been run on hardware. Everything below that describes behaviour on
+a board is a design statement, not an observation, and the two places most
+likely to need revising once one exists are marked where they appear.
 
 ---
 
@@ -111,9 +115,19 @@ BSSID under you while the SSID stays put.
 
 ## 3. Provisioning
 
-The shared key (LMK, 16 bytes) is set on both sides when the node is flashed and
-when it is added in the collector's web interface. That is what removes the
-chicken-and-egg problem of exchanging a key over a link that needs the key.
+The shared key (LMK, 16 bytes) is set on both sides at build time, which is what
+removes the chicken-and-egg problem of exchanging a key over a link that needs
+the key:
+
+```
+-DFEATURE_ESPNOW_INGEST -DESPNOW_LMK='"16-byte-secret!!"'
+```
+
+**One key for every node, not one per node.** A per-node key would be better —
+one compromised node would then not be every node — but it needs somewhere to
+store eight of them and a UI to enter them, and this feature has neither yet.
+For one to three nodes on a home network that is the right trade; it is written
+here so it is a decision rather than an oversight.
 
 ```
 Node with no stored channel:
@@ -132,14 +146,34 @@ instead — the first 8 bytes of HMAC-SHA256 over the frame. That proves the
 sender holds the key, which is what stops a stranger's node from being adopted
 by being carried past the house during a pairing window. It does not make the
 frame private: it is readable in the clear and leaks a MAC address. The pairing
-window being human-initiated and two minutes long is the rest of the defence.
+window being short and deliberately opened is the rest of the defence.
+
+**How the window is opened today: by power-cycling the collector.** A collector
+that has no nodes provisioned listens for two minutes after it comes up
+(`ESPNOW_BOOT_PAIRING_S`), and that is the entire provisioning interface for
+now. `espnowBeginPairing()` exists for a button in the web interface to call;
+the button is not built. Once a node is paired the window never opens again on
+its own, so a second node needs that button — or a collector with its node file
+removed.
+
+The node table is persisted to `/espnow_nodes.bin` on LittleFS: written whole
+on a provisioning change and once a day, never per frame. The daily write is
+what keeps the battery history across a reboot; without it every power cut
+would cost five days of history before `battery_days` could be answered again.
 
 ## 4. The wire format
 
 Defined once, in `src/espnow/EspNowProto.h`, and compiled by both sides — a
 change there is a change to both or it does not build. Layout is asserted at
 compile time and re-checked on the host by
-[`tests/host/test_espnow_proto.cpp`](../tests/host/test_espnow_proto.cpp).
+[`tests/host/test_espnow_proto.cpp`](../tests/host/test_espnow_proto.cpp); the
+decisions made about an arriving frame live in `src/espnow/NodeTable.h` and are
+tested by [`tests/host/test_espnow_nodetable.cpp`](../tests/host/test_espnow_nodetable.cpp).
+
+Two wraps are handled there that are easy to miss and fail exactly once, months
+in, on a device nobody is watching: the sequence number wraps after 65,536
+frames — about six weeks at one a minute — and `millis()` wraps after 49 days.
+Comparing either numerically would silence a node or mark every node offline.
 
 | message | direction | bytes | carries |
 |---|---|---|---|
@@ -209,14 +243,60 @@ history was lost still has to warn before it dies.
 
 ## 6. What this costs the collector
 
-`FEATURE_ESPNOW_INGEST` turns modem sleep off at compile time. That is not
-tidiness — `WIFI_PS_MIN_MODEM` breaks ESP-NOW unicast, measured, while leaving
-broadcast working, which is the worst possible failure mode because pairing
-would succeed and then nothing would arrive. The collector is mains powered
-indoors and has nothing to gain from modem sleep anyway.
+### Where a reading goes
 
-ESP-NOW itself measured 8,128 bytes of firmware when linked in, because the WiFi
-stack it sits on is already there.
+Straight into `RemoteIngest`, the same mailbox `POST /api/ingest` writes to.
+`RemoteNodeSensor` drains it on the ordinary sensor tick, so an ESP-NOW reading
+gets the same calibration, the same outlier filters, the same ring buffer, the
+same exporters and the same dashboard as a wired BME280. Nothing downstream
+knows one arrived over a radio.
+
+That reuse is why `FEATURE_ESPNOW_INGEST` implies `FEATURE_REMOTE_NODES`: the
+mailbox and the plugin that drains it are where the readings live. It also
+brings `POST /api/ingest` along, which is refused without a token.
+
+### Which task does what
+
+The receive callback runs on the WiFi task, where ESP-IDF's own documentation
+says lengthy work is a mistake. So it validates the frame, sends the ACK, parks
+the rest, and returns. Sequence numbers, the HMAC, the battery history, the
+filesystem and the handoff to `RemoteIngest` all happen in `espnowIngestTick()`
+from `loop()`.
+
+**The ACK is the deliberate exception** — it is sent from the callback, because
+the node is holding its radio in receive waiting for it and every millisecond
+of that wait is battery. If that turns out to misbehave from inside the callback
+on real hardware, the fix is a small high-priority task fed by the same ring:
+the node tolerates tens of milliseconds, so a task hop is affordable. **This is
+the one thing in the implementation most likely to need revisiting on a board.**
+
+### Modem sleep
+
+Forced off when this feature is compiled in — the sketch overrides the stored
+config value rather than trusting it. `WIFI_PS_MIN_MODEM` breaks ESP-NOW
+unicast, measured, while leaving broadcast working: pairing would succeed and
+then no reading would ever arrive, with nothing in any log to say why. A
+mains-powered collector indoors loses nothing by it.
+
+### Flash
+
+Measured on `xiao_esp32c3`, `firmware.bin`, against `app0` = 1,507,328 bytes:
+
+| build | bytes | delta |
+|---|---|---|
+| baseline | 1,333,408 | — |
+| `+FEATURE_REMOTE_NODES` | 1,339,984 | +6,576 |
+| `+FEATURE_ESPNOW_INGEST` (implies the above) | 1,353,216 | **+19,808 total** |
+| every optional feature on | 1,410,432 | 93.6 % of `app0` |
+
+So ESP-NOW itself, its pairing and the ingest path add **13,232 bytes** on top
+of the remote-node feature it reuses. About 8 KB of that is the ESP-NOW stack —
+cheap because the WiFi stack underneath it is already linked — and the rest is
+this code plus the mbedTLS HMAC it calls.
+
+The everything-on build leaves 96,896 bytes of headroom. That is comfortable
+but no longer generous, and it is the number to watch when the next feature
+lands.
 
 ## 7. Expected life
 
@@ -235,3 +315,14 @@ a month over fourteen months is roughly a quarter of the capacity. Expect
 
 Every figure above is a calculation, not a measurement. Nothing here has been
 run on hardware yet.
+
+## 8. What is left
+
+- The node firmware (`node_espnow/`): the sender, the divider reading, the
+  channel rescan, the RTC-memory buffering the wire format has room for.
+- The warning badge on the Kindle dashboard and in the web interface.
+- A pairing button, so a second node does not need the collector power-cycled.
+- Per-node keys instead of one shared key.
+- Signal strength: `EspNowNode::rssi` stays 0 on Arduino core 2.x, because IDF
+  4.4 hands the receive callback no signal information. The core-3 branch that
+  reads it is written and compiled only by the probe environment.

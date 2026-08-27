@@ -71,6 +71,9 @@
 #ifdef FEATURE_KINDLE_DASHBOARD
 #  include "src/web/KindleDashboard.h"      // GET /kindle (e-ink dashboard)
 #endif
+#ifdef FEATURE_ESPNOW_INGEST
+#  include "src/espnow/EspNowIngest.h"      // battery nodes over ESP-NOW
+#endif
 #include "src/managers/ConfigManager.h"
 #include "src/managers/HardwareManager.h"
 #include "src/managers/StorageManager.h"
@@ -240,6 +243,19 @@ static void _loadSleepConfig() {
         g_contIdleMs     = cont["idle_timeout_ms"] | (uint32_t)300000;
         g_contIdleCpuMhz = (uint8_t)(cont["idle_cpu_mhz"] | 80);
         g_contModemSleep = cont["modem_sleep"]      | true;
+#ifdef FEATURE_ESPNOW_INGEST
+        // Not a preference. WIFI_PS_MIN_MODEM breaks ESP-NOW unicast —
+        // measured — while leaving broadcast working, which is the worst
+        // possible failure mode: pairing succeeds and then no reading ever
+        // arrives, with nothing in any log to say why. Overriding the stored
+        // value here means a device with an ESP-NOW build cannot be
+        // configured into that state, whatever platform_config.json says.
+        // A mains-powered collector indoors loses nothing by it.
+        if (g_contModemSleep) {
+            Serial.println("[ESPNOW] modem sleep forced off: it breaks ESP-NOW unicast");
+            g_contModemSleep = false;
+        }
+#endif
     }
 
     JsonObjectConst hyb = sl["hybrid"];
@@ -1007,6 +1023,29 @@ void loop() {
             s_lastNtpRetry = 0;
         }
     }
+
+    // ── ESP-NOW battery nodes ────────────────────────────────────────────────
+    // Started lazily rather than from setup(), for two reasons. ESP-NOW rides
+    // the station interface and inherits its channel, so bringing it up before
+    // the association has settled means adding peers to a radio that has not
+    // chosen a channel yet. And every boot path — web mode, continuous, hybrid
+    // — reaches loop(), so one site here covers what would otherwise be four.
+    //
+    // The tick drains what the receive callback parked. It must run on this
+    // task and not that one: it walks the ingest mailbox and may write flash,
+    // and the WiFi task is no place for either.
+#ifdef FEATURE_ESPNOW_INGEST
+    {
+        static bool     s_espnowUp      = false;
+        static uint32_t s_espnowRetryAt = 0;
+        if (!s_espnowUp && WiFi.status() == WL_CONNECTED &&
+            (int32_t)(millis() - s_espnowRetryAt) >= 0) {
+            s_espnowUp = espnowIngestBegin();
+            if (!s_espnowUp) s_espnowRetryAt = millis() + 5000;
+        }
+        if (s_espnowUp) espnowIngestTick();
+    }
+#endif
 
     // ── SSE live heartbeat (1 Hz) ─────────────────────────────────────────────
     // No-op when no EventSource clients are subscribed.
