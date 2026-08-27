@@ -83,7 +83,7 @@
 
 // ── Platform v5.0 — multi-sensor modules (compiled in only when needed) ──────
 #include "src/sensors/SensorManager.h"
-// Existing sensors (upgraded) — each guarded by arduino_build_flags.h toggles
+// Existing sensors (upgraded) — each guarded by setup.h toggles
 #ifdef SENSOR_BME280_ENABLED
 #  include "src/sensors/plugins/BME280Sensor.h"
 #endif
@@ -378,7 +378,7 @@ static void _checkPinConflicts() {
 static void _initPlatform() {
     DBGLN("=== Platform v5.0: initialising sensors ===");
 
-    // Register all plugins (guarded by arduino_build_flags.h toggles)
+    // Register all plugins (guarded by setup.h toggles)
 #ifdef SENSOR_BME280_ENABLED
     sensorManager.registerPlugin("bme280",  []()->ISensor*{ return new BME280Sensor(); });
     sensorManager.registerPlugin("bmp280",  []()->ISensor*{ return new BME280Sensor(); });
@@ -452,7 +452,7 @@ static void _initPlatform() {
     // Detect sensor pin conflicts with hardware flow sensor pin (M9)
     _checkPinConflicts();
 
-    // Register exporters (guarded by arduino_build_flags.h toggles)
+    // Register exporters (guarded by setup.h toggles)
 #ifdef EXPORT_MQTT_ENABLED
     g_mqttExporter = new MqttExporter();
     exportManager.addExporter(g_mqttExporter);
