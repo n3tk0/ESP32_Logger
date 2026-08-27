@@ -7,10 +7,10 @@
 #include <esp_wifi.h>
 #include <LittleFS.h>
 #include <WiFi.h>
-#include <mbedtls/md.h>
 #include <string.h>
 #include <time.h>
 
+#include "EspNowAuth.h"
 #include "../sensors/RemoteIngest.h"
 
 // ============================================================================
@@ -154,32 +154,6 @@ static inline uint8_t currentChannel() {
     wifi_second_chan_t sec;
     if (esp_wifi_get_channel(&ch, &sec) != ESP_OK) return 0;
     return ch;
-}
-
-/// Truncated HMAC-SHA256 over `data`, into `out8`.
-///
-/// The tag on a DISCOVER frame proves the sender holds the shared key. Eight
-/// bytes rather than thirty-two because the frame is 22 bytes in total and a
-/// full tag would treble it for nothing: 64 bits of forgery resistance is far
-/// more than an attacker gets to attempt against a two-minute window.
-static bool hmacTrunc(const uint8_t* data, size_t len, uint8_t out8[8]) {
-    const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (!info) return false;
-
-    uint8_t full[32];
-    if (mbedtls_md_hmac(info, (const uint8_t*)ESPNOW_LMK, 16, data, len, full) != 0)
-        return false;
-    memcpy(out8, full, 8);
-    return true;
-}
-
-/// Constant-time compare. The window is short and the tag is not a password,
-/// but a byte-at-a-time memcmp on a value an attacker can iterate is free to
-/// get right and awkward to explain otherwise.
-static bool tagEquals(const uint8_t* a, const uint8_t* b) {
-    uint8_t diff = 0;
-    for (int i = 0; i < 8; i++) diff |= (uint8_t)(a[i] ^ b[i]);
-    return diff == 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -410,9 +384,14 @@ static bool servicePendingDiscover() {
 
     if (!espnowPairingActive()) return false;
 
-    uint8_t want[8];
-    if (!hmacTrunc((const uint8_t*)&d, EN_DISCOVER_SIGNED_LEN, want)) return false;
-    if (!tagEquals(d.tag, want)) { s_stats.discoverBadSig++; return false; }
+    // Verified with the shared helper, against exactly the region the node
+    // signed with the same one. Two implementations of this is how a node
+    // pairs with nothing while both sides look correct in isolation.
+    if (!espnowVerifyTag((const uint8_t*)ESPNOW_LMK, (const uint8_t*)&d,
+                         EN_DISCOVER_SIGNED_LEN, d.tag)) {
+        s_stats.discoverBadSig++;
+        return false;
+    }
 
     uint8_t assigned = 0;
     taskENTER_CRITICAL(&s_nodeMux);
@@ -431,13 +410,8 @@ static bool servicePendingDiscover() {
         Serial.println("[ESPNOW] pairing refused: node table is full");
         return false;
     }
-    if (!addPeer(mac)) return false;
 
     WelcomeMsg w{};
-    w.magic     = ESPNOW_MAGIC;
-    w.ver       = ESPNOW_PROTO_VER;
-    w.type      = EN_MSG_WELCOME;
-    w.nodeId    = assigned;
     w.intervalS = ESPNOW_DEFAULT_INTERVAL_S;
     w.epoch     = nowEpoch();
     w.channel   = currentChannel();
@@ -448,7 +422,22 @@ static bool servicePendingDiscover() {
     if (bssid) memcpy(w.bssid, bssid, 6);
     strncpy(w.ssid, WiFi.SSID().c_str(), sizeof(w.ssid) - 1);
 
-    esp_now_send(mac, (const uint8_t*)&w, sizeof(w));
+    if (!espnowSignWelcome(w, (const uint8_t*)ESPNOW_LMK, assigned, mac))
+        return false;
+
+    // BROADCAST, AND BEFORE THE PEER IS ADDED. Both matter. The node cannot
+    // receive an encrypted frame from a collector it has not yet added as a
+    // peer, and it cannot add one until this message tells it the collector's
+    // MAC — there is no ordering that resolves that, so the reply goes out in
+    // the clear, signed, addressed by the target field inside it.
+    //
+    // Adding the encrypted peer afterwards is what makes every subsequent
+    // frame encrypted: once the peer exists with encrypt=true, sends to it
+    // are, and this broadcast would not have been.
+    static const uint8_t BCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    esp_now_send(BCAST, (const uint8_t*)&w, sizeof(w));
+
+    if (!addPeer(mac)) return false;
     s_stats.paired++;
     s_dirty = true;
     Serial.printf("[ESPNOW] paired node %u on channel %u\n", assigned, w.channel);

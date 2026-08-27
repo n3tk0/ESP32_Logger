@@ -8,11 +8,14 @@ of this. It stays awake, posts JSON to `POST /api/ingest`, and is not a battery
 design. This is the battery design, and it is a separate device, a separate
 firmware and a separate ingest path.
 
-**Status.** The collector side is implemented: the wire format
-(`src/espnow/EspNowProto.h`), the battery model (`src/power/BatteryModel.h`),
-the node bookkeeping (`src/espnow/NodeTable.h`) and the radio itself
-(`src/espnow/EspNowIngest.cpp`), behind `FEATURE_ESPNOW_INGEST`. The node
-firmware and the dashboard warning badge are not written yet.
+**Status.** Both ends are implemented. The collector is behind
+`FEATURE_ESPNOW_INGEST`: the wire format (`src/espnow/EspNowProto.h`), the
+signature (`src/espnow/EspNowAuth.h`), the battery model
+(`src/power/BatteryModel.h`), the node bookkeeping (`src/espnow/NodeTable.h`)
+and the radio (`src/espnow/EspNowIngest.cpp`). The node firmware is
+[`node_espnow/`](../node_espnow/README.md), a separate PlatformIO project that
+compiles three of those headers so the two cannot drift apart. The dashboard
+warning badge is not written yet.
 
 Nothing has been run on hardware. Everything below that describes behaviour on
 a board is a design statement, not an observation, and the two places most
@@ -73,12 +76,21 @@ collector's web interface, without walking to a node that may be behind a wall
 or on a roof.
 
 **Liveness.** This is the part that heals the channel. The radio's own send
-callback already reports whether the frame was acknowledged at the MAC layer,
-which catches a wrong channel. The application-level ACK catches strictly more:
-a collector that was reflashed and lost its peer table answers at the MAC layer
-but has nothing to say, and only the missing `AckMsg` reveals it. That case is
-handled by `EN_ACK_REDISCOVER`, which sends the node back through provisioning
-rather than leaving it transmitting into a collector that will not decode it.
+callback reports whether the frame was acknowledged at the MAC layer, which
+catches a wrong channel; the application-level ACK catches strictly more, and
+its absence is what the node acts on.
+
+A correction to an earlier version of this document, because it matters for
+what the node has to do on its own. A collector that was reflashed and lost its
+peer table **cannot tell the node so.** ESP-NOW decrypts an incoming frame only
+from a peer it already holds the key for, so the node's reports are dropped by
+the radio before any code on the collector runs. `EN_ACK_REDISCOVER` exists and
+is correct, but it is reachable only in the narrow case where the peer entry
+survived and the node record did not.
+
+Recovery from a reflashed collector is therefore the node's, by the same route
+as everything else: enough unanswered wakes, and it runs the pairing sweep
+again.
 
 ### What the window costs
 
@@ -140,6 +152,27 @@ Collector, only while a pairing window is open:
 
 Node: store it all in NVS and sleep.
 ```
+
+**WELCOME is broadcast and signed, not unicast and encrypted, and that is
+forced.** ESP-NOW decrypts an incoming frame only from a peer already added
+with the key — so for the node to receive an encrypted WELCOME it would have to
+have added the collector as a peer already, which means knowing the collector's
+MAC address, which is what the WELCOME is for. No ordering resolves that.
+
+So the reply goes out in the clear to the broadcast address, carries the MAC it
+is meant for, and is authenticated exactly as DISCOVER is. A node ignores one
+addressed to somebody else, and one whose tag does not verify — and the target
+field is inside the signed region, so a valid WELCOME cannot be retargeted at a
+different node by anyone in range.
+
+What that discloses is an SSID and a BSSID, both of which the access point
+broadcasts continuously anyway, plus a node number and a wake interval.
+
+Both signatures are produced and checked by `src/espnow/EspNowAuth.h`, which
+both firmwares compile. A signature is the kind of thing two implementations
+get subtly different — the covered region, the truncation length — and the
+failure mode is a node that pairs with nothing while each side looks correct on
+its own.
 
 `DISCOVER` is broadcast, and broadcast cannot be encrypted, so it is signed
 instead — the first 8 bytes of HMAC-SHA256 over the frame. That proves the
@@ -318,8 +351,6 @@ run on hardware yet.
 
 ## 8. What is left
 
-- The node firmware (`node_espnow/`): the sender, the divider reading, the
-  channel rescan, the RTC-memory buffering the wire format has room for.
 - The warning badge on the Kindle dashboard and in the web interface.
 - A pairing button, so a second node does not need the collector power-cycled.
 - Per-node keys instead of one shared key.

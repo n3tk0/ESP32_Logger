@@ -43,6 +43,7 @@ finds.
 |---|---|
 | [../node/README.md](../node/README.md) | The ESP8266 sensor node that pushes readings into `POST /api/ingest` |
 | [ESPNOW_NODE.md](ESPNOW_NODE.md) | The battery node over ESP-NOW: wire format, why the channel healing lives on the node, and what the cell is expected to last |
+| [../node_espnow/README.md](../node_espnow/README.md) | Building and wiring the ESP-NOW battery node: the divider, pairing, and what it does when things go wrong |
 | [../schematics/README.md](../schematics/README.md) | Wiring diagrams |
 
 ## Tests

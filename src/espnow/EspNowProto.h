@@ -32,11 +32,16 @@
 //
 // AUTHENTICITY
 // ------------
-// DATA and ACK travel between peers added with a per-node LMK, so the radio
+// DATA and ACK travel between peers added with the shared LMK, so the radio
 // encrypts and authenticates them (CCMP) and nothing here re-does that work.
-// DISCOVER is the exception: it is broadcast, and broadcast cannot be
-// encrypted, so it carries a truncated HMAC over its own bytes. See the
-// comment on DiscoverMsg for what that does and does not buy.
+//
+// The two handshake messages cannot use that, and the reason is a bootstrap
+// nobody escapes: ESP-NOW decrypts an incoming frame only from a peer already
+// added with the key, so before the two ends know each other's MAC addresses
+// neither can receive anything encrypted from the other. DISCOVER and WELCOME
+// are therefore both broadcast, both in the clear, and both carry a truncated
+// HMAC over their own bytes instead. See the comments on each for what that
+// does and does not buy.
 //
 // A NOTE ON REPLAY
 // ----------------
@@ -77,7 +82,7 @@ enum EspNowMsgType : uint8_t {
     EN_MSG_DATA     = 1,   ///< node → collector, encrypted, unicast
     EN_MSG_ACK      = 2,   ///< collector → node, encrypted, unicast
     EN_MSG_DISCOVER = 3,   ///< node → broadcast, plaintext + HMAC
-    EN_MSG_WELCOME  = 4,   ///< collector → node, encrypted, unicast
+    EN_MSG_WELCOME  = 4,   ///< collector → broadcast, plaintext + HMAC
 };
 
 // ---------------------------------------------------------------------------
@@ -141,8 +146,17 @@ static inline int espnowDataLen(uint8_t count) {
 
 enum EspNowAckFlags : uint8_t {
     /// The collector does not recognise this node and wants it to re-run
-    /// discovery. Set when its peer table was lost to a reflash or a factory
-    /// reset while the node still holds a valid-looking configuration.
+    /// discovery.
+    ///
+    /// NARROWER THAN IT LOOKS, and worth knowing why before relying on it. A
+    /// collector that lost its peer table cannot decrypt this node's DATA at
+    /// all — the radio drops the frame before any callback runs — so it never
+    /// gets the chance to answer. This flag is reachable only when the peer
+    /// entry survived but the node record did not, which is a narrow case.
+    ///
+    /// Recovery from a reflashed collector is the node's job instead: enough
+    /// unanswered wakes and it runs the pairing sweep again. See
+    /// docs/ESPNOW_NODE.md.
     EN_ACK_REDISCOVER = 1 << 0,
 };
 
@@ -199,7 +213,23 @@ struct __attribute__((packed)) DiscoverMsg {
 /// Offset and length of the region DiscoverMsg::tag authenticates.
 static const size_t EN_DISCOVER_SIGNED_LEN = 14;
 
-/// collector → node, unicast and encrypted, in answer to DISCOVER.
+/// collector → node, in answer to DISCOVER.
+///
+/// BROADCAST AND SIGNED, NOT UNICAST AND ENCRYPTED, AND THAT IS FORCED.
+/// ESP-NOW decrypts an incoming frame only from a peer already added with the
+/// key — so for the node to receive an encrypted WELCOME it would have to have
+/// added the collector as a peer already, which means knowing the collector's
+/// MAC address, which is what the WELCOME is for. There is no ordering that
+/// resolves that.
+///
+/// So the reply goes out unencrypted to the broadcast address, carries the MAC
+/// it is meant for, and is authenticated the same way DISCOVER is: an HMAC
+/// over everything before the tag. A node ignores a WELCOME addressed to
+/// somebody else, and one whose tag does not verify.
+///
+/// What that discloses to anyone in range is an SSID and a BSSID — both of
+/// which the access point itself broadcasts continuously — plus a node number
+/// and a wake interval. Nothing that was private a moment earlier.
 struct __attribute__((packed)) WelcomeMsg {
     uint8_t  magic;
     uint8_t  ver;
@@ -215,7 +245,12 @@ struct __attribute__((packed)) WelcomeMsg {
     /// BSSID when it still matches something on the air.
     uint8_t  bssid[6];
     char     ssid[33];
+    uint8_t  target[6];  ///< the node this is for; everyone else ignores it
+    uint8_t  tag[8];     ///< truncated HMAC-SHA256 over the 57 bytes above
 };
+
+/// Offset and length of the region WelcomeMsg::tag authenticates.
+static const size_t EN_WELCOME_SIGNED_LEN = 57;
 
 // ---------------------------------------------------------------------------
 // Field packing
@@ -357,9 +392,11 @@ static_assert(sizeof(EnvSample)   == 12,  "EnvSample must stay 12 bytes");
 static_assert(sizeof(DataMsg)     == 192, "DataMsg header is 12 + 15*12");
 static_assert(sizeof(AckMsg)      == 14,  "AckMsg must stay 14 bytes");
 static_assert(sizeof(DiscoverMsg) == 22,  "DiscoverMsg must stay 22 bytes");
-static_assert(sizeof(WelcomeMsg)  == 51,  "WelcomeMsg must stay 51 bytes");
+static_assert(sizeof(WelcomeMsg)  == 65,  "WelcomeMsg must stay 65 bytes");
 static_assert(sizeof(DataMsg) <= ESPNOW_MAX_FRAME, "a full burst must fit one frame");
 static_assert(sizeof(WelcomeMsg) <= ESPNOW_MAX_FRAME, "WELCOME must fit one frame");
 static_assert(offsetof(DataMsg, count) == 6, "espnowValidate() reads count at [6]");
 static_assert(offsetof(DiscoverMsg, tag) == EN_DISCOVER_SIGNED_LEN,
+              "the HMAC must cover exactly the bytes before the tag");
+static_assert(offsetof(WelcomeMsg, tag) == EN_WELCOME_SIGNED_LEN,
               "the HMAC must cover exactly the bytes before the tag");

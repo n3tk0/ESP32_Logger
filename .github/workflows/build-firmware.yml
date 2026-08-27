@@ -28,6 +28,7 @@ on:
       - 'boards/**'
       - 'partitions_balanced.csv'
       - 'node/**'
+      - 'node_espnow/**'
       - '.github/workflows/build-firmware.yml'
   pull_request:
     paths:
@@ -39,6 +40,7 @@ on:
       - 'boards/**'
       - 'partitions_balanced.csv'
       - 'node/**'
+      - 'node_espnow/**'
   workflow_dispatch:
   release:
     types: [created]
@@ -380,6 +382,65 @@ jobs:
         with:
           name: firmware-node-esp8266
           path: node/.pio/build/nodemcuv2/firmware.bin
+
+  # The ESP-NOW battery node, also a separate PlatformIO project and also
+  # invisible to `pio run` in the repository root.
+  #
+  # This job is not really about the node compiling. It is about the THREE
+  # HEADERS the node shares with the collector -- the wire format, the DISCOVER
+  # and WELCOME signature, and the BME280 driver. A change to any of them that
+  # suits one side and breaks the other produces two firmwares that build
+  # cleanly, flash successfully, and never exchange a single frame. Nothing
+  # else in CI would catch that, because the collector matrix builds the
+  # headers only from the collector's side.
+  build-node-espnow:
+    name: build (espnow node, ${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            env: xiao_esp32c3
+          - name: bench
+            env: xiao_esp32c3_bench
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            node_espnow/.pio
+          key: pio-espnow-node-${{ matrix.env }}-${{ hashFiles('node_espnow/platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build
+        working-directory: node_espnow
+        run: pio run -e ${{ matrix.env }}
+
+      - name: Report size
+        working-directory: node_espnow
+        run: |
+          SIZE=$(stat -c%s .pio/build/${{ matrix.env }}/firmware.bin)
+          echo "=== espnow node (${{ matrix.name }}) ==="
+          echo "Firmware size: $(( SIZE / 1024 )) KB"
+
+      - name: Upload artifact
+        if: matrix.name == 'default'
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-node-espnow
+          path: node_espnow/.pio/build/xiao_esp32c3/firmware.bin
 
   attach-to-release:
     needs: build

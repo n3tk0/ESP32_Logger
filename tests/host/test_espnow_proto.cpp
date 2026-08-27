@@ -28,7 +28,7 @@ static void test_sizes() {
     CHECK_EQ((int)sizeof(DataMsg),     192);
     CHECK_EQ((int)sizeof(AckMsg),      14);
     CHECK_EQ((int)sizeof(DiscoverMsg), 22);
-    CHECK_EQ((int)sizeof(WelcomeMsg),  51);
+    CHECK_EQ((int)sizeof(WelcomeMsg),  65);
 
     // A one-sample frame is the common case and the one whose size decides the
     // node's airtime: 24 bytes against the 237 the JSON node posts.
@@ -258,10 +258,24 @@ static void test_validate_accepts_each_type() {
 // The tag must cover every byte before it and no byte after it. Getting this
 // wrong is not a build error and not a runtime error — it is a signature that
 // verifies while leaving part of the frame unauthenticated.
-static void test_discover_signed_region() {
+static void test_signed_regions() {
     DiscoverMsg d;
     CHECK_EQ((int)EN_DISCOVER_SIGNED_LEN, (int)offsetof(DiscoverMsg, tag));
     CHECK_EQ((int)(EN_DISCOVER_SIGNED_LEN + sizeof(d.tag)), (int)sizeof(DiscoverMsg));
+
+    // WELCOME is signed for a reason worth restating: ESP-NOW decrypts only
+    // from a peer already added with the key, so the node cannot receive an
+    // encrypted reply from a collector whose MAC the reply is what tells it.
+    // The frame therefore goes out in the clear and carries a tag instead.
+    WelcomeMsg w;
+    CHECK_EQ((int)EN_WELCOME_SIGNED_LEN, (int)offsetof(WelcomeMsg, tag));
+    CHECK_EQ((int)(EN_WELCOME_SIGNED_LEN + sizeof(w.tag)), (int)sizeof(WelcomeMsg));
+
+    // And the target it is addressed to must be inside the signed region: a
+    // tag that did not cover it would let anyone in range retarget a valid
+    // WELCOME at a different node.
+    CHECK((int)offsetof(WelcomeMsg, target) < (int)EN_WELCOME_SIGNED_LEN);
+    CHECK((int)(offsetof(WelcomeMsg, target) + 6) <= (int)EN_WELCOME_SIGNED_LEN);
 }
 
 int main() {
@@ -272,6 +286,6 @@ int main() {
     RUN(test_encode_rejects_bad_input);
     RUN(test_validate_rejects);
     RUN(test_validate_accepts_each_type);
-    RUN(test_discover_signed_region);
+    RUN(test_signed_regions);
     return SUMMARY();
 }
