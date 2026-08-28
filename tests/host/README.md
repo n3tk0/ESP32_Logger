@@ -15,6 +15,15 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_ringbuffer_concurrency.cpp` | `RingBuffer<N>` SPSC acquire/release visibility (ThreadSanitizer target) |
 | `test_aggregation.cpp` | `AggregationEngine` — `lttb()` (endpoint preservation, bounds), `bucket()` (raw/avg/min/max/sum), `aggregate()` pipeline bounds |
 | `test_pathutils.cpp` | security-critical `Utils.cpp` helpers — `sanitizePath`, `sanitizeFilename`, `isPathProtected`, `buildPath`, `urlEncode` |
+| `test_ringbuffer_concurrency.cpp` | the SPSC acquire/release ordering, under ThreadSanitizer |
+| `test_psychrometrics.cpp` | Magnus saturation pressure, `dewPointC()`, the self-heating correction and its invariance |
+| `test_httpexporter_bufsize.cpp` | the JSON body buffer-size arithmetic, extracted because the exporter cannot be compiled on the host |
+| `test_refresh_cadence.cpp` | `RefreshCadence.h` — the clock's minute-boundary demand and the data prediction's age bands |
+| `test_espnow_proto.cpp` | the wire format: layouts, sentinels, encode/validate round trips |
+| `test_espnow_nodetable.cpp` | the three decisions the collector makes about an arriving frame |
+| `test_remote_ingest.cpp` | the mailbox and the separate historical queue it grew |
+| `test_battery_model.cpp` | that the remaining-life model **refuses** to answer when it cannot |
+| `test_kindle_skin.cpp` | `KindleSkin.h` — the override CSS, the time/date/pressure formats, and the clamp that stands between a stored byte and a stylesheet |
 
 Fuzz targets (random-input property checks):
 

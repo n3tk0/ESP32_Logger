@@ -31,6 +31,7 @@
 #include "../managers/DataLogger.h"
 #include "../utils/Utils.h"
 #include "ApiHandlers.h"
+#include "KindleSkin.h"                 // kdSkinClamp() on settings import
 #include "FirstRunHandler.h"            // R11 first-run wizard backend
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "CsrfToken.h"                 // Pass 7 CSRF on mutating routes
@@ -712,6 +713,22 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     JsonObject lg = doc["logger"].to<JsonObject>();
     lg["csvLoggingEnabled"]         = config.logger.csvLoggingEnabled;
     lg["aggregationIntervalSec"]    = config.logger.aggregationIntervalSec ? config.logger.aggregationIntervalSec : 60;
+
+    // ── Kindle dashboard appearance ───────────────────────────────────────
+    // Exported on every build, including one without FEATURE_KINDLE_DASHBOARD:
+    // a settings file is a record of the device's configuration, and dropping
+    // a section because this particular firmware cannot draw it would mean a
+    // backup taken on one build quietly resetting the appearance on another.
+    JsonObject kd = doc["kindle"].to<JsonObject>();
+    kd["face"]          = config.kindle.face;
+    kd["faceCustom"]    = config.kindle.faceCustom;
+    kd["boldZones"]     = config.kindle.boldZones;
+    kd["showFlags"]     = config.kindle.showFlags;
+    kd["clockStyle"]    = config.kindle.clockStyle;
+    kd["timeFormat"]    = config.kindle.timeFormat;
+    kd["dateFormat"]    = config.kindle.dateFormat;
+    kd["pressureUnit"]  = config.kindle.pressureUnit;
+    kd["tempDecimals"]  = config.kindle.tempDecimals;
 
     // ── Network ───────────────────────────────────────────────────────────
     JsonObject net = doc["network"].to<JsonObject>();
@@ -2274,6 +2291,24 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 JsonObject lg = doc["logger"];
                 if (lg["csvLoggingEnabled"].is<bool>())         config.logger.csvLoggingEnabled         = lg["csvLoggingEnabled"];
                 if (lg["aggregationIntervalSec"].is<int>())     config.logger.aggregationIntervalSec    = constrain(lg["aggregationIntervalSec"].as<int>(), 5, 3600);
+            }
+            if (doc["kindle"].is<JsonObject>()) {
+                JsonObject kd = doc["kindle"];
+                if (kd["face"].is<int>())          config.kindle.face         = (uint8_t)kd["face"].as<int>();
+                if (kd["faceCustom"].is<const char*>())
+                    SAFE_STRNCPY(config.kindle.faceCustom, kd["faceCustom"], sizeof(config.kindle.faceCustom));
+                if (kd["boldZones"].is<int>())     config.kindle.boldZones    = (uint16_t)kd["boldZones"].as<int>();
+                if (kd["showFlags"].is<int>())     config.kindle.showFlags    = (uint16_t)kd["showFlags"].as<int>();
+                if (kd["clockStyle"].is<int>())    config.kindle.clockStyle   = (uint8_t)kd["clockStyle"].as<int>();
+                if (kd["timeFormat"].is<int>())    config.kindle.timeFormat   = (uint8_t)kd["timeFormat"].as<int>();
+                if (kd["dateFormat"].is<int>())    config.kindle.dateFormat   = (uint8_t)kd["dateFormat"].as<int>();
+                if (kd["pressureUnit"].is<int>())  config.kindle.pressureUnit = (uint8_t)kd["pressureUnit"].as<int>();
+                if (kd["tempDecimals"].is<int>())  config.kindle.tempDecimals = (uint8_t)kd["tempDecimals"].as<int>();
+                // An imported file is not a form: it can carry anything,
+                // including values written by a firmware that had one more
+                // clock style than this one. Clamped here so the renderer
+                // never has to consider that it might not have been.
+                kdSkinClamp(config.kindle);
             }
             saveConfig();
             r->send(200, "text/plain", "OK");

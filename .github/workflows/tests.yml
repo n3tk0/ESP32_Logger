@@ -23,6 +23,8 @@ on:
       - 'tools/check_metric_names.py'
       - 'scripts/gen_failsafe.py'
       - 'src/web/failsafe.html'
+      - 'www/**'
+      - 'tests/web/**'
       - 'tools/pio_envs.py'
       - 'tools/check_pio_envs.py'
       - 'tools/features.py'
@@ -42,6 +44,8 @@ on:
       - 'tools/check_metric_names.py'
       - 'scripts/gen_failsafe.py'
       - 'src/web/failsafe.html'
+      - 'www/**'
+      - 'tests/web/**'
       - 'tools/pio_envs.py'
       - 'tools/check_pio_envs.py'
       - 'tools/features.py'
@@ -150,6 +154,90 @@ jobs:
         with:
           name: cppcheck-report
           path: cppcheck.log
+
+  browser:
+    name: browser (settings pages)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('tests/web/*.py') }}
+
+      - name: Install Playwright + Chromium
+        run: |
+          pip install --quiet playwright
+          python3 -m playwright install --with-deps chromium
+
+      - name: Drive the ESP-NOW settings page
+        # The pages are not compiled, so nothing else in this repository
+        # notices a page that fetches a field the firmware does not send, uses
+        # an icon that is not in the sheet, or wires a button to a handler
+        # core.js never registered. Each of those opens a window that looks
+        # fine and does nothing.
+        run: |
+          python3 tests/web/mock_device.py 8765 &
+          sleep 2
+          MOCK_PORT=8765 python3 tests/web/drive_espnow_page.py
+
+      - name: Drive the e-ink dashboard settings page
+        # Its two bitmasks carry bit values defined in src/core/Config.h and
+        # repeated in www/js/kindle.js. A page that reads a mask back correctly
+        # while writing the neighbouring bit looks perfect and toggles the
+        # wrong setting, which is a bug that presents as a rendering fault.
+        run: |
+          python3 tests/web/mock_device.py 8767 &
+          sleep 2
+          MOCK_PORT=8767 python3 tests/web/drive_kindle_page.py
+
+      - name: Verify that check actually fails on a mask that is not collected
+        # Same argument as the dead-button control below: a browser test that
+        # cannot fail is worth less than none. This breaks the WRITE path only
+        # — every checkbox still renders and still reads back its own state, so
+        # the page looks entirely correct and the saved mask is wrong. It is
+        # the exact failure the round-trip assertions exist for, and the one a
+        # test that only looked at the rendered page would miss.
+        run: |
+          set -e
+          cp www/js/kindle.js www/js/kindle.js.orig
+          sed -i 's/if (el \&\& el.checked) mask |= defs\[i\]\[0\];/if (el \&\& el.checked) mask |= 0;/' www/js/kindle.js
+          grep -q 'mask |= 0;' www/js/kindle.js  # the sed matched something
+          python3 tests/web/mock_device.py 8768 &
+          sleep 2
+          if MOCK_PORT=8768 python3 tests/web/drive_kindle_page.py > /dev/null 2>&1; then
+            mv www/js/kindle.js.orig www/js/kindle.js
+            echo "::error::the browser test passed with the masks never collected"
+            exit 1
+          fi
+          mv www/js/kindle.js.orig www/js/kindle.js
+          echo "browser test fires on a mask that is never collected"
+
+      - name: Verify that check actually fails on a dead button
+        # A browser test that cannot fail is worth less than none, because a
+        # green tick on a page nobody opened is exactly the false comfort it
+        # was written to remove. Unregister the pairing handler and the click
+        # must stop doing anything.
+        run: |
+          set -e
+          cp www/js/espnow.js www/js/espnow.js.orig
+          sed -i 's/  espnowPair: espnowPair,//' www/js/espnow.js
+          python3 tests/web/mock_device.py 8766 &
+          sleep 2
+          if MOCK_PORT=8766 python3 tests/web/drive_espnow_page.py > /dev/null 2>&1; then
+            mv www/js/espnow.js.orig www/js/espnow.js
+            echo "::error::the browser test passed with the pairing button unwired"
+            exit 1
+          fi
+          mv www/js/espnow.js.orig www/js/espnow.js
+          echo "browser test fires on an unwired button"
 
   api-docs:
     name: api-docs (route coverage)

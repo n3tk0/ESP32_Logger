@@ -1,0 +1,76 @@
+  <section class="page" id="page-settings_espnow">
+    <div class="page-head">
+      <div>
+        <h1 class="page-title"><span data-icon="radio"></span> Battery nodes</h1>
+        <div class="page-sub"><a href="#settings">Settings</a> / Battery nodes (ESP-NOW)</div>
+      </div>
+      <div class="page-actions">
+        <button class="btn" data-click="espnowRefresh"><span data-icon="refresh-cw"></span> Refresh</button>
+      </div>
+    </div>
+
+    <div id="en-msg"></div>
+
+    <!-- Pairing.  The whole reason this page exists: before it, adopting a
+         second node meant power-cycling the collector, because one with no
+         nodes listens for two minutes at boot and that was the entire
+         provisioning interface. -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title"><span data-icon="link"></span> Pairing</div>
+        <span id="en-pair-state" class="badge dim">closed</span>
+      </div>
+      <div class="card-body">
+        <p class="hint">
+          Open the window, then power the node. It sweeps channels 1–13 looking
+          for a collector and is adopted only while this is open and only if it
+          holds the same 16-character key this firmware was built with.
+        </p>
+        <div class="field">
+          <label class="field-label" for="en-pair-secs">Window length</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="en-pair-secs" class="input" style="flex:0 0 140px">
+              <option value="60">1 minute</option>
+              <option value="120" selected>2 minutes</option>
+              <option value="300">5 minutes</option>
+            </select>
+            <button class="btn primary" data-click="espnowPair">
+              <span data-icon="link"></span> Open pairing window
+            </button>
+          </div>
+          <p class="hint">
+            Kept short on purpose. While it is open, any node holding the shared
+            key can join — so this is a door you open when you mean to, not one
+            left ajar.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Nodes -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title"><span data-icon="cpu"></span> Nodes</div>
+        <span id="en-node-count" class="badge dim">—</span>
+      </div>
+      <div class="card-body">
+        <div id="en-nodes"><p class="hint">Loading…</p></div>
+      </div>
+    </div>
+
+    <!-- Diagnostics.
+         Counters and not decoration: "nothing is arriving" has several very
+         different causes and from the outside they look identical. -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title"><span data-icon="activity"></span> Radio counters</div>
+      </div>
+      <div class="card-body">
+        <p class="hint">
+          Since boot. When nothing is arriving, these are what tell a mismatched
+          key from a moved channel from an unprovisioned node.
+        </p>
+        <div id="en-stats" class="grid grid-auto"></div>
+      </div>
+    </div>
+  </section>

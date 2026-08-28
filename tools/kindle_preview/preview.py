@@ -20,6 +20,10 @@ lang = sys.argv[2] if len(sys.argv)>2 else 'en'
 scen = sys.argv[3] if len(sys.argv)>3 else 'calm'
 
 PAGE_W = int(sys.argv[4]) if len(sys.argv) > 4 else 600
+# 5th argument: draw the low-battery badge. Off by default, because the page
+# it is meant to represent usually has no warning on it and a preview that
+# always shows one would misrepresent the common case.
+WARN = len(sys.argv) > 5 and sys.argv[5] in ("warn", "1", "true")
 def kdpx(n):
     return (n * PAGE_W + 300) // 600 if n >= 0 else -((-n * PAGE_W + 300) // 600)
 
@@ -43,6 +47,26 @@ for m in re.finditer(r'KD_S\(\s*((?:"(?:[^"\\]|\\.)*"\s*)+)\)|KD_N\(\s*(-?\d+)\s
         style += str(kdpx(int(m.group(2))))
 if len(style) < 1500:
     raise SystemExit('stylesheet extraction produced %d chars — the emitter shape changed' % len(style))
+
+# ── The clock style, also extracted rather than copied ──────────────────────
+# config.kindle.clockStyle is a runtime setting, and its CSS is emitted by
+# kdSkinCss() in src/web/KindleSkin.h as overrides appended after the sheet
+# above. Each style claims to keep the block's total height at the 139 px the
+# design fixed — which is what keeps the hairline under the clock level with
+# the outdoor column — and that claim is only worth anything if it is measured.
+# So the arm is pulled out of the firmware and appended here the same way the
+# device would append it, and shot.mjs prints the resulting page height.
+CLOCK = sys.argv[6] if len(sys.argv) > 6 else 'plain'
+if CLOCK != 'plain':
+    arm = {'boxed': 'KCLOCK_BOXED', 'ruled': 'KCLOCK_RULED', 'dated': 'KCLOCK_DATED'}
+    if CLOCK not in arm:
+        raise SystemExit('unknown clock style %r (plain|boxed|ruled|dated)' % CLOCK)
+    skin_src = open(os.path.join(ROOT, 'src/web/KindleSkin.h')).read()
+    j0 = skin_src.index('case ' + arm[CLOCK] + ':')
+    j1 = skin_src.index('break;', j0)
+    blk = re.sub(r'//[^\n]*', '', skin_src[j0:j1])
+    for m in re.finditer(r'out \+= "((?:[^"\\]|\\.)*)"|out \+= kdPx\(\s*(-?\d+)\s*\)', blk):
+        style += m.group(1).replace('\\"', '"') if m.group(1) else str(kdpx(int(m.group(2))))
 
 
 S = {
@@ -143,13 +167,36 @@ for lab,ic,t,lo2 in cols:
     per+=('<td class="per"><div class="per-l">%s</div>%s<div class="per-t">%d&deg;%s</div></td>'
           %(lab,ico(ic,kdpx(34)),t,extra))
 
+# The battery badge, replayed from appendBatteryBadge() in
+# src/web/KindleDashboard.cpp. A COPY, like the rest of the markup here and
+# unlike the stylesheet, which is extracted — see this directory's README for
+# which half of this preview can drift and which cannot. The arithmetic is the
+# same kdpx() the firmware uses, so at least the geometry cannot.
+def battery_badge():
+    w, h, r = kdpx(46), kdpx(22), kdpx(3)
+    bx, by, bw, bh, t2 = kdpx(7), kdpx(6), kdpx(24), kdpx(10), kdpx(2)
+    ex = kdpx(38)
+    return (
+        '<svg class="bw" width="%d" height="%d" viewBox="0 0 %d %d">' % (w, h, w, h) +
+        '<rect x="0" y="0" width="%d" height="%d" rx="%d" fill="#000"/>' % (w, h, r) +
+        '<rect x="%d" y="%d" width="%d" height="%d" fill="#fff"/>' % (bx, by, bw, bh) +
+        '<rect x="%d" y="%d" width="%d" height="%d" fill="#000"/>'
+            % (bx + t2, by + t2, bw - 2 * t2, bh - 2 * t2) +
+        '<rect x="%d" y="%d" width="%d" height="%d" fill="#fff"/>'
+            % (bx + bw, by + kdpx(3), kdpx(3), bh - kdpx(6)) +
+        '<rect x="%d" y="%d" width="%d" height="%d" fill="#fff"/>'
+            % (ex, kdpx(5), kdpx(3), kdpx(8)) +
+        '<rect x="%d" y="%d" width="%d" height="%d" fill="#fff"/>'
+            % (ex, kdpx(15), kdpx(3), kdpx(3)) +
+        '</svg>')
+
 wk=''
 for i,(n,dnum) in enumerate(list(zip(S['wd'],[24,25,26,27,28,29,30]))):
     cls='wd wd-now' if i==1 else ('wd wd-we' if i>=5 else 'wd')
     wk+='<td class="%s"><div class="wd-n">%s</div><div class="wd-d">%d</div></td>'%(cls,n,dnum)
 
 body=('<table class="hero"><tr><td width="50%">'
- '<div class="lab">'+S['out']+'</div>'
+ '<div class="lab">'+S['out']+(battery_badge() if WARN else '')+'</div>'
  '<div class="'+HERO['cls']+'">'+HERO['now']+'<span class="deg">&deg;</span>'
  '<span class="slash">/</span><span class="hum-o">'+HERO['hum']+'%</span></div>'
  '<div class="sub">'+HERO['lo']+S['to']+HERO['hi']+'&deg;'
@@ -159,6 +206,7 @@ body=('<table class="hero"><tr><td width="50%">'
  +' <span class="dim">('+HERO['d']+')</span></div>'
  '</td><td width="50%" class="sep">'
  '<div class="clock">17:40</div>'
+ +('<div class="clock-d">25 %s</div>'%S['mon'] if CLOCK=='dated' else '')+
  '<div class="inrule"></div>'
  '<div class="lab">'+S['ins']+'</div>'
  '<div class="in-t">21.0<span class="in-d">&deg;</span>'

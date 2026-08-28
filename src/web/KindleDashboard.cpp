@@ -12,6 +12,10 @@
 #include "../core/Globals.h"
 #include "DashboardStrings.h"
 #include "RefreshCadence.h"
+#include "KindleSkin.h"                 // config.kindle -> face, weight, formats
+#ifdef FEATURE_ESPNOW_INGEST
+#  include "../espnow/EspNowIngest.h"   // espnowAnyBatteryWarn()
+#endif
 
 #ifdef MODULE_FORECAST_ENABLED
 #  include "../modules/ForecastModule.h"
@@ -65,11 +69,17 @@ static Latest humidityOf(const char* sensorId) {
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
-static void fmtTemp(char* buf, size_t n, float v) {
+// One decimal by default. A tenth of a degree is the most an e-ink glance can
+// use, and two decimals make the big type wrap.
+//
+// Zero is offered as a setting (config.kindle.tempDecimals) rather than as a
+// second opinion about precision: a whole-degree page is a legitimately
+// different thing to want from across a room, and the reading it drops was
+// never load-bearing. Anything above one is not offered, because the column
+// has no room for it.
+static void fmtTemp(char* buf, size_t n, float v, int dec = 1) {
     if (!isfinite(v)) { snprintf(buf, n, "--"); return; }
-    // One decimal. A tenth of a degree is the most an e-ink glance can use,
-    // and two decimals make the big type wrap.
-    snprintf(buf, n, "%.1f", (double)v);
+    snprintf(buf, n, dec ? "%.1f" : "%.0f", (double)v);
 }
 
 static void fmtInt(char* buf, size_t n, float v) {
@@ -271,6 +281,98 @@ static void appendKeySwatch(String& out, const char* colour, int width, bool das
     out += F("\"/></svg>");
 }
 
+// The battery warning badge.
+//
+// WHERE, AND WHY THERE
+// --------------------
+// Top right of the outdoor block, level with its label, in the only piece of
+// empty space on the page — right of the humidity figure and left of the
+// column rule. Everything else here is a measurement; the one thing that is
+// not competes with nothing.
+//
+// DRAWN, NOT TYPED
+// ----------------
+// Inline SVG rather than a character. The reader's font is whatever the device
+// firmware ships and its coverage varies; a glyph that renders as a box is
+// worse than no warning at all, because it reads as a rendering fault rather
+// than as a low battery. Every stroke here is a path, so it looks the same on
+// every firmware.
+//
+// A DARK FILL AND A HOLE THROUGH IT
+// ---------------------------------
+// The panel is greyscale and the page is otherwise light, so a solid black
+// plate is the only thing on it that reads as an alarm at arm's length. The
+// battery outline and the exclamation are cut OUT of it in white rather than
+// drawn on top: on a screen with no colour, inverted is the loudest a small
+// mark gets.
+static void appendBatteryBadge(String& out) {
+    const int w = kdPx(46), h = kdPx(22), r = kdPx(3);
+
+    out += F("<svg class=\"bw\" width=\""); out += w;
+    out += F("\" height=\"");                 out += h;
+    out += F("\" viewBox=\"0 0 ");            out += w;
+    out += ' ';                               out += h;
+    out += F("\">");
+
+    // The plate.
+    out += F("<rect x=\"0\" y=\"0\" width=\""); out += w;
+    out += F("\" height=\"");                     out += h;
+    out += F("\" rx=\"");                         out += r;
+    out += F("\" fill=\"#000\"/>");
+
+    // Battery body, knocked through in white: a filled shell with the inside
+    // punched back to black, which is a stroke drawn as two rects because an
+    // e-ink panel renders a 1 px stroke unevenly at this size.
+    const int bx = kdPx(7), by = kdPx(6), bw = kdPx(24), bh = kdPx(10), t2 = kdPx(2);
+    out += F("<rect x=\""); out += bx;
+    out += F("\" y=\"");   out += by;
+    out += F("\" width=\"");  out += bw;
+    out += F("\" height=\""); out += bh;
+    out += F("\" fill=\"#fff\"/>");
+    out += F("<rect x=\""); out += bx + t2;
+    out += F("\" y=\"");   out += by + t2;
+    out += F("\" width=\"");  out += bw - 2 * t2;
+    out += F("\" height=\""); out += bh - 2 * t2;
+    out += F("\" fill=\"#000\"/>");
+
+    // The terminal nub.
+    out += F("<rect x=\""); out += bx + bw;
+    out += F("\" y=\"");   out += by + kdPx(3);
+    out += F("\" width=\"");  out += kdPx(3);
+    out += F("\" height=\""); out += bh - kdPx(6);
+    out += F("\" fill=\"#fff\"/>");
+
+    // The exclamation, to the right of the cell. Two marks and a gap, so it
+    // survives being scaled down with KINDLE_PAGE_W.
+    const int ex = kdPx(38);
+    out += F("<rect x=\""); out += ex;
+    out += F("\" y=\"");   out += kdPx(5);
+    out += F("\" width=\"");  out += kdPx(3);
+    out += F("\" height=\""); out += kdPx(8);
+    out += F("\" fill=\"#fff\"/>");
+    out += F("<rect x=\""); out += ex;
+    out += F("\" y=\"");   out += kdPx(15);
+    out += F("\" width=\"");  out += kdPx(3);
+    out += F("\" height=\""); out += kdPx(3);
+    out += F("\" fill=\"#fff\"/>");
+
+    out += F("</svg>");
+}
+
+/// Whether any battery node is low enough to warrant the badge.
+///
+/// One place, so the renderer and the web interface cannot disagree about what
+/// counts as a warning: both ask the same espnowAnyBatteryWarn(), which is
+/// batteryShouldWarn() over the same history. A build without the radio has no
+/// battery nodes and no badge.
+static bool batteryWarningActive() {
+#ifdef FEATURE_ESPNOW_INGEST
+    return espnowAnyBatteryWarn();
+#else
+    return false;
+#endif
+}
+
 // Smallest and largest hourly extreme across the window, for the caption.
 static bool windowExtremes(const TrendRing::Hour* h, float& mn, float& mx) {
     mn = 1e9f; mx = -1e9f;
@@ -386,6 +488,13 @@ static void handleKindle(AsyncWebServerRequest* req) {
     const bool haveIn  = trendRing.series(KINDLE_INDOOR_SENSOR,  "temperature", now, tIn);
     const bool haveP   = trendRing.series(KINDLE_OUTDOOR_SENSOR, "pressure",    now, tPress);
 
+    // A clamped COPY, not a reference into the live config. The page reads
+    // this a dozen times while it builds; taking the values once means a save
+    // landing mid-render cannot produce a page whose stylesheet and markup
+    // disagree about which clock is being drawn.
+    KindleConfig skin = config.kindle;
+    kdSkinClamp(skin);
+
     String p;
     p.reserve(7000);
     char buf[16];
@@ -431,6 +540,12 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // sit against the first glyph of the inside reading.
     KD_S(".hero .sep{border-left:");           KD_N(1);
     KD_S("px solid #aaa;padding-left:");       KD_N(30);
+    KD_S("px}");
+
+    // The badge sits on the label's own line, pushed right. float and not
+    // flex: this page is built for a browser that may be WebKit 531, where
+    // flexbox does not exist. A float has worked since 1996.
+    KD_S(".bw{float:right;margin-top:"); KD_N(-2);
     KD_S("px}");
 
     KD_S(".lab{font-size:");                   KD_N(12);
@@ -639,6 +754,13 @@ static void handleKindle(AsyncWebServerRequest* req) {
     #undef KD_S
     #undef KD_N
 
+    // Everything above is the design and is emitted unconditionally; anything
+    // the reader has chosen goes here, as overrides. See KindleSkin.h for why
+    // the two are kept apart — briefly: the preview tool reconstructs the
+    // sheet above by reading this source, and a branch in it would put every
+    // arm of every choice into the picture at once.
+    kdSkinCss(p, skin);
+
     p += F("</style></head><body>");
 
     // No masthead. The place name never changed and the date is carried by the
@@ -647,25 +769,28 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     // Outside on the left, clock over inside on the right
     p += F("<table class=\"hero\"><tr><td width=\"50%\">"
-           "<div class=\"lab\">" KD_T("Outside", "Навън") "</div><div class=\"");
-    fmtTemp(buf, sizeof(buf), outT.value);
+           "<div class=\"lab\">" KD_T("Outside", "Навън"));
+    if ((skin.showFlags & KSHOW_BATTERY) && batteryWarningActive()) appendBatteryBadge(p);
+    p += F("</div><div class=\"");
+    fmtTemp(buf, sizeof(buf), outT.value, skin.tempDecimals);
     p += bigClass(buf); p += F("\">"); p += buf;
     p += F("<span class=\"deg\">&deg;</span>");
     // Humidity rides on the temperature's baseline, a slash between them. It
     // is the same measurement of the same air at the same instant, so a line
     // break was putting a paragraph boundary through one reading.
-    if (outH.ok) {
+    if (outH.ok && (skin.showFlags & KSHOW_OUT_HUM)) {
         p += F("<span class=\"slash\">/</span><span class=\"hum-o\">");
         fmtInt(buf, sizeof(buf), outH.value); p += buf; p += F("%</span>");
     }
     p += F("</div><div class=\"sub\">");
     if (outT.ok) {
         float mn, mx;
-        if (haveOut && windowExtremes(tOut, mn, mx)) {
+        if (haveOut && (skin.showFlags & KSHOW_RANGE) && windowExtremes(tOut, mn, mx)) {
             // The 24 h span in figures, so the night's low is not only
             // readable off the chart.
-            fmtTemp(buf, sizeof(buf), mn); p += buf;
-            p += F(KD_T(" to ", " до ")); fmtTemp(buf, sizeof(buf), mx); p += buf;
+            fmtTemp(buf, sizeof(buf), mn, skin.tempDecimals); p += buf;
+            p += F(KD_T(" to ", " до "));
+            fmtTemp(buf, sizeof(buf), mx, skin.tempDecimals); p += buf;
             p += F("&deg;");
         }
         p += F("<span class=\"dim\">");
@@ -680,18 +805,35 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // Pressure gets its own size. The absolute figure is the one number here
     // that a reader compares against memory rather than against the page, and
     // at 15px it was set as a footnote to the humidity.
-    if (outP.ok) {
+    if (outP.ok && (skin.showFlags & KSHOW_PRESSURE)) {
         p += F("<div class=\"pres\">");
-        fmtInt(buf, sizeof(buf), outP.value); p += buf;
-        p += F("<span class=\"pres-u\"> hPa</span></div>");
+        // The sensor reports hPa; the reader may think in mmHg or inHg. A
+        // barometric figure is compared against memory rather than against the
+        // page, so it has to be in the units that memory is in.
+        const float pv = kdPressureValue(outP.value, skin.pressureUnit);
+        const int   pd = kdPressureDecimals(skin.pressureUnit);
+        if (pd) { p += String(pv, pd); }
+        else    { fmtInt(buf, sizeof(buf), pv); p += buf; }
+        p += F("<span class=\"pres-u\"> ");
+        p += kdPressureUnitLabel(skin.pressureUnit);
+        p += F("</span></div>");
     }
-    if (haveP) {
+    if (haveP && (skin.showFlags & KSHOW_TENDENCY)) {
         const Tendency t = pressureTendency(tPress);
         if (t.have) {
             p += F("<div class=\"sub sub-t\">"); p += t.arrow; p += F(" "); p += t.word;
+            // The change follows the same unit as the figure above it. A
+            // "-1.2 hPa/3h" under a reading in mmHg is two scales on one
+            // block, which is exactly the confusion the setting exists to end.
+            const float dv = kdPressureValue(t.delta, skin.pressureUnit);
             p += F(" <span class=\"dim\">(");
-            if (t.delta >= 0) p += F("+");
-            p += String(t.delta, 1); p += F(" hPa/3h)</span></div>");
+            if (dv >= 0) p += F("+");
+            // One more place than the absolute figure: the three-hour change
+            // is small in every unit, and rounded to the same precision as the
+            // reading it would read as zero all winter.
+            p += String(dv, kdPressureDecimals(skin.pressureUnit) + 1);
+            p += F(" "); p += kdPressureUnitLabel(skin.pressureUnit);
+            p += F("/3h)</span></div>");
         }
     }
     p += F("</td><td width=\"50%\" class=\"sep\">");
@@ -702,9 +844,17 @@ static void handleKindle(AsyncWebServerRequest* req) {
         const time_t when_t = (time_t)now;
         struct tm tmv;
         if (localtime_r(&when_t, &tmv) != nullptr) {
-            char hm[8];
-            snprintf(hm, sizeof(hm), "%02d:%02d", tmv.tm_hour, tmv.tm_min);
+            char hm[12];
+            kdFmtTime(hm, sizeof(hm), tmv, skin.timeFormat);
             p += F("<div class=\"clock\">"); p += hm; p += F("</div>");
+            // The one clock style that needs markup as well as a rule. Its
+            // height was taken out of the clock's own (see KindleSkin.h), so
+            // the hairline below stays level with the outdoor column.
+            if (skin.clockStyle == KCLOCK_DATED) {
+                char dt[32];
+                kdFmtDate(dt, sizeof(dt), tmv, skin.dateFormat);
+                p += F("<div class=\"clock-d\">"); p += dt; p += F("</div>");
+            }
         } else {
             p += F("<div class=\"clock-x\">" KD_T("no time", "няма час") "</div>");
         }
@@ -717,40 +867,46 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // Lower third: inside temperature and humidity. The 24 h inside range went
     // with the clock — the dashed line on the chart already carries it, and it
     // was the least-read figure on the page.
-    p += F("<div class=\"inrule\"></div>"
-           "<div class=\"lab\">" KD_T("Inside", "Вътре") "</div><div class=\"in-t\">");
-    if (inT.ok) {
-        fmtTemp(buf, sizeof(buf), inT.value); p += buf;
-        p += F("<span class=\"in-d\">&deg;</span>");
-        if (inH.ok) {
-            p += F("<span class=\"slash slash-i\">/</span><span class=\"hum-i\">");
-            fmtInt(buf, sizeof(buf), inH.value); p += buf; p += F("%</span>");
+    if (skin.showFlags & KSHOW_INSIDE) {
+        p += F("<div class=\"inrule\"></div>"
+               "<div class=\"lab\">" KD_T("Inside", "Вътре") "</div><div class=\"in-t\">");
+        if (inT.ok) {
+            fmtTemp(buf, sizeof(buf), inT.value, skin.tempDecimals); p += buf;
+            p += F("<span class=\"in-d\">&deg;</span>");
+            if (inH.ok) {
+                p += F("<span class=\"slash slash-i\">/</span><span class=\"hum-i\">");
+                fmtInt(buf, sizeof(buf), inH.value); p += buf; p += F("%</span>");
+            }
+            p += F("<span class=\"in-age dim\">");
+            appendAge(p, inT.ts, now);
+            p += F("</span>");
+        } else {
+            p += F("<span class=\"in-age dim\">"
+                   KD_T("no reading", "няма данни") "</span>");
         }
-        p += F("<span class=\"in-age dim\">");
-        appendAge(p, inT.ts, now);
-        p += F("</span>");
-    } else {
-        p += F("<span class=\"in-age dim\">"
-               KD_T("no reading", "няма данни") "</span>");
+        p += F("</div>");
     }
-    p += F("</div></td></tr></table>");
+    p += F("</td></tr></table>");
 
-    p += F("<div class=\"rule\"></div><div class=\"sec\">" KD_T("Last 24 hours", "Последните 24 часа") "</div>");
-    appendChart(p, tOut, tIn, haveOut, haveIn);
-    if (haveOut || haveIn) {
-        // The two swatches must be drawn with the same stroke as the lines they
-        // stand for — .l-out #000/3, .l-in #777/2 dashed — or the key describes
-        // a chart the reader is not looking at.
-        p += F("<table class=\"key\"><tr><td>");
-        appendKeySwatch(p, "#000", 3, false);
-        p += F(" " KD_T("outside mean", "средно навън")
-               "<span class=\"dim\">"
-               KD_T(", shaded band = hourly low to high",
-                    ", сивото е час. мин&ndash;макс")
-               "</span>"
-               "</td><td style=\"text-align:right\">");
-        appendKeySwatch(p, "#777", 2, true);
-        p += F(" " KD_T("inside", "вътре") "</td></tr></table>");
+    if (skin.showFlags & KSHOW_CHART) {
+        p += F("<div class=\"rule\"></div><div class=\"sec\">"
+               KD_T("Last 24 hours", "Последните 24 часа") "</div>");
+        appendChart(p, tOut, tIn, haveOut, haveIn);
+        if (haveOut || haveIn) {
+            // The two swatches must be drawn with the same stroke as the lines
+            // they stand for — .l-out #000/3, .l-in #777/2 dashed — or the key
+            // describes a chart the reader is not looking at.
+            p += F("<table class=\"key\"><tr><td>");
+            appendKeySwatch(p, "#000", 3, false);
+            p += F(" " KD_T("outside mean", "средно навън")
+                   "<span class=\"dim\">"
+                   KD_T(", shaded band = hourly low to high",
+                        ", сивото е час. мин&ndash;макс")
+                   "</span>"
+                   "</td><td style=\"text-align:right\">");
+            appendKeySwatch(p, "#777", 2, true);
+            p += F(" " KD_T("inside", "вътре") "</td></tr></table>");
+        }
     }
 
 #ifdef MODULE_FORECAST_ENABLED
@@ -760,7 +916,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     appendForecastSection(p);
 #endif
 
-    appendWeek(p, now);
+    if (skin.showFlags & KSHOW_WEEK) appendWeek(p, now);
 
     // The footer carries the two manual repaints. Links rather than anything
     // scripted, so a five-way pad reaches them as readily as a fingertip. See
