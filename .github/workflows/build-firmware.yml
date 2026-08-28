@@ -241,20 +241,37 @@ jobs:
       # back, so it is exercised on the build that actually needs it. This
       # also keeps the SD-off code path compiling: every `&SD` goes through
       # sdFs() now, and a missed one would only fail here.
+      # This used to comment the block out of setup.h by matching its exact
+      # three lines, and it failed the moment that block grew a trailing
+      # comment — loudly, which is to its credit, but it was work to redo for
+      # a change that altered nothing.
+      #
+      # FEATURE_SET_EXPLICIT removes the need. The flags are derived from
+      # features.py, so the set cannot drift from what setup.h declares, and
+      # the step now exercises the same mechanism the deploy tools use rather
+      # than a text substitution unique to CI.
       - name: Build again with SD storage off, and report what it bought
         run: |
           set -e
           BEFORE=$(stat -c%s .pio/build/xiao_esp32c3/firmware.bin)
-          python3 - <<'EOF'
-          import pathlib, sys
-          p = pathlib.Path('src/setup.h'); s = p.read_text()
-          on  = "#ifndef FEATURE_SD_STORAGE\n#  define FEATURE_SD_STORAGE\n#endif"
-          off = "//#ifndef FEATURE_SD_STORAGE\n//#  define FEATURE_SD_STORAGE\n//#endif"
-          if on not in s:
-              sys.exit('setup.h: FEATURE_SD_STORAGE block changed shape, fix this job')
-          p.write_text(s.replace(on, off))
+          FLAGS=$(python3 - <<'EOF'
+          import sys
+          sys.path.insert(0, 'tools')
+          from features import build_flags_for, default_on_features
+          # default_on_features() re-reads setup.h, which the step above has
+          # already edited to switch the optional five on. So this is exactly
+          # the set that produced BEFORE — the comparison is like for like,
+          # and the two numbers differ by the SD driver and nothing else.
+          # (Passing every feature instead makes the "smaller" build bigger,
+          # because it drags in eighteen sensors the first one did not have.)
+          on = [f.macro for f in default_on_features()]
+          if 'FEATURE_SD_STORAGE' not in on:
+              sys.exit('setup.h no longer has FEATURE_SD_STORAGE on by default')
+          print(build_flags_for([m for m in on if m != 'FEATURE_SD_STORAGE']))
           EOF
-          pio run -e xiao_esp32c3
+          )
+          echo "flags: ${FLAGS}"
+          PLATFORMIO_BUILD_FLAGS="${FLAGS}" pio run -e xiao_esp32c3
           AFTER=$(stat -c%s .pio/build/xiao_esp32c3/firmware.bin)
           echo "=== xiao_esp32c3, all features on, SD storage OFF ==="
           echo "with SD: ${BEFORE} bytes -> without: ${AFTER} bytes (saved $(( BEFORE - AFTER )))"
