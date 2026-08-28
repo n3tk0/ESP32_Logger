@@ -615,6 +615,12 @@ them — and from the outside they look identical. `malformed`,
 `unknown_node`, `replayed`, `ring_full` and `discover_bad_sig` are what tell
 them apart.
 
+`history_collapsed` and `history_no_clock` are the same argument applied to
+backfill, and they are two numbers rather than one because they ask for
+opposite fixes: a backlog queue that keeps overflowing wants a bigger queue,
+while a burst that arrives with no clock on either side wants NTP or an RTC,
+and no amount of queue will help it.
+
 Two fields are deliberately `null` rather than zero. `rssi` is unavailable on
 Arduino core 2.x (IDF 4.4 hands the receive callback no signal information),
 and `days` is null whenever `batteryDaysLeft()` refuses to answer — too little
