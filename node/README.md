@@ -235,6 +235,23 @@ short enough not to disturb WiFi — a whole-frame lock would not be.
    pio device monitor
    ```
 
+   **Use that monitor, not the Arduino IDE's.** Two reasons, and the first
+   catches people every time:
+
+   - The ESP8266's boot ROM prints at **74880 baud** and this firmware prints
+     at **115200**. Whichever one the terminal is set to, the other arrives as
+     mojibake — so a monitor showing nothing but garbage is the normal
+     appearance of a working board, not a broken one. Everything after the
+     `ESP32_Logger sensor node` banner is readable at 115200.
+   - `platformio.ini` sets `monitor_filters = esp8266_exception_decoder`,
+     which turns a crash dump into a stack trace with function names. Without
+     it a crash is a page of hex addresses, which is most of the reason a
+     crashing node looks like a silent one.
+
+   This is a PlatformIO project, not a sketch: `src/main.cpp` is not a `.ino`,
+   and the shared BME280 driver is reached through `-I..`. Opening the folder
+   in the Arduino IDE will not build it.
+
 ## Setup portal
 
 Settings live in `/config.json` on the node's LittleFS. The values in
@@ -246,6 +263,22 @@ To configure without a cable: join the node's `esp-node-XXXX` network
 (password `configure` by default — change `PORTAL_AP_PASS`). A phone normally
 pops the "sign in to network" prompt straight into the form; otherwise open
 `http://192.168.4.1`.
+
+**If the page will not load**, in the order these actually bite:
+
+- **Type `http://` explicitly.** A browser that has seen HTTPS for a bare
+  `192.168.4.1` will retry it as `https://`, and the node serves plain HTTP
+  only. There is no certificate on an 80 MHz part.
+- **Turn mobile data off.** The AP has no internet. Android and iOS both
+  notice and quietly send everything over cellular instead, which looks
+  exactly like a device that is not answering. The "stay connected?" prompt
+  is the one to accept.
+- **Check the window is still open.** The portal only runs without a time
+  limit when the node has nothing to fall back to. If an SSID was compiled in
+  or previously saved, it runs for five minutes after two failed associations
+  and then goes back to retrying — see the table below. The clock is paused
+  while somebody is connected to the AP, so it will not close mid-form, but
+  it can close before you join.
 
 The form covers WiFi, collector address and port, ingest token, optional Basic
 Auth, **sensor pins**, node id, post interval and altitude. Saving writes the
@@ -308,7 +341,7 @@ Leave `ALTITUDE_M` at 0 and only `pressure` is sent.
 | Situation | Behaviour |
 |-----------|-----------|
 | Sensor missing at boot | Retries the probe on every post cycle — a cold breakout that fails its first probe recovers without a power cycle |
-| WiFi down | Gives up the association attempt after 20 s, powers the radio down, retries next cycle. After two consecutive failures it offers the setup portal for 5 minutes, then goes back to retrying |
+| WiFi down | Gives up the association attempt after 20 s, powers the radio down, retries next cycle. After two consecutive failures it offers the setup portal for 5 minutes, then goes back to retrying. Those five minutes are counted only while nobody is joined to the AP — a connected station means a human is mid-configuration, and the window used to close under them |
 | Config lost or corrupt | Falls back to the compiled-in defaults; if those are incomplete, the portal comes up and waits |
 | Collector unreachable | Logs the error and drops that sample; there is no local buffer |
 | Wrong token | Collector answers 401; the message is printed on the serial monitor |
