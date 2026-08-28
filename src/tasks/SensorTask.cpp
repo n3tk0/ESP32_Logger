@@ -25,15 +25,31 @@ void sensorTaskFunc(void* /*param*/) {
         uint32_t pollMs = sensorManager.minReadIntervalMs();
         if (pollMs < 50) pollMs = 50;
 
-        // Timestamp priority: hardware RTC → NTP system clock → millis monotonic
+        // Timestamp priority: system clock → hardware RTC → millis monotonic.
+        //
+        // THE SYSTEM CLOCK LEADS, AND THE ORDER USED TO BE THE OTHER WAY.
+        //
+        // Preferring the RTC looked obviously right — it is the clock that
+        // survives a power cut — but it made every reading carry a stamp from
+        // one clock while ProcessingTask judged it against another. Nothing
+        // disciplines the DS1302 to NTP and nothing seeds the system clock
+        // from the DS1302, so the two drift apart with no upper bound.
+        //
+        // Once the RTC is more than two minutes slow, readingIsBackfilled()
+        // starts calling every fresh reading history: out of the live web
+        // ring, out of alert evaluation, and silent about it. A dashboard that
+        // simply stops updating, weeks after anyone touched the device.
+        //
+        // Judged and stamped by the same clock, that cannot happen. The RTC
+        // keeps the job it is actually needed for — being the only real clock
+        // on a device with no network, where time(nullptr) never becomes
+        // plausible and this falls through to it exactly as before.
         uint32_t ts = 0;
-        if (Rtc) {
+        time_t sysT = time(nullptr);
+        if (sysT > 1000000000L) ts = (uint32_t)sysT;
+        if (ts == 0 && Rtc) {
             RtcDateTime now = Rtc->GetDateTime();
             if (now.IsValid() && now.Year() >= 2020) ts = now.Unix32Time();
-        }
-        if (ts == 0) {
-            time_t sysT = time(nullptr);
-            if (sysT > 1000000000L) ts = (uint32_t)sysT;
         }
         // +1 avoids ts=0 (reserved as "unknown" by SensorTypes.h and
         // LiveAggregator._lastFlushEpoch sentinel).  (AUDIT 10.3)

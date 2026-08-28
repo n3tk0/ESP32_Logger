@@ -39,11 +39,24 @@ int RemoteNodeSensor::readAll(SensorReading* out, int maxOut) {
     // Remember the metric names for getMetrics(). Rebuilt from each drain so
     // a node that starts reporting humidity mid-life (BMP280 swapped for a
     // BME280) shows up without a reboot.
+    //
+    // DISTINCT names, because drain() stopped returning distinct readings.
+    // It now appends the backfill queue after the live values, so an outage
+    // backlog hands back temperature, humidity, pressure, temperature,
+    // humidity, … — and copying that verbatim published a sensor whose metric
+    // list repeated itself into /api/sensors and into MQTT Home Assistant
+    // discovery, where each repeat is another entity for the same reading.
     if (n > 0) {
-        int keep = (n < MAX_METRICS) ? n : MAX_METRICS;
-        for (int i = 0; i < keep; i++) {
-            strncpy(_metricNames[i], out[i].metric, sizeof(_metricNames[i]) - 1);
-            _metricNames[i][sizeof(_metricNames[i]) - 1] = '\0';
+        int keep = 0;
+        for (int i = 0; i < n && keep < MAX_METRICS; i++) {
+            bool seen = false;
+            for (int j = 0; j < keep; j++) {
+                if (strcmp(_metricNames[j], out[i].metric) == 0) { seen = true; break; }
+            }
+            if (seen) continue;
+            strncpy(_metricNames[keep], out[i].metric, sizeof(_metricNames[keep]) - 1);
+            _metricNames[keep][sizeof(_metricNames[keep]) - 1] = '\0';
+            keep++;
         }
         _metricCount = keep;
     }

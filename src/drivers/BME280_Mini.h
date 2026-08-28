@@ -47,7 +47,26 @@ public:
         _write8(0xF2, 0x05);       // ctrl_hum: osrs_h = 16x (only BME280)
         _write8(0xF5, 0x00);       // config: standby 0.5ms, filter off
         _write8(0xF4, 0xB7);       // ctrl_meas: osrs_t=16x, osrs_p=16x, normal mode
-        delay(50);
+
+        // Long enough for the FIRST conversion to finish, which 50 ms was not.
+        //
+        // The datasheet's worst case for the 16x/16x/16x set just written is
+        //   1.25 + (2.3*16) + (2.3*16 + 0.575) + (2.3*16 + 0.575) = 112.8 ms
+        // and until it completes every data register still holds its reset
+        // value, 0x800000 — which readTemperature() and friends correctly
+        // report as NaN.
+        //
+        // begin() returning while that is still true makes it a promise the
+        // function does not keep, and whether anyone noticed came down to what
+        // the caller did next. The collector and the ESP8266 node read on a
+        // timer seconds later, so they never saw it. The ESP-NOW battery node
+        // calls sensorBegin() and readSample() back to back and then deep
+        // sleeps: every wake shipped battery voltage and NaN for temperature,
+        // humidity and pressure — a node that pairs, reports on schedule, and
+        // carries no measurement at all.
+        //
+        // 120 ms, once, at begin. It is not a hot path on any of the three.
+        delay(120);
 
         return true;
     }

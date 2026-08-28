@@ -372,8 +372,22 @@ static void onRecv(const uint8_t* mac, const uint8_t* data, int len) {
     // visible only as a ringFull counter nobody was watching.
     //
     // Unacknowledged, the node keeps its buffer and brings the samples again
-    // on its next wake. A duplicate is free — espnowSeqCheck() drops it — and
-    // a lost reading is not.
+    // on its next wake, which is the right trade: a lost reading cannot be
+    // recovered and a repeated one can be lived with.
+    //
+    // BUT IT IS NOT FREE, and an earlier version of this comment said it was.
+    // espnowSeqCheck() drops a repeated SEQUENCE NUMBER, and the node does not
+    // repeat one — main.cpp increments s_seq on the unacknowledged path too,
+    // then re-sends the buffered samples inside a later frame alongside newer
+    // ones. So the retransmission is not a duplicate frame the collector could
+    // recognise; it is a new frame whose contents overlap.
+    //
+    // What that costs: samples from a frame that landed but whose ACK was lost
+    // in the air are stored twice. The trend grid buckets by the reading's own
+    // timestamp, so a repeat lands in the hour it belongs to and overwrites
+    // rather than double-counting; the CSV gets two rows with the same stamp.
+    // Deduplicating properly needs per-sample identity rather than per-frame,
+    // which the wire format does not carry today.
     taskENTER_CRITICAL(&s_ringMux);
     const int next = (s_ringTail + 1) % RX_RING;
     if (next == s_ringHead) {
@@ -648,6 +662,27 @@ bool espnowIngestBegin() {
         Serial.println("[ESPNOW] WiFi is off — not starting");
         return false;
     }
+
+    // MODEM SLEEP OFF, SAID OUT LOUD RATHER THAN ASSUMED.
+    //
+    // WIFI_PS_MIN_MODEM breaks ESP-NOW unicast while leaving broadcast
+    // working, which is the failure this whole file's header warns about:
+    // pairing succeeds, the node reports for years, and not one reading ever
+    // arrives.
+    //
+    // modemSleepAllowed() in the sketch stops US from ENABLING it. That is
+    // not the same as it being off: the Arduino-ESP32 default for a connected
+    // station is WIFI_PS_MIN_MODEM, and nothing was ever turning it back off.
+    // So the documented failure was not an edge case somebody might configure
+    // their way into — it was the state the collector booted in.
+    //
+    // The node has always done this in linkBegin(). The collector now does the
+    // same thing at the same point, and here rather than in the sketch because
+    // this is the feature that requires it: a WiFi reconnect elsewhere cannot
+    // quietly undo a decision made next to the radio that depends on it.
+    if (esp_wifi_set_ps(WIFI_PS_NONE) != ESP_OK)
+        Serial.println("[ESPNOW] could not turn modem sleep off — "
+                       "unicast may not arrive");
 
     if (esp_now_init() != ESP_OK) {
         Serial.println("[ESPNOW] esp_now_init() failed");
