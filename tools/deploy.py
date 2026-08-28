@@ -35,7 +35,8 @@ from deploy_core import (
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
-from features import always_on_features, grouped, is_known, optional_features
+from features import (default_on_features, grouped, has_a_reading_source,
+                      is_known, optional_features)
 from pio_envs import (
     chip_for, defaults_for, environments, env_names, env_info, ports_for,
     usb_pins,
@@ -174,13 +175,16 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
 
     The list comes from src/setup.h through tools/features.py, so a feature
     added to the firmware shows up here without anyone remembering to add it.
-    Only the off-by-default ones are NUMBERED: an -D flag can switch those on,
-    and cannot switch off one that setup.h enables itself.
 
-    The always-on ones are printed anyway, unnumbered, at the end. BME280 is
-    one of them, and somebody scanning this menu for their sensor and not
-    finding it concludes the firmware has no driver for it. The blank space
-    reads as "no"; the line reads as "already in".
+    Every one of them is selectable, in both directions. That is newer than it
+    looks: setup.h writes `#ifndef X / #define X`, so a -D flag could only ever
+    add, and this menu used to show the off-by-default half and nothing else.
+    The tools now pass FEATURE_SET_EXPLICIT, which skips those defaults and
+    makes the list they send the whole set — so clearing BME280 or the SD
+    driver does what it says.
+
+    The dot in the margin marks what a plain `pio run` would have given you,
+    which is the only thing the old split still usefully told anyone.
     """
     while True:
         opts = optional_features()
@@ -189,6 +193,7 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
         print()
         print(_bold("  ── Build features " + "─" * 44))
         print(_dim("  Compiled in through PLATFORMIO_BUILD_FLAGS. No file is edited."))
+        print(_dim("  A dot marks what a plain `pio run` would give you."))
         print()
 
         index: list[str] = []
@@ -198,22 +203,21 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
                 index.append(f.macro)
                 n = len(index)
                 tick = _green("✓") if f.macro in chosen else " "
-                label = f.macro.replace("SENSOR_", "").replace("_ENABLED", "")
-                print(f"  {_cyan(f'[{n:>2}]')} [{tick}] {label:<22} {_dim(f.summary)}")
-            print()
-
-        always = always_on_features()
-        if always:
-            print(_bold("  Always on"))
-            print(_dim("  In every build. Removing one means editing src/setup.h."))
-            for f in always:
+                dot = "•" if f.enabled else " "
                 label = (f.macro.replace("SENSOR_", "").replace("EXPORT_", "")
                                 .replace("_ENABLED", ""))
-                # rstrip because not every always-on macro carries a trailing
-                # comment in setup.h to derive a summary from, and a line of
-                # padding after the name looks like something failed to load.
-                print(f"       [{_green('✓')}] {label:<22} "
+                print(f"  {_cyan(f'[{n:>2}]')} [{tick}]{dot} {label:<22} "
                       f"{_dim(f.summary) if f.summary else ''}".rstrip())
+            print()
+
+        # The rule setup.h enforces with an #error, said here in a sentence
+        # while there is still something to click. A compiler diagnostic is a
+        # fine backstop and a poor first contact.
+        if not has_a_reading_source(chosen):
+            print(_red("  Nothing to read from.") +
+                  _dim("  Pick at least one sensor, or a remote-node feature to"))
+            print(_dim("  receive readings from another board. The build refuses "
+                       "otherwise."))
             print()
 
         if "FEATURE_ESPNOW_INGEST" in chosen:
@@ -227,7 +231,11 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
             print(f"  {_cyan('[k]')}  ESP-NOW key   {shown}")
             print()
 
-        print(f"  {_cyan('[c]')}  Clear all      {_cyan('[b]')}  Back")
+        # A starting point. Now that the tool controls the whole set, a fresh
+        # config means thirty cleared boxes, and the first thing anyone wants
+        # is "what I would have got anyway, then my changes".
+        print(f"  {_cyan('[d]')}  Default set    {_cyan('[c]')}  Clear all"
+              f"      {_cyan('[b]')}  Back")
         print()
 
         try:
@@ -241,6 +249,9 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
             return
         if low == "c":
             cfg["features"] = []
+            continue
+        if low == "d":
+            cfg["features"] = [f.macro for f in default_on_features()]
             continue
         if low == "k" and "FEATURE_ESPNOW_INGEST" in chosen:
             print(_dim("  16 characters exactly. Empty leaves setup.h's default in place."))

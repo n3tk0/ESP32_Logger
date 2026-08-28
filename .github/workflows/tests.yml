@@ -250,6 +250,15 @@ jobs:
         # in the API reference table (the table had drifted to ~10% coverage).
         run: python3 tools/check_api_docs.py
 
+      - name: Verify every feature guard can see the macro it tests
+        # AlertEngine.cpp guarded its MQTT publishing on EXPORT_MQTT_ENABLED
+        # and never included setup.h, so the macro was undefined there and the
+        # block was compiled out of every default build. Alerts silently never
+        # reached MQTT, and nothing said so — not a warning, not a link error,
+        # not a failing test. It surfaced only when the deploy tools started
+        # passing the feature set on the command line and the image grew.
+        run: python3 tools/check_feature_guards.py
+
       - name: Verify the docs cite symbols, not line numbers
         # Line citations rot silently and a reader cannot tell a stale one from
         # their own confusion. When this check was added, all 53 file:line

@@ -51,7 +51,8 @@ from deploy_core import (
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
-from features import always_on_features, grouped, is_known, optional_features
+from features import (default_on_features, grouped,
+                      has_a_reading_source, is_known, optional_features)
 from pio_envs import (
     INI, NO_PROJECT, chip_for, defaults_for, env_info, environments, env_names,
     ports_for, usb_pins,
@@ -425,22 +426,24 @@ class DeployerGUI:
         and for the same reason: four hand-maintained copies of one list is
         four things to go stale, and they all did.
 
-        Only the off-by-default features get a checkbox. A -D flag can switch
-        those on; it cannot switch off one that setup.h enables itself, and a
-        checkbox that cannot do what it says is worse than no checkbox.
+        EVERY feature gets a checkbox, and clearing one means it. That is
+        newer than it looks: setup.h writes `#ifndef X / #define X`, so a -D
+        flag could only ever add, and this list used to hold the off-by-default
+        half — BME280 had no switch at all, and neither did the 34 KB of SD
+        driver on a device that may never have a card in it. The tools now pass
+        FEATURE_SET_EXPLICIT, which skips those defaults, so what is ticked
+        here is the whole build.
 
-        The always-on ones are LISTED anyway, read-only, under the rest. That
-        is not decoration: BME280 is one of them, and a person who opens this
-        window, scans it for their sensor and does not find it concludes the
-        firmware does not support it. An empty space says "no"; the list says
-        "already in, and here is what to edit if you want it out".
+        A dot marks what a plain `pio run` would have given you. It is the only
+        thing the old on/off split still usefully said, and "Default set"
+        below restores exactly that.
         """
         ctk.CTkLabel(parent, text="Build features:",
                      font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(14, 2))
         ctk.CTkLabel(parent,
                      text="Compiled in via PLATFORMIO_BUILD_FLAGS. No project "
                           "file is edited, so an abandoned deploy leaves the "
-                          "checkout as it was.",
+                          "checkout as it was.  •  marks the default set.",
                      font=("Helvetica", 8), text_color="gray",
                      wraplength=420, justify="left").pack(anchor="w", padx=(20, 0))
 
@@ -456,7 +459,10 @@ class DeployerGUI:
             for f in rows:
                 var = ctk.BooleanVar(value=f.macro in selected)
                 self.feature_vars[f.macro] = var
-                label = f.macro.replace("SENSOR_", "").replace("_ENABLED", "")
+                label = (f.macro.replace("SENSOR_", "").replace("EXPORT_", "")
+                                .replace("_ENABLED", ""))
+                if f.enabled:
+                    label = f"• {label}"
                 if f.summary:
                     label = f"{label}  —  {f.summary}"
                 ctk.CTkCheckBox(
@@ -465,28 +471,26 @@ class DeployerGUI:
                     font=("Helvetica", 9),
                 ).pack(anchor="w", padx=(14, 0), pady=1)
 
-        # Already in every build. Labels rather than disabled checkboxes: a
-        # greyed tick still looks like a control somebody failed to reach,
-        # while a line of text reads as a statement of fact.
-        always = always_on_features()
-        if always:
-            ctk.CTkLabel(box, text="Always on",
-                         font=("Helvetica", 9, "bold")).pack(anchor="w", pady=(10, 0))
-            ctk.CTkLabel(
-                box,
-                text="In every build. Removing one means editing "
-                     "src/setup.h — a source change to make deliberately, "
-                     "not something a flash tool does behind your back.",
-                font=("Helvetica", 8), text_color="gray",
-                wraplength=380, justify="left").pack(anchor="w", padx=(14, 0))
-            for f in always:
-                name = f.macro.replace("SENSOR_", "").replace("EXPORT_", "") \
-                              .replace("_ENABLED", "")
-                text = f"✓  {name}"
-                if f.summary:
-                    text = f"{text}  —  {f.summary}"
-                ctk.CTkLabel(box, text=text, font=("Helvetica", 9),
-                             text_color="gray").pack(anchor="w", padx=(14, 0), pady=1)
+        # A starting point. Thirty cleared boxes is what a fresh config now
+        # looks like, and the first thing anyone wants from it is "what I
+        # would have got anyway, then my changes".
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(anchor="w", pady=(2, 0))
+        ctk.CTkButton(row, text="Default set", width=100, height=24,
+                      font=("Helvetica", 9),
+                      command=self._features_default).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(row, text="Clear all", width=90, height=24,
+                      font=("Helvetica", 9), fg_color="gray30",
+                      command=self._features_clear).pack(side="left")
+
+        # The rule setup.h enforces with an #error, said here while there is
+        # still something to click. A compiler diagnostic is a fine backstop
+        # and a poor first contact.
+        self.feature_warning = ctk.CTkLabel(
+            parent, text="", font=("Helvetica", 9),
+            text_color="#d9822b", wraplength=420, justify="left")
+        self.feature_warning.pack(anchor="w", padx=(20, 0), pady=(4, 0))
+        self._refresh_feature_warning()
 
         # The ESP-NOW key. Shown always rather than hidden behind its feature:
         # a field that appears and disappears as a checkbox is clicked is
@@ -505,6 +509,35 @@ class DeployerGUI:
         self.espnow_lmk_note.pack(anchor="w", padx=(20, 0), pady=(0, 10))
         self._refresh_espnow_note()
 
+    def _set_features(self, macros) -> None:
+        """Point every checkbox at `macros`, then save and re-validate."""
+        wanted = set(macros)
+        for m, var in self.feature_vars.items():
+            var.set(m in wanted)
+        self._save_setting("features", None, sorted(wanted))
+        self._refresh_espnow_note()
+        self._refresh_feature_warning()
+
+    def _features_default(self) -> None:
+        self._set_features(f.macro for f in default_on_features())
+
+    def _features_clear(self) -> None:
+        self._set_features([])
+
+    def _refresh_feature_warning(self) -> None:
+        """Say when the selected set cannot produce a reading."""
+        note = getattr(self, "feature_warning", None)
+        if note is None:
+            return
+        chosen = [m for m, v in self.feature_vars.items() if v.get()]
+        if has_a_reading_source(chosen):
+            note.configure(text="")
+        else:
+            note.configure(
+                text="Nothing to read from. Pick at least one sensor, or a "
+                     "remote-node feature to receive readings from another "
+                     "board — the firmware refuses to compile otherwise.")
+
     def _on_feature_toggle(self, macro: str) -> None:
         feats = [m for m, v in self.feature_vars.items() if v.get()]
 
@@ -519,6 +552,7 @@ class DeployerGUI:
 
         self._save_setting("features", None, feats)
         self._refresh_espnow_note()
+        self._refresh_feature_warning()
 
     def _save_espnow_lmk(self) -> None:
         key = self.espnow_lmk_entry.get().strip()

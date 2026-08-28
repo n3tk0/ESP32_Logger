@@ -27,7 +27,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from features import all_features, optional_features  # noqa: E402
+from features import (all_features, build_flags_for,     # noqa: E402
+                      has_a_reading_source, optional_features)
 from pio_envs import _project_root                    # noqa: E402
 
 #: Features this project is known to have. Named rather than counted, because a
@@ -39,6 +40,15 @@ MUST_OFFER = {
     "FEATURE_KINDLE_DASHBOARD",
     "MODULE_FORECAST_ENABLED",
     "MODULE_HEATER_ENABLED",
+    # The four below ship ON. They belong here since FEATURE_SET_EXPLICIT made
+    # a cleared checkbox mean something: BME280 is the one somebody went
+    # looking for and could not find, and the SD driver is 34 KB of flash on a
+    # device that may have no card in it. If either drops out of the menu the
+    # tools are back to offering half the truth.
+    "SENSOR_BME280_ENABLED",
+    "SENSOR_SDS011_ENABLED",
+    "FEATURE_SD_STORAGE",
+    "EXPORT_MQTT_ENABLED",
 }
 
 
@@ -104,12 +114,38 @@ def main() -> int:
                 f"features.py reports {len(extra)} {label} toggle(s) that are not "
                 f"there: {', '.join(sorted(extra))}")
 
-    absent = MUST_OFFER - parsed_off
+    offered = {f.macro for f in optional_features()}
+    absent = MUST_OFFER - offered
     if absent:
         problems.append(
-            f"these are not offered as optional features: {', '.join(sorted(absent))}\n"
-            f"    Either setup.h stopped declaring them, or one is now on by "
-            f"default — in which case MUST_OFFER here needs updating too.")
+            f"these are not offered by the deploy tools: {', '.join(sorted(absent))}\n"
+            f"    Either setup.h stopped declaring them, or the parser stopped "
+            f"seeing them. Check the _DEFINE regex in tools/features.py.")
+
+    # THE INVARIANT THAT MAKES A CLEARED CHECKBOX MEAN ANYTHING.
+    #
+    # setup.h applies its own defaults unless FEATURE_SET_EXPLICIT is defined,
+    # so a flag string without it can only ever ADD features: untick BME280 or
+    # the SD driver, and the build still has both. That failure is invisible —
+    # the deploy succeeds, the firmware runs, and it is simply 34 KB larger
+    # than the tool said it would be — so it is asserted rather than trusted.
+    flags = build_flags_for(["SENSOR_BME280_ENABLED"])
+    if "-DFEATURE_SET_EXPLICIT" not in flags:
+        problems.append(
+            "build_flags_for() does not pass -DFEATURE_SET_EXPLICIT.\n"
+            "    Without it setup.h re-applies its defaults and every cleared "
+            "checkbox is ignored, silently.")
+
+    # And the guard on the far side: a set with nothing to read from must be
+    # refused by the tools before the compiler has to refuse it.
+    if has_a_reading_source([]):
+        problems.append("has_a_reading_source([]) is True — the empty set must "
+                        "not count as a build that can measure anything.")
+    if not has_a_reading_source(["SENSOR_BME280_ENABLED"]):
+        problems.append("has_a_reading_source() does not count a local sensor.")
+    if not has_a_reading_source(["FEATURE_ESPNOW_INGEST"]):
+        problems.append("has_a_reading_source() does not count a remote node, "
+                        "but setup.h's #error accepts one.")
 
     if problems:
         print(f"FAIL: {len(problems)} problem(s) with the feature list.\n")
@@ -117,9 +153,10 @@ def main() -> int:
             print(f"  {p}")
         return 1
 
-    print(f"OK: {len(parsed_off)} optional feature(s) offered by the deploy "
-          f"tools, {len(parsed_on)} on by default, both agreeing with a "
-          f"second independent scan of src/setup.h.")
+    print(f"OK: {len(offered)} feature(s) offered by the deploy tools, all "
+          f"switchable both ways; {len(parsed_on)} of them are what a plain "
+          f"`pio run` gets. Agrees with a second independent scan of "
+          f"src/setup.h.")
     return 0
 
 

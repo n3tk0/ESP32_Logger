@@ -128,13 +128,50 @@ def all_features() -> list[Feature]:
 
 
 def optional_features() -> list[Feature]:
-    """The ones a build flag can switch ON. See the note at the top of the file."""
-    return [f for f in all_features() if not f.enabled]
+    """Every feature. All of them are selectable, in both directions.
+
+    Kept under the old name because three tools import it, and because the
+    thing it means has not changed — "what the tool may offer" — only the
+    answer has. A build flag used to be able to add a feature and never
+    remove one, so this returned the off-by-default half; with
+    FEATURE_SET_EXPLICIT the tools pass the complete set and a checkbox means
+    what it says either way.
+    """
+    return all_features()
+
+
+def default_on_features() -> list[Feature]:
+    """The ones a plain `pio run` gets, for a tool that offers to preselect."""
+    return [f for f in all_features() if f.enabled]
 
 
 def always_on_features() -> list[Feature]:
-    """The ones setup.h enables by default, which -D cannot switch off."""
-    return [f for f in all_features() if f.enabled]
+    """Nothing is unconditionally on any more; kept so old callers still run.
+
+    Before FEATURE_SET_EXPLICIT this listed the eight features setup.h defined
+    itself, which no -D could remove. It returns empty now, and any UI built on
+    it renders nothing rather than a stale panel.
+    """
+    return []
+
+
+def sensor_features() -> list[Feature]:
+    """The ones that count towards "this build can measure something"."""
+    return [f for f in all_features() if f.group == "Sensors"]
+
+
+#: A build with none of these has nothing to measure and nothing to receive.
+#: setup.h refuses it with an #error; the tools refuse it earlier, with a
+#: sentence instead of a compiler diagnostic. Kept here so both agree.
+REMOTE_SOURCE_MACROS = ("FEATURE_REMOTE_NODES", "FEATURE_ESPNOW_INGEST")
+
+
+def has_a_reading_source(macros) -> bool:
+    """Whether `macros` gives the firmware any way to obtain a reading."""
+    chosen = set(macros)
+    if any(m in chosen for m in REMOTE_SOURCE_MACROS):
+        return True
+    return any(f.macro in chosen for f in sensor_features())
 
 
 def grouped(features: list[Feature]) -> dict[str, list[Feature]]:
@@ -167,8 +204,14 @@ def build_flags_for(macros, extra: dict[str, str] | None = None) -> str:
 
     `extra` carries string-valued flags such as the ESP-NOW key, quoted the way
     the compiler needs.
+
+    FEATURE_SET_EXPLICIT leads, and it is what makes a cleared checkbox mean
+    anything. Without it setup.h applies its own defaults and the flags below
+    can only add to them — so unticking BME280 or the SD driver would compile a
+    build that still had both. With it, this list is the whole set.
     """
-    parts = [f"-D{m}" for m in macros if is_known(m)]
+    parts = ["-DFEATURE_SET_EXPLICIT"]
+    parts += [f"-D{m}" for m in macros if is_known(m)]
     for key, value in (extra or {}).items():
         if value:
             parts.append(f'-D{key}=\\"{value}\\"')
@@ -176,19 +219,20 @@ def build_flags_for(macros, extra: dict[str, str] | None = None) -> str:
 
 
 def main() -> int:
-    opt = optional_features()
-    print(f"Optional — a build flag can switch these ON ({len(opt)}):\n")
-    for group, rows in grouped(opt).items():
+    feats = all_features()
+    print(f"Every feature the deploy tools can switch either way ({len(feats)}).")
+    print("A dot marks the ones a plain `pio run` gets; the tools pass")
+    print("FEATURE_SET_EXPLICIT, so what they send is the whole set.\n")
+    for group, rows in grouped(feats).items():
         print(f"  {group}")
         for f in rows:
-            print(f"    {f.macro:<32} {f.summary}")
+            mark = "•" if f.enabled else " "
+            print(f"   {mark} {f.macro:<32} {f.summary}")
         print()
 
-    always = always_on_features()
-    print(f"On by default — setup.h must be edited to remove these ({len(always)}):\n")
-    for group, rows in grouped(always).items():
-        names = ", ".join(f.macro for f in rows)
-        print(f"  {group:<12} {names}")
+    sensors = sensor_features()
+    print(f"At least one of these {len(sensors)} sensors — or a remote-node")
+    print("feature — has to survive, or setup.h refuses to compile.")
     return 0
 
 

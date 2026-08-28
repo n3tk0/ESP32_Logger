@@ -87,23 +87,52 @@ def run(app) -> None:
     if "FEATURE_ESPNOW_INGEST" not in fv:
         return
 
-    # ── The always-on features are NAMED, not merely absent ─────────────────
+    # ── Every feature is tickable, the once-always-on ones included ─────────
     #
-    # They get no checkbox, and rightly: a -D flag cannot switch off something
-    # setup.h defines itself, so a tickable box would be a lie. But an absence
-    # says the wrong thing. This check exists because somebody opened the
-    # window looking for BME280, did not find it, and concluded the firmware
-    # had no driver for it — when it is in every build ever produced.
+    # This check exists because somebody opened the window looking for BME280,
+    # did not find it, and concluded the firmware had no driver for it — when
+    # it was in every build ever produced. It had no checkbox because setup.h
+    # defined it itself and no -D flag could remove it. FEATURE_SET_EXPLICIT
+    # changed that, and this asserts the window caught up.
+    from features import all_features         # noqa: PLC0415
+    for macro in ("SENSOR_BME280_ENABLED", "SENSOR_SDS011_ENABLED",
+                  "FEATURE_SD_STORAGE", "EXPORT_MQTT_ENABLED"):
+        check(macro in fv, f"{macro} has a checkbox of its own")
+    check(len(fv) == len(all_features()),
+          f"all {len(all_features())} features are offered, none held back")
+
+    # ── The set buttons ─────────────────────────────────────────────────────
+    app._features_default()
+    feats = set(app.cfg.get("features") or [])
+    check("SENSOR_BME280_ENABLED" in feats and "FEATURE_SD_STORAGE" in feats,
+          "Default set restores what a plain `pio run` gives")
+    check("FEATURE_KINDLE_DASHBOARD" not in feats,
+          "and does not quietly add an off-by-default one")
+
+    # ── The rule that a build must be able to read something ────────────────
     #
-    # Asserted through the widget tree rather than the source, so deleting the
-    # panel fails here even if features.py still knows the list.
-    from features import always_on_features   # noqa: PLC0415
+    # setup.h refuses this with an #error. The window has to say so while
+    # there is still something to click: a compiler diagnostic is a fine
+    # backstop and a poor first contact.
+    app._features_clear()
     painted = _all_label_text(app.root)
-    for f in always_on_features():
-        name = (f.macro.replace("SENSOR_", "").replace("EXPORT_", "")
-                       .replace("_ENABLED", ""))
-        check(name in painted, f"{name} is shown as always-on")
-    check("setup.h" in painted, "and the window says where to go to remove one")
+    check("Nothing to read from" in painted,
+          "clearing everything warns that nothing can be measured")
+
+    app._set_features(["SENSOR_BME280_ENABLED"])
+    painted = _all_label_text(app.root)
+    check("Nothing to read from" not in painted,
+          "and one sensor clears the warning")
+
+    # A collector that only aggregates other boards is a legitimate build, and
+    # setup.h's #error accepts one — so the window must not refuse it either.
+    app._set_features(["FEATURE_ESPNOW_INGEST"])
+    painted = _all_label_text(app.root)
+    check("Nothing to read from" not in painted,
+          "a remote-node-only build is not treated as sensorless")
+
+    # Put the boxes back where the rest of this file expects them.
+    app._features_clear()
 
     # ── Ticking ESP-NOW must also tick what it implies ──────────────────────
     # setup.h defines FEATURE_REMOTE_NODES either way, so leaving the box
