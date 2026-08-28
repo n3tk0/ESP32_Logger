@@ -35,7 +35,7 @@ from deploy_core import (
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
-from features import grouped, is_known, optional_features
+from features import always_on_features, grouped, is_known, optional_features
 from pio_envs import (
     chip_for, defaults_for, environments, env_names, env_info, ports_for,
     usb_pins,
@@ -174,8 +174,13 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
 
     The list comes from src/setup.h through tools/features.py, so a feature
     added to the firmware shows up here without anyone remembering to add it.
-    Only the off-by-default ones appear: an -D flag can switch those on, and
-    cannot switch off one that setup.h enables itself.
+    Only the off-by-default ones are NUMBERED: an -D flag can switch those on,
+    and cannot switch off one that setup.h enables itself.
+
+    The always-on ones are printed anyway, unnumbered, at the end. BME280 is
+    one of them, and somebody scanning this menu for their sensor and not
+    finding it concludes the firmware has no driver for it. The blank space
+    reads as "no"; the line reads as "already in".
     """
     while True:
         opts = optional_features()
@@ -195,6 +200,20 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
                 tick = _green("✓") if f.macro in chosen else " "
                 label = f.macro.replace("SENSOR_", "").replace("_ENABLED", "")
                 print(f"  {_cyan(f'[{n:>2}]')} [{tick}] {label:<22} {_dim(f.summary)}")
+            print()
+
+        always = always_on_features()
+        if always:
+            print(_bold("  Always on"))
+            print(_dim("  In every build. Removing one means editing src/setup.h."))
+            for f in always:
+                label = (f.macro.replace("SENSOR_", "").replace("EXPORT_", "")
+                                .replace("_ENABLED", ""))
+                # rstrip because not every always-on macro carries a trailing
+                # comment in setup.h to derive a summary from, and a line of
+                # padding after the name looks like something failed to load.
+                print(f"       [{_green('✓')}] {label:<22} "
+                      f"{_dim(f.summary) if f.summary else ''}".rstrip())
             print()
 
         if "FEATURE_ESPNOW_INGEST" in chosen:

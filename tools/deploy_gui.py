@@ -51,7 +51,7 @@ from deploy_core import (
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
-from features import grouped, is_known, optional_features
+from features import always_on_features, grouped, is_known, optional_features
 from pio_envs import (
     INI, NO_PROJECT, chip_for, defaults_for, env_info, environments, env_names,
     ports_for, usb_pins,
@@ -425,9 +425,15 @@ class DeployerGUI:
         and for the same reason: four hand-maintained copies of one list is
         four things to go stale, and they all did.
 
-        Only the off-by-default features are shown. A -D flag can switch those
-        on; it cannot switch off one that setup.h enables itself, and a
+        Only the off-by-default features get a checkbox. A -D flag can switch
+        those on; it cannot switch off one that setup.h enables itself, and a
         checkbox that cannot do what it says is worse than no checkbox.
+
+        The always-on ones are LISTED anyway, read-only, under the rest. That
+        is not decoration: BME280 is one of them, and a person who opens this
+        window, scans it for their sensor and does not find it concludes the
+        firmware does not support it. An empty space says "no"; the list says
+        "already in, and here is what to edit if you want it out".
         """
         ctk.CTkLabel(parent, text="Build features:",
                      font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(14, 2))
@@ -458,6 +464,29 @@ class DeployerGUI:
                     command=lambda m=f.macro: self._on_feature_toggle(m),
                     font=("Helvetica", 9),
                 ).pack(anchor="w", padx=(14, 0), pady=1)
+
+        # Already in every build. Labels rather than disabled checkboxes: a
+        # greyed tick still looks like a control somebody failed to reach,
+        # while a line of text reads as a statement of fact.
+        always = always_on_features()
+        if always:
+            ctk.CTkLabel(box, text="Always on",
+                         font=("Helvetica", 9, "bold")).pack(anchor="w", pady=(10, 0))
+            ctk.CTkLabel(
+                box,
+                text="In every build. Removing one means editing "
+                     "src/setup.h — a source change to make deliberately, "
+                     "not something a flash tool does behind your back.",
+                font=("Helvetica", 8), text_color="gray",
+                wraplength=380, justify="left").pack(anchor="w", padx=(14, 0))
+            for f in always:
+                name = f.macro.replace("SENSOR_", "").replace("EXPORT_", "") \
+                              .replace("_ENABLED", "")
+                text = f"✓  {name}"
+                if f.summary:
+                    text = f"{text}  —  {f.summary}"
+                ctk.CTkLabel(box, text=text, font=("Helvetica", 9),
+                             text_color="gray").pack(anchor="w", padx=(14, 0), pady=1)
 
         # The ESP-NOW key. Shown always rather than hidden behind its feature:
         # a field that appears and disappears as a checkbox is clicked is

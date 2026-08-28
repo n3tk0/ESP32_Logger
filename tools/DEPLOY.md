@@ -254,12 +254,24 @@ a duplicate flag appended on every single run, a build comment rewritten into
 nonsense. Nothing in the feature path touches a file, so a deploy you abandon
 halfway leaves the checkout exactly as it was.
 
-**Only the off-by-default features are offered.** A `-D` flag can switch those
-on; it cannot switch off one that `setup.h` enables itself, because the header
-writes `#ifndef X / #define X` and defines it again a line after any `-U`.
-Turning one of those off means editing `setup.h`, which is a source change a
-person should make deliberately. `python3 tools/features.py` prints both lists
-and says which is which.
+**Only the off-by-default features are selectable.** A `-D` flag can switch
+those on; it cannot switch off one that `setup.h` enables itself, because the
+header writes `#ifndef X / #define X` and defines it again a line after any
+`-U`. Turning one of those off means editing `setup.h`, which is a source
+change a person should make deliberately. `python3 tools/features.py` prints
+both lists and says which is which.
+
+The always-on ones are **shown anyway**, read-only, under the selectable list —
+unnumbered in the CLI, greyed labels in the GUI. That is not decoration.
+BME280/BMP280 is one of them, and the absence of a checkbox for it reads as
+"this firmware has no BME280 driver" rather than as "already in every build",
+which is exactly the wrong conclusion and one somebody reached. An empty space
+answers a question it was never asked; the list answers the one that was.
+
+`tests/gui/drive_deploy_gui.py` asserts each always-on name is painted
+somewhere in the window, walking the widget tree rather than the source that
+built it — deleting the panel has to fail the test even while `features.py`
+still knows the list.
 
 The flags go to **every** `pio run`, not only the compile step. `pio run -t
 upload` relinks before it flashes, so an upload that did not carry them would

@@ -47,6 +47,25 @@ def check(cond: bool, what: str) -> None:
         print(f"  FAIL {what}")
 
 
+def _all_label_text(widget) -> str:
+    """Every piece of text painted anywhere in the window, concatenated.
+
+    Walks the widget tree rather than reading the source that built it: the
+    question is what a person sees, and a panel that stopped being packed is
+    exactly the regression worth catching.
+    """
+    out = []
+    try:
+        text = widget.cget("text")
+        if isinstance(text, str):
+            out.append(text)
+    except Exception:
+        pass
+    for child in getattr(widget, "winfo_children", lambda: [])():
+        out.append(_all_label_text(child))
+    return "\n".join(out)
+
+
 def run(app) -> None:
     fv = app.feature_vars
 
@@ -67,6 +86,24 @@ def run(app) -> None:
     check("FEATURE_ESPNOW_INGEST" in fv, "the ESP-NOW checkbox exists")
     if "FEATURE_ESPNOW_INGEST" not in fv:
         return
+
+    # ── The always-on features are NAMED, not merely absent ─────────────────
+    #
+    # They get no checkbox, and rightly: a -D flag cannot switch off something
+    # setup.h defines itself, so a tickable box would be a lie. But an absence
+    # says the wrong thing. This check exists because somebody opened the
+    # window looking for BME280, did not find it, and concluded the firmware
+    # had no driver for it — when it is in every build ever produced.
+    #
+    # Asserted through the widget tree rather than the source, so deleting the
+    # panel fails here even if features.py still knows the list.
+    from features import always_on_features   # noqa: PLC0415
+    painted = _all_label_text(app.root)
+    for f in always_on_features():
+        name = (f.macro.replace("SENSOR_", "").replace("EXPORT_", "")
+                       .replace("_ENABLED", ""))
+        check(name in painted, f"{name} is shown as always-on")
+    check("setup.h" in painted, "and the window says where to go to remove one")
 
     # ── Ticking ESP-NOW must also tick what it implies ──────────────────────
     # setup.h defines FEATURE_REMOTE_NODES either way, so leaving the box
