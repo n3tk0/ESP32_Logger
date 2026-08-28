@@ -404,6 +404,7 @@ static void handleEspnowStatus(AsyncWebServerRequest* req) {
     st["replayed"]          = s.replayed;
     st["ring_full"]         = s.ringFull;
     st["history_collapsed"] = s.historyCollapsed;
+    st["history_no_clock"]  = s.historyNoClock;
     st["acks"]              = s.acksSent;
     st["discover_seen"]     = s.discoverSeen;
     st["discover_bad_sig"]  = s.discoverBadSig;

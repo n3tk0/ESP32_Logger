@@ -163,7 +163,23 @@ static inline uint8_t currentChannel() {
 // Called only from the tick, so the node lock is taken here rather than by
 // the caller. Nothing else in this file writes the filesystem.
 
+// Persisting the node table, with a retry that is not a spin.
+//
+// s_dirty stays set when the write fails, which is right — the table still
+// needs saving — but the tick runs from loop(), so "still needs saving" meant
+// retrying the open thousands of times a second and printing a line each time.
+// A full or broken filesystem does not heal inside a millisecond, and the log
+// it produced would bury whatever else was wrong.
+//
+// So a failure buys a minute of quiet. The flag is untouched, so the retry
+// still happens; it just happens at a rate that matches how fast a filesystem
+// fault can plausibly clear.
+static uint32_t s_saveRetryAtMs = 0;   ///< millis() before which not to retry
+
 static void saveNodes() {
+    // Signed difference, so this stays correct across the millis() wrap.
+    if (s_saveRetryAtMs != 0 && (int32_t)(s_saveRetryAtMs - millis()) > 0) return;
+
     EspNowNode snap[EspNowNodeTable::CAP];
     taskENTER_CRITICAL(&s_nodeMux);
     for (int i = 0; i < EspNowNodeTable::CAP; i++) snap[i] = s_nodes.at(i);
@@ -171,7 +187,10 @@ static void saveNodes() {
 
     File f = LittleFS.open(NODES_FILE, "w");
     if (!f) {
-        Serial.println("[ESPNOW] could not open the node file for writing");
+        Serial.println("[ESPNOW] could not open the node file for writing "
+                       "— retrying in 60 s");
+        s_saveRetryAtMs = millis() + 60000u;
+        if (s_saveRetryAtMs == 0) s_saveRetryAtMs = 1;   // 0 means "no backoff"
         return;
     }
     f.write((const uint8_t*)&NODES_MAGIC, sizeof(NODES_MAGIC));
@@ -179,6 +198,7 @@ static void saveNodes() {
         f.write((const uint8_t*)&snap[i], sizeof(snap[i]));
     f.close();
     s_dirty = false;
+    s_saveRetryAtMs = 0;
 }
 
 static void loadNodes() {
@@ -340,8 +360,19 @@ static void onRecv(const uint8_t* mac, const uint8_t* data, int len) {
 
     DataMsg m;
     espnowDecodeData(data, len, m);
-    sendAck(mac, m);
 
+    // QUEUE FIRST, ACK SECOND, and the order is the whole point.
+    //
+    // The ACK is what tells the node its report landed; on receiving one the
+    // node clears the samples it was carrying — up to fifteen of them, an
+    // outage's worth. Acknowledging before the enqueue meant a ring-full drop
+    // still said "landed", and the node then threw away readings that had
+    // reached no further than this function. A silent hole in the record,
+    // visible only as a ringFull counter nobody was watching.
+    //
+    // Unacknowledged, the node keeps its buffer and brings the samples again
+    // on its next wake. A duplicate is free — espnowSeqCheck() drops it — and
+    // a lost reading is not.
     taskENTER_CRITICAL(&s_ringMux);
     const int next = (s_ringTail + 1) % RX_RING;
     if (next == s_ringHead) {
@@ -353,6 +384,10 @@ static void onRecv(const uint8_t* mac, const uint8_t* data, int len) {
     s_ring[s_ringTail].msg = m;
     s_ringTail = next;
     taskEXIT_CRITICAL(&s_ringMux);
+
+    // Safely outside the spinlock, and only now that the frame is somewhere
+    // the tick will find it.
+    sendAck(mac, m);
 
     if (rssi) {
         taskENTER_CRITICAL(&s_nodeMux);
@@ -520,11 +555,10 @@ void espnowIngestTick() {
         EspNowNode snap{};
         if (!acceptFrame(f, id, sizeof(id), snap)) continue;
 
-        // The node's own clock is used when it has one. RemoteIngest stores
-        // the timestamp but SensorManager stamps its own over it anyway (see
-        // RemoteIngest::put), so this is the node's sampling time being
-        // preserved against the day that changes — not something the pipeline
-        // reads today.
+        // The node's own clock is used when it has one, and it is load-bearing:
+        // SensorManager stamps only a reading whose timestamp is zero, so what
+        // is derived here is the time the reading is filed under. Zero when
+        // neither side has a clock, which the history path below tests for.
         const uint32_t base = f.msg.epoch ? f.msg.epoch : nowEpoch();
 
         // WHERE EACH SAMPLE GOES
@@ -555,6 +589,14 @@ void espnowIngestTick() {
             for (int k = 0; k < cnt; k++) {
                 if (i == newest) {
                     remoteIngest.put(id, m[k].metric, m[k].value, m[k].unit, ts);
+                } else if (ts < 1000000000u) {
+                    // No clock anywhere — not on the node, not here — so a
+                    // backdated reading has no date to be filed under and
+                    // putHistorical() would refuse it. Counted separately
+                    // from the overflow below, because the two ask for
+                    // opposite things: one wants a bigger queue, this one
+                    // wants NTP or an RTC.
+                    s_stats.historyNoClock++;
                 } else if (!remoteIngest.putHistorical(id, m[k].metric, m[k].value,
                                                        m[k].unit, ts)) {
                     // The queue was full and shed its oldest entry to take
@@ -642,13 +684,32 @@ bool espnowPairingActive() {
     return (int32_t)(s_pairUntilMs - millis()) > 0;
 }
 
+// Either both halves take, or neither does.
+//
+// This used to mutate the table and then add the radio peer, so a peer that
+// could not be added left the table already changed: a rename applied in RAM,
+// s_dirty never set so it was never written, and the API returning an error
+// over the top of it. The page then showed the new name until the next reboot
+// showed the old one.
+//
+// The peer goes first now, because it is the half that can fail for reasons
+// outside this table — the driver's peer list is a fixed twenty slots. And if
+// the table refuses afterwards, a peer this call created is taken back out;
+// one that was already there is left alone, since renaming an existing node
+// must not cost it its peer.
 bool espnowAddNode(const uint8_t mac[6], uint8_t nodeId, const char* label,
                    uint16_t intervalS) {
+    const bool peerExisted = s_up && esp_now_is_peer_exist(mac);
+    if (s_up && !addPeer(mac)) return false;
+
     taskENTER_CRITICAL(&s_nodeMux);
     const bool ok = s_nodes.add(mac, nodeId, label, intervalS) != nullptr;
     taskEXIT_CRITICAL(&s_nodeMux);
-    if (!ok) return false;
-    if (s_up && !addPeer(mac)) return false;
+
+    if (!ok) {
+        if (s_up && !peerExisted) esp_now_del_peer(mac);
+        return false;
+    }
     s_dirty = true;
     return true;
 }

@@ -270,6 +270,15 @@ samples of four metrics, or fifty-six. When it overflows it sheds the oldest
 and counts it in `EspNowIngestStats::historyCollapsed`, because a backlog that
 keeps overflowing is a tuning fact worth being able to see.
 
+A backdated reading can also be dropped for a reason that has nothing to do
+with the queue: neither the node nor the collector had a real clock when the
+burst arrived, so there is no date to file it under. That is
+`historyNoClock`, and it is counted apart from the overflow because the two
+ask for opposite things — an overflowing queue wants a bigger queue, a burst
+with no clock wants NTP or an RTC, and no amount of queue will help it. They
+were one counter until a review pointed out that a single number covering both
+sends people to tune the thing that was never wrong.
+
 Every field that can be missing has a reserved value meaning "not measured",
 mapped to NaN on the way out. A BMP280 has no humidity sensor, and reporting
 that as `0 %RH` would be a reading the collector could not tell from a real one.

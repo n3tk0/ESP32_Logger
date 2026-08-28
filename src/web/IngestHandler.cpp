@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
+#include <time.h>                     // the collector's clock, to judge the node's
 
 #include "RateLimiter.h"
 #include "../sensors/RemoteIngest.h"
@@ -106,12 +107,42 @@ static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
         return;
     }
 
-    // Stored, but not authoritative: SensorManager stamps the collector's
-    // clock over every reading once the plugin returns, remote or wired. The
-    // reference node has no RTC and sends 0, so nothing is lost today — but
-    // do not read this field as "the node's sampling time is preserved".
-    // See RemoteIngest::put().
-    const uint32_t ts = body["ts"] | 0UL;
+    // ── The node's timestamp, and how far it is trusted ─────────────────────
+    //
+    // This used to be decorative: SensorManager stamped the collector's clock
+    // over every reading regardless, so whatever a node sent here was
+    // discarded. That changed when remote readings were allowed to keep the
+    // time they were measured — the field is authoritative now, and an
+    // authoritative field arriving over the network from a device with no RTC
+    // has to be checked rather than believed.
+    //
+    // The rule: this endpoint takes a batch of readings sampled NOW. There is
+    // one `ts` for the whole batch and no way to mark it as backfill, so a
+    // stamp that the collector's own pipeline would classify as history is a
+    // stamp that is wrong — the same ±120 s the backfill test uses, so that
+    // /api/ingest cannot produce a reading its own pipeline then hides.
+    //
+    // An implausible stamp costs the STAMP, not the reading. Falling back to
+    // zero hands the job to SensorManager, which dates it on arrival: a
+    // reading a few seconds late in the record beats one filed under the wrong
+    // hour, and beats one dropped. The count comes back in the response so a
+    // node with a drifting clock can find out it has one.
+    //
+    // A collector with no clock of its own cannot judge, and there the node's
+    // epoch is better than nothing: it is taken as sent.
+    uint32_t ts = body["ts"] | 0UL;
+    const uint32_t nowEpoch = (uint32_t)time(nullptr);
+    bool clockRejected = false;
+
+    if (ts != 0 && nowEpoch >= 1000000000u) {
+        const bool tooOld    = ts < 1000000000u ||
+                               (ts <= nowEpoch && (nowEpoch - ts) > 120u);
+        const bool tooFuture = ts > nowEpoch && (ts - nowEpoch) > 120u;
+        if (tooOld || tooFuture) {
+            ts = 0;
+            clockRejected = true;
+        }
+    }
 
     int stored = 0, rejected = 0;
     for (JsonObjectConst r : readings) {
@@ -125,9 +156,10 @@ static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
         else                                                 rejected++;
     }
 
-    char out[80];
-    snprintf(out, sizeof(out), "{\"ok\":true,\"stored\":%d,\"rejected\":%d}",
-             stored, rejected);
+    char out[112];
+    snprintf(out, sizeof(out),
+             "{\"ok\":true,\"stored\":%d,\"rejected\":%d,\"clock_rejected\":%s}",
+             stored, rejected, clockRejected ? "true" : "false");
     req->send(200, "application/json", out);
 }
 

@@ -141,6 +141,7 @@ function enRenderStats(d) {
     ["replayed",          "duplicate / stale"],
     ["ring_full",         "arrived faster than drained"],
     ["history_collapsed", "backfill dropped"],
+    ["history_no_clock",  "backfill with no clock"],
     ["acks",              "acks sent"],
     ["discover_seen",     "pairing requests seen"],
     ["paired",            "nodes paired"]
@@ -154,7 +155,7 @@ function enRenderStats(d) {
     // where everything is orange teaches people to stop reading it.
     var bad = v > 0 && (k === "unknown_node" || k === "malformed" ||
                         k === "discover_bad_sig" || k === "ring_full" ||
-                        k === "history_collapsed");
+                        k === "history_collapsed" || k === "history_no_clock");
     html +=
       '<div class="set-card" style="cursor:default">' +
         '<div class="set-card-t"' + (bad ? ' style="color:var(--warn)"' : "") + ">" + v + "</div>" +

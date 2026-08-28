@@ -83,19 +83,11 @@ void processingTaskFunc(void* /*param*/) {
 
         // ── Is this a reading from now, or one being backfilled? ────────
         //
-        // A remote node that buffered through an outage hands over readings
-        // minutes or hours old, carrying their own timestamps (see the note in
-        // SensorManager where the stamp is applied). They belong in the record
-        // and NOT in the two places that mean "what is happening right now".
-        //
-        // The threshold is generous on purpose: a live reading is at most one
-        // sensor interval old, and the slowest configured interval here is
-        // well under two minutes. Anything older is history by construction,
-        // not a slow sensor.
+        // The rule, and the reason a stamp from the future is not backfill,
+        // live in readingIsBackfilled() — where a host test can reach them.
+        // See the note above it in SensorTypes.h.
         const uint32_t nowEpoch = (uint32_t)time(nullptr);
-        const bool backfilled   = r.timestamp >= 1000000000u &&
-                                  nowEpoch    >= 1000000000u &&
-                                  (nowEpoch - r.timestamp) > 120u;
+        const bool backfilled   = readingIsBackfilled(r.timestamp, nowEpoch);
 
         // Write to web ring buffer — skip error readings so the dashboard
         // never mixes bad values with good ones.  (AUDIT 11.3)
