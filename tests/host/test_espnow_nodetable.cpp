@@ -306,6 +306,103 @@ static void test_default_node_id() {
     CHECK_EQ((int)small[0], 0);
 }
 
+// ---------------------------------------------------------------------------
+// Slot indices
+// ---------------------------------------------------------------------------
+// indexOf() is what lets state be kept ALONGSIDE the table — the clock-skew
+// array in EspNowIngest.cpp — rather than inside EspNowNode, where a new field
+// would change sizeof(), make loadNodes() discard the saved file, and cost
+// every deployed node a re-pair.
+//
+// It therefore has to agree with byId() about which slot a node occupies, and
+// has to stop answering the moment a node is removed. A stale index would have
+// the page showing one node's clock drift under another node's name.
+static void test_table_index_of() {
+    EspNowNodeTable t;
+
+    CHECK_EQ(t.indexOf(1), -1);          // nothing provisioned
+    CHECK_EQ(t.indexOf(0), -1);          // 0 is never a node
+
+    EspNowNode* a = t.add(MAC_A, 1, nullptr, 60);
+    EspNowNode* b = t.add(MAC_B, 2, nullptr, 60);
+    CHECK(a != nullptr && b != nullptr);
+
+    const int ia = t.indexOf(1);
+    const int ib = t.indexOf(2);
+    CHECK(ia >= 0 && ib >= 0);
+    CHECK(ia != ib);
+    CHECK(&t.at(ia) == a);
+    CHECK(&t.at(ib) == b);
+
+    CHECK_EQ(t.indexOf(3), -1);          // provisioned neighbours are not a match
+
+    // A removed node stops answering, and its neighbour does not move.
+    CHECK(t.remove(1));
+    CHECK_EQ(t.indexOf(1), -1);
+    CHECK_EQ(t.indexOf(2), ib);
+}
+
+// ---------------------------------------------------------------------------
+// Clock skew
+// ---------------------------------------------------------------------------
+static void test_skew_needs_two_clocks() {
+    int32_t s = 12345;   // must be left alone on refusal
+
+    CHECK(!espnowClockSkew(0, BASE, s));
+    CHECK_EQ((long)s, 12345L);
+
+    CHECK(!espnowClockSkew(BASE, 0, s));
+    CHECK_EQ((long)s, 12345L);
+
+    CHECK(!espnowClockSkew(0, 0, s));
+    CHECK_EQ((long)s, 12345L);
+
+    // 999999999 is one second below the plausibility floor — an unset clock,
+    // not a device that genuinely believes it is September 2001.
+    CHECK(!espnowClockSkew(999999999u, BASE, s));
+    CHECK(!espnowClockSkew(BASE, 999999999u, s));
+}
+
+static void test_skew_sign_and_magnitude() {
+    int32_t s = 0;
+
+    // In step.
+    CHECK(espnowClockSkew(BASE, BASE, s));
+    CHECK_EQ((long)s, 0L);
+
+    // The node is behind us — the direction an RC-timed sleep drifts. Positive.
+    CHECK(espnowClockSkew(BASE, BASE - 90u, s));
+    CHECK_EQ((long)s, 90L);
+
+    // The node is ahead. Negative — and this is the case the obvious uint32
+    // subtraction gets wrong, coming back as 4,294,967,286 instead of -10.
+    CHECK(espnowClockSkew(BASE, BASE + 10u, s));
+    CHECK_EQ((long)s, -10L);
+}
+
+static void test_skew_saturates_without_wrapping() {
+    int32_t s = 0;
+
+    // A node that thinks it is 2001 while the collector is in 2025: nearly
+    // eight hundred million seconds, well inside the range, so it reports
+    // exactly rather than saturating.
+    CHECK(espnowClockSkew(1750000000u, 1000000000u, s));
+    CHECK_EQ((long)s, 750000000L);
+
+    // Beyond the range, in both directions. The point is not the number, it is
+    // that a vast skew must not come back as a small one.
+    CHECK(espnowClockSkew(4294967295u, 1000000000u, s));
+    CHECK_EQ((long)s, 2147483647L);
+
+    CHECK(espnowClockSkew(1000000000u, 4294967295u, s));
+    CHECK_EQ((long)s, -2147483647L);
+
+    // And never INT32_MIN, because every caller takes the magnitude with -skew
+    // and negating INT32_MIN is undefined behaviour.
+    CHECK(s != (-2147483647L - 1L));
+    CHECK_EQ((long)(-s), 2147483647L);
+}
+
 int main() {
     RUN(test_expand_full_sample);
     RUN(test_absent_fields_produce_no_metric);
@@ -322,5 +419,9 @@ int main() {
     RUN(test_table_label_is_clamped);
     RUN(test_offline_count);
     RUN(test_default_node_id);
+    RUN(test_table_index_of);
+    RUN(test_skew_needs_two_clocks);
+    RUN(test_skew_sign_and_magnitude);
+    RUN(test_skew_saturates_without_wrapping);
     return SUMMARY();
 }

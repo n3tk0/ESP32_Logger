@@ -11,6 +11,8 @@
 #include <time.h>
 
 #include "EspNowAuth.h"
+#include "../core/EventLog.h"   // the clock-skew warning outlives the serial cable
+#include "../core/Globals.h"    // bootCount, to tie a log line to a boot
 #include "../sensors/RemoteIngest.h"
 
 // ============================================================================
@@ -130,6 +132,36 @@ static portMUX_TYPE s_ringMux  = portMUX_INITIALIZER_UNLOCKED;
 static DiscoverMsg s_pendingDiscover;
 static uint8_t     s_pendingMac[6];
 static volatile bool s_pendingValid = false;
+
+// ---------------------------------------------------------------------------
+// How far each node's clock is from ours
+// ---------------------------------------------------------------------------
+// Measured HERE and not reported by the node, because the node is the one with
+// a battery. Every DATA frame already carries the node's own epoch, and this
+// collector has a real clock, so the difference is free: no extra byte on the
+// air, no extra wake, and — the part that matters on a device that deep sleeps
+// — not one flash write on the node to record something only readable with a
+// cable attached.
+//
+// Kept beside the table rather than inside EspNowNode. Adding a field there
+// changes sizeof(), which makes loadNodes() discard the saved file and costs
+// every deployed node a re-pair. A live measurement retaken on the next report
+// has no business surviving a reboot at that price.
+//
+// Positive means the node is BEHIND us, which is the direction an RC-timed
+// deep sleep drifts.
+static int32_t s_skew[EspNowNodeTable::CAP]      = {0};
+static bool    s_haveSkew[EspNowNodeTable::CAP]  = {false};
+/// millis() of the last log line per node, so a badly drifting node writes
+/// one line an hour and not one a minute.
+static uint32_t s_skewLoggedMs[EspNowNodeTable::CAP] = {0};
+
+#ifndef ESPNOW_SKEW_WARN_S
+#  define ESPNOW_SKEW_WARN_S 60
+#endif
+#ifndef ESPNOW_SKEW_LOG_INTERVAL_MS
+#  define ESPNOW_SKEW_LOG_INTERVAL_MS 3600000UL
+#endif
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -504,6 +536,18 @@ static bool acceptFrame(const RxFrame& f, char* outId, size_t outIdLen,
                         EspNowNode& outSnap) {
     bool ok = false;
 
+    // Filled under the lock, acted on after it is released: the log line writes
+    // flash, which a critical section is the last place to do.
+    bool    logSkew     = false;
+    int32_t logSkewVal  = 0;
+    char    logSkewId[sizeof(EspNowNode::id)] = {0};
+
+    // Read once, out here. time() is a libc call that takes a lock of its own,
+    // and the critical section below runs with interrupts off — the fewer
+    // things reached from inside it, the better. It was already being called
+    // in there for `base`; now it is called once, for both.
+    const uint32_t ours = nowEpoch();
+
     taskENTER_CRITICAL(&s_nodeMux);
     EspNowNode* n = s_nodes.byId(f.msg.nodeId);
     if (n) {
@@ -518,7 +562,33 @@ static bool acceptFrame(const RxFrame& f, char* outId, size_t outIdLen,
             n->everSeen   = true;
             n->framesRx++;
 
-            const uint32_t base = f.msg.epoch ? f.msg.epoch : nowEpoch();
+            // How far this node's clock is from ours, when both sides have one.
+            // The arithmetic and its two guards live in NodeTable.h, where the
+            // host tests can reach them.
+            int32_t skew = 0;
+            if (espnowClockSkew(ours, f.msg.epoch, skew)) {
+                const int idx = s_nodes.indexOf(f.msg.nodeId);
+                if (idx >= 0) {
+                    const int32_t mag = skew < 0 ? -skew : skew;
+                    // Log on crossing the threshold, at most once an hour per
+                    // node. Unsigned difference, so it stays right across the
+                    // millis() wrap; the zero initial value makes the first
+                    // offence log immediately rather than an hour into uptime.
+                    if (mag >= (int32_t)ESPNOW_SKEW_WARN_S &&
+                        (s_skewLoggedMs[idx] == 0 ||
+                         (uint32_t)(millis() - s_skewLoggedMs[idx]) >= ESPNOW_SKEW_LOG_INTERVAL_MS)) {
+                        s_skewLoggedMs[idx] = millis();
+                        if (s_skewLoggedMs[idx] == 0) s_skewLoggedMs[idx] = 1;  // 0 means "never"
+                        logSkew    = true;
+                        logSkewVal = skew;
+                        strncpy(logSkewId, n->id, sizeof(logSkewId) - 1);
+                    }
+                    s_skew[idx]     = skew;
+                    s_haveSkew[idx] = true;
+                }
+            }
+
+            const uint32_t base = f.msg.epoch ? f.msg.epoch : ours;
             for (uint8_t i = 0; i < f.msg.count && i < ESPNOW_MAX_SAMPLES; i++) {
                 const float mv = enUnpackMv(f.msg.s[i].vbat_mv);
                 if (enIsAbsent(mv)) continue;
@@ -535,6 +605,20 @@ static bool acceptFrame(const RxFrame& f, char* outId, size_t outIdLen,
         }
     }
     taskEXIT_CRITICAL(&s_nodeMux);
+
+    // A minute out is not a rounding error on a node that reports every minute:
+    // it means either that the node has been running on its RC oscillator since
+    // the last ACK it actually heard, or that the collector's own clock jumped.
+    // Either way the backfill timestamps in that frame are a minute wrong, and
+    // the only way anyone finds out is if it is written down — the serial
+    // console is not attached to a device that is outdoors.
+    if (logSkew) {
+        Serial.printf("[ESPNOW] node %s clock is %ld s %s\n",
+                      logSkewId, (long)(logSkewVal < 0 ? -logSkewVal : logSkewVal),
+                      logSkewVal > 0 ? "behind" : "ahead");
+        eventLogPrintf("boot#%u  ESPNOW_SKEW  node=%s  skew=%+ld s",
+                       (unsigned)bootCount, logSkewId, (long)logSkewVal);
+    }
 
     if (!n) {
         s_stats.unknownNode++;
@@ -745,6 +829,13 @@ bool espnowAddNode(const uint8_t mac[6], uint8_t nodeId, const char* label,
 
     taskENTER_CRITICAL(&s_nodeMux);
     const bool ok = s_nodes.add(mac, nodeId, label, intervalS) != nullptr;
+    // A slot is reused, so whatever the previous occupant's clock was doing is
+    // not this node's measurement. add() also returns the existing entry when
+    // the node is merely being renamed — clearing there costs one report.
+    if (ok) {
+        const int idx = s_nodes.indexOf(nodeId);
+        if (idx >= 0) { s_haveSkew[idx] = false; s_skew[idx] = 0; s_skewLoggedMs[idx] = 0; }
+    }
     taskEXIT_CRITICAL(&s_nodeMux);
 
     if (!ok) {
@@ -763,6 +854,9 @@ bool espnowRemoveNode(uint8_t nodeId) {
     const EspNowNode* n = s_nodes.byId(nodeId);
     if (n) {
         memcpy(mac, n->mac, 6);
+        // Before remove(), while the slot still answers to this node id.
+        const int idx = s_nodes.indexOf(nodeId);
+        if (idx >= 0) { s_haveSkew[idx] = false; s_skew[idx] = 0; s_skewLoggedMs[idx] = 0; }
         s_nodes.remove(nodeId);
         found = true;
     }
@@ -782,6 +876,18 @@ int espnowCopyNodes(EspNowNode* out, int maxOut) {
         if (s_nodes.at(i).used) out[n++] = s_nodes.at(i);
     taskEXIT_CRITICAL(&s_nodeMux);
     return n;
+}
+
+bool espnowNodeSkew(uint8_t nodeId, int32_t& outSkewS) {
+    bool have = false;
+    // The index lookup and the read of the parallel array have to happen under
+    // the same lock: a remove() between them would have this reading a slot
+    // that now belongs to a different node, or to none.
+    taskENTER_CRITICAL(&s_nodeMux);
+    const int idx = s_nodes.indexOf(nodeId);
+    if (idx >= 0 && s_haveSkew[idx]) { outSkewS = s_skew[idx]; have = true; }
+    taskEXIT_CRITICAL(&s_nodeMux);
+    return have;
 }
 
 bool espnowAnyBatteryWarn() {

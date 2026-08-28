@@ -170,6 +170,44 @@ static inline EspNowSeqVerdict espnowSeqCheck(bool haveSeq, uint16_t last,
 }
 
 // ---------------------------------------------------------------------------
+// Clock skew
+// ---------------------------------------------------------------------------
+
+/// Seconds a node's clock is out, positive when the node is BEHIND `ours` —
+/// which is the direction an RC-timed deep sleep drifts. Returns false, and
+/// leaves `out` alone, when either clock is unset.
+///
+/// Both guards are load-bearing and neither is redundant. A node that has never
+/// been told the time sends epoch 0, and "1970 minus now" is not a drift
+/// measurement, it is the absence of one. The collector's own clock is equally
+/// capable of being unset, and subtracting from a zero there would make every
+/// node look fifty-six years fast.
+///
+/// The subtraction widens to int64 first. The obvious `(int32_t)(ours - theirs)`
+/// on two uint32s is right for small differences by accident of two's
+/// complement and wrong for large ones, and the case where it is wrong — a node
+/// whose clock is years out because it was never synchronised — is exactly the
+/// case this function exists to report.
+///
+/// Anything beyond ±2^31 seconds saturates rather than wrapping: a skew of
+/// sixty-eight years is not a number anyone reads, but it must not come back as
+/// a small one.
+///
+/// The negative clamp stops one short of INT32_MIN, deliberately. Callers take
+/// the magnitude with `-skew`, and negating INT32_MIN is undefined behaviour —
+/// a range this function can never produce is cheaper than a range every caller
+/// has to remember to handle.
+static inline bool espnowClockSkew(uint32_t ours, uint32_t theirs, int32_t& out) {
+    if (ours < 1000000000u || theirs < 1000000000u) return false;
+
+    const int64_t d = (int64_t)ours - (int64_t)theirs;
+    if (d >  2147483647LL)       out =  2147483647L;
+    else if (d < -2147483647LL)  out = -2147483647L;
+    else                         out = (int32_t)d;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // A node
 // ---------------------------------------------------------------------------
 
@@ -279,6 +317,19 @@ public:
         for (int i = 0; i < CAP; i++)
             if (_n[i].used && _n[i].nodeId == nodeId) return &_n[i];
         return nullptr;
+    }
+
+    /// Slot index for `nodeId`, or -1. For state kept ALONGSIDE the table
+    /// rather than inside it — see the clock-skew array in EspNowIngest.cpp.
+    /// Adding a field to EspNowNode changes sizeof and makes loadNodes()
+    /// discard the saved file, which costs every deployed node a re-pair; a
+    /// live measurement that is re-taken on the next report has no business
+    /// paying that.
+    int indexOf(uint8_t nodeId) const {
+        if (nodeId == 0) return -1;
+        for (int i = 0; i < CAP; i++)
+            if (_n[i].used && _n[i].nodeId == nodeId) return i;
+        return -1;
     }
 
     EspNowNode* byMac(const uint8_t* mac) {

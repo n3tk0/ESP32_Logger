@@ -102,6 +102,23 @@ bool espnowRemoveNode(uint8_t nodeId);
 /// written, up to `maxOut`.
 int espnowCopyNodes(EspNowNode* out, int maxOut);
 
+/// How far a node's clock is from the collector's, in seconds, positive when
+/// the node is BEHIND us — which is the direction an RC-timed deep sleep
+/// drifts. Returns false when there is no measurement yet: the node has never
+/// reported, or one of the two clocks was unset when it did.
+///
+/// Measured rather than reported. Every DATA frame already carries the node's
+/// own epoch and this collector has a real clock, so the difference costs the
+/// node nothing — no extra byte on the air, no extra wake, and no flash write
+/// on a device that spends its life asleep.
+///
+/// Deliberately NOT stored in EspNowNode: the table is persisted as raw
+/// structs, so a new field there changes sizeof(), makes loadNodes() discard
+/// the saved file, and costs every deployed node a re-pair. A live measurement
+/// that is retaken on the next report should not be paid for at that price, so
+/// it lives in a parallel array and starts empty after a reboot.
+bool espnowNodeSkew(uint8_t nodeId, int32_t& outSkewS);
+
 /// True when any tracked node's battery warrants the dashboard warning.
 bool espnowAnyBatteryWarn();
 

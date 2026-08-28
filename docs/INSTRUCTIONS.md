@@ -303,7 +303,7 @@ profile, logs, and UI files; the first-run wizard runs after restart.
 | `counters.queueDrops` | Cumulative queue-full drops |
 | `counters.ringPushDrops` | Ring buffer push drops |
 | `counters.resets` | Current consecutive non-graceful reset count |
-| `resetLog` | Tail of `/reset_log.txt` (last ≤16 lines) |
+| `resetLog` | Tail of `/error_log.txt` (last ≤16 lines). The JSON key keeps its old name so saved diagnostic bundles and the failsafe page still parse. |
 | `uptime` | Seconds since boot |
 | `network.ip` | Current IP address (client or AP) |
 | `storage.sd_supported` | False when the firmware was built with `FEATURE_SD_STORAGE` off — distinguishes "no driver" from "no card" |
@@ -319,10 +319,24 @@ profile, logs, and UI files; the first-run wizard runs after restart.
 When the failsafe page loads it polls `/api/diag` to display current IP,
 uptime, free heap, and consecutive reset count at the top of the page.
 
-### /reset_log.txt format
+### /error_log.txt format
 
-One line per reset: `<timestamp> boot=<N> reason=<string> gpio=<hex>`.
-Written in `_writeResetLog()` (`ESP_Logger.ino`).
+The device's one diagnostic log. It was called `/reset_log.txt` in builds before
+the ESP-NOW clock-drift line was added — the old name described only its first
+writer — and `eventLogMigrate()` renames it at boot, so existing history
+survives the change.
+
+Every writer goes through `eventLogPrintf()` in `src/core/EventLog.h`, which
+appends one line, takes `fsMutex`, and resolves the filesystem the same way
+`/api/diag` reads it back. Lines are capped at 160 characters.
+
+Current writers:
+
+| Line | Written by |
+|------|-----------|
+| `boot#N  reason=<string>` | `_writeResetLog()` (`ESP_Logger.ino`), once per notable reset |
+| `boot#N  OTA_<event>  running=<label>` | `_logOtaEvent()` (`OtaManager.cpp`) |
+| `boot#N  ESPNOW_SKEW  node=<id>  skew=<±N> s` | `acceptFrame()` (`EspNowIngest.cpp`), when a node's clock is more than `ESPNOW_SKEW_WARN_S` out, at most once an hour per node |
 
 ---
 

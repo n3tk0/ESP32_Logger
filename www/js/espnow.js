@@ -12,8 +12,11 @@
 //          callback no signal information at all.
 //   days   null whenever the battery model refuses to answer: too little
 //          history, a flat trace, or a slope inside the noise.
-// Both render as an em dash. Printing 0 dBm or 0 days would be a number
-// somebody believes.
+//   skew_s null until the node has reported with both clocks set. Zero is a
+//          real and good answer here — a perfectly synchronised node — so the
+//          two must not be conflated.
+// All three render as an em dash. Printing 0 dBm, 0 days or 0 s would be a
+// number somebody believes.
 // ============================================================================
 
 var _enTimer = null;
@@ -40,6 +43,37 @@ function enEsc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
   });
+}
+
+// How far the node's clock is from the collector's, as a badge.
+//
+// The node has no crystal and no NTP: its deep sleep is timed by an RC
+// oscillator that drifts by a percentage, not by parts per million. It is
+// re-synchronised from the epoch in every ACK, so a healthy node reads a few
+// seconds at most, and a large figure means the ACKs are not getting through —
+// which is worth seeing here, because the symptom otherwise is nothing more
+// than readings quietly filed under the wrong minute.
+//
+// The threshold matches the firmware's ESPNOW_SKEW_WARN_S, so the badge turns
+// amber for exactly the drift that writes a line in the log.
+function enSkew(n) {
+  if (n.skew_s == null)
+    return { text: "—", cls: "dim",
+             title: "Not measured yet — needs one report with a clock on both sides." };
+
+  var s = n.skew_s;
+  var mag = Math.abs(s);
+  var txt = mag < 60 ? mag + "s" : enFmtAge(mag);
+  if (s !== 0) txt = (s > 0 ? "-" : "+") + txt;   // node behind us reads as negative
+
+  return {
+    text: txt,
+    cls:  mag >= 60 ? "warn" : "ok",
+    title: s === 0 ? "In step with the collector."
+                   : "The node's clock is " + mag + " s " + (s > 0 ? "behind" : "ahead of") +
+                     " the collector's. It is re-synchronised on every acknowledgement, " +
+                     "so a large figure means the acknowledgements are not arriving."
+  };
 }
 
 // Battery badge class. Matches the firmware's own rule so the page and the
@@ -77,6 +111,7 @@ function enRenderNodes(d) {
     var mvTxt = n.mv == null ? "" : " · " + (n.mv / 1000).toFixed(2) + " V";
     var rssiTxt = n.rssi == null ? "—" : n.rssi + " dBm";
     var seenTxt = n.seen ? enFmtAge(n.age_s) + " ago" : "never";
+    var skew = enSkew(n);
 
     html +=
       '<div class="card" style="margin-bottom:10px">' +
@@ -94,6 +129,8 @@ function enRenderNodes(d) {
             '<span class="badge dim">left: ' + daysTxt + "</span>" +
             '<span class="badge dim">seen: ' + seenTxt + "</span>" +
             '<span class="badge dim">rssi: ' + rssiTxt + "</span>" +
+            '<span class="badge ' + skew.cls + '" title="' + enEsc(skew.title) + '">clock: ' +
+              enEsc(skew.text) + "</span>" +
             '<span class="badge dim">' + n.frames + " frames</span>" +
             (n.dropped ? '<span class="badge warn">' + n.dropped + " dropped</span>" : "") +
           "</div>" +

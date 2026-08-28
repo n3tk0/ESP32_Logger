@@ -71,6 +71,26 @@ million. The node has no NTP either — it never associates to the access point.
 The `epoch` in the ACK is its only source of wall-clock time, and it needs one
 to timestamp readings it had to buffer.
 
+That synchronisation happens on **every** ACK, and deliberately so — the
+alternative, syncing on a schedule, would save the node nothing. The 14 bytes
+are already in flight, the node is already holding its radio open waiting for
+them, and `settimeofday()` writes RTC memory rather than flash. The cost of
+correcting the clock every wake is zero; the cost of correcting it every hour
+instead is up to an hour of accumulated RC drift on the timestamps in between.
+
+**How far it has actually drifted** is measured on the collector, not reported
+by the node. Every `DataMsg` already carries the node's own `epoch`, so the
+difference against the collector's clock is free — no extra byte on the air, no
+extra wake, and no flash write on a device that spends its life asleep. It
+shows on the Battery nodes page as the `clock:` badge (negative means the node
+is behind), and crossing `ESPNOW_SKEW_WARN_S` — 60 seconds by default — writes
+one line to `/error_log.txt`, at most once an hour per node, so a drifting node
+is visible on a device nobody has a serial cable attached to.
+
+A healthy node reads a few seconds at most. A large figure does not mean the
+oscillator is bad; it means the ACKs are not arriving, and the drift is simply
+what that looks like from the outside.
+
 **Configuration.** `intervalS` lets the wake period be changed from the
 collector's web interface, without walking to a node that may be behind a wall
 or on a roof.

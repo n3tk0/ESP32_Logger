@@ -61,6 +61,27 @@ with sync_playwright() as p:
     check("0 dBm" not in body, "a missing RSSI is never printed as 0 dBm")
     check("left: 0 d" not in body, "a null day count is never printed as 0 d")
 
+    # Clock drift. Three cases, and the page has to keep them apart. The badge
+    # reads as the node's clock relative to the collector's, so a node that is
+    # behind reads negative — the API's own sign is the other way round, being
+    # "how far ahead of the node are we".
+    #   skew_s 3     the node is three seconds behind: "-3s"
+    #   skew_s -184  the node is three minutes AHEAD: "+3m". A negative on the
+    #                wire, and the sign the firmware's uint32 subtraction used
+    #                to lose to a wrap.
+    #   skew_s null  never measured, which is NOT zero. A page that printed
+    #                "0s" here would be claiming a perfectly synchronised node.
+    check("clock: -3s" in body, "a node behind the collector reads as negative")
+    check("clock: +3m" in body, "a node ahead of the collector reads as positive")
+    check("clock: —" in body, "an unmeasured drift shows a dash")
+    check("clock: 0s" not in body, "an unmeasured drift is never printed as 0s")
+
+    # And the threshold is coloured: 184 s is past ESPNOW_SKEW_WARN_S, which is
+    # also the drift that writes a line to /error_log.txt.
+    warn_texts = pg.locator("#en-nodes .badge.warn").all_inner_texts()
+    check(any("3m" in x.lower() for x in warn_texts),
+          "a drift past the warning threshold is coloured as one")
+
     # A node that has never reported.
     check("never" in body, "a node that has never reported says so")
 
