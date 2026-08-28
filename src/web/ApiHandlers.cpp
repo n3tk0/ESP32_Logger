@@ -404,6 +404,7 @@ static void handleEspnowStatus(AsyncWebServerRequest* req) {
     st["replayed"]          = s.replayed;
     st["ring_full"]         = s.ringFull;
     st["history_collapsed"] = s.historyCollapsed;
+    st["history_no_clock"]  = s.historyNoClock;
     st["acks"]              = s.acksSent;
     st["discover_seen"]     = s.discoverSeen;
     st["discover_bad_sig"]  = s.discoverBadSig;
@@ -545,25 +546,6 @@ static void handleKindleConfigGet(AsyncWebServerRequest* req) {
     sendJsonResponse(req, doc);
 }
 
-// A font-family list arrives as free text and ends up inside a stylesheet, so
-// it is filtered rather than trusted: letters, digits, spaces, commas, quotes
-// and hyphens are everything a family list can legitimately contain, and the
-// characters that would end the declaration and begin something else are not
-// in that set. Anything outside it is dropped, not rejected — a stray
-// semicolon is a typo, and losing the page over one is a worse answer than
-// ignoring it.
-static void kindleSanitiseFace(const String& in, char* out, size_t n) {
-    size_t j = 0;
-    for (size_t i = 0; i < in.length() && j + 1 < n; i++) {
-        const char c = in[i];
-        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                        (c >= '0' && c <= '9') ||
-                        c == ' ' || c == ',' || c == '\'' || c == '-';
-        if (ok) out[j++] = c;
-    }
-    out[j] = '\0';
-}
-
 static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
 
@@ -583,18 +565,18 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     KD_PARAM("decimals",      tempDecimals);
     #undef KD_PARAM
 
-    if (req->hasParam("face_custom", true))
-        kindleSanitiseFace(req->getParam("face_custom", true)->value(),
-                           k.faceCustom, sizeof(k.faceCustom));
+    if (req->hasParam("face_custom", true)) {
+        const String v = req->getParam("face_custom", true)->value();
+        strncpy(k.faceCustom, v.c_str(), sizeof(k.faceCustom) - 1);
+        k.faceCustom[sizeof(k.faceCustom) - 1] = '\0';
+    }
 
     // Clamped before it is stored, so an out-of-range value never reaches the
-    // renderer even by way of a config.bin somebody edited by hand.
+    // renderer even by way of a config.bin somebody edited by hand. This is
+    // also what filters the font list and what falls back to the base stack
+    // when a custom face is left with nothing to name — both used to live
+    // here, where the settings-import path could not reach them.
     kdSkinClamp(k);
-
-    // A custom face with nothing in the field would render the page in the
-    // browser's default rather than in anything chosen; the base stack is a
-    // better answer than a blank one.
-    if (k.face == KFACE_CUSTOM && k.faceCustom[0] == '\0') k.face = KFACE_BOOKERLY;
 
     config.kindle = k;
     if (!saveConfig()) {

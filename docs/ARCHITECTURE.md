@@ -558,6 +558,23 @@ the node to obtain a token. It is gated by the shared `INGEST_TOKEN` (header
 `X-Ingest-Token` or `?token=`), the same rate limiter as every other mutating
 route, and whatever Basic Auth is compiled in globally.
 
+Its optional `ts` became authoritative when remote readings were allowed to
+keep the time they were measured, so it is now checked rather than believed.
+The endpoint takes a batch sampled **now** — one `ts` for the whole batch, no
+way to mark it as backfill — so a stamp more than 120 s from the collector's
+clock in either direction is a stamp that is wrong: it is dropped and the
+reading is dated on arrival instead. That is the same 120 s the pipeline uses
+to tell live readings from backfill, so `/api/ingest` cannot produce a reading
+its own pipeline then hides from the dashboard and from alerts. The reading
+itself is never dropped for this, and the response says whether it happened:
+
+```json
+{"ok":true,"stored":3,"rejected":0,"clock_rejected":true}
+```
+
+`clock_rejected` is how a node with a drifting clock finds out it has one. A
+collector with no clock of its own cannot judge and takes `ts` as sent.
+
 **Alerts**
 
 | Method | Route | Auth | Purpose |
@@ -597,6 +614,12 @@ channel, an unprovisioned node, frames arriving faster than the tick drains
 them — and from the outside they look identical. `malformed`,
 `unknown_node`, `replayed`, `ring_full` and `discover_bad_sig` are what tell
 them apart.
+
+`history_collapsed` and `history_no_clock` are the same argument applied to
+backfill, and they are two numbers rather than one because they ask for
+opposite fixes: a backlog queue that keeps overflowing wants a bigger queue,
+while a burst that arrives with no clock on either side wants NTP or an RTC,
+and no amount of queue will help it.
 
 Two fields are deliberately `null` rather than zero. `rssi` is unavailable on
 Arduino core 2.x (IDF 4.4 hands the receive callback no signal information),

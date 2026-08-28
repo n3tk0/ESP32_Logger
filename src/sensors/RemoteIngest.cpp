@@ -124,8 +124,16 @@ int RemoteIngest::drain(const char* nodeId, SensorReading* out, int maxOut,
         copyClamped(r.metric, sizeof(r.metric), _e[i].metric);
         copyClamped(r.unit,   sizeof(r.unit),   _e[i].unit);
         r.value     = _e[i].value;
-        // Carried through, though SensorManager overwrites it moments
-        // later — see the note on put() in the header.
+        // Carried through, and it survives: SensorManager stamps only a
+        // reading whose timestamp is zero. (It used to be overwritten
+        // unconditionally, which is what the old note here said.)
+        //
+        // This is a mailbox, not a queue, so a slot that is not refilled is
+        // re-emitted on every drain with the timestamp it first arrived with.
+        // That is deliberate — a node reporting every five minutes should not
+        // vanish from the latest-value table between reports — and it is why
+        // ProcessingTask's backfill test matters here: once the value is more
+        // than two minutes old, its repeats stop being treated as live.
         r.timestamp = _e[i].ts;
         r.quality   = (staleAfterMs > 0 && age > staleAfterMs)
                     ? QUALITY_ERROR

@@ -296,4 +296,32 @@ inline void kdSkinClamp(KindleConfig& k) {
     k.boldZones &= 0x01FF;
     k.showFlags &= KSHOW_ALL;
     k.faceCustom[sizeof(k.faceCustom) - 1] = '\0';
+
+    // The font list is filtered HERE, not only where a form posts it.
+    //
+    // It lands verbatim inside the page's stylesheet, so a `}` in it closes
+    // the rule and everything after is whatever the writer wanted. The API
+    // handler filtered it and the settings-IMPORT path did not — and an
+    // imported config.bin is exactly as capable of carrying a string as a
+    // form is. One filter, in the function both of them already call, is the
+    // arrangement where that cannot be true of the next path either.
+    //
+    // Letters, digits, spaces, commas, quotes and hyphens are everything a
+    // family list can legitimately contain. Anything else is dropped rather
+    // than rejected: a stray semicolon is a typo, and losing the page over
+    // one is a worse answer than ignoring it.
+    size_t w = 0;
+    for (size_t r = 0; k.faceCustom[r] != '\0'; r++) {
+        const char c = k.faceCustom[r];
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') ||
+                        c == ' ' || c == ',' || c == '\'' || c == '-';
+        if (ok) k.faceCustom[w++] = c;
+    }
+    k.faceCustom[w] = '\0';
+
+    // A custom face with nothing left to name would render the page in the
+    // browser's default rather than in anything chosen — including when the
+    // filter above is what emptied it.
+    if (k.face == KFACE_CUSTOM && k.faceCustom[0] == '\0') k.face = KFACE_BOOKERLY;
 }

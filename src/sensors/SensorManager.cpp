@@ -323,7 +323,21 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                 // that need cross-sensor values (BME688's ambient-RH reference,
                 // HeaterModule's control inputs) read it here rather than off
                 // the queue, so a backed-up sensorQueue can't starve them.
-                readingCache.put(readings[j]);
+                //
+                // BACKFILL DOES NOT BELONG HERE, for the same reason it does
+                // not belong in the live web ring — this table answers "what
+                // is happening now". A remote node emptying an outage backlog
+                // hands over readings hours old, and putting one here would
+                // not merely overwrite the current value: ReadingCache reports
+                // age as millis() since it was RECORDED, so the stale reading
+                // would present as zero seconds old.
+                //
+                // That is the one thing the consumers cannot defend against.
+                // Both of them check the age precisely because a dead sensor
+                // is supposed to look dead — HeaterModule's fail-safe drives a
+                // MOSFET gate on it.
+                if (!readingIsBackfilled(readings[j].timestamp, now))
+                    readingCache.put(readings[j]);
 
                 if (xQueueSend(queue, &readings[j], 0) != pdTRUE) {
                     extern volatile uint32_t g_queueDrops;

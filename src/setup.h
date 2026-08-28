@@ -31,7 +31,30 @@
 // ============================================================================
 // Reduces flash usage (~5-20 KB per module).  Only enable what you actually
 // have wired up.  PlatformIO build_flags override these via -D defines.
+//
+// TWO WAYS TO SELECT, AND WHY THERE ARE TWO
+// -----------------------------------------
+// The block below is the DEFAULT set: edit it, or add -D flags, and you get
+// those on top of whatever is already on.  That is the right shape for a hand
+// build, and it is why every entry is written `#ifndef X / #define X`.
+//
+// It is also the reason a -D flag can only ever ADD.  `-USENSOR_BME280_ENABLED`
+// achieves nothing: the preprocessor applies it before the header, and the
+// header defines the macro again a line later.  So for years the deploy tools
+// could offer the off-by-default features and nothing else — and a person who
+// opened the tool looking for BME280, or wanting the SD driver gone to reclaim
+// its 34 KB, found no switch at all.
+//
+// FEATURE_SET_EXPLICIT is that switch.  With it defined, the defaults below are
+// skipped entirely and the build carries exactly the macros it was passed —
+// nothing implied, nothing assumed.  The deploy tools always build that way, so
+// a checkbox means what it says in both directions.
+//
+// Everything outside the guard still applies in both modes: the ESP-NOW
+// implication below, and the sanity check that at least one sensor survived.
 // ----------------------------------------------------------------------------
+#ifndef FEATURE_SET_EXPLICIT
+
 // Sensors with internal mini drivers (no external library needed)
 #ifndef SENSOR_BME280_ENABLED
 #  define SENSOR_BME280_ENABLED       // BME280/BMP280 (I2C)
@@ -140,11 +163,8 @@
 //#  define FEATURE_ESPNOW_INGEST       // ESP-NOW receive path + pairing
 //#endif
 
-#ifdef FEATURE_ESPNOW_INGEST
-#  ifndef FEATURE_REMOTE_NODES
-#    define FEATURE_REMOTE_NODES
-#  endif
-#endif
+// (The FEATURE_REMOTE_NODES implication this used to carry moved below the
+// default block, so it applies to an explicit set as well.)
 
 // Kindle dashboard — GET /kindle.  A server-rendered, JavaScript-free page
 // sized for a 6" e-ink reader's browser.  See docs/KINDLE_DASHBOARD.md.
@@ -175,7 +195,7 @@
 // /api/diag reports storage.sd_supported=false so the UI can tell "no card"
 // from "no driver".  See src/core/SdCompat.h.
 #ifndef FEATURE_SD_STORAGE
-#  define FEATURE_SD_STORAGE
+#  define FEATURE_SD_STORAGE         // SD card driver (~34 KB of flash)
 #endif
 
 // Cloud / network exporters
@@ -193,6 +213,44 @@
 #endif
 #ifndef EXPORT_WEBHOOK_ENABLED
 #  define EXPORT_WEBHOOK_ENABLED         // Generic webhook (Discord/Slack/IFTTT)
+#endif
+
+#endif  // !FEATURE_SET_EXPLICIT
+
+// ── Applies to both selection modes ─────────────────────────────────────────
+//
+// The ESP-NOW implication lives out here on purpose. RemoteIngest is where an
+// ESP-NOW reading lands and RemoteNodeSensor is what drains it, so a build with
+// the radio and without the pipeline compiles and then silently receives into
+// nothing. A deploy tool that forgot to tick both must not be able to produce
+// that build.
+#ifdef FEATURE_ESPNOW_INGEST
+#  ifndef FEATURE_REMOTE_NODES
+#    define FEATURE_REMOTE_NODES
+#  endif
+#endif
+
+// A collector with no sensor compiled in boots, serves its whole web interface,
+// and measures nothing — and every screen in it looks like a device waiting for
+// its first reading rather than one that can never take any. That is a failure
+// worth having at compile time, where it costs a line of text instead of an
+// afternoon.
+//
+// Remote nodes do not count. FEATURE_REMOTE_NODES and FEATURE_ESPNOW_INGEST
+// bring readings in from elsewhere, and a collector that only aggregates other
+// boards is a legitimate thing to build — so either of them satisfies this too.
+#if !defined(SENSOR_BME280_ENABLED)   && !defined(SENSOR_BME688_ENABLED)   && \
+    !defined(SENSOR_DS18B20_ENABLED)  && !defined(SENSOR_SDS011_ENABLED)   && \
+    !defined(SENSOR_PMS5003_ENABLED)  && !defined(SENSOR_SPS30_ENABLED)    && \
+    !defined(SENSOR_ENS160_ENABLED)   && !defined(SENSOR_SGP30_ENABLED)    && \
+    !defined(SENSOR_SCD4X_ENABLED)    && !defined(SENSOR_VEML6075_ENABLED) && \
+    !defined(SENSOR_VEML7700_ENABLED) && !defined(SENSOR_BH1750_ENABLED)   && \
+    !defined(SENSOR_WATERFLOW_ENABLED)&& !defined(SENSOR_RAIN_ENABLED)     && \
+    !defined(SENSOR_WIND_ENABLED)     && !defined(SENSOR_SOIL_ENABLED)     && \
+    !defined(SENSOR_HCSR04_ENABLED)   && !defined(SENSOR_ZMPT101B_ENABLED) && \
+    !defined(SENSOR_ZMCT103C_ENABLED) && !defined(FEATURE_REMOTE_NODES)    && \
+    !defined(FEATURE_ESPNOW_INGEST)
+#  error "No sensor is compiled in. Enable at least one SENSOR_*_ENABLED, or a remote-node feature to receive readings from another board."
 #endif
 
 // ============================================================================

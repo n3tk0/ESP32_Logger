@@ -254,12 +254,61 @@ a duplicate flag appended on every single run, a build comment rewritten into
 nonsense. Nothing in the feature path touches a file, so a deploy you abandon
 halfway leaves the checkout exactly as it was.
 
-**Only the off-by-default features are offered.** A `-D` flag can switch those
-on; it cannot switch off one that `setup.h` enables itself, because the header
-writes `#ifndef X / #define X` and defines it again a line after any `-U`.
-Turning one of those off means editing `setup.h`, which is a source change a
-person should make deliberately. `python3 tools/features.py` prints both lists
-and says which is which.
+**Every feature is selectable, in both directions**, and that took a change in
+the firmware to make true. `setup.h` writes each default as
+`#ifndef X / #define X`, so `-UX` achieves nothing — the preprocessor applies
+it before the header, and the header defines the macro again a line later. A
+`-D` flag could therefore only ever *add*, and eight features had no switch at
+all: among them BME280/BMP280, which somebody went looking for and concluded
+was unsupported, and the SD driver, which is ~34 KB of flash on a device that
+may never have a card in it.
+
+`FEATURE_SET_EXPLICIT` is the switch. With it defined, `setup.h` skips its
+default block entirely and the build carries exactly the macros it was passed.
+The tools always pass it, so a cleared checkbox means what it says. A hand
+build is unaffected: no flag, same defaults as always.
+
+Two rules sit outside that guard because they hold either way — the
+`FEATURE_ESPNOW_INGEST → FEATURE_REMOTE_NODES` implication, and an `#error`
+when nothing in the set can produce a reading. The tools refuse that set first,
+in a sentence, while there is still something to click; the `#error` is the
+backstop for a hand build.
+
+Both tools group the list by type and mark the default set with a dot, with a
+**Default set** control to restore it. Measured on `xiao_esp32c3`: the default
+set is 1,322,692 bytes; one sensor and nothing else is 1,109,610. 213 KB is
+what the SD driver, the second sensor and the five exporters cost when they are
+not wanted.
+
+#### The nodes
+
+Steps **10** and **11** compile and flash a satellite board — `node_espnow/`
+(the deep-sleeping ESP32-C3) or `node/` (the mains ESP8266) — with
+`pio run -d <project>`. Each gets its own env and its own port, because a node
+is a different board on a different USB device and borrowing the collector's
+is the shortest path to flashing an ESP8266 image at an ESP32-C3. The `D`
+preset runs both steps.
+
+#### The ESP-NOW key
+
+Generated, not invented: **Generate** in the GUI, `[g]` in the CLI, 16
+characters from the system CSPRNG. Letters and digits only — the key reaches
+the compiler as `-DESPNOW_LMK=\"…\"` through a shell, and ambiguous glyphs
+(`0`/`O`, `1`/`l`/`I`) are dropped because somebody reads it off one screen and
+types it into another.
+
+It is stored once and carried into **whichever target is built**, collector or
+battery node, so both sides hold the same 16 bytes without either being typed
+twice. `node_espnow/platformio.ini` no longer hardcodes a key: `node_config.h`
+declares it with `#ifndef` and a placeholder, which is what lets the tool
+override it without redefining a macro the ini had already defined.
+
+`tests/gui/drive_deploy_gui.py` asserts all of it against the running window —
+that every feature has a checkbox, that clearing everything raises the
+"nothing to read from" warning, that a generated key is 16 characters and
+contains nothing that would break a `-D` flag, and that the battery node is
+built with the same key as the collector while the ESP8266 node is not handed
+one it cannot use.
 
 The flags go to **every** `pio run`, not only the compile step. `pio run -t
 upload` relinks before it flashes, so an upload that did not carry them would

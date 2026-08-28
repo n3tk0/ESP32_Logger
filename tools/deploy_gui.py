@@ -42,6 +42,9 @@ sys.path.insert(0, str(TOOLS))
 
 from deploy_core import (
     DeployManager,
+    NODE_PROJECTS,
+    generate_espnow_key,
+    node_project,
     load_cfg,
     save_cfg,
     STEP_NAMES,
@@ -51,7 +54,8 @@ from deploy_core import (
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
-from features import grouped, is_known, optional_features
+from features import (default_on_features, grouped,
+                      has_a_reading_source, is_known, optional_features)
 from pio_envs import (
     INI, NO_PROJECT, chip_for, defaults_for, env_info, environments, env_names,
     ports_for, usb_pins,
@@ -425,16 +429,24 @@ class DeployerGUI:
         and for the same reason: four hand-maintained copies of one list is
         four things to go stale, and they all did.
 
-        Only the off-by-default features are shown. A -D flag can switch those
-        on; it cannot switch off one that setup.h enables itself, and a
-        checkbox that cannot do what it says is worse than no checkbox.
+        EVERY feature gets a checkbox, and clearing one means it. That is
+        newer than it looks: setup.h writes `#ifndef X / #define X`, so a -D
+        flag could only ever add, and this list used to hold the off-by-default
+        half — BME280 had no switch at all, and neither did the 34 KB of SD
+        driver on a device that may never have a card in it. The tools now pass
+        FEATURE_SET_EXPLICIT, which skips those defaults, so what is ticked
+        here is the whole build.
+
+        A dot marks what a plain `pio run` would have given you. It is the only
+        thing the old on/off split still usefully said, and "Default set"
+        below restores exactly that.
         """
         ctk.CTkLabel(parent, text="Build features:",
                      font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(14, 2))
         ctk.CTkLabel(parent,
                      text="Compiled in via PLATFORMIO_BUILD_FLAGS. No project "
                           "file is edited, so an abandoned deploy leaves the "
-                          "checkout as it was.",
+                          "checkout as it was.  •  marks the default set.",
                      font=("Helvetica", 8), text_color="gray",
                      wraplength=420, justify="left").pack(anchor="w", padx=(20, 0))
 
@@ -450,7 +462,10 @@ class DeployerGUI:
             for f in rows:
                 var = ctk.BooleanVar(value=f.macro in selected)
                 self.feature_vars[f.macro] = var
-                label = f.macro.replace("SENSOR_", "").replace("_ENABLED", "")
+                label = (f.macro.replace("SENSOR_", "").replace("EXPORT_", "")
+                                .replace("_ENABLED", ""))
+                if f.enabled:
+                    label = f"• {label}"
                 if f.summary:
                     label = f"{label}  —  {f.summary}"
                 ctk.CTkCheckBox(
@@ -459,22 +474,157 @@ class DeployerGUI:
                     font=("Helvetica", 9),
                 ).pack(anchor="w", padx=(14, 0), pady=1)
 
+        # A starting point. Thirty cleared boxes is what a fresh config now
+        # looks like, and the first thing anyone wants from it is "what I
+        # would have got anyway, then my changes".
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(anchor="w", pady=(2, 0))
+        ctk.CTkButton(row, text="Default set", width=100, height=24,
+                      font=("Helvetica", 9),
+                      command=self._features_default).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(row, text="Clear all", width=90, height=24,
+                      font=("Helvetica", 9), fg_color="gray30",
+                      command=self._features_clear).pack(side="left")
+
+        # The rule setup.h enforces with an #error, said here while there is
+        # still something to click. A compiler diagnostic is a fine backstop
+        # and a poor first contact.
+        self.feature_warning = ctk.CTkLabel(
+            parent, text="", font=("Helvetica", 9),
+            text_color="#d9822b", wraplength=420, justify="left")
+        self.feature_warning.pack(anchor="w", padx=(20, 0), pady=(4, 0))
+        self._refresh_feature_warning()
+
         # The ESP-NOW key. Shown always rather than hidden behind its feature:
         # a field that appears and disappears as a checkbox is clicked is
         # harder to find than one that is simply greyed out by irrelevance,
         # and the warning below is the thing that most needs to be read.
         ctk.CTkLabel(parent, text="ESP-NOW shared key (16 characters):",
                      font=("Helvetica", 9)).pack(anchor="w", pady=(8, 2))
-        self.espnow_lmk_entry = ctk.CTkEntry(parent, width=260)
+        keyrow = ctk.CTkFrame(parent, fg_color="transparent")
+        keyrow.pack(anchor="w", fill="x")
+        self.espnow_lmk_entry = ctk.CTkEntry(keyrow, width=260)
         self.espnow_lmk_entry.insert(0, self.cfg.get("espnow_lmk") or "")
-        self.espnow_lmk_entry.pack(anchor="w")
+        self.espnow_lmk_entry.pack(side="left")
         self.espnow_lmk_entry.bind("<FocusOut>", lambda _: self._save_espnow_lmk())
+        ctk.CTkButton(keyrow, text="Generate", width=84, height=28,
+                      font=("Helvetica", 9),
+                      command=self._generate_espnow_key).pack(side="left", padx=(6, 0))
 
         self.espnow_lmk_note = ctk.CTkLabel(
             parent, text="", font=("Helvetica", 8),
             text_color="gray", wraplength=420, justify="left")
         self.espnow_lmk_note.pack(anchor="w", padx=(20, 0), pady=(0, 10))
         self._refresh_espnow_note()
+
+        self._build_node_section(parent)
+
+    def _generate_espnow_key(self) -> None:
+        """A fresh key, into the field and into the config.
+
+        Generated rather than invented: a key somebody types is a key somebody
+        can remember, and this one is the only thing between the collector's
+        pipeline and any ESP-NOW frame in radio range. It goes into whichever
+        target this tool builds next — collector or node — so the two sides
+        match without anyone copying it between two windows.
+        """
+        key = generate_espnow_key()
+        self.espnow_lmk_entry.delete(0, "end")
+        self.espnow_lmk_entry.insert(0, key)
+        self._save_espnow_lmk()
+
+    def _build_node_section(self, parent) -> None:
+        """Which satellite board steps 10 and 11 build and flash.
+
+        Its own project, env and port. A node is a different board on a
+        different USB device, and borrowing the collector's port is the
+        shortest path to flashing an ESP8266 image at an ESP32-C3.
+        """
+        ctk.CTkLabel(parent, text="Node target:",
+                     font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 2))
+
+        proj = node_project(self.cfg)
+        labels = [p.label for p in NODE_PROJECTS.values()]
+        self._node_label_to_key = {p.label: k for k, p in NODE_PROJECTS.items()}
+        self.node_project_var = ctk.StringVar(value=proj.label)
+        ctk.CTkOptionMenu(parent, values=labels, variable=self.node_project_var,
+                          command=self._on_node_project_change).pack(fill="x", pady=(0, 2))
+
+        self.node_blurb = ctk.CTkLabel(
+            parent, text=proj.blurb, font=("Helvetica", 8), text_color="gray",
+            wraplength=420, justify="left")
+        self.node_blurb.pack(anchor="w", padx=(20, 0))
+
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=(4, 0))
+        ctk.CTkLabel(row, text="env", font=("Helvetica", 9),
+                     width=32).pack(side="left")
+        self.node_env_entry = ctk.CTkEntry(row, width=140,
+                                           placeholder_text=proj.default_env)
+        self.node_env_entry.insert(0, self.cfg.get("node_env") or "")
+        self.node_env_entry.pack(side="left", padx=(0, 8))
+        self.node_env_entry.bind(
+            "<FocusOut>", lambda _: self._save_setting("node_env", self.node_env_entry))
+        ctk.CTkLabel(row, text="port", font=("Helvetica", 9),
+                     width=34).pack(side="left")
+        self.node_port_entry = ctk.CTkEntry(row, width=140,
+                                            placeholder_text="auto-detect")
+        self.node_port_entry.insert(0, self.cfg.get("node_port") or "")
+        self.node_port_entry.pack(side="left")
+        self.node_port_entry.bind(
+            "<FocusOut>", lambda _: self._save_setting("node_port", self.node_port_entry))
+
+        ctk.CTkLabel(parent,
+                     text="Steps 10 and 11 build and flash this project. The "
+                          "ESP-NOW key above travels with it, so the node and "
+                          "the collector hold the same 16 bytes without either "
+                          "being typed twice.",
+                     font=("Helvetica", 8), text_color="gray",
+                     wraplength=420, justify="left").pack(anchor="w",
+                                                          padx=(20, 0), pady=(2, 10))
+
+    def _on_node_project_change(self, label: str) -> None:
+        key = self._node_label_to_key.get(label)
+        if not key:
+            return
+        self._save_setting("node_project", None, key)
+        # The env belonged to the old project; keeping it would offer an
+        # ESP8266 env for an ESP32 build and fail two steps later.
+        self._save_setting("node_env", None, "")
+        self.node_env_entry.delete(0, "end")
+        proj = NODE_PROJECTS[key]
+        self.node_env_entry.configure(placeholder_text=proj.default_env)
+        self.node_blurb.configure(text=proj.blurb)
+        self._refresh_espnow_note()
+
+    def _set_features(self, macros) -> None:
+        """Point every checkbox at `macros`, then save and re-validate."""
+        wanted = set(macros)
+        for m, var in self.feature_vars.items():
+            var.set(m in wanted)
+        self._save_setting("features", None, sorted(wanted))
+        self._refresh_espnow_note()
+        self._refresh_feature_warning()
+
+    def _features_default(self) -> None:
+        self._set_features(f.macro for f in default_on_features())
+
+    def _features_clear(self) -> None:
+        self._set_features([])
+
+    def _refresh_feature_warning(self) -> None:
+        """Say when the selected set cannot produce a reading."""
+        note = getattr(self, "feature_warning", None)
+        if note is None:
+            return
+        chosen = [m for m, v in self.feature_vars.items() if v.get()]
+        if has_a_reading_source(chosen):
+            note.configure(text="")
+        else:
+            note.configure(
+                text="Nothing to read from. Pick at least one sensor, or a "
+                     "remote-node feature to receive readings from another "
+                     "board — the firmware refuses to compile otherwise.")
 
     def _on_feature_toggle(self, macro: str) -> None:
         feats = [m for m, v in self.feature_vars.items() if v.get()]
@@ -490,6 +640,7 @@ class DeployerGUI:
 
         self._save_setting("features", None, feats)
         self._refresh_espnow_note()
+        self._refresh_feature_warning()
 
     def _save_espnow_lmk(self) -> None:
         key = self.espnow_lmk_entry.get().strip()

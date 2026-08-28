@@ -102,6 +102,42 @@ private:
 };
 
 // ============================================================================
+// IS THIS READING FROM NOW, OR IS IT BEING BACKFILLED?
+// ============================================================================
+// A remote node that buffered through an outage hands over readings minutes or
+// hours old, carrying their own timestamps. They belong in the record and NOT
+// in the two places that mean "what is happening right now" — the live web ring
+// and alert evaluation. ProcessingTask asks this of every reading.
+//
+// The window is generous on purpose: a live reading is at most one sensor
+// interval old, and the slowest interval configured here is well under two
+// minutes. Anything older is history by construction, not a slow sensor.
+//
+// ONLY IN THE PAST, and that guard is the whole reason this is a function
+// rather than an expression written inline. Both stamps are uint32_t, so one
+// second in the FUTURE makes the subtraction wrap to ~4.29 billion and every
+// reading reads as backfilled — silently out of the live ring and out of
+// alerts, with nothing in the log to say why.
+//
+// A future stamp is the normal case, not a corner. SensorTask stamps from the
+// hardware RTC when one is fitted and only falls back to the system clock,
+// while the caller compares against the system clock; two clocks agreeing to
+// the second are the exception, and a DS1302 running one ahead is enough to
+// blank the dashboard. A reading from ahead of us is not history, so it is not
+// backfill: it takes the live path, which is what a clock a few seconds out
+// ought to cost.
+//
+// Either stamp being unset or pre-2001 means there is no usable clock to
+// judge with, and an unjudgeable reading is treated as live.
+inline bool readingIsBackfilled(uint32_t readingTs, uint32_t nowEpoch,
+                                uint32_t windowSec = 120u) {
+    constexpr uint32_t MIN_REAL_TS = 1000000000u;
+    if (readingTs < MIN_REAL_TS || nowEpoch < MIN_REAL_TS) return false;
+    if (readingTs > nowEpoch) return false;
+    return (nowEpoch - readingTs) > windowSec;
+}
+
+// ============================================================================
 // AGGREGATION ENUMS  (used by AggregationEngine + /api/data endpoint)
 // ============================================================================
 // R28 / AUDIT 5.19: APPEND-ONLY; never renumber or reorder.  These values are

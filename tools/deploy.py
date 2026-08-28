@@ -24,6 +24,9 @@ from typing import Any
 
 from deploy_core import (
     DeployManager,
+    NODE_PROJECTS,
+    generate_espnow_key,
+    node_project,
     load_cfg,
     save_cfg,
     detect_port,
@@ -35,7 +38,8 @@ from deploy_core import (
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
-from features import grouped, is_known, optional_features
+from features import (default_on_features, grouped, has_a_reading_source,
+                      is_known, optional_features)
 from pio_envs import (
     chip_for, defaults_for, environments, env_names, env_info, ports_for,
     usb_pins,
@@ -164,9 +168,83 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     feats = [m for m in (cfg.get("features") or []) if is_known(m)]
     fsum = _green(f"{len(feats)} selected") if feats else _dim("none")
     print(f"  {_cyan('[F]')}  Build features  {fsum}  {_dim('(uppercase F)')}")
+    np = node_project(cfg)
+    key_state = _green("key set") if len(cfg.get("espnow_lmk") or "") == 16 \
+        else (_yellow("no key") if np.wants_key else _dim("no key needed"))
+    print(f"  {_cyan('[N]')}  Node target     {np.label}  {key_state}  {_dim('(uppercase N)')}")
     print(f"  {_cyan('[W]')}  WiFi provision  via serial COM port  {_dim('(uppercase W)')}")
     print(f"  {_cyan('[q]')}  Quit")
     print()
+
+
+def _node_menu(cfg: dict[str, Any]) -> None:
+    """Which satellite board steps 10 and 11 build and flash.
+
+    Its own project, env and port. A node is a different board on a different
+    USB device, and borrowing the collector's port is the shortest path to
+    flashing an ESP8266 image at an ESP32-C3.
+    """
+    while True:
+        proj = node_project(cfg)
+        print()
+        print(_bold("  ── Node target " + "─" * 47))
+        for i, (key, p) in enumerate(NODE_PROJECTS.items(), start=1):
+            tick = _green("✓") if key == proj.key else " "
+            print(f"  {_cyan(f'[{i}]')} [{tick}] {p.label:<22} {_dim(p.blurb)}")
+        print()
+        env_disp = cfg.get("node_env") or _dim(f"{proj.default_env} (project default)")
+        port_disp = cfg.get("node_port") or _dim("auto-detect")
+        print(f"  {_cyan('[e]')}  Node env   : {_bold(env_disp)}")
+        print(f"  {_cyan('[p]')}  Node port  : {_bold(port_disp)}")
+
+        lmk = cfg.get("espnow_lmk") or ""
+        if proj.wants_key:
+            if len(lmk) == 16:
+                shown = _green(lmk) + _dim("  — the collector gets the same 16 bytes")
+            elif lmk:
+                shown = _red(f"{len(lmk)} characters — both firmwares assert on 16")
+            else:
+                shown = _yellow("not set — the node would carry its placeholder "
+                                "and pair with nothing")
+            print(f"  {_cyan('[k]')}  ESP-NOW key: {shown}")
+            print(f"  {_cyan('[g]')}  Generate a key  "
+                  f"{_dim('16 random characters, from the system CSPRNG')}")
+        print()
+        print(f"  {_cyan('[b]')}  Back")
+        print()
+
+        try:
+            ans = input(_bold("  Choice: ")).strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return
+        low = ans.lower()
+        if low in ("b", "", "q"):
+            return
+        if low == "e":
+            cfg["node_env"] = _prompt("Node env", cfg.get("node_env") or proj.default_env)
+            continue
+        if low == "p":
+            cfg["node_port"] = _prompt("Node port", cfg.get("node_port") or "")
+            continue
+        if low == "g" and proj.wants_key:
+            cfg["espnow_lmk"] = generate_espnow_key()
+            print(_green(f"  Generated: {cfg['espnow_lmk']}"))
+            time.sleep(1.4)
+            continue
+        if low == "k" and proj.wants_key:
+            key = _prompt("ESP-NOW key (16 characters)", lmk)
+            if key and len(key) != 16:
+                print(_red(f"  {len(key)} characters — unchanged."))
+                time.sleep(1.2)
+                continue
+            cfg["espnow_lmk"] = key
+            continue
+        if ans.isdigit() and 1 <= int(ans) <= len(NODE_PROJECTS):
+            cfg["node_project"] = list(NODE_PROJECTS)[int(ans) - 1]
+            # The env belonged to the old project; keeping it would offer an
+            # ESP8266 env for an ESP32 build and fail two steps later.
+            cfg["node_env"] = None
 
 
 def _feature_menu(cfg: dict[str, Any]) -> None:
@@ -174,8 +252,16 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
 
     The list comes from src/setup.h through tools/features.py, so a feature
     added to the firmware shows up here without anyone remembering to add it.
-    Only the off-by-default ones appear: an -D flag can switch those on, and
-    cannot switch off one that setup.h enables itself.
+
+    Every one of them is selectable, in both directions. That is newer than it
+    looks: setup.h writes `#ifndef X / #define X`, so a -D flag could only ever
+    add, and this menu used to show the off-by-default half and nothing else.
+    The tools now pass FEATURE_SET_EXPLICIT, which skips those defaults and
+    makes the list they send the whole set — so clearing BME280 or the SD
+    driver does what it says.
+
+    The dot in the margin marks what a plain `pio run` would have given you,
+    which is the only thing the old split still usefully told anyone.
     """
     while True:
         opts = optional_features()
@@ -184,6 +270,7 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
         print()
         print(_bold("  ── Build features " + "─" * 44))
         print(_dim("  Compiled in through PLATFORMIO_BUILD_FLAGS. No file is edited."))
+        print(_dim("  A dot marks what a plain `pio run` would give you."))
         print()
 
         index: list[str] = []
@@ -193,8 +280,21 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
                 index.append(f.macro)
                 n = len(index)
                 tick = _green("✓") if f.macro in chosen else " "
-                label = f.macro.replace("SENSOR_", "").replace("_ENABLED", "")
-                print(f"  {_cyan(f'[{n:>2}]')} [{tick}] {label:<22} {_dim(f.summary)}")
+                dot = "•" if f.enabled else " "
+                label = (f.macro.replace("SENSOR_", "").replace("EXPORT_", "")
+                                .replace("_ENABLED", ""))
+                print(f"  {_cyan(f'[{n:>2}]')} [{tick}]{dot} {label:<22} "
+                      f"{_dim(f.summary) if f.summary else ''}".rstrip())
+            print()
+
+        # The rule setup.h enforces with an #error, said here in a sentence
+        # while there is still something to click. A compiler diagnostic is a
+        # fine backstop and a poor first contact.
+        if not has_a_reading_source(chosen):
+            print(_red("  Nothing to read from.") +
+                  _dim("  Pick at least one sensor, or a remote-node feature to"))
+            print(_dim("  receive readings from another board. The build refuses "
+                       "otherwise."))
             print()
 
         if "FEATURE_ESPNOW_INGEST" in chosen:
@@ -206,9 +306,15 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
             else:
                 shown = _green("set") + _dim("  (flash the SAME 16 bytes into the node)")
             print(f"  {_cyan('[k]')}  ESP-NOW key   {shown}")
+            print(f"  {_cyan('[g]')}  Generate one  "
+                  f"{_dim('16 random characters, from the system CSPRNG')}")
             print()
 
-        print(f"  {_cyan('[c]')}  Clear all      {_cyan('[b]')}  Back")
+        # A starting point. Now that the tool controls the whole set, a fresh
+        # config means thirty cleared boxes, and the first thing anyone wants
+        # is "what I would have got anyway, then my changes".
+        print(f"  {_cyan('[d]')}  Default set    {_cyan('[c]')}  Clear all"
+              f"      {_cyan('[b]')}  Back")
         print()
 
         try:
@@ -223,8 +329,23 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
         if low == "c":
             cfg["features"] = []
             continue
+        if low == "d":
+            cfg["features"] = [f.macro for f in default_on_features()]
+            continue
+        if low == "g":
+            # Generated rather than invented. A key somebody types is a key
+            # somebody can remember, and this one is the only thing between
+            # the pipeline and any ESP-NOW frame in radio range.
+            cfg["espnow_lmk"] = generate_espnow_key()
+            print(_green(f"  Generated: {cfg['espnow_lmk']}"))
+            print(_dim("  Saved. Both the collector and the node get it from "
+                       "here — flash the node from this tool and neither side "
+                       "has to be typed."))
+            time.sleep(1.6)
+            continue
         if low == "k" and "FEATURE_ESPNOW_INGEST" in chosen:
-            print(_dim("  16 characters exactly. Empty leaves setup.h's default in place."))
+            print(_dim("  16 characters exactly. Empty leaves the firmware's "
+                       "placeholder in place; [g] generates one."))
             try:
                 key = input(_bold("  ESP-NOW key: ")).strip()
             except (KeyboardInterrupt, EOFError):
@@ -386,6 +507,9 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             # test match the uppercase key too, so an uppercase action placed
             # after one can never run.
             _feature_menu(cfg)
+
+        elif choice == "N":          # uppercase N — node target
+            _node_menu(cfg)
 
         elif choice == "W":          # uppercase W — WiFi provisioner
             s_wifi_provision(cfg)

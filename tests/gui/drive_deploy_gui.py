@@ -47,6 +47,25 @@ def check(cond: bool, what: str) -> None:
         print(f"  FAIL {what}")
 
 
+def _all_label_text(widget) -> str:
+    """Every piece of text painted anywhere in the window, concatenated.
+
+    Walks the widget tree rather than reading the source that built it: the
+    question is what a person sees, and a panel that stopped being packed is
+    exactly the regression worth catching.
+    """
+    out = []
+    try:
+        text = widget.cget("text")
+        if isinstance(text, str):
+            out.append(text)
+    except Exception:
+        pass
+    for child in getattr(widget, "winfo_children", lambda: [])():
+        out.append(_all_label_text(child))
+    return "\n".join(out)
+
+
 def run(app) -> None:
     fv = app.feature_vars
 
@@ -67,6 +86,64 @@ def run(app) -> None:
     check("FEATURE_ESPNOW_INGEST" in fv, "the ESP-NOW checkbox exists")
     if "FEATURE_ESPNOW_INGEST" not in fv:
         return
+
+    # ── Every feature is tickable, the once-always-on ones included ─────────
+    #
+    # This check exists because somebody opened the window looking for BME280,
+    # did not find it, and concluded the firmware had no driver for it — when
+    # it was in every build ever produced. It had no checkbox because setup.h
+    # defined it itself and no -D flag could remove it. FEATURE_SET_EXPLICIT
+    # changed that, and this asserts the window caught up.
+    from features import all_features         # noqa: PLC0415
+    for macro in ("SENSOR_BME280_ENABLED", "SENSOR_SDS011_ENABLED",
+                  "FEATURE_SD_STORAGE", "EXPORT_MQTT_ENABLED"):
+        check(macro in fv, f"{macro} has a checkbox of its own")
+    check(len(fv) == len(all_features()),
+          f"all {len(all_features())} features are offered, none held back")
+
+    # ── Selecting nothing must not take the build over ──────────────────────
+    #
+    # The factory config selects nothing, meaning "I have not chosen". This
+    # shipped once with that meaning "I choose nothing": the tool passed
+    # -DFEATURE_SET_EXPLICIT alone, setup.h suppressed every default, and the
+    # #error fired on the first build anybody ran after updating. It went
+    # unnoticed because this file only ever drove a NON-empty selection.
+    app._features_clear()
+    check(dc.DeployManager(app.cfg)._pio_env() is None,
+          "an empty selection leaves the build to setup.h's defaults")
+
+    # ── The set buttons ─────────────────────────────────────────────────────
+    app._features_default()
+    feats = set(app.cfg.get("features") or [])
+    check("SENSOR_BME280_ENABLED" in feats and "FEATURE_SD_STORAGE" in feats,
+          "Default set restores what a plain `pio run` gives")
+    check("FEATURE_KINDLE_DASHBOARD" not in feats,
+          "and does not quietly add an off-by-default one")
+
+    # ── The rule that a build must be able to read something ────────────────
+    #
+    # setup.h refuses this with an #error. The window has to say so while
+    # there is still something to click: a compiler diagnostic is a fine
+    # backstop and a poor first contact.
+    app._features_clear()
+    painted = _all_label_text(app.root)
+    check("Nothing to read from" in painted,
+          "clearing everything warns that nothing can be measured")
+
+    app._set_features(["SENSOR_BME280_ENABLED"])
+    painted = _all_label_text(app.root)
+    check("Nothing to read from" not in painted,
+          "and one sensor clears the warning")
+
+    # A collector that only aggregates other boards is a legitimate build, and
+    # setup.h's #error accepts one — so the window must not refuse it either.
+    app._set_features(["FEATURE_ESPNOW_INGEST"])
+    painted = _all_label_text(app.root)
+    check("Nothing to read from" not in painted,
+          "a remote-node-only build is not treated as sensorless")
+
+    # Put the boxes back where the rest of this file expects them.
+    app._features_clear()
 
     # ── Ticking ESP-NOW must also tick what it implies ──────────────────────
     # setup.h defines FEATURE_REMOTE_NODES either way, so leaving the box
@@ -96,13 +173,64 @@ def run(app) -> None:
     note = app.espnow_lmk_note.cget("text")
     check("node" in note, "a valid key points at the node it must match")
 
+    # ── The key is generated, not invented ──────────────────────────────────
+    #
+    # A key somebody types is a key somebody can remember, and this one is the
+    # only thing between the collector's pipeline and any ESP-NOW frame in
+    # radio range. Both firmwares static_assert on exactly 16 characters, so a
+    # generator that produced 15 would fail at the far end of a two-minute
+    # build — asserted here instead.
+    from deploy_core import NODE_PROJECTS, node_project   # noqa: PLC0415
+    before = app.espnow_lmk_entry.get()
+    app._generate_espnow_key()
+    key = app.espnow_lmk_entry.get()
+    check(len(key) == 16, f"a generated key is exactly 16 characters ({len(key)})")
+    check(key != before, "and it is not the one that was already there")
+    check(app.cfg.get("espnow_lmk") == key, "it reaches the config, not just the field")
+    # The compiler gets it as -DESPNOW_LMK=\"...\" through a shell; a quote or
+    # a backslash in it is a broken build.
+    check(all(c.isalnum() for c in key),
+          f"and holds nothing that would break a -D flag: {key!r}")
+
+    # ── The node target ─────────────────────────────────────────────────────
+    check(hasattr(app, "node_project_var"), "the node target has a control")
+    app._on_node_project_change(NODE_PROJECTS["node"].label)
+    check(app.cfg.get("node_project") == "node", "switching the node project sticks")
+    check(not app.cfg.get("node_env"),
+          "and clears the env, which belonged to the other chip")
+
+    # _node_target(), not _node_cmd(): the target needs no PlatformIO to
+    # answer, and this job does not install one. The first version asked for
+    # the command, got [None, "run", …] back, and died in a str.join — a
+    # traceback that named the join rather than the missing toolchain, which
+    # is also why _node_cmd() now returns None outright.
+    mgr = dc.DeployManager(app.cfg)
+    target = mgr._node_target()
+    check(target is not None, "the ESP8266 node resolves to a project")
+    if target:
+        directory, env_name = target
+        check(directory.name == "node" and env_name == "nodemcuv2",
+              f"and it is its own project and env: {directory.name}/{env_name}")
+    # The ESP8266 node has no radio key, so it must not be handed one.
+    check(mgr._node_env() is None, "and is not given an ESP-NOW key it cannot use")
+
+    app._on_node_project_change(NODE_PROJECTS["node_espnow"].label)
+    mgr = dc.DeployManager(app.cfg)
+    nenv = mgr._node_env() or {}
+    check(key in nenv.get("PLATFORMIO_BUILD_FLAGS", ""),
+          "the battery node is built with the same key as the collector")
+
     # ── What the compiler would actually be given ───────────────────────────
     env = dc.DeployManager(app.cfg)._pio_env()
     flags = (env or {}).get("PLATFORMIO_BUILD_FLAGS", "")
     print(f"  ---  PLATFORMIO_BUILD_FLAGS = {flags}")
     check("-DFEATURE_ESPNOW_INGEST" in flags, "the feature reaches the build")
     check("-DFEATURE_REMOTE_NODES" in flags, "the implied feature reaches the build")
-    check('ESPNOW_LMK=\\"sixteen-char-key\\"' in flags, "the key reaches the build")
+    # Against whatever key the config holds NOW, not a literal: the generator
+    # check above replaced the typed one, and an assertion naming the old
+    # string would fail on a page that is working perfectly.
+    check(f'ESPNOW_LMK=\\"{app.cfg["espnow_lmk"]}\\"' in flags,
+          "the key reaches the build")
 
     # ── And unticking takes it away again ───────────────────────────────────
     # FEATURE_REMOTE_NODES is deliberately LEFT: it is useful on its own, it

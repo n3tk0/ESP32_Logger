@@ -1,4 +1,16 @@
 #include "AlertEngine.h"
+// Config.h pulls in setup.h, and this file needs it for a reason that is not
+// obvious: the EXPORT_MQTT_ENABLED guard below. Nothing else in this
+// translation unit's include chain reaches setup.h — AlertEngine.h,
+// DataPipeline.h and MqttExporter.h all bottom out at SensorTypes.h and
+// <Arduino.h> — so the macro was simply undefined here, and the block that
+// publishes alerts over MQTT was compiled out of every default build. It
+// looked enabled everywhere it was configured and never sent anything.
+//
+// Found when the deploy tools started passing the feature set on the command
+// line: defining it for every TU brought 240 bytes of code back, which is
+// what that missing block weighs.
+#include "../core/Config.h"
 #include "../utils/MutexGuard.h"
 #include "../utils/AtomicWrite.h"
 #include "../pipeline/DataPipeline.h"   // global fsMutex — serialise FS writes

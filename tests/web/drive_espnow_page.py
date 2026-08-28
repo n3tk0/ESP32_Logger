@@ -80,6 +80,11 @@ with sync_playwright() as p:
     stats = pg.locator("#en-stats").inner_text()
     check("1528" in stats, "the accepted-frame counter is shown")
     check("bad pairing signature" in stats, "the failure counters are labelled")
+    # The two backfill counters are separate on purpose — an overflowing queue
+    # and a burst with no clock ask for opposite fixes — so the page has to
+    # show both rather than one number covering them.
+    check("backfill dropped" in stats and "backfill with no clock" in stats,
+          "the two backfill causes are shown apart")
 
     # Pairing button end to end: click, POST, badge flips.
     check(pg.locator("#en-pair-state").inner_text().strip().lower() == "closed", "pairing starts closed")

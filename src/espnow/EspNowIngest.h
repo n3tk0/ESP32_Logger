@@ -122,6 +122,15 @@ struct EspNowIngestStats {
     /// keeps overflowing means the drain is too slow for the burst size —
     /// a tuning fact, and one worth being able to see rather than guess at.
     uint32_t historyCollapsed;
+    /// Backfilled readings that had no date to be filed under: neither the
+    /// node nor the collector had a real clock when the burst arrived.
+    ///
+    /// Counted apart from historyCollapsed, which it used to be folded into,
+    /// because the two ask for opposite things. An overflowing queue wants a
+    /// bigger queue; a burst with no clock wants NTP or an RTC, and no amount
+    /// of queue will help it. One number covering both is the kind of
+    /// diagnostic that sends people to tune the thing that was never wrong.
+    uint32_t historyNoClock;
     uint32_t acksSent;
     uint32_t discoverSeen;
     uint32_t discoverBadSig;
