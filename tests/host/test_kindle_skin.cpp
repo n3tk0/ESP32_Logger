@@ -278,6 +278,47 @@ static void test_clamp_rejects_what_a_form_cannot_send() {
     CHECK(css.s.empty());
 }
 
+// The font list lands verbatim inside the page's stylesheet, so a `}` in it
+// closes the rule and everything after is whatever the writer wanted.
+//
+// This is asserted on kdSkinClamp() rather than on the API handler because
+// that is where it had to move: the filter used to live only where a form
+// posted the value, and the settings-IMPORT path — which is just as capable
+// of carrying a string — walked straight past it into config.kindle.
+static void test_clamp_filters_the_font_list() {
+    KindleConfig k = defaults();
+    k.face = KFACE_CUSTOM;
+    strcpy(k.faceCustom, "Ember} body{display:none");
+    kdSkinClamp(k);
+    CHECK(strchr(k.faceCustom, '}') == nullptr);
+    CHECK(strchr(k.faceCustom, '{') == nullptr);
+    CHECK(strchr(k.faceCustom, ':') == nullptr);
+    // What a family list legitimately holds survives intact.
+    CHECK(strstr(k.faceCustom, "Ember") != nullptr);
+
+    KindleConfig q = defaults();
+    q.face = KFACE_CUSTOM;
+    strcpy(q.faceCustom, "'Amazon Ember',serif;@import url(x)");
+    kdSkinClamp(q);
+    CHECK(strchr(q.faceCustom, ';') == nullptr);
+    CHECK(strchr(q.faceCustom, '@') == nullptr);
+    CHECK(strchr(q.faceCustom, '(') == nullptr);
+    CHECK(strstr(q.faceCustom, "'Amazon Ember',serif") != nullptr);
+
+    // Filtered down to nothing is the same as never named: the page must fall
+    // back to a real stack rather than render in the browser's default.
+    KindleConfig e = defaults();
+    e.face = KFACE_CUSTOM;
+    strcpy(e.faceCustom, "{};@()");
+    kdSkinClamp(e);
+    CHECK(e.faceCustom[0] == '\0');
+    CHECK(e.face == KFACE_BOOKERLY);
+
+    Css css;
+    kdSkinCss(css, e);
+    CHECK(!css.has("font-family"));
+}
+
 static void test_clamp_leaves_a_valid_config_alone() {
     KindleConfig k = defaults();
     k.face = KFACE_FUTURA;
@@ -304,6 +345,7 @@ int main() {
     RUN(test_date_formats);
     RUN(test_pressure_units);
     RUN(test_clamp_rejects_what_a_form_cannot_send);
+    RUN(test_clamp_filters_the_font_list);
     RUN(test_clamp_leaves_a_valid_config_alone);
     return SUMMARY();
 }

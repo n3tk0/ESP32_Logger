@@ -136,6 +136,24 @@ def main() -> int:
             "    Without it setup.h re-applies its defaults and every cleared "
             "checkbox is ignored, silently.")
 
+    # AND THE OTHER SIDE OF THE SAME COIN, which shipped broken once.
+    #
+    # The tool's factory config selects nothing, meaning "I have not chosen".
+    # Prepending FEATURE_SET_EXPLICIT to that declared "I choose nothing",
+    # setup.h suppressed every default, and the #error fired on the first
+    # build anybody ran after updating — the default path, for every existing
+    # user, before they had touched a single checkbox.
+    if build_flags_for([]) != "":
+        problems.append(
+            f"build_flags_for([]) returns {build_flags_for([])!r}, not \"\".\n"
+            "    An empty selection means 'I have not chosen', so it must "
+            "leave setup.h's defaults alone. Claiming an explicit empty set "
+            "makes the default build fail to compile.")
+    if build_flags_for(["NOT_A_REAL_FEATURE"]) != "":
+        problems.append(
+            "build_flags_for() claims an explicit set from unknown macros "
+            "alone, which is the empty-selection bug by another route.")
+
     # And the guard on the far side: a set with nothing to read from must be
     # refused by the tools before the compiler has to refuse it.
     if has_a_reading_source([]):

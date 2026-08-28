@@ -101,6 +101,17 @@ def run(app) -> None:
     check(len(fv) == len(all_features()),
           f"all {len(all_features())} features are offered, none held back")
 
+    # ── Selecting nothing must not take the build over ──────────────────────
+    #
+    # The factory config selects nothing, meaning "I have not chosen". This
+    # shipped once with that meaning "I choose nothing": the tool passed
+    # -DFEATURE_SET_EXPLICIT alone, setup.h suppressed every default, and the
+    # #error fired on the first build anybody ran after updating. It went
+    # unnoticed because this file only ever drove a NON-empty selection.
+    app._features_clear()
+    check(dc.DeployManager(app.cfg)._pio_env() is None,
+          "an empty selection leaves the build to setup.h's defaults")
+
     # ── The set buttons ─────────────────────────────────────────────────────
     app._features_default()
     feats = set(app.cfg.get("features") or [])

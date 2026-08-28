@@ -209,9 +209,25 @@ def build_flags_for(macros, extra: dict[str, str] | None = None) -> str:
     anything. Without it setup.h applies its own defaults and the flags below
     can only add to them — so unticking BME280 or the SD driver would compile a
     build that still had both. With it, this list is the whole set.
+
+    AN EMPTY SELECTION IS NOT AN EMPTY SET. It returns "" — no flags at all —
+    so setup.h keeps its own defaults and the build is the one a plain
+    `pio run` produces.
+
+    That distinction is the whole of a bug this shipped with. The tool's
+    factory config selects nothing, meaning "I have not chosen"; prepending
+    FEATURE_SET_EXPLICIT to it declared "I choose nothing", setup.h duly
+    suppressed every default, and the #error fired on the first build anybody
+    ran after updating. There is no legitimate empty set — a build with no
+    sensor and no remote node cannot compile by design — so the empty list can
+    safely mean the only other thing it could mean.
     """
+    selected = [m for m in macros if is_known(m)]
+    if not selected:
+        return ""
+
     parts = ["-DFEATURE_SET_EXPLICIT"]
-    parts += [f"-D{m}" for m in macros if is_known(m)]
+    parts += [f"-D{m}" for m in selected]
     for key, value in (extra or {}).items():
         if value:
             parts.append(f'-D{key}=\\"{value}\\"')

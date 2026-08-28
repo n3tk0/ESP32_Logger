@@ -176,9 +176,9 @@ static inline uint8_t currentChannel() {
 // fault can plausibly clear.
 static uint32_t s_saveRetryAtMs = 0;   ///< millis() before which not to retry
 
-static void saveNodes() {
+static bool saveNodes() {
     // Signed difference, so this stays correct across the millis() wrap.
-    if (s_saveRetryAtMs != 0 && (int32_t)(s_saveRetryAtMs - millis()) > 0) return;
+    if (s_saveRetryAtMs != 0 && (int32_t)(s_saveRetryAtMs - millis()) > 0) return false;
 
     EspNowNode snap[EspNowNodeTable::CAP];
     taskENTER_CRITICAL(&s_nodeMux);
@@ -191,7 +191,7 @@ static void saveNodes() {
                        "— retrying in 60 s");
         s_saveRetryAtMs = millis() + 60000u;
         if (s_saveRetryAtMs == 0) s_saveRetryAtMs = 1;   // 0 means "no backoff"
-        return;
+        return false;
     }
     f.write((const uint8_t*)&NODES_MAGIC, sizeof(NODES_MAGIC));
     for (int i = 0; i < EspNowNodeTable::CAP; i++)
@@ -199,6 +199,7 @@ static void saveNodes() {
     f.close();
     s_dirty = false;
     s_saveRetryAtMs = 0;
+    return true;
 }
 
 static void loadNodes() {
@@ -621,10 +622,15 @@ void espnowIngestTick() {
     // Persist on a provisioning change, and once a day so a reboot does not
     // cost the battery history. Not per frame: that would be a flash write a
     // minute per node, which is how a partition gets worn out.
+    // s_lastDay advances only on a write that HAPPENED. It used to be set
+    // first, which quietly turned the retry off: saveNodes() can return early
+    // on its 60 s backoff, and on the daily path s_dirty is false, so nothing
+    // would have brought the tick back. One skipped write and that day's
+    // battery minima were gone — the history that takes five days to rebuild
+    // before batteryDaysLeft() will answer at all.
     const uint32_t today = nowEpoch() / 86400u;
     if (s_dirty || (today != 0 && today != s_lastDay && s_nodes.count() > 0)) {
-        s_lastDay = today;
-        saveNodes();
+        if (saveNodes()) s_lastDay = today;
     }
 }
 
