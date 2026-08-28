@@ -1,5 +1,6 @@
 #include "OtaManager.h"
 #include "../core/Globals.h"
+#include "../core/EventLog.h"       // eventLogPrintf
 #include "../setup.h"               // OTA_CONFIRM_TIMEOUT_MS
 #include "../pipeline/DataPipeline.h"
 #include "../utils/MutexGuard.h"
@@ -29,17 +30,15 @@ static char s_runningLabel[8]  = "";
 static char s_previousLabel[8] = "";
 
 // ---------------------------------------------------------------------------
+// Through eventLogPrintf() rather than opening the file here.
+//
+// This used to write to LittleFS by name while /api/diag read the same log
+// from activeFS — so on a board configured for an SD card, every OTA event was
+// written where nothing ever looked. The helper resolves the filesystem once,
+// the same way for every writer.
 static void _logOtaEvent(const char* event) {
-    if (!littleFsAvailable) return;
-    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-    if (!g.isLocked()) return;
-    File f = LittleFS.open("/reset_log.txt", FILE_APPEND);
-    if (!f) return;
-    char line[80];
-    snprintf(line, sizeof(line), "boot#%u  OTA_%s  running=%s\n",
-             (unsigned)bootCount, event, s_runningLabel);
-    f.print(line);
-    f.close();
+    eventLogPrintf("boot#%u  OTA_%s  running=%s",
+                   (unsigned)bootCount, event, s_runningLabel);
 }
 
 // ---------------------------------------------------------------------------

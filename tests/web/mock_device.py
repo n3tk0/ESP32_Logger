@@ -25,13 +25,20 @@ STATUS = {
     "nodes": [
         {"id": "outdoor", "node_id": 1, "interval": 60, "frames": 1440, "dropped": 2,
          "offline": False, "mac": "24:6F:28:01:02:03", "age_s": 42, "seen": True,
-         "rssi": None, "mv": 3874, "percent": 62, "days": 237, "warn": False},
+         "rssi": None, "mv": 3874, "percent": 62, "days": 237, "warn": False,
+         "skew_s": 3},
         {"id": "balcony", "node_id": 2, "interval": 300, "frames": 88, "dropped": 0,
          "offline": True, "mac": "24:6F:28:0A:0B:0C", "age_s": 5400, "seen": True,
-         "rssi": None, "mv": 3560, "percent": 8, "days": None, "warn": True},
+         "rssi": None, "mv": 3560, "percent": 8, "days": None, "warn": True,
+         # Well past ESPNOW_SKEW_WARN_S, and negative — the node is AHEAD of
+         # the collector, the direction the obvious unsigned subtraction in the
+         # firmware would have turned into four billion.
+         "skew_s": -184},
         {"id": "espnow-03", "node_id": 3, "interval": 60, "frames": 0, "dropped": 0,
          "offline": True, "mac": "24:6F:28:AA:BB:CC", "age_s": 0, "seen": False,
-         "rssi": None, "mv": None, "percent": None, "days": None, "warn": False},
+         "rssi": None, "mv": None, "percent": None, "days": None, "warn": False,
+         # Never reported, so there is no measurement — which is not zero.
+         "skew_s": None},
     ],
     "stats": {"frames": 1528, "malformed": 0, "unknown_node": 3, "replayed": 1,
               "ring_full": 0, "history_collapsed": 0, "history_no_clock": 2,

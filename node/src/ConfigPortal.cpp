@@ -271,12 +271,37 @@ bool portalRun(NodeSettings& s, uint32_t timeoutMs) {
     s_http.onNotFound(handleRoot);
     s_http.begin();
 
-    const uint32_t start = millis();
+    uint32_t start = millis();
+    bool     hadClient = false;
     while (!s_saved) {
         s_dns.processNextRequest();
         s_http.handleClient();
 
-        if (timeoutMs && (millis() - start) > timeoutMs) {
+        // THE CLOCK STOPS WHILE SOMEBODY IS CONNECTED.
+        //
+        // The timeout exists so a node does not sit in AP mode forever after a
+        // 3 am router reboot nobody witnessed. A station associated to the
+        // softAP is the opposite of that: it is direct evidence a human is
+        // standing there, mid-configuration.
+        //
+        // Without this the window closed under them. Joining the AP, waiting
+        // out the phone's "no internet, stay connected?" prompt, and typing an
+        // SSID and a passphrase is comfortably more than the five minutes the
+        // timer allowed from BOOT — so the page would half-load, or not load
+        // at all, and the AP would vanish. From the outside that is
+        // indistinguishable from a portal that never worked.
+        const bool client = WiFi.softAPgetStationNum() > 0;
+        if (client) {
+            start = millis();          // hold the window open
+            hadClient = true;
+        } else if (hadClient) {
+            // They left without saving. Give the timeout a fresh start rather
+            // than resuming a stale count, so a reconnect gets a full window.
+            hadClient = false;
+            start = millis();
+        }
+
+        if (timeoutMs && !client && (millis() - start) > timeoutMs) {
             Serial.println("[portal] timed out, retrying the saved network");
             break;
         }

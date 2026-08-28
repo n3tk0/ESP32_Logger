@@ -35,7 +35,8 @@ extern MqttExporter* g_mqttExporter;
 #endif
 #include "../tasks/TaskManager.h"  // task handles for /api/diag
 #include "../managers/OtaManager.h"
-#include "../utils/MutexGuard.h"   // R19.D: guarded /reset_log.txt read
+#include "../utils/MutexGuard.h"   // R19.D: guarded diagnostic-log read
+#include "../core/EventLog.h"      // EVENT_LOG_PATH
 #include "../core/SdCompat.h"      // sdSupportCompiledIn() for /api/diag
 
 // ---------------------------------------------------------------------------
@@ -380,6 +381,15 @@ static void handleEspnowStatus(AsyncWebServerRequest* req) {
         // no signal information at all. Sent as null rather than 0 so the page
         // can show "—" instead of a plausible-looking -0 dBm.
         if (e.rssi) o["rssi"] = e.rssi; else o["rssi"] = nullptr;
+
+        // How far the node's clock has drifted from ours, in seconds, positive
+        // when the node is behind. Null until it has reported with both clocks
+        // set — which is not the same as zero, and a page that printed "0 s"
+        // for "not measured yet" would be claiming a perfectly synchronised
+        // node on a device that has no idea.
+        int32_t skew = 0;
+        if (espnowNodeSkew(e.nodeId, skew)) o["skew_s"] = skew;
+        else                                o["skew_s"] = nullptr;
 
         if (e.lastMv) {
             o["mv"]      = e.lastMv;
@@ -751,12 +761,15 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
                                           : WiFi.softAPIP().toString();
     }
 
-    // R19.D — tail of /reset_log.txt (last ≤16 lines)
+    // R19.D — tail of the diagnostic log (last ≤16 lines).
+    // The JSON key stays `resetLog`: it is what the failsafe page and every
+    // saved diagnostic bundle already read, and renaming a field to match a
+    // filename would break those for nothing.
     JsonArray rl = doc["resetLog"].to<JsonArray>();
     if (fsAvailable && activeFS && fsMutex) {
         MutexGuard g(fsMutex, pdMS_TO_TICKS(1000));
-        if (g.isLocked() && activeFS->exists("/reset_log.txt")) {
-            File f = activeFS->open("/reset_log.txt", FILE_READ);
+        if (g.isLocked() && activeFS->exists(EVENT_LOG_PATH)) {
+            File f = activeFS->open(EVENT_LOG_PATH, FILE_READ);
             if (f && f.size() <= 8 * 1024) {
                 String buf = f.readString();
                 f.close();

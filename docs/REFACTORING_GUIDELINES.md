@@ -272,7 +272,7 @@ The following endpoints currently lack one or both protections and MUST be patch
 ### 2.4 Protected path list
 
 `isPathProtected(path)` MUST return true for ALL of:
-- `/config.bin`, `/bootcount.bin`, `/reset_log.txt`, `/config.tmp`, `/bootcount.tmp`
+- `/config.bin`, `/bootcount.bin`, `/error_log.txt` (and `/reset_log.txt`, its pre-rename name), `/config.tmp`, `/bootcount.tmp`
 - `/alerts.json`, `/alerts.json.tmp`
 - `/platform_config.json`, `/platform_config.json.tmp`
 - Any path starting with `/config/`
@@ -285,7 +285,7 @@ The following endpoints currently lack one or both protections and MUST be patch
 
 - `/export_settings`, `/api/backup`, and any GET that includes secrets MUST mask the following fields by default: `apPassword`, `clientPassword`, `password` (MQTT), `access_token` (OSM), `Authorization` (HTTP exporter).
 - Default mask value: `"***"`.
-- Caller MUST pass `?include_secrets=1` AND a fresh CSRF token to unmask. The unmask path MUST log the access via Serial + `/reset_log.txt`.
+- Caller MUST pass `?include_secrets=1` AND a fresh CSRF token to unmask. The unmask path MUST log the access via Serial + `eventLogPrintf()` (`/error_log.txt`).
 - Frontend MUST display secrets via a deliberate "Show" toggle that triggers the unmask fetch — never via auto-populated `<input type="password" value="...">`.
 
 ### 2.6 String validation at API boundary

@@ -72,6 +72,10 @@ bool isPathProtected(const String& path) {
     if (path.isEmpty()) return false;
     if (path == "/config.bin")              return true;
     if (path == "/bootcount.bin")           return true;
+    // Both names: the current one, and the one older builds used. A device that
+    // has not rebooted since the update — or one where the rename failed — must
+    // not have the old file suddenly become deletable through the Files page.
+    if (path == "/error_log.txt")           return true;
     if (path == "/reset_log.txt")           return true;
     if (path == "/board_profile.txt")       return true;  // R11
     if (path == "/platform_config.json")    return true;  // R5 — reveals MQTT/OSM secrets
@@ -87,7 +91,8 @@ bool isPathProtected(const String& path) {
 // Diagnostic files that are write-protected (isPathProtected=true) but safe
 // to download — they contain no secrets, only crash/debug info the user needs.
 bool isPathDownloadAllowed(const String& path) {
-    if (path == "/reset_log.txt")        return true;
+    if (path == "/error_log.txt")        return true;
+    if (path == "/reset_log.txt")        return true;   // pre-rename builds
     if (path == "/board_profile.txt")    return true;
     if (path == "/alerts.json")          return true;
     return false;

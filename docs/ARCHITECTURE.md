@@ -621,11 +621,27 @@ opposite fixes: a backlog queue that keeps overflowing wants a bigger queue,
 while a burst that arrives with no clock on either side wants NTP or an RTC,
 and no amount of queue will help it.
 
-Two fields are deliberately `null` rather than zero. `rssi` is unavailable on
+`skew_s` is how far a node's clock is from the collector's, in seconds,
+positive when the node is behind. It is measured rather than reported: every
+`DataMsg` already carries the node's own epoch, so the difference costs the
+node no extra byte on the air, no extra wake, and no flash write on a device
+that spends its life asleep. Crossing `ESPNOW_SKEW_WARN_S` also writes a line
+to `/error_log.txt`, at most once an hour per node — see `docs/ESPNOW_NODE.md`.
+
+The measurement lives in a runtime array beside the node table rather than in
+`EspNowNode`, and deliberately so: the table is persisted as raw structs, so a
+new field there changes `sizeof()`, makes `loadNodes()` discard the saved file,
+and costs every deployed node a re-pair. A live figure retaken on the next
+report is not worth that. It is therefore empty after a reboot until each node
+next reports.
+
+Three fields are deliberately `null` rather than zero. `rssi` is unavailable on
 Arduino core 2.x (IDF 4.4 hands the receive callback no signal information),
-and `days` is null whenever `batteryDaysLeft()` refuses to answer — too little
-history, or a slope inside the noise. A zero in either would read as a
-measurement.
+`days` is null whenever `batteryDaysLeft()` refuses to answer — too little
+history, or a slope inside the noise — and `skew_s` is null until the node has
+reported with a clock set on both sides. A zero in any of them would read as a
+measurement, and for `skew_s` a particularly convincing one: a perfectly
+synchronised node.
 
 **E-ink dashboard** (`FEATURE_KINDLE_DASHBOARD`)
 

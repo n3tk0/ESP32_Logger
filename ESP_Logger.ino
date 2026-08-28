@@ -54,6 +54,7 @@
 
 #include "src/core/Globals.h"
 #include "src/core/BoardProfiles.h"   // R11: pin-rules registry loaded after initStorage
+#include "src/core/EventLog.h"        // the one diagnostic log, and its rename
 #include "src/core/ModuleRegistry.h"  // Pass 5: unified module registry (phase 1 = empty)
 #include "src/modules/WiFiModule.h"    // Pass 5 phase 2
 #include "src/modules/OtaModule.h"     // Pass 5 phase 2
@@ -334,7 +335,7 @@ static PlatformMode _detectPlatformMode() {
 }
 
 // ---------------------------------------------------------------------------
-// Watchdog recovery log — write reset reason to /reset_log.txt on LittleFS
+// Watchdog recovery log — write the reset reason to the diagnostic log.
 // Appends one line per boot so resets can be diagnosed via the Files page.
 // ---------------------------------------------------------------------------
 static const char* _resetReasonStr(esp_reset_reason_t r) {
@@ -359,17 +360,11 @@ static void _writeResetLog() {
     // Only log notable resets (skip normal power-on and deep-sleep wake)
     if (reason == ESP_RST_POWERON || reason == ESP_RST_DEEPSLEEP) return;
 
-    File f = activeFS->open("/reset_log.txt", FILE_APPEND);
-    if (!f) return;
-
-    // Format: YYYY-MM-DD HH:MM:SS  REASON  boot#N
-    // RTC time may not be valid at this point; use uptime placeholder
-    char line[80];
-    snprintf(line, sizeof(line), "boot#%u  reason=%s\n",
-             (unsigned)bootCount, _resetReasonStr(reason));
-    f.print(line);
-    f.close();
-    DBGF("[WDT] Reset log entry: %s", line);
+    // RTC time may not be valid at this point, so the boot number is the only
+    // ordering the line carries.
+    eventLogPrintf("boot#%u  reason=%s", (unsigned)bootCount, _resetReasonStr(reason));
+    DBGF("[WDT] Reset log entry: boot#%u reason=%s\n",
+         (unsigned)bootCount, _resetReasonStr(reason));
 }
 
 // ---------------------------------------------------------------------------
@@ -683,6 +678,9 @@ void setup() {
     DBGF("Boot count: %d\n", bootCount);
 
     // ── Watchdog recovery log ─────────────────────────────────────────────────
+    // The rename first, so an older build's history carries over rather than
+    // being orphaned under a name nothing reads any more.
+    eventLogMigrate();
     _writeResetLog();
 
     // ── OTA rollback support ─────────────────────────────────────────────────
