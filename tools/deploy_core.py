@@ -55,6 +55,8 @@ STEP_NAMES: dict[int, str] = {
     7: "Upload LittleFS       pio run -t uploadfs",
     8: "Upload web via HTTP   POST /upload to device IP",
     9: "Open serial monitor   pio device monitor",
+    10: "Compile node firmware pio run -d node…",
+    11: "Flash node firmware   pio run -d node… -t upload",
 }
 
 PRESETS: dict[str, tuple[str, list[int]]] = {
@@ -62,6 +64,10 @@ PRESETS: dict[str, tuple[str, list[int]]] = {
     "C": ("Clean build",   [4, 5, 6]),
     "Q": ("Quick flash",   [5, 6]),
     "H": ("HTTP deploy",   [1, 8]),
+    # The node is its own board on its own USB device, so it gets its own
+    # preset rather than joining "All steps" — running both in one pass would
+    # flash whichever happens to be plugged in twice.
+    "D": ("Node flash",    [10, 11]),
     "A": ("All steps",     list(range(1, 10))),
     "N": ("None",          []),
 }
@@ -97,9 +103,78 @@ DEFAULT_CFG: dict[str, Any] = {
 
     # The 16-byte key shared with an ESP-NOW battery node. Only meaningful with
     # FEATURE_ESPNOW_INGEST, and the same value has to be flashed into the node
-    # or nothing pairs and nothing decrypts.
+    # or nothing pairs and nothing decrypts. Generate one with
+    # generate_espnow_key(); it is carried into whichever target is built, so
+    # collector and node agree without anybody retyping it.
     "espnow_lmk":           "",
+
+    # Which satellite project the node steps build. Its own env and port,
+    # because a node is a different board on a different USB device and
+    # reusing the collector's would flash the wrong one.
+    "node_project":         "node_espnow",
+    "node_env":             None,   # None = the project's own default
+    "node_port":            None,   # None = auto-detect
 }
+
+
+# ── The satellite projects ────────────────────────────────────────────────────
+#
+# Each is a self-contained PlatformIO project beside the collector's, built
+# with `pio run -d <dir>`. Listed here rather than discovered, because there
+# are two of them and they differ in ways a scan could not infer: only one
+# shares the ESP-NOW key, and their default envs come from different chips.
+class NodeProject:
+    def __init__(self, key: str, directory: str, label: str,
+                 default_env: str, wants_key: bool, blurb: str):
+        self.key = key
+        self.directory = directory
+        self.label = label
+        self.default_env = default_env
+        self.wants_key = wants_key
+        self.blurb = blurb
+
+
+NODE_PROJECTS: dict[str, NodeProject] = {
+    "node_espnow": NodeProject(
+        "node_espnow", "node_espnow", "ESP-NOW battery node",
+        "xiao_esp32c3", True,
+        "Deep-sleeping ESP32-C3. Shares the 16-byte key with the collector."),
+    "node": NodeProject(
+        "node", "node", "ESP8266 WiFi node",
+        "nodemcuv2", False,
+        "Mains-powered ESP8266. Pushes readings to POST /api/ingest."),
+}
+
+
+def node_project(cfg: dict[str, Any]) -> NodeProject:
+    """The satellite project the node steps act on."""
+    return NODE_PROJECTS.get(cfg.get("node_project") or "",
+                             NODE_PROJECTS["node_espnow"])
+
+
+#: The alphabet a generated ESP-NOW key is drawn from.
+#:
+#: Letters and digits only, and that is a decision rather than laziness. The
+#: key reaches the compiler as -DESPNOW_LMK=\"...\" through a shell and a
+#: PlatformIO ini parser, so a quote, a backslash, a dollar or a semicolon in
+#: it is a broken build at best. Ambiguous glyphs are dropped too — somebody
+#: reads this off one screen and types it into another, and 0/O and 1/l/I is
+#: where that goes wrong.
+_KEY_ALPHABET = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def generate_espnow_key(length: int = 16) -> str:
+    """A fresh shared key, from the system's cryptographic RNG.
+
+    `secrets`, not `random`: this is the only thing standing between the
+    collector's pipeline and any ESP-NOW frame in radio range, and
+    `random.choice` is seeded predictably enough to enumerate.
+
+    Exactly 16 characters because both firmwares static_assert on it — see
+    ESPNOW_LMK in node_config.h and in the collector's setup.h.
+    """
+    import secrets
+    return "".join(secrets.choice(_KEY_ALPHABET) for _ in range(length))
 
 # Keys load_cfg() re-derives from the environment when they are None. `chip` is
 # absent on purpose: it is re-derived unconditionally, because an env and a
@@ -872,6 +947,96 @@ class DeployManager:
             cmd += ["--port", self.cfg["port"]]
         return self._run_cmd(cmd)
 
+    # ── The satellite boards ─────────────────────────────────────────────────
+    #
+    # A node is a separate PlatformIO project (`pio run -d node_espnow`), a
+    # separate board, and a separate USB device. It therefore gets its own env
+    # and its own port rather than borrowing the collector's — sharing them was
+    # the shortest path to flashing an ESP8266 image at an ESP32-C3.
+    def _node_env(self) -> dict[str, str] | None:
+        """os.environ plus the node's build flags, or None when it needs none.
+
+        The ESP-NOW key is the whole point. The collector and the node have to
+        hold the same 16 bytes or nothing pairs and nothing decrypts, and the
+        two are built minutes apart from the same config — so it is passed
+        here rather than left for somebody to copy into node_config.h by hand
+        and mistype once.
+        """
+        proj = node_project(self.cfg)
+        lmk = (self.cfg.get("espnow_lmk") or "").strip()
+        if not (proj.wants_key and lmk):
+            return None
+
+        env = dict(os.environ)
+        existing = env.get("PLATFORMIO_BUILD_FLAGS", "").strip()
+        flag = f'-DESPNOW_LMK=\\"{lmk}\\"'
+        env["PLATFORMIO_BUILD_FLAGS"] = f"{existing} {flag}".strip()
+        return env
+
+    def _node_cmd(self, *extra: str) -> list[str] | None:
+        proj = node_project(self.cfg)
+        directory = ROOT / proj.directory
+        if not (directory / "platformio.ini").is_file():
+            self._log(f"ERROR: no PlatformIO project at {directory}.")
+            return None
+        env_name = self.cfg.get("node_env") or proj.default_env
+        return [self.pio, "run", "-d", str(directory), "-e", env_name, *extra]
+
+    def _node_preamble(self) -> bool:
+        if self.pio is None:
+            self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            return False
+        proj = node_project(self.cfg)
+        self._log(f"Node project: {proj.label}  ({proj.directory}/)")
+        if proj.wants_key:
+            lmk = (self.cfg.get("espnow_lmk") or "").strip()
+            if not lmk:
+                # Not an error: node_config.h has a placeholder and the build
+                # succeeds. Said loudly because a node flashed with the
+                # placeholder pairs with nothing and gives no clue why.
+                self._log("WARNING: no ESP-NOW key set — the node will carry the "
+                          "placeholder from node_config.h and will not pair with "
+                          "a collector built with a real one.")
+            elif len(lmk) != 16:
+                self._log(f"ERROR: the ESP-NOW key is {len(lmk)} characters; "
+                          f"both firmwares static_assert on exactly 16.")
+                return False
+            else:
+                self._log("ESP-NOW key: the same 16 bytes this tool gives the "
+                          "collector.")
+        return True
+
+    def s10_compile_node(self) -> int:
+        self._emit_start(10, STEP_NAMES[10])
+        if not self._node_preamble():
+            self._emit_complete(10, 1)
+            return 1
+        cmd = self._node_cmd()
+        rc = 1 if cmd is None else self._run_cmd(cmd, env=self._node_env())
+        if rc == 0:
+            self._log("✓ Node firmware compiled.")
+        self._emit_complete(10, rc)
+        return rc
+
+    def s11_flash_node(self) -> int:
+        self._emit_start(11, STEP_NAMES[11])
+        if not self._node_preamble():
+            self._emit_complete(11, 1)
+            return 1
+        cmd = self._node_cmd("-t", "upload")
+        if cmd is not None and self.cfg.get("node_port"):
+            cmd += ["--upload-port", self.cfg["node_port"]]
+        # The same env as the compile step, and for the same reason it matters
+        # on the collector: `pio run -t upload` relinks before it flashes, so
+        # an upload without the key would rebuild the node WITHOUT it and
+        # flash that — a board that boots, sweeps every channel, and pairs
+        # with nothing.
+        rc = 1 if cmd is None else self._run_cmd(cmd, env=self._node_env())
+        if rc == 0:
+            self._log("✓ Node firmware flashed.")
+        self._emit_complete(11, rc)
+        return rc
+
     def provision_wifi(
         self,
         input_fn: Optional[Callable[[str], str]] = None,
@@ -1119,6 +1284,8 @@ class DeployManager:
             7: self.s7_upload_fs,
             8: self.s8_upload_http,
             9: self.s9_monitor,
+           10: self.s10_compile_node,
+           11: self.s11_flash_node,
         }
 
         failed: list[int] = []

@@ -162,13 +162,56 @@ def run(app) -> None:
     note = app.espnow_lmk_note.cget("text")
     check("node" in note, "a valid key points at the node it must match")
 
+    # ── The key is generated, not invented ──────────────────────────────────
+    #
+    # A key somebody types is a key somebody can remember, and this one is the
+    # only thing between the collector's pipeline and any ESP-NOW frame in
+    # radio range. Both firmwares static_assert on exactly 16 characters, so a
+    # generator that produced 15 would fail at the far end of a two-minute
+    # build — asserted here instead.
+    from deploy_core import NODE_PROJECTS, node_project   # noqa: PLC0415
+    before = app.espnow_lmk_entry.get()
+    app._generate_espnow_key()
+    key = app.espnow_lmk_entry.get()
+    check(len(key) == 16, f"a generated key is exactly 16 characters ({len(key)})")
+    check(key != before, "and it is not the one that was already there")
+    check(app.cfg.get("espnow_lmk") == key, "it reaches the config, not just the field")
+    # The compiler gets it as -DESPNOW_LMK=\"...\" through a shell; a quote or
+    # a backslash in it is a broken build.
+    check(all(c.isalnum() for c in key),
+          f"and holds nothing that would break a -D flag: {key!r}")
+
+    # ── The node target ─────────────────────────────────────────────────────
+    check(hasattr(app, "node_project_var"), "the node target has a control")
+    app._on_node_project_change(NODE_PROJECTS["node"].label)
+    check(app.cfg.get("node_project") == "node", "switching the node project sticks")
+    check(not app.cfg.get("node_env"),
+          "and clears the env, which belonged to the other chip")
+
+    mgr = dc.DeployManager(app.cfg)
+    cmd = mgr._node_cmd() or []
+    check("node" in " ".join(cmd) and "nodemcuv2" in " ".join(cmd),
+          f"the ESP8266 node builds its own project: {' '.join(cmd[-4:])}")
+    # The ESP8266 node has no radio key, so it must not be handed one.
+    check(mgr._node_env() is None, "and is not given an ESP-NOW key it cannot use")
+
+    app._on_node_project_change(NODE_PROJECTS["node_espnow"].label)
+    mgr = dc.DeployManager(app.cfg)
+    nenv = mgr._node_env() or {}
+    check(key in nenv.get("PLATFORMIO_BUILD_FLAGS", ""),
+          "the battery node is built with the same key as the collector")
+
     # ── What the compiler would actually be given ───────────────────────────
     env = dc.DeployManager(app.cfg)._pio_env()
     flags = (env or {}).get("PLATFORMIO_BUILD_FLAGS", "")
     print(f"  ---  PLATFORMIO_BUILD_FLAGS = {flags}")
     check("-DFEATURE_ESPNOW_INGEST" in flags, "the feature reaches the build")
     check("-DFEATURE_REMOTE_NODES" in flags, "the implied feature reaches the build")
-    check('ESPNOW_LMK=\\"sixteen-char-key\\"' in flags, "the key reaches the build")
+    # Against whatever key the config holds NOW, not a literal: the generator
+    # check above replaced the typed one, and an assertion naming the old
+    # string would fail on a page that is working perfectly.
+    check(f'ESPNOW_LMK=\\"{app.cfg["espnow_lmk"]}\\"' in flags,
+          "the key reaches the build")
 
     # ── And unticking takes it away again ───────────────────────────────────
     # FEATURE_REMOTE_NODES is deliberately LEFT: it is useful on its own, it

@@ -42,6 +42,9 @@ sys.path.insert(0, str(TOOLS))
 
 from deploy_core import (
     DeployManager,
+    NODE_PROJECTS,
+    generate_espnow_key,
+    node_project,
     load_cfg,
     save_cfg,
     STEP_NAMES,
@@ -498,15 +501,100 @@ class DeployerGUI:
         # and the warning below is the thing that most needs to be read.
         ctk.CTkLabel(parent, text="ESP-NOW shared key (16 characters):",
                      font=("Helvetica", 9)).pack(anchor="w", pady=(8, 2))
-        self.espnow_lmk_entry = ctk.CTkEntry(parent, width=260)
+        keyrow = ctk.CTkFrame(parent, fg_color="transparent")
+        keyrow.pack(anchor="w", fill="x")
+        self.espnow_lmk_entry = ctk.CTkEntry(keyrow, width=260)
         self.espnow_lmk_entry.insert(0, self.cfg.get("espnow_lmk") or "")
-        self.espnow_lmk_entry.pack(anchor="w")
+        self.espnow_lmk_entry.pack(side="left")
         self.espnow_lmk_entry.bind("<FocusOut>", lambda _: self._save_espnow_lmk())
+        ctk.CTkButton(keyrow, text="Generate", width=84, height=28,
+                      font=("Helvetica", 9),
+                      command=self._generate_espnow_key).pack(side="left", padx=(6, 0))
 
         self.espnow_lmk_note = ctk.CTkLabel(
             parent, text="", font=("Helvetica", 8),
             text_color="gray", wraplength=420, justify="left")
         self.espnow_lmk_note.pack(anchor="w", padx=(20, 0), pady=(0, 10))
+        self._refresh_espnow_note()
+
+        self._build_node_section(parent)
+
+    def _generate_espnow_key(self) -> None:
+        """A fresh key, into the field and into the config.
+
+        Generated rather than invented: a key somebody types is a key somebody
+        can remember, and this one is the only thing between the collector's
+        pipeline and any ESP-NOW frame in radio range. It goes into whichever
+        target this tool builds next — collector or node — so the two sides
+        match without anyone copying it between two windows.
+        """
+        key = generate_espnow_key()
+        self.espnow_lmk_entry.delete(0, "end")
+        self.espnow_lmk_entry.insert(0, key)
+        self._save_espnow_lmk()
+
+    def _build_node_section(self, parent) -> None:
+        """Which satellite board steps 10 and 11 build and flash.
+
+        Its own project, env and port. A node is a different board on a
+        different USB device, and borrowing the collector's port is the
+        shortest path to flashing an ESP8266 image at an ESP32-C3.
+        """
+        ctk.CTkLabel(parent, text="Node target:",
+                     font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 2))
+
+        proj = node_project(self.cfg)
+        labels = [p.label for p in NODE_PROJECTS.values()]
+        self._node_label_to_key = {p.label: k for k, p in NODE_PROJECTS.items()}
+        self.node_project_var = ctk.StringVar(value=proj.label)
+        ctk.CTkOptionMenu(parent, values=labels, variable=self.node_project_var,
+                          command=self._on_node_project_change).pack(fill="x", pady=(0, 2))
+
+        self.node_blurb = ctk.CTkLabel(
+            parent, text=proj.blurb, font=("Helvetica", 8), text_color="gray",
+            wraplength=420, justify="left")
+        self.node_blurb.pack(anchor="w", padx=(20, 0))
+
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=(4, 0))
+        ctk.CTkLabel(row, text="env", font=("Helvetica", 9),
+                     width=32).pack(side="left")
+        self.node_env_entry = ctk.CTkEntry(row, width=140,
+                                           placeholder_text=proj.default_env)
+        self.node_env_entry.insert(0, self.cfg.get("node_env") or "")
+        self.node_env_entry.pack(side="left", padx=(0, 8))
+        self.node_env_entry.bind(
+            "<FocusOut>", lambda _: self._save_setting("node_env", self.node_env_entry))
+        ctk.CTkLabel(row, text="port", font=("Helvetica", 9),
+                     width=34).pack(side="left")
+        self.node_port_entry = ctk.CTkEntry(row, width=140,
+                                            placeholder_text="auto-detect")
+        self.node_port_entry.insert(0, self.cfg.get("node_port") or "")
+        self.node_port_entry.pack(side="left")
+        self.node_port_entry.bind(
+            "<FocusOut>", lambda _: self._save_setting("node_port", self.node_port_entry))
+
+        ctk.CTkLabel(parent,
+                     text="Steps 10 and 11 build and flash this project. The "
+                          "ESP-NOW key above travels with it, so the node and "
+                          "the collector hold the same 16 bytes without either "
+                          "being typed twice.",
+                     font=("Helvetica", 8), text_color="gray",
+                     wraplength=420, justify="left").pack(anchor="w",
+                                                          padx=(20, 0), pady=(2, 10))
+
+    def _on_node_project_change(self, label: str) -> None:
+        key = self._node_label_to_key.get(label)
+        if not key:
+            return
+        self._save_setting("node_project", None, key)
+        # The env belonged to the old project; keeping it would offer an
+        # ESP8266 env for an ESP32 build and fail two steps later.
+        self._save_setting("node_env", None, "")
+        self.node_env_entry.delete(0, "end")
+        proj = NODE_PROJECTS[key]
+        self.node_env_entry.configure(placeholder_text=proj.default_env)
+        self.node_blurb.configure(text=proj.blurb)
         self._refresh_espnow_note()
 
     def _set_features(self, macros) -> None:

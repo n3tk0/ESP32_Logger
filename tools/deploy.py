@@ -24,6 +24,9 @@ from typing import Any
 
 from deploy_core import (
     DeployManager,
+    NODE_PROJECTS,
+    generate_espnow_key,
+    node_project,
     load_cfg,
     save_cfg,
     detect_port,
@@ -165,9 +168,83 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     feats = [m for m in (cfg.get("features") or []) if is_known(m)]
     fsum = _green(f"{len(feats)} selected") if feats else _dim("none")
     print(f"  {_cyan('[F]')}  Build features  {fsum}  {_dim('(uppercase F)')}")
+    np = node_project(cfg)
+    key_state = _green("key set") if len(cfg.get("espnow_lmk") or "") == 16 \
+        else (_yellow("no key") if np.wants_key else _dim("no key needed"))
+    print(f"  {_cyan('[N]')}  Node target     {np.label}  {key_state}  {_dim('(uppercase N)')}")
     print(f"  {_cyan('[W]')}  WiFi provision  via serial COM port  {_dim('(uppercase W)')}")
     print(f"  {_cyan('[q]')}  Quit")
     print()
+
+
+def _node_menu(cfg: dict[str, Any]) -> None:
+    """Which satellite board steps 10 and 11 build and flash.
+
+    Its own project, env and port. A node is a different board on a different
+    USB device, and borrowing the collector's port is the shortest path to
+    flashing an ESP8266 image at an ESP32-C3.
+    """
+    while True:
+        proj = node_project(cfg)
+        print()
+        print(_bold("  ── Node target " + "─" * 47))
+        for i, (key, p) in enumerate(NODE_PROJECTS.items(), start=1):
+            tick = _green("✓") if key == proj.key else " "
+            print(f"  {_cyan(f'[{i}]')} [{tick}] {p.label:<22} {_dim(p.blurb)}")
+        print()
+        env_disp = cfg.get("node_env") or _dim(f"{proj.default_env} (project default)")
+        port_disp = cfg.get("node_port") or _dim("auto-detect")
+        print(f"  {_cyan('[e]')}  Node env   : {_bold(env_disp)}")
+        print(f"  {_cyan('[p]')}  Node port  : {_bold(port_disp)}")
+
+        lmk = cfg.get("espnow_lmk") or ""
+        if proj.wants_key:
+            if len(lmk) == 16:
+                shown = _green(lmk) + _dim("  — the collector gets the same 16 bytes")
+            elif lmk:
+                shown = _red(f"{len(lmk)} characters — both firmwares assert on 16")
+            else:
+                shown = _yellow("not set — the node would carry its placeholder "
+                                "and pair with nothing")
+            print(f"  {_cyan('[k]')}  ESP-NOW key: {shown}")
+            print(f"  {_cyan('[g]')}  Generate a key  "
+                  f"{_dim('16 random characters, from the system CSPRNG')}")
+        print()
+        print(f"  {_cyan('[b]')}  Back")
+        print()
+
+        try:
+            ans = input(_bold("  Choice: ")).strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return
+        low = ans.lower()
+        if low in ("b", "", "q"):
+            return
+        if low == "e":
+            cfg["node_env"] = _prompt("Node env", cfg.get("node_env") or proj.default_env)
+            continue
+        if low == "p":
+            cfg["node_port"] = _prompt("Node port", cfg.get("node_port") or "")
+            continue
+        if low == "g" and proj.wants_key:
+            cfg["espnow_lmk"] = generate_espnow_key()
+            print(_green(f"  Generated: {cfg['espnow_lmk']}"))
+            time.sleep(1.4)
+            continue
+        if low == "k" and proj.wants_key:
+            key = _prompt("ESP-NOW key (16 characters)", lmk)
+            if key and len(key) != 16:
+                print(_red(f"  {len(key)} characters — unchanged."))
+                time.sleep(1.2)
+                continue
+            cfg["espnow_lmk"] = key
+            continue
+        if ans.isdigit() and 1 <= int(ans) <= len(NODE_PROJECTS):
+            cfg["node_project"] = list(NODE_PROJECTS)[int(ans) - 1]
+            # The env belonged to the old project; keeping it would offer an
+            # ESP8266 env for an ESP32 build and fail two steps later.
+            cfg["node_env"] = None
 
 
 def _feature_menu(cfg: dict[str, Any]) -> None:
@@ -229,6 +306,8 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
             else:
                 shown = _green("set") + _dim("  (flash the SAME 16 bytes into the node)")
             print(f"  {_cyan('[k]')}  ESP-NOW key   {shown}")
+            print(f"  {_cyan('[g]')}  Generate one  "
+                  f"{_dim('16 random characters, from the system CSPRNG')}")
             print()
 
         # A starting point. Now that the tool controls the whole set, a fresh
@@ -253,8 +332,20 @@ def _feature_menu(cfg: dict[str, Any]) -> None:
         if low == "d":
             cfg["features"] = [f.macro for f in default_on_features()]
             continue
+        if low == "g":
+            # Generated rather than invented. A key somebody types is a key
+            # somebody can remember, and this one is the only thing between
+            # the pipeline and any ESP-NOW frame in radio range.
+            cfg["espnow_lmk"] = generate_espnow_key()
+            print(_green(f"  Generated: {cfg['espnow_lmk']}"))
+            print(_dim("  Saved. Both the collector and the node get it from "
+                       "here — flash the node from this tool and neither side "
+                       "has to be typed."))
+            time.sleep(1.6)
+            continue
         if low == "k" and "FEATURE_ESPNOW_INGEST" in chosen:
-            print(_dim("  16 characters exactly. Empty leaves setup.h's default in place."))
+            print(_dim("  16 characters exactly. Empty leaves the firmware's "
+                       "placeholder in place; [g] generates one."))
             try:
                 key = input(_bold("  ESP-NOW key: ")).strip()
             except (KeyboardInterrupt, EOFError):
@@ -416,6 +507,9 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
             # test match the uppercase key too, so an uppercase action placed
             # after one can never run.
             _feature_menu(cfg)
+
+        elif choice == "N":          # uppercase N — node target
+            _node_menu(cfg)
 
         elif choice == "W":          # uppercase W — WiFi provisioner
             s_wifi_provision(cfg)
