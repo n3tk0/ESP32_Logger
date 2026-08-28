@@ -973,13 +973,31 @@ class DeployManager:
         env["PLATFORMIO_BUILD_FLAGS"] = f"{existing} {flag}".strip()
         return env
 
-    def _node_cmd(self, *extra: str) -> list[str] | None:
+    def _node_target(self) -> tuple[Path, str] | None:
+        """Which directory and env the node steps act on, or None if unbuildable.
+
+        Split from _node_cmd() because it needs no PlatformIO to answer, and
+        the question "would this flash the right project" is worth being able
+        to ask on a machine that has no toolchain installed.
+        """
         proj = node_project(self.cfg)
         directory = ROOT / proj.directory
         if not (directory / "platformio.ini").is_file():
             self._log(f"ERROR: no PlatformIO project at {directory}.")
             return None
-        env_name = self.cfg.get("node_env") or proj.default_env
+        return directory, (self.cfg.get("node_env") or proj.default_env)
+
+    def _node_cmd(self, *extra: str) -> list[str] | None:
+        # None, not a list beginning with None. Returning [None, "run", …]
+        # produced a command that looked fine until something joined it, and
+        # the traceback named the join rather than the missing toolchain.
+        if self.pio is None:
+            self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            return None
+        target = self._node_target()
+        if target is None:
+            return None
+        directory, env_name = target
         return [self.pio, "run", "-d", str(directory), "-e", env_name, *extra]
 
     def _node_preamble(self) -> bool:

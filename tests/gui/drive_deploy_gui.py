@@ -188,10 +188,18 @@ def run(app) -> None:
     check(not app.cfg.get("node_env"),
           "and clears the env, which belonged to the other chip")
 
+    # _node_target(), not _node_cmd(): the target needs no PlatformIO to
+    # answer, and this job does not install one. The first version asked for
+    # the command, got [None, "run", …] back, and died in a str.join — a
+    # traceback that named the join rather than the missing toolchain, which
+    # is also why _node_cmd() now returns None outright.
     mgr = dc.DeployManager(app.cfg)
-    cmd = mgr._node_cmd() or []
-    check("node" in " ".join(cmd) and "nodemcuv2" in " ".join(cmd),
-          f"the ESP8266 node builds its own project: {' '.join(cmd[-4:])}")
+    target = mgr._node_target()
+    check(target is not None, "the ESP8266 node resolves to a project")
+    if target:
+        directory, env_name = target
+        check(directory.name == "node" and env_name == "nodemcuv2",
+              f"and it is its own project and env: {directory.name}/{env_name}")
     # The ESP8266 node has no radio key, so it must not be handed one.
     check(mgr._node_env() is None, "and is not given an ESP-NOW key it cannot use")
 
