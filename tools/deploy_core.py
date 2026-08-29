@@ -44,6 +44,28 @@ DATA_WWW = ROOT / "data" / "www"
 TOOLS    = ROOT / "tools"
 CFG_FILE = ROOT / ".flash_tool.json"
 
+
+def _python() -> str:
+    """Return the path to the Python interpreter.
+
+    In a normal ``python deploy_gui.py`` invocation ``sys.executable`` is the
+    interpreter.  Inside a PyInstaller frozen bundle it is the ``.exe`` itself
+    (e.g. ``ESP32_Deploy.exe``), and using it to spawn a helper script opens a
+    new GUI window instead of running the script.  Fall back to whichever
+    ``python`` / ``python3`` is on PATH so the helper scripts still work.
+    """
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+    for name in ("python3", "python"):
+        found = shutil.which(name)
+        if found:
+            return found
+    # Last resort: the frozen executable cannot run .py scripts, but returning
+    # it keeps the error message intelligible ("cannot run build_web.py")
+    # rather than crashing with a NoneType later.
+    return sys.executable
+
+
 # ── Step catalogue ────────────────────────────────────────────────────────────
 STEP_NAMES: dict[int, str] = {
     1: "Build web assets      www/ → data/www/",
@@ -603,6 +625,7 @@ class DeployManager:
                 text=True,
                 bufsize=1,
                 env=env,
+                cwd=str(ROOT),
             )
         except Exception as exc:
             self._log(f"Error: {exc}")
@@ -636,7 +659,7 @@ class DeployManager:
         if not script.is_file():
             self._log("ERROR: build_web.py not found in tools/")
             return 2
-        rc = self._run_cmd([sys.executable, str(script), "--dst", str(DATA_WWW)])
+        rc = self._run_cmd([_python(), str(script), "--dst", str(DATA_WWW)])
         if rc == 0:
             self._log("✓ Web assets built.")
         self._emit_complete(1, rc)
@@ -653,7 +676,7 @@ class DeployManager:
         # cannot give: esp32s3 and esp32s3_n16r8 are the same silicon with 8
         # and 16 MB behind it, and the size lands in the bootloader image
         # header.
-        cmd = [sys.executable, str(script), "--chip", self.cfg["env"],
+        cmd = [_python(), str(script), "--chip", self.cfg["env"],
                "--baud", str(self.cfg["baud"])]
         if self.cfg.get("port"):
             cmd += ["--port", self.cfg["port"]]
