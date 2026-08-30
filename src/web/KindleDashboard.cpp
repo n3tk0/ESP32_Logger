@@ -27,6 +27,14 @@ static constexpr int PAGE_W  = KINDLE_PAGE_W;
 static constexpr int CHART_W = kdPx(560);
 static constexpr int CHART_H = kdPx(200);
 
+static const char* outdoorSensorId() {
+    return (config.kindle.outdoorSensor[0] != '\0') ? config.kindle.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
+}
+
+static const char* indoorSensorId() {
+    return (config.kindle.indoorSensor[0] != '\0') ? config.kindle.indoorSensor : KINDLE_INDOOR_SENSOR;
+}
+
 // ---------------------------------------------------------------------------
 // Reading the current values
 // ---------------------------------------------------------------------------
@@ -720,8 +728,8 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
 
     // Fill trend data
     const uint32_t now = (uint32_t)time(nullptr);
-    ctx->haveOut = trendRing.series(KINDLE_OUTDOOR_SENSOR, "temperature", now, ctx->tOut);
-    ctx->haveIn  = trendRing.series(KINDLE_INDOOR_SENSOR,  "temperature", now, ctx->tIn);
+    ctx->haveOut = trendRing.series(outdoorSensorId(), "temperature", now, ctx->tOut);
+    ctx->haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, ctx->tIn);
     ctx->init(W, H);
 
     const uint32_t headerSize = 14 + 40 + 64;
@@ -794,20 +802,20 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
 
 
 static void handleKindleData(AsyncWebServerRequest* req) {
-    const Latest outT = latestOf(KINDLE_OUTDOOR_SENSOR, "temperature");
-    const Latest outH = humidityOf(KINDLE_OUTDOOR_SENSOR);
-    const Latest outP = latestOf(KINDLE_OUTDOOR_SENSOR, "pressure");
-    const Latest inT  = latestOf(KINDLE_INDOOR_SENSOR,  "temperature");
-    const Latest inH  = humidityOf(KINDLE_INDOOR_SENSOR);
-    const Latest inA  = latestOf(KINDLE_INDOOR_SENSOR,  "aqi");
+    const Latest outT = latestOf(outdoorSensorId(), "temperature");
+    const Latest outH = humidityOf(outdoorSensorId());
+    const Latest outP = latestOf(outdoorSensorId(), "pressure");
+    const Latest inT  = latestOf(indoorSensorId(),  "temperature");
+    const Latest inH  = humidityOf(indoorSensorId());
+    const Latest inA  = latestOf(indoorSensorId(),  "aqi");
     const uint32_t now = (uint32_t)time(nullptr);
 
     TrendRing::Hour tOut[TrendRing::HOURS];
     TrendRing::Hour tIn [TrendRing::HOURS];
     TrendRing::Hour tPress[TrendRing::HOURS];
-    const bool haveOut = trendRing.series(KINDLE_OUTDOOR_SENSOR, "temperature", now, tOut);
-    const bool haveIn  = trendRing.series(KINDLE_INDOOR_SENSOR,  "temperature", now, tIn);
-    const bool haveP   = trendRing.series(KINDLE_OUTDOOR_SENSOR, "pressure",    now, tPress);
+    const bool haveOut = trendRing.series(outdoorSensorId(), "temperature", now, tOut);
+    const bool haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, tIn);
+    const bool haveP   = trendRing.series(outdoorSensorId(), "pressure",    now, tPress);
 
     KindleConfig skin = config.kindle;
     kdSkinClamp(skin);
@@ -968,20 +976,20 @@ static void handleKindleData(AsyncWebServerRequest* req) {
 }
 
 static void handleKindle(AsyncWebServerRequest* req) {
-    const Latest outT = latestOf(KINDLE_OUTDOOR_SENSOR, "temperature");
-    const Latest outH = humidityOf(KINDLE_OUTDOOR_SENSOR);
-    const Latest outP = latestOf(KINDLE_OUTDOOR_SENSOR, "pressure");
-    const Latest inT  = latestOf(KINDLE_INDOOR_SENSOR,  "temperature");
-    const Latest inH  = humidityOf(KINDLE_INDOOR_SENSOR);
+    const Latest outT = latestOf(outdoorSensorId(), "temperature");
+    const Latest outH = humidityOf(outdoorSensorId());
+    const Latest outP = latestOf(outdoorSensorId(), "pressure");
+    const Latest inT  = latestOf(indoorSensorId(),  "temperature");
+    const Latest inH  = humidityOf(indoorSensorId());
 
     const uint32_t now = (uint32_t)time(nullptr);
 
     TrendRing::Hour tOut[TrendRing::HOURS];
     TrendRing::Hour tIn [TrendRing::HOURS];
     TrendRing::Hour tPress[TrendRing::HOURS];
-    const bool haveOut = trendRing.series(KINDLE_OUTDOOR_SENSOR, "temperature", now, tOut);
-    const bool haveIn  = trendRing.series(KINDLE_INDOOR_SENSOR,  "temperature", now, tIn);
-    const bool haveP   = trendRing.series(KINDLE_OUTDOOR_SENSOR, "pressure",    now, tPress);
+    const bool haveOut = trendRing.series(outdoorSensorId(), "temperature", now, tOut);
+    const bool haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, tIn);
+    const bool haveP   = trendRing.series(outdoorSensorId(), "pressure",    now, tPress);
 
     // A clamped COPY, not a reference into the live config. The page reads
     // this a dozen times while it builds; taking the values once means a save
@@ -1433,10 +1441,10 @@ static void handleKindle(AsyncWebServerRequest* req) {
 }
 
 void kindleTrackTrends() {
-    trendRing.track(KINDLE_OUTDOOR_SENSOR, "temperature");
-    trendRing.track(KINDLE_INDOOR_SENSOR,  "temperature");
-    trendRing.track(KINDLE_OUTDOOR_SENSOR, "pressure");
-    trendRing.track(KINDLE_OUTDOOR_SENSOR, "humidity");
+    trendRing.track(outdoorSensorId(), "temperature");
+    trendRing.track(indoorSensorId(),  "temperature");
+    trendRing.track(outdoorSensorId(), "pressure");
+    trendRing.track(outdoorSensorId(), "humidity");
 }
 
 // ---------------------------------------------------------------------------

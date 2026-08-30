@@ -208,6 +208,28 @@
         </div>
       </div>
 
+      <!-- Sensor Mapping -->
+      <div class="card" style="margin-top:20px">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="thermometer"></span> Sensor mapping</div>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:150px">
+              <label class="field-label" for="kd-outdoor-sensor">Outdoor sensor ID</label>
+              <input type="text" id="kd-outdoor-sensor" class="input" placeholder="outdoor" maxlength="15">
+            </div>
+            <div class="field" style="flex:1;min-width:150px">
+              <label class="field-label" for="kd-indoor-sensor">Indoor sensor ID</label>
+              <input type="text" id="kd-indoor-sensor" class="input" placeholder="indoor" maxlength="15">
+            </div>
+          </div>
+          <p class="hint">
+            The sensor IDs (from the Sensors page) that populate the outdoor and indoor sections of the dashboard. Leave blank to use the firmware defaults.
+          </p>
+        </div>
+      </div>
+
       <!-- FBInk -->
       <div class="card">
         <div class="card-head">

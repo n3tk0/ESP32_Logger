@@ -19,6 +19,9 @@
 #include "../core/Globals.h"         // config, activeFS
 #include "../core/ModuleRegistry.h"  // Pass 5 phase 3: /api/modules
 #include "IngestHandler.h"           // POST /api/ingest (FEATURE_REMOTE_NODES)
+#ifdef FEATURE_REMOTE_NODES
+#include "../sensors/RemoteIngest.h"
+#endif
 #include "../espnow/EspNowIngest.h"   // GET/POST /api/espnow/* (FEATURE_ESPNOW_INGEST)
 #include "KindleSkin.h"               // GET/POST /api/kindle/config
 #include "../managers/ConfigManager.h" // saveConfig() after module update
@@ -520,6 +523,33 @@ static void handleEspnowForget(AsyncWebServerRequest* req) {
 }
 #endif  // FEATURE_ESPNOW_INGEST
 
+#ifdef FEATURE_REMOTE_NODES
+static void handleApiRemoteStatus(AsyncWebServerRequest* req) {
+    JsonDocument doc;
+    JsonArray nodesArr = doc["nodes"].to<JsonArray>();
+
+    int count = remoteIngest.nodeCount();
+    for (int i = 0; i < count; i++) {
+        char nodeId[32] = {0};
+        if (remoteIngest.nodeIdAt(i, nodeId, sizeof(nodeId))) {
+            JsonObject n = nodesArr.add<JsonObject>();
+            n["id"] = nodeId;
+            uint32_t ageMs = remoteIngest.ageMsForNode(nodeId);
+            n["age_ms"] = ageMs;
+            n["online"] = (ageMs != UINT32_MAX && ageMs < 180000); // 3 mins threshold
+
+            char metrics[8][16];
+            int mCount = remoteIngest.metricsForNode(nodeId, metrics, 8);
+            JsonArray mArr = n["metrics"].to<JsonArray>();
+            for (int m = 0; m < mCount; m++) {
+                mArr.add(metrics[m]);
+            }
+        }
+    }
+    sendJsonResponse(req, doc);
+}
+#endif
+
 #ifdef FEATURE_KINDLE_DASHBOARD
 // ---------------------------------------------------------------------------
 // GET /api/kindle/config — how the e-ink dashboard is drawn
@@ -554,6 +584,8 @@ static void handleKindleConfigGet(AsyncWebServerRequest* req) {
     doc["follow_data"]      = (k.followData == 0xFF) ? KINDLE_FOLLOW_DATA : (int)k.followData;
     doc["clock_pin_refresh"] = (k.clockPinRefresh == 0xFF) ? KINDLE_CLOCK_PIN_REFRESH : (int)k.clockPinRefresh;
     doc["fbink_res_w"]      = k.fbinkResW;
+    doc["outdoor_sensor"]   = (k.outdoorSensor[0] != '\0') ? k.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
+    doc["indoor_sensor"]    = (k.indoorSensor[0] != '\0') ? k.indoorSensor : KINDLE_INDOOR_SENSOR;
 
     // The page's own width, read-only. It is a build-time constant (every size
     // in the stylesheet is derived from it), and the settings page shows it so
@@ -590,6 +622,16 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
         const String v = req->getParam("face_custom", true)->value();
         strncpy(k.faceCustom, v.c_str(), sizeof(k.faceCustom) - 1);
         k.faceCustom[sizeof(k.faceCustom) - 1] = '\0';
+    }
+    if (req->hasParam("outdoor_sensor", true)) {
+        const String v = req->getParam("outdoor_sensor", true)->value();
+        strncpy(k.outdoorSensor, v.c_str(), sizeof(k.outdoorSensor) - 1);
+        k.outdoorSensor[sizeof(k.outdoorSensor) - 1] = '\0';
+    }
+    if (req->hasParam("indoor_sensor", true)) {
+        const String v = req->getParam("indoor_sensor", true)->value();
+        strncpy(k.indoorSensor, v.c_str(), sizeof(k.indoorSensor) - 1);
+        k.indoorSensor[sizeof(k.indoorSensor) - 1] = '\0';
     }
 
     // Clamped before it is stored, so an out-of-range value never reaches the
@@ -1511,6 +1553,9 @@ void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/espnow/pair",       HTTP_POST, handleEspnowPair);
     server.on("/api/espnow/node",       HTTP_POST, handleEspnowNode);
     server.on("/api/espnow/forget",     HTTP_POST, handleEspnowForget);
+#endif
+#ifdef FEATURE_REMOTE_NODES
+    server.on("/api/remote/status",     HTTP_GET,  handleApiRemoteStatus);
 #endif
 #ifdef FEATURE_KINDLE_DASHBOARD
     server.on("/api/kindle/config",     HTTP_GET,  handleKindleConfigGet);

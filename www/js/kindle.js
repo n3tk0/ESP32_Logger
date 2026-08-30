@@ -115,6 +115,8 @@ function kindleRender(d) {
   kdSet("kd-follow",   d.follow_data);
   kdSet("kd-clockpin", d.clock_pin_refresh);
   kdSet("kd-fbink-res", d.fbink_res_w || 0);
+  kdSet("kd-outdoor-sensor", d.outdoor_sensor || "");
+  kdSet("kd-indoor-sensor",  d.indoor_sensor || "");
 
   // Stated, not settable. The width is a build-time constant because every
   // size in the page's stylesheet is derived from it, so a reader on which the
@@ -192,6 +194,8 @@ function kindleSave() {
   body.set("follow_data",      kdVal("kd-follow", "1"));
   body.set("clock_pin_refresh", kdVal("kd-clockpin", "1"));
   body.set("fbink_res_w",       kdVal("kd-fbink-res", "0"));
+  body.set("outdoor_sensor",    (document.getElementById("kd-outdoor-sensor") || {}).value || "");
+  body.set("indoor_sensor",     (document.getElementById("kd-indoor-sensor") || {}).value || "");
 
   // Said in terms of the panel, not of the server. "Saved" alone would leave
   // somebody standing in front of a reader that has not repainted yet
@@ -219,6 +223,8 @@ function kindleDefaults() {
   body.set("follow_data", "255");     // 0xFF = use compile-time default  
   body.set("clock_pin_refresh", "255");
   body.set("fbink_res_w", "0");
+  body.set("outdoor_sensor", "");
+  body.set("indoor_sensor", "");
 
   return kindlePost(body, "Back to the built-in design.");
 }

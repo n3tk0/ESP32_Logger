@@ -331,6 +331,8 @@ struct KindleConfig {
     uint8_t  followData;      // 0xFF = use KINDLE_FOLLOW_DATA; 0 or 1 = explicit
     uint8_t  clockPinRefresh; // 0xFF = use KINDLE_CLOCK_PIN_REFRESH; 0 or 1 = explicit
     uint16_t fbinkResW;       // 0 = use KINDLE_PAGE_W (600); set 1072 for PW4 FBInk mode
+    char     outdoorSensor[16]; // Empty = use compile-time KINDLE_OUTDOOR_SENSOR
+    char     indoorSensor[16];  // Empty = use compile-time KINDLE_INDOOR_SENSOR
     uint8_t  reserved[9];
 };
 
