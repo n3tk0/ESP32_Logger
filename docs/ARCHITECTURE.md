@@ -608,6 +608,12 @@ collector with no clock of its own cannot judge and takes `ts` as sent.
 | POST | `/api/espnow/node` | CSRF | Rename a node (`label`) or change its `interval` |
 | POST | `/api/espnow/forget` | CSRF | Drop a node's radio peer and its slot |
 
+**Remote WiFi Nodes** (`FEATURE_REMOTE_NODES`)
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/remote/status` | read | List HTTP WiFi nodes, metrics, age, and online status |
+
 The counters in `/api/espnow/status` are not decoration. "No readings are
 arriving" has several very different causes — a mismatched key, a moved
 channel, an unprovisioned node, frames arriving faster than the tick drains
