@@ -111,6 +111,11 @@ function kindleRender(d) {
   kdBoxes("kd-bold", KD_BOLD, "kd-b-", d.bold | 0);
   kdBoxes("kd-show", KD_SHOW, "kd-s-", d.show | 0);
 
+  kdSet("kd-refresh",  d.refresh_sec);
+  kdSet("kd-follow",   d.follow_data);
+  kdSet("kd-clockpin", d.clock_pin_refresh);
+  kdSet("kd-fbink-res", d.fbink_res_w || 0);
+
   // Stated, not settable. The width is a build-time constant because every
   // size in the page's stylesheet is derived from it, so a reader on which the
   // layout looks wrong needs to know where the number came from rather than
@@ -183,6 +188,11 @@ function kindleSave() {
   body.set("bold",          kdMaskOf(KD_BOLD, "kd-b-"));
   body.set("show",          kdMaskOf(KD_SHOW, "kd-s-"));
 
+  body.set("refresh_sec",      kdVal("kd-refresh", "300"));
+  body.set("follow_data",      kdVal("kd-follow", "1"));
+  body.set("clock_pin_refresh", kdVal("kd-clockpin", "1"));
+  body.set("fbink_res_w",       kdVal("kd-fbink-res", "0"));
+
   // Said in terms of the panel, not of the server. "Saved" alone would leave
   // somebody standing in front of a reader that has not repainted yet
   // wondering whether it worked.
@@ -204,6 +214,12 @@ function kindleDefaults() {
   body.set("decimals", "1");
   body.set("bold", "0");
   body.set("show", "255");   // KSHOW_ALL
+  
+  body.set("refresh_sec", "0");      // 0 = use compile-time default
+  body.set("follow_data", "255");     // 0xFF = use compile-time default  
+  body.set("clock_pin_refresh", "255");
+  body.set("fbink_res_w", "0");
+
   return kindlePost(body, "Back to the built-in design.");
 }
 

@@ -128,6 +128,10 @@ public:
     /// Returns false when `index` is past the last known node.
     bool nodeIdAt(int index, char* out, size_t outLen) const;
 
+    /// Writes the distinct metrics held for `nodeId` into `out`, up to `maxOut`.
+    /// Returns how many were written.
+    int metricsForNode(const char* nodeId, char out[][16], int maxOut) const;
+
 private:
     /// Queued historical readings, across all nodes.
     ///

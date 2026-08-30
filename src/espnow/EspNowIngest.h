@@ -155,4 +155,10 @@ struct EspNowIngestStats {
 };
 const EspNowIngestStats& espnowStats();
 
+/// Runtime-configurable offline threshold (missed intervals before offline).
+/// Persisted in NVS under key "en_offline_iv". Falls back to
+/// ESPNOW_OFFLINE_INTERVALS when never set or set to 0.
+uint8_t espnowGetOfflineIntervals();
+void    espnowSetOfflineIntervals(uint8_t n);
+
 #endif  // FEATURE_ESPNOW_INGEST

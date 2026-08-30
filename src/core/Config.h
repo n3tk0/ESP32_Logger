@@ -326,7 +326,12 @@ struct KindleConfig {
     uint8_t  dateFormat;      // KindleDateFormat
     uint8_t  pressureUnit;    // KindlePressureUnit
     uint8_t  tempDecimals;    // 0 or 1
-    uint8_t  reserved[15];
+    // v14.1 — refresh cadence, formerly in reserved[]
+    uint16_t refreshSec;      // 0 = use KINDLE_REFRESH_SEC compile-time default
+    uint8_t  followData;      // 0xFF = use KINDLE_FOLLOW_DATA; 0 or 1 = explicit
+    uint8_t  clockPinRefresh; // 0xFF = use KINDLE_CLOCK_PIN_REFRESH; 0 or 1 = explicit
+    uint16_t fbinkResW;       // 0 = use KINDLE_PAGE_W (600); set 1072 for PW4 FBInk mode
+    uint8_t  reserved[9];
 };
 
 struct DeviceConfig {

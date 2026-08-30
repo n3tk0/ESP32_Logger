@@ -221,6 +221,8 @@ function espnowRefresh() {
       enRenderPairing(d);
       enRenderNodes(d);
       enRenderStats(d);
+      var oiv = document.getElementById("en-offline-iv");
+      if (oiv && d.offline_intervals) oiv.value = d.offline_intervals;
       return d;
     })
     .catch(function (e) {
@@ -321,6 +323,61 @@ function espnowForget(nodeId, label) {
     .catch(function () { enMsg("Could not forget the node.", "err"); });
 }
 
+function espnowAddManual() {
+  var mac = (document.getElementById("en-add-mac") || {}).value || "";
+  var nodeId = (document.getElementById("en-add-id") || {}).value || "";
+  var label = (document.getElementById("en-add-label") || {}).value || "";
+  var iv = (document.getElementById("en-add-iv") || {}).value || "60";
+
+  if (!mac || !nodeId) {
+    enMsg("MAC address and node ID are required.", "err");
+    return;
+  }
+
+  var body = new URLSearchParams();
+  body.set("mac", mac);
+  body.set("node_id", nodeId);
+  if (label) body.set("label", label);
+  body.set("interval", iv);
+
+  return postWithCsrf("/api/espnow/add", {
+    body: body,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" }
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d && d.ok) {
+        enMsg("Node added. It will appear once its first frame arrives.", "ok");
+        espnowRefresh();
+      } else {
+        enMsg((d && d.error) || "Could not add the node.", "err");
+      }
+    })
+    .catch(function () { enMsg("Could not add the node.", "err"); });
+}
+
+function espnowSaveConfig() {
+  var oiv = document.getElementById("en-offline-iv");
+  if (!oiv) return;
+
+  var body = new URLSearchParams();
+  body.set("offline_intervals", oiv.value);
+
+  return postWithCsrf("/api/espnow/config", {
+    body: body,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" }
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d && d.ok) {
+        enMsg("Configuration saved.", "ok");
+      } else {
+        enMsg((d && d.error) || "Save failed.", "err");
+      }
+    })
+    .catch(function () { enMsg("Save failed.", "err"); });
+}
+
 function espnowInit() {
   espnowRefresh();
 }
@@ -334,4 +391,6 @@ registerHandlers({
   espnowPair: espnowPair,
   espnowSaveNode: espnowSaveNode,
   espnowForget: espnowForget,
+  espnowAddManual: espnowAddManual,
+  espnowSaveConfig: espnowSaveConfig,
 });

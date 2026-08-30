@@ -136,6 +136,18 @@
         </div>
       </div>
 
+      <!-- Weather Forecast -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="cloud-sun"></span> Weather forecast</div>
+        </div>
+        <div class="card-body">
+          <p class="hint" style="margin:0">
+            The forecast provider, coordinates, and outlook mode (hourly / daily) are configured under <a href="#settings_modules">Settings → Modules</a>. The outlook setting controls whether the three columns on the e-ink page show the next hours (+3 h, +6 h, +9 h) or the next days.
+          </p>
+        </div>
+      </div>
+
       <!-- Units -->
       <div class="card">
         <div class="card-head">
@@ -160,6 +172,55 @@
               </select>
               <p class="hint">Whole degrees set the big numerals wider apart.</p>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Refresh cadence -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="timer"></span> Refresh cadence</div>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:150px">
+              <label class="field-label" for="kd-refresh">Maximum interval (s)</label>
+              <input type="number" id="kd-refresh" class="input" min="60" max="600" step="10" placeholder="300">
+            </div>
+            <div class="field" style="flex:1;min-width:150px">
+              <label class="field-label" for="kd-follow">Follow data</label>
+              <select id="kd-follow" class="input">
+                <option value="1">On — reload after new data</option>
+                <option value="0">Off — fixed interval only</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1;min-width:150px">
+              <label class="field-label" for="kd-clockpin">Clock sync</label>
+              <select id="kd-clockpin" class="input">
+                <option value="1">On — align to the minute</option>
+                <option value="0">Off — free-running</option>
+              </select>
+            </div>
+          </div>
+          <p class="hint">
+            How often the reader reloads the page. Every reload repaints the whole panel, which flashes and costs battery. 'Follow data' predicts when the next reading is due and reloads right after. 'Clock sync' aligns the reload to the minute boundary so the displayed time changes when the minute does.
+          </p>
+        </div>
+      </div>
+
+      <!-- FBInk -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="monitor"></span> FBInk settings</div>
+        </div>
+        <div class="card-body">
+          <div class="field">
+            <label class="field-label" for="kd-fbink-res">FBInk resolution</label>
+            <select id="kd-fbink-res" class="input">
+              <option value="0">Default (600×800)</option>
+              <option value="1072">Paperwhite 4 (1072×1448)</option>
+            </select>
+            <p class="hint">Screen resolution for the FBInk Kindle script. Affects graph dimensions and icon sizes served by /kindle/data.</p>
           </div>
         </div>
       </div>

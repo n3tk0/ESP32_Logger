@@ -59,3 +59,4 @@ node/build.log
 # whichever machine ran it), so tracking it put churn in every diff and made
 # the file the second-largest thing in the repository.
 compile_commands.json
+data/

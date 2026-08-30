@@ -240,4 +240,24 @@ bool RemoteIngest::nodeIdAt(int index, char* out, size_t outLen) const {
     return true;
 }
 
+int RemoteIngest::metricsForNode(const char* nodeId, char out[][16], int maxOut) const {
+    if (nodeId == nullptr || out == nullptr || maxOut <= 0) return 0;
+
+    int n = 0;
+    taskENTER_CRITICAL(&_mux);
+    for (int i = 0; i < MAX_ENTRIES && n < maxOut; i++) {
+        if (!_e[i].used || !eq(_e[i].nodeId, nodeId)) continue;
+        
+        bool dup = false;
+        for (int j = 0; j < n; j++) {
+            if (eq(out[j], _e[i].metric)) { dup = true; break; }
+        }
+        if (!dup) {
+            copyClamped(out[n++], 16, _e[i].metric);
+        }
+    }
+    taskEXIT_CRITICAL(&_mux);
+    return n;
+}
+
 #endif  // FEATURE_REMOTE_NODES

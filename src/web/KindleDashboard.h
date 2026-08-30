@@ -114,6 +114,7 @@ constexpr int kdPx(int n) {
 #ifdef FEATURE_KINDLE_DASHBOARD
 
 class AsyncWebServer;
+class AsyncWebServerRequest;
 
 // Which sensors the dashboard reads. These are sensor instance ids as
 // configured in platform_config.json — "outdoor" is typically a remote node
@@ -179,5 +180,7 @@ void kindleTrackTrends();
 
 /// Registers GET /kindle and GET /kindle/probe on `server`.
 void registerKindleDashboard(AsyncWebServer& server);
+
+void handleKindleGraph(AsyncWebServerRequest* req);
 
 #endif  // FEATURE_KINDLE_DASHBOARD

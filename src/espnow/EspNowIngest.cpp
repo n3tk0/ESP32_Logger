@@ -9,6 +9,7 @@
 #include <WiFi.h>
 #include <string.h>
 #include <time.h>
+#include <Preferences.h>
 
 #include "EspNowAuth.h"
 #include "../core/EventLog.h"   // the clock-skew warning outlives the serial cable
@@ -106,6 +107,7 @@ static bool              s_up          = false;
 static uint32_t          s_pairUntilMs = 0;
 static bool              s_dirty       = false;   ///< table changed, needs saving
 static uint32_t          s_lastDay     = 0;       ///< last day written to flash
+static uint8_t           s_offlineIntervals = 0;  // 0 = use ESPNOW_OFFLINE_INTERVALS
 
 /// Frames the callback parked for the tick to deal with.
 ///
@@ -779,6 +781,12 @@ bool espnowIngestBegin() {
     addBroadcastPeer();
 
     loadNodes();
+    {
+        Preferences prefs;
+        prefs.begin("espnow", true);
+        s_offlineIntervals = prefs.getUChar("offline_iv", 0);
+        prefs.end();
+    }
     for (int i = 0; i < EspNowNodeTable::CAP; i++) {
         const EspNowNode& n = s_nodes.at(i);
         if (n.used) addPeer(n.mac);
@@ -900,11 +908,23 @@ bool espnowAnyBatteryWarn() {
 int espnowOfflineCount() {
     const uint32_t now = millis();
     taskENTER_CRITICAL(&s_nodeMux);
-    const int c = s_nodes.offlineCount(now);
+    const int c = s_nodes.offlineCount(now, espnowGetOfflineIntervals());
     taskEXIT_CRITICAL(&s_nodeMux);
     return c;
 }
 
 const EspNowIngestStats& espnowStats() { return s_stats; }
+uint8_t espnowGetOfflineIntervals() {
+    return s_offlineIntervals ? s_offlineIntervals : (uint8_t)ESPNOW_OFFLINE_INTERVALS;
+}
+
+void espnowSetOfflineIntervals(uint8_t n) {
+    s_offlineIntervals = n;
+    // Persist to NVS
+    Preferences prefs;
+    prefs.begin("espnow", false);
+    prefs.putUChar("offline_iv", n);
+    prefs.end();
+}
 
 #endif  // FEATURE_ESPNOW_INGEST

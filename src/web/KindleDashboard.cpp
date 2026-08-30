@@ -4,6 +4,8 @@
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
+#include <time.h>
+#include <new>
 #include <math.h>
 
 #include "../pipeline/DataPipeline.h"
@@ -472,6 +474,499 @@ static void appendWeek(String& out, uint32_t now) {
 // on firmware 5.16.4 or later would support them; an older one would not, and
 // tables with literal pixel values render the same on both. See the header for
 // why that trade is made in favour of the old browser.
+// ============================================================================
+// 4-bit grayscale BMP streaming for /kindle/graph.bmp
+// ============================================================================
+// BMP format: 14-byte file header + 40-byte info header + 64-byte palette
+// (16 entries × 4 bytes) + pixel data (bottom-up, 4-bit packed).
+//
+// The ESP32 cannot hold the full image in RAM (even at 560×200 it would be
+// 56 KB), so we stream it chunk by chunk using AsyncWebServer's chunked
+// response. Each chunk renders a few rows into a small stack buffer.
+
+// 16-shade greyscale palette, matched to the CSS values in the HTML dashboard.
+// Index 0 = black (#000), index 15 = white (#fff).
+static constexpr uint8_t BMP_PALETTE[16] = {
+    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+    0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF
+};
+
+// Map an 8-bit grey (0=black, 255=white) to a 4-bit palette index (0..15).
+static inline uint8_t grey8to4(uint8_t g) { return g >> 4; }
+
+// Map a CSS hex grey like 0xD5 to a palette index.
+static inline uint8_t cssGrey(uint8_t hex) { return hex >> 4; }
+
+// Pack two 4-bit pixels into one byte (high nibble = left pixel).
+static inline uint8_t pack4(uint8_t left, uint8_t right) {
+    return (left << 4) | (right & 0x0F);
+}
+
+static size_t writeBmpHeader(uint8_t* buf, uint16_t w, uint16_t h) {
+    const uint16_t rowBytes = w / 2;  // 4-bit, w is always even
+    const uint32_t pixelSize = (uint32_t)rowBytes * h;
+    const uint32_t headerSize = 14 + 40 + 64;  // file + info + palette
+    const uint32_t fileSize = headerSize + pixelSize;
+
+    // BITMAPFILEHEADER (14 bytes)
+    buf[0] = 'B'; buf[1] = 'M';
+    memcpy(buf + 2, &fileSize, 4);
+    memset(buf + 6, 0, 4);  // reserved
+    memcpy(buf + 10, &headerSize, 4);
+
+    // BITMAPINFOHEADER (40 bytes)
+    uint32_t infoSize = 40;
+    memcpy(buf + 14, &infoSize, 4);
+    int32_t sw = w, sh = h;  // signed for BMP
+    memcpy(buf + 18, &sw, 4);
+    memcpy(buf + 22, &sh, 4);  // positive = bottom-up
+    uint16_t planes = 1;
+    memcpy(buf + 26, &planes, 2);
+    uint16_t bpp = 4;
+    memcpy(buf + 28, &bpp, 2);
+    memset(buf + 30, 0, 24);  // compression=0, rest zeros
+
+    // Palette: 16 greyscale entries (BGRA)
+    for (int i = 0; i < 16; i++) {
+        uint8_t v = BMP_PALETTE[i];
+        buf[54 + i*4 + 0] = v;  // B
+        buf[54 + i*4 + 1] = v;  // G
+        buf[54 + i*4 + 2] = v;  // R
+        buf[54 + i*4 + 3] = 0;  // A
+    }
+    return headerSize;  // 118 bytes
+}
+
+// Rendering context for the BMP chart, computed once and shared across chunks.
+struct ChartBmpCtx {
+    uint16_t W, H;
+    uint16_t rowBytes;
+    int L, R, T, B;
+    float dx;
+    float lo, hi, span;
+    TrendRing::Hour tOut[TrendRing::HOURS];
+    TrendRing::Hour tIn[TrendRing::HOURS];
+    bool haveOut, haveIn;
+    float yScale;  // (B - T) / span
+
+    // Precomputed X positions for each hour
+    int hourX[TrendRing::HOURS];
+    // Precomputed outdoor band Y (min/max) and mean Y for each hour
+    int outMinY[TrendRing::HOURS];
+    int outMaxY[TrendRing::HOURS];
+    int outMeanY[TrendRing::HOURS];
+    int inMeanY[TrendRing::HOURS];
+    bool hourValid[TrendRing::HOURS];    // outdoor has data
+    bool inHourValid[TrendRing::HOURS];  // indoor has data
+
+    // Grid line Y positions (5 lines)
+    int gridY[5];
+    char gridLabel[5][8];
+
+    void init(uint16_t width, uint16_t height) {
+        W = width;
+        H = height;
+        rowBytes = W / 2;
+        L = W * 40 / 560;   // scale margins proportionally
+        R = W - W * 4 / 560;
+        T = H * 10 / 200;
+        B = H - H * 26 / 200;
+        dx = (float)(R - L) / (float)(TrendRing::HOURS - 1);
+
+        // Compute Y scale
+        lo = 1e9f; hi = -1e9f;
+        for (int i = 0; i < TrendRing::HOURS; i++) {
+            if (haveOut && tOut[i].count) {
+                if (tOut[i].min < lo) lo = tOut[i].min;
+                if (tOut[i].max > hi) hi = tOut[i].max;
+            }
+            if (haveIn && tIn[i].count) {
+                if (tIn[i].min < lo) lo = tIn[i].min;
+                if (tIn[i].max > hi) hi = tIn[i].max;
+            }
+        }
+        float pad = (hi - lo) * 0.06f;
+        if (pad < 0.4f) pad = 0.4f;
+        lo -= pad; hi += pad;
+        span = hi - lo;
+        if (span < 0.001f) span = 1.0f;  // safety
+        yScale = (float)(B - T) / span;
+
+        // Precompute positions
+        for (int i = 0; i < TrendRing::HOURS; i++) {
+            hourX[i] = L + (int)(dx * (float)i);
+            hourValid[i] = haveOut && tOut[i].count > 0;
+            inHourValid[i] = haveIn && tIn[i].count > 0;
+            if (hourValid[i]) {
+                outMinY[i] = T + (int)((hi - tOut[i].min) * yScale);
+                outMaxY[i] = T + (int)((hi - tOut[i].max) * yScale);
+                outMeanY[i] = T + (int)((hi - tOut[i].sum / tOut[i].count) * yScale);
+            }
+            if (inHourValid[i]) {
+                inMeanY[i] = T + (int)((hi - tIn[i].sum / tIn[i].count) * yScale);
+            }
+        }
+
+        // Grid lines
+        for (int k = 0; k <= 4; k++) {
+            float v = hi - span * (float)k / 4.0f;
+            gridY[k] = T + (int)((float)(B - T) * (float)k / 4.0f);
+            snprintf(gridLabel[k], sizeof(gridLabel[k]), "%.0f", (double)v);
+        }
+    }
+
+    // Render one row of pixels. `y` is in image coordinates (0=top).
+    // `bmpY` is the BMP row (bottom-up: bmpY = H-1-y).
+    void renderRow(uint8_t* row, int y) const {
+        // Fill with white (palette index 15)
+        memset(row, 0xFF, rowBytes);
+
+        // ── Vertical grid lines (every 3h + "now") ──
+        if (y >= T && y <= B) {
+            uint8_t vgridGrey = cssGrey(0xD5);  // #d5d5d5 → palette ~13
+            for (int i = 0; i < TrendRing::HOURS; i += 3)
+                setPixel4(row, hourX[i], vgridGrey);
+            setPixel4(row, hourX[TrendRing::HOURS - 1], vgridGrey);
+        }
+
+        // ── Horizontal grid lines ──
+        for (int k = 0; k <= 4; k++) {
+            if (y == gridY[k]) {
+                uint8_t c = (k == 4) ? cssGrey(0x77) : cssGrey(0xC4);
+                for (int x = L; x <= R; x++)
+                    setPixel4(row, x, c);
+            }
+        }
+
+        // ── Outdoor min-max band ──
+        if (haveOut) {
+            for (int i = 0; i < TrendRing::HOURS - 1; i++) {
+                if (!hourValid[i] || !hourValid[i+1]) continue;
+                // Interpolate band for this row between hour i and i+1
+                int x0 = hourX[i], x1 = hourX[i+1];
+                for (int x = x0; x <= x1; x++) {
+                    float t = (x1 > x0) ? (float)(x - x0) / (float)(x1 - x0) : 0;
+                    int minY = outMinY[i] + (int)(t * (outMinY[i+1] - outMinY[i]));
+                    int maxY = outMaxY[i] + (int)(t * (outMaxY[i+1] - outMaxY[i]));
+                    if (y >= maxY && y <= minY) {
+                        // Inside band: fill with #d8d8d8
+                        setPixel4(row, x, cssGrey(0xD8));
+                    }
+                    // Band outline (#8f8f8f)
+                    if (y == maxY || y == minY) {
+                        setPixel4(row, x, cssGrey(0x8F));
+                    }
+                }
+            }
+        }
+
+        // ── Outdoor mean line (3px wide, #000) ──
+        if (haveOut) {
+            for (int i = 0; i < TrendRing::HOURS - 1; i++) {
+                if (!hourValid[i] || !hourValid[i+1]) continue;
+                int x0 = hourX[i], x1 = hourX[i+1];
+                for (int x = x0; x <= x1; x++) {
+                    float t = (x1 > x0) ? (float)(x - x0) / (float)(x1 - x0) : 0;
+                    int my = outMeanY[i] + (int)(t * (outMeanY[i+1] - outMeanY[i]));
+                    // 3px thick: draw if within ±1 of mean
+                    if (y >= my - 1 && y <= my + 1)
+                        setPixel4(row, x, 0);  // black
+                }
+            }
+        }
+
+        // ── Indoor mean line (2px wide, #777, dashed 7-5) ──
+        if (haveIn) {
+            for (int i = 0; i < TrendRing::HOURS - 1; i++) {
+                if (!inHourValid[i] || !inHourValid[i+1]) continue;
+                int x0 = hourX[i], x1 = hourX[i+1];
+                for (int x = x0; x <= x1; x++) {
+                    // Dash pattern: 7px on, 5px off
+                    int phase = (x - x0) % 12;
+                    if (phase >= 7) continue;  // gap
+                    float t = (x1 > x0) ? (float)(x - x0) / (float)(x1 - x0) : 0;
+                    int my = inMeanY[i] + (int)(t * (inMeanY[i+1] - inMeanY[i]));
+                    if (y >= my && y <= my + 1)
+                        setPixel4(row, x, cssGrey(0x77));
+                }
+            }
+        }
+    }
+
+    // Set a single pixel in a 4-bit packed row buffer.
+    void setPixel4(uint8_t* row, int x, uint8_t palIdx) const {
+        if (x < 0 || x >= W) return;
+        int byteIdx = x / 2;
+        if (x & 1)
+            row[byteIdx] = (row[byteIdx] & 0xF0) | (palIdx & 0x0F);
+        else
+            row[byteIdx] = (palIdx << 4) | (row[byteIdx] & 0x0F);
+    }
+};
+
+void handleKindleGraph(AsyncWebServerRequest* req) {
+    // Determine dimensions from resolution config
+    const KindleConfig skin = config.kindle;
+    const bool hiRes = (skin.fbinkResW > 600);
+    const uint16_t W = hiRes ? 1000 : 560;
+    const uint16_t H = hiRes ? 360 : 200;
+
+    // Allocate context on heap (it's ~2.5 KB with the arrays)
+    auto* ctx = new(std::nothrow) ChartBmpCtx;
+    if (!ctx) {
+        req->send(503, "text/plain", "OOM");
+        return;
+    }
+
+    // Fill trend data
+    const uint32_t now = (uint32_t)time(nullptr);
+    ctx->haveOut = trendRing.series(KINDLE_OUTDOOR_SENSOR, "temperature", now, ctx->tOut);
+    ctx->haveIn  = trendRing.series(KINDLE_INDOOR_SENSOR,  "temperature", now, ctx->tIn);
+    ctx->init(W, H);
+
+    const uint32_t headerSize = 14 + 40 + 64;
+    const uint32_t totalSize = headerSize + (uint32_t)ctx->rowBytes * H;
+    const uint16_t CHUNK_ROWS = 20;
+
+    // State for the chunked callback
+    struct StreamState {
+        ChartBmpCtx* ctx;
+        uint16_t W, H;
+        uint32_t headerSize;
+        uint32_t bytesSent;
+        uint32_t totalSize;
+        uint16_t chunkRows;
+    };
+
+    auto* st = new(std::nothrow) StreamState{
+        ctx, W, H, headerSize, 0, totalSize, CHUNK_ROWS
+    };
+    if (!st) { delete ctx; req->send(503, "text/plain", "OOM"); return; }
+
+    AsyncWebServerResponse* resp = req->beginChunkedResponse(
+        "image/bmp",
+        [st](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
+            if (st->bytesSent >= st->totalSize) {
+                // Done — free resources
+                delete st->ctx;
+                delete st;
+                return 0;
+            }
+
+            size_t written = 0;
+
+            // First: emit BMP header
+            if (st->bytesSent < st->headerSize) {
+                written = writeBmpHeader(buffer, st->W, st->H);
+                st->bytesSent += written;
+                return written;
+            }
+
+            // Pixel data: BMP is bottom-up, so row 0 in BMP = bottom of image
+            const uint32_t pixelOffset = st->bytesSent - st->headerSize;
+            const int startBmpRow = pixelOffset / st->ctx->rowBytes;
+            int rowsToRender = st->chunkRows;
+            int remaining = st->H - startBmpRow;
+            if (rowsToRender > remaining) rowsToRender = remaining;
+            if ((size_t)(rowsToRender * st->ctx->rowBytes) > maxLen)
+                rowsToRender = maxLen / st->ctx->rowBytes;
+            if (rowsToRender < 1) rowsToRender = 1;
+
+            for (int r = 0; r < rowsToRender; r++) {
+                int bmpRow = startBmpRow + r;
+                int imgY = st->H - 1 - bmpRow;  // BMP bottom-up → image top-down
+                st->ctx->renderRow(buffer + r * st->ctx->rowBytes, imgY);
+            }
+
+            written = rowsToRender * st->ctx->rowBytes;
+            st->bytesSent += written;
+            return written;
+        });
+
+    resp->setContentLength(totalSize);
+    resp->addHeader("Cache-Control", "no-cache");
+    req->send(resp);
+}
+
+// ---------------------------------------------------------------------------
+// The page
+// ---------------------------------------------------------------------------
+
+
+static void handleKindleData(AsyncWebServerRequest* req) {
+    const Latest outT = latestOf(KINDLE_OUTDOOR_SENSOR, "temperature");
+    const Latest outH = humidityOf(KINDLE_OUTDOOR_SENSOR);
+    const Latest outP = latestOf(KINDLE_OUTDOOR_SENSOR, "pressure");
+    const Latest inT  = latestOf(KINDLE_INDOOR_SENSOR,  "temperature");
+    const Latest inH  = humidityOf(KINDLE_INDOOR_SENSOR);
+    const Latest inA  = latestOf(KINDLE_INDOOR_SENSOR,  "aqi");
+    const uint32_t now = (uint32_t)time(nullptr);
+
+    TrendRing::Hour tOut[TrendRing::HOURS];
+    TrendRing::Hour tIn [TrendRing::HOURS];
+    TrendRing::Hour tPress[TrendRing::HOURS];
+    const bool haveOut = trendRing.series(KINDLE_OUTDOOR_SENSOR, "temperature", now, tOut);
+    const bool haveIn  = trendRing.series(KINDLE_INDOOR_SENSOR,  "temperature", now, tIn);
+    const bool haveP   = trendRing.series(KINDLE_OUTDOOR_SENSOR, "pressure",    now, tPress);
+
+    KindleConfig skin = config.kindle;
+    kdSkinClamp(skin);
+    char buf[24];
+
+    AsyncResponseStream* s = req->beginResponseStream("text/plain");
+
+    // ── Outdoor ──
+    fmtTemp(buf, sizeof(buf), outT.value, skin.tempDecimals);
+    s->printf("OUT_TEMP=\"%s\"\n", outT.ok ? buf : "--");
+    s->printf("OUT_HUM=%d\n", outH.ok ? (int)roundf(outH.value) : -1);
+    
+    if (outP.ok) {
+        const float pv = kdPressureValue(outP.value, skin.pressureUnit);
+        const int pd = kdPressureDecimals(skin.pressureUnit);
+        if (pd) snprintf(buf, sizeof(buf), "%.*f", pd, (double)pv);
+        else    fmtInt(buf, sizeof(buf), pv);
+        s->printf("OUT_PRES=\"%s\"\n", buf);
+        s->printf("OUT_PRES_UNIT=\"%s\"\n", kdPressureUnitLabel(skin.pressureUnit));
+    } else {
+        s->print("OUT_PRES=\"--\"\nOUT_PRES_UNIT=\"\"\n");
+    }
+
+    if (haveP) {
+        const Tendency t = pressureTendency(tPress);
+        if (t.have) {
+            s->printf("OUT_TEND=\"%s\"\n", t.word);
+            const char* arrows[] = {"↑", "↗", "→", "↘", "↓"};
+            int ai = 2; // steady default
+            if (t.delta >= 1.6f) ai = 0;
+            else if (t.delta >= 0.5f) ai = 1;
+            else if (t.delta > -0.5f) ai = 2;
+            else if (t.delta > -1.6f) ai = 3;
+            else ai = 4;
+            s->printf("OUT_TEND_ARROW=\"%s\"\n", arrows[ai]);
+            const float dv = kdPressureValue(t.delta, skin.pressureUnit);
+            const int ddec = kdPressureDecimals(skin.pressureUnit) + 1;
+            s->printf("OUT_TEND_DELTA=\"%+.*f\"\n", ddec, (double)dv);
+        } else {
+            s->print("OUT_TEND=\"\"\nOUT_TEND_ARROW=\"\"\nOUT_TEND_DELTA=\"\"\n");
+        }
+    } else {
+        s->print("OUT_TEND=\"\"\nOUT_TEND_ARROW=\"\"\nOUT_TEND_DELTA=\"\"\n");
+    }
+
+    float mn = 1e9f, mx = -1e9f;
+    if (haveOut) {
+        for (int i = 0; i < TrendRing::HOURS; i++) {
+            if (tOut[i].count) {
+                if (tOut[i].min < mn) mn = tOut[i].min;
+                if (tOut[i].max > mx) mx = tOut[i].max;
+            }
+        }
+    }
+    if (mn <= mx) {
+        fmtTemp(buf, sizeof(buf), mn, skin.tempDecimals);
+        s->printf("OUT_RANGE_LO=\"%s\"\n", buf);
+        fmtTemp(buf, sizeof(buf), mx, skin.tempDecimals);
+        s->printf("OUT_RANGE_HI=\"%s\"\n", buf);
+    } else {
+        s->print("OUT_RANGE_LO=\"\"\nOUT_RANGE_HI=\"\"\n");
+    }
+
+    if (outT.ok && outT.ts && now > outT.ts) {
+        s->printf("OUT_AGE_MIN=%u\n", (unsigned)((now - outT.ts) / 60));
+    } else {
+        s->print("OUT_AGE_MIN=0\n");
+    }
+
+    bool battWarn = false;
+    #ifdef FEATURE_ESPNOW_INGEST
+    battWarn = espnowAnyBatteryWarn();
+    #endif
+    s->printf("OUT_BATT_WARN=%d\n", battWarn ? 1 : 0);
+
+    // ── Indoor ──
+    fmtTemp(buf, sizeof(buf), inT.value, skin.tempDecimals);
+    s->printf("IN_TEMP=\"%s\"\n", inT.ok ? buf : "--");
+    s->printf("IN_HUM=%d\n", inH.ok ? (int)roundf(inH.value) : -1);
+    if (inA.ok) s->printf("IN_AQI=%d\n", (int)roundf(inA.value));
+    else s->print("IN_AQI=\n");
+    if (inT.ok && inT.ts && now > inT.ts)
+        s->printf("IN_AGE_MIN=%u\n", (unsigned)((now - inT.ts) / 60));
+    else
+        s->print("IN_AGE_MIN=0\n");
+
+    // ── Clock & Date ──
+    if (now > 1000000000u) {
+        struct tm tm;
+        time_t t = (time_t)now;
+        localtime_r(&t, &tm);
+        s->printf("CLOCK=\"%02d:%02d\"\n", tm.tm_hour, tm.tm_min);
+        s->printf("DATE=\"%d %s\"\n", tm.tm_mday, kdMonth(tm.tm_mon));
+        s->printf("MONTH_LABEL=\"%s\"\n", kdMonth(tm.tm_mon));
+        s->printf("YEAR=%d\n", tm.tm_year + 1900);
+
+        int wday = (tm.tm_wday + 6) % 7; // 0=Mon..6=Sun
+        time_t monday = t - wday * 86400;
+        for (int i = 0; i < 7; i++) {
+            time_t day = monday + i * 86400;
+            struct tm dtm;
+            localtime_r(&day, &dtm);
+            s->printf("WK%d_NAME=\"%s\"\n", i, kdWeekdayShort(i));
+            s->printf("WK%d_DAY=%d\n", i, dtm.tm_mday);
+        }
+        s->printf("WK_TODAY=%d\n", wday);
+    } else {
+        s->print("CLOCK=\"--:--\"\nDATE=\"\"\nMONTH_LABEL=\"\"\nYEAR=\n");
+        for (int i = 0; i < 7; i++)
+            s->printf("WK%d_NAME=\"%s\"\nWK%d_DAY=\n", i, kdWeekdayShort(i), i);
+        s->print("WK_TODAY=-1\n");
+    }
+
+    // ── Forecast ──
+    #ifdef MODULE_FORECAST_ENABLED
+    const auto& fc = forecastModule.snapshot();
+    s->printf("FC_SUMMARY=\"%s\"\n", fc.summary);
+    s->printf("FC_CODE=%d\n", fc.code);
+    s->printf("FC_HIGH=%d\n", (int)roundf(fc.highC));
+    s->printf("FC_LOW=%d\n", (int)roundf(fc.lowC));
+    s->printf("FC_WIND=%d\n", (int)roundf(fc.windKph));
+    for (int i = 0; i < 3; i++) {
+        s->printf("FC%d_LABEL=\"%s\"\n", i, fc.outlook[i].label);
+        s->printf("FC%d_CODE=%d\n", i, fc.outlook[i].code);
+        s->printf("FC%d_TEMP=%d\n", i, (int)roundf(fc.outlook[i].tempC));
+        if (!isnan(fc.outlook[i].lowC))
+            s->printf("FC%d_LOW=%d\n", i, (int)roundf(fc.outlook[i].lowC));
+        else
+            s->printf("FC%d_LOW=\n", i);
+    }
+    #else
+    s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_HIGH=\nFC_LOW=\nFC_WIND=\n");
+    for (int i = 0; i < 3; i++)
+        s->printf("FC%d_LABEL=\"\"\nFC%d_CODE=-1\nFC%d_TEMP=\nFC%d_LOW=\n", i, i, i, i);
+    #endif
+
+    // ── UI labels ──
+    s->printf("LBL_OUTSIDE=\"%s\"\n", KD_T("OUTSIDE", "НАВЪН"));
+    s->printf("LBL_INSIDE=\"%s\"\n", KD_T("INSIDE", "ВЪТРЕ"));
+    s->printf("LBL_LAST24=\"%s\"\n", KD_T("LAST 24 HOURS", "ПОСЛЕДНИТЕ 24 ЧАСА"));
+    s->printf("LBL_FORECAST=\"%s\"\n", KD_T("FORECAST", "ПРОГНОЗА"));
+    s->printf("LBL_MEASURED=\"%s\"\n", KD_T("Measured on site", "Измерено на място"));
+    s->printf("LBL_NO_READING=\"%s\"\n", KD_T("no reading", "няма данни"));
+    s->printf("LBL_WIND=\"%s\"\n", KD_T("wind", "вятър"));
+    s->printf("LBL_TO=\"%s\"\n", KD_T("to", "до"));
+
+    // ── Metadata ──
+    const uint16_t resW = skin.fbinkResW ? skin.fbinkResW : (uint16_t)KINDLE_PAGE_W;
+    const uint16_t resH = (resW > 600) ? 1448 : 800;
+    s->printf("RES_W=%u\n", resW);
+    s->printf("RES_H=%u\n", resH);
+    s->printf("LANG=\"%s\"\n", KD_T("en", "bg"));
+    s->printf("DECIMALS=%d\n", skin.tempDecimals);
+    s->printf("CLOCK_STYLE=%d\n", skin.clockStyle);
+    s->printf("SHOW_FLAGS=%u\n", skin.showFlags);
+
+    req->send(s);
+}
+
 static void handleKindle(AsyncWebServerRequest* req) {
     const Latest outT = latestOf(KINDLE_OUTDOOR_SENSOR, "temperature");
     const Latest outH = humidityOf(KINDLE_OUTDOOR_SENSOR);
@@ -1072,6 +1567,8 @@ static void handleKindleClear(AsyncWebServerRequest* req) {
 void registerKindleDashboard(AsyncWebServer& server) {
     server.on("/kindle/probe", HTTP_GET, handleKindleProbe);
     server.on("/kindle/clear", HTTP_GET, handleKindleClear);
+    server.on("/kindle/data",  HTTP_GET, handleKindleData);
+    server.on("/kindle/graph.bmp", HTTP_GET, handleKindleGraph);
     server.on("/kindle",       HTTP_GET, handleKindle);
 }
 

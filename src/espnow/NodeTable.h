@@ -254,10 +254,11 @@ static inline void espnowDefaultNodeId(uint8_t nodeId, char* out, size_t outLen)
 /// The age is an unsigned difference so it stays correct across the millis()
 /// wrap at ~49 days — a collector that has been up longer than that must not
 /// suddenly declare every node offline.
-static inline bool espnowNodeOffline(const EspNowNode& n, uint32_t nowMs) {
+static inline bool espnowNodeOffline(const EspNowNode& n, uint32_t nowMs,
+                                     uint8_t intervals = ESPNOW_OFFLINE_INTERVALS) {
     if (!n.used || !n.everSeen) return true;
     const uint32_t iv = n.intervalS ? n.intervalS : (uint32_t)ESPNOW_DEFAULT_INTERVAL_S;
-    const uint32_t limitMs = iv * 1000u * (uint32_t)ESPNOW_OFFLINE_INTERVALS;
+    const uint32_t limitMs = iv * 1000u * (uint32_t)intervals;
     return (uint32_t)(nowMs - n.lastSeenMs) > limitMs;
 }
 
@@ -380,10 +381,10 @@ public:
         return c;
     }
 
-    int offlineCount(uint32_t nowMs) const {
+    int offlineCount(uint32_t nowMs, uint8_t intervals = ESPNOW_OFFLINE_INTERVALS) const {
         int c = 0;
         for (int i = 0; i < CAP; i++)
-            if (_n[i].used && espnowNodeOffline(_n[i], nowMs)) c++;
+            if (_n[i].used && espnowNodeOffline(_n[i], nowMs, intervals)) c++;
         return c;
     }
 

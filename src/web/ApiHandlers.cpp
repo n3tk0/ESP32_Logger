@@ -548,6 +548,13 @@ static void handleKindleConfigGet(AsyncWebServerRequest* req) {
     doc["pressure_unit"] = k.pressureUnit;
     doc["decimals"]      = k.tempDecimals;
 
+    // Refresh cadence — runtime overrides of compile-time knobs.
+    // 0 / 0xFF means "use the built-in default", which the page shows.
+    doc["refresh_sec"]      = k.refreshSec ? k.refreshSec : KINDLE_REFRESH_SEC;
+    doc["follow_data"]      = (k.followData == 0xFF) ? KINDLE_FOLLOW_DATA : (int)k.followData;
+    doc["clock_pin_refresh"] = (k.clockPinRefresh == 0xFF) ? KINDLE_CLOCK_PIN_REFRESH : (int)k.clockPinRefresh;
+    doc["fbink_res_w"]      = k.fbinkResW;
+
     // The page's own width, read-only. It is a build-time constant (every size
     // in the stylesheet is derived from it), and the settings page shows it so
     // that "the layout is wrong on my reader" has somewhere to start rather
@@ -573,6 +580,10 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     KD_PARAM("date_format",   dateFormat);
     KD_PARAM("pressure_unit", pressureUnit);
     KD_PARAM("decimals",      tempDecimals);
+    KD_PARAM("refresh_sec",      refreshSec);
+    KD_PARAM("follow_data",      followData);
+    KD_PARAM("clock_pin_refresh", clockPinRefresh);
+    KD_PARAM("fbink_res_w",       fbinkResW);
     #undef KD_PARAM
 
     if (req->hasParam("face_custom", true)) {
