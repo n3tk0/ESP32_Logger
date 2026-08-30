@@ -1,1 +1,1 @@
-{ "items": [ { "name": "ESP32 Dashboard", "priority": 1, "items": [ { "name": "Start Dashboard", "priority": 1, "action": "start.sh" }, { "name": "Stop Dashboard", "priority": 2, "action": "stop.sh" } ] } ] }
+{ "items": [ { "name": "ESP32 Dashboard", "priority": 1, "items": [ { "name": "Start Dashboard", "priority": 1, "action": "sh start.sh" }, { "name": "Stop Dashboard", "priority": 2, "action": "sh stop.sh" } ] } ] }

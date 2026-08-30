@@ -12,11 +12,11 @@
       <items>
         <item>
           <name>Start Dashboard</name>
-          <action>start.sh</action>
+          <action>sh start.sh</action>
         </item>
         <item>
           <name>Stop Dashboard</name>
-          <action>stop.sh</action>
+          <action>sh stop.sh</action>
         </item>
       </items>
     </menu>
