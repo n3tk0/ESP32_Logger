@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<extension>
+  <information>
+    <name>ESP32 Dashboard</name>
+    <version>1.0</version>
+    <author>ESP32 Logger</author>
+    <id>esp32_logger_dashboard</id>
+  </information>
+  <menus>
+    <menu type="app" id="esp32_logger_dashboard">
+      <name>ESP32 Dashboard</name>
+      <items>
+        <item>
+          <name>Start Dashboard</name>
+          <action>start.sh</action>
+        </item>
+        <item>
+          <name>Stop Dashboard</name>
+          <action>stop.sh</action>
+        </item>
+      </items>
+    </menu>
+  </menus>
+</extension>

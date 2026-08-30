@@ -1,0 +1,3 @@
+kindle/*.sh text eol=lf
+kindle/*.json text eol=lf
+kindle/*.xml text eol=lf
