@@ -216,12 +216,16 @@
         <div class="card-body">
           <div style="display:flex;gap:12px;flex-wrap:wrap">
             <div class="field" style="flex:1;min-width:150px">
-              <label class="field-label" for="kd-outdoor-sensor">Outdoor sensor ID</label>
-              <input type="text" id="kd-outdoor-sensor" class="input" placeholder="outdoor" maxlength="15">
+              <label class="field-label" for="kd-outdoor-sensor">Outdoor sensor</label>
+              <select id="kd-outdoor-sensor" class="input">
+                <option value="">Default (outdoor)</option>
+              </select>
             </div>
             <div class="field" style="flex:1;min-width:150px">
-              <label class="field-label" for="kd-indoor-sensor">Indoor sensor ID</label>
-              <input type="text" id="kd-indoor-sensor" class="input" placeholder="indoor" maxlength="15">
+              <label class="field-label" for="kd-indoor-sensor">Indoor sensor</label>
+              <select id="kd-indoor-sensor" class="input">
+                <option value="">Default (indoor)</option>
+              </select>
             </div>
           </div>
           <p class="hint">

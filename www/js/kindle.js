@@ -230,7 +230,24 @@ function kindleDefaults() {
 }
 
 function kindleInit() {
-  kindleRefresh();
+  fetchWithTimeout("/api/sensors", {}, 10000)
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(d) {
+      var options = '<option value="">Default</option>';
+      if (d && d.sensors) {
+        d.sensors.forEach(function(s) {
+          options += '<option value="' + esc(s.id) + '">' + esc(s.id) + (s.name ? " (" + esc(s.name) + ")" : "") + '</option>';
+        });
+      }
+      var outSel = document.getElementById("kd-outdoor-sensor");
+      var inSel = document.getElementById("kd-indoor-sensor");
+      if (outSel) outSel.innerHTML = options.replace("Default", "Default (outdoor)");
+      if (inSel) inSel.innerHTML = options.replace("Default", "Default (indoor)");
+    })
+    .catch(function() {})
+    .finally(function() {
+      kindleRefresh();
+    });
 }
 
 // Through the dispatcher's allowlist, not on window: core.js routes every
