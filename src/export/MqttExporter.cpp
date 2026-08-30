@@ -4,6 +4,10 @@
 
 MqttExporter::~MqttExporter() {
     if (_client.connected()) _client.disconnect();
+    if (_stream) {
+        delete _stream;
+        _stream = nullptr;
+    }
 }
 
 bool MqttExporter::init(JsonObjectConst cfg) {
@@ -34,7 +38,15 @@ bool MqttExporter::init(JsonObjectConst cfg) {
         snprintf(_clientId, sizeof(_clientId), "wl-%s", _deviceId);
     }
 
-    _client.setClient(_wifiClient);
+    if (_stream) delete _stream;
+    if (_useTls) {
+        WiFiClientSecure* sec = new WiFiClientSecure();
+        sec->setInsecure();
+        _stream = sec;
+    } else {
+        _stream = new WiFiClient();
+    }
+    _client.setClient(*_stream);
     _client.setServer(_broker, _port);
     _client.setKeepAlive(60);
 
@@ -74,26 +86,6 @@ bool MqttExporter::_publish(const SensorReading& r) {
 
 bool MqttExporter::send(const SensorReading* readings, size_t count) {
     if (!_enabled || count == 0) return true;
-
-    if (_useTls) {
-        WiFiClientSecure secureClient;
-        // R15: no CA store bundled — setInsecure() until 19.x rollout
-        //       adds opt-in cert pinning in a follow-up phase
-        secureClient.setInsecure();
-        _client.setClient(secureClient);
-        if (!_connect()) {
-            _client.setClient(_wifiClient);
-            return false;
-        }
-        bool allOk = true;
-        for (size_t i = 0; i < count; i++) {
-            _client.loop();
-            if (!_publish(readings[i])) allOk = false;
-        }
-        _client.disconnect();
-        _client.setClient(_wifiClient);
-        return allOk;
-    }
 
     if (!_connect()) return false;
     bool allOk = true;
@@ -171,17 +163,8 @@ bool MqttExporter::_publishDiscoveryOne(const char* sensorId, const char* sensor
 void MqttExporter::publishHaDiscovery() {
     if (!_enabled || !_haDiscovery) return;
 
-    WiFiClientSecure secureClient;
-    if (_useTls) {
-        // R15: no CA store bundled — setInsecure() until 19.x rollout
-        //       adds opt-in cert pinning in a follow-up phase
-        secureClient.setInsecure();
-        _client.setClient(secureClient);
-    }
-
     if (!_connect()) {
         Serial.println("[MQTT] HA discovery: not connected");
-        if (_useTls) _client.setClient(_wifiClient);
         return;
     }
     Serial.println("[MQTT] Publishing HA discovery payloads…");
@@ -202,9 +185,4 @@ void MqttExporter::publishHaDiscovery() {
         }
     }
     Serial.printf("[MQTT] HA discovery: %d topics published\n", published);
-
-    if (_useTls) {
-        _client.disconnect();
-        _client.setClient(_wifiClient);
-    }
 }

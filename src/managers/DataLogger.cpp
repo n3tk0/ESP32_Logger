@@ -71,7 +71,10 @@ void flushLogBufferToFS() {
     // Enforce maxEntries: trim oldest lines before appending new ones
     if (config.datalog.maxEntries > 0) {
         int existingLines = countFileLines(activeFS, logFile);
-        trimLogFile(activeFS, logFile, config.datalog.maxEntries, existingLines, logBufferCount);
+        if (!trimLogFile(activeFS, logFile, config.datalog.maxEntries, existingLines, logBufferCount)) {
+            Serial.println("ERR: Trim failed, clearing file to prevent overflow");
+            activeFS->remove(logFile);
+        }
     }
 
     File f = activeFS->open(logFile, FILE_APPEND);
@@ -143,7 +146,10 @@ void flushLogBufferToFS() {
                 }
                 line += timeBuf;
             } else {
-                uint32_t dur = logBuffer[i].sleepTimestamp - logBuffer[i].wakeTimestamp;
+                uint32_t dur = 0;
+                if (logBuffer[i].sleepTimestamp > logBuffer[i].wakeTimestamp) {
+                    dur = logBuffer[i].sleepTimestamp - logBuffer[i].wakeTimestamp;
+                }
                 line += String(dur) + "s";
             }
         }

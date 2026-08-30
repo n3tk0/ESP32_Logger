@@ -4,11 +4,11 @@
 // ============================================================================
 #pragma once
 #include <Arduino.h>
-#include <WiFiClient.h>
+#include <Client.h>
 
 class MQTT_Mini {
 public:
-    void setClient(WiFiClient& client) { _tcp = &client; }
+    void setClient(Client& client) { _tcp = &client; }
     void setServer(const char* broker, uint16_t port) {
         _broker = broker;
         _port   = port;
@@ -174,7 +174,7 @@ public:
     int state() const { return _state; }
 
 private:
-    WiFiClient* _tcp = nullptr;
+    Client* _tcp = nullptr;
     const char* _broker = nullptr;
     uint16_t    _port = 1883;
     uint16_t    _keepAlive = 60;

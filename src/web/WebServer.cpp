@@ -503,23 +503,37 @@ static void h_get_api_recent_logs(AsyncWebServerRequest* r) {
     size_t fSize = f.size();
     const size_t TAIL_BYTES = 1024;
 
+    size_t toRead = (fSize > TAIL_BYTES) ? TAIL_BYTES : fSize;
     if (fSize > TAIL_BYTES) {
         f.seek(fSize - TAIL_BYTES);
-        f.readStringUntil('\n');   // discard partial first line
     }
 
-    while (f.available()) {
-        int i = 0;
-        while (f.available() && i < (int)LR_LINELN - 1) {
-            char c = f.read();
-            if (c == '\n' || c == '\r') break;
-            lineBuf[i++] = c;
+    auto blockBuf = std::unique_ptr<char[]>(new (std::nothrow) char[toRead + 1]);
+    if (blockBuf) {
+        size_t bytesRead = f.read((uint8_t*)blockBuf.get(), toRead);
+        blockBuf[bytesRead] = '\0';
+        char* ptr = blockBuf.get();
+        
+        if (fSize > TAIL_BYTES) {
+            char* nl = strchr(ptr, '\n');
+            if (nl) ptr = nl + 1;
         }
-        lineBuf[i] = '\0';
-        // skip empty lines
-        if (i > 0) {
-            memcpy(slot(lCount % LR_LINES), lineBuf.get(), i + 1);
-            lCount++;
+        
+        char* end = blockBuf.get() + bytesRead;
+        while (ptr < end) {
+            char* nl = strchr(ptr, '\n');
+            if (!nl) nl = end;
+            
+            char* cr = strchr(ptr, '\r');
+            size_t len = (cr && cr < nl) ? (cr - ptr) : (nl - ptr);
+            
+            if (len > 0) {
+                if (len >= LR_LINELN) len = LR_LINELN - 1;
+                memcpy(slot(lCount % LR_LINES), ptr, len);
+                slot(lCount % LR_LINES)[len] = '\0';
+                lCount++;
+            }
+            ptr = nl + 1;
         }
     }
     f.close();

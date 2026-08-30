@@ -52,6 +52,7 @@ const char* HeaterModule::_faultText(Fault f) {
 
 // ---------------------------------------------------------------------------
 bool HeaterModule::load(JsonObjectConst cfg) {
+    MutexGuard g(_hwMutex, pdMS_TO_TICKS(500));
     // Any config change forces the output off and a re-attach in tick(). A
     // half-applied config must never leave the previous pin driven.
     _forceOff(FAULT_NONE);
@@ -402,6 +403,9 @@ void HeaterModule::tick(uint32_t nowMs) {
 // ---------------------------------------------------------------------------
 void HeaterModule::statusJson(JsonObject out) const {
     if (!isEnabled()) return;               // UI falls back to "disabled"
+
+    MutexGuard g(_hwMutex, pdMS_TO_TICKS(100));
+    if (!g.isLocked()) return; // skip output if locked
 
     if (_fault != FAULT_NONE) {
         out["text"] = _faultText(_fault);

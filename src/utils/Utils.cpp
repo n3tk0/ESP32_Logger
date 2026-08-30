@@ -111,9 +111,9 @@ bool deleteRecursive(fs::FS& fs, const String& path) {
     bool overallOk = true;
 
     while (!stack.empty()) {
-        // Abort on suspiciously deep trees to prevent OOM on the AsyncTCP
-        // worker stack (typically ~4 KB).  (AUDIT 7.4)
-        if (stack.size() > 256) return false;
+        // Abort on suspiciously large trees to prevent OOM on the heap.
+        // A limit of 4096 files per flat directory is extremely safe (~80KB).
+        if (stack.size() > 4096) return false;
 
         Pending cur = stack.back();   // peek
 

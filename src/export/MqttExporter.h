@@ -39,7 +39,7 @@ private:
                               const char* metric,   const char* unit,
                               const char* deviceClass);
 
-    WiFiClient   _wifiClient;
+    Client*      _stream = nullptr;
     MQTT_Mini    _client;
 
     char     _broker[65]      = {};
