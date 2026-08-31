@@ -81,13 +81,10 @@ static void handleRoot() {
 
     p += F("<h2>WiFi</h2>");
     row(p, "ssid", "Network name", esc(s.ssid), "text", "");
-    // The stored passphrase is deliberately NOT rendered back. Putting it in
-    // the page source would expose it to anyone who reaches the portal, and
-    // an empty field that means "keep what is saved" is the standard, safer
-    // behaviour.
-    row(p, "pass", "Password", String(), "password",
-        s.pass[0] ? "Leave empty to keep the saved password."
-                  : "Required.");
+    row(p, "pass", "Password", esc(s.pass), "password",
+        "<input type=\"checkbox\" style=\"width:auto;display:inline-block;margin-right:5px;vertical-align:middle\" "
+        "onclick=\"document.getElementById('pass').type = this.checked ? 'text' : 'password'\">"
+        "<span style=\"vertical-align:middle\">Show password</span>");
 
     p += F("<h2>Collector</h2>");
     row(p, "host", "IP address", esc(s.host), "text",
@@ -173,7 +170,7 @@ static void handleSave() {
     };
 
     text  ("ssid",   s.ssid,      sizeof(s.ssid));
-    secret("pass",   s.pass,      sizeof(s.pass));
+    text  ("pass",   s.pass,      sizeof(s.pass));
     text  ("host",   s.host,      sizeof(s.host));
     text  ("token",  s.token,     sizeof(s.token));
     text  ("buser",  s.basicUser, sizeof(s.basicUser));

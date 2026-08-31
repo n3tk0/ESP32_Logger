@@ -81,10 +81,9 @@ static bool ensureWifi() {
         return true;
     }
 
-    // Two clean failures before offering the portal: one is a transient the
-    // next cycle usually clears, and tearing the radio down to raise an AP
-    // costs a posting interval.
-    if (++s_wifiFailures < 2) return false;
+    // Three clean failures before offering the portal: transients can be cleared
+    // and tearing the radio down to raise an AP costs a posting interval.
+    if (++s_wifiFailures < 3) return false;
 
     Serial.println("[wifi] repeated failures — opening setup portal");
     s_portalBgRunning = false; // portalRun will stop the HTTP server on exit
