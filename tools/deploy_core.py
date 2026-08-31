@@ -77,6 +77,7 @@ STEP_NAMES: dict[int, str] = {
     7: "Upload LittleFS       pio run -t uploadfs",
     8: "Upload web via HTTP   POST /upload to device IP",
     9: "Open serial monitor   pio device monitor",
+    12: "Erase node flash      pio run -d node… -t erase",
     10: "Compile node firmware pio run -d node…",
     11: "Flash node firmware   pio run -d node… -t upload",
 }
@@ -1078,6 +1079,30 @@ class DeployManager:
         self._emit_complete(11, rc)
         return rc
 
+    def s12_erase_node(self, confirm_callback: Optional[Callable[[], bool]] = None) -> int:
+        self._emit_start(12, STEP_NAMES[12])
+        self._log("*** WARNING: Wipes all node flash (config, logs, FS). ***")
+
+        if confirm_callback:
+            if not confirm_callback():
+                self._log("Skipped.")
+                self._emit_complete(12, 0)
+                return 0
+
+        if not self._node_preamble():
+            self._emit_complete(12, 1)
+            return 1
+
+        cmd = self._node_cmd("-t", "erase")
+        if cmd is not None and self.cfg.get("node_port"):
+            cmd += ["--upload-port", self.cfg["node_port"]]
+
+        rc = 1 if cmd is None else self._run_cmd(cmd, env=self._node_env())
+        if rc == 0:
+            self._log("✓ Node flash erased.")
+        self._emit_complete(12, rc)
+        return rc
+
     def provision_wifi(
         self,
         input_fn: Optional[Callable[[str], str]] = None,
@@ -1310,7 +1335,22 @@ class DeployManager:
 
     def run_steps(self, steps: list[int], confirm_erase_callback: Optional[Callable[[], bool]] = None) -> bool:
         """Run selected steps. Returns True if all succeeded."""
-        steps = sorted(steps)
+        # Define logical execution order. 12 (Erase node) must happen before 11 (Flash node).
+        order_map = {
+            1: 10,
+            3: 20,
+            4: 30,
+            5: 40,
+            2: 50,
+            6: 60,
+            7: 70,
+            8: 80,
+            12: 85,
+            10: 90,
+            11: 100,
+            9: 110,
+        }
+        steps = sorted(steps, key=lambda s: order_map.get(s, s * 100))
         if not steps:
             self._log("No steps selected.")
             return False
@@ -1327,6 +1367,7 @@ class DeployManager:
             9: self.s9_monitor,
            10: self.s10_compile_node,
            11: self.s11_flash_node,
+           12: lambda: self.s12_erase_node(confirm_erase_callback),
         }
 
         failed: list[int] = []
