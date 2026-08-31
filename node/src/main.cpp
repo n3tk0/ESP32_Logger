@@ -40,7 +40,18 @@ static bool connectWifi() {
     if (WiFi.status() == WL_CONNECTED) return true;
 
     Serial.printf("[wifi] connecting to \"%s\"", s_cfg.ssid);
+    
+    // Explicitly disconnect to clear any stale state from previous attempts
+    WiFi.disconnect();
+    delay(10);
+    
     WiFi.mode(WIFI_STA);
+    
+    // Unified 2.4/5GHz networks and band-steering routers sometimes fail to
+    // negotiate 802.11n with the ESP8266, resulting in association timeouts.
+    // Restricting the radio to 802.11g bypasses the problem.
+    WiFi.setPhyMode(WIFI_PHY_MODE_11G);
+
     // Persisting credentials to flash on every boot wears it out for no gain;
     // they live in /config.json.
     WiFi.persistent(false);
