@@ -1768,6 +1768,7 @@
       ["yfs201",  "droplets",        "YF-S201",   "Pulse · Flow"],
       ["rain",    "cloud-rain",      "Rain",      "Pulse"],
       ["wind",    "wind",            "Wind",      "Pulse"],
+        ["remote",  "cpu",             "Remote",    "HTTP Node"],
     ];
 
     var typeGridHTML = typeCards.map(function (c) {
@@ -1804,7 +1805,7 @@
           // Step 3
           '<div class="wiz-step" data-step="3">' +
             '<div class="form-grid">' +
-              '<div class="field"><label for="wiz-iface">Interface</label><select id="wiz-iface" class="input"><option>I2C</option><option>UART</option><option>Pulse</option><option>GPIO</option><option>ADC</option><option>1-Wire</option></select></div>' +
+              '<div class="field"><label for="wiz-iface">Interface</label><select id="wiz-iface" class="input"><option>I2C</option><option>UART</option><option>Pulse</option><option>GPIO</option><option>ADC</option><option>1-Wire</option><option>HTTP</option></select></div>' +
               // I2C fields
               '<div class="field wiz-if" data-if="i2c"><label for="wiz-addr">I2C Address</label><input id="wiz-addr" class="input mono" value="0x76"/></div>' +
               '<div class="field wiz-if" data-if="i2c"><label for="wiz-sda">SDA pin</label><input id="wiz-sda" class="input mono" type="number" value="6"/></div>' +
@@ -1815,6 +1816,7 @@
               '<div class="field wiz-if" data-if="uart"><label for="wiz-baud">Baud</label><input id="wiz-baud" class="input mono" type="number" value="9600"/></div>' +
               // GPIO / ADC / 1-Wire: single data pin
               '<div class="field wiz-if" data-if="pulse gpio adc 1-wire"><label for="wiz-pin">Data pin</label><input id="wiz-pin" class="input mono" type="number" value="4"/></div>' +
+              '<div class="field wiz-if" data-if="http"><label for="wiz-node">Remote Node ID</label><input id="wiz-node" class="input mono" type="text" placeholder="Defaults to Sensor ID"/></div>' +
               // Always shown
               '<div class="field"><label for="wiz-int">Read interval (ms)</label><input id="wiz-int" class="input mono" type="number" value="10000" min="500"/></div>' +
             '</div>' +
@@ -1855,7 +1857,7 @@
         // "UART · …", "Pulse") so the right pin fields show on the next step.
         var metaEl = c.querySelector(".wiz-type-meta");
         var meta = ((metaEl && metaEl.textContent) || "").split("·")[0].trim().toUpperCase();
-        var ifMap = { "I2C": "I2C", "UART": "UART", "PULSE": "Pulse", "ADC": "ADC", "1-WIRE": "1-Wire" };
+        var ifMap = { "I2C": "I2C", "UART": "UART", "PULSE": "Pulse", "ADC": "ADC", "1-WIRE": "1-Wire" , "HTTP": "HTTP", "HTTP NODE": "HTTP" };
         var ifaceEl = document.getElementById("wiz-iface");
         if (ifaceEl && ifMap[meta]) { ifaceEl.value = ifMap[meta]; wizUpdateIfaceFields(); }
       });
@@ -1970,6 +1972,7 @@
     var iface    = ifaceVal.toLowerCase();
 
     // Read an integer field by id; return `def` when blank/missing/non-numeric.
+      var nodeVal  = (document.getElementById("wiz-node")  || {}).value || "";
     function pinVal(id, def) {
       var v = (document.getElementById(id) || {}).value;
       var n = parseInt(v, 10);
@@ -1990,6 +1993,7 @@
     }
 
     // Interface-specific pins/keys — must match the SensorManager plugin schema.
+      if (iface === "http" && nodeVal) { obj.node = nodeVal; }
     if (iface === "i2c") {
       var addrVal = (document.getElementById("wiz-addr") || {}).value || "0x76";
       obj.address = parseInt(addrVal, 16) || parseInt(addrVal, 10) || 0;
