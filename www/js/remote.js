@@ -46,21 +46,32 @@ function rnRenderNodes(d) {
   for (var i = 0; i < nodes.length; i++) {
     var n = nodes[i];
     var seenTxt = rnFmtAge(n.age_ms) + " ago";
-    var metricsTxt = n.metrics ? n.metrics.join(", ") : "";
+
+    var metricsHtml = "";
+    if (n.metrics && n.metrics.length) {
+      for (var j = 0; j < n.metrics.length; j++) {
+        var m = n.metrics[j];
+        var val = (typeof m.value === "number") ? m.value.toFixed(1) : m.value;
+        metricsHtml += '<span class="badge dim" style="margin-right:6px; font-family:monospace">' + 
+                       rnEsc(m.metric) + ': <strong>' + rnEsc(val) + '</strong> <small>' + rnEsc(m.unit) + '</small></span>';
+      }
+    }
 
     html +=
       '<div class="card" style="margin-bottom:10px">' +
         '<div class="card-head">' +
-          '<div class="card-title">' + rnEsc(n.id) + "</div>" +
+          '<div class="card-title"><span data-icon="cpu"></span> ' + rnEsc(n.id) + '</div>' +
           '<span class="badge ' + (n.online ? "ok" : "err") + '">' +
             (n.online ? "online" : "offline") +
           "</span>" +
         "</div>" +
         '<div class="card-body">' +
-          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
-            '<span class="badge dim">seen: ' + seenTxt + "</span>" +
-            '<span class="badge dim">metrics: ' + rnEsc(metricsTxt) + "</span>" +
-          "</div>" +
+          '<div style="margin-bottom:8px">' +
+            '<span class="badge dim">seen: ' + seenTxt + '</span>' +
+          '</div>' +
+          '<div style="display:flex; flex-wrap:wrap; gap:4px">' +
+            metricsHtml +
+          '</div>' +
         "</div>" +
       "</div>";
   }

@@ -538,11 +538,14 @@ static void handleApiRemoteStatus(AsyncWebServerRequest* req) {
             n["age_ms"] = ageMs;
             n["online"] = (ageMs != UINT32_MAX && ageMs < 180000); // 3 mins threshold
 
-            char metrics[8][16];
-            int mCount = remoteIngest.metricsForNode(nodeId, metrics, 8);
+            SensorReading readings[8];
+            int mCount = remoteIngest.peekLatest(nodeId, readings, 8);
             JsonArray mArr = n["metrics"].to<JsonArray>();
             for (int m = 0; m < mCount; m++) {
-                mArr.add(metrics[m]);
+                JsonObject mObj = mArr.add<JsonObject>();
+                mObj["metric"] = readings[m].metric;
+                mObj["value"] = readings[m].value;
+                mObj["unit"] = readings[m].unit;
             }
         }
     }

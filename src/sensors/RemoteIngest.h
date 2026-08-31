@@ -132,6 +132,10 @@ public:
     /// Returns how many were written.
     int metricsForNode(const char* nodeId, char out[][16], int maxOut) const;
 
+    /// Copies the latest values from the mailbox into `out` without touching history.
+    /// Used by the diagnostics/remote endpoint to show current values.
+    int peekLatest(const char* nodeId, SensorReading* out, int maxOut) const;
+
 private:
     /// Queued historical readings, across all nodes.
     ///
