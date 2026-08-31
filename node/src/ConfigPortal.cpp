@@ -324,3 +324,28 @@ bool portalRun(NodeSettings& s, uint32_t timeoutMs) {
 
     return s_saved;
 }
+
+void portalStartBackground(NodeSettings& s) {
+    s_target = &s;
+    s_saved  = false;
+
+    s_http.on("/", handleRoot);
+    s_http.on("/save", HTTP_POST, handleSave);
+    s_http.onNotFound(handleRoot);
+    s_http.begin();
+    Serial.println("[portal] Background configuration server started on STA interface");
+}
+
+void portalHandleClient() {
+    s_http.handleClient();
+    if (s_saved) {
+        // Let the browser collect the confirmation page
+        const uint32_t until = millis() + 1500;
+        while ((int32_t)(millis() - until) < 0) {
+            s_http.handleClient();
+            delay(5);
+        }
+        Serial.println("[portal] Settings saved via background server, restarting");
+        ESP.restart();
+    }
+}

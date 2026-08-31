@@ -67,3 +67,10 @@ bool portalButtonHeld();
 /// Returns true if settings were saved — the caller should restart. Returns
 /// false on timeout, with `s` unmodified.
 bool portalRun(NodeSettings& s, uint32_t timeoutMs);
+
+/// Starts the HTTP server on the existing network interface (STA mode)
+/// for background configuration.
+void portalStartBackground(NodeSettings& s);
+
+/// Services background HTTP requests. Restarts the ESP if settings are saved.
+void portalHandleClient();

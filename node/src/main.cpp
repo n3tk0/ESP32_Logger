@@ -27,6 +27,8 @@ static NodeSettings s_cfg;
 static uint32_t     s_lastPost   = 0;
 static bool         s_postedOnce = false;
 
+static bool         s_portalBgRunning = false;
+
 // Consecutive failed association attempts. Drives how long the portal is
 // offered before falling back to another retry.
 static uint8_t s_wifiFailures = 0;
@@ -70,7 +72,14 @@ static bool connectWifi() {
 // again, so the node self-heals — while still being reachable in that window
 // if the credentials really did change.
 static bool ensureWifi() {
-    if (connectWifi()) { s_wifiFailures = 0; return true; }
+    if (connectWifi()) {
+        s_wifiFailures = 0;
+        if (!s_portalBgRunning) {
+            portalStartBackground(s_cfg);
+            s_portalBgRunning = true;
+        }
+        return true;
+    }
 
     // Two clean failures before offering the portal: one is a transient the
     // next cycle usually clears, and tearing the radio down to raise an AP
@@ -78,6 +87,7 @@ static bool ensureWifi() {
     if (++s_wifiFailures < 2) return false;
 
     Serial.println("[wifi] repeated failures — opening setup portal");
+    s_portalBgRunning = false; // portalRun will stop the HTTP server on exit
     if (portalRun(s_cfg, PORTAL_TIMEOUT_MS)) {
         Serial.println("[cfg] saved, restarting");
         delay(200);
@@ -178,6 +188,10 @@ void setup() {
 }
 
 void loop() {
+    if (s_portalBgRunning) {
+        portalHandleClient();
+    }
+
     const uint32_t now = millis();
 
     // Unsigned subtraction, so the ~49-day millis() wrap is a non-event.
