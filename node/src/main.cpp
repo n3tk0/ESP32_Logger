@@ -207,7 +207,15 @@ void loop() {
     if (!sensorsReady()) sensorsBegin(s_cfg);
     if (!sensorsReady()) return;
 
-    if (!ensureWifi()) return;
+    if (!ensureWifi()) {
+        if (s_wifiFailures > 0) {
+            // We haven't hit the 3-failure threshold to open the AP yet.
+            // Reset s_postedOnce so we retry immediately instead of waiting
+            // for the full posting interval.
+            s_postedOnce = false;
+        }
+        return;
+    }
 
     postReadings();
 }
