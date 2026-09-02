@@ -1,24 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  KUAL extension descriptor.
+
+  The <menus> block POINTS AT menu.json; it does not repeat the entries. The
+  previous version declared <menu type="app"> with the items spelled out
+  inline, which is not a shape KUAL parses — so on a build that reads
+  config.xml the extension contributed nothing to the menu, and on one that
+  reads menu.json it was being ignored anyway.
+
+  Both files are kept because KUAL 1.x reads this and 2.x reads menu.json;
+  they must describe the same two actions.
+-->
 <extension>
   <information>
     <name>ESP32 Dashboard</name>
     <version>1.0</version>
-    <author>ESP32 Logger</author>
-    <id>esp32_logger_dashboard</id>
+    <author>ESP32_Logger</author>
+    <id>esp32dash</id>
   </information>
   <menus>
-    <menu type="app" id="esp32_logger_dashboard">
-      <name>ESP32 Dashboard</name>
-      <items>
-        <item>
-          <name>Start Dashboard</name>
-          <action>sh start.sh</action>
-        </item>
-        <item>
-          <name>Stop Dashboard</name>
-          <action>sh stop.sh</action>
-        </item>
-      </items>
-    </menu>
+    <menu type="json" dynamic="false">menu.json</menu>
   </menus>
 </extension>

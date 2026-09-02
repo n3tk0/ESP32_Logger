@@ -15,7 +15,19 @@
 # ============================================================================
 
 # ── Configuration ────────────────────────────────────────────────────────────
-DASH_DIR="/mnt/us/dashboard"
+# WHERE THIS SCRIPT LIVES, not a fixed path. It was pinned to
+# /mnt/us/dashboard, which is the one place a KUAL extension cannot be: KUAL
+# builds its menu by scanning the subdirectories of /mnt/us/extensions and
+# nowhere else, so an extension installed where the README said to put it was
+# never listed — and one moved into extensions/ to be listed then found no
+# layout and no icons, because those were still looked up under the old path.
+#
+# Deriving it removes the conflict: the folder works wherever it is copied,
+# and the KUAL location is just one of them. DASH_DIR in the environment still
+# wins, for anyone who has split the data off somewhere else.
+if [ -z "$DASH_DIR" ]; then
+    DASH_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || DASH_DIR=$(dirname "$0")
+fi
 TMP="/tmp/dash"
 HOST="http://192.168.1.50"       # ESP32 collector IP — change to match yours
 FETCH_TIMEOUT=10                  # wget timeout in seconds
@@ -309,17 +321,51 @@ draw_data() {
 
 # ── Cleanup on exit ──────────────────────────────────────────────────────────
 cleanup() {
+    # The sleep is a child process and does not get the signal we did. Left
+    # alone it holds the script here for the rest of the minute, which is what
+    # made Stop look like it had failed.
+    [ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null
     restore_sleep
     rm -rf "$TMP"
+    rm -f /tmp/dash.pid
     exit 0
 }
 trap cleanup INT TERM
+
+# A sleep that can be interrupted.
+#
+# `sleep 60` in the foreground cannot: a shell running a foreground command
+# does not act on a trapped signal until that command returns, so pressing Stop
+# in KUAL did nothing visible for up to a minute — and stop.sh had already
+# removed the pidfile by then, so a second Start would launch another copy
+# alongside the one still winding down, two processes drawing to one
+# framebuffer.
+#
+# Backgrounding it and waiting is the POSIX way round that: `wait` returns as
+# soon as a trapped signal arrives, and the handler runs immediately.
+SLEEP_PID=""
+nap() {
+    sleep "$1" &
+    SLEEP_PID=$!
+    wait "$SLEEP_PID" 2>/dev/null
+    SLEEP_PID=""
+}
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 mkdir -p "$TMP"
 prevent_sleep
+
+# A layout BEFORE the first fetch, so no drawing path can run without one.
+#
+# RES_W and RES_H come from the collector, so load_layout() falls back to
+# 600x800 here and load_data() reloads it at the real resolution the moment the
+# collector answers. Without this the clock still ran on its own timer while the
+# collector was unreachable, emitting `fbink -x  -y  -S` with every coordinate
+# empty — rejected by FBInk, so the "Cannot reach" message stayed on screen by
+# luck rather than by design.
+load_layout
 
 # Initial fetch and full draw
 if fetch_data; then
@@ -338,7 +384,7 @@ fi
 # Main loop
 CYCLE=0
 while true; do
-    sleep 60
+    nap 60
     CYCLE=$((CYCLE + 1))
     NOW_TIME=$(date +%H:%M)
 

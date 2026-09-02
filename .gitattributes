@@ -3,6 +3,17 @@
 # from what CI compares against by exactly one byte per line, so pin it.
 src/web/failsafe.html text eol=lf
 
+# Everything the Kindle reads is parsed by busybox ash or by KUAL's JSON
+# reader, and neither tolerates a CR. A layout file checked out with CRLF gives
+# every coordinate a trailing carriage return — GR_X=20\r — which FBInk rejects
+# as a bad argument, and a menu.json with CRLF makes KUAL list nothing at all
+# without saying why.
 kindle/*.sh text eol=lf
 kindle/*.json text eol=lf
 kindle/*.xml text eol=lf
+kindle/layout/*.conf text eol=lf
+
+# The pre-rendered icons are images. Marked explicitly so no future text rule
+# can reach them: a single CRLF substitution inside a BMP shifts the pixel data
+# and the reader draws noise.
+kindle/icons/**/*.bmp binary
