@@ -867,48 +867,53 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
-// GET  /api/kindle/slots — what the dashboard shows, and in what order
-// POST /api/kindle/slots — replace the whole list
+// GET  /api/kindle/slots — what is in each of the nine places
+// POST /api/kindle/slots — replace the whole layout
 // ---------------------------------------------------------------------------
-// A WHOLE-LIST REPLACE, not per-slot edits. The list is short, ordered, and
-// the order is a property of the list rather than of any slot in it — an
-// endpoint that moved one entry would need a second concept of position, and
-// the editor would still have to send everything to reorder two rows. Sending
-// the array is simpler at both ends and cannot leave the device holding half
-// an edit.
+// A WHOLE-LAYOUT REPLACE, not per-place edits. Nine short records is a small
+// payload, the editor holds all of them on screen at once anyway, and an
+// endpoint that wrote one place at a time could leave the device holding half
+// an edit — a headline pointing at a sensor the grid below it no longer shares.
 //
-// The sizes are described in the response too. The form has to name them
-// somewhere, and generating that list from the firmware's own enum means a
-// size added later appears in the editor without anyone remembering to add it
-// twice.
+// THE PLACES ARE DESCRIBED IN THE RESPONSE, generated from the firmware's own
+// enum. The form has to name them somewhere, and deriving that list here means
+// a place added later appears in the editor without anyone remembering to add
+// it in two codebases.
 static void handleKindleSlotsGet(AsyncWebServerRequest* req) {
     JsonDocument doc;
+    const KindleZones& zones = kdSlots();
 
-    JsonArray arr = doc["slots"].to<JsonArray>();
-    const KindleSlotList& list = kdSlots();
-    for (int i = 0; i < list.count; i++) {
-        const KindleSlot& s = list.slot[i];
-        JsonObject o = arr.add<JsonObject>();
+    JsonObject zo = doc["zones"].to<JsonObject>();
+    for (int i = 0; i < KZ_COUNT; i++) {
+        const KindleSlot& s = zones.z[i];
+        JsonObject o = zo[kdZoneKey((uint8_t)i)].to<JsonObject>();
         o["sensor"]   = s.sensorId;
         o["metric"]   = s.metric;
         o["label"]    = s.label;                 // "" means "use the default"
         o["shown"]    = kdSlotLabel(s);          // what will actually be drawn
-        o["size"]     = s.size;
         o["flags"]    = s.flags;
         o["decimals"] = s.decimals;
     }
 
-    JsonArray sizes = doc["sizes"].to<JsonArray>();
-    static const char* SIZE_NAME[KSLOT_SIZE_COUNT] = { "hero", "large", "medium", "small" };
-    for (int i = 0; i < KSLOT_SIZE_COUNT; i++) {
-        JsonObject o = sizes.add<JsonObject>();
-        o["id"]    = i;
-        o["name"]  = SIZE_NAME[i];
-        o["units"] = kdSlotUnits((uint8_t)i);    // twelfths of a row
+    // The layout itself, so the editor can lay its cards out the way the page
+    // does rather than carrying a second, drifting copy of the design. `group`
+    // is which block a place sits in and `role` is what it does there; both are
+    // strings because a number here would have to be kept in step by hand.
+    JsonArray order = doc["order"].to<JsonArray>();
+    for (int i = 0; i < KZ_COUNT; i++) {
+        JsonObject o = order.add<JsonObject>();
+        o["key"]   = kdZoneKey((uint8_t)i);
+        o["group"] = kdZoneIsIndoor((uint8_t)i) ? "indoor" : "outdoor";
+        o["role"]  = (i == KZ_HERO) ? "hero"
+                   : (i == KZ_BIG)  ? "big"
+                   : kdZoneIsGrid((uint8_t)i) ? "grid" : "indoor";
     }
 
-    doc["cap"]        = KindleSlotList::CAP;
-    doc["row_units"]  = KSLOT_ROW_UNITS;
+    doc["group_out"]  = kdGroupOutLabel(zones);
+    doc["group_in"]   = kdGroupInLabel(zones);
+    doc["group_out_set"] = zones.groupOut;      // "" = showing the built-in
+    doc["group_in_set"]  = zones.groupIn;
+
     doc["flag_bold"]  = KSLOTF_BOLD;
     doc["flag_unit"]  = KSLOTF_UNIT;
     doc["flag_age"]   = KSLOTF_AGE;
@@ -926,33 +931,41 @@ static void handleKindleSlotsPost(AsyncWebServerRequest* req, uint8_t* data, siz
         req->send(400, "application/json", "{\"ok\":false,\"error\":\"bad JSON\"}");
         return;
     }
-    JsonArrayConst arr = doc["slots"].as<JsonArrayConst>();
-    if (arr.isNull()) {
+    JsonObjectConst zin = doc["zones"].as<JsonObjectConst>();
+    if (zin.isNull()) {
         req->send(400, "application/json",
-                  "{\"ok\":false,\"error\":\"expected a slots array\"}");
+                  "{\"ok\":false,\"error\":\"expected a zones object\"}");
         return;
     }
 
-    // Built in full BEFORE anything is stored. A list assembled straight into
-    // kdSlots() would leave the dashboard drawing a half-applied layout if the
+    // Built in full BEFORE anything is stored. A layout assembled straight into
+    // kdSlots() would leave the dashboard drawing a half-applied page if the
     // save then failed.
-    KindleSlotList fresh;
+    KindleZones fresh;
     fresh.clear();
-    int dropped = 0;
-    for (JsonObjectConst o : arr) {
-        if (fresh.count >= KindleSlotList::CAP) { dropped++; continue; }
-        KindleSlot& s = fresh.slot[fresh.count];
+    strncpy(fresh.groupOut, doc["group_out"] | "", sizeof(fresh.groupOut) - 1);
+    strncpy(fresh.groupIn,  doc["group_in"]  | "", sizeof(fresh.groupIn)  - 1);
+
+    int filled = 0, dropped = 0;
+    for (JsonPairConst kv : zin) {
+        const uint8_t z = kdZoneFromKey(kv.key().c_str());
+        if (z >= KZ_COUNT) { dropped++; continue; }   // not a place we have
+        JsonObjectConst o = kv.value().as<JsonObjectConst>();
+        if (o.isNull()) continue;                     // an explicit null empties it
+
+        KindleSlot& s = fresh.z[z];
         s = KindleSlot{};
         strncpy(s.sensorId, o["sensor"] | "", sizeof(s.sensorId) - 1);
         strncpy(s.metric,   o["metric"] | "", sizeof(s.metric)   - 1);
         strncpy(s.label,    o["label"]  | "", sizeof(s.label)    - 1);
-        s.size     = (uint8_t)(o["size"]     | (int)KSLOT_MEDIUM);
         s.decimals = (uint8_t)(o["decimals"] | (int)KSLOT_DECIMALS_AUTO);
         s.flags    = (uint8_t)(o["flags"]    | (int)KSLOTF_UNIT);
-        if (!s.used()) { dropped++; continue; }
-        fresh.count++;
+        // Half-filled is empty, not an error: the editor sends every place on
+        // every save, and the ones the reader left blank arrive as blanks.
+        if (!s.used()) { s = KindleSlot{}; continue; }
+        filled++;
     }
-    kdSlotsClamp(fresh);
+    kdZonesClamp(fresh);
 
     if (!activeFS) {
         req->send(503, "application/json", "{\"ok\":false,\"error\":\"no filesystem\"}");
@@ -963,13 +976,13 @@ static void handleKindleSlotsPost(AsyncWebServerRequest* req, uint8_t* data, siz
         return;
     }
 
-    // Only now. The renderers read this list without a lock, so it is replaced
-    // once, after the write that makes it survive a reboot.
+    // Only now. The renderers read this without a lock, so it is replaced once,
+    // after the write that makes it survive a reboot.
     kdSlots() = fresh;
 
     JsonDocument res;
     res["ok"]      = true;
-    res["count"]   = fresh.count;
+    res["count"]   = filled;
     res["dropped"] = dropped;   // named so an editor can say what was refused
     sendJsonResponse(req, res);
 }

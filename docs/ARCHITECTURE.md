@@ -676,43 +676,51 @@ synchronised node.
 |---|---|---|---|
 | GET | `/api/kindle/config` | read | How `/kindle` is drawn, plus its build-time width |
 | POST | `/api/kindle/config` | CSRF | Face, weight, clock style, formats, which blocks are drawn |
-| GET | `/api/kindle/slots` | read | Which readings the dashboard shows, in order, plus the size vocabulary |
-| POST | `/api/kindle/slots` | CSRF | Replace the whole ordered list (JSON body) |
+| GET | `/api/kindle/slots` | read | What is in each of the nine places, plus the layout's own vocabulary |
+| POST | `/api/kindle/slots` | CSRF | Replace the whole layout (JSON body) |
 
-**The dashboard is a list, not a shape.** It used to be six hardwired readings
-— the outdoor sensor's temperature, humidity and pressure and the indoor
-sensor's temperature, humidity and AQI — which is a fine dashboard for exactly
-one hardware configuration. Twenty sensor plugins between them publish
-twenty-nine distinct metrics and the page could reach six of them; worse, it
+**The layout is fixed; what goes in it is not.** The page used to be six
+hardwired readings — the outdoor sensor's temperature, humidity and pressure and
+the indoor sensor's temperature, humidity and AQI — which is a fine dashboard
+for exactly one hardware configuration. Twenty sensor plugins between them
+publish twenty-nine distinct metrics and the page could reach six; worse, it
 insisted on the six, so a BMP280 outdoors rendered a dash where its humidity
 would have been, forever, in a space nothing else could use.
 
-Each slot names a sensor, a metric and a size. The renderers walk the list in
-order and pack it into rows, and a slot whose sensor is not reporting that
-metric is not drawn at all — the row closes up behind it. Adding PM2.5 from an
-SDS011 on the balcony is adding a slot.
+A free list of readings that packed itself into rows replaced that, and went too
+far: a page that can show anything has no shape, and it rearranged itself
+whenever a sensor went quiet. What it is now is **nine named places** — a
+headline and the value beside it, a two-by-two grid under them, and a row of up
+to three under the clock — each of which names a sensor, a metric, a caption,
+its decimals and four switches. Adding PM2.5 from an SDS011 on the balcony is
+putting it in a place.
 
-Sizes and order rather than coordinates, and deliberately: the same page is
-rendered at 600x800 by an FBInk shell script and at 1072x1448 by a CSS page,
-so pixel positions chosen for one are wrong for the other, and placing every
-value twice by hand is not flexibility. A hero fills its row; large, medium and
-small take a half, a third and a quarter, and they tile exactly because the
-widths are twelfths. The packing happens once, on the collector, and both
-renderers are told the answer — two implementations of one packing rule is two
-chances to disagree about where a value goes.
+**An empty place is skipped and the ones after it close up**, which is the
+BMP280 case and the reason any of this exists. It is also how the indoor row
+becomes two fields instead of three: leave the third unconfigured.
 
-The list lives in `/config/kindle_slots.json`, not in `config.bin`, following
-the split the rest of the firmware makes: scalars in the binary struct, lists
-of configured things in JSON under `/config/`. It costs no migration, which
-matters — every field added to `DeviceConfig` puts every deployed device
-through `loadConfig()`'s migration path, and twelve slots would have been
-another 600 bytes of it. An absent file means "never configured" and yields
-defaults that reproduce the old six-reading page exactly, built from whichever
-two sensors the device was already pointed at.
+No place carries a size or a coordinate, and deliberately: the same page is
+rendered at 600x800 by an FBInk shell script and at 1072x1448 by a CSS page, so
+pixel positions chosen for one are wrong for the other, and the type scale was
+measured on the panel rather than chosen by taste. The place decides how big its
+number is; the reader decides which number it is. Both renderers are handed the
+result of ONE `kdResolveZones()` call, so the visibility rule, the unit
+conversion and the rounding cannot differ between screens.
 
-`/kindle/data` emits the packed slots as `SLOTn_*` keys alongside the older
-fixed `OUT_*`/`IN_*` ones, so a Kindle running an earlier copy of
-`update_dash.sh` keeps working from the keys it knows.
+The layout lives in `/config/kindle_slots.json`, not in `config.bin`, following
+the split the rest of the firmware makes: scalars in the binary struct, lists of
+configured things in JSON under `/config/`. It costs no migration, which
+matters — every field added to `DeviceConfig` puts every deployed device through
+`loadConfig()`'s migration path, and nine places would have been another 450
+bytes of it. An absent file means "never configured" and yields defaults that
+reproduce the old page, built from whichever two sensors the device was already
+pointed at.
+
+`/kindle/data` emits the places as `Z_<PLACE>_*` keys alongside the older fixed
+`OUT_*`/`IN_*` ones, so a Kindle running an earlier copy of `update_dash.sh`
+keeps working from the keys it knows. It also sends the width of each value and
+unit in thousandths of the type size, because FBInk draws one size per call and
+will not report how wide it drew anything.
 
 
 The page being configured has no settings of its own and never will: it is

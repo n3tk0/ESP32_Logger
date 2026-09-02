@@ -166,165 +166,195 @@ draw_clock() {
 }
 
 # ── Full dashboard rendering ─────────────────────────────────────────────────
-# ── The configurable slots ───────────────────────────────────────────────────
-# The collector sends a list of readings, each already placed: a row and a
-# column in twelfths of the page width. The packing is done there so the FBInk
-# page and the HTML page cannot disagree about where a value goes; all this end
-# does is turn twelfths into pixels.
+# ── The nine places ──────────────────────────────────────────────────────────
+# The collector sends what is in each named place and, for the two groups that
+# can close up behind an empty one, which places survived and in what order. All
+# this end does is turn that into pixels for one panel.
 #
-# Sizes rather than coordinates, because these coordinates are for one panel.
-# 600x800 and 1072x1448 want different pixel positions for the same layout, and
-# the reader should not have to place every value twice.
+# NAMES, NOT COORDINATES. 600x800 and 1072x1448 want different pixel positions
+# for the same design, and the reader should not have to place every value
+# twice; the layout file carries the positions, this carries the drawing.
 
-# The type size for a slot size, from the layout file.
-slot_val_size() {
-    case "$1" in
-        0) echo "${SLOT_VAL_SZ_HERO:-80}"   ;;
-        1) echo "${SLOT_VAL_SZ_LARGE:-44}"  ;;
-        2) echo "${SLOT_VAL_SZ_MEDIUM:-32}" ;;
-        *) echo "${SLOT_VAL_SZ_SMALL:-26}"  ;;
-    esac
-}
-
-# How tall a row is, given the largest slot in it.
+# ONE PLACE'S VALUE IS THREE DRAWS, not one.
 #
-# Only the hero spends a line on its label; every other size sets the label
-# inline with the value, so those rows are one line tall rather than two. That
-# is where the heights below came down from — see draw_slots().
-slot_row_height() {
-    case "$1" in
-        0) echo "${SLOT_ROW_H_HERO:-104}"   ;;
-        1) echo "${SLOT_ROW_H_LARGE:-52}"   ;;
-        *) echo "${SLOT_ROW_H:-40}"         ;;
-    esac
-}
+# The number at its full size, then its unit as a footnote at four tenths of it,
+# then the tendency arrow if it has one. FBInk draws one size per call, so each
+# piece is a separate call at an x that depends on how wide the piece before it
+# came out — and FBInk will not say. The collector measures them for us and
+# sends the widths as Z_<PLACE>_VADVW and _UADVW, in thousandths of the type
+# size; see kdAdvanceMille() in KindleDashboard.cpp.
+#
+# A unit at full size was what the first version of this drew, and it was wrong
+# twice: "1008 hPa ↘" at 32 px is wider than the column it sits in, and a unit
+# as loud as its number is not a unit, it is a second number.
+draw_field() {
+    # $1=x $2=row top $3=size $4=bold $5=value $6=unit $7=arrow
+    # $8=value advance $9=unit advance
+    local x="$1" y="$2" sz="$3" bold="$4" val="$5" unit="$6" arrow="$7"
+    local vadv="$8" uadv="$9"
+    local ux usz asz
 
-draw_slots() {
-    [ "${SLOT_COUNT:-0}" -gt 0 ] 2>/dev/null || return 1
+    if [ -z "$val" ]; then
+        # An em dash, not "--" and not nothing: a place that is configured but
+        # has no reading has to look different from one nobody filled in.
+        draw_text_reg "$x" "$y" "$sz" "GRAY7" "${LBL_DASH:-—}"
+        return
+    fi
 
-    local n="$SLOT_COUNT" i row sz
+    if [ "$bold" = "1" ]; then
+        draw_text_bold "$x" "$y" "$sz" "BLACK" "$val"
+    else
+        draw_text_reg  "$x" "$y" "$sz" "BLACK" "$val"
+    fi
+    ux=$(( x + sz * vadv / 1000 ))
 
-    # First pass: the tallest slot in each row decides the row's height. Two
-    # passes rather than one because a row's height is not known until every
-    # slot in it has been seen, and the y of every LATER row depends on it.
-    i=0
-    while [ "$i" -lt "$n" ]; do
-        eval "row=\$SLOT${i}_ROW; sz=\$SLOT${i}_SIZE"
-        eval "cur=\${ROWMAX_${row}:-9}"
-        [ "$sz" -lt "$cur" ] 2>/dev/null && eval "ROWMAX_${row}=$sz"
-        i=$((i + 1))
-    done
-
-    # Second pass: draw. y accumulates the heights of the rows above.
-    local x y w val lab unit bold age txt vsz rh lablen labsz labw vx vy curmax
-    local area_x="${SLOT_X:-18}" area_y="${SLOT_Y:-20}" area_w="${SLOT_W:-564}"
-    local last_row=-1 cur_y="$area_y"
-
-    i=0
-    while [ "$i" -lt "$n" ]; do
-        eval "row=\$SLOT${i}_ROW; col=\$SLOT${i}_COL; units=\$SLOT${i}_UNITS"
-        eval "sz=\$SLOT${i}_SIZE; bold=\$SLOT${i}_BOLD; age=\$SLOT${i}_AGE_MIN"
-        eval "lab=\$SLOT${i}_LABEL; val=\$SLOT${i}_VALUE; unit=\$SLOT${i}_UNIT"
-        eval "lablen=\${SLOT${i}_LABEL_LEN:-0}"
-
-        # Advance y once per row, using the heights of the rows we have passed.
-        while [ "$last_row" -lt "$row" ]; do
-            last_row=$((last_row + 1))
-            [ "$last_row" -gt 0 ] && {
-                eval "prevmax=\${ROWMAX_$((last_row - 1)):-2}"
-                rh=$(slot_row_height "$prevmax")
-                cur_y=$((cur_y + rh))
-            }
-        done
-
-        x=$((area_x + col * area_w / 12))
-        w=$((units * area_w / 12))
-        y="$cur_y"
-        vsz=$(slot_val_size "$sz")
-
-        # A LIST LONGER THAN THE PAGE IS TRUNCATED, NOT SMEARED OVER THE CHART.
-        #
-        # The zones below the flow are at fixed coordinates, so a reader who
-        # adds a seventh and eighth reading eventually asks for more rows than
-        # there is room for. Text drawn over the chart heading on an e-ink panel
-        # is not "a bit crowded", it is two overlaid glyph sets that neither can
-        # be read; a reading that is simply missing is at least legible as a
-        # reading that is missing, and it is the reader's own list to shorten.
-        if [ $((y + vsz)) -gt "$((area_y + ${SLOT_AREA_H:-235}))" ]; then
-            break
-        fi
-
-        txt="$val"
-        # Degrees and per-cent set tight against the number, everything else
-        # after a space — "8.4 °" and "71 %" are not how either is written,
-        # "1008 hPa" is. The same rule the HTML renderer applies.
+    if [ -n "$unit" ]; then
+        usz=$(( sz * 42 / 100 ))
+        [ "$usz" -lt 9 ] && usz=9
         case "$unit" in
-            '')      ;;
-            '°'|'%') txt="$txt$unit"  ;;
-            *)       txt="$txt $unit" ;;
+            # Degrees and per-cent set tight against the number — "8.4 °" and
+            # "71 %" are not how either is written. Everything else takes a
+            # space, as "1008 hPa" does.
+            '°'|'%') ;;
+            *)       ux=$(( ux + sz / 12 )) ;;
         esac
-        # Only when it is worth saying. A reading a minute old is current; one
-        # an hour old is the thing the reader needs to know about.
-        [ "${age:-0}" -gt 1 ] 2>/dev/null && txt="$txt  ${age}m"
-
-        labsz="${SLOT_LABEL_SZ:-12}"
-
-        # THE LABEL SHARES THE VALUE'S LINE UNLESS THE SLOT IS THE HERO.
-        #
-        # The hero is the masthead and wants its caption above it. Everywhere
-        # else a label on its own line doubled the height of a row to caption a
-        # number three glyphs long, and six of those spread the page over an
-        # amount of white the design this replaced never had.
-        #
-        # FBInk cannot be asked how wide a string came out, so the value's x is
-        # an estimate: the collector counts the label's CHARACTERS (bytes would
-        # be wrong — "ВЛАГА" is five letters and ten bytes) and the advance below
-        # is the average width of an upper-case glyph as a percentage of its
-        # size, measured on the panel's serif. Being a few pixels out puts a
-        # slightly wider or narrower gap between the label and the number, which
-        # is why an estimate is good enough here and would not be for anything
-        # that had to line up.
-        if [ "$sz" = "0" ] || [ -z "$lab" ]; then
-            [ -n "$lab" ] && draw_text_reg "$x" "$y" "$labsz" "GRAY7" "$lab"
-            vx="$x"
-            vy=$((y + labsz + 4))
+        if [ "$unit" = "°" ]; then
+            # The degree rides at the cap line rather than on the baseline,
+            # where at four tenths of the size it reads as a lower-case o.
+            draw_text_reg "$ux" "$y" "$usz" "GRAY4" "$unit"
         else
-            # Baselines, roughly: the small label drops so it sits on the
-            # number's foot rather than floating level with its cap.
-            draw_text_reg "$x" "$((y + vsz - labsz - 2))" "$labsz" "GRAY7" "$lab"
-            labw=$((lablen * labsz * ${SLOT_LABEL_ADV:-62} / 100))
-            # A floor, so the numbers down a column start at the same x whether
-            # their caption is "AQI" or "НАЛЯГ". Ragged value starts are most of
-            # what a scattered page looks like.
-            [ "$labw" -lt "${SLOT_LABEL_MINW:-40}" ] && labw="${SLOT_LABEL_MINW:-40}"
-            vx=$((x + labw + 8))
-            vy="$y"
+            draw_text_reg "$ux" "$(baseline_y "$y" "$sz" "$usz")" "$usz" "GRAY4" "$unit"
         fi
+        ux=$(( ux + usz * uadv / 1000 ))
+    fi
 
-        if [ "$bold" = "1" ]; then
-            draw_text_bold "$vx" "$vy" "$vsz" "BLACK" "$txt"
-        else
-            draw_text_reg  "$vx" "$vy" "$vsz" "BLACK" "$txt"
+    if [ -n "$arrow" ]; then
+        asz=$(( sz * 50 / 100 ))
+        [ "$asz" -lt 10 ] && asz=10
+        draw_text_reg "$(( ux + sz / 10 ))" "$(baseline_y "$y" "$sz" "$asz")" \
+                      "$asz" "GRAY4" "$arrow"
+    fi
+}
+
+# Where a smaller value has to start so it shares a baseline with a larger one
+# beside it. FBInk's y is the TOP of the text, so two sizes drawn at one y sit
+# on two baselines and the row looks dropped; the ascent is about eight tenths
+# of the size, which is where the 80 comes from.
+baseline_y() {
+    # $1=row top  $2=largest size in the row  $3=this size
+    echo $(( $1 + ($2 - $3) * 80 / 100 ))
+}
+
+draw_zones() {
+    # A collector running older firmware sends no Z_GROUP_OUT, and draw_all
+    # falls back to the fixed keys it does send — so the reader and the
+    # collector do not have to be updated in the same minute.
+    [ -n "${Z_GROUP_OUT:-}" ] || return 1
+
+    local lx="${COL_L_X:-18}" rx="${COL_R_X:-318}" rw="${COL_R_W:-264}"
+    local lab_sz="${GROUP_LAB_SZ:-12}"
+    local z val unit lab arrow bold vadv uadv n i cx cw vsz y
+
+    # ── Left column: the outdoor headline ───────────────────────────────────
+    draw_text_reg "$lx" "${TOP_Y:-20}" "$lab_sz" "GRAY7" "$Z_GROUP_OUT"
+
+    local hero_sz="${HERO_SZ:-84}" hero_y="${HERO_Y:-38}"
+    draw_field "$lx" "$hero_y" "$hero_sz" "${Z_HERO_BOLD:-0}" \
+               "$Z_HERO_VALUE" "$Z_HERO_UNIT" "$Z_HERO_ARROW" \
+               "${Z_HERO_VADVW:-0}" "${Z_HERO_UADVW:-0}"
+
+    # The slash and the second value, after the whole of the headline. The
+    # collector measured that width for us — see kdAdvanceMille() — because
+    # FBInk will not say how wide it drew something and ${#var} counts bytes,
+    # which makes "8.4°" five characters long.
+    if [ -n "${Z_BIG_VALUE:-}" ]; then
+        local big_sz="${BIG_SZ:-44}"
+        local hw=$(( hero_sz * ${Z_HERO_ADVW:-0} / 1000 ))
+        local sx=$(( lx + hw + ${HEAD_GAP:-8} ))
+        y=$(baseline_y "$hero_y" "$hero_sz" "$big_sz")
+        draw_text_reg "$sx" "$y" "$big_sz" "GRAY10" "/"
+        draw_field "$(( sx + ${SLASH_W:-22} ))" "$y" "$big_sz" "${Z_BIG_BOLD:-0}" \
+                   "$Z_BIG_VALUE" "$Z_BIG_UNIT" "$Z_BIG_ARROW" \
+                   "${Z_BIG_VADVW:-0}" "${Z_BIG_UADVW:-0}"
+    fi
+
+    # The 24 h low-to-high and the age, composed by the collector so that the
+    # wording, the unit and the rounding are the page's and not this script's.
+    [ -n "${Z_SUB:-}" ] && \
+        draw_text_reg "$lx" "${SUB_Y:-128}" "${SUB_SZ:-15}" "GRAY4" "$Z_SUB"
+
+    # ── Left column: the two-by-two grid ────────────────────────────────────
+    # Two columns always, so the second cell of a row lands under the second
+    # cell of the row above it.
+    local gy="${GRID_Y:-152}" gcol=0
+    for z in ${GRID_ZONES:-}; do
+        eval "val=\$Z_${z}_VALUE; unit=\$Z_${z}_UNIT; lab=\$Z_${z}_LABEL"
+        eval "arrow=\$Z_${z}_ARROW; bold=\$Z_${z}_BOLD"
+        eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"
+        cx=$(( lx + gcol * ${GRID_COL_W:-135} ))
+        draw_text_reg "$cx" "$gy" "${GRID_LAB_SZ:-12}" "GRAY7" "$lab"
+        draw_field "$cx" "$(( gy + ${GRID_LAB_SZ:-12} + 4 ))" "${GRID_VAL_SZ:-30}" \
+                   "$bold" "$val" "$unit" "$arrow" "$vadv" "$uadv"
+        gcol=$((gcol + 1))
+        if [ "$gcol" -ge 2 ]; then
+            gcol=0
+            gy=$((gy + ${GRID_ROW_H:-50}))
         fi
-
-        # Where the flow actually reaches. Tracked as it is drawn rather than
-        # worked out from the last row afterwards, so that a list truncated by
-        # the height guard above reports the bottom of what WAS drawn.
-        eval "curmax=\${ROWMAX_${row}:-2}"
-        rh=$(slot_row_height "$curmax")
-        SLOTS_BOTTOM=$((cur_y + rh))
-
-        i=$((i + 1))
     done
+
+    # ── Right column: the indoor row ────────────────────────────────────────
+    # Three fields or two, whichever survived, on one row with the first set
+    # larger. Equal columns, so two are two halves and three are three thirds —
+    # the first is bigger by TYPE, not by width, which is what keeps the row
+    # aligned whichever count it is.
+    n=0
+    for z in ${IN_ZONES:-}; do n=$((n + 1)); done
+    if [ "$n" -gt 0 ]; then
+        draw_hline "$rx" "${IN_RULE_Y:-126}" "$rw" "GRAY10"
+        draw_text_reg "$rx" "${IN_LAB_Y:-134}" "$lab_sz" "GRAY7" "$Z_GROUP_IN"
+
+        # The first field gets more of the row, not an equal share: it is set
+        # larger, so equal columns crowd it against its neighbour while leaving
+        # the small ones space they do not need. The same split the HTML page
+        # uses.
+        local w1
+        if [ "$n" -ge 3 ]; then w1=$(( rw * 40 / 100 ))
+        elif [ "$n" -eq 2 ]; then w1=$(( rw * 55 / 100 ))
+        else w1="$rw"
+        fi
+        cw=$(( n > 1 ? (rw - w1) / (n - 1) : rw ))
+        i=0
+        for z in $IN_ZONES; do
+            eval "val=\$Z_${z}_VALUE; unit=\$Z_${z}_UNIT; lab=\$Z_${z}_LABEL"
+            eval "arrow=\$Z_${z}_ARROW; bold=\$Z_${z}_BOLD"
+            eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"
+            if [ "$i" = "0" ]; then cx="$rx"; else cx=$(( rx + w1 + (i - 1) * cw )); fi
+            vsz="${IN_VAL_SZ:-28}"
+            [ "$i" = "0" ] && vsz="${IN_VAL_SZ_1:-40}"
+            draw_text_reg "$cx" "${IN_ROW_Y:-152}" "${GRID_LAB_SZ:-12}" "GRAY7" "$lab"
+            y=$(baseline_y "${IN_VAL_Y:-168}" "${IN_VAL_SZ_1:-40}" "$vsz")
+            draw_field "$cx" "$y" "$vsz" "$bold" "$val" "$unit" "$arrow" "$vadv" "$uadv"
+            i=$((i + 1))
+        done
+    fi
+
+    # ── The hairline between the columns ────────────────────────────────────
+    # Drawn last, so nothing above paints over it. SEP_W=0 in the layout file
+    # turns it off for a panel where it does not come out cleanly.
+    if [ "${SEP_W:-1}" -gt 0 ] 2>/dev/null; then
+        fbink -x "${SEP_X:-300}" -y "${TOP_Y:-20}" -C GRAY10 -p -M -q \
+              -R "${SEP_W:-1}x${SEP_H:-210}" 2>/dev/null
+    fi
+
     return 0
 }
 
 draw_all() {
-    # The slot flow, when the collector sends one. A collector running older
-    # firmware sends no SLOT_COUNT, and the fixed zones below still draw the
-    # page it knows how to describe — so the reader and the collector do not
+    # The nine places, when the collector describes them. One running older
+    # firmware sends no Z_GROUP_OUT, and the hardwired block below still draws
+    # the page it knows how to describe — so the reader and the collector do not
     # have to be updated in the same minute.
-    if draw_slots; then
+    if draw_zones; then
         draw_clock "$(date +%H:%M)"
         draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAY10"
         draw_text_reg "$LAB_CHART_X" "$LAB_CHART_Y" "$LAB_SZ" "GRAY7" "$LBL_LAST24"

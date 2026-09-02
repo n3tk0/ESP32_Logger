@@ -195,68 +195,84 @@ for i,(n,dnum) in enumerate(list(zip(S['wd'],[24,25,26,27,28,29,30]))):
     cls='wd wd-now' if i==1 else ('wd wd-we' if i>=5 else 'wd')
     wk+='<td class="%s"><div class="wd-n">%s</div><div class="wd-d">%d</div></td>'%(cls,n,dnum)
 
-# ── The slot flow ───────────────────────────────────────────────────────────
-# The page is a list of readings now, so the preview is too. These are the six
-# the firmware defaults to, packed the way kdSlotsPack() packs them: a hero
-# beside the clock on row 0, then the rest across full-width rows.
+# ── The nine places ─────────────────────────────────────────────────────────
+# The page is nine named places now, so the preview is too. These hold what the
+# firmware defaults to.
 #
-# The sizes and the twelfths are duplicated from src/web/KindleSlots.h rather
-# than parsed out of it, and that is a deliberate limit of this tool: it draws
-# what the layout SHOULD look like, and the host tests are what prove the
-# firmware packs it that way.
-# The widths are the ones kdSlotsPack() ends up with after a row shares itself
-# equally among its slots: two readings on a full-width row are six twelfths
-# each whatever their sizes, so the rows end flush and the columns line up.
-SLOTS = [
-    # label,           value,       unit,  size, units, row, bold, age
-    (S['out'],         HERO['now'], '°',   'h',  6,     0,   True,  '3 ' + ('min old' if lang == 'en' else 'мин')),
-    (('HUM' if lang == 'en' else 'ВЛАГА'), HERO['hum'], '%', 'm', 6, 1, False, ''),   # noqa: E501
-    (('PRESS' if lang == 'en' else 'НАЛЯГ'), HERO['hpa'], 'hPa', 'm', 6, 1, False, ''),
-    (S['ins'],         '21.0',      '°',   'l',  6,     2,   False, '1 ' + ('min old' if lang == 'en' else 'мин')),
-    (('HUM' if lang == 'en' else 'ВЛАГА'), '44',  '%',   'm',  6,     2,   False, ''),
-    ('AQI',            '42',        '',    'm',  12,    3,   False, ''),
-]
+# The layout is duplicated from src/web/KindleDashboard.cpp rather than parsed
+# out of it, and that is a deliberate limit of this tool: it draws what the page
+# SHOULD look like, and the host tests plus the firmware itself are what prove
+# it draws that. The STYLESHEET, on the other hand, is extracted — see the top
+# of this file — so sizes, greys and spacing cannot drift.
+LAB_HUM   = 'HUM'   if lang == 'en' else 'ВЛАГА'
+LAB_PRESS = 'PRESS' if lang == 'en' else 'НАЛЯГ'
+LAB_DEW   = 'DEW'   if lang == 'en' else 'РОСА'
+LAB_TEMP  = 'TEMP'  if lang == 'en' else 'ТЕМП'
+LAB_TO    = 'to'    if lang == 'en' else 'до'
+LAB_AGE   = '3 min old' if lang == 'en' else '3 мин'
 
-def slot_cells(row):
-    out = ''
-    for i, (lab, val, unit, sz, units, r, bold, age) in enumerate(SLOTS):
-        if r != row:
-            continue
-        # Only the hero captions itself on a line of its own; the rest set the
-        # label inline with the value, which is what appendSlotRows() does and
-        # is what keeps a row one line tall. The badge is the exception — it is
-        # floated, so it needs a line to float within.
-        badge = battery_badge() if (WARN and i == 0) else ''
-        own = (sz == 'h') or bool(badge)
-        out += ('<td class="slot sl-%s" width="%d%%">' % (sz, (units * 100 + 6) // 12) +
-                ('<div class="lab">' + lab + badge + '</div>' if own else '') +
-                '<div class="val' + (' val-b' if bold else '') + '">' +
-                ('' if own else '<span class="lab-i">' + lab + '</span> ') + val +
-                (unit_span(unit) if unit else '') +
-                ('<span class="age"> &middot; ' + age + '</span>' if age else '') +
-                '</div></td>')
-    return out
+# key: (caption, value, unit, tendency arrow)
+GRID   = [(LAB_PRESS, HERO['hpa'], 'hPa', '↘'), (LAB_DEW, '3.1', '°', '')]
+INDOOR = [(LAB_TEMP, '21.0', '°', ''), (LAB_HUM, '44', '%', ''), ('AQI', '42', '', '')]
 
 def unit_span(unit):
     """Degrees and per-cent set tight against the number; everything else after
-    a space. The same rule appendSlotRows() applies."""
+    a space. The same rule appendValue() applies."""
     if unit == '°':
         return '<span class="unit unit-d">°</span>'
     if unit == '%':
         return '<span class="unit">%</span>'
     return '<span class="unit"> ' + unit + '</span>'
 
-def slot_row(row):
-    cells = slot_cells(row)
-    return ('<table class="slots"><tr>' + cells + '</tr></table>') if cells else ''
+def value(val, unit, arrow, cls, bold=False):
+    return ('<span class="' + cls + (' val-b' if bold else '') + '">' + val +
+            (unit_span(unit) if unit else '') +
+            ('<span class="tend">' + arrow + '</span>' if arrow else '') +
+            '</span>')
 
-body=('<table class="hero"><tr><td width="50%">'
- + slot_row(0) +
- '</td><td width="50%" class="sep">'
+def cell(lab, val, unit, arrow, cls):
+    return ('<div class="lab">' + lab + '</div><div class="cv">' +
+            value(val, unit, arrow, cls) + '</div>')
+
+def grid_rows():
+    out = ''
+    for i in range(0, len(GRID), 2):
+        out += '<table class="grid"><tr><td>' + cell(*GRID[i], 'gv') + '</td><td>'
+        if i + 1 < len(GRID):
+            out += cell(*GRID[i + 1], 'gv')
+        out += '</td></tr></table>'
+    return out
+
+def indoor_row():
+    if not INDOOR:
+        return ''
+    n = len(INDOOR)
+    # The first field gets more of the row because it is set larger — the same
+    # split appendTopBlock() applies.
+    first = 40 if n >= 3 else (55 if n == 2 else 100)
+    tds = ''
+    for i, (lab, val, unit, arrow) in enumerate(INDOOR):
+        w = first if i == 0 else (100 - first) // (n - 1)
+        tds += ('<td width="%d%%">' % w +
+                cell(lab, val, unit, arrow, 'iv iv-1' if i == 0 else 'iv') + '</td>')
+    return ('<div class="inrule"></div><div class="lab">' + S['ins'] + '</div>'
+            '<table class="inrow"><tr>' + tds + '</tr></table>')
+
+body=('<table class="top"><tr><td class="col-l" width="50%">'
+ '<div class="lab">' + S['out'] + (battery_badge() if WARN else '') + '</div>'
+ '<div class="head">'
+ + value(HERO['now'], '°', '', 'v1', True)
+ + '<span class="slash">/</span>'
+ + value(HERO['hum'], '%', '', 'v2')
+ + '</div>'
+ '<div class="sub">-2.4 ' + LAB_TO + ' 15.3&deg;<span class="dim">&nbsp; &middot; &nbsp;'
+ + LAB_AGE + '</span></div>'
+ + grid_rows()
+ + '</td><td class="col-r sep" width="50%">'
  '<div class="clock">17:40</div>'
- +('<div class="clock-d">25 %s</div>'%S['mon'] if CLOCK=='dated' else '')+
- '</td></tr></table>'
- + slot_row(1) + slot_row(2) + slot_row(3)
+ +('<div class="clock-d">25 %s</div>'%S['mon'] if CLOCK=='dated' else '')
+ + indoor_row()
+ + '</td></tr></table>'
  + '<div class="rule"></div><div class="sec">'+S['h24']+'</div>'
  + '\n'.join(g) +
  '<table class="key"><tr><td>'

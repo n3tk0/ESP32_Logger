@@ -1,39 +1,60 @@
 // ============================================================================
 // src/web/KindleSlots.h — what the e-ink dashboard shows, and where
 //
-// The page used to be six hardwired readings: the outdoor sensor's
-// temperature, humidity and pressure, and the indoor sensor's temperature,
-// humidity and AQI. That is a fine dashboard for exactly one hardware
-// configuration. This firmware has twenty sensor plugins between them
-// producing twenty-nine distinct metrics, and the page could reach six.
-//
-// The cost was not only the metrics it could not show. It was the ones it
+// The page began as six hardwired readings: the outdoor temperature, humidity
+// and pressure, and the indoor temperature, humidity and AQI. That is a fine
+// dashboard for exactly one hardware configuration, and this firmware has
+// twenty sensor plugins between them producing twenty-nine distinct metrics.
+// The cost was not only the metrics it could not show — it was the ones it
 // insisted on: a BMP280 outdoors measures no humidity, so the humidity row
-// rendered a dash forever in a space nothing could use, and an SDS011 on the
-// balcony had nowhere at all to put PM2.5.
+// rendered a dash forever in a space nothing could use.
 //
-// So the layout is a LIST rather than a shape. Each slot names a sensor, a
-// metric and a size; the renderers walk the list in order and pack it into
-// rows. Adding a reading is adding a slot, and a slot whose sensor is not
-// reporting simply is not drawn — the row closes up behind it.
+// The fix went too far the other way for a while. The page became a free list
+// of readings that packed themselves into rows, which could show anything and
+// therefore had no shape: the reader chose the order and the sizes, and got a
+// different page every time a sensor went quiet.
 //
-// SIZE AND ORDER, NOT X AND Y
-// ---------------------------
-// A slot does not carry coordinates, and that is deliberate rather than a
-// simplification. The dashboard is rendered at 600x800 on a Kindle 7 and at
-// 1072x1448 on a Paperwhite, by two entirely different renderers — a CSS page
-// and an FBInk shell script. Pixel positions chosen for one are wrong for the
-// other, and asking the reader to place every value twice, by hand, in a
-// coordinate system they cannot see, is not flexibility. Order plus size is
-// the same freedom expressed in a form that survives both screens: the sizes
-// are the ones the layout was tuned at, and the packing keeps the margins and
-// rhythm that make an e-ink page legible at a glance.
+// SO: NAMED PLACES, NOT A FLOW. The layout is fixed and the CONTENT of each
+// place is the reader's. There are nine of them and they are always in the same
+// spot, at the same size, whether or not anything is configured into them:
 //
-// NO ARDUINO IN HERE, for the reason NodeTable.h has none: the packing, the
-// defaults and the label rules are the parts most likely to be wrong, and
+//     ┌────────────────────────────────┬──────────────────────────────┐
+//     │ «outdoor group label»          │            17:40             │
+//     │                                │ ──────────────────────────── │
+//     │   HERO / BIG                   │ «indoor group label»         │
+//     │   24 h low-to-high · age       │  IN1     IN2     IN3         │
+//     │                                │                              │
+//     │   G1        G2                 │                              │
+//     │   G3        G4                 │                              │
+//     └────────────────────────────────┴──────────────────────────────┘
+//
+// HERO and BIG share one baseline with a slash between them, under a single
+// group label, because they are usually one measurement of one parcel of air —
+// `8.4° / 71%` — and a line break between those two puts a paragraph boundary
+// through a single reading. The line under them is the 24-hour low-to-high of
+// the HERO's own metric plus how old the reading is.
+//
+// G1..G4 are a two-by-two table, caption above value. IN1..IN3 are one row
+// under the clock with the first set larger, so the indoor block has an obvious
+// first number rather than three of equal weight.
+//
+// AN EMPTY PLACE IS SKIPPED AND THE ONES AFTER IT CLOSE UP. That is the BMP280
+// case and the reason any of this exists: no humidity reading, no humidity in
+// the grid, no hole where one used to be. It is also how "three fields, or two"
+// works for the indoor row — leave IN3 unconfigured and the other two spread.
+//
+// WHAT A PLACE DOES NOT CARRY IS A SIZE OR A COORDINATE. The dashboard is
+// rendered at 600x800 on a Kindle 7 and at 1072x1448 on a Paperwhite, by two
+// entirely different renderers — a CSS page and an FBInk shell script. Pixel
+// positions chosen for one are wrong for the other, and the type scale was
+// measured on the panel and is not the reader's to get wrong. The place decides
+// how big its number is; the reader decides which number it is.
+//
+// NO ARDUINO IN HERE, for the reason NodeTable.h has none: the defaults, the
+// label rules and the closing-up are the parts most likely to be wrong, and
 // tests/host/test_kindle_slots.cpp can exercise all of them on the build host.
-// Loading and saving the list needs ArduinoJson and a filesystem, so that
-// lives in KindleSlots.cpp.
+// Loading and saving needs ArduinoJson and a filesystem, so that lives in
+// KindleSlotStore.cpp.
 // ============================================================================
 #pragma once
 
@@ -53,47 +74,65 @@
 #endif
 
 // ---------------------------------------------------------------------------
-// Sizes
+// The nine places
 // ---------------------------------------------------------------------------
-// Four, and the widths are twelfths so every combination tiles a row exactly.
-// A HERO takes the full width and always starts one; the others pack.
-enum KindleSlotSize : uint8_t {
-    KSLOT_HERO   = 0,   ///< the glance value — full width, largest type
-    KSLOT_LARGE  = 1,   ///< half a row
-    KSLOT_MEDIUM = 2,   ///< a third
-    KSLOT_SMALL  = 3,   ///< a quarter
-    KSLOT_SIZE_COUNT
+// The order is the drawing order and the storage order, so a file written by an
+// older build lines up with a newer one field for field. Appending is safe;
+// renumbering is not.
+enum KindleZone : uint8_t {
+    KZ_HERO = 0,   ///< the glance value, largest type on the page
+    KZ_BIG,        ///< beside it, after a slash, about half its size
+    KZ_G1,         ///< the two-by-two grid, in reading order
+    KZ_G2,
+    KZ_G3,
+    KZ_G4,
+    KZ_IN1,        ///< the indoor row under the clock; IN1 is the larger one
+    KZ_IN2,
+    KZ_IN3,
+    KZ_COUNT
 };
 
-/// Row width in twelfths, so LARGE+MEDIUM+SMALL cannot silently overflow.
-static const uint8_t KSLOT_ROW_UNITS = 12;
+/// How many of the grid and indoor places there are, named rather than spelled
+/// as 4 and 3 at each of the dozen sites that walk them.
+static const int KZ_GRID_COUNT   = 4;
+static const int KZ_INDOOR_COUNT = 3;
 
-/// The clock is not a reading and so is not a slot, but it does take up space:
-/// both renderers draw it in the top-right, over the first row. Half the width,
-/// which is what the page has always given it.
-///
-/// This is why kdSlotUnits() takes the row's capacity rather than returning a
-/// constant for a hero. A hero means "the largest type, alone on its row" — and
-/// on the row it shares with the clock, alone means the other half. Fixing the
-/// hero at twelve twelfths instead would have run the outdoor temperature under
-/// the clock the first time somebody put a four-digit reading there.
-static const uint8_t KSLOT_CLOCK_UNITS = 6;
-
-/// Width in twelfths. `rowUnits` is how much of the row is available — the full
-/// twelve, or less on a row that shares with the clock.
-static inline uint8_t kdSlotUnits(uint8_t size, uint8_t rowUnits = KSLOT_ROW_UNITS) {
-    if (rowUnits == 0 || rowUnits > KSLOT_ROW_UNITS) rowUnits = KSLOT_ROW_UNITS;
-    switch (size) {
-        case KSLOT_HERO:   return rowUnits;               // the whole of its row
-        case KSLOT_LARGE:  return (uint8_t)(rowUnits / 2 ? rowUnits / 2 : 1);
-        case KSLOT_MEDIUM: return (uint8_t)(rowUnits / 3 ? rowUnits / 3 : 1);
-        case KSLOT_SMALL:  return (uint8_t)(rowUnits / 4 ? rowUnits / 4 : 1);
-        default:           return (uint8_t)(rowUnits / 3 ? rowUnits / 3 : 1);
+/// The stable key each place is stored and addressed by — in the JSON file, in
+/// the API, and in the shell renderer's variable names. A NUMBER would have
+/// been shorter and would also mean that inserting a place one day silently
+/// moved everybody's configuration one place along.
+static inline const char* kdZoneKey(uint8_t z) {
+    switch (z) {
+        case KZ_HERO: return "hero";
+        case KZ_BIG:  return "big";
+        case KZ_G1:   return "g1";
+        case KZ_G2:   return "g2";
+        case KZ_G3:   return "g3";
+        case KZ_G4:   return "g4";
+        case KZ_IN1:  return "in1";
+        case KZ_IN2:  return "in2";
+        case KZ_IN3:  return "in3";
+        default:      return "";
     }
 }
 
+/// The reverse, for reading a file or a form. KZ_COUNT means "no such place",
+/// which is a value the caller must check — a key that does not resolve is a
+/// field from a future build, not something to guess at.
+static inline uint8_t kdZoneFromKey(const char* key) {
+    if (!key || !*key) return KZ_COUNT;
+    for (uint8_t z = 0; z < KZ_COUNT; z++)
+        if (strcmp(kdZoneKey(z), key) == 0) return z;
+    return KZ_COUNT;
+}
+
+/// Which of the two groups a place belongs to. The group is what carries the
+/// heading above it and, on the shell renderer, which column it is drawn in.
+static inline bool kdZoneIsIndoor(uint8_t z) { return z >= KZ_IN1 && z <= KZ_IN3; }
+static inline bool kdZoneIsGrid(uint8_t z)   { return z >= KZ_G1  && z <= KZ_G4;  }
+
 // ---------------------------------------------------------------------------
-// Per-slot options
+// Per-place options
 // ---------------------------------------------------------------------------
 constexpr uint8_t KSLOTF_BOLD     = 0x01;  ///< draw the value bold
 constexpr uint8_t KSLOTF_UNIT     = 0x02;  ///< append the reading's own unit
@@ -105,16 +144,15 @@ constexpr uint8_t KSLOTF_ALL      = 0x0F;
 static const uint8_t KSLOT_DECIMALS_AUTO = 0xFF;
 
 // ---------------------------------------------------------------------------
-// One slot
+// One place's contents
 // ---------------------------------------------------------------------------
 // The id and metric buffers match SensorReading's, so a name that fits the
 // pipeline fits here — and one that does not was already being truncated
 // upstream rather than by this.
 struct KindleSlot {
-    char    sensorId[17];   ///< "" = the slot is unused
+    char    sensorId[17];   ///< "" = nothing configured here; the place is skipped
     char    metric[17];
     char    label[17];      ///< "" = derive from the metric
-    uint8_t size;           ///< KindleSlotSize
     uint8_t decimals;       ///< KSLOT_DECIMALS_AUTO or 0..3
     uint8_t flags;          ///< KSLOTF_*
 
@@ -124,10 +162,10 @@ struct KindleSlot {
 // ---------------------------------------------------------------------------
 // What a metric is called, and how precisely it is worth showing
 // ---------------------------------------------------------------------------
-// A table rather than per-slot configuration, because "pm25" should read as
+// A table rather than per-place configuration, because "pm25" should read as
 // "PM2.5" on every dashboard ever configured and nobody should have to type
-// that. The label is still overridable — a slot named "Спалня" beats any
-// table — but the default is right often enough that most slots need nothing.
+// that. The label is still overridable — a place named "Спалня" beats any
+// table — but the default is right often enough that most places need nothing.
 struct KdMetricStyle {
     const char* metric;
     const char* label;
@@ -145,28 +183,28 @@ struct KdMetricStyle {
 
 static const KdMetricStyle KD_METRIC_STYLE[] = {
     // metric            label                    dec  display unit
-    { "temperature",   KD_T("TEMP",  "ТЕМП"),    1,   "\u00B0"   },
+    { "temperature",   KD_T("TEMP",  "ТЕМП"),    1,   "°"   },
     { "humidity",      KD_T("HUM",   "ВЛАГА"),   0,   "%"        },
     { "humidity_amb",  KD_T("HUM",   "ВЛАГА"),   0,   "%"        },
-    { "dew_point",     KD_T("DEW",   "РОСА"),    1,   "\u00B0"   },
+    { "dew_point",     KD_T("DEW",   "РОСА"),    1,   "°"   },
     { "pressure",      KD_T("PRESS", "НАЛЯГ"),   0,   nullptr    },  // re-united elsewhere
     { "aqi",           "AQI",                    0,   ""         },
-    { "co2",           "CO\u2082",               0,   "ppm"      },
-    { "eco2",          "eCO\u2082",              0,   "ppm"      },
+    { "co2",           "CO₂",               0,   "ppm"      },
+    { "eco2",          "eCO₂",              0,   "ppm"      },
     { "tvoc",          "TVOC",                   0,   "ppb"      },
-    { "pm1",           "PM1",                    0,   "\u00B5g/m\u00B3" },
-    { "pm25",          "PM2.5",                  0,   "\u00B5g/m\u00B3" },
-    { "pm4",           "PM4",                    0,   "\u00B5g/m\u00B3" },
-    { "pm10",          "PM10",                   0,   "\u00B5g/m\u00B3" },
+    { "pm1",           "PM1",                    0,   "µg/m³" },
+    { "pm25",          "PM2.5",                  0,   "µg/m³" },
+    { "pm4",           "PM4",                    0,   "µg/m³" },
+    { "pm10",          "PM10",                   0,   "µg/m³" },
     { "lux",           KD_T("LIGHT", "СВЕТЛ"),   0,   "lx"       },
     { "uva",           "UVA",                    1,   nullptr    },
     { "uvb",           "UVB",                    1,   nullptr    },
     { "rain",          KD_T("RAIN",  "ДЪЖД"),    1,   "mm"       },
     { "rain_rate",     KD_T("RAIN/h","ДЪЖД/ч"),  1,   "mm/h"     },
-    { "rain_total",    KD_T("RAIN \u03A3","ДЪЖД \u03A3"), 1, "mm" },
+    { "rain_total",    KD_T("RAIN Σ","ДЪЖД Σ"), 1, "mm" },
     { "wind",          KD_T("WIND",  "ВЯТЪР"),   1,   nullptr    },
     { "wind_speed",    KD_T("WIND",  "ВЯТЪР"),   1,   nullptr    },
-    { "wind_direction",KD_T("DIR",   "ПОСОКА"),  0,   "\u00B0"   },
+    { "wind_direction",KD_T("DIR",   "ПОСОКА"),  0,   "°"   },
     { "soil_moisture", KD_T("SOIL",  "ПОЧВА"),   0,   "%"        },
     { "flow_rate",     KD_T("FLOW",  "ДЕБИТ"),   1,   nullptr    },
     { "battery_voltage", KD_T("BATT","БАТЕРИЯ"), 2,   "V"        },
@@ -183,7 +221,7 @@ static inline const KdMetricStyle* kdMetricStyle(const char* metric) {
     return nullptr;
 }
 
-/// The label to draw for a slot: its own if set, else the metric's, else the
+/// The label to draw: the place's own if set, else the metric's, else the
 /// metric name itself — which is not pretty for something unlisted, but it is
 /// honest, and a table that quietly rendered nothing would be worse.
 static inline const char* kdSlotLabel(const KindleSlot& s) {
@@ -207,208 +245,148 @@ static inline uint8_t kdSlotDecimals(const KindleSlot& s) {
 }
 
 // ---------------------------------------------------------------------------
-// The list
+// The whole configuration
 // ---------------------------------------------------------------------------
-/// Twelve. A 600x800 panel read from across a room holds a hero, a couple of
-/// mid-sized values and two rows of small ones before it stops being glanceable
-/// — and the cap exists so a malformed file cannot make the renderers walk off
-/// the end, not to ration a scarce resource.
-struct KindleSlotList {
-    static constexpr int CAP = 12;
-
-    KindleSlot slot[CAP];
-    int        count = 0;
+/// The nine places plus the two group headings above them.
+///
+/// The headings are stored rather than compiled in because they are the one
+/// piece of text on this page that is about the reader's house and not about
+/// the data: "НАВЪН" and "ВЪТРЕ" are right for most people, "Балкон" and
+/// "Спалня" are right for the person who put the sensors there, and neither the
+/// firmware nor the metric table can know which.
+struct KindleZones {
+    KindleSlot z[KZ_COUNT];
+    char       groupOut[17];   ///< "" = the built-in heading
+    char       groupIn[17];
 
     void clear() {
-        count = 0;
-        for (int i = 0; i < CAP; i++) slot[i] = KindleSlot{};
+        for (int i = 0; i < KZ_COUNT; i++) z[i] = KindleSlot{};
+        groupOut[0] = '\0';
+        groupIn[0]  = '\0';
     }
 
-    bool add(const char* sensorId, const char* metric, const char* label,
-             uint8_t size, uint8_t decimals = KSLOT_DECIMALS_AUTO,
+    bool set(uint8_t zone, const char* sensorId, const char* metric,
+             const char* label = nullptr,
+             uint8_t decimals = KSLOT_DECIMALS_AUTO,
              uint8_t flags = KSLOTF_UNIT) {
-        if (count >= CAP || !sensorId || !metric) return false;
-        KindleSlot& s = slot[count];
+        if (zone >= KZ_COUNT || !sensorId || !metric) return false;
+        KindleSlot& s = z[zone];
         s = KindleSlot{};
         strncpy(s.sensorId, sensorId, sizeof(s.sensorId) - 1);
         strncpy(s.metric,   metric,   sizeof(s.metric)   - 1);
         if (label) strncpy(s.label, label, sizeof(s.label) - 1);
-        s.size     = size;
         s.decimals = decimals;
         s.flags    = flags;
         if (!s.used()) { s = KindleSlot{}; return false; }
-        count++;
         return true;
     }
+
+    /// How many places have something configured in them. Not the same as how
+    /// many will be DRAWN — that depends on which sensors are reporting.
+    int configured() const {
+        int n = 0;
+        for (int i = 0; i < KZ_COUNT; i++) if (z[i].used()) n++;
+        return n;
+    }
 };
+
+/// The heading above the outdoor block, and above the indoor one.
+static inline const char* kdGroupOutLabel(const KindleZones& k) {
+    return k.groupOut[0] ? k.groupOut : KD_T("OUTSIDE", "НАВЪН");
+}
+static inline const char* kdGroupInLabel(const KindleZones& k) {
+    return k.groupIn[0] ? k.groupIn : KD_T("INSIDE", "ВЪТРЕ");
+}
 
 /// Bring anything that arrived from a file or a form into range.
 ///
 /// Applied on the way IN, not at the point of use, for the reason kdSkinClamp()
-/// exists: a renderer should never have to wonder whether the size byte it was
-/// handed is one of the four it knows about.
-static inline void kdSlotsClamp(KindleSlotList& list) {
-    if (list.count < 0)             list.count = 0;
-    if (list.count > KindleSlotList::CAP) list.count = KindleSlotList::CAP;
-
-    int keep = 0;
-    for (int i = 0; i < list.count; i++) {
-        KindleSlot s = list.slot[i];
+/// exists: a renderer should never have to wonder whether the byte it was
+/// handed is one of the values it knows about.
+static inline void kdZonesClamp(KindleZones& k) {
+    for (int i = 0; i < KZ_COUNT; i++) {
+        KindleSlot& s = k.z[i];
         s.sensorId[sizeof(s.sensorId) - 1] = '\0';
         s.metric[sizeof(s.metric) - 1]     = '\0';
         s.label[sizeof(s.label) - 1]       = '\0';
-        if (!s.used()) continue;                       // drop the empty ones
-        if (s.size >= KSLOT_SIZE_COUNT) s.size = KSLOT_MEDIUM;
+        if (!s.used()) { s = KindleSlot{}; continue; }   // half-filled is empty
         if (s.decimals != KSLOT_DECIMALS_AUTO && s.decimals > 3) s.decimals = 3;
         s.flags &= KSLOTF_ALL;
-        list.slot[keep++] = s;
     }
-    list.count = keep;
-    for (int i = keep; i < KindleSlotList::CAP; i++) list.slot[i] = KindleSlot{};
+    k.groupOut[sizeof(k.groupOut) - 1] = '\0';
+    k.groupIn[sizeof(k.groupIn)   - 1] = '\0';
 }
 
 // ---------------------------------------------------------------------------
-// Packing the list into rows
+// Closing up behind an empty place
 // ---------------------------------------------------------------------------
-/// Where one slot ends up: which row, and how many twelfths across it starts.
-struct KdSlotPlacement {
-    int     index;      ///< into KindleSlotList::slot
-    uint8_t row;
-    uint8_t col;        ///< 0..11, in twelfths from the left
-    uint8_t units;      ///< width in twelfths
-};
-
-/// Greedy left-to-right packing, one pass, in list order.
+/// Collect the places of one group that will actually be drawn, in order.
 ///
-/// ORDER IS PRESERVED EXACTLY — a slot never jumps ahead of another to fill a
-/// gap. A best-fit packer would use the space better and would also mean the
-/// reader's carefully chosen order rearranging itself whenever a sensor went
-/// quiet, which on a glanceable display is worse than an inch of white space.
+/// `visible[KZ_COUNT]` says which places have a reading to show; pass nullptr to
+/// treat everything configured as visible, which is what the settings preview
+/// wants. Writes zone indices into `out` and returns how many.
 ///
-/// `visible` says which slots have a reading to show; a slot that has none is
-/// skipped entirely and the row closes up behind it. That is the BMP280 case:
-/// no humidity reading, no humidity slot, no gap where one used to be.
-///
-/// `firstRowUnits` is how much of row 0 the flow may use. Pass
-/// KSLOT_ROW_UNITS - KSLOT_CLOCK_UNITS when the clock shares that row, which
-/// on this dashboard it always does.
-///
-/// Returns how many placements were written, at most `maxOut`.
-static inline int kdSlotsPack(const KindleSlotList& list, const bool* visible,
-                              KdSlotPlacement* out, int maxOut,
-                              uint8_t firstRowUnits = KSLOT_ROW_UNITS) {
-    if (!out || maxOut <= 0) return 0;
-    if (firstRowUnits == 0 || firstRowUnits > KSLOT_ROW_UNITS)
-        firstRowUnits = KSLOT_ROW_UNITS;
-
-    int     n   = 0;
-    uint8_t row = 0;
-    uint8_t col = 0;
-
-    for (int i = 0; i < list.count && n < maxOut; i++) {
-        if (!list.slot[i].used()) continue;
-        if (visible && !visible[i]) continue;
-
-        uint8_t cap   = (row == 0) ? firstRowUnits : KSLOT_ROW_UNITS;
-        uint8_t units = kdSlotUnits(list.slot[i].size, cap);
-
-        // A hero owns its row. Starting one mid-row would put the glance value
-        // beside something small and destroy the size hierarchy that makes it
-        // the glance value.
-        const bool needsOwnRow = (list.slot[i].size == KSLOT_HERO);
-        if ((needsOwnRow && col != 0) || (col + units > cap)) {
-            row++;
-            col = 0;
-            // The next row may be wider, so the width has to be recomputed
-            // against it — a hero that wrapped off the clock's row takes the
-            // whole of the one it lands on, not the half it would have had.
-            cap   = KSLOT_ROW_UNITS;
-            units = kdSlotUnits(list.slot[i].size, cap);
-        }
-
-        out[n].index = i;
-        out[n].row   = row;
-        out[n].col   = col;
-        out[n].units = units;
-        n++;
-
-        col += units;
-        if (col >= cap || needsOwnRow) { row++; col = 0; }
-    }
-
-    // ── Even columns ────────────────────────────────────────────────────────
-    // THE SIZES DECIDE WHAT FITS ON A ROW. THE ROW THEN SHARES ITSELF EQUALLY.
-    //
-    // Two things were wrong with using the nominal widths as the final ones. A
-    // row of two mediums came to eight twelfths and left the last third white,
-    // so every other row stopped short of the right margin — on a page whose
-    // whole job is to be read at a glance that reads as a missing value rather
-    // than as space. And a row of a large and a medium came to six and four,
-    // which is a different column boundary from the row above it, so the
-    // numbers down a column started at a different x on every line. Between
-    // them that is most of what makes a page look scattered.
-    //
-    // Sharing the row equally fixes both: a row always ends flush, and two rows
-    // with the same number of readings put their columns in the same places.
-    // Nothing is lost by it, because width was never what expressed the
-    // hierarchy here — the type size is, and that still comes from the slot's
-    // own size. Width only ever said how much of the row to reserve, and the
-    // wrapping above has already used it for that.
-    //
-    // The remainder goes to the last slot rather than being spread by rounding:
-    // one column a twelfth wider than its neighbour is invisible, a row that
-    // stops a twelfth short is not.
-    for (int i = 0; i < n; ) {
-        int j = i;
-        while (j < n && out[j].row == out[i].row) j++;
-
-        const int inRow = j - i;
-        const int cap   = (out[i].row == 0) ? firstRowUnits : KSLOT_ROW_UNITS;
-        // Never zero: every slot is at least one twelfth and a row never holds
-        // more than it has room for, so inRow <= cap.
-        const int each  = cap / inRow;
-
-        int c = 0;
-        for (int k = i; k < j; k++) {
-            out[k].col   = (uint8_t)c;
-            out[k].units = (uint8_t)((k == j - 1) ? (cap - c) : each);
-            c += out[k].units;
-        }
-        i = j;
+/// THE ORDER IS NEVER CHANGED. A best-fit arrangement would use the space
+/// better and would also mean the reader's chosen order rearranging itself
+/// whenever a sensor went quiet, which on a glanceable display is worse than a
+/// gap. What happens instead is that the survivors move UP into the places in
+/// front of them: three configured grid cells with the second one quiet are
+/// drawn top-left, top-right, bottom-left.
+static inline int kdZonesUsed(const KindleZones& k, const bool* visible,
+                              uint8_t first, int count, uint8_t* out) {
+    if (!out || count <= 0) return 0;
+    int n = 0;
+    for (int i = 0; i < count; i++) {
+        const uint8_t z = (uint8_t)(first + i);
+        if (z >= KZ_COUNT) break;
+        if (!k.z[z].used()) continue;
+        if (visible && !visible[z]) continue;
+        out[n++] = z;
     }
     return n;
 }
 
-/// How many rows a packing occupies — the renderers need it to know how much
-/// vertical space to reserve before the chart.
-static inline int kdSlotsRowCount(const KdSlotPlacement* p, int n) {
-    if (!p || n <= 0) return 0;
-    return (int)p[n - 1].row + 1;
+/// The grid's survivors, in reading order. At most KZ_GRID_COUNT.
+static inline int kdGridUsed(const KindleZones& k, const bool* visible, uint8_t* out) {
+    return kdZonesUsed(k, visible, KZ_G1, KZ_GRID_COUNT, out);
+}
+
+/// The indoor row's survivors. At most KZ_INDOOR_COUNT — and this is what makes
+/// "three fields, or two" a setting rather than a mode: leave IN3 empty and two
+/// come back.
+static inline int kdIndoorUsed(const KindleZones& k, const bool* visible, uint8_t* out) {
+    return kdZonesUsed(k, visible, KZ_IN1, KZ_INDOOR_COUNT, out);
 }
 
 // ---------------------------------------------------------------------------
-// The default list
+// The default configuration
 // ---------------------------------------------------------------------------
-/// EXACTLY WHAT THE DASHBOARD DREW BEFORE ANY OF THIS EXISTED.
+/// WHAT THE DASHBOARD DREW BEFORE ANY OF THIS EXISTED, in the places that now
+/// hold it. A device upgrading into this has been looking at the same page for
+/// months and should not find it rearranged because the firmware learned it
+/// could be: outdoor temperature and humidity on the headline, pressure and dew
+/// point in the grid, the indoor three under the clock.
 ///
-/// A device upgrading into slots has been looking at the same page for months,
-/// and it must not change appearance because the firmware learned it could be
-/// rearranged. Same six readings, same order, same emphasis — the difference
-/// is only that they are now a list somebody can edit.
-static inline void kdSlotsDefault(KindleSlotList& list,
+/// The grid's third and fourth places are left EMPTY rather than filled with
+/// something plausible. A dashboard that arrives showing a metric the hardware
+/// does not have would be showing a dash, which is the fault this whole design
+/// was built to remove; an empty place is an invitation to put something in it.
+static inline void kdZonesDefault(KindleZones& k,
                                   const char* outdoorId, const char* indoorId) {
-    list.clear();
+    k.clear();
     if (!outdoorId || !*outdoorId) outdoorId = "outdoor";
     if (!indoorId  || !*indoorId)  indoorId  = "indoor";
 
-    list.add(outdoorId, "temperature", KD_T("OUTSIDE", "НАВЪН"), KSLOT_HERO,
-             KSLOT_DECIMALS_AUTO, KSLOTF_BOLD | KSLOTF_UNIT | KSLOTF_AGE);
-    list.add(outdoorId, "humidity",    nullptr, KSLOT_MEDIUM);
-    list.add(outdoorId, "pressure",    nullptr, KSLOT_MEDIUM,
-             KSLOT_DECIMALS_AUTO, KSLOTF_UNIT | KSLOTF_TREND);
+    k.set(KZ_HERO, outdoorId, "temperature", nullptr,
+          KSLOT_DECIMALS_AUTO, KSLOTF_BOLD | KSLOTF_UNIT | KSLOTF_AGE);
+    k.set(KZ_BIG,  outdoorId, "humidity");
 
-    list.add(indoorId,  "temperature", KD_T("INSIDE", "ВЪТРЕ"), KSLOT_LARGE,
-             KSLOT_DECIMALS_AUTO, KSLOTF_UNIT | KSLOTF_AGE);
-    list.add(indoorId,  "humidity",    nullptr, KSLOT_MEDIUM);
-    list.add(indoorId,  "aqi",         nullptr, KSLOT_MEDIUM);
+    k.set(KZ_G1,   outdoorId, "pressure",  nullptr,
+          KSLOT_DECIMALS_AUTO, KSLOTF_UNIT | KSLOTF_TREND);
+    k.set(KZ_G2,   outdoorId, "dew_point");
+
+    k.set(KZ_IN1,  indoorId,  "temperature", nullptr,
+          KSLOT_DECIMALS_AUTO, KSLOTF_UNIT | KSLOTF_AGE);
+    k.set(KZ_IN2,  indoorId,  "humidity");
+    k.set(KZ_IN3,  indoorId,  "aqi");
 }

@@ -15,11 +15,11 @@
 
 // Must match the KBOLD_* constants in src/core/Config.h.
 var KD_BOLD = [
-  [0x0001, "Hero reading"],
-  [0x0002, "Large readings"],
-  [0x0004, "Medium readings"],
+  [0x0001, "Headline"],
+  [0x0002, "Beside the headline"],
+  [0x0004, "The grid"],
   [0x0008, "Clock"],
-  [0x0010, "Small readings"],
+  [0x0010, "Indoor row"],
   [0x0020, "Units"],
   [0x0040, "Forecast"],
   [0x0080, "Week strip"],
@@ -28,11 +28,11 @@ var KD_BOLD = [
 
 // Must match the KSHOW_* constants in src/core/Config.h.
 var KD_SHOW = [
-  [0x0001, "Outside humidity"],
-  [0x0002, "Pressure"],
+  [0x0001, "The value beside the headline"],
+  [0x0002, "The two-by-two grid"],
   [0x0004, "Pressure tendency"],
   [0x0008, "24-hour range"],
-  [0x0010, "Inside block"],
+  [0x0010, "Indoor block"],
   [0x0020, "Trend chart"],
   [0x0040, "Week strip"],
   [0x0080, "Low-battery badge"]
@@ -231,23 +231,43 @@ function kindleDefaults() {
 
 
 // ============================================================================
-// The slot editor
+// The layout editor
 // ============================================================================
-// The dashboard's readings, as an ordered list. The page holds the working
-// copy; nothing is sent until Save, so reordering four rows is one request
-// rather than four.
+// The dashboard is nine named PLACES and the reader chooses what goes in each.
+// This draws them in the shape the page draws them — the headline and its grid
+// on the left, the indoor row on the right — rather than as a flat list, so
+// that "where will this land" is answered by looking at the form.
+//
+// The page holds a working copy and nothing is sent until Save, so filling in
+// four places is one request rather than four, and the device can never end up
+// holding half an edit.
 //
 // The sensor and metric dropdowns come from GET /api/sensors, which already
 // reports the metrics each sensor publishes. That is what makes the editor
 // honest about hardware: a BMP280 offers temperature and pressure and no
 // humidity, because that is what it measures, and a BME688 offers AQI because
 // it has one.
-var kdSlots   = [];     // the working copy
-var kdSizes   = [];     // [{id, name, units}] from the firmware's own enum
+var kdZones   = {};     // the working copy, keyed by place
+var kdOrder   = [];     // [{key, group, role}] from the firmware's own enum
 var kdSensors = [];     // [{id, name, metrics: []}]
-var kdCap     = 12;
+var kdGroups  = { out: "", in: "" };        // the reader's headings, "" = built-in
+var kdGroupPh = { out: "OUTSIDE", in: "INSIDE" };   // what "" renders as
 var kdFlags   = { bold: 1, unit: 2, age: 4, trend: 8 };
 var kdAutoDec = 255;
+
+// What each place is FOR, in the reader's terms. The firmware sends the keys
+// and the roles; the wording is the form's own business.
+var KD_ZONE_TEXT = {
+  hero: ["Headline", "The largest number on the page."],
+  big:  ["Beside it", "Shares the headline's baseline, after a slash. Usually the humidity of the same air."],
+  g1:   ["Grid, top left", ""],
+  g2:   ["Grid, top right", ""],
+  g3:   ["Grid, bottom left", ""],
+  g4:   ["Grid, bottom right", ""],
+  in1:  ["Indoor, first", "Set larger than the other two."],
+  in2:  ["Indoor, second", ""],
+  in3:  ["Indoor, third", "Leave empty for a row of two."]
+};
 
 function kdSlotMsg(text, kind) {
   showMsg("kd-slot-msg",
@@ -262,152 +282,213 @@ function kdMetricsFor(sensorId) {
   return [];
 }
 
-function kdRenderSlots() {
-  var box = document.getElementById("kd-slots");
-  var count = document.getElementById("kd-slot-count");
-  if (!box) return;
-
-  if (count) {
-    count.textContent = kdSlots.length + " / " + kdCap;
-    count.className = "badge " + (kdSlots.length >= kdCap ? "warn" : "dim");
+function kdZone(key) {
+  if (!kdZones[key]) {
+    kdZones[key] = { sensor: "", metric: "", label: "", shown: "",
+                     flags: kdFlags.unit, decimals: kdAutoDec };
   }
-
-  if (!kdSlots.length) {
-    box.innerHTML = "<p class='hint'>No readings configured — the e-ink page " +
-                    "will show the clock and the chart only.</p>";
-    return;
-  }
-
-  var html = "";
-  for (var i = 0; i < kdSlots.length; i++) {
-    var s = kdSlots[i];
-
-    // The sensor this slot names may not be among the configured ones — a node
-    // that has been removed, or a list restored from another device. Kept as an
-    // option rather than silently reassigned: dropping it would rewrite the
-    // reader's layout on their behalf just because a sensor was offline.
-    var sensorOpts = "";
-    var known = false;
-    for (var j = 0; j < kdSensors.length; j++) {
-      var sel = kdSensors[j].id === s.sensor;
-      if (sel) known = true;
-      sensorOpts += "<option value='" + esc(kdSensors[j].id) + "'" +
-                    (sel ? " selected" : "") + ">" + esc(kdSensors[j].id) + "</option>";
-    }
-    if (!known && s.sensor) {
-      sensorOpts = "<option value='" + esc(s.sensor) + "' selected>" +
-                   esc(s.sensor) + " (not configured)</option>" + sensorOpts;
-    }
-
-    var metrics = kdMetricsFor(s.sensor);
-    var metricOpts = "";
-    var mKnown = false;
-    for (var m = 0; m < metrics.length; m++) {
-      var msel = metrics[m] === s.metric;
-      if (msel) mKnown = true;
-      metricOpts += "<option value='" + esc(metrics[m]) + "'" +
-                    (msel ? " selected" : "") + ">" + esc(metrics[m]) + "</option>";
-    }
-    if (!mKnown && s.metric) {
-      metricOpts = "<option value='" + esc(s.metric) + "' selected>" +
-                   esc(s.metric) + " (not reported)</option>" + metricOpts;
-    }
-
-    var sizeOpts = "";
-    for (var z = 0; z < kdSizes.length; z++) {
-      sizeOpts += "<option value='" + kdSizes[z].id + "'" +
-                  (kdSizes[z].id === s.size ? " selected" : "") + ">" +
-                  esc(kdSizes[z].name) + "</option>";
-    }
-
-    html +=
-      "<div class='card' style='margin-bottom:8px'><div class='card-body'>" +
-        "<div style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'>" +
-          "<div style='flex:1;min-width:130px'>" +
-            "<label class='field-label'>Sensor</label>" +
-            "<select class='input' data-change='kindleSlotEdit' " +
-              "data-args='[" + i + ",\"sensor\"]'>" + sensorOpts + "</select></div>" +
-          "<div style='flex:1;min-width:130px'>" +
-            "<label class='field-label'>Reading</label>" +
-            "<select class='input' data-change='kindleSlotEdit' " +
-              "data-args='[" + i + ",\"metric\"]'>" + metricOpts + "</select></div>" +
-          "<div style='flex:0 0 110px'>" +
-            "<label class='field-label'>Size</label>" +
-            "<select class='input' data-change='kindleSlotEdit' " +
-              "data-args='[" + i + ",\"size\"]'>" + sizeOpts + "</select></div>" +
-          "<div style='flex:1;min-width:110px'>" +
-            "<label class='field-label'>Label</label>" +
-            "<input class='input' maxlength='16' placeholder='" + esc(s.shown || "") + "' " +
-              "value='" + esc(s.label || "") + "' data-change='kindleSlotEdit' " +
-              "data-args='[" + i + ",\"label\"]'></div>" +
-        "</div>" +
-        "<div style='display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;align-items:center'>" +
-          kdFlagBox(i, kdFlags.unit,  "unit",  "Show the unit") +
-          kdFlagBox(i, kdFlags.bold,  "bold",  "Bold") +
-          kdFlagBox(i, kdFlags.age,   "age",   "Show the age when stale") +
-          "<span style='flex:1'></span>" +
-          "<button class='btn' data-click='kindleSlotMove' data-args='[" + i + ",-1]'>&uarr;</button>" +
-          "<button class='btn' data-click='kindleSlotMove' data-args='[" + i + ",1]'>&darr;</button>" +
-          "<button class='btn warn' data-click='kindleSlotRemove' data-args='[" + i + "]'>" +
-            "<span data-icon='trash'></span></button>" +
-        "</div>" +
-      "</div></div>";
-  }
-  box.innerHTML = html;
-  if (window.Icons && Icons.swap) Icons.swap(box);
+  return kdZones[key];
 }
 
-function kdFlagBox(i, bit, name, label) {
-  var on = (kdSlots[i].flags & bit) !== 0;
+// One place's card: which sensor, which reading, what to call it, and the
+// switches that decide how it is drawn.
+function kdZoneCard(key) {
+  var s = kdZone(key);
+  var text = KD_ZONE_TEXT[key] || [key, ""];
+
+  // The sensor this place names may not be among the configured ones — a node
+  // that has been removed, or a layout restored from another device. Kept as an
+  // option rather than silently reassigned: dropping it would rewrite the
+  // reader's page on their behalf just because a sensor was offline.
+  var sensorOpts = "<option value=''" + (s.sensor ? "" : " selected") +
+                   ">&mdash; empty &mdash;</option>";
+  var known = false;
+  for (var j = 0; j < kdSensors.length; j++) {
+    var sel = kdSensors[j].id === s.sensor;
+    if (sel) known = true;
+    sensorOpts += "<option value='" + esc(kdSensors[j].id) + "'" +
+                  (sel ? " selected" : "") + ">" + esc(kdSensors[j].id) + "</option>";
+  }
+  if (!known && s.sensor) {
+    sensorOpts += "<option value='" + esc(s.sensor) + "' selected>" +
+                  esc(s.sensor) + " (not configured)</option>";
+  }
+
+  var metrics = kdMetricsFor(s.sensor);
+  var metricOpts = "";
+  var mKnown = false;
+  for (var m = 0; m < metrics.length; m++) {
+    var msel = metrics[m] === s.metric;
+    if (msel) mKnown = true;
+    metricOpts += "<option value='" + esc(metrics[m]) + "'" +
+                  (msel ? " selected" : "") + ">" + esc(metrics[m]) + "</option>";
+  }
+  if (!mKnown && s.metric) {
+    metricOpts = "<option value='" + esc(s.metric) + "' selected>" +
+                 esc(s.metric) + " (not reported)</option>" + metricOpts;
+  }
+
+  var empty = !s.sensor || !s.metric;
+
+  return "<div class='card' style='margin-bottom:8px'><div class='card-body'>" +
+    "<div style='display:flex;gap:6px;align-items:baseline;margin-bottom:6px'>" +
+      "<strong style='font-size:.9rem'>" + esc(text[0]) + "</strong>" +
+      (text[1] ? "<span class='hint' style='margin:0'>" + esc(text[1]) + "</span>" : "") +
+      (empty ? "<span class='badge dim' style='margin-left:auto'>empty</span>" : "") +
+    "</div>" +
+    "<div style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'>" +
+      "<div style='flex:1;min-width:130px'>" +
+        "<label class='field-label'>Sensor</label>" +
+        "<select class='input' data-change='kindleZoneEdit' " +
+          "data-args='[\"" + key + "\",\"sensor\"]'>" + sensorOpts + "</select></div>" +
+      "<div style='flex:1;min-width:130px'>" +
+        "<label class='field-label'>Reading</label>" +
+        "<select class='input' data-change='kindleZoneEdit' " +
+          "data-args='[\"" + key + "\",\"metric\"]'>" + metricOpts + "</select></div>" +
+      "<div style='flex:1;min-width:110px'>" +
+        "<label class='field-label'>Caption</label>" +
+        "<input class='input' maxlength='16' placeholder='" + esc(s.shown || "") + "' " +
+          "value='" + esc(s.label || "") + "' data-change='kindleZoneEdit' " +
+          "data-args='[\"" + key + "\",\"label\"]'></div>" +
+      "<div style='flex:0 0 120px'>" +
+        "<label class='field-label'>Decimals</label>" +
+        kdDecimalSelect(key, s.decimals) + "</div>" +
+    "</div>" +
+    "<div style='display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;align-items:center'>" +
+      kdFlagBox(key, kdFlags.unit,  "Show the unit") +
+      kdFlagBox(key, kdFlags.bold,  "Bold") +
+      kdFlagBox(key, kdFlags.age,   "Show the age when stale") +
+      kdFlagBox(key, kdFlags.trend, "Tendency arrow (pressure)") +
+      "<span style='flex:1'></span>" +
+      "<button class='btn warn' data-click='kindleZoneClear' data-args='[\"" + key + "\"]'>" +
+        "<span data-icon='trash'></span> Empty it</button>" +
+    "</div>" +
+  "</div></div>";
+}
+
+function kdDecimalSelect(key, dec) {
+  var html = "<select class='input' data-change='kindleZoneEdit' " +
+             "data-args='[\"" + key + "\",\"decimals\"]'>" +
+             "<option value='" + kdAutoDec + "'" +
+             (dec === kdAutoDec ? " selected" : "") + ">Automatic</option>";
+  for (var d = 0; d <= 3; d++) {
+    html += "<option value='" + d + "'" + (dec === d ? " selected" : "") + ">" +
+            d + "</option>";
+  }
+  return html + "</select>";
+}
+
+function kdFlagBox(key, bit, label) {
+  var on = (kdZone(key).flags & bit) !== 0;
   return "<label style='display:flex;gap:5px;align-items:center;font-size:.85rem'>" +
            "<input type='checkbox' style='width:auto'" + (on ? " checked" : "") +
-           " data-change='kindleSlotFlag' data-args='[" + i + "," + bit + "]'>" +
+           " data-change='kindleZoneFlag' data-args='[\"" + key + "\"," + bit + "]'>" +
            esc(label) + "</label>";
 }
 
-function kindleSlotEdit(i, field, ev) {
-  if (!kdSlots[i]) return;
-  var v = ev && ev.target ? ev.target.value : "";
-  if (field === "size") kdSlots[i].size = parseInt(v, 10) || 0;
-  else                  kdSlots[i][field] = v;
+// A heading, and the places under it. Two of these make the whole editor.
+function kdGroupBlock(which, title, note, keys) {
+  var html = "<div class='card' style='margin-bottom:10px'><div class='card-head'>" +
+      "<div class='card-title'>" + esc(title) + "</div></div><div class='card-body'>" +
+      "<p class='hint' style='margin-top:0'>" + esc(note) + "</p>" +
+      "<div class='field' style='max-width:280px'>" +
+        "<label class='field-label'>Heading on the page</label>" +
+        "<input class='input' maxlength='16' placeholder='" + esc(kdGroupPh[which]) +
+          "' value='" + esc(kdGroups[which] || "") + "' data-change='kindleGroupEdit' " +
+          "data-args='[\"" + which + "\"]'>" +
+        "<p class='hint'>Leave blank for the built-in wording.</p>" +
+      "</div>";
+  for (var i = 0; i < keys.length; i++) html += kdZoneCard(keys[i]);
+  return html + "</div></div>";
+}
+
+function kdRenderSlots() {
+  var box = document.getElementById("kd-slots");
+  if (!box) return;
+
+  // Grouped the way the page groups them, and in the firmware's own order, so
+  // a place added to the enum one day appears here without a second edit.
+  var outKeys = [], inKeys = [];
+  for (var i = 0; i < kdOrder.length; i++) {
+    (kdOrder[i].group === "indoor" ? inKeys : outKeys).push(kdOrder[i].key);
+  }
+
+  var filled = 0;
+  for (var k in kdZones) {
+    if (kdZones.hasOwnProperty(k) && kdZones[k].sensor && kdZones[k].metric) filled++;
+  }
+  var count = document.getElementById("kd-slot-count");
+  if (count) {
+    count.textContent = filled + " / " + kdOrder.length + " filled";
+    count.className = "badge dim";
+  }
+
+  box.innerHTML =
+    kdGroupBlock("out", "The left column",
+                 "The headline, the value beside it, and the two-by-two grid " +
+                 "under the 24-hour line. An empty place is skipped and the " +
+                 "grid closes up behind it.", outKeys) +
+    kdGroupBlock("in", "The right column, under the clock",
+                 "One row of up to three. The first is set larger. Leave the " +
+                 "third empty for a row of two.", inKeys);
+
+  if (window.Icons && Icons.swap) Icons.swap(box);
+}
+
+// THE ELEMENT, NOT THE EVENT.
+//
+// core.js's dispatcher calls a handler as `fn.apply(el, args)` when the tag
+// carries data-args, and as `fn.call(el, ev)` when it does not — so a handler
+// that takes arguments never receives the event at all. The version of this
+// editor that read `ev.target.value` was therefore reading undefined and
+// storing "" every time somebody chose a sensor from the dropdown: the control
+// looked like it worked and the value it set was empty.
+//
+// `this` is the element in both cases, which is what makes it the reliable one
+// to read. The event is kept as a fallback for a caller that passes one.
+function kdEventValue(self, ev, prop) {
+  var el = (self && self.nodeType === 1) ? self : (ev && ev.target);
+  return el ? el[prop] : undefined;
+}
+
+function kindleZoneEdit(key, field, ev) {
+  var s = kdZone(key);
+  var v = kdEventValue(this, ev, "value");
+  if (v === undefined) return;
+  if (field === "decimals") s.decimals = parseInt(v, 10);
+  else                      s[field] = v;
 
   // Changing the sensor can invalidate the metric — a BME688's "aqi" means
   // nothing on a BMP280. Reset to the new sensor's first reading rather than
   // leaving a pairing that will never resolve.
-  if (field === "sensor") {
+  if (field !== "sensor") return;
+  if (!v) { s.metric = ""; }
+  else {
     var ms = kdMetricsFor(v);
-    if (ms.indexOf(kdSlots[i].metric) < 0) kdSlots[i].metric = ms.length ? ms[0] : "";
+    if (ms.indexOf(s.metric) < 0) s.metric = ms.length ? ms[0] : "";
   }
+  // ONLY the sensor redraws. The dispatcher listens on "input" as well as
+  // "change", so redrawing on a caption edit would rebuild the form on every
+  // keystroke and take the reader's cursor with it.
   kdRenderSlots();
 }
 
-function kindleSlotFlag(i, bit, ev) {
-  if (!kdSlots[i]) return;
-  var on = ev && ev.target ? ev.target.checked : false;
-  kdSlots[i].flags = on ? (kdSlots[i].flags | bit) : (kdSlots[i].flags & ~bit);
+function kindleZoneFlag(key, bit, ev) {
+  var s = kdZone(key);
+  var on = kdEventValue(this, ev, "checked");
+  if (on === undefined) return;
+  s.flags = on ? (s.flags | bit) : (s.flags & ~bit);
 }
 
-function kindleSlotMove(i, dir) {
-  var j = i + dir;
-  if (j < 0 || j >= kdSlots.length) return;
-  var t = kdSlots[i]; kdSlots[i] = kdSlots[j]; kdSlots[j] = t;
+function kindleZoneClear(key) {
+  kdZones[key] = { sensor: "", metric: "", label: "", shown: "",
+                   flags: kdFlags.unit, decimals: kdAutoDec };
   kdRenderSlots();
 }
 
-function kindleSlotRemove(i) {
-  kdSlots.splice(i, 1);
-  kdRenderSlots();
-}
-
-function kindleSlotAdd() {
-  if (kdSlots.length >= kdCap) { kdSlotMsg("That is the most the page holds.", "err"); return; }
-  var first = kdSensors.length ? kdSensors[0] : null;
-  kdSlots.push({
-    sensor: first ? first.id : "",
-    metric: first && first.metrics && first.metrics.length ? first.metrics[0] : "",
-    label: "", size: 3, flags: kdFlags.unit, decimals: kdAutoDec
-  });
-  kdRenderSlots();
+function kindleGroupEdit(which, ev) {
+  var v = kdEventValue(this, ev, "value");
+  if (v !== undefined) kdGroups[which] = v;
 }
 
 function kindleSlotsLoad() {
@@ -415,11 +496,12 @@ function kindleSlotsLoad() {
     .then(function(r) { return r.ok ? r.json() : null; })
     .then(function(d) {
       if (!d) return;
-      kdSlots = d.slots || [];
-      kdSizes = d.sizes || [];
-      kdCap   = d.cap || 12;
+      kdZones = d.zones || {};
+      kdOrder = d.order || [];
       kdFlags = { bold: d.flag_bold, unit: d.flag_unit, age: d.flag_age, trend: d.flag_trend };
       kdAutoDec = d.auto_decimals;
+      kdGroups  = { out: d.group_out_set || "", in: d.group_in_set || "" };
+      kdGroupPh = { out: d.group_out || "OUTSIDE", in: d.group_in || "INSIDE" };
       kdRenderSlots();
     })
     .catch(function() {});
@@ -427,15 +509,14 @@ function kindleSlotsLoad() {
 
 function kindleSlotsSave() {
   return postWithCsrf("/api/kindle/slots", {
-    body: JSON.stringify({ slots: kdSlots }),
+    body: JSON.stringify({ zones: kdZones,
+                           group_out: kdGroups.out, group_in: kdGroups.in }),
     headers: { "Content-Type": "application/json" }
   })
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d && d.ok) {
-        var m = "Saved " + d.count + " reading" + (d.count === 1 ? "" : "s") + ".";
-        if (d.dropped) m += " " + d.dropped + " incomplete one(s) were dropped.";
-        kdSlotMsg(m, "ok");
+        kdSlotMsg("Saved " + d.count + " reading" + (d.count === 1 ? "" : "s") + ".", "ok");
         kindleSlotsLoad();
       } else {
         kdSlotMsg((d && d.error) || "Save failed.", "err");
@@ -445,24 +526,35 @@ function kindleSlotsSave() {
 }
 
 function kindleSlotsReset() {
-  // The built-in six, rebuilt from the two sensors the page is pointed at, so
-  // "back to the built-in design" means the same thing here as on the button
-  // above it.
+  // The built-in layout, rebuilt from the two sensors the page is pointed at,
+  // so "back to the built-in design" means the same thing here as on the button
+  // above it. The last two grid places are left EMPTY on purpose: a dashboard
+  // that arrives showing a metric the hardware does not have is showing a dash.
   var out = (document.getElementById("kd-outdoor-sensor") || {}).value || "";
   var inn = (document.getElementById("kd-indoor-sensor") || {}).value || "";
   if (!out && kdSensors.length) out = kdSensors[0].id;
   if (!inn && kdSensors.length) inn = kdSensors[kdSensors.length > 1 ? 1 : 0].id;
 
-  kdSlots = [
-    { sensor: out, metric: "temperature", label: "", size: 0, flags: kdFlags.bold | kdFlags.unit | kdFlags.age, decimals: kdAutoDec },
-    { sensor: out, metric: "humidity",    label: "", size: 2, flags: kdFlags.unit, decimals: kdAutoDec },
-    { sensor: out, metric: "pressure",    label: "", size: 2, flags: kdFlags.unit | kdFlags.trend, decimals: kdAutoDec },
-    { sensor: inn, metric: "temperature", label: "", size: 1, flags: kdFlags.unit | kdFlags.age, decimals: kdAutoDec },
-    { sensor: inn, metric: "humidity",    label: "", size: 2, flags: kdFlags.unit, decimals: kdAutoDec },
-    { sensor: inn, metric: "aqi",         label: "", size: 2, flags: kdFlags.unit, decimals: kdAutoDec }
-  ];
+  function z(sensor, metric, flags) {
+    return { sensor: sensor, metric: metric, label: "", shown: "",
+             flags: flags, decimals: kdAutoDec };
+  }
+  var none = z("", "", kdFlags.unit);
+
+  kdZones = {
+    hero: z(out, "temperature", kdFlags.bold | kdFlags.unit | kdFlags.age),
+    big:  z(out, "humidity",    kdFlags.unit),
+    g1:   z(out, "pressure",    kdFlags.unit | kdFlags.trend),
+    g2:   z(out, "dew_point",   kdFlags.unit),
+    g3:   none,
+    g4:   none,
+    in1:  z(inn, "temperature", kdFlags.unit | kdFlags.age),
+    in2:  z(inn, "humidity",    kdFlags.unit),
+    in3:  z(inn, "aqi",         kdFlags.unit)
+  };
+  kdGroups = { out: "", in: "" };
   kdRenderSlots();
-  kdSlotMsg("Reset — press Save readings to keep it.", "ok");
+  kdSlotMsg("Reset — press Save to keep it.", "ok");
 }
 
 function kindleInit() {
@@ -497,11 +589,10 @@ registerHandlers({
   kindleDefaults: kindleDefaults,
   kindleFaceChanged: kindleFaceChanged,
   kindleClockChanged: kindleClockChanged,
-  kindleSlotAdd: kindleSlotAdd,
-  kindleSlotEdit: kindleSlotEdit,
-  kindleSlotFlag: kindleSlotFlag,
-  kindleSlotMove: kindleSlotMove,
-  kindleSlotRemove: kindleSlotRemove,
+  kindleZoneEdit: kindleZoneEdit,
+  kindleZoneFlag: kindleZoneFlag,
+  kindleZoneClear: kindleZoneClear,
+  kindleGroupEdit: kindleGroupEdit,
   kindleSlotsSave: kindleSlotsSave,
   kindleSlotsReset: kindleSlotsReset,
 });

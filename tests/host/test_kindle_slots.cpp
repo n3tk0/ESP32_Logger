@@ -1,14 +1,18 @@
 // Host unit tests for src/web/KindleSlots.h
 //
-// The slot list is what the dashboard draws, so the things worth checking are
-// the ones that decide whether a reader sees a sensible page or a broken one:
+// The nine places are what the dashboard draws, so the things worth checking
+// are the ones that decide whether a reader sees a sensible page or a broken
+// one:
 //
-//   • the defaults reproduce the dashboard as it was before slots existed —
-//     an upgrade must not rearrange a page somebody has been reading for
-//     months;
-//   • a slot with no reading leaves NO gap, because that is the whole point of
-//     the BMP280 case: no humidity measured, no humidity row;
-//   • packing never overflows a row and never reorders the list;
+//   • the defaults reproduce the dashboard as it was before any of this was
+//     configurable — an upgrade must not rearrange a page somebody has been
+//     reading for months;
+//   • a place with no reading leaves NO gap, because that is the whole point of
+//     the BMP280 case: no humidity measured, no humidity in the grid;
+//   • the indoor row comes back as two when only two are configured, which is
+//     how "three fields, or two" is a setting rather than a mode;
+//   • the zone keys round-trip, since they are what the file and the API are
+//     addressed by;
 //   • anything arriving from a file is clamped before a renderer sees it.
 #include <stdint.h>
 #include <string.h>
@@ -20,62 +24,143 @@
 // Defaults
 // ---------------------------------------------------------------------------
 static void test_defaults_reproduce_the_old_dashboard() {
-    KindleSlotList l;
-    kdSlotsDefault(l, "balcony", "livingroom");
+    KindleZones k;
+    kdZonesDefault(k, "balcony", "livingroom");
 
-    CHECK_EQ(l.count, 6);
+    // The headline: outdoor temperature, with the humidity beside it.
+    CHECK_STREQ(k.z[KZ_HERO].sensorId, "balcony");
+    CHECK_STREQ(k.z[KZ_HERO].metric,   "temperature");
+    CHECK((k.z[KZ_HERO].flags & KSLOTF_BOLD) != 0);
+    CHECK((k.z[KZ_HERO].flags & KSLOTF_AGE)  != 0);
+    CHECK_STREQ(k.z[KZ_BIG].sensorId, "balcony");
+    CHECK_STREQ(k.z[KZ_BIG].metric,   "humidity");
 
-    // Same six readings, in the same order, with the same emphasis.
-    CHECK_STREQ(l.slot[0].sensorId, "balcony");
-    CHECK_STREQ(l.slot[0].metric,   "temperature");
-    CHECK_EQ((int)l.slot[0].size, (int)KSLOT_HERO);
-    CHECK((l.slot[0].flags & KSLOTF_BOLD) != 0);
+    // The grid: pressure with its tendency, then the dew point.
+    CHECK_STREQ(k.z[KZ_G1].metric, "pressure");
+    CHECK((k.z[KZ_G1].flags & KSLOTF_TREND) != 0);
+    CHECK_STREQ(k.z[KZ_G2].metric, "dew_point");
 
-    CHECK_STREQ(l.slot[1].metric, "humidity");
-    CHECK_STREQ(l.slot[2].metric, "pressure");
-    CHECK((l.slot[2].flags & KSLOTF_TREND) != 0);   // pressure carries the arrow
+    // THE LAST TWO GRID PLACES ARRIVE EMPTY, deliberately. A dashboard that
+    // shipped showing a metric the hardware does not have would be showing a
+    // dash, which is the fault this design exists to remove.
+    CHECK(!k.z[KZ_G3].used());
+    CHECK(!k.z[KZ_G4].used());
 
-    CHECK_STREQ(l.slot[3].sensorId, "livingroom");
-    CHECK_STREQ(l.slot[3].metric,   "temperature");
-    CHECK_STREQ(l.slot[4].metric,   "humidity");
-    CHECK_STREQ(l.slot[5].metric,   "aqi");
+    // The indoor row.
+    CHECK_STREQ(k.z[KZ_IN1].sensorId, "livingroom");
+    CHECK_STREQ(k.z[KZ_IN1].metric,   "temperature");
+    CHECK_STREQ(k.z[KZ_IN2].metric,   "humidity");
+    CHECK_STREQ(k.z[KZ_IN3].metric,   "aqi");
 
-    // An empty sensor id must not produce a slot keyed on "" — every reading
+    CHECK_EQ(k.configured(), 7);
+
+    // An empty sensor id must not produce a place keyed on "" — every reading
     // would miss and the page would be blank with no clue why.
-    KindleSlotList d;
-    kdSlotsDefault(d, "", nullptr);
-    CHECK_EQ(d.count, 6);
-    CHECK(d.slot[0].sensorId[0] != '\0');
-    CHECK(d.slot[3].sensorId[0] != '\0');
+    KindleZones d;
+    kdZonesDefault(d, "", nullptr);
+    CHECK(d.z[KZ_HERO].sensorId[0] != '\0');
+    CHECK(d.z[KZ_IN1].sensorId[0]  != '\0');
+
+    // And the headings fall back rather than rendering as nothing.
+    CHECK(kdGroupOutLabel(d)[0] != '\0');
+    CHECK(kdGroupInLabel(d)[0]  != '\0');
+}
+
+static void test_group_headings_are_overridable() {
+    KindleZones k;
+    kdZonesDefault(k, "a", "b");
+    const char* builtinOut = kdGroupOutLabel(k);
+
+    strcpy(k.groupOut, "Балкон");
+    CHECK_STREQ(kdGroupOutLabel(k), "Балкон");
+    CHECK_STREQ(kdGroupInLabel(k), builtinOut[0] ? kdGroupInLabel(k) : "");
+
+    // Cleared goes back to the built-in rather than to an empty heading.
+    k.groupOut[0] = '\0';
+    CHECK_STREQ(kdGroupOutLabel(k), builtinOut);
+}
+
+// ---------------------------------------------------------------------------
+// The keys the file and the API are addressed by
+// ---------------------------------------------------------------------------
+static void test_zone_keys_round_trip() {
+    for (uint8_t z = 0; z < KZ_COUNT; z++) {
+        const char* k = kdZoneKey(z);
+        CHECK(k[0] != '\0');
+        CHECK_EQ((int)kdZoneFromKey(k), (int)z);
+    }
+    // Every key distinct — two places sharing one would silently overwrite
+    // each other on load.
+    for (uint8_t a = 0; a < KZ_COUNT; a++)
+        for (uint8_t b = (uint8_t)(a + 1); b < KZ_COUNT; b++)
+            CHECK(strcmp(kdZoneKey(a), kdZoneKey(b)) != 0);
+
+    // Anything else is refused rather than guessed at. A key from a later
+    // build must not land in whichever place happens to be first.
+    CHECK_EQ((int)kdZoneFromKey("g5"), (int)KZ_COUNT);
+    CHECK_EQ((int)kdZoneFromKey(""),   (int)KZ_COUNT);
+    CHECK_EQ((int)kdZoneFromKey(nullptr), (int)KZ_COUNT);
+    CHECK_STREQ(kdZoneKey(KZ_COUNT), "");
+    CHECK_STREQ(kdZoneKey(200), "");
+}
+
+static void test_groups_are_named_correctly() {
+    CHECK(kdZoneIsIndoor(KZ_IN1));
+    CHECK(kdZoneIsIndoor(KZ_IN3));
+    CHECK(!kdZoneIsIndoor(KZ_HERO));
+    CHECK(!kdZoneIsIndoor(KZ_G4));
+
+    CHECK(kdZoneIsGrid(KZ_G1));
+    CHECK(kdZoneIsGrid(KZ_G4));
+    CHECK(!kdZoneIsGrid(KZ_BIG));
+    CHECK(!kdZoneIsGrid(KZ_IN1));
 }
 
 // ---------------------------------------------------------------------------
 // Labels and decimals
 // ---------------------------------------------------------------------------
-static void test_labels_come_from_the_table_or_the_slot() {
-    KindleSlotList l;
-    l.clear();
-    l.add("s", "pm25", nullptr, KSLOT_SMALL);
-    l.add("s", "temperature", "Спалня", KSLOT_MEDIUM);
-    l.add("s", "unlisted_metric", nullptr, KSLOT_SMALL);
+static void test_labels_come_from_the_table_or_the_place() {
+    KindleZones k;
+    k.clear();
+    k.set(KZ_G1, "s", "pm25");
+    k.set(KZ_G2, "s", "temperature", "Спалня");
+    k.set(KZ_G3, "s", "unlisted_metric");
 
-    CHECK_STREQ(kdSlotLabel(l.slot[0]), "PM2.5");        // from the table
-    CHECK_STREQ(kdSlotLabel(l.slot[1]), "Спалня");       // the slot's own wins
-    CHECK_STREQ(kdSlotLabel(l.slot[2]), "unlisted_metric");  // honest fallback
+    // The table's name, not the metric id.
+    CHECK_STREQ(kdSlotLabel(k.z[KZ_G1]), "PM2.5");
+    // The reader's own name beats the table.
+    CHECK_STREQ(kdSlotLabel(k.z[KZ_G2]), "Спалня");
+    // Unlisted falls back to the metric — not pretty, but honest, where a
+    // table that quietly rendered nothing would be worse.
+    CHECK_STREQ(kdSlotLabel(k.z[KZ_G3]), "unlisted_metric");
+}
+
+static void test_units_come_from_the_table_then_the_reading() {
+    KindleZones k;
+    k.clear();
+    k.set(KZ_G1, "s", "temperature");
+    k.set(KZ_G2, "s", "uva");
+
+    // The table overrides the pipeline's machine-readable unit.
+    CHECK_STREQ(kdSlotUnit(k.z[KZ_G1], "C"), "°");
+    // With no table entry for the unit, the sensor's own is used.
+    CHECK_STREQ(kdSlotUnit(k.z[KZ_G2], "index"), "index");
+    // And a reading with no unit prints none rather than "(null)".
+    CHECK_STREQ(kdSlotUnit(k.z[KZ_G2], nullptr), "");
 }
 
 static void test_decimals_come_from_the_metric_unless_set() {
-    KindleSlotList l;
-    l.clear();
-    l.add("s", "temperature", nullptr, KSLOT_HERO);       // 1 by convention
-    l.add("s", "humidity",    nullptr, KSLOT_SMALL);      // 0
-    l.add("s", "battery_voltage", nullptr, KSLOT_SMALL);  // 2
-    l.add("s", "temperature", nullptr, KSLOT_SMALL, 0);   // overridden
+    KindleZones k;
+    k.clear();
+    k.set(KZ_G1, "s", "temperature");
+    k.set(KZ_G2, "s", "humidity");
+    k.set(KZ_G3, "s", "battery_voltage");
+    k.set(KZ_G4, "s", "temperature", nullptr, 0);
 
-    CHECK_EQ((int)kdSlotDecimals(l.slot[0]), 1);
-    CHECK_EQ((int)kdSlotDecimals(l.slot[1]), 0);
-    CHECK_EQ((int)kdSlotDecimals(l.slot[2]), 2);
-    CHECK_EQ((int)kdSlotDecimals(l.slot[3]), 0);
+    CHECK_EQ((int)kdSlotDecimals(k.z[KZ_G1]), 1);
+    CHECK_EQ((int)kdSlotDecimals(k.z[KZ_G2]), 0);
+    CHECK_EQ((int)kdSlotDecimals(k.z[KZ_G3]), 2);
+    CHECK_EQ((int)kdSlotDecimals(k.z[KZ_G4]), 0);   // the override wins
 
     // A nonsense override is clamped rather than passed to a printf as %.*f
     // with a width nobody budgeted a buffer for.
@@ -86,408 +171,231 @@ static void test_decimals_come_from_the_metric_unless_set() {
 }
 
 // ---------------------------------------------------------------------------
-// Packing
+// Closing up behind an empty place
 // ---------------------------------------------------------------------------
-static void test_a_row_never_overflows() {
-    KindleSlotList l;
-    l.clear();
-    // 4 + 4 + 4 = 12 exactly, then one more that cannot fit.
-    for (int i = 0; i < 4; i++) l.add("s", "pm25", nullptr, KSLOT_MEDIUM);
-
-    KdSlotPlacement p[KindleSlotList::CAP];
-    const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP);
-    CHECK_EQ(n, 4);
-
-    // Sum the widths per row; none may exceed twelve.
-    int used[8] = {0};
-    for (int i = 0; i < n; i++) {
-        CHECK(p[i].row < 8);
-        CHECK_EQ((int)p[i].col, used[p[i].row]);   // laid left to right, no holes
-        used[p[i].row] += p[i].units;
-    }
-    for (int r = 0; r < 8; r++) CHECK(used[r] <= KSLOT_ROW_UNITS);
-
-    CHECK_EQ((int)p[3].row, 1);                    // the fourth wrapped
-    CHECK_EQ((int)p[3].col, 0);
-}
-
-// A HERO is the glance value. Beside a small slot it stops being one, so it
-// takes its own row even when there is room next to it.
-static void test_a_hero_owns_its_row() {
-    KindleSlotList l;
-    l.clear();
-    l.add("s", "pm25",        nullptr, KSLOT_SMALL);   // 3 units, row 0
-    l.add("s", "temperature", nullptr, KSLOT_HERO);    // must not join row 0
-    l.add("s", "humidity",    nullptr, KSLOT_SMALL);   // must not join the hero
-
-    KdSlotPlacement p[KindleSlotList::CAP];
-    const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP);
-    CHECK_EQ(n, 3);
-    CHECK_EQ((int)p[0].row, 0);
-    CHECK_EQ((int)p[1].row, 1);
-    CHECK_EQ((int)p[1].col, 0);
-    CHECK_EQ((int)p[2].row, 2);
-}
-
 // The case the whole feature exists for.
 static void test_an_absent_reading_leaves_no_gap() {
-    KindleSlotList l;
-    l.clear();
-    l.add("bmp280", "temperature", nullptr, KSLOT_MEDIUM);
-    l.add("bmp280", "humidity",    nullptr, KSLOT_MEDIUM);   // a BMP280 has none
-    l.add("bmp280", "pressure",    nullptr, KSLOT_MEDIUM);
+    KindleZones k;
+    k.clear();
+    k.set(KZ_G1, "bmp280", "pressure");
+    k.set(KZ_G2, "bmp280", "humidity");    // a BMP280 has none
+    k.set(KZ_G3, "bmp280", "dew_point");
 
-    const bool visible[3] = { true, false, true };
-    KdSlotPlacement p[KindleSlotList::CAP];
-    const int n = kdSlotsPack(l, visible, p, KindleSlotList::CAP);
+    bool visible[KZ_COUNT] = {false};
+    visible[KZ_G1] = true;
+    visible[KZ_G2] = false;
+    visible[KZ_G3] = true;
 
+    uint8_t used[KZ_GRID_COUNT];
+    const int n = kdGridUsed(k, visible, used);
+
+    // Two cells, and the dew point has moved UP into the place the humidity
+    // would have had — it does not sit third with a hole in front of it.
     CHECK_EQ(n, 2);
-    CHECK_EQ(p[0].index, 0);
-    CHECK_EQ(p[1].index, 2);
-    // Pressure moves up beside temperature — it does not sit in the third
-    // position with a hole where the humidity was.
-    CHECK_EQ((int)p[1].row, 0);
-    // Two survivors share the row rather than leaving the last third white:
-    // six twelfths each, so the pressure starts at the halfway mark.
-    CHECK_EQ((int)p[1].col, 6);
-    CHECK_EQ((int)p[0].units, 6);
-    CHECK_EQ((int)p[1].units, 6);
-    CHECK_EQ(kdSlotsRowCount(p, n), 1);
+    CHECK_EQ((int)used[0], (int)KZ_G1);
+    CHECK_EQ((int)used[1], (int)KZ_G3);
 }
 
-// A row always ends flush against the right margin. The old hardwired design
-// used both columns fully all the way down; a flow that stops two twelfths
-// short on every other row reads as a missing value rather than as space.
-static void test_rows_end_flush() {
-    struct Case { uint8_t sizes[6]; int count; uint8_t firstRow; };
-    static const Case cases[] = {
-        { { KSLOT_MEDIUM, KSLOT_MEDIUM, 0, 0, 0, 0 }, 2, KSLOT_ROW_UNITS },
-        { { KSLOT_SMALL,  KSLOT_SMALL,  0, 0, 0, 0 }, 2, KSLOT_ROW_UNITS },
-        { { KSLOT_LARGE,  KSLOT_SMALL,  0, 0, 0, 0 }, 2, KSLOT_ROW_UNITS },
-        { { KSLOT_SMALL,  0, 0, 0, 0, 0 },            1, KSLOT_ROW_UNITS },
-        { { KSLOT_HERO,   KSLOT_MEDIUM, KSLOT_MEDIUM, KSLOT_LARGE,
-            KSLOT_MEDIUM, KSLOT_MEDIUM },             6,
-          (uint8_t)(KSLOT_ROW_UNITS - KSLOT_CLOCK_UNITS) },
-    };
+static void test_an_unconfigured_place_is_skipped_too() {
+    KindleZones k;
+    k.clear();
+    k.set(KZ_G2, "s", "pm25");     // G1 left empty on purpose
+    k.set(KZ_G4, "s", "co2");
 
-    for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
-        KindleSlotList l;
-        l.clear();
-        for (int i = 0; i < cases[c].count; i++)
-            l.add("s", "pm25", nullptr, cases[c].sizes[i]);
-
-        KdSlotPlacement p[KindleSlotList::CAP];
-        const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP,
-                                  cases[c].firstRow);
-        CHECK_EQ(n, cases[c].count);
-
-        for (int i = 0; i < n; ) {
-            int j = i, used = 0;
-            while (j < n && p[j].row == p[i].row) { used += p[j].units; j++; }
-            const int cap = (p[i].row == 0) ? cases[c].firstRow : KSLOT_ROW_UNITS;
-            CHECK_EQ(used, cap);                 // flush, neither short nor over
-            CHECK_EQ((int)p[i].col, 0);          // and still laid left to right
-            for (int k = i + 1; k < j; k++)
-                CHECK_EQ((int)p[k].col, (int)p[k - 1].col + (int)p[k - 1].units);
-            i = j;
-        }
-    }
+    uint8_t used[KZ_GRID_COUNT];
+    const int n = kdGridUsed(k, nullptr, used);   // nullptr = everything reports
+    CHECK_EQ(n, 2);
+    CHECK_EQ((int)used[0], (int)KZ_G2);
+    CHECK_EQ((int)used[1], (int)KZ_G4);
 }
 
-// Two rows holding the same number of readings put their columns in the same
-// places, whatever sizes those readings are. This is the alignment down a page
-// that made the old hardwired design read as a page rather than as six values
-// scattered over one.
-static void test_rows_of_equal_count_share_their_columns() {
-    KindleSlotList l;
-    l.clear();
-    l.add("s", "humidity",    nullptr, KSLOT_MEDIUM);   // row 1: medium, medium
-    l.add("s", "pressure",    nullptr, KSLOT_MEDIUM);
-    l.add("s", "temperature", nullptr, KSLOT_LARGE);    // row 2: large, medium
-    l.add("s", "humidity",    nullptr, KSLOT_MEDIUM);
+// "Three fields, or two" is a setting rather than a mode: leave the third
+// empty and two come back.
+static void test_the_indoor_row_can_be_two() {
+    KindleZones k;
+    k.clear();
+    k.set(KZ_IN1, "in", "temperature");
+    k.set(KZ_IN2, "in", "humidity");
 
-    // Full-width rows on both, so the comparison is between two rows of the
-    // same capacity — row 0 shares with the clock and is narrower by design.
-    KdSlotPlacement p[KindleSlotList::CAP];
-    const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP);
-    CHECK_EQ(n, 4);
+    uint8_t used[KZ_INDOOR_COUNT];
+    CHECK_EQ(kdIndoorUsed(k, nullptr, used), 2);
+    CHECK_EQ((int)used[0], (int)KZ_IN1);
+    CHECK_EQ((int)used[1], (int)KZ_IN2);
 
-    // Both pairs land two across.
-    CHECK_EQ((int)p[0].row, (int)p[1].row);
-    CHECK_EQ((int)p[2].row, (int)p[3].row);
-    CHECK((int)p[2].row > (int)p[0].row);
+    k.set(KZ_IN3, "in", "aqi");
+    CHECK_EQ(kdIndoorUsed(k, nullptr, used), 3);
 
-    // The second column starts at the same twelfth on both, though one row
-    // holds a large and the other does not.
-    CHECK_EQ((int)p[1].col, (int)p[3].col);
-    CHECK_EQ((int)p[1].col, 6);
+    // And one quiet sensor takes it back down without disturbing the order.
+    bool visible[KZ_COUNT];
+    for (int i = 0; i < KZ_COUNT; i++) visible[i] = true;
+    visible[KZ_IN2] = false;
+    CHECK_EQ(kdIndoorUsed(k, visible, used), 2);
+    CHECK_EQ((int)used[0], (int)KZ_IN1);
+    CHECK_EQ((int)used[1], (int)KZ_IN3);
 }
 
-// A row's slots are never zero twelfths wide, however many of them there are.
-// A zero-width column is an invisible reading that still cost a list entry.
-static void test_no_column_is_zero_wide() {
-    for (uint8_t first = 1; first <= KSLOT_ROW_UNITS; first++) {
-        KindleSlotList l;
-        l.clear();
-        for (int i = 0; i < KindleSlotList::CAP; i++)
-            l.add("s", "pm25", nullptr, KSLOT_SMALL);
+// The two groups never bleed into one another. An off-by-one in the walk would
+// put an indoor reading in the outdoor grid, which reads as a wrong number
+// rather than as a layout bug.
+static void test_the_groups_do_not_bleed() {
+    KindleZones k;
+    k.clear();
+    for (int i = 0; i < KZ_COUNT; i++) k.set((uint8_t)i, "s", "pm25");
 
-        KdSlotPlacement p[KindleSlotList::CAP];
-        const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP, first);
-        for (int i = 0; i < n; i++) {
-            CHECK(p[i].units > 0);
-            CHECK((int)p[i].col + (int)p[i].units <=
-                  ((p[i].row == 0) ? (int)first : (int)KSLOT_ROW_UNITS));
-        }
-    }
-}
+    uint8_t grid[KZ_GRID_COUNT];
+    CHECK_EQ(kdGridUsed(k, nullptr, grid), KZ_GRID_COUNT);
+    for (int i = 0; i < KZ_GRID_COUNT; i++) CHECK(kdZoneIsGrid(grid[i]));
 
-// Packing must not reorder. A best-fit packer would fill the gap left by a
-// quiet sensor with whatever happened to fit, so the reader's page would
-// rearrange itself every time a node dropped out.
-static void test_packing_preserves_order() {
-    KindleSlotList l;
-    l.clear();
-    l.add("s", "temperature", nullptr, KSLOT_LARGE);   // 6
-    l.add("s", "pm25",        nullptr, KSLOT_SMALL);   // 3  -> row 0, col 6
-    l.add("s", "pressure",    nullptr, KSLOT_LARGE);   // 6  -> wraps to row 1
-    l.add("s", "humidity",    nullptr, KSLOT_SMALL);   // 3  -> would have fitted row 0
+    uint8_t in[KZ_INDOOR_COUNT];
+    CHECK_EQ(kdIndoorUsed(k, nullptr, in), KZ_INDOOR_COUNT);
+    for (int i = 0; i < KZ_INDOOR_COUNT; i++) CHECK(kdZoneIsIndoor(in[i]));
 
-    KdSlotPlacement p[KindleSlotList::CAP];
-    const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP);
-    CHECK_EQ(n, 4);
-    for (int i = 0; i < n; i++) CHECK_EQ(p[i].index, i);   // never resequenced
-    CHECK_EQ((int)p[2].row, 1);
-    CHECK_EQ((int)p[3].row, 1);   // follows the pressure, not back-filled to row 0
-}
-
-static void test_pack_respects_maxout_and_empty_input() {
-    KindleSlotList l;
-    l.clear();
-    for (int i = 0; i < 8; i++) l.add("s", "pm25", nullptr, KSLOT_SMALL);
-
-    KdSlotPlacement p[4];
-    CHECK_EQ(kdSlotsPack(l, nullptr, p, 4), 4);
-    CHECK_EQ(kdSlotsPack(l, nullptr, p, 0), 0);
-    CHECK_EQ(kdSlotsPack(l, nullptr, nullptr, 4), 0);
-
-    KindleSlotList empty;
+    // Nothing configured at all is zero of each, not a walk off the end.
+    KindleZones empty;
     empty.clear();
-    CHECK_EQ(kdSlotsPack(empty, nullptr, p, 4), 0);
-    CHECK_EQ(kdSlotsRowCount(p, 0), 0);
+    CHECK_EQ(kdGridUsed(empty, nullptr, grid), 0);
+    CHECK_EQ(kdIndoorUsed(empty, nullptr, in), 0);
+    CHECK_EQ(empty.configured(), 0);
 }
 
-// Every size must tile a row exactly, or a combination somewhere leaves a
-// sliver that the renderers would each round differently.
-static void test_every_size_divides_a_row() {
-    for (uint8_t s = 0; s < KSLOT_SIZE_COUNT; s++) {
-        const uint8_t u = kdSlotUnits(s);
-        CHECK(u > 0);
-        CHECK(u <= KSLOT_ROW_UNITS);
-        CHECK_EQ(KSLOT_ROW_UNITS % u, 0);
-    }
-    // And on the narrowed first row, where the clock has taken half.
-    const uint8_t half = KSLOT_ROW_UNITS - KSLOT_CLOCK_UNITS;
-    for (uint8_t s = 0; s < KSLOT_SIZE_COUNT; s++) {
-        const uint8_t u = kdSlotUnits(s, half);
-        CHECK(u > 0);
-        CHECK(u <= half);
-    }
-    // A width is never zero however narrow the row gets — a zero-width slot
-    // would be an invisible reading that still consumed a list entry.
-    for (uint8_t r = 1; r <= KSLOT_ROW_UNITS; r++)
-        for (uint8_t s = 0; s < KSLOT_SIZE_COUNT; s++)
-            CHECK(kdSlotUnits(s, r) > 0);
-}
+static void test_used_refuses_a_bad_call() {
+    KindleZones k;
+    kdZonesDefault(k, "a", "b");
+    uint8_t out[KZ_COUNT];
 
-// ---------------------------------------------------------------------------
-// Sharing row 0 with the clock
-// ---------------------------------------------------------------------------
-// The clock is not a reading, so it is not a slot — but both renderers draw it
-// over the top-right of the first row, and the packer has to know. Before this,
-// a hero claimed all twelve twelfths of row 0 and the outdoor temperature ran
-// underneath the clock as soon as the value got wide.
-static void test_the_clock_narrows_the_first_row() {
-    const uint8_t half = KSLOT_ROW_UNITS - KSLOT_CLOCK_UNITS;
-
-    KindleSlotList l;
-    l.clear();
-    l.add("s", "temperature", nullptr, KSLOT_HERO);     // row 0, beside the clock
-    l.add("s", "pressure",    nullptr, KSLOT_MEDIUM);   // row 1, full width
-    l.add("s", "humidity",    nullptr, KSLOT_MEDIUM);
-    l.add("s", "pm25",        nullptr, KSLOT_MEDIUM);
-
-    KdSlotPlacement p[KindleSlotList::CAP];
-    const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP, half);
-    CHECK_EQ(n, 4);
-
-    // The hero takes the half it has, not the whole width.
-    CHECK_EQ((int)p[0].row, 0);
-    CHECK_EQ((int)p[0].col, 0);
-    CHECK_EQ((int)p[0].units, (int)half);
-
-    // Everything after it is on a full-width row and packs three across.
-    CHECK_EQ((int)p[1].row, 1);
-    CHECK_EQ((int)p[1].units, 4);
-    CHECK_EQ((int)p[2].row, 1);
-    CHECK_EQ((int)p[3].row, 1);
-    CHECK_EQ((int)p[3].col, 8);
-    CHECK_EQ(kdSlotsRowCount(p, n), 2);
-}
-
-// Row 0 holds only what fits beside the clock; the rest moves down.
-static void test_small_slots_fill_only_half_of_row_zero() {
-    const uint8_t half = KSLOT_ROW_UNITS - KSLOT_CLOCK_UNITS;   // 6
-
-    KindleSlotList l;
-    l.clear();
-    for (int i = 0; i < 5; i++) l.add("s", "pm25", nullptr, KSLOT_SMALL);
-
-    KdSlotPlacement p[KindleSlotList::CAP];
-    const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP, half);
-    CHECK_EQ(n, 5);
-
-    // A small is a quarter of the row it is on: 1 unit of six on row 0, 3 of
-    // twelve after that. Six/one = six would fit, but the first row's capacity
-    // is what stops it running under the clock.
-    int onRow0 = 0, used0 = 0;
-    for (int i = 0; i < n; i++)
-        if (p[i].row == 0) { onRow0++; used0 += p[i].units; }
-    CHECK(used0 <= (int)half);
-    CHECK(onRow0 >= 1);
-
-    // Nothing on any row exceeds that row's capacity.
-    int used[8] = {0};
-    for (int i = 0; i < n; i++) used[p[i].row] += p[i].units;
-    CHECK(used[0] <= (int)half);
-    for (int r = 1; r < 8; r++) CHECK(used[r] <= KSLOT_ROW_UNITS);
-}
-
-// The default is unchanged, so every existing caller and test still describes
-// a full-width first row.
-static void test_packing_defaults_to_a_full_first_row() {
-    KindleSlotList l;
-    l.clear();
-    l.add("s", "temperature", nullptr, KSLOT_HERO);
-
-    KdSlotPlacement a[4], b[4];
-    const int na = kdSlotsPack(l, nullptr, a, 4);
-    const int nb = kdSlotsPack(l, nullptr, b, 4, KSLOT_ROW_UNITS);
-    CHECK_EQ(na, nb);
-    CHECK_EQ((int)a[0].units, (int)b[0].units);
-    CHECK_EQ((int)a[0].units, (int)KSLOT_ROW_UNITS);
-
-    // An out-of-range capacity falls back to the full row rather than
-    // producing a layout nobody asked for.
-    kdSlotsPack(l, nullptr, b, 4, 0);
-    CHECK_EQ((int)b[0].units, (int)KSLOT_ROW_UNITS);
-    kdSlotsPack(l, nullptr, b, 4, 99);
-    CHECK_EQ((int)b[0].units, (int)KSLOT_ROW_UNITS);
+    CHECK_EQ(kdZonesUsed(k, nullptr, KZ_G1, 0, out), 0);
+    CHECK_EQ(kdZonesUsed(k, nullptr, KZ_G1, KZ_GRID_COUNT, nullptr), 0);
+    // A walk that would run past the end stops at it rather than reading
+    // whatever follows the array.
+    CHECK(kdZonesUsed(k, nullptr, KZ_IN3, 8, out) <= 1);
 }
 
 // ---------------------------------------------------------------------------
 // Clamping
 // ---------------------------------------------------------------------------
-static void test_clamp_drops_unusable_slots() {
-    KindleSlotList l;
-    l.clear();
-    l.count = 5;
-    strcpy(l.slot[0].sensorId, "a"); strcpy(l.slot[0].metric, "temperature");
-    // 1: no metric — unusable
-    strcpy(l.slot[1].sensorId, "b");
-    // 2: no sensor — unusable
-    strcpy(l.slot[2].metric, "humidity");
-    strcpy(l.slot[3].sensorId, "c"); strcpy(l.slot[3].metric, "pm25");
-    strcpy(l.slot[4].sensorId, "d"); strcpy(l.slot[4].metric, "aqi");
+static void test_clamp_empties_a_half_filled_place() {
+    KindleZones k;
+    k.clear();
+    // A sensor with no metric, and a metric with no sensor. Both arrive from a
+    // form where somebody filled one box; neither can produce a reading.
+    strcpy(k.z[KZ_G1].sensorId, "s");
+    strcpy(k.z[KZ_G2].metric,   "pm25");
+    k.set(KZ_G3, "s", "co2");
 
-    kdSlotsClamp(l);
+    kdZonesClamp(k);
 
-    CHECK_EQ(l.count, 3);
-    CHECK_STREQ(l.slot[0].sensorId, "a");
-    CHECK_STREQ(l.slot[1].sensorId, "c");   // closed up, order kept
-    CHECK_STREQ(l.slot[2].sensorId, "d");
+    CHECK(!k.z[KZ_G1].used());
+    CHECK(!k.z[KZ_G2].used());
+    CHECK(k.z[KZ_G3].used());
+    // And emptied means EMPTIED — a leftover sensor id in a place the reader
+    // cleared would come back the next time they set a metric on it.
+    CHECK_STREQ(k.z[KZ_G1].sensorId, "");
+    CHECK_STREQ(k.z[KZ_G2].metric,   "");
+    CHECK_EQ(k.configured(), 1);
 }
 
 static void test_clamp_bounds_everything_a_renderer_reads() {
-    KindleSlotList l;
-    l.clear();
-    l.count = 1;
-    strcpy(l.slot[0].sensorId, "a");
-    strcpy(l.slot[0].metric,   "temperature");
-    l.slot[0].size     = 200;      // not one of the four
-    l.slot[0].decimals = 200;
-    l.slot[0].flags    = 0xFF;     // bits nothing defines
+    KindleZones k;
+    k.clear();
+    k.set(KZ_HERO, "s", "temperature");
+    k.z[KZ_HERO].decimals = 9;
+    k.z[KZ_HERO].flags    = 0xFF;
 
-    kdSlotsClamp(l);
+    kdZonesClamp(k);
 
-    CHECK(l.slot[0].size < KSLOT_SIZE_COUNT);
-    CHECK(l.slot[0].decimals <= 3 || l.slot[0].decimals == KSLOT_DECIMALS_AUTO);
-    CHECK_EQ((int)(l.slot[0].flags & ~KSLOTF_ALL), 0);
+    CHECK_EQ((int)k.z[KZ_HERO].decimals, 3);
+    CHECK_EQ((int)k.z[KZ_HERO].flags, (int)KSLOTF_ALL);
 
-    // A count from a corrupt file must not walk the renderer off the array.
-    KindleSlotList big;
-    big.clear();
-    big.count = 9999;
-    kdSlotsClamp(big);
-    CHECK(big.count >= 0 && big.count <= KindleSlotList::CAP);
-
-    KindleSlotList neg;
-    neg.clear();
-    neg.count = -3;
-    kdSlotsClamp(neg);
-    CHECK_EQ(neg.count, 0);
+    // AUTO is not a number and must survive the clamp untouched — turning it
+    // into 3 would silently give every place three decimals.
+    KindleZones a;
+    a.clear();
+    a.set(KZ_HERO, "s", "temperature");   // defaults to AUTO
+    kdZonesClamp(a);
+    CHECK_EQ((int)a.z[KZ_HERO].decimals, (int)KSLOT_DECIMALS_AUTO);
 }
 
-static void test_add_refuses_past_the_cap() {
-    KindleSlotList l;
-    l.clear();
-    for (int i = 0; i < KindleSlotList::CAP; i++)
-        CHECK(l.add("s", "pm25", nullptr, KSLOT_SMALL));
-    CHECK(!l.add("s", "pm25", nullptr, KSLOT_SMALL));
-    CHECK_EQ(l.count, KindleSlotList::CAP);
+static void test_set_refuses_what_it_cannot_store() {
+    KindleZones k;
+    k.clear();
 
-    // And refuses the ones that would be dead on arrival.
-    KindleSlotList m;
-    m.clear();
-    CHECK(!m.add("", "temperature", nullptr, KSLOT_HERO));
-    CHECK(!m.add("s", "", nullptr, KSLOT_HERO));
-    CHECK(!m.add(nullptr, "temperature", nullptr, KSLOT_HERO));
-    CHECK_EQ(m.count, 0);
+    CHECK(!k.set(KZ_COUNT, "s", "pm25"));      // no such place
+    CHECK(!k.set(200,      "s", "pm25"));
+    CHECK(!k.set(KZ_G1, nullptr, "pm25"));
+    CHECK(!k.set(KZ_G1, "s", nullptr));
+    CHECK(!k.set(KZ_G1, "", "pm25"));          // empty is not a sensor id
+    CHECK(!k.z[KZ_G1].used());
+    CHECK_EQ(k.configured(), 0);
+
+    CHECK(k.set(KZ_G1, "s", "pm25"));
+    CHECK_EQ(k.configured(), 1);
 }
 
-// A name longer than the field is truncated, not written past the end.
 static void test_long_names_are_truncated_not_overflowed() {
-    KindleSlotList l;
-    l.clear();
-    const char* longId = "a_very_long_sensor_identifier_indeed";
-    l.add(longId, "temperature", "a label that is far too long to fit", KSLOT_SMALL);
+    // Longer than every buffer in KindleSlot, and longer than a JSON parser
+    // would have bothered to check.
+    const char* huge = "0123456789012345678901234567890123456789";
 
-    CHECK_EQ(l.count, 1);
-    CHECK_EQ((int)strlen(l.slot[0].sensorId), (int)sizeof(l.slot[0].sensorId) - 1);
-    CHECK_EQ((int)strlen(l.slot[0].label),    (int)sizeof(l.slot[0].label) - 1);
-    CHECK_EQ((int)l.slot[0].sensorId[sizeof(l.slot[0].sensorId) - 1], 0);
-    CHECK_EQ((int)l.slot[0].label[sizeof(l.slot[0].label) - 1], 0);
+    KindleZones k;
+    k.clear();
+    CHECK(k.set(KZ_HERO, huge, huge, huge));
+
+    CHECK_EQ(strlen(k.z[KZ_HERO].sensorId), sizeof(k.z[KZ_HERO].sensorId) - 1);
+    CHECK_EQ(strlen(k.z[KZ_HERO].metric),   sizeof(k.z[KZ_HERO].metric)   - 1);
+    CHECK_EQ(strlen(k.z[KZ_HERO].label),    sizeof(k.z[KZ_HERO].label)    - 1);
+
+    // And a clamp over a buffer somebody filled to the brim without a
+    // terminator leaves it terminated.
+    memset(k.z[KZ_G1].sensorId, 'x', sizeof(k.z[KZ_G1].sensorId));
+    memset(k.z[KZ_G1].metric,   'y', sizeof(k.z[KZ_G1].metric));
+    memset(k.z[KZ_G1].label,    'z', sizeof(k.z[KZ_G1].label));
+    kdZonesClamp(k);
+    CHECK_EQ(strlen(k.z[KZ_G1].sensorId), sizeof(k.z[KZ_G1].sensorId) - 1);
+    CHECK_EQ(strlen(k.z[KZ_G1].metric),   sizeof(k.z[KZ_G1].metric)   - 1);
+    CHECK_EQ(strlen(k.z[KZ_G1].label),    sizeof(k.z[KZ_G1].label)    - 1);
+}
+
+// Every metric in the style table has to be usable: a label that is empty
+// renders as nothing, and a decimal count above three overruns the buffers
+// kdSlotDecimals() is trusted to have bounded.
+static void test_the_metric_table_is_sane() {
+    for (int i = 0; i < KD_METRIC_STYLE_COUNT; i++) {
+        const KdMetricStyle& m = KD_METRIC_STYLE[i];
+        CHECK(m.metric && m.metric[0]);
+        CHECK(m.label  && m.label[0]);
+        CHECK(m.decimals <= 3);
+        // Every metric name must fit KindleSlot::metric, or a place configured
+        // from the table's own list would be stored truncated and never match.
+        CHECK(strlen(m.metric) < sizeof(((KindleSlot*)nullptr)->metric));
+    }
+    // No duplicates: the lookup returns the first, so a second entry for one
+    // metric is a rule nobody can see not being applied.
+    for (int a = 0; a < KD_METRIC_STYLE_COUNT; a++)
+        for (int b = a + 1; b < KD_METRIC_STYLE_COUNT; b++)
+            CHECK(strcmp(KD_METRIC_STYLE[a].metric, KD_METRIC_STYLE[b].metric) != 0);
+
+    CHECK(kdMetricStyle(nullptr) == nullptr);
+    CHECK(kdMetricStyle("")      == nullptr);
+    CHECK(kdMetricStyle("nope")  == nullptr);
 }
 
 int main() {
     RUN(test_defaults_reproduce_the_old_dashboard);
-    RUN(test_labels_come_from_the_table_or_the_slot);
+    RUN(test_group_headings_are_overridable);
+    RUN(test_zone_keys_round_trip);
+    RUN(test_groups_are_named_correctly);
+    RUN(test_labels_come_from_the_table_or_the_place);
+    RUN(test_units_come_from_the_table_then_the_reading);
     RUN(test_decimals_come_from_the_metric_unless_set);
-    RUN(test_a_row_never_overflows);
-    RUN(test_a_hero_owns_its_row);
     RUN(test_an_absent_reading_leaves_no_gap);
-    RUN(test_rows_end_flush);
-    RUN(test_rows_of_equal_count_share_their_columns);
-    RUN(test_no_column_is_zero_wide);
-    RUN(test_packing_preserves_order);
-    RUN(test_pack_respects_maxout_and_empty_input);
-    RUN(test_every_size_divides_a_row);
-    RUN(test_the_clock_narrows_the_first_row);
-    RUN(test_small_slots_fill_only_half_of_row_zero);
-    RUN(test_packing_defaults_to_a_full_first_row);
-    RUN(test_clamp_drops_unusable_slots);
+    RUN(test_an_unconfigured_place_is_skipped_too);
+    RUN(test_the_indoor_row_can_be_two);
+    RUN(test_the_groups_do_not_bleed);
+    RUN(test_used_refuses_a_bad_call);
+    RUN(test_clamp_empties_a_half_filled_place);
     RUN(test_clamp_bounds_everything_a_renderer_reads);
-    RUN(test_add_refuses_past_the_cap);
+    RUN(test_set_refuses_what_it_cannot_store);
     RUN(test_long_names_are_truncated_not_overflowed);
+    RUN(test_the_metric_table_is_sane);
     return SUMMARY();
 }

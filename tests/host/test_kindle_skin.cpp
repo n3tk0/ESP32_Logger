@@ -131,14 +131,14 @@ static void test_custom_face_is_used_verbatim_or_not_at_all() {
 
 static void test_bold_zones_are_independent() {
     KindleConfig k = defaults();
-    k.boldZones = KBOLD_SLOT_MEDIUM;
+    k.boldZones = KBOLD_GRID;
     Css css;
     kdSkinCss(css, k);
-    CHECK(css.has(".sl-m .val{font-weight:bold}"));
+    CHECK(css.has(".gv{font-weight:bold}"));
     // The neighbouring bits must not have come along: a mask bug here shows up
     // as a page where the wrong number is heavy, which reads as a design
     // choice rather than as a fault.
-    CHECK(!css.has(".sl-l .val{font-weight"));
+    CHECK(!css.has(".v2{font-weight"));
     CHECK(!css.has(".clock{font-weight"));
 
     KindleConfig all = defaults();
@@ -153,26 +153,34 @@ static void test_bold_zones_are_independent() {
 
 static void test_clock_styles_keep_their_height() {
     // Each style is allowed to change how the clock looks; none of them is
-    // allowed to change how tall the block is, because that height is what
-    // keeps the hairline under it level with the outdoor column. The browser
-    // check lives in tools/kindle_preview; this one is the arithmetic.
+    // allowed to change how tall the block is, because that height is where the
+    // hairline under it falls and therefore where the indoor row starts. A
+    // style that ran tall made the right column the taller of the two and put
+    // the footer below the fold. The browser check lives in
+    // tools/kindle_preview; this one is the arithmetic.
     KindleConfig boxed = defaults();  boxed.clockStyle = KCLOCK_BOXED;
     Css b; kdSkinCss(b, boxed);
     CHECK(b.has("background:#000"));
-    CHECK(b.has("height:131px"));       // 131 + 8 margin = the 139 of the design
-    CHECK(b.has("margin-bottom:8px"));
+    CHECK(b.has("height:96px"));        // 96 + 4 margin = the 100 of the design
+    CHECK(b.has("margin-bottom:4px"));
 
     KindleConfig dated = defaults();  dated.clockStyle = KCLOCK_DATED;
     Css d; kdSkinCss(d, dated);
-    CHECK(d.has("height:112px"));       // 112 + 27 = 139: taken from the clock,
-    CHECK(d.has(".clock-d{height:27px")); // not added underneath it
+    CHECK(d.has("height:76px"));        // 76 + 24 = 100: taken from the clock,
+    CHECK(d.has(".clock-d{height:24px")); // not added underneath it
 
     KindleConfig ruled = defaults();  ruled.clockStyle = KCLOCK_RULED;
     Css r; kdSkinCss(r, ruled);
     CHECK(r.has("border-top:1px solid #000"));
     // box-sizing is border-box for the whole page, so the rule comes out of the
-    // padding and the height is not restated at all.
-    CHECK(!r.has("height:"));
+    // padding and no BLOCK height is restated — the line height and the padding
+    // are what add up to the 100. Matched with the punctuation in front of it,
+    // because a bare "height:" also matches "line-height:", which this style
+    // does set and must be allowed to.
+    CHECK(!r.has("{height:"));
+    CHECK(!r.has(";height:"));
+    CHECK(r.has("line-height:84px"));
+    CHECK(r.has("padding-top:16px"));   // 84 + 16 = 100
 }
 
 // ---------------------------------------------------------------------------

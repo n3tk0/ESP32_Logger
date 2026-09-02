@@ -161,29 +161,34 @@ enum KindlePressureUnit : uint8_t {
 //
 // FIVE OF THESE USED TO NAME A READING — the outdoor temperature, the outdoor
 // humidity, the pressure, and the inside pair. There is no such thing any more:
-// the dashboard is a list of slots the reader arranges, so "the pressure" is
-// wherever they put it, and a bit that meant one hardwired position had nothing
-// left to point at. The bits still exist, at the same values so no stored
-// configuration changes meaning by more than it has to, and they now name the
-// four SIZES in the flow plus the units — which is the same question ("what on
-// this page is heavy?") asked in the vocabulary the page now has.
+// the dashboard is nine named PLACES and the reader chooses what goes in each,
+// so "the pressure" is wherever they put it and a bit that meant one hardwired
+// position had nothing left to point at. The bits still exist, at the same
+// values so no stored configuration changes meaning by more than it has to, and
+// they now name the places — which is the same question ("what on this page is
+// heavy?") asked in the vocabulary the page has.
 //
-// Emphasis on one particular reading did not go away with them; it moved to
-// where it belongs, as KSLOTF_BOLD on the slot itself.
-constexpr uint16_t KBOLD_SLOT_HERO   = 0x0001;
-constexpr uint16_t KBOLD_SLOT_LARGE  = 0x0002;
-constexpr uint16_t KBOLD_SLOT_MEDIUM = 0x0004;
-constexpr uint16_t KBOLD_CLOCK       = 0x0008;
-constexpr uint16_t KBOLD_SLOT_SMALL  = 0x0010;
-constexpr uint16_t KBOLD_UNITS       = 0x0020;
-constexpr uint16_t KBOLD_FORECAST    = 0x0040;
-constexpr uint16_t KBOLD_WEEK        = 0x0080;
-constexpr uint16_t KBOLD_LABELS      = 0x0100;
+// Emphasis on one PARTICULAR reading did not go away with them; it moved to
+// where it belongs, as KSLOTF_BOLD on the place itself.
+constexpr uint16_t KBOLD_HERO      = 0x0001;   // the headline value
+constexpr uint16_t KBOLD_BIG       = 0x0002;   // the one beside it
+constexpr uint16_t KBOLD_GRID      = 0x0004;   // the two-by-two grid
+constexpr uint16_t KBOLD_CLOCK     = 0x0008;
+constexpr uint16_t KBOLD_INDOOR    = 0x0010;   // the row under the clock
+constexpr uint16_t KBOLD_UNITS     = 0x0020;
+constexpr uint16_t KBOLD_FORECAST  = 0x0040;
+constexpr uint16_t KBOLD_WEEK      = 0x0080;
+constexpr uint16_t KBOLD_LABELS    = 0x0100;
 
 // Which blocks are drawn. Every one of these defaults to on; they exist for
 // the reader who wants the page to be two numbers and nothing else.
-constexpr uint16_t KSHOW_OUT_HUM   = 0x0001;
-constexpr uint16_t KSHOW_PRESSURE  = 0x0002;
+//
+// The first two named a reading for the same reason and were renamed with it:
+// 0x0001 was "the outdoor humidity" and is now "the second value on the
+// headline", whatever the reader put there; 0x0002 was "the pressure" and is
+// now the grid that the pressure sits in by default.
+constexpr uint16_t KSHOW_BIG       = 0x0001;   // the value beside the headline
+constexpr uint16_t KSHOW_GRID      = 0x0002;   // the two-by-two block
 constexpr uint16_t KSHOW_TENDENCY  = 0x0004;
 constexpr uint16_t KSHOW_RANGE     = 0x0008;   // the 24 h low-to-high line
 constexpr uint16_t KSHOW_INSIDE    = 0x0010;
