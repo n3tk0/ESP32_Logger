@@ -53,7 +53,16 @@ constexpr const char* DEFAULT_DATALOG_PREFIX = "datalog";
 constexpr const char* DEFAULT_NTP_SERVER     = "pool.ntp.org";
 
 #define CONFIG_STRUCT_MAGIC  0xC0FFEE36
-#define CONFIG_VERSION       14
+// BUMP THIS WHENEVER sizeof(DeviceConfig) CHANGES, not only when a field's
+// meaning does. loadConfig() reaches its migration path by comparing the file's
+// size against sizeof(DeviceConfig) and then checks the version byte against
+// KNOWN_MIGRATABLE in ConfigManager.cpp. Leaving the number alone while the
+// struct grows means a device running the previous firmware presents a file
+// that is both too short AND carries a version the migrator does not accept —
+// which is a factory reset, written straight back to flash. v15 grew
+// KindleConfig by 33 bytes and would have done exactly that to every v14
+// device.
+#define CONFIG_VERSION       15
 
 // DS1302 RAM addresses for bootcount backup
 #define RTC_RAM_BOOTCOUNT_ADDR  0

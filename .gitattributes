@@ -1,3 +1,8 @@
+# The failsafe page is compressed byte-for-byte into src/web/FailsafeHtml.h and
+# CI checks the two agree. A CRLF working tree makes the generated header differ
+# from what CI compares against by exactly one byte per line, so pin it.
+src/web/failsafe.html text eol=lf
+
 kindle/*.sh text eol=lf
 kindle/*.json text eol=lf
 kindle/*.xml text eol=lf

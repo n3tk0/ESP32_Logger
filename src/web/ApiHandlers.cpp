@@ -350,9 +350,18 @@ static void handleApiSensors(AsyncWebServerRequest* req) {
 static void handleEspnowStatus(AsyncWebServerRequest* req) {
     JsonDocument doc;
 
-    doc["pairing"] = espnowPairingActive();
-    doc["offline"] = espnowOfflineCount();
-    doc["warn"]    = espnowAnyBatteryWarn();
+    // Read ONCE and used for both the count and the per-node flags below.
+    // Asking twice would be harmless today, but computing the two from
+    // different thresholds is what made the summary badge disagree with the
+    // node list, so they share a value by construction.
+    const uint8_t offlineIv = espnowGetOfflineIntervals();
+
+    doc["pairing"]           = espnowPairingActive();
+    doc["offline"]           = espnowOfflineCount();
+    doc["warn"]              = espnowAnyBatteryWarn();
+    // Shown on the settings form so the number in the input is the number the
+    // device is actually using, rather than whatever was last typed.
+    doc["offline_intervals"] = offlineIv;
 
     EspNowNode nodes[ESPNOW_MAX_NODES];
     const int n = espnowCopyNodes(nodes, ESPNOW_MAX_NODES);
@@ -367,7 +376,7 @@ static void handleEspnowStatus(AsyncWebServerRequest* req) {
         o["interval"]  = e.intervalS;
         o["frames"]    = e.framesRx;
         o["dropped"]   = e.framesDropped;
-        o["offline"]   = espnowNodeOffline(e, nowMs);
+        o["offline"]   = espnowNodeOffline(e, nowMs, offlineIv);
 
         char mac[18];
         snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -505,6 +514,175 @@ static void handleEspnowNode(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
+// POST /api/espnow/add — provision a node by typing its MAC
+// ---------------------------------------------------------------------------
+// The escape hatch from pairing, and it is needed more often than it sounds.
+// Pairing requires the node to be awake, in range and holding the right key at
+// the moment somebody clicks a button — which is fine on a bench and awkward
+// for a node already sealed in a box on a roof. Its MAC is printed on the
+// module and never changes.
+//
+// The node still has to hold the shared key for anything it sends to decrypt,
+// so this adds a slot and a peer, not trust: a wrong MAC produces a node that
+// never reports, not one that reports someone else's readings.
+static bool parseMac(const String& s, uint8_t out[6]) {
+    // Accepts aa:bb:cc:dd:ee:ff, aa-bb-…, and aabbccddeeff — the three forms a
+    // MAC is printed in — but nothing else. sscanf with %x would have taken
+    // "0x1 2 3 4 5 6" and negative numbers as well.
+    int n = 0;
+    uint8_t nib = 0;
+    bool half = false;
+    for (size_t i = 0; i < s.length(); i++) {
+        const char c = s[i];
+        if (c == ':' || c == '-') {
+            // A separator mid-byte means a short group ("aa:b:cc"), which is
+            // ambiguous, not merely untidy.
+            if (half) return false;
+            continue;
+        }
+        uint8_t v;
+        if      (c >= '0' && c <= '9') v = (uint8_t)(c - '0');
+        else if (c >= 'a' && c <= 'f') v = (uint8_t)(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F') v = (uint8_t)(c - 'A' + 10);
+        else return false;
+
+        if (!half) { nib = v; half = true; }
+        else {
+            if (n >= 6) return false;          // too long
+            out[n++] = (uint8_t)((nib << 4) | v);
+            half = false;
+        }
+    }
+    return n == 6 && !half;
+}
+
+static void handleEspnowAdd(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;
+
+    if (!req->hasParam("mac", true) || !req->hasParam("node_id", true)) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"mac and node_id are required\"}");
+        return;
+    }
+
+    uint8_t mac[6];
+    if (!parseMac(req->getParam("mac", true)->value(), mac)) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"malformed MAC address\"}");
+        return;
+    }
+
+    // Refused rather than accepted-and-ignored. A multicast MAC (low bit of the
+    // first octet) cannot be an ESP-NOW peer, and the all-zero address is what
+    // an empty form field parses to if the digits are stripped.
+    if (mac[0] & 0x01) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"that is a multicast address, not a device\"}");
+        return;
+    }
+    bool allZero = true;
+    for (int i = 0; i < 6; i++) if (mac[i]) { allZero = false; break; }
+    if (allZero) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"00:00:00:00:00:00 is not a device\"}");
+        return;
+    }
+
+    const long rawId = req->getParam("node_id", true)->value().toInt();
+    // 0 is the wire's "unprovisioned" marker and 255 is reserved; the table
+    // refuses both, but saying so here gives the form something to show.
+    if (rawId < 1 || rawId > 254) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"node_id must be 1..254\"}");
+        return;
+    }
+    const uint8_t id = (uint8_t)rawId;
+
+    uint16_t interval = (uint16_t)ESPNOW_DEFAULT_INTERVAL_S;
+    if (req->hasParam("interval", true)) {
+        const long v = req->getParam("interval", true)->value().toInt();
+        if (v < 10 || v > 65535) {
+            req->send(400, "application/json",
+                      "{\"ok\":false,\"error\":\"interval must be 10..65535 s\"}");
+            return;
+        }
+        interval = (uint16_t)v;
+    }
+
+    // Empty label means "let the table name it espnow-NN", which is what add()
+    // does with a null. Passing "" would have been stored as an empty sensorId.
+    const char* label = nullptr;
+    String labelStr;
+    if (req->hasParam("label", true)) {
+        labelStr = req->getParam("label", true)->value();
+        if (labelStr.length() > 0) label = labelStr.c_str();
+    }
+
+    // A MAC already in the table under a DIFFERENT id would otherwise produce
+    // two slots for one radio: add() keys on nodeId, so it would not notice.
+    // The node would then be counted twice and one of the two entries could
+    // never go anything but offline.
+    {
+        EspNowNode nodes[ESPNOW_MAX_NODES];
+        const int n = espnowCopyNodes(nodes, ESPNOW_MAX_NODES);
+        for (int i = 0; i < n; i++) {
+            if (nodes[i].nodeId != id && memcmp(nodes[i].mac, mac, 6) == 0) {
+                req->send(409, "application/json",
+                          "{\"ok\":false,\"error\":\"that MAC is already node "
+                          "with another id — forget it first\"}");
+                return;
+            }
+        }
+    }
+
+    if (!espnowAddNode(mac, id, label, interval)) {
+        req->send(507, "application/json",
+                  "{\"ok\":false,\"error\":\"the node table is full\"}");
+        return;
+    }
+
+    JsonDocument doc;
+    doc["ok"]       = true;
+    doc["node_id"]  = id;
+    doc["interval"] = interval;
+    sendJsonResponse(req, doc);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/espnow/config — settings that belong to the radio, not to a node
+// ---------------------------------------------------------------------------
+static void handleEspnowConfig(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;
+
+    if (!req->hasParam("offline_intervals", true)) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"nothing to set\"}");
+        return;
+    }
+
+    const long v = req->getParam("offline_intervals", true)->value().toInt();
+    // 0 is legal and means "use the built-in default"; the setter enforces the
+    // rest of the range and refuses rather than clamping, so a typed 200 comes
+    // back as an error instead of silently becoming 60.
+    if (v < 0 || v > 255 || !espnowSetOfflineIntervals((uint8_t)v)) {
+        char msg[128];
+        snprintf(msg, sizeof(msg),
+                 "{\"ok\":false,\"error\":\"offline_intervals must be 0 (default) "
+                 "or %d..%d\"}",
+                 ESPNOW_OFFLINE_INTERVALS_MIN, ESPNOW_OFFLINE_INTERVALS_MAX);
+        req->send(400, "application/json", msg);
+        return;
+    }
+
+    JsonDocument doc;
+    doc["ok"] = true;
+    // The EFFECTIVE value, not the stored one: a posted 0 comes back as the
+    // built-in default, so the form shows what the device will actually use.
+    doc["offline_intervals"] = espnowGetOfflineIntervals();
+    sendJsonResponse(req, doc);
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/espnow/forget — drop a node's radio peer and its slot
 // ---------------------------------------------------------------------------
 static void handleEspnowForget(AsyncWebServerRequest* req) {
@@ -524,29 +702,62 @@ static void handleEspnowForget(AsyncWebServerRequest* req) {
 #endif  // FEATURE_ESPNOW_INGEST
 
 #ifdef FEATURE_REMOTE_NODES
+// ---------------------------------------------------------------------------
+// GET /api/remote/status — the HTTP nodes posting to /api/ingest
+// ---------------------------------------------------------------------------
+// The mailbox is the only record of these. Unlike an ESP-NOW node there is no
+// provisioning table: a node exists because it posted, and it is listed until
+// its slots are recycled. So this endpoint reports what arrived and how long
+// ago, and nothing about what was configured.
+//
+// THE STALENESS THRESHOLD MATCHES RemoteNodeSensor'S DEFAULT, deliberately.
+// The plugin treats a reading older than ten minutes as QUALITY_ERROR; a page
+// that called the same node offline after three would contradict the dashboard
+// it sits next to — readings still flowing in, the settings page saying the
+// node is down. A node whose plugin is configured with its own
+// `stale_after_ms` will disagree with this figure, which is why the age is
+// reported alongside the verdict rather than instead of it.
+static constexpr uint32_t REMOTE_STATUS_STALE_MS = 600000UL;   // 10 minutes
+
 static void handleApiRemoteStatus(AsyncWebServerRequest* req) {
     JsonDocument doc;
     JsonArray nodesArr = doc["nodes"].to<JsonArray>();
 
-    int count = remoteIngest.nodeCount();
+    const int count = remoteIngest.nodeCount();
     for (int i = 0; i < count; i++) {
-        char nodeId[32] = {0};
-        if (remoteIngest.nodeIdAt(i, nodeId, sizeof(nodeId))) {
-            JsonObject n = nodesArr.add<JsonObject>();
-            n["id"] = nodeId;
-            uint32_t ageMs = remoteIngest.ageMsForNode(nodeId);
-            n["age_ms"] = ageMs;
-            n["online"] = (ageMs != UINT32_MAX && ageMs < 180000); // 3 mins threshold
+        // MAX_NODE_ID, not an arbitrary 32: the mailbox clamps ids to sixteen
+        // characters plus a terminator, and a larger buffer here only invites
+        // the reader to think longer ids survive.
+        char nodeId[RemoteIngest::MAX_NODE_ID] = {0};
+        if (!remoteIngest.nodeIdAt(i, nodeId, sizeof(nodeId))) continue;
 
-            SensorReading readings[8];
-            int mCount = remoteIngest.peekLatest(nodeId, readings, 8);
-            JsonArray mArr = n["metrics"].to<JsonArray>();
-            for (int m = 0; m < mCount; m++) {
-                JsonObject mObj = mArr.add<JsonObject>();
-                mObj["metric"] = readings[m].metric;
-                mObj["value"] = readings[m].value;
-                mObj["unit"] = readings[m].unit;
-            }
+        JsonObject n = nodesArr.add<JsonObject>();
+        n["id"] = nodeId;
+
+        // UINT32_MAX means "never heard from", which is not an age. Sent as
+        // null so the page prints a dash instead of forty-nine days.
+        const uint32_t ageMs = remoteIngest.ageMsForNode(nodeId);
+        const bool     seen  = (ageMs != UINT32_MAX);
+        if (seen) n["age_ms"] = ageMs; else n["age_ms"] = nullptr;
+        n["online"] = seen && (ageMs < REMOTE_STATUS_STALE_MS);
+
+        // Eight is every metric a node of this kind sends with room to spare
+        // (temperature, humidity, pressure, battery and three more), and the
+        // array is on the AsyncTCP worker's stack, which is not generous.
+        SensorReading readings[8];
+        const int mCount = remoteIngest.peekLatest(nodeId, readings, 8,
+                                                   REMOTE_STATUS_STALE_MS);
+        JsonArray mArr = n["metrics"].to<JsonArray>();
+        for (int m = 0; m < mCount; m++) {
+            JsonObject mObj = mArr.add<JsonObject>();
+            mObj["metric"] = readings[m].metric;
+            mObj["value"]  = readings[m].value;
+            mObj["unit"]   = readings[m].unit;
+            // Per-metric, because a node can go on reporting temperature after
+            // its humidity sensor has stopped, and one aggregate freshness
+            // figure for the node would hide that.
+            mObj["stale"]  = (readings[m].quality == QUALITY_ERROR);
+            mObj["ts"]     = readings[m].timestamp;
         }
     }
     sendJsonResponse(req, doc);
@@ -1555,6 +1766,8 @@ void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/espnow/status",     HTTP_GET,  handleEspnowStatus);
     server.on("/api/espnow/pair",       HTTP_POST, handleEspnowPair);
     server.on("/api/espnow/node",       HTTP_POST, handleEspnowNode);
+    server.on("/api/espnow/add",        HTTP_POST, handleEspnowAdd);
+    server.on("/api/espnow/config",     HTTP_POST, handleEspnowConfig);
     server.on("/api/espnow/forget",     HTTP_POST, handleEspnowForget);
 #endif
 #ifdef FEATURE_REMOTE_NODES

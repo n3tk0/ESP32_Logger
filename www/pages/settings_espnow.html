@@ -114,10 +114,14 @@
       <div class="card-body">
         <div class="field" style="max-width:300px">
           <label class="field-label" for="en-offline-iv">Offline threshold (missed intervals)</label>
-          <input class="input" id="en-offline-iv" type="number" min="1" max="10" value="3">
+          <!-- The bounds match what the firmware accepts; it refuses rather
+               than clamps, so a form that offered 1 would produce an error the
+               hint below has already explained. -->
+          <input class="input" id="en-offline-iv" type="number" min="2" max="60" value="3">
           <p class="hint">
             How many consecutive missed reports before a node counts as offline.
-            Three is the default — one miss is ordinary on 2.4 GHz.
+            Three is the default — one miss is ordinary on 2.4 GHz, so the
+            minimum is two.
           </p>
         </div>
         <button class="btn" data-click="espnowSaveConfig">

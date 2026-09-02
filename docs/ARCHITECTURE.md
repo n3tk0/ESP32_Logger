@@ -606,6 +606,8 @@ collector with no clock of its own cannot judge and takes `ts` as sent.
 | GET | `/api/espnow/status` | read | Nodes, battery, last seen, and the drop counters |
 | POST | `/api/espnow/pair` | CSRF | Open a pairing window (`seconds`, 30–600) |
 | POST | `/api/espnow/node` | CSRF | Rename a node (`label`) or change its `interval` |
+| POST | `/api/espnow/add` | CSRF | Provision a node by `mac` + `node_id`, bypassing pairing |
+| POST | `/api/espnow/config` | CSRF | Radio-wide settings — currently `offline_intervals` |
 | POST | `/api/espnow/forget` | CSRF | Drop a node's radio peer and its slot |
 
 **Remote WiFi Nodes** (`FEATURE_REMOTE_NODES`)
@@ -613,6 +615,25 @@ collector with no clock of its own cannot judge and takes `ts` as sent.
 | Method | Route | Auth | Purpose |
 |---|---|---|---|
 | GET | `/api/remote/status` | read | List HTTP WiFi nodes, metrics, age, and online status |
+
+`/api/espnow/add` exists because pairing needs the node awake, in range and
+holding the right key at the moment somebody clicks a button — fine on a bench,
+awkward for a node already sealed in a box on a roof, whose MAC is printed on
+the module. It adds a slot and a radio peer, not trust: the node still has to
+hold the shared key for anything it sends to decrypt, so a mistyped MAC
+produces a node that never reports rather than one that reports a stranger's
+readings. A MAC already registered under a different id is refused (409) rather
+than accepted, because `add()` keys on `node_id` and would otherwise give one
+radio two slots, one of which could never be anything but offline.
+
+`offline_intervals` is stored in NVS rather than in `config.bin`. It is a
+diagnostic threshold, not part of the device's identity, and putting one byte in
+the config struct would have cost a migration on every deployed device. 0 means
+"use the built-in `ESPNOW_OFFLINE_INTERVALS`", and the endpoint answers with the
+*effective* value so the form shows what the device will actually use. The same
+figure drives both the summary count and the per-node badges — they are computed
+from one read, because computing them from two is how the badge came to say
+"offline" beside a count that said none were.
 
 The counters in `/api/espnow/status` are not decoration. "No readings are
 arriving" has several very different causes — a mismatched key, a moved
