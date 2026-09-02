@@ -24,6 +24,7 @@
 #endif
 #include "../espnow/EspNowIngest.h"   // GET/POST /api/espnow/* (FEATURE_ESPNOW_INGEST)
 #include "KindleSkin.h"               // GET/POST /api/kindle/config
+#include "KindleSlotStore.h"           // GET/POST /api/kindle/slots
 #include "../managers/ConfigManager.h" // saveConfig() after module update
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
@@ -863,6 +864,114 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     // No reload of anything: the dashboard reads config.kindle each time it
     // renders, so the next repaint on the reader is the new page.
     req->send(200, "application/json", "{\"ok\":true}");
+}
+
+// ---------------------------------------------------------------------------
+// GET  /api/kindle/slots — what the dashboard shows, and in what order
+// POST /api/kindle/slots — replace the whole list
+// ---------------------------------------------------------------------------
+// A WHOLE-LIST REPLACE, not per-slot edits. The list is short, ordered, and
+// the order is a property of the list rather than of any slot in it — an
+// endpoint that moved one entry would need a second concept of position, and
+// the editor would still have to send everything to reorder two rows. Sending
+// the array is simpler at both ends and cannot leave the device holding half
+// an edit.
+//
+// The sizes are described in the response too. The form has to name them
+// somewhere, and generating that list from the firmware's own enum means a
+// size added later appears in the editor without anyone remembering to add it
+// twice.
+static void handleKindleSlotsGet(AsyncWebServerRequest* req) {
+    JsonDocument doc;
+
+    JsonArray arr = doc["slots"].to<JsonArray>();
+    const KindleSlotList& list = kdSlots();
+    for (int i = 0; i < list.count; i++) {
+        const KindleSlot& s = list.slot[i];
+        JsonObject o = arr.add<JsonObject>();
+        o["sensor"]   = s.sensorId;
+        o["metric"]   = s.metric;
+        o["label"]    = s.label;                 // "" means "use the default"
+        o["shown"]    = kdSlotLabel(s);          // what will actually be drawn
+        o["size"]     = s.size;
+        o["flags"]    = s.flags;
+        o["decimals"] = s.decimals;
+    }
+
+    JsonArray sizes = doc["sizes"].to<JsonArray>();
+    static const char* SIZE_NAME[KSLOT_SIZE_COUNT] = { "hero", "large", "medium", "small" };
+    for (int i = 0; i < KSLOT_SIZE_COUNT; i++) {
+        JsonObject o = sizes.add<JsonObject>();
+        o["id"]    = i;
+        o["name"]  = SIZE_NAME[i];
+        o["units"] = kdSlotUnits((uint8_t)i);    // twelfths of a row
+    }
+
+    doc["cap"]        = KindleSlotList::CAP;
+    doc["row_units"]  = KSLOT_ROW_UNITS;
+    doc["flag_bold"]  = KSLOTF_BOLD;
+    doc["flag_unit"]  = KSLOTF_UNIT;
+    doc["flag_age"]   = KSLOTF_AGE;
+    doc["flag_trend"] = KSLOTF_TREND;
+    doc["auto_decimals"] = KSLOT_DECIMALS_AUTO;
+
+    sendJsonResponse(req, doc);
+}
+
+static void handleKindleSlotsPost(AsyncWebServerRequest* req, uint8_t* data, size_t len) {
+    if (!requireMutatingAuth(req)) return;
+
+    JsonDocument doc;
+    if (deserializeJson(doc, data, len) != DeserializationError::Ok) {
+        req->send(400, "application/json", "{\"ok\":false,\"error\":\"bad JSON\"}");
+        return;
+    }
+    JsonArrayConst arr = doc["slots"].as<JsonArrayConst>();
+    if (arr.isNull()) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"expected a slots array\"}");
+        return;
+    }
+
+    // Built in full BEFORE anything is stored. A list assembled straight into
+    // kdSlots() would leave the dashboard drawing a half-applied layout if the
+    // save then failed.
+    KindleSlotList fresh;
+    fresh.clear();
+    int dropped = 0;
+    for (JsonObjectConst o : arr) {
+        if (fresh.count >= KindleSlotList::CAP) { dropped++; continue; }
+        KindleSlot& s = fresh.slot[fresh.count];
+        s = KindleSlot{};
+        strncpy(s.sensorId, o["sensor"] | "", sizeof(s.sensorId) - 1);
+        strncpy(s.metric,   o["metric"] | "", sizeof(s.metric)   - 1);
+        strncpy(s.label,    o["label"]  | "", sizeof(s.label)    - 1);
+        s.size     = (uint8_t)(o["size"]     | (int)KSLOT_MEDIUM);
+        s.decimals = (uint8_t)(o["decimals"] | (int)KSLOT_DECIMALS_AUTO);
+        s.flags    = (uint8_t)(o["flags"]    | (int)KSLOTF_UNIT);
+        if (!s.used()) { dropped++; continue; }
+        fresh.count++;
+    }
+    kdSlotsClamp(fresh);
+
+    if (!activeFS) {
+        req->send(503, "application/json", "{\"ok\":false,\"error\":\"no filesystem\"}");
+        return;
+    }
+    if (!kdSlotsSave(*activeFS, fresh)) {
+        req->send(500, "application/json", "{\"ok\":false,\"error\":\"save failed\"}");
+        return;
+    }
+
+    // Only now. The renderers read this list without a lock, so it is replaced
+    // once, after the write that makes it survive a reboot.
+    kdSlots() = fresh;
+
+    JsonDocument res;
+    res["ok"]      = true;
+    res["count"]   = fresh.count;
+    res["dropped"] = dropped;   // named so an editor can say what was refused
+    sendJsonResponse(req, res);
 }
 #endif  // FEATURE_KINDLE_DASHBOARD
 
@@ -1776,6 +1885,22 @@ void registerApiRoutes(AsyncWebServer& server) {
 #ifdef FEATURE_KINDLE_DASHBOARD
     server.on("/api/kindle/config",     HTTP_GET,  handleKindleConfigGet);
     server.on("/api/kindle/config",     HTTP_POST, handleKindleConfigPost);
+    server.on("/api/kindle/slots",      HTTP_GET,  handleKindleSlotsGet);
+    // A JSON body rather than form fields, so the whole ordered list arrives as
+    // one document. Same one-shot body guard the wifi test uses: a split body
+    // would be reassembled here with no bound on what it could grow to.
+    server.on("/api/kindle/slots", HTTP_POST,
+        [](AsyncWebServerRequest* r) { /* handled in the body callback */ },
+        nullptr,
+        [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
+           size_t index, size_t total) {
+            if (index != 0 || len != total) {
+                r->send(413, "application/json",
+                        "{\"ok\":false,\"error\":\"body too large\"}");
+                return;
+            }
+            handleKindleSlotsPost(r, data, len);
+        });
 #endif
     server.on("/api/mqtt/ha_discovery", HTTP_POST, handleMqttHaDiscovery);
     server.on("/api/ota/status",        HTTP_GET,  handleOtaStatus);

@@ -17,6 +17,7 @@
 #include "RefreshCadence.h"
 #include "KindleSkin.h"                 // config.kindle -> face, weight, formats
 #include "KindleChartBmp.h"             // ChartBmpCtx / ChartBmpReader
+#include "KindleSlotStore.h"            // the configurable slot list
 #ifdef FEATURE_ESPNOW_INGEST
 #  include "../espnow/EspNowIngest.h"   // espnowAnyBatteryWarn()
 #endif
@@ -44,6 +45,12 @@ struct Latest {
     float    value = NAN;
     uint32_t ts    = 0;
     bool     ok    = false;
+    // Carried from the reading rather than configured per slot. A metric's
+    // unit is a property of the sensor that produced it — an SDS011 knows its
+    // PM is µg/m³ and a BH1750 knows its light is lux — so asking the reader to
+    // type it into a slot would be asking them to repeat something the
+    // pipeline already knows, and to get it wrong.
+    char     unit[12] = {0};
 };
 
 static Latest latestOf(const char* sensorId, const char* metric) {
@@ -56,9 +63,17 @@ static Latest latestOf(const char* sensorId, const char* metric) {
         out.value = r.value;
         out.ts    = r.timestamp;
         out.ok    = true;
+        strncpy(out.unit, r.unit, sizeof(out.unit) - 1);
     }
     return out;
 }
+
+/// The reading a slot names, with the same humidity preference the fixed
+/// zones have always applied: a self-heating-corrected figure when the sensor
+/// publishes one. Routed through here rather than through latestOf() directly
+/// so a slot configured as plain "humidity" gets the corrected value, which is
+/// what the reader means and what the page used to show.
+static Latest slotReading(const KindleSlot& s);
 
 // The humidity to show, preferring the self-heating-corrected figure.
 //
@@ -76,6 +91,11 @@ static Latest humidityOf(const char* sensorId) {
     Latest corrected = latestOf(sensorId, "humidity_amb");
     if (corrected.ok) return corrected;
     return latestOf(sensorId, "humidity");
+}
+
+static Latest slotReading(const KindleSlot& s) {
+    if (strcmp(s.metric, "humidity") == 0) return humidityOf(s.sensorId);
+    return latestOf(s.sensorId, s.metric);
 }
 
 // ---------------------------------------------------------------------------
@@ -571,6 +591,83 @@ static void kdShellVarN(AsyncResponseStream* s, const char* fmt, int i, const ch
     kdShellVar(s, key, val);
 }
 
+// ---------------------------------------------------------------------------
+// The configurable slots
+// ---------------------------------------------------------------------------
+/// Resolve the slot list against the live readings and emit it, already packed.
+///
+/// VISIBILITY IS DECIDED HERE AND NOWHERE ELSE. A slot whose sensor is not
+/// reporting that metric is not emitted at all, so the row closes up behind it
+/// — which is the case this whole feature exists for: a BMP280 outdoors
+/// measures no humidity, and the page should not hold a space open for one.
+///
+/// The alternative, emitting every slot with an "ok" flag and letting each
+/// renderer decide, would put the same rule in a shell script and a CSS page
+/// and wait for them to drift.
+static void emitSlots(AsyncResponseStream* s, const KindleConfig& skin, uint32_t now) {
+    const KindleSlotList& list = kdSlots();
+
+    Latest reading[KindleSlotList::CAP];
+    bool   visible[KindleSlotList::CAP] = {false};
+    for (int i = 0; i < list.count; i++) {
+        if (!list.slot[i].used()) continue;
+        reading[i] = slotReading(list.slot[i]);
+        visible[i] = reading[i].ok;
+    }
+
+    KdSlotPlacement place[KindleSlotList::CAP];
+    const int n = kdSlotsPack(list, visible, place, KindleSlotList::CAP);
+
+    s->printf("SLOT_COUNT=%d\n", n);
+    s->printf("SLOT_ROWS=%d\n", kdSlotsRowCount(place, n));
+
+    char key[24];
+    char buf[32];
+    for (int k = 0; k < n; k++) {
+        const int          idx = place[k].index;
+        const KindleSlot&  sl  = list.slot[idx];
+        const Latest&      rd  = reading[idx];
+
+        // Pressure is the one metric the reader can re-unit, so it is the one
+        // whose stored hPa is not what gets printed.
+        float       v    = rd.value;
+        const char* unit = rd.unit;
+        int         dec  = kdSlotDecimals(sl);
+        if (strcmp(sl.metric, "pressure") == 0) {
+            v    = kdPressureValue(rd.value, skin.pressureUnit);
+            unit = kdPressureUnitLabel(skin.pressureUnit);
+            dec  = kdPressureDecimals(skin.pressureUnit);
+        } else if (strcmp(sl.metric, "temperature") == 0) {
+            // The temperature decimals control predates slots and still wins:
+            // it is the setting people actually turn, and having it apply to
+            // the hero but not to a second temperature slot would be a puzzle.
+            dec = skin.tempDecimals;
+        }
+
+        snprintf(buf, sizeof(buf), "%.*f", dec, (double)v);
+
+        snprintf(key, sizeof(key), "SLOT%d_LABEL", k);  kdShellVar(s, key, kdSlotLabel(sl));
+        snprintf(key, sizeof(key), "SLOT%d_VALUE", k);  kdShellVar(s, key, buf);
+        snprintf(key, sizeof(key), "SLOT%d_UNIT", k);
+        kdShellVar(s, key, (sl.flags & KSLOTF_UNIT) ? unit : "");
+        snprintf(key, sizeof(key), "SLOT%d_SENSOR", k); kdShellVar(s, key, sl.sensorId);
+        snprintf(key, sizeof(key), "SLOT%d_METRIC", k); kdShellVar(s, key, sl.metric);
+
+        s->printf("SLOT%d_SIZE=%u\n",  k, (unsigned)sl.size);
+        s->printf("SLOT%d_ROW=%u\n",   k, (unsigned)place[k].row);
+        s->printf("SLOT%d_COL=%u\n",   k, (unsigned)place[k].col);
+        s->printf("SLOT%d_UNITS=%u\n", k, (unsigned)place[k].units);
+        s->printf("SLOT%d_BOLD=%d\n",  k, (sl.flags & KSLOTF_BOLD) ? 1 : 0);
+
+        // Age in minutes, and only when it was asked for and is real. A value
+        // measured seconds ago and one measured yesterday look identical on an
+        // e-ink panel that repaints every five minutes.
+        unsigned ageMin = 0;
+        if ((sl.flags & KSLOTF_AGE) && rd.ts && now > rd.ts) ageMin = (now - rd.ts) / 60u;
+        s->printf("SLOT%d_AGE_MIN=%u\n", k, ageMin);
+    }
+}
+
 static void handleKindleData(AsyncWebServerRequest* req) {
     const Latest outT = latestOf(outdoorSensorId(), "temperature");
     const Latest outH = humidityOf(outdoorSensorId());
@@ -738,6 +835,19 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     kdShellVar(s, "LBL_NO_READING", KD_T("no reading", "няма данни"));
     kdShellVar(s, "LBL_WIND", KD_T("wind", "вятър"));
     kdShellVar(s, "LBL_TO", KD_T("to", "до"));
+
+    // ── Slots ──
+    //
+    // The configurable layout, emitted alongside the fixed OUT_*/IN_* keys
+    // rather than instead of them. A Kindle running an older copy of
+    // update_dash.sh keeps working from the keys it knows; a current one draws
+    // the slot flow and ignores them. Nobody has to update the reader and the
+    // collector in the same minute.
+    //
+    // Each slot arrives already placed — row and column in twelfths — because
+    // the packing has to agree with the HTML page's, and two implementations of
+    // one packing rule is two chances to disagree about where a value goes.
+    emitSlots(s, skin, now);
 
     // ── Metadata ──
     const uint16_t resW = skin.fbinkResW ? skin.fbinkResW : (uint16_t)KINDLE_PAGE_W;
@@ -1360,6 +1470,15 @@ static void handleKindleClear(AsyncWebServerRequest* req) {
 // silently unreachable, and the pages simply rendered the dashboard instead.
 // The children go first.
 void registerKindleDashboard(AsyncWebServer& server) {
+    // Loaded here rather than in setup(): registration is the first moment the
+    // dashboard exists as a thing, the filesystem is up by now, and it keeps
+    // the sketch from needing to know that slots are a file at all.
+    //
+    // The two sensor ids seed the defaults, so a device that has never
+    // configured a slot gets the page it had before slots existed — built from
+    // whichever sensors it was already pointing at.
+    if (activeFS) kdSlotsBegin(*activeFS, outdoorSensorId(), indoorSensorId());
+
     server.on("/kindle/probe", HTTP_GET, handleKindleProbe);
     server.on("/kindle/clear", HTTP_GET, handleKindleClear);
     server.on("/kindle/data",  HTTP_GET, handleKindleData);

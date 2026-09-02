@@ -251,6 +251,44 @@
         </div>
       </div>
 
+      <!-- What the dashboard shows -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="layout"></span> Readings on the dashboard</div>
+          <span id="kd-slot-count" class="badge dim"></span>
+        </div>
+        <div class="card-body">
+          <p class="hint">
+            Each row below is one reading on the e-ink page, drawn in this
+            order. A reading whose sensor is not reporting is skipped and the
+            row closes up behind it — so a BMP280 outside simply has no humidity
+            line, rather than a permanent dash.
+          </p>
+          <p class="hint">
+            Size decides both the type size and how much of the width it takes:
+            a <strong>hero</strong> fills the row on its own, then
+            <strong>large</strong> is a half, <strong>medium</strong> a third
+            and <strong>small</strong> a quarter. They pack left to right and
+            wrap.
+          </p>
+
+          <div id="kd-slots"></div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+            <button class="btn" data-click="kindleSlotAdd">
+              <span data-icon="plus"></span> Add a reading
+            </button>
+            <button class="btn" data-click="kindleSlotsReset">
+              <span data-icon="rotate-ccw"></span> Back to the built-in six
+            </button>
+            <button class="btn primary" data-click="kindleSlotsSave">
+              <span data-icon="save"></span> Save readings
+            </button>
+          </div>
+          <div id="kd-slot-msg"></div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-body" style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn primary" data-click="kindleSave">

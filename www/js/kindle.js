@@ -229,6 +229,242 @@ function kindleDefaults() {
   return kindlePost(body, "Back to the built-in design.");
 }
 
+
+// ============================================================================
+// The slot editor
+// ============================================================================
+// The dashboard's readings, as an ordered list. The page holds the working
+// copy; nothing is sent until Save, so reordering four rows is one request
+// rather than four.
+//
+// The sensor and metric dropdowns come from GET /api/sensors, which already
+// reports the metrics each sensor publishes. That is what makes the editor
+// honest about hardware: a BMP280 offers temperature and pressure and no
+// humidity, because that is what it measures, and a BME688 offers AQI because
+// it has one.
+var kdSlots   = [];     // the working copy
+var kdSizes   = [];     // [{id, name, units}] from the firmware's own enum
+var kdSensors = [];     // [{id, name, metrics: []}]
+var kdCap     = 12;
+var kdFlags   = { bold: 1, unit: 2, age: 4, trend: 8 };
+var kdAutoDec = 255;
+
+function kdSlotMsg(text, kind) {
+  showMsg("kd-slot-msg",
+          "<div class='alert alert-" + (kind === "ok" ? "success" : "error") + "'>" +
+          esc(text) + "</div>", true);
+}
+
+function kdMetricsFor(sensorId) {
+  for (var i = 0; i < kdSensors.length; i++) {
+    if (kdSensors[i].id === sensorId) return kdSensors[i].metrics || [];
+  }
+  return [];
+}
+
+function kdRenderSlots() {
+  var box = document.getElementById("kd-slots");
+  var count = document.getElementById("kd-slot-count");
+  if (!box) return;
+
+  if (count) {
+    count.textContent = kdSlots.length + " / " + kdCap;
+    count.className = "badge " + (kdSlots.length >= kdCap ? "warn" : "dim");
+  }
+
+  if (!kdSlots.length) {
+    box.innerHTML = "<p class='hint'>No readings configured — the e-ink page " +
+                    "will show the clock and the chart only.</p>";
+    return;
+  }
+
+  var html = "";
+  for (var i = 0; i < kdSlots.length; i++) {
+    var s = kdSlots[i];
+
+    // The sensor this slot names may not be among the configured ones — a node
+    // that has been removed, or a list restored from another device. Kept as an
+    // option rather than silently reassigned: dropping it would rewrite the
+    // reader's layout on their behalf just because a sensor was offline.
+    var sensorOpts = "";
+    var known = false;
+    for (var j = 0; j < kdSensors.length; j++) {
+      var sel = kdSensors[j].id === s.sensor;
+      if (sel) known = true;
+      sensorOpts += "<option value='" + esc(kdSensors[j].id) + "'" +
+                    (sel ? " selected" : "") + ">" + esc(kdSensors[j].id) + "</option>";
+    }
+    if (!known && s.sensor) {
+      sensorOpts = "<option value='" + esc(s.sensor) + "' selected>" +
+                   esc(s.sensor) + " (not configured)</option>" + sensorOpts;
+    }
+
+    var metrics = kdMetricsFor(s.sensor);
+    var metricOpts = "";
+    var mKnown = false;
+    for (var m = 0; m < metrics.length; m++) {
+      var msel = metrics[m] === s.metric;
+      if (msel) mKnown = true;
+      metricOpts += "<option value='" + esc(metrics[m]) + "'" +
+                    (msel ? " selected" : "") + ">" + esc(metrics[m]) + "</option>";
+    }
+    if (!mKnown && s.metric) {
+      metricOpts = "<option value='" + esc(s.metric) + "' selected>" +
+                   esc(s.metric) + " (not reported)</option>" + metricOpts;
+    }
+
+    var sizeOpts = "";
+    for (var z = 0; z < kdSizes.length; z++) {
+      sizeOpts += "<option value='" + kdSizes[z].id + "'" +
+                  (kdSizes[z].id === s.size ? " selected" : "") + ">" +
+                  esc(kdSizes[z].name) + "</option>";
+    }
+
+    html +=
+      "<div class='card' style='margin-bottom:8px'><div class='card-body'>" +
+        "<div style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'>" +
+          "<div style='flex:1;min-width:130px'>" +
+            "<label class='field-label'>Sensor</label>" +
+            "<select class='input' data-change='kindleSlotEdit' " +
+              "data-args='[" + i + ",\"sensor\"]'>" + sensorOpts + "</select></div>" +
+          "<div style='flex:1;min-width:130px'>" +
+            "<label class='field-label'>Reading</label>" +
+            "<select class='input' data-change='kindleSlotEdit' " +
+              "data-args='[" + i + ",\"metric\"]'>" + metricOpts + "</select></div>" +
+          "<div style='flex:0 0 110px'>" +
+            "<label class='field-label'>Size</label>" +
+            "<select class='input' data-change='kindleSlotEdit' " +
+              "data-args='[" + i + ",\"size\"]'>" + sizeOpts + "</select></div>" +
+          "<div style='flex:1;min-width:110px'>" +
+            "<label class='field-label'>Label</label>" +
+            "<input class='input' maxlength='16' placeholder='" + esc(s.shown || "") + "' " +
+              "value='" + esc(s.label || "") + "' data-change='kindleSlotEdit' " +
+              "data-args='[" + i + ",\"label\"]'></div>" +
+        "</div>" +
+        "<div style='display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;align-items:center'>" +
+          kdFlagBox(i, kdFlags.unit,  "unit",  "Show the unit") +
+          kdFlagBox(i, kdFlags.bold,  "bold",  "Bold") +
+          kdFlagBox(i, kdFlags.age,   "age",   "Show the age when stale") +
+          "<span style='flex:1'></span>" +
+          "<button class='btn' data-click='kindleSlotMove' data-args='[" + i + ",-1]'>&uarr;</button>" +
+          "<button class='btn' data-click='kindleSlotMove' data-args='[" + i + ",1]'>&darr;</button>" +
+          "<button class='btn warn' data-click='kindleSlotRemove' data-args='[" + i + "]'>" +
+            "<span data-icon='trash'></span></button>" +
+        "</div>" +
+      "</div></div>";
+  }
+  box.innerHTML = html;
+  if (window.Icons && Icons.swap) Icons.swap(box);
+}
+
+function kdFlagBox(i, bit, name, label) {
+  var on = (kdSlots[i].flags & bit) !== 0;
+  return "<label style='display:flex;gap:5px;align-items:center;font-size:.85rem'>" +
+           "<input type='checkbox' style='width:auto'" + (on ? " checked" : "") +
+           " data-change='kindleSlotFlag' data-args='[" + i + "," + bit + "]'>" +
+           esc(label) + "</label>";
+}
+
+function kindleSlotEdit(i, field, ev) {
+  if (!kdSlots[i]) return;
+  var v = ev && ev.target ? ev.target.value : "";
+  if (field === "size") kdSlots[i].size = parseInt(v, 10) || 0;
+  else                  kdSlots[i][field] = v;
+
+  // Changing the sensor can invalidate the metric — a BME688's "aqi" means
+  // nothing on a BMP280. Reset to the new sensor's first reading rather than
+  // leaving a pairing that will never resolve.
+  if (field === "sensor") {
+    var ms = kdMetricsFor(v);
+    if (ms.indexOf(kdSlots[i].metric) < 0) kdSlots[i].metric = ms.length ? ms[0] : "";
+  }
+  kdRenderSlots();
+}
+
+function kindleSlotFlag(i, bit, ev) {
+  if (!kdSlots[i]) return;
+  var on = ev && ev.target ? ev.target.checked : false;
+  kdSlots[i].flags = on ? (kdSlots[i].flags | bit) : (kdSlots[i].flags & ~bit);
+}
+
+function kindleSlotMove(i, dir) {
+  var j = i + dir;
+  if (j < 0 || j >= kdSlots.length) return;
+  var t = kdSlots[i]; kdSlots[i] = kdSlots[j]; kdSlots[j] = t;
+  kdRenderSlots();
+}
+
+function kindleSlotRemove(i) {
+  kdSlots.splice(i, 1);
+  kdRenderSlots();
+}
+
+function kindleSlotAdd() {
+  if (kdSlots.length >= kdCap) { kdSlotMsg("That is the most the page holds.", "err"); return; }
+  var first = kdSensors.length ? kdSensors[0] : null;
+  kdSlots.push({
+    sensor: first ? first.id : "",
+    metric: first && first.metrics && first.metrics.length ? first.metrics[0] : "",
+    label: "", size: 3, flags: kdFlags.unit, decimals: kdAutoDec
+  });
+  kdRenderSlots();
+}
+
+function kindleSlotsLoad() {
+  return fetchWithTimeout("/api/kindle/slots", {}, 10000)
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(d) {
+      if (!d) return;
+      kdSlots = d.slots || [];
+      kdSizes = d.sizes || [];
+      kdCap   = d.cap || 12;
+      kdFlags = { bold: d.flag_bold, unit: d.flag_unit, age: d.flag_age, trend: d.flag_trend };
+      kdAutoDec = d.auto_decimals;
+      kdRenderSlots();
+    })
+    .catch(function() {});
+}
+
+function kindleSlotsSave() {
+  return postWithCsrf("/api/kindle/slots", {
+    body: JSON.stringify({ slots: kdSlots }),
+    headers: { "Content-Type": "application/json" }
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d && d.ok) {
+        var m = "Saved " + d.count + " reading" + (d.count === 1 ? "" : "s") + ".";
+        if (d.dropped) m += " " + d.dropped + " incomplete one(s) were dropped.";
+        kdSlotMsg(m, "ok");
+        kindleSlotsLoad();
+      } else {
+        kdSlotMsg((d && d.error) || "Save failed.", "err");
+      }
+    })
+    .catch(function() { kdSlotMsg("Save failed.", "err"); });
+}
+
+function kindleSlotsReset() {
+  // The built-in six, rebuilt from the two sensors the page is pointed at, so
+  // "back to the built-in design" means the same thing here as on the button
+  // above it.
+  var out = (document.getElementById("kd-outdoor-sensor") || {}).value || "";
+  var inn = (document.getElementById("kd-indoor-sensor") || {}).value || "";
+  if (!out && kdSensors.length) out = kdSensors[0].id;
+  if (!inn && kdSensors.length) inn = kdSensors[kdSensors.length > 1 ? 1 : 0].id;
+
+  kdSlots = [
+    { sensor: out, metric: "temperature", label: "", size: 0, flags: kdFlags.bold | kdFlags.unit | kdFlags.age, decimals: kdAutoDec },
+    { sensor: out, metric: "humidity",    label: "", size: 2, flags: kdFlags.unit, decimals: kdAutoDec },
+    { sensor: out, metric: "pressure",    label: "", size: 2, flags: kdFlags.unit | kdFlags.trend, decimals: kdAutoDec },
+    { sensor: inn, metric: "temperature", label: "", size: 1, flags: kdFlags.unit | kdFlags.age, decimals: kdAutoDec },
+    { sensor: inn, metric: "humidity",    label: "", size: 2, flags: kdFlags.unit, decimals: kdAutoDec },
+    { sensor: inn, metric: "aqi",         label: "", size: 2, flags: kdFlags.unit, decimals: kdAutoDec }
+  ];
+  kdRenderSlots();
+  kdSlotMsg("Reset — press Save readings to keep it.", "ok");
+}
+
 function kindleInit() {
   fetchWithTimeout("/api/sensors", {}, 10000)
     .then(function(r) { return r.ok ? r.json() : null; })
@@ -239,6 +475,7 @@ function kindleInit() {
           options += '<option value="' + esc(s.id) + '">' + esc(s.id) + (s.name ? " (" + esc(s.name) + ")" : "") + '</option>';
         });
       }
+      kdSensors = (d && d.sensors) ? d.sensors : [];
       var outSel = document.getElementById("kd-outdoor-sensor");
       var inSel = document.getElementById("kd-indoor-sensor");
       if (outSel) outSel.innerHTML = options.replace("Default", "Default (outdoor)");
@@ -247,6 +484,7 @@ function kindleInit() {
     .catch(function() {})
     .finally(function() {
       kindleRefresh();
+      kindleSlotsLoad();
     });
 }
 
@@ -259,4 +497,11 @@ registerHandlers({
   kindleDefaults: kindleDefaults,
   kindleFaceChanged: kindleFaceChanged,
   kindleClockChanged: kindleClockChanged,
+  kindleSlotAdd: kindleSlotAdd,
+  kindleSlotEdit: kindleSlotEdit,
+  kindleSlotFlag: kindleSlotFlag,
+  kindleSlotMove: kindleSlotMove,
+  kindleSlotRemove: kindleSlotRemove,
+  kindleSlotsSave: kindleSlotsSave,
+  kindleSlotsReset: kindleSlotsReset,
 });

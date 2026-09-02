@@ -676,6 +676,44 @@ synchronised node.
 |---|---|---|---|
 | GET | `/api/kindle/config` | read | How `/kindle` is drawn, plus its build-time width |
 | POST | `/api/kindle/config` | CSRF | Face, weight, clock style, formats, which blocks are drawn |
+| GET | `/api/kindle/slots` | read | Which readings the dashboard shows, in order, plus the size vocabulary |
+| POST | `/api/kindle/slots` | CSRF | Replace the whole ordered list (JSON body) |
+
+**The dashboard is a list, not a shape.** It used to be six hardwired readings
+— the outdoor sensor's temperature, humidity and pressure and the indoor
+sensor's temperature, humidity and AQI — which is a fine dashboard for exactly
+one hardware configuration. Twenty sensor plugins between them publish
+twenty-nine distinct metrics and the page could reach six of them; worse, it
+insisted on the six, so a BMP280 outdoors rendered a dash where its humidity
+would have been, forever, in a space nothing else could use.
+
+Each slot names a sensor, a metric and a size. The renderers walk the list in
+order and pack it into rows, and a slot whose sensor is not reporting that
+metric is not drawn at all — the row closes up behind it. Adding PM2.5 from an
+SDS011 on the balcony is adding a slot.
+
+Sizes and order rather than coordinates, and deliberately: the same page is
+rendered at 600x800 by an FBInk shell script and at 1072x1448 by a CSS page,
+so pixel positions chosen for one are wrong for the other, and placing every
+value twice by hand is not flexibility. A hero fills its row; large, medium and
+small take a half, a third and a quarter, and they tile exactly because the
+widths are twelfths. The packing happens once, on the collector, and both
+renderers are told the answer — two implementations of one packing rule is two
+chances to disagree about where a value goes.
+
+The list lives in `/config/kindle_slots.json`, not in `config.bin`, following
+the split the rest of the firmware makes: scalars in the binary struct, lists
+of configured things in JSON under `/config/`. It costs no migration, which
+matters — every field added to `DeviceConfig` puts every deployed device
+through `loadConfig()`'s migration path, and twelve slots would have been
+another 600 bytes of it. An absent file means "never configured" and yields
+defaults that reproduce the old six-reading page exactly, built from whichever
+two sensors the device was already pointed at.
+
+`/kindle/data` emits the packed slots as `SLOTn_*` keys alongside the older
+fixed `OUT_*`/`IN_*` ones, so a Kindle running an earlier copy of
+`update_dash.sh` keeps working from the keys it knows.
+
 
 The page being configured has no settings of its own and never will: it is
 served to a reader with no JavaScript and, on some firmware, a five-way pad

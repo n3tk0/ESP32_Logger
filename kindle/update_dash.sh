@@ -166,7 +166,119 @@ draw_clock() {
 }
 
 # ── Full dashboard rendering ─────────────────────────────────────────────────
+# ── The configurable slots ───────────────────────────────────────────────────
+# The collector sends a list of readings, each already placed: a row and a
+# column in twelfths of the page width. The packing is done there so the FBInk
+# page and the HTML page cannot disagree about where a value goes; all this end
+# does is turn twelfths into pixels.
+#
+# Sizes rather than coordinates, because these coordinates are for one panel.
+# 600x800 and 1072x1448 want different pixel positions for the same layout, and
+# the reader should not have to place every value twice.
+
+# The type size for a slot size, from the layout file.
+slot_val_size() {
+    case "$1" in
+        0) echo "${SLOT_VAL_SZ_HERO:-80}"   ;;
+        1) echo "${SLOT_VAL_SZ_LARGE:-44}"  ;;
+        2) echo "${SLOT_VAL_SZ_MEDIUM:-32}" ;;
+        *) echo "${SLOT_VAL_SZ_SMALL:-26}"  ;;
+    esac
+}
+
+# How tall a row is, given the largest slot in it.
+slot_row_height() {
+    case "$1" in
+        0) echo "${SLOT_ROW_H_HERO:-118}"   ;;
+        1) echo "${SLOT_ROW_H_LARGE:-74}"   ;;
+        *) echo "${SLOT_ROW_H:-56}"         ;;
+    esac
+}
+
+draw_slots() {
+    [ "${SLOT_COUNT:-0}" -gt 0 ] 2>/dev/null || return 1
+
+    local n="$SLOT_COUNT" i row sz
+
+    # First pass: the tallest slot in each row decides the row's height. Two
+    # passes rather than one because a row's height is not known until every
+    # slot in it has been seen, and the y of every LATER row depends on it.
+    i=0
+    while [ "$i" -lt "$n" ]; do
+        eval "row=\$SLOT${i}_ROW; sz=\$SLOT${i}_SIZE"
+        eval "cur=\${ROWMAX_${row}:-9}"
+        [ "$sz" -lt "$cur" ] 2>/dev/null && eval "ROWMAX_${row}=$sz"
+        i=$((i + 1))
+    done
+
+    # Second pass: draw. y accumulates the heights of the rows above.
+    local x y w val lab unit bold age txt vsz rh
+    local area_x="${SLOT_X:-18}" area_y="${SLOT_Y:-20}" area_w="${SLOT_W:-564}"
+    local last_row=-1 cur_y="$area_y"
+
+    i=0
+    while [ "$i" -lt "$n" ]; do
+        eval "row=\$SLOT${i}_ROW; col=\$SLOT${i}_COL; units=\$SLOT${i}_UNITS"
+        eval "sz=\$SLOT${i}_SIZE; bold=\$SLOT${i}_BOLD; age=\$SLOT${i}_AGE_MIN"
+        eval "lab=\$SLOT${i}_LABEL; val=\$SLOT${i}_VALUE; unit=\$SLOT${i}_UNIT"
+
+        # Advance y once per row, using the heights of the rows we have passed.
+        while [ "$last_row" -lt "$row" ]; do
+            last_row=$((last_row + 1))
+            [ "$last_row" -gt 0 ] && {
+                eval "prevmax=\${ROWMAX_$((last_row - 1)):-2}"
+                rh=$(slot_row_height "$prevmax")
+                cur_y=$((cur_y + rh))
+            }
+        done
+
+        x=$((area_x + col * area_w / 12))
+        w=$((units * area_w / 12))
+        y="$cur_y"
+        vsz=$(slot_val_size "$sz")
+
+        # Label above, value below — the same order the page has always used,
+        # and the one that survives a value being wider than its label.
+        [ -n "$lab" ] && draw_text_reg "$x" "$y" "${SLOT_LABEL_SZ:-12}" "GRAY7" "$lab"
+
+        txt="$val"
+        [ -n "$unit" ] && txt="$txt $unit"
+        # Only when it is worth saying. A reading a minute old is current; one
+        # an hour old is the thing the reader needs to know about.
+        [ "${age:-0}" -gt 1 ] 2>/dev/null && txt="$txt  ${age}m"
+
+        if [ "$bold" = "1" ]; then
+            draw_text_bold "$x" "$((y + ${SLOT_LABEL_SZ:-12} + 4))" "$vsz" "BLACK" "$txt"
+        else
+            draw_text_reg  "$x" "$((y + ${SLOT_LABEL_SZ:-12} + 4))" "$vsz" "BLACK" "$txt"
+        fi
+
+        i=$((i + 1))
+    done
+
+    # Where the caller should carry on drawing: below the last row.
+    eval "lastmax=\${ROWMAX_${last_row}:-2}"
+    rh=$(slot_row_height "$lastmax")
+    SLOTS_BOTTOM=$((cur_y + rh))
+    return 0
+}
+
 draw_all() {
+    # The slot flow, when the collector sends one. A collector running older
+    # firmware sends no SLOT_COUNT, and the fixed zones below still draw the
+    # page it knows how to describe — so the reader and the collector do not
+    # have to be updated in the same minute.
+    if draw_slots; then
+        draw_clock "$(date +%H:%M)"
+        draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAY10"
+        draw_text_reg "$LAB_CHART_X" "$LAB_CHART_Y" "$LAB_SZ" "GRAY7" "$LBL_LAST24"
+        if [ -f "$TMP/graph.bmp" ]; then
+            fbink -g file="$TMP/graph.bmp",x="$GR_X",y="$GR_Y" -p -M -q 2>/dev/null
+        fi
+        draw_forecast
+        return 0
+    fi
+
     # Section label: OUTSIDE
     draw_text_reg "$LAB_OUT_X" "$LAB_OUT_Y" "$LAB_SZ" "GRAY7" "$LBL_OUTSIDE"
 
@@ -238,6 +350,15 @@ draw_all() {
     # Third divider
     draw_hline "$RULE3_X" "$RULE3_Y" "$RULE3_W" "GRAY10"
 
+    draw_forecast
+}
+
+# ── Forecast, week strip and footer ──────────────────────────────────────────
+# Extracted from draw_all() so the slot flow and the legacy fixed layout can
+# both end the page the same way. None of it is a sensor reading, so none of it
+# is a slot: the forecast comes from an API, the week strip from the clock, and
+# the footer is a constant.
+draw_forecast() {
     # Forecast section
     if [ -n "$FC_SUMMARY" ]; then
         draw_text_reg "$LAB_FC_X" "$LAB_FC_Y" "$LAB_SZ" "GRAY7" "$LBL_FORECAST"
@@ -309,7 +430,8 @@ draw_all() {
 
     # Footer
     draw_hline "$FOOT_RULE_X" "$FOOT_RULE_Y" "$FOOT_RULE_W" "GRAY10"
-    draw_text_reg "$FOOT_X" "$FOOT_Y" "$FOOT_SZ" "GRAY5" "$LBL_MEASURED"
+    draw_text_reg "$FOOT_X" "$FOOT_Y" "$FOOT_SZ" "GRAY5" "$LBL_MEASURED"}
+
 }
 
 # ── Data-only update (partial) ───────────────────────────────────────────────

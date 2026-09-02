@@ -50,6 +50,41 @@ STATUS = {
 # Deliberately NOT the defaults: a page that renders correctly only when every
 # value is zero is a page whose select boxes have never been proven to reflect
 # what the device holds.
+# GET /api/kindle/slots — the configurable readings, and the size vocabulary
+# the firmware defines. Deliberately NOT the defaults: a page that renders only
+# when every slot is a plain temperature is a page whose dropdowns have never
+# been proven to reflect what the device holds.
+KINDLE_SLOTS = {
+    "slots": [
+        {"sensor": "balcony", "metric": "temperature", "label": "НАВЪН",
+         "shown": "НАВЪН", "size": 0, "flags": 7, "decimals": 255},
+        {"sensor": "balcony", "metric": "pm25", "label": "",
+         "shown": "PM2.5", "size": 3, "flags": 2, "decimals": 255},
+        # A sensor that is no longer configured — the editor must keep it
+        # rather than silently reassigning the reader's layout.
+        {"sensor": "shed", "metric": "aqi", "label": "",
+         "shown": "AQI", "size": 3, "flags": 2, "decimals": 255},
+    ],
+    "sizes": [
+        {"id": 0, "name": "hero", "units": 12},
+        {"id": 1, "name": "large", "units": 6},
+        {"id": 2, "name": "medium", "units": 4},
+        {"id": 3, "name": "small", "units": 3},
+    ],
+    "cap": 12, "row_units": 12,
+    "flag_bold": 1, "flag_unit": 2, "flag_age": 4, "flag_trend": 8,
+    "auto_decimals": 255,
+}
+
+SENSORS = {
+    "sensors": [
+        {"id": "balcony", "type": "bmp280", "name": "Balcony", "enabled": True,
+         "metrics": ["temperature", "pressure"]},
+        {"id": "livingroom", "type": "bme688", "name": "Living room", "enabled": True,
+         "metrics": ["temperature", "humidity", "pressure", "aqi"]},
+    ]
+}
+
 KINDLE = {
     "face": 4,            # Helvetica
     "face_custom": "",
@@ -81,6 +116,10 @@ class H(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
+        if path == "/api/kindle/slots":
+            return self._json(KINDLE_SLOTS)
+        if path == "/api/sensors":
+            return self._json(SENSORS)
         if path == "/api/espnow/status":
             return self._json(STATUS)
         if path == "/api/kindle/config":

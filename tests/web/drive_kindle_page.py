@@ -138,6 +138,61 @@ with sync_playwright() as p:
           "restoring puts back the built-in design")
     check(pg.input_value("#kd-face") == "0", "and the form re-renders as restored")
 
+
+    # ── The slot editor ──────────────────────────────────────────────────────
+    # The readings the dashboard shows, as an ordered list. What matters here is
+    # that the dropdowns reflect the HARDWARE: a BMP280 must not offer humidity,
+    # because it cannot measure it, and that is the whole reason for the feature.
+    slots = pg.locator("#kd-slots")
+    check(slots.count() == 1, "the slot editor rendered")
+
+    rows = pg.locator("#kd-slots .card").count()
+    check(rows == 3, "one card per configured reading (%d)" % rows)
+    check("3 / 12" in pg.locator("#kd-slot-count").inner_text(),
+          "the count badge shows how many of the cap are used")
+
+    # The first slot names "balcony", a BMP280 in the mock.
+    metric_opts = (pg.locator("#kd-slots .card").nth(0)
+                     .locator("select").nth(1).locator("option").all_inner_texts())
+    check("temperature" in metric_opts, "a reading the sensor publishes is offered")
+    check("pressure" in metric_opts, "and so is its pressure")
+    check(not any("humidity" in o for o in metric_opts),
+          "a BMP280 is NOT offered humidity: %r" % (metric_opts,))
+
+    # A slot naming a sensor that is no longer configured keeps its entry rather
+    # than being silently reassigned to whatever happens to be first.
+    third = pg.locator("#kd-slots .card").nth(2).locator("select").nth(0)
+    check("not configured" in third.inner_text(),
+          "an unknown sensor is kept and marked, not dropped")
+
+    # The derived label is offered as a placeholder, so the reader can see what
+    # they get without typing anything.
+    ph = (pg.locator("#kd-slots .card").nth(1)
+            .locator("input[maxlength='16']").get_attribute("placeholder"))
+    check(ph == "PM2.5", "the derived label is the placeholder (%r)" % ph)
+
+    # Reordering is local until Save — no request per move. Both ends are
+    # asserted: the mover landed in the second row AND the one it displaced
+    # came up to the first. Checking only the first would pass on a page that
+    # did nothing, since the row it moved into already held a temperature.
+    m0 = pg.locator("#kd-slots .card").nth(0).locator("select").nth(1).input_value()
+    m1 = pg.locator("#kd-slots .card").nth(1).locator("select").nth(1).input_value()
+    (pg.locator("#kd-slots .card").nth(0)
+       .locator('[data-click="kindleSlotMove"]').nth(1).click())
+    pg.wait_for_timeout(300)
+    n0 = pg.locator("#kd-slots .card").nth(0).locator("select").nth(1).input_value()
+    n1 = pg.locator("#kd-slots .card").nth(1).locator("select").nth(1).input_value()
+    check(n0 == m1 and n1 == m0,
+          "moving a reading down swaps it with the next (%s,%s -> %s,%s)" % (m0, m1, n0, n1))
+
+    pg.click('[data-click="kindleSlotAdd"]')
+    pg.wait_for_timeout(300)
+    check(pg.locator("#kd-slots .card").count() == 4, "adding a reading appends a row")
+    (pg.locator("#kd-slots .card").nth(3)
+       .locator('[data-click="kindleSlotRemove"]').click())
+    pg.wait_for_timeout(300)
+    check(pg.locator("#kd-slots .card").count() == 3, "removing one takes it away again")
+
     shot = os.environ.get("SCREENSHOT")
     if shot:
         pg.screenshot(path=shot, full_page=True)
