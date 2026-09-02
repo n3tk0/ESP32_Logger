@@ -19,6 +19,14 @@
 // HA discovery topics:
 //   homeassistant/sensor/{deviceId}_{sensorId}_{metric}/config
 // ============================================================================
+/// What the broker is told to expect, and what _connect() measures staleness
+/// against. Sixty seconds matches the default aggregation interval, so a device
+/// exporting on schedule keeps its socket and one that has gone quiet rebuilds
+/// it rather than publishing into a connection the broker has already closed.
+#ifndef MQTT_KEEPALIVE_S
+#  define MQTT_KEEPALIVE_S 60
+#endif
+
 class MqttExporter : public IExporter {
 public:
     ~MqttExporter();
