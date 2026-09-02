@@ -6,6 +6,7 @@
 #include <ESPAsyncWebServer.h>
 #include <time.h>
 #include <new>
+#include <memory>     // shared_ptr — the BMP filler owns its state through one
 #include <math.h>
 
 #include "../pipeline/DataPipeline.h"
@@ -15,6 +16,7 @@
 #include "DashboardStrings.h"
 #include "RefreshCadence.h"
 #include "KindleSkin.h"                 // config.kindle -> face, weight, formats
+#include "KindleChartBmp.h"             // ChartBmpCtx / ChartBmpReader
 #ifdef FEATURE_ESPNOW_INGEST
 #  include "../espnow/EspNowIngest.h"   // espnowAnyBatteryWarn()
 #endif
@@ -482,316 +484,49 @@ static void appendWeek(String& out, uint32_t now) {
 // on firmware 5.16.4 or later would support them; an older one would not, and
 // tables with literal pixel values render the same on both. See the header for
 // why that trade is made in favour of the old browser.
-// ============================================================================
-// 4-bit grayscale BMP streaming for /kindle/graph.bmp
-// ============================================================================
-// BMP format: 14-byte file header + 40-byte info header + 64-byte palette
-// (16 entries × 4 bytes) + pixel data (bottom-up, 4-bit packed).
-//
-// The ESP32 cannot hold the full image in RAM (even at 560×200 it would be
-// 56 KB), so we stream it chunk by chunk using AsyncWebServer's chunked
-// response. Each chunk renders a few rows into a small stack buffer.
-
-// 16-shade greyscale palette, matched to the CSS values in the HTML dashboard.
-// Index 0 = black (#000), index 15 = white (#fff).
-static constexpr uint8_t BMP_PALETTE[16] = {
-    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
-    0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF
-};
-
-// Map an 8-bit grey (0=black, 255=white) to a 4-bit palette index (0..15).
-static inline uint8_t grey8to4(uint8_t g) { return g >> 4; }
-
-// Map a CSS hex grey like 0xD5 to a palette index.
-static inline uint8_t cssGrey(uint8_t hex) { return hex >> 4; }
-
-// Pack two 4-bit pixels into one byte (high nibble = left pixel).
-static inline uint8_t pack4(uint8_t left, uint8_t right) {
-    return (left << 4) | (right & 0x0F);
-}
-
-static size_t writeBmpHeader(uint8_t* buf, uint16_t w, uint16_t h) {
-    const uint16_t rowBytes = w / 2;  // 4-bit, w is always even
-    const uint32_t pixelSize = (uint32_t)rowBytes * h;
-    const uint32_t headerSize = 14 + 40 + 64;  // file + info + palette
-    const uint32_t fileSize = headerSize + pixelSize;
-
-    // BITMAPFILEHEADER (14 bytes)
-    buf[0] = 'B'; buf[1] = 'M';
-    memcpy(buf + 2, &fileSize, 4);
-    memset(buf + 6, 0, 4);  // reserved
-    memcpy(buf + 10, &headerSize, 4);
-
-    // BITMAPINFOHEADER (40 bytes)
-    uint32_t infoSize = 40;
-    memcpy(buf + 14, &infoSize, 4);
-    int32_t sw = w, sh = h;  // signed for BMP
-    memcpy(buf + 18, &sw, 4);
-    memcpy(buf + 22, &sh, 4);  // positive = bottom-up
-    uint16_t planes = 1;
-    memcpy(buf + 26, &planes, 2);
-    uint16_t bpp = 4;
-    memcpy(buf + 28, &bpp, 2);
-    memset(buf + 30, 0, 24);  // compression=0, rest zeros
-
-    // Palette: 16 greyscale entries (BGRA)
-    for (int i = 0; i < 16; i++) {
-        uint8_t v = BMP_PALETTE[i];
-        buf[54 + i*4 + 0] = v;  // B
-        buf[54 + i*4 + 1] = v;  // G
-        buf[54 + i*4 + 2] = v;  // R
-        buf[54 + i*4 + 3] = 0;  // A
-    }
-    return headerSize;  // 118 bytes
-}
-
-// Rendering context for the BMP chart, computed once and shared across chunks.
-struct ChartBmpCtx {
-    uint16_t W, H;
-    uint16_t rowBytes;
-    int L, R, T, B;
-    float dx;
-    float lo, hi, span;
-    TrendRing::Hour tOut[TrendRing::HOURS];
-    TrendRing::Hour tIn[TrendRing::HOURS];
-    bool haveOut, haveIn;
-    float yScale;  // (B - T) / span
-
-    // Precomputed X positions for each hour
-    int hourX[TrendRing::HOURS];
-    // Precomputed outdoor band Y (min/max) and mean Y for each hour
-    int outMinY[TrendRing::HOURS];
-    int outMaxY[TrendRing::HOURS];
-    int outMeanY[TrendRing::HOURS];
-    int inMeanY[TrendRing::HOURS];
-    bool hourValid[TrendRing::HOURS];    // outdoor has data
-    bool inHourValid[TrendRing::HOURS];  // indoor has data
-
-    // Grid line Y positions (5 lines)
-    int gridY[5];
-    char gridLabel[5][8];
-
-    void init(uint16_t width, uint16_t height) {
-        W = width;
-        H = height;
-        rowBytes = W / 2;
-        L = W * 40 / 560;   // scale margins proportionally
-        R = W - W * 4 / 560;
-        T = H * 10 / 200;
-        B = H - H * 26 / 200;
-        dx = (float)(R - L) / (float)(TrendRing::HOURS - 1);
-
-        // Compute Y scale
-        lo = 1e9f; hi = -1e9f;
-        for (int i = 0; i < TrendRing::HOURS; i++) {
-            if (haveOut && tOut[i].count) {
-                if (tOut[i].min < lo) lo = tOut[i].min;
-                if (tOut[i].max > hi) hi = tOut[i].max;
-            }
-            if (haveIn && tIn[i].count) {
-                if (tIn[i].min < lo) lo = tIn[i].min;
-                if (tIn[i].max > hi) hi = tIn[i].max;
-            }
-        }
-        float pad = (hi - lo) * 0.06f;
-        if (pad < 0.4f) pad = 0.4f;
-        lo -= pad; hi += pad;
-        span = hi - lo;
-        if (span < 0.001f) span = 1.0f;  // safety
-        yScale = (float)(B - T) / span;
-
-        // Precompute positions
-        for (int i = 0; i < TrendRing::HOURS; i++) {
-            hourX[i] = L + (int)(dx * (float)i);
-            hourValid[i] = haveOut && tOut[i].count > 0;
-            inHourValid[i] = haveIn && tIn[i].count > 0;
-            if (hourValid[i]) {
-                outMinY[i] = T + (int)((hi - tOut[i].min) * yScale);
-                outMaxY[i] = T + (int)((hi - tOut[i].max) * yScale);
-                outMeanY[i] = T + (int)((hi - tOut[i].sum / tOut[i].count) * yScale);
-            }
-            if (inHourValid[i]) {
-                inMeanY[i] = T + (int)((hi - tIn[i].sum / tIn[i].count) * yScale);
-            }
-        }
-
-        // Grid lines
-        for (int k = 0; k <= 4; k++) {
-            float v = hi - span * (float)k / 4.0f;
-            gridY[k] = T + (int)((float)(B - T) * (float)k / 4.0f);
-            snprintf(gridLabel[k], sizeof(gridLabel[k]), "%.0f", (double)v);
-        }
-    }
-
-    // Render one row of pixels. `y` is in image coordinates (0=top).
-    // `bmpY` is the BMP row (bottom-up: bmpY = H-1-y).
-    void renderRow(uint8_t* row, int y) const {
-        // Fill with white (palette index 15)
-        memset(row, 0xFF, rowBytes);
-
-        // ── Vertical grid lines (every 3h + "now") ──
-        if (y >= T && y <= B) {
-            uint8_t vgridGrey = cssGrey(0xD5);  // #d5d5d5 → palette ~13
-            for (int i = 0; i < TrendRing::HOURS; i += 3)
-                setPixel4(row, hourX[i], vgridGrey);
-            setPixel4(row, hourX[TrendRing::HOURS - 1], vgridGrey);
-        }
-
-        // ── Horizontal grid lines ──
-        for (int k = 0; k <= 4; k++) {
-            if (y == gridY[k]) {
-                uint8_t c = (k == 4) ? cssGrey(0x77) : cssGrey(0xC4);
-                for (int x = L; x <= R; x++)
-                    setPixel4(row, x, c);
-            }
-        }
-
-        // ── Outdoor min-max band ──
-        if (haveOut) {
-            for (int i = 0; i < TrendRing::HOURS - 1; i++) {
-                if (!hourValid[i] || !hourValid[i+1]) continue;
-                // Interpolate band for this row between hour i and i+1
-                int x0 = hourX[i], x1 = hourX[i+1];
-                for (int x = x0; x <= x1; x++) {
-                    float t = (x1 > x0) ? (float)(x - x0) / (float)(x1 - x0) : 0;
-                    int minY = outMinY[i] + (int)(t * (outMinY[i+1] - outMinY[i]));
-                    int maxY = outMaxY[i] + (int)(t * (outMaxY[i+1] - outMaxY[i]));
-                    if (y >= maxY && y <= minY) {
-                        // Inside band: fill with #d8d8d8
-                        setPixel4(row, x, cssGrey(0xD8));
-                    }
-                    // Band outline (#8f8f8f)
-                    if (y == maxY || y == minY) {
-                        setPixel4(row, x, cssGrey(0x8F));
-                    }
-                }
-            }
-        }
-
-        // ── Outdoor mean line (3px wide, #000) ──
-        if (haveOut) {
-            for (int i = 0; i < TrendRing::HOURS - 1; i++) {
-                if (!hourValid[i] || !hourValid[i+1]) continue;
-                int x0 = hourX[i], x1 = hourX[i+1];
-                for (int x = x0; x <= x1; x++) {
-                    float t = (x1 > x0) ? (float)(x - x0) / (float)(x1 - x0) : 0;
-                    int my = outMeanY[i] + (int)(t * (outMeanY[i+1] - outMeanY[i]));
-                    // 3px thick: draw if within ±1 of mean
-                    if (y >= my - 1 && y <= my + 1)
-                        setPixel4(row, x, 0);  // black
-                }
-            }
-        }
-
-        // ── Indoor mean line (2px wide, #777, dashed 7-5) ──
-        if (haveIn) {
-            for (int i = 0; i < TrendRing::HOURS - 1; i++) {
-                if (!inHourValid[i] || !inHourValid[i+1]) continue;
-                int x0 = hourX[i], x1 = hourX[i+1];
-                for (int x = x0; x <= x1; x++) {
-                    // Dash pattern: 7px on, 5px off
-                    int phase = (x - x0) % 12;
-                    if (phase >= 7) continue;  // gap
-                    float t = (x1 > x0) ? (float)(x - x0) / (float)(x1 - x0) : 0;
-                    int my = inMeanY[i] + (int)(t * (inMeanY[i+1] - inMeanY[i]));
-                    if (y >= my && y <= my + 1)
-                        setPixel4(row, x, cssGrey(0x77));
-                }
-            }
-        }
-    }
-
-    // Set a single pixel in a 4-bit packed row buffer.
-    void setPixel4(uint8_t* row, int x, uint8_t palIdx) const {
-        if (x < 0 || x >= W) return;
-        int byteIdx = x / 2;
-        if (x & 1)
-            row[byteIdx] = (row[byteIdx] & 0xF0) | (palIdx & 0x0F);
-        else
-            row[byteIdx] = (palIdx << 4) | (row[byteIdx] & 0x0F);
-    }
-};
+// The chart itself lives in KindleChartBmp.h — Arduino-free, so the host
+// tests can render it and check the bytes. Only the serving is below.
 
 void handleKindleGraph(AsyncWebServerRequest* req) {
-    // Determine dimensions from resolution config
     const KindleConfig skin = config.kindle;
-    const bool hiRes = (skin.fbinkResW > 600);
+    const bool     hiRes = (skin.fbinkResW > 600);
     const uint16_t W = hiRes ? 1000 : 560;
-    const uint16_t H = hiRes ? 360 : 200;
+    const uint16_t H = hiRes ? 360  : 200;
 
-    // Allocate context on heap (it's ~2.5 KB with the arrays)
-    auto* ctx = new(std::nothrow) ChartBmpCtx;
-    if (!ctx) {
-        req->send(503, "text/plain", "OOM");
-        return;
-    }
+    // A shared_ptr, AND THAT IS THE FIX, not a tidier spelling of the same
+    // thing. The previous version held raw pointers and deleted them only on
+    // the branch that runs when the last byte goes out, so a client that
+    // disconnected mid-image leaked the context and the stream state — every
+    // time. The client is a ten-year-old reader on wifi fetching this on a
+    // timer, which is the population most likely to drop a connection, and
+    // ~3 KB a go against this device's free heap is not many aborted requests
+    // before it stops serving anything at all. The response object owns the
+    // std::function; destroying it — on completion OR on abort — releases this.
+    auto st = std::shared_ptr<ChartBmpReader>(new(std::nothrow) ChartBmpReader);
+    if (!st) { req->send(503, "text/plain", "out of memory"); return; }
 
-    // Fill trend data
     const uint32_t now = (uint32_t)time(nullptr);
-    ctx->haveOut = trendRing.series(outdoorSensorId(), "temperature", now, ctx->tOut);
-    ctx->haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, ctx->tIn);
-    ctx->init(W, H);
+    st->ctx.haveOut = trendRing.series(outdoorSensorId(), "temperature", now, st->ctx.tOut);
+    st->ctx.haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, st->ctx.tIn);
+    st->ctx.init(W, H);
+    st->begin();
 
-    const uint32_t headerSize = 14 + 40 + 64;
-    const uint32_t totalSize = headerSize + (uint32_t)ctx->rowBytes * H;
-    const uint16_t CHUNK_ROWS = 20;
-
-    // State for the chunked callback
-    struct StreamState {
-        ChartBmpCtx* ctx;
-        uint16_t W, H;
-        uint32_t headerSize;
-        uint32_t bytesSent;
-        uint32_t totalSize;
-        uint16_t chunkRows;
-    };
-
-    auto* st = new(std::nothrow) StreamState{
-        ctx, W, H, headerSize, 0, totalSize, CHUNK_ROWS
-    };
-    if (!st) { delete ctx; req->send(503, "text/plain", "OOM"); return; }
-
-    AsyncWebServerResponse* resp = req->beginChunkedResponse(
-        "image/bmp",
-        [st](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
-            if (st->bytesSent >= st->totalSize) {
-                // Done — free resources
-                delete st->ctx;
-                delete st;
-                return 0;
-            }
-
-            size_t written = 0;
-
-            // First: emit BMP header
-            if (st->bytesSent < st->headerSize) {
-                written = writeBmpHeader(buffer, st->W, st->H);
-                st->bytesSent += written;
-                return written;
-            }
-
-            // Pixel data: BMP is bottom-up, so row 0 in BMP = bottom of image
-            const uint32_t pixelOffset = st->bytesSent - st->headerSize;
-            const int startBmpRow = pixelOffset / st->ctx->rowBytes;
-            int rowsToRender = st->chunkRows;
-            int remaining = st->H - startBmpRow;
-            if (rowsToRender > remaining) rowsToRender = remaining;
-            if ((size_t)(rowsToRender * st->ctx->rowBytes) > maxLen)
-                rowsToRender = maxLen / st->ctx->rowBytes;
-            if (rowsToRender < 1) rowsToRender = 1;
-
-            for (int r = 0; r < rowsToRender; r++) {
-                int bmpRow = startBmpRow + r;
-                int imgY = st->H - 1 - bmpRow;  // BMP bottom-up → image top-down
-                st->ctx->renderRow(buffer + r * st->ctx->rowBytes, imgY);
-            }
-
-            written = rowsToRender * st->ctx->rowBytes;
-            st->bytesSent += written;
-            return written;
+    // A LENGTHED RESPONSE, NOT A CHUNKED ONE. The size is known before the
+    // first byte, and the previous version sent it as Content-Length ON TOP OF
+    // Transfer-Encoding: chunked — two framings that contradict each other,
+    // where the length given was the unchunked size. A client that believed the
+    // header read a truncated BMP; a proxy is entitled to reject the message
+    // outright. Announcing the length also lets the reader show progress and
+    // skips the per-chunk framing on a slow link.
+    AsyncWebServerResponse* resp = req->beginResponse(
+        "image/bmp", st->total,
+        [st](uint8_t* buffer, size_t maxLen, size_t /*index*/) -> size_t {
+            return st->read(buffer, maxLen);
         });
 
-    resp->setContentLength(totalSize);
+    // beginResponse allocates, and this device runs close enough to its heap
+    // limit that "it returned null" is a real branch rather than a formality.
+    if (!resp) { req->send(503, "text/plain", "out of memory"); return; }
     resp->addHeader("Cache-Control", "no-cache");
     req->send(resp);
 }
