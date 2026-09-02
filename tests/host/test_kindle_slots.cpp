@@ -495,6 +495,54 @@ static void test_a_full_grid_with_one_quiet_sensor() {
     CHECK_EQ(rows[1], 2);
 }
 
+// ---------------------------------------------------------------------------
+// The unit a place ends up drawing
+// ---------------------------------------------------------------------------
+// kdSlotUnit() hands back the string it was given whenever the metric table has
+// nothing to say — a metric listed with a null unit (wind, wind_speed, uva, uvb,
+// flow_rate) or one not in the table at all. The renderers used to STORE that
+// pointer, and the string it pointed at belonged to a `Latest` that lived for
+// one iteration of the resolve loop, so both of them read a popped stack frame.
+//
+// This is the host-side half of the fix: it pins down exactly which inputs come
+// back as the caller's own pointer, so that anybody storing the result knows it
+// has to copy. The firmware side copies into KdResolved::unit.
+static void test_the_unit_can_be_the_callers_own_pointer() {
+    KindleZones k;
+    k.clear();
+    k.set(KZ_G1, "s", "temperature");     // the table overrides
+    k.set(KZ_G2, "s", "wind_speed");      // listed, but with no unit
+    k.set(KZ_G3, "s", "uva");             // ditto
+    k.set(KZ_G4, "s", "flow_rate");       // ditto
+    k.set(KZ_G5, "s", "not_in_the_table");
+
+    // A buffer standing in for Latest::unit — the thing that used to dangle.
+    char reported[12];
+    strcpy(reported, "m/s");
+
+    // The table's own unit is a literal and does not alias the caller.
+    CHECK(kdSlotUnit(k.z[KZ_G1], reported) != reported);
+    CHECK_STREQ(kdSlotUnit(k.z[KZ_G1], reported), "°");
+
+    // These four hand the caller's pointer straight back. Same address, which
+    // is the whole hazard stated as an assertion.
+    CHECK(kdSlotUnit(k.z[KZ_G2], reported) == reported);
+    CHECK(kdSlotUnit(k.z[KZ_G3], reported) == reported);
+    CHECK(kdSlotUnit(k.z[KZ_G4], reported) == reported);
+    CHECK(kdSlotUnit(k.z[KZ_G5], reported) == reported);
+
+    // And a null reading unit comes back as an empty string rather than as
+    // nullptr, so a caller copying it does not have to check.
+    CHECK_STREQ(kdSlotUnit(k.z[KZ_G2], nullptr), "");
+
+    // Whatever comes back, it fits the buffer the firmware copies it into.
+    // A table unit longer than KdResolved::unit would be truncated silently.
+    for (int i = 0; i < KD_METRIC_STYLE_COUNT; i++) {
+        const char* u = KD_METRIC_STYLE[i].unit;
+        if (u) CHECK(strlen(u) < 12);
+    }
+}
+
 int main() {
     RUN(test_defaults_reproduce_the_old_dashboard);
     RUN(test_group_headings_are_overridable);
@@ -502,6 +550,7 @@ int main() {
     RUN(test_groups_are_named_correctly);
     RUN(test_labels_come_from_the_table_or_the_place);
     RUN(test_units_come_from_the_table_then_the_reading);
+    RUN(test_the_unit_can_be_the_callers_own_pointer);
     RUN(test_decimals_come_from_the_metric_unless_set);
     RUN(test_an_absent_reading_leaves_no_gap);
     RUN(test_an_unconfigured_place_is_skipped_too);

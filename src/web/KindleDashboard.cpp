@@ -618,9 +618,20 @@ static void kdShellVarN(AsyncResponseStream* s, const char* fmt, int i, const ch
 /// be rounded one way on the reader and another in a browser.
 struct KdResolved {
     char        text[24];   ///< the number, already at its decimals
-    const char* unit;
-    const char* label;
-    const char* arrow;      ///< the 3 h tendency, when the place asked for one
+
+    /// A BUFFER, NOT A POINTER, and that is the whole point of it.
+    ///
+    /// The unit usually comes from KD_METRIC_STYLE and is a string literal, but
+    /// for a metric the table does not list — or lists with a null unit, which
+    /// is wind, wind_speed, uva, uvb and flow_rate — kdSlotUnit() hands back the
+    /// unit the SENSOR reported, and that lives in the `Latest` the resolve loop
+    /// declared for one iteration. Storing the pointer meant both renderers read
+    /// a popped stack frame: the reading would print with whatever happened to
+    /// be at that address, which on a good day is the next place's unit.
+    char        unit[12];   ///< sized to match Latest::unit
+
+    const char* label;      ///< into KindleZones or a table literal — both outlive us
+    const char* arrow;      ///< a literal from ARROWS[]
     bool        ok;
     uint32_t    ts;
 };
@@ -678,8 +689,7 @@ static void kdResolveZones(const KindleConfig& skin, KdResolved out[KZ_COUNT]) {
     static const char* ARROWS[] = { "↑", "↗", "→", "↘", "↓" };
 
     for (int i = 0; i < KZ_COUNT; i++) {
-        out[i] = KdResolved{};
-        out[i].unit  = "";
+        out[i] = KdResolved{};      // zeroes unit[], which is an empty string
         out[i].label = "";
         out[i].arrow = "";
 
@@ -713,7 +723,10 @@ static void kdResolveZones(const KindleConfig& skin, KdResolved out[KZ_COUNT]) {
         // machine-readable "C". Pressure is the exception — it was re-united
         // above and carries its own label.
         if (strcmp(sl.metric, "pressure") != 0) unit = kdSlotUnit(sl, unit);
-        out[i].unit  = (sl.flags & KSLOTF_UNIT) ? unit : "";
+        if ((sl.flags & KSLOTF_UNIT) && unit) {
+            strncpy(out[i].unit, unit, sizeof(out[i].unit) - 1);
+            out[i].unit[sizeof(out[i].unit) - 1] = '\0';
+        }
         out[i].label = kdSlotLabel(sl);
         out[i].ok    = true;
         out[i].ts    = rd.ts;
@@ -1286,20 +1299,25 @@ static void handleKindleData(AsyncWebServerRequest* req) {
 }
 
 static void handleKindle(AsyncWebServerRequest* req) {
+    // ONLY WHAT THIS PAGE STILL READS. The outdoor humidity and pressure and
+    // the indoor humidity were fetched here when the layout hardwired them;
+    // the places resolve their own readings now, and these were left behind
+    // costing two ring-buffer lookups under the data mutex on every render.
+    // The pressure series cost more: a full twenty-four-hour walk of the trend
+    // ring, computed and then dropped.
+    //
+    // The two temperatures stay because the refresh cadence below is derived
+    // from whichever of them is newer, and the two temperature series stay
+    // because the chart draws them.
     const Latest outT = latestOf(outdoorSensorId(), "temperature");
-    const Latest outH = humidityOf(outdoorSensorId());
-    const Latest outP = latestOf(outdoorSensorId(), "pressure");
     const Latest inT  = latestOf(indoorSensorId(),  "temperature");
-    const Latest inH  = humidityOf(indoorSensorId());
 
     const uint32_t now = (uint32_t)time(nullptr);
 
     TrendRing::Hour tOut[TrendRing::HOURS];
     TrendRing::Hour tIn [TrendRing::HOURS];
-    TrendRing::Hour tPress[TrendRing::HOURS];
     const bool haveOut = trendRing.series(outdoorSensorId(), "temperature", now, tOut);
     const bool haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, tIn);
-    const bool haveP   = trendRing.series(outdoorSensorId(), "pressure",    now, tPress);
 
     // A clamped COPY, not a reference into the live config. The page reads
     // this a dozen times while it builds; taking the values once means a save

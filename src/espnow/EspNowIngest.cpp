@@ -946,16 +946,28 @@ bool espnowSetOfflineIntervals(uint8_t n) {
     if (n != 0 && (n < ESPNOW_OFFLINE_INTERVALS_MIN || n > ESPNOW_OFFLINE_INTERVALS_MAX))
         return false;
 
+    // THE LIVE VALUE CHANGES ONLY IF THE WRITE LANDS. Assigning first meant a
+    // full or worn flash left the running threshold changed and the caller told
+    // it had failed — so the dashboard behaved one way until the next reboot
+    // and another way after it, with nothing on screen to explain either.
+    const uint8_t previous = s_offlineIntervals;
     s_offlineIntervals = n;
 
     Preferences prefs;
     // The namespace and key are ESPNOW_NVS_NS / ESPNOW_NVS_OFFLINE_IV in the
     // header. Spelling them literally in two places is how the doc comment came
     // to name a key ("en_offline_iv") that does not exist.
-    if (!prefs.begin(ESPNOW_NVS_NS, false)) return false;
+    if (!prefs.begin(ESPNOW_NVS_NS, false)) {
+        s_offlineIntervals = previous;
+        Serial.println("[ESPNOW] could not open NVS for the offline threshold");
+        return false;
+    }
     const bool ok = prefs.putUChar(ESPNOW_NVS_OFFLINE_IV, n) == sizeof(uint8_t);
     prefs.end();
-    if (!ok) Serial.println("[ESPNOW] could not persist the offline threshold");
+    if (!ok) {
+        s_offlineIntervals = previous;
+        Serial.println("[ESPNOW] could not persist the offline threshold");
+    }
     return ok;
 }
 

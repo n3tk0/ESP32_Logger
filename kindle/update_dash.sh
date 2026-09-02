@@ -377,6 +377,16 @@ draw_zones() {
     return 0
 }
 
+# A battery node whose cells are running down stops reporting without saying
+# anything first, and the page it stops appearing on is the one that ought to
+# warn about it. Drawn beside the outdoor heading on both paths — it used to be
+# in the fallback block only, which meant the current layout never showed it.
+draw_battery_badge() {
+    [ "${OUT_BATT_WARN:-0}" = "1" ] || return 0
+    [ -f "$ICON_DIR/fc_batt.bmp" ] || return 0
+    fbink -g file="$ICON_DIR/fc_batt.bmp",x="$BATT_X",y="$BATT_Y" -p -M -q 2>/dev/null
+}
+
 draw_all() {
     # The nine places, when the collector describes them. One running older
     # firmware sends no Z_GROUP_OUT, and the hardwired block below still draws
@@ -384,11 +394,17 @@ draw_all() {
     # have to be updated in the same minute.
     if draw_zones; then
         draw_clock "$(date +%H:%M)"
+        draw_battery_badge
         draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAY10"
         draw_text_reg "$LAB_CHART_X" "$LAB_CHART_Y" "$LAB_SZ" "GRAY7" "$LBL_LAST24"
         if [ -f "$TMP/graph.bmp" ]; then
             fbink -g file="$TMP/graph.bmp",x="$GR_X",y="$GR_Y" -p -M -q 2>/dev/null
         fi
+        # The rule between the chart and the forecast. It was drawn only on the
+        # fallback path below, so the places path ran the two sections together
+        # with nothing between them — and the fc_batt.bmp icons shipped in
+        # kindle/icons/ were dead files, since the badge was down there too.
+        draw_hline "$RULE3_X" "$RULE3_Y" "$RULE3_W" "GRAY10"
         draw_forecast
         return 0
     fi
@@ -396,13 +412,10 @@ draw_all() {
     # Section label: OUTSIDE
     draw_text_reg "$LAB_OUT_X" "$LAB_OUT_Y" "$LAB_SZ" "GRAY7" "$LBL_OUTSIDE"
 
-    # Battery warning icon (if active)
-    if [ "$OUT_BATT_WARN" = "1" ] && [ -f "$ICON_DIR/fc_batt.bmp" ]; then
-        fbink -g file="$ICON_DIR/fc_batt.bmp",x="$BATT_X",y="$BATT_Y" -p -M -q 2>/dev/null
-    fi
+    draw_battery_badge
 
     # Hero outdoor temperature
-    draw_text_bold "$HERO_X" "$HERO_Y" "$HERO_SZ" "BLACK" "${OUT_TEMP}°"
+    draw_text_bold "$LEGACY_HERO_X" "$LEGACY_HERO_Y" "$LEGACY_HERO_SZ" "BLACK" "${OUT_TEMP}°"
 
     # Outdoor humidity
     if [ "$OUT_HUM" != "-1" ]; then
@@ -418,7 +431,7 @@ draw_all() {
         sub="$sub  ${OUT_AGE_MIN}m"
     fi
     if [ -n "$sub" ]; then
-        draw_text_reg "$SUB_X" "$SUB_Y" "$SUB_SZ" "GRAY4" "$sub"
+        draw_text_reg "$LEGACY_SUB_X" "$LEGACY_SUB_Y" "$LEGACY_SUB_SZ" "GRAY4" "$sub"
     fi
 
     # Pressure
@@ -544,7 +557,7 @@ draw_forecast() {
 
     # Footer
     draw_hline "$FOOT_RULE_X" "$FOOT_RULE_Y" "$FOOT_RULE_W" "GRAY10"
-    draw_text_reg "$FOOT_X" "$FOOT_Y" "$FOOT_SZ" "GRAY5" "$LBL_MEASURED"}
+    draw_text_reg "$FOOT_X" "$FOOT_Y" "$FOOT_SZ" "GRAY5" "$LBL_MEASURED"
 
 }
 

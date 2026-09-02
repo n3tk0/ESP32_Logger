@@ -538,8 +538,22 @@ function kindleSlotsLoad() {
 }
 
 function kindleSlotsSave() {
+  // ONLY THE FIELDS THE DEVICE READS. `shown` is what the caption WILL render
+  // as, derived on the collector from the metric table — it comes down with the
+  // layout so the form can offer it as a placeholder, and sending it back is a
+  // quarter of the payload spent on a value the firmware ignores. On a body
+  // that reaches two kilobytes fully filled in, and travels to a device whose
+  // segments are about 1.4 KB, a quarter matters.
+  var out = {};
+  Object.keys(kdZones).forEach(function (k) {
+    var z = kdZones[k];
+    out[k] = { sensor: z.sensor || "", metric: z.metric || "",
+               label: z.label || "", flags: z.flags | 0,
+               decimals: z.decimals | 0, ink: z.ink | 0 };
+  });
+
   return postWithCsrf("/api/kindle/slots", {
-    body: JSON.stringify({ zones: kdZones,
+    body: JSON.stringify({ zones: out,
                            group_out: kdGroups.out, group_in: kdGroups.in }),
     headers: { "Content-Type": "application/json" }
   })

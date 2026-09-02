@@ -662,16 +662,29 @@ static void handleEspnowConfig(AsyncWebServerRequest* req) {
     }
 
     const long v = req->getParam("offline_intervals", true)->value().toInt();
-    // 0 is legal and means "use the built-in default"; the setter enforces the
-    // rest of the range and refuses rather than clamping, so a typed 200 comes
-    // back as an error instead of silently becoming 60.
-    if (v < 0 || v > 255 || !espnowSetOfflineIntervals((uint8_t)v)) {
+    // 0 is legal and means "use the built-in default"; the range is refused
+    // rather than clamped, so a typed 200 comes back as an error instead of
+    // silently becoming 60.
+    //
+    // THE RANGE AND THE PERSIST FAILURE ARE DIFFERENT ANSWERS. Both used to come
+    // back as "must be 0 or 3..60", which told somebody whose flash was full to
+    // go and check a number that was already correct. The setter still
+    // range-checks too — it is the function that writes flash, and it is not
+    // this handler's business to be the only guard.
+    if (v < 0 || v > 255 ||
+        (v != 0 && (v < ESPNOW_OFFLINE_INTERVALS_MIN ||
+                    v > ESPNOW_OFFLINE_INTERVALS_MAX))) {
         char msg[128];
         snprintf(msg, sizeof(msg),
                  "{\"ok\":false,\"error\":\"offline_intervals must be 0 (default) "
                  "or %d..%d\"}",
                  ESPNOW_OFFLINE_INTERVALS_MIN, ESPNOW_OFFLINE_INTERVALS_MAX);
         req->send(400, "application/json", msg);
+        return;
+    }
+    if (!espnowSetOfflineIntervals((uint8_t)v)) {
+        req->send(500, "application/json",
+                  "{\"ok\":false,\"error\":\"could not save the threshold\"}");
         return;
     }
 
@@ -1911,20 +1924,53 @@ void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/kindle/config",     HTTP_GET,  handleKindleConfigGet);
     server.on("/api/kindle/config",     HTTP_POST, handleKindleConfigPost);
     server.on("/api/kindle/slots",      HTTP_GET,  handleKindleSlotsGet);
-    // A JSON body rather than form fields, so the whole ordered list arrives as
-    // one document. Same one-shot body guard the wifi test uses: a split body
-    // would be reassembled here with no bound on what it could grow to.
+    // A JSON body rather than form fields, so the whole layout arrives as one
+    // document — and it is ACCUMULATED, not required to arrive in one packet.
+    //
+    // The one-shot guard the wifi test uses was copied here, and it was wrong
+    // the moment the editor grew past a single segment: eleven places round-trip
+    // at about 1.2 KB with nothing typed into them and over 2 KB once captions
+    // are, so AsyncTCP splits the body at the window size and every save of a
+    // filled-in layout came back 413. The wifi test's body is a handful of
+    // bytes and never splits, which is why the pattern looked safe.
+    //
+    // Bounded at KINDLE_SLOTS_MAX_BYTES, the same cap the stored file has, so
+    // the two cannot disagree about what is too big.
     server.on("/api/kindle/slots", HTTP_POST,
         [](AsyncWebServerRequest* r) { /* handled in the body callback */ },
         nullptr,
         [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
            size_t index, size_t total) {
-            if (index != 0 || len != total) {
+            if (total > KINDLE_SLOTS_MAX_BYTES) {
                 r->send(413, "application/json",
                         "{\"ok\":false,\"error\":\"body too large\"}");
                 return;
             }
-            handleKindleSlotsPost(r, data, len);
+            if (index == 0) {
+                r->_tempObject = new (std::nothrow) String();
+                if (!r->_tempObject) {
+                    r->send(500, "application/json",
+                            "{\"ok\":false,\"error\":\"out_of_memory\"}");
+                    return;
+                }
+                // Registered immediately after the allocation: a client that
+                // disconnects before the last chunk would otherwise orphan the
+                // buffer, since the delete below never runs. delete on a null
+                // pointer is well-defined, so this is safe after it too.
+                r->onDisconnect([r]() {
+                    delete static_cast<String*>(r->_tempObject);
+                    r->_tempObject = nullptr;
+                });
+                static_cast<String*>(r->_tempObject)->reserve(total);
+            }
+            String* buf = static_cast<String*>(r->_tempObject);
+            if (!buf) return;                       // an earlier chunk failed
+            buf->concat(reinterpret_cast<const char*>(data), len);
+            if (index + len >= total) {
+                handleKindleSlotsPost(r, (uint8_t*)buf->c_str(), buf->length());
+                delete buf;
+                r->_tempObject = nullptr;
+            }
         });
 #endif
     server.on("/api/mqtt/ha_discovery", HTTP_POST, handleMqttHaDiscovery);
