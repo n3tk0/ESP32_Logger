@@ -16,6 +16,41 @@ static DNSServer        s_dns;
 static NodeSettings*    s_target = nullptr;
 static bool             s_saved  = false;
 
+/// True while the portal is being served on the STA interface — the home LAN —
+/// rather than on the node's own access point.
+///
+/// THE DIFFERENCE IS WHO CAN REACH IT. To open the AP portal you have to be
+/// associated with the node's access point, standing next to it, during a
+/// window it opens only after repeated WiFi failures. The background portal is
+/// on the LAN, for the node's whole uptime, reachable by anything on the
+/// network. The same page cannot be safe in both places, so it is not the same
+/// page: secrets are rendered on one and blanked on the other.
+static bool s_background = false;
+
+/// Handlers are registered once for the life of the process.
+///
+/// ESP8266WebServer::on() appends to a list and never deduplicates, and
+/// portalStartBackground() is called on every transition back to connected —
+/// so a node whose router reboots nightly grew three dead handler entries a
+/// night, walked on every request, until it ran out of heap.
+static bool s_routesBound = false;
+
+/// Basic auth on the background portal, using the credentials the node already
+/// holds for the collector.
+///
+/// Reusing them is not elegant, but the alternative was worse in both
+/// directions: a new setting nobody would fill in, or — as shipped — a form on
+/// the LAN that anyone could POST to, repointing the node at their own
+/// collector and restarting it. The AP portal is not gated, because reaching it
+/// already requires the AP's own password.
+static bool backgroundAuthOk() {
+    if (!s_background) return true;
+    const NodeSettings& s = *s_target;
+    if (s_http.authenticate(s.basicUser, s.basicPass)) return true;
+    s_http.requestAuthentication();
+    return false;
+}
+
 bool portalButtonHeld() {
     pinMode(PORTAL_TRIGGER_PIN, INPUT_PULLUP);
     // One read can catch a floating pin mid-transition; require the button to
@@ -58,6 +93,7 @@ static void row(String& p, const char* id, const char* label,
 }
 
 static void handleRoot() {
+    if (!backgroundAuthOk()) return;
     const NodeSettings& s = *s_target;
 
     String p;
@@ -81,17 +117,37 @@ static void handleRoot() {
 
     p += F("<h2>WiFi</h2>");
     row(p, "ssid", "Network name", esc(s.ssid), "text", "");
-    row(p, "pass", "Password", esc(s.pass), "password",
-        "<input type=\"checkbox\" style=\"width:auto;display:inline-block;margin-right:5px;vertical-align:middle\" "
-        "onclick=\"document.getElementById('pass').type = this.checked ? 'text' : 'password'\">"
-        "<span style=\"vertical-align:middle\">Show password</span>");
+    // Rendered ONLY on the access-point portal, where seeing it is a
+    // convenience for whoever is standing in front of the node and had to know
+    // the AP password to get here. On the LAN portal the field is blank and an
+    // empty submission keeps what is stored: that page is reachable by
+    // everything on the network for as long as the node is up, and putting the
+    // home WiFi passphrase in its HTML source would hand it to all of them.
+    if (s_background) {
+        row(p, "pass", "Password", String(), "password",
+            s.pass[0] ? "Leave empty to keep the saved password."
+                      : "Required.");
+    } else {
+        row(p, "pass", "Password", esc(s.pass), "password",
+            "<input type=\"checkbox\" style=\"width:auto;display:inline-block;margin-right:5px;vertical-align:middle\" "
+            "onclick=\"document.getElementById('pass').type = this.checked ? 'text' : 'password'\">"
+            "<span style=\"vertical-align:middle\">Show password</span>");
+    }
 
     p += F("<h2>Collector</h2>");
     row(p, "host", "IP address", esc(s.host), "text",
         "The ESP32-C3. Give it a DHCP reservation on your router.");
     row(p, "port", "Port", String(s.port), "number", "");
-    row(p, "token", "Ingest token", esc(s.token), "text",
-        "Must match INGEST_TOKEN on the collector.");
+    // Same rule as the passphrase: a shared secret, shown where only someone
+    // already on the node's own AP can see it, blank on the LAN.
+    if (s_background) {
+        row(p, "token", "Ingest token", String(), "password",
+            s.token[0] ? "Leave empty to keep the saved token."
+                       : "Must match INGEST_TOKEN on the collector.");
+    } else {
+        row(p, "token", "Ingest token", esc(s.token), "text",
+            "Must match INGEST_TOKEN on the collector.");
+    }
     row(p, "buser", "Basic auth user", esc(s.basicUser), "text",
         "Only if the collector was built with WEB_BASIC_AUTH_ENABLED.");
     row(p, "bpass", "Basic auth password", String(), "password",
@@ -144,6 +200,11 @@ static void handleRoot() {
 }
 
 static void handleSave() {
+    // Checked HERE too, not only on the form. A POST does not have to come from
+    // a page this device served, and this is the handler that rewrites the
+    // node's collector address and then restarts it.
+    if (!backgroundAuthOk()) return;
+
     // Build into a COPY. Writing straight into the caller's settings would
     // leave them corrupted on the validation and write-failure paths below:
     // portalRun() promises to return with `s` unmodified, and a node that
@@ -170,9 +231,14 @@ static void handleSave() {
     };
 
     text  ("ssid",   s.ssid,      sizeof(s.ssid));
-    text  ("pass",   s.pass,      sizeof(s.pass));
+    // secret(), not text(). The LAN form serves these fields blank, so a plain
+    // copy would wipe the passphrase and the token on every save from it. On
+    // the AP form the fields arrive pre-filled, so "empty means keep" only
+    // costs the ability to blank them there — which an erase already covers,
+    // and which is far rarer than clearing a field by accident on a phone.
+    secret("pass",   s.pass,      sizeof(s.pass));
     text  ("host",   s.host,      sizeof(s.host));
-    text  ("token",  s.token,     sizeof(s.token));
+    secret("token",  s.token,     sizeof(s.token));
     text  ("buser",  s.basicUser, sizeof(s.basicUser));
     secret("bpass",  s.basicPass, sizeof(s.basicPass));
     text  ("nodeid", s.nodeId,    sizeof(s.nodeId));
@@ -237,8 +303,9 @@ static void handleSave() {
 }
 
 bool portalRun(NodeSettings& s, uint32_t timeoutMs) {
-    s_target = &s;
-    s_saved  = false;
+    s_target     = &s;
+    s_saved      = false;
+    s_background = false;   // the AP portal: secrets shown, no auth gate
 
     char ap[32];
     // The MAC suffix keeps two nodes in one house apart on the air.
@@ -261,11 +328,14 @@ bool portalRun(NodeSettings& s, uint32_t timeoutMs) {
     s_dns.setErrorReplyCode(DNSReplyCode::NoError);
     s_dns.start(53, "*", ip);
 
-    s_http.on("/", handleRoot);
-    s_http.on("/save", HTTP_POST, handleSave);
-    // Captive-portal probes hit vendor-specific URLs; sending them the form
-    // is what makes the prompt open straight into it.
-    s_http.onNotFound(handleRoot);
+    if (!s_routesBound) {
+        s_http.on("/", handleRoot);
+        s_http.on("/save", HTTP_POST, handleSave);
+        // Captive-portal probes hit vendor-specific URLs; sending them the form
+        // is what makes the prompt open straight into it.
+        s_http.onNotFound(handleRoot);
+        s_routesBound = true;
+    }
     s_http.begin();
 
     uint32_t start = millis();
@@ -322,15 +392,35 @@ bool portalRun(NodeSettings& s, uint32_t timeoutMs) {
     return s_saved;
 }
 
-void portalStartBackground(NodeSettings& s) {
-    s_target = &s;
-    s_saved  = false;
+bool portalStartBackground(NodeSettings& s) {
+    // FAILS CLOSED. Without credentials there is nothing between this form and
+    // everything on the network, and the form rewrites the node's collector
+    // address and restarts it. Refusing is a feature the user has to turn on by
+    // setting a password, which is the right way round; serving it anyway would
+    // be a remote-configuration interface nobody asked to expose.
+    if (s.basicUser[0] == '\0' || s.basicPass[0] == '\0') {
+        Serial.println(F("[portal] background server NOT started: set a basic-auth "
+                         "user and password in the setup portal to enable "
+                         "configuration over the LAN"));
+        return false;
+    }
 
-    s_http.on("/", handleRoot);
-    s_http.on("/save", HTTP_POST, handleSave);
-    s_http.onNotFound(handleRoot);
+    s_target     = &s;
+    s_saved      = false;
+    s_background = true;
+
+    // Once for the life of the process. on() appends without deduplicating, so
+    // re-registering on every reconnect leaked three entries per router outage.
+    if (!s_routesBound) {
+        s_http.on("/", handleRoot);
+        s_http.on("/save", HTTP_POST, handleSave);
+        s_http.onNotFound(handleRoot);
+        s_routesBound = true;
+    }
     s_http.begin();
-    Serial.println("[portal] Background configuration server started on STA interface");
+    Serial.printf("[portal] background configuration server on http://%s/ "
+                  "(password protected)\n", WiFi.localIP().toString().c_str());
+    return true;
 }
 
 void portalHandleClient() {

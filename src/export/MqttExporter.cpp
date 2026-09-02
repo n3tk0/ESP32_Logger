@@ -5,6 +5,7 @@
 
 MqttExporter::~MqttExporter() {
     if (_client.connected()) _client.disconnect();
+    _client.clearClient();
     if (_stream) {
         delete _stream;
         _stream = nullptr;
@@ -21,6 +22,9 @@ bool MqttExporter::init(JsonObjectConst cfg) {
         // kilobytes of mbedtls state for a feature the user just switched off.
         if (_stream) {
             if (_client.connected()) _client.disconnect();
+            // Before the delete, always: MQTT_Mini holds a bare pointer it does
+            // not own, and connected() reads it.
+            _client.clearClient();
             delete _stream;
             _stream = nullptr;
         }
@@ -57,6 +61,7 @@ bool MqttExporter::init(JsonObjectConst cfg) {
     // connected socket with nothing pointing at it.
     if (_stream) {
         if (_client.connected()) _client.disconnect();
+        _client.clearClient();
         delete _stream;
         _stream = nullptr;
     }

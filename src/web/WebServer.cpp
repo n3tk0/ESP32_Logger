@@ -755,6 +755,17 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     kd["dateFormat"]    = config.kindle.dateFormat;
     kd["pressureUnit"]  = config.kindle.pressureUnit;
     kd["tempDecimals"]  = config.kindle.tempDecimals;
+    // v15. Added here as well as to the struct, because the paragraph above is
+    // the promise this section makes: a settings file is a record of the
+    // device's configuration. Six new fields that a backup did not carry would
+    // have made a restore silently revert the sensor mapping and the FBInk
+    // resolution while appearing to restore everything.
+    kd["refreshSec"]      = config.kindle.refreshSec;
+    kd["followData"]      = config.kindle.followData;
+    kd["clockPinRefresh"] = config.kindle.clockPinRefresh;
+    kd["fbinkResW"]       = config.kindle.fbinkResW;
+    kd["outdoorSensor"]   = config.kindle.outdoorSensor;
+    kd["indoorSensor"]    = config.kindle.indoorSensor;
 
     // ── Network ───────────────────────────────────────────────────────────
     JsonObject net = doc["network"].to<JsonObject>();
@@ -2330,6 +2341,21 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 if (kd["dateFormat"].is<int>())    config.kindle.dateFormat   = (uint8_t)kd["dateFormat"].as<int>();
                 if (kd["pressureUnit"].is<int>())  config.kindle.pressureUnit = (uint8_t)kd["pressureUnit"].as<int>();
                 if (kd["tempDecimals"].is<int>())  config.kindle.tempDecimals = (uint8_t)kd["tempDecimals"].as<int>();
+                // v15. Absent keys leave the field alone, so a settings file
+                // written by an older firmware restores what it knew about and
+                // does not reset what it never carried.
+                if (kd["refreshSec"].is<int>())
+                    config.kindle.refreshSec = (uint16_t)constrain(kd["refreshSec"].as<int>(), 0, 86400);
+                if (kd["followData"].is<int>())
+                    config.kindle.followData = (uint8_t)kd["followData"].as<int>();
+                if (kd["clockPinRefresh"].is<int>())
+                    config.kindle.clockPinRefresh = (uint8_t)kd["clockPinRefresh"].as<int>();
+                if (kd["fbinkResW"].is<int>())
+                    config.kindle.fbinkResW = (uint16_t)constrain(kd["fbinkResW"].as<int>(), 0, 4096);
+                if (kd["outdoorSensor"].is<const char*>())
+                    SAFE_STRNCPY(config.kindle.outdoorSensor, kd["outdoorSensor"], sizeof(config.kindle.outdoorSensor));
+                if (kd["indoorSensor"].is<const char*>())
+                    SAFE_STRNCPY(config.kindle.indoorSensor, kd["indoorSensor"], sizeof(config.kindle.indoorSensor));
                 // An imported file is not a form: it can carry anything,
                 // including values written by a firmware that had one more
                 // clock style than this one. Clamped here so the renderer

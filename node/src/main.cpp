@@ -33,10 +33,11 @@ static bool         s_portalBgRunning = false;
 // Bring WiFi up, retrying 3 times back-to-back before offering the setup portal.
 static bool ensureWifi() {
     if (WiFi.status() == WL_CONNECTED) {
-        if (!s_portalBgRunning) {
-            portalStartBackground(s_cfg);
-            s_portalBgRunning = true;
-        }
+        // Only flag it as running if it actually started: portalStartBackground()
+        // refuses without basic-auth credentials, and setting the flag anyway
+        // would have loop() calling portalHandleClient() on a server that was
+        // never begun.
+        if (!s_portalBgRunning) s_portalBgRunning = portalStartBackground(s_cfg);
         return true;
     }
 
@@ -60,10 +61,7 @@ static bool ensureWifi() {
 
         if (WiFi.status() == WL_CONNECTED) {
             Serial.printf(" ok, %s\n", WiFi.localIP().toString().c_str());
-            if (!s_portalBgRunning) {
-                portalStartBackground(s_cfg);
-                s_portalBgRunning = true;
-            }
+            if (!s_portalBgRunning) s_portalBgRunning = portalStartBackground(s_cfg);
             return true;
         }
 

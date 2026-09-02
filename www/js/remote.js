@@ -16,7 +16,12 @@ function rnEsc(s) {
   });
 }
 
+// null means the node has never reported — the mailbox holds an entry for it
+// but no timestamp — and that is NOT an age of zero. Math.round(null/1000) is
+// 0, so the page said "seen: 0s ago" about a node it had never heard from,
+// which is the most reassuring possible way to display the opposite.
 function rnFmtAge(ms) {
+  if (ms === null || ms === undefined) return null;
   var s = Math.round(ms / 1000);
   if (s < 60) return s + "s";
   var m = Math.round(s / 60);
@@ -45,7 +50,8 @@ function rnRenderNodes(d) {
   var html = "";
   for (var i = 0; i < nodes.length; i++) {
     var n = nodes[i];
-    var seenTxt = rnFmtAge(n.age_ms) + " ago";
+    var age = rnFmtAge(n.age_ms);
+    var seenTxt = age === null ? "never" : age + " ago";
 
     var metricsHtml = "";
     if (n.metrics && n.metrics.length) {

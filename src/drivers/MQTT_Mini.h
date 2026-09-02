@@ -9,6 +9,13 @@
 class MQTT_Mini {
 public:
     void setClient(Client& client) { _tcp = &client; }
+
+    /// Forget the transport. MUST be called before the Client it points at is
+    /// destroyed — this class does not own it, and connected() dereferences it
+    /// without knowing whether it is still there. The exporter frees its socket
+    /// on the disabled and out-of-memory paths, and without this the pointer
+    /// left behind was read again in the destructor.
+    void clearClient() { _tcp = nullptr; _connected = false; }
     void setServer(const char* broker, uint16_t port) {
         _broker = broker;
         _port   = port;

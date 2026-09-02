@@ -58,8 +58,53 @@ fetch_graph() {
     wget -q -T 15 -O "$TMP/graph.bmp" "$HOST/kindle/graph.bmp" 2>/dev/null
 }
 
+# Read KEY="value" pairs into the environment WITHOUT executing the file.
+#
+# `. "$TMP/data.txt"` was doing exactly that — executing it — as root. The file
+# arrives over plain HTTP from a device on the network, and one of the values in
+# it is the forecast provider's free-text summary, so "the collector is
+# trusted" was not enough even before considering anyone able to answer for it
+# on the wire. A summary of  "; reboot; #  is a command, not a description.
+#
+# The collector escapes what it emits, and this refuses to run what it reads.
+# Either alone would do; both means a mistake at one end is not a shell on the
+# reader.
+#
+# Only names matching the dashboard's own convention are accepted, the value is
+# taken literally up to the closing quote, and the shell's own unescaping is
+# applied to nothing.
 load_data() {
-    [ -f "$TMP/data.txt" ] && . "$TMP/data.txt"
+    [ -f "$TMP/data.txt" ] || return 1
+    while IFS= read -r line; do
+        key=${line%%=*}
+        [ "$key" = "$line" ] && continue          # no '=' — not an assignment
+        case "$key" in
+            *[!A-Za-z0-9_]* | '' ) continue ;;    # not a plain variable name
+        esac
+        val=${line#*=}
+        case "$val" in
+            '"'*'"' )
+                val=${val#\"}
+                val=${val%\"}
+                # Undo the collector's backslash escaping, literally.
+                val=$(printf '%s' "$val" | sed 's/\\\(["\\$`]\)/\1/g')
+                ;;
+        esac
+        eval "$key=\$val"                         # value expanded, never parsed
+    done < "$TMP/data.txt"
+
+    # The layout follows the data, always — RES_W and RES_H come from the
+    # collector, so the two cannot be loaded independently.
+    #
+    # It used to be called once, inside the branch taken when the FIRST fetch
+    # succeeded. A Kindle that finished booting before the ESP32 did took the
+    # other branch, and nothing in the main loop ever called it again: every
+    # coordinate stayed unset for as long as the script ran, and the only cure
+    # was noticing and restarting it. Calling it here also means a change to
+    # the FBInk resolution on the collector is picked up on the next fetch
+    # rather than at the next reboot.
+    load_layout
+    return 0
 }
 
 # ── Layout loading ───────────────────────────────────────────────────────────
@@ -278,8 +323,7 @@ prevent_sleep
 
 # Initial fetch and full draw
 if fetch_data; then
-    load_data
-    load_layout
+    load_data          # also loads the layout, which follows RES_W/RES_H
     fetch_graph
     fbink -c                    # clear full screen
     draw_all
