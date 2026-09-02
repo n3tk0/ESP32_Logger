@@ -19,8 +19,12 @@
 #include "../core/Globals.h"         // config, activeFS
 #include "../core/ModuleRegistry.h"  // Pass 5 phase 3: /api/modules
 #include "IngestHandler.h"           // POST /api/ingest (FEATURE_REMOTE_NODES)
+#ifdef FEATURE_REMOTE_NODES
+#include "../sensors/RemoteIngest.h"
+#endif
 #include "../espnow/EspNowIngest.h"   // GET/POST /api/espnow/* (FEATURE_ESPNOW_INGEST)
 #include "KindleSkin.h"               // GET/POST /api/kindle/config
+#include "KindleSlotStore.h"           // GET/POST /api/kindle/slots
 #include "../managers/ConfigManager.h" // saveConfig() after module update
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
@@ -347,9 +351,18 @@ static void handleApiSensors(AsyncWebServerRequest* req) {
 static void handleEspnowStatus(AsyncWebServerRequest* req) {
     JsonDocument doc;
 
-    doc["pairing"] = espnowPairingActive();
-    doc["offline"] = espnowOfflineCount();
-    doc["warn"]    = espnowAnyBatteryWarn();
+    // Read ONCE and used for both the count and the per-node flags below.
+    // Asking twice would be harmless today, but computing the two from
+    // different thresholds is what made the summary badge disagree with the
+    // node list, so they share a value by construction.
+    const uint8_t offlineIv = espnowGetOfflineIntervals();
+
+    doc["pairing"]           = espnowPairingActive();
+    doc["offline"]           = espnowOfflineCount();
+    doc["warn"]              = espnowAnyBatteryWarn();
+    // Shown on the settings form so the number in the input is the number the
+    // device is actually using, rather than whatever was last typed.
+    doc["offline_intervals"] = offlineIv;
 
     EspNowNode nodes[ESPNOW_MAX_NODES];
     const int n = espnowCopyNodes(nodes, ESPNOW_MAX_NODES);
@@ -364,7 +377,7 @@ static void handleEspnowStatus(AsyncWebServerRequest* req) {
         o["interval"]  = e.intervalS;
         o["frames"]    = e.framesRx;
         o["dropped"]   = e.framesDropped;
-        o["offline"]   = espnowNodeOffline(e, nowMs);
+        o["offline"]   = espnowNodeOffline(e, nowMs, offlineIv);
 
         char mac[18];
         snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -502,6 +515,188 @@ static void handleEspnowNode(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
+// POST /api/espnow/add — provision a node by typing its MAC
+// ---------------------------------------------------------------------------
+// The escape hatch from pairing, and it is needed more often than it sounds.
+// Pairing requires the node to be awake, in range and holding the right key at
+// the moment somebody clicks a button — which is fine on a bench and awkward
+// for a node already sealed in a box on a roof. Its MAC is printed on the
+// module and never changes.
+//
+// The node still has to hold the shared key for anything it sends to decrypt,
+// so this adds a slot and a peer, not trust: a wrong MAC produces a node that
+// never reports, not one that reports someone else's readings.
+static bool parseMac(const String& s, uint8_t out[6]) {
+    // Accepts aa:bb:cc:dd:ee:ff, aa-bb-…, and aabbccddeeff — the three forms a
+    // MAC is printed in — but nothing else. sscanf with %x would have taken
+    // "0x1 2 3 4 5 6" and negative numbers as well.
+    int n = 0;
+    uint8_t nib = 0;
+    bool half = false;
+    for (size_t i = 0; i < s.length(); i++) {
+        const char c = s[i];
+        if (c == ':' || c == '-') {
+            // A separator mid-byte means a short group ("aa:b:cc"), which is
+            // ambiguous, not merely untidy.
+            if (half) return false;
+            continue;
+        }
+        uint8_t v;
+        if      (c >= '0' && c <= '9') v = (uint8_t)(c - '0');
+        else if (c >= 'a' && c <= 'f') v = (uint8_t)(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F') v = (uint8_t)(c - 'A' + 10);
+        else return false;
+
+        if (!half) { nib = v; half = true; }
+        else {
+            if (n >= 6) return false;          // too long
+            out[n++] = (uint8_t)((nib << 4) | v);
+            half = false;
+        }
+    }
+    return n == 6 && !half;
+}
+
+static void handleEspnowAdd(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;
+
+    if (!req->hasParam("mac", true) || !req->hasParam("node_id", true)) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"mac and node_id are required\"}");
+        return;
+    }
+
+    uint8_t mac[6];
+    if (!parseMac(req->getParam("mac", true)->value(), mac)) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"malformed MAC address\"}");
+        return;
+    }
+
+    // Refused rather than accepted-and-ignored. A multicast MAC (low bit of the
+    // first octet) cannot be an ESP-NOW peer, and the all-zero address is what
+    // an empty form field parses to if the digits are stripped.
+    if (mac[0] & 0x01) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"that is a multicast address, not a device\"}");
+        return;
+    }
+    bool allZero = true;
+    for (int i = 0; i < 6; i++) if (mac[i]) { allZero = false; break; }
+    if (allZero) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"00:00:00:00:00:00 is not a device\"}");
+        return;
+    }
+
+    const long rawId = req->getParam("node_id", true)->value().toInt();
+    // 0 is the wire's "unprovisioned" marker and 255 is reserved; the table
+    // refuses both, but saying so here gives the form something to show.
+    if (rawId < 1 || rawId > 254) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"node_id must be 1..254\"}");
+        return;
+    }
+    const uint8_t id = (uint8_t)rawId;
+
+    uint16_t interval = (uint16_t)ESPNOW_DEFAULT_INTERVAL_S;
+    if (req->hasParam("interval", true)) {
+        const long v = req->getParam("interval", true)->value().toInt();
+        if (v < 10 || v > 65535) {
+            req->send(400, "application/json",
+                      "{\"ok\":false,\"error\":\"interval must be 10..65535 s\"}");
+            return;
+        }
+        interval = (uint16_t)v;
+    }
+
+    // Empty label means "let the table name it espnow-NN", which is what add()
+    // does with a null. Passing "" would have been stored as an empty sensorId.
+    const char* label = nullptr;
+    String labelStr;
+    if (req->hasParam("label", true)) {
+        labelStr = req->getParam("label", true)->value();
+        if (labelStr.length() > 0) label = labelStr.c_str();
+    }
+
+    // A MAC already in the table under a DIFFERENT id would otherwise produce
+    // two slots for one radio: add() keys on nodeId, so it would not notice.
+    // The node would then be counted twice and one of the two entries could
+    // never go anything but offline.
+    {
+        EspNowNode nodes[ESPNOW_MAX_NODES];
+        const int n = espnowCopyNodes(nodes, ESPNOW_MAX_NODES);
+        for (int i = 0; i < n; i++) {
+            if (nodes[i].nodeId != id && memcmp(nodes[i].mac, mac, 6) == 0) {
+                req->send(409, "application/json",
+                          "{\"ok\":false,\"error\":\"that MAC is already node "
+                          "with another id — forget it first\"}");
+                return;
+            }
+        }
+    }
+
+    if (!espnowAddNode(mac, id, label, interval)) {
+        req->send(507, "application/json",
+                  "{\"ok\":false,\"error\":\"the node table is full\"}");
+        return;
+    }
+
+    JsonDocument doc;
+    doc["ok"]       = true;
+    doc["node_id"]  = id;
+    doc["interval"] = interval;
+    sendJsonResponse(req, doc);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/espnow/config — settings that belong to the radio, not to a node
+// ---------------------------------------------------------------------------
+static void handleEspnowConfig(AsyncWebServerRequest* req) {
+    if (!requireMutatingAuth(req)) return;
+
+    if (!req->hasParam("offline_intervals", true)) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"nothing to set\"}");
+        return;
+    }
+
+    const long v = req->getParam("offline_intervals", true)->value().toInt();
+    // 0 is legal and means "use the built-in default"; the range is refused
+    // rather than clamped, so a typed 200 comes back as an error instead of
+    // silently becoming 60.
+    //
+    // THE RANGE AND THE PERSIST FAILURE ARE DIFFERENT ANSWERS. Both used to come
+    // back as "must be 0 or 3..60", which told somebody whose flash was full to
+    // go and check a number that was already correct. The setter still
+    // range-checks too — it is the function that writes flash, and it is not
+    // this handler's business to be the only guard.
+    if (v < 0 || v > 255 ||
+        (v != 0 && (v < ESPNOW_OFFLINE_INTERVALS_MIN ||
+                    v > ESPNOW_OFFLINE_INTERVALS_MAX))) {
+        char msg[128];
+        snprintf(msg, sizeof(msg),
+                 "{\"ok\":false,\"error\":\"offline_intervals must be 0 (default) "
+                 "or %d..%d\"}",
+                 ESPNOW_OFFLINE_INTERVALS_MIN, ESPNOW_OFFLINE_INTERVALS_MAX);
+        req->send(400, "application/json", msg);
+        return;
+    }
+    if (!espnowSetOfflineIntervals((uint8_t)v)) {
+        req->send(500, "application/json",
+                  "{\"ok\":false,\"error\":\"could not save the threshold\"}");
+        return;
+    }
+
+    JsonDocument doc;
+    doc["ok"] = true;
+    // The EFFECTIVE value, not the stored one: a posted 0 comes back as the
+    // built-in default, so the form shows what the device will actually use.
+    doc["offline_intervals"] = espnowGetOfflineIntervals();
+    sendJsonResponse(req, doc);
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/espnow/forget — drop a node's radio peer and its slot
 // ---------------------------------------------------------------------------
 static void handleEspnowForget(AsyncWebServerRequest* req) {
@@ -519,6 +714,69 @@ static void handleEspnowForget(AsyncWebServerRequest* req) {
     req->send(200, "application/json", "{\"ok\":true}");
 }
 #endif  // FEATURE_ESPNOW_INGEST
+
+#ifdef FEATURE_REMOTE_NODES
+// ---------------------------------------------------------------------------
+// GET /api/remote/status — the HTTP nodes posting to /api/ingest
+// ---------------------------------------------------------------------------
+// The mailbox is the only record of these. Unlike an ESP-NOW node there is no
+// provisioning table: a node exists because it posted, and it is listed until
+// its slots are recycled. So this endpoint reports what arrived and how long
+// ago, and nothing about what was configured.
+//
+// THE STALENESS THRESHOLD MATCHES RemoteNodeSensor'S DEFAULT, deliberately.
+// The plugin treats a reading older than ten minutes as QUALITY_ERROR; a page
+// that called the same node offline after three would contradict the dashboard
+// it sits next to — readings still flowing in, the settings page saying the
+// node is down. A node whose plugin is configured with its own
+// `stale_after_ms` will disagree with this figure, which is why the age is
+// reported alongside the verdict rather than instead of it.
+static constexpr uint32_t REMOTE_STATUS_STALE_MS = 600000UL;   // 10 minutes
+
+static void handleApiRemoteStatus(AsyncWebServerRequest* req) {
+    JsonDocument doc;
+    JsonArray nodesArr = doc["nodes"].to<JsonArray>();
+
+    const int count = remoteIngest.nodeCount();
+    for (int i = 0; i < count; i++) {
+        // MAX_NODE_ID, not an arbitrary 32: the mailbox clamps ids to sixteen
+        // characters plus a terminator, and a larger buffer here only invites
+        // the reader to think longer ids survive.
+        char nodeId[RemoteIngest::MAX_NODE_ID] = {0};
+        if (!remoteIngest.nodeIdAt(i, nodeId, sizeof(nodeId))) continue;
+
+        JsonObject n = nodesArr.add<JsonObject>();
+        n["id"] = nodeId;
+
+        // UINT32_MAX means "never heard from", which is not an age. Sent as
+        // null so the page prints a dash instead of forty-nine days.
+        const uint32_t ageMs = remoteIngest.ageMsForNode(nodeId);
+        const bool     seen  = (ageMs != UINT32_MAX);
+        if (seen) n["age_ms"] = ageMs; else n["age_ms"] = nullptr;
+        n["online"] = seen && (ageMs < REMOTE_STATUS_STALE_MS);
+
+        // Eight is every metric a node of this kind sends with room to spare
+        // (temperature, humidity, pressure, battery and three more), and the
+        // array is on the AsyncTCP worker's stack, which is not generous.
+        SensorReading readings[8];
+        const int mCount = remoteIngest.peekLatest(nodeId, readings, 8,
+                                                   REMOTE_STATUS_STALE_MS);
+        JsonArray mArr = n["metrics"].to<JsonArray>();
+        for (int m = 0; m < mCount; m++) {
+            JsonObject mObj = mArr.add<JsonObject>();
+            mObj["metric"] = readings[m].metric;
+            mObj["value"]  = readings[m].value;
+            mObj["unit"]   = readings[m].unit;
+            // Per-metric, because a node can go on reporting temperature after
+            // its humidity sensor has stopped, and one aggregate freshness
+            // figure for the node would hide that.
+            mObj["stale"]  = (readings[m].quality == QUALITY_ERROR);
+            mObj["ts"]     = readings[m].timestamp;
+        }
+    }
+    sendJsonResponse(req, doc);
+}
+#endif
 
 #ifdef FEATURE_KINDLE_DASHBOARD
 // ---------------------------------------------------------------------------
@@ -548,6 +806,15 @@ static void handleKindleConfigGet(AsyncWebServerRequest* req) {
     doc["pressure_unit"] = k.pressureUnit;
     doc["decimals"]      = k.tempDecimals;
 
+    // Refresh cadence — runtime overrides of compile-time knobs.
+    // 0 / 0xFF means "use the built-in default", which the page shows.
+    doc["refresh_sec"]      = k.refreshSec ? k.refreshSec : KINDLE_REFRESH_SEC;
+    doc["follow_data"]      = (k.followData == 0xFF) ? KINDLE_FOLLOW_DATA : (int)k.followData;
+    doc["clock_pin_refresh"] = (k.clockPinRefresh == 0xFF) ? KINDLE_CLOCK_PIN_REFRESH : (int)k.clockPinRefresh;
+    doc["fbink_res_w"]      = k.fbinkResW;
+    doc["outdoor_sensor"]   = (k.outdoorSensor[0] != '\0') ? k.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
+    doc["indoor_sensor"]    = (k.indoorSensor[0] != '\0') ? k.indoorSensor : KINDLE_INDOOR_SENSOR;
+
     // The page's own width, read-only. It is a build-time constant (every size
     // in the stylesheet is derived from it), and the settings page shows it so
     // that "the layout is wrong on my reader" has somewhere to start rather
@@ -573,12 +840,26 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     KD_PARAM("date_format",   dateFormat);
     KD_PARAM("pressure_unit", pressureUnit);
     KD_PARAM("decimals",      tempDecimals);
+    KD_PARAM("refresh_sec",      refreshSec);
+    KD_PARAM("follow_data",      followData);
+    KD_PARAM("clock_pin_refresh", clockPinRefresh);
+    KD_PARAM("fbink_res_w",       fbinkResW);
     #undef KD_PARAM
 
     if (req->hasParam("face_custom", true)) {
         const String v = req->getParam("face_custom", true)->value();
         strncpy(k.faceCustom, v.c_str(), sizeof(k.faceCustom) - 1);
         k.faceCustom[sizeof(k.faceCustom) - 1] = '\0';
+    }
+    if (req->hasParam("outdoor_sensor", true)) {
+        const String v = req->getParam("outdoor_sensor", true)->value();
+        strncpy(k.outdoorSensor, v.c_str(), sizeof(k.outdoorSensor) - 1);
+        k.outdoorSensor[sizeof(k.outdoorSensor) - 1] = '\0';
+    }
+    if (req->hasParam("indoor_sensor", true)) {
+        const String v = req->getParam("indoor_sensor", true)->value();
+        strncpy(k.indoorSensor, v.c_str(), sizeof(k.indoorSensor) - 1);
+        k.indoorSensor[sizeof(k.indoorSensor) - 1] = '\0';
     }
 
     // Clamped before it is stored, so an out-of-range value never reaches the
@@ -596,6 +877,139 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     // No reload of anything: the dashboard reads config.kindle each time it
     // renders, so the next repaint on the reader is the new page.
     req->send(200, "application/json", "{\"ok\":true}");
+}
+
+// ---------------------------------------------------------------------------
+// GET  /api/kindle/slots — what is in each of the eleven places
+// POST /api/kindle/slots — replace the whole layout
+// ---------------------------------------------------------------------------
+// A WHOLE-LAYOUT REPLACE, not per-place edits. Eleven short records is a small
+// payload, the editor holds all of them on screen at once anyway, and an
+// endpoint that wrote one place at a time could leave the device holding half
+// an edit — a headline pointing at a sensor the grid below it no longer shares.
+//
+// THE PLACES ARE DESCRIBED IN THE RESPONSE, generated from the firmware's own
+// enum. The form has to name them somewhere, and deriving that list here means
+// a place added later appears in the editor without anyone remembering to add
+// it in two codebases.
+static void handleKindleSlotsGet(AsyncWebServerRequest* req) {
+    JsonDocument doc;
+    const KindleZones& zones = kdSlots();
+
+    JsonObject zo = doc["zones"].to<JsonObject>();
+    for (int i = 0; i < KZ_COUNT; i++) {
+        const KindleSlot& s = zones.z[i];
+        JsonObject o = zo[kdZoneKey((uint8_t)i)].to<JsonObject>();
+        o["sensor"]   = s.sensorId;
+        o["metric"]   = s.metric;
+        o["label"]    = s.label;                 // "" means "use the default"
+        o["shown"]    = kdSlotLabel(s);          // what will actually be drawn
+        o["flags"]    = s.flags;
+        o["decimals"] = s.decimals;
+        o["ink"]      = s.ink;
+    }
+
+    // The layout itself, so the editor can lay its cards out the way the page
+    // does rather than carrying a second, drifting copy of the design. `group`
+    // is which block a place sits in and `role` is what it does there; both are
+    // strings because a number here would have to be kept in step by hand.
+    JsonArray order = doc["order"].to<JsonArray>();
+    for (int i = 0; i < KZ_COUNT; i++) {
+        JsonObject o = order.add<JsonObject>();
+        o["key"]   = kdZoneKey((uint8_t)i);
+        o["group"] = kdZoneIsIndoor((uint8_t)i) ? "indoor" : "outdoor";
+        o["role"]  = (i == KZ_HERO) ? "hero"
+                   : (i == KZ_BIG)  ? "big"
+                   : kdZoneIsGrid((uint8_t)i) ? "grid" : "indoor";
+    }
+
+    doc["group_out"]  = kdGroupOutLabel(zones);
+    doc["group_in"]   = kdGroupInLabel(zones);
+    doc["group_out_set"] = zones.groupOut;      // "" = showing the built-in
+    doc["group_in_set"]  = zones.groupIn;
+
+    // The grey levels, generated from the firmware's own enum so a level added
+    // later appears in the form without anyone remembering to add it twice.
+    JsonArray inks = doc["inks"].to<JsonArray>();
+    for (uint8_t i = 0; i < KINK_COUNT; i++) {
+        JsonObject o = inks.add<JsonObject>();
+        o["id"]  = i;
+        o["css"] = kdInkCss(i);
+    }
+    doc["grid_cols"] = KZ_GRID_COLS;
+
+    doc["flag_bold"]  = KSLOTF_BOLD;
+    doc["flag_unit"]  = KSLOTF_UNIT;
+    doc["flag_age"]   = KSLOTF_AGE;
+    doc["flag_trend"] = KSLOTF_TREND;
+    doc["auto_decimals"] = KSLOT_DECIMALS_AUTO;
+
+    sendJsonResponse(req, doc);
+}
+
+static void handleKindleSlotsPost(AsyncWebServerRequest* req, uint8_t* data, size_t len) {
+    if (!requireMutatingAuth(req)) return;
+
+    JsonDocument doc;
+    if (deserializeJson(doc, data, len) != DeserializationError::Ok) {
+        req->send(400, "application/json", "{\"ok\":false,\"error\":\"bad JSON\"}");
+        return;
+    }
+    JsonObjectConst zin = doc["zones"].as<JsonObjectConst>();
+    if (zin.isNull()) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"expected a zones object\"}");
+        return;
+    }
+
+    // Built in full BEFORE anything is stored. A layout assembled straight into
+    // kdSlots() would leave the dashboard drawing a half-applied page if the
+    // save then failed.
+    KindleZones fresh;
+    fresh.clear();
+    strncpy(fresh.groupOut, doc["group_out"] | "", sizeof(fresh.groupOut) - 1);
+    strncpy(fresh.groupIn,  doc["group_in"]  | "", sizeof(fresh.groupIn)  - 1);
+
+    int filled = 0, dropped = 0;
+    for (JsonPairConst kv : zin) {
+        const uint8_t z = kdZoneFromKey(kv.key().c_str());
+        if (z >= KZ_COUNT) { dropped++; continue; }   // not a place we have
+        JsonObjectConst o = kv.value().as<JsonObjectConst>();
+        if (o.isNull()) continue;                     // an explicit null empties it
+
+        KindleSlot& s = fresh.z[z];
+        s = KindleSlot{};
+        strncpy(s.sensorId, o["sensor"] | "", sizeof(s.sensorId) - 1);
+        strncpy(s.metric,   o["metric"] | "", sizeof(s.metric)   - 1);
+        strncpy(s.label,    o["label"]  | "", sizeof(s.label)    - 1);
+        s.decimals = (uint8_t)(o["decimals"] | (int)KSLOT_DECIMALS_AUTO);
+        s.flags    = (uint8_t)(o["flags"]    | (int)KSLOTF_UNIT);
+        s.ink      = (uint8_t)(o["ink"]      | (int)KINK_BLACK);
+        // Half-filled is empty, not an error: the editor sends every place on
+        // every save, and the ones the reader left blank arrive as blanks.
+        if (!s.used()) { s = KindleSlot{}; continue; }
+        filled++;
+    }
+    kdZonesClamp(fresh);
+
+    if (!activeFS) {
+        req->send(503, "application/json", "{\"ok\":false,\"error\":\"no filesystem\"}");
+        return;
+    }
+    if (!kdSlotsSave(*activeFS, fresh)) {
+        req->send(500, "application/json", "{\"ok\":false,\"error\":\"save failed\"}");
+        return;
+    }
+
+    // Only now. The renderers read this without a lock, so it is replaced once,
+    // after the write that makes it survive a reboot.
+    kdSlots() = fresh;
+
+    JsonDocument res;
+    res["ok"]      = true;
+    res["count"]   = filled;
+    res["dropped"] = dropped;   // named so an editor can say what was refused
+    sendJsonResponse(req, res);
 }
 #endif  // FEATURE_KINDLE_DASHBOARD
 
@@ -1499,11 +1913,65 @@ void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/espnow/status",     HTTP_GET,  handleEspnowStatus);
     server.on("/api/espnow/pair",       HTTP_POST, handleEspnowPair);
     server.on("/api/espnow/node",       HTTP_POST, handleEspnowNode);
+    server.on("/api/espnow/add",        HTTP_POST, handleEspnowAdd);
+    server.on("/api/espnow/config",     HTTP_POST, handleEspnowConfig);
     server.on("/api/espnow/forget",     HTTP_POST, handleEspnowForget);
+#endif
+#ifdef FEATURE_REMOTE_NODES
+    server.on("/api/remote/status",     HTTP_GET,  handleApiRemoteStatus);
 #endif
 #ifdef FEATURE_KINDLE_DASHBOARD
     server.on("/api/kindle/config",     HTTP_GET,  handleKindleConfigGet);
     server.on("/api/kindle/config",     HTTP_POST, handleKindleConfigPost);
+    server.on("/api/kindle/slots",      HTTP_GET,  handleKindleSlotsGet);
+    // A JSON body rather than form fields, so the whole layout arrives as one
+    // document — and it is ACCUMULATED, not required to arrive in one packet.
+    //
+    // The one-shot guard the wifi test uses was copied here, and it was wrong
+    // the moment the editor grew past a single segment: eleven places round-trip
+    // at about 1.2 KB with nothing typed into them and over 2 KB once captions
+    // are, so AsyncTCP splits the body at the window size and every save of a
+    // filled-in layout came back 413. The wifi test's body is a handful of
+    // bytes and never splits, which is why the pattern looked safe.
+    //
+    // Bounded at KINDLE_SLOTS_MAX_BYTES, the same cap the stored file has, so
+    // the two cannot disagree about what is too big.
+    server.on("/api/kindle/slots", HTTP_POST,
+        [](AsyncWebServerRequest* r) { /* handled in the body callback */ },
+        nullptr,
+        [](AsyncWebServerRequest* r, uint8_t* data, size_t len,
+           size_t index, size_t total) {
+            if (total > KINDLE_SLOTS_MAX_BYTES) {
+                r->send(413, "application/json",
+                        "{\"ok\":false,\"error\":\"body too large\"}");
+                return;
+            }
+            if (index == 0) {
+                r->_tempObject = new (std::nothrow) String();
+                if (!r->_tempObject) {
+                    r->send(500, "application/json",
+                            "{\"ok\":false,\"error\":\"out_of_memory\"}");
+                    return;
+                }
+                // Registered immediately after the allocation: a client that
+                // disconnects before the last chunk would otherwise orphan the
+                // buffer, since the delete below never runs. delete on a null
+                // pointer is well-defined, so this is safe after it too.
+                r->onDisconnect([r]() {
+                    delete static_cast<String*>(r->_tempObject);
+                    r->_tempObject = nullptr;
+                });
+                static_cast<String*>(r->_tempObject)->reserve(total);
+            }
+            String* buf = static_cast<String*>(r->_tempObject);
+            if (!buf) return;                       // an earlier chunk failed
+            buf->concat(reinterpret_cast<const char*>(data), len);
+            if (index + len >= total) {
+                handleKindleSlotsPost(r, (uint8_t*)buf->c_str(), buf->length());
+                delete buf;
+                r->_tempObject = nullptr;
+            }
+        });
 #endif
     server.on("/api/mqtt/ha_discovery", HTTP_POST, handleMqttHaDiscovery);
     server.on("/api/ota/status",        HTTP_GET,  handleOtaStatus);

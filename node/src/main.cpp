@@ -27,63 +27,59 @@ static NodeSettings s_cfg;
 static uint32_t     s_lastPost   = 0;
 static bool         s_postedOnce = false;
 
-// Consecutive failed association attempts. Drives how long the portal is
-// offered before falling back to another retry.
-static uint8_t s_wifiFailures = 0;
+static bool         s_portalBgRunning = false;
 
-// ---------------------------------------------------------------------------
-// WiFi
-// ---------------------------------------------------------------------------
-static bool connectWifi() {
-    if (WiFi.status() == WL_CONNECTED) return true;
 
-    Serial.printf("[wifi] connecting to \"%s\"", s_cfg.ssid);
-    WiFi.mode(WIFI_STA);
-    // Persisting credentials to flash on every boot wears it out for no gain;
-    // they live in /config.json.
-    WiFi.persistent(false);
-    WiFi.begin(s_cfg.ssid, s_cfg.pass);
-
-    const uint32_t start = millis();
-    while (WiFi.status() != WL_CONNECTED) {
-        if (millis() - start > WIFI_CONNECT_TIMEOUT_MS) {
-            Serial.println(" timed out");
-            // Leave the radio off until the next attempt. A station stuck
-            // mid-association draws more than an idle one and will not
-            // recover on its own.
-            WiFi.disconnect(true);
-            return false;
-        }
-        delay(250);
-        Serial.print('.');
-        yield();
-    }
-    Serial.printf(" ok, %s\n", WiFi.localIP().toString().c_str());
-    return true;
-}
-
-// Bring WiFi up, opening the setup portal when that keeps failing.
-//
-// The portal is time-boxed here, and that is the whole point: a router that
-// reboots at 3 am must not leave the node parked in AP mode until someone
-// notices. After PORTAL_TIMEOUT_MS it closes and the saved network is tried
-// again, so the node self-heals — while still being reachable in that window
-// if the credentials really did change.
+// Bring WiFi up, retrying 3 times back-to-back before offering the setup portal.
 static bool ensureWifi() {
-    if (connectWifi()) { s_wifiFailures = 0; return true; }
+    if (WiFi.status() == WL_CONNECTED) {
+        // Only flag it as running if it actually started: portalStartBackground()
+        // refuses without basic-auth credentials, and setting the flag anyway
+        // would have loop() calling portalHandleClient() on a server that was
+        // never begun.
+        if (!s_portalBgRunning) s_portalBgRunning = portalStartBackground(s_cfg);
+        return true;
+    }
 
-    // Two clean failures before offering the portal: one is a transient the
-    // next cycle usually clears, and tearing the radio down to raise an AP
-    // costs a posting interval.
-    if (++s_wifiFailures < 2) return false;
+    WiFi.mode(WIFI_STA);
+    WiFi.persistent(false);
 
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        Serial.printf("[wifi] connecting to \"%s\" (attempt %d/3)", s_cfg.ssid, attempt);
+        WiFi.begin(s_cfg.ssid, s_cfg.pass);
+
+        const uint32_t start = millis();
+        while (WiFi.status() != WL_CONNECTED) {
+            if (millis() - start > WIFI_CONNECT_TIMEOUT_MS) {
+                Serial.println(" timed out");
+                break; // break the while loop to retry
+            }
+            delay(250);
+            Serial.print('.');
+            yield();
+        }
+
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.printf(" ok, %s\n", WiFi.localIP().toString().c_str());
+            if (!s_portalBgRunning) s_portalBgRunning = portalStartBackground(s_cfg);
+            return true;
+        }
+
+        // Clean up before next attempt
+        WiFi.disconnect();
+        delay(1000);
+    }
+
+    WiFi.disconnect(true);
     Serial.println("[wifi] repeated failures — opening setup portal");
+    s_portalBgRunning = false; // portalRun will stop the HTTP server on exit
     if (portalRun(s_cfg, PORTAL_TIMEOUT_MS)) {
         Serial.println("[cfg] saved, restarting");
         delay(200);
         ESP.restart();
     }
-    s_wifiFailures = 0;   // give the saved network a fresh run of attempts
+    
+    // Portal timed out. Return false so loop can sleep.
     return false;
 }
 
@@ -178,6 +174,10 @@ void setup() {
 }
 
 void loop() {
+    if (s_portalBgRunning) {
+        portalHandleClient();
+    }
+
     const uint32_t now = millis();
 
     // Unsigned subtraction, so the ~49-day millis() wrap is a non-event.

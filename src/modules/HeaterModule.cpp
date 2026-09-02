@@ -52,6 +52,21 @@ const char* HeaterModule::_faultText(Fault f) {
 
 // ---------------------------------------------------------------------------
 bool HeaterModule::load(JsonObjectConst cfg) {
+    // REFUSED rather than applied unlocked. The guard was added here without a
+    // check, which is worse than not taking it: on a failed acquire the whole
+    // function still ran — _forceOff(), the pin reassignment, every setpoint —
+    // concurrently with the tick that drives the output, which is precisely the
+    // race the lock exists to stop, now wearing the appearance of safety.
+    //
+    // Half a second is a long time to wait for a mutex nothing holds for more
+    // than a few instructions, so failing after it means something is genuinely
+    // stuck, and the honest answer to a config POST is "not applied".
+    MutexGuard g(_hwMutex, pdMS_TO_TICKS(500));
+    if (!g.isLocked()) {
+        Serial.println("[Heater] config not applied: the hardware lock is held");
+        return false;
+    }
+
     // Any config change forces the output off and a re-attach in tick(). A
     // half-applied config must never leave the previous pin driven.
     _forceOff(FAULT_NONE);
@@ -402,6 +417,23 @@ void HeaterModule::tick(uint32_t nowMs) {
 // ---------------------------------------------------------------------------
 void HeaterModule::statusJson(JsonObject out) const {
     if (!isEnabled()) return;               // UI falls back to "disabled"
+
+    // The lock is for CONSISTENCY BETWEEN FIELDS, not for the fields
+    // themselves — each is a scalar on a 32-bit part and reads atomically. It
+    // stops the card describing a duty cycle from before a reconfigure beside a
+    // temperature from after it.
+    //
+    // A failed acquire says so rather than returning. Returning left `out`
+    // empty, and an empty status object is how this function reports DISABLED
+    // (see the line above) — so 100 ms of contention made the UI claim the
+    // heater was off while it was driving a pin. Saying "busy" is honest and,
+    // unlike silence, self-correcting on the next poll.
+    MutexGuard g(_hwMutex, pdMS_TO_TICKS(100));
+    if (!g.isLocked()) {
+        out["text"] = "busy";
+        out["tone"] = "dim";
+        return;
+    }
 
     if (_fault != FAULT_NONE) {
         out["text"] = _faultText(_fault);

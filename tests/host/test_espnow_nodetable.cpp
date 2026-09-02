@@ -151,20 +151,47 @@ static void test_offline_detection() {
     n.used = true; n.nodeId = 1; n.intervalS = 60;
 
     // Provisioned but never heard from is offline, not merely absent.
-    CHECK(espnowNodeOffline(n, 1000));
+    CHECK(espnowNodeOffline(n, 1000, ESPNOW_OFFLINE_INTERVALS));
 
     n.everSeen = true;
     n.lastSeenMs = 1000;
 
-    CHECK(!espnowNodeOffline(n, 1000));
-    CHECK(!espnowNodeOffline(n, 1000 + 60000));            // one missed
-    CHECK(!espnowNodeOffline(n, 1000 + 180000));           // exactly three
-    CHECK(espnowNodeOffline(n,  1000 + 180001));           // past three
+    CHECK(!espnowNodeOffline(n, 1000, ESPNOW_OFFLINE_INTERVALS));
+    CHECK(!espnowNodeOffline(n, 1000 + 60000, ESPNOW_OFFLINE_INTERVALS));            // one missed
+    CHECK(!espnowNodeOffline(n, 1000 + 180000, ESPNOW_OFFLINE_INTERVALS));           // exactly three
+    CHECK(espnowNodeOffline(n,  1000 + 180001, ESPNOW_OFFLINE_INTERVALS));           // past three
 
     // An unset interval falls back rather than making the node immortal.
     n.intervalS = 0;
     CHECK(espnowNodeOffline(n, 1000 + 1000u * ESPNOW_DEFAULT_INTERVAL_S *
-                                     ESPNOW_OFFLINE_INTERVALS + 1));
+                                     ESPNOW_OFFLINE_INTERVALS + 1, ESPNOW_OFFLINE_INTERVALS));
+}
+
+// The threshold became a runtime setting, so it has to actually move the line.
+static void test_offline_threshold_is_configurable() {
+    EspNowNode n{};
+    n.used = true; n.everSeen = true; n.nodeId = 1; n.intervalS = 60;
+    n.lastSeenMs = 1000;
+
+    // Five minutes of silence: offline at the default 3, still online at 6.
+    const uint32_t fiveMin = 1000 + 300000;
+    CHECK(espnowNodeOffline(n, fiveMin, 3));
+    CHECK(!espnowNodeOffline(n, fiveMin, 6));
+
+    // Two is the tightest the API accepts, and it must be tighter than three.
+    CHECK(espnowNodeOffline(n, 1000 + 120001, 2));
+    CHECK(!espnowNodeOffline(n, 1000 + 120001, 3));
+
+    // ZERO IS "USE THE DEFAULT", not "offline after no time at all". A stored
+    // setting that was never written reads as 0, and the naive arithmetic —
+    // interval × 1000 × 0 — makes the limit zero milliseconds and every node
+    // offline one tick after it reported.
+    CHECK(!espnowNodeOffline(n, 1000, 0));
+    CHECK(!espnowNodeOffline(n, 1000 + 180000, 0));
+    CHECK(espnowNodeOffline(n,  1000 + 180001, 0));
+    for (uint32_t t = 1000; t < 1000 + 180000; t += 4999)
+        CHECK_EQ(espnowNodeOffline(n, t, 0),
+                 espnowNodeOffline(n, t, ESPNOW_OFFLINE_INTERVALS));
 }
 
 // millis() wraps at about 49 days. A collector that has been up longer must
@@ -174,9 +201,9 @@ static void test_offline_survives_the_millis_wrap() {
     n.used = true; n.everSeen = true; n.nodeId = 1; n.intervalS = 60;
 
     n.lastSeenMs = 0xFFFFF000u;                 // shortly before the wrap
-    CHECK(!espnowNodeOffline(n, 0xFFFFF000u + 1000));
-    CHECK(!espnowNodeOffline(n, 0x00000FFFu));  // 8,191 ms later, across zero
-    CHECK(espnowNodeOffline(n,  0x0002BF21u));  // ~180 s later, across zero
+    CHECK(!espnowNodeOffline(n, 0xFFFFF000u + 1000, ESPNOW_OFFLINE_INTERVALS));
+    CHECK(!espnowNodeOffline(n, 0x00000FFFu, ESPNOW_OFFLINE_INTERVALS));  // 8,191 ms later, across zero
+    CHECK(espnowNodeOffline(n,  0x0002BF21u, ESPNOW_OFFLINE_INTERVALS));  // ~180 s later, across zero
 }
 
 // ---------------------------------------------------------------------------
@@ -286,11 +313,11 @@ static void test_offline_count() {
     EspNowNodeTable t;
     EspNowNode* a = t.add(MAC_A, 1, nullptr, 60);
     EspNowNode* b = t.add(MAC_B, 2, nullptr, 60);
-    CHECK_EQ(t.offlineCount(500000), 2);           // neither has ever reported
+    CHECK_EQ(t.offlineCount(500000, ESPNOW_OFFLINE_INTERVALS), 2);           // neither has ever reported
 
     a->everSeen = true; a->lastSeenMs = 500000;
     b->everSeen = true; b->lastSeenMs = 100000;    // 400 s ago, interval 60
-    CHECK_EQ(t.offlineCount(500000), 1);
+    CHECK_EQ(t.offlineCount(500000, ESPNOW_OFFLINE_INTERVALS), 1);
 }
 
 static void test_default_node_id() {
@@ -412,6 +439,7 @@ int main() {
     RUN(test_seq_reset_is_honoured);
     RUN(test_offline_detection);
     RUN(test_offline_survives_the_millis_wrap);
+    RUN(test_offline_threshold_is_configurable);
     RUN(test_battery_metrics_emitted_only_when_meaningful);
     RUN(test_battery_warning_reaches_the_table);
     RUN(test_table_add_and_lookup);

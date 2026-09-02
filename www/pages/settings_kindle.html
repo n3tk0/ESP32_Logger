@@ -115,7 +115,11 @@
           <p class="hint" style="margin-top:0">
             Which figures are set bold. Nothing is, by default: the page's sizes
             already carry the hierarchy, and weight on top of them is for a
-            shelf far enough away that size alone stops being enough.
+            shelf far enough away that size alone stops being enough. These
+            apply to a whole block at once — to set one particular reading bold,
+            or to change how dark it is drawn, use that place's own
+            <strong>Bold</strong> switch and <strong>Ink</strong> menu under
+            <em>Readings on the dashboard</em> below.
           </p>
           <div class="grid grid-auto" id="kd-bold"></div>
         </div>
@@ -133,6 +137,18 @@
             gives its height back to the ones above it.
           </p>
           <div class="grid grid-auto" id="kd-show"></div>
+        </div>
+      </div>
+
+      <!-- Weather Forecast -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="cloud-sun"></span> Weather forecast</div>
+        </div>
+        <div class="card-body">
+          <p class="hint" style="margin:0">
+            The forecast provider, coordinates, and outlook mode (hourly / daily) are configured under <a href="#settings_modules">Settings → Modules</a>. The outlook setting controls whether the three columns on the e-ink page show the next hours (+3 h, +6 h, +9 h) or the next days.
+          </p>
         </div>
       </div>
 
@@ -161,6 +177,124 @@
               <p class="hint">Whole degrees set the big numerals wider apart.</p>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Refresh cadence -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="timer"></span> Refresh cadence</div>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:150px">
+              <label class="field-label" for="kd-refresh">Maximum interval (s)</label>
+              <input type="number" id="kd-refresh" class="input" min="60" max="600" step="10" placeholder="300">
+            </div>
+            <div class="field" style="flex:1;min-width:150px">
+              <label class="field-label" for="kd-follow">Follow data</label>
+              <select id="kd-follow" class="input">
+                <option value="1">On — reload after new data</option>
+                <option value="0">Off — fixed interval only</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1;min-width:150px">
+              <label class="field-label" for="kd-clockpin">Clock sync</label>
+              <select id="kd-clockpin" class="input">
+                <option value="1">On — align to the minute</option>
+                <option value="0">Off — free-running</option>
+              </select>
+            </div>
+          </div>
+          <p class="hint">
+            How often the reader reloads the page. Every reload repaints the whole panel, which flashes and costs battery. 'Follow data' predicts when the next reading is due and reloads right after. 'Clock sync' aligns the reload to the minute boundary so the displayed time changes when the minute does.
+          </p>
+        </div>
+      </div>
+
+      <!-- Sensor Mapping -->
+      <div class="card" style="margin-top:20px">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="thermometer"></span> Sensor mapping</div>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:150px">
+              <label class="field-label" for="kd-outdoor-sensor">Outdoor sensor</label>
+              <select id="kd-outdoor-sensor" class="input">
+                <option value="">Default (outdoor)</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1;min-width:150px">
+              <label class="field-label" for="kd-indoor-sensor">Indoor sensor</label>
+              <select id="kd-indoor-sensor" class="input">
+                <option value="">Default (indoor)</option>
+              </select>
+            </div>
+          </div>
+          <p class="hint">
+            The sensor IDs (from the Sensors page) that populate the outdoor and indoor sections of the dashboard. Leave blank to use the firmware defaults.
+          </p>
+        </div>
+      </div>
+
+      <!-- FBInk -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="monitor"></span> FBInk settings</div>
+        </div>
+        <div class="card-body">
+          <div class="field">
+            <label class="field-label" for="kd-fbink-res">FBInk resolution</label>
+            <select id="kd-fbink-res" class="input">
+              <option value="0">Default (600×800)</option>
+              <option value="1072">Paperwhite 4 (1072×1448)</option>
+            </select>
+            <p class="hint">Screen resolution for the FBInk Kindle script. Affects graph dimensions and icon sizes served by /kindle/data.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- What the dashboard shows -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="layout"></span> Readings on the dashboard</div>
+          <span id="kd-slot-count" class="badge dim"></span>
+        </div>
+        <div class="card-body">
+          <p class="hint">
+            The page has <strong>eleven places</strong> and they are always in
+            the same spot at the same size. What goes in each one is yours, and
+            so is how dark and how heavy it is drawn.
+          </p>
+          <pre class="hint" style="line-height:1.35;margin:6px 0 10px;overflow-x:auto">┌────────────────────────────┬──────────────────────┐
+│ heading                    │        17:40         │
+│                            │ ──────────────────── │
+│   HEADLINE / beside it     │ heading              │
+│   24 h low-to-high · age   │           second  third
+│                            │  FIRST     44%     42│
+│   grid 1    grid 2   grid 3│                      │
+│   grid 4    grid 5   grid 6│                      │
+└────────────────────────────┴──────────────────────┘</pre>
+          <p class="hint">
+            An empty place is skipped and the ones after it close up — so a
+            BMP280 outside simply has no humidity in the grid, rather than a
+            permanent dash. Every grid row then divides its own width by
+            however many cells it ended up with, so two readings are two halves
+            rather than two thirds and a gap. The indoor row works the same
+            way: leave the third empty and two come back.
+          </p>
+          <div id="kd-slots"></div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+            <button class="btn" data-click="kindleSlotsReset">
+              <span data-icon="rotate-ccw"></span> Back to the built-in layout
+            </button>
+            <button class="btn primary" data-click="kindleSlotsSave">
+              <span data-icon="save"></span> Save readings
+            </button>
+          </div>
+          <div id="kd-slot-msg"></div>
         </div>
       </div>
 

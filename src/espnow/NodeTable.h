@@ -254,10 +254,23 @@ static inline void espnowDefaultNodeId(uint8_t nodeId, char* out, size_t outLen)
 /// The age is an unsigned difference so it stays correct across the millis()
 /// wrap at ~49 days — a collector that has been up longer than that must not
 /// suddenly declare every node offline.
-static inline bool espnowNodeOffline(const EspNowNode& n, uint32_t nowMs) {
+/// `intervals` HAS NO DEFAULT, deliberately, and that is a change from when it
+/// was a compile-time constant. The threshold became a runtime setting, and a
+/// defaulted parameter meant every existing call kept compiling while silently
+/// reading the old constant — which is how /api/espnow/status came to report a
+/// node count computed from the user's setting beside per-node badges computed
+/// from the built-in 3. Requiring the argument makes the compiler point at
+/// every place that has to decide.
+///
+/// Zero is treated as the built-in default rather than as "offline after no
+/// time at all", so a caller that passes an unset stored value gets sane
+/// behaviour instead of a table where every node is offline.
+static inline bool espnowNodeOffline(const EspNowNode& n, uint32_t nowMs,
+                                     uint8_t intervals) {
     if (!n.used || !n.everSeen) return true;
     const uint32_t iv = n.intervalS ? n.intervalS : (uint32_t)ESPNOW_DEFAULT_INTERVAL_S;
-    const uint32_t limitMs = iv * 1000u * (uint32_t)ESPNOW_OFFLINE_INTERVALS;
+    const uint32_t k  = intervals ? (uint32_t)intervals : (uint32_t)ESPNOW_OFFLINE_INTERVALS;
+    const uint32_t limitMs = iv * 1000u * k;
     return (uint32_t)(nowMs - n.lastSeenMs) > limitMs;
 }
 
@@ -380,10 +393,13 @@ public:
         return c;
     }
 
-    int offlineCount(uint32_t nowMs) const {
+    /// `intervals` is required here for the same reason it is on
+    /// espnowNodeOffline(): the count and the per-node flag must be computed
+    /// from one threshold or the page contradicts itself.
+    int offlineCount(uint32_t nowMs, uint8_t intervals) const {
         int c = 0;
         for (int i = 0; i < CAP; i++)
-            if (_n[i].used && espnowNodeOffline(_n[i], nowMs)) c++;
+            if (_n[i].used && espnowNodeOffline(_n[i], nowMs, intervals)) c++;
         return c;
     }
 

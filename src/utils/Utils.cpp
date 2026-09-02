@@ -106,14 +106,36 @@ bool isPathDownloadAllowed(const String& path) {
 bool deleteRecursive(fs::FS& fs, const String& path) {
     struct Pending { String path; bool listed; };
     std::vector<Pending> stack;
+    // A directory listing pushes all of its children at once, and the first few
+    // doublings of an empty vector are the ones that fragment the heap. Sixty
+    // four covers an ordinary directory without a single reallocation.
+    stack.reserve(64);
     stack.push_back({ path, false });
 
     bool overallOk = true;
 
     while (!stack.empty()) {
-        // Abort on suspiciously deep trees to prevent OOM on the AsyncTCP
-        // worker stack (typically ~4 KB).  (AUDIT 7.4)
-        if (stack.size() > 256) return false;
+        // WHAT THIS COSTS, because the number was raised on arithmetic that
+        // left out the larger half. A Pending is a String plus a bool — about
+        // 20 bytes in the vector — but the String's characters live in their
+        // own heap block, and a LittleFS path runs 20-40 characters, so each
+        // entry is nearer 55 bytes than 20. On top of that std::vector grows by
+        // doubling, and during a growth it holds the old buffer and the new one
+        // at once, so the peak demand is 1.5x the vector and it must be
+        // CONTIGUOUS.
+        //
+        // At 4096 that is roughly 225 KB against an ESP32-C3 that has 320 KB of
+        // SRAM in total and rather less of it free — not a safety margin, an
+        // out-of-memory reboot in the middle of a delete.
+        //
+        // 1024 is ~56 KB, which is affordable, and it is the number that fixes
+        // what the raise was actually for: 256 aborted on a /logs directory
+        // holding under a year of daily files, which is not a suspicious tree.
+        // This one holds about three years.
+        if (stack.size() > 1024) {
+            Serial.println("[fs] deleteRecursive: tree too large, aborting");
+            return false;
+        }
 
         Pending cur = stack.back();   // peek
 

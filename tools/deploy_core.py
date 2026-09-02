@@ -77,8 +77,9 @@ STEP_NAMES: dict[int, str] = {
     7: "Upload LittleFS       pio run -t uploadfs",
     8: "Upload web via HTTP   POST /upload to device IP",
     9: "Open serial monitor   pio device monitor",
-    10: "Compile node firmware pio run -d node…",
-    11: "Flash node firmware   pio run -d node… -t upload",
+    10: "Erase node flash      pio run -d node… -t erase",
+    11: "Compile node firmware pio run -d node…",
+    12: "Flash node firmware   pio run -d node… -t upload",
 }
 
 PRESETS: dict[str, tuple[str, list[int]]] = {
@@ -89,7 +90,7 @@ PRESETS: dict[str, tuple[str, list[int]]] = {
     # The node is its own board on its own USB device, so it gets its own
     # preset rather than joining "All steps" — running both in one pass would
     # flash whichever happens to be plugged in twice.
-    "D": ("Node flash",    [10, 11]),
+    "D": ("Node flash",    [11, 12]),
     "A": ("All steps",     list(range(1, 10))),
     "N": ("None",          []),
 }
@@ -1047,22 +1048,46 @@ class DeployManager:
                           "collector.")
         return True
 
-    def s10_compile_node(self) -> int:
+    def s10_erase_node(self, confirm_callback: Optional[Callable[[], bool]] = None) -> int:
         self._emit_start(10, STEP_NAMES[10])
+        self._log("*** WARNING: Wipes all node flash (config, logs, FS). ***")
+
+        if confirm_callback:
+            if not confirm_callback():
+                self._log("Skipped.")
+                self._emit_complete(10, 0)
+                return 0
+
         if not self._node_preamble():
             self._emit_complete(10, 1)
+            return 1
+
+        cmd = self._node_cmd("-t", "erase")
+        if cmd is not None and self.cfg.get("node_port"):
+            cmd += ["--upload-port", self.cfg["node_port"]]
+
+        rc = 1 if cmd is None else self._run_cmd(cmd, env=self._node_env())
+        if rc == 0:
+            self._log("✓ Node flash erased.")
+        self._emit_complete(10, rc)
+        return rc
+
+    def s11_compile_node(self) -> int:
+        self._emit_start(11, STEP_NAMES[11])
+        if not self._node_preamble():
+            self._emit_complete(11, 1)
             return 1
         cmd = self._node_cmd()
         rc = 1 if cmd is None else self._run_cmd(cmd, env=self._node_env())
         if rc == 0:
             self._log("✓ Node firmware compiled.")
-        self._emit_complete(10, rc)
+        self._emit_complete(11, rc)
         return rc
 
-    def s11_flash_node(self) -> int:
-        self._emit_start(11, STEP_NAMES[11])
+    def s12_flash_node(self) -> int:
+        self._emit_start(12, STEP_NAMES[12])
         if not self._node_preamble():
-            self._emit_complete(11, 1)
+            self._emit_complete(12, 1)
             return 1
         cmd = self._node_cmd("-t", "upload")
         if cmd is not None and self.cfg.get("node_port"):
@@ -1075,7 +1100,7 @@ class DeployManager:
         rc = 1 if cmd is None else self._run_cmd(cmd, env=self._node_env())
         if rc == 0:
             self._log("✓ Node firmware flashed.")
-        self._emit_complete(11, rc)
+        self._emit_complete(12, rc)
         return rc
 
     def provision_wifi(
@@ -1325,8 +1350,9 @@ class DeployManager:
             7: self.s7_upload_fs,
             8: self.s8_upload_http,
             9: self.s9_monitor,
-           10: self.s10_compile_node,
-           11: self.s11_flash_node,
+           10: lambda: self.s10_erase_node(confirm_erase_callback),
+           11: self.s11_compile_node,
+           12: self.s12_flash_node,
         }
 
         failed: list[int] = []

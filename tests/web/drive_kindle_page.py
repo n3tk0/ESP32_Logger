@@ -138,6 +138,94 @@ with sync_playwright() as p:
           "restoring puts back the built-in design")
     check(pg.input_value("#kd-face") == "0", "and the form re-renders as restored")
 
+
+    # ── The layout editor ────────────────────────────────────────────────────
+    # Nine fixed places, drawn in two groups the way the page groups them. What
+    # matters here is that the dropdowns reflect the HARDWARE: a BMP280 must not
+    # offer humidity, because it cannot measure it, and that is the whole reason
+    # for the feature.
+    slots = pg.locator("#kd-slots")
+    check(slots.count() == 1, "the layout editor rendered")
+
+    # Two group blocks, and a card for every place — INCLUDING the empty ones.
+    # A place is a fixed position on the page, so an editor that hid the empty
+    # ones would be hiding the very thing the reader came to fill in.
+    groups = pg.locator("#kd-slots > .card").count()
+    check(groups == 2, "one block per column (%d)" % groups)
+    cards = pg.locator("#kd-slots .card .card").count()
+    check(cards == 11, "a card for every place, empty ones included (%d)" % cards)
+    check(pg.locator("#kd-slots .badge:has-text('empty')").count() == 5,
+          "the five empty places are marked as empty")
+    check("6 / 11" in pg.locator("#kd-slot-count").inner_text(),
+          "the count badge says how many places are filled")
+
+    def card(n):
+        return pg.locator("#kd-slots .card .card").nth(n)
+
+    # The headline names "balcony", a BMP280 in the mock.
+    metric_opts = card(0).locator("select").nth(1).locator("option").all_inner_texts()
+    check("temperature" in metric_opts, "a reading the sensor publishes is offered")
+    check("pressure" in metric_opts, "and so is its pressure")
+    check(not any("humidity" in o for o in metric_opts),
+          "a BMP280 is NOT offered humidity: %r" % (metric_opts,))
+
+    # A place naming a sensor that is no longer configured keeps its entry
+    # rather than being silently reassigned to whatever happens to be first.
+    g4 = card(5).locator("select").nth(0)
+    check("not configured" in g4.inner_text(),
+          "an unknown sensor is kept and marked, not dropped")
+
+    # The derived label is offered as a placeholder, so the reader can see what
+    # they get without typing anything.
+    ph = card(2).locator("input[maxlength='16']").get_attribute("placeholder")
+    check(ph == "PM2.5", "the derived caption is the placeholder (%r)" % ph)
+
+    # A heading the reader overrode comes back as a value; one they did not
+    # comes back as a placeholder, so the form says which is which.
+    out_head = pg.locator("#kd-slots > .card").nth(0).locator("input[maxlength='16']").nth(0)
+    check(out_head.input_value() == "БАЛКОН", "an overridden heading round-trips")
+    in_head = pg.locator("#kd-slots > .card").nth(1).locator("input[maxlength='16']").nth(0)
+    check(in_head.input_value() == "",
+          "and one left alone stays empty rather than being filled in")
+    check(in_head.get_attribute("placeholder") == "ВЪТРЕ",
+          "with the built-in wording as its placeholder")
+
+    # Emptying a place is local until Save, and leaves the card in position —
+    # the place does not disappear, it becomes available.
+    before = pg.locator("#kd-slots .badge:has-text('empty')").count()
+    card(2).locator('[data-click="kindleZoneClear"]').click()
+    pg.wait_for_timeout(300)
+    check(pg.locator("#kd-slots .card .card").count() == 11,
+          "emptying a place leaves its card where it was")
+    check(pg.locator("#kd-slots .badge:has-text('empty')").count() == before + 1,
+          "and marks it empty")
+    check(card(2).locator("select").nth(0).input_value() == "",
+          "with no sensor selected")
+
+    # Changing the sensor must not leave a metric that sensor cannot report.
+    card(0).locator("select").nth(0).select_option("livingroom")
+    pg.wait_for_timeout(300)
+    new_metric = card(0).locator("select").nth(1).input_value()
+    check(new_metric in ("temperature", "humidity", "pressure", "aqi"),
+          "changing the sensor keeps a reading it actually publishes (%r)" % new_metric)
+
+    # ── Per-place ink ────────────────────────────────────────────────────────
+    # How dark a value is drawn is the reader's, per place. The selects are
+    # sensor, reading, decimals, ink — so ink is the last one on the card.
+    def ink_of(n):
+        return card(n).locator("select").last.input_value()
+
+    check(ink_of(1) == "2", "a place pushed into the mid grey round-trips (%s)" % ink_of(1))
+    check(ink_of(5) == "1", "and one in the dark grey (%s)" % ink_of(5))
+    check(ink_of(0) == "0", "while a place nobody touched is black")
+
+    # And it is local until Save, like everything else on this form.
+    card(0).locator("select").last.select_option("3")
+    pg.wait_for_timeout(300)
+    check(ink_of(0) == "3", "choosing an ink sticks")
+    check(pg.evaluate("kdZones.hero.ink") == 3,
+          "and reaches the working copy as a number, not a string")
+
     shot = os.environ.get("SCREENSHOT")
     if shot:
         pg.screenshot(path=shot, full_page=True)

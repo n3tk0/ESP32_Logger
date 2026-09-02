@@ -1,0 +1,24 @@
+{
+    "items": [
+        {
+            "name": "ESP32 Dashboard",
+            "priority": 1,
+            "items": [
+                {
+                    "name": "Start Dashboard",
+                    "priority": 1,
+                    "action": "/bin/sh",
+                    "params": "start.sh",
+                    "exitmenu": true
+                },
+                {
+                    "name": "Stop Dashboard",
+                    "priority": 2,
+                    "action": "/bin/sh",
+                    "params": "stop.sh",
+                    "exitmenu": false
+                }
+            ]
+        }
+    ]
+}

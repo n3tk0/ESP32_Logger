@@ -53,7 +53,16 @@ constexpr const char* DEFAULT_DATALOG_PREFIX = "datalog";
 constexpr const char* DEFAULT_NTP_SERVER     = "pool.ntp.org";
 
 #define CONFIG_STRUCT_MAGIC  0xC0FFEE36
-#define CONFIG_VERSION       14
+// BUMP THIS WHENEVER sizeof(DeviceConfig) CHANGES, not only when a field's
+// meaning does. loadConfig() reaches its migration path by comparing the file's
+// size against sizeof(DeviceConfig) and then checks the version byte against
+// KNOWN_MIGRATABLE in ConfigManager.cpp. Leaving the number alone while the
+// struct grows means a device running the previous firmware presents a file
+// that is both too short AND carries a version the migrator does not accept —
+// which is a factory reset, written straight back to flash. v15 grew
+// KindleConfig by 33 bytes and would have done exactly that to every v14
+// device.
+#define CONFIG_VERSION       15
 
 // DS1302 RAM addresses for bootcount backup
 #define RTC_RAM_BOOTCOUNT_ADDR  0
@@ -149,20 +158,37 @@ enum KindlePressureUnit : uint8_t {
 // Which figures are set bold. A bitmask and not a single "emphasis" setting
 // because the answer depends on the shelf: a page read across a room wants the
 // outdoor temperature heavy, one read at a desk may want nothing heavy at all.
-constexpr uint16_t KBOLD_OUT_TEMP  = 0x0001;
-constexpr uint16_t KBOLD_OUT_HUM   = 0x0002;
-constexpr uint16_t KBOLD_PRESSURE  = 0x0004;
+//
+// FIVE OF THESE USED TO NAME A READING — the outdoor temperature, the outdoor
+// humidity, the pressure, and the inside pair. There is no such thing any more:
+// the dashboard is nine named PLACES and the reader chooses what goes in each,
+// so "the pressure" is wherever they put it and a bit that meant one hardwired
+// position had nothing left to point at. The bits still exist, at the same
+// values so no stored configuration changes meaning by more than it has to, and
+// they now name the places — which is the same question ("what on this page is
+// heavy?") asked in the vocabulary the page has.
+//
+// Emphasis on one PARTICULAR reading did not go away with them; it moved to
+// where it belongs, as KSLOTF_BOLD on the place itself.
+constexpr uint16_t KBOLD_HERO      = 0x0001;   // the headline value
+constexpr uint16_t KBOLD_BIG       = 0x0002;   // the one beside it
+constexpr uint16_t KBOLD_GRID      = 0x0004;   // the two-by-two grid
 constexpr uint16_t KBOLD_CLOCK     = 0x0008;
-constexpr uint16_t KBOLD_IN_TEMP   = 0x0010;
-constexpr uint16_t KBOLD_IN_HUM    = 0x0020;
+constexpr uint16_t KBOLD_INDOOR    = 0x0010;   // the row under the clock
+constexpr uint16_t KBOLD_UNITS     = 0x0020;
 constexpr uint16_t KBOLD_FORECAST  = 0x0040;
 constexpr uint16_t KBOLD_WEEK      = 0x0080;
 constexpr uint16_t KBOLD_LABELS    = 0x0100;
 
 // Which blocks are drawn. Every one of these defaults to on; they exist for
 // the reader who wants the page to be two numbers and nothing else.
-constexpr uint16_t KSHOW_OUT_HUM   = 0x0001;
-constexpr uint16_t KSHOW_PRESSURE  = 0x0002;
+//
+// The first two named a reading for the same reason and were renamed with it:
+// 0x0001 was "the outdoor humidity" and is now "the second value on the
+// headline", whatever the reader put there; 0x0002 was "the pressure" and is
+// now the grid that the pressure sits in by default.
+constexpr uint16_t KSHOW_BIG       = 0x0001;   // the value beside the headline
+constexpr uint16_t KSHOW_GRID      = 0x0002;   // the two-by-two block
 constexpr uint16_t KSHOW_TENDENCY  = 0x0004;
 constexpr uint16_t KSHOW_RANGE     = 0x0008;   // the 24 h low-to-high line
 constexpr uint16_t KSHOW_INSIDE    = 0x0010;
@@ -326,7 +352,14 @@ struct KindleConfig {
     uint8_t  dateFormat;      // KindleDateFormat
     uint8_t  pressureUnit;    // KindlePressureUnit
     uint8_t  tempDecimals;    // 0 or 1
-    uint8_t  reserved[15];
+    // v14.1 — refresh cadence, formerly in reserved[]
+    uint16_t refreshSec;      // 0 = use KINDLE_REFRESH_SEC compile-time default
+    uint8_t  followData;      // 0xFF = use KINDLE_FOLLOW_DATA; 0 or 1 = explicit
+    uint8_t  clockPinRefresh; // 0xFF = use KINDLE_CLOCK_PIN_REFRESH; 0 or 1 = explicit
+    uint16_t fbinkResW;       // 0 = use KINDLE_PAGE_W (600); set 1072 for PW4 FBInk mode
+    char     outdoorSensor[16]; // Empty = use compile-time KINDLE_OUTDOOR_SENSOR
+    char     indoorSensor[16];  // Empty = use compile-time KINDLE_INDOOR_SENSOR
+    uint8_t  reserved[9];
 };
 
 struct DeviceConfig {

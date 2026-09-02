@@ -318,6 +318,18 @@ void loadDefaultConfig() {
     config.kindle.dateFormat   = KDATE_DAY_MONTH;
     config.kindle.pressureUnit = KPRESS_HPA;
     config.kindle.tempDecimals = 1;
+
+    // v15 fields. Written out rather than left to the memset above, because
+    // two of the sentinels are 0xFF: zero means "explicitly off" for
+    // followData and clockPinRefresh, so a memset alone would make a
+    // factory-reset device stop following the data instead of using the
+    // built-in default.
+    config.kindle.refreshSec      = 0;      // 0    → KINDLE_REFRESH_SEC
+    config.kindle.followData      = 0xFF;   // 0xFF → KINDLE_FOLLOW_DATA
+    config.kindle.clockPinRefresh = 0xFF;   // 0xFF → KINDLE_CLOCK_PIN_REFRESH
+    config.kindle.fbinkResW       = 0;      // 0    → KINDLE_PAGE_W
+    config.kindle.outdoorSensor[0] = '\0';  // ""   → KINDLE_OUTDOOR_SENSOR
+    config.kindle.indoorSensor[0]  = '\0';  // ""   → KINDLE_INDOOR_SENSOR
 }
 
 // ============================================================================
@@ -370,6 +382,25 @@ void migrateConfig(uint8_t fromVersion) {
         config.kindle.dateFormat    = KDATE_DAY_MONTH;
         config.kindle.pressureUnit  = KPRESS_HPA;
         config.kindle.tempDecimals  = 1;
+    }
+    if (fromVersion < 15) {
+        // KindleConfig grew by 33 bytes: refresh cadence, the FBInk render
+        // width, and the two sensor ids the dashboard reads.
+        //
+        // EVERY ONE OF THESE IS SET TO ITS "USE THE COMPILE-TIME DEFAULT"
+        // SENTINEL, and the sentinels are not all zero. A device upgrading has
+        // been rendering the built-in behaviour, and the upgrade must not
+        // change it — but loadDefaultConfig() starts from a memset, so
+        // followData and clockPinRefresh would arrive as 0, which means
+        // "explicitly off" and not "unset". The page would quietly stop
+        // following the data on every device that had never opened the
+        // settings form.
+        config.kindle.refreshSec      = 0;      // 0    → KINDLE_REFRESH_SEC
+        config.kindle.followData      = 0xFF;   // 0xFF → KINDLE_FOLLOW_DATA
+        config.kindle.clockPinRefresh = 0xFF;   // 0xFF → KINDLE_CLOCK_PIN_REFRESH
+        config.kindle.fbinkResW       = 0;      // 0    → KINDLE_PAGE_W
+        config.kindle.outdoorSensor[0] = '\0';  // ""   → KINDLE_OUTDOOR_SENSOR
+        config.kindle.indoorSensor[0]  = '\0';  // ""   → KINDLE_INDOOR_SENSOR
     }
     config.version = CONFIG_VERSION;
     config.hardware.version = CONFIG_VERSION;
@@ -472,7 +503,7 @@ bool loadConfig() {
 
         // Reject unrecognised source versions — byte layouts before v6 differ.
         uint8_t rawVersion = (got >= 5) ? rawBuf[sizeof(uint32_t)] : 0;
-        constexpr uint8_t KNOWN_MIGRATABLE[] = {6, 7, 8, 9, 10, 11, 12, 13};
+        constexpr uint8_t KNOWN_MIGRATABLE[] = {6, 7, 8, 9, 10, 11, 12, 13, 14};
         bool versionKnown = false;
         for (uint8_t v : KNOWN_MIGRATABLE) {
             if (rawVersion == v) { versionKnown = true; break; }

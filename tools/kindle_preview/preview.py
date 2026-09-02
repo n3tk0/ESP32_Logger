@@ -195,23 +195,104 @@ for i,(n,dnum) in enumerate(list(zip(S['wd'],[24,25,26,27,28,29,30]))):
     cls='wd wd-now' if i==1 else ('wd wd-we' if i>=5 else 'wd')
     wk+='<td class="%s"><div class="wd-n">%s</div><div class="wd-d">%d</div></td>'%(cls,n,dnum)
 
-body=('<table class="hero"><tr><td width="50%">'
- '<div class="lab">'+S['out']+(battery_badge() if WARN else '')+'</div>'
- '<div class="'+HERO['cls']+'">'+HERO['now']+'<span class="deg">&deg;</span>'
- '<span class="slash">/</span><span class="hum-o">'+HERO['hum']+'%</span></div>'
- '<div class="sub">'+HERO['lo']+S['to']+HERO['hi']+'&deg;'
- '<span class="dim"> &middot; 3 '+('min old' if lang=='en' else 'мин')+'</span></div>'
- '<div class="pres">'+HERO['hpa']+'<span class="pres-u"> hPa</span></div>'
- '<div class="sub sub-t">'+HERO['arrow']+' '+HERO['trend']
- +' <span class="dim">('+HERO['d']+')</span></div>'
- '</td><td width="50%" class="sep">'
+# ── The nine places ─────────────────────────────────────────────────────────
+# The page is nine named places now, so the preview is too. These hold what the
+# firmware defaults to.
+#
+# The layout is duplicated from src/web/KindleDashboard.cpp rather than parsed
+# out of it, and that is a deliberate limit of this tool: it draws what the page
+# SHOULD look like, and the host tests plus the firmware itself are what prove
+# it draws that. The STYLESHEET, on the other hand, is extracted — see the top
+# of this file — so sizes, greys and spacing cannot drift.
+LAB_HUM   = 'HUM'   if lang == 'en' else 'ВЛАГА'
+LAB_PRESS = 'PRESS' if lang == 'en' else 'НАЛЯГ'
+LAB_DEW   = 'DEW'   if lang == 'en' else 'РОСА'
+LAB_TEMP  = 'TEMP'  if lang == 'en' else 'ТЕМП'
+LAB_TO    = 'to'    if lang == 'en' else 'до'
+LAB_AGE   = '3 min old' if lang == 'en' else '3 мин'
+
+# (caption, value, unit, tendency arrow, ink class)
+# Three in the grid, which is what the third column is for: a ppm reading beside
+# the pressure and the dew point rather than instead of one of them.
+GRID   = [(LAB_PRESS, HERO['hpa'], 'hPa', '↘', ''),
+          (LAB_DEW, '3.1', '°', '', ''),
+          ('CO₂', '640', 'ppm', '', 'ink-d')]
+INDOOR = [(LAB_TEMP, '21.0', '°', '', ''),
+          (LAB_HUM, '44', '%', '', 'ink-d'),
+          ('AQI', '42', '', '', 'ink-d')]
+
+def unit_span(unit):
+    """Degrees and per-cent set tight against the number; everything else after
+    a space. The same rule appendValue() applies."""
+    if unit == '°':
+        return '<span class="unit unit-d">°</span>'
+    if unit == '%':
+        return '<span class="unit">%</span>'
+    return '<span class="unit"> ' + unit + '</span>'
+
+def value(val, unit, arrow, cls, bold=False, ink=''):
+    return ('<span class="' + cls + (' val-b' if bold else '') +
+            ((' ' + ink) if ink else '') + '">' + val +
+            (unit_span(unit) if unit else '') +
+            ('<span class="tend">' + arrow + '</span>' if arrow else '') +
+            '</span>')
+
+def cell(lab, val, unit, arrow, ink, cls, caption=True):
+    return (('<div class="lab">' + lab + '</div>' if caption else '') +
+            '<div class="cv">' + value(val, unit, arrow, cls, False, ink) + '</div>')
+
+def row_split(n, cols=3):
+    """Balanced, full rows — the same rule kdGridRowSplit() applies: the number
+    of rows comes from the cap, then the cells spread as evenly as they go."""
+    if n <= 0:
+        return []
+    rows = (n + cols - 1) // cols
+    base, extra = divmod(n, rows)
+    return [base + (1 if r < extra else 0) for r in range(rows)]
+
+def grid_rows():
+    out, at = '', 0
+    for cols in row_split(len(GRID)):
+        out += '<table class="grid' + (' grid-3' if cols >= 3 else '') + '"><tr>'
+        for _ in range(cols):
+            out += ('<td width="%d%%">' % (100 // cols) +
+                    cell(*GRID[at], 'gv') + '</td>')
+            at += 1
+        out += '</tr></table>'
+    return out
+
+def indoor_row():
+    if not INDOOR:
+        return ''
+    n = len(INDOOR)
+    # The first field gets more of the row because it is set larger — the same
+    # split appendTopBlock() applies.
+    first = 42 if n >= 3 else (58 if n == 2 else 100)
+    tds = ''
+    for i, (lab, val, unit, arrow, ink) in enumerate(INDOOR):
+        w = first if i == 0 else (100 - first) // (n - 1)
+        # The first field carries no caption and spends the line on type.
+        tds += ('<td width="%d%%">' % w +
+                cell(lab, val, unit, arrow, ink,
+                     'iv iv-1' if i == 0 else 'iv', i != 0) + '</td>')
+    return ('<div class="inrule"></div><div class="lab">' + S['ins'] + '</div>'
+            '<table class="inrow"><tr>' + tds + '</tr></table>')
+
+body=('<table class="top"><tr><td class="col-l" width="50%">'
+ '<div class="lab">' + S['out'] + (battery_badge() if WARN else '') + '</div>'
+ '<div class="head">'
+ + value(HERO['now'], '°', '', 'v1', True)
+ + '<span class="slash">/</span>'
+ + value(HERO['hum'], '%', '', 'v2')
+ + '</div>'
+ '<div class="sub">-2.4 ' + LAB_TO + ' 15.3&deg;<span class="dim">&nbsp; &middot; &nbsp;'
+ + LAB_AGE + '</span></div>'
+ + grid_rows()
+ + '</td><td class="col-r sep" width="50%">'
  '<div class="clock">17:40</div>'
- +('<div class="clock-d">25 %s</div>'%S['mon'] if CLOCK=='dated' else '')+
- '<div class="inrule"></div>'
- '<div class="lab">'+S['ins']+'</div>'
- '<div class="in-t">21.0<span class="in-d">&deg;</span>'
- '<span class="slash slash-i">/</span><span class="hum-i">44%</span></div>'
- '</td></tr></table>'
+ +('<div class="clock-d">25 %s</div>'%S['mon'] if CLOCK=='dated' else '')
+ + indoor_row()
+ + '</td></tr></table>'
  + '<div class="rule"></div><div class="sec">'+S['h24']+'</div>'
  + '\n'.join(g) +
  '<table class="key"><tr><td>'

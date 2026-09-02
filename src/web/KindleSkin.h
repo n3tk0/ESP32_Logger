@@ -109,33 +109,48 @@ inline void kdSkinCss(StringT& out, const KindleConfig& k) {
     // One rule per zone rather than one long selector list, because a browser
     // that chokes on an unknown selector drops the rule it is in and no more.
     #define KD_BOLD(bit, sel) if (k.boldZones & (bit)) { out += sel; out += "{font-weight:bold}"; }
-    KD_BOLD(KBOLD_OUT_TEMP, ".big")
-    KD_BOLD(KBOLD_OUT_HUM,  ".hum-o")
-    KD_BOLD(KBOLD_PRESSURE, ".pres")
+    KD_BOLD(KBOLD_HERO,     ".v1")
+    KD_BOLD(KBOLD_BIG,      ".v2")
+    KD_BOLD(KBOLD_GRID,     ".gv")
     KD_BOLD(KBOLD_CLOCK,    ".clock")
-    KD_BOLD(KBOLD_IN_TEMP,  ".in-t")
-    KD_BOLD(KBOLD_IN_HUM,   ".hum-i")
+    KD_BOLD(KBOLD_INDOOR,   ".iv")
+    KD_BOLD(KBOLD_UNITS,    ".unit")
     KD_BOLD(KBOLD_FORECAST, ".fc-t,.per-t")
     KD_BOLD(KBOLD_WEEK,     ".wd-d")
     KD_BOLD(KBOLD_LABELS,   ".lab,.sec,.per-l,.wd-n")
     #undef KD_BOLD
 
     // ── The clock ───────────────────────────────────────────────────────────
-    // Each of these keeps the block's total height at the 139 px the design
-    // fixed, because that height is what puts the hairline under it level with
-    // the outdoor column's text. Anything taller makes the page ragged; taller
-    // still and the footer goes below the fold. box-sizing is border-box for
-    // the whole page, so a border added here comes out of the padding rather
-    // than adding to the height.
+    // EACH OF THESE KEEPS THE BLOCK AT 100 PX, which is the plain clock's own
+    // line-height and therefore where the hairline under it falls and where the
+    // indoor row starts. Anything taller pushes the indoor block down, and the
+    // right column becomes the taller of the two — which on a page whose whole
+    // budget is one 800 px screen with no scrollbar means the footer goes below
+    // the fold.
+    //
+    // The figure used to be 139, from a layout where the clock sat BESIDE the
+    // indoor block rather than above it and its height set where a divider fell.
+    // At 139 the three styles came out at 813, 801 and 821 px against a budget
+    // of 800, all three over, and none of them by enough to be obvious.
+    //
+    // box-sizing is border-box for the whole page, so a border added here comes
+    // out of the padding rather than adding to the height.
     switch (k.clockStyle) {
         case KCLOCK_BOXED:
             // The same treatment the current day already gets in the week
             // strip: inverted, because a filled block is the one mark that
             // survives e-ink dithering unambiguously.
+            //
+            // 96 + 4 of margin is the 100. The face comes down to 84 so it has
+            // air inside the plate rather than touching its top and bottom.
             out += ".clock{background:#000;color:#fff;text-align:center;height:";
-            out += kdPx(131);
+            out += kdPx(96);
+            out += "px;font-size:";
+            out += kdPx(84);
+            out += "px;line-height:";
+            out += kdPx(96);
             out += "px;margin-bottom:";
-            out += kdPx(8);
+            out += kdPx(4);
             out += "px;letter-spacing:";
             out += kdPx(-2);
             out += "px}";
@@ -145,31 +160,33 @@ inline void kdSkinCss(StringT& out, const KindleConfig& k) {
             // A hairline above; the .inrule already under the block is the one
             // below. Smaller and wider-tracked, which is what makes it read as
             // a rule rather than as a number that happens to have a line over
-            // it.
+            // it. 16 of padding + 84 of line is the 100.
             out += ".clock{border-top:";
             out += kdPx(1);
             out += "px solid #000;text-align:center;font-size:";
-            out += kdPx(78);
+            out += kdPx(72);
+            out += "px;line-height:";
+            out += kdPx(84);
             out += "px;letter-spacing:";
             out += kdPx(2);
             out += "px;padding-top:";
-            out += kdPx(18);
+            out += kdPx(16);
             out += "px}";
             break;
 
         case KCLOCK_DATED:
             // Room for a date line is taken FROM the clock, not added under
-            // it: 112 + 27 is the same 139.
+            // it: 76 + 24 is the same 100.
             out += ".clock{height:";
-            out += kdPx(112);
+            out += kdPx(76);
             out += "px;font-size:";
-            out += kdPx(84);
+            out += kdPx(66);
             out += "px;line-height:";
-            out += kdPx(92);
+            out += kdPx(76);
             out += "px}.clock-d{height:";
-            out += kdPx(27);
+            out += kdPx(24);
             out += "px;font-size:";
-            out += kdPx(16);
+            out += kdPx(15);
             out += "px;letter-spacing:";
             out += kdPx(1);
             out += "px;color:#444}";

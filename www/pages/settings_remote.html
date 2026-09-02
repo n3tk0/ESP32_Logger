@@ -1,0 +1,32 @@
+  <section class="page" id="page-settings_remote">
+    <div class="page-head">
+      <div>
+        <h1 class="page-title"><span data-icon="wifi"></span> Remote WiFi nodes</h1>
+        <div class="page-sub"><a href="#settings">Settings</a> / Remote WiFi nodes</div>
+      </div>
+      <div class="page-actions">
+        <button class="btn" data-click="remoteRefresh"><span data-icon="refresh-cw"></span> Refresh</button>
+      </div>
+    </div>
+
+    <div id="rn-msg"></div>
+
+    <!-- Nodes -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title"><span data-icon="cpu"></span> Nodes</div>
+        <span id="rn-node-count" class="badge dim">—</span>
+      </div>
+      <div class="card-body">
+        <div id="rn-nodes"><p class="hint">Loading…</p></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body">
+        <p class="hint">
+          <strong>Note:</strong> WiFi nodes are configured via their own captive portal, and registered on this collector via <code>platform_config.json</code> sensor entries of type <code>"remote"</code>.
+        </p>
+      </div>
+    </div>
+  </section>

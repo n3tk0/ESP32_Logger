@@ -135,7 +135,87 @@ static void test_unsynced_device_backs_off() {
     CHECK(kdRefreshDelaySec(T, T + 7200u, false) == 300u);   // no clock: backs off
 }
 
+// ---------------------------------------------------------------------------
+// The runtime knobs
+// ---------------------------------------------------------------------------
+// These three were preprocessor conditions while the settings page offered them
+// as a form, so the panel saved values that nothing read. The point of these
+// checks is not the arithmetic — that is covered above — but that passing a
+// KdCadence changes the answer at all.
+static void test_cadence_defaults_match_the_macros() {
+    const uint32_t T = BOUNDARY;
+    const KdCadence def;   // must be indistinguishable from the old behaviour
+    CHECK_EQ((long)def.refreshSec, (long)KINDLE_REFRESH_SEC);
+    for (uint32_t off = 0; off < 3600u; off += 137u)
+        CHECK_EQ((long)kdRefreshDelaySec(T, T + off, true),
+                 (long)kdRefreshDelaySec(T, T + off, true, def));
+}
+
+static void test_refresh_ceiling_is_honoured() {
+    const uint32_t T = BOUNDARY;
+
+    KdCadence slow;                       // a reader that should flash rarely
+    slow.refreshSec      = 1800;
+    slow.clockPinRefresh = false;         // or the clock pins it to a minute
+    CHECK_EQ((long)kdRefreshDelaySec(T, T + 7200u, false, slow), 1800L);
+    CHECK_EQ((long)kdRefreshDelaySec(0, T, false, slow), 1800L);
+
+    KdCadence fast;
+    fast.refreshSec      = 120;
+    fast.clockPinRefresh = false;
+    CHECK_EQ((long)kdRefreshDelaySec(T, T + 7200u, false, fast), 120L);
+}
+
+static void test_clock_pinning_can_be_turned_off() {
+    // :58 — the case the picker exists for. With pinning on, the clock's
+    // aligned 62 s wins; with it off, the data path decides alone.
+    const uint32_t at58 = BOUNDARY + 58u;
+
+    KdCadence on;
+    CHECK_EQ((long)kdRefreshDelaySec(BOUNDARY, at58, true, on), 62L);
+
+    KdCadence off;
+    off.clockPinRefresh = false;
+    CHECK(kdRefreshDelaySec(BOUNDARY, at58, true, off) != 62L);
+    // and the result no longer lands on a minute boundary by construction
+    CHECK_EQ((long)kdRefreshDelaySec(BOUNDARY, at58, true, off), 60L);
+}
+
+static void test_follow_data_can_be_turned_off() {
+    const uint32_t T = BOUNDARY;
+
+    KdCadence off;
+    off.followData      = false;
+    off.clockPinRefresh = false;
+    // Fresh data would have asked for ~64 s; with following off every case is
+    // the ceiling.
+    CHECK_EQ((long)kdRefreshDelaySec(T, T, false, off), (long)KINDLE_REFRESH_SEC);
+    CHECK_EQ((long)kdRefreshDelaySec(T, T + 30u, false, off), (long)KINDLE_REFRESH_SEC);
+
+    KdCadence on;
+    on.clockPinRefresh = false;
+    CHECK_EQ((long)kdRefreshDelaySec(T, T, false, on), 64L);
+}
+
+// A ceiling below the floor would invert the clamp — d is raised to the floor
+// and then lowered to the ceiling, so every case would return the floor.
+static void test_clamp_keeps_the_ceiling_above_the_floor() {
+    KdCadence c;
+    c.refreshSec = 1;
+    c.clamp();
+    CHECK(c.refreshSec >= (uint32_t)KINDLE_REFRESH_MIN_SEC);
+
+    c.refreshSec = 999999;
+    c.clamp();
+    CHECK_EQ((long)c.refreshSec, 86400L);
+}
+
 int main() {
+    RUN(test_cadence_defaults_match_the_macros);
+    RUN(test_refresh_ceiling_is_honoured);
+    RUN(test_clock_pinning_can_be_turned_off);
+    RUN(test_follow_data_can_be_turned_off);
+    RUN(test_clamp_keeps_the_ceiling_above_the_floor);
     RUN(test_alignment_from_every_second);
     RUN(test_sync_guard_skips_a_near_boundary);
     RUN(test_data_bands_unpinned);

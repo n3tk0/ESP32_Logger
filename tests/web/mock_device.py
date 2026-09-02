@@ -50,6 +50,73 @@ STATUS = {
 # Deliberately NOT the defaults: a page that renders correctly only when every
 # value is zero is a page whose select boxes have never been proven to reflect
 # what the device holds.
+# GET /api/kindle/slots — what is in each of the eleven places, and the layout
+# vocabulary the firmware defines. Deliberately NOT the defaults: a page that
+# renders only when every place holds a plain temperature is a page whose
+# dropdowns have never been proven to reflect what the device holds.
+KINDLE_SLOTS = {
+    "zones": {
+        "hero": {"sensor": "balcony", "metric": "temperature", "label": "НАВЪН",
+                 "shown": "НАВЪН", "flags": 7, "decimals": 255, "ink": 0},
+        # A place the reader has pushed back into the mid grey.
+        "big":  {"sensor": "balcony", "metric": "pressure", "label": "",
+                 "shown": "PRESS", "flags": 2, "decimals": 255, "ink": 2},
+        "g1":   {"sensor": "balcony", "metric": "pm25", "label": "",
+                 "shown": "PM2.5", "flags": 2, "decimals": 255, "ink": 0},
+        # Places the reader left empty. The editor must draw the card and mark
+        # each one, not skip it: the layout is fixed places, not a list.
+        "g2":   {"sensor": "", "metric": "", "label": "",
+                 "shown": "", "flags": 2, "decimals": 255, "ink": 0},
+        "g3":   {"sensor": "", "metric": "", "label": "",
+                 "shown": "", "flags": 2, "decimals": 255, "ink": 0},
+        # A sensor that is no longer configured — the editor must keep it
+        # rather than silently reassigning the reader's layout.
+        "g4":   {"sensor": "shed", "metric": "aqi", "label": "",
+                 "shown": "AQI", "flags": 2, "decimals": 255, "ink": 1},
+        "g5":   {"sensor": "", "metric": "", "label": "",
+                 "shown": "", "flags": 2, "decimals": 255, "ink": 0},
+        "g6":   {"sensor": "", "metric": "", "label": "",
+                 "shown": "", "flags": 2, "decimals": 255, "ink": 0},
+        "in1":  {"sensor": "livingroom", "metric": "temperature", "label": "",
+                 "shown": "TEMP", "flags": 6, "decimals": 1, "ink": 0},
+        "in2":  {"sensor": "livingroom", "metric": "humidity", "label": "",
+                 "shown": "HUM", "flags": 2, "decimals": 255, "ink": 1},
+        # The third indoor place empty, which is how a row of two is asked for.
+        "in3":  {"sensor": "", "metric": "", "label": "",
+                 "shown": "", "flags": 2, "decimals": 255, "ink": 0},
+    },
+    "order": [
+        {"key": "hero", "group": "outdoor", "role": "hero"},
+        {"key": "big",  "group": "outdoor", "role": "big"},
+        {"key": "g1",   "group": "outdoor", "role": "grid"},
+        {"key": "g2",   "group": "outdoor", "role": "grid"},
+        {"key": "g3",   "group": "outdoor", "role": "grid"},
+        {"key": "g4",   "group": "outdoor", "role": "grid"},
+        {"key": "g5",   "group": "outdoor", "role": "grid"},
+        {"key": "g6",   "group": "outdoor", "role": "grid"},
+        {"key": "in1",  "group": "indoor",  "role": "indoor"},
+        {"key": "in2",  "group": "indoor",  "role": "indoor"},
+        {"key": "in3",  "group": "indoor",  "role": "indoor"},
+    ],
+    "inks": [{"id": 0, "css": "#000"}, {"id": 1, "css": "#444"},
+             {"id": 2, "css": "#777"}, {"id": 3, "css": "#aaa"}],
+    "grid_cols": 3,
+    # A heading the reader has overridden, and one they have not.
+    "group_out": "БАЛКОН", "group_out_set": "БАЛКОН",
+    "group_in": "ВЪТРЕ",   "group_in_set": "",
+    "flag_bold": 1, "flag_unit": 2, "flag_age": 4, "flag_trend": 8,
+    "auto_decimals": 255,
+}
+
+SENSORS = {
+    "sensors": [
+        {"id": "balcony", "type": "bmp280", "name": "Balcony", "enabled": True,
+         "metrics": ["temperature", "pressure"]},
+        {"id": "livingroom", "type": "bme688", "name": "Living room", "enabled": True,
+         "metrics": ["temperature", "humidity", "pressure", "aqi"]},
+    ]
+}
+
 KINDLE = {
     "face": 4,            # Helvetica
     "face_custom": "",
@@ -81,6 +148,10 @@ class H(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
+        if path == "/api/kindle/slots":
+            return self._json(KINDLE_SLOTS)
+        if path == "/api/sensors":
+            return self._json(SENSORS)
         if path == "/api/espnow/status":
             return self._json(STATUS)
         if path == "/api/kindle/config":

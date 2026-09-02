@@ -119,6 +119,10 @@ public:
     /// millis() since the most recent put() for `nodeId`, or UINT32_MAX when
     /// the node has never reported. Used by the diagnostics endpoint and the
     /// Kindle dashboard to show "last seen".
+    ///
+    /// UINT32_MAX is a SENTINEL, not an age. A caller that passes it on to a
+    /// display or an API without testing for it publishes 4,294,967,295 ms —
+    /// forty-nine days — as though it were a measurement.
     uint32_t ageMsForNode(const char* nodeId) const;
 
     /// Number of distinct nodes that have reported at least once.
@@ -127,6 +131,22 @@ public:
     /// Writes the id of node `index` (0-based, in slot order) into `out`.
     /// Returns false when `index` is past the last known node.
     bool nodeIdAt(int index, char* out, size_t outLen) const;
+
+    /// The latest value the mailbox holds for each of `nodeId`'s metrics.
+    ///
+    /// A READ, unlike drain(): nothing is consumed, no history is touched, and
+    /// the sensor plugin that owns this node still receives every reading on
+    /// its own tick. That is what makes it safe to call from a web handler.
+    ///
+    /// `staleAfterMs` is the age past which a value is reported as
+    /// QUALITY_ERROR rather than QUALITY_GOOD — the same rule drain() applies,
+    /// because a mailbox re-emits an entry that is never refilled and a dead
+    /// node would otherwise read exactly like a live one. 0 means "do not
+    /// judge", and every reading comes back QUALITY_GOOD.
+    ///
+    /// Returns how many readings were written, at most `maxOut`.
+    int peekLatest(const char* nodeId, SensorReading* out, int maxOut,
+                   uint32_t staleAfterMs = 0) const;
 
 private:
     /// Queued historical readings, across all nodes.

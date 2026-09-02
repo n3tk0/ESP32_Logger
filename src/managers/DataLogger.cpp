@@ -71,7 +71,26 @@ void flushLogBufferToFS() {
     // Enforce maxEntries: trim oldest lines before appending new ones
     if (config.datalog.maxEntries > 0) {
         int existingLines = countFileLines(activeFS, logFile);
-        trimLogFile(activeFS, logFile, config.datalog.maxEntries, existingLines, logBufferCount);
+        if (!trimLogFile(activeFS, logFile, config.datalog.maxEntries, existingLines,
+                         logBufferCount)) {
+            // SKIPPING THE APPEND, NOT DELETING THE FILE.
+            //
+            // Deleting it was the wrong end of the problem. trimLogFile() goes
+            // through atomicWrite(), which needs room for a temporary copy — so
+            // the commonest reason it fails is a filesystem with no space left,
+            // in which case the existing log is intact and holds up to
+            // maxEntries rows of the user's history. Throwing all of it away
+            // frees space, certainly, but it is the data the device exists to
+            // collect, and it does not fix the full disk.
+            //
+            // What must not happen is the file growing while the trim cannot
+            // run, and not appending achieves that exactly. The rows in the
+            // buffer are lost either way; the ones already on disk need not be.
+            Serial.println("[datalog] trim failed — skipping this flush so the "
+                           "file cannot grow past maxEntries (log left intact)");
+            logBufferCount = 0;
+            return;
+        }
     }
 
     File f = activeFS->open(logFile, FILE_APPEND);
@@ -143,7 +162,10 @@ void flushLogBufferToFS() {
                 }
                 line += timeBuf;
             } else {
-                uint32_t dur = logBuffer[i].sleepTimestamp - logBuffer[i].wakeTimestamp;
+                uint32_t dur = 0;
+                if (logBuffer[i].sleepTimestamp > logBuffer[i].wakeTimestamp) {
+                    dur = logBuffer[i].sleepTimestamp - logBuffer[i].wakeTimestamp;
+                }
                 line += String(dur) + "s";
             }
         }

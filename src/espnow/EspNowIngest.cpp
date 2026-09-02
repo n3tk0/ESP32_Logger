@@ -9,6 +9,7 @@
 #include <WiFi.h>
 #include <string.h>
 #include <time.h>
+#include <Preferences.h>
 
 #include "EspNowAuth.h"
 #include "../core/EventLog.h"   // the clock-skew warning outlives the serial cable
@@ -106,6 +107,7 @@ static bool              s_up          = false;
 static uint32_t          s_pairUntilMs = 0;
 static bool              s_dirty       = false;   ///< table changed, needs saving
 static uint32_t          s_lastDay     = 0;       ///< last day written to flash
+static uint8_t           s_offlineIntervals = 0;  // 0 = use ESPNOW_OFFLINE_INTERVALS
 
 /// Frames the callback parked for the tick to deal with.
 ///
@@ -779,6 +781,25 @@ bool espnowIngestBegin() {
     addBroadcastPeer();
 
     loadNodes();
+    {
+        // Read-only open. A namespace that has never been written does not
+        // exist, and begin() returns false for it — which is the ordinary
+        // first-boot case, not an error: s_offlineIntervals stays 0 and
+        // espnowGetOfflineIntervals() answers with the compile-time default.
+        Preferences prefs;
+        if (prefs.begin(ESPNOW_NVS_NS, true)) {
+            const uint8_t stored = prefs.getUChar(ESPNOW_NVS_OFFLINE_IV, 0);
+            prefs.end();
+            // Validated on the way IN as well as on the way out. A value
+            // written by an older build, or by anything else that touched this
+            // namespace, must not be able to put the table in a state where
+            // every node reads offline.
+            s_offlineIntervals =
+                (stored == 0 || (stored >= ESPNOW_OFFLINE_INTERVALS_MIN &&
+                                 stored <= ESPNOW_OFFLINE_INTERVALS_MAX))
+                ? stored : 0;
+        }
+    }
     for (int i = 0; i < EspNowNodeTable::CAP; i++) {
         const EspNowNode& n = s_nodes.at(i);
         if (n.used) addPeer(n.mac);
@@ -898,13 +919,56 @@ bool espnowAnyBatteryWarn() {
 }
 
 int espnowOfflineCount() {
+    // Both reads happen BEFORE the critical section. Neither is expensive, but
+    // a section that runs with interrupts disabled should contain the table
+    // walk and nothing else.
     const uint32_t now = millis();
+    const uint8_t  iv  = espnowGetOfflineIntervals();
     taskENTER_CRITICAL(&s_nodeMux);
-    const int c = s_nodes.offlineCount(now);
+    const int c = s_nodes.offlineCount(now, iv);
     taskEXIT_CRITICAL(&s_nodeMux);
     return c;
 }
 
 const EspNowIngestStats& espnowStats() { return s_stats; }
+
+uint8_t espnowGetOfflineIntervals() {
+    return s_offlineIntervals ? s_offlineIntervals : (uint8_t)ESPNOW_OFFLINE_INTERVALS;
+}
+
+bool espnowSetOfflineIntervals(uint8_t n) {
+    // Range-checked HERE and not only at the web handler, because this is the
+    // function that writes flash. One is a node marked offline by a single
+    // lost frame, which 2.4 GHz produces routinely — the dashboard would
+    // flicker. Above 60 the threshold exceeds an hour even at the shortest
+    // wake period, by which point "offline" has stopped meaning anything.
+    // 0 stays legal and means "use the built-in default".
+    if (n != 0 && (n < ESPNOW_OFFLINE_INTERVALS_MIN || n > ESPNOW_OFFLINE_INTERVALS_MAX))
+        return false;
+
+    // THE LIVE VALUE CHANGES ONLY IF THE WRITE LANDS. Assigning first meant a
+    // full or worn flash left the running threshold changed and the caller told
+    // it had failed — so the dashboard behaved one way until the next reboot
+    // and another way after it, with nothing on screen to explain either.
+    const uint8_t previous = s_offlineIntervals;
+    s_offlineIntervals = n;
+
+    Preferences prefs;
+    // The namespace and key are ESPNOW_NVS_NS / ESPNOW_NVS_OFFLINE_IV in the
+    // header. Spelling them literally in two places is how the doc comment came
+    // to name a key ("en_offline_iv") that does not exist.
+    if (!prefs.begin(ESPNOW_NVS_NS, false)) {
+        s_offlineIntervals = previous;
+        Serial.println("[ESPNOW] could not open NVS for the offline threshold");
+        return false;
+    }
+    const bool ok = prefs.putUChar(ESPNOW_NVS_OFFLINE_IV, n) == sizeof(uint8_t);
+    prefs.end();
+    if (!ok) {
+        s_offlineIntervals = previous;
+        Serial.println("[ESPNOW] could not persist the offline threshold");
+    }
+    return ok;
+}
 
 #endif  // FEATURE_ESPNOW_INGEST

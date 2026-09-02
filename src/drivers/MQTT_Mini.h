@@ -4,11 +4,18 @@
 // ============================================================================
 #pragma once
 #include <Arduino.h>
-#include <WiFiClient.h>
+#include <Client.h>
 
 class MQTT_Mini {
 public:
-    void setClient(WiFiClient& client) { _tcp = &client; }
+    void setClient(Client& client) { _tcp = &client; }
+
+    /// Forget the transport. MUST be called before the Client it points at is
+    /// destroyed — this class does not own it, and connected() dereferences it
+    /// without knowing whether it is still there. The exporter frees its socket
+    /// on the disabled and out-of-memory paths, and without this the pointer
+    /// left behind was read again in the destructor.
+    void clearClient() { _tcp = nullptr; _connected = false; }
     void setServer(const char* broker, uint16_t port) {
         _broker = broker;
         _port   = port;
@@ -115,7 +122,23 @@ public:
 
         _connected = true;
         _state = 0;
+        _lastTxMs = millis();
         return true;
+    }
+
+    /// millis() of the last packet WE sent. The broker measures its keepalive
+    /// against this, not against anything it sends us.
+    uint32_t lastTxMs() const { return _lastTxMs; }
+
+    /// True once the connection has been quiet long enough that the broker is
+    /// entitled to have dropped it — MQTT 3.1.1 §3.1.2.10 gives it 1.5 × the
+    /// keepalive, and this answers at 1.0 × so a caller has room to act.
+    ///
+    /// It matters because a broker-side close is not visible here until a write
+    /// fails: publish() would go on returning true into a socket that is gone.
+    bool keepAliveExpired() const {
+        if (!_connected || _keepAlive == 0) return false;
+        return (uint32_t)(millis() - _lastTxMs) >= (uint32_t)_keepAlive * 1000u;
     }
 
     // Publish QoS 0 message
@@ -147,6 +170,10 @@ public:
             if (_tcp->write((const uint8_t*)payload, payloadLen) != payloadLen) goto fail;
         }
         _tcp->flush();
+        // A publish is traffic, so it resets the broker's keepalive timer just
+        // as a PINGREQ would. Without this, a device exporting every 30 s would
+        // still ping every 30 s for no reason.
+        _lastTxMs = millis();
         return true;
 
     fail:
@@ -158,6 +185,23 @@ public:
         // Drain any incoming data (we don't subscribe, but broker may send PINGRESP)
         if (_tcp) {
             while (_tcp->available()) _tcp->read();
+        }
+
+        // PINGREQ once the connection has been quiet for half the keepalive.
+        //
+        // This used to be absent, which was harmless while every publish was
+        // bracketed by a connect and a disconnect. It stopped being harmless
+        // when the connection began to persist between exports: setKeepAlive()
+        // only tells the BROKER how long to wait, and a client that announces
+        // 60 s and then says nothing for 90 is one the broker must disconnect.
+        // The socket then looks alive here until a write fails, so publishes
+        // return true into nothing.
+        if (_connected && _keepAlive > 0 && _tcp) {
+            const uint32_t halfMs = (uint32_t)_keepAlive * 500u;
+            if ((uint32_t)(millis() - _lastTxMs) >= halfMs) {
+                static const uint8_t PINGREQ[2] = { 0xC0, 0x00 };
+                if (_tcp->write(PINGREQ, 2) == 2) _lastTxMs = millis();
+            }
         }
     }
 
@@ -174,10 +218,11 @@ public:
     int state() const { return _state; }
 
 private:
-    WiFiClient* _tcp = nullptr;
+    Client* _tcp = nullptr;
     const char* _broker = nullptr;
     uint16_t    _port = 1883;
     uint16_t    _keepAlive = 60;
+    uint32_t    _lastTxMs  = 0;    ///< millis() of the last packet we sent
     bool        _connected = false;
     int         _state = 0;  // 0=ok, negative=error, positive=CONNACK rc
 

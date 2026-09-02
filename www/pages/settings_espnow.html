@@ -47,6 +47,39 @@
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title"><span data-icon="plus-circle"></span> Add node manually</div>
+      </div>
+      <div class="card-body">
+        <p class="hint">
+          For nodes that cannot pair over the air. The node must still hold the
+          same 16-character key to have its frames accepted.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:180px">
+            <label class="field-label" for="en-add-mac">MAC address</label>
+            <input class="input" id="en-add-mac" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17">
+          </div>
+          <div style="flex:0 0 100px">
+            <label class="field-label" for="en-add-id">Node ID</label>
+            <input class="input" id="en-add-id" type="number" min="1" max="254" placeholder="1">
+          </div>
+          <div style="flex:1;min-width:120px">
+            <label class="field-label" for="en-add-label">Name</label>
+            <input class="input" id="en-add-label" maxlength="16" placeholder="outdoor">
+          </div>
+          <div style="flex:0 0 110px">
+            <label class="field-label" for="en-add-iv">Interval (s)</label>
+            <input class="input" id="en-add-iv" type="number" min="10" max="65535" value="60">
+          </div>
+          <button class="btn primary" data-click="espnowAddManual">
+            <span data-icon="plus"></span> Add
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Nodes -->
     <div class="card">
       <div class="card-head">
@@ -71,6 +104,29 @@
           key from a moved channel from an unprovisioned node.
         </p>
         <div id="en-stats" class="grid grid-auto"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title"><span data-icon="settings"></span> Configuration</div>
+      </div>
+      <div class="card-body">
+        <div class="field" style="max-width:300px">
+          <label class="field-label" for="en-offline-iv">Offline threshold (missed intervals)</label>
+          <!-- The bounds match what the firmware accepts; it refuses rather
+               than clamps, so a form that offered 1 would produce an error the
+               hint below has already explained. -->
+          <input class="input" id="en-offline-iv" type="number" min="2" max="60" value="3">
+          <p class="hint">
+            How many consecutive missed reports before a node counts as offline.
+            Three is the default — one miss is ordinary on 2.4 GHz, so the
+            minimum is two.
+          </p>
+        </div>
+        <button class="btn" data-click="espnowSaveConfig">
+          <span data-icon="save"></span> Save
+        </button>
       </div>
     </div>
   </section>

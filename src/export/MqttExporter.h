@@ -19,6 +19,24 @@
 // HA discovery topics:
 //   homeassistant/sensor/{deviceId}_{sensorId}_{metric}/config
 // ============================================================================
+/// What the broker is told to expect, and what _connect() measures staleness
+/// against.
+///
+/// COMFORTABLY LONGER THAN THE EXPORT INTERVAL, and that is the whole point of
+/// the number. It was 60 s, which is also the default aggregation interval — so
+/// each export arrived at roughly the moment the socket was declared stale, and
+/// the connection was torn down and re-handshaked nearly every cycle. That is
+/// the TLS cost the persistent socket exists to avoid, paid on a timer.
+///
+/// At 300 s a device exporting every minute never trips the check: its own
+/// publishes are the traffic that keeps the window open. One that has been
+/// quiet for five minutes rebuilds, which is right — after that long the broker
+/// may well have dropped it, and a publish into a closed socket succeeds
+/// silently.
+#ifndef MQTT_KEEPALIVE_S
+#  define MQTT_KEEPALIVE_S 300
+#endif
+
 class MqttExporter : public IExporter {
 public:
     ~MqttExporter();
@@ -39,7 +57,7 @@ private:
                               const char* metric,   const char* unit,
                               const char* deviceClass);
 
-    WiFiClient   _wifiClient;
+    Client*      _stream = nullptr;
     MQTT_Mini    _client;
 
     char     _broker[65]      = {};

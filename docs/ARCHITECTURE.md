@@ -606,7 +606,34 @@ collector with no clock of its own cannot judge and takes `ts` as sent.
 | GET | `/api/espnow/status` | read | Nodes, battery, last seen, and the drop counters |
 | POST | `/api/espnow/pair` | CSRF | Open a pairing window (`seconds`, 30–600) |
 | POST | `/api/espnow/node` | CSRF | Rename a node (`label`) or change its `interval` |
+| POST | `/api/espnow/add` | CSRF | Provision a node by `mac` + `node_id`, bypassing pairing |
+| POST | `/api/espnow/config` | CSRF | Radio-wide settings — currently `offline_intervals` |
 | POST | `/api/espnow/forget` | CSRF | Drop a node's radio peer and its slot |
+
+**Remote WiFi Nodes** (`FEATURE_REMOTE_NODES`)
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/remote/status` | read | List HTTP WiFi nodes, metrics, age, and online status |
+
+`/api/espnow/add` exists because pairing needs the node awake, in range and
+holding the right key at the moment somebody clicks a button — fine on a bench,
+awkward for a node already sealed in a box on a roof, whose MAC is printed on
+the module. It adds a slot and a radio peer, not trust: the node still has to
+hold the shared key for anything it sends to decrypt, so a mistyped MAC
+produces a node that never reports rather than one that reports a stranger's
+readings. A MAC already registered under a different id is refused (409) rather
+than accepted, because `add()` keys on `node_id` and would otherwise give one
+radio two slots, one of which could never be anything but offline.
+
+`offline_intervals` is stored in NVS rather than in `config.bin`. It is a
+diagnostic threshold, not part of the device's identity, and putting one byte in
+the config struct would have cost a migration on every deployed device. 0 means
+"use the built-in `ESPNOW_OFFLINE_INTERVALS`", and the endpoint answers with the
+*effective* value so the form shows what the device will actually use. The same
+figure drives both the summary count and the per-node badges — they are computed
+from one read, because computing them from two is how the badge came to say
+"offline" beside a count that said none were.
 
 The counters in `/api/espnow/status` are not decoration. "No readings are
 arriving" has several very different causes — a mismatched key, a moved
@@ -649,6 +676,55 @@ synchronised node.
 |---|---|---|---|
 | GET | `/api/kindle/config` | read | How `/kindle` is drawn, plus its build-time width |
 | POST | `/api/kindle/config` | CSRF | Face, weight, clock style, formats, which blocks are drawn |
+| GET | `/api/kindle/slots` | read | What is in each of the eleven places, plus the layout's own vocabulary |
+| POST | `/api/kindle/slots` | CSRF | Replace the whole layout (JSON body) |
+
+**The layout is fixed; what goes in it is not.** The page used to be six
+hardwired readings — the outdoor sensor's temperature, humidity and pressure and
+the indoor sensor's temperature, humidity and AQI — which is a fine dashboard
+for exactly one hardware configuration. Twenty sensor plugins between them
+publish twenty-nine distinct metrics and the page could reach six; worse, it
+insisted on the six, so a BMP280 outdoors rendered a dash where its humidity
+would have been, forever, in a space nothing else could use.
+
+A free list of readings that packed itself into rows replaced that, and went too
+far: a page that can show anything has no shape, and it rearranged itself
+whenever a sensor went quiet. What it is now is **eleven named places** — a
+headline and the value beside it, a grid of up to three across and two deep, and
+a row of up to three under the clock — each of which names a sensor, a metric, a
+caption, its decimals, four switches and one of four grey levels. Adding PM2.5
+from an SDS011 on the balcony is putting it in a place.
+
+**An empty place is skipped and the ones after it close up**, which is the
+BMP280 case and the reason any of this exists. Every row then divides its own
+width by however many cells it ended up with, so two readings are two halves
+rather than two of three thirds with the last one white, and four are two rows
+of two rather than three and a lone cell. It is also how the indoor row becomes
+two fields instead of three: leave the third unconfigured.
+
+No place carries a size or a coordinate, and deliberately: the same page is
+rendered at 600x800 by an FBInk shell script and at 1072x1448 by a CSS page, so
+pixel positions chosen for one are wrong for the other, and the type scale was
+measured on the panel rather than chosen by taste. The place decides how big its
+number is; the reader decides which number it is. Both renderers are handed the
+result of ONE `kdResolveZones()` call, so the visibility rule, the unit
+conversion and the rounding cannot differ between screens.
+
+The layout lives in `/config/kindle_slots.json`, not in `config.bin`, following
+the split the rest of the firmware makes: scalars in the binary struct, lists of
+configured things in JSON under `/config/`. It costs no migration, which
+matters — every field added to `DeviceConfig` puts every deployed device through
+`loadConfig()`'s migration path, and eleven places would have been another 600
+bytes of it. An absent file means "never configured" and yields defaults that
+reproduce the old page, built from whichever two sensors the device was already
+pointed at.
+
+`/kindle/data` emits the places as `Z_<PLACE>_*` keys alongside the older fixed
+`OUT_*`/`IN_*` ones, so a Kindle running an earlier copy of `update_dash.sh`
+keeps working from the keys it knows. It also sends the width of each value and
+unit in thousandths of the type size, because FBInk draws one size per call and
+will not report how wide it drew anything.
+
 
 The page being configured has no settings of its own and never will: it is
 served to a reader with no JavaScript and, on some firmware, a five-way pad

@@ -1,14 +1,35 @@
 #include "MqttExporter.h"
+#include <new>                        // new (std::nothrow) — this part aborts otherwise
 #include "../core/Globals.h"  // config.deviceId
 #include "../sensors/SensorManager.h"  // publishHaDiscovery()
 
 MqttExporter::~MqttExporter() {
     if (_client.connected()) _client.disconnect();
+    _client.clearClient();
+    if (_stream) {
+        delete _stream;
+        _stream = nullptr;
+    }
 }
 
 bool MqttExporter::init(JsonObjectConst cfg) {
     _enabled = cfg["enabled"] | false;
-    if (!_enabled) return true;
+    if (!_enabled) {
+        // Turning the exporter off has to release the socket, not merely stop
+        // using it. The connection used to live on the stack for the length of
+        // one send, so there was nothing to release; now it persists, and a
+        // disabled exporter that kept an open TLS session would hold tens of
+        // kilobytes of mbedtls state for a feature the user just switched off.
+        if (_stream) {
+            if (_client.connected()) _client.disconnect();
+            // Before the delete, always: MQTT_Mini holds a bare pointer it does
+            // not own, and connected() reads it.
+            _client.clearClient();
+            delete _stream;
+            _stream = nullptr;
+        }
+        return true;
+    }
 
     strncpy(_broker,      cfg["broker"]       | "localhost", sizeof(_broker)-1);
     _port = cfg["port"]   | 1883;
@@ -34,9 +55,40 @@ bool MqttExporter::init(JsonObjectConst cfg) {
         snprintf(_clientId, sizeof(_clientId), "wl-%s", _deviceId);
     }
 
-    _client.setClient(_wifiClient);
+    // The socket outlives a single send now, so it is owned here rather than
+    // built on the stack per publish. Replacing it means tearing the old one
+    // down first — a reconfigure that flips use_tls would otherwise leave a
+    // connected socket with nothing pointing at it.
+    if (_stream) {
+        if (_client.connected()) _client.disconnect();
+        _client.clearClient();
+        delete _stream;
+        _stream = nullptr;
+    }
+
+    // new (std::nothrow), like everything else in this tree. WiFiClientSecure
+    // brings an mbedtls context with it, this part runs close to its heap
+    // limit, and a plain `new` under -fno-exceptions does not fail — it aborts,
+    // which is a reboot loop rather than an exporter that reports it is off.
+    if (_useTls) {
+        WiFiClientSecure* sec = new (std::nothrow) WiFiClientSecure();
+        // R15: no CA store is bundled, so the certificate is not verified.
+        // Encryption without authentication still keeps credentials off the
+        // wire in clear, which is what this buys until cert pinning lands.
+        if (sec) sec->setInsecure();
+        _stream = sec;
+    } else {
+        _stream = new (std::nothrow) WiFiClient();
+    }
+    if (!_stream) {
+        Serial.println("[MQTT] out of memory allocating the socket — exporter disabled");
+        _enabled = false;
+        return false;
+    }
+
+    _client.setClient(*_stream);
     _client.setServer(_broker, _port);
-    _client.setKeepAlive(60);
+    _client.setKeepAlive(MQTT_KEEPALIVE_S);
 
     Serial.printf("[MQTT] broker=%s:%d prefix=%s tls=%s\n",
                   _broker, _port, _topicPrefix, _useTls ? "yes" : "no");
@@ -44,6 +96,25 @@ bool MqttExporter::init(JsonObjectConst cfg) {
 }
 
 bool MqttExporter::_connect() {
+    // A CONNECTION THE BROKER HAS ALREADY GIVEN UP ON STILL READS AS CONNECTED
+    // HERE. connected() asks the TCP layer, which does not learn of a
+    // broker-side close until a write fails or a FIN arrives and is noticed —
+    // so publish() returns true and the readings go nowhere, silently.
+    //
+    // That could not happen while every send connected and disconnected around
+    // itself. Now that the socket persists between exports, an export interval
+    // longer than the keepalive is the ordinary case, not an edge one: this
+    // device exports on the aggregation interval, which defaults to 60 s.
+    //
+    // So a connection past its keepalive is torn down and rebuilt rather than
+    // trusted. The handshake cost returns only in the case where the saving was
+    // never real.
+    if (_client.connected() && _client.keepAliveExpired()) {
+        Serial.println("[MQTT] connection idle past the keepalive — reconnecting");
+        _client.disconnect();
+        if (_stream) _stream->stop();
+    }
+
     if (_client.connected()) return true;
 
     bool ok;
@@ -74,26 +145,6 @@ bool MqttExporter::_publish(const SensorReading& r) {
 
 bool MqttExporter::send(const SensorReading* readings, size_t count) {
     if (!_enabled || count == 0) return true;
-
-    if (_useTls) {
-        WiFiClientSecure secureClient;
-        // R15: no CA store bundled — setInsecure() until 19.x rollout
-        //       adds opt-in cert pinning in a follow-up phase
-        secureClient.setInsecure();
-        _client.setClient(secureClient);
-        if (!_connect()) {
-            _client.setClient(_wifiClient);
-            return false;
-        }
-        bool allOk = true;
-        for (size_t i = 0; i < count; i++) {
-            _client.loop();
-            if (!_publish(readings[i])) allOk = false;
-        }
-        _client.disconnect();
-        _client.setClient(_wifiClient);
-        return allOk;
-    }
 
     if (!_connect()) return false;
     bool allOk = true;
@@ -171,17 +222,8 @@ bool MqttExporter::_publishDiscoveryOne(const char* sensorId, const char* sensor
 void MqttExporter::publishHaDiscovery() {
     if (!_enabled || !_haDiscovery) return;
 
-    WiFiClientSecure secureClient;
-    if (_useTls) {
-        // R15: no CA store bundled — setInsecure() until 19.x rollout
-        //       adds opt-in cert pinning in a follow-up phase
-        secureClient.setInsecure();
-        _client.setClient(secureClient);
-    }
-
     if (!_connect()) {
         Serial.println("[MQTT] HA discovery: not connected");
-        if (_useTls) _client.setClient(_wifiClient);
         return;
     }
     Serial.println("[MQTT] Publishing HA discovery payloads…");
@@ -202,9 +244,4 @@ void MqttExporter::publishHaDiscovery() {
         }
     }
     Serial.printf("[MQTT] HA discovery: %d topics published\n", published);
-
-    if (_useTls) {
-        _client.disconnect();
-        _client.setClient(_wifiClient);
-    }
 }

@@ -69,8 +69,26 @@ SRC = ROOT / "src" / "web" / "failsafe.html"
 OUT = ROOT / "src" / "web" / "FailsafeHtml.h"
 
 
+def source_bytes() -> bytes:
+    """The page, with line endings normalised to LF.
+
+    NOT a plain read_bytes(), and the difference is a CI failure that looks
+    like a mystery. git checks this file out with whatever line endings the
+    platform's core.autocrlf asks for, so a Windows working tree holds CRLF
+    while the committed blob — and every CI checkout — holds LF. Generating
+    the header from the working tree then stores 29 bytes that are not in the
+    file CI compares against, and --check fails with a size mismatch nobody
+    can reproduce on the machine that produced it.
+
+    Normalising here makes the header a function of the COMMITTED content,
+    which is the only version everyone agrees on. A browser does not care
+    which one it is served.
+    """
+    return SRC.read_bytes().replace(b"\r\n", b"\n")
+
+
 def render() -> str:
-    raw = SRC.read_bytes()
+    raw = source_bytes()
     # mtime=0 so the output depends only on the input: a rebuild must not
     # produce a different header, or the CI drift check would fail at random
     # and every build would dirty the working tree.
@@ -133,7 +151,7 @@ def committed_is_current() -> tuple[bool, str]:
         inflated = gzip.decompress(gz)
     except (OSError, EOFError) as exc:
         return False, f"the stored bytes are not a valid gzip stream ({exc})"
-    raw = SRC.read_bytes()
+    raw = source_bytes()
     if inflated != raw:
         return False, (f"inflates to {len(inflated):,} bytes, but "
                        f"{SRC.name} is now {len(raw):,} bytes")

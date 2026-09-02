@@ -102,6 +102,34 @@ inline uint32_t kdPickDelay(uint32_t dataWants, uint32_t clockWants) {
 }
 
 // ---------------------------------------------------------------------------
+// The three knobs, as values rather than as #ifs
+// ---------------------------------------------------------------------------
+// They were preprocessor conditions, which is how the settings page came to
+// offer a "Refresh cadence" panel that changed nothing: KindleConfig stored the
+// fields, the migration defaulted them, /api/kindle/config returned them, the
+// form saved them — and the code that decides the cadence had been compiled
+// against the macros long before any of that ran.
+//
+// The macros stay as the defaults, so a build with no configuration behaves
+// exactly as it did and the host tests keep their existing call sites.
+struct KdCadence {
+    uint32_t refreshSec      = (uint32_t)KINDLE_REFRESH_SEC;
+    bool     followData      = (KINDLE_FOLLOW_DATA != 0);
+    bool     clockPinRefresh = (KINDLE_CLOCK_PIN_REFRESH != 0);
+
+    /// Bring a stored value into range.
+    ///
+    /// The ceiling must not fall below the floor — kdRefreshDelaySec() clamps
+    /// up to the floor and then down to the ceiling, so a ceiling underneath it
+    /// would silently invert the two and return the floor for every case. The
+    /// upper bound is a day, past which "refresh" is not what the page is for.
+    void clamp() {
+        if (refreshSec < (uint32_t)KINDLE_REFRESH_MIN_SEC) refreshSec = KINDLE_REFRESH_MIN_SEC;
+        if (refreshSec > 86400u) refreshSec = 86400u;
+    }
+};
+
+// ---------------------------------------------------------------------------
 // The delay to put in the meta refresh
 // ---------------------------------------------------------------------------
 // Two demands, and the smaller wins — with one qualification below.
@@ -116,17 +144,12 @@ inline uint32_t kdPickDelay(uint32_t dataWants, uint32_t clockWants) {
 // device prints "clock not set" instead, and pinning the refresh to a minute
 // boundary for a clock nobody can see is the very backoff failure the data
 // cases above are shaped to avoid.
-inline uint32_t kdRefreshDelaySec(uint32_t newestTs, uint32_t now, bool clockShown) {
-#if KINDLE_CLOCK_PIN_REFRESH
-    const uint32_t clockWants = clockShown ? kdClockDelaySec(now) : KD_NO_CLOCK_DEMAND;
-#else
-    (void)clockShown;
-    const uint32_t clockWants = KD_NO_CLOCK_DEMAND;
-#endif
-    (void)now;   // unused when both the clock and the data path are off
+inline uint32_t kdRefreshDelaySec(uint32_t newestTs, uint32_t now, bool clockShown,
+                                  const KdCadence& cad = KdCadence{}) {
+    const uint32_t clockWants =
+        (cad.clockPinRefresh && clockShown) ? kdClockDelaySec(now) : KD_NO_CLOCK_DEMAND;
 
-#if KINDLE_FOLLOW_DATA
-    if (newestTs != 0 && now >= newestTs) {
+    if (cad.followData && newestTs != 0 && now >= newestTs) {
         const uint32_t age    = now - newestTs;
         const uint32_t period = KINDLE_DATA_PERIOD_SEC;
 
@@ -143,15 +166,12 @@ inline uint32_t kdRefreshDelaySec(uint32_t newestTs, uint32_t now, bool clockSho
             // Two periods with nothing is a source that is down. Back off to
             // the ceiling; the page already says the reading is stale, and
             // flashing at it will not bring the node back.
-            return kdPickDelay((uint32_t)KINDLE_REFRESH_SEC, clockWants);
+            return kdPickDelay(cad.refreshSec, clockWants);
         }
 
         if (d < (uint32_t)KINDLE_REFRESH_MIN_SEC) d = KINDLE_REFRESH_MIN_SEC;
-        if (d > (uint32_t)KINDLE_REFRESH_SEC)     d = KINDLE_REFRESH_SEC;
+        if (d > cad.refreshSec)                   d = cad.refreshSec;
         return kdPickDelay(d, clockWants);
     }
-#else
-    (void)newestTs;
-#endif
-    return kdPickDelay((uint32_t)KINDLE_REFRESH_SEC, clockWants);
+    return kdPickDelay(cad.refreshSec, clockWants);
 }

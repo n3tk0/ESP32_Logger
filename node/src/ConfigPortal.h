@@ -67,3 +67,17 @@ bool portalButtonHeld();
 /// Returns true if settings were saved — the caller should restart. Returns
 /// false on timeout, with `s` unmodified.
 bool portalRun(NodeSettings& s, uint32_t timeoutMs);
+
+/// Serve the configuration form on the STA interface — the home LAN — for as
+/// long as the node is up, so it can be reconfigured without walking to it.
+///
+/// GATED ON THE BASIC-AUTH CREDENTIALS, and returns false without starting
+/// anything when they are unset. This form rewrites the collector address and
+/// restarts the node; on the LAN it is reachable by everything on the network,
+/// unlike the access-point portal, which needs the AP's own password and only
+/// exists in a short window. The passphrase and the ingest token are also
+/// blanked in this mode rather than rendered into the page.
+bool portalStartBackground(NodeSettings& s);
+
+/// Services background HTTP requests. Restarts the ESP if settings are saved.
+void portalHandleClient();

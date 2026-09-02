@@ -155,4 +155,31 @@ struct EspNowIngestStats {
 };
 const EspNowIngestStats& espnowStats();
 
+/// Where the offline threshold is persisted. Named here so the writer and the
+/// reader cannot drift apart — they were two string literals and a doc comment
+/// that named a third spelling.
+#define ESPNOW_NVS_NS          "espnow"
+#define ESPNOW_NVS_OFFLINE_IV  "offline_iv"
+
+/// Accepted range for the runtime threshold, outside of which
+/// espnowSetOfflineIntervals() refuses.
+#define ESPNOW_OFFLINE_INTERVALS_MIN 2
+#define ESPNOW_OFFLINE_INTERVALS_MAX 60
+
+/// Missed reports before a node counts as offline, as configured at runtime.
+///
+/// In NVS rather than in DeviceConfig: this is a diagnostic threshold, not part
+/// of the device's identity, and putting it in config.bin would have grown the
+/// struct and cost a migration on every deployed device for one byte.
+///
+/// Returns the compile-time ESPNOW_OFFLINE_INTERVALS when never set or stored
+/// as 0, so "unset" and "the default" are the same thing to every caller.
+uint8_t espnowGetOfflineIntervals();
+
+/// Store a new threshold. 0 restores the built-in default; anything else must
+/// be within [ESPNOW_OFFLINE_INTERVALS_MIN, ESPNOW_OFFLINE_INTERVALS_MAX].
+/// Returns false — and changes nothing — when the value is out of range or the
+/// write fails.
+bool espnowSetOfflineIntervals(uint8_t n);
+
 #endif  // FEATURE_ESPNOW_INGEST

@@ -240,4 +240,47 @@ bool RemoteIngest::nodeIdAt(int index, char* out, size_t outLen) const {
     return true;
 }
 
+int RemoteIngest::peekLatest(const char* nodeId, SensorReading* out, int maxOut,
+                             uint32_t staleAfterMs) const {
+    if (!nodeId || !out || maxOut <= 0) return 0;
+
+    const uint32_t now = millis();
+
+    int n = 0;
+    taskENTER_CRITICAL(&_mux);
+    for (int i = 0; i < MAX_ENTRIES && n < maxOut; i++) {
+        if (!_e[i].used || !eq(_e[i].nodeId, nodeId)) continue;
+
+        // One entry per (node, metric) is the mailbox's own invariant, so this
+        // cannot normally fire — it is here because put() clamps long metric
+        // names and two different names can clamp to the same sixteen bytes.
+        bool dup = false;
+        for (int j = 0; j < n; j++) {
+            if (eq(out[j].metric, _e[i].metric)) { dup = true; break; }
+        }
+        if (dup) continue;
+
+        // Unsigned difference, so it stays correct across the millis() wrap at
+        // ~49 days.
+        const uint32_t age = now - _e[i].rxMillis;
+
+        out[n] = SensorReading();
+        copyClamped(out[n].sensorId, sizeof(out[n].sensorId), _e[i].nodeId);
+        copyClamped(out[n].metric,   sizeof(out[n].metric),   _e[i].metric);
+        copyClamped(out[n].unit,     sizeof(out[n].unit),     _e[i].unit);
+        out[n].value     = _e[i].value;
+        out[n].timestamp = _e[i].ts;
+        // The same rule drain() applies, and for the same reason: this is a
+        // mailbox, so a slot that is never refilled keeps answering with the
+        // value it first received. Reporting that as good would make a node
+        // that died an hour ago indistinguishable from one reporting now.
+        out[n].quality   = (staleAfterMs > 0 && age > staleAfterMs)
+                         ? QUALITY_ERROR
+                         : QUALITY_GOOD;
+        n++;
+    }
+    taskEXIT_CRITICAL(&_mux);
+    return n;
+}
+
 #endif  // FEATURE_REMOTE_NODES
