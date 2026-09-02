@@ -68,13 +68,27 @@ enum KindleSlotSize : uint8_t {
 /// Row width in twelfths, so LARGE+MEDIUM+SMALL cannot silently overflow.
 static const uint8_t KSLOT_ROW_UNITS = 12;
 
-static inline uint8_t kdSlotUnits(uint8_t size) {
+/// The clock is not a reading and so is not a slot, but it does take up space:
+/// both renderers draw it in the top-right, over the first row. Half the width,
+/// which is what the page has always given it.
+///
+/// This is why kdSlotUnits() takes the row's capacity rather than returning a
+/// constant for a hero. A hero means "the largest type, alone on its row" — and
+/// on the row it shares with the clock, alone means the other half. Fixing the
+/// hero at twelve twelfths instead would have run the outdoor temperature under
+/// the clock the first time somebody put a four-digit reading there.
+static const uint8_t KSLOT_CLOCK_UNITS = 6;
+
+/// Width in twelfths. `rowUnits` is how much of the row is available — the full
+/// twelve, or less on a row that shares with the clock.
+static inline uint8_t kdSlotUnits(uint8_t size, uint8_t rowUnits = KSLOT_ROW_UNITS) {
+    if (rowUnits == 0 || rowUnits > KSLOT_ROW_UNITS) rowUnits = KSLOT_ROW_UNITS;
     switch (size) {
-        case KSLOT_HERO:   return 12;
-        case KSLOT_LARGE:  return 6;
-        case KSLOT_MEDIUM: return 4;
-        case KSLOT_SMALL:  return 3;
-        default:           return 4;
+        case KSLOT_HERO:   return rowUnits;               // the whole of its row
+        case KSLOT_LARGE:  return (uint8_t)(rowUnits / 2 ? rowUnits / 2 : 1);
+        case KSLOT_MEDIUM: return (uint8_t)(rowUnits / 3 ? rowUnits / 3 : 1);
+        case KSLOT_SMALL:  return (uint8_t)(rowUnits / 4 ? rowUnits / 4 : 1);
+        default:           return (uint8_t)(rowUnits / 3 ? rowUnits / 3 : 1);
     }
 }
 
@@ -118,36 +132,46 @@ struct KdMetricStyle {
     const char* metric;
     const char* label;
     uint8_t     decimals;
+    /// What to print after the value, when the reading's own unit is not what
+    /// a glanceable page wants. nullptr means "use the sensor's".
+    ///
+    /// The pipeline's units are chosen to be unambiguous between machines:
+    /// temperature is "C", particulates are "ug/m3". On a page read from
+    /// across a room the temperature wants the degree sign it has always had —
+    /// dropping it to "8.4 C" would be a visible regression from the design
+    /// this replaced — and "µg/m³" is what the number means to a person.
+    const char* unit;
 };
 
 static const KdMetricStyle KD_METRIC_STYLE[] = {
-    { "temperature",   KD_T("TEMP",  "ТЕМП"),    1 },
-    { "humidity",      KD_T("HUM",   "ВЛАГА"),   0 },
-    { "humidity_amb",  KD_T("HUM",   "ВЛАГА"),   0 },
-    { "dew_point",     KD_T("DEW",   "РОСА"),    1 },
-    { "pressure",      KD_T("PRESS", "НАЛЯГ"),   0 },
-    { "aqi",           "AQI",                    0 },
-    { "co2",           "CO₂",                    0 },
-    { "eco2",          "eCO₂",                   0 },
-    { "tvoc",          "TVOC",                   0 },
-    { "pm1",           "PM1",                    0 },
-    { "pm25",          "PM2.5",                  0 },
-    { "pm4",           "PM4",                    0 },
-    { "pm10",          "PM10",                   0 },
-    { "lux",           KD_T("LIGHT", "СВЕТЛ"),   0 },
-    { "uva",           "UVA",                    1 },
-    { "uvb",           "UVB",                    1 },
-    { "rain",          KD_T("RAIN",  "ДЪЖД"),    1 },
-    { "rain_rate",     KD_T("RAIN/h","ДЪЖД/ч"),  1 },
-    { "rain_total",    KD_T("RAIN Σ","ДЪЖД Σ"),  1 },
-    { "wind",          KD_T("WIND",  "ВЯТЪР"),   1 },
-    { "wind_speed",    KD_T("WIND",  "ВЯТЪР"),   1 },
-    { "wind_direction",KD_T("DIR",   "ПОСОКА"),  0 },
-    { "soil_moisture", KD_T("SOIL",  "ПОЧВА"),   0 },
-    { "flow_rate",     KD_T("FLOW",  "ДЕБИТ"),   1 },
-    { "battery_voltage", KD_T("BATT","БАТЕРИЯ"), 2 },
-    { "battery_percent", KD_T("BATT","БАТЕРИЯ"), 0 },
-    { "battery_days",  KD_T("DAYS",  "ДНИ"),     0 },
+    // metric            label                    dec  display unit
+    { "temperature",   KD_T("TEMP",  "ТЕМП"),    1,   "\u00B0"   },
+    { "humidity",      KD_T("HUM",   "ВЛАГА"),   0,   "%"        },
+    { "humidity_amb",  KD_T("HUM",   "ВЛАГА"),   0,   "%"        },
+    { "dew_point",     KD_T("DEW",   "РОСА"),    1,   "\u00B0"   },
+    { "pressure",      KD_T("PRESS", "НАЛЯГ"),   0,   nullptr    },  // re-united elsewhere
+    { "aqi",           "AQI",                    0,   ""         },
+    { "co2",           "CO\u2082",               0,   "ppm"      },
+    { "eco2",          "eCO\u2082",              0,   "ppm"      },
+    { "tvoc",          "TVOC",                   0,   "ppb"      },
+    { "pm1",           "PM1",                    0,   "\u00B5g/m\u00B3" },
+    { "pm25",          "PM2.5",                  0,   "\u00B5g/m\u00B3" },
+    { "pm4",           "PM4",                    0,   "\u00B5g/m\u00B3" },
+    { "pm10",          "PM10",                   0,   "\u00B5g/m\u00B3" },
+    { "lux",           KD_T("LIGHT", "СВЕТЛ"),   0,   "lx"       },
+    { "uva",           "UVA",                    1,   nullptr    },
+    { "uvb",           "UVB",                    1,   nullptr    },
+    { "rain",          KD_T("RAIN",  "ДЪЖД"),    1,   "mm"       },
+    { "rain_rate",     KD_T("RAIN/h","ДЪЖД/ч"),  1,   "mm/h"     },
+    { "rain_total",    KD_T("RAIN \u03A3","ДЪЖД \u03A3"), 1, "mm" },
+    { "wind",          KD_T("WIND",  "ВЯТЪР"),   1,   nullptr    },
+    { "wind_speed",    KD_T("WIND",  "ВЯТЪР"),   1,   nullptr    },
+    { "wind_direction",KD_T("DIR",   "ПОСОКА"),  0,   "\u00B0"   },
+    { "soil_moisture", KD_T("SOIL",  "ПОЧВА"),   0,   "%"        },
+    { "flow_rate",     KD_T("FLOW",  "ДЕБИТ"),   1,   nullptr    },
+    { "battery_voltage", KD_T("BATT","БАТЕРИЯ"), 2,   "V"        },
+    { "battery_percent", KD_T("BATT","БАТЕРИЯ"), 0,   "%"        },
+    { "battery_days",  KD_T("DAYS",  "ДНИ"),     0,   "d"        },
 };
 static const int KD_METRIC_STYLE_COUNT =
     (int)(sizeof(KD_METRIC_STYLE) / sizeof(KD_METRIC_STYLE[0]));
@@ -166,6 +190,14 @@ static inline const char* kdSlotLabel(const KindleSlot& s) {
     if (s.label[0]) return s.label;
     const KdMetricStyle* st = kdMetricStyle(s.metric);
     return st ? st->label : s.metric;
+}
+
+/// What to print after the value. The table's choice when it has one, else the
+/// unit the sensor reported, else nothing.
+static inline const char* kdSlotUnit(const KindleSlot& s, const char* readingUnit) {
+    const KdMetricStyle* st = kdMetricStyle(s.metric);
+    if (st && st->unit) return st->unit;
+    return readingUnit ? readingUnit : "";
 }
 
 static inline uint8_t kdSlotDecimals(const KindleSlot& s) {
@@ -257,10 +289,17 @@ struct KdSlotPlacement {
 /// skipped entirely and the row closes up behind it. That is the BMP280 case:
 /// no humidity reading, no humidity slot, no gap where one used to be.
 ///
+/// `firstRowUnits` is how much of row 0 the flow may use. Pass
+/// KSLOT_ROW_UNITS - KSLOT_CLOCK_UNITS when the clock shares that row, which
+/// on this dashboard it always does.
+///
 /// Returns how many placements were written, at most `maxOut`.
 static inline int kdSlotsPack(const KindleSlotList& list, const bool* visible,
-                              KdSlotPlacement* out, int maxOut) {
+                              KdSlotPlacement* out, int maxOut,
+                              uint8_t firstRowUnits = KSLOT_ROW_UNITS) {
     if (!out || maxOut <= 0) return 0;
+    if (firstRowUnits == 0 || firstRowUnits > KSLOT_ROW_UNITS)
+        firstRowUnits = KSLOT_ROW_UNITS;
 
     int     n   = 0;
     uint8_t row = 0;
@@ -270,15 +309,21 @@ static inline int kdSlotsPack(const KindleSlotList& list, const bool* visible,
         if (!list.slot[i].used()) continue;
         if (visible && !visible[i]) continue;
 
-        const uint8_t units = kdSlotUnits(list.slot[i].size);
+        uint8_t cap   = (row == 0) ? firstRowUnits : KSLOT_ROW_UNITS;
+        uint8_t units = kdSlotUnits(list.slot[i].size, cap);
 
         // A hero owns its row. Starting one mid-row would put the glance value
         // beside something small and destroy the size hierarchy that makes it
         // the glance value.
         const bool needsOwnRow = (list.slot[i].size == KSLOT_HERO);
-        if ((needsOwnRow && col != 0) || (col + units > KSLOT_ROW_UNITS)) {
+        if ((needsOwnRow && col != 0) || (col + units > cap)) {
             row++;
             col = 0;
+            // The next row may be wider, so the width has to be recomputed
+            // against it — a hero that wrapped off the clock's row takes the
+            // whole of the one it lands on, not the half it would have had.
+            cap   = KSLOT_ROW_UNITS;
+            units = kdSlotUnits(list.slot[i].size, cap);
         }
 
         out[n].index = i;
@@ -288,7 +333,7 @@ static inline int kdSlotsPack(const KindleSlotList& list, const bool* visible,
         n++;
 
         col += units;
-        if (col >= KSLOT_ROW_UNITS || needsOwnRow) { row++; col = 0; }
+        if (col >= cap || needsOwnRow) { row++; col = 0; }
     }
     return n;
 }

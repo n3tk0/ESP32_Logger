@@ -195,6 +195,103 @@ static void test_every_size_divides_a_row() {
         CHECK(u <= KSLOT_ROW_UNITS);
         CHECK_EQ(KSLOT_ROW_UNITS % u, 0);
     }
+    // And on the narrowed first row, where the clock has taken half.
+    const uint8_t half = KSLOT_ROW_UNITS - KSLOT_CLOCK_UNITS;
+    for (uint8_t s = 0; s < KSLOT_SIZE_COUNT; s++) {
+        const uint8_t u = kdSlotUnits(s, half);
+        CHECK(u > 0);
+        CHECK(u <= half);
+    }
+    // A width is never zero however narrow the row gets — a zero-width slot
+    // would be an invisible reading that still consumed a list entry.
+    for (uint8_t r = 1; r <= KSLOT_ROW_UNITS; r++)
+        for (uint8_t s = 0; s < KSLOT_SIZE_COUNT; s++)
+            CHECK(kdSlotUnits(s, r) > 0);
+}
+
+// ---------------------------------------------------------------------------
+// Sharing row 0 with the clock
+// ---------------------------------------------------------------------------
+// The clock is not a reading, so it is not a slot — but both renderers draw it
+// over the top-right of the first row, and the packer has to know. Before this,
+// a hero claimed all twelve twelfths of row 0 and the outdoor temperature ran
+// underneath the clock as soon as the value got wide.
+static void test_the_clock_narrows_the_first_row() {
+    const uint8_t half = KSLOT_ROW_UNITS - KSLOT_CLOCK_UNITS;
+
+    KindleSlotList l;
+    l.clear();
+    l.add("s", "temperature", nullptr, KSLOT_HERO);     // row 0, beside the clock
+    l.add("s", "pressure",    nullptr, KSLOT_MEDIUM);   // row 1, full width
+    l.add("s", "humidity",    nullptr, KSLOT_MEDIUM);
+    l.add("s", "pm25",        nullptr, KSLOT_MEDIUM);
+
+    KdSlotPlacement p[KindleSlotList::CAP];
+    const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP, half);
+    CHECK_EQ(n, 4);
+
+    // The hero takes the half it has, not the whole width.
+    CHECK_EQ((int)p[0].row, 0);
+    CHECK_EQ((int)p[0].col, 0);
+    CHECK_EQ((int)p[0].units, (int)half);
+
+    // Everything after it is on a full-width row and packs three across.
+    CHECK_EQ((int)p[1].row, 1);
+    CHECK_EQ((int)p[1].units, 4);
+    CHECK_EQ((int)p[2].row, 1);
+    CHECK_EQ((int)p[3].row, 1);
+    CHECK_EQ((int)p[3].col, 8);
+    CHECK_EQ(kdSlotsRowCount(p, n), 2);
+}
+
+// Row 0 holds only what fits beside the clock; the rest moves down.
+static void test_small_slots_fill_only_half_of_row_zero() {
+    const uint8_t half = KSLOT_ROW_UNITS - KSLOT_CLOCK_UNITS;   // 6
+
+    KindleSlotList l;
+    l.clear();
+    for (int i = 0; i < 5; i++) l.add("s", "pm25", nullptr, KSLOT_SMALL);
+
+    KdSlotPlacement p[KindleSlotList::CAP];
+    const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP, half);
+    CHECK_EQ(n, 5);
+
+    // A small is a quarter of the row it is on: 1 unit of six on row 0, 3 of
+    // twelve after that. Six/one = six would fit, but the first row's capacity
+    // is what stops it running under the clock.
+    int onRow0 = 0, used0 = 0;
+    for (int i = 0; i < n; i++)
+        if (p[i].row == 0) { onRow0++; used0 += p[i].units; }
+    CHECK(used0 <= (int)half);
+    CHECK(onRow0 >= 1);
+
+    // Nothing on any row exceeds that row's capacity.
+    int used[8] = {0};
+    for (int i = 0; i < n; i++) used[p[i].row] += p[i].units;
+    CHECK(used[0] <= (int)half);
+    for (int r = 1; r < 8; r++) CHECK(used[r] <= KSLOT_ROW_UNITS);
+}
+
+// The default is unchanged, so every existing caller and test still describes
+// a full-width first row.
+static void test_packing_defaults_to_a_full_first_row() {
+    KindleSlotList l;
+    l.clear();
+    l.add("s", "temperature", nullptr, KSLOT_HERO);
+
+    KdSlotPlacement a[4], b[4];
+    const int na = kdSlotsPack(l, nullptr, a, 4);
+    const int nb = kdSlotsPack(l, nullptr, b, 4, KSLOT_ROW_UNITS);
+    CHECK_EQ(na, nb);
+    CHECK_EQ((int)a[0].units, (int)b[0].units);
+    CHECK_EQ((int)a[0].units, (int)KSLOT_ROW_UNITS);
+
+    // An out-of-range capacity falls back to the full row rather than
+    // producing a layout nobody asked for.
+    kdSlotsPack(l, nullptr, b, 4, 0);
+    CHECK_EQ((int)b[0].units, (int)KSLOT_ROW_UNITS);
+    kdSlotsPack(l, nullptr, b, 4, 99);
+    CHECK_EQ((int)b[0].units, (int)KSLOT_ROW_UNITS);
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +388,9 @@ int main() {
     RUN(test_packing_preserves_order);
     RUN(test_pack_respects_maxout_and_empty_input);
     RUN(test_every_size_divides_a_row);
+    RUN(test_the_clock_narrows_the_first_row);
+    RUN(test_small_slots_fill_only_half_of_row_zero);
+    RUN(test_packing_defaults_to_a_full_first_row);
     RUN(test_clamp_drops_unusable_slots);
     RUN(test_clamp_bounds_everything_a_renderer_reads);
     RUN(test_add_refuses_past_the_cap);

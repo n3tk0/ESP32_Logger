@@ -195,23 +195,50 @@ for i,(n,dnum) in enumerate(list(zip(S['wd'],[24,25,26,27,28,29,30]))):
     cls='wd wd-now' if i==1 else ('wd wd-we' if i>=5 else 'wd')
     wk+='<td class="%s"><div class="wd-n">%s</div><div class="wd-d">%d</div></td>'%(cls,n,dnum)
 
+# ── The slot flow ───────────────────────────────────────────────────────────
+# The page is a list of readings now, so the preview is too. These are the six
+# the firmware defaults to, packed the way kdSlotsPack() packs them: a hero
+# beside the clock on row 0, then the rest across full-width rows.
+#
+# The sizes and the twelfths are duplicated from src/web/KindleSlots.h rather
+# than parsed out of it, and that is a deliberate limit of this tool: it draws
+# what the layout SHOULD look like, and the host tests are what prove the
+# firmware packs it that way.
+SLOTS = [
+    # label,           value,       unit,  size, units, row, bold, age
+    (S['out'],         HERO['now'], '°',   'h',  6,     0,   True,  '3 ' + ('min old' if lang == 'en' else 'мин')),
+    (('HUM' if lang == 'en' else 'ВЛАГА'), HERO['hum'], '%', 'm', 4, 1, False, ''),   # noqa: E501
+    (('PRESS' if lang == 'en' else 'НАЛЯГ'), HERO['hpa'], 'hPa', 'm', 4, 1, False, ''),
+    (S['ins'],         '21.0',      '°',   'l',  6,     2,   False, '1 ' + ('min old' if lang == 'en' else 'мин')),
+    (('HUM' if lang == 'en' else 'ВЛАГА'), '44',  '%',   'm',  4,     2,   False, ''),
+    ('AQI',            '42',        '',    'm',  4,     2,   False, ''),
+]
+
+def slot_cells(row):
+    out = ''
+    for i, (lab, val, unit, sz, units, r, bold, age) in enumerate(SLOTS):
+        if r != row:
+            continue
+        badge = battery_badge() if (WARN and i == 0) else ''
+        out += ('<td class="slot sl-%s" width="%d%%">' % (sz, (units * 100 + 6) // 12) +
+                '<div class="lab">' + lab + badge + '</div>' +
+                '<div class="val' + (' val-b' if bold else '') + '">' + val +
+                ('<span class="unit"> ' + unit + '</span>' if unit else '') +
+                ('<span class="age"> &middot; ' + age + '</span>' if age else '') +
+                '</div></td>')
+    return out
+
+def slot_row(row):
+    cells = slot_cells(row)
+    return ('<table class="slots"><tr>' + cells + '</tr></table>') if cells else ''
+
 body=('<table class="hero"><tr><td width="50%">'
- '<div class="lab">'+S['out']+(battery_badge() if WARN else '')+'</div>'
- '<div class="'+HERO['cls']+'">'+HERO['now']+'<span class="deg">&deg;</span>'
- '<span class="slash">/</span><span class="hum-o">'+HERO['hum']+'%</span></div>'
- '<div class="sub">'+HERO['lo']+S['to']+HERO['hi']+'&deg;'
- '<span class="dim"> &middot; 3 '+('min old' if lang=='en' else 'мин')+'</span></div>'
- '<div class="pres">'+HERO['hpa']+'<span class="pres-u"> hPa</span></div>'
- '<div class="sub sub-t">'+HERO['arrow']+' '+HERO['trend']
- +' <span class="dim">('+HERO['d']+')</span></div>'
+ + slot_row(0) +
  '</td><td width="50%" class="sep">'
  '<div class="clock">17:40</div>'
  +('<div class="clock-d">25 %s</div>'%S['mon'] if CLOCK=='dated' else '')+
- '<div class="inrule"></div>'
- '<div class="lab">'+S['ins']+'</div>'
- '<div class="in-t">21.0<span class="in-d">&deg;</span>'
- '<span class="slash slash-i">/</span><span class="hum-i">44%</span></div>'
  '</td></tr></table>'
+ + slot_row(1) + slot_row(2)
  + '<div class="rule"></div><div class="sec">'+S['h24']+'</div>'
  + '\n'.join(g) +
  '<table class="key"><tr><td>'
