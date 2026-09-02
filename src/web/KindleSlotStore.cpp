@@ -25,6 +25,7 @@ static void readZone(KindleSlot& s, JsonObjectConst o) {
     copyField(s.label,    sizeof(s.label),    o["label"]);
     s.decimals = (uint8_t)(o["decimals"] | (int)KSLOT_DECIMALS_AUTO);
     s.flags    = (uint8_t)(o["flags"]    | (int)KSLOTF_UNIT);
+    s.ink      = (uint8_t)(o["ink"]      | (int)KINK_BLACK);
 }
 
 // The one earlier shape this file ever had: a "slots" ARRAY of readings that
@@ -34,8 +35,9 @@ static void readZone(KindleSlot& s, JsonObjectConst o) {
 // again — so the array is poured into the places in the order it was written
 // rather than thrown away. Sizes are dropped: a place decides its own now.
 static void adoptLegacyArray(KindleZones& out, JsonArrayConst arr) {
-    static const uint8_t ORDER[] = { KZ_HERO, KZ_BIG, KZ_G1, KZ_G2,
-                                     KZ_G3, KZ_G4, KZ_IN1, KZ_IN2, KZ_IN3 };
+    static const uint8_t ORDER[] = { KZ_HERO, KZ_BIG, KZ_G1, KZ_G2, KZ_G3,
+                                     KZ_G4, KZ_G5, KZ_G6,
+                                     KZ_IN1, KZ_IN2, KZ_IN3 };
     int n = 0;
     for (JsonObjectConst o : arr) {
         if (n >= (int)(sizeof(ORDER) / sizeof(ORDER[0]))) break;
@@ -154,6 +156,7 @@ bool kdSlotsSave(fs::FS& fs, const KindleZones& zones, const char* path) {
         if (s.label[0]) o["label"] = s.label;     // omit when it is the default
         o["flags"] = s.flags;
         if (s.decimals != KSLOT_DECIMALS_AUTO) o["decimals"] = s.decimals;
+        if (s.ink != KINK_BLACK) o["ink"] = s.ink;   // omit when it is the default
     }
 
     // /config/ may not exist on a device that has never written a module file.

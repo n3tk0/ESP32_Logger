@@ -12,7 +12,7 @@ Rendered at 600×800 CSS px through a greyscale filter, which is how every
 layout decision in this document was checked. It is the current page: a two-column
 top block with no masthead — the outdoor headline and its grid on the left, the
 clock and the indoor row on the right — three-hourly rules in the chart, the
-month above the week strip, and the two manual repaint links in the footer. The page comes to **782 of the 800 px** available.
+month above the week strip, and the two manual repaint links in the footer. The page comes to **761 of the 800 px** available.
 
 The figures are synthetic. The **stylesheet is extracted from the `KD_S`/`KD_N`
 calls in `KindleDashboard.cpp`** at render time rather than kept as a copy, so
@@ -197,7 +197,7 @@ Load it on the reader and read the numbers off:
 
 Below 320 or above 2400 the build fails rather than rendering something that
 was never measured. All three values above are checked at the device's viewport
-before release: 782 of 810 at 600, 694 of 724 at 536, 1393 of 1448 at 1072, and
+before release: 761 of 810 at 600, 678 of 724 at 536, 1357 of 1448 at 1072, and
 no horizontal overflow at any of them.
 
 An earlier attempt at this got the chart wrong — the SVG kept its 600-px size
@@ -235,7 +235,7 @@ the only two numbers the page exists to show. The top block is the masthead.
 It is **two columns**. The outdoor readings on the left, the clock and the
 indoor row on the right, with a hairline between them.
 
-### Nine named places
+### Eleven named places
 
 The page began as six hardwired readings, which is a fine dashboard for exactly
 one hardware configuration — and this firmware has twenty sensor plugins between
@@ -248,23 +248,27 @@ readings that packed themselves into rows, which could show anything and
 therefore had no shape: a different page every time a sensor went quiet.
 
 So the layout is fixed and the CONTENT of each place is the reader's. There are
-nine, always in the same spot at the same size:
+eleven, always in the same spot at the same size:
 
 ```
 ┌────────────────────────────────┬──────────────────────────────┐
 │ «outdoor heading»              │            17:40             │
 │                                │ ──────────────────────────── │
 │   HERO / BIG                   │ «indoor heading»             │
-│   24 h low-to-high · age       │  IN1     IN2     IN3         │
+│   24 h low-to-high · age       │           IN2      IN3       │
+│                                │  IN1      44%       42       │
 │                                │                              │
-│   G1        G2                 │                              │
-│   G3        G4                 │                              │
+│   G1     G2     G3             │                              │
+│   G4     G5     G6             │                              │
 └────────────────────────────────┴──────────────────────────────┘
 ```
 
-Each place names a sensor, a metric, an optional caption, how many decimals, and
+Each place names a sensor, a metric, an optional caption, how many decimals,
 four switches — bold, show the unit, show the age when stale, show the pressure
-tendency. Set under Settings → E-ink dashboard; stored in
+tendency — and **how dark it is drawn**: black, dark, mid or light grey. Four
+levels rather than a colour picker, because the panel has sixteen real grey
+levels and the ones worth having are the ones far enough apart to render solid,
+which is what the page's palette already is. Set under Settings → E-ink dashboard; stored in
 `/config/kindle_slots.json`, not in `config.bin`, so adding a field costs no
 migration. `src/web/KindleSlots.h` is the model and has no Arduino in it, which
 is what lets `tests/host/test_kindle_slots.cpp` exercise the defaults, the
@@ -286,7 +290,9 @@ reading.
 The line under them is the **24-hour low-to-high of the hero's own metric**,
 plus how old the reading is: `-2.4 до 15.3° · 3 мин`. It is composed on the
 collector, by `kdSubLine()`, so the wording, the unit and the rounding are the
-page's and not each renderer's.
+page's and not each renderer's, and it is set in the page's mid grey rather than
+its dark one — it is context for the number above it, not a reading in its own
+right. Switch it off under *What is drawn → 24-hour range*.
 
 The pair is the one thing on the page that must not reflow, so it is `nowrap`
 with the overflow hidden, and the sizes were measured against the widest it
@@ -299,11 +305,21 @@ value's own line would be denser, and it also makes every cell a different
 width — six captions of different lengths put six numbers at six different x.
 Above the value they all start at the cell's left edge.
 
-The grid is two columns always, so the second cell of a row lands under the
-second cell of the row above it. The indoor row gives its **first field more of
-the width** (40 % of three, 55 % of two) because it is set larger; equal columns
-would crowd it against its neighbour while leaving the small ones space they do
-not need.
+**Every row divides its own width by its own count.** The grid is up to three
+across and two deep, and the cells that survived are spread across balanced,
+full rows — 1, 2, 3, then 2+2, 3+2, 3+3. Two readings are two halves, not two of
+three thirds with the last one white; four are two rows of two, not three and a
+lone cell. Three across is narrower than two, so a row of three steps its type
+down: "1008 hPa" with a tendency arrow after it does not fit a third of half a
+page at the two-across size.
+
+The indoor row gives its **first field more of the width** (42 % of three, 58 %
+of two) because it is set much larger, and that field carries **no caption** at
+all — the heading directly above already names the room, and a "TEMP" under it
+says nothing the degree sign has not. The line it gives back is spent on type.
+The other two hang their captions in the space it does not use and sit on its
+bottom edge, so all three values line up along one edge rather than along their
+tops.
 
 ### Units are footnotes
 
@@ -342,7 +358,7 @@ Three decisions, all of them about the medium:
   cut out of a dark field.
 - **It floats.** `.bw` is `float:right`, not flex — the same reason the whole
   page lays out in tables. It also means the badge costs no height: the page
-  measures 782 px of the 800 budget with it and without it.
+  measures 761 px of the 800 budget with it and without it.
 
 Its geometry goes through `kdPx()` like everything else, so it scales with
 `KINDLE_PAGE_W` down to a Kindle 4's 536 px. The condition is
@@ -406,7 +422,7 @@ exists.
 | **Date** | `27 august`, `august 27`, `27.08.2026`, `2026-08-27` |
 | **Pressure** | hPa, mmHg or inHg — the three-hour change follows it |
 | **Temperature** | one decimal or whole degrees |
-| **Readings** | what goes in each of the nine places, and each one's caption, decimals and switches |
+| **Readings** | what goes in each of the eleven places, and each one's caption, decimals, switches and grey level |
 | **Blocks** | the value beside the headline, the two-by-two grid, the pressure tendency, the 24 h range, the indoor block, the chart, the week strip, the battery badge |
 
 The settings live in `config.kindle` (`src/core/Config.h`) and are read on
@@ -449,9 +465,9 @@ clock rather than adding them beneath it.
 
 The figure used to be 139, from the layout where the clock sat BESIDE the indoor
 block rather than above it and its height set where a divider fell. At 139 the
-three non-plain styles came out at 813, 801 and 821 px against a budget of 800 —
+three non-plain styles came out over the 800 budget —
 all three over, and none by enough to be obvious. The page now measures
-**778–783 of the 800 in all four**, measured in a browser through `preview.py`,
+**757–762 of the 800 in all four**, measured in a browser through `preview.py`,
 which extracts the override arm from `KindleSkin.h` the same way it extracts the
 base sheet.
 
@@ -493,7 +509,7 @@ px and a 167 ppi Kindle 7 mapping them 1:1 both come to 0.15 mm per CSS px.
 > smallest thing worth aiming at". That was wrong twice over: the 44 in the
 > usual guidance is CSS px on a phone — roughly **9 mm** — and 4 mm is under
 > half of it. The button is reachable with an infrared touch panel but it is not
-> generous. The page has no spare height at 782 of 800 to grow it without taking
+> generous. The page has no spare height at 761 of 800 to grow it without taking
 > the difference from the chart, which is a trade worth making deliberately
 > rather than by accident.
 

@@ -676,7 +676,7 @@ synchronised node.
 |---|---|---|---|
 | GET | `/api/kindle/config` | read | How `/kindle` is drawn, plus its build-time width |
 | POST | `/api/kindle/config` | CSRF | Face, weight, clock style, formats, which blocks are drawn |
-| GET | `/api/kindle/slots` | read | What is in each of the nine places, plus the layout's own vocabulary |
+| GET | `/api/kindle/slots` | read | What is in each of the eleven places, plus the layout's own vocabulary |
 | POST | `/api/kindle/slots` | CSRF | Replace the whole layout (JSON body) |
 
 **The layout is fixed; what goes in it is not.** The page used to be six
@@ -689,15 +689,18 @@ would have been, forever, in a space nothing else could use.
 
 A free list of readings that packed itself into rows replaced that, and went too
 far: a page that can show anything has no shape, and it rearranged itself
-whenever a sensor went quiet. What it is now is **nine named places** — a
-headline and the value beside it, a two-by-two grid under them, and a row of up
-to three under the clock — each of which names a sensor, a metric, a caption,
-its decimals and four switches. Adding PM2.5 from an SDS011 on the balcony is
-putting it in a place.
+whenever a sensor went quiet. What it is now is **eleven named places** — a
+headline and the value beside it, a grid of up to three across and two deep, and
+a row of up to three under the clock — each of which names a sensor, a metric, a
+caption, its decimals, four switches and one of four grey levels. Adding PM2.5
+from an SDS011 on the balcony is putting it in a place.
 
 **An empty place is skipped and the ones after it close up**, which is the
-BMP280 case and the reason any of this exists. It is also how the indoor row
-becomes two fields instead of three: leave the third unconfigured.
+BMP280 case and the reason any of this exists. Every row then divides its own
+width by however many cells it ended up with, so two readings are two halves
+rather than two of three thirds with the last one white, and four are two rows
+of two rather than three and a lone cell. It is also how the indoor row becomes
+two fields instead of three: leave the third unconfigured.
 
 No place carries a size or a coordinate, and deliberately: the same page is
 rendered at 600x800 by an FBInk shell script and at 1072x1448 by a CSS page, so
@@ -711,7 +714,7 @@ The layout lives in `/config/kindle_slots.json`, not in `config.bin`, following
 the split the rest of the firmware makes: scalars in the binary struct, lists of
 configured things in JSON under `/config/`. It costs no migration, which
 matters — every field added to `DeviceConfig` puts every deployed device through
-`loadConfig()`'s migration path, and nine places would have been another 450
+`loadConfig()`'s migration path, and eleven places would have been another 600
 bytes of it. An absent file means "never configured" and yields defaults that
 reproduce the old page, built from whichever two sensors the device was already
 pointed at.

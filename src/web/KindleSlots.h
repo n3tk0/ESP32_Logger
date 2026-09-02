@@ -15,17 +15,18 @@
 // different page every time a sensor went quiet.
 //
 // SO: NAMED PLACES, NOT A FLOW. The layout is fixed and the CONTENT of each
-// place is the reader's. There are nine of them and they are always in the same
-// spot, at the same size, whether or not anything is configured into them:
+// place is the reader's. There are eleven of them and they are always in the
+// same spot, at the same size, whether or not anything is configured into them:
 //
 //     ┌────────────────────────────────┬──────────────────────────────┐
 //     │ «outdoor group label»          │            17:40             │
 //     │                                │ ──────────────────────────── │
 //     │   HERO / BIG                   │ «indoor group label»         │
-//     │   24 h low-to-high · age       │  IN1     IN2     IN3         │
+//     │   24 h low-to-high · age       │           IN2      IN3       │
+//     │                                │  IN1      44%       42       │
 //     │                                │                              │
-//     │   G1        G2                 │                              │
-//     │   G3        G4                 │                              │
+//     │   G1     G2     G3             │                              │
+//     │   G4     G5     G6             │                              │
 //     └────────────────────────────────┴──────────────────────────────┘
 //
 // HERO and BIG share one baseline with a slash between them, under a single
@@ -34,9 +35,12 @@
 // through a single reading. The line under them is the 24-hour low-to-high of
 // the HERO's own metric plus how old the reading is.
 //
-// G1..G4 are a two-by-two table, caption above value. IN1..IN3 are one row
-// under the clock with the first set larger, so the indoor block has an obvious
-// first number rather than three of equal weight.
+// G1..G6 are a table of up to three across and two deep, caption above value,
+// and every row divides its own width by however many cells it ended up with —
+// two readings are two halves, not two of three thirds with the last one white.
+// IN1..IN3 are one row under the clock; IN1 is set much larger and carries no
+// caption, because the group heading directly above it already names the room,
+// and the other two sit on its bottom edge.
 //
 // AN EMPTY PLACE IS SKIPPED AND THE ONES AFTER IT CLOSE UP. That is the BMP280
 // case and the reason any of this exists: no humidity reading, no humidity in
@@ -74,28 +78,34 @@
 #endif
 
 // ---------------------------------------------------------------------------
-// The nine places
+// The eleven places
 // ---------------------------------------------------------------------------
-// The order is the drawing order and the storage order, so a file written by an
-// older build lines up with a newer one field for field. Appending is safe;
-// renumbering is not.
+// The order is the drawing order and the storage order. Appending is safe;
+// renumbering is not — but nothing depends on the numbers anyway, because every
+// place is addressed by its KEY in the file, the API and the shell renderer.
 enum KindleZone : uint8_t {
     KZ_HERO = 0,   ///< the glance value, largest type on the page
     KZ_BIG,        ///< beside it, after a slash, about half its size
-    KZ_G1,         ///< the two-by-two grid, in reading order
+    KZ_G1,         ///< the grid, in reading order: up to three across, two deep
     KZ_G2,
     KZ_G3,
     KZ_G4,
-    KZ_IN1,        ///< the indoor row under the clock; IN1 is the larger one
+    KZ_G5,
+    KZ_G6,
+    KZ_IN1,        ///< the indoor row under the clock; IN1 is the large one
     KZ_IN2,
     KZ_IN3,
     KZ_COUNT
 };
 
 /// How many of the grid and indoor places there are, named rather than spelled
-/// as 4 and 3 at each of the dozen sites that walk them.
-static const int KZ_GRID_COUNT   = 4;
+/// as 6 and 3 at each of the dozen sites that walk them.
+static const int KZ_GRID_COUNT   = 6;
 static const int KZ_INDOOR_COUNT = 3;
+
+/// The widest the grid gets. Two rows of three is what fits above the chart on
+/// a 600x800 panel; a third row would run into it.
+static const int KZ_GRID_COLS = 3;
 
 /// The stable key each place is stored and addressed by — in the JSON file, in
 /// the API, and in the shell renderer's variable names. A NUMBER would have
@@ -109,6 +119,8 @@ static inline const char* kdZoneKey(uint8_t z) {
         case KZ_G2:   return "g2";
         case KZ_G3:   return "g3";
         case KZ_G4:   return "g4";
+        case KZ_G5:   return "g5";
+        case KZ_G6:   return "g6";
         case KZ_IN1:  return "in1";
         case KZ_IN2:  return "in2";
         case KZ_IN3:  return "in3";
@@ -129,7 +141,7 @@ static inline uint8_t kdZoneFromKey(const char* key) {
 /// Which of the two groups a place belongs to. The group is what carries the
 /// heading above it and, on the shell renderer, which column it is drawn in.
 static inline bool kdZoneIsIndoor(uint8_t z) { return z >= KZ_IN1 && z <= KZ_IN3; }
-static inline bool kdZoneIsGrid(uint8_t z)   { return z >= KZ_G1  && z <= KZ_G4;  }
+static inline bool kdZoneIsGrid(uint8_t z)   { return z >= KZ_G1  && z <= KZ_G6;  }
 
 // ---------------------------------------------------------------------------
 // Per-place options
@@ -144,6 +156,47 @@ constexpr uint8_t KSLOTF_ALL      = 0x0F;
 static const uint8_t KSLOT_DECIMALS_AUTO = 0xFF;
 
 // ---------------------------------------------------------------------------
+// How dark a value is drawn
+// ---------------------------------------------------------------------------
+// FOUR LEVELS, NOT A COLOUR PICKER. The page's palette is #000 #444 #777 #aaa
+// plus two washes, and it is four values rather than a gradient because the
+// panel has sixteen real grey levels and the dithering worth avoiding comes
+// from tones too close together. Spaced this far apart each renders solid; a
+// free choice would mostly offer a way to pick two that mush into each other.
+//
+// This is per PLACE, so a reader who wants the pressure to recede behind the
+// temperature can say so without the firmware having an opinion about which
+// readings matter — which was the whole reason the layout became configurable.
+enum KindleInk : uint8_t {
+    KINK_BLACK = 0,   ///< #000 — the default, and what a headline wants
+    KINK_DARK  = 1,   ///< #444
+    KINK_MID   = 2,   ///< #777
+    KINK_LIGHT = 3,   ///< #aaa — legible on the panel, but only just
+    KINK_COUNT
+};
+
+/// The CSS colour for a level. Also the order the settings form lists them in.
+static inline const char* kdInkCss(uint8_t ink) {
+    switch (ink) {
+        case KINK_DARK:  return "#444";
+        case KINK_MID:   return "#777";
+        case KINK_LIGHT: return "#aaa";
+        default:         return "#000";
+    }
+}
+
+/// What FBInk calls the same level. The shell renderer takes a colour NAME, and
+/// these four are the ones the rest of update_dash.sh already uses.
+static inline const char* kdInkFbink(uint8_t ink) {
+    switch (ink) {
+        case KINK_DARK:  return "GRAY4";
+        case KINK_MID:   return "GRAY7";
+        case KINK_LIGHT: return "GRAY10";
+        default:         return "BLACK";
+    }
+}
+
+// ---------------------------------------------------------------------------
 // One place's contents
 // ---------------------------------------------------------------------------
 // The id and metric buffers match SensorReading's, so a name that fits the
@@ -155,6 +208,7 @@ struct KindleSlot {
     char    label[17];      ///< "" = derive from the metric
     uint8_t decimals;       ///< KSLOT_DECIMALS_AUTO or 0..3
     uint8_t flags;          ///< KSLOTF_*
+    uint8_t ink;            ///< KindleInk — how dark the value is drawn
 
     bool used() const { return sensorId[0] != '\0' && metric[0] != '\0'; }
 };
@@ -247,7 +301,7 @@ static inline uint8_t kdSlotDecimals(const KindleSlot& s) {
 // ---------------------------------------------------------------------------
 // The whole configuration
 // ---------------------------------------------------------------------------
-/// The nine places plus the two group headings above them.
+/// The eleven places plus the two group headings above them.
 ///
 /// The headings are stored rather than compiled in because they are the one
 /// piece of text on this page that is about the reader's house and not about
@@ -268,7 +322,8 @@ struct KindleZones {
     bool set(uint8_t zone, const char* sensorId, const char* metric,
              const char* label = nullptr,
              uint8_t decimals = KSLOT_DECIMALS_AUTO,
-             uint8_t flags = KSLOTF_UNIT) {
+             uint8_t flags = KSLOTF_UNIT,
+             uint8_t ink = KINK_BLACK) {
         if (zone >= KZ_COUNT || !sensorId || !metric) return false;
         KindleSlot& s = z[zone];
         s = KindleSlot{};
@@ -277,6 +332,7 @@ struct KindleZones {
         if (label) strncpy(s.label, label, sizeof(s.label) - 1);
         s.decimals = decimals;
         s.flags    = flags;
+        s.ink      = ink;
         if (!s.used()) { s = KindleSlot{}; return false; }
         return true;
     }
@@ -311,6 +367,7 @@ static inline void kdZonesClamp(KindleZones& k) {
         s.label[sizeof(s.label) - 1]       = '\0';
         if (!s.used()) { s = KindleSlot{}; continue; }   // half-filled is empty
         if (s.decimals != KSLOT_DECIMALS_AUTO && s.decimals > 3) s.decimals = 3;
+        if (s.ink >= KINK_COUNT) s.ink = KINK_BLACK;
         s.flags &= KSLOTF_ALL;
     }
     k.groupOut[sizeof(k.groupOut) - 1] = '\0';
@@ -349,6 +406,38 @@ static inline int kdZonesUsed(const KindleZones& k, const bool* visible,
 /// The grid's survivors, in reading order. At most KZ_GRID_COUNT.
 static inline int kdGridUsed(const KindleZones& k, const bool* visible, uint8_t* out) {
     return kdZonesUsed(k, visible, KZ_G1, KZ_GRID_COUNT, out);
+}
+
+/// How to break `n` grid cells into rows, and how many go on each.
+///
+/// THE ROWS ARE BALANCED AND ALWAYS FULL. Three across is the widest the grid
+/// gets, but filling greedily from the left would put four cells out as three
+/// and one — and a lone cell taking a whole row, or taking a third of one and
+/// leaving two thirds white, are both worse than two rows of two. So the number
+/// of rows comes from the cap and the cells are then spread as evenly as they
+/// go, remainder to the earlier rows:
+///
+///     1 -> 1        4 -> 2 2
+///     2 -> 2        5 -> 3 2
+///     3 -> 3        6 -> 3 3
+///
+/// Each row then divides its own width by its own count, which is what makes
+/// "no empty space" true whichever places the reader filled in.
+///
+/// Writes the per-row counts into `rows` (at most 2 for a six-place grid) and
+/// returns how many rows there are.
+static inline int kdGridRowSplit(int n, int* rows, int maxRows) {
+    if (!rows || maxRows <= 0 || n <= 0) return 0;
+    int nRows = (n + KZ_GRID_COLS - 1) / KZ_GRID_COLS;
+    if (nRows > maxRows) nRows = maxRows;
+
+    const int base = n / nRows;
+    int extra = n - base * nRows;          // 0 .. nRows-1
+    for (int r = 0; r < nRows; r++) {
+        rows[r] = base + (extra > 0 ? 1 : 0);
+        if (extra > 0) extra--;
+    }
+    return nRows;
 }
 
 /// The indoor row's survivors. At most KZ_INDOOR_COUNT — and this is what makes

@@ -166,10 +166,11 @@ draw_clock() {
 }
 
 # ── Full dashboard rendering ─────────────────────────────────────────────────
-# ── The nine places ──────────────────────────────────────────────────────────
+# ── The eleven places ────────────────────────────────────────────────────────
 # The collector sends what is in each named place and, for the two groups that
-# can close up behind an empty one, which places survived and in what order. All
-# this end does is turn that into pixels for one panel.
+# can close up behind an empty one, which places survived and in what order —
+# and for the grid, how they break into rows. All this end does is turn that
+# into pixels for one panel.
 #
 # NAMES, NOT COORDINATES. 600x800 and 1072x1448 want different pixel positions
 # for the same design, and the reader should not have to place every value
@@ -189,9 +190,9 @@ draw_clock() {
 # as loud as its number is not a unit, it is a second number.
 draw_field() {
     # $1=x $2=row top $3=size $4=bold $5=value $6=unit $7=arrow
-    # $8=value advance $9=unit advance
+    # $8=value advance $9=unit advance ${10}=ink colour
     local x="$1" y="$2" sz="$3" bold="$4" val="$5" unit="$6" arrow="$7"
-    local vadv="$8" uadv="$9"
+    local vadv="$8" uadv="$9" ink="${10:-BLACK}"
     local ux usz asz
 
     if [ -z "$val" ]; then
@@ -202,9 +203,9 @@ draw_field() {
     fi
 
     if [ "$bold" = "1" ]; then
-        draw_text_bold "$x" "$y" "$sz" "BLACK" "$val"
+        draw_text_bold "$x" "$y" "$sz" "$ink" "$val"
     else
-        draw_text_reg  "$x" "$y" "$sz" "BLACK" "$val"
+        draw_text_reg  "$x" "$y" "$sz" "$ink" "$val"
     fi
     ux=$(( x + sz * vadv / 1000 ))
 
@@ -253,7 +254,7 @@ draw_zones() {
 
     local lx="${COL_L_X:-18}" rx="${COL_R_X:-318}" rw="${COL_R_W:-264}"
     local lab_sz="${GROUP_LAB_SZ:-12}"
-    local z val unit lab arrow bold vadv uadv n i cx cw vsz y
+    local z val unit lab arrow bold vadv uadv ink n i cx cw vsz y
 
     # ── Left column: the outdoor headline ───────────────────────────────────
     draw_text_reg "$lx" "${TOP_Y:-20}" "$lab_sz" "GRAY7" "$Z_GROUP_OUT"
@@ -261,7 +262,7 @@ draw_zones() {
     local hero_sz="${HERO_SZ:-84}" hero_y="${HERO_Y:-38}"
     draw_field "$lx" "$hero_y" "$hero_sz" "${Z_HERO_BOLD:-0}" \
                "$Z_HERO_VALUE" "$Z_HERO_UNIT" "$Z_HERO_ARROW" \
-               "${Z_HERO_VADVW:-0}" "${Z_HERO_UADVW:-0}"
+               "${Z_HERO_VADVW:-0}" "${Z_HERO_UADVW:-0}" "${Z_HERO_INK:-BLACK}"
 
     # The slash and the second value, after the whole of the headline. The
     # collector measured that width for us — see kdAdvanceMille() — because
@@ -275,31 +276,45 @@ draw_zones() {
         draw_text_reg "$sx" "$y" "$big_sz" "GRAY10" "/"
         draw_field "$(( sx + ${SLASH_W:-22} ))" "$y" "$big_sz" "${Z_BIG_BOLD:-0}" \
                    "$Z_BIG_VALUE" "$Z_BIG_UNIT" "$Z_BIG_ARROW" \
-                   "${Z_BIG_VADVW:-0}" "${Z_BIG_UADVW:-0}"
+                   "${Z_BIG_VADVW:-0}" "${Z_BIG_UADVW:-0}" "${Z_BIG_INK:-BLACK}"
     fi
 
     # The 24 h low-to-high and the age, composed by the collector so that the
     # wording, the unit and the rounding are the page's and not this script's.
+    # Set in the page's mid grey, not its dark one: it is context for the big
+    # number above it, not a reading in its own right. The collector sends an
+    # empty string when the reader has switched it off.
     [ -n "${Z_SUB:-}" ] && \
-        draw_text_reg "$lx" "${SUB_Y:-128}" "${SUB_SZ:-15}" "GRAY4" "$Z_SUB"
+        draw_text_reg "$lx" "${SUB_Y:-128}" "${SUB_SZ:-14}" "GRAY7" "$Z_SUB"
 
-    # ── Left column: the two-by-two grid ────────────────────────────────────
-    # Two columns always, so the second cell of a row lands under the second
-    # cell of the row above it.
-    local gy="${GRID_Y:-152}" gcol=0
-    for z in ${GRID_ZONES:-}; do
-        eval "val=\$Z_${z}_VALUE; unit=\$Z_${z}_UNIT; lab=\$Z_${z}_LABEL"
-        eval "arrow=\$Z_${z}_ARROW; bold=\$Z_${z}_BOLD"
-        eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"
-        cx=$(( lx + gcol * ${GRID_COL_W:-135} ))
-        draw_text_reg "$cx" "$gy" "${GRID_LAB_SZ:-12}" "GRAY7" "$lab"
-        draw_field "$cx" "$(( gy + ${GRID_LAB_SZ:-12} + 4 ))" "${GRID_VAL_SZ:-30}" \
-                   "$bold" "$val" "$unit" "$arrow" "$vadv" "$uadv"
-        gcol=$((gcol + 1))
-        if [ "$gcol" -ge 2 ]; then
-            gcol=0
-            gy=$((gy + ${GRID_ROW_H:-50}))
+    # ── Left column: the grid ───────────────────────────────────────────────
+    # GRID_ROWS says how many cells are on each row; each row then divides its
+    # own width by its own count, so two cells are two halves rather than two of
+    # three thirds with the last one left white. The balancing is the
+    # collector's, because the HTML page has to break the rows the same way and
+    # a rule written twice is a rule written differently.
+    local gy="${GRID_Y:-150}" gcols gvsz gcw gi=0
+    set -- ${GRID_ZONES:-}
+    for gcols in ${GRID_ROWS:-}; do
+        gcw=$(( ${COL_L_W:-270} / gcols ))
+        # Three across is a third of half a page, which "1008 hPa" with an arrow
+        # after it does not fit at the two-across size.
+        if [ "$gcols" -ge 3 ]; then gvsz="${GRID_VAL_SZ_3:-26}"
+        else                        gvsz="${GRID_VAL_SZ:-31}"
         fi
+        gi=0
+        while [ "$gi" -lt "$gcols" ] && [ -n "${1:-}" ]; do
+            z="$1"; shift
+            eval "val=\$Z_${z}_VALUE; unit=\$Z_${z}_UNIT; lab=\$Z_${z}_LABEL"
+            eval "arrow=\$Z_${z}_ARROW; bold=\$Z_${z}_BOLD; ink=\${Z_${z}_INK:-BLACK}"
+            eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"
+            cx=$(( lx + gi * gcw ))
+            draw_text_reg "$cx" "$gy" "${GRID_LAB_SZ:-10}" "GRAY7" "$lab"
+            draw_field "$cx" "$(( gy + ${GRID_LAB_SZ:-10} + 4 ))" "$gvsz" \
+                       "$bold" "$val" "$unit" "$arrow" "$vadv" "$uadv" "$ink"
+            gi=$((gi + 1))
+        done
+        gy=$((gy + ${GRID_ROW_H:-46}))
     done
 
     # ── Right column: the indoor row ────────────────────────────────────────
@@ -318,22 +333,35 @@ draw_zones() {
         # the small ones space they do not need. The same split the HTML page
         # uses.
         local w1
-        if [ "$n" -ge 3 ]; then w1=$(( rw * 40 / 100 ))
-        elif [ "$n" -eq 2 ]; then w1=$(( rw * 55 / 100 ))
+        if [ "$n" -ge 3 ]; then w1=$(( rw * 42 / 100 ))
+        elif [ "$n" -eq 2 ]; then w1=$(( rw * 58 / 100 ))
         else w1="$rw"
         fi
         cw=$(( n > 1 ? (rw - w1) / (n - 1) : rw ))
+
+        # ALL THREE VALUES SIT ON ONE BOTTOM EDGE. The first has no caption —
+        # the heading above already says which room this is, and "TEMP" under
+        # it says nothing the degree sign has not — so it is half again as tall
+        # and starts higher. The other two hang their captions in the space it
+        # does not use, which is the space its missing caption gave back.
+        local big="${IN_VAL_SZ_1:-52}" small="${IN_VAL_SZ:-28}"
+        local big_y="${IN_VAL_Y:-158}"
+        local small_y=$(( big_y + big - small ))
+
         i=0
         for z in $IN_ZONES; do
             eval "val=\$Z_${z}_VALUE; unit=\$Z_${z}_UNIT; lab=\$Z_${z}_LABEL"
-            eval "arrow=\$Z_${z}_ARROW; bold=\$Z_${z}_BOLD"
+            eval "arrow=\$Z_${z}_ARROW; bold=\$Z_${z}_BOLD; ink=\${Z_${z}_INK:-BLACK}"
             eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"
-            if [ "$i" = "0" ]; then cx="$rx"; else cx=$(( rx + w1 + (i - 1) * cw )); fi
-            vsz="${IN_VAL_SZ:-28}"
-            [ "$i" = "0" ] && vsz="${IN_VAL_SZ_1:-40}"
-            draw_text_reg "$cx" "${IN_ROW_Y:-152}" "${GRID_LAB_SZ:-12}" "GRAY7" "$lab"
-            y=$(baseline_y "${IN_VAL_Y:-168}" "${IN_VAL_SZ_1:-40}" "$vsz")
-            draw_field "$cx" "$y" "$vsz" "$bold" "$val" "$unit" "$arrow" "$vadv" "$uadv"
+            if [ "$i" = "0" ]; then
+                cx="$rx"; vsz="$big"; y="$big_y"
+            else
+                cx=$(( rx + w1 + (i - 1) * cw )); vsz="$small"; y="$small_y"
+                draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \
+                              "${GRID_LAB_SZ:-10}" "GRAY7" "$lab"
+            fi
+            draw_field "$cx" "$y" "$vsz" "$bold" "$val" "$unit" "$arrow" \
+                       "$vadv" "$uadv" "$ink"
             i=$((i + 1))
         done
     fi

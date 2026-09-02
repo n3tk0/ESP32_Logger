@@ -1,6 +1,6 @@
 // Host unit tests for src/web/KindleSlots.h
 //
-// The nine places are what the dashboard draws, so the things worth checking
+// The eleven places are what the dashboard draws, so the things worth checking
 // are the ones that decide whether a reader sees a sensible page or a broken
 // one:
 //
@@ -13,7 +13,10 @@
 //     how "three fields, or two" is a setting rather than a mode;
 //   • the zone keys round-trip, since they are what the file and the API are
 //     addressed by;
-//   • anything arriving from a file is clamped before a renderer sees it.
+//   • the grid breaks into balanced, full rows, because "no empty space" has to
+//     hold whichever places got filled in;
+//   • anything arriving from a file is clamped before a renderer sees it —
+//     including the ink level, which a renderer uses to index a palette.
 #include <stdint.h>
 #include <string.h>
 
@@ -40,11 +43,13 @@ static void test_defaults_reproduce_the_old_dashboard() {
     CHECK((k.z[KZ_G1].flags & KSLOTF_TREND) != 0);
     CHECK_STREQ(k.z[KZ_G2].metric, "dew_point");
 
-    // THE LAST TWO GRID PLACES ARRIVE EMPTY, deliberately. A dashboard that
+    // THE REST OF THE GRID ARRIVES EMPTY, deliberately. A dashboard that
     // shipped showing a metric the hardware does not have would be showing a
     // dash, which is the fault this design exists to remove.
     CHECK(!k.z[KZ_G3].used());
     CHECK(!k.z[KZ_G4].used());
+    CHECK(!k.z[KZ_G5].used());
+    CHECK(!k.z[KZ_G6].used());
 
     // The indoor row.
     CHECK_STREQ(k.z[KZ_IN1].sensorId, "livingroom");
@@ -97,7 +102,7 @@ static void test_zone_keys_round_trip() {
 
     // Anything else is refused rather than guessed at. A key from a later
     // build must not land in whichever place happens to be first.
-    CHECK_EQ((int)kdZoneFromKey("g5"), (int)KZ_COUNT);
+    CHECK_EQ((int)kdZoneFromKey("g7"), (int)KZ_COUNT);
     CHECK_EQ((int)kdZoneFromKey(""),   (int)KZ_COUNT);
     CHECK_EQ((int)kdZoneFromKey(nullptr), (int)KZ_COUNT);
     CHECK_STREQ(kdZoneKey(KZ_COUNT), "");
@@ -300,11 +305,15 @@ static void test_clamp_bounds_everything_a_renderer_reads() {
     k.set(KZ_HERO, "s", "temperature");
     k.z[KZ_HERO].decimals = 9;
     k.z[KZ_HERO].flags    = 0xFF;
+    k.z[KZ_HERO].ink      = 99;
 
     kdZonesClamp(k);
 
     CHECK_EQ((int)k.z[KZ_HERO].decimals, 3);
     CHECK_EQ((int)k.z[KZ_HERO].flags, (int)KSLOTF_ALL);
+    // An ink level nobody has is BLACK, not whatever byte was there: a
+    // renderer indexes a palette with this.
+    CHECK_EQ((int)k.z[KZ_HERO].ink, (int)KINK_BLACK);
 
     // AUTO is not a number and must survive the clamp untouched — turning it
     // into 3 would silently give every place three decimals.
@@ -379,6 +388,113 @@ static void test_the_metric_table_is_sane() {
     CHECK(kdMetricStyle("nope")  == nullptr);
 }
 
+// ---------------------------------------------------------------------------
+// How dark a value is drawn
+// ---------------------------------------------------------------------------
+static void test_every_ink_level_names_a_colour() {
+    for (uint8_t i = 0; i < KINK_COUNT; i++) {
+        const char* css = kdInkCss(i);
+        const char* fb  = kdInkFbink(i);
+        CHECK(css && css[0] == '#' && strlen(css) == 4);
+        CHECK(fb && fb[0]);
+    }
+    // Every level distinct in both vocabularies — two that render the same are
+    // a setting the reader can change with no effect.
+    for (uint8_t a = 0; a < KINK_COUNT; a++)
+        for (uint8_t b = (uint8_t)(a + 1); b < KINK_COUNT; b++) {
+            CHECK(strcmp(kdInkCss(a),   kdInkCss(b))   != 0);
+            CHECK(strcmp(kdInkFbink(a), kdInkFbink(b)) != 0);
+        }
+    // Out of range is black in both, because a renderer handed a stored byte
+    // must not index past the palette.
+    CHECK_STREQ(kdInkCss(KINK_COUNT), "#000");
+    CHECK_STREQ(kdInkFbink(KINK_COUNT), "BLACK");
+    CHECK_STREQ(kdInkCss(200), "#000");
+    CHECK_STREQ(kdInkFbink(200), "BLACK");
+    // And black is the default a place arrives with.
+    KindleSlot fresh{};
+    CHECK_EQ((int)fresh.ink, (int)KINK_BLACK);
+}
+
+// ---------------------------------------------------------------------------
+// Breaking the grid into rows
+// ---------------------------------------------------------------------------
+// The rule that makes "no empty space" true whichever places got filled in.
+static void test_the_grid_rows_are_balanced_and_full() {
+    struct Case { int n; int rows; int a; int b; };
+    static const Case cases[] = {
+        { 1, 1, 1, 0 },
+        { 2, 1, 2, 0 },
+        { 3, 1, 3, 0 },
+        // Four is TWO AND TWO, not three and one. A lone cell taking a whole
+        // row, or a third of one with two thirds white, are both worse.
+        { 4, 2, 2, 2 },
+        { 5, 2, 3, 2 },
+        { 6, 2, 3, 3 },
+    };
+
+    for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
+        int rows[KZ_GRID_COUNT] = {0};
+        const int n = kdGridRowSplit(cases[c].n, rows, KZ_GRID_COUNT);
+        CHECK_EQ(n, cases[c].rows);
+        CHECK_EQ(rows[0], cases[c].a);
+        if (n > 1) CHECK_EQ(rows[1], cases[c].b);
+
+        // Every cell is placed exactly once, and no row is over the cap.
+        int total = 0;
+        for (int r = 0; r < n; r++) {
+            CHECK(rows[r] > 0);
+            CHECK(rows[r] <= KZ_GRID_COLS);
+            total += rows[r];
+        }
+        CHECK_EQ(total, cases[c].n);
+    }
+}
+
+static void test_the_row_split_refuses_a_bad_call() {
+    int rows[KZ_GRID_COUNT];
+    CHECK_EQ(kdGridRowSplit(0, rows, KZ_GRID_COUNT), 0);
+    CHECK_EQ(kdGridRowSplit(-1, rows, KZ_GRID_COUNT), 0);
+    CHECK_EQ(kdGridRowSplit(4, nullptr, KZ_GRID_COUNT), 0);
+    CHECK_EQ(kdGridRowSplit(4, rows, 0), 0);
+
+    // Asked for more rows than it may have, it fills what it has rather than
+    // writing past the caller's array.
+    int one[1];
+    const int n = kdGridRowSplit(6, one, 1);
+    CHECK_EQ(n, 1);
+    CHECK(one[0] > 0);
+}
+
+// The whole grid, end to end: what the reader configured, what is reporting,
+// and how it comes out as rows.
+static void test_a_full_grid_with_one_quiet_sensor() {
+    KindleZones k;
+    k.clear();
+    k.set(KZ_G1, "out", "pressure");
+    k.set(KZ_G2, "out", "dew_point");
+    k.set(KZ_G3, "out", "humidity");     // the BMP280 case
+    k.set(KZ_G4, "co2", "co2");
+    k.set(KZ_G5, "pm",  "pm25");
+
+    bool visible[KZ_COUNT];
+    for (int i = 0; i < KZ_COUNT; i++) visible[i] = true;
+    visible[KZ_G3] = false;
+
+    uint8_t used[KZ_GRID_COUNT];
+    const int n = kdGridUsed(k, visible, used);
+    CHECK_EQ(n, 4);
+    CHECK_EQ((int)used[0], (int)KZ_G1);
+    CHECK_EQ((int)used[1], (int)KZ_G2);
+    CHECK_EQ((int)used[2], (int)KZ_G4);   // closed up over the quiet one
+    CHECK_EQ((int)used[3], (int)KZ_G5);
+
+    int rows[KZ_GRID_COUNT];
+    CHECK_EQ(kdGridRowSplit(n, rows, KZ_GRID_COUNT), 2);
+    CHECK_EQ(rows[0], 2);
+    CHECK_EQ(rows[1], 2);
+}
+
 int main() {
     RUN(test_defaults_reproduce_the_old_dashboard);
     RUN(test_group_headings_are_overridable);
@@ -391,6 +507,10 @@ int main() {
     RUN(test_an_unconfigured_place_is_skipped_too);
     RUN(test_the_indoor_row_can_be_two);
     RUN(test_the_groups_do_not_bleed);
+    RUN(test_every_ink_level_names_a_colour);
+    RUN(test_the_grid_rows_are_balanced_and_full);
+    RUN(test_the_row_split_refuses_a_bad_call);
+    RUN(test_a_full_grid_with_one_quiet_sensor);
     RUN(test_used_refuses_a_bad_call);
     RUN(test_clamp_empties_a_half_filled_place);
     RUN(test_clamp_bounds_everything_a_renderer_reads);

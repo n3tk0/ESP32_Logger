@@ -867,10 +867,10 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
 }
 
 // ---------------------------------------------------------------------------
-// GET  /api/kindle/slots — what is in each of the nine places
+// GET  /api/kindle/slots — what is in each of the eleven places
 // POST /api/kindle/slots — replace the whole layout
 // ---------------------------------------------------------------------------
-// A WHOLE-LAYOUT REPLACE, not per-place edits. Nine short records is a small
+// A WHOLE-LAYOUT REPLACE, not per-place edits. Eleven short records is a small
 // payload, the editor holds all of them on screen at once anyway, and an
 // endpoint that wrote one place at a time could leave the device holding half
 // an edit — a headline pointing at a sensor the grid below it no longer shares.
@@ -893,6 +893,7 @@ static void handleKindleSlotsGet(AsyncWebServerRequest* req) {
         o["shown"]    = kdSlotLabel(s);          // what will actually be drawn
         o["flags"]    = s.flags;
         o["decimals"] = s.decimals;
+        o["ink"]      = s.ink;
     }
 
     // The layout itself, so the editor can lay its cards out the way the page
@@ -913,6 +914,16 @@ static void handleKindleSlotsGet(AsyncWebServerRequest* req) {
     doc["group_in"]   = kdGroupInLabel(zones);
     doc["group_out_set"] = zones.groupOut;      // "" = showing the built-in
     doc["group_in_set"]  = zones.groupIn;
+
+    // The grey levels, generated from the firmware's own enum so a level added
+    // later appears in the form without anyone remembering to add it twice.
+    JsonArray inks = doc["inks"].to<JsonArray>();
+    for (uint8_t i = 0; i < KINK_COUNT; i++) {
+        JsonObject o = inks.add<JsonObject>();
+        o["id"]  = i;
+        o["css"] = kdInkCss(i);
+    }
+    doc["grid_cols"] = KZ_GRID_COLS;
 
     doc["flag_bold"]  = KSLOTF_BOLD;
     doc["flag_unit"]  = KSLOTF_UNIT;
@@ -960,6 +971,7 @@ static void handleKindleSlotsPost(AsyncWebServerRequest* req, uint8_t* data, siz
         strncpy(s.label,    o["label"]  | "", sizeof(s.label)    - 1);
         s.decimals = (uint8_t)(o["decimals"] | (int)KSLOT_DECIMALS_AUTO);
         s.flags    = (uint8_t)(o["flags"]    | (int)KSLOTF_UNIT);
+        s.ink      = (uint8_t)(o["ink"]      | (int)KINK_BLACK);
         // Half-filled is empty, not an error: the editor sends every place on
         // every save, and the ones the reader left blank arrive as blanks.
         if (!s.used()) { s = KindleSlot{}; continue; }

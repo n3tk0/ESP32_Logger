@@ -253,18 +253,25 @@ var kdSensors = [];     // [{id, name, metrics: []}]
 var kdGroups  = { out: "", in: "" };        // the reader's headings, "" = built-in
 var kdGroupPh = { out: "OUTSIDE", in: "INSIDE" };   // what "" renders as
 var kdFlags   = { bold: 1, unit: 2, age: 4, trend: 8 };
+var kdInks    = [];     // [{id, css}] from the firmware's own enum
 var kdAutoDec = 255;
+
+// The grey levels, in the firmware's order. Named here rather than derived from
+// the hex, because "#777" is not a word anybody wants in a dropdown.
+var KD_INK_NAME = ["Black", "Dark grey", "Mid grey", "Light grey"];
 
 // What each place is FOR, in the reader's terms. The firmware sends the keys
 // and the roles; the wording is the form's own business.
 var KD_ZONE_TEXT = {
   hero: ["Headline", "The largest number on the page."],
   big:  ["Beside it", "Shares the headline's baseline, after a slash. Usually the humidity of the same air."],
-  g1:   ["Grid, top left", ""],
-  g2:   ["Grid, top right", ""],
-  g3:   ["Grid, bottom left", ""],
-  g4:   ["Grid, bottom right", ""],
-  in1:  ["Indoor, first", "Set larger than the other two."],
+  g1:   ["Grid, first", ""],
+  g2:   ["Grid, second", ""],
+  g3:   ["Grid, third", ""],
+  g4:   ["Grid, fourth", ""],
+  g5:   ["Grid, fifth", ""],
+  g6:   ["Grid, sixth", ""],
+  in1:  ["Indoor, first", "Set much larger than the other two, and drawn with no caption — the heading above it already names the room."],
   in2:  ["Indoor, second", ""],
   in3:  ["Indoor, third", "Leave empty for a row of two."]
 };
@@ -285,7 +292,7 @@ function kdMetricsFor(sensorId) {
 function kdZone(key) {
   if (!kdZones[key]) {
     kdZones[key] = { sensor: "", metric: "", label: "", shown: "",
-                     flags: kdFlags.unit, decimals: kdAutoDec };
+                     flags: kdFlags.unit, decimals: kdAutoDec, ink: 0 };
   }
   return kdZones[key];
 }
@@ -350,9 +357,12 @@ function kdZoneCard(key) {
         "<input class='input' maxlength='16' placeholder='" + esc(s.shown || "") + "' " +
           "value='" + esc(s.label || "") + "' data-change='kindleZoneEdit' " +
           "data-args='[\"" + key + "\",\"label\"]'></div>" +
-      "<div style='flex:0 0 120px'>" +
+      "<div style='flex:0 0 110px'>" +
         "<label class='field-label'>Decimals</label>" +
         kdDecimalSelect(key, s.decimals) + "</div>" +
+      "<div style='flex:0 0 130px'>" +
+        "<label class='field-label'>Ink</label>" +
+        kdInkSelect(key, s.ink | 0) + "</div>" +
     "</div>" +
     "<div style='display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;align-items:center'>" +
       kdFlagBox(key, kdFlags.unit,  "Show the unit") +
@@ -374,6 +384,20 @@ function kdDecimalSelect(key, dec) {
   for (var d = 0; d <= 3; d++) {
     html += "<option value='" + d + "'" + (dec === d ? " selected" : "") + ">" +
             d + "</option>";
+  }
+  return html + "</select>";
+}
+
+// How dark the value is drawn. Four levels rather than a colour picker: the
+// panel has sixteen real grey levels and the ones worth having are the ones far
+// enough apart to render solid, which is what the page's palette already is.
+function kdInkSelect(key, ink) {
+  var html = "<select class='input' data-change='kindleZoneEdit' " +
+             "data-args='[\"" + key + "\",\"ink\"]'>";
+  var n = kdInks.length ? kdInks.length : KD_INK_NAME.length;
+  for (var i = 0; i < n; i++) {
+    html += "<option value='" + i + "'" + (ink === i ? " selected" : "") + ">" +
+            esc(KD_INK_NAME[i] || ("Level " + i)) + "</option>";
   }
   return html + "</select>";
 }
@@ -425,12 +449,16 @@ function kdRenderSlots() {
 
   box.innerHTML =
     kdGroupBlock("out", "The left column",
-                 "The headline, the value beside it, and the two-by-two grid " +
-                 "under the 24-hour line. An empty place is skipped and the " +
-                 "grid closes up behind it.", outKeys) +
+                 "The headline, the value beside it, and the grid under the " +
+                 "24-hour line — up to three across and two deep. An empty " +
+                 "place is skipped and the grid closes up behind it; every " +
+                 "row then divides its own width by however many cells it " +
+                 "ended up with, so two is two halves rather than two thirds " +
+                 "and a gap.", outKeys) +
     kdGroupBlock("in", "The right column, under the clock",
-                 "One row of up to three. The first is set larger. Leave the " +
-                 "third empty for a row of two.", inKeys);
+                 "One row of up to three. The first is set much larger and " +
+                 "carries no caption; the other two sit on its bottom edge. " +
+                 "Leave the third empty for a row of two.", inKeys);
 
   if (window.Icons && Icons.swap) Icons.swap(box);
 }
@@ -455,9 +483,10 @@ function kindleZoneEdit(key, field, ev) {
   var s = kdZone(key);
   var v = kdEventValue(this, ev, "value");
   if (v === undefined) return;
-  if (field === "decimals") s.decimals = parseInt(v, 10);
-  else                      s[field] = v;
+  if (field === "decimals" || field === "ink") s[field] = parseInt(v, 10);
+  else                                        s[field] = v;
 
+  // Only the sensor changes what the other controls can offer.
   // Changing the sensor can invalidate the metric — a BME688's "aqi" means
   // nothing on a BMP280. Reset to the new sensor's first reading rather than
   // leaving a pairing that will never resolve.
@@ -482,7 +511,7 @@ function kindleZoneFlag(key, bit, ev) {
 
 function kindleZoneClear(key) {
   kdZones[key] = { sensor: "", metric: "", label: "", shown: "",
-                   flags: kdFlags.unit, decimals: kdAutoDec };
+                   flags: kdFlags.unit, decimals: kdAutoDec, ink: 0 };
   kdRenderSlots();
 }
 
@@ -499,6 +528,7 @@ function kindleSlotsLoad() {
       kdZones = d.zones || {};
       kdOrder = d.order || [];
       kdFlags = { bold: d.flag_bold, unit: d.flag_unit, age: d.flag_age, trend: d.flag_trend };
+      kdInks  = d.inks || [];
       kdAutoDec = d.auto_decimals;
       kdGroups  = { out: d.group_out_set || "", in: d.group_in_set || "" };
       kdGroupPh = { out: d.group_out || "OUTSIDE", in: d.group_in || "INSIDE" };
@@ -535,22 +565,24 @@ function kindleSlotsReset() {
   if (!out && kdSensors.length) out = kdSensors[0].id;
   if (!inn && kdSensors.length) inn = kdSensors[kdSensors.length > 1 ? 1 : 0].id;
 
-  function z(sensor, metric, flags) {
+  function z(sensor, metric, flags, ink) {
     return { sensor: sensor, metric: metric, label: "", shown: "",
-             flags: flags, decimals: kdAutoDec };
+             flags: flags, decimals: kdAutoDec, ink: ink || 0 };
   }
-  var none = z("", "", kdFlags.unit);
+  function none() { return z("", "", kdFlags.unit, 0); }
 
   kdZones = {
     hero: z(out, "temperature", kdFlags.bold | kdFlags.unit | kdFlags.age),
-    big:  z(out, "humidity",    kdFlags.unit),
+    big:  z(out, "humidity",    kdFlags.unit, 1),
     g1:   z(out, "pressure",    kdFlags.unit | kdFlags.trend),
     g2:   z(out, "dew_point",   kdFlags.unit),
-    g3:   none,
-    g4:   none,
+    g3:   none(),
+    g4:   none(),
+    g5:   none(),
+    g6:   none(),
     in1:  z(inn, "temperature", kdFlags.unit | kdFlags.age),
-    in2:  z(inn, "humidity",    kdFlags.unit),
-    in3:  z(inn, "aqi",         kdFlags.unit)
+    in2:  z(inn, "humidity",    kdFlags.unit, 1),
+    in3:  z(inn, "aqi",         kdFlags.unit, 1)
   };
   kdGroups = { out: "", in: "" };
   kdRenderSlots();

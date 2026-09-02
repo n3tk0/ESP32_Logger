@@ -153,10 +153,10 @@ with sync_playwright() as p:
     groups = pg.locator("#kd-slots > .card").count()
     check(groups == 2, "one block per column (%d)" % groups)
     cards = pg.locator("#kd-slots .card .card").count()
-    check(cards == 9, "a card for every place, empty ones included (%d)" % cards)
-    check(pg.locator("#kd-slots .badge:has-text('empty')").count() == 3,
-          "the three empty places are marked as empty")
-    check("6 / 9" in pg.locator("#kd-slot-count").inner_text(),
+    check(cards == 11, "a card for every place, empty ones included (%d)" % cards)
+    check(pg.locator("#kd-slots .badge:has-text('empty')").count() == 5,
+          "the five empty places are marked as empty")
+    check("6 / 11" in pg.locator("#kd-slot-count").inner_text(),
           "the count badge says how many places are filled")
 
     def card(n):
@@ -195,7 +195,7 @@ with sync_playwright() as p:
     before = pg.locator("#kd-slots .badge:has-text('empty')").count()
     card(2).locator('[data-click="kindleZoneClear"]').click()
     pg.wait_for_timeout(300)
-    check(pg.locator("#kd-slots .card .card").count() == 9,
+    check(pg.locator("#kd-slots .card .card").count() == 11,
           "emptying a place leaves its card where it was")
     check(pg.locator("#kd-slots .badge:has-text('empty')").count() == before + 1,
           "and marks it empty")
@@ -208,6 +208,23 @@ with sync_playwright() as p:
     new_metric = card(0).locator("select").nth(1).input_value()
     check(new_metric in ("temperature", "humidity", "pressure", "aqi"),
           "changing the sensor keeps a reading it actually publishes (%r)" % new_metric)
+
+    # ── Per-place ink ────────────────────────────────────────────────────────
+    # How dark a value is drawn is the reader's, per place. The selects are
+    # sensor, reading, decimals, ink — so ink is the last one on the card.
+    def ink_of(n):
+        return card(n).locator("select").last.input_value()
+
+    check(ink_of(1) == "2", "a place pushed into the mid grey round-trips (%s)" % ink_of(1))
+    check(ink_of(5) == "1", "and one in the dark grey (%s)" % ink_of(5))
+    check(ink_of(0) == "0", "while a place nobody touched is black")
+
+    # And it is local until Save, like everything else on this form.
+    card(0).locator("select").last.select_option("3")
+    pg.wait_for_timeout(300)
+    check(ink_of(0) == "3", "choosing an ink sticks")
+    check(pg.evaluate("kdZones.hero.ink") == 3,
+          "and reaches the working copy as a number, not a string")
 
     shot = os.environ.get("SCREENSHOT")
     if shot:

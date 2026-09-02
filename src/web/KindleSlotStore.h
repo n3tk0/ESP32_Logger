@@ -1,17 +1,17 @@
 // ============================================================================
-// src/web/KindleSlotStore.h — loading and saving what goes in the nine places
+// src/web/KindleSlotStore.h — loading and saving what goes in the eleven places
 //
 // A FILE, NOT config.bin, and the split is the one this codebase already makes
 // everywhere else: scalar settings — the face, the formats, the refresh
 // cadence — live in the binary struct, and configured *things* live in JSON
-// under /config/. Nine places of three short strings each is a configured
+// under /config/. Eleven places of three short strings each is a configured
 // thing.
 //
 // The practical difference is that it costs no migration. Every field added to
 // DeviceConfig changes sizeof() and puts every deployed device through
 // loadConfig()'s migration path, which is exactly the machinery that reset
 // everybody's configuration when KindleConfig grew by 33 bytes and the version
-// was not bumped. Nine places would have been another 450 bytes of it.
+// was not bumped. Eleven places would have been another 600 bytes of it.
 //
 // Crash-safety and quarantine follow ModuleRegistry: write to .new and rename,
 // finish an interrupted rename on the next boot, and move a file that will not
@@ -30,7 +30,7 @@
 #  define KINDLE_SLOTS_FILE "/config/kindle_slots.json"
 #endif
 
-/// Cap on the file we will parse. Nine places of three short strings comes to
+/// Cap on the file we will parse. Eleven places of three short strings comes to
 /// well under a kilobyte; four is room for formatting and future fields, and
 /// it stops a corrupted length making the parser ask for the heap.
 #ifndef KINDLE_SLOTS_MAX_BYTES

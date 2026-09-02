@@ -611,7 +611,7 @@ static void kdShellVarN(AsyncResponseStream* s, const char* fmt, int i, const ch
 }
 
 // ---------------------------------------------------------------------------
-// The nine places
+// The eleven places
 // ---------------------------------------------------------------------------
 /// One resolved place: the reading, formatted, with the label, unit and
 /// tendency it will be drawn with. Shared by both renderers so a value cannot
@@ -666,7 +666,7 @@ static unsigned kdAdvanceMille(const char* s) {
     return total;
 }
 
-/// Resolve all nine places against the live readings.
+/// Resolve all eleven places against the live readings.
 ///
 /// ONE CALL, USED BY BOTH RENDERERS. The FBInk page and the HTML one differ in
 /// how they DRAW a place and not at all in what is in it, so the visibility
@@ -794,7 +794,7 @@ static void kdSubLine(char* buf, size_t n, const KindleConfig& skin,
 // ---------------------------------------------------------------------------
 // The shell renderer's half
 // ---------------------------------------------------------------------------
-/// Emit the nine places for update_dash.sh.
+/// Emit the eleven places for update_dash.sh.
 ///
 /// The keys are named after the places rather than numbered, so the script says
 /// `$Z_HERO_VALUE` and a person reading it knows where that lands. GRID_ZONES
@@ -838,6 +838,11 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
 
         s->printf("Z_%s_BOLD=%d\n", up,
                   (zones.z[i].flags & KSLOTF_BOLD) ? 1 : 0);
+        // The colour NAME, not the level: the shell hands it straight to
+        // FBInk's -C, and translating a number there would be a second copy of
+        // a mapping that already lives in KindleSlots.h.
+        snprintf(key, sizeof(key), "Z_%s_INK", up);
+        kdShellVar(s, key, kdInkFbink(zones.z[i].ink));
 
         // HOW WIDE THE PIECES COME OUT, in thousandths of the type size they
         // are drawn at. The shell renderer needs them because a unit is set as
@@ -860,12 +865,26 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
 
     // The survivors, in order. An empty list is a group that draws nothing.
     uint8_t used[KZ_GRID_COUNT];
-    int n = kdGridUsed(zones, visible, used);
+    const int n = (skin.showFlags & KSHOW_GRID)
+                ? kdGridUsed(zones, visible, used) : 0;
     s->print("GRID_ZONES=\"");
     for (int i = 0; i < n; i++) {
         if (i) s->print(' ');
         for (const char* c = kdZoneKey(used[i]); *c; c++)
             s->print((char)((*c >= 'a' && *c <= 'z') ? *c - 32 : *c));
+    }
+    s->print("\"\n");
+
+    // How they break into rows. Worked out here rather than in the script for
+    // the reason the packing always was: the HTML page and the reader must not
+    // disagree about which cell is on which row, and a balancing rule written
+    // twice is a rule written differently.
+    int rows[KZ_GRID_COUNT];
+    const int nRows = kdGridRowSplit(n, rows, KZ_GRID_COUNT);
+    s->print("GRID_ROWS=\"");
+    for (int r = 0; r < nRows; r++) {
+        if (r) s->print(' ');
+        s->print(rows[r]);
     }
     s->print("\"\n");
 
@@ -890,6 +909,11 @@ static void appendValue(String& p, const KdResolved& r, const KindleSlot& sl,
     p += F("<span class=\"");
     p += cls;
     if (sl.flags & KSLOTF_BOLD) p += F(" val-b");
+    // How dark, per place. Black is the default and emits no class, so a page
+    // where nobody has touched this carries no extra markup at all.
+    if (sl.ink == KINK_DARK)       p += F(" ink-d");
+    else if (sl.ink == KINK_MID)   p += F(" ink-m");
+    else if (sl.ink == KINK_LIGHT) p += F(" ink-l");
     p += F("\">");
     if (!r.ok) {
         p += F("<span class=\"dim\">&mdash;</span></span>");
@@ -922,10 +946,13 @@ static void appendValue(String& p, const KdResolved& r, const KindleSlot& sl,
 /// A captioned cell: the label above, the value under it. The grid and the
 /// indoor row are the same shape at two sizes, so they are one function.
 static void appendCell(String& p, const KdResolved& r, const KindleSlot& sl,
-                       const char* valueClass) {
-    p += F("<div class=\"lab\">");
-    appendEscaped(p, r.ok ? r.label : kdSlotLabel(sl));
-    p += F("</div><div class=\"cv\">");
+                       const char* valueClass, bool caption = true) {
+    if (caption) {
+        p += F("<div class=\"lab\">");
+        appendEscaped(p, r.ok ? r.label : kdSlotLabel(sl));
+        p += F("</div>");
+    }
+    p += F("<div class=\"cv\">");
     appendValue(p, r, sl, valueClass);
     p += F("</div>");
 }
@@ -978,13 +1005,27 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now) {
     if (skin.showFlags & KSHOW_GRID) {
         uint8_t used[KZ_GRID_COUNT];
         const int n = kdGridUsed(zones, visible, used);
-        for (int i = 0; i < n; i += 2) {
-            p += F("<table class=\"grid\"><tr><td>");
-            appendCell(p, res[used[i]], zones.z[used[i]], "gv");
-            p += F("</td><td>");
-            if (i + 1 < n)
-                appendCell(p, res[used[i + 1]], zones.z[used[i + 1]], "gv");
-            p += F("</td></tr></table>");
+
+        int rows[KZ_GRID_COUNT];
+        const int nRows = kdGridRowSplit(n, rows, KZ_GRID_COUNT);
+
+        int at = 0;
+        for (int r = 0; r < nRows; r++) {
+            const int cols = rows[r];
+            // EACH ROW DIVIDES ITS OWN WIDTH BY ITS OWN COUNT. Two cells are
+            // two halves, not two of three thirds with the last one white —
+            // "no empty space" has to hold whichever places got filled in.
+            p += F("<table class=\"grid");
+            if (cols >= 3) p += F(" grid-3");    // the tighter type scale
+            p += F("\"><tr>");
+            for (int c = 0; c < cols && at < n; c++, at++) {
+                p += F("<td width=\"");
+                p += (int)(100 / cols);
+                p += F("%\">");
+                appendCell(p, res[used[at]], zones.z[used[at]], "gv");
+                p += F("</td>");
+            }
+            p += F("</tr></table>");
         }
     }
 
@@ -1032,13 +1073,19 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now) {
             // set larger, so equal columns crowd it against its neighbour while
             // leaving the small ones with space they do not need — "21.0°" at
             // forty pixels does not fit a third of half a page.
-            const int firstW = (n >= 3) ? 40 : (n == 2 ? 55 : 100);
+            const int firstW = (n >= 3) ? 42 : (n == 2 ? 58 : 100);
             for (int i = 0; i < n; i++) {
                 p += F("<td width=\"");
                 p += (i == 0) ? firstW : ((100 - firstW) / (n - 1));
                 p += F("%\">");
+                // THE FIRST FIELD CARRIES NO CAPTION and spends the line on
+                // type instead. The heading directly above it already says
+                // which room this is, and "TEMP" under it says nothing a
+                // degree sign has not already said. The other two keep theirs
+                // and sit on the bottom of the row, so all three values line
+                // up along one edge rather than along their tops.
                 appendCell(p, res[used[i]], zones.z[used[i]],
-                           i == 0 ? "iv iv-1" : "iv");
+                           i == 0 ? "iv iv-1" : "iv", i != 0);
                 p += F("</td>");
             }
             p += F("</tr></table>");
@@ -1216,7 +1263,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     kdShellVar(s, "LBL_WIND", KD_T("wind", "вятър"));
     kdShellVar(s, "LBL_TO", KD_T("to", "до"));
 
-    // ── The nine places ──
+    // ── The eleven places ──
     //
     // The configurable layout, emitted alongside the fixed OUT_*/IN_* keys
     // rather than instead of them. A Kindle running an older copy of
@@ -1332,8 +1379,8 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // ONE CAPTION STYLE FOR THE WHOLE PAGE. The group headings, the cell
     // captions and the section rules below all use it, so a reader who has
     // learnt what small tracked grey means on this page has learnt it once.
-    KD_S(".lab{font-size:");                   KD_N(12);
-    KD_S("px;letter-spacing:");                KD_N(4);
+    KD_S(".lab{font-size:");                   KD_N(10);
+    KD_S("px;letter-spacing:");                KD_N(3);
     KD_S("px;text-transform:uppercase;margin-bottom:"); KD_N(2);
     KD_S("px;color:#777;white-space:nowrap;overflow:hidden}");
 
@@ -1359,9 +1406,13 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S("px}");
 
     // The 24 h low-to-high and the age, on one line under the headline.
-    KD_S(".sub{font-size:");                   KD_N(15);
+    // The 24 h low-to-high and the age, on one line under the headline. Set in
+    // the page's mid grey rather than its dark one: it is context for the big
+    // number above it, not a reading in its own right, and at #444 it competed
+    // with the grid underneath. Switchable off entirely — see KSHOW_RANGE.
+    KD_S(".sub{font-size:");                   KD_N(14);
     KD_S("px;margin-top:");                    KD_N(4);
-    KD_S("px;line-height:1.45;color:#444;white-space:nowrap;overflow:hidden}");
+    KD_S("px;line-height:1.45;color:#777;white-space:nowrap;overflow:hidden}");
     KD_S(".dim{color:#777}");
 
     // ── The two-by-two grid, and the indoor row ─────────────────────────────
@@ -1380,21 +1431,38 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S(".cv{line-height:1.0;white-space:nowrap;overflow:hidden;letter-spacing:-");
     KD_N(1);
     KD_S("px}");
-    // One line box for the whole indoor row, so the larger first value and the
-    // smaller two beside it sit on ONE baseline rather than sharing a top edge
-    // and hanging at three different depths.
-    KD_S(".inrow .cv{line-height:");           KD_N(42);
+    // THE INDOOR ROW ALIGNS ALONG ITS BOTTOM, not its top. The first field has
+    // no caption and is half again as tall as the other two, so aligning tops
+    // would leave those two floating above a much larger number. The value is
+    // the last thing in every cell, so bottom alignment puts all three on one
+    // edge and pushes the two captions up into the space the big one does not
+    // use — which is the space its missing caption gave back.
+    KD_S(".inrow td{vertical-align:bottom}");
+    KD_S(".gv{font-size:");                    KD_N(31);
     KD_S("px}");
-    KD_S(".gv{font-size:");                    KD_N(32);
+    // Three across is a third of half a page, which "1008 hPa" with a tendency
+    // arrow after it does not fit at the two-across size. The row carries the
+    // class, so a page with three in one row and two in the next sets each row
+    // at the size its own width can hold.
+    KD_S(".grid-3 .gv{font-size:");            KD_N(26);
     KD_S("px}");
     KD_S(".iv{font-size:");                    KD_N(28);
     KD_S("px}");
     // The first indoor field is the one the reader looks at, so it is larger by
     // TYPE and not by width — the columns stay equal, which is what keeps the
     // row aligned whether it holds three fields or two.
-    KD_S(".iv-1{font-size:");                  KD_N(40);
+    // The first indoor field spends its caption's line on type instead: the
+    // heading above already says which room this is, so a "TEMP" under it says
+    // nothing the degree sign has not.
+    KD_S(".iv-1{font-size:");                  KD_N(52);
     KD_S("px}");
     KD_S(".val-b{font-weight:700}");
+
+    // How dark a value is drawn, per place. Black is the default and carries no
+    // class at all, so a page nobody has touched emits none of these.
+    KD_S(".ink-d{color:#444}");
+    KD_S(".ink-m{color:#777}");
+    KD_S(".ink-l{color:#aaa}");
 
     // A unit is a footnote to its number, not a second number.
     KD_S(".unit{font-size:0.42em;font-weight:400;color:#444;letter-spacing:0}");
@@ -1553,7 +1621,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // week strip at the foot, so the row was two lines of furniture above the
     // only two numbers the page exists to show. The top block is the masthead.
     //
-    // THE SAME NINE PLACES THE FBINK RENDERER DRAWS, resolved by the same call,
+    // THE SAME ELEVEN PLACES THE FBINK RENDERER DRAWS, resolved by the same call,
     // so "what is in this place" has one answer on this device rather than one
     // per screen.
     appendTopBlock(p, skin, now);

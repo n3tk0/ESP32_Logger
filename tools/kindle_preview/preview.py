@@ -211,9 +211,15 @@ LAB_TEMP  = 'TEMP'  if lang == 'en' else 'ТЕМП'
 LAB_TO    = 'to'    if lang == 'en' else 'до'
 LAB_AGE   = '3 min old' if lang == 'en' else '3 мин'
 
-# key: (caption, value, unit, tendency arrow)
-GRID   = [(LAB_PRESS, HERO['hpa'], 'hPa', '↘'), (LAB_DEW, '3.1', '°', '')]
-INDOOR = [(LAB_TEMP, '21.0', '°', ''), (LAB_HUM, '44', '%', ''), ('AQI', '42', '', '')]
+# (caption, value, unit, tendency arrow, ink class)
+# Three in the grid, which is what the third column is for: a ppm reading beside
+# the pressure and the dew point rather than instead of one of them.
+GRID   = [(LAB_PRESS, HERO['hpa'], 'hPa', '↘', ''),
+          (LAB_DEW, '3.1', '°', '', ''),
+          ('CO₂', '640', 'ppm', '', 'ink-d')]
+INDOOR = [(LAB_TEMP, '21.0', '°', '', ''),
+          (LAB_HUM, '44', '%', '', 'ink-d'),
+          ('AQI', '42', '', '', 'ink-d')]
 
 def unit_span(unit):
     """Degrees and per-cent set tight against the number; everything else after
@@ -224,23 +230,35 @@ def unit_span(unit):
         return '<span class="unit">%</span>'
     return '<span class="unit"> ' + unit + '</span>'
 
-def value(val, unit, arrow, cls, bold=False):
-    return ('<span class="' + cls + (' val-b' if bold else '') + '">' + val +
+def value(val, unit, arrow, cls, bold=False, ink=''):
+    return ('<span class="' + cls + (' val-b' if bold else '') +
+            ((' ' + ink) if ink else '') + '">' + val +
             (unit_span(unit) if unit else '') +
             ('<span class="tend">' + arrow + '</span>' if arrow else '') +
             '</span>')
 
-def cell(lab, val, unit, arrow, cls):
-    return ('<div class="lab">' + lab + '</div><div class="cv">' +
-            value(val, unit, arrow, cls) + '</div>')
+def cell(lab, val, unit, arrow, ink, cls, caption=True):
+    return (('<div class="lab">' + lab + '</div>' if caption else '') +
+            '<div class="cv">' + value(val, unit, arrow, cls, False, ink) + '</div>')
+
+def row_split(n, cols=3):
+    """Balanced, full rows — the same rule kdGridRowSplit() applies: the number
+    of rows comes from the cap, then the cells spread as evenly as they go."""
+    if n <= 0:
+        return []
+    rows = (n + cols - 1) // cols
+    base, extra = divmod(n, rows)
+    return [base + (1 if r < extra else 0) for r in range(rows)]
 
 def grid_rows():
-    out = ''
-    for i in range(0, len(GRID), 2):
-        out += '<table class="grid"><tr><td>' + cell(*GRID[i], 'gv') + '</td><td>'
-        if i + 1 < len(GRID):
-            out += cell(*GRID[i + 1], 'gv')
-        out += '</td></tr></table>'
+    out, at = '', 0
+    for cols in row_split(len(GRID)):
+        out += '<table class="grid' + (' grid-3' if cols >= 3 else '') + '"><tr>'
+        for _ in range(cols):
+            out += ('<td width="%d%%">' % (100 // cols) +
+                    cell(*GRID[at], 'gv') + '</td>')
+            at += 1
+        out += '</tr></table>'
     return out
 
 def indoor_row():
@@ -249,12 +267,14 @@ def indoor_row():
     n = len(INDOOR)
     # The first field gets more of the row because it is set larger — the same
     # split appendTopBlock() applies.
-    first = 40 if n >= 3 else (55 if n == 2 else 100)
+    first = 42 if n >= 3 else (58 if n == 2 else 100)
     tds = ''
-    for i, (lab, val, unit, arrow) in enumerate(INDOOR):
+    for i, (lab, val, unit, arrow, ink) in enumerate(INDOOR):
         w = first if i == 0 else (100 - first) // (n - 1)
+        # The first field carries no caption and spends the line on type.
         tds += ('<td width="%d%%">' % w +
-                cell(lab, val, unit, arrow, 'iv iv-1' if i == 0 else 'iv') + '</td>')
+                cell(lab, val, unit, arrow, ink,
+                     'iv iv-1' if i == 0 else 'iv', i != 0) + '</td>')
     return ('<div class="inrule"></div><div class="lab">' + S['ins'] + '</div>'
             '<table class="inrow"><tr>' + tds + '</tr></table>')
 

@@ -116,8 +116,9 @@
             Which figures are set bold. Nothing is, by default: the page's sizes
             already carry the hierarchy, and weight on top of them is for a
             shelf far enough away that size alone stops being enough. These
-            apply by size, to every reading of that size — to set one particular
-            reading bold, use its own <strong>B</strong> switch under
+            apply to a whole block at once — to set one particular reading bold,
+            or to change how dark it is drawn, use that place's own
+            <strong>Bold</strong> switch and <strong>Ink</strong> menu under
             <em>Readings on the dashboard</em> below.
           </p>
           <div class="grid grid-auto" id="kd-bold"></div>
@@ -262,25 +263,27 @@
         </div>
         <div class="card-body">
           <p class="hint">
-            The page has <strong>nine places</strong> and they are always in the
-            same spot at the same size. What goes in each one is yours.
+            The page has <strong>eleven places</strong> and they are always in
+            the same spot at the same size. What goes in each one is yours, and
+            so is how dark and how heavy it is drawn.
           </p>
           <pre class="hint" style="line-height:1.35;margin:6px 0 10px;overflow-x:auto">┌────────────────────────────┬──────────────────────┐
 │ heading                    │        17:40         │
 │                            │ ──────────────────── │
 │   HEADLINE / beside it     │ heading              │
-│   24 h low-to-high · age   │  first  second third │
-│                            │                      │
-│   grid 1        grid 2     │                      │
-│   grid 3        grid 4     │                      │
+│   24 h low-to-high · age   │           second  third
+│                            │  FIRST     44%     42│
+│   grid 1    grid 2   grid 3│                      │
+│   grid 4    grid 5   grid 6│                      │
 └────────────────────────────┴──────────────────────┘</pre>
           <p class="hint">
             An empty place is skipped and the ones after it close up — so a
             BMP280 outside simply has no humidity in the grid, rather than a
-            permanent dash. That is also how the indoor row becomes two fields
-            instead of three: leave the third empty.
+            permanent dash. Every grid row then divides its own width by
+            however many cells it ended up with, so two readings are two halves
+            rather than two thirds and a gap. The indoor row works the same
+            way: leave the third empty and two come back.
           </p>
-
           <div id="kd-slots"></div>
 
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
