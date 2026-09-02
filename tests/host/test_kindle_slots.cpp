@@ -147,8 +147,99 @@ static void test_an_absent_reading_leaves_no_gap() {
     // Pressure moves up beside temperature — it does not sit in the third
     // position with a hole where the humidity was.
     CHECK_EQ((int)p[1].row, 0);
-    CHECK_EQ((int)p[1].col, 4);
+    // Two survivors share the row rather than leaving the last third white:
+    // six twelfths each, so the pressure starts at the halfway mark.
+    CHECK_EQ((int)p[1].col, 6);
+    CHECK_EQ((int)p[0].units, 6);
+    CHECK_EQ((int)p[1].units, 6);
     CHECK_EQ(kdSlotsRowCount(p, n), 1);
+}
+
+// A row always ends flush against the right margin. The old hardwired design
+// used both columns fully all the way down; a flow that stops two twelfths
+// short on every other row reads as a missing value rather than as space.
+static void test_rows_end_flush() {
+    struct Case { uint8_t sizes[6]; int count; uint8_t firstRow; };
+    static const Case cases[] = {
+        { { KSLOT_MEDIUM, KSLOT_MEDIUM, 0, 0, 0, 0 }, 2, KSLOT_ROW_UNITS },
+        { { KSLOT_SMALL,  KSLOT_SMALL,  0, 0, 0, 0 }, 2, KSLOT_ROW_UNITS },
+        { { KSLOT_LARGE,  KSLOT_SMALL,  0, 0, 0, 0 }, 2, KSLOT_ROW_UNITS },
+        { { KSLOT_SMALL,  0, 0, 0, 0, 0 },            1, KSLOT_ROW_UNITS },
+        { { KSLOT_HERO,   KSLOT_MEDIUM, KSLOT_MEDIUM, KSLOT_LARGE,
+            KSLOT_MEDIUM, KSLOT_MEDIUM },             6,
+          (uint8_t)(KSLOT_ROW_UNITS - KSLOT_CLOCK_UNITS) },
+    };
+
+    for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
+        KindleSlotList l;
+        l.clear();
+        for (int i = 0; i < cases[c].count; i++)
+            l.add("s", "pm25", nullptr, cases[c].sizes[i]);
+
+        KdSlotPlacement p[KindleSlotList::CAP];
+        const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP,
+                                  cases[c].firstRow);
+        CHECK_EQ(n, cases[c].count);
+
+        for (int i = 0; i < n; ) {
+            int j = i, used = 0;
+            while (j < n && p[j].row == p[i].row) { used += p[j].units; j++; }
+            const int cap = (p[i].row == 0) ? cases[c].firstRow : KSLOT_ROW_UNITS;
+            CHECK_EQ(used, cap);                 // flush, neither short nor over
+            CHECK_EQ((int)p[i].col, 0);          // and still laid left to right
+            for (int k = i + 1; k < j; k++)
+                CHECK_EQ((int)p[k].col, (int)p[k - 1].col + (int)p[k - 1].units);
+            i = j;
+        }
+    }
+}
+
+// Two rows holding the same number of readings put their columns in the same
+// places, whatever sizes those readings are. This is the alignment down a page
+// that made the old hardwired design read as a page rather than as six values
+// scattered over one.
+static void test_rows_of_equal_count_share_their_columns() {
+    KindleSlotList l;
+    l.clear();
+    l.add("s", "humidity",    nullptr, KSLOT_MEDIUM);   // row 1: medium, medium
+    l.add("s", "pressure",    nullptr, KSLOT_MEDIUM);
+    l.add("s", "temperature", nullptr, KSLOT_LARGE);    // row 2: large, medium
+    l.add("s", "humidity",    nullptr, KSLOT_MEDIUM);
+
+    // Full-width rows on both, so the comparison is between two rows of the
+    // same capacity — row 0 shares with the clock and is narrower by design.
+    KdSlotPlacement p[KindleSlotList::CAP];
+    const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP);
+    CHECK_EQ(n, 4);
+
+    // Both pairs land two across.
+    CHECK_EQ((int)p[0].row, (int)p[1].row);
+    CHECK_EQ((int)p[2].row, (int)p[3].row);
+    CHECK((int)p[2].row > (int)p[0].row);
+
+    // The second column starts at the same twelfth on both, though one row
+    // holds a large and the other does not.
+    CHECK_EQ((int)p[1].col, (int)p[3].col);
+    CHECK_EQ((int)p[1].col, 6);
+}
+
+// A row's slots are never zero twelfths wide, however many of them there are.
+// A zero-width column is an invisible reading that still cost a list entry.
+static void test_no_column_is_zero_wide() {
+    for (uint8_t first = 1; first <= KSLOT_ROW_UNITS; first++) {
+        KindleSlotList l;
+        l.clear();
+        for (int i = 0; i < KindleSlotList::CAP; i++)
+            l.add("s", "pm25", nullptr, KSLOT_SMALL);
+
+        KdSlotPlacement p[KindleSlotList::CAP];
+        const int n = kdSlotsPack(l, nullptr, p, KindleSlotList::CAP, first);
+        for (int i = 0; i < n; i++) {
+            CHECK(p[i].units > 0);
+            CHECK((int)p[i].col + (int)p[i].units <=
+                  ((p[i].row == 0) ? (int)first : (int)KSLOT_ROW_UNITS));
+        }
+    }
 }
 
 // Packing must not reorder. A best-fit packer would fill the gap left by a
@@ -385,6 +476,9 @@ int main() {
     RUN(test_a_row_never_overflows);
     RUN(test_a_hero_owns_its_row);
     RUN(test_an_absent_reading_leaves_no_gap);
+    RUN(test_rows_end_flush);
+    RUN(test_rows_of_equal_count_share_their_columns);
+    RUN(test_no_column_is_zero_wide);
     RUN(test_packing_preserves_order);
     RUN(test_pack_respects_maxout_and_empty_input);
     RUN(test_every_size_divides_a_row);

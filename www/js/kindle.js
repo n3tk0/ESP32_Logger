@@ -15,15 +15,15 @@
 
 // Must match the KBOLD_* constants in src/core/Config.h.
 var KD_BOLD = [
-  [0x0001, "Outside temperature"],
-  [0x0002, "Outside humidity"],
-  [0x0004, "Pressure"],
+  [0x0001, "Hero reading"],
+  [0x0002, "Large readings"],
+  [0x0004, "Medium readings"],
   [0x0008, "Clock"],
-  [0x0010, "Inside temperature"],
-  [0x0020, "Inside humidity"],
+  [0x0010, "Small readings"],
+  [0x0020, "Units"],
   [0x0040, "Forecast"],
   [0x0080, "Week strip"],
-  [0x0100, "Section labels"]
+  [0x0100, "Labels"]
 ];
 
 // Must match the KSHOW_* constants in src/core/Config.h.

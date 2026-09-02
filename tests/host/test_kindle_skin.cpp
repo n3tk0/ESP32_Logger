@@ -131,14 +131,14 @@ static void test_custom_face_is_used_verbatim_or_not_at_all() {
 
 static void test_bold_zones_are_independent() {
     KindleConfig k = defaults();
-    k.boldZones = KBOLD_PRESSURE;
+    k.boldZones = KBOLD_SLOT_MEDIUM;
     Css css;
     kdSkinCss(css, k);
-    CHECK(css.has(".pres{font-weight:bold}"));
+    CHECK(css.has(".sl-m .val{font-weight:bold}"));
     // The neighbouring bits must not have come along: a mask bug here shows up
     // as a page where the wrong number is heavy, which reads as a design
     // choice rather than as a fault.
-    CHECK(!css.has(".big{font-weight"));
+    CHECK(!css.has(".sl-l .val{font-weight"));
     CHECK(!css.has(".clock{font-weight"));
 
     KindleConfig all = defaults();

@@ -109,15 +109,15 @@ inline void kdSkinCss(StringT& out, const KindleConfig& k) {
     // One rule per zone rather than one long selector list, because a browser
     // that chokes on an unknown selector drops the rule it is in and no more.
     #define KD_BOLD(bit, sel) if (k.boldZones & (bit)) { out += sel; out += "{font-weight:bold}"; }
-    KD_BOLD(KBOLD_OUT_TEMP, ".big")
-    KD_BOLD(KBOLD_OUT_HUM,  ".hum-o")
-    KD_BOLD(KBOLD_PRESSURE, ".pres")
-    KD_BOLD(KBOLD_CLOCK,    ".clock")
-    KD_BOLD(KBOLD_IN_TEMP,  ".in-t")
-    KD_BOLD(KBOLD_IN_HUM,   ".hum-i")
-    KD_BOLD(KBOLD_FORECAST, ".fc-t,.per-t")
-    KD_BOLD(KBOLD_WEEK,     ".wd-d")
-    KD_BOLD(KBOLD_LABELS,   ".lab,.sec,.per-l,.wd-n")
+    KD_BOLD(KBOLD_SLOT_HERO,   ".sl-h .val")
+    KD_BOLD(KBOLD_SLOT_LARGE,  ".sl-l .val")
+    KD_BOLD(KBOLD_SLOT_MEDIUM, ".sl-m .val")
+    KD_BOLD(KBOLD_CLOCK,       ".clock")
+    KD_BOLD(KBOLD_SLOT_SMALL,  ".sl-s .val")
+    KD_BOLD(KBOLD_UNITS,       ".slot .unit")
+    KD_BOLD(KBOLD_FORECAST,    ".fc-t,.per-t")
+    KD_BOLD(KBOLD_WEEK,        ".wd-d")
+    KD_BOLD(KBOLD_LABELS,      ".lab,.lab-i,.sec,.per-l,.wd-n")
     #undef KD_BOLD
 
     // ── The clock ───────────────────────────────────────────────────────────

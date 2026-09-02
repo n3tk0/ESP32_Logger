@@ -158,15 +158,27 @@ enum KindlePressureUnit : uint8_t {
 // Which figures are set bold. A bitmask and not a single "emphasis" setting
 // because the answer depends on the shelf: a page read across a room wants the
 // outdoor temperature heavy, one read at a desk may want nothing heavy at all.
-constexpr uint16_t KBOLD_OUT_TEMP  = 0x0001;
-constexpr uint16_t KBOLD_OUT_HUM   = 0x0002;
-constexpr uint16_t KBOLD_PRESSURE  = 0x0004;
-constexpr uint16_t KBOLD_CLOCK     = 0x0008;
-constexpr uint16_t KBOLD_IN_TEMP   = 0x0010;
-constexpr uint16_t KBOLD_IN_HUM    = 0x0020;
-constexpr uint16_t KBOLD_FORECAST  = 0x0040;
-constexpr uint16_t KBOLD_WEEK      = 0x0080;
-constexpr uint16_t KBOLD_LABELS    = 0x0100;
+//
+// FIVE OF THESE USED TO NAME A READING — the outdoor temperature, the outdoor
+// humidity, the pressure, and the inside pair. There is no such thing any more:
+// the dashboard is a list of slots the reader arranges, so "the pressure" is
+// wherever they put it, and a bit that meant one hardwired position had nothing
+// left to point at. The bits still exist, at the same values so no stored
+// configuration changes meaning by more than it has to, and they now name the
+// four SIZES in the flow plus the units — which is the same question ("what on
+// this page is heavy?") asked in the vocabulary the page now has.
+//
+// Emphasis on one particular reading did not go away with them; it moved to
+// where it belongs, as KSLOTF_BOLD on the slot itself.
+constexpr uint16_t KBOLD_SLOT_HERO   = 0x0001;
+constexpr uint16_t KBOLD_SLOT_LARGE  = 0x0002;
+constexpr uint16_t KBOLD_SLOT_MEDIUM = 0x0004;
+constexpr uint16_t KBOLD_CLOCK       = 0x0008;
+constexpr uint16_t KBOLD_SLOT_SMALL  = 0x0010;
+constexpr uint16_t KBOLD_UNITS       = 0x0020;
+constexpr uint16_t KBOLD_FORECAST    = 0x0040;
+constexpr uint16_t KBOLD_WEEK        = 0x0080;
+constexpr uint16_t KBOLD_LABELS      = 0x0100;
 
 // Which blocks are drawn. Every one of these defaults to on; they exist for
 // the reader who wants the page to be two numbers and nothing else.

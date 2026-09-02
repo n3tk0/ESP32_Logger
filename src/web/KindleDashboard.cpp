@@ -711,6 +711,19 @@ static void emitSlots(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
         s->printf("SLOT%d_UNITS=%u\n", k, (unsigned)place[k].units);
         s->printf("SLOT%d_BOLD=%d\n",  k, (sl.flags & KSLOTF_BOLD) ? 1 : 0);
 
+        // How many CHARACTERS the label is, which is not how many bytes.
+        //
+        // The shell renderer sets the label inline with the value now, so it
+        // has to know how far right the value starts, and it works that out
+        // from the label's length. POSIX ${#var} counts bytes: "ВЛАГА" is five
+        // letters and ten bytes, and a script trusting that would start the
+        // value a label's width too far right and push it off the column. The
+        // count is done here because this is the end that has the encoding.
+        unsigned glyphs = 0;
+        for (const char* c = res[k].label; c && *c; c++)
+            if ((*c & 0xC0) != 0x80) glyphs++;      // skip UTF-8 continuations
+        s->printf("SLOT%d_LABEL_LEN=%u\n", k, glyphs);
+
         // Age in minutes, and only when it was asked for and is real. A value
         // measured seconds ago and one measured yesterday look identical on an
         // e-ink panel that repaints every five minutes.
@@ -765,20 +778,52 @@ static void appendSlotRows(String& p, const KindleConfig& skin, uint32_t now,
         p += (int)((place[k].units * 100 + 6) / 12);   // rounded, sums to ~100
         p += F("%\">");
 
-        p += F("<div class=\"lab\">");
-        appendEscaped(p, res[k].label);
+        // THE LABEL SHARES THE VALUE'S LINE UNLESS IT CANNOT.
+        //
+        // A label on its own line is right for the hero — it is the masthead of
+        // the page and wants the space. Everywhere else it doubled the height of
+        // a row to caption a number that is three glyphs long, and six of those
+        // spread the page over an amount of white the design this replaced never
+        // had. "ВЛАГА 71%" on one line is what the old page did and it is what
+        // fits on a panel read from across a room.
+        const bool hero  = (sl.size == KSLOT_HERO);
         // The battery badge belongs beside the first reading, which is where it
-        // has always been — it warns about the node feeding this page.
-        if (k == 0 && (skin.showFlags & KSHOW_BATTERY) && batteryWarningActive())
-            appendBatteryBadge(p);
-        p += F("</div>");
+        // has always been — it warns about the node feeding this page. It is
+        // floated, so it needs a line of its own to float within; a slot that
+        // carries it keeps its label there rather than inline.
+        const bool badge = (k == 0 && (skin.showFlags & KSHOW_BATTERY)
+                                   && batteryWarningActive());
+
+        if (hero || badge) {
+            p += F("<div class=\"lab\">");
+            appendEscaped(p, res[k].label);
+            if (badge) appendBatteryBadge(p);
+            p += F("</div>");
+        }
 
         p += F("<div class=\"val");
         if (sl.flags & KSLOTF_BOLD) p += F(" val-b");
         p += F("\">");
+        if (!hero && !badge) {
+            p += F("<span class=\"lab-i\">");
+            appendEscaped(p, res[k].label);
+            p += F("</span> ");
+        }
         p += res[k].text;
         if (res[k].unit && *res[k].unit) {
-            p += F("<span class=\"unit\"> ");
+            // TWO UNITS SET TIGHT AGAINST THE NUMBER, and the rest with a space
+            // before them. "8.4 °" and "71 %" are not how either is written;
+            // "1008 hPa" is. The degree also rides high rather than sitting on
+            // the baseline, where at four tenths of the value's size it reads as
+            // a lower-case o — which is exactly what the page looked like the
+            // first time the slot flow drew it.
+            const bool deg   = strcmp(res[k].unit, "°") == 0;
+            const bool tight = deg || strcmp(res[k].unit, "%") == 0;
+
+            p += F("<span class=\"unit");
+            if (deg) p += F(" unit-d");
+            p += F("\">");
+            if (!tight) p += ' ';
             appendEscaped(p, res[k].unit);
             p += F("</span>");
         }
@@ -1129,10 +1174,40 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S(".slot{vertical-align:top;padding:0 ");  KD_N(6);
     KD_S("px 0 0}");
     KD_S(".slot .lab{margin-bottom:0}");
+    // The inline label — the one the non-hero slots carry on the value's own
+    // line. Tracked and grey like .lab so the page has one caption style, but
+    // sized per slot: a caption set relative to a 26 px value in em would come
+    // out at nine pixels, which on a panel read across a room is not a caption
+    // but a smudge.
+    //
+    // inline-block with a minimum width, so the numbers in a column start at
+    // the same x from row to row however long each caption is. Ragged value
+    // starts are most of what "scattered" looks like on a page of six readings.
+    // A MINIMUM and not a fixed width: a longer caption than the column was
+    // measured for pushes its own value right rather than being drawn over it.
+    KD_S(".slot .lab-i{font-weight:400;text-transform:uppercase;color:#777;"
+         "display:inline-block;vertical-align:baseline;letter-spacing:"); KD_N(2);
+    KD_S("px}");
+    KD_S(".sl-l .lab-i{font-size:");               KD_N(15);
+    KD_S("px;min-width:");                         KD_N(80);
+    KD_S("px}");
+    KD_S(".sl-m .lab-i{font-size:");               KD_N(13);
+    KD_S("px;min-width:");                         KD_N(70);
+    KD_S("px}");
+    KD_S(".sl-s .lab-i{font-size:");               KD_N(12);
+    KD_S("px;min-width:");                         KD_N(56);
+    KD_S("px}");
     KD_S(".slot .val{line-height:0.98;letter-spacing:-");  KD_N(1);
     KD_S("px;white-space:nowrap;overflow:hidden}");
     KD_S(".slot .val-b{font-weight:700}");
     KD_S(".slot .unit{font-size:0.42em;font-weight:400;color:#444}");
+    // The degree, set as the design has always set it: small, at the cap line
+    // rather than on the baseline. In em so that one rule serves all four slot
+    // sizes — a pixel offset tuned on the hero is wrong on a quarter-width
+    // reading. top is relative to the DEGREE's own size, which is why 0.38
+    // here is the same proportion the fixed 12 px on a 30 px glyph was.
+    KD_S(".slot .unit-d{font-size:0.34em;vertical-align:top;line-height:1;"
+         "position:relative;top:0.38em}");
     // The age rides on the value's baseline rather than taking a line of its
     // own. Six slots each spending a line on "3 min old" cost more of the
     // panel than the chart did, and the page has to fit 800 px without a
@@ -1293,6 +1368,35 @@ static void handleKindle(AsyncWebServerRequest* req) {
     appendSlotRows(p, skin, now, 0, 0);
 
     p += F("</td><td width=\"50%\" class=\"sep\">");
+
+    // The clock, over the half of row 0 the flow was told not to use. It is not
+    // a slot because it is not a reading, but KSLOT_CLOCK_UNITS is the space it
+    // takes, and this is what takes it.
+    //
+    // An e-ink panel on a shelf is read across a room, which is why the time is
+    // set at 96 px here and not as the 14 px of grey in a corner it started as.
+    if (now > 1000000000u) {
+        const time_t when_t = (time_t)now;
+        struct tm tmv;
+        if (localtime_r(&when_t, &tmv) != nullptr) {
+            char hm[12];
+            kdFmtTime(hm, sizeof(hm), tmv, skin.timeFormat);
+            p += F("<div class=\"clock\">"); p += hm; p += F("</div>");
+            // The one clock style that needs markup as well as a rule.
+            if (skin.clockStyle == KCLOCK_DATED) {
+                char dt[32];
+                kdFmtDate(dt, sizeof(dt), tmv, skin.dateFormat);
+                p += F("<div class=\"clock-d\">"); p += dt; p += F("</div>");
+            }
+        } else {
+            p += F("<div class=\"clock-x\">" KD_T("no time", "няма час") "</div>");
+        }
+    } else {
+        // Not "--:--": a plausible-looking blank clock invites the reader to
+        // wonder what time it is, where "clock not set" names the fault.
+        p += F("<div class=\"clock-x\">" KD_T("clock not set", "часът не е сверен") "</div>");
+    }
+
     p += F("</td></tr></table>");
 
     // Rows 1 and after, at the full width the clock does not share.

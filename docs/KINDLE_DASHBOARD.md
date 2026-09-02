@@ -10,9 +10,10 @@ Point the Kindle's experimental browser at `http://<collector-ip>/kindle`.
 
 Rendered at 600×800 CSS px through a greyscale filter, which is how every
 layout decision in this document was checked. It is the current page: hero row
-without a masthead, temperature paired with its humidity, three-hourly rules in
-the chart, the month above the week strip, and the two manual repaint links in
-the footer. The page comes to **796 of the 800 px** available.
+without a masthead, then the configurable readings — each captioned on its own
+line, rows sharing themselves equally so the columns line up — three-hourly
+rules in the chart, the month above the week strip, and the two manual repaint
+links in the footer. The page comes to **795 of the 800 px** available.
 
 The figures are synthetic. The **stylesheet is extracted from the `KD_S`/`KD_N`
 calls in `KindleDashboard.cpp`** at render time rather than kept as a copy, so
@@ -197,7 +198,7 @@ Load it on the reader and read the numbers off:
 
 Below 320 or above 2400 the build fails rather than rendering something that
 was never measured. All three values above are checked at the device's viewport
-before release: 796 of 810 at 600, 709 of 724 at 536, 1416 of 1448 at 1072, and
+before release: 795 of 810 at 600, 705 of 724 at 536, 1417 of 1448 at 1072, and
 no horizontal overflow at any of them.
 
 An earlier attempt at this got the chart wrong — the SVG kept its 600-px size
@@ -232,39 +233,52 @@ There is no masthead. The place name never changed and the date is carried by
 the week strip at the foot, so the row was two lines of furniture standing above
 the only two numbers the page exists to show. The hero row is the masthead.
 
-The right half is split about two-to-one:
-
-- **the clock**, at 96 px — an e-ink panel on a shelf is read from across a
-  room, and the time used to be 14 px of grey in a corner;
-- **inside temperature and humidity** below a hairline.
+Its right half is **the clock**, at 96 px — an e-ink panel on a shelf is read
+from across a room, and the time used to be 14 px of grey in a corner. The
+clock is not a reading and so is not a slot, but it does take up space:
+`KSLOT_CLOCK_UNITS` is the half of row 0 it occupies, and the flow is told not
+to use it. Its left half is the first slot in the list, which by default is the
+outdoor temperature.
 
 The inside 24-hour range went with the masthead. The dashed line on the chart
 already carries it, and it was the least-read figure on the page.
 
-### Temperature and humidity share a line
+### The readings below it
 
-`8.4° / 71%`, on one baseline, humidity at half the size. They are one
-measurement of one parcel of air at one instant, and a line break between them
-was putting a paragraph boundary through a single reading. The same pairing
-runs inside, at 40 px and 30 px.
+Everything under the hero row is the slot list, in the order the reader put it
+in, packed left to right and wrapped. Three rules shape how it looks, and all
+three exist because the design this replaced was denser than a naive flow:
 
-The slash forces a width check: `-12.4° / 100%` is the widest this line can
-get. A reading of four or more glyphs already drops to the smaller `.big4`
-face, and `.big4 .hum-o` brings the pair down with it — without that rule the
-humidity runs off the column in a hard frost. It is measured in the browser at
-the device's viewport, not estimated.
+- **Only the hero captions itself on a line of its own.** Every other size sets
+  its label inline with the value — `ВЛАГА 71%` — because a caption on its own
+  line doubles the height of a row to describe a number three glyphs long, and
+  six of those spread the page over an amount of white the old page never had.
+- **A row shares itself equally.** Two readings on a full-width row are six
+  twelfths each whatever their sizes. The sizes decide what *fits* on a row;
+  once that is settled, equal columns mean a row always ends flush at the right
+  margin and two rows with the same number of readings put their columns in the
+  same places. Width was never what expressed the hierarchy here — the type
+  size is, and that still comes from the slot.
+- **The inline label has a minimum width.** `AQI` and `НАЛЯГ` are not the same
+  length, and without a floor under the caption the numbers down a column each
+  started at a different x. A minimum and not a fixed width, so a longer label
+  than the column was measured for pushes its own value right rather than being
+  drawn over it.
 
-### Pressure has its own size
+Degrees and per-cent set tight against the number, everything else after a
+space: `8.4°`, `71%`, `1008 hPa`. The degree also rides at the cap line rather
+than on the baseline, where at four tenths of the value's size it reads as a
+lower-case o.
 
-34 px, on its own line, with the tendency underneath unchanged. The absolute
-figure is the one number on the page a reader compares against memory rather
-than against the page, and at 15 px it was set as a footnote to the humidity.
-
-The two columns are different shapes, so their numerals are aligned by a fixed
-box height on both (`.big`, `.clock`) plus a 12 px nudge on the clock, which has
-no label above it to push it down. `.clock`'s height also sets where the divider
-falls — two thirds down the cell the left column sizes. Getting this by eye is
-what made an earlier version look ragged; it is measured in the browser instead.
+The FBInk renderer in `kindle/update_dash.sh` follows the same three rules, from
+the same packing — `kdResolveSlots()` runs once and both renderers are handed
+its result, so the two cannot disagree about where a value goes. It cannot ask
+FBInk how wide it drew a label, so the value's x is an estimate from the label's
+length in characters (`SLOT<i>_LABEL_LEN`, counted on the collector, because
+`${#var}` in the shell counts bytes and "ВЛАГА" is five letters and ten of
+them) times `SLOT_LABEL_ADV` in the layout file. Being a few pixels out widens
+or narrows the gap after a caption, which is why an estimate is good enough
+here.
 
 ### The low-battery badge
 
@@ -288,7 +302,7 @@ Three decisions, all of them about the medium:
   cut out of a dark field.
 - **It floats.** `.bw` is `float:right`, not flex — the same reason the whole
   page lays out in tables. It also means the badge costs no height: the page
-  measures 796 px of the 800 budget with it and without it.
+  measures 795 px of the 800 budget with it and without it.
 
 Its geometry goes through `kdPx()` like everything else, so it scales with
 `KINDLE_PAGE_W` down to a Kindle 4's 536 px. The condition is
@@ -390,7 +404,7 @@ Each of the four fits in the 139 px the design fixed for that block, which is
 what keeps the hairline under the clock level with the outdoor column's text.
 Boxed takes its breathing room out of its own height, ruled puts its border
 inside its padding, and the dated style takes 27 px from the clock rather than
-adding them beneath it. The page measures **796 of the 800 budget in all four**,
+adding them beneath it. The page measures **795 of the 800 budget in all four**,
 with the hairline landing on the same pixel — measured in a browser through
 `preview.py`, which extracts the override arm from `KindleSkin.h` the same way
 it extracts the base sheet.
@@ -433,7 +447,7 @@ px and a 167 ppi Kindle 7 mapping them 1:1 both come to 0.15 mm per CSS px.
 > smallest thing worth aiming at". That was wrong twice over: the 44 in the
 > usual guidance is CSS px on a phone — roughly **9 mm** — and 4 mm is under
 > half of it. The button is reachable with an infrared touch panel but it is not
-> generous. The page has no spare height at 796 of 800 to grow it without taking
+> generous. The page has no spare height at 795 of 800 to grow it without taking
 > the difference from the chart, which is a trade worth making deliberately
 > rather than by accident.
 

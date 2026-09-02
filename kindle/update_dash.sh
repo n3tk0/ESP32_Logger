@@ -187,11 +187,15 @@ slot_val_size() {
 }
 
 # How tall a row is, given the largest slot in it.
+#
+# Only the hero spends a line on its label; every other size sets the label
+# inline with the value, so those rows are one line tall rather than two. That
+# is where the heights below came down from — see draw_slots().
 slot_row_height() {
     case "$1" in
-        0) echo "${SLOT_ROW_H_HERO:-118}"   ;;
-        1) echo "${SLOT_ROW_H_LARGE:-74}"   ;;
-        *) echo "${SLOT_ROW_H:-56}"         ;;
+        0) echo "${SLOT_ROW_H_HERO:-104}"   ;;
+        1) echo "${SLOT_ROW_H_LARGE:-52}"   ;;
+        *) echo "${SLOT_ROW_H:-40}"         ;;
     esac
 }
 
@@ -212,7 +216,7 @@ draw_slots() {
     done
 
     # Second pass: draw. y accumulates the heights of the rows above.
-    local x y w val lab unit bold age txt vsz rh
+    local x y w val lab unit bold age txt vsz rh lablen labsz labw vx vy curmax
     local area_x="${SLOT_X:-18}" area_y="${SLOT_Y:-20}" area_w="${SLOT_W:-564}"
     local last_row=-1 cur_y="$area_y"
 
@@ -221,6 +225,7 @@ draw_slots() {
         eval "row=\$SLOT${i}_ROW; col=\$SLOT${i}_COL; units=\$SLOT${i}_UNITS"
         eval "sz=\$SLOT${i}_SIZE; bold=\$SLOT${i}_BOLD; age=\$SLOT${i}_AGE_MIN"
         eval "lab=\$SLOT${i}_LABEL; val=\$SLOT${i}_VALUE; unit=\$SLOT${i}_UNIT"
+        eval "lablen=\${SLOT${i}_LABEL_LEN:-0}"
 
         # Advance y once per row, using the heights of the rows we have passed.
         while [ "$last_row" -lt "$row" ]; do
@@ -237,29 +242,80 @@ draw_slots() {
         y="$cur_y"
         vsz=$(slot_val_size "$sz")
 
-        # Label above, value below — the same order the page has always used,
-        # and the one that survives a value being wider than its label.
-        [ -n "$lab" ] && draw_text_reg "$x" "$y" "${SLOT_LABEL_SZ:-12}" "GRAY7" "$lab"
+        # A LIST LONGER THAN THE PAGE IS TRUNCATED, NOT SMEARED OVER THE CHART.
+        #
+        # The zones below the flow are at fixed coordinates, so a reader who
+        # adds a seventh and eighth reading eventually asks for more rows than
+        # there is room for. Text drawn over the chart heading on an e-ink panel
+        # is not "a bit crowded", it is two overlaid glyph sets that neither can
+        # be read; a reading that is simply missing is at least legible as a
+        # reading that is missing, and it is the reader's own list to shorten.
+        if [ $((y + vsz)) -gt "$((area_y + ${SLOT_AREA_H:-235}))" ]; then
+            break
+        fi
 
         txt="$val"
-        [ -n "$unit" ] && txt="$txt $unit"
+        # Degrees and per-cent set tight against the number, everything else
+        # after a space — "8.4 °" and "71 %" are not how either is written,
+        # "1008 hPa" is. The same rule the HTML renderer applies.
+        case "$unit" in
+            '')      ;;
+            '°'|'%') txt="$txt$unit"  ;;
+            *)       txt="$txt $unit" ;;
+        esac
         # Only when it is worth saying. A reading a minute old is current; one
         # an hour old is the thing the reader needs to know about.
         [ "${age:-0}" -gt 1 ] 2>/dev/null && txt="$txt  ${age}m"
 
-        if [ "$bold" = "1" ]; then
-            draw_text_bold "$x" "$((y + ${SLOT_LABEL_SZ:-12} + 4))" "$vsz" "BLACK" "$txt"
+        labsz="${SLOT_LABEL_SZ:-12}"
+
+        # THE LABEL SHARES THE VALUE'S LINE UNLESS THE SLOT IS THE HERO.
+        #
+        # The hero is the masthead and wants its caption above it. Everywhere
+        # else a label on its own line doubled the height of a row to caption a
+        # number three glyphs long, and six of those spread the page over an
+        # amount of white the design this replaced never had.
+        #
+        # FBInk cannot be asked how wide a string came out, so the value's x is
+        # an estimate: the collector counts the label's CHARACTERS (bytes would
+        # be wrong — "ВЛАГА" is five letters and ten bytes) and the advance below
+        # is the average width of an upper-case glyph as a percentage of its
+        # size, measured on the panel's serif. Being a few pixels out puts a
+        # slightly wider or narrower gap between the label and the number, which
+        # is why an estimate is good enough here and would not be for anything
+        # that had to line up.
+        if [ "$sz" = "0" ] || [ -z "$lab" ]; then
+            [ -n "$lab" ] && draw_text_reg "$x" "$y" "$labsz" "GRAY7" "$lab"
+            vx="$x"
+            vy=$((y + labsz + 4))
         else
-            draw_text_reg  "$x" "$((y + ${SLOT_LABEL_SZ:-12} + 4))" "$vsz" "BLACK" "$txt"
+            # Baselines, roughly: the small label drops so it sits on the
+            # number's foot rather than floating level with its cap.
+            draw_text_reg "$x" "$((y + vsz - labsz - 2))" "$labsz" "GRAY7" "$lab"
+            labw=$((lablen * labsz * ${SLOT_LABEL_ADV:-62} / 100))
+            # A floor, so the numbers down a column start at the same x whether
+            # their caption is "AQI" or "НАЛЯГ". Ragged value starts are most of
+            # what a scattered page looks like.
+            [ "$labw" -lt "${SLOT_LABEL_MINW:-40}" ] && labw="${SLOT_LABEL_MINW:-40}"
+            vx=$((x + labw + 8))
+            vy="$y"
         fi
+
+        if [ "$bold" = "1" ]; then
+            draw_text_bold "$vx" "$vy" "$vsz" "BLACK" "$txt"
+        else
+            draw_text_reg  "$vx" "$vy" "$vsz" "BLACK" "$txt"
+        fi
+
+        # Where the flow actually reaches. Tracked as it is drawn rather than
+        # worked out from the last row afterwards, so that a list truncated by
+        # the height guard above reports the bottom of what WAS drawn.
+        eval "curmax=\${ROWMAX_${row}:-2}"
+        rh=$(slot_row_height "$curmax")
+        SLOTS_BOTTOM=$((cur_y + rh))
 
         i=$((i + 1))
     done
-
-    # Where the caller should carry on drawing: below the last row.
-    eval "lastmax=\${ROWMAX_${last_row}:-2}"
-    rh=$(slot_row_height "$lastmax")
-    SLOTS_BOTTOM=$((cur_y + rh))
     return 0
 }
 

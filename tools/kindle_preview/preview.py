@@ -204,14 +204,17 @@ for i,(n,dnum) in enumerate(list(zip(S['wd'],[24,25,26,27,28,29,30]))):
 # than parsed out of it, and that is a deliberate limit of this tool: it draws
 # what the layout SHOULD look like, and the host tests are what prove the
 # firmware packs it that way.
+# The widths are the ones kdSlotsPack() ends up with after a row shares itself
+# equally among its slots: two readings on a full-width row are six twelfths
+# each whatever their sizes, so the rows end flush and the columns line up.
 SLOTS = [
     # label,           value,       unit,  size, units, row, bold, age
     (S['out'],         HERO['now'], '°',   'h',  6,     0,   True,  '3 ' + ('min old' if lang == 'en' else 'мин')),
-    (('HUM' if lang == 'en' else 'ВЛАГА'), HERO['hum'], '%', 'm', 4, 1, False, ''),   # noqa: E501
-    (('PRESS' if lang == 'en' else 'НАЛЯГ'), HERO['hpa'], 'hPa', 'm', 4, 1, False, ''),
+    (('HUM' if lang == 'en' else 'ВЛАГА'), HERO['hum'], '%', 'm', 6, 1, False, ''),   # noqa: E501
+    (('PRESS' if lang == 'en' else 'НАЛЯГ'), HERO['hpa'], 'hPa', 'm', 6, 1, False, ''),
     (S['ins'],         '21.0',      '°',   'l',  6,     2,   False, '1 ' + ('min old' if lang == 'en' else 'мин')),
-    (('HUM' if lang == 'en' else 'ВЛАГА'), '44',  '%',   'm',  4,     2,   False, ''),
-    ('AQI',            '42',        '',    'm',  4,     2,   False, ''),
+    (('HUM' if lang == 'en' else 'ВЛАГА'), '44',  '%',   'm',  6,     2,   False, ''),
+    ('AQI',            '42',        '',    'm',  12,    3,   False, ''),
 ]
 
 def slot_cells(row):
@@ -219,14 +222,29 @@ def slot_cells(row):
     for i, (lab, val, unit, sz, units, r, bold, age) in enumerate(SLOTS):
         if r != row:
             continue
+        # Only the hero captions itself on a line of its own; the rest set the
+        # label inline with the value, which is what appendSlotRows() does and
+        # is what keeps a row one line tall. The badge is the exception — it is
+        # floated, so it needs a line to float within.
         badge = battery_badge() if (WARN and i == 0) else ''
+        own = (sz == 'h') or bool(badge)
         out += ('<td class="slot sl-%s" width="%d%%">' % (sz, (units * 100 + 6) // 12) +
-                '<div class="lab">' + lab + badge + '</div>' +
-                '<div class="val' + (' val-b' if bold else '') + '">' + val +
-                ('<span class="unit"> ' + unit + '</span>' if unit else '') +
+                ('<div class="lab">' + lab + badge + '</div>' if own else '') +
+                '<div class="val' + (' val-b' if bold else '') + '">' +
+                ('' if own else '<span class="lab-i">' + lab + '</span> ') + val +
+                (unit_span(unit) if unit else '') +
                 ('<span class="age"> &middot; ' + age + '</span>' if age else '') +
                 '</div></td>')
     return out
+
+def unit_span(unit):
+    """Degrees and per-cent set tight against the number; everything else after
+    a space. The same rule appendSlotRows() applies."""
+    if unit == '°':
+        return '<span class="unit unit-d">°</span>'
+    if unit == '%':
+        return '<span class="unit">%</span>'
+    return '<span class="unit"> ' + unit + '</span>'
 
 def slot_row(row):
     cells = slot_cells(row)
@@ -238,7 +256,7 @@ body=('<table class="hero"><tr><td width="50%">'
  '<div class="clock">17:40</div>'
  +('<div class="clock-d">25 %s</div>'%S['mon'] if CLOCK=='dated' else '')+
  '</td></tr></table>'
- + slot_row(1) + slot_row(2)
+ + slot_row(1) + slot_row(2) + slot_row(3)
  + '<div class="rule"></div><div class="sec">'+S['h24']+'</div>'
  + '\n'.join(g) +
  '<table class="key"><tr><td>'

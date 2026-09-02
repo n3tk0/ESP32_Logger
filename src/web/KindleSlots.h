@@ -335,6 +335,47 @@ static inline int kdSlotsPack(const KindleSlotList& list, const bool* visible,
         col += units;
         if (col >= cap || needsOwnRow) { row++; col = 0; }
     }
+
+    // ── Even columns ────────────────────────────────────────────────────────
+    // THE SIZES DECIDE WHAT FITS ON A ROW. THE ROW THEN SHARES ITSELF EQUALLY.
+    //
+    // Two things were wrong with using the nominal widths as the final ones. A
+    // row of two mediums came to eight twelfths and left the last third white,
+    // so every other row stopped short of the right margin — on a page whose
+    // whole job is to be read at a glance that reads as a missing value rather
+    // than as space. And a row of a large and a medium came to six and four,
+    // which is a different column boundary from the row above it, so the
+    // numbers down a column started at a different x on every line. Between
+    // them that is most of what makes a page look scattered.
+    //
+    // Sharing the row equally fixes both: a row always ends flush, and two rows
+    // with the same number of readings put their columns in the same places.
+    // Nothing is lost by it, because width was never what expressed the
+    // hierarchy here — the type size is, and that still comes from the slot's
+    // own size. Width only ever said how much of the row to reserve, and the
+    // wrapping above has already used it for that.
+    //
+    // The remainder goes to the last slot rather than being spread by rounding:
+    // one column a twelfth wider than its neighbour is invisible, a row that
+    // stops a twelfth short is not.
+    for (int i = 0; i < n; ) {
+        int j = i;
+        while (j < n && out[j].row == out[i].row) j++;
+
+        const int inRow = j - i;
+        const int cap   = (out[i].row == 0) ? firstRowUnits : KSLOT_ROW_UNITS;
+        // Never zero: every slot is at least one twelfth and a row never holds
+        // more than it has room for, so inRow <= cap.
+        const int each  = cap / inRow;
+
+        int c = 0;
+        for (int k = i; k < j; k++) {
+            out[k].col   = (uint8_t)c;
+            out[k].units = (uint8_t)((k == j - 1) ? (cap - c) : each);
+            c += out[k].units;
+        }
+        i = j;
+    }
     return n;
 }
 
