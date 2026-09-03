@@ -363,6 +363,19 @@ jobs:
                 f'{len(got):,} bytes, identical to failsafe.html')
           EOF
 
+      - name: Drive the Kindle dashboard against a fake FBInk
+        # The dashboard's entire output is `fbink` invocations, and fbink is
+        # not installed here — so a flag that does not exist, a colour outside
+        # the palette or a rectangle refreshed at the wrong coordinates all
+        # look exactly like a working dashboard from CI. They looked like one
+        # on the device too: fbink exits non-zero and the script sends stderr
+        # to /dev/null, so the page just came up blank in places. This records
+        # every call and validates it against FBInk's own option table.
+        #
+        # `sh`, not bash: the Kindle runs busybox ash, and Ubuntu's /bin/sh is
+        # dash — the closest thing to it available here.
+        run: sh tests/kindle/drive_dash.sh
+
       - name: Verify the deploy tools see every board in platformio.ini
         # tools/pio_envs.py is where the flash tools get their board list. An
         # env its parser cannot see is a board the tool will not offer, and

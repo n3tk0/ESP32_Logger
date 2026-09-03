@@ -12,6 +12,13 @@ kindle/*.sh text eol=lf
 kindle/*.json text eol=lf
 kindle/*.xml text eol=lf
 kindle/layout/*.conf text eol=lf
+kindle/dash.conf.default text eol=lf
+
+# The same reasoning reaches the test: it parses tab-separated fbink argv under
+# `sh`, so a CR at the end of every recorded line would break every assertion —
+# and it is the only thing standing between the dashboard and a device nobody
+# can debug remotely.
+tests/kindle/*.sh text eol=lf
 
 # The pre-rendered icons are images. Marked explicitly so no future text rule
 # can reach them: a single CRLF substitution inside a BMP shifts the pixel data
