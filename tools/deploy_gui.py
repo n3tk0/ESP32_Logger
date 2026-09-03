@@ -172,6 +172,135 @@ def clamp_scale(scale: float) -> float:
     return max(SCALE_MIN, min(SCALE_MAX, round(scale, 2)))
 
 
+class Balloon:
+    """The hint that appears under the pointer, and the window it is NOT.
+
+    Every per-item explanation in this window used to be a grey line printed
+    under the thing it explained: a sentence under each of six preset buttons,
+    under each of twelve steps, under each of thirty features. All of it true,
+    all of it read once, and together it roughly doubled the height of three
+    panels — the step list and the feature list were twice as long as the
+    number of things in them.
+
+    So they hover now. The important part is what this is made of: **one
+    CTkLabel placed over the main window**, not a `Toplevel`. A tooltip window
+    is the same object as the dialogs this tool deliberately does not use — an
+    override-redirect child that the window manager places, can show behind
+    its parent, and on some systems steals focus from it. A placed label
+    cannot: it is inside the window, it is clipped by it, it takes no focus,
+    and it disappears the moment the pointer leaves.
+
+    The cost is that a hint cannot extend past the window edge, so `_show()`
+    clamps it and flips it above the widget when there is no room below.
+    """
+
+    SHOW_DELAY_MS = 350
+    #: Hiding is delayed too, and that is not a nicety. CustomTkinter forwards
+    #: bind() to the internal canvas AND the internal text label, so moving the
+    #: pointer across one button emits Leave/Enter pairs. Hiding immediately
+    #: made the hint flicker on every crossing.
+    HIDE_DELAY_MS = 120
+
+    def __init__(self, app: "DeployerGUI") -> None:
+        self.app = app
+        self.root = app.root
+        self._show_job = None
+        self._hide_job = None
+        # A frame around the label purely for the border: CTkLabel has no
+        # border of its own, and without one the hint dissolved into whatever
+        # card it happened to float over — it has to read as being ON TOP of
+        # the window, not part of it.
+        self._frame = ctk.CTkFrame(
+            self.root, corner_radius=6, border_width=1,
+            fg_color=("#ffffff", "#15181c"),
+            border_color=("#b9bfc9", "#565b63"))
+        self._label = ctk.CTkLabel(
+            self._frame, text="", font=app.fonts["small"],
+            justify="left", anchor="w",
+            text_color=("gray10", "gray90"),
+            wraplength=app.px(330))
+        self._label.pack(padx=11, pady=8)
+        # Scrolling moves the widget out from under a hint that is already up.
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.root.bind(seq, lambda _e: self.hide(), add="+")
+
+    # ── attaching ───────────────────────────────────────────────────────────
+    def attach(self, widget, text) -> None:
+        """Give `widget` a hint. `text` may be a string or a callable.
+
+        A callable is re-read on every hover, which is what the board and port
+        lines need: their hint is the detail their one visible line dropped,
+        and that detail changes with the selected environment.
+        """
+        if not text:
+            return
+        widget.bind("<Enter>", lambda _e: self._enter(widget, text), add="+")
+        widget.bind("<Leave>", lambda _e: self._leave(), add="+")
+        # A click means the pointer is busy doing something else.
+        widget.bind("<Button-1>", lambda _e: self.hide(), add="+")
+
+    # ── scheduling ──────────────────────────────────────────────────────────
+    def _enter(self, widget, text) -> None:
+        self._cancel(self._hide_job)
+        self._hide_job = None
+        self._cancel(self._show_job)
+        self._show_job = self.root.after(
+            self.SHOW_DELAY_MS, lambda: self._show(widget, text))
+
+    def _leave(self) -> None:
+        self._cancel(self._show_job)
+        self._show_job = None
+        self._cancel(self._hide_job)
+        self._hide_job = self.root.after(self.HIDE_DELAY_MS, self.hide)
+
+    def _cancel(self, job) -> None:
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+
+    # ── painting ────────────────────────────────────────────────────────────
+    def _show(self, widget, text) -> None:
+        self._show_job = None
+        body = text() if callable(text) else text
+        if not body:
+            return
+        try:
+            if not widget.winfo_ismapped():
+                return                      # its tab or panel went away
+            self._label.configure(text=body)
+            self._frame.update_idletasks()
+            w, h = self._frame.winfo_reqwidth(), self._frame.winfo_reqheight()
+            rx, ry = self.root.winfo_rootx(), self.root.winfo_rooty()
+            x = widget.winfo_rootx() - rx
+            below = widget.winfo_rooty() - ry + widget.winfo_height() + 4
+            x = max(6, min(x, self.root.winfo_width() - w - 6))
+            y = below
+            if y + h > self.root.winfo_height() - 6:
+                y = max(6, widget.winfo_rooty() - ry - h - 4)
+            self._frame.place(x=x, y=y)
+            self._frame.lift()
+        except Exception:
+            self.hide()
+
+    def hide(self) -> None:
+        self._cancel(self._show_job)
+        self._show_job = None
+        try:
+            self._frame.place_forget()
+        except Exception:
+            pass
+
+    @property
+    def visible(self) -> bool:
+        return bool(self._frame.winfo_manager())
+
+    @property
+    def text(self) -> str:
+        return self._label.cget("text")
+
+
 class DeployerGUI:
     def __init__(self, root: ctk.CTk):
         self.root = root
@@ -287,8 +416,13 @@ class DeployerGUI:
                      "info")
 
     # ── layout ──────────────────────────────────────────────────────────────
+    def _hint(self, widget, text) -> None:
+        """Attach a hover hint. See Balloon — it is a label, not a window."""
+        self.balloon.attach(widget, text)
+
     def _build_ui(self) -> None:
         """Header, status bar, then sidebar + tabs in what is left."""
+        self.balloon = Balloon(self)
         self._build_header()
         # Packed before the body so a long status message can never push the
         # bar off the bottom of the window.
@@ -392,17 +526,19 @@ class DeployerGUI:
         self._build_job_card(self.sidebar)
         self._build_run_card(pinned)
 
-    def _card(self, parent, title: str, subtitle: str = "") -> ctk.CTkFrame:
-        """A titled block in the sidebar. Returns the frame to fill."""
+    def _card(self, parent, title: str, hint: str = "") -> ctk.CTkFrame:
+        """A titled block in the sidebar. Returns the frame to fill.
+
+        An explanation goes on the title as a hover hint rather than under it
+        as a paragraph — see Balloon. The ⓘ is there so the hint can be found
+        by someone who is not already hovering it.
+        """
         card = ctk.CTkFrame(parent)
         card.pack(fill="x", padx=4, pady=(0, 12))
-        ctk.CTkLabel(card, text=title, font=self.fonts["h2"], anchor="w",
-                     justify="left").pack(fill="x", padx=14, pady=(12, 0))
-        if subtitle:
-            ctk.CTkLabel(card, text=subtitle, font=self.fonts["small"],
-                         text_color=COLORS["muted"], anchor="w",
-                         justify="left", wraplength=self.px(300)
-                         ).pack(fill="x", padx=14, pady=(2, 0))
+        head = ctk.CTkLabel(card, text=f"{title}  ⓘ" if hint else title,
+                            font=self.fonts["h2"], anchor="w", justify="left")
+        head.pack(fill="x", padx=14, pady=(12, 0))
+        self._hint(head, hint)
         inner = ctk.CTkFrame(card, fg_color="transparent")
         inner.pack(fill="x", padx=14, pady=(8, 14))
         return inner
@@ -413,7 +549,11 @@ class DeployerGUI:
         Free text let a nonexistent env through to pio, which failed minutes
         later with a message that did not say what was wrong.
         """
-        inner = self._card(parent, "1 · Board")
+        inner = self._card(
+            parent, "1 · Board",
+            "The environments in platformio.ini. Everything else — chip, "
+            "upload speed, partition table, the USB IDs the port scan matches "
+            "on — follows from this one choice, so nothing else needs typing.")
 
         names = env_names() or [detect_env()]
         current = self.cfg.get("env") or detect_env()
@@ -434,6 +574,9 @@ class DeployerGUI:
             text_color=COLORS["muted"], wraplength=self.px(300),
             anchor="w", justify="left")
         self.board_label.pack(fill="x", pady=(6, 0))
+        # One line on screen — board and chip — with flash size, partition
+        # table and where the speeds come from behind it.
+        self._hint(self.board_label, self._board_detail)
 
     def _build_port_card(self, parent) -> None:
         """Which USB port, as a list you pick from.
@@ -443,7 +586,12 @@ class DeployerGUI:
         is still editable, so a port no scan can see (a network bridge, a
         symlink) can be typed as before.
         """
-        inner = self._card(parent, "2 · Port")
+        inner = self._card(
+            parent, "2 · Port",
+            "Ranked by the selected board's own USB VID:PID, best match "
+            "first (★). Non-USB ports (COM1, /dev/ttyS0) are never listed — "
+            "no board sits behind one. The field is editable, for a port no "
+            "scan can see.")
 
         self.port_box = self._sz(ctk.CTkComboBox(
             inner, values=[AUTO_PORT], font=self.fonts["body"],
@@ -464,6 +612,8 @@ class DeployerGUI:
             text_color=COLORS["muted"], wraplength=self.px(300),
             anchor="w", justify="left")
         self.port_note.pack(fill="x", pady=(6, 0))
+        self._port_note_detail = ""
+        self._hint(self.port_note, lambda: self._port_note_detail)
         self._refresh_ports(announce=False)
 
     def _build_job_card(self, parent) -> None:
@@ -475,21 +625,32 @@ class DeployerGUI:
         the step catalogue. The individual steps are still one click away, and
         ticking them still works exactly as it did.
         """
-        inner = self._card(parent, "3 · What do you want to do?")
+        inner = self._card(
+            parent, "3 · What do you want to do?",
+            "Each button ticks a set of steps. Hover one to see what it is "
+            "for; unfold Customise steps to tick them yourself.")
 
-        for key, (pname, psteps) in PRESETS.items():
-            if not psteps and key == "N":
-                continue                    # "None" lives under Customise
-            holder = ctk.CTkFrame(inner, fg_color="transparent")
-            holder.pack(fill="x", pady=(0, 8))
-            self._sz(ctk.CTkButton(
-                holder, text=pname, font=self.fonts["button"],
-                anchor="w", command=lambda s=psteps: self._apply_preset(s)), 40
-                ).pack(fill="x")
-            ctk.CTkLabel(holder, text=PRESET_BLURBS.get(key, ""),
-                         font=self.fonts["small"], text_color=COLORS["muted"],
-                         wraplength=self.px(300), anchor="w", justify="left"
-                         ).pack(fill="x", padx=(4, 0), pady=(2, 0))
+        # Two columns. One button per row was the only sensible arrangement
+        # while each carried a two-line caption; without them the captions are
+        # what set the width, and six full-width buttons is a column you
+        # scroll to reach the last two.
+        grid = ctk.CTkFrame(inner, fg_color="transparent")
+        grid.pack(fill="x")
+        grid.grid_columnconfigure((0, 1), weight=1, uniform="preset")
+
+        for i, (key, (pname, psteps)) in enumerate(
+                (k, v) for k, v in PRESETS.items() if v[1] or k != "N"):
+            steps_s = ", ".join(str(n) for n in psteps)
+            button = self._sz(ctk.CTkButton(
+                grid, text=pname, font=self.fonts["button"],
+                command=lambda s=psteps: self._apply_preset(s)), 40)
+            button.grid(row=i // 2, column=i % 2, sticky="ew",
+                        padx=(0, 4) if i % 2 == 0 else (4, 0), pady=3)
+            # What it is for, and which steps that means — the second half was
+            # never on screen at all, and is the question the first half raises.
+            self._hint(button, f"{PRESET_BLURBS.get(key, '')}\n\n"
+                               f"Steps {steps_s}:\n" +
+                       "\n".join(f"  {n}.  {step_parts(n)[0]}" for n in psteps))
 
         # ── Individual steps, folded away rather than removed ───────────────
         self._steps_open = bool(self.cfg.get("steps_panel_open", False))
@@ -523,16 +684,16 @@ class DeployerGUI:
                 title, detail = step_parts(n)
                 var = tk.BooleanVar(value=n in enabled_steps)
                 self.step_vars[n] = var
-                ctk.CTkCheckBox(
+                check = ctk.CTkCheckBox(
                     parent, text=f"{n}.  {title}", variable=var,
                     font=self.fonts["body"], checkbox_width=self.px(22),
                     checkbox_height=self.px(22),
-                    command=self._update_steps).pack(anchor="w", pady=(4, 0))
-                if detail:
-                    ctk.CTkLabel(parent, text=detail, font=self.fonts["small"],
-                                 text_color=COLORS["muted"], anchor="w",
-                                 justify="left", wraplength=self.px(280)
-                                 ).pack(anchor="w", padx=(self.px(34), 0))
+                    command=self._update_steps)
+                check.pack(anchor="w", pady=(3, 0))
+                # The command it runs, on hover. Printed under every step, it
+                # made a twelve-item list twenty-four lines long.
+                self._hint(check, f"Step {n} · {title}\n{detail}" if detail
+                                  else f"Step {n} · {title}")
 
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", pady=(10, 4))
@@ -756,16 +917,13 @@ class DeployerGUI:
 
         self._refresh_env_labels(sync_cdc=True)
 
-    def _settings_group(self, parent, title: str, subtitle: str = ""):
+    def _settings_group(self, parent, title: str, hint: str = ""):
         card = ctk.CTkFrame(parent)
-        card.pack(fill="x", pady=(0, 14))
-        ctk.CTkLabel(card, text=title, font=self.fonts["h2"], anchor="w"
-                     ).pack(fill="x", padx=16, pady=(14, 0))
-        if subtitle:
-            ctk.CTkLabel(card, text=subtitle, font=self.fonts["small"],
-                         text_color=COLORS["muted"], anchor="w",
-                         justify="left", wraplength=self.px(620)
-                         ).pack(fill="x", padx=16, pady=(4, 0))
+        card.pack(fill="x", pady=(0, 12))
+        head = ctk.CTkLabel(card, text=f"{title}  ⓘ" if hint else title,
+                            font=self.fonts["h2"], anchor="w")
+        head.pack(fill="x", padx=16, pady=(14, 0))
+        self._hint(head, hint)
         inner = ctk.CTkFrame(card, fg_color="transparent")
         inner.pack(fill="x", padx=16, pady=(10, 16))
         return inner
@@ -806,15 +964,15 @@ class DeployerGUI:
         inside a tab — three scrollbars deep, and the only way to read thirty
         features. It has the tab to itself now.
         """
-        ctk.CTkLabel(parent, text="Build features", font=self.fonts["h1"],
-                     anchor="w").pack(fill="x", pady=(4, 2))
-        ctk.CTkLabel(parent,
-                     text="Compiled in via PLATFORMIO_BUILD_FLAGS. No project "
-                          "file is edited, so an abandoned deploy leaves the "
-                          "checkout as it was.   •  marks the default set.",
-                     font=self.fonts["small"], text_color=COLORS["muted"],
-                     wraplength=self.px(640), anchor="w",
-                     justify="left").pack(fill="x", pady=(0, 8))
+        head = ctk.CTkLabel(parent, text="Build features  ⓘ",
+                            font=self.fonts["h1"], anchor="w")
+        head.pack(fill="x", pady=(4, 6))
+        self._hint(head,
+                   "Compiled in via PLATFORMIO_BUILD_FLAGS. No project file "
+                   "is edited, so an abandoned deploy leaves the checkout as "
+                   "it was.\n\nA • marks a feature a plain `pio run` would "
+                   "have given you; \"Default set\" restores exactly those.\n\n"
+                   "Hover any feature for what it is.")
 
         selected = set(m for m in (self.cfg.get("features") or []) if is_known(m))
 
@@ -862,17 +1020,16 @@ class DeployerGUI:
                     label = f"• {label}"
                 row = ctk.CTkFrame(gframe, fg_color="transparent")
                 row.pack(fill="x")
-                ctk.CTkCheckBox(
+                check = ctk.CTkCheckBox(
                     row, text=label, variable=var,
                     command=lambda m=f.macro: self._on_feature_toggle(m),
                     font=self.fonts["body"], checkbox_width=self.px(22),
-                    checkbox_height=self.px(22),
-                ).pack(anchor="w", padx=(24, 0), pady=(4, 0))
-                if f.summary:
-                    ctk.CTkLabel(row, text=f.summary, font=self.fonts["small"],
-                                 text_color=COLORS["muted"], anchor="w",
-                                 justify="left", wraplength=self.px(560)
-                                 ).pack(anchor="w", padx=(self.px(54), 0))
+                    checkbox_height=self.px(22))
+                check.pack(anchor="w", padx=(24, 0), pady=(3, 0))
+                # Thirty features, each with a line of description under it,
+                # is sixty lines to scroll past to reach the ESP-NOW key.
+                self._hint(check, f"{f.macro}\n{f.summary}" if f.summary
+                                  else f.macro)
                 self._feature_rows.append(
                     (f"{f.macro} {label} {f.summary or ''} {group}".lower(),
                      row, gframe))
@@ -952,8 +1109,17 @@ class DeployerGUI:
         different USB device, and borrowing the collector's port is the
         shortest path to flashing an ESP8266 image at an ESP32-C3.
         """
-        ctk.CTkLabel(parent, text="Node target", font=self.fonts["h2"],
-                     anchor="w").pack(fill="x", pady=(10, 4))
+        node_head = ctk.CTkLabel(parent, text="Node target  ⓘ",
+                                 font=self.fonts["h2"], anchor="w")
+        node_head.pack(fill="x", pady=(10, 4))
+        self._hint(node_head,
+                   "Steps 10, 11 and 12 build and flash this project. It gets "
+                   "its own env and its own port, because a node is a "
+                   "different board on a different USB device — borrowing the "
+                   "collector's port is the shortest path to flashing an "
+                   "ESP8266 image at an ESP32-C3.\n\nThe ESP-NOW key above "
+                   "travels with it, so the node and the collector hold the "
+                   "same 16 bytes without either being typed twice.")
 
         proj = node_project(self.cfg)
         labels = [p.label for p in NODE_PROJECTS.values()]
@@ -991,14 +1157,7 @@ class DeployerGUI:
         self.node_port_entry.bind(
             "<FocusOut>", lambda _: self._save_setting("node_port", self.node_port_entry))
 
-        ctk.CTkLabel(parent,
-                     text="Steps 10, 11 and 12 build and flash this project. "
-                          "The ESP-NOW key above travels with it, so the node "
-                          "and the collector hold the same 16 bytes without "
-                          "either being typed twice.",
-                     font=self.fonts["small"], text_color=COLORS["muted"],
-                     wraplength=self.px(640), anchor="w", justify="left"
-                     ).pack(fill="x", pady=(8, 14))
+        ctk.CTkLabel(parent, text="", font=self.fonts["small"]).pack(pady=(0, 6))
 
     def _build_wifi_tab(self) -> None:
         """WiFi provisioning, in a tab rather than a modal dialog.
@@ -1012,16 +1171,13 @@ class DeployerGUI:
         frame = ctk.CTkScrollableFrame(tab)
         frame.pack(fill="both", expand=True, padx=8, pady=8)
 
-        ctk.CTkLabel(frame, text="WiFi provisioning", font=self.fonts["h1"],
-                     anchor="w").pack(fill="x", pady=(4, 2))
-        ctk.CTkLabel(frame,
-                     text="Sends the credentials to a device already running "
-                          "this firmware, over the USB serial port selected on "
-                          "the left. Nothing is written to disk and nothing is "
-                          "recompiled.",
-                     font=self.fonts["small"], text_color=COLORS["muted"],
-                     wraplength=self.px(640), anchor="w",
-                     justify="left").pack(fill="x", pady=(0, 14))
+        head = ctk.CTkLabel(frame, text="WiFi provisioning  ⓘ",
+                            font=self.fonts["h1"], anchor="w")
+        head.pack(fill="x", pady=(4, 12))
+        self._hint(head,
+                   "Sends the credentials to a device already running this "
+                   "firmware, over the USB serial port selected on the left. "
+                   "Nothing is written to disk and nothing is recompiled.")
 
         ctk.CTkLabel(frame, text="Network name (SSID)", font=self.fonts["bodyb"],
                      anchor="w").pack(fill="x")
@@ -1077,10 +1233,16 @@ THE SHORT VERSION
   Changed the firmware?             "Quick flash".
   Changed only the web UI, device already on WiFi?  "HTTP deploy".
 
+HINTS ON HOVER
+  Rest the pointer on a job button, a step, a feature or any heading marked
+  ⓘ and a balloon says what it is. That is where the explanations went: as
+  printed lines they doubled the height of every list in this window.
+
 NO POP-UPS
-  This tool never opens a second window. Warnings, results and questions —
-  including the erase confirmation — appear in the status bar along the
-  bottom, with the buttons to answer them. If a step seems to be waiting,
+  This tool never opens a second window — the hint balloon included; it is a
+  label drawn inside this window, not a tooltip window. Warnings, results and
+  questions, the erase confirmation among them, appear in the status bar along
+  the bottom with the buttons to answer them. If a step seems to be waiting,
   look at the bottom of the window.
 
 READABILITY
@@ -1261,10 +1423,11 @@ REQUIREMENTS
         ESP8266 node instead of the collector.
         """
         if not HAS_PYSERIAL:
-            self.port_note.configure(
-                text="pyserial is not installed, so ports cannot be listed. "
-                     "Type the port by hand, or install it: pip install pyserial",
-                text_color=COLORS["warning"])
+            self._set_port_note(
+                "pyserial is missing — type the port by hand.", "warning",
+                "The pyserial package enumerates serial ports; without it "
+                "this list stays empty and nothing is auto-detected.\n\n"
+                "  pip install pyserial")
             if announce:
                 self._notify("pyserial is not installed — serial ports cannot "
                              "be listed. pip install pyserial", "warning")
@@ -1273,8 +1436,7 @@ REQUIREMENTS
         try:
             ranked = ports_for(self.cfg.get("env") or detect_env())
         except Exception as exc:
-            self.port_note.configure(text=f"Could not list ports: {exc}",
-                                     text_color=COLORS["error"])
+            self._set_port_note("Could not list ports.", "error", str(exc))
             return
 
         values = [AUTO_PORT] + [self._port_label(*r) for r in ranked]
@@ -1305,19 +1467,20 @@ REQUIREMENTS
 
         env = self.cfg.get("env") or detect_env()
         if not ranked:
-            self.port_note.configure(
-                text="No USB serial ports found. Non-USB ports (COM1, "
-                     "/dev/ttyS0) are not listed: no board sits behind one.",
-                text_color=COLORS["warning"])
+            self._set_port_note(
+                "No USB serial ports found.", "warning",
+                "Non-USB ports (COM1, /dev/ttyS0) are not listed: no board "
+                "sits behind one.\n\nCheck that the cable carries data — a "
+                "charge-only cable powers the board and enumerates nothing.")
             if announce:
                 self._notify("No USB serial ports found — check the cable and "
                              "that it is a data cable, not charge-only.",
                              "warning")
         else:
-            self.port_note.configure(
-                text=f"{len(ranked)} USB port(s) found; ★ marks a USB ID that "
-                     f"matches {env}.",
-                text_color=COLORS["muted"])
+            self._set_port_note(
+                f"{len(ranked)} port(s); ★ matches {env}.", "muted",
+                "\n".join(f"{'★ ' if m else '   '}{dev}  —  {desc}"
+                          for dev, desc, m in ranked))
             if announce:
                 self._notify(
                     f"{len(ranked)} port(s) found, {len(matches)} matching "
@@ -1325,6 +1488,28 @@ REQUIREMENTS
                                  if len(matches) == 1 else
                                  " Pick one from the list."),
                     "success" if matches else "info", seconds=8)
+
+    def _set_port_note(self, text: str, level: str, detail: str = "") -> None:
+        """One short line under the port box; the long version on hover."""
+        self.port_note.configure(text=text, text_color=COLORS[level])
+        self._port_note_detail = detail
+
+    def _board_detail(self) -> str:
+        """What the one-line board summary leaves out, for its hint."""
+        info = env_info(self.cfg.get("env", ""))
+        lines = [f"[env:{info.name}]",
+                 f"board       {info.board or 'unknown'}",
+                 f"chip        {info.chip}",
+                 f"flash       {info.flash_size or 'unknown — no board JSON'}",
+                 f"partitions  {info.partitions or 'platform default'}",
+                 f"filesystem  {info.filesystem or '-'}"]
+        try:
+            d = defaults_for(info.name)
+            lines += [f"upload      {d['baud']} (from {d['baud_src']})",
+                      f"monitor     {d['monitor_speed']} (from {d['monitor_src']})"]
+        except Exception:
+            pass
+        return "\n".join(lines)
 
     # ── environment ─────────────────────────────────────────────────────────
     def _on_env_change(self, name: str) -> None:
@@ -1351,10 +1536,9 @@ REQUIREMENTS
         info = env_info(self.cfg.get("env", ""))
         board = getattr(self, "board_label", None)
         if board is not None:
+            # One line, because the rest of it is one hover away.
             board.configure(
-                text=f"{info.board or 'unknown board'}\n{info.chip} · "
-                     f"{info.flash_size or 'flash ?'} · "
-                     f"{info.partitions or 'default partitions'}")
+                text=f"{info.board or 'unknown board'} · {info.chip}")
         usb = getattr(self, "usb_info_label", None)
         if usb is not None:
             pins = usb_pins(info.chip)

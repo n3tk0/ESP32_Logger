@@ -85,6 +85,34 @@ def _code_only(path: Path) -> str:
     return " ".join(kept)
 
 
+def _find_button(widget, text: str):
+    """The first CTkButton in the tree whose caption is `text`."""
+    try:
+        if isinstance(widget, ctk.CTkButton) and widget.cget("text") == text:
+            return widget
+    except Exception:
+        pass
+    for child in getattr(widget, "winfo_children", lambda: [])():
+        found = _find_button(child, text)
+        if found is not None:
+            return found
+    return None
+
+
+def _hint_of(app, kind: str, key: str) -> str:
+    """Rebuild the hint text the window attaches to a preset button.
+
+    Asserting on the STRING the window builds, rather than reaching into the
+    binding, keeps this readable — and the string is the whole point: the
+    printed line is gone, so what the hint says is now the only place the
+    sentence exists on screen.
+    """
+    steps = dc.PRESETS[key][1]
+    return (f"{dc.PRESET_BLURBS[key]}\n\nSteps "
+            f"{', '.join(str(n) for n in steps)}:\n" +
+            "\n".join(f"  {n}.  {dc.step_parts(n)[0]}" for n in steps))
+
+
 def _toplevels(root) -> list:
     """Every extra window the application has open, main window excluded."""
     return [w for w in root.winfo_children()
@@ -119,6 +147,43 @@ def run_window(app) -> None:
     app._apply_preset([])
     check(_toplevels(app.root) == [],
           "rescan, save, WiFi and an empty preset open no second window")
+
+    # ── The hover hints are a label, not a tooltip WINDOW ───────────────────
+    #
+    # The per-item explanations were printed under every preset, step and
+    # feature, which roughly doubled the height of three panels. They hover
+    # now — and the thing that appears has to be drawn INSIDE this window: a
+    # tooltip window is the same object as the dialogs above, an
+    # override-redirect child the window manager places, and it would put back
+    # exactly what the rest of this file asserts is gone.
+    balloon = app.balloon
+    check(not isinstance(balloon._frame, (tk.Toplevel, ctk.CTkToplevel)),
+          "the hint is a framed label, not a Toplevel")
+    check(str(balloon._frame.winfo_toplevel()) == str(app.root),
+          "and it belongs to the main window")
+
+    app.tab_view.set(g.TAB_RUN)
+    app.root.update()
+    button = _find_button(app.root, dc.PRESETS["Q"][0])
+    check(button is not None, f"the {dc.PRESETS['Q'][0]!r} button is findable")
+    if button is not None:
+        balloon._show(button, "hover text under test")
+        app.root.update()
+        check(balloon.visible, "a hint appears for the widget under the pointer")
+        check(_toplevels(app.root) == [], "and opens no window to do it")
+        x, y = balloon._frame.winfo_x(), balloon._frame.winfo_y()
+        check(0 <= x and 0 <= y, f"it is placed inside the window ({x},{y})")
+        balloon.hide()
+        app.root.update()
+        check(not balloon.visible, "and it goes away again")
+
+    # Every hint still SAYS what the printed line said, so nothing was lost
+    # with the pixels: the presets carry their blurb, the steps their command.
+    balloon._show(button, _hint_of(app, "preset", "Q"))
+    check("everyday" in balloon.text.lower() and "5, 6" in balloon.text,
+          f"the preset hint keeps its sentence and names its steps: "
+          f"{balloon.text.splitlines()[0][:44]!r}")
+    balloon.hide()
 
     # ── The type is readable, and follows the scale control ─────────────────
     #

@@ -68,6 +68,7 @@ a shorter menu and no error at all.
 - **`deploy_gui.py`** — Desktop window (CustomTkinter)
   - Board → port → job → **Run** down the left, always visible
   - Tabs for output, settings, build features, WiFi and help
+  - Per-item explanations on hover (a placed label, not a tooltip window)
   - **No pop-up windows at all** — messages and questions appear in the status
     bar at the bottom of the same window
   - Text scales from the header (A− / A+) and the choice is remembered
@@ -166,14 +167,30 @@ never scrolled off:
    (chip, upload speed, partition table, USB IDs) follows from the choice.
 2. **Port** — a list of the USB ports that exist, best match for the selected
    board first (★). Still typeable, for a port no scan can see.
-3. **What do you want to do?** — the presets, each with a sentence saying what
-   it is for. `▸ Customise steps` unfolds the twelve individual toggles.
+3. **What do you want to do?** — the presets, two to a row; hover one for what
+   it is for and the steps it ticks. `▸ Customise steps` unfolds the twelve
+   individual toggles.
 4. **Run** — the button, and under it the steps it is about to run, by name.
 
 On the right: **Run** (progress bar and log), **Settings** (device IP, upload
 and monitor baud, HTTP upload filter, USB CDC), **Build** (the feature list
 with a filter box, the ESP-NOW key, the node target), **WiFi** (provisioning)
 and **Help**.
+
+**Hints on hover.** Rest the pointer on a job button, a step, a feature, or
+any heading marked ⓘ, and a balloon says what it is — the preset's sentence
+and the steps it ticks, the command a step runs, what a sensor is and on which
+bus. Printed under each item, as they used to be, those lines roughly doubled
+the height of three panels: the twelve-step list was twenty-four lines long and
+the thirty-feature list sixty.
+
+The balloon is **a label placed inside the main window, not a tooltip
+window**. That distinction is the whole point: a tooltip is the same object as
+the dialogs below — an override-redirect child the window manager places, which
+can appear behind its parent and take focus from it. A placed label is clipped
+by the window, takes no focus, and vanishes when the pointer leaves. The cost
+is that it cannot extend past the window edge, so it clamps and flips above the
+widget when there is no room below.
 
 **No pop-up windows.** Everything the tool says lands in the status bar along
 the bottom or in the log, and everything it asks — the erase confirmation
@@ -182,7 +199,8 @@ dialog can open *behind* its parent under several Linux window managers and on
 an unfocused Windows app, and the erase confirmation did exactly that, leaving
 a deploy stopped on a question nobody could see. `tests/gui/drive_deploy_gui.py`
 asserts that no `messagebox`, `CTkToplevel`, `CTkInputDialog` or `grab_set`
-call exists in the file.
+call exists in the file, and that the hint is a `CTkLabel` belonging to the
+main window.
 
 **Readability.** Nothing in the window is smaller than 15 px (the old one used
 8–10 pt for exactly the labels carrying the warnings). `A −` / `A +` in the
@@ -242,9 +260,9 @@ Quick configurations for common workflows:
 | **Node flash** | 11,12 | The satellite node board, on its own port |
 | **All steps** | 1-9 | Everything including serial monitor |
 
-The GUI prints the same one-line explanation under each preset button, and the
-CLI's `[?]` screen lists them; both read `PRESET_BLURBS` in `deploy_core.py`,
-so there is one copy of the wording.
+The GUI shows the same one-line explanation when you hover a preset button, and
+the CLI's `[?]` screen lists them; both read `PRESET_BLURBS` in
+`deploy_core.py`, so there is one copy of the wording.
 
 ## Configuration
 
