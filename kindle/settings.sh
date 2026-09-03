@@ -27,7 +27,11 @@ SELF_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || SELF_DIR=$(dirname "$0")
 DASH_LIB_ONLY=1 . "$SELF_DIR/update_dash.sh"
 
 TMP="${DASH_TMP:-/tmp/dash}"
-SCAN_LIST="$TMP/collectors"
+# Beside dash.conf, NOT under /tmp/dash: stop.sh and the dashboard's own
+# cleanup() both `rm -rf` that directory, so a scan run before pressing Stop
+# left "Next collector" with nothing to step through — and a reboot cleared it
+# anyway, /tmp being a ramdisk. The list is as durable as the address it feeds.
+SCAN_LIST="${DASH_SCAN_LIST:-$SELF_DIR/collectors}"
 mkdir -p "$TMP" 2>/dev/null
 
 conf_init
@@ -42,6 +46,12 @@ have_fbink() { command -v fbink >/dev/null 2>&1; }
 # A running dashboard re-reads dash.conf every minute and repaints when it finds
 # this file, so a change applies — and the settings screen this script painted
 # over the page goes away — within one tick. Nothing has to be restarted.
+#
+# ALWAYS CALLED AFTER say_lines, never before. say_lines clears and flashes the
+# whole panel, which is a second or two of e-ink; with the flag already down,
+# a tick landing in that window would consume it, repaint the dashboard, and
+# then have the settings page painted on top of it with no flag left to undo
+# that — the page would sit there until the next full refresh, an hour later.
 ask_redraw() { : > "$TMP/redraw" 2>/dev/null; }
 
 say_lines() {
@@ -89,14 +99,21 @@ cmd_set() {
         *" $k "*) ;;
         *) echo "unknown setting: $k" >&2; return 1 ;;
     esac
+    # 08 is not a number the shell can divide by. Normalise before validating,
+    # so `set DATA_EVERY 05` stores 5 rather than a value that would break the
+    # loop the first time it came round.
+    case "$k" in
+        HOST) ;;
+        *) v=$(strip_zeros "$v") ;;
+    esac
     if ! conf_valid "$k" "$v"; then
         printf '%s is not a valid %s\n' "$v" "$k" | say_lines
         return 1
     fi
     eval "$k=\$v"
     conf_write || { echo "could not write $CONF" >&2; return 1; }
-    ask_redraw
     printf '%s = %s\n\nThe dashboard picks this up within a minute.\n' "$k" "$v" | say_lines
+    ask_redraw
 }
 
 # ── profiles ─────────────────────────────────────────────────────────────────
@@ -111,9 +128,9 @@ cmd_profile() {
         *) echo "profiles: saver, normal, fast" >&2; return 1 ;;
     esac
     conf_write || return 1
-    ask_redraw
     printf 'Refresh profile: %s\n\nclock %s min  data %s min\nchart %s min  forecast %s min\nfull screen %s min\n\nApplies within a minute.\n' \
         "$1" "$CLOCK_EVERY" "$DATA_EVERY" "$GRAPH_EVERY" "$FORECAST_EVERY" "$FULL_EVERY" | say_lines
+    ask_redraw
 }
 
 # ── finding the collector ────────────────────────────────────────────────────
@@ -173,9 +190,9 @@ cmd_find() {
     first=$(head -1 "$SCAN_LIST")
     HOST="$first"
     conf_write
-    ask_redraw
     printf 'Collector: %s\n\n%s host(s) answered. If this is the wrong\none, use Settings → Next collector.\n\nApplies within a minute.\n' \
         "$first" "$found" | say_lines
+    ask_redraw
 }
 
 cmd_next() {
@@ -199,8 +216,8 @@ cmd_next() {
     [ -n "$next" ] || return 1
     HOST="$next"
     conf_write
-    ask_redraw
     printf 'Collector: %s\n\nApplies within a minute.\n' "$next" | say_lines
+    ask_redraw
 }
 
 # ── reset ────────────────────────────────────────────────────────────────────
@@ -211,8 +228,8 @@ cmd_reset() {
         return 1
     fi
     conf_load
-    ask_redraw
     printf 'Settings reset to defaults.\n\nCollector: %s\n\nApplies within a minute.\n' "$HOST" | say_lines
+    ask_redraw
 }
 
 # ── Dispatch ─────────────────────────────────────────────────────────────────

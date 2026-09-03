@@ -110,6 +110,17 @@ settings screen you were just looking at gives way to the page again by itself.
 | `CLOCK_FLASH_EVERY` | `1` | Flash the clock zone every N clock updates (0 = never) |
 | `SENSOR_FLASH_EVERY` | `0` | Flash the readings zone every N sensor updates (0 = never) |
 
+`Find collector` writes the addresses that answered to `collectors`, beside
+`dash.conf` — not under `/tmp`, which Stop deletes and a reboot clears — so
+**Next collector** still works the next time you come back to it.
+
+### When the collector cannot be reached
+
+The readings block is replaced by the address it tried and how to change it,
+and the clock keeps running underneath. The chart and the forecast are left
+alone: a page with yesterday's chart and a reason on it beats a blank one.
+Every data tier retries, and the first success draws the whole page again.
+
 The forecast interval is the Kindle's **redraw** cadence. The collector fetches
 from the weather API on its own schedule — WebUI → Settings → Forecast → *Fetch
 interval*, 10–360 min — so setting this one shorter than that just redraws the

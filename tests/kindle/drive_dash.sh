@@ -68,12 +68,18 @@ while [ $# -gt 0 ]; do
         *) shift ;;
     esac
 done
+# Both endpoints answer only for WGET_OK_HOST, so a test can point the
+# dashboard at an address that is not there and see what it does about it.
 case "$url" in
     *"$WGET_OK_HOST"*/kindle/data)
         if [ "$out" = "-" ] || [ -z "$out" ]; then cat "$FIXTURE"; else cp "$FIXTURE" "$out"; fi
         exit 0 ;;
-    */kindle/graph.bmp) [ -n "$out" ] && printf 'BM fake' > "$out"; exit 0 ;;
+    *"$WGET_OK_HOST"*/kindle/graph.bmp)
+        [ -n "$out" ] && printf 'BM fake' > "$out"
+        exit 0 ;;
 esac
+# wget -O truncates its target before it knows whether the transfer will work.
+[ -n "$out" ] && [ "$out" != "-" ] && : > "$out"
 exit 1
 EOF
 cat > "$BIN/lipc-set-prop" <<'EOF'
@@ -274,7 +280,10 @@ validate_colours() {
 }
 
 lines_of() { [ -s "$1" ] && wc -l < "$1" | tr -d ' ' || echo 0; }
-calls()    { grep -c . "$FBINK_LOG" 2>/dev/null || echo 0; }
+# grep -c always prints a count, including 0 — the `|| echo 0` this used to
+# carry appended a SECOND line on no-match, so "$n" became "0\n0" and every
+# numeric test on it was a syntax error rather than a comparison.
+calls()    { grep -c . "$FBINK_LOG" 2>/dev/null; }
 reset_log() { : > "$FBINK_LOG"; }
 
 echo "The Kindle dashboard, drawn against a fake FBInk:"
@@ -311,8 +320,32 @@ done < "$FBINK_LOG"
 check "$([ -z "$bad" ] && echo 0 || echo 1)" \
       "every colour is in the palette${bad:+ — $bad}"
 
+# ── The flags this dashboard must never use again ────────────────────────────
+#
+# The table above only says an option EXISTS. -p, -M and -L all exist — as
+# --padded, --halfway and --linecountcode — which is exactly why they were
+# used by mistake for pixel coordinates, a partial refresh and a line, and
+# exactly why a syntax check alone would wave the regression straight through.
+# This is the list that catches it: what each one really means, and what to use
+# instead.
+deny_flag() {
+    # $1=flag $2=what it actually is / what to use
+    if grep -q "	$1	" "$FBINK_LOG" || grep -q "	$1$" "$FBINK_LOG"; then
+        check 1 "never $1 — $2"
+    else
+        check 0 "never $1 — $2"
+    fi
+}
+deny_flag "-p" "that is --padded, not pixel coordinates; -t left=/top= positions"
+deny_flag "-M" "that is --halfway, which centres text vertically"
+deny_flag "-L" "that is --linecountcode, which takes no argument; -k draws rules"
+deny_flag "-R" "no such option at all; -k top=,left=,width=,height= fills"
+deny_flag "-F" "that names a BUILT-IN font; -t regular=FILE takes a path"
+deny_flag "-x" "character columns, not pixels; -t left= is pixels"
+deny_flag "-y" "character rows, not pixels; -t top= is pixels"
+
 # Text: TrueType, at a pixel size, with the string after --
-tcalls=$(grep -c -- '-t	regular=' "$FBINK_LOG" || echo 0)
+tcalls=$(grep -c -- '-t	regular=' "$FBINK_LOG")
 check "$([ "$tcalls" -gt 10 ] && echo 0 || echo 1)" \
       "$tcalls strings are drawn with -t regular=…"
 check "$(grep -q -- '-t	regular=[^	]*px=' "$FBINK_LOG" && echo 0 || echo 1)" \
@@ -330,15 +363,23 @@ check "$([ -f "$fontfile" ] && echo 0 || echo 1)" \
 # ── 2. One refresh per zone, and the flash goes where it was asked ───────────
 reset_log
 redraw_clock "12:35" 1
-refreshes=$(grep -c -- '-s' "$FBINK_LOG" || echo 0)
+refreshes=$(grep -c -- '	-s	' "$FBINK_LOG")
 check "$([ "$refreshes" -eq 1 ] && echo 0 || echo 1)" \
       "a clock update refreshes once ($refreshes)"
 check "$(grep -q -- '-f	-s	top='"$Z_CLOCK_Y"',left='"$Z_CLOCK_X"',width='"$Z_CLOCK_W"',height='"$Z_CLOCK_H" "$FBINK_LOG" && echo 0 || echo 1)" \
       "and flashes exactly the clock rectangle"
 check "$(grep -q -- '-k	top='"$Z_CLOCK_Y" "$FBINK_LOG" && echo 0 || echo 1)" \
       "clearing the old time first, so a shorter one leaves nothing behind"
-check "$(grep -cq -- '-b' "$FBINK_LOG" && echo 0 || echo 1)" \
-      "and every draw before the refresh is -b (framebuffer only)"
+undeferred=0
+while IFS= read -r line; do
+    case "$line" in
+        *"	-t	"*|*"	-k	"*|*"	-g	"*) ;;   # a drawing call
+        *) continue ;;
+    esac
+    case "$line" in *"	-b	"*) ;; *) undeferred=$((undeferred + 1)) ;; esac
+done < "$FBINK_LOG"
+check "$undeferred" \
+      "every drawing call defers its refresh with -b ($undeferred without)"
 
 reset_log
 redraw_sensors "12:35" 0
@@ -346,7 +387,7 @@ check "$(grep -q -- '-s	top='"$Z_SENS_Y"',left='"$Z_SENS_X"',width='"$Z_SENS_W"'
       "a sensor update refreshes the readings rectangle"
 check "$(grep -q -- '-f	-s	top='"$Z_SENS_Y" "$FBINK_LOG" && echo 1 || echo 0)" \
       "without flashing it — a third of the screen going black every 5 min is not a fix"
-refreshes=$(grep -c -- '	-s	' "$FBINK_LOG" || echo 0)
+refreshes=$(grep -c -- '	-s	' "$FBINK_LOG")
 check "$([ "$refreshes" -le 1 ] && echo 0 || echo 1)" \
       "and refreshes once, not once per string ($refreshes)"
 
@@ -384,6 +425,34 @@ for res in 600x800 1072x1448; do
 done
 RES_W=600; RES_H=800; load_layout
 
+# ── 2b. The clock rectangle is cleared and flashed, so nothing else may live
+# in it ───────────────────────────────────────────────────────────────────────
+# The rule above the indoor row sat six pixels inside it: drawn by
+# draw_sensors_body, erased by draw_clock, on every sensor redraw and every
+# minute's clock tier.
+for res in 600x800 1072x1448; do
+    RES_W=${res%x*}; RES_H=${res#*x}
+    load_layout
+    check "$([ $((Z_CLOCK_Y + Z_CLOCK_H)) -le "${IN_RULE_Y:-99999}" ] && echo 0 || echo 1)" \
+          "$res: the clock rect ($Z_CLOCK_Y..$((Z_CLOCK_Y + Z_CLOCK_H))) stops above the indoor rule (${IN_RULE_Y:-none})"
+    check "$([ "$Z_CLOCK_H" -gt "${CL_SIZE:-0}" ] && echo 0 || echo 1)" \
+          "and is still taller than the digits in it (${CL_SIZE:-?} px)"
+done
+RES_W=600; RES_H=800; load_layout
+
+# White text on the inverted "today" cell has to be drawn WITHOUT a background
+# box, or FBInk's OT renderer fills that box white and the glyphs vanish.
+reset_log
+draw_forecast_body
+check "$(grep -q -- '-O	-C	WHITE' "$FBINK_LOG" && echo 0 || echo 1)" \
+      "white text is drawn bgless (-O), not as white-on-white"
+nobg=0
+while IFS= read -r line; do
+    case "$line" in *"	-t	"*) ;; *) continue ;; esac
+    case "$line" in *"	-O	"*) ;; *) nobg=$((nobg + 1)) ;; esac
+done < "$FBINK_LOG"
+check "$nobg" "and so is every other string ($nobg with a background box)"
+
 # ── 3. The payload is data, never a command ──────────────────────────────────
 check "$([ ! -f "$WORK/pwned" ] && echo 0 || echo 1)" \
       "a forecast summary containing a shell command did not run it"
@@ -392,6 +461,63 @@ case "$FC_SUMMARY" in
     *) got=1 ;;
 esac
 check "$got" "and it survived as text: $(printf '%.28s…' "$FC_SUMMARY")"
+
+# ── 3b. The payload may not choose which variables it sets ───────────────────
+#
+# "A plain variable name" is not a safe thing to let the network pick: PATH is
+# one, and so are TMP, DASH_DIR and SLEEP_PID. Verified against the real
+# parser, not against a promise in a comment.
+cat > "$DASH_TMP/hostile.txt" <<'EOF'
+PATH=/pwned
+TMP=/mnt/us
+DASH_DIR=/evil
+SLEEP_PID=1
+IFS=:
+RES_W=../../../../etc
+Z_HERO_VALUE=8.4
+EOF
+( real_path="$PATH"
+  load_kv "$DASH_TMP/hostile.txt" PAYLOAD
+  [ "$PATH" = "$real_path" ] || exit 1
+  [ "$TMP" != "/mnt/us" ] || exit 2
+  [ "$DASH_DIR" != "/evil" ] || exit 3
+  [ "$SLEEP_PID" != "1" ] || exit 4
+  [ "$Z_HERO_VALUE" = "8.4" ] || exit 5 )
+check "$?" "a payload cannot set PATH, TMP, DASH_DIR or SLEEP_PID — but its own keys still land"
+
+# RES_W and RES_H are interpolated into a path that gets EXECUTED with `.`.
+( RES_W="../../../../tmp"; RES_H="800"
+  load_layout
+  [ "$RES_W" = "600" ] || exit 1 )
+check "$?" "a traversal in RES_W falls back to a real layout instead of sourcing it"
+
+# ── 3c. A file with no trailing newline keeps its last line ──────────────────
+printf 'A_ONE=1\nRES_H=1448' > "$DASH_TMP/nonl.txt"
+( load_kv "$DASH_TMP/nonl.txt" PAYLOAD
+  [ "$RES_H" = "1448" ] || exit 1 )
+check "$?" "the last line of a file with no trailing newline is not dropped"
+
+# ── 3d. A failed chart fetch keeps the chart that is there ───────────────────
+printf 'GOOD' > "$DASH_TMP/graph.bmp"
+( WGET_OK_HOST=nowhere.invalid HOST=203.0.113.9 fetch_graph
+  [ "$(cat "$DASH_TMP/graph.bmp")" = "GOOD" ] || exit 1
+  [ ! -f "$DASH_TMP/graph.new" ] || exit 2 )
+check "$?" "a failed graph fetch leaves the previous chart intact"
+
+# ── 3e. With no data at all, the page says why ───────────────────────────────
+( HAVE_DATA=0
+  unset Z_GROUP_OUT OUT_TEMP IN_TEMP IN_HUM OUT_HUM
+  : > "$FBINK_LOG"
+  draw_sensors_body && exit 1                      # must refuse
+  redraw_offline "12:34"
+  grep -q -- 'Cannot reach' "$FBINK_LOG" || exit 2
+  grep -q -- '	--	°$' "$FBINK_LOG" && exit 3     # no punctuation-only fields
+  # and the message lands in the readings zone, not under the chart
+  grep -q -- "-s	top=$Z_SENS_Y,left=$Z_SENS_X" "$FBINK_LOG" || exit 4 )
+check "$?" "with no payload it draws a reason in the readings zone, not '°  /%'"
+reset_log
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+load_layout
 
 # ── 4. The schedule ──────────────────────────────────────────────────────────
 # Defaults: clock 1, data 5, chart 15, forecast 30, full 60.
@@ -422,13 +548,22 @@ CLOCK_EVERY=1; CLOCK_FLASH_EVERY=1
 check "$(flash_due 7 1 1 && echo 0 || echo 1)" "with the defaults every minute flashes"
 check "$(flash_due 7 1 0 && echo 1 || echo 0)" "and 0 turns flashing off"
 
+# A zero-padded interval is not octal. $((08)) is an error in every POSIX
+# shell, and this one is evaluated once a minute.
+CLOCK_EVERY=1; DATA_EVERY=$(strip_zeros "08"); GRAPH_EVERY=15
+check "$([ "$DATA_EVERY" = "8" ] && echo 0 || echo 1)" \
+      "a zero-padded interval is normalised ($DATA_EVERY), not read as octal"
+check "$(plan_minute 8 >/dev/null 2>&1 && echo 0 || echo 1)" \
+      "and the schedule computes with it instead of dying on base 8"
+DATA_EVERY=5
+
 echo ""
 echo "Settings, edited the way KUAL edits them:"
 
 # ── 5. settings.sh ───────────────────────────────────────────────────────────
 run_settings() {
     DASH_DIR="$KDIR" DASH_TMP="$DASH_TMP" DASH_CONF="$DASH_CONF" \
-        sh "$KDIR/settings.sh" "$@" 2>&1
+        DASH_SCAN_LIST="$WORK/collectors" sh "$KDIR/settings.sh" "$@" 2>&1
 }
 
 rm -f "$DASH_CONF"
@@ -496,9 +631,36 @@ check "$([ "$(run_settings get HOST)" = "10.9.9.42" ] && echo 0 || echo 1)" \
 check "$(grep -q '10.9.9.42' "$WORK/find.txt" && echo 0 || echo 1)" \
       "and says which address it took"
 
+# The scan result has to outlive Stop, which deletes /tmp/dash — and a reboot,
+# which is a ramdisk. It lives beside dash.conf for that reason.
+check "$(grep -q 'DASH_SCAN_LIST:-\$SELF_DIR/collectors' "$KDIR/settings.sh" && echo 0 || echo 1)" \
+      "the scan list defaults to beside dash.conf, not under /tmp/dash"
+rm -rf "$DASH_TMP"
+mkdir -p "$DASH_TMP"
+run_settings next > "$WORK/next.txt" 2>&1
+check "$([ "$(run_settings get HOST)" = "10.9.9.42" ] && echo 0 || echo 1)" \
+      "so Next collector still works after the dashboard was stopped"
+
 run_settings reset >/dev/null
 check "$([ "$(run_settings get HOST)" = "192.168.1.50" ] && echo 0 || echo 1)" \
       "reset restores dash.conf.default"
+
+# The redraw flag is dropped AFTER the settings screen is painted. say_lines
+# clears and flashes the whole panel; with the flag already down, a tick
+# landing in that window repaints the dashboard and then has the settings page
+# drawn on top of it, with nothing left to undo that until the next full
+# refresh an hour later.
+check "$(awk '
+    { line[NR] = $0 }
+    END {
+        for (i = 1; i <= NR; i++) {
+            if (line[i] !~ /^[ \t]*ask_redraw[ \t]*$/) continue
+            for (j = i + 1; j <= i + 4 && j <= NR; j++)
+                if (line[j] ~ /say_lines/) { bad = 1 }
+        }
+        exit (bad ? 1 : 0)
+    }' "$KDIR/settings.sh" && echo 0 || echo 1)" \
+      "and it is set after the screen is painted, not before"
 
 # ── 7. A hand-edited dash.conf cannot break the loop ─────────────────────────
 printf 'HOST=10.0.0.5\nDATA_EVERY=0\nFULL_EVERY=notanumber\n' > "$DASH_CONF"
@@ -510,6 +672,25 @@ printf 'HOST=10.0.0.5\nDATA_EVERY=0\nFULL_EVERY=notanumber\n' > "$DASH_CONF"
   [ "$DATA_EVERY" -ge 1 ] || exit 2
   [ "$FULL_EVERY" -ge 1 ] || exit 3 ) 
 check "$?" "a bad value in dash.conf falls back to the default, and the address gains its scheme only where it is used"
+
+# ── 8. The tick aims at the minute, not at "sixty seconds from now" ──────────
+# A tick costs time — a fetch, a dozen draws, a refresh — so a fixed 60 makes
+# every cycle 60+N and the clock walks away from the minute it is showing.
+( date() { echo "07"; }
+  nap()  { echo "$1" > "$WORK/slept"; }
+  nap_to_minute
+  [ "$(cat "$WORK/slept")" = "53" ] || exit 1 )
+check "$?" "at :07 it sleeps 53 seconds, landing on the minute"
+( date() { echo "00"; }
+  nap()  { echo "$1" > "$WORK/slept"; }
+  nap_to_minute
+  [ "$(cat "$WORK/slept")" = "60" ] || exit 1 )
+check "$?" "and at :00 it waits a whole minute rather than ticking twice for it"
+( date() { echo "08"; }
+  nap()  { echo "$1" > "$WORK/slept"; }
+  nap_to_minute
+  [ "$(cat "$WORK/slept")" = "52" ] || exit 1 )
+check "$?" "with :08 and :09 handled as decimal, not as bad octal"
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then

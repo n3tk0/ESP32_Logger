@@ -107,19 +107,47 @@ conf_help() {
 #
 # Only names matching the convention are accepted, the value is taken literally
 # up to the closing quote, and the shell's own unescaping is applied to nothing.
-# $2, when given, is a space-separated whitelist of names to accept.
+#
+# $2 restricts WHICH names may be assigned, and both callers pass one, because
+# "a plain variable name" is not a safe thing to let the network choose. PATH
+# is a plain variable name; so are IFS, TMP, DASH_DIR and SLEEP_PID. A payload
+# carrying PATH=/mnt/us/evil would have the next fbink, wget or date call run
+# an attacker's binary as root, and TMP=/mnt/us would turn cleanup()'s
+# `rm -rf "$TMP"` into a wipe of the user's documents on Stop.
+#
+# Pass either a space-separated list of exact names (dash.conf) or the token
+# PAYLOAD, which accepts the shapes the collector emits and nothing else.
+# The names /kindle/data is allowed to set. Shapes rather than a list, because
+# the place keys carry names the collector chooses (Z_<PLACE>_VALUE) — but the
+# shapes are narrow, and everything outside them, PATH included, is dropped.
+# See kdShellVar() and emitZones() in src/web/KindleDashboard.cpp.
+payload_key_ok() {
+    case "$1" in
+        Z_*|GRID_ZONES|GRID_ROWS|IN_ZONES|LBL_*|FC_*|FC[0-9]_*|WK[0-9]_*|WK_TODAY) return 0 ;;
+        OUT_*|IN_*|RES_W|RES_H|LANG|DECIMALS|CLOCK_STYLE|SHOW_FLAGS) return 0 ;;
+    esac
+    return 1
+}
+
 load_kv() {
     local file="$1" allow="${2:-}"
     local line key val
     [ -f "$file" ] || return 1
-    while IFS= read -r line; do
+    # `|| [ -n "$line" ]`: read returns non-zero on a final line with no
+    # trailing newline, having already assigned it. Without this the last
+    # setting in a hand-edited dash.conf is silently dropped — and in the
+    # collector's payload the last key is RES_H, so a 1072x1448 panel would
+    # quietly fall back to the 600x800 layout.
+    while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in ''|'#'*) continue ;; esac
         key=${line%%=*}
         [ "$key" = "$line" ] && continue          # no '=' — not an assignment
         case "$key" in
             *[!A-Za-z0-9_]* | '' ) continue ;;    # not a plain variable name
         esac
-        if [ -n "$allow" ]; then
+        if [ "$allow" = "PAYLOAD" ]; then
+            payload_key_ok "$key" || continue
+        elif [ -n "$allow" ]; then
             case " $allow " in
                 *" $key "*) ;;
                 *) continue ;;
@@ -143,6 +171,17 @@ load_kv() {
 # Applied on load as well as on save, so a hand-edited dash.conf cannot put the
 # loop into a state with no tiers — an interval of 0 or a stray word would
 # otherwise make `expr % 0` fail once a minute, forever, silently.
+# Leading zeros are stripped before anything does arithmetic with the value.
+# $((08)) is an error in every POSIX shell — "value too great for base" — and
+# the loop evaluates MINUTE % DATA_EVERY once a minute, so a single
+# zero-padded interval in a hand-edited dash.conf would kill every tier.
+strip_zeros() {
+    local v="$1"
+    while [ "${v#0}" != "$v" ] && [ -n "${v#0}" ]; do v="${v#0}"; done
+    [ -n "$v" ] || v=0
+    printf '%s' "$v"
+}
+
 conf_valid() {
     # $1=key $2=value → 0 if acceptable
     local k="$1" v="$2"
@@ -166,6 +205,11 @@ conf_valid() {
     esac
 }
 
+#: Keys already complained about, so a bad line in dash.conf is reported once
+#: rather than once a minute for as long as the dashboard runs — on a device
+#: whose /tmp is a ramdisk and whose log is never rotated.
+CONF_WARNED=""
+
 conf_load() {
     local k v
     [ -f "$CONF" ] || return 0
@@ -176,9 +220,33 @@ conf_load() {
     load_kv "$CONF" "$(conf_keys)"
     for k in $(conf_keys); do
         eval "v=\$$k"
+        case "$k" in
+            HOST) ;;
+            *) v=$(strip_zeros "$v"); eval "$k=\$v" ;;
+        esac
         if ! conf_valid "$k" "$v"; then
+            # The last value that WAS valid, which at startup is the built-in
+            # default and later is whatever was running. Saying "the default"
+            # when it is the latter would be a lie about which number is now
+            # in force.
             eval "$k=\$DASH_PREV_$k"
-            echo "dash.conf: $k=$v is not valid, keeping the default" >&2
+            eval "v=\$$k"
+            case " $CONF_WARNED " in
+                *" $k "*) ;;
+                *) CONF_WARNED="$CONF_WARNED $k"
+                   echo "dash.conf: $k is not a usable value; keeping $v" >&2 ;;
+            esac
+        else
+            # It parses now, so a later mistake in the same key is worth
+            # hearing about again. Rebuilt in the shell rather than with
+            # `sed s/ $k\b//`: \b is a GNU extension that busybox sed is not
+            # obliged to have, and a pattern that silently matches nothing
+            # would make the warning fire once a minute again.
+            local w kept=""
+            for w in $CONF_WARNED; do
+                [ "$w" = "$k" ] || kept="$kept $w"
+            done
+            CONF_WARNED="$kept"
         fi
     done
 }
@@ -201,7 +269,7 @@ conf_write() {
         echo "# dash.conf — ESP32 Logger Kindle dashboard"
         echo "#"
         echo "# Edited from KUAL (ESP32 Dashboard → Settings) or by hand."
-        echo "# Restart the dashboard for a change to take effect."
+        echo "# A running dashboard re-reads this file every minute; no restart."
         echo ""
         for k in $(conf_keys); do
             eval "v=\$$k"
@@ -275,11 +343,23 @@ fetch_data() {
 }
 
 fetch_graph() {
-    wget -q -T 15 -O "$TMP/graph.bmp" "$(host_url)/kindle/graph.bmp" 2>/dev/null
+    # Into a scratch file, and only into place once it is whole. wget -O
+    # truncates its target the moment it opens it, so fetching straight onto
+    # graph.bmp turned one WiFi hiccup into a zero-byte file — and since
+    # redraw_chart clears its rectangle before drawing, that showed as a blank
+    # strip where the chart was until the next successful fetch. Keeping the
+    # last good chart is the better failure.
+    if wget -q -T 15 -O "$TMP/graph.new" "$(host_url)/kindle/graph.bmp" 2>/dev/null \
+       && [ -s "$TMP/graph.new" ]; then
+        mv "$TMP/graph.new" "$TMP/graph.bmp"
+        return 0
+    fi
+    rm -f "$TMP/graph.new"
+    return 1
 }
 
 load_data() {
-    load_kv "$TMP/data.txt" || return 1
+    load_kv "$TMP/data.txt" PAYLOAD || return 1
 
     # The layout follows the data, always — RES_W and RES_H come from the
     # collector, so the two cannot be loaded independently.
@@ -289,12 +369,29 @@ load_data() {
     # other branch, and nothing in the main loop ever called it again: every
     # coordinate stayed unset for as long as the script ran.
     load_layout
+    HAVE_DATA=1
     return 0
 }
 
+#: 1 once a payload has been parsed. Until then every Z_*, OUT_* and IN_* is
+#: empty, and the drawing paths would compose "°", "/%" and "°/%" out of them —
+#: three punctuation marks and no explanation, on a Kindle that finished
+#: booting before the ESP32 did.
+HAVE_DATA=0
+
 # ── Layout loading ───────────────────────────────────────────────────────────
+# RES_W and RES_H come off the wire and are interpolated into a path that is
+# then EXECUTED with `.`, so they are checked here rather than trusted: a
+# payload sending RES_W=../../../../mnt/us/x reaches any .conf-suffixed file on
+# the device. Digits only, and a size the panel could plausibly be.
 load_layout() {
-    local conf="$DASH_DIR/layout/${RES_W}x${RES_H}.conf"
+    local conf
+    case "${RES_W:-}" in ''|*[!0-9]*) RES_W=600 ;; esac
+    case "${RES_H:-}" in ''|*[!0-9]*) RES_H=800 ;; esac
+    [ "$RES_W" -ge 100 ] && [ "$RES_W" -le 4000 ] 2>/dev/null || RES_W=600
+    [ "$RES_H" -ge 100 ] && [ "$RES_H" -le 4000 ] 2>/dev/null || RES_H=800
+
+    conf="$DASH_DIR/layout/${RES_W}x${RES_H}.conf"
     if [ -f "$conf" ]; then
         . "$conf"
     else
@@ -351,9 +448,16 @@ fb() { fbink "$@" 2>/dev/null; }
 
 draw_text() {
     # $1=x $2=y $3=px $4=font file $5=colour $6=text
+    #
+    # -O/--bgless: draw the glyphs and nothing else. FBInk's OpenType renderer
+    # otherwise fills the text's whole box with the background pen, which is
+    # WHITE unless -B says otherwise — so white text on the inverted "today"
+    # cell punched a white rectangle out of the black plate and disappeared
+    # into it. Every tier clears its rectangle before drawing, so there is
+    # nothing underneath that the glyphs need to cover.
     [ -n "$6" ] || return 0
     [ -n "$4" ] || return 0
-    fb -q -b -C "$5" -t regular="$4",px="$3",left="$1",top="$2" -- "$6"
+    fb -q -b -O -C "$5" -t regular="$4",px="$3",left="$1",top="$2" -- "$6"
 }
 
 draw_text_bold() { draw_text "$1" "$2" "$3" "$FONT_BOLD" "$4" "$5"; }
@@ -603,6 +707,12 @@ draw_sensors_body() {
     fi
 
     # ── The legacy fixed layout ─────────────────────────────────────────────
+    # It formats "${OUT_TEMP}°" and "${IN_TEMP}°/${IN_HUM}%" from whatever is
+    # in those variables, and `[ "$OUT_HUM" != "-1" ]` is true when OUT_HUM is
+    # unset — so with no payload at all it draws the punctuation and nothing
+    # else. The caller shows the offline page instead.
+    [ -n "${OUT_TEMP:-}" ] || return 1
+
     draw_text_reg "$LAB_OUT_X" "$LAB_OUT_Y" "$LAB_SZ" "GRAY7" "$LBL_OUTSIDE"
     draw_battery_badge
     draw_text_bold "$LEGACY_HERO_X" "$LEGACY_HERO_Y" "$LEGACY_HERO_SZ" "BLACK" "${OUT_TEMP}°"
@@ -743,6 +853,26 @@ redraw_forecast() {
     refresh_zone "$Z_FC_X" "$Z_FC_Y" "$Z_FC_W" "$Z_FC_H" 0
 }
 
+# What the panel shows when the collector cannot be reached. In the READINGS
+# zone, deliberately: the startup message used to be drawn at y=380, which is
+# inside the chart rectangle, so the chart tier cleared the explanation off the
+# screen fifteen minutes later and left nothing in its place.
+#
+# The chart and the forecast below are left alone — a stale page with a reason
+# on it beats a blank one.
+redraw_offline() {
+    # $1=HH:MM
+    local y=$(( Z_SENS_H / 3 ))
+    fill_rect "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" WHITE
+    draw_text_bold "${OFF_X:-40}" "$y" "${OFF_SZ:-26}" "BLACK" \
+                   "Cannot reach $(host_url)"
+    draw_text_reg "${OFF_X:-40}" "$(( y + ${OFF_SZ:-26} + 12 ))" \
+                  "${OFF_SUB_SZ:-16}" "GRAY5" \
+                  "Check WiFi, or KUAL → Settings → Find collector"
+    draw_clock "$1"
+    refresh_zone "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" 0
+}
+
 # The whole page, one flashing refresh at the end. This is the tier that
 # actually resets ghosting, and it is why the others do not have to.
 redraw_all() {
@@ -812,6 +942,23 @@ nap() {
     SLEEP_PID=""
 }
 
+# Sleep until the top of the next minute, rather than for sixty seconds.
+#
+# A tick costs time — a fetch, a dozen draws, a refresh — so `nap 60` makes
+# each cycle 60+N seconds and the clock walks away from the minute it is
+# supposed to show. After forty ticks at a second and a half apiece it is a
+# minute behind, displaying the wrong time and skipping a minute now and then
+# to catch up. Aiming at the boundary costs nothing and never drifts.
+nap_to_minute() {
+    local sec
+    sec=$(date +%S)
+    sec=$(strip_zeros "$sec")            # 08 and 09 are not octal here either
+    local delay=$(( 60 - sec ))
+    # At :00 exactly, wait the whole minute rather than ticking twice for it.
+    [ "$delay" -le 0 ] && delay=60
+    nap "$delay"
+}
+
 # Sourced for the helpers alone — by settings.sh, and by the tests.
 [ -n "${DASH_LIB_ONLY:-}" ] && return 0
 
@@ -838,17 +985,15 @@ if fetch_data; then
     redraw_all "$(date +%H:%M)"
 else
     clear_screen
-    draw_text_reg 40 380 24 "BLACK" "Cannot reach $(host_url)"
-    draw_text_reg 40 412 18 "GRAY5" "Check WiFi, or set the collector in KUAL → Settings"
     refresh_screen
+    redraw_offline "$(date +%H:%M)"
 fi
 
 # ── Main loop ────────────────────────────────────────────────────────────────
 # One tick a minute; the tiers decide what that tick costs.
 MINUTE=0
-FORCE_FULL=0
 while true; do
-    nap 60
+    nap_to_minute
     MINUTE=$((MINUTE + 1))
     NOW_TIME=$(date +%H:%M)
 
@@ -863,12 +1008,29 @@ while true; do
     # be visible now rather than at the top of the hour.
     if [ -f "$TMP/redraw" ]; then
         rm -f "$TMP/redraw"
-        FORCE_FULL=1
+        TIERS="full"
+    else
+        TIERS=$(plan_minute "$MINUTE")
     fi
 
-    TIERS=$(plan_minute "$MINUTE")
-    [ "$FORCE_FULL" = "1" ] && TIERS="full"
-    FORCE_FULL=0
+    # ── Nothing to draw yet ─────────────────────────────────────────────────
+    # No payload has ever parsed, so every reading is empty. Keep the reason on
+    # screen and the clock current, and try again whenever the data tier comes
+    # round; the first success draws the whole page.
+    if [ "$HAVE_DATA" = "0" ]; then
+        case " $TIERS " in
+            *" full "*|*" sensors "*)
+                if fetch_data && load_data; then
+                    fetch_graph
+                    redraw_all "$NOW_TIME"
+                else
+                    redraw_offline "$NOW_TIME"
+                fi
+                ;;
+            *" clock "*) redraw_clock "$NOW_TIME" 0 ;;
+        esac
+        continue
+    fi
 
     case " $TIERS " in
         *" full "*)
@@ -894,8 +1056,10 @@ while true; do
             ;;
     esac
 
+    # A failed fetch leaves the previous chart in place, so redrawing it is
+    # still right — the caption and the rule around it have to come back.
     case " $TIERS " in
-        *" chart "*) fetch_graph; redraw_chart ;;
+        *" chart "*) fetch_graph || true; redraw_chart ;;
     esac
 
     case " $TIERS " in

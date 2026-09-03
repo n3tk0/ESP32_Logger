@@ -676,6 +676,37 @@ with `fbink -b` (framebuffer only) and **refreshes once at the end**; without
 it every string is its own visible repaint, twenty per page, each leaving a
 ghost.
 
+### The payload is data, and only some of it
+
+`/kindle/data` arrives over plain HTTP as `KEY="value"` lines, and the reader
+parses them rather than sourcing the file — sourcing it was executing the
+forecast provider's free-text summary as root. But refusing to *execute* the
+file is only half of it: the names it may *assign* have to be bounded too.
+`PATH` is a plain variable name; so are `IFS`, `TMP`, `DASH_DIR` and
+`SLEEP_PID`. A payload carrying `PATH=/mnt/us/evil` would have the next
+`fbink`, `wget` or `date` call run an attacker's binary as root, and
+`TMP=/mnt/us` would turn the cleanup handler's `rm -rf "$TMP"` into a wipe of
+the user's documents when they pressed Stop.
+
+So the parser takes an allowlist. `dash.conf` passes the exact key names it
+owns; the payload passes `PAYLOAD`, which accepts the shapes the collector
+actually emits — `Z_*`, `GRID_*`, `IN_ZONES`, `LBL_*`, `FC*`, `WK*`, `OUT_*`,
+`IN_*`, `RES_W`, `RES_H` and a handful of scalars — and drops everything else.
+
+`RES_W` and `RES_H` get a second check, because they are interpolated into a
+path that is then executed with `.` to load the layout: digits only, and a
+plausible panel size, or the reader falls back to 600x800. Without it,
+`RES_W=../../../../mnt/us/x` reached any `.conf`-suffixed file on the device.
+
+### The tick aims at the minute
+
+`sleep 60` in a loop is not a clock. A tick costs time — a fetch, a dozen
+draws, a refresh — so each cycle takes 60+N seconds and the displayed minute
+walks away from the real one, skipping a minute now and then to catch up. The
+loop sleeps `60 - $(date +%S)` instead, which lands on the boundary however
+long the work took. (Leading zeros are stripped first: `$((08))` is an error
+in every POSIX shell, and `date +%S` produces one twice a minute.)
+
 ### It was speaking a language FBInk does not
 
 Worth recording, because nothing in this repository could have caught it and

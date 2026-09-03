@@ -65,3 +65,7 @@ data/
 # kindle/dash.conf.default on first run. It holds one person's collector
 # address and refresh intervals — never the project's.
 kindle/dash.conf
+
+# And the addresses "Find collector" turned up, kept beside it so that Stop —
+# which deletes /tmp/dash — cannot take them with it.
+kindle/collectors
