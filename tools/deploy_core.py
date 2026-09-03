@@ -67,20 +67,40 @@ def _python() -> str:
 
 
 # ── Step catalogue ────────────────────────────────────────────────────────────
-STEP_NAMES: dict[int, str] = {
-    1: "Build web assets      www/ → data/www/",
-    2: "Flash bootloader      rollback-enabled, via esptool",
-    3: "Erase chip flash      full wipe",
-    4: "Clean build artifacts pio run -t clean",
-    5: "Compile firmware      pio run",
-    6: "Flash firmware        pio run -t upload",
-    7: "Upload LittleFS       pio run -t uploadfs",
-    8: "Upload web via HTTP   POST /upload to device IP",
-    9: "Open serial monitor   pio device monitor",
-    10: "Erase node flash      pio run -d node… -t erase",
-    11: "Compile node firmware pio run -d node…",
-    12: "Flash node firmware   pio run -d node… -t upload",
+#: Each step as (what it does, how it does it). Two halves rather than one
+#: padded string because they have two different readers: the CLI prints them
+#: in an aligned column, and the GUI needs them apart — it has no column to
+#: align to, and truncating the single string cut "pio run -d node… -t upload"
+#: down to something that no longer said which project it built.
+STEP_DETAIL: dict[int, tuple[str, str]] = {
+    1:  ("Build web assets",      "www/ → data/www/"),
+    2:  ("Flash bootloader",      "rollback-enabled, via esptool"),
+    3:  ("Erase chip flash",      "full wipe"),
+    4:  ("Clean build artifacts", "pio run -t clean"),
+    5:  ("Compile firmware",      "pio run"),
+    6:  ("Flash firmware",        "pio run -t upload"),
+    7:  ("Upload LittleFS",       "pio run -t uploadfs"),
+    8:  ("Upload web via HTTP",   "POST /upload to device IP"),
+    9:  ("Open serial monitor",   "pio device monitor"),
+    10: ("Erase node flash",      "pio run -d node… -t erase"),
+    11: ("Compile node firmware", "pio run -d node…"),
+    12: ("Flash node firmware",   "pio run -d node… -t upload"),
 }
+
+#: The catalogue as the CLI prints it: title padded to one column, then detail.
+_STEP_COL = max(len(title) for title, _ in STEP_DETAIL.values())
+STEP_NAMES: dict[int, str] = {
+    n: f"{title:<{_STEP_COL}} {detail}"
+    for n, (title, detail) in STEP_DETAIL.items()
+}
+
+
+def step_parts(step: int) -> tuple[str, str]:
+    """A step's name split into what it does and how, e.g.
+    ``("Build web assets", "www/ → data/www/")``.
+    """
+    return STEP_DETAIL.get(step, ("", ""))
+
 
 PRESETS: dict[str, tuple[str, list[int]]] = {
     "F": ("Full flash",    [1, 3, 5, 6, 7]),
@@ -93,6 +113,21 @@ PRESETS: dict[str, tuple[str, list[int]]] = {
     "D": ("Node flash",    [11, 12]),
     "A": ("All steps",     list(range(1, 10))),
     "N": ("None",          []),
+}
+
+#: What each preset is FOR, in the words of somebody who has not memorised the
+#: step numbers. "Full flash — steps 1, 3, 5, 6, 7" tells you nothing you did
+#: not already know from the name; the question a person actually has in front
+#: of this menu is which of these seven they want, and the step list answers it
+#: only if you already know the catalogue by heart.
+PRESET_BLURBS: dict[str, str] = {
+    "F": "New or misbehaving board: wipe it, then build and flash everything.",
+    "C": "Compile from scratch after a toolchain or library change, then flash.",
+    "Q": "The everyday one — compile the firmware and flash it.",
+    "H": "Web UI only, over WiFi. No USB cable, no reflash.",
+    "D": "Build and flash the satellite node board on its own port.",
+    "A": "Every collector step in order, monitor included.",
+    "N": "Untick everything and start from a clean sheet.",
 }
 
 # ── Config defaults + persistence ─────────────────────────────────────────────
@@ -112,6 +147,14 @@ DEFAULT_CFG: dict[str, Any] = {
     "steps":                [1, 3, 5, 6, 7],
     "upload_filter":        "all",
     "wipe_before_upload":   False,
+
+    # Interface scale for the GUI, 1.0 = the default type size. Kept with the
+    # rest of the settings rather than in a file of its own: it is a per-person
+    # accessibility setting, and a second config file is a second thing to find
+    # when it is wrong. The CLI ignores it.
+    "ui_scale":             1.0,
+    "ui_theme":             "Dark",   # Dark | Light | System, GUI only
+    "steps_panel_open":     False,    # GUI only: is the step list unfolded
 
     # Optional compile-time features, by macro name. Read from src/setup.h by
     # tools/features.py rather than listed here, so adding one to the firmware

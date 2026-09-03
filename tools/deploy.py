@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import textwrap
 import time
 from pathlib import Path
 from typing import Any
@@ -33,8 +34,10 @@ from deploy_core import (
     detect_env,
     adopt_env_defaults,
     pinned_keys,
+    STEP_DETAIL,
     STEP_NAMES,
     PRESETS,
+    PRESET_BLURBS,
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
@@ -86,6 +89,16 @@ def _detect_port() -> str:
 def _detect_env() -> str:
     """Wrapper for backward compatibility."""
     return detect_env()
+
+
+def _tag(n: int) -> str:
+    """A menu key padded to one column: "[1] " and "[10]" are both 4 wide.
+
+    Steps 10 to 12 used to hang a character out of the column, because the
+    padding was two literal spaces after a bracket whose width depends on the
+    number inside it.
+    """
+    return f"[{n}]".ljust(4)
 
 
 def _print_menu(cfg: dict[str, Any]) -> None:
@@ -150,7 +163,7 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     print(_bold("  ── Steps " + "─" * 53))
     for n, name in STEP_NAMES.items():
         tick = _green("✓") if n in enabled else " "
-        print(f"  {_cyan(f'[{n}]')}  [{tick}] {name}")
+        print(f"  {_cyan(_tag(n))} [{tick}] {name}")
     print()
 
     # Presets block
@@ -173,8 +186,56 @@ def _print_menu(cfg: dict[str, Any]) -> None:
         else (_yellow("no key") if np.wants_key else _dim("no key needed"))
     print(f"  {_cyan('[N]')}  Node target     {np.label}  {key_state}  {_dim('(uppercase N)')}")
     print(f"  {_cyan('[W]')}  WiFi provision  via serial COM port  {_dim('(uppercase W)')}")
+    print(f"  {_cyan('[?]')}  What should I pick?  {_dim('presets and steps, explained')}")
     print(f"  {_cyan('[q]')}  Quit")
     print()
+
+
+def _help_screen() -> None:
+    """What to pick, in plain words.
+
+    The menu is dense on purpose — settings, twelve steps, seven presets and
+    the actions all on one screen — and density is what makes it fast on the
+    twentieth run and opaque on the first. Rather than pad every preset with a
+    sentence nobody rereads, the sentences live here, behind [?].
+    """
+    _clear()
+    print(_cyan("╔" + "═" * _W + "╗"))
+    print(_cyan("║") + _bold("  What do you want to do?").ljust(_W) + _cyan("║"))
+    print(_cyan("╚" + "═" * _W + "╝"))
+    print()
+    for key, (pname, psteps) in PRESETS.items():
+        steps_s = ", ".join(str(s) for s in psteps) if psteps else "—"
+        # Padded before it is coloured: an escape sequence counts toward a
+        # format width and pads to nothing on screen.
+        print(f"  {_cyan(f'[{key}]')}  {_bold(pname.ljust(14))}"
+              f"{_dim(f'steps {steps_s}')}")
+        blurb = PRESET_BLURBS.get(key)
+        if blurb:
+            print(f"       {blurb}")
+    print()
+    print(_bold("  ── The steps " + "─" * 49))
+    for n, (title, detail) in STEP_DETAIL.items():
+        print(f"  {_cyan(_tag(n))} {title:<22} {_dim(detail)}")
+    print()
+    print(_bold("  ── Good to know " + "─" * 46))
+    for fact in (
+        "Settings you do not pin follow platformio.ini, so switching board "
+        "carries that board's own upload speed, chip and USB CDC flag.",
+        "[F] build features are passed as -D flags; no project file is edited.",
+        "[N] node steps (10–12) act on a DIFFERENT board, on its own port.",
+        "Everything is saved to .flash_tool.json in the project root.",
+        "The same tool with a window: python3 tools/deploy_gui.py",
+    ):
+        wrapped = textwrap.wrap(fact, width=_W + 2)
+        print(f"  {_dim('•')} {wrapped[0]}")
+        for line in wrapped[1:]:
+            print(f"    {line}")
+    print()
+    try:
+        input(_dim("  Press Enter to return to the menu… "))
+    except (KeyboardInterrupt, EOFError):
+        pass
 
 
 def _node_menu(cfg: dict[str, Any]) -> None:
@@ -394,6 +455,9 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
         if ch == "q":
             sys.exit(0)
 
+        elif ch == "?":
+            _help_screen()
+
         elif ch == "r":
             return cfg
 
@@ -589,15 +653,15 @@ def run_steps(cfg: dict[str, Any]) -> None:
     success = manager.run_steps(steps, confirm_erase_callback=_confirm_erase)
 
     print()
+    # Padded rather than typed: the success line was one column wider than the
+    # rule above it, so the box it drew did not close.
     bar = "═" * 46
-    if success:
-        print(_green(f"  ╔{bar}╗"))
-        print(_green(f"  ║  ✓  All steps completed successfully.         ║"))
-        print(_green(f"  ╚{bar}╝"))
-    else:
-        print(_red(  f"  ╔{bar}╗"))
-        print(_red(  f"  ║  ✗  Some steps failed. See logs above.       ║"))
-        print(_red(  f"  ╚{bar}╝"))
+    paint = _green if success else _red
+    msg = ("✓  All steps completed successfully." if success
+           else "✗  Some steps failed. See logs above.")
+    print(paint(f"  ╔{bar}╗"))
+    print(paint(f"  ║  {msg.ljust(len(bar) - 2)}║"))
+    print(paint(f"  ╚{bar}╝"))
 
     print()
     try:
