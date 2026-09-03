@@ -1,0 +1,45 @@
+# dash.conf — ESP32 Logger Kindle dashboard
+#
+# This file is the DEFAULT. On first run update_dash.sh copies it to
+# dash.conf beside it, and only dash.conf is ever written to — so copying a
+# new version of the extension over an old one cannot overwrite your settings.
+#
+# Edit it from the device: KUAL → ESP32 Dashboard → Settings. Editing this file
+# by hand over USB or SSH works just as well; restart the dashboard afterwards.
+
+# Collector address (IP or http://host:port)
+HOST=192.168.1.50
+
+# Seconds to wait for the collector
+FETCH_TIMEOUT=10
+
+# ── How often each part of the screen is redrawn, in minutes ────────────────
+# E-ink ghosts, and the cure — a flashing refresh — is visible. So the clock,
+# which changes every minute, is flashed inside its own small rectangle; the
+# readings and the chart are redrawn without a flash; and once an hour the
+# whole page is cleared and flashed, which resets ghosting everywhere.
+
+# Minutes between clock updates
+CLOCK_EVERY=1
+
+# Minutes between sensor updates
+DATA_EVERY=5
+
+# Minutes between chart updates
+GRAPH_EVERY=15
+
+# Minutes between forecast updates. The collector polls the weather API on its
+# own schedule (WebUI → Settings → Forecast → Fetch interval, 10–360 min);
+# redrawing more often than that just redraws the same numbers.
+FORECAST_EVERY=30
+
+# Minutes between whole-screen refreshes
+FULL_EVERY=60
+
+# Flash the clock zone every N clock updates (0 = never). 1 keeps that corner
+# permanently clean, which is where ghosting shows first.
+CLOCK_FLASH_EVERY=1
+
+# Flash the readings zone every N sensor updates (0 = never). Off by default:
+# it is a third of the screen, and the hourly full refresh already clears it.
+SENSOR_FLASH_EVERY=0

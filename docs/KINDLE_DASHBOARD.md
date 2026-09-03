@@ -613,6 +613,88 @@ charger, not one running a fortnight on its battery.
 is a confident lie, so prefer lowering `KINDLE_REFRESH_SEC` to something the
 clock can live with over turning the pinning off.
 
+## The other reader: FBInk, not the browser
+
+Everything above is the page the Kindle's own browser loads. `kindle/` holds
+the other reader — a shell script that fetches `/kindle/data`, a plain
+`KEY="value"` payload, and draws it straight to the framebuffer with
+[FBInk](https://github.com/NiLuJe/FBInk). No browser, no JavaScript, no
+document to reflow: it exists because the 7th-generation Kindle's browser is
+slow to wake and pushes a full-screen flash every time it repaints.
+
+### Settings live on the device
+
+The collector's address used to be a line in the middle of `update_dash.sh` —
+the one setting that changes when a router hands out a new lease, and changing
+it needed a text editor, a USB cable and a computer. It is `dash.conf` now,
+beside the script, seeded from `dash.conf.default` on first run so that
+reinstalling the extension cannot overwrite it.
+
+A Kindle has no keyboard outside its own reader, so `settings.sh` is built
+around not needing one:
+
+- **Find collector** takes the Kindle's own IPv4 address, walks the /24 it sits
+  on in parallel batches, and keeps the hosts that answer `/kindle/data` with a
+  dashboard payload — the body is checked, because anything else on the network
+  answering port 80 is not a collector.
+- **Next collector** steps to the next address that scan found, wrapping round,
+  which is the whole interaction when the first guess was wrong.
+- The refresh **profiles** (fast, normal, battery saver) set the five intervals
+  together, because "how often should the chart be redrawn" is not a question
+  anyone wants to answer five times through a menu that can only step numbers.
+
+Values are validated where they are read, not only where they are written: an
+interval of `0` would make the loop divide by it once a minute forever, so a
+hand-edited `dash.conf` carrying one falls back to the default and says so.
+
+### The refresh tiers
+
+E-ink ghosts, and the cure — a flashing update, the panel driven to black and
+back — is slow and visible. So it is spent where it buys the most:
+
+| Every | Redrawn | Refresh |
+|---|---|---|
+| `CLOCK_EVERY` (1 min) | the clock | **flashing**, its rectangle only |
+| `DATA_EVERY` (5 min) | the readings | plain, its rectangle |
+| `GRAPH_EVERY` (15 min) | the chart | plain, its rectangle |
+| `FORECAST_EVERY` (30 min) | forecast, week, footer | plain, its rectangle |
+| `FULL_EVERY` (60 min) | everything | **flashing**, whole screen |
+
+The clock changes every minute, so it ghosts first — and its rectangle is small
+enough that flashing it is barely noticeable, which is why it gets hourly
+treatment every minute while the rest of the screen waits.
+
+`FORECAST_EVERY` is a *redraw* cadence and has nothing to do with how often the
+forecast is fetched from the API: that is the collector's own interval
+(`interval_min`, 10–360, in the Forecast settings). Setting the Kindle's
+shorter just redraws the same numbers.
+
+Two mechanics carry more of the result than the intervals do. Each tier
+**clears its rectangle before drawing** — e-ink does not erase what it is drawn
+over, so `21.0` replaced by `9.8` leaves the `0` standing. And each tier draws
+with `fbink -b` (framebuffer only) and **refreshes once at the end**; without
+it every string is its own visible repaint, twenty per page, each leaving a
+ghost.
+
+### It was speaking a language FBInk does not
+
+Worth recording, because nothing in this repository could have caught it and
+the symptom was not a crash. The renderer invoked `-p` for pixel coordinates
+(it means `--padded`), `-M` for a partial refresh (`--halfway`, which centres
+text vertically), `-R WxH` for a filled rectangle and `-L W` for a line —
+neither exists, and `-L` is `--linecountcode` — `-F` with a font *path* when it
+names a built-in font, and colours `GRAY10`/`GRAY14`/`GRAY15` when the palette
+runs `GRAY1`..`GRAY9` then `GRAYA`..`GRAYE`. Text was positioned in character
+cells while every layout file is written in pixels.
+
+Since the script sends stderr to `/dev/null`, all of it failed quietly: the
+chart and the icons drew, the text did not. `tests/kindle/drive_dash.sh` now
+runs the drawing code against a fake `fbink` that records its argv and
+validates every call against FBInk's own option table — the only way any of
+this can be checked without a Kindle on the desk. It also walks a simulated
+hour of the tier schedule, and asserts the four rectangles tile both shipped
+panel sizes, since a gap between two of them is a strip nothing ever repaints.
+
 ## The 24-hour trend needs its own storage
 
 This is the part worth understanding before you wonder why a new feature

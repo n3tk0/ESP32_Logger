@@ -9,12 +9,13 @@
   reads menu.json it was being ignored anyway.
 
   Both files are kept because KUAL 1.x reads this and 2.x reads menu.json;
-  they must describe the same two actions.
+  pointing at the same file is what keeps the two in step — Start, Stop and the
+  Settings submenu are described once, in menu.json, and never listed here.
 -->
 <extension>
   <information>
     <name>ESP32 Dashboard</name>
-    <version>1.0</version>
+    <version>1.1</version>
     <author>ESP32_Logger</author>
     <id>esp32dash</id>
   </information>

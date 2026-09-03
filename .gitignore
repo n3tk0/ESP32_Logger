@@ -60,3 +60,8 @@ node/build.log
 # the file the second-largest thing in the repository.
 compile_commands.json
 data/
+
+# The Kindle dashboard writes its settings here, seeded from
+# kindle/dash.conf.default on first run. It holds one person's collector
+# address and refresh intervals — never the project's.
+kindle/dash.conf

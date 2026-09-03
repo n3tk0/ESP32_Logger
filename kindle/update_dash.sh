@@ -1,98 +1,130 @@
 #!/bin/sh
 # ============================================================================
-# update_dash.sh — FBInk Kindle Weather Dashboard
+# update_dash.sh — FBInk Kindle dashboard
 #
-# Fetches sensor data from an ESP32 collector and renders it directly to the
-# Kindle's framebuffer using FBInk. Designed for always-on, wall-powered use.
+# Fetches sensor data from an ESP32 collector and draws it straight to the
+# Kindle's framebuffer with FBInk. Built for an always-on, wall-powered panel.
 #
-# Tiered refresh strategy to balance readability vs e-ink wear:
-#   Every  1 min — update clock text (partial refresh, clock zone only)
-#   Every  5 min — fetch sensor data + graph, update all text (partial)
-#   Every 10 min — partial clear of clock zone (anti-ghosting)
-#   Every 30 min — full screen flash refresh (clear all ghosting)
+# ── Settings ────────────────────────────────────────────────────────────────
+# Everything a person needs to change lives in dash.conf beside this script —
+# the collector address and the four refresh intervals. settings.sh edits it
+# from KUAL, so the device needs no keyboard and this file needs no editing.
 #
-# All temporary files land on /tmp (tmpfs) to prevent eMMC wear.
+# ── How the screen is refreshed ─────────────────────────────────────────────
+# E-ink ghosts: a partial update leaves a faint impression of what was there
+# before, and impressions accumulate. The cure is a flashing update (the panel
+# driven to black and back), which is slow and visible — so it is spent where
+# it buys the most and withheld where it would only annoy.
+#
+#   every  CLOCK_EVERY min — the clock rectangle only, with a flashing refresh
+#                            of that rectangle: the one region that changes
+#                            every minute is also the one that ghosts first,
+#                            and a flash 200 px wide is barely noticeable
+#   every  DATA_EVERY  min — fetch, then redraw the readings block, one plain
+#                            (non-flashing) refresh of that rectangle
+#   every  GRAPH_EVERY min — refetch the 24 h chart and blit it
+#   every  FORECAST_EVERY  — redraw the forecast, week strip and footer; the
+#                            collector polls the weather API on its own
+#                            interval (Settings → Forecast), so asking more
+#                            often than that just redraws the same values
+#   every  FULL_EVERY  min — clear and redraw the whole page with a full
+#                            flashing refresh, which resets ghosting entirely
+#
+# Each tier draws with `fbink -b` (framebuffer only, no refresh) and then
+# issues ONE refresh for the rectangle it touched. Refreshing per draw call —
+# which is what happens if -b is left off — costs one visible repaint per piece
+# of text, twenty of them for a page like this, and every one leaves its own
+# ghost.
+#
+# ── A note on the FBInk command line ────────────────────────────────────────
+# This file used to invoke flags that do not exist: `-p` for pixel coordinates
+# (it means --padded), `-M` for a partial refresh (it means --halfway, which
+# centres the text vertically), `-R WxH` for a filled rectangle and `-L W` for
+# a line (neither is an FBInk option; -L is --linecountcode), `-F` with a path
+# (it names a BUILT-IN font, not a file), and colours GRAY10/GRAY14/GRAY15
+# (the scale is GRAY1..GRAY9 then GRAYA..GRAYE). Text was positioned in
+# character cells while the layout files are in pixels.
+#
+# The primitives below use the documented interface: -t/--truetype for text at
+# a pixel position, -k/--cls for filled rectangles, -s/--refresh with a region
+# for refreshes, -b/--norefresh to batch. See fbink --help.
+#
+# All temporary files land on /tmp (tmpfs) to spare the eMMC.
 # ============================================================================
 
-# ── Configuration ────────────────────────────────────────────────────────────
-# WHERE THIS SCRIPT LIVES, not a fixed path. It was pinned to
-# /mnt/us/dashboard, which is the one place a KUAL extension cannot be: KUAL
-# builds its menu by scanning the subdirectories of /mnt/us/extensions and
-# nowhere else, so an extension installed where the README said to put it was
-# never listed — and one moved into extensions/ to be listed then found no
-# layout and no icons, because those were still looked up under the old path.
-#
-# Deriving it removes the conflict: the folder works wherever it is copied,
-# and the KUAL location is just one of them. DASH_DIR in the environment still
-# wins, for anyone who has split the data off somewhere else.
+# ── Where this script lives ──────────────────────────────────────────────────
+# Derived, not fixed: a KUAL extension can be installed under any name in
+# /mnt/us/extensions/, and the layout, icons, fonts and dash.conf all have to be
+# found relative to wherever that turned out to be.
 if [ -z "$DASH_DIR" ]; then
     DASH_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || DASH_DIR=$(dirname "$0")
 fi
-TMP="/tmp/dash"
-HOST="http://192.168.1.50"       # ESP32 collector IP — change to match yours
-FETCH_TIMEOUT=10                  # wget timeout in seconds
+TMP="${DASH_TMP:-/tmp/dash}"
+CONF="${DASH_CONF:-$DASH_DIR/dash.conf}"
+CONF_DEFAULT="$DASH_DIR/dash.conf.default"
 
-# ── Prevent sleep & screensaver ──────────────────────────────────────────────
-# The device is wall-powered and must not blank the screen or suspend.
-# lipc-set-prop talks to the Kindle's own power daemon.
-prevent_sleep() {
-    lipc-set-prop com.lab126.powerd preventScreenSaver 1 2>/dev/null
-    # Some firmware versions need this too:
-    lipc-set-prop com.lab126.cmd intrf enable 2>/dev/null
-    # Disable the framework's own screen blanking if running:
-    lipc-set-prop com.lab126.blanket unload 2>/dev/null
+# ── Settings and their defaults ──────────────────────────────────────────────
+# dash.conf overrides these. The names are also the ones settings.sh accepts,
+# and conf_keys() below is the single list both ends read.
+HOST="http://192.168.1.50"
+FETCH_TIMEOUT=10
+CLOCK_EVERY=1
+DATA_EVERY=5
+GRAPH_EVERY=15
+FORECAST_EVERY=30
+FULL_EVERY=60
+CLOCK_FLASH_EVERY=1
+SENSOR_FLASH_EVERY=0
+
+conf_keys() {
+    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY"
 }
 
-restore_sleep() {
-    lipc-set-prop com.lab126.powerd preventScreenSaver 0 2>/dev/null
+# What each key means, for `settings.sh show` and for dash.conf's comments.
+conf_help() {
+    case "$1" in
+        HOST)               echo "Collector address (IP or http://host:port)" ;;
+        FETCH_TIMEOUT)      echo "Seconds to wait for the collector" ;;
+        CLOCK_EVERY)        echo "Minutes between clock updates" ;;
+        DATA_EVERY)         echo "Minutes between sensor updates" ;;
+        GRAPH_EVERY)        echo "Minutes between chart updates" ;;
+        FORECAST_EVERY)     echo "Minutes between forecast updates" ;;
+        FULL_EVERY)         echo "Minutes between whole-screen refreshes" ;;
+        CLOCK_FLASH_EVERY)  echo "Flash the clock zone every N clock updates (0 = never)" ;;
+        SENSOR_FLASH_EVERY) echo "Flash the readings zone every N sensor updates (0 = never)" ;;
+        *)                  echo "" ;;
+    esac
 }
 
-# ── Font selection ───────────────────────────────────────────────────────────
-# System fonts first; user can drop overrides into dashboard/fonts/.
-SYS_FONTS="/usr/java/lib/fonts"
-USR_FONTS="$DASH_DIR/fonts"
-
-pick_font() {
-    if [ -f "$USR_FONTS/$1" ]; then echo "$USR_FONTS/$1"
-    elif [ -f "$SYS_FONTS/$1" ]; then echo "$SYS_FONTS/$1"
-    else echo "$1"; fi  # bare name as last resort — FBInk may find it
-}
-
-FONT_REG=$(pick_font "Bookerly-Regular.ttf")
-FONT_BOLD=$(pick_font "Bookerly-Bold.ttf")
-
-# ── Network helpers ──────────────────────────────────────────────────────────
-fetch_data() {
-    wget -q -T "$FETCH_TIMEOUT" -O "$TMP/data.txt" "$HOST/kindle/data" 2>/dev/null
-}
-
-fetch_graph() {
-    wget -q -T 15 -O "$TMP/graph.bmp" "$HOST/kindle/graph.bmp" 2>/dev/null
-}
-
-# Read KEY="value" pairs into the environment WITHOUT executing the file.
+# ── Reading key=value files without executing them ───────────────────────────
+# Used for BOTH dash.conf and the collector's payload, and for the payload it is
+# the whole defence. `. "$TMP/data.txt"` was doing exactly that — executing it —
+# as root. The file arrives over plain HTTP from a device on the network and one
+# of the values in it is the forecast provider's free-text summary, so "the
+# collector is trusted" was not enough even before considering anyone able to
+# answer for it on the wire. A summary of  "; reboot; #  is a command, not a
+# description.
 #
-# `. "$TMP/data.txt"` was doing exactly that — executing it — as root. The file
-# arrives over plain HTTP from a device on the network, and one of the values in
-# it is the forecast provider's free-text summary, so "the collector is
-# trusted" was not enough even before considering anyone able to answer for it
-# on the wire. A summary of  "; reboot; #  is a command, not a description.
-#
-# The collector escapes what it emits, and this refuses to run what it reads.
-# Either alone would do; both means a mistake at one end is not a shell on the
-# reader.
-#
-# Only names matching the dashboard's own convention are accepted, the value is
-# taken literally up to the closing quote, and the shell's own unescaping is
-# applied to nothing.
-load_data() {
-    [ -f "$TMP/data.txt" ] || return 1
+# Only names matching the convention are accepted, the value is taken literally
+# up to the closing quote, and the shell's own unescaping is applied to nothing.
+# $2, when given, is a space-separated whitelist of names to accept.
+load_kv() {
+    local file="$1" allow="${2:-}"
+    local line key val
+    [ -f "$file" ] || return 1
     while IFS= read -r line; do
+        case "$line" in ''|'#'*) continue ;; esac
         key=${line%%=*}
         [ "$key" = "$line" ] && continue          # no '=' — not an assignment
         case "$key" in
             *[!A-Za-z0-9_]* | '' ) continue ;;    # not a plain variable name
         esac
+        if [ -n "$allow" ]; then
+            case " $allow " in
+                *" $key "*) ;;
+                *) continue ;;
+            esac
+        fi
         val=${line#*=}
         case "$val" in
             '"'*'"' )
@@ -103,7 +135,151 @@ load_data() {
                 ;;
         esac
         eval "$key=\$val"                         # value expanded, never parsed
-    done < "$TMP/data.txt"
+    done < "$file"
+    return 0
+}
+
+# ── Settings validation ──────────────────────────────────────────────────────
+# Applied on load as well as on save, so a hand-edited dash.conf cannot put the
+# loop into a state with no tiers — an interval of 0 or a stray word would
+# otherwise make `expr % 0` fail once a minute, forever, silently.
+conf_valid() {
+    # $1=key $2=value → 0 if acceptable
+    local k="$1" v="$2"
+    case "$k" in
+        HOST)
+            case "$v" in
+                ''|*' '*|*'"'*|*'`'*|*'$'*|*';'*|*'|'*|*'&'*) return 1 ;;
+            esac
+            return 0 ;;
+        *)
+            case "$v" in
+                ''|*[!0-9]*) return 1 ;;
+            esac
+            # Zero disables the two flash counters; every other key needs a tier
+            # that actually comes round.
+            case "$k" in
+                CLOCK_FLASH_EVERY|SENSOR_FLASH_EVERY) [ "$v" -le 1440 ] ;;
+                *) [ "$v" -ge 1 ] && [ "$v" -le 1440 ] ;;
+            esac
+            ;;
+    esac
+}
+
+conf_load() {
+    local k v
+    [ -f "$CONF" ] || return 0
+    # Into the shell only through the whitelist, and only if it passes.
+    for k in $(conf_keys); do
+        eval "DASH_PREV_$k=\$$k"
+    done
+    load_kv "$CONF" "$(conf_keys)"
+    for k in $(conf_keys); do
+        eval "v=\$$k"
+        if ! conf_valid "$k" "$v"; then
+            eval "$k=\$DASH_PREV_$k"
+            echo "dash.conf: $k=$v is not valid, keeping the default" >&2
+        fi
+    done
+}
+
+# The address as wget needs it. The scheme is added HERE rather than folded
+# into HOST on load, so dash.conf keeps exactly what was set and `settings.sh
+# get HOST` answers with it — a value that changes shape between being written
+# and being read back is one nobody can check against what they typed.
+host_url() {
+    case "$HOST" in
+        http://*|https://*) printf '%s' "$HOST" ;;
+        *)                  printf 'http://%s' "$HOST" ;;
+    esac
+}
+
+conf_write() {
+    # Rewrite dash.conf from the values currently in the environment.
+    local k v tmp="$CONF.tmp$$"
+    {
+        echo "# dash.conf — ESP32 Logger Kindle dashboard"
+        echo "#"
+        echo "# Edited from KUAL (ESP32 Dashboard → Settings) or by hand."
+        echo "# Restart the dashboard for a change to take effect."
+        echo ""
+        for k in $(conf_keys); do
+            eval "v=\$$k"
+            echo "# $(conf_help "$k")"
+            echo "$k=$v"
+        done
+    } > "$tmp" || return 1
+    mv "$tmp" "$CONF"
+}
+
+conf_init() {
+    # First run: seed dash.conf from the shipped defaults, so that copying a new
+    # version of the extension over the old one cannot overwrite settings —
+    # dash.conf is not in the repository, dash.conf.default is.
+    [ -f "$CONF" ] && return 0
+    if [ -f "$CONF_DEFAULT" ]; then
+        cp "$CONF_DEFAULT" "$CONF" 2>/dev/null && return 0
+    fi
+    conf_write
+}
+
+# ── Prevent sleep & screensaver ──────────────────────────────────────────────
+prevent_sleep() {
+    lipc-set-prop com.lab126.powerd preventScreenSaver 1 2>/dev/null
+    lipc-set-prop com.lab126.cmd intrf enable 2>/dev/null
+    lipc-set-prop com.lab126.blanket unload 2>/dev/null
+}
+
+restore_sleep() {
+    lipc-set-prop com.lab126.powerd preventScreenSaver 0 2>/dev/null
+}
+
+# ── Font selection ───────────────────────────────────────────────────────────
+# -t/--truetype needs a FILE. A name that does not resolve leaves every string
+# undrawn, so the candidates are tried in order and the first file that exists
+# wins; the Kindle's own font directory is the fallback for a device with no
+# Bookerly, and dropping any .ttf into fonts/ overrides the lot.
+SYS_FONTS="/usr/java/lib/fonts"
+USR_FONTS="$DASH_DIR/fonts"
+
+pick_font() {
+    # $1=preferred file name, $2...=alternatives
+    local name
+    for name in "$@"; do
+        [ -f "$USR_FONTS/$name" ] && { echo "$USR_FONTS/$name"; return 0; }
+    done
+    for name in "$@"; do
+        [ -f "$SYS_FONTS/$name" ] && { echo "$SYS_FONTS/$name"; return 0; }
+    done
+    echo ""
+}
+
+font_setup() {
+    FONT_REG=$(pick_font "Bookerly-Regular.ttf" "Caecilia_LT_65_Medium.ttf" \
+                         "Helvetica_LT_65_Medium.ttf" "Futura_LT_Book.ttf")
+    FONT_BOLD=$(pick_font "Bookerly-Bold.ttf" "Caecilia_LT_75_Bold.ttf" \
+                          "Helvetica_LT_75_Bold.ttf" "Futura_LT_Bold.ttf")
+    [ -z "$FONT_BOLD" ] && FONT_BOLD="$FONT_REG"
+    [ -z "$FONT_REG" ]  && FONT_REG="$FONT_BOLD"
+    if [ -z "$FONT_REG" ]; then
+        echo "No TrueType font found in $USR_FONTS or $SYS_FONTS." >&2
+        echo "Drop one into $USR_FONTS — text cannot be drawn without it." >&2
+        return 1
+    fi
+    return 0
+}
+
+# ── Network helpers ──────────────────────────────────────────────────────────
+fetch_data() {
+    wget -q -T "$FETCH_TIMEOUT" -O "$TMP/data.txt" "$(host_url)/kindle/data" 2>/dev/null
+}
+
+fetch_graph() {
+    wget -q -T 15 -O "$TMP/graph.bmp" "$(host_url)/kindle/graph.bmp" 2>/dev/null
+}
+
+load_data() {
+    load_kv "$TMP/data.txt" || return 1
 
     # The layout follows the data, always — RES_W and RES_H come from the
     # collector, so the two cannot be loaded independently.
@@ -111,10 +287,7 @@ load_data() {
     # It used to be called once, inside the branch taken when the FIRST fetch
     # succeeded. A Kindle that finished booting before the ESP32 did took the
     # other branch, and nothing in the main loop ever called it again: every
-    # coordinate stayed unset for as long as the script ran, and the only cure
-    # was noticing and restarting it. Calling it here also means a change to
-    # the FBInk resolution on the collector is picked up on the next fetch
-    # rather than at the next reboot.
+    # coordinate stayed unset for as long as the script ran.
     load_layout
     return 0
 }
@@ -125,57 +298,106 @@ load_layout() {
     if [ -f "$conf" ]; then
         . "$conf"
     else
-        # Fallback to 600x800
         . "$DASH_DIR/layout/600x800.conf"
     fi
+    zones_derive
+}
+
+# ── The four rectangles the page is refreshed in ─────────────────────────────
+# They tile the screen top to bottom: readings, chart, forecast — with the clock
+# inside the readings block, because it is the one region that changes on its
+# own timer and so needs a rectangle of its own too.
+#
+# Derived from the layout's own dividers rather than listed again in it: the
+# chart starts at RULE2_Y and the forecast at RULE3_Y whatever the panel, and a
+# second copy of those numbers is a second copy to keep in step.
+zones_derive() {
+    ZW=${RES_W:-600}
+    ZH=${RES_H:-800}
+
+    Z_CLOCK_X=${CL_X:-318};  Z_CLOCK_Y=${CL_Y:-26}
+    Z_CLOCK_W=${CL_W:-264};  Z_CLOCK_H=${CL_H:-104}
+
+    Z_SENS_X=0
+    Z_SENS_Y=0
+    Z_SENS_W=$ZW
+    Z_SENS_H=${RULE2_Y:-255}
+
+    # The chart, plus the caption above it.
+    Z_CHART_X=0
+    Z_CHART_Y=${RULE2_Y:-255}
+    Z_CHART_W=$ZW
+    Z_CHART_H=$(( ${RULE3_Y:-490} - ${RULE2_Y:-255} ))
+
+    Z_FC_X=0
+    Z_FC_Y=${RULE3_Y:-490}
+    Z_FC_W=$ZW
+    Z_FC_H=$(( ZH - ${RULE3_Y:-490} ))
 }
 
 # ── Drawing primitives ───────────────────────────────────────────────────────
-# FBInk coordinate reference:
-#   -x COL  — column (from left)
-#   -y ROW  — row (from top)
-#   -S SIZE — pixel size for OT/TT fonts
-#   -F FONT — path to .ttf
-#   -C COLOR — FBInk color name or hex
-#   -p       — use pixel coordinates (not row/col)
-#   -M       — partial refresh (no flash)
-#   -f       — full flash refresh
+# Every one of them draws with -b (framebuffer only). The refresh is a separate
+# call per zone, at the end — see the header.
+#
+#   -t regular=FILE,px=N,left=X,top=Y   text at a pixel position, TrueType
+#   -k top=,left=,width=,height=        fill a rectangle with -B
+#   -s top=,left=,width=,height= [-f]   refresh that rectangle, flashing or not
+#   -g file=,x=,y=                      blit an image
+#
+# The `--` before a string is not decoration: the outdoor temperature is
+# regularly "-2.4", and without it FBInk reads that as options.
+
+fb() { fbink "$@" 2>/dev/null; }
 
 draw_text() {
-    # $1=x $2=y $3=size $4=font $5=color $6=text
-    fbink -x "$1" -y "$2" -S "$3" -F "$4" -C "$5" -p -M -q "$6" 2>/dev/null
+    # $1=x $2=y $3=px $4=font file $5=colour $6=text
+    [ -n "$6" ] || return 0
+    [ -n "$4" ] || return 0
+    fb -q -b -C "$5" -t regular="$4",px="$3",left="$1",top="$2" -- "$6"
 }
 
-draw_text_bold() {
-    draw_text "$1" "$2" "$3" "$FONT_BOLD" "$4" "$5"
-}
+draw_text_bold() { draw_text "$1" "$2" "$3" "$FONT_BOLD" "$4" "$5"; }
+draw_text_reg()  { draw_text "$1" "$2" "$3" "$FONT_REG"  "$4" "$5"; }
 
-draw_text_reg() {
-    draw_text "$1" "$2" "$3" "$FONT_REG" "$4" "$5"
+fill_rect() {
+    # $1=x $2=y $3=w $4=h $5=colour
+    fb -q -b -B "$5" -k top="$2",left="$1",width="$3",height="$4"
 }
 
 draw_hline() {
-    # $1=x $2=y $3=width $4=color
-    fbink -x "$1" -y "$2" -S 1 -C "$4" -p -M -q -L "$3" 2>/dev/null
+    # $1=x $2=y $3=width $4=colour — a rectangle one pixel tall, because FBInk
+    # has no line primitive and -L is --linecountcode, which took this script's
+    # width as a string to print.
+    fill_rect "$1" "$2" "$3" "${RULE_H:-1}" "$4"
 }
 
-# ── Clock rendering ──────────────────────────────────────────────────────────
+draw_image() {
+    # $1=file $2=x $3=y
+    [ -f "$1" ] || return 0
+    fb -q -b -g file="$1",x="$2",y="$3"
+}
+
+refresh_zone() {
+    # $1=x $2=y $3=w $4=h $5=1 to flash
+    if [ "${5:-0}" = "1" ]; then
+        fb -q -f -s top="$2",left="$1",width="$3",height="$4"
+    else
+        fb -q -s top="$2",left="$1",width="$3",height="$4"
+    fi
+}
+
+refresh_screen() { fb -q -f -s; }
+
+clear_screen()   { fb -q -b -B WHITE -k; }
+
+# ── Clock ────────────────────────────────────────────────────────────────────
 draw_clock() {
     local now_time="$1"
+    fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
     draw_text_bold "$CL_X" "$CL_Y" "$CL_SIZE" "BLACK" "$now_time"
 }
 
-# ── Full dashboard rendering ─────────────────────────────────────────────────
-# ── The eleven places ────────────────────────────────────────────────────────
-# The collector sends what is in each named place and, for the two groups that
-# can close up behind an empty one, which places survived and in what order —
-# and for the grid, how they break into rows. All this end does is turn that
-# into pixels for one panel.
-#
-# NAMES, NOT COORDINATES. 600x800 and 1072x1448 want different pixel positions
-# for the same design, and the reader should not have to place every value
-# twice; the layout file carries the positions, this carries the drawing.
-
+# ── One place's value ────────────────────────────────────────────────────────
 # ONE PLACE'S VALUE IS THREE DRAWS, not one.
 #
 # The number at its full size, then its unit as a footnote at four tenths of it,
@@ -184,10 +406,6 @@ draw_clock() {
 # came out — and FBInk will not say. The collector measures them for us and
 # sends the widths as Z_<PLACE>_VADVW and _UADVW, in thousandths of the type
 # size; see kdAdvanceMille() in KindleDashboard.cpp.
-#
-# A unit at full size was what the first version of this drew, and it was wrong
-# twice: "1008 hPa ↘" at 32 px is wider than the column it sits in, and a unit
-# as loud as its number is not a unit, it is a second number.
 draw_field() {
     # $1=x $2=row top $3=size $4=bold $5=value $6=unit $7=arrow
     # $8=value advance $9=unit advance ${10}=ink colour
@@ -238,7 +456,7 @@ draw_field() {
 }
 
 # Where a smaller value has to start so it shares a baseline with a larger one
-# beside it. FBInk's y is the TOP of the text, so two sizes drawn at one y sit
+# beside it. FBInk's top is the TOP of the text, so two sizes drawn at one y sit
 # on two baselines and the row looks dropped; the ascent is about eight tenths
 # of the size, which is where the 80 comes from.
 baseline_y() {
@@ -246,8 +464,17 @@ baseline_y() {
     echo $(( $1 + ($2 - $3) * 80 / 100 ))
 }
 
+# ── The readings block ───────────────────────────────────────────────────────
+# The collector sends what is in each named place and, for the two groups that
+# can close up behind an empty one, which places survived and in what order —
+# and for the grid, how they break into rows. All this end does is turn that
+# into pixels for one panel.
+#
+# NAMES, NOT COORDINATES. 600x800 and 1072x1448 want different pixel positions
+# for the same design, and the reader should not have to place every value
+# twice; the layout file carries the positions, this carries the drawing.
 draw_zones() {
-    # A collector running older firmware sends no Z_GROUP_OUT, and draw_all
+    # A collector running older firmware sends no Z_GROUP_OUT, and draw_sensors
     # falls back to the fixed keys it does send — so the reader and the
     # collector do not have to be updated in the same minute.
     [ -n "${Z_GROUP_OUT:-}" ] || return 1
@@ -273,7 +500,7 @@ draw_zones() {
         local hw=$(( hero_sz * ${Z_HERO_ADVW:-0} / 1000 ))
         local sx=$(( lx + hw + ${HEAD_GAP:-8} ))
         y=$(baseline_y "$hero_y" "$hero_sz" "$big_sz")
-        draw_text_reg "$sx" "$y" "$big_sz" "GRAY10" "/"
+        draw_text_reg "$sx" "$y" "$big_sz" "GRAYA" "/"
         draw_field "$(( sx + ${SLASH_W:-22} ))" "$y" "$big_sz" "${Z_BIG_BOLD:-0}" \
                    "$Z_BIG_VALUE" "$Z_BIG_UNIT" "$Z_BIG_ARROW" \
                    "${Z_BIG_VADVW:-0}" "${Z_BIG_UADVW:-0}" "${Z_BIG_INK:-BLACK}"
@@ -281,24 +508,17 @@ draw_zones() {
 
     # The 24 h low-to-high and the age, composed by the collector so that the
     # wording, the unit and the rounding are the page's and not this script's.
-    # Set in the page's mid grey, not its dark one: it is context for the big
-    # number above it, not a reading in its own right. The collector sends an
-    # empty string when the reader has switched it off.
     [ -n "${Z_SUB:-}" ] && \
         draw_text_reg "$lx" "${SUB_Y:-128}" "${SUB_SZ:-14}" "GRAY7" "$Z_SUB"
 
     # ── Left column: the grid ───────────────────────────────────────────────
     # GRID_ROWS says how many cells are on each row; each row then divides its
     # own width by its own count, so two cells are two halves rather than two of
-    # three thirds with the last one left white. The balancing is the
-    # collector's, because the HTML page has to break the rows the same way and
-    # a rule written twice is a rule written differently.
+    # three thirds with the last one left white.
     local gy="${GRID_Y:-150}" gcols gvsz gcw gi=0
     set -- ${GRID_ZONES:-}
     for gcols in ${GRID_ROWS:-}; do
         gcw=$(( ${COL_L_W:-270} / gcols ))
-        # Three across is a third of half a page, which "1008 hPa" with an arrow
-        # after it does not fit at the two-across size.
         if [ "$gcols" -ge 3 ]; then gvsz="${GRID_VAL_SZ_3:-26}"
         else                        gvsz="${GRID_VAL_SZ:-31}"
         fi
@@ -318,20 +538,15 @@ draw_zones() {
     done
 
     # ── Right column: the indoor row ────────────────────────────────────────
-    # Three fields or two, whichever survived, on one row with the first set
-    # larger. Equal columns, so two are two halves and three are three thirds —
-    # the first is bigger by TYPE, not by width, which is what keeps the row
-    # aligned whichever count it is.
     n=0
     for z in ${IN_ZONES:-}; do n=$((n + 1)); done
     if [ "$n" -gt 0 ]; then
-        draw_hline "$rx" "${IN_RULE_Y:-126}" "$rw" "GRAY10"
+        draw_hline "$rx" "${IN_RULE_Y:-126}" "$rw" "GRAYA"
         draw_text_reg "$rx" "${IN_LAB_Y:-134}" "$lab_sz" "GRAY7" "$Z_GROUP_IN"
 
         # The first field gets more of the row, not an equal share: it is set
         # larger, so equal columns crowd it against its neighbour while leaving
-        # the small ones space they do not need. The same split the HTML page
-        # uses.
+        # the small ones space they do not need.
         local w1
         if [ "$n" -ge 3 ]; then w1=$(( rw * 42 / 100 ))
         elif [ "$n" -eq 2 ]; then w1=$(( rw * 58 / 100 ))
@@ -340,10 +555,8 @@ draw_zones() {
         cw=$(( n > 1 ? (rw - w1) / (n - 1) : rw ))
 
         # ALL THREE VALUES SIT ON ONE BOTTOM EDGE. The first has no caption —
-        # the heading above already says which room this is, and "TEMP" under
-        # it says nothing the degree sign has not — so it is half again as tall
-        # and starts higher. The other two hang their captions in the space it
-        # does not use, which is the space its missing caption gave back.
+        # the heading above already says which room this is — so it is half
+        # again as tall and starts higher.
         local big="${IN_VAL_SZ_1:-52}" small="${IN_VAL_SZ:-28}"
         local big_y="${IN_VAL_Y:-158}"
         local small_y=$(( big_y + big - small ))
@@ -367,11 +580,8 @@ draw_zones() {
     fi
 
     # ── The hairline between the columns ────────────────────────────────────
-    # Drawn last, so nothing above paints over it. SEP_W=0 in the layout file
-    # turns it off for a panel where it does not come out cleanly.
     if [ "${SEP_W:-1}" -gt 0 ] 2>/dev/null; then
-        fbink -x "${SEP_X:-300}" -y "${TOP_Y:-20}" -C GRAY10 -p -M -q \
-              -R "${SEP_W:-1}x${SEP_H:-210}" 2>/dev/null
+        fill_rect "${SEP_X:-300}" "${TOP_Y:-20}" "${SEP_W:-1}" "${SEP_H:-210}" GRAYA
     fi
 
     return 0
@@ -379,50 +589,28 @@ draw_zones() {
 
 # A battery node whose cells are running down stops reporting without saying
 # anything first, and the page it stops appearing on is the one that ought to
-# warn about it. Drawn beside the outdoor heading on both paths — it used to be
-# in the fallback block only, which meant the current layout never showed it.
+# warn about it.
 draw_battery_badge() {
     [ "${OUT_BATT_WARN:-0}" = "1" ] || return 0
-    [ -f "$ICON_DIR/fc_batt.bmp" ] || return 0
-    fbink -g file="$ICON_DIR/fc_batt.bmp",x="$BATT_X",y="$BATT_Y" -p -M -q 2>/dev/null
+    draw_image "$ICON_DIR/fc_batt.bmp" "$BATT_X" "$BATT_Y"
 }
 
-draw_all() {
-    # The nine places, when the collector describes them. One running older
-    # firmware sends no Z_GROUP_OUT, and the hardwired block below still draws
-    # the page it knows how to describe — so the reader and the collector do not
-    # have to be updated in the same minute.
+# The layout the collector describes, or the fixed one it used to.
+draw_sensors_body() {
     if draw_zones; then
-        draw_clock "$(date +%H:%M)"
         draw_battery_badge
-        draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAY10"
-        draw_text_reg "$LAB_CHART_X" "$LAB_CHART_Y" "$LAB_SZ" "GRAY7" "$LBL_LAST24"
-        if [ -f "$TMP/graph.bmp" ]; then
-            fbink -g file="$TMP/graph.bmp",x="$GR_X",y="$GR_Y" -p -M -q 2>/dev/null
-        fi
-        # The rule between the chart and the forecast. It was drawn only on the
-        # fallback path below, so the places path ran the two sections together
-        # with nothing between them — and the fc_batt.bmp icons shipped in
-        # kindle/icons/ were dead files, since the badge was down there too.
-        draw_hline "$RULE3_X" "$RULE3_Y" "$RULE3_W" "GRAY10"
-        draw_forecast
         return 0
     fi
 
-    # Section label: OUTSIDE
+    # ── The legacy fixed layout ─────────────────────────────────────────────
     draw_text_reg "$LAB_OUT_X" "$LAB_OUT_Y" "$LAB_SZ" "GRAY7" "$LBL_OUTSIDE"
-
     draw_battery_badge
-
-    # Hero outdoor temperature
     draw_text_bold "$LEGACY_HERO_X" "$LEGACY_HERO_Y" "$LEGACY_HERO_SZ" "BLACK" "${OUT_TEMP}°"
 
-    # Outdoor humidity
     if [ "$OUT_HUM" != "-1" ]; then
         draw_text_reg "$HUM_X" "$HUM_Y" "$HUM_SZ" "GRAY4" "/${OUT_HUM}%"
     fi
 
-    # Subtitle: 24h range + age
     local sub=""
     if [ -n "$OUT_RANGE_LO" ] && [ -n "$OUT_RANGE_HI" ]; then
         sub="${OUT_RANGE_LO} ${LBL_TO} ${OUT_RANGE_HI}°"
@@ -430,81 +618,54 @@ draw_all() {
     if [ "$OUT_AGE_MIN" -gt 1 ] 2>/dev/null; then
         sub="$sub  ${OUT_AGE_MIN}m"
     fi
-    if [ -n "$sub" ]; then
-        draw_text_reg "$LEGACY_SUB_X" "$LEGACY_SUB_Y" "$LEGACY_SUB_SZ" "GRAY4" "$sub"
-    fi
+    [ -n "$sub" ] && draw_text_reg "$LEGACY_SUB_X" "$LEGACY_SUB_Y" "$LEGACY_SUB_SZ" "GRAY4" "$sub"
 
-    # Pressure
     if [ -n "$OUT_PRES" ] && [ "$OUT_PRES" != "--" ]; then
         draw_text_bold "$PRES_X" "$PRES_Y" "$PRES_SZ" "BLACK" "$OUT_PRES $OUT_PRES_UNIT"
     fi
-
-    # Pressure tendency
     if [ -n "$OUT_TEND" ]; then
         draw_text_reg "$TEND_X" "$TEND_Y" "$TEND_SZ" "GRAY4" "$OUT_TEND_ARROW $OUT_TEND ($OUT_TEND_DELTA)"
     fi
 
-    # Divider line
-    draw_hline "$RULE1_X" "$RULE1_Y" "$RULE1_W" "GRAY10"
-
-    # Clock area (right side of hero)
-    draw_clock "$(date +%H:%M)"
-
-    # Indoor section label
+    draw_hline "$RULE1_X" "$RULE1_Y" "$RULE1_W" "GRAYA"
     draw_text_reg "$LAB_IN_X" "$LAB_IN_Y" "$LAB_SZ" "GRAY7" "$LBL_INSIDE"
 
-    # Indoor temperature + humidity
     local in_str="${IN_TEMP}°"
-    if [ "$IN_HUM" != "-1" ]; then
-        in_str="${in_str}/${IN_HUM}%"
-    fi
+    [ "$IN_HUM" != "-1" ] && in_str="${in_str}/${IN_HUM}%"
     if [ "$IN_AGE_MIN" -gt 1 ] 2>/dev/null; then
         in_str="$in_str  ${IN_AGE_MIN}m"
     fi
     draw_text_reg "$IN_X" "$IN_Y" "$IN_SZ" "BLACK" "$in_str"
+    return 0
+}
 
-    # Second divider
-    draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAY10"
-
-    # Section label: LAST 24 HOURS
+# ── The chart ────────────────────────────────────────────────────────────────
+draw_chart_body() {
+    draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAYA"
     draw_text_reg "$LAB_CHART_X" "$LAB_CHART_Y" "$LAB_SZ" "GRAY7" "$LBL_LAST24"
-
-    # Trend graph
-    if [ -f "$TMP/graph.bmp" ]; then
-        fbink -g file="$TMP/graph.bmp",x="$GR_X",y="$GR_Y" -p -M -q 2>/dev/null
-    fi
-
-    # Third divider
-    draw_hline "$RULE3_X" "$RULE3_Y" "$RULE3_W" "GRAY10"
-
-    draw_forecast
+    draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"
 }
 
 # ── Forecast, week strip and footer ──────────────────────────────────────────
-# Extracted from draw_all() so the slot flow and the legacy fixed layout can
-# both end the page the same way. None of it is a sensor reading, so none of it
-# is a slot: the forecast comes from an API, the week strip from the clock, and
-# the footer is a constant.
-draw_forecast() {
-    # Forecast section
+# None of it is a sensor reading, so none of it is a slot: the forecast comes
+# from an API, the week strip from the clock, and the footer is a constant.
+draw_forecast_body() {
+    draw_hline "$RULE3_X" "$RULE3_Y" "$RULE3_W" "GRAYA"
+
     if [ -n "$FC_SUMMARY" ]; then
         draw_text_reg "$LAB_FC_X" "$LAB_FC_Y" "$LAB_SZ" "GRAY7" "$LBL_FORECAST"
 
-        # Current condition icon
         local icon="$ICON_DIR/fc_${FC_CODE}_${FC_MAIN_SZ}.bmp"
         [ ! -f "$icon" ] && icon="$ICON_DIR/fc_-1_${FC_MAIN_SZ}.bmp"
-        if [ -f "$icon" ]; then
-            fbink -g file="$icon",x="$FC_ICON_X",y="$FC_ICON_Y" -p -M -q 2>/dev/null
-        fi
+        draw_image "$icon" "$FC_ICON_X" "$FC_ICON_Y"
 
-        # Current condition text
         draw_text_reg "$FC_TEXT_X" "$FC_TEXT_Y" "$FC_TEXT_SZ" "BLACK" "$FC_SUMMARY"
         draw_text_bold "$FC_TEMP_X" "$FC_TEMP_Y" "$FC_TEMP_SZ" "BLACK" "${FC_HIGH}°/${FC_LOW}°"
         if [ -n "$FC_WIND" ] && [ "$FC_WIND" != "0" ]; then
             draw_text_reg "$FC_WIND_X" "$FC_WIND_Y" "$FC_WIND_SZ" "GRAY4" "$LBL_WIND ${FC_WIND} km/h"
         fi
 
-        # 3 outlook columns
+        local i ol_label ol_code ol_temp ol_x ol_y ol_icon ol_icon_y ol_temp_y
         for i in 0 1 2; do
             eval "ol_label=\$FC${i}_LABEL"
             eval "ol_code=\$FC${i}_CODE"
@@ -512,60 +673,118 @@ draw_forecast() {
             eval "ol_x=\$OL${i}_X"
             eval "ol_y=\$OL${i}_Y"
 
-            if [ -n "$ol_label" ]; then
-                # Outlook label
-                draw_text_reg "$ol_x" "$ol_y" "$OL_LABEL_SZ" "GRAY7" "$ol_label"
+            [ -n "$ol_label" ] || continue
+            draw_text_reg "$ol_x" "$ol_y" "$OL_LABEL_SZ" "GRAY7" "$ol_label"
 
-                # Outlook icon
-                local ol_icon="$ICON_DIR/fc_${ol_code}_${FC_OL_SZ}.bmp"
-                [ ! -f "$ol_icon" ] && ol_icon="$ICON_DIR/fc_-1_${FC_OL_SZ}.bmp"
-                local ol_icon_y=$((ol_y + OL_ICON_OFFSET))
-                if [ -f "$ol_icon" ]; then
-                    fbink -g file="$ol_icon",x="$ol_x",y="$ol_icon_y" -p -M -q 2>/dev/null
-                fi
+            ol_icon="$ICON_DIR/fc_${ol_code}_${FC_OL_SZ}.bmp"
+            [ ! -f "$ol_icon" ] && ol_icon="$ICON_DIR/fc_-1_${FC_OL_SZ}.bmp"
+            ol_icon_y=$((ol_y + OL_ICON_OFFSET))
+            draw_image "$ol_icon" "$ol_x" "$ol_icon_y"
 
-                # Outlook temp
-                local ol_temp_y=$((ol_y + OL_TEMP_OFFSET))
-                draw_text_bold "$ol_x" "$ol_temp_y" "$OL_TEMP_SZ" "BLACK" "${ol_temp}°"
-            fi
+            ol_temp_y=$((ol_y + OL_TEMP_OFFSET))
+            draw_text_bold "$ol_x" "$ol_temp_y" "$OL_TEMP_SZ" "BLACK" "${ol_temp}°"
         done
     fi
 
     # Week strip
-    local wk_x="$WK_X"
+    local wk_x="$WK_X" wk_name wk_day wk_bg i
     for i in 0 1 2 3 4 5 6; do
         eval "wk_name=\$WK${i}_NAME"
         eval "wk_day=\$WK${i}_DAY"
 
-        # Background: inverted for today, grey for weekend
         if [ "$i" = "$WK_TODAY" ]; then
-            # Today: inverted (black bg, white text)
-            fbink -x "$wk_x" -y "$WK_Y" -S 1 -C BLACK -p -M -q -R "${WK_CELL_W}x${WK_CELL_H}" 2>/dev/null
+            # Today: knocked out of a black plate.
+            fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
             draw_text_reg "$wk_x" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "WHITE" "$wk_name"
             draw_text_bold "$wk_x" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "WHITE" "$wk_day"
         else
-            local wk_bg="GRAY15"
-            # Weekend slightly darker
-            [ "$i" = "5" ] || [ "$i" = "6" ] && wk_bg="GRAY14"
-            fbink -x "$wk_x" -y "$WK_Y" -S 1 -C "$wk_bg" -p -M -q -R "${WK_CELL_W}x${WK_CELL_H}" 2>/dev/null
+            wk_bg="GRAYE"
+            [ "$i" = "5" ] || [ "$i" = "6" ] && wk_bg="GRAYD"
+            fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
             draw_text_reg "$wk_x" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "GRAY7" "$wk_name"
             draw_text_bold "$wk_x" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "BLACK" "$wk_day"
         fi
-
         wk_x=$((wk_x + WK_CELL_W))
     done
 
-    # Footer
-    draw_hline "$FOOT_RULE_X" "$FOOT_RULE_Y" "$FOOT_RULE_W" "GRAY10"
+    draw_hline "$FOOT_RULE_X" "$FOOT_RULE_Y" "$FOOT_RULE_W" "GRAYA"
     draw_text_reg "$FOOT_X" "$FOOT_Y" "$FOOT_SZ" "GRAY5" "$LBL_MEASURED"
-
 }
 
-# ── Data-only update (partial) ───────────────────────────────────────────────
-draw_data() {
-    # Re-renders just the data fields without full clear.
-    # Each FBInk call does a partial refresh of its own area.
-    draw_all  # For now, same as full draw but without clear — FBInk handles partial
+# ── The four repaints ────────────────────────────────────────────────────────
+# Each one clears its own rectangle, draws into the framebuffer, and refreshes
+# that rectangle exactly once. Clearing first is not optional: e-ink does not
+# erase what it is drawn over, so "21.0" replaced by "9.8" leaves the "0"
+# standing where nothing wrote.
+
+redraw_clock() {
+    # $1=HH:MM  $2=1 to flash this rectangle
+    draw_clock "$1"
+    refresh_zone "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" "${2:-0}"
+}
+
+redraw_sensors() {
+    # $1=HH:MM  $2=1 to flash
+    fill_rect "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" WHITE
+    draw_sensors_body
+    draw_clock "$1"                 # inside this rectangle, so it goes with it
+    refresh_zone "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" "${2:-0}"
+}
+
+redraw_chart() {
+    fill_rect "$Z_CHART_X" "$Z_CHART_Y" "$Z_CHART_W" "$Z_CHART_H" WHITE
+    draw_chart_body
+    refresh_zone "$Z_CHART_X" "$Z_CHART_Y" "$Z_CHART_W" "$Z_CHART_H" 0
+}
+
+redraw_forecast() {
+    fill_rect "$Z_FC_X" "$Z_FC_Y" "$Z_FC_W" "$Z_FC_H" WHITE
+    draw_forecast_body
+    refresh_zone "$Z_FC_X" "$Z_FC_Y" "$Z_FC_W" "$Z_FC_H" 0
+}
+
+# The whole page, one flashing refresh at the end. This is the tier that
+# actually resets ghosting, and it is why the others do not have to.
+redraw_all() {
+    # $1=HH:MM
+    clear_screen
+    draw_sensors_body
+    draw_clock "$1"
+    draw_chart_body
+    draw_forecast_body
+    refresh_screen
+}
+
+# ── Which tiers are due this minute ──────────────────────────────────────────
+# Split out of the loop so it can be tested: tests/kindle/drive_dash.sh walks a
+# simulated hour and asserts the schedule, which is the part of this file most
+# likely to be got wrong by a plausible-looking edit.
+due() {
+    # $1=minute counter $2=interval — 0 or empty means "never"
+    [ -n "$2" ] && [ "$2" -gt 0 ] 2>/dev/null || return 1
+    [ $(( $1 % $2 )) -eq 0 ]
+}
+
+plan_minute() {
+    # Echoes the tiers due at minute $1, most expensive first. "full" stands in
+    # for all of them: it redraws the page, so nothing else has anything to do.
+    local m="$1" out=""
+    if due "$m" "$FULL_EVERY"; then
+        echo "full"
+        return 0
+    fi
+    due "$m" "$DATA_EVERY"     && out="$out sensors"
+    due "$m" "$GRAPH_EVERY"    && out="$out chart"
+    due "$m" "$FORECAST_EVERY" && out="$out forecast"
+    due "$m" "$CLOCK_EVERY"    && out="$out clock"
+    echo "${out# }"
+}
+
+flash_due() {
+    # $1=minute counter $2=tier interval $3=flash every N of those tiers
+    [ -n "$3" ] && [ "$3" -gt 0 ] 2>/dev/null || return 1
+    [ "$2" -gt 0 ] 2>/dev/null || return 1
+    [ $(( ($1 / $2) % $3 )) -eq 0 ]
 }
 
 # ── Cleanup on exit ──────────────────────────────────────────────────────────
@@ -579,19 +798,12 @@ cleanup() {
     rm -f /tmp/dash.pid
     exit 0
 }
-trap cleanup INT TERM
 
 # A sleep that can be interrupted.
 #
-# `sleep 60` in the foreground cannot: a shell running a foreground command
-# does not act on a trapped signal until that command returns, so pressing Stop
-# in KUAL did nothing visible for up to a minute — and stop.sh had already
-# removed the pidfile by then, so a second Start would launch another copy
-# alongside the one still winding down, two processes drawing to one
-# framebuffer.
-#
-# Backgrounding it and waiting is the POSIX way round that: `wait` returns as
-# soon as a trapped signal arrives, and the handler runs immediately.
+# `sleep 60` in the foreground cannot: a shell running a foreground command does
+# not act on a trapped signal until that command returns, so pressing Stop in
+# KUAL did nothing visible for up to a minute.
 SLEEP_PID=""
 nap() {
     sleep "$1" &
@@ -600,76 +812,107 @@ nap() {
     SLEEP_PID=""
 }
 
+# Sourced for the helpers alone — by settings.sh, and by the tests.
+[ -n "${DASH_LIB_ONLY:-}" ] && return 0
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
+trap cleanup INT TERM
+
 mkdir -p "$TMP"
+conf_init
+conf_load
+font_setup || echo "Continuing without text." >&2
 prevent_sleep
 
 # A layout BEFORE the first fetch, so no drawing path can run without one.
-#
-# RES_W and RES_H come from the collector, so load_layout() falls back to
-# 600x800 here and load_data() reloads it at the real resolution the moment the
-# collector answers. Without this the clock still ran on its own timer while the
-# collector was unreachable, emitting `fbink -x  -y  -S` with every coordinate
-# empty — rejected by FBInk, so the "Cannot reach" message stayed on screen by
-# luck rather than by design.
+# RES_W and RES_H come from the collector, so this falls back to 600x800 and
+# load_data() reloads it at the real resolution the moment the collector
+# answers.
 load_layout
 
-# Initial fetch and full draw
 if fetch_data; then
-    load_data          # also loads the layout, which follows RES_W/RES_H
+    load_data
     fetch_graph
-    fbink -c                    # clear full screen
-    draw_all
-    draw_clock "$(date +%H:%M)"
-    fbink -s -f                 # full refresh (flash)
+    redraw_all "$(date +%H:%M)"
 else
-    fbink -c
-    draw_text_reg 50 400 24 "BLACK" "Cannot reach $HOST — check WiFi"
-    fbink -s -f
+    clear_screen
+    draw_text_reg 40 380 24 "BLACK" "Cannot reach $(host_url)"
+    draw_text_reg 40 412 18 "GRAY5" "Check WiFi, or set the collector in KUAL → Settings"
+    refresh_screen
 fi
 
-# Main loop
-CYCLE=0
+# ── Main loop ────────────────────────────────────────────────────────────────
+# One tick a minute; the tiers decide what that tick costs.
+MINUTE=0
+FORCE_FULL=0
 while true; do
     nap 60
-    CYCLE=$((CYCLE + 1))
+    MINUTE=$((MINUTE + 1))
     NOW_TIME=$(date +%H:%M)
 
-    if [ $((CYCLE % 30)) -eq 0 ]; then
-        # ═══ FULL REFRESH (every 30 min) ═══
-        # Clears ghosting with a black flash, then redraws everything.
-        fetch_data && load_data
-        fetch_graph
-        fbink -c                        # full clear (flash to black)
-        draw_all
-        draw_clock "$NOW_TIME"
-        fbink -s -f                     # full e-ink refresh
+    # Settings are re-read every minute rather than at startup, so a change
+    # made from KUAL takes effect within a minute instead of needing Stop and
+    # Start. It is one small read from a filesystem the kernel has cached, and
+    # it is what makes the on-device settings menu usable at all.
+    conf_load
 
-    elif [ $((CYCLE % 10)) -eq 0 ]; then
-        # ═══ PARTIAL CLEAR (every 10 min) ═══
-        # Clears just the clock zone to reduce ghosting buildup.
-        fetch_data && load_data
-        # Clear clock area
-        fbink -x "$CL_X" -y "$CL_Y" -C WHITE -p -M -q \
-              -R "${CL_W}x${CL_H}" 2>/dev/null
-        draw_clock "$NOW_TIME"
-        draw_data
-
-    elif [ $((CYCLE % 5)) -eq 0 ]; then
-        # ═══ DATA UPDATE (every 5 min) ═══
-        # Fresh sensor data + new graph.
-        fetch_data && load_data
-        fetch_graph
-        draw_data
-        draw_clock "$NOW_TIME"
-
-    else
-        # ═══ CLOCK ONLY (every 1 min) ═══
-        # Clear just the clock text and redraw.
-        fbink -x "$CL_X" -y "$CL_Y" -C WHITE -p -M -q \
-              -R "${CL_W}x${CL_H}" 2>/dev/null
-        draw_clock "$NOW_TIME"
+    # settings.sh leaves this behind after any change: the settings screen it
+    # painted is sitting on top of the dashboard, and whatever changed should
+    # be visible now rather than at the top of the hour.
+    if [ -f "$TMP/redraw" ]; then
+        rm -f "$TMP/redraw"
+        FORCE_FULL=1
     fi
+
+    TIERS=$(plan_minute "$MINUTE")
+    [ "$FORCE_FULL" = "1" ] && TIERS="full"
+    FORCE_FULL=0
+
+    case " $TIERS " in
+        *" full "*)
+            fetch_data && load_data
+            fetch_graph
+            redraw_all "$NOW_TIME"
+            continue
+            ;;
+    esac
+
+    # One fetch serves however many tiers are due this minute.
+    case " $TIERS " in
+        *" sensors "*|*" forecast "*) fetch_data && load_data ;;
+    esac
+
+    case " $TIERS " in
+        *" sensors "*)
+            if flash_due "$MINUTE" "$DATA_EVERY" "$SENSOR_FLASH_EVERY"; then
+                redraw_sensors "$NOW_TIME" 1
+            else
+                redraw_sensors "$NOW_TIME" 0
+            fi
+            ;;
+    esac
+
+    case " $TIERS " in
+        *" chart "*) fetch_graph; redraw_chart ;;
+    esac
+
+    case " $TIERS " in
+        *" forecast "*) redraw_forecast ;;
+    esac
+
+    # The clock last, and only when the sensors tier has not already drawn it —
+    # it lives inside that rectangle, so drawing it twice in one minute is a
+    # second repaint of the same pixels.
+    case " $TIERS " in
+        *" sensors "*) ;;
+        *" clock "*)
+            if flash_due "$MINUTE" "$CLOCK_EVERY" "$CLOCK_FLASH_EVERY"; then
+                redraw_clock "$NOW_TIME" 1
+            else
+                redraw_clock "$NOW_TIME" 0
+            fi
+            ;;
+    esac
 done
