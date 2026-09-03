@@ -65,12 +65,48 @@ a shorter menu and no error at all.
   - Uses DeployManager for all operations
   - Same UX as before, simplified implementation
 
-- **`deploy_gui.py`** — Modern GUI application
-  - Built with CustomTkinter for native look & feel
-  - Real-time logging, progress tracking
-  - Settings panel with auto-detection
-  - Preset buttons for common workflows
-  - Clean tabbed interface
+- **`deploy_gui.py`** — Desktop window (CustomTkinter)
+  - Board → port → job → **Run** down the left, always visible
+  - Tabs for output, settings, build features, WiFi and help
+  - Per-item explanations on hover (a placed label, not a tooltip window)
+  - **No pop-up windows at all** — messages and questions appear in the status
+    bar at the bottom of the same window
+  - Text scales from the header (A− / A+) and the choice is remembered
+
+### Why CustomTkinter — and what about Flet?
+
+The window is a form: six dropdowns, thirty checkboxes, a log pane and a
+button. CustomTkinter renders that adequately, `tkinter` ships with CPython on
+Windows and macOS, and the only extra dependency is a small pure-Python
+package. That is the whole case for it — not that it is pretty.
+
+**Flet** (Python driving a Flutter client) would look better, and its layout
+engine is genuinely nicer than tkinter's geometry managers. The costs land
+squarely on the three things this project has already paid for:
+
+| | CustomTkinter (today) | Flet |
+|---|---|---|
+| Binary | one PyInstaller file, ~30 MB | Python **plus** a bundled Flutter client, typically 80–150 MB |
+| Packaging | `deploy_gui.spec`, three OSes in CI | `flet pack` — a different pipeline; macOS becomes an app bundle, not one file |
+| Antivirus / Gatekeeper | already a documented fight (see below) | a second native executable spawned by the first, and a localhost socket between them |
+| Headless test | `drive_deploy_gui.py` clicks real widgets under Xvfb and asserts on the resulting `PLATFORMIO_BUILD_FLAGS` | no Python-side widget driving; you would test the model and stop asserting on the window |
+| Dependency | one pure-Python package, stable for years | a versioned native runtime whose API has broken across releases |
+
+The last two matter most. The widget-driving test is the reason a checkbox
+wired to the wrong variable gets caught, and losing it to gain a nicer button
+is a bad trade for a tool whose job is to erase flash on demand.
+
+So: **not a replacement, at least not on looks alone.** The reasons that would
+justify it are real but absent here — running the flasher in a browser or on a
+tablet, or a UI rich enough to need tables, searchable dropdowns and live
+charts.
+
+If it is ever tried, the architecture already makes it cheap and reversible:
+`deploy_core.py` holds every step, and `deploy_gui.py` is a view over it. A
+`deploy_flet.py` can sit beside `deploy_gui.py` against the same core, be
+packaged for all three OSes and be measured — size, startup time, whether
+Defender flags it, whether the widgets can be driven in CI — before anything
+is removed. Decide it on those numbers, not on a screenshot.
 
 ## Installation
 
@@ -122,16 +158,64 @@ pip install -r tools/requirements.txt
 python3 tools/deploy_gui.py
 ```
 
-Features:
-- Modern, professional interface
-- Real-time output logging
-- Progress tracking
-- Keyboard shortcuts (Ctrl+R to run, Ctrl+S to save, Ctrl+L to clear logs)
-- Settings panel on left sidebar
-- Step toggles and preset buttons
-- Persistent configuration
+### The window
+
+Down the left, in the order you need them, with the last one pinned so it is
+never scrolled off:
+
+1. **Board** — the environments read out of `platformio.ini`. Everything else
+   (chip, upload speed, partition table, USB IDs) follows from the choice.
+2. **Port** — a list of the USB ports that exist, best match for the selected
+   board first (★). Still typeable, for a port no scan can see.
+3. **What do you want to do?** — the presets, two to a row; hover one for what
+   it is for and the steps it ticks. `▸ Customise steps` unfolds the twelve
+   individual toggles.
+4. **Run** — the button, and under it the steps it is about to run, by name.
+
+On the right: **Run** (progress bar and log), **Settings** (device IP, upload
+and monitor baud, HTTP upload filter, USB CDC), **Build** (the feature list
+with a filter box, the ESP-NOW key, the node target), **WiFi** (provisioning)
+and **Help**.
+
+**Hints on hover.** Rest the pointer on a job button, a step, a feature, or
+any heading marked ⓘ, and a balloon says what it is — the preset's sentence
+and the steps it ticks, the command a step runs, what a sensor is and on which
+bus. Printed under each item, as they used to be, those lines roughly doubled
+the height of three panels: the twelve-step list was twenty-four lines long and
+the thirty-feature list sixty.
+
+The balloon is **a label placed inside the main window, not a tooltip
+window**. That distinction is the whole point: a tooltip is the same object as
+the dialogs below — an override-redirect child the window manager places, which
+can appear behind its parent and take focus from it. A placed label is clipped
+by the window, takes no focus, and vanishes when the pointer leaves. The cost
+is that it cannot extend past the window edge, so it clamps and flips above the
+widget when there is no room below.
+
+**No pop-up windows.** Everything the tool says lands in the status bar along
+the bottom or in the log, and everything it asks — the erase confirmation
+included — grows buttons in that same bar. This is not cosmetic: a tkinter
+dialog can open *behind* its parent under several Linux window managers and on
+an unfocused Windows app, and the erase confirmation did exactly that, leaving
+a deploy stopped on a question nobody could see. `tests/gui/drive_deploy_gui.py`
+asserts that no `messagebox`, `CTkToplevel`, `CTkInputDialog` or `grab_set`
+call exists in the file, and that the hint is a `CTkLabel` belonging to the
+main window.
+
+**Readability.** Nothing in the window is smaller than 15 px (the old one used
+8–10 pt for exactly the labels carrying the warnings). `A −` / `A +` in the
+header rescale the whole interface between 85 % and 180 %, and the Dark /
+Light / System menu beside them switches theme; both are saved in
+`.flash_tool.json` as `ui_scale` and `ui_theme`.
+
+Keyboard: `Ctrl+R` run · `Ctrl+S` save · `Ctrl+L` clear the log · `F5` rescan
+ports · `Ctrl++` / `Ctrl+-` / `Ctrl+0` text size.
 
 ### CLI
+
+`[?]` in the menu explains every preset and step in plain words, so the dense
+one-screen menu does not have to.
+
 ```bash
 # Interactive menu
 python3 tools/deploy.py
@@ -159,6 +243,9 @@ python3 tools/deploy.py --run
 7. **Upload LittleFS** — Flash the web UI filesystem
 8. **Upload web via HTTP** — Deploy to running device over WiFi
 9. **Open serial monitor** — Watch device logs
+10. **Erase node flash** — Full wipe of the satellite board (`pio run -d node… -t erase`)
+11. **Compile node firmware** — Build the satellite project
+12. **Flash node firmware** — Upload it, on the node's own port
 
 ## Presets
 
@@ -170,7 +257,12 @@ Quick configurations for common workflows:
 | **Clean build** | 4,5,6 | Rebuild & recompile without erase |
 | **Quick flash** | 5,6 | Fast recompile & flash (no erase) |
 | **HTTP deploy** | 1,8 | Rebuild web + push to running device |
+| **Node flash** | 11,12 | The satellite node board, on its own port |
 | **All steps** | 1-9 | Everything including serial monitor |
+
+The GUI shows the same one-line explanation when you hover a preset button, and
+the CLI's `[?]` screen lists them; both read `PRESET_BLURBS` in
+`deploy_core.py`, so there is one copy of the wording.
 
 ## Configuration
 
@@ -185,7 +277,9 @@ Settings are saved to `.flash_tool.json` in the project root:
   "device_ip": "192.168.4.1",
   "steps": [1, 3, 5, 6, 7],
   "upload_filter": "all",
-  "wipe_before_upload": false
+  "wipe_before_upload": false,
+  "ui_scale": 1.0,
+  "ui_theme": "Dark"
 }
 ```
 
@@ -232,6 +326,9 @@ values you pinned survive the switch.
 - **steps** — Selected workflow steps
 - **upload_filter** — Which files to upload (all/gz/plain)
 - **wipe_before_upload** — Delete /www before uploading (safety)
+- **ui_scale**, **ui_theme**, **steps_panel_open** — GUI only: interface scale
+  (0.85–1.8), `Dark`/`Light`/`System`, and whether the step list is unfolded.
+  The CLI ignores them.
 - **usb_cdc_on_boot** — USB CDC (serial over USB) on boot for ESP32-C3
   - **ON** (default) — USB pins locked for serial communication
   - **OFF** — USB pins (GPIO 18/19) available for general use
@@ -241,8 +338,9 @@ values you pinned survive the switch.
 
 #### Build features
 
-The `[F]` menu entry in the CLI and the checkbox list in the GUI's settings
-tab. Both read `src/setup.h` through `tools/features.py`, so there is no list
+The `[F]` menu entry in the CLI and the checkbox list in the GUI's **Build**
+tab (with a filter box over it — thirty checkboxes is a list you search, not
+one you read). Both read `src/setup.h` through `tools/features.py`, so there is no list
 here to keep in step.
 
 Selected features are passed as `PLATFORMIO_BUILD_FLAGS` and **no project file
@@ -400,8 +498,8 @@ Releases get the three binaries attached as assets as well.
 **Put it in your `ESP32_Logger` folder** (any subdirectory works) or start it
 from there. It reads `platformio.ini` at runtime rather than bundling it —
 that is what makes the board list follow the project instead of the binary's
-build date. Started somewhere with no project above it, it says so in a dialog
-instead of showing an empty board list.
+build date. Started somewhere with no project above it, it says so in its own
+status bar and log instead of showing an empty board list.
 
 On Linux: `chmod +x ESP32_Deploy-linux`. On macOS, the binary is unsigned, so
 Gatekeeper quarantines it: `xattr -d com.apple.quarantine ESP32_Deploy-macos`.
