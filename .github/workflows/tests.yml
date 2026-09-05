@@ -208,19 +208,23 @@ jobs:
           MOCK_PORT=8767 python3 tests/web/drive_sensors_page.py
 
       - name: Verify that check actually fails without the node-id field
+        # Take the remote branch out of BOTH the form builder and the saver by
+        # making its condition unreachable — the state this page was in when a
+        # remote sensor could not be configured from the UI at all. Done by
+        # condition rather than by cutting the block out: the branch has been
+        # first in one chain and second in the other, and a self-test that
+        # depends on which is a self-test that breaks when the code is tidied.
         run: |
           set -e
           cp www/js/sensors.js www/js/sensors.js.orig
-          # Delete the editor's http branch — the state this page was in when
-          # a remote sensor could not be configured from the UI at all.
-          python3 - <<'EOF'
-          import pathlib
-          p = pathlib.Path("www/js/sensors.js")
-          s = p.read_text()
-          i = s.index('  } else if (s.interface === "http" || s.type === "remote") {')
-          j = s.index('  } else if (s.interface === "uart") {', i)
-          p.write_text(s[:i] + s[j:])
-          EOF
+          sed -i 's/if (s.interface === "http" || s.type === "remote") {/if (false) {/g' \
+              www/js/sensors.js
+          grep -q 'if (false) {' www/js/sensors.js || {
+            echo "::error::the self-test no longer matches the remote branch"
+            cp www/js/sensors.js.orig www/js/sensors.js
+            exit 1
+          }
+          node --check www/js/sensors.js
           python3 tests/web/mock_device.py 8768 &
           sleep 2
           if MOCK_PORT=8768 python3 tests/web/drive_sensors_page.py > /dev/null 2>&1; then
