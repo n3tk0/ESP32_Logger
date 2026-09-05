@@ -692,6 +692,44 @@ check "$?" "and at :00 it waits a whole minute rather than ticking twice for it"
   [ "$(cat "$WORK/slept")" = "52" ] || exit 1 )
 check "$?" "with :08 and :09 handled as decimal, not as bad octal"
 
+# ── 9. KUAL can actually launch what menu.json names ─────────────────────────
+#
+# KUAL runs each item as `action params`, and what it uses for a working
+# directory is not something an extension gets to assume. With a bare
+# "start.sh" in params, `/bin/sh start.sh` resolves against whatever KUAL
+# happens to be sitting in — and when that is not the extension folder, every
+# entry in the menu does nothing at all: the menu closes (exitmenu), the
+# dashboard never starts, and there is no error anywhere, because the shell
+# that could have printed one was never given a file to run.
+#
+# So every params path is absolute, and every script it names exists here.
+menu="$KDIR/menu.json"
+check "$([ -f "$menu" ] && echo 0 || echo 1)" "menu.json is present"
+
+rel=$(grep -o '"params": "[^/][^"]*"' "$menu" | head -5)
+check "$([ -z "$rel" ] && echo 0 || echo 1)" \
+      "every menu action names its script by absolute path${rel:+ (relative: $rel)}"
+
+missing=""
+for scr in $(grep -o '"params": "/[^" ]*\.sh' "$menu" | sed 's/.*"//'); do
+    base=$(basename "$scr")
+    [ -f "$KDIR/$base" ] || missing="$missing $base"
+done
+check "$([ -z "$missing" ] && echo 0 || echo 1)" \
+      "and every script it names ships in kindle/${missing:+ — missing:$missing}"
+
+# A CR anywhere in these files is the other way the menu dies silently: KUAL's
+# JSON reader rejects the file and lists nothing, and busybox ash cannot run a
+# script whose shebang ends in one. .gitattributes pins them to LF; this is
+# what notices when that stops being true.
+crlf=""
+for f in "$menu" "$KDIR"/*.sh "$KDIR/config.xml"; do
+    [ -f "$f" ] || continue
+    if od -c "$f" 2>/dev/null | grep -q '\\r'; then crlf="$crlf $(basename "$f")"; fi
+done
+check "$([ -z "$crlf" ] && echo 0 || echo 1)" \
+      "no CRLF in what the Kindle parses${crlf:+ —$crlf}"
+
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
     echo "FAIL: $FAILURES of $CHECKS check(s) failed"

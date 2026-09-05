@@ -188,19 +188,24 @@ void loop() {
     s_lastPost   = now;
     s_postedOnce = true;
 
-    // WiFi FIRST, and whatever the sensors are doing.
+    // THE SENSOR PROBE FIRST, THEN THE NETWORK, AND NEITHER GATES THE OTHER.
     //
-    // This used to sit below the sensor gate, so a node whose sensor was not
-    // found returned before ever reaching it: after a router reboot it never
-    // reconnected, and portalStartBackground() — the one way to fix the sensor
-    // without a cable — is called from in here, so it never came back either.
-    // A node with a wiring mistake became a node you had to walk to.
-    if (!ensureWifi()) return;
-
-    // Retry rather than requiring a power cycle: a breakout on a cold balcony
-    // can fail its first probe and answer a minute later. sensorsBegin() only
-    // re-probes what is not already up.
+    // Both orderings have been wrong here. With the WiFi check first, a node
+    // that cannot reach its router never re-probes its sensor — ensureWifi()
+    // spends three connect timeouts and can block in the portal, then returns
+    // false, every cycle forever, and a power cut that took out both the
+    // router and a cold breakout leaves the sensor unfound until someone
+    // walks to it. With the sensor check first (as it shipped), a node whose
+    // sensor was missing returned before ever reaching ensureWifi(), so it
+    // never reconnected after a router reboot — and portalStartBackground(),
+    // the one way to fix the wiring without a cable, is called from in there.
+    //
+    // The probe needs no network and costs a few milliseconds, so it goes
+    // first and unconditionally; the network follows and is likewise not
+    // conditional on the sensor. Only the POST needs both.
     if (!sensorsReady()) sensorsBegin(s_cfg);
+
+    if (!ensureWifi()) return;
     if (!sensorsReady()) return;
 
     postReadings();

@@ -124,7 +124,22 @@ public:
     void        resetErrorCount()                { _errorCount = 0; }
 
 protected:
-    bool     _enabled    = false;
+    // TRUE, because a sensor only exists when the config asked for one.
+    //
+    // SensorManager::loadAndInit() skips every entry whose "enabled" is false
+    // before it constructs anything, so an instance that exists is one the
+    // user enabled. Defaulting to false made that a trap instead of an
+    // invariant: each plugin had to remember `_enabled = cfg["enabled"] |
+    // true;` in its own init(), twenty did, and RemoteNodeSensor did not — so
+    // it loaded, logged "ready", and was skipped by every tick, reporting
+    // itself "disabled" to a UI that filters disabled sensors out of the
+    // dashboard entirely.
+    //
+    // Defaulting to true fixes that without taking the decision away from a
+    // plugin that has one: a driver whose hardware is optional can still set
+    // _enabled = false in init() to mean "loaded, not usable", the way
+    // MqttExporter and HeaterModule do, and nothing overwrites it afterwards.
+    bool     _enabled    = true;
     char     _id[17]     = {};
     uint32_t _lastReadTs = 0;
     uint32_t _errorCount = 0;

@@ -140,6 +140,57 @@ In order of how often each one is the answer:
 4. **Truncated copy.** `menu.json` must be valid JSON — an interrupted `scp`
    leaves a file that parses as nothing.
 
+## It is in KUAL, but pressing an entry does nothing
+
+The menu closes and the Kindle goes back to the home screen — which is what
+`exitmenu` asks for — and then nothing happens: no dashboard, no settings page,
+no error. In order of how often each one is the answer:
+
+1. **The scripts have CRLF line endings.** This is the usual one, and it comes
+   from copying the folder through Windows. `busybox ash` reads the shebang
+   literally, so `#!/bin/sh\r` names an interpreter that does not exist, and
+   every line of the script carries a trailing carriage return besides. Check
+   on the device:
+
+   ```sh
+   head -1 /mnt/us/extensions/esp32dash/start.sh | od -c | head -2
+   ```
+
+   A `\r  \n` at the end means yes. Fix it on the Kindle with
+
+   ```sh
+   cd /mnt/us/extensions/esp32dash
+   for f in *.sh menu.json config.xml; do
+       sed -i 's/\r$//' "$f"
+   done
+   ```
+
+   or re-copy from a checkout that honours `.gitattributes` (the repository
+   pins every file the Kindle parses to LF; a checkout made before that file
+   existed will not have applied it).
+
+2. **The folder is not named `esp32dash`.** The menu launches its scripts by
+   absolute path — `/bin/sh /mnt/us/extensions/esp32dash/start.sh` — because
+   KUAL does not promise what the working directory will be, and a bare
+   `start.sh` in `params` resolves against whatever it happens to be. That is
+   exactly the failure this section is about, and it looks identical: the menu
+   closes, the shell is handed a filename it cannot open, and nothing is said.
+   If you installed to a different folder name, either rename it to
+   `esp32dash` or edit the paths in `menu.json` to match.
+
+3. **The copy is incomplete.** `start.sh` runs `update_dash.sh` from beside
+   itself; an interrupted `scp` that dropped the larger file leaves Start
+   apparently doing nothing. `ls -l /mnt/us/extensions/esp32dash` should show
+   `update_dash.sh` at roughly 47 KB.
+
+To see what a menu entry would have said, run the same command over SSH — it
+prints to stdout, which KUAL discards:
+
+```sh
+sh /mnt/us/extensions/esp32dash/start.sh
+cat /tmp/dash.log
+```
+
 ## Custom fonts
 
 Text is drawn with `fbink -t regular=FILE`, so a font is a FILE and the name

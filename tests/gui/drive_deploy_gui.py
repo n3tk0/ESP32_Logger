@@ -400,13 +400,19 @@ def run_prompts(app) -> None:
     # empty black rectangle that showed nothing: the output is on a pipe,
     # going into the log. Asserted here by asking the decision directly,
     # since CI runs this on Linux where the question does not arise.
+    import win_console                                    # noqa: E402
     real_platform = sys.platform
     try:
         sys.platform = "win32"
-        check(dc._no_window() == {"creationflags": dc._CREATE_NO_WINDOW},
+        check(dc._no_window() == {"creationflags": win_console.CREATE_NO_WINDOW},
               "a piped step is launched with no console window")
         check(dc._no_window(inherits_console=True) == {},
               "the serial monitor keeps the console it was launched from")
+        # The same decision reaches flash_bootloader.py, which used to carry
+        # its own copy of these three functions.
+        import flash_bootloader as fb2                    # noqa: E402
+        check(fb2._no_window is dc._no_window,
+              "and the bootloader script asks the same helper, not a copy")
     finally:
         sys.platform = real_platform
 

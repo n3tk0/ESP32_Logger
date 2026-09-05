@@ -28,34 +28,10 @@ BOOTLOADER_DIR = os.path.join(SCRIPT_DIR, "bootloader")
 
 # Windows hands a console-subsystem child (python.exe, esptool) a console
 # window of its own whenever the parent has none — which is every step the
-# frozen deploy GUI runs, because it is built windowed. That window carries no
-# output the GUI is not already showing in its log, so it is suppressed.
-_CREATE_NO_WINDOW = 0x08000000
-
-
-def _has_console() -> bool:
-    """True when this process is attached to a console window."""
-    if sys.platform != "win32":
-        return True
-    try:
-        import ctypes
-        return bool(ctypes.windll.kernel32.GetConsoleWindow())
-    except Exception:
-        return True
-
-
-def _no_window(inherits_console: bool = False) -> dict:
-    """subprocess kwargs that keep a child from opening a console window.
-
-    Withheld only for a child that writes straight to a console we are
-    already attached to: there the window is the terminal being read, and
-    detaching the child from it would swallow esptool's progress output.
-    """
-    if sys.platform != "win32":
-        return {}
-    if inherits_console and _has_console():
-        return {}
-    return {"creationflags": _CREATE_NO_WINDOW}
+# frozen deploy GUI runs, because it is built windowed. Shared with
+# deploy_core.py rather than copied: see tools/win_console.py.
+sys.path.insert(0, SCRIPT_DIR)
+from win_console import no_window as _no_window   # noqa: E402
 
 
 def _confirm(question: str) -> bool:
@@ -335,12 +311,21 @@ def main():
     # the return code has to be looked at, or this check passes on every
     # machine that lacks esptool and the failure surfaces halfway through the
     # step instead of before it.
+    missing = False
     try:
         probe = subprocess.run([sys.executable, "-m", "esptool", "version"],
-                               capture_output=True, timeout=5, **_no_window())
+                               capture_output=True, timeout=10, **_no_window())
         missing = probe.returncode != 0
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except FileNotFoundError:
         missing = True
+    except subprocess.TimeoutExpired:
+        # A SLOW import is not a missing module. `python -m esptool version`
+        # pulls in pyserial, cryptography and reedsolo; on a cold filesystem,
+        # behind on-access antivirus, or from a network-mounted interpreter it
+        # can take longer than the probe waits. Refusing to flash there would
+        # tell the user to install a package they already have — so the probe
+        # says nothing and the real esptool run below reports what happens.
+        print("NOTE: the esptool check timed out; continuing anyway.")
     if missing:
         print(f"ERROR: esptool not available to {sys.executable}.")
         print(f"Install it with: {sys.executable} -m pip install esptool")

@@ -1894,7 +1894,13 @@ REQUIREMENTS
         def run_in_bg():
             done = [0]
             try:
-                self._clear_logs()
+                # Through after(), like every other Tk call in this file. A
+                # direct .delete() here reaches a Tcl interpreter owned by the
+                # main thread from a worker — on a non-threaded Tcl build that
+                # raises before any step runs, and the except below then
+                # reports it as "Deployment stopped: …", naming Tcl rather
+                # than anything the user did.
+                self.root.after(0, self._clear_logs)
                 self._log("=" * 60)
                 self._log("Deployment Started")
                 self._log("=" * 60 + "\n")

@@ -8,14 +8,14 @@
                     "name": "Start Dashboard",
                     "priority": 1,
                     "action": "/bin/sh",
-                    "params": "start.sh",
+                    "params": "/mnt/us/extensions/esp32dash/start.sh",
                     "exitmenu": true
                 },
                 {
                     "name": "Stop Dashboard",
                     "priority": 2,
                     "action": "/bin/sh",
-                    "params": "stop.sh",
+                    "params": "/mnt/us/extensions/esp32dash/stop.sh",
                     "exitmenu": false
                 },
                 {
@@ -26,49 +26,49 @@
                             "name": "Show settings",
                             "priority": 1,
                             "action": "/bin/sh",
-                            "params": "settings.sh show",
+                            "params": "/mnt/us/extensions/esp32dash/settings.sh show",
                             "exitmenu": true
                         },
                         {
                             "name": "Find collector",
                             "priority": 2,
                             "action": "/bin/sh",
-                            "params": "settings.sh find",
+                            "params": "/mnt/us/extensions/esp32dash/settings.sh find",
                             "exitmenu": true
                         },
                         {
                             "name": "Next collector",
                             "priority": 3,
                             "action": "/bin/sh",
-                            "params": "settings.sh next",
+                            "params": "/mnt/us/extensions/esp32dash/settings.sh next",
                             "exitmenu": true
                         },
                         {
                             "name": "Refresh: normal",
                             "priority": 4,
                             "action": "/bin/sh",
-                            "params": "settings.sh profile normal",
+                            "params": "/mnt/us/extensions/esp32dash/settings.sh profile normal",
                             "exitmenu": true
                         },
                         {
                             "name": "Refresh: fast",
                             "priority": 5,
                             "action": "/bin/sh",
-                            "params": "settings.sh profile fast",
+                            "params": "/mnt/us/extensions/esp32dash/settings.sh profile fast",
                             "exitmenu": true
                         },
                         {
                             "name": "Refresh: battery saver",
                             "priority": 6,
                             "action": "/bin/sh",
-                            "params": "settings.sh profile saver",
+                            "params": "/mnt/us/extensions/esp32dash/settings.sh profile saver",
                             "exitmenu": true
                         },
                         {
                             "name": "Reset settings",
                             "priority": 7,
                             "action": "/bin/sh",
-                            "params": "settings.sh reset",
+                            "params": "/mnt/us/extensions/esp32dash/settings.sh reset",
                             "exitmenu": true
                         }
                     ]

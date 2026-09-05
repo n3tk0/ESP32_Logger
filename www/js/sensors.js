@@ -735,16 +735,23 @@ function clRenderSensors(sensors) {
             return t.value === s.type;
           }) || {}
         ).label || s.type;
+      // `|| "?"` on a pin number is wrong for exactly one value, and it is a
+      // value people use: GPIO 0. It is a perfectly good I2C pin on the
+      // ESP32-C3 — SCL=0 is a working, shipped configuration — and the row
+      // printed "SCL:?" for it, which reads as "not configured".
+      var pinTxt = function (v) {
+        return (v === undefined || v === null || v === "") ? "?" : String(v);
+      };
       var pinInfo =
-        s.interface === "i2c"
-          ? "SDA:" + (s.sda || "?") + " SCL:" + (s.scl || "?") +
-            (s.bus ? " Bus:" + s.bus : "")
-          : s.interface === "uart"
-            ? "RX:" + (s.uart_rx || "?")
-            : s.interface === "pulse"
-              ? "Pin:" + (s.pin || "?")
-              : s.interface === "http" || s.type === "remote"
-                ? "Node:" + (s.node || s.id || "?")
+        s.interface === "http" || s.type === "remote"
+          ? "Node:" + (s.node || s.id || "?")
+          : s.interface === "i2c"
+            ? "SDA:" + pinTxt(s.sda) + " SCL:" + pinTxt(s.scl) +
+              (s.bus ? " Bus:" + s.bus : "")
+            : s.interface === "uart"
+              ? "RX:" + pinTxt(s.uart_rx)
+              : s.interface === "pulse"
+                ? "Pin:" + pinTxt(s.pin)
                 : "";
       return (
         '<div class="sensor-list-row" data-sensor-idx="' + i + '" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border)">' +
@@ -832,7 +839,18 @@ function _clBuildEditFormHtml(s) {
   html += '<div class="field"><label class="field-label">Read Interval (ms)</label>' +
           '<input type="number" step="100" name="read_interval_ms" class="input" value="' + (s.read_interval_ms || 10000) + '"></div>';
 
-  if (s.interface === "i2c") {
+  if (s.interface === "http" || s.type === "remote") {
+    // The whole configuration of a remote sensor. The collector never
+    // contacts the node — the node POSTs to /api/ingest — so there is no
+    // address here to get wrong: the pairing is this string, compared
+    // exactly (strcmp) against the "node" field of the arriving payload.
+    html += '<div class="field"><label class="field-label">Remote node id</label>' +
+            '<input type="text" name="node" class="input mono" maxlength="16" value="' +
+            esc(s.node !== undefined ? s.node : "") + '" placeholder="' + esc(s.id || "") + '">' +
+            '<p class="hint">Must match the <b>Node id</b> in the satellite\u2019s ' +
+            'setup portal, exactly, up to 16 characters. Left empty, the sensor id ' +
+            'above is used instead.</p></div>';
+  } else if (s.interface === "i2c") {
     var busVal = (s.bus !== undefined ? s.bus : 0);
     html += '<div class="form-grid">' +
             '<div class="field"><label class="field-label">SDA Pin</label><input type="number" name="sda" class="input" value="' + (s.sda !== undefined ? s.sda : 6) + '"></div>' +
@@ -846,17 +864,6 @@ function _clBuildEditFormHtml(s) {
             '<div class="hint">Put devices with the same fixed address on different buses — e.g. VEML6075 and VEML7700 are both 0x10 and cannot share one. ' +
             'Bus 1 needs a chip with two I2C controllers (ESP32-S3, ESP32); the ESP32-C3 has only bus 0. ' +
             'Each bus needs its own SDA/SCL pins and its own pull-ups.</div></div>';
-  } else if (s.interface === "http" || s.type === "remote") {
-    // The whole configuration of a remote sensor. The collector never
-    // contacts the node — the node POSTs to /api/ingest — so there is no
-    // address here to get wrong: the pairing is this string, compared
-    // exactly (strcmp) against the "node" field of the arriving payload.
-    html += '<div class="field"><label class="field-label">Remote node id</label>' +
-            '<input type="text" name="node" class="input mono" maxlength="16" value="' +
-            esc(s.node !== undefined ? s.node : "") + '" placeholder="' + esc(s.id || "") + '">' +
-            '<p class="hint">Must match the <b>Node id</b> in the satellite\u2019s ' +
-            'setup portal, exactly, up to 16 characters. Left empty, the sensor id ' +
-            'above is used instead.</p></div>';
   } else if (s.interface === "uart") {
     html += '<div class="form-grid">' +
             '<div class="field"><label class="field-label">RX Pin</label><input type="number" name="uart_rx" class="input" value="' + (s.uart_rx !== undefined ? s.uart_rx : 20) + '"></div>' +

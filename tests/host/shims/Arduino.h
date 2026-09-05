@@ -18,6 +18,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <stdarg.h>
 #include <math.h>
 
@@ -83,10 +84,15 @@ public:
 
     // In-place, and returning void, exactly as Arduino's do — code written
     // against them reads `v.trim();` and then uses `v`.
+    // isspace(), NOT "<= ' '". Arduino's String::trim() strips exactly the
+    // six characters isspace() accepts; a <= ' ' test additionally eats NUL
+    // and every C0 control byte, so a host test could prove a parser accepts
+    // input the device would reject. The shim is only useful while it is
+    // boring in the same places the real one is.
     void trim() {
         size_t b = 0, e = _s.size();
-        while (b < e && (unsigned char)_s[b] <= ' ') b++;
-        while (e > b && (unsigned char)_s[e - 1] <= ' ') e--;
+        while (b < e && isspace((unsigned char)_s[b])) b++;
+        while (e > b && isspace((unsigned char)_s[e - 1])) e--;
         _s = _s.substr(b, e - b);
     }
     void toUpperCase() {

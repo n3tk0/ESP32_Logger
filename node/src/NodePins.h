@@ -93,9 +93,20 @@ static const Label LABELS[] = {
     { "CMD", 11 }, { "CLK",  6 },
 };
 static const uint8_t LABEL_COUNT = sizeof(LABELS) / sizeof(LABELS[0]);
-/// How many of LABELS[] are D-numbers — the ones worth printing back at the
-/// user. "GPIO6 (CLK)" would read like an endorsement of the flash clock.
-static const uint8_t D_LABEL_COUNT = 9;
+
+/// Is this label one of the D-numbers — the ones worth printing back at the
+/// user? "GPIO6 (CLK)" would read like an endorsement of the flash clock, so
+/// only D0-D8 are ever echoed.
+///
+/// Asked of the label itself rather than of its POSITION in the table. The
+/// count used to be a hand-maintained 9, which made the answer depend on
+/// LABELS[] staying sorted with the D-numbers first: inserting RX before D8
+/// would have silently stopped GPIO15 having a name, in a log line whose
+/// whole purpose is to print one.
+static inline bool isDLabel(const char* label) {
+    return label[0] == 'D' && label[1] >= '0' && label[1] <= '9'
+        && label[2] == '\0';
+}
 
 /// Header layout, top to bottom, as the pads are printed on the board. Used
 /// only to draw the diagram; names that are not GPIOs (GND, 3V3, RST…) are
@@ -150,8 +161,10 @@ static inline Risk riskOf(int gpio) {
 
 /// The D-label for a GPIO, or "" when the boards do not print one.
 static inline const char* dLabelFor(int gpio) {
-    for (uint8_t i = 0; i < D_LABEL_COUNT; i++) {
-        if ((int)LABELS[i].gpio == gpio) return LABELS[i].label;
+    for (uint8_t i = 0; i < LABEL_COUNT; i++) {
+        if ((int)LABELS[i].gpio == gpio && isDLabel(LABELS[i].label)) {
+            return LABELS[i].label;
+        }
     }
     return "";
 }

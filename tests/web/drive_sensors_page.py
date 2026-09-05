@@ -80,6 +80,16 @@ with sync_playwright() as p:
     check("SDA:4" in body.replace(" ", ""),
           "and a wired sensor still shows its pins")
 
+    # GPIO 0 is a real I2C pin — SCL=0 is a working configuration on the
+    # ESP32-C3 — and `s.scl || "?"` printed it as "not configured". The
+    # fixture has carried scl:0 since this file was written; nothing looked
+    # at it until a review pointed out that the test walked past the bug it
+    # was seeded to catch.
+    check("SCL:0" in body.replace(" ", ""),
+          "including GPIO 0, which a falsy test would hide as '?'")
+    check("SCL:?" not in body.replace(" ", ""),
+          "and never as a question mark")
+
     print("\nThe editor:")
     # Open the remote sensor's editor the way a person does: the pencil on
     # its row. (Clicking the row itself hits the enable checkbox, which is a

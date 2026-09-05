@@ -1857,7 +1857,10 @@
         // "UART · …", "Pulse") so the right pin fields show on the next step.
         var metaEl = c.querySelector(".wiz-type-meta");
         var meta = ((metaEl && metaEl.textContent) || "").split("·")[0].trim().toUpperCase();
-        var ifMap = { "I2C": "I2C", "UART": "UART", "PULSE": "Pulse", "ADC": "ADC", "1-WIRE": "1-Wire" , "HTTP": "HTTP", "HTTP NODE": "HTTP" };
+        // Keyed on the first "·"-separated word of the card's meta line, upper-cased:
+      // "I2C · T/H/P" → "I2C". Every card's meta has to start with one of these
+      // or its interface is not preselected and step 3 shows the wrong fields.
+      var ifMap = { "I2C": "I2C", "UART": "UART", "PULSE": "Pulse", "ADC": "ADC", "1-WIRE": "1-Wire", "HTTP": "HTTP" };
         var ifaceEl = document.getElementById("wiz-iface");
         if (ifaceEl && ifMap[meta]) { ifaceEl.value = ifMap[meta]; wizUpdateIfaceFields(); }
       });

@@ -169,17 +169,19 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         bool initOk = s->init(sensor);
         g_pinAllowUnsafe = false;
         if (initOk) {
-            // Belt and braces, and one plugin's worth of braces earned it:
-            // the loop above already skipped every config entry whose
-            // "enabled" is false, so anything that reaches here IS enabled —
-            // yet ISensor::_enabled defaults to false and each plugin has to
-            // remember to set it in init(). RemoteNodeSensor did not, and the
-            // result was a sensor that loaded, reported "disabled", and was
-            // skipped by tickFiltered() forever. Setting it here makes the
-            // invariant the manager's, so the next plugin cannot restate it
-            // wrongly by saying nothing at all.
-            s->setEnabled(sensor["enabled"] | true);
-
+            // NOTHING sets _enabled here, deliberately.
+            //
+            // An earlier version of this fix did — `setEnabled(sensor
+            // ["enabled"] | true)` — and it was the wrong shape twice over.
+            // The loop above already skipped every entry whose "enabled" is
+            // false, so the value could only ever be true and the call could
+            // only ever be a no-op… except against a plugin that had just
+            // decided otherwise in init(), which it would silently overrule.
+            // A driver whose hardware is optional has to be able to come back
+            // from init() saying "loaded, not usable".
+            //
+            // The default in ISensor.h carries the invariant instead: a
+            // sensor that exists is one the config enabled.
             _sensors[_count]    = s;
             _lastReadMs[_count] = 0;
             _count++;

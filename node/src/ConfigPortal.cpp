@@ -462,10 +462,20 @@ static void handleRoot() {
             "'No networks found. Type the name by hand.';return;}"
           "msg.textContent='Tap one to use it.';"
           "box.style.display='';"
+          // An SSID is 32 arbitrary bytes chosen by whoever is in radio
+          // range, and this page renders the ingest token and the WiFi
+          // passphrase into its own fields. Dropping a name straight into
+          // innerHTML would let a neighbouring AP named
+          // "<img src=x onerror=...>" run script in the portal's origin the
+          // moment somebody presses Scan. Escaped for BOTH destinations —
+          // the attribute and the text — not just the attribute.
+          "function esc(t){return String(t).replace(/[&<>\"']/g,function(c){"
+            "return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"
+            "\"'\":'&#39;'}[c];});}"
           "box.innerHTML=d.networks.map(function(n){"
-            "return '<div class=\"net\" data-s=\"'+n.ssid.replace(/\"/g,'&quot;')"
-              "+'\"><b>'+n.ssid+'</b><span>'+(n.secure?'\\ud83d\\udd12 ':'')"
-              "+n.rssi+' dBm</span></div>';}).join('');"
+            "return '<div class=\"net\" data-s=\"'+esc(n.ssid)"
+              "+'\"><b>'+esc(n.ssid)+'</b><span>'+(n.secure?'\\ud83d\\udd12 ':'')"
+              "+(+n.rssi)+' dBm</span></div>';}).join('');"
           "[].forEach.call(box.querySelectorAll('.net'),function(e){"
             "e.onclick=function(){document.getElementById('ssid').value=e.dataset.s;"
               "document.getElementById('pass').focus();};});})"
@@ -504,15 +514,38 @@ static void handleRoot() {
 // would hold the only web-server thread the portal has — on the AP, that is
 // the phone's own connection timing out. scanNetworks(true) returns
 // immediately and /scan reports progress.
+/// True while the scan has the radio widened from AP to AP+STA, so the mode
+/// can be put back. The ESP8266 has ONE radio: the softAP and the station
+/// share a channel, and a station that associates drags the AP onto its
+/// channel — disassociating the phone that is standing in the portal. Leaving
+/// AP_STA on for the rest of the session leaves that trap armed.
+static bool s_widenedForScan = false;
+
 static void handleScanStart() {
     if (!backgroundAuthOk()) return;
     // Widen AP → AP_STA so the access point the phone is sitting on stays up
     // while the radio scans. In the background portal the node is already in
     // STA and can scan as it is.
-    if (WiFi.getMode() == WIFI_AP) WiFi.mode(WIFI_AP_STA);
+    if (WiFi.getMode() == WIFI_AP) {
+        WiFi.mode(WIFI_AP_STA);
+        s_widenedForScan = true;
+        // Scanning does not need an association, and an association is the
+        // thing that would move the AP's channel. portalRun() can be reached
+        // from setup() before anything calls WiFi.disconnect(), so the SDK
+        // may still hold credentials from flash and auto-connect on its own
+        // the moment the station interface comes up.
+        WiFi.disconnect(false);
+    }
     WiFi.scanDelete();
     WiFi.scanNetworks(true);
     s_http.send(200, "text/plain", "OK");
+}
+
+/// Put the radio back the way the portal found it, once the scan is over.
+static void narrowAfterScan() {
+    if (!s_widenedForScan) return;
+    s_widenedForScan = false;
+    WiFi.mode(WIFI_AP);
 }
 
 static void handleScanResult() {
@@ -524,6 +557,7 @@ static void handleScanResult() {
         doc["scanning"] = true;
     } else if (n == WIFI_SCAN_FAILED) {
         doc["error"] = "Scan failed.";
+        narrowAfterScan();
     } else {
         JsonArray nets = doc["networks"].to<JsonArray>();
         // Twelve is more than any hallway shows on a phone, and the JSON is
@@ -535,6 +569,7 @@ static void handleScanResult() {
             net["secure"] = WiFi.encryptionType(i) != ENC_TYPE_NONE;
         }
         WiFi.scanDelete();
+        narrowAfterScan();
     }
 
     String out;
@@ -735,21 +770,41 @@ bool portalRun(NodeSettings& s, uint32_t timeoutMs) {
     bindRoutes();
     s_http.begin();
 
-    const uint32_t start = millis();
+    uint32_t start     = millis();
+    bool     hadClient = false;
     while (true) {
         s_dns.processNextRequest();
         s_http.handleClient();
 
         if (s_saved) break;
 
-        // A timeout is a promise to the node that it will go back to work.
-        // Someone standing at the form is evidence that promise should wait —
-        // and an associated station is the only signal available here, since
-        // softAP is the opposite of that: it is direct evidence a human is
-        // present, so the countdown restarts while anyone is connected.
+        // THE CLOCK STOPS WHILE SOMEBODY IS CONNECTED, and restarts when they
+        // leave. Both halves matter, and an earlier rewrite of this file kept
+        // the comment while dropping the assignments — which is worse than
+        // never having had them, because the behaviour it describes is the
+        // reason the timeout is survivable.
+        //
+        // The timeout exists so a node does not sit in AP mode forever after a
+        // 3 am router reboot nobody witnessed. A station associated to the
+        // softAP is the opposite of that: direct evidence a human is standing
+        // there, mid-configuration. Without the reset the window closes under
+        // them — joining the AP, waiting out the phone's "no internet, stay
+        // connected?" prompt and working through four steps is comfortably
+        // more than five minutes from boot, and a phone that roams off the
+        // no-internet AP for one loop iteration would take the portal with it.
         const bool client = WiFi.softAPgetStationNum() > 0;
+        if (client) {
+            start = millis();          // hold the window open
+            hadClient = true;
+        } else if (hadClient) {
+            // They left without saving. A fresh window rather than a stale
+            // count, so a reconnect gets the whole five minutes again.
+            hadClient = false;
+            start = millis();
+        }
+
         if (timeoutMs && !client && (millis() - start) > timeoutMs) {
-            Serial.println("[portal] timed out");
+            Serial.println("[portal] timed out, retrying the saved network");
             break;
         }
         delay(5);   // feeds the softAP task; yield() alone starves it here

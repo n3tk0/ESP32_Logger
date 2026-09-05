@@ -113,6 +113,39 @@ static void test_riskof_treats_nonsense_as_never() {
 }
 
 // ---------------------------------------------------------------------------
+static void test_d_label_lookup_does_not_depend_on_table_order() {
+    // The lookup used to walk the first D_LABEL_COUNT entries, a hand-kept 9,
+    // so the answer depended on LABELS[] staying sorted with the D-numbers
+    // first. It asks the label itself now. Assert the property directly: for
+    // EVERY entry in the table, dLabelFor() gives back a D-number or nothing —
+    // whatever order the entries are in.
+    for (uint8_t i = 0; i < LABEL_COUNT; i++) {
+        const char* back = dLabelFor(LABELS[i].gpio);
+        if (back[0] != '\0') {
+            CHECK(isDLabel(back));
+        } else {
+            // No D-name for this pin means no D-labelled entry points at it.
+            bool anyD = false;
+            for (uint8_t j = 0; j < LABEL_COUNT; j++) {
+                if (LABELS[j].gpio == LABELS[i].gpio && isDLabel(LABELS[j].label)) {
+                    anyD = true;
+                }
+            }
+            CHECK(!anyD);
+        }
+    }
+    // And the predicate itself, since everything above leans on it.
+    CHECK(isDLabel("D0"));
+    CHECK(isDLabel("D8"));
+    CHECK(!isDLabel("DX"));
+    CHECK(!isDLabel("D10"));   // no such silkscreen, and two digits is not one
+    CHECK(!isDLabel("RX"));
+    CHECK(!isDLabel("SD0"));
+    CHECK(!isDLabel("CLK"));
+    CHECK(!isDLabel(""));
+}
+
+// ---------------------------------------------------------------------------
 static void test_labels_printed_back_are_d_numbers_only() {
     CHECK_STREQ(dLabelFor(12), "D6");
     CHECK_STREQ(dLabelFor(16), "D0");
@@ -174,6 +207,7 @@ int main() {
     RUN(test_awkward_pins_are_warned_not_banned);
     RUN(test_riskof_treats_nonsense_as_never);
     RUN(test_labels_printed_back_are_d_numbers_only);
+    RUN(test_d_label_lookup_does_not_depend_on_table_order);
     RUN(test_tables_are_self_consistent);
     RUN(test_board_layouts);
     return SUMMARY();

@@ -73,32 +73,10 @@ def _python() -> str:
 # parent has none. The frozen GUI is built windowed (console=False in
 # deploy_gui.spec), so each step popped an empty black window that showed
 # nothing — its output is on a pipe, being written into the GUI's log.
-_CREATE_NO_WINDOW = 0x08000000
-
-
-def _has_console() -> bool:
-    """True when this process is attached to a console window."""
-    if sys.platform != "win32":
-        return True
-    try:
-        import ctypes
-        return bool(ctypes.windll.kernel32.GetConsoleWindow())
-    except Exception:
-        return True
-
-
-def _no_window(inherits_console: bool = False) -> dict[str, Any]:
-    """subprocess kwargs that keep a child from opening a console window.
-
-    Withheld for an interactive child when we have a real console: the serial
-    monitor reads keystrokes through the console, and detaching it from ours
-    would leave nothing to type into.
-    """
-    if sys.platform != "win32":
-        return {}
-    if inherits_console and _has_console():
-        return {}
-    return {"creationflags": _CREATE_NO_WINDOW}
+#
+# The helpers live in win_console.py because flash_bootloader.py needs exactly
+# the same decision, and a copy in each file is a copy to keep in step.
+from win_console import has_console as _has_console, no_window as _no_window  # noqa: E402
 
 
 # ── Step catalogue ────────────────────────────────────────────────────────────
@@ -708,7 +686,13 @@ class DeployManager:
         try:
             process = subprocess.Popen(
                 cmd,
-                stdin=None if interactive else subprocess.DEVNULL,
+                # `interactive` asks for a keyboard; a console is what
+                # supplies one. Without a console — the frozen windowed GUI —
+                # inheriting stdin hands the child an invalid handle, which is
+                # the same "prompting on a stdin nobody has" this commit
+                # removed from step 2. DEVNULL is the honest answer there.
+                stdin=None if (interactive and _has_console())
+                      else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -748,6 +732,7 @@ class DeployManager:
         script = TOOLS / "build_web.py"
         if not script.is_file():
             self._log("ERROR: build_web.py not found in tools/")
+            self._emit_complete(1, 2)
             return 2
         rc = self._run_cmd([_python(), str(script), "--dst", str(DATA_WWW)])
         if rc == 0:
@@ -761,6 +746,10 @@ class DeployManager:
         script = TOOLS / "flash_bootloader.py"
         if not script.is_file():
             self._log("ERROR: flash_bootloader.py not found in tools/")
+            # Paired with the _emit_start above. Every exit from a step has to
+            # emit a completion or the GUI's progress counter, which counts
+            # them, stays a step behind for the rest of the run.
+            self._emit_complete(2, 2)
             return 2
 
         # The question is asked HERE, by whoever has a user to ask — the CLI
@@ -771,6 +760,7 @@ class DeployManager:
         self._log("*** Overwrites the existing bootloader on the device. ***")
         if confirm_callback and not confirm_callback():
             self._log("Skipped.")
+            self._skipped.append(2)
             self._emit_complete(2, 0)
             return 0
 
@@ -797,11 +787,13 @@ class DeployManager:
         if confirm_callback:
             if not confirm_callback():
                 self._log("Skipped.")
+                self._skipped.append(3)
                 self._emit_complete(3, 0)
                 return 0
 
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            self._emit_complete(3, 1)
             return 1
 
         cmd = [self.pio, "run", "-t", "erase", "-e", self.cfg["env"]]
@@ -817,6 +809,7 @@ class DeployManager:
         self._emit_start(4, STEP_NAMES[4])
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            self._emit_complete(4, 1)
             return 1
         rc = self._run_cmd([self.pio, "run", "-t", "clean", "-e", self.cfg["env"]],
                            env=self._pio_env())
@@ -829,6 +822,7 @@ class DeployManager:
         self._emit_start(5, STEP_NAMES[5])
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            self._emit_complete(5, 1)
             return 1
         # Configure USB CDC flag before compilation
         self._configure_usb_cdc()
@@ -844,6 +838,7 @@ class DeployManager:
         self._emit_start(6, STEP_NAMES[6])
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            self._emit_complete(6, 1)
             return 1
         cmd = [self.pio, "run", "-t", "upload", "-e", self.cfg["env"]]
         if self.cfg.get("port"):
@@ -864,10 +859,12 @@ class DeployManager:
             self._log("data/www/ is empty — running Build web first…")
             rc = self.s1_build_web()
             if rc != 0:
+                self._emit_complete(7, rc)
                 return rc
 
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            self._emit_complete(7, 1)
             return 1
 
         cmd = [self.pio, "run", "-t", "uploadfs", "-e", self.cfg["env"]]
@@ -1067,6 +1064,7 @@ class DeployManager:
         self._emit_start(9, STEP_NAMES[9])
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            self._emit_complete(9, 1)
             return 1
         cmd = [self.pio, "device", "monitor", "-e", self.cfg["env"]]
         if self.cfg.get("port"):
@@ -1159,6 +1157,7 @@ class DeployManager:
         if confirm_callback:
             if not confirm_callback():
                 self._log("Skipped.")
+                self._skipped.append(10)
                 self._emit_complete(10, 0)
                 return 0
 
@@ -1467,6 +1466,11 @@ class DeployManager:
         }
 
         failed: list[int] = []
+        # Declining a destructive step is not a failure — but it is not the
+        # step having run, either. Without this the CLI printed its green
+        # "All steps completed successfully" box for a deploy whose bootloader
+        # was never written, and the GUI said the same in its status bar.
+        self._skipped = []
         self._log(f"\n{'='*60}")
         self._log(f"Running steps: {', '.join(str(s) for s in steps)}")
         self._log(f"Environment: {self.cfg['env']}")
@@ -1489,7 +1493,12 @@ class DeployManager:
 
         self._log("")
         if not failed:
-            self._log("✓ All steps completed successfully.")
+            if self._skipped:
+                sk = ", ".join(str(s) for s in sorted(self._skipped))
+                self._log(f"✓ Completed — but step(s) {sk} were DECLINED and "
+                          f"did not run.")
+            else:
+                self._log("✓ All steps completed successfully.")
             return True
 
         fs = ", ".join(str(s) for s in failed)
