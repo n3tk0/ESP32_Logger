@@ -193,8 +193,8 @@ is that it cannot extend past the window edge, so it clamps and flips above the
 widget when there is no room below.
 
 **No pop-up windows.** Everything the tool says lands in the status bar along
-the bottom or in the log, and everything it asks — the erase confirmation
-included — grows buttons in that same bar. This is not cosmetic: a tkinter
+the bottom or in the log, and everything it asks — the erase and bootloader
+confirmations included — grows buttons in that same bar. This is not cosmetic: a tkinter
 dialog can open *behind* its parent under several Linux window managers and on
 an unfocused Windows app, and the erase confirmation did exactly that, leaving
 a deploy stopped on a question nobody could see. `tests/gui/drive_deploy_gui.py`
@@ -235,7 +235,7 @@ python3 tools/deploy.py --run
 > `Content-Encoding: gzip`.
 
 1. **Build web assets** — Minify and gzip `www/` → `data/www/`
-2. **Flash bootloader** — Rollback-enabled bootloader via esptool
+2. **Flash bootloader** — Rollback-enabled bootloader via esptool (asks first)
 3. **Erase chip flash** — Full wipe (config, logs, LittleFS)
 4. **Clean build artifacts** — Remove old build files
 5. **Compile firmware** — Build the ESP32 sketch (pio run)
@@ -617,7 +617,30 @@ manager.on_step_start = lambda step, name: print(f"Starting {name}")
 manager.on_step_output = lambda msg: print(msg)
 manager.on_step_complete = lambda step, rc: print(f"Step {step} done")
 manager.on_error = lambda msg: print(f"ERROR: {msg}")
+
+manager.run_steps(
+    steps,
+    confirm_erase_callback=ask,        # steps 3 and 10 — wipes the flash
+    confirm_bootloader_callback=ask,   # step 2 — overwrites the bootloader
+)
 ```
+
+### A step must never prompt on stdin
+
+The destructive steps are confirmed by the FRONT END, through the callbacks
+above, and the answer is passed to the helper script as a flag
+(`flash_bootloader.py --yes`, `flash_clean.py -y`). A helper that asks for
+itself works from a terminal and cannot work from the GUI: the windowed build
+has no console behind it and therefore no stdin, so `input()` there raises
+
+```
+EOFError: EOF when reading a line
+```
+
+and the step fails on a question nobody was shown. `deploy_core._run_cmd()`
+now gives every step `stdin=DEVNULL` (the serial monitor excepted) so a new
+one cannot reintroduce this quietly — it fails at the prompt in testing rather
+than in someone's hands.
 
 ## Troubleshooting
 
@@ -643,6 +666,22 @@ pio --version
 - Ensure device is connected to WiFi with correct IP
 - Device must be reachable: `ping <device_ip>`
 - Run step 1 (Build web) first to ensure data/www/ exists
+
+### `EOFError: EOF when reading a line` during a step
+
+Fixed. A helper script was prompting on a stdin the windowed GUI does not
+have; the confirmations are asked in the window now and passed on as `--yes`.
+If you see it again, a step is prompting where it must not — see
+[A step must never prompt on stdin](#a-step-must-never-prompt-on-stdin).
+
+### A console window flashes up on every step (Windows)
+
+Also fixed, and for the same underlying reason: the GUI is built windowed
+(`console=False`), so Windows handed each console program it launched
+(`python.exe`, `pio.exe`, `esptool`) a console window of its own. They were
+always empty — the output goes down a pipe into the GUI's log — and the steps
+are launched with `CREATE_NO_WINDOW` now. The serial monitor keeps its console
+when there is one to keep, since it is the one step with a keyboard.
 
 ## Migration from Old Tools
 

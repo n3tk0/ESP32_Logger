@@ -66,6 +66,41 @@ def _python() -> str:
     return sys.executable
 
 
+# ── Windows: children without console windows ─────────────────────────────────
+#
+# Every step runs a console-subsystem program (python.exe, pio.exe, esptool),
+# and Windows gives such a child a console window of its own whenever the
+# parent has none. The frozen GUI is built windowed (console=False in
+# deploy_gui.spec), so each step popped an empty black window that showed
+# nothing — its output is on a pipe, being written into the GUI's log.
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _has_console() -> bool:
+    """True when this process is attached to a console window."""
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+        return bool(ctypes.windll.kernel32.GetConsoleWindow())
+    except Exception:
+        return True
+
+
+def _no_window(inherits_console: bool = False) -> dict[str, Any]:
+    """subprocess kwargs that keep a child from opening a console window.
+
+    Withheld for an interactive child when we have a real console: the serial
+    monitor reads keystrokes through the console, and detaching it from ours
+    would leave nothing to type into.
+    """
+    if sys.platform != "win32":
+        return {}
+    if inherits_console and _has_console():
+        return {}
+    return {"creationflags": _CREATE_NO_WINDOW}
+
+
 # ── Step catalogue ────────────────────────────────────────────────────────────
 #: Each step as (what it does, how it does it). Two halves rather than one
 #: padded string because they have two different readers: the CLI prints them
@@ -658,18 +693,29 @@ class DeployManager:
                 self._log(f"  ! ESP-NOW key is {len(lmk)} characters; it must be "
                           f"exactly 16. The build will refuse it.")
 
-    def _run_cmd(self, cmd: list[str], env: dict[str, str] | None = None) -> int:
-        """Run a subprocess command and stream output to callback."""
+    def _run_cmd(self, cmd: list[str], env: dict[str, str] | None = None,
+                 interactive: bool = False) -> int:
+        """Run a subprocess command and stream output to callback.
+
+        stdin is closed unless `interactive`. A step that asks a question
+        nobody can answer is worse than one that never asks: run from the
+        GUI, the bootloader step inherited a stdin that did not exist and
+        died on an EOFError traceback. The steps that need an answer get it
+        from the front end now, and pass it on the command line. Only the
+        serial monitor genuinely wants a keyboard.
+        """
         self._log(f"$ {shlex.join(cmd)}")
         try:
             process = subprocess.Popen(
                 cmd,
+                stdin=None if interactive else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 env=env,
                 cwd=str(ROOT),
+                **_no_window(inherits_console=interactive),
             )
         except Exception as exc:
             self._log(f"Error: {exc}")
@@ -709,19 +755,32 @@ class DeployManager:
         self._emit_complete(1, rc)
         return rc
 
-    def s2_flash_bootloader(self) -> int:
+    def s2_flash_bootloader(
+            self, confirm_callback: Optional[Callable[[], bool]] = None) -> int:
         self._emit_start(2, STEP_NAMES[2])
         script = TOOLS / "flash_bootloader.py"
         if not script.is_file():
             self._log("ERROR: flash_bootloader.py not found in tools/")
             return 2
+
+        # The question is asked HERE, by whoever has a user to ask — the CLI
+        # on its terminal, the GUI in its status bar — and the answer is
+        # passed to the script as --yes. flash_bootloader.py used to ask it
+        # itself, on a stdin the windowed GUI does not have, and the step
+        # ended on "EOFError: EOF when reading a line" every time.
+        self._log("*** Overwrites the existing bootloader on the device. ***")
+        if confirm_callback and not confirm_callback():
+            self._log("Skipped.")
+            self._emit_complete(2, 0)
+            return 0
+
         # Pass the ENV name, not the chip family. flash_bootloader resolves the
         # chip from it and — crucially — the flash size, which the chip alone
         # cannot give: esp32s3 and esp32s3_n16r8 are the same silicon with 8
         # and 16 MB behind it, and the size lands in the bootloader image
         # header.
         cmd = [_python(), str(script), "--chip", self.cfg["env"],
-               "--baud", str(self.cfg["baud"])]
+               "--baud", str(self.cfg["baud"]), "--yes"]
         if self.cfg.get("port"):
             cmd += ["--port", self.cfg["port"]]
         rc = self._run_cmd(cmd)
@@ -1012,7 +1071,9 @@ class DeployManager:
         cmd = [self.pio, "device", "monitor", "-e", self.cfg["env"]]
         if self.cfg.get("port"):
             cmd += ["--port", self.cfg["port"]]
-        return self._run_cmd(cmd)
+        # The one step with a keyboard: miniterm's own keys (Ctrl-C to quit,
+        # Ctrl-T for its menu) need a stdin, and a console to read it from.
+        return self._run_cmd(cmd, interactive=True)
 
     # ── The satellite boards ─────────────────────────────────────────────────
     #
@@ -1376,8 +1437,15 @@ class DeployManager:
 
     # ── Orchestration ──────────────────────────────────────────────────────────
 
-    def run_steps(self, steps: list[int], confirm_erase_callback: Optional[Callable[[], bool]] = None) -> bool:
-        """Run selected steps. Returns True if all succeeded."""
+    def run_steps(self, steps: list[int],
+                  confirm_erase_callback: Optional[Callable[[], bool]] = None,
+                  confirm_bootloader_callback: Optional[Callable[[], bool]] = None) -> bool:
+        """Run selected steps. Returns True if all succeeded.
+
+        The confirm callbacks are how a front end asks its user about the two
+        destructive steps. A caller that passes none has no one to ask and
+        gets the steps it selected.
+        """
         steps = sorted(steps)
         if not steps:
             self._log("No steps selected.")
@@ -1385,7 +1453,7 @@ class DeployManager:
 
         dispatch = {
             1: self.s1_build_web,
-            2: self.s2_flash_bootloader,
+            2: lambda: self.s2_flash_bootloader(confirm_bootloader_callback),
             3: lambda: self.s3_erase(confirm_erase_callback),
             4: self.s4_clean,
             5: self.s5_compile,

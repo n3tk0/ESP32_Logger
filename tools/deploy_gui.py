@@ -8,8 +8,9 @@ code path deploy.py (the CLI) runs. Three rules shape what is here:
   ONE WINDOW.
     No message boxes, no modal dialogs, no input pop-ups. Everything the tool
     has to SAY appears in the status bar along the bottom or in the log;
-    everything it has to ASK — the erase confirmation, WiFi credentials, which
-    of five serial ports — is a control in the window itself. A tkinter dialog
+    everything it has to ASK — the erase and bootloader confirmations, WiFi
+    credentials, which of five serial ports — is a control in the window
+    itself. A tkinter dialog
     that opens behind its parent (which is what happens under several Linux
     window managers, and on Windows when the app is not focused) is
     indistinguishable from a hung program, and the erase confirmation was
@@ -1241,8 +1242,8 @@ HINTS ON HOVER
 NO POP-UPS
   This tool never opens a second window — the hint balloon included; it is a
   label drawn inside this window, not a tooltip window. Warnings, results and
-  questions, the erase confirmation among them, appear in the status bar along
-  the bottom with the buttons to answer them. If a step seems to be waiting,
+  questions, the erase and bootloader confirmations among them, appear in the
+  status bar along the bottom with the buttons to answer them. If a step seems to be waiting,
   look at the bottom of the window.
 
 READABILITY
@@ -1378,6 +1379,19 @@ REQUIREMENTS
             "Erase the whole flash? This deletes the configuration, the logs "
             "and the LittleFS filesystem on the device.",
             yes="Erase everything", no="Skip this step", danger=True)
+
+    def _confirm_bootloader(self) -> bool:
+        """Bootloader confirmation — the same question, in the same place.
+
+        flash_bootloader.py asks this itself when run from a terminal. It
+        cannot ask a windowed build: there is no console behind this window
+        and so no stdin, which is why the step used to end on an EOFError
+        instead of on an answer. Asked here, the script is told --yes.
+        """
+        return self._ask(
+            "Flash the rollback-enabled bootloader? This overwrites the "
+            "bootloader currently on the device.",
+            yes="Flash bootloader", no="Skip this step", danger=True)
 
     def _on_close(self) -> None:
         """Release anything blocked on a question, then close.
@@ -1904,7 +1918,9 @@ REQUIREMENTS
                 self.manager.on_step_complete = completed
 
                 success = self.manager.run_steps(
-                    steps, confirm_erase_callback=self._confirm_erase)
+                    steps,
+                    confirm_erase_callback=self._confirm_erase,
+                    confirm_bootloader_callback=self._confirm_bootloader)
 
                 self._log("\n" + "=" * 60)
                 if success:

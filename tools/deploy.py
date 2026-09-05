@@ -641,16 +641,25 @@ def run_steps(cfg: dict[str, Any]) -> None:
     # Create manager with CLI output callbacks
     manager = DeployManager(cfg)
 
-    def _confirm_erase() -> bool:
-        """Confirmation for chip erase."""
+    def _confirm() -> bool:
+        """Answer a destructive step's question. The step has just logged it.
+
+        Used for the erase steps and for the bootloader step — the latter
+        asked for itself, inside flash_bootloader.py, until the GUI (which
+        has no stdin to prompt on) turned that prompt into an EOFError. The
+        front end asks now, and the script is told --yes.
+        """
         try:
             ans = input(_yellow("  Continue? [y/N] ")).strip().lower()
         except (KeyboardInterrupt, EOFError):
             ans = ""
         return ans in ("y", "yes")
 
-    # Run with confirmation callback
-    success = manager.run_steps(steps, confirm_erase_callback=_confirm_erase)
+    # Run with confirmation callbacks
+    success = manager.run_steps(
+        steps,
+        confirm_erase_callback=_confirm,
+        confirm_bootloader_callback=_confirm)
 
     print()
     # Padded rather than typed: the success line was one column wider than the

@@ -10,6 +10,7 @@ Usage:
     python flash_bootloader.py                  # auto-detect port & chip
     python flash_bootloader.py --port COM3      # explicit port
     python flash_bootloader.py --chip esp32     # explicit chip
+    python flash_bootloader.py --yes            # skip the confirmation prompt
     python flash_bootloader.py --list-ports     # show available ports
 
 Requirements:
@@ -24,6 +25,59 @@ import glob
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BOOTLOADER_DIR = os.path.join(SCRIPT_DIR, "bootloader")
+
+# Windows hands a console-subsystem child (python.exe, esptool) a console
+# window of its own whenever the parent has none — which is every step the
+# frozen deploy GUI runs, because it is built windowed. That window carries no
+# output the GUI is not already showing in its log, so it is suppressed.
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _has_console() -> bool:
+    """True when this process is attached to a console window."""
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+        return bool(ctypes.windll.kernel32.GetConsoleWindow())
+    except Exception:
+        return True
+
+
+def _no_window(inherits_console: bool = False) -> dict:
+    """subprocess kwargs that keep a child from opening a console window.
+
+    Withheld only for a child that writes straight to a console we are
+    already attached to: there the window is the terminal being read, and
+    detaching the child from it would swallow esptool's progress output.
+    """
+    if sys.platform != "win32":
+        return {}
+    if inherits_console and _has_console():
+        return {}
+    return {"creationflags": _CREATE_NO_WINDOW}
+
+
+def _confirm(question: str) -> bool:
+    """Ask a yes/no question; treat "nobody can answer" as no.
+
+    This used to be a bare input(). Run from the deploy GUI — a windowed
+    build with no console and therefore no stdin — it raised EOFError, and
+    the step died on a traceback rather than on an answer. A caller with no
+    console is meant to ask its own user and pass --yes; one that does not
+    gets a refusal it can read instead of a stack trace.
+    """
+    try:
+        return input(question).strip().lower() in ("y", "yes")
+    except EOFError:
+        print()
+        print("No console to answer on — nothing was flashed.")
+        print("Pass --yes to confirm up front when running non-interactively.")
+        return False
+    except KeyboardInterrupt:
+        print()
+        return False
+
 
 # Bootloader flash addresses by chip family.
 #
@@ -100,7 +154,7 @@ def detect_chip(port):
     try:
         result = subprocess.run(
             [sys.executable, "-m", "esptool", "--port", port, "chip_id"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10, **_no_window()
         )
         output = result.stdout + result.stderr
         # Chip family is all that matters here; which board carries it does
@@ -161,8 +215,12 @@ def find_binary(chip, name):
     return None
 
 
-def flash(port, chip, bootloader_only=False, baud=921600):
-    """Flash bootloader (and optionally partition table) via esptool."""
+def flash(port, chip, bootloader_only=False, baud=921600, assume_yes=False):
+    """Flash bootloader (and optionally partition table) via esptool.
+
+    `assume_yes` skips the confirmation prompt, for callers that have already
+    asked their own user (the deploy CLI and GUI both do).
+    """
     requested = chip                 # may be an env/board name
     chip = resolve_chip(chip)
     cfg = CHIP_CONFIG.get(chip)
@@ -218,13 +276,13 @@ def flash(port, chip, bootloader_only=False, baud=921600):
         print()
 
     # Safety prompt
-    answer = input("Flash bootloader? This overwrites the existing bootloader. [y/N] ")
-    if answer.strip().lower() != "y":
+    if not assume_yes and not _confirm(
+            "Flash bootloader? This overwrites the existing bootloader. [y/N] "):
         print("Aborted.")
         return False
 
     print("\nFlashing...\n")
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, **_no_window(inherits_console=True))
     if result.returncode == 0:
         print("\nDone. Bootloader flashed successfully.")
         print("Now upload your firmware as usual (Arduino IDE / PlatformIO).")
@@ -254,6 +312,11 @@ def main():
     parser.add_argument("--baud", "-b", type=int, default=921600, help="Flash baud rate")
     parser.add_argument("--bootloader-only", action="store_true",
                         help="Flash bootloader only (skip partition table)")
+    # The deploy CLI and GUI both ask before they get here, and the GUI has no
+    # console for a second prompt to appear on.
+    parser.add_argument("--yes", "-y", action="store_true",
+                        help="Skip the confirmation prompt (for non-interactive "
+                             "callers that have already asked)")
     parser.add_argument("--list-ports", action="store_true", help="List serial ports and exit")
     args = parser.parse_args()
 
@@ -267,12 +330,20 @@ def main():
             print("No serial ports found.")
         return
 
-    # Check esptool is installed
+    # Check esptool is installed. A missing MODULE does not raise here — the
+    # interpreter starts fine and exits 1 with "No module named esptool" — so
+    # the return code has to be looked at, or this check passes on every
+    # machine that lacks esptool and the failure surfaces halfway through the
+    # step instead of before it.
     try:
-        subprocess.run([sys.executable, "-m", "esptool", "version"],
-                       capture_output=True, timeout=5)
+        probe = subprocess.run([sys.executable, "-m", "esptool", "version"],
+                               capture_output=True, timeout=5, **_no_window())
+        missing = probe.returncode != 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
-        print("ERROR: esptool not found. Install it with: pip install esptool")
+        missing = True
+    if missing:
+        print(f"ERROR: esptool not available to {sys.executable}.")
+        print(f"Install it with: {sys.executable} -m pip install esptool")
         sys.exit(1)
 
     # Resolve port
@@ -292,6 +363,12 @@ def main():
             except (ValueError, IndexError):
                 print("Invalid selection.")
                 sys.exit(1)
+            except (EOFError, KeyboardInterrupt):
+                # Same reason as the confirmation prompt: no console, no
+                # answer. Say which flag settles it instead of traceback.
+                print()
+                print("No console to answer on. Pass --port to pick one.")
+                sys.exit(1)
         else:
             print("ERROR: No serial ports detected. Use --port to specify manually.")
             sys.exit(1)
@@ -307,7 +384,8 @@ def main():
             print("Could not auto-detect chip. Use --chip esp32c3 or --chip esp32")
             sys.exit(1)
 
-    success = flash(port, chip, bootloader_only=args.bootloader_only, baud=args.baud)
+    success = flash(port, chip, bootloader_only=args.bootloader_only,
+                    baud=args.baud, assume_yes=args.yes)
     sys.exit(0 if success else 1)
 
 
