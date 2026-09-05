@@ -1273,6 +1273,10 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     kdShellVar(s, "LBL_FORECAST", KD_T("FORECAST", "ПРОГНОЗА"));
     kdShellVar(s, "LBL_MEASURED", KD_T("Measured on site", "Измерено на място"));
     kdShellVar(s, "LBL_NO_READING", KD_T("no reading", "няма данни"));
+    // Drawn by the reader where the chart would be when the image is not there
+    // — a missing fetch, or one that arrived half-written. The reader has its
+    // own English fallback, so an older collector still says something.
+    kdShellVar(s, "LBL_NO_CHART", KD_T("No chart yet", "Още няма графика"));
     kdShellVar(s, "LBL_WIND", KD_T("wind", "вятър"));
     kdShellVar(s, "LBL_TO", KD_T("to", "до"));
 

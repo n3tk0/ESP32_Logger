@@ -38,7 +38,20 @@ entry never appeared in the launcher.
    Over USB or SSH instead: put the address in `dash.conf` (it is created from
    `dash.conf.default` on first run).
 
-3. Ensure FBInk is installed and in PATH.
+3. **Install FBInk, and put it somewhere the launcher can find it.** It is not
+   part of the Kindle firmware and it is not shipped here; it is the whole
+   output of this dashboard, and KUAL hands an extension a `PATH` that does not
+   include most of the places people keep binaries. Any of these is enough:
+
+   ```
+   /mnt/us/extensions/esp32dash/bin/fbink     ← beside the scripts
+   /mnt/us/bin/fbink
+   /mnt/us/fbink/fbink
+   /mnt/us/extensions/fbink/bin/fbink
+   ```
+
+   If it is missing, the extension says so on the panel and in `kual.log`
+   instead of starting a dashboard that can never draw anything.
 
 4. On the ESP32 WebUI, go to Settings → E-ink Dashboard and set the
    FBInk resolution to match your Kindle.
@@ -144,52 +157,96 @@ In order of how often each one is the answer:
 
 The menu closes and the Kindle goes back to the home screen — which is what
 `exitmenu` asks for — and then nothing happens: no dashboard, no settings page,
-no error. In order of how often each one is the answer:
+no error. KUAL discards whatever a menu entry prints, so all of the causes
+below used to look identical from the sofa.
 
-1. **The scripts have CRLF line endings.** This is the usual one, and it comes
-   from copying the folder through Windows. `busybox ash` reads the shebang
-   literally, so `#!/bin/sh\r` names an interpreter that does not exist, and
-   every line of the script carries a trailing carriage return besides. Check
-   on the device:
+**They do not any more. Read `kual.log`.** Every menu entry runs `kual.sh`,
+which writes what it did, what it ran, and the exit code to `kual.log` *beside
+the scripts* — on `/mnt/us`, the volume that appears when you plug the Kindle
+into a computer. No shell, no network and no SSH needed:
 
-   ```sh
-   head -1 /mnt/us/extensions/esp32dash/start.sh | od -c | head -2
-   ```
+```
+extensions/esp32dash/kual.log
+```
 
-   A `\r  \n` at the end means yes. Fix it on the Kindle with
+A launch that worked looks like this:
+
+```
+2026-09-05 18:31:02 --- start (dir /mnt/us/extensions/esp32dash)
+2026-09-05 18:31:02 run: Start Dashboard (sh /mnt/us/extensions/esp32dash/start.sh)
+2026-09-05 18:31:02 Dashboard started (PID 1234). Log: /tmp/dash.log
+2026-09-05 18:31:02 exit 0
+```
+
+What the log will usually say instead, in order of how often each is the
+answer:
+
+1. **`FBInk is not installed, or not in PATH`.** FBInk is not part of the
+   Kindle firmware and it is not part of this extension — it is a separate
+   binary you install once, and KUAL hands an extension a `PATH` that does not
+   include most of the places people put it. Without it *every* draw fails
+   silently: the dashboard starts, keeps its schedule, and the panel never
+   changes, which from across the room is the same thing as nothing having
+   started. `kual.sh` looks in `bin/` beside itself, `/mnt/us/bin`,
+   `/mnt/us/fbink` and `/mnt/us/extensions/fbink/bin` before giving up, so
+   dropping the binary in any of those is enough. It also prints the message
+   on the panel with `eips`, which *is* in the firmware.
+
+   `update_dash.sh` now refuses to start without it rather than running blind.
+
+2. **Windows line endings.** `busybox ash` cannot run a script whose lines end
+   in a carriage return — `then\r` is not `then` — and a layout file copied
+   the same way gives every coordinate one (`GR_X=20\r`), which FBInk rejects
+   as a bad argument. This is **repaired automatically**: `kual.sh` is written
+   so that a CRLF copy of it still runs, and it strips the carriage returns out
+   of every `.sh`, `.conf`, `.json` and `.xml` in the folder before running
+   anything, logging what it fixed. The icons are BMPs and are never touched.
+
+   If you want to do it by hand anyway:
 
    ```sh
    cd /mnt/us/extensions/esp32dash
-   for f in *.sh menu.json config.xml; do
-       sed -i 's/\r$//' "$f"
-   done
+   for f in *.sh *.conf *.json *.xml layout/*.conf; do sed -i 's/\r$//' "$f"; done
    ```
-
-   or re-copy from a checkout that honours `.gitattributes` (the repository
-   pins every file the Kindle parses to LF; a checkout made before that file
-   existed will not have applied it).
-
-2. **The folder is not named `esp32dash`.** The menu launches its scripts by
-   absolute path — `/bin/sh /mnt/us/extensions/esp32dash/start.sh` — because
-   KUAL does not promise what the working directory will be, and a bare
-   `start.sh` in `params` resolves against whatever it happens to be. That is
-   exactly the failure this section is about, and it looks identical: the menu
-   closes, the shell is handed a filename it cannot open, and nothing is said.
-   If you installed to a different folder name, either rename it to
-   `esp32dash` or edit the paths in `menu.json` to match.
 
 3. **The copy is incomplete.** `start.sh` runs `update_dash.sh` from beside
    itself; an interrupted `scp` that dropped the larger file leaves Start
    apparently doing nothing. `ls -l /mnt/us/extensions/esp32dash` should show
-   `update_dash.sh` at roughly 47 KB.
+   `update_dash.sh` at roughly 47 KB. The log names the file that was missing.
 
-To see what a menu entry would have said, run the same command over SSH — it
-prints to stdout, which KUAL discards:
+The folder name is **not** one of the causes. KUAL runs a menu entry in the
+directory the `menu.json` it came from lives in — which is why KOReader's own
+extension can say `./bin/koreader-ext.sh` — so every entry here names its
+script relatively and an extension unzipped as `esp32dash-main` works exactly
+the same.
+
+To watch one live instead, over SSH:
 
 ```sh
-sh /mnt/us/extensions/esp32dash/start.sh
+sh /mnt/us/extensions/esp32dash/kual.sh start
+cat /mnt/us/extensions/esp32dash/kual.log
 cat /tmp/dash.log
 ```
+
+## The chart area is blank
+
+The rule and the caption are there, and nothing underneath them. That is the
+image, not the readings — and the dashboard now says which:
+
+- **`No chart yet — http://…`** drawn where the chart goes means the image is
+  not on the reader. The address is printed with it, so a wrong one is visible
+  from across the room. It resolves itself at the next chart update
+  (`GRAPH_EVERY`, 15 minutes by default) once the collector answers.
+- `/tmp/dash.log` says which half failed. `chart: no image from …` is the
+  network or a collector that is not there. **`chart: incomplete image (N
+  bytes)`** is a transfer that was cut off partway — the ESP32 streams the BMP
+  while it is also serving the web UI, and a reader on wifi is the client most
+  likely to lose a connection mid-image. The half-written file is discarded and
+  the chart that already works stays on the screen.
+- **A chart with a grid and no line in it** is the other thing entirely: the
+  image arrived, and the collector had no history to draw. That is a sensor
+  question — check the sensor named as outdoor/indoor on the E-ink Dashboard
+  settings page — not a Kindle one.
 
 ## Custom fonts
 

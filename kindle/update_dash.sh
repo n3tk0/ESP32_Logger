@@ -342,6 +342,40 @@ fetch_data() {
     wget -q -T "$FETCH_TIMEOUT" -O "$TMP/data.txt" "$(host_url)/kindle/data" 2>/dev/null
 }
 
+# Is this a WHOLE BMP, or the first part of one?
+#
+# "Not empty" was the only thing asked before, and it is not enough. The image
+# is streamed off an ESP32 a kilobyte at a time while it is also serving the
+# web UI and taking readings; the connection is a ten-year-old reader on wifi.
+# When that connection dies mid-image the collector has already sent a
+# Content-Length, and busybox wget does not always call a short read an error —
+# so a half-drawn chart lands on disk looking exactly like a good one, replaces
+# the good one, and FBInk then refuses to blit it. The chart vanishes and comes
+# back at some later fetch, which is precisely the symptom that was reported.
+#
+# A BMP says how long it is in its own header: "BM", then the file size as a
+# 32-bit little-endian count at offset 2. Comparing that with the bytes on disk
+# catches a truncated transfer without knowing anything about the image.
+#
+# THE CHECK REFUSES ONLY WHAT IT IS SURE OF. If od is not on the device, or the
+# declared size is not a number this file could plausibly have, the size test is
+# skipped rather than failed — a check that throws away good charts because it
+# could not read them would be worse than the bug it is here for.
+graph_ok() {
+    # $1=file
+    [ -s "$1" ] || return 1
+    [ "$(dd if="$1" bs=1 count=2 2>/dev/null)" = "BM" ] || return 1
+
+    local have want
+    have=$(wc -c < "$1" 2>/dev/null | tr -dc '0-9')
+    want=$(od -An -tu4 -j2 -N4 "$1" 2>/dev/null | tr -dc '0-9')
+
+    [ -n "$want" ] || return 0                          # no od, or no answer
+    [ "$want" -ge 118 ] 2>/dev/null || return 0          # smaller than a header
+    [ "$want" -le 4194304 ] 2>/dev/null || return 0      # bigger than any panel
+    [ "$have" = "$want" ]
+}
+
 fetch_graph() {
     # Into a scratch file, and only into place once it is whole. wget -O
     # truncates its target the moment it opens it, so fetching straight onto
@@ -350,9 +384,18 @@ fetch_graph() {
     # strip where the chart was until the next successful fetch. Keeping the
     # last good chart is the better failure.
     if wget -q -T 15 -O "$TMP/graph.new" "$(host_url)/kindle/graph.bmp" 2>/dev/null \
-       && [ -s "$TMP/graph.new" ]; then
+       && graph_ok "$TMP/graph.new"; then
         mv "$TMP/graph.new" "$TMP/graph.bmp"
         return 0
+    fi
+    # Say which of the two it was. Both leave the previous chart alone, but they
+    # need different things done about them — one is the network, the other is
+    # the collector running out of heap partway through the image — and
+    # /tmp/dash.log is the only place anybody can see the difference.
+    if [ -s "$TMP/graph.new" ]; then
+        echo "$(date '+%H:%M') chart: incomplete image ($(wc -c < "$TMP/graph.new" | tr -dc '0-9') bytes), keeping the last good one" >&2
+    else
+        echo "$(date '+%H:%M') chart: no image from $(host_url)" >&2
     fi
     rm -f "$TMP/graph.new"
     return 1
@@ -477,7 +520,13 @@ draw_hline() {
 
 draw_image() {
     # $1=file $2=x $3=y
-    [ -f "$1" ] || return 0
+    #
+    # NON-ZERO WHEN NOTHING WAS DRAWN, and that is the whole point of the
+    # change: a missing file used to return success, so the chart tier cleared
+    # its rectangle, drew nothing into it, refreshed the panel and reported that
+    # it had worked. The blank strip that left behind is indistinguishable from
+    # a chart with no data in it. Now the caller can say so instead.
+    [ -f "$1" ] || return 1
     fb -q -b -g file="$1",x="$2",y="$3"
 }
 
@@ -753,7 +802,21 @@ draw_sensors_body() {
 draw_chart_body() {
     draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAYA"
     draw_text_reg "$LAB_CHART_X" "$LAB_CHART_Y" "$LAB_SZ" "GRAY7" "$LBL_LAST24"
-    draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"
+    draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y" && return 0
+
+    # NOTHING WAS DRAWN — SAY SO, rather than refreshing an empty rectangle.
+    #
+    # The caption and the rule above it are drawn either way, so a blank strip
+    # underneath them reads as "the chart is empty": no readings, or a sensor
+    # that stopped reporting. It is usually neither. It is the image not being
+    # here — the first fetch after a start has not happened yet, the collector
+    # was rebooting when it did, or what arrived was not a whole BMP. One line
+    # where the chart would be turns a mystery into a fact, and it names the
+    # address so a wrong one is visible from across the room.
+    local y=$(( ${GR_Y:-278} + ${GR_H:-200} / 3 ))
+    draw_text_reg "${GR_X:-20}" "$y" "${LAB_SZ:-16}" "GRAY5" \
+                  "${LBL_NO_CHART:-No chart yet} — $(host_url)"
+    return 1
 }
 
 # ── Forecast, week strip and footer ──────────────────────────────────────────
@@ -965,6 +1028,27 @@ nap_to_minute() {
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
+
+# FBInk is this script's entire output, and it is NOT part of the Kindle
+# firmware — it is a separate binary the reader has to be given, and KUAL hands
+# an extension a PATH that does not include the places people put it. Without
+# it every `fb` call fails, stderr is on /dev/null where it belongs for a draw,
+# the schedule keeps its minute, and the panel stays exactly as it was: a
+# dashboard that is running perfectly and showing nothing, which from the sofa
+# is the same thing as one that never started.
+#
+# `eips` IS in the firmware, so the one message that has to get through when
+# there is no FBInk is the one message that can always be drawn.
+if ! command -v fbink >/dev/null 2>&1; then
+    echo "fbink not found. PATH=$PATH" >&2
+    echo "FBInk is not part of the Kindle firmware: install it and make sure" >&2
+    echo "the launcher can see it — kindle/README.md, 'It is in KUAL, but" >&2
+    echo "pressing an entry does nothing'." >&2
+    command -v eips >/dev/null 2>&1 &&
+        eips 1 1 "ESP32 Dashboard: FBInk not found - see kual.log" 2>/dev/null
+    exit 1
+fi
+
 trap cleanup INT TERM
 
 mkdir -p "$TMP"

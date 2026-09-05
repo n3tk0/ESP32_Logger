@@ -181,6 +181,31 @@ static void test_chunking_is_transparent_at_high_res() {
     for (size_t c : chunks) CHECK(renderWith(c, true, 1000, 360) == ref);
 }
 
+// The image says how long it is, and it has to be telling the truth.
+//
+// THE READER NOW BELIEVES IT. kindle/update_dash.sh refuses to replace the
+// chart on screen with a download whose byte count does not match the size
+// written at offset 2 of its own header — that is how it tells a whole image
+// from one that stopped when the connection died, which was showing up on the
+// device as a chart that vanished for a while and came back.
+//
+// So a header that promises a different number from what the streamer emits
+// would no longer be a cosmetic mistake in a field no viewer reads: it would
+// be a collector whose every chart the reader throws away, on a device with no
+// way to say so. Two numbers, computed in two places (writeBmpHeader() from w
+// and h, begin() from rowBytes and H), checked against a third: the bytes that
+// actually came out.
+static void test_the_declared_size_is_the_size_that_is_sent() {
+    struct { uint16_t w, h; } sizes[] = { {560, 200}, {1000, 360} };
+    for (auto& s : sizes) {
+        const std::vector<uint8_t> img = renderWith(1436, true, s.w, s.h);
+        CHECK_EQ((long)le32(img.data() + 2), (long)img.size());
+        // …and the pixel data starts where the header says it does, or a
+        // reader counting from 118 reads the palette as pixels.
+        CHECK_EQ((long)le32(img.data() + 10), (long)KD_BMP_HEADER_SIZE);
+    }
+}
+
 // The row cache is only correct if rows actually differ; if the renderer
 // produced one repeated row, every test above would pass while serving the
 // wrong row for every request.
@@ -232,6 +257,7 @@ int main() {
     RUN(test_row_bytes_are_exact);
     RUN(test_chunking_is_transparent);
     RUN(test_chunking_is_transparent_at_high_res);
+    RUN(test_the_declared_size_is_the_size_that_is_sent);
     RUN(test_rows_are_not_all_identical);
     RUN(test_renders_without_indoor_data);
     RUN(test_survives_a_completely_empty_ring);

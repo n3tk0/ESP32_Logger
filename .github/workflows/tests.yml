@@ -32,6 +32,8 @@ on:
       - 'tools/check_node_portal.py'
       - 'tools/check_sensor_plugins.py'
       - 'node/**'
+      - 'kindle/**'
+      - 'tests/kindle/**'
       - 'platformio.ini'
       - 'boards/**'
   pull_request:
@@ -56,6 +58,8 @@ on:
       - 'tools/check_node_portal.py'
       - 'tools/check_sensor_plugins.py'
       - 'node/**'
+      - 'kindle/**'
+      - 'tests/kindle/**'
       - 'platformio.ini'
       - 'boards/**'
   workflow_dispatch:
@@ -423,6 +427,27 @@ jobs:
         # `sh`, not bash: the Kindle runs busybox ash, and Ubuntu's /bin/sh is
         # dash — the closest thing to it available here.
         run: sh tests/kindle/drive_dash.sh
+
+      - name: Verify that suite actually fails on a chart it should refuse
+        # The reported bug: the chart on a Kindle vanished for a while and came
+        # back. What lands on disk when the image is cut off mid-transfer is a
+        # BMP header promising a size and a file shorter than it — not empty,
+        # so the old "is it non-empty" test promoted it over the good chart and
+        # FBInk then refused to draw it. Take the size check back out and the
+        # suite has to notice, or it is only describing the fix.
+        run: |
+          set -e
+          cp kindle/update_dash.sh /tmp/ud.orig
+          sed -i 's/^    \[ "$have" = "$want" \]$/    return 0/' kindle/update_dash.sh
+          ! grep -q 'have" = "$want"' kindle/update_dash.sh   # the sed matched
+          if sh tests/kindle/drive_dash.sh > /dev/null 2>&1; then
+            echo "::error::drive_dash.sh passed a fetch that accepts a truncated BMP"
+            cp /tmp/ud.orig kindle/update_dash.sh
+            exit 1
+          fi
+          cp /tmp/ud.orig kindle/update_dash.sh
+          rm /tmp/ud.orig
+          echo "the suite fails when a half-written chart is accepted, as it should"
 
       - name: Verify the deploy tools see every board in platformio.ini
         # tools/pio_envs.py is where the flash tools get their board list. An
