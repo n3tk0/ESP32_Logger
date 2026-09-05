@@ -342,6 +342,21 @@ def resolve_selection(text: str) -> tuple[list[str], list[str]]:
         elif macro not in chosen:
             chosen.append(macro)
 
+    # A SELECTION THAT SUBTRACTED ITSELF TO NOTHING IS NOT "default".
+    #
+    # `-all`, or `all` followed by removals of everything, leaves chosen empty
+    # — and an empty list means "setup.h decides" everywhere downstream, so it
+    # would build and ship the full default feature set under a green tick.
+    # That is the silent drop this module's header says must always be an
+    # error: the reader asked for a specific thing and got something else. The
+    # empty box means "I have not chosen"; this means "I chose nothing", and
+    # there is deliberately no spelling for that because it does not compile.
+    if not errors and not chosen:
+        errors.append(
+            "everything named was then taken back out, and a build with no "
+            "features is not one setup.h will compile. Say `default` for the "
+            "set it ships, or name what you want.")
+
     if not errors and chosen and not has_a_reading_source(chosen):
         errors.append(
             "this selection has no sensor and no remote-node feature, so there "

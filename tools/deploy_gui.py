@@ -1929,7 +1929,18 @@ REQUIREMENTS
                     confirm_bootloader_callback=self._confirm_bootloader)
 
                 self._log("\n" + "=" * 60)
-                if success:
+                # "Nothing failed" is not "everything ran". A declined
+                # bootloader step is neither an error nor a flash, and the
+                # green banner was being shown for both.
+                declined = self.manager.skipped
+                if success and declined:
+                    sk = ", ".join(str(n) for n in declined)
+                    self._log(f"! Finished — step(s) {sk} were DECLINED and "
+                              f"did not run.", "warning")
+                    self._set_progress(total, total, "Finished with declines")
+                    self._notify(f"Finished, but step(s) {sk} were declined — "
+                                 f"they did not run.", "warning")
+                elif success:
                     self._log("✓ All steps completed successfully!")
                     self._set_progress(total, total, "Finished")
                     self._notify("All steps completed successfully.", "success")

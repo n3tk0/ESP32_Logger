@@ -119,6 +119,15 @@ macros, _ = resolve_selection("bme280 -bme280 kindle")
 check(macros == ["FEATURE_KINDLE_DASHBOARD"],
       "  removing something that was added leaves the rest")
 
+# ...but subtracting everything is not "default". An empty result means
+# "setup.h decides" everywhere downstream, so `-all` would have built and
+# shipped the full default set under a green tick — the reader asked for a
+# specific thing and got something else, which is the silent drop this whole
+# resolver exists to prevent.
+refuses("-all", "taken back out", "'-all' is refused, not read as 'default'")
+refuses("all -all", "taken back out", "  and so is adding everything then removing it")
+refuses("bme280 -bme280", "taken back out", "  and so is one that cancels itself")
+
 print("\nWhat it refuses, and why refusing beats guessing:")
 
 # VEML6075 is UV and VEML7700 is lux: different sensors, different addresses,

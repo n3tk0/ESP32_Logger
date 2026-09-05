@@ -202,6 +202,12 @@ jobs:
           sleep 2
           MOCK_PORT=8765 python3 tests/web/drive_espnow_page.py
 
+      # ONE PORT PER STEP, NEVER REUSED IN THIS JOB. Actions does not kill a
+      # step's background children, so every mock_device.py started here is
+      # still listening when the next step runs: a second server on the same
+      # port dies with EADDRINUSE and its driver silently tests against the
+      # earlier one — whose fixture the earlier driver had already POSTed
+      # over. 8765/8766 espnow, 8767/8768 kindle, 8770/8771 sensors.
       - name: Drive the sensors page's remote-sensor editor
         # A satellite node pairs with the collector on one string, its node id,
         # and that string is the whole configuration of a "remote" sensor —
@@ -211,9 +217,9 @@ jobs:
         # This edits it the way a person does and asserts on the document that
         # goes back to the device.
         run: |
-          python3 tests/web/mock_device.py 8767 &
+          python3 tests/web/mock_device.py 8770 &
           sleep 2
-          MOCK_PORT=8767 python3 tests/web/drive_sensors_page.py
+          MOCK_PORT=8770 python3 tests/web/drive_sensors_page.py
 
       - name: Verify that check actually fails without the node-id field
         # Take the remote branch out of BOTH the form builder and the saver by
@@ -233,9 +239,9 @@ jobs:
             exit 1
           }
           node --check www/js/sensors.js
-          python3 tests/web/mock_device.py 8768 &
+          python3 tests/web/mock_device.py 8771 &
           sleep 2
-          if MOCK_PORT=8768 python3 tests/web/drive_sensors_page.py > /dev/null 2>&1; then
+          if MOCK_PORT=8771 python3 tests/web/drive_sensors_page.py > /dev/null 2>&1; then
             echo "::error::drive_sensors_page.py passed with the node-id field removed"
             cp www/js/sensors.js.orig www/js/sensors.js
             exit 1
@@ -578,6 +584,26 @@ jobs:
           fi
           cp node/src/ConfigPortal.cpp.orig node/src/ConfigPortal.cpp
           rm node/src/ConfigPortal.cpp.orig
+
+      - name: Verify that check actually fails when the browser owns the radio
+        # The scan widens the ESP8266 from AP to AP_STA, and the part has ONE
+        # radio: a station that associates drags the softAP onto its channel
+        # and drops whoever is standing in the portal. Putting it back used to
+        # be reachable only from the /scan poll — the browser's job, and the
+        # browser is the half that can close a tab.
+        run: |
+          set -e
+          cp node/src/ConfigPortal.cpp /tmp/portal.orig
+          sed -i 's/^        scanWatchdog();$//' node/src/ConfigPortal.cpp
+          ! grep -q '^        scanWatchdog();$' node/src/ConfigPortal.cpp
+          if python3 tools/check_node_portal.py > /dev/null 2>&1; then
+            echo "::error::check_node_portal.py passed a portal that only narrows on a poll"
+            cp /tmp/portal.orig node/src/ConfigPortal.cpp
+            exit 1
+          fi
+          cp /tmp/portal.orig node/src/ConfigPortal.cpp
+          rm /tmp/portal.orig
+          echo "the check fails when only the browser can put the radio back"
           echo "the check fails on broken portal JavaScript, as it should"
 
       - name: Verify the deploy tools offer every feature setup.h declares

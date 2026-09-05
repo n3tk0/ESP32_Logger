@@ -823,6 +823,10 @@ echo "start.sh ran in $(pwd)"
 EOF
 sed 's/$/\r/' "$EXT/start.sh" > "$EXT/start.crlf" && mv "$EXT/start.crlf" "$EXT/start.sh"
 printf 'GR_X=20\r\nGR_Y=278\r\n' > "$EXT/layout/600x800.conf"
+# Not a *.conf, and it is the one conf_init copies to dash.conf on first
+# run — a CR here gives HOST a trailing carriage return and every fetch
+# fails against "http://192.168.1.50\r" with nothing anywhere saying why.
+printf 'HOST=192.168.1.50\r\n' > "$EXT/dash.conf.default"
 printf '\211PNG\r\n\032\n' > "$EXT/icons.bmp"   # not ours: must not be touched
 icons_before=$(wc -c < "$EXT/icons.bmp" | tr -dc 0-9)
 
@@ -837,6 +841,8 @@ check "$(tr -d '\r' < "$EXT/start.sh" | cmp -s - "$EXT/start.sh" && echo 0 || ec
       "  start.sh has no CR left in it"
 check "$(tr -d '\r' < "$EXT/layout/600x800.conf" | cmp -s - "$EXT/layout/600x800.conf" && echo 0 || echo 1)" \
       "  and neither does a layout file, whose GR_X=20\\r FBInk would reject"
+check "$(tr -d '\r' < "$EXT/dash.conf.default" | cmp -s - "$EXT/dash.conf.default" && echo 0 || echo 1)" \
+      "  nor dash.conf.default, which first run copies into the live config"
 check "$([ "$(wc -c < "$EXT/icons.bmp" | tr -dc 0-9)" = "$icons_before" ] && echo 0 || echo 1)" \
       "  while a file that is not ours keeps every byte it had"
 

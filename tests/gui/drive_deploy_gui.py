@@ -356,7 +356,8 @@ def run_prompts(app) -> None:
 
     # ── What the step then runs ─────────────────────────────────────────────
     mgr = dc.DeployManager(app.cfg)
-    mgr.on_step_output = lambda line, end="\n": None
+    said: list[str] = []
+    mgr.on_step_output = lambda line, end="\n": said.append(line)
     real_popen = dc.subprocess.Popen
     _FakePopen.calls = []
     try:
@@ -365,8 +366,10 @@ def run_prompts(app) -> None:
         ran = list(_FakePopen.calls)
 
         _FakePopen.calls = []
-        mgr.run_steps([2], confirm_bootloader_callback=lambda: False)
+        said.clear()
+        declined_ok = mgr.run_steps([2], confirm_bootloader_callback=lambda: False)
         skipped = list(_FakePopen.calls)
+        declined_log = "".join(said)
     finally:
         dc.subprocess.Popen = real_popen
 
@@ -378,6 +381,38 @@ def run_prompts(app) -> None:
         check(kwargs.get("stdin") is subprocess.DEVNULL,
               "and gives it no stdin to ask on")
     check(skipped == [], "declining runs nothing at all")
+
+    # AND SAYS SO. "Nothing failed" and "everything ran" are different
+    # answers, and run_steps() gives one bool for both — so a front end that
+    # only looks at the bool prints its green "All steps completed
+    # successfully" box for a deploy whose bootloader was never written.
+    # Both of them used to.
+    check(declined_ok is True, "declining is not a failure")
+    check(mgr.skipped == [2],
+          f"but the manager names the step that did not run ({mgr.skipped})")
+    check("DECLINED" in declined_log,
+          "and its own summary says so rather than claiming success")
+    check("All steps completed successfully" not in declined_log,
+          "  and does not also claim the opposite")
+
+    # A manager that has never run anything can still be asked, and a step
+    # called on its own — they are public methods — skips rather than raising.
+    fresh = dc.DeployManager(app.cfg)
+    fresh.on_step_output = lambda line, end="\n": None
+    check(fresh.skipped == [], "a manager that has run nothing has skipped nothing")
+    try:
+        rc = fresh.s2_flash_bootloader(lambda: False)
+        check(rc == 0 and fresh.skipped == [2],
+              "and s2 called directly skips instead of raising AttributeError")
+    except AttributeError as exc:
+        check(False, f"s2 called directly raised: {exc}")
+
+    # The CLI draws its own banner from the same answer. It is not callable
+    # from here — it lives inside an interactive menu — so this is the one
+    # thing to assert about it: that it asks.
+    cli_src = (ROOT / "tools" / "deploy.py").read_text(encoding="utf-8")
+    check("manager.skipped" in cli_src,
+          "the CLI banner reads the same list the GUI banner does")
 
     # ── The script itself, when something asks it anyway ────────────────────
     real_input = builtins.input

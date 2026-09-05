@@ -132,6 +132,17 @@ check "$(grep -q "installed from an MRPI package" "$D/kual.log" && echo 0 || ech
 check "$(grep -q "FBInk" "$D/kual.log" && echo 0 || echo 1)" \
       "  along with FBInk being absent, which is why nothing would draw"
 
+# The updater SOURCES this file, so everything it defines outlives it and is
+# in scope for whatever the same package run sources next. Its own header
+# promises it leaves nothing behind; this is what holds it to that.
+leftovers=$( ESP32DASH_PREFIX="$FAKE" sh -c '
+    . ./install-esp32dash.sh > /dev/null 2>&1
+    set | grep "^ESP32DASH_" | cut -d= -f1
+    command -v esp32dash_log > /dev/null 2>&1 && echo esp32dash_log
+    true' 2>/dev/null )
+check "$([ -z "$leftovers" ] && echo 0 || echo 1)" \
+      "it leaves nothing of its own in the updater's shell${leftovers:+ — $(echo $leftovers)}"
+
 # Installing over an install is the normal case — every update after the first.
 ( ESP32DASH_PREFIX="$FAKE" . ./install-esp32dash.sh ) >> "$WORK/install.log" 2>&1
 check "$?" "installing over an existing install returns 0"

@@ -89,7 +89,14 @@ say() {
 # are BMPs and a substitution inside one draws noise.
 heal_crlf() {
     local f healed=""
+    # dash.conf.default is named explicitly: it is not a *.conf. conf_init
+    # copies it verbatim to dash.conf on first run and update_dash.sh SOURCES
+    # the result, so a CR there gives HOST a trailing carriage return, every
+    # wget fails against "http://192.168.1.50\r", and nothing anywhere says
+    # why. dash.conf itself is healed for the same reason — it is the file
+    # somebody may have edited over USB, from Windows.
     for f in "$DIR"/*.sh "$DIR"/*.conf "$DIR"/*.json "$DIR"/*.xml \
+             "$DIR"/dash.conf.default "$DIR"/dash.conf \
              "$DIR"/layout/*.conf; do
         [ -f "$f" ] || continue
         if tr -d '\r' < "$f" | cmp -s - "$f"; then continue; fi

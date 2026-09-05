@@ -246,6 +246,36 @@ def main() -> int:
                  f"page would not say which GPIO it resolved to")
     print(f"OK: {len(pin_fields)} pin field(s), each with its resolver line")
 
+    # ── 5. something other than the browser puts the radio back ─────────────
+    #
+    # The scan widens the ESP8266 from AP to AP_STA, and the ESP8266 has ONE
+    # radio: a station that associates drags the softAP onto its channel and
+    # disconnects whoever is standing in the portal. narrowAfterScan() undoes
+    # that — but it used to be reachable ONLY from the /scan poll, which is
+    # the browser's job, and the browser is the half of this that can walk
+    # away. Close the tab and the radio stayed widened for the whole session.
+    #
+    # So: whatever narrows it must also be called from the portal's own loop,
+    # not only from a request handler. Asserted here rather than in a host
+    # test because ConfigPortal.cpp cannot be compiled off the device.
+    if "WIFI_AP_STA" in src:
+        loop = function_body(src, "bool portalRun(")
+        if not loop:
+            fail("could not find portalRun() to check the scan watchdog")
+        narrowers = re.findall(r"\b(\w*[Ss]can\w*)\s*\(\s*\)\s*;", loop)
+        if not narrowers:
+            fail("portalRun()'s loop never calls anything that could put the "
+                 "radio back after a scan. narrowAfterScan() is then reachable "
+                 "only from the /scan poll, and a browser that walks away "
+                 "leaves the node in AP_STA for the rest of the session — one "
+                 "radio, one channel, and the phone in the portal gets dropped.")
+        watchdog = function_body(src, "static void scanWatchdog(")
+        if "narrowAfterScan" not in watchdog:
+            fail("scanWatchdog() does not narrow the radio, so calling it from "
+                 "the loop achieves nothing")
+        print(f"OK: the portal loop calls {', '.join(sorted(set(narrowers)))} — "
+              f"the radio is put back without the browser's help")
+
     return 0
 
 

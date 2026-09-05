@@ -503,6 +503,25 @@ class DeployManager:
         self.on_step_complete: Optional[Callable[[int, int], None]] = None
         self.on_error: Optional[Callable[[str], None]] = None
 
+        # Steps the user was asked about and declined. HERE AND NOT IN
+        # run_steps(), because the step methods are public and independently
+        # callable — s2_flash_bootloader(lambda: False) on a fresh manager
+        # reached `self._skipped.append(2)` and raised AttributeError instead
+        # of skipping the step, which is a worse answer to "no" than either
+        # running it or not.
+        self._skipped: list[int] = []
+
+    @property
+    def skipped(self) -> list[int]:
+        """The steps of the last run that were offered and declined.
+
+        A front end has to be able to ask. run_steps() returning True means
+        "nothing failed", which is not the same as "everything ran", and the
+        difference is a bootloader that was never written under a green box
+        saying it was.
+        """
+        return sorted(self._skipped)
+
     def _log(self, msg: str, end: str = "\n") -> None:
         """Internal logging. Supports end parameter for in-line progress."""
         if self.on_step_output:
@@ -1467,9 +1486,11 @@ class DeployManager:
 
         failed: list[int] = []
         # Declining a destructive step is not a failure — but it is not the
-        # step having run, either. Without this the CLI printed its green
-        # "All steps completed successfully" box for a deploy whose bootloader
-        # was never written, and the GUI said the same in its status bar.
+        # step having run, either, and run_steps() returns one bool for both.
+        # So the list is cleared here and read back through `skipped` by
+        # whoever draws the banner: deploy.py and deploy_gui.py both used to
+        # print "All steps completed successfully" for a deploy whose
+        # bootloader was never written, because True was all they were told.
         self._skipped = []
         self._log(f"\n{'='*60}")
         self._log(f"Running steps: {', '.join(str(s) for s in steps)}")

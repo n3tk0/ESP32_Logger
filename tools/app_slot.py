@@ -11,10 +11,8 @@ in a comment beside them, and they are correct — until somebody changes a
 partition table, at which point they are a check that passes while the image no
 longer fits.
 
-PlatformIO writes the partition table it actually built with to
-`.pio/build/<env>/partitions.csv`. Asking that file is the difference between
-checking the build in front of you and checking the build somebody had in mind
-when they wrote the workflow.
+So the table is resolved rather than remembered — see `--env` below, which
+asks platformio.ini which table this env builds with and then finds it.
 
 WHY THE LARGEST APP PARTITION AND NOT THE SUM
 ---------------------------------------------

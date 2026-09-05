@@ -145,7 +145,11 @@ jobs:
           BUILD=".pio/build/$BOARD"
           STAMP="$(date -u +%Y%m%d)-$(git rev-parse --short HEAD)"
           SUFFIX=""
-          [ -n "$IN_LABEL" ] && SUFFIX="-$(echo "$IN_LABEL" | tr -c 'A-Za-z0-9._-' '-')"
+          # printf, not echo: `echo x | tr -c 'keep' '-'` translates the
+          # trailing NEWLINE too, so a label of "balcony" came back
+          # "balcony-" and every name carried a doubled dash.
+          [ -n "$IN_LABEL" ] &&
+            SUFFIX="-$(printf '%s' "$IN_LABEL" | tr -c 'A-Za-z0-9._-' '-')"
           NAME="firmware-${BOARD}${SUFFIX}-${STAMP}.bin"
 
           mkdir -p out

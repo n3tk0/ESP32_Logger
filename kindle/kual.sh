@@ -30,5 +30,12 @@
 #
 # It is also why the real work is in a second file: that one is filtered
 # through `tr` before it runs, so it can be written like ordinary shell.
+#
+# ONE FIXED NAME, not /tmp/kual-run.$$. The shell `exec`s into the copy, so
+# nothing is left to delete it afterwards, and /tmp is a ramdisk on a device
+# that runs for months between reboots — a per-launch name accumulated a
+# 6 KB copy in RAM every time somebody pressed a menu entry. Overwriting one
+# file is safe here because a second launch while the first is still running
+# is what start.sh's PID file exists to refuse.
 # ============================================================================
-exec /bin/sh -c 'd=${0%/*}; [ "$d" = "$0" ] && d=.; r=/tmp/kual-run.$$; tr -d "\r" < "$d/kual-run.sh" > "$r" 2>/dev/null || cp "$d/kual-run.sh" "$r"; exec /bin/sh "$r" "$d" "$@"' "$0" "$@"
+exec /bin/sh -c 'd=${0%/*}; [ "$d" = "$0" ] && d=.; r=/tmp/esp32dash-kual-run.sh; tr -d "\r" < "$d/kual-run.sh" > "$r" 2>/dev/null || cp "$d/kual-run.sh" "$r"; exec /bin/sh "$r" "$d" "$@"' "$0" "$@"

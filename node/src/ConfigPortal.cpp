@@ -519,7 +519,14 @@ static void handleRoot() {
 /// share a channel, and a station that associates drags the AP onto its
 /// channel — disassociating the phone that is standing in the portal. Leaving
 /// AP_STA on for the rest of the session leaves that trap armed.
-static bool s_widenedForScan = false;
+static bool     s_widenedForScan = false;
+static uint32_t s_scanStartedMs   = 0;
+
+/// How long the radio may stay widened before the portal narrows it itself.
+/// An ESP8266 scan is two to four seconds; the page polls every 750 ms and
+/// gives up after fifteen tries, so nothing legitimate is still waiting at
+/// twenty. Well clear of a slow scan, well inside a session.
+static const uint32_t kScanCeilingMs = 20000;
 
 static void handleScanStart() {
     if (!backgroundAuthOk()) return;
@@ -538,6 +545,7 @@ static void handleScanStart() {
     }
     WiFi.scanDelete();
     WiFi.scanNetworks(true);
+    s_scanStartedMs = millis();
     s_http.send(200, "text/plain", "OK");
 }
 
@@ -546,6 +554,28 @@ static void narrowAfterScan() {
     if (!s_widenedForScan) return;
     s_widenedForScan = false;
     WiFi.mode(WIFI_AP);
+}
+
+/// THE BROWSER IS THE HALF OF THIS THAT CAN WALK AWAY.
+///
+/// narrowAfterScan() runs on the /scan poll, which is the page's job. Close
+/// the tab, let its own retry counter give up, drop the link, or lock the
+/// phone — the poll stops, the scan finishes into a buffer nobody reads, and
+/// the radio stays in AP_STA for the rest of the portal session with exactly
+/// the trap armed that narrowAfterScan() exists to disarm: one radio, one
+/// channel, and a station that associates drags the softAP onto its channel
+/// and disconnects whoever is standing in the portal.
+///
+/// So the portal narrows on a ceiling of its own rather than on being asked.
+/// Time and not completion, deliberately: changing mode is entitled to drop
+/// the scan results, and narrowing the moment the scan finished would race
+/// the poll that is about to collect them.
+static void scanWatchdog() {
+    if (!s_widenedForScan) return;
+    if ((millis() - s_scanStartedMs) > kScanCeilingMs) {
+        Serial.println("[portal] scan abandoned; putting the radio back to AP");
+        narrowAfterScan();
+    }
 }
 
 static void handleScanResult() {
@@ -775,6 +805,7 @@ bool portalRun(NodeSettings& s, uint32_t timeoutMs) {
     while (true) {
         s_dns.processNextRequest();
         s_http.handleClient();
+        scanWatchdog();
 
         if (s_saved) break;
 

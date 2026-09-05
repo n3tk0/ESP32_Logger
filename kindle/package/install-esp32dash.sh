@@ -128,5 +128,23 @@ fi
 
 esp32dash_log "I" "done - open KUAL and look for ESP32 Dashboard"
 
-unset ESP32DASH_D ESP32DASH_FBINK ESP32DASH_DEST ESP32DASH_EXTS ESP32DASH_PREFIX
-return $ESP32DASH_RC
+# Everything this file put into the updater's shell, taken back out —
+# esp32dash_log included, because it is a FUNCTION the updater sourced and it
+# would otherwise be in scope for whatever .sh the same package run sources
+# next.
+#
+# TWICE, AND NOT ONCE INTO A VARIABLE. Remembering the exit code across the
+# cleanup takes a variable, and that variable is then the one thing left
+# behind — the first attempt at this left ESP32DASH_EXIT sitting in the
+# updater's shell, which the test caught. Two branches with a cleanup each
+# costs three duplicated lines and leaves nothing.
+if [ "$ESP32DASH_RC" -eq 0 ]; then
+    unset ESP32DASH_D ESP32DASH_FBINK ESP32DASH_DEST ESP32DASH_EXTS \
+          ESP32DASH_PREFIX ESP32DASH_RC
+    unset -f esp32dash_log 2> /dev/null || true
+    return 0
+fi
+unset ESP32DASH_D ESP32DASH_FBINK ESP32DASH_DEST ESP32DASH_EXTS \
+      ESP32DASH_PREFIX ESP32DASH_RC
+unset -f esp32dash_log 2> /dev/null || true
+return 1
