@@ -9,6 +9,21 @@ The deployment toolchain provides two interfaces for building, flashing, and dep
 
 Both share identical business logic via `deploy_core.py`, ensuring consistency and easy maintenance.
 
+There is a third way in that needs neither: **Actions → Build OTA Firmware →
+Run workflow** on GitHub. It offers the same board list and the same feature
+set, resolves the choice through the same `tools/features.py`, and passes the
+same `PLATFORMIO_BUILD_FLAGS` string — so a build from the button is the build
+these tools would have produced. What it hands back is the application image
+and its SHA-256, for upload to a device that is already running: no cable, no
+toolchain, and no bootloader or filesystem in the file, because those are not
+things a running firmware can install into itself.
+
+The thirty checkboxes arrive there as one line of text (`default`, `all`,
+`bme280 kindle remote_nodes`, `all -sds011`), because a `workflow_dispatch`
+form takes at most ten inputs. `features.py --resolve` is what makes that line
+mean the same thing the checkboxes do, and `tests/tools/drive_feature_resolve.py`
+is what keeps it meaning it.
+
 ## Architecture
 
 ```

@@ -34,6 +34,8 @@ on:
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
+      - 'tests/tools/**'
+      - 'tools/app_slot.py'
       - 'platformio.ini'
       - 'boards/**'
   pull_request:
@@ -60,6 +62,8 @@ on:
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
+      - 'tests/tools/**'
+      - 'tools/app_slot.py'
       - 'platformio.ini'
       - 'boards/**'
   workflow_dispatch:
@@ -467,6 +471,34 @@ jobs:
         # env its parser cannot see is a board the tool will not offer, and
         # nothing else would say so.
         run: python3 tools/check_pio_envs.py
+
+      - name: Verify that check actually fails on a board missing from the form
+        # The board dropdown in build-ota-firmware.yml is the one board list
+        # that cannot be computed — GitHub builds a workflow_dispatch `choice`
+        # before any of our code runs — so it is the one that can go stale. A
+        # board in platformio.ini and not in the form is a board nobody can get
+        # a firmware for without a toolchain.
+        run: |
+          set -e
+          cp .github/workflows/build-ota-firmware.yml /tmp/ota.orig
+          sed -i '0,/^          - lolin_c3_pico$/{/^          - lolin_c3_pico$/d}' \
+            .github/workflows/build-ota-firmware.yml
+          ! grep -q 'lolin_c3_pico' .github/workflows/build-ota-firmware.yml
+          if python3 tools/check_pio_envs.py > /dev/null 2>&1; then
+            echo "::error::check_pio_envs.py passed a board missing from the OTA form"
+            cp /tmp/ota.orig .github/workflows/build-ota-firmware.yml
+            exit 1
+          fi
+          cp /tmp/ota.orig .github/workflows/build-ota-firmware.yml
+          rm /tmp/ota.orig
+          echo "the check fails when the form loses a board, as it should"
+
+      - name: Check what the build form's text box means
+        # The OTA build workflow takes thirty checkboxes as one line of text.
+        # A name that quietly matched nothing is a firmware missing exactly the
+        # feature it was built for; one that matched the WRONG feature is
+        # worse, and VEML6075 (UV) and VEML7700 (lux) are one character apart.
+        run: python3 tests/tools/drive_feature_resolve.py
 
       - name: Verify every sensor plugin enables itself
         # ISensor::_enabled defaults to false and each plugin has to set it in

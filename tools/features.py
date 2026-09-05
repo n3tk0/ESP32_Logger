@@ -234,6 +234,123 @@ def build_flags_for(macros, extra: dict[str, str] | None = None) -> str:
     return " ".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# Turning what somebody typed into a set of macros
+# ---------------------------------------------------------------------------
+#
+# The GUI offers thirty checkboxes. A GitHub Actions form offers a text box —
+# there is a hard limit of ten inputs on a workflow_dispatch, and thirty
+# booleans would be most of a screen on a phone even if there were room. So the
+# same choice arrives here as a line of text, and this is what makes that line
+# mean the same thing the checkboxes do.
+#
+# It accepts what a person would actually type. "SENSOR_BME280_ENABLED" is the
+# name in setup.h and always works; "bme280" is what the sensor is called.
+# Prefix and _ENABLED suffix are decoration, and a unique substring is enough —
+# "kindle" can only be one thing. Anything ambiguous or unknown is an error
+# with the candidates listed, never a silent drop: a build missing exactly the
+# feature that was asked for, with a green tick next to it, is the failure this
+# whole path could most plausibly have had.
+
+_STRIP_PREFIXES = ("SENSOR_", "MODULE_", "EXPORT_", "FEATURE_")
+
+
+def _core(macro: str) -> str:
+    """The part of a macro name a person would say out loud."""
+    name = macro
+    for p in _STRIP_PREFIXES:
+        if name.startswith(p):
+            name = name[len(p):]
+            break
+    if name.endswith("_ENABLED"):
+        name = name[: -len("_ENABLED")]
+    return name
+
+
+def _norm(text: str) -> str:
+    """Case- and punctuation-insensitive: BME280, bme-280 and bme_280 agree."""
+    return "".join(ch for ch in text.lower() if ch.isalnum())
+
+
+def match_feature(token: str) -> tuple[str | None, list[str]]:
+    """One macro for `token`, or None and the candidates that made it ambiguous."""
+    macros = [f.macro for f in optional_features()]
+    want = _norm(token)
+    if not want:
+        return None, []
+
+    for m in macros:                                   # the real name
+        if _norm(m) == want:
+            return m, []
+    hits = [m for m in macros if _norm(_core(m)) == want]
+    if len(hits) == 1:
+        return hits[0], []
+    if len(hits) > 1:
+        return None, hits
+
+    hits = [m for m in macros if want in _norm(_core(m))]
+    if len(hits) == 1:
+        return hits[0], []
+    return None, hits
+
+
+def resolve_selection(text: str) -> tuple[list[str], list[str]]:
+    """`text` -> (macros, errors).
+
+    An EMPTY RESULT IS NOT AN EMPTY SET — it means "setup.h decides", the same
+    distinction build_flags_for() documents at length. `default` says that in
+    words; there is deliberately no spelling for "no features at all", because
+    a build with no reading source does not compile and the #error that follows
+    would be a worse way to find out.
+
+    Otherwise: `all` for everything, names to add, and a `-` in front of a name
+    to take one back out — `all -sds011` is the shape most people want.
+    """
+    tokens = [t for t in re.split(r"[\s,;]+", (text or "").strip()) if t]
+    if not tokens or (len(tokens) == 1 and tokens[0].lower() in ("default", "defaults")):
+        return [], []
+
+    chosen: list[str] = []
+    errors: list[str] = []
+
+    for token in tokens:
+        drop = token[0] in "-^!"
+        name = token[1:] if drop else token
+        if not drop and name.lower() == "all":
+            for f in optional_features():
+                if f.macro not in chosen:
+                    chosen.append(f.macro)
+            continue
+        if drop and name.lower() == "all":
+            chosen.clear()
+            continue
+
+        macro, candidates = match_feature(name)
+        if macro is None:
+            # The bare name, not the token: a leading "-" is how the name was
+            # being used, not part of what could not be found.
+            if candidates:
+                errors.append(
+                    f"'{name}' matches {len(candidates)} features — say which: "
+                    + ", ".join(candidates[:6]))
+            else:
+                errors.append(f"'{name}' is not a feature in src/setup.h")
+            continue
+        if drop:
+            if macro in chosen:
+                chosen.remove(macro)
+        elif macro not in chosen:
+            chosen.append(macro)
+
+    if not errors and chosen and not has_a_reading_source(chosen):
+        errors.append(
+            "this selection has no sensor and no remote-node feature, so there "
+            "is nothing for the firmware to read. setup.h refuses it with an "
+            "#error; add a sensor, FEATURE_REMOTE_NODES or FEATURE_ESPNOW_INGEST.")
+
+    return chosen, errors
+
+
 def main() -> int:
     feats = all_features()
     print(f"Every feature the deploy tools can switch either way ({len(feats)}).")
@@ -252,13 +369,53 @@ def main() -> int:
     return 0
 
 
+def cli(argv: list[str]) -> int:
+    """`--resolve` / `--build-flags`, for the callers that are not a person.
+
+    Two verbs rather than one because they answer different questions and both
+    get asked: a workflow shows the resolved list in its summary so somebody
+    can see what they are about to flash, and passes the flags to the compiler.
+    """
+    if not argv:
+        return main()
+
+    verb = argv[0]
+    if verb not in ("--resolve", "--build-flags"):
+        print(f"usage: features.py [--resolve TEXT | --build-flags TEXT "
+              f"[--espnow-lmk KEY]]", file=sys.stderr)
+        return 2
+
+    text = argv[1] if len(argv) > 1 else ""
+    lmk = ""
+    if "--espnow-lmk" in argv:
+        i = argv.index("--espnow-lmk")
+        lmk = argv[i + 1] if i + 1 < len(argv) else ""
+
+    macros, errors = resolve_selection(text)
+    if errors:
+        for e in errors:
+            print(f"features: {e}", file=sys.stderr)
+        return 2
+
+    if verb == "--resolve":
+        for m in macros:
+            print(m)
+        return 0
+
+    extra = {}
+    if lmk and "FEATURE_ESPNOW_INGEST" in macros:
+        extra["ESPNOW_LMK"] = lmk
+    print(build_flags_for(macros, extra))
+    return 0
+
+
 if __name__ == "__main__":
     # `features.py | grep -q NAME` closes the pipe as soon as it matches, and
     # without this Python turns that into a BrokenPipeError traceback on
     # stderr. The CI check does exactly that, and a tool that prints a stack
     # trace when it worked is a tool people stop trusting.
     try:
-        sys.exit(main())
+        sys.exit(cli(sys.argv[1:]))
     except BrokenPipeError:
         try:
             sys.stdout.close()
