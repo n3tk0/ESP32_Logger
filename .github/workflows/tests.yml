@@ -30,6 +30,7 @@ on:
       - 'tools/features.py'
       - 'tools/check_features.py'
       - 'tools/check_node_portal.py'
+      - 'tools/check_sensor_plugins.py'
       - 'node/**'
       - 'platformio.ini'
       - 'boards/**'
@@ -53,6 +54,7 @@ on:
       - 'tools/features.py'
       - 'tools/check_features.py'
       - 'tools/check_node_portal.py'
+      - 'tools/check_sensor_plugins.py'
       - 'node/**'
       - 'platformio.ini'
       - 'boards/**'
@@ -423,6 +425,27 @@ jobs:
         # env its parser cannot see is a board the tool will not offer, and
         # nothing else would say so.
         run: python3 tools/check_pio_envs.py
+
+      - name: Verify every sensor plugin enables itself
+        # ISensor::_enabled defaults to false and each plugin has to set it in
+        # init(). RemoteNodeSensor did not, so it loaded, logged "ready", and
+        # was then skipped by every tick — reporting itself "disabled" to the
+        # UI while the node feeding it was plainly alive on the Remote-nodes
+        # page. Nothing else in this repository would notice.
+        run: python3 tools/check_sensor_plugins.py
+
+      - name: Verify that check actually fails on a plugin that forgets
+        run: |
+          set -e
+          cp src/sensors/plugins/RemoteNodeSensor.cpp /tmp/rns.orig
+          sed -i '/_enabled = config\["enabled"\] | true;/d' src/sensors/plugins/RemoteNodeSensor.cpp
+          if python3 tools/check_sensor_plugins.py > /dev/null 2>&1; then
+            echo "::error::check_sensor_plugins.py passed a plugin that never enables itself"
+            cp /tmp/rns.orig src/sensors/plugins/RemoteNodeSensor.cpp
+            exit 1
+          fi
+          cp /tmp/rns.orig src/sensors/plugins/RemoteNodeSensor.cpp
+          echo "the check fails on a plugin that forgets, as it should"
 
       - name: Set up Node for the portal check
         uses: actions/setup-node@v4

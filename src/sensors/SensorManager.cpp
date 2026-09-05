@@ -169,6 +169,17 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         bool initOk = s->init(sensor);
         g_pinAllowUnsafe = false;
         if (initOk) {
+            // Belt and braces, and one plugin's worth of braces earned it:
+            // the loop above already skipped every config entry whose
+            // "enabled" is false, so anything that reaches here IS enabled —
+            // yet ISensor::_enabled defaults to false and each plugin has to
+            // remember to set it in init(). RemoteNodeSensor did not, and the
+            // result was a sensor that loaded, reported "disabled", and was
+            // skipped by tickFiltered() forever. Setting it here makes the
+            // invariant the manager's, so the next plugin cannot restate it
+            // wrongly by saying nothing at all.
+            s->setEnabled(sensor["enabled"] | true);
+
             _sensors[_count]    = s;
             _lastReadMs[_count] = 0;
             _count++;
