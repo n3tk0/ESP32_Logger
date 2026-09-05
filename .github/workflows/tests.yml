@@ -434,18 +434,41 @@ jobs:
         # page. Nothing else in this repository would notice.
         run: python3 tools/check_sensor_plugins.py
 
-      - name: Verify that check actually fails on a plugin that forgets
+      - name: Verify that check actually fails on a flipped default
+        # The invariant it guards is the DEFAULT: a sensor that loads is a
+        # sensor that runs, because loadAndInit() only ever constructs
+        # sensors the config enabled. Flipping ISensor::_enabled back to
+        # false re-arms the trap for every plugin at once — one forgets, and
+        # it loads, logs "ready", and is skipped by every tick.
         run: |
           set -e
-          cp src/sensors/plugins/RemoteNodeSensor.cpp /tmp/rns.orig
-          sed -i '/_enabled = config\["enabled"\] | true;/d' src/sensors/plugins/RemoteNodeSensor.cpp
+          cp src/sensors/ISensor.h /tmp/isensor.orig
+          sed -i 's/bool     _enabled    = true;/bool     _enabled    = false;/' src/sensors/ISensor.h
           if python3 tools/check_sensor_plugins.py > /dev/null 2>&1; then
-            echo "::error::check_sensor_plugins.py passed a plugin that never enables itself"
-            cp /tmp/rns.orig src/sensors/plugins/RemoteNodeSensor.cpp
+            echo "::error::check_sensor_plugins.py passed a false _enabled default"
+            cp /tmp/isensor.orig src/sensors/ISensor.h
             exit 1
           fi
-          cp /tmp/rns.orig src/sensors/plugins/RemoteNodeSensor.cpp
-          echo "the check fails on a plugin that forgets, as it should"
+          cp /tmp/isensor.orig src/sensors/ISensor.h
+          rm /tmp/isensor.orig
+          echo "the check fails on a flipped default, as it should"
+
+      - name: Verify that check actually fails when the manager overrules init()
+        # The other half: a plugin whose hardware is optional must be able to
+        # come back from init() unusable, and an unconditional setEnabled()
+        # after it would tick that sensor against absent hardware.
+        run: |
+          set -e
+          cp src/sensors/SensorManager.cpp /tmp/sm.orig
+          sed -i 's|            _sensors\[_count\]    = s;|            s->setEnabled(true);\n            _sensors[_count]    = s;|' src/sensors/SensorManager.cpp
+          if python3 tools/check_sensor_plugins.py > /dev/null 2>&1; then
+            echo "::error::check_sensor_plugins.py passed a manager that overrules init()"
+            cp /tmp/sm.orig src/sensors/SensorManager.cpp
+            exit 1
+          fi
+          cp /tmp/sm.orig src/sensors/SensorManager.cpp
+          rm /tmp/sm.orig
+          echo "the check fails when the manager overrules init(), as it should"
 
       - name: Set up Node for the portal check
         uses: actions/setup-node@v4
