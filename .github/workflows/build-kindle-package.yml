@@ -1,0 +1,141 @@
+# Build the Kindle dashboard's installable artifacts.
+#
+# WHY THIS WORKFLOW EXISTS
+# ------------------------
+# Every reported failure of this extension so far has been an installation
+# failure, not a code one: a checkout on Windows that rewrote every line ending
+# so busybox ash could not run a single script, a folder copied by hand into a
+# place KUAL does not look, an FBInk that was never installed. All three look
+# identical on the device — the menu closes, the home screen comes back, and
+# nothing is said, because KUAL discards whatever a menu entry prints.
+#
+# A build artifact removes the question. The bytes that leave this job are the
+# bytes that reach the reader; nothing in between gets to reinterpret one.
+#
+# Outputs:
+#   Update_esp32dash_<version>_install.bin  drop into /mnt/us/mrpackages and
+#                                           press one button in KUAL (MRPI)
+#   esp32dash-kindle-<version>.zip          unpack at the USB root instead
+#
+# Triggers: pushes and PRs touching the Kindle tree or the packaging, manual
+# dispatch, and releases (where both files are attached).
+
+name: Build Kindle Package
+
+on:
+  push:
+    paths:
+      - 'kindle/**'
+      - 'tools/mk_kindle_package.sh'
+      - 'tests/kindle/**'
+      - '.github/workflows/build-kindle-package.yml'
+  pull_request:
+    paths:
+      - 'kindle/**'
+      - 'tools/mk_kindle_package.sh'
+      - 'tests/kindle/**'
+      - '.github/workflows/build-kindle-package.yml'
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  package:
+    name: MRPI package
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # `git describe` needs the tags for the version
+
+      - name: Install KindleTool's build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential zlib1g-dev libarchive-dev nettle-dev
+
+      # From source, not a binary from a forum thread. KindleTool is what signs
+      # the package with the jailbreak key a hacked Kindle already trusts —
+      # nothing secret of ours goes into it, and nothing opaque should either.
+      - name: Build KindleTool
+        run: |
+          set -e
+          git clone --depth 1 https://github.com/NiLuJe/KindleTool.git /tmp/kindletool
+          make -C /tmp/kindletool -j"$(nproc)"
+          # The Makefile puts it in KindleTool/Release/; found rather than
+          # assumed, but an empty answer has to stop here and not three steps
+          # later as "kindletool: not found".
+          kt=$(find /tmp/kindletool -name kindletool -type f -perm -u+x | head -1)
+          if [ -z "$kt" ]; then
+            echo "::error::KindleTool built without producing a binary"
+            exit 1
+          fi
+          "$kt" version
+          echo "KINDLETOOL=$kt" >> "$GITHUB_ENV"
+
+      - name: Check the packaging, and install it into a Kindle that is not there
+        # The installer is sourced by the Kindle's own updater, as root, with
+        # the framework paused: no console, no shell, no second chance. This
+        # runs it against a scratch tree and asserts what survives.
+        run: sh tests/kindle/drive_package.sh
+
+      - name: Build the package
+        run: |
+          set -e
+          VERSION="${GITHUB_REF_NAME}"
+          case "$GITHUB_REF" in
+            refs/tags/*) ;;                       # a release: use the tag
+            *) VERSION="" ;;                      # otherwise let git describe
+          esac
+          if [ -n "$VERSION" ]; then
+            sh tools/mk_kindle_package.sh --version "$VERSION"
+          else
+            sh tools/mk_kindle_package.sh
+          fi
+          ls -l build/kindle/
+
+      # A .bin that KindleTool cannot read back is a .bin the Kindle will not
+      # read either, and the reader's only report is "Your Kindle did not
+      # update". Take it apart again and compare it with what went in.
+      - name: Read the package back
+        run: |
+          set -e
+          BIN=$(ls build/kindle/Update_esp32dash_*_install.bin)
+          echo "::group::header"
+          "$KINDLETOOL" convert -i "$BIN"
+          echo "::endgroup::"
+
+          mkdir -p /tmp/roundtrip
+          "$KINDLETOOL" extract "$BIN" /tmp/roundtrip
+          ls -l /tmp/roundtrip
+
+          test -f /tmp/roundtrip/install-esp32dash.sh
+          test -f /tmp/roundtrip/esp32dash.tar.gz
+          cmp /tmp/roundtrip/esp32dash.tar.gz build/kindle/stage/esp32dash.tar.gz
+          cmp /tmp/roundtrip/install-esp32dash.sh build/kindle/stage/install-esp32dash.sh
+          echo "the package contains exactly what was staged"
+
+          # One .sh, and no others hiding inside: KindleTool marks EVERY file
+          # ending in .sh as an install script for the updater to run, so a
+          # second one would be the Kindle executing the dashboard's own
+          # start.sh in the middle of an update.
+          n=$(find /tmp/roundtrip -name '*.sh' | wc -l)
+          test "$n" = "1" || { echo "::error::$n .sh files in the package"; exit 1; }
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: kindle-dashboard-package
+          path: |
+            build/kindle/Update_esp32dash_*_install.bin
+            build/kindle/esp32dash-kindle-*.zip
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/kindle/Update_esp32dash_*_install.bin
+            build/kindle/esp32dash-kindle-*.zip

@@ -41,8 +41,15 @@ DIR=$(pwd)
 # missing binary is why a dashboard that "started" can leave the screen exactly
 # as it was: every draw fails, the script keeps its schedule, and nothing ever
 # appears. Look in the places people put it before deciding it is absent.
-for d in "$DIR" "$DIR/bin" /mnt/us/bin /mnt/us/fbink /mnt/us/extensions/fbink \
-         /mnt/us/extensions/fbink/bin /mnt/us/extensions/kterm/bin \
+#
+# /mnt/us/libkh/bin FIRST, because that is not a guess: the universal jailbreak
+# hotfix installs FBInk there as part of setting the device up, so on most
+# jailbroken Kindles the binary is already present and merely unreachable from
+# the PATH a menu entry is given. That one line is the difference between "the
+# dashboard does nothing" and a working panel.
+for d in /mnt/us/libkh/bin "$DIR" "$DIR/bin" /mnt/us/bin /mnt/us/fbink \
+         /mnt/us/extensions/fbink /mnt/us/extensions/fbink/bin \
+         /mnt/us/extensions/kterm/bin \
          /usr/local/bin /usr/local/mnt/us/bin; do
     [ -d "$d" ] && PATH="$PATH:$d"
 done
@@ -114,7 +121,10 @@ run() {
 }
 
 # ── What KUAL asked for ──────────────────────────────────────────────────────
-log "--- $* (dir $DIR)"
+# The version goes in every time, not once at install: the first question asked
+# of a reader behaving oddly is which build is on it, and the answer has to be
+# in the same file as the symptom.
+log "--- $* (dir $DIR, version $(cat "$DIR/VERSION" 2>/dev/null || echo unknown))"
 heal_crlf
 
 if ! command -v fbink >/dev/null 2>&1; then

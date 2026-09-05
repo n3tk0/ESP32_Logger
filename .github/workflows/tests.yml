@@ -428,6 +428,19 @@ jobs:
         # dash — the closest thing to it available here.
         run: sh tests/kindle/drive_dash.sh
 
+      - name: Build the Kindle package and install it into a Kindle that is not there
+        # The installer inside the MRPI package is sourced by the Kindle's own
+        # updater, as root, with the framework paused: no console, no shell and
+        # no second chance. This stages the package, asserts the properties
+        # that decide what the updater does with it — one .sh in the whole
+        # package, because it runs all of them — and then runs the installer
+        # against a scratch tree standing in for /mnt/us.
+        #
+        # The .bin itself is built and taken apart again in
+        # build-kindle-package.yml, which has KindleTool. This half needs
+        # nothing but a shell, so it runs with everything else.
+        run: sh tests/kindle/drive_package.sh
+
       - name: Verify that suite actually fails on a chart it should refuse
         # The reported bug: the chart on a Kindle vanished for a while and came
         # back. What lands on disk when the image is cut off mid-transfer is a

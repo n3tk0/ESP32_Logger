@@ -14,11 +14,18 @@ kindle/*.xml text eol=lf
 kindle/layout/*.conf text eol=lf
 kindle/dash.conf.default text eol=lf
 
+# The installer inside the MRPI package is not read by the Kindle at all — it
+# is read by the Kindle's own UPDATER, which sources it as root in the middle
+# of an update. A CR there fails the update on a device with no console to say
+# so, and the package is built from this working tree.
+kindle/package/*.sh text eol=lf
+
 # The same reasoning reaches the test: it parses tab-separated fbink argv under
 # `sh`, so a CR at the end of every recorded line would break every assertion —
 # and it is the only thing standing between the dashboard and a device nobody
 # can debug remotely.
 tests/kindle/*.sh text eol=lf
+tools/mk_kindle_package.sh text eol=lf
 
 # The pre-rendered icons are images. Marked explicitly so no future text rule
 # can reach them: a single CRLF substitution inside a BMP shifts the pixel data
