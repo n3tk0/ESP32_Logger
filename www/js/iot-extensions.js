@@ -1768,7 +1768,7 @@
       ["yfs201",  "droplets",        "YF-S201",   "Pulse · Flow"],
       ["rain",    "cloud-rain",      "Rain",      "Pulse"],
       ["wind",    "wind",            "Wind",      "Pulse"],
-        ["remote",  "cpu",             "Remote",    "HTTP Node"],
+      ["remote",  "cpu",             "Remote",    "HTTP \u00b7 satellite node"],
     ];
 
     var typeGridHTML = typeCards.map(function (c) {
@@ -1971,8 +1971,9 @@
     var intVal   = (document.getElementById("wiz-int")   || {}).value || "10000";
     var iface    = ifaceVal.toLowerCase();
 
+    var nodeVal  = (document.getElementById("wiz-node")  || {}).value || "";
+
     // Read an integer field by id; return `def` when blank/missing/non-numeric.
-      var nodeVal  = (document.getElementById("wiz-node")  || {}).value || "";
     function pinVal(id, def) {
       var v = (document.getElementById(id) || {}).value;
       var n = parseInt(v, 10);
@@ -1993,8 +1994,13 @@
     }
 
     // Interface-specific pins/keys — must match the SensorManager plugin schema.
-      if (iface === "http" && nodeVal) { obj.node = nodeVal; }
-    if (iface === "i2c") {
+    if (iface === "http") {
+      // A remote node has no pins at all: it is named, not wired. Falling
+      // through to the else below wrote `pin: 4` — the hidden data-pin
+      // field's default — into every remote sensor. RemoteNodeSensor ignores
+      // it, so nothing broke; it was still a lie in the config file.
+      if (nodeVal) obj.node = nodeVal;
+    } else if (iface === "i2c") {
       var addrVal = (document.getElementById("wiz-addr") || {}).value || "0x76";
       obj.address = parseInt(addrVal, 16) || parseInt(addrVal, 10) || 0;
       obj.sda     = pinVal("wiz-sda", -1);

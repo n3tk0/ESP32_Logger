@@ -188,13 +188,20 @@ void loop() {
     s_lastPost   = now;
     s_postedOnce = true;
 
+    // WiFi FIRST, and whatever the sensors are doing.
+    //
+    // This used to sit below the sensor gate, so a node whose sensor was not
+    // found returned before ever reaching it: after a router reboot it never
+    // reconnected, and portalStartBackground() — the one way to fix the sensor
+    // without a cable — is called from in here, so it never came back either.
+    // A node with a wiring mistake became a node you had to walk to.
+    if (!ensureWifi()) return;
+
     // Retry rather than requiring a power cycle: a breakout on a cold balcony
     // can fail its first probe and answer a minute later. sensorsBegin() only
     // re-probes what is not already up.
     if (!sensorsReady()) sensorsBegin(s_cfg);
     if (!sensorsReady()) return;
-
-    if (!ensureWifi()) return;
 
     postReadings();
 }

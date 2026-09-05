@@ -280,15 +280,60 @@ pops the "sign in to network" prompt straight into the form; otherwise open
   while somebody is connected to the AP, so it will not close mid-form, but
   it can close before you join.
 
-The form covers WiFi, collector address and port, ingest token, optional Basic
-Auth, **sensor pins**, node id, post interval and altitude. Saving writes the
-config and restarts.
+The form is a four-step wizard, in the order the answers depend on each other:
+
+| Step | Asks for |
+|---|---|
+| 1 · Network | SSID and passphrase. **Scan** lists what is on the air; tap a name to fill the field. |
+| 2 · Collector | The ESP32's address and port, the ingest token, and the Basic Auth pair. |
+| 3 · Board & pins | Which board this is, a diagram of its header, and the sensor pins. |
+| 4 · This node | Node id, post interval, altitude — and a summary of the lot. |
+
+Saving writes the config and restarts.
+
+### The pin fields, and the mistake they used to allow
+
+**Type either form: `D6` or `12`.** The line under each field says which pin
+that resolved to, colour-coded, and the diagram above badges it on the header.
+
+This is the whole reason step 3 looks the way it does. The fields ask for a
+GPIO number, the board is printed with D-numbers, and the two disagree exactly
+where it hurts: **D6 is GPIO12, while GPIO6 is the SPI flash clock**. The form
+used to accept any number from 0 to 16 and write it to flash, so a BMP280
+wired to the pads marked D6/D5 and entered as `6` and `5` put I2C on the flash
+bus. The node then came up as
+
+```
+wdt reset
+load 0x4010f000, len 3424, room 16
+~ld
+<garbage, forever>
+```
+
+on every boot, because the setting had been saved. Now:
+
+- **GPIO6-11 are refused outright** — no wiring makes the flash bus work, so
+  there is no "are you sure" for it either. The save is rejected with the
+  reason and the stored config is left alone.
+- **The silkscreen is accepted as input**, so nothing has to be translated by
+  hand.
+- **The awkward-but-usable pins are warned about, not banned**: GPIO0/GPIO2
+  (strap, must be high at reset), GPIO15 (strap, must be low), GPIO1/GPIO3
+  (the serial console) and GPIO16 (no interrupt, no pull-up). An I2C pull-up
+  holding a strap pin high is how the vendor boards wire their own sensors.
+
+The board selector changes the diagram, not the behaviour — the ESP8266's pins
+are the same on all of them. The D-numbers are identical on the NodeMCU and
+the D1 mini; the "bare ESP-12" option simply has no silkscreen to promise.
 
 The pin fields shown depend on what is in the build: an I2C pair when a
 BMx280/BME688 is compiled in, a 1-Wire pin when DS18B20 is. Offering a control
 for a driver that is not present would be a control that does nothing, which
-is worse than no control. GPIO numbers outside 0-16 are rejected and keep the
-previous value.
+is worse than no control.
+
+The table itself is `node/src/NodePins.h`, and `tests/host/test_node_pins.cpp`
+checks it on the build host — that D6 is 12, that the flash bus is refused,
+and that nothing merely awkward is refused with it.
 
 Password fields come back **empty** and mean "keep the saved one". The stored
 passphrase is never rendered into the page — putting it in the page source
@@ -321,7 +366,46 @@ The AP is WPA2, not open. It only exists while the node cannot reach its
 network, but an open AP in that window would let anyone in range repoint the
 node at their own collector. **Change `PORTAL_AP_PASS` from the default.**
 
-Outside the portal the node runs no server and listens on no port.
+Outside the portal the node runs no server and listens on no port — **unless**
+a Basic Auth user and password are set. Then, and only then, the same form is
+also served on the LAN for as long as the node is up, behind those
+credentials. Leaving them empty is what the log means by:
+
+```
+[portal] background server NOT started: set a basic-auth user and password
+         in the setup portal to enable configuration over the LAN
+```
+
+One pair, two jobs: it guards that LAN form, and it is what the node sends to
+the collector when the collector was built with `WEB_BASIC_AUTH_ENABLED`. If
+your collector uses Basic Auth, these have to be the collector's credentials —
+you do not get to pick a different password for the portal.
+
+## Pairing with the collector
+
+The collector never contacts the node. The node POSTs to `/api/ingest`, and
+the only thing that pairs the two is the **node id string** — compared
+exactly, up to 16 characters. The node's IP is not entered anywhere on the
+collector.
+
+On the collector, add a sensor of type **`remote`** whose `node` field is that
+string (leave `node` out and the sensor's own id is used instead):
+
+```json
+{ "id": "balcony", "type": "remote", "enabled": true,
+  "interface": "http", "node": "balcony", "read_interval_ms": 30000 }
+```
+
+Its serial log says what it is listening for:
+
+```
+[balcony.remote] listening for node "balcony" (stale after 600000 ms)
+```
+
+A remote sensor has **no metrics until the first POST arrives**, and the
+collector's dashboard draws one card per (sensor, metric) pair — so a
+correctly configured node that has not reported yet shows up in the sensor
+list and nowhere else. That is not a failure; it is one posting interval.
 
 ## Altitude and pressure
 

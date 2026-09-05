@@ -86,6 +86,7 @@ bool settingsLoad(NodeSettings& out) {
     out.pulsePin   = doc["pulsePin"]   | out.pulsePin;
     out.sdsRx      = doc["sdsRx"]      | out.sdsRx;
     out.sdsTx      = doc["sdsTx"]      | out.sdsTx;
+    out.board      = doc["board"]      | out.board;
 
     return true;
 }
@@ -108,6 +109,7 @@ bool settingsSave(const NodeSettings& s) {
     doc["pulsePin"]   = s.pulsePin;
     doc["sdsRx"]      = s.sdsRx;
     doc["sdsTx"]      = s.sdsTx;
+    doc["board"]      = s.board;
 
     // Temp file + rename: a brownout partway through leaves the previous
     // config intact rather than a truncated one. Writing CFG_PATH directly

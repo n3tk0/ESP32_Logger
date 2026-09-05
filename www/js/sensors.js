@@ -540,6 +540,11 @@ var CL_SENSOR_TYPES = [
   { value: "sgp30", label: "SGP30 (TVOC/eCO2)", iface: "i2c" },
   { value: "rain", label: "Rain gauge (tipping bucket)", iface: "pulse" },
   { value: "wind", label: "Wind speed (anemometer)", iface: "pulse" },
+  // Not wired to this board at all: the values arrive by POST /api/ingest from
+  // a satellite node. It belongs in this list because the list is what names a
+  // sensor in the UI, and without an entry a remote node showed up as the raw
+  // string "remote" with no interface line.
+  { value: "remote", label: "Remote node (HTTP ingest)", iface: "http" },
 ];
 
 // R11: GPIO pin list + per-pin warnings are derived from the active
@@ -738,7 +743,9 @@ function clRenderSensors(sensors) {
             ? "RX:" + (s.uart_rx || "?")
             : s.interface === "pulse"
               ? "Pin:" + (s.pin || "?")
-              : "";
+              : s.interface === "http" || s.type === "remote"
+                ? "Node:" + (s.node || s.id || "?")
+                : "";
       return (
         '<div class="sensor-list-row" data-sensor-idx="' + i + '" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border)">' +
         '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:0 0 auto">' +
@@ -839,6 +846,17 @@ function _clBuildEditFormHtml(s) {
             '<div class="hint">Put devices with the same fixed address on different buses — e.g. VEML6075 and VEML7700 are both 0x10 and cannot share one. ' +
             'Bus 1 needs a chip with two I2C controllers (ESP32-S3, ESP32); the ESP32-C3 has only bus 0. ' +
             'Each bus needs its own SDA/SCL pins and its own pull-ups.</div></div>';
+  } else if (s.interface === "http" || s.type === "remote") {
+    // The whole configuration of a remote sensor. The collector never
+    // contacts the node — the node POSTs to /api/ingest — so there is no
+    // address here to get wrong: the pairing is this string, compared
+    // exactly (strcmp) against the "node" field of the arriving payload.
+    html += '<div class="field"><label class="field-label">Remote node id</label>' +
+            '<input type="text" name="node" class="input mono" maxlength="16" value="' +
+            esc(s.node !== undefined ? s.node : "") + '" placeholder="' + esc(s.id || "") + '">' +
+            '<p class="hint">Must match the <b>Node id</b> in the satellite\u2019s ' +
+            'setup portal, exactly, up to 16 characters. Left empty, the sensor id ' +
+            'above is used instead.</p></div>';
   } else if (s.interface === "uart") {
     html += '<div class="form-grid">' +
             '<div class="field"><label class="field-label">RX Pin</label><input type="number" name="uart_rx" class="input" value="' + (s.uart_rx !== undefined ? s.uart_rx : 20) + '"></div>' +
@@ -878,7 +896,7 @@ function _clBuildEditFormHtml(s) {
           '<input type="checkbox" name="allow_unsafe_pins"' + (s.allow_unsafe_pins ? ' checked' : '') +
           '> Use restricted pin anyway (proper pull-ups added)</label>';
 
-  var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "bus", "uart_rx", "uart_tx", "baud", "pin", "work_period_min", "pulses_per_liter", "calibration", "humidityCorrectionEnabled", "humidityCorrectionKappa", "allow_unsafe_pins"];
+  var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "bus", "uart_rx", "uart_tx", "baud", "pin", "node", "work_period_min", "pulses_per_liter", "calibration", "humidityCorrectionEnabled", "humidityCorrectionKappa", "allow_unsafe_pins"];
   var advObj = {};
   for (var k in s) {
     if (stdKeys.indexOf(k) === -1) advObj[k] = s[k];
@@ -1007,7 +1025,13 @@ function clSaveEditedSensor() {
   s.enabled = fd.get("enabled") === "on";
   s.read_interval_ms = parseInt(fd.get("read_interval_ms") || 10000, 10);
   
-  if (s.interface === "i2c") {
+  if (s.interface === "http" || s.type === "remote") {
+    var nodeVal = (fd.get("node") || "").trim();
+    // Empty means "use the sensor id", which is what RemoteNodeSensor::init
+    // does with a missing field — so store nothing rather than an empty
+    // string that would look like a deliberate, unmatchable node id.
+    if (nodeVal) s.node = nodeVal; else delete s.node;
+  } else if (s.interface === "i2c") {
     s.sda = parseInt(fd.get("sda") || 6, 10);
     s.scl = parseInt(fd.get("scl") || 7, 10);
     s.bus = parseInt(fd.get("bus") || 0, 10);

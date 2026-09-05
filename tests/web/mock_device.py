@@ -46,6 +46,22 @@ STATUS = {
               "discover_seen": 5, "discover_bad_sig": 1, "paired": 3},
 }
 
+# GET /api/platform_config — what the sensors page loads and rewrites.
+# Deliberately mixed: a wired sensor and a remote one, because the two take
+# completely different halves of the editor (pins versus a node id) and a page
+# that only ever renders the wired case has never proved it can do the other.
+PLATFORM = {
+    "version": 1,
+    "mode": "legacy",
+    "sensors": [
+        {"id": "env_indoor", "type": "bme280", "enabled": True,
+         "interface": "i2c", "sda": 4, "scl": 0, "address": 119,
+         "read_interval_ms": 10000},
+        {"id": "balcony", "type": "remote", "enabled": True,
+         "interface": "http", "node": "outside", "read_interval_ms": 30000},
+    ],
+}
+
 # The e-ink dashboard's appearance, as GET /api/kindle/config returns it.
 # Deliberately NOT the defaults: a page that renders correctly only when every
 # value is zero is a page whose select boxes have never been proven to reflect
@@ -138,6 +154,13 @@ class H(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def _read_json(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            return json.loads(self.rfile.read(n).decode() or "{}")
+        except ValueError:
+            return None
+
     def _json(self, obj, code=200):
         b = json.dumps(obj).encode()
         self.send_response(code)
@@ -158,6 +181,8 @@ class H(http.server.SimpleHTTPRequestHandler):
             return self._json(KINDLE)
         if path == "/api/csrf-token":
             return self._json({"token": "test-token"})
+        if path == "/api/platform_config":
+            return self._json(PLATFORM)
         # Everything else the SPA polls on boot — answered emptily so the page
         # under test is not competing with a wall of failed requests.
         if path.startswith("/api/") or path in ("/status", "/wifi_scan_result"):
@@ -168,6 +193,16 @@ class H(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
+        # The sensors page sends the WHOLE platform config as a JSON document,
+        # unlike every form on the other pages. Read it before the form parse
+        # below, which would turn it into one nonsense key.
+        if path == "/save_platform":
+            doc = self._read_json()
+            if doc is None:
+                return self._json({"ok": False, "error": "bad json"}, 400)
+            PLATFORM.clear()
+            PLATFORM.update(doc)
+            return self._json({"ok": True})
         n = int(self.headers.get("Content-Length") or 0)
         body = urllib.parse.parse_qs(self.rfile.read(n).decode())
         if path == "/api/espnow/pair":
