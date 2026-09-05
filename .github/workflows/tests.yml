@@ -500,6 +500,13 @@ jobs:
         # worse, and VEML6075 (UV) and VEML7700 (lux) are one character apart.
         run: python3 tests/tools/drive_feature_resolve.py
 
+      - name: Check the OTA size check knows where the partition table is
+        # It answers one question — how many bytes may an OTA image be on this
+        # board — and its first version got it from a path a PlatformIO build
+        # does not write, so the check silently stopped being one while still
+        # reading like it passed.
+        run: python3 tests/tools/drive_app_slot.py
+
       - name: Verify every sensor plugin enables itself
         # ISensor::_enabled defaults to false and each plugin has to set it in
         # init(). RemoteNodeSensor did not, so it loaded, logged "ready", and

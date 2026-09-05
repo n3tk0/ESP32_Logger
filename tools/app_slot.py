@@ -22,8 +22,24 @@ An OTA image is written whole into ONE slot. A table with app0 and app1 has
 twice the app flash and the same limit per image — the second slot is what
 makes a rollback possible, not what makes a bigger firmware possible.
 
-    python3 tools/app_slot.py .pio/build/lolin_c3_pico/partitions.csv
+    python3 tools/app_slot.py partitions_balanced.csv
     1507328
+    python3 tools/app_slot.py --env esp32s3
+    3342336
+
+WHERE THE TABLE IS, WHICH IS NOT WHERE IT LOOKS LIKE IT SHOULD BE
+-----------------------------------------------------------------
+The first version of this read `.pio/build/<env>/partitions.csv`, on the
+reasonable assumption that a build leaves the table it used beside the binary.
+It does not — the first CI run said "No partition table found, so the image was
+not size-checked" and handed over a 1,306 KB image with no idea that the slot
+is 1,472 KB. A check that quietly does nothing is worse than no check, because
+it reads like one that passed.
+
+So `--env` resolves it the way PlatformIO does: `board_build.partitions` names
+either a file in the project (partitions_balanced.csv) or one of the Arduino
+core's own (default_8MB.csv, default_16MB.csv), which live in the framework
+package under the PlatformIO core directory. Both are searched, in that order.
 
 Exits 1, saying so, when the file names no app partition at all: a size check
 that silently returns 0 would fail every build, and one that returned a default
@@ -76,9 +92,54 @@ def _as_bytes(size: str) -> int:
     return base * mult
 
 
+def core_dir() -> Path:
+    """PlatformIO's own directory, wherever this machine keeps it."""
+    import os
+    return Path(os.environ.get("PLATFORMIO_CORE_DIR")
+                or os.environ.get("PLATFORMIO_HOME_DIR")
+                or (Path.home() / ".platformio"))
+
+
+def table_for_env(env: str) -> Path | None:
+    """The partition table `pio run -e env` builds with, or None if not found."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from pio_envs import environments, _project_root  # type: ignore
+
+    match = [e for e in environments(include_all=True) if e.name == env]
+    if not match or not match[0].partitions:
+        return None
+    name = match[0].partitions
+
+    root = _project_root()
+    if root is not None:
+        local = Path(root) / name
+        if local.is_file():
+            return local
+
+    # The Arduino core ships the default tables. The package directory carries
+    # a version in its name on some installs, so it is globbed rather than
+    # spelled out.
+    packages = core_dir() / "packages"
+    for pattern in ("framework-arduinoespressif32*/tools/partitions/" + name,
+                    "framework-arduinoespressif32*/*/tools/partitions/" + name):
+        for hit in sorted(packages.glob(pattern)):
+            if hit.is_file():
+                return hit
+    return None
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) == 2 and argv[0] == "--env":
+        found = table_for_env(argv[1])
+        if found is None:
+            print(f"app_slot: no partition table found for env {argv[1]!r}",
+                  file=sys.stderr)
+            return 1
+        argv = [str(found)]
+
     if len(argv) != 1:
-        print("usage: app_slot.py <partitions.csv>", file=sys.stderr)
+        print("usage: app_slot.py <partitions.csv> | --env <name>",
+              file=sys.stderr)
         return 2
     path = Path(argv[0])
     if not path.is_file():

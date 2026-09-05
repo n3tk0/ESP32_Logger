@@ -154,19 +154,21 @@ jobs:
           SHA=$(cut -d' ' -f1 < "out/$NAME.sha256")
           SIZE=$(stat -c%s "out/$NAME")
 
-          # The limit is read from the partition table PlatformIO built THIS
-          # image with, not from a number typed into a workflow — the app slot
-          # is 1,472 KB on the 4 MB C3s and 6,400 KB on the 16 MB S3, and a
-          # table that changes should change the check with it.
+          # The limit comes from the partition table THIS env builds with, not
+          # from a number typed into a workflow — 1,472 KB on the 4 MB C3s,
+          # 6,400 KB on the 16 MB S3 — resolved the way PlatformIO resolves it:
+          # board_build.partitions names either a file in the project or one of
+          # the Arduino core's own, and app_slot.py looks in both.
           #
-          # Missing table: WARN, do not fail, and do not guess from another
-          # env's entry in platformio.ini. The image is the thing that was
-          # asked for; a wrong limit that rejects a good build would be worse
-          # than no limit, and the device refuses an oversized image anyway.
-          MAX=0
-          if [ -f "$BUILD/partitions.csv" ]; then
-            MAX=$(python3 tools/app_slot.py "$BUILD/partitions.csv" || echo 0)
-          fi
+          # It used to read .pio/build/<env>/partitions.csv, on the reasonable
+          # assumption that a build leaves its table beside the binary. It does
+          # not, and the first run of this workflow duly said "not size-checked"
+          # and handed over an image with no idea whether it fits.
+          #
+          # Still a warning and not a failure when it cannot be found: the image
+          # is the thing that was asked for, and the device refuses an oversized
+          # one anyway.
+          MAX=$(python3 tools/app_slot.py --env "$BOARD" || echo 0)
 
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "sha=$SHA"   >> "$GITHUB_OUTPUT"

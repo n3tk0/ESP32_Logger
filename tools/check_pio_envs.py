@@ -120,4 +120,15 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # `check_pio_envs.py | head` closes the pipe partway through the listing,
+    # and without this Python turns that into a BrokenPipeError traceback on
+    # stderr — a tool that prints a stack trace when it worked is a tool people
+    # stop trusting. tools/features.py has carried the same guard for the same
+    # reason since the CI check started grepping its output.
+    try:
+        sys.exit(main())
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        finally:
+            sys.exit(0)
