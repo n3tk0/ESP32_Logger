@@ -123,6 +123,22 @@ jobs:
           n=$(find /tmp/roundtrip -name '*.sh' | wc -l)
           test "$n" = "1" || { echo "::error::$n .sh files in the package"; exit 1; }
 
+          # And the same thing asked of the file the updater actually reads.
+          # update-filelist.dat is the bundle manifest — one line per file, as
+          #   type md5 name blocksize display-name
+          # where 129 means "run this" and 128 means "this is an asset". The
+          # check above is about our file names; this one is about what the
+          # Kindle will do with them, which is the part that matters.
+          echo "::group::update-filelist.dat"
+          cat /tmp/roundtrip/update-filelist.dat
+          echo "::endgroup::"
+          runnable=$(awk '$1 == 129' /tmp/roundtrip/update-filelist.dat | wc -l)
+          if [ "$runnable" != "1" ]; then
+            echo "::error::$runnable files are flagged for the updater to run, expected 1"
+            exit 1
+          fi
+          awk '$1 == 129 { print "the updater will run:", $3 }' /tmp/roundtrip/update-filelist.dat
+
       - name: Upload the package
         uses: actions/upload-artifact@v4
         with:
