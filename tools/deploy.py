@@ -641,27 +641,53 @@ def run_steps(cfg: dict[str, Any]) -> None:
     # Create manager with CLI output callbacks
     manager = DeployManager(cfg)
 
-    def _confirm_erase() -> bool:
-        """Confirmation for chip erase."""
+    def _confirm() -> bool:
+        """Answer a destructive step's question. The step has just logged it.
+
+        Used for the erase steps and for the bootloader step — the latter
+        asked for itself, inside flash_bootloader.py, until the GUI (which
+        has no stdin to prompt on) turned that prompt into an EOFError. The
+        front end asks now, and the script is told --yes.
+        """
         try:
             ans = input(_yellow("  Continue? [y/N] ")).strip().lower()
         except (KeyboardInterrupt, EOFError):
             ans = ""
         return ans in ("y", "yes")
 
-    # Run with confirmation callback
-    success = manager.run_steps(steps, confirm_erase_callback=_confirm_erase)
+    # Run with confirmation callbacks
+    success = manager.run_steps(
+        steps,
+        confirm_erase_callback=_confirm,
+        confirm_bootloader_callback=_confirm)
 
     print()
     # Padded rather than typed: the success line was one column wider than the
     # rule above it, so the box it drew did not close.
     bar = "═" * 46
-    paint = _green if success else _red
-    msg = ("✓  All steps completed successfully." if success
-           else "✗  Some steps failed. See logs above.")
+
+    # THREE OUTCOMES, NOT TWO. run_steps() returns one bool, and "nothing
+    # failed" is not "everything ran": answering no to "Flash bootloader? This
+    # overwrites the existing bootloader." is not an error, and it is not the
+    # bootloader having been written either. Printing the green box for it is
+    # how somebody walks away believing a device was flashed.
+    #
+    # Which steps were declined goes on its own line rather than inside the
+    # box: three declined steps would be wider than the rule, and a box that
+    # does not close is what the padding above exists to prevent.
+    declined = manager.skipped
+    if not success:
+        paint, msg = _red, "✗  Some steps failed. See logs above."
+    elif declined:
+        paint, msg = _yellow, "!  Finished — but some steps were declined."
+    else:
+        paint, msg = _green, "✓  All steps completed successfully."
     print(paint(f"  ╔{bar}╗"))
     print(paint(f"  ║  {msg.ljust(len(bar) - 2)}║"))
     print(paint(f"  ╚{bar}╝"))
+    if success and declined:
+        names = ", ".join(f"{n} ({STEP_NAMES.get(n, '?')})" for n in declined)
+        print(_yellow(f"     Declined, and did not run: {names}"))
 
     print()
     try:

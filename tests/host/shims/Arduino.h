@@ -17,6 +17,8 @@
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
 #include <stdarg.h>
 #include <math.h>
 
@@ -79,6 +81,34 @@ public:
     bool operator==(const char* o)   const { return _s == (o ? o : ""); }
     bool operator!=(const String& o) const { return !(*this == o); }
     bool operator!=(const char* o)   const { return !(*this == o); }
+
+    // In-place, and returning void, exactly as Arduino's do — code written
+    // against them reads `v.trim();` and then uses `v`.
+    // isspace(), NOT "<= ' '". Arduino's String::trim() strips exactly the
+    // six characters isspace() accepts; a <= ' ' test additionally eats NUL
+    // and every C0 control byte, so a host test could prove a parser accepts
+    // input the device would reject. The shim is only useful while it is
+    // boring in the same places the real one is.
+    void trim() {
+        size_t b = 0, e = _s.size();
+        while (b < e && isspace((unsigned char)_s[b])) b++;
+        while (e > b && isspace((unsigned char)_s[e - 1])) e--;
+        _s = _s.substr(b, e - b);
+    }
+    void toUpperCase() {
+        for (size_t i = 0; i < _s.size(); i++) {
+            if (_s[i] >= 'a' && _s[i] <= 'z') _s[i] = (char)(_s[i] - 'a' + 'A');
+        }
+    }
+    void toLowerCase() {
+        for (size_t i = 0; i < _s.size(); i++) {
+            if (_s[i] >= 'A' && _s[i] <= 'Z') _s[i] = (char)(_s[i] - 'A' + 'a');
+        }
+    }
+    // Arduino's toInt() parses a leading integer and answers 0 for anything
+    // it cannot read at all — it does not signal failure, and callers that
+    // care check the characters themselves.
+    long toInt() const { return atol(_s.c_str()); }
 
     String& operator+=(const String& o) { _s += o._s;            return *this; }
     String& operator+=(const char* o)   { _s += (o ? o : "");    return *this; }

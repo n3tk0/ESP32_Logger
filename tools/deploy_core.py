@@ -66,6 +66,19 @@ def _python() -> str:
     return sys.executable
 
 
+# ── Windows: children without console windows ─────────────────────────────────
+#
+# Every step runs a console-subsystem program (python.exe, pio.exe, esptool),
+# and Windows gives such a child a console window of its own whenever the
+# parent has none. The frozen GUI is built windowed (console=False in
+# deploy_gui.spec), so each step popped an empty black window that showed
+# nothing — its output is on a pipe, being written into the GUI's log.
+#
+# The helpers live in win_console.py because flash_bootloader.py needs exactly
+# the same decision, and a copy in each file is a copy to keep in step.
+from win_console import has_console as _has_console, no_window as _no_window  # noqa: E402
+
+
 # ── Step catalogue ────────────────────────────────────────────────────────────
 #: Each step as (what it does, how it does it). Two halves rather than one
 #: padded string because they have two different readers: the CLI prints them
@@ -490,6 +503,25 @@ class DeployManager:
         self.on_step_complete: Optional[Callable[[int, int], None]] = None
         self.on_error: Optional[Callable[[str], None]] = None
 
+        # Steps the user was asked about and declined. HERE AND NOT IN
+        # run_steps(), because the step methods are public and independently
+        # callable — s2_flash_bootloader(lambda: False) on a fresh manager
+        # reached `self._skipped.append(2)` and raised AttributeError instead
+        # of skipping the step, which is a worse answer to "no" than either
+        # running it or not.
+        self._skipped: list[int] = []
+
+    @property
+    def skipped(self) -> list[int]:
+        """The steps of the last run that were offered and declined.
+
+        A front end has to be able to ask. run_steps() returning True means
+        "nothing failed", which is not the same as "everything ran", and the
+        difference is a bootloader that was never written under a green box
+        saying it was.
+        """
+        return sorted(self._skipped)
+
     def _log(self, msg: str, end: str = "\n") -> None:
         """Internal logging. Supports end parameter for in-line progress."""
         if self.on_step_output:
@@ -658,18 +690,35 @@ class DeployManager:
                 self._log(f"  ! ESP-NOW key is {len(lmk)} characters; it must be "
                           f"exactly 16. The build will refuse it.")
 
-    def _run_cmd(self, cmd: list[str], env: dict[str, str] | None = None) -> int:
-        """Run a subprocess command and stream output to callback."""
+    def _run_cmd(self, cmd: list[str], env: dict[str, str] | None = None,
+                 interactive: bool = False) -> int:
+        """Run a subprocess command and stream output to callback.
+
+        stdin is closed unless `interactive`. A step that asks a question
+        nobody can answer is worse than one that never asks: run from the
+        GUI, the bootloader step inherited a stdin that did not exist and
+        died on an EOFError traceback. The steps that need an answer get it
+        from the front end now, and pass it on the command line. Only the
+        serial monitor genuinely wants a keyboard.
+        """
         self._log(f"$ {shlex.join(cmd)}")
         try:
             process = subprocess.Popen(
                 cmd,
+                # `interactive` asks for a keyboard; a console is what
+                # supplies one. Without a console — the frozen windowed GUI —
+                # inheriting stdin hands the child an invalid handle, which is
+                # the same "prompting on a stdin nobody has" this commit
+                # removed from step 2. DEVNULL is the honest answer there.
+                stdin=None if (interactive and _has_console())
+                      else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 env=env,
                 cwd=str(ROOT),
+                **_no_window(inherits_console=interactive),
             )
         except Exception as exc:
             self._log(f"Error: {exc}")
@@ -702,6 +751,7 @@ class DeployManager:
         script = TOOLS / "build_web.py"
         if not script.is_file():
             self._log("ERROR: build_web.py not found in tools/")
+            self._emit_complete(1, 2)
             return 2
         rc = self._run_cmd([_python(), str(script), "--dst", str(DATA_WWW)])
         if rc == 0:
@@ -709,19 +759,37 @@ class DeployManager:
         self._emit_complete(1, rc)
         return rc
 
-    def s2_flash_bootloader(self) -> int:
+    def s2_flash_bootloader(
+            self, confirm_callback: Optional[Callable[[], bool]] = None) -> int:
         self._emit_start(2, STEP_NAMES[2])
         script = TOOLS / "flash_bootloader.py"
         if not script.is_file():
             self._log("ERROR: flash_bootloader.py not found in tools/")
+            # Paired with the _emit_start above. Every exit from a step has to
+            # emit a completion or the GUI's progress counter, which counts
+            # them, stays a step behind for the rest of the run.
+            self._emit_complete(2, 2)
             return 2
+
+        # The question is asked HERE, by whoever has a user to ask — the CLI
+        # on its terminal, the GUI in its status bar — and the answer is
+        # passed to the script as --yes. flash_bootloader.py used to ask it
+        # itself, on a stdin the windowed GUI does not have, and the step
+        # ended on "EOFError: EOF when reading a line" every time.
+        self._log("*** Overwrites the existing bootloader on the device. ***")
+        if confirm_callback and not confirm_callback():
+            self._log("Skipped.")
+            self._skipped.append(2)
+            self._emit_complete(2, 0)
+            return 0
+
         # Pass the ENV name, not the chip family. flash_bootloader resolves the
         # chip from it and — crucially — the flash size, which the chip alone
         # cannot give: esp32s3 and esp32s3_n16r8 are the same silicon with 8
         # and 16 MB behind it, and the size lands in the bootloader image
         # header.
         cmd = [_python(), str(script), "--chip", self.cfg["env"],
-               "--baud", str(self.cfg["baud"])]
+               "--baud", str(self.cfg["baud"]), "--yes"]
         if self.cfg.get("port"):
             cmd += ["--port", self.cfg["port"]]
         rc = self._run_cmd(cmd)
@@ -738,11 +806,13 @@ class DeployManager:
         if confirm_callback:
             if not confirm_callback():
                 self._log("Skipped.")
+                self._skipped.append(3)
                 self._emit_complete(3, 0)
                 return 0
 
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            self._emit_complete(3, 1)
             return 1
 
         cmd = [self.pio, "run", "-t", "erase", "-e", self.cfg["env"]]
@@ -758,6 +828,7 @@ class DeployManager:
         self._emit_start(4, STEP_NAMES[4])
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            self._emit_complete(4, 1)
             return 1
         rc = self._run_cmd([self.pio, "run", "-t", "clean", "-e", self.cfg["env"]],
                            env=self._pio_env())
@@ -770,6 +841,7 @@ class DeployManager:
         self._emit_start(5, STEP_NAMES[5])
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            self._emit_complete(5, 1)
             return 1
         # Configure USB CDC flag before compilation
         self._configure_usb_cdc()
@@ -785,6 +857,7 @@ class DeployManager:
         self._emit_start(6, STEP_NAMES[6])
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            self._emit_complete(6, 1)
             return 1
         cmd = [self.pio, "run", "-t", "upload", "-e", self.cfg["env"]]
         if self.cfg.get("port"):
@@ -805,10 +878,12 @@ class DeployManager:
             self._log("data/www/ is empty — running Build web first…")
             rc = self.s1_build_web()
             if rc != 0:
+                self._emit_complete(7, rc)
                 return rc
 
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            self._emit_complete(7, 1)
             return 1
 
         cmd = [self.pio, "run", "-t", "uploadfs", "-e", self.cfg["env"]]
@@ -1008,11 +1083,14 @@ class DeployManager:
         self._emit_start(9, STEP_NAMES[9])
         if self.pio is None:
             self._log("ERROR: PlatformIO CLI (pio) not found in PATH.")
+            self._emit_complete(9, 1)
             return 1
         cmd = [self.pio, "device", "monitor", "-e", self.cfg["env"]]
         if self.cfg.get("port"):
             cmd += ["--port", self.cfg["port"]]
-        return self._run_cmd(cmd)
+        # The one step with a keyboard: miniterm's own keys (Ctrl-C to quit,
+        # Ctrl-T for its menu) need a stdin, and a console to read it from.
+        return self._run_cmd(cmd, interactive=True)
 
     # ── The satellite boards ─────────────────────────────────────────────────
     #
@@ -1098,6 +1176,7 @@ class DeployManager:
         if confirm_callback:
             if not confirm_callback():
                 self._log("Skipped.")
+                self._skipped.append(10)
                 self._emit_complete(10, 0)
                 return 0
 
@@ -1376,8 +1455,15 @@ class DeployManager:
 
     # ── Orchestration ──────────────────────────────────────────────────────────
 
-    def run_steps(self, steps: list[int], confirm_erase_callback: Optional[Callable[[], bool]] = None) -> bool:
-        """Run selected steps. Returns True if all succeeded."""
+    def run_steps(self, steps: list[int],
+                  confirm_erase_callback: Optional[Callable[[], bool]] = None,
+                  confirm_bootloader_callback: Optional[Callable[[], bool]] = None) -> bool:
+        """Run selected steps. Returns True if all succeeded.
+
+        The confirm callbacks are how a front end asks its user about the two
+        destructive steps. A caller that passes none has no one to ask and
+        gets the steps it selected.
+        """
         steps = sorted(steps)
         if not steps:
             self._log("No steps selected.")
@@ -1385,7 +1471,7 @@ class DeployManager:
 
         dispatch = {
             1: self.s1_build_web,
-            2: self.s2_flash_bootloader,
+            2: lambda: self.s2_flash_bootloader(confirm_bootloader_callback),
             3: lambda: self.s3_erase(confirm_erase_callback),
             4: self.s4_clean,
             5: self.s5_compile,
@@ -1399,6 +1485,13 @@ class DeployManager:
         }
 
         failed: list[int] = []
+        # Declining a destructive step is not a failure — but it is not the
+        # step having run, either, and run_steps() returns one bool for both.
+        # So the list is cleared here and read back through `skipped` by
+        # whoever draws the banner: deploy.py and deploy_gui.py both used to
+        # print "All steps completed successfully" for a deploy whose
+        # bootloader was never written, because True was all they were told.
+        self._skipped = []
         self._log(f"\n{'='*60}")
         self._log(f"Running steps: {', '.join(str(s) for s in steps)}")
         self._log(f"Environment: {self.cfg['env']}")
@@ -1421,7 +1514,12 @@ class DeployManager:
 
         self._log("")
         if not failed:
-            self._log("✓ All steps completed successfully.")
+            if self._skipped:
+                sk = ", ".join(str(s) for s in sorted(self._skipped))
+                self._log(f"✓ Completed — but step(s) {sk} were DECLINED and "
+                          f"did not run.")
+            else:
+                self._log("✓ All steps completed successfully.")
             return True
 
         fs = ", ".join(str(s) for s in failed)

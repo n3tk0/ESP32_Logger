@@ -69,3 +69,7 @@ kindle/dash.conf
 # And the addresses "Find collector" turned up, kept beside it so that Stop —
 # which deletes /tmp/dash — cannot take them with it.
 kindle/collectors
+
+# Written on the device by kindle/kual-run.sh: the record of what each KUAL
+# menu entry did, kept beside the scripts so a USB cable can read it.
+kindle/kual.log

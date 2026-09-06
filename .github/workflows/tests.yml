@@ -29,6 +29,13 @@ on:
       - 'tools/check_pio_envs.py'
       - 'tools/features.py'
       - 'tools/check_features.py'
+      - 'tools/check_node_portal.py'
+      - 'tools/check_sensor_plugins.py'
+      - 'node/**'
+      - 'kindle/**'
+      - 'tests/kindle/**'
+      - 'tests/tools/**'
+      - 'tools/app_slot.py'
       - 'platformio.ini'
       - 'boards/**'
   pull_request:
@@ -50,6 +57,13 @@ on:
       - 'tools/check_pio_envs.py'
       - 'tools/features.py'
       - 'tools/check_features.py'
+      - 'tools/check_node_portal.py'
+      - 'tools/check_sensor_plugins.py'
+      - 'node/**'
+      - 'kindle/**'
+      - 'tests/kindle/**'
+      - 'tests/tools/**'
+      - 'tools/app_slot.py'
       - 'platformio.ini'
       - 'boards/**'
   workflow_dispatch:
@@ -187,6 +201,54 @@ jobs:
           python3 tests/web/mock_device.py 8765 &
           sleep 2
           MOCK_PORT=8765 python3 tests/web/drive_espnow_page.py
+
+      # ONE PORT PER STEP, NEVER REUSED IN THIS JOB. Actions does not kill a
+      # step's background children, so every mock_device.py started here is
+      # still listening when the next step runs: a second server on the same
+      # port dies with EADDRINUSE and its driver silently tests against the
+      # earlier one — whose fixture the earlier driver had already POSTed
+      # over. 8765/8766 espnow, 8767/8768 kindle, 8770/8771 sensors.
+      - name: Drive the sensors page's remote-sensor editor
+        # A satellite node pairs with the collector on one string, its node id,
+        # and that string is the whole configuration of a "remote" sensor —
+        # there is no address and nothing to probe. The type was missing from
+        # the page's own list and the editor had no field for it, so the one
+        # setting it has could only be reached through the Advanced JSON box.
+        # This edits it the way a person does and asserts on the document that
+        # goes back to the device.
+        run: |
+          python3 tests/web/mock_device.py 8770 &
+          sleep 2
+          MOCK_PORT=8770 python3 tests/web/drive_sensors_page.py
+
+      - name: Verify that check actually fails without the node-id field
+        # Take the remote branch out of BOTH the form builder and the saver by
+        # making its condition unreachable — the state this page was in when a
+        # remote sensor could not be configured from the UI at all. Done by
+        # condition rather than by cutting the block out: the branch has been
+        # first in one chain and second in the other, and a self-test that
+        # depends on which is a self-test that breaks when the code is tidied.
+        run: |
+          set -e
+          cp www/js/sensors.js www/js/sensors.js.orig
+          sed -i 's/if (s.interface === "http" || s.type === "remote") {/if (false) {/g' \
+              www/js/sensors.js
+          grep -q 'if (false) {' www/js/sensors.js || {
+            echo "::error::the self-test no longer matches the remote branch"
+            cp www/js/sensors.js.orig www/js/sensors.js
+            exit 1
+          }
+          node --check www/js/sensors.js
+          python3 tests/web/mock_device.py 8771 &
+          sleep 2
+          if MOCK_PORT=8771 python3 tests/web/drive_sensors_page.py > /dev/null 2>&1; then
+            echo "::error::drive_sensors_page.py passed with the node-id field removed"
+            cp www/js/sensors.js.orig www/js/sensors.js
+            exit 1
+          fi
+          cp www/js/sensors.js.orig www/js/sensors.js
+          rm www/js/sensors.js.orig
+          echo "the driver fails without the field, as it should"
 
       - name: Drive the e-ink dashboard settings page
         # Its two bitmasks carry bit values defined in src/core/Config.h and
@@ -376,11 +438,173 @@ jobs:
         # dash — the closest thing to it available here.
         run: sh tests/kindle/drive_dash.sh
 
+      - name: Build the Kindle package and install it into a Kindle that is not there
+        # The installer inside the MRPI package is sourced by the Kindle's own
+        # updater, as root, with the framework paused: no console, no shell and
+        # no second chance. This stages the package, asserts the properties
+        # that decide what the updater does with it — one .sh in the whole
+        # package, because it runs all of them — and then runs the installer
+        # against a scratch tree standing in for /mnt/us.
+        #
+        # The .bin itself is built and taken apart again in
+        # build-kindle-package.yml, which has KindleTool. This half needs
+        # nothing but a shell, so it runs with everything else.
+        run: sh tests/kindle/drive_package.sh
+
+      - name: Verify that suite actually fails on a chart it should refuse
+        # The reported bug: the chart on a Kindle vanished for a while and came
+        # back. What lands on disk when the image is cut off mid-transfer is a
+        # BMP header promising a size and a file shorter than it — not empty,
+        # so the old "is it non-empty" test promoted it over the good chart and
+        # FBInk then refused to draw it. Take the size check back out and the
+        # suite has to notice, or it is only describing the fix.
+        run: |
+          set -e
+          cp kindle/update_dash.sh /tmp/ud.orig
+          sed -i 's/^    \[ "$have" = "$want" \]$/    return 0/' kindle/update_dash.sh
+          ! grep -q 'have" = "$want"' kindle/update_dash.sh   # the sed matched
+          if sh tests/kindle/drive_dash.sh > /dev/null 2>&1; then
+            echo "::error::drive_dash.sh passed a fetch that accepts a truncated BMP"
+            cp /tmp/ud.orig kindle/update_dash.sh
+            exit 1
+          fi
+          cp /tmp/ud.orig kindle/update_dash.sh
+          rm /tmp/ud.orig
+          echo "the suite fails when a half-written chart is accepted, as it should"
+
       - name: Verify the deploy tools see every board in platformio.ini
         # tools/pio_envs.py is where the flash tools get their board list. An
         # env its parser cannot see is a board the tool will not offer, and
         # nothing else would say so.
         run: python3 tools/check_pio_envs.py
+
+      - name: Verify that check actually fails on a board missing from the form
+        # The board dropdown in build-ota-firmware.yml is the one board list
+        # that cannot be computed — GitHub builds a workflow_dispatch `choice`
+        # before any of our code runs — so it is the one that can go stale. A
+        # board in platformio.ini and not in the form is a board nobody can get
+        # a firmware for without a toolchain.
+        run: |
+          set -e
+          cp .github/workflows/build-ota-firmware.yml /tmp/ota.orig
+          sed -i '0,/^          - lolin_c3_pico$/{/^          - lolin_c3_pico$/d}' \
+            .github/workflows/build-ota-firmware.yml
+          ! grep -q 'lolin_c3_pico' .github/workflows/build-ota-firmware.yml
+          if python3 tools/check_pio_envs.py > /dev/null 2>&1; then
+            echo "::error::check_pio_envs.py passed a board missing from the OTA form"
+            cp /tmp/ota.orig .github/workflows/build-ota-firmware.yml
+            exit 1
+          fi
+          cp /tmp/ota.orig .github/workflows/build-ota-firmware.yml
+          rm /tmp/ota.orig
+          echo "the check fails when the form loses a board, as it should"
+
+      - name: Check what the build form's text box means
+        # The OTA build workflow takes thirty checkboxes as one line of text.
+        # A name that quietly matched nothing is a firmware missing exactly the
+        # feature it was built for; one that matched the WRONG feature is
+        # worse, and VEML6075 (UV) and VEML7700 (lux) are one character apart.
+        run: python3 tests/tools/drive_feature_resolve.py
+
+      - name: Check the OTA size check knows where the partition table is
+        # It answers one question — how many bytes may an OTA image be on this
+        # board — and its first version got it from a path a PlatformIO build
+        # does not write, so the check silently stopped being one while still
+        # reading like it passed.
+        run: python3 tests/tools/drive_app_slot.py
+
+      - name: Verify every sensor plugin enables itself
+        # ISensor::_enabled defaults to false and each plugin has to set it in
+        # init(). RemoteNodeSensor did not, so it loaded, logged "ready", and
+        # was then skipped by every tick — reporting itself "disabled" to the
+        # UI while the node feeding it was plainly alive on the Remote-nodes
+        # page. Nothing else in this repository would notice.
+        run: python3 tools/check_sensor_plugins.py
+
+      - name: Verify that check actually fails on a flipped default
+        # The invariant it guards is the DEFAULT: a sensor that loads is a
+        # sensor that runs, because loadAndInit() only ever constructs
+        # sensors the config enabled. Flipping ISensor::_enabled back to
+        # false re-arms the trap for every plugin at once — one forgets, and
+        # it loads, logs "ready", and is skipped by every tick.
+        run: |
+          set -e
+          cp src/sensors/ISensor.h /tmp/isensor.orig
+          sed -i 's/bool     _enabled    = true;/bool     _enabled    = false;/' src/sensors/ISensor.h
+          if python3 tools/check_sensor_plugins.py > /dev/null 2>&1; then
+            echo "::error::check_sensor_plugins.py passed a false _enabled default"
+            cp /tmp/isensor.orig src/sensors/ISensor.h
+            exit 1
+          fi
+          cp /tmp/isensor.orig src/sensors/ISensor.h
+          rm /tmp/isensor.orig
+          echo "the check fails on a flipped default, as it should"
+
+      - name: Verify that check actually fails when the manager overrules init()
+        # The other half: a plugin whose hardware is optional must be able to
+        # come back from init() unusable, and an unconditional setEnabled()
+        # after it would tick that sensor against absent hardware.
+        run: |
+          set -e
+          cp src/sensors/SensorManager.cpp /tmp/sm.orig
+          sed -i 's|            _sensors\[_count\]    = s;|            s->setEnabled(true);\n            _sensors[_count]    = s;|' src/sensors/SensorManager.cpp
+          if python3 tools/check_sensor_plugins.py > /dev/null 2>&1; then
+            echo "::error::check_sensor_plugins.py passed a manager that overrules init()"
+            cp /tmp/sm.orig src/sensors/SensorManager.cpp
+            exit 1
+          fi
+          cp /tmp/sm.orig src/sensors/SensorManager.cpp
+          rm /tmp/sm.orig
+          echo "the check fails when the manager overrules init(), as it should"
+
+      - name: Set up Node for the portal check
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify the node's setup portal is a page that works
+        # node/src/ConfigPortal.cpp serves HTML+CSS+JS written as C++ string
+        # literals. The compiler sees one long string, so a missing brace in
+        # the JavaScript builds perfectly and ships a page whose buttons do
+        # nothing -- and the ESP8266 toolchain is not installed here, so even a
+        # compile would not catch it. This rebuilds the page and parses it.
+        run: python3 tools/check_node_portal.py
+
+      - name: Verify that check actually fails on broken portal JavaScript
+        run: |
+          set -e
+          cp node/src/ConfigPortal.cpp node/src/ConfigPortal.cpp.orig
+          # An unbalanced paren INSIDE the JavaScript, which leaves the C++
+          # perfectly valid -- exactly the failure that reaches a phone.
+          sed -i 's|"function pinFields(){|"function pinFields({|' node/src/ConfigPortal.cpp
+          if python3 tools/check_node_portal.py > /dev/null 2>&1; then
+            echo "::error::check_node_portal.py passed a page whose JS does not parse"
+            cp node/src/ConfigPortal.cpp.orig node/src/ConfigPortal.cpp
+            exit 1
+          fi
+          cp node/src/ConfigPortal.cpp.orig node/src/ConfigPortal.cpp
+          rm node/src/ConfigPortal.cpp.orig
+
+      - name: Verify that check actually fails when the browser owns the radio
+        # The scan widens the ESP8266 from AP to AP_STA, and the part has ONE
+        # radio: a station that associates drags the softAP onto its channel
+        # and drops whoever is standing in the portal. Putting it back used to
+        # be reachable only from the /scan poll — the browser's job, and the
+        # browser is the half that can close a tab.
+        run: |
+          set -e
+          cp node/src/ConfigPortal.cpp /tmp/portal.orig
+          sed -i 's/^        scanWatchdog();$//' node/src/ConfigPortal.cpp
+          ! grep -q '^        scanWatchdog();$' node/src/ConfigPortal.cpp
+          if python3 tools/check_node_portal.py > /dev/null 2>&1; then
+            echo "::error::check_node_portal.py passed a portal that only narrows on a poll"
+            cp /tmp/portal.orig node/src/ConfigPortal.cpp
+            exit 1
+          fi
+          cp /tmp/portal.orig node/src/ConfigPortal.cpp
+          rm /tmp/portal.orig
+          echo "the check fails when only the browser can put the radio back"
+          echo "the check fails on broken portal JavaScript, as it should"
 
       - name: Verify the deploy tools offer every feature setup.h declares
         # tools/features.py parses src/setup.h with a regex, and the deploy CLI

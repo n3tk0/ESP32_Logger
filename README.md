@@ -263,6 +263,19 @@ the **Seeed XIAO ESP32-S3** board profile in the first-run wizard: the header
 breaks out only GPIO 1–9 and 43/44, and the profile is what stops the pin
 pickers from offering the GPIOs that never leave the module.
 
+**No toolchain? Build it in GitHub instead.**
+
+**Actions → [Build OTA Firmware](../../actions/workflows/build-ota-firmware.yml) → Run workflow.** Pick a board, say which
+features you want — `default`, `all`, or a list like `bme280 kindle remote_nodes`
+or `all -sds011` — and the run hands back one `firmware.bin` with its SHA-256
+and the `curl` line to push it to a device that is already running. It is the
+same feature machinery the deploy tool uses (`tools/features.py`), so a build
+from the button and a build from a desk are the same build.
+
+That artifact is the **application image only**, which is what OTA takes. A
+first flash still needs a cable, and a build that changes `www/` still needs
+`tools/upload_www.py`.
+
 **3. Upload firmware and LittleFS image**
 
 ```bash

@@ -4,6 +4,7 @@
 #include <Wire.h>
 
 #include "node_config.h"
+#include "NodePins.h"   // the silkscreen label for a GPIO, for the log lines
 
 #if defined(NODE_SENSOR_BMX280)
 #  include "src/drivers/BME280_Mini.h"
@@ -123,6 +124,17 @@ static void add(NodeReading* out, int& n, int maxOut,
     n++;
 }
 
+#ifdef NODE_HAS_I2C
+/// "GPIO12 (D6)" — both ways of writing the same pin, because a wiring mistake
+/// is the likeliest reason anyone is reading these lines, and the two numbering
+/// schemes are exactly what people mix up.
+static void describePin(char* out, size_t n, uint8_t gpio) {
+    const char* d = NodePins::dLabelFor(gpio);
+    if (*d) snprintf(out, n, "GPIO%u (%s)", (unsigned)gpio, d);
+    else    snprintf(out, n, "GPIO%u", (unsigned)gpio);
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // begin
 // ---------------------------------------------------------------------------
@@ -132,6 +144,16 @@ int sensorsBegin(const NodeSettings& s) {
 
 #ifdef NODE_HAS_I2C
     Wire.begin(s.i2cSda, s.i2cScl);
+    // Printed on every probe, success or not. "No sensor found" and "no sensor
+    // found ON THESE TWO PINS" are the same sentence to the firmware and very
+    // different ones to whoever is holding the board: the commonest cause is a
+    // silkscreen D-number entered as a GPIO, and this line is where that shows.
+    {
+        char sdaTxt[20], sclTxt[20];
+        describePin(sdaTxt, sizeof(sdaTxt), s.i2cSda);
+        describePin(sclTxt, sizeof(sclTxt), s.i2cScl);
+        Serial.printf("[sensor] I2C on SDA=%s SCL=%s\n", sdaTxt, sclTxt);
+    }
 #endif
 
 #if defined(NODE_SENSOR_BMX280)
@@ -148,7 +170,14 @@ int sensorsBegin(const NodeSettings& s) {
                               cand[i], s.i2cSda, s.i2cScl);
             }
         }
-        if (!s_bmxOk) Serial.println("[sensor] no BME280/BMP280 on either address");
+        if (!s_bmxOk) {
+            char sdaTxt[20], sclTxt[20];
+            describePin(sdaTxt, sizeof(sdaTxt), s.i2cSda);
+            describePin(sclTxt, sizeof(sclTxt), s.i2cScl);
+            Serial.printf("[sensor] no BME280/BMP280 at 0x%02X or 0x%02X "
+                          "(SDA=%s SCL=%s)\n",
+                          cand[0], cand[1], sdaTxt, sclTxt);
+        }
     }
     if (s_bmxOk) {
         ok++;
@@ -168,7 +197,14 @@ int sensorsBegin(const NodeSettings& s) {
                               cand[i], s.i2cSda, s.i2cScl);
             }
         }
-        if (!s_bme688Ok) Serial.println("[sensor] no BME680/BME688 on either address");
+        if (!s_bme688Ok) {
+            char sdaTxt[20], sclTxt[20];
+            describePin(sdaTxt, sizeof(sdaTxt), s.i2cSda);
+            describePin(sclTxt, sizeof(sclTxt), s.i2cScl);
+            Serial.printf("[sensor] no BME680/BME688 at 0x%02X or 0x%02X "
+                          "(SDA=%s SCL=%s)\n",
+                          cand[0], cand[1], sdaTxt, sclTxt);
+        }
     }
     if (s_bme688Ok) {
         ok++;
@@ -217,7 +253,14 @@ int sensorsBegin(const NodeSettings& s) {
                 }
             }
         }
-        if (!s_bhOk) Serial.println("[sensor] no BH1750 on either address");
+        if (!s_bhOk) {
+            char sdaTxt[20], sclTxt[20];
+            describePin(sdaTxt, sizeof(sdaTxt), s.i2cSda);
+            describePin(sclTxt, sizeof(sclTxt), s.i2cScl);
+            Serial.printf("[sensor] no BH1750 at 0x%02X or 0x%02X "
+                          "(SDA=%s SCL=%s)\n",
+                          cand[0], cand[1], sdaTxt, sclTxt);
+        }
     }
     if (s_bhOk) {
         ok++;

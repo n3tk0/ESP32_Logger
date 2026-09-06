@@ -24,9 +24,14 @@ is why it saves and restores it.
 """
 from __future__ import annotations
 
+import builtins
+import io
 import shutil
+import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -36,6 +41,7 @@ import tkinter as tk              # noqa: E402
 import customtkinter as ctk        # noqa: E402
 import deploy_core as dc           # noqa: E402
 import deploy_gui as g             # noqa: E402
+import flash_bootloader as fb      # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -272,6 +278,180 @@ def run_window(app) -> None:
     print()
 
 
+class _FakePopen:
+    """A child process that never starts. Records how it was asked to."""
+
+    def __init__(self, cmd, **kwargs):
+        _FakePopen.calls.append((list(cmd), kwargs))
+        self.stdout = io.StringIO("")
+        self.returncode = 0
+
+    def wait(self, timeout=None):
+        return 0
+
+    calls: list = []
+
+
+_UNANSWERED = object()
+
+
+def _answer_in_window(app, ask, caption: str):
+    """Ask from a worker thread, click the answer, return what the worker got.
+
+    A real mainloop rather than update() calls, because that is the whole
+    difference: _ask() reaches the window through root.after() from the
+    thread running the steps, and tkinter refuses that unless the main thread
+    is inside mainloop(). Everything below therefore stays on the thread it
+    belongs to — the worker only calls the code under test, and the clicking
+    and the quitting happen on the main thread as after() callbacks.
+    """
+    result = {}
+    threading.Thread(target=lambda: result.setdefault("value", ask()),
+                     daemon=True).start()
+
+    def click() -> None:
+        button = _find_button(app.answer_row, caption)
+        if button is not None:
+            button.invoke()
+        else:
+            app.root.after(20, click)
+
+    def poll(deadline=time.time() + 10) -> None:
+        # Leave the loop once the worker has its answer — or on the deadline,
+        # so a question that never appears fails a check instead of hanging CI.
+        if "value" in result or time.time() > deadline:
+            app.root.quit()
+        else:
+            app.root.after(20, poll)
+
+    app.root.after(20, click)
+    app.root.after(20, poll)
+    app.root.mainloop()
+    app.root.update()
+    return result.get("value", _UNANSWERED)
+
+
+def run_prompts(app) -> None:
+    """The two destructive steps ask HERE, and their scripts never prompt.
+
+    tools/flash_bootloader.py asked its own "[y/N]" on stdin. A windowed
+    build has no console and therefore no stdin, so the question the person
+    was supposed to answer arrived as:
+
+        EOFError: EOF when reading a line
+
+    and step 2 failed every time it ran from this window. The question moved
+    into the window — where the erase confirmation already was — and the
+    script is told the answer with --yes.
+    """
+    print("The confirmations:")
+
+    # ── The bootloader question is a control in this window ─────────────────
+    answered = _answer_in_window(app, app._confirm_bootloader, "Flash bootloader")
+    check(answered is True, "confirming the bootloader step answers True")
+    check(_toplevels(app.root) == [], "and it asked without opening a window")
+
+    answered = _answer_in_window(app, app._confirm_bootloader, "Skip this step")
+    check(answered is False, "and declining it answers False")
+
+    # ── What the step then runs ─────────────────────────────────────────────
+    mgr = dc.DeployManager(app.cfg)
+    said: list[str] = []
+    mgr.on_step_output = lambda line, end="\n": said.append(line)
+    real_popen = dc.subprocess.Popen
+    _FakePopen.calls = []
+    try:
+        dc.subprocess.Popen = _FakePopen
+        mgr.run_steps([2], confirm_bootloader_callback=lambda: True)
+        ran = list(_FakePopen.calls)
+
+        _FakePopen.calls = []
+        said.clear()
+        declined_ok = mgr.run_steps([2], confirm_bootloader_callback=lambda: False)
+        skipped = list(_FakePopen.calls)
+        declined_log = "".join(said)
+    finally:
+        dc.subprocess.Popen = real_popen
+
+    check(len(ran) == 1, f"confirming runs one command ({len(ran)})")
+    if ran:
+        cmd, kwargs = ran[0]
+        check("--yes" in cmd,
+              "the step carries the answer to the script, so it cannot ask again")
+        check(kwargs.get("stdin") is subprocess.DEVNULL,
+              "and gives it no stdin to ask on")
+    check(skipped == [], "declining runs nothing at all")
+
+    # AND SAYS SO. "Nothing failed" and "everything ran" are different
+    # answers, and run_steps() gives one bool for both — so a front end that
+    # only looks at the bool prints its green "All steps completed
+    # successfully" box for a deploy whose bootloader was never written.
+    # Both of them used to.
+    check(declined_ok is True, "declining is not a failure")
+    check(mgr.skipped == [2],
+          f"but the manager names the step that did not run ({mgr.skipped})")
+    check("DECLINED" in declined_log,
+          "and its own summary says so rather than claiming success")
+    check("All steps completed successfully" not in declined_log,
+          "  and does not also claim the opposite")
+
+    # A manager that has never run anything can still be asked, and a step
+    # called on its own — they are public methods — skips rather than raising.
+    fresh = dc.DeployManager(app.cfg)
+    fresh.on_step_output = lambda line, end="\n": None
+    check(fresh.skipped == [], "a manager that has run nothing has skipped nothing")
+    try:
+        rc = fresh.s2_flash_bootloader(lambda: False)
+        check(rc == 0 and fresh.skipped == [2],
+              "and s2 called directly skips instead of raising AttributeError")
+    except AttributeError as exc:
+        check(False, f"s2 called directly raised: {exc}")
+
+    # The CLI draws its own banner from the same answer. It is not callable
+    # from here — it lives inside an interactive menu — so this is the one
+    # thing to assert about it: that it asks.
+    cli_src = (ROOT / "tools" / "deploy.py").read_text(encoding="utf-8")
+    check("manager.skipped" in cli_src,
+          "the CLI banner reads the same list the GUI banner does")
+
+    # ── The script itself, when something asks it anyway ────────────────────
+    real_input = builtins.input
+
+    def _no_stdin(*_args):
+        raise EOFError("EOF when reading a line")
+
+    try:
+        builtins.input = _no_stdin
+        check(fb._confirm("Flash bootloader? [y/N] ") is False,
+              "and run without a console it refuses instead of tracebacking")
+    finally:
+        builtins.input = real_input
+
+    # ── Nothing pops a console window on Windows ────────────────────────────
+    #
+    # Each step is a console program (python.exe, pio.exe, esptool). Windows
+    # gives one its own console window when the parent has none — which is
+    # this window, built with console=False — so every step flashed up an
+    # empty black rectangle that showed nothing: the output is on a pipe,
+    # going into the log. Asserted here by asking the decision directly,
+    # since CI runs this on Linux where the question does not arise.
+    import win_console                                    # noqa: E402
+    real_platform = sys.platform
+    try:
+        sys.platform = "win32"
+        check(dc._no_window() == {"creationflags": win_console.CREATE_NO_WINDOW},
+              "a piped step is launched with no console window")
+        check(dc._no_window(inherits_console=True) == {},
+              "the serial monitor keeps the console it was launched from")
+        # The same decision reaches flash_bootloader.py, which used to carry
+        # its own copy of these three functions.
+        import flash_bootloader as fb2                    # noqa: E402
+        check(fb2._no_window is dc._no_window,
+              "and the bootloader script asks the same helper, not a copy")
+    finally:
+        sys.platform = real_platform
+
+
 def run(app) -> None:
     fv = app.feature_vars
 
@@ -464,6 +644,7 @@ def main() -> int:
         app = g.DeployerGUI(root)
         root.update()
         run_window(app)
+        run_prompts(app)
         print("Driving the deploy GUI's build-feature widgets:")
         run(app)
     finally:

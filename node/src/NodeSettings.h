@@ -36,6 +36,14 @@ struct NodeSettings {
     uint32_t intervalMs    = 60000;
     float    altitudeM     = 0.0f;
 
+    // Which board this firmware is running on. It changes NOTHING the node
+    // does — the ESP8266's pins are the same on all of them — and everything
+    // the setup portal SHOWS: the header diagram, and which silkscreen label
+    // belongs to which GPIO. Kept here rather than compiled in because the
+    // same binary is flashed to whatever is on the shelf.
+    //   0 = NodeMCU V2/V3, 1 = Wemos D1 mini, 2 = bare ESP-12 / other
+    uint8_t  board         = 0;
+
     // Sensor wiring. Defaults come from node_config.h; the portal overrides
     // them per device, and only shows the fields whose sensor is actually
     // compiled into this build.

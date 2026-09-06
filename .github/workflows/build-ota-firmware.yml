@@ -1,0 +1,246 @@
+# Build one firmware image, to your choices, for uploading over the air.
+#
+# WHY THIS IS NOT build-firmware.yml
+# ----------------------------------
+# That workflow builds every board on every push, with the features setup.h
+# ships, to prove the tree compiles. This one is a button: pick a board, say
+# which features you want, get back the single file the device's own updater
+# takes — the same choices the deploy tool offers, without needing the deploy
+# tool, a toolchain, or a cable.
+#
+# It is the OTA path deliberately. `firmware.bin` is the application image and
+# nothing else: no bootloader, no partition table, no filesystem. That is what
+# POST /do_update writes, and it is why this is a 1-2 MB file rather than a
+# flash dump — an image with a bootloader glued to the front of it is not a
+# thing the running firmware can install, and is the usual reason an OTA that
+# "should have worked" is refused on its first byte.
+#
+# THE FILESYSTEM IS NOT IN HERE. The web UI lives on LittleFS and is uploaded
+# separately (tools/upload_www.py). An OTA of the application alone is the
+# normal case and the UI keeps working; a build that changes www/ needs that
+# uploaded too, and the run summary says so rather than leaving it to be
+# discovered.
+#
+#   Actions -> Build OTA Firmware -> Run workflow
+#
+# The artifact holds firmware.bin and its SHA-256. The device verifies that
+# digest when the upload URL carries ?sha256=, so it is published beside the
+# image rather than left for somebody to work out.
+
+name: Build OTA Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      board:
+        description: 'Board (the deployable [env:…] names in platformio.ini)'
+        type: choice
+        required: true
+        default: xiao_esp32c3
+        options:
+          - xiao_esp32c3
+          - esp32c3_supermini
+          - lolin_c3_pico
+          - esp32s3
+          - xiao_esp32s3
+          - esp32s3_n16r8
+      features:
+        description: '"default" (what setup.h ships), "all", or a list — "bme280 kindle remote_nodes", "all -sds011"'
+        type: string
+        required: true
+        default: default
+      espnow_lmk:
+        description: 'ESP-NOW link key (used only when the ESP-NOW feature is selected)'
+        type: string
+        required: false
+        default: ''
+      label:
+        description: 'Extra word for the file name, e.g. balcony (optional)'
+        type: string
+        required: false
+        default: ''
+
+  # So a change to this workflow, or to the resolver behind it, is proved to
+  # work rather than discovered the next time somebody presses the button: a
+  # dispatch-only workflow is never exercised by CI at all.
+  push:
+    paths:
+      - '.github/workflows/build-ota-firmware.yml'
+      - 'tools/features.py'
+      - 'tools/app_slot.py'
+      - 'tests/tools/**'
+  pull_request:
+    paths:
+      - '.github/workflows/build-ota-firmware.yml'
+      - 'tools/features.py'
+      - 'tools/app_slot.py'
+      - 'tests/tools/**'
+
+jobs:
+  build:
+    name: OTA image
+    runs-on: ubuntu-latest
+
+    # EVERY INPUT ARRIVES AS AN ENVIRONMENT VARIABLE, and none is interpolated
+    # into a shell line. `${{ inputs.features }}` written inside a `run:` is
+    # pasted in as text before the shell ever sees it, so a value containing a
+    # quote or a backtick would be running as part of the script rather than
+    # being read by it. The `||` defaults are for the push/pull_request runs,
+    # where there are no inputs at all.
+    env:
+      IN_BOARD: ${{ inputs.board || 'xiao_esp32c3' }}
+      IN_FEATURES: ${{ inputs.features || 'default' }}
+      IN_LMK: ${{ inputs.espnow_lmk }}
+      IN_LABEL: ${{ inputs.label }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # The text box is thirty checkboxes on one line, so what it means has to
+      # be pinned down somewhere a test can reach. It is, in tools/features.py.
+      - name: Check the feature resolver
+        run: python3 tests/tools/drive_feature_resolve.py
+
+      - name: Work out what was asked for
+        id: choices
+        run: |
+          set -e
+          # Resolved BEFORE the toolchain is installed: a typo should cost ten
+          # seconds and a message naming the features that were probably meant,
+          # not four minutes and a compiler error about a macro nobody wrote.
+          if ! python3 tools/features.py --resolve "$IN_FEATURES" > macros.txt; then
+            echo "::error::Could not read the feature list — see the message above."
+            exit 1
+          fi
+          FLAGS=$(python3 tools/features.py --build-flags "$IN_FEATURES" \
+                    --espnow-lmk "$IN_LMK")
+
+          echo "board=$IN_BOARD" >> "$GITHUB_OUTPUT"
+          echo "flags=$FLAGS"    >> "$GITHUB_OUTPUT"
+
+          echo "board:    $IN_BOARD"
+          echo "features:"; sed 's/^/  /' macros.txt
+          echo "flags:    ${FLAGS:-(none — setup.h decides)}"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build
+        env:
+          # The same variable the deploy tool sets, carrying the same string
+          # from the same function — so a build from this button and a build
+          # from somebody's desk are the same build.
+          PLATFORMIO_BUILD_FLAGS: ${{ steps.choices.outputs.flags }}
+        run: pio run -e ${{ steps.choices.outputs.board }}
+
+      - name: Name it, size it, hash it
+        id: out
+        run: |
+          set -e
+          BOARD="${{ steps.choices.outputs.board }}"
+          BUILD=".pio/build/$BOARD"
+          STAMP="$(date -u +%Y%m%d)-$(git rev-parse --short HEAD)"
+          SUFFIX=""
+          # printf, not echo: `echo x | tr -c 'keep' '-'` translates the
+          # trailing NEWLINE too, so a label of "balcony" came back
+          # "balcony-" and every name carried a doubled dash.
+          [ -n "$IN_LABEL" ] &&
+            SUFFIX="-$(printf '%s' "$IN_LABEL" | tr -c 'A-Za-z0-9._-' '-')"
+          NAME="firmware-${BOARD}${SUFFIX}-${STAMP}.bin"
+
+          mkdir -p out
+          cp "$BUILD/firmware.bin" "out/$NAME"
+          ( cd out && sha256sum "$NAME" > "$NAME.sha256" )
+          SHA=$(cut -d' ' -f1 < "out/$NAME.sha256")
+          SIZE=$(stat -c%s "out/$NAME")
+
+          # The limit comes from the partition table THIS env builds with, not
+          # from a number typed into a workflow — 1,472 KB on the 4 MB C3s,
+          # 6,400 KB on the 16 MB S3 — resolved the way PlatformIO resolves it:
+          # board_build.partitions names either a file in the project or one of
+          # the Arduino core's own, and app_slot.py looks in both.
+          #
+          # It used to read .pio/build/<env>/partitions.csv, on the reasonable
+          # assumption that a build leaves its table beside the binary. It does
+          # not, and the first run of this workflow duly said "not size-checked"
+          # and handed over an image with no idea whether it fits.
+          #
+          # Still a warning and not a failure when it cannot be found: the image
+          # is the thing that was asked for, and the device refuses an oversized
+          # one anyway.
+          MAX=$(python3 tools/app_slot.py --env "$BOARD" || echo 0)
+
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA"   >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "max=$MAX"   >> "$GITHUB_OUTPUT"
+
+          if [ "$MAX" -le 0 ]; then
+            echo "::warning::No partition table found, so the image was not size-checked"
+          elif [ "$SIZE" -gt "$MAX" ]; then
+            echo "::error::The image is $SIZE bytes and the app slot is $MAX — the device would refuse it"
+            exit 1
+          fi
+          echo "$NAME  $((SIZE / 1024)) KB  sha256 $SHA"
+
+      # The part somebody actually reads, on the phone they pressed the button
+      # from: what it is, whether it fits, the digest the device will check,
+      # and the two ways in.
+      - name: Write the run summary
+        run: |
+          SIZE=${{ steps.out.outputs.size }}
+          MAX=${{ steps.out.outputs.max }}
+          {
+            echo "## ${{ steps.out.outputs.name }}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Board | \`${{ steps.choices.outputs.board }}\` |"
+            if [ "$MAX" -gt 0 ]; then
+              echo "| Size | $((SIZE / 1024)) KB of $((MAX / 1024)) KB app slot ($((SIZE * 100 / MAX))%) |"
+            else
+              echo "| Size | $((SIZE / 1024)) KB (app slot unknown, not checked) |"
+            fi
+            echo "| SHA-256 | \`${{ steps.out.outputs.sha }}\` |"
+            echo
+            echo "### Features"
+            echo
+            if [ -s macros.txt ]; then
+              echo '```'
+              cat macros.txt
+              echo '```'
+            else
+              echo "The set \`src/setup.h\` ships — no build flags were passed."
+            fi
+            echo
+            echo "### Flashing it"
+            echo
+            echo "Download the artifact below, unzip it, then either:"
+            echo
+            echo "- **Web UI** — Settings → Firmware update, and pick the \`.bin\`."
+            echo "- **curl** —"
+            echo
+            echo '```'
+            echo "curl -F 'update=@${{ steps.out.outputs.name }}' \\"
+            echo "  'http://<device>/do_update?sha256=${{ steps.out.outputs.sha }}'"
+            echo '```'
+            echo
+            echo "The device hashes what it receives and refuses the update when the"
+            echo "digest does not match, so a truncated upload cannot half-flash it."
+            echo
+            echo "This is the application image only. If this build changes anything"
+            echo "under \`www/\`, upload the filesystem too: \`python3 tools/upload_www.py\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.out.outputs.name }}
+          path: |
+            out/*.bin
+            out/*.sha256
+          if-no-files-found: error

@@ -15,6 +15,10 @@ So this asserts, against a plain regex scan of the same file:
     tools now take those from here rather than keeping their own copies
   - the default env is real
   - the flash tools can name a bootloader offset for every chip in use
+  - the board dropdown in .github/workflows/build-ota-firmware.yml offers
+    exactly the deployable envs — a workflow_dispatch `choice` is the one
+    board list that has to be written out by hand, so it is the one that can
+    go stale
 
 Usage:
     python3 tools/check_pio_envs.py
@@ -78,6 +82,29 @@ def main() -> int:
             problems.append(f"[env:{e.name}] is {e.chip}, which "
                             f"tools/flash_bootloader.py has no CHIP_CONFIG for")
 
+    # The one board list that CANNOT be computed: a workflow_dispatch `choice`
+    # has to be spelled out in the YAML, because GitHub builds the dropdown
+    # before any of our code runs. So it is the one list that can silently go
+    # stale — a board added to platformio.ini and missing from the form is a
+    # board nobody can build a firmware for without a toolchain, and nothing
+    # else would say so.
+    wf = ROOT / ".github" / "workflows" / "build-ota-firmware.yml"
+    if wf.is_file():
+        text = wf.read_text(encoding="utf-8")
+        block = re.search(r"options:\n((?:\s*-\s*\S+\n)+)", text)
+        listed = set(re.findall(r"-\s*(\S+)", block.group(1))) if block else set()
+        deployable = set(env_names())
+        if not block:
+            problems.append(f"{wf.name}: no `options:` list found for the board input")
+        else:
+            for name in sorted(deployable - listed):
+                problems.append(f"{wf.name}: [env:{name}] is deployable but is not "
+                                f"offered in the board dropdown")
+            for name in sorted(listed - deployable):
+                problems.append(f"{wf.name}: the board dropdown offers {name!r}, "
+                                f"which is not a deployable env "
+                                f"({'not deployable' if name in set(env_names(include_all=True)) else 'no such env'})")
+
     if problems:
         print("FAIL: the deploy tools and platformio.ini disagree.\n")
         for p in problems:
@@ -93,4 +120,15 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # `check_pio_envs.py | head` closes the pipe partway through the listing,
+    # and without this Python turns that into a BrokenPipeError traceback on
+    # stderr — a tool that prints a stack trace when it worked is a tool people
+    # stop trusting. tools/features.py has carried the same guard for the same
+    # reason since the CI check started grepping its output.
+    try:
+        sys.exit(main())
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        finally:
+            sys.exit(0)

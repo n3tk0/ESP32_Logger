@@ -169,6 +169,19 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         bool initOk = s->init(sensor);
         g_pinAllowUnsafe = false;
         if (initOk) {
+            // NOTHING sets _enabled here, deliberately.
+            //
+            // An earlier version of this fix did — `setEnabled(sensor
+            // ["enabled"] | true)` — and it was the wrong shape twice over.
+            // The loop above already skipped every entry whose "enabled" is
+            // false, so the value could only ever be true and the call could
+            // only ever be a no-op… except against a plugin that had just
+            // decided otherwise in init(), which it would silently overrule.
+            // A driver whose hardware is optional has to be able to come back
+            // from init() saying "loaded, not usable".
+            //
+            // The default in ISensor.h carries the invariant instead: a
+            // sensor that exists is one the config enabled.
             _sensors[_count]    = s;
             _lastReadMs[_count] = 0;
             _count++;

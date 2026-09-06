@@ -10,6 +10,24 @@
 #include "../RemoteIngest.h"
 
 bool RemoteNodeSensor::init(JsonObjectConst config) {
+    // NOTHING HERE TOUCHES _enabled, AND THAT IS THE FIX.
+    //
+    // It used to default to false, with every plugin expected to turn itself
+    // on in init(). Twenty did; this one did not, so a remote sensor was
+    // created disabled: it appeared in /api/sensors as
+    // {"enabled":false,"status":"disabled"}, tickFiltered() skipped it,
+    // drain() was therefore never called, and it never grew a single metric —
+    // while the node itself was plainly alive on the Remote-nodes page, which
+    // reads the ingest mailbox directly. The one screen that could have
+    // explained it was the one screen that looked fine.
+    //
+    // The default is true now (ISensor.h), because SensorManager::loadAndInit()
+    // skips every config entry whose "enabled" is false before constructing
+    // anything: a sensor that exists is one the user asked for. Reading the
+    // key again here would be reading a question already answered, and this
+    // file is the one everybody copies from — leaving the line in is how the
+    // per-plugin obligation gets reintroduced.
+
     // Default the node id to the sensor id: naming both after the location
     // is the expected setup, and it removes the commonest configuration
     // mistake (a node posting under a name nothing is listening for).

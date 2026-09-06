@@ -11,25 +11,68 @@ Fetches data from an ESP32_Logger collector and renders with FBInk.
 
 ## Installation
 
-**The folder has to go in `/mnt/us/extensions/`, and the name of the folder is
-up to you.** KUAL builds its menu by scanning the subdirectories of
-`/mnt/us/extensions` for a `menu.json`, and it looks nowhere else — an earlier
-version of this file said to install to `/mnt/us/dashboard/`, which is why the
-entry never appeared in the launcher.
+Three routes. **The first one is the reason the other two are listed second**:
+every failure of this extension reported so far has been an installation
+failure rather than a code one — a checkout on Windows that rewrote every line
+ending so `busybox ash` could not run a single script, a folder copied into a
+place KUAL does not look, an FBInk that was never installed. All three look
+identical on the device, because KUAL discards whatever a menu entry prints:
+the menu closes, the home screen comes back, nothing is said.
 
-1. Copy the whole `kindle/` folder to `/mnt/us/extensions/esp32dash/`:
-   ```
-   ssh root@kindle-ip mkdir -p /mnt/us/extensions/esp32dash
-   scp -r kindle/* root@kindle-ip:/mnt/us/extensions/esp32dash/
-   ```
-   Over USB instead: mount the Kindle and copy `kindle/` into
-   `extensions/`, renaming it `esp32dash`.
+A built package removes the question. The bytes that leave the build are the
+bytes that reach the reader.
 
-   The script finds its own layout, icons and fonts relative to wherever it is
-   installed, so the folder name and location are free — this one only has to
-   be under `extensions/` for KUAL to see it.
+### 1 · The MRPI package — one file, one button
 
-2. Tell it where the collector is — **from the Kindle**, no editing and no
+Needs [MRPI](https://wiki.mobileread.com/wiki/MobileRead_Package_Installer),
+which most jailbreak walkthroughs install alongside KUAL.
+
+1. Download `Update_esp32dash_<version>_install.bin` from this repository's
+   **Releases** page.
+2. Plug the Kindle in and drop the file into `mrpackages` at the root of the
+   USB volume (create the folder if it is not there).
+3. Eject the Kindle, then **KUAL → Helper → Install MR Packages**.
+
+It unpacks into `/mnt/us/extensions/esp32dash/` and **keeps `dash.conf` and
+the collector scan list** if they are already there, so an update never sends
+you back to the Find collector screen. What it did is appended to
+`extensions/esp32dash/kual.log`, which the USB cable can read.
+
+The package is an OTA V2 update signed with the jailbreak key a hacked Kindle
+already trusts — the same mechanism every MobileRead hack package uses. It is
+built by `.github/workflows/build-kindle-package.yml`, which also takes the
+package apart again and compares it with what went in.
+
+### 2 · The zip — for a reader without MRPI
+
+`esp32dash-kindle-<version>.zip`, from the same Releases page. Unpack it at the
+root of the USB volume: it contains `extensions/esp32dash/` and an empty
+`mrpackages/`, so it lands in the right place by construction. A zip stores
+bytes — no unpacker on any platform rewrites a line ending.
+
+### 3 · From a checkout — for development
+
+```
+ssh root@kindle-ip mkdir -p /mnt/us/extensions/esp32dash
+scp -r kindle/* root@kindle-ip:/mnt/us/extensions/esp32dash/
+```
+
+Over USB instead: copy `kindle/` into `extensions/`, renaming it `esp32dash`.
+**Check your line endings if you do this from Windows** — or let `kual.sh` do
+it, which strips carriage returns out of the folder every time a menu entry
+runs.
+
+`tools/mk_kindle_package.sh` builds both artifacts locally; it needs
+[KindleTool](https://github.com/NiLuJe/KindleTool) for the `.bin`, and
+`--stage-only` skips that and produces just the zip.
+
+The folder name is free — KUAL scans the subdirectories of
+`/mnt/us/extensions` for a `menu.json` and every path in ours is relative — but
+`esp32dash` is what the documentation and the packages use.
+
+### After installing, whichever route
+
+1. **Tell it where the collector is** — from the Kindle, no editing and no
    keyboard: KUAL → ESP32 Dashboard → Settings → **Find collector**. It probes
    every address on the Kindle's own subnet for a dashboard payload and saves
    the one that answers. If more than one does, **Next collector** steps to the
@@ -38,12 +81,27 @@ entry never appeared in the launcher.
    Over USB or SSH instead: put the address in `dash.conf` (it is created from
    `dash.conf.default` on first run).
 
-3. Ensure FBInk is installed and in PATH.
+2. **Make sure FBInk is findable.** It is not part of the Kindle firmware and
+   it is not shipped here; it is the whole output of this dashboard, and KUAL
+   hands an extension a `PATH` that does not include most of the places people
+   keep binaries. On a jailbroken Kindle it is usually already at
+   `/mnt/us/libkh/bin/fbink`, where the jailbreak hotfix puts it — that is the
+   first place the launcher looks. Any of these also works:
 
-4. On the ESP32 WebUI, go to Settings → E-ink Dashboard and set the
+   ```
+   /mnt/us/extensions/esp32dash/bin/fbink     ← beside the scripts
+   /mnt/us/bin/fbink
+   /mnt/us/fbink/fbink
+   /mnt/us/extensions/fbink/bin/fbink
+   ```
+
+   If it is missing, the extension says so on the panel and in `kual.log`
+   instead of starting a dashboard that can never draw anything.
+
+3. On the ESP32 WebUI, go to Settings → E-ink Dashboard and set the
    FBInk resolution to match your Kindle.
 
-5. Restart KUAL (leave the launcher and open it again). It reads the extension
+4. Restart KUAL (leave the launcher and open it again). It reads the extension
    list once at startup, so a folder added while it is open does not appear.
 
 ## Usage
@@ -139,6 +197,106 @@ In order of how often each one is the answer:
    repository pins these files to LF; check with `file menu.json` if in doubt.
 4. **Truncated copy.** `menu.json` must be valid JSON — an interrupted `scp`
    leaves a file that parses as nothing.
+
+## It is in KUAL, but pressing an entry does nothing
+
+The menu closes and the Kindle goes back to the home screen — which is what
+`exitmenu` asks for — and then nothing happens: no dashboard, no settings page,
+no error. KUAL discards whatever a menu entry prints, so all of the causes
+below used to look identical from the sofa.
+
+**They do not any more. Read `kual.log`.** Every menu entry runs `kual.sh`,
+which writes what it did, what it ran, and the exit code to `kual.log` *beside
+the scripts* — on `/mnt/us`, the volume that appears when you plug the Kindle
+into a computer. No shell, no network and no SSH needed:
+
+```
+extensions/esp32dash/kual.log
+```
+
+A launch that worked looks like this:
+
+```
+2026-09-05 18:31:02 --- start (dir /mnt/us/extensions/esp32dash)
+2026-09-05 18:31:02 run: Start Dashboard (sh /mnt/us/extensions/esp32dash/start.sh)
+2026-09-05 18:31:02 Dashboard started (PID 1234). Log: /tmp/dash.log
+2026-09-05 18:31:02 exit 0
+```
+
+What the log will usually say instead, in order of how often each is the
+answer:
+
+1. **`FBInk is not installed, or not in PATH`.** FBInk is not part of the
+   Kindle firmware and it is not part of this extension — it is a separate
+   binary you install once, and KUAL hands an extension a `PATH` that does not
+   include most of the places people put it. Without it *every* draw fails
+   silently: the dashboard starts, keeps its schedule, and the panel never
+   changes, which from across the room is the same thing as nothing having
+   started. `kual.sh` looks in **`/mnt/us/libkh/bin`** first — the jailbreak
+   hotfix installs FBInk there, so on most jailbroken Kindles the binary is
+   already present and merely unreachable from the `PATH` a menu entry is
+   given — then in `bin/` beside itself, `/mnt/us/bin`, `/mnt/us/fbink` and
+   `/mnt/us/extensions/fbink/bin` before giving up. It also prints the message
+   on the panel with `eips`, which *is* in the firmware.
+
+   `update_dash.sh` now refuses to start without it rather than running blind.
+
+2. **Windows line endings.** `busybox ash` cannot run a script whose lines end
+   in a carriage return — `then\r` is not `then` — and a layout file copied
+   the same way gives every coordinate one (`GR_X=20\r`), which FBInk rejects
+   as a bad argument. This is **repaired automatically**: `kual.sh` is written
+   so that a CRLF copy of it still runs, and it strips the carriage returns out
+   of every `.sh`, `.conf`, `.json` and `.xml` in the folder before running
+   anything, logging what it fixed. The icons are BMPs and are never touched.
+
+   If you want to do it by hand anyway:
+
+   ```sh
+   cd /mnt/us/extensions/esp32dash
+   for f in *.sh *.conf *.json *.xml layout/*.conf; do sed -i 's/\r$//' "$f"; done
+   ```
+
+3. **The copy is incomplete.** `start.sh` runs `update_dash.sh` from beside
+   itself; an interrupted `scp` that dropped the larger file leaves Start
+   apparently doing nothing. `ls -l /mnt/us/extensions/esp32dash` should show
+   `update_dash.sh` at roughly 47 KB. The log names the file that was missing.
+
+   Installing from the MRPI package or the zip makes 2 and 3 impossible: both
+   carry the tree as one archive, built and checked by CI.
+
+The folder name is **not** one of the causes. KUAL runs a menu entry in the
+directory the `menu.json` it came from lives in — which is why KOReader's own
+extension can say `./bin/koreader-ext.sh` — so every entry here names its
+script relatively and an extension unzipped as `esp32dash-main` works exactly
+the same.
+
+To watch one live instead, over SSH:
+
+```sh
+sh /mnt/us/extensions/esp32dash/kual.sh start
+cat /mnt/us/extensions/esp32dash/kual.log
+cat /tmp/dash.log
+```
+
+## The chart area is blank
+
+The rule and the caption are there, and nothing underneath them. That is the
+image, not the readings — and the dashboard now says which:
+
+- **`No chart yet — http://…`** drawn where the chart goes means the image is
+  not on the reader. The address is printed with it, so a wrong one is visible
+  from across the room. It resolves itself at the next chart update
+  (`GRAPH_EVERY`, 15 minutes by default) once the collector answers.
+- `/tmp/dash.log` says which half failed. `chart: no image from …` is the
+  network or a collector that is not there. **`chart: incomplete image (N
+  bytes)`** is a transfer that was cut off partway — the ESP32 streams the BMP
+  while it is also serving the web UI, and a reader on wifi is the client most
+  likely to lose a connection mid-image. The half-written file is discarded and
+  the chart that already works stays on the screen.
+- **A chart with a grid and no line in it** is the other thing entirely: the
+  image arrived, and the collector had no history to draw. That is a sensor
+  question — check the sensor named as outdoor/indoor on the E-ink Dashboard
+  settings page — not a Kindle one.
 
 ## Custom fonts
 

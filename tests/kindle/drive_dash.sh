@@ -75,7 +75,20 @@ case "$url" in
         if [ "$out" = "-" ] || [ -z "$out" ]; then cat "$FIXTURE"; else cp "$FIXTURE" "$out"; fi
         exit 0 ;;
     *"$WGET_OK_HOST"*/kindle/graph.bmp)
-        [ -n "$out" ] && printf 'BM fake' > "$out"
+        # A REAL, SELF-CONSISTENT BMP: "BM", then the file's own length as a
+        # 32-bit little-endian count at offset 2 (130 = \202), then bytes to
+        # match. GRAPH_TRUNCATE=1 keeps the promise in the header and stops
+        # writing short of it, which is what a collector that runs out of heap
+        # halfway through the image leaves on the reader's disk.
+        if [ -n "$out" ]; then
+            if [ "${GRAPH_TRUNCATE:-0}" = "1" ]; then
+                { printf 'BM\202\000\000\000'
+                  dd if=/dev/zero bs=1 count=54 2>/dev/null; } > "$out"
+            else
+                { printf 'BM\202\000\000\000'
+                  dd if=/dev/zero bs=1 count=124 2>/dev/null; } > "$out"
+            fi
+        fi
         exit 0 ;;
 esac
 # wget -O truncates its target before it knows whether the transfer will work.
@@ -497,12 +510,67 @@ printf 'A_ONE=1\nRES_H=1448' > "$DASH_TMP/nonl.txt"
   [ "$RES_H" = "1448" ] || exit 1 )
 check "$?" "the last line of a file with no trailing newline is not dropped"
 
-# ── 3d. A failed chart fetch keeps the chart that is there ───────────────────
+# ── 3d. The chart on disk is only ever replaced by a whole one ──────────────
+#
+# THE REPORTED SYMPTOM WAS "the chart disappears sometimes, and comes back".
+# The image is streamed off an ESP32 that is also serving a web UI, to a
+# ten-year-old reader on wifi; when the connection dies mid-image, what lands
+# on disk is a BMP header promising a size and a file that stops short of it.
+# It is not empty, so the old "is it non-empty" test promoted it over the good
+# chart, and then FBInk refused to draw it — a blank strip until some later
+# fetch happened to succeed.
 printf 'GOOD' > "$DASH_TMP/graph.bmp"
 ( WGET_OK_HOST=nowhere.invalid HOST=203.0.113.9 fetch_graph
   [ "$(cat "$DASH_TMP/graph.bmp")" = "GOOD" ] || exit 1
   [ ! -f "$DASH_TMP/graph.new" ] || exit 2 )
 check "$?" "a failed graph fetch leaves the previous chart intact"
+
+( GRAPH_TRUNCATE=1 WGET_OK_HOST=10.9.9.42 HOST=10.9.9.42 fetch_graph && exit 1
+  [ "$(cat "$DASH_TMP/graph.bmp")" = "GOOD" ] || exit 2
+  [ ! -f "$DASH_TMP/graph.new" ] || exit 3 )
+check "$?" "a half-written image does not replace the chart that works"
+
+( WGET_OK_HOST=10.9.9.42 HOST=10.9.9.42 fetch_graph || exit 1
+  [ "$(wc -c < "$DASH_TMP/graph.bmp" | tr -dc 0-9)" = "130" ] || exit 2 )
+check "$?" "and a whole one does"
+
+# The check has to be sure before it refuses. A device with no `od` — or a
+# header this shell cannot read as a number — must keep working, or the fix
+# for a chart that sometimes vanishes is a chart that never arrives.
+( od() { return 127; }
+  printf 'BM....some bytes' > "$DASH_TMP/graph.odd"
+  graph_ok "$DASH_TMP/graph.odd" || exit 1 )
+check "$?" "with no od to read the header, a plausible BMP is still accepted"
+( printf 'not a bmp at all' > "$DASH_TMP/graph.odd"
+  graph_ok "$DASH_TMP/graph.odd" && exit 1
+  : > "$DASH_TMP/graph.odd"
+  graph_ok "$DASH_TMP/graph.odd" && exit 2
+  exit 0 )
+check "$?" "but something that is not a BMP, or is empty, never is"
+
+# ── 3d2. A chart that is not there says so ──────────────────────────────────
+#
+# The caption and the rule above the chart are drawn whatever happens, so an
+# empty rectangle under them reads as "no readings" — a sensor problem, which
+# is where anyone would then go looking. It is the image that is missing.
+( reset_log
+  rm -f "$DASH_TMP/graph.bmp"
+  HOST=10.9.9.42
+  draw_chart_body && exit 1                       # must report that it failed
+  grep -q "No chart yet" "$FBINK_LOG" || exit 2
+  grep -q "http://10.9.9.42" "$FBINK_LOG" || exit 3
+  grep -q -- "-g	file=" "$FBINK_LOG" && exit 4   # and no blit was attempted
+  exit 0 )
+check "$?" "with no image, the chart tier writes a reason where the chart goes"
+( reset_log
+  printf 'BM\202\000\000\000' > "$DASH_TMP/graph.bmp"
+  draw_chart_body || exit 1
+  grep -q "No chart yet" "$FBINK_LOG" && exit 2
+  grep -q -- "file=$DASH_TMP/graph.bmp" "$FBINK_LOG" || exit 3
+  exit 0 )
+check "$?" "and when the image is there it is blitted, with nothing written over it"
+rm -f "$DASH_TMP/graph.odd"
+reset_log
 
 # ── 3e. With no data at all, the page says why ───────────────────────────────
 ( HAVE_DATA=0
@@ -691,6 +759,142 @@ check "$?" "and at :00 it waits a whole minute rather than ticking twice for it"
   nap_to_minute
   [ "$(cat "$WORK/slept")" = "52" ] || exit 1 )
 check "$?" "with :08 and :09 handled as decimal, not as bad octal"
+
+# ── 9. KUAL can actually launch what menu.json names ─────────────────────────
+#
+# KUAL SHOWS NOTHING. It runs `action params`, closes the menu, and the home
+# screen comes back — whether the dashboard started, the script was never
+# found, or the shell died on its first line. "Every entry does nothing" was
+# reported from a device with no shell access, and there was no way to tell
+# those apart, so every entry now goes through kual.sh, which records what
+# happened next to itself on /mnt/us where a USB cable can read it.
+menu="$KDIR/menu.json"
+check "$([ -f "$menu" ] && echo 0 || echo 1)" "menu.json is present"
+
+# Paths are relative ON PURPOSE, and this is the assertion that says so: KUAL
+# runs an action in the directory the menu.json it came from lives in (it is
+# how KOReader's own extension gets away with "./bin/koreader-ext.sh"), so a
+# relative path is the one spelling that does not care what the folder was
+# named when it was copied. An absolute /mnt/us/extensions/esp32dash/… breaks
+# every entry the moment somebody unzips it as esp32dash-main.
+abs=$(grep -o '"params": "/[^"]*"' "$menu")
+check "$([ -z "$abs" ] && echo 0 || echo 1)" \
+      "no entry hardcodes an install path${abs:+ ($abs)}"
+
+notdispatched=$(grep -o '"params": "[^"]*"' "$menu" | grep -v '"params": "kual\.sh ' || true)
+check "$([ -z "$notdispatched" ] && echo 0 || echo 1)" \
+      "every entry goes through kual.sh, so every launch is logged${notdispatched:+ ($notdispatched)}"
+
+for f in kual.sh kual-run.sh start.sh stop.sh settings.sh update_dash.sh; do
+    check "$([ -f "$KDIR/$f" ] && echo 0 || echo 1)" "  $f ships in kindle/"
+done
+
+# Every command the menu can send has to be one the dispatcher answers. A
+# renamed entry that falls through to "unknown command" is the same silence
+# this whole file exists to end.
+unknown=""
+grep -o '"params": "kual\.sh [^"]*"' "$menu" | sed 's/.*kual\.sh //; s/"$//' |
+while read -r cmd; do
+    set -- $cmd
+    case "$1" in
+        start|stop|show|find|next|reset|profile) ;;
+        *) echo "$1" >> "$WORK/unknown" ;;
+    esac
+done
+[ -f "$WORK/unknown" ] && unknown=$(cat "$WORK/unknown")
+check "$([ -z "$unknown" ] && echo 0 || echo 1)" \
+      "and every command it sends is one kual-run.sh knows${unknown:+ ($unknown)}"
+
+# ── 9b. The launcher survives the thing it is here to fix ────────────────────
+#
+# CRLF is the first suspect whenever nothing runs: busybox ash cannot execute a
+# script whose lines end in a carriage return, and these files are edited and
+# copied on Windows. So the launcher is written to survive being CRLF itself —
+# one command, where the only CR that can land is a trailing character on the
+# last argument — and to heal the rest of the extension on the way past.
+EXT="$WORK/ext"
+mkdir -p "$EXT/layout"
+for f in kual.sh kual-run.sh; do
+    sed 's/$/\r/' "$KDIR/$f" > "$EXT/$f"        # deliberately Windows-mangled
+done
+cat > "$EXT/start.sh" <<'EOF'
+#!/bin/sh
+echo "start.sh ran in $(pwd)"
+EOF
+sed 's/$/\r/' "$EXT/start.sh" > "$EXT/start.crlf" && mv "$EXT/start.crlf" "$EXT/start.sh"
+printf 'GR_X=20\r\nGR_Y=278\r\n' > "$EXT/layout/600x800.conf"
+# Not a *.conf, and it is the one conf_init copies to dash.conf on first
+# run — a CR here gives HOST a trailing carriage return and every fetch
+# fails against "http://192.168.1.50\r" with nothing anywhere saying why.
+printf 'HOST=192.168.1.50\r\n' > "$EXT/dash.conf.default"
+printf '\211PNG\r\n\032\n' > "$EXT/icons.bmp"   # not ours: must not be touched
+icons_before=$(wc -c < "$EXT/icons.bmp" | tr -dc 0-9)
+
+( cd "$EXT" && PATH="$BIN:$PATH" sh kual.sh start > "$WORK/kual.out" 2>&1 )
+rc=$?
+check "$rc" "a CRLF kual.sh still launches, from a CRLF kual-run.sh"
+check "$(grep -q "start.sh ran in" "$EXT/kual.log" 2>/dev/null && echo 0 || echo 1)" \
+      "  and the script it launched ran, with its output in kual.log"
+check "$(grep -q "healed Windows line endings" "$EXT/kual.log" 2>/dev/null && echo 0 || echo 1)" \
+      "  the CRs it found were fixed in place, not just reported"
+check "$(tr -d '\r' < "$EXT/start.sh" | cmp -s - "$EXT/start.sh" && echo 0 || echo 1)" \
+      "  start.sh has no CR left in it"
+check "$(tr -d '\r' < "$EXT/layout/600x800.conf" | cmp -s - "$EXT/layout/600x800.conf" && echo 0 || echo 1)" \
+      "  and neither does a layout file, whose GR_X=20\\r FBInk would reject"
+check "$(tr -d '\r' < "$EXT/dash.conf.default" | cmp -s - "$EXT/dash.conf.default" && echo 0 || echo 1)" \
+      "  nor dash.conf.default, which first run copies into the live config"
+check "$([ "$(wc -c < "$EXT/icons.bmp" | tr -dc 0-9)" = "$icons_before" ] && echo 0 || echo 1)" \
+      "  while a file that is not ours keeps every byte it had"
+
+# The log is the point of all of it: next to the scripts, on the volume that
+# appears over USB, not in /tmp where a reboot takes it.
+check "$([ -f "$EXT/kual.log" ] && echo 0 || echo 1)" \
+      "the log is written beside the scripts, where a USB cable can read it"
+
+# An entry that fails has to say so on the panel — KUAL will not.
+cat > "$EXT/stop.sh" <<'EOF'
+#!/bin/sh
+echo "this is what went wrong" >&2
+exit 3
+EOF
+: > "$FBINK_LOG"
+( cd "$EXT" && PATH="$BIN:$PATH" sh kual.sh stop > /dev/null 2>&1 )
+check "$([ "$?" = "3" ] && echo 0 || echo 1)" "a failing entry exits non-zero"
+check "$(grep -q "exit 3" "$EXT/kual.log" && echo 0 || echo 1)" \
+      "  with the exit code and the error text in the log"
+check "$(grep -q "this is what went wrong" "$EXT/kual.log" && echo 0 || echo 1)" \
+      "  including what the script itself printed"
+check "$(grep -qi "failed" "$FBINK_LOG" && echo 0 || echo 1)" \
+      "  and a line on the panel, because nothing else would ever show one"
+
+# FBInk is not part of the Kindle firmware, and KUAL's PATH does not include
+# where people put it. Without it every draw fails and the panel simply does
+# not change — a dashboard that is running and invisible.
+: > "$FBINK_LOG"
+( cd "$EXT" && PATH="/usr/bin:/bin" sh kual.sh start > /dev/null 2>&1 )
+check "$(grep -q "FBInk is not installed" "$EXT/kual.log" && echo 0 || echo 1)" \
+      "a missing FBInk is named in the log rather than being drawn around"
+
+# And the dashboard itself refuses to run blind: it would otherwise keep its
+# schedule for days against a framebuffer it cannot write to.
+out=$(PATH="/usr/bin:/bin" DASH_DIR="$KDIR" DASH_TMP="$WORK/t2" \
+      /bin/sh "$KDIR/update_dash.sh" 2>&1)
+check "$([ "$?" != "0" ] && echo 0 || echo 1)" \
+      "update_dash.sh stops when FBInk is missing instead of drawing nothing"
+check "$(printf '%s' "$out" | grep -q "fbink not found" && echo 0 || echo 1)" \
+      "  and says which binary it wanted"
+
+# A CR anywhere in these files is the other way the menu dies silently: KUAL's
+# JSON reader rejects the file and lists nothing, and busybox ash cannot run a
+# script whose shebang ends in one. .gitattributes pins them to LF; this is
+# what notices when that stops being true.
+crlf=""
+for f in "$menu" "$KDIR"/*.sh "$KDIR/config.xml"; do
+    [ -f "$f" ] || continue
+    if od -c "$f" 2>/dev/null | grep -q '\\r'; then crlf="$crlf $(basename "$f")"; fi
+done
+check "$([ -z "$crlf" ] && echo 0 || echo 1)" \
+      "no CRLF in what the Kindle parses${crlf:+ —$crlf}"
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
