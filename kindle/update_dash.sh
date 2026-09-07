@@ -123,7 +123,7 @@ conf_help() {
 # See kdShellVar() and emitZones() in src/web/KindleDashboard.cpp.
 payload_key_ok() {
     case "$1" in
-        Z_*|GRID_ZONES|GRID_ROWS|IN_ZONES|LBL_*|FC_*|FC[0-9]_*|WK[0-9]_*|WK_TODAY) return 0 ;;
+        Z_*|GRID_ZONES|GRID_ROWS|IN_ZONES|LBL_*|FC_*|FC[0-9]_*|WK[0-9]_*|WK_TODAY|WK_MON_MONTH|WK_SUN_MONTH) return 0 ;;
         OUT_*|IN_*|RES_W|RES_H|LANG|DECIMALS|CLOCK_STYLE|SHOW_FLAGS) return 0 ;;
     esac
     return 1
@@ -859,6 +859,16 @@ draw_forecast_body() {
         done
     fi
 
+    # Week heading (month)
+    if [ -n "${WK_MON_MONTH:-}" ]; then
+        draw_hline "${WK_HDG_RULE_X:-$FOOT_RULE_X}" "${WK_HDG_RULE_Y:-$WK_Y}" \
+                   "${WK_HDG_RULE_W:-$FOOT_RULE_W}" "GRAYA"
+        local wk_heading="$WK_MON_MONTH"
+        [ -n "${WK_SUN_MONTH:-}" ] && wk_heading="$wk_heading – $WK_SUN_MONTH"
+        draw_text_reg "${WK_HDG_X:-$WK_X}" "${WK_HDG_Y:-$WK_Y}" \
+                      "${WK_HDG_SZ:-$LAB_SZ}" "GRAY7" "$wk_heading"
+    fi
+
     # Week strip
     local wk_x="$WK_X" wk_name wk_day wk_bg i
     for i in 0 1 2 3 4 5 6; do
@@ -872,7 +882,7 @@ draw_forecast_body() {
             draw_text_bold "$wk_x" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "WHITE" "$wk_day"
         else
             wk_bg="GRAYE"
-            [ "$i" = "5" ] || [ "$i" = "6" ] && wk_bg="GRAYD"
+            { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
             fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
             draw_text_reg "$wk_x" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "GRAY7" "$wk_name"
             draw_text_bold "$wk_x" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "BLACK" "$wk_day"

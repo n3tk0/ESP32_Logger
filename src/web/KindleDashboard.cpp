@@ -1233,6 +1233,22 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             s->printf("WK%d_DAY=%d\n", i, dtm.tm_mday);
         }
         s->printf("WK_TODAY=%d\n", wday);
+
+        // The month heading the web page draws above the week strip:
+        // one name when the week stays inside a month, two with a dash
+        // between them when it straddles the boundary.
+        {
+            time_t sunday = monday + 6 * 86400;
+            struct tm mv, sv;
+            if (localtime_r(&monday, &mv) != nullptr &&
+                localtime_r(&sunday, &sv) != nullptr) {
+                kdShellVar(s, "WK_MON_MONTH", kdMonth(mv.tm_mon));
+                kdShellVar(s, "WK_SUN_MONTH",
+                           sv.tm_mon != mv.tm_mon ? kdMonth(sv.tm_mon) : "");
+            } else {
+                s->print("WK_MON_MONTH=\"\"\nWK_SUN_MONTH=\"\"\n");
+            }
+        }
     } else {
         s->print("CLOCK=\"--:--\"\nDATE=\"\"\nMONTH_LABEL=\"\"\nYEAR=\n");
         for (int i = 0; i < 7; i++)
@@ -1240,7 +1256,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             kdShellVarN(s, "WK%d_NAME", i, kdWeekdayShort(i));
             s->printf("WK%d_DAY=\n", i);
         }
-        s->print("WK_TODAY=-1\n");
+        s->print("WK_TODAY=-1\nWK_MON_MONTH=\"\"\nWK_SUN_MONTH=\"\"\n");
     }
 
     // ── Forecast ──
