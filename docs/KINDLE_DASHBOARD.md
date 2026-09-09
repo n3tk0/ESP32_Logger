@@ -691,12 +691,57 @@ the user's documents when they pressed Stop.
 So the parser takes an allowlist. `dash.conf` passes the exact key names it
 owns; the payload passes `PAYLOAD`, which accepts the shapes the collector
 actually emits — `Z_*`, `GRID_*`, `IN_ZONES`, `LBL_*`, `FC*`, `WK*`, `OUT_*`,
-`IN_*`, `RES_W`, `RES_H` and a handful of scalars — and drops everything else.
+`IN_*`, `RES_W`, `RES_H` and a handful of named scalars (`CLOCK`, `CLOCK_ADVW`,
+`CLOCK_STYLE`, `DATE`, `TIME_FORMAT`, `SHOW_CHART`, `SHOW_WEEK`, `CHART_OUT`,
+`CHART_IN`, `KEY_OUT_ADVW`, `LANG`, `DECIMALS`, `SHOW_FLAGS`) — and drops
+everything else.
 
 `RES_W` and `RES_H` get a second check, because they are interpolated into a
 path that is then executed with `.` to load the layout: digits only, and a
 plausible panel size, or the reader falls back to 600x800. Without it,
 `RES_W=../../../../mnt/us/x` reached any `.conf`-suffixed file on the device.
+
+### One design, two renderers — and what they were disagreeing about
+
+The panel and the browser page at `/kindle` are the same design drawn twice,
+from one set of settings, by two pieces of code that cannot see each other.
+Every place they disagree is invisible from both sides: the reader switches
+something off, the browser stops drawing it, and the panel on the wall — the
+one anybody is actually looking at — carries on. Nothing errors.
+
+Four of them were found and closed:
+
+| | The page | The panel, before |
+|---|---|---|
+| The chart's key | two swatches under the chart, at the weights of the lines they name | nothing at all — two lines and no way to tell which was which |
+| `KSHOW_CHART`, `KSHOW_WEEK`, `KSHOW_BIG`, `KSHOW_BATTERY` | section hidden | section drawn regardless |
+| Twelve-hour clock, `9:05` without the leading zero | `kdFmtTime()` | always `09:05` |
+| Boxed / ruled / dated clock | four styles in CSS | one, always |
+
+**Where each is decided is the point of the fix.** A switch is applied on the
+collector: `KSHOW_BIG` empties the place the way `KSHOW_GRID` already emptied
+the grid, and the battery flag is folded into `OUT_BATT_WARN`, so a reader
+running an older `update_dash.sh` gets the right answer too. What the panel
+cannot be told in a value it already reads — the two section switches and
+whether the chart has a line in it — arrives as one key each (`SHOW_CHART`,
+`SHOW_WEEK`, `CHART_OUT`, `CHART_IN`) rather than as bits of `SHOW_FLAGS`,
+because masking them in the script would put `KSHOW_CHART`'s numeric value in a
+second file and the day it moves is the day the panel hides the wrong section.
+
+The clock is the one that stays split, and deliberately. The **time** is the
+Kindle's own — it redraws every minute, and the collector is fetched every few
+at best — while the **format and the style** are settings, so `now_clock()` is
+`kdFmtTime()` written in shell and the four styles are drawn with the
+primitives a framebuffer has. Centring the boxed and ruled clocks needs a width
+FBInk will not report, so the collector measures its own copy of the time and
+sends `CLOCK_ADVW`, the same measurement every place already carries. It is a
+sample rather than this minute's string: on the minutes where the two differ in
+width — `9:59` to `10:00` on the lean clock — the centring is out by half a
+digit until the next fetch, which beats the time set hard against the left edge
+of a black plate.
+
+`tests/kindle/drive_dash.sh` covers all of it, and CI takes the key back out
+again to prove the suite notices.
 
 ### The tick aims at the minute
 
@@ -764,8 +809,19 @@ because they are scaffolding rather than data. `#d5d5d5` rather than something
 fainter: the panel quantises to 16 levels and a near-white rule rounds away to
 nothing.
 
-The grid fills as readings arrive: expect a partial chart for the first day
-after a reboot, and the section says so rather than drawing an empty box.
+The grid fills as readings arrive, and it **survives a restart of the
+collector**. `TrendStore` writes a CRC-checked snapshot of the ring to
+`/trend.bin` on LittleFS whenever an hour rolls over — not on every reading —
+via `/trend.tmp` and a rename, so a power cut during the write cannot leave a
+half-file. On boot the snapshot is **merged by name** into the series that have
+already been registered: it can claim a track that exists and nothing else, so
+a saved file cannot invent a series or squat on a slot that now belongs to a
+different sensor. A bad magic, a bad version, a wrong length or a single
+flipped bit anywhere in it is refused and the live ring is left untouched.
+
+Expect a partial chart only on the first run of a new collector, and after a
+gap longer than the window; the section says so rather than drawing an empty
+box.
 
 ## Forecast
 

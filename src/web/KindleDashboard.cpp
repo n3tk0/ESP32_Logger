@@ -820,6 +820,20 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
     bool visible[KZ_COUNT];
     kdZoneVisibility(res, visible);
 
+    // KSHOW_BIG APPLIED HERE, where the grid's and the indoor row's flags are
+    // already applied. The page tests it before drawing the slash and the
+    // second headline value; nothing tested it on this side, so switching the
+    // second value off left the browser page with one number and the panel
+    // with two. A place that is switched off is a place with no reading, which
+    // is a shape both renderers already know what to do with — the reader
+    // draws nothing for an empty Z_BIG_VALUE.
+    if (!(skin.showFlags & KSHOW_BIG)) {
+        res[KZ_BIG].ok      = false;
+        res[KZ_BIG].text[0] = '\0';
+        res[KZ_BIG].unit[0] = '\0';
+        res[KZ_BIG].arrow   = "";
+    }
+
     const KindleZones& zones = kdSlots();
 
     kdShellVar(s, "Z_GROUP_OUT", kdGroupOutLabel(zones));
@@ -1196,7 +1210,12 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     #ifdef FEATURE_ESPNOW_INGEST
     battWarn = espnowAnyBatteryWarn();
     #endif
-    s->printf("OUT_BATT_WARN=%d\n", battWarn ? 1 : 0);
+    // KSHOW_BATTERY FOLDED IN HERE, not left to the reader. The page tests
+    // the flag and the panel did not, so switching the badge off in Settings
+    // silenced it on the browser and left it on the Kindle — which is the one
+    // of the two that is on the wall being looked at.
+    s->printf("OUT_BATT_WARN=%d\n",
+              (battWarn && (skin.showFlags & KSHOW_BATTERY)) ? 1 : 0);
 
     // ── Indoor ──
     fmtTemp(buf, sizeof(buf), inT.value, skin.tempDecimals);
@@ -1214,10 +1233,29 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         struct tm tm;
         time_t t = (time_t)now;
         localtime_r(&t, &tm);
-        s->printf("CLOCK=\"%02d:%02d\"\n", tm.tm_hour, tm.tm_min);
+        // THE SAME FORMATTERS THE PAGE USES, not a second hardwired pair.
+        // These were "%02d:%02d" and "%d %s" while the HTML went through
+        // kdFmtTime()/kdFmtDate(), so a reader who chose the twelve-hour clock
+        // or an ISO date got it on the browser page and 24-hour, "27 august"
+        // on the panel — from one setting, on one device.
+        //
+        // CLOCK is still not what the panel draws minute to minute: the reader
+        // has its own clock and a fetch happens every few minutes at best. It
+        // is the sample the reader's own formatting is checked against, and the
+        // value the offline page falls back to.
         {
+            char tbuf[16];
+            kdFmtTime(tbuf, sizeof(tbuf), tm, skin.timeFormat);
+            kdShellVar(s, "CLOCK", tbuf);
+            // How wide it came out, in thousandths of the type size — the same
+            // measurement the places carry, and for the same reason: FBInk
+            // draws one size per call and will not say how wide it drew.
+            // The boxed and ruled clock styles centre the time, and this is
+            // what the reader centres it with.
+            s->printf("CLOCK_ADVW=%u\n", kdAdvanceMille(tbuf));
+
             char dbuf[32];
-            snprintf(dbuf, sizeof(dbuf), "%d %s", tm.tm_mday, kdMonth(tm.tm_mon));
+            kdFmtDate(dbuf, sizeof(dbuf), tm, skin.dateFormat);
             kdShellVar(s, "DATE", dbuf);
         }
         kdShellVar(s, "MONTH_LABEL", kdMonth(tm.tm_mon));
@@ -1250,7 +1288,8 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             }
         }
     } else {
-        s->print("CLOCK=\"--:--\"\nDATE=\"\"\nMONTH_LABEL=\"\"\nYEAR=\n");
+        s->print("CLOCK=\"--:--\"\nCLOCK_ADVW=0\nDATE=\"\"\n"
+                 "MONTH_LABEL=\"\"\nYEAR=\n");
         for (int i = 0; i < 7; i++)
         {
             kdShellVarN(s, "WK%d_NAME", i, kdWeekdayShort(i));
@@ -1296,6 +1335,22 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     kdShellVar(s, "LBL_WIND", KD_T("wind", "вятър"));
     kdShellVar(s, "LBL_TO", KD_T("to", "до"));
 
+    // The chart's key, worded here so the panel and the page say the same
+    // thing in the same language. The page sets the band clause in grey after
+    // the first label; the panel draws it as one line for the same reason it
+    // draws everything as one line — there is no inline markup on a
+    // framebuffer — so it arrives without the leading comma the HTML needs.
+    kdShellVar(s, "LBL_KEY_OUT",  KD_T("outside mean", "средно навън"));
+    kdShellVar(s, "LBL_KEY_BAND", KD_T("shaded band = hourly low to high",
+                                       "сивото е час. мин–макс"));
+    kdShellVar(s, "LBL_KEY_IN",   KD_T("inside", "вътре"));
+    // The page sets the first label at #444 and the band clause after it at
+    // #777, in one line of markup. On a framebuffer that is two draws at two
+    // greys, and the second one starts where the first ended — which FBInk
+    // will not say. Measured here, like every other width the reader needs.
+    s->printf("KEY_OUT_ADVW=%u\n",
+              kdAdvanceMille(KD_T("outside mean", "средно навън")));
+
     // ── The eleven places ──
     //
     // The configurable layout, emitted alongside the fixed OUT_*/IN_* keys
@@ -1313,7 +1368,24 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     kdShellVar(s, "LANG", KD_T("en", "bg"));
     s->printf("DECIMALS=%d\n", skin.tempDecimals);
     s->printf("CLOCK_STYLE=%d\n", skin.clockStyle);
+    s->printf("TIME_FORMAT=%d\n", skin.timeFormat);
     s->printf("SHOW_FLAGS=%u\n", skin.showFlags);
+
+    // THE SWITCHES SPELT OUT, one key each, rather than left as bits of
+    // SHOW_FLAGS for the reader to mask. Decoding them there would be a second
+    // copy of KSHOW_CHART's numeric value living in a shell script, and the
+    // day one of them moves is the day the panel starts hiding the wrong
+    // section. The grid and the indoor row are already handled this way —
+    // emitZones() sends an empty list for a group that is switched off.
+    s->printf("SHOW_CHART=%d\n", (skin.showFlags & KSHOW_CHART) ? 1 : 0);
+    s->printf("SHOW_WEEK=%d\n",  (skin.showFlags & KSHOW_WEEK)  ? 1 : 0);
+
+    // Whether the chart has anything in it, which is what decides if the key
+    // under it is drawn — the same test the page makes before drawing its own.
+    // A key naming two lines over an empty grid describes a chart that is not
+    // there.
+    s->printf("CHART_OUT=%d\n", haveOut ? 1 : 0);
+    s->printf("CHART_IN=%d\n",  haveIn  ? 1 : 0);
 
     req->send(s);
 }

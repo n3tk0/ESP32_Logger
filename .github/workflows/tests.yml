@@ -472,6 +472,41 @@ jobs:
           rm /tmp/ud.orig
           echo "the suite fails when a half-written chart is accepted, as it should"
 
+      - name: Verify that suite notices when the panel and the page drift apart
+        # The Kindle screen and the browser page at /kindle are ONE design
+        # rendered twice, from one set of settings, by two pieces of code that
+        # cannot see each other. Everything they disagree about is invisible
+        # from either side: the reader turns the chart off, the browser stops
+        # drawing it, and the panel on the wall carries on — with no error
+        # anywhere. The key under the chart was that, for as long as the chart
+        # existed: the page had one, the panel never did.
+        #
+        # Take the key back out and the suite has to notice, or it is only
+        # describing today's script.
+        run: |
+          set -e
+          cp kindle/update_dash.sh /tmp/ud.orig
+          sed -i 's/^        draw_chart_key$/        :/' kindle/update_dash.sh
+          ! grep -q '^        draw_chart_key$' kindle/update_dash.sh   # the sed matched
+          if sh tests/kindle/drive_dash.sh > /dev/null 2>&1; then
+            echo "::error::drive_dash.sh passed a chart drawn with no key under it"
+            cp /tmp/ud.orig kindle/update_dash.sh
+            exit 1
+          fi
+          cp /tmp/ud.orig kindle/update_dash.sh
+          # And the other half of the same class: a section switch the page
+          # obeys and the panel ignores.
+          sed -i 's/\[ "${SHOW_CHART:-1}" = "1" \] || return 0/:/' kindle/update_dash.sh
+          ! grep -q 'SHOW_CHART:-1' kindle/update_dash.sh
+          if sh tests/kindle/drive_dash.sh > /dev/null 2>&1; then
+            echo "::error::drive_dash.sh passed a panel that ignores SHOW_CHART"
+            cp /tmp/ud.orig kindle/update_dash.sh
+            exit 1
+          fi
+          cp /tmp/ud.orig kindle/update_dash.sh
+          rm /tmp/ud.orig
+          echo "the suite fails when the panel stops matching the page, as it should"
+
       - name: Verify the deploy tools see every board in platformio.ini
         # tools/pio_envs.py is where the flash tools get their board list. An
         # env its parser cannot see is a board the tool will not offer, and

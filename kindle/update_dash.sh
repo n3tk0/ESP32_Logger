@@ -125,6 +125,13 @@ payload_key_ok() {
     case "$1" in
         Z_*|GRID_ZONES|GRID_ROWS|IN_ZONES|LBL_*|FC_*|FC[0-9]_*|WK[0-9]_*|WK_TODAY|WK_MON_MONTH|WK_SUN_MONTH) return 0 ;;
         OUT_*|IN_*|RES_W|RES_H|LANG|DECIMALS|CLOCK_STYLE|SHOW_FLAGS) return 0 ;;
+        # What the panel needs to draw the same page the browser draws: the
+        # clock's style and format and the sample the collector formatted with
+        # them, the two section switches, and whether the chart has a line in
+        # it. Exact names, not a shape — each one is read by this script and
+        # nothing here wants a family of them.
+        CLOCK|CLOCK_ADVW|DATE|TIME_FORMAT) return 0 ;;
+        SHOW_CHART|SHOW_WEEK|CHART_OUT|CHART_IN|KEY_OUT_ADVW) return 0 ;;
     esac
     return 1
 }
@@ -544,10 +551,90 @@ refresh_screen() { fb -q -f -s; }
 clear_screen()   { fb -q -b -B WHITE -k; }
 
 # ── Clock ────────────────────────────────────────────────────────────────────
+#
+# THE TIME COMES FROM THIS DEVICE, THE FORMAT FROM THE COLLECTOR. The Kindle
+# has its own clock and redraws once a minute; the collector is fetched every
+# few minutes at best, so its CLOCK is a sample and not what is drawn. But the
+# CHOICE of format is a setting the reader made once, on the same page as
+# everything else here, and it used to reach the browser and stop there — a
+# reader who picked the twelve-hour clock got it on the web page and 24-hour on
+# the panel, from one setting on one device.
+#
+# The three cases are kdFmtTime()'s, written the same way: no space before
+# "am", lower case, no seconds anywhere.
+now_clock() {
+    local hm h m
+    hm=$(date '+%H:%M')
+    case "${TIME_FORMAT:-0}" in
+        1)  echo "${hm#0}" ;;                      # 9:05 — no leading zero
+        2)  h=$(strip_zeros "${hm%%:*}"); m="${hm#*:}"
+            if [ "${h:-0}" -lt 12 ] 2>/dev/null; then m="${m}am"; else m="${m}pm"; fi
+            h=$(( ${h:-0} % 12 ))
+            [ "$h" -eq 0 ] && h=12
+            echo "$h:$m" ;;
+        *)  echo "$hm" ;;                          # 09:05
+    esac
+}
+
+# Where a centred clock starts.
+#
+# CLOCK_ADVW is how wide the collector's own copy of the time came out, in
+# thousandths of the type size — the same measurement every place carries, and
+# for the same reason: FBInk draws one size per call and will not say how wide
+# it drew. It is a SAMPLE, not this minute's string, so on the minutes where
+# the two differ in width — 9:59 to 10:00 on the lean clock — the centring is
+# out by half a digit until the next fetch. Half a digit beats the time set
+# hard against the left edge of a black plate.
+clock_centre_x() {
+    local sz="$1" w
+    w=$(( sz * ${CLOCK_ADVW:-0} / 1000 ))
+    if [ "$w" -gt 0 ] && [ "$w" -lt "${Z_CLOCK_W:-0}" ] 2>/dev/null; then
+        echo $(( Z_CLOCK_X + (Z_CLOCK_W - w) / 2 ))
+    else
+        echo "$CL_X"
+    fi
+}
+
+# The four styles the page offers, at the sizes in the layout file. The page
+# sets them in CSS (kdSkinCss); this draws the same four with the primitives a
+# framebuffer has.
 draw_clock() {
     local now_time="$1"
+    local sz cy
     fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
-    draw_text_bold "$CL_X" "$CL_Y" "$CL_SIZE" "BLACK" "$now_time"
+
+    case "${CLOCK_STYLE:-0}" in
+        1)  # BOXED — knocked out of a black plate, the treatment the current
+            # weekday already gets in the week strip. On a screen with no
+            # colour a filled block is the one mark that survives dithering
+            # unambiguously, which is why the style exists at all.
+            sz="${CL_SZ_BOXED:-$CL_SIZE}"
+            fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" BLACK
+            cy=$(( Z_CLOCK_Y + (Z_CLOCK_H - sz) / 2 ))
+            draw_text_bold "$(clock_centre_x "$sz")" "$cy" "$sz" "WHITE" "$now_time"
+            ;;
+        2)  # RULED — a hairline over it and set smaller, so it reads as a rule
+            # rather than as a number that happens to have a line above it. The
+            # hairline under it is the one the indoor row already draws.
+            sz="${CL_SZ_RULED:-$CL_SIZE}"
+            draw_hline "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" BLACK
+            cy=$(( Z_CLOCK_Y + ${CL_RULED_PAD:-15} ))
+            draw_text_bold "$(clock_centre_x "$sz")" "$cy" "$sz" "BLACK" "$now_time"
+            ;;
+        3)  # DATED — the room for the date is taken FROM the clock rather than
+            # added under it, exactly as the CSS does it, because the rectangle
+            # this is drawn in has to end above the indoor rule either way.
+            #
+            # The date is the collector's, formatted to the reader's choice. It
+            # changes once a day, so a value up to one fetch old is right.
+            sz="${CL_SZ_DATED:-$CL_SIZE}"
+            draw_text_bold "$CL_X" "$CL_Y" "$sz" "BLACK" "$now_time"
+            [ -n "${DATE:-}" ] && \
+                draw_text_reg "$CL_X" "$(( CL_Y + sz + ${CL_DATE_GAP:-6} ))" \
+                              "${CL_DATE_SZ:-14}" "GRAY4" "$DATE"
+            ;;
+        *)  draw_text_bold "$CL_X" "$CL_Y" "$CL_SIZE" "BLACK" "$now_time" ;;
+    esac
 }
 
 # ── One place's value ────────────────────────────────────────────────────────
@@ -799,10 +886,69 @@ draw_sensors_body() {
 }
 
 # ── The chart ────────────────────────────────────────────────────────────────
+# The key under it, the same two entries the web page draws.
+#
+# ONLY WHEN THERE IS A LINE FOR IT TO NAME. The page tests haveOut/haveIn
+# before drawing its own, because a key describing two lines over an empty grid
+# is worse than no key: it says the chart is showing something. CHART_OUT and
+# CHART_IN carry that answer. An older collector sends neither and this draws
+# nothing, which is what it did before there was a key at all.
+#
+# The weights are the page's and are not decoration: the outdoor mean is a
+# solid 3 px rule and the indoor line a dashed 2 px one, and on a panel with no
+# colour the dashes are the whole of what tells the two lines apart.
+draw_chart_key() {
+    local y="${KEY_Y:-0}" sz="${KEY_SZ:-13}" sw="${KEY_SW_W:-26}"
+    local gap="${KEY_GAP:-6}" mid tx dx dash seg end
+    [ "$y" -gt 0 ] 2>/dev/null || return 0
+
+    # The swatch sits on the middle of the type, not on its top edge.
+    mid=$(( y + sz / 2 ))
+
+    if [ "${CHART_OUT:-0}" = "1" ]; then
+        fill_rect "$GR_X" "$mid" "$sw" "${KEY_SW_H:-3}" BLACK
+        tx=$(( GR_X + sw + gap ))
+        draw_text_reg "$tx" "$y" "$sz" "GRAY4" "${LBL_KEY_OUT:-outside mean}"
+        # The band clause after it, in the lighter grey the page's .dim sets.
+        # It starts where the label ended, which the collector measured for us
+        # — see KEY_OUT_ADVW, and draw_field() for why this is not ${#var}.
+        if [ -n "${LBL_KEY_BAND:-}" ] && [ "${KEY_OUT_ADVW:-0}" -gt 0 ] 2>/dev/null; then
+            draw_text_reg "$(( tx + sz * KEY_OUT_ADVW / 1000 ))" "$y" "$sz" \
+                          "GRAY7" ", $LBL_KEY_BAND"
+        fi
+    fi
+
+    if [ "${CHART_IN:-0}" = "1" ]; then
+        tx="${KEY_IN_X:-0}"
+        [ "$tx" -gt 0 ] 2>/dev/null || tx=$(( GR_X + GR_W * 3 / 4 ))
+        # FBInk has no dashed rule, so it is drawn as segments.
+        dash="${KEY_DASH:-7}"
+        end=$(( tx + sw ))
+        dx="$tx"
+        while [ "$dx" -lt "$end" ]; do
+            seg="$dash"
+            [ $(( dx + seg )) -gt "$end" ] && seg=$(( end - dx ))
+            fill_rect "$dx" "$mid" "$seg" "${KEY_SW_H_IN:-2}" GRAY7
+            dx=$(( dx + dash + ${KEY_DASH_GAP:-5} ))
+        done
+        draw_text_reg "$(( tx + sw + gap ))" "$y" "$sz" "GRAY4" \
+                      "${LBL_KEY_IN:-inside}"
+    fi
+}
+
 draw_chart_body() {
+    # SWITCHED OFF MEANS OFF HERE TOO. The reader can turn the chart off in
+    # Settings → Kindle; the page then draws neither the section nor the rule
+    # above it, and this drew both regardless. One setting, one device, two
+    # answers.
+    [ "${SHOW_CHART:-1}" = "1" ] || return 0
+
     draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAYA"
     draw_text_reg "$LAB_CHART_X" "$LAB_CHART_Y" "$LAB_SZ" "GRAY7" "$LBL_LAST24"
-    draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y" && return 0
+    if draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"; then
+        draw_chart_key
+        return 0
+    fi
 
     # NOTHING WAS DRAWN — SAY SO, rather than refreshing an empty rectangle.
     #
@@ -857,6 +1003,16 @@ draw_forecast_body() {
             ol_temp_y=$((ol_y + OL_TEMP_OFFSET))
             draw_text_bold "$ol_x" "$ol_temp_y" "$OL_TEMP_SZ" "BLACK" "${ol_temp}°"
         done
+    fi
+
+    # ── The week strip ──────────────────────────────────────────────────────
+    # Behind its own switch, as it is on the page (KSHOW_WEEK). Everything
+    # under it — the footer rule and the line of type — is drawn either way,
+    # because the page's footer is not part of the strip.
+    if [ "${SHOW_WEEK:-1}" != "1" ]; then
+        draw_hline "$FOOT_RULE_X" "$FOOT_RULE_Y" "$FOOT_RULE_W" "GRAYA"
+        draw_text_reg "$FOOT_X" "$FOOT_Y" "$FOOT_SZ" "GRAY5" "$LBL_MEASURED"
+        return 0
     fi
 
     # Week heading (month)
@@ -1076,11 +1232,11 @@ load_layout
 if fetch_data; then
     load_data
     fetch_graph
-    redraw_all "$(date +%H:%M)"
+    redraw_all "$(now_clock)"
 else
     clear_screen
     refresh_screen
-    redraw_offline "$(date +%H:%M)"
+    redraw_offline "$(now_clock)"
 fi
 
 # ── Main loop ────────────────────────────────────────────────────────────────
@@ -1089,7 +1245,11 @@ MINUTE=0
 while true; do
     nap_to_minute
     MINUTE=$((MINUTE + 1))
-    NOW_TIME=$(date +%H:%M)
+    # The reader's own clock, in the collector's chosen format. The format is
+    # whatever the last payload said, so changing it in Settings shows up on
+    # the next fetch — the same one-tick lag every other value on this page
+    # has, and the clock itself is never stale because the time is local.
+    NOW_TIME=$(now_clock)
 
     # Settings are re-read every minute rather than at startup, so a change
     # made from KUAL takes effect within a minute instead of needing Stop and

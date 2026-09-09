@@ -198,6 +198,19 @@ WK_TODAY=1
 WK_MON_MONTH="MARCH"
 WK_SUN_MONTH="APRIL"
 OUT_BATT_WARN=1
+CLOCK="12:34"
+CLOCK_ADVW=2400
+CLOCK_STYLE=0
+TIME_FORMAT=0
+DATE="24 MARCH"
+SHOW_CHART=1
+SHOW_WEEK=1
+CHART_OUT=1
+CHART_IN=1
+KEY_OUT_ADVW=5200
+LBL_KEY_OUT="outside mean"
+LBL_KEY_BAND="shaded band = hourly low to high"
+LBL_KEY_IN="inside"
 LBL_OUTSIDE="OUTSIDE"
 LBL_INSIDE="INSIDE"
 LBL_LAST24="LAST 24 HOURS"
@@ -572,6 +585,190 @@ check "$?" "with no image, the chart tier writes a reason where the chart goes"
   exit 0 )
 check "$?" "and when the image is there it is blitted, with nothing written over it"
 rm -f "$DASH_TMP/graph.odd"
+reset_log
+
+# ── 3d3. The chart's key, and the two switches over the sections ────────────
+#
+# WHY THIS IS TESTED AND NOT JUST LOOKED AT
+#
+# This screen and the browser page at /kindle are one design rendered twice,
+# from one set of settings, by two pieces of code that cannot see each other.
+# Everything they disagree about is invisible from either side: the reader
+# turns the chart off, the browser stops drawing it, and the panel on the wall
+# — the one anybody is actually looking at — carries on. There is no error
+# anywhere in that.
+#
+# The key is the case that was found. The page has drawn one under its chart
+# since the chart existed; this script never had one, so the panel showed two
+# lines and said nothing about which was which.
+( reset_log
+  printf 'BM\202\000\000\000' > "$DASH_TMP/graph.bmp"
+  draw_chart_body || exit 1
+  # The wording is the collector's, in the collector's language.
+  grep -q "outside mean" "$FBINK_LOG" || exit 2
+  grep -q "inside" "$FBINK_LOG" || exit 3
+  grep -q "shaded band = hourly low to high" "$FBINK_LOG" || exit 4
+  # THE SWATCHES AT THE WEIGHTS OF THE LINES THEY STAND FOR — 3 px solid for
+  # the outdoor mean, 2 px dashed for the indoor. A key drawn in some other
+  # weight describes a chart the reader is not looking at.
+  grep -q -- "-k	top=[0-9]*,left=$GR_X,width=$KEY_SW_W,height=$KEY_SW_H" "$FBINK_LOG" || exit 5
+  # The dashed one is segments, because FBInk has no dashed rule: more than
+  # one fill of KEY_SW_H_IN, none of them the full swatch width.
+  segs=$(grep -c -- "height=$KEY_SW_H_IN	*$" "$FBINK_LOG")
+  [ "${segs:-0}" -ge 2 ] || exit 6
+  grep -q -- "width=$KEY_SW_W,height=$KEY_SW_H_IN" "$FBINK_LOG" && exit 7
+  exit 0 )
+check "$?" "the chart's key names both lines, at the weights the page draws them"
+
+# Only when there is a line for it to name. A key over an empty grid says the
+# chart is showing something.
+( reset_log
+  CHART_OUT=0 CHART_IN=0 draw_chart_body || exit 1
+  grep -q "outside mean" "$FBINK_LOG" && exit 2
+  grep -q "inside" "$FBINK_LOG" && exit 3
+  grep -q -- "file=$DASH_TMP/graph.bmp" "$FBINK_LOG" || exit 4   # chart still drawn
+  exit 0 )
+check "$?" "with no series in it, the chart gets no key"
+
+# An older collector sends neither flag. Drawing nothing is what this script
+# did before it had a key at all, so the reader is never told about lines the
+# collector has not said are there.
+( reset_log
+  unset CHART_OUT CHART_IN
+  draw_chart_body || exit 1
+  grep -q "outside mean" "$FBINK_LOG" && exit 2
+  exit 0 )
+check "$?" "and an older collector, which sends neither flag, gets none either"
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+
+# The two section switches. The page tests KSHOW_CHART and KSHOW_WEEK; this
+# tested neither, so switching a section off in Settings hid it on the browser
+# and left it on the panel.
+( reset_log
+  SHOW_CHART=0 draw_chart_body || exit 1
+  [ "$(calls)" = "0" ] || exit 2 )
+check "$?" "the chart switched off draws nothing at all — not even its rule"
+
+( reset_log
+  SHOW_WEEK=0 draw_forecast_body
+  # No week cells: the strip's plates are WK_CELL_W wide and there are seven.
+  grep -q -- "width=$WK_CELL_W,height=$WK_CELL_H" "$FBINK_LOG" && exit 1
+  # But the footer under it is not part of the strip and still appears.
+  grep -q "Measured on site" "$FBINK_LOG" || exit 2
+  grep -q -- "-k	top=$FOOT_RULE_Y" "$FBINK_LOG" || exit 3
+  exit 0 )
+check "$?" "the week strip switched off takes the strip and leaves the footer"
+
+( reset_log
+  draw_forecast_body
+  grep -q -- "width=$WK_CELL_W,height=$WK_CELL_H" "$FBINK_LOG" || exit 1 )
+check "$?" "and switched on it is still there"
+reset_log
+
+# ── 3d4. The clock: the reader's time, the collector's format and style ─────
+#
+# The time is the Kindle's own — it redraws every minute and the collector is
+# fetched every few at best. The FORMAT and the STYLE are settings, made once
+# on the same page as everything else, and they used to reach the browser and
+# stop there: a reader who chose the twelve-hour clock got it on the web page
+# and 24-hour on the panel, from one setting on one device.
+#
+# now_clock() is kdFmtTime() written in shell, so these are its three cases.
+( date() { echo "09:05"; }
+  [ "$(TIME_FORMAT=0 now_clock)" = "09:05" ] || exit 1
+  [ "$(TIME_FORMAT=1 now_clock)" = "9:05" ]  || exit 2
+  [ "$(TIME_FORMAT=2 now_clock)" = "9:05am" ] || exit 3
+  [ "$(now_clock)" = "09:05" ] || exit 4 )        # unset is 24-hour
+check "$?" "the three clock formats are the three the page offers"
+
+# The two the twelve-hour clock is always got wrong on: noon is 12pm, not 0pm,
+# and midnight is 12am, not 0am or 12pm.
+( date() { echo "12:00"; }
+  [ "$(TIME_FORMAT=2 now_clock)" = "12:00pm" ] || exit 1 )
+check "$?" "noon is 12pm"
+( date() { echo "00:30"; }
+  [ "$(TIME_FORMAT=2 now_clock)" = "12:30am" ] || exit 1
+  [ "$(TIME_FORMAT=1 now_clock)" = "0:30" ] || exit 2 )
+check "$?" "and midnight is 12am"
+( date() { echo "13:07"; }
+  [ "$(TIME_FORMAT=2 now_clock)" = "1:07pm" ] || exit 1
+  [ "$(TIME_FORMAT=0 now_clock)" = "13:07" ] || exit 2 )
+check "$?" "an afternoon hour counts down from twelve, not up from zero"
+
+# 08 and 09 are the pair that breaks a shell doing arithmetic: $((08)) is
+# "value too great for base" in every POSIX shell, and this one is inside the
+# clock, which is drawn every minute.
+( date() { echo "08:09"; }
+  [ "$(TIME_FORMAT=2 now_clock)" = "8:09am" ] || exit 1
+  [ "$(TIME_FORMAT=1 now_clock)" = "8:09" ] || exit 2 )
+check "$?" "with 08 and 09 read as decimal, not as bad octal"
+
+# The four styles. Each one is what kdSkinCss draws in CSS, with the primitives
+# a framebuffer has.
+( reset_log
+  CLOCK_STYLE=0 draw_clock "12:34"
+  grep -q -- "px=$CL_SIZE," "$FBINK_LOG" || exit 1
+  grep -q -- "-B	BLACK" "$FBINK_LOG" && exit 2       # no plate
+  exit 0 )
+check "$?" "the plain clock is the time at its full size and nothing else"
+
+( reset_log
+  CLOCK_STYLE=1 draw_clock "12:34"
+  # A black plate filling the clock rectangle, with the time knocked out of it.
+  grep -q -- "-B	BLACK	-k	top=$Z_CLOCK_Y,left=$Z_CLOCK_X,width=$Z_CLOCK_W,height=$Z_CLOCK_H" "$FBINK_LOG" || exit 1
+  grep -q -- "-C	WHITE" "$FBINK_LOG" || exit 2
+  grep -q -- "px=$CL_SZ_BOXED," "$FBINK_LOG" || exit 3
+  # Centred, not against the left edge — CLOCK_ADVW is what centres it.
+  left=$(sed -n 's/.*-C	WHITE	-t	[^	]*left=\([0-9]*\),.*/\1/p' "$FBINK_LOG" | head -1)
+  [ -n "$left" ] && [ "$left" -gt "$CL_X" ] || exit 4 )
+check "$?" "the boxed clock is knocked out of a plate and centred on it"
+
+( reset_log
+  CLOCK_STYLE=2 draw_clock "12:34"
+  grep -q -- "-k	top=$Z_CLOCK_Y,left=$Z_CLOCK_X,width=$Z_CLOCK_W,height=$RULE_H" "$FBINK_LOG" || exit 1
+  grep -q -- "px=$CL_SZ_RULED," "$FBINK_LOG" || exit 2 )
+check "$?" "the ruled clock has a hairline over it and is set smaller"
+
+( reset_log
+  CLOCK_STYLE=3 draw_clock "12:34"
+  grep -q -- "px=$CL_SZ_DATED," "$FBINK_LOG" || exit 1
+  grep -q -- "px=$CL_DATE_SZ," "$FBINK_LOG" || exit 2
+  grep -q "24 MARCH" "$FBINK_LOG" || exit 3 )
+check "$?" "the dated clock takes its room from the time and puts the date under it"
+
+# An older collector sends no CLOCK_STYLE. The plain clock is what this script
+# has always drawn, so that is what it keeps drawing.
+( reset_log
+  unset CLOCK_STYLE
+  draw_clock "12:34"
+  grep -q -- "px=$CL_SIZE," "$FBINK_LOG" || exit 1
+  grep -q -- "-B	BLACK" "$FBINK_LOG" && exit 2
+  exit 0 )
+check "$?" "and with no style at all it is the plain one, as it always was"
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+
+# Every style, and the key, through the option table — the check section 1 runs
+# over the default page. A style is drawn on a timer nobody watches; a flag it
+# gets wrong is a clock that silently stops appearing.
+bad=""
+for style in 0 1 2 3; do
+    reset_log
+    CLOCK_STYLE=$style redraw_all "12:34"
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        if reason=$(validate_call "$line"); then :; else
+            bad="style $style: $reason"; break
+        fi
+        if reason=$(validate_colours "$line"); then :; else
+            bad="style $style: $reason"; break
+        fi
+    done < "$FBINK_LOG"
+    [ -z "$bad" ] || break
+done
+check "$([ -z "$bad" ] && echo 0 || echo 1)" \
+      "all four clock styles speak FBInk too${bad:+ — $bad}"
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+load_layout
 reset_log
 
 # ── 3e. With no data at all, the page says why ───────────────────────────────
