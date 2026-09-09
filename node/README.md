@@ -427,12 +427,38 @@ Leave `ALTITUDE_M` at 0 and only `pressure` is sent.
 | Sensor missing at boot | Retries the probe on every post cycle — a cold breakout that fails its first probe recovers without a power cycle |
 | WiFi down | Gives up the association attempt after 20 s, powers the radio down, retries next cycle. After two consecutive failures it offers the setup portal for 5 minutes, then goes back to retrying. Those five minutes are counted only while nobody is joined to the AP — a connected station means a human is mid-configuration, and the window used to close under them |
 | Config lost or corrupt | Falls back to the compiled-in defaults; if those are incomplete, the portal comes up and waits |
-| Collector unreachable | Logs the error and drops that sample; there is no local buffer |
-| Wrong token | Collector answers 401; the message is printed on the serial monitor |
+| Collector unreachable | Keeps the readings and hands them over when it comes back — see below |
+| Wrong token | Collector answers 401; the message is printed on the serial monitor. The readings are kept, so fixing the token recovers the gap as well as the future |
 
-There is deliberately no local buffering. A gap in outdoor temperature is
-visible and self-explanatory on the dashboard; a node replaying an hour of
-stale samples after a reconnect is neither.
+## What it keeps while the collector is away
+
+The node holds **192 readings** — an hour for a three-metric node at the
+default one-minute interval, twenty minutes for a nine-metric one — in a ring
+in RAM (`node/src/Backlog.h`). That is about 3 KB, and it is the whole cost.
+
+The sensor is read **before the network is even looked at**, so the cycle where
+the router is down is not the cycle whose reading is lost. Each entry
+remembers `millis()`, not a date: this board has no clock, and what it can
+always say honestly is *how long ago*. The POST turns that into `dt_s` per
+reading and the collector, which does have NTP, turns it back into a timestamp.
+
+Nothing leaves the ring until the collector says what it did with it. The reply
+carries `accepted` — how many readings from the front of the batch it
+consumed — and the node drops exactly that many and keeps the rest, in order.
+So a 200 that took nothing (the collector's own history queue is full and
+draining) costs no data: the batch is simply offered again next cycle. Up to
+four batches of 48 go per cycle, which lets a node catch up several times
+faster than it accumulates without looking like a flood.
+
+When the outage outruns the buffer, the **oldest** readings go, and the count
+is printed. Losing the start of an outage beats losing the end of it: the
+recent hours are the ones the dashboard draws. On the collector's side the
+same rule applies, so a reading does not survive one queue to be dropped by
+the other's opposite opinion.
+
+The ring is RAM, so a **reboot of the node** still loses what it was holding.
+It is the collector's chart that survives a restart (`/trend.bin`), not the
+node's queue.
 
 ## Power
 

@@ -1,0 +1,279 @@
+// The dashboard's wording: which language it is in, and what case it is set in.
+//
+// Two things live here because they are two halves of the same job — deciding
+// what string the reader ends up looking at — and because both fail quietly.
+//
+// WHICH LANGUAGE
+// --------------
+// It was the compiler's decision: -DKINDLE_LANG_BG picked one literal of each
+// pair and threw the other away. That cost nothing and could not be changed
+// without a reflash, on a device whose whole point is that it hangs on a wall
+// and is read by somebody who did not build its firmware. It is a setting now,
+// which means every table has to carry both languages and ask at the moment it
+// is read — and a table that forgot to ask leaves half the page in the old
+// language, which reads as an unfinished translation rather than as a bug.
+//
+// WHAT CASE
+// ---------
+// Every caption on the Kindle dashboard is set uppercase, and on the browser
+// page that is one line of CSS — so the string tables and the labels a reader
+// types stay in their natural case. The panel has no CSS. It draws whatever
+// /kindle/data hands it, which is why one dashboard came out "НАВЪН" in the
+// browser and "Навън" on the panel, from one setting on one device.
+//
+// It cannot be fixed at the reader's end: `tr a-z A-Z` in busybox ash is
+// ASCII-only, and a Bulgarian label is exactly the case that needs it.
+//
+// So the collector uppercases, and the two halves of that are both quiet when
+// wrong. Cyrillic in UTF-8 straddles a lead-byte boundary — а-п is D0 B0..BF
+// and р-я is D1 80..8F — so the obvious "subtract 0x20" turns "р" into a space
+// followed by a capital. And a label that does not fit its buffer has to be
+// cut BETWEEN characters: half a two-byte sequence is not a shorter word, it
+// is a replacement glyph on a device nobody can attach a console to.
+#define FEATURE_KINDLE_DASHBOARD 1
+
+#include "src/web/DashboardStrings.h"
+// KindleSlots.h too: the metric labels and the two group headings are the
+// wording a reader sees most of, and they live in that table rather than here.
+#include "src/web/KindleSlots.h"
+#include "check.h"
+
+#include <string>
+
+static std::string up(const char* s, size_t cap = 128) {
+    char buf[256];
+    if (cap > sizeof(buf)) cap = sizeof(buf);
+    kdUpperUtf8(buf, cap, s);
+    return std::string(buf);
+}
+
+// The result is kept in a NAMED local before it is compared. CHECK_STREQ takes
+// its two arguments into `const char*` on one line and reads them on the next,
+// so `CHECK_STREQ(up(x).c_str(), y)` hands it a pointer into a temporary that
+// has already been destroyed — which passes for short strings, where the small
+// string optimisation leaves the bytes on a stack slot nothing has reused yet,
+// and fails for long ones. A test that is itself undefined proves nothing.
+static void chk_up(const char* in, const char* want) {
+    const std::string got = up(in);
+    CHECK_STREQ(got.c_str(), want);
+}
+
+// ---------------------------------------------------------------------------
+static void test_ascii_is_the_easy_half() {
+    chk_up("pressure", "PRESSURE");
+    chk_up("Mon", "MON");
+    chk_up("august", "AUGUST");
+    chk_up("ALREADY", "ALREADY");
+    chk_up("", "");
+    // Digits, punctuation and the degree pass through: an outlook label is
+    // "19:00" and a unit is "hPa" against "°".
+    chk_up("19:00", "19:00");
+    chk_up("pm2.5 (ug/m3)", "PM2.5 (UG/M3)");
+}
+
+// ---------------------------------------------------------------------------
+static void test_the_labels_this_was_written_for() {
+    chk_up("Навън", "НАВЪН");
+    chk_up("Вътре", "ВЪТРЕ");
+    chk_up("налягане", "НАЛЯГАНЕ");
+    chk_up("септември", "СЕПТЕМВРИ");
+    chk_up("точка на оросяване", "ТОЧКА НА ОРОСЯВАНЕ");
+    // The short weekday names, which are the seven most repeated strings on
+    // the page.
+    chk_up("пн", "ПН");
+    chk_up("сб", "СБ");
+    chk_up("нд", "НД");
+}
+
+// ---------------------------------------------------------------------------
+// THE ONE THIS FILE EXISTS FOR. The Cyrillic lower case runs across two UTF-8
+// lead bytes: а-п live at D0 B0..D0 BF and р-я at D1 80..D1 8F. Treating the
+// block as one range and subtracting 0x20 from the trail byte gives, for "р"
+// (D1 80), D1 60 — which is not a letter at all.
+static void test_the_run_that_straddles_the_lead_byte() {
+    // Every letter of the Bulgarian alphabet, in order, lower then upper.
+    static const char* LOWER =
+        "абвгдежзийклмнопрстуфхцчшщъьюя";
+    static const char* UPPER =
+        "АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЬЮЯ";
+    chk_up(LOWER, UPPER);
+
+    // The boundary itself, one letter either side of it.
+    chk_up("п", "П");     // D0 BF — last of the first run
+    chk_up("р", "Р");     // D1 80 — first of the second
+    chk_up("пр", "ПР");
+
+    // Two bytes in, two bytes out: a length that grows would overflow a
+    // fixed buffer somewhere downstream.
+    CHECK_EQ((long)up(LOWER).size(), (long)strlen(LOWER));
+}
+
+// ---------------------------------------------------------------------------
+static void test_it_leaves_alone_what_it_does_not_understand() {
+    // Not Bulgarian and not ASCII. Copied through rather than mangled: a
+    // label is a reader's own text and a byte this does not understand is a
+    // byte it must not corrupt.
+    chk_up("°C", "°C");
+    chk_up("µg/m³", "µG/M³");
+    chk_up("→", "→");
+    chk_up("日本", "日本");
+}
+
+// ---------------------------------------------------------------------------
+// The third run: D1 90..9F -> D0 80..8F.
+//
+// ѝ IS BULGARIAN AND IT IS THE POINT. It is the grave-accented и that
+// distinguishes the short possessive "ѝ" from the conjunction "и" — a reader
+// naming a place "стаята ѝ" gets it from any Bulgarian keyboard layout. While
+// this run was a special case for ё alone, ѝ fell through to the leave-alone
+// branch and stayed lower case in the middle of an otherwise capitalised
+// label, on the panel, where nothing would explain why.
+static void test_the_accented_run_above_the_alphabet() {
+    chk_up("ѝ", "Ѝ");                    // D1 9D -> D0 8D
+    chk_up("стаята ѝ", "СТАЯТА Ѝ");      // in the place it actually appears
+    chk_up("ё", "Ё");                    // D1 91 -> D0 81, the old special case
+
+    // The ends of the run, and one byte past each, which must not move.
+    chk_up("ѐ", "Ѐ");                    // D1 90, first
+    chk_up("џ", "Џ");                    // D1 9F, last
+    chk_up("я", "Я");                    // D1 8F — the run below, unchanged
+    chk_up("ѠѠ", "ѠѠ");                  // D1 A0 — above it, left alone
+
+    // Still two bytes out for two bytes in.
+    CHECK_EQ((long)up("ѝёѐџ").size(), (long)strlen("ѝёѐџ"));
+}
+
+// ---------------------------------------------------------------------------
+// A cut inside a two-byte sequence is not a shorter word. It is a replacement
+// glyph, on a panel on a wall, in a language the person who set it chose.
+static void test_it_never_cuts_a_character_in_half() {
+    // "НАВЪН" is ten bytes. Every capacity from 1 to 12 has to come back as a
+    // whole number of characters and a terminator.
+    for (size_t cap = 1; cap <= 12; cap++) {
+        char buf[16];
+        memset(buf, 0x7E, sizeof(buf));
+        kdUpperUtf8(buf, cap, "Навън");
+        const size_t n = strlen(buf);
+        CHECK(n < cap);                       // always terminated inside cap
+        CHECK(n % 2 == 0);                    // whole Cyrillic characters only
+        // and nothing was written past the capacity it was given
+        CHECK((unsigned char)buf[cap] == 0x7E || cap >= sizeof(buf));
+    }
+
+    // The same for a mixed string, where the cut can land on either kind.
+    for (size_t cap = 1; cap <= 14; cap++) {
+        char buf[16];
+        kdUpperUtf8(buf, cap, "aбcдe");
+        // Whatever came back is valid UTF-8: no byte is a lone continuation.
+        const unsigned char* p = (const unsigned char*)buf;
+        while (*p) {
+            if (*p < 0x80)      { p++; }
+            else if (*p >= 0xC0) { CHECK((p[1] & 0xC0) == 0x80); p += 2; }
+            else                 { CHECK(false); break; }   // a lone trail byte
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+static void test_the_degenerate_calls() {
+    char buf[8];
+    kdUpperUtf8(buf, sizeof(buf), nullptr);
+    CHECK_STREQ(buf, "");
+    // A zero capacity has nowhere to put a terminator, so it writes nothing.
+    char guard[4] = {0x7E, 0x7E, 0x7E, 0x7E};
+    kdUpperUtf8(guard, 0, "Навън");
+    CHECK((unsigned char)guard[0] == 0x7E);
+    kdUpperUtf8(nullptr, 8, "Навън");        // must not crash
+}
+
+// ---------------------------------------------------------------------------
+// The label follows the setting, and the setting is not the compiler's
+// ---------------------------------------------------------------------------
+// The language was a build flag: KD_T() resolved to one literal and the other
+// was discarded, so this table held one pointer per row and a reader who
+// wanted the other language had to build firmware for a panel on a wall.
+//
+// It is a setting now, which means the row has to hold both and label() has to
+// ask — and the failure if it does not is silent in exactly one direction:
+// switching to Bulgarian would leave every table label in English while the
+// labels a reader typed themselves changed, which reads as a half-finished
+// translation rather than as a bug.
+static void test_the_label_follows_the_language() {
+    const uint8_t saved = kdLangRef();
+
+    kdLangBegin(KLANG_EN);
+    const KdMetricStyle* t = kdMetricStyle("temperature");
+    CHECK(t != nullptr);
+    if (t) CHECK_STREQ(t->label(), "TEMP");
+
+    kdLangBegin(KLANG_BG);
+    if (t) CHECK_STREQ(t->label(), "ТЕМП");
+
+    // Through kdSlotLabel(), which is what both renderers actually call. A
+    // place with no label of its own falls back to the table.
+    KindleSlot s{};
+    strncpy(s.metric, "pressure", sizeof(s.metric) - 1);
+    CHECK_STREQ(kdSlotLabel(s), "НАЛЯГ");
+    kdLangBegin(KLANG_EN);
+    CHECK_STREQ(kdSlotLabel(s), "PRESS");
+
+    // A place the reader named keeps its own name in either language. It is
+    // their text, not a translation.
+    strncpy(s.label, "Спалня", sizeof(s.label) - 1);
+    CHECK_STREQ(kdSlotLabel(s), "Спалня");
+    kdLangBegin(KLANG_BG);
+    CHECK_STREQ(kdSlotLabel(s), "Спалня");
+
+    // A metric the table does not list falls back to the metric name, which is
+    // not a translated string in either language.
+    KindleSlot u{};
+    strncpy(u.metric, "unlisted_thing", sizeof(u.metric) - 1);
+    CHECK_STREQ(kdSlotLabel(u), "unlisted_thing");
+
+    // Both group headings follow too — they are the two captions a reader is
+    // most likely to notice, being the largest.
+    KindleZones z{};
+    kdLangBegin(KLANG_EN);
+    CHECK_STREQ(kdGroupOutLabel(z), "OUTSIDE");
+    CHECK_STREQ(kdGroupInLabel(z),  "INSIDE");
+    kdLangBegin(KLANG_BG);
+    CHECK_STREQ(kdGroupOutLabel(z), "НАВЪН");
+    CHECK_STREQ(kdGroupInLabel(z),  "ВЪТРЕ");
+
+    kdLangRef() = saved;
+}
+
+// KLANG_AUTO is what an older config's reserved byte reads as, so every device
+// that upgrades into this arrives holding it. It has to mean "carry on saying
+// what you said before" — anything else and an update silently changes the
+// language of a panel on somebody's wall.
+static void test_an_unset_setting_keeps_the_build_s_language() {
+    const uint8_t saved = kdLangRef();
+#if defined(KINDLE_LANG_BG)
+    const uint8_t built = KLANG_BG;
+#else
+    const uint8_t built = KLANG_EN;
+#endif
+    CHECK_EQ((int)kdLangResolve(KLANG_AUTO), (int)built);
+    CHECK_EQ((int)kdLangResolve(KLANG_EN),   (int)KLANG_EN);
+    CHECK_EQ((int)kdLangResolve(KLANG_BG),   (int)KLANG_BG);
+    // A byte out of storage is not a promise. Anything unrecognised is the
+    // build's language too, not an index into nothing.
+    CHECK_EQ((int)kdLangResolve(3),   (int)built);
+    CHECK_EQ((int)kdLangResolve(200), (int)built);
+    CHECK_EQ((int)kdLangResolve(255), (int)built);
+    kdLangRef() = saved;
+}
+
+int main() {
+    RUN(test_ascii_is_the_easy_half);
+    RUN(test_the_labels_this_was_written_for);
+    RUN(test_the_run_that_straddles_the_lead_byte);
+    RUN(test_it_leaves_alone_what_it_does_not_understand);
+    RUN(test_the_accented_run_above_the_alphabet);
+    RUN(test_it_never_cuts_a_character_in_half);
+    RUN(test_the_degenerate_calls);
+    RUN(test_the_label_follows_the_language);
+    RUN(test_an_unset_setting_keeps_the_build_s_language);
+    return SUMMARY();
+}

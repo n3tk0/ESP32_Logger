@@ -125,6 +125,16 @@ payload_key_ok() {
     case "$1" in
         Z_*|GRID_ZONES|GRID_ROWS|IN_ZONES|LBL_*|FC_*|FC[0-9]_*|WK[0-9]_*|WK_TODAY|WK_MON_MONTH|WK_SUN_MONTH) return 0 ;;
         OUT_*|IN_*|RES_W|RES_H|LANG|DECIMALS|CLOCK_STYLE|SHOW_FLAGS) return 0 ;;
+        # What the panel needs to draw the same page the browser draws: the
+        # clock's style and format and the sample the collector formatted with
+        # them, the two section switches, and whether the chart has a line in
+        # it. Exact names, not a shape — each one is read by this script and
+        # nothing here wants a family of them.
+        CLOCK|CLOCK_ADVW|DATE|TIME_FORMAT) return 0 ;;
+        SHOW_CHART|SHOW_WEEK|CHART_OUT|CHART_IN|KEY_OUT_ADVW) return 0 ;;
+        # The chart's axis: the five values, the five hours, their widths, and
+        # where the image's plot area is inside the image.
+        CH_Y[0-9]|CH_Y[0-9]W|CH_H[0-9]|CH_H[0-9]W|CH_L|CH_R|CH_T|CH_B|CH_NOTE) return 0 ;;
     esac
     return 1
 }
@@ -376,7 +386,14 @@ graph_ok() {
     [ "$have" = "$want" ]
 }
 
+# Is the chart switched on? Consulted before FETCHING as well as before
+# drawing: a reader who turns the chart off in Settings should not have the
+# Kindle keep downloading a 56 KB image over WiFi every GRAPH_EVERY minutes
+# for a section nothing draws.
+chart_wanted() { [ "${SHOW_CHART:-1}" = "1" ]; }
+
 fetch_graph() {
+    chart_wanted || return 1
     # Into a scratch file, and only into place once it is whole. wget -O
     # truncates its target the moment it opens it, so fetching straight onto
     # graph.bmp turned one WiFi hiccup into a zero-byte file — and since
@@ -544,10 +561,104 @@ refresh_screen() { fb -q -f -s; }
 clear_screen()   { fb -q -b -B WHITE -k; }
 
 # ── Clock ────────────────────────────────────────────────────────────────────
+#
+# THE TIME COMES FROM THIS DEVICE, THE FORMAT FROM THE COLLECTOR. The Kindle
+# has its own clock and redraws once a minute; the collector is fetched every
+# few minutes at best, so its CLOCK is a sample and not what is drawn. But the
+# CHOICE of format is a setting the reader made once, on the same page as
+# everything else here, and it used to reach the browser and stop there — a
+# reader who picked the twelve-hour clock got it on the web page and 24-hour on
+# the panel, from one setting on one device.
+#
+# The three cases are kdFmtTime()'s, written the same way: no space before
+# "am", lower case, no seconds anywhere.
+now_clock() {
+    local hm h m
+    hm=$(date '+%H:%M')
+    case "${TIME_FORMAT:-0}" in
+        1)  echo "${hm#0}" ;;                      # 9:05 — no leading zero
+        2)  h=$(strip_zeros "${hm%%:*}"); m="${hm#*:}"
+            if [ "${h:-0}" -lt 12 ] 2>/dev/null; then m="${m}am"; else m="${m}pm"; fi
+            h=$(( ${h:-0} % 12 ))
+            [ "$h" -eq 0 ] && h=12
+            echo "$h:$m" ;;
+        *)  echo "$hm" ;;                          # 09:05
+    esac
+}
+
+# Where a centred clock starts.
+#
+# CLOCK_ADVW is how wide the collector's own copy of the time came out, in
+# thousandths of the type size — the same measurement every place carries, and
+# for the same reason: FBInk draws one size per call and will not say how wide
+# it drew. It is a SAMPLE, not this minute's string, so on the minutes where
+# the two differ in width — 9:59 to 10:00 on the lean clock — the centring is
+# out by half a digit until the next fetch. Half a digit beats the time set
+# hard against the left edge of a black plate.
+clock_centre_x() {
+    # $1=type size  -> CENTRE_X
+    local sz="$1" w
+    w=$(( sz * ${CLOCK_ADVW:-0} / 1000 ))
+    if [ "$w" -gt 0 ] && [ "$w" -lt "${Z_CLOCK_W:-0}" ] 2>/dev/null; then
+        CENTRE_X=$(( Z_CLOCK_X + (Z_CLOCK_W - w) / 2 ))
+    else
+        CENTRE_X="$CL_X"
+    fi
+}
+
+# The four styles the page offers, at the sizes in the layout file. The page
+# sets them in CSS (kdSkinCss); this draws the same four with the primitives a
+# framebuffer has.
 draw_clock() {
     local now_time="$1"
-    fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
-    draw_text_bold "$CL_X" "$CL_Y" "$CL_SIZE" "BLACK" "$now_time"
+    local sz cy
+    # The clearing fill is per-style, not up front: the boxed clock covers the
+    # whole rectangle in black anyway, so a white fill before it was a second
+    # fbink process a minute — 1440 forks a day on a ten-year-old ARM device —
+    # painting something nothing would ever see.
+    case "${CLOCK_STYLE:-0}" in
+        1)  # BOXED — knocked out of a black plate, the treatment the current
+            # weekday already gets in the week strip. On a screen with no
+            # colour a filled block is the one mark that survives dithering
+            # unambiguously, which is why the style exists at all.
+            sz="${CL_SZ_BOXED:-$CL_SIZE}"
+            fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" BLACK
+            cy=$(( Z_CLOCK_Y + (Z_CLOCK_H - sz) / 2 ))
+            clock_centre_x "$sz"
+            draw_text_bold "$CENTRE_X" "$cy" "$sz" "WHITE" "$now_time"
+            ;;
+        2)  # RULED — a hairline over it and set smaller, so it reads as a rule
+            # rather than as a number that happens to have a line above it. The
+            # hairline under it is the one the indoor row already draws.
+            fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
+            sz="${CL_SZ_RULED:-$CL_SIZE}"
+            draw_hline "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" BLACK
+            cy=$(( Z_CLOCK_Y + ${CL_RULED_PAD:-15} ))
+            clock_centre_x "$sz"
+            draw_text_bold "$CENTRE_X" "$cy" "$sz" "BLACK" "$now_time"
+            ;;
+        3)  # DATED — the room for the date is taken FROM the clock rather than
+            # added under it, exactly as the CSS does it, because the rectangle
+            # this is drawn in has to end above the indoor rule either way.
+            #
+            # The date is the collector's, formatted to the reader's choice. It
+            # changes once a day, so a value up to one fetch old is right.
+            fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
+            sz="${CL_SZ_DATED:-$CL_SIZE}"
+            draw_text_bold "$CL_X" "$CL_Y" "$sz" "BLACK" "$now_time"
+            # An `&&` here would make draw_clock's exit status the test's, so
+            # a collector that sends no date — an older one, or the offline
+            # path before any fetch — would report a failure for a clock it
+            # drew perfectly. Nothing tests it today; redraw_all is one `&&`
+            # away from turning that into a skipped repaint.
+            if [ -n "${DATE:-}" ]; then
+                draw_text_reg "$CL_X" "$(( CL_Y + sz + ${CL_DATE_GAP:-6} ))" \
+                              "${CL_DATE_SZ:-14}" "GRAY4" "$DATE"
+            fi
+            ;;
+        *)  fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
+            draw_text_bold "$CL_X" "$CL_Y" "$CL_SIZE" "BLACK" "$now_time" ;;
+    esac
 }
 
 # ── One place's value ────────────────────────────────────────────────────────
@@ -581,7 +692,13 @@ draw_field() {
     ux=$(( x + sz * vadv / 1000 ))
 
     if [ -n "$unit" ]; then
-        usz=$(( sz * 42 / 100 ))
+        # 42 % for a unit, 34 % for a degree — the page's .unit and .unit-d.
+        # The degree was set at the same 42 % as "hPa", which at a headline
+        # size is a circle the height of a lower-case o sitting where a
+        # footnote should be, and it pushed everything after it too far right.
+        if [ "$unit" = "°" ]; then usz=$(( sz * 34 / 100 ))
+        else                       usz=$(( sz * 42 / 100 ))
+        fi
         [ "$usz" -lt 9 ] && usz=9
         case "$unit" in
             # Degrees and per-cent set tight against the number — "8.4 °" and
@@ -592,7 +709,7 @@ draw_field() {
         esac
         if [ "$unit" = "°" ]; then
             # The degree rides at the cap line rather than on the baseline,
-            # where at four tenths of the size it reads as a lower-case o.
+            # where at a third of the size it reads as a lower-case o.
             draw_text_reg "$ux" "$y" "$usz" "GRAY4" "$unit"
         else
             draw_text_reg "$ux" "$(baseline_y "$y" "$sz" "$usz")" "$usz" "GRAY4" "$unit"
@@ -615,6 +732,36 @@ draw_field() {
 baseline_y() {
     # $1=row top  $2=largest size in the row  $3=this size
     echo $(( $1 + ($2 - $3) * 80 / 100 ))
+}
+
+# Where something `w` pixels wide starts if it is to be centred in a cell that
+# begins at `x`. Used by the outlook columns and the week strip, both of which
+# the page centres (.per and .wd are text-align:center) and both of which the
+# panel used to draw hard against the cell's left edge.
+#
+# A width of zero — an older collector, which measures nothing — falls back to
+# the left edge, which is what this always did.
+#
+# THE ANSWER IS A VARIABLE, NOT AN ECHO. `x=$(centre_in ...)` forks a subshell,
+# and a full repaint centres twenty-four things: seven weekday names, seven
+# numerals, three outlook labels, three icons, three temperatures and the
+# clock. Two dozen process creations on a ten-year-old ARM device, once a
+# minute for the clock and once a tier for the rest, to do three integer
+# operations. draw_field() already passes its widths this way.
+CENTRE_X=0
+centre_in() {
+    # $1=cell left  $2=cell width  $3=content width  -> CENTRE_X
+    if [ "${3:-0}" -gt 0 ] && [ "$3" -lt "$2" ] 2>/dev/null; then
+        CENTRE_X=$(( $1 + ($2 - $3) / 2 ))
+    else
+        CENTRE_X="$1"
+    fi
+}
+
+# The same, for an outlook column, whose width is one number for all three.
+ol_centre() {
+    # $1=column left  $2=content width  -> CENTRE_X
+    centre_in "$1" "${OL_PLATE_W:-0}" "$2"
 }
 
 # ── The readings block ───────────────────────────────────────────────────────
@@ -694,7 +841,11 @@ draw_zones() {
     n=0
     for z in ${IN_ZONES:-}; do n=$((n + 1)); done
     if [ "$n" -gt 0 ]; then
-        draw_hline "$rx" "${IN_RULE_Y:-126}" "$rw" "GRAYA"
+        # GRAYD, not GRAYA: .inrule is #d8d8d8 and .rule is #aaa. This one
+        # separates two things inside one column, where the page's section
+        # rules separate the columns from what is under them, and drawn at the
+        # heavier weight it read as a third section break.
+        draw_hline "$rx" "${IN_RULE_Y:-126}" "$rw" "GRAYD"
         draw_text_reg "$rx" "${IN_LAB_Y:-134}" "$lab_sz" "GRAY7" "$Z_GROUP_IN"
 
         # The first field gets more of the row, not an equal share: it is set
@@ -799,10 +950,137 @@ draw_sensors_body() {
 }
 
 # ── The chart ────────────────────────────────────────────────────────────────
+# The key under it, the same two entries the web page draws.
+#
+# ONLY WHEN THERE IS A LINE FOR IT TO NAME. The page tests haveOut/haveIn
+# before drawing its own, because a key describing two lines over an empty grid
+# is worse than no key: it says the chart is showing something. CHART_OUT and
+# CHART_IN carry that answer. An older collector sends neither and this draws
+# nothing, which is what it did before there was a key at all.
+#
+# The weights are the page's and are not decoration: the outdoor mean is a
+# solid 3 px rule and the indoor line a dashed 2 px one, and on a panel with no
+# colour the dashes are the whole of what tells the two lines apart.
+draw_chart_key() {
+    local y="${KEY_Y:-0}" sz="${KEY_SZ:-13}" sw="${KEY_SW_W:-26}"
+    local gap="${KEY_GAP:-6}" mid tx dx dash seg end
+    [ "$y" -gt 0 ] 2>/dev/null || return 0
+
+    # The swatch sits on the middle of the type, not on its top edge.
+    mid=$(( y + sz / 2 ))
+
+    if [ "${CHART_OUT:-0}" = "1" ]; then
+        fill_rect "$GR_X" "$mid" "$sw" "${KEY_SW_H:-3}" BLACK
+        tx=$(( GR_X + sw + gap ))
+        draw_text_reg "$tx" "$y" "$sz" "GRAY4" "${LBL_KEY_OUT:-outside mean}"
+        # The band clause after it, in the lighter grey the page's .dim sets.
+        # It starts where the label ended, which the collector measured for us
+        # — see KEY_OUT_ADVW, and draw_field() for why this is not ${#var}.
+        if [ -n "${LBL_KEY_BAND:-}" ] && [ "${KEY_OUT_ADVW:-0}" -gt 0 ] 2>/dev/null; then
+            draw_text_reg "$(( tx + sz * KEY_OUT_ADVW / 1000 ))" "$y" "$sz" \
+                          "GRAY7" ", $LBL_KEY_BAND"
+        fi
+    fi
+
+    if [ "${CHART_IN:-0}" = "1" ]; then
+        tx="${KEY_IN_X:-0}"
+        [ "$tx" -gt 0 ] 2>/dev/null || tx=$(( GR_X + GR_W * 3 / 4 ))
+        # FBInk has no dashed rule, so it is drawn as segments.
+        dash="${KEY_DASH:-7}"
+        end=$(( tx + sw ))
+        dx="$tx"
+        while [ "$dx" -lt "$end" ]; do
+            seg="$dash"
+            [ $(( dx + seg )) -gt "$end" ] && seg=$(( end - dx ))
+            fill_rect "$dx" "$mid" "$seg" "${KEY_SW_H_IN:-2}" GRAY7
+            dx=$(( dx + dash + ${KEY_DASH_GAP:-5} ))
+        done
+        draw_text_reg "$(( tx + sw + gap ))" "$y" "$sz" "GRAY4" \
+                      "${LBL_KEY_IN:-inside}"
+    fi
+}
+
+# The five values down the side and the five hours along the bottom.
+#
+# THE IMAGE CANNOT CARRY THEM. Drawing text into a 4-bit BMP would need a
+# bitmap font on the ESP32 that the firmware does not have, so the collector
+# sends the labels as text and says where its own plot area is inside the image
+# (CH_L/CH_R/CH_T/CH_B, in image pixels). Without this the panel showed a bare
+# grid while the browser page showed the same grid with numbers on it, and a
+# grid with no numbers is a picture of a chart rather than a chart.
+#
+# The positions are the page's: the value 7 px left of the axis, dropped 4 px
+# so it sits on its grid line; the hour centred on its vertical, 8 px up from
+# the image's bottom edge. Both are measured by the collector, because FBInk
+# will not say how wide it drew something — see draw_field().
+draw_chart_axis() {
+    [ -n "${CH_L:-}" ] || return 0
+    local sz="${AX_SZ:-11}" gap="${AX_GAP:-7}" base="${AX_BASE:-4}"
+    local k y w x lab
+
+    # FBInk's `top` is the TOP of the text, and the page positions these by
+    # their BASELINE — so each one is lifted by the ascent, which is about
+    # eight tenths of the size. Same eighty as baseline_y(), for the same
+    # reason: two sizes drawn at one y sit on two baselines.
+    #
+    # Down the side, right-aligned on the axis and sitting on its grid line.
+    k=0
+    while [ "$k" -le 4 ]; do
+        eval "lab=\${CH_Y${k}:-}; w=\${CH_Y${k}W:-0}"
+        if [ -n "$lab" ]; then
+            y=$(( GR_Y + CH_T + (CH_B - CH_T) * k / 4 + base - sz * 80 / 100 ))
+            x=$(( GR_X + CH_L - gap - sz * w / 1000 ))
+            draw_text_reg "$x" "$y" "$sz" "GRAY7" "$lab"
+        fi
+        k=$((k + 1))
+    done
+
+    # Along the bottom, centred on the three-hourly rules the image draws at
+    # hours 0, 6, 12 and 18 — except "now", which is set against the right-hand
+    # edge because that is where the axis ends.
+    k=0
+    while [ "$k" -le 4 ]; do
+        eval "lab=\${CH_H${k}:-}; w=\${CH_H${k}W:-0}"
+        if [ -n "$lab" ]; then
+            w=$(( sz * w / 1000 ))
+            if [ "$k" -eq 4 ]; then
+                x=$(( GR_X + CH_R - w ))
+            else
+                x=$(( GR_X + CH_L + (CH_R - CH_L) * (k * 6) / 23 - w / 2 ))
+            fi
+            draw_text_reg "$x" \
+                "$(( GR_Y + GR_H - ${HX_DROP:-8} - sz * 80 / 100 ))" \
+                "$sz" "GRAY7" "$lab"
+        fi
+        k=$((k + 1))
+    done
+}
+
 draw_chart_body() {
+    # SWITCHED OFF MEANS OFF HERE TOO. The reader can turn the chart off in
+    # Settings → Kindle; the page then draws neither the section nor the rule
+    # above it, and this drew both regardless. One setting, one device, two
+    # answers.
+    chart_wanted || return 0
+
     draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAYA"
     draw_text_reg "$LAB_CHART_X" "$LAB_CHART_Y" "$LAB_SZ" "GRAY7" "$LBL_LAST24"
-    draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y" && return 0
+
+    # NOTHING RECORDED YET IS NOT THE SAME AS NOTHING HAPPENING. The image is
+    # still a grid when the ring is empty, and a grid with no line in it reads
+    # as a sensor that has stopped. The page prints a sentence instead; so does
+    # this. CH_NOTE carries it, so the wording and the language are the page's.
+    if [ -n "${CH_NOTE:-}" ]; then
+        draw_text_reg "${GR_X:-20}" "$(( ${GR_Y:-278} + ${GR_H:-200} / 3 ))" \
+                      "${LAB_SZ:-16}" "GRAY5" "$CH_NOTE"
+        return 0
+    fi
+
+    if draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"; then
+        draw_chart_axis
+        draw_chart_key
+        return 0
+    fi
 
     # NOTHING WAS DRAWN — SAY SO, rather than refreshing an empty rectangle.
     #
@@ -838,7 +1116,15 @@ draw_forecast_body() {
             draw_text_reg "$FC_WIND_X" "$FC_WIND_Y" "$FC_WIND_SZ" "GRAY4" "$LBL_WIND ${FC_WIND} km/h"
         fi
 
+        # EACH COLUMN ON A PLATE, AND CENTRED ON IT. The page sets .per to
+        # `width:88px; text-align:center; background:#f0f0f0`; this drew the
+        # label, the icon and the temperature at the column's left edge on
+        # white, so three tidy grey cards came out as three ragged stacks. The
+        # widths come from the collector (FC*_LABELW / FC*_TEMPW) for the
+        # reason every other width does: FBInk will not say how wide it drew
+        # something, and ${#var} counts bytes.
         local i ol_label ol_code ol_temp ol_x ol_y ol_icon ol_icon_y ol_temp_y
+        local plate_w="${OL_PLATE_W:-0}" ol_w
         for i in 0 1 2; do
             eval "ol_label=\$FC${i}_LABEL"
             eval "ol_code=\$FC${i}_CODE"
@@ -847,48 +1133,85 @@ draw_forecast_body() {
             eval "ol_y=\$OL${i}_Y"
 
             [ -n "$ol_label" ] || continue
-            draw_text_reg "$ol_x" "$ol_y" "$OL_LABEL_SZ" "GRAY7" "$ol_label"
+
+            if [ "$plate_w" -gt 0 ] 2>/dev/null; then
+                fill_rect "$ol_x" "$(( ol_y - ${OL_PLATE_TOP:-4} ))" \
+                          "$plate_w" "${OL_PLATE_H:-80}" GRAYE
+            fi
+
+            eval "ol_w=\${FC${i}_LABELW:-0}"
+            ol_centre "$ol_x" "$(( OL_LABEL_SZ * ol_w / 1000 ))"
+            draw_text_reg "$CENTRE_X" "$ol_y" "$OL_LABEL_SZ" "GRAY7" "$ol_label"
 
             ol_icon="$ICON_DIR/fc_${ol_code}_${FC_OL_SZ}.bmp"
             [ ! -f "$ol_icon" ] && ol_icon="$ICON_DIR/fc_-1_${FC_OL_SZ}.bmp"
             ol_icon_y=$((ol_y + OL_ICON_OFFSET))
-            draw_image "$ol_icon" "$ol_x" "$ol_icon_y"
+            ol_centre "$ol_x" "$FC_OL_SZ"
+            draw_image "$ol_icon" "$CENTRE_X" "$ol_icon_y"
 
+            eval "ol_w=\${FC${i}_TEMPW:-0}"
             ol_temp_y=$((ol_y + OL_TEMP_OFFSET))
-            draw_text_bold "$ol_x" "$ol_temp_y" "$OL_TEMP_SZ" "BLACK" "${ol_temp}°"
+            ol_centre "$ol_x" "$(( OL_TEMP_SZ * ol_w / 1000 ))"
+            draw_text_bold "$CENTRE_X" "$ol_temp_y" "$OL_TEMP_SZ" "BLACK" "${ol_temp}°"
         done
     fi
 
-    # Week heading (month)
-    if [ -n "${WK_MON_MONTH:-}" ]; then
-        draw_hline "${WK_HDG_RULE_X:-$FOOT_RULE_X}" "${WK_HDG_RULE_Y:-$WK_Y}" \
-                   "${WK_HDG_RULE_W:-$FOOT_RULE_W}" "GRAYA"
-        local wk_heading="$WK_MON_MONTH"
-        [ -n "${WK_SUN_MONTH:-}" ] && wk_heading="$wk_heading – $WK_SUN_MONTH"
-        draw_text_reg "${WK_HDG_X:-$WK_X}" "${WK_HDG_Y:-$WK_Y}" \
-                      "${WK_HDG_SZ:-$LAB_SZ}" "GRAY7" "$wk_heading"
-    fi
+    # ── The week strip ──────────────────────────────────────────────────────
+    # Behind its own switch, as it is on the page (KSHOW_WEEK). Everything
+    # under it — the footer rule and the line of type — is drawn either way,
+    # because the page's footer is not part of the strip.
+    #
+    # WRAPPED RATHER THAN RETURNED FROM. The early return needed its own copy
+    # of the footer, so the two lines that draw it existed twice — and the
+    # branch that is harder to reach by hand, the switch turned off, is the one
+    # a later change to the footer would miss. Which is exactly the class of
+    # silent divergence this file has spent the last few commits removing.
+    if [ "${SHOW_WEEK:-1}" = "1" ]; then
 
-    # Week strip
-    local wk_x="$WK_X" wk_name wk_day wk_bg i
-    for i in 0 1 2 3 4 5 6; do
-        eval "wk_name=\$WK${i}_NAME"
-        eval "wk_day=\$WK${i}_DAY"
-
-        if [ "$i" = "$WK_TODAY" ]; then
-            # Today: knocked out of a black plate.
-            fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
-            draw_text_reg "$wk_x" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "WHITE" "$wk_name"
-            draw_text_bold "$wk_x" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "WHITE" "$wk_day"
-        else
-            wk_bg="GRAYE"
-            { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
-            fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
-            draw_text_reg "$wk_x" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "GRAY7" "$wk_name"
-            draw_text_bold "$wk_x" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "BLACK" "$wk_day"
+        # Week heading (month)
+        if [ -n "${WK_MON_MONTH:-}" ]; then
+            draw_hline "${WK_HDG_RULE_X:-$FOOT_RULE_X}" "${WK_HDG_RULE_Y:-$WK_Y}" \
+                       "${WK_HDG_RULE_W:-$FOOT_RULE_W}" "GRAYA"
+            local wk_heading="$WK_MON_MONTH"
+            [ -n "${WK_SUN_MONTH:-}" ] && wk_heading="$wk_heading – $WK_SUN_MONTH"
+            draw_text_reg "${WK_HDG_X:-$WK_X}" "${WK_HDG_Y:-$WK_Y}" \
+                          "${WK_HDG_SZ:-$LAB_SZ}" "GRAY7" "$wk_heading"
         fi
-        wk_x=$((wk_x + WK_CELL_W))
-    done
+
+        # Week strip
+        local wk_x="$WK_X" wk_name wk_day wk_bg i wk_nw wk_dw wk_nx wk_dx
+        for i in 0 1 2 3 4 5 6; do
+            eval "wk_name=\$WK${i}_NAME"
+            eval "wk_day=\$WK${i}_DAY"
+
+            # CENTRED IN THE CELL, and the number set REGULAR. .wd is
+            # text-align:center and .wd-d carries no font-weight, so the page draws
+            # seven centred regular numerals; the panel drew seven bold ones hard
+            # against the left edge of their cells, which on a row of identical
+            # boxes is the one place a misalignment cannot hide. The widths are the
+            # collector's — see draw_field() for why they are not ${#var}.
+            eval "wk_nw=\$WK${i}_NAMEW; wk_dw=\$WK${i}_DAYW"
+            centre_in "$wk_x" "$WK_CELL_W" "$(( WK_NAME_SZ * ${wk_nw:-0} / 1000 ))"
+            wk_nx="$CENTRE_X"
+            centre_in "$wk_x" "$WK_CELL_W" "$(( WK_DAY_SZ * ${wk_dw:-0} / 1000 ))"
+            wk_dx="$CENTRE_X"
+
+            if [ "$i" = "$WK_TODAY" ]; then
+                # Today: knocked out of a black plate.
+                fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
+                draw_text_reg "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "WHITE" "$wk_name"
+                draw_text_reg "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "WHITE" "$wk_day"
+            else
+                wk_bg="GRAYE"
+                { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
+                fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
+                draw_text_reg "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "GRAY7" "$wk_name"
+                draw_text_reg "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "BLACK" "$wk_day"
+            fi
+            wk_x=$((wk_x + WK_CELL_W))
+        done
+
+    fi   # SHOW_WEEK
 
     draw_hline "$FOOT_RULE_X" "$FOOT_RULE_Y" "$FOOT_RULE_W" "GRAYA"
     draw_text_reg "$FOOT_X" "$FOOT_Y" "$FOOT_SZ" "GRAY5" "$LBL_MEASURED"
@@ -935,13 +1258,19 @@ redraw_forecast() {
 # on it beats a blank one.
 redraw_offline() {
     # $1=HH:MM
+    # THE ONE MESSAGE THAT CANNOT BE FETCHED WHEN IT IS NEEDED. Every other
+    # string on this panel comes from /kindle/data in whatever language the
+    # collector is set to; this one is drawn precisely because the collector
+    # cannot be reached. So it uses the wording the LAST successful fetch left
+    # behind — which is every outage after the first contact — and falls back
+    # to English before that, on a panel nobody has set a language on yet.
     local y=$(( Z_SENS_H / 3 ))
     fill_rect "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" WHITE
     draw_text_bold "${OFF_X:-40}" "$y" "${OFF_SZ:-26}" "BLACK" \
-                   "Cannot reach $(host_url)"
+                   "${LBL_OFFLINE:-Cannot reach} $(host_url)"
     draw_text_reg "${OFF_X:-40}" "$(( y + ${OFF_SZ:-26} + 12 ))" \
                   "${OFF_SUB_SZ:-16}" "GRAY5" \
-                  "Check WiFi, or KUAL → Settings → Find collector"
+                  "${LBL_OFFLINE_HINT:-Check WiFi, or KUAL → Settings → Find collector}"
     draw_clock "$1"
     refresh_zone "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" 0
 }
@@ -1076,11 +1405,11 @@ load_layout
 if fetch_data; then
     load_data
     fetch_graph
-    redraw_all "$(date +%H:%M)"
+    redraw_all "$(now_clock)"
 else
     clear_screen
     refresh_screen
-    redraw_offline "$(date +%H:%M)"
+    redraw_offline "$(now_clock)"
 fi
 
 # ── Main loop ────────────────────────────────────────────────────────────────
@@ -1089,7 +1418,11 @@ MINUTE=0
 while true; do
     nap_to_minute
     MINUTE=$((MINUTE + 1))
-    NOW_TIME=$(date +%H:%M)
+    # The reader's own clock, in the collector's chosen format. The format is
+    # whatever the last payload said, so changing it in Settings shows up on
+    # the next fetch — the same one-tick lag every other value on this page
+    # has, and the clock itself is never stale because the time is local.
+    NOW_TIME=$(now_clock)
 
     # Settings are re-read every minute rather than at startup, so a change
     # made from KUAL takes effect within a minute instead of needing Stop and
@@ -1136,8 +1469,20 @@ while true; do
     esac
 
     # One fetch serves however many tiers are due this minute.
+    #
+    # THE CHART TIER IS IN THIS LIST NOW, and it has to be. The axis labels
+    # live in the payload (CH_Y0..CH_Y4 — see draw_chart_axis) and the image
+    # comes from a separate fetch, so drawing one against the other's numbers
+    # is a chart labelled with a scale it does not have. GRAPH_EVERY and
+    # DATA_EVERY are both editable from the KUAL menu, so any pair where the
+    # chart tier can fire without the data tier — 10 and 15, say — was
+    # labelling a fresh image with a scale up to fifteen minutes old, and
+    # nothing on the panel could show that it had happened.
+    #
+    # A payload fetch is one small request; the image it accompanies is fifty
+    # times the size.
     case " $TIERS " in
-        *" sensors "*|*" forecast "*) fetch_data && load_data ;;
+        *" sensors "*|*" forecast "*|*" chart "*) fetch_data && load_data ;;
     esac
 
     case " $TIERS " in

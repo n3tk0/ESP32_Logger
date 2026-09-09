@@ -176,14 +176,30 @@ void appendWeatherIcon(String& out, int code, int px) {
 // own clock rather than by parsing the provider's date strings. The daily
 // arrays are always anchored on today, so the offset is all that is needed and
 // there is no timezone of theirs to reconcile with ours.
-static void weekdayLabel(char* out, size_t n, int daysAhead) {
+static void weekdayLabel(ForecastModule::Period& p, int daysAhead) {
     const time_t now = (time_t)time(nullptr);
     struct tm tmv;
+    p.wday = -1;
     if (now < 1000000000 || localtime_r(&now, &tmv) == nullptr) {
-        snprintf(out, n, "+%dd", daysAhead);
+        snprintf(p.label, sizeof(p.label), "+%dd", daysAhead);
         return;
     }
-    snprintf(out, n, "%s", kdWeekdayAhead(tmv.tm_wday, daysAhead));
+    // THE NUMBER, NOT THE NAME. A forecast is fetched every few hours and read
+    // every few minutes, and the language is a setting now — so a name written
+    // down here is a name in whatever language was set when the provider was
+    // last polled. Switching to Bulgarian would leave three English weekdays
+    // sitting under a Bulgarian page until the next poll, up to six hours
+    // later, which reads as a translation somebody gave up on.
+    //
+    // `label` is still filled in, because an hourly column has no weekday and
+    // because an older reader of this snapshot has nothing else to print.
+    p.wday = (int8_t)((tmv.tm_wday + daysAhead) % 7);
+    snprintf(p.label, sizeof(p.label), "%s", kdWeekdayAhead(tmv.tm_wday, daysAhead));
+}
+
+/// What an outlook column is captioned, resolved at the moment it is drawn.
+const char* forecastPeriodLabel(const ForecastModule::Period& p) {
+    return (p.wday >= 0 && p.wday < 7) ? kdWeekdayAhead(p.wday, 0) : p.label;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +368,7 @@ bool ForecastModule::_fetchOpenMeteo() {
             d.outlook[i].tempC = hi | NAN;
             d.outlook[i].lowC  = doc["daily"]["temperature_2m_min"][i + 1] | NAN;
             d.outlook[i].code  = doc["daily"]["weather_code"][i + 1] | -1;
-            weekdayLabel(d.outlook[i].label, sizeof(d.outlook[i].label), i + 1);
+            weekdayLabel(d.outlook[i], i + 1);
         }
     } else {
         for (int i = 0; i < 3; i++) {
@@ -527,7 +543,7 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
         d.outlook[i].tempC = acc[i].hi;
         d.outlook[i].lowC  = acc[i].lo;
         d.outlook[i].code  = acc[i].code;
-        weekdayLabel(d.outlook[i].label, sizeof(d.outlook[i].label), i + 1);
+        weekdayLabel(d.outlook[i], i + 1);
     }
     return true;
 }
@@ -562,8 +578,9 @@ void appendForecastSection(String& out) {
     // columns stepping forward. Reading order matches the question order,
     // "what is it like" then "what is coming", and keeps the outlook from
     // competing with the measured temperatures higher up the page.
-    out += F("<div class=\"rule\"></div><div class=\"sec\">" KD_T("Forecast", "Прогноза") "</div>"
-             "<table><tr><td width=\"56\" class=\"ico\">");
+    out += F("<div class=\"rule\"></div><div class=\"sec\">");
+    out += kdT("Forecast", "Прогноза");
+    out += F("</div><table><tr><td width=\"56\" class=\"ico\">");
     appendWeatherIcon(out, d.code, kdPx(52));
     out += F("</td><td class=\"fc\">");
     out += d.summary;
@@ -576,7 +593,7 @@ void appendForecastSection(String& out) {
     }
     out += F("<div class=\"sub\">");
     if (isfinite(d.windKph)) {
-        out += F(KD_T("wind ", "вятър "));
+        out += kdT("wind ", "вятър ");
         out += (int)(d.windKph + 0.5f);
         out += F(" km/h");
     }
@@ -587,8 +604,8 @@ void appendForecastSection(String& out) {
         const uint32_t ageMin = (now - d.fetchedAt) / 60u;
         if (isfinite(d.windKph)) out += F(" &middot; ");
         out += F("<span class=\"dim\">");
-        if (ageMin < 60) { out += ageMin; out += F(KD_T(" min old", " мин")); }
-        else             { out += (ageMin / 60); out += F(KD_T(" h old", " ч")); }
+        if (ageMin < 60) { out += ageMin;        out += kdT(" min old", " мин"); }
+        else             { out += (ageMin / 60); out += kdT(" h old",   " ч");   }
         out += F("</span>");
     }
     out += F("</div></td>");
@@ -597,7 +614,9 @@ void appendForecastSection(String& out) {
         const ForecastModule::Period& pd = d.outlook[i];
         out += F("<td class=\"per\">");
         if (pd.valid) {
-            out += F("<div class=\"per-l\">"); out += pd.label; out += F("</div>");
+            out += F("<div class=\"per-l\">");
+            out += forecastPeriodLabel(pd);
+            out += F("</div>");
             appendWeatherIcon(out, pd.code, kdPx(34));
             out += F("<div class=\"per-t\">");
             out += (int)lroundf(pd.tempC);

@@ -165,6 +165,20 @@ static Tendency pressureTendency(const TrendRing::Hour* h) {
 //
 // Gaps break both the band and the lines instead of interpolating. A flat
 // line through a four-hour outage reads as "it was steady", which is a lie.
+/// Has this series any reading in it at all?
+///
+/// NOT THE SAME QUESTION AS trendRing.series()'s return, which answers "is this
+/// series tracked" — and every one of them is, from kindleTrackTrends() at
+/// boot, whether or not a reading has ever arrived. Using that as "there is a
+/// line to name" put the chart's key under the "the record fills as readings
+/// arrive" note on a fresh boot: two swatches naming two lines that are not
+/// drawn, on the one screen this branch exists to keep honest.
+static bool seriesHasData(const TrendRing::Hour* h) {
+    if (h == nullptr) return false;
+    for (int i = 0; i < TrendRing::HOURS; i++) if (h[i].count) return true;
+    return false;
+}
+
 static void appendChart(String& out,
                         const TrendRing::Hour* a, const TrendRing::Hour* b,
                         bool haveA, bool haveB) {
@@ -174,8 +188,10 @@ static void appendChart(String& out,
         if (haveB && b[i].count) { if (b[i].min < lo) lo = b[i].min; if (b[i].max > hi) hi = b[i].max; }
     }
     if (lo > hi) {
-        out += F(KD_T("<p class=\"note\">The 24 hour record fills as readings arrive.</p>",
-                      "<p class=\"note\">24-часовият запис се попълва с постъпването на данни.</p>"));
+        out += F("<p class=\"note\">");
+        out += kdT("The 24 hour record fills as readings arrive.",
+                   "24-часовият запис се попълва с постъпването на данни.");
+        out += F("</p>");
         return;
     }
     float pad = (hi - lo) * 0.06f;
@@ -280,7 +296,9 @@ static void appendChart(String& out,
     // Leaving it bare made the axis read as if it stopped five hours ago.
     out += F("<text class=\"ax\" x=\""); out += KD_X(TrendRing::HOURS - 1);
     out += F("\" y=\""); out += CHART_H - kdPx(8);
-    out += F("\" text-anchor=\"end\">" KD_T("now", "сега") "</text>");
+    out += F("\" text-anchor=\"end\">");
+    out += kdT("now", "сега");
+    out += F("</text>");
 
     #undef KD_X
     #undef KD_Y
@@ -416,8 +434,8 @@ static void appendAge(String& out, uint32_t ts, uint32_t now) {
     const uint32_t mins = (now - ts) / 60u;
     if (mins < 2) return;                       // fresh; saying so is noise
     out += F(" &middot; ");
-    if (mins < 60) { out += mins; out += F(KD_T(" min old", " мин"));  }
-    else           { out += (mins / 60); out += F(KD_T(" h old", " ч")); }
+    if (mins < 60) { out += mins;        out += kdT(" min old", " мин"); }
+    else           { out += (mins / 60); out += kdT(" h old",   " ч");   }
 }
 
 // Text into HTML.
@@ -528,9 +546,8 @@ static void appendWeek(String& out, uint32_t now) {
 
 void handleKindleGraph(AsyncWebServerRequest* req) {
     const KindleConfig skin = config.kindle;
-    const bool     hiRes = (skin.fbinkResW > 600);
-    const uint16_t W = hiRes ? 1000 : 560;
-    const uint16_t H = hiRes ? 360  : 200;
+    const uint16_t W = ChartBmp::imageW(skin.fbinkResW);
+    const uint16_t H = ChartBmp::imageH(skin.fbinkResW);
 
     // A shared_ptr, AND THAT IS THE FIX, not a tidier spelling of the same
     // thing. The previous version held raw pointers and deleted them only on
@@ -604,6 +621,26 @@ static void kdShellVar(AsyncResponseStream* s, const char* key, const char* val)
 }
 
 /// The same, for the indexed keys (FC0_LABEL, WK3_NAME…).
+/// kdShellVar(), but uppercased first.
+///
+/// FOR EVERY STRING THE PAGE SETS `text-transform:uppercase` ON. That CSS is
+/// the only reason the tables in DashboardStrings.h are lower case, and the
+/// panel has no CSS — so it drew "Навън" and "Mon" where the browser drew
+/// "НАВЪН" and "MON", from one setting on one device, and most visibly on the
+/// two strings a reader typed themselves. The reader's busybox cannot fix it:
+/// `tr a-z A-Z` is ASCII-only, which would uppercase "Pressure" and leave
+/// "Налягане" exactly as it was.
+///
+/// 96 bytes because a label is 24 (KindleSlot::label) and Cyrillic is two bytes
+/// a letter; kdUpperUtf8() truncates on a character boundary rather than inside
+/// one, so a longer string loses whole letters instead of gaining a box glyph.
+static void kdShellVarUpper(AsyncResponseStream* s, const char* key,
+                            const char* val) {
+    char up[96];
+    kdUpperUtf8(up, sizeof(up), val);
+    kdShellVar(s, key, up);
+}
+
 static void kdShellVarN(AsyncResponseStream* s, const char* fmt, int i, const char* val) {
     char key[24];
     snprintf(key, sizeof(key), fmt, i);
@@ -820,10 +857,37 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
     bool visible[KZ_COUNT];
     kdZoneVisibility(res, visible);
 
+    // KSHOW_BIG APPLIED HERE, where the grid's and the indoor row's flags are
+    // already applied. The page tests it before drawing the slash and the
+    // second headline value; nothing tested it on this side, so switching the
+    // second value off left the browser page with one number and the panel
+    // with two. A place that is switched off is a place with no reading, which
+    // is a shape both renderers already know what to do with — the reader
+    // draws nothing for an empty Z_BIG_VALUE.
+    if (!(skin.showFlags & KSHOW_BIG)) {
+        res[KZ_BIG].ok      = false;
+        res[KZ_BIG].text[0] = '\0';
+        res[KZ_BIG].unit[0] = '\0';
+        res[KZ_BIG].arrow   = "";
+    }
+
     const KindleZones& zones = kdSlots();
 
-    kdShellVar(s, "Z_GROUP_OUT", kdGroupOutLabel(zones));
-    kdShellVar(s, "Z_GROUP_IN",  kdGroupInLabel(zones));
+    // THE SECOND HEADLINE VALUE IS SUBORDINATE, and the page says so in one
+    // line of CSS the panel cannot see: `.v2{color:#444}`, applying whenever
+    // the place has not been given an ink of its own (an .ink-* class is
+    // emitted later in the sheet and wins when there is one). The panel read
+    // only the ink and so drew it in full black, level with the headline it is
+    // meant to sit under — "32.4 / 71" as two equal numbers instead of a
+    // reading and its companion.
+    const bool bigDefaultInk = (zones.z[KZ_BIG].ink != KINK_DARK &&
+                                zones.z[KZ_BIG].ink != KINK_MID &&
+                                zones.z[KZ_BIG].ink != KINK_LIGHT);
+
+    // Uppercased, because .lab is `text-transform:uppercase` on the page and
+    // the panel has no CSS. See kdShellVarUpper().
+    kdShellVarUpper(s, "Z_GROUP_OUT", kdGroupOutLabel(zones));
+    kdShellVarUpper(s, "Z_GROUP_IN",  kdGroupInLabel(zones));
 
     char sub[64];
     kdSubLine(sub, sizeof(sub), skin, res[KZ_HERO], now);
@@ -845,7 +909,7 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
         snprintf(key, sizeof(key), "Z_%s_UNIT", up);
         kdShellVar(s, key, res[i].unit);
         snprintf(key, sizeof(key), "Z_%s_LABEL", up);
-        kdShellVar(s, key, res[i].label);
+        kdShellVarUpper(s, key, res[i].label);
         snprintf(key, sizeof(key), "Z_%s_ARROW", up);
         kdShellVar(s, key, res[i].arrow);
 
@@ -855,7 +919,8 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
         // FBInk's -C, and translating a number there would be a second copy of
         // a mapping that already lives in KindleSlots.h.
         snprintf(key, sizeof(key), "Z_%s_INK", up);
-        kdShellVar(s, key, kdInkFbink(zones.z[i].ink));
+        kdShellVar(s, key, (i == KZ_BIG && bigDefaultInk)
+                           ? "GRAY4" : kdInkFbink(zones.z[i].ink));
 
         // HOW WIDE THE PIECES COME OUT, in thousandths of the type size they
         // are drawn at. The shell renderer needs them because a unit is set as
@@ -1062,12 +1127,16 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now) {
                 p += F("<div class=\"clock-d\">"); p += dt; p += F("</div>");
             }
         } else {
-            p += F("<div class=\"clock-x\">" KD_T("no time", "няма час") "</div>");
+            p += F("<div class=\"clock-x\">");
+            p += kdT("no time", "няма час");
+            p += F("</div>");
         }
     } else {
         // Not "--:--": a plausible-looking blank clock invites the reader to
         // wonder what time it is, where "clock not set" names the fault.
-        p += F("<div class=\"clock-x\">" KD_T("clock not set", "часът не е сверен") "</div>");
+        p += F("<div class=\"clock-x\">");
+        p += kdT("clock not set", "часът не е сверен");
+        p += F("</div>");
     }
 
     // ── The indoor row ──────────────────────────────────────────────────────
@@ -1109,6 +1178,13 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now) {
 }
 
 static void handleKindleData(AsyncWebServerRequest* req) {
+    // THE LANGUAGE, FIRST, BEFORE ANYTHING IS WORDED. kdT() and the weekday and
+    // month tables read one ambient value rather than taking a parameter each —
+    // see DashboardStrings.h for why — and this is where it is set. Every page
+    // is rendered start to finish on the async web server's own task, so
+    // nothing else is looking at it in between.
+    kdLangBegin(config.kindle.lang);
+
     const Latest outT = latestOf(outdoorSensorId(), "temperature");
     const Latest outH = humidityOf(outdoorSensorId());
     const Latest outP = latestOf(outdoorSensorId(), "pressure");
@@ -1196,7 +1272,12 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     #ifdef FEATURE_ESPNOW_INGEST
     battWarn = espnowAnyBatteryWarn();
     #endif
-    s->printf("OUT_BATT_WARN=%d\n", battWarn ? 1 : 0);
+    // KSHOW_BATTERY FOLDED IN HERE, not left to the reader. The page tests
+    // the flag and the panel did not, so switching the badge off in Settings
+    // silenced it on the browser and left it on the Kindle — which is the one
+    // of the two that is on the wall being looked at.
+    s->printf("OUT_BATT_WARN=%d\n",
+              (battWarn && (skin.showFlags & KSHOW_BATTERY)) ? 1 : 0);
 
     // ── Indoor ──
     fmtTemp(buf, sizeof(buf), inT.value, skin.tempDecimals);
@@ -1214,10 +1295,29 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         struct tm tm;
         time_t t = (time_t)now;
         localtime_r(&t, &tm);
-        s->printf("CLOCK=\"%02d:%02d\"\n", tm.tm_hour, tm.tm_min);
+        // THE SAME FORMATTERS THE PAGE USES, not a second hardwired pair.
+        // These were "%02d:%02d" and "%d %s" while the HTML went through
+        // kdFmtTime()/kdFmtDate(), so a reader who chose the twelve-hour clock
+        // or an ISO date got it on the browser page and 24-hour, "27 august"
+        // on the panel — from one setting, on one device.
+        //
+        // CLOCK is still not what the panel draws minute to minute: the reader
+        // has its own clock and a fetch happens every few minutes at best. It
+        // is the sample the reader's own formatting is checked against, and the
+        // value the offline page falls back to.
         {
+            char tbuf[16];
+            kdFmtTime(tbuf, sizeof(tbuf), tm, skin.timeFormat);
+            kdShellVar(s, "CLOCK", tbuf);
+            // How wide it came out, in thousandths of the type size — the same
+            // measurement the places carry, and for the same reason: FBInk
+            // draws one size per call and will not say how wide it drew.
+            // The boxed and ruled clock styles centre the time, and this is
+            // what the reader centres it with.
+            s->printf("CLOCK_ADVW=%u\n", kdAdvanceMille(tbuf));
+
             char dbuf[32];
-            snprintf(dbuf, sizeof(dbuf), "%d %s", tm.tm_mday, kdMonth(tm.tm_mon));
+            kdFmtDate(dbuf, sizeof(dbuf), tm, skin.dateFormat);
             kdShellVar(s, "DATE", dbuf);
         }
         kdShellVar(s, "MONTH_LABEL", kdMonth(tm.tm_mon));
@@ -1229,8 +1329,22 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             time_t day = monday + i * 86400;
             struct tm dtm;
             localtime_r(&day, &dtm);
-            kdShellVarN(s, "WK%d_NAME", i, kdWeekdayShort(i));
-            s->printf("WK%d_DAY=%d\n", i, dtm.tm_mday);
+            // Uppercased (.wd-n is text-transform:uppercase) and measured.
+            //
+            // MEASURED BECAUSE .wd IS text-align:center. The panel drew both
+            // strings at the cell's left edge while the page centred them in
+            // it, which on a seven-cell strip is seven visible mistakes in a
+            // row. FBInk will not say how wide it drew something, so the width
+            // comes from here — the same measurement every place carries.
+            char wkn[16];
+            kdUpperUtf8(wkn, sizeof(wkn), kdWeekdayShort(i));
+            kdShellVarN(s, "WK%d_NAME", i, wkn);
+            s->printf("WK%d_NAMEW=%u\n", i, kdAdvanceMille(wkn));
+
+            char wkd[8];
+            snprintf(wkd, sizeof(wkd), "%d", dtm.tm_mday);
+            s->printf("WK%d_DAY=%s\n", i, wkd);
+            s->printf("WK%d_DAYW=%u\n", i, kdAdvanceMille(wkd));
         }
         s->printf("WK_TODAY=%d\n", wday);
 
@@ -1242,19 +1356,23 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             struct tm mv, sv;
             if (localtime_r(&monday, &mv) != nullptr &&
                 localtime_r(&sunday, &sv) != nullptr) {
-                kdShellVar(s, "WK_MON_MONTH", kdMonth(mv.tm_mon));
-                kdShellVar(s, "WK_SUN_MONTH",
-                           sv.tm_mon != mv.tm_mon ? kdMonth(sv.tm_mon) : "");
+                kdShellVarUpper(s, "WK_MON_MONTH", kdMonth(mv.tm_mon));
+                kdShellVarUpper(s, "WK_SUN_MONTH",
+                                sv.tm_mon != mv.tm_mon ? kdMonth(sv.tm_mon) : "");
             } else {
                 s->print("WK_MON_MONTH=\"\"\nWK_SUN_MONTH=\"\"\n");
             }
         }
     } else {
-        s->print("CLOCK=\"--:--\"\nDATE=\"\"\nMONTH_LABEL=\"\"\nYEAR=\n");
+        s->print("CLOCK=\"--:--\"\nCLOCK_ADVW=0\nDATE=\"\"\n"
+                 "MONTH_LABEL=\"\"\nYEAR=\n");
         for (int i = 0; i < 7; i++)
         {
-            kdShellVarN(s, "WK%d_NAME", i, kdWeekdayShort(i));
-            s->printf("WK%d_DAY=\n", i);
+            char wkn[16];
+            kdUpperUtf8(wkn, sizeof(wkn), kdWeekdayShort(i));
+            kdShellVarN(s, "WK%d_NAME", i, wkn);
+            s->printf("WK%d_NAMEW=%u\nWK%d_DAY=\nWK%d_DAYW=0\n",
+                      i, kdAdvanceMille(wkn), i, i);
         }
         s->print("WK_TODAY=-1\nWK_MON_MONTH=\"\"\nWK_SUN_MONTH=\"\"\n");
     }
@@ -1268,9 +1386,24 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     s->printf("FC_LOW=%d\n", (int)roundf(fc.lowC));
     s->printf("FC_WIND=%d\n", (int)roundf(fc.windKph));
     for (int i = 0; i < 3; i++) {
-        kdShellVarN(s, "FC%d_LABEL", i, fc.outlook[i].label);
+        // forecastPeriodLabel(), NOT .label — the same call the HTML renderer
+        // makes. The stored string was written when the provider was last
+        // polled, so on this path it was still the language that was set then:
+        // switch to Bulgarian and the browser page said ПН/ВТ/СР while the
+        // panel on the wall said MON/TUE/WED for up to six hours. Which is the
+        // exact defect Period::wday was added to remove.
+        char oll[24];
+        kdUpperUtf8(oll, sizeof(oll), forecastPeriodLabel(fc.outlook[i]));
+        kdShellVarN(s, "FC%d_LABEL", i, oll);
+        s->printf("FC%d_LABELW=%u\n", i, kdAdvanceMille(oll));
         s->printf("FC%d_CODE=%d\n", i, fc.outlook[i].code);
+
+        // The temperature as it is DRAWN, degree included, because .per is
+        // centred and what has to be measured is the whole string.
+        char olt[12];
+        snprintf(olt, sizeof(olt), "%d°", (int)roundf(fc.outlook[i].tempC));
         s->printf("FC%d_TEMP=%d\n", i, (int)roundf(fc.outlook[i].tempC));
+        s->printf("FC%d_TEMPW=%u\n", i, kdAdvanceMille(olt));
         if (!isnan(fc.outlook[i].lowC))
             s->printf("FC%d_LOW=%d\n", i, (int)roundf(fc.outlook[i].lowC));
         else
@@ -1279,7 +1412,8 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     #else
     s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_HIGH=\nFC_LOW=\nFC_WIND=\n");
     for (int i = 0; i < 3; i++)
-        s->printf("FC%d_LABEL=\"\"\nFC%d_CODE=-1\nFC%d_TEMP=\nFC%d_LOW=\n", i, i, i, i);
+        s->printf("FC%d_LABEL=\"\"\nFC%d_LABELW=0\nFC%d_CODE=-1\n"
+                  "FC%d_TEMP=\nFC%d_TEMPW=0\nFC%d_LOW=\n", i, i, i, i, i, i);
     #endif
 
     // ── UI labels ──
@@ -1295,6 +1429,33 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     kdShellVar(s, "LBL_NO_CHART", KD_T("No chart yet", "Още няма графика"));
     kdShellVar(s, "LBL_WIND", KD_T("wind", "вятър"));
     kdShellVar(s, "LBL_TO", KD_T("to", "до"));
+
+    // What the panel writes when it cannot reach this collector — which is,
+    // necessarily, wording it cannot ask for at the moment it needs it. The
+    // reader keeps whatever the last successful fetch gave it, so the message
+    // is in the reader's language for every outage after the first contact,
+    // and in the script's English fallback before that. A panel that has never
+    // reached its collector is also a panel nobody has set a language on.
+    kdShellVar(s, "LBL_OFFLINE", KD_T("Cannot reach", "Няма връзка с"));
+    kdShellVar(s, "LBL_OFFLINE_HINT",
+               KD_T("Check WiFi, or KUAL → Settings → Find collector",
+                    "Проверете WiFi, или KUAL → Settings → Find collector"));
+
+    // The chart's key, worded here so the panel and the page say the same
+    // thing in the same language. The page sets the band clause in grey after
+    // the first label; the panel draws it as one line for the same reason it
+    // draws everything as one line — there is no inline markup on a
+    // framebuffer — so it arrives without the leading comma the HTML needs.
+    kdShellVar(s, "LBL_KEY_OUT",  KD_T("outside mean", "средно навън"));
+    kdShellVar(s, "LBL_KEY_BAND", KD_T("shaded band = hourly low to high",
+                                       "сивото е час. мин–макс"));
+    kdShellVar(s, "LBL_KEY_IN",   KD_T("inside", "вътре"));
+    // The page sets the first label at #444 and the band clause after it at
+    // #777, in one line of markup. On a framebuffer that is two draws at two
+    // greys, and the second one starts where the first ended — which FBInk
+    // will not say. Measured here, like every other width the reader needs.
+    s->printf("KEY_OUT_ADVW=%u\n",
+              kdAdvanceMille(KD_T("outside mean", "средно навън")));
 
     // ── The eleven places ──
     //
@@ -1313,12 +1474,114 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     kdShellVar(s, "LANG", KD_T("en", "bg"));
     s->printf("DECIMALS=%d\n", skin.tempDecimals);
     s->printf("CLOCK_STYLE=%d\n", skin.clockStyle);
+    s->printf("TIME_FORMAT=%d\n", skin.timeFormat);
     s->printf("SHOW_FLAGS=%u\n", skin.showFlags);
+
+    // THE SWITCHES SPELT OUT, one key each, rather than left as bits of
+    // SHOW_FLAGS for the reader to mask. Decoding them there would be a second
+    // copy of KSHOW_CHART's numeric value living in a shell script, and the
+    // day one of them moves is the day the panel starts hiding the wrong
+    // section. The grid and the indoor row are already handled this way —
+    // emitZones() sends an empty list for a group that is switched off.
+    s->printf("SHOW_CHART=%d\n", (skin.showFlags & KSHOW_CHART) ? 1 : 0);
+    s->printf("SHOW_WEEK=%d\n",  (skin.showFlags & KSHOW_WEEK)  ? 1 : 0);
+
+    // Whether the chart has anything in it, which is what decides if the key
+    // under it is drawn — the same test the page makes before drawing its own.
+    // A key naming two lines over an empty grid describes a chart that is not
+    // there.
+    s->printf("CHART_OUT=%d\n", (haveOut && seriesHasData(tOut)) ? 1 : 0);
+    s->printf("CHART_IN=%d\n",  (haveIn  && seriesHasData(tIn))  ? 1 : 0);
+
+    // ── The chart's axis, which the image itself cannot carry ───────────────
+    //
+    // The BMP has no labels and cannot have any: drawing text into a 4-bit
+    // image would need a bitmap font on the ESP32 that this firmware does not
+    // carry, and the note in ChartBmpCtx says where they belong instead —
+    // "in /kindle/data next to the rest of the text, and the script should
+    // place them". This is that. Until now the panel showed a bare grid while
+    // the browser page showed the same grid with five temperatures down the
+    // side and five hours along the bottom, and a grid with no numbers on it
+    // is a picture of a chart rather than a chart.
+    //
+    // THE SAME lo/hi THE IMAGE USES, computed the same way — the 6 % padding
+    // with a 0.4° floor, from appendChart() and ChartBmpCtx::init() alike. A
+    // second opinion here would label the image with somebody else's scale.
+    {
+        float clo = 1e9f, chi = -1e9f;
+        for (int i = 0; i < TrendRing::HOURS; i++) {
+            if (haveOut && tOut[i].count) {
+                if (tOut[i].min < clo) clo = tOut[i].min;
+                if (tOut[i].max > chi) chi = tOut[i].max;
+            }
+            if (haveIn && tIn[i].count) {
+                if (tIn[i].min < clo) clo = tIn[i].min;
+                if (tIn[i].max > chi) chi = tIn[i].max;
+            }
+        }
+        const bool haveAny = (clo <= chi);
+        if (haveAny) {
+            float pad = (chi - clo) * 0.06f;
+            if (pad < 0.4f) pad = 0.4f;
+            clo -= pad; chi += pad;
+            const float cspan = (chi - clo) > 0.001f ? (chi - clo) : 1.0f;
+            for (int k = 0; k <= 4; k++) {
+                char lbl[12];
+                fmtInt(lbl, sizeof(lbl), chi - cspan * (float)k / 4.0f);
+                char key[16];
+                snprintf(key, sizeof(key), "CH_Y%d", k);
+                kdShellVar(s, key, lbl);
+                s->printf("CH_Y%dW=%u\n", k, kdAdvanceMille(lbl));
+            }
+        } else {
+            for (int k = 0; k <= 4; k++)
+                s->printf("CH_Y%d=\"\"\nCH_Y%dW=0\n", k, k);
+        }
+
+        // The hour axis: -23h, -17h, -11h, -5h and "now". Fixed strings, so
+        // the reader could hold them — but then "now" would be English on a
+        // Bulgarian panel, and the stride would be written down twice.
+        for (int k = 0; k < 5; k++) {
+            char lbl[12];
+            if (k == 4) snprintf(lbl, sizeof(lbl), "%s", KD_T("now", "сега"));
+            else        snprintf(lbl, sizeof(lbl), "-%dh", 23 - k * 6);
+            char key[16];
+            snprintf(key, sizeof(key), "CH_H%d", k);
+            kdShellVar(s, key, lbl);
+            s->printf("CH_H%dW=%u\n", k, kdAdvanceMille(lbl));
+        }
+
+        // WHERE THE PLOT AREA IS INSIDE THE IMAGE, in image pixels, ASKED FOR
+        // rather than re-derived. These were a copy of ChartBmpCtx::init()'s
+        // arithmetic, which is the thing the comment claimed they avoided: a
+        // margin change there would have left the axis labels annotating a
+        // plot area the image no longer had, and nothing compiles the shell
+        // script that draws them.
+        const uint16_t cw = ChartBmp::imageW(skin.fbinkResW);
+        const uint16_t ch = ChartBmp::imageH(skin.fbinkResW);
+        s->printf("CH_L=%d\nCH_R=%d\nCH_T=%d\nCH_B=%d\n",
+                  ChartBmp::marginL(cw), ChartBmp::marginR(cw),
+                  ChartBmp::marginT(ch), ChartBmp::marginB(ch));
+
+        // What the page prints instead of a chart when the record is empty.
+        // The panel drew the grid regardless, which reads as "nothing is
+        // happening outside" rather than "this has not filled in yet".
+        kdShellVar(s, "CH_NOTE", haveAny ? "" :
+                   KD_T("The 24 hour record fills as readings arrive.",
+                        "24-часовият запис се попълва с постъпването на данни."));
+    }
 
     req->send(s);
 }
 
 static void handleKindle(AsyncWebServerRequest* req) {
+    // THE LANGUAGE, FIRST, BEFORE ANYTHING IS WORDED. kdT() and the weekday and
+    // month tables read one ambient value rather than taking a parameter each —
+    // see DashboardStrings.h for why — and this is where it is set. Every page
+    // is rendered start to finish on the async web server's own task, so
+    // nothing else is looking at it in between.
+    kdLangBegin(config.kindle.lang);
+
     // ONLY WHAT THIS PAGE STILL READS. The outdoor humidity and pressure and
     // the indoor humidity were fetched here when the layout hardwired them;
     // the places resolve their own readings now, and these were left behind
@@ -1371,7 +1634,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     p += kdRefreshDelaySec(outT.ts > inT.ts ? outT.ts : inT.ts, now,
                            now > KINDLE_MIN_REAL_TS, cad);
-    p += F("\"><title>" KD_T("Weather", "Времето") "</title><style>");
+    p += F("\"><title>");
+    p += kdT("Weather", "Времето");
+    p += F("</title><style>");
 
     // The stylesheet, emitted rather than stored as one literal: every number
     // in it is a 600-px-layout figure passed through kdPx(). KD_S is a literal
@@ -1665,23 +1930,30 @@ static void handleKindle(AsyncWebServerRequest* req) {
     appendTopBlock(p, skin, now);
 
     if (skin.showFlags & KSHOW_CHART) {
-        p += F("<div class=\"rule\"></div><div class=\"sec\">"
-               KD_T("Last 24 hours", "Последните 24 часа") "</div>");
+        p += F("<div class=\"rule\"></div><div class=\"sec\">");
+        p += kdT("Last 24 hours", "Последните 24 часа");
+        p += F("</div>");
         appendChart(p, tOut, tIn, haveOut, haveIn);
-        if (haveOut || haveIn) {
+        // The key names the lines the chart DREW, which is what appendChart's
+        // own lo > hi test turns on — not the series the ring is tracking.
+        const bool drewOut = haveOut && seriesHasData(tOut);
+        const bool drewIn  = haveIn  && seriesHasData(tIn);
+        if (drewOut || drewIn) {
             // The two swatches must be drawn with the same stroke as the lines
             // they stand for — .l-out #000/3, .l-in #777/2 dashed — or the key
             // describes a chart the reader is not looking at.
             p += F("<table class=\"key\"><tr><td>");
             appendKeySwatch(p, "#000", 3, false);
-            p += F(" " KD_T("outside mean", "средно навън")
-                   "<span class=\"dim\">"
-                   KD_T(", shaded band = hourly low to high",
-                        ", сивото е час. мин&ndash;макс")
-                   "</span>"
-                   "</td><td style=\"text-align:right\">");
+            p += ' ';
+            p += kdT("outside mean", "средно навън");
+            p += F("<span class=\"dim\">");
+            p += kdT(", shaded band = hourly low to high",
+                     ", сивото е час. мин&ndash;макс");
+            p += F("</span></td><td style=\"text-align:right\">");
             appendKeySwatch(p, "#777", 2, true);
-            p += F(" " KD_T("inside", "вътре") "</td></tr></table>");
+            p += ' ';
+            p += kdT("inside", "вътре");
+            p += F("</td></tr></table>");
         }
     }
 
@@ -1698,12 +1970,13 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // scripted, so a five-way pad reaches them as readily as a fingertip. See
     // the .act rule for what the padding actually buys, and for why the size
     // is smaller than the usual touch guidance rather than meeting it.
-    p += F("<table class=\"foot\"><tr><td>"
-           KD_T("Measured on site", "Измерено на място"));
-    p += F("</td><td class=\"act\"><a href=\"/kindle\">"
-           KD_T("refresh", "обнови") "</a>"
-           "<a href=\"/kindle/clear\">" KD_T("clear", "изчисти") "</a>"
-           "</td></tr></table></body></html>");
+    p += F("<table class=\"foot\"><tr><td>");
+    p += kdT("Measured on site", "Измерено на място");
+    p += F("</td><td class=\"act\"><a href=\"/kindle\">");
+    p += kdT("refresh", "обнови");
+    p += F("</a><a href=\"/kindle/clear\">");
+    p += kdT("clear", "изчисти");
+    p += F("</a></td></tr></table></body></html>");
 
     AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
     // The meta tag drives the refresh, so nothing may be served from cache: an

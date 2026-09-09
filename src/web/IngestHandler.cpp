@@ -5,8 +5,11 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
+#include <new>                        // nothrow, for the body buffer
+#include <math.h>                     // isfinite(), before the ingest calls do it
 #include <time.h>                     // the collector's clock, to judge the node's
 
+#include "IngestBatch.h"
 #include "RateLimiter.h"
 #include "../sensors/RemoteIngest.h"
 
@@ -17,7 +20,15 @@
 // A node payload is a handful of small objects. Anything larger is either a
 // misconfigured client or someone probing, and buffering it would be the
 // only unbounded allocation on this path.
-static constexpr size_t INGEST_MAX_BODY = 1024;
+//
+// FOUR KILOBYTES AND NOT ONE, because a node handing over a buffered outage
+// sends more than one moment at a time. At roughly 60 bytes of JSON per
+// reading, 1 KB was about sixteen readings — five samples of a three-metric
+// node — so a backlog had to be dribbled out five samples per POST, and a
+// node reporting every minute could not catch up on an outage faster than it
+// was accumulating a new one. It is still a fixed ceiling and still the only
+// buffer on this path; it is just one that fits the job the path now has.
+static constexpr size_t INGEST_MAX_BODY = 4096;
 
 // Length-independent compare. The token is short and this endpoint is rate
 // limited, so a timing oracle here is largely theoretical — but the whole
@@ -50,34 +61,10 @@ static bool authorised(AsyncWebServerRequest* req) {
     return false;
 }
 
-static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
-                             size_t len, size_t index, size_t total) {
-    // Shape checks FIRST, and they answer only on the opening segment.
-    //
-    // ESPAsyncWebServer calls this once per segment of a chunked body. Every
-    // req->send() overwrites the request's response object — leaking the
-    // previous one — and writes another HTTP response onto the same socket,
-    // so replying per segment corrupts the connection. Answering on index 0
-    // and staying silent afterwards is what keeps that to one response.
-    //
-    // The size check has to come before the single-chunk check too: a body
-    // larger than the cap is exactly what arrives split, so testing it second
-    // made its own error message unreachable.
-    if (total > INGEST_MAX_BODY) {
-        if (index == 0) {
-            req->send(413, "application/json",
-                      "{\"ok\":false,\"error\":\"body too large\"}");
-        }
-        return;
-    }
-    if (index != 0 || len != total) {
-        if (index == 0) {
-            req->send(413, "application/json",
-                      "{\"ok\":false,\"error\":\"body must arrive in one chunk\"}");
-        }
-        return;
-    }
-
+/// Parse and act on one complete request body. Called by the segment callback
+/// below once every byte has arrived.
+static void handleIngestPayload(AsyncWebServerRequest* req,
+                                const uint8_t* data, size_t len) {
     // Auth before the rate limiter: the bucket is device-wide, so checking it
     // first let an unauthenticated caller drain it and lock out the real node.
     if (!authorised(req)) {
@@ -144,23 +131,289 @@ static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
         }
     }
 
-    int stored = 0, rejected = 0;
+    // ── Readings the node measured earlier and is only now handing over ─────
+    //
+    // `dt_s` on a reading is how many seconds BEFORE this batch it was taken.
+    // It is the same field, meaning the same thing, as EnvSample::dt_s in the
+    // ESP-NOW protocol — a node with no clock cannot send an absolute time,
+    // but it can always say how long ago.
+    //
+    // Those go to putHistorical(), not put(). put() is a mailbox slot and
+    // overwrites: right for a node reporting faster than the collector ticks,
+    // wrong for fifteen distinct measurements from an outage, which it would
+    // collapse into one. RemoteIngest has had the queue for this since the
+    // ESP-NOW path was written; this endpoint simply never used it, so an
+    // HTTP node had nowhere to put a backlog and dropped it instead.
+    //
+    // THE BASE IS THE COLLECTOR'S CLOCK unless the node's own stamp survived
+    // the check above. Anchoring an age to a clock that is not set produces a
+    // 1970 date, which storage would keep and the chart would file under an
+    // hour that has not happened — so with no clock, an age is discarded and
+    // the reading is taken as live. A gap is better than a wrong date, and it
+    // is the same judgement putHistorical() makes for itself.
+    const uint32_t base        = (ts != 0) ? ts : nowEpoch;
+    const bool     canBackfill = (nowEpoch >= 1000000000u);
+
+    // ── Which readings are the node's CURRENT value, and which are history ──
+    //
+    // The rule, and why it is wrong in both directions, is in IngestBatch.h
+    // where a host test can reach it. Sixteen names is past what a node can
+    // report (the reference node's NODE_MAX_READINGS is 12).
+    static constexpr int MAX_LIVE = 16;
+    int liveIdx[MAX_LIVE];
+    const int nLive = IngestBatch::findNewestPerMetric(
+        (int)readings.size(),
+        [&readings](int i) -> const char* { return readings[i]["metric"] | ""; },
+        liveIdx, MAX_LIVE);
+
+    // ── What the counters mean, and why the batch can stop early ───────────
+    //
+    // `accepted` is the length of the PREFIX of this batch that the collector
+    // consumed — stored, queued, or judged unusable. It is the only number the
+    // node needs: it drops exactly that many from the front of its own buffer
+    // and keeps the rest, in order, to offer again.
+    //
+    // WHY A PREFIX AND NOT THE WHOLE BATCH. The history queue holds 64
+    // readings and drains a handful per sensor tick; an ESP8266 handing over
+    // an hour-long outage offers 192. putHistorical() never refuses for want
+    // of room — it sheds the oldest and takes the new one, which is the only
+    // thing it can do for ESP-NOW, where the node is already asleep by the
+    // time the frame is parsed. Letting it do that here would have shredded
+    // two thirds of that outage inside the collector, seconds after the node
+    // had gone to the trouble of keeping it. The node is still on the line and
+    // has three times the room, so it is told to wait instead: the loop below
+    // stops at the first backfill reading there is no space for, and
+    // everything from there on stays where it already is.
+    //
+    // A reading the collector cannot use — no metric name, a value that is not
+    // a number, a date before 2001 — is consumed rather than blocking the
+    // queue behind it. Sending it again would fail the same way for ever.
+    int stored = 0, queued = 0, rejected = 0, accepted = 0;
+    bool backpressure = false;
+    bool noClock      = false;
+
+    // READ ONCE AND COUNTED DOWN, not asked per reading. historyRoom() takes
+    // the ingest spinlock, and a forty-eight-reading backlog batch was taking
+    // it forty-eight times on the async web server's task purely to re-read
+    // one subtraction — with the ESP-NOW receive path contending for the same
+    // lock.
+    //
+    // IT IS AN ESTIMATE, NOT A RESERVATION, and it is allowed to be. This runs
+    // on the async web server's task; espnowIngestTick() calls putHistorical()
+    // from loop() and the sensor plugins drain() from SensorTask, so the real
+    // figure moves under us in both directions while the batch is walked. A
+    // drain only makes the count pessimistic — we stop early and the node
+    // offers the rest again a minute later. An ESP-NOW frame arriving mid-batch
+    // makes it optimistic, and the overshoot is bounded by the frame: the last
+    // reading or two go to putHistorical(), which takes them and sheds its
+    // oldest under its own spinlock rather than corrupting anything. Re-reading
+    // per reading would narrow that window without closing it — the value can
+    // go stale between the read and the put either way — and would pay
+    // forty-eight spinlock takes for the privilege.
+    int room = remoteIngest.historyRoom();
+
+    // ── The current values first, and outside the prefix rule entirely ──────
+    //
+    // THE HISTORY QUEUE IS ONE QUEUE FOR EVERY NODE, and it is drained by each
+    // node's own sensor plugin. So a node that posts with a valid token but
+    // has no `remote` sensor configured for it fills those 64 slots with
+    // entries nothing will ever drain — and then historyRoom() is zero for
+    // ever, for everybody.
+    //
+    // A batch is sent oldest first, so its first reading is backfill and the
+    // loop below would break on it immediately: accepted would be 0 and the
+    // CURRENT readings at the end of the batch would never be reached. Every
+    // other node would then read as offline on the dashboard, on /api/nodes
+    // and in "last seen" while posting perfectly, because nothing was
+    // refreshing its mailbox.
+    //
+    // The mailbox needs no room — it is one slot per (node, metric), already
+    // allocated — so it is filled here, before any of that can apply. A live
+    // reading the prefix does not reach stays in the node's ring and is
+    // offered again next cycle; put() is a mailbox and writing it twice is
+    // writing it once.
+    {
+        int i = -1;
+        for (JsonObjectConst r : readings) {
+            i++;
+            if (!IngestBatch::isLive(IngestBatch::isNewest(liveIdx, nLive, i),
+                                     IngestBatch::clampAge(r["dt_s"] | 0UL)))
+                continue;
+            // COUNTED HERE, ALL OF THEM. A live reading with no metric name or
+            // a value that is not a number used to be skipped silently by this
+            // pass and skipped again by the `if (live) continue;` below, so it
+            // appeared in neither `stored` nor `rejected` — a reply claiming
+            // three readings consumed and accounting for two.
+            const char* metric = r["metric"] | "";
+            const bool  ok     = (*metric != '\0') && r["value"].is<float>() &&
+                                 isfinite(r["value"].as<float>());
+            if (!ok) { rejected++; continue; }
+
+            const uint32_t age = IngestBatch::clampAge(r["dt_s"] | 0UL);
+            if (remoteIngest.put(node, metric, r["value"].as<float>(),
+                                 r["unit"] | "",
+                                 (canBackfill && base > age) ? base - age : ts))
+                stored++;
+            else
+                rejected++;      // the mailbox is full of other nodes' metrics
+        }
+    }
+
+    int idx = -1;
     for (JsonObjectConst r : readings) {
+        idx++;
         const char* metric = r["metric"] | "";
         const char* unit   = r["unit"]   | "";
         // No default: an absent value must be rejected, not read as 0.
-        if (!r["value"].is<float>()) { rejected++; continue; }
-        const float value = r["value"].as<float>();
+        const bool  hasValue = r["value"].is<float>();
+        const float value    = hasValue ? r["value"].as<float>() : 0.0f;
 
-        if (remoteIngest.put(node, metric, value, unit, ts)) stored++;
-        else                                                 rejected++;
+        const uint32_t age  = IngestBatch::clampAge(r["dt_s"] | 0UL);
+        const bool     live = IngestBatch::isLive(
+                                  IngestBatch::isNewest(liveIdx, nLive, idx), age);
+        const bool     backfill =
+            IngestBatch::isBackfill(live, age, canBackfill, base);
+        const uint32_t when = backfill ? (base - age) : 0;
+
+        // ── NO CLOCK MEANS HOLD, NOT SWALLOW ────────────────────────────
+        //
+        // canBackfill is false until NTP lands, and isBackfill() then answers
+        // false for everything — so an aged reading fell through to put(),
+        // the one-slot-per-metric mailbox, and the batch came back fully
+        // accepted. A node handing over an hour-long outage to a collector
+        // that had just rebooted was told to drop all forty-eight readings
+        // after forty-seven of them had overwritten each other. That is
+        // precisely the window the node's ring was written for, and this
+        // endpoint was emptying it.
+        //
+        // Held instead: the node keeps them and offers them again, and a
+        // collector whose clock arrives a minute later files them properly.
+        // The live pass above has already refreshed the mailbox, so the
+        // dashboard is current throughout — only the history waits.
+        if (!live && age > 0 && !canBackfill) {
+            noClock      = true;
+            backpressure = true;
+            break;
+        }
+
+        // ROOM CHECKED BEFORE THE READING IS JUDGED, so that a batch stops at
+        // the same place whatever it happens to contain. Deciding to stop is
+        // about the queue, not about this reading.
+        if (backfill && room <= 0) {
+            backpressure = true;
+            break;
+        }
+
+        accepted++;
+
+        // Already in the mailbox, from the pass above, which counted it as
+        // stored or rejected. Nothing more to do with it here.
+        if (live) continue;
+
+        // What both put() and putHistorical() refuse outright, tested here so
+        // that a false from either below has exactly one meaning left.
+        if (!hasValue || *metric == '\0' || !isfinite(value) ||
+            (backfill && when < 1000000000u)) {
+            rejected++;
+            continue;
+        }
+
+        if (backfill) {
+            // There is room — checked above — so this cannot shed anything,
+            // and its return value cannot mean anything but success.
+            remoteIngest.putHistorical(node, metric, value, unit, when);
+            room--;
+            queued++;
+        } else if (remoteIngest.put(node, metric, value, unit,
+                                    (canBackfill && base > age) ? base - age : ts)) {
+            // Not the newest of its metric and not old enough to be history:
+            // a second reading taken in the same second. The mailbox keeps the
+            // time it was TAKEN, not the time it arrived.
+            stored++;
+        } else {
+            // The mailbox is full of other nodes' metrics. Consumed anyway:
+            // holding the reading would not make a slot appear, and the node
+            // would stop recording new ones behind it.
+            rejected++;
+        }
     }
 
-    char out[112];
+    // `accepted` IS THE ONLY NUMBER THE NODE ACTS ON, and the others do not
+    // have to sum to it. The mailbox pass runs over the whole batch, so a live
+    // reading past the point the prefix stopped is already counted in `stored`
+    // while the node still holds it — and offers it again, which is harmless
+    // because a mailbox written twice is a mailbox written once.
+    //
+    // `stored` and `queued` are reported apart because they answer different
+    // questions — how much is current, how much was backlog — and `held` says
+    // plainly that the rest of the batch was not read at all, so a node that
+    // gets a 200 back never mistakes it for "all of it arrived".
+    char out[256];
     snprintf(out, sizeof(out),
-             "{\"ok\":true,\"stored\":%d,\"rejected\":%d,\"clock_rejected\":%s}",
-             stored, rejected, clockRejected ? "true" : "false");
+             "{\"ok\":true,\"accepted\":%d,\"stored\":%d,\"queued\":%d,"
+             "\"rejected\":%d,\"held\":%s,\"no_clock\":%s,\"room\":%d,"
+             "\"clock_rejected\":%s}",
+             accepted, stored, queued, rejected,
+             backpressure ? "true" : "false", noClock ? "true" : "false",
+             room < 0 ? 0 : room,
+             clockRejected ? "true" : "false");
     req->send(200, "application/json", out);
+}
+
+// ── One body, however many TCP segments it arrives in ───────────────────────
+//
+// THIS USED TO REFUSE ANYTHING THAT DID NOT ARRIVE IN ONE PIECE, and while the
+// cap was 1 KB that was very nearly always true. It stopped being true the
+// moment the cap went to 4 KB for buffered batches: ESPAsyncWebServer hands
+// over a body one TCP segment at a time, the ESP32's MSS is about 1.4 KB, and
+// a batch of forty-eight readings is roughly 2.9 KB. So every batch large
+// enough to need the new cap was answered 413 — and the node holds a batch on
+// any non-200, which means a node that fell far enough behind to send a large
+// batch could never send anything again. The feature would have failed exactly
+// when it was needed.
+//
+// Accumulating through _tempObject is what /api/firstrun and
+// /api/kindle/slots already do, and the shape is theirs: allocate on the
+// opening segment, register the disconnect cleaner immediately after (a client
+// that drops mid-body would otherwise orphan the buffer, because the delete at
+// the end never runs), and answer once, when the last byte is in.
+static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
+                             size_t len, size_t index, size_t total) {
+    // The size check answers only on the opening segment. Every req->send()
+    // overwrites the request's response object — leaking the previous one —
+    // and writes another HTTP response onto the same socket, so replying per
+    // segment corrupts the connection.
+    if (total > INGEST_MAX_BODY) {
+        if (index == 0) {
+            req->send(413, "application/json",
+                      "{\"ok\":false,\"error\":\"body too large\"}");
+        }
+        return;
+    }
+
+    if (index == 0) {
+        req->_tempObject = new (std::nothrow) String();
+        if (!req->_tempObject) {
+            req->send(500, "application/json",
+                      "{\"ok\":false,\"error\":\"out of memory\"}");
+            return;
+        }
+        req->onDisconnect([req]() {
+            delete static_cast<String*>(req->_tempObject);
+            req->_tempObject = nullptr;
+        });
+        static_cast<String*>(req->_tempObject)->reserve(total);
+    }
+
+    String* buf = static_cast<String*>(req->_tempObject);
+    if (!buf) return;                     // the opening segment failed to allocate
+    buf->concat(reinterpret_cast<const char*>(data), len);
+
+    if (index + len >= total) {
+        handleIngestPayload(req, (const uint8_t*)buf->c_str(), buf->length());
+        delete buf;
+        req->_tempObject = nullptr;
+    }
 }
 
 void registerIngestHandler(AsyncWebServer& server) {

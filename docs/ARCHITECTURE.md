@@ -560,18 +560,98 @@ route, and whatever Basic Auth is compiled in globally.
 
 Its optional `ts` became authoritative when remote readings were allowed to
 keep the time they were measured, so it is now checked rather than believed.
-The endpoint takes a batch sampled **now** — one `ts` for the whole batch, no
-way to mark it as backfill — so a stamp more than 120 s from the collector's
-clock in either direction is a stamp that is wrong: it is dropped and the
-reading is dated on arrival instead. That is the same 120 s the pipeline uses
-to tell live readings from backfill, so `/api/ingest` cannot produce a reading
-its own pipeline then hides from the dashboard and from alerts. The reading
-itself is never dropped for this, and the response says whether it happened:
+The batch's `ts` describes readings sampled **now**, so a stamp more than 120 s
+from the collector's clock in either direction is a stamp that is wrong: it is
+dropped and the reading is dated on arrival instead. That is the same 120 s the
+pipeline uses to tell live readings from backfill, so a live `/api/ingest`
+reading cannot be one its own pipeline then hides from the dashboard and from
+alerts. The reading itself is never dropped for this.
+
+The body is accumulated across TCP segments, like `/api/firstrun` and
+`/api/kindle/slots`. It has to be: the cap is 4 KB for buffered batches and the
+ESP32's MSS is about 1460 bytes, so a batch large enough to need the cap always
+arrives split. `tools/check_body_handlers.py` holds every body handler in
+`src/web` to that.
+
+**A reading may carry `dt_s`: how many seconds before the batch it was taken.**
+That is how a node hands over what it buffered through an outage, and it is the
+same field meaning the same thing as `EnvSample::dt_s` in the ESP-NOW protocol
+— a node with no clock cannot send an absolute time, but it can always say how
+long ago. Ages are clamped to 24 h, and are ignored entirely when the
+collector's own clock is unset: anchoring an age to a clock that is not set
+produces a 1970 date, and a gap beats a wrong one.
+
+A batch is sent **oldest first**, and the endpoint splits it the same way the
+ESP-NOW path does. The newest reading of each metric goes to
+`RemoteIngest::put()` — the mailbox slot the dashboard, `/api/nodes` and "last
+seen" read. Everything older goes to `putHistorical()`, which queues each one
+as a distinct measurement. Both halves matter: a whole backlog sent to the
+mailbox is overwritten to its last sample microseconds after arriving, and a
+newest reading sent to the queue leaves a node that is posting perfectly
+reading as offline on every screen.
 
 ```json
-{"ok":true,"stored":3,"rejected":0,"clock_rejected":true}
+{"ok":true,"accepted":31,"stored":3,"queued":28,"rejected":0,
+ "held":true,"no_clock":false,"room":0,"clock_rejected":false}
 ```
 
+`accepted` is **the length of the prefix of the batch the collector consumed** —
+stored, queued, or judged unusable — and it is the only number a node needs:
+**it drops exactly that many from the front of its own buffer and keeps the
+rest, in order, to offer again.** `held` says the batch stopped early.
+
+The **current value of each metric is written before that prefix is walked**,
+and outside the rule entirely. The history queue is one queue for every node,
+drained by each node's own sensor plugin — so a node that posts with a valid
+token but has no `remote` sensor configured fills it with entries nothing will
+ever drain, and `room` is then zero for everybody. A batch is oldest-first, so
+its first reading is backfill and the prefix would stop on it, leaving the
+current readings at the end unreached and every other node reading as offline
+while posting perfectly. The mailbox needs no room — one slot per (node,
+metric), already allocated — so it is filled first. A live reading the prefix
+does not reach is simply offered again next cycle; `put()` is a mailbox, and
+writing it twice is writing it once.
+
+"Current" means **newest of its metric in the batch _and_ no older than 120 s**,
+the same window `readingIsBackfilled()` uses. Both halves are load-bearing: a
+node handing over an hour-long outage sends it as four batches, and "newest in
+this batch" is true of one reading per metric in *every* one of them — without
+the age test, batch 1's newest went to the mailbox, batch 2's overwrote it, and
+nine of sixty-four buffered samples were deleted on arrival by the rule that
+exists to stop the mailbox eating a backlog.
+
+`stored` and `queued` do **not** have to sum to `accepted`. The mailbox pass
+runs over the whole batch, so a current reading past the point the prefix
+stopped is counted in `stored` while the node still holds it — and offers it
+again, which is harmless because a mailbox written twice is a mailbox written
+once. `accepted` is the only number the node acts on.
+
+There are **two** reasons a batch stops early, and `no_clock` says which. The
+first is backpressure. The history queue holds
+`REMOTE_HISTORY_SLOTS` (64) readings and drains a handful per sensor tick,
+while the reference node offers up to 192 from an hour-long outage.
+`putHistorical()` never refuses for want of room — it sheds its oldest entry,
+the only thing it can do for ESP-NOW, where the node is asleep by the time the
+frame is parsed — so letting it run would shred two thirds of that outage
+inside the collector seconds after the node went to the trouble of keeping it.
+An HTTP node is still on the line and has the larger buffer, so it is told to
+wait instead: the loop stops at the first backfill reading there is no room
+for, and `room` says how much space is left. A reading the collector *cannot*
+use is consumed rather than left to block the queue behind it, because sending
+it again would fail the same way for ever.
+
+The second is that the collector's own clock is not set yet. `dt_s` is an age,
+and an age needs something to be subtracted from; until NTP lands there is
+nothing, so `isBackfill()` answers false for everything. Those readings used to
+fall through to the mailbox and the batch came back fully accepted — a node
+handing over an hour-long outage to a collector that had **just rebooted** was
+told to drop all forty-eight after forty-seven had overwritten each other,
+which is precisely the window the node's ring exists for. They are held now
+(`held: true, no_clock: true`), and the mailbox pass keeps the dashboard
+current throughout: only the history waits.
+
+A collector that predates `accepted` answers without it; a node reads its
+absence as "the whole batch", which is what an older collector did with it.
 `clock_rejected` is how a node with a drifting clock finds out it has one. A
 collector with no clock of its own cannot judge and takes `ts` as sent.
 
@@ -985,7 +1065,8 @@ ISR shared state (existing pattern, unchanged):
 Every writer to LittleFS/SD takes `fsMutex` (via the RAII `MutexGuard`, or the
 `atomicWrite(fs, path, …, fsMutex)` helper). This includes `CsvLogger`,
 `FlowRunLogger`, `ConfigManager` (`saveConfig`/crash-recovery), `AlertEngine`
-(`_save()`), `DataLogger`, the boot-counter backup, and the streamed
+(`_save()`), `DataLogger`, `TrendStore` (the 24-hour chart's snapshot),
+`EspNowIngest` (the node table), the boot-counter backup, and the streamed
 `/save_platform` upload. Concurrent unserialized writes can interleave a
 `tmp` open + `rename` against a log append and corrupt the filesystem, so a new
 FS writer **must** hold `fsMutex`.
@@ -1011,6 +1092,18 @@ the 2 s timeout and returns `pdFALSE`.
   lock-agnostic — fix it at the one call site that double-locks.
 - `AlertEngine::_save()` runs on the AsyncTCP web task; it passes `fsMutex` to
   `atomicWrite` (previously `nullptr`, which raced StorageTask writes).
+
+**`tools/check_fs_mutex.py` holds every file that writes the filesystem to
+this.** The rule has no compiler behind it: code that breaks it compiles,
+links, and works on the bench, because the missing thing is a line that is not
+there. Two files got it wrong months apart — the trend snapshot
+(`TrendStore`) and the ESP-NOW node table (`EspNowIngest`), both writing from
+`loop()` while `StorageTask` appended CSV rows. The check is deliberately
+coarse: it asks whether a file that opens for writing, removes, renames or
+makes a directory has *heard of* `fsMutex` at all, in code or in a comment. A
+class whose writes run under its caller's lock — `CsvLogger`, `FlowRunLogger`
+— says so in a comment and passes, which is right, because it must not
+re-acquire a non-recursive mutex it already holds.
 
 ---
 

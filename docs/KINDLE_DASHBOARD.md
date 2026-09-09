@@ -105,8 +105,8 @@ changes what the page *says* is runtime.
 | `KINDLE_OUTDOOR_SENSOR`, `KINDLE_INDOOR_SENSOR` | build flag | also names the four `TrendRing` series registered at boot |
 | `KINDLE_REFRESH_SEC`, `KINDLE_REFRESH_MIN_SEC`, `KINDLE_DATA_PERIOD_SEC`, `KINDLE_FOLLOW_DATA`, `KINDLE_CLOCK_PIN_REFRESH`, `KINDLE_CLOCK_SYNC_GUARD_SEC` | build flag | they only set numbers in a `<meta>` tag |
 | `KINDLE_PAGE_W` | build flag | rescales every size in the stylesheet |
-| `KINDLE_LANG_BG` | build flag | a single-language build pays nothing for the other |
-| face, weight, clock style, time/date/pressure format, which blocks are drawn | **the collector's web UI** | Settings → E-ink dashboard; see [Appearance](#appearance) |
+| `KINDLE_LANG_BG` | build flag, and now only a **default** | see [Language](#language) — the setting below overrides it |
+| language, face, weight, clock style, time/date/pressure format, which blocks are drawn | **the collector's web UI** | Settings → E-ink dashboard; see [Appearance](#appearance) |
 | provider, key, lat/lon, outlook, interval | **the collector's web UI** | Settings → Modules → Weather forecast |
 
 The forecast row is the part you will actually want to change after flashing —
@@ -370,20 +370,59 @@ that firmware that could be low.
 
 ### Language
 
+**Settings → E-ink dashboard → Language.** It covers the browser page and the
+FBInk panel together, because they are one design rendered twice and nobody
+reads one in English and the other in Bulgarian. No reflash.
+
 ```ini
--DKINDLE_LANG_BG    ; Bulgarian; omit for English
+-DKINDLE_LANG_BG    ; what that setting DEFAULTS to; omit for English
 ```
 
-A compile-time switch, so a single-language build pays nothing for the other —
-the unused literal is discarded. The weekday names in the week strip come from
-tables in `DashboardStrings.h` rather than from `strftime`: the C locale would
-give English names whatever the build language, and newlib on this part has no
-`bg_BG` to switch to.
+It used to be the build flag alone, on the argument that a single-language
+build pays nothing for the other and nobody needs to change the language
+without a reflash. The second half of that was wrong: the device is a panel on
+a wall, its reader is not the person who built the firmware, and "reflash to
+read it in your own language" is not an answer. Both wordings are compiled in
+now — about a kilobyte of flash across the whole page, and nothing of RAM.
+
+`KLANG_AUTO` is **zero**, which is what an older config's reserved byte reads
+as, so a device that upgrades into this keeps saying whatever its firmware was
+built to say until somebody chooses otherwise. An unrecognised byte resolves
+the same way: a value out of storage is not a promise.
+
+Three things follow from the language being a setting rather than a constant,
+and each was somewhere the old design could quietly stay in the old language:
+
+- **`KD_T()` is a call, not a macro that picks a literal.** It can no longer be
+  pasted between string literals — `"a" KD_T("b","c") "d"` was compile-time
+  concatenation and is now a syntax error, which is a good way for this to fail
+  rather than a bad one.
+- **The metric label table carries both languages per row** (`labelEn`,
+  `labelBg`) and asks when it is read. A table initialised once cannot hold a
+  setting.
+- **The forecast stores the weekday as a number, not a name.** It is fetched
+  every few hours and read every few minutes, so a name written down at fetch
+  time is a name in whichever language was set then — switching to Bulgarian
+  would have left three English weekdays under a Bulgarian page for up to six
+  hours.
+
+What it does *not* translate: the names you have given your places (your text,
+drawn as you typed it) and the weather provider's own summary.
+
+The weekday names come from tables in `DashboardStrings.h` rather than from
+`strftime`: the C locale would give English names whatever the setting, and
+newlib on this part has no `bg_BG` to switch to.
 
 Cyrillic depends on the reader's fallback font. The page declares UTF-8 and
 names the device's serif faces first, but Bookerly's Cyrillic coverage varies
-by firmware — if a Bulgarian build shows boxes, that is the font, not the
-encoding.
+by firmware — if Bulgarian shows boxes, that is the font, not the encoding.
+
+**On the panel, the language needs nothing at all.** Every string the FBInk
+renderer draws arrives in `/kindle/data`, so it follows the collector's setting
+on the next fetch. The single exception is the "cannot reach the collector"
+message, which is drawn precisely when the collector cannot be asked: it uses
+the wording the last successful fetch left behind, and falls back to English
+before first contact — on a panel where nobody has set a language yet.
 
 ### The greys
 
@@ -691,12 +730,112 @@ the user's documents when they pressed Stop.
 So the parser takes an allowlist. `dash.conf` passes the exact key names it
 owns; the payload passes `PAYLOAD`, which accepts the shapes the collector
 actually emits — `Z_*`, `GRID_*`, `IN_ZONES`, `LBL_*`, `FC*`, `WK*`, `OUT_*`,
-`IN_*`, `RES_W`, `RES_H` and a handful of scalars — and drops everything else.
+`IN_*`, `RES_W`, `RES_H`, the chart's axis (`CH_*`) and a handful of named
+scalars (`CLOCK`, `CLOCK_ADVW`, `CLOCK_STYLE`, `DATE`, `TIME_FORMAT`,
+`SHOW_CHART`, `SHOW_WEEK`, `CHART_OUT`, `CHART_IN`, `KEY_OUT_ADVW`, `LANG`,
+`DECIMALS`, `SHOW_FLAGS`) — and drops everything else.
 
 `RES_W` and `RES_H` get a second check, because they are interpolated into a
 path that is then executed with `.` to load the layout: digits only, and a
 plausible panel size, or the reader falls back to 600x800. Without it,
 `RES_W=../../../../mnt/us/x` reached any `.conf`-suffixed file on the device.
+
+### One design, two renderers — and what they were disagreeing about
+
+The panel and the browser page at `/kindle` are the same design drawn twice,
+from one set of settings, by two pieces of code that cannot see each other.
+Every place they disagree is invisible from both sides: the reader switches
+something off, the browser stops drawing it, and the panel on the wall — the
+one anybody is actually looking at — carries on. Nothing errors.
+
+Found by holding a photograph of the browser page next to a photograph of the
+panel, which is the only instrument this had:
+
+| | The page | The panel, before |
+|---|---|---|
+| The chart's numbers | five temperatures down the side, five hours along the bottom | **none** — a bare grid, which reads as a sensor that has stopped |
+| An empty 24-hour record | a sentence saying it fills as readings arrive | the empty grid again, with no explanation |
+| The chart's key | two swatches, at the weights of the lines they name | nothing at all — two lines and no way to tell which was which |
+| Every caption | `text-transform:uppercase` | drawn as typed: `Навън`, `Mon`, `август` |
+| The week strip | centred in each cell, numerals regular | left-aligned and bold, in all seven |
+| The three outlook columns | centred on a `#f0f0f0` plate | left-aligned on white |
+| A degree | `.unit-d`, 0.34em | 0.42em, the size of a spelt-out unit |
+| The second headline value | `#444` — subordinate to the number it follows | full black, level with it |
+| The hairline under the clock | `#d8d8d8` | `#aaa`, the weight of a section rule |
+| A place set to "light" ink | `#aaa` | **nothing at all** — `kdInkFbink()` returned `GRAY10`, which is not a colour FBInk has, so the whole draw call failed silently |
+| `KSHOW_CHART`, `KSHOW_WEEK`, `KSHOW_BIG`, `KSHOW_BATTERY` | section hidden | section drawn regardless |
+| Twelve-hour clock, `9:05` without the leading zero, ISO dates | `kdFmtTime()` / `kdFmtDate()` | always `09:05`, always "27 august" |
+| Boxed / ruled / dated clock | four styles in CSS | one, always |
+| Hero, clock, forecast, footer, week numerals | 88 / 96 / 28 / 12 / 24 px | 84 / 88 / 26 / 11 / 22 |
+
+### Upper case, and why it has to be done at the collector
+
+Every caption on this dashboard is set uppercase, and on the page that is one
+line of CSS — which is why the string tables in `DashboardStrings.h` are lower
+case and the note over `kdMonth()` says so. The panel has no CSS. It drew
+whatever `/kindle/data` handed it, so one dashboard came out `НАВЪН` in the
+browser and `Навън` on the panel, most visibly on the two strings a reader
+typed themselves.
+
+It cannot be fixed at the reader's end: `tr a-z A-Z` in busybox ash is
+ASCII-only, so the panel would keep drawing `Навън` while uppercasing
+`Pressure`. `kdUpperUtf8()` does it in the firmware, for ASCII and Cyrillic,
+and copies through anything else untouched — a byte it does not understand is a
+byte in a label somebody chose. Cyrillic straddles a UTF-8 lead-byte boundary
+(а–п is `D0 B0..BF`, р–я is `D1 80..8F`), so the obvious single subtraction
+turns "р" into a space and a capital; and a label too long for its buffer is
+cut **between** characters, because half a two-byte sequence is not a shorter
+word, it is a replacement glyph. `tests/host/test_dashboard_strings.cpp` holds
+both.
+
+### The chart's axis
+
+The image is a 4-bit BMP and cannot carry text: drawing any would need a bitmap
+font on the ESP32 that this firmware does not have. So the five values and the
+five hours travel as strings in `/kindle/data` — with `CH_L`/`CH_R`/`CH_T`/`CH_B`
+saying where the plot area sits **inside** the image, taken from
+`ChartBmpCtx::init()` rather than re-derived at the other end — and the reader
+places them with FBInk. The `lo`/`hi` they are computed from is the image's
+own: the same 6 % padding with a 0.4° floor that `appendChart()` and
+`ChartBmpCtx::init()` both apply, because a second opinion here would label the
+image with somebody else's scale.
+
+### What keeps them together now
+
+`tools/check_kindle_parity.py` reads the stylesheet out of the firmware — the
+same extraction `tools/kindle_preview/preview.py` uses, so it cannot hold a
+stale copy of the numbers — and asserts that every type size in it appears at
+the right scale in both layout files, along with the three runtime clock
+styles, the week strip's geometry and the chart image's own dimensions. It
+checks **sizes and not positions**: the page is a flow layout and the panel is
+absolute coordinates, so "where the forecast starts" is legitimately different
+on each, and comparing those would be noise that trains people to ignore the
+checker. CI runs it, and then breaks a number at each end to prove it notices.
+
+**Where each is decided is the point of the fix.** A switch is applied on the
+collector: `KSHOW_BIG` empties the place the way `KSHOW_GRID` already emptied
+the grid, and the battery flag is folded into `OUT_BATT_WARN`, so a reader
+running an older `update_dash.sh` gets the right answer too. What the panel
+cannot be told in a value it already reads — the two section switches and
+whether the chart has a line in it — arrives as one key each (`SHOW_CHART`,
+`SHOW_WEEK`, `CHART_OUT`, `CHART_IN`) rather than as bits of `SHOW_FLAGS`,
+because masking them in the script would put `KSHOW_CHART`'s numeric value in a
+second file and the day it moves is the day the panel hides the wrong section.
+
+The clock is the one that stays split, and deliberately. The **time** is the
+Kindle's own — it redraws every minute, and the collector is fetched every few
+at best — while the **format and the style** are settings, so `now_clock()` is
+`kdFmtTime()` written in shell and the four styles are drawn with the
+primitives a framebuffer has. Centring the boxed and ruled clocks needs a width
+FBInk will not report, so the collector measures its own copy of the time and
+sends `CLOCK_ADVW`, the same measurement every place already carries. It is a
+sample rather than this minute's string: on the minutes where the two differ in
+width — `9:59` to `10:00` on the lean clock — the centring is out by half a
+digit until the next fetch, which beats the time set hard against the left edge
+of a black plate.
+
+`tests/kindle/drive_dash.sh` covers all of it, and CI takes the key back out
+again to prove the suite notices.
 
 ### The tick aims at the minute
 
@@ -764,8 +903,19 @@ because they are scaffolding rather than data. `#d5d5d5` rather than something
 fainter: the panel quantises to 16 levels and a near-white rule rounds away to
 nothing.
 
-The grid fills as readings arrive: expect a partial chart for the first day
-after a reboot, and the section says so rather than drawing an empty box.
+The grid fills as readings arrive, and it **survives a restart of the
+collector**. `TrendStore` writes a CRC-checked snapshot of the ring to
+`/trend.bin` on LittleFS whenever an hour rolls over — not on every reading —
+via `/trend.tmp` and a rename, so a power cut during the write cannot leave a
+half-file. On boot the snapshot is **merged by name** into the series that have
+already been registered: it can claim a track that exists and nothing else, so
+a saved file cannot invent a series or squat on a slot that now belongs to a
+different sensor. A bad magic, a bad version, a wrong length or a single
+flipped bit anywhere in it is refused and the live ring is left untouched.
+
+Expect a partial chart only on the first run of a new collector, and after a
+gap longer than the window; the section says so rather than drawing an empty
+box.
 
 ## Forecast
 

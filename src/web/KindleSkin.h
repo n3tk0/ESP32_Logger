@@ -43,9 +43,13 @@
 #include "../core/Config.h"
 #include "KindleDashboard.h"     // kdPx()
 
-#ifdef FEATURE_KINDLE_DASHBOARD
-#include "DashboardStrings.h"    // kdMonth()
-#endif
+// UNCONDITIONAL, unlike the rest of this header's dashboard-only parts.
+// kdSkinClamp() below is compiled into every build — ApiHandlers.cpp includes
+// this whether or not the dashboard is — and it now clamps the language byte,
+// whose KLANG_* names live in DashboardStrings.h outside that file's own
+// feature guard for exactly this reason. The header costs nothing when the
+// dashboard is off: everything else in it is guarded.
+#include "DashboardStrings.h"    // kdMonth(), KLANG_*
 
 // ---------------------------------------------------------------------------
 // The face
@@ -310,6 +314,11 @@ inline void kdSkinClamp(KindleConfig& k) {
     if (k.dateFormat > KDATE_ISO)       k.dateFormat = KDATE_DAY_MONTH;
     if (k.pressureUnit > KPRESS_INHG)   k.pressureUnit = KPRESS_HPA;
     if (k.tempDecimals > 1)             k.tempDecimals = 1;
+    // A language byte out of storage, or off a form, is not a promise. Anything
+    // that is not one of the three becomes KLANG_AUTO — "as the firmware was
+    // built" — which is also what an older config's reserved byte reads as, so
+    // an upgrade and a corrupt byte land on the same safe answer.
+    if (k.lang > KLANG_BG)              k.lang = KLANG_AUTO;
     k.boldZones &= 0x01FF;
     k.showFlags &= KSHOW_ALL;
     k.faceCustom[sizeof(k.faceCustom) - 1] = '\0';

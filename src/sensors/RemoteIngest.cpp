@@ -104,6 +104,13 @@ int RemoteIngest::historyPending() const {
     return n;
 }
 
+int RemoteIngest::historyRoom() const {
+    taskENTER_CRITICAL(&_mux);
+    const int n = MAX_HISTORY - _hCount;
+    taskEXIT_CRITICAL(&_mux);
+    return n > 0 ? n : 0;
+}
+
 int RemoteIngest::drain(const char* nodeId, SensorReading* out, int maxOut,
                         uint32_t staleAfterMs) {
     if (nodeId == nullptr || out == nullptr || maxOut <= 0) return 0;

@@ -2,6 +2,7 @@
 #include "../core/Globals.h"
 #include "../core/ModuleRegistry.h"     // Pass 5: shadow modules.json on save
 #include "../pipeline/DataPipeline.h"   // fsMutex
+#include "../web/DashboardStrings.h"    // KLANG_AUTO — the dashboard's language
 #include "../utils/MutexGuard.h"
 #include <LittleFS.h>
 #include "esp_mac.h"
@@ -314,6 +315,7 @@ void loadDefaultConfig() {
     config.kindle.boldZones    = 0;
     config.kindle.showFlags    = KSHOW_ALL;
     config.kindle.clockStyle   = KCLOCK_PLAIN;
+    config.kindle.lang         = KLANG_AUTO;   // as the firmware was built
     config.kindle.timeFormat   = KTIME_24;
     config.kindle.dateFormat   = KDATE_DAY_MONTH;
     config.kindle.pressureUnit = KPRESS_HPA;
@@ -378,6 +380,7 @@ void migrateConfig(uint8_t fromVersion) {
         config.kindle.boldZones     = 0;
         config.kindle.showFlags     = KSHOW_ALL;
         config.kindle.clockStyle    = KCLOCK_PLAIN;
+        config.kindle.lang          = KLANG_AUTO;
         config.kindle.timeFormat    = KTIME_24;
         config.kindle.dateFormat    = KDATE_DAY_MONTH;
         config.kindle.pressureUnit  = KPRESS_HPA;

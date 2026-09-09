@@ -143,6 +143,11 @@ KINDLE = {
     "date_format": 1,     # month first
     "pressure_unit": 1,   # mmHg
     "decimals": 0,
+    # Bulgarian, and deliberately not "as built": the select has three entries
+    # and the one that proves it reflects the device is the one that is neither
+    # the default nor zero.
+    "lang": 2,
+    "lang_built": 1,
     "page_w": 600,
 }
 
@@ -219,7 +224,7 @@ class H(http.server.SimpleHTTPRequestHandler):
             # re-read returns — the round trip is the thing worth proving,
             # since the page rebuilds itself from the GET after every save.
             for k in ("face", "bold", "show", "clock_style", "time_format",
-                      "date_format", "pressure_unit", "decimals"):
+                      "date_format", "pressure_unit", "decimals", "lang"):
                 if k in body:
                     KINDLE[k] = int(body[k][0])
             if "face_custom" in body:

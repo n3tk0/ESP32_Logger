@@ -242,6 +242,60 @@ static void test_history_is_not_stale_merely_for_being_old() {
     CHECK_EQ((int)out[0].quality, (int)QUALITY_GOOD);
 }
 
+// ---------------------------------------------------------------------------
+// historyRoom() — the number a sender is told to wait on
+// ---------------------------------------------------------------------------
+//
+// /api/ingest reads this to decide where to stop taking a batch, so what it
+// says has to be true at the boundary and not merely near it. Two ways of
+// being subtly wrong would both be invisible until an outage: one off at the
+// top means a batch always sheds its last reading, and a negative number means
+// "room" reads as plenty to any caller that only tested `> 0` — or as an
+// enormous number to one that stored it unsigned.
+static void test_history_room_counts_down_to_zero_and_stops() {
+    RemoteIngest& ri = fresh();
+    const int CAP = 64;                    // REMOTE_HISTORY_SLOTS
+    CHECK_EQ(ri.historyRoom(), CAP);
+
+    for (int i = 0; i < CAP; i++) {
+        CHECK_EQ(ri.historyRoom(), CAP - i);
+        CHECK(ri.putHistorical("out", "temperature", (float)i, "C", T0 + i));
+    }
+    CHECK_EQ(ri.historyRoom(), 0);
+    CHECK_EQ(ri.historyPending(), CAP);
+
+    // Past full it stays zero rather than going negative — putHistorical()
+    // sheds to make room, so the count never grows past the cap either.
+    CHECK(!ri.putHistorical("out", "temperature", 999.0f, "C", T0 + CAP));
+    CHECK_EQ(ri.historyRoom(), 0);
+
+    // And it comes back as the queue drains, which is the whole point: a node
+    // told to wait has to be able to find out when to stop waiting.
+    SensorReading out[8];
+    CHECK_EQ(ri.drain("out", out, 8, 0), 8);
+    CHECK_EQ(ri.historyRoom(), 8);
+}
+
+// A reading that made the queue shed its oldest is still IN the queue. The
+// false it returns says what it cost, not that it failed — and reading it as
+// a failure is a duplicate-data bug at the ingest endpoint, which would then
+// tell the node it took nothing and receive a second copy of the same batch.
+static void test_a_shed_is_not_a_refusal() {
+    RemoteIngest& ri = fresh();
+    const int CAP = 64;
+    for (int i = 0; i < CAP; i++)
+        CHECK(ri.putHistorical("out", "temperature", (float)i, "C", T0 + i));
+
+    CHECK(!ri.putHistorical("out", "temperature", 999.0f, "C", T0 + CAP));
+
+    // Drain the lot: the newcomer is there, at the end, and reading 0 is not.
+    SensorReading out[CAP];
+    CHECK_EQ(ri.drain("out", out, CAP, 0), CAP);
+    CHECK(out[0].value > 0.99f && out[0].value < 1.01f);              // 0 shed
+    CHECK(out[CAP - 1].value > 998.9f && out[CAP - 1].value < 999.1f);
+    CHECK_EQ(ri.historyPending(), 0);
+}
+
 int main() {
     RUN(test_put_overwrites);
     RUN(test_history_keeps_every_reading);
@@ -254,5 +308,7 @@ int main() {
     RUN(test_ring_wraps_cleanly);
     RUN(test_staleness_still_marks_the_live_value);
     RUN(test_history_is_not_stale_merely_for_being_old);
+    RUN(test_history_room_counts_down_to_zero_and_stops);
+    RUN(test_a_shed_is_not_a_refusal);
     return SUMMARY();
 }

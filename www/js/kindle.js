@@ -98,6 +98,17 @@ function kindleClockChanged() {
 }
 
 function kindleRender(d) {
+  // "As built" names the language it actually resolves to. Without this the
+  // option is a promise the page cannot keep: a reader looking at it has no
+  // way to know whether leaving it there means English or Bulgarian, and the
+  // collector already sends the answer.
+  var asBuilt = document.querySelector("#kd-lang option[value='0']");
+  if (asBuilt) {
+    asBuilt.textContent = (d.lang_built === 2) ? "As built (Български)"
+                        : (d.lang_built === 1) ? "As built (English)"
+                        : "As built";
+  }
+  kdSet("kd-lang",  d.lang);
   kdSet("kd-face",  d.face);
   kdSet("kd-clock", d.clock_style);
   kdSet("kd-time",  d.time_format);
@@ -182,6 +193,7 @@ function kindleSave() {
   var body = new URLSearchParams();
   body.set("face",          kdVal("kd-face", "0"));
   body.set("face_custom",   (document.getElementById("kd-face-custom") || {}).value || "");
+  body.set("lang",          kdVal("kd-lang", "0"));
   body.set("clock_style",   kdVal("kd-clock", "0"));
   body.set("time_format",   kdVal("kd-time", "0"));
   body.set("date_format",   kdVal("kd-date", "0"));
@@ -209,6 +221,9 @@ function kindleDefaults() {
     return;
 
   var body = new URLSearchParams();
+  // Back to "as built", which is where a device that has never been touched
+  // sits — not to English, which would be a choice this button did not make.
+  body.set("lang", "0");
   body.set("face", "0");
   body.set("face_custom", "");
   body.set("clock_style", "0");

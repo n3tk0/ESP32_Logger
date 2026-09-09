@@ -172,32 +172,90 @@ FC_HIGH=14
 FC_LOW=3
 FC_WIND=23
 FC0_LABEL="21:00"
+FC0_LABELW=2260
 FC0_CODE=61
 FC0_TEMP=6
+FC0_TEMPW=830
 FC1_LABEL="00:00"
+FC1_LABELW=2260
 FC1_CODE=3
 FC1_TEMP=4
+FC1_TEMPW=830
 FC2_LABEL="03:00"
+FC2_LABELW=2260
 FC2_CODE=0
 FC2_TEMP=2
+FC2_TEMPW=830
 WK0_NAME="MO"
 WK0_DAY=24
+WK0_NAMEW=1240
+WK0_DAYW=1000
 WK1_NAME="TU"
 WK1_DAY=25
+WK1_NAMEW=1240
+WK1_DAYW=1000
 WK2_NAME="WE"
 WK2_DAY=26
+WK2_NAMEW=1240
+WK2_DAYW=1000
 WK3_NAME="TH"
 WK3_DAY=27
+WK3_NAMEW=1240
+WK3_DAYW=1000
 WK4_NAME="FR"
 WK4_DAY=28
+WK4_NAMEW=1240
+WK4_DAYW=1000
 WK5_NAME="SA"
 WK5_DAY=29
+WK5_NAMEW=1240
+WK5_DAYW=1000
 WK6_NAME="SU"
 WK6_DAY=30
+WK6_NAMEW=1240
+WK6_DAYW=1000
 WK_TODAY=1
 WK_MON_MONTH="MARCH"
 WK_SUN_MONTH="APRIL"
 OUT_BATT_WARN=1
+CLOCK="12:34"
+CLOCK_ADVW=2400
+CLOCK_STYLE=0
+TIME_FORMAT=0
+DATE="24 MARCH"
+SHOW_CHART=1
+SHOW_WEEK=1
+CHART_OUT=1
+CHART_IN=1
+KEY_OUT_ADVW=5200
+CH_Y0="33"
+CH_Y0W=1000
+CH_Y1="31"
+CH_Y1W=1000
+CH_Y2="28"
+CH_Y2W=1000
+CH_Y3="26"
+CH_Y3W=1000
+CH_Y4="23"
+CH_Y4W=1000
+CH_H0="-23h"
+CH_H0W=1830
+CH_H1="-17h"
+CH_H1W=1830
+CH_H2="-11h"
+CH_H2W=1830
+CH_H3="-5h"
+CH_H3W=1330
+CH_H4="now"
+CH_H4W=1500
+CH_L=40
+CH_R=556
+CH_T=10
+CH_B=174
+CH_NOTE=""
+LBL_KEY_OUT="outside mean"
+LBL_KEY_BAND="shaded band = hourly low to high"
+LBL_KEY_IN="inside"
 LBL_OUTSIDE="OUTSIDE"
 LBL_INSIDE="INSIDE"
 LBL_LAST24="LAST 24 HOURS"
@@ -205,6 +263,8 @@ LBL_FORECAST="FORECAST"
 LBL_MEASURED="Measured on site"
 LBL_WIND="wind"
 LBL_TO="to"
+LBL_OFFLINE="Няма връзка с"
+LBL_OFFLINE_HINT="Проверете WiFi"
 RES_W=600
 RES_H=800
 EOF
@@ -574,13 +634,358 @@ check "$?" "and when the image is there it is blitted, with nothing written over
 rm -f "$DASH_TMP/graph.odd"
 reset_log
 
+# ── 3d3. The chart's key, and the two switches over the sections ────────────
+#
+# WHY THIS IS TESTED AND NOT JUST LOOKED AT
+#
+# This screen and the browser page at /kindle are one design rendered twice,
+# from one set of settings, by two pieces of code that cannot see each other.
+# Everything they disagree about is invisible from either side: the reader
+# turns the chart off, the browser stops drawing it, and the panel on the wall
+# — the one anybody is actually looking at — carries on. There is no error
+# anywhere in that.
+#
+# The key is the case that was found. The page has drawn one under its chart
+# since the chart existed; this script never had one, so the panel showed two
+# lines and said nothing about which was which.
+( reset_log
+  printf 'BM\202\000\000\000' > "$DASH_TMP/graph.bmp"
+  draw_chart_body || exit 1
+  # The wording is the collector's, in the collector's language.
+  grep -q "outside mean" "$FBINK_LOG" || exit 2
+  grep -q "inside" "$FBINK_LOG" || exit 3
+  grep -q "shaded band = hourly low to high" "$FBINK_LOG" || exit 4
+  # THE SWATCHES AT THE WEIGHTS OF THE LINES THEY STAND FOR — 3 px solid for
+  # the outdoor mean, 2 px dashed for the indoor. A key drawn in some other
+  # weight describes a chart the reader is not looking at.
+  grep -q -- "-k	top=[0-9]*,left=$GR_X,width=$KEY_SW_W,height=$KEY_SW_H" "$FBINK_LOG" || exit 5
+  # The dashed one is segments, because FBInk has no dashed rule: more than
+  # one fill of KEY_SW_H_IN, none of them the full swatch width.
+  segs=$(grep -c -- "height=$KEY_SW_H_IN	*$" "$FBINK_LOG")
+  [ "${segs:-0}" -ge 2 ] || exit 6
+  grep -q -- "width=$KEY_SW_W,height=$KEY_SW_H_IN" "$FBINK_LOG" && exit 7
+  exit 0 )
+check "$?" "the chart's key names both lines, at the weights the page draws them"
+
+# Only when there is a line for it to name. A key over an empty grid says the
+# chart is showing something.
+( reset_log
+  CHART_OUT=0 CHART_IN=0 draw_chart_body || exit 1
+  grep -q "outside mean" "$FBINK_LOG" && exit 2
+  grep -q "inside" "$FBINK_LOG" && exit 3
+  grep -q -- "file=$DASH_TMP/graph.bmp" "$FBINK_LOG" || exit 4   # chart still drawn
+  exit 0 )
+check "$?" "with no series in it, the chart gets no key"
+
+# An older collector sends neither flag. Drawing nothing is what this script
+# did before it had a key at all, so the reader is never told about lines the
+# collector has not said are there.
+( reset_log
+  unset CHART_OUT CHART_IN
+  draw_chart_body || exit 1
+  grep -q "outside mean" "$FBINK_LOG" && exit 2
+  exit 0 )
+check "$?" "and an older collector, which sends neither flag, gets none either"
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+
+# The two section switches. The page tests KSHOW_CHART and KSHOW_WEEK; this
+# tested neither, so switching a section off in Settings hid it on the browser
+# and left it on the panel.
+( reset_log
+  SHOW_CHART=0 draw_chart_body || exit 1
+  [ "$(calls)" = "0" ] || exit 2 )
+check "$?" "the chart switched off draws nothing at all — not even its rule"
+
+( reset_log
+  SHOW_WEEK=0 draw_forecast_body
+  # No week cells: the strip's plates are WK_CELL_W wide and there are seven.
+  grep -q -- "width=$WK_CELL_W,height=$WK_CELL_H" "$FBINK_LOG" && exit 1
+  # But the footer under it is not part of the strip and still appears.
+  grep -q "Measured on site" "$FBINK_LOG" || exit 2
+  grep -q -- "-k	top=$FOOT_RULE_Y" "$FBINK_LOG" || exit 3
+  exit 0 )
+check "$?" "the week strip switched off takes the strip and leaves the footer"
+
+( reset_log
+  draw_forecast_body
+  grep -q -- "width=$WK_CELL_W,height=$WK_CELL_H" "$FBINK_LOG" || exit 1 )
+check "$?" "and switched on it is still there"
+reset_log
+
+# ── 3d3b. The chart's numbers, its plates, and everything the page centres ──
+#
+# All of these were found by holding a photograph of the browser page next to a
+# photograph of the panel. None of them is an error anywhere: the panel drew
+# what it was told to draw, and what it was told left out every string the page
+# renders with CSS the panel does not have.
+( reset_log
+  printf 'BM\202\000\000\000' > "$DASH_TMP/graph.bmp"
+  draw_chart_body || exit 1
+  # The five values down the side and the five hours along the bottom. The
+  # image is a 4-bit BMP with no font in it; without these the panel showed a
+  # bare grid beside a browser page showing the same grid with numbers on it.
+  for v in 33 31 28 26 23 -23h -17h -11h -5h now; do
+      grep -q -- "	--	$v	" "$FBINK_LOG" || exit 2
+  done
+  # Right-aligned on the axis: "33" is 1000 mille at 11 px = 11 px wide, so it
+  # starts at GR_X + CH_L - AX_GAP - 11.
+  grep -q -- "left=$(( GR_X + CH_L - AX_GAP - AX_SZ * 1000 / 1000 ))," "$FBINK_LOG" || exit 3
+  # And "now" is set against the right-hand end of the axis, not past it.
+  grep -q -- "left=$(( GR_X + CH_R - AX_SZ * 1500 / 1000 ))," "$FBINK_LOG" || exit 4
+  exit 0 )
+check "$?" "the chart's axis is labelled, the way the page labels it"
+
+# An empty record is a sentence, not a grid. A grid with no line in it reads as
+# a sensor that has stopped, which is the one thing it does not mean.
+( reset_log
+  CH_NOTE="The 24 hour record fills as readings arrive." draw_chart_body || exit 1
+  grep -q "24 hour record fills" "$FBINK_LOG" || exit 2
+  grep -q -- "-g	file=" "$FBINK_LOG" && exit 3      # and no empty image under it
+  grep -q -- "	--	33	" "$FBINK_LOG" && exit 4      # nor an axis for nothing
+  exit 0 )
+check "$?" "with nothing recorded yet it says so instead of drawing an empty grid"
+
+# An older collector sends no axis at all. Drawing the image alone is what this
+# script did before, and is still better than placing labels it has not been
+# given.
+( reset_log
+  unset CH_L CH_R CH_T CH_B
+  draw_chart_body || exit 1
+  grep -q -- "file=$DASH_TMP/graph.bmp" "$FBINK_LOG" || exit 2
+  grep -q -- "	--	33	" "$FBINK_LOG" && exit 3
+  exit 0 )
+check "$?" "and an older collector, which sends no axis, still gets its chart"
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+load_layout
+
+# The week strip: centred in its cells, and the number set regular. Seven
+# identical boxes are the one place a misalignment cannot hide, and the panel
+# drew all seven hard against the left edge in bold.
+( reset_log
+  draw_forecast_body
+  # WK0: name 1240 mille at WK_NAME_SZ, day 1000 at WK_DAY_SZ, in an
+  # WK_CELL_W cell starting at WK_X.
+  nx=$(( WK_X + (WK_CELL_W - WK_NAME_SZ * 1240 / 1000) / 2 ))
+  dx=$(( WK_X + (WK_CELL_W - WK_DAY_SZ * 1000 / 1000) / 2 ))
+  [ "$nx" -gt "$WK_X" ] || exit 1                  # it really is inset
+  grep -q -- "left=$nx,top=$(( WK_Y + WK_NAME_OFFSET ))" "$FBINK_LOG" || exit 2
+  grep -q -- "left=$dx,top=$(( WK_Y + WK_DAY_OFFSET ))" "$FBINK_LOG" || exit 3
+  # .wd-d carries no font-weight on the page, so the numeral is set in the
+  # REGULAR face. -t names its file as `regular=` whichever face it is, so the
+  # assertion has to be on the path — the bold one must not appear at this size.
+  grep -q -- "regular=$FONT_REG,px=$WK_DAY_SZ," "$FBINK_LOG" || exit 4
+  grep -q -- "regular=$FONT_BOLD,px=$WK_DAY_SZ," "$FBINK_LOG" && exit 5
+  exit 0 )
+check "$?" "the week strip is centred in its cells and set regular, as the page sets it"
+
+# An older collector measures nothing. Falling back to the left edge is what
+# this always did, and is better than centring on a width of zero.
+( reset_log
+  unset WK0_NAMEW WK0_DAYW WK1_NAMEW WK1_DAYW WK2_NAMEW WK2_DAYW \
+        WK3_NAMEW WK3_DAYW WK4_NAMEW WK4_DAYW WK5_NAMEW WK5_DAYW \
+        WK6_NAMEW WK6_DAYW
+  draw_forecast_body
+  grep -q -- "left=$WK_X,top=$(( WK_Y + WK_NAME_OFFSET ))" "$FBINK_LOG" || exit 1 )
+check "$?" "with no widths it falls back to the left edge rather than to nonsense"
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+
+# The three outlook columns: a grey plate each, with the label, the icon and
+# the temperature centred on it.
+( reset_log
+  draw_forecast_body
+  grep -q -- "-B	GRAYE	-k	top=$(( OL0_Y - OL_PLATE_TOP )),left=$OL0_X,width=$OL_PLATE_W,height=$OL_PLATE_H" "$FBINK_LOG" || exit 1
+  # The icon is FC_OL_SZ wide and the plate OL_PLATE_W, so it is inset by half
+  # the difference — not drawn at the column's left edge.
+  ix=$(( OL0_X + (OL_PLATE_W - FC_OL_SZ) / 2 ))
+  grep -q -- "x=$ix,y=$(( OL0_Y + OL_ICON_OFFSET ))" "$FBINK_LOG" || exit 2
+  lx=$(( OL0_X + (OL_PLATE_W - OL_LABEL_SZ * 2260 / 1000) / 2 ))
+  grep -q -- "left=$lx,top=$OL0_Y" "$FBINK_LOG" || exit 3
+  exit 0 )
+check "$?" "each outlook column sits on a plate with its contents centred"
+
+# The hairline between the clock and the indoor row is the light one. Drawn at
+# a section rule's weight it reads as a third section break.
+( reset_log
+  draw_sensors_body
+  grep -q -- "-B	GRAYD	-k	top=$IN_RULE_Y" "$FBINK_LOG" || exit 1 )
+check "$?" "the indoor hairline is #d8d8d8, not a section rule"
+
+# A degree is a footnote, not a unit. The page sets .unit at 0.42em and
+# .unit-d at 0.34em; one size for both put a circle the height of a lower-case
+# o where the superscript should be, and pushed everything after it right.
+( reset_log
+  draw_field 10 20 100 0 "21.0" "°" "" 2000 330 BLACK
+  grep -q -- "px=34," "$FBINK_LOG" || exit 1
+  reset_log
+  draw_field 10 20 100 0 "1008" "hPa" "" 2000 1600 BLACK
+  grep -q -- "px=42," "$FBINK_LOG" || exit 2
+  exit 0 )
+check "$?" "the degree is set smaller than a spelt-out unit, as the page sets it"
+reset_log
+
+# ── 3d4. The clock: the reader's time, the collector's format and style ─────
+#
+# The time is the Kindle's own — it redraws every minute and the collector is
+# fetched every few at best. The FORMAT and the STYLE are settings, made once
+# on the same page as everything else, and they used to reach the browser and
+# stop there: a reader who chose the twelve-hour clock got it on the web page
+# and 24-hour on the panel, from one setting on one device.
+#
+# now_clock() is kdFmtTime() written in shell, so these are its three cases.
+( date() { echo "09:05"; }
+  [ "$(TIME_FORMAT=0 now_clock)" = "09:05" ] || exit 1
+  [ "$(TIME_FORMAT=1 now_clock)" = "9:05" ]  || exit 2
+  [ "$(TIME_FORMAT=2 now_clock)" = "9:05am" ] || exit 3
+  [ "$(now_clock)" = "09:05" ] || exit 4 )        # unset is 24-hour
+check "$?" "the three clock formats are the three the page offers"
+
+# The two the twelve-hour clock is always got wrong on: noon is 12pm, not 0pm,
+# and midnight is 12am, not 0am or 12pm.
+( date() { echo "12:00"; }
+  [ "$(TIME_FORMAT=2 now_clock)" = "12:00pm" ] || exit 1 )
+check "$?" "noon is 12pm"
+( date() { echo "00:30"; }
+  [ "$(TIME_FORMAT=2 now_clock)" = "12:30am" ] || exit 1
+  [ "$(TIME_FORMAT=1 now_clock)" = "0:30" ] || exit 2 )
+check "$?" "and midnight is 12am"
+( date() { echo "13:07"; }
+  [ "$(TIME_FORMAT=2 now_clock)" = "1:07pm" ] || exit 1
+  [ "$(TIME_FORMAT=0 now_clock)" = "13:07" ] || exit 2 )
+check "$?" "an afternoon hour counts down from twelve, not up from zero"
+
+# 08 and 09 are the pair that breaks a shell doing arithmetic: $((08)) is
+# "value too great for base" in every POSIX shell, and this one is inside the
+# clock, which is drawn every minute.
+( date() { echo "08:09"; }
+  [ "$(TIME_FORMAT=2 now_clock)" = "8:09am" ] || exit 1
+  [ "$(TIME_FORMAT=1 now_clock)" = "8:09" ] || exit 2 )
+check "$?" "with 08 and 09 read as decimal, not as bad octal"
+
+# The four styles. Each one is what kdSkinCss draws in CSS, with the primitives
+# a framebuffer has.
+( reset_log
+  CLOCK_STYLE=0 draw_clock "12:34"
+  grep -q -- "px=$CL_SIZE," "$FBINK_LOG" || exit 1
+  grep -q -- "-B	BLACK" "$FBINK_LOG" && exit 2       # no plate
+  exit 0 )
+check "$?" "the plain clock is the time at its full size and nothing else"
+
+( reset_log
+  CLOCK_STYLE=1 draw_clock "12:34"
+  # A black plate filling the clock rectangle, with the time knocked out of it.
+  grep -q -- "-B	BLACK	-k	top=$Z_CLOCK_Y,left=$Z_CLOCK_X,width=$Z_CLOCK_W,height=$Z_CLOCK_H" "$FBINK_LOG" || exit 1
+  grep -q -- "-C	WHITE" "$FBINK_LOG" || exit 2
+  grep -q -- "px=$CL_SZ_BOXED," "$FBINK_LOG" || exit 3
+  # Centred, not against the left edge — CLOCK_ADVW is what centres it.
+  left=$(sed -n 's/.*-C	WHITE	-t	[^	]*left=\([0-9]*\),.*/\1/p' "$FBINK_LOG" | head -1)
+  [ -n "$left" ] && [ "$left" -gt "$CL_X" ] || exit 4 )
+check "$?" "the boxed clock is knocked out of a plate and centred on it"
+
+( reset_log
+  CLOCK_STYLE=2 draw_clock "12:34"
+  grep -q -- "-k	top=$Z_CLOCK_Y,left=$Z_CLOCK_X,width=$Z_CLOCK_W,height=$RULE_H" "$FBINK_LOG" || exit 1
+  grep -q -- "px=$CL_SZ_RULED," "$FBINK_LOG" || exit 2 )
+check "$?" "the ruled clock has a hairline over it and is set smaller"
+
+( reset_log
+  CLOCK_STYLE=3 draw_clock "12:34"
+  grep -q -- "px=$CL_SZ_DATED," "$FBINK_LOG" || exit 1
+  grep -q -- "px=$CL_DATE_SZ," "$FBINK_LOG" || exit 2
+  grep -q "24 MARCH" "$FBINK_LOG" || exit 3 )
+check "$?" "the dated clock takes its room from the time and puts the date under it"
+
+# An older collector sends no CLOCK_STYLE. The plain clock is what this script
+# has always drawn, so that is what it keeps drawing.
+( reset_log
+  unset CLOCK_STYLE
+  draw_clock "12:34"
+  grep -q -- "px=$CL_SIZE," "$FBINK_LOG" || exit 1
+  grep -q -- "-B	BLACK" "$FBINK_LOG" && exit 2
+  exit 0 )
+check "$?" "and with no style at all it is the plain one, as it always was"
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+
+# Every style, and the key, through the option table — the check section 1 runs
+# over the default page. A style is drawn on a timer nobody watches; a flag it
+# gets wrong is a clock that silently stops appearing.
+bad=""
+for style in 0 1 2 3; do
+    reset_log
+    CLOCK_STYLE=$style redraw_all "12:34"
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        if reason=$(validate_call "$line"); then :; else
+            bad="style $style: $reason"; break
+        fi
+        if reason=$(validate_colours "$line"); then :; else
+            bad="style $style: $reason"; break
+        fi
+    done < "$FBINK_LOG"
+    [ -z "$bad" ] || break
+done
+check "$([ -z "$bad" ] && echo 0 || echo 1)" \
+      "all four clock styles speak FBInk too${bad:+ — $bad}"
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+load_layout
+reset_log
+
+# ── 3d5. The language is the collector's, including when it is unreachable ──
+#
+# Every string on this panel comes from /kindle/data, so the language follows
+# the collector's setting with no reflash and nothing to configure here. The
+# offline message is the one that cannot: it is drawn precisely because the
+# collector cannot be reached. It uses whatever the last successful fetch left
+# behind, which covers every outage after first contact.
+( reset_log
+  HOST=10.9.9.42
+  redraw_offline "12:34"
+  grep -q "Няма връзка с" "$FBINK_LOG" || exit 1
+  grep -q "Проверете WiFi" "$FBINK_LOG" || exit 2
+  grep -q "Cannot reach" "$FBINK_LOG" && exit 3
+  exit 0 )
+check "$?" "the offline message is in the language the collector last sent"
+
+# And before first contact there is nothing to have kept, so it says what it
+# has always said rather than nothing at all.
+( reset_log
+  unset LBL_OFFLINE LBL_OFFLINE_HINT
+  HOST=10.9.9.42
+  redraw_offline "12:34"
+  grep -q "Cannot reach" "$FBINK_LOG" || exit 1
+  grep -q "Find collector" "$FBINK_LOG" || exit 2
+  exit 0 )
+check "$?" "and English before the collector has ever answered"
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+reset_log
+
+# ── 3d6. The axis and the image come from the same minute ───────────────────
+#
+# The five temperatures down the side of the chart are in the PAYLOAD and the
+# grid they label is in a separately fetched image. GRAPH_EVERY and DATA_EVERY
+# are both editable from the KUAL menu, so a pair like 10 and 15 gives minutes
+# where the chart tier fires alone — and a fresh image then gets a scale up to
+# fifteen minutes old drawn down its side, which nothing on the panel could
+# show had happened.
+CLOCK_EVERY=1; DATA_EVERY=15; GRAPH_EVERY=10; FORECAST_EVERY=30; FULL_EVERY=60
+check "$(case " $(plan_minute 10) " in *" chart "*) echo 0 ;; *) echo 1 ;; esac)" \
+      "minute 10 is a chart tier with no data tier ($(plan_minute 10))"
+( . /dev/null
+  # The loop's own fetch list, as the script writes it: the chart tier has to
+  # be one of the tiers that pulls a payload.
+  grep -q '\*" sensors "\*|\*" forecast "\*|\*" chart "\*) fetch_data' \
+       "$KDIR/update_dash.sh" || exit 1 )
+check "$?" "and the chart tier fetches the payload its axis labels come from"
+CLOCK_EVERY=1; DATA_EVERY=5; GRAPH_EVERY=15; FORECAST_EVERY=30; FULL_EVERY=60
+
 # ── 3e. With no data at all, the page says why ───────────────────────────────
 ( HAVE_DATA=0
   unset Z_GROUP_OUT OUT_TEMP IN_TEMP IN_HUM OUT_HUM
   : > "$FBINK_LOG"
   draw_sensors_body && exit 1                      # must refuse
   redraw_offline "12:34"
-  grep -q -- 'Cannot reach' "$FBINK_LOG" || exit 2
+  # Whatever the offline wording currently is — the payload carries it now, so
+  # a literal here would only be asserting the fixture's language.
+  grep -q -- "${LBL_OFFLINE:-Cannot reach}" "$FBINK_LOG" || exit 2
   grep -q -- '	--	°$' "$FBINK_LOG" && exit 3     # no punctuation-only fields
   # and the message lands in the readings zone, not under the chart
   grep -q -- "-s	top=$Z_SENS_Y,left=$Z_SENS_X" "$FBINK_LOG" || exit 4 )

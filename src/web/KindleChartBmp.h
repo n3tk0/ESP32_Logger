@@ -86,6 +86,34 @@ inline size_t writeBmpHeader(uint8_t* buf, uint16_t w, uint16_t h) {
     return headerSize;  // 118 bytes
 }
 
+// ── The image's own size and margins, in one place ──────────────────────────
+//
+// BOTH ARE READ BY SOMETHING THAT IS NOT THE RENDERER. handleKindleGraph()
+// picks the size; ChartBmpCtx::init() derives the plot area from it; and
+// /kindle/data has to tell the Kindle where that plot area is, because the
+// image is a 4-bit BMP with no font in it and the axis labels are drawn on
+// top by FBInk. Three copies of `W * 40 / 560` in three files is three copies
+// to keep in step, and the one that goes stale first is the one nothing
+// compiles — the shell script's.
+//
+// So they are functions, and every caller asks. A resize or a margin change
+// then moves the labels with the image instead of leaving them behind it.
+namespace ChartBmp {
+
+/// The image served for a panel of this width. 1072-wide readers get the
+/// larger one; everything else the 600-wide panel's.
+inline uint16_t imageW(uint16_t panelW) { return (panelW > 600) ? 1000 : 560; }
+inline uint16_t imageH(uint16_t panelW) { return (panelW > 600) ? 360  : 200; }
+
+/// The plot area inside that image, in image pixels. The margins are the
+/// 600x200 design's, scaled with the image.
+inline int marginL(uint16_t w) { return w * 40 / 560; }
+inline int marginR(uint16_t w) { return w - w * 4 / 560; }
+inline int marginT(uint16_t h) { return h * 10 / 200; }
+inline int marginB(uint16_t h) { return h - h * 26 / 200; }
+
+}  // namespace ChartBmp
+
 // Rendering context for the BMP chart, computed once and shared across chunks.
 struct ChartBmpCtx {
     uint16_t W, H;
@@ -125,10 +153,10 @@ struct ChartBmpCtx {
         W = width;
         H = height;
         rowBytes = W / 2;
-        L = W * 40 / 560;   // scale margins proportionally
-        R = W - W * 4 / 560;
-        T = H * 10 / 200;
-        B = H - H * 26 / 200;
+        L = ChartBmp::marginL(W);
+        R = ChartBmp::marginR(W);
+        T = ChartBmp::marginT(H);
+        B = ChartBmp::marginB(H);
         dx = (float)(R - L) / (float)(TrendRing::HOURS - 1);
 
         // Compute Y scale

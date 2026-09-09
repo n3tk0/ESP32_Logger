@@ -14,7 +14,9 @@
 #include "EspNowAuth.h"
 #include "../core/EventLog.h"   // the clock-skew warning outlives the serial cable
 #include "../core/Globals.h"    // bootCount, to tie a log line to a boot
+#include "../pipeline/DataPipeline.h"   // fsMutex
 #include "../sensors/RemoteIngest.h"
+#include "../utils/MutexGuard.h"
 
 // ============================================================================
 // WHICH TASK DOES WHAT, AND WHY IT MATTERS
@@ -219,6 +221,20 @@ static bool saveNodes() {
     for (int i = 0; i < EspNowNodeTable::CAP; i++) snap[i] = s_nodes.at(i);
     taskEXIT_CRITICAL(&s_nodeMux);
 
+    // Pillar 1.3: every LittleFS write call site takes fsMutex. The tick runs
+    // from loop() and StorageTask appends to the day's CSV on its own task —
+    // LittleFS is not re-entrant across tasks, and two writers in its metadata
+    // at once corrupt the directory or panic the core without either failure
+    // naming the code that caused it. Taken after the snapshot above, so the
+    // node spinlock and this mutex are never held at the same time.
+    MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
+    if (fsMutex && !guard.isLocked()) {
+        Serial.println("[ESPNOW] fsMutex timeout — retrying in 60 s");
+        s_saveRetryAtMs = millis() + 60000u;
+        if (s_saveRetryAtMs == 0) s_saveRetryAtMs = 1;
+        return false;
+    }
+
     File f = LittleFS.open(NODES_FILE, "w");
     if (!f) {
         Serial.println("[ESPNOW] could not open the node file for writing "
@@ -237,6 +253,16 @@ static bool saveNodes() {
 }
 
 static void loadNodes() {
+    // Same lock as saveNodes(), and needed for the same reason: this runs from
+    // espnowIngestBegin(), which loop() calls once the network is up — after
+    // TaskManager::init(), so StorageTask is already writing. The discards
+    // below are removes, which is a write however it is spelled.
+    MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
+    if (fsMutex && !guard.isLocked()) {
+        Serial.println("[ESPNOW] fsMutex timeout — the node table starts empty");
+        return;
+    }
+
     if (!LittleFS.exists(NODES_FILE)) return;
 
     File f = LittleFS.open(NODES_FILE, "r");

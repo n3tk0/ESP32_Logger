@@ -71,6 +71,7 @@
 #endif
 #ifdef FEATURE_KINDLE_DASHBOARD
 #  include "src/web/KindleDashboard.h"      // GET /kindle (e-ink dashboard)
+#  include "src/pipeline/TrendStore.h"       // the 24-hour chart, across a reboot
 #endif
 #ifdef FEATURE_ESPNOW_INGEST
 #  include "src/espnow/EspNowIngest.h"      // battery nodes over ESP-NOW
@@ -241,6 +242,16 @@ static void _doSleep() {
         TaskManager::shutdown();
         delay(200);
     }
+#ifdef FEATURE_KINDLE_DASHBOARD
+    // RAM DOES NOT SURVIVE DEEP SLEEP, so the hour in progress goes with it
+    // unless it is written first. trendStoreTick() only writes when an hour
+    // rolls, which is right for a device left running and useless here — and
+    // on the hybrid timer path loop() is never entered at all, so the tick
+    // never runs and the chart was restored from flash at every wake and
+    // never advanced past whatever the last restart happened to write.
+    trendStoreSave();
+#endif
+
     DBGLN("[Sleep] Deep sleep →");
     Serial.flush();
     delay(10);
@@ -789,6 +800,10 @@ void setup() {
             // called, and route registration is far enough downstream to lose a
             // visible slice of the first hour.
             kindleTrackTrends();
+            // AFTER the track()s, never before: the snapshot fills the series
+            // this build decided to keep, and finds nothing to fill if they do
+            // not exist yet. See TrendStore.h.
+            trendStoreLoad();
             #endif
             _initPlatform();
         } else {
@@ -862,8 +877,10 @@ void setup() {
 #ifdef FEATURE_KINDLE_DASHBOARD
             // Same reason as the web-mode path above: track before the task
             // that feeds the ring exists. track() is idempotent, so a boot
-            // that reaches both call sites costs nothing.
+            // that reaches both call sites costs nothing — and so is the load,
+            // which merges the same bytes into the same series.
             kindleTrackTrends();
+            trendStoreLoad();
 #endif
             _initPlatform();
         }
@@ -878,6 +895,11 @@ void setup() {
         uint32_t windowEnd = millis() + g_hybridActiveMs;
         while (millis() < windowEnd) {
             if (shouldRestart) {
+#ifdef FEATURE_KINDLE_DASHBOARD
+                // The hour in progress, before the power goes — see the sleep
+                // path below and the restart path in loop().
+                trendStoreSave();
+#endif
                 // Invalidate magic so the next boot's setup() takes the
                 // cold-boot branch and zeroes the counter regardless of
                 // ESP_RST_SW. Setting g_consecutiveResets=0 alone is
@@ -890,6 +912,15 @@ void setup() {
             delay(100);
         }
         flushLogBufferToFS();
+#ifdef FEATURE_KINDLE_DASHBOARD
+        // RAM DOES NOT SURVIVE DEEP SLEEP, so the hour in progress goes with
+        // it unless it is written first. trendStoreTick() only writes when an
+        // hour rolls, which is right for a device left running and useless
+        // here — and on this path loop() is never entered at all, so the tick
+        // never runs: the chart was restored from flash at every wake and
+        // never advanced past whatever the last restart happened to write.
+        trendStoreSave();
+#endif
         configureWakeup();            // re-arm GPIO wakeup sources
         esp_sleep_enable_timer_wakeup((uint64_t)g_hybridSleepMs * 1000ULL);
         TaskManager::shutdown();
@@ -1056,6 +1087,15 @@ void loop() {
     }
 #endif
 
+#ifdef FEATURE_KINDLE_DASHBOARD
+    // ── The 24-hour chart, written down when an hour finishes ────────────────
+    // A flag test on every pass and a ~1.7 KB write about twenty-four times a
+    // day. Here and not in ProcessingTask because that one is the path every
+    // reading takes, and a filesystem write in it would stall the pipeline for
+    // as long as the flash felt like taking.
+    trendStoreTick();
+#endif
+
     // ── SSE live heartbeat (1 Hz) ─────────────────────────────────────────────
     // No-op when no EventSource clients are subscribed.
     {
@@ -1109,6 +1149,18 @@ void loop() {
     if (shouldRestart && millis() - restartTimer > 2000) {
         DBGLN("Restarting...");
         Serial.flush();
+
+#ifdef FEATURE_KINDLE_DASHBOARD
+        // THE HOUR IN PROGRESS, before the power goes. trendStoreTick() only
+        // writes when an hour has rolled, which is right for a device left
+        // alone and wrong for one about to restart: whatever has been measured
+        // since the last roll would go with it, and a reader who pressed
+        // Restart would come back to a chart with a bite out of the right-hand
+        // end. It is one flash write on a path that is already about to spend
+        // two seconds and a radio shutdown.
+        trendStoreSave();
+#endif
+
         // Pillar 3.8 / AUDIT FC.1: NEVER auto-confirm a PENDING_VERIFY OTA on
         // the restart path — a buggy image that triggers watchdog resets
         // would otherwise get itself confirmed instead of rolled back.  Only
