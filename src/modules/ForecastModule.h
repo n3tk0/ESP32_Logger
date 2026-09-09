@@ -148,6 +148,12 @@ const char* forecastPeriodLabel(const ForecastModule::Period& p);
 /// Draws a stroke-only condition glyph for a WMO code at `px` square.
 /// Exposed for the dashboard; see the note in the .cpp on why the icon is
 /// drawn rather than fetched from the provider.
+/// The WMO code reduced to the one icon that stands for its whole range —
+/// 0, 1, 3, 45, 51, 61, 71, 80, 85, 95, or -1 for "no icon for this".
+///
+/// The panel has eleven BMP files and no way to reduce a code itself, so the
+/// collector sends the reduced one. See the note on the definition.
+int  weatherIconCode(int code);
 void appendWeatherIcon(String& out, int code, int px);
 
 #endif  // MODULE_FORECAST_ENABLED

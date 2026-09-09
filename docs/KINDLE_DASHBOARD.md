@@ -767,6 +767,72 @@ panel, which is the only instrument this had:
 | Twelve-hour clock, `9:05` without the leading zero, ISO dates | `kdFmtTime()` / `kdFmtDate()` | always `09:05`, always "27 august" |
 | Boxed / ruled / dated clock | four styles in CSS | one, always |
 | Hero, clock, forecast, footer, week numerals | 88 / 96 / 28 / 12 / 24 px | 84 / 88 / 26 / 11 / 22 |
+| Every string, at the size both files agree on | the em is 88 px | **the em is ~76 px** — `px=88` is a line height to FBInk, not an em |
+| Every gap computed from an advance | correct, the browser measures its own | a sixth too wide, so the headline's second value ran into the divider |
+| Today, in the week strip | white on black | **a black rectangle with nothing in it** |
+| The forecast icon | an SVG chosen by a RANGE of WMO codes | a BMP named after the exact code — and there is no `fc_2` for partly cloudy, so: the question mark |
+| The wind line | `вятър 5 km/h · 8 мин` | the wind alone; nothing said how old the forecast was |
+
+### FBInk's `px` is a line height, not an em
+
+The single reason the panel looked worse than the page rather than different
+from it. FBInk sizes OpenType text with `stbtt_ScaleForPixelHeight(font, px)`,
+and stb_truetype documents that as
+
+    scale = pixels / (ascent - descent)
+
+— its `px` is the whole span from the top of the ascender to the bottom of the
+descender. CSS `font-size` is the em square, which for a text serif is some
+14–20 % smaller than that span. So `px=88` and `font-size:88px` are **not the
+same size**, `tools/check_kindle_parity.py` was right that both files said 88,
+and the panel still drew every string about a sixth small: thinner stems, more
+air between them, a screen made of correct numbers that looked cheap.
+
+It also moved things. The panel places a value after another by adding
+`size × advance-in-mille / 1000`, and the collector measures those advances in
+thousandths of the **em** — so while the em was a sixth smaller than the size,
+every one of those gaps was a sixth too wide. That is why the headline's
+`/ 993 hPa` sat far from the temperature and ran into the divider.
+
+`draw_text()` converts once, at the FBInk call, using `TEXT_PX_MILLE` from the
+layout file — `(ascent - descent) / unitsPerEm` in thousandths. Past that
+point one design pixel is one em pixel, which fixes the size and the
+arithmetic together. The `.conf` keeps the design's number, so the parity
+checker still compares like with like; the box is also started half its own
+growth higher, so correcting the size does not drop every string down the
+screen away from the coordinates it was tuned to.
+
+It is the one number to turn if the type ends up a hair large or small.
+
+### The icon the panel is sent is already reduced
+
+The page picks an SVG by a range — `code >= 61 && code <= 67` is rain. The
+panel has eleven BMP files, one per range, named after the range's
+representative, and no way in `sh` to reduce a code to its range. So it asked
+for the code it was given: Open-Meteo answers **2** for partly cloudy about as
+often as 1, there is no `fc_2_52.bmp`, and the fallback is `fc_-1` — the
+circled question mark that is supposed to mean "no forecast at all". Three of
+them across the outlook row, beside a browser page showing sun and cloud.
+
+`weatherIconCode()` does the reduction, in the collector, and is what
+`appendWeatherIcon()` switches on as well — so a range added there reaches both
+renderers at once. `/kindle/data` carries `FC_ICON` and `FC0..2_ICON` beside
+the raw `FC_CODE`, and the panel does no mapping at all. `check_kindle_parity.py`
+holds every value that function can return to a BMP that exists.
+
+### White text on a plate is drawn ON the plate
+
+`-O`/`--bgless` is right over a tier's own cleared white rectangle: FBInk's OT
+renderer otherwise paints the string's whole box with the background pen, and
+a white box would rub out whatever was drawn before it.
+
+It is wrong on the two inverted places — today's cell in the week strip, and
+the boxed clock. There the glyphs are white, and bgless leaves whether white
+survives to how that FBInk build blends against the framebuffer. On the device
+it did not: the cell came out as an empty black rectangle, the one mark on the
+screen that has to be legible reading as a hole. Those two draw with
+`-C WHITE -B BLACK` and no bgless — the ordinary path, where the box is painted
+in the plate's own colour and so cannot be seen.
 
 ### Upper case, and why it has to be done at the collector
 

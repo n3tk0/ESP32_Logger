@@ -506,22 +506,84 @@ zones_derive() {
 
 fb() { fbink "$@" 2>/dev/null; }
 
+# ── FBInk's px is not the CSS px ─────────────────────────────────────────────
+#
+# THIS IS WHY THE PANEL'S TYPE CAME OUT SMALLER THAN THE PAGE'S. FBInk sizes
+# OpenType text with stbtt_ScaleForPixelHeight(font, px) — fbink.c, in the
+# print_ot() setup — and stb_truetype documents that as
+#
+#     scale = pixels / (ascent - descent)
+#
+# i.e. `px` is the font's WHOLE LINE HEIGHT, top of the ascender to bottom of
+# the descender. CSS font-size is the em square, which for a text serif is some
+# 14-20% smaller than that span. So `px=88` and `font-size:88px` are not the
+# same size, and the panel drew every string about a sixth small next to the
+# browser page: thinner stems, more air, a worse-looking screen made of the
+# right numbers.
+#
+# It also moved things. The script places a value after another by adding
+# `size × advance-in-mille / 1000`, with the advances measured at the collector
+# in thousandths of the EM — so while the em was a sixth smaller than the size,
+# every gap was a sixth too wide, and the headline's "/ 993 hPa" was pushed
+# into the divider and clipped. Correcting the size corrects the arithmetic
+# with it: past here, one design pixel is one em pixel again.
+#
+# TEXT_PX_MILLE is (ascent - descent) / unitsPerEm for the panel's font, in
+# thousandths — the number to turn if the type ends up a hair large or small,
+# and the only one. It lives in the layout file because the fonts a Kindle
+# carries differ by model.
+text_px() {
+    # A design size in CSS pixels → the px FBInk has to be asked for.
+    echo $(( $1 * ${TEXT_PX_MILLE:-1160} / 1000 ))
+}
+
+text_top() {
+    # $1=design top $2=design size — where that box has to start so the string
+    # stays optically where the layout put it. FBInk grows the box downward
+    # from `top`, so half the growth comes back off the top. Its own function
+    # because the panel's tests have to compute the same number, and a second
+    # copy of this arithmetic is a second one to keep in step.
+    local t
+    t=$(( $1 - ($(text_px "$2") - $2) / 2 ))
+    [ "$t" -lt 0 ] && t=0
+    echo "$t"
+}
+
 draw_text() {
-    # $1=x $2=y $3=px $4=font file $5=colour $6=text
+    # $1=x $2=y $3=px $4=font file $5=colour $6=text [$7=background pen]
     #
-    # -O/--bgless: draw the glyphs and nothing else. FBInk's OpenType renderer
-    # otherwise fills the text's whole box with the background pen, which is
-    # WHITE unless -B says otherwise — so white text on the inverted "today"
-    # cell punched a white rectangle out of the black plate and disappeared
-    # into it. Every tier clears its rectangle before drawing, so there is
-    # nothing underneath that the glyphs need to cover.
+    # WITHOUT $7: -O/--bgless, the glyphs and nothing else. FBInk's OpenType
+    # renderer otherwise fills the text's whole box with the background pen,
+    # which is WHITE unless -B says otherwise, and every tier has already
+    # cleared its own rectangle — so a box of white would rub out whatever the
+    # tier drew before it.
+    #
+    # WITH $7: the box IS painted, in that pen, and bgless is not used. That is
+    # for text on a plate that is not white — today's cell in the week strip,
+    # white on black. Drawn bgless it came out as an empty black rectangle on
+    # the device: FBInk's bgless path blends each glyph pixel against what is
+    # already in the framebuffer, and whether white survives that depends on
+    # the FBInk build. Painting a black box under white glyphs does not depend
+    # on anything: it is the ordinary path, and the box is invisible against
+    # the plate it sits on.
     [ -n "$6" ] || return 0
     [ -n "$4" ] || return 0
-    fb -q -b -O -C "$5" -t regular="$4",px="$3",left="$1",top="$2" -- "$6"
+    local px top
+    px=$(text_px "$3")
+    top=$(text_top "$2" "$3")
+    if [ -n "$7" ]; then
+        fb -q -b -C "$5" -B "$7" -t regular="$4",px="$px",left="$1",top="$top" -- "$6"
+    else
+        fb -q -b -O -C "$5" -t regular="$4",px="$px",left="$1",top="$top" -- "$6"
+    fi
 }
 
 draw_text_bold() { draw_text "$1" "$2" "$3" "$FONT_BOLD" "$4" "$5"; }
 draw_text_reg()  { draw_text "$1" "$2" "$3" "$FONT_REG"  "$4" "$5"; }
+
+# The same two, on a plate that is not white.
+draw_text_bold_on() { draw_text "$1" "$2" "$3" "$FONT_BOLD" "$4" "$5" "$6"; }
+draw_text_reg_on()  { draw_text "$1" "$2" "$3" "$FONT_REG"  "$4" "$5" "$6"; }
 
 fill_rect() {
     # $1=x $2=y $3=w $4=h $5=colour
@@ -625,7 +687,10 @@ draw_clock() {
             fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" BLACK
             cy=$(( Z_CLOCK_Y + (Z_CLOCK_H - sz) / 2 ))
             clock_centre_x "$sz"
-            draw_text_bold "$CENTRE_X" "$cy" "$sz" "WHITE" "$now_time"
+            # On the plate, not bgless over it — the same reason today's cell
+            # in the week strip is, and the same symptom if it is not: a black
+            # box with no time in it.
+            draw_text_bold_on "$CENTRE_X" "$cy" "$sz" "WHITE" "$now_time" "BLACK"
             ;;
         2)  # RULED — a hairline over it and set smaller, so it reads as a rule
             # rather than as a number that happens to have a line above it. The
@@ -1106,14 +1171,34 @@ draw_forecast_body() {
     if [ -n "$FC_SUMMARY" ]; then
         draw_text_reg "$LAB_FC_X" "$LAB_FC_Y" "$LAB_SZ" "GRAY7" "$LBL_FORECAST"
 
-        local icon="$ICON_DIR/fc_${FC_CODE}_${FC_MAIN_SZ}.bmp"
+        # FC_ICON, NOT FC_CODE. There are eleven icon files, one per range of
+        # WMO codes, and this script cannot reduce a code to its range — so it
+        # asked for fc_2_52.bmp on a partly-cloudy day, did not find it, and
+        # drew fc_-1, the circled question mark that is supposed to mean "no
+        # forecast". The collector reduces it now (weatherIconCode), which is
+        # also where the browser page's ranges live, so the two cannot disagree.
+        # FC_CODE is the fallback for a collector too old to send FC_ICON.
+        local icon="$ICON_DIR/fc_${FC_ICON:-$FC_CODE}_${FC_MAIN_SZ}.bmp"
         [ ! -f "$icon" ] && icon="$ICON_DIR/fc_-1_${FC_MAIN_SZ}.bmp"
         draw_image "$icon" "$FC_ICON_X" "$FC_ICON_Y"
 
         draw_text_reg "$FC_TEXT_X" "$FC_TEXT_Y" "$FC_TEXT_SZ" "BLACK" "$FC_SUMMARY"
         draw_text_bold "$FC_TEMP_X" "$FC_TEMP_Y" "$FC_TEMP_SZ" "BLACK" "${FC_HIGH}°/${FC_LOW}°"
+        # THE AGE BELONGS ON THIS LINE. The page draws "вятър 5 km/h · 8 мин"
+        # and the panel drew only the wind, so the one thing that says whether
+        # to believe a forecast — how old it is — was on the screen nobody
+        # looks at. Formatted by the collector (FC_AGE), like every other
+        # string, so the wording follows the language setting.
+        local fc_sub=""
         if [ -n "$FC_WIND" ] && [ "$FC_WIND" != "0" ]; then
-            draw_text_reg "$FC_WIND_X" "$FC_WIND_Y" "$FC_WIND_SZ" "GRAY4" "$LBL_WIND ${FC_WIND} km/h"
+            fc_sub="$LBL_WIND ${FC_WIND} km/h"
+        fi
+        if [ -n "$FC_AGE" ]; then
+            if [ -n "$fc_sub" ]; then fc_sub="$fc_sub · $FC_AGE"
+            else                      fc_sub="$FC_AGE"; fi
+        fi
+        if [ -n "$fc_sub" ]; then
+            draw_text_reg "$FC_WIND_X" "$FC_WIND_Y" "$FC_WIND_SZ" "GRAY4" "$fc_sub"
         fi
 
         # EACH COLUMN ON A PLATE, AND CENTRED ON IT. The page sets .per to
@@ -1127,7 +1212,7 @@ draw_forecast_body() {
         local plate_w="${OL_PLATE_W:-0}" ol_w
         for i in 0 1 2; do
             eval "ol_label=\$FC${i}_LABEL"
-            eval "ol_code=\$FC${i}_CODE"
+            eval "ol_code=\${FC${i}_ICON:-\$FC${i}_CODE}"
             eval "ol_temp=\$FC${i}_TEMP"
             eval "ol_x=\$OL${i}_X"
             eval "ol_y=\$OL${i}_Y"
@@ -1197,10 +1282,14 @@ draw_forecast_body() {
             wk_dx="$CENTRE_X"
 
             if [ "$i" = "$WK_TODAY" ]; then
-                # Today: knocked out of a black plate.
+                # Today: knocked out of a black plate — and drawn ON that
+                # plate, not bgless over it. Bgless left an empty black
+                # rectangle where the date should be: the one cell on the
+                # screen that has to be legible, reading as a hole. See
+                # draw_text().
                 fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
-                draw_text_reg "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "WHITE" "$wk_name"
-                draw_text_reg "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "WHITE" "$wk_day"
+                draw_text_reg_on "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "WHITE" "$wk_name" "BLACK"
+                draw_text_reg_on "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "WHITE" "$wk_day" "BLACK"
             else
                 wk_bg="GRAYE"
                 { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"

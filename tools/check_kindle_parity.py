@@ -204,6 +204,43 @@ def main():
                                 'a %dx%d image'
                                 % (rel, conf.get('GR_W'), conf.get('GR_H'), w, h))
 
+    # ── Every icon the collector can ask for exists on the panel ─────────────
+    #
+    # The page draws an SVG chosen by a range of WMO codes; the panel blits a
+    # BMP named after a code. weatherIconCode() reduces the one to the other,
+    # and the panel does no mapping at all — so every value it can return must
+    # be a file that is there. It was not: nothing reduced the code before, so
+    # a partly-cloudy afternoon (WMO 2) asked for fc_2_52.bmp, and the panel
+    # drew the circled question mark that means "no forecast".
+    fc = open(os.path.join(ROOT, 'src/modules/ForecastModule.cpp'),
+              encoding='utf-8').read()
+    fn = fc[fc.index('int weatherIconCode(int code) {'):]
+    fn = fn[:fn.index('\n}')]
+    want = sorted({int(m) for m in re.findall(r'return\s+(-?\d+);', fn)})
+    if len(want) < 5:
+        problems.append('parity: weatherIconCode() returned %d codes — the '
+                        'function changed shape' % len(want))
+
+    gen = open(os.path.join(ROOT, 'scripts/generate_kindle_icons.py'),
+               encoding='utf-8').read()
+    m = re.search(r'RESOLUTIONS\s*=\s*\{(.*?)\}', gen, re.S)
+    if not m:
+        problems.append('parity: generate_kindle_icons.py no longer states its '
+                        'RESOLUTIONS')
+    else:
+        for res, main_sz, ol_sz in re.findall(
+                r'(\d+)\s*:\s*\((\d+),\s*(\d+)\)', m.group(1)):
+            for code in want:
+                for sz in (main_sz, ol_sz):
+                    f = os.path.join(ROOT, 'kindle/icons', res,
+                                     'fc_%d_%s.bmp' % (code, sz))
+                    if not os.path.isfile(f):
+                        problems.append(
+                            'kindle/icons/%s/fc_%d_%s.bmp is missing, and '
+                            'weatherIconCode() can return %d — the panel would '
+                            'draw the question mark'
+                            % (res, code, sz, code))
+
     if problems:
         print('FAIL: %d place(s) where the panel and the page disagree.\n'
               % len(problems))

@@ -129,44 +129,85 @@ static void slant(String& o, int x, int len) {
     o += F("\" y2=\""); o += 50 + len; o += F("\"/>");
 }
 
+// The WMO code reduced to the one icon that stands for its whole range.
+//
+// ONE TABLE, TWO RENDERERS. The browser page draws an SVG chosen by the ranges
+// below; the panel blits a BMP named after a code, from a set of eleven files.
+// The two agreed on the ranges only by accident, and did not: the generator
+// makes fc_1_*.bmp for "partly cloudy" and Open-Meteo answers 2 for it about as
+// often as 1, so the panel looked for fc_2_52.bmp, did not find it, and fell
+// back to fc_-1_52.bmp — the circled question mark. On a dashboard whose
+// forecast row is three icons wide, that was three question marks next to a
+// browser page showing sun, sun and cloud.
+//
+// So the collector reduces the code and sends THAT, and the panel does no
+// mapping at all. Adding a range here reaches both renderers at once.
+int weatherIconCode(int code) {
+    if (code < 0)                       return -1;
+    if (code == 0)                      return 0;
+    if (code <= 2)                      return 1;    // mainly clear, partly cloudy
+    if (code == 3)                      return 3;    // overcast
+    if (code == 45 || code == 48)       return 45;   // fog, rime fog
+    if (code >= 51 && code <= 57)       return 51;   // drizzle, freezing drizzle
+    if (code >= 61 && code <= 67)       return 61;   // rain, freezing rain
+    if (code >= 71 && code <= 77)       return 71;   // snow, grains
+    if (code >= 80 && code <= 82)       return 80;   // rain showers
+    if (code == 85 || code == 86)       return 85;   // snow showers
+    if (code >= 95)                     return 95;   // thunderstorm
+    return -1;                          // a code no range claims
+}
+
 void appendWeatherIcon(String& out, int code, int px) {
     out += F("<svg viewBox=\"0 0 64 64\" width=\""); out += px;
     out += F("\" height=\""); out += px;
     out += F("\" stroke=\"#000\" stroke-width=\"2.4\" stroke-linecap=\"round\" "
              "stroke-linejoin=\"round\" fill=\"none\">");
 
-    if (code < 0) {
-        out += F("<circle cx=\"32\" cy=\"32\" r=\"14\" fill=\"#fff\"/>"
-                 "<text x=\"32\" y=\"40\" text-anchor=\"middle\" font-size=\"22\" "
-                 "font-family=\"Georgia,serif\" stroke=\"none\" fill=\"#000\">?</text>");
-    } else if (code == 0) {
+    // Through the same reduction the panel is sent, so the two cannot drift.
+    switch (weatherIconCode(code)) {
+    case 0:
         out += FPSTR(SUN_FULL);
-    } else if (code <= 2) {
+        break;
+    case 1:
         out += FPSTR(SUN_SMALL); out += FPSTR(CLOUD);
-    } else if (code == 3) {
+        break;
+    case 3:
         out += FPSTR(CLOUD);
-    } else if (code == 45 || code == 48) {
+        break;
+    case 45:
         out += FPSTR(CLOUD);
         out += F("<line x1=\"16\" y1=\"51\" x2=\"48\" y2=\"51\"/>"
                  "<line x1=\"16\" y1=\"56\" x2=\"48\" y2=\"56\"/>");
-    } else if (code >= 51 && code <= 57) {
+        break;
+    case 51:
         out += FPSTR(CLOUD);
         for (int i = 0; i < 3; i++) slant(out, 22 + i * 11, 5);
-    } else if (code >= 61 && code <= 67) {
+        break;
+    case 61:
         out += FPSTR(CLOUD);
         for (int i = 0; i < 3; i++) slant(out, 22 + i * 11, 10);
-    } else if (code >= 71 && code <= 77) {
+        break;
+    case 71:
         out += FPSTR(CLOUD);
         for (int i = 0; i < 3; i++) flake(out, 22 + i * 13);
-    } else if (code >= 80 && code <= 82) {
+        break;
+    case 80:
         out += FPSTR(CLOUD);
         slant(out, 26, 10); slant(out, 37, 10);
-    } else if (code == 85 || code == 86) {
+        break;
+    case 85:
         out += FPSTR(CLOUD);
         slant(out, 24, 10); flake(out, 40);
-    } else {                       // >= 95, thunderstorm
+        break;
+    case 95:
         out += FPSTR(CLOUD);
         out += F("<path d=\"M34 48L26 58h7l-3 8 10-12h-7l4-6z\" fill=\"#fff\"/>");
+        break;
+    default:                       // -1, and anything no range claims
+        out += F("<circle cx=\"32\" cy=\"32\" r=\"14\" fill=\"#fff\"/>"
+                 "<text x=\"32\" y=\"40\" text-anchor=\"middle\" font-size=\"22\" "
+                 "font-family=\"Georgia,serif\" stroke=\"none\" fill=\"#000\">?</text>");
+        break;
     }
     out += F("</svg>");
 }
