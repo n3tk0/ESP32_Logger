@@ -190,6 +190,14 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
     // queue behind it. Sending it again would fail the same way for ever.
     int stored = 0, queued = 0, rejected = 0, accepted = 0;
     bool backpressure = false;
+    bool noClock      = false;
+
+    // READ ONCE AND COUNTED DOWN, not asked per reading. historyRoom() takes
+    // the ingest spinlock, and a forty-eight-reading backlog batch was taking
+    // it forty-eight times on the async web server's task purely to re-read
+    // one subtraction — with the ESP-NOW receive path contending for the same
+    // lock. Nothing else adds to the queue while this handler runs.
+    int room = remoteIngest.historyRoom();
 
     // ── The current values first, and outside the prefix rule entirely ──────
     //
@@ -218,14 +226,23 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
             if (!IngestBatch::isLive(IngestBatch::isNewest(liveIdx, nLive, i),
                                      IngestBatch::clampAge(r["dt_s"] | 0UL)))
                 continue;
+            // COUNTED HERE, ALL OF THEM. A live reading with no metric name or
+            // a value that is not a number used to be skipped silently by this
+            // pass and skipped again by the `if (live) continue;` below, so it
+            // appeared in neither `stored` nor `rejected` — a reply claiming
+            // three readings consumed and accounting for two.
             const char* metric = r["metric"] | "";
-            if (*metric == '\0' || !r["value"].is<float>()) continue;
-            const float value = r["value"].as<float>();
-            if (!isfinite(value)) continue;
+            const bool  ok     = (*metric != '\0') && r["value"].is<float>() &&
+                                 isfinite(r["value"].as<float>());
+            if (!ok) { rejected++; continue; }
+
             const uint32_t age = IngestBatch::clampAge(r["dt_s"] | 0UL);
-            if (remoteIngest.put(node, metric, value, r["unit"] | "",
+            if (remoteIngest.put(node, metric, r["value"].as<float>(),
+                                 r["unit"] | "",
                                  (canBackfill && base > age) ? base - age : ts))
                 stored++;
+            else
+                rejected++;      // the mailbox is full of other nodes' metrics
         }
     }
 
@@ -245,17 +262,39 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
             IngestBatch::isBackfill(live, age, canBackfill, base);
         const uint32_t when = backfill ? (base - age) : 0;
 
+        // ── NO CLOCK MEANS HOLD, NOT SWALLOW ────────────────────────────
+        //
+        // canBackfill is false until NTP lands, and isBackfill() then answers
+        // false for everything — so an aged reading fell through to put(),
+        // the one-slot-per-metric mailbox, and the batch came back fully
+        // accepted. A node handing over an hour-long outage to a collector
+        // that had just rebooted was told to drop all forty-eight readings
+        // after forty-seven of them had overwritten each other. That is
+        // precisely the window the node's ring was written for, and this
+        // endpoint was emptying it.
+        //
+        // Held instead: the node keeps them and offers them again, and a
+        // collector whose clock arrives a minute later files them properly.
+        // The live pass above has already refreshed the mailbox, so the
+        // dashboard is current throughout — only the history waits.
+        if (!live && age > 0 && !canBackfill) {
+            noClock      = true;
+            backpressure = true;
+            break;
+        }
+
         // ROOM CHECKED BEFORE THE READING IS JUDGED, so that a batch stops at
         // the same place whatever it happens to contain. Deciding to stop is
         // about the queue, not about this reading.
-        if (backfill && remoteIngest.historyRoom() <= 0) {
+        if (backfill && room <= 0) {
             backpressure = true;
             break;
         }
 
         accepted++;
 
-        // Already in the mailbox, from the pass above. Counted there.
+        // Already in the mailbox, from the pass above, which counted it as
+        // stored or rejected. Nothing more to do with it here.
         if (live) continue;
 
         // What both put() and putHistorical() refuse outright, tested here so
@@ -270,6 +309,7 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
             // There is room — checked above — so this cannot shed anything,
             // and its return value cannot mean anything but success.
             remoteIngest.putHistorical(node, metric, value, unit, when);
+            room--;
             queued++;
         } else if (remoteIngest.put(node, metric, value, unit,
                                     (canBackfill && base > age) ? base - age : ts)) {
@@ -285,17 +325,24 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
         }
     }
 
+    // `accepted` IS THE ONLY NUMBER THE NODE ACTS ON, and the others do not
+    // have to sum to it. The mailbox pass runs over the whole batch, so a live
+    // reading past the point the prefix stopped is already counted in `stored`
+    // while the node still holds it — and offers it again, which is harmless
+    // because a mailbox written twice is a mailbox written once.
+    //
     // `stored` and `queued` are reported apart because they answer different
     // questions — how much is current, how much was backlog — and `held` says
     // plainly that the rest of the batch was not read at all, so a node that
     // gets a 200 back never mistakes it for "all of it arrived".
-    char out[224];
+    char out[256];
     snprintf(out, sizeof(out),
              "{\"ok\":true,\"accepted\":%d,\"stored\":%d,\"queued\":%d,"
-             "\"rejected\":%d,\"held\":%s,\"room\":%d,"
+             "\"rejected\":%d,\"held\":%s,\"no_clock\":%s,\"room\":%d,"
              "\"clock_rejected\":%s}",
              accepted, stored, queued, rejected,
-             backpressure ? "true" : "false", remoteIngest.historyRoom(),
+             backpressure ? "true" : "false", noClock ? "true" : "false",
+             room < 0 ? 0 : room,
              clockRejected ? "true" : "false");
     req->send(200, "application/json", out);
 }

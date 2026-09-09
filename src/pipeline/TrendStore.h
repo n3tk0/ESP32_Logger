@@ -31,9 +31,14 @@ void trendStoreLoad();
 void trendStoreTick();
 
 /// Write now, whatever the flag says. For the paths that know the power is
-/// about to go: a reboot from the UI, an OTA about to restart the device.
-/// Returns false when the filesystem refused, which is worth logging but is
-/// not worth delaying a restart for.
+/// about to go: a reboot from the UI, an OTA about to restart the device,
+/// every deep sleep. Returns false when the filesystem refused, which is worth
+/// logging but is not worth delaying a restart for.
+///
+/// IT IGNORES THE RETRY BACKOFF, which trendStoreTick() honours. A transient
+/// filesystem failure a moment ago set a sixty-second hold; this function is
+/// called when there is not going to BE a next attempt, so honouring it would
+/// have thrown away the hour it was called to preserve.
 bool trendStoreSave();
 
 #endif  // FEATURE_KINDLE_DASHBOARD

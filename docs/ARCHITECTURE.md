@@ -592,7 +592,7 @@ reading as offline on every screen.
 
 ```json
 {"ok":true,"accepted":31,"stored":3,"queued":28,"rejected":0,
- "held":true,"room":0,"clock_rejected":false}
+ "held":true,"no_clock":false,"room":0,"clock_rejected":false}
 ```
 
 `accepted` is **the length of the prefix of the batch the collector consumed** —
@@ -620,7 +620,14 @@ the age test, batch 1's newest went to the mailbox, batch 2's overwrote it, and
 nine of sixty-four buffered samples were deleted on arrival by the rule that
 exists to stop the mailbox eating a backlog.
 
-The stop is deliberate backpressure. The history queue holds
+`stored` and `queued` do **not** have to sum to `accepted`. The mailbox pass
+runs over the whole batch, so a current reading past the point the prefix
+stopped is counted in `stored` while the node still holds it — and offers it
+again, which is harmless because a mailbox written twice is a mailbox written
+once. `accepted` is the only number the node acts on.
+
+There are **two** reasons a batch stops early, and `no_clock` says which. The
+first is backpressure. The history queue holds
 `REMOTE_HISTORY_SLOTS` (64) readings and drains a handful per sensor tick,
 while the reference node offers up to 192 from an hour-long outage.
 `putHistorical()` never refuses for want of room — it sheds its oldest entry,
@@ -632,6 +639,16 @@ wait instead: the loop stops at the first backfill reading there is no room
 for, and `room` says how much space is left. A reading the collector *cannot*
 use is consumed rather than left to block the queue behind it, because sending
 it again would fail the same way for ever.
+
+The second is that the collector's own clock is not set yet. `dt_s` is an age,
+and an age needs something to be subtracted from; until NTP lands there is
+nothing, so `isBackfill()` answers false for everything. Those readings used to
+fall through to the mailbox and the batch came back fully accepted — a node
+handing over an hour-long outage to a collector that had **just rebooted** was
+told to drop all forty-eight after forty-seven had overwritten each other,
+which is precisely the window the node's ring exists for. They are held now
+(`held: true, no_clock: true`), and the mailbox pass keeps the dashboard
+current throughout: only the history waits.
 
 A collector that predates `accepted` answers without it; a node reads its
 absence as "the whole batch", which is what an older collector did with it.

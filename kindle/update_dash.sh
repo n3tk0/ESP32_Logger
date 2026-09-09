@@ -596,12 +596,13 @@ now_clock() {
 # out by half a digit until the next fetch. Half a digit beats the time set
 # hard against the left edge of a black plate.
 clock_centre_x() {
+    # $1=type size  -> CENTRE_X
     local sz="$1" w
     w=$(( sz * ${CLOCK_ADVW:-0} / 1000 ))
     if [ "$w" -gt 0 ] && [ "$w" -lt "${Z_CLOCK_W:-0}" ] 2>/dev/null; then
-        echo $(( Z_CLOCK_X + (Z_CLOCK_W - w) / 2 ))
+        CENTRE_X=$(( Z_CLOCK_X + (Z_CLOCK_W - w) / 2 ))
     else
-        echo "$CL_X"
+        CENTRE_X="$CL_X"
     fi
 }
 
@@ -623,7 +624,8 @@ draw_clock() {
             sz="${CL_SZ_BOXED:-$CL_SIZE}"
             fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" BLACK
             cy=$(( Z_CLOCK_Y + (Z_CLOCK_H - sz) / 2 ))
-            draw_text_bold "$(clock_centre_x "$sz")" "$cy" "$sz" "WHITE" "$now_time"
+            clock_centre_x "$sz"
+            draw_text_bold "$CENTRE_X" "$cy" "$sz" "WHITE" "$now_time"
             ;;
         2)  # RULED — a hairline over it and set smaller, so it reads as a rule
             # rather than as a number that happens to have a line above it. The
@@ -632,7 +634,8 @@ draw_clock() {
             sz="${CL_SZ_RULED:-$CL_SIZE}"
             draw_hline "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" BLACK
             cy=$(( Z_CLOCK_Y + ${CL_RULED_PAD:-15} ))
-            draw_text_bold "$(clock_centre_x "$sz")" "$cy" "$sz" "BLACK" "$now_time"
+            clock_centre_x "$sz"
+            draw_text_bold "$CENTRE_X" "$cy" "$sz" "BLACK" "$now_time"
             ;;
         3)  # DATED — the room for the date is taken FROM the clock rather than
             # added under it, exactly as the CSS does it, because the rectangle
@@ -738,18 +741,26 @@ baseline_y() {
 #
 # A width of zero — an older collector, which measures nothing — falls back to
 # the left edge, which is what this always did.
+#
+# THE ANSWER IS A VARIABLE, NOT AN ECHO. `x=$(centre_in ...)` forks a subshell,
+# and a full repaint centres twenty-four things: seven weekday names, seven
+# numerals, three outlook labels, three icons, three temperatures and the
+# clock. Two dozen process creations on a ten-year-old ARM device, once a
+# minute for the clock and once a tier for the rest, to do three integer
+# operations. draw_field() already passes its widths this way.
+CENTRE_X=0
 centre_in() {
-    # $1=cell left  $2=cell width  $3=content width
+    # $1=cell left  $2=cell width  $3=content width  -> CENTRE_X
     if [ "${3:-0}" -gt 0 ] && [ "$3" -lt "$2" ] 2>/dev/null; then
-        echo $(( $1 + ($2 - $3) / 2 ))
+        CENTRE_X=$(( $1 + ($2 - $3) / 2 ))
     else
-        echo "$1"
+        CENTRE_X="$1"
     fi
 }
 
 # The same, for an outlook column, whose width is one number for all three.
 ol_centre() {
-    # $1=column left  $2=content width
+    # $1=column left  $2=content width  -> CENTRE_X
     centre_in "$1" "${OL_PLATE_W:-0}" "$2"
 }
 
@@ -1129,18 +1140,19 @@ draw_forecast_body() {
             fi
 
             eval "ol_w=\${FC${i}_LABELW:-0}"
-            draw_text_reg "$(ol_centre "$ol_x" "$(( OL_LABEL_SZ * ol_w / 1000 ))")" \
-                          "$ol_y" "$OL_LABEL_SZ" "GRAY7" "$ol_label"
+            ol_centre "$ol_x" "$(( OL_LABEL_SZ * ol_w / 1000 ))"
+            draw_text_reg "$CENTRE_X" "$ol_y" "$OL_LABEL_SZ" "GRAY7" "$ol_label"
 
             ol_icon="$ICON_DIR/fc_${ol_code}_${FC_OL_SZ}.bmp"
             [ ! -f "$ol_icon" ] && ol_icon="$ICON_DIR/fc_-1_${FC_OL_SZ}.bmp"
             ol_icon_y=$((ol_y + OL_ICON_OFFSET))
-            draw_image "$ol_icon" "$(ol_centre "$ol_x" "$FC_OL_SZ")" "$ol_icon_y"
+            ol_centre "$ol_x" "$FC_OL_SZ"
+            draw_image "$ol_icon" "$CENTRE_X" "$ol_icon_y"
 
             eval "ol_w=\${FC${i}_TEMPW:-0}"
             ol_temp_y=$((ol_y + OL_TEMP_OFFSET))
-            draw_text_bold "$(ol_centre "$ol_x" "$(( OL_TEMP_SZ * ol_w / 1000 ))")" \
-                           "$ol_temp_y" "$OL_TEMP_SZ" "BLACK" "${ol_temp}°"
+            ol_centre "$ol_x" "$(( OL_TEMP_SZ * ol_w / 1000 ))"
+            draw_text_bold "$CENTRE_X" "$ol_temp_y" "$OL_TEMP_SZ" "BLACK" "${ol_temp}°"
         done
     fi
 
@@ -1148,54 +1160,58 @@ draw_forecast_body() {
     # Behind its own switch, as it is on the page (KSHOW_WEEK). Everything
     # under it — the footer rule and the line of type — is drawn either way,
     # because the page's footer is not part of the strip.
-    if [ "${SHOW_WEEK:-1}" != "1" ]; then
-        draw_hline "$FOOT_RULE_X" "$FOOT_RULE_Y" "$FOOT_RULE_W" "GRAYA"
-        draw_text_reg "$FOOT_X" "$FOOT_Y" "$FOOT_SZ" "GRAY5" "$LBL_MEASURED"
-        return 0
-    fi
+    #
+    # WRAPPED RATHER THAN RETURNED FROM. The early return needed its own copy
+    # of the footer, so the two lines that draw it existed twice — and the
+    # branch that is harder to reach by hand, the switch turned off, is the one
+    # a later change to the footer would miss. Which is exactly the class of
+    # silent divergence this file has spent the last few commits removing.
+    if [ "${SHOW_WEEK:-1}" = "1" ]; then
 
-    # Week heading (month)
-    if [ -n "${WK_MON_MONTH:-}" ]; then
-        draw_hline "${WK_HDG_RULE_X:-$FOOT_RULE_X}" "${WK_HDG_RULE_Y:-$WK_Y}" \
-                   "${WK_HDG_RULE_W:-$FOOT_RULE_W}" "GRAYA"
-        local wk_heading="$WK_MON_MONTH"
-        [ -n "${WK_SUN_MONTH:-}" ] && wk_heading="$wk_heading – $WK_SUN_MONTH"
-        draw_text_reg "${WK_HDG_X:-$WK_X}" "${WK_HDG_Y:-$WK_Y}" \
-                      "${WK_HDG_SZ:-$LAB_SZ}" "GRAY7" "$wk_heading"
-    fi
-
-    # Week strip
-    local wk_x="$WK_X" wk_name wk_day wk_bg i wk_nw wk_dw wk_nx wk_dx
-    for i in 0 1 2 3 4 5 6; do
-        eval "wk_name=\$WK${i}_NAME"
-        eval "wk_day=\$WK${i}_DAY"
-
-        # CENTRED IN THE CELL, and the number set REGULAR. .wd is
-        # text-align:center and .wd-d carries no font-weight, so the page draws
-        # seven centred regular numerals; the panel drew seven bold ones hard
-        # against the left edge of their cells, which on a row of identical
-        # boxes is the one place a misalignment cannot hide. The widths are the
-        # collector's — see draw_field() for why they are not ${#var}.
-        eval "wk_nw=\$WK${i}_NAMEW; wk_dw=\$WK${i}_DAYW"
-        wk_nx=$(centre_in "$wk_x" "$WK_CELL_W" \
-                          "$(( WK_NAME_SZ * ${wk_nw:-0} / 1000 ))")
-        wk_dx=$(centre_in "$wk_x" "$WK_CELL_W" \
-                          "$(( WK_DAY_SZ * ${wk_dw:-0} / 1000 ))")
-
-        if [ "$i" = "$WK_TODAY" ]; then
-            # Today: knocked out of a black plate.
-            fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
-            draw_text_reg "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "WHITE" "$wk_name"
-            draw_text_reg "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "WHITE" "$wk_day"
-        else
-            wk_bg="GRAYE"
-            { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
-            fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
-            draw_text_reg "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "GRAY7" "$wk_name"
-            draw_text_reg "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "BLACK" "$wk_day"
+        # Week heading (month)
+        if [ -n "${WK_MON_MONTH:-}" ]; then
+            draw_hline "${WK_HDG_RULE_X:-$FOOT_RULE_X}" "${WK_HDG_RULE_Y:-$WK_Y}" \
+                       "${WK_HDG_RULE_W:-$FOOT_RULE_W}" "GRAYA"
+            local wk_heading="$WK_MON_MONTH"
+            [ -n "${WK_SUN_MONTH:-}" ] && wk_heading="$wk_heading – $WK_SUN_MONTH"
+            draw_text_reg "${WK_HDG_X:-$WK_X}" "${WK_HDG_Y:-$WK_Y}" \
+                          "${WK_HDG_SZ:-$LAB_SZ}" "GRAY7" "$wk_heading"
         fi
-        wk_x=$((wk_x + WK_CELL_W))
-    done
+
+        # Week strip
+        local wk_x="$WK_X" wk_name wk_day wk_bg i wk_nw wk_dw wk_nx wk_dx
+        for i in 0 1 2 3 4 5 6; do
+            eval "wk_name=\$WK${i}_NAME"
+            eval "wk_day=\$WK${i}_DAY"
+
+            # CENTRED IN THE CELL, and the number set REGULAR. .wd is
+            # text-align:center and .wd-d carries no font-weight, so the page draws
+            # seven centred regular numerals; the panel drew seven bold ones hard
+            # against the left edge of their cells, which on a row of identical
+            # boxes is the one place a misalignment cannot hide. The widths are the
+            # collector's — see draw_field() for why they are not ${#var}.
+            eval "wk_nw=\$WK${i}_NAMEW; wk_dw=\$WK${i}_DAYW"
+            centre_in "$wk_x" "$WK_CELL_W" "$(( WK_NAME_SZ * ${wk_nw:-0} / 1000 ))"
+            wk_nx="$CENTRE_X"
+            centre_in "$wk_x" "$WK_CELL_W" "$(( WK_DAY_SZ * ${wk_dw:-0} / 1000 ))"
+            wk_dx="$CENTRE_X"
+
+            if [ "$i" = "$WK_TODAY" ]; then
+                # Today: knocked out of a black plate.
+                fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
+                draw_text_reg "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "WHITE" "$wk_name"
+                draw_text_reg "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "WHITE" "$wk_day"
+            else
+                wk_bg="GRAYE"
+                { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
+                fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
+                draw_text_reg "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "GRAY7" "$wk_name"
+                draw_text_reg "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "BLACK" "$wk_day"
+            fi
+            wk_x=$((wk_x + WK_CELL_W))
+        done
+
+    fi   # SHOW_WEEK
 
     draw_hline "$FOOT_RULE_X" "$FOOT_RULE_Y" "$FOOT_RULE_W" "GRAYA"
     draw_text_reg "$FOOT_X" "$FOOT_Y" "$FOOT_SZ" "GRAY5" "$LBL_MEASURED"
@@ -1453,8 +1469,20 @@ while true; do
     esac
 
     # One fetch serves however many tiers are due this minute.
+    #
+    # THE CHART TIER IS IN THIS LIST NOW, and it has to be. The axis labels
+    # live in the payload (CH_Y0..CH_Y4 — see draw_chart_axis) and the image
+    # comes from a separate fetch, so drawing one against the other's numbers
+    # is a chart labelled with a scale it does not have. GRAPH_EVERY and
+    # DATA_EVERY are both editable from the KUAL menu, so any pair where the
+    # chart tier can fire without the data tier — 10 and 15, say — was
+    # labelling a fresh image with a scale up to fifteen minutes old, and
+    # nothing on the panel could show that it had happened.
+    #
+    # A payload fetch is one small request; the image it accompanies is fifty
+    # times the size.
     case " $TIERS " in
-        *" sensors "*|*" forecast "*) fetch_data && load_data ;;
+        *" sensors "*|*" forecast "*|*" chart "*) fetch_data && load_data ;;
     esac
 
     case " $TIERS " in

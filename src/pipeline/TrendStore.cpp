@@ -26,22 +26,38 @@ static const char* TREND_TMP  = "/trend.tmp";
 static uint32_t s_retryAtMs = 0;
 
 bool trendStoreSave() {
-    if (s_retryAtMs != 0 && (int32_t)(s_retryAtMs - millis()) > 0) return false;
-
     const size_t need = TrendRing::snapshotBytes();
 
     // On the stack: under 2 KB on a task that has thousands, and a heap
     // allocation on the path that runs when flash is already unhappy is one
     // more thing that can fail while trying to recover.
     uint8_t buf[TrendRing::SNAP_MAX_BYTES];
-    if (need > sizeof(buf)) return false;
+    if (need > sizeof(buf)) return false;      // before the flag is touched
 
-    if (trendRing.snapshot(buf, sizeof(buf)) != need) return false;
+    // CLEARED HERE, WITH THE COPY TAKEN, not after the file is closed.
+    //
+    // The write below spends tens to hundreds of milliseconds in LittleFS, and
+    // ProcessingTask keeps folding readings in throughout. An hour that rolls
+    // during that window sets the flag for a roll this snapshot does not
+    // contain — and clearing it afterwards discarded that, so nothing was
+    // written until the NEXT hour rolled and a power cut in between lost the
+    // bucket this whole arrangement exists to keep. Cleared with the copy, the
+    // late roll survives as a flag that is still set.
+    //
+    // Every failure path below puts it back, so a write that does not land
+    // still leaves something for the next tick to do. The cost of being wrong
+    // the other way is one redundant write.
+    trendRing.clearDirty();
+    if (trendRing.snapshot(buf, sizeof(buf)) != need) {
+        trendRing.markDirty();
+        return false;
+    }
 
     File f = LittleFS.open(TREND_TMP, "w");
     if (!f) {
         Serial.println("[trend] cannot open the snapshot for writing "
                        "— retrying in 60 s");
+        trendRing.markDirty();
         s_retryAtMs = millis() + 60000u;
         if (s_retryAtMs == 0) s_retryAtMs = 1;      // 0 means "no backoff"
         return false;
@@ -53,6 +69,7 @@ bool trendStoreSave() {
         Serial.printf("[trend] wrote %u of %u bytes — discarding\n",
                       (unsigned)wrote, (unsigned)need);
         LittleFS.remove(TREND_TMP);
+        trendRing.markDirty();
         s_retryAtMs = millis() + 60000u;
         if (s_retryAtMs == 0) s_retryAtMs = 1;
         return false;
@@ -76,19 +93,26 @@ bool trendStoreSave() {
         if (!LittleFS.rename(TREND_TMP, TREND_FILE)) {
             Serial.println("[trend] could not rename the snapshot into place");
             LittleFS.remove(TREND_TMP);
+            trendRing.markDirty();
             s_retryAtMs = millis() + 60000u;
             if (s_retryAtMs == 0) s_retryAtMs = 1;
             return false;
         }
     }
 
-    trendRing.clearDirty();
     s_retryAtMs = 0;
     return true;
 }
 
 void trendStoreTick() {
     if (!trendRing.dirty()) return;
+    // THE BACKOFF LIVES HERE, not in trendStoreSave(). A failed write buys a
+    // minute of quiet rather than retrying from every pass of loop(): a full
+    // or broken filesystem does not heal inside a millisecond, and the log it
+    // would produce buries whatever else is wrong. The forced save is the
+    // opposite case — it is called when there is no next attempt — so it does
+    // not consult this.
+    if (s_retryAtMs != 0 && (int32_t)(s_retryAtMs - millis()) > 0) return;
     trendStoreSave();
 }
 

@@ -242,6 +242,16 @@ static void _doSleep() {
         TaskManager::shutdown();
         delay(200);
     }
+#ifdef FEATURE_KINDLE_DASHBOARD
+    // RAM DOES NOT SURVIVE DEEP SLEEP, so the hour in progress goes with it
+    // unless it is written first. trendStoreTick() only writes when an hour
+    // rolls, which is right for a device left running and useless here — and
+    // on the hybrid timer path loop() is never entered at all, so the tick
+    // never runs and the chart was restored from flash at every wake and
+    // never advanced past whatever the last restart happened to write.
+    trendStoreSave();
+#endif
+
     DBGLN("[Sleep] Deep sleep →");
     Serial.flush();
     delay(10);
@@ -886,14 +896,9 @@ void setup() {
         while (millis() < windowEnd) {
             if (shouldRestart) {
 #ifdef FEATURE_KINDLE_DASHBOARD
-        // THE HOUR IN PROGRESS, before the power goes. trendStoreTick() only
-        // writes when an hour has rolled, which is right for a device left
-        // alone and wrong for one about to restart: whatever has been measured
-        // since the last roll would go with it, and a reader who pressed
-        // Restart would come back to a chart with a bite out of the right-hand
-        // end. It is one flash write on a path that is already about to spend
-        // two seconds and a radio shutdown.
-        trendStoreSave();
+                // The hour in progress, before the power goes — see the sleep
+                // path below and the restart path in loop().
+                trendStoreSave();
 #endif
                 // Invalidate magic so the next boot's setup() takes the
                 // cold-boot branch and zeroes the counter regardless of
@@ -907,6 +912,15 @@ void setup() {
             delay(100);
         }
         flushLogBufferToFS();
+#ifdef FEATURE_KINDLE_DASHBOARD
+        // RAM DOES NOT SURVIVE DEEP SLEEP, so the hour in progress goes with
+        // it unless it is written first. trendStoreTick() only writes when an
+        // hour rolls, which is right for a device left running and useless
+        // here — and on this path loop() is never entered at all, so the tick
+        // never runs: the chart was restored from flash at every wake and
+        // never advanced past whatever the last restart happened to write.
+        trendStoreSave();
+#endif
         configureWakeup();            // re-arm GPIO wakeup sources
         esp_sleep_enable_timer_wakeup((uint64_t)g_hybridSleepMs * 1000ULL);
         TaskManager::shutdown();

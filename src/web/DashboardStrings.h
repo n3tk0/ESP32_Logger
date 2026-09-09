@@ -241,7 +241,14 @@ inline const char* kdWeekdayAhead(int wday, int daysAhead) {
                                        "Thu", "Fri", "Sat" };
     static const char* const BG[7] = { "нд", "пн", "вт", "ср",
                                        "чт", "пт", "сб" };
-    const int i = (wday + daysAhead) % 7;
+    // CLAMPED LIKE ITS TWO SIBLINGS. `%` on a negative sum is negative in C,
+    // so an unguarded index reads before the array — and the one caller that
+    // now passes a STORED value, forecastPeriodLabel() with Period::wday,
+    // holds -1 for an hourly column. Its own `wday >= 0` test was the only
+    // thing standing between that and EN[-1].
+    int i = (wday + daysAhead) % 7;
+    if (i < 0) i += 7;
+    if (i < 0 || i > 6) i = 0;
     return kdLangIsBg() ? BG[i] : EN[i];
 }
 

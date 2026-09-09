@@ -620,6 +620,7 @@ jobs:
             .github/workflows/build-ota-firmware.yml
           if grep -q 'lolin_c3_pico' .github/workflows/build-ota-firmware.yml; then
             echo "::error::the board mutation no longer matches — this proof step is stale"
+            cp /tmp/ota.orig .github/workflows/build-ota-firmware.yml
             exit 1
           fi
           if python3 tools/check_pio_envs.py > /dev/null 2>&1; then
@@ -729,6 +730,7 @@ jobs:
           sed -i 's/^        scanWatchdog();$//' node/src/ConfigPortal.cpp
           if grep -q '^        scanWatchdog();$' node/src/ConfigPortal.cpp; then
             echo "::error::the scanWatchdog mutation no longer matches — this proof step is stale"
+            cp /tmp/portal.orig node/src/ConfigPortal.cpp
             exit 1
           fi
           if python3 tools/check_node_portal.py > /dev/null 2>&1; then

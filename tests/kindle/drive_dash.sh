@@ -958,6 +958,25 @@ check "$?" "and English before the collector has ever answered"
 load_kv "$DASH_TMP/data.txt" PAYLOAD
 reset_log
 
+# ── 3d6. The axis and the image come from the same minute ───────────────────
+#
+# The five temperatures down the side of the chart are in the PAYLOAD and the
+# grid they label is in a separately fetched image. GRAPH_EVERY and DATA_EVERY
+# are both editable from the KUAL menu, so a pair like 10 and 15 gives minutes
+# where the chart tier fires alone — and a fresh image then gets a scale up to
+# fifteen minutes old drawn down its side, which nothing on the panel could
+# show had happened.
+CLOCK_EVERY=1; DATA_EVERY=15; GRAPH_EVERY=10; FORECAST_EVERY=30; FULL_EVERY=60
+check "$(case " $(plan_minute 10) " in *" chart "*) echo 0 ;; *) echo 1 ;; esac)" \
+      "minute 10 is a chart tier with no data tier ($(plan_minute 10))"
+( . /dev/null
+  # The loop's own fetch list, as the script writes it: the chart tier has to
+  # be one of the tiers that pulls a payload.
+  grep -q '\*" sensors "\*|\*" forecast "\*|\*" chart "\*) fetch_data' \
+       "$KDIR/update_dash.sh" || exit 1 )
+check "$?" "and the chart tier fetches the payload its axis labels come from"
+CLOCK_EVERY=1; DATA_EVERY=5; GRAPH_EVERY=15; FORECAST_EVERY=30; FULL_EVERY=60
+
 # ── 3e. With no data at all, the page says why ───────────────────────────────
 ( HAVE_DATA=0
   unset Z_GROUP_OUT OUT_TEMP IN_TEMP IN_HUM OUT_HUM

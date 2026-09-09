@@ -899,6 +899,15 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
 // a place added later appears in the editor without anyone remembering to add
 // it in two codebases.
 static void handleKindleSlotsGet(AsyncWebServerRequest* req) {
+    // THE THIRD CONSUMER OF kdT(), and the one that was reading whatever the
+    // last /kindle request left behind. kdSlotLabel() and the two group
+    // headings pick their language from one ambient value now, so an editor
+    // opened before anything had rendered the dashboard showed "TEMP" and
+    // "OUTSIDE" while the page and the panel both drew "ТЕМП" and "НАВЪН" —
+    // and a Kindle polling /kindle/data flipped it back on the next reload
+    // with nobody touching anything.
+    kdLangBegin(config.kindle.lang);
+
     JsonDocument doc;
     const KindleZones& zones = kdSlots();
 

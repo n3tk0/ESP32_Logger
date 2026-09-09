@@ -165,6 +165,20 @@ static Tendency pressureTendency(const TrendRing::Hour* h) {
 //
 // Gaps break both the band and the lines instead of interpolating. A flat
 // line through a four-hour outage reads as "it was steady", which is a lie.
+/// Has this series any reading in it at all?
+///
+/// NOT THE SAME QUESTION AS trendRing.series()'s return, which answers "is this
+/// series tracked" — and every one of them is, from kindleTrackTrends() at
+/// boot, whether or not a reading has ever arrived. Using that as "there is a
+/// line to name" put the chart's key under the "the record fills as readings
+/// arrive" note on a fresh boot: two swatches naming two lines that are not
+/// drawn, on the one screen this branch exists to keep honest.
+static bool seriesHasData(const TrendRing::Hour* h) {
+    if (h == nullptr) return false;
+    for (int i = 0; i < TrendRing::HOURS; i++) if (h[i].count) return true;
+    return false;
+}
+
 static void appendChart(String& out,
                         const TrendRing::Hour* a, const TrendRing::Hour* b,
                         bool haveA, bool haveB) {
@@ -1476,8 +1490,8 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // under it is drawn — the same test the page makes before drawing its own.
     // A key naming two lines over an empty grid describes a chart that is not
     // there.
-    s->printf("CHART_OUT=%d\n", haveOut ? 1 : 0);
-    s->printf("CHART_IN=%d\n",  haveIn  ? 1 : 0);
+    s->printf("CHART_OUT=%d\n", (haveOut && seriesHasData(tOut)) ? 1 : 0);
+    s->printf("CHART_IN=%d\n",  (haveIn  && seriesHasData(tIn))  ? 1 : 0);
 
     // ── The chart's axis, which the image itself cannot carry ───────────────
     //
@@ -1920,7 +1934,11 @@ static void handleKindle(AsyncWebServerRequest* req) {
         p += kdT("Last 24 hours", "Последните 24 часа");
         p += F("</div>");
         appendChart(p, tOut, tIn, haveOut, haveIn);
-        if (haveOut || haveIn) {
+        // The key names the lines the chart DREW, which is what appendChart's
+        // own lo > hi test turns on — not the series the ring is tracking.
+        const bool drewOut = haveOut && seriesHasData(tOut);
+        const bool drewIn  = haveIn  && seriesHasData(tIn);
+        if (drewOut || drewIn) {
             // The two swatches must be drawn with the same stroke as the lines
             // they stand for — .l-out #000/3, .l-in #777/2 dashed — or the key
             // describes a chart the reader is not looking at.

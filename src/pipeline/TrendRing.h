@@ -135,6 +135,11 @@ public:
     bool dirty() const { return _dirty; }
     void clearDirty()  { _dirty = false; }
 
+    /// Put the flag back. For a save that took the copy, cleared the flag and
+    /// then could not write it: without this the roll it was holding would be
+    /// forgotten and nothing would try again until the next hour.
+    void markDirty()   { _dirty = true; }
+
 private:
     struct Series {
         char     sensorId[17];

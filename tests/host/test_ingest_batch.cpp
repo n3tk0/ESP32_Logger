@@ -276,6 +276,42 @@ static void test_a_middle_catch_up_batch_is_all_history() {
     CHECK(isNewest(live, n, 47));
 }
 
+// ---------------------------------------------------------------------------
+// A collector with no clock must HOLD an aged reading, not swallow it
+// ---------------------------------------------------------------------------
+// canBackfill is false until NTP lands, and isBackfill() then answers false
+// for everything — so an aged reading fell through to the one-slot-per-metric
+// mailbox and the batch came back fully accepted. A node handing over an
+// hour-long outage to a collector that had just rebooted was told to drop all
+// forty-eight readings after forty-seven of them had overwritten each other.
+//
+// That is precisely the window the node's ring exists for. The endpoint holds
+// them now; this is the arithmetic it holds on.
+static void test_no_clock_holds_the_backlog() {
+    // Nothing is backfill without a clock — that much was already true, and is
+    // what made the readings fall through.
+    CHECK(!isBackfill(/*live=*/false, 3600, /*canBackfill=*/false, 0));
+    CHECK(!isBackfill(false, 60, false, 0));
+
+    // So the endpoint cannot decide from isBackfill() alone. What it tests is
+    // "this wanted to be history and there is no clock to date it with":
+    for (uint32_t age : {1u, 60u, 121u, 3600u, MAX_AGE_S}) {
+        const bool live = isLive(/*newest=*/false, age);
+        CHECK(!live);
+        CHECK(!isBackfill(live, age, false, 0));   // nowhere to go
+        CHECK(age > 0);                            // and so it must be held
+    }
+
+    // A reading taken NOW is still deliverable with no clock: the collector
+    // dates it on arrival, which is what a zero age means.
+    CHECK(isLive(true, 0));
+    CHECK(!isBackfill(isLive(true, 0), 0, false, 0));
+
+    // And once the clock lands, the same readings are history again.
+    const uint32_t NOW = 1750000000u;
+    CHECK(isBackfill(isLive(false, 3600), 3600, true, NOW));
+}
+
 int main() {
     RUN(test_the_last_of_each_metric_is_the_current_value);
     RUN(test_a_metric_reported_once_is_still_current);
@@ -286,6 +322,7 @@ int main() {
     RUN(test_newest_in_a_batch_is_not_the_same_as_current);
     RUN(test_what_counts_as_backfill);
     RUN(test_a_middle_catch_up_batch_is_all_history);
+    RUN(test_no_clock_holds_the_backlog);
     RUN(test_an_hours_backlog_splits_into_one_mailbox_slot_per_metric);
     return SUMMARY();
 }
