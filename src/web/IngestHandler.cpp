@@ -196,7 +196,20 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
     // the ingest spinlock, and a forty-eight-reading backlog batch was taking
     // it forty-eight times on the async web server's task purely to re-read
     // one subtraction — with the ESP-NOW receive path contending for the same
-    // lock. Nothing else adds to the queue while this handler runs.
+    // lock.
+    //
+    // IT IS AN ESTIMATE, NOT A RESERVATION, and it is allowed to be. This runs
+    // on the async web server's task; espnowIngestTick() calls putHistorical()
+    // from loop() and the sensor plugins drain() from SensorTask, so the real
+    // figure moves under us in both directions while the batch is walked. A
+    // drain only makes the count pessimistic — we stop early and the node
+    // offers the rest again a minute later. An ESP-NOW frame arriving mid-batch
+    // makes it optimistic, and the overshoot is bounded by the frame: the last
+    // reading or two go to putHistorical(), which takes them and sheds its
+    // oldest under its own spinlock rather than corrupting anything. Re-reading
+    // per reading would narrow that window without closing it — the value can
+    // go stale between the read and the put either way — and would pay
+    // forty-eight spinlock takes for the privilege.
     int room = remoteIngest.historyRoom();
 
     // ── The current values first, and outside the prefix rule entirely ──────

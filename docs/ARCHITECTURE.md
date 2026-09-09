@@ -1065,7 +1065,8 @@ ISR shared state (existing pattern, unchanged):
 Every writer to LittleFS/SD takes `fsMutex` (via the RAII `MutexGuard`, or the
 `atomicWrite(fs, path, …, fsMutex)` helper). This includes `CsvLogger`,
 `FlowRunLogger`, `ConfigManager` (`saveConfig`/crash-recovery), `AlertEngine`
-(`_save()`), `DataLogger`, the boot-counter backup, and the streamed
+(`_save()`), `DataLogger`, `TrendStore` (the 24-hour chart's snapshot),
+`EspNowIngest` (the node table), the boot-counter backup, and the streamed
 `/save_platform` upload. Concurrent unserialized writes can interleave a
 `tmp` open + `rename` against a log append and corrupt the filesystem, so a new
 FS writer **must** hold `fsMutex`.
@@ -1091,6 +1092,18 @@ the 2 s timeout and returns `pdFALSE`.
   lock-agnostic — fix it at the one call site that double-locks.
 - `AlertEngine::_save()` runs on the AsyncTCP web task; it passes `fsMutex` to
   `atomicWrite` (previously `nullptr`, which raced StorageTask writes).
+
+**`tools/check_fs_mutex.py` holds every file that writes the filesystem to
+this.** The rule has no compiler behind it: code that breaks it compiles,
+links, and works on the bench, because the missing thing is a line that is not
+there. Two files got it wrong months apart — the trend snapshot
+(`TrendStore`) and the ESP-NOW node table (`EspNowIngest`), both writing from
+`loop()` while `StorageTask` appended CSV rows. The check is deliberately
+coarse: it asks whether a file that opens for writing, removes, renames or
+makes a directory has *heard of* `fsMutex` at all, in code or in a comment. A
+class whose writes run under its caller's lock — `CsvLogger`, `FlowRunLogger`
+— says so in a comment and passes, which is right, because it must not
+re-acquire a non-recursive mutex it already holds.
 
 ---
 

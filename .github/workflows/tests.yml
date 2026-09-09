@@ -33,6 +33,7 @@ on:
       - 'tools/check_sensor_plugins.py'
       - 'tools/check_kindle_parity.py'
       - 'tools/check_body_handlers.py'
+      - 'tools/check_fs_mutex.py'
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
@@ -63,6 +64,7 @@ on:
       - 'tools/check_sensor_plugins.py'
       - 'tools/check_kindle_parity.py'
       - 'tools/check_body_handlers.py'
+      - 'tools/check_fs_mutex.py'
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
@@ -513,6 +515,39 @@ jobs:
           cp /tmp/ih.orig src/web/IngestHandler.cpp
           rm /tmp/ih.orig
           echo "the checker fails on a cap the handler cannot receive, as it should"
+
+      - name: Verify every filesystem writer knows about fsMutex
+        # Pillar 1.3, which has no compiler behind it. LittleFS is not
+        # re-entrant across FreeRTOS tasks: StorageTask appends a CSV row while
+        # loop() writes a snapshot and the web server serves a file, and two of
+        # them inside littlefs's metadata at once corrupts the directory or
+        # panics the core. Nothing about the code that does it looks wrong —
+        # the bug is a line that is not there — and it was got wrong twice, in
+        # the trend snapshot and the ESP-NOW node table, months apart.
+        run: python3 tools/check_fs_mutex.py
+
+      - name: Verify that checker fails on an unguarded write
+        run: |
+          set -e
+          cp src/pipeline/TrendStore.cpp /tmp/tsm.orig
+          python3 - <<'EOF'
+          s = open('src/pipeline/TrendStore.cpp').read()
+          s = s.replace('fsMutex', 'noLockAtAll').replace('atomicWrite', 'x')
+          open('src/pipeline/TrendStore.cpp', 'w').write(s)
+          EOF
+          if grep -q 'fsMutex' src/pipeline/TrendStore.cpp; then
+            echo "::error::the fsMutex mutation no longer matches — this proof step is stale"
+            cp /tmp/tsm.orig src/pipeline/TrendStore.cpp
+            exit 1
+          fi
+          if python3 tools/check_fs_mutex.py > /dev/null 2>&1; then
+            echo "::error::check_fs_mutex.py passed a snapshot written with no lock"
+            cp /tmp/tsm.orig src/pipeline/TrendStore.cpp
+            exit 1
+          fi
+          cp /tmp/tsm.orig src/pipeline/TrendStore.cpp
+          rm /tmp/tsm.orig
+          echo "the checker fails on an unguarded filesystem write, as it should"
 
       - name: Hold the panel's layout to the browser page's design
         # GET /kindle and kindle/update_dash.sh are one design rendered twice,

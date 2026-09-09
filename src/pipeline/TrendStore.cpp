@@ -5,7 +5,9 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 
+#include "DataPipeline.h"          // fsMutex
 #include "TrendRing.h"
+#include "../utils/MutexGuard.h"
 
 // Two names, because a save that is interrupted must not be able to destroy
 // the last good one. The bytes go to the temporary file, that file is closed,
@@ -24,6 +26,18 @@ static const char* TREND_TMP  = "/trend.tmp";
 // from EspNowIngest's saveNodes(), for the same reason and with the same
 // signed-difference comparison so it survives the millis() wrap.
 static uint32_t s_retryAtMs = 0;
+
+/// Every failure path does the same three things: say what happened, put the
+/// dirty flag back so the next tick tries again, and buy the minute. Written
+/// once because there are five of them and a path that forgot the markDirty()
+/// would leave the hour on the floor without anything looking wrong.
+static bool trendSaveFailed(const char* why) {
+    Serial.printf("[trend] %s — retrying in 60 s\n", why);
+    trendRing.markDirty();
+    s_retryAtMs = millis() + 60000u;
+    if (s_retryAtMs == 0) s_retryAtMs = 1;      // 0 means "no backoff"
+    return false;
+}
 
 bool trendStoreSave() {
     const size_t need = TrendRing::snapshotBytes();
@@ -49,30 +63,50 @@ bool trendStoreSave() {
     // the other way is one redundant write.
     trendRing.clearDirty();
     if (trendRing.snapshot(buf, sizeof(buf)) != need) {
-        trendRing.markDirty();
-        return false;
+        return trendSaveFailed("the snapshot did not come out the expected size");
+    }
+
+    // ── fsMutex, and only now ────────────────────────────────────────────────
+    //
+    // Pillar 1.3: every LittleFS write call site acquires it. This one is
+    // called from loop() — trendStoreTick(), and the forced saves on the
+    // restart and deep-sleep paths — while StorageTask is appending rows to
+    // the day's CSV and the async web server is serving files off the same
+    // filesystem. LittleFS is not re-entrant across tasks: two writers in its
+    // metadata at once corrupts the directory or panics the core, and neither
+    // failure names the code that caused it.
+    //
+    // TAKEN AFTER THE COPY, not around it. snapshot() takes the ring's own
+    // spinlock; nothing can block inside a critical section, so the two could
+    // not deadlock in either order — but held around the copy, fsMutex would
+    // be held for work that is not filesystem work, and fsMutex is the lock
+    // every writer on the device queues behind. The copy is in hand by the
+    // time the file is opened, so the lock covers the filesystem and nothing
+    // else.
+    //
+    // A failed take is fatal to this attempt, never a reason to write anyway
+    // (Pillar 1.2). The one case that cannot be recovered is a force-deleted
+    // task that died holding it — see TaskManager::shutdown() — and writing
+    // into a filesystem whose last writer was killed mid-operation is the one
+    // thing worse than losing the hour.
+    MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
+    if (fsMutex && !guard.isLocked()) {
+        return trendSaveFailed("fsMutex timeout");
     }
 
     File f = LittleFS.open(TREND_TMP, "w");
     if (!f) {
-        Serial.println("[trend] cannot open the snapshot for writing "
-                       "— retrying in 60 s");
-        trendRing.markDirty();
-        s_retryAtMs = millis() + 60000u;
-        if (s_retryAtMs == 0) s_retryAtMs = 1;      // 0 means "no backoff"
-        return false;
+        return trendSaveFailed("cannot open the snapshot for writing");
     }
     const size_t wrote = f.write(buf, need);
     f.close();
 
     if (wrote != need) {
-        Serial.printf("[trend] wrote %u of %u bytes — discarding\n",
-                      (unsigned)wrote, (unsigned)need);
         LittleFS.remove(TREND_TMP);
-        trendRing.markDirty();
-        s_retryAtMs = millis() + 60000u;
-        if (s_retryAtMs == 0) s_retryAtMs = 1;
-        return false;
+        char why[64];
+        snprintf(why, sizeof(why), "wrote %u of %u bytes",
+                 (unsigned)wrote, (unsigned)need);
+        return trendSaveFailed(why);
     }
 
     // RENAME FIRST, and only unlink if it will not go over the top.
@@ -91,12 +125,8 @@ bool trendStoreSave() {
     if (!LittleFS.rename(TREND_TMP, TREND_FILE)) {
         LittleFS.remove(TREND_FILE);
         if (!LittleFS.rename(TREND_TMP, TREND_FILE)) {
-            Serial.println("[trend] could not rename the snapshot into place");
             LittleFS.remove(TREND_TMP);
-            trendRing.markDirty();
-            s_retryAtMs = millis() + 60000u;
-            if (s_retryAtMs == 0) s_retryAtMs = 1;
-            return false;
+            return trendSaveFailed("could not rename the snapshot into place");
         }
     }
 
@@ -117,6 +147,23 @@ void trendStoreTick() {
 }
 
 void trendStoreLoad() {
+    // fsMutex IS NULL HERE, AND THAT IS CORRECT. This runs from setup(),
+    // before _initPlatform() calls TaskManager::init() — the call that creates
+    // the mutex and starts the tasks it guards against. A null handle means
+    // "there is no concurrency to guard against yet, proceed", the same
+    // documented Pillar 1.3 exemption ConfigManager::saveConfig() takes on the
+    // migration path. Only a FAILED take is fatal, and one can only happen if
+    // this is ever called later, from somewhere that does have company.
+    //
+    // Held across restore() as well as the reads: restore() takes the ring's
+    // spinlock, which cannot block, and splitting the function to release the
+    // mutex in between would leave the removes below outside it.
+    MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
+    if (fsMutex && !guard.isLocked()) {
+        Serial.println("[trend] fsMutex timeout — the chart starts empty");
+        return;
+    }
+
     // A save that was cut short leaves the temporary file behind, and nothing
     // else ever looks at that name again — so without this it sits on the
     // filesystem for the life of the device, one snapshot's worth of a part

@@ -162,13 +162,20 @@ inline const char* kdT(const char* en, const char* bg) {
 // in. Everything else is copied through untouched — a byte this does not
 // understand is a byte it must not corrupt, and a label is a reader's own text.
 //
-// Cyrillic in UTF-8 is two bytes, and the lower-case letters sit in two runs:
+// Cyrillic in UTF-8 is two bytes, and the lower-case letters sit in three runs:
 //   а-п  D0 B0..D0 BF  ->  А-П  D0 90..D0 9F   (subtract 0x20 from the second)
 //   р-я  D1 80..D1 8F  ->  Р-Я  D0 A0..D0 AF   (lead D1->D0, add 0x20)
-// The two runs are why this is not one subtraction: the block straddles a
-// UTF-8 lead-byte boundary, and treating it as one range turns "р" into " Р".
-// Ё (D1 91 -> D0 81) is handled with them; it is not Bulgarian but it costs
-// two lines and a Russian label is a plausible thing for someone to type.
+//   ѐ-џ  D1 90..D1 9F  ->  Ѐ-Џ  D0 80..D0 8F   (lead D1->D0, subtract 0x10)
+// The runs are why this is not one subtraction: the block straddles a UTF-8
+// lead-byte boundary, and treating it as one range turns "р" into " Р".
+//
+// THE THIRD RUN IS NOT DECORATION. It used to be a special case for ё alone,
+// which left ѝ (U+045D, D1 9D) — the grave-accented и that Bulgarian uses for
+// the short possessive, distinguishing "ѝ" from "и" — falling through to the
+// copy-untouched branch and staying lower case inside an otherwise capitalised
+// label. As a range it is the same three lines and also covers ђ ѓ є ѕ і ї ј
+// љ њ ћ ќ ў џ, none of which are Bulgarian but all of which are a plausible
+// thing for someone to type into a label they named themselves.
 //
 // Truncation is on a character, never inside one: half a two-byte sequence is
 // not a shorter word, it is a replacement glyph.
@@ -192,8 +199,8 @@ inline void kdUpperUtf8(char* dst, size_t cap, const char* src) {
         } else if (*p == 0xD1 && p[1] >= 0x80 && p[1] <= 0x8F) {
             out[n++] = 0xD0; out[n++] = (unsigned char)(p[1] + 0x20);   // р-я
             p += 2;
-        } else if (*p == 0xD1 && p[1] == 0x91) {
-            out[n++] = 0xD0; out[n++] = 0x81;                           // ё
+        } else if (*p == 0xD1 && p[1] >= 0x90 && p[1] <= 0x9F) {
+            out[n++] = 0xD0; out[n++] = (unsigned char)(p[1] - 0x10);   // ѐ-џ
             p += 2;
         } else {
             // Anything else, including a malformed sequence: copied byte for

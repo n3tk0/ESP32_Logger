@@ -117,9 +117,30 @@ static void test_it_leaves_alone_what_it_does_not_understand() {
     chk_up("µg/m³", "µG/M³");
     chk_up("→", "→");
     chk_up("日本", "日本");
-    // Ё is not Bulgarian but costs two lines, and a Russian label is a
-    // plausible thing for somebody to type.
-    chk_up("ё", "Ё");
+}
+
+// ---------------------------------------------------------------------------
+// The third run: D1 90..9F -> D0 80..8F.
+//
+// ѝ IS BULGARIAN AND IT IS THE POINT. It is the grave-accented и that
+// distinguishes the short possessive "ѝ" from the conjunction "и" — a reader
+// naming a place "стаята ѝ" gets it from any Bulgarian keyboard layout. While
+// this run was a special case for ё alone, ѝ fell through to the leave-alone
+// branch and stayed lower case in the middle of an otherwise capitalised
+// label, on the panel, where nothing would explain why.
+static void test_the_accented_run_above_the_alphabet() {
+    chk_up("ѝ", "Ѝ");                    // D1 9D -> D0 8D
+    chk_up("стаята ѝ", "СТАЯТА Ѝ");      // in the place it actually appears
+    chk_up("ё", "Ё");                    // D1 91 -> D0 81, the old special case
+
+    // The ends of the run, and one byte past each, which must not move.
+    chk_up("ѐ", "Ѐ");                    // D1 90, first
+    chk_up("џ", "Џ");                    // D1 9F, last
+    chk_up("я", "Я");                    // D1 8F — the run below, unchanged
+    chk_up("ѠѠ", "ѠѠ");                  // D1 A0 — above it, left alone
+
+    // Still two bytes out for two bytes in.
+    CHECK_EQ((long)up("ѝёѐџ").size(), (long)strlen("ѝёѐџ"));
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +270,7 @@ int main() {
     RUN(test_the_labels_this_was_written_for);
     RUN(test_the_run_that_straddles_the_lead_byte);
     RUN(test_it_leaves_alone_what_it_does_not_understand);
+    RUN(test_the_accented_run_above_the_alphabet);
     RUN(test_it_never_cuts_a_character_in_half);
     RUN(test_the_degenerate_calls);
     RUN(test_the_label_follows_the_language);
