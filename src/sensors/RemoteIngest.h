@@ -93,6 +93,22 @@ public:
     /// How many queued historical readings are still waiting to be drained.
     int historyPending() const;
 
+    /// How many more the queue can take before it starts shedding.
+    ///
+    /// EXISTS SO A SENDER CAN BE TOLD TO WAIT. putHistorical() never refuses
+    /// for want of room — it drops the oldest and takes the new one, which is
+    /// the only thing it can do for ESP-NOW, where the frame has already been
+    /// received and the node is asleep by the time it is parsed.
+    ///
+    /// An HTTP node is the opposite case: it is still on the line, it has a
+    /// buffer of its own that is three times this queue, and it will hold what
+    /// this collector cannot take if only it is told. Shedding into a 64-slot
+    /// queue what a 192-slot one is offering loses two thirds of an outage for
+    /// no reason. /api/ingest reads this and stops accepting a batch at the
+    /// point the queue fills, so the node keeps the remainder and offers it
+    /// again as the drain makes room. Never negative.
+    int historyRoom() const;
+
     /// Copy every metric held for `nodeId` into `out`, up to `maxOut`.
     /// Fills metric/value/unit/timestamp/quality only — SensorManager
     /// overwrites sensorId and sensorType from the plugin instance.

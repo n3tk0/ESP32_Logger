@@ -560,18 +560,55 @@ route, and whatever Basic Auth is compiled in globally.
 
 Its optional `ts` became authoritative when remote readings were allowed to
 keep the time they were measured, so it is now checked rather than believed.
-The endpoint takes a batch sampled **now** — one `ts` for the whole batch, no
-way to mark it as backfill — so a stamp more than 120 s from the collector's
-clock in either direction is a stamp that is wrong: it is dropped and the
-reading is dated on arrival instead. That is the same 120 s the pipeline uses
-to tell live readings from backfill, so `/api/ingest` cannot produce a reading
-its own pipeline then hides from the dashboard and from alerts. The reading
-itself is never dropped for this, and the response says whether it happened:
+The batch's `ts` describes readings sampled **now**, so a stamp more than 120 s
+from the collector's clock in either direction is a stamp that is wrong: it is
+dropped and the reading is dated on arrival instead. That is the same 120 s the
+pipeline uses to tell live readings from backfill, so a live `/api/ingest`
+reading cannot be one its own pipeline then hides from the dashboard and from
+alerts. The reading itself is never dropped for this.
+
+**A reading may carry `dt_s`: how many seconds before the batch it was taken.**
+That is how a node hands over what it buffered through an outage, and it is the
+same field meaning the same thing as `EnvSample::dt_s` in the ESP-NOW protocol
+— a node with no clock cannot send an absolute time, but it can always say how
+long ago. Ages are clamped to 24 h, and are ignored entirely when the
+collector's own clock is unset: anchoring an age to a clock that is not set
+produces a 1970 date, and a gap beats a wrong one.
+
+A batch is sent **oldest first**, and the endpoint splits it the same way the
+ESP-NOW path does. The newest reading of each metric goes to
+`RemoteIngest::put()` — the mailbox slot the dashboard, `/api/nodes` and "last
+seen" read. Everything older goes to `putHistorical()`, which queues each one
+as a distinct measurement. Both halves matter: a whole backlog sent to the
+mailbox is overwritten to its last sample microseconds after arriving, and a
+newest reading sent to the queue leaves a node that is posting perfectly
+reading as offline on every screen.
 
 ```json
-{"ok":true,"stored":3,"rejected":0,"clock_rejected":true}
+{"ok":true,"accepted":31,"stored":3,"queued":28,"rejected":0,
+ "held":true,"room":0,"clock_rejected":false}
 ```
 
+`accepted` is **the length of the prefix of the batch the collector consumed** —
+stored, queued, or judged unusable — and it is the only number a node needs:
+**it drops exactly that many from the front of its own buffer and keeps the
+rest, in order, to offer again.** `held` says the batch stopped early.
+
+The stop is deliberate backpressure. The history queue holds
+`REMOTE_HISTORY_SLOTS` (64) readings and drains a handful per sensor tick,
+while the reference node offers up to 192 from an hour-long outage.
+`putHistorical()` never refuses for want of room — it sheds its oldest entry,
+the only thing it can do for ESP-NOW, where the node is asleep by the time the
+frame is parsed — so letting it run would shred two thirds of that outage
+inside the collector seconds after the node went to the trouble of keeping it.
+An HTTP node is still on the line and has the larger buffer, so it is told to
+wait instead: the loop stops at the first backfill reading there is no room
+for, and `room` says how much space is left. A reading the collector *cannot*
+use is consumed rather than left to block the queue behind it, because sending
+it again would fail the same way for ever.
+
+A collector that predates `accepted` answers without it; a node reads its
+absence as "the whole batch", which is what an older collector did with it.
 `clock_rejected` is how a node with a drifting clock finds out it has one. A
 collector with no clock of its own cannot judge and takes `ts` as sent.
 
