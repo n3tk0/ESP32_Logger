@@ -409,10 +409,12 @@ def run_stop(app) -> None:
     real_popen = dc.subprocess.Popen
     try:
         dc.subprocess.Popen = _FakePopen
-        mgr2.cancel()                     # before anything is running at all
-        mgr2._cancelled = True            # cancel() before run_steps resets it
-        # run_steps() clears the flag on entry, so drive the loop the way the
-        # GUI does: start, then cancel from the callback of the first step.
+
+        # Cancelled from the first step's own completion callback, which is
+        # exactly the gap this is about: step 4's child has exited, step 5's
+        # has not been launched. (Cancelling BEFORE run_steps is the next
+        # case below, and pre-cancelling here would make this one test that
+        # instead — step 4 would not run either.)
         def stop_after_first(step, rc):
             mgr2.cancel()
         mgr2.on_step_complete = stop_after_first
