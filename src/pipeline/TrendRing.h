@@ -84,6 +84,57 @@ public:
     bool series(const char* sensorId, const char* metric, uint32_t nowTs,
                 Hour* out) const;
 
+    // ── Surviving a reboot ──────────────────────────────────────────────────
+    //
+    // This ring is the ONLY twenty-four-hour record the firmware keeps.
+    // webRingBuf holds minutes (see the header above), and the FS-backed
+    // history reader is still stubbed out — so a power cut at 3 am cost the
+    // whole chart, and the reader woke to a blank strip that filled back in
+    // one hour at a time over the following day. Nothing said why, because
+    // nothing had gone wrong: the data had simply never been anywhere but RAM.
+    //
+    // snapshot() and restore() move bytes to and from a caller's buffer and
+    // know nothing about a filesystem. That is deliberate twice over: the
+    // format can be driven by a host test, and the code that does know about
+    // LittleFS lives in one file (TrendStore.cpp) instead of inside the data
+    // structure that every reading passes through.
+    //
+    // RESTORING A STALE SNAPSHOT IS SAFE AND NEEDS NO SPECIAL CASE. series()
+    // decides what is live by comparing each series' lastHour against the hour
+    // being asked about, so a snapshot from four hours ago comes back as
+    // twenty hours of readings and four empty buckets, and one from last week
+    // comes back empty. That is the same arithmetic that already handles a
+    // node which stops reporting, so there is no second rule to keep in step.
+    static constexpr uint32_t SNAP_MAGIC   = 0x444E5254u;   // 'TRND', little end
+    static constexpr uint16_t SNAP_VERSION = 1;
+
+    /// Exactly how many bytes snapshot() writes. Constant for a given build.
+    static size_t snapshotBytes();
+
+    /// An upper bound on that figure, known at compile time so a caller can
+    /// size a stack buffer with it — the save path runs when flash is already
+    /// unhappy, and a heap allocation there is one more thing that can fail
+    /// while trying to recover. snapshotBytes() static_asserts against this,
+    /// so the bound cannot quietly fall below the real size.
+    static constexpr size_t SNAP_MAX_BYTES = 2048;
+
+    /// Serialise every slot, used or not, into `buf`. Returns the number of
+    /// bytes written, or 0 when `cap` is too small — never a partial record.
+    size_t snapshot(uint8_t* buf, size_t cap) const;
+
+    /// Replace the contents from a snapshot. Refuses anything whose magic,
+    /// version, length or CRC does not match, and leaves the ring untouched
+    /// when it does: half-restoring would put invented temperatures on a chart
+    /// that has no other way of being wrong.
+    bool restore(const uint8_t* buf, size_t len);
+
+    /// True when an hour has been completed since the last clearDirty() —
+    /// which is the moment a bucket stops changing and is worth writing down.
+    /// Deliberately NOT set by every add(): a reading a minute is 1,440 flash
+    /// writes a day for a chart whose resolution is one hour.
+    bool dirty() const { return _dirty; }
+    void clearDirty()  { _dirty = false; }
+
 private:
     struct Series {
         char     sensorId[17];
@@ -96,6 +147,7 @@ private:
     int _find(const char* sensorId, const char* metric) const;
 
     Series _s[MAX_SERIES] = {};
+    bool   _dirty = false;      ///< an hour was completed; see dirty()
     mutable portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;
 };
 
