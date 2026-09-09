@@ -16,6 +16,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -113,6 +114,13 @@ def step_parts(step: int) -> tuple[str, str]:
     ``("Build web assets", "www/ → data/www/")``.
     """
     return STEP_DETAIL.get(step, ("", ""))
+
+
+#: What a step returns when the run was stopped rather than finished. 130 is
+#: the shell's own number for "killed by SIGINT" — it is not zero, so nothing
+#: mistakes it for success, and it is not 1, so a banner can tell a step that
+#: was stopped from one that failed.
+RC_CANCELLED = 130
 
 
 PRESETS: dict[str, tuple[str, list[int]]] = {
@@ -266,6 +274,64 @@ _UPLOAD_FILTER_LABELS = {
     "gz":    "Compressed only (.gz + binaries)",
     "plain": "Uncompressed only (plain + binaries)",
 }
+
+
+#: The extensions build_web.py gzips, imported rather than copied — a second
+#: list is a second list to keep in step, and the two are answering the same
+#: question from opposite ends.
+try:
+    from build_web import GZIP_TEXT_EXTS as _GZIPPABLE      # noqa: E402
+except Exception:                                            # pragma: no cover
+    _GZIPPABLE = {".html", ".htm", ".css", ".js", ".json",
+                  ".txt", ".svg", ".xml", ".csv"}
+
+
+def www_matches_filter(uf: str, root: Path | None = None) -> bool:
+    """Was the tree in data/www/ built under `uf`?
+
+    EXISTS BECAUSE THE LITTLEFS IMAGE IS A DIRECTORY, NOT A FILE LIST. Step 8
+    filters as it uploads, one file at a time, so its setting takes effect
+    whatever is on disk. Step 7 runs `pio run -t uploadfs`, which images
+    data/www/ exactly as it stands — so for that step the filter has to have
+    been applied when the tree was written, and the only way to honour a
+    setting changed since then is to notice and rebuild.
+
+    Cheap and structural rather than a manifest: a pair of files that a filter
+    forbids is proof the tree predates it.
+
+      plain  a `.gz` anywhere is proof
+      gz     a plain file WITH a `.gz` sibling is proof — the plain one should
+             have been dropped. A file with no sibling is a binary, or one
+             whose gzip came out bigger, and is right to be there. AND a tree
+             with gzippable text in it and not one `.gz` to show for it, which
+             is what a plain-only tree looks like: without that second test a
+             tree built "uncompressed only" passed the "compressed only" check
+             by having no pairs to be caught by.
+      all    nothing to prove: `all` keeps whatever it finds, and a text file
+             with no `.gz` is the "gzip was bigger" case, not a violation.
+
+    Wrong in the cheap direction on purpose. A false "no" costs one rebuild,
+    a few seconds nobody notices; a false "yes" images the wrong tree onto a
+    partition that was too small for it, which is the bug this is here for.
+    """
+    root = root or DATA_WWW
+    if not root.is_dir():
+        return True                     # nothing built; the caller builds it
+    if uf == "plain":
+        return not any(root.rglob("*.gz"))
+    if uf == "gz":
+        seen_gz = False
+        for gz in root.rglob("*.gz"):
+            seen_gz = True
+            if gz.with_suffix("").exists():
+                return False
+        if seen_gz:
+            return True
+        # No .gz at all. That is either a tree with nothing worth gzipping in
+        # it, or a plain-only build.
+        return not any(p.suffix.lower() in _GZIPPABLE
+                       for p in root.rglob("*") if p.is_file())
+    return True
 
 
 def detect_env() -> str:
@@ -511,6 +577,65 @@ class DeployManager:
         # running it or not.
         self._skipped: list[int] = []
 
+        # ── Stopping a run that is already going ─────────────────────────────
+        #
+        # Step 9 is a serial monitor. It does not finish — that is what a
+        # monitor is — so a front end with no way to stop it has no way to get
+        # its button back, and the GUI sat on "⏳ Running…" for ever with a
+        # `pio device monitor` still attached to the port. Nothing else could
+        # be flashed until the window was killed.
+        #
+        # The handle is kept under a lock because cancel() is called from the
+        # UI thread while _run_cmd() is inside its read loop on the worker.
+        self._proc: Optional[subprocess.Popen] = None
+        self._proc_lock = threading.Lock()
+        self._cancelled = False
+
+    @property
+    def cancelled(self) -> bool:
+        """True when the last run was stopped rather than finished or failed.
+
+        A front end has to be able to tell the three apart: a stopped run is
+        not a failure, and drawing it in red teaches people that stopping is
+        something that went wrong.
+        """
+        return self._cancelled
+
+    def cancel(self) -> None:
+        """Stop the running step and skip whatever was queued behind it.
+
+        Safe from any thread, and safe when nothing is running: it sets the
+        flag either way, so a cancel that arrives between two steps — or
+        before run_steps() has even been called — is not lost. run_steps()
+        checks the flag before each step and never clears it, which is what
+        makes the second case work.
+
+        FINAL FOR THIS MANAGER. There is no un-cancel: a run is a manager,
+        and the next run gets a new one. Both front ends already build one
+        per run, and "cancelled, then reused, then cancelled again" is a
+        state with no reader and one more way to go wrong.
+        """
+        self._cancelled = True
+        with self._proc_lock:
+            proc = self._proc
+        if proc is None:
+            return
+        try:
+            proc.terminate()
+        except Exception:
+            return
+        # SIGTERM first, and only kill what will not take it. pio's monitor
+        # closes the serial port on the way down; killing it outright leaves
+        # the port held on some platforms until the OS reaps the handle, which
+        # is the next flash failing to open it.
+        try:
+            proc.wait(timeout=3)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
     @property
     def skipped(self) -> list[int]:
         """The steps of the last run that were offered and declined.
@@ -701,6 +826,11 @@ class DeployManager:
         from the front end now, and pass it on the command line. Only the
         serial monitor genuinely wants a keyboard.
         """
+        # Asked before the command is even printed: a cancel that landed
+        # between two steps must not start the next one, and a "$ pio run …"
+        # in the log for something that never ran reads as one that did.
+        if self._cancelled:
+            return RC_CANCELLED
         self._log(f"$ {shlex.join(cmd)}")
         try:
             process = subprocess.Popen(
@@ -724,6 +854,16 @@ class DeployManager:
             self._log(f"Error: {exc}")
             return 1
 
+        # Published so cancel() can reach it from the UI thread. Set before the
+        # read loop below, which is where this thread spends the whole step.
+        with self._proc_lock:
+            self._proc = process
+        # cancel() may have run between the flag test above and the line
+        # above — it would have found no process and terminated nothing, so
+        # the newly started child has to be caught here instead.
+        if self._cancelled:
+            self.cancel()
+
         # Don't use Popen as a context manager: its __exit__ calls wait()
         # without terminating first, so a KeyboardInterrupt (or an exception
         # from the logging callback) would block forever on a still-running
@@ -732,7 +872,12 @@ class DeployManager:
             if process.stdout:
                 for line in process.stdout:
                     self._log(line, end="")
-            return process.wait()
+            rc = process.wait()
+            # A step we killed did not fail — it was stopped, and the two are
+            # not the same thing to whoever is reading the banner. terminate()
+            # gives a negative rc on POSIX and 1 on Windows; neither is worth
+            # reporting as an error the user should look into.
+            return RC_CANCELLED if self._cancelled else rc
         except BaseException:
             process.terminate()
             try:
@@ -741,6 +886,8 @@ class DeployManager:
                 process.kill()
             raise
         finally:
+            with self._proc_lock:
+                self._proc = None
             if process.stdout:
                 process.stdout.close()
 
@@ -753,7 +900,16 @@ class DeployManager:
             self._log("ERROR: build_web.py not found in tools/")
             self._emit_complete(1, 2)
             return 2
-        rc = self._run_cmd([_python(), str(script), "--dst", str(DATA_WWW)])
+        # THE FILTER IS APPLIED HERE, not at upload time, because the tree
+        # this writes is what step 7 hands to `pio run -t uploadfs` — and that
+        # images the directory as it finds it. Filtering only in step 8's own
+        # upload loop meant the setting worked over HTTP and did nothing at
+        # all over USB: the LittleFS image got both copies of every page,
+        # about 970 KB of a C3's 1088 KB partition, before a single log row.
+        uf = self.cfg.get("upload_filter", "all")
+        self._log(f"Keeping: {_UPLOAD_FILTER_LABELS.get(uf, uf)}")
+        rc = self._run_cmd([_python(), str(script),
+                            "--dst", str(DATA_WWW), "--filter", uf])
         if rc == 0:
             self._log("✓ Web assets built.")
         self._emit_complete(1, rc)
@@ -874,8 +1030,21 @@ class DeployManager:
 
     def s7_upload_fs(self) -> int:
         self._emit_start(7, STEP_NAMES[7])
+        uf = self.cfg.get("upload_filter", "all")
         if not DATA_WWW.is_dir() or not any(DATA_WWW.iterdir()):
             self._log("data/www/ is empty — running Build web first…")
+            rc = self.s1_build_web()
+            if rc != 0:
+                self._emit_complete(7, rc)
+                return rc
+        elif not www_matches_filter(uf):
+            # The tree on disk was built under a different filter. `pio run -t
+            # uploadfs` images the directory as it finds it, so without this
+            # the setting would be honoured only on the runs that happened to
+            # include step 1 — and a person who picked "compressed only" to
+            # fit a C3 and then ran Quick flash would still get both copies.
+            self._log(f"data/www/ does not match \"{_UPLOAD_FILTER_LABELS.get(uf, uf)}\" "
+                      f"— rebuilding it first…")
             rc = self.s1_build_web()
             if rc != 0:
                 self._emit_complete(7, rc)
@@ -1088,9 +1257,22 @@ class DeployManager:
         cmd = [self.pio, "device", "monitor", "-e", self.cfg["env"]]
         if self.cfg.get("port"):
             cmd += ["--port", self.cfg["port"]]
+        # THE ONE STEP THAT DOES NOT END BY ITSELF. It is a monitor: it runs
+        # until somebody stops it, so it is the step that needs saying so.
+        # From a console that is Ctrl-C, miniterm's own key. From the GUI
+        # there is no console and therefore no stdin to press it on, which is
+        # why cancel() exists and why the button says STOP while this runs.
+        self._log("Serial monitor open — press STOP (or Ctrl-C on a console) "
+                  "to close it.")
         # The one step with a keyboard: miniterm's own keys (Ctrl-C to quit,
         # Ctrl-T for its menu) need a stdin, and a console to read it from.
-        return self._run_cmd(cmd, interactive=True)
+        rc = self._run_cmd(cmd, interactive=True)
+        # Emitted like every other step. Without it the GUI's progress bar
+        # stayed one short of the total for any run ending in the monitor,
+        # which read as a step that had not finished — and, since this is the
+        # step you stop rather than the step that ends, it never would.
+        self._emit_complete(9, rc)
+        return rc
 
     # ── The satellite boards ─────────────────────────────────────────────────
     #
@@ -1492,6 +1674,12 @@ class DeployManager:
         # print "All steps completed successfully" for a deploy whose
         # bootloader was never written, because True was all they were told.
         self._skipped = []
+        # NOT RESET HERE. A cancel that arrived before this was called — the
+        # GUI's STOP pressed in the moment between the click on RUN and the
+        # manager existing — would be thrown away by a reset, and the button
+        # would have quietly done nothing, which is the bug this whole thing
+        # is here to fix. cancel() is final for a manager; both front ends
+        # build a fresh one per run.
         self._log(f"\n{'='*60}")
         self._log(f"Running steps: {', '.join(str(s) for s in steps)}")
         self._log(f"Environment: {self.cfg['env']}")
@@ -1499,12 +1687,22 @@ class DeployManager:
         self._log(f"Chip: {self.cfg.get('chip')}")
         self._log(f"{'='*60}\n")
 
+        stopped_at: Optional[int] = None
         for s in steps:
+            # Asked before each step, not only inside _run_cmd(): a stop that
+            # arrives while step 5 is compiling should not be answered by
+            # starting step 6.
+            if self._cancelled:
+                stopped_at = s
+                break
             fn = dispatch.get(s)
             if fn is None:
                 continue
             try:
                 rc = fn()
+                if self._cancelled:
+                    stopped_at = s
+                    break
                 if rc != 0:
                     failed.append(s)
                     self._log(f"✗ Step {s} failed (exit {rc}).")
@@ -1513,6 +1711,18 @@ class DeployManager:
                 failed.append(s)
 
         self._log("")
+        if self._cancelled:
+            remaining = [n for n in steps if stopped_at is not None and n >= stopped_at]
+            note = (f" Step(s) {', '.join(str(n) for n in remaining)} did not "
+                    f"finish." if remaining else "")
+            self._log(f"■ Stopped.{note}")
+            # Stopping is not failing. Returning False here would paint the
+            # red "some steps failed" box over a button the user pressed on
+            # purpose — but it is not True either, because the steps did not
+            # all run, and a caller that only reads the bool would then claim
+            # they had. Front ends ask `cancelled` to tell the two apart.
+            return False
+
         if not failed:
             if self._skipped:
                 sk = ", ".join(str(s) for s in sorted(self._skipped))

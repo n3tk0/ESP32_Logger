@@ -310,6 +310,10 @@ class DeployerGUI:
         self.cfg = load_cfg()
         self.manager: Optional[DeployManager] = None
         self.running = False
+        # A STOP pressed before the manager exists. Milliseconds wide, but a
+        # button that quietly does nothing is the bug being fixed here, not a
+        # smaller version of it.
+        self._stop_requested = False
         self.step_vars: dict[int, tk.BooleanVar] = {}
         self.feature_vars: dict[str, ctk.BooleanVar] = {}
 
@@ -736,9 +740,13 @@ class DeployerGUI:
     def _build_run_card(self, parent) -> None:
         inner = self._card(parent, "4 · Run")
 
+        # ONE BUTTON, TWO JOBS. While a run is going this is the only way to
+        # stop it: step 9 is a serial monitor and never ends on its own, so a
+        # window whose only button is a greyed-out "Running…" is a window that
+        # has to be killed to flash anything again.
         self.run_btn = self._sz(ctk.CTkButton(
             inner, text="▶   RUN", font=self.fonts["h2"],
-            command=self._on_run), 52)
+            command=self._on_run_or_stop), 52)
         self.run_btn.pack(fill="x")
 
         # What "Run" is about to do, spelled out. The old window said nothing
@@ -872,9 +880,14 @@ class DeployerGUI:
 
         # ── Web upload ──────────────────────────────────────────────────────
         box = self._settings_group(
-            frame, "Web upload over HTTP (step 8)",
-            "Which copies of the web assets go to a device that is already "
-            "running.")
+            frame, "Web asset copies (steps 1, 7 and 8)",
+            "Which copies of the pages reach the device — over USB in the "
+            "LittleFS image and over WiFi in the HTTP upload alike. "
+            "\"Compressed only\" is what fits a 4 MB C3: the whole tree is "
+            "about 970 KB with both copies and about 270 KB with one, out of "
+            "a 1088 KB partition that also holds the logs. The firmware "
+            "serves a compressed-only tree; every browser since 2010 asks "
+            "for gzip.")
         self._filter_labels = {v: k for k, v in _UPLOAD_FILTER_LABELS.items()}
         current = self.cfg.get("upload_filter", "all")
         self.filter_var = ctk.StringVar(
@@ -884,6 +897,17 @@ class DeployerGUI:
             variable=self.filter_var, font=self.fonts["body"],
             dropdown_font=self.fonts["body"],
             command=self._on_filter_change), 38).pack(fill="x")
+
+        # Which of the three steps it reaches, spelled out under the menu:
+        # the setting used to live under a heading naming step 8 only, and
+        # was in fact ignored by the step that fills the flash.
+        ctk.CTkLabel(
+            box, text="Step 1 writes data/www/ this way, step 7 images it to "
+                      "LittleFS, step 8 uploads it over HTTP. Change it and "
+                      "step 7 rebuilds the tree before flashing.",
+            font=self.fonts["small"], text_color=COLORS["muted"],
+            wraplength=self.px(620), anchor="w", justify="left",
+        ).pack(fill="x", pady=(6, 0))
 
         self.wipe_var = ctk.BooleanVar(value=self.cfg.get("wipe_before_upload", False))
         ctk.CTkCheckBox(
@@ -1253,13 +1277,15 @@ READABILITY
 
 KEYBOARD
   Ctrl+R   Run the selected steps        F5       Rescan serial ports
+           (the RUN button becomes STOP while a run is going — that is how
+            the serial monitor, which never ends on its own, is closed)
   Ctrl+S   Save configuration            Ctrl++   Larger text
   Ctrl+L   Clear the log                 Ctrl+-   Smaller text
                                          Ctrl+0   Reset text size
 
 WHERE THE SETTINGS LIVE
-  Settings tab   device IP, upload and monitor baud, HTTP upload filter,
-                 USB CDC on boot.
+  Settings tab   device IP, upload and monitor baud, which web asset copies
+                 to keep (steps 1, 7 and 8), USB CDC on boot.
   Build tab      the compile-time feature list read from src/setup.h, the
                  16-character ESP-NOW key, and which satellite node project
                  steps 10–12 build.
@@ -1647,7 +1673,11 @@ REQUIREMENTS
             label.configure(
                 text="Nothing selected — pick a job above, or tick steps under "
                      "Customise.", text_color=COLORS["warning"])
-            self.run_btn.configure(state="disabled")
+            # Not while running: the button is STOP then, and an empty step
+            # list is no reason to take away the only way to stop what is
+            # already going.
+            if not self.running:
+                self.run_btn.configure(state="disabled")
             return
         shown = steps[:5]
         lines = "\n".join(f"  {n}.  {step_parts(n)[0]}" for n in shown)
@@ -1854,6 +1884,44 @@ REQUIREMENTS
         except Exception:
             pass
 
+    def _on_run_or_stop(self) -> None:
+        """The one button: RUN when idle, STOP while a run is going."""
+        if self.running:
+            self._on_stop()
+        else:
+            self._on_run()
+
+    def _on_stop(self) -> None:
+        """Stop the running step and skip whatever was queued behind it.
+
+        The reason this exists is step 9. A serial monitor does not finish —
+        it is a monitor — and with no console there is no stdin to press
+        miniterm's Ctrl-C on, so the run stayed on "⏳ Running…" until the
+        window was killed, with `pio device monitor` still holding the port.
+
+        The worker thread is not touched. It is inside _run_cmd()'s read loop
+        on a pipe, and terminating the child at the far end of that pipe is
+        what ends the loop; run_steps() then sees the flag and stops rather
+        than starting the next step. Killing the thread instead would leave
+        the child running with nothing reading it.
+        """
+        mgr = self.manager
+        if mgr is None:
+            # Between the click on RUN and the manager being built there is
+            # nothing to terminate yet — so the press is remembered, and the
+            # worker cancels the manager the moment it has one.
+            self._stop_requested = True
+            self.run_btn.configure(state="disabled", text="■   Stopping…")
+            self._notify("Stop requested — it will stop as soon as the run "
+                         "starts.", "warning", seconds=4)
+            return
+        self.run_btn.configure(state="disabled", text="■   Stopping…")
+        self._notify("Stopping…", "warning", seconds=4)
+        # On its own thread: cancel() waits up to 3 s for the child to take a
+        # SIGTERM, and doing that on the UI thread freezes the window for
+        # exactly as long as the thing being stopped takes to stop.
+        threading.Thread(target=mgr.cancel, daemon=True).start()
+
     def _on_run(self) -> None:
         """Run selected steps in a background thread."""
         if self.running:
@@ -1885,7 +1953,12 @@ REQUIREMENTS
             return
 
         self.running = True
-        self.run_btn.configure(state="disabled", text="⏳   Running…")
+        self._stop_requested = False
+        # A run that has not built its manager yet cannot be stopped by
+        # terminating anything, so the previous run's manager must not be
+        # left where _on_stop() would find it and cancel it instead.
+        self.manager = None
+        self.run_btn.configure(state="normal", text="■   STOP")
         self.tab_view.set(TAB_RUN)
         total = len(steps)
         self._set_progress(0, total, f"Starting {total} step(s)…")
@@ -1906,6 +1979,9 @@ REQUIREMENTS
                 self._log("=" * 60 + "\n")
 
                 self.manager = DeployManager(self.cfg)
+                # A STOP pressed in the moment before this existed.
+                if self._stop_requested:
+                    self.manager.cancel()
 
                 def started(step, name):
                     self._log(f"\n[{step}] {name}")
@@ -1931,9 +2007,17 @@ REQUIREMENTS
                 self._log("\n" + "=" * 60)
                 # "Nothing failed" is not "everything ran". A declined
                 # bootloader step is neither an error nor a flash, and the
-                # green banner was being shown for both.
+                # green banner was being shown for both. A STOPPED run is a
+                # third answer again: the steps did not all run, but nothing
+                # went wrong — somebody pressed the button — so it is not
+                # painted red either.
                 declined = self.manager.skipped
-                if success and declined:
+                if self.manager.cancelled:
+                    self._log("■ Stopped.")
+                    self._set_progress(done[0], total,
+                                       f"Stopped after {done[0]} of {total}")
+                    self._notify("Stopped.", "warning")
+                elif success and declined:
                     sk = ", ".join(str(n) for n in declined)
                     self._log(f"! Finished — step(s) {sk} were DECLINED and "
                               f"did not run.", "warning")
@@ -1958,6 +2042,11 @@ REQUIREMENTS
                 self.running = False
                 self.root.after(0, lambda: self.run_btn.configure(
                     state="normal", text="▶   RUN"))
+                # A step list emptied while the run was going left RUN
+                # enabled over nothing to run; _refresh_plan() is what knows
+                # the difference, and it is only correct to ask now that
+                # `running` is False.
+                self.root.after(0, self._refresh_plan)
 
         thread = threading.Thread(target=run_in_bg, daemon=True)
         thread.start()
