@@ -805,6 +805,11 @@ static void handleKindleConfigGet(AsyncWebServerRequest* req) {
     doc["date_format"]   = k.dateFormat;
     doc["pressure_unit"] = k.pressureUnit;
     doc["decimals"]      = k.tempDecimals;
+    // The stored value, not the resolved one: the page's select has an
+    // "as built" entry, and showing it resolved would silently turn that
+    // choice into a fixed one the next time somebody pressed Save.
+    doc["lang"]          = k.lang;
+    doc["lang_built"]    = kdLangResolve(KLANG_AUTO);
 
     // Refresh cadence — runtime overrides of compile-time knobs.
     // 0 / 0xFF means "use the built-in default", which the page shows.
@@ -840,6 +845,7 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     KD_PARAM("date_format",   dateFormat);
     KD_PARAM("pressure_unit", pressureUnit);
     KD_PARAM("decimals",      tempDecimals);
+    KD_PARAM("lang",          lang);
     KD_PARAM("refresh_sec",      refreshSec);
     KD_PARAM("follow_data",      followData);
     KD_PARAM("clock_pin_refresh", clockPinRefresh);

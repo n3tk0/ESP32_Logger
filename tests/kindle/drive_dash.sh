@@ -263,6 +263,8 @@ LBL_FORECAST="FORECAST"
 LBL_MEASURED="Measured on site"
 LBL_WIND="wind"
 LBL_TO="to"
+LBL_OFFLINE="Няма връзка с"
+LBL_OFFLINE_HINT="Проверете WiFi"
 RES_W=600
 RES_H=800
 EOF
@@ -927,13 +929,44 @@ load_kv "$DASH_TMP/data.txt" PAYLOAD
 load_layout
 reset_log
 
+# ── 3d5. The language is the collector's, including when it is unreachable ──
+#
+# Every string on this panel comes from /kindle/data, so the language follows
+# the collector's setting with no reflash and nothing to configure here. The
+# offline message is the one that cannot: it is drawn precisely because the
+# collector cannot be reached. It uses whatever the last successful fetch left
+# behind, which covers every outage after first contact.
+( reset_log
+  HOST=10.9.9.42
+  redraw_offline "12:34"
+  grep -q "Няма връзка с" "$FBINK_LOG" || exit 1
+  grep -q "Проверете WiFi" "$FBINK_LOG" || exit 2
+  grep -q "Cannot reach" "$FBINK_LOG" && exit 3
+  exit 0 )
+check "$?" "the offline message is in the language the collector last sent"
+
+# And before first contact there is nothing to have kept, so it says what it
+# has always said rather than nothing at all.
+( reset_log
+  unset LBL_OFFLINE LBL_OFFLINE_HINT
+  HOST=10.9.9.42
+  redraw_offline "12:34"
+  grep -q "Cannot reach" "$FBINK_LOG" || exit 1
+  grep -q "Find collector" "$FBINK_LOG" || exit 2
+  exit 0 )
+check "$?" "and English before the collector has ever answered"
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+reset_log
+
 # ── 3e. With no data at all, the page says why ───────────────────────────────
 ( HAVE_DATA=0
   unset Z_GROUP_OUT OUT_TEMP IN_TEMP IN_HUM OUT_HUM
   : > "$FBINK_LOG"
   draw_sensors_body && exit 1                      # must refuse
   redraw_offline "12:34"
-  grep -q -- 'Cannot reach' "$FBINK_LOG" || exit 2
+  # Whatever the offline wording currently is — the payload carries it now, so
+  # a literal here would only be asserting the fixture's language.
+  grep -q -- "${LBL_OFFLINE:-Cannot reach}" "$FBINK_LOG" || exit 2
   grep -q -- '	--	°$' "$FBINK_LOG" && exit 3     # no punctuation-only fields
   # and the message lands in the readings zone, not under the chart
   grep -q -- "-s	top=$Z_SENS_Y,left=$Z_SENS_X" "$FBINK_LOG" || exit 4 )

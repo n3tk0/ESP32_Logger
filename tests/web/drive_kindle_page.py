@@ -35,7 +35,8 @@ def check(cond, what):
 # What mock_device.py starts with — not the defaults, on purpose: a page that
 # renders correctly only when every value is zero has never had its selects
 # proven against anything.
-START = dict(face="4", clock="3", time="2", date="1", press="1", dec="0")
+START = dict(face="4", clock="3", time="2", date="1", press="1", dec="0",
+             lang="2")
 
 with sync_playwright() as p:
     exe = os.environ.get("CHROMIUM_PATH")
@@ -53,7 +54,11 @@ with sync_playwright() as p:
     # Every select shows what the device holds, not its own first option.
     for el, want in (("kd-face", START["face"]), ("kd-clock", START["clock"]),
                      ("kd-time", START["time"]), ("kd-date", START["date"]),
-                     ("kd-press", START["press"]), ("kd-dec", START["dec"])):
+                     ("kd-press", START["press"]), ("kd-dec", START["dec"]),
+                     # The language was a build flag, so the page never had a
+                     # control for it and the reader had to reflash a panel on
+                     # a wall to read it in their own language.
+                     ("kd-lang", START["lang"])):
         got = pg.input_value("#" + el)
         check(got == want, f"#{el} reflects the device ({got!r})")
 
@@ -101,6 +106,7 @@ with sync_playwright() as p:
     # ── Save, and read the wire ─────────────────────────────────────────────
     # Bits flipped in both directions so a handler that only ever ORs, or one
     # that writes a constant, cannot pass.
+    pg.select_option("#kd-lang", "1")       # English
     pg.select_option("#kd-face", "2")       # Palatino
     pg.select_option("#kd-clock", "1")      # boxed
     pg.select_option("#kd-time", "0")       # 24 h
@@ -119,6 +125,7 @@ with sync_playwright() as p:
     got = pg.evaluate(
         "fetch('/api/kindle/config').then(function(r){return r.json()})")
     check(got["face"] == 2, f"the face round-trips (got {got['face']})")
+    check(got["lang"] == 1, f"the language round-trips (got {got['lang']})")
     check(got["clock_style"] == 1, f"the clock style round-trips (got {got['clock_style']})")
     check(got["pressure_unit"] == 0, "the pressure unit round-trips")
     check(got["decimals"] == 1, "the decimal count round-trips")
@@ -136,6 +143,9 @@ with sync_playwright() as p:
     check(got["face"] == 0 and got["bold"] == 0 and got["show"] == 0xFF and
           got["clock_style"] == 0 and got["decimals"] == 1,
           "restoring puts back the built-in design")
+    # Back to "as built" — not to English, which would be a choice the restore
+    # button did not make on behalf of somebody who had never touched this.
+    check(got["lang"] == 0, f"and the language goes back to as-built (got {got['lang']})")
     check(pg.input_value("#kd-face") == "0", "and the form re-renders as restored")
 
 

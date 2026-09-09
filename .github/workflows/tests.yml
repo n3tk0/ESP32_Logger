@@ -84,6 +84,13 @@ jobs:
             flags: '-fsanitize=address,undefined -fno-omit-frame-pointer'
           - name: tsan
             flags: '-fsanitize=thread'
+          # The other language build. -DKINDLE_LANG_BG no longer picks the
+          # strings — it picks what KLANG_AUTO resolves to, which is what every
+          # device that upgrades into the runtime setting is holding. Half of
+          # that behaviour is unreachable from a build that never sets the
+          # flag, and it is the half a Bulgarian panel runs on.
+          - name: lang-bg
+            flags: '-DKINDLE_LANG_BG'
     steps:
       - uses: actions/checkout@v4
 

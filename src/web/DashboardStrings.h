@@ -1,15 +1,19 @@
 // ============================================================================
 // src/web/DashboardStrings.h
 //
-// Dashboard wording in English or Bulgarian, chosen at build time.
+// Dashboard wording in English or Bulgarian, chosen at RUN time.
 //
-//   -DKINDLE_LANG_BG    Bulgarian
-//   (default)           English
+//   Settings -> E-ink dashboard -> Language, or config.kindle.lang
+//   -DKINDLE_LANG_BG    what that setting defaults to
 //
-// A compile-time switch rather than a runtime setting: the unused literal is
-// discarded by the compiler, so a single-language build pays nothing for the
-// other. The page is served to one reader on one shelf; nobody needs to
-// change its language without a reflash.
+// It used to be the build flag alone, on the argument that a single-language
+// build pays nothing for the other and nobody needs to change the language
+// without a reflash. The second half of that was wrong: the device is a panel
+// on a wall, its reader is not the person who built the firmware, and "reflash
+// to read it in your own language" is not an answer. Both literals are
+// compiled in now — under a kilobyte of flash across the whole page, and
+// nothing of RAM — and which one is read is a setting, for the browser page
+// and the FBInk panel together.
 //
 // WHY THE NAMES ARE TABLES AND NOT strftime
 // -----------------------------------------
@@ -33,16 +37,101 @@
 
 #include "../setup.h"
 
+#include <stdint.h>
 #include <stddef.h>          // size_t, for kdUpperUtf8()
+
+// ---------------------------------------------------------------------------
+// Which language the dashboard is written in
+// ---------------------------------------------------------------------------
+// The browser page and the FBInk panel together, because they are one design
+// rendered twice and nobody reads one in English and the other in Bulgarian.
+//
+// Stored as config.kindle.lang. OUTSIDE the feature guard below, because
+// Config.h's struct carries the field whether or not the dashboard is compiled
+// in, and a name that exists only in some builds is a name that breaks one.
+//
+// KLANG_AUTO IS ZERO, AND THAT IS THE POINT. It is what an older config's
+// reserved byte reads as, so a device upgrading into this keeps saying
+// whatever its firmware was built to say — the compile-time -DKINDLE_LANG_BG,
+// which is now the default rather than the decision. Choosing either of the
+// other two overrides it, and needs no reflash.
+enum KindleLang : uint8_t {
+    KLANG_AUTO = 0,     ///< as the firmware was built
+    KLANG_EN   = 1,
+    KLANG_BG   = 2
+};
 
 #ifdef FEATURE_KINDLE_DASHBOARD
 
-// Pick one of a pair. Both literals are written out, only one is emitted.
+// ---------------------------------------------------------------------------
+// Which language, and when it is decided
+// ---------------------------------------------------------------------------
+//
+// IT USED TO BE THE COMPILER'S DECISION. -DKINDLE_LANG_BG picked one literal of
+// each pair and discarded the other, which cost nothing and could not be
+// changed without a reflash — on a device whose whole point is that it hangs on
+// a wall. A reader who wanted the other language had to build firmware.
+//
+// It is a setting now (config.kindle.lang), and the build flag is what that
+// setting defaults to. Both literals are compiled in; the pair costs a pointer
+// and the strings themselves, which on a page of about forty is under a
+// kilobyte of flash and nothing at all of RAM.
+//
+// ONE VARIABLE, NOT A PARAMETER THREADED THROUGH THIRTY FUNCTIONS. kdT() is
+// called from the tendency wording, from a metric's label, from the middle of
+// the chart — none of which has a KindleConfig to consult, and giving them all
+// one would be a parameter that exists to be passed on. The current language is
+// genuinely ambient: it is a property of the page being rendered, and every
+// page is rendered start to finish on the async web server's own task, so
+// nothing else is looking while it is set. kdLangBegin() is called once at the
+// top of each handler and says so out loud.
+//
+// The function-local static is what lets this stay header-only: C++17 gives one
+// instance across every translation unit that includes this, so a host test can
+// include the header on its own and link.
+inline uint8_t& kdLangRef() {
 #if defined(KINDLE_LANG_BG)
-#  define KD_T(en, bg) bg
+    static uint8_t v = KLANG_BG;
 #else
-#  define KD_T(en, bg) en
+    static uint8_t v = KLANG_EN;
 #endif
+    return v;
+}
+
+/// Turn the stored setting into the language actually in use.
+///
+/// KLANG_AUTO — which is what an older config's reserved byte reads as, and
+/// therefore what every device upgrading into this has — means "as the
+/// firmware was built". Anything unrecognised means the same: a byte from
+/// storage is not a promise.
+inline uint8_t kdLangResolve(uint8_t stored) {
+    if (stored == KLANG_EN || stored == KLANG_BG) return stored;
+#if defined(KINDLE_LANG_BG)
+    return KLANG_BG;
+#else
+    return KLANG_EN;
+#endif
+}
+
+/// Set the language for the page about to be rendered. Call once, at the top.
+inline void kdLangBegin(uint8_t stored) { kdLangRef() = kdLangResolve(stored); }
+
+inline bool kdLangIsBg() { return kdLangRef() == KLANG_BG; }
+
+/// Pick one of a pair. Both are compiled in; which one is read is a setting.
+inline const char* kdT(const char* en, const char* bg) {
+    return kdLangIsBg() ? bg : en;
+}
+
+// A macro still, so the call sites read the same as they always did — and so
+// that KindleSlots.h's `#ifndef KD_T` fallback keeps working for a host test
+// that includes it on its own.
+//
+// IT IS NO LONGER A CONSTANT, and the one thing that changes is that it can no
+// longer be pasted between string literals: `"a" KD_T("b","c") "d"` was
+// compile-time concatenation and is now a syntax error, which is a good way for
+// this to fail rather than a bad one.
+#define KD_T(en, bg) kdT((en), (bg))
 
 // ---------------------------------------------------------------------------
 // Upper case, for the renderer that has no CSS
@@ -124,42 +213,36 @@ inline void kdUpperUtf8(char* dst, size_t cap, const char* src) {
 
 // Monday-based index, for the week strip.
 inline const char* kdWeekdayShort(int mondayIdx) {
-    static const char* N[7] = {
-#if defined(KINDLE_LANG_BG)
-        "пн", "вт", "ср", "чт", "пт", "сб", "нд"
-#else
-        "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
-#endif
-    };
-    return N[(mondayIdx < 0 || mondayIdx > 6) ? 0 : mondayIdx];
+    static const char* const EN[7] = { "Mon", "Tue", "Wed", "Thu",
+                                       "Fri", "Sat", "Sun" };
+    static const char* const BG[7] = { "пн", "вт", "ср", "чт",
+                                       "пт", "сб", "нд" };
+    const int i = (mondayIdx < 0 || mondayIdx > 6) ? 0 : mondayIdx;
+    return kdLangIsBg() ? BG[i] : EN[i];
 }
 
 // tm_mon counts from January. Set uppercase by CSS, so these stay lower case —
 // Bulgarian month names are not capitalised in running text, and text-transform
 // is what makes the section heading match the two above it.
 inline const char* kdMonth(int mon) {
-    static const char* N[12] = {
-#if defined(KINDLE_LANG_BG)
-        "януари", "февруари", "март", "април", "май", "юни",
-        "юли", "август", "септември", "октомври", "ноември", "декември"
-#else
+    static const char* const EN[12] = {
         "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"
-#endif
-    };
-    return N[(mon < 0 || mon > 11) ? 0 : mon];
+        "July", "August", "September", "October", "November", "December" };
+    static const char* const BG[12] = {
+        "януари", "февруари", "март", "април", "май", "юни",
+        "юли", "август", "септември", "октомври", "ноември", "декември" };
+    const int i = (mon < 0 || mon > 11) ? 0 : mon;
+    return kdLangIsBg() ? BG[i] : EN[i];
 }
 
 // Weekday abbreviation for a forecast column, N days ahead of `wday`.
 inline const char* kdWeekdayAhead(int wday, int daysAhead) {
-    static const char* N[7] = {
-#if defined(KINDLE_LANG_BG)
-        "нд", "пн", "вт", "ср", "чт", "пт", "сб"
-#else
-        "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
-#endif
-    };
-    return N[(wday + daysAhead) % 7];
+    static const char* const EN[7] = { "Sun", "Mon", "Tue", "Wed",
+                                       "Thu", "Fri", "Sat" };
+    static const char* const BG[7] = { "нд", "пн", "вт", "ср",
+                                       "чт", "пт", "сб" };
+    const int i = (wday + daysAhead) % 7;
+    return kdLangIsBg() ? BG[i] : EN[i];
 }
 
 #endif  // FEATURE_KINDLE_DASHBOARD

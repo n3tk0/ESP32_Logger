@@ -75,6 +75,10 @@
 // whole build configuration to compile.
 #ifndef KD_T
 #  define KD_T(en, bg) en
+// KD_T is a call now, so the fallback needs the function behind it as well:
+// a table row asks for its label in whichever language is set, and with the
+// dashboard compiled out there is no setting to ask.
+inline const char* kdT(const char* en, const char* /*bg*/) { return en; }
 #endif
 
 // ---------------------------------------------------------------------------
@@ -229,7 +233,19 @@ struct KindleSlot {
 // table — but the default is right often enough that most places need nothing.
 struct KdMetricStyle {
     const char* metric;
-    const char* label;
+
+    /// The label in each language, rather than one already chosen.
+    ///
+    /// THE TABLE IS STATIC AND THE LANGUAGE IS NOT. KD_T() used to be a macro
+    /// the compiler resolved, so `KD_T("TEMP", "ТЕМП")` was a literal and this
+    /// was one pointer. It is a function now — the language is a setting, and
+    /// a setting cannot be baked into a table that is initialised once — so
+    /// both go in the row and label() picks when it is asked.
+    const char* labelEn;
+    const char* labelBg;
+
+    const char* label() const { return kdT(labelEn, labelBg); }
+
     uint8_t     decimals;
     /// What to print after the value, when the reading's own unit is not what
     /// a glanceable page wants. nullptr means "use the sensor's".
@@ -243,34 +259,34 @@ struct KdMetricStyle {
 };
 
 static const KdMetricStyle KD_METRIC_STYLE[] = {
-    // metric            label                    dec  display unit
-    { "temperature",   KD_T("TEMP",  "ТЕМП"),    1,   "°"   },
-    { "humidity",      KD_T("HUM",   "ВЛАГА"),   0,   "%"        },
-    { "humidity_amb",  KD_T("HUM",   "ВЛАГА"),   0,   "%"        },
-    { "dew_point",     KD_T("DEW",   "РОСА"),    1,   "°"   },
-    { "pressure",      KD_T("PRESS", "НАЛЯГ"),   0,   nullptr    },  // re-united elsewhere
-    { "aqi",           "AQI",                    0,   ""         },
-    { "co2",           "CO₂",               0,   "ppm"      },
-    { "eco2",          "eCO₂",              0,   "ppm"      },
-    { "tvoc",          "TVOC",                   0,   "ppb"      },
-    { "pm1",           "PM1",                    0,   "µg/m³" },
-    { "pm25",          "PM2.5",                  0,   "µg/m³" },
-    { "pm4",           "PM4",                    0,   "µg/m³" },
-    { "pm10",          "PM10",                   0,   "µg/m³" },
-    { "lux",           KD_T("LIGHT", "СВЕТЛ"),   0,   "lx"       },
-    { "uva",           "UVA",                    1,   nullptr    },
-    { "uvb",           "UVB",                    1,   nullptr    },
-    { "rain",          KD_T("RAIN",  "ДЪЖД"),    1,   "mm"       },
-    { "rain_rate",     KD_T("RAIN/h","ДЪЖД/ч"),  1,   "mm/h"     },
-    { "rain_total",    KD_T("RAIN Σ","ДЪЖД Σ"), 1, "mm" },
-    { "wind",          KD_T("WIND",  "ВЯТЪР"),   1,   nullptr    },
-    { "wind_speed",    KD_T("WIND",  "ВЯТЪР"),   1,   nullptr    },
-    { "wind_direction",KD_T("DIR",   "ПОСОКА"),  0,   "°"   },
-    { "soil_moisture", KD_T("SOIL",  "ПОЧВА"),   0,   "%"        },
-    { "flow_rate",     KD_T("FLOW",  "ДЕБИТ"),   1,   nullptr    },
-    { "battery_voltage", KD_T("BATT","БАТЕРИЯ"), 2,   "V"        },
-    { "battery_percent", KD_T("BATT","БАТЕРИЯ"), 0,   "%"        },
-    { "battery_days",  KD_T("DAYS",  "ДНИ"),     0,   "d"        },
+    // metric             EN        BG         dec display unit
+    { "temperature",     "TEMP",   "ТЕМП",    1, "°" },
+    { "humidity",        "HUM",    "ВЛАГА",   0, "%" },
+    { "humidity_amb",    "HUM",    "ВЛАГА",   0, "%" },
+    { "dew_point",       "DEW",    "РОСА",    1, "°" },
+    { "pressure",        "PRESS",  "НАЛЯГ",   0, nullptr },  // re-united elsewhere
+    { "aqi",             "AQI",    "AQI",     0, "" },
+    { "co2",             "CO₂",    "CO₂",     0, "ppm" },
+    { "eco2",            "eCO₂",   "eCO₂",    0, "ppm" },
+    { "tvoc",            "TVOC",   "TVOC",    0, "ppb" },
+    { "pm1",             "PM1",    "PM1",     0, "µg/m³" },
+    { "pm25",            "PM2.5",  "PM2.5",   0, "µg/m³" },
+    { "pm4",             "PM4",    "PM4",     0, "µg/m³" },
+    { "pm10",            "PM10",   "PM10",    0, "µg/m³" },
+    { "lux",             "LIGHT",  "СВЕТЛ",   0, "lx" },
+    { "uva",             "UVA",    "UVA",     1, nullptr },
+    { "uvb",             "UVB",    "UVB",     1, nullptr },
+    { "rain",            "RAIN",   "ДЪЖД",    1, "mm" },
+    { "rain_rate",       "RAIN/h", "ДЪЖД/ч",  1, "mm/h" },
+    { "rain_total",      "RAIN Σ", "ДЪЖД Σ",  1, "mm" },
+    { "wind",            "WIND",   "ВЯТЪР",   1, nullptr },
+    { "wind_speed",      "WIND",   "ВЯТЪР",   1, nullptr },
+    { "wind_direction",  "DIR",    "ПОСОКА",  0, "°" },
+    { "soil_moisture",   "SOIL",   "ПОЧВА",   0, "%" },
+    { "flow_rate",       "FLOW",   "ДЕБИТ",   1, nullptr },
+    { "battery_voltage", "BATT",   "БАТЕРИЯ", 2, "V" },
+    { "battery_percent", "BATT",   "БАТЕРИЯ", 0, "%" },
+    { "battery_days",    "DAYS",   "ДНИ",     0, "d" },
 };
 static const int KD_METRIC_STYLE_COUNT =
     (int)(sizeof(KD_METRIC_STYLE) / sizeof(KD_METRIC_STYLE[0]));
@@ -288,7 +304,7 @@ static inline const KdMetricStyle* kdMetricStyle(const char* metric) {
 static inline const char* kdSlotLabel(const KindleSlot& s) {
     if (s.label[0]) return s.label;
     const KdMetricStyle* st = kdMetricStyle(s.metric);
-    return st ? st->label : s.metric;
+    return st ? st->label() : s.metric;
 }
 
 /// What to print after the value. The table's choice when it has one, else the

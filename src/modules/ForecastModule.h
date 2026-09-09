@@ -63,7 +63,15 @@ public:
         bool  valid = false;
         // 12, not 8: a Cyrillic two-letter abbreviation is four UTF-8
         // bytes, and "21:00" plus a terminator already wants six.
-        char  label[12] = {0};  // "21:00" or "ср"
+        char  label[12] = {0};  // "21:00", or the weekday as it was at fetch
+        /// 0=Sunday..6=Saturday for a daily column, -1 for an hourly one.
+        ///
+        /// STORED AS A NUMBER because the language is a runtime setting and
+        /// this snapshot is written every few hours: a name written here is a
+        /// name in whichever language was set when the provider was last
+        /// polled. `label` keeps the rendered form for an hourly column, which
+        /// is a clock time and has no language.
+        int8_t wday = -1;
         float tempC = NAN;
         float lowC  = NAN;
         int   code  = -1;
@@ -132,6 +140,10 @@ extern ForecastModule forecastModule;
 /// Appends the dashboard's forecast section to `out`. Defined here so the
 /// Kindle renderer does not need to know the provider details.
 void appendForecastSection(String& out);
+
+/// The caption for one outlook column, in the language set now rather than the
+/// one set when the forecast was fetched. See Period::wday.
+const char* forecastPeriodLabel(const ForecastModule::Period& p);
 
 /// Draws a stroke-only condition glyph for a WMO code at `px` square.
 /// Exposed for the dashboard; see the note in the .cpp on why the icon is

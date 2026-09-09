@@ -371,7 +371,12 @@ static void test_the_metric_table_is_sane() {
     for (int i = 0; i < KD_METRIC_STYLE_COUNT; i++) {
         const KdMetricStyle& m = KD_METRIC_STYLE[i];
         CHECK(m.metric && m.metric[0]);
-        CHECK(m.label  && m.label[0]);
+        // BOTH LANGUAGES, because the table carries both now and the one that
+        // is empty is the one nobody building in the other language would see.
+        // A blank label renders as nothing at all — no caption over the value,
+        // which reads as a place nobody filled in.
+        CHECK(m.labelEn && m.labelEn[0]);
+        CHECK(m.labelBg && m.labelBg[0]);
         CHECK(m.decimals <= 3);
         // Every metric name must fit KindleSlot::metric, or a place configured
         // from the table's own list would be stored truncated and never match.

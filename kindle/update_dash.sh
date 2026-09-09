@@ -1224,13 +1224,19 @@ redraw_forecast() {
 # on it beats a blank one.
 redraw_offline() {
     # $1=HH:MM
+    # THE ONE MESSAGE THAT CANNOT BE FETCHED WHEN IT IS NEEDED. Every other
+    # string on this panel comes from /kindle/data in whatever language the
+    # collector is set to; this one is drawn precisely because the collector
+    # cannot be reached. So it uses the wording the LAST successful fetch left
+    # behind — which is every outage after the first contact — and falls back
+    # to English before that, on a panel nobody has set a language on yet.
     local y=$(( Z_SENS_H / 3 ))
     fill_rect "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" WHITE
     draw_text_bold "${OFF_X:-40}" "$y" "${OFF_SZ:-26}" "BLACK" \
-                   "Cannot reach $(host_url)"
+                   "${LBL_OFFLINE:-Cannot reach} $(host_url)"
     draw_text_reg "${OFF_X:-40}" "$(( y + ${OFF_SZ:-26} + 12 ))" \
                   "${OFF_SUB_SZ:-16}" "GRAY5" \
-                  "Check WiFi, or KUAL → Settings → Find collector"
+                  "${LBL_OFFLINE_HINT:-Check WiFi, or KUAL → Settings → Find collector}"
     draw_clock "$1"
     refresh_zone "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" 0
 }

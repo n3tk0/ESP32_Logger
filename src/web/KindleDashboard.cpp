@@ -174,8 +174,10 @@ static void appendChart(String& out,
         if (haveB && b[i].count) { if (b[i].min < lo) lo = b[i].min; if (b[i].max > hi) hi = b[i].max; }
     }
     if (lo > hi) {
-        out += F(KD_T("<p class=\"note\">The 24 hour record fills as readings arrive.</p>",
-                      "<p class=\"note\">24-часовият запис се попълва с постъпването на данни.</p>"));
+        out += F("<p class=\"note\">");
+        out += kdT("The 24 hour record fills as readings arrive.",
+                   "24-часовият запис се попълва с постъпването на данни.");
+        out += F("</p>");
         return;
     }
     float pad = (hi - lo) * 0.06f;
@@ -280,7 +282,9 @@ static void appendChart(String& out,
     // Leaving it bare made the axis read as if it stopped five hours ago.
     out += F("<text class=\"ax\" x=\""); out += KD_X(TrendRing::HOURS - 1);
     out += F("\" y=\""); out += CHART_H - kdPx(8);
-    out += F("\" text-anchor=\"end\">" KD_T("now", "сега") "</text>");
+    out += F("\" text-anchor=\"end\">");
+    out += kdT("now", "сега");
+    out += F("</text>");
 
     #undef KD_X
     #undef KD_Y
@@ -416,8 +420,8 @@ static void appendAge(String& out, uint32_t ts, uint32_t now) {
     const uint32_t mins = (now - ts) / 60u;
     if (mins < 2) return;                       // fresh; saying so is noise
     out += F(" &middot; ");
-    if (mins < 60) { out += mins; out += F(KD_T(" min old", " мин"));  }
-    else           { out += (mins / 60); out += F(KD_T(" h old", " ч")); }
+    if (mins < 60) { out += mins;        out += kdT(" min old", " мин"); }
+    else           { out += (mins / 60); out += kdT(" h old",   " ч");   }
 }
 
 // Text into HTML.
@@ -1110,12 +1114,16 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now) {
                 p += F("<div class=\"clock-d\">"); p += dt; p += F("</div>");
             }
         } else {
-            p += F("<div class=\"clock-x\">" KD_T("no time", "няма час") "</div>");
+            p += F("<div class=\"clock-x\">");
+            p += kdT("no time", "няма час");
+            p += F("</div>");
         }
     } else {
         // Not "--:--": a plausible-looking blank clock invites the reader to
         // wonder what time it is, where "clock not set" names the fault.
-        p += F("<div class=\"clock-x\">" KD_T("clock not set", "часът не е сверен") "</div>");
+        p += F("<div class=\"clock-x\">");
+        p += kdT("clock not set", "часът не е сверен");
+        p += F("</div>");
     }
 
     // ── The indoor row ──────────────────────────────────────────────────────
@@ -1157,6 +1165,13 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now) {
 }
 
 static void handleKindleData(AsyncWebServerRequest* req) {
+    // THE LANGUAGE, FIRST, BEFORE ANYTHING IS WORDED. kdT() and the weekday and
+    // month tables read one ambient value rather than taking a parameter each —
+    // see DashboardStrings.h for why — and this is where it is set. Every page
+    // is rendered start to finish on the async web server's own task, so
+    // nothing else is looking at it in between.
+    kdLangBegin(config.kindle.lang);
+
     const Latest outT = latestOf(outdoorSensorId(), "temperature");
     const Latest outH = humidityOf(outdoorSensorId());
     const Latest outP = latestOf(outdoorSensorId(), "pressure");
@@ -1396,6 +1411,17 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     kdShellVar(s, "LBL_WIND", KD_T("wind", "вятър"));
     kdShellVar(s, "LBL_TO", KD_T("to", "до"));
 
+    // What the panel writes when it cannot reach this collector — which is,
+    // necessarily, wording it cannot ask for at the moment it needs it. The
+    // reader keeps whatever the last successful fetch gave it, so the message
+    // is in the reader's language for every outage after the first contact,
+    // and in the script's English fallback before that. A panel that has never
+    // reached its collector is also a panel nobody has set a language on.
+    kdShellVar(s, "LBL_OFFLINE", KD_T("Cannot reach", "Няма връзка с"));
+    kdShellVar(s, "LBL_OFFLINE_HINT",
+               KD_T("Check WiFi, or KUAL → Settings → Find collector",
+                    "Проверете WiFi, или KUAL → Settings → Find collector"));
+
     // The chart's key, worded here so the panel and the page say the same
     // thing in the same language. The page sets the band clause in grey after
     // the first label; the panel draws it as one line for the same reason it
@@ -1529,6 +1555,13 @@ static void handleKindleData(AsyncWebServerRequest* req) {
 }
 
 static void handleKindle(AsyncWebServerRequest* req) {
+    // THE LANGUAGE, FIRST, BEFORE ANYTHING IS WORDED. kdT() and the weekday and
+    // month tables read one ambient value rather than taking a parameter each —
+    // see DashboardStrings.h for why — and this is where it is set. Every page
+    // is rendered start to finish on the async web server's own task, so
+    // nothing else is looking at it in between.
+    kdLangBegin(config.kindle.lang);
+
     // ONLY WHAT THIS PAGE STILL READS. The outdoor humidity and pressure and
     // the indoor humidity were fetched here when the layout hardwired them;
     // the places resolve their own readings now, and these were left behind
@@ -1581,7 +1614,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     p += kdRefreshDelaySec(outT.ts > inT.ts ? outT.ts : inT.ts, now,
                            now > KINDLE_MIN_REAL_TS, cad);
-    p += F("\"><title>" KD_T("Weather", "Времето") "</title><style>");
+    p += F("\"><title>");
+    p += kdT("Weather", "Времето");
+    p += F("</title><style>");
 
     // The stylesheet, emitted rather than stored as one literal: every number
     // in it is a 600-px-layout figure passed through kdPx(). KD_S is a literal
@@ -1875,8 +1910,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
     appendTopBlock(p, skin, now);
 
     if (skin.showFlags & KSHOW_CHART) {
-        p += F("<div class=\"rule\"></div><div class=\"sec\">"
-               KD_T("Last 24 hours", "Последните 24 часа") "</div>");
+        p += F("<div class=\"rule\"></div><div class=\"sec\">");
+        p += kdT("Last 24 hours", "Последните 24 часа");
+        p += F("</div>");
         appendChart(p, tOut, tIn, haveOut, haveIn);
         if (haveOut || haveIn) {
             // The two swatches must be drawn with the same stroke as the lines
@@ -1884,14 +1920,16 @@ static void handleKindle(AsyncWebServerRequest* req) {
             // describes a chart the reader is not looking at.
             p += F("<table class=\"key\"><tr><td>");
             appendKeySwatch(p, "#000", 3, false);
-            p += F(" " KD_T("outside mean", "средно навън")
-                   "<span class=\"dim\">"
-                   KD_T(", shaded band = hourly low to high",
-                        ", сивото е час. мин&ndash;макс")
-                   "</span>"
-                   "</td><td style=\"text-align:right\">");
+            p += ' ';
+            p += kdT("outside mean", "средно навън");
+            p += F("<span class=\"dim\">");
+            p += kdT(", shaded band = hourly low to high",
+                     ", сивото е час. мин&ndash;макс");
+            p += F("</span></td><td style=\"text-align:right\">");
             appendKeySwatch(p, "#777", 2, true);
-            p += F(" " KD_T("inside", "вътре") "</td></tr></table>");
+            p += ' ';
+            p += kdT("inside", "вътре");
+            p += F("</td></tr></table>");
         }
     }
 
@@ -1908,12 +1946,13 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // scripted, so a five-way pad reaches them as readily as a fingertip. See
     // the .act rule for what the padding actually buys, and for why the size
     // is smaller than the usual touch guidance rather than meeting it.
-    p += F("<table class=\"foot\"><tr><td>"
-           KD_T("Measured on site", "Измерено на място"));
-    p += F("</td><td class=\"act\"><a href=\"/kindle\">"
-           KD_T("refresh", "обнови") "</a>"
-           "<a href=\"/kindle/clear\">" KD_T("clear", "изчисти") "</a>"
-           "</td></tr></table></body></html>");
+    p += F("<table class=\"foot\"><tr><td>");
+    p += kdT("Measured on site", "Измерено на място");
+    p += F("</td><td class=\"act\"><a href=\"/kindle\">");
+    p += kdT("refresh", "обнови");
+    p += F("</a><a href=\"/kindle/clear\">");
+    p += kdT("clear", "изчисти");
+    p += F("</a></td></tr></table></body></html>");
 
     AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
     // The meta tag drives the refresh, so nothing may be served from cache: an

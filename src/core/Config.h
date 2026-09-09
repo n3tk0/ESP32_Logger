@@ -151,6 +151,10 @@ enum KindleDateFormat : uint8_t {
     KDATE_ISO = 3           // 2026-08-27
 };
 
+// KindleLang (KLANG_AUTO / _EN / _BG) is in src/web/DashboardStrings.h, beside
+// the words it chooses between — that header is deliberately free of Arduino
+// so a host test can include it alone, which is why it cannot live here.
+
 enum KindlePressureUnit : uint8_t {
     KPRESS_HPA = 0, KPRESS_MMHG = 1, KPRESS_INHG = 2
 };
@@ -359,7 +363,11 @@ struct KindleConfig {
     uint16_t fbinkResW;       // 0 = use KINDLE_PAGE_W (600); set 1072 for PW4 FBInk mode
     char     outdoorSensor[16]; // Empty = use compile-time KINDLE_OUTDOOR_SENSOR
     char     indoorSensor[16];  // Empty = use compile-time KINDLE_INDOOR_SENSOR
-    uint8_t  reserved[9];
+    // v14.2 — the wording's language, formerly in reserved[]. KLANG_AUTO (0)
+    // is what an older config holds there, and means "as the firmware was
+    // built", so an upgrade changes nothing until somebody chooses.
+    uint8_t  lang;            // KindleLang
+    uint8_t  reserved[8];
 };
 
 struct DeviceConfig {

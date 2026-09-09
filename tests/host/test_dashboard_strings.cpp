@@ -1,7 +1,20 @@
-// Upper case for the renderer that has no CSS.
+// The dashboard's wording: which language it is in, and what case it is set in.
 //
-// WHY THIS IS WORTH A TEST FILE
-// -----------------------------
+// Two things live here because they are two halves of the same job — deciding
+// what string the reader ends up looking at — and because both fail quietly.
+//
+// WHICH LANGUAGE
+// --------------
+// It was the compiler's decision: -DKINDLE_LANG_BG picked one literal of each
+// pair and threw the other away. That cost nothing and could not be changed
+// without a reflash, on a device whose whole point is that it hangs on a wall
+// and is read by somebody who did not build its firmware. It is a setting now,
+// which means every table has to carry both languages and ask at the moment it
+// is read — and a table that forgot to ask leaves half the page in the old
+// language, which reads as an unfinished translation rather than as a bug.
+//
+// WHAT CASE
+// ---------
 // Every caption on the Kindle dashboard is set uppercase, and on the browser
 // page that is one line of CSS — so the string tables and the labels a reader
 // types stay in their natural case. The panel has no CSS. It draws whatever
@@ -20,6 +33,9 @@
 #define FEATURE_KINDLE_DASHBOARD 1
 
 #include "src/web/DashboardStrings.h"
+// KindleSlots.h too: the metric labels and the two group headings are the
+// wording a reader sees most of, and they live in that table rather than here.
+#include "src/web/KindleSlots.h"
 #include "check.h"
 
 #include <string>
@@ -149,6 +165,85 @@ static void test_the_degenerate_calls() {
     kdUpperUtf8(nullptr, 8, "Навън");        // must not crash
 }
 
+// ---------------------------------------------------------------------------
+// The label follows the setting, and the setting is not the compiler's
+// ---------------------------------------------------------------------------
+// The language was a build flag: KD_T() resolved to one literal and the other
+// was discarded, so this table held one pointer per row and a reader who
+// wanted the other language had to build firmware for a panel on a wall.
+//
+// It is a setting now, which means the row has to hold both and label() has to
+// ask — and the failure if it does not is silent in exactly one direction:
+// switching to Bulgarian would leave every table label in English while the
+// labels a reader typed themselves changed, which reads as a half-finished
+// translation rather than as a bug.
+static void test_the_label_follows_the_language() {
+    const uint8_t saved = kdLangRef();
+
+    kdLangBegin(KLANG_EN);
+    const KdMetricStyle* t = kdMetricStyle("temperature");
+    CHECK(t != nullptr);
+    if (t) CHECK_STREQ(t->label(), "TEMP");
+
+    kdLangBegin(KLANG_BG);
+    if (t) CHECK_STREQ(t->label(), "ТЕМП");
+
+    // Through kdSlotLabel(), which is what both renderers actually call. A
+    // place with no label of its own falls back to the table.
+    KindleSlot s{};
+    strncpy(s.metric, "pressure", sizeof(s.metric) - 1);
+    CHECK_STREQ(kdSlotLabel(s), "НАЛЯГ");
+    kdLangBegin(KLANG_EN);
+    CHECK_STREQ(kdSlotLabel(s), "PRESS");
+
+    // A place the reader named keeps its own name in either language. It is
+    // their text, not a translation.
+    strncpy(s.label, "Спалня", sizeof(s.label) - 1);
+    CHECK_STREQ(kdSlotLabel(s), "Спалня");
+    kdLangBegin(KLANG_BG);
+    CHECK_STREQ(kdSlotLabel(s), "Спалня");
+
+    // A metric the table does not list falls back to the metric name, which is
+    // not a translated string in either language.
+    KindleSlot u{};
+    strncpy(u.metric, "unlisted_thing", sizeof(u.metric) - 1);
+    CHECK_STREQ(kdSlotLabel(u), "unlisted_thing");
+
+    // Both group headings follow too — they are the two captions a reader is
+    // most likely to notice, being the largest.
+    KindleZones z{};
+    kdLangBegin(KLANG_EN);
+    CHECK_STREQ(kdGroupOutLabel(z), "OUTSIDE");
+    CHECK_STREQ(kdGroupInLabel(z),  "INSIDE");
+    kdLangBegin(KLANG_BG);
+    CHECK_STREQ(kdGroupOutLabel(z), "НАВЪН");
+    CHECK_STREQ(kdGroupInLabel(z),  "ВЪТРЕ");
+
+    kdLangRef() = saved;
+}
+
+// KLANG_AUTO is what an older config's reserved byte reads as, so every device
+// that upgrades into this arrives holding it. It has to mean "carry on saying
+// what you said before" — anything else and an update silently changes the
+// language of a panel on somebody's wall.
+static void test_an_unset_setting_keeps_the_build_s_language() {
+    const uint8_t saved = kdLangRef();
+#if defined(KINDLE_LANG_BG)
+    const uint8_t built = KLANG_BG;
+#else
+    const uint8_t built = KLANG_EN;
+#endif
+    CHECK_EQ((int)kdLangResolve(KLANG_AUTO), (int)built);
+    CHECK_EQ((int)kdLangResolve(KLANG_EN),   (int)KLANG_EN);
+    CHECK_EQ((int)kdLangResolve(KLANG_BG),   (int)KLANG_BG);
+    // A byte out of storage is not a promise. Anything unrecognised is the
+    // build's language too, not an index into nothing.
+    CHECK_EQ((int)kdLangResolve(3),   (int)built);
+    CHECK_EQ((int)kdLangResolve(200), (int)built);
+    CHECK_EQ((int)kdLangResolve(255), (int)built);
+    kdLangRef() = saved;
+}
+
 int main() {
     RUN(test_ascii_is_the_easy_half);
     RUN(test_the_labels_this_was_written_for);
@@ -156,5 +251,7 @@ int main() {
     RUN(test_it_leaves_alone_what_it_does_not_understand);
     RUN(test_it_never_cuts_a_character_in_half);
     RUN(test_the_degenerate_calls);
+    RUN(test_the_label_follows_the_language);
+    RUN(test_an_unset_setting_keeps_the_build_s_language);
     return SUMMARY();
 }

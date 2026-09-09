@@ -105,8 +105,8 @@ changes what the page *says* is runtime.
 | `KINDLE_OUTDOOR_SENSOR`, `KINDLE_INDOOR_SENSOR` | build flag | also names the four `TrendRing` series registered at boot |
 | `KINDLE_REFRESH_SEC`, `KINDLE_REFRESH_MIN_SEC`, `KINDLE_DATA_PERIOD_SEC`, `KINDLE_FOLLOW_DATA`, `KINDLE_CLOCK_PIN_REFRESH`, `KINDLE_CLOCK_SYNC_GUARD_SEC` | build flag | they only set numbers in a `<meta>` tag |
 | `KINDLE_PAGE_W` | build flag | rescales every size in the stylesheet |
-| `KINDLE_LANG_BG` | build flag | a single-language build pays nothing for the other |
-| face, weight, clock style, time/date/pressure format, which blocks are drawn | **the collector's web UI** | Settings → E-ink dashboard; see [Appearance](#appearance) |
+| `KINDLE_LANG_BG` | build flag, and now only a **default** | see [Language](#language) — the setting below overrides it |
+| language, face, weight, clock style, time/date/pressure format, which blocks are drawn | **the collector's web UI** | Settings → E-ink dashboard; see [Appearance](#appearance) |
 | provider, key, lat/lon, outlook, interval | **the collector's web UI** | Settings → Modules → Weather forecast |
 
 The forecast row is the part you will actually want to change after flashing —
@@ -370,20 +370,59 @@ that firmware that could be low.
 
 ### Language
 
+**Settings → E-ink dashboard → Language.** It covers the browser page and the
+FBInk panel together, because they are one design rendered twice and nobody
+reads one in English and the other in Bulgarian. No reflash.
+
 ```ini
--DKINDLE_LANG_BG    ; Bulgarian; omit for English
+-DKINDLE_LANG_BG    ; what that setting DEFAULTS to; omit for English
 ```
 
-A compile-time switch, so a single-language build pays nothing for the other —
-the unused literal is discarded. The weekday names in the week strip come from
-tables in `DashboardStrings.h` rather than from `strftime`: the C locale would
-give English names whatever the build language, and newlib on this part has no
-`bg_BG` to switch to.
+It used to be the build flag alone, on the argument that a single-language
+build pays nothing for the other and nobody needs to change the language
+without a reflash. The second half of that was wrong: the device is a panel on
+a wall, its reader is not the person who built the firmware, and "reflash to
+read it in your own language" is not an answer. Both wordings are compiled in
+now — about a kilobyte of flash across the whole page, and nothing of RAM.
+
+`KLANG_AUTO` is **zero**, which is what an older config's reserved byte reads
+as, so a device that upgrades into this keeps saying whatever its firmware was
+built to say until somebody chooses otherwise. An unrecognised byte resolves
+the same way: a value out of storage is not a promise.
+
+Three things follow from the language being a setting rather than a constant,
+and each was somewhere the old design could quietly stay in the old language:
+
+- **`KD_T()` is a call, not a macro that picks a literal.** It can no longer be
+  pasted between string literals — `"a" KD_T("b","c") "d"` was compile-time
+  concatenation and is now a syntax error, which is a good way for this to fail
+  rather than a bad one.
+- **The metric label table carries both languages per row** (`labelEn`,
+  `labelBg`) and asks when it is read. A table initialised once cannot hold a
+  setting.
+- **The forecast stores the weekday as a number, not a name.** It is fetched
+  every few hours and read every few minutes, so a name written down at fetch
+  time is a name in whichever language was set then — switching to Bulgarian
+  would have left three English weekdays under a Bulgarian page for up to six
+  hours.
+
+What it does *not* translate: the names you have given your places (your text,
+drawn as you typed it) and the weather provider's own summary.
+
+The weekday names come from tables in `DashboardStrings.h` rather than from
+`strftime`: the C locale would give English names whatever the setting, and
+newlib on this part has no `bg_BG` to switch to.
 
 Cyrillic depends on the reader's fallback font. The page declares UTF-8 and
 names the device's serif faces first, but Bookerly's Cyrillic coverage varies
-by firmware — if a Bulgarian build shows boxes, that is the font, not the
-encoding.
+by firmware — if Bulgarian shows boxes, that is the font, not the encoding.
+
+**On the panel, the language needs nothing at all.** Every string the FBInk
+renderer draws arrives in `/kindle/data`, so it follows the collector's setting
+on the next fetch. The single exception is the "cannot reach the collector"
+message, which is drawn precisely when the collector cannot be asked: it uses
+the wording the last successful fetch left behind, and falls back to English
+before first contact — on a panel where nobody has set a language yet.
 
 ### The greys
 
