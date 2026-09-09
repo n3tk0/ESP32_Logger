@@ -405,6 +405,36 @@ static void test_every_ink_level_names_a_colour() {
             CHECK(strcmp(kdInkCss(a),   kdInkCss(b))   != 0);
             CHECK(strcmp(kdInkFbink(a), kdInkFbink(b)) != 0);
         }
+    // ── AND THE FBINK NAME HAS TO BE ONE FBINK HAS ──────────────────────────
+    //
+    // "names a colour" was all this asked, and KINK_LIGHT named GRAY10 —
+    // which FBInk does not have. Its scale runs BLACK, GRAY1..GRAY9, then
+    // GRAYA..GRAYE, then WHITE, so `-C GRAY10` was rejected, the whole draw
+    // call failed, and a place set to "light" was simply not on the panel. The
+    // browser page showed it in pale grey. The reader sends fbink's stderr to
+    // /dev/null, so nothing anywhere said a word.
+    //
+    // The relationship is exact, which is what makes it worth checking rather
+    // than eyeballing: FBInk's greys are the sixteen values 0x00, 0x11 … 0xFF,
+    // and kdInkCss()'s are three-digit hex — so the name is decided by the
+    // digit, and #aaa is GRAYA and nothing else.
+    static const char* PALETTE[16] = {
+        "BLACK", "GRAY1", "GRAY2", "GRAY3", "GRAY4", "GRAY5", "GRAY6", "GRAY7",
+        "GRAY8", "GRAY9", "GRAYA", "GRAYB", "GRAYC", "GRAYD", "GRAYE", "WHITE"
+    };
+    for (uint8_t i = 0; i < KINK_COUNT; i++) {
+        const char* css = kdInkCss(i);       // "#000", "#444", "#777", "#aaa"
+        const char  d   = css[1];
+        const int   n   = (d >= '0' && d <= '9') ? d - '0'
+                        : (d >= 'a' && d <= 'f') ? d - 'a' + 10
+                        : (d >= 'A' && d <= 'F') ? d - 'A' + 10 : -1;
+        CHECK(n >= 0 && n <= 15);
+        // The three digits are equal, or the two vocabularies are describing
+        // different colours and no single FBInk name can stand for it.
+        CHECK(css[1] == css[2] && css[2] == css[3]);
+        if (n >= 0 && n <= 15) CHECK_STREQ(kdInkFbink(i), PALETTE[n]);
+    }
+
     // Out of range is black in both, because a renderer handed a stored byte
     // must not index past the palette.
     CHECK_STREQ(kdInkCss(KINK_COUNT), "#000");

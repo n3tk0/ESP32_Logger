@@ -854,6 +854,8 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
         res[KZ_BIG].arrow   = "";
     }
 
+    const KindleZones& zones = kdSlots();
+
     // THE SECOND HEADLINE VALUE IS SUBORDINATE, and the page says so in one
     // line of CSS the panel cannot see: `.v2{color:#444}`, applying whenever
     // the place has not been given an ink of its own (an .ink-* class is
@@ -864,8 +866,6 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
     const bool bigDefaultInk = (zones.z[KZ_BIG].ink != KINK_DARK &&
                                 zones.z[KZ_BIG].ink != KINK_MID &&
                                 zones.z[KZ_BIG].ink != KINK_LIGHT);
-
-    const KindleZones& zones = kdSlots();
 
     // Uppercased, because .lab is `text-transform:uppercase` on the page and
     // the panel has no CSS. See kdShellVarUpper().
