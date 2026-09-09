@@ -386,7 +386,14 @@ graph_ok() {
     [ "$have" = "$want" ]
 }
 
+# Is the chart switched on? Consulted before FETCHING as well as before
+# drawing: a reader who turns the chart off in Settings should not have the
+# Kindle keep downloading a 56 KB image over WiFi every GRAPH_EVERY minutes
+# for a section nothing draws.
+chart_wanted() { [ "${SHOW_CHART:-1}" = "1" ]; }
+
 fetch_graph() {
+    chart_wanted || return 1
     # Into a scratch file, and only into place once it is whole. wget -O
     # truncates its target the moment it opens it, so fetching straight onto
     # graph.bmp turned one WiFi hiccup into a zero-byte file — and since
@@ -604,8 +611,10 @@ clock_centre_x() {
 draw_clock() {
     local now_time="$1"
     local sz cy
-    fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
-
+    # The clearing fill is per-style, not up front: the boxed clock covers the
+    # whole rectangle in black anyway, so a white fill before it was a second
+    # fbink process a minute — 1440 forks a day on a ten-year-old ARM device —
+    # painting something nothing would ever see.
     case "${CLOCK_STYLE:-0}" in
         1)  # BOXED — knocked out of a black plate, the treatment the current
             # weekday already gets in the week strip. On a screen with no
@@ -619,6 +628,7 @@ draw_clock() {
         2)  # RULED — a hairline over it and set smaller, so it reads as a rule
             # rather than as a number that happens to have a line above it. The
             # hairline under it is the one the indoor row already draws.
+            fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
             sz="${CL_SZ_RULED:-$CL_SIZE}"
             draw_hline "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" BLACK
             cy=$(( Z_CLOCK_Y + ${CL_RULED_PAD:-15} ))
@@ -630,13 +640,21 @@ draw_clock() {
             #
             # The date is the collector's, formatted to the reader's choice. It
             # changes once a day, so a value up to one fetch old is right.
+            fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
             sz="${CL_SZ_DATED:-$CL_SIZE}"
             draw_text_bold "$CL_X" "$CL_Y" "$sz" "BLACK" "$now_time"
-            [ -n "${DATE:-}" ] && \
+            # An `&&` here would make draw_clock's exit status the test's, so
+            # a collector that sends no date — an older one, or the offline
+            # path before any fetch — would report a failure for a clock it
+            # drew perfectly. Nothing tests it today; redraw_all is one `&&`
+            # away from turning that into a skipped repaint.
+            if [ -n "${DATE:-}" ]; then
                 draw_text_reg "$CL_X" "$(( CL_Y + sz + ${CL_DATE_GAP:-6} ))" \
                               "${CL_DATE_SZ:-14}" "GRAY4" "$DATE"
+            fi
             ;;
-        *)  draw_text_bold "$CL_X" "$CL_Y" "$CL_SIZE" "BLACK" "$now_time" ;;
+        *)  fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
+            draw_text_bold "$CL_X" "$CL_Y" "$CL_SIZE" "BLACK" "$now_time" ;;
     esac
 }
 
@@ -1032,7 +1050,7 @@ draw_chart_body() {
     # Settings → Kindle; the page then draws neither the section nor the rule
     # above it, and this drew both regardless. One setting, one device, two
     # answers.
-    [ "${SHOW_CHART:-1}" = "1" ] || return 0
+    chart_wanted || return 0
 
     draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAYA"
     draw_text_reg "$LAB_CHART_X" "$LAB_CHART_Y" "$LAB_SZ" "GRAY7" "$LBL_LAST24"

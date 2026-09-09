@@ -58,13 +58,28 @@ bool trendStoreSave() {
         return false;
     }
 
-    LittleFS.remove(TREND_FILE);
+    // RENAME FIRST, and only unlink if it will not go over the top.
+    //
+    // This used to remove the good file and then rename onto the name it had
+    // just freed — which opens a window in which NEITHER name holds a
+    // snapshot. A power cut in that window is the exact event the two-file
+    // dance exists to survive, and it left the collector waking with a blank
+    // chart: the failure the whole feature was written to remove, caused by
+    // the code written to prevent it.
+    //
+    // littlefs's rename replaces an existing target atomically, so the unlink
+    // bought nothing. It is kept as a fallback because the filesystem wrapper
+    // is not the same on every core, and a rename that refuses an existing
+    // name would otherwise mean the snapshot could never be updated at all.
     if (!LittleFS.rename(TREND_TMP, TREND_FILE)) {
-        Serial.println("[trend] could not rename the snapshot into place");
-        LittleFS.remove(TREND_TMP);
-        s_retryAtMs = millis() + 60000u;
-        if (s_retryAtMs == 0) s_retryAtMs = 1;
-        return false;
+        LittleFS.remove(TREND_FILE);
+        if (!LittleFS.rename(TREND_TMP, TREND_FILE)) {
+            Serial.println("[trend] could not rename the snapshot into place");
+            LittleFS.remove(TREND_TMP);
+            s_retryAtMs = millis() + 60000u;
+            if (s_retryAtMs == 0) s_retryAtMs = 1;
+            return false;
+        }
     }
 
     trendRing.clearDirty();
@@ -78,6 +93,13 @@ void trendStoreTick() {
 }
 
 void trendStoreLoad() {
+    // A save that was cut short leaves the temporary file behind, and nothing
+    // else ever looks at that name again — so without this it sits on the
+    // filesystem for the life of the device, one snapshot's worth of a part
+    // that has a few hundred kilobytes in total. Removed here rather than in
+    // save(), because this is the one place that runs after a crash.
+    if (LittleFS.exists(TREND_TMP)) LittleFS.remove(TREND_TMP);
+
     if (!LittleFS.exists(TREND_FILE)) return;   // first boot; nothing to say
 
     File f = LittleFS.open(TREND_FILE, "r");
@@ -98,6 +120,9 @@ void trendStoreLoad() {
         return;
     }
 
+    // Under 2 KB on the stack, and it is the only large frame on this path:
+    // restore() reads the slots one at a time out of this buffer rather than
+    // staging a second copy of them beside it.
     uint8_t buf[TrendRing::SNAP_MAX_BYTES];
     const size_t got = f.read(buf, need);
     f.close();

@@ -532,9 +532,8 @@ static void appendWeek(String& out, uint32_t now) {
 
 void handleKindleGraph(AsyncWebServerRequest* req) {
     const KindleConfig skin = config.kindle;
-    const bool     hiRes = (skin.fbinkResW > 600);
-    const uint16_t W = hiRes ? 1000 : 560;
-    const uint16_t H = hiRes ? 360  : 200;
+    const uint16_t W = ChartBmp::imageW(skin.fbinkResW);
+    const uint16_t H = ChartBmp::imageH(skin.fbinkResW);
 
     // A shared_ptr, AND THAT IS THE FIX, not a tidier spelling of the same
     // thing. The previous version held raw pointers and deleted them only on
@@ -1373,8 +1372,14 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     s->printf("FC_LOW=%d\n", (int)roundf(fc.lowC));
     s->printf("FC_WIND=%d\n", (int)roundf(fc.windKph));
     for (int i = 0; i < 3; i++) {
+        // forecastPeriodLabel(), NOT .label — the same call the HTML renderer
+        // makes. The stored string was written when the provider was last
+        // polled, so on this path it was still the language that was set then:
+        // switch to Bulgarian and the browser page said ПН/ВТ/СР while the
+        // panel on the wall said MON/TUE/WED for up to six hours. Which is the
+        // exact defect Period::wday was added to remove.
         char oll[24];
-        kdUpperUtf8(oll, sizeof(oll), fc.outlook[i].label);
+        kdUpperUtf8(oll, sizeof(oll), forecastPeriodLabel(fc.outlook[i]));
         kdShellVarN(s, "FC%d_LABEL", i, oll);
         s->printf("FC%d_LABELW=%u\n", i, kdAdvanceMille(oll));
         s->printf("FC%d_CODE=%d\n", i, fc.outlook[i].code);
@@ -1532,16 +1537,17 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             s->printf("CH_H%dW=%u\n", k, kdAdvanceMille(lbl));
         }
 
-        // WHERE THE PLOT AREA IS INSIDE THE IMAGE, in image pixels, taken
-        // from the image's own margin formulas rather than re-derived at the
-        // other end. ChartBmpCtx::init() is the only place that decides this;
-        // a copy of `W * 40 / 560` in a shell script is a copy that goes stale
-        // the first time the image is resized.
-        const uint16_t cw = (skin.fbinkResW > 600) ? 1000 : 560;
-        const uint16_t ch = (skin.fbinkResW > 600) ? 360  : 200;
+        // WHERE THE PLOT AREA IS INSIDE THE IMAGE, in image pixels, ASKED FOR
+        // rather than re-derived. These were a copy of ChartBmpCtx::init()'s
+        // arithmetic, which is the thing the comment claimed they avoided: a
+        // margin change there would have left the axis labels annotating a
+        // plot area the image no longer had, and nothing compiles the shell
+        // script that draws them.
+        const uint16_t cw = ChartBmp::imageW(skin.fbinkResW);
+        const uint16_t ch = ChartBmp::imageH(skin.fbinkResW);
         s->printf("CH_L=%d\nCH_R=%d\nCH_T=%d\nCH_B=%d\n",
-                  cw * 40 / 560, cw - cw * 4 / 560,
-                  ch * 10 / 200, ch - ch * 26 / 200);
+                  ChartBmp::marginL(cw), ChartBmp::marginR(cw),
+                  ChartBmp::marginT(ch), ChartBmp::marginB(ch));
 
         // What the page prints instead of a chart when the record is empty.
         // The panel drew the grid regardless, which reads as "nothing is

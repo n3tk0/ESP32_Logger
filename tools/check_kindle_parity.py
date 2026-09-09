@@ -185,11 +185,15 @@ def main():
 
     # The chart image's own size, which the layout has to reserve exactly:
     # short and the image is clipped, long and the axis labels land in space.
-    src = open(CPP, encoding='utf-8').read()
-    m = re.search(r'const uint16_t W = hiRes \? (\d+) : (\d+);\s*\n'
-                  r'\s*const uint16_t H = hiRes \? (\d+)\s*: (\d+);', src)
+    # Read from ChartBmp::imageW/imageH in KindleChartBmp.h, which is where
+    # both the renderer and /kindle/data now ask.
+    bmp = open(os.path.join(ROOT, 'src/web/KindleChartBmp.h'), encoding='utf-8').read()
+    m = re.search(r'imageW\(uint16_t panelW\)\s*\{\s*return \(panelW > 600\) '
+                  r'\? (\d+) : (\d+); \}\s*\n'
+                  r'\s*inline uint16_t imageH\(uint16_t panelW\)\s*\{\s*'
+                  r'return \(panelW > 600\) \? (\d+)\s*: (\d+); \}', bmp)
     if not m:
-        problems.append('parity: handleKindleGraph no longer states the BMP size')
+        problems.append('parity: ChartBmp::imageW/imageH no longer state the BMP size')
     else:
         hiW, loW, hiH, loH = (int(g) for g in m.groups())
         for rel, (w, h) in (('kindle/layout/600x800.conf', (loW, loH)),

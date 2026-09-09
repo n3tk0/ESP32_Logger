@@ -148,6 +148,13 @@ with sync_playwright() as p:
     check(got["lang"] == 0, f"and the language goes back to as-built (got {got['lang']})")
     check(pg.input_value("#kd-face") == "0", "and the form re-renders as restored")
 
+    # "As built" has to say WHICH language that is, or it is a promise the page
+    # cannot keep: a reader looking at the option has no way to know whether
+    # leaving it there means English or Bulgarian.
+    as_built = pg.locator("#kd-lang option[value='0']").inner_text()
+    check("English" in as_built,
+          f"the as-built option names the build's language ({as_built!r})")
+
 
     # ── The layout editor ────────────────────────────────────────────────────
     # Nine fixed places, drawn in two groups the way the page groups them. What

@@ -133,17 +133,53 @@ static void test_an_age_is_clamped_rather_than_refused() {
 }
 
 // ---------------------------------------------------------------------------
+// Newest of its metric is not the same as current, and the difference is nine
+// deleted readings
+// ---------------------------------------------------------------------------
+// A node handing over an hour-long outage sends it oldest-first as four
+// batches of forty-eight. "Newest in this batch" is true of three readings in
+// EVERY one of those batches, not only the last — so a rule that sent the
+// newest to the mailbox sent batch 1's three, then let batch 2's overwrite
+// them, then batch 3's overwrite those. Nine of sixty-four buffered samples
+// deleted on arrival, by the rule whose whole purpose is to stop the mailbox
+// eating a backlog.
+static void test_newest_in_a_batch_is_not_the_same_as_current() {
+    // The last reading of a live post: newest, and taken just now.
+    CHECK(isLive(true, 0));
+    CHECK(isLive(true, 5));
+    CHECK(isLive(true, LIVE_AGE_S));
+
+    // Newest of its metric in a catch-up batch, and an hour old. NOT current —
+    // this is the one that was costing readings.
+    CHECK(!isLive(true, LIVE_AGE_S + 1));
+    CHECK(!isLive(true, 3600));
+    CHECK(!isLive(true, MAX_AGE_S));
+
+    // And something with a newer reading behind it is never current, however
+    // recent it is.
+    CHECK(!isLive(false, 0));
+    CHECK(!isLive(false, 3600));
+
+    // The window is the pipeline's own: readingIsBackfilled() calls anything
+    // older than this history, so a reading the mailbox called current and the
+    // pipeline called backfill would be drawn on the dashboard and skipped by
+    // the alert engine.
+    CHECK_EQ((long)LIVE_AGE_S, 120L);
+}
+
+// ---------------------------------------------------------------------------
 static void test_what_counts_as_backfill() {
     const uint32_t NOW = 1750000000u;
 
     // The ordinary case: an old reading, a collector that knows what time it
-    // is, and a metric that has something newer behind it in the batch.
-    CHECK(isBackfill(/*newest=*/false, 3600, /*canBackfill=*/true, NOW));
+    // is, and something newer behind it in the batch.
+    CHECK(isBackfill(/*live=*/false, 3600, /*canBackfill=*/true, NOW));
 
-    // THE CURRENT VALUE IS NEVER HISTORY, however old it is. A node reporting
-    // once an hour still has a latest reading and the dashboard has to see it.
-    CHECK(!isBackfill(true, 3600, true, NOW));
-    CHECK(!isBackfill(true, MAX_AGE_S, true, NOW));
+    // The current value is never history — but "current" is isLive()'s answer,
+    // not "newest in this batch". An hour-old newest is backfill.
+    CHECK(!isBackfill(isLive(true, 5), 5, true, NOW));
+    CHECK(isBackfill(isLive(true, 3600), 3600, true, NOW));
+    CHECK(isBackfill(isLive(true, MAX_AGE_S), MAX_AGE_S, true, NOW));
 
     // Taken now.
     CHECK(!isBackfill(false, 0, true, NOW));
@@ -179,9 +215,10 @@ static void test_an_hours_backlog_splits_into_one_mailbox_slot_per_metric() {
 
     int toMailbox = 0, toQueue = 0;
     for (int i = 0; i < (int)names.size(); i++) {
-        const bool nw = isNewest(live, n, i);
-        if (isBackfill(nw, clampAge(ages[(size_t)i]), true, NOW)) toQueue++;
-        else                                                      toMailbox++;
+        const uint32_t age = clampAge(ages[(size_t)i]);
+        const bool     lv  = isLive(isNewest(live, n, i), age);
+        if (isBackfill(lv, age, true, NOW)) toQueue++;
+        else                                toMailbox++;
     }
 
     // 122 readings in, two slots out and 120 distinct measurements queued.
@@ -196,6 +233,49 @@ static void test_an_hours_backlog_splits_into_one_mailbox_slot_per_metric() {
     CHECK(isNewest(live, n, 121));
 }
 
+// ---------------------------------------------------------------------------
+// A batch from the middle of a catch-up puts NOTHING in the mailbox
+// ---------------------------------------------------------------------------
+// The node holds 192 readings after an hour off the network and hands them
+// over in four batches. Only the last one carries anything that is actually
+// current; the first three are pure history, and every reading in them has to
+// reach the queue. This is the arithmetic that was losing nine of them.
+static void test_a_middle_catch_up_batch_is_all_history() {
+    const uint32_t NOW = 1750000000u;
+
+    // Batch 2 of 4: sixteen samples of three metrics, all between 30 and 46
+    // minutes old, oldest first.
+    std::vector<const char*> names;
+    std::vector<uint32_t>    ages;
+    for (int m = 46; m >= 31; m--) {
+        names.push_back("temperature"); ages.push_back((uint32_t)m * 60u);
+        names.push_back("humidity");    ages.push_back((uint32_t)m * 60u);
+        names.push_back("pressure");    ages.push_back((uint32_t)m * 60u);
+    }
+    Batch b{names};
+    int live[16];
+    const int n = newest(b, live, 16);
+    CHECK_EQ(n, 3);                      // three metrics have a newest here
+
+    int toMailbox = 0, toQueue = 0;
+    for (int i = 0; i < (int)names.size(); i++) {
+        const uint32_t age = clampAge(ages[(size_t)i]);
+        const bool     lv  = isLive(isNewest(live, n, i), age);
+        if (isBackfill(lv, age, true, NOW)) toQueue++;
+        else                                toMailbox++;
+    }
+    CHECK_EQ((long)names.size(), 48L);
+    CHECK_EQ(toQueue, 48);               // every one of them is history
+    CHECK_EQ(toMailbox, 0);              // and the mailbox is not touched
+
+    // The three that WOULD have gone to the mailbox are the newest of each
+    // metric — thirty-one minutes old, and about to be overwritten by the
+    // next batch's three. That is the deletion this test exists to catch.
+    CHECK(isNewest(live, n, 45));
+    CHECK(isNewest(live, n, 46));
+    CHECK(isNewest(live, n, 47));
+}
+
 int main() {
     RUN(test_the_last_of_each_metric_is_the_current_value);
     RUN(test_a_metric_reported_once_is_still_current);
@@ -203,7 +283,9 @@ int main() {
     RUN(test_a_nameless_reading_is_not_anybodys_newest);
     RUN(test_more_metrics_than_slots_keeps_the_newest_ones);
     RUN(test_an_age_is_clamped_rather_than_refused);
+    RUN(test_newest_in_a_batch_is_not_the_same_as_current);
     RUN(test_what_counts_as_backfill);
+    RUN(test_a_middle_catch_up_batch_is_all_history);
     RUN(test_an_hours_backlog_splits_into_one_mailbox_slot_per_metric);
     return SUMMARY();
 }

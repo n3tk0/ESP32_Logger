@@ -98,6 +98,16 @@ function kindleClockChanged() {
 }
 
 function kindleRender(d) {
+  // "As built" names the language it actually resolves to. Without this the
+  // option is a promise the page cannot keep: a reader looking at it has no
+  // way to know whether leaving it there means English or Bulgarian, and the
+  // collector already sends the answer.
+  var asBuilt = document.querySelector("#kd-lang option[value='0']");
+  if (asBuilt) {
+    asBuilt.textContent = (d.lang_built === 2) ? "As built (Български)"
+                        : (d.lang_built === 1) ? "As built (English)"
+                        : "As built";
+  }
   kdSet("kd-lang",  d.lang);
   kdSet("kd-face",  d.face);
   kdSet("kd-clock", d.clock_style);

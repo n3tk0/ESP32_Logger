@@ -64,15 +64,28 @@ template <typename NameAt>
 int findNewestPerMetric(int count, NameAt nameAt, int* out, int maxOut) {
     int n = 0;
     if (out == nullptr || maxOut <= 0) return 0;
-    for (int k = count - 1; k >= 0 && n < maxOut; k--) {
+
+    // The names found so far, kept HERE rather than re-read through nameAt().
+    //
+    // The accessor walks a JSON array, which is a linked list: asking it for
+    // element i costs i steps. The inner loop below asks once per name already
+    // found, so re-reading turned a forty-eight-reading batch into tens of
+    // thousands of link traversals on the web server's own task. Sixteen
+    // pointers on the stack is the whole fix, and they stay valid because they
+    // point into the document the caller is iterating.
+    const char* seenNames[32];
+    const int cap = (maxOut < 32) ? maxOut : 32;
+
+    for (int k = count - 1; k >= 0 && n < cap; k--) {
         const char* m = nameAt(k);
         if (m == nullptr || *m == '\0') continue;
         bool seen = false;
         for (int j = 0; j < n; j++) {
-            const char* p = nameAt(out[j]);
-            if (p != nullptr && strcmp(p, m) == 0) { seen = true; break; }
+            if (strcmp(seenNames[j], m) == 0) { seen = true; break; }
         }
-        if (!seen) out[n++] = k;
+        if (seen) continue;
+        seenNames[n] = m;
+        out[n++] = k;
     }
     return n;
 }
@@ -82,13 +95,37 @@ inline bool isNewest(const int* live, int nLive, int idx) {
     return false;
 }
 
+/// How recent a reading has to be to count as the node's CURRENT value.
+///
+/// The pipeline's own number: readingIsBackfilled() in SensorTypes.h treats
+/// anything older than this as history, so a reading the mailbox called
+/// current and the pipeline called backfill would be one the dashboard drew
+/// and the alert engine ignored.
+static const uint32_t LIVE_AGE_S = 120;
+
+/// Is this reading the node's current value for its metric?
+///
+/// NEWEST OF ITS METRIC **AND** ACTUALLY RECENT, and the second half is not
+/// belt-and-braces. A node handing over an hour-long outage sends it as four
+/// batches of forty-eight, oldest first — and "newest in this batch" is true
+/// of three readings in every one of those batches, not just the last. Without
+/// the age test, batch 1's newest went to the mailbox, batch 2's overwrote it,
+/// batch 3's overwrote that: nine of sixty-four buffered samples deleted on
+/// arrival, by the very rule that exists to stop the mailbox eating a backlog.
+///
+/// With it, only the batch that actually carries a fresh reading refreshes the
+/// mailbox, and every older sample goes to the queue where it belongs.
+inline bool isLive(bool newest, uint32_t ageS) {
+    return newest && ageS <= LIVE_AGE_S;
+}
+
 /// Does this reading belong in the history queue rather than the mailbox?
 ///
 /// Four conditions, and each one is load-bearing:
 ///
-///   !isNewest    the current value of a metric is never history, however old
-///                it is. A node reporting once an hour still has a latest
-///                reading, and the dashboard has to be able to see it.
+///   !isLive      the current value of a metric is never history. isLive()
+///                says what that means, and why "newest in this batch" alone
+///                was not enough.
 ///   age > 0      an age of zero means "taken now", which is the mailbox.
 ///   canBackfill  the COLLECTOR'S clock, not the node's. Anchoring an age to a
 ///                clock that is not set produces a 1970 date, which storage
@@ -97,9 +134,9 @@ inline bool isNewest(const int* live, int nLive, int idx) {
 ///                live instead, and dated on arrival.
 ///   base > age   the same thing again at the arithmetic level: an age that
 ///                reaches back past the epoch has no timestamp to become.
-inline bool isBackfill(bool newest, uint32_t ageS, bool canBackfill,
+inline bool isBackfill(bool live, uint32_t ageS, bool canBackfill,
                        uint32_t base) {
-    return !newest && ageS > 0 && canBackfill && base > ageS;
+    return !live && ageS > 0 && canBackfill && base > ageS;
 }
 
 }  // namespace IngestBatch

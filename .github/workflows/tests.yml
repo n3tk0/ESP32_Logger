@@ -32,6 +32,7 @@ on:
       - 'tools/check_node_portal.py'
       - 'tools/check_sensor_plugins.py'
       - 'tools/check_kindle_parity.py'
+      - 'tools/check_body_handlers.py'
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
@@ -61,6 +62,7 @@ on:
       - 'tools/check_node_portal.py'
       - 'tools/check_sensor_plugins.py'
       - 'tools/check_kindle_parity.py'
+      - 'tools/check_body_handlers.py'
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
@@ -480,6 +482,33 @@ jobs:
           cp /tmp/ud.orig kindle/update_dash.sh
           rm /tmp/ud.orig
           echo "the suite fails when a half-written chart is accepted, as it should"
+
+      - name: Verify every POST body cap above one TCP segment accumulates
+        # ESPAsyncWebServer delivers a body one TCP segment at a time, and the
+        # ESP32's MSS is about 1460 bytes. A handler that refuses anything not
+        # arriving in one callback is correct only while its own cap is under
+        # that — raise the cap and it starts rejecting exactly the bodies the
+        # raise was for, silently. /api/ingest went to 4 KB for buffered node
+        # batches and every batch large enough to need it was answered 413.
+        run: python3 tools/check_body_handlers.py
+
+      - name: Verify that checker fails on a cap it cannot receive
+        run: |
+          set -e
+          cp src/web/IngestHandler.cpp /tmp/ih.orig
+          python3 - <<'EOF'
+          s = open('src/web/IngestHandler.cpp').read()
+          s = s.replace('_tempObject', '_bodyBuf')
+          open('src/web/IngestHandler.cpp', 'w').write(s)
+          EOF
+          if python3 tools/check_body_handlers.py > /dev/null 2>&1; then
+            echo "::error::check_body_handlers.py passed a 4 KB cap with no accumulation"
+            cp /tmp/ih.orig src/web/IngestHandler.cpp
+            exit 1
+          fi
+          cp /tmp/ih.orig src/web/IngestHandler.cpp
+          rm /tmp/ih.orig
+          echo "the checker fails on a cap the handler cannot receive, as it should"
 
       - name: Hold the panel's layout to the browser page's design
         # GET /kindle and kindle/update_dash.sh are one design rendered twice,

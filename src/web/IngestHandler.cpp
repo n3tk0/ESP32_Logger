@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
+#include <new>                        // nothrow, for the body buffer
 #include <math.h>                     // isfinite(), before the ingest calls do it
 #include <time.h>                     // the collector's clock, to judge the node's
 
@@ -60,34 +61,10 @@ static bool authorised(AsyncWebServerRequest* req) {
     return false;
 }
 
-static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
-                             size_t len, size_t index, size_t total) {
-    // Shape checks FIRST, and they answer only on the opening segment.
-    //
-    // ESPAsyncWebServer calls this once per segment of a chunked body. Every
-    // req->send() overwrites the request's response object — leaking the
-    // previous one — and writes another HTTP response onto the same socket,
-    // so replying per segment corrupts the connection. Answering on index 0
-    // and staying silent afterwards is what keeps that to one response.
-    //
-    // The size check has to come before the single-chunk check too: a body
-    // larger than the cap is exactly what arrives split, so testing it second
-    // made its own error message unreachable.
-    if (total > INGEST_MAX_BODY) {
-        if (index == 0) {
-            req->send(413, "application/json",
-                      "{\"ok\":false,\"error\":\"body too large\"}");
-        }
-        return;
-    }
-    if (index != 0 || len != total) {
-        if (index == 0) {
-            req->send(413, "application/json",
-                      "{\"ok\":false,\"error\":\"body must arrive in one chunk\"}");
-        }
-        return;
-    }
-
+/// Parse and act on one complete request body. Called by the segment callback
+/// below once every byte has arrived.
+static void handleIngestPayload(AsyncWebServerRequest* req,
+                                const uint8_t* data, size_t len) {
     // Auth before the rate limiter: the bucket is device-wide, so checking it
     // first let an unauthenticated caller drain it and lock out the real node.
     if (!authorised(req)) {
@@ -204,17 +181,55 @@ static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
     // time the frame is parsed. Letting it do that here would have shredded
     // two thirds of that outage inside the collector, seconds after the node
     // had gone to the trouble of keeping it. The node is still on the line and
-    // has three times the room, so it is told to wait instead: this loop stops
-    // at the first backfill reading there is no space for, and everything from
-    // there on stays where it already is.
+    // has three times the room, so it is told to wait instead: the loop below
+    // stops at the first backfill reading there is no space for, and
+    // everything from there on stays where it already is.
     //
     // A reading the collector cannot use — no metric name, a value that is not
     // a number, a date before 2001 — is consumed rather than blocking the
     // queue behind it. Sending it again would fail the same way for ever.
     int stored = 0, queued = 0, rejected = 0, accepted = 0;
     bool backpressure = false;
-    int  idx = -1;
 
+    // ── The current values first, and outside the prefix rule entirely ──────
+    //
+    // THE HISTORY QUEUE IS ONE QUEUE FOR EVERY NODE, and it is drained by each
+    // node's own sensor plugin. So a node that posts with a valid token but
+    // has no `remote` sensor configured for it fills those 64 slots with
+    // entries nothing will ever drain — and then historyRoom() is zero for
+    // ever, for everybody.
+    //
+    // A batch is sent oldest first, so its first reading is backfill and the
+    // loop below would break on it immediately: accepted would be 0 and the
+    // CURRENT readings at the end of the batch would never be reached. Every
+    // other node would then read as offline on the dashboard, on /api/nodes
+    // and in "last seen" while posting perfectly, because nothing was
+    // refreshing its mailbox.
+    //
+    // The mailbox needs no room — it is one slot per (node, metric), already
+    // allocated — so it is filled here, before any of that can apply. A live
+    // reading the prefix does not reach stays in the node's ring and is
+    // offered again next cycle; put() is a mailbox and writing it twice is
+    // writing it once.
+    {
+        int i = -1;
+        for (JsonObjectConst r : readings) {
+            i++;
+            if (!IngestBatch::isLive(IngestBatch::isNewest(liveIdx, nLive, i),
+                                     IngestBatch::clampAge(r["dt_s"] | 0UL)))
+                continue;
+            const char* metric = r["metric"] | "";
+            if (*metric == '\0' || !r["value"].is<float>()) continue;
+            const float value = r["value"].as<float>();
+            if (!isfinite(value)) continue;
+            const uint32_t age = IngestBatch::clampAge(r["dt_s"] | 0UL);
+            if (remoteIngest.put(node, metric, value, r["unit"] | "",
+                                 (canBackfill && base > age) ? base - age : ts))
+                stored++;
+        }
+    }
+
+    int idx = -1;
     for (JsonObjectConst r : readings) {
         idx++;
         const char* metric = r["metric"] | "";
@@ -223,10 +238,11 @@ static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
         const bool  hasValue = r["value"].is<float>();
         const float value    = hasValue ? r["value"].as<float>() : 0.0f;
 
-        const uint32_t age    = IngestBatch::clampAge(r["dt_s"] | 0UL);
-        const bool     newest = IngestBatch::isNewest(liveIdx, nLive, idx);
+        const uint32_t age  = IngestBatch::clampAge(r["dt_s"] | 0UL);
+        const bool     live = IngestBatch::isLive(
+                                  IngestBatch::isNewest(liveIdx, nLive, idx), age);
         const bool     backfill =
-            IngestBatch::isBackfill(newest, age, canBackfill, base);
+            IngestBatch::isBackfill(live, age, canBackfill, base);
         const uint32_t when = backfill ? (base - age) : 0;
 
         // ROOM CHECKED BEFORE THE READING IS JUDGED, so that a batch stops at
@@ -238,6 +254,9 @@ static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
         }
 
         accepted++;
+
+        // Already in the mailbox, from the pass above. Counted there.
+        if (live) continue;
 
         // What both put() and putHistorical() refuse outright, tested here so
         // that a false from either below has exactly one meaning left.
@@ -254,12 +273,9 @@ static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
             queued++;
         } else if (remoteIngest.put(node, metric, value, unit,
                                     (canBackfill && base > age) ? base - age : ts)) {
-            // The mailbox keeps the time the reading was TAKEN, not the time
-            // it arrived: a node that spent four seconds reconnecting before
-            // posting measured four seconds ago, and put() honours a stamp
-            // rather than overwriting it. Falls back to the batch stamp — 0
-            // included, which is SensorManager's cue to date it on arrival —
-            // when there is no clock to anchor an age to.
+            // Not the newest of its metric and not old enough to be history:
+            // a second reading taken in the same second. The mailbox keeps the
+            // time it was TAKEN, not the time it arrived.
             stored++;
         } else {
             // The mailbox is full of other nodes' metrics. Consumed anyway:
@@ -282,6 +298,62 @@ static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
              backpressure ? "true" : "false", remoteIngest.historyRoom(),
              clockRejected ? "true" : "false");
     req->send(200, "application/json", out);
+}
+
+// ── One body, however many TCP segments it arrives in ───────────────────────
+//
+// THIS USED TO REFUSE ANYTHING THAT DID NOT ARRIVE IN ONE PIECE, and while the
+// cap was 1 KB that was very nearly always true. It stopped being true the
+// moment the cap went to 4 KB for buffered batches: ESPAsyncWebServer hands
+// over a body one TCP segment at a time, the ESP32's MSS is about 1.4 KB, and
+// a batch of forty-eight readings is roughly 2.9 KB. So every batch large
+// enough to need the new cap was answered 413 — and the node holds a batch on
+// any non-200, which means a node that fell far enough behind to send a large
+// batch could never send anything again. The feature would have failed exactly
+// when it was needed.
+//
+// Accumulating through _tempObject is what /api/firstrun and
+// /api/kindle/slots already do, and the shape is theirs: allocate on the
+// opening segment, register the disconnect cleaner immediately after (a client
+// that drops mid-body would otherwise orphan the buffer, because the delete at
+// the end never runs), and answer once, when the last byte is in.
+static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
+                             size_t len, size_t index, size_t total) {
+    // The size check answers only on the opening segment. Every req->send()
+    // overwrites the request's response object — leaking the previous one —
+    // and writes another HTTP response onto the same socket, so replying per
+    // segment corrupts the connection.
+    if (total > INGEST_MAX_BODY) {
+        if (index == 0) {
+            req->send(413, "application/json",
+                      "{\"ok\":false,\"error\":\"body too large\"}");
+        }
+        return;
+    }
+
+    if (index == 0) {
+        req->_tempObject = new (std::nothrow) String();
+        if (!req->_tempObject) {
+            req->send(500, "application/json",
+                      "{\"ok\":false,\"error\":\"out of memory\"}");
+            return;
+        }
+        req->onDisconnect([req]() {
+            delete static_cast<String*>(req->_tempObject);
+            req->_tempObject = nullptr;
+        });
+        static_cast<String*>(req->_tempObject)->reserve(total);
+    }
+
+    String* buf = static_cast<String*>(req->_tempObject);
+    if (!buf) return;                     // the opening segment failed to allocate
+    buf->concat(reinterpret_cast<const char*>(data), len);
+
+    if (index + len >= total) {
+        handleIngestPayload(req, (const uint8_t*)buf->c_str(), buf->length());
+        delete buf;
+        req->_tempObject = nullptr;
+    }
 }
 
 void registerIngestHandler(AsyncWebServer& server) {

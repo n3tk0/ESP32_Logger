@@ -567,6 +567,12 @@ pipeline uses to tell live readings from backfill, so a live `/api/ingest`
 reading cannot be one its own pipeline then hides from the dashboard and from
 alerts. The reading itself is never dropped for this.
 
+The body is accumulated across TCP segments, like `/api/firstrun` and
+`/api/kindle/slots`. It has to be: the cap is 4 KB for buffered batches and the
+ESP32's MSS is about 1460 bytes, so a batch large enough to need the cap always
+arrives split. `tools/check_body_handlers.py` holds every body handler in
+`src/web` to that.
+
 **A reading may carry `dt_s`: how many seconds before the batch it was taken.**
 That is how a node hands over what it buffered through an outage, and it is the
 same field meaning the same thing as `EnvSample::dt_s` in the ESP-NOW protocol
@@ -593,6 +599,26 @@ reading as offline on every screen.
 stored, queued, or judged unusable — and it is the only number a node needs:
 **it drops exactly that many from the front of its own buffer and keeps the
 rest, in order, to offer again.** `held` says the batch stopped early.
+
+The **current value of each metric is written before that prefix is walked**,
+and outside the rule entirely. The history queue is one queue for every node,
+drained by each node's own sensor plugin — so a node that posts with a valid
+token but has no `remote` sensor configured fills it with entries nothing will
+ever drain, and `room` is then zero for everybody. A batch is oldest-first, so
+its first reading is backfill and the prefix would stop on it, leaving the
+current readings at the end unreached and every other node reading as offline
+while posting perfectly. The mailbox needs no room — one slot per (node,
+metric), already allocated — so it is filled first. A live reading the prefix
+does not reach is simply offered again next cycle; `put()` is a mailbox, and
+writing it twice is writing it once.
+
+"Current" means **newest of its metric in the batch _and_ no older than 120 s**,
+the same window `readingIsBackfilled()` uses. Both halves are load-bearing: a
+node handing over an hour-long outage sends it as four batches, and "newest in
+this batch" is true of one reading per metric in *every* one of them — without
+the age test, batch 1's newest went to the mailbox, batch 2's overwrote it, and
+nine of sixty-four buffered samples were deleted on arrival by the rule that
+exists to stop the mailbox eating a backlog.
 
 The stop is deliberate backpressure. The history queue holds
 `REMOTE_HISTORY_SLOTS` (64) readings and drains a handful per sensor tick,

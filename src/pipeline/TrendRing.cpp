@@ -228,16 +228,30 @@ bool TrendRing::restore(const uint8_t* buf, size_t len) {
     const size_t   bytes   = sizeof(Series) * (size_t)MAX_SERIES;
     if (crc32(payload, bytes) != h.crc) return false;
 
-    // Copied into a staging array and checked before anything reaches the live
-    // ring: a series whose id or metric is not NUL-terminated would be read
-    // past by _find()'s strcmp on every reading from then on.
-    Series staged[MAX_SERIES];
-    memcpy(staged, payload, bytes);
+    // Checked before anything reaches the live ring: a series whose id or
+    // metric is not NUL-terminated would be read past by _find()'s strcmp on
+    // every reading from then on.
+    //
+    // ONE SERIES AT A TIME, not all of them staged at once. This held a
+    // Series staged[MAX_SERIES] — about 1.7 KB — while the caller was already
+    // holding a 2 KB read buffer of its own, and both are live during setup()
+    // on the Arduino loop task's 8 KB stack, under the File object and
+    // setup()'s own frames. Half the stack for one call, and a stack overflow
+    // at boot is a device whose only symptom is a reset loop. Two passes over
+    // the same buffer cost nothing and need one Series.
+    auto slotAt = [&](int i, Series& out) {
+        memcpy(&out, payload + (size_t)i * sizeof(Series), sizeof(Series));
+        out.sensorId[sizeof(out.sensorId) - 1] = '\0';
+        out.metric[sizeof(out.metric)     - 1] = '\0';
+    };
+
+    Series one;
     for (int i = 0; i < MAX_SERIES; i++) {
-        staged[i].sensorId[sizeof(staged[i].sensorId) - 1] = '\0';
-        staged[i].metric[sizeof(staged[i].metric)   - 1] = '\0';
-        // A used slot with no name is not a series, it is a corrupted one.
-        if (staged[i].used && staged[i].sensorId[0] == '\0') return false;
+        slotAt(i, one);
+        // A used slot with no name is not a series, it is a corrupted one —
+        // and finding that out has to happen before the live ring is touched,
+        // so it is its own pass rather than a check inside the one below.
+        if (one.used && one.sensorId[0] == '\0') return false;
     }
 
     // MERGED BY NAME INTO THE SERIES THIS BUILD TRACKS, not copied wholesale
@@ -253,11 +267,12 @@ bool TrendRing::restore(const uint8_t* buf, size_t len) {
     // answer for a series that no longer exists.
     taskENTER_CRITICAL(&_mux);
     for (int i = 0; i < MAX_SERIES; i++) {
-        if (!staged[i].used) continue;
-        const int j = _find(staged[i].sensorId, staged[i].metric);
+        slotAt(i, one);
+        if (!one.used) continue;
+        const int j = _find(one.sensorId, one.metric);
         if (j < 0) continue;
-        _s[j].lastHour = staged[i].lastHour;
-        memcpy(_s[j].h, staged[i].h, sizeof(_s[j].h));
+        _s[j].lastHour = one.lastHour;
+        memcpy(_s[j].h, one.h, sizeof(_s[j].h));
     }
     taskEXIT_CRITICAL(&_mux);
     return true;

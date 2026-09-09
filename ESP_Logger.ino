@@ -885,6 +885,16 @@ void setup() {
         uint32_t windowEnd = millis() + g_hybridActiveMs;
         while (millis() < windowEnd) {
             if (shouldRestart) {
+#ifdef FEATURE_KINDLE_DASHBOARD
+        // THE HOUR IN PROGRESS, before the power goes. trendStoreTick() only
+        // writes when an hour has rolled, which is right for a device left
+        // alone and wrong for one about to restart: whatever has been measured
+        // since the last roll would go with it, and a reader who pressed
+        // Restart would come back to a chart with a bite out of the right-hand
+        // end. It is one flash write on a path that is already about to spend
+        // two seconds and a radio shutdown.
+        trendStoreSave();
+#endif
                 // Invalidate magic so the next boot's setup() takes the
                 // cold-boot branch and zeroes the counter regardless of
                 // ESP_RST_SW. Setting g_consecutiveResets=0 alone is
@@ -1125,6 +1135,18 @@ void loop() {
     if (shouldRestart && millis() - restartTimer > 2000) {
         DBGLN("Restarting...");
         Serial.flush();
+
+#ifdef FEATURE_KINDLE_DASHBOARD
+        // THE HOUR IN PROGRESS, before the power goes. trendStoreTick() only
+        // writes when an hour has rolled, which is right for a device left
+        // alone and wrong for one about to restart: whatever has been measured
+        // since the last roll would go with it, and a reader who pressed
+        // Restart would come back to a chart with a bite out of the right-hand
+        // end. It is one flash write on a path that is already about to spend
+        // two seconds and a radio shutdown.
+        trendStoreSave();
+#endif
+
         // Pillar 3.8 / AUDIT FC.1: NEVER auto-confirm a PENDING_VERIFY OTA on
         // the restart path — a buggy image that triggers watchdog resets
         // would otherwise get itself confirmed instead of rolled back.  Only
