@@ -31,6 +31,7 @@ on:
       - 'tools/check_features.py'
       - 'tools/check_node_portal.py'
       - 'tools/check_sensor_plugins.py'
+      - 'tools/check_kindle_parity.py'
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
@@ -59,6 +60,7 @@ on:
       - 'tools/check_features.py'
       - 'tools/check_node_portal.py'
       - 'tools/check_sensor_plugins.py'
+      - 'tools/check_kindle_parity.py'
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
@@ -471,6 +473,42 @@ jobs:
           cp /tmp/ud.orig kindle/update_dash.sh
           rm /tmp/ud.orig
           echo "the suite fails when a half-written chart is accepted, as it should"
+
+      - name: Hold the panel's layout to the browser page's design
+        # GET /kindle and kindle/update_dash.sh are one design rendered twice,
+        # by two pieces of code that cannot see each other: the page takes its
+        # type sizes from a stylesheet emitted in C++, the panel from a .conf
+        # file of pixel coordinates. Nothing connected them, so they drifted —
+        # and every drift is invisible from both sides. The last set was found
+        # by holding a photograph of one next to a photograph of the other.
+        run: python3 tools/check_kindle_parity.py
+
+      - name: Verify that checker fails when a size drifts
+        # Both directions, because the drift can start at either end: a layout
+        # number edited without the stylesheet, or a stylesheet edited without
+        # the layout.
+        run: |
+          set -e
+          cp kindle/layout/600x800.conf /tmp/l.orig
+          sed -i 's/^CL_SIZE=96$/CL_SIZE=88/' kindle/layout/600x800.conf
+          ! grep -q '^CL_SIZE=96$' kindle/layout/600x800.conf     # the sed matched
+          if python3 tools/check_kindle_parity.py > /dev/null 2>&1; then
+            echo "::error::check_kindle_parity.py passed a clock 8 px off the page's"
+            cp /tmp/l.orig kindle/layout/600x800.conf
+            exit 1
+          fi
+          cp /tmp/l.orig kindle/layout/600x800.conf
+          cp src/web/KindleDashboard.cpp /tmp/kd.orig
+          sed -i 's/KD_S(".wd-d{font-size:");                  KD_N(24);/KD_S(".wd-d{font-size:");                  KD_N(26);/' src/web/KindleDashboard.cpp
+          ! grep -q 'wd-d{font-size:");                  KD_N(24)' src/web/KindleDashboard.cpp
+          if python3 tools/check_kindle_parity.py > /dev/null 2>&1; then
+            echo "::error::check_kindle_parity.py passed a stylesheet the layout does not follow"
+            cp /tmp/kd.orig src/web/KindleDashboard.cpp
+            exit 1
+          fi
+          cp /tmp/kd.orig src/web/KindleDashboard.cpp
+          rm /tmp/l.orig /tmp/kd.orig
+          echo "the checker fails when either end drifts, as it should"
 
       - name: Verify that suite notices when the panel and the page drift apart
         # The Kindle screen and the browser page at /kindle are ONE design

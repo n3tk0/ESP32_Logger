@@ -132,6 +132,9 @@ payload_key_ok() {
         # nothing here wants a family of them.
         CLOCK|CLOCK_ADVW|DATE|TIME_FORMAT) return 0 ;;
         SHOW_CHART|SHOW_WEEK|CHART_OUT|CHART_IN|KEY_OUT_ADVW) return 0 ;;
+        # The chart's axis: the five values, the five hours, their widths, and
+        # where the image's plot area is inside the image.
+        CH_Y[0-9]|CH_Y[0-9]W|CH_H[0-9]|CH_H[0-9]W|CH_L|CH_R|CH_T|CH_B|CH_NOTE) return 0 ;;
     esac
     return 1
 }
@@ -668,7 +671,13 @@ draw_field() {
     ux=$(( x + sz * vadv / 1000 ))
 
     if [ -n "$unit" ]; then
-        usz=$(( sz * 42 / 100 ))
+        # 42 % for a unit, 34 % for a degree — the page's .unit and .unit-d.
+        # The degree was set at the same 42 % as "hPa", which at a headline
+        # size is a circle the height of a lower-case o sitting where a
+        # footnote should be, and it pushed everything after it too far right.
+        if [ "$unit" = "°" ]; then usz=$(( sz * 34 / 100 ))
+        else                       usz=$(( sz * 42 / 100 ))
+        fi
         [ "$usz" -lt 9 ] && usz=9
         case "$unit" in
             # Degrees and per-cent set tight against the number — "8.4 °" and
@@ -679,7 +688,7 @@ draw_field() {
         esac
         if [ "$unit" = "°" ]; then
             # The degree rides at the cap line rather than on the baseline,
-            # where at four tenths of the size it reads as a lower-case o.
+            # where at a third of the size it reads as a lower-case o.
             draw_text_reg "$ux" "$y" "$usz" "GRAY4" "$unit"
         else
             draw_text_reg "$ux" "$(baseline_y "$y" "$sz" "$usz")" "$usz" "GRAY4" "$unit"
@@ -702,6 +711,28 @@ draw_field() {
 baseline_y() {
     # $1=row top  $2=largest size in the row  $3=this size
     echo $(( $1 + ($2 - $3) * 80 / 100 ))
+}
+
+# Where something `w` pixels wide starts if it is to be centred in a cell that
+# begins at `x`. Used by the outlook columns and the week strip, both of which
+# the page centres (.per and .wd are text-align:center) and both of which the
+# panel used to draw hard against the cell's left edge.
+#
+# A width of zero — an older collector, which measures nothing — falls back to
+# the left edge, which is what this always did.
+centre_in() {
+    # $1=cell left  $2=cell width  $3=content width
+    if [ "${3:-0}" -gt 0 ] && [ "$3" -lt "$2" ] 2>/dev/null; then
+        echo $(( $1 + ($2 - $3) / 2 ))
+    else
+        echo "$1"
+    fi
+}
+
+# The same, for an outlook column, whose width is one number for all three.
+ol_centre() {
+    # $1=column left  $2=content width
+    centre_in "$1" "${OL_PLATE_W:-0}" "$2"
 }
 
 # ── The readings block ───────────────────────────────────────────────────────
@@ -781,7 +812,11 @@ draw_zones() {
     n=0
     for z in ${IN_ZONES:-}; do n=$((n + 1)); done
     if [ "$n" -gt 0 ]; then
-        draw_hline "$rx" "${IN_RULE_Y:-126}" "$rw" "GRAYA"
+        # GRAYD, not GRAYA: .inrule is #d8d8d8 and .rule is #aaa. This one
+        # separates two things inside one column, where the page's section
+        # rules separate the columns from what is under them, and drawn at the
+        # heavier weight it read as a third section break.
+        draw_hline "$rx" "${IN_RULE_Y:-126}" "$rw" "GRAYD"
         draw_text_reg "$rx" "${IN_LAB_Y:-134}" "$lab_sz" "GRAY7" "$Z_GROUP_IN"
 
         # The first field gets more of the row, not an equal share: it is set
@@ -936,6 +971,62 @@ draw_chart_key() {
     fi
 }
 
+# The five values down the side and the five hours along the bottom.
+#
+# THE IMAGE CANNOT CARRY THEM. Drawing text into a 4-bit BMP would need a
+# bitmap font on the ESP32 that the firmware does not have, so the collector
+# sends the labels as text and says where its own plot area is inside the image
+# (CH_L/CH_R/CH_T/CH_B, in image pixels). Without this the panel showed a bare
+# grid while the browser page showed the same grid with numbers on it, and a
+# grid with no numbers is a picture of a chart rather than a chart.
+#
+# The positions are the page's: the value 7 px left of the axis, dropped 4 px
+# so it sits on its grid line; the hour centred on its vertical, 8 px up from
+# the image's bottom edge. Both are measured by the collector, because FBInk
+# will not say how wide it drew something — see draw_field().
+draw_chart_axis() {
+    [ -n "${CH_L:-}" ] || return 0
+    local sz="${AX_SZ:-11}" gap="${AX_GAP:-7}" base="${AX_BASE:-4}"
+    local k y w x lab
+
+    # FBInk's `top` is the TOP of the text, and the page positions these by
+    # their BASELINE — so each one is lifted by the ascent, which is about
+    # eight tenths of the size. Same eighty as baseline_y(), for the same
+    # reason: two sizes drawn at one y sit on two baselines.
+    #
+    # Down the side, right-aligned on the axis and sitting on its grid line.
+    k=0
+    while [ "$k" -le 4 ]; do
+        eval "lab=\${CH_Y${k}:-}; w=\${CH_Y${k}W:-0}"
+        if [ -n "$lab" ]; then
+            y=$(( GR_Y + CH_T + (CH_B - CH_T) * k / 4 + base - sz * 80 / 100 ))
+            x=$(( GR_X + CH_L - gap - sz * w / 1000 ))
+            draw_text_reg "$x" "$y" "$sz" "GRAY7" "$lab"
+        fi
+        k=$((k + 1))
+    done
+
+    # Along the bottom, centred on the three-hourly rules the image draws at
+    # hours 0, 6, 12 and 18 — except "now", which is set against the right-hand
+    # edge because that is where the axis ends.
+    k=0
+    while [ "$k" -le 4 ]; do
+        eval "lab=\${CH_H${k}:-}; w=\${CH_H${k}W:-0}"
+        if [ -n "$lab" ]; then
+            w=$(( sz * w / 1000 ))
+            if [ "$k" -eq 4 ]; then
+                x=$(( GR_X + CH_R - w ))
+            else
+                x=$(( GR_X + CH_L + (CH_R - CH_L) * (k * 6) / 23 - w / 2 ))
+            fi
+            draw_text_reg "$x" \
+                "$(( GR_Y + GR_H - ${HX_DROP:-8} - sz * 80 / 100 ))" \
+                "$sz" "GRAY7" "$lab"
+        fi
+        k=$((k + 1))
+    done
+}
+
 draw_chart_body() {
     # SWITCHED OFF MEANS OFF HERE TOO. The reader can turn the chart off in
     # Settings → Kindle; the page then draws neither the section nor the rule
@@ -945,7 +1036,19 @@ draw_chart_body() {
 
     draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAYA"
     draw_text_reg "$LAB_CHART_X" "$LAB_CHART_Y" "$LAB_SZ" "GRAY7" "$LBL_LAST24"
+
+    # NOTHING RECORDED YET IS NOT THE SAME AS NOTHING HAPPENING. The image is
+    # still a grid when the ring is empty, and a grid with no line in it reads
+    # as a sensor that has stopped. The page prints a sentence instead; so does
+    # this. CH_NOTE carries it, so the wording and the language are the page's.
+    if [ -n "${CH_NOTE:-}" ]; then
+        draw_text_reg "${GR_X:-20}" "$(( ${GR_Y:-278} + ${GR_H:-200} / 3 ))" \
+                      "${LAB_SZ:-16}" "GRAY5" "$CH_NOTE"
+        return 0
+    fi
+
     if draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"; then
+        draw_chart_axis
         draw_chart_key
         return 0
     fi
@@ -984,7 +1087,15 @@ draw_forecast_body() {
             draw_text_reg "$FC_WIND_X" "$FC_WIND_Y" "$FC_WIND_SZ" "GRAY4" "$LBL_WIND ${FC_WIND} km/h"
         fi
 
+        # EACH COLUMN ON A PLATE, AND CENTRED ON IT. The page sets .per to
+        # `width:88px; text-align:center; background:#f0f0f0`; this drew the
+        # label, the icon and the temperature at the column's left edge on
+        # white, so three tidy grey cards came out as three ragged stacks. The
+        # widths come from the collector (FC*_LABELW / FC*_TEMPW) for the
+        # reason every other width does: FBInk will not say how wide it drew
+        # something, and ${#var} counts bytes.
         local i ol_label ol_code ol_temp ol_x ol_y ol_icon ol_icon_y ol_temp_y
+        local plate_w="${OL_PLATE_W:-0}" ol_w
         for i in 0 1 2; do
             eval "ol_label=\$FC${i}_LABEL"
             eval "ol_code=\$FC${i}_CODE"
@@ -993,15 +1104,25 @@ draw_forecast_body() {
             eval "ol_y=\$OL${i}_Y"
 
             [ -n "$ol_label" ] || continue
-            draw_text_reg "$ol_x" "$ol_y" "$OL_LABEL_SZ" "GRAY7" "$ol_label"
+
+            if [ "$plate_w" -gt 0 ] 2>/dev/null; then
+                fill_rect "$ol_x" "$(( ol_y - ${OL_PLATE_TOP:-4} ))" \
+                          "$plate_w" "${OL_PLATE_H:-80}" GRAYE
+            fi
+
+            eval "ol_w=\${FC${i}_LABELW:-0}"
+            draw_text_reg "$(ol_centre "$ol_x" "$(( OL_LABEL_SZ * ol_w / 1000 ))")" \
+                          "$ol_y" "$OL_LABEL_SZ" "GRAY7" "$ol_label"
 
             ol_icon="$ICON_DIR/fc_${ol_code}_${FC_OL_SZ}.bmp"
             [ ! -f "$ol_icon" ] && ol_icon="$ICON_DIR/fc_-1_${FC_OL_SZ}.bmp"
             ol_icon_y=$((ol_y + OL_ICON_OFFSET))
-            draw_image "$ol_icon" "$ol_x" "$ol_icon_y"
+            draw_image "$ol_icon" "$(ol_centre "$ol_x" "$FC_OL_SZ")" "$ol_icon_y"
 
+            eval "ol_w=\${FC${i}_TEMPW:-0}"
             ol_temp_y=$((ol_y + OL_TEMP_OFFSET))
-            draw_text_bold "$ol_x" "$ol_temp_y" "$OL_TEMP_SZ" "BLACK" "${ol_temp}°"
+            draw_text_bold "$(ol_centre "$ol_x" "$(( OL_TEMP_SZ * ol_w / 1000 ))")" \
+                           "$ol_temp_y" "$OL_TEMP_SZ" "BLACK" "${ol_temp}°"
         done
     fi
 
@@ -1026,22 +1147,34 @@ draw_forecast_body() {
     fi
 
     # Week strip
-    local wk_x="$WK_X" wk_name wk_day wk_bg i
+    local wk_x="$WK_X" wk_name wk_day wk_bg i wk_nw wk_dw wk_nx wk_dx
     for i in 0 1 2 3 4 5 6; do
         eval "wk_name=\$WK${i}_NAME"
         eval "wk_day=\$WK${i}_DAY"
 
+        # CENTRED IN THE CELL, and the number set REGULAR. .wd is
+        # text-align:center and .wd-d carries no font-weight, so the page draws
+        # seven centred regular numerals; the panel drew seven bold ones hard
+        # against the left edge of their cells, which on a row of identical
+        # boxes is the one place a misalignment cannot hide. The widths are the
+        # collector's — see draw_field() for why they are not ${#var}.
+        eval "wk_nw=\$WK${i}_NAMEW; wk_dw=\$WK${i}_DAYW"
+        wk_nx=$(centre_in "$wk_x" "$WK_CELL_W" \
+                          "$(( WK_NAME_SZ * ${wk_nw:-0} / 1000 ))")
+        wk_dx=$(centre_in "$wk_x" "$WK_CELL_W" \
+                          "$(( WK_DAY_SZ * ${wk_dw:-0} / 1000 ))")
+
         if [ "$i" = "$WK_TODAY" ]; then
             # Today: knocked out of a black plate.
             fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
-            draw_text_reg "$wk_x" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "WHITE" "$wk_name"
-            draw_text_bold "$wk_x" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "WHITE" "$wk_day"
+            draw_text_reg "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "WHITE" "$wk_name"
+            draw_text_reg "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "WHITE" "$wk_day"
         else
             wk_bg="GRAYE"
             { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
             fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
-            draw_text_reg "$wk_x" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "GRAY7" "$wk_name"
-            draw_text_bold "$wk_x" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "BLACK" "$wk_day"
+            draw_text_reg "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "GRAY7" "$wk_name"
+            draw_text_reg "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "BLACK" "$wk_day"
         fi
         wk_x=$((wk_x + WK_CELL_W))
     done

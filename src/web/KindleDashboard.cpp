@@ -604,6 +604,26 @@ static void kdShellVar(AsyncResponseStream* s, const char* key, const char* val)
 }
 
 /// The same, for the indexed keys (FC0_LABEL, WK3_NAME…).
+/// kdShellVar(), but uppercased first.
+///
+/// FOR EVERY STRING THE PAGE SETS `text-transform:uppercase` ON. That CSS is
+/// the only reason the tables in DashboardStrings.h are lower case, and the
+/// panel has no CSS — so it drew "Навън" and "Mon" where the browser drew
+/// "НАВЪН" and "MON", from one setting on one device, and most visibly on the
+/// two strings a reader typed themselves. The reader's busybox cannot fix it:
+/// `tr a-z A-Z` is ASCII-only, which would uppercase "Pressure" and leave
+/// "Налягане" exactly as it was.
+///
+/// 96 bytes because a label is 24 (KindleSlot::label) and Cyrillic is two bytes
+/// a letter; kdUpperUtf8() truncates on a character boundary rather than inside
+/// one, so a longer string loses whole letters instead of gaining a box glyph.
+static void kdShellVarUpper(AsyncResponseStream* s, const char* key,
+                            const char* val) {
+    char up[96];
+    kdUpperUtf8(up, sizeof(up), val);
+    kdShellVar(s, key, up);
+}
+
 static void kdShellVarN(AsyncResponseStream* s, const char* fmt, int i, const char* val) {
     char key[24];
     snprintf(key, sizeof(key), fmt, i);
@@ -834,10 +854,23 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
         res[KZ_BIG].arrow   = "";
     }
 
+    // THE SECOND HEADLINE VALUE IS SUBORDINATE, and the page says so in one
+    // line of CSS the panel cannot see: `.v2{color:#444}`, applying whenever
+    // the place has not been given an ink of its own (an .ink-* class is
+    // emitted later in the sheet and wins when there is one). The panel read
+    // only the ink and so drew it in full black, level with the headline it is
+    // meant to sit under — "32.4 / 71" as two equal numbers instead of a
+    // reading and its companion.
+    const bool bigDefaultInk = (zones.z[KZ_BIG].ink != KINK_DARK &&
+                                zones.z[KZ_BIG].ink != KINK_MID &&
+                                zones.z[KZ_BIG].ink != KINK_LIGHT);
+
     const KindleZones& zones = kdSlots();
 
-    kdShellVar(s, "Z_GROUP_OUT", kdGroupOutLabel(zones));
-    kdShellVar(s, "Z_GROUP_IN",  kdGroupInLabel(zones));
+    // Uppercased, because .lab is `text-transform:uppercase` on the page and
+    // the panel has no CSS. See kdShellVarUpper().
+    kdShellVarUpper(s, "Z_GROUP_OUT", kdGroupOutLabel(zones));
+    kdShellVarUpper(s, "Z_GROUP_IN",  kdGroupInLabel(zones));
 
     char sub[64];
     kdSubLine(sub, sizeof(sub), skin, res[KZ_HERO], now);
@@ -859,7 +892,7 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
         snprintf(key, sizeof(key), "Z_%s_UNIT", up);
         kdShellVar(s, key, res[i].unit);
         snprintf(key, sizeof(key), "Z_%s_LABEL", up);
-        kdShellVar(s, key, res[i].label);
+        kdShellVarUpper(s, key, res[i].label);
         snprintf(key, sizeof(key), "Z_%s_ARROW", up);
         kdShellVar(s, key, res[i].arrow);
 
@@ -869,7 +902,8 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
         // FBInk's -C, and translating a number there would be a second copy of
         // a mapping that already lives in KindleSlots.h.
         snprintf(key, sizeof(key), "Z_%s_INK", up);
-        kdShellVar(s, key, kdInkFbink(zones.z[i].ink));
+        kdShellVar(s, key, (i == KZ_BIG && bigDefaultInk)
+                           ? "GRAY4" : kdInkFbink(zones.z[i].ink));
 
         // HOW WIDE THE PIECES COME OUT, in thousandths of the type size they
         // are drawn at. The shell renderer needs them because a unit is set as
@@ -1267,8 +1301,22 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             time_t day = monday + i * 86400;
             struct tm dtm;
             localtime_r(&day, &dtm);
-            kdShellVarN(s, "WK%d_NAME", i, kdWeekdayShort(i));
-            s->printf("WK%d_DAY=%d\n", i, dtm.tm_mday);
+            // Uppercased (.wd-n is text-transform:uppercase) and measured.
+            //
+            // MEASURED BECAUSE .wd IS text-align:center. The panel drew both
+            // strings at the cell's left edge while the page centred them in
+            // it, which on a seven-cell strip is seven visible mistakes in a
+            // row. FBInk will not say how wide it drew something, so the width
+            // comes from here — the same measurement every place carries.
+            char wkn[16];
+            kdUpperUtf8(wkn, sizeof(wkn), kdWeekdayShort(i));
+            kdShellVarN(s, "WK%d_NAME", i, wkn);
+            s->printf("WK%d_NAMEW=%u\n", i, kdAdvanceMille(wkn));
+
+            char wkd[8];
+            snprintf(wkd, sizeof(wkd), "%d", dtm.tm_mday);
+            s->printf("WK%d_DAY=%s\n", i, wkd);
+            s->printf("WK%d_DAYW=%u\n", i, kdAdvanceMille(wkd));
         }
         s->printf("WK_TODAY=%d\n", wday);
 
@@ -1280,9 +1328,9 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             struct tm mv, sv;
             if (localtime_r(&monday, &mv) != nullptr &&
                 localtime_r(&sunday, &sv) != nullptr) {
-                kdShellVar(s, "WK_MON_MONTH", kdMonth(mv.tm_mon));
-                kdShellVar(s, "WK_SUN_MONTH",
-                           sv.tm_mon != mv.tm_mon ? kdMonth(sv.tm_mon) : "");
+                kdShellVarUpper(s, "WK_MON_MONTH", kdMonth(mv.tm_mon));
+                kdShellVarUpper(s, "WK_SUN_MONTH",
+                                sv.tm_mon != mv.tm_mon ? kdMonth(sv.tm_mon) : "");
             } else {
                 s->print("WK_MON_MONTH=\"\"\nWK_SUN_MONTH=\"\"\n");
             }
@@ -1292,8 +1340,11 @@ static void handleKindleData(AsyncWebServerRequest* req) {
                  "MONTH_LABEL=\"\"\nYEAR=\n");
         for (int i = 0; i < 7; i++)
         {
-            kdShellVarN(s, "WK%d_NAME", i, kdWeekdayShort(i));
-            s->printf("WK%d_DAY=\n", i);
+            char wkn[16];
+            kdUpperUtf8(wkn, sizeof(wkn), kdWeekdayShort(i));
+            kdShellVarN(s, "WK%d_NAME", i, wkn);
+            s->printf("WK%d_NAMEW=%u\nWK%d_DAY=\nWK%d_DAYW=0\n",
+                      i, kdAdvanceMille(wkn), i, i);
         }
         s->print("WK_TODAY=-1\nWK_MON_MONTH=\"\"\nWK_SUN_MONTH=\"\"\n");
     }
@@ -1307,9 +1358,18 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     s->printf("FC_LOW=%d\n", (int)roundf(fc.lowC));
     s->printf("FC_WIND=%d\n", (int)roundf(fc.windKph));
     for (int i = 0; i < 3; i++) {
-        kdShellVarN(s, "FC%d_LABEL", i, fc.outlook[i].label);
+        char oll[24];
+        kdUpperUtf8(oll, sizeof(oll), fc.outlook[i].label);
+        kdShellVarN(s, "FC%d_LABEL", i, oll);
+        s->printf("FC%d_LABELW=%u\n", i, kdAdvanceMille(oll));
         s->printf("FC%d_CODE=%d\n", i, fc.outlook[i].code);
+
+        // The temperature as it is DRAWN, degree included, because .per is
+        // centred and what has to be measured is the whole string.
+        char olt[12];
+        snprintf(olt, sizeof(olt), "%d°", (int)roundf(fc.outlook[i].tempC));
         s->printf("FC%d_TEMP=%d\n", i, (int)roundf(fc.outlook[i].tempC));
+        s->printf("FC%d_TEMPW=%u\n", i, kdAdvanceMille(olt));
         if (!isnan(fc.outlook[i].lowC))
             s->printf("FC%d_LOW=%d\n", i, (int)roundf(fc.outlook[i].lowC));
         else
@@ -1318,7 +1378,8 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     #else
     s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_HIGH=\nFC_LOW=\nFC_WIND=\n");
     for (int i = 0; i < 3; i++)
-        s->printf("FC%d_LABEL=\"\"\nFC%d_CODE=-1\nFC%d_TEMP=\nFC%d_LOW=\n", i, i, i, i);
+        s->printf("FC%d_LABEL=\"\"\nFC%d_LABELW=0\nFC%d_CODE=-1\n"
+                  "FC%d_TEMP=\nFC%d_TEMPW=0\nFC%d_LOW=\n", i, i, i, i, i, i);
     #endif
 
     // ── UI labels ──
@@ -1386,6 +1447,83 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // there.
     s->printf("CHART_OUT=%d\n", haveOut ? 1 : 0);
     s->printf("CHART_IN=%d\n",  haveIn  ? 1 : 0);
+
+    // ── The chart's axis, which the image itself cannot carry ───────────────
+    //
+    // The BMP has no labels and cannot have any: drawing text into a 4-bit
+    // image would need a bitmap font on the ESP32 that this firmware does not
+    // carry, and the note in ChartBmpCtx says where they belong instead —
+    // "in /kindle/data next to the rest of the text, and the script should
+    // place them". This is that. Until now the panel showed a bare grid while
+    // the browser page showed the same grid with five temperatures down the
+    // side and five hours along the bottom, and a grid with no numbers on it
+    // is a picture of a chart rather than a chart.
+    //
+    // THE SAME lo/hi THE IMAGE USES, computed the same way — the 6 % padding
+    // with a 0.4° floor, from appendChart() and ChartBmpCtx::init() alike. A
+    // second opinion here would label the image with somebody else's scale.
+    {
+        float clo = 1e9f, chi = -1e9f;
+        for (int i = 0; i < TrendRing::HOURS; i++) {
+            if (haveOut && tOut[i].count) {
+                if (tOut[i].min < clo) clo = tOut[i].min;
+                if (tOut[i].max > chi) chi = tOut[i].max;
+            }
+            if (haveIn && tIn[i].count) {
+                if (tIn[i].min < clo) clo = tIn[i].min;
+                if (tIn[i].max > chi) chi = tIn[i].max;
+            }
+        }
+        const bool haveAny = (clo <= chi);
+        if (haveAny) {
+            float pad = (chi - clo) * 0.06f;
+            if (pad < 0.4f) pad = 0.4f;
+            clo -= pad; chi += pad;
+            const float cspan = (chi - clo) > 0.001f ? (chi - clo) : 1.0f;
+            for (int k = 0; k <= 4; k++) {
+                char lbl[12];
+                fmtInt(lbl, sizeof(lbl), chi - cspan * (float)k / 4.0f);
+                char key[16];
+                snprintf(key, sizeof(key), "CH_Y%d", k);
+                kdShellVar(s, key, lbl);
+                s->printf("CH_Y%dW=%u\n", k, kdAdvanceMille(lbl));
+            }
+        } else {
+            for (int k = 0; k <= 4; k++)
+                s->printf("CH_Y%d=\"\"\nCH_Y%dW=0\n", k, k);
+        }
+
+        // The hour axis: -23h, -17h, -11h, -5h and "now". Fixed strings, so
+        // the reader could hold them — but then "now" would be English on a
+        // Bulgarian panel, and the stride would be written down twice.
+        for (int k = 0; k < 5; k++) {
+            char lbl[12];
+            if (k == 4) snprintf(lbl, sizeof(lbl), "%s", KD_T("now", "сега"));
+            else        snprintf(lbl, sizeof(lbl), "-%dh", 23 - k * 6);
+            char key[16];
+            snprintf(key, sizeof(key), "CH_H%d", k);
+            kdShellVar(s, key, lbl);
+            s->printf("CH_H%dW=%u\n", k, kdAdvanceMille(lbl));
+        }
+
+        // WHERE THE PLOT AREA IS INSIDE THE IMAGE, in image pixels, taken
+        // from the image's own margin formulas rather than re-derived at the
+        // other end. ChartBmpCtx::init() is the only place that decides this;
+        // a copy of `W * 40 / 560` in a shell script is a copy that goes stale
+        // the first time the image is resized.
+        const uint16_t cw = (skin.fbinkResW > 600) ? 1000 : 560;
+        const uint16_t ch = (skin.fbinkResW > 600) ? 360  : 200;
+        s->printf("CH_L=%d\nCH_R=%d\nCH_T=%d\nCH_B=%d\n",
+                  cw * 40 / 560, cw - cw * 4 / 560,
+                  ch * 10 / 200, ch - ch * 26 / 200);
+
+        // What the page prints instead of a chart when the record is empty.
+        // The panel drew the grid regardless, which reads as "nothing is
+        // happening outside" rather than "this has not filled in yet".
+        kdShellVar(s, "CH_NOTE", haveAny ? "" :
+                   KD_T("The 24 hour record fills as readings arrive.",
+                        "24-часовият запис се попълва с постъпването на данни."));
+    }
 
     req->send(s);
 }

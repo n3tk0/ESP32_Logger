@@ -189,9 +189,16 @@ static inline const char* kdInkCss(uint8_t ink) {
 /// these four are the ones the rest of update_dash.sh already uses.
 static inline const char* kdInkFbink(uint8_t ink) {
     switch (ink) {
-        case KINK_DARK:  return "GRAY4";
-        case KINK_MID:   return "GRAY7";
-        case KINK_LIGHT: return "GRAY10";
+        case KINK_DARK:  return "GRAY4";     // .ink-d #444
+        case KINK_MID:   return "GRAY7";     // .ink-m #777
+        // .ink-l IS #aaa, AND FBINK'S NAME FOR IT IS GRAYA. This said GRAY10,
+        // which is not a colour FBInk has: its scale runs GRAY1..GRAY9 and
+        // then GRAYA..GRAYE, so `-C GRAY10` was rejected, the whole draw call
+        // failed, and a place set to "light" was simply not on the panel —
+        // silently, because the reader sends fbink's stderr to /dev/null. The
+        // browser page showed the value in pale grey and the Kindle showed
+        // nothing at all, which reads as a dead sensor.
+        case KINK_LIGHT: return "GRAYA";
         default:         return "BLACK";
     }
 }

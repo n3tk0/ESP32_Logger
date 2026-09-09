@@ -691,10 +691,10 @@ the user's documents when they pressed Stop.
 So the parser takes an allowlist. `dash.conf` passes the exact key names it
 owns; the payload passes `PAYLOAD`, which accepts the shapes the collector
 actually emits — `Z_*`, `GRID_*`, `IN_ZONES`, `LBL_*`, `FC*`, `WK*`, `OUT_*`,
-`IN_*`, `RES_W`, `RES_H` and a handful of named scalars (`CLOCK`, `CLOCK_ADVW`,
-`CLOCK_STYLE`, `DATE`, `TIME_FORMAT`, `SHOW_CHART`, `SHOW_WEEK`, `CHART_OUT`,
-`CHART_IN`, `KEY_OUT_ADVW`, `LANG`, `DECIMALS`, `SHOW_FLAGS`) — and drops
-everything else.
+`IN_*`, `RES_W`, `RES_H`, the chart's axis (`CH_*`) and a handful of named
+scalars (`CLOCK`, `CLOCK_ADVW`, `CLOCK_STYLE`, `DATE`, `TIME_FORMAT`,
+`SHOW_CHART`, `SHOW_WEEK`, `CHART_OUT`, `CHART_IN`, `KEY_OUT_ADVW`, `LANG`,
+`DECIMALS`, `SHOW_FLAGS`) — and drops everything else.
 
 `RES_W` and `RES_H` get a second check, because they are interpolated into a
 path that is then executed with `.` to load the layout: digits only, and a
@@ -709,14 +709,69 @@ Every place they disagree is invisible from both sides: the reader switches
 something off, the browser stops drawing it, and the panel on the wall — the
 one anybody is actually looking at — carries on. Nothing errors.
 
-Four of them were found and closed:
+Found by holding a photograph of the browser page next to a photograph of the
+panel, which is the only instrument this had:
 
 | | The page | The panel, before |
 |---|---|---|
-| The chart's key | two swatches under the chart, at the weights of the lines they name | nothing at all — two lines and no way to tell which was which |
+| The chart's numbers | five temperatures down the side, five hours along the bottom | **none** — a bare grid, which reads as a sensor that has stopped |
+| An empty 24-hour record | a sentence saying it fills as readings arrive | the empty grid again, with no explanation |
+| The chart's key | two swatches, at the weights of the lines they name | nothing at all — two lines and no way to tell which was which |
+| Every caption | `text-transform:uppercase` | drawn as typed: `Навън`, `Mon`, `август` |
+| The week strip | centred in each cell, numerals regular | left-aligned and bold, in all seven |
+| The three outlook columns | centred on a `#f0f0f0` plate | left-aligned on white |
+| A degree | `.unit-d`, 0.34em | 0.42em, the size of a spelt-out unit |
+| The second headline value | `#444` — subordinate to the number it follows | full black, level with it |
+| The hairline under the clock | `#d8d8d8` | `#aaa`, the weight of a section rule |
+| A place set to "light" ink | `#aaa` | **nothing at all** — `kdInkFbink()` returned `GRAY10`, which is not a colour FBInk has, so the whole draw call failed silently |
 | `KSHOW_CHART`, `KSHOW_WEEK`, `KSHOW_BIG`, `KSHOW_BATTERY` | section hidden | section drawn regardless |
-| Twelve-hour clock, `9:05` without the leading zero | `kdFmtTime()` | always `09:05` |
+| Twelve-hour clock, `9:05` without the leading zero, ISO dates | `kdFmtTime()` / `kdFmtDate()` | always `09:05`, always "27 august" |
 | Boxed / ruled / dated clock | four styles in CSS | one, always |
+| Hero, clock, forecast, footer, week numerals | 88 / 96 / 28 / 12 / 24 px | 84 / 88 / 26 / 11 / 22 |
+
+### Upper case, and why it has to be done at the collector
+
+Every caption on this dashboard is set uppercase, and on the page that is one
+line of CSS — which is why the string tables in `DashboardStrings.h` are lower
+case and the note over `kdMonth()` says so. The panel has no CSS. It drew
+whatever `/kindle/data` handed it, so one dashboard came out `НАВЪН` in the
+browser and `Навън` on the panel, most visibly on the two strings a reader
+typed themselves.
+
+It cannot be fixed at the reader's end: `tr a-z A-Z` in busybox ash is
+ASCII-only, so the panel would keep drawing `Навън` while uppercasing
+`Pressure`. `kdUpperUtf8()` does it in the firmware, for ASCII and Cyrillic,
+and copies through anything else untouched — a byte it does not understand is a
+byte in a label somebody chose. Cyrillic straddles a UTF-8 lead-byte boundary
+(а–п is `D0 B0..BF`, р–я is `D1 80..8F`), so the obvious single subtraction
+turns "р" into a space and a capital; and a label too long for its buffer is
+cut **between** characters, because half a two-byte sequence is not a shorter
+word, it is a replacement glyph. `tests/host/test_dashboard_strings.cpp` holds
+both.
+
+### The chart's axis
+
+The image is a 4-bit BMP and cannot carry text: drawing any would need a bitmap
+font on the ESP32 that this firmware does not have. So the five values and the
+five hours travel as strings in `/kindle/data` — with `CH_L`/`CH_R`/`CH_T`/`CH_B`
+saying where the plot area sits **inside** the image, taken from
+`ChartBmpCtx::init()` rather than re-derived at the other end — and the reader
+places them with FBInk. The `lo`/`hi` they are computed from is the image's
+own: the same 6 % padding with a 0.4° floor that `appendChart()` and
+`ChartBmpCtx::init()` both apply, because a second opinion here would label the
+image with somebody else's scale.
+
+### What keeps them together now
+
+`tools/check_kindle_parity.py` reads the stylesheet out of the firmware — the
+same extraction `tools/kindle_preview/preview.py` uses, so it cannot hold a
+stale copy of the numbers — and asserts that every type size in it appears at
+the right scale in both layout files, along with the three runtime clock
+styles, the week strip's geometry and the chart image's own dimensions. It
+checks **sizes and not positions**: the page is a flow layout and the panel is
+absolute coordinates, so "where the forecast starts" is legitimately different
+on each, and comparing those would be noise that trains people to ignore the
+checker. CI runs it, and then breaks a number at each end to prove it notices.
 
 **Where each is decided is the point of the fix.** A switch is applied on the
 collector: `KSHOW_BIG` empties the place the way `KSHOW_GRID` already emptied

@@ -172,28 +172,48 @@ FC_HIGH=14
 FC_LOW=3
 FC_WIND=23
 FC0_LABEL="21:00"
+FC0_LABELW=2260
 FC0_CODE=61
 FC0_TEMP=6
+FC0_TEMPW=830
 FC1_LABEL="00:00"
+FC1_LABELW=2260
 FC1_CODE=3
 FC1_TEMP=4
+FC1_TEMPW=830
 FC2_LABEL="03:00"
+FC2_LABELW=2260
 FC2_CODE=0
 FC2_TEMP=2
+FC2_TEMPW=830
 WK0_NAME="MO"
 WK0_DAY=24
+WK0_NAMEW=1240
+WK0_DAYW=1000
 WK1_NAME="TU"
 WK1_DAY=25
+WK1_NAMEW=1240
+WK1_DAYW=1000
 WK2_NAME="WE"
 WK2_DAY=26
+WK2_NAMEW=1240
+WK2_DAYW=1000
 WK3_NAME="TH"
 WK3_DAY=27
+WK3_NAMEW=1240
+WK3_DAYW=1000
 WK4_NAME="FR"
 WK4_DAY=28
+WK4_NAMEW=1240
+WK4_DAYW=1000
 WK5_NAME="SA"
 WK5_DAY=29
+WK5_NAMEW=1240
+WK5_DAYW=1000
 WK6_NAME="SU"
 WK6_DAY=30
+WK6_NAMEW=1240
+WK6_DAYW=1000
 WK_TODAY=1
 WK_MON_MONTH="MARCH"
 WK_SUN_MONTH="APRIL"
@@ -208,6 +228,31 @@ SHOW_WEEK=1
 CHART_OUT=1
 CHART_IN=1
 KEY_OUT_ADVW=5200
+CH_Y0="33"
+CH_Y0W=1000
+CH_Y1="31"
+CH_Y1W=1000
+CH_Y2="28"
+CH_Y2W=1000
+CH_Y3="26"
+CH_Y3W=1000
+CH_Y4="23"
+CH_Y4W=1000
+CH_H0="-23h"
+CH_H0W=1830
+CH_H1="-17h"
+CH_H1W=1830
+CH_H2="-11h"
+CH_H2W=1830
+CH_H3="-5h"
+CH_H3W=1330
+CH_H4="now"
+CH_H4W=1500
+CH_L=40
+CH_R=556
+CH_T=10
+CH_B=174
+CH_NOTE=""
 LBL_KEY_OUT="outside mean"
 LBL_KEY_BAND="shaded band = hourly low to high"
 LBL_KEY_IN="inside"
@@ -663,6 +708,117 @@ check "$?" "the week strip switched off takes the strip and leaves the footer"
   draw_forecast_body
   grep -q -- "width=$WK_CELL_W,height=$WK_CELL_H" "$FBINK_LOG" || exit 1 )
 check "$?" "and switched on it is still there"
+reset_log
+
+# ── 3d3b. The chart's numbers, its plates, and everything the page centres ──
+#
+# All of these were found by holding a photograph of the browser page next to a
+# photograph of the panel. None of them is an error anywhere: the panel drew
+# what it was told to draw, and what it was told left out every string the page
+# renders with CSS the panel does not have.
+( reset_log
+  printf 'BM\202\000\000\000' > "$DASH_TMP/graph.bmp"
+  draw_chart_body || exit 1
+  # The five values down the side and the five hours along the bottom. The
+  # image is a 4-bit BMP with no font in it; without these the panel showed a
+  # bare grid beside a browser page showing the same grid with numbers on it.
+  for v in 33 31 28 26 23 -23h -17h -11h -5h now; do
+      grep -q -- "	--	$v	" "$FBINK_LOG" || exit 2
+  done
+  # Right-aligned on the axis: "33" is 1000 mille at 11 px = 11 px wide, so it
+  # starts at GR_X + CH_L - AX_GAP - 11.
+  grep -q -- "left=$(( GR_X + CH_L - AX_GAP - AX_SZ * 1000 / 1000 ))," "$FBINK_LOG" || exit 3
+  # And "now" is set against the right-hand end of the axis, not past it.
+  grep -q -- "left=$(( GR_X + CH_R - AX_SZ * 1500 / 1000 ))," "$FBINK_LOG" || exit 4
+  exit 0 )
+check "$?" "the chart's axis is labelled, the way the page labels it"
+
+# An empty record is a sentence, not a grid. A grid with no line in it reads as
+# a sensor that has stopped, which is the one thing it does not mean.
+( reset_log
+  CH_NOTE="The 24 hour record fills as readings arrive." draw_chart_body || exit 1
+  grep -q "24 hour record fills" "$FBINK_LOG" || exit 2
+  grep -q -- "-g	file=" "$FBINK_LOG" && exit 3      # and no empty image under it
+  grep -q -- "	--	33	" "$FBINK_LOG" && exit 4      # nor an axis for nothing
+  exit 0 )
+check "$?" "with nothing recorded yet it says so instead of drawing an empty grid"
+
+# An older collector sends no axis at all. Drawing the image alone is what this
+# script did before, and is still better than placing labels it has not been
+# given.
+( reset_log
+  unset CH_L CH_R CH_T CH_B
+  draw_chart_body || exit 1
+  grep -q -- "file=$DASH_TMP/graph.bmp" "$FBINK_LOG" || exit 2
+  grep -q -- "	--	33	" "$FBINK_LOG" && exit 3
+  exit 0 )
+check "$?" "and an older collector, which sends no axis, still gets its chart"
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+load_layout
+
+# The week strip: centred in its cells, and the number set regular. Seven
+# identical boxes are the one place a misalignment cannot hide, and the panel
+# drew all seven hard against the left edge in bold.
+( reset_log
+  draw_forecast_body
+  # WK0: name 1240 mille at WK_NAME_SZ, day 1000 at WK_DAY_SZ, in an
+  # WK_CELL_W cell starting at WK_X.
+  nx=$(( WK_X + (WK_CELL_W - WK_NAME_SZ * 1240 / 1000) / 2 ))
+  dx=$(( WK_X + (WK_CELL_W - WK_DAY_SZ * 1000 / 1000) / 2 ))
+  [ "$nx" -gt "$WK_X" ] || exit 1                  # it really is inset
+  grep -q -- "left=$nx,top=$(( WK_Y + WK_NAME_OFFSET ))" "$FBINK_LOG" || exit 2
+  grep -q -- "left=$dx,top=$(( WK_Y + WK_DAY_OFFSET ))" "$FBINK_LOG" || exit 3
+  # .wd-d carries no font-weight on the page, so the numeral is set in the
+  # REGULAR face. -t names its file as `regular=` whichever face it is, so the
+  # assertion has to be on the path — the bold one must not appear at this size.
+  grep -q -- "regular=$FONT_REG,px=$WK_DAY_SZ," "$FBINK_LOG" || exit 4
+  grep -q -- "regular=$FONT_BOLD,px=$WK_DAY_SZ," "$FBINK_LOG" && exit 5
+  exit 0 )
+check "$?" "the week strip is centred in its cells and set regular, as the page sets it"
+
+# An older collector measures nothing. Falling back to the left edge is what
+# this always did, and is better than centring on a width of zero.
+( reset_log
+  unset WK0_NAMEW WK0_DAYW WK1_NAMEW WK1_DAYW WK2_NAMEW WK2_DAYW \
+        WK3_NAMEW WK3_DAYW WK4_NAMEW WK4_DAYW WK5_NAMEW WK5_DAYW \
+        WK6_NAMEW WK6_DAYW
+  draw_forecast_body
+  grep -q -- "left=$WK_X,top=$(( WK_Y + WK_NAME_OFFSET ))" "$FBINK_LOG" || exit 1 )
+check "$?" "with no widths it falls back to the left edge rather than to nonsense"
+load_kv "$DASH_TMP/data.txt" PAYLOAD
+
+# The three outlook columns: a grey plate each, with the label, the icon and
+# the temperature centred on it.
+( reset_log
+  draw_forecast_body
+  grep -q -- "-B	GRAYE	-k	top=$(( OL0_Y - OL_PLATE_TOP )),left=$OL0_X,width=$OL_PLATE_W,height=$OL_PLATE_H" "$FBINK_LOG" || exit 1
+  # The icon is FC_OL_SZ wide and the plate OL_PLATE_W, so it is inset by half
+  # the difference — not drawn at the column's left edge.
+  ix=$(( OL0_X + (OL_PLATE_W - FC_OL_SZ) / 2 ))
+  grep -q -- "x=$ix,y=$(( OL0_Y + OL_ICON_OFFSET ))" "$FBINK_LOG" || exit 2
+  lx=$(( OL0_X + (OL_PLATE_W - OL_LABEL_SZ * 2260 / 1000) / 2 ))
+  grep -q -- "left=$lx,top=$OL0_Y" "$FBINK_LOG" || exit 3
+  exit 0 )
+check "$?" "each outlook column sits on a plate with its contents centred"
+
+# The hairline between the clock and the indoor row is the light one. Drawn at
+# a section rule's weight it reads as a third section break.
+( reset_log
+  draw_sensors_body
+  grep -q -- "-B	GRAYD	-k	top=$IN_RULE_Y" "$FBINK_LOG" || exit 1 )
+check "$?" "the indoor hairline is #d8d8d8, not a section rule"
+
+# A degree is a footnote, not a unit. The page sets .unit at 0.42em and
+# .unit-d at 0.34em; one size for both put a circle the height of a lower-case
+# o where the superscript should be, and pushed everything after it right.
+( reset_log
+  draw_field 10 20 100 0 "21.0" "°" "" 2000 330 BLACK
+  grep -q -- "px=34," "$FBINK_LOG" || exit 1
+  reset_log
+  draw_field 10 20 100 0 "1008" "hPa" "" 2000 1600 BLACK
+  grep -q -- "px=42," "$FBINK_LOG" || exit 2
+  exit 0 )
+check "$?" "the degree is set smaller than a spelt-out unit, as the page sets it"
 reset_log
 
 # ── 3d4. The clock: the reader's time, the collector's format and style ─────
