@@ -853,7 +853,11 @@ def run_web_filter(app) -> None:
     s7 = src_core.split("def s7_upload_fs")[1].split("def s8_")[0]
     check("www_matches_filter" in s7,
           "step 7 checks the tree against the filter before imaging it")
-    check("s1_build_web" in s7,
+    # Through the helper, not through step 1: a rebuild inside step 7 that
+    # announces step 1's completion makes the progress bar count past its own
+    # total. The block further down asserts that separately; here it is only
+    # that step 7 rebuilds at all.
+    check("_build_web_assets" in s7,
           "  and rebuilds rather than flashing the wrong tree")
     app.cfg["upload_filter"] = "all"
     print()
