@@ -473,7 +473,11 @@ jobs:
           set -e
           cp kindle/update_dash.sh /tmp/ud.orig
           sed -i 's/^    \[ "$have" = "$want" \]$/    return 0/' kindle/update_dash.sh
-          ! grep -q 'have" = "$want"' kindle/update_dash.sh   # the sed matched
+          if grep -q 'have" = "$want"' kindle/update_dash.sh; then
+            echo "::error::the graph_ok mutation no longer matches — this proof step is stale"
+            cp /tmp/ud.orig kindle/update_dash.sh
+            exit 1
+          fi
           if sh tests/kindle/drive_dash.sh > /dev/null 2>&1; then
             echo "::error::drive_dash.sh passed a fetch that accepts a truncated BMP"
             cp /tmp/ud.orig kindle/update_dash.sh
@@ -527,7 +531,11 @@ jobs:
           set -e
           cp kindle/layout/600x800.conf /tmp/l.orig
           sed -i 's/^CL_SIZE=96$/CL_SIZE=88/' kindle/layout/600x800.conf
-          ! grep -q '^CL_SIZE=96$' kindle/layout/600x800.conf     # the sed matched
+          if grep -q '^CL_SIZE=96$' kindle/layout/600x800.conf; then
+            echo "::error::the CL_SIZE mutation no longer matches — this proof step is stale"
+            cp /tmp/l.orig kindle/layout/600x800.conf
+            exit 1
+          fi
           if python3 tools/check_kindle_parity.py > /dev/null 2>&1; then
             echo "::error::check_kindle_parity.py passed a clock 8 px off the page's"
             cp /tmp/l.orig kindle/layout/600x800.conf
@@ -536,7 +544,11 @@ jobs:
           cp /tmp/l.orig kindle/layout/600x800.conf
           cp src/web/KindleDashboard.cpp /tmp/kd.orig
           sed -i 's/KD_S(".wd-d{font-size:");                  KD_N(24);/KD_S(".wd-d{font-size:");                  KD_N(26);/' src/web/KindleDashboard.cpp
-          ! grep -q 'wd-d{font-size:");                  KD_N(24)' src/web/KindleDashboard.cpp
+          if grep -q 'wd-d{font-size:");                  KD_N(24)' src/web/KindleDashboard.cpp; then
+            echo "::error::the .wd-d mutation no longer matches — this proof step is stale"
+            cp /tmp/kd.orig src/web/KindleDashboard.cpp
+            exit 1
+          fi
           if python3 tools/check_kindle_parity.py > /dev/null 2>&1; then
             echo "::error::check_kindle_parity.py passed a stylesheet the layout does not follow"
             cp /tmp/kd.orig src/web/KindleDashboard.cpp
@@ -561,7 +573,11 @@ jobs:
           set -e
           cp kindle/update_dash.sh /tmp/ud.orig
           sed -i 's/^        draw_chart_key$/        :/' kindle/update_dash.sh
-          ! grep -q '^        draw_chart_key$' kindle/update_dash.sh   # the sed matched
+          if grep -q '^        draw_chart_key$' kindle/update_dash.sh; then
+            echo "::error::the draw_chart_key mutation no longer matches — this proof step is stale"
+            cp /tmp/ud.orig kindle/update_dash.sh
+            exit 1
+          fi
           if sh tests/kindle/drive_dash.sh > /dev/null 2>&1; then
             echo "::error::drive_dash.sh passed a chart drawn with no key under it"
             cp /tmp/ud.orig kindle/update_dash.sh
@@ -570,8 +586,12 @@ jobs:
           cp /tmp/ud.orig kindle/update_dash.sh
           # And the other half of the same class: a section switch the page
           # obeys and the panel ignores.
-          sed -i 's/\[ "${SHOW_CHART:-1}" = "1" \] || return 0/:/' kindle/update_dash.sh
-          ! grep -q 'SHOW_CHART:-1' kindle/update_dash.sh
+          sed -i 's/^chart_wanted() { \[ "${SHOW_CHART:-1}" = "1" \]; }/chart_wanted() { return 0; }/' kindle/update_dash.sh
+          if grep -q 'chart_wanted() { \[' kindle/update_dash.sh; then
+            echo "::error::the SHOW_CHART mutation no longer matches — this proof step is stale"
+            cp /tmp/ud.orig kindle/update_dash.sh
+            exit 1
+          fi
           if sh tests/kindle/drive_dash.sh > /dev/null 2>&1; then
             echo "::error::drive_dash.sh passed a panel that ignores SHOW_CHART"
             cp /tmp/ud.orig kindle/update_dash.sh
@@ -598,7 +618,10 @@ jobs:
           cp .github/workflows/build-ota-firmware.yml /tmp/ota.orig
           sed -i '0,/^          - lolin_c3_pico$/{/^          - lolin_c3_pico$/d}' \
             .github/workflows/build-ota-firmware.yml
-          ! grep -q 'lolin_c3_pico' .github/workflows/build-ota-firmware.yml
+          if grep -q 'lolin_c3_pico' .github/workflows/build-ota-firmware.yml; then
+            echo "::error::the board mutation no longer matches — this proof step is stale"
+            exit 1
+          fi
           if python3 tools/check_pio_envs.py > /dev/null 2>&1; then
             echo "::error::check_pio_envs.py passed a board missing from the OTA form"
             cp /tmp/ota.orig .github/workflows/build-ota-firmware.yml
@@ -704,7 +727,10 @@ jobs:
           set -e
           cp node/src/ConfigPortal.cpp /tmp/portal.orig
           sed -i 's/^        scanWatchdog();$//' node/src/ConfigPortal.cpp
-          ! grep -q '^        scanWatchdog();$' node/src/ConfigPortal.cpp
+          if grep -q '^        scanWatchdog();$' node/src/ConfigPortal.cpp; then
+            echo "::error::the scanWatchdog mutation no longer matches — this proof step is stale"
+            exit 1
+          fi
           if python3 tools/check_node_portal.py > /dev/null 2>&1; then
             echo "::error::check_node_portal.py passed a portal that only narrows on a poll"
             cp /tmp/portal.orig node/src/ConfigPortal.cpp
