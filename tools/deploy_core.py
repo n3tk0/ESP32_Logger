@@ -13,6 +13,7 @@ import mimetypes
 import os
 import re
 import shlex
+import signal
 import shutil
 import subprocess
 import sys
@@ -114,6 +115,37 @@ def step_parts(step: int) -> tuple[str, str]:
     ``("Build web assets", "www/ → data/www/")``.
     """
     return STEP_DETAIL.get(step, ("", ""))
+
+
+def _kill_tree(proc) -> None:
+    """Kill a child that would not take a SIGTERM, and what it started.
+
+    THE CHILD IS RARELY ALONE. `pio run -t upload` runs esptool in a
+    subprocess of its own, and killing pio leaves esptool holding the serial
+    port — so the next flash fails to open it, on a device the user has just
+    stopped and expects to be free. `pio device monitor` is the exception:
+    miniterm runs inside pio, so terminating pio is the whole of it.
+
+    Windows has no process groups a console app reliably answers, so the tree
+    is taken with taskkill, which ships with the OS. Everywhere else the child
+    was started in a session of its own (see _run_cmd) when it is safe to do
+    so, and the whole group goes at once; a child that was not gets the plain
+    kill it would have got anyway.
+    """
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           capture_output=True, timeout=10,
+                           **_no_window())
+            return
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            proc.kill()
+    except Exception:
+        # Nothing left to try, and a cancel that cannot kill is still a
+        # cancel: run_steps() stops either way.
+        pass
 
 
 #: What a step returns when the run was stopped rather than finished. 130 is
@@ -307,8 +339,15 @@ def www_matches_filter(uf: str, root: Path | None = None) -> bool:
              is what a plain-only tree looks like: without that second test a
              tree built "uncompressed only" passed the "compressed only" check
              by having no pairs to be caught by.
-      all    nothing to prove: `all` keeps whatever it finds, and a text file
-             with no `.gz` is the "gzip was bigger" case, not a violation.
+      all    the mirror of `gz`: a `.gz` WITHOUT its plain sibling is proof —
+             the compressed-only tree, which is what "all" was chosen to stop
+             being. Plus the same no-`.gz`-at-all test, for the plain-only one.
+
+             This used to answer True for everything, on the grounds that
+             `all` keeps whatever it finds. It does not: `all` keeps BOTH
+             copies, and a person switching gz → all to get the plain files
+             back got the gz-only tree imaged again, because nothing noticed
+             that half of it was missing.
 
     Wrong in the cheap direction on purpose. A false "no" costs one rebuild,
     a few seconds nobody notices; a false "yes" images the wrong tree onto a
@@ -319,19 +358,21 @@ def www_matches_filter(uf: str, root: Path | None = None) -> bool:
         return True                     # nothing built; the caller builds it
     if uf == "plain":
         return not any(root.rglob("*.gz"))
-    if uf == "gz":
-        seen_gz = False
-        for gz in root.rglob("*.gz"):
-            seen_gz = True
-            if gz.with_suffix("").exists():
-                return False
-        if seen_gz:
-            return True
-        # No .gz at all. That is either a tree with nothing worth gzipping in
-        # it, or a plain-only build.
-        return not any(p.suffix.lower() in _GZIPPABLE
-                       for p in root.rglob("*") if p.is_file())
-    return True
+    if uf not in ("gz", "all"):
+        return True                     # a filter this does not know
+
+    seen_gz = False
+    for gz in root.rglob("*.gz"):
+        seen_gz = True
+        # gz wants no pairs; all wants nothing BUT pairs.
+        if gz.with_suffix("").exists() != (uf == "all"):
+            return False
+    if seen_gz:
+        return True
+    # No .gz at all: either a tree with nothing worth gzipping in it, or a
+    # plain-only build, and only the first of those satisfies either filter.
+    return not any(p.suffix.lower() in _GZIPPABLE
+                   for p in root.rglob("*") if p.is_file())
 
 
 def detect_env() -> str:
@@ -628,13 +669,16 @@ class DeployManager:
         # closes the serial port on the way down; killing it outright leaves
         # the port held on some platforms until the OS reaps the handle, which
         # is the next flash failing to open it.
+        #
+        # Two threads wait on this child — this one and the worker in
+        # _run_cmd(). That is safe: Popen.wait() takes its own lock and hands
+        # the second caller the cached returncode rather than reaping twice.
         try:
             proc.wait(timeout=3)
+            return
         except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            pass
+        _kill_tree(proc)
 
     @property
     def skipped(self) -> list[int]:
@@ -848,6 +892,13 @@ class DeployManager:
                 bufsize=1,
                 env=env,
                 cwd=str(ROOT),
+                # A SESSION OF ITS OWN, so cancel() can take the child AND
+                # what it started — esptool under pio, which holds the serial
+                # port after its parent is gone. Not for the monitor: a new
+                # session has no controlling terminal, and that is where
+                # miniterm's own Ctrl-C comes from on the CLI.
+                **({} if (interactive or sys.platform == "win32")
+                   else {"start_new_session": True}),
                 **_no_window(inherits_console=interactive),
             )
         except Exception as exc:
@@ -895,10 +946,20 @@ class DeployManager:
 
     def s1_build_web(self) -> int:
         self._emit_start(1, STEP_NAMES[1])
+        rc = self._build_web_assets()
+        self._emit_complete(1, rc)
+        return rc
+
+    def _build_web_assets(self) -> int:
+        """The build itself, without step 1's start/complete events.
+
+        Step 7 runs it when the tree on disk does not match the filter, and a
+        step that emits ANOTHER step's completion is a progress bar counting
+        past its own total: Quick flash is three steps and finished "4 of 3".
+        """
         script = TOOLS / "build_web.py"
         if not script.is_file():
             self._log("ERROR: build_web.py not found in tools/")
-            self._emit_complete(1, 2)
             return 2
         # THE FILTER IS APPLIED HERE, not at upload time, because the tree
         # this writes is what step 7 hands to `pio run -t uploadfs` — and that
@@ -912,7 +973,6 @@ class DeployManager:
                             "--dst", str(DATA_WWW), "--filter", uf])
         if rc == 0:
             self._log("✓ Web assets built.")
-        self._emit_complete(1, rc)
         return rc
 
     def s2_flash_bootloader(
@@ -1033,7 +1093,7 @@ class DeployManager:
         uf = self.cfg.get("upload_filter", "all")
         if not DATA_WWW.is_dir() or not any(DATA_WWW.iterdir()):
             self._log("data/www/ is empty — running Build web first…")
-            rc = self.s1_build_web()
+            rc = self._build_web_assets()
             if rc != 0:
                 self._emit_complete(7, rc)
                 return rc
@@ -1045,7 +1105,7 @@ class DeployManager:
             # fit a C3 and then ran Quick flash would still get both copies.
             self._log(f"data/www/ does not match \"{_UPLOAD_FILTER_LABELS.get(uf, uf)}\" "
                       f"— rebuilding it first…")
-            rc = self.s1_build_web()
+            rc = self._build_web_assets()
             if rc != 0:
                 self._emit_complete(7, rc)
                 return rc
@@ -1090,6 +1150,17 @@ class DeployManager:
         # deploy tooling must do the same.
         self._csrf_token = self._fetch_csrf(base)
 
+        # STOP HAS TO REACH THIS ONE TOO. Every other step is a subprocess,
+        # and cancel() ends it by terminating the child at the far end of the
+        # pipe. This step is a Python loop over a hundred-odd files, with no
+        # child to terminate — so pressing STOP mid-upload went on uploading
+        # until it ran out of files. It asks the flag itself, between files,
+        # which is the only place it can be interrupted without leaving a
+        # half-written one on the device.
+        if self._cancelled:
+            self._emit_complete(8, RC_CANCELLED)
+            return RC_CANCELLED
+
         # Optional wipe
         if self.cfg.get("wipe_before_upload"):
             self._log("Wiping /www on device…")
@@ -1111,6 +1182,11 @@ class DeployManager:
         ok = fail = skipped = 0
 
         for fpath in sorted(DATA_WWW.rglob("*")):
+            if self._cancelled:
+                self._log("")
+                self._log(f"■ Stopped after {ok} file(s).")
+                self._emit_complete(8, RC_CANCELLED)
+                return RC_CANCELLED
             if not fpath.is_file():
                 continue
             if "platform_config" in fpath.name:
@@ -1198,6 +1274,10 @@ class DeployManager:
 
         deleted = failed = 0
         for f in files:
+            # The same reason the upload loop below asks: there is no child
+            # process here for cancel() to terminate.
+            if self._cancelled:
+                break
             path = f.get("path") or f.get("name") or ""
             if not path:
                 continue
@@ -1687,13 +1767,17 @@ class DeployManager:
         self._log(f"Chip: {self.cfg.get('chip')}")
         self._log(f"{'='*60}\n")
 
-        stopped_at: Optional[int] = None
-        for s in steps:
+        remaining: list[int] = []
+        for idx, s in enumerate(steps):
             # Asked before each step, not only inside _run_cmd(): a stop that
             # arrives while step 5 is compiling should not be answered by
             # starting step 6.
+            #
+            # BY INDEX, not by "every number at or above this one": the list is
+            # sorted here, so the two agree today, and the index says what is
+            # actually meant — what was left of THIS list when it stopped.
             if self._cancelled:
-                stopped_at = s
+                remaining = steps[idx:]
                 break
             fn = dispatch.get(s)
             if fn is None:
@@ -1701,7 +1785,14 @@ class DeployManager:
             try:
                 rc = fn()
                 if self._cancelled:
-                    stopped_at = s
+                    # WHETHER THIS ONE COUNTS AS UNFINISHED depends on which
+                    # side of it the stop landed. RC_CANCELLED means the step
+                    # was cut short — it is one of the unfinished. Any other
+                    # code means it ran to the end and the stop arrived after,
+                    # and naming it as unfinished tells the reader a compile
+                    # they watched succeed did not happen.
+                    remaining = (steps[idx:] if rc == RC_CANCELLED
+                                 else steps[idx + 1:])
                     break
                 if rc != 0:
                     failed.append(s)
@@ -1712,7 +1803,6 @@ class DeployManager:
 
         self._log("")
         if self._cancelled:
-            remaining = [n for n in steps if stopped_at is not None and n >= stopped_at]
             note = (f" Step(s) {', '.join(str(n) for n in remaining)} did not "
                     f"finish." if remaining else "")
             self._log(f"■ Stopped.{note}")

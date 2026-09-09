@@ -682,7 +682,16 @@ def run_steps(cfg: dict[str, Any]) -> None:
     # box: three declined steps would be wider than the rule, and a box that
     # does not close is what the padding above exists to prevent.
     declined = manager.skipped
-    if not success:
+    if manager.cancelled:
+        # A FOURTH LINE, and the reason it is not red: run_steps() answers
+        # False for a stopped run as well as a failed one, so without this the
+        # CLI would put "Some steps failed" over a run somebody stopped on
+        # purpose. Nothing in this menu calls cancel() today — there is no
+        # STOP on a terminal, where Ctrl-C is the stop — but the manager can
+        # be stopped by whoever holds it, and a banner that lies about that
+        # is a banner waiting to lie.
+        paint, msg = _yellow, "■  Stopped. See logs above for how far it got."
+    elif not success:
         paint, msg = _red, "✗  Some steps failed. See logs above."
     elif declined:
         paint, msg = _yellow, "!  Finished — but some steps were declined."

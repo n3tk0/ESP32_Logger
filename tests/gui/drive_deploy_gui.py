@@ -403,7 +403,8 @@ def run_stop(app) -> None:
     # one is launched. The flag is what carries it across that gap; without
     # the check at the top of the loop the next step started anyway.
     mgr2 = dc.DeployManager(app.cfg)
-    mgr2.on_step_output = lambda line, end="\n": None
+    said2: list[str] = []
+    mgr2.on_step_output = lambda line, end="\n": said2.append(line)
     mgr2.pio = "pio"
     _FakePopen.calls = []
     real_popen = dc.subprocess.Popen
@@ -425,6 +426,13 @@ def run_stop(app) -> None:
           f"a stop during step 4 does not start steps 5 and 6 "
           f"({len(_FakePopen.calls)} command(s) ran)")
     check(mgr2.cancelled is True, "and the run is reported as stopped")
+    # NAMING ONLY WHAT REALLY DID NOT FINISH. Step 4 ran to the end here — the
+    # stop came from its own completion callback — so listing it as unfinished
+    # would tell the reader a compile they watched succeed did not happen.
+    stopped_line = "".join(l for l in said2 if "Stopped" in l)
+    check("Step(s) 5, 6 did not finish" in stopped_line,
+          f"and names the two that did not, not the one that did "
+          f"({stopped_line.strip()!r})")
 
     # ── A stop pressed before the run has started ───────────────────────────
     #
@@ -448,6 +456,83 @@ def run_stop(app) -> None:
           f"({len(_FakePopen.calls)} command(s) ran)")
     check(mgr3.cancelled is True and early is False,
           "and is still reported as stopped rather than as a clean finish")
+
+    # ── The stopped step is not counted as a done one ───────────────────────
+    #
+    # The monitor emits its completion like every other step, so a run of one
+    # step that was stopped reported "Stopped after 1 of 1" over a log saying
+    # step 9 did not finish. The GUI's own callback is what has to know.
+    done = [0]
+    def completed(step, rc):
+        if rc != dc.RC_CANCELLED:
+            done[0] += 1
+    completed(5, 0)
+    completed(9, dc.RC_CANCELLED)
+    check(done[0] == 1,
+          f"a step that returned {dc.RC_CANCELLED} is not counted as finished "
+          f"({done[0]} of 2)")
+    gui_src = (ROOT / "tools" / "deploy_gui.py").read_text(encoding="utf-8")
+    check("if rc != RC_CANCELLED:" in gui_src,
+          "and the window's own counter says the same")
+
+    # ── One "Stopped." in the log, not two ──────────────────────────────────
+    check(gui_src.count('self._log("■ Stopped.")') == 0,
+          "the window does not repeat the line run_steps() already logged")
+    core_src = (ROOT / "tools" / "deploy_core.py").read_text(encoding="utf-8")
+    check('"■ Stopped.' in core_src,
+          "  which it does log, with which steps did not finish")
+
+    # ── Ctrl+R is the button ────────────────────────────────────────────────
+    #
+    # It used to do nothing at all while running, so the one step that never
+    # ends could be started from the keyboard and not stopped from it.
+    check("_on_run_or_stop()" in gui_src.split("<Control-r>")[1][:80],
+          "Ctrl+R runs or stops, the same as the button it mirrors")
+
+    # ── The CLI knows the third outcome too ─────────────────────────────────
+    cli_src = (ROOT / "tools" / "deploy.py").read_text(encoding="utf-8")
+    check("manager.cancelled" in cli_src,
+          "the CLI banner asks whether the run was stopped")
+    idx_c, idx_f = cli_src.index("manager.cancelled"), cli_src.index("Some steps failed")
+    check(idx_c < idx_f,
+          "  and asks before it decides the run failed")
+
+    # ── Step 8 has no child to terminate, so it asks the flag ───────────────
+    #
+    # Every other step is a subprocess that cancel() ends by terminating it.
+    # This one is a Python loop over a hundred files: STOP mid-upload went on
+    # uploading until it ran out of files.
+    s8 = core_src.split("def s8_upload_http")[1].split("\n    def ")[0]
+    check(s8.count("self._cancelled") >= 2,
+          f"the HTTP upload checks for a stop between files "
+          f"({s8.count('self._cancelled')} checks)")
+    wipe = core_src.split("def _http_wipe_www")[1].split("\n    def ")[0]
+    check("self._cancelled" in wipe,
+          "  and so does the wipe that can precede it")
+
+    # ── A rebuild inside step 7 is not a second step ────────────────────────
+    #
+    # s1_build_web() emits step 1's start and completion. Called from step 7
+    # it emitted them for a step the user did not select, and the progress bar
+    # counted past its own total: Quick flash is three steps and finished
+    # "4 of 3".
+    s7 = core_src.split("def s7_upload_fs")[1].split("\n    def ")[0]
+    check("s1_build_web" not in s7 and "_build_web_assets" in s7,
+          "step 7 rebuilds through the quiet helper, not through step 1")
+
+    mgr4 = dc.DeployManager(app.cfg)
+    seen: list = []
+    mgr4.on_step_output = lambda line, end="\n": None
+    mgr4.on_step_start = lambda step, name: seen.append(step)
+    mgr4.pio = "pio"
+    real_popen = dc.subprocess.Popen
+    try:
+        dc.subprocess.Popen = _FakePopen
+        mgr4._build_web_assets()
+    finally:
+        dc.subprocess.Popen = real_popen
+    check(seen == [],
+          f"and the helper announces no step of its own ({seen})")
 
     # ── The button itself ───────────────────────────────────────────────────
     #
@@ -693,8 +778,13 @@ def run_web_filter(app) -> None:
             sizes[mode] = _build(dst, mode)["flash_bytes"]
             check(dc.www_matches_filter(mode, dst),
                   f"a tree built {mode!r} satisfies its own filter")
+            # EVERY other filter, "all" included. It used to be skipped here,
+            # on the grounds that "all" keeps whatever it finds — and that was
+            # the bug: switching gz → all left the plain files missing, and
+            # nothing noticed, so step 7 imaged the compressed-only tree at
+            # somebody who had just asked for both copies.
             for other in ("all", "gz", "plain"):
-                if other == mode or other == "all":
+                if other == mode:
                     continue
                 check(not dc.www_matches_filter(other, dst),
                       f"and a {mode!r} tree is not mistaken for {other!r}")
@@ -716,6 +806,14 @@ def run_web_filter(app) -> None:
         _build(dst, "all")
         check(len(list(dst.rglob("*"))) > 0 and dc.www_matches_filter("all", dst),
               "and gz → all puts them back")
+
+        # THE SWITCH THAT WAS NOT NOTICED. A gz tree with the filter set back
+        # to "all" has to read as not matching, or step 7 flashes it anyway.
+        gz_only = Path(tmp) / "gz"
+        check(not dc.www_matches_filter("all", gz_only),
+              "a compressed-only tree does not satisfy \"both copies\"")
+        check(not dc.www_matches_filter("all", Path(tmp) / "plain"),
+              "and neither does an uncompressed-only one")
 
         # No holes: a binary has no .gz to be kept instead of, and neither has
         # a text file whose gzip came out bigger. Dropping the plain copy of

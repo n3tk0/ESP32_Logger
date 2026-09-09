@@ -190,7 +190,16 @@ never scrolled off:
    step 9: a serial monitor does not finish on its own, and the frozen window
    has no console for miniterm's Ctrl-C. Pressing it terminates the step that
    is running and skips whatever was queued behind it — the log says
-   `■ Stopped.` rather than reporting a failure, because nothing failed.
+   `■ Stopped.` rather than reporting a failure, because nothing failed, and
+   names the steps that did not finish — not the one that had just finished
+   when the button was pressed. **Ctrl+R does the same thing the button does**,
+   whichever state it is in.
+
+   It reaches the steps that are not subprocesses too: step 8 uploads over
+   HTTP in a Python loop with no child to terminate, so it asks between files.
+   And it takes what the step started, not only the step: `pio run -t upload`
+   runs esptool in a subprocess of its own, and killing pio alone would leave
+   esptool holding the serial port that was just freed on purpose.
 
 On the right: **Run** (progress bar and log), **Settings** (device IP, upload
 and monitor baud, which web asset copies to keep, USB CDC), **Build** (the feature list
@@ -348,7 +357,9 @@ values you pinned survive the switch.
   (all/gz/plain). Applies to **all three** web steps: step 1 writes
   `data/www/` this way, step 7 images that directory to LittleFS, step 8
   uploads it over HTTP. Change it and step 7 rebuilds the tree first rather
-  than flashing one built under the old setting. `gz` is what fits a 4 MB
+  than flashing one built under the old setting — in **either** direction:
+  `gz` → `all` leaves the plain files missing just as `all` → `gz` leaves them
+  present, and both are a tree that does not match what was asked for. `gz` is what fits a 4 MB
   board: about 270 KB against about 970 KB for both copies, out of a 1088 KB
   LittleFS partition that also holds the logs.
 - **wipe_before_upload** — Delete /www before uploading (safety)

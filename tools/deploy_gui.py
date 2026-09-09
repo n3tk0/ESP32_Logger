@@ -56,6 +56,7 @@ sys.path.insert(0, str(TOOLS))
 
 from deploy_core import (
     DeployManager,
+    RC_CANCELLED,
     NODE_PROJECTS,
     PRESET_BLURBS,
     generate_espnow_key,
@@ -1276,9 +1277,9 @@ READABILITY
   are remembered in .flash_tool.json.
 
 KEYBOARD
-  Ctrl+R   Run the selected steps        F5       Rescan serial ports
-           (the RUN button becomes STOP while a run is going — that is how
-            the serial monitor, which never ends on its own, is closed)
+  Ctrl+R   Run, or stop a run already    F5       Rescan serial ports
+           going — the RUN button is STOP while one is, and that is how the
+           serial monitor, which never ends on its own, is closed
   Ctrl+S   Save configuration            Ctrl++   Larger text
   Ctrl+L   Clear the log                 Ctrl+-   Smaller text
                                          Ctrl+0   Reset text size
@@ -1990,7 +1991,12 @@ REQUIREMENTS
                         f"Step {done[0] + 1} of {total} — {step_parts(step)[0]}")
 
                 def completed(step, rc):
-                    done[0] += 1
+                    # A STOPPED STEP IS NOT A DONE STEP. The monitor emits its
+                    # completion like every other step, so a run of one step
+                    # that was stopped reported "Stopped after 1 of 1" over a
+                    # log saying step 9 did not finish.
+                    if rc != RC_CANCELLED:
+                        done[0] += 1
                     self._log(f"  → Step {step} completed with code {rc}\n")
                     self._set_progress(done[0], total,
                                        f"{done[0]} of {total} step(s) done")
@@ -2013,7 +2019,9 @@ REQUIREMENTS
                 # painted red either.
                 declined = self.manager.skipped
                 if self.manager.cancelled:
-                    self._log("■ Stopped.")
+                    # run_steps() has already logged "■ Stopped." and which
+                    # steps did not finish; saying it again just puts the line
+                    # in the log twice.
                     self._set_progress(done[0], total,
                                        f"Stopped after {done[0]} of {total}")
                     self._notify("Stopped.", "warning")
@@ -2121,7 +2129,12 @@ REQUIREMENTS
     # ── keyboard ────────────────────────────────────────────────────────────
     def bind_shortcuts(self) -> None:
         r = self.root
-        r.bind("<Control-r>", lambda _: None if self.running else self._on_run())
+        # THE SAME KEY AS THE BUTTON, and the same job: RUN when idle, STOP
+        # while a run is going. It used to do nothing at all while running,
+        # which on the one step that never ends left the keyboard with no way
+        # out of what the keyboard had started.
+        r.bind("<Control-r>", lambda _: self._on_run_or_stop())
+        r.bind("<Control-R>", lambda _: self._on_run_or_stop())
         r.bind("<Control-s>", lambda _: self._save_config())
         r.bind("<Control-l>", lambda _: self._clear_logs())
         r.bind("<F5>", lambda _: self._refresh_ports())
