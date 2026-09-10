@@ -43,3 +43,10 @@ CLOCK_FLASH_EVERY=1
 # Flash the readings zone every N sensor updates (0 = never). Off by default:
 # it is a third of the screen, and the hourly full refresh already clears it.
 SENSOR_FLASH_EVERY=0
+
+# Log every FBInk call to kual.log, beside these scripts (1 = on, 0 = off).
+# Draws nothing differently — it only writes down what was drawn, which is the
+# only way to tell a panel that drew the wrong thing from one that drew the
+# right thing and had it come out wrong. A line per string, so leave it off
+# unless something on screen needs explaining.
+TRACE=0

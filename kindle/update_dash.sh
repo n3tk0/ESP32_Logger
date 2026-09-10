@@ -76,8 +76,19 @@ FULL_EVERY=60
 CLOCK_FLASH_EVERY=1
 SENSOR_FLASH_EVERY=0
 
+# Every FBInk call, into kual.log, and nothing drawn differently.
+#
+# THE PANEL IS THE ONE RENDERER NOBODY CAN WATCH. The tests drive it against a
+# fake FBInk that records its argv, and a browser has a devtools pane — the
+# thing on the wall has neither, so a report that a cell "does not look right"
+# has no evidence behind it and is argued about from photographs. One line per
+# call is the difference between guessing and reading.
+#
+# Off by default: it is a line per string, sixty a redraw.
+TRACE=0
+
 conf_keys() {
-    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY"
+    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE"
 }
 
 # What each key means, for `settings.sh show` and for dash.conf's comments.
@@ -92,6 +103,7 @@ conf_help() {
         FULL_EVERY)         echo "Minutes between whole-screen refreshes" ;;
         CLOCK_FLASH_EVERY)  echo "Flash the clock zone every N clock updates (0 = never)" ;;
         SENSOR_FLASH_EVERY) echo "Flash the readings zone every N sensor updates (0 = never)" ;;
+        TRACE)              echo "Log every FBInk call to kual.log (1 = on)" ;;
         *)                  echo "" ;;
     esac
 }
@@ -208,6 +220,8 @@ conf_valid() {
             # Zero disables the two flash counters; every other key needs a tier
             # that actually comes round.
             case "$k" in
+                # A switch, not a tier: 0 or 1, and nothing in between to mean.
+                TRACE) [ "$v" -le 1 ] ;;
                 CLOCK_FLASH_EVERY|SENSOR_FLASH_EVERY) [ "$v" -le 1440 ] ;;
                 *) [ "$v" -ge 1 ] && [ "$v" -le 1440 ] ;;
             esac
@@ -508,7 +522,12 @@ zones_derive() {
 # The `--` before a string is not decoration: the outdoor temperature is
 # regularly "-2.4", and without it FBInk reads that as options.
 
-fb() { fbink "$@" 2>/dev/null; }
+fb() {
+    # stderr, so kual-run.sh's own redirection carries it into kual.log next to
+    # the scripts, where a USB cable can read it.
+    [ "${TRACE:-0}" = "1" ] && printf 'fbink %s\n' "$*" >&2
+    fbink "$@" 2>/dev/null
+}
 
 # ── FBInk's px is not the CSS px ─────────────────────────────────────────────
 #

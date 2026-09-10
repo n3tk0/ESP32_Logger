@@ -830,6 +830,21 @@ renderers at once. `/kindle/data` carries `FC_ICON` and `FC0..2_ICON` beside
 the raw `FC_CODE`, and the panel does no mapping at all. `check_kindle_parity.py`
 holds every value that function can return to a BMP that exists.
 
+### Reading what the panel actually drew
+
+`TRACE=1` in `dash.conf` writes every FBInk call to `kual.log`, beside the
+scripts, and draws nothing differently.
+
+THE PANEL IS THE ONE RENDERER NOBODY CAN WATCH. The tests drive it against a
+fake FBInk that records its argv; a browser page has a devtools pane; the
+thing on the wall has neither. So a report that one cell "does not look right"
+arrives as a photograph, and a photograph cannot tell a panel that drew the
+wrong thing from one that drew the right thing and had it come out wrong —
+which are different bugs with different fixes, in different files. One line
+per call is the difference between reading and guessing.
+
+A line per string, so it is off by default.
+
 ### White text on a plate is drawn ON the plate
 
 `-O`/`--bgless` is right over a tier's own cleared white rectangle: FBInk's OT

@@ -632,6 +632,31 @@ check "$([ "$TX_TOP" -lt 200 ] && echo 0 || echo 1)" \
 check "$?" "every layout names its font's (ascent - descent) / em"
 RES_W=600; RES_H=800; load_layout
 
+# ── TRACE writes down what was drawn, and changes nothing about it ───────────
+#
+# The panel is the one renderer nobody can watch: the tests drive it against a
+# fake FBInk that records its argv, a browser has devtools, and the thing on
+# the wall has neither — so "that cell does not look right" gets argued about
+# from photographs. One line per call settles it.
+( reset_log
+  TRACE=0 draw_forecast_body 2>"$WORK/trace_off.txt"
+  off=$(calls); cp "$FBINK_LOG" "$WORK/calls_off.txt"
+  reset_log
+  TRACE=1 draw_forecast_body 2>"$WORK/trace_on.txt"
+  on=$(calls)
+  # The same calls, in the same order: a switch that changed the drawing would
+  # be a switch nobody could trust the output of.
+  cmp -s "$WORK/calls_off.txt" "$FBINK_LOG" || exit 1
+  [ "$off" = "$on" ] || exit 2
+  [ ! -s "$WORK/trace_off.txt" ] || exit 3
+  [ -s "$WORK/trace_on.txt" ] || exit 4
+  grep -q "^fbink " "$WORK/trace_on.txt" || exit 5
+  # And it is the real argv, not a summary: the pens are what a report about a
+  # cell drawn in the wrong colour turns on.
+  grep -q "^fbink .*-C WHITE -B BLACK" "$WORK/trace_on.txt" || exit 6
+  exit 0 )
+check "$?" "TRACE=1 logs every FBInk call and draws exactly the same panel"
+
 # ── 3. The payload is data, never a command ──────────────────────────────────
 check "$([ ! -f "$WORK/pwned" ] && echo 0 || echo 1)" \
       "a forecast summary containing a shell command did not run it"
