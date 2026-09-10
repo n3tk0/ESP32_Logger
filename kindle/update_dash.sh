@@ -87,8 +87,20 @@ SENSOR_FLASH_EVERY=0
 # Off by default: it is a line per string, sixty a redraw.
 TRACE=0
 
+# ── Power ────────────────────────────────────────────────────────────────────
+# awake | wifi | suspend. See the note over net_up(): a ten-year-old Kindle
+# looping a shell script with an associated radio draws 60-80 mA and lasts a
+# day and a half. Each step down turns off more of that, and asks for more
+# trust that the device comes back.
+POWER=awake
+# Seconds to wait for the radio to associate before fetching anyway.
+WIFI_WAIT=15
+# Stop the Amazon reader framework while the panel runs (1 = yes). Put back on
+# Stop. Another 10-15 mA, at the cost of the device not being a reader.
+GUI_STOP=0
+
 conf_keys() {
-    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE"
+    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP"
 }
 
 # What each key means, for `settings.sh show` and for dash.conf's comments.
@@ -104,6 +116,9 @@ conf_help() {
         CLOCK_FLASH_EVERY)  echo "Flash the clock zone every N clock updates (0 = never)" ;;
         SENSOR_FLASH_EVERY) echo "Flash the readings zone every N sensor updates (0 = never)" ;;
         TRACE)              echo "Log every FBInk call to kual.log (1 = on)" ;;
+        POWER)              echo "awake | wifi (radio off between fetches) | suspend (also sleeps to RAM)" ;;
+        WIFI_WAIT)          echo "Seconds to wait for the radio to associate" ;;
+        GUI_STOP)           echo "Stop the Amazon reader framework while running (1 = on)" ;;
         *)                  echo "" ;;
     esac
 }
@@ -208,6 +223,13 @@ conf_valid() {
     # $1=key $2=value → 0 if acceptable
     local k="$1" v="$2"
     case "$k" in
+        POWER)
+            # A word, not a number, and the only one — so it is tested before
+            # the numeric arm below, which would refuse every value it has.
+            case "$v" in
+                awake|wifi|suspend) return 0 ;;
+                *) return 1 ;;
+            esac ;;
         HOST)
             case "$v" in
                 ''|*' '*|*'"'*|*'`'*|*'$'*|*';'*|*'|'*|*'&'*) return 1 ;;
@@ -221,7 +243,10 @@ conf_valid() {
             # that actually comes round.
             case "$k" in
                 # A switch, not a tier: 0 or 1, and nothing in between to mean.
-                TRACE) [ "$v" -le 1 ] ;;
+                TRACE|GUI_STOP) [ "$v" -le 1 ] ;;
+                # Seconds, and a wait longer than the tick it sits inside is a
+                # panel that never draws.
+                WIFI_WAIT) [ "$v" -le 45 ] ;;
                 CLOCK_FLASH_EVERY|SENSOR_FLASH_EVERY) [ "$v" -le 1440 ] ;;
                 *) [ "$v" -ge 1 ] && [ "$v" -le 1440 ] ;;
             esac
@@ -245,7 +270,7 @@ conf_load() {
     for k in $(conf_keys); do
         eval "v=\$$k"
         case "$k" in
-            HOST) ;;
+            HOST|POWER) ;;
             *) v=$(strip_zeros "$v"); eval "$k=\$v" ;;
         esac
         if ! conf_valid "$k" "$v"; then
@@ -324,6 +349,137 @@ prevent_sleep() {
 
 restore_sleep() {
     lipc-set-prop com.lab126.powerd preventScreenSaver 0 2>/dev/null
+}
+
+# ── Power ────────────────────────────────────────────────────────────────────
+#
+# WHAT A DASHBOARD COSTS A TEN-YEAR-OLD KINDLE. The i.MX6SL never reaches a
+# hardware suspend while this script is looping, and the radio stays associated
+# whether or not anything is being fetched:
+#
+#   CPU awake in a shell loop      ~25-35 mA
+#   WiFi associated, idle          ~30-50 mA   (beacons, DTIM, the radio itself)
+#
+# — 60-80 mA against a cell that left the factory at 890-1420 mAh and, ten
+# years on, is likely 600-900. That is a day and a half. The panel is on a wall
+# and the cable is not.
+#
+# Three settings, each a superset of the one before, because each is a
+# different amount of trust in a ten-year-old device to wake up again:
+#
+#   POWER=awake     what this always did. Nothing is touched.
+#   POWER=wifi      the radio is off except around a fetch. The CPU stays up.
+#                   Roughly halves the draw; no way for it to fail beyond a
+#                   fetch that finds no network, which the script already
+#                   handles by keeping the last reading on screen.
+#   POWER=suspend   the above, and the wait between ticks is a real suspend to
+#                   RAM with an RTC alarm to come back. Under a milliamp while
+#                   it is down, which is where the days turn into weeks — and
+#                   the one that can leave a panel dark if the alarm does not
+#                   take, which is why suspend_for() refuses to go down
+#                   without reading the alarm back first.
+#
+# The tiers already say which minutes need the network: the clock is drawn
+# from the reader's own clock and needs nothing.
+
+# The nodes are variables so the tests can point them at a temp file. A test
+# that writes the real /sys/power/state suspends the machine running it.
+RTC_WAKEALARM="${RTC_WAKEALARM:-/sys/class/rtc/rtc0/wakealarm}"
+PM_STATE="${PM_STATE:-/sys/power/state}"
+
+net_up() {
+    [ "${POWER:-awake}" = "awake" ] && return 0
+    lipc-set-prop com.lab126.cmd wirelessEnable 1 2>/dev/null
+    # ASSOCIATION IS NOT INSTANT. The chip and the DHCP client want four to ten
+    # seconds, and a fetch fired before that fails against a network that is
+    # about to be there — which on the panel is a minute of "offline" for no
+    # reason. Waited for, not slept through: a reader that associates in three
+    # seconds should not pay for the one that takes nine.
+    local waited=0
+    while [ "$waited" -lt "${WIFI_WAIT:-15}" ]; do
+        case "$(lipc-get-prop com.lab126.wifid cmState 2>/dev/null)" in
+            *CONNECTED*) return 0 ;;
+        esac
+        nap 1
+        waited=$((waited + 1))
+    done
+    # Out of patience. The fetch is still attempted: cmState is a property of a
+    # daemon, and a wrong answer from it is not a reason to skip a request that
+    # might work.
+    return 1
+}
+
+net_down() {
+    [ "${POWER:-awake}" = "awake" ] && return 0
+    lipc-set-prop com.lab126.cmd wirelessEnable 0 2>/dev/null
+    return 0
+}
+
+# ── The Amazon framework ─────────────────────────────────────────────────────
+#
+# A Kindle running as a panel is still running the reader: the Java VM (cvm),
+# the indexer, the search service, the touch UI. None of it is looked at and it
+# costs another 10-15 mA of the 25-35 the CPU draws at idle.
+#
+# STOPPED, NOT KILLED, and put back by cleanup(). Somebody who tries this and
+# does not like it presses Stop in KUAL and has their Kindle back; a killed
+# framework needs a reboot. Off by default for the same reason: it is the
+# setting that makes the device stop being a reader.
+gui_stop() {
+    [ "${GUI_STOP:-0}" = "1" ] || return 0
+    GUI_STOPPED=0
+    if stop lab126_gui >/dev/null 2>&1; then
+        GUI_STOPPED=1
+    elif killall -STOP cvm 2>/dev/null; then
+        GUI_STOPPED=2
+    fi
+    return 0
+}
+
+gui_restore() {
+    case "${GUI_STOPPED:-0}" in
+        1) start lab126_gui >/dev/null 2>&1 ;;
+        2) killall -CONT cvm 2>/dev/null ;;
+    esac
+    GUI_STOPPED=0
+    return 0
+}
+
+# Does this minute's work need the network at all?
+needs_net() {
+    case " $1 " in
+        *" full "*|*" sensors "*|*" forecast "*|*" chart "*) return 0 ;;
+    esac
+    return 1
+}
+
+# Suspend to RAM for $1 seconds. Non-zero if it did not happen, and the caller
+# falls back to an ordinary sleep.
+#
+# THE ALARM IS READ BACK BEFORE THE MACHINE GOES DOWN. Everything else here is
+# recoverable — a failed fetch keeps the last reading, a failed draw comes back
+# next minute — but a suspend with no alarm behind it is a panel that stays
+# dark until somebody presses the power button. It is the one place in this
+# script that can end the dashboard rather than degrade it.
+suspend_for() {
+    local want="$1" now alarm back
+    # Not worth the transition, and short values are where a rounding error
+    # turns into an alarm in the past.
+    [ "$want" -ge "${SUSPEND_MIN:-5}" ] 2>/dev/null || return 1
+    [ -w "$RTC_WAKEALARM" ] && [ -w "$PM_STATE" ] || return 1
+
+    now=$(date +%s)
+    alarm=$((now + want))
+    # Cleared first: writing an alarm over a pending one is rejected by the
+    # driver rather than replacing it, so the second write would be the one
+    # that silently did nothing.
+    echo 0 > "$RTC_WAKEALARM" 2>/dev/null || return 1
+    echo "$alarm" > "$RTC_WAKEALARM" 2>/dev/null || return 1
+    back=$(cat "$RTC_WAKEALARM" 2>/dev/null)
+    [ "$back" = "$alarm" ] || return 1
+
+    echo mem > "$PM_STATE" 2>/dev/null || return 1
+    return 0
 }
 
 # ── Font selection ───────────────────────────────────────────────────────────
@@ -1491,6 +1647,11 @@ cleanup() {
     # made Stop look like it had failed.
     [ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null
     restore_sleep
+    # The radio goes back on whatever POWER was set to: Stop hands the device
+    # back to its owner, and handing it back with no network is a Kindle that
+    # looks broken.
+    [ "${POWER:-awake}" = "awake" ] || lipc-set-prop com.lab126.cmd wirelessEnable 1 2>/dev/null
+    gui_restore
     rm -rf "$TMP"
     rm -f /tmp/dash.pid
     exit 0
@@ -1523,6 +1684,13 @@ nap_to_minute() {
     local delay=$(( 60 - sec ))
     # At :00 exactly, wait the whole minute rather than ticking twice for it.
     [ "$delay" -le 0 ] && delay=60
+    # A real suspend where it is asked for and possible, an ordinary sleep
+    # where it is not. suspend_for() returns non-zero rather than risking a
+    # machine that does not come back, so this is the fallback and not an
+    # error path.
+    if [ "${POWER:-awake}" = "suspend" ]; then
+        suspend_for "$delay" && return 0
+    fi
     nap "$delay"
 }
 
@@ -1560,6 +1728,7 @@ conf_init
 conf_load
 font_setup || echo "Continuing without text." >&2
 prevent_sleep
+gui_stop
 
 # A layout BEFORE the first fetch, so no drawing path can run without one.
 # RES_W and RES_H come from the collector, so this falls back to 600x800 and
@@ -1567,6 +1736,7 @@ prevent_sleep
 # answers.
 load_layout
 
+net_up
 if fetch_data; then
     load_data
     fetch_graph
@@ -1581,6 +1751,10 @@ fi
 # One tick a minute; the tiers decide what that tick costs.
 MINUTE=0
 while true; do
+    # AT THE TOP, not after the work. The tick body below has `continue` in it
+    # in four places, and a radio turned off after them is a radio left on for
+    # the rest of the day on exactly the paths that took a shortcut.
+    net_down
     nap_to_minute
     MINUTE=$((MINUTE + 1))
     # The reader's own clock, in the collector's chosen format. The format is
@@ -1604,6 +1778,10 @@ while true; do
     else
         TIERS=$(plan_minute "$MINUTE")
     fi
+
+    # The clock is drawn from the reader's own clock, so most minutes need no
+    # network at all — which is the whole of where the battery goes.
+    needs_net "$TIERS" && net_up
 
     # ── Nothing to draw yet ─────────────────────────────────────────────────
     # No payload has ever parsed, so every reading is empty. Keep the reason on

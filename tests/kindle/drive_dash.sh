@@ -104,6 +104,20 @@ cat > "$BIN/ifconfig" <<'EOF'
 echo "wlan0     Link encap:Ethernet"
 echo "          inet addr:10.9.9.7  Bcast:10.9.9.255  Mask:255.255.255.0"
 EOF
+# lipc — the Kindle's own property bus, which the power settings drive. The
+# fakes record every call and answer cmState from a file the tests write, so
+# association can be made to take a while, or never.
+cat > "$BIN/lipc-set-prop" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "$LIPC_LOG"
+exit 0
+EOF
+cat > "$BIN/lipc-get-prop" <<'EOF'
+#!/bin/sh
+printf 'get %s\n' "$*" >> "$LIPC_LOG"
+[ -f "$WIFI_STATE" ] && cat "$WIFI_STATE"
+exit 0
+EOF
 chmod +x "$BIN"/*
 PATH="$BIN:$PATH"
 export PATH
@@ -111,6 +125,20 @@ export PATH
 FBINK_LOG="$WORK/fbink.log"
 export FBINK_LOG
 : > "$FBINK_LOG"
+
+LIPC_LOG="$WORK/lipc.log"
+WIFI_STATE="$WORK/wifi_state"
+export LIPC_LOG WIFI_STATE
+: > "$LIPC_LOG"
+echo "CONNECTED" > "$WIFI_STATE"
+
+# The two kernel nodes suspend_for() writes, pointed at files. A test that
+# writes the real /sys/power/state suspends the machine running it.
+RTC_WAKEALARM="$WORK/wakealarm"
+PM_STATE="$WORK/pm_state"
+export RTC_WAKEALARM PM_STATE
+: > "$RTC_WAKEALARM"
+: > "$PM_STATE"
 
 # A font, because -t/--truetype needs a file that exists.
 mkdir -p "$WORK/fonts"
@@ -656,6 +684,110 @@ RES_W=600; RES_H=800; load_layout
   grep -q "^fbink .*-h -C BLACK -B WHITE" "$WORK/trace_on.txt" || exit 6
   exit 0 )
 check "$?" "TRACE=1 logs every FBInk call and draws exactly the same panel"
+
+# ── Power: the radio, and the suspend ────────────────────────────────────────
+#
+# A ten-year-old Kindle looping a shell script with an associated radio draws
+# 60-80 mA against a cell that is probably down to 600-900 mAh. Most minutes on
+# this panel need no network at all — the clock comes from the reader's own
+# clock — so most minutes should not be paying for one.
+lipc_reset() { : > "$LIPC_LOG"; }
+
+# awake changes nothing. It is the default, and the setting exists so that
+# somebody who does not want any of this is not given it.
+( lipc_reset
+  POWER=awake net_up
+  POWER=awake net_down
+  [ ! -s "$LIPC_LOG" ] || exit 1 )
+check "$?" "POWER=awake touches the radio not at all"
+
+( lipc_reset
+  echo "CONNECTED" > "$WIFI_STATE"
+  POWER=wifi net_up || exit 1
+  grep -q "wirelessEnable 1" "$LIPC_LOG" || exit 2
+  POWER=wifi net_down
+  grep -q "wirelessEnable 0" "$LIPC_LOG" || exit 3
+  exit 0 )
+check "$?" "POWER=wifi turns the radio on for a fetch and off after it"
+
+# Association is not instant: four to ten seconds for the chip and DHCP. Waited
+# for rather than slept through, and given up on rather than waited for ever.
+( lipc_reset
+  echo "SEARCHING" > "$WIFI_STATE"
+  start=$(date +%s)
+  POWER=wifi WIFI_WAIT=2 net_up && exit 1        # it must report the timeout
+  [ $(( $(date +%s) - start )) -ge 2 ] || exit 2 # and it must actually wait
+  grep -q "cmState" "$LIPC_LOG" || exit 3
+  exit 0 )
+check "$?" "and gives the radio a bounded wait to associate, not an unbounded one"
+
+# Which minutes need it at all — the whole of where the battery goes.
+( needs_net "clock" && exit 1
+  needs_net "" && exit 2
+  needs_net "sensors clock" || exit 3
+  needs_net "chart" || exit 4
+  needs_net "forecast" || exit 5
+  needs_net "full" || exit 6
+  exit 0 )
+check "$?" "a clock-only minute needs no network; every other tier does"
+
+# ── The suspend, which is the one that can end the dashboard ─────────────────
+#
+# Everything else here degrades: a failed fetch keeps the last reading, a
+# failed draw comes back next minute. A suspend with no alarm behind it is a
+# panel that stays dark until somebody presses the power button.
+( : > "$PM_STATE"; : > "$RTC_WAKEALARM"
+  suspend_for 45 || exit 1
+  [ "$(cat "$PM_STATE")" = "mem" ] || exit 2
+  # The alarm is in the future, by about what was asked for.
+  now=$(date +%s); a=$(cat "$RTC_WAKEALARM")
+  [ "$a" -gt "$now" ] || exit 3
+  [ $(( a - now )) -le 46 ] || exit 4
+  exit 0 )
+check "$?" "suspend_for sets an RTC alarm ahead of itself and then suspends"
+
+# A node that takes the write and does not keep it — the failure that leaves a
+# device asleep with nothing to wake it.
+#
+# THE REAL FUNCTION, not a copy of it here. /dev/null is writable and reads
+# back empty, which is exactly the shape of that failure, and driving the copy
+# instead would be a check that passes whatever suspend_for() does.
+( : > "$PM_STATE"
+  RTC_WAKEALARM=/dev/null suspend_for 45 && exit 1
+  [ ! -s "$PM_STATE" ] || exit 2      # and nothing was suspended
+  exit 0 )
+check "$?" "an alarm that does not read back stops it going down at all"
+
+( : > "$PM_STATE"
+  suspend_for 2 && exit 1             # under SUSPEND_MIN
+  [ ! -s "$PM_STATE" ] || exit 2
+  exit 0 )
+check "$?" "and a wait too short to be worth a transition is slept, not suspended"
+
+( : > "$PM_STATE"
+  RTC_WAKEALARM="$WORK/nope/wakealarm" suspend_for 45 && exit 1
+  [ ! -s "$PM_STATE" ] || exit 2
+  exit 0 )
+check "$?" "a device with no RTC alarm node never suspends"
+
+# Stop hands the Kindle back to its owner. With the radio off and the reader
+# framework stopped, "hands it back" has to mean putting both of them right.
+( body=$(sed -n '/^cleanup() {/,/^}/p' "$KDIR/update_dash.sh")
+  printf '%s' "$body" | grep -q "wirelessEnable 1" || exit 1
+  printf '%s' "$body" | grep -q "gui_restore" || exit 2
+  printf '%s' "$body" | grep -q "restore_sleep" || exit 3
+  exit 0 )
+check "$?" "Stop puts the radio back and restarts the framework it stopped"
+
+# And the framework stop is reversible rather than fatal: STOP/CONT or the
+# service, never a kill, because a killed cvm needs a reboot.
+( body=$(sed -n '/^gui_stop() {/,/^}/p' "$KDIR/update_dash.sh")
+  printf '%s' "$body" | grep -q -- "-STOP cvm" || exit 1
+  printf '%s' "$body" | grep -qE "killall +-(9|KILL)" && exit 2
+  body=$(sed -n '/^gui_restore() {/,/^}/p' "$KDIR/update_dash.sh")
+  printf '%s' "$body" | grep -q -- "-CONT cvm" || exit 3
+  exit 0 )
+check "$?" "and stops the reader framework in a way Stop can undo"
 
 # ── 3. The payload is data, never a command ──────────────────────────────────
 check "$([ ! -f "$WORK/pwned" ] && echo 0 || echo 1)" \

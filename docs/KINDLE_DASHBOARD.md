@@ -1139,6 +1139,63 @@ Today is marked by inverting the cell rather than outlining it: a filled block
 is the one mark that stays unambiguous after e-ink dithering, where a thin
 ring can read as a smudge.
 
+## What a dashboard costs the Kindle
+
+The i.MX6SL never reaches a hardware suspend while `update_dash.sh` is
+looping, and the radio stays associated whether or not anything is being
+fetched:
+
+| | |
+|---|---:|
+| CPU awake in a shell loop | ~25–35 mA |
+| WiFi associated, idle (beacons, DTIM, the radio) | ~30–50 mA |
+| Amazon's reader framework in the background | ~10–15 mA of the CPU's share |
+
+That is 60–80 mA against a cell that left the factory at 890–1420 mAh and, ten
+years on, is likely 600–900. A day and a half, on a panel that hangs on a wall
+with no cable.
+
+**Most minutes need none of it.** The clock is drawn from the reader's own
+clock — `CLOCK_EVERY=1` costs one e-ink update and no network at all — and the
+tiers already say which minutes do: `DATA_EVERY=5`, `GRAPH_EVERY=15`,
+`FORECAST_EVERY=30`. Four minutes in five, the radio is paying for nothing.
+
+`POWER` in `dash.conf` is three settings, each a superset of the one before,
+because each asks for more trust that a ten-year-old device comes back:
+
+| | | |
+|---|---|---:|
+| `awake` | what this always did; nothing is touched | 1–2 days |
+| `wifi` | the radio is off except around a fetch | ~3 days |
+| `suspend` | the above, and the wait between ticks is a real suspend to RAM with an RTC alarm | 5–7 days |
+
+`wifi` cannot fail in a way the panel does not already handle: a fetch that
+finds no network keeps the last reading on screen, which is what it does when
+the collector is down. Association is not instant — four to ten seconds for
+the chip and DHCP — so `net_up()` waits for `cmState` to say CONNECTED rather
+than sleeping a fixed guess, and gives up after `WIFI_WAIT` and tries the
+fetch anyway: a wrong answer from a daemon is not a reason to skip a request
+that might work.
+
+**`suspend` is the one that can end the dashboard rather than degrade it.**
+Everything else here recovers by itself; a suspend with no alarm behind it is
+a panel that stays dark until somebody presses the power button. So
+`suspend_for()` clears the alarm, writes it, **reads it back**, and refuses to
+go down unless the value stuck — and `nap_to_minute()` treats that refusal as
+the ordinary path, falling back to a plain sleep. `RTC_WAKEALARM` and
+`PM_STATE` are variables so the tests can point them at a temp file; a test
+that wrote the real `/sys/power/state` would suspend the machine running it.
+
+`GUI_STOP=1` stops Amazon's reader framework — `stop lab126_gui`, or
+`killall -STOP cvm` where that service is not there. **Stopped, not killed**,
+and put back by `cleanup()`: somebody who tries it and does not like it presses
+Stop in KUAL and has their Kindle back, where a killed `cvm` needs a reboot.
+Off by default, because it is the setting that makes the device stop being a
+reader.
+
+Pressing Stop puts the radio back on whatever `POWER` was set to. Handing the
+device back to its owner with no network is a Kindle that looks broken.
+
 ## TLS
 
 The forecast client uses `setInsecure()`, consistent with `HttpExporter` and

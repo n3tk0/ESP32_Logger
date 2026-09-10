@@ -50,3 +50,25 @@ SENSOR_FLASH_EVERY=0
 # right thing and had it come out wrong. A line per string, so leave it off
 # unless something on screen needs explaining.
 TRACE=0
+
+# ── Battery ──────────────────────────────────────────────────────────────────
+# awake   | what this always did: the CPU loops and the radio stays associated,
+#           about 60-80 mA, which on a ten-year-old cell is a day and a half.
+# wifi    | the radio is off except around a fetch. Roughly halves the draw,
+#           and cannot fail in a way the panel does not already handle.
+# suspend | the above, and the wait between ticks is a real suspend to RAM with
+#           an RTC alarm to come back — under a milliamp while it is down.
+#           This is the one that can leave the panel dark if the alarm does not
+#           take, so the script reads the alarm back before it goes down and
+#           falls back to an ordinary sleep if it did not stick. Try `wifi`
+#           first, and `suspend` when you are ready to be near the device.
+POWER=awake
+
+# Seconds to wait for the radio to associate before fetching anyway. Four to
+# ten is normal for this chip and DHCP; the fetch is attempted either way.
+WIFI_WAIT=15
+
+# Stop the Amazon reader framework while the panel runs (1 = yes, 0 = no).
+# Another 10-15 mA. Put back when you press Stop in KUAL — but while it is on,
+# the Kindle is not a reader.
+GUI_STOP=0
