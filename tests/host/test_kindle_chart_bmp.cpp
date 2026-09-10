@@ -105,21 +105,32 @@ static uint16_t le16(const uint8_t* p) {
     return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
 }
 
+// ── The sizes the firmware actually serves ───────────────────────────────────
+// ASKED FOR, NOT WRITTEN DOWN. Every call below passed a literal 560x200 and
+// 1000x360, and stayed green when the chart grew to 220 and 396 — proving the
+// 4-bit packing, the header arithmetic and the chunk-boundary invariance for
+// heights no device produces, and never once rendering the shipped ones. The
+// margins at 220 no longer divide exactly, which is precisely the arithmetic a
+// suite pinned to the old height cannot see.
+static const uint16_t LO_W = ChartBmp::imageW(600),  LO_H = ChartBmp::imageH(600);
+static const uint16_t HI_W = ChartBmp::imageW(1072), HI_H = ChartBmp::imageH(1072);
+static const uint32_t LO_ROW = (uint32_t)LO_W / 2, HI_ROW = (uint32_t)HI_W / 2;
+
 static void test_header_is_a_valid_4bit_bmp() {
     uint8_t h[KD_BMP_HEADER_SIZE];
-    const size_t n = writeBmpHeader(h, 560, 200);
+    const size_t n = writeBmpHeader(h, LO_W, LO_H);
     CHECK_EQ((int)n, (int)KD_BMP_HEADER_SIZE);
 
     CHECK_EQ((int)h[0], (int)'B');
     CHECK_EQ((int)h[1], (int)'M');
 
-    const uint32_t rowBytes  = 560 / 2;
-    const uint32_t pixels    = rowBytes * 200;
+    const uint32_t rowBytes  = LO_ROW;
+    const uint32_t pixels    = rowBytes * LO_H;
     CHECK_EQ((long)le32(h + 2),  (long)(KD_BMP_HEADER_SIZE + pixels));  // file size
     CHECK_EQ((long)le32(h + 10), (long)KD_BMP_HEADER_SIZE);             // pixel offset
     CHECK_EQ((long)le32(h + 14), 40L);                                  // info header
-    CHECK_EQ((long)le32(h + 18), 560L);                                 // width
-    CHECK_EQ((long)le32(h + 22), 200L);                                 // height, +ve = bottom-up
+    CHECK_EQ((long)le32(h + 18), (long)LO_W);                                 // width
+    CHECK_EQ((long)le32(h + 22), (long)LO_H);                                 // height, +ve = bottom-up
     CHECK_EQ((int)le16(h + 26), 1);                                     // planes
     CHECK_EQ((int)le16(h + 28), 4);                                     // bits per pixel
     CHECK_EQ((long)le32(h + 30), 0L);                                   // BI_RGB
@@ -142,11 +153,11 @@ static void test_row_bytes_are_exact() {
     ChartBmpCtx c{};
     fillCtx(c, true);
 
-    c.init(560, 200);
-    CHECK_EQ((int)c.rowBytes, 280);
-    CHECK_EQ((int)(c.rowBytes * 2), 560);
+    c.init(LO_W, LO_H);
+    CHECK_EQ((int)c.rowBytes, (int)LO_ROW);
+    CHECK_EQ((int)(c.rowBytes * 2), (int)LO_W);
 
-    c.init(1000, 360);
+    c.init(HI_W, HI_H);
     CHECK_EQ((int)c.rowBytes, 500);
     CHECK((size_t)c.rowBytes <= KD_BMP_MAX_ROW_BYTES);
 }
@@ -155,9 +166,9 @@ static void test_row_bytes_are_exact() {
 // The property that matters
 // ---------------------------------------------------------------------------
 static void test_chunking_is_transparent() {
-    const std::vector<uint8_t> ref = renderWith(4096, true, 560, 200);
+    const std::vector<uint8_t> ref = renderWith(4096, true, LO_W, LO_H);
 
-    const uint32_t expect = (uint32_t)KD_BMP_HEADER_SIZE + 280u * 200u;
+    const uint32_t expect = (uint32_t)KD_BMP_HEADER_SIZE + LO_ROW * (uint32_t)LO_H;
     CHECK_EQ((long)ref.size(), (long)expect);
 
     // 1 byte at a time is the extreme the old code could not survive: smaller
@@ -165,7 +176,7 @@ static void test_chunking_is_transparent() {
     // 117 and 119 straddle the header boundary; 279 and 281 straddle a row.
     const size_t chunks[] = {1, 2, 3, 7, 64, 117, 118, 119, 279, 280, 281, 512, 1436, 65536};
     for (size_t c : chunks) {
-        const std::vector<uint8_t> got = renderWith(c, true, 560, 200);
+        const std::vector<uint8_t> got = renderWith(c, true, LO_W, LO_H);
         CHECK_EQ((long)got.size(), (long)ref.size());
         CHECK(got == ref);
     }
@@ -174,11 +185,11 @@ static void test_chunking_is_transparent() {
 // The same, at the resolution the Paperwhite uses — where a row is 500 bytes
 // and a single 1436-byte send spans nearly three of them.
 static void test_chunking_is_transparent_at_high_res() {
-    const std::vector<uint8_t> ref = renderWith(8192, true, 1000, 360);
-    CHECK_EQ((long)ref.size(), (long)(KD_BMP_HEADER_SIZE + 500u * 360u));
+    const std::vector<uint8_t> ref = renderWith(8192, true, HI_W, HI_H);
+    CHECK_EQ((long)ref.size(), (long)(KD_BMP_HEADER_SIZE + HI_ROW * (uint32_t)HI_H));
 
     const size_t chunks[] = {1, 5, 118, 499, 500, 501, 1436, 4096};
-    for (size_t c : chunks) CHECK(renderWith(c, true, 1000, 360) == ref);
+    for (size_t c : chunks) CHECK(renderWith(c, true, HI_W, HI_H) == ref);
 }
 
 // The image says how long it is, and it has to be telling the truth.
@@ -196,7 +207,7 @@ static void test_chunking_is_transparent_at_high_res() {
 // and h, begin() from rowBytes and H), checked against a third: the bytes that
 // actually came out.
 static void test_the_declared_size_is_the_size_that_is_sent() {
-    struct { uint16_t w, h; } sizes[] = { {560, 200}, {1000, 360} };
+    struct { uint16_t w, h; } sizes[] = { {LO_W, LO_H}, {HI_W, HI_H} };
     for (auto& s : sizes) {
         const std::vector<uint8_t> img = renderWith(1436, true, s.w, s.h);
         CHECK_EQ((long)le32(img.data() + 2), (long)img.size());
@@ -210,12 +221,12 @@ static void test_the_declared_size_is_the_size_that_is_sent() {
 // produced one repeated row, every test above would pass while serving the
 // wrong row for every request.
 static void test_rows_are_not_all_identical() {
-    const std::vector<uint8_t> img = renderWith(4096, true, 560, 200);
+    const std::vector<uint8_t> img = renderWith(4096, true, LO_W, LO_H);
     const uint8_t* px = img.data() + KD_BMP_HEADER_SIZE;
 
     int distinct = 0;
-    for (int r = 1; r < 200; r++)
-        if (memcmp(px + (size_t)r * 280, px + (size_t)(r - 1) * 280, 280) != 0)
+    for (uint16_t r = 1; r < LO_H; r++)
+        if (memcmp(px + (size_t)r * LO_ROW, px + (size_t)(r - 1) * LO_ROW, LO_ROW) != 0)
             distinct++;
     CHECK(distinct > 5);
 }
@@ -223,9 +234,9 @@ static void test_rows_are_not_all_identical() {
 // A collector with no indoor sensor configured still has to produce a picture,
 // not a division by zero or an empty body.
 static void test_renders_without_indoor_data() {
-    const std::vector<uint8_t> img = renderWith(1436, false, 560, 200);
-    CHECK_EQ((long)img.size(), (long)(KD_BMP_HEADER_SIZE + 280u * 200u));
-    CHECK(renderWith(1, false, 560, 200) == img);
+    const std::vector<uint8_t> img = renderWith(1436, false, LO_W, LO_H);
+    CHECK_EQ((long)img.size(), (long)(KD_BMP_HEADER_SIZE + LO_ROW * (uint32_t)LO_H));
+    CHECK(renderWith(1, false, LO_W, LO_H) == img);
 }
 
 // Nothing reported at all: every hour empty. lo/hi start at ±1e9 and stay
@@ -239,11 +250,11 @@ static void test_survives_a_completely_empty_ring() {
         rd.ctx.tOut[i].count = 0;
         rd.ctx.tIn[i].count  = 0;
     }
-    rd.ctx.init(560, 200);
+    rd.ctx.init(LO_W, LO_H);
     rd.begin();
 
     CHECK(rd.ctx.span > 0.0f);
-    CHECK_EQ((long)rd.total, (long)(KD_BMP_HEADER_SIZE + 280u * 200u));
+    CHECK_EQ((long)rd.total, (long)(KD_BMP_HEADER_SIZE + LO_ROW * (uint32_t)LO_H));
 
     std::vector<uint8_t> buf(600);
     size_t got = 0;

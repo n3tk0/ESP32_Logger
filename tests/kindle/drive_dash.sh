@@ -110,12 +110,34 @@ EOF
 cat > "$BIN/lipc-set-prop" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "$LIPC_LOG"
+printf 'lipc %s\n' "$*" >> "$SYS_LOG"
+# The one firmware difference nothing else can see: com.lab126.cmd is part of
+# the reader framework on some readers, so with it stopped the set has nobody
+# to answer it. Touching this file is how a test says "this is that reader".
+[ -f "$LIPC_FAIL" ] && exit 1
 exit 0
 EOF
 cat > "$BIN/lipc-get-prop" <<'EOF'
 #!/bin/sh
 printf 'get %s\n' "$*" >> "$LIPC_LOG"
 [ -f "$WIFI_STATE" ] && cat "$WIFI_STATE"
+exit 0
+EOF
+# upstart and the signal, which is how the reader framework is stopped and put
+# back. Both write to the SAME log as lipc-set-prop, because the thing worth
+# asserting about them is the ORDER: the framework serves the radio on the
+# firmware above, so a restore that reaches the radio first restores nothing.
+for t in start stop; do
+    cat > "$BIN/$t" <<EOF
+#!/bin/sh
+printf '$t %s\n' "\$*" >> "\$SYS_LOG"
+[ -f "\$GUI_NO_UPSTART" ] && exit 1
+exit 0
+EOF
+done
+cat > "$BIN/killall" <<'EOF'
+#!/bin/sh
+printf 'killall %s\n' "$*" >> "$SYS_LOG"
 exit 0
 EOF
 chmod +x "$BIN"/*
@@ -128,16 +150,26 @@ export FBINK_LOG
 
 LIPC_LOG="$WORK/lipc.log"
 WIFI_STATE="$WORK/wifi_state"
-export LIPC_LOG WIFI_STATE
+SYS_LOG="$WORK/sys.log"
+LIPC_FAIL="$WORK/lipc_fail"
+GUI_NO_UPSTART="$WORK/no_upstart"
+export LIPC_LOG WIFI_STATE SYS_LOG LIPC_FAIL GUI_NO_UPSTART
 : > "$LIPC_LOG"
+: > "$SYS_LOG"
+rm -f "$LIPC_FAIL" "$GUI_NO_UPSTART"
 echo "CONNECTED" > "$WIFI_STATE"
 
-# The two kernel nodes suspend_for() writes, pointed at files. A test that
-# writes the real /sys/power/state suspends the machine running it.
+# The three kernel nodes suspend_for() reads and writes, pointed at files. A
+# test that writes the real /sys/power/state suspends the machine running it.
+# since_epoch is the RTC's own clock, which is the one the alarm is measured
+# against — a test can set it to a number the system clock will never be, which
+# is the only way to tell the two timebases apart.
 RTC_WAKEALARM="$WORK/wakealarm"
+RTC_SINCE_EPOCH="$WORK/since_epoch"
 PM_STATE="$WORK/pm_state"
-export RTC_WAKEALARM PM_STATE
+export RTC_WAKEALARM RTC_SINCE_EPOCH PM_STATE
 : > "$RTC_WAKEALARM"
+: > "$RTC_SINCE_EPOCH"
 : > "$PM_STATE"
 
 # A font, because -t/--truetype needs a file that exists.
@@ -279,7 +311,7 @@ CH_H4W=1500
 CH_L=40
 CH_R=556
 CH_T=10
-CH_B=174
+CH_B=194
 CH_NOTE=""
 LBL_KEY_OUT="outside mean"
 LBL_KEY_BAND="shaded band = hourly low to high"
@@ -776,14 +808,130 @@ check "$?" "and a wait too short to be worth a transition is slept, not suspende
   exit 0 )
 check "$?" "a device with no RTC alarm node never suspends"
 
+# THE ALARM IS A NUMBER IN THE RTC'S TIMEBASE, NOT THE SYSTEM CLOCK'S. The
+# kernel compares this node against the RTC; `date +%s` reads the system clock.
+# They agree only while the RTC runs in UTC, and on a reader whose does not, an
+# absolute alarm computed from `date` lands hours away — a panel dark until it
+# comes round, or one waking on every tick. The read-back cannot see it: the
+# digits stick either way, so the guard that exists to refuse a suspend with no
+# alarm behind it would confirm exactly that suspend.
+#
+# since_epoch is that clock. Setting it to a number the system clock will never
+# hold is the only way to prove which one the sum was taken from.
+( : > "$PM_STATE"; : > "$RTC_WAKEALARM"
+  echo 1000 > "$RTC_SINCE_EPOCH"
+  suspend_for 60 || exit 1
+  [ "$(cat "$RTC_WAKEALARM")" = "1060" ] || exit 2
+  exit 0 )
+check "$?" "the wake alarm is set in the RTC's own timebase, not the system clock's"
+
+# A driver that does not publish since_epoch is not a driver to refuse to sleep
+# on: the system clock is the best answer left, and it is the right one on
+# every reader whose RTC is in UTC — which is all of the ones Amazon ships.
+( : > "$PM_STATE"; : > "$RTC_WAKEALARM"; : > "$RTC_SINCE_EPOCH"
+  now=$(date +%s)
+  suspend_for 60 || exit 1
+  back=$(cat "$RTC_WAKEALARM")
+  [ "$back" -ge $((now + 60)) ] && [ "$back" -le $((now + 65)) ] || exit 2
+  exit 0 )
+check "$?" "and falls back to the system clock where the RTC does not publish one"
+
 # Stop hands the Kindle back to its owner. With the radio off and the reader
 # framework stopped, "hands it back" has to mean putting both of them right.
-( body=$(sed -n '/^cleanup() {/,/^}/p' "$KDIR/update_dash.sh")
-  printf '%s' "$body" | grep -q "wirelessEnable 1" || exit 1
-  printf '%s' "$body" | grep -q "gui_restore" || exit 2
-  printf '%s' "$body" | grep -q "restore_sleep" || exit 3
+#
+# DRIVEN, NOT GREPPED. This read cleanup()'s source for the string
+# "wirelessEnable 1" and called that covered — so it went green on a cleanup()
+# that reached the radio before the framework that answers for it, and it went
+# RED the moment the same call moved behind a radio_set() helper. A test that
+# fails on a rename and passes on a wrong order is testing the spelling.
+sys_reset() { : > "$SYS_LOG"; : > "$LIPC_LOG"; }
+# Which line of the shared log a pattern first appears on, or nothing.
+sys_line() { grep -n -- "$1" "$SYS_LOG" 2>/dev/null | head -1 | cut -d: -f1; }
+
+( sys_reset
+  TMP="$WORK/cleanup-tmp"; RADIO_MARK="$TMP/radio-off"; GUI_MARK="$TMP/gui-stopped"
+  mkdir -p "$TMP"
+  POWER=wifi GUI_STOP=1 GUI_STOPPED=0 GUI_BLOCKED=0
+  gui_apply                                  # the framework goes down
+  net_down                                   # and the radio with it
+  sys_reset
+  ( DASH_PIDFILE="$WORK/cleanup.pid" cleanup ) >/dev/null 2>&1
+  g=$(sys_line 'start lab126_gui'); [ -n "$g" ] || g=$(sys_line 'killall -CONT')
+  r=$(sys_line 'wirelessEnable 1')
+  [ -n "$g" ] || exit 1                      # the framework came back
+  [ -n "$r" ] || exit 2                      # and so did the radio
+  # THE ORDER IS THE POINT. The framework answers com.lab126.cmd on the reader
+  # where GUI_STOP takes the radio down with it, so a radio restored first is
+  # a restore with nobody to hear it.
+  [ "$g" -lt "$r" ] || exit 3
+  [ -d "$TMP" ] && exit 4                    # and it cleared up after itself
   exit 0 )
-check "$?" "Stop puts the radio back and restarts the framework it stopped"
+check "$?" "Stop puts the framework back, then the radio, then tidies up"
+
+# And when nothing ran the trap at all. stop.sh sends SIGKILL ten seconds after
+# SIGTERM, so the dashboards whose cleanup() never runs are exactly the ones it
+# creates — wedged, OOM-killed, killed by hand. The markers under DASH_TMP are
+# what survives that, and stop.sh is what reads them.
+( sys_reset
+  st="$WORK/stopsh"; rm -rf "$st"; mkdir -p "$st"
+  echo 2 > "$st/gui-stopped"        # the VM was SIGSTOPped
+  : > "$st/radio-off"               # and the radio turned off
+  DASH_PIDFILE="$WORK/none.pid" DASH_TMP="$st" sh "$KDIR/stop.sh" >/dev/null 2>&1
+  g=$(sys_line 'killall -CONT'); r=$(sys_line 'wirelessEnable 1')
+  [ -n "$g" ] || exit 1
+  [ -n "$r" ] || exit 2
+  [ "$g" -lt "$r" ] || exit 3       # the framework first here too
+  [ -d "$st" ] && exit 4
+  exit 0 )
+check "$?" "stop.sh puts back what a dashboard that never ran its trap left"
+
+# From the markers, and only the markers. A reader on POWER=awake who has never
+# turned GUI_STOP on does not get their radio switched on by a script they
+# asked to stop.
+( sys_reset
+  st="$WORK/stopsh2"; rm -rf "$st"; mkdir -p "$st"
+  DASH_PIDFILE="$WORK/none.pid" DASH_TMP="$st" sh "$KDIR/stop.sh" >/dev/null 2>&1
+  [ -n "$(sys_line 'wirelessEnable 1')" ] && exit 1
+  [ -n "$(sys_line 'start lab126_gui')$(sys_line 'killall -CONT')" ] && exit 2
+  exit 0 )
+check "$?" "and turns on nothing the dashboard never turned off"
+
+# The radio this script turned off is the radio this script turns back on —
+# which is not the same question as what POWER says by then. POWER is re-read
+# every minute, and awake is the value that makes every path here return
+# without touching anything: switching back to it left the reader with no
+# network and nothing in the script that would ever restore it, Stop included.
+( sys_reset
+  TMP="$WORK/power-tmp"; RADIO_MARK="$TMP/radio-off"; mkdir -p "$TMP"
+  POWER=wifi RADIO_OFF=0
+  net_down
+  grep -q "wirelessEnable 0" "$LIPC_LOG" || exit 1
+  [ -f "$RADIO_MARK" ] || exit 2
+  sys_reset
+  POWER=awake power_apply
+  grep -q "wirelessEnable 1" "$LIPC_LOG" || exit 3
+  [ -f "$RADIO_MARK" ] && exit 4
+  # And having put it back, it does not keep putting it back every minute.
+  sys_reset
+  power_apply
+  [ -s "$LIPC_LOG" ] && exit 5
+  exit 0 )
+check "$?" "switching POWER back to awake turns the radio on again"
+
+# wifid answers with a word, and three of the words it can answer with contain
+# the one being looked for. A `*CONNECTED*` glob read DISCONNECTED as connected
+# — the exact answer the bounded wait exists to wait through — and fired the
+# fetch into an interface that was still coming up.
+( sys_reset
+  TMP="$WORK/wifi-tmp"; RADIO_MARK="$TMP/radio-off"; mkdir -p "$TMP"
+  for state in DISCONNECTED NOT_CONNECTED; do
+      echo "$state" > "$WIFI_STATE"
+      POWER=wifi WIFI_WAIT=1 net_up && exit 1
+  done
+  echo "CONNECTED" > "$WIFI_STATE"
+  POWER=wifi WIFI_WAIT=1 net_up || exit 2
+  exit 0 )
+check "$?" "DISCONNECTED is not read as CONNECTED"
 
 # And the framework stop is reversible rather than fatal: STOP/CONT or the
 # service, never a kill, because a killed cvm needs a reboot.
@@ -794,6 +942,82 @@ check "$?" "Stop puts the radio back and restarts the framework it stopped"
   printf '%s' "$body" | grep -q -- "-CONT cvm" || exit 3
   exit 0 )
 check "$?" "and stops the reader framework in a way Stop can undo"
+
+# GUI_STOP is in conf_keys(), so conf_load() re-reads it every minute and
+# conf_write() promises the reader "the dashboard picks this up within a
+# minute". It was acted on ONCE, before the loop: turning it on from Settings
+# did nothing at all, and turning it back off left the framework down until
+# Stop — which, with the framework down, is a menu entry that is not on screen.
+( sys_reset
+  TMP="$WORK/gui-tmp"; GUI_MARK="$TMP/gui-stopped"; mkdir -p "$TMP"
+  GUI_STOPPED=0 GUI_BLOCKED=0 POWER=awake
+  GUI_STOP=1 gui_apply
+  { sys_line 'stop lab126_gui' || sys_line 'killall -STOP'; } >/dev/null
+  [ -n "$(sys_line 'stop lab126_gui')$(sys_line 'killall -STOP')" ] || exit 1
+  [ -f "$GUI_MARK" ] || exit 2
+  sys_reset
+  GUI_STOP=0 gui_apply
+  [ -n "$(sys_line 'start lab126_gui')$(sys_line 'killall -CONT')" ] || exit 3
+  [ -f "$GUI_MARK" ] && exit 4
+  # Idempotent: a tick that changes nothing touches nothing.
+  sys_reset
+  gui_apply
+  [ -s "$SYS_LOG" ] && exit 5
+  exit 0 )
+check "$?" "GUI_STOP is applied every minute, both ways, and only on a change"
+
+# THE ONE COMBINATION THAT CAN LEAVE THE PANEL BLANK FOR A DAY. On firmware
+# where com.lab126.cmd is part of the reader framework, GUI_STOP takes the
+# radio's own control interface down with it — so POWER=wifi could turn the
+# radio off and never get it back, and every fetch for the rest of the run
+# would fail with nothing on the panel to say why. net_up() is the only place
+# that can tell the two firmwares apart, because it is the only one that asks.
+( sys_reset
+  TMP="$WORK/heal-tmp"; RADIO_MARK="$TMP/radio-off"; GUI_MARK="$TMP/gui-stopped"
+  mkdir -p "$TMP"
+  GUI_STOPPED=0 GUI_BLOCKED=0 POWER=wifi GUI_STOP=1
+  gui_apply
+  [ "${GUI_STOPPED:-0}" = "0" ] && exit 1
+  sys_reset
+  : > "$LIPC_FAIL"                        # com.lab126.cmd stops answering
+  echo "CONNECTED" > "$WIFI_STATE"
+  net_up >/dev/null 2>&1
+  rm -f "$LIPC_FAIL"
+  [ -n "$(sys_line 'start lab126_gui')$(sys_line 'killall -CONT')" ] || exit 2
+  [ "${GUI_BLOCKED:-0}" = "1" ] || exit 3
+  # And it stays back: re-applying the setting must not stop it again while the
+  # radio is still needed, or the next minute undoes the repair.
+  sys_reset
+  gui_apply
+  [ -n "$(sys_line 'stop lab126_gui')$(sys_line 'killall -STOP')" ] && exit 4
+  # ... but with nobody asking the radio for anything, the saving is still on
+  # offer, so awake gets it back.
+  sys_reset
+  POWER=awake gui_apply
+  [ -n "$(sys_line 'stop lab126_gui')$(sys_line 'killall -STOP')" ] || exit 5
+  exit 0 )
+check "$?" "a framework that takes the radio with it is put back, and stays back"
+
+# THE LOOP'S WIRING, WHICH IS THE ONE THING THIS FILE CANNOT DRIVE.
+# DASH_LIB_ONLY stops the source before MAIN, so every test here calls the
+# functions directly and nothing ever runs a tick. That is fine for what the
+# functions do and useless for whether they are called — and a setting that is
+# re-read every minute but applied only at startup looks exactly like one that
+# works, which is what GUI_STOP was for two commits. So the loop is read.
+( body=$(sed -n '/^while true; do/,/^done$/p' "$KDIR/update_dash.sh")
+  line() { printf '%s' "$body" | grep -n "^    $1\$" | head -1 | cut -d: -f1; }
+  n=$(line net_down); c=$(line conf_load)
+  pw=$(line power_apply); g=$(line gui_apply)
+  [ -n "$n" ] && [ -n "$c" ] && [ -n "$pw" ] && [ -n "$g" ] || exit 1
+  # After the read, not before it: applying last minute's value is not applying
+  # the setting.
+  [ "$c" -lt "$pw" ] && [ "$c" -lt "$g" ] || exit 2
+  # And the radio goes down at the TOP, before the nap — the tick body has
+  # `continue` in four places, and a radio turned off after them is a radio
+  # left on for the rest of the day on exactly the paths that took a shortcut.
+  [ "$n" -lt "$c" ] || exit 3
+  exit 0 )
+check "$?" "the loop re-reads the settings and then applies them"
 
 # ── 3. The payload is data, never a command ──────────────────────────────────
 check "$([ ! -f "$WORK/pwned" ] && echo 0 || echo 1)" \
@@ -1093,10 +1317,39 @@ check "$?" "and centred on both panels, not only the one whose numbers divide"
 ( bad=0
   # The bottom edge of the box FBInk actually draws for a design y and size.
   bot() { text_geom "$1" "$2"; echo $(( TX_TOP + TX_PX )); }
+  #
+  # AGAINST THE NEIGHBOUR'S DESIGN LINE, NOT ITS BOX. FBInk's box is a sixth
+  # taller than the type in it and centred on the line, so a quarter of it is
+  # the face's leading above the caps — and this design shares that leading on
+  # purpose, exactly as the page's line-height does: a 14 px caption sits over
+  # an 88 px number whose box legitimately starts above the caption's. Compared
+  # box against box, five places in the shipped layout "fail" and none of them
+  # is visible. What this loop is for is the coarse order — a section drawn
+  # into the next, a footer past the bottom edge, a chart over its own key —
+  # which is what re-tiling gets wrong and what no photograph can diagnose.
   le() { [ "$1" -le "$2" ] || { echo "  $4: $3 ends at $1, past $2" >&2; bad=1; }; }
 
   for res in 600x800 1072x1448; do
       RES_W=${res%x*}; RES_H=${res#*x}; load_layout
+
+      # ── The legacy block, which is the one nobody looks at ──────────────
+      # What update_dash.sh draws when the collector is running older firmware
+      # and sends no named places. It is the one arrangement the preview tool
+      # never renders and no photograph is ever taken of — and growing LAB_SZ,
+      # LEGACY_SUB_SZ and TEND_SZ by three px each put its heading two px
+      # inside the hero, its subtitle against the pressure line and, on the
+      # Paperwhite, its section label a pixel inside the indoor row. This loop
+      # covered only the zone layout, so all of it passed.
+      le "$(bot "$LAB_OUT_Y" "$LAB_SZ")"  "$LEGACY_HERO_Y" "the legacy heading" "$res"
+      le "$(bot "$LEGACY_HERO_Y" "$LEGACY_HERO_SZ")" "$LEGACY_SUB_Y" \
+         "the legacy hero" "$res"
+      le "$(bot "$LEGACY_SUB_Y" "$LEGACY_SUB_SZ")" "$PRES_Y" \
+         "the legacy subtitle" "$res"
+      le "$(bot "$PRES_Y" "$PRES_SZ")"    "$TEND_Y"   "the legacy pressure" "$res"
+      le "$(bot "$TEND_Y" "$TEND_SZ")"    "$RULE1_Y"  "the legacy tendency" "$res"
+      le "$RULE1_Y" "$LAB_IN_Y" "the legacy rule" "$res"
+      le "$(bot "$LAB_IN_Y" "$LAB_SZ")"   "$IN_Y"     "the legacy indoor heading" "$res"
+      le "$(bot "$IN_Y" "$IN_SZ")"        "$RULE2_Y"  "the legacy indoor row" "$res"
 
       # The top block: left column, then right, both above the chart's rule.
       le "$(bot "$TOP_Y" "$GROUP_LAB_SZ")" "$HERO_Y"   "the group label" "$res"
@@ -1108,6 +1361,9 @@ check "$?" "and centred on both panels, not only the one whose numbers divide"
          "$(( IN_VAL_Y + IN_VAL_SZ_1 - IN_VAL_SZ - GRID_LAB_SZ - 4 ))" \
          "the indoor heading" "$res"
       le "$(bot "$IN_VAL_Y" "$IN_VAL_SZ_1")" "$RULE2_Y" "the indoor row" "$res"
+      # The hairline between the columns runs the height of the block, so it
+      # must not outrun it into the chart's rule.
+      le "$(( TOP_Y + SEP_H ))" "$RULE2_Y" "the column hairline" "$res"
 
       # The chart, its caption and its key.
       le "$RULE2_Y" "$LAB_CHART_Y" "the chart's rule" "$res"
@@ -1432,6 +1688,36 @@ check "$([ "$(run_settings get HOST)" = "10.9.9.42" ] && echo 0 || echo 1)" \
 check "$(grep -q '^HOST=10.9.9.42' "$DASH_CONF" && echo 0 || echo 1)" \
       "and lands in dash.conf as a plain key=value"
 
+# The battery settings, as three named choices. `set POWER wifi` has always
+# worked; what did not was reaching it — kual-run.sh forwarded a fixed list of
+# commands and menu.json listed a fixed set of entries, and neither had grown
+# any of the three keys. The docs said "try wifi first", which on the device
+# meant a USB cable.
+( run_settings power wifi >/dev/null
+  [ "$(run_settings get POWER)" = "wifi" ] || exit 1
+  [ "$(run_settings get GUI_STOP)" = "0" ] || exit 2
+  run_settings power deep >/dev/null
+  [ "$(run_settings get POWER)" = "suspend" ] || exit 3
+  [ "$(run_settings get GUI_STOP)" = "1" ] || exit 4
+  # And back out again in one step, which is the half that has to work: it is
+  # the setting whose menu entry stops being on screen once it is on.
+  run_settings power awake >/dev/null
+  [ "$(run_settings get POWER)" = "awake" ] || exit 5
+  [ "$(run_settings get GUI_STOP)" = "0" ] || exit 6
+  exit 0 )
+check "$?" "power names the battery settings, and names a way back out of them"
+
+# The one that stops the reader framework says so before it does it, because
+# the menu it was pressed in goes with it.
+( out=$(run_settings power deep)
+  printf '%s' "$out" | grep -qi "reboot" || exit 1
+  run_settings power awake >/dev/null
+  exit 0 )
+check "$?" "and the deep setting says how to get the reader back"
+
+check "$(run_settings power nonsense >/dev/null 2>&1 && echo 1 || echo 0)" \
+      "an unknown battery setting is refused rather than written"
+
 run_settings set DATA_EVERY 7 >/dev/null
 check "$([ "$(run_settings get DATA_EVERY)" = "7" ] && echo 0 || echo 1)" \
       "an interval can be changed"
@@ -1577,12 +1863,26 @@ done
 # Every command the menu can send has to be one the dispatcher answers. A
 # renamed entry that falls through to "unknown command" is the same silence
 # this whole file exists to end.
+#
+# THE LIST IS READ OUT OF THE DISPATCHER, not written down here. This carried
+# its own copy of the seven commands kual-run.sh knew, which made it a second
+# place to remember — and the copy nothing executes is the one that goes stale.
+# It did, the moment the battery settings were given menu entries: the check
+# reported "power" as a command the dispatcher does not know, at a point where
+# the dispatcher had just learnt it.
+known=$(sed -n '/^case "\${1:-}" in$/,/^esac$/p' "$KDIR/kual-run.sh" |
+        sed -n 's/^    \([a-z|"]*\)).*/\1/p' | tr '|\n' '  ')
+case " $known " in
+    *" start "*|*" stop "*) ;;
+    *) echo "the dispatcher's command list did not parse: [$known]" >&2
+       known="" ;;
+esac
 unknown=""
 grep -o '"params": "kual\.sh [^"]*"' "$menu" | sed 's/.*kual\.sh //; s/"$//' |
 while read -r cmd; do
     set -- $cmd
-    case "$1" in
-        start|stop|show|find|next|reset|profile) ;;
+    case " $known " in
+        *" $1 "*) ;;
         *) echo "$1" >> "$WORK/unknown" ;;
     esac
 done

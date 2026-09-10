@@ -12,7 +12,7 @@ Rendered at 600×800 CSS px through a greyscale filter, which is how every
 layout decision in this document was checked. It is the current page: a two-column
 top block with no masthead — the outdoor headline and its grid on the left, the
 clock and the indoor row on the right — three-hourly rules in the chart, the
-month above the week strip, and the two manual repaint links in the footer. The page comes to **761 of the 800 px** available.
+month above the week strip, and the two manual repaint links in the footer. The page comes to **777 of the 800 px** available.
 
 The figures are synthetic. The **stylesheet is extracted from the `KD_S`/`KD_N`
 calls in `KindleDashboard.cpp`** at render time rather than kept as a copy, so
@@ -197,7 +197,7 @@ Load it on the reader and read the numbers off:
 
 Below 320 or above 2400 the build fails rather than rendering something that
 was never measured. All three values above are checked at the device's viewport
-before release: 761 of 810 at 600, 678 of 724 at 536, 1357 of 1448 at 1072, and
+before release: 778 of 810 at 600, 704 of 724 at 536, 1394 of 1448 at 1072, and
 no horizontal overflow at any of them.
 
 An earlier attempt at this got the chart wrong — the SVG kept its 600-px size
@@ -422,7 +422,7 @@ Three decisions, all of them about the medium:
   cut out of a dark field.
 - **It floats.** `.bw` is `float:right`, not flex — the same reason the whole
   page lays out in tables. It also means the badge costs no height: the page
-  measures 761 px of the 800 budget with it and without it.
+  measures 777 px of the 800 budget with it and without it.
 
 Its geometry goes through `kdPx()` like everything else, so it scales with
 `KINDLE_PAGE_W` down to a Kindle 4's 536 px. The condition is
@@ -1252,14 +1252,51 @@ the ordinary path, falling back to a plain sleep. `RTC_WAKEALARM` and
 that wrote the real `/sys/power/state` would suspend the machine running it.
 
 `GUI_STOP=1` stops Amazon's reader framework — `stop lab126_gui`, or
-`killall -STOP cvm` where that service is not there. **Stopped, not killed**,
-and put back by `cleanup()`: somebody who tries it and does not like it presses
-Stop in KUAL and has their Kindle back, where a killed `cvm` needs a reboot.
-Off by default, because it is the setting that makes the device stop being a
-reader.
+`killall -STOP cvm` where that service is not there. **Stopped, not killed**: a
+stopped job comes back with `start` and a SIGSTOPped VM with SIGCONT, where a
+killed `cvm` needs a reboot. Off by default, because it is the setting that
+makes the device stop being a reader.
 
-Pressing Stop puts the radio back on whatever `POWER` was set to. Handing the
-device back to its owner with no network is a Kindle that looks broken.
+**And it is the one setting KUAL cannot undo.** KUAL is a Kindlet, hosted by
+the framework this switches off, so "press Stop in KUAL" — the way back from
+everything else here — is not on the screen while it is on. An earlier version
+of this page said it was. The ways back are:
+
+- set `GUI_STOP=0` in `dash.conf` over USB. `gui_apply()` re-reads and
+  re-applies it every minute, exactly like every other key in `conf_keys()` —
+  it used to be read every minute and applied only at startup, which made
+  turning it on from Settings do nothing and turning it off do nothing until
+  Stop;
+- run `stop.sh`, which restores the framework itself rather than relying on the
+  dashboard's exit trap;
+- hold the power button until the reader reboots, which clears both forms.
+
+**On some firmware the framework also serves the radio.** `com.lab126.cmd` is
+what `net_up()` and `net_down()` talk to, and where it shares an upstart job
+with the reader, `GUI_STOP=1` plus `POWER=wifi` would turn the radio off and
+never get it back — every fetch failing for the rest of the run with nothing on
+the panel to say why. `net_up()` is the only place that can tell the two
+firmwares apart, because it is the only one that asks: if the radio cannot be
+set while the framework is stopped, the framework goes back, the radio is asked
+again, and `GUI_STOP` stays off for as long as anything needs the network. Ten
+milliamps is worth less than a dashboard that updates.
+
+**Stop hands the device back.** `cleanup()` restores the framework first and
+then the radio — that order, because the framework is what answers for the
+radio on the firmware above — and only restores a radio this script turned off,
+which is not the same question as what `POWER` says by the time Stop is
+pressed. Switching `POWER` back to `awake` mid-run used to strand the radio:
+`awake` is the value that makes every path return without touching anything,
+Stop included, so undoing the setting left the reader with no network and
+nothing that would restore it. `power_apply()` is what closes that.
+
+**And when nothing runs the trap at all.** `stop.sh` sends SIGKILL ten seconds
+after SIGTERM, so the dashboards whose `cleanup()` never runs are exactly the
+ones it creates — along with the wedged, the OOM-killed and the killed by hand.
+The dashboard writes what it took into `radio-off` and `gui-stopped` under its
+own temp directory, and `stop.sh` reads those and puts back precisely that:
+a reader on `POWER=awake` who never turned `GUI_STOP` on does not get their
+radio switched on by a script they asked to stop.
 
 ## TLS
 

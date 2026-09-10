@@ -146,6 +146,11 @@ case "${1:-}" in
     show|find|next|reset)
              run "Settings $1"     sh "$DIR/settings.sh" "$1" ;;
     profile) run "Settings profile ${2:-}" sh "$DIR/settings.sh" profile "${2:-normal}" ;;
+    power)   run "Settings power ${2:-}"   sh "$DIR/settings.sh" power   "${2:-awake}" ;;
+    # The general form, so a setting that has no menu entry of its own is still
+    # reachable from a device with no keyboard — every key in conf_keys() is
+    # validated by settings.sh before it is written.
+    set)     run "Settings set ${2:-} ${3:-}" sh "$DIR/settings.sh" set "${2:-}" "${3:-}" ;;
     "")      log "no command given"; say "ESP32 Dashboard: no command given"; exit 2 ;;
     *)       log "unknown command: $1"
              say "ESP32 Dashboard: unknown command $1"

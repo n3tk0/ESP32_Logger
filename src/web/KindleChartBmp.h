@@ -106,11 +106,20 @@ inline uint16_t imageW(uint16_t panelW) { return (panelW > 600) ? 1000 : 560; }
 inline uint16_t imageH(uint16_t panelW) { return (panelW > 600) ? 396 : 220; }
 
 /// The plot area inside that image, in image pixels. The margins are the
-/// 560x220 design's, scaled with the image.
+/// 560x220 design's, scaled with the image — so each divides by the design's
+/// own dimension, 560 across and 220 down.
+///
+/// THE VERTICAL PAIR DIVIDED BY 200 UNTIL THE CHART GREW. While the design was
+/// 200 tall that was the same arithmetic; at 220 it is a factor of 1.1, and the
+/// panel plotted its curve into 181 px where the page's SVG — which places its
+/// own margins at a flat kdPx(10) and kdPx(26) — used 184, one pixel lower and
+/// a percent and a half shorter. Two renderings of one chart, disagreeing by an
+/// amount no photograph would ever settle. check_kindle_parity.py compares
+/// GR_W/GR_H and not these, so nothing else was going to say so.
 inline int marginL(uint16_t w) { return w * 40 / 560; }
 inline int marginR(uint16_t w) { return w - w * 4 / 560; }
-inline int marginT(uint16_t h) { return h * 10 / 200; }
-inline int marginB(uint16_t h) { return h - h * 26 / 200; }
+inline int marginT(uint16_t h) { return h * 10 / 220; }
+inline int marginB(uint16_t h) { return h - h * 26 / 220; }
 
 }  // namespace ChartBmp
 

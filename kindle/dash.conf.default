@@ -69,6 +69,14 @@ POWER=awake
 WIFI_WAIT=15
 
 # Stop the Amazon reader framework while the panel runs (1 = yes, 0 = no).
-# Another 10-15 mA. Put back when you press Stop in KUAL — but while it is on,
-# the Kindle is not a reader.
+# Another 10-15 mA.
+#
+# READ THIS ONE BEFORE TURNING IT ON. KUAL is hosted BY the framework this
+# stops, so while it is on there is no menu to press Stop in — the way back
+# from every other setting here is the one thing this setting takes away. The
+# ways back are: set this to 0 over USB, which the dashboard picks up within a
+# minute like any other key; run stop.sh, which puts the framework back itself;
+# or hold the power button until the Kindle reboots. On firmware where the
+# framework also serves the radio, the dashboard notices the first time a fetch
+# cannot turn it on, puts the framework back, and says so in the log.
 GUI_STOP=0

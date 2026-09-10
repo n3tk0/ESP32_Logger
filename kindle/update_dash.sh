@@ -385,11 +385,52 @@ restore_sleep() {
 # The nodes are variables so the tests can point them at a temp file. A test
 # that writes the real /sys/power/state suspends the machine running it.
 RTC_WAKEALARM="${RTC_WAKEALARM:-/sys/class/rtc/rtc0/wakealarm}"
+RTC_SINCE_EPOCH="${RTC_SINCE_EPOCH:-/sys/class/rtc/rtc0/since_epoch}"
 PM_STATE="${PM_STATE:-/sys/power/state}"
+
+# WHETHER WE ARE THE ONES HOLDING THE RADIO DOWN, which is not the same
+# question as what POWER is set to. POWER is re-read every minute and can
+# change under us; this latch is what every restore path keys on instead, so a
+# radio this script turned off is a radio this script turns back on whatever
+# the setting says by then.
+RADIO_OFF=0
+
+# AND A MARKER ON DISK BESIDE IT, because the shell variable dies with the
+# shell. cleanup() restores both the radio and the framework on SIGTERM, but a
+# dashboard that is wedged, OOM-killed or killed by hand never reaches it —
+# and stop.sh sends SIGKILL ten seconds after SIGTERM to exactly those. Both
+# things left behind are device-wide and outlive the process: a radio turned
+# off stays off, a stopped reader framework stays stopped. The markers are what
+# lets stop.sh put back precisely what was taken, rather than guessing or
+# resetting a radio nobody touched.
+RADIO_MARK="$TMP/radio-off"
+GUI_MARK="$TMP/gui-stopped"
+
+radio_set() {
+    lipc-set-prop com.lab126.cmd wirelessEnable "$1" >/dev/null 2>&1
+}
 
 net_up() {
     [ "${POWER:-awake}" = "awake" ] && return 0
-    lipc-set-prop com.lab126.cmd wirelessEnable 1 2>/dev/null
+    if ! radio_set 1; then
+        # THE FRAMEWORK IS WHAT SERVES THE RADIO on firmware where
+        # com.lab126.cmd shares an upstart job with the reader — which is
+        # exactly what GUI_STOP stops. The setting that saves ten milliamps
+        # would then be the reason nothing fetches again for the rest of the
+        # run, with nothing on the panel to say why. So it is put back and the
+        # radio asked again: a dashboard that updates is worth more than the
+        # ten milliamps, and this is the only place that can tell the two
+        # firmwares apart.
+        if [ "${GUI_STOPPED:-0}" != "0" ]; then
+            gui_restore
+            GUI_BLOCKED=1
+            echo "GUI_STOP: this firmware serves the radio from the framework;" \
+                 "put back so the dashboard can still fetch." >&2
+            radio_set 1
+        fi
+    fi
+    RADIO_OFF=0
+    rm -f "$RADIO_MARK" 2>/dev/null
     # ASSOCIATION IS NOT INSTANT. The chip and the DHCP client want four to ten
     # seconds, and a fetch fired before that fails against a network that is
     # about to be there — which on the panel is a minute of "offline" for no
@@ -397,8 +438,13 @@ net_up() {
     # seconds should not pay for the one that takes nine.
     local waited=0
     while [ "$waited" -lt "${WIFI_WAIT:-15}" ]; do
+        # EXACTLY CONNECTED. A `*CONNECTED*` glob also matches DISCONNECTED and
+        # NOT_CONNECTED — wifid saying the opposite — so the bounded wait this
+        # function exists for was skipped on the one answer it was written to
+        # wait through, and the fetch fired into an interface that was still
+        # coming up.
         case "$(lipc-get-prop com.lab126.wifid cmState 2>/dev/null)" in
-            *CONNECTED*) return 0 ;;
+            CONNECTED) return 0 ;;
         esac
         nap 1
         waited=$((waited + 1))
@@ -411,8 +457,27 @@ net_up() {
 
 net_down() {
     [ "${POWER:-awake}" = "awake" ] && return 0
-    lipc-set-prop com.lab126.cmd wirelessEnable 0 2>/dev/null
+    radio_set 0
+    RADIO_OFF=1
+    : > "$RADIO_MARK" 2>/dev/null
     return 0
+}
+
+# Going back to awake has to put the radio on.
+#
+# POWER is one of the settings conf_load() re-reads every minute, and awake is
+# the value that makes net_up(), net_down() and cleanup() all return without
+# touching anything. So switching back to it — the documented way to undo a
+# battery setting you did not like — left the reader with the radio off and no
+# path in this script that would ever turn it on again, Stop included. The
+# latch is what makes the difference visible: it says we turned it off, and
+# that is still true after the setting says not to.
+power_apply() {
+    [ "${POWER:-awake}" = "awake" ] || return 0
+    [ "${RADIO_OFF:-0}" = "1" ] || return 0
+    radio_set 1
+    RADIO_OFF=0
+    rm -f "$RADIO_MARK" 2>/dev/null
 }
 
 # ── The Amazon framework ─────────────────────────────────────────────────────
@@ -421,10 +486,23 @@ net_down() {
 # the indexer, the search service, the touch UI. None of it is looked at and it
 # costs another 10-15 mA of the 25-35 the CPU draws at idle.
 #
-# STOPPED, NOT KILLED, and put back by cleanup(). Somebody who tries this and
-# does not like it presses Stop in KUAL and has their Kindle back; a killed
-# framework needs a reboot. Off by default for the same reason: it is the
-# setting that makes the device stop being a reader.
+# STOPPED, NOT KILLED. A killed framework needs a reboot; a stopped one comes
+# back with `start`, and a SIGSTOPped one with SIGCONT.
+#
+# AND THERE IS NO KUAL WHILE IT IS STOPPED, which is the thing to know before
+# turning this on. KUAL is a Kindlet, hosted by the framework this switches
+# off, so "press Stop in KUAL" — the way back from every other setting here —
+# is not available for this one. The ways back are:
+#
+#   * set GUI_STOP=0 in dash.conf over USB. gui_apply() picks it up within a
+#     minute, exactly like every other key;
+#   * run stop.sh, which restores the framework itself rather than relying on
+#     this script's exit trap;
+#   * hold the power button until the reader reboots, which clears both a
+#     stopped job and a SIGSTOPped VM.
+#
+# Off by default, and the only setting here that makes the device stop being a
+# reader while it is on.
 gui_stop() {
     [ "${GUI_STOP:-0}" = "1" ] || return 0
     GUI_STOPPED=0
@@ -433,6 +511,7 @@ gui_stop() {
     elif killall -STOP cvm 2>/dev/null; then
         GUI_STOPPED=2
     fi
+    [ "$GUI_STOPPED" = "0" ] || echo "$GUI_STOPPED" > "$GUI_MARK" 2>/dev/null
     return 0
 }
 
@@ -442,6 +521,32 @@ gui_restore() {
         2) killall -CONT cvm 2>/dev/null ;;
     esac
     GUI_STOPPED=0
+    rm -f "$GUI_MARK" 2>/dev/null
+    return 0
+}
+
+# Applied every minute, because it is read every minute.
+#
+# conf_load() re-reads every key in conf_keys() each tick so that "a change
+# made from KUAL takes effect within a minute" — the contract conf_write()
+# prints to the reader. GUI_STOP was in that list but acted on once, before the
+# loop: turning it on from Settings did nothing at all, and turning it back off
+# left the framework down until Stop. The one key that quietly did not honour
+# the promise the rest of them make.
+gui_apply() {
+    local want="${GUI_STOP:-0}"
+    # Blocked only where it actually conflicts. GUI_BLOCKED is set by net_up()
+    # on the firmware where stopping the framework takes the radio with it; on
+    # POWER=awake nothing is asking the radio for anything, so the saving is
+    # still there to be had.
+    if [ "${GUI_BLOCKED:-0}" = "1" ] && [ "${POWER:-awake}" != "awake" ]; then
+        want=0
+    fi
+    if [ "$want" = "1" ]; then
+        [ "${GUI_STOPPED:-0}" = "0" ] && gui_stop
+    else
+        [ "${GUI_STOPPED:-0}" = "0" ] || gui_restore
+    fi
     return 0
 }
 
@@ -468,7 +573,18 @@ suspend_for() {
     [ "$want" -ge "${SUSPEND_MIN:-5}" ] 2>/dev/null || return 1
     [ -w "$RTC_WAKEALARM" ] && [ -w "$PM_STATE" ] || return 1
 
-    now=$(date +%s)
+    # THE RTC'S OWN CLOCK, NOT THE SYSTEM'S. The kernel compares this node
+    # against the RTC; `date +%s` reads the system clock. The two agree only
+    # while the RTC runs in UTC, and on a reader whose does not, an absolute
+    # alarm lands hours away — a panel dark until it comes round, or one waking
+    # on every tick. The read-back below cannot tell: the digits stick either
+    # way, so it would confirm a suspend that never comes back. since_epoch is
+    # the same clock the alarm is measured in, and is what makes the sum mean
+    # what it says.
+    now=$(cat "$RTC_SINCE_EPOCH" 2>/dev/null)
+    case "$now" in
+        ''|*[!0-9]*) now=$(date +%s) ;;
+    esac
     alarm=$((now + want))
     # Cleared first: writing an alarm over a pending one is rejected by the
     # driver rather than replacing it, so the second write would be the one
@@ -1647,13 +1763,19 @@ cleanup() {
     # made Stop look like it had failed.
     [ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null
     restore_sleep
-    # The radio goes back on whatever POWER was set to: Stop hands the device
-    # back to its owner, and handing it back with no network is a Kindle that
-    # looks broken.
-    [ "${POWER:-awake}" = "awake" ] || lipc-set-prop com.lab126.cmd wirelessEnable 1 2>/dev/null
+    # THE FRAMEWORK FIRST. On the firmware where GUI_STOP takes the radio down
+    # with it, the framework is what answers com.lab126.cmd — so restoring the
+    # radio before the service that answers for it is a restore that quietly
+    # does nothing.
     gui_restore
+    # And the radio goes back if WE are the ones who turned it off. Keyed on
+    # the latch and not on POWER: POWER may have been set back to awake in the
+    # meantime, and awake is the value that would skip this. Stop hands the
+    # device back to its owner, and handing it back with no network is a Kindle
+    # that looks broken.
+    [ "${RADIO_OFF:-0}" = "1" ] && radio_set 1
     rm -rf "$TMP"
-    rm -f /tmp/dash.pid
+    rm -f "${DASH_PIDFILE:-/tmp/dash.pid}"
     exit 0
 }
 
@@ -1728,7 +1850,7 @@ conf_init
 conf_load
 font_setup || echo "Continuing without text." >&2
 prevent_sleep
-gui_stop
+gui_apply
 
 # A layout BEFORE the first fetch, so no drawing path can run without one.
 # RES_W and RES_H come from the collector, so this falls back to 600x800 and
@@ -1768,6 +1890,12 @@ while true; do
     # Start. It is one small read from a filesystem the kernel has cached, and
     # it is what makes the on-device settings menu usable at all.
     conf_load
+    # Both of these are settings like any other, so they are applied where
+    # every other setting is: after the read, every minute. power_apply() puts
+    # the radio back if POWER has gone to awake, and gui_apply() starts or
+    # stops the framework to match GUI_STOP.
+    power_apply
+    gui_apply
 
     # settings.sh leaves this behind after any change: the settings screen it
     # painted is sitting on top of the dashboard, and whatever changed should

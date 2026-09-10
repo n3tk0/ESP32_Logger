@@ -65,8 +65,29 @@
                             "exitmenu": true
                         },
                         {
-                            "name": "Reset settings",
+                            "name": "Battery: normal",
                             "priority": 7,
+                            "action": "/bin/sh",
+                            "params": "kual.sh power awake",
+                            "exitmenu": true
+                        },
+                        {
+                            "name": "Battery: radio off between updates",
+                            "priority": 8,
+                            "action": "/bin/sh",
+                            "params": "kual.sh power wifi",
+                            "exitmenu": true
+                        },
+                        {
+                            "name": "Battery: deep sleep",
+                            "priority": 9,
+                            "action": "/bin/sh",
+                            "params": "kual.sh power suspend",
+                            "exitmenu": true
+                        },
+                        {
+                            "name": "Reset settings",
+                            "priority": 10,
                             "action": "/bin/sh",
                             "params": "kual.sh reset",
                             "exitmenu": true

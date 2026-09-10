@@ -561,48 +561,21 @@ jobs:
       - name: Verify that checker fails when a size drifts
         # Both directions, because the drift can start at either end: a layout
         # number edited without the stylesheet, or a stylesheet edited without
-        # the layout.
+        # the layout. All twenty sizes, not one hand-picked rule.
         #
-        # THE MUTATIONS MATCH THE SHAPE, NOT THE SIZE, and the staleness guard
-        # runs BEFORE the edit. Both were the other way round, and both were
-        # wrong for the same reason: a grep for the pre-image AFTER a sed only
-        # catches a sed that matched and did not replace, which cannot happen.
-        # A size that has since moved makes the sed a no-op, the grep find
-        # nothing, and the step fail as "the checker passed a stylesheet the
-        # layout does not follow" — a lie about the checker that sends whoever
-        # reads it looking in the wrong file. It is how this step failed when
-        # .wd-d grew from 24 px to 30, and pinning the new number here would
-        # only have set the same trap for the next size that moves.
-        run: |
-          set -e
-          cp kindle/layout/600x800.conf /tmp/l.orig
-          grep -qE '^CL_SIZE=[0-9]+$' kindle/layout/600x800.conf || {
-            echo "::error::no CL_SIZE in the layout — this proof step is stale"
-            exit 1
-          }
-          # 7 px: a clock this small is not a size the design can drift to, so
-          # the checker failing below is the checker noticing, never a coincidence.
-          sed -i -E 's/^CL_SIZE=[0-9]+$/CL_SIZE=7/' kindle/layout/600x800.conf
-          if python3 tools/check_kindle_parity.py > /dev/null 2>&1; then
-            echo "::error::check_kindle_parity.py passed a clock the page does not set"
-            cp /tmp/l.orig kindle/layout/600x800.conf
-            exit 1
-          fi
-          cp /tmp/l.orig kindle/layout/600x800.conf
-          cp src/web/KindleDashboard.cpp /tmp/kd.orig
-          grep -qE 'KD_S\("\.wd-d\{font-size:"\); +KD_N\([0-9]+\);' src/web/KindleDashboard.cpp || {
-            echo "::error::no .wd-d font-size in the stylesheet — this proof step is stale"
-            exit 1
-          }
-          sed -i -E 's/(KD_S\("\.wd-d\{font-size:"\); +KD_N\()[0-9]+(\);)/\17\2/' src/web/KindleDashboard.cpp
-          if python3 tools/check_kindle_parity.py > /dev/null 2>&1; then
-            echo "::error::check_kindle_parity.py passed a stylesheet the layout does not follow"
-            cp /tmp/kd.orig src/web/KindleDashboard.cpp
-            exit 1
-          fi
-          cp /tmp/kd.orig src/web/KindleDashboard.cpp
-          rm /tmp/l.orig /tmp/kd.orig
-          echo "the checker fails when either end drifts, as it should"
+        # THE MUTATION LIVES IN THE CHECKER NOW. This step used to rewrite a
+        # font-size in KindleDashboard.cpp with a sed and then restore the file,
+        # which put a regex matching the C++ emitter's exact layout — down to
+        # the run of spaces between KD_S(...) and its KD_N — in a YAML file that
+        # nothing compiles. A second copy of the emitter's shape, and the one
+        # that goes stale first. It did: the day .wd-d grew from 24 px to 30 the
+        # sed matched nothing, the stylesheet was never mutated, and the step
+        # failed as "check_kindle_parity.py passed a stylesheet the layout does
+        # not follow" — a lie about the checker that sends whoever reads it to
+        # the wrong file. --self-test bends the numbers it has already parsed,
+        # in memory: no shape to match, no file to restore, and it grows with
+        # the table instead of alongside it.
+        run: python3 tools/check_kindle_parity.py --self-test
 
       - name: Verify that suite notices when the panel and the page drift apart
         # The Kindle screen and the browser page at /kindle are ONE design
