@@ -336,7 +336,25 @@ export DASH_TMP DASH_CONF
 mkdir -p "$DASH_TMP"
 cp "$FIXTURE" "$DASH_TMP/data.txt"
 
-DASH_LIB_ONLY=1 DASH_DIR="$KDIR" . "$KDIR/update_dash.sh"
+# ASSIGNED, NOT PREFIXED. `VAR=x . file` is a variable assignment on a
+# SPECIAL builtin, so a POSIX shell keeps it after the command returns —
+# which is the whole reason the prefix spelling worked here. bash discards
+# it unless it is in POSIX mode, so under `bash tests/kindle/drive_dash.sh`
+# DASH_DIR came back empty the moment the source returned: everything the
+# library reads AT source time still worked (CONF, USR_FONTS), everything
+# it reads LATER did not — load_layout sourced "/layout/600x800.conf",
+# found nothing, and 35 checks failed on empty sizes rather than on
+# anything this file is testing. Not exported, because dash does not
+# export them either and update_dash.sh is RUN as a child further down,
+# where an inherited DASH_LIB_ONLY would stop it before it draws.
+DASH_LIB_ONLY=1
+DASH_DIR="$KDIR"
+. "$KDIR/update_dash.sh"
+
+# Named here so the next shell to lose it says so, rather than failing
+# thirty-five drawing checks on arithmetic against an empty size.
+check "$([ -n "$DASH_DIR" ] && [ -d "$DASH_DIR/layout" ] && echo 0 || echo 1)" \
+      "the library still knows where it lives after it has been sourced"
 
 USR_FONTS="$WORK/fonts"
 font_setup
@@ -2016,7 +2034,7 @@ rm -f "$DASH_TMP/redraw"
 run_settings set FORECAST_EVERY 45 >/dev/null
 check "$([ -f "$DASH_TMP/redraw" ] && echo 0 || echo 1)" \
       "a change asks the running dashboard to repaint"
-( DASH_LIB_ONLY=1 DASH_DIR="$KDIR" DASH_CONF="$DASH_CONF" DASH_TMP="$DASH_TMP" \
+( DASH_LIB_ONLY=1; DASH_DIR="$KDIR"; DASH_CONF="$DASH_CONF"; DASH_TMP="$DASH_TMP"
   . "$KDIR/update_dash.sh"
   conf_load
   [ "$FORECAST_EVERY" = "45" ] || exit 1 )
@@ -2067,7 +2085,7 @@ check "$(awk '
 
 # ── 7. A hand-edited dash.conf cannot break the loop ─────────────────────────
 printf 'HOST=10.0.0.5\nDATA_EVERY=0\nFULL_EVERY=notanumber\n' > "$DASH_CONF"
-( DASH_LIB_ONLY=1 DASH_DIR="$KDIR" DASH_CONF="$DASH_CONF" DASH_TMP="$DASH_TMP" \
+( DASH_LIB_ONLY=1; DASH_DIR="$KDIR"; DASH_CONF="$DASH_CONF"; DASH_TMP="$DASH_TMP"
   . "$KDIR/update_dash.sh"
   conf_load 2>/dev/null
   [ "$HOST" = "10.0.0.5" ] || exit 1
