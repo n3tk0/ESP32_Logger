@@ -769,7 +769,7 @@ panel, which is the only instrument this had:
 | Hero, clock, forecast, footer, week numerals | 88 / 96 / 28 / 12 / 24 px | 84 / 88 / 26 / 11 / 22 |
 | Every string, at the size both files agree on | the em is 88 px | **the em is ~76 px** — `px=88` is a line height to FBInk, not an em |
 | Every gap computed from an advance | correct, the browser measures its own | a sixth too wide, so the headline's second value ran into the divider |
-| Today, in the week strip | white on black | **a black rectangle with nothing in it** |
+| Today, in the week strip | white on black | **a black rectangle with nothing in it**, then a white box with a black date in it — see below: asking FBInk for white on black is what draws the opposite |
 | The forecast icon | an SVG chosen by a RANGE of WMO codes | a BMP named after the exact code — and there is no `fc_2` for partly cloudy, so: the question mark |
 | The wind line | `вятър 5 km/h · 8 мин` | the wind alone; nothing said how old the forecast was |
 
@@ -845,19 +845,45 @@ per call is the difference between reading and guessing.
 
 A line per string, so it is off by default.
 
-### White text on a plate is drawn ON the plate
+### White text on a plate is asked for by inverting, not by naming the pens
 
-`-O`/`--bgless` is right over a tier's own cleared white rectangle: FBInk's OT
-renderer otherwise paints the string's whole box with the background pen, and
-a white box would rub out whatever was drawn before it.
+`-C WHITE -B BLACK` draws the **opposite** of what it says, and this took two
+attempts and a photograph to see.
 
-It is wrong on the two inverted places — today's cell in the week strip, and
-the boxed clock. There the glyphs are white, and bgless leaves whether white
-survives to how that FBInk build blends against the framebuffer. On the device
-it did not: the cell came out as an empty black rectangle, the one mark on the
-screen that has to be legible reading as a hole. Those two draw with
-`-C WHITE -B BLACK` and no bgless — the ordinary path, where the box is painted
-in the plate's own colour and so cannot be seen.
+FBInk has a fast path in `print_ot()` for text whose two pens are pure black
+and pure white:
+
+    const short int layer_diff = (short int) (fgcolor - bgcolor);
+    if (abs(layer_diff) == 0xFFu) {
+            uint8_t ainv = 0xFFu;
+            if (is_inverted) { ainv = 0U; }
+            ...  pixel = lnPtr[k] ^ ainv;
+
+It skips blending and uses stb_truetype's coverage mask directly, XORed with
+`0xFF`. That XOR is the assumption that black-and-white text means BLACK ON
+WHITE unless `--invert` says otherwise — so the empty ground around the glyphs
+became white and the glyphs became black. On the panel: a white box with a
+black date in it, in the middle of the black plate meant to contain a white
+one. Asking for white on black is precisely the pair that triggers it.
+
+So the two inverted places — today's cell in the week strip, and the boxed
+clock — pass `-h`/`--invert` with the pens a NON-inverted call would use.
+`--invert` flips the mask and the pens together, so white-on-black comes out
+of both of FBInk's paths: the fast one, where the mask is used as-is, and the
+general blend, where the pens are swapped before it runs.
+
+It is also right on every Kindle. FBInk's own condition there reads
+
+    (isKindleLegacy && !is_inverted) || (!isKindleLegacy && is_inverted)
+
+— compensating for the legacy models' inverted colour map, so `--invert` means
+the same thing to the eye on a K3 as on a KT2, and the panel needs to know
+nothing about which it is running on.
+
+`-O`/`--bgless` stays right everywhere else: over a tier's own cleared white
+rectangle, it draws the glyphs and no box, so nothing rubs out what came
+before it. It does not take the fast path at all.
+
 
 ### Upper case, and why it has to be done at the collector
 

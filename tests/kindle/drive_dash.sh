@@ -518,36 +518,36 @@ for res in 600x800 1072x1448; do
 done
 RES_W=600; RES_H=800; load_layout
 
-# ── Text on a plate is drawn ON the plate; everything else is bgless ─────────
+# ── Text on a dark plate is knocked out with --invert ────────────────────────
 #
-# Two ways to fail, and the panel has now failed both.
+# NOT -C WHITE -B BLACK, which draws the opposite. FBInk has a fast path for
+# text whose pens are pure black and pure white — abs(fgcolor - bgcolor) ==
+# 0xFF in print_ot() — where it uses stb's coverage mask directly, XORed with
+# 0xFF, on the assumption that B&W text means black on white unless --invert
+# says otherwise. Asking for white on black is exactly the pair that triggers
+# it, so today's cell came out as a white box with a black date in it, in the
+# middle of the black plate meant to contain a white one.
 #
-# Bgless (-O) is right over the tier's own cleared white rectangle: FBInk's OT
-# renderer otherwise paints the string's whole box with the background pen, and
-# a white box would rub out whatever was drawn before it.
-#
-# It is WRONG on the inverted cells — today in the week strip, the boxed clock.
-# There the glyphs are white, and bgless leaves whether white survives up to
-# how that FBInk build blends against the framebuffer: on the device it left an
-# empty black rectangle where the date should be. Painting the box in the
-# plate's own colour is the ordinary path and depends on nothing.
+# --invert flips the mask AND the pens, so the ordinary pens through it give
+# white-on-black out of both FBInk's paths — and on every Kindle, its own
+# condition compensating for the legacy models' inverted colour map.
 reset_log
 draw_forecast_body
-check "$(grep -q -- '-C	WHITE	-B	BLACK' "$FBINK_LOG" && echo 0 || echo 1)" \
-      "white text is drawn on a black box, not bgless over one"
-check "$(grep -q -- '-O	-C	WHITE' "$FBINK_LOG" && echo 1 || echo 0)" \
-      "and no white string is left to bgless, where it can vanish"
+check "$(grep -q -- '	-h	-C	BLACK	-B	WHITE' "$FBINK_LOG" && echo 0 || echo 1)" \
+      "the inverted cell is knocked out with --invert and the ordinary pens"
+check "$(grep -q -- '-C	WHITE' "$FBINK_LOG" && echo 1 || echo 0)" \
+      "and never asks for WHITE on BLACK, the pair that draws the opposite"
 badbg=0
 while IFS= read -r line; do
     case "$line" in *"	-t	"*) ;; *) continue ;; esac
-    # Either bgless, or an explicit pen for the plate it sits on. Never neither.
+    # Either bgless over a cleared rectangle, or inverted out of a plate.
     case "$line" in
         *"	-O	"*) ;;
-        *"	-B	"*) ;;
+        *"	-h	"*) ;;
         *) badbg=$((badbg + 1)) ;;
     esac
 done < "$FBINK_LOG"
-check "$badbg" "and every other string is bgless or names its plate ($badbg neither)"
+check "$badbg" "and every other string is bgless or inverted ($badbg neither)"
 
 # ── The forecast icon comes reduced, so the panel never guesses ──────────────
 #
@@ -653,7 +653,7 @@ RES_W=600; RES_H=800; load_layout
   grep -q "^fbink " "$WORK/trace_on.txt" || exit 5
   # And it is the real argv, not a summary: the pens are what a report about a
   # cell drawn in the wrong colour turns on.
-  grep -q "^fbink .*-C WHITE -B BLACK" "$WORK/trace_on.txt" || exit 6
+  grep -q "^fbink .*-h -C BLACK -B WHITE" "$WORK/trace_on.txt" || exit 6
   exit 0 )
 check "$?" "TRACE=1 logs every FBInk call and draws exactly the same panel"
 
@@ -1039,10 +1039,10 @@ check "$?" "the plain clock is the time at its full size and nothing else"
   CLOCK_STYLE=1 draw_clock "12:34"
   # A black plate filling the clock rectangle, with the time knocked out of it.
   grep -q -- "-B	BLACK	-k	top=$Z_CLOCK_Y,left=$Z_CLOCK_X,width=$Z_CLOCK_W,height=$Z_CLOCK_H" "$FBINK_LOG" || exit 1
-  grep -q -- "-C	WHITE" "$FBINK_LOG" || exit 2
+  grep -q -- "-h	-C	BLACK	-B	WHITE" "$FBINK_LOG" || exit 2
   grep -q -- "px=$(px_of "$CL_SZ_BOXED")," "$FBINK_LOG" || exit 3
   # Centred, not against the left edge — CLOCK_ADVW is what centres it.
-  left=$(sed -n 's/.*-C	WHITE	-B	BLACK	-t	[^	]*left=\([0-9]*\),.*/\1/p' "$FBINK_LOG" | head -1)
+  left=$(sed -n 's/.*-h	-C	BLACK	-B	WHITE	-t	[^	]*left=\([0-9]*\),.*/\1/p' "$FBINK_LOG" | head -1)
   [ -n "$left" ] && [ "$left" -gt "$CL_X" ] || exit 4 )
 check "$?" "the boxed clock is knocked out of a plate and centred on it"
 

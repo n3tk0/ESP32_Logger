@@ -581,7 +581,7 @@ box_top() {
 }
 
 draw_text() {
-    # $1=x $2=y $3=px $4=font file $5=colour $6=text [$7=background pen]
+    # $1=x $2=y $3=px $4=font file $5=colour $6=text [$7=INV]
     #
     # WITHOUT $7: -O/--bgless, the glyphs and nothing else. FBInk's OpenType
     # renderer otherwise fills the text's whole box with the background pen,
@@ -589,19 +589,30 @@ draw_text() {
     # cleared its own rectangle — so a box of white would rub out whatever the
     # tier drew before it.
     #
-    # WITH $7: the box IS painted, in that pen, and bgless is not used. That is
-    # for text on a plate that is not white — today's cell in the week strip,
-    # white on black. Drawn bgless it came out as an empty black rectangle on
-    # the device: FBInk's bgless path blends each glyph pixel against what is
-    # already in the framebuffer, and whether white survives that depends on
-    # the FBInk build. Painting a black box under white glyphs does not depend
-    # on anything: it is the ordinary path, and the box is invisible against
-    # the plate it sits on.
+    # WITH $7 ("INV"): the string is knocked out of a dark plate, and this is
+    # -h/--invert with the ORDINARY pens rather than -C WHITE -B BLACK.
+    #
+    # THE OBVIOUS SPELLING DRAWS THE OPPOSITE. FBInk has a fast path for text
+    # whose two pens are pure black and pure white — `abs(fgcolor - bgcolor)
+    # == 0xFF` in print_ot() — where it skips blending and uses stb's coverage
+    # mask directly, XORed with 0xFF. That XOR is the assumption that B&W text
+    # means BLACK ON WHITE unless --invert says otherwise, so it turns the
+    # empty ground white and the glyphs black: on the panel, a white box with
+    # a black date in it, sitting in the middle of the black plate meant to
+    # contain white ones. Asking for WHITE on BLACK is exactly what triggers
+    # it, because that is exactly the pair the fast path is for.
+    #
+    # --invert flips it, and flips the pens with it, so passing the pens a
+    # NON-inverted call would use gets white-on-black out of both FBInk's
+    # paths: the fast one (the mask is used as-is) and the general blend (the
+    # pens are swapped before it runs). And it is right on every Kindle:
+    # FBInk's own condition compensates for the legacy models' inverted colour
+    # map, so --invert means the same thing to the eye on a K3 as on a KT2.
     [ -n "$6" ] || return 0
     [ -n "$4" ] || return 0
     text_geom "$2" "$3"
     if [ -n "$7" ]; then
-        fb -q -b -C "$5" -B "$7" -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$6"
+        fb -q -b -h -C BLACK -B WHITE -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$6"
     else
         fb -q -b -O -C "$5" -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$6"
     fi
@@ -610,9 +621,10 @@ draw_text() {
 draw_text_bold() { draw_text "$1" "$2" "$3" "$FONT_BOLD" "$4" "$5"; }
 draw_text_reg()  { draw_text "$1" "$2" "$3" "$FONT_REG"  "$4" "$5"; }
 
-# The same two, on a plate that is not white.
-draw_text_bold_on() { draw_text "$1" "$2" "$3" "$FONT_BOLD" "$4" "$5" "$6"; }
-draw_text_reg_on()  { draw_text "$1" "$2" "$3" "$FONT_REG"  "$4" "$5" "$6"; }
+# The same two, knocked out of a dark plate. No colour: --invert decides it,
+# and passing one would only be a colour that is ignored.
+draw_text_bold_inv() { draw_text "$1" "$2" "$3" "$FONT_BOLD" "" "$4" INV; }
+draw_text_reg_inv()  { draw_text "$1" "$2" "$3" "$FONT_REG"  "" "$4" INV; }
 
 fill_rect() {
     # $1=x $2=y $3=w $4=h $5=colour
@@ -719,7 +731,7 @@ draw_clock() {
             # On the plate, not bgless over it — the same reason today's cell
             # in the week strip is, and the same symptom if it is not: a black
             # box with no time in it.
-            draw_text_bold_on "$CENTRE_X" "$cy" "$sz" "WHITE" "$now_time" "BLACK"
+            draw_text_bold_inv "$CENTRE_X" "$cy" "$sz" "$now_time"
             ;;
         2)  # RULED — a hairline over it and set smaller, so it reads as a rule
             # rather than as a number that happens to have a line above it. The
@@ -1352,8 +1364,8 @@ draw_forecast_body() {
                 # screen that has to be legible, reading as a hole. See
                 # draw_text().
                 fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
-                draw_text_reg_on "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "WHITE" "$wk_name" "BLACK"
-                draw_text_reg_on "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "WHITE" "$wk_day" "BLACK"
+                draw_text_reg_inv "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "$wk_name"
+                draw_text_reg_inv "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "$wk_day"
             else
                 wk_bg="GRAYE"
                 { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
