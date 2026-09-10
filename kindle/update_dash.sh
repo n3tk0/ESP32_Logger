@@ -76,8 +76,19 @@ FULL_EVERY=60
 CLOCK_FLASH_EVERY=1
 SENSOR_FLASH_EVERY=0
 
+# Every FBInk call, into kual.log, and nothing drawn differently.
+#
+# THE PANEL IS THE ONE RENDERER NOBODY CAN WATCH. The tests drive it against a
+# fake FBInk that records its argv, and a browser has a devtools pane — the
+# thing on the wall has neither, so a report that a cell "does not look right"
+# has no evidence behind it and is argued about from photographs. One line per
+# call is the difference between guessing and reading.
+#
+# Off by default: it is a line per string, sixty a redraw.
+TRACE=0
+
 conf_keys() {
-    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY"
+    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE"
 }
 
 # What each key means, for `settings.sh show` and for dash.conf's comments.
@@ -92,6 +103,7 @@ conf_help() {
         FULL_EVERY)         echo "Minutes between whole-screen refreshes" ;;
         CLOCK_FLASH_EVERY)  echo "Flash the clock zone every N clock updates (0 = never)" ;;
         SENSOR_FLASH_EVERY) echo "Flash the readings zone every N sensor updates (0 = never)" ;;
+        TRACE)              echo "Log every FBInk call to kual.log (1 = on)" ;;
         *)                  echo "" ;;
     esac
 }
@@ -208,6 +220,8 @@ conf_valid() {
             # Zero disables the two flash counters; every other key needs a tier
             # that actually comes round.
             case "$k" in
+                # A switch, not a tier: 0 or 1, and nothing in between to mean.
+                TRACE) [ "$v" -le 1 ] ;;
                 CLOCK_FLASH_EVERY|SENSOR_FLASH_EVERY) [ "$v" -le 1440 ] ;;
                 *) [ "$v" -ge 1 ] && [ "$v" -le 1440 ] ;;
             esac
@@ -457,6 +471,10 @@ load_layout() {
     else
         . "$DASH_DIR/layout/600x800.conf"
     fi
+    # Derived once here rather than per string: both depend only on the layout,
+    # and a fork per draw is a fork this script has spent years avoiding.
+    TEXT_PX_MILLE="${TEXT_PX_MILLE:-1160}"
+    BASELINE_MILLE=$(( 800 * TEXT_PX_MILLE / 1000 - (TEXT_PX_MILLE - 1000) / 2 ))
     zones_derive
 }
 
@@ -504,24 +522,109 @@ zones_derive() {
 # The `--` before a string is not decoration: the outdoor temperature is
 # regularly "-2.4", and without it FBInk reads that as options.
 
-fb() { fbink "$@" 2>/dev/null; }
+fb() {
+    # stderr, so kual-run.sh's own redirection carries it into kual.log next to
+    # the scripts, where a USB cable can read it.
+    [ "${TRACE:-0}" = "1" ] && printf 'fbink %s\n' "$*" >&2
+    fbink "$@" 2>/dev/null
+}
+
+# ── FBInk's px is not the CSS px ─────────────────────────────────────────────
+#
+# THIS IS WHY THE PANEL'S TYPE CAME OUT SMALLER THAN THE PAGE'S. FBInk sizes
+# OpenType text with stbtt_ScaleForPixelHeight(font, px) — fbink.c, in the
+# print_ot() setup — and stb_truetype documents that as
+#
+#     scale = pixels / (ascent - descent)
+#
+# i.e. `px` is the font's WHOLE LINE HEIGHT, top of the ascender to bottom of
+# the descender. CSS font-size is the em square, which for a text serif is some
+# 14-20% smaller than that span. So `px=88` and `font-size:88px` are not the
+# same size, and the panel drew every string about a sixth small next to the
+# browser page: thinner stems, more air, a worse-looking screen made of the
+# right numbers.
+#
+# It also moved things. The script places a value after another by adding
+# `size × advance-in-mille / 1000`, with the advances measured at the collector
+# in thousandths of the EM — so while the em was a sixth smaller than the size,
+# every gap was a sixth too wide, and the headline's "/ 993 hPa" was pushed
+# into the divider and clipped. Correcting the size corrects the arithmetic
+# with it: past here, one design pixel is one em pixel again.
+#
+# TEXT_PX_MILLE is (ascent - descent) / unitsPerEm for the panel's font, in
+# thousandths — the number to turn if the type ends up a hair large or small,
+# and the only one. It lives in the layout file because the fonts a Kindle
+# carries differ by model.
+# NO SUBSHELL, because this is called for every string on the panel and the
+# clock tier redraws every minute. `echo` in `$( )` is a fork, and three of
+# them per string is ~180 forks a redraw on a ten-year-old ARM — in a file
+# whose other comments count forks. It sets two globals instead, the way
+# centre_in() already sets CENTRE_X.
+#
+# Sets:  TX_PX  the px FBInk has to be asked for
+#        TX_TOP where the box has to start so the string stays optically where
+#               the layout put it (FBInk grows the box downward from `top`, so
+#               half the growth comes back off the top)
+text_geom() {
+    # $1=design top  $2=design size
+    TX_PX=$(( $2 * ${TEXT_PX_MILLE:-1160} / 1000 ))
+    TX_TOP=$(( $1 - (TX_PX - $2) / 2 ))
+    [ "$TX_TOP" -lt 0 ] && TX_TOP=0
+}
+
+# The other direction: the design `top` that puts a string's BOX at $1.
+# For anything positioned by where its box has to sit rather than by where the
+# layout tuned its top — the week strip centres its two rows in the cell.
+box_top() {
+    # $1=wanted box top  $2=design size
+    BOX_TOP=$(( $1 + ($2 * ${TEXT_PX_MILLE:-1160} / 1000 - $2) / 2 ))
+}
 
 draw_text() {
-    # $1=x $2=y $3=px $4=font file $5=colour $6=text
+    # $1=x $2=y $3=px $4=font file $5=colour $6=text [$7=INV]
     #
-    # -O/--bgless: draw the glyphs and nothing else. FBInk's OpenType renderer
-    # otherwise fills the text's whole box with the background pen, which is
-    # WHITE unless -B says otherwise — so white text on the inverted "today"
-    # cell punched a white rectangle out of the black plate and disappeared
-    # into it. Every tier clears its rectangle before drawing, so there is
-    # nothing underneath that the glyphs need to cover.
+    # WITHOUT $7: -O/--bgless, the glyphs and nothing else. FBInk's OpenType
+    # renderer otherwise fills the text's whole box with the background pen,
+    # which is WHITE unless -B says otherwise, and every tier has already
+    # cleared its own rectangle — so a box of white would rub out whatever the
+    # tier drew before it.
+    #
+    # WITH $7 ("INV"): the string is knocked out of a dark plate, and this is
+    # -h/--invert with the ORDINARY pens rather than -C WHITE -B BLACK.
+    #
+    # THE OBVIOUS SPELLING DRAWS THE OPPOSITE. FBInk has a fast path for text
+    # whose two pens are pure black and pure white — `abs(fgcolor - bgcolor)
+    # == 0xFF` in print_ot() — where it skips blending and uses stb's coverage
+    # mask directly, XORed with 0xFF. That XOR is the assumption that B&W text
+    # means BLACK ON WHITE unless --invert says otherwise, so it turns the
+    # empty ground white and the glyphs black: on the panel, a white box with
+    # a black date in it, sitting in the middle of the black plate meant to
+    # contain white ones. Asking for WHITE on BLACK is exactly what triggers
+    # it, because that is exactly the pair the fast path is for.
+    #
+    # --invert flips it, and flips the pens with it, so passing the pens a
+    # NON-inverted call would use gets white-on-black out of both FBInk's
+    # paths: the fast one (the mask is used as-is) and the general blend (the
+    # pens are swapped before it runs). And it is right on every Kindle:
+    # FBInk's own condition compensates for the legacy models' inverted colour
+    # map, so --invert means the same thing to the eye on a K3 as on a KT2.
     [ -n "$6" ] || return 0
     [ -n "$4" ] || return 0
-    fb -q -b -O -C "$5" -t regular="$4",px="$3",left="$1",top="$2" -- "$6"
+    text_geom "$2" "$3"
+    if [ -n "$7" ]; then
+        fb -q -b -h -C BLACK -B WHITE -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$6"
+    else
+        fb -q -b -O -C "$5" -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$6"
+    fi
 }
 
 draw_text_bold() { draw_text "$1" "$2" "$3" "$FONT_BOLD" "$4" "$5"; }
 draw_text_reg()  { draw_text "$1" "$2" "$3" "$FONT_REG"  "$4" "$5"; }
+
+# The same two, knocked out of a dark plate. No colour: --invert decides it,
+# and passing one would only be a colour that is ignored.
+draw_text_bold_inv() { draw_text "$1" "$2" "$3" "$FONT_BOLD" "" "$4" INV; }
+draw_text_reg_inv()  { draw_text "$1" "$2" "$3" "$FONT_REG"  "" "$4" INV; }
 
 fill_rect() {
     # $1=x $2=y $3=w $4=h $5=colour
@@ -625,7 +728,10 @@ draw_clock() {
             fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" BLACK
             cy=$(( Z_CLOCK_Y + (Z_CLOCK_H - sz) / 2 ))
             clock_centre_x "$sz"
-            draw_text_bold "$CENTRE_X" "$cy" "$sz" "WHITE" "$now_time"
+            # On the plate, not bgless over it — the same reason today's cell
+            # in the week strip is, and the same symptom if it is not: a black
+            # box with no time in it.
+            draw_text_bold_inv "$CENTRE_X" "$cy" "$sz" "$now_time"
             ;;
         2)  # RULED — a hairline over it and set smaller, so it reads as a rule
             # rather than as a number that happens to have a line above it. The
@@ -652,8 +758,13 @@ draw_clock() {
             # drew perfectly. Nothing tests it today; redraw_all is one `&&`
             # away from turning that into a skipped repaint.
             if [ -n "${DATE:-}" ]; then
-                draw_text_reg "$CL_X" "$(( CL_Y + sz + ${CL_DATE_GAP:-6} ))" \
-                              "${CL_DATE_SZ:-14}" "GRAY4" "$DATE"
+                # UNDER THE TIME'S BOX, not under its design size. The box is
+                # TEXT_PX_MILLE tall and starts half the growth higher, so it
+                # ends at top + px - (px - sz)/2 — past CL_Y + sz, which ate
+                # the whole of CL_DATE_GAP and left the two rows touching.
+                text_geom "$CL_Y" "$sz"
+                draw_text_reg "$CL_X" "$(( TX_TOP + TX_PX + ${CL_DATE_GAP:-6} ))" \
+                    "${CL_DATE_SZ:-14}" "GRAY4" "$DATE"
             fi
             ;;
         *)  fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
@@ -729,9 +840,22 @@ draw_field() {
 # beside it. FBInk's top is the TOP of the text, so two sizes drawn at one y sit
 # on two baselines and the row looks dropped; the ascent is about eight tenths
 # of the size, which is where the 80 comes from.
+# How far below a design `top` the baseline lands, in thousandths of the size.
+#
+# THE 800 IS THE FONT'S; THE REST IS FBInk's. A serif's ascent is about eight
+# tenths of the span FBInk sizes by (ascent - descent), so with px=size the
+# baseline sat 0.80 x size below the box top and everything here used 80/100.
+# text_geom() moved that: the box is TEXT_PX_MILLE bigger and starts half the
+# growth higher, so the baseline is now
+#
+#     0.800 x M - (M - 1)/2   of the size, M = TEXT_PX_MILLE/1000
+#
+# — 848/1000 at M = 1.16. Derived rather than written down again, because it
+# is the constant that has to move when somebody turns TEXT_PX_MILLE and the
+# one nobody would think to. Computed once by load_layout, into BASELINE_MILLE.
 baseline_y() {
     # $1=row top  $2=largest size in the row  $3=this size
-    echo $(( $1 + ($2 - $3) * 80 / 100 ))
+    echo $(( $1 + ($2 - $3) * ${BASELINE_MILLE:-848} / 1000 ))
 }
 
 # Where something `w` pixels wide starts if it is to be centred in a cell that
@@ -1019,16 +1143,18 @@ draw_chart_axis() {
     local k y w x lab
 
     # FBInk's `top` is the TOP of the text, and the page positions these by
-    # their BASELINE — so each one is lifted by the ascent, which is about
-    # eight tenths of the size. Same eighty as baseline_y(), for the same
-    # reason: two sizes drawn at one y sit on two baselines.
+    # their BASELINE — so each one is lifted by the ascent. Through
+    # baseline_mille() rather than a copy of the number, for the reason on
+    # that function: it moves with TEXT_PX_MILLE and a written-down 80 would
+    # not.
+
     #
     # Down the side, right-aligned on the axis and sitting on its grid line.
     k=0
     while [ "$k" -le 4 ]; do
         eval "lab=\${CH_Y${k}:-}; w=\${CH_Y${k}W:-0}"
         if [ -n "$lab" ]; then
-            y=$(( GR_Y + CH_T + (CH_B - CH_T) * k / 4 + base - sz * 80 / 100 ))
+            y=$(( GR_Y + CH_T + (CH_B - CH_T) * k / 4 + base - sz * ${BASELINE_MILLE:-848} / 1000 ))
             x=$(( GR_X + CH_L - gap - sz * w / 1000 ))
             draw_text_reg "$x" "$y" "$sz" "GRAY7" "$lab"
         fi
@@ -1106,14 +1232,34 @@ draw_forecast_body() {
     if [ -n "$FC_SUMMARY" ]; then
         draw_text_reg "$LAB_FC_X" "$LAB_FC_Y" "$LAB_SZ" "GRAY7" "$LBL_FORECAST"
 
-        local icon="$ICON_DIR/fc_${FC_CODE}_${FC_MAIN_SZ}.bmp"
+        # FC_ICON, NOT FC_CODE. There are eleven icon files, one per range of
+        # WMO codes, and this script cannot reduce a code to its range — so it
+        # asked for fc_2_52.bmp on a partly-cloudy day, did not find it, and
+        # drew fc_-1, the circled question mark that is supposed to mean "no
+        # forecast". The collector reduces it now (weatherIconCode), which is
+        # also where the browser page's ranges live, so the two cannot disagree.
+        # FC_CODE is the fallback for a collector too old to send FC_ICON.
+        local icon="$ICON_DIR/fc_${FC_ICON:-$FC_CODE}_${FC_MAIN_SZ}.bmp"
         [ ! -f "$icon" ] && icon="$ICON_DIR/fc_-1_${FC_MAIN_SZ}.bmp"
         draw_image "$icon" "$FC_ICON_X" "$FC_ICON_Y"
 
         draw_text_reg "$FC_TEXT_X" "$FC_TEXT_Y" "$FC_TEXT_SZ" "BLACK" "$FC_SUMMARY"
         draw_text_bold "$FC_TEMP_X" "$FC_TEMP_Y" "$FC_TEMP_SZ" "BLACK" "${FC_HIGH}°/${FC_LOW}°"
+        # THE AGE BELONGS ON THIS LINE. The page draws "вятър 5 km/h · 8 мин"
+        # and the panel drew only the wind, so the one thing that says whether
+        # to believe a forecast — how old it is — was on the screen nobody
+        # looks at. Formatted by the collector (FC_AGE), like every other
+        # string, so the wording follows the language setting.
+        local fc_sub=""
         if [ -n "$FC_WIND" ] && [ "$FC_WIND" != "0" ]; then
-            draw_text_reg "$FC_WIND_X" "$FC_WIND_Y" "$FC_WIND_SZ" "GRAY4" "$LBL_WIND ${FC_WIND} km/h"
+            fc_sub="$LBL_WIND ${FC_WIND} km/h"
+        fi
+        if [ -n "$FC_AGE" ]; then
+            if [ -n "$fc_sub" ]; then fc_sub="$fc_sub · $FC_AGE"
+            else                      fc_sub="$FC_AGE"; fi
+        fi
+        if [ -n "$fc_sub" ]; then
+            draw_text_reg "$FC_WIND_X" "$FC_WIND_Y" "$FC_WIND_SZ" "GRAY4" "$fc_sub"
         fi
 
         # EACH COLUMN ON A PLATE, AND CENTRED ON IT. The page sets .per to
@@ -1127,7 +1273,7 @@ draw_forecast_body() {
         local plate_w="${OL_PLATE_W:-0}" ol_w
         for i in 0 1 2; do
             eval "ol_label=\$FC${i}_LABEL"
-            eval "ol_code=\$FC${i}_CODE"
+            eval "ol_code=\${FC${i}_ICON:-\$FC${i}_CODE}"
             eval "ol_temp=\$FC${i}_TEMP"
             eval "ol_x=\$OL${i}_X"
             eval "ol_y=\$OL${i}_Y"
@@ -1190,6 +1336,21 @@ draw_forecast_body() {
             # against the left edge of their cells, which on a row of identical
             # boxes is the one place a misalignment cannot hide. The widths are the
             # collector's — see draw_field() for why they are not ${#var}.
+            # CENTRED IN THE CELL VERTICALLY TOO, not only across it. The two
+            # offsets in the layout were tuned when a box was exactly its
+            # design size; text_geom() made the day's box 27 px instead of 24,
+            # so the pair ended up 5 px from the top of the cell and 2 from the
+            # bottom — the one row of identical boxes where three pixels of
+            # list is visible. The layout keeps the SPACING between the two
+            # rows; where the pair sits is derived, so it stays centred
+            # whatever TEXT_PX_MILLE is set to.
+            wk_gap=$(( WK_DAY_OFFSET - WK_NAME_OFFSET ))
+            wk_dh=$(( WK_DAY_SZ * TEXT_PX_MILLE / 1000 ))
+            wk_top=$(( WK_Y + (WK_CELL_H - wk_gap - wk_dh) / 2 ))
+            [ "$wk_top" -lt "$WK_Y" ] && wk_top="$WK_Y"
+            box_top "$wk_top" "$WK_NAME_SZ";            wk_ny="$BOX_TOP"
+            box_top "$(( wk_top + wk_gap ))" "$WK_DAY_SZ"; wk_dy="$BOX_TOP"
+
             eval "wk_nw=\$WK${i}_NAMEW; wk_dw=\$WK${i}_DAYW"
             centre_in "$wk_x" "$WK_CELL_W" "$(( WK_NAME_SZ * ${wk_nw:-0} / 1000 ))"
             wk_nx="$CENTRE_X"
@@ -1197,16 +1358,20 @@ draw_forecast_body() {
             wk_dx="$CENTRE_X"
 
             if [ "$i" = "$WK_TODAY" ]; then
-                # Today: knocked out of a black plate.
+                # Today: knocked out of a black plate — and drawn ON that
+                # plate, not bgless over it. Bgless left an empty black
+                # rectangle where the date should be: the one cell on the
+                # screen that has to be legible, reading as a hole. See
+                # draw_text().
                 fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
-                draw_text_reg "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "WHITE" "$wk_name"
-                draw_text_reg "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "WHITE" "$wk_day"
+                draw_text_reg_inv "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "$wk_name"
+                draw_text_reg_inv "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "$wk_day"
             else
                 wk_bg="GRAYE"
                 { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
                 fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
-                draw_text_reg "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "GRAY7" "$wk_name"
-                draw_text_reg "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "BLACK" "$wk_day"
+                draw_text_reg "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "GRAY7" "$wk_name"
+                draw_text_reg "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "BLACK" "$wk_day"
             fi
             wk_x=$((wk_x + WK_CELL_W))
         done

@@ -186,9 +186,23 @@ never scrolled off:
    it is for and the steps it ticks. `▸ Customise steps` unfolds the twelve
    individual toggles.
 4. **Run** — the button, and under it the steps it is about to run, by name.
+   **While a run is going, that button is STOP.** It is the only way to end
+   step 9: a serial monitor does not finish on its own, and the frozen window
+   has no console for miniterm's Ctrl-C. Pressing it terminates the step that
+   is running and skips whatever was queued behind it — the log says
+   `■ Stopped.` rather than reporting a failure, because nothing failed, and
+   names the steps that did not finish — not the one that had just finished
+   when the button was pressed. **Ctrl+R does the same thing the button does**,
+   whichever state it is in.
+
+   It reaches the steps that are not subprocesses too: step 8 uploads over
+   HTTP in a Python loop with no child to terminate, so it asks between files.
+   And it takes what the step started, not only the step: `pio run -t upload`
+   runs esptool in a subprocess of its own, and killing pio alone would leave
+   esptool holding the serial port that was just freed on purpose.
 
 On the right: **Run** (progress bar and log), **Settings** (device IP, upload
-and monitor baud, HTTP upload filter, USB CDC), **Build** (the feature list
+and monitor baud, which web asset copies to keep, USB CDC), **Build** (the feature list
 with a filter box, the ESP-NOW key, the node target), **WiFi** (provisioning)
 and **Help**.
 
@@ -339,7 +353,15 @@ values you pinned survive the switch.
   `pio run -t upload` reads the same value from the ini directly.
 - **device_ip** — Device IP for HTTP deploy (default: 192.168.4.1)
 - **steps** — Selected workflow steps
-- **upload_filter** — Which files to upload (all/gz/plain)
+- **upload_filter** — Which copies of the web assets reach the device
+  (all/gz/plain). Applies to **all three** web steps: step 1 writes
+  `data/www/` this way, step 7 images that directory to LittleFS, step 8
+  uploads it over HTTP. Change it and step 7 rebuilds the tree first rather
+  than flashing one built under the old setting — in **either** direction:
+  `gz` → `all` leaves the plain files missing just as `all` → `gz` leaves them
+  present, and both are a tree that does not match what was asked for. `gz` is what fits a 4 MB
+  board: about 270 KB against about 970 KB for both copies, out of a 1088 KB
+  LittleFS partition that also holds the logs.
 - **wipe_before_upload** — Delete /www before uploading (safety)
 - **ui_scale**, **ui_theme**, **steps_panel_open** — GUI only: interface scale
   (0.85–1.8), `Dark`/`Light`/`System`, and whether the step list is unfolded.

@@ -147,7 +147,7 @@ def _print_menu(cfg: dict[str, Any]) -> None:
         ("i", "Device IP      ", cfg.get("device_ip", "")),
         ("b", "Upload baud    ", _derived("baud", cfg.get("baud"))),
         ("m", "Monitor baud   ", _derived("monitor_speed", cfg.get("monitor_speed"))),
-        ("u", "HTTP upload    ", _UPLOAD_FILTER_LABELS.get(uf, uf)),
+        ("u", "Copies to flash", _UPLOAD_FILTER_LABELS.get(uf, uf)),
         ("w", "Wipe /www first", _green("YES — delete all before upload") if wipe else _dim("no")),
         ("U", "USB CDC on boot", usb_state),
     ]:
@@ -563,6 +563,12 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
                                    if cur in _UPLOAD_FILTERS else 0]
             cfg["upload_filter"] = nxt
             print(_dim(f"  → {_UPLOAD_FILTER_LABELS[nxt]}"))
+            # Both destinations, not just the HTTP one it used to name. Step 1
+            # writes the tree this way and step 7 images the tree, so this is
+            # what a LittleFS upload costs on flash as much as what an HTTP
+            # upload sends.
+            print(_dim("    Applies to the LittleFS image (step 7) and the "
+                       "HTTP upload (step 8) alike."))
             time.sleep(0.5)
 
         elif choice == "F":          # uppercase F — build features
@@ -676,7 +682,16 @@ def run_steps(cfg: dict[str, Any]) -> None:
     # box: three declined steps would be wider than the rule, and a box that
     # does not close is what the padding above exists to prevent.
     declined = manager.skipped
-    if not success:
+    if manager.cancelled:
+        # A FOURTH LINE, and the reason it is not red: run_steps() answers
+        # False for a stopped run as well as a failed one, so without this the
+        # CLI would put "Some steps failed" over a run somebody stopped on
+        # purpose. Nothing in this menu calls cancel() today — there is no
+        # STOP on a terminal, where Ctrl-C is the stop — but the manager can
+        # be stopped by whoever holds it, and a banner that lies about that
+        # is a banner waiting to lie.
+        paint, msg = _yellow, "■  Stopped. See logs above."
+    elif not success:
         paint, msg = _red, "✗  Some steps failed. See logs above."
     elif declined:
         paint, msg = _yellow, "!  Finished — but some steps were declined."

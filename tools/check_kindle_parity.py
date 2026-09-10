@@ -204,6 +204,58 @@ def main():
                                 'a %dx%d image'
                                 % (rel, conf.get('GR_W'), conf.get('GR_H'), w, h))
 
+    # ── Every icon the collector can ask for exists on the panel ─────────────
+    #
+    # The page draws an SVG chosen by a range of WMO codes; the panel blits a
+    # BMP named after a code. weatherIconCode() reduces the one to the other,
+    # and the panel does no mapping at all — so every value it can return must
+    # be a file that is there. It was not: nothing reduced the code before, so
+    # a partly-cloudy afternoon (WMO 2) asked for fc_2_52.bmp, and the panel
+    # drew the circled question mark that means "no forecast".
+    # REPORTED, NEVER RAISED. This tool's contract is to print "FAIL: N
+    # place(s)…" and exit 1; a reformatted signature or a moved generator must
+    # come out as one of those lines, not as a traceback from str.index() or a
+    # missing file — the guard immediately below shows the intent was always
+    # to report shape changes rather than abort on them.
+    def read(rel):
+        try:
+            with open(os.path.join(ROOT, rel), encoding='utf-8') as fh:
+                return fh.read()
+        except OSError as exc:
+            problems.append('parity: cannot read %s (%s)' % (rel, exc))
+            return ''
+
+    fc = read('src/modules/ForecastModule.cpp')
+    m = re.search(r'int\s+weatherIconCode\s*\(\s*int\s+\w+\s*\)\s*\{'
+                  r'(.*?)\n\}', fc, re.S)
+    want = sorted({int(g) for g in re.findall(r'return\s+(-?\d+);', m.group(1))}) \
+        if m else []
+    if not m:
+        problems.append('parity: weatherIconCode() not found in '
+                        'ForecastModule.cpp — the function changed shape')
+    elif len(want) < 5:
+        problems.append('parity: weatherIconCode() returned %d codes — the '
+                        'function changed shape' % len(want))
+
+    gen = read('scripts/generate_kindle_icons.py')
+    m = re.search(r'RESOLUTIONS\s*=\s*\{(.*?)\}', gen, re.S)
+    if not m:
+        problems.append('parity: generate_kindle_icons.py no longer states its '
+                        'RESOLUTIONS')
+    else:
+        for res, main_sz, ol_sz in re.findall(
+                r'(\d+)\s*:\s*\((\d+),\s*(\d+)\)', m.group(1)):
+            for code in want:
+                for sz in (main_sz, ol_sz):
+                    f = os.path.join(ROOT, 'kindle/icons', res,
+                                     'fc_%d_%s.bmp' % (code, sz))
+                    if not os.path.isfile(f):
+                        problems.append(
+                            'kindle/icons/%s/fc_%d_%s.bmp is missing, and '
+                            'weatherIconCode() can return %d — the panel would '
+                            'draw the question mark'
+                            % (res, code, sz, code))
+
     if problems:
         print('FAIL: %d place(s) where the panel and the page disagree.\n'
               % len(problems))

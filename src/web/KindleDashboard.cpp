@@ -1382,9 +1382,26 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     const auto& fc = forecastModule.snapshot();
     kdShellVar(s, "FC_SUMMARY", fc.summary);
     s->printf("FC_CODE=%d\n", fc.code);
+    // FC_ICON, NOT FC_CODE, IS WHAT THE PANEL DRAWS WITH. It has eleven BMP
+    // files, one per range, and no way to reduce a code itself — so it looked
+    // for fc_2_52.bmp on a partly-cloudy afternoon, did not find it, and drew
+    // the circled question mark that means "no forecast at all". FC_CODE stays
+    // for anything that wants the raw number.
+    s->printf("FC_ICON=%d\n", weatherIconCode(fc.code));
     s->printf("FC_HIGH=%d\n", (int)roundf(fc.highC));
     s->printf("FC_LOW=%d\n", (int)roundf(fc.lowC));
     s->printf("FC_WIND=%d\n", (int)roundf(fc.windKph));
+
+    // How old the forecast is, formatted here rather than on the panel: the
+    // page draws "· 8 мин" beside the wind and the panel drew nothing, so the
+    // one line that says whether to believe the forecast was on one of the two
+    // screens. Formatted rather than sent as a number because the wording is
+    // the collector's language decision, like every other string it sends.
+    {
+        char age[16];
+        forecastAgeText(age, sizeof(age), fc.fetchedAt, (uint32_t)time(nullptr));
+        kdShellVar(s, "FC_AGE", age);
+    }
     for (int i = 0; i < 3; i++) {
         // forecastPeriodLabel(), NOT .label — the same call the HTML renderer
         // makes. The stored string was written when the provider was last
@@ -1397,6 +1414,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         kdShellVarN(s, "FC%d_LABEL", i, oll);
         s->printf("FC%d_LABELW=%u\n", i, kdAdvanceMille(oll));
         s->printf("FC%d_CODE=%d\n", i, fc.outlook[i].code);
+        s->printf("FC%d_ICON=%d\n", i, weatherIconCode(fc.outlook[i].code));
 
         // The temperature as it is DRAWN, degree included, because .per is
         // centred and what has to be measured is the whole string.
@@ -1410,10 +1428,11 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             s->printf("FC%d_LOW=\n", i);
     }
     #else
-    s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_HIGH=\nFC_LOW=\nFC_WIND=\n");
+    s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_ICON=-1\nFC_HIGH=\nFC_LOW=\n"
+             "FC_WIND=\nFC_AGE=\"\"\n");
     for (int i = 0; i < 3; i++)
-        s->printf("FC%d_LABEL=\"\"\nFC%d_LABELW=0\nFC%d_CODE=-1\n"
-                  "FC%d_TEMP=\nFC%d_TEMPW=0\nFC%d_LOW=\n", i, i, i, i, i, i);
+        s->printf("FC%d_LABEL=\"\"\nFC%d_LABELW=0\nFC%d_CODE=-1\nFC%d_ICON=-1\n"
+                  "FC%d_TEMP=\nFC%d_TEMPW=0\nFC%d_LOW=\n", i, i, i, i, i, i, i);
     #endif
 
     // ── UI labels ──

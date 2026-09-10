@@ -767,6 +767,123 @@ panel, which is the only instrument this had:
 | Twelve-hour clock, `9:05` without the leading zero, ISO dates | `kdFmtTime()` / `kdFmtDate()` | always `09:05`, always "27 august" |
 | Boxed / ruled / dated clock | four styles in CSS | one, always |
 | Hero, clock, forecast, footer, week numerals | 88 / 96 / 28 / 12 / 24 px | 84 / 88 / 26 / 11 / 22 |
+| Every string, at the size both files agree on | the em is 88 px | **the em is ~76 px** — `px=88` is a line height to FBInk, not an em |
+| Every gap computed from an advance | correct, the browser measures its own | a sixth too wide, so the headline's second value ran into the divider |
+| Today, in the week strip | white on black | **a black rectangle with nothing in it**, then a white box with a black date in it — see below: asking FBInk for white on black is what draws the opposite |
+| The forecast icon | an SVG chosen by a RANGE of WMO codes | a BMP named after the exact code — and there is no `fc_2` for partly cloudy, so: the question mark |
+| The wind line | `вятър 5 km/h · 8 мин` | the wind alone; nothing said how old the forecast was |
+
+### FBInk's `px` is a line height, not an em
+
+The single reason the panel looked worse than the page rather than different
+from it. FBInk sizes OpenType text with `stbtt_ScaleForPixelHeight(font, px)`,
+and stb_truetype documents that as
+
+    scale = pixels / (ascent - descent)
+
+— its `px` is the whole span from the top of the ascender to the bottom of the
+descender. CSS `font-size` is the em square, which for a text serif is some
+14–20 % smaller than that span. So `px=88` and `font-size:88px` are **not the
+same size**, `tools/check_kindle_parity.py` was right that both files said 88,
+and the panel still drew every string about a sixth small: thinner stems, more
+air between them, a screen made of correct numbers that looked cheap.
+
+It also moved things. The panel places a value after another by adding
+`size × advance-in-mille / 1000`, and the collector measures those advances in
+thousandths of the **em** — so while the em was a sixth smaller than the size,
+every one of those gaps was a sixth too wide. That is why the headline's
+`/ 993 hPa` sat far from the temperature and ran into the divider.
+
+`draw_text()` converts once, at the FBInk call, using `TEXT_PX_MILLE` from the
+layout file — `(ascent - descent) / unitsPerEm` in thousandths. Past that
+point one design pixel is one em pixel, which fixes the size and the
+arithmetic together. The `.conf` keeps the design's number, so the parity
+checker still compares like with like; the box is also started half its own
+growth higher, so correcting the size does not drop every string down the
+screen away from the coordinates it was tuned to.
+
+It is the one number to turn if the type ends up a hair large or small.
+
+Two things that were tuned against the old geometry moved with it, and are
+derived now rather than written down: `baseline_mille` — where a baseline
+falls below a design `top`, `0.800 × M − (M−1)/2` of the size, 848 at M=1.16
+— and the week strip's two rows, which are centred in their cell from the
+cell's height and the boxes' real heights. The layout still says how far
+apart the two rows sit; where the pair sits is worked out, so it stays
+centred whatever `TEXT_PX_MILLE` is. Left as they were, the day number sat
+five pixels from the top of its cell and two from the bottom, on the one row
+of seven identical boxes where three pixels of list is visible.
+
+### The icon the panel is sent is already reduced
+
+The page picks an SVG by a range — `code >= 61 && code <= 67` is rain. The
+panel has eleven BMP files, one per range, named after the range's
+representative, and no way in `sh` to reduce a code to its range. So it asked
+for the code it was given: Open-Meteo answers **2** for partly cloudy about as
+often as 1, there is no `fc_2_52.bmp`, and the fallback is `fc_-1` — the
+circled question mark that is supposed to mean "no forecast at all". Three of
+them across the outlook row, beside a browser page showing sun and cloud.
+
+`weatherIconCode()` does the reduction, in the collector, and is what
+`appendWeatherIcon()` switches on as well — so a range added there reaches both
+renderers at once. `/kindle/data` carries `FC_ICON` and `FC0..2_ICON` beside
+the raw `FC_CODE`, and the panel does no mapping at all. `check_kindle_parity.py`
+holds every value that function can return to a BMP that exists.
+
+### Reading what the panel actually drew
+
+`TRACE=1` in `dash.conf` writes every FBInk call to `kual.log`, beside the
+scripts, and draws nothing differently.
+
+THE PANEL IS THE ONE RENDERER NOBODY CAN WATCH. The tests drive it against a
+fake FBInk that records its argv; a browser page has a devtools pane; the
+thing on the wall has neither. So a report that one cell "does not look right"
+arrives as a photograph, and a photograph cannot tell a panel that drew the
+wrong thing from one that drew the right thing and had it come out wrong —
+which are different bugs with different fixes, in different files. One line
+per call is the difference between reading and guessing.
+
+A line per string, so it is off by default.
+
+### White text on a plate is asked for by inverting, not by naming the pens
+
+`-C WHITE -B BLACK` draws the **opposite** of what it says, and this took two
+attempts and a photograph to see.
+
+FBInk has a fast path in `print_ot()` for text whose two pens are pure black
+and pure white:
+
+    const short int layer_diff = (short int) (fgcolor - bgcolor);
+    if (abs(layer_diff) == 0xFFu) {
+            uint8_t ainv = 0xFFu;
+            if (is_inverted) { ainv = 0U; }
+            ...  pixel = lnPtr[k] ^ ainv;
+
+It skips blending and uses stb_truetype's coverage mask directly, XORed with
+`0xFF`. That XOR is the assumption that black-and-white text means BLACK ON
+WHITE unless `--invert` says otherwise — so the empty ground around the glyphs
+became white and the glyphs became black. On the panel: a white box with a
+black date in it, in the middle of the black plate meant to contain a white
+one. Asking for white on black is precisely the pair that triggers it.
+
+So the two inverted places — today's cell in the week strip, and the boxed
+clock — pass `-h`/`--invert` with the pens a NON-inverted call would use.
+`--invert` flips the mask and the pens together, so white-on-black comes out
+of both of FBInk's paths: the fast one, where the mask is used as-is, and the
+general blend, where the pens are swapped before it runs.
+
+It is also right on every Kindle. FBInk's own condition there reads
+
+    (isKindleLegacy && !is_inverted) || (!isKindleLegacy && is_inverted)
+
+— compensating for the legacy models' inverted colour map, so `--invert` means
+the same thing to the eye on a K3 as on a KT2, and the panel needs to know
+nothing about which it is running on.
+
+`-O`/`--bgless` stays right everywhere else: over a tier's own cleared white
+rectangle, it draws the glyphs and no box, so nothing rubs out what came
+before it. It does not take the fast path at all.
+
 
 ### Upper case, and why it has to be done at the collector
 

@@ -25,6 +25,8 @@ is why it saves and restores it.
 from __future__ import annotations
 
 import builtins
+import contextlib
+import re
 import io
 import shutil
 import subprocess
@@ -289,7 +291,323 @@ class _FakePopen:
     def wait(self, timeout=None):
         return 0
 
+    # A Popen has these, and _run_cmd() reaches for them on the paths a stop
+    # takes. A double that does not is a double that turns a code path into an
+    # AttributeError and reports it as the step failing.
+    pid = -1
+
+    def terminate(self):
+        pass
+
+    def kill(self):
+        pass
+
     calls: list = []
+
+
+class _NeverEndingPopen:
+    """A child that keeps talking until somebody terminates it — step 9.
+
+    `pio device monitor` does not finish. The GUI's worker thread sits in
+    _run_cmd()'s read loop over its output for as long as it runs, which is
+    for ever, and the only thing that ends it is the far end of the pipe
+    closing. That is what cancel() has to make happen, and it is not
+    observable with a Popen whose stdout is an empty string.
+    """
+
+    def __init__(self, cmd, **kwargs):
+        _NeverEndingPopen.last = self
+        self.cmd = list(cmd)
+        self.terminated = threading.Event()
+        self.killed = False
+        self.stdout = self
+        self.returncode = None
+
+    # Read as an iterator, the way _run_cmd() does: a line a millisecond
+    # until terminate() closes it.
+    def __iter__(self):
+        while not self.terminated.is_set():
+            time.sleep(0.001)
+            yield "monitoring…\n"
+
+    def close(self):
+        pass
+
+    def terminate(self):
+        self.terminated.set()
+        self.returncode = -15
+
+    def kill(self):
+        self.killed = True
+        self.terminate()
+
+    def wait(self, timeout=None):
+        # Never returns until terminated, exactly like the real thing.
+        self.terminated.wait(timeout if timeout is not None else 10)
+        if not self.terminated.is_set():
+            raise subprocess.TimeoutExpired(self.cmd, timeout or 10)
+        return self.returncode if self.returncode is not None else 0
+
+    last: "Optional[_NeverEndingPopen]" = None
+
+
+def run_stop(app) -> None:
+    """The serial monitor, and getting the window back afterwards.
+
+    WHY THIS EXISTS
+    ---------------
+    Step 9 is a monitor: it runs until stopped. The GUI had nothing that
+    stopped it — RUN went grey and said "⏳ Running…", the worker thread sat
+    in the read loop, and `pio device monitor` kept the serial port until the
+    window was killed. Nothing else could be flashed in the meantime, and
+    nothing on screen suggested that killing the window was the way out.
+    """
+    print("Driving the stop button:")
+
+    mgr = dc.DeployManager(app.cfg)
+    said: list[str] = []
+    mgr.on_step_output = lambda line, end="\n": said.append(line)
+    mgr.pio = "pio"                       # CI has no PlatformIO installed
+
+    real_popen = dc.subprocess.Popen
+    finished = threading.Event()
+    result: dict = {}
+    try:
+        dc.subprocess.Popen = _NeverEndingPopen
+        _NeverEndingPopen.last = None
+
+        def worker():
+            result["ok"] = mgr.run_steps([9])
+            finished.set()
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        # Wait for the monitor to actually be running before stopping it —
+        # stopping something that has not started is a different test, below.
+        deadline = time.time() + 5
+        while _NeverEndingPopen.last is None and time.time() < deadline:
+            time.sleep(0.01)
+        check(_NeverEndingPopen.last is not None,
+              "the monitor step starts a child that does not end on its own")
+        check(not finished.wait(0.2),
+              "and the run does not finish while it is up")
+
+        mgr.cancel()
+        check(finished.wait(5), "cancel() ends the run")
+        check(_NeverEndingPopen.last.terminated.is_set(),
+              "by terminating the child rather than abandoning it")
+        check(not _NeverEndingPopen.last.killed,
+              "and SIGTERM was enough — nothing had to be killed outright")
+    finally:
+        dc.subprocess.Popen = real_popen
+
+    check(mgr.cancelled is True, "the manager says it was stopped")
+    check(result.get("ok") is False,
+          "and does not claim every step completed")
+    log = "".join(said)
+    check("Stopped" in log, f"the log says so: {log.strip().splitlines()[-1:]}")
+    check("failed" not in log.lower(),
+          "and does not call it a failure — somebody pressed the button")
+
+    # ── A stop between two steps ────────────────────────────────────────────
+    #
+    # cancel() can land after one step's child has exited and before the next
+    # one is launched. The flag is what carries it across that gap; without
+    # the check at the top of the loop the next step started anyway.
+    mgr2 = dc.DeployManager(app.cfg)
+    said2: list[str] = []
+    mgr2.on_step_output = lambda line, end="\n": said2.append(line)
+    mgr2.pio = "pio"
+    _FakePopen.calls = []
+    real_popen = dc.subprocess.Popen
+    try:
+        dc.subprocess.Popen = _FakePopen
+
+        # Cancelled from the first step's own completion callback, which is
+        # exactly the gap this is about: step 4's child has exited, step 5's
+        # has not been launched. (Cancelling BEFORE run_steps is the next
+        # case below, and pre-cancelling here would make this one test that
+        # instead — step 4 would not run either.)
+        def stop_after_first(step, rc):
+            mgr2.cancel()
+        mgr2.on_step_complete = stop_after_first
+        mgr2.run_steps([4, 5, 6])
+    finally:
+        dc.subprocess.Popen = real_popen
+    check(len(_FakePopen.calls) == 1,
+          f"a stop during step 4 does not start steps 5 and 6 "
+          f"({len(_FakePopen.calls)} command(s) ran)")
+    check(mgr2.cancelled is True, "and the run is reported as stopped")
+    # NAMING ONLY WHAT REALLY DID NOT FINISH. Step 4 ran to the end here — the
+    # stop came from its own completion callback — so listing it as unfinished
+    # would tell the reader a compile they watched succeed did not happen.
+    stopped_line = "".join(l for l in said2 if "Stopped" in l)
+    check("Step(s) 5, 6 did not finish" in stopped_line,
+          f"and names the two that did not, not the one that did "
+          f"({stopped_line.strip()!r})")
+
+    # ── A stop pressed before the run has started ───────────────────────────
+    #
+    # The window is milliseconds wide — between the click on RUN and the
+    # worker building its manager — and a button that quietly does nothing is
+    # the bug being fixed, not a smaller version of it. run_steps() must
+    # therefore NOT clear a flag it finds already set, which it used to.
+    mgr3 = dc.DeployManager(app.cfg)
+    mgr3.on_step_output = lambda line, end="\n": None
+    mgr3.pio = "pio"
+    _FakePopen.calls = []
+    real_popen = dc.subprocess.Popen
+    try:
+        dc.subprocess.Popen = _FakePopen
+        mgr3.cancel()
+        early = mgr3.run_steps([4, 5, 6])
+    finally:
+        dc.subprocess.Popen = real_popen
+    check(len(_FakePopen.calls) == 0,
+          f"a stop before the run starts runs nothing at all "
+          f"({len(_FakePopen.calls)} command(s) ran)")
+    check(mgr3.cancelled is True and early is False,
+          "and is still reported as stopped rather than as a clean finish")
+
+    # ── The stopped step is not counted as a done one ───────────────────────
+    #
+    # The monitor emits its completion like every other step, so a run of one
+    # step that was stopped reported "Stopped after 1 of 1" over a log saying
+    # step 9 did not finish. The GUI's own callback is what has to know.
+    # The counter lives in a closure inside _on_run(), so what is asserted
+    # here is the rule and that the window applies it. Matched as a pattern
+    # rather than as one exact line, so reformatting the guard is not a
+    # failure — only removing it is.
+    gui_src = (ROOT / "tools" / "deploy_gui.py").read_text(encoding="utf-8")
+    counter = re.search(r"def completed\(step, rc\):(.*?)\n\n", gui_src, re.S)
+    body = counter.group(1) if counter else ""
+    check(bool(counter), "the window has a per-step completion callback")
+    check(re.search(r"rc\s*!=\s*RC_CANCELLED", body) is not None,
+          "and does not count a step that was stopped as one that finished")
+    check("done[0] += 1" in body,
+          "  while still counting the ones that did")
+
+    # ── One "Stopped." in the log, not two ──────────────────────────────────
+    check(gui_src.count('_log("■ Stopped.")') == 0,
+          "the window does not repeat the line run_steps() already logged")
+    core_src = (ROOT / "tools" / "deploy_core.py").read_text(encoding="utf-8")
+    check('"■ Stopped.' in core_src,
+          "  which it does log, with which steps did not finish")
+
+    # ── Ctrl+R is the button ────────────────────────────────────────────────
+    #
+    # It used to do nothing at all while running, so the one step that never
+    # ends could be started from the keyboard and not stopped from it.
+    binding = re.search(r'"<Control-r>",([^\n]*)', gui_src)
+    check(binding is not None and "_on_run_or_stop" in binding.group(1),
+          "Ctrl+R runs or stops, the same as the button it mirrors")
+
+    # ── Never the tool's own process group ──────────────────────────────────
+    #
+    # A child started without start_new_session shares this process's group —
+    # every one does, so a terminal's Ctrl-C reaches the whole job — so
+    # os.killpg() on it would SIGKILL the deploy tool, and from a terminal the
+    # entire foreground job. The step STOP exists for is the serial monitor,
+    # which is exactly that path.
+    check("killpg" not in core_src.replace("os.killpg() on it would", ""),
+          "cancel() never kills a process group, which would be this one")
+    check("_descendants" in core_src and "pgrep" in core_src,
+          "  it walks the tree instead, so esptool goes with pio")
+
+    # ── The CLI knows the third outcome too ─────────────────────────────────
+    cli_src = (ROOT / "tools" / "deploy.py").read_text(encoding="utf-8")
+    check("manager.cancelled" in cli_src,
+          "the CLI banner asks whether the run was stopped")
+    idx_c, idx_f = cli_src.index("manager.cancelled"), cli_src.index("Some steps failed")
+    check(idx_c < idx_f,
+          "  and asks before it decides the run failed")
+
+    # ── Step 8 has no child to terminate, so it asks the flag ───────────────
+    #
+    # Every other step is a subprocess that cancel() ends by terminating it.
+    # This one is a Python loop over a hundred files: STOP mid-upload went on
+    # uploading until it ran out of files.
+    s8 = core_src.split("def s8_upload_http")[1].split("\n    def ")[0]
+    check(s8.count("self._cancelled") >= 2,
+          f"the HTTP upload checks for a stop between files "
+          f"({s8.count('self._cancelled')} checks)")
+    wipe = core_src.split("def _http_wipe_www")[1].split("\n    def ")[0]
+    check("self._cancelled" in wipe,
+          "  and so does the wipe that can precede it")
+
+    # ── A rebuild inside step 7 is not a second step ────────────────────────
+    #
+    # s1_build_web() emits step 1's start and completion. Called from step 7
+    # it emitted them for a step the user did not select, and the progress bar
+    # counted past its own total: Quick flash is three steps and finished
+    # "4 of 3".
+    s7 = core_src.split("def s7_upload_fs")[1].split("\n    def ")[0]
+    check("s1_build_web" not in s7 and "_build_web_assets" in s7,
+          "step 7 rebuilds through the quiet helper, not through step 1")
+
+    mgr4 = dc.DeployManager(app.cfg)
+    seen: list = []
+    mgr4.on_step_output = lambda line, end="\n": None
+    mgr4.on_step_start = lambda step, name: seen.append(step)
+    mgr4.pio = "pio"
+    real_popen = dc.subprocess.Popen
+    try:
+        dc.subprocess.Popen = _FakePopen
+        mgr4._build_web_assets()
+    finally:
+        dc.subprocess.Popen = real_popen
+    check(seen == [],
+          f"and the helper announces no step of its own ({seen})")
+
+    # ── The button itself ───────────────────────────────────────────────────
+    #
+    # root.update() after each click because _notify() reaches the status bar
+    # through root.after(0, …) — without a turn of the event loop the label
+    # still holds what it said before, and every check below would be reading
+    # the previous frame.
+    check(app.run_btn.cget("text") == "▶   RUN", "the button reads RUN when idle")
+
+    app.running = True
+    app.manager = None
+    app._on_run_or_stop()
+    app.root.update()
+    check("stop requested" in app.status_label.cget("text").lower(),
+          f"clicking STOP before the manager exists remembers the press "
+          f"({app.status_label.cget('text')!r})")
+    check(app._stop_requested is True,
+          "and the worker will cancel the manager the moment it has one")
+    app._stop_requested = False
+
+    # A run in progress must not have its only stop taken away by an empty
+    # step list — _refresh_plan() disables RUN when nothing is ticked, and
+    # while running the button is not RUN.
+    app.run_btn.configure(state="normal", text="■   STOP")
+    app.cfg["steps"] = []
+    app._refresh_plan()
+    check(str(app.run_btn.cget("state")) == "normal",
+          "unticking every step mid-run leaves STOP clickable")
+
+    stopped: list = []
+    app.manager = type("M", (), {"cancel": lambda self: stopped.append(True)})()
+    app._on_run_or_stop()
+    app.root.update()
+    deadline = time.time() + 3
+    while not stopped and time.time() < deadline:
+        time.sleep(0.01)
+    check(bool(stopped), "and clicking it while running cancels the manager")
+    check("Stopping" in app.run_btn.cget("text"),
+          f"the button says what it is doing while it does it "
+          f"({app.run_btn.cget('text')!r})")
+
+    # Back to a state the rest of the file can work from.
+    app.running = False
+    app.manager = None
+    app.cfg["steps"] = [5, 6]
+    app._refresh_plan()
+    app.run_btn.configure(text="▶   RUN")
+    check(str(app.run_btn.cget("state")) == "normal",
+          "and once the run is over RUN comes back")
+    print()
 
 
 _UNANSWERED = object()
@@ -450,6 +768,124 @@ def run_prompts(app) -> None:
               "and the bootloader script asks the same helper, not a copy")
     finally:
         sys.platform = real_platform
+
+
+def run_web_filter(app) -> None:
+    """Which copies of the pages reach the device, over BOTH routes.
+
+    WHY THIS EXISTS
+    ---------------
+    The setting was applied in one place: step 8's HTTP upload loop, file by
+    file. Step 7 runs `pio run -t uploadfs`, which images data/www/ exactly
+    as it stands — so over USB the setting did nothing at all, and a tree with
+    both copies of every page is about 970 KB of a 4 MB C3's 1088 KB LittleFS
+    partition, before one row of CSV. Somebody choosing "compressed only" to
+    make it fit got both copies anyway and a full filesystem.
+    """
+    print("Driving the web asset filter:")
+
+    import build_web                                       # noqa: PLC0415
+
+    def _build(dst: Path, mode: str) -> dict:
+        """build_web.build(), without its per-file size report.
+
+        Forty lines per call and six calls below is two hundred and forty
+        lines of CI log saying what this test is not asking about.
+        """
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            return build_web.build(ROOT / "www", dst, filter_mode=mode)
+
+    sizes = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for mode in ("all", "gz", "plain"):
+            dst = Path(tmp) / mode
+            sizes[mode] = _build(dst, mode)["flash_bytes"]
+            check(dc.www_matches_filter(mode, dst),
+                  f"a tree built {mode!r} satisfies its own filter")
+            # EVERY other filter, "all" included. It used to be skipped here,
+            # on the grounds that "all" keeps whatever it finds — and that was
+            # the bug: switching gz → all left the plain files missing, and
+            # nothing noticed, so step 7 imaged the compressed-only tree at
+            # somebody who had just asked for both copies.
+            for other in ("all", "gz", "plain"):
+                if other == mode:
+                    continue
+                check(not dc.www_matches_filter(other, dst),
+                      f"and a {mode!r} tree is not mistaken for {other!r}")
+
+        # THE NUMBER THIS IS ALL ABOUT.
+        check(sizes["gz"] < sizes["all"] / 2,
+              f"compressed-only is less than half the flash of both "
+              f"({sizes['gz']} B vs {sizes['all']} B)")
+        check(sizes["plain"] < sizes["all"],
+              "and uncompressed-only is smaller than both, too")
+
+        # Switching filter must REPLACE the tree, not add to it. Built in
+        # place, one after the other, the way step 1 does on the second run.
+        dst = Path(tmp) / "switch"
+        _build(dst, "all")
+        _build(dst, "gz")
+        check(dc.www_matches_filter("gz", dst),
+              "rebuilding all → gz drops the plain siblings it replaced")
+        _build(dst, "all")
+        check(len(list(dst.rglob("*"))) > 0 and dc.www_matches_filter("all", dst),
+              "and gz → all puts them back")
+
+        # THE SWITCH THAT WAS NOT NOTICED. A gz tree with the filter set back
+        # to "all" has to read as not matching, or step 7 flashes it anyway.
+        gz_only = Path(tmp) / "gz"
+        check(not dc.www_matches_filter("all", gz_only),
+              "a compressed-only tree does not satisfy \"both copies\"")
+        check(not dc.www_matches_filter("all", Path(tmp) / "plain"),
+              "and neither does an uncompressed-only one")
+
+        # No holes: a binary has no .gz to be kept instead of, and neither has
+        # a text file whose gzip came out bigger. Dropping the plain copy of
+        # either would be a tree missing a page rather than a smaller one.
+        gz_tree = Path(tmp) / "gz"
+        names = {p.name for p in gz_tree.rglob("*") if p.is_file()}
+        check(any(n.endswith(".gz") for n in names), "the gz tree has .gz files")
+        for p in (Path(tmp) / "all").rglob("*"):
+            if not p.is_file() or p.suffix == ".gz":
+                continue
+            rel = p.relative_to(Path(tmp) / "all")
+            served = (gz_tree / rel).exists() or (gz_tree / (str(rel) + ".gz")).exists()
+            check(served, f"{rel} is still served by the gz tree")
+
+    # ── And that both steps honour it ───────────────────────────────────────
+    #
+    # Step 1 by passing it to build_web.py, step 7 by noticing a tree that
+    # does not match and rebuilding before it images anything.
+    app.cfg["upload_filter"] = "gz"
+    mgr = dc.DeployManager(app.cfg)
+    mgr.on_step_output = lambda line, end="\n": None
+    mgr.pio = "pio"
+    _FakePopen.calls = []
+    real_popen = dc.subprocess.Popen
+    try:
+        dc.subprocess.Popen = _FakePopen
+        mgr.s1_build_web()
+    finally:
+        dc.subprocess.Popen = real_popen
+    check(len(_FakePopen.calls) == 1, "step 1 runs one command")
+    if _FakePopen.calls:
+        cmd = _FakePopen.calls[0][0]
+        check("--filter" in cmd and cmd[cmd.index("--filter") + 1] == "gz",
+              f"and carries the filter to build_web.py ({cmd[-2:]})")
+
+    src_core = (ROOT / "tools" / "deploy_core.py").read_text(encoding="utf-8")
+    s7 = src_core.split("def s7_upload_fs")[1].split("def s8_")[0]
+    check("www_matches_filter" in s7,
+          "step 7 checks the tree against the filter before imaging it")
+    # Through the helper, not through step 1: a rebuild inside step 7 that
+    # announces step 1's completion makes the progress bar count past its own
+    # total. The block further down asserts that separately; here it is only
+    # that step 7 rebuilds at all.
+    check("_build_web_assets" in s7,
+          "  and rebuilds rather than flashing the wrong tree")
+    app.cfg["upload_filter"] = "all"
+    print()
 
 
 def run(app) -> None:
@@ -645,6 +1081,8 @@ def main() -> int:
         root.update()
         run_window(app)
         run_prompts(app)
+        run_stop(app)
+        run_web_filter(app)
         print("Driving the deploy GUI's build-feature widgets:")
         run(app)
     finally:

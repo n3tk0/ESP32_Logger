@@ -16,17 +16,31 @@ For each source file under www/:
   • .json / .txt → gzip only.
   • binary (.png .jpg .ico .woff …) → copied as-is (already compressed).
 
-Both the (possibly minified) plain file AND its `.gz` sibling are written.
-The firmware's serveStatic() probes for `.gz` first and emits
-Content-Encoding: gzip when the client supports it, falling back to the
-plain file otherwise (Pass 4 C1).
+WHICH COPIES GET WRITTEN — `--filter`
+    all    both the (possibly minified) plain file AND its `.gz` sibling.
+           The firmware's serveStatic() probes for `.gz` first and emits
+           Content-Encoding: gzip when the client supports it, falling back
+           to the plain file otherwise (Pass 4 C1).
+    gz     the `.gz` only, for any file where it came out smaller. HALVES
+           WHAT THE TREE COSTS ON FLASH, which is the whole reason this is a
+           setting: a 4 MB C3 has a LittleFS partition measured in hundreds
+           of kilobytes, and two copies of every page did not fit. The
+           firmware serves a gz-only tree — see the "flash-saving mode"
+           probe in WebServer.cpp — so nothing is lost but the fallback for
+           a client that cannot do gzip, and there has not been one of those
+           in fifteen years.
+    plain  no `.gz` at all. Debugging, and the same thing `--no-gzip` did.
+
+Binaries (.png .jpg .ico .woff …) are already compressed and are copied
+as-is under every filter — gzipping them makes them bigger.
 
 Stdlib only — no pip install needed.
 
 Usage:
-    python3 tools/build_web.py            # build dist/www/
-    python3 tools/build_web.py --clean    # remove dist/www/ first
-    python3 tools/build_web.py --no-gzip  # skip the .gz siblings (debug)
+    python3 tools/build_web.py                 # build dist/www/
+    python3 tools/build_web.py --clean         # remove dist/www/ first
+    python3 tools/build_web.py --filter gz     # one copy of each, .gz where it wins
+    python3 tools/build_web.py --no-gzip       # alias for --filter plain
 """
 
 from __future__ import annotations
@@ -141,15 +155,25 @@ def gzip_bytes(data: bytes) -> bytes:
     return gzip.compress(data, compresslevel=9)
 
 
-def build(src_root: Path, dst_root: Path, *, do_gzip: bool) -> dict:
+def build(src_root: Path, dst_root: Path, *, do_gzip: bool = True,
+          filter_mode: str = "all") -> dict:
     """Walk src_root and emit a flash-ready tree under dst_root.
+
+    `filter_mode` is which copies to keep — "all", "gz" or "plain"; see the
+    module docstring. `do_gzip=False` is the old spelling of "plain" and is
+    honoured for callers that still pass it.
 
     Returns a dict with byte totals for the size summary printed by main():
         in_bytes    — sum of source files
         plain_bytes — minified plain output (what serves to non-gzip clients)
         gz_bytes    — minified+gzipped output (what serves to gzip clients)
-        flash_bytes — total bytes consumed on LittleFS (plain + gz siblings)
+        flash_bytes — total bytes consumed on LittleFS
     """
+    if not do_gzip:
+        filter_mode = "plain"
+    if filter_mode not in ("all", "gz", "plain"):
+        raise ValueError(f"unknown filter {filter_mode!r}")
+    do_gzip = filter_mode != "plain"
     in_bytes = 0
     plain_bytes = 0
     gz_bytes = 0
@@ -187,21 +211,39 @@ def build(src_root: Path, dst_root: Path, *, do_gzip: bool) -> dict:
             print(f"error: {src} is not valid UTF-8 ({ex})", file=sys.stderr)
             sys.exit(1)
 
-        dst.write_bytes(out_bytes)
         plain_bytes += len(out_bytes)
-        flash_bytes += len(out_bytes)
 
         # Emit a `.gz` sibling for any text-y file so AsyncStaticWebHandler
         # can serve it with Content-Encoding: gzip.  Skip when the gzipped
         # size is larger than plain (rare but happens for tiny files).
         wire_bytes = len(out_bytes)
+        gz_path = dst.with_suffix(dst.suffix + ".gz")
+        gz: bytes | None = None
         if do_gzip and src.suffix.lower() in GZIP_TEXT_EXTS:
-            gz = gzip_bytes(out_bytes)
-            if len(gz) < len(out_bytes):
-                gz_path = dst.with_suffix(dst.suffix + ".gz")
-                gz_path.write_bytes(gz)
-                flash_bytes += len(gz)
-                wire_bytes = len(gz)
+            candidate = gzip_bytes(out_bytes)
+            if len(candidate) < len(out_bytes):
+                gz = candidate
+                wire_bytes = len(candidate)
+
+        # UNDER "gz", THE PLAIN FILE IS DROPPED — but only where there is a
+        # .gz to drop it in favour of. A binary has none, and a text file
+        # whose gzip came out bigger has none either, and writing neither
+        # copy of those would be a tree with holes in it rather than a
+        # smaller tree.
+        keep_plain = not (filter_mode == "gz" and gz is not None)
+        if keep_plain:
+            dst.write_bytes(out_bytes)
+            flash_bytes += len(out_bytes)
+        elif dst.exists():
+            # A previous build with a different filter left it there. The
+            # tree is what gets imaged onto LittleFS, so a stale plain
+            # sibling is the flash this filter was chosen to save.
+            dst.unlink()
+        if gz is not None:
+            gz_path.write_bytes(gz)
+            flash_bytes += len(gz)
+        elif gz_path.exists():
+            gz_path.unlink()          # same, the other way round
         gz_bytes += wire_bytes
 
         rel_pct = 100.0 * wire_bytes / max(1, len(raw))
@@ -296,8 +338,12 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--clean", action="store_true",
                    help="remove dist/www/ before building")
+    p.add_argument("--filter", choices=("all", "gz", "plain"), default="all",
+                   help="which copies to keep: all (plain + .gz), gz (one "
+                        "copy each, .gz where it is smaller — halves what the "
+                        "tree costs on flash), plain (no .gz at all)")
     p.add_argument("--no-gzip", action="store_true",
-                   help="skip producing .gz siblings (debugging)")
+                   help="alias for --filter plain (kept for old call sites)")
     p.add_argument("--src", default=str(SRC),
                    help="source directory (default: www/)")
     p.add_argument("--dst", default=str(DST),
@@ -320,8 +366,9 @@ def main() -> int:
 
     dst_root.mkdir(parents=True, exist_ok=True)
 
-    print(f"[build_web] {src_root} -> {dst_root}")
-    totals = build(src_root, dst_root, do_gzip=not args.no_gzip)
+    mode = "plain" if args.no_gzip else args.filter
+    print(f"[build_web] {src_root} -> {dst_root}  (filter: {mode})")
+    totals = build(src_root, dst_root, filter_mode=mode)
 
     in_b   = totals["in_bytes"]
     wire_b = totals["gz_bytes"]
@@ -330,7 +377,10 @@ def main() -> int:
     print()
     print(f"[build_web] source : {in_b:>9} B")
     print(f"[build_web] wire   : {wire_b:>9} B  ({wire_pct:.1f}% of source - what gzip-aware browsers download)")
-    print(f"[build_web] flash  : {flash_b:>9} B  (plain + .gz siblings on LittleFS)")
+    what = {"all":   "plain + .gz siblings",
+            "gz":    ".gz only where it is smaller",
+            "plain": "plain only"}[mode]
+    print(f"[build_web] flash  : {flash_b:>9} B  ({what} on LittleFS)")
     # `relative_to(ROOT)` raises ValueError when --dst points outside the
     # project root (gemini review PR #49); fall back to the absolute path
     # so the line still reads sensibly.
