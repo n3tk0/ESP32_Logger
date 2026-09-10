@@ -157,6 +157,22 @@ int weatherIconCode(int code) {
     return -1;                          // a code no range claims
 }
 
+// How old the forecast is, in the words the reader chose.
+//
+// ONE FORMATTER, TWO RENDERERS — the same rule weatherIconCode() exists for,
+// and the same drift if it is written twice: change the sixty-minute threshold
+// or the wording in one place and the browser page and the panel print
+// different ages for the same snapshot. Empty when there is no fetch to
+// measure from, which is what both callers test.
+void forecastAgeText(char* out, size_t cap, uint32_t fetchedAt, uint32_t now) {
+    if (out == nullptr || cap == 0) return;
+    out[0] = '\0';
+    if (fetchedAt == 0 || now <= fetchedAt) return;
+    const uint32_t mins = (now - fetchedAt) / 60u;
+    if (mins < 60) snprintf(out, cap, "%u%s", (unsigned)mins, kdT(" min old", " мин"));
+    else           snprintf(out, cap, "%u%s", (unsigned)(mins / 60), kdT(" h old", " ч"));
+}
+
 void appendWeatherIcon(String& out, int code, int px) {
     out += F("<svg viewBox=\"0 0 64 64\" width=\""); out += px;
     out += F("\" height=\""); out += px;
@@ -640,13 +656,12 @@ void appendForecastSection(String& out) {
     }
     // Age, not the fetch time: it answers "should I believe this?" without the
     // reader doing arithmetic against a clock.
-    const uint32_t now = (uint32_t)time(nullptr);
-    if (d.fetchedAt > 0 && now > d.fetchedAt) {
-        const uint32_t ageMin = (now - d.fetchedAt) / 60u;
+    char age[16];
+    forecastAgeText(age, sizeof(age), d.fetchedAt, (uint32_t)time(nullptr));
+    if (age[0] != '\0') {
         if (isfinite(d.windKph)) out += F(" &middot; ");
         out += F("<span class=\"dim\">");
-        if (ageMin < 60) { out += ageMin;        out += kdT(" min old", " мин"); }
-        else             { out += (ageMin / 60); out += kdT(" h old",   " ч");   }
+        out += age;
         out += F("</span>");
     }
     out += F("</div></td>");

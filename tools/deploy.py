@@ -690,7 +690,7 @@ def run_steps(cfg: dict[str, Any]) -> None:
         # STOP on a terminal, where Ctrl-C is the stop — but the manager can
         # be stopped by whoever holds it, and a banner that lies about that
         # is a banner waiting to lie.
-        paint, msg = _yellow, "■  Stopped. See logs above for how far it got."
+        paint, msg = _yellow, "■  Stopped. See logs above."
     elif not success:
         paint, msg = _red, "✗  Some steps failed. See logs above."
     elif declined:

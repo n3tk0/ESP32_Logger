@@ -457,6 +457,10 @@ load_layout() {
     else
         . "$DASH_DIR/layout/600x800.conf"
     fi
+    # Derived once here rather than per string: both depend only on the layout,
+    # and a fork per draw is a fork this script has spent years avoiding.
+    TEXT_PX_MILLE="${TEXT_PX_MILLE:-1160}"
+    BASELINE_MILLE=$(( 800 * TEXT_PX_MILLE / 1000 - (TEXT_PX_MILLE - 1000) / 2 ))
     zones_derive
 }
 
@@ -532,21 +536,29 @@ fb() { fbink "$@" 2>/dev/null; }
 # thousandths — the number to turn if the type ends up a hair large or small,
 # and the only one. It lives in the layout file because the fonts a Kindle
 # carries differ by model.
-text_px() {
-    # A design size in CSS pixels → the px FBInk has to be asked for.
-    echo $(( $1 * ${TEXT_PX_MILLE:-1160} / 1000 ))
+# NO SUBSHELL, because this is called for every string on the panel and the
+# clock tier redraws every minute. `echo` in `$( )` is a fork, and three of
+# them per string is ~180 forks a redraw on a ten-year-old ARM — in a file
+# whose other comments count forks. It sets two globals instead, the way
+# centre_in() already sets CENTRE_X.
+#
+# Sets:  TX_PX  the px FBInk has to be asked for
+#        TX_TOP where the box has to start so the string stays optically where
+#               the layout put it (FBInk grows the box downward from `top`, so
+#               half the growth comes back off the top)
+text_geom() {
+    # $1=design top  $2=design size
+    TX_PX=$(( $2 * ${TEXT_PX_MILLE:-1160} / 1000 ))
+    TX_TOP=$(( $1 - (TX_PX - $2) / 2 ))
+    [ "$TX_TOP" -lt 0 ] && TX_TOP=0
 }
 
-text_top() {
-    # $1=design top $2=design size — where that box has to start so the string
-    # stays optically where the layout put it. FBInk grows the box downward
-    # from `top`, so half the growth comes back off the top. Its own function
-    # because the panel's tests have to compute the same number, and a second
-    # copy of this arithmetic is a second one to keep in step.
-    local t
-    t=$(( $1 - ($(text_px "$2") - $2) / 2 ))
-    [ "$t" -lt 0 ] && t=0
-    echo "$t"
+# The other direction: the design `top` that puts a string's BOX at $1.
+# For anything positioned by where its box has to sit rather than by where the
+# layout tuned its top — the week strip centres its two rows in the cell.
+box_top() {
+    # $1=wanted box top  $2=design size
+    BOX_TOP=$(( $1 + ($2 * ${TEXT_PX_MILLE:-1160} / 1000 - $2) / 2 ))
 }
 
 draw_text() {
@@ -568,13 +580,11 @@ draw_text() {
     # the plate it sits on.
     [ -n "$6" ] || return 0
     [ -n "$4" ] || return 0
-    local px top
-    px=$(text_px "$3")
-    top=$(text_top "$2" "$3")
+    text_geom "$2" "$3"
     if [ -n "$7" ]; then
-        fb -q -b -C "$5" -B "$7" -t regular="$4",px="$px",left="$1",top="$top" -- "$6"
+        fb -q -b -C "$5" -B "$7" -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$6"
     else
-        fb -q -b -O -C "$5" -t regular="$4",px="$px",left="$1",top="$top" -- "$6"
+        fb -q -b -O -C "$5" -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$6"
     fi
 }
 
@@ -717,8 +727,13 @@ draw_clock() {
             # drew perfectly. Nothing tests it today; redraw_all is one `&&`
             # away from turning that into a skipped repaint.
             if [ -n "${DATE:-}" ]; then
-                draw_text_reg "$CL_X" "$(( CL_Y + sz + ${CL_DATE_GAP:-6} ))" \
-                              "${CL_DATE_SZ:-14}" "GRAY4" "$DATE"
+                # UNDER THE TIME'S BOX, not under its design size. The box is
+                # TEXT_PX_MILLE tall and starts half the growth higher, so it
+                # ends at top + px - (px - sz)/2 — past CL_Y + sz, which ate
+                # the whole of CL_DATE_GAP and left the two rows touching.
+                text_geom "$CL_Y" "$sz"
+                draw_text_reg "$CL_X" "$(( TX_TOP + TX_PX + ${CL_DATE_GAP:-6} ))" \
+                    "${CL_DATE_SZ:-14}" "GRAY4" "$DATE"
             fi
             ;;
         *)  fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
@@ -794,9 +809,22 @@ draw_field() {
 # beside it. FBInk's top is the TOP of the text, so two sizes drawn at one y sit
 # on two baselines and the row looks dropped; the ascent is about eight tenths
 # of the size, which is where the 80 comes from.
+# How far below a design `top` the baseline lands, in thousandths of the size.
+#
+# THE 800 IS THE FONT'S; THE REST IS FBInk's. A serif's ascent is about eight
+# tenths of the span FBInk sizes by (ascent - descent), so with px=size the
+# baseline sat 0.80 x size below the box top and everything here used 80/100.
+# text_geom() moved that: the box is TEXT_PX_MILLE bigger and starts half the
+# growth higher, so the baseline is now
+#
+#     0.800 x M - (M - 1)/2   of the size, M = TEXT_PX_MILLE/1000
+#
+# — 848/1000 at M = 1.16. Derived rather than written down again, because it
+# is the constant that has to move when somebody turns TEXT_PX_MILLE and the
+# one nobody would think to. Computed once by load_layout, into BASELINE_MILLE.
 baseline_y() {
     # $1=row top  $2=largest size in the row  $3=this size
-    echo $(( $1 + ($2 - $3) * 80 / 100 ))
+    echo $(( $1 + ($2 - $3) * ${BASELINE_MILLE:-848} / 1000 ))
 }
 
 # Where something `w` pixels wide starts if it is to be centred in a cell that
@@ -1084,16 +1112,18 @@ draw_chart_axis() {
     local k y w x lab
 
     # FBInk's `top` is the TOP of the text, and the page positions these by
-    # their BASELINE — so each one is lifted by the ascent, which is about
-    # eight tenths of the size. Same eighty as baseline_y(), for the same
-    # reason: two sizes drawn at one y sit on two baselines.
+    # their BASELINE — so each one is lifted by the ascent. Through
+    # baseline_mille() rather than a copy of the number, for the reason on
+    # that function: it moves with TEXT_PX_MILLE and a written-down 80 would
+    # not.
+
     #
     # Down the side, right-aligned on the axis and sitting on its grid line.
     k=0
     while [ "$k" -le 4 ]; do
         eval "lab=\${CH_Y${k}:-}; w=\${CH_Y${k}W:-0}"
         if [ -n "$lab" ]; then
-            y=$(( GR_Y + CH_T + (CH_B - CH_T) * k / 4 + base - sz * 80 / 100 ))
+            y=$(( GR_Y + CH_T + (CH_B - CH_T) * k / 4 + base - sz * ${BASELINE_MILLE:-848} / 1000 ))
             x=$(( GR_X + CH_L - gap - sz * w / 1000 ))
             draw_text_reg "$x" "$y" "$sz" "GRAY7" "$lab"
         fi
@@ -1275,6 +1305,21 @@ draw_forecast_body() {
             # against the left edge of their cells, which on a row of identical
             # boxes is the one place a misalignment cannot hide. The widths are the
             # collector's — see draw_field() for why they are not ${#var}.
+            # CENTRED IN THE CELL VERTICALLY TOO, not only across it. The two
+            # offsets in the layout were tuned when a box was exactly its
+            # design size; text_geom() made the day's box 27 px instead of 24,
+            # so the pair ended up 5 px from the top of the cell and 2 from the
+            # bottom — the one row of identical boxes where three pixels of
+            # list is visible. The layout keeps the SPACING between the two
+            # rows; where the pair sits is derived, so it stays centred
+            # whatever TEXT_PX_MILLE is set to.
+            wk_gap=$(( WK_DAY_OFFSET - WK_NAME_OFFSET ))
+            wk_dh=$(( WK_DAY_SZ * TEXT_PX_MILLE / 1000 ))
+            wk_top=$(( WK_Y + (WK_CELL_H - wk_gap - wk_dh) / 2 ))
+            [ "$wk_top" -lt "$WK_Y" ] && wk_top="$WK_Y"
+            box_top "$wk_top" "$WK_NAME_SZ";            wk_ny="$BOX_TOP"
+            box_top "$(( wk_top + wk_gap ))" "$WK_DAY_SZ"; wk_dy="$BOX_TOP"
+
             eval "wk_nw=\$WK${i}_NAMEW; wk_dw=\$WK${i}_DAYW"
             centre_in "$wk_x" "$WK_CELL_W" "$(( WK_NAME_SZ * ${wk_nw:-0} / 1000 ))"
             wk_nx="$CENTRE_X"
@@ -1288,14 +1333,14 @@ draw_forecast_body() {
                 # screen that has to be legible, reading as a hole. See
                 # draw_text().
                 fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
-                draw_text_reg_on "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "WHITE" "$wk_name" "BLACK"
-                draw_text_reg_on "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "WHITE" "$wk_day" "BLACK"
+                draw_text_reg_on "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "WHITE" "$wk_name" "BLACK"
+                draw_text_reg_on "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "WHITE" "$wk_day" "BLACK"
             else
                 wk_bg="GRAYE"
                 { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
                 fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
-                draw_text_reg "$wk_nx" "$((WK_Y + WK_NAME_OFFSET))" "$WK_NAME_SZ" "GRAY7" "$wk_name"
-                draw_text_reg "$wk_dx" "$((WK_Y + WK_DAY_OFFSET))" "$WK_DAY_SZ" "BLACK" "$wk_day"
+                draw_text_reg "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "GRAY7" "$wk_name"
+                draw_text_reg "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "BLACK" "$wk_day"
             fi
             wk_x=$((wk_x + WK_CELL_W))
         done

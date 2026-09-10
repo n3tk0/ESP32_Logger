@@ -354,6 +354,9 @@ validate_colours() {
     return 0
 }
 
+# px= as draw_text computes it, for the assertions below.
+px_of() { text_geom 0 "$1"; echo "$TX_PX"; }
+
 lines_of() { [ -s "$1" ] && wc -l < "$1" | tr -d ' ' || echo 0; }
 # grep -c always prints a count, including 0 — the `|| echo 0` this used to
 # carry appended a SECOND line on no-match, so "$n" became "0\n0" and every
@@ -610,11 +613,12 @@ check "$?" "and with no age, the wind alone"
 # said font-size:88px and drew a sixth small — and, because every gap is
 # computed as `size × advance-in-mille / 1000` against an em that was a sixth
 # smaller than the size, pushed the headline's second value into the divider.
-check "$([ "$(text_px 100)" -gt 100 ] && echo 0 || echo 1)" \
-      "a design size is asked of FBInk larger than itself ($(text_px 100) for 100)"
-check "$([ "$(text_px 100)" -le 130 ] && echo 0 || echo 1)" \
-      "  and not by more than a line height can plausibly be ($(text_px 100))"
-check "$([ "$(text_top 200 100)" -lt 200 ] && echo 0 || echo 1)" \
+text_geom 200 100
+check "$([ "$TX_PX" -gt 100 ] && echo 0 || echo 1)" \
+      "a design size is asked of FBInk larger than itself ($TX_PX for 100)"
+check "$([ "$TX_PX" -le 130 ] && echo 0 || echo 1)" \
+      "  and not by more than a line height can plausibly be ($TX_PX)"
+check "$([ "$TX_TOP" -lt 200 ] && echo 0 || echo 1)" \
       "the box starts higher by half its growth, so the string does not drop"
 ( # Every layout carries the ratio, and in a band a real font can be in.
   ok=0
@@ -867,16 +871,49 @@ load_layout
   # WK_CELL_W cell starting at WK_X.
   nx=$(( WK_X + (WK_CELL_W - WK_NAME_SZ * 1240 / 1000) / 2 ))
   dx=$(( WK_X + (WK_CELL_W - WK_DAY_SZ * 1000 / 1000) / 2 ))
+  # The pair is centred in the cell now, not hung off the layout's two offsets:
+  # text_geom() made the day's box taller than its design size, which left the
+  # two rows 5 px from the top and 2 from the bottom.
+  wk_gap=$(( WK_DAY_OFFSET - WK_NAME_OFFSET ))
+  wk_dh=$(( WK_DAY_SZ * TEXT_PX_MILLE / 1000 ))
+  wk_ny_want=$(( WK_Y + (WK_CELL_H - wk_gap - wk_dh) / 2 ))
+  wk_dy_want=$(( wk_ny_want + wk_gap ))
+  # Really centred: the space above the first box equals the space under the
+  # second, to a pixel.
+  wk_nh=$(( WK_NAME_SZ * TEXT_PX_MILLE / 1000 ))
+  above=$(( wk_ny_want - WK_Y ))
+  below=$(( WK_Y + WK_CELL_H - wk_dy_want - wk_dh ))
+  [ "$above" -ge 0 ] && [ "$below" -ge 0 ] || exit 6
+  [ $(( above - below )) -le 1 ] && [ $(( below - above )) -le 1 ] || exit 7
   [ "$nx" -gt "$WK_X" ] || exit 1                  # it really is inset
-  grep -q -- "left=$nx,top=$(text_top "$(( WK_Y + WK_NAME_OFFSET ))" "$WK_NAME_SZ")" "$FBINK_LOG" || exit 2
-  grep -q -- "left=$dx,top=$(text_top "$(( WK_Y + WK_DAY_OFFSET ))" "$WK_DAY_SZ")" "$FBINK_LOG" || exit 3
+  grep -q -- "left=$nx,top=$wk_ny_want" "$FBINK_LOG" || exit 2
+  grep -q -- "left=$dx,top=$wk_dy_want" "$FBINK_LOG" || exit 3
   # .wd-d carries no font-weight on the page, so the numeral is set in the
   # REGULAR face. -t names its file as `regular=` whichever face it is, so the
   # assertion has to be on the path — the bold one must not appear at this size.
-  grep -q -- "regular=$FONT_REG,px=$(text_px "$WK_DAY_SZ")," "$FBINK_LOG" || exit 4
-  grep -q -- "regular=$FONT_BOLD,px=$(text_px "$WK_DAY_SZ")," "$FBINK_LOG" && exit 5
+  grep -q -- "regular=$FONT_REG,px=$(px_of "$WK_DAY_SZ")," "$FBINK_LOG" || exit 4
+  grep -q -- "regular=$FONT_BOLD,px=$(px_of "$WK_DAY_SZ")," "$FBINK_LOG" && exit 5
   exit 0 )
 check "$?" "the week strip is centred in its cells and set regular, as the page sets it"
+
+# BOTH PANELS. The 600x800 numbers happen to divide evenly; the check that
+# matters is that the derivation centres whatever sizes a layout carries — the
+# 1072 one has a 20 px name where 600 has 11, and the two offsets it was tuned
+# with are not the ones that centre it now.
+( ok=0
+  for res in 600x800 1072x1448; do
+      RES_W=${res%x*}; RES_H=${res#*x}; load_layout
+      gap=$(( WK_DAY_OFFSET - WK_NAME_OFFSET ))
+      dh=$(( WK_DAY_SZ * TEXT_PX_MILLE / 1000 ))
+      top=$(( (WK_CELL_H - gap - dh) / 2 ))
+      below=$(( WK_CELL_H - top - gap - dh ))
+      [ "$top" -ge 0 ] && [ "$below" -ge 0 ] || ok=1
+      [ $(( top - below )) -le 1 ] && [ $(( below - top )) -le 1 ] || ok=1
+  done
+  exit $ok )
+check "$?" "and centred on both panels, not only the one whose numbers divide"
+RES_W=600; RES_H=800; load_layout
+load_kv "$DASH_TMP/data.txt" PAYLOAD
 
 # An older collector measures nothing. Falling back to the left edge is what
 # this always did, and is better than centring on a width of zero.
@@ -885,7 +922,10 @@ check "$?" "the week strip is centred in its cells and set regular, as the page 
         WK3_NAMEW WK3_DAYW WK4_NAMEW WK4_DAYW WK5_NAMEW WK5_DAYW \
         WK6_NAMEW WK6_DAYW
   draw_forecast_body
-  grep -q -- "left=$WK_X,top=$(( WK_Y + WK_NAME_OFFSET ))" "$FBINK_LOG" || exit 1 )
+  wk_gap=$(( WK_DAY_OFFSET - WK_NAME_OFFSET ))
+  wk_dh=$(( WK_DAY_SZ * TEXT_PX_MILLE / 1000 ))
+  wk_ny_want=$(( WK_Y + (WK_CELL_H - wk_gap - wk_dh) / 2 ))
+  grep -q -- "left=$WK_X,top=$wk_ny_want" "$FBINK_LOG" || exit 1 )
 check "$?" "with no widths it falls back to the left edge rather than to nonsense"
 load_kv "$DASH_TMP/data.txt" PAYLOAD
 
@@ -915,10 +955,10 @@ check "$?" "the indoor hairline is #d8d8d8, not a section rule"
 # o where the superscript should be, and pushed everything after it right.
 ( reset_log
   draw_field 10 20 100 0 "21.0" "°" "" 2000 330 BLACK
-  grep -q -- "px=$(text_px 34)," "$FBINK_LOG" || exit 1
+  grep -q -- "px=$(px_of 34)," "$FBINK_LOG" || exit 1
   reset_log
   draw_field 10 20 100 0 "1008" "hPa" "" 2000 1600 BLACK
-  grep -q -- "px=$(text_px 42)," "$FBINK_LOG" || exit 2
+  grep -q -- "px=$(px_of 42)," "$FBINK_LOG" || exit 2
   exit 0 )
 check "$?" "the degree is set smaller than a spelt-out unit, as the page sets it"
 reset_log
@@ -965,7 +1005,7 @@ check "$?" "with 08 and 09 read as decimal, not as bad octal"
 # a framebuffer has.
 ( reset_log
   CLOCK_STYLE=0 draw_clock "12:34"
-  grep -q -- "px=$(text_px "$CL_SIZE")," "$FBINK_LOG" || exit 1
+  grep -q -- "px=$(px_of "$CL_SIZE")," "$FBINK_LOG" || exit 1
   grep -q -- "-B	BLACK" "$FBINK_LOG" && exit 2       # no plate
   exit 0 )
 check "$?" "the plain clock is the time at its full size and nothing else"
@@ -975,7 +1015,7 @@ check "$?" "the plain clock is the time at its full size and nothing else"
   # A black plate filling the clock rectangle, with the time knocked out of it.
   grep -q -- "-B	BLACK	-k	top=$Z_CLOCK_Y,left=$Z_CLOCK_X,width=$Z_CLOCK_W,height=$Z_CLOCK_H" "$FBINK_LOG" || exit 1
   grep -q -- "-C	WHITE" "$FBINK_LOG" || exit 2
-  grep -q -- "px=$(text_px "$CL_SZ_BOXED")," "$FBINK_LOG" || exit 3
+  grep -q -- "px=$(px_of "$CL_SZ_BOXED")," "$FBINK_LOG" || exit 3
   # Centred, not against the left edge — CLOCK_ADVW is what centres it.
   left=$(sed -n 's/.*-C	WHITE	-B	BLACK	-t	[^	]*left=\([0-9]*\),.*/\1/p' "$FBINK_LOG" | head -1)
   [ -n "$left" ] && [ "$left" -gt "$CL_X" ] || exit 4 )
@@ -984,13 +1024,13 @@ check "$?" "the boxed clock is knocked out of a plate and centred on it"
 ( reset_log
   CLOCK_STYLE=2 draw_clock "12:34"
   grep -q -- "-k	top=$Z_CLOCK_Y,left=$Z_CLOCK_X,width=$Z_CLOCK_W,height=$RULE_H" "$FBINK_LOG" || exit 1
-  grep -q -- "px=$(text_px "$CL_SZ_RULED")," "$FBINK_LOG" || exit 2 )
+  grep -q -- "px=$(px_of "$CL_SZ_RULED")," "$FBINK_LOG" || exit 2 )
 check "$?" "the ruled clock has a hairline over it and is set smaller"
 
 ( reset_log
   CLOCK_STYLE=3 draw_clock "12:34"
-  grep -q -- "px=$(text_px "$CL_SZ_DATED")," "$FBINK_LOG" || exit 1
-  grep -q -- "px=$(text_px "$CL_DATE_SZ")," "$FBINK_LOG" || exit 2
+  grep -q -- "px=$(px_of "$CL_SZ_DATED")," "$FBINK_LOG" || exit 1
+  grep -q -- "px=$(px_of "$CL_DATE_SZ")," "$FBINK_LOG" || exit 2
   grep -q "24 MARCH" "$FBINK_LOG" || exit 3 )
 check "$?" "the dated clock takes its room from the time and puts the date under it"
 
@@ -999,7 +1039,7 @@ check "$?" "the dated clock takes its room from the time and puts the date under
 ( reset_log
   unset CLOCK_STYLE
   draw_clock "12:34"
-  grep -q -- "px=$(text_px "$CL_SIZE")," "$FBINK_LOG" || exit 1
+  grep -q -- "px=$(px_of "$CL_SIZE")," "$FBINK_LOG" || exit 1
   grep -q -- "-B	BLACK" "$FBINK_LOG" && exit 2
   exit 0 )
 check "$?" "and with no style at all it is the plain one, as it always was"

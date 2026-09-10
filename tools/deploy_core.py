@@ -117,6 +117,39 @@ def step_parts(step: int) -> tuple[str, str]:
     return STEP_DETAIL.get(step, ("", ""))
 
 
+def _descendants(pid: int) -> list[int]:
+    """Every process under `pid`, deepest first.
+
+    Walked with pgrep rather than a process group, because THE GROUP IS OURS.
+    A child started without start_new_session shares the deploy tool's own
+    process group — every child does, so that a terminal's Ctrl-C reaches the
+    whole job the way it always has — and os.killpg() on it would SIGKILL the
+    tool, and from a terminal the entire foreground job with it. The step STOP
+    exists for is the serial monitor, so that is the path it would have taken.
+
+    Deepest first so a parent cannot notice a dead child and start another.
+    Empty when pgrep is absent; the caller falls back to killing the child it
+    has.
+    """
+    out: list[int] = []
+    frontier = [pid]
+    # Bounded: a runaway or a cycle must not spin here.
+    for _ in range(8):
+        if not frontier:
+            break
+        kids: list[int] = []
+        for parent in frontier:
+            try:
+                r = subprocess.run(["pgrep", "-P", str(parent)],
+                                   capture_output=True, text=True, timeout=5)
+            except Exception:
+                return out
+            kids += [int(line) for line in r.stdout.split() if line.isdigit()]
+        out = kids + out
+        frontier = kids
+    return out
+
+
 def _kill_tree(proc) -> None:
     """Kill a child that would not take a SIGTERM, and what it started.
 
@@ -126,11 +159,10 @@ def _kill_tree(proc) -> None:
     stopped and expects to be free. `pio device monitor` is the exception:
     miniterm runs inside pio, so terminating pio is the whole of it.
 
-    Windows has no process groups a console app reliably answers, so the tree
-    is taken with taskkill, which ships with the OS. Everywhere else the child
-    was started in a session of its own (see _run_cmd) when it is safe to do
-    so, and the whole group goes at once; a child that was not gets the plain
-    kill it would have got anyway.
+    Windows has no process group a console app reliably answers, so the tree
+    goes to taskkill, which ships with the OS. Everywhere else the tree is
+    walked and killed from the leaves up — never by process group, which is
+    ours; see _descendants().
     """
     try:
         if sys.platform == "win32":
@@ -138,10 +170,12 @@ def _kill_tree(proc) -> None:
                            capture_output=True, timeout=10,
                            **_no_window())
             return
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
-            proc.kill()
+        for pid in _descendants(proc.pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass                    # already gone, or not ours to kill
+        proc.kill()
     except Exception:
         # Nothing left to try, and a cancel that cannot kill is still a
         # cancel: run_steps() stops either way.
@@ -314,8 +348,11 @@ _UPLOAD_FILTER_LABELS = {
 try:
     from build_web import GZIP_TEXT_EXTS as _GZIPPABLE      # noqa: E402
 except Exception:                                            # pragma: no cover
-    _GZIPPABLE = {".html", ".htm", ".css", ".js", ".json",
-                  ".txt", ".svg", ".xml", ".csv"}
+    # NOT A SECOND COPY OF THE LIST — that is what the import is here to
+    # avoid, and a stale copy would answer the question wrongly with nothing
+    # logged. None means "cannot tell", and the one caller treats that as
+    # "rebuild", which is the cheap direction.
+    _GZIPPABLE = None
 
 
 def www_matches_filter(uf: str, root: Path | None = None) -> bool:
@@ -371,6 +408,8 @@ def www_matches_filter(uf: str, root: Path | None = None) -> bool:
         return True
     # No .gz at all: either a tree with nothing worth gzipping in it, or a
     # plain-only build, and only the first of those satisfies either filter.
+    if _GZIPPABLE is None:
+        return False                    # cannot tell; rebuilding is cheap
     return not any(p.suffix.lower() in _GZIPPABLE
                    for p in root.rglob("*") if p.is_file())
 
@@ -631,6 +670,13 @@ class DeployManager:
         self._proc: Optional[subprocess.Popen] = None
         self._proc_lock = threading.Lock()
         self._cancelled = False
+        # The child cancel() actually terminated, so a step that had already
+        # finished when the stop arrived is not reported as cut short. Without
+        # it, STOP pressed in the instant after a compile succeeded made
+        # run_steps() log "Step 5 did not finish" for a compile the user had
+        # just watched succeed. The object rather than its pid: pids are
+        # reused, and identity is the question being asked.
+        self._killed_proc: Optional[subprocess.Popen] = None
 
     @property
     def cancelled(self) -> bool:
@@ -661,6 +707,7 @@ class DeployManager:
             proc = self._proc
         if proc is None:
             return
+        self._killed_proc = proc
         try:
             proc.terminate()
         except Exception:
@@ -892,13 +939,12 @@ class DeployManager:
                 bufsize=1,
                 env=env,
                 cwd=str(ROOT),
-                # A SESSION OF ITS OWN, so cancel() can take the child AND
-                # what it started — esptool under pio, which holds the serial
-                # port after its parent is gone. Not for the monitor: a new
-                # session has no controlling terminal, and that is where
-                # miniterm's own Ctrl-C comes from on the CLI.
-                **({} if (interactive or sys.platform == "win32")
-                   else {"start_new_session": True}),
+                # IN OUR OWN PROCESS GROUP, deliberately. A session of its
+                # own would put the child out of reach of the terminal's
+                # Ctrl-C — which on the CLI is the only stop there is, and
+                # which reaches pio AND the esptool under it precisely
+                # because they share this group. cancel() takes the tree by
+                # walking it instead; see _kill_tree().
                 **_no_window(inherits_console=interactive),
             )
         except Exception as exc:
@@ -928,7 +974,11 @@ class DeployManager:
             # not the same thing to whoever is reading the banner. terminate()
             # gives a negative rc on POSIX and 1 on Windows; neither is worth
             # reporting as an error the user should look into.
-            return RC_CANCELLED if self._cancelled else rc
+            #
+            # THIS process, not merely "a cancel happened": a stop that lands
+            # in the instant between a successful exit and this line must not
+            # turn that step into one that did not finish.
+            return RC_CANCELLED if self._killed_proc is process else rc
         except BaseException:
             process.terminate()
             try:
@@ -1166,6 +1216,15 @@ class DeployManager:
             self._log("Wiping /www on device…")
             deleted, failed = self._http_wipe_www(base)
             self._log(f"Deleted {deleted} file(s)" + (f", {failed} failed" if failed else "") + ".")
+            # It breaks on the flag, so it can come back having deleted half
+            # of /www. Saying "Deleted 12 file(s)." and then going on to
+            # create directories and upload nothing leaves the device empty
+            # and the log claiming the wipe was what was asked for.
+            if self._cancelled:
+                self._log("■ Stopped part-way through the wipe — /www is "
+                          "incomplete. Run step 8 again to fill it.")
+                self._emit_complete(8, RC_CANCELLED)
+                return RC_CANCELLED
 
         # Create directories
         self._http_mkdir(base, "/", "www")
@@ -1195,11 +1254,18 @@ class DeployManager:
             is_gz  = fpath.suffix == ".gz"
             is_bin = fpath.suffix.lower() in _BIN_EXT
 
-            # Apply filter
+            # Apply filter — BY THE SAME RULE build_web BUILDS BY, which is
+            # not "keep the .gz ones". Under `gz` it keeps the plain copy of
+            # any file that has no .gz to keep instead: a binary, or a text
+            # file whose gzip came out no smaller, or an extension it does not
+            # gzip at all (.map, .ttf, .webmanifest). Skipping those by name
+            # left the HTTP-uploaded /www missing files the LittleFS image
+            # from step 7 has — the two routes this was supposed to make agree.
             if not is_bin:
                 if uf == "gz" and not is_gz:
-                    skipped += 1
-                    continue
+                    if fpath.with_name(fpath.name + ".gz").exists():
+                        skipped += 1
+                        continue
                 if uf == "plain" and is_gz:
                     skipped += 1
                     continue

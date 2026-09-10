@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import builtins
 import contextlib
+import re
 import io
 import shutil
 import subprocess
@@ -290,6 +291,17 @@ class _FakePopen:
     def wait(self, timeout=None):
         return 0
 
+    # A Popen has these, and _run_cmd() reaches for them on the paths a stop
+    # takes. A double that does not is a double that turns a code path into an
+    # AttributeError and reports it as the step failing.
+    pid = -1
+
+    def terminate(self):
+        pass
+
+    def kill(self):
+        pass
+
     calls: list = []
 
 
@@ -462,21 +474,21 @@ def run_stop(app) -> None:
     # The monitor emits its completion like every other step, so a run of one
     # step that was stopped reported "Stopped after 1 of 1" over a log saying
     # step 9 did not finish. The GUI's own callback is what has to know.
-    done = [0]
-    def completed(step, rc):
-        if rc != dc.RC_CANCELLED:
-            done[0] += 1
-    completed(5, 0)
-    completed(9, dc.RC_CANCELLED)
-    check(done[0] == 1,
-          f"a step that returned {dc.RC_CANCELLED} is not counted as finished "
-          f"({done[0]} of 2)")
+    # The counter lives in a closure inside _on_run(), so what is asserted
+    # here is the rule and that the window applies it. Matched as a pattern
+    # rather than as one exact line, so reformatting the guard is not a
+    # failure — only removing it is.
     gui_src = (ROOT / "tools" / "deploy_gui.py").read_text(encoding="utf-8")
-    check("if rc != RC_CANCELLED:" in gui_src,
-          "and the window's own counter says the same")
+    counter = re.search(r"def completed\(step, rc\):(.*?)\n\n", gui_src, re.S)
+    body = counter.group(1) if counter else ""
+    check(bool(counter), "the window has a per-step completion callback")
+    check(re.search(r"rc\s*!=\s*RC_CANCELLED", body) is not None,
+          "and does not count a step that was stopped as one that finished")
+    check("done[0] += 1" in body,
+          "  while still counting the ones that did")
 
     # ── One "Stopped." in the log, not two ──────────────────────────────────
-    check(gui_src.count('self._log("■ Stopped.")') == 0,
+    check(gui_src.count('_log("■ Stopped.")') == 0,
           "the window does not repeat the line run_steps() already logged")
     core_src = (ROOT / "tools" / "deploy_core.py").read_text(encoding="utf-8")
     check('"■ Stopped.' in core_src,
@@ -486,8 +498,21 @@ def run_stop(app) -> None:
     #
     # It used to do nothing at all while running, so the one step that never
     # ends could be started from the keyboard and not stopped from it.
-    check("_on_run_or_stop()" in gui_src.split("<Control-r>")[1][:80],
+    binding = re.search(r'"<Control-r>",([^\n]*)', gui_src)
+    check(binding is not None and "_on_run_or_stop" in binding.group(1),
           "Ctrl+R runs or stops, the same as the button it mirrors")
+
+    # ── Never the tool's own process group ──────────────────────────────────
+    #
+    # A child started without start_new_session shares this process's group —
+    # every one does, so a terminal's Ctrl-C reaches the whole job — so
+    # os.killpg() on it would SIGKILL the deploy tool, and from a terminal the
+    # entire foreground job. The step STOP exists for is the serial monitor,
+    # which is exactly that path.
+    check("killpg" not in core_src.replace("os.killpg() on it would", ""),
+          "cancel() never kills a process group, which would be this one")
+    check("_descendants" in core_src and "pgrep" in core_src,
+          "  it walks the tree instead, so esptool goes with pio")
 
     # ── The CLI knows the third outcome too ─────────────────────────────────
     cli_src = (ROOT / "tools" / "deploy.py").read_text(encoding="utf-8")

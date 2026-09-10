@@ -1398,15 +1398,8 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // screens. Formatted rather than sent as a number because the wording is
     // the collector's language decision, like every other string it sends.
     {
-        const uint32_t now = (uint32_t)time(nullptr);
-        char age[16] = "";
-        if (fc.fetchedAt > 0 && now > fc.fetchedAt) {
-            const uint32_t mins = (now - fc.fetchedAt) / 60u;
-            if (mins < 60) snprintf(age, sizeof(age), "%u%s", (unsigned)mins,
-                                    kdT(" min old", " мин"));
-            else           snprintf(age, sizeof(age), "%u%s", (unsigned)(mins / 60),
-                                    kdT(" h old", " ч"));
-        }
+        char age[16];
+        forecastAgeText(age, sizeof(age), fc.fetchedAt, (uint32_t)time(nullptr));
         kdShellVar(s, "FC_AGE", age);
     }
     for (int i = 0; i < 3; i++) {

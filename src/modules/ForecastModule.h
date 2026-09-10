@@ -154,6 +154,11 @@ const char* forecastPeriodLabel(const ForecastModule::Period& p);
 /// The panel has eleven BMP files and no way to reduce a code itself, so the
 /// collector sends the reduced one. See the note on the definition.
 int  weatherIconCode(int code);
+
+/// How old a forecast is, formatted for the reader — "8 мин", "2 h old", or
+/// an empty string when there is no fetch to measure from. Written once
+/// because the browser page and the FBInk panel both print it.
+void forecastAgeText(char* out, size_t cap, uint32_t fetchedAt, uint32_t now);
 void appendWeatherIcon(String& out, int code, int px);
 
 #endif  // MODULE_FORECAST_ENABLED

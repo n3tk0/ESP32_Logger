@@ -804,6 +804,16 @@ screen away from the coordinates it was tuned to.
 
 It is the one number to turn if the type ends up a hair large or small.
 
+Two things that were tuned against the old geometry moved with it, and are
+derived now rather than written down: `baseline_mille` — where a baseline
+falls below a design `top`, `0.800 × M − (M−1)/2` of the size, 848 at M=1.16
+— and the week strip's two rows, which are centred in their cell from the
+cell's height and the boxes' real heights. The layout still says how far
+apart the two rows sit; where the pair sits is worked out, so it stays
+centred whatever `TEXT_PX_MILLE` is. Left as they were, the day number sat
+five pixels from the top of its cell and two from the bottom, on the one row
+of seven identical boxes where three pixels of list is visible.
+
 ### The icon the panel is sent is already reduced
 
 The page picks an SVG by a range — `code >= 61 && code <= 67` is rain. The
