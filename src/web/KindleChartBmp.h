@@ -29,8 +29,8 @@
 // BMP format: 14-byte file header + 40-byte info header + 64-byte palette
 // (16 entries × 4 bytes) + pixel data (bottom-up, 4-bit packed).
 //
-// The ESP32 cannot hold the full image in RAM (even at 560×200 it would be
-// 56 KB), so we stream it chunk by chunk using AsyncWebServer's chunked
+// The ESP32 cannot hold the full image in RAM (even at 560×220 it would be
+// 62 KB), so we stream it chunk by chunk using AsyncWebServer's chunked
 // response. Each chunk renders a few rows into a small stack buffer.
 
 // 16-shade greyscale palette, matched to the CSS values in the HTML dashboard.
@@ -103,10 +103,10 @@ namespace ChartBmp {
 /// The image served for a panel of this width. 1072-wide readers get the
 /// larger one; everything else the 600-wide panel's.
 inline uint16_t imageW(uint16_t panelW) { return (panelW > 600) ? 1000 : 560; }
-inline uint16_t imageH(uint16_t panelW) { return (panelW > 600) ? 360  : 200; }
+inline uint16_t imageH(uint16_t panelW) { return (panelW > 600) ? 396 : 220; }
 
 /// The plot area inside that image, in image pixels. The margins are the
-/// 600x200 design's, scaled with the image.
+/// 560x220 design's, scaled with the image.
 inline int marginL(uint16_t w) { return w * 40 / 560; }
 inline int marginR(uint16_t w) { return w - w * 4 / 560; }
 inline int marginT(uint16_t h) { return h * 10 / 200; }

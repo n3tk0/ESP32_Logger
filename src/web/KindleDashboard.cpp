@@ -28,7 +28,7 @@
 
 static constexpr int PAGE_W  = KINDLE_PAGE_W;
 static constexpr int CHART_W = kdPx(560);
-static constexpr int CHART_H = kdPx(200);
+static constexpr int CHART_H = kdPx(220);
 
 static const char* outdoorSensorId() {
     return (config.kindle.outdoorSensor[0] != '\0') ? config.kindle.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
@@ -1665,7 +1665,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     #define KD_N(n)   p += kdPx(n)
 
     KD_S("body{font-family:Bookerly,Caecilia,Georgia,'Times New Roman',serif;"
-         "margin:0;padding:");                 KD_N(20);
+         "margin:0;padding:");                 KD_N(14);
     KD_S("px ");                               KD_N(18);
     KD_S("px;background:#fff;color:#000;-webkit-text-size-adjust:none}"
          "*{box-sizing:border-box}"
@@ -1682,7 +1682,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // gradients and from tones too close together, not from flat
     // well-separated fills. Spaced this far apart each renders solid.
     KD_S(".top td{padding:");                  KD_N(2);
-    KD_S("px 0 ");                             KD_N(6);
+    KD_S("px 0 ");                             KD_N(4);
     KD_S("px}");
 
     // Two classes, not one: .top td above is (0,1,1) and would otherwise
@@ -1695,14 +1695,22 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // The badge sits on the heading's own line, pushed right. float and not
     // flex: this page is built for a browser that may be WebKit 531, where
     // flexbox does not exist. A float has worked since 1996.
+    // AND A NEGATIVE BOTTOM MARGIN, so a low battery never reflows the page.
+    // The badge is a fixed 22 px tall in a caption line that is 20; floats
+    // count towards the height of a table cell, so the two pixels it stood
+    // proud by moved everything under it down on exactly the readers whose
+    // battery is going. Pulling its margin box back inside the line makes the
+    // page the same height whether the badge is drawn or not, which is what
+    // tools/kindle_preview/README.md asks anyone changing this to check.
     KD_S(".bw{float:right;margin-top:"); KD_N(-2);
+    KD_S("px;margin-bottom:");           KD_N(-4);
     KD_S("px}");
 
     // ONE CAPTION STYLE FOR THE WHOLE PAGE. The group headings, the cell
     // captions and the section rules below all use it, so a reader who has
     // learnt what small tracked grey means on this page has learnt it once.
-    KD_S(".lab{font-size:");                   KD_N(10);
-    KD_S("px;letter-spacing:");                KD_N(3);
+    KD_S(".lab{font-size:");                   KD_N(14);
+    KD_S("px;letter-spacing:");                KD_N(2);
     KD_S("px;text-transform:uppercase;margin-bottom:"); KD_N(2);
     KD_S("px;color:#777;white-space:nowrap;overflow:hidden}");
 
@@ -1732,7 +1740,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // the page's mid grey rather than its dark one: it is context for the big
     // number above it, not a reading in its own right, and at #444 it competed
     // with the grid underneath. Switchable off entirely — see KSHOW_RANGE.
-    KD_S(".sub{font-size:");                   KD_N(14);
+    KD_S(".sub{font-size:");                   KD_N(17);
     KD_S("px;margin-top:");                    KD_N(4);
     KD_S("px;line-height:1.45;color:#777;white-space:nowrap;overflow:hidden}");
     KD_S(".dim{color:#777}");
@@ -1746,7 +1754,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // table-layout:fixed so the width attribute is obeyed. Without it the
     // browser sizes columns by content and a four-digit pressure beside a
     // two-digit humidity takes space the layout had allocated.
-    KD_S(".grid,.inrow{table-layout:fixed;margin-top:"); KD_N(10);
+    KD_S(".grid,.inrow{table-layout:fixed;margin-top:"); KD_N(8);
     KD_S("px}");
     KD_S(".grid td,.inrow td{padding:0 ");     KD_N(10);
     KD_S("px 0 0;vertical-align:top}");
@@ -1759,16 +1767,24 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // the last thing in every cell, so bottom alignment puts all three on one
     // edge and pushes the two captions up into the space the big one does not
     // use — which is the space its missing caption gave back.
-    KD_S(".inrow td{vertical-align:bottom}");
-    KD_S(".gv{font-size:");                    KD_N(31);
+    // AND CARRIES LESS RIGHT PADDING THAN THE GRID. The top block is a
+    // content-sized two-column table, so the widest headline the page draws —
+    // -12.4° / 100% — is also the arrangement that leaves the indoor row its
+    // narrowest. At 10 px of gutter the first cell had 90 px of content box for
+    // a "21.0°" that measures 94, and .cv clips: the degree sign, on the one
+    // indoor number anybody reads, simply was not drawn. 6 px is what fits it,
+    // and a 6 px gutter beside a legible degree beats a 10 px one beside none.
+    KD_S(".inrow td{vertical-align:bottom;padding-right:"); KD_N(6);
+    KD_S("px}");
+    KD_S(".gv{font-size:");                    KD_N(34);
     KD_S("px}");
     // Three across is a third of half a page, which "1008 hPa" with a tendency
     // arrow after it does not fit at the two-across size. The row carries the
     // class, so a page with three in one row and two in the next sets each row
     // at the size its own width can hold.
-    KD_S(".grid-3 .gv{font-size:");            KD_N(26);
+    KD_S(".grid-3 .gv{font-size:");            KD_N(27);
     KD_S("px}");
-    KD_S(".iv{font-size:");                    KD_N(28);
+    KD_S(".iv{font-size:");                    KD_N(31);
     KD_S("px}");
     // The first indoor field is the one the reader looks at, so it is larger by
     // TYPE and not by width — the columns stay equal, which is what keeps the
@@ -1815,27 +1831,27 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // page's section rules: it separates two things inside one column, where
     // .rule separates the columns from what is under them.
     KD_S(".inrule{border-top:");               KD_N(1);
-    KD_S("px solid #d8d8d8;margin:");          KD_N(10);
-    KD_S("px 0 ");                             KD_N(8);
+    KD_S("px solid #d8d8d8;margin:");          KD_N(8);
+    KD_S("px 0 ");                             KD_N(6);
     KD_S("px}");
 
     // Three rules on the page, so a few px each is what keeps the footer above
     // the fold. Measured, not guessed.
     KD_S(".rule{border-top:");                 KD_N(1);
-    KD_S("px solid #aaa;margin:");             KD_N(10);
-    KD_S("px 0 ");                             KD_N(7);
+    KD_S("px solid #aaa;margin:");             KD_N(8);
+    KD_S("px 0 ");                             KD_N(6);
     KD_S("px}");
-    KD_S(".sec{font-size:");                   KD_N(12);
+    KD_S(".sec{font-size:");                   KD_N(15);
     KD_S("px;letter-spacing:");                KD_N(4);
-    KD_S("px;text-transform:uppercase;margin-bottom:"); KD_N(8);
+    KD_S("px;text-transform:uppercase;margin-bottom:"); KD_N(6);
     KD_S("px;color:#777}");
 
     KD_S(".ico{vertical-align:top;padding-top:"); KD_N(4);
     KD_S("px}");
-    KD_S(".fc{font-size:");                    KD_N(28);
+    KD_S(".fc{font-size:");                    KD_N(31);
     KD_S("px;line-height:1.1;padding-left:");  KD_N(12);
     KD_S("px}");
-    KD_S(".fc-t{font-size:");                  KD_N(30);
+    KD_S(".fc-t{font-size:");                  KD_N(33);
     KD_S("px;margin-top:");                    KD_N(1);
     KD_S("px;color:#000}");
 
@@ -1845,12 +1861,12 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S("px;text-align:center;vertical-align:top;white-space:nowrap;"
          "background:#f0f0f0;border-left:");   KD_N(4);
     KD_S("px solid #fff}");
-    KD_S(".per-l{font-size:");                 KD_N(11);
+    KD_S(".per-l{font-size:");                 KD_N(14);
     KD_S("px;letter-spacing:");                KD_N(2);
     KD_S("px;text-transform:uppercase;margin-bottom:"); KD_N(1);
-    KD_S("px;color:#777;padding-top:");        KD_N(4);
+    KD_S("px;color:#777;padding-top:");        KD_N(3);
     KD_S("px}");
-    KD_S(".per-t{font-size:");                 KD_N(19);
+    KD_S(".per-t{font-size:");                 KD_N(22);
     KD_S("px;margin-top:");                    KD_N(-2);
     KD_S("px;padding-bottom:");                KD_N(5);
     KD_S("px}");
@@ -1860,7 +1876,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S(".grid{stroke:#c4c4c4;stroke-width:"); KD_N(1);
     KD_S("}.vgrid{stroke:#d5d5d5;stroke-width:"); KD_N(1);
     KD_S("}.base{stroke:#777;stroke-width:");  KD_N(1);
-    KD_S("}.ax{font-size:");                   KD_N(11);
+    KD_S("}.ax{font-size:");                   KD_N(14);
     KD_S("px;fill:#777;font-family:Bookerly,Georgia,serif}");
     KD_S(".band{fill:#d8d8d8;stroke:#8f8f8f;stroke-width:"); KD_N(1);
     KD_S("}.l-out{fill:none;stroke:#000;stroke-width:"); KD_N(3);
@@ -1869,12 +1885,12 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S(" ");                                 KD_N(5);
     KD_S("}");
 
-    KD_S(".key{font-size:");                   KD_N(13);
+    KD_S(".key{font-size:");                   KD_N(15);
     KD_S("px;margin-top:");                    KD_N(2);
     KD_S("px;color:#444}");
     KD_S(".key td{padding-top:");              KD_N(2);
     KD_S("px}");
-    KD_S(".note{font-size:");                  KD_N(15);
+    KD_S(".note{font-size:");                  KD_N(17);
     KD_S("px;font-style:italic;text-align:center;padding:"); KD_N(36);
     KD_S("px 0;color:#777}");
 
@@ -1885,14 +1901,14 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S("px}");
     KD_S(".wk{margin-top:");                   KD_N(2);
     KD_S("px}");
-    KD_S(".wd{width:14.28%;text-align:center;padding:"); KD_N(8);
-    KD_S("px 0 ");                             KD_N(7);
+    KD_S(".wd{width:14.28%;text-align:center;padding:"); KD_N(6);
+    KD_S("px 0 ");                             KD_N(5);
     KD_S("px;background:#f4f4f4}");
     KD_S(".wd-we{background:#e4e4e4}");
-    KD_S(".wd-n{font-size:");                  KD_N(11);
+    KD_S(".wd-n{font-size:");                  KD_N(14);
     KD_S("px;letter-spacing:");                KD_N(2);
     KD_S("px;text-transform:uppercase;color:#777}");
-    KD_S(".wd-d{font-size:");                  KD_N(24);
+    KD_S(".wd-d{font-size:");                  KD_N(30);
     KD_S("px;line-height:1.15}");
 
     // Inverted rather than outlined: a filled block is the one mark that stays
@@ -1900,30 +1916,32 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S(".wd-now{background:#000;color:#fff}");
 
     KD_S(".foot{border-top:");                 KD_N(1);
-    KD_S("px solid #aaa;margin-top:");         KD_N(7);
-    KD_S("px;font-size:");                     KD_N(12);
+    KD_S("px solid #aaa;margin-top:");         KD_N(6);
+    KD_S("px;font-size:");                     KD_N(15);
     KD_S("px;color:#555;letter-spacing:.5px}");
-    KD_S(".foot td{padding-top:");             KD_N(5);
+    KD_S(".foot td{padding-top:");             KD_N(4);
     KD_S("px}");
 
     // Boxed rather than underlined so the target is visible before it is
     // touched, which on a panel with no hover state is the only chance.
     //
-    // SIZE, HONESTLY: this comes to 72x26 CSS px, which is about 11x4 mm on
+    // SIZE, HONESTLY: this comes to 78x27 CSS px, which is about 12x4 mm on
     // any of the readers this page targets — a 300 ppi Paperwhite scaling 600
     // CSS px across 1072 device px and a 167 ppi Kindle 7 mapping them 1:1
     // work out to the same 0.15 mm per CSS px. An earlier version of this
     // comment cited "44 device px" as the guideline met; that was wrong twice
     // over. The 44 in the usual guidance is CSS px on a phone, roughly 9 mm,
     // and 4 mm is under half of it. It is reachable with an infrared touch
-    // panel but it is not generous, and the page has no spare height at 796 of
-    // 800 to grow it without taking the difference from the chart.
+    // panel but it is not generous. The type inside it grew with the rest of
+    // the small end of the scale, which is where the extra height went: the
+    // page finishes at 778 of 800 and has none left over to make the box
+    // itself taller.
     KD_S(".act{text-align:right;white-space:nowrap}");
     KD_S(".act a{display:inline-block;border:");  KD_N(1);
     KD_S("px solid #777;color:#000;text-decoration:none;padding:"); KD_N(4);
     KD_S("px ");                                  KD_N(12);
     KD_S("px;margin-left:");                      KD_N(8);
-    KD_S("px;font-size:");                        KD_N(13);
+    KD_S("px;font-size:");                        KD_N(15);
     KD_S("px;letter-spacing:");                   KD_N(1);
     KD_S("px;background:#f4f4f4}");
 

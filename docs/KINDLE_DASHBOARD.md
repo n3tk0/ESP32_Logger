@@ -226,6 +226,70 @@ version. So the page:
 None of that is a sacrifice on this medium. A panel that repaints in full or
 not at all has no use for a script that updates part of itself.
 
+### It is read from across a room, not held
+
+A Kindle on a shelf is not a Kindle in a lap, and the scale this page started
+with was a lap scale: 10 px captions, 12 px section headings, a 14 px line under
+the headline. At 167 ppi 10 CSS px is **1.5 mm of em** — about a millimetre of
+cap height. At arm's length that is comfortable. From the other side of a room
+it is a grey smudge, and the smudge was carrying the units, the axis, the day
+names and the age of the forecast: everything that says what the big numbers
+mean.
+
+So the scale was **compressed rather than enlarged** — the small end grew by
+about a third, the large end did not move at all.
+
+| | was | is |
+|---|---|---|
+| captions (`.lab`), weekday names, outlook labels | 10–11 px | **14 px** |
+| section headings (`.sec`), footer, chart key | 12–13 px | **15 px** |
+| chart axis (`.ax`) | 11 px | **14 px** |
+| the 24 h line under the headline (`.sub`) | 14 px | **17 px** |
+| outlook temperatures, day numbers | 19 / 24 px | **22 / 30 px** |
+| grid, indoor and forecast values | 26–31 px | **27–34 px** |
+| headline, clock, first indoor value | 88 / 96 / 52 px | unchanged |
+
+**The headline and the clock stayed put for a reason that is not taste.** The
+top block is a content-sized two-column table and `.head` is
+`white-space:nowrap`, so growing the hero takes width from the right-hand
+column — at the widest headline the page draws, `-12.4° / 100%`, the indoor
+degree sign fell off the end of its cell. They were also the two things already
+legible from the far side of the room.
+
+The height came out of the page's own white space rather than out of the
+budget: the body padding, the three section rules, the week strip's cells and
+the gaps under the headings each gave back a few pixels. What was left went
+into the **chart, 200 → 220 CSS px** — the one block whose job is a shape
+rather than a number, and so the one that spends vertical resolution well. The
+page finishes at **778 of 800** in the busiest arrangement it draws, where it
+finished at 762.
+
+Two sizes were then pulled back a step by measurement rather than taste. At
+29 px `1008 hPa` with a tendency arrow after it did not fit a third of the
+left column, and `.cv` clips — so the arrow, the one glyph that says which
+way the pressure is going, was the part that fell off; three across is 27.
+And the daily outlook shows a *pair* of temperatures in an 88 px plate, where
+23 px put the widest one the forecast can produce at 86 of those 88 with no
+clip to catch it; the plates are 22.
+
+### On the panel the same change buys much more
+
+The panel had room the page never did. Its tiling is absolute coordinates
+instead of a flow layout, and it stopped at **701 of 800** — 99 px of blank
+screen under the footer, with every size on it chosen to fit above that line.
+Both layout files were re-tiled from the top down to spend it; the footer now
+finishes at 788.
+
+Nothing had been checking that tiling. Fifty-five coordinates moved, and a
+panel is the one renderer nobody can watch — a section drawn over its neighbour
+comes back as a photograph, days later. So `tests/kindle/drive_dash.sh` now
+asserts the whole chain on **both** panels, from the layout files themselves and
+through the same `text_geom()` the renderer positions with: each section clears
+the next, nothing runs past the bottom edge, and the footer has to come within a
+twentieth of it. That last clause is the one that keeps the type large — a
+layout stopping short of the edge has room it is not spending, and the suite
+fails until it spends it.
+
 ## The top of the page
 
 There is no masthead. The place name never changed and the date is carried by
@@ -540,7 +604,7 @@ Three ways, and one of them is not what it sounds like.
 A **refresh** button in the footer. A link, not a script, so a five-way pad
 reaches it as readily as a fingertip.
 
-It measures **72×26 CSS px**, which is about **11×4 mm** on any of the readers
+It measures **78×27 CSS px**, which is about **12×4 mm** on any of the readers
 this page targets — a 300 ppi Paperwhite scaling 600 CSS px across 1072 device
 px and a 167 ppi Kindle 7 mapping them 1:1 both come to 0.15 mm per CSS px.
 
@@ -548,9 +612,10 @@ px and a 167 ppi Kindle 7 mapping them 1:1 both come to 0.15 mm per CSS px.
 > smallest thing worth aiming at". That was wrong twice over: the 44 in the
 > usual guidance is CSS px on a phone — roughly **9 mm** — and 4 mm is under
 > half of it. The button is reachable with an infrared touch panel but it is not
-> generous. The page has no spare height at 761 of 800 to grow it without taking
-> the difference from the chart, which is a trade worth making deliberately
-> rather than by accident.
+> generous. Its type grew with the rest of the small end of the scale, which is
+> where the height went: the page finishes at 778 of 800 and has none left over
+> to make the box itself taller. Taking more would come out of the chart, which
+> is a trade worth making deliberately rather than by accident.
 
 > **Route order is load-bearing.** `AsyncCallbackWebHandler::canHandle` matches
 > a URL that *starts with* its uri plus `/`, and the first registered handler

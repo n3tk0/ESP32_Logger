@@ -27,7 +27,7 @@ python3 tools/kindle_preview/preview.py hourly bg calm 600 -    boxed
 The screenshot script takes an output path and a viewport, and prints the
 rendered page height against the budget — the number to watch, since a page over
 800 scrolls on a device with no scrollbar to say so. The badge is a float and
-costs no height; 796 with it and 796 without is the check that it stays that
+costs no height; 777 with it and 777 without is the check that it stays that
 way.
 
 Needs `playwright` and a Chromium; set `CHROMIUM_PATH` if yours is not at

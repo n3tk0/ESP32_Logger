@@ -384,6 +384,12 @@ validate_colours() {
 
 # px= as draw_text computes it, for the assertions below.
 px_of() { text_geom 0 "$1"; echo "$TX_PX"; }
+# And the `top=` it lands on for a design y, which is NOT that y: draw_text()
+# centres the taller box text_geom() asks FBInk for on the design's line. It
+# came to the same number while the outlook label was 11 px — 11*1160/1000 is
+# 12, and half of one pixel rounds to none — so an assertion written as the
+# raw y passed by arithmetic accident and broke the first time that size grew.
+top_of() { text_geom "$1" "$2"; echo "$TX_TOP"; }
 
 lines_of() { [ -s "$1" ] && wc -l < "$1" | tr -d ' ' || echo 0; }
 # grep -c always prints a count, including 0 — the `|| echo 0` this used to
@@ -1069,6 +1075,81 @@ check "$?" "the week strip is centred in its cells and set regular, as the page 
   done
   exit $ok )
 check "$?" "and centred on both panels, not only the one whose numbers divide"
+
+# ── The tiling clears itself, fills the panel, and does not overrun it ───────
+# THE GUARD RAIL FOR EVERY Y IN A LAYOUT FILE. The panel is the one renderer
+# nobody can watch: a section drawn over its neighbour, or past the bottom
+# edge, comes back as a photograph days later. So the order the design fixes is
+# asserted here — from the layout files themselves, for both panels, through
+# the same text_geom() the renderer positions with, because a size is not the
+# height of the box FBInk draws it in.
+#
+# THE LAST CLAUSE IS THE ONE THAT KEEPS THE TYPE LARGE, and it is the reason
+# this exists. The tiling this replaced stopped at 701 of 800 and every size on
+# the panel had been chosen to fit inside that; the captions came out at 10 px,
+# which is a millimetre of cap height at 167 ppi and unreadable from across a
+# room. A layout that leaves more than a twentieth of the screen blank under
+# its footer has room it is not spending, and this fails until it spends it.
+( bad=0
+  # The bottom edge of the box FBInk actually draws for a design y and size.
+  bot() { text_geom "$1" "$2"; echo $(( TX_TOP + TX_PX )); }
+  le() { [ "$1" -le "$2" ] || { echo "  $4: $3 ends at $1, past $2" >&2; bad=1; }; }
+
+  for res in 600x800 1072x1448; do
+      RES_W=${res%x*}; RES_H=${res#*x}; load_layout
+
+      # The top block: left column, then right, both above the chart's rule.
+      le "$(bot "$TOP_Y" "$GROUP_LAB_SZ")" "$HERO_Y"   "the group label" "$res"
+      le "$(bot "$SUB_Y" "$SUB_SZ")"       "$GRID_Y"   "the 24 h line"   "$res"
+      gy=$(( GRID_Y + GRID_ROW_H + GRID_LAB_SZ + 4 ))
+      le "$(bot "$gy" "$GRID_VAL_SZ")"     "$RULE2_Y"  "the second grid row" "$res"
+      le "$(( CL_Y + CL_H ))"              "$IN_RULE_Y" "the clock's rectangle" "$res"
+      le "$(bot "$IN_LAB_Y" "$GROUP_LAB_SZ")" \
+         "$(( IN_VAL_Y + IN_VAL_SZ_1 - IN_VAL_SZ - GRID_LAB_SZ - 4 ))" \
+         "the indoor heading" "$res"
+      le "$(bot "$IN_VAL_Y" "$IN_VAL_SZ_1")" "$RULE2_Y" "the indoor row" "$res"
+
+      # The chart, its caption and its key.
+      le "$RULE2_Y" "$LAB_CHART_Y" "the chart's rule" "$res"
+      le "$(bot "$LAB_CHART_Y" "$LAB_SZ")" "$GR_Y"    "the chart's caption" "$res"
+      le "$(( GR_Y + GR_H ))"              "$KEY_Y"   "the chart" "$res"
+      le "$(bot "$KEY_Y" "$KEY_SZ")"       "$RULE3_Y" "the chart's key" "$res"
+
+      # The forecast: the left stack, the icon beside it, and the three plates.
+      le "$RULE3_Y" "$LAB_FC_Y" "the forecast's rule" "$res"
+      le "$(bot "$LAB_FC_Y" "$LAB_SZ")" "$FC_TEXT_Y"  "the forecast's caption" "$res"
+      le "$(bot "$LAB_FC_Y" "$LAB_SZ")" "$FC_ICON_Y"  "the forecast's caption" "$res"
+      le "$(bot "$FC_TEXT_Y" "$FC_TEXT_SZ")" "$FC_TEMP_Y" "the condition" "$res"
+      le "$(bot "$FC_TEMP_Y" "$FC_TEMP_SZ")" "$FC_WIND_Y" "the high and low" "$res"
+      le "$(bot "$FC_WIND_Y" "$FC_WIND_SZ")" "$WK_HDG_RULE_Y" "the wind line" "$res"
+      le "$(( FC_ICON_Y + FC_MAIN_SZ ))" "$WK_HDG_RULE_Y" "the forecast icon" "$res"
+
+      plate_top=$(( OL0_Y - OL_PLATE_TOP ))
+      plate_bot=$(( plate_top + OL_PLATE_H ))
+      le "$RULE3_Y"  "$plate_top"      "the forecast's rule" "$res"
+      le "$plate_bot" "$WK_HDG_RULE_Y" "the outlook plates"  "$res"
+      le "$(bot "$OL0_Y" "$OL_LABEL_SZ")" "$(( OL0_Y + OL_ICON_OFFSET ))" \
+         "the outlook label" "$res"
+      le "$(( OL0_Y + OL_ICON_OFFSET + FC_OL_SZ ))" \
+         "$(( OL0_Y + OL_TEMP_OFFSET ))" "the outlook icon" "$res"
+      le "$(bot "$(( OL0_Y + OL_TEMP_OFFSET ))" "$OL_TEMP_SZ")" "$plate_bot" \
+         "the outlook temperature" "$res"
+
+      # The week strip and the footer.
+      le "$WK_HDG_RULE_Y" "$WK_HDG_Y" "the week's rule" "$res"
+      le "$(bot "$WK_HDG_Y" "$WK_HDG_SZ")" "$WK_Y" "the month heading" "$res"
+      le "$(( WK_Y + WK_CELL_H ))" "$FOOT_RULE_Y" "the week strip" "$res"
+      le "$FOOT_RULE_Y" "$FOOT_Y" "the footer's rule" "$res"
+
+      foot_bot=$(bot "$FOOT_Y" "$FOOT_SZ")
+      le "$foot_bot" "$RES_H" "the footer" "$res"
+      # ... and it has to come close to the bottom, not stop short of it.
+      le "$(( RES_H - foot_bot ))" "$(( RES_H / 20 ))" \
+         "$(( RES_H - foot_bot )) px of unspent screen under the footer" "$res"
+  done
+  exit $bad )
+check "$?" "every section clears the next and the tiling spends the panel"
+
 RES_W=600; RES_H=800; load_layout
 load_kv "$DASH_TMP/data.txt" PAYLOAD
 
@@ -1096,7 +1177,7 @@ load_kv "$DASH_TMP/data.txt" PAYLOAD
   ix=$(( OL0_X + (OL_PLATE_W - FC_OL_SZ) / 2 ))
   grep -q -- "x=$ix,y=$(( OL0_Y + OL_ICON_OFFSET ))" "$FBINK_LOG" || exit 2
   lx=$(( OL0_X + (OL_PLATE_W - OL_LABEL_SZ * 2260 / 1000) / 2 ))
-  grep -q -- "left=$lx,top=$OL0_Y" "$FBINK_LOG" || exit 3
+  grep -q -- "left=$lx,top=$(top_of "$OL0_Y" "$OL_LABEL_SZ")" "$FBINK_LOG" || exit 3
   exit 0 )
 check "$?" "each outlook column sits on a plate with its contents centred"
 
