@@ -1376,15 +1376,32 @@ removes along with KUAL.
 | `MENU_LBL` | the three labels, separated by bars |
 
 **How the touch is read.** An input event is sixteen bytes — two 32-bit
-timestamps, a 16-bit type, a 16-bit code, a 32-bit value — so `od -tu2 -w16`
-prints one record per line as eight numbers, and the last four are the ones
-that matter. busybox has `od`; it does not have `evtest`. The touchscreen is
-found as the input device that reports **absolute** positions, because the
-power button and the cover magnet report keys and nothing else.
+timestamps, a 16-bit type, a 16-bit code, a 32-bit value — so one
+`dd bs=16 count=1` is exactly one event and `od -tu2` prints it as eight
+numbers. busybox has both; it does not have `evtest`. The touchscreen is found
+as the input device that reports **absolute** positions, because the power
+button and the cover magnet report keys and nothing else.
 
-A stroke is **one** tap however many positions it reports: `SYN_REPORT` is the
-frame boundary, and after a frame is emitted the next forty are dropped —
-counted rather than timed, because `date` there would be a fork per frame.
+> **One `dd` per event, not `od` across the stream.** The first version piped
+> the whole device through a single `od`, which block-buffers when its stdout
+> is a pipe: a tap produced nothing at all until four kilobytes of output had
+> piled up — about a hundred events — and then arrived as a burst. Measured,
+> not guessed. The menu would never have opened. The device is silent until a
+> finger lands, so a fork per event is a fork per touch and nothing at all
+> while nobody is touching.
+
+A stroke is **one** tap however many positions it reports. What ends a contact
+is the finger leaving, which panels say in one of two ways — `BTN_TOUCH` going
+to zero, or a frame carrying no coordinates at all — and both are honoured,
+because which one a reader speaks is the reader's business. Only `SYN_REPORT`
+ends a frame: `SYN_MT_REPORT` separates the contacts inside one, and
+`SYN_DROPPED` is the kernel saying its queue overflowed and the state is not to
+be trusted.
+
+> **A frame counter was the first answer and the wrong one.** Forty frames were
+> dropped after each emit, but a real tap is three to thirty — so the budget
+> left over from one tap swallowed the next, which is to say the tap that opens
+> the bar ate the tap that presses the button it opened.
 
 **The labels are the script's own, not the collector's.** The moment this bar
 is most wanted is the one where the collector cannot be reached, so a menu
@@ -1403,9 +1420,30 @@ log prints every touch raw and mapped, which is where `TOUCH_MAXX` and
 **What it costs while it is on:** one background process blocked in `read(2)`,
 and the wait between ticks becomes a read on a FIFO — sliced into two-second
 reads so a signal is still noticed promptly, since `nap` being a killable
-background sleep is what made Stop feel immediate. With `POWER=suspend` the CPU
-is down between ticks and no read is running; the touch wakes the device and
-the tap is read on the way back up.
+background sleep is what made Stop feel immediate. The slices are bounded by
+the **clock**, not by counting them: `read -t` is not POSIX, and a shell
+without it errors at once rather than waiting, which would turn a minute's wait
+into thirty instant iterations and the main loop into a spin — fetching and
+flashing the panel as fast as the CPU allows, on a battery.
+
+**The menu and `POWER=suspend` do not combine, and the menu wins.** With the
+CPU down there is no process to read the touchscreen, so the bar would be dead
+for the whole wait and the taps would pile up in the FIFO unread. Where both
+are asked for, the reader standing in front of the panel is the one being
+served. An earlier version of this page claimed the tap was read on the way
+back up from a suspend; no code path did that, and none does now.
+
+**Nothing falls through to Exit.** `outside` is the default and every way out
+of the hit test leads to it, so a coordinate that is out of range or not a
+number — an uncalibrated panel reporting thousands on a 600×800 screen, which
+is the exact case `TOUCH_MAXX` exists for — dismisses the bar. It used to
+select the right-hand third, so the reader's second tap exited the dashboard.
+
+`TOUCH_MAXX` and `TOUCH_MAXY` name the ranges of the values the panel reports
+**first and second**, which is what the `TRACE` line shows — so on a swapped
+panel they move to the other side with the values. Dividing a swapped reading
+by the other axis's maximum is how a calibrated panel still lands on the wrong
+third.
 
 All of it is reachable from KUAL under **Settings → Screen**.
 

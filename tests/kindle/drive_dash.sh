@@ -1028,24 +1028,30 @@ check "$?" "the loop re-reads the settings and then applies them"
 
 # CANVAS asks the framework to put its chrome away, and says so on disk so that
 # stop.sh can put it back when this script never reaches its trap.
+# DRIVEN THROUGH THE APPLIER, because that is what the loop calls. CANVAS is
+# re-read every minute like every other key, so it has to be re-applied every
+# minute or the KUAL entry that sets it does nothing until the next Start —
+# which is the bug gui_apply() exists for, made twice.
 ( sys_reset
   TMP="$WORK/canvas-tmp"; CANVAS_MARK="$TMP/canvas"; mkdir -p "$TMP"
-  CANVAS=desktop canvas_take
+  CANVAS=desktop canvas_apply
   [ -s "$LIPC_LOG" ] && exit 1              # the default touches nothing
   [ -f "$CANVAS_MARK" ] && exit 2
   sys_reset
-  CANVAS=blank canvas_take
+  CANVAS=blank canvas_apply
   grep -q "disableEnablePillow 1" "$LIPC_LOG" || exit 3
   [ -f "$CANVAS_MARK" ] || exit 4
-  sys_reset
-  canvas_give_back
-  grep -q "disableEnablePillow 0" "$LIPC_LOG" || exit 5
-  [ -f "$CANVAS_MARK" ] && exit 6
-  # And having given it back, it does not keep giving it back.
-  sys_reset; canvas_give_back
-  [ -s "$LIPC_LOG" ] && exit 7
+  # Idempotent: a tick that changes nothing touches nothing.
+  sys_reset; CANVAS=blank canvas_apply
+  [ -s "$LIPC_LOG" ] && exit 5
+  # And turning it back off hands the chrome back, within the minute.
+  sys_reset; CANVAS=desktop canvas_apply
+  grep -q "disableEnablePillow 0" "$LIPC_LOG" || exit 6
+  [ -f "$CANVAS_MARK" ] && exit 7
+  sys_reset; CANVAS=desktop canvas_apply
+  [ -s "$LIPC_LOG" ] && exit 8
   exit 0 )
-check "$?" "CANVAS=blank puts the reader's chrome away, and takes it back"
+check "$?" "CANVAS is applied every minute, both ways, and only on a change"
 
 # An input event is sixteen bytes: two 32-bit timestamps, a 16-bit type, a
 # 16-bit code, a 32-bit value. The reader decodes them with od, because busybox
@@ -1075,6 +1081,121 @@ check "$?" "a touch is decoded to one x y line per stroke, not per event"
   [ "$(touch_reader "$WORK/ev.bin")" = "120 240" ] || exit 1
   exit 0 )
 check "$?" "and the single-touch axes are read as well as the multitouch pair"
+
+# A STROKE IS ONE TAP, AND THE NEXT TAP IS THE NEXT TAP. The first version
+# counted forty frames after an emit and called that the debounce — but a real
+# tap is three to thirty frames, so the budget left over from one tap swallowed
+# the one after it: the tap that opens the bar ate the tap that presses the
+# button it opened. What ends a contact is the finger leaving, which panels say
+# either with BTN_TOUCH going to zero or with a frame carrying no coordinates.
+( { ev 3 53 100; ev 3 54 700; ev 0 0 0      # tap 1, two frames
+    ev 3 53 101; ev 3 54 701; ev 0 0 0
+    ev 1 330 0;  ev 0 0 0                   # finger up, the way most panels say it
+    ev 3 53 300; ev 3 54 750; ev 0 0 0      # tap 2
+    ev 0 0 0                                # an empty frame: the other way
+    ev 3 53 500; ev 3 54 760; ev 0 0 0; } > "$WORK/ev.bin"
+  out=$(touch_reader "$WORK/ev.bin" | tr '\n' '/')
+  [ "$out" = "100 700/300 750/500 760/" ] || { echo "got [$out]" >&2; exit 1; }
+  exit 0 )
+check "$?" "three taps are three lines, however each panel says the finger left"
+
+# SYN_REPORT ONLY. SYN_MT_REPORT (code 2) separates the contacts inside one
+# frame on a protocol-A panel and SYN_DROPPED (code 3) says the kernel's queue
+# overflowed; treating either as the end of a frame reports a position from
+# half a frame and calls the state good when the kernel has just said it is not.
+( { ev 3 53 210; ev 0 2 0                   # first contact, not a frame end
+    ev 3 53 999; ev 3 54 888; ev 0 3 0      # SYN_DROPPED, not a frame end
+    ev 3 54 640; ev 0 0 0; } > "$WORK/ev.bin"
+  out=$(touch_reader "$WORK/ev.bin")
+  [ "$out" = "999 640" ] || { echo "got [$out]" >&2; exit 1; }
+  exit 0 )
+check "$?" "and only SYN_REPORT ends a frame, not the multitouch or dropped ones"
+
+# THE MOST DESTRUCTIVE BUTTON IS THE LAST ONE THAT SHOULD WIN A DEFAULT. Quit
+# was the fall-through, so a coordinate out of range or not a number at all —
+# an uncalibrated panel reporting thousands on a 600x800 screen, which is the
+# exact case TOUCH_MAXX exists for — failed both thirds and exited the
+# dashboard on the reader's second tap.
+( RES_W=600 RES_H=800
+  menu_hit 2900 3100; [ "$MENU_HIT" = "outside" ] || exit 1
+  menu_hit 900 760;   [ "$MENU_HIT" = "outside" ] || exit 2
+  menu_hit "" 760;    [ "$MENU_HIT" = "outside" ] || exit 3
+  menu_hit 300 "";    [ "$MENU_HIT" = "outside" ] || exit 4
+  menu_hit abc 760;   [ "$MENU_HIT" = "outside" ] || exit 5
+  # And a real tap on the right-hand third still quits.
+  menu_hit 550 760;   [ "$MENU_HIT" = "quit" ]    || exit 6
+  exit 0 )
+check "$?" "an uncalibrated or nonsense coordinate dismisses the bar, never quits"
+
+# The maxima travel with their axes: TOUCH_MAXX names the range of the value
+# the panel reports FIRST, which is what the TRACE line shows. Dividing a
+# swapped value by the other axis's maximum is how a calibrated panel still
+# lands on the wrong third.
+( RES_W=600 RES_H=800
+  TOUCH_SWAP=1 TOUCH_MAXX=1024 TOUCH_MAXY=768 touch_scale 512 384
+  # raw (512,384) swaps to (384,512); 384 of 768 across, 512 of 1024 down.
+  [ "$TAP_X" = "300" ] || { echo "x=$TAP_X" >&2; exit 1; }
+  [ "$TAP_Y" = "400" ] || { echo "y=$TAP_Y" >&2; exit 2; }
+  exit 0 )
+check "$?" "a swapped panel's calibration follows the axis it was measured on"
+
+# The menu and a real suspend do not combine: with the CPU down nothing is
+# reading the touchscreen. The menu wins, because it is the one the reader is
+# standing in front of.
+( body=$(sed -n '/^nap_to_minute() {/,/^}/p' "$KDIR/update_dash.sh")
+  printf '%s' "$body" | grep -q 'TOUCH_READY:-0}" != "1"' || exit 1
+  # And TAP is cleared on every path out, not only inside nap_or_tap — the
+  # suspend returns before that one, so a tap taken on one tick was still in
+  # TAP on the next and menu_hit ran again on stale coordinates.
+  printf '%s' "$body" | grep -q '^    TAP=""' || exit 2
+  exit 0 )
+check "$?" "a suspend never runs with the menu armed, and never replays a tap"
+
+# `read -t` is not POSIX. A shell without it errors at once rather than
+# waiting, with the complaint swallowed — and a wait that counts reads instead
+# of looking at the clock turns a minute into thirty instant iterations and the
+# main loop into a spin, fetching and flashing on a battery.
+( body=$(sed -n '/^nap_or_tap() {/,/^}/p' "$KDIR/update_dash.sh")
+  printf '%s' "$body" | grep -q 'start=$(date +%s)' || exit 1
+  printf '%s' "$body" | grep -q 'now - start )) -ge "$want"' || exit 2
+  printf '%s' "$body" | grep -q 'nap 1' || exit 3
+  exit 0 )
+check "$?" "and the wait is bounded by the clock, not by counting the reads"
+
+# strip_zeros() turns "" into "0", which is right for a tier nobody filled in
+# and wrong for a device path. conf_load() knew; cmd_set() did not, so the
+# override could never be cleared once set. One function, asked by both.
+( conf_is_text HOST      || exit 1
+  conf_is_text TOUCH_DEV || exit 2
+  conf_is_text CANVAS    || exit 3
+  conf_is_text MENU_LBL  || exit 4
+  conf_is_text DATA_EVERY && exit 5
+  conf_is_text TOUCH     && exit 6
+  grep -q 'conf_is_text' "$KDIR/settings.sh" || exit 7
+  exit 0 )
+check "$?" "the keys that are not numbers are one list, and settings.sh asks it"
+
+# Every key in conf_keys() carries a line of help, or conf_write() bakes a bare
+# "# " above it and dash.conf.default's careful wording is gone the first time
+# anything is saved.
+( missing=""
+  for k in $(conf_keys); do
+      [ -n "$(conf_help "$k")" ] || missing="$missing $k"
+  done
+  [ -z "$missing" ] || { echo "no help for:$missing" >&2; exit 1; }
+  exit 0 )
+check "$?" "and every key says what it means, so a save keeps dash.conf readable"
+
+# A key with no built-in default is empty on every dash.conf written before it
+# existed — which is every one already on a reader.
+( missing=""
+  for k in $(conf_keys); do
+      eval "v=\$$k"
+      conf_valid "$k" "$v" || missing="$missing $k"
+  done
+  [ -z "$missing" ] || { echo "no usable default for:$missing" >&2; exit 1; }
+  exit 0 )
+check "$?" "every key has a built-in default its own validator accepts"
 
 # A panel that reports its own scale rather than the screen's.
 ( RES_W=600 RES_H=800
@@ -1850,6 +1971,16 @@ check "$?" "and the deep setting says how to get the reader back"
 
 check "$(run_settings power nonsense >/dev/null 2>&1 && echo 1 || echo 0)" \
       "an unknown battery setting is refused rather than written"
+
+# strip_zeros() turns "" into "0", which conf_valid TOUCH_DEV refuses — so the
+# touchscreen override could be set from KUAL and never cleared again. cmd_set()
+# now asks conf_is_text(), the same list conf_load() asks.
+( run_settings set TOUCH_DEV /dev/input/event3 >/dev/null
+  [ "$(run_settings get TOUCH_DEV)" = "/dev/input/event3" ] || exit 1
+  run_settings set TOUCH_DEV "" >/dev/null
+  [ -z "$(run_settings get TOUCH_DEV)" ] || { echo "[$(run_settings get TOUCH_DEV)]" >&2; exit 2; }
+  exit 0 )
+check "$?" "the touchscreen override can be cleared again, not only set"
 
 run_settings set DATA_EVERY 7 >/dev/null
 check "$([ "$(run_settings get DATA_EVERY)" = "7" ] && echo 0 || echo 1)" \

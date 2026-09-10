@@ -99,8 +99,40 @@ WIFI_WAIT=15
 # Stop. Another 10-15 mA, at the cost of the device not being a reader.
 GUI_STOP=0
 
+# ── The screen ───────────────────────────────────────────────────────────────
+# See canvas_take() and the tap menu below it. THESE HAVE TO BE HERE and not
+# only in dash.conf.default: conf_load() validates every key in conf_keys()
+# against whatever the running shell holds, so a key with no built-in default
+# is empty on any dash.conf written before it existed — which is every one
+# already on a reader. CANVAS and MENU_LBL refuse an empty value, so the
+# upgrade warned once a minute and then baked the empty into dash.conf on the
+# next save.
+CANVAS=desktop
+TOUCH=0
+TOUCH_DEV=
+TOUCH_MAXX=0
+TOUCH_MAXY=0
+TOUCH_SWAP=0
+MENU_LBL="Refresh|Hide|Exit"
+
 conf_keys() {
     echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP CANVAS TOUCH TOUCH_DEV TOUCH_MAXX TOUCH_MAXY TOUCH_SWAP MENU_LBL"
+}
+
+# THE KEYS THAT ARE NOT NUMBERS, in one place because two places drifted.
+#
+# strip_zeros() turns "08" into 8, which is what stops a tier written with a
+# leading zero from breaking the arithmetic that reads it — and it turns "" into
+# "0", which is right for a tier nobody filled in and wrong for a device path.
+# It gave TOUCH_DEV a value of "0" and a warning once a minute about a setting
+# the reader had deliberately left empty. conf_load() was taught the exception;
+# settings.sh's cmd_set() was not, so `set TOUCH_DEV ""` still could not clear
+# it. One function, asked by both.
+conf_is_text() {
+    case "$1" in
+        HOST|POWER|CANVAS|MENU_LBL|TOUCH_DEV) return 0 ;;
+    esac
+    return 1
 }
 
 # What each key means, for `settings.sh show` and for dash.conf's comments.
@@ -119,6 +151,13 @@ conf_help() {
         POWER)              echo "awake | wifi (radio off between fetches) | suspend (also sleeps to RAM)" ;;
         WIFI_WAIT)          echo "Seconds to wait for the radio to associate" ;;
         GUI_STOP)           echo "Stop the Amazon reader framework while running (1 = on)" ;;
+        CANVAS)             echo "desktop (draw over the reader) | blank (put its chrome away first)" ;;
+        TOUCH)              echo "Tap the screen for a menu: refresh, hide, exit (1 = on)" ;;
+        TOUCH_DEV)          echo "Touchscreen input device, or empty to find it" ;;
+        TOUCH_MAXX)         echo "Touch panel's full scale across, or 0 if it reports screen pixels" ;;
+        TOUCH_MAXY)         echo "Touch panel's full scale down, or 0 if it reports screen pixels" ;;
+        TOUCH_SWAP)         echo "1 if the panel reports Y where X is expected" ;;
+        MENU_LBL)           echo "The three labels on the tap menu, separated by bars" ;;
         *)                  echo "" ;;
     esac
 }
@@ -294,14 +333,9 @@ conf_load() {
     load_kv "$CONF" "$(conf_keys)"
     for k in $(conf_keys); do
         eval "v=\$$k"
-        case "$k" in
-            # THE KEYS THAT ARE NOT NUMBERS. strip_zeros() turns "" into "0" —
-            # which is right for a tier nobody filled in and wrong for a device
-            # path, where it produced a TOUCH_DEV of "0" and a warning once a
-            # minute about a setting the reader had deliberately left empty.
-            HOST|POWER|CANVAS|MENU_LBL|TOUCH_DEV) ;;
-            *) v=$(strip_zeros "$v"); eval "$k=\$v" ;;
-        esac
+        if conf_is_text "$k"; then :; else
+            v=$(strip_zeros "$v"); eval "$k=\$v"
+        fi
         if ! conf_valid "$k" "$v"; then
             # The last value that WAS valid, which at startup is the built-in
             # default and later is whatever was running. Saying "the default"
@@ -646,9 +680,21 @@ suspend_for() {
 CANVAS_MARK="$TMP/canvas"
 
 canvas_take() {
-    [ "${CANVAS:-desktop}" = "blank" ] || return 0
     lipc-set-prop com.lab126.pillow disableEnablePillow 1 2>/dev/null
     : > "$CANVAS_MARK" 2>/dev/null
+    return 0
+}
+
+# Applied every minute, because it is read every minute — the same contract
+# gui_apply() exists for, and the same bug without it: the KUAL entry that sets
+# CANVAS would have done nothing at all until the next Start, while settings.sh
+# printed "the dashboard picks this up within a minute".
+canvas_apply() {
+    if [ "${CANVAS:-desktop}" = "blank" ]; then
+        [ -f "$CANVAS_MARK" ] || canvas_take
+    else
+        canvas_give_back
+    fi
     return 0
 }
 
@@ -712,35 +758,53 @@ touch_find() {
 
 # One line of "x y" per touch, on stdout.
 #
-# od BECAUSE BUSYBOX HAS IT. An input event is sixteen bytes — two 32-bit
-# timestamps, a 16-bit type, a 16-bit code, a 32-bit value — so `od -tu2 -w16`
-# prints one record per line as eight numbers, and the last four are the ones
-# that matter.
+# ONE dd PER EVENT, NOT od ACROSS THE STREAM. od block-buffers when its stdout
+# is a pipe: a tap produced nothing at all until four kilobytes of its output
+# had piled up — about a hundred events — and then arrived as a burst. Measured,
+# not guessed; the first version of this shipped that way and the menu would
+# never have opened. The device is silent until a finger lands, so a fork per
+# event is a fork per touch and nothing at all while nobody is touching.
 #
-# ONE LINE PER STROKE, NOT PER EVENT. A finger produces a stream of positions
-# and SYN_REPORT is the frame boundary; after a frame is reported the next
-# forty are dropped, which is the rest of one finger going down and up again.
-# Counted rather than timed because `date` here would be a fork per frame.
+# An input event is sixteen bytes — two 32-bit timestamps, a 16-bit type, a
+# 16-bit code, a 32-bit value — so one `dd bs=16 count=1` is exactly one event
+# and `od -tu2` prints it as eight numbers. The loop reads the device, not each
+# dd, so the descriptor stays open across events.
+#
+# ONE LINE PER CONTACT. A finger produces a stream of positions; what ends a
+# contact is the finger leaving, which panels say in one of two ways — BTN_TOUCH
+# going to zero, or a frame carrying no coordinates at all. Both are honoured,
+# because which one a reader speaks is the reader's business. A frame counter
+# was the first answer and the wrong one: a real tap is three to thirty frames,
+# so a budget of forty swallowed the NEXT tap — the one that presses the button
+# the first tap opened.
 touch_reader() {
-    local a b c d type code vlo vhi x= y= skip=0
-    od -An -tu2 -w16 -v < "$1" 2>/dev/null |
-    while read -r a b c d type code vlo vhi; do
-        case "$type" in
-            3)  case "$code" in
-                    0|53) x=$vlo ;;
-                    1|54) y=$vlo ;;
+    local rec x= y= seen=0 emitted=0
+    while :; do
+        rec=$(dd bs=16 count=1 2>/dev/null | od -An -tu2 -v)
+        # shellcheck disable=SC2086
+        set -- $rec
+        [ "$#" -lt 8 ] && break                 # short read: the device is gone
+        case "$5" in
+            3)  case "$6" in
+                    0|53) x=$7; seen=1 ;;
+                    1|54) y=$7; seen=1 ;;
                 esac ;;
-            0)  if [ -n "$x" ] && [ -n "$y" ]; then
-                    if [ "$skip" -gt 0 ]; then
-                        skip=$((skip - 1))
-                    else
-                        printf '%s %s\n' "$x" "$y"
-                        skip=40
-                    fi
-                    x=; y=
-                fi ;;
+            1)  # BTN_TOUCH. Zero is the finger leaving.
+                [ "$6" = 330 ] && [ "$7" = 0 ] && emitted=0 ;;
+            0)  # SYN_REPORT ONLY. SYN_MT_REPORT (2) separates the contacts
+                # inside one frame and SYN_DROPPED (3) says the kernel's queue
+                # overflowed and the state is not to be trusted; neither of them
+                # ends a frame.
+                [ "$6" = 0 ] || continue
+                if [ "$seen" = 0 ]; then
+                    emitted=0                   # an empty frame: the finger left
+                elif [ -n "$x" ] && [ -n "$y" ] && [ "$emitted" = 0 ]; then
+                    printf '%s %s\n' "$x" "$y"
+                    emitted=1
+                fi
+                seen=0 ;;
         esac
-    done
+    done < "$1"
 }
 
 touch_arm() {
@@ -767,8 +831,29 @@ touch_arm() {
     return 0
 }
 
+# And so is the menu. Arming it is not free — a background process and a fifo —
+# so it is armed and disarmed to match the setting rather than at startup only.
+touch_apply() {
+    if [ "${TOUCH:-0}" = "1" ]; then
+        [ "${TOUCH_READY:-0}" = "1" ] || touch_arm
+    else
+        [ "${TOUCH_READY:-0}" = "1" ] && touch_disarm
+    fi
+    return 0
+}
+
 touch_disarm() {
-    [ -n "$TOUCH_PID" ] && kill "$TOUCH_PID" 2>/dev/null
+    if [ -n "$TOUCH_PID" ]; then
+        # THE CHILDREN TOO. The reader forks a dd per event and one of them is
+        # blocked on the touchscreen right now; killing only the shell around
+        # it leaves that dd holding the device open, one per Start/Stop cycle.
+        # pgrep is not on every reader, so the fifo going away is the backstop:
+        # a reader that survives this finds nothing to write to.
+        for _p in $(pgrep -P "$TOUCH_PID" 2>/dev/null); do
+            kill "$_p" 2>/dev/null
+        done
+        kill "$TOUCH_PID" 2>/dev/null
+    fi
     TOUCH_PID=""
     TOUCH_READY=0
     rm -f "$TOUCH_FIFO" 2>/dev/null
@@ -783,12 +868,19 @@ touch_disarm() {
 # every tap it decoded, raw and mapped, which is the one-glance way to find
 # those numbers for a reader that differs.
 touch_scale() {
-    TAP_X="$1"; TAP_Y="$2"
-    if [ "${TOUCH_SWAP:-0}" = "1" ]; then TAP_X="$2"; TAP_Y="$1"; fi
-    [ "${TOUCH_MAXX:-0}" -gt 0 ] 2>/dev/null &&
-        TAP_X=$(( TAP_X * ${RES_W:-600} / TOUCH_MAXX ))
-    [ "${TOUCH_MAXY:-0}" -gt 0 ] 2>/dev/null &&
-        TAP_Y=$(( TAP_Y * ${RES_H:-800} / TOUCH_MAXY ))
+    local rx="$1" ry="$2" mx="${TOUCH_MAXX:-0}" my="${TOUCH_MAXY:-0}" t
+    # THE MAXIMA TRAVEL WITH THEIR AXES. TOUCH_MAXX names the range of the
+    # value the panel reports FIRST — which is what a reader reads off the
+    # TRACE line — so on a swapped panel it has to move to the other side with
+    # it. Dividing a swapped value by the other axis's maximum is how a
+    # calibrated panel still lands on the wrong third.
+    if [ "${TOUCH_SWAP:-0}" = "1" ]; then
+        t="$rx"; rx="$ry"; ry="$t"
+        t="$mx"; mx="$my"; my="$t"
+    fi
+    TAP_X="$rx"; TAP_Y="$ry"
+    [ "$mx" -gt 0 ] 2>/dev/null && TAP_X=$(( rx * ${RES_W:-600} / mx ))
+    [ "$my" -gt 0 ] 2>/dev/null && TAP_Y=$(( ry * ${RES_H:-800} / my ))
     [ "${TRACE:-0}" = "1" ] && echo "TOUCH: raw $1,$2 -> $TAP_X,$TAP_Y" >&2
     return 0
 }
@@ -803,10 +895,21 @@ menu_geom() {
 # Which button is under a tap, or `outside` for the rest of the screen.
 menu_hit() {
     menu_geom
-    if [ "$2" -lt "$MENU_Y" ] 2>/dev/null; then MENU_HIT=outside; return 0; fi
-    if   [ "$1" -lt "$MENU_THIRD" ] 2>/dev/null;         then MENU_HIT=refresh
-    elif [ "$1" -lt $(( MENU_THIRD * 2 )) ] 2>/dev/null; then MENU_HIT=hide
-    else                                                      MENU_HIT=quit
+    # OUTSIDE IS THE DEFAULT, AND EVERY WAY OUT LEADS TO IT. Quit was the
+    # fall-through, so a coordinate that was out of range or not a number at
+    # all — an uncalibrated panel reporting 2900,3100 on a 600x800 screen, which
+    # is the exact case TOUCH_MAXX exists for — failed both thirds and exited
+    # the dashboard. The most destructive button is the last one that should
+    # win a default.
+    MENU_HIT=outside
+    case "$1" in ''|*[!0-9]*) return 0 ;; esac
+    case "$2" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$2" -lt "$MENU_Y" ] && return 0
+    [ "$2" -gt "${RES_H:-800}" ] && return 0
+    [ "$1" -ge "$MENU_W" ] && return 0
+    if   [ "$1" -lt "$MENU_THIRD" ];         then MENU_HIT=refresh
+    elif [ "$1" -lt $(( MENU_THIRD * 2 )) ]; then MENU_HIT=hide
+    else                                          MENU_HIT=quit
     fi
     return 0
 }
@@ -2061,7 +2164,18 @@ nap_to_minute() {
     # where it is not. suspend_for() returns non-zero rather than risking a
     # machine that does not come back, so this is the fallback and not an
     # error path.
-    if [ "${POWER:-awake}" = "suspend" ]; then
+    # CLEARED HERE, WHERE EVERY PATH OUT OF THIS FUNCTION PASSES. It used to be
+    # cleared only inside nap_or_tap, which the suspend below returns before
+    # reaching — so a tap taken on one tick was still in TAP on the next, and
+    # with the bar open menu_hit ran again on the stale coordinates. A tap in
+    # the right-hand third then chose `quit` on a tick nobody had touched, and
+    # the dashboard exited by itself.
+    TAP=""
+    # A REAL SUSPEND AND THE TAP MENU DO NOT COMBINE. With the CPU down there is
+    # no process to read the touchscreen, so the menu would be dead for the
+    # whole wait and the taps would pile up in the fifo unread. The menu wins
+    # where both are asked for: it is the one the reader is standing in front of.
+    if [ "${POWER:-awake}" = "suspend" ] && [ "${TOUCH_READY:-0}" != "1" ]; then
         suspend_for "$delay" && return 0
     fi
     nap_or_tap "$delay"
@@ -2078,20 +2192,30 @@ nap_to_minute() {
 # a background sleep the trap can kill, which is what made Stop feel immediate;
 # a single sixty-second read would hand that back.
 nap_or_tap() {
-    local left="$1"
+    local want="$1" start now last=""
     TAP=""
     if [ "${TOUCH_READY:-0}" != "1" ]; then
-        nap "$left"
+        nap "$want"
         return 1
     fi
-    while [ "$left" -gt 0 ]; do
+    # BOUNDED BY THE CLOCK, NOT BY COUNTING THE READS. `read -t` is not POSIX:
+    # a shell without it errors immediately rather than waiting, with the
+    # complaint swallowed by the redirect — and crediting each read with two
+    # seconds it never spent turned a minute's wait into thirty instant
+    # iterations and the main loop into a spin, fetching and flashing the panel
+    # as fast as the CPU allows, on a battery.
+    start=$(date +%s)
+    while :; do
         if read -t 2 -r TAP <&9 2>/dev/null && [ -n "$TAP" ]; then
             return 0
         fi
         TAP=""
-        left=$((left - 2))
+        now=$(date +%s)
+        [ $(( now - start )) -ge "$want" ] && return 1
+        # The clock has not moved, so that read did not wait. Make it.
+        [ "$now" = "$last" ] && nap 1
+        last="$now"
     done
-    return 1
 }
 
 # Sourced for the helpers alone — by settings.sh, and by the tests.
@@ -2128,9 +2252,9 @@ conf_init
 conf_load
 font_setup || echo "Continuing without text." >&2
 prevent_sleep
-canvas_take
+canvas_apply
 gui_apply
-touch_arm
+touch_apply
 
 # A layout BEFORE the first fetch, so no drawing path can run without one.
 # RES_W and RES_H come from the collector, so this falls back to 600x800 and
@@ -2172,7 +2296,14 @@ while true; do
                 # A full tick, through the same file settings.sh leaves behind:
                 # one way for "draw everything now", not two.
                 refresh) : > "$TMP/redraw" ;;
-                *)       redraw_all "$(now_clock)"; refresh_screen; continue ;;
+                # THE SAME FILE, NOT A REDRAW OF ITS OWN. redraw_all() ends
+                # with its own refresh_screen, so calling one after it flashed
+                # the whole panel twice for one dismissal — and it draws the
+                # readings unconditionally, where the tick below falls back to
+                # redraw_offline when no payload has ever parsed. Dismissing the
+                # bar wiped the "cannot reach the collector" message off a panel
+                # that had nothing else to show.
+                *)       : > "$TMP/redraw" ;;
             esac
         else
             MENU=1
@@ -2206,6 +2337,8 @@ while true; do
     # stops the framework to match GUI_STOP.
     power_apply
     gui_apply
+    canvas_apply
+    touch_apply
 
     # settings.sh leaves this behind after any change: the settings screen it
     # painted is sitting on top of the dashboard, and whatever changed should

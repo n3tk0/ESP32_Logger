@@ -102,10 +102,9 @@ cmd_set() {
     # 08 is not a number the shell can divide by. Normalise before validating,
     # so `set DATA_EVERY 05` stores 5 rather than a value that would break the
     # loop the first time it came round.
-    case "$k" in
-        HOST) ;;
-        *) v=$(strip_zeros "$v") ;;
-    esac
+    if conf_is_text "$k"; then :; else
+        v=$(strip_zeros "$v")
+    fi
     if ! conf_valid "$k" "$v"; then
         printf '%s is not a valid %s\n' "$v" "$k" | say_lines
         return 1
