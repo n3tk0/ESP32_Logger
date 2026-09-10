@@ -356,7 +356,8 @@ plus how old the reading is: `-2.4 до 15.3° · 3 мин`. It is composed on t
 collector, by `kdSubLine()`, so the wording, the unit and the rounding are the
 page's and not each renderer's, and it is set in the page's mid grey rather than
 its dark one — it is context for the number above it, not a reading in its own
-right. Switch it off under *What is drawn → 24-hour range*.
+right. Switch it off in the zone table's **Shown** column, on the
+*24-hour low-to-high* row.
 
 The pair is the one thing on the page that must not reflow, so it is `nowrap`
 with the overflow hidden, and the sizes were measured against the widest it
@@ -516,17 +517,49 @@ because it is served to a browser with no JavaScript and sometimes no touch
 panel, and a form there would be a worse version of the one that already
 exists.
 
+### The zone table is that page's index
+
+**Every region of the panel is one row**, in the order the panel draws them,
+carrying the two switches that belong to it and a way through to whatever fills
+it — a jump to the control further down the same page, a link to the page that
+actually owns it, or a plain statement that nothing configures it.
+
+It replaced three lists. A grid of nine checkboxes headed *Weight*, a grid of
+eight headed *What is drawn*, and a card of eleven place-editors: three
+different namings of the same regions, in three different orders. "The grid"
+was in two of them and meant the same thing. "Beside the headline" was in two
+and meant the same thing. The forecast was in one and could not be configured
+from that page at all. To answer *where do I turn this on* the reader had to
+hold the whole layout in their head and then guess which of the three lists
+owned it.
+
+| Column | |
+|---|---|
+| **Zone** | the region, and one line saying where on the panel it is |
+| **Shown** | its `KSHOW_*` bit, or *Always* for one that cannot be turned off, or *Module* for the forecast, which is a build-time feature rather than a setting |
+| **Bold** | its `KBOLD_*` bit, or a dash for a region that has no weight of its own |
+| **What fills it** | ↓ to a control further down this page, → to the page that owns it, or the sentence that says nothing does |
+
+Every `KSHOW_*` and every `KBOLD_*` bit appears exactly once, which is what
+makes the mapping checkable by eye against `src/core/Config.h` — and what
+`tests/web/drive_kindle_page.py` asserts by counting the checkboxes by id
+prefix rather than by container.
+
+The last two rows are not regions. **Captions** and **Units** are the two
+things that appear inside every region and own a weight bit each, so they sit
+under a heading of their own rather than reading as places on the panel.
+
+The rest of the page is the controls those rows point at:
+
 | | |
 |---|---|
 | **Face** | Bookerly (default), Caecilia, Palatino, Baskerville, Helvetica, Futura, or a font-family list of your own |
-| **Weight** | which figures are set bold — the headline, the value beside it, the grid, the clock, the indoor row, the units, the forecast, the week strip and the captions; none by default |
 | **Clock** | plain, boxed, ruled, or with the date beneath |
 | **Time** | `09:05`, `9:05`, `9:05am` |
 | **Date** | `27 august`, `august 27`, `27.08.2026`, `2026-08-27` |
 | **Pressure** | hPa, mmHg or inHg — the three-hour change follows it |
 | **Temperature** | one decimal or whole degrees |
 | **Readings** | what goes in each of the eleven places, and each one's caption, decimals, switches and grey level |
-| **Blocks** | the value beside the headline, the two-by-two grid, the pressure tendency, the 24 h range, the indoor block, the chart, the week strip, the battery badge |
 
 The settings live in `config.kindle` (`src/core/Config.h`) and are read on
 every render, so a save takes effect on the panel's next repaint. They survive

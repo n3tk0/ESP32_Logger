@@ -530,6 +530,33 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .ftable td:last-child { text-align:right; }
 .ftable td:last-child .row-acts { display:inline-flex; gap:2px; opacity:0; transition:opacity .12s; }
 .ftable tr:hover .row-acts { opacity:1; }
+/* THE E-INK DASHBOARD'S ZONE TABLE
+   An .ftable whose rows are regions of a drawn page rather than files, so it
+   drops the file table's two conventions that do not apply: columns three and
+   four are a checkbox and a button, not monospaced metadata, and a row is two
+   lines tall because each carries a sentence saying where on the panel it is. */
+.kd-ztable td { height:auto; padding-top:9px; padding-bottom:9px; vertical-align:top; }
+.kd-ztable td:first-child .hint { max-width:58ch; }
+.kd-ztable td:nth-child(3), .kd-ztable td:nth-child(4) { font-family:inherit; color:inherit; font-size:12.5px; }
+.kd-ztable .kd-zbit { text-align:center; width:72px; }
+.kd-ztable th:nth-child(2), .kd-ztable th:nth-child(3) { text-align:center; }
+.kd-ztable .kd-zbit input { width:16px; height:16px; accent-color:var(--accent); margin-top:2px; }
+.kd-ztable .kd-zfill { width:260px; }
+.kd-ztable .kd-zsplit th { height:var(--row-h); font-size:10px; }
+.kd-ztable tr:hover .kd-zsplit th { background:var(--panel-2); }
+
+/* A jump from that table lands on a card four screens down. Without the flash
+   the reader arrives somewhere and has to work out which control was meant. */
+.kd-flash { animation:kd-flash 1.4s ease-out; }
+@keyframes kd-flash {
+  0%, 30% { box-shadow:0 0 0 2px var(--accent); }
+  100%    { box-shadow:0 0 0 2px transparent; }
+}
+@media (prefers-reduced-motion:reduce) { .kd-flash { animation:none; outline:2px solid var(--accent); } }
+
+/* Small button, for a table cell that is a link to somewhere else on the page. */
+.btn.sm { padding:3px 8px; font-size:11.5px; height:auto; }
+
 .fname { display:flex; align-items:center; gap:8px; font-weight:500; }
 .fname.dir [data-lucide] { color:var(--accent); }
 
