@@ -268,6 +268,11 @@
       '<path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path>',
     "arrow-right":
       '<path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path>',
+    // Down, not right: the e-ink dashboard's zone table uses the two to say
+    // whether a control is further down THIS page or on another one, which is
+    // the difference the reader is actually asking about.
+    "arrow-down":
+      '<path d="M12 5v14"></path><path d="m19 12-7 7-7-7"></path>',
     "bell-off":
       '<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"></path>' +
       '<path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"></path>' +

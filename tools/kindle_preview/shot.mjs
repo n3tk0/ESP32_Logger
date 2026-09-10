@@ -3,7 +3,7 @@
 //   node tools/kindle_preview/shot.mjs [out.png] [width] [height]
 //
 // The height is the number that matters: at the default width the page must
-// come in under 800, and it currently sits at 796. Anything over that scrolls
+// come in under 800, and it currently sits at 777. Anything over that scrolls
 // on a device with no scrollbar to tell you it did.
 import { chromium } from 'playwright';
 import path from 'node:path';

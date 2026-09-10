@@ -87,8 +87,52 @@ SENSOR_FLASH_EVERY=0
 # Off by default: it is a line per string, sixty a redraw.
 TRACE=0
 
+# ── Power ────────────────────────────────────────────────────────────────────
+# awake | wifi | suspend. See the note over net_up(): a ten-year-old Kindle
+# looping a shell script with an associated radio draws 60-80 mA and lasts a
+# day and a half. Each step down turns off more of that, and asks for more
+# trust that the device comes back.
+POWER=awake
+# Seconds to wait for the radio to associate before fetching anyway.
+WIFI_WAIT=15
+# Stop the Amazon reader framework while the panel runs (1 = yes). Put back on
+# Stop. Another 10-15 mA, at the cost of the device not being a reader.
+GUI_STOP=0
+
+# ── The screen ───────────────────────────────────────────────────────────────
+# See canvas_take() and the tap menu below it. THESE HAVE TO BE HERE and not
+# only in dash.conf.default: conf_load() validates every key in conf_keys()
+# against whatever the running shell holds, so a key with no built-in default
+# is empty on any dash.conf written before it existed — which is every one
+# already on a reader. CANVAS and MENU_LBL refuse an empty value, so the
+# upgrade warned once a minute and then baked the empty into dash.conf on the
+# next save.
+CANVAS=desktop
+TOUCH=0
+TOUCH_DEV=
+TOUCH_MAXX=0
+TOUCH_MAXY=0
+TOUCH_SWAP=0
+MENU_LBL="Refresh|Hide|Exit"
+
 conf_keys() {
-    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE"
+    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP CANVAS TOUCH TOUCH_DEV TOUCH_MAXX TOUCH_MAXY TOUCH_SWAP MENU_LBL"
+}
+
+# THE KEYS THAT ARE NOT NUMBERS, in one place because two places drifted.
+#
+# strip_zeros() turns "08" into 8, which is what stops a tier written with a
+# leading zero from breaking the arithmetic that reads it — and it turns "" into
+# "0", which is right for a tier nobody filled in and wrong for a device path.
+# It gave TOUCH_DEV a value of "0" and a warning once a minute about a setting
+# the reader had deliberately left empty. conf_load() was taught the exception;
+# settings.sh's cmd_set() was not, so `set TOUCH_DEV ""` still could not clear
+# it. One function, asked by both.
+conf_is_text() {
+    case "$1" in
+        HOST|POWER|CANVAS|MENU_LBL|TOUCH_DEV) return 0 ;;
+    esac
+    return 1
 }
 
 # What each key means, for `settings.sh show` and for dash.conf's comments.
@@ -104,6 +148,16 @@ conf_help() {
         CLOCK_FLASH_EVERY)  echo "Flash the clock zone every N clock updates (0 = never)" ;;
         SENSOR_FLASH_EVERY) echo "Flash the readings zone every N sensor updates (0 = never)" ;;
         TRACE)              echo "Log every FBInk call to kual.log (1 = on)" ;;
+        POWER)              echo "awake | wifi (radio off between fetches) | suspend (also sleeps to RAM)" ;;
+        WIFI_WAIT)          echo "Seconds to wait for the radio to associate" ;;
+        GUI_STOP)           echo "Stop the Amazon reader framework while running (1 = on)" ;;
+        CANVAS)             echo "desktop (draw over the reader) | blank (put its chrome away first)" ;;
+        TOUCH)              echo "Tap the screen for a menu: refresh, hide, exit (1 = on)" ;;
+        TOUCH_DEV)          echo "Touchscreen input device, or empty to find it" ;;
+        TOUCH_MAXX)         echo "Touch panel's full scale across, or 0 if it reports screen pixels" ;;
+        TOUCH_MAXY)         echo "Touch panel's full scale down, or 0 if it reports screen pixels" ;;
+        TOUCH_SWAP)         echo "1 if the panel reports Y where X is expected" ;;
+        MENU_LBL)           echo "The three labels on the tap menu, separated by bars" ;;
         *)                  echo "" ;;
     esac
 }
@@ -208,6 +262,35 @@ conf_valid() {
     # $1=key $2=value → 0 if acceptable
     local k="$1" v="$2"
     case "$k" in
+        POWER)
+            # A word, not a number, and the only one — so it is tested before
+            # the numeric arm below, which would refuse every value it has.
+            case "$v" in
+                awake|wifi|suspend) return 0 ;;
+                *) return 1 ;;
+            esac ;;
+        CANVAS)
+            # A word like POWER, and tested before the numeric arm for the
+            # same reason.
+            case "$v" in
+                desktop|blank) return 0 ;;
+                *) return 1 ;;
+            esac ;;
+        MENU_LBL)
+            # Three labels separated by bars. It reaches draw_text_reg_inv and
+            # nothing else, so the shell metacharacters are what matter — the
+            # bar itself is the separator and so is allowed.
+            case "$v" in
+                ''|*'"'*|*'`'*|*'$'*|*';'*|*'&'*|*'<'*|*'>'*) return 1 ;;
+            esac
+            return 0 ;;
+        TOUCH_DEV)
+            # A device path, or empty to let touch_find() pick one.
+            [ -z "$v" ] && return 0
+            case "$v" in
+                /dev/input/event[0-9]|/dev/input/event[0-9][0-9]) return 0 ;;
+                *) return 1 ;;
+            esac ;;
         HOST)
             case "$v" in
                 ''|*' '*|*'"'*|*'`'*|*'$'*|*';'*|*'|'*|*'&'*) return 1 ;;
@@ -221,7 +304,13 @@ conf_valid() {
             # that actually comes round.
             case "$k" in
                 # A switch, not a tier: 0 or 1, and nothing in between to mean.
-                TRACE) [ "$v" -le 1 ] ;;
+                TRACE|GUI_STOP|TOUCH|TOUCH_SWAP) [ "$v" -le 1 ] ;;
+                # A touch panel's full scale, or 0 for "it already reports
+                # screen pixels". No upper tier applies.
+                TOUCH_MAXX|TOUCH_MAXY) [ "$v" -le 65535 ] ;;
+                # Seconds, and a wait longer than the tick it sits inside is a
+                # panel that never draws.
+                WIFI_WAIT) [ "$v" -le 45 ] ;;
                 CLOCK_FLASH_EVERY|SENSOR_FLASH_EVERY) [ "$v" -le 1440 ] ;;
                 *) [ "$v" -ge 1 ] && [ "$v" -le 1440 ] ;;
             esac
@@ -244,10 +333,9 @@ conf_load() {
     load_kv "$CONF" "$(conf_keys)"
     for k in $(conf_keys); do
         eval "v=\$$k"
-        case "$k" in
-            HOST) ;;
-            *) v=$(strip_zeros "$v"); eval "$k=\$v" ;;
-        esac
+        if conf_is_text "$k"; then :; else
+            v=$(strip_zeros "$v"); eval "$k=\$v"
+        fi
         if ! conf_valid "$k" "$v"; then
             # The last value that WAS valid, which at startup is the built-in
             # default and later is whatever was running. Saying "the default"
@@ -324,6 +412,542 @@ prevent_sleep() {
 
 restore_sleep() {
     lipc-set-prop com.lab126.powerd preventScreenSaver 0 2>/dev/null
+}
+
+# ── Power ────────────────────────────────────────────────────────────────────
+#
+# WHAT A DASHBOARD COSTS A TEN-YEAR-OLD KINDLE. The i.MX6SL never reaches a
+# hardware suspend while this script is looping, and the radio stays associated
+# whether or not anything is being fetched:
+#
+#   CPU awake in a shell loop      ~25-35 mA
+#   WiFi associated, idle          ~30-50 mA   (beacons, DTIM, the radio itself)
+#
+# — 60-80 mA against a cell that left the factory at 890-1420 mAh and, ten
+# years on, is likely 600-900. That is a day and a half. The panel is on a wall
+# and the cable is not.
+#
+# Three settings, each a superset of the one before, because each is a
+# different amount of trust in a ten-year-old device to wake up again:
+#
+#   POWER=awake     what this always did. Nothing is touched.
+#   POWER=wifi      the radio is off except around a fetch. The CPU stays up.
+#                   Roughly halves the draw; no way for it to fail beyond a
+#                   fetch that finds no network, which the script already
+#                   handles by keeping the last reading on screen.
+#   POWER=suspend   the above, and the wait between ticks is a real suspend to
+#                   RAM with an RTC alarm to come back. Under a milliamp while
+#                   it is down, which is where the days turn into weeks — and
+#                   the one that can leave a panel dark if the alarm does not
+#                   take, which is why suspend_for() refuses to go down
+#                   without reading the alarm back first.
+#
+# The tiers already say which minutes need the network: the clock is drawn
+# from the reader's own clock and needs nothing.
+
+# The nodes are variables so the tests can point them at a temp file. A test
+# that writes the real /sys/power/state suspends the machine running it.
+RTC_WAKEALARM="${RTC_WAKEALARM:-/sys/class/rtc/rtc0/wakealarm}"
+RTC_SINCE_EPOCH="${RTC_SINCE_EPOCH:-/sys/class/rtc/rtc0/since_epoch}"
+PM_STATE="${PM_STATE:-/sys/power/state}"
+
+# WHETHER WE ARE THE ONES HOLDING THE RADIO DOWN, which is not the same
+# question as what POWER is set to. POWER is re-read every minute and can
+# change under us; this latch is what every restore path keys on instead, so a
+# radio this script turned off is a radio this script turns back on whatever
+# the setting says by then.
+RADIO_OFF=0
+
+# AND A MARKER ON DISK BESIDE IT, because the shell variable dies with the
+# shell. cleanup() restores both the radio and the framework on SIGTERM, but a
+# dashboard that is wedged, OOM-killed or killed by hand never reaches it —
+# and stop.sh sends SIGKILL ten seconds after SIGTERM to exactly those. Both
+# things left behind are device-wide and outlive the process: a radio turned
+# off stays off, a stopped reader framework stays stopped. The markers are what
+# lets stop.sh put back precisely what was taken, rather than guessing or
+# resetting a radio nobody touched.
+RADIO_MARK="$TMP/radio-off"
+GUI_MARK="$TMP/gui-stopped"
+
+radio_set() {
+    lipc-set-prop com.lab126.cmd wirelessEnable "$1" >/dev/null 2>&1
+}
+
+net_up() {
+    [ "${POWER:-awake}" = "awake" ] && return 0
+    if ! radio_set 1; then
+        # THE FRAMEWORK IS WHAT SERVES THE RADIO on firmware where
+        # com.lab126.cmd shares an upstart job with the reader — which is
+        # exactly what GUI_STOP stops. The setting that saves ten milliamps
+        # would then be the reason nothing fetches again for the rest of the
+        # run, with nothing on the panel to say why. So it is put back and the
+        # radio asked again: a dashboard that updates is worth more than the
+        # ten milliamps, and this is the only place that can tell the two
+        # firmwares apart.
+        if [ "${GUI_STOPPED:-0}" != "0" ]; then
+            gui_restore
+            GUI_BLOCKED=1
+            echo "GUI_STOP: this firmware serves the radio from the framework;" \
+                 "put back so the dashboard can still fetch." >&2
+            radio_set 1
+        fi
+    fi
+    RADIO_OFF=0
+    rm -f "$RADIO_MARK" 2>/dev/null
+    # ASSOCIATION IS NOT INSTANT. The chip and the DHCP client want four to ten
+    # seconds, and a fetch fired before that fails against a network that is
+    # about to be there — which on the panel is a minute of "offline" for no
+    # reason. Waited for, not slept through: a reader that associates in three
+    # seconds should not pay for the one that takes nine.
+    local waited=0
+    while [ "$waited" -lt "${WIFI_WAIT:-15}" ]; do
+        # EXACTLY CONNECTED. A `*CONNECTED*` glob also matches DISCONNECTED and
+        # NOT_CONNECTED — wifid saying the opposite — so the bounded wait this
+        # function exists for was skipped on the one answer it was written to
+        # wait through, and the fetch fired into an interface that was still
+        # coming up.
+        case "$(lipc-get-prop com.lab126.wifid cmState 2>/dev/null)" in
+            CONNECTED) return 0 ;;
+        esac
+        nap 1
+        waited=$((waited + 1))
+    done
+    # Out of patience. The fetch is still attempted: cmState is a property of a
+    # daemon, and a wrong answer from it is not a reason to skip a request that
+    # might work.
+    return 1
+}
+
+net_down() {
+    [ "${POWER:-awake}" = "awake" ] && return 0
+    radio_set 0
+    RADIO_OFF=1
+    : > "$RADIO_MARK" 2>/dev/null
+    return 0
+}
+
+# Going back to awake has to put the radio on.
+#
+# POWER is one of the settings conf_load() re-reads every minute, and awake is
+# the value that makes net_up(), net_down() and cleanup() all return without
+# touching anything. So switching back to it — the documented way to undo a
+# battery setting you did not like — left the reader with the radio off and no
+# path in this script that would ever turn it on again, Stop included. The
+# latch is what makes the difference visible: it says we turned it off, and
+# that is still true after the setting says not to.
+power_apply() {
+    [ "${POWER:-awake}" = "awake" ] || return 0
+    [ "${RADIO_OFF:-0}" = "1" ] || return 0
+    radio_set 1
+    RADIO_OFF=0
+    rm -f "$RADIO_MARK" 2>/dev/null
+}
+
+# ── The Amazon framework ─────────────────────────────────────────────────────
+#
+# A Kindle running as a panel is still running the reader: the Java VM (cvm),
+# the indexer, the search service, the touch UI. None of it is looked at and it
+# costs another 10-15 mA of the 25-35 the CPU draws at idle.
+#
+# STOPPED, NOT KILLED. A killed framework needs a reboot; a stopped one comes
+# back with `start`, and a SIGSTOPped one with SIGCONT.
+#
+# AND THERE IS NO KUAL WHILE IT IS STOPPED, which is the thing to know before
+# turning this on. KUAL is a Kindlet, hosted by the framework this switches
+# off, so "press Stop in KUAL" — the way back from every other setting here —
+# is not available for this one. The ways back are:
+#
+#   * set GUI_STOP=0 in dash.conf over USB. gui_apply() picks it up within a
+#     minute, exactly like every other key;
+#   * run stop.sh, which restores the framework itself rather than relying on
+#     this script's exit trap;
+#   * hold the power button until the reader reboots, which clears both a
+#     stopped job and a SIGSTOPped VM.
+#
+# Off by default, and the only setting here that makes the device stop being a
+# reader while it is on.
+gui_stop() {
+    [ "${GUI_STOP:-0}" = "1" ] || return 0
+    GUI_STOPPED=0
+    if stop lab126_gui >/dev/null 2>&1; then
+        GUI_STOPPED=1
+    elif killall -STOP cvm 2>/dev/null; then
+        GUI_STOPPED=2
+    fi
+    [ "$GUI_STOPPED" = "0" ] || echo "$GUI_STOPPED" > "$GUI_MARK" 2>/dev/null
+    return 0
+}
+
+gui_restore() {
+    case "${GUI_STOPPED:-0}" in
+        1) start lab126_gui >/dev/null 2>&1 ;;
+        2) killall -CONT cvm 2>/dev/null ;;
+    esac
+    GUI_STOPPED=0
+    rm -f "$GUI_MARK" 2>/dev/null
+    return 0
+}
+
+# Applied every minute, because it is read every minute.
+#
+# conf_load() re-reads every key in conf_keys() each tick so that "a change
+# made from KUAL takes effect within a minute" — the contract conf_write()
+# prints to the reader. GUI_STOP was in that list but acted on once, before the
+# loop: turning it on from Settings did nothing at all, and turning it back off
+# left the framework down until Stop. The one key that quietly did not honour
+# the promise the rest of them make.
+gui_apply() {
+    local want="${GUI_STOP:-0}"
+    # Blocked only where it actually conflicts. GUI_BLOCKED is set by net_up()
+    # on the firmware where stopping the framework takes the radio with it; on
+    # POWER=awake nothing is asking the radio for anything, so the saving is
+    # still there to be had.
+    if [ "${GUI_BLOCKED:-0}" = "1" ] && [ "${POWER:-awake}" != "awake" ]; then
+        want=0
+    fi
+    if [ "$want" = "1" ]; then
+        [ "${GUI_STOPPED:-0}" = "0" ] && gui_stop
+    else
+        [ "${GUI_STOPPED:-0}" = "0" ] || gui_restore
+    fi
+    return 0
+}
+
+# Does this minute's work need the network at all?
+needs_net() {
+    case " $1 " in
+        *" full "*|*" sensors "*|*" forecast "*|*" chart "*) return 0 ;;
+    esac
+    return 1
+}
+
+# Suspend to RAM for $1 seconds. Non-zero if it did not happen, and the caller
+# falls back to an ordinary sleep.
+#
+# THE ALARM IS READ BACK BEFORE THE MACHINE GOES DOWN. Everything else here is
+# recoverable — a failed fetch keeps the last reading, a failed draw comes back
+# next minute — but a suspend with no alarm behind it is a panel that stays
+# dark until somebody presses the power button. It is the one place in this
+# script that can end the dashboard rather than degrade it.
+suspend_for() {
+    local want="$1" now alarm back
+    # Not worth the transition, and short values are where a rounding error
+    # turns into an alarm in the past.
+    [ "$want" -ge "${SUSPEND_MIN:-5}" ] 2>/dev/null || return 1
+    [ -w "$RTC_WAKEALARM" ] && [ -w "$PM_STATE" ] || return 1
+
+    # THE RTC'S OWN CLOCK, NOT THE SYSTEM'S. The kernel compares this node
+    # against the RTC; `date +%s` reads the system clock. The two agree only
+    # while the RTC runs in UTC, and on a reader whose does not, an absolute
+    # alarm lands hours away — a panel dark until it comes round, or one waking
+    # on every tick. The read-back below cannot tell: the digits stick either
+    # way, so it would confirm a suspend that never comes back. since_epoch is
+    # the same clock the alarm is measured in, and is what makes the sum mean
+    # what it says.
+    now=$(cat "$RTC_SINCE_EPOCH" 2>/dev/null)
+    case "$now" in
+        ''|*[!0-9]*) now=$(date +%s) ;;
+    esac
+    alarm=$((now + want))
+    # Cleared first: writing an alarm over a pending one is rejected by the
+    # driver rather than replacing it, so the second write would be the one
+    # that silently did nothing.
+    echo 0 > "$RTC_WAKEALARM" 2>/dev/null || return 1
+    echo "$alarm" > "$RTC_WAKEALARM" 2>/dev/null || return 1
+    back=$(cat "$RTC_WAKEALARM" 2>/dev/null)
+    [ "$back" = "$alarm" ] || return 1
+
+    echo mem > "$PM_STATE" 2>/dev/null || return 1
+    return 0
+}
+
+# ── The reader's own screen, and ours ────────────────────────────────────────
+#
+# FBINK WRITES TO /dev/fb0. IT DOES NOT OWN THE SCREEN.
+#
+# The Amazon framework still does. It repaints its library whenever it decides
+# to — a cover thumbnail finishing, the status bar ticking, a sync — and every
+# touch goes to it, not to us. So a dashboard drawn over the home screen is a
+# dashboard that keeps being wiped by the thing underneath, and a tap on it
+# opens whatever book was under your finger. The panel "coming back after a
+# minute or two" is the same fault seen from the other end: the framework
+# painted over us and nothing redrew until the next tick came round.
+#
+# CANVAS=blank asks the framework to put its chrome away — the status bar and
+# the toolbars, which are the parts that repaint most often. It is NOT a fix on
+# its own: only GUI_STOP makes the screen actually ours. It is the half of the
+# fix that costs nothing and keeps the reader a reader.
+CANVAS_MARK="$TMP/canvas"
+
+canvas_take() {
+    lipc-set-prop com.lab126.pillow disableEnablePillow 1 2>/dev/null
+    : > "$CANVAS_MARK" 2>/dev/null
+    return 0
+}
+
+# Applied every minute, because it is read every minute — the same contract
+# gui_apply() exists for, and the same bug without it: the KUAL entry that sets
+# CANVAS would have done nothing at all until the next Start, while settings.sh
+# printed "the dashboard picks this up within a minute".
+canvas_apply() {
+    if [ "${CANVAS:-desktop}" = "blank" ]; then
+        [ -f "$CANVAS_MARK" ] || canvas_take
+    else
+        canvas_give_back
+    fi
+    return 0
+}
+
+canvas_give_back() {
+    [ -f "$CANVAS_MARK" ] || return 0
+    lipc-set-prop com.lab126.pillow disableEnablePillow 0 2>/dev/null
+    rm -f "$CANVAS_MARK" 2>/dev/null
+    return 0
+}
+
+# ── The tap menu ─────────────────────────────────────────────────────────────
+#
+# A BAR THAT IS NOT THERE UNTIL YOU ASK FOR IT.
+#
+# The dashboard is a picture with no controls on it, which is right for
+# something read from across a room and wrong the moment somebody is standing
+# in front of it wanting it refreshed. A reader who taps the screen is asking
+# the panel a question, and until this the question went through to whatever
+# the framework had underneath.
+#
+# Tap once and the bar appears along the bottom. Tap a third of it and that
+# button runs. Tap anywhere else and the bar goes away again.
+#
+# EXIT IS ON IT ON PURPOSE. It runs the same cleanup Stop does, which is the
+# way back GUI_STOP otherwise takes away with the launcher it stops.
+#
+# WHAT IT COSTS: one background process blocked in read(2), and the wait
+# between ticks becomes a read with a timeout so a tap is acted on at once
+# rather than at the top of the next minute.
+TOUCH_FIFO="$TMP/touch"
+TOUCH_READY=0
+TOUCH_PID=""
+MENU=0
+
+# Which /dev/input device is the touchscreen.
+#
+# WITHOUT evtest, WHICH THE KINDLE DOES NOT HAVE. The touchscreen is the input
+# device that reports ABSOLUTE positions; the power button and the cover magnet
+# report keys and nothing else, so a non-zero `abs` capability mask is what
+# tells them apart. TOUCH_DEV overrides it for a reader where that guess is
+# wrong.
+touch_find() {
+    local d n abs
+    if [ -n "${TOUCH_DEV:-}" ]; then
+        [ -r "$TOUCH_DEV" ] && { echo "$TOUCH_DEV"; return 0; }
+        return 1
+    fi
+    for d in /dev/input/event*; do
+        [ -r "$d" ] || continue
+        n=${d##*/event}
+        abs=$(cat "/sys/class/input/event$n/device/capabilities/abs" 2>/dev/null)
+        # All-zero once the spaces and zeros are gone means it reports no axes.
+        case "$(printf '%s' "$abs" | tr -d ' 0')" in
+            '') continue ;;
+        esac
+        echo "$d"
+        return 0
+    done
+    return 1
+}
+
+# One line of "x y" per touch, on stdout.
+#
+# ONE dd PER EVENT, NOT od ACROSS THE STREAM. od block-buffers when its stdout
+# is a pipe: a tap produced nothing at all until four kilobytes of its output
+# had piled up — about a hundred events — and then arrived as a burst. Measured,
+# not guessed; the first version of this shipped that way and the menu would
+# never have opened. The device is silent until a finger lands, so a fork per
+# event is a fork per touch and nothing at all while nobody is touching.
+#
+# An input event is sixteen bytes — two 32-bit timestamps, a 16-bit type, a
+# 16-bit code, a 32-bit value — so one `dd bs=16 count=1` is exactly one event
+# and `od -tu2` prints it as eight numbers. The loop reads the device, not each
+# dd, so the descriptor stays open across events.
+#
+# ONE LINE PER CONTACT. A finger produces a stream of positions; what ends a
+# contact is the finger leaving, which panels say in one of two ways — BTN_TOUCH
+# going to zero, or a frame carrying no coordinates at all. Both are honoured,
+# because which one a reader speaks is the reader's business. A frame counter
+# was the first answer and the wrong one: a real tap is three to thirty frames,
+# so a budget of forty swallowed the NEXT tap — the one that presses the button
+# the first tap opened.
+touch_reader() {
+    local rec x= y= seen=0 emitted=0
+    while :; do
+        rec=$(dd bs=16 count=1 2>/dev/null | od -An -tu2 -v)
+        # shellcheck disable=SC2086
+        set -- $rec
+        [ "$#" -lt 8 ] && break                 # short read: the device is gone
+        case "$5" in
+            3)  case "$6" in
+                    0|53) x=$7; seen=1 ;;
+                    1|54) y=$7; seen=1 ;;
+                esac ;;
+            1)  # BTN_TOUCH. Zero is the finger leaving.
+                [ "$6" = 330 ] && [ "$7" = 0 ] && emitted=0 ;;
+            0)  # SYN_REPORT ONLY. SYN_MT_REPORT (2) separates the contacts
+                # inside one frame and SYN_DROPPED (3) says the kernel's queue
+                # overflowed and the state is not to be trusted; neither of them
+                # ends a frame.
+                [ "$6" = 0 ] || continue
+                if [ "$seen" = 0 ]; then
+                    emitted=0                   # an empty frame: the finger left
+                elif [ -n "$x" ] && [ -n "$y" ] && [ "$emitted" = 0 ]; then
+                    printf '%s %s\n' "$x" "$y"
+                    emitted=1
+                fi
+                seen=0 ;;
+        esac
+    done < "$1"
+}
+
+touch_arm() {
+    TOUCH_READY=0
+    [ "${TOUCH:-0}" = "1" ] || return 0
+    command -v od >/dev/null 2>&1 || {
+        echo "TOUCH: no od on this reader; the tap menu needs one." >&2
+        return 0
+    }
+    local dev
+    dev=$(touch_find) || {
+        echo "TOUCH: no touchscreen among /dev/input/event*; set TOUCH_DEV." >&2
+        return 0
+    }
+    rm -f "$TOUCH_FIFO" 2>/dev/null
+    mkfifo "$TOUCH_FIFO" 2>/dev/null || return 0
+    # OPENED FOR BOTH, so the reader end never sees EOF when a writer closes
+    # and the writer never blocks waiting for one to appear.
+    exec 9<> "$TOUCH_FIFO" 2>/dev/null || return 0
+    touch_reader "$dev" > "$TOUCH_FIFO" &
+    TOUCH_PID=$!
+    TOUCH_READY=1
+    [ "${TRACE:-0}" = "1" ] && echo "TOUCH: reading $dev" >&2
+    return 0
+}
+
+# And so is the menu. Arming it is not free — a background process and a fifo —
+# so it is armed and disarmed to match the setting rather than at startup only.
+touch_apply() {
+    if [ "${TOUCH:-0}" = "1" ]; then
+        [ "${TOUCH_READY:-0}" = "1" ] || touch_arm
+    else
+        [ "${TOUCH_READY:-0}" = "1" ] && touch_disarm
+    fi
+    return 0
+}
+
+touch_disarm() {
+    if [ -n "$TOUCH_PID" ]; then
+        # THE CHILDREN TOO. The reader forks a dd per event and one of them is
+        # blocked on the touchscreen right now; killing only the shell around
+        # it leaves that dd holding the device open, one per Start/Stop cycle.
+        # pgrep is not on every reader, so the fifo going away is the backstop:
+        # a reader that survives this finds nothing to write to.
+        for _p in $(pgrep -P "$TOUCH_PID" 2>/dev/null); do
+            kill "$_p" 2>/dev/null
+        done
+        kill "$TOUCH_PID" 2>/dev/null
+    fi
+    TOUCH_PID=""
+    TOUCH_READY=0
+    rm -f "$TOUCH_FIFO" 2>/dev/null
+    return 0
+}
+
+# The panel's coordinates are not always the screen's.
+#
+# Several Kindles report screen pixels and need nothing here. Where a reader
+# does not, TOUCH_MAXX and TOUCH_MAXY say what its full scale is and this maps
+# it; TOUCH_SWAP is for a panel mounted the other way round. TRACE=1 prints
+# every tap it decoded, raw and mapped, which is the one-glance way to find
+# those numbers for a reader that differs.
+touch_scale() {
+    local rx="$1" ry="$2" mx="${TOUCH_MAXX:-0}" my="${TOUCH_MAXY:-0}" t
+    # THE MAXIMA TRAVEL WITH THEIR AXES. TOUCH_MAXX names the range of the
+    # value the panel reports FIRST — which is what a reader reads off the
+    # TRACE line — so on a swapped panel it has to move to the other side with
+    # it. Dividing a swapped value by the other axis's maximum is how a
+    # calibrated panel still lands on the wrong third.
+    if [ "${TOUCH_SWAP:-0}" = "1" ]; then
+        t="$rx"; rx="$ry"; ry="$t"
+        t="$mx"; mx="$my"; my="$t"
+    fi
+    TAP_X="$rx"; TAP_Y="$ry"
+    [ "$mx" -gt 0 ] 2>/dev/null && TAP_X=$(( rx * ${RES_W:-600} / mx ))
+    [ "$my" -gt 0 ] 2>/dev/null && TAP_Y=$(( ry * ${RES_H:-800} / my ))
+    [ "${TRACE:-0}" = "1" ] && echo "TOUCH: raw $1,$2 -> $TAP_X,$TAP_Y" >&2
+    return 0
+}
+
+menu_geom() {
+    MENU_H=$(( ${RES_H:-800} / 9 ))
+    MENU_Y=$(( ${RES_H:-800} - MENU_H ))
+    MENU_W=${RES_W:-600}
+    MENU_THIRD=$(( MENU_W / 3 ))
+}
+
+# Which button is under a tap, or `outside` for the rest of the screen.
+menu_hit() {
+    menu_geom
+    # OUTSIDE IS THE DEFAULT, AND EVERY WAY OUT LEADS TO IT. Quit was the
+    # fall-through, so a coordinate that was out of range or not a number at
+    # all — an uncalibrated panel reporting 2900,3100 on a 600x800 screen, which
+    # is the exact case TOUCH_MAXX exists for — failed both thirds and exited
+    # the dashboard. The most destructive button is the last one that should
+    # win a default.
+    MENU_HIT=outside
+    case "$1" in ''|*[!0-9]*) return 0 ;; esac
+    case "$2" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$2" -lt "$MENU_Y" ] && return 0
+    [ "$2" -gt "${RES_H:-800}" ] && return 0
+    [ "$1" -ge "$MENU_W" ] && return 0
+    if   [ "$1" -lt "$MENU_THIRD" ];         then MENU_HIT=refresh
+    elif [ "$1" -lt $(( MENU_THIRD * 2 )) ]; then MENU_HIT=hide
+    else                                          MENU_HIT=quit
+    fi
+    return 0
+}
+
+# THE LABELS ARE THE SCRIPT'S OWN, not the collector's. The one moment this bar
+# is most wanted is the one where the collector cannot be reached, so a menu
+# whose words arrive over the network is a menu that is blank exactly when it
+# matters. MENU_LBL carries all three, so a reader who wants them in their own
+# language sets one line in dash.conf.
+#
+# LEFT-ALIGNED IN THEIR THIRDS, WITH THE THIRDS RULED. FBInk will not report how
+# wide it drew a string and ${#var} counts bytes — "Обнови" is twelve of them
+# for six letters — so a centred label would be centred on a measurement that is
+# wrong for half the languages this panel speaks. A ruled third says where the
+# button is without needing one.
+draw_menu() {
+    menu_geom
+    fill_rect 0 "$MENU_Y" "$MENU_W" "$MENU_H" BLACK
+
+    local sz=$(( MENU_H * 32 / 100 ))
+    [ "$sz" -lt 12 ] && sz=12
+    local ty=$(( MENU_Y + (MENU_H - sz) / 2 ))
+    local pad=$(( MENU_THIRD / 6 ))
+
+    # The two dividers, in the mid grey the page uses for a hairline inside a
+    # block rather than the white that would read as a gap in the bar.
+    fill_rect "$MENU_THIRD"            "$MENU_Y" "${RULE_H:-1}" "$MENU_H" GRAY7
+    fill_rect $(( MENU_THIRD * 2 ))    "$MENU_Y" "${RULE_H:-1}" "$MENU_H" GRAY7
+
+    local rest="${MENU_LBL:-Refresh|Hide|Exit}" i=0 lbl
+    while [ "$i" -lt 3 ]; do
+        lbl="${rest%%|*}"
+        case "$rest" in *'|'*) rest="${rest#*|}" ;; *) rest="" ;; esac
+        [ -n "$lbl" ] && draw_text_reg_inv $(( i * MENU_THIRD + pad )) "$ty" "$sz" "$lbl"
+        i=$((i + 1))
+    done
+    refresh_zone 0 "$MENU_Y" "$MENU_W" "$MENU_H" 1
+    return 0
 }
 
 # ── Font selection ───────────────────────────────────────────────────────────
@@ -1491,8 +2115,21 @@ cleanup() {
     # made Stop look like it had failed.
     [ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null
     restore_sleep
+    # THE FRAMEWORK FIRST. On the firmware where GUI_STOP takes the radio down
+    # with it, the framework is what answers com.lab126.cmd — so restoring the
+    # radio before the service that answers for it is a restore that quietly
+    # does nothing.
+    touch_disarm
+    canvas_give_back
+    gui_restore
+    # And the radio goes back if WE are the ones who turned it off. Keyed on
+    # the latch and not on POWER: POWER may have been set back to awake in the
+    # meantime, and awake is the value that would skip this. Stop hands the
+    # device back to its owner, and handing it back with no network is a Kindle
+    # that looks broken.
+    [ "${RADIO_OFF:-0}" = "1" ] && radio_set 1
     rm -rf "$TMP"
-    rm -f /tmp/dash.pid
+    rm -f "${DASH_PIDFILE:-/tmp/dash.pid}"
     exit 0
 }
 
@@ -1523,7 +2160,62 @@ nap_to_minute() {
     local delay=$(( 60 - sec ))
     # At :00 exactly, wait the whole minute rather than ticking twice for it.
     [ "$delay" -le 0 ] && delay=60
-    nap "$delay"
+    # A real suspend where it is asked for and possible, an ordinary sleep
+    # where it is not. suspend_for() returns non-zero rather than risking a
+    # machine that does not come back, so this is the fallback and not an
+    # error path.
+    # CLEARED HERE, WHERE EVERY PATH OUT OF THIS FUNCTION PASSES. It used to be
+    # cleared only inside nap_or_tap, which the suspend below returns before
+    # reaching — so a tap taken on one tick was still in TAP on the next, and
+    # with the bar open menu_hit ran again on the stale coordinates. A tap in
+    # the right-hand third then chose `quit` on a tick nobody had touched, and
+    # the dashboard exited by itself.
+    TAP=""
+    # A REAL SUSPEND AND THE TAP MENU DO NOT COMBINE. With the CPU down there is
+    # no process to read the touchscreen, so the menu would be dead for the
+    # whole wait and the taps would pile up in the fifo unread. The menu wins
+    # where both are asked for: it is the one the reader is standing in front of.
+    if [ "${POWER:-awake}" = "suspend" ] && [ "${TOUCH_READY:-0}" != "1" ]; then
+        suspend_for "$delay" && return 0
+    fi
+    nap_or_tap "$delay"
+}
+
+# The wait, with an ear open for the screen.
+#
+# TAP is the tap that arrived, or empty if the wait ran out. Without the menu
+# armed this is the plain interruptible sleep it has always been; with it, the
+# wait is a read on the touch FIFO so a finger is acted on the moment it lands
+# instead of at the top of the next minute.
+#
+# SLICED INTO TWO-SECOND READS so a signal is still noticed promptly. `nap` is
+# a background sleep the trap can kill, which is what made Stop feel immediate;
+# a single sixty-second read would hand that back.
+nap_or_tap() {
+    local want="$1" start now last=""
+    TAP=""
+    if [ "${TOUCH_READY:-0}" != "1" ]; then
+        nap "$want"
+        return 1
+    fi
+    # BOUNDED BY THE CLOCK, NOT BY COUNTING THE READS. `read -t` is not POSIX:
+    # a shell without it errors immediately rather than waiting, with the
+    # complaint swallowed by the redirect — and crediting each read with two
+    # seconds it never spent turned a minute's wait into thirty instant
+    # iterations and the main loop into a spin, fetching and flashing the panel
+    # as fast as the CPU allows, on a battery.
+    start=$(date +%s)
+    while :; do
+        if read -t 2 -r TAP <&9 2>/dev/null && [ -n "$TAP" ]; then
+            return 0
+        fi
+        TAP=""
+        now=$(date +%s)
+        [ $(( now - start )) -ge "$want" ] && return 1
+        # The clock has not moved, so that read did not wait. Make it.
+        [ "$now" = "$last" ] && nap 1
+        last="$now"
+    done
 }
 
 # Sourced for the helpers alone — by settings.sh, and by the tests.
@@ -1560,6 +2252,9 @@ conf_init
 conf_load
 font_setup || echo "Continuing without text." >&2
 prevent_sleep
+canvas_apply
+gui_apply
+touch_apply
 
 # A layout BEFORE the first fetch, so no drawing path can run without one.
 # RES_W and RES_H come from the collector, so this falls back to 600x800 and
@@ -1567,6 +2262,7 @@ prevent_sleep
 # answers.
 load_layout
 
+net_up
 if fetch_data; then
     load_data
     fetch_graph
@@ -1581,7 +2277,48 @@ fi
 # One tick a minute; the tiers decide what that tick costs.
 MINUTE=0
 while true; do
+    # AT THE TOP, not after the work. The tick body below has `continue` in it
+    # in four places, and a radio turned off after them is a radio left on for
+    # the rest of the day on exactly the paths that took a shortcut.
+    net_down
     nap_to_minute
+
+    # A TAP IS ANSWERED BEFORE THE TICK IT INTERRUPTED, and does not spend a
+    # minute: the clock counter is what decides which tier comes round next,
+    # and a reader who taps four times should not fast-forward the chart.
+    if [ -n "${TAP:-}" ]; then
+        touch_scale $TAP
+        if [ "${MENU:-0}" = "1" ]; then
+            menu_hit "$TAP_X" "$TAP_Y"
+            MENU=0
+            case "$MENU_HIT" in
+                quit)    cleanup ;;
+                # A full tick, through the same file settings.sh leaves behind:
+                # one way for "draw everything now", not two.
+                refresh) : > "$TMP/redraw" ;;
+                # THE SAME FILE, NOT A REDRAW OF ITS OWN. redraw_all() ends
+                # with its own refresh_screen, so calling one after it flashed
+                # the whole panel twice for one dismissal — and it draws the
+                # readings unconditionally, where the tick below falls back to
+                # redraw_offline when no payload has ever parsed. Dismissing the
+                # bar wiped the "cannot reach the collector" message off a panel
+                # that had nothing else to show.
+                *)       : > "$TMP/redraw" ;;
+            esac
+        else
+            MENU=1
+            draw_menu
+            continue
+        fi
+    elif [ "${MENU:-0}" = "1" ]; then
+        # THE WAIT RAN OUT WITH THE BAR STILL UP, so it is dismissed rather
+        # than drawn through: the tick below repaints zones, and a zone
+        # repainted over half a bar is a smear nobody asked for. It also means
+        # a bar left up by accident goes away on its own within the minute.
+        MENU=0
+        : > "$TMP/redraw"
+    fi
+
     MINUTE=$((MINUTE + 1))
     # The reader's own clock, in the collector's chosen format. The format is
     # whatever the last payload said, so changing it in Settings shows up on
@@ -1594,6 +2331,14 @@ while true; do
     # Start. It is one small read from a filesystem the kernel has cached, and
     # it is what makes the on-device settings menu usable at all.
     conf_load
+    # Both of these are settings like any other, so they are applied where
+    # every other setting is: after the read, every minute. power_apply() puts
+    # the radio back if POWER has gone to awake, and gui_apply() starts or
+    # stops the framework to match GUI_STOP.
+    power_apply
+    gui_apply
+    canvas_apply
+    touch_apply
 
     # settings.sh leaves this behind after any change: the settings screen it
     # painted is sitting on top of the dashboard, and whatever changed should
@@ -1604,6 +2349,10 @@ while true; do
     else
         TIERS=$(plan_minute "$MINUTE")
     fi
+
+    # The clock is drawn from the reader's own clock, so most minutes need no
+    # network at all — which is the whole of where the battery goes.
+    needs_net "$TIERS" && net_up
 
     # ── Nothing to draw yet ─────────────────────────────────────────────────
     # No payload has ever parsed, so every reading is empty. Keep the reason on

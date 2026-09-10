@@ -62,13 +62,33 @@ with sync_playwright() as p:
         got = pg.input_value("#" + el)
         check(got == want, f"#{el} reflects the device ({got!r})")
 
-    # The two checkbox groups are built by kindle.js from its own copy of the
-    # firmware's bit values, so their COUNT is the first thing to check: a
-    # missing row means a setting nobody can reach.
-    check(pg.locator("#kd-bold input[type=checkbox]").count() == 9,
-          "every weight zone has a checkbox")
-    check(pg.locator("#kd-show input[type=checkbox]").count() == 8,
-          "every block has a checkbox")
+    # ── The zone table ──────────────────────────────────────────────────────
+    # One row per region of the panel, in the order the panel draws them, and
+    # both bitmasks live in it. This replaced two anonymous checkbox grids —
+    # one headed "Weight", one "What is drawn" — whose rows named the same
+    # regions differently, in different orders, and never said where on the
+    # panel a region was or what filled it.
+    #
+    # THE COUNTS ARE THE FIRST THING TO CHECK, and they are counted BY ID
+    # PREFIX rather than by container: that proves every firmware bit reached
+    # the table exactly once, which is the property that matters. A missing row
+    # is a setting nobody can reach; a duplicated one is two checkboxes fighting
+    # over the same bit.
+    check(pg.locator("#kd-zones input[id^=kd-b-]").count() == 9,
+          "every weight bit has a row in the zone table")
+    check(pg.locator("#kd-zones input[id^=kd-s-]").count() == 8,
+          "every visibility bit has a row in the zone table")
+    ids = pg.eval_on_selector_all(
+        "#kd-zones input[type=checkbox]", "els => els.map(e => e.id)")
+    check(len(ids) == len(set(ids)), "and no bit is claimed by two rows")
+
+    # Every row says where on the panel it is. A table of switches that does
+    # not is the grid this replaced.
+    rows = pg.locator("#kd-zones tbody tr:not(.kd-zsplit)")
+    check(rows.count() == 13, "a row per region, plus the two page-wide ones (%d)"
+          % rows.count())
+    check(pg.locator("#kd-zones tbody tr .hint").count() >= 13,
+          "and every row says where on the panel it is")
 
     # bold = 0x0009 in the mock: outdoor temperature (0x1) and clock (0x8).
     check(pg.is_checked("#kd-b-1") and pg.is_checked("#kd-b-8"),

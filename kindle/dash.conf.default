@@ -50,3 +50,72 @@ SENSOR_FLASH_EVERY=0
 # right thing and had it come out wrong. A line per string, so leave it off
 # unless something on screen needs explaining.
 TRACE=0
+
+# ── Battery ──────────────────────────────────────────────────────────────────
+# awake   | what this always did: the CPU loops and the radio stays associated,
+#           about 60-80 mA, which on a ten-year-old cell is a day and a half.
+# wifi    | the radio is off except around a fetch. Roughly halves the draw,
+#           and cannot fail in a way the panel does not already handle.
+# suspend | the above, and the wait between ticks is a real suspend to RAM with
+#           an RTC alarm to come back — under a milliamp while it is down.
+#           This is the one that can leave the panel dark if the alarm does not
+#           take, so the script reads the alarm back before it goes down and
+#           falls back to an ordinary sleep if it did not stick. Try `wifi`
+#           first, and `suspend` when you are ready to be near the device.
+POWER=awake
+
+# Seconds to wait for the radio to associate before fetching anyway. Four to
+# ten is normal for this chip and DHCP; the fetch is attempted either way.
+WIFI_WAIT=15
+
+# Stop the Amazon reader framework while the panel runs (1 = yes, 0 = no).
+# Another 10-15 mA.
+#
+# READ THIS ONE BEFORE TURNING IT ON. KUAL is hosted BY the framework this
+# stops, so while it is on there is no menu to press Stop in — the way back
+# from every other setting here is the one thing this setting takes away. The
+# ways back are: set this to 0 over USB, which the dashboard picks up within a
+# minute like any other key; run stop.sh, which puts the framework back itself;
+# or hold the power button until the Kindle reboots. On firmware where the
+# framework also serves the radio, the dashboard notices the first time a fetch
+# cannot turn it on, puts the framework back, and says so in the log.
+GUI_STOP=0
+
+# ── The screen the dashboard is drawn on ─────────────────────────────────────
+#
+# FBInk writes to the framebuffer; it does not own the screen. The reader's own
+# framework does, and it repaints its library whenever it likes — which is what
+# makes the dashboard vanish back to the home screen for a minute at a time,
+# and what makes a tap on the dashboard open a book.
+#
+#   desktop   what this always did: drawn over whatever the reader is showing
+#   blank     ask the framework to put its chrome away first
+#
+# `blank` is half the fix and costs nothing. The whole fix is GUI_STOP above,
+# which stops the framework altogether — use the tap menu below to get back.
+CANVAS=desktop
+
+# ── The tap menu ─────────────────────────────────────────────────────────────
+# Tap the screen and a bar appears along the bottom: refresh, hide, exit.
+# Exit runs the same cleanup as Stop, which is the way back when GUI_STOP has
+# taken the launcher with it. 1 = on, 0 = off.
+#
+# NOT WITH POWER=suspend. With the CPU down nothing is reading the touchscreen,
+# so where both are asked for the menu wins and the panel does not suspend.
+TOUCH=0
+
+# Which input device is the touchscreen. Empty = find it (the one that reports
+# absolute positions). Set it to /dev/input/eventN if that guess is wrong.
+TOUCH_DEV=
+
+# The touch panel's full scale, when it does not already report screen pixels.
+# 0 = it does. Run with TRACE=1 and tap the corners: the log prints every touch
+# raw and mapped, which is where these two numbers come from.
+TOUCH_MAXX=0
+TOUCH_MAXY=0
+
+# 1 if the panel reports Y where X is expected.
+TOUCH_SWAP=0
+
+# The three labels on the bar, in order, separated by bars.
+MENU_LBL=Refresh|Hide|Exit

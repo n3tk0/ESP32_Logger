@@ -113,18 +113,14 @@ def load_conf(path):
     return vals
 
 
-def main():
-    sheet = extract_css(CPP, '#define KD_N(n)   p += kdPx(n)', '#undef KD_S')
-    if len(sheet) < 1500:
-        raise SystemExit('parity: stylesheet extraction produced %d chars — '
-                         'the emitter changed shape' % len(sheet))
+def css_layout_pairs():
+    """The design, in CSS pixels, and where the panel keeps its copy.
 
-    # ── The design, in CSS pixels, and where the panel keeps its copy ────────
-    #
-    # Left: what the browser page is told. Right: the layout key the FBInk
-    # renderer draws with. Same number, two files, and until this existed
-    # nothing said so.
-    pairs = [
+    Left: what the browser page is told. Right: the layout key the FBInk
+    renderer draws with. Same number, two files, and until this existed nothing
+    said so.
+    """
+    return [
         ('.lab',        'font-size', ['GROUP_LAB_SZ', 'GRID_LAB_SZ']),
         ('.v1',         'font-size', ['HERO_SZ']),
         ('.v2',         'font-size', ['BIG_SZ']),
@@ -146,6 +142,98 @@ def main():
         ('.key',        'font-size', ['KEY_SZ']),
         ('.ax',         'font-size', ['AX_SZ']),
     ]
+
+
+def compare(sheet, confs=None):
+    """How many type sizes disagree, for a given sheet and set of layouts.
+
+    `confs` maps a layout path to an already-loaded dict, so the self-test can
+    hand in a bent copy; anything not named is read from disk.
+    """
+    bad = 0
+    for rel, page_w in PANELS:
+        conf = (confs or {}).get(rel)
+        if conf is None:
+            conf = load_conf(os.path.join(ROOT, rel))
+        for sel, prop, keys in css_layout_pairs():
+            want = kdpx(css_decl(sheet, sel, prop), page_w)
+            for key in keys:
+                if conf.get(key) != want:
+                    bad += 1
+    return bad
+
+
+def bend(sheet, sel, prop, by=3):
+    """The stylesheet with one declaration moved, or the original if it could
+    not be found — which is itself something the self-test reports."""
+    pat = (r'((?:^|[;}])' + re.escape(sel) + r'\{[^{}]*?'
+           + re.escape(prop) + r':)@(-?\d+)@')
+    return re.sub(pat, lambda m: '%s@%d@' % (m.group(1), int(m.group(2)) + by),
+                  sheet, count=1)
+
+
+def self_test():
+    """Prove this checker fails when the two ends drift, without editing them.
+
+    CI USED TO DO THIS WITH A sed. It rewrote one font-size in
+    KindleDashboard.cpp, ran main(), and expected a failure — which meant a
+    regex in a YAML file that had to match the C++ emitter's exact layout, down
+    to the run of spaces between `KD_S(".wd-d{font-size:");` and its `KD_N`.
+    Two copies of the emitter's shape, one of them in a file nothing compiles.
+    It went stale the first time a size moved and reported the drift as
+    "check_kindle_parity.py passed a stylesheet the layout does not follow",
+    which is a lie about the checker and sends the reader to the wrong file.
+
+    The mutation belongs here, where the numbers are already parsed: bend one
+    of them in memory and assert the comparison notices. Nothing on disk is
+    touched, so there is no restore to get wrong and no shape to match.
+    """
+    sheet = extract_css(CPP, '#define KD_N(n)   p += kdPx(n)', '#undef KD_S')
+    fails = []
+
+    # Both directions, because the drift can start at either end: a layout
+    # number edited without the stylesheet, or a stylesheet edited without the
+    # layout. Every pair is exercised, not one hand-picked rule.
+    for sel, prop, keys in css_layout_pairs():
+        css = css_decl(sheet, sel, prop)
+        for rel, page_w in PANELS:
+            conf = load_conf(os.path.join(ROOT, rel))
+            want = kdpx(css, page_w)
+            for key in keys:
+                if conf.get(key) != want:
+                    fails.append('%s %s{%s} and %s already disagree'
+                                 % (rel, sel, prop, key))
+                # The layout drifting away from the page...
+                if compare(sheet, {rel: dict(conf, **{key: want + 3})}) == 0:
+                    fails.append('a %s three px off %s{%s} was not noticed'
+                                 % (key, sel, prop))
+        # ...and the page drifting away from the layout.
+        bent = bend(sheet, sel, prop)
+        if bent == sheet:
+            fails.append('could not bend %s{%s} — the sheet changed shape'
+                         % (sel, prop))
+        elif compare(bent, None) == 0:
+            fails.append('a stylesheet three px off every layout was not noticed'
+                         ' at %s{%s}' % (sel, prop))
+
+    if fails:
+        print('SELF-TEST FAIL: %d case(s) this checker would have let through.\n'
+              % len(fails))
+        for f in fails:
+            print('  ' + f)
+        return 1
+    print('OK: self-test — the checker notices a drift at either end of all %d '
+          'type sizes.' % len(css_layout_pairs()))
+    return 0
+
+
+def main():
+    sheet = extract_css(CPP, '#define KD_N(n)   p += kdPx(n)', '#undef KD_S')
+    if len(sheet) < 1500:
+        raise SystemExit('parity: stylesheet extraction produced %d chars — '
+                         'the emitter changed shape' % len(sheet))
+
+    pairs = css_layout_pairs()
 
     # The runtime clock styles, whose CSS lives in kdSkinCss() rather than in
     # the sheet. Each claims to keep the clock block at the height the design
@@ -196,6 +284,8 @@ def main():
         problems.append('parity: ChartBmp::imageW/imageH no longer state the BMP size')
     else:
         hiW, loW, hiH, loH = (int(g) for g in m.groups())
+        mw = re.search(r'CHART_W = kdPx\((\d+)\);', open(CPP, encoding='utf-8').read())
+        loW_design = int(mw.group(1)) if mw else None
         for rel, (w, h) in (('kindle/layout/600x800.conf', (loW, loH)),
                             ('kindle/layout/1072x1448.conf', (hiW, hiH))):
             conf = load_conf(os.path.join(ROOT, rel))
@@ -203,6 +293,45 @@ def main():
                 problems.append('%s: GR_W/GR_H = %s/%s but the collector serves '
                                 'a %dx%d image'
                                 % (rel, conf.get('GR_W'), conf.get('GR_H'), w, h))
+
+    # ── And the plot area inside it, which is the same design twice again ────
+    #
+    # The page draws its chart as an SVG whose margins are flat kdPx() values;
+    # the panel blits a BMP whose margins ChartBmp scales from the design's own
+    # dimensions. Same picture, so the same margins — and the only thing making
+    # that true is that ChartBmp divides by the number CHART_H is built from.
+    #
+    # IT STOPPED BEING TRUE THE DAY THE CHART GREW. imageH went 200 to 220 and
+    # the vertical pair kept dividing by 200, so the panel plotted a 24 h curve
+    # into 181 px where the page used 184, one pixel lower and a percent and a
+    # half shorter. Nothing said so: the size check above compares GR_W/GR_H,
+    # which were both right.
+    m = re.search(r'CHART_H = kdPx\((\d+)\);', open(CPP, encoding='utf-8').read())
+    design_h = int(m.group(1)) if m else None
+    if design_h is None:
+        problems.append('parity: no CHART_H = kdPx(N) in KindleDashboard.cpp — '
+                        'the page no longer states its chart height')
+
+    svg = re.search(r'const int L = kdPx\((\d+)\), R = CHART_W - kdPx\((\d+)\), '
+                    r'T = kdPx\((\d+)\), B = CHART_H - kdPx\((\d+)\);',
+                    open(CPP, encoding='utf-8').read())
+    mar = re.findall(r'inline int margin([LRTB])\(uint16_t \w\) '
+                     r'\{ return (?:\w - )?\w \* (\d+) / (\d+); \}', bmp)
+    if not svg or len(mar) != 4:
+        problems.append('parity: the chart margins are no longer stated as '
+                        'kdPx() on the page and marginL/R/T/B on the panel')
+    else:
+        want = dict(zip('LRTB', (int(g) for g in svg.groups())))
+        # The horizontal pair scales by the design's width, the vertical by its
+        # height. Both are the number the page builds its own box from.
+        design = {'L': loW_design, 'R': loW_design, 'T': design_h, 'B': design_h}
+        for side, num, den in mar:
+            if int(num) != want[side]:
+                problems.append('parity: margin%s insets %s px but the page '
+                                'insets its SVG by %d' % (side, num, want[side]))
+            if design[side] is not None and int(den) != design[side]:
+                problems.append('parity: margin%s divides by %s but the design '
+                                'it scales from is %d' % (side, den, design[side]))
 
     # ── Every icon the collector can ask for exists on the panel ─────────────
     #
@@ -271,4 +400,6 @@ def main():
 
 
 if __name__ == '__main__':
+    if '--self-test' in sys.argv:
+        sys.exit(self_test())
     sys.exit(main())

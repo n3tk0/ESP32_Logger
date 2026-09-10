@@ -102,10 +102,9 @@ cmd_set() {
     # 08 is not a number the shell can divide by. Normalise before validating,
     # so `set DATA_EVERY 05` stores 5 rather than a value that would break the
     # loop the first time it came round.
-    case "$k" in
-        HOST) ;;
-        *) v=$(strip_zeros "$v") ;;
-    esac
+    if conf_is_text "$k"; then :; else
+        v=$(strip_zeros "$v")
+    fi
     if ! conf_valid "$k" "$v"; then
         printf '%s is not a valid %s\n' "$v" "$k" | say_lines
         return 1
@@ -113,6 +112,38 @@ cmd_set() {
     eval "$k=\$v"
     conf_write || { echo "could not write $CONF" >&2; return 1; }
     printf '%s = %s\n\nThe dashboard picks this up within a minute.\n' "$k" "$v" | say_lines
+    ask_redraw
+}
+
+# ── power ────────────────────────────────────────────────────────────────────
+# The battery settings, as three named choices rather than three keys to type.
+#
+# THEY WERE UNREACHABLE. `set KEY VALUE` has always existed here, but kual-run.sh
+# forwards a fixed list of commands and menu.json lists a fixed set of entries,
+# and neither had grown POWER, WIFI_WAIT or GUI_STOP. The documentation said
+# "try wifi first, and suspend when you are ready", which on the device meant a
+# USB cable and a text editor — the exact thing this file's header says the
+# whole settings subsystem exists to remove. They are the settings most likely
+# to be tried, reverted and tried again, so they are the last ones that should
+# need a computer.
+cmd_power() {
+    case "$1" in
+        awake)   POWER=awake;   GUI_STOP=0 ;;
+        wifi)    POWER=wifi;    GUI_STOP=0 ;;
+        suspend) POWER=suspend; GUI_STOP=0 ;;
+        # The framework is the one that makes the device stop being a reader,
+        # and takes KUAL — this menu — with it. It is offered, and it says so.
+        deep)    POWER=suspend; GUI_STOP=1 ;;
+        *) echo "power: awake, wifi, suspend, deep" >&2; return 1 ;;
+    esac
+    conf_write || return 1
+    if [ "$GUI_STOP" = "1" ]; then
+        printf 'Battery: %s\n\nThe reader framework will be stopped, and\nthis menu goes with it.\n\nTo undo: run Stop over USB, or hold the\npower button until the Kindle reboots.\n\nApplies within a minute.\n' \
+            "$1" | say_lines
+    else
+        printf 'Battery: %s\n\nPOWER %s  GUI_STOP %s\n\nApplies within a minute.\n' \
+            "$1" "$POWER" "$GUI_STOP" | say_lines
+    fi
     ask_redraw
 }
 
@@ -237,12 +268,13 @@ case "${1:-show}" in
     show)    cmd_show ;;
     get)     shift; cmd_get "$@" ;;
     set)     shift; cmd_set "$@" ;;
+    power)   shift; cmd_power "$@" ;;
     profile) shift; cmd_profile "$@" ;;
     find)    cmd_find ;;
     next)    cmd_next ;;
     reset)   cmd_reset ;;
     *)
-        echo "usage: settings.sh {show|get KEY|set KEY VALUE|profile NAME|find|next|reset}" >&2
+        echo "usage: settings.sh {show|get KEY|set KEY VALUE|power NAME|profile NAME|find|next|reset}" >&2
         exit 2
         ;;
 esac

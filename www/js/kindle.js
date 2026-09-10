@@ -13,30 +13,117 @@
 // which is the kind of bug that looks like a rendering fault.
 // ============================================================================
 
-// Must match the KBOLD_* constants in src/core/Config.h.
-var KD_BOLD = [
-  [0x0001, "Headline"],
-  [0x0002, "Beside the headline"],
-  [0x0004, "The grid"],
-  [0x0008, "Clock"],
-  [0x0010, "Indoor row"],
-  [0x0020, "Units"],
-  [0x0040, "Forecast"],
-  [0x0080, "Week strip"],
-  [0x0100, "Labels"]
+// ── The page, zone by zone ──────────────────────────────────────────────────
+//
+// ONE ROW PER REGION OF THE PANEL, IN THE ORDER THE PANEL DRAWS THEM.
+//
+// This was three separate lists. A grid of nine checkboxes headed "Weight", a
+// grid of eight headed "What is drawn", and a card of eleven place-editors —
+// three different namings of the same regions, in three different orders, none
+// of them saying where on the panel a region is or what fills it. "The grid"
+// appeared in two of them and meant the same thing; "Beside the headline"
+// appeared in two and meant the same thing; the forecast appeared in one of
+// them and was not configurable from this page at all. To answer "where do I
+// turn this on" the reader had to hold the whole layout in their head and
+// guess which of the three lists owned it.
+//
+// So: one table, the panel's own reading order, and a fourth column that says
+// where the content comes from — a jump to the control further down this page,
+// a link to the page that actually owns it, or a plain statement that nothing
+// configures it. Every KSHOW bit and every KBOLD bit appears exactly once,
+// which is also what makes the mapping checkable by eye against
+// src/core/Config.h.
+//
+//   show:  KSHOW_* bit; 0 = always drawn; -1 = a build-time module.
+//   bold:  KBOLD_* bit; 0 = no weight of its own.
+//   fill:  ["jump", elementId, label]  a control further down this page
+//          ["link", href, label]       the page that owns it
+//          ["text", sentence]          nothing configures it
+var KD_ZONES = [
+  { name: "Headline",
+    where: "Top left. The largest number on the page.",
+    show: 0, bold: 0x0001,
+    fill: ["jump", "kd-zone-hero", "Pick the reading"] },
+
+  { name: "Beside the headline",
+    where: "Shares the headline's baseline, after a slash.",
+    show: 0x0001, bold: 0x0002,
+    fill: ["jump", "kd-zone-big", "Pick the reading"] },
+
+  { name: "24-hour low-to-high",
+    where: "The small line under the headline, with the reading's age.",
+    show: 0x0008, bold: 0,
+    fill: ["text", "Follows the headline's sensor."] },
+
+  { name: "The grid",
+    where: "Under that line \u2014 up to three across and two deep.",
+    show: 0x0002, bold: 0x0004,
+    fill: ["jump", "kd-zone-g1", "Pick the six readings"] },
+
+  { name: "Pressure tendency arrow",
+    where: "After a pressure reading, wherever one is placed.",
+    show: 0x0004, bold: 0,
+    fill: ["text", "Per place, under \u201cTendency arrow\u201d."] },
+
+  { name: "Clock",
+    where: "Top right, above the indoor row.",
+    show: 0, bold: 0x0008,
+    fill: ["jump", "kd-card-clock", "Style, time and date"] },
+
+  { name: "Indoor row",
+    where: "Under the clock \u2014 up to three readings on one baseline.",
+    show: 0x0010, bold: 0x0010,
+    fill: ["jump", "kd-zone-in1", "Pick the three readings"] },
+
+  { name: "24-hour trend chart",
+    where: "Full width, under the two columns.",
+    show: 0x0020, bold: 0,
+    fill: ["text", "Drawn from the stored history of the headline's sensor."] },
+
+  { name: "Weather forecast",
+    where: "Under the chart: the condition, and three outlook columns.",
+    show: -1, bold: 0x0040,
+    fill: ["link", "#settings_modules", "Provider, place and outlook"] },
+
+  { name: "Week strip",
+    where: "The seven days above the footer, today knocked out in black.",
+    show: 0x0040, bold: 0x0080,
+    fill: ["text", "Drawn from the device's own date."] },
+
+  { name: "Low-battery badge",
+    where: "Beside the outdoor heading, when a node is nearly flat.",
+    show: 0x0080, bold: 0,
+    fill: ["link", "#settings_espnow", "Which nodes report a battery"] },
+
+  // The last two are not regions. They are the two things that appear inside
+  // every region, and they own a weight bit each — which is why they were in
+  // the "Weight" list alongside eight regions, reading as if they were places
+  // on the panel.
+  { name: "Captions", span: true,
+    where: "The small grey heading above every value, and the two column headings.",
+    show: 0, bold: 0x0100,
+    fill: ["jump", "kd-slots", "Wording, per place"] },
+
+  { name: "Units", span: true,
+    where: "The suffix after a number \u2014 \u00b0, %, hPa.",
+    show: 0, bold: 0x0020,
+    fill: ["jump", "kd-card-units", "Which units"] }
 ];
 
-// Must match the KSHOW_* constants in src/core/Config.h.
-var KD_SHOW = [
-  [0x0001, "The value beside the headline"],
-  [0x0002, "The two-by-two grid"],
-  [0x0004, "Pressure tendency"],
-  [0x0008, "24-hour range"],
-  [0x0010, "Indoor block"],
-  [0x0020, "Trend chart"],
-  [0x0040, "Week strip"],
-  [0x0080, "Low-battery badge"]
-];
+// Kept for the round-trip: kdMaskOf() walks these to collect the checkboxes
+// the table above rendered, and they are the list the firmware's constants are
+// compared against. Derived from KD_ZONES rather than written twice, so a zone
+// added to the table cannot be left out of the save.
+function kdBitsOf(field) {
+  var out = [];
+  for (var i = 0; i < KD_ZONES.length; i++) {
+    var bit = KD_ZONES[i][field];
+    if (bit > 0) out.push([bit, KD_ZONES[i].name]);
+  }
+  return out;
+}
+var KD_BOLD = kdBitsOf("bold");
+var KD_SHOW = kdBitsOf("show");
 
 function kdMsg(text, kind) {
   showMsg("kd-msg",
@@ -50,17 +137,77 @@ function kdEsc(s) {
   });
 }
 
-function kdBoxes(boxId, defs, prefix, mask) {
-  var box = document.getElementById(boxId);
-  if (!box) return;
-  var html = "";
-  for (var i = 0; i < defs.length; i++) {
-    html +=
-      '<label class="check"><input type="checkbox" id="' + prefix + defs[i][0] + '"' +
-      ((mask & defs[i][0]) ? " checked" : "") + '><span>' + kdEsc(defs[i][1]) +
-      "</span></label>";
+// One cell of the table: a checkbox bound to a bit, or the reason there is
+// none. A blank cell would read as "off"; a word says which it is.
+function kdBitCell(bit, prefix, mask, none) {
+  if (bit > 0) {
+    return '<input type="checkbox" style="width:auto" id="' + prefix + bit + '"' +
+           ((mask & bit) ? " checked" : "") + ' aria-label="' + kdEsc(none.aria) + '">';
   }
-  box.innerHTML = html;
+  return '<span class="hint" style="margin:0">' + kdEsc(none.word) + "</span>";
+}
+
+function kdFillCell(fill) {
+  if (!fill) return "";
+  if (fill[0] === "jump") {
+    return '<button class="btn sm" data-click="kindleJump" data-args=' +
+           "'[\"" + fill[1] + "\"]'>" + kdEsc(fill[2]) +
+           ' <span data-icon="arrow-down"></span></button>';
+  }
+  if (fill[0] === "link") {
+    return '<a class="btn sm" href="' + kdEsc(fill[1]) + '">' + kdEsc(fill[2]) +
+           ' <span data-icon="arrow-right"></span></a>';
+  }
+  return '<span class="hint" style="margin:0">' + kdEsc(fill[1]) + "</span>";
+}
+
+function kdRenderZones(show, bold) {
+  var box = document.getElementById("kd-zones");
+  if (!box) return;
+
+  var rows = "", spanOpened = false;
+  for (var i = 0; i < KD_ZONES.length; i++) {
+    var z = KD_ZONES[i];
+    // The two page-wide rows are separated by a heading rather than just sat
+    // at the bottom: they are not places on the panel, and a table of regions
+    // that ends with two non-regions is the confusion this replaced.
+    if (z.span && !spanOpened) {
+      spanOpened = true;
+      rows += '<tr class="kd-zsplit"><th colspan="4">Everywhere on the page</th></tr>';
+    }
+    rows +=
+      "<tr>" +
+        "<td><strong>" + kdEsc(z.name) + "</strong>" +
+          '<div class="hint" style="margin:2px 0 0">' + kdEsc(z.where) + "</div></td>" +
+        '<td class="kd-zbit">' +
+          kdBitCell(z.show, "kd-s-", show,
+                    { aria: "Show " + z.name,
+                      word: z.show === -1 ? "Module" : "Always" }) + "</td>" +
+        '<td class="kd-zbit">' +
+          kdBitCell(z.bold, "kd-b-", bold,
+                    { aria: "Bold " + z.name, word: "\u2014" }) + "</td>" +
+        '<td class="kd-zfill">' + kdFillCell(z.fill) + "</td>" +
+      "</tr>";
+  }
+
+  box.innerHTML =
+    '<table class="ftable kd-ztable"><thead><tr>' +
+      "<th>Zone</th><th>Shown</th><th>Bold</th><th>What fills it</th>" +
+    "</tr></thead><tbody>" + rows + "</tbody></table>";
+
+  if (window.Icons && Icons.swap) Icons.swap(box);
+}
+
+// Take the reader to the control that fills a zone, and flash it, rather than
+// naming it and leaving them to find it four cards down. The table is this
+// page's index; an index whose entries are not links is just a list.
+function kindleJump(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  try { el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  catch (e) { el.scrollIntoView(); }
+  el.classList.add("kd-flash");
+  setTimeout(function () { el.classList.remove("kd-flash"); }, 1400);
 }
 
 function kdMaskOf(defs, prefix) {
@@ -119,8 +266,7 @@ function kindleRender(d) {
   var fc = document.getElementById("kd-face-custom");
   if (fc) fc.value = d.face_custom || "";
 
-  kdBoxes("kd-bold", KD_BOLD, "kd-b-", d.bold | 0);
-  kdBoxes("kd-show", KD_SHOW, "kd-s-", d.show | 0);
+  kdRenderZones(d.show | 0, d.bold | 0);
 
   kdSet("kd-refresh",  d.refresh_sec);
   kdSet("kd-follow",   d.follow_data);
@@ -352,7 +498,9 @@ function kdZoneCard(key) {
 
   var empty = !s.sensor || !s.metric;
 
-  return "<div class='card' style='margin-bottom:8px'><div class='card-body'>" +
+  // The id is what the zone table's "Pick the reading" button jumps to.
+  return "<div class='card' id='kd-zone-" + key + "' style='margin-bottom:8px'>" +
+    "<div class='card-body'>" +
     "<div style='display:flex;gap:6px;align-items:baseline;margin-bottom:6px'>" +
       "<strong style='font-size:.9rem'>" + esc(text[0]) + "</strong>" +
       (text[1] ? "<span class='hint' style='margin:0'>" + esc(text[1]) + "</span>" : "") +
@@ -648,6 +796,7 @@ registerHandlers({
   kindleRefresh: kindleRefresh,
   kindleSave: kindleSave,
   kindleDefaults: kindleDefaults,
+  kindleJump: kindleJump,
   kindleFaceChanged: kindleFaceChanged,
   kindleClockChanged: kindleClockChanged,
   kindleZoneEdit: kindleZoneEdit,

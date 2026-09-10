@@ -1,7 +1,8 @@
 #!/bin/sh
 # stop.sh — stop the dashboard and give the Kindle its normal behaviour back.
 
-PIDFILE=/tmp/dash.pid
+PIDFILE="${DASH_PIDFILE:-/tmp/dash.pid}"
+DASH_TMP="${DASH_TMP:-/tmp/dash}"
 
 # BY PID, NOT BY NAME. `killall update_dash.sh` only ever worked while the
 # script was executed directly; started as `sh ./update_dash.sh` — which is
@@ -32,7 +33,36 @@ for p in $(ps 2>/dev/null | grep '[u]pdate_dash\.sh' | awk '{print $1}'); do
     kill "$p" 2>/dev/null
 done
 
+# ── Hand the device back, whatever state the dashboard left it in ────────────
+#
+# THE EXIT TRAP IS NOT A RECOVERY PATH, only the tidy case. update_dash.sh puts
+# the radio and the reader framework back from cleanup(), which runs on
+# SIGTERM — and ten seconds above this line we send SIGKILL to anything that
+# did not go, which is exactly the wedged, OOM-killed or hand-killed dashboard
+# whose cleanup() never ran. Both things it can leave behind are device-wide
+# and outlive the process: a radio turned off stays off, and a stopped reader
+# framework stays stopped until a reboot. Neither is something to hand back to
+# somebody who just pressed Stop.
+#
+# FROM THE MARKERS, NOT UNCONDITIONALLY. They say what this dashboard actually
+# took, so a reader who runs with POWER=awake and never had GUI_STOP on does not
+# get their radio switched on by a script they asked to stop.
 lipc-set-prop com.lab126.powerd preventScreenSaver 0 2>/dev/null
-rm -rf /tmp/dash
+
+# The framework before the radio: it is what answers com.lab126.cmd on the
+# firmware where GUI_STOP takes the radio down with it, so the other order is a
+# restore that quietly does nothing.
+case "$(cat "$DASH_TMP/gui-stopped" 2>/dev/null)" in
+    1) start lab126_gui >/dev/null 2>&1 ;;
+    2) killall -CONT cvm 2>/dev/null ;;
+esac
+# And the chrome CANVAS=blank asked it to put away, for the same reason: a
+# reader handed back without its status bar looks broken in a way nothing on
+# screen explains.
+[ -f "$DASH_TMP/canvas" ] &&
+    lipc-set-prop com.lab126.pillow disableEnablePillow 0 2>/dev/null
+[ -f "$DASH_TMP/radio-off" ] && lipc-set-prop com.lab126.cmd wirelessEnable 1 2>/dev/null
+
+rm -rf "$DASH_TMP"
 fbink -c 2>/dev/null
 echo "Dashboard stopped."

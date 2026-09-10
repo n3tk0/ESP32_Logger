@@ -10,7 +10,7 @@
 # not care.
 cd "$(dirname "$0")" || exit 1
 
-PIDFILE=/tmp/dash.pid
+PIDFILE="${DASH_PIDFILE:-/tmp/dash.pid}"
 
 # Already running? Starting a second copy leaves two processes drawing to the
 # same framebuffer on different timers, which looks like a corrupted panel

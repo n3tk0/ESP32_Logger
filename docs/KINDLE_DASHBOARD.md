@@ -12,7 +12,7 @@ Rendered at 600×800 CSS px through a greyscale filter, which is how every
 layout decision in this document was checked. It is the current page: a two-column
 top block with no masthead — the outdoor headline and its grid on the left, the
 clock and the indoor row on the right — three-hourly rules in the chart, the
-month above the week strip, and the two manual repaint links in the footer. The page comes to **761 of the 800 px** available.
+month above the week strip, and the two manual repaint links in the footer. The page comes to **777 of the 800 px** available.
 
 The figures are synthetic. The **stylesheet is extracted from the `KD_S`/`KD_N`
 calls in `KindleDashboard.cpp`** at render time rather than kept as a copy, so
@@ -197,7 +197,7 @@ Load it on the reader and read the numbers off:
 
 Below 320 or above 2400 the build fails rather than rendering something that
 was never measured. All three values above are checked at the device's viewport
-before release: 761 of 810 at 600, 678 of 724 at 536, 1357 of 1448 at 1072, and
+before release: 778 of 810 at 600, 704 of 724 at 536, 1394 of 1448 at 1072, and
 no horizontal overflow at any of them.
 
 An earlier attempt at this got the chart wrong — the SVG kept its 600-px size
@@ -225,6 +225,70 @@ version. So the page:
 
 None of that is a sacrifice on this medium. A panel that repaints in full or
 not at all has no use for a script that updates part of itself.
+
+### It is read from across a room, not held
+
+A Kindle on a shelf is not a Kindle in a lap, and the scale this page started
+with was a lap scale: 10 px captions, 12 px section headings, a 14 px line under
+the headline. At 167 ppi 10 CSS px is **1.5 mm of em** — about a millimetre of
+cap height. At arm's length that is comfortable. From the other side of a room
+it is a grey smudge, and the smudge was carrying the units, the axis, the day
+names and the age of the forecast: everything that says what the big numbers
+mean.
+
+So the scale was **compressed rather than enlarged** — the small end grew by
+about a third, the large end did not move at all.
+
+| | was | is |
+|---|---|---|
+| captions (`.lab`), weekday names, outlook labels | 10–11 px | **14 px** |
+| section headings (`.sec`), footer, chart key | 12–13 px | **15 px** |
+| chart axis (`.ax`) | 11 px | **14 px** |
+| the 24 h line under the headline (`.sub`) | 14 px | **17 px** |
+| outlook temperatures, day numbers | 19 / 24 px | **22 / 30 px** |
+| grid, indoor and forecast values | 26–31 px | **27–34 px** |
+| headline, clock, first indoor value | 88 / 96 / 52 px | unchanged |
+
+**The headline and the clock stayed put for a reason that is not taste.** The
+top block is a content-sized two-column table and `.head` is
+`white-space:nowrap`, so growing the hero takes width from the right-hand
+column — at the widest headline the page draws, `-12.4° / 100%`, the indoor
+degree sign fell off the end of its cell. They were also the two things already
+legible from the far side of the room.
+
+The height came out of the page's own white space rather than out of the
+budget: the body padding, the three section rules, the week strip's cells and
+the gaps under the headings each gave back a few pixels. What was left went
+into the **chart, 200 → 220 CSS px** — the one block whose job is a shape
+rather than a number, and so the one that spends vertical resolution well. The
+page finishes at **778 of 800** in the busiest arrangement it draws, where it
+finished at 762.
+
+Two sizes were then pulled back a step by measurement rather than taste. At
+29 px `1008 hPa` with a tendency arrow after it did not fit a third of the
+left column, and `.cv` clips — so the arrow, the one glyph that says which
+way the pressure is going, was the part that fell off; three across is 27.
+And the daily outlook shows a *pair* of temperatures in an 88 px plate, where
+23 px put the widest one the forecast can produce at 86 of those 88 with no
+clip to catch it; the plates are 22.
+
+### On the panel the same change buys much more
+
+The panel had room the page never did. Its tiling is absolute coordinates
+instead of a flow layout, and it stopped at **701 of 800** — 99 px of blank
+screen under the footer, with every size on it chosen to fit above that line.
+Both layout files were re-tiled from the top down to spend it; the footer now
+finishes at 788.
+
+Nothing had been checking that tiling. Fifty-five coordinates moved, and a
+panel is the one renderer nobody can watch — a section drawn over its neighbour
+comes back as a photograph, days later. So `tests/kindle/drive_dash.sh` now
+asserts the whole chain on **both** panels, from the layout files themselves and
+through the same `text_geom()` the renderer positions with: each section clears
+the next, nothing runs past the bottom edge, and the footer has to come within a
+twentieth of it. That last clause is the one that keeps the type large — a
+layout stopping short of the edge has room it is not spending, and the suite
+fails until it spends it.
 
 ## The top of the page
 
@@ -292,7 +356,8 @@ plus how old the reading is: `-2.4 до 15.3° · 3 мин`. It is composed on t
 collector, by `kdSubLine()`, so the wording, the unit and the rounding are the
 page's and not each renderer's, and it is set in the page's mid grey rather than
 its dark one — it is context for the number above it, not a reading in its own
-right. Switch it off under *What is drawn → 24-hour range*.
+right. Switch it off in the zone table's **Shown** column, on the
+*24-hour low-to-high* row.
 
 The pair is the one thing on the page that must not reflow, so it is `nowrap`
 with the overflow hidden, and the sizes were measured against the widest it
@@ -358,7 +423,7 @@ Three decisions, all of them about the medium:
   cut out of a dark field.
 - **It floats.** `.bw` is `float:right`, not flex — the same reason the whole
   page lays out in tables. It also means the badge costs no height: the page
-  measures 761 px of the 800 budget with it and without it.
+  measures 777 px of the 800 budget with it and without it.
 
 Its geometry goes through `kdPx()` like everything else, so it scales with
 `KINDLE_PAGE_W` down to a Kindle 4's 536 px. The condition is
@@ -452,17 +517,49 @@ because it is served to a browser with no JavaScript and sometimes no touch
 panel, and a form there would be a worse version of the one that already
 exists.
 
+### The zone table is that page's index
+
+**Every region of the panel is one row**, in the order the panel draws them,
+carrying the two switches that belong to it and a way through to whatever fills
+it — a jump to the control further down the same page, a link to the page that
+actually owns it, or a plain statement that nothing configures it.
+
+It replaced three lists. A grid of nine checkboxes headed *Weight*, a grid of
+eight headed *What is drawn*, and a card of eleven place-editors: three
+different namings of the same regions, in three different orders. "The grid"
+was in two of them and meant the same thing. "Beside the headline" was in two
+and meant the same thing. The forecast was in one and could not be configured
+from that page at all. To answer *where do I turn this on* the reader had to
+hold the whole layout in their head and then guess which of the three lists
+owned it.
+
+| Column | |
+|---|---|
+| **Zone** | the region, and one line saying where on the panel it is |
+| **Shown** | its `KSHOW_*` bit, or *Always* for one that cannot be turned off, or *Module* for the forecast, which is a build-time feature rather than a setting |
+| **Bold** | its `KBOLD_*` bit, or a dash for a region that has no weight of its own |
+| **What fills it** | ↓ to a control further down this page, → to the page that owns it, or the sentence that says nothing does |
+
+Every `KSHOW_*` and every `KBOLD_*` bit appears exactly once, which is what
+makes the mapping checkable by eye against `src/core/Config.h` — and what
+`tests/web/drive_kindle_page.py` asserts by counting the checkboxes by id
+prefix rather than by container.
+
+The last two rows are not regions. **Captions** and **Units** are the two
+things that appear inside every region and own a weight bit each, so they sit
+under a heading of their own rather than reading as places on the panel.
+
+The rest of the page is the controls those rows point at:
+
 | | |
 |---|---|
 | **Face** | Bookerly (default), Caecilia, Palatino, Baskerville, Helvetica, Futura, or a font-family list of your own |
-| **Weight** | which figures are set bold — the headline, the value beside it, the grid, the clock, the indoor row, the units, the forecast, the week strip and the captions; none by default |
 | **Clock** | plain, boxed, ruled, or with the date beneath |
 | **Time** | `09:05`, `9:05`, `9:05am` |
 | **Date** | `27 august`, `august 27`, `27.08.2026`, `2026-08-27` |
 | **Pressure** | hPa, mmHg or inHg — the three-hour change follows it |
 | **Temperature** | one decimal or whole degrees |
 | **Readings** | what goes in each of the eleven places, and each one's caption, decimals, switches and grey level |
-| **Blocks** | the value beside the headline, the two-by-two grid, the pressure tendency, the 24 h range, the indoor block, the chart, the week strip, the battery badge |
 
 The settings live in `config.kindle` (`src/core/Config.h`) and are read on
 every render, so a save takes effect on the panel's next repaint. They survive
@@ -540,7 +637,7 @@ Three ways, and one of them is not what it sounds like.
 A **refresh** button in the footer. A link, not a script, so a five-way pad
 reaches it as readily as a fingertip.
 
-It measures **72×26 CSS px**, which is about **11×4 mm** on any of the readers
+It measures **78×27 CSS px**, which is about **12×4 mm** on any of the readers
 this page targets — a 300 ppi Paperwhite scaling 600 CSS px across 1072 device
 px and a 167 ppi Kindle 7 mapping them 1:1 both come to 0.15 mm per CSS px.
 
@@ -548,9 +645,10 @@ px and a 167 ppi Kindle 7 mapping them 1:1 both come to 0.15 mm per CSS px.
 > smallest thing worth aiming at". That was wrong twice over: the 44 in the
 > usual guidance is CSS px on a phone — roughly **9 mm** — and 4 mm is under
 > half of it. The button is reachable with an infrared touch panel but it is not
-> generous. The page has no spare height at 761 of 800 to grow it without taking
-> the difference from the chart, which is a trade worth making deliberately
-> rather than by accident.
+> generous. Its type grew with the rest of the small end of the scale, which is
+> where the height went: the page finishes at 778 of 800 and has none left over
+> to make the box itself taller. Taking more would come out of the chart, which
+> is a trade worth making deliberately rather than by accident.
 
 > **Route order is load-bearing.** `AsyncCallbackWebHandler::canHandle` matches
 > a URL that *starts with* its uri plus `/`, and the first registered handler
@@ -1138,6 +1236,216 @@ correct for free.
 Today is marked by inverting the cell rather than outlining it: a filled block
 is the one mark that stays unambiguous after e-ink dithering, where a thin
 ring can read as a smudge.
+
+## What a dashboard costs the Kindle
+
+The i.MX6SL never reaches a hardware suspend while `update_dash.sh` is
+looping, and the radio stays associated whether or not anything is being
+fetched:
+
+| | |
+|---|---:|
+| CPU awake in a shell loop | ~25–35 mA |
+| WiFi associated, idle (beacons, DTIM, the radio) | ~30–50 mA |
+| Amazon's reader framework in the background | ~10–15 mA of the CPU's share |
+
+That is 60–80 mA against a cell that left the factory at 890–1420 mAh and, ten
+years on, is likely 600–900. A day and a half, on a panel that hangs on a wall
+with no cable.
+
+**Most minutes need none of it.** The clock is drawn from the reader's own
+clock — `CLOCK_EVERY=1` costs one e-ink update and no network at all — and the
+tiers already say which minutes do: `DATA_EVERY=5`, `GRAPH_EVERY=15`,
+`FORECAST_EVERY=30`. Four minutes in five, the radio is paying for nothing.
+
+`POWER` in `dash.conf` is three settings, each a superset of the one before,
+because each asks for more trust that a ten-year-old device comes back:
+
+| | | |
+|---|---|---:|
+| `awake` | what this always did; nothing is touched | 1–2 days |
+| `wifi` | the radio is off except around a fetch | ~3 days |
+| `suspend` | the above, and the wait between ticks is a real suspend to RAM with an RTC alarm | 5–7 days |
+
+`wifi` cannot fail in a way the panel does not already handle: a fetch that
+finds no network keeps the last reading on screen, which is what it does when
+the collector is down. Association is not instant — four to ten seconds for
+the chip and DHCP — so `net_up()` waits for `cmState` to say CONNECTED rather
+than sleeping a fixed guess, and gives up after `WIFI_WAIT` and tries the
+fetch anyway: a wrong answer from a daemon is not a reason to skip a request
+that might work.
+
+**`suspend` is the one that can end the dashboard rather than degrade it.**
+Everything else here recovers by itself; a suspend with no alarm behind it is
+a panel that stays dark until somebody presses the power button. So
+`suspend_for()` clears the alarm, writes it, **reads it back**, and refuses to
+go down unless the value stuck — and `nap_to_minute()` treats that refusal as
+the ordinary path, falling back to a plain sleep. `RTC_WAKEALARM` and
+`PM_STATE` are variables so the tests can point them at a temp file; a test
+that wrote the real `/sys/power/state` would suspend the machine running it.
+
+`GUI_STOP=1` stops Amazon's reader framework — `stop lab126_gui`, or
+`killall -STOP cvm` where that service is not there. **Stopped, not killed**: a
+stopped job comes back with `start` and a SIGSTOPped VM with SIGCONT, where a
+killed `cvm` needs a reboot. Off by default, because it is the setting that
+makes the device stop being a reader.
+
+**And it is the one setting KUAL cannot undo.** KUAL is a Kindlet, hosted by
+the framework this switches off, so "press Stop in KUAL" — the way back from
+everything else here — is not on the screen while it is on. An earlier version
+of this page said it was. The ways back are:
+
+- set `GUI_STOP=0` in `dash.conf` over USB. `gui_apply()` re-reads and
+  re-applies it every minute, exactly like every other key in `conf_keys()` —
+  it used to be read every minute and applied only at startup, which made
+  turning it on from Settings do nothing and turning it off do nothing until
+  Stop;
+- run `stop.sh`, which restores the framework itself rather than relying on the
+  dashboard's exit trap;
+- hold the power button until the reader reboots, which clears both forms.
+
+**On some firmware the framework also serves the radio.** `com.lab126.cmd` is
+what `net_up()` and `net_down()` talk to, and where it shares an upstart job
+with the reader, `GUI_STOP=1` plus `POWER=wifi` would turn the radio off and
+never get it back — every fetch failing for the rest of the run with nothing on
+the panel to say why. `net_up()` is the only place that can tell the two
+firmwares apart, because it is the only one that asks: if the radio cannot be
+set while the framework is stopped, the framework goes back, the radio is asked
+again, and `GUI_STOP` stays off for as long as anything needs the network. Ten
+milliamps is worth less than a dashboard that updates.
+
+**Stop hands the device back.** `cleanup()` restores the framework first and
+then the radio — that order, because the framework is what answers for the
+radio on the firmware above — and only restores a radio this script turned off,
+which is not the same question as what `POWER` says by the time Stop is
+pressed. Switching `POWER` back to `awake` mid-run used to strand the radio:
+`awake` is the value that makes every path return without touching anything,
+Stop included, so undoing the setting left the reader with no network and
+nothing that would restore it. `power_apply()` is what closes that.
+
+**And when nothing runs the trap at all.** `stop.sh` sends SIGKILL ten seconds
+after SIGTERM, so the dashboards whose `cleanup()` never runs are exactly the
+ones it creates — along with the wedged, the OOM-killed and the killed by hand.
+The dashboard writes what it took into `radio-off` and `gui-stopped` under its
+own temp directory, and `stop.sh` reads those and puts back precisely that:
+a reader on `POWER=awake` who never turned `GUI_STOP` on does not get their
+radio switched on by a script they asked to stop.
+
+## The screen the panel is drawn on
+
+**FBInk writes to the framebuffer. It does not own the screen.** The reader's
+own framework does, and that is the whole of two complaints that look like
+separate faults:
+
+- **the dashboard drops back to the home screen and takes a minute to come
+  back.** The framework repainted its library over us — a cover thumbnail
+  finishing, the status bar ticking, a sync — and nothing redrew until the next
+  tick came round;
+- **tapping the dashboard opens a book.** The touch never reached this script.
+  It went to whatever the framework was showing underneath.
+
+`CANVAS=blank` asks the framework to put its chrome away
+(`com.lab126.pillow disableEnablePillow`). It is half the fix and costs
+nothing: the status bar and the toolbars are the parts that repaint most often.
+The whole fix is `GUI_STOP=1`, which stops the framework altogether — and the
+tap menu below is what makes that safe to use, because it is the way back that
+stopping the launcher otherwise takes away.
+
+### The tap menu
+
+**A bar that is not there until you ask for it.** The dashboard is a picture
+with no controls on it, which is right for something read from across a room
+and wrong the moment somebody is standing in front of it wanting it refreshed.
+
+Tap once and a bar appears along the bottom ninth of the screen, ruled into
+three: **Refresh · Hide · Exit**. Tap a third and that button runs; tap
+anywhere above it and the bar goes away. A bar left up on its own is dismissed
+at the next tick rather than drawn through, because a zone repainted over half
+a bar is a smear nobody asked for.
+
+**Exit runs the same `cleanup()` Stop does** — the radio back, the framework
+back, the chrome back. That is deliberate: it is the recovery path `GUI_STOP`
+removes along with KUAL.
+
+| | |
+|---|---|
+| `TOUCH` | 1 to arm the menu; off by default |
+| `TOUCH_DEV` | the input device, or empty to find it |
+| `TOUCH_MAXX`, `TOUCH_MAXY` | the panel's full scale, or 0 where it already reports screen pixels |
+| `TOUCH_SWAP` | 1 for a panel that reports Y where X is expected |
+| `MENU_LBL` | the three labels, separated by bars |
+
+**How the touch is read.** An input event is sixteen bytes — two 32-bit
+timestamps, a 16-bit type, a 16-bit code, a 32-bit value — so one
+`dd bs=16 count=1` is exactly one event and `od -tu2` prints it as eight
+numbers. busybox has both; it does not have `evtest`. The touchscreen is found
+as the input device that reports **absolute** positions, because the power
+button and the cover magnet report keys and nothing else.
+
+> **One `dd` per event, not `od` across the stream.** The first version piped
+> the whole device through a single `od`, which block-buffers when its stdout
+> is a pipe: a tap produced nothing at all until four kilobytes of output had
+> piled up — about a hundred events — and then arrived as a burst. Measured,
+> not guessed. The menu would never have opened. The device is silent until a
+> finger lands, so a fork per event is a fork per touch and nothing at all
+> while nobody is touching.
+
+A stroke is **one** tap however many positions it reports. What ends a contact
+is the finger leaving, which panels say in one of two ways — `BTN_TOUCH` going
+to zero, or a frame carrying no coordinates at all — and both are honoured,
+because which one a reader speaks is the reader's business. Only `SYN_REPORT`
+ends a frame: `SYN_MT_REPORT` separates the contacts inside one, and
+`SYN_DROPPED` is the kernel saying its queue overflowed and the state is not to
+be trusted.
+
+> **A frame counter was the first answer and the wrong one.** Forty frames were
+> dropped after each emit, but a real tap is three to thirty — so the budget
+> left over from one tap swallowed the next, which is to say the tap that opens
+> the bar ate the tap that presses the button it opened.
+
+**The labels are the script's own, not the collector's.** The moment this bar
+is most wanted is the one where the collector cannot be reached, so a menu
+whose words arrive over the network is a menu that is blank exactly when it
+matters. They are left-aligned in their thirds with the thirds ruled, because
+FBInk will not report how wide it drew a string and `${#var}` counts bytes —
+`Обнови` is twelve of them for six letters — so a centred label would be
+centred on a measurement that is wrong for half the languages this panel
+speaks.
+
+**Calibration, if a reader needs it.** Several Kindles report screen pixels and
+need nothing. Where one does not, run with `TRACE=1` and tap the corners: the
+log prints every touch raw and mapped, which is where `TOUCH_MAXX` and
+`TOUCH_MAXY` come from.
+
+**What it costs while it is on:** one background process blocked in `read(2)`,
+and the wait between ticks becomes a read on a FIFO — sliced into two-second
+reads so a signal is still noticed promptly, since `nap` being a killable
+background sleep is what made Stop feel immediate. The slices are bounded by
+the **clock**, not by counting them: `read -t` is not POSIX, and a shell
+without it errors at once rather than waiting, which would turn a minute's wait
+into thirty instant iterations and the main loop into a spin — fetching and
+flashing the panel as fast as the CPU allows, on a battery.
+
+**The menu and `POWER=suspend` do not combine, and the menu wins.** With the
+CPU down there is no process to read the touchscreen, so the bar would be dead
+for the whole wait and the taps would pile up in the FIFO unread. Where both
+are asked for, the reader standing in front of the panel is the one being
+served. An earlier version of this page claimed the tap was read on the way
+back up from a suspend; no code path did that, and none does now.
+
+**Nothing falls through to Exit.** `outside` is the default and every way out
+of the hit test leads to it, so a coordinate that is out of range or not a
+number — an uncalibrated panel reporting thousands on a 600×800 screen, which
+is the exact case `TOUCH_MAXX` exists for — dismisses the bar. It used to
+select the right-hand third, so the reader's second tap exited the dashboard.
+
+`TOUCH_MAXX` and `TOUCH_MAXY` name the ranges of the values the panel reports
+**first and second**, which is what the `TRACE` line shows — so on a swapped
+panel they move to the other side with the values. Dividing a swapped reading
+by the other axis's maximum is how a calibrated panel still lands on the wrong
+third.
+
+All of it is reachable from KUAL under **Settings → Screen**.
 
 ## TLS
 

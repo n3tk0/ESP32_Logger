@@ -27,6 +27,29 @@
     </div>
 
     <div id="kd-form">
+      <!-- The page, zone by zone: this page's index -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="layout"></span> The page, zone by zone</div>
+        </div>
+        <div class="card-body">
+          <p class="hint" style="margin-top:0">
+            Every region of the e-ink page, in the order it is drawn, with the
+            two switches that belong to it and a way through to whatever fills
+            it. <strong>Shown</strong> takes the region off the page entirely
+            and gives its height back to the ones above; <strong>Bold</strong>
+            sets its figures heavier, which is for a shelf far enough away that
+            size alone stops being enough.
+          </p>
+          <div id="kd-zones"></div>
+          <p class="hint">
+            Turning a region off is for the reader who wants two numbers and
+            nothing else. Changes here are kept by <strong>Save</strong> at the
+            foot of this page.
+          </p>
+        </div>
+      </div>
+
       <!-- Language -->
       <div class="card">
         <div class="card-head">
@@ -93,7 +116,7 @@
       </div>
 
       <!-- Clock -->
-      <div class="card">
+      <div class="card" id="kd-card-clock">
         <div class="card-head">
           <div class="card-title"><span data-icon="clock"></span> Clock</div>
         </div>
@@ -134,54 +157,8 @@
         </div>
       </div>
 
-      <!-- Weight -->
-      <div class="card">
-        <div class="card-head">
-          <div class="card-title"><span data-icon="sliders-horizontal"></span> Weight</div>
-        </div>
-        <div class="card-body">
-          <p class="hint" style="margin-top:0">
-            Which figures are set bold. Nothing is, by default: the page's sizes
-            already carry the hierarchy, and weight on top of them is for a
-            shelf far enough away that size alone stops being enough. These
-            apply to a whole block at once — to set one particular reading bold,
-            or to change how dark it is drawn, use that place's own
-            <strong>Bold</strong> switch and <strong>Ink</strong> menu under
-            <em>Readings on the dashboard</em> below.
-          </p>
-          <div class="grid grid-auto" id="kd-bold"></div>
-        </div>
-      </div>
-
-      <!-- Blocks -->
-      <div class="card">
-        <div class="card-head">
-          <div class="card-title"><span data-icon="eye"></span> What is drawn</div>
-        </div>
-        <div class="card-body">
-          <p class="hint" style="margin-top:0">
-            All on by default. Turning things off is for the reader who wants
-            the page to be two numbers and nothing else — every block removed
-            gives its height back to the ones above it.
-          </p>
-          <div class="grid grid-auto" id="kd-show"></div>
-        </div>
-      </div>
-
-      <!-- Weather Forecast -->
-      <div class="card">
-        <div class="card-head">
-          <div class="card-title"><span data-icon="cloud-sun"></span> Weather forecast</div>
-        </div>
-        <div class="card-body">
-          <p class="hint" style="margin:0">
-            The forecast provider, coordinates, and outlook mode (hourly / daily) are configured under <a href="#settings_modules">Settings → Modules</a>. The outlook setting controls whether the three columns on the e-ink page show the next hours (+3 h, +6 h, +9 h) or the next days.
-          </p>
-        </div>
-      </div>
-
       <!-- Units -->
-      <div class="card">
+      <div class="card" id="kd-card-units">
         <div class="card-head">
           <div class="card-title"><span data-icon="gauge"></span> Units</div>
         </div>
