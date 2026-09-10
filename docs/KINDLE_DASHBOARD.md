@@ -1331,6 +1331,84 @@ own temp directory, and `stop.sh` reads those and puts back precisely that:
 a reader on `POWER=awake` who never turned `GUI_STOP` on does not get their
 radio switched on by a script they asked to stop.
 
+## The screen the panel is drawn on
+
+**FBInk writes to the framebuffer. It does not own the screen.** The reader's
+own framework does, and that is the whole of two complaints that look like
+separate faults:
+
+- **the dashboard drops back to the home screen and takes a minute to come
+  back.** The framework repainted its library over us — a cover thumbnail
+  finishing, the status bar ticking, a sync — and nothing redrew until the next
+  tick came round;
+- **tapping the dashboard opens a book.** The touch never reached this script.
+  It went to whatever the framework was showing underneath.
+
+`CANVAS=blank` asks the framework to put its chrome away
+(`com.lab126.pillow disableEnablePillow`). It is half the fix and costs
+nothing: the status bar and the toolbars are the parts that repaint most often.
+The whole fix is `GUI_STOP=1`, which stops the framework altogether — and the
+tap menu below is what makes that safe to use, because it is the way back that
+stopping the launcher otherwise takes away.
+
+### The tap menu
+
+**A bar that is not there until you ask for it.** The dashboard is a picture
+with no controls on it, which is right for something read from across a room
+and wrong the moment somebody is standing in front of it wanting it refreshed.
+
+Tap once and a bar appears along the bottom ninth of the screen, ruled into
+three: **Refresh · Hide · Exit**. Tap a third and that button runs; tap
+anywhere above it and the bar goes away. A bar left up on its own is dismissed
+at the next tick rather than drawn through, because a zone repainted over half
+a bar is a smear nobody asked for.
+
+**Exit runs the same `cleanup()` Stop does** — the radio back, the framework
+back, the chrome back. That is deliberate: it is the recovery path `GUI_STOP`
+removes along with KUAL.
+
+| | |
+|---|---|
+| `TOUCH` | 1 to arm the menu; off by default |
+| `TOUCH_DEV` | the input device, or empty to find it |
+| `TOUCH_MAXX`, `TOUCH_MAXY` | the panel's full scale, or 0 where it already reports screen pixels |
+| `TOUCH_SWAP` | 1 for a panel that reports Y where X is expected |
+| `MENU_LBL` | the three labels, separated by bars |
+
+**How the touch is read.** An input event is sixteen bytes — two 32-bit
+timestamps, a 16-bit type, a 16-bit code, a 32-bit value — so `od -tu2 -w16`
+prints one record per line as eight numbers, and the last four are the ones
+that matter. busybox has `od`; it does not have `evtest`. The touchscreen is
+found as the input device that reports **absolute** positions, because the
+power button and the cover magnet report keys and nothing else.
+
+A stroke is **one** tap however many positions it reports: `SYN_REPORT` is the
+frame boundary, and after a frame is emitted the next forty are dropped —
+counted rather than timed, because `date` there would be a fork per frame.
+
+**The labels are the script's own, not the collector's.** The moment this bar
+is most wanted is the one where the collector cannot be reached, so a menu
+whose words arrive over the network is a menu that is blank exactly when it
+matters. They are left-aligned in their thirds with the thirds ruled, because
+FBInk will not report how wide it drew a string and `${#var}` counts bytes —
+`Обнови` is twelve of them for six letters — so a centred label would be
+centred on a measurement that is wrong for half the languages this panel
+speaks.
+
+**Calibration, if a reader needs it.** Several Kindles report screen pixels and
+need nothing. Where one does not, run with `TRACE=1` and tap the corners: the
+log prints every touch raw and mapped, which is where `TOUCH_MAXX` and
+`TOUCH_MAXY` come from.
+
+**What it costs while it is on:** one background process blocked in `read(2)`,
+and the wait between ticks becomes a read on a FIFO — sliced into two-second
+reads so a signal is still noticed promptly, since `nap` being a killable
+background sleep is what made Stop feel immediate. With `POWER=suspend` the CPU
+is down between ticks and no read is running; the touch wakes the device and
+the tap is read on the way back up.
+
+All of it is reachable from KUAL under **Settings → Screen**.
+
 ## TLS
 
 The forecast client uses `setInsecure()`, consistent with `HttpExporter` and

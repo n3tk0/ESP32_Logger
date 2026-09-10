@@ -56,6 +56,11 @@ case "$(cat "$DASH_TMP/gui-stopped" 2>/dev/null)" in
     1) start lab126_gui >/dev/null 2>&1 ;;
     2) killall -CONT cvm 2>/dev/null ;;
 esac
+# And the chrome CANVAS=blank asked it to put away, for the same reason: a
+# reader handed back without its status bar looks broken in a way nothing on
+# screen explains.
+[ -f "$DASH_TMP/canvas" ] &&
+    lipc-set-prop com.lab126.pillow disableEnablePillow 0 2>/dev/null
 [ -f "$DASH_TMP/radio-off" ] && lipc-set-prop com.lab126.cmd wirelessEnable 1 2>/dev/null
 
 rm -rf "$DASH_TMP"

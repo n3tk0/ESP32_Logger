@@ -86,8 +86,42 @@
                             "exitmenu": true
                         },
                         {
-                            "name": "Reset settings",
+                            "name": "Screen",
                             "priority": 10,
+                            "items": [
+                                {
+                                    "name": "Draw over the reader",
+                                    "priority": 1,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set CANVAS desktop",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Put the reader's chrome away",
+                                    "priority": 2,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set CANVAS blank",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Tap menu: on",
+                                    "priority": 3,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set TOUCH 1",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Tap menu: off",
+                                    "priority": 4,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set TOUCH 0",
+                                    "exitmenu": true
+                                }
+                            ]
+                        },
+                        {
+                            "name": "Reset settings",
+                            "priority": 11,
                             "action": "/bin/sh",
                             "params": "kual.sh reset",
                             "exitmenu": true

@@ -1019,6 +1019,139 @@ check "$?" "a framework that takes the radio with it is put back, and stays back
   exit 0 )
 check "$?" "the loop re-reads the settings and then applies them"
 
+# ── The screen the dashboard is drawn on, and the tap menu ───────────────────
+#
+# FBInk writes to the framebuffer; it does not own the screen. The reader's own
+# framework does — it repaints its library whenever it likes and every touch
+# goes to it — which is why the dashboard kept dropping back to the home screen
+# for a minute at a time, and why tapping it opened a book.
+
+# CANVAS asks the framework to put its chrome away, and says so on disk so that
+# stop.sh can put it back when this script never reaches its trap.
+( sys_reset
+  TMP="$WORK/canvas-tmp"; CANVAS_MARK="$TMP/canvas"; mkdir -p "$TMP"
+  CANVAS=desktop canvas_take
+  [ -s "$LIPC_LOG" ] && exit 1              # the default touches nothing
+  [ -f "$CANVAS_MARK" ] && exit 2
+  sys_reset
+  CANVAS=blank canvas_take
+  grep -q "disableEnablePillow 1" "$LIPC_LOG" || exit 3
+  [ -f "$CANVAS_MARK" ] || exit 4
+  sys_reset
+  canvas_give_back
+  grep -q "disableEnablePillow 0" "$LIPC_LOG" || exit 5
+  [ -f "$CANVAS_MARK" ] && exit 6
+  # And having given it back, it does not keep giving it back.
+  sys_reset; canvas_give_back
+  [ -s "$LIPC_LOG" ] && exit 7
+  exit 0 )
+check "$?" "CANVAS=blank puts the reader's chrome away, and takes it back"
+
+# An input event is sixteen bytes: two 32-bit timestamps, a 16-bit type, a
+# 16-bit code, a 32-bit value. The reader decodes them with od, because busybox
+# has od and does not have evtest.
+ev() {
+    # $1=type $2=code $3=value — one record, little-endian, on stdout.
+    printf "$(printf '\\%03o' 0 0 0 0 0 0 0 0 \
+        $(( $1 & 255 )) $(( ($1 >> 8) & 255 )) \
+        $(( $2 & 255 )) $(( ($2 >> 8) & 255 )) \
+        $(( $3 & 255 )) $(( ($3 >> 8) & 255 )) 0 0)"
+}
+
+( : > "$WORK/ev.bin"
+  # One finger: X, Y, frame — then a second frame that must NOT produce a
+  # second line, because a stroke is one tap however many positions it reports.
+  { ev 3 53 412; ev 3 54 690; ev 0 0 0
+    ev 3 53 413; ev 3 54 691; ev 0 0 0; } > "$WORK/ev.bin"
+  out=$(touch_reader "$WORK/ev.bin")
+  [ "$out" = "412 690" ] || { echo "got [$out]" >&2; exit 1; }
+  exit 0 )
+check "$?" "a touch is decoded to one x y line per stroke, not per event"
+
+# ABS_X/ABS_Y (0/1) as well as the multitouch pair (53/54): which of them a
+# reader sends is the reader's business, and a panel that speaks the older one
+# is not a panel with no touchscreen.
+( { ev 3 0 120; ev 3 1 240; ev 0 0 0; } > "$WORK/ev.bin"
+  [ "$(touch_reader "$WORK/ev.bin")" = "120 240" ] || exit 1
+  exit 0 )
+check "$?" "and the single-touch axes are read as well as the multitouch pair"
+
+# A panel that reports its own scale rather than the screen's.
+( RES_W=600 RES_H=800
+  TOUCH_MAXX=0 TOUCH_MAXY=0 TOUCH_SWAP=0 touch_scale 300 400
+  [ "$TAP_X" = "300" ] && [ "$TAP_Y" = "400" ] || exit 1
+  TOUCH_MAXX=1200 TOUCH_MAXY=1600 TOUCH_SWAP=0 touch_scale 600 800
+  [ "$TAP_X" = "300" ] && [ "$TAP_Y" = "400" ] || exit 2
+  TOUCH_MAXX=0 TOUCH_MAXY=0 TOUCH_SWAP=1 touch_scale 111 222
+  [ "$TAP_X" = "222" ] && [ "$TAP_Y" = "111" ] || exit 3
+  exit 0 )
+check "$?" "a panel with its own scale, or its axes swapped, still lands where it was touched"
+
+# The bar is the bottom ninth, ruled into three. A tap above it dismisses.
+( RES_W=600 RES_H=800
+  menu_geom
+  [ "$MENU_H" = "88" ] || exit 1             # 800/9
+  [ "$MENU_Y" = "712" ] || exit 2            # 800 - 88
+  menu_hit 50 760;  [ "$MENU_HIT" = "refresh" ] || exit 3
+  menu_hit 300 760; [ "$MENU_HIT" = "hide" ]    || exit 4
+  menu_hit 550 760; [ "$MENU_HIT" = "quit" ]    || exit 5
+  menu_hit 300 400; [ "$MENU_HIT" = "outside" ] || exit 6
+  # The thirds meet exactly: 200 and 400 belong to the button on their right.
+  menu_hit 199 760; [ "$MENU_HIT" = "refresh" ] || exit 7
+  menu_hit 200 760; [ "$MENU_HIT" = "hide" ]    || exit 8
+  menu_hit 399 760; [ "$MENU_HIT" = "hide" ]    || exit 9
+  menu_hit 400 760; [ "$MENU_HIT" = "quit" ]    || exit 10
+  exit 0 )
+check "$?" "the bar is ruled into three, and a tap above it is outside"
+
+# Drawn along the bottom, in the inverted pens the today cell already uses —
+# `-O` over a black plate leaves an empty black rectangle, which is the one
+# place on the screen that has to be legible reading as a hole.
+( reset_log
+  RES_W=600 RES_H=800 MENU_LBL="Refresh|Hide|Exit" FONT_REG="$WORK/fonts/Bookerly-Regular.ttf"
+  draw_menu
+  menu_geom
+  grep -q -- "-B	BLACK	-k	top=$MENU_Y,left=0,width=600,height=$MENU_H" "$FBINK_LOG" || exit 1
+  for w in Refresh Hide Exit; do
+      grep -q -- "--	$w" "$FBINK_LOG" || { echo "no $w" >&2; exit 2; }
+  done
+  # Knocked out of the plate, not drawn bgless over it.
+  grep -q -- "-h	-C	BLACK	-B	WHITE" "$FBINK_LOG" || exit 3
+  # And it refreshes only its own strip, not the whole screen.
+  grep -q -- "-f	-s	top=$MENU_Y,left=0,width=600,height=$MENU_H" "$FBINK_LOG" || exit 4
+  exit 0 )
+check "$?" "the menu is knocked out of a plate along the bottom, and refreshes only itself"
+
+# The labels are the SCRIPT'S, not the collector's: the moment the bar is most
+# wanted is the one where the collector cannot be reached.
+( reset_log
+  RES_W=600 RES_H=800 MENU_LBL="Обнови|Скрий|Изход" FONT_REG="$WORK/fonts/Bookerly-Regular.ttf"
+  draw_menu
+  grep -q -- "--	Обнови" "$FBINK_LOG" || exit 1
+  grep -q -- "--	Изход" "$FBINK_LOG" || exit 2
+  exit 0 )
+check "$?" "and are the reader's own words when they set them"
+
+# THE WIRING, which DASH_LIB_ONLY means this file cannot drive: the tap is
+# answered BEFORE the minute counter moves, or a reader tapping four times
+# fast-forwards the chart.
+( body=$(sed -n '/^while true; do/,/^done$/p' "$KDIR/update_dash.sh")
+  line() { printf '%s' "$body" | grep -n -- "$1" | head -1 | cut -d: -f1; }
+  t=$(line 'if \[ -n "${TAP:-}" \]; then')
+  m=$(line 'MINUTE=\$((MINUTE + 1))')
+  [ -n "$t" ] && [ -n "$m" ] && [ "$t" -lt "$m" ] || exit 1
+  # Exit runs the same cleanup Stop does — the way back GUI_STOP takes away.
+  printf '%s' "$body" | grep -q 'quit)    cleanup' || exit 2
+  exit 0 )
+check "$?" "a tap is answered before the minute counter moves, and Exit is Stop"
+
+# The trap gives back everything the run took, in the order that works.
+( body=$(sed -n '/^cleanup() {/,/^}/p' "$KDIR/update_dash.sh")
+  printf '%s' "$body" | grep -q 'touch_disarm'     || exit 1
+  printf '%s' "$body" | grep -q 'canvas_give_back' || exit 2
+  exit 0 )
+check "$?" "and Stop disarms the screen and hands the chrome back"
+
 # ── 3. The payload is data, never a command ──────────────────────────────────
 check "$([ ! -f "$WORK/pwned" ] && echo 0 || echo 1)" \
       "a forecast summary containing a shell command did not run it"

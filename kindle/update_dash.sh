@@ -100,7 +100,7 @@ WIFI_WAIT=15
 GUI_STOP=0
 
 conf_keys() {
-    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP"
+    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP CANVAS TOUCH TOUCH_DEV TOUCH_MAXX TOUCH_MAXY TOUCH_SWAP MENU_LBL"
 }
 
 # What each key means, for `settings.sh show` and for dash.conf's comments.
@@ -230,6 +230,28 @@ conf_valid() {
                 awake|wifi|suspend) return 0 ;;
                 *) return 1 ;;
             esac ;;
+        CANVAS)
+            # A word like POWER, and tested before the numeric arm for the
+            # same reason.
+            case "$v" in
+                desktop|blank) return 0 ;;
+                *) return 1 ;;
+            esac ;;
+        MENU_LBL)
+            # Three labels separated by bars. It reaches draw_text_reg_inv and
+            # nothing else, so the shell metacharacters are what matter — the
+            # bar itself is the separator and so is allowed.
+            case "$v" in
+                ''|*'"'*|*'`'*|*'$'*|*';'*|*'&'*|*'<'*|*'>'*) return 1 ;;
+            esac
+            return 0 ;;
+        TOUCH_DEV)
+            # A device path, or empty to let touch_find() pick one.
+            [ -z "$v" ] && return 0
+            case "$v" in
+                /dev/input/event[0-9]|/dev/input/event[0-9][0-9]) return 0 ;;
+                *) return 1 ;;
+            esac ;;
         HOST)
             case "$v" in
                 ''|*' '*|*'"'*|*'`'*|*'$'*|*';'*|*'|'*|*'&'*) return 1 ;;
@@ -243,7 +265,10 @@ conf_valid() {
             # that actually comes round.
             case "$k" in
                 # A switch, not a tier: 0 or 1, and nothing in between to mean.
-                TRACE|GUI_STOP) [ "$v" -le 1 ] ;;
+                TRACE|GUI_STOP|TOUCH|TOUCH_SWAP) [ "$v" -le 1 ] ;;
+                # A touch panel's full scale, or 0 for "it already reports
+                # screen pixels". No upper tier applies.
+                TOUCH_MAXX|TOUCH_MAXY) [ "$v" -le 65535 ] ;;
                 # Seconds, and a wait longer than the tick it sits inside is a
                 # panel that never draws.
                 WIFI_WAIT) [ "$v" -le 45 ] ;;
@@ -270,7 +295,11 @@ conf_load() {
     for k in $(conf_keys); do
         eval "v=\$$k"
         case "$k" in
-            HOST|POWER) ;;
+            # THE KEYS THAT ARE NOT NUMBERS. strip_zeros() turns "" into "0" —
+            # which is right for a tier nobody filled in and wrong for a device
+            # path, where it produced a TOUCH_DEV of "0" and a warning once a
+            # minute about a setting the reader had deliberately left empty.
+            HOST|POWER|CANVAS|MENU_LBL|TOUCH_DEV) ;;
             *) v=$(strip_zeros "$v"); eval "$k=\$v" ;;
         esac
         if ! conf_valid "$k" "$v"; then
@@ -595,6 +624,226 @@ suspend_for() {
     [ "$back" = "$alarm" ] || return 1
 
     echo mem > "$PM_STATE" 2>/dev/null || return 1
+    return 0
+}
+
+# ── The reader's own screen, and ours ────────────────────────────────────────
+#
+# FBINK WRITES TO /dev/fb0. IT DOES NOT OWN THE SCREEN.
+#
+# The Amazon framework still does. It repaints its library whenever it decides
+# to — a cover thumbnail finishing, the status bar ticking, a sync — and every
+# touch goes to it, not to us. So a dashboard drawn over the home screen is a
+# dashboard that keeps being wiped by the thing underneath, and a tap on it
+# opens whatever book was under your finger. The panel "coming back after a
+# minute or two" is the same fault seen from the other end: the framework
+# painted over us and nothing redrew until the next tick came round.
+#
+# CANVAS=blank asks the framework to put its chrome away — the status bar and
+# the toolbars, which are the parts that repaint most often. It is NOT a fix on
+# its own: only GUI_STOP makes the screen actually ours. It is the half of the
+# fix that costs nothing and keeps the reader a reader.
+CANVAS_MARK="$TMP/canvas"
+
+canvas_take() {
+    [ "${CANVAS:-desktop}" = "blank" ] || return 0
+    lipc-set-prop com.lab126.pillow disableEnablePillow 1 2>/dev/null
+    : > "$CANVAS_MARK" 2>/dev/null
+    return 0
+}
+
+canvas_give_back() {
+    [ -f "$CANVAS_MARK" ] || return 0
+    lipc-set-prop com.lab126.pillow disableEnablePillow 0 2>/dev/null
+    rm -f "$CANVAS_MARK" 2>/dev/null
+    return 0
+}
+
+# ── The tap menu ─────────────────────────────────────────────────────────────
+#
+# A BAR THAT IS NOT THERE UNTIL YOU ASK FOR IT.
+#
+# The dashboard is a picture with no controls on it, which is right for
+# something read from across a room and wrong the moment somebody is standing
+# in front of it wanting it refreshed. A reader who taps the screen is asking
+# the panel a question, and until this the question went through to whatever
+# the framework had underneath.
+#
+# Tap once and the bar appears along the bottom. Tap a third of it and that
+# button runs. Tap anywhere else and the bar goes away again.
+#
+# EXIT IS ON IT ON PURPOSE. It runs the same cleanup Stop does, which is the
+# way back GUI_STOP otherwise takes away with the launcher it stops.
+#
+# WHAT IT COSTS: one background process blocked in read(2), and the wait
+# between ticks becomes a read with a timeout so a tap is acted on at once
+# rather than at the top of the next minute.
+TOUCH_FIFO="$TMP/touch"
+TOUCH_READY=0
+TOUCH_PID=""
+MENU=0
+
+# Which /dev/input device is the touchscreen.
+#
+# WITHOUT evtest, WHICH THE KINDLE DOES NOT HAVE. The touchscreen is the input
+# device that reports ABSOLUTE positions; the power button and the cover magnet
+# report keys and nothing else, so a non-zero `abs` capability mask is what
+# tells them apart. TOUCH_DEV overrides it for a reader where that guess is
+# wrong.
+touch_find() {
+    local d n abs
+    if [ -n "${TOUCH_DEV:-}" ]; then
+        [ -r "$TOUCH_DEV" ] && { echo "$TOUCH_DEV"; return 0; }
+        return 1
+    fi
+    for d in /dev/input/event*; do
+        [ -r "$d" ] || continue
+        n=${d##*/event}
+        abs=$(cat "/sys/class/input/event$n/device/capabilities/abs" 2>/dev/null)
+        # All-zero once the spaces and zeros are gone means it reports no axes.
+        case "$(printf '%s' "$abs" | tr -d ' 0')" in
+            '') continue ;;
+        esac
+        echo "$d"
+        return 0
+    done
+    return 1
+}
+
+# One line of "x y" per touch, on stdout.
+#
+# od BECAUSE BUSYBOX HAS IT. An input event is sixteen bytes — two 32-bit
+# timestamps, a 16-bit type, a 16-bit code, a 32-bit value — so `od -tu2 -w16`
+# prints one record per line as eight numbers, and the last four are the ones
+# that matter.
+#
+# ONE LINE PER STROKE, NOT PER EVENT. A finger produces a stream of positions
+# and SYN_REPORT is the frame boundary; after a frame is reported the next
+# forty are dropped, which is the rest of one finger going down and up again.
+# Counted rather than timed because `date` here would be a fork per frame.
+touch_reader() {
+    local a b c d type code vlo vhi x= y= skip=0
+    od -An -tu2 -w16 -v < "$1" 2>/dev/null |
+    while read -r a b c d type code vlo vhi; do
+        case "$type" in
+            3)  case "$code" in
+                    0|53) x=$vlo ;;
+                    1|54) y=$vlo ;;
+                esac ;;
+            0)  if [ -n "$x" ] && [ -n "$y" ]; then
+                    if [ "$skip" -gt 0 ]; then
+                        skip=$((skip - 1))
+                    else
+                        printf '%s %s\n' "$x" "$y"
+                        skip=40
+                    fi
+                    x=; y=
+                fi ;;
+        esac
+    done
+}
+
+touch_arm() {
+    TOUCH_READY=0
+    [ "${TOUCH:-0}" = "1" ] || return 0
+    command -v od >/dev/null 2>&1 || {
+        echo "TOUCH: no od on this reader; the tap menu needs one." >&2
+        return 0
+    }
+    local dev
+    dev=$(touch_find) || {
+        echo "TOUCH: no touchscreen among /dev/input/event*; set TOUCH_DEV." >&2
+        return 0
+    }
+    rm -f "$TOUCH_FIFO" 2>/dev/null
+    mkfifo "$TOUCH_FIFO" 2>/dev/null || return 0
+    # OPENED FOR BOTH, so the reader end never sees EOF when a writer closes
+    # and the writer never blocks waiting for one to appear.
+    exec 9<> "$TOUCH_FIFO" 2>/dev/null || return 0
+    touch_reader "$dev" > "$TOUCH_FIFO" &
+    TOUCH_PID=$!
+    TOUCH_READY=1
+    [ "${TRACE:-0}" = "1" ] && echo "TOUCH: reading $dev" >&2
+    return 0
+}
+
+touch_disarm() {
+    [ -n "$TOUCH_PID" ] && kill "$TOUCH_PID" 2>/dev/null
+    TOUCH_PID=""
+    TOUCH_READY=0
+    rm -f "$TOUCH_FIFO" 2>/dev/null
+    return 0
+}
+
+# The panel's coordinates are not always the screen's.
+#
+# Several Kindles report screen pixels and need nothing here. Where a reader
+# does not, TOUCH_MAXX and TOUCH_MAXY say what its full scale is and this maps
+# it; TOUCH_SWAP is for a panel mounted the other way round. TRACE=1 prints
+# every tap it decoded, raw and mapped, which is the one-glance way to find
+# those numbers for a reader that differs.
+touch_scale() {
+    TAP_X="$1"; TAP_Y="$2"
+    if [ "${TOUCH_SWAP:-0}" = "1" ]; then TAP_X="$2"; TAP_Y="$1"; fi
+    [ "${TOUCH_MAXX:-0}" -gt 0 ] 2>/dev/null &&
+        TAP_X=$(( TAP_X * ${RES_W:-600} / TOUCH_MAXX ))
+    [ "${TOUCH_MAXY:-0}" -gt 0 ] 2>/dev/null &&
+        TAP_Y=$(( TAP_Y * ${RES_H:-800} / TOUCH_MAXY ))
+    [ "${TRACE:-0}" = "1" ] && echo "TOUCH: raw $1,$2 -> $TAP_X,$TAP_Y" >&2
+    return 0
+}
+
+menu_geom() {
+    MENU_H=$(( ${RES_H:-800} / 9 ))
+    MENU_Y=$(( ${RES_H:-800} - MENU_H ))
+    MENU_W=${RES_W:-600}
+    MENU_THIRD=$(( MENU_W / 3 ))
+}
+
+# Which button is under a tap, or `outside` for the rest of the screen.
+menu_hit() {
+    menu_geom
+    if [ "$2" -lt "$MENU_Y" ] 2>/dev/null; then MENU_HIT=outside; return 0; fi
+    if   [ "$1" -lt "$MENU_THIRD" ] 2>/dev/null;         then MENU_HIT=refresh
+    elif [ "$1" -lt $(( MENU_THIRD * 2 )) ] 2>/dev/null; then MENU_HIT=hide
+    else                                                      MENU_HIT=quit
+    fi
+    return 0
+}
+
+# THE LABELS ARE THE SCRIPT'S OWN, not the collector's. The one moment this bar
+# is most wanted is the one where the collector cannot be reached, so a menu
+# whose words arrive over the network is a menu that is blank exactly when it
+# matters. MENU_LBL carries all three, so a reader who wants them in their own
+# language sets one line in dash.conf.
+#
+# LEFT-ALIGNED IN THEIR THIRDS, WITH THE THIRDS RULED. FBInk will not report how
+# wide it drew a string and ${#var} counts bytes — "Обнови" is twelve of them
+# for six letters — so a centred label would be centred on a measurement that is
+# wrong for half the languages this panel speaks. A ruled third says where the
+# button is without needing one.
+draw_menu() {
+    menu_geom
+    fill_rect 0 "$MENU_Y" "$MENU_W" "$MENU_H" BLACK
+
+    local sz=$(( MENU_H * 32 / 100 ))
+    [ "$sz" -lt 12 ] && sz=12
+    local ty=$(( MENU_Y + (MENU_H - sz) / 2 ))
+    local pad=$(( MENU_THIRD / 6 ))
+
+    # The two dividers, in the mid grey the page uses for a hairline inside a
+    # block rather than the white that would read as a gap in the bar.
+    fill_rect "$MENU_THIRD"            "$MENU_Y" "${RULE_H:-1}" "$MENU_H" GRAY7
+    fill_rect $(( MENU_THIRD * 2 ))    "$MENU_Y" "${RULE_H:-1}" "$MENU_H" GRAY7
+
+    local rest="${MENU_LBL:-Refresh|Hide|Exit}" i=0 lbl
+    while [ "$i" -lt 3 ]; do
+        lbl="${rest%%|*}"
+        case "$rest" in *'|'*) rest="${rest#*|}" ;; *) rest="" ;; esac
+        [ -n "$lbl" ] && draw_text_reg_inv $(( i * MENU_THIRD + pad )) "$ty" "$sz" "$lbl"
+        i=$((i + 1))
+    done
+    refresh_zone 0 "$MENU_Y" "$MENU_W" "$MENU_H" 1
     return 0
 }
 
@@ -1767,6 +2016,8 @@ cleanup() {
     # with it, the framework is what answers com.lab126.cmd — so restoring the
     # radio before the service that answers for it is a restore that quietly
     # does nothing.
+    touch_disarm
+    canvas_give_back
     gui_restore
     # And the radio goes back if WE are the ones who turned it off. Keyed on
     # the latch and not on POWER: POWER may have been set back to awake in the
@@ -1813,7 +2064,34 @@ nap_to_minute() {
     if [ "${POWER:-awake}" = "suspend" ]; then
         suspend_for "$delay" && return 0
     fi
-    nap "$delay"
+    nap_or_tap "$delay"
+}
+
+# The wait, with an ear open for the screen.
+#
+# TAP is the tap that arrived, or empty if the wait ran out. Without the menu
+# armed this is the plain interruptible sleep it has always been; with it, the
+# wait is a read on the touch FIFO so a finger is acted on the moment it lands
+# instead of at the top of the next minute.
+#
+# SLICED INTO TWO-SECOND READS so a signal is still noticed promptly. `nap` is
+# a background sleep the trap can kill, which is what made Stop feel immediate;
+# a single sixty-second read would hand that back.
+nap_or_tap() {
+    local left="$1"
+    TAP=""
+    if [ "${TOUCH_READY:-0}" != "1" ]; then
+        nap "$left"
+        return 1
+    fi
+    while [ "$left" -gt 0 ]; do
+        if read -t 2 -r TAP <&9 2>/dev/null && [ -n "$TAP" ]; then
+            return 0
+        fi
+        TAP=""
+        left=$((left - 2))
+    done
+    return 1
 }
 
 # Sourced for the helpers alone — by settings.sh, and by the tests.
@@ -1850,7 +2128,9 @@ conf_init
 conf_load
 font_setup || echo "Continuing without text." >&2
 prevent_sleep
+canvas_take
 gui_apply
+touch_arm
 
 # A layout BEFORE the first fetch, so no drawing path can run without one.
 # RES_W and RES_H come from the collector, so this falls back to 600x800 and
@@ -1878,6 +2158,36 @@ while true; do
     # the rest of the day on exactly the paths that took a shortcut.
     net_down
     nap_to_minute
+
+    # A TAP IS ANSWERED BEFORE THE TICK IT INTERRUPTED, and does not spend a
+    # minute: the clock counter is what decides which tier comes round next,
+    # and a reader who taps four times should not fast-forward the chart.
+    if [ -n "${TAP:-}" ]; then
+        touch_scale $TAP
+        if [ "${MENU:-0}" = "1" ]; then
+            menu_hit "$TAP_X" "$TAP_Y"
+            MENU=0
+            case "$MENU_HIT" in
+                quit)    cleanup ;;
+                # A full tick, through the same file settings.sh leaves behind:
+                # one way for "draw everything now", not two.
+                refresh) : > "$TMP/redraw" ;;
+                *)       redraw_all "$(now_clock)"; refresh_screen; continue ;;
+            esac
+        else
+            MENU=1
+            draw_menu
+            continue
+        fi
+    elif [ "${MENU:-0}" = "1" ]; then
+        # THE WAIT RAN OUT WITH THE BAR STILL UP, so it is dismissed rather
+        # than drawn through: the tick below repaints zones, and a zone
+        # repainted over half a bar is a smear nobody asked for. It also means
+        # a bar left up by accident goes away on its own within the minute.
+        MENU=0
+        : > "$TMP/redraw"
+    fi
+
     MINUTE=$((MINUTE + 1))
     # The reader's own clock, in the collector's chosen format. The format is
     # whatever the last payload said, so changing it in Settings shows up on

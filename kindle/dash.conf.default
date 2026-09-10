@@ -80,3 +80,39 @@ WIFI_WAIT=15
 # framework also serves the radio, the dashboard notices the first time a fetch
 # cannot turn it on, puts the framework back, and says so in the log.
 GUI_STOP=0
+
+# ── The screen the dashboard is drawn on ─────────────────────────────────────
+#
+# FBInk writes to the framebuffer; it does not own the screen. The reader's own
+# framework does, and it repaints its library whenever it likes — which is what
+# makes the dashboard vanish back to the home screen for a minute at a time,
+# and what makes a tap on the dashboard open a book.
+#
+#   desktop   what this always did: drawn over whatever the reader is showing
+#   blank     ask the framework to put its chrome away first
+#
+# `blank` is half the fix and costs nothing. The whole fix is GUI_STOP above,
+# which stops the framework altogether — use the tap menu below to get back.
+CANVAS=desktop
+
+# ── The tap menu ─────────────────────────────────────────────────────────────
+# Tap the screen and a bar appears along the bottom: refresh, hide, exit.
+# Exit runs the same cleanup as Stop, which is the way back when GUI_STOP has
+# taken the launcher with it. 1 = on, 0 = off.
+TOUCH=0
+
+# Which input device is the touchscreen. Empty = find it (the one that reports
+# absolute positions). Set it to /dev/input/eventN if that guess is wrong.
+TOUCH_DEV=
+
+# The touch panel's full scale, when it does not already report screen pixels.
+# 0 = it does. Run with TRACE=1 and tap the corners: the log prints every touch
+# raw and mapped, which is where these two numbers come from.
+TOUCH_MAXX=0
+TOUCH_MAXY=0
+
+# 1 if the panel reports Y where X is expected.
+TOUCH_SWAP=0
+
+# The three labels on the bar, in order, separated by bars.
+MENU_LBL=Refresh|Hide|Exit
