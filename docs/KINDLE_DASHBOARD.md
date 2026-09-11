@@ -954,8 +954,30 @@ plate is what puts the sun's rays back through the cloud in front of them.
 and reads **both** grounds out of `update_dash.sh` — the pen the plate is
 filled with and the pen the forecast zone is cleared with — rather than keeping a
 copy. Repaint the plate in another grey and it fails there, not on the wall.
-`--fix` re-grounds; `--self-test` bends every icon three ways in memory and
-requires the checker to catch each one.
+
+**The generator re-grounds through the same routine.**
+`scripts/generate_kindle_icons.py` is what produces these files, and it filled
+every canvas white: the twenty-two repaired by hand would have gone back to
+white cards the next time anybody added a WMO code. It fills white and then
+re-grounds the outlook size through `check_kindle_icons.reground()`, so what
+it writes is what the checker checks, byte for byte. Its `RESOLUTIONS` comes
+out of the layout files too — `FC_MAIN_SZ` and `FC_OL_SZ` are the panel's own
+numbers, and the copy it used to keep was the one `check_kindle_parity.py`
+read back to decide which BMPs must exist.
+
+`--fix` re-grounds in place, and refuses to write when the flood fill escapes
+into the artwork rather than leaving the file flattened. `--self-test` bends
+every outlook icon five ways in memory — the ground swapped, the ground put
+back and `reground()` held to its contract, a corner off, the fills flattened,
+and that flattening with one white pixel left on the edge — and three ways for
+the icon beside the headline, which has no plate to be flattened into.
+
+**Each bend has to change a pixel, and the icon has to pass the plain check
+first.** The first draft of that self-test, run against the white-grounded
+icons, reported every bend caught while the plain check was failing all
+twenty-two files: its fill was seeded from pixels that already held the ground
+it wanted, so it mutated nothing and every bend was answered by the defect
+that was already there.
 
 ### Reading what the panel actually drew
 

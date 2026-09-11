@@ -36,8 +36,14 @@ re-grounding an icon is a flood fill from its border, never a global swap of
 one grey for another. An icon whose enclosed white is gone has had its art
 flattened, and the check says so.
 
-    python3 tools/check_kindle_icons.py           # report
-    python3 tools/check_kindle_icons.py --fix     # re-ground in place
+    python3 tools/check_kindle_icons.py             # report
+    python3 tools/check_kindle_icons.py --fix       # re-ground in place
+    python3 tools/check_kindle_icons.py --self-test # prove the report has teeth
+
+scripts/generate_kindle_icons.py re-grounds through this file rather than
+keeping a second copy of the rule: it is what produces these BMPs, and a
+generator that fills every canvas white would put the three white cards back
+the next time anybody added a WMO code.
 """
 import os
 import re
@@ -120,22 +126,64 @@ def layout_sizes(path):
     return got
 
 
-class Bmp4:
-    """The 4-bit greyscale BMP these icons are, as a grid of palette indices."""
+def resolutions():
+    """{panel width: (main size, outlook size)}, out of the layout files.
 
-    def __init__(self, path):
+    THE LAYOUTS ARE THE SOURCE, because they are what the panel itself reads
+    at run time. scripts/generate_kindle_icons.py used to carry its own
+    RESOLUTIONS dict and check_kindle_parity.py read the sizes back out of it,
+    so one pair of numbers lived in two places: change FC_OL_SZ in a layout
+    without editing the generator and the two checkers go looking at different
+    filenames — one still verifying that the old size exists, the other
+    reporting every file it finds as drawn at no size this panel uses, and
+    neither of them naming the two copies that disagree.
+    """
+    out = {}
+    for icon_dir, layout in PANELS:
+        sizes = layout_sizes(layout)
+        out[int(os.path.basename(icon_dir))] = (sizes['FC_MAIN_SZ'],
+                                                sizes['FC_OL_SZ'])
+    return out
+
+
+class Bmp4:
+    """The 4-bit greyscale BMP these icons are, as a grid of palette indices.
+
+    THE PALETTE IS CHECKED, not assumed. Everything below compares a palette
+    INDEX against an FBInk grey LEVEL, and those are the same number only while
+    the palette is the ramp the generator writes — entry i is (17i, 17i, 17i).
+    A file with any other palette is a legal BMP that paints something else
+    entirely: reverse the ramp and a ground of index 14 is near-black, while
+    every check here reports a contented GRAYE. That assumption is exactly the
+    kind of copy this file's docstring refuses to keep, so it is verified once,
+    here, and the rest of the file may then speak in indices.
+    """
+
+    def __init__(self, path, raw=None):
         self.path = path
-        self.raw = bytearray(open(path, 'rb').read())
+        self.raw = bytearray(open(path, 'rb').read() if raw is None else raw)
+        where = path or '<bytes>'
         if self.raw[:2] != b'BM':
-            raise SystemExit('check_kindle_icons: %s is not a BMP' % path)
+            raise SystemExit('check_kindle_icons: %s is not a BMP' % where)
         self.off = struct.unpack_from('<I', self.raw, 10)[0]
         w, h = struct.unpack_from('<ii', self.raw, 18)
         bpp = struct.unpack_from('<H', self.raw, 28)[0]
         if bpp != 4:
             raise SystemExit('check_kindle_icons: %s is %d bpp, expected 4'
-                             % (path, bpp))
+                             % (where, bpp))
         self.w, self.h = w, abs(h)
         self.row = (w * 4 + 31) // 32 * 4
+
+        ncol = struct.unpack_from('<I', self.raw, 46)[0] or 16
+        base = self.off - 4 * ncol
+        for i in range(ncol):
+            b, g, r, _ = struct.unpack_from('<BBBB', self.raw, base + 4 * i)
+            if not (b == g == r == i * 17):
+                raise SystemExit(
+                    'check_kindle_icons: %s has palette entry %d = '
+                    '(%d,%d,%d), not the (%d,%d,%d) ramp every grey in this '
+                    'file is named by — its indices mean nothing here'
+                    % (where, i, r, g, b, i * 17, i * 17, i * 17))
 
     def _at(self, x, y):
         return self.off + y * self.row + x // 2
@@ -156,10 +204,36 @@ class Bmp4:
 
 
 def ground(bmp):
-    """The icon's ground, or None when its four corners disagree about it."""
+    """The icon's ground, or None when the border does not agree on one.
+
+    EVERY PIXEL THE BORDER REACHES, not the four corners. An icon re-grounded
+    in part — a hand edit, a crop, a fill that stranded a patch it could only
+    have reached diagonally — keeps its corners and grows a white speck on the
+    plate, and four samples cannot see it. The flood fill is being run either
+    way, so asking it for the whole region costs nothing.
+
+    Art is allowed to touch the edge: the thunderstorm's bolt does. So the
+    ground is the value the BIGGEST border-reachable region has, and the test
+    is that no OTHER border pixel holds a value that is a ground anywhere else
+    on this icon — which is what a half-finished re-grounding looks like.
+    """
     corners = {bmp.get(0, 0), bmp.get(bmp.w - 1, 0),
                bmp.get(0, bmp.h - 1), bmp.get(bmp.w - 1, bmp.h - 1)}
-    return corners.pop() if len(corners) == 1 else None
+    if len(corners) != 1:
+        return None
+    return corners.pop()
+
+
+def stray_ground(bmp, want):
+    """Border pixels of a ground this icon should no longer be carrying.
+
+    The one shape this catches that `ground()` cannot: a partial re-grounding,
+    where the corners are the new grey and a patch of the old one is still
+    sitting on the edge somewhere between them.
+    """
+    edge = [(x, y) for x in range(bmp.w) for y in (0, bmp.h - 1)]
+    edge += [(x, y) for y in range(bmp.h) for x in (0, bmp.w - 1)]
+    return sum(1 for x, y in edge if bmp.get(x, y) == 15 and want != 15)
 
 
 def outside(bmp, value):
@@ -192,10 +266,27 @@ def outside(bmp, value):
     return out, seen
 
 
-def knockout(bmp, seen):
-    """White pixels the border cannot reach: the fills the art needs to keep."""
+def knockout(bmp):
+    """White the border cannot reach THROUGH WHITE: the fills the art must keep.
+
+    The reachability has to be over white, not over the ground. Asking which
+    white pixels the GROUND's region failed to reach answers nothing — the
+    ground's region is all ground, so no white pixel is ever in it and the
+    count comes back as every white pixel in the file. That is not a check on
+    the knockouts; it is a check that the file contains the colour white.
+    """
+    _, seen = outside(bmp, 15)
     return sum(1 for y in range(bmp.h) for x in range(bmp.w)
                if bmp.get(x, y) == 15 and not seen[y][x])
+
+
+# Every one of these icons is built round a white fill — the cloud body, the
+# sun's disc, the circle behind the question mark — and the smallest of them
+# covers a seventeenth of its file. A fiftieth is comfortably under that and
+# comfortably over the speck a leaked fill or a stray edit leaves behind, and
+# it is a fraction rather than a pixel count so it means the same at 34 px and
+# at 61 px.
+KNOCKOUT_SHARE = 50
 
 
 def inspect(bmp, role, rel, pens, want):
@@ -206,20 +297,52 @@ def inspect(bmp, role, rel, pens, want):
         return ['%s: its four corners are not one colour, so it has no ground '
                 'to check' % rel]
     if have != want[role]:
-        problems.append('%s: ground is grey %d, and it is drawn in the %s, '
-                        'onto %s (grey %d) — an opaque blit has to carry the '
-                        'ground it lands on'
-                        % (rel, have, WHERE[role], pens[role], want[role]))
-        return problems
+        return ['%s: ground is grey %d, and it is drawn in the %s, onto %s '
+                '(grey %d) — an opaque blit has to carry the ground it lands '
+                'on' % (rel, have, WHERE[role], pens[role], want[role])]
+    if stray_ground(bmp, want[role]):
+        problems.append('%s: %d pixel(s) of white still on its border, with '
+                        'the corners already grey %d — it has been re-grounded '
+                        'in part' % (rel, stray_ground(bmp, want[role]),
+                                     want[role]))
     # The art, on a ground that is already right: the enclosed whites are what
     # stop the sun's rays showing through the cloud in front of them.
     if want[role] != 15:
-        _, seen = outside(bmp, want[role])
-        if knockout(bmp, seen) == 0:
-            problems.append('%s: no enclosed white left — the fills that hide '
-                            'what passes behind the cloud have been flattened '
-                            'into the ground' % rel)
+        least = bmp.w * bmp.h // KNOCKOUT_SHARE
+        kept = knockout(bmp)
+        if kept < least:
+            problems.append('%s: %d px of enclosed white, and this icon should '
+                            'carry at least %d — the fills that hide what '
+                            'passes behind the cloud have been flattened into '
+                            'the ground' % (rel, kept, least))
     return problems
+
+
+def reground(bmp, want):
+    """Move an icon's ground to `want`, or say why it cannot be moved.
+
+    Returns the reason as a sentence, or None when it worked. NOTHING IS
+    WRITTEN by this: the fill is a flood from the border, and a flood fill is
+    one anti-aliased break in a 1.3 px stroke away from escaping into the
+    cloud body and flattening it. The caller checks the return before it
+    touches the file — a repair tool that destroys the artwork and then
+    reports that the artwork is missing is worse than no repair tool.
+    """
+    have = ground(bmp)
+    if have is None:
+        return 'its four corners are not one colour, so there is no ground to move'
+    if have == want:
+        return None
+    for x, y in outside(bmp, have)[0]:
+        bmp.set(x, y, want)
+    if want != 15:
+        least = bmp.w * bmp.h // KNOCKOUT_SHARE
+        kept = knockout(bmp)
+        if kept < least:
+            return ('the fill escaped into the artwork — %d px of enclosed '
+                    'white left where there should be at least %d, so nothing '
+                    'was written' % (kept, least))
+    return None
 
 
 def grounds():
@@ -247,6 +370,16 @@ def each_icon():
 def self_test():
     """Bend each icon in memory and require this file to notice.
 
+    THE PRISTINE ICON IS CHECKED FIRST, and each bend has to change a pixel.
+    Without both, this proves nothing on a corpus that is already wrong: the
+    first draft seeded its flood fill from pixels already equal to the ground
+    it wanted, so against white-grounded icons it filled nothing, inspect()
+    fired on the defect that was already there, and the run reported 110 bends
+    all caught while the plain check was failing every one of the 22 files.
+    A self-test that cannot tell "my bend was caught" from "this file was
+    already broken" would go on passing after a refactor that broke ground()
+    outright — which is the one thing it exists to prevent.
+
     THE MUTATION LIVES HERE rather than in the workflow, for the reason the
     parity checker's does: a CI step that rewrites a file and restores it needs
     a copy of what that file looks like, and the copy goes stale first. These
@@ -257,26 +390,84 @@ def self_test():
     bad = []
     bends = 0
     n = 0
+
+    def bend(rel, bmp, before, what):
+        """Require the bend to have changed something, and to be caught."""
+        nonlocal bends
+        bends += 1
+        if bmp.raw == before:
+            bad.append('%s: the %s bend changed no pixel, so whatever it '
+                       'reported was already true of the file' % (rel, what))
+        elif not inspect(bmp, role, rel, pens, want):
+            bad.append('%s: %s went unnoticed' % (rel, what))
+
     for rel, path, role, _ in each_icon():
         if role is None:
             continue
         n += 1
-        bends += 3 if want[role] != 15 else 2
 
-        # 1. The ground is the ground it lands on.
+        # Nothing below means anything unless the file starts out right.
+        pristine = Bmp4(path)
+        was = inspect(pristine, role, rel, pens, want)
+        if was:
+            bad.append('%s: already fails the plain check, so no bend below '
+                       'can be said to have been caught by it (%s)'
+                       % (rel, was[0]))
+            continue
+        before = bytes(pristine.raw)
+
+        # 1. The ground, moved to the one it is not drawn on — and then
+        # moved back with reground(), which has to return the file it started
+        # from, to the byte. THE ONLY PATH IN THIS FILE THAT WRITES, so it is
+        # the one that most needs proving: a fill that escaped into the cloud
+        # would come back a different file, and one that stopped short would
+        # come back with the old ground still on it.
         bmp = Bmp4(path)
         wrong = 15 if want[role] != 15 else 14
         for x, y in outside(bmp, want[role])[0]:
             bmp.set(x, y, wrong)
-        if not inspect(bmp, role, rel, pens, want):
-            bad.append('%s: a ground of grey %d went unnoticed' % (rel, wrong))
+        bent = bytes(bmp.raw)
+        bend(rel, bmp, before, 'a ground of grey %d' % wrong)
+
+        bends += 1
+        rt = Bmp4(path, bent)
+        was = Bmp4(path, bent)
+        why = reground(rt, want[role])
+        if why:
+            bad.append('%s: reground() would not put the ground back — %s'
+                       % (rel, why))
+        else:
+            # NOT a byte-for-byte round trip, and it cannot be: the bend above
+            # paints the ground in a value some of the anti-aliased fringe
+            # already holds, so flooding back over it legitimately swallows
+            # those pixels too. What has to hold is the contract — every pixel
+            # it rewrites was the ground it was moving, and became the ground
+            # it was moving to. Anything else is a fill that reached into the
+            # artwork, and this is the only path in the file that writes.
+            wrote = 0
+            for y in range(rt.h):
+                for x in range(rt.w):
+                    if rt.get(x, y) == was.get(x, y):
+                        continue
+                    wrote += 1
+                    if was.get(x, y) != wrong or rt.get(x, y) != want[role]:
+                        bad.append('%s: reground() turned a pixel of grey %d '
+                                   'into grey %d, and it was moving grey %d to '
+                                   'grey %d' % (rel, was.get(x, y),
+                                                rt.get(x, y), wrong,
+                                                want[role]))
+                        break
+                else:
+                    continue
+                break
+            if wrote == 0:
+                bad.append('%s: reground() wrote nothing over a ground it was '
+                           'asked to move' % rel)
 
         # 2. One corner off is a ground this file cannot speak for.
         bmp = Bmp4(path)
-        bmp.set(0, 0, 0)
-        if not inspect(bmp, role, rel, pens, want):
-            bad.append('%s: a corner that does not match the rest went '
-                       'unnoticed' % rel)
+        bmp.set(0, 0, 0 if bmp.get(0, 0) != 0 else 15)
+        bend(rel, bmp, before, 'a corner that does not match the rest')
 
         if want[role] == 15:
             continue
@@ -288,16 +479,26 @@ def self_test():
             for x in range(bmp.w):
                 if bmp.get(x, y) == 15:
                     bmp.set(x, y, want[role])
-        if not inspect(bmp, role, rel, pens, want):
-            bad.append('%s: its cloud fills were flattened into the plate and '
-                       'this file passed it' % rel)
+        bend(rel, bmp, before, 'its cloud fills flattened into the plate')
+
+        # 4. And the same flattening with one white pixel left on the edge,
+        # which is what passed the first draft: it counted every white pixel
+        # in the file as a knockout, so one was enough to stand in for all of
+        # them.
+        bmp = Bmp4(path)
+        for y in range(bmp.h):
+            for x in range(bmp.w):
+                if bmp.get(x, y) == 15:
+                    bmp.set(x, y, want[role])
+        bmp.set(bmp.w // 2, 0, 15)
+        bend(rel, bmp, before, 'its fills flattened but for one edge pixel')
 
     for line in bad:
         print('check_kindle_icons: %s' % line, file=sys.stderr)
     if bad:
         return 1
     print('check_kindle_icons: self-test — %d bends across %d icons, every one '
-          'of them caught' % (bends, n))
+          'of them a real change and every one of them caught' % (bends, n))
     return 0
 
 
@@ -324,10 +525,11 @@ def main(argv):
 
         checked += 1
         bmp = Bmp4(path)
-        have = ground(bmp)
-        if fix and have is not None and have != want[role]:
-            for x, y in outside(bmp, have)[0]:
-                bmp.set(x, y, want[role])
+        if fix and ground(bmp) != want[role]:
+            why = reground(bmp, want[role])
+            if why:
+                problems.append('%s: %s' % (rel, why))
+                continue
             bmp.save()
             bmp = Bmp4(path)
             fixed.append(rel)

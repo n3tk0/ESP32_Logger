@@ -1667,9 +1667,22 @@ check "$?" "and centred on both panels, not only the one whose numbers divide"
       # is what stops it reading as a white card inside the grey one — so an
       # icon wider than the card it sits on would hang a strip of GRAYE over
       # the page's white on both sides of it.
-      [ "$FC_OL_SZ" -le "$OL_PLATE_W" ] || {
-          echo "  $res: the outlook icon is ${FC_OL_SZ}px wide on a ${OL_PLATE_W}px plate" >&2
-          bad=1; }
+      #
+      # OL_PLATE_W CHECKED FIRST, and for its own sake. ol_centre() centres the
+      # label, the icon and the temperature inside it, so a layout that leaves
+      # it out does not merely lose the plate: it stacks all three at
+      # ol_x - width/2, and the icons then carry a grey for a card nobody drew.
+      # Testing the width against an empty string would also have made `[`
+      # print "integer expression expected" and this file report an icon
+      # "34px wide on a px plate" — a hole in a message, for a missing key.
+      case "${OL_PLATE_W:-}" in
+          ''|*[!0-9]*|0)
+              echo "  $res: OL_PLATE_W is unset or zero, and the whole outlook column is centred in it" >&2
+              bad=1 ;;
+          *)  [ "$FC_OL_SZ" -le "$OL_PLATE_W" ] || {
+                  echo "  $res: the outlook icon is ${FC_OL_SZ}px wide on a ${OL_PLATE_W}px plate" >&2
+                  bad=1; } ;;
+      esac
 
       # The week strip and the footer.
       le "$WK_HDG_RULE_Y" "$WK_HDG_Y" "the week's rule" "$res"

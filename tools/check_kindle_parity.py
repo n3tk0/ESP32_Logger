@@ -34,6 +34,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import check_kindle_icons                                      # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CPP = os.path.join(ROOT, 'src/web/KindleDashboard.cpp')
 SKIN = os.path.join(ROOT, 'src/web/KindleSkin.h')
@@ -366,24 +369,23 @@ def main():
         problems.append('parity: weatherIconCode() returned %d codes — the '
                         'function changed shape' % len(want))
 
-    gen = read('scripts/generate_kindle_icons.py')
-    m = re.search(r'RESOLUTIONS\s*=\s*\{(.*?)\}', gen, re.S)
-    if not m:
-        problems.append('parity: generate_kindle_icons.py no longer states its '
-                        'RESOLUTIONS')
-    else:
-        for res, main_sz, ol_sz in re.findall(
-                r'(\d+)\s*:\s*\((\d+),\s*(\d+)\)', m.group(1)):
-            for code in want:
-                for sz in (main_sz, ol_sz):
-                    f = os.path.join(ROOT, 'kindle/icons', res,
-                                     'fc_%d_%s.bmp' % (code, sz))
-                    if not os.path.isfile(f):
-                        problems.append(
-                            'kindle/icons/%s/fc_%d_%s.bmp is missing, and '
-                            'weatherIconCode() can return %d — the panel would '
-                            'draw the question mark'
-                            % (res, code, sz, code))
+    # THE SIZES COME FROM THE LAYOUT FILES, through the same helper
+    # check_kindle_icons.py uses. They used to be read back out of
+    # generate_kindle_icons.py's own RESOLUTIONS dict, which made one pair of
+    # numbers live in two places: edit FC_OL_SZ in a layout and this checker
+    # went on verifying that the OLD size exists while the panel drew the new
+    # one, and nothing named the two copies that disagreed.
+    for res, (main_sz, ol_sz) in check_kindle_icons.resolutions().items():
+        for code in want:
+            for sz in (main_sz, ol_sz):
+                f = os.path.join(ROOT, 'kindle/icons', str(res),
+                                 'fc_%d_%d.bmp' % (code, sz))
+                if not os.path.isfile(f):
+                    problems.append(
+                        'kindle/icons/%d/fc_%d_%d.bmp is missing, and '
+                        'weatherIconCode() can return %d — the panel would '
+                        'draw the question mark'
+                        % (res, code, sz, code))
 
     if problems:
         print('FAIL: %d place(s) where the panel and the page disagree.\n'

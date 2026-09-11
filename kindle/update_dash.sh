@@ -1904,6 +1904,12 @@ draw_forecast_body() {
 
             [ -n "$ol_label" ] || continue
 
+            # NOT AN OPTIONAL SHAPE, whatever this guard suggests: ol_centre
+            # below centres all three of the label, the icon and the
+            # temperature inside OL_PLATE_W, so a layout without it stacks them
+            # at ol_x - width/2 — and the icons carry the plate's grey as their
+            # own ground, so they would be three grey squares on white. Both
+            # layouts set it and drive_dash.sh fails a layout that does not.
             if [ "$plate_w" -gt 0 ] 2>/dev/null; then
                 fill_rect "$ol_x" "$(( ol_y - ${OL_PLATE_TOP:-4} ))" \
                           "$plate_w" "${OL_PLATE_H:-80}" GRAYE
