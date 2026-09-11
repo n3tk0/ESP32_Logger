@@ -12,13 +12,29 @@ Requirements:
 Usage:
     python scripts/generate_kindle_icons.py
     # Output lands in kindle/icons/600/ and kindle/icons/1072/
+
+EACH ICON CARRIES THE GROUND IT IS DRAWN ON. The canvas is filled white and
+the outlook size is then re-grounded to the plate's grey, through the same
+routine tools/check_kindle_icons.py uses — so what this writes is what that
+checks, byte for byte, and there is no second copy of the rule to go stale.
+
+Filling the canvas white for every size is what this file used to do, and it
+put a white card inside each of the three grey ones on the panel. Those files
+were repaired by hand once; without this, the next person to add a WMO code
+would have put them straight back.
 """
 
 import os
 import io
 import struct
+import sys
 from pathlib import Path
 from PIL import Image
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+from check_kindle_icons import (          # noqa: E402
+    Bmp4, grounds, reground, resolutions,
+)
 
 try:
     from PyQt5.QtGui import QImage, QPainter, QColor
@@ -130,12 +146,13 @@ BATTERY_SVG_INNER = (
 )
 
 # ---------------------------------------------------------------------------
-# Resolution configs: { res_w: [(main_icon_size, outlook_icon_size)] }
+# Resolution configs: { res_w: (main_icon_size, outlook_icon_size) }
+#
+# READ OUT OF kindle/layout/*.conf, not written here. These are FC_MAIN_SZ and
+# FC_OL_SZ, and the panel reads them from those files at run time — a second
+# copy here is a copy that can disagree with the sizes actually being drawn.
 # ---------------------------------------------------------------------------
-RESOLUTIONS = {
-    600:  (52, 34),
-    1072: (93, 61),
-}
+RESOLUTIONS = resolutions()
 
 
 def wrap_svg(inner: str, viewbox: str = "0 0 64 64",
@@ -226,6 +243,11 @@ def generate_all():
     project_root = Path(__file__).parent.parent
     kindle_dir = project_root / "kindle" / "icons"
 
+    # The pens update_dash.sh paints with, so this file holds no colour of its
+    # own: the plate's grey and the cleared zone's white come from the script
+    # that draws them, and repainting the plate reaches the icons on it.
+    _, GROUND = grounds()
+
     for res_w, (main_sz, outlook_sz) in RESOLUTIONS.items():
         out_dir = kindle_dir / str(res_w)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -237,6 +259,18 @@ def generate_all():
                 bmp = svg_to_greyscale_bmp(svg_doc, sz)
                 fname = f"fc_{code}_{sz}.bmp"
                 path = out_dir / fname
+                # The outlook icons are blitted onto a plate, so they carry
+                # its grey; the one beside the headline lands on the cleared
+                # zone's white and keeps the canvas it was rendered on. A
+                # flood fill from the border, so the cloud body and the sun
+                # disc — filled white on purpose, to hide what passes behind
+                # them — are not flattened into the plate with the rest.
+                if sz == outlook_sz:
+                    img = Bmp4(str(path), bmp)
+                    why = reground(img, GROUND["outlook"])
+                    if why:
+                        raise SystemExit(f"{fname}: {why}")
+                    bmp = bytes(img.raw)
                 path.write_bytes(bmp)
                 print(f"  {path.relative_to(project_root)} ({len(bmp)} bytes)")
 
