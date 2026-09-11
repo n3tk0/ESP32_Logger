@@ -928,6 +928,35 @@ renderers at once. `/kindle/data` carries `FC_ICON` and `FC0..2_ICON` beside
 the raw `FC_CODE`, and the panel does no mapping at all. `check_kindle_parity.py`
 holds every value that function can return to a BMP that exists.
 
+### And each icon carries the ground it lands on
+
+The page draws its glyphs as inline SVG with **no background at all** — stroke
+work on a transparent canvas. So one drawing sits on the outlook column's
+`#f0f0f0` wash and on the page's white beside the headline without being told
+which, and the cloud body's `fill="#fff"` is doing a different job: it hides
+the sun's rays passing behind the cloud.
+
+FBInk cannot do that. It blits a rectangle of pixels, every one of them
+opaque, so each BMP carries a ground of its own — and it was white for all of
+them. The three outlook icons are dropped onto a `GRAYE` plate, so each came
+out as **a white card inside the grey one**: three bright squares in the one
+row of the panel meant to read as three quiet ones. The big icon beside the
+headline lands on the page's white and was right all along, which is why this
+was easy to look at for months without seeing it.
+
+The outlook sizes — `FC_OL_SZ`, 34 px and 61 px — carry `GRAYE` as their
+ground now; `FC_MAIN_SZ`, 52 px and 93 px, keep their white. Re-grounding one
+is a **flood fill from its border**, never a global swap of one grey for
+another: the enclosed whites are the knockouts, and flattening them into the
+plate is what puts the sun's rays back through the cloud in front of them.
+
+`check_kindle_icons.py` holds each file to the ground its size is drawn on,
+and reads **both** grounds out of `update_dash.sh` — the pen the plate is
+filled with and the pen the forecast zone is cleared with — rather than keeping a
+copy. Repaint the plate in another grey and it fails there, not on the wall.
+`--fix` re-grounds; `--self-test` bends every icon three ways in memory and
+requires the checker to catch each one.
+
 ### Reading what the panel actually drew
 
 `TRACE=1` in `dash.conf` writes every FBInk call to `kual.log`, beside the

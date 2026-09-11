@@ -1662,6 +1662,14 @@ check "$?" "and centred on both panels, not only the one whose numbers divide"
          "$(( OL0_Y + OL_TEMP_OFFSET ))" "the outlook icon" "$res"
       le "$(bot "$(( OL0_Y + OL_TEMP_OFFSET ))" "$OL_TEMP_SZ")" "$plate_bot" \
          "the outlook temperature" "$res"
+      # AND THE ICON HAS TO FIT ITS PLATE, sideways as well as down the page.
+      # It is an opaque blit carrying the plate's own grey as its ground — that
+      # is what stops it reading as a white card inside the grey one — so an
+      # icon wider than the card it sits on would hang a strip of GRAYE over
+      # the page's white on both sides of it.
+      [ "$FC_OL_SZ" -le "$OL_PLATE_W" ] || {
+          echo "  $res: the outlook icon is ${FC_OL_SZ}px wide on a ${OL_PLATE_W}px plate" >&2
+          bad=1; }
 
       # The week strip and the footer.
       le "$WK_HDG_RULE_Y" "$WK_HDG_Y" "the week's rule" "$res"

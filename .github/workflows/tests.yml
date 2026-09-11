@@ -32,6 +32,7 @@ on:
       - 'tools/check_node_portal.py'
       - 'tools/check_sensor_plugins.py'
       - 'tools/check_kindle_parity.py'
+      - 'tools/check_kindle_icons.py'
       - 'tools/check_body_handlers.py'
       - 'tools/check_fs_mutex.py'
       - 'node/**'
@@ -63,6 +64,7 @@ on:
       - 'tools/check_node_portal.py'
       - 'tools/check_sensor_plugins.py'
       - 'tools/check_kindle_parity.py'
+      - 'tools/check_kindle_icons.py'
       - 'tools/check_body_handlers.py'
       - 'tools/check_fs_mutex.py'
       - 'node/**'
@@ -576,6 +578,26 @@ jobs:
         # in memory: no shape to match, no file to restore, and it grows with
         # the table instead of alongside it.
         run: python3 tools/check_kindle_parity.py --self-test
+
+      - name: Hold each panel icon's ground to the ground it is drawn on
+        # The page's glyphs are inline SVG with no background at all, so one
+        # drawing sits on the outlook column's wash and on the page's white
+        # without being told which. FBInk blits opaque pixels: each BMP carries
+        # a ground of its own, and it was white for all of them — so the three
+        # outlook icons came out as white cards inside the grey ones. Both
+        # grounds are read out of update_dash.sh, so a plate repainted in
+        # another grey fails here rather than on the wall.
+        run: python3 tools/check_kindle_icons.py
+
+      - name: Verify that checker fails on an icon with the wrong ground
+        # Three bends per outlook icon — the ground swapped, one corner off,
+        # and the cloud's white fills flattened into the plate, which is what
+        # a global swap of one grey for another does and the flood fill --fix
+        # uses does not. Two for the icon beside the headline, which stands on
+        # white and so has no plate to be flattened into. All of it in memory:
+        # these are BMPs, and a step bending one here would be a byte offset
+        # in a YAML file that nothing compiles.
+        run: python3 tools/check_kindle_icons.py --self-test
 
       - name: Verify that suite notices when the panel and the page drift apart
         # The Kindle screen and the browser page at /kindle are ONE design
