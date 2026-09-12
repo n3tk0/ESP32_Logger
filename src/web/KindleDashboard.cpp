@@ -1590,6 +1590,22 @@ static void handleKindleData(AsyncWebServerRequest* req) {
                         "24-часовият запис се попълва с постъпването на данни."));
     }
 
+    // ── The last line, and the reason there is one ──────────────────────────
+    //
+    // THE PANEL CANNOT OTHERWISE TELL A WHOLE PAYLOAD FROM THE FIRST PART OF
+    // ONE. This is streamed off an ESP32 while it is also serving the web UI
+    // and taking readings, to a ten-year-old reader on wifi; when that
+    // connection dies mid-payload, busybox wget does not always call the short
+    // read an error, and what lands on the Kindle parses perfectly — every key
+    // past the cut simply absent. The page then comes up with a third of its
+    // values blank and nothing anywhere to say why, which is exactly the
+    // failure the BMP's own length field already catches for the chart.
+    //
+    // One key, always emitted, always last: update_dash.sh's payload_ok()
+    // refuses a payload without it and keeps the previous one instead. A
+    // reader running an older script ignores it like any key it does not know.
+    s->print("END=1\n");
+
     req->send(s);
 }
 

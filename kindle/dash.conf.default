@@ -62,6 +62,13 @@ TRACE=0
 #           take, so the script reads the alarm back before it goes down and
 #           falls back to an ordinary sleep if it did not stick. Try `wifi`
 #           first, and `suspend` when you are ready to be near the device.
+#
+# AND `suspend` ON ITS OWN DOES NOT BUY DAYS. With CLOCK_EVERY=1 the panel
+# suspends and comes back sixty times an hour, and every one of those is a
+# resume, a draw and a flashing refresh of the clock. The saving is in not
+# waking up: the panel now sleeps straight through the minutes with no tier due
+# in them, so it is the intervals that decide how long it stays down. KUAL →
+# Settings → Battery → "deep sleep, rare updates" sets both in one go.
 POWER=awake
 
 # Seconds to wait for the radio to associate before fetching anyway. Four to
@@ -96,13 +103,20 @@ GUI_STOP=0
 CANVAS=desktop
 
 # ── The tap menu ─────────────────────────────────────────────────────────────
-# Tap the screen and a bar appears along the bottom: refresh, hide, exit.
-# Exit runs the same cleanup as Stop, which is the way back when GUI_STOP has
-# taken the launcher with it. 1 = on, 0 = off.
+# Tap the screen and a bar appears along the bottom. Tap a button and it runs;
+# tap anywhere above the bar and it goes away. Exit runs the same cleanup as
+# Stop — and asks first, because a panel's touch calibration is the thing most
+# likely to be wrong and Exit is the one button that cannot be undone from the
+# sofa.
 #
-# NOT WITH POWER=suspend. With the CPU down nothing is reading the touchscreen,
-# so where both are asked for the menu wins and the panel does not suspend.
-TOUCH=0
+# ON BY DEFAULT. It is the way back from GUI_STOP, which takes the launcher and
+# the Stop button with it, and it costs one process blocked in read(2).
+#
+# IT COMBINES WITH POWER=suspend NOW. While the CPU is down nothing reads the
+# touchscreen, because nothing can — but the power button brings it back, and
+# WAKE_MENU below is what makes the panel answer that with this bar instead of
+# going straight back to sleep. 1 = on, 0 = off.
+TOUCH=1
 
 # Which input device is the touchscreen. Empty = find it (the one that reports
 # absolute positions). Set it to /dev/input/eventN if that guess is wrong.
@@ -117,5 +131,87 @@ TOUCH_MAXY=0
 # 1 if the panel reports Y where X is expected.
 TOUCH_SWAP=0
 
-# The three labels on the bar, in order, separated by bars.
-MENU_LBL=Refresh|Hide|Exit
+# ── What is on the bar ───────────────────────────────────────────────────────
+# MENU_ACT is the list that decides: how many buttons the bar has, and what
+# each one does. Two to five of these five words —
+#
+#   refresh    fetch everything and redraw the whole page now
+#   wake       stop sleeping, so the device can be told things — and on the
+#              second press, go back to sleeping. This is the button the power
+#              button exists to reach: it writes POWER, so KUAL and the panel
+#              agree about it afterwards
+#   settings   a second bar: find the collector, step to the next one, cycle
+#              the battery setting, show what the device thinks is going on.
+#              With GUI_STOP=1 there is no KUAL, and this is the whole of the
+#              settings menu, drawn where a finger can reach it
+#   hide       put the bar away (tapping above it does the same)
+#   quit       end the dashboard, after asking
+#
+# MENU_LBL only NAMES them, in whatever language you like, in the same order.
+# The `wake` button is a toggle, so its label may carry BOTH directions with a
+# slash between them — `Awake/Sleep` — and the bar draws the half that says
+# which way the next tap will go. A label with no slash is used as it is.
+# If it has fewer labels than MENU_ACT has buttons the built-in English is used
+# instead — a bar whose words are one place along from its buttons is worse
+# than a bar you cannot read.
+MENU_LBL=Refresh|Awake/Sleep|More|Exit
+MENU_ACT=refresh|wake|settings|quit
+
+# The settings bar, in its fixed order: find, next, battery, info, back.
+MENU_LBL2=Find|Next|Battery|Info|Back
+
+# What the bar says while it is asking whether you meant Exit.
+SURE_LBL=Tap the bar again to exit
+
+# The three power modes, as the footer status line names them.
+MODE_LBL=awake|radio off|asleep
+
+# ── Waking it up ─────────────────────────────────────────────────────────────
+# A SUSPENDED KINDLE WAKES FROM THE POWER BUTTON. Not from the touchscreen —
+# its controller has no power while the CPU is down, which is the same reason a
+# sleeping Kindle does not wake when you touch the screen. So the button is the
+# way in, and until now the panel did not notice: it woke, found nothing due
+# that minute, drew nothing, and went straight back down. The press worked
+# perfectly and looked like a dead button.
+#
+# With WAKE_MENU=1 a press repaints the page and puts the bar up, and the panel
+# stays awake and listening for WAKE_HOLD seconds — longer if you keep tapping.
+# Then it goes back down by itself.
+#
+# TOUCH=0 with WAKE_MENU=1 is the combination worth having on a wall: nothing
+# reads the touchscreen while nobody is there, and the button summons a menu
+# when somebody is.
+WAKE_MENU=1
+WAKE_HOLD=120
+
+# ── Quiet hours ──────────────────────────────────────────────────────────────
+# A flashing refresh is a black frame, and at three in the morning in a bedroom
+# it is the brightest thing in the room. It is also the most expensive thing
+# this panel does, on the hours when nobody is reading it.
+#
+# Between these two hours nothing flashes and the clock is drawn every
+# QUIET_EVERY minutes instead of CLOCK_EVERY — which, with POWER=suspend, is
+# what turns the night into one long sleep rather than sixty short ones. The
+# morning is paid for in one go: leaving the quiet hours spends a whole
+# flashing refresh, which is where a night of partial updates goes.
+#
+# Hours, 0-23, and the two being equal turns it off. QUIET_EVERY=0 means the
+# clock keeps its usual interval.
+QUIET_FROM=0
+QUIET_TO=0
+QUIET_EVERY=15
+
+# ── The footer status line ───────────────────────────────────────────────────
+# The right-hand end of the footer: how full THIS Kindle is (the battery badge
+# on the page belongs to the outdoor node), which power mode it is actually in
+# — a panel inside its wake window is awake whatever POWER says — and, in
+# brackets when the collector has stopped answering, the time it last did.
+# 1 = on.
+STATUS=1
+
+# ── The first run ────────────────────────────────────────────────────────────
+# When the first fetch fails against the address the package shipped, and no
+# scan has ever been run, look for the collector on this subnet once and say
+# what turned up. That is the first-run state rather than a fault, and the
+# reader is standing in front of a device with no keyboard. 1 = on.
+AUTO_FIND=1

@@ -776,9 +776,16 @@ around not needing one:
   answering port 80 is not a collector.
 - **Next collector** steps to the next address that scan found, wrapping round,
   which is the whole interaction when the first guess was wrong.
-- The refresh **profiles** (fast, normal, battery saver) set the five intervals
-  together, because "how often should the chart be redrawn" is not a question
-  anyone wants to answer five times through a menu that can only step numbers.
+- The refresh **profiles** (fast, normal, battery saver, days) set the five
+  intervals together, because "how often should the chart be redrawn" is not a
+  question anyone wants to answer five times through a menu that can only step
+  numbers. The **battery** modes and **quiet hours** are named choices for the
+  same reason.
+- **Info** prints what the device thinks is going on, which is the one page
+  that used to need a USB cable — see [Settings → Info](#settings--info).
+- And all of it is on the **tap menu's settings bar** as well, because the
+  reader that needs a settings menu most is the one running with `GUI_STOP=1`,
+  where there is no KUAL to open.
 
 Values are validated where they are read, not only where they are written: an
 interval of `0` would make the loop divide by it once a minute forever, so a
@@ -796,6 +803,10 @@ back — is slow and visible. So it is spent where it buys the most:
 | `GRAPH_EVERY` (15 min) | the chart | plain, its rectangle |
 | `FORECAST_EVERY` (30 min) | forecast, week, footer | plain, its rectangle |
 | `FULL_EVERY` (60 min) | everything | **flashing**, whole screen |
+
+Inside the quiet hours nothing flashes and the clock tier stretches to
+`QUIET_EVERY`; with `POWER=suspend` the wait spans every minute with no tier
+due in it, rather than ending at the next minute boundary.
 
 The clock changes every minute, so it ghosts first — and its rectangle is small
 enough that flashing it is barely noticeable, which is why it gets hourly
@@ -1316,7 +1327,38 @@ because each asks for more trust that a ten-year-old device comes back:
 |---|---|---:|
 | `awake` | what this always did; nothing is touched | 1–2 days |
 | `wifi` | the radio is off except around a fetch | ~3 days |
-| `suspend` | the above, and the wait between ticks is a real suspend to RAM with an RTC alarm | 5–7 days |
+| `suspend` | the above, and the wait between ticks is a real suspend to RAM with an RTC alarm | see below |
+
+**`suspend` on its own does not buy days, and the menu entry that set it said
+it did.** With `CLOCK_EVERY=1` the panel suspends and comes back *sixty times
+an hour* — and each of those is a resume, a draw, and a flashing refresh of the
+clock rectangle: 1440 of each a day, for a setting whose whole promise is that
+the reader stops doing things.
+
+The saving is in not waking up. Two changes make it real:
+
+- **the wait spans the empty minutes.** `minute_busy()` asks the tiers whether
+  a given minute has anything in it and `next_due_in()` walks forward to the
+  first one that does, so the RTC alarm is set for *that* minute rather than
+  for the next. At the battery-saver intervals fourteen minutes in fifteen have
+  nothing due, and the panel was waking for every one of them to find that out.
+  Capped at `SLEEP_MAX_MIN` (30) because a panel should come back and look at
+  itself now and again whatever the intervals say — a fetch that has been
+  failing for half an hour is worth finding out about;
+- **the clock is what decides how long that is**, so the mode that promises
+  days has to slow it down. KUAL → Settings → Battery → **deep sleep, rare
+  updates** (`settings.sh power days`) sets `POWER=suspend` *and* clock 15 /
+  data 30 / chart 60 / forecast 60 / full 240 in one write. Quiet hours do the
+  same thing for the night alone.
+
+**And `rtc0` was a guess.** A reader with more than one RTC — the SoC's and the
+power chip's — does not promise that the first one holds the alarm the kernel
+will honour, and on the reader where it does not, `suspend_for()` correctly
+refuses to go down (the alarm does not read back) and the deep sleep simply
+never happens, with nothing anywhere saying why. `rtc_pick()` writes a probe
+alarm to `rtc0`…`rtc3`, reads each back, takes the first that sticks, enables
+its `power/wakeup` where that node exists, and logs which it chose.
+`Settings → Info` prints it.
 
 `wifi` cannot fail in a way the panel does not already handle: a fetch that
 finds no network keeps the last reading on screen, which is what it does when
@@ -1408,23 +1450,66 @@ stopping the launcher otherwise takes away.
 with no controls on it, which is right for something read from across a room
 and wrong the moment somebody is standing in front of it wanting it refreshed.
 
-Tap once and a bar appears along the bottom ninth of the screen, ruled into
-three: **Refresh · Hide · Exit**. Tap a third and that button runs; tap
-anywhere above it and the bar goes away. A bar left up on its own is dismissed
+Tap once and a bar appears along the bottom ninth of the screen, ruled into one
+slot per button: **Refresh · Awake/Sleep · More · Exit**. Tap a slot and it runs; tap
+anywhere above the bar and it goes away. A bar left up on its own is dismissed
 at the next tick rather than drawn through, because a zone repainted over half
 a bar is a smear nobody asked for.
 
-**Exit runs the same `cleanup()` Stop does** — the radio back, the framework
-back, the chrome back. That is deliberate: it is the recovery path `GUI_STOP`
-removes along with KUAL.
+**`MENU_ACT` is the list that decides what the bar is** — how many buttons it
+has and what each one does — out of five words:
 
 | | |
 |---|---|
-| `TOUCH` | 1 to arm the menu; off by default |
+| `refresh` | fetch everything and redraw the whole page now |
+| `wake` | stop sleeping, so the device can be told things; pressed again, go back to sleeping. It writes `POWER` to `dash.conf`, so KUAL and the panel agree about it afterwards |
+| `settings` | a second bar: **Find · Next · Battery · Info · Back** |
+| `hide` | put the bar away, which tapping above it also does |
+| `quit` | end the dashboard, after asking |
+
+**`MENU_LBL` only names them**, in whatever language, in the same order. The
+`wake` button is a toggle, so its label may carry both directions separated by
+a slash — `Awake/Sleep` — and the bar draws the half naming where the next tap
+goes: a button reading "Awake" that sends an already-awake panel to sleep lies
+about itself, on a screen that gives no other feedback at all. A label
+list shorter than the action list is refused and the built-in English used
+instead: a bar whose words are one place along from its buttons does not merely
+fail to help, it says the wrong thing about what a tap will do — and every
+`dash.conf` written before `MENU_ACT` existed carries exactly three labels for
+a bar that now has four buttons.
+
+**The type shrinks to fit the slot it names.** FBInk will not report how wide
+it drew a string and `${#var}` counts bytes, so `str_chars()` counts
+*characters* instead — every UTF-8 character has one lead byte and its
+continuations are `0x80`–`0xBF`, so dropping the continuations and counting
+what is left works in any language — and a proportional serif at half its size
+per character bounds the size for all of them. Five buttons on a 600 px panel
+is 120 px each, and "Settings" at the height this bar used to ask for is 130 of
+them.
+
+**Exit asks first.** One tap turns the whole bar into the confirmation — one
+button, full width, so the second tap cannot miss it and nothing else on the
+bar can be hit by accident while it is up. This panel's touch calibration is
+the thing most likely to be wrong on any given reader, and Exit is the one
+button where being wrong cannot be undone from the sofa. Anything else cancels.
+
+**Exit runs the same `cleanup()` Stop does** — the radio back, the framework
+back, the chrome back. That is deliberate: it is the recovery path `GUI_STOP`
+removes along with KUAL. So is the settings bar: with the framework stopped
+there is no KUAL to change a setting from, and **Find**, **Next**, **Battery**
+and **Info** run the same `settings.sh` the menu entries run, drawn where a
+finger can reach them.
+
+| | |
+|---|---|
+| `TOUCH` | 1 to arm the menu — **on by default now**: it is the way back from `GUI_STOP`, and a setting whose job is to be the recovery path has to be there before anybody needs it |
+| `WAKE_MENU` | 1 for the power button to open it after a suspend |
+| `WAKE_HOLD` | seconds to stay awake and listening after such a press |
 | `TOUCH_DEV` | the input device, or empty to find it |
 | `TOUCH_MAXX`, `TOUCH_MAXY` | the panel's full scale, or 0 where it already reports screen pixels |
 | `TOUCH_SWAP` | 1 for a panel that reports Y where X is expected |
-| `MENU_LBL` | the three labels, separated by bars |
+| `MENU_ACT` | what the buttons do, separated by bars |
+| `MENU_LBL`, `MENU_LBL2`, `SURE_LBL` | the labels for the two bars and the confirmation |
 
 **How the touch is read.** An input event is sixteen bytes — two 32-bit
 timestamps, a 16-bit type, a 16-bit code, a 32-bit value — so one
@@ -1477,12 +1562,68 @@ without it errors at once rather than waiting, which would turn a minute's wait
 into thirty instant iterations and the main loop into a spin — fetching and
 flashing the panel as fast as the CPU allows, on a battery.
 
-**The menu and `POWER=suspend` do not combine, and the menu wins.** With the
-CPU down there is no process to read the touchscreen, so the bar would be dead
-for the whole wait and the taps would pile up in the FIFO unread. Where both
-are asked for, the reader standing in front of the panel is the one being
-served. An earlier version of this page claimed the tap was read on the way
-back up from a suspend; no code path did that, and none does now.
+### Waking it up
+
+**A suspended Kindle wakes from the power button. It does not wake from the
+touchscreen** — the touch controller has no power while the CPU is down, which
+is the same reason a sleeping Kindle does not wake when you touch its screen.
+So the button is the way in, and for a long time the panel did not notice it
+had been used: `echo mem` returned, the loop ran an ordinary tick, four minutes
+in five nothing was due, nothing was drawn, and the reader went straight back
+down. The press worked perfectly and was indistinguishable from a dead button.
+
+**A write to `/sys/power/state` that returns without suspending is the one
+failure this could have made worse than the bug it fixes.** The early-wake path
+below answers a resume by repainting the whole page and putting the bar up; a
+write that comes straight back would do that on every pass through the main
+loop — a flashing panel and a battery emptied in an afternoon, rather than a
+panel that merely never sleeps. So `suspend_for()` times the write against the
+system clock and calls anything under `SUSPEND_MIN_DOWN` (2 s) *not a suspend*:
+it returns non-zero, the caller sleeps the ordinary way, and the reason is
+logged **once** rather than once a minute, because `/tmp` is a ramdisk on a
+device that runs for months. A person pressing the button within two seconds of
+it going down loses that press and presses again; a reader that cannot suspend
+at all loses nothing.
+
+**Nothing has to identify the wake source to fix that.** The alarm says when we
+meant to come back and the RTC says when we did: a resume with more than
+`SUSPEND_SLACK` (3 s) of the wait still to run is a resume nothing scheduled,
+which on this device is a person — the power button, or a cable. `suspend_for()`
+sets `SUSPEND_EARLY`, and `nap_to_minute()` answers it with `wake_interactive()`:
+
+1. the window opens for `WAKE_HOLD` seconds (120 by default), and every tap
+   pushes it out again;
+2. `prevent_sleep` is re-applied, because powerd re-arms its own screensaver
+   across a suspend on some firmware — the one call that has to be made again
+   rather than once at startup;
+3. the touchscreen is armed **even when `TOUCH=0`**;
+4. the whole page is repainted — the framework may have put its screensaver on
+   the screen while the CPU was down, and no tier would have cleared it for up
+   to an hour — and the bar goes on top of it.
+
+When the window runs out the touchscreen is disarmed and the panel sleeps
+again. Nothing has to be remembered or undone.
+
+**`TOUCH=0` with `WAKE_MENU=1` is the combination worth having on a wall:**
+nothing reads the panel while nobody is there, and the button summons a menu
+when somebody is. With `TOUCH=1` the bar is always available and a tap opens
+the same window, so a reader working through the settings bar does not have the
+panel suspend under them.
+
+**What stops a suspend is somebody being there, not the menu being armed.** It
+used to be the other way round — `nap_to_minute()` refused to suspend while the
+tap reader was running — which quietly made `TOUCH=1` cancel `POWER=suspend`
+altogether: the two settings a reader most wants together were the one pair
+that could not be had. `tests/kindle/drive_dash.sh` fails if that gate comes
+back.
+
+**Pressing the power button while the panel is `awake` is a different thing.**
+powerd handles it and sends the reader to sleep by the firmware's own path, and
+it comes back with Amazon's screensaver on the screen. Nothing here would have
+repainted until a tier came round. `lost_time()` notices instead: a wait that
+took far more than the `LOST_MIN` (25 s) it asked for means the reader was
+asleep, and the page is redrawn. That covers a framework repaint and a stepped
+clock as well, and it needs to know nothing about which of them happened.
 
 **Nothing falls through to Exit.** `outside` is the default and every way out
 of the hit test leads to it, so a coordinate that is out of range or not a
@@ -1497,6 +1638,139 @@ by the other axis's maximum is how a calibrated panel still lands on the wrong
 third.
 
 All of it is reachable from KUAL under **Settings → Screen**.
+
+## Quiet hours
+
+A flashing refresh is a black frame, and at three in the morning in a bedroom
+it is the brightest thing in the room. It is also the most expensive thing this
+panel does, on the hours when nobody is reading it.
+
+Between `QUIET_FROM` and `QUIET_TO` — hours, 0–23, wrapping round midnight,
+equal to switch it off — nothing flashes and the clock is drawn every
+`QUIET_EVERY` minutes instead of `CLOCK_EVERY`. With `POWER=suspend` that is
+what turns the night into one long sleep rather than sixty short ones, because
+the clock is the tier that decides how long a suspend can be.
+
+The morning is paid for in one go: **leaving the quiet hours spends a whole
+flashing refresh**, which is where a night of partial updates goes. That is the
+one moment when clearing it costs nothing anybody is awake to mind.
+
+`quiet_now()` is asked by four things a tick and `date +%H` is a fork, so it is
+evaluated once into `QUIET_IS` and read from there.
+
+KUAL → Settings → **Quiet hours**, or `settings.sh quiet night|off|FROM TO`.
+
+## The footer says what the panel knows about itself
+
+**The battery badge on this page belongs to the outdoor node.** The reader's
+own battery — the one that decides whether the panel is still on the wall next
+week — appeared nowhere at all, on a page whose entire power section exists to
+make it last.
+
+The right-hand end of the footer (`STAT_X` in the layout, `STATUS=0` to turn it
+off) carries three things:
+
+- how full this Kindle is, from `lipc-get-prop com.lab126.powerd battLevel`,
+  asked on the tier that draws the footer and nowhere else;
+- **which mode it is actually in**, not the one `POWER` names: a panel inside
+  its wake window is awake whatever the setting says, and that is the one thing
+  somebody standing in front of it wants confirmed before they start tapping.
+  `MODE_LBL` carries the three words, so they can be set in any language;
+- in brackets, when the collector has stopped answering, the time it last did.
+
+Left-aligned at `STAT_X`, like everything else here: FBInk will not say how
+wide it drew a string, so there is no right edge to align to.
+
+## Numbers nobody has confirmed
+
+Three separate ways the panel could show a reading as current when it was not,
+all of them silent:
+
+**A failed fetch left the previous readings in place** and repainted them,
+unchanged, every `DATA_EVERY` minutes for as long as the collector stayed down.
+The only thing on the panel that could have said otherwise was the age inside
+`Z_SUB` — which is part of the payload and was frozen with it. A dead collector
+and a calm afternoon looked identical. `data_stale()` decides now, and a stale
+readings zone draws the offline notice with the time of the last good fetch in
+it. **One failed fetch is not a verdict**: `STALE_AFTER` (2) consecutive
+failures are, because a single wifi hiccup should not make the page flinch when
+the numbers are five minutes old and the next tier will almost certainly work.
+
+**`load_kv()` only ever assigns.** A place the collector stops sending — a
+sensor whose node went flat, a group switched off in the web UI — kept the
+value it last reported, with no age against it and nothing to tell it from a
+live reading. `zones_forget()` takes the previous payload's places back out of
+the shell before the new one is read; the names come from the lists the last
+payload sent, because `Z_<PLACE>_*` is a family the collector names rather than
+a fixed set.
+
+**Half a payload parses perfectly.** `/kindle/data` is streamed off the ESP32
+while it is also serving the web UI, to a ten-year-old reader on wifi, and
+busybox wget does not always call a short read an error — so a payload cut off
+partway lands on disk looking exactly like a whole one, and `wget -O` has
+already truncated the good copy. Every key past the cut is simply absent: a
+third of the page blank, with nothing to say why. This is the same failure the
+BMP's own length field has caught for the chart since `graph_ok()`, on the
+other endpoint, unasked for longer.
+
+So the collector emits **`END=1`** as the last line of every payload, and
+`payload_ok()` refuses one without it — fetching into `data.new` and moving it
+into place only once it is whole, exactly as `fetch_graph()` does. A collector
+too old to send it is held to `RES_H` instead, which is in the metadata block
+two thirds of the way in: not proof, but it catches the cut that lands in the
+readings, which is most of them.
+
+## The last page, kept where a reboot cannot take it
+
+`/tmp` is a ramdisk, so a reader that has just been switched on knows nothing:
+no chart, no forecast, no week strip, and the one message it can draw is in
+English because the language is a value the collector sends. If the collector
+is down too — which is the same power cut, most of the time — that is the whole
+page until it comes back.
+
+So the payload is kept beside `dash.conf` as `last.txt`, written **on the full
+tier only**: once an hour, not once a fetch, because this is FAT on the eMMC
+and not tmpfs. `cache_save()` appends `CACHED_AT` so the page it draws can say
+how old it is, and `cache_load()` explicitly undoes the freshness `load_data()`
+assumes — the ages in that payload were computed at the collector before the
+reader was switched off, so the readings zone carries the offline notice over
+them while the chart, forecast and week strip below are worth having whatever
+their age.
+
+`settings.sh` reads the same file for one thing only: `RES_W`/`RES_H`, so that
+its own screens are laid out for the panel they are on. Every one of them was
+drawn at 600×800 coordinates whatever the reader, which on a Paperwhite meant
+small type in the top-left corner of a mostly empty screen.
+
+## When nobody has told it where the collector is
+
+The address it is trying is the one the package shipped, nothing is answering
+there, and no scan has ever been run. That is not a fault to report — it is the
+first-run state, and the reader is standing in front of a device with no
+keyboard. With `AUTO_FIND=1` the panel looks once, on its own, and says what it
+found.
+
+A scan is 254 addresses at a two-second timeout: half a minute or more of a
+screen that does not change, which on e-ink is indistinguishable from a menu
+entry that did nothing at all — the exact complaint this extension's logging
+exists to answer. So `cmd_find` reports where it has got to after each batch,
+into its own rectangle rather than by repainting the page: `say_lines()` clears
+and flashes the whole panel, and a scan reporting that way would have flashed
+the screen eleven times.
+
+## Settings → Info
+
+The same facts as `kual.log`, on the screen. Every fault reported against this
+extension so far has been an installation one — no FBInk, the wrong folder, a
+collector at another address — and every one of them was diagnosed by plugging
+the reader into a computer and reading a log.
+
+`settings.sh diag` prints the version, whether the dashboard is running, the
+panel size, where FBInk was found, this Kindle's address and battery, the wifi
+state, the collector address **and whether it answers**, the touchscreen device,
+the power mode and which RTC holds the wake alarm, the intervals, and the quiet
+hours. It is on the KUAL menu and on the tap menu's settings bar, because the
+reader that needs it most is the one with no launcher.
 
 ## TLS
 

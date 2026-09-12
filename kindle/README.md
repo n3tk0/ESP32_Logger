@@ -109,6 +109,15 @@ The folder name is free — KUAL scans the subdirectories of
 **From KUAL:** open the launcher → **ESP32 Dashboard** → *Start Dashboard*.
 *Stop Dashboard* ends it and restores the screensaver.
 
+**From the panel itself:** tap the screen. A bar appears along the bottom —
+**Refresh · Awake/Sleep · More · Exit** — and *More* opens **Find · Next · Battery ·
+Info · Back**, which is the settings menu with no launcher involved. *Exit*
+asks before it acts. Everything on both bars is reachable without a keyboard,
+a cable or KUAL, which matters because `GUI_STOP=1` takes KUAL away.
+
+**And if the panel is asleep, press the power button.** It wakes, repaints, and
+puts the bar up for two minutes. See *[Battery](#battery)*.
+
 **From a shell**, if you prefer:
 
 ```bash
@@ -134,20 +143,27 @@ KUAL → ESP32 Dashboard → **Settings** edits it on the device:
 | Entry | What it does |
 |---|---|
 | **Show settings** | Paints the current values on the screen |
+| **Info: what is going on** | FBInk, the collector and whether it answers, the touchscreen, the wake alarm, the battery — the page that used to need a USB cable |
 | **Find collector** | Scans this subnet for a host serving `/kindle/data` and saves it |
 | **Next collector** | Steps to the next address that scan found |
 | **Refresh: normal** | clock 1 min · data 5 · chart 15 · forecast 30 · full 60 |
 | **Refresh: fast** | clock 1 · data 2 · chart 5 · forecast 15 · full 30 |
 | **Refresh: battery saver** | clock 5 · data 15 · chart 30 · forecast 60 · full 120 |
+| **Battery →** | normal · radio off between updates · sleep between updates · **deep sleep, rare updates** |
+| **Screen →** | draw over the reader or take the screen · tap menu on/off · power button opens the menu on/off · footer status on/off |
+| **Quiet hours →** | 22:00–07:00, or off |
 | **Reset settings** | Back to `dash.conf.default` |
 
 From a shell the same thing, one key at a time:
 
 ```bash
 sh settings.sh show
+sh settings.sh diag
 sh settings.sh set HOST 192.168.1.50
 sh settings.sh set FORECAST_EVERY 60
 sh settings.sh profile saver
+sh settings.sh power days
+sh settings.sh quiet night
 ```
 
 A value that would break the loop is refused rather than written — an interval
@@ -167,17 +183,88 @@ settings screen you were just looking at gives way to the page again by itself.
 | `FULL_EVERY` | `60` | Minutes between whole-screen refreshes |
 | `CLOCK_FLASH_EVERY` | `1` | Flash the clock zone every N clock updates (0 = never) |
 | `SENSOR_FLASH_EVERY` | `0` | Flash the readings zone every N sensor updates (0 = never) |
+| `POWER` | `awake` | `awake`, `wifi` (radio off between fetches) or `suspend` (sleeps to RAM as well) |
+| `TOUCH` | `1` | Tap the screen for the menu |
+| `WAKE_MENU` | `1` | A press of the power button wakes the panel and opens the menu |
+| `WAKE_HOLD` | `120` | Seconds it then stays awake and listening; every tap pushes this out |
+| `MENU_ACT` | `refresh\|wake\|settings\|quit` | What the bar's buttons do — 2 to 5 of `refresh`, `wake`, `settings`, `hide`, `quit` |
+| `MENU_LBL` | `Refresh\|Awake/Sleep\|More\|Exit` | What they are called. The sleep button may carry both directions with a slash; the bar draws the half that says where the next tap goes. Fewer labels than buttons and the built-in names are used instead |
+| `QUIET_FROM`, `QUIET_TO` | `0`, `0` | Hours between which nothing flashes. Equal = off |
+| `QUIET_EVERY` | `15` | Minutes between clock updates during those hours |
+| `STATUS` | `1` | Draw this Kindle's battery and power mode at the end of the footer |
+| `AUTO_FIND` | `1` | Look for the collector once if the very first fetch fails |
 
 `Find collector` writes the addresses that answered to `collectors`, beside
 `dash.conf` — not under `/tmp`, which Stop deletes and a reboot clears — so
 **Next collector** still works the next time you come back to it.
 
+### Battery
+
+A ten-year-old Kindle looping this script with an associated radio draws 60–80
+mA — a day and a half on a cell that is probably down to 600–900 mAh. Most
+minutes on this panel need none of it: the clock comes from the reader's own
+clock.
+
+| Battery menu entry | What it does |
+|---|---|
+| **normal** | nothing is touched |
+| **radio off between updates** | the radio is up only around a fetch. Cannot fail in a way the panel does not already handle |
+| **sleep between updates** | and the wait is a real suspend to RAM with an RTC alarm |
+| **deep sleep, rare updates** | the above, **and** the intervals that make it worth having: clock 15 min, data 30, chart 60, forecast 60, full 240 |
+
+**The last two are not the same setting, and the difference is the point.**
+Sleeping between updates with `CLOCK_EVERY=1` suspends and comes back sixty
+times an hour — each one a resume, a draw and a flashing refresh of the clock.
+The saving is in *not waking up*, so the panel sleeps straight through the
+minutes with no tier due in them, and it is the intervals that decide how long
+that is.
+
+**Waking it up.** A suspended Kindle wakes from the **power button** — not from
+the touchscreen, whose controller has no power while the CPU is down, which is
+the same reason a sleeping Kindle does not wake when you touch its screen. A
+short press repaints the page and puts the tap bar up for `WAKE_HOLD` seconds;
+every tap pushes that out again, so there is time to work through the settings
+bar. Then it goes back to sleep by itself.
+
+Tap **Awake** on that bar and the sleeping stops until you tap it again — which
+is the way to hold the panel up while you change something, from the bar or
+from KUAL. It writes `POWER` to `dash.conf`, so the menu and the panel agree
+about it afterwards.
+
+`TOUCH=0` with `WAKE_MENU=1` is worth knowing about for a panel on a wall:
+nothing reads the touchscreen while nobody is there, and the button summons a
+menu when somebody is.
+
+**Quiet hours** (Settings → Quiet hours) stop the flashing overnight and slow
+the clock to `QUIET_EVERY`, which with a real suspend turns the night into one
+long sleep instead of sixty short ones. Leaving them spends one full flashing
+refresh, which is where the night's ghosting goes.
+
 ### When the collector cannot be reached
 
-The readings block is replaced by the address it tried and how to change it,
-and the clock keeps running underneath. The chart and the forecast are left
-alone: a page with yesterday's chart and a reason on it beats a blank one.
-Every data tier retries, and the first success draws the whole page again.
+The readings block is replaced by the address it tried, how to change it, and
+**the time it last worked**, and the clock keeps running underneath. The chart
+and the forecast are left alone: a page with yesterday's chart and a reason on
+it beats a blank one. Every data tier retries, and the first success draws the
+whole page again.
+
+**One failed fetch is not enough to say so.** A single wifi hiccup should not
+make the page flinch when the numbers are five minutes old and the next tier
+will almost certainly work, so it takes two failures in a row. What it will not
+do any more is keep repainting the last readings indefinitely with nothing to
+say they are old — a dead collector and a calm afternoon used to look
+identical.
+
+**A reading the collector stops sending is forgotten**, rather than left on
+screen at whatever it last was: a sensor whose node goes flat takes its value
+off the panel with it.
+
+**And after a reboot there is still a page.** The last payload is kept beside
+`dash.conf` as `last.txt` — written once an hour, not once a fetch — so a
+reader that has just been switched on comes up with the chart, the forecast and
+the week strip it last had, in the language the collector set, with the offline
+notice over the readings and the time they were from. `/tmp` is a ramdisk;
+without it a cold start with the collector also down is a blank screen.
 
 The forecast interval is the Kindle's **redraw** cadence. The collector fetches
 from the weather API on its own schedule — WebUI → Settings → Forecast → *Fetch
@@ -325,6 +412,9 @@ where it buys the most and withheld where it would only annoy.
 | `GRAPH_EVERY` (15 min) | the 24 h chart | plain, that rectangle |
 | `FORECAST_EVERY` (30 min) | forecast, week strip, footer | plain, that rectangle |
 | `FULL_EVERY` (60 min) | everything | **flashing**, whole screen |
+
+Inside the quiet hours nothing flashes at all, and the clock tier stretches to
+`QUIET_EVERY`.
 
 The clock is the one region that changes every minute, so it is the one that
 ghosts first — and it is small enough that flashing it is barely noticeable,

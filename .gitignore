@@ -73,3 +73,9 @@ kindle/collectors
 # Written on the device by kindle/kual-run.sh: the record of what each KUAL
 # menu entry did, kept beside the scripts so a USB cable can read it.
 kindle/kual.log
+
+# The last payload the panel drew, kept beside dash.conf so that a reader which
+# has just been switched on has a page — and the collector's choice of language
+# — before the first fetch answers. /tmp is a ramdisk; this is one device's
+# weather, not the project's.
+kindle/last.txt
