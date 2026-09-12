@@ -297,6 +297,28 @@ jobs:
           mv www/js/kindle.js.orig www/js/kindle.js
           echo "browser test fires on a mask that is never collected"
 
+      - name: Verify that check actually fails when one Save covers only half
+        # THE FAILURE THIS PAGE WAS REDESIGNED AROUND. There used to be two
+        # Save buttons over two working copies, with nothing on screen saying
+        # which covered what — so editing a place and pressing the Save at the
+        # foot of the page stored nothing and reported success. One button
+        # writes both endpoints now; break the second write and the driver has
+        # to notice, or it is only describing the intention.
+        run: |
+          set -e
+          cp www/js/kindle.js www/js/kindle.js.orig
+          sed -i 's|body: kdSlotsBody(),|body: JSON.stringify({ zones: {} }),|' www/js/kindle.js
+          grep -q 'zones: {} ' www/js/kindle.js  # the sed matched something
+          python3 tests/web/mock_device.py 8769 &
+          sleep 2
+          if MOCK_PORT=8769 python3 tests/web/drive_kindle_page.py > /dev/null 2>&1; then
+            mv www/js/kindle.js.orig www/js/kindle.js
+            echo "::error::the browser test passed with the places never sent"
+            exit 1
+          fi
+          mv www/js/kindle.js.orig www/js/kindle.js
+          echo "browser test fires when a save leaves the places behind"
+
       - name: Verify that check actually fails on a dead button
         # A browser test that cannot fail is worth less than none, because a
         # green tick on a page nobody opened is exactly the false comfort it

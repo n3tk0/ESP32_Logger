@@ -356,7 +356,7 @@ plus how old the reading is: `-2.4 до 15.3° · 3 мин`. It is composed on t
 collector, by `kdSubLine()`, so the wording, the unit and the rounding are the
 page's and not each renderer's, and it is set in the page's mid grey rather than
 its dark one — it is context for the number above it, not a reading in its own
-right. Switch it off in the zone table's **Shown** column, on the
+right. Switch it off with the region's **Shown** switch, on the
 *24-hour low-to-high* row.
 
 The pair is the one thing on the page that must not reflow, so it is `nowrap`
@@ -517,28 +517,43 @@ because it is served to a browser with no JavaScript and sometimes no touch
 panel, and a form there would be a worse version of the one that already
 exists.
 
-### The zone table is that page's index
+### The panel is that page's index
 
-**Every region of the panel is one row**, in the order the panel draws them,
-carrying the two switches that belong to it and a way through to whatever fills
-it — a jump to the control further down the same page, a link to the page that
-actually owns it, or a plain statement that nothing configures it.
+**It configures a picture, so it shows the picture.** The panel is drawn beside
+the form at its own 600×800 coordinates — the ones in
+`kindle/layout/600x800.conf`, so the preview and the FBInk panel cannot drift
+on where a thing sits — and it is drawn from the values *in the form* rather
+than the ones on the device. Every question the form asks (what does Bold do,
+how tall is the boxed clock, did switching that region off leave a hole) used
+to be answerable only by saving, walking to the reader, and waiting for it to
+repaint.
 
-It replaced three lists. A grid of nine checkboxes headed *Weight*, a grid of
-eight headed *What is drawn*, and a card of eleven place-editors: three
-different namings of the same regions, in three different orders. "The grid"
-was in two of them and meant the same thing. "Beside the headline" was in two
-and meant the same thing. The forecast was in one and could not be configured
-from that page at all. To answer *where do I turn this on* the reader had to
-hold the whole layout in their head and then guess which of the three lists
-owned it.
+**And it is the navigation: tap a region and that region opens.** Everything
+about it is then in one place — whether it is drawn, whether its figures are
+heavy, and which reading fills it.
 
-| Column | |
+That replaced three lists and then a table. A grid of nine checkboxes headed
+*Weight*, a grid of eight headed *What is drawn*, and a card of eleven
+place-editors: three different namings of the same regions, in three different
+orders. "The grid" was in two of them and meant the same thing. The forecast
+was in one and could not be configured from that page at all. The table that
+followed fixed the naming and the order, and kept the split that mattered
+most: a region's two switches were in it, and the reading that filled the
+region was eleven always-open editors further down — about a hundred controls
+in one scroll, **saved by a different button**.
+
+| On the row | |
 |---|---|
-| **Zone** | the region, and one line saying where on the panel it is |
+| the region's name, and one line saying where on the panel it is | |
 | **Shown** | its `KSHOW_*` bit, or *Always* for one that cannot be turned off, or *Module* for the forecast, which is a build-time feature rather than a setting |
 | **Bold** | its `KBOLD_*` bit, or a dash for a region that has no weight of its own |
-| **What fills it** | ↓ to a control further down this page, → to the page that owns it, or the sentence that says nothing does |
+| a summary | the reading that fills it, or how many of its places are filled |
+
+**The two switches stay on the row, not inside the part that expands.** Whether
+a region is drawn at all is the thing worth seeing without opening anything —
+and it is what keeps every mask bit in the DOM for one walk to collect. A page
+that rendered them only for the open region would save whatever the others
+happened to be last time.
 
 Every `KSHOW_*` and every `KBOLD_*` bit appears exactly once, which is what
 makes the mapping checkable by eye against `src/core/Config.h` — and what
@@ -547,7 +562,36 @@ prefix rather than by container.
 
 The last two rows are not regions. **Captions** and **Units** are the two
 things that appear inside every region and own a weight bit each, so they sit
-under a heading of their own rather than reading as places on the panel.
+under a heading of their own rather than reading as places on the panel. The
+**pressure tendency arrow** sits with them: it is a modifier on whichever place
+holds a pressure reading, and its switch is the master for all of them — which
+is why none of the three has a hit target on the preview. There is no one place
+on the panel to point at.
+
+**The hit targets do not overlap.** The headline's number and the value beside
+it share a baseline on the real panel, and targets drawn to match that left the
+headline's almost entirely underneath its neighbour's — a region you could only
+open by aiming at its edge. The driver asserts it from the rendered rectangles,
+because it is the kind of thing that is obvious in a screenshot and invisible
+in the source.
+
+### One save, for the whole page
+
+There were two, over two working copies, and **nothing on screen said which
+covered what**: editing a place and pressing the Save at the foot of the page
+stored nothing and reported success.
+
+One button writes both endpoints now — `/api/kindle/config` then
+`/api/kindle/slots` — and reports one outcome, in terms of the panel rather
+than the server: *"Saved 6 readings and the appearance. The reader picks it up
+on its next repaint."* A bar appears at the foot of the page as soon as
+anything is unsaved and says what is in it (*"Unsaved: 2 settings, a place"*),
+with **Discard** beside Save, which re-reads the device rather than reloading
+the browser.
+
+**Back to the built-in design** fills the form and waits. It used to write on
+the spot; a destructive button that acts before the reader has seen what it did
+is a button nobody can undo.
 
 The rest of the page is the controls those rows point at:
 
@@ -559,7 +603,13 @@ The rest of the page is the controls those rows point at:
 | **Date** | `27 august`, `august 27`, `27.08.2026`, `2026-08-27` |
 | **Pressure** | hPa, mmHg or inHg — the three-hour change follows it |
 | **Temperature** | one decimal or whole degrees |
-| **Readings** | what goes in each of the eleven places, and each one's caption, decimals, switches and grey level |
+| **How often the reader reloads** | *Often*, *Balanced*, *Sparing*, or by hand — three named choices over the interval, whether it follows new data, and whether it pins to the minute, each saying what it costs. A cadence that matches none of them opens the fields by itself |
+| **The reader** | the panel size for the FBInk script, and the outdoor and indoor sensors that feed the chart and the 24-hour history |
+| **Readings** | what goes in each of the eleven places, and each one's caption, decimals, switches and grey level — inside the region that draws it |
+
+The long explanations are still there and are folded into **“?”** disclosures:
+every paragraph of them answers a question somebody actually asked, and all of
+them at once was a page nobody scrolled to the end of.
 
 The settings live in `config.kindle` (`src/core/Config.h`) and are read on
 every render, so a save takes effect on the panel's next repaint. They survive

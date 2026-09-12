@@ -66,8 +66,32 @@
     "rotate-ccw":
       '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>' +
       '<path d="M3 3v5h5"></path>',
+    // THREE THAT THIS PAGE HAS BEEN ASKING FOR ALL ALONG. The e-ink dashboard
+    // settings page tags three of its card headings "layout", "monitor" and
+    // "timer", and swap() skips a name it does not know in silence — so those
+    // three headings have been rendering an empty span. Bodies from Lucide
+    // 0.441 like every other entry here; "layout" is that release's alias of
+    // panels-top-left.
+    "layout":
+      '<rect width="18" height="18" x="3" y="3" rx="2"></rect>' +
+      '<path d="M3 9h18"></path>' +
+      '<path d="M9 21V9"></path>',
+    "monitor":
+      '<rect width="20" height="14" x="2" y="3" rx="2"></rect>' +
+      '<line x1="8" x2="16" y1="21" y2="21"></line>' +
+      '<line x1="12" x2="12" y1="17" y2="21"></line>',
+    "timer":
+      '<line x1="10" x2="14" y1="2" y2="2"></line>' +
+      '<line x1="12" x2="15" y1="14" y2="11"></line>' +
+      '<circle cx="12" cy="14" r="8"></circle>',
     "chevron-left":
       '<path d="m15 18-6-6 6-6"></path>',
+    // Its pair, for the e-ink dashboard's region rows: pointing right when a
+    // row is closed and rotated to point down when it is open. An icon name
+    // swap() does not know is skipped in silence, so a row would have had no
+    // expand affordance at all.
+    "chevron-right":
+      '<path d="m9 18 6-6-6-6"></path>',
     "droplets":
       '<path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"></path>' +
       '<path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"></path>',
@@ -268,7 +292,7 @@
       '<path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path>',
     "arrow-right":
       '<path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path>',
-    // Down, not right: the e-ink dashboard's zone table uses the two to say
+    // Down, not right: the e-ink dashboard's region rows use the two to say
     // whether a control is further down THIS page or on another one, which is
     // the difference the reader is actually asking about.
     "arrow-down":
