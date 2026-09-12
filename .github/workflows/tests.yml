@@ -647,6 +647,48 @@ jobs:
           rm /tmp/ud.orig
           echo "the suite fails when the panel stops matching the page, as it should"
 
+      - name: Verify that suite refuses a payload it should not have taken
+        # The same class as the truncated chart above, on the other endpoint and
+        # unasked for far longer. /kindle/data is streamed off the ESP32 while
+        # it is also serving the web UI, to a reader on wifi; when that
+        # connection dies partway, busybox wget does not always call the short
+        # read an error, and what lands on the Kindle PARSES — every key past
+        # the cut simply absent, a third of the page blank, and `wget -O` has
+        # already truncated the good copy. END=1 is what tells the two apart.
+        run: |
+          set -e
+          cp kindle/update_dash.sh /tmp/ud.orig
+          sed -i "s/^payload_ok() {$/payload_ok() { return 0; } unused_payload_ok() {/" kindle/update_dash.sh
+          if ! grep -q 'unused_payload_ok' kindle/update_dash.sh; then
+            echo "::error::the payload_ok mutation no longer matches — this proof step is stale"
+            cp /tmp/ud.orig kindle/update_dash.sh
+            exit 1
+          fi
+          if sh tests/kindle/drive_dash.sh > /dev/null 2>&1; then
+            echo "::error::drive_dash.sh passed a fetch that accepts half a payload"
+            cp /tmp/ud.orig kindle/update_dash.sh
+            exit 1
+          fi
+          cp /tmp/ud.orig kindle/update_dash.sh
+          # And the wake window, which is what lets POWER=suspend and the tap
+          # menu coexist at all. Gate the suspend on the menu being armed
+          # again — which is what it used to do — and TOUCH=1 silently cancels
+          # the deep sleep for everybody who has both switched on.
+          sed -i 's/&& ! wake_window; then/\&\& [ "${TOUCH_READY:-0}" != "1" ]; then/' kindle/update_dash.sh
+          if grep -q '! wake_window; then' kindle/update_dash.sh; then
+            echo "::error::the wake-window mutation no longer matches — this proof step is stale"
+            cp /tmp/ud.orig kindle/update_dash.sh
+            exit 1
+          fi
+          if sh tests/kindle/drive_dash.sh > /dev/null 2>&1; then
+            echo "::error::drive_dash.sh passed a suspend the tap menu can cancel"
+            cp /tmp/ud.orig kindle/update_dash.sh
+            exit 1
+          fi
+          cp /tmp/ud.orig kindle/update_dash.sh
+          rm /tmp/ud.orig
+          echo "the suite fails on half a payload and on a sleep the menu cancels"
+
       - name: Verify the deploy tools see every board in platformio.ini
         # tools/pio_envs.py is where the flash tools get their board list. An
         # env its parser cannot see is a board the tool will not offer, and

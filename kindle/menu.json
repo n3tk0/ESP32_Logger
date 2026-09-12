@@ -30,64 +30,84 @@
                             "exitmenu": true
                         },
                         {
-                            "name": "Find collector",
+                            "name": "Info: what is going on",
                             "priority": 2,
+                            "action": "/bin/sh",
+                            "params": "kual.sh diag",
+                            "exitmenu": true
+                        },
+                        {
+                            "name": "Find collector",
+                            "priority": 3,
                             "action": "/bin/sh",
                             "params": "kual.sh find",
                             "exitmenu": true
                         },
                         {
                             "name": "Next collector",
-                            "priority": 3,
+                            "priority": 4,
                             "action": "/bin/sh",
                             "params": "kual.sh next",
                             "exitmenu": true
                         },
                         {
                             "name": "Refresh: normal",
-                            "priority": 4,
+                            "priority": 5,
                             "action": "/bin/sh",
                             "params": "kual.sh profile normal",
                             "exitmenu": true
                         },
                         {
                             "name": "Refresh: fast",
-                            "priority": 5,
+                            "priority": 6,
                             "action": "/bin/sh",
                             "params": "kual.sh profile fast",
                             "exitmenu": true
                         },
                         {
                             "name": "Refresh: battery saver",
-                            "priority": 6,
+                            "priority": 7,
                             "action": "/bin/sh",
                             "params": "kual.sh profile saver",
                             "exitmenu": true
                         },
                         {
-                            "name": "Battery: normal",
-                            "priority": 7,
-                            "action": "/bin/sh",
-                            "params": "kual.sh power awake",
-                            "exitmenu": true
-                        },
-                        {
-                            "name": "Battery: radio off between updates",
+                            "name": "Battery",
                             "priority": 8,
-                            "action": "/bin/sh",
-                            "params": "kual.sh power wifi",
-                            "exitmenu": true
-                        },
-                        {
-                            "name": "Battery: deep sleep",
-                            "priority": 9,
-                            "action": "/bin/sh",
-                            "params": "kual.sh power suspend",
-                            "exitmenu": true
+                            "items": [
+                                {
+                                    "name": "Battery: normal",
+                                    "priority": 1,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh power awake",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Battery: radio off between updates",
+                                    "priority": 2,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh power wifi",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Battery: sleep between updates",
+                                    "priority": 3,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh power suspend",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Battery: deep sleep, rare updates",
+                                    "priority": 4,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh power days",
+                                    "exitmenu": true
+                                }
+                            ]
                         },
                         {
                             "name": "Screen",
-                            "priority": 10,
+                            "priority": 9,
                             "items": [
                                 {
                                     "name": "Draw over the reader",
@@ -115,6 +135,54 @@
                                     "priority": 4,
                                     "action": "/bin/sh",
                                     "params": "kual.sh set TOUCH 0",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Power button opens the menu: on",
+                                    "priority": 5,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set WAKE_MENU 1",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Power button opens the menu: off",
+                                    "priority": 6,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set WAKE_MENU 0",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Footer status: on",
+                                    "priority": 7,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set STATUS 1",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Footer status: off",
+                                    "priority": 8,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set STATUS 0",
+                                    "exitmenu": true
+                                }
+                            ]
+                        },
+                        {
+                            "name": "Quiet hours",
+                            "priority": 10,
+                            "items": [
+                                {
+                                    "name": "Quiet hours: 22:00 to 07:00",
+                                    "priority": 1,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh quiet night",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Quiet hours: off",
+                                    "priority": 2,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh quiet off",
                                     "exitmenu": true
                                 }
                             ]

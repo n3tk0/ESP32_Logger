@@ -143,10 +143,11 @@ fi
 case "${1:-}" in
     start)   run "Start Dashboard" sh "$DIR/start.sh" ;;
     stop)    run "Stop Dashboard"  sh "$DIR/stop.sh" ;;
-    show|find|next|reset)
+    show|find|next|diag|reset)
              run "Settings $1"     sh "$DIR/settings.sh" "$1" ;;
     profile) run "Settings profile ${2:-}" sh "$DIR/settings.sh" profile "${2:-normal}" ;;
     power)   run "Settings power ${2:-}"   sh "$DIR/settings.sh" power   "${2:-awake}" ;;
+    quiet)   run "Settings quiet ${2:-}"   sh "$DIR/settings.sh" quiet   "${2:-off}" ;;
     # The general form, so a setting that has no menu entry of its own is still
     # reachable from a device with no keyboard — every key in conf_keys() is
     # validated by settings.sh before it is written.
