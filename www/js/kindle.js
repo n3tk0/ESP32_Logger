@@ -66,21 +66,23 @@
 var KD_ZONES = [
   { id:"hero", name:"Headline",
     where:"Top left. The largest number on the page.",
-    show:0, bold:0x0001, slot:"hero", head:"out", box:[10,12,136,112] },
+    show:0, bold:0x0001, slot:"hero", head:"out",
+    box:[10,12,136,112], sabox:[10,12,152,132] },
 
   { id:"big", name:"Beside the headline",
     where:"Shares the headline's baseline, after a slash.",
-    show:0x0001, bold:0x0002, slot:"big", box:[148,40,146,64] },
+    show:0x0001, bold:0x0002, slot:"big",
+    box:[148,40,146,64], sabox:[164,48,130,80] },
 
   { id:"sub", name:"24-hour low-to-high",
     where:"The small line under the headline, with the reading's age.",
-    show:0x0008, bold:0, box:[10,126,284,24],
+    show:0x0008, bold:0, box:[10,126,284,24], sabox:[10,152,284,28],
     fill:["text","Follows the headline's sensor."] },
 
   { id:"grid", name:"The grid",
     where:"Under that line — up to three across and two deep.",
     show:0x0002, bold:0x0004, slots:["g1","g2","g3","g4","g5","g6"],
-    box:[10,152,284,122] },
+    box:[10,152,284,122], sabox:[10,186,284,196] },
 
   { id:"tend", name:"Pressure tendency arrow",
     where:"After a pressure reading, wherever one is placed.",
@@ -89,32 +91,36 @@ var KD_ZONES = [
 
   { id:"clock", name:"Clock",
     where:"Top right, above the indoor row.",
-    show:0, bold:0x0008, box:[314,20,272,102],
+    show:0, bold:0x0008, box:[314,20,272,102], sabox:[314,20,272,116],
     fill:["jump","kd-card-clock","Style, time and date"] },
 
   { id:"inrow", name:"Indoor row",
     where:"Under the clock — up to three readings on one baseline.",
     show:0x0010, bold:0x0010, slots:["in1","in2","in3"], head:"in",
-    box:[314,126,272,148] },
+    box:[314,126,272,148], sabox:[314,140,272,160] },
 
   { id:"chart", name:"24-hour trend chart",
     where:"Full width, under the two columns.",
-    show:0x0020, bold:0, box:[8,282,584,260],
+    show:0x0020, bold:0, box:[8,282,584,260], sabox:[8,406,584,264],
     fill:["text","Drawn from the stored history of the outdoor and indoor sensors named under “The reader”."] },
 
   { id:"fc", name:"Weather forecast",
     where:"Under the chart: the condition, and three outlook columns.",
+    // NO sabox: the band is where the readings above went, so on that page
+    // there is nothing to point at. The row stays in the list — its weight
+    // switch is a bit of the mask, and a bit with no checkbox in the DOM is a
+    // bit dropped on the next Save.
     show:-1, bold:0x0040, box:[8,552,584,118],
     fill:["link","#settings_modules","Provider, place and outlook"] },
 
   { id:"week", name:"Week strip",
     where:"The seven days above the footer, today knocked out in black.",
-    show:0x0040, bold:0x0080, box:[10,674,580,84],
+    show:0x0040, bold:0x0080, box:[10,674,580,84], sabox:[10,674,580,84],
     fill:["text","Drawn from the device's own date."] },
 
   { id:"batt", name:"Low-battery badge",
     where:"Beside the outdoor heading, when a node is nearly flat.",
-    show:0x0080, bold:0, box:[234,12,30,26],
+    show:0x0080, bold:0, box:[234,12,30,26], sabox:[234,12,30,26],
     fill:["link","#settings_espnow","Which nodes report a battery"] },
 
   // The last two are not regions. They are the two things that appear inside
@@ -367,36 +373,84 @@ function kdPvDate() {
   return ["27 august","august 27","27.08.2026","2026-08-27"][kdVal("kd-date","0") | 0];
 }
 
+// ── The two shapes this page comes in ──────────────────────────────────────
+// A collector that is its own access point cannot fetch a forecast, so the
+// band it would occupy goes and the readings grow into it. That is a second
+// set of coordinates, and these are they: mirrored from
+// kindle/layout/600x800.conf and 600x800-standalone.conf, which is where the
+// panel reads the same numbers. tools/check_kindle_parity.py holds the type
+// sizes of both to the firmware's own stylesheet; this table is the preview's
+// copy of the geometry around them.
+//
+// THE TYPE GREW BY A SIXTH AND NOT A THIRD because the freed band is vertical
+// and every number is limited by the COLUMN it sits in — see the note in the
+// overlay file. The preview proves it: tests/web/drive_kindle_page.py measures
+// the widest string each reading can produce, with kdTw, against its column.
+var KD_SHAPE = {
+  normal: {
+    heroSz:88,  bigSz:44,  subY:128, subSz:17,
+    gridY:158,  rowH:58,   gridVal:34, gridVal3:27, labSz:14,
+    sepH:252,   clockSz:96, clockH:97, boxed:84, ruled:72, dated:66, dateSz:15,
+    inRuleY:124, inLabY:134, inValY:166, inVal1:52, inVal:31,
+    chartRuleY:282, chartLabY:288, chartY:308, keyY:530,
+    forecast:true
+  },
+  sa: {
+    heroSz:104, bigSz:48,  subY:158, subSz:19,
+    gridY:196,  rowH:92,   gridVal:42, gridVal3:31, labSz:15,
+    sepH:376,   clockSz:110, clockH:111, boxed:96, ruled:82, dated:74, dateSz:16,
+    inRuleY:138, inLabY:152, inValY:190, inVal1:56, inVal:34,
+    chartRuleY:406, chartLabY:412, chartY:432, keyY:654,
+    forecast:false
+  }
+};
+
+// Which one the preview draws. `auto` is not a shape — it is the collector
+// deciding, minute by minute, and the page cannot know today's answer. It
+// draws the ordinary page and says so under the control.
+function kdShape() {
+  return (kdVal("kd-layout", "0") === "2") ? KD_SHAPE.sa : KD_SHAPE.normal;
+}
+
 function kdRenderPreview() {
   var el = document.getElementById("kd-panel");
   if (!el) return;
   var show = kdMaskOf(KD_SHOW, "kd-s-"), bold = kdMaskOf(KD_BOLD, "kd-b-");
   var capB = !!(bold & 0x0100), unitB = !!(bold & 0x0020);
+  var L = kdShape();
   var h = "", i, z, v, u, x, ux, usz;
 
   // ── Left column: the headline, its line, its grid ──
-  h += kdT(18, 20, 14, kdGroups.out || kdGroupPh.out, { ink:"#777777", bold:capB });
+  h += kdT(18, 20, L.labSz, kdGroups.out || kdGroupPh.out, { ink:"#777777", bold:capB });
   z = kdSlot("hero"); v = kdPvValue(z);
-  h += kdT(18, 38, 88, v || "—",
+  h += kdT(18, 38, L.heroSz, v || "—",
            { bold:(z.flags & kdFlags.bold) || (bold & 0x0001), ink:kdPvInk(z.ink) });
-  x = 18 + kdTw(v || "—", 88);
+  x = 18 + kdTw(v || "—", L.heroSz);
   u = kdPvUnit(z);
-  h += kdT(x, 44, 30, u, { ink:"#444444", bold:unitB });
-  x += kdTw(u, 30);
+  usz = Math.round(L.heroSz * 0.34);
+  // The unit and the second value hang off the headline's size rather than
+  // carrying coordinates of their own: they sit on its baseline, and a table
+  // with three numbers that must move together is a table two of them can be
+  // forgotten in.
+  h += kdT(x, 44 + Math.round((L.heroSz - 88) / 4), usz, u,
+           { ink:"#444444", bold:unitB });
+  x += kdTw(u, usz);
 
   if (show & 0x0001) {
     z = kdSlot("big"); v = kdPvValue(z);
     if (v) {
+      var by = 56 + Math.round((L.heroSz - 88) / 2);
       x += 8;
-      h += kdT(x, 56, 44, "/", { ink:"#aaaaaa" });
-      x += kdTw("/", 44) + 6;
-      h += kdT(x, 56, 44, v,
+      h += kdT(x, by, L.bigSz, "/", { ink:"#aaaaaa" });
+      x += kdTw("/", L.bigSz) + 6;
+      h += kdT(x, by, L.bigSz, v,
                { bold:(z.flags & kdFlags.bold) || (bold & 0x0002), ink:kdPvInk(z.ink) });
-      h += kdT(x + kdTw(v, 44), 62, 19, kdPvUnit(z), { ink:"#444444", bold:unitB });
+      h += kdT(x + kdTw(v, L.bigSz), by + 6, Math.round(L.bigSz * 0.42),
+               kdPvUnit(z), { ink:"#444444", bold:unitB });
     }
   }
   if (show & 0x0008) {
-    h += kdT(18, 128, 17, "-2.4 to 15.3°  ·  3 min", { ink:"#777777" });
+    h += kdT(18, L.subY, L.subSz, "-2.4 to 15.3°  ·  3 min", { ink:"#777777" });
   }
 
   if (show & 0x0002) {
@@ -405,19 +459,20 @@ function kdRenderPreview() {
     var rows = [live.slice(0, 3), live.slice(3, 6)];
     for (var r = 0; r < rows.length; r++) {
       if (!rows[r].length) continue;
-      var cw = Math.floor(270 / rows[r].length), gy = 158 + r * 58;
-      var vs = rows[r].length >= 3 ? 27 : 34;
+      var cw = Math.floor(270 / rows[r].length), gy = L.gridY + r * L.rowH;
+      var vs = rows[r].length >= 3 ? L.gridVal3 : L.gridVal;
       for (i = 0; i < rows[r].length; i++) {
         z = kdSlot(rows[r][i]); x = 18 + i * cw; v = kdPvValue(z);
-        h += kdT(x, gy, 14, kdPvCaption(z), { ink:"#777777", bold:capB });
-        h += kdT(x, gy + 20, vs, v,
+        h += kdT(x, gy, L.labSz, kdPvCaption(z), { ink:"#777777", bold:capB });
+        h += kdT(x, gy + L.labSz + 6, vs, v,
                  { bold:(z.flags & kdFlags.bold) || (bold & 0x0004), ink:kdPvInk(z.ink) });
         u = kdPvUnit(z);
         ux = x + kdTw(v, vs) + (u === "°" || u === "%" ? 0 : 3);
         usz = Math.round(vs * (u === "°" ? 0.34 : 0.42));
-        h += kdT(ux, gy + 24, usz, u, { ink:"#444444", bold:unitB });
+        var uy = gy + L.labSz + 10;
+        h += kdT(ux, uy, usz, u, { ink:"#444444", bold:unitB });
         if ((z.flags & kdFlags.trend) && (show & 0x0004) && z.metric === "pressure") {
-          h += kdT(ux + kdTw(u, usz) + 4, gy + 24, 16, "↘", { ink:"#444444" });
+          h += kdT(ux + kdTw(u, usz) + 4, uy, 16, "↘", { ink:"#444444" });
         }
       }
     }
@@ -425,38 +480,42 @@ function kdRenderPreview() {
   if (show & 0x0080) h += kdBox(240, 18, 22, 22, "kd-pl dk");
 
   // The hairline between the columns
-  h += kdBox(300, 20, 1, 252, "kd-rl");
+  h += kdBox(300, 20, 1, L.sepH, "kd-rl");
 
   // ── Right column: the clock, then the indoor row ──
   var cs = kdVal("kd-clock", "0") | 0, cb = !!(bold & 0x0008);
   if (cs === 1) {
-    h += kdBox(318, 26, 264, 97, "kd-pl dk");
-    h += "<i style='left:340px;top:44px;font-size:84px;color:#ffffff;font-weight:" +
+    h += kdBox(318, 26, 264, L.clockH, "kd-pl dk");
+    h += "<i style='left:340px;top:" + (26 + Math.round(L.clockH * 0.19)) +
+         "px;font-size:" + L.boxed + "px;color:#ffffff;font-weight:" +
          (cb ? 600 : 400) + "'>" + kdEsc(kdPvClock()) + "</i>";
   } else if (cs === 2) {
     h += kdBox(318, 26, 264, 1, "kd-rl");
-    h += kdT(340, 46, 72, kdPvClock(), { bold:cb, ls:2 });
+    h += kdT(340, 26 + Math.round(L.clockH * 0.21), L.ruled, kdPvClock(),
+             { bold:cb, ls:2 });
   } else if (cs === 3) {
-    h += kdT(318, 26, 66, kdPvClock(), { bold:cb });
-    h += kdT(318, 104, 15, kdPvDate(), { ink:"#444444" });
+    h += kdT(318, 26, L.dated, kdPvClock(), { bold:cb });
+    h += kdT(318, 26 + L.dated + 12, L.dateSz, kdPvDate(), { ink:"#444444" });
   } else {
-    h += kdT(318, 26, 96, kdPvClock(), { bold:cb });
+    h += kdT(318, 26, L.clockSz, kdPvClock(), { bold:cb });
   }
 
   if (show & 0x0010) {
     var ik = ["in1","in2","in3"], ilive = [];
     for (i = 0; i < 3; i++) if (kdPvValue(kdSlot(ik[i])) !== "") ilive.push(ik[i]);
     if (ilive.length) {
-      h += kdBox(318, 124, 264, 1, "kd-rl soft");
-      h += kdT(318, 134, 14, kdGroups["in"] || kdGroupPh["in"], { ink:"#777777", bold:capB });
+      h += kdBox(318, L.inRuleY, 264, 1, "kd-rl soft");
+      h += kdT(318, L.inLabY, L.labSz, kdGroups["in"] || kdGroupPh["in"],
+               { ink:"#777777", bold:capB });
       var w1 = ilive.length >= 3 ? 111 : (ilive.length === 2 ? 153 : 264);
       var cw2 = ilive.length > 1 ? Math.floor((264 - w1) / (ilive.length - 1)) : 264;
       for (i = 0; i < ilive.length; i++) {
         z = kdSlot(ilive[i]);
-        var big = i === 0, ivs = big ? 52 : 31;
-        var iy = big ? 166 : 166 + 52 - 31;
+        var big = i === 0, ivs = big ? L.inVal1 : L.inVal;
+        var iy = big ? L.inValY : L.inValY + L.inVal1 - L.inVal;
         x = big ? 318 : 318 + w1 + (i - 1) * cw2;
-        if (!big) h += kdT(x, iy - 18, 14, kdPvCaption(z), { ink:"#777777", bold:capB });
+        if (!big) h += kdT(x, iy - 18, L.labSz, kdPvCaption(z),
+                           { ink:"#777777", bold:capB });
         v = kdPvValue(z);
         h += kdT(x, iy, ivs, v,
                  { bold:(z.flags & kdFlags.bold) || (bold & 0x0010), ink:kdPvInk(z.ink) });
@@ -469,32 +528,38 @@ function kdRenderPreview() {
   }
 
   // ── The chart ──
-  h += kdBox(18, 282, 564, 1, "kd-rl");
+  h += kdBox(18, L.chartRuleY, 564, 1, "kd-rl");
   if (show & 0x0020) {
-    h += kdT(18, 288, 14, "24 HOURS", { ink:"#777777", bold:capB });
-    h += kdBox(20, 308, 560, 220, "kd-pl");
-    for (i = 1; i < 4; i++) h += kdBox(20, 308 + i * 55, 560, 1, "kd-rl soft");
-    h += "<svg style='left:20px;top:308px;width:560px;height:220px' viewBox='0 0 560 220'" +
+    h += kdT(18, L.chartLabY, L.labSz, "24 HOURS", { ink:"#777777", bold:capB });
+    h += kdBox(20, L.chartY, 560, 220, "kd-pl");
+    for (i = 1; i < 4; i++) h += kdBox(20, L.chartY + i * 55, 560, 1, "kd-rl soft");
+    h += "<svg style='left:20px;top:" + L.chartY +
+         "px;width:560px;height:220px' viewBox='0 0 560 220'" +
          " aria-hidden='true'>" +
          "<polyline points='0,150 70,140 140,158 210,120 280,96 350,110 420,74 490,88 560,66'" +
          " fill='none' stroke='#111111' stroke-width='3'/>" +
          "<polyline points='0,60 70,62 140,58 210,64 280,60 350,56 420,62 490,58 560,60'" +
          " fill='none' stroke='#777777' stroke-width='2' stroke-dasharray='7 5'/></svg>";
-    h += kdT(20, 530, 15, "outside mean", { ink:"#444444" });
+    h += kdT(20, L.keyY, 15, "outside mean", { ink:"#444444" });
   }
 
-  // ── The forecast ──
-  h += kdBox(18, 552, 564, 1, "kd-rl");
-  h += kdT(18, 558, 14, "FORECAST", { ink:"#777777", bold:capB });
-  h += kdBox(18, 580, 52, 52, "kd-pl");
-  h += kdT(78, 580, 31, "Showers", { bold:!!(bold & 0x0040) });
-  h += kdT(78, 614, 33, "14°/3°", { bold:true });
-  h += kdT(78, 652, 17, "wind 23 km/h · 8 min", { ink:"#444444" });
-  for (i = 0; i < 3; i++) {
-    h += kdBox(320 + i * 90, 560, 88, 92, "kd-pl");
-    h += kdT(326 + i * 90, 564, 14, ["21:00","00:00","03:00"][i], { ink:"#777777", bold:capB });
-    h += kdBox(340 + i * 90, 584, 34, 34, "kd-wk we");
-    h += kdT(340 + i * 90, 622, 22, ["6°","4°","3°"][i], { bold:true });
+  // ── The forecast, on the page that has one ──
+  // Not drawn at all on the standalone page: the band is where the readings
+  // above went, and drawing it here would be a preview of a page the reader
+  // will never see. Its row in the list stays, marked — see kdRenderZones.
+  if (L.forecast) {
+    h += kdBox(18, 552, 564, 1, "kd-rl");
+    h += kdT(18, 558, 14, "FORECAST", { ink:"#777777", bold:capB });
+    h += kdBox(18, 580, 52, 52, "kd-pl");
+    h += kdT(78, 580, 31, "Showers", { bold:!!(bold & 0x0040) });
+    h += kdT(78, 614, 33, "14°/3°", { bold:true });
+    h += kdT(78, 652, 17, "wind 23 km/h · 8 min", { ink:"#444444" });
+    for (i = 0; i < 3; i++) {
+      h += kdBox(320 + i * 90, 560, 88, 92, "kd-pl");
+      h += kdT(326 + i * 90, 564, 14, ["21:00","00:00","03:00"][i], { ink:"#777777", bold:capB });
+      h += kdBox(340 + i * 90, 584, 34, 34, "kd-wk we");
+      h += kdT(340 + i * 90, 622, 22, ["6°","4°","3°"][i], { bold:true });
+    }
   }
 
   // ── The week strip ──
@@ -516,16 +581,22 @@ function kdRenderPreview() {
   h += kdT(18, 772, 15, "measured on site", { ink:"#545c68" });
 
   // ── The hit targets ──
-  // A button per region, over the drawing, so the picture is the index.
+  // A button per region, over the drawing, so the picture is the index. Each
+  // zone's rectangle follows the shape the page is in: `sabox` where the
+  // standalone page put it, and no target at all for a region that page does
+  // not have — the forecast's row stays in the list, but there is nothing on
+  // the drawing to point at.
+  var sa = !L.forecast;
   for (i = 0; i < KD_ZONES.length; i++) {
     var d = KD_ZONES[i];
-    if (!d.box) continue;
+    var bx = sa ? d.sabox : d.box;
+    if (!bx) continue;
     var off = d.show > 0 && !(show & d.show);
     h += "<button type='button' class='kd-hit" + (off ? " off" : "") +
          (kdOpen === d.id ? " on" : "") + "' data-click='kindleZoneOpen'" +
          " data-args='[\"" + d.id + "\"]' title='" + kdEsc(d.name) +
-         "' aria-label='" + kdEsc(d.name) + "' style='left:" + d.box[0] + "px;top:" +
-         d.box[1] + "px;width:" + d.box[2] + "px;height:" + d.box[3] + "px'></button>";
+         "' aria-label='" + kdEsc(d.name) + "' style='left:" + bx[0] + "px;top:" +
+         bx[1] + "px;width:" + bx[2] + "px;height:" + bx[3] + "px'></button>";
   }
 
   el.innerHTML = h;
@@ -717,6 +788,10 @@ function kdRenderZones() {
   var bold = kdLoaded ? kdMaskOf(KD_BOLD, "kd-b-") : kdBoldInit;
 
   var html = "", spanOpened = false;
+  // The forecast's row on a page with no forecast band. It stays in the list —
+  // its weight switch is a bit of the mask, and a bit with no checkbox in the
+  // DOM is a bit dropped on the next Save — but it says what it is.
+  var noFc = !kdShape().forecast;
   // SAID WHERE THE ROWS ARE. A slots read that failed leaves every place
   // looking empty, and eleven empty rows are exactly what a device with
   // nothing configured looks like — so without this the form quietly
@@ -756,7 +831,10 @@ function kdRenderZones() {
             "<span class='kd-zchev' data-icon='chevron-right'></span>" +
             "<span class='kd-ztext'><strong>" + kdEsc(d.name) + "</strong>" +
               "<span class='kd-zwhere'>" + kdEsc(d.where) + "</span></span>" +
-            "<span class='kd-zsum'>" + kdZoneSummary(d) + "</span>" +
+            "<span class='kd-zsum'>" +
+              ((noFc && d.id === "fc")
+                ? "<span class='badge dim'>not on this page</span>"
+                : kdZoneSummary(d)) + "</span>" +
           "</button>" +
           "<div class='kd-zsw'>" +
             kdSwitch(d.show, "kd-s-", show, "Shown", d.show === -1 ? "Module" : "Always") +
@@ -824,6 +902,7 @@ function kdSnapshot() {
     press:kdVal("kd-press","0"), dec:kdVal("kd-dec","1"),
     refresh:kdVal("kd-refresh",""), follow:kdVal("kd-follow","1"),
     pin:kdVal("kd-clockpin","1"), res:kdVal("kd-fbink-res","0"),
+    layout:kdVal("kd-layout","0"),
     out:kdVal("kd-outdoor-sensor",""), inn:kdVal("kd-indoor-sensor",""),
     show:kdMaskOf(KD_SHOW,"kd-s-"), bold:kdMaskOf(KD_BOLD,"kd-b-"),
     zones:kdZones, groups:kdGroups
@@ -872,9 +951,12 @@ function kindleTouched(ev) {
   var el = (this && this.nodeType === 1) ? this : (ev && ev.target);
   var id = el ? el.id : "";
   kindleClockChanged();
-  if (id === "kd-press" || id === "kd-dec") kdRenderZones();
+  // kd-layout is in the list because the region rows say which page they are
+  // describing: the forecast's row is marked when the page has no band for it.
+  if (id === "kd-press" || id === "kd-dec" || id === "kd-layout") kdRenderZones();
   kdRenderPreview();
   kdCadenceRender();
+  kdLayoutRender();
   kdDirtyRefresh();
 }
 
@@ -1027,6 +1109,24 @@ function kindleCadence(name) {
   kindleTouched();
 }
 
+// What the chosen shape means, said under the control. `auto` is the one that
+// needs saying: it is not a shape, it is the collector deciding minute by
+// minute, so the preview beside it is the ordinary page and the reader has to
+// know that is a default rather than a promise.
+var KD_LAYOUT_SAYS = {
+  "0": "The collector decides: the standalone page while it is an access point, " +
+       "built without the forecast module, or unable to refresh the forecast for " +
+       "six hours. The preview shows the ordinary page.",
+  "1": "The forecast band is kept even when there is nothing to put in it.",
+  "2": "The forecast band is gone on every page, and the readings above are a " +
+       "sixth larger."
+};
+
+function kdLayoutRender() {
+  var el = document.getElementById("kd-layout-says");
+  if (el) el.textContent = KD_LAYOUT_SAYS[kdVal("kd-layout", "0")] || "";
+}
+
 // ── The custom face field, and the date format ──────────────────────────────
 // Both are hidden rather than disabled when they do not apply: a control that
 // is visible but does nothing is a question the page is asking and then
@@ -1089,6 +1189,7 @@ function kindleRender(d) {
   kdSet("kd-follow",    (d.follow_data === 0) ? 0 : 1);
   kdSet("kd-clockpin",  (d.clock_pin_refresh === 0) ? 0 : 1);
   kdSet("kd-fbink-res", d.fbink_res_w || 0);
+  kdSet("kd-layout",    d.layout_mode || 0);
   kdSet("kd-outdoor-sensor", d.outdoor_sensor || "");
   kdSet("kd-indoor-sensor",  d.indoor_sensor || "");
 
@@ -1121,6 +1222,7 @@ function kindleRender(d) {
   kdRenderZones();
   kindleFaceChangedQuiet();
   kindleClockChanged();
+  kdLayoutRender();
   // What the DEVICE holds decides whether the fields start open; the latch is
   // the reader's choice within this page load, and a reload is not one.
   kdCadOpen = false;
@@ -1202,6 +1304,7 @@ function kdConfigBody() {
   body.set("follow_data",   kdVal("kd-follow", "1"));
   body.set("clock_pin_refresh", kdVal("kd-clockpin", "1"));
   body.set("fbink_res_w",   kdVal("kd-fbink-res", "0"));
+  body.set("layout_mode",   kdVal("kd-layout", "0"));
   body.set("outdoor_sensor", (document.getElementById("kd-outdoor-sensor") || {}).value || "");
   body.set("indoor_sensor",  (document.getElementById("kd-indoor-sensor") || {}).value || "");
   return body;
@@ -1318,6 +1421,10 @@ function kindleDefaults() {
   kdSet("kd-follow", "1");
   kdSet("kd-clockpin", "1");
   kdSet("kd-fbink-res", "0");
+  // Back to "the collector decides", which is what a device that has never
+  // been touched holds — not to a shape, which would be a choice this button
+  // did not make.
+  kdSet("kd-layout", "0");
 
   kdShowInit = 0xFF;   // KSHOW_ALL
   kdBoldInit = 0;

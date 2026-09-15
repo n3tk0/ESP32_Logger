@@ -157,9 +157,19 @@ STATUS=1
 # Look for the collector by itself, once, when the first fetch fails against an
 # address nobody has changed. 1 = on.
 AUTO_FIND=1
+# WHICH SHAPE THE PAGE IS DRAWN IN, and who decides.
+#
+#   auto        the collector says, in PAGE_MODE. It is the end that knows
+#               whether a forecast is coming; this end only knows whether one
+#               arrived, which is the same answer one tick later.
+#   normal      always keep the forecast band, even with nothing in it.
+#   standalone  always the tall-readings page: the forecast band goes and the
+#               top block takes its 124 px. For a panel on a collector that is
+#               its own access point and is never going to have a forecast.
+LAYOUT=auto
 
 conf_keys() {
-    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP CANVAS TOUCH TOUCH_DEV TOUCH_MAXX TOUCH_MAXY TOUCH_SWAP MENU_LBL MENU_ACT MENU_LBL2 SURE_LBL MODE_LBL WAKE_MENU WAKE_HOLD QUIET_FROM QUIET_TO QUIET_EVERY STATUS AUTO_FIND"
+    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP CANVAS TOUCH TOUCH_DEV TOUCH_MAXX TOUCH_MAXY TOUCH_SWAP MENU_LBL MENU_ACT MENU_LBL2 SURE_LBL MODE_LBL WAKE_MENU WAKE_HOLD QUIET_FROM QUIET_TO QUIET_EVERY STATUS AUTO_FIND LAYOUT"
 }
 
 # THE KEYS THAT ARE NOT NUMBERS, in one place because two places drifted.
@@ -174,7 +184,7 @@ conf_keys() {
 conf_is_text() {
     case "$1" in
         HOST|POWER|CANVAS|TOUCH_DEV) return 0 ;;
-        MENU_LBL|MENU_ACT|MENU_LBL2|SURE_LBL|MODE_LBL) return 0 ;;
+        MENU_LBL|MENU_ACT|MENU_LBL2|SURE_LBL|MODE_LBL|LAYOUT) return 0 ;;
     esac
     return 1
 }
@@ -201,6 +211,7 @@ conf_help() {
         TOUCH_MAXX)         echo "Touch panel's full scale across, or 0 if it reports screen pixels" ;;
         TOUCH_MAXY)         echo "Touch panel's full scale down, or 0 if it reports screen pixels" ;;
         TOUCH_SWAP)         echo "1 if the panel reports Y where X is expected" ;;
+        LAYOUT)             echo "auto follows the collector; normal keeps the forecast band; standalone drops it and enlarges the readings" ;;
         MENU_LBL)           echo "The labels on the tap menu, separated by bars" ;;
         MENU_ACT)           echo "What each button does: refresh|wake|settings|hide|quit" ;;
         MENU_LBL2)          echo "The labels on the settings bar, separated by bars" ;;
@@ -252,6 +263,9 @@ payload_key_ok() {
         # it. Exact names, not a shape — each one is read by this script and
         # nothing here wants a family of them.
         CLOCK|CLOCK_ADVW|DATE|TIME_FORMAT) return 0 ;;
+        # Which shape the page is. Only the collector can know: it is the end
+        # that can see whether a forecast is coming.
+        PAGE_MODE) return 0 ;;
         # Written by cache_save(), not by the collector — but the cache is
         # loaded through exactly the same path as a payload, so they are
         # allowed here. They reach one drawn string and nothing else.
@@ -351,6 +365,14 @@ conf_valid() {
             # same reason.
             case "$v" in
                 desktop|blank) return 0 ;;
+                *) return 1 ;;
+            esac ;;
+        LAYOUT)
+            # Three words, and `auto` is the one that does what the collector
+            # says. The other two are for a reader who wants the page to stay
+            # the shape they set it to whatever the network is doing.
+            case "$v" in
+                auto|normal|standalone) return 0 ;;
                 *) return 1 ;;
             esac ;;
         MENU_LBL|MENU_LBL2|SURE_LBL|MODE_LBL)
@@ -1909,7 +1931,11 @@ zones_forget() {
     # has to be able to go away too — draw_forecast_body draws the whole block
     # only when FC_SUMMARY is set.
     unset FC_SUMMARY FC0_LABEL FC1_LABEL FC2_LABEL 2>/dev/null
-    unset CACHED_AT 2>/dev/null
+    # AND THE SHAPE OF THE PAGE, for the same reason: a collector downgraded to
+    # a firmware that does not send it would otherwise leave the panel drawing
+    # the standalone layout for ever, because load_kv only ever assigns.
+    unset PAGE_MODE 2>/dev/null
+    unset CACHED_AT CACHED_ON 2>/dev/null
     return 0
 }
 
@@ -1944,6 +1970,34 @@ HAVE_DATA=0
 # then EXECUTED with `.`, so they are checked here rather than trusted: a
 # payload sending RES_W=../../../../mnt/us/x reaches any .conf-suffixed file on
 # the device. Digits only, and a size the panel could plausibly be.
+# Is this the standalone page — no forecast band, readings a third larger?
+#
+# THE READER'S SETTING WINS, and `auto` is what asks the collector. PAGE_MODE
+# arrives in the payload and is unset by zones_forget() before every load, so a
+# collector too old to send it, or one downgraded to a firmware without it,
+# takes this back to the ordinary page rather than leaving the panel in a shape
+# nothing is sending any more.
+page_standalone() {
+    case "${LAYOUT:-auto}" in
+        normal)     return 1 ;;
+        standalone) return 0 ;;
+    esac
+    [ "${PAGE_MODE:-normal}" = "standalone" ]
+}
+
+#: 1 when the standalone overlay is the layout currently loaded — not merely
+#: when one was asked for. See load_layout().
+LAYOUT_SA=0
+
+# Is the forecast band drawn at all?
+#
+# KEYED ON THE LAYOUT THAT LOADED, not on what was asked for. A panel with no
+# overlay of its own is still holding coordinates with a forecast band in them,
+# and hiding the block on that page is 124 px of white with a week strip under
+# it — the exact hole this whole change exists to close. The two questions
+# cannot be allowed to disagree, so only one of them decides.
+fc_wanted() { [ "${LAYOUT_SA:-0}" != "1" ]; }
+
 load_layout() {
     local conf
     case "${RES_W:-}" in ''|*[!0-9]*) RES_W=600 ;; esac
@@ -1955,7 +2009,41 @@ load_layout() {
     if [ -f "$conf" ]; then
         . "$conf"
     else
-        . "$DASH_DIR/layout/600x800.conf"
+        conf="$DASH_DIR/layout/600x800.conf"
+        . "$conf"
+    fi
+    # ── AND THE STANDALONE PAGE ON TOP OF IT ────────────────────────────────
+    # An OVERLAY, not a second full layout: it carries only the numbers that
+    # move, so the base file stays the one description of this panel and a key
+    # added there cannot be missing here. Sourced after, so its numbers win.
+    #
+    # A panel with no overlay of its own keeps the ORDINARY page, forecast band
+    # and all: falling back to the 600 px overlay would be the wrong page drawn
+    # at the right size, and hiding the band without moving anything would be
+    # the hole this change exists to close. LAYOUT_SA is what the rest of the
+    # script reads, so the two cannot disagree.
+    local was="${LAYOUT_SA:-0}"
+    LAYOUT_SA=0
+    if page_standalone; then
+        conf="${conf%.conf}-standalone.conf"
+        if [ -f "$conf" ]; then
+            . "$conf"
+            LAYOUT_SA=1
+        fi
+    fi
+    # ── A PAGE THAT CHANGED SHAPE HAS TO BE REPAINTED WHOLE ─────────────────
+    # The router goes down, the collector comes up as its own AP, and the next
+    # payload says standalone: every coordinate on the page has just moved, and
+    # the tiers repaint their own rectangles only. Without this the chart stays
+    # where it was, the new one is drawn 124 px lower, and the panel carries
+    # both until the next full tier — up to an hour of a page with two charts
+    # on it. The same going back the other way.
+    #
+    # Skipped on the first load of a run, where `was` and the new value can
+    # only differ because nothing had been drawn yet.
+    if [ -n "${HAVE_DATA:-}" ] && [ "$HAVE_DATA" = "1" ] &&
+       [ "$was" != "$LAYOUT_SA" ]; then
+        : > "$TMP/redraw"
     fi
     # Derived once here rather than per string: both depend only on the layout,
     # and a fork per draw is a fork this script has spent years avoiding.
@@ -2777,9 +2865,13 @@ draw_chart_body() {
 # None of it is a sensor reading, so none of it is a slot: the forecast comes
 # from an API, the week strip from the clock, and the footer is a constant.
 draw_forecast_body() {
-    draw_hline "$RULE3_X" "$RULE3_Y" "$RULE3_W" "GRAYA"
+    # NOT EVEN THE RULE on the standalone page: RULE3_Y is the week heading's
+    # own rule there, and a second hairline one pixel above it is a two-pixel
+    # line nobody asked for. The week strip and footer below are drawn by the
+    # rest of this function, which is why the return is here and not at the top.
+    fc_wanted && draw_hline "$RULE3_X" "$RULE3_Y" "$RULE3_W" "GRAYA"
 
-    if [ -n "$FC_SUMMARY" ]; then
+    if fc_wanted && [ -n "$FC_SUMMARY" ]; then
         draw_text_reg "$LAB_FC_X" "$LAB_FC_Y" "$LAB_SZ" "GRAY7" "$LBL_FORECAST"
 
         # FC_ICON, NOT FC_CODE. There are eleven icon files, one per range of

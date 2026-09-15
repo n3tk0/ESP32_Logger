@@ -332,6 +332,7 @@ void loadDefaultConfig() {
     config.kindle.fbinkResW       = 0;      // 0    → KINDLE_PAGE_W
     config.kindle.outdoorSensor[0] = '\0';  // ""   → KINDLE_OUTDOOR_SENSOR
     config.kindle.indoorSensor[0]  = '\0';  // ""   → KINDLE_INDOOR_SENSOR
+    config.kindle.layoutMode       = KLAYOUT_AUTO;   // decide from the forecast
 }
 
 // ============================================================================

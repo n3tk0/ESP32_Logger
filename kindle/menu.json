@@ -164,6 +164,27 @@
                                     "action": "/bin/sh",
                                     "params": "kual.sh set STATUS 0",
                                     "exitmenu": true
+                                },
+                                {
+                                    "name": "Page shape: follow the collector",
+                                    "priority": 9,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set LAYOUT auto",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Page shape: keep the forecast band",
+                                    "priority": 10,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set LAYOUT normal",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Page shape: standalone, larger readings",
+                                    "priority": 11,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set LAYOUT standalone",
+                                    "exitmenu": true
                                 }
                             ]
                         },

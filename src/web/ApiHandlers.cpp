@@ -817,6 +817,10 @@ static void handleKindleConfigGet(AsyncWebServerRequest* req) {
     doc["follow_data"]      = (k.followData == 0xFF) ? KINDLE_FOLLOW_DATA : (int)k.followData;
     doc["clock_pin_refresh"] = (k.clockPinRefresh == 0xFF) ? KINDLE_CLOCK_PIN_REFRESH : (int)k.clockPinRefresh;
     doc["fbink_res_w"]      = k.fbinkResW;
+    // The stored choice, not the decision it leads to: "auto" is a setting in
+    // its own right and showing it resolved would turn it into a fixed one the
+    // next time somebody pressed Save — the same reason `lang` is sent raw.
+    doc["layout_mode"]      = k.layoutMode;
     doc["outdoor_sensor"]   = (k.outdoorSensor[0] != '\0') ? k.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
     doc["indoor_sensor"]    = (k.indoorSensor[0] != '\0') ? k.indoorSensor : KINDLE_INDOOR_SENSOR;
 
@@ -850,6 +854,7 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     KD_PARAM("follow_data",      followData);
     KD_PARAM("clock_pin_refresh", clockPinRefresh);
     KD_PARAM("fbink_res_w",       fbinkResW);
+    KD_PARAM("layout_mode",       layoutMode);
     #undef KD_PARAM
 
     if (req->hasParam("face_custom", true)) {

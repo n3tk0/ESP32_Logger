@@ -183,6 +183,67 @@ static void test_clock_styles_keep_their_height() {
     CHECK(r.has("padding-top:16px"));   // 84 + 16 = 100
 }
 
+static void test_every_clock_style_has_a_standalone_twin() {
+    // `.sa .clock` in the page's own sheet is two classes to these rules' one,
+    // so without a twin here the sheet would win and a boxed clock on a
+    // standalone page would take the plain size — and its plate, whose height
+    // is set separately, would be the wrong height for the face inside it.
+    //
+    // The twins keep the block at 114 the way the originals keep it at 100:
+    // that height is where the hairline falls and where the indoor row starts.
+    KindleConfig boxed = defaults();  boxed.clockStyle = KCLOCK_BOXED;
+    Css b; kdSkinCss(b, boxed);
+    CHECK(b.has(".sa .clock{height:110px"));      // 110 + 4 margin = 114
+    CHECK(b.has("font-size:96px"));
+
+    KindleConfig dated = defaults();  dated.clockStyle = KCLOCK_DATED;
+    Css d; kdSkinCss(d, dated);
+    CHECK(d.has(".sa .clock{height:86px"));       // 86 + 28 = 114
+    CHECK(d.has(".sa .clock-d{height:28px"));
+
+    KindleConfig ruled = defaults();  ruled.clockStyle = KCLOCK_RULED;
+    Css r; kdSkinCss(r, ruled);
+    CHECK(r.has(".sa .clock{font-size:82px"));
+    CHECK(r.has("padding-top:18px"));             // 96 + 18 = 114
+
+    // And the plain clock has none: the sheet's own `.sa .clock` is the whole
+    // of it, which is why that rule exists there rather than here.
+    KindleConfig plain = defaults();
+    Css p2; kdSkinCss(p2, plain);
+    CHECK(!p2.has(".sa .clock"));
+}
+
+// ── Which shape the page is drawn in ────────────────────────────────────────
+// Every arm, because the interesting one — an access point with nothing
+// upstream — is the arm nobody can reach from a desk without unplugging the
+// router, and it is the whole reason the mode exists.
+static void test_standalone_decision() {
+    const uint32_t H6 = 6 * 3600, NOW = 1000000;
+
+    // AUTO, a working forecast, on a network: the page keeps its band.
+    CHECK(!kdStandaloneDecide(KLAYOUT_AUTO, true, false, NOW - 60, NOW, H6));
+    // AUTO on our own AP: nothing upstream can ever fill it.
+    CHECK(kdStandaloneDecide(KLAYOUT_AUTO, true, true, NOW - 60, NOW, H6));
+    // AUTO in a build with no forecast module at all.
+    CHECK(kdStandaloneDecide(KLAYOUT_AUTO, false, false, 0, NOW, H6));
+    // AUTO with a forecast that has never once been answered.
+    CHECK(kdStandaloneDecide(KLAYOUT_AUTO, true, false, 0, NOW, H6));
+    // AUTO with one nobody has been able to refresh for a quarter of a day:
+    // still formatted, still plausible, and hours wrong.
+    CHECK(kdStandaloneDecide(KLAYOUT_AUTO, true, false, NOW - H6 - 1, NOW, H6));
+    CHECK(!kdStandaloneDecide(KLAYOUT_AUTO, true, false, NOW - H6 + 1, NOW, H6));
+    // A clock that has gone backwards — NTP landing after a reading — is not a
+    // stale forecast. Unsigned arithmetic on `now - fetchedAt` would have made
+    // it one, and a very large one.
+    CHECK(!kdStandaloneDecide(KLAYOUT_AUTO, true, false, NOW + 600, NOW, H6));
+
+    // And the two choices, which answer without asking anything else. The
+    // forced-standalone case is how somebody sees the page before they take
+    // the collector out to the shed.
+    CHECK(!kdStandaloneDecide(KLAYOUT_NORMAL, false, true, 0, NOW, H6));
+    CHECK(kdStandaloneDecide(KLAYOUT_STANDALONE, true, false, NOW, NOW, H6));
+}
+
 // ---------------------------------------------------------------------------
 static void test_time_formats() {
     char buf[16];
@@ -264,6 +325,7 @@ static void test_clamp_rejects_what_a_form_cannot_send() {
     k.tempDecimals = 5;
     k.boldZones = 0xFFFF;
     k.showFlags = 0xFFFF;
+    k.layoutMode = 77;
     memset(k.faceCustom, 'x', sizeof(k.faceCustom));   // deliberately unterminated
 
     kdSkinClamp(k);
@@ -276,6 +338,10 @@ static void test_clamp_rejects_what_a_form_cannot_send() {
     CHECK(k.tempDecimals == 1);
     CHECK(k.boldZones == 0x01FF);        // the nine bits that exist
     CHECK(k.showFlags == KSHOW_ALL);
+    // An unrecognised shape becomes AUTO, which is also what an older
+    // config.bin's reserved byte reads as: an upgrade and a corrupt byte land
+    // on the same safe answer.
+    CHECK(k.layoutMode == KLAYOUT_AUTO);
     CHECK(strlen(k.faceCustom) == sizeof(k.faceCustom) - 1);   // terminated
 
     // A clamped-to-defaults config still renders as the design.
@@ -337,6 +403,7 @@ static void test_clamp_leaves_a_valid_config_alone() {
     k.tempDecimals = 0;
     k.boldZones = KBOLD_CLOCK | KBOLD_WEEK;
     k.showFlags = KSHOW_ALL & ~KSHOW_WEEK;
+    k.layoutMode = KLAYOUT_STANDALONE;
     const KindleConfig before = k;
     kdSkinClamp(k);
     CHECK(memcmp(&before, &k, sizeof(k)) == 0);
@@ -349,6 +416,8 @@ int main() {
     RUN(test_custom_face_is_used_verbatim_or_not_at_all);
     RUN(test_bold_zones_are_independent);
     RUN(test_clock_styles_keep_their_height);
+    RUN(test_every_clock_style_has_a_standalone_twin);
+    RUN(test_standalone_decision);
     RUN(test_time_formats);
     RUN(test_date_formats);
     RUN(test_pressure_units);

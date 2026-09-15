@@ -201,6 +201,19 @@ constexpr uint16_t KSHOW_WEEK      = 0x0040;
 constexpr uint16_t KSHOW_BATTERY   = 0x0080;   // the low-battery badge
 constexpr uint16_t KSHOW_ALL       = 0x00FF;
 
+// ── Which shape the page is drawn in ────────────────────────────────────────
+// A collector running as its own access point — a wifi or ESP-NOW node talking
+// to it directly, nothing upstream — cannot fetch a forecast, and the forecast
+// is an eighth of the page. Left in place it is a band of white on the panel
+// and a question mark in the browser; taken out, that space belongs to the
+// readings, which are the whole reason the thing is on the wall.
+//
+// AUTO IS 0, which is what a config.bin written before this field held: an
+// upgrade decides by itself and changes nothing for anybody who then chooses.
+constexpr uint8_t KLAYOUT_AUTO       = 0;   // standalone when there is no forecast to draw
+constexpr uint8_t KLAYOUT_NORMAL     = 1;   // always keep the forecast band
+constexpr uint8_t KLAYOUT_STANDALONE = 2;   // always the tall-readings page
+
 enum DateFormat   : uint8_t { DATE_OFF=0, DATE_DDMMYYYY=1, DATE_MMDDYYYY=2, DATE_YYYYMMDD=3, DATE_DDMMYYYY_DOT=4 };
 enum TimeFormat   : uint8_t { TIME_HHMMSS=0, TIME_HHMM=1, TIME_12H=2 };
 enum EndFormat    : uint8_t { END_TIME=0, END_DURATION=1, END_OFF=2 };
@@ -367,7 +380,12 @@ struct KindleConfig {
     // is what an older config holds there, and means "as the firmware was
     // built", so an upgrade changes nothing until somebody chooses.
     uint8_t  lang;            // KindleLang
-    uint8_t  reserved[8];
+    // v14.3 — the page's shape, formerly in reserved[]. KLAYOUT_AUTO (0) is
+    // what an older config holds there, and means "decide from whether there
+    // is a forecast to draw", so an upgrade changes nothing until somebody
+    // chooses.
+    uint8_t  layoutMode;      // KLAYOUT_*
+    uint8_t  reserved[7];
 };
 
 struct DeviceConfig {

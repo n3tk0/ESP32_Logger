@@ -217,3 +217,20 @@ STATUS=1
 # what turned up. That is the first-run state rather than a fault, and the
 # reader is standing in front of a device with no keyboard. 1 = on.
 AUTO_FIND=1
+
+# ── The page's shape ─────────────────────────────────────────────────────────
+# A collector running as its own access point — wifi and ESP-NOW nodes talking
+# straight to it, nothing upstream — cannot fetch a forecast, and the forecast
+# band is an eighth of the panel. On the standalone page that band is gone and
+# the readings above take its 124 px: the same eleven places, a sixth larger,
+# with the chart and the week strip exactly where they were.
+#
+#   auto        the collector decides, and says so in every payload. It draws
+#               the standalone page while it is an access point, while it was
+#               built without the forecast module, or while nothing has been
+#               able to refresh the forecast for six hours.
+#   normal      keep the forecast band even when there is nothing to put in it.
+#   standalone  always the tall-readings page.
+#
+# The two fixed choices are also how you see the other page from a desk.
+LAYOUT=auto

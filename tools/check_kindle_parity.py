@@ -46,6 +46,13 @@ SKIN = os.path.join(ROOT, 'src/web/KindleSkin.h')
 PANELS = [('kindle/layout/600x800.conf', 600),
           ('kindle/layout/1072x1448.conf', 1072)]
 
+# The standalone page — the same design with the forecast band taken out and
+# the readings grown into it. It is a second set of type sizes on both sides:
+# `.sa`-prefixed rules in the stylesheet, an overlay .conf beside each panel's
+# layout. Two more files to drift apart, and they drift the same silent way.
+SA_PANELS = [('kindle/layout/600x800-standalone.conf', 600),
+             ('kindle/layout/1072x1448-standalone.conf', 1072)]
+
 
 def kdpx(n, page_w):
     """kdPx() from src/web/KindleDashboard.h, to the pixel."""
@@ -147,6 +154,47 @@ def css_layout_pairs():
     ]
 
 
+def sa_layout_pairs():
+    """The standalone design, and where its half of the panel keeps the copy.
+
+    Only the sizes the standalone page CHANGES. A rule it does not override —
+    the week strip, the footer, the chart's axis — is the base one on both
+    sides already, and listing it here would assert the overlay repeats numbers
+    it deliberately does not carry.
+    """
+    return [
+        ('.sa .lab',        'font-size', ['GROUP_LAB_SZ', 'GRID_LAB_SZ']),
+        ('.sa .v1',         'font-size', ['HERO_SZ']),
+        ('.sa .v2',         'font-size', ['BIG_SZ']),
+        ('.sa .sub',        'font-size', ['SUB_SZ']),
+        ('.sa .gv',         'font-size', ['GRID_VAL_SZ']),
+        ('.sa .grid-3 .gv', 'font-size', ['GRID_VAL_SZ_3']),
+        ('.sa .iv',         'font-size', ['IN_VAL_SZ']),
+        ('.sa .iv-1',       'font-size', ['IN_VAL_SZ_1']),
+        ('.sa .clock',      'font-size', ['CL_SIZE']),
+    ]
+
+
+def kskin_sa_px(name):
+    """The standalone clock size inside one of kdSkinCss()'s style arms.
+
+    `.sa .clock` in the page's own sheet is two classes to those rules' one, so
+    each arm carries a twin that has to win against it — and the twin is the
+    number the overlay has to agree with, not the base one two lines above it.
+    """
+    src = open(SKIN, encoding='utf-8').read()
+    arm = src[src.index('case %s:' % name):]
+    arm = arm[:arm.index('break;')]
+    if '.sa .clock' not in arm:
+        raise SystemExit('parity: %s has no standalone twin — a boxed clock on '
+                         'the standalone page would take the plain size' % name)
+    arm = arm[arm.index('.sa .clock'):]
+    m = re.search(r'font-size:";\s*\n?\s*out \+= kdPx\((\d+)\)', arm)
+    if not m:
+        raise SystemExit('parity: no font-size after .sa .clock in %s' % name)
+    return int(m.group(1))
+
+
 def compare(sheet, confs=None):
     """How many type sizes disagree, for a given sheet and set of layouts.
 
@@ -154,11 +202,12 @@ def compare(sheet, confs=None):
     hand in a bent copy; anything not named is read from disk.
     """
     bad = 0
-    for rel, page_w in PANELS:
+    for (rel, page_w), pairs in ([(p, css_layout_pairs()) for p in PANELS] +
+                                 [(p, sa_layout_pairs()) for p in SA_PANELS]):
         conf = (confs or {}).get(rel)
         if conf is None:
             conf = load_conf(os.path.join(ROOT, rel))
-        for sel, prop, keys in css_layout_pairs():
+        for sel, prop, keys in pairs:
             want = kdpx(css_decl(sheet, sel, prop), page_w)
             for key in keys:
                 if conf.get(key) != want:
@@ -197,9 +246,10 @@ def self_test():
     # Both directions, because the drift can start at either end: a layout
     # number edited without the stylesheet, or a stylesheet edited without the
     # layout. Every pair is exercised, not one hand-picked rule.
-    for sel, prop, keys in css_layout_pairs():
+    for sel, prop, keys in css_layout_pairs() + sa_layout_pairs():
         css = css_decl(sheet, sel, prop)
-        for rel, page_w in PANELS:
+        sa = sel.startswith('.sa ')
+        for rel, page_w in (SA_PANELS if sa else PANELS):
             conf = load_conf(os.path.join(ROOT, rel))
             want = kdpx(css, page_w)
             for key in keys:
@@ -226,7 +276,8 @@ def self_test():
             print('  ' + f)
         return 1
     print('OK: self-test — the checker notices a drift at either end of all %d '
-          'type sizes.' % len(css_layout_pairs()))
+          'type sizes, the standalone page included.'
+          % (len(css_layout_pairs()) + len(sa_layout_pairs())))
     return 0
 
 
@@ -273,6 +324,26 @@ def main():
             problems.append('%s: WK_CELL_W=%s but seven cells across the '
                             'content width is %d'
                             % (rel, conf.get('WK_CELL_W'), cell))
+
+    # ── And the standalone page, which is the same design twice over again ──
+    # Its overlay carries only the sizes it changes, so only those are checked:
+    # anything it leaves alone is the base number on both sides already.
+    for rel, page_w in SA_PANELS:
+        conf = load_conf(os.path.join(ROOT, rel))
+        for sel, prop, keys in sa_layout_pairs():
+            want = kdpx(css_decl(sheet, sel, prop), page_w)
+            for key in keys:
+                if key not in conf:
+                    problems.append('%s: %s is missing (the page sets %s{%s:%dpx})'
+                                    % (rel, key, sel, prop, want))
+                elif conf[key] != want:
+                    problems.append('%s: %s=%d but the page sets %s{%s} to %d'
+                                    % (rel, key, conf[key], sel, prop, want))
+        for case, key in clock_pairs:
+            want = kdpx(kskin_sa_px(case), page_w)
+            if conf.get(key) != want:
+                problems.append('%s: %s=%s but kdSkinCss() sets the standalone '
+                                '%s to %d' % (rel, key, conf.get(key), case, want))
 
     # The chart image's own size, which the layout has to reserve exactly:
     # short and the image is clipped, long and the axis labels land in space.
@@ -396,8 +467,9 @@ def main():
               'is a\npanel that quietly stops matching the browser page.')
         return 1
 
-    print('OK: %d type sizes and %d clock styles agree across %d panels.'
-          % (len(pairs), len(clock_pairs), len(PANELS)))
+    print('OK: %d type sizes and %d clock styles agree across %d panels, '
+          'and %d more on the standalone page.'
+          % (len(pairs), len(clock_pairs), len(PANELS), len(sa_layout_pairs())))
     return 0
 
 

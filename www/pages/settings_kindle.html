@@ -273,6 +273,41 @@
                 These two feed the <strong>chart</strong> and the 24-hour history.
                 Which reading stands in which place is chosen zone by zone above.
               </p>
+
+              <div class="field" style="margin-top:14px">
+                <label class="field-label" for="kd-layout">The page's shape</label>
+                <select id="kd-layout" class="input" data-change="kindleTouched">
+                  <option value="0">Follow the collector</option>
+                  <option value="1">Always keep the forecast band</option>
+                  <option value="2">Standalone — no forecast, larger readings</option>
+                </select>
+              </div>
+              <p class="hint" id="kd-layout-says"></p>
+              <details class="kd-why">
+                <summary>What standalone means</summary>
+                <p class="hint">
+                  A collector running as its own <strong>access point</strong> —
+                  wifi and ESP-NOW nodes talking straight to it, nothing
+                  upstream — cannot fetch a forecast, and the forecast band is an
+                  eighth of the page. On the standalone page that band is gone and
+                  the readings take it: the same eleven places, a sixth larger,
+                  with the chart and the week strip where they were.
+                </p>
+                <p class="hint">
+                  <strong>Follow the collector</strong> switches by itself: it
+                  draws the standalone page while this device is an access point,
+                  while it was built without the forecast module, or while nothing
+                  has been able to refresh the forecast for six hours. The other
+                  two settings fix the shape whatever the network is doing — which
+                  is how you see one of them from a desk.
+                </p>
+                <p class="hint">
+                  The readings grow by a sixth and not by a third because the
+                  freed band is <em>vertical</em>: every number is limited by the
+                  column it sits in, and “1008 hPa” three across already fills
+                  87 px of a 90 px cell.
+                </p>
+              </details>
               <p class="hint" id="kd-pagew"></p>
             </div>
           </div>

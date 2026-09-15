@@ -1319,6 +1319,77 @@ A failed fetch does not invalidate the cache. A three-hour-old forecast is
 still broadly right, and blanking the panel because one HTTPS request timed
 out trades useful for nothing. The age is printed, so you can judge.
 
+### The page a collector with no forecast draws
+
+**A collector running as its own access point cannot fetch one at all.** Wifi
+and ESP-NOW nodes talk straight to it, nothing is upstream, and the forecast
+band is 124 px of the 800 px panel — an eighth of the page that can never be
+filled. Until this it stayed there: white space with a rule over it on the
+panel, and a circled question mark in the browser, because the section was
+settled at build time and not at render time.
+
+The standalone page takes the band out and gives it to the readings.
+
+|  | ordinary | standalone |
+|---|---|---|
+| top block | 20…282 | **20…406** |
+| chart | 308…528 | 432…652, the same size |
+| forecast | 552…676 | — |
+| week strip, footer | 676…800 | unchanged |
+
+**The type grows by a sixth, not a third.** The freed band is vertical and the
+columns are the width they always were, so every number is limited by the cell
+it sits in rather than by the room above it: "1008 hPa" three across is 87 px
+of a 90 px cell at 31, "21.4°" is 110 of the indoor row's first 111 at 56, and
+"17:40" is 260 of the clock's 264 at 110. A size a third larger overruns on the
+day the pressure goes to four digits — which is every day — and neither
+renderer wraps: the browser clips and FBInk draws straight over its neighbour.
+What is left over becomes air around the numbers, which a panel read from
+across a room wants anyway. `tests/web/drive_kindle_page.py` measures the
+widest string each reading can produce against its column, so the next person
+to enlarge one finds out here rather than on the wall.
+
+**Who decides.** The collector: it is the only end that can see whether a
+forecast is coming, and it says so in every payload as `PAGE_MODE`. It draws
+the standalone page while `apModeTriggered` is set, while the build has no
+forecast module, or while nothing has refreshed the forecast for six hours —
+the last because a collector that keeps wifi but loses its upstream serves a
+forecast that is still formatted, still plausible, and hours stale.
+`config.kindle.layoutMode` (the settings page's **The page's shape**) fixes it
+either way, and `LAYOUT=` in `dash.conf` — or KUAL's **Settings → Screen →
+Page shape** — lets the reader overrule the collector.
+
+**How the panel carries two layouts.** `kindle/layout/600x800-standalone.conf`
+is an OVERLAY, sourced on top of the panel's own layout and carrying only the
+numbers that move, so the base file stays the one description of the panel. A
+panel with no overlay of its own keeps the ordinary page, band and all —
+`fc_wanted()` reads the layout that actually LOADED rather than the one that
+was asked for, because hiding the block on coordinates that still have a band
+for it is the 124 px hole this exists to close. A page that changes shape while
+running asks for a full repaint: the tiers repaint their own rectangles only,
+so without it the old chart would sit beside the new one for up to an hour.
+
+`RULE3_Y` is not only a rule. `zones_derive()` cuts the refresh rectangles at
+it, so on the standalone page it is set to the week heading's own rule: the
+chart's rectangle reaches it, and the one below is exactly the week strip and
+the footer — which is what they were under the forecast all along. Nothing
+draws a line there, because a second hairline one pixel above the week's would
+be a two-pixel line nobody asked for.
+
+**The browser page draws the same design.** `body.sa` and a block of `.sa`
+rules, emitted unconditionally so the stylesheet stays a statement of fact for
+`tools/kindle_preview` and `tools/check_kindle_parity.py` to replay — and each
+of the three clock styles carries a standalone twin in `kdSkinCss()`, because
+`.sa .clock` in the sheet is two classes to those rules' one and would
+otherwise win. The parity checker holds the overlay and the `.sa` rules
+together exactly as it holds the base layout and the design together.
+
+**And the footer says where you are.** "Measured on site" is the right thing to
+say about numbers that came over a network from a windowsill; on an access
+point with nothing upstream the useful sentence is which network this is and
+whether anything is still reporting into it — `AP ESP32-Logger · 3 nodes ·
+2 min ago`, built from `NodeTable`'s own record of what it has heard.
+
 ### On OpenWeatherMap's high/low
 
 On the free current-weather endpoint, `temp_min`/`temp_max` are the spread

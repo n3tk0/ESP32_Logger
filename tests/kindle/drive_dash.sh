@@ -618,6 +618,108 @@ for res in 600x800 1072x1448; do
 done
 RES_W=600; RES_H=800; load_layout
 
+# ── 2a-bis. THE STANDALONE PAGE ─────────────────────────────────────────────
+#
+# A collector that is its own access point cannot fetch a forecast, and the
+# forecast band is an eighth of the panel. On that page it goes, and the
+# readings take its 124 px — a different set of coordinates, sourced ON TOP OF
+# the panel's own so that the base file stays the one description of it.
+( PAGE_MODE=standalone LAYOUT=auto RES_W=600 RES_H=800
+  load_layout
+  [ "$LAYOUT_SA" = "1" ] || exit 1
+  # The numbers that move
+  [ "$HERO_SZ" = "104" ] || { echo "hero [$HERO_SZ]" >&2; exit 2; }
+  [ "$RULE2_Y" = "406" ] || exit 3
+  [ "$GR_Y" = "432" ] || exit 4
+  # ...and one that does not, proving the base file was loaded underneath
+  # rather than replaced: nothing below the chart moves on this page.
+  [ "$WK_Y" = "700" ] || exit 5
+  [ "$FOOT_Y" = "772" ] || exit 6
+  [ "$GR_H" = "220" ] || exit 7        # the chart keeps its exact size
+  exit 0 )
+check "$?" "the standalone overlay moves the top block and leaves the week strip alone"
+
+# The same page has to TILE, like the ordinary one: a rectangle nothing
+# repaints is a strip of the panel that keeps whatever was on it.
+for res in 600x800 1072x1448; do
+  ( PAGE_MODE=standalone LAYOUT=auto RES_W=${res%x*} RES_H=${res#*x}
+    load_layout
+    [ "$LAYOUT_SA" = "1" ] || exit 1
+    [ "$Z_SENS_H" -eq "$Z_CHART_Y" ] || exit 2
+    [ $((Z_CHART_Y + Z_CHART_H)) -eq "$Z_FC_Y" ] || exit 3
+    [ $((Z_FC_Y + Z_FC_H)) -eq "$RES_H" ] || exit 4
+    # The chart's image has to fit between its own rule and the week's.
+    [ $((GR_Y + GR_H)) -lt "$RULE3_Y" ] || exit 5
+    [ "$KEY_Y" -ge $((GR_Y + GR_H)) ] || exit 6
+    [ "$KEY_Y" -lt "$RULE3_Y" ] || exit 7
+    # The top block: two grid rows have to finish above the chart's rule, and
+    # the clock's rectangle above the indoor rule — the two ways a bigger type
+    # size runs into the block under it.
+    [ $((GRID_Y + 2 * GRID_ROW_H)) -lt "$RULE2_Y" ] || exit 8
+    [ $((Z_CLOCK_Y + Z_CLOCK_H)) -le "$IN_RULE_Y" ] || exit 9
+    [ $((IN_VAL_Y + IN_VAL_SZ_1)) -lt "$RULE2_Y" ] || exit 10
+    exit 0 )
+  check "$?" "the $res standalone layout tiles the panel and nothing overruns"
+done
+RES_W=600; RES_H=800; load_layout
+
+# WHO DECIDES, and in which order. The collector is the only end that knows
+# whether a forecast is coming; the reader's own setting is what overrules it.
+( LAYOUT=auto   PAGE_MODE=standalone page_standalone || exit 1
+  LAYOUT=auto   PAGE_MODE=normal     page_standalone && exit 2
+  # A collector too old to send the key at all: the ordinary page.
+  ( unset PAGE_MODE; LAYOUT=auto page_standalone ) && exit 3
+  LAYOUT=normal     PAGE_MODE=standalone page_standalone && exit 4
+  LAYOUT=standalone PAGE_MODE=normal     page_standalone || exit 5
+  exit 0 )
+check "$?" "the reader's LAYOUT setting overrules the collector, and auto asks it"
+
+# AND A PANEL WITH NO OVERLAY OF ITS OWN KEEPS THE ORDINARY PAGE. Hiding the
+# forecast on coordinates that still have a band for it is the 124 px hole this
+# whole change exists to close, so the two questions are one: fc_wanted reads
+# the layout that LOADED, not the one that was asked for.
+#
+# A hand-written layout for a panel this package does not ship is the case:
+# the base file is found, the overlay beside it is not.
+( mkdir -p "$WORK/lay/layout"
+  cp "$KDIR/layout/600x800.conf" "$WORK/lay/layout/640x900.conf"
+  DASH_DIR="$WORK/lay"
+  PAGE_MODE=standalone LAYOUT=auto RES_W=640 RES_H=900
+  load_layout
+  [ "$LAYOUT_SA" = "0" ] || exit 1
+  fc_wanted || exit 2
+  page_standalone || exit 3        # it was asked for; it just could not be had
+  exit 0 )
+check "$?" "a panel with no standalone overlay draws the ordinary page, band and all"
+
+# An unknown panel falls back to the 600 px page — and to ITS overlay, so the
+# two halves of that page are never from different files.
+( PAGE_MODE=standalone LAYOUT=auto RES_W=999 RES_H=1333
+  load_layout
+  [ "$LAYOUT_SA" = "1" ] || exit 1
+  [ "$RULE2_Y" = "406" ] || exit 2
+  exit 0 )
+check "$?" "and one with no layout at all falls back to the 600 px page and its overlay"
+RES_W=600; RES_H=800; load_layout
+
+# A PAGE THAT CHANGED SHAPE IS REPAINTED WHOLE. The router goes down, the
+# collector comes up as its own AP, and every coordinate moves — but the tiers
+# repaint their own rectangles only, so the old chart would sit on the panel
+# beside the new one until the next full tier, up to an hour later.
+( rm -f "$DASH_TMP/redraw"
+  HAVE_DATA=1 LAYOUT=auto RES_W=600 RES_H=800
+  PAGE_MODE=normal;     load_layout
+  [ -f "$DASH_TMP/redraw" ] && exit 1      # no change, no repaint
+  PAGE_MODE=standalone; load_layout
+  [ -f "$DASH_TMP/redraw" ] || exit 2
+  rm -f "$DASH_TMP/redraw"
+  PAGE_MODE=normal;     load_layout
+  [ -f "$DASH_TMP/redraw" ] || exit 3      # and the same coming back
+  rm -f "$DASH_TMP/redraw"
+  exit 0 )
+check "$?" "a page that changes shape asks for a full repaint, not a tier"
+RES_W=600; RES_H=800; LAYOUT=auto; unset PAGE_MODE; load_layout
+
 # ── 2b. The clock rectangle is cleared and flashed, so nothing else may live
 # in it ───────────────────────────────────────────────────────────────────────
 # The rule above the indoor row sat six pixels inside it: drawn by
@@ -1257,6 +1359,17 @@ check "$?" "and every key says what it means, so a save keeps dash.conf readable
   [ -z "$missing" ] || { echo "no usable default for:$missing" >&2; exit 1; }
   exit 0 )
 check "$?" "every key has a built-in default its own validator accepts"
+
+# LAYOUT is three words and nothing else. A typo in dash.conf must not become a
+# page nobody asked for, and `auto` has to survive being written back out by
+# conf_write — it is the value that lets the collector decide.
+( conf_valid LAYOUT auto || exit 1
+  conf_valid LAYOUT normal || exit 2
+  conf_valid LAYOUT standalone || exit 3
+  conf_valid LAYOUT tall && exit 4
+  conf_valid LAYOUT "" && exit 5
+  exit 0 )
+check "$?" "LAYOUT takes auto, normal or standalone, and nothing else"
 
 # A panel that reports its own scale rather than the screen's.
 ( RES_W=600 RES_H=800
@@ -2195,6 +2308,29 @@ check "$?" "the week strip switched off takes the strip and leaves the footer"
   draw_forecast_body
   grep -q -- "width=$WK_CELL_W,height=$WK_CELL_H" "$FBINK_LOG" || exit 1 )
 check "$?" "and switched on it is still there"
+reset_log
+
+# ── The forecast band on the standalone page ────────────────────────────────
+#
+# Not the block, and NOT ITS RULE EITHER: RULE3_Y is the week heading's own
+# rule on that page, and a second hairline one pixel above it is a two-pixel
+# line nobody asked for. Everything else this function draws — the week strip,
+# the footer — is where it has always been, which is the point of giving the
+# whole 124 px to the top of the page instead of spreading it.
+( reset_log
+  PAGE_MODE=standalone LAYOUT=auto RES_W=600 RES_H=800
+  load_layout
+  FC_SUMMARY="Showers" FC_ICON=1 FC_HIGH=14 FC_LOW=3 draw_forecast_body
+  grep -q "Showers" "$FBINK_LOG" && exit 1
+  # ONE hairline at that y, not two. RULE3_Y and the week heading's own rule
+  # are the same row on this page and the same 564x1 rectangle, so a second
+  # draw is invisible in a diff and two pixels thick on the panel.
+  [ "$(grep -c -- "-k	top=$RULE3_Y" "$FBINK_LOG")" = "1" ] || exit 2
+  grep -q -- "width=$WK_CELL_W,height=$WK_CELL_H" "$FBINK_LOG" || exit 3
+  grep -q -- "-k	top=$FOOT_RULE_Y" "$FBINK_LOG" || exit 4
+  exit 0 )
+check "$?" "the standalone page draws no forecast and no rule where it was"
+RES_W=600; RES_H=800; LAYOUT=auto; unset PAGE_MODE; load_layout
 reset_log
 
 # ── 3d3b. The chart's numbers, its plates, and everything the page centres ──

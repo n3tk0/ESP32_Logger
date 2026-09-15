@@ -578,6 +578,79 @@ with sync_playwright() as p:
           "a half-written save says what was written (%r)" % said.strip()[:90])
     pg.unroute("**/api/kindle/slots*")
 
+    # ── The standalone page ─────────────────────────────────────────────────
+    #
+    # A collector that is its own access point cannot fetch a forecast, so the
+    # band goes and the readings take it. The page offers the shape as a
+    # setting, and the preview has to draw the one that was chosen — a preview
+    # showing the other page is worse than none, because it is believed.
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_timeout(1400)
+    check(pg.input_value("#kd-layout") == "0",
+          "the page's shape starts at what the device holds (follow the collector)")
+    fc_before = pg.locator("#kd-panel .kd-hit[data-args='[\"fc\"]']").count()
+    pg.select_option("#kd-layout", "2")
+    pg.wait_for_timeout(500)
+
+    # The forecast is not on this page at all: no block, and nothing to tap.
+    check(fc_before == 1 and
+          pg.locator("#kd-panel .kd-hit[data-args='[\"fc\"]']").count() == 0,
+          "choosing standalone takes the forecast off the preview")
+    check(pg.locator("#kd-zrow-fc .badge", has_text="not on this page").count() == 1,
+          "and says so on its row, which stays for its weight switch")
+
+    # ...and the chart moved down into what the band used to be.
+    chart = pg.evaluate(
+        "(function(){var p=document.querySelector('#kd-panel').getBoundingClientRect();"
+        "var c=document.querySelector('#kd-panel .kd-hit[data-args=\\'[\"chart\"]\\']')"
+        ".getBoundingClientRect();"
+        "return Math.round((c.top-p.top)/(p.height/800));})()")
+    check(abs(chart - 406) <= 3,
+          "the chart sits where the standalone layout puts it (%d, want 406)" % chart)
+
+    # ── AND EVERY READING STILL FITS ITS COLUMN ─────────────────────────────
+    # The freed band is VERTICAL. The columns are the width they always were,
+    # so the type could only grow until the widest string each reading can
+    # produce filled its cell — which is why the standalone sizes are a sixth
+    # larger and not a third. Measured with the page's own estimator, against
+    # the column widths the layout files fix.
+    fits = pg.evaluate(
+        "(function(){var L=kdShape(),bad=[];"
+        "if (kdTw('1008',L.gridVal3)+3+kdTw('hPa',Math.round(L.gridVal3*0.42))>90)"
+        " bad.push('grid-3');"
+        "if (kdTw('1008',L.gridVal)+3+kdTw('hPa',Math.round(L.gridVal*0.42))>135)"
+        " bad.push('grid-2');"
+        "if (kdTw('21.4',L.inVal1)+kdTw('\\u00b0',Math.round(L.inVal1*0.34))>111)"
+        " bad.push('indoor-1');"
+        "if (kdTw('17:40',L.clockSz)>264) bad.push('clock');"
+        "if (18+kdTw('8.4',L.heroSz)+kdTw('\\u00b0',Math.round(L.heroSz*0.34))+8+"
+        "kdTw('/',L.bigSz)+6+kdTw('71',L.bigSz)+"
+        "kdTw('%',Math.round(L.bigSz*0.42))>288) bad.push('headline');"
+        "return bad;})()")
+    check(not fits, "every reading still fits its column (%s)" % (fits or "all fit"))
+
+    # The targets are a different set of rectangles on this page, and they have
+    # to be disjoint here too — the reason the first set was not.
+    over2 = pg.evaluate(
+        "(function(){var b=[].map.call("
+        "document.querySelectorAll('#kd-panel .kd-hit'),function(e){"
+        "var r=e.getBoundingClientRect();"
+        "return [e.getAttribute('data-args'),r];});var out=[];"
+        "for(var i=0;i<b.length;i++)for(var j=i+1;j<b.length;j++){"
+        "var p=b[i][1],q=b[j][1];"
+        "if(p.left<q.right&&q.left<p.right&&p.top<q.bottom&&q.top<p.bottom)"
+        "out.push(b[i][0]+'/'+b[j][0]);}return out;})()")
+    check(not over2, "and no two standalone targets overlap (%s)" % (over2 or "none"))
+
+    # It is a setting like any other: unsaved until Save, then read back.
+    check(pg.is_visible("#kd-savebar"), "choosing a shape is an unsaved change")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got["layout_mode"] == 2, "and it reaches the device (%r)" % got["layout_mode"])
+    check(pg.input_value("#kd-layout") == "2", "and comes back on the re-read")
+
     shot = os.environ.get("SCREENSHOT")
     if shot:
         pg.screenshot(path=shot, full_page=True)

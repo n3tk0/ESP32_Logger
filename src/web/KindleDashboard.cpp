@@ -26,6 +26,95 @@
 #  include "../modules/ForecastModule.h"
 #endif
 
+// Every forecast key, empty. Two callers — a build without the module and a
+// page drawn in standalone — and they have to send the same set: a key that
+// one of them omits is a key the panel keeps from the LAST payload, which is
+// how a forecast that is no longer being drawn goes on being remembered.
+static void kdForecastKeysEmpty(AsyncResponseStream* s) {
+    s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_ICON=-1\nFC_HIGH=\nFC_LOW=\n"
+             "FC_WIND=\nFC_AGE=\"\"\n");
+    for (int i = 0; i < 3; i++)
+        s->printf("FC%d_LABEL=\"\"\nFC%d_LABELW=0\nFC%d_CODE=-1\nFC%d_ICON=-1\n"
+                  "FC%d_TEMP=\nFC%d_TEMPW=0\nFC%d_LOW=\n", i, i, i, i, i, i, i);
+}
+
+// ---------------------------------------------------------------------------
+// Standalone: the page a collector draws when it is the whole network
+// ---------------------------------------------------------------------------
+// A collector running as its own access point — wifi and ESP-NOW nodes talking
+// straight to it, nothing upstream — cannot fetch a forecast. The forecast is
+// an eighth of the page, and left in place it is a band of white on the panel
+// and a circled question mark in the browser: the one block that is furniture
+// rather than information, sitting where the readings could be.
+//
+// So the band goes and the readings take it: the same eleven places, set large
+// enough to read from across a room. See kindle/layout/600x800-standalone.conf
+// for where every number lands, and the `.sa` rules in the stylesheet below
+// for the browser's half of the same design.
+//
+// WHAT COUNTS AS "NO FORECAST TO DRAW" is deliberately broader than "no
+// internet": a build without the module, an AP with nobody upstream, and a
+// forecast nobody has been able to refresh for a quarter of a day are the same
+// thing to a reader standing in front of the panel. The last one is a real
+// case rather than a hypothetical — a collector that keeps wifi but loses its
+// upstream serves a forecast that is still formatted, still plausible, and
+// hours stale.
+static constexpr uint32_t KD_FORECAST_STALE_S = 6 * 3600;
+
+static bool kdStandalone() {
+    #ifdef MODULE_FORECAST_ENABLED
+    const auto& fc = forecastModule.snapshot();
+    const uint32_t fetchedAt = fc.fetchedAt;
+    const bool haveModule = true;
+    #else
+    const uint32_t fetchedAt = 0;
+    const bool haveModule = false;
+    #endif
+    // The rule itself is in KindleSkin.h, where tests/host/test_kindle_skin.cpp
+    // can reach every arm of it without a radio or a network.
+    return kdStandaloneDecide(config.kindle.layoutMode, haveModule,
+                              apModeTriggered, fetchedAt,
+                              (uint32_t)time(nullptr), KD_FORECAST_STALE_S);
+}
+
+// The left half of the footer. "Measured on site" is the right thing to say
+// about a page whose numbers came over a network from a device on a windowsill;
+// on an AP with nothing upstream, the useful sentence is which network this is
+// and whether anything is still reporting into it — the two facts a reader has
+// no other way to get without a cable or a browser.
+static void kdFooterNote(char* buf, size_t n) {
+    if (!kdStandalone() || !apModeTriggered) {
+        snprintf(buf, n, "%s", KD_T("Measured on site", "Измерено на място"));
+        return;
+    }
+    const char* ssid = (strlen(config.network.apSSID) > 0)
+                     ? config.network.apSSID : config.deviceName;
+    int at = snprintf(buf, n, "AP %s", ssid);
+    if (at < 0 || (size_t)at >= n) return;
+
+    #ifdef FEATURE_ESPNOW_INGEST
+    // The nodes this collector is actually hearing from, and how long ago the
+    // most recent of them spoke. Not the station count: a phone on the AP and
+    // the Kindle itself are stations, and neither is a reading.
+    EspNowNode nodes[ESPNOW_MAX_NODES];
+    const int have = espnowCopyNodes(nodes, ESPNOW_MAX_NODES);
+    if (have > 0) {
+        at += snprintf(buf + at, n - at, KD_T(" · %d node%s", " · %d възел%s"),
+                       have, (have == 1) ? "" : KD_T("s", "а"));
+        if (at < 0 || (size_t)at >= n) return;
+        uint32_t newest = 0;
+        for (int i = 0; i < have; i++)
+            if (nodes[i].lastSeenMs > newest) newest = nodes[i].lastSeenMs;
+        if (newest) {
+            const uint32_t mins = (millis() - newest) / 60000u;
+            if (mins < 1) snprintf(buf + at, n - at, KD_T(" · just now", " · току-що"));
+            else          snprintf(buf + at, n - at, KD_T(" · %lu min ago", " · преди %lu мин"),
+                                   (unsigned long)mins);
+        }
+    }
+    #endif
+}
+
 static constexpr int PAGE_W  = KINDLE_PAGE_W;
 static constexpr int CHART_W = kdPx(560);
 static constexpr int CHART_H = kdPx(220);
@@ -1378,61 +1467,66 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     }
 
     // ── Forecast ──
+    // STANDALONE SENDS THE EMPTY SET, exactly as a build without the module
+    // does. The mode means "this page has no forecast band", so a reader on an
+    // older update_dash.sh — which knows nothing about PAGE_MODE — still draws
+    // no forecast rather than a stale one under a layout that has no room for
+    // it. One rule, two vintages of reader.
     #ifdef MODULE_FORECAST_ENABLED
-    const auto& fc = forecastModule.snapshot();
-    kdShellVar(s, "FC_SUMMARY", fc.summary);
-    s->printf("FC_CODE=%d\n", fc.code);
-    // FC_ICON, NOT FC_CODE, IS WHAT THE PANEL DRAWS WITH. It has eleven BMP
-    // files, one per range, and no way to reduce a code itself — so it looked
-    // for fc_2_52.bmp on a partly-cloudy afternoon, did not find it, and drew
-    // the circled question mark that means "no forecast at all". FC_CODE stays
-    // for anything that wants the raw number.
-    s->printf("FC_ICON=%d\n", weatherIconCode(fc.code));
-    s->printf("FC_HIGH=%d\n", (int)roundf(fc.highC));
-    s->printf("FC_LOW=%d\n", (int)roundf(fc.lowC));
-    s->printf("FC_WIND=%d\n", (int)roundf(fc.windKph));
+    if (!kdStandalone()) {
+        const auto& fc = forecastModule.snapshot();
+        kdShellVar(s, "FC_SUMMARY", fc.summary);
+        s->printf("FC_CODE=%d\n", fc.code);
+        // FC_ICON, NOT FC_CODE, IS WHAT THE PANEL DRAWS WITH. It has eleven BMP
+        // files, one per range, and no way to reduce a code itself — so it looked
+        // for fc_2_52.bmp on a partly-cloudy afternoon, did not find it, and drew
+        // the circled question mark that means "no forecast at all". FC_CODE stays
+        // for anything that wants the raw number.
+        s->printf("FC_ICON=%d\n", weatherIconCode(fc.code));
+        s->printf("FC_HIGH=%d\n", (int)roundf(fc.highC));
+        s->printf("FC_LOW=%d\n", (int)roundf(fc.lowC));
+        s->printf("FC_WIND=%d\n", (int)roundf(fc.windKph));
 
-    // How old the forecast is, formatted here rather than on the panel: the
-    // page draws "· 8 мин" beside the wind and the panel drew nothing, so the
-    // one line that says whether to believe the forecast was on one of the two
-    // screens. Formatted rather than sent as a number because the wording is
-    // the collector's language decision, like every other string it sends.
-    {
-        char age[16];
-        forecastAgeText(age, sizeof(age), fc.fetchedAt, (uint32_t)time(nullptr));
-        kdShellVar(s, "FC_AGE", age);
-    }
-    for (int i = 0; i < 3; i++) {
-        // forecastPeriodLabel(), NOT .label — the same call the HTML renderer
-        // makes. The stored string was written when the provider was last
-        // polled, so on this path it was still the language that was set then:
-        // switch to Bulgarian and the browser page said ПН/ВТ/СР while the
-        // panel on the wall said MON/TUE/WED for up to six hours. Which is the
-        // exact defect Period::wday was added to remove.
-        char oll[24];
-        kdUpperUtf8(oll, sizeof(oll), forecastPeriodLabel(fc.outlook[i]));
-        kdShellVarN(s, "FC%d_LABEL", i, oll);
-        s->printf("FC%d_LABELW=%u\n", i, kdAdvanceMille(oll));
-        s->printf("FC%d_CODE=%d\n", i, fc.outlook[i].code);
-        s->printf("FC%d_ICON=%d\n", i, weatherIconCode(fc.outlook[i].code));
+        // How old the forecast is, formatted here rather than on the panel: the
+        // page draws "· 8 мин" beside the wind and the panel drew nothing, so the
+        // one line that says whether to believe the forecast was on one of the two
+        // screens. Formatted rather than sent as a number because the wording is
+        // the collector's language decision, like every other string it sends.
+        {
+            char age[16];
+            forecastAgeText(age, sizeof(age), fc.fetchedAt, (uint32_t)time(nullptr));
+            kdShellVar(s, "FC_AGE", age);
+        }
+        for (int i = 0; i < 3; i++) {
+            // forecastPeriodLabel(), NOT .label — the same call the HTML renderer
+            // makes. The stored string was written when the provider was last
+            // polled, so on this path it was still the language that was set then:
+            // switch to Bulgarian and the browser page said ПН/ВТ/СР while the
+            // panel on the wall said MON/TUE/WED for up to six hours. Which is the
+            // exact defect Period::wday was added to remove.
+            char oll[24];
+            kdUpperUtf8(oll, sizeof(oll), forecastPeriodLabel(fc.outlook[i]));
+            kdShellVarN(s, "FC%d_LABEL", i, oll);
+            s->printf("FC%d_LABELW=%u\n", i, kdAdvanceMille(oll));
+            s->printf("FC%d_CODE=%d\n", i, fc.outlook[i].code);
+            s->printf("FC%d_ICON=%d\n", i, weatherIconCode(fc.outlook[i].code));
 
-        // The temperature as it is DRAWN, degree included, because .per is
-        // centred and what has to be measured is the whole string.
-        char olt[12];
-        snprintf(olt, sizeof(olt), "%d°", (int)roundf(fc.outlook[i].tempC));
-        s->printf("FC%d_TEMP=%d\n", i, (int)roundf(fc.outlook[i].tempC));
-        s->printf("FC%d_TEMPW=%u\n", i, kdAdvanceMille(olt));
-        if (!isnan(fc.outlook[i].lowC))
-            s->printf("FC%d_LOW=%d\n", i, (int)roundf(fc.outlook[i].lowC));
-        else
-            s->printf("FC%d_LOW=\n", i);
+            // The temperature as it is DRAWN, degree included, because .per is
+            // centred and what has to be measured is the whole string.
+            char olt[12];
+            snprintf(olt, sizeof(olt), "%d°", (int)roundf(fc.outlook[i].tempC));
+            s->printf("FC%d_TEMP=%d\n", i, (int)roundf(fc.outlook[i].tempC));
+            s->printf("FC%d_TEMPW=%u\n", i, kdAdvanceMille(olt));
+            if (!isnan(fc.outlook[i].lowC))
+                s->printf("FC%d_LOW=%d\n", i, (int)roundf(fc.outlook[i].lowC));
+            else
+                s->printf("FC%d_LOW=\n", i);
+        }
+    } else {
+        kdForecastKeysEmpty(s);
     }
     #else
-    s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_ICON=-1\nFC_HIGH=\nFC_LOW=\n"
-             "FC_WIND=\nFC_AGE=\"\"\n");
-    for (int i = 0; i < 3; i++)
-        s->printf("FC%d_LABEL=\"\"\nFC%d_LABELW=0\nFC%d_CODE=-1\nFC%d_ICON=-1\n"
-                  "FC%d_TEMP=\nFC%d_TEMPW=0\nFC%d_LOW=\n", i, i, i, i, i, i, i);
+    kdForecastKeysEmpty(s);
     #endif
 
     // ── UI labels ──
@@ -1440,7 +1534,11 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     kdShellVar(s, "LBL_INSIDE", KD_T("INSIDE", "ВЪТРЕ"));
     kdShellVar(s, "LBL_LAST24", KD_T("LAST 24 HOURS", "ПОСЛЕДНИТЕ 24 ЧАСА"));
     kdShellVar(s, "LBL_FORECAST", KD_T("FORECAST", "ПРОГНОЗА"));
-    kdShellVar(s, "LBL_MEASURED", KD_T("Measured on site", "Измерено на място"));
+    {
+        char note[96];
+        kdFooterNote(note, sizeof(note));
+        kdShellVar(s, "LBL_MEASURED", note);
+    }
     kdShellVar(s, "LBL_NO_READING", KD_T("no reading", "няма данни"));
     // Drawn by the reader where the chart would be when the image is not there
     // — a missing fetch, or one that arrived half-written. The reader has its
@@ -1504,6 +1602,12 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // emitZones() sends an empty list for a group that is switched off.
     s->printf("SHOW_CHART=%d\n", (skin.showFlags & KSHOW_CHART) ? 1 : 0);
     s->printf("SHOW_WEEK=%d\n",  (skin.showFlags & KSHOW_WEEK)  ? 1 : 0);
+
+    // WHICH SHAPE THE PAGE IS, decided here and nowhere else. The panel has
+    // the coordinates for both and no way to know which applies: only this end
+    // knows whether a forecast is coming. A reader running an older
+    // update_dash.sh ignores the key and keeps the page it has always drawn.
+    kdShellVar(s, "PAGE_MODE", kdStandalone() ? "standalone" : "normal");
 
     // Whether the chart has anything in it, which is what decides if the key
     // under it is drawn — the same test the page makes before drawing its own.
@@ -1961,6 +2065,58 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S("px;letter-spacing:");                   KD_N(1);
     KD_S("px;background:#f4f4f4}");
 
+    // ── The standalone page ─────────────────────────────────────────────────
+    // The forecast band is an eighth of this page, and on a collector that is
+    // its own access point nothing can ever fill it. body.sa is that page: the
+    // band goes, and every number in the top block grows into it.
+    //
+    // EMITTED UNCONDITIONALLY, as an override, rather than branched into the
+    // rules above. The sheet above is the design and is replayed as plain text
+    // by tools/kindle_preview and by tools/check_kindle_parity.py — a branch in
+    // it would put both arms of the choice into their picture at once. A class
+    // on <body> costs one attribute and keeps the sheet a statement of fact.
+    //
+    // Every size here has a twin in kindle/layout/600x800-standalone.conf, and
+    // check_kindle_parity.py holds the two together the same way it holds the
+    // design and the base layout together.
+    // ── WHY A SIXTH AND NOT A THIRD ─────────────────────────────────────────
+    // The band that was freed is vertical; the columns are the width they
+    // always were, and every number here is limited by the column it sits in.
+    // "1008 hPa" three across is 87 px of a 90 px cell at 31; "21.4°" is 110 of
+    // the indoor row's first 111 at 56; "17:40" is 260 of the clock's 264 at
+    // 110. A size a third larger overruns on the day the pressure goes to four
+    // digits, and neither renderer wraps — the browser clips and FBInk draws
+    // straight over its neighbour. The height left over becomes air, which is
+    // what a panel read from across a room wants anyway.
+    KD_S(".sa .lab{font-size:");               KD_N(15);
+    KD_S("px}");
+    KD_S(".sa .v1{font-size:");                KD_N(104);
+    KD_S("px}");
+    KD_S(".sa .v2{font-size:");                KD_N(48);
+    KD_S("px}");
+    KD_S(".sa .slash{font-size:");             KD_N(48);
+    KD_S("px;padding:0 ");                     KD_N(8);
+    KD_S("px;top:");                           KD_N(-6);
+    KD_S("px}");
+    KD_S(".sa .sub{font-size:");               KD_N(19);
+    KD_S("px}");
+    KD_S(".sa .gv{font-size:");                KD_N(42);
+    KD_S("px}");
+    KD_S(".sa .grid-3 .gv{font-size:");        KD_N(31);
+    KD_S("px}");
+    KD_S(".sa .iv{font-size:");                KD_N(34);
+    KD_S("px}");
+    KD_S(".sa .iv-1{font-size:");              KD_N(56);
+    KD_S("px}");
+    // The plain clock; the three styles carry their own twins in kdSkinCss(),
+    // which is emitted after this and has to win against it.
+    KD_S(".sa .clock{font-size:");             KD_N(110);
+    KD_S("px;line-height:");                   KD_N(114);
+    KD_S("px}");
+    KD_S(".sa .clock-x{font-size:");           KD_N(48);
+    KD_S("px;line-height:");                   KD_N(114);
+    KD_S("px}");
+
     #undef KD_S
     #undef KD_N
 
@@ -1971,7 +2127,12 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // arm of every choice into the picture at once.
     kdSkinCss(p, skin);
 
-    p += F("</style></head><body>");
+    // The class the block above hangs on, and the only place the page's shape
+    // is chosen. Everything else about standalone is a rule that was already
+    // in the sheet.
+    p += F("</style></head><body");
+    if (kdStandalone()) p += F(" class=\"sa\"");
+    p += F(">");
 
     // No masthead. The place name never changed and the date is carried by the
     // week strip at the foot, so the row was two lines of furniture above the
@@ -2014,7 +2175,12 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // Last, deliberately: the measured values are what the reader came for and
     // the forecast is the supporting note, so it reads as a footnote rather
     // than as something competing with the two temperatures.
-    appendForecastSection(p);
+    //
+    // AND NOT AT ALL IN STANDALONE. This used to be settled at build time
+    // alone, so a collector built with the module and then run on its own AP
+    // served the section with a circled question mark in it — furniture, in
+    // the one place on the page where the readings could have been.
+    if (!kdStandalone()) appendForecastSection(p);
 #endif
 
     if (skin.showFlags & KSHOW_WEEK) appendWeek(p, now);
@@ -2024,7 +2190,11 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // the .act rule for what the padding actually buys, and for why the size
     // is smaller than the usual touch guidance rather than meeting it.
     p += F("<table class=\"foot\"><tr><td>");
-    p += kdT("Measured on site", "Измерено на място");
+    {
+        char note[96];
+        kdFooterNote(note, sizeof(note));
+        p += note;
+    }
     p += F("</td><td class=\"act\"><a href=\"/kindle\">");
     p += kdT("refresh", "обнови");
     p += F("</a><a href=\"/kindle/clear\">");

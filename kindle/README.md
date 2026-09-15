@@ -193,6 +193,7 @@ settings screen you were just looking at gives way to the page again by itself.
 | `QUIET_EVERY` | `15` | Minutes between clock updates during those hours |
 | `STATUS` | `1` | Draw this Kindle's battery and power mode at the end of the footer |
 | `AUTO_FIND` | `1` | Look for the collector once if the very first fetch fails |
+| `LAYOUT` | `auto` | The page's shape: `auto` follows the collector, `normal` keeps the forecast band, `standalone` drops it and enlarges the readings |
 
 `Find collector` writes the addresses that answered to `collectors`, beside
 `dash.conf` — not under `/tmp`, which Stop deletes and a reboot clears — so
@@ -239,6 +240,32 @@ menu when somebody is.
 the clock to `QUIET_EVERY`, which with a real suspend turns the night into one
 long sleep instead of sixty short ones. Leaving them spends one full flashing
 refresh, which is where the night's ghosting goes.
+
+### The standalone page
+
+A collector running as **its own access point** — wifi and ESP-NOW nodes
+talking straight to it, nothing upstream — cannot fetch a forecast, and the
+forecast band is an eighth of the panel. Left in place it is white space with a
+rule over it.
+
+So on that page the band is gone and the readings take its 124 px: the same
+eleven places, a sixth larger, with the chart and the week strip exactly where
+they were. The footer's left half says which network this is and how many nodes
+are reporting into it, instead of "Measured on site".
+
+The collector decides and says so in every payload, so nothing has to be set on
+the reader: it draws the standalone page while it is an access point, while it
+was built without the forecast module, or while nothing has been able to
+refresh the forecast for six hours. `LAYOUT=normal` or `LAYOUT=standalone` in
+`dash.conf` — or **Settings → Screen → Page shape** in KUAL — fixes the shape
+whatever the network is doing, which is also how you see one page from the
+other's network.
+
+**The readings grow by a sixth and not by a third** because the band that was
+freed is vertical: every number is limited by the column it sits in, and
+"1008 hPa" three across already fills 87 px of a 90 px cell. The rest of the
+height becomes air around them, which is what a panel read from across a room
+wants anyway.
 
 ### When the collector cannot be reached
 
