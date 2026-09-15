@@ -151,9 +151,11 @@ TOUCH_SWAP=0
 # The `wake` button is a toggle, so its label may carry BOTH directions with a
 # slash between them — `Awake/Sleep` — and the bar draws the half that says
 # which way the next tap will go. A label with no slash is used as it is.
-# If it has fewer labels than MENU_ACT has buttons the built-in English is used
-# instead — a bar whose words are one place along from its buttons is worse
-# than a bar you cannot read.
+# The labels are used only when there are exactly as many of them as MENU_ACT
+# has buttons AND they are not the shipped four below; otherwise each button is
+# named after what it DOES (refresh -> Refresh, hide -> Hide). So if you change
+# MENU_ACT, change these with it or delete the line — a bar whose words are one
+# place along from its buttons is worse than a bar you cannot read.
 MENU_LBL=Refresh|Awake/Sleep|More|Exit
 MENU_ACT=refresh|wake|settings|quit
 

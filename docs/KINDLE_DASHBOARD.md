@@ -1408,7 +1408,9 @@ refuses to go down (the alarm does not read back) and the deep sleep simply
 never happens, with nothing anywhere saying why. `rtc_pick()` writes a probe
 alarm to `rtc0`…`rtc3`, reads each back, takes the first that sticks, enables
 its `power/wakeup` where that node exists, and logs which it chose.
-`Settings → Info` prints it.
+`Settings → Info` prints it — and because that screen runs the same probe,
+whatever alarm a node already held is read first and written back afterwards:
+looking at a status page must not cancel powerd's own wake.
 
 `wifi` cannot fail in a way the panel does not already handle: a fetch that
 finds no network keeps the last reading on screen, which is what it does when
@@ -1423,7 +1425,13 @@ Everything else here recovers by itself; a suspend with no alarm behind it is
 a panel that stays dark until somebody presses the power button. So
 `suspend_for()` clears the alarm, writes it, **reads it back**, and refuses to
 go down unless the value stuck — and `nap_to_minute()` treats that refusal as
-the ordinary path, falling back to a plain sleep. `RTC_WAKEALARM` and
+the ordinary path, falling back to a plain sleep **of the minute it was going
+to wait anyway**, not of the half hour the suspend was going to spend down: the
+long wait is bought by the machine being off, and a reader that cannot suspend
+would otherwise sit awake and unresponsive through it. Every exit from
+`suspend_for()` that is not a completed sleep takes the alarm back off the RTC,
+so nothing is left pending to pull the reader out of powerd's own sleep later.
+`RTC_WAKEALARM` and
 `PM_STATE` are variables so the tests can point them at a temp file; a test
 that wrote the real `/sys/power/state` would suspend the machine running it.
 
@@ -1521,12 +1529,18 @@ has and what each one does — out of five words:
 `wake` button is a toggle, so its label may carry both directions separated by
 a slash — `Awake/Sleep` — and the bar draws the half naming where the next tap
 goes: a button reading "Awake" that sends an already-awake panel to sleep lies
-about itself, on a screen that gives no other feedback at all. A label
-list shorter than the action list is refused and the built-in English used
-instead: a bar whose words are one place along from its buttons does not merely
-fail to help, it says the wrong thing about what a tap will do — and every
-`dash.conf` written before `MENU_ACT` existed carries exactly three labels for
-a bar that now has four buttons.
+about itself, on a screen that gives no other feedback at all.
+
+**The labels are taken only when they are demonstrably yours**: as many of them
+as there are buttons, and not the four the package ships. Anything else is
+labelled from the actions themselves — `refresh` draws *Refresh*, `hide` draws
+*Hide* — because a bar whose words are one place along from its buttons does
+not merely fail to help, it says the wrong thing about what a tap will do.
+Every `dash.conf` written before `MENU_ACT` existed carries exactly three
+labels for a bar that now has four buttons, and changing `MENU_ACT` while
+leaving `MENU_LBL` alone leaves four shipped words over four buttons that are
+no longer the ones they name. Change both together, or leave `MENU_LBL` out and
+let the actions name themselves.
 
 **The type shrinks to fit the slot it names.** FBInk will not report how wide
 it drew a string and `${#var}` counts bytes, so `str_chars()` counts
@@ -1627,8 +1641,13 @@ failure this could have made worse than the bug it fixes.** The early-wake path
 below answers a resume by repainting the whole page and putting the bar up; a
 write that comes straight back would do that on every pass through the main
 loop — a flashing panel and a battery emptied in an afternoon, rather than a
-panel that merely never sleeps. So `suspend_for()` times the write against the
-system clock and calls anything under `SUSPEND_MIN_DOWN` (2 s) *not a suspend*:
+panel that merely never sleeps. So `suspend_for()` times the write against
+**both clocks — the RTC's `since_epoch` and the system's — and believes
+whichever of them ran**: the system clock is not guaranteed to be advanced
+across a suspend, and asking it alone called a perfectly good fifteen-minute
+sleep "no time passed" on a reader whose clock resumes where it left off,
+turning `POWER=suspend` into an ordinary sleep for the rest of the run. It
+calls anything under `SUSPEND_MIN_DOWN` (2 s) on both *not a suspend*:
 it returns non-zero, the caller sleeps the ordinary way, and the reason is
 logged **once** rather than once a minute, because `/tmp` is a ramdisk on a
 device that runs for months. A person pressing the button within two seconds of
@@ -1650,6 +1669,14 @@ sets `SUSPEND_EARLY`, and `nap_to_minute()` answers it with `wake_interactive()`
 4. the whole page is repainted — the framework may have put its screensaver on
    the screen while the CPU was down, and no tier would have cleared it for up
    to an hour — and the bar goes on top of it.
+
+`nap_to_minute()` then sets `WOKE_UP`, and the main loop's first act is to go
+straight back to listening for a tap. That flag is not a detail: the loop
+cannot otherwise tell a wake from a wait that ran out, and what it does with
+one of those is dismiss the bar and repaint — so the bar was erased within
+milliseconds of being drawn and the button still looked dead, with the panel
+flashing twice on the way. `tests/kindle/drive_dash.sh` fails if the flag or
+the loop's answer to it goes.
 
 When the window runs out the touchscreen is disarmed and the panel sleeps
 again. Nothing has to be remembered or undone.
@@ -1722,10 +1749,13 @@ off) carries three things:
 
 - how full this Kindle is, from `lipc-get-prop com.lab126.powerd battLevel`,
   asked on the tier that draws the footer and nowhere else;
-- **which mode it is actually in**, not the one `POWER` names: a panel inside
-  its wake window is awake whatever the setting says, and that is the one thing
-  somebody standing in front of it wants confirmed before they start tapping.
-  `MODE_LBL` carries the three words, so they can be set in any language;
+- **which mode it is actually in**, not the one `POWER` names: a panel in
+  `POWER=suspend` that is inside its wake window is awake, and that is the one
+  thing somebody standing in front of it wants confirmed before they start
+  tapping. Only that mode: the window is what holds the machine up and it holds
+  nothing else, so under `POWER=wifi` the radio is still cut between fetches
+  while it is open and the footer goes on saying so. `MODE_LBL` carries the
+  three words, so they can be set in any language;
 - in brackets, when the collector has stopped answering, the time it last did.
 
 Left-aligned at `STAT_X`, like everything else here: FBInk will not say how
@@ -1779,9 +1809,15 @@ is down too — which is the same power cut, most of the time — that is the wh
 page until it comes back.
 
 So the payload is kept beside `dash.conf` as `last.txt`, written **on the full
-tier only**: once an hour, not once a fetch, because this is FAT on the eMMC
-and not tmpfs. `cache_save()` appends `CACHED_AT` so the page it draws can say
-how old it is, and `cache_load()` explicitly undoes the freshness `load_data()`
+tier only**, and only when a payload has actually been fetched since the
+dashboard started: once an hour, not once a fetch, because this is FAT on the
+eMMC and not tmpfs — and a reader whose collector is down is holding the cache
+itself in `data.txt`, so saving it again would be an hourly rewrite of the same
+bytes with another stamp appended each time. `cache_save()` appends `CACHED_AT`
+and `CACHED_ON` so the page it draws can say how old it is — the day is put in
+front of the time when the cache is not from today, because `17:40` under
+three-day-old readings on a page whose own clock is live reads as this
+afternoon. `cache_load()` explicitly undoes the freshness `load_data()`
 assumes — the ages in that payload were computed at the collector before the
 reader was switched off, so the readings zone carries the offline notice over
 them while the chart, forecast and week strip below are worth having whatever

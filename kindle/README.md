@@ -188,7 +188,7 @@ settings screen you were just looking at gives way to the page again by itself.
 | `WAKE_MENU` | `1` | A press of the power button wakes the panel and opens the menu |
 | `WAKE_HOLD` | `120` | Seconds it then stays awake and listening; every tap pushes this out |
 | `MENU_ACT` | `refresh\|wake\|settings\|quit` | What the bar's buttons do — 2 to 5 of `refresh`, `wake`, `settings`, `hide`, `quit` |
-| `MENU_LBL` | `Refresh\|Awake/Sleep\|More\|Exit` | What they are called. The sleep button may carry both directions with a slash; the bar draws the half that says where the next tap goes. Fewer labels than buttons and the built-in names are used instead |
+| `MENU_LBL` | `Refresh\|Awake/Sleep\|More\|Exit` | What they are called. The sleep button may carry both directions with a slash; the bar draws the half that says where the next tap goes. Used only when there are as many labels as buttons and they are not the shipped four — otherwise each button is named after what it does, so changing `MENU_ACT` alone cannot mislabel the bar |
 | `QUIET_FROM`, `QUIET_TO` | `0`, `0` | Hours between which nothing flashes. Equal = off |
 | `QUIET_EVERY` | `15` | Minutes between clock updates during those hours |
 | `STATUS` | `1` | Draw this Kindle's battery and power mode at the end of the footer |
@@ -260,10 +260,12 @@ screen at whatever it last was: a sensor whose node goes flat takes its value
 off the panel with it.
 
 **And after a reboot there is still a page.** The last payload is kept beside
-`dash.conf` as `last.txt` — written once an hour, not once a fetch — so a
-reader that has just been switched on comes up with the chart, the forecast and
-the week strip it last had, in the language the collector set, with the offline
-notice over the readings and the time they were from. `/tmp` is a ramdisk;
+`dash.conf` as `last.txt` — written once an hour, not once a fetch, and only
+when something was actually fetched since the dashboard started — so a reader
+that has just been switched on comes up with the chart, the forecast and the
+week strip it last had, in the language the collector set, with the offline
+notice over the readings and the time they were from (with the day in front of
+it when that time was not today's). `/tmp` is a ramdisk;
 without it a cold start with the collector also down is a blank screen.
 
 The forecast interval is the Kindle's **redraw** cadence. The collector fetches

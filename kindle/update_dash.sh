@@ -122,12 +122,21 @@ TOUCH_SWAP=0
 # only names them. A dash.conf written before MENU_ACT existed carries three
 # labels and no actions, so the built-in four would have been drawn under three
 # words shifted one place along — "Hide" over the button that keeps the panel
-# awake. menu_open() refuses a label list shorter than the action list and uses
-# the built-in labels instead, so the bar is never mislabelled.
-MENU_LBL="Refresh|Awake/Sleep|More|Exit"
+# awake. menu_labels() takes the reader's list only when it names EVERY button
+# and is not simply the shipped one; otherwise every label is derived from the
+# action it sits over, so the bar is never mislabelled.
+#
+# THE SHIPPED WORDS ARE THEIR OWN CONSTANTS. The keys below are what dash.conf
+# overwrites, so by the time the question is asked there is nothing left to
+# compare against — and "these are the labels the reader chose" and "these have
+# simply never been changed" are the same four words.
+MENU_LBL_STD="Refresh|Awake/Sleep|More|Exit"
+MENU_LBL2_STD="Find|Next|Battery|Info|Back"
+SURE_LBL_STD="Tap the bar again to exit"
+MENU_LBL="$MENU_LBL_STD"
 MENU_ACT="refresh|wake|settings|quit"
-MENU_LBL2="Find|Next|Battery|Info|Back"
-SURE_LBL="Tap the bar again to exit"
+MENU_LBL2="$MENU_LBL2_STD"
+SURE_LBL="$SURE_LBL_STD"
 MODE_LBL="awake|radio off|asleep"
 # ── Waking up ────────────────────────────────────────────────────────────────
 # See suspend_for() and wake_interactive(). A press of the power button is the
@@ -244,9 +253,9 @@ payload_key_ok() {
         # nothing here wants a family of them.
         CLOCK|CLOCK_ADVW|DATE|TIME_FORMAT) return 0 ;;
         # Written by cache_save(), not by the collector — but the cache is
-        # loaded through exactly the same path as a payload, so it is allowed
-        # here. It reaches one drawn string and nothing else.
-        CACHED_AT) return 0 ;;
+        # loaded through exactly the same path as a payload, so they are
+        # allowed here. They reach one drawn string and nothing else.
+        CACHED_AT|CACHED_ON) return 0 ;;
         SHOW_CHART|SHOW_WEEK|CHART_OUT|CHART_IN|KEY_OUT_ADVW) return 0 ;;
         # The chart's axis: the five values, the five hours, their widths, and
         # where the image's plot area is inside the image.
@@ -460,10 +469,6 @@ conf_load() {
     done
 }
 
-# The address as wget needs it. The scheme is added HERE rather than folded
-# into HOST on load, so dash.conf keeps exactly what was set and `settings.sh
-# get HOST` answers with it — a value that changes shape between being written
-# and being read back is one nobody can check against what they typed.
 # Is the collector address still the one the package shipped?
 #
 # Read out of dash.conf.default rather than written down here: the value nobody
@@ -476,6 +481,10 @@ host_is_default() {
     [ "${HOST:-}" = "$d" ]
 }
 
+# The address as wget needs it. The scheme is added HERE rather than folded
+# into HOST on load, so dash.conf keeps exactly what was set and `settings.sh
+# get HOST` answers with it — a value that changes shape between being written
+# and being read back is one nobody can check against what they typed.
 host_url() {
     case "$HOST" in
         http://*|https://*) printf '%s' "$HOST" ;;
@@ -592,7 +601,7 @@ RTC_PICKED=0
 rtc_pick() {
     RTC_PICKED=1
     [ "${RTC_PINNED:-0}" = "1" ] && return 0
-    local n node want back chosen="" w
+    local n node want back prev chosen="" w
     for n in 0 1 2 3; do
         node="/sys/class/rtc/rtc$n/wakealarm"
         [ -w "$node" ] || continue
@@ -600,14 +609,28 @@ rtc_pick() {
         RTC_SINCE_EPOCH="/sys/class/rtc/rtc$n/since_epoch"
         rtc_now
         want=$(( RTC_NOW + 120 ))
+        # WHATEVER WAS ALREADY ON THE NODE GOES BACK ON IT. This probe is not
+        # only run on the way into a suspend: Settings -> Info asks it too, to
+        # put the answer on the screen. An alarm somebody else armed — powerd's
+        # own, or the framework's — is not this function's to throw away, and
+        # without this, looking at a status page cancelled it.
+        prev=$(cat "$node" 2>/dev/null)
+        case "$prev" in ''|*[!0-9]*) prev=0 ;; esac
         # Cleared first, then written, then READ BACK — the same three steps
         # suspend_for() takes, because the question here is exactly the one it
         # asks: will this node hold an alarm. Cleared again afterwards: this is
         # a probe, not a request to wake up in two minutes.
+        #
+        # ONE WAY OUT OF THE LOOP BODY, so the restore below cannot be skipped
+        # by a write that failed halfway through.
         echo 0 > "$node" 2>/dev/null || continue
-        echo "$want" > "$node" 2>/dev/null || continue
-        back=$(cat "$node" 2>/dev/null)
+        if echo "$want" > "$node" 2>/dev/null; then
+            back=$(cat "$node" 2>/dev/null)
+        else
+            back=""
+        fi
         echo 0 > "$node" 2>/dev/null
+        [ "$prev" = "0" ] || echo "$prev" > "$node" 2>/dev/null
         if [ "$back" = "$want" ]; then chosen="$n"; break; fi
     done
     if [ -z "$chosen" ]; then
@@ -817,8 +840,16 @@ SUSPEND_EARLY=0
 #: Said once, not once a minute — see the note where it is set.
 SUSPEND_WARNED=0
 
+# The alarm goes back off wherever the sleep did not happen, or happened and
+# was cut short by the button. A pending alarm on a machine that is staying
+# awake is a wake that powerd's own sleep will take later, for nothing.
+rtc_disarm() {
+    [ -w "$RTC_WAKEALARM" ] && echo 0 > "$RTC_WAKEALARM" 2>/dev/null
+    return 0
+}
+
 suspend_for() {
-    local want="$1" alarm back
+    local want="$1" alarm back down rdown
     SUSPEND_EARLY=0
     # Not worth the transition, and short values are where a rounding error
     # turns into an alarm in the past.
@@ -847,8 +878,9 @@ suspend_for() {
     # a machine that went down from one that did not — see below.
     epoch_now
     local went="$EPOCH"
-    echo mem > "$PM_STATE" 2>/dev/null || return 1
+    echo mem > "$PM_STATE" 2>/dev/null || { rtc_disarm; return 1; }
     epoch_now
+    rtc_now
 
     # ── DID IT ACTUALLY GO DOWN? ────────────────────────────────────────────
     #
@@ -860,11 +892,23 @@ suspend_for() {
     # battery emptied in an afternoon, which is a great deal worse than a panel
     # that merely never sleeps.
     #
-    # No time passed, so the machine did not go down: say so, and let the
-    # caller sleep the ordinary way. A person pressing the button within two
+    # BOTH CLOCKS, AND WHICHEVER OF THEM RAN. The note below this block says
+    # the system clock is not guaranteed to have been running across a suspend
+    # — and asking it alone, as this did, calls a perfectly good fifteen-minute
+    # sleep on such a reader "no time passed" and turns POWER=suspend into an
+    # ordinary sleep for the rest of the run, with a message saying the reader
+    # cannot do it. The RTC is the clock the alarm is measured in and it kept
+    # running by definition; the system clock is the one that survives an RTC
+    # that will not read back. Either saying time passed is time passed.
+    down=$(( EPOCH - went ))
+    rdown=$(( RTC_NOW - (alarm - want) ))
+    [ "$rdown" -gt "$down" ] 2>/dev/null && down="$rdown"
+
+    # No time passed on either, so the machine did not go down: say so, and let
+    # the caller sleep the ordinary way. A person pressing the button within two
     # seconds of it going down loses their press and presses again; a device
     # that cannot suspend loses nothing at all.
-    if [ $(( EPOCH - went )) -lt "${SUSPEND_MIN_DOWN:-2}" ]; then
+    if [ "$down" -lt "${SUSPEND_MIN_DOWN:-2}" ]; then
         # ONCE, not once a minute. /tmp is a ramdisk on a device that runs for
         # months between reboots, and a line a minute is the same mistake
         # CONF_WARNED exists to stop: 1440 copies of one sentence, in RAM, to
@@ -875,6 +919,7 @@ suspend_for() {
                  "instead. POWER=suspend will not save anything on this" \
                  "reader — see Settings → Info for the RTC it found." >&2
         fi
+        rtc_disarm
         return 1
     fi
 
@@ -884,8 +929,11 @@ suspend_for() {
     # suspend, and the alarm is the only number that says what we asked for. A
     # few seconds of slack, because an alarm and a resume do not land on the
     # same second.
-    rtc_now
     [ $(( alarm - RTC_NOW )) -ge "${SUSPEND_SLACK:-3}" ] && SUSPEND_EARLY=1
+    # An early wake leaves OUR alarm still pending, and the window that follows
+    # it is minutes long: cleared here so it cannot fire into the framework's
+    # sleep afterwards. The next suspend arms its own.
+    [ "$SUSPEND_EARLY" = "1" ] && rtc_disarm
     return 0
 }
 
@@ -1089,11 +1137,18 @@ list_at() {
 #
 # Every UTF-8 character has exactly one lead byte and its continuations are
 # 0x80..0xBF, so dropping the continuations and counting what is left counts
-# characters in any language. `wc -c` and not `wc -m`: busybox's -m depends on
-# a locale a Kindle does not set.
+# characters in any language. Not `wc -m`, which would count them directly:
+# busybox's -m depends on a locale a Kindle does not set.
 str_chars() {
-    STR_N=$(printf '%s' "$1" | tr -d '\200-\277' | wc -c | tr -dc '0-9')
-    [ -n "$STR_N" ] || STR_N=0
+    # ${#} ON WHAT IS LEFT AFTER THE CONTINUATION BYTES GO, rather than piping
+    # the count out through wc: this is called once per button per repaint on a
+    # ten-year-old ARM reader, and the shell can count the bytes of a string it
+    # already holds. The tr is still a fork, and still the right one — the
+    # shell's own length is bytes under the C locale this runs in, which is
+    # exactly the miscount being corrected.
+    local t
+    t=$(printf '%s' "$1" | tr -d '\200-\277')
+    STR_N=${#t}
     return 0
 }
 
@@ -1307,20 +1362,20 @@ menu_open() {
     case "${1:-main}" in
         main) MENU=1
               MENU_ACTS="${MENU_ACT:-refresh|wake|settings|quit}"
-              menu_labels "${MENU_LBL:-}" "Refresh|Awake/Sleep|More|Exit" ;;
+              menu_labels "${MENU_LBL:-}" "$MENU_LBL_STD" ;;
         more) MENU=2
               MENU_ACTS="find|next|power|diag|back"
-              menu_labels "${MENU_LBL2:-}" "Find|Next|Battery|Info|Back" ;;
+              menu_labels "${MENU_LBL2:-}" "$MENU_LBL2_STD" ;;
         # ONE BUTTON, THE WHOLE WIDTH OF THE BAR. The confirmation is not a
         # small target next to four others — it is the bar, so the second tap
         # cannot miss it and nothing else on the bar can be hit by accident
         # while it is up.
         sure) MENU=3
               MENU_ACTS="sure"
-              menu_labels "${SURE_LBL:-}" "Tap the bar again to exit" ;;
+              menu_labels "${SURE_LBL:-}" "$SURE_LBL_STD" ;;
         *)    MENU=1
               MENU_ACTS="${MENU_ACT:-refresh|wake|settings|quit}"
-              menu_labels "${MENU_LBL:-}" "Refresh|Awake/Sleep|More|Exit" ;;
+              menu_labels "${MENU_LBL:-}" "$MENU_LBL_STD" ;;
     esac
     draw_menu
     return 0
@@ -1362,23 +1417,33 @@ menu_label() {
 # Locals only. MENU_ACTS and MENU_LBLS belong to the bar that is up, and this
 # is asked while one is not.
 menu_word() {
-    local acts lbls want i=0
+    local acts lbls="" want i=0
     MENU_WORD=""
     acts="${MENU_ACT:-refresh|wake|settings|quit}"
     list_len "$acts"; want=$LIST_N
     list_len "${MENU_LBL:-}"
-    if [ -n "${MENU_LBL:-}" ] && [ "$LIST_N" -ge "$want" ]; then
+    # The same rule the bar is drawn under — see menu_labels(). A sentence
+    # naming a button has to name the word that is ON it.
+    if [ -n "${MENU_LBL:-}" ] && [ "$LIST_N" = "$want" ] &&
+       [ "$MENU_LBL" != "$MENU_LBL_STD" ]; then
         lbls="$MENU_LBL"
-    else
-        lbls="Refresh|Awake/Sleep|More|Exit"
     fi
     while [ "$i" -lt "$want" ]; do
         list_at "$acts" "$i"
         if [ "$LIST_ITEM" = "$1" ]; then
-            list_at "$lbls" "$i"
+            menu_word_of "$LIST_ITEM"
+            if [ -n "$lbls" ]; then
+                list_at "$lbls" "$i"
+                # AN EMPTY SLOT IS NOT AN ANSWER. `MENU_LBL=Refresh||More|Exit`
+                # passes conf_valid and counts four, and returning "" from here
+                # with a success was a caller's `|| MENU_WORD="Awake"` never
+                # firing and a screen reading "tap  to stop sleeping".
+                [ -n "$LIST_ITEM" ] && MENU_WORD_DEF="$LIST_ITEM"
+            fi
             # The first half of a two-part label, which is the direction a
             # sentence naming the button means: "tap Awake to stop sleeping".
-            MENU_WORD="${LIST_ITEM%%/*}"
+            MENU_WORD="${MENU_WORD_DEF%%/*}"
+            [ -n "$MENU_WORD" ] || return 1
             return 0
         fi
         i=$((i + 1))
@@ -1444,7 +1509,31 @@ settings_run() {
     return 0
 }
 
-# The reader's labels if there are enough of them, the built-in ones otherwise.
+# The word this script would use for an action, so a bar can always be labelled
+# from what its buttons DO. One table, in the file that dispatches the actions.
+menu_word_of() {
+    case "$1" in
+        refresh)  MENU_WORD_DEF="Refresh" ;;
+        wake)     MENU_WORD_DEF="Awake/Sleep" ;;
+        settings) MENU_WORD_DEF="More" ;;
+        hide)     MENU_WORD_DEF="Hide" ;;
+        quit)     MENU_WORD_DEF="Exit" ;;
+        find)     MENU_WORD_DEF="Find" ;;
+        next)     MENU_WORD_DEF="Next" ;;
+        power)    MENU_WORD_DEF="Battery" ;;
+        diag)     MENU_WORD_DEF="Info" ;;
+        back)     MENU_WORD_DEF="Back" ;;
+        sure)     MENU_WORD_DEF="$SURE_LBL_STD" ;;
+        # Not a word this file dispatches, so there is nothing truthful to put
+        # over it. The action's own name is at least not a lie about another
+        # button.
+        *)        MENU_WORD_DEF="$1" ;;
+    esac
+    return 0
+}
+
+# The reader's labels when they are demonstrably theirs, words built from the
+# actions otherwise.
 #
 # A BAR WHOSE WORDS ARE ONE PLACE ALONG FROM ITS BUTTONS is worse than one in a
 # language the reader does not read: it does not merely fail to help, it says
@@ -1453,15 +1542,33 @@ settings_run() {
 # "Hide" over the button that keeps the panel awake and "Exit" over the one
 # that opens the settings.
 menu_labels() {
-    # $1=the reader's list  $2=the built-in one
-    local want
+    # $1=the reader's list  $2=the shipped one, to recognise rather than to use
+    local want i=0 sep=""
     list_len "$MENU_ACTS"; want=$LIST_N
     list_len "${1:-}"
-    if [ -n "${1:-}" ] && [ "$LIST_N" -ge "$want" ]; then
+    # EXACTLY AS MANY LABELS AS BUTTONS, AND NOT THE SHIPPED ONES. "Enough"
+    # took a four-label default over a three-button MENU_ACT and drew
+    # "Awake/Sleep" over the button that opens the settings and "More" over the
+    # one that ends the dashboard: words one place along from their buttons,
+    # which is worse than words in a language nobody in the room reads.
+    #
+    # The shipped list is refused for the same reason: a reader who changes
+    # MENU_ACT and leaves MENU_LBL alone has four labels for four buttons, and
+    # every one of them belongs to a button that is no longer there.
+    if [ -n "${1:-}" ] && [ "$LIST_N" = "$want" ] && [ "$1" != "${2:-}" ]; then
         MENU_LBLS="$1"
-    else
-        MENU_LBLS="$2"
+        return 0
     fi
+    # Built from the actions, which is the same four words when the actions are
+    # the shipped ones — and the right words when they are not.
+    MENU_LBLS=""
+    while [ "$i" -lt "$want" ]; do
+        list_at "$MENU_ACTS" "$i"
+        menu_word_of "$LIST_ITEM"
+        MENU_LBLS="$MENU_LBLS$sep$MENU_WORD_DEF"
+        sep="|"
+        i=$(( i + 1 ))
+    done
     return 0
 }
 
@@ -1578,7 +1685,16 @@ EVER_FRESH=0
 #: is not there, and numbers nobody has said anything about are then a lie the
 #: page is telling on its own behalf.
 FAILS=0
+#: The stamp on the payload the cache already holds, so an hour that brought
+#: nothing new does not rewrite it — see cache_save().
+CACHE_STAMP=""
 CACHE="${DASH_CACHE:-$DASH_DIR/last.txt}"
+# The addresses a scan found, beside dash.conf for the same reason the cache is
+# — /tmp is a ramdisk and stop.sh empties it. Named HERE, in the file
+# settings.sh sources, because settings.sh is the half that writes it and the
+# dashboard is the half that asks whether it exists: two spellings of one path
+# is a scan whose results the other half cannot see.
+SCAN_LIST="${DASH_SCAN_LIST:-$DASH_DIR/collectors}"
 
 # Are the readings on screen old enough that drawing them without saying so
 # would be dishonest?
@@ -1616,11 +1732,18 @@ fetch_data() {
             2>/dev/null && payload_ok "$TMP/data.new"; then
         mv "$TMP/data.new" "$TMP/data.txt"
         FAILS=0
+        TRUNC_WARNED=0
         return 0
     fi
     FAILS=$(( FAILS + 1 ))
-    if [ -s "$TMP/data.new" ]; then
-        echo "$(date '+%H:%M') data: incomplete payload ($(wc -c < "$TMP/data.new" | tr -dc '0-9') bytes), keeping the last good one" >&2
+    # ONCE PER RUN OF BAD LUCK, not once per fetch. A link that consistently
+    # cuts the payload — the exact case payload_ok() exists for — is 288 copies
+    # of one sentence a day in a ramdisk, which is the mistake CONF_WARNED and
+    # SUSPEND_WARNED already exist to stop. The latch is dropped by the next
+    # whole payload, so a fault that comes back is reported again.
+    if [ -s "$TMP/data.new" ] && [ "${TRUNC_WARNED:-0}" = "0" ]; then
+        TRUNC_WARNED=1
+        echo "$(date '+%H:%M') data: incomplete payload ($(wc -c < "$TMP/data.new" | tr -dc '0-9') bytes), keeping the last good one; further cuts are not logged until a whole one arrives" >&2
     fi
     rm -f "$TMP/data.new"
     DATA_FRESH=0
@@ -1639,14 +1762,35 @@ fetch_data() {
 # So the payload is kept beside dash.conf, written on the full tier: once an
 # hour, not once a fetch, because this is FAT on the eMMC and not tmpfs.
 cache_save() {
+    # ONLY A PAYLOAD THIS RUN ACTUALLY FETCHED. The full tier calls this every
+    # hour whether the fetch worked or not, and what is in data.txt when it did
+    # not is the cache itself, loaded at startup — so an offline reader rewrote
+    # the same bytes to the eMMC once an hour and appended another CACHED_AT to
+    # them every time. A week away is 168 duplicate lines and 168 rewrites of a
+    # file on FAT, to save what was already saved.
+    [ "${EVER_FRESH:-0}" = "1" ] || return 1
+    # AND NOT THE SAME PAYLOAD TWICE. Once the collector goes down, every hour
+    # after that would rewrite the last good payload with the same stamp on it:
+    # the duplicate lines are gone but the writes are not, and this is eMMC.
+    # The stamp is the payload's own identity here — it is the minute a fetch
+    # last succeeded, so an unchanged one means nothing new to keep.
+    [ "${LAST_OK:-}" != "${CACHE_STAMP:-}" ] || return 1
     [ -s "$TMP/data.txt" ] || return 1
     cp "$TMP/data.txt" "$CACHE.tmp$$" 2>/dev/null || return 1
     # WHEN, or the page drawn from this file cannot say how old it is — and a
     # panel showing yesterday's numbers with no date on them is the one
     # failure worse than a blank one. Written as a payload key so that loading
     # the cache is exactly loading a payload.
-    printf 'CACHED_AT="%s"\n' "${LAST_OK:-}" >> "$CACHE.tmp$$" 2>/dev/null
+    #
+    # AND WHICH DAY, which the clock alone cannot carry: a reader switched off
+    # on Monday evening and switched on on Thursday drew "(17:40)" under
+    # readings three days old, and 17:40 on a page whose own clock says 09:12
+    # reads as yesterday at worst. The day is only put on screen when it is not
+    # today's — see cache_load().
+    printf 'CACHED_AT="%s"\nCACHED_ON="%s"\n' "${LAST_OK:-}" "$(date '+%d.%m')" \
+        >> "$CACHE.tmp$$" 2>/dev/null
     mv "$CACHE.tmp$$" "$CACHE" 2>/dev/null || { rm -f "$CACHE.tmp$$"; return 1; }
+    CACHE_STAMP="${LAST_OK:-}"
     return 0
 }
 
@@ -1657,6 +1801,14 @@ cache_load() {
     # load_data believes what it loaded is current, because every other caller
     # has just fetched it. Here it is not.
     LAST_OK="${CACHED_AT:-}"
+    # The day in front of the time when the cache is not from today. Two
+    # numbers rather than a formatted date: this is a stamp in brackets beside
+    # a clock, it has to be unmistakably not the clock, and it must not depend
+    # on a `date -d` busybox may not have.
+    if [ -n "${CACHED_ON:-}" ] && [ -n "$LAST_OK" ] &&
+       [ "$CACHED_ON" != "$(date '+%d.%m')" ]; then
+        LAST_OK="$CACHED_ON $LAST_OK"
+    fi
     EVER_FRESH=0
     # NOT FRESH, and the page says so: the ages in this payload were computed
     # at the collector when it was written, so its "3 min" is a lie by however
@@ -2022,6 +2174,12 @@ batt_read() {
 # awake whatever the setting says, and that is the one thing somebody standing
 # in front of it wants confirmed before they start tapping.
 #
+# ONLY UNDER POWER=suspend, THOUGH: the window is what holds the machine up,
+# and it holds nothing else. Under POWER=wifi the radio is still cut between
+# fetches during the window, so reporting "awake" for two minutes after every
+# tap had the one line whose job is to say which mode the panel is in saying
+# the wrong one.
+#
 # LEFT-ALIGNED AT STAT_X, like everything else here: FBInk will not say how
 # wide it drew a string, so a right-aligned footer would be aligned on a guess.
 # The layout leaves room for it.
@@ -2031,7 +2189,7 @@ draw_status() {
     local s="" i=0
     batt_read
     [ -n "$BATT" ] && s="$BATT%"
-    if wake_window; then
+    if [ "${POWER:-awake}" = "suspend" ] && wake_window; then
         i=0
     else
         case "${POWER:-awake}" in
@@ -3072,7 +3230,8 @@ nap_to_minute() {
     # the right-hand third then chose `quit` on a tick nobody had touched, and
     # the dashboard exited by itself.
     TAP=""
-    local start
+    WOKE_UP=0
+    local start deep
     epoch_now
     start="$EPOCH"
 
@@ -3095,14 +3254,25 @@ nap_to_minute() {
         # be — which is why the quiet hours can slow the clock down, and why
         # doing so is worth whole days.
         next_due_in "${MINUTE:-0}"
-        delay=$(( delay + (NEXT_DUE - 1) * 60 ))
+        # THE EXTENSION BELONGS TO THE SUSPEND, NOT TO THE FALLBACK. It is
+        # bought by the machine being down: a reader whose /sys/power/state
+        # refuses, or that has no RTC alarm to come back on, would otherwise
+        # take the half hour it was asked to sleep for and spend it awake —
+        # with TOUCH=0 that is a panel that answers nothing and repaints
+        # nothing for thirty minutes, which is far worse than the minute the
+        # fallback promises.
+        deep=$(( delay + (NEXT_DUE - 1) * 60 ))
         # Which RTC holds an alarm the kernel will honour, asked here because
         # here is where the answer is first needed.
         [ "${RTC_PICKED:-0}" = "1" ] || rtc_pick
-        if suspend_for "$delay"; then
+        if suspend_for "$deep"; then
             # Back before the alarm was due: somebody pressed something.
             if [ "${SUSPEND_EARLY:-0}" = "1" ] && [ "${WAKE_MENU:-1}" = "1" ]; then
                 wake_interactive
+                # SAID OUT LOUD TO THE LOOP, because the loop cannot tell this
+                # from a wait that simply ran out — and what it does with one
+                # of those is dismiss the bar and repaint. See the main loop.
+                WOKE_UP=1
             fi
             return 0
         fi
@@ -3217,7 +3387,7 @@ else
     # of a device with no keyboard. So look, once, and say what was found.
     # AUTO_FIND=0 for anybody who would rather it did not.
     if [ "${AUTO_FIND:-1}" = "1" ] && host_is_default &&
-       [ ! -s "${DASH_SCAN_LIST:-$DASH_DIR/collectors}" ]; then
+       [ ! -s "$SCAN_LIST" ]; then
         echo "first run: no collector at $HOST, looking for one" >&2
         settings_run find
         rm -f "$TMP/redraw"
@@ -3258,6 +3428,21 @@ while true; do
     # the rest of the day on exactly the paths that took a shortcut.
     net_down
     nap_to_minute
+
+    # SOMEBODY PRESSED THE BUTTON AND IT HAS ALREADY BEEN ANSWERED:
+    # wake_interactive() repainted the page and put the bar up. Straight back
+    # to listening for the tap that bar exists to catch.
+    #
+    # THE LOOP CANNOT TELL THIS FROM A WAIT THAT RAN OUT, and what it does with
+    # one of those is two lines below: dismiss the bar and repaint. That erased
+    # the bar within milliseconds of drawing it — the press worked, the panel
+    # flashed twice, and the button still looked dead, which is the whole thing
+    # this mechanism exists to fix. The tick would then have painted zones over
+    # what was left of it.
+    if [ "${WOKE_UP:-0}" = "1" ]; then
+        WOKE_UP=0
+        continue
+    fi
 
     # A TAP IS ANSWERED BEFORE THE TICK IT INTERRUPTED, and does not spend a
     # minute: the clock counter is what decides which tier comes round next,

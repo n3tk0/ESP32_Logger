@@ -829,7 +829,11 @@ check "$?" "a clock-only minute needs no network; every other tier does"
   # call a suspend, because the early-wake path would otherwise repaint the
   # whole page on every pass through the main loop. A test that wants the
   # suspend to have happened has to say that it did.
-  SUSPEND_MIN_DOWN=0 suspend_for 45 || exit 1
+  # SUSPEND_SLACK=100: with a fake since_epoch that does not move, every
+  # resume looks early — and an early resume takes the alarm back off the node
+  # (see the check below), which is the value this test is here to read. A
+  # slack wider than the wait is how the resume counts as the alarm's own.
+  SUSPEND_MIN_DOWN=0 SUSPEND_SLACK=100 suspend_for 45 || exit 1
   [ "$(cat "$PM_STATE")" = "mem" ] || exit 2
   # The alarm is in the future, by about what was asked for.
   now=$(date +%s); a=$(cat "$RTC_WAKEALARM")
@@ -874,7 +878,7 @@ check "$?" "a device with no RTC alarm node never suspends"
 # hold is the only way to prove which one the sum was taken from.
 ( : > "$PM_STATE"; : > "$RTC_WAKEALARM"
   echo 1000 > "$RTC_SINCE_EPOCH"
-  SUSPEND_MIN_DOWN=0 suspend_for 60 || exit 1
+  SUSPEND_MIN_DOWN=0 SUSPEND_SLACK=100 suspend_for 60 || exit 1
   [ "$(cat "$RTC_WAKEALARM")" = "1060" ] || exit 2
   exit 0 )
 check "$?" "the wake alarm is set in the RTC's own timebase, not the system clock's"
@@ -884,7 +888,7 @@ check "$?" "the wake alarm is set in the RTC's own timebase, not the system cloc
 # every reader whose RTC is in UTC — which is all of the ones Amazon ships.
 ( : > "$PM_STATE"; : > "$RTC_WAKEALARM"; : > "$RTC_SINCE_EPOCH"
   now=$(date +%s)
-  SUSPEND_MIN_DOWN=0 suspend_for 60 || exit 1
+  SUSPEND_MIN_DOWN=0 SUSPEND_SLACK=100 suspend_for 60 || exit 1
   back=$(cat "$RTC_WAKEALARM")
   [ "$back" -ge $((now + 60)) ] && [ "$back" -le $((now + 65)) ] || exit 2
   exit 0 )
@@ -1390,6 +1394,35 @@ check "$?" "the sleep button names the mode it will switch to, not the one it is
   exit 0 )
 check "$?" "and anything naming that button in a sentence gets the same word"
 
+# ── A BAR WHOSE WORDS ARE ONE PLACE ALONG FROM ITS BUTTONS ──────────────────
+#
+# MENU_ACT is settable and MENU_LBL is a separate key, so a reader who changes
+# what the buttons DO and leaves the labels alone had four shipped words over
+# three of their own buttons: "Awake/Sleep" over the one that hides the bar and
+# "More" over the one that ends the dashboard. Counting them was never enough —
+# the shipped list is refused as well, and every label comes from the action it
+# sits over.
+( reset_log
+  RES_W=600 RES_H=800 MENU_ACTS="" FONT_REG="$WORK/fonts/Bookerly-Regular.ttf"
+  MENU_ACT="refresh|hide|quit"
+  MENU_LBL="$MENU_LBL_STD"
+  menu_open main
+  grep -q -- "--	Hide" "$FBINK_LOG" || exit 1
+  grep -q -- "--	Exit" "$FBINK_LOG" || exit 2
+  grep -q -- "--	Sleep" "$FBINK_LOG" && exit 3
+  grep -q -- "--	More" "$FBINK_LOG" && exit 4
+  exit 0 )
+check "$?" "a bar with its own actions is labelled from them, not from the shipped words"
+
+# And a hole in the reader's list is not an answer either: MENU_LBL=A||B|C
+# passes validation and counts four, and menu_word returning "" with a success
+# was a settings screen reading "tap  to stop sleeping".
+( MENU_ACT="refresh|wake|settings|quit" MENU_LBL="Refresh||More|Exit"
+  menu_word wake || exit 1
+  [ "$MENU_WORD" = "Awake" ] || { echo "got [$MENU_WORD]" >&2; exit 2; }
+  exit 0 )
+check "$?" "and an empty label falls back to the built-in word for that button"
+
 # EXIT ASKS FIRST. One tap turns the whole bar into the confirmation — one
 # button, the full width, so the second tap cannot miss it and nothing else can
 # be hit by accident while it is up. This panel's touch calibration is the
@@ -1518,6 +1551,7 @@ check "$?" "the wake alarm's RTC is probed when a suspend needs it, not assumed"
   SUSPEND_SLACK=100 SUSPEND_MIN_DOWN=0 suspend_for 45 || exit 1
   [ "$SUSPEND_EARLY" = "0" ] || exit 2
   exit 0 )
+check "$?" "and a resume near enough to its alarm is the alarm, not a person"
 
 # ── A WRITE THAT COMES STRAIGHT BACK IS NOT A SUSPEND ───────────────────────
 #
@@ -1541,7 +1575,96 @@ check "$?" "the wake alarm's RTC is probed when a suspend needs it, not assumed"
   [ -s "$WORK/s2.err" ] && exit 4
   exit 0 )
 check "$?" "a suspend that returns with no time passed is refused, not answered"
-check "$?" "and a resume near enough to its alarm is the alarm, not a person"
+
+# ── WHICH CLOCK SAYS THE MACHINE WENT DOWN ──────────────────────────────────
+#
+# The system clock is not guaranteed to have been running across a suspend —
+# suspend_for's own note says so, two lines under where it was the only clock
+# asked. On a reader whose clock resumes where it left off, a perfectly good
+# fifteen-minute sleep read as "no time passed": every suspend from then on was
+# an ordinary sleep, with a line in the log saying the reader cannot do it.
+# The RTC is the clock that kept running, and the one the alarm is measured in.
+( : > "$PM_STATE"; : > "$RTC_WAKEALARM"
+  SUSPEND_WARNED=0
+  # since_epoch moves across the write; the system clock cannot move at all
+  # inside one call, which is exactly the reader being got wrong.
+  RTC_STEP=0
+  rtc_now() { RTC_NOW=$(( 1000 + RTC_STEP )); RTC_STEP=900; }
+  SUSPEND_MIN_DOWN=2 SUSPEND_SLACK=3 suspend_for 900 2>"$WORK/rtcdown.err" || exit 1
+  [ -s "$WORK/rtcdown.err" ] && exit 2     # and nothing was said about it
+  [ "$SUSPEND_EARLY" = "0" ] || exit 3     # it came back on its own alarm
+  exit 0 )
+check "$?" "a suspend the system clock slept through is measured by the RTC instead"
+
+# ── WHAT IS LEFT ON THE RTC WHEN THE SLEEP DID NOT HAPPEN ───────────────────
+#
+# An alarm armed on a machine that then stays awake is not harmless: it fires
+# into powerd's own sleep later and pulls the Kindle out of it for nothing.
+# Every way out of suspend_for that is not a completed sleep takes it back off.
+( : > "$PM_STATE"; : > "$RTC_WAKEALARM"; : > "$RTC_SINCE_EPOCH"
+  SUSPEND_WARNED=0
+  suspend_for 45 2>/dev/null && exit 1          # the straight-back refusal
+  [ "$(cat "$RTC_WAKEALARM")" = "0" ] || exit 2
+  # And a resume that came back early: that alarm is still pending, and the
+  # window the button just bought is minutes long.
+  : > "$RTC_WAKEALARM"
+  SUSPEND_MIN_DOWN=0 SUSPEND_SLACK=3 suspend_for 45 || exit 3
+  [ "$SUSPEND_EARLY" = "1" ] || exit 4
+  [ "$(cat "$RTC_WAKEALARM")" = "0" ] || exit 5
+  exit 0 )
+check "$?" "an alarm outlives neither a refused suspend nor an early wake"
+
+# And the probe puts back what it found. Settings → Info runs it to name the
+# RTC on the screen, and a status page that cancels the framework's own alarm
+# by being looked at is a side effect nobody would go looking for.
+( body=$(sed -n '/^rtc_pick() {/,/^}/p' "$KDIR/update_dash.sh")
+  printf '%s\n' "$body" | grep -q 'prev=$(cat "$node"' || exit 1
+  printf '%s\n' "$body" | grep -q '\[ "$prev" = "0" \] || echo "$prev" > "$node"' || exit 2
+  exit 0 )
+check "$?" "the RTC probe puts back any alarm it found"
+
+# ── THE EXTENSION BELONGS TO THE SUSPEND ────────────────────────────────────
+#
+# The wait is stretched over the empty minutes on the promise that the machine
+# will be DOWN for them. A reader whose /sys/power/state refuses, or that has
+# no RTC alarm to come back on, would otherwise spend that half hour awake —
+# with TOUCH=0 that is a panel answering nothing and repainting nothing for
+# thirty minutes, which is worse than the bug the extension fixes.
+( POWER=suspend AWAKE_UNTIL=0 MINUTE=0 RTC_PICKED=1
+  next_due_in() { NEXT_DUE=30; }
+  suspend_for() { SUSPEND_TRIED="$1"; return 1; }
+  nap_or_tap() { NAP_ARG="$1"; TAP=""; return 1; }
+  lost_time() { return 0; }
+  nap_to_minute
+  [ "${SUSPEND_TRIED:-0}" -gt 600 ] || exit 1      # the suspend was asked for it
+  [ "${NAP_ARG:-9999}" -le 60 ] || exit 2          # the fallback was not
+  exit 0 )
+check "$?" "a refused suspend hands the fallback a minute, not the half hour it asked to sleep for"
+
+# ── AND THE LOOP HAS TO HEAR ABOUT AN EARLY WAKE ────────────────────────────
+#
+# wake_interactive() repaints the page and puts the bar up, and then returns
+# into a loop that cannot tell this from a wait that simply ran out — and what
+# it does with one of those is dismiss the bar and repaint. The bar was erased
+# within milliseconds of being drawn: the press worked, the panel flashed
+# twice, and the button still looked dead.
+( POWER=suspend AWAKE_UNTIL=0 MINUTE=0 WAKE_MENU=1 RTC_PICKED=1
+  next_due_in() { NEXT_DUE=1; }
+  suspend_for() { SUSPEND_EARLY=1; return 0; }
+  wake_interactive() { WOKE_CALLED=1; return 0; }
+  nap_to_minute
+  [ "${WOKE_CALLED:-0}" = "1" ] || exit 1
+  [ "${WOKE_UP:-0}" = "1" ] || exit 2
+  exit 0 )
+check "$?" "an early wake puts the bar up and says so"
+
+( body=$(sed -n '/^while true; do/,$p' "$KDIR/update_dash.sh")
+  w=$(printf '%s\n' "$body" | grep -n 'WOKE_UP' | head -1 | cut -d: -f1)
+  d=$(printf '%s\n' "$body" | grep -n 'elif \[ "${MENU:-0}" != "0" \]' | head -1 | cut -d: -f1)
+  [ -n "$w" ] && [ -n "$d" ] || exit 1
+  [ "$w" -lt "$d" ] || exit 2
+  exit 0 )
+check "$?" "and the loop answers it before dismissing a bar nobody tapped"
 
 # THE WAKE WINDOW IS WHAT LETS THE TWO SETTINGS COEXIST. TOUCH=0 with
 # WAKE_MENU=1 is the combination worth having on a wall: nothing reads the
@@ -1683,6 +1806,24 @@ check "$?" "a truncated one keeps the last good payload instead of replacing it"
   exit 0 )
 check "$?" "and a run of failures is counted, so one hiccup is not a verdict"
 
+# AND THE LINE THAT SAYS SO IS SAID ONCE. A link that consistently cuts the
+# payload is 288 copies of one sentence a day in a ramdisk — the mistake
+# CONF_WARNED and SUSPEND_WARNED already exist to stop. Dropped by the next
+# whole payload, so a fault that comes back is reported again.
+( cp "$FIXTURE" "$TMP/data.txt"
+  TRUNC_WARNED=0
+  WGET_OK_HOST=10.9.9.42; HOST=10.9.9.42; DATA_TRUNCATE=1
+  export WGET_OK_HOST DATA_TRUNCATE
+  fetch_data 2>"$WORK/t1.err"
+  grep -q "incomplete payload" "$WORK/t1.err" || exit 1
+  fetch_data 2>"$WORK/t2.err"
+  [ -s "$WORK/t2.err" ] && exit 2
+  DATA_TRUNCATE=0 fetch_data || exit 3
+  fetch_data 2>"$WORK/t3.err"
+  grep -q "incomplete payload" "$WORK/t3.err" || exit 4
+  exit 0 )
+check "$?" "the incomplete-payload line is said once, not once a tick"
+
 # ── A place that stops being sent stops being drawn ──────────────────────────
 #
 # load_kv() ONLY EVER ASSIGNS. A sensor whose node went flat, a group switched
@@ -1735,6 +1876,53 @@ check "$?" "a stale readings zone draws the reason and the time it last worked"
   exit 0 )
 check "$?" "the cached page comes back after a reboot, and is not passed off as current"
 
+# AND IT IS WRITTEN FROM A PAYLOAD, NOT FROM ITSELF. The full tier calls
+# cache_save every hour whether the fetch worked or not, and what is in
+# data.txt when it did not is the cache, loaded at startup — so an offline
+# reader rewrote the same bytes to the eMMC once an hour and appended another
+# CACHED_AT line to them every time.
+( CACHE="$WORK/last2.txt"; rm -f "$CACHE"
+  cp "$FIXTURE" "$TMP/data.txt"
+  EVER_FRESH=0
+  LAST_OK="07:45"
+  cache_save && exit 1
+  [ -f "$CACHE" ] && exit 2
+  EVER_FRESH=1
+  cache_save || exit 3
+  [ "$(grep -c '^CACHED_AT=' "$CACHE")" = "1" ] || exit 4
+  # The hour after, with the cache itself in data.txt and nothing fetched since
+  cp "$CACHE" "$TMP/data.txt"
+  EVER_FRESH=0
+  cache_save && exit 5
+  [ "$(grep -c '^CACHED_AT=' "$CACHE")" = "1" ] || exit 6
+  # And not the same payload twice either: once the collector is down, every
+  # hour after it would rewrite the last good one with the same stamp on it.
+  cp "$FIXTURE" "$TMP/data.txt"
+  EVER_FRESH=1
+  cache_save && exit 7
+  # ...while something newer IS kept.
+  LAST_OK="08:45"
+  cache_save || exit 8
+  grep -q '^CACHED_AT="08:45"' "$CACHE" || exit 9
+  exit 0 )
+check "$?" "the cache is saved from a payload this run fetched, not rewritten from itself"
+
+# WHICH DAY, WHEN IT WAS NOT TODAY. HH:MM under readings three days old reads
+# as this afternoon on a page whose own clock is live — the one failure
+# cache_save's note calls worse than a blank panel.
+( CACHE="$WORK/last3.txt"
+  other=01.01; [ "$(date '+%d.%m')" = "01.01" ] && other=02.01
+  { cat "$FIXTURE"; printf 'CACHED_AT="17:40"\nCACHED_ON="%s"\n' "$other"; } > "$CACHE"
+  cache_load || exit 1
+  [ "$LAST_OK" = "$other 17:40" ] || { echo "got [$LAST_OK]" >&2; exit 2; }
+  # ...and today's cache is just the time, because the clock beside it agrees.
+  { cat "$FIXTURE"; printf 'CACHED_AT="17:40"\nCACHED_ON="%s"\n' "$(date '+%d.%m')"; } > "$CACHE"
+  cache_load || exit 3
+  [ "$LAST_OK" = "17:40" ] || { echo "got [$LAST_OK]" >&2; exit 4; }
+  cp "$FIXTURE" "$TMP/data.txt"
+  exit 0 )
+check "$?" "a cache from another day carries the day, not just the time"
+
 # ── The footer says what the panel knows about itself ────────────────────────
 # The battery badge on this page belongs to the outdoor NODE. The reader's own
 # battery — the one that decides whether the panel is on the wall next week —
@@ -1747,6 +1935,22 @@ check "$?" "the cached page comes back after a reboot, and is not passed off as 
   [ "$got" = "62% · asleep" ] || { echo "got [$got]" >&2; exit 1; }
   exit 0 )
 check "$?" "the footer carries the reader's own battery and the mode it is in"
+
+# AND THE WAKE WINDOW ONLY CHANGES ONE OF THEM. It is what holds the machine
+# UP, and it holds nothing else: under POWER=wifi the radio is still cut
+# between fetches while it is open, so reporting "awake" for two minutes after
+# every tap had the one line whose job is to say which mode the panel is in
+# saying the wrong one.
+( reset_log
+  load_data
+  FAKE_BATT=62 STATUS=1 MODE_LBL="awake|radio off|asleep"
+  POWER=wifi
+  wake_extend
+  draw_status
+  got=$(drawn_at "$STAT_X" "$(px_of "$STAT_SZ")")
+  [ "$got" = "62% · radio off" ] || { echo "got [$got]" >&2; exit 1; }
+  exit 0 )
+check "$?" "and a wake window does not rename the radio policy"
 
 # THE MODE IT IS IN, NOT THE ONE POWER NAMES: a panel inside its wake window is
 # awake whatever the setting says, and that is the one thing somebody standing
@@ -2679,8 +2883,21 @@ check "$(grep -q '10.9.9.42' "$WORK/find.txt" && echo 0 || echo 1)" \
 
 # The scan result has to outlive Stop, which deletes /tmp/dash — and a reboot,
 # which is a ramdisk. It lives beside dash.conf for that reason.
-check "$(grep -q 'DASH_SCAN_LIST:-\$SELF_DIR/collectors' "$KDIR/settings.sh" && echo 0 || echo 1)" \
-      "the scan list defaults to beside dash.conf, not under /tmp/dash"
+# ONE PATH, NAMED IN update_dash.sh, which settings.sh sources: this script
+# writes the list and the dashboard asks whether it exists, so a second
+# spelling of it is a scan whose results the other half cannot see. The cache
+# is the same story, and drive_dash's own run_settings — which passes a
+# DASH_DIR that is not settings.sh's own directory — is where the two would
+# first come apart.
+( DASH_LIB_ONLY=1; DASH_DIR="$KDIR"
+  unset DASH_SCAN_LIST DASH_CACHE
+  . "$KDIR/update_dash.sh"
+  [ "$SCAN_LIST" = "$KDIR/collectors" ] || exit 1
+  [ "$CACHE" = "$KDIR/last.txt" ] || exit 2
+  grep -q 'SELF_DIR/collectors' "$KDIR/settings.sh" && exit 3
+  grep -q 'SELF_DIR/last.txt' "$KDIR/settings.sh" && exit 4
+  exit 0 )
+check "$?" "the scan list and the cache are one path, beside dash.conf"
 rm -rf "$DASH_TMP"
 mkdir -p "$DASH_TMP"
 run_settings next > "$WORK/next.txt" 2>&1

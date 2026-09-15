@@ -30,11 +30,12 @@ SELF_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || SELF_DIR=$(dirname "$0")
 DASH_LIB_ONLY=1 . "$SELF_DIR/update_dash.sh"
 
 TMP="${DASH_TMP:-/tmp/dash}"
-# Beside dash.conf, NOT under /tmp/dash: stop.sh and the dashboard's own
-# cleanup() both `rm -rf` that directory, so a scan run before pressing Stop
-# left "Next collector" with nothing to step through — and a reboot cleared it
-# anyway, /tmp being a ramdisk. The list is as durable as the address it feeds.
-SCAN_LIST="${DASH_SCAN_LIST:-$SELF_DIR/collectors}"
+# SCAN_LIST and CACHE come from update_dash.sh, sourced above — beside
+# dash.conf rather than under /tmp/dash, because stop.sh and the dashboard's
+# own cleanup() both `rm -rf` that directory and a reboot clears it anyway. Not
+# spelled out again here: the dashboard asks whether the scan list exists and
+# this script writes it, so a second spelling is the two halves looking at
+# different files the day either path moves.
 mkdir -p "$TMP" 2>/dev/null
 
 conf_init
@@ -50,7 +51,7 @@ conf_load
 #
 # Read directly rather than through cache_load(), which would copy over the
 # running dashboard's own payload in /tmp while it is using it.
-load_kv "${DASH_CACHE:-$SELF_DIR/last.txt}" PAYLOAD 2>/dev/null
+load_kv "$CACHE" PAYLOAD 2>/dev/null
 load_layout
 # Type sizes as hundredths, so one number scales every screen here.
 UI_S=$(( ${RES_W:-600} * 100 / 600 ))

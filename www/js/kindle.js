@@ -132,11 +132,6 @@ var KD_ZONES = [
     fill:["jump","kd-card-units","Which units"] }
 ];
 
-function kdZoneDef(id) {
-  for (var i = 0; i < KD_ZONES.length; i++) if (KD_ZONES[i].id === id) return KD_ZONES[i];
-  return null;
-}
-
 // Kept for the round-trip: kdMaskOf() walks these to collect the checkboxes
 // the rows above rendered, and they are the list the firmware's constants are
 // compared against. Derived from KD_ZONES rather than written twice, so a zone
@@ -201,6 +196,15 @@ var kdFlags   = { bold: 1, unit: 2, age: 4, trend: 8 };
 var kdInks    = [];     // [{id, css}] from the firmware's own enum
 var kdAutoDec = 255;
 var kdOpen    = "hero"; // which row is expanded
+// Did the DEVICE's places actually arrive? Everything else on this page has a
+// sensible empty state; the eleven places do not. An empty kdZones is
+// indistinguishable from "eleven empty places", and one Save then posts that
+// over a layout nobody has seen — which is a new failure the single Save
+// button introduced, because the slots used to have a Save of their own that
+// this reader would never have pressed.
+// null until the first read answers either way — the rows are drawn once
+// before kdLoaded goes up, and "not read yet" must not print the warning.
+var kdSlotsOk = null;
 var kdBase    = "";     // the snapshot Save/Discard measure against
 var kdLoaded  = false;
 
@@ -230,10 +234,34 @@ var KD_SAMPLE = {
   dew_point:"3.1", aqi:"42", co2:"640", pm25:"12", pm10:"18", voc:"0.4",
   lux:"320", battery:"3.91", rssi:"-68", rain:"0.2", wind:"5"
 };
+// HOW THE DEVICE FORMATS EACH ONE — decimals and the unit it prints — mirrored
+// from KD_METRIC_STYLE in src/web/KindleSlots.h, which is what the panel reads.
+// "Automatic" decimals is that table's number, NOT the decimals control on this
+// page: that control is the temperature's, and the firmware applies it to
+// temperatures and to nothing else. Without this the preview drew "640.0 ppm"
+// and "71.0 %" — over-stating the width of every integer reading on a page
+// whose whole question is what fits.
+var KD_METRIC = {
+  temperature:{ d:1, u:"°" },      humidity:{ d:0, u:"%" },
+  humidity_amb:{ d:0, u:"%" },     dew_point:{ d:1, u:"°" },
+  pressure:{ d:0, u:"" },          aqi:{ d:0, u:"" },
+  co2:{ d:0, u:"ppm" },            eco2:{ d:0, u:"ppm" },
+  tvoc:{ d:0, u:"ppb" },           pm1:{ d:0, u:"µg/m³" },
+  pm25:{ d:0, u:"µg/m³" },         pm4:{ d:0, u:"µg/m³" },
+  pm10:{ d:0, u:"µg/m³" },         lux:{ d:0, u:"lx" },
+  uva:{ d:1, u:"" },               uvb:{ d:1, u:"" },
+  rain:{ d:1, u:"mm" },            rain_rate:{ d:1, u:"mm/h" },
+  rain_total:{ d:1, u:"mm" },      wind:{ d:1, u:"" },
+  wind_speed:{ d:1, u:"" },        wind_direction:{ d:0, u:"°" },
+  soil_moisture:{ d:0, u:"%" },    flow_rate:{ d:1, u:"" },
+  battery_voltage:{ d:2, u:"V" },  battery_percent:{ d:0, u:"%" },
+  battery_days:{ d:0, u:"d" }
+};
+// What a metric not in that table falls back to: the firmware uses one decimal
+// and whatever unit the reading itself carried, which this page does not have —
+// so these are the sensible guesses for the machine metrics a node also sends.
 var KD_UNIT = {
-  temperature:"°", dew_point:"°", humidity:"%", humidity_amb:"%",
-  pressure:"hPa", co2:"ppm", pm25:"µg", pm10:"µg", lux:"lx",
-  battery:"V", rssi:"dBm", rain:"mm", wind:"m/s"
+  battery:"V", rssi:"dBm", voc:"ppb", wind:"m/s"
 };
 
 function kdSlot(key) {
@@ -311,19 +339,26 @@ function kdPvValue(z) {
   if (!z.sensor || !z.metric) return "";
   var v = KD_SAMPLE[z.metric];
   if (v === undefined) return "42";
-  var dec = (z.decimals === kdAutoDec) ? (kdVal("kd-dec", "1") | 0) : (z.decimals | 0);
+  // Pressure is re-united here rather than re-formatted: the unit it is shown
+  // in decides both the number and its decimals, exactly as the firmware does.
   if (z.metric === "pressure") {
     var n = parseFloat(v), u = kdVal("kd-press", "0") | 0;
     if (u === 1) return String(Math.round(n * 0.750062));
     if (u === 2) return (n * 0.02953).toFixed(2);
     return String(Math.round(n));
   }
-  if (String(v).indexOf(".") >= 0 || dec > 0) return parseFloat(v).toFixed(dec);
-  return v;
+  var st = KD_METRIC[z.metric];
+  var dec = (z.decimals === kdAutoDec) ? (st ? st.d : 1) : (z.decimals | 0);
+  // The decimals control predates the places and still wins for temperatures,
+  // which is what the firmware does with it — and only for those.
+  if (z.metric === "temperature") dec = kdVal("kd-dec", "1") | 0;
+  return parseFloat(v).toFixed(dec > 3 ? 3 : dec);
 }
 function kdPvUnit(z) {
   if (!(z.flags & kdFlags.unit) || !z.metric) return "";
   if (z.metric === "pressure") return ["hPa","mmHg","inHg"][kdVal("kd-press","0") | 0];
+  var st = KD_METRIC[z.metric];
+  if (st) return st.u;
   return KD_UNIT[z.metric] || "";
 }
 function kdPvCaption(z) { return z.label || z.shown || ""; }
@@ -682,6 +717,17 @@ function kdRenderZones() {
   var bold = kdLoaded ? kdMaskOf(KD_BOLD, "kd-b-") : kdBoldInit;
 
   var html = "", spanOpened = false;
+  // SAID WHERE THE ROWS ARE. A slots read that failed leaves every place
+  // looking empty, and eleven empty rows are exactly what a device with
+  // nothing configured looks like — so without this the form quietly
+  // misdescribes a reader that may be fully set up. kindleSave() will not
+  // send them; this is the half the reader can see.
+  if (kdSlotsOk === false) {
+    html += "<p class='hint' id='kd-zones-unread' style='margin:0 0 10px'>" +
+            "<strong>The readings could not be read from this device.</strong> " +
+            "The places below are not what it holds, and Save leaves them " +
+            "exactly as they are. Reload the page to try again.</p>";
+  }
   for (var i = 0; i < KD_ZONES.length; i++) {
     var d = KD_ZONES[i], open = kdOpen === d.id;
 
@@ -848,11 +894,22 @@ function kindleSlotEdit(key, field, ev) {
       var ms = kdMetricsFor(v);
       if (ms.indexOf(z.metric) < 0) z.metric = ms.length ? ms[0] : "";
     }
+  }
+  // THE ROW SAYS WHAT IS IN IT, so the three fields that change what it says
+  // redraw it. The metric is most of the row: the summary under the name, the
+  // value badge beside it, and the Tendency arrow — which exists only for
+  // pressure, and stayed on screen with its flag still set after the place was
+  // moved to a metric the device ignores it for.
+  //
+  // Not the caption: it is typed, the dispatcher fires on "input" as well as
+  // "change", and rebuilding on a keystroke takes the cursor with it. These
+  // three are dropdowns, which commit once.
+  if (field === "sensor" || field === "metric" || field === "decimals") {
     kdRenderZones();
   }
-  // The caption is typed, and the dispatcher listens on "input" as well as
-  // "change": redrawing the rows on every keystroke would take the cursor with
-  // it. The panel is redrawn, because that is where the caption appears.
+  // The panel always, because every one of these fields appears on it — the
+  // caption included, which is why a caption being typed still redraws this
+  // much and no more.
   kdRenderPreview();
   kdDirtyRefresh();
 }
@@ -910,6 +967,14 @@ var KD_CAD = {
               says:"Reloads at most every ten minutes and ignores new data until then. The longest battery life; the clock can be ten minutes behind." }
 };
 
+// "By hand…" once chosen stays chosen. kdCadenceName() reads the VALUES, and
+// the values in the custom fields routinely match a preset — they start at
+// whatever the last named choice left in them. So every edit anywhere on the
+// page hid the fields the reader had just opened, and typing 600 into the
+// interval passed through 60 on the way, which IS a preset: the field being
+// typed into vanished after the second keystroke and took the focus with it.
+var kdCadOpen = false;
+
 function kdCadenceName() {
   var sec = kdVal("kd-refresh", "") | 0;
   var follow = kdVal("kd-follow", "1"), pin = kdVal("kd-clockpin", "1");
@@ -925,14 +990,15 @@ function kdCadenceRender() {
   if (!seg) return;
   var name = kdCadenceName();
   var b = seg.querySelectorAll("button");
+  var marked = kdCadOpen ? "custom" : name;
   for (var i = 0; i < b.length; i++) {
     var raw = b[i].getAttribute("data-args") || "[]";
-    var mine = raw.indexOf('"' + name + '"') >= 0;
+    var mine = raw.indexOf('"' + marked + '"') >= 0;
     b[i].classList.toggle("active", mine);
     b[i].setAttribute("aria-pressed", mine ? "true" : "false");
   }
   var custom = document.getElementById("kd-cad-custom");
-  if (custom) custom.style.display = (name === "custom") ? "" : "none";
+  if (custom) custom.style.display = (name === "custom" || kdCadOpen) ? "" : "none";
   var says = document.getElementById("kd-cad-says");
   if (says) says.textContent = KD_CAD[name] ? KD_CAD[name].says : "";
   var badge = document.getElementById("kd-cad-badge");
@@ -945,26 +1011,16 @@ function kdCadenceRender() {
 function kindleCadence(name) {
   if (name === "custom") {
     // Nothing to set: the fields are simply revealed, holding whatever the
-    // named choice last left in them.
-    var custom = document.getElementById("kd-cad-custom");
-    if (custom) custom.style.display = "";
-    var says = document.getElementById("kd-cad-says");
-    if (says) says.textContent = "";
-    var seg = document.getElementById("kd-cad");
-    if (seg) {
-      var b = seg.querySelectorAll("button");
-      for (var i = 0; i < b.length; i++) {
-        var mine = (b[i].getAttribute("data-args") || "").indexOf('"custom"') >= 0;
-        b[i].classList.toggle("active", mine);
-        b[i].setAttribute("aria-pressed", mine ? "true" : "false");
-      }
-    }
+    // named choice last left in them. The latch is what keeps them revealed.
+    kdCadOpen = true;
+    kdCadenceRender();
     var f = document.getElementById("kd-refresh");
     if (f) f.focus();
     return;
   }
   var c = KD_CAD[name];
   if (!c) return;
+  kdCadOpen = false;
   kdSet("kd-refresh", c.sec);
   kdSet("kd-follow", c.follow);
   kdSet("kd-clockpin", c.pin);
@@ -1036,14 +1092,17 @@ function kindleRender(d) {
   kdSet("kd-outdoor-sensor", d.outdoor_sensor || "");
   kdSet("kd-indoor-sensor",  d.indoor_sensor || "");
 
-  // THE PREVIEW IS THE BROWSER PAGE, so the badge is that page's width — the
-  // build-time one it states further down. The FBInk resolution beside it is a
-  // different number for a different renderer, and putting it here said the
-  // preview was 1072 px wide while it was drawn at 600.
+  // THE BADGE IS ABOUT THE DRAWING UNDER IT, which is the 600 px layout these
+  // coordinates come from — KINDLE_PAGE_W scales every size in the firmware's
+  // stylesheet from that same 600, so the proportions hold at any width. Both
+  // the FBInk resolution and a build-time page width are numbers for something
+  // else, and either one printed here alone says the preview is a width it is
+  // not.
   var size = document.getElementById("kd-pv-size");
   if (size) {
     var w = (d.page_w | 0) || 600;
-    size.textContent = w + " px wide";
+    size.textContent = (w === 600) ? "600 px wide"
+                                   : ("600 px wide · this build draws " + w);
   }
 
   // Stated, not settable. The width is a build-time constant because every
@@ -1062,6 +1121,9 @@ function kindleRender(d) {
   kdRenderZones();
   kindleFaceChangedQuiet();
   kindleClockChanged();
+  // What the DEVICE holds decides whether the fields start open; the latch is
+  // the reader's choice within this page load, and a reload is not one.
+  kdCadOpen = false;
   kdCadenceRender();
   kdRenderPreview();
 }
@@ -1087,6 +1149,7 @@ function kindleRefresh() {
   ])
     .then(function (both) {
       var s = both[1];
+      kdSlotsOk = !!s;
       if (s) {
         kdZones = s.zones || {};
         kdOrder = s.order || [];
@@ -1168,7 +1231,33 @@ function kdSlotsBody() {
 // somebody standing in front of a reader that has not repainted yet wondering
 // whether it worked.
 function kindleSave() {
-  var slots = 0;
+  var slots = 0, wrote = "";
+  // THE PLACES ARE NOT SENT IF THEY WERE NEVER READ. A slots GET that 404s
+  // (older firmware), times out, or comes back refused leaves every place
+  // looking empty in a form that cannot tell that from a device with nothing
+  // configured — and posting it back erases the reader's whole layout while
+  // reporting success. The appearance is still saved: it is on screen, it was
+  // read, and it is what the reader came to change.
+  if (!kdSlotsOk) {
+    return postWithCsrf("/api/kindle/config", {
+      body: kdConfigBody(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) throw new Error((d && d.error) || "the appearance was refused");
+        return kindleRefresh();
+      })
+      .then(function () {
+        kdMsg("Saved the appearance. The readings could not be read from the " +
+              "reader, so they were left exactly as they are — reload the page " +
+              "to try again.", "ok");
+      })
+      .catch(function (e) {
+        kdMsg("Save failed: " + ((e && e.message) || "unknown") +
+              ". Nothing on the reader has changed.", "err");
+      });
+  }
   return postWithCsrf("/api/kindle/config", {
     body: kdConfigBody(),
     headers: { "Content-Type": "application/x-www-form-urlencoded" }
@@ -1176,6 +1265,10 @@ function kindleSave() {
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d || !d.ok) throw new Error((d && d.error) || "the appearance was refused");
+      // Written, and the reader will see it on the next repaint whatever
+      // happens to the second half — so a failure below cannot claim nothing
+      // changed.
+      wrote = "The appearance was saved; the readings were not.";
       return postWithCsrf("/api/kindle/slots", {
         body: kdSlotsBody(),
         headers: { "Content-Type": "application/json" }
@@ -1192,8 +1285,8 @@ function kindleSave() {
             " and the appearance. The reader picks it up on its next repaint.", "ok");
     })
     .catch(function (e) {
-      kdMsg("Save failed: " + ((e && e.message) || "unknown") +
-            ". Nothing on the reader has changed.", "err");
+      kdMsg("Save failed: " + ((e && e.message) || "unknown") + ". " +
+            (wrote || "Nothing on the reader has changed."), "err");
     });
 }
 
@@ -1228,9 +1321,6 @@ function kindleDefaults() {
 
   kdShowInit = 0xFF;   // KSHOW_ALL
   kdBoldInit = 0;
-  kdLoaded = false;    // so the rows take the defaults above, not the DOM
-  kdRenderZones();
-  kdLoaded = true;
 
   // The built-in layout, rebuilt from the two sensors the page is pointed at,
   // so "back to the built-in design" means the same thing for the places as it
@@ -1259,6 +1349,19 @@ function kindleDefaults() {
     in3:  z(inn, "aqi",         kdFlags.unit, 1)
   };
   kdGroups = { out:"", in:"" };
+
+  // THE ROWS ARE DRAWN AFTER THE PLACES ARE REPLACED, not before. Rendering
+  // first left every row — the open editor's five controls, each collapsed
+  // row's "balcony · temperature", the filled counts — describing the layout
+  // this button had just thrown away, while the preview beside them showed the
+  // new one. Touching any of those stale controls then wrote its old value
+  // back into the fresh layout.
+  //
+  // kdLoaded=false while they are drawn, so the switches take the defaults set
+  // above rather than what is still checked in the DOM.
+  kdLoaded = false;
+  kdRenderZones();
+  kdLoaded = true;
 
   kindleTouched();
   kdMsg("The built-in design is in the form. Press Save to keep it.", "ok");

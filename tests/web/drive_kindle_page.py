@@ -380,6 +380,89 @@ with sync_playwright() as p:
     check(new_metric in ("temperature", "humidity", "pressure", "aqi"),
           "changing the sensor keeps a reading it actually publishes (%r)" % new_metric)
 
+    # ── The preview draws the numbers the DEVICE would draw ─────────────────
+    # "Automatic" decimals is the metric table's own number in the firmware
+    # (KD_METRIC_STYLE in src/web/KindleSlots.h), and the decimals control on
+    # this page is the temperature's — the firmware applies it to temperatures
+    # and nothing else. Running every reading through it drew "640.0 ppm" and
+    # "71.0 %", over-stating the width of every integer reading on a page whose
+    # whole question is what fits where.
+    ints = pg.evaluate(
+        "(function(){var z={sensor:'x',metric:'co2',flags:kdFlags.unit,"
+        "decimals:kdAutoDec,label:'',ink:0};"
+        "var a=kdPvValue(z)+kdPvUnit(z);"
+        "z.metric='humidity'; var b=kdPvValue(z)+kdPvUnit(z);"
+        "z.metric='temperature'; var c=kdPvValue(z);"
+        "z.metric='pm25'; var d=kdPvValue(z)+kdPvUnit(z);"
+        "return [a,b,c,d];})()")
+    check(ints[0] == "640ppm", "an integer reading is drawn as one (%r)" % ints[0])
+    check(ints[1] == "71%", "and so is a humidity (%r)" % ints[1])
+    check(ints[3] == "12\u00b5g/m\u00b3",
+          "with the unit the panel prints, not a short form (%r)" % ints[3])
+    # The one metric the control does apply to, whatever it is set to here.
+    want_dec = int(pg.input_value("#kd-dec") or 0)
+    check(ints[2] == ("%.*f" % (want_dec, 8.4)),
+          "the decimals control still rules the temperature (%r at dec=%d)"
+          % (ints[2], want_dec))
+
+    # The badge over the drawing describes the DRAWING: these coordinates are
+    # the 600 px layout, and KINDLE_PAGE_W scales the firmware's sizes from
+    # that same 600, so a build-time width printed here alone says the preview
+    # is a width it is not.
+    badge = pg.inner_text("#kd-pv-size").lower()
+    check(badge.startswith("600 px wide"), "the preview says how wide IT is (%r)" % badge)
+
+    # ── A row says what is in it ────────────────────────────────────────────
+    # The metric is most of a row: the summary under the name, the value badge
+    # beside it, and the Tendency arrow — which exists for pressure only, and
+    # stayed on screen with its flag still set after the place was moved to a
+    # metric the firmware ignores it for.
+    g1 = "#kd-zone-g1"
+    if pg.locator(g1).count() == 0:          # the hit target toggles
+        pg.click("#kd-panel .kd-hit[data-args='[\"grid\"]']")
+        pg.wait_for_timeout(400)
+    pg.locator(g1 + " select").nth(0).select_option(index=1)
+    pg.wait_for_timeout(300)
+    mets = pg.locator(g1 + " select").nth(1)
+    opts = mets.locator("option").all_inner_texts()
+    if "pressure" in opts:
+        mets.select_option("pressure")
+        pg.wait_for_timeout(300)
+        check(pg.locator(g1 + " .kd-flag", has_text="Tendency").count() == 1,
+              "a pressure place offers the tendency arrow")
+        mets.select_option("temperature")
+        pg.wait_for_timeout(300)
+        check(pg.locator(g1 + " .kd-flag", has_text="Tendency").count() == 0,
+              "and moving it off pressure takes the arrow away with it")
+        head = pg.inner_text(g1 + " .kd-slot-head")
+        check("\u00b0" in head or "8" in head,
+              "with the value badge redrawn for the new reading (%r)" % head.strip()[:40])
+
+    # ── "By hand…" stays open once it has been chosen ───────────────────────
+    # kdCadenceName() reads the VALUES, and the custom fields start at whatever
+    # the last named choice left in them — so every edit anywhere on the page
+    # hid the fields the reader had just opened, and typing 600 into the
+    # interval passes through 60, which IS a preset.
+    pg.click('[data-click="kindleCadence"][data-args=\'["balanced"]\']')
+    pg.wait_for_timeout(300)
+    check(not pg.is_visible("#kd-cad-custom"), "a named cadence keeps the fields shut")
+    pg.click('[data-click="kindleCadence"][data-args=\'["custom"]\']')
+    pg.wait_for_timeout(300)
+    check(pg.is_visible("#kd-cad-custom"), "By hand opens them")
+    pg.click("#kd-s-32")                      # an unrelated switch, twice
+    pg.wait_for_timeout(200)
+    pg.click("#kd-s-32")
+    pg.wait_for_timeout(200)
+    check(pg.is_visible("#kd-cad-custom"),
+          "and an edit somewhere else does not shut them again")
+    pg.fill("#kd-refresh", "60")              # a value that matches a preset
+    pg.wait_for_timeout(300)
+    check(pg.is_visible("#kd-cad-custom"),
+          "nor does typing a number that happens to match one")
+    pg.click('[data-click="kindleCadence"][data-args=\'["balanced"]\']')
+    pg.wait_for_timeout(300)
+    check(not pg.is_visible("#kd-cad-custom"), "and picking a named one shuts them")
+
     # ── Per-place ink ───────────────────────────────────────────────────────
     # How dark a value is drawn is the reader's, per place. The selects are
     # sensor, reading, caption, decimals, ink — so ink is the last one.
@@ -405,6 +488,18 @@ with sync_playwright() as p:
     pg.wait_for_timeout(700)
     check(pg.input_value("#kd-face") == "0", "restoring fills the form")
     check(pg.is_visible("#kd-savebar"), "and leaves it unsaved, waiting for Save")
+    # AND THE ROWS, WHICH ARE HALF THE THING BEING RESTORED. They were drawn
+    # before the places were replaced, so every row still described the layout
+    # the button had just thrown away while the preview beside them showed the
+    # new one — and touching any of those stale controls wrote its old value
+    # back into the fresh layout.
+    check(pg.evaluate("kdZones.g3 && kdZones.g3.sensor === ''"),
+          "the built-in design leaves the last grid places empty")
+    if pg.locator("#kd-zone-g3").count() == 0:
+        pg.click("#kd-panel .kd-hit[data-args='[\"grid\"]']")
+        pg.wait_for_timeout(400)
+    check(pg.locator("#kd-zone-g3 .badge", has_text="empty").count() == 1,
+          "and the rows say so, rather than still describing the old layout")
     live = pg.evaluate(
         "fetch('/api/kindle/config').then(function(r){return r.json()})")
     check(live["face"] == 2, "nothing on the device changed until Save (%r)" % live["face"])
@@ -425,6 +520,63 @@ with sync_playwright() as p:
     as_built = pg.locator("#kd-lang option[value='0']").inner_text()
     check("English" in as_built,
           f"the as-built option names the build's language ({as_built!r})")
+
+    # ── A LAYOUT NOBODY COULD READ IS A LAYOUT NOBODY MAY OVERWRITE ─────────
+    #
+    # The single Save writes both endpoints, which means a slots GET that fails
+    # — older firmware with no such route, a timeout, a device that rebooted —
+    # is no longer harmless: kdZones stays empty, the form shows eleven empty
+    # places because it cannot tell that from a device with nothing configured,
+    # and the first Save posts that over the reader's whole layout and reports
+    # success. While the places had a Save of their own, this reader would
+    # never have pressed it.
+    before = pg.evaluate(
+        "fetch('/api/kindle/slots').then(function(r){return r.json()})")
+    pg.route("**/api/kindle/slots*",
+             lambda route: route.abort() if route.request.method == "GET"
+             else route.continue_())
+    # RELOADED, not navigated: the address already carries this page's hash, so
+    # goto() would be a same-document navigation and fetch nothing at all.
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_timeout(1400)
+    check(pg.evaluate("kdSlotsOk") is False, "a slots read that failed is remembered")
+    check(pg.locator("#kd-zones-unread").count() == 1,
+          "and the rows say they are not the device's, rather than looking empty")
+    pg.unroute("**/api/kindle/slots*")
+    pg.select_option("#kd-face", "1")
+    pg.wait_for_timeout(200)
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    after = pg.evaluate(
+        "fetch('/api/kindle/slots').then(function(r){return r.json()})")
+    check(after["zones"] == before["zones"],
+          "one Save cannot erase the places it was never able to read")
+    cfg = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(cfg["face"] == 1, "while the half it did read is still saved")
+    said = pg.inner_text("#kd-msg")
+    check("left exactly as they are" in said,
+          "and the page says which half went (%r)" % said.strip()[:80])
+
+    # And the other way round: the appearance written, the places refused. The
+    # message has to say so — "Nothing on the reader has changed" over a device
+    # that has already repainted is the same untrue save report the one-Save
+    # redesign exists to end.
+    # The pattern ends in a star because postWithCsrf() hangs ?csrf=... on the
+    # URL: without it the POST is not matched and the abort never happens.
+    pg.route("**/api/kindle/slots*",
+             lambda route: route.abort() if route.request.method == "POST"
+             else route.continue_())
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_timeout(1400)
+    pg.select_option("#kd-face", "3")
+    pg.wait_for_timeout(200)
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    said = pg.inner_text("#kd-msg")
+    check("The appearance was saved" in said,
+          "a half-written save says what was written (%r)" % said.strip()[:90])
+    pg.unroute("**/api/kindle/slots*")
 
     shot = os.environ.get("SCREENSHOT")
     if shot:
