@@ -70,6 +70,13 @@ PLATFORM = {
 # vocabulary the firmware defines. Deliberately NOT the defaults: a page that
 # renders only when every place holds a plain temperature is a page whose
 # dropdowns have never been proven to reflect what the device holds.
+# What the collector's metric table renders a caption as — see kdSlotCaption()
+# in src/web/KindleSlotStore.cpp. Only the metrics this fixture uses.
+SHOWN = {
+    "temperature": "TEMP", "humidity": "HUM", "pressure": "PRESS",
+    "dew_point": "DEW", "aqi": "AQI", "pm25": "PM2.5", "co2": "CO2",
+}
+
 KINDLE_SLOTS = {
     "zones": {
         "hero": {"sensor": "balcony", "metric": "temperature", "label": "НАВЪН",
@@ -149,6 +156,19 @@ KINDLE = {
     "lang": 2,
     "lang_built": 1,
     "page_w": 600,
+    # The cadence and the reader, which the page now offers as named choices
+    # and a panel size. Deliberately NOT the balanced preset: the control that
+    # matters is the one that can show a state nobody chose from its own list.
+    "refresh_sec": 180,
+    "follow_data": 0,
+    "clock_pin_refresh": 1,
+    "fbink_res_w": 1072,
+    # The page's shape. 0 is "follow the collector", which is what a device
+    # that has never been asked holds — and the value the driver has to be able
+    # to move away from and back to.
+    "layout_mode": 0,
+    "outdoor_sensor": "balcony",
+    "indoor_sensor": "",
 }
 
 
@@ -201,6 +221,29 @@ class H(http.server.SimpleHTTPRequestHandler):
         # The sensors page sends the WHOLE platform config as a JSON document,
         # unlike every form on the other pages. Read it before the form parse
         # below, which would turn it into one nonsense key.
+        if path == "/api/kindle/slots":
+            # THE OTHER HALF OF ONE SAVE. The page writes the appearance and
+            # then the places, and reports the count this answers with — so a
+            # mock that swallowed the document would let a page that never
+            # sent the places look like one that did.
+            doc = self._read_json()
+            if doc is None or "zones" not in doc:
+                return self._json({"ok": False, "error": "bad json"}, 400)
+            # `shown` IS THE DEVICE'S, NOT THE FORM'S. The collector derives
+            # the caption a place will render from its metric table and sends
+            # it down on every read; the form does not send it back, because
+            # the firmware ignores it and it is a quarter of the payload. A
+            # mock that stored the posted document verbatim therefore dropped
+            # it — and the page's placeholder, which is that value, came back
+            # empty after the first save. Derived here, as the firmware does.
+            for key, z in doc["zones"].items():
+                z["shown"] = SHOWN.get(z.get("metric", ""), "")
+            KINDLE_SLOTS["zones"] = doc["zones"]
+            KINDLE_SLOTS["group_out_set"] = doc.get("group_out", "")
+            KINDLE_SLOTS["group_in_set"] = doc.get("group_in", "")
+            n = sum(1 for z in doc["zones"].values()
+                    if z.get("sensor") and z.get("metric"))
+            return self._json({"ok": True, "count": n})
         if path == "/save_platform":
             doc = self._read_json()
             if doc is None:
@@ -224,11 +267,14 @@ class H(http.server.SimpleHTTPRequestHandler):
             # re-read returns — the round trip is the thing worth proving,
             # since the page rebuilds itself from the GET after every save.
             for k in ("face", "bold", "show", "clock_style", "time_format",
-                      "date_format", "pressure_unit", "decimals", "lang"):
+                      "date_format", "pressure_unit", "decimals", "lang",
+                      "refresh_sec", "follow_data", "clock_pin_refresh",
+                      "fbink_res_w", "layout_mode"):
                 if k in body:
                     KINDLE[k] = int(body[k][0])
-            if "face_custom" in body:
-                KINDLE["face_custom"] = body["face_custom"][0]
+            for k in ("face_custom", "outdoor_sensor", "indoor_sensor"):
+                if k in body:
+                    KINDLE[k] = body[k][0]
             return self._json({"ok": True})
         if path == "/api/espnow/forget":
             STATUS["nodes"] = [x for x in STATUS["nodes"]

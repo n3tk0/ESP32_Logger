@@ -755,7 +755,7 @@ synchronised node.
 | Method | Route | Auth | Purpose |
 |---|---|---|---|
 | GET | `/api/kindle/config` | read | How `/kindle` is drawn, plus its build-time width |
-| POST | `/api/kindle/config` | CSRF | Face, weight, clock style, formats, which blocks are drawn |
+| POST | `/api/kindle/config` | CSRF | Face, weight, clock style, formats, which blocks are drawn, and the page's shape |
 | GET | `/api/kindle/slots` | read | What is in each of the eleven places, plus the layout's own vocabulary |
 | POST | `/api/kindle/slots` | CSRF | Replace the whole layout (JSON body) |
 

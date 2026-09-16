@@ -139,6 +139,13 @@ inline void kdSkinCss(StringT& out, const KindleConfig& k) {
     //
     // box-sizing is border-box for the whole page, so a border added here comes
     // out of the padding rather than adding to the height.
+    //
+    // AND EACH ARM WRITES ITS STANDALONE TWIN BESIDE IT, at the same 114 px the
+    // standalone sheet gives the plain clock. Not because the style changes in
+    // that mode — it does not — but because `.sa .clock` in the sheet above is
+    // two classes to these rules' one: without a twin here, a boxed clock in
+    // standalone would take the sheet's plain size and its plate would be the
+    // wrong height. The twin is more specific AND later, so it wins.
     switch (k.clockStyle) {
         case KCLOCK_BOXED:
             // The same treatment the current day already gets in the week
@@ -158,6 +165,16 @@ inline void kdSkinCss(StringT& out, const KindleConfig& k) {
             out += "px;letter-spacing:";
             out += kdPx(-2);
             out += "px}";
+            // 110 + 4 of margin is the 114.
+            out += ".sa .clock{height:";
+            out += kdPx(110);
+            out += "px;font-size:";
+            out += kdPx(96);
+            out += "px;line-height:";
+            out += kdPx(110);
+            out += "px;margin-bottom:";
+            out += kdPx(4);
+            out += "px}";
             break;
 
         case KCLOCK_RULED:
@@ -175,6 +192,14 @@ inline void kdSkinCss(StringT& out, const KindleConfig& k) {
             out += kdPx(2);
             out += "px;padding-top:";
             out += kdPx(16);
+            out += "px}";
+            // 18 of padding + 96 of line is the 114.
+            out += ".sa .clock{font-size:";
+            out += kdPx(82);
+            out += "px;line-height:";
+            out += kdPx(96);
+            out += "px;padding-top:";
+            out += kdPx(18);
             out += "px}";
             break;
 
@@ -194,6 +219,18 @@ inline void kdSkinCss(StringT& out, const KindleConfig& k) {
             out += "px;letter-spacing:";
             out += kdPx(1);
             out += "px;color:#444}";
+            // 86 + 28 is the same 114, and the date line grows with it.
+            out += ".sa .clock{height:";
+            out += kdPx(86);
+            out += "px;font-size:";
+            out += kdPx(74);
+            out += "px;line-height:";
+            out += kdPx(86);
+            out += "px}.sa .clock-d{height:";
+            out += kdPx(28);
+            out += "px;font-size:";
+            out += kdPx(16);
+            out += "px}";
             break;
 
         case KCLOCK_PLAIN:
@@ -302,6 +339,29 @@ inline int kdPressureDecimals(uint8_t unit) {
 // ---------------------------------------------------------------------------
 // Bounds
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Which shape the page is drawn in
+// ---------------------------------------------------------------------------
+// THE WHOLE DECISION, as arithmetic over four facts, so that every arm of it
+// can be exercised on the build host rather than only on a device that has to
+// be taken off its wifi to reach the interesting one. KindleDashboard.cpp's
+// kdStandalone() is the three-line caller that reads those facts off the
+// running collector.
+//
+// `fetchedAt` is 0 when the forecast has never once been answered, which is a
+// different fact from a stale one and lands on the same answer: there is
+// nothing to put in that band.
+inline bool kdStandaloneDecide(uint8_t layoutMode, bool haveForecastModule,
+                               bool apMode, uint32_t fetchedAt, uint32_t now,
+                               uint32_t staleAfterS) {
+    if (layoutMode == KLAYOUT_NORMAL)     return false;
+    if (layoutMode == KLAYOUT_STANDALONE) return true;
+    if (!haveForecastModule) return true;
+    if (apMode)              return true;
+    if (!fetchedAt)          return true;
+    return now > fetchedAt && (now - fetchedAt) > staleAfterS;
+}
+
 // Applied on the way in from the API and again on the way out to the page.
 // Twice, because a config.bin can also arrive by import or from a firmware
 // that wrote a field this one has since narrowed, and a stylesheet built from
@@ -319,6 +379,9 @@ inline void kdSkinClamp(KindleConfig& k) {
     // built" — which is also what an older config's reserved byte reads as, so
     // an upgrade and a corrupt byte land on the same safe answer.
     if (k.lang > KLANG_BG)              k.lang = KLANG_AUTO;
+    // Same reasoning, same safe answer: KLAYOUT_AUTO is both the older
+    // config's reserved byte and what a value nobody recognises becomes.
+    if (k.layoutMode > KLAYOUT_STANDALONE) k.layoutMode = KLAYOUT_AUTO;
     k.boldZones &= 0x01FF;
     k.showFlags &= KSHOW_ALL;
     k.faceCustom[sizeof(k.faceCustom) - 1] = '\0';

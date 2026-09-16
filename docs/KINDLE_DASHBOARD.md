@@ -356,7 +356,7 @@ plus how old the reading is: `-2.4 до 15.3° · 3 мин`. It is composed on t
 collector, by `kdSubLine()`, so the wording, the unit and the rounding are the
 page's and not each renderer's, and it is set in the page's mid grey rather than
 its dark one — it is context for the number above it, not a reading in its own
-right. Switch it off in the zone table's **Shown** column, on the
+right. Switch it off with the region's **Shown** switch, on the
 *24-hour low-to-high* row.
 
 The pair is the one thing on the page that must not reflow, so it is `nowrap`
@@ -517,28 +517,43 @@ because it is served to a browser with no JavaScript and sometimes no touch
 panel, and a form there would be a worse version of the one that already
 exists.
 
-### The zone table is that page's index
+### The panel is that page's index
 
-**Every region of the panel is one row**, in the order the panel draws them,
-carrying the two switches that belong to it and a way through to whatever fills
-it — a jump to the control further down the same page, a link to the page that
-actually owns it, or a plain statement that nothing configures it.
+**It configures a picture, so it shows the picture.** The panel is drawn beside
+the form at its own 600×800 coordinates — the ones in
+`kindle/layout/600x800.conf`, so the preview and the FBInk panel cannot drift
+on where a thing sits — and it is drawn from the values *in the form* rather
+than the ones on the device. Every question the form asks (what does Bold do,
+how tall is the boxed clock, did switching that region off leave a hole) used
+to be answerable only by saving, walking to the reader, and waiting for it to
+repaint.
 
-It replaced three lists. A grid of nine checkboxes headed *Weight*, a grid of
-eight headed *What is drawn*, and a card of eleven place-editors: three
-different namings of the same regions, in three different orders. "The grid"
-was in two of them and meant the same thing. "Beside the headline" was in two
-and meant the same thing. The forecast was in one and could not be configured
-from that page at all. To answer *where do I turn this on* the reader had to
-hold the whole layout in their head and then guess which of the three lists
-owned it.
+**And it is the navigation: tap a region and that region opens.** Everything
+about it is then in one place — whether it is drawn, whether its figures are
+heavy, and which reading fills it.
 
-| Column | |
+That replaced three lists and then a table. A grid of nine checkboxes headed
+*Weight*, a grid of eight headed *What is drawn*, and a card of eleven
+place-editors: three different namings of the same regions, in three different
+orders. "The grid" was in two of them and meant the same thing. The forecast
+was in one and could not be configured from that page at all. The table that
+followed fixed the naming and the order, and kept the split that mattered
+most: a region's two switches were in it, and the reading that filled the
+region was eleven always-open editors further down — about a hundred controls
+in one scroll, **saved by a different button**.
+
+| On the row | |
 |---|---|
-| **Zone** | the region, and one line saying where on the panel it is |
+| the region's name, and one line saying where on the panel it is | |
 | **Shown** | its `KSHOW_*` bit, or *Always* for one that cannot be turned off, or *Module* for the forecast, which is a build-time feature rather than a setting |
 | **Bold** | its `KBOLD_*` bit, or a dash for a region that has no weight of its own |
-| **What fills it** | ↓ to a control further down this page, → to the page that owns it, or the sentence that says nothing does |
+| a summary | the reading that fills it, or how many of its places are filled |
+
+**The two switches stay on the row, not inside the part that expands.** Whether
+a region is drawn at all is the thing worth seeing without opening anything —
+and it is what keeps every mask bit in the DOM for one walk to collect. A page
+that rendered them only for the open region would save whatever the others
+happened to be last time.
 
 Every `KSHOW_*` and every `KBOLD_*` bit appears exactly once, which is what
 makes the mapping checkable by eye against `src/core/Config.h` — and what
@@ -547,7 +562,36 @@ prefix rather than by container.
 
 The last two rows are not regions. **Captions** and **Units** are the two
 things that appear inside every region and own a weight bit each, so they sit
-under a heading of their own rather than reading as places on the panel.
+under a heading of their own rather than reading as places on the panel. The
+**pressure tendency arrow** sits with them: it is a modifier on whichever place
+holds a pressure reading, and its switch is the master for all of them — which
+is why none of the three has a hit target on the preview. There is no one place
+on the panel to point at.
+
+**The hit targets do not overlap.** The headline's number and the value beside
+it share a baseline on the real panel, and targets drawn to match that left the
+headline's almost entirely underneath its neighbour's — a region you could only
+open by aiming at its edge. The driver asserts it from the rendered rectangles,
+because it is the kind of thing that is obvious in a screenshot and invisible
+in the source.
+
+### One save, for the whole page
+
+There were two, over two working copies, and **nothing on screen said which
+covered what**: editing a place and pressing the Save at the foot of the page
+stored nothing and reported success.
+
+One button writes both endpoints now — `/api/kindle/config` then
+`/api/kindle/slots` — and reports one outcome, in terms of the panel rather
+than the server: *"Saved 6 readings and the appearance. The reader picks it up
+on its next repaint."* A bar appears at the foot of the page as soon as
+anything is unsaved and says what is in it (*"Unsaved: 2 settings, a place"*),
+with **Discard** beside Save, which re-reads the device rather than reloading
+the browser.
+
+**Back to the built-in design** fills the form and waits. It used to write on
+the spot; a destructive button that acts before the reader has seen what it did
+is a button nobody can undo.
 
 The rest of the page is the controls those rows point at:
 
@@ -559,7 +603,13 @@ The rest of the page is the controls those rows point at:
 | **Date** | `27 august`, `august 27`, `27.08.2026`, `2026-08-27` |
 | **Pressure** | hPa, mmHg or inHg — the three-hour change follows it |
 | **Temperature** | one decimal or whole degrees |
-| **Readings** | what goes in each of the eleven places, and each one's caption, decimals, switches and grey level |
+| **How often the reader reloads** | *Often*, *Balanced*, *Sparing*, or by hand — three named choices over the interval, whether it follows new data, and whether it pins to the minute, each saying what it costs. A cadence that matches none of them opens the fields by itself |
+| **The reader** | the panel size for the FBInk script, and the outdoor and indoor sensors that feed the chart and the 24-hour history |
+| **Readings** | what goes in each of the eleven places, and each one's caption, decimals, switches and grey level — inside the region that draws it |
+
+The long explanations are still there and are folded into **“?”** disclosures:
+every paragraph of them answers a question somebody actually asked, and all of
+them at once was a page nobody scrolled to the end of.
 
 The settings live in `config.kindle` (`src/core/Config.h`) and are read on
 every render, so a save takes effect on the panel's next repaint. They survive
@@ -776,9 +826,16 @@ around not needing one:
   answering port 80 is not a collector.
 - **Next collector** steps to the next address that scan found, wrapping round,
   which is the whole interaction when the first guess was wrong.
-- The refresh **profiles** (fast, normal, battery saver) set the five intervals
-  together, because "how often should the chart be redrawn" is not a question
-  anyone wants to answer five times through a menu that can only step numbers.
+- The refresh **profiles** (fast, normal, battery saver, days) set the five
+  intervals together, because "how often should the chart be redrawn" is not a
+  question anyone wants to answer five times through a menu that can only step
+  numbers. The **battery** modes and **quiet hours** are named choices for the
+  same reason.
+- **Info** prints what the device thinks is going on, which is the one page
+  that used to need a USB cable — see [Settings → Info](#settings--info).
+- And all of it is on the **tap menu's settings bar** as well, because the
+  reader that needs a settings menu most is the one running with `GUI_STOP=1`,
+  where there is no KUAL to open.
 
 Values are validated where they are read, not only where they are written: an
 interval of `0` would make the loop divide by it once a minute forever, so a
@@ -796,6 +853,10 @@ back — is slow and visible. So it is spent where it buys the most:
 | `GRAPH_EVERY` (15 min) | the chart | plain, its rectangle |
 | `FORECAST_EVERY` (30 min) | forecast, week, footer | plain, its rectangle |
 | `FULL_EVERY` (60 min) | everything | **flashing**, whole screen |
+
+Inside the quiet hours nothing flashes and the clock tier stretches to
+`QUIET_EVERY`; with `POWER=suspend` the wait spans every minute with no tier
+due in it, rather than ending at the next minute boundary.
 
 The clock changes every minute, so it ghosts first — and its rectangle is small
 enough that flashing it is barely noticeable, which is why it gets hourly
@@ -1258,6 +1319,77 @@ A failed fetch does not invalidate the cache. A three-hour-old forecast is
 still broadly right, and blanking the panel because one HTTPS request timed
 out trades useful for nothing. The age is printed, so you can judge.
 
+### The page a collector with no forecast draws
+
+**A collector running as its own access point cannot fetch one at all.** Wifi
+and ESP-NOW nodes talk straight to it, nothing is upstream, and the forecast
+band is 124 px of the 800 px panel — an eighth of the page that can never be
+filled. Until this it stayed there: white space with a rule over it on the
+panel, and a circled question mark in the browser, because the section was
+settled at build time and not at render time.
+
+The standalone page takes the band out and gives it to the readings.
+
+|  | ordinary | standalone |
+|---|---|---|
+| top block | 20…282 | **20…406** |
+| chart | 308…528 | 432…652, the same size |
+| forecast | 552…676 | — |
+| week strip, footer | 676…800 | unchanged |
+
+**The type grows by a sixth, not a third.** The freed band is vertical and the
+columns are the width they always were, so every number is limited by the cell
+it sits in rather than by the room above it: "1008 hPa" three across is 87 px
+of a 90 px cell at 31, "21.4°" is 110 of the indoor row's first 111 at 56, and
+"17:40" is 260 of the clock's 264 at 110. A size a third larger overruns on the
+day the pressure goes to four digits — which is every day — and neither
+renderer wraps: the browser clips and FBInk draws straight over its neighbour.
+What is left over becomes air around the numbers, which a panel read from
+across a room wants anyway. `tests/web/drive_kindle_page.py` measures the
+widest string each reading can produce against its column, so the next person
+to enlarge one finds out here rather than on the wall.
+
+**Who decides.** The collector: it is the only end that can see whether a
+forecast is coming, and it says so in every payload as `PAGE_MODE`. It draws
+the standalone page while `apModeTriggered` is set, while the build has no
+forecast module, or while nothing has refreshed the forecast for six hours —
+the last because a collector that keeps wifi but loses its upstream serves a
+forecast that is still formatted, still plausible, and hours stale.
+`config.kindle.layoutMode` (the settings page's **The page's shape**) fixes it
+either way, and `LAYOUT=` in `dash.conf` — or KUAL's **Settings → Screen →
+Page shape** — lets the reader overrule the collector.
+
+**How the panel carries two layouts.** `kindle/layout/600x800-standalone.conf`
+is an OVERLAY, sourced on top of the panel's own layout and carrying only the
+numbers that move, so the base file stays the one description of the panel. A
+panel with no overlay of its own keeps the ordinary page, band and all —
+`fc_wanted()` reads the layout that actually LOADED rather than the one that
+was asked for, because hiding the block on coordinates that still have a band
+for it is the 124 px hole this exists to close. A page that changes shape while
+running asks for a full repaint: the tiers repaint their own rectangles only,
+so without it the old chart would sit beside the new one for up to an hour.
+
+`RULE3_Y` is not only a rule. `zones_derive()` cuts the refresh rectangles at
+it, so on the standalone page it is set to the week heading's own rule: the
+chart's rectangle reaches it, and the one below is exactly the week strip and
+the footer — which is what they were under the forecast all along. Nothing
+draws a line there, because a second hairline one pixel above the week's would
+be a two-pixel line nobody asked for.
+
+**The browser page draws the same design.** `body.sa` and a block of `.sa`
+rules, emitted unconditionally so the stylesheet stays a statement of fact for
+`tools/kindle_preview` and `tools/check_kindle_parity.py` to replay — and each
+of the three clock styles carries a standalone twin in `kdSkinCss()`, because
+`.sa .clock` in the sheet is two classes to those rules' one and would
+otherwise win. The parity checker holds the overlay and the `.sa` rules
+together exactly as it holds the base layout and the design together.
+
+**And the footer says where you are.** "Measured on site" is the right thing to
+say about numbers that came over a network from a windowsill; on an access
+point with nothing upstream the useful sentence is which network this is and
+whether anything is still reporting into it — `AP ESP32-Logger · 3 nodes ·
+2 min ago`, built from `NodeTable`'s own record of what it has heard.
+
 ### On OpenWeatherMap's high/low
 
 On the free current-weather endpoint, `temp_min`/`temp_max` are the spread
@@ -1316,7 +1448,40 @@ because each asks for more trust that a ten-year-old device comes back:
 |---|---|---:|
 | `awake` | what this always did; nothing is touched | 1–2 days |
 | `wifi` | the radio is off except around a fetch | ~3 days |
-| `suspend` | the above, and the wait between ticks is a real suspend to RAM with an RTC alarm | 5–7 days |
+| `suspend` | the above, and the wait between ticks is a real suspend to RAM with an RTC alarm | see below |
+
+**`suspend` on its own does not buy days, and the menu entry that set it said
+it did.** With `CLOCK_EVERY=1` the panel suspends and comes back *sixty times
+an hour* — and each of those is a resume, a draw, and a flashing refresh of the
+clock rectangle: 1440 of each a day, for a setting whose whole promise is that
+the reader stops doing things.
+
+The saving is in not waking up. Two changes make it real:
+
+- **the wait spans the empty minutes.** `minute_busy()` asks the tiers whether
+  a given minute has anything in it and `next_due_in()` walks forward to the
+  first one that does, so the RTC alarm is set for *that* minute rather than
+  for the next. At the battery-saver intervals fourteen minutes in fifteen have
+  nothing due, and the panel was waking for every one of them to find that out.
+  Capped at `SLEEP_MAX_MIN` (30) because a panel should come back and look at
+  itself now and again whatever the intervals say — a fetch that has been
+  failing for half an hour is worth finding out about;
+- **the clock is what decides how long that is**, so the mode that promises
+  days has to slow it down. KUAL → Settings → Battery → **deep sleep, rare
+  updates** (`settings.sh power days`) sets `POWER=suspend` *and* clock 15 /
+  data 30 / chart 60 / forecast 60 / full 240 in one write. Quiet hours do the
+  same thing for the night alone.
+
+**And `rtc0` was a guess.** A reader with more than one RTC — the SoC's and the
+power chip's — does not promise that the first one holds the alarm the kernel
+will honour, and on the reader where it does not, `suspend_for()` correctly
+refuses to go down (the alarm does not read back) and the deep sleep simply
+never happens, with nothing anywhere saying why. `rtc_pick()` writes a probe
+alarm to `rtc0`…`rtc3`, reads each back, takes the first that sticks, enables
+its `power/wakeup` where that node exists, and logs which it chose.
+`Settings → Info` prints it — and because that screen runs the same probe,
+whatever alarm a node already held is read first and written back afterwards:
+looking at a status page must not cancel powerd's own wake.
 
 `wifi` cannot fail in a way the panel does not already handle: a fetch that
 finds no network keeps the last reading on screen, which is what it does when
@@ -1331,7 +1496,13 @@ Everything else here recovers by itself; a suspend with no alarm behind it is
 a panel that stays dark until somebody presses the power button. So
 `suspend_for()` clears the alarm, writes it, **reads it back**, and refuses to
 go down unless the value stuck — and `nap_to_minute()` treats that refusal as
-the ordinary path, falling back to a plain sleep. `RTC_WAKEALARM` and
+the ordinary path, falling back to a plain sleep **of the minute it was going
+to wait anyway**, not of the half hour the suspend was going to spend down: the
+long wait is bought by the machine being off, and a reader that cannot suspend
+would otherwise sit awake and unresponsive through it. Every exit from
+`suspend_for()` that is not a completed sleep takes the alarm back off the RTC,
+so nothing is left pending to pull the reader out of powerd's own sleep later.
+`RTC_WAKEALARM` and
 `PM_STATE` are variables so the tests can point them at a temp file; a test
 that wrote the real `/sys/power/state` would suspend the machine running it.
 
@@ -1408,23 +1579,72 @@ stopping the launcher otherwise takes away.
 with no controls on it, which is right for something read from across a room
 and wrong the moment somebody is standing in front of it wanting it refreshed.
 
-Tap once and a bar appears along the bottom ninth of the screen, ruled into
-three: **Refresh · Hide · Exit**. Tap a third and that button runs; tap
-anywhere above it and the bar goes away. A bar left up on its own is dismissed
+Tap once and a bar appears along the bottom ninth of the screen, ruled into one
+slot per button: **Refresh · Awake/Sleep · More · Exit**. Tap a slot and it runs; tap
+anywhere above the bar and it goes away. A bar left up on its own is dismissed
 at the next tick rather than drawn through, because a zone repainted over half
 a bar is a smear nobody asked for.
 
-**Exit runs the same `cleanup()` Stop does** — the radio back, the framework
-back, the chrome back. That is deliberate: it is the recovery path `GUI_STOP`
-removes along with KUAL.
+**`MENU_ACT` is the list that decides what the bar is** — how many buttons it
+has and what each one does — out of five words:
 
 | | |
 |---|---|
-| `TOUCH` | 1 to arm the menu; off by default |
+| `refresh` | fetch everything and redraw the whole page now |
+| `wake` | stop sleeping, so the device can be told things; pressed again, go back to sleeping. It writes `POWER` to `dash.conf`, so KUAL and the panel agree about it afterwards |
+| `settings` | a second bar: **Find · Next · Battery · Info · Back** |
+| `hide` | put the bar away, which tapping above it also does |
+| `quit` | end the dashboard, after asking |
+
+**`MENU_LBL` only names them**, in whatever language, in the same order. The
+`wake` button is a toggle, so its label may carry both directions separated by
+a slash — `Awake/Sleep` — and the bar draws the half naming where the next tap
+goes: a button reading "Awake" that sends an already-awake panel to sleep lies
+about itself, on a screen that gives no other feedback at all.
+
+**The labels are taken only when they are demonstrably yours**: as many of them
+as there are buttons, and not the four the package ships. Anything else is
+labelled from the actions themselves — `refresh` draws *Refresh*, `hide` draws
+*Hide* — because a bar whose words are one place along from its buttons does
+not merely fail to help, it says the wrong thing about what a tap will do.
+Every `dash.conf` written before `MENU_ACT` existed carries exactly three
+labels for a bar that now has four buttons, and changing `MENU_ACT` while
+leaving `MENU_LBL` alone leaves four shipped words over four buttons that are
+no longer the ones they name. Change both together, or leave `MENU_LBL` out and
+let the actions name themselves.
+
+**The type shrinks to fit the slot it names.** FBInk will not report how wide
+it drew a string and `${#var}` counts bytes, so `str_chars()` counts
+*characters* instead — every UTF-8 character has one lead byte and its
+continuations are `0x80`–`0xBF`, so dropping the continuations and counting
+what is left works in any language — and a proportional serif at half its size
+per character bounds the size for all of them. Five buttons on a 600 px panel
+is 120 px each, and "Settings" at the height this bar used to ask for is 130 of
+them.
+
+**Exit asks first.** One tap turns the whole bar into the confirmation — one
+button, full width, so the second tap cannot miss it and nothing else on the
+bar can be hit by accident while it is up. This panel's touch calibration is
+the thing most likely to be wrong on any given reader, and Exit is the one
+button where being wrong cannot be undone from the sofa. Anything else cancels.
+
+**Exit runs the same `cleanup()` Stop does** — the radio back, the framework
+back, the chrome back. That is deliberate: it is the recovery path `GUI_STOP`
+removes along with KUAL. So is the settings bar: with the framework stopped
+there is no KUAL to change a setting from, and **Find**, **Next**, **Battery**
+and **Info** run the same `settings.sh` the menu entries run, drawn where a
+finger can reach them.
+
+| | |
+|---|---|
+| `TOUCH` | 1 to arm the menu — **on by default now**: it is the way back from `GUI_STOP`, and a setting whose job is to be the recovery path has to be there before anybody needs it |
+| `WAKE_MENU` | 1 for the power button to open it after a suspend |
+| `WAKE_HOLD` | seconds to stay awake and listening after such a press |
 | `TOUCH_DEV` | the input device, or empty to find it |
 | `TOUCH_MAXX`, `TOUCH_MAXY` | the panel's full scale, or 0 where it already reports screen pixels |
 | `TOUCH_SWAP` | 1 for a panel that reports Y where X is expected |
-| `MENU_LBL` | the three labels, separated by bars |
+| `MENU_ACT` | what the buttons do, separated by bars |
+| `MENU_LBL`, `MENU_LBL2`, `SURE_LBL` | the labels for the two bars and the confirmation |
 
 **How the touch is read.** An input event is sixteen bytes — two 32-bit
 timestamps, a 16-bit type, a 16-bit code, a 32-bit value — so one
@@ -1477,12 +1697,81 @@ without it errors at once rather than waiting, which would turn a minute's wait
 into thirty instant iterations and the main loop into a spin — fetching and
 flashing the panel as fast as the CPU allows, on a battery.
 
-**The menu and `POWER=suspend` do not combine, and the menu wins.** With the
-CPU down there is no process to read the touchscreen, so the bar would be dead
-for the whole wait and the taps would pile up in the FIFO unread. Where both
-are asked for, the reader standing in front of the panel is the one being
-served. An earlier version of this page claimed the tap was read on the way
-back up from a suspend; no code path did that, and none does now.
+### Waking it up
+
+**A suspended Kindle wakes from the power button. It does not wake from the
+touchscreen** — the touch controller has no power while the CPU is down, which
+is the same reason a sleeping Kindle does not wake when you touch its screen.
+So the button is the way in, and for a long time the panel did not notice it
+had been used: `echo mem` returned, the loop ran an ordinary tick, four minutes
+in five nothing was due, nothing was drawn, and the reader went straight back
+down. The press worked perfectly and was indistinguishable from a dead button.
+
+**A write to `/sys/power/state` that returns without suspending is the one
+failure this could have made worse than the bug it fixes.** The early-wake path
+below answers a resume by repainting the whole page and putting the bar up; a
+write that comes straight back would do that on every pass through the main
+loop — a flashing panel and a battery emptied in an afternoon, rather than a
+panel that merely never sleeps. So `suspend_for()` times the write against
+**both clocks — the RTC's `since_epoch` and the system's — and believes
+whichever of them ran**: the system clock is not guaranteed to be advanced
+across a suspend, and asking it alone called a perfectly good fifteen-minute
+sleep "no time passed" on a reader whose clock resumes where it left off,
+turning `POWER=suspend` into an ordinary sleep for the rest of the run. It
+calls anything under `SUSPEND_MIN_DOWN` (2 s) on both *not a suspend*:
+it returns non-zero, the caller sleeps the ordinary way, and the reason is
+logged **once** rather than once a minute, because `/tmp` is a ramdisk on a
+device that runs for months. A person pressing the button within two seconds of
+it going down loses that press and presses again; a reader that cannot suspend
+at all loses nothing.
+
+**Nothing has to identify the wake source to fix that.** The alarm says when we
+meant to come back and the RTC says when we did: a resume with more than
+`SUSPEND_SLACK` (3 s) of the wait still to run is a resume nothing scheduled,
+which on this device is a person — the power button, or a cable. `suspend_for()`
+sets `SUSPEND_EARLY`, and `nap_to_minute()` answers it with `wake_interactive()`:
+
+1. the window opens for `WAKE_HOLD` seconds (120 by default), and every tap
+   pushes it out again;
+2. `prevent_sleep` is re-applied, because powerd re-arms its own screensaver
+   across a suspend on some firmware — the one call that has to be made again
+   rather than once at startup;
+3. the touchscreen is armed **even when `TOUCH=0`**;
+4. the whole page is repainted — the framework may have put its screensaver on
+   the screen while the CPU was down, and no tier would have cleared it for up
+   to an hour — and the bar goes on top of it.
+
+`nap_to_minute()` then sets `WOKE_UP`, and the main loop's first act is to go
+straight back to listening for a tap. That flag is not a detail: the loop
+cannot otherwise tell a wake from a wait that ran out, and what it does with
+one of those is dismiss the bar and repaint — so the bar was erased within
+milliseconds of being drawn and the button still looked dead, with the panel
+flashing twice on the way. `tests/kindle/drive_dash.sh` fails if the flag or
+the loop's answer to it goes.
+
+When the window runs out the touchscreen is disarmed and the panel sleeps
+again. Nothing has to be remembered or undone.
+
+**`TOUCH=0` with `WAKE_MENU=1` is the combination worth having on a wall:**
+nothing reads the panel while nobody is there, and the button summons a menu
+when somebody is. With `TOUCH=1` the bar is always available and a tap opens
+the same window, so a reader working through the settings bar does not have the
+panel suspend under them.
+
+**What stops a suspend is somebody being there, not the menu being armed.** It
+used to be the other way round — `nap_to_minute()` refused to suspend while the
+tap reader was running — which quietly made `TOUCH=1` cancel `POWER=suspend`
+altogether: the two settings a reader most wants together were the one pair
+that could not be had. `tests/kindle/drive_dash.sh` fails if that gate comes
+back.
+
+**Pressing the power button while the panel is `awake` is a different thing.**
+powerd handles it and sends the reader to sleep by the firmware's own path, and
+it comes back with Amazon's screensaver on the screen. Nothing here would have
+repainted until a tier came round. `lost_time()` notices instead: a wait that
+took far more than the `LOST_MIN` (25 s) it asked for means the reader was
+asleep, and the page is redrawn. That covers a framework repaint and a stepped
+clock as well, and it needs to know nothing about which of them happened.
 
 **Nothing falls through to Exit.** `outside` is the default and every way out
 of the hit test leads to it, so a coordinate that is out of range or not a
@@ -1497,6 +1786,148 @@ by the other axis's maximum is how a calibrated panel still lands on the wrong
 third.
 
 All of it is reachable from KUAL under **Settings → Screen**.
+
+## Quiet hours
+
+A flashing refresh is a black frame, and at three in the morning in a bedroom
+it is the brightest thing in the room. It is also the most expensive thing this
+panel does, on the hours when nobody is reading it.
+
+Between `QUIET_FROM` and `QUIET_TO` — hours, 0–23, wrapping round midnight,
+equal to switch it off — nothing flashes and the clock is drawn every
+`QUIET_EVERY` minutes instead of `CLOCK_EVERY`. With `POWER=suspend` that is
+what turns the night into one long sleep rather than sixty short ones, because
+the clock is the tier that decides how long a suspend can be.
+
+The morning is paid for in one go: **leaving the quiet hours spends a whole
+flashing refresh**, which is where a night of partial updates goes. That is the
+one moment when clearing it costs nothing anybody is awake to mind.
+
+`quiet_now()` is asked by four things a tick and `date +%H` is a fork, so it is
+evaluated once into `QUIET_IS` and read from there.
+
+KUAL → Settings → **Quiet hours**, or `settings.sh quiet night|off|FROM TO`.
+
+## The footer says what the panel knows about itself
+
+**The battery badge on this page belongs to the outdoor node.** The reader's
+own battery — the one that decides whether the panel is still on the wall next
+week — appeared nowhere at all, on a page whose entire power section exists to
+make it last.
+
+The right-hand end of the footer (`STAT_X` in the layout, `STATUS=0` to turn it
+off) carries three things:
+
+- how full this Kindle is, from `lipc-get-prop com.lab126.powerd battLevel`,
+  asked on the tier that draws the footer and nowhere else;
+- **which mode it is actually in**, not the one `POWER` names: a panel in
+  `POWER=suspend` that is inside its wake window is awake, and that is the one
+  thing somebody standing in front of it wants confirmed before they start
+  tapping. Only that mode: the window is what holds the machine up and it holds
+  nothing else, so under `POWER=wifi` the radio is still cut between fetches
+  while it is open and the footer goes on saying so. `MODE_LBL` carries the
+  three words, so they can be set in any language;
+- in brackets, when the collector has stopped answering, the time it last did.
+
+Left-aligned at `STAT_X`, like everything else here: FBInk will not say how
+wide it drew a string, so there is no right edge to align to.
+
+## Numbers nobody has confirmed
+
+Three separate ways the panel could show a reading as current when it was not,
+all of them silent:
+
+**A failed fetch left the previous readings in place** and repainted them,
+unchanged, every `DATA_EVERY` minutes for as long as the collector stayed down.
+The only thing on the panel that could have said otherwise was the age inside
+`Z_SUB` — which is part of the payload and was frozen with it. A dead collector
+and a calm afternoon looked identical. `data_stale()` decides now, and a stale
+readings zone draws the offline notice with the time of the last good fetch in
+it. **One failed fetch is not a verdict**: `STALE_AFTER` (2) consecutive
+failures are, because a single wifi hiccup should not make the page flinch when
+the numbers are five minutes old and the next tier will almost certainly work.
+
+**`load_kv()` only ever assigns.** A place the collector stops sending — a
+sensor whose node went flat, a group switched off in the web UI — kept the
+value it last reported, with no age against it and nothing to tell it from a
+live reading. `zones_forget()` takes the previous payload's places back out of
+the shell before the new one is read; the names come from the lists the last
+payload sent, because `Z_<PLACE>_*` is a family the collector names rather than
+a fixed set.
+
+**Half a payload parses perfectly.** `/kindle/data` is streamed off the ESP32
+while it is also serving the web UI, to a ten-year-old reader on wifi, and
+busybox wget does not always call a short read an error — so a payload cut off
+partway lands on disk looking exactly like a whole one, and `wget -O` has
+already truncated the good copy. Every key past the cut is simply absent: a
+third of the page blank, with nothing to say why. This is the same failure the
+BMP's own length field has caught for the chart since `graph_ok()`, on the
+other endpoint, unasked for longer.
+
+So the collector emits **`END=1`** as the last line of every payload, and
+`payload_ok()` refuses one without it — fetching into `data.new` and moving it
+into place only once it is whole, exactly as `fetch_graph()` does. A collector
+too old to send it is held to `RES_H` instead, which is in the metadata block
+two thirds of the way in: not proof, but it catches the cut that lands in the
+readings, which is most of them.
+
+## The last page, kept where a reboot cannot take it
+
+`/tmp` is a ramdisk, so a reader that has just been switched on knows nothing:
+no chart, no forecast, no week strip, and the one message it can draw is in
+English because the language is a value the collector sends. If the collector
+is down too — which is the same power cut, most of the time — that is the whole
+page until it comes back.
+
+So the payload is kept beside `dash.conf` as `last.txt`, written **on the full
+tier only**, and only when a payload has actually been fetched since the
+dashboard started: once an hour, not once a fetch, because this is FAT on the
+eMMC and not tmpfs — and a reader whose collector is down is holding the cache
+itself in `data.txt`, so saving it again would be an hourly rewrite of the same
+bytes with another stamp appended each time. `cache_save()` appends `CACHED_AT`
+and `CACHED_ON` so the page it draws can say how old it is — the day is put in
+front of the time when the cache is not from today, because `17:40` under
+three-day-old readings on a page whose own clock is live reads as this
+afternoon. `cache_load()` explicitly undoes the freshness `load_data()`
+assumes — the ages in that payload were computed at the collector before the
+reader was switched off, so the readings zone carries the offline notice over
+them while the chart, forecast and week strip below are worth having whatever
+their age.
+
+`settings.sh` reads the same file for one thing only: `RES_W`/`RES_H`, so that
+its own screens are laid out for the panel they are on. Every one of them was
+drawn at 600×800 coordinates whatever the reader, which on a Paperwhite meant
+small type in the top-left corner of a mostly empty screen.
+
+## When nobody has told it where the collector is
+
+The address it is trying is the one the package shipped, nothing is answering
+there, and no scan has ever been run. That is not a fault to report — it is the
+first-run state, and the reader is standing in front of a device with no
+keyboard. With `AUTO_FIND=1` the panel looks once, on its own, and says what it
+found.
+
+A scan is 254 addresses at a two-second timeout: half a minute or more of a
+screen that does not change, which on e-ink is indistinguishable from a menu
+entry that did nothing at all — the exact complaint this extension's logging
+exists to answer. So `cmd_find` reports where it has got to after each batch,
+into its own rectangle rather than by repainting the page: `say_lines()` clears
+and flashes the whole panel, and a scan reporting that way would have flashed
+the screen eleven times.
+
+## Settings → Info
+
+The same facts as `kual.log`, on the screen. Every fault reported against this
+extension so far has been an installation one — no FBInk, the wrong folder, a
+collector at another address — and every one of them was diagnosed by plugging
+the reader into a computer and reading a log.
+
+`settings.sh diag` prints the version, whether the dashboard is running, the
+panel size, where FBInk was found, this Kindle's address and battery, the wifi
+state, the collector address **and whether it answers**, the touchscreen device,
+the power mode and which RTC holds the wake alarm, the intervals, and the quiet
+hours. It is on the KUAL menu and on the tap menu's settings bar, because the
+reader that needs it most is the one with no launcher.
 
 ## TLS
 

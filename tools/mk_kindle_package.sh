@@ -89,7 +89,8 @@ FILES=$(cd "$ROOT" && git ls-files kindle/ 2>/dev/null | grep -v '^kindle/packag
 if [ -z "$FILES" ]; then
     # Not a checkout (a release tarball, say). Take what is there instead.
     FILES=$(cd "$ROOT" && find kindle -type f ! -path 'kindle/package/*' \
-            ! -name dash.conf ! -name collectors ! -name kual.log | sort)
+            ! -name dash.conf ! -name collectors ! -name kual.log \
+            ! -name last.txt | sort)
 fi
 
 COUNT=0

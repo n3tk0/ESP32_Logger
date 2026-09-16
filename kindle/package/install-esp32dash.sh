@@ -63,10 +63,12 @@ if [ ! -d "$ESP32DASH_PREFIX/mnt/us" ]; then
 fi
 
 # ── Keep what the reader typed ──────────────────────────────────────────────
-# dash.conf holds the collector's address, found or entered on the device, and
-# `collectors` is the scan list behind Next collector. Neither is ours to
-# replace: the tarball does not contain them, and the extraction below writes
-# over our own files only.
+# dash.conf holds the collector's address, found or entered on the device,
+# `collectors` is the scan list behind Next collector, and last.txt is the
+# payload the panel last drew — which is what gives a reader that has just been
+# switched on a page, in the right language, before the first fetch answers.
+# None of them is ours to replace: the tarball does not contain them, and the
+# extraction below writes over our own files only.
 if [ -f "$ESP32DASH_DEST/dash.conf" ]; then
     esp32dash_log "I" "keeping the existing dash.conf"
 fi
