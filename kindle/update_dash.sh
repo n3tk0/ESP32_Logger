@@ -1970,7 +1970,7 @@ HAVE_DATA=0
 # then EXECUTED with `.`, so they are checked here rather than trusted: a
 # payload sending RES_W=../../../../mnt/us/x reaches any .conf-suffixed file on
 # the device. Digits only, and a size the panel could plausibly be.
-# Is this the standalone page — no forecast band, readings a third larger?
+# Is this the standalone page — no forecast band, readings a sixth larger?
 #
 # THE READER'S SETTING WINS, and `auto` is what asks the collector. PAGE_MODE
 # arrives in the payload and is unset by zones_forget() before every load, so a

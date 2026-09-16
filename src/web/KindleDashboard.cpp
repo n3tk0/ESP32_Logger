@@ -87,9 +87,21 @@ static void kdFooterNote(char* buf, size_t n) {
         snprintf(buf, n, "%s", KD_T("Measured on site", "Измерено на място"));
         return;
     }
+    // THE PANEL'S FOOTER IS 378 px WIDE BEFORE THE STATUS LINE, and FBInk
+    // does not clip: a long name would be drawn straight through the battery
+    // and the power mode at STAT_X. An SSID is up to 32 characters, so it is
+    // taken to 16 — on a UTF-8 boundary, because a name cut inside a two-byte
+    // letter draws as a box glyph on both renderers.
     const char* ssid = (strlen(config.network.apSSID) > 0)
                      ? config.network.apSSID : config.deviceName;
-    int at = snprintf(buf, n, "AP %s", ssid);
+    char shortSsid[17];
+    size_t cut = 0;
+    while (ssid[cut] && cut < sizeof(shortSsid) - 1) cut++;
+    while (cut > 0 && ((unsigned char)ssid[cut] & 0xC0) == 0x80) cut--;
+    memcpy(shortSsid, ssid, cut);
+    shortSsid[cut] = '\0';
+
+    int at = snprintf(buf, n, "AP %s", shortSsid);
     if (at < 0 || (size_t)at >= n) return;
 
     #ifdef FEATURE_ESPNOW_INGEST
@@ -97,19 +109,33 @@ static void kdFooterNote(char* buf, size_t n) {
     // most recent of them spoke. Not the station count: a phone on the AP and
     // the Kindle itself are stations, and neither is a reading.
     EspNowNode nodes[ESPNOW_MAX_NODES];
-    const int have = espnowCopyNodes(nodes, ESPNOW_MAX_NODES);
+    const int copied = espnowCopyNodes(nodes, ESPNOW_MAX_NODES);
+    // THE ONES IT HAS ACTUALLY HEARD FROM, not the ones provisioned. A node
+    // paired an hour ago and never seen since is not something reporting into
+    // this network, and counting it says the opposite of what the line is for.
+    int have = 0;
+    uint32_t newest = 0;
+    for (int i = 0; i < copied; i++) {
+        if (!nodes[i].everSeen) continue;
+        have++;
+        if (nodes[i].lastSeenMs > newest) newest = nodes[i].lastSeenMs;
+    }
     if (have > 0) {
         at += snprintf(buf + at, n - at, KD_T(" · %d node%s", " · %d възел%s"),
                        have, (have == 1) ? "" : KD_T("s", "а"));
         if (at < 0 || (size_t)at >= n) return;
-        uint32_t newest = 0;
-        for (int i = 0; i < have; i++)
-            if (nodes[i].lastSeenMs > newest) newest = nodes[i].lastSeenMs;
         if (newest) {
+            // Minutes up to an hour, then hours — the same shape the page's
+            // own age line takes, and it keeps this string short enough for
+            // the footer whatever happens to the node.
             const uint32_t mins = (millis() - newest) / 60000u;
-            if (mins < 1) snprintf(buf + at, n - at, KD_T(" · just now", " · току-що"));
-            else          snprintf(buf + at, n - at, KD_T(" · %lu min ago", " · преди %lu мин"),
-                                   (unsigned long)mins);
+            if (mins < 1)       snprintf(buf + at, n - at, KD_T(" · just now", " · току-що"));
+            else if (mins < 60) snprintf(buf + at, n - at,
+                                         KD_T(" · %lu min ago", " · преди %lu мин"),
+                                         (unsigned long)mins);
+            else                snprintf(buf + at, n - at,
+                                         KD_T(" · %lu h ago", " · преди %lu ч"),
+                                         (unsigned long)(mins / 60));
         }
     }
     #endif
@@ -2191,9 +2217,14 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // is smaller than the usual touch guidance rather than meeting it.
     p += F("<table class=\"foot\"><tr><td>");
     {
+        // THROUGH appendEscaped, because the note carries the AP's name and
+        // that is a string somebody typed. It reaches this page the same way a
+        // slot label does — see the note above appendEscaped() — and a page
+        // served without authentication is not the place to make an exception
+        // for a string that merely looks harmless.
         char note[96];
         kdFooterNote(note, sizeof(note));
-        p += note;
+        appendEscaped(p, note);
     }
     p += F("</td><td class=\"act\"><a href=\"/kindle\">");
     p += kdT("refresh", "обнови");

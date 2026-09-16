@@ -24,6 +24,7 @@ import os
 import sys
 from playwright.sync_api import sync_playwright
 
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PORT = os.environ.get("MOCK_PORT", "8765")
 BASE = "http://127.0.0.1:" + PORT
 URL = BASE + "/#settings_kindle"
@@ -641,6 +642,50 @@ with sync_playwright() as p:
         "if(p.left<q.right&&q.left<p.right&&p.top<q.bottom&&q.top<p.bottom)"
         "out.push(b[i][0]+'/'+b[j][0]);}return out;})()")
     check(not over2, "and no two standalone targets overlap (%s)" % (over2 or "none"))
+
+    # ── AND THE PREVIEW'S COPY OF THE GEOMETRY IS THE PANEL'S ───────────────
+    #
+    # KD_SHAPE is a third copy of these numbers: the panel reads them from
+    # kindle/layout/*.conf, the browser page gets its type sizes from the
+    # firmware's stylesheet (tools/check_kindle_parity.py holds those two
+    # together), and the preview draws from this table. Nothing connected the
+    # third one, so a layout edit could leave the preview quietly describing
+    # the page as it used to be — which is the one failure a preview cannot
+    # survive, because it is believed.
+    def conf_of(path):
+        vals = {}
+        for line in open(os.path.join(ROOT_DIR, path), encoding="utf-8"):
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            v = v.strip()
+            if v.lstrip("-").isdigit():
+                vals[k.strip()] = int(v)
+        return vals
+
+    base = conf_of("kindle/layout/600x800.conf")
+    sa = dict(base, **conf_of("kindle/layout/600x800-standalone.conf"))
+    KEYS = {
+        "heroSz":"HERO_SZ", "bigSz":"BIG_SZ", "subY":"SUB_Y", "subSz":"SUB_SZ",
+        "gridY":"GRID_Y", "rowH":"GRID_ROW_H", "gridVal":"GRID_VAL_SZ",
+        "gridVal3":"GRID_VAL_SZ_3", "labSz":"GRID_LAB_SZ", "sepH":"SEP_H",
+        "clockSz":"CL_SIZE", "clockH":"CL_H", "boxed":"CL_SZ_BOXED",
+        "ruled":"CL_SZ_RULED", "dated":"CL_SZ_DATED", "dateSz":"CL_DATE_SZ",
+        "inRuleY":"IN_RULE_Y", "inLabY":"IN_LAB_Y", "inValY":"IN_VAL_Y",
+        "inVal1":"IN_VAL_SZ_1", "inVal":"IN_VAL_SZ", "chartRuleY":"RULE2_Y",
+        "chartLabY":"LAB_CHART_Y", "chartY":"GR_Y", "keyY":"KEY_Y",
+    }
+    shapes = pg.evaluate("KD_SHAPE")
+    drift = []
+    for shape, conf in (("normal", base), ("sa", sa)):
+        for js_key, conf_key in KEYS.items():
+            if shapes[shape][js_key] != conf.get(conf_key):
+                drift.append("%s.%s=%s but %s=%s" % (
+                    shape, js_key, shapes[shape][js_key],
+                    conf_key, conf.get(conf_key)))
+    check(not drift, "the preview's geometry is the panel's, both shapes (%s)"
+          % ("; ".join(drift) if drift else "all %d agree" % (2 * len(KEYS))))
 
     # It is a setting like any other: unsaved until Save, then read back.
     check(pg.is_visible("#kd-savebar"), "choosing a shape is an unsaved change")
