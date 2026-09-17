@@ -15,9 +15,11 @@
 //     #endif
 //
 // So on core 3.x, naming Wire1 on a single-controller part (ESP32-C3) is a
-// compile error, not a runtime refusal. platformio.ini sets `platform =
-// espressif32` without a version pin, so a platform update alone is enough to
-// cross that line — this guard keeps the C3 targets building either way.
+// compile error, not a runtime refusal. platformio.ini pins the deployable
+// envs to espressif32@7.0.1 (core 2.0.17), but the `x_core3_probe` env exists
+// precisely to build a C3 against pioarduino's core 3.x, and that env would
+// not compile without this guard. It is what lets one source tree answer to
+// both cores.
 #if defined(SOC_HP_I2C_NUM)
 #  define LOGGER_SOC_I2C_NUM SOC_HP_I2C_NUM
 #elif defined(SOC_I2C_NUM)

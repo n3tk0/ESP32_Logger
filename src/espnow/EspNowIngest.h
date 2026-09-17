@@ -8,10 +8,17 @@
 // --------------------
 // Straight into RemoteIngest, exactly as POST /api/ingest does. Everything
 // downstream is then free: RemoteNodeSensor drains the mailbox on the normal
-// sensor tick, so an ESP-NOW reading gets the same calibration, the same
-// outlier filters, the same ring buffer, the same exporters and the same
-// dashboard as a wired BME280. Nothing in the pipeline knows or needs to know
-// that this one arrived over a radio.
+// sensor tick, so an ESP-NOW reading gets the same cadence, the same health
+// accounting, the same ring buffer, the same exporters and the same dashboard
+// as a wired BME280. Nothing in the pipeline knows or needs to know that this
+// one arrived over a radio.
+//
+// What it does NOT get is validation this firmware does not have: there are
+// no outlier or rate filters anywhere in the pipeline (an earlier version of
+// this comment claimed otherwise), and calibration belongs to the plugin that
+// reads a wire. A value a node sends is a value that lands, so the guards
+// that matter for this path are the ones in EspNowAuth and the range checks
+// in the frame decoder.
 //
 // That is why this file is small. The work was choosing to land in an
 // existing mailbox instead of building a second path.
