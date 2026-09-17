@@ -2514,6 +2514,37 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
             // Content-Length cannot trigger a huge heap allocation.
             constexpr size_t kImportMax = 8192;
             if (!index) {
+                // THE CLEANER GOES ON BEFORE THE ALLOCATION, AND THAT ORDER IS
+                // LOAD-BEARING: IT IS WHAT KEEPS THE OOM PATH FROM CORRUPTING
+                // THE HEAP.
+                //
+                // ~AsyncWebServerRequest() does `free(_tempObject)` for any
+                // non-null value. It cannot know that the sentinel below is a
+                // fake pointer rather than a heap block — so a client that
+                // dropped between a FAILED allocation and the request callback
+                // left free((void*)1) to run on the web task. Not a leak, not
+                // a wrong answer: heap corruption, on the path taken when the
+                // device is already short of memory.
+                //
+                // Registering here covers both outcomes of the allocation,
+                // which registering after it could not. It is safe to do under
+                // memory pressure because it allocates nothing: the lambda
+                // captures one pointer, so std::function stores it inline
+                // rather than on the heap. And it is enough because
+                // _onDisconnect() calls this back and only THEN drops the
+                // request's self-reference (the library's WebRequest.cpp), so
+                // whatever this nulls, the destructor never frees.
+                //
+                // R13 follow-up (Codex P2 on PR #89): the original reason for
+                // a cleaner at all — a disconnect before the request callback
+                // orphaning the buffer. delete on nullptr is well-defined, so
+                // this stays a no-op after the success path's own delete.
+                req->onDisconnect([req]() {
+                    // Never delete the OOM sentinel (it is not a real pointer).
+                    if (req->_tempObject != reinterpret_cast<void*>(1))
+                        delete static_cast<String*>(req->_tempObject);
+                    req->_tempObject = nullptr;
+                });
                 String* buf = new (std::nothrow) String();
                 if (!buf) {
                     // Flag OOM with a sentinel instead of sending here: the
@@ -2523,21 +2554,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                     req->_tempObject = reinterpret_cast<void*>(1);
                     return;
                 }
-                // ML-2: publish the pointer and register the disconnect cleaner
-                // IMMEDIATELY after allocation — before reserve() — so there is
-                // no window in which an abort could leak the buffer.
-                // R13 follow-up (Codex P2 on PR #89): client disconnect before
-                // the request callback fires would otherwise leak the heap
-                // buffer. onDisconnect runs even on aborts; freeing here makes
-                // the success path's delete a no-op (delete on nullptr is
-                // well-defined).
                 req->_tempObject = buf;
-                req->onDisconnect([req]() {
-                    // Never delete the OOM sentinel (it is not a real pointer).
-                    if (req->_tempObject != reinterpret_cast<void*>(1))
-                        delete static_cast<String*>(req->_tempObject);
-                    req->_tempObject = nullptr;
-                });
                 size_t hint = req->contentLength() > 0 ? req->contentLength() : 4096;
                 if (hint > kImportMax) hint = kImportMax;
                 buf->reserve(hint);
@@ -2584,12 +2601,45 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
             bool shaMismatch  = false;
             bool shaActive    = false;
             bool authFailed   = false;
+            bool beginFailed  = false;
+            // Which kind of begin() failure, because they need different
+            // answers and begin() does not tell them apart by itself: it
+            // refuses an already-open partition with no error code AND fails
+            // its 4 KB sector-buffer malloc with no error code.
+            bool beginBusy    = false;
+            // Update.begin() succeeded and neither end() nor abort() has run.
+            // Cleared the moment the upload is concluded either way, exactly
+            // like shaActive above, so the destructor below is a no-op on
+            // every path that finished properly.
+            bool otaOpen      = false;
             String expectedSha;
             mbedtls_sha256_context sha;
             ~OtaCtx() {
                 if (shaActive) {
                     mbedtls_sha256_free(&sha);
                     shaActive = false;
+                }
+                // AN UPLOAD THAT OPENED THE OTA PARTITION AND NEVER CLOSED IT
+                // BREAKS EVERY UPLOAD AFTER IT, UNTIL THE DEVICE REBOOTS.
+                //
+                // UpdateClass::begin() starts with `if (_size > 0) return
+                // false;` and only end()/abort() put _size back to zero. So a
+                // browser that goes away mid-upload — tab closed, AP dropped,
+                // or the client's own timeout firing on a slow link — used to
+                // leave _size set forever. The next attempt then failed inside
+                // begin(), which this handler reported as "Invalid firmware
+                // image": the most misleading answer available, since the
+                // image was fine and no retry could ever work.
+                //
+                // Both ways out of a request destroy this context — the
+                // request callback deletes it, and onDisconnect deletes it on
+                // an abort — so this is the one place that covers both. It is
+                // cheap and flash-free (abort() just releases the 4 KB sector
+                // buffer and resets the counters), which is why it is safe to
+                // run from the web task.
+                if (otaOpen) {
+                    Update.abort();
+                    otaOpen = false;
                 }
             }
         };
@@ -2608,9 +2658,37 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 bool shaMismatch = ctx ? ctx->shaMismatch : false;
 
                 bool ok = !rejected && !Update.hasError();
+                char detail[192];
                 const char* msg;
                 if (shaMismatch) {
                     msg = "{\"success\":false,\"message\":\"SHA-256 mismatch — image rejected\"}";
+                } else if (ctx && ctx->beginFailed) {
+                    // Its own branch because it is not a bad image, and the
+                    // shared "Invalid firmware image" sent people looking for
+                    // a corrupt file. Three causes, three answers — and none
+                    // of them claims the partition was freed, because on the
+                    // busy path this request never held it and so cannot have
+                    // released it.
+                    if (ctx->beginBusy) {
+                        snprintf(detail, sizeof(detail),
+                                 "{\"success\":false,\"message\":"
+                                 "\"An update is already open on the OTA "
+                                 "partition. Wait for it to finish, or restart "
+                                 "the device and try again.\"}");
+                    } else if (Update.getError() != UPDATE_ERROR_OK) {
+                        snprintf(detail, sizeof(detail),
+                                 "{\"success\":false,\"message\":"
+                                 "\"Cannot open the OTA partition: %s\"}",
+                                 Update.errorString());
+                    } else {
+                        // begin() failed, was not busy, and set no error: the
+                        // only path left is its sector-buffer malloc.
+                        snprintf(detail, sizeof(detail),
+                                 "{\"success\":false,\"message\":"
+                                 "\"Not enough free memory to start the "
+                                 "update. Restart the device and try again.\"}");
+                    }
+                    msg = detail;
                 } else if (rejected) {
                     msg = "{\"success\":false,\"message\":\"Invalid firmware image\"}";
                 } else if (ok) {
@@ -2623,8 +2701,10 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 resp->addHeader("Connection", "close");
                 r->send(resp);
 
-                // Free per-request state.  Context destructor releases the
-                // mbedTLS SHA engine if the upload aborted before final.
+                // Free per-request state.  The context destructor releases
+                // the mbedTLS SHA engine and, if this upload opened the OTA
+                // partition without concluding it, that too — so the next
+                // attempt is not refused by a request that is already over.
                 if (ctx) {
                     delete ctx;
                     r->_tempObject = nullptr;
@@ -2699,11 +2779,18 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                         ctx->rejected = true;
                         return;
                     }
+                    // Read BEFORE the call: begin()'s own refusal path
+                    // leaves no trace of this, and it is the difference
+                    // between "someone else is flashing" and "out of memory".
+                    const bool wasBusy = Update.isRunning();
                     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
                         Update.printError(Serial);
-                        ctx->rejected = true;
+                        ctx->rejected    = true;
+                        ctx->beginFailed = true;   // not the image's fault
+                        ctx->beginBusy   = wasBusy;
                         return;
                     }
+                    ctx->otaOpen = true;
                     // Initialise the hasher exactly once per upload, regardless
                     // of whether verification was requested — the cost is tiny
                     // and lets us log the actual digest for debugging.
@@ -2740,11 +2827,21 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                             ctx->rejected    = true;
                             ctx->shaMismatch = true;
                             Update.abort();
+                            ctx->otaOpen = false;  // abort() reset _size
                             return;
                         }
                     }
-                    if (Update.end(true)) DBGF("OTA done: %u bytes\n", index + len);
-                    else Update.printError(Serial);
+                    if (Update.end(true)) {
+                        ctx->otaOpen = false;      // closed cleanly
+                        DBGF("OTA done: %u bytes\n", index + len);
+                    } else {
+                        // end() returns false WITHOUT resetting _size when an
+                        // earlier write already set an error, so the partition
+                        // is still open here. Leaving otaOpen set hands it to
+                        // the destructor, which is what keeps a failed write
+                        // from wedging the next attempt too.
+                        Update.printError(Serial);
+                    }
                 }
             }
         );

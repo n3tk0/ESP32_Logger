@@ -37,6 +37,7 @@ on:
       - 'tools/check_fs_mutex.py'
       - 'tools/check_rtc_mutex.py'
       - 'tools/check_sse_lock.py'
+      - 'tools/check_tempobject_cleanup.py'
       - 'tools/check_kindle_payload_keys.py'
       - 'node/**'
       - 'kindle/**'
@@ -72,6 +73,7 @@ on:
       - 'tools/check_fs_mutex.py'
       - 'tools/check_rtc_mutex.py'
       - 'tools/check_sse_lock.py'
+      - 'tools/check_tempobject_cleanup.py'
       - 'tools/check_kindle_payload_keys.py'
       - 'node/**'
       - 'kindle/**'
@@ -698,6 +700,60 @@ jobs:
           rm /tmp/pio.orig
           echo "the checker fails when the locks are compiled out, as it should"
 
+      - name: Per-request state in _tempObject is cleaned up (check_tempobject_cleanup)
+        run: python3 tools/check_tempobject_cleanup.py
+
+      - name: Verify that checker fails when the cleaner moves below the allocation
+        run: |
+          set -e
+          cp src/web/WebServer.cpp /tmp/ws.orig
+          python3 - <<'EOF'
+          p = 'src/web/WebServer.cpp'
+          lines = open(p).read().split('\n')
+          head = '                req->onDisconnect([req]() {'
+          assert lines.count(head) == 1, 'cleaner anchor moved'
+          start = lines.index(head)
+          end = next(i for i in range(start, len(lines)) if lines[i].strip() == '});')
+          block = lines[start:end + 1]
+          rest = lines[:start] + lines[end + 1:]
+          at = next(i for i, l in enumerate(rest) if 'req->_tempObject = buf;' in l)
+          open(p, 'w').write('\n'.join(rest[:at + 1] + block + rest[at + 1:]))
+          EOF
+          if python3 tools/check_tempobject_cleanup.py > /dev/null 2>&1; then
+            echo "::error::check_tempobject_cleanup.py passed an OOM sentinel whose cleaner is registered after the allocation"
+            cp /tmp/ws.orig src/web/WebServer.cpp
+            exit 1
+          fi
+          cp /tmp/ws.orig src/web/WebServer.cpp
+          rm /tmp/ws.orig
+          echo "the checker fails when the cleaner moves below the allocation, as it should"
+
+      - name: Verify that checker fails on a missing disconnect cleaner
+        run: |
+          set -e
+          cp src/web/IngestHandler.cpp /tmp/ih.orig
+          python3 - <<'EOF'
+          p = 'src/web/IngestHandler.cpp'
+          lines = open(p).read().split('\n')
+          head = '        req->onDisconnect([req]() {'
+          assert lines.count(head) == 1, 'cleaner anchor moved'
+          start = lines.index(head)
+          end = next(i for i in range(start, len(lines)) if lines[i].strip() == '});')
+          open(p, 'w').write('\n'.join(lines[:start] + lines[end + 1:]))
+          EOF
+          if grep -q 'onDisconnect' src/web/IngestHandler.cpp; then
+            echo "::error::the cleaner mutation no longer matches — this proof step is stale"
+            cp /tmp/ih.orig src/web/IngestHandler.cpp
+            exit 1
+          fi
+          if python3 tools/check_tempobject_cleanup.py > /dev/null 2>&1; then
+            echo "::error::check_tempobject_cleanup.py passed a _tempObject site with no cleaner"
+            cp /tmp/ih.orig src/web/IngestHandler.cpp
+            exit 1
+          fi
+          cp /tmp/ih.orig src/web/IngestHandler.cpp
+          rm /tmp/ih.orig
+          echo "the checker fails on a missing disconnect cleaner, as it should"
       - name: The Kindle payload and the panel agree on key names
         run: python3 tools/check_kindle_payload_keys.py
 

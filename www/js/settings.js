@@ -1427,7 +1427,54 @@ function otaUpload() {
     if (progressDiv) progressDiv.style.display = "block";
 
     var xhr = new XMLHttpRequest();
+
+  // WHY THERE IS NO xhr.timeout HERE.
+  //
+  // It used to be a flat 120 s on the whole request, which is a bet that a
+  // 1.3 MB image always transfers in two minutes. On a weak AP it does not,
+  // and losing that bet was expensive twice over: the user saw a timeout on
+  // an upload that was working, and the abort left the device's OTA partition
+  // open, so the next attempt failed too (see the ~OtaCtx note in
+  // src/web/WebServer.cpp). The firmware now releases the partition on an
+  // abort, but the better answer is not to abort a healthy upload at all.
+  //
+  // What matters is not how long the transfer takes but whether it is still
+  // moving, so the watchdog is re-armed by every progress event and only
+  // fires when nothing has moved for a while. After the last byte is sent
+  // there are no more progress events — the device is verifying and writing
+  // flash — so that phase gets its own, longer window.
+  var OTA_IDLE_MS = 45000;
+  var OTA_FLASH_MS = 120000;
+  var otaWatchdog = null;
+  var otaGaveUp = false;
+  function otaClearWatchdog() {
+    if (otaWatchdog) {
+      clearTimeout(otaWatchdog);
+      otaWatchdog = null;
+    }
+  }
+  function otaArmWatchdog(ms, title, detail) {
+    otaClearWatchdog();
+    otaWatchdog = setTimeout(function () {
+      otaWatchdog = null;
+      otaGaveUp = true;
+      // abort() raises onabort, not ontimeout, and cancels onload — so the
+      // popup and the re-enable have to happen here.
+      xhr.abort();
+      if (progressDiv) progressDiv.style.display = "none";
+      otaShowPopup("alert-triangle", title, detail, false, true);
+      uploadBtn.disabled = false;
+      fileInput.disabled = false;
+    }, ms);
+  }
+
   xhr.upload.onprogress = function (e) {
+    // Still moving: the stall clock starts again from here.
+    otaArmWatchdog(
+      OTA_IDLE_MS,
+      "Upload Stalled",
+      "The device accepted nothing for 45 s. Check the connection and retry.",
+    );
     if (e.lengthComputable) {
       var pct = Math.round((e.loaded / e.total) * 100);
       if (progressBar) progressBar.style.width = pct + "%";
@@ -1447,6 +1494,15 @@ function otaUpload() {
   // needs ~5 s to verify + write flash before xhr.onload fires.  Surface
   // that phase explicitly so users don't think the UI froze.
   xhr.upload.onload = function () {
+    // Every byte is on the device; from here it answers when it has finished
+    // verifying and flashing, with no progress events in between.
+    otaArmWatchdog(
+      OTA_FLASH_MS,
+      "No Answer From Device",
+      "The image was uploaded but the device did not report back within " +
+        "120 s. Do not re-upload yet — reload this page and check the " +
+        "firmware version first.",
+    );
     otaShowPopup(
       "cpu",
       "Verifying firmware…",
@@ -1457,6 +1513,7 @@ function otaUpload() {
     otaUpdatePopupProgress(100, "Flashing…");
   };
   xhr.onload = function () {
+    otaClearWatchdog();
     if (progressDiv) progressDiv.style.display = "none";
 
     if (xhr.status === 200) {
@@ -1532,6 +1589,8 @@ function otaUpload() {
     }
   };
   xhr.onerror = function () {
+    otaClearWatchdog();
+    if (otaGaveUp) return;   // the watchdog already reported and re-enabled
     if (progressDiv) progressDiv.style.display = "none";
     otaShowPopup(
       "alert-triangle",
@@ -1543,6 +1602,7 @@ function otaUpload() {
     uploadBtn.disabled = false;
     fileInput.disabled = false;
   };
+  xhr.onabort = otaClearWatchdog;
 
     var formData = new FormData();
     formData.append("firmware", file);
@@ -1553,14 +1613,14 @@ function otaUpload() {
       if (sha)   qs.push("sha256=" + encodeURIComponent(sha));
       if (token) qs.push("csrf=" + encodeURIComponent(token));
       xhr.open("POST", "/do_update" + (qs.length ? "?" + qs.join("&") : ""));
-      xhr.timeout = 120000;
-      xhr.ontimeout = function () {
-        if (progressDiv) progressDiv.style.display = "none";
-        otaShowPopup("alert-triangle", "Upload Timeout",
-          "No response from device after 120 s — check connection and retry.", false, true);
-        uploadBtn.disabled = false;
-        fileInput.disabled = false;
-      };
+      // Deliberately no xhr.timeout: the stall watchdog above replaces it.
+      // Armed before send() so a connection that never gets going is still
+      // caught — the first progress event re-arms it.
+      otaArmWatchdog(
+        OTA_IDLE_MS,
+        "Upload Stalled",
+        "The device accepted nothing for 45 s. Check the connection and retry.",
+      );
       xhr.send(formData);
     });
   });   // end _otaSha256().then
