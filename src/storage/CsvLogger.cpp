@@ -165,22 +165,3 @@ bool CsvLogger::appendRow(uint32_t epoch, const char* headerLine, const char* ro
     }
     return true;
 }
-
-// ---------------------------------------------------------------------------
-int CsvLogger::listFiles(fs::FS& fs, char (*names)[32], int maxNames) const {
-    int    count = 0;
-    File   dir   = fs.open(_dir);
-    if (!dir || !dir.isDirectory()) return 0;
-    File entry;
-    while ((entry = dir.openNextFile()) && count < maxNames) {
-        const char* nm = entry.name();
-        size_t      n  = strlen(nm);
-        if (n >= 4 && strcmp(nm + n - 4, ".csv") == 0) {
-            strncpy(names[count], nm, 31);
-            names[count][31] = '\0';
-            count++;
-        }
-        entry.close();
-    }
-    return count;
-}
