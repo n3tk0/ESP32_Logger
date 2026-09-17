@@ -47,7 +47,12 @@ Read as deltas:
   the core. It has since been made for its own reason, unrelated to the core:
   ESP32Async locks the SSE client list, and `publishLiveEvent()` walks that
   list from `loop()` while the AsyncTCP task mutates it. This row is what said
-  in advance that paying for the fix would still fit the C3.
+  in advance that paying for the fix would still fit the C3 — and when the
+  swap was made, CI measured it on the real thing and agreed. The same
+  `xiao_esp32c3` job, on the same tree, with nothing but the library
+  different: `firmware.bin` 1308 KB (88 %, 163 KB free) before, 1311 KB
+  (89 %, 161 KB free) after. About 3 KB of the image, within a rounding step
+  of what this table predicted, and the check gates at 95 %.
 - **the core itself: +222,931 bytes.** This is the whole story. It matches the
   +224 KB an ESP32-C3 user reported on 3.0.1 in [discussion #9860][d9860],
   where the maintainer's explanation was that the IDF WiFi stack "grew by about
