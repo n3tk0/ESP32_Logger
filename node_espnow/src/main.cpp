@@ -266,6 +266,18 @@ static uint8_t buildFrame(DataMsg& m, const EnvSample& live, uint32_t now,
 // ---------------------------------------------------------------------------
 
 static void sleepNow(uint16_t seconds) {
+    // NEVER ZERO. This is a battery device whose entire power budget is the
+    // ratio of this number to the second or so a wake costs, so a 0 here is
+    // not a short interval — it is a node that never sleeps again and a cell
+    // flat within a day. s_link.intervalS comes from NVS
+    // (prefs.getUShort("iv", …)), and while the collector's API refuses
+    // anything under 10 s, a truncated or hand-edited namespace can still
+    // hand back 0. The rescan arithmetic further down already defends itself
+    // this way; the sleep, which is the one that matters, did not.
+    if (seconds == 0) {
+        seconds = NODE_INTERVAL_S ? NODE_INTERVAL_S : 60;
+        Serial.printf("[node] stored interval was 0 — sleeping %us instead\n", seconds);
+    }
     Serial.printf("[node] wake %u done in %lu ms, sleeping %us\n",
                   (unsigned)s_wakeCount, (unsigned long)millis(), seconds);
     Serial.flush();
