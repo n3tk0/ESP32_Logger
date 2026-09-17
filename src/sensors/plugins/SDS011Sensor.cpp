@@ -52,9 +52,11 @@ bool SDS011Sensor::init(JsonObjectConst cfg) {
 
         // Verify ACK frame: AA C5 08 01 {period} ... {checksum} AB (10 bytes)
         uint8_t ack[10] = {};
-        unsigned long dl = millis() + 1000;
+        // millis() - start, not millis() < start + N: the sum wraps at the
+        // ~49.7-day rollover and the wait would end before it began.
+        const unsigned long ackStart = millis();
         int pos = 0;
-        while (millis() < dl && pos < 10) {
+        while (millis() - ackStart < 1000 && pos < 10) {
             if (_serial->available()) {
                 uint8_t b = _serial->read();
                 if (pos == 0 && b != 0xAA) continue;
@@ -140,8 +142,8 @@ bool SDS011Sensor::read(SensorReading& out) {
     }
     // Continuous mode: block briefly if no data yet
     if (_hwPeriodMin == 0) {
-        unsigned long deadline = millis() + 2000;
-        while (millis() < deadline) {
+        const unsigned long start = millis();       // wrap-safe wait
+        while (millis() - start < 2000) {
             g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();
             if (!_serial->available()) { delay(5); continue; }
             if (_tryReadFrame(tmp, 2) > 0) {
@@ -169,8 +171,8 @@ int SDS011Sensor::readAll(SensorReading* out, int maxOut) {
     int n = _tryReadFrame(out, maxOut);
     if (n > 0) return n;
 
-    unsigned long deadline = millis() + 2000;
-    while (millis() < deadline) {
+    const unsigned long start = millis();           // wrap-safe wait
+    while (millis() - start < 2000) {
         g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();
         if (!_serial->available()) { delay(5); continue; }
         n = _tryReadFrame(out, maxOut);
