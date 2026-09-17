@@ -1,10 +1,11 @@
 // ============================================================================
-// setup.h — central build-time configuration for ESP32 Water Logger v5.1.0
+// setup.h — central build-time configuration for the ESP32 Water Logger
+// (the firmware version lives in src/core/Config.h — VERSION_MAJOR/MINOR/PATCH)
 // ============================================================================
 // This is the single place to configure WHAT GETS BUILT and HOW IT BEHAVES.
 //
 //   • Module toggles  — enable/disable sensors and exporters
-//   • GPIO defaults   — fallback pin numbers when not in platform_config.json
+//   • GPIO defaults   — per-board pin numbers kept for reference (see §2)
 //   • Debug flags     — Serial output verbosity, FreeRTOS unicore
 //   • Task tuning     — FreeRTOS priorities, stack sizes, queue depths
 //   • Timing/limits   — log batch sizes, timeouts, intervals
@@ -254,10 +255,26 @@
 #endif
 
 // ============================================================================
-// 2. GPIO DEFAULT PINS — fallback values used when not in platform_config.json
+// 2. GPIO DEFAULT PINS — per-board reference values, NOT a runtime fallback
 // ============================================================================
-// PlatformIO -D flags override these per board.  Arduino IDE users edit here.
-// Defaults below match the XIAO ESP32-C3 wiring.
+// NOTHING IN THE FIRMWARE READS THESE.  Every pin that the device actually
+// drives comes from persisted configuration: the I2C/UART/pulse pins of a
+// sensor from its entry in platform_config.json (SensorManager passes them to
+// I2CBus::acquire / validateAttachPin), and the flow, RTC and SD pins from
+// config.bin's HardwareConfig, which the first-run wizard fills in.
+//
+// They are kept, and kept per board in platformio.ini, because they record
+// which pins are free on each carrier — the answer the wizard's defaults
+// should be giving.  The wizard does not ask yet: www/js/sensors.js and
+// www/js/iot-extensions.js carry their own hard-coded 6/7 proposal, so on a
+// board wired differently the form opens on pins the user cannot use.
+//
+// So treat this block as documentation with a build flag attached, and do not
+// add a consumer for it without also wiring the values through to the UI —
+// half a mechanism is what produced the mismatch above.
+//
+// Values below are the ESP32-C3 SuperMini wiring; platformio.ini overrides
+// them per env (XIAO C3 = 6/7, LOLIN C3 = 8/10, XIAO S3 = 5/6).
 // ----------------------------------------------------------------------------
 #ifndef DEFAULT_SDA
 #  define DEFAULT_SDA        8

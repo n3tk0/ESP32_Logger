@@ -1,6 +1,7 @@
 /**
  * src/web/WebServer.cpp
- * ESP32 Water Logger v5.1.0 – Production audit hardening
+ * ESP32 Water Logger – Production audit hardening
+ * (version: src/core/Config.h — VERSION_MAJOR/MINOR/PATCH)
  *
  * Architecture:
  *   – Normal mode  : AsyncWebServer serves /www/index.html + /www/js/*.js

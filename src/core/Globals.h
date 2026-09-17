@@ -150,7 +150,7 @@ extern volatile uint32_t g_lastWebActivity;
 // ============================================================================
 // DEFERRED ACTIONS (executed from loop() so async handlers don't block)
 // ============================================================================
-#include <atomic>
+// (<atomic> is included at the top of this header.)
 // g_pendingNtpSync:      0 = idle, 1 = requested, 2 = running
 // g_lastNtpSyncResult:   0 = unknown, 1 = ok, -1 = fail
 extern volatile uint8_t g_pendingNtpSync;
