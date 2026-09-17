@@ -38,11 +38,22 @@ SCAN = ['src', '.']            # '.' picks up the top-level .ino
 # The mutating calls, on either of the two ways the filesystem is named:
 # `LittleFS.` / `SD.` directly, or through the `activeFS` pointer the platform
 # layer hands around.
+# A `fs::FS` arrives three ways and the check has to know all three: as the
+# global object (LittleFS.remove), through a pointer (activeFS->remove), and
+# through a REFERENCE, where the call is spelled with a dot on an ordinary
+# variable name — `bool save(fs::FS& fs) { fs.rename(...); }`.
+#
+# THAT THIRD ONE WAS MISSING, and it is not hypothetical: KindleSlotStore's
+# kdSlotsSave() opened, wrote, removed and renamed the layout file from the
+# async web task with no lock at all, and this check passed it every run,
+# because every call was `fs.` and the pattern only knew `fs->`. The invariant
+# this file exists to enforce was invisible in exactly the shape a new writer
+# is most likely to use.
+_TARGET = r'(?:LittleFS|SD|SD_MMC|activeFS|fs|_fs|dst|dstFs|targetFS)'
+_ACCESS = r'(?:\s*\.\s*|\s*->\s*)'
 WRITE_RE = re.compile(
-    r'(?:LittleFS|SD|SD_MMC)\s*\.\s*(remove|rename|mkdir|rmdir)\s*\(|'
-    r'(?:activeFS|fs|_fs)\s*->\s*(remove|rename|mkdir|rmdir)\s*\(|'
-    r'(?:LittleFS|SD|SD_MMC)\s*\.\s*open\s*\([^;]*?(?:"w"|"a"|FILE_WRITE|FILE_APPEND)|'
-    r'(?:activeFS|fs|_fs)\s*->\s*open\s*\([^;]*?(?:"w"|"a"|FILE_WRITE|FILE_APPEND)')
+    _TARGET + _ACCESS + r'(?:remove|rename|mkdir|rmdir)\s*\(|' +
+    _TARGET + _ACCESS + r'open\s*\([^;]*?(?:"w"|"a"|FILE_WRITE|FILE_APPEND)')
 
 # Saying either of these counts as having heard of the rule, and COMMENTS
 # COUNT. atomicWrite() takes fsMutex itself (see src/utils/AtomicWrite.h), and

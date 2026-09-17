@@ -98,6 +98,13 @@ bool isPathDownloadAllowed(const String& path) {
     return false;
 }
 
+// THE CALLER HOLDS fsMutex. /delete is the only call site (WebServer.cpp) and
+// it takes the lock with a 500 ms cap before calling in, answering 503 if a
+// storage task has it — so this must NOT acquire it again: fsMutex is not
+// recursive and a second take from the same task deadlocks until the timeout.
+// Written down because Pillar 1.3 is unenforceable by the compiler and
+// tools/check_fs_mutex.py can only see whether a file has reckoned with it.
+//
 // Iterative deletion using an explicit work-stack on the heap.
 // The previous recursive version called itself on every sub-directory, which
 // risked blowing the ~4 KB AsyncTCP worker stack on deep trees.  This version
