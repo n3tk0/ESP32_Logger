@@ -130,6 +130,18 @@ uint32_t OtaManager::millisUntilConfirm() {
 void OtaManager::setConfirmPolicy(uint32_t autoConfirmMs, bool requireManual) {
     if (autoConfirmMs > 0) s_autoConfirmMs = autoConfirmMs;
     s_requireManualConfirm = requireManual;
+
+    // RE-ARM THE DEADLINE, because the one boot this setting matters on is the
+    // boot it arrives too late for: boot() computes s_pendingDeadline from the
+    // compile-time default, and OtaModule::load() only reaches us afterwards,
+    // once modules.json has been read. A device configured for a 10-minute
+    // stability window would have confirmed at 90 s regardless.
+    //
+    // Measured from now rather than from boot: the window is "survive this
+    // long", and the part already survived is not what the setting is about.
+    if (s_pending && !s_confirmed) {
+        s_pendingDeadline = millis() + s_autoConfirmMs;
+    }
 }
 
 uint32_t OtaManager::autoConfirmMs()        { return s_autoConfirmMs; }

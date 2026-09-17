@@ -12,10 +12,26 @@ void initRtc() {
     DBGLN("Init RTC...");
     bool pinsValid = true;
 
+    // Bounds PER TARGET, matching ConfigManager::sanitizeWakeConfig()'s
+    // isSafePin. This was a C3-only range (0..21 minus the 11-17 flash bus),
+    // which is the exact mistake HardwareManager::initHardware warns about in
+    // its own comment: on a classic ESP32 or an S3 it refuses GPIOs the chip
+    // and the sanitiser both accept, so a DS1302 wired to GPIO25/26/27 — the
+    // ordinary choice on a devkit — reported "RTC pins invalid!" and left
+    // rtcValid false with no way to fix it from the UI.
     auto isPinSafe = [](int p) {
-        if (p < 0 || p > 21) return false;
-        if (p >= 11 && p <= 17) return false;
-        return true;
+#if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6
+        return p >= 0 && p <= 21 && !(p >= 11 && p <= 17);
+#elif CONFIG_IDF_TARGET_ESP32
+        // Internal flash occupies 6-11; 34-39 are input-only, and the DS1302
+        // needs to drive CE/SCLK and both directions on IO.
+        return p >= 0 && p <= 33 && !(p >= 6 && p <= 11);
+#elif CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32S3
+        // 26-37 is flash + octal PSRAM on the parts this project builds for.
+        return p >= 0 && p <= 48 && !(p >= 26 && p <= 37);
+#else
+        return p >= 0 && p <= 48;
+#endif
     };
 
     if (!isPinSafe(config.hardware.pinRtcCE) ||
@@ -254,10 +270,21 @@ String getWakeupReason() {
     if (cause == ESP_SLEEP_WAKEUP_GPIO) {
         int expectedState = (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH) ? HIGH : LOW;
 
+        // An unassigned pin (PIN_UNSET = 255) must not reach either of the two
+        // reads below: `bitmask >> 255` is undefined for a 32-bit value, and
+        // digitalRead(255) is an out-of-range GPIO. A device with no buttons
+        // wired cannot have woken on one, so unset reads as not-triggered.
+        auto bitOf = [](uint32_t mask, uint8_t pin) -> bool {
+            return pin < 32 && ((mask >> pin) & 1u);
+        };
+        auto readIs = [](uint8_t pin, int expected) -> bool {
+            return pin != PIN_UNSET && pin <= 48 && digitalRead(pin) == expected;
+        };
+
         if (earlyGPIO_captured) {
-            bool ffEarly  = (bool)((earlyGPIO_bitmask >> config.hardware.pinWakeupFF)    & 1);
-            bool pfEarly  = (bool)((earlyGPIO_bitmask >> config.hardware.pinWakeupPF)    & 1);
-            bool wifiEarly= (bool)((earlyGPIO_bitmask >> config.hardware.pinWifiTrigger) & 1);
+            bool ffEarly  = bitOf(earlyGPIO_bitmask, config.hardware.pinWakeupFF);
+            bool pfEarly  = bitOf(earlyGPIO_bitmask, config.hardware.pinWakeupPF);
+            bool wifiEarly= bitOf(earlyGPIO_bitmask, config.hardware.pinWifiTrigger);
             
             if (expectedState == LOW) {
                 ffEarly   = !ffEarly;
@@ -274,9 +301,9 @@ String getWakeupReason() {
 
         // Fallback
         delay(config.hardware.debounceMs);
-        bool ffNow   = (digitalRead(config.hardware.pinWakeupFF)    == expectedState);
-        bool pfNow   = (digitalRead(config.hardware.pinWakeupPF)    == expectedState);
-        bool wifiNow = (digitalRead(config.hardware.pinWifiTrigger) == expectedState);
+        bool ffNow   = readIs(config.hardware.pinWakeupFF,    expectedState);
+        bool pfNow   = readIs(config.hardware.pinWakeupPF,    expectedState);
+        bool wifiNow = readIs(config.hardware.pinWifiTrigger, expectedState);
         if (ffNow)   return "FF_BTN";
         if (pfNow)   return "PF_BTN";
         if (wifiNow) return "WIFI";

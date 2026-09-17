@@ -10,14 +10,30 @@
 #include "RtcManager.h"
 #include <LittleFS.h>
 #include <math.h>
+#include <string.h>   // memchr
 
-// Count newlines in a file (= number of log entries)
+// Count newlines in a file (= number of log entries).
+//
+// Read in blocks, not a byte at a time. Every flush calls this while holding
+// fsMutex, and at the default cap of 10 000 entries the datalog is around
+// 600 KB — that many single-byte File::read() calls is roughly a second of
+// the mutex held against the sensor and export paths, for a number that a
+// memchr scan produces in a few milliseconds.
 static int countFileLines(fs::FS* fs, const String& path) {
     File f = fs->open(path, "r");
     if (!f) return 0;
     int count = 0;
-    while (f.available()) {
-        if (f.read() == '\n') count++;
+    uint8_t buf[256];
+    for (;;) {
+        int n = f.read(buf, sizeof(buf));
+        if (n <= 0) break;
+        for (const uint8_t* p = buf; ; ) {
+            const uint8_t* nl = (const uint8_t*)memchr(p, '\n', (size_t)(buf + n - p));
+            if (!nl) break;
+            count++;
+            p = nl + 1;
+            if (p >= buf + n) break;
+        }
     }
     f.close();
     return count;

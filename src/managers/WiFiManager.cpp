@@ -46,7 +46,7 @@ void safeWiFiShutdown() {
     WiFi.scanDelete();
 
     // Disconnect от AP/Client, изчисти запазените credentials в RAM
-    WiFi.disconnect(true /*wifioff=false*/);
+    WiFi.disconnect(true /* wifioff: also power the radio down */);
     delay(50);
 
     // Спри SoftAP ако е активен
