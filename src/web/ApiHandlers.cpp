@@ -2075,11 +2075,19 @@ void registerApiRoutes(AsyncWebServer& server) {
     // Pass 5 phase 3: generic module CRUD.
     //
     // IMPORTANT — route ordering vs. prefix matching:
-    // The esphome ESPAsyncWebServer fork PREFIX-matches handlers
-    // (canHandle ≈ `url == uri || url.startsWith(uri + "/")`), NOT exact-match
-    // as an earlier comment here assumed. Handlers are tried in registration
-    // order and the first whose canHandle() passes wins, so MORE-SPECIFIC paths
-    // MUST be registered BEFORE shorter ones:
+    // ESPAsyncWebServer PREFIX-matches handlers, NOT exact-match as an earlier
+    // comment here assumed. Handlers are tried in registration order and the
+    // first whose canHandle() passes wins, so MORE-SPECIFIC paths MUST be
+    // registered BEFORE shorter ones.
+    //
+    // This survived the move to ESP32Async/ESPAsyncWebServer unchanged, which
+    // is worth stating because that version looks like it might have changed
+    // it: a plain string route now builds an AsyncURIMatcher, and that class
+    // does offer exact(), prefix() and dir() types. A bare `server.on("/x")`
+    // selects its BackwardCompatible type, whose match is
+    // `uri == url || url.startsWith(uri + "/")` — the same rule as before.
+    // (A route string ending in `*` would now select the prefix type instead.
+    // None of ours does; the list below is the reason not to add one casually.)
     //   • "/api/modules" registered first would swallow "/api/modules/<id>" —
     //     the detail/form GET would return the whole index array, so the UI
     //     shows "no configurable form".

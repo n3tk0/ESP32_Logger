@@ -160,24 +160,28 @@ static void buildLiveSnapshot(JsonDocument& doc) {
 // Called from loop() at ~1 Hz.  Skips work entirely when nobody is subscribed
 // so polling-only deployments pay zero cost.
 // ---------------------------------------------------------------------------
-// CALLED FROM loop(), WHICH IS NOT THE TASK THAT OWNS THESE CLIENTS.
+// CALLED FROM loop(), WHICH IS NOT THE TASK THAT OWNS THESE CLIENTS — and
+// that is safe only because of which web server library this builds against.
 //
-// AsyncEventSource keeps its subscribers in a LinkedList that the AsyncTCP
-// task mutates: _addClient() on connect, _handleDisconnect() on close, and
-// the list's own deleter frees the client object there. In the fork this
-// project pins (esphome/ESPAsyncWebServer-esphome 3.4), neither send() nor
-// count() takes a lock while walking that list — checked in the library's
-// AsyncEventSource.cpp — so a browser opening or closing /api/live while
-// this walk is in flight races the list, and a disconnect frees an object
-// this loop may still dereference. A dashboard reload is exactly that event.
+// AsyncEventSource keeps its subscribers in a list that the AsyncTCP task
+// mutates: added on connect, erased AND DELETED on disconnect. Walking it
+// from here at 1 Hz therefore races a browser opening or closing the live
+// page — a dashboard reload is exactly that event — and the losing outcome
+// is this task dereferencing a client the other one just freed.
 //
-// It cannot be closed from here: the other side of the race is library code
-// and there is no hook to run this on the AsyncTCP task instead. What CAN be
-// done is to not make it worse — nothing else may push to an async client
-// from outside a request handler, and the 1 Hz tick stays the only such
-// caller. The real fixes are a library with a guarded client list (the
-// ESP32Async fork this repo already builds in the x_core3_probe env has one)
-// or replacing SSE with polling, and both are decisions, not review edits.
+// ESP32Async/ESPAsyncWebServer (pinned in platformio.ini, with
+// -DASYNCWEBSERVER_USE_MUTEX=1 stated explicitly) takes a recursive mutex
+// around that list in send(), count(), _addClient(), _handleDisconnect() and
+// close(). The esphome fork this project used to pin takes nothing, and under
+// it this function was a use-after-free waiting for a page refresh.
+//
+// So: the dependency is load-bearing, not incidental. If it is ever moved
+// back, this push has to go with it — the live page already falls back to
+// polling /api/live when the event stream is unavailable (www/js/pages.js
+// liveStartTransport), so removing the push is the safe retreat.
+//
+// Either way, nothing else may write to an async client from outside a
+// request handler: this stays the only such caller.
 // ---------------------------------------------------------------------------
 void publishLiveEvent() {
     if (liveEvents.count() == 0) return;
@@ -1592,6 +1596,11 @@ static void h_post_api_platform_reload(AsyncWebServerRequest* r) {
 // non-const in esphome/ESPAsyncWebServer-esphome. One signature cannot satisfy
 // both, and `override` turns the mismatch into a hard error rather than a
 // silently-never-called method — which is the failure mode worth avoiding.
+//
+// Every env now pins the ESP32Async line, so the const branch is the one that
+// ships; the shim stays because it is what let that move happen without
+// touching either gate handler, and it keeps a build against the older fork
+// honest rather than subtly broken.
 // ASYNCWEBSERVER_VERSION_MAJOR exists only in the ESP32Async line (it comes
 // from its AsyncWebServerVersion.h), so it is the discriminator.
 #ifdef ASYNCWEBSERVER_VERSION_MAJOR
@@ -1670,6 +1679,20 @@ static FirstRunGateHandler s_firstRunGate;
 void setupWebServer() {
     DBGLN("Setting up web server...");
 
+    // ── addHandler() TAKES OWNERSHIP, and every handler we pass it is a
+    // static. `_handlers` is a std::list<std::unique_ptr<AsyncWebHandler>>,
+    // so anything that removes an entry runs `delete` on an object that was
+    // never `new`ed — i.e. server.reset() or server.removeHandler() would
+    // corrupt the heap here, and so would destroying `server` itself.
+    //
+    // None of those happen: `server` is a global (src/core/Globals.cpp) that
+    // outlives every path through this firmware, its destructor never runs
+    // because a reboot is ESP.restart() rather than a return from main, and
+    // nothing in the tree calls reset() or removeHandler(). The statics are
+    // the cheaper shape and they are correct AS LONG AS THAT STAYS TRUE —
+    // adding a reset()/removeHandler() call means allocating every handler
+    // registered here instead, not just deleting a line.
+    //
     // R11: first-run gate runs before auth gate. The wizard must be
     // reachable on a fresh device even when Basic Auth is compiled in —
     // setting credentials is part of the wizard's job (a later phase).
@@ -2016,6 +2039,8 @@ void setupWebServer() {
     server.on("/api/live", HTTP_GET, h_get_api_live);
 
     // SSE channel — same payload, pushed at 1 Hz by publishLiveEvent().
+    // Static, like the two gate handlers: see the ownership note at the top
+    // of setupWebServer() for why that is safe and what would break it.
     server.addHandler(&liveEvents);
 
     // =========================================================================

@@ -29,8 +29,11 @@
  *
  * ИЗПОЛЗВАНИ БИБЛИОТЕКИ (Arduino Library Manager):
  *   ArduinoJson                 (B. Blanchon)     >= 7.0   -> Core
- *   ESPAsyncWebServer           (esphome/lacamera)>= 3.1   -> WebServer
- *   AsyncTCP                    (me-no-dev)       >= 1.1   -> WebServer
+ *   ESPAsyncWebServer           (ESP32Async)      >= 3.12  -> WebServer
+ *   AsyncTCP                    (ESP32Async)      >= 3.5   -> WebServer
+ *     ^ the web server fork is load-bearing, not interchangeable: its
+ *       locked SSE client list is what makes publishLiveEvent() safe to
+ *       call from loop().  See the note beside lib_deps in platformio.ini.
  *
  * Всички сензорни драйвери (BME280, BME688, DS18B20, SDS011, PMS5003, SPS30, ENS160,
  * SGP30, SCD4x, VEML6075, VEML7700, BH1750, HC-SR04, ZMPT101B, ZMCT103C,
@@ -1109,10 +1112,11 @@ void loop() {
     // ── SSE live heartbeat (1 Hz) ─────────────────────────────────────────────
     // No-op when no EventSource clients are subscribed.
     //
-    // This is the one place the main task touches an async client, and the
-    // library's client list is not locked against the AsyncTCP task that
-    // mutates it — see the note above publishLiveEvent() in WebServer.cpp.
-    // Do not add a second such caller.
+    // This is the one place the main task touches an async client. It is safe
+    // because the pinned web server locks its client list against the AsyncTCP
+    // task that mutates it — see the note above publishLiveEvent() in
+    // WebServer.cpp, and the dependency note in platformio.ini. Do not add a
+    // second such caller.
     {
         static uint32_t s_lastLiveTick = 0;
         uint32_t now = millis();

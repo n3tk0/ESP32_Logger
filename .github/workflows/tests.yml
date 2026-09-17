@@ -36,6 +36,7 @@ on:
       - 'tools/check_body_handlers.py'
       - 'tools/check_fs_mutex.py'
       - 'tools/check_rtc_mutex.py'
+      - 'tools/check_sse_lock.py'
       - 'tools/check_kindle_payload_keys.py'
       - 'node/**'
       - 'kindle/**'
@@ -70,6 +71,7 @@ on:
       - 'tools/check_body_handlers.py'
       - 'tools/check_fs_mutex.py'
       - 'tools/check_rtc_mutex.py'
+      - 'tools/check_sse_lock.py'
       - 'tools/check_kindle_payload_keys.py'
       - 'node/**'
       - 'kindle/**'
@@ -643,6 +645,56 @@ jobs:
           cp /tmp/dl.orig src/managers/DataLogger.cpp
           rm /tmp/dl.orig
           echo "the checker fails on an unguarded RTC transaction, as it should"
+
+      - name: The SSE push rests on a locked client list (check_sse_lock)
+        run: python3 tools/check_sse_lock.py
+
+      - name: Verify that checker fails on an unlocked web server
+        run: |
+          set -e
+          cp platformio.ini /tmp/pio.orig
+          python3 - <<'EOF'
+          s = open('platformio.ini').read()
+          s = s.replace('ESP32Async/ESPAsyncWebServer @ ^3.12.0',
+                        'esphome/ESPAsyncWebServer-esphome @ ^3.4.0')
+          open('platformio.ini', 'w').write(s)
+          EOF
+          if grep -q 'ESP32Async/ESPAsyncWebServer' platformio.ini; then
+            echo "::error::the web-server pin mutation no longer matches — this proof step is stale"
+            cp /tmp/pio.orig platformio.ini
+            exit 1
+          fi
+          if python3 tools/check_sse_lock.py > /dev/null 2>&1; then
+            echo "::error::check_sse_lock.py passed a web server that does not lock its client list"
+            cp /tmp/pio.orig platformio.ini
+            exit 1
+          fi
+          cp /tmp/pio.orig platformio.ini
+          rm /tmp/pio.orig
+          echo "the checker fails on an unlocked web server, as it should"
+
+      - name: Verify that checker fails when the locks are compiled out
+        run: |
+          set -e
+          cp platformio.ini /tmp/pio.orig
+          python3 - <<'EOF'
+          s = open('platformio.ini').read()
+          s = s.replace('-DASYNCWEBSERVER_USE_MUTEX=1', '-DASYNCWEBSERVER_USE_MUTEX=0')
+          open('platformio.ini', 'w').write(s)
+          EOF
+          if grep -q 'ASYNCWEBSERVER_USE_MUTEX=1' platformio.ini; then
+            echo "::error::the USE_MUTEX mutation no longer matches — this proof step is stale"
+            cp /tmp/pio.orig platformio.ini
+            exit 1
+          fi
+          if python3 tools/check_sse_lock.py > /dev/null 2>&1; then
+            echo "::error::check_sse_lock.py passed a build whose web-server locks are no-ops"
+            cp /tmp/pio.orig platformio.ini
+            exit 1
+          fi
+          cp /tmp/pio.orig platformio.ini
+          rm /tmp/pio.orig
+          echo "the checker fails when the locks are compiled out, as it should"
 
       - name: The Kindle payload and the panel agree on key names
         run: python3 tools/check_kindle_payload_keys.py

@@ -35,8 +35,8 @@ as headroom.
 
 | build | app flash | of partition | free | RAM |
 |---|---:|---:|---:|---:|
-| core 2.0.17, esphome AsyncWebServer — **what we ship** | 1,382,104 | 91.7 % | 125,224 | 55,116 |
-| core 2.0.17, ESP32Async AsyncWebServer | 1,386,716 | 92.0 % | 120,612 | 55,044 |
+| core 2.0.17, esphome AsyncWebServer — shipped until the SSE race was fixed | 1,382,104 | 91.7 % | 125,224 | 55,116 |
+| core 2.0.17, ESP32Async AsyncWebServer — **what we ship** | 1,386,716 | 92.0 % | 120,612 | 55,044 |
 | core 3.3.11 / IDF 5.5.5, stock sdkconfig | 1,609,647 | **106.8 %** | **−102,319** | 52,612 |
 | core 3.3.11, with the sdkconfig levers below | 1,484,222 | 98.5 % | 23,106 | 49,344 |
 
@@ -44,7 +44,10 @@ Read as deltas:
 
 - **the web-server library swap: +4,612 bytes.** Small, and worth isolating —
   without this row the library change would have been silently attributed to
-  the core.
+  the core. It has since been made for its own reason, unrelated to the core:
+  ESP32Async locks the SSE client list, and `publishLiveEvent()` walks that
+  list from `loop()` while the AsyncTCP task mutates it. This row is what said
+  in advance that paying for the fix would still fit the C3.
 - **the core itself: +222,931 bytes.** This is the whole story. It matches the
   +224 KB an ESP32-C3 user reported on 3.0.1 in [discussion #9860][d9860],
   where the maintainer's explanation was that the IDF WiFi stack "grew by about
@@ -138,7 +141,8 @@ Our ESP-IDF surface (`esp_sleep_*`, `esp_ota_*`, `esp_random`,
 `freertos/*`, `driver/gpio.h`) is stable across 4.4 → 5.5.
 
 Two source changes were needed, both from the **library** swap rather than the
-core, and both are in the tree now because they compile on 2.x as well:
+core. Both compile on either library, which is why they went in before the swap
+did and why they are still written to accept both:
 
 1. `clientAcceptsGzip()` binds `getHeader()` to a `const AsyncWebHeader*` —
    ESP32Async returns const, the esphome fork does not, and the const pointer
@@ -147,6 +151,16 @@ core, and both are in the tree now because they compile on 2.x as well:
    esphome fork. One signature cannot satisfy both, so `LOGGER_CANHANDLE_CV`
    (keyed off `ASYNCWEBSERVER_VERSION_MAJOR`, which only the ESP32Async line
    defines) supplies the qualifier.
+
+The library swap itself is no longer hypothetical: the deployable envs pin
+`ESP32Async/ESPAsyncWebServer` because its SSE client list is locked, so what
+`x_core3_probe` now prices against them is the **core** alone, which is what it
+was built for. Nothing else in the API surface this firmware touches moved with
+it — `send_P`, `beginResponse_P`, `_tempObject` (still reclaimed with `free()`,
+which the upload handler already accounts for), `DefaultHeaders`, the
+existence-checking `serveStatic` match, and the `url == uri || startsWith(uri +
+"/")` route rule all behave the same, and the interesting-header opt-in the
+esphome fork had already dropped is simply absent.
 
 ## One trap worth knowing about
 

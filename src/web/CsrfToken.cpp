@@ -47,11 +47,11 @@ bool CsrfToken::valid(AsyncWebServerRequest* req) {
     // THE REASON GIVEN HERE WAS WRONG, and it mattered because another
     // handler was written around it: this said ESPAsyncWebServer drops custom
     // request headers unless a handler opts in with addInterestingHeader().
-    // In the fork this project pins (esphome/ESPAsyncWebServer-esphome),
-    // AsyncCallbackWebHandler::canHandle() registers "ANY" for every
-    // server.on() route and _removeNotInterestingHeaders() then keeps
-    // everything — so a custom header would in fact be readable, as
-    // /api/ingest's X-Ingest-Token relies on.
+    // It does not. The esphome fork kept every header for a server.on() route
+    // because its AsyncCallbackWebHandler::canHandle() registered "ANY", and
+    // the ESP32Async line this now pins dropped the interesting-header
+    // mechanism altogether — so a custom header is readable either way, which
+    // is what /api/ingest's X-Ingest-Token relies on.
     //
     // A param is still the right choice for THIS token: it is what the SPA
     // already sends on every mutating call, it survives a plain HTML form
