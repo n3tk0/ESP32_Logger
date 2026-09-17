@@ -12,7 +12,20 @@
 #endif
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <time.h>                       // time() — pipelineNowEpoch()
 #include "../core/SdCompat.h"   // sdFs() — SD.h only when FEATURE_SD_STORAGE
+
+// ---------------------------------------------------------------------------
+// See the contract in TaskManager.h — the ordering is the whole point.
+uint32_t pipelineNowEpoch() {
+    const time_t sysT = time(nullptr);
+    if (sysT > 1000000000L) return (uint32_t)sysT;
+    if (Rtc) {
+        RtcDateTime now = Rtc->GetDateTime();
+        if (now.IsValid() && now.Year() >= 2020) return now.Unix32Time();
+    }
+    return (uint32_t)(millis() / 1000UL) + 1;
+}
 
 // Static member definitions
 TaskHandle_t      TaskManager::hSensor     = nullptr;
@@ -300,8 +313,11 @@ void TaskManager::shutdown() {
     // Wait for sensor queues to drain (up to 3s) before hard timeout.
     // Prevents storageQueue data loss when sensor pipeline is still writing.
     constexpr uint32_t DRAIN_TIMEOUT_MS = 3000;
-    uint32_t deadline = millis() + DRAIN_TIMEOUT_MS;
-    while (millis() < deadline) {
+    // Elapsed, not millis() < millis() + N: the sum wraps at the ~49.7-day
+    // rollover, and a shutdown that lands there would skip the drain entirely
+    // and then force-delete tasks mid-write.
+    const uint32_t drainStart = millis();
+    while (millis() - drainStart < DRAIN_TIMEOUT_MS) {
         UBaseType_t sq = sensorQueue  ? uxQueueMessagesWaiting(sensorQueue)  : 0;
         UBaseType_t stq = storageQueue ? uxQueueMessagesWaiting(storageQueue) : 0;
         UBaseType_t eq = exportQueue  ? uxQueueMessagesWaiting(exportQueue)  : 0;
@@ -316,13 +332,13 @@ void TaskManager::shutdown() {
     // reads (SDS011 / PMS5003 ~2 s). 4 s ceiling.
     constexpr uint32_t WAIT_MS  = 4000;
     constexpr uint32_t STEP_MS  = 50;
-    uint32_t waitDeadline = millis() + WAIT_MS;
+    const uint32_t waitStart = millis();       // elapsed; see the note above
     TaskHandle_t* handles[] = { &hSensor, &hSlowSensor, &hProcess,
                                 &hStorage, &hExport };
     for (TaskHandle_t* hp : handles) {
         if (*hp == nullptr) continue;
         bool deleted = false;
-        while (millis() < waitDeadline) {
+        while (millis() - waitStart < WAIT_MS) {
             if (eTaskGetState(*hp) == eDeleted) { deleted = true; break; }
             vTaskDelay(pdMS_TO_TICKS(STEP_MS));
         }
