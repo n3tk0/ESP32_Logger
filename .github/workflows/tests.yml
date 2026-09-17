@@ -614,6 +614,43 @@ jobs:
           rm /tmp/tsm.orig
           echo "the checker fails on an unguarded filesystem write, as it should"
 
+      - name: Verify that checker sees a write through an fs::FS& reference
+        run: |
+          set -e
+          # THE SHAPE THE CHECKER USED TO MISS. TrendStore writes through a
+          # pointer (_fs->open), and the mutation above only removes the
+          # awareness token — so it proved nothing about HOW the write is
+          # spelled. KindleSlotStore writes through a reference parameter
+          # (fs.open / fs.rename / fs.remove), which the pattern did not match
+          # at all: that file wrote /config/kindle_slots.json from the async
+          # web task with no lock, for as long as it existed, and every run of
+          # this check passed it.
+          cp src/web/KindleSlotStore.cpp /tmp/kss.orig
+          python3 - <<'EOF'
+          s = open('src/web/KindleSlotStore.cpp').read()
+          # Every awareness token, including the ones in comments —
+          # AWARE_RE matches the raw text on purpose, so a passing mention
+          # of atomicWrite() in a note is enough to satisfy it. Leaving that
+          # one behind is how this proof passed while proving nothing.
+          s = (s.replace('fsMutex', 'noLockAtAll')
+                .replace('MutexGuard', 'NoGuard')
+                .replace('atomicWrite', 'x'))
+          open('src/web/KindleSlotStore.cpp', 'w').write(s)
+          EOF
+          if grep -qE 'fsMutex|atomicWrite' src/web/KindleSlotStore.cpp; then
+            echo "::error::the KindleSlotStore mutation no longer matches — this proof step is stale"
+            cp /tmp/kss.orig src/web/KindleSlotStore.cpp
+            exit 1
+          fi
+          if python3 tools/check_fs_mutex.py > /dev/null 2>&1; then
+            echo "::error::check_fs_mutex.py passed an fs::FS& write with no lock"
+            cp /tmp/kss.orig src/web/KindleSlotStore.cpp
+            exit 1
+          fi
+          cp /tmp/kss.orig src/web/KindleSlotStore.cpp
+          rm /tmp/kss.orig
+          echo "the checker sees dot-notation writes through a reference, as it should"
+
       - name: Hold the panel's layout to the browser page's design
         # GET /kindle and kindle/update_dash.sh are one design rendered twice,
         # by two pieces of code that cannot see each other: the page takes its
