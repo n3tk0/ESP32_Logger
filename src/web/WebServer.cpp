@@ -159,6 +159,26 @@ static void buildLiveSnapshot(JsonDocument& doc) {
 
 // Called from loop() at ~1 Hz.  Skips work entirely when nobody is subscribed
 // so polling-only deployments pay zero cost.
+// ---------------------------------------------------------------------------
+// CALLED FROM loop(), WHICH IS NOT THE TASK THAT OWNS THESE CLIENTS.
+//
+// AsyncEventSource keeps its subscribers in a LinkedList that the AsyncTCP
+// task mutates: _addClient() on connect, _handleDisconnect() on close, and
+// the list's own deleter frees the client object there. In the fork this
+// project pins (esphome/ESPAsyncWebServer-esphome 3.4), neither send() nor
+// count() takes a lock while walking that list — checked in the library's
+// AsyncEventSource.cpp — so a browser opening or closing /api/live while
+// this walk is in flight races the list, and a disconnect frees an object
+// this loop may still dereference. A dashboard reload is exactly that event.
+//
+// It cannot be closed from here: the other side of the race is library code
+// and there is no hook to run this on the AsyncTCP task instead. What CAN be
+// done is to not make it worse — nothing else may push to an async client
+// from outside a request handler, and the 1 Hz tick stays the only such
+// caller. The real fixes are a library with a guarded client list (the
+// ESP32Async fork this repo already builds in the x_core3_probe env has one)
+// or replacing SSE with polling, and both are decisions, not review edits.
+// ---------------------------------------------------------------------------
 void publishLiveEvent() {
     if (liveEvents.count() == 0) return;
     JsonDocument doc;
@@ -1110,15 +1130,25 @@ static void h_post_api_datalog_create(AsyncWebServerRequest* r) {
     if (incDeviceId && strlen(config.deviceId) > 0)
         newFile += "_" + String(config.deviceId);
     if (timestampFn) {
+        // A zeroed RtcDateTime would render "_00000000_000000", which looks
+        // like a date and is not one. The millis() form below is the existing
+        // answer for "no clock to name this with", so a busy bus takes it too.
+        bool haveClock = false;
+        char buf[20];
         if (Rtc) {
-            RtcDateTime now = Rtc->GetDateTime();
-            char buf[20];
-            snprintf(buf, sizeof(buf), "_%04d%02d%02d_%02d%02d%02d",
-                now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second());
-            newFile += buf;
-        } else {
-            newFile += "_" + String(millis());
+            MutexGuard rg(rtcMutex, pdMS_TO_TICKS(200));
+            if (!rtcMutex || rg.isLocked()) {
+                RtcDateTime now = Rtc->GetDateTime();
+                if (now.IsValid()) {
+                    snprintf(buf, sizeof(buf), "_%04d%02d%02d_%02d%02d%02d",
+                             now.Year(), now.Month(), now.Day(),
+                             now.Hour(), now.Minute(), now.Second());
+                    haveClock = true;
+                }
+            }
         }
+        if (haveClock) newFile += buf;
+        else           newFile += "_" + String(millis());
     }
     newFile += ".txt";
 
@@ -1307,6 +1337,11 @@ static void h_post_rtc_protect(AsyncWebServerRequest* r) {
     if (!requireMutatingAuth(r)) return;
     if (Rtc) {
         bool protect = r->hasParam("protect", true);
+        MutexGuard rg(rtcMutex, pdMS_TO_TICKS(500));
+        if (rtcMutex && !rg.isLocked()) {
+            r->send(503, "application/json", "{\"ok\":false,\"error\":\"rtc busy\"}");
+            return;
+        }
         Rtc->SetIsWriteProtected(protect);
     }
     r->send(200, "application/json", "{\"ok\":true}");
@@ -1878,10 +1913,20 @@ void setupWebServer() {
 
         o["rtcPresent"] = (Rtc != nullptr);
         if (Rtc) {
-            o["rtcProtected"] = Rtc->GetIsWriteProtected();
-            o["rtcRunning"]   = Rtc->GetIsRunning();
-            RtcDateTime rtNow = Rtc->GetDateTime();
-            o["timeSource"]   = (rtNow.Year() >= 2020) ? "rtc" : "unknown";
+            // Three bus exchanges, one lock: reading them separately would let
+            // a pipeline task's clock read land between them and shift the bits
+            // of whichever transaction was in flight.
+            MutexGuard rg(rtcMutex, pdMS_TO_TICKS(200));
+            if (rtcMutex && !rg.isLocked()) {
+                o["rtcProtected"] = false;
+                o["rtcRunning"]   = false;
+                o["timeSource"]   = "busy";
+            } else {
+                o["rtcProtected"] = Rtc->GetIsWriteProtected();
+                o["rtcRunning"]   = Rtc->GetIsRunning();
+                RtcDateTime rtNow = Rtc->GetDateTime();
+                o["timeSource"]   = (rtNow.Year() >= 2020) ? "rtc" : "unknown";
+            }
         } else {
             o["rtcProtected"] = false;
             o["rtcRunning"]   = false;

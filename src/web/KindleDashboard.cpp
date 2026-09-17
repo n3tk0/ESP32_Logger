@@ -1435,8 +1435,12 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             kdFmtDate(dbuf, sizeof(dbuf), tm, skin.dateFormat);
             kdShellVar(s, "DATE", dbuf);
         }
-        kdShellVar(s, "MONTH_LABEL", kdMonth(tm.tm_mon));
-        s->printf("YEAR=%d\n", tm.tm_year + 1900);
+        // MONTH_LABEL and YEAR used to be emitted here. Nothing consumed
+        // them: update_dash.sh's payload_key_ok() refuses both (so load_kv
+        // dropped them on every fetch) and the script never names either one.
+        // The panel's date comes from DATE, and the week strip's month from
+        // WK_MON_MONTH / WK_SUN_MONTH. Two dead assignments in a payload this
+        // device fetches over WiFi every DATA_EVERY minutes.
 
         int wday = (tm.tm_wday + 6) % 7; // 0=Mon..6=Sun
         time_t monday = t - wday * 86400;
@@ -1479,8 +1483,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             }
         }
     } else {
-        s->print("CLOCK=\"--:--\"\nCLOCK_ADVW=0\nDATE=\"\"\n"
-                 "MONTH_LABEL=\"\"\nYEAR=\n");
+        s->print("CLOCK=\"--:--\"\nCLOCK_ADVW=0\nDATE=\"\"\n");
         for (int i = 0; i < 7; i++)
         {
             char wkn[16];

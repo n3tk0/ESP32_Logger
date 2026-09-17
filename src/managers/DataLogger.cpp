@@ -252,8 +252,13 @@ void addLogEntry(uint32_t capturedPulses) {
     logBuffer[i].wakeTimestamp = currentWakeTimestamp;
 
     if (Rtc) {
-        RtcDateTime now = Rtc->GetDateTime();
-        logBuffer[i].sleepTimestamp = now.IsValid() ? now.Unix32Time() : 0;
+        MutexGuard rg(rtcMutex, pdMS_TO_TICKS(200));
+        if (rtcMutex && !rg.isLocked()) {
+            logBuffer[i].sleepTimestamp = 0;   // bus busy; 0 means "unknown"
+        } else {
+            RtcDateTime now = Rtc->GetDateTime();
+            logBuffer[i].sleepTimestamp = now.IsValid() ? now.Unix32Time() : 0;
+        }
     } else {
         logBuffer[i].sleepTimestamp = 0;
     }

@@ -26,6 +26,27 @@ extern SemaphoreHandle_t configMutex;   // platform_config.json reload guard
 extern SemaphoreHandle_t wireMutex;     // I2C Wire bus serialisation (#14)
 extern SemaphoreHandle_t fsMutex;       // LittleFS write serialisation (FS1)
 
+// ---------------------------------------------------------------------------
+// rtcMutex — the DS1302's three-wire bus.
+//
+// WHY THIS EXISTS. The DS1302 is bit-banged: ThreeWire drives CE/SCLK and
+// turns IO around by hand, one edge at a time, with no peripheral and no
+// arbitration. Five different contexts reach it — pipelineNowEpoch() from
+// SensorTask, SlowSensorTask and StorageTask, the deferred /set_time write
+// and the boot-count backup from loop(), getRtcDateTimeString() and
+// /api/diag from the AsyncTCP worker, and the NTP sync's SetDateTime — and
+// none of them used to take anything. Two interleaved transactions do not
+// fail cleanly: they shift each other's bits, so a read returns a plausible
+// wrong time (BCD garbage often decodes in range) and a read landing inside
+// a SetMemory/SetDateTime can write a register the caller never addressed.
+//
+// HOLD IT FOR THE TRANSACTION AND NOTHING MORE. It is the innermost lock in
+// this firmware: no other mutex may be taken while it is held, which is why
+// backupBootCount() releases it before atomicWrite() takes fsMutex. Nothing
+// blocks on it for longer than one DS1302 exchange (~1 ms) except the
+// deliberate unprotect/write/protect sequences, which are ~120 ms.
+extern SemaphoreHandle_t rtcMutex;      // DS1302 three-wire bus serialisation
+
 // Drop counter — incremented whenever a queue send fails (finding #3)
 extern volatile uint32_t g_queueDrops;
 // Drop counter — incremented when webRingBuf push is skipped due to mutex contention

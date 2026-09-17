@@ -40,6 +40,17 @@ public:
     //           Called at boot with the module's slice of modules.json and
     //           at runtime when POST /api/modules/:id arrives.
     //           Return false if validation rejects the payload.
+    //
+    //           A FALSE RETURN DOES NOT PROMISE NOTHING CHANGED, and callers
+    //           must not assume it does. Every module written so far assigns
+    //           as it parses and reports the failure at the end, so a rejected
+    //           payload has usually been partly applied. POST /api/modules/:id
+    //           compensates by snapshotting DeviceConfig and putting it back —
+    //           which covers the config-backed modules and cannot cover a
+    //           module's own members. A new module that can reject a payload
+    //           should therefore validate everything BEFORE it assigns
+    //           anything; then the compensation is redundant rather than
+    //           load-bearing.
     //   save(): write this module's current state into `cfg`.
     //           Called by the registry when persisting modules.json.
     // ------------------------------------------------------------------

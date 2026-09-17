@@ -180,6 +180,16 @@ bool OtaManager::rollback() {
                   s_runningLabel, s_previousLabel);
     _logOtaEvent("ROLLBACK");
 
+    // A ROLLBACK IS A DECISION, NOT A CRASH. It reboots through
+    // esp_ota_mark_app_invalid_rollback_and_reboot(), which the next boot sees
+    // as ESP_RST_SW with the reset-guard magic still valid — so the safe-mode
+    // circuit breaker counted it as a crash-style reset. Three rollbacks
+    // inside a minute each (a bad image being rejected repeatedly is exactly
+    // when that happens) dropped the device into AP-only safe mode on top of
+    // the rollback it was already doing. Every other deliberate restart path
+    // in the firmware zeroes the magic for this reason; this one did not.
+    g_resetMagic = 0;
+
     esp_err_t err = esp_ota_mark_app_invalid_rollback_and_reboot();
     // If we get here, rollback failed (reboot didn't happen)
     Serial.printf("[OTA] Rollback failed: %s\n", esp_err_to_name(err));

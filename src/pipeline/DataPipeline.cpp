@@ -9,6 +9,7 @@ SemaphoreHandle_t webDataMutex = nullptr;
 SemaphoreHandle_t configMutex  = nullptr;
 SemaphoreHandle_t wireMutex    = nullptr;
 SemaphoreHandle_t fsMutex      = nullptr;
+SemaphoreHandle_t rtcMutex      = nullptr;
 
 // Queue drop counter (incremented on xQueueSend failure)
 volatile uint32_t g_queueDrops = 0;

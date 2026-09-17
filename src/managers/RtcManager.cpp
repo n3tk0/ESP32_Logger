@@ -1,6 +1,7 @@
 #include "RtcManager.h"
 #include "../core/Globals.h"
 #include "../utils/AtomicWrite.h"
+#include "../utils/MutexGuard.h"      // rtcMutex — the DS1302 bus
 #include "../pipeline/DataPipeline.h"
 #include <LittleFS.h>
 #include <esp_sleep.h>
@@ -112,18 +113,26 @@ void initRtc() {
 
 void backupBootCount() {
     if (Rtc) {
-        // R22 follow-up (Gemini HIGH + Codex P2 on PR #99): initRtc now
-        // re-enables write protection, so SetMemory needs its own
-        // unprotect/write/protect cycle — same pattern /set_time and
-        // syncTimeFromNTP use. Without this, SetMemory silently no-ops
-        // and bootCount drifts away from the RTC RAM copy.
-        Rtc->SetIsWriteProtected(false);
-        Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR),     (uint8_t)((bootCount >> 24) & 0xFF));
-        Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 1), (uint8_t)((bootCount >> 16) & 0xFF));
-        Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 2), (uint8_t)((bootCount >>  8) & 0xFF));
-        Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 3), (uint8_t)( bootCount        & 0xFF));
-        Rtc->SetMemory((uint8_t)RTC_RAM_MAGIC_ADDR, (uint8_t)RTC_RAM_MAGIC_VALUE);
-        Rtc->SetIsWriteProtected(true);
+        // SCOPED so the bus lock is released before atomicWrite() below takes
+        // fsMutex: rtcMutex is the innermost lock in this firmware and nothing
+        // else may be acquired while it is held (see DataPipeline.h).
+        MutexGuard rg(rtcMutex, pdMS_TO_TICKS(500));
+        if (rtcMutex && !rg.isLocked()) {
+            Serial.println("[RTC] bootcount not backed up to RTC RAM: bus busy");
+        } else {
+            // R22 follow-up (Gemini HIGH + Codex P2 on PR #99): initRtc now
+            // re-enables write protection, so SetMemory needs its own
+            // unprotect/write/protect cycle — same pattern /set_time and
+            // syncTimeFromNTP use. Without this, SetMemory silently no-ops
+            // and bootCount drifts away from the RTC RAM copy.
+            Rtc->SetIsWriteProtected(false);
+            Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR),     (uint8_t)((bootCount >> 24) & 0xFF));
+            Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 1), (uint8_t)((bootCount >> 16) & 0xFF));
+            Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 2), (uint8_t)((bootCount >>  8) & 0xFF));
+            Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 3), (uint8_t)( bootCount        & 0xFF));
+            Rtc->SetMemory((uint8_t)RTC_RAM_MAGIC_ADDR, (uint8_t)RTC_RAM_MAGIC_VALUE);
+            Rtc->SetIsWriteProtected(true);
+        }
     }
     atomicWrite(LittleFS, BOOTCOUNT_BACKUP_FILE, [](File& f) -> bool {
         return f.write((uint8_t*)&bootCount, sizeof(bootCount)) == sizeof(bootCount);
@@ -132,7 +141,10 @@ void backupBootCount() {
 
 void restoreBootCount() {
     if (Rtc) {
-        uint8_t magic = Rtc->GetMemory((uint8_t)RTC_RAM_MAGIC_ADDR);
+        MutexGuard rg(rtcMutex, pdMS_TO_TICKS(500));
+        uint8_t magic = (rtcMutex && !rg.isLocked())
+                        ? 0   // bus busy — fall through to the flash copy
+                        : Rtc->GetMemory((uint8_t)RTC_RAM_MAGIC_ADDR);
         if (magic == RTC_RAM_MAGIC_VALUE) {
             bootCount = ((uint32_t)Rtc->GetMemory((uint8_t) RTC_RAM_BOOTCOUNT_ADDR)     << 24) |
                         ((uint32_t)Rtc->GetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 1)) << 16) |
@@ -161,7 +173,14 @@ static bool _sysClockTm(struct tm* out) {
 
 String getRtcDateTimeString() {
     if (Rtc) {
-        RtcDateTime now = Rtc->GetDateTime();
+        // Runs on the AsyncTCP worker for /api/status and /api/diag, while
+        // three pipeline tasks may be reading the same bus.
+        RtcDateTime now(0, 0, 0, 0, 0, 0);
+        {
+            MutexGuard rg(rtcMutex, pdMS_TO_TICKS(200));
+            if (rtcMutex && !rg.isLocked()) return "RTC busy";
+            now = Rtc->GetDateTime();
+        }
         if (now.Year() >= 2020 && now.Month() != 0) {
             // RTC stores UTC (after NTP sync); convert to local for display.
             time_t epoch = (time_t)now.Unix32Time();

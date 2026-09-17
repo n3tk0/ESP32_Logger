@@ -1411,16 +1411,52 @@ static void handleApiModuleUpdate(AsyncWebServerRequest* req, const String& id,
         req->send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}");
         return;
     }
-    // Top-level "enabled" toggles runtime state; the rest of the payload is
-    // the module's own field bag (schema shape).
-    if (body["enabled"].is<bool>()) mod->setEnabled(body["enabled"].as<bool>());
     JsonObjectConst cfg = body["config"].is<JsonObjectConst>()
                           ? body["config"].as<JsonObjectConst>()
                           : body.as<JsonObjectConst>();
+
+    // ── A 400 HAS TO MEAN NOTHING HAPPENED ──────────────────────────────────
+    //
+    // It did not. IModule::load() is a merge, not a transaction: every
+    // config-backed module writes fields into the live DeviceConfig as it
+    // parses them and returns false only at the end, when it finds the bad
+    // one. WiFiModule is the clearest case — mode, SSID and password are
+    // already in `config` by the time a malformed static IP fails the
+    // payload. This handler then answered "validation failed" and returned
+    // without saving, so the device ran on a configuration the caller had
+    // been told was rejected, and the next unrelated saveConfig() — a theme
+    // change, /save_time, a module toggle — wrote it to flash.
+    //
+    // So the config is snapshotted and put back when load() refuses. On the
+    // heap, because sizeof(DeviceConfig) is about a kilobyte and this runs on
+    // the AsyncTCP worker's stack; nothrow, because failing to snapshot must
+    // mean "do not attempt the load" rather than an abort.
+    //
+    // WHAT THIS DOES NOT COVER, and cannot from here: a module that keeps its
+    // own members outside DeviceConfig (HeaterModule's pin and setpoints,
+    // OtaModule's confirm policy, ForecastModule's location). Those still
+    // apply field by field, and a module whose load() can reject a payload
+    // ought to validate before it assigns. The snapshot is the floor, not the
+    // contract — see the note on load() in src/core/IModule.h.
+    DeviceConfig* snapshot = new (std::nothrow) DeviceConfig(config);
+    if (!snapshot) {
+        req->send(503, "application/json",
+                  "{\"ok\":false,\"error\":\"out of memory — config not touched\"}");
+        return;
+    }
+
     if (!mod->load(cfg)) {
+        config = *snapshot;            // put back what load() half-applied
+        delete snapshot;
         req->send(400, "application/json", "{\"ok\":false,\"error\":\"validation failed\"}");
         return;
     }
+    delete snapshot;
+
+    // AFTER the load, not before it. A rejected payload used to leave the
+    // module enabled or disabled anyway — which for HeaterModule means an
+    // output energised or dropped by a request that answered 400.
+    if (body["enabled"].is<bool>()) mod->setEnabled(body["enabled"].as<bool>());
     // Persist: saveConfig() already shadows modules.json via moduleRegistry.
     saveConfig();
     req->send(200, "application/json", "{\"ok\":true}");

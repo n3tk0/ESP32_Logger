@@ -35,6 +35,8 @@ on:
       - 'tools/check_kindle_icons.py'
       - 'tools/check_body_handlers.py'
       - 'tools/check_fs_mutex.py'
+      - 'tools/check_rtc_mutex.py'
+      - 'tools/check_kindle_payload_keys.py'
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
@@ -67,6 +69,8 @@ on:
       - 'tools/check_kindle_icons.py'
       - 'tools/check_body_handlers.py'
       - 'tools/check_fs_mutex.py'
+      - 'tools/check_rtc_mutex.py'
+      - 'tools/check_kindle_payload_keys.py'
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
@@ -613,6 +617,59 @@ jobs:
           cp /tmp/tsm.orig src/pipeline/TrendStore.cpp
           rm /tmp/tsm.orig
           echo "the checker fails on an unguarded filesystem write, as it should"
+
+      - name: The DS1302 bus is serialised (check_rtc_mutex)
+        run: python3 tools/check_rtc_mutex.py
+
+      - name: Verify that checker fails on an unguarded RTC transaction
+        run: |
+          set -e
+          cp src/managers/DataLogger.cpp /tmp/dl.orig
+          python3 - <<'EOF'
+          s = open('src/managers/DataLogger.cpp').read()
+          s = s.replace('rtcMutex', 'noLockAtAll')
+          open('src/managers/DataLogger.cpp', 'w').write(s)
+          EOF
+          if grep -q 'rtcMutex' src/managers/DataLogger.cpp; then
+            echo "::error::the rtcMutex mutation no longer matches — this proof step is stale"
+            cp /tmp/dl.orig src/managers/DataLogger.cpp
+            exit 1
+          fi
+          if python3 tools/check_rtc_mutex.py > /dev/null 2>&1; then
+            echo "::error::check_rtc_mutex.py passed a DS1302 transaction with no lock"
+            cp /tmp/dl.orig src/managers/DataLogger.cpp
+            exit 1
+          fi
+          cp /tmp/dl.orig src/managers/DataLogger.cpp
+          rm /tmp/dl.orig
+          echo "the checker fails on an unguarded RTC transaction, as it should"
+
+      - name: The Kindle payload and the panel agree on key names
+        run: python3 tools/check_kindle_payload_keys.py
+
+      - name: Verify that checker fails on a key the panel would drop
+        run: |
+          set -e
+          cp src/web/KindleDashboard.cpp /tmp/kd.orig
+          python3 - <<'EOF'
+          s = open('src/web/KindleDashboard.cpp').read()
+          s = s.replace('kdShellVar(s, "DATE", dbuf);',
+                        'kdShellVar(s, "DATE", dbuf);\n            kdShellVar(s, "NOBODY_READS_THIS", dbuf);', 1)
+          open('src/web/KindleDashboard.cpp', 'w').write(s)
+          EOF
+          if ! grep -q 'NOBODY_READS_THIS' src/web/KindleDashboard.cpp; then
+            echo "::error::the payload-key mutation no longer matches — this proof step is stale"
+            cp /tmp/kd.orig src/web/KindleDashboard.cpp
+            exit 1
+          fi
+          if python3 tools/check_kindle_payload_keys.py > /dev/null 2>&1; then
+            echo "::error::check_kindle_payload_keys.py passed a key the panel drops"
+            cp /tmp/kd.orig src/web/KindleDashboard.cpp
+            exit 1
+          fi
+          cp /tmp/kd.orig src/web/KindleDashboard.cpp
+          rm /tmp/kd.orig
+          echo "the checker fails on a key the panel would drop, as it should"
 
       - name: Verify that checker sees a write through an fs::FS& reference
         run: |

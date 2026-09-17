@@ -151,6 +151,7 @@
 #  include "src/sensors/plugins/ZMCT103CSensor.h"
 #endif
 #include "src/pipeline/DataPipeline.h"
+#include "src/utils/MutexGuard.h"       // rtcMutex guards around the DS1302
 #include "src/tasks/TaskManager.h"
 #include "src/export/ExportManager.h"
 #ifdef EXPORT_MQTT_ENABLED
@@ -685,6 +686,8 @@ void setup() {
     initHardware();   // Configure pin modes AND initialize RTC BEFORE reading time
 
     // ── Wake timestamp ────────────────────────────────────────────────────────
+    // Unguarded on purpose: this runs before TaskManager::init() creates
+    // rtcMutex, and nothing else exists yet to share the bus with.
     if (Rtc) {
         RtcDateTime now = Rtc->GetDateTime();
         currentWakeTimestamp = now.IsValid() ? now.Unix32Time() : 0;
@@ -1105,6 +1108,11 @@ void loop() {
 
     // ── SSE live heartbeat (1 Hz) ─────────────────────────────────────────────
     // No-op when no EventSource clients are subscribed.
+    //
+    // This is the one place the main task touches an async client, and the
+    // library's client list is not locked against the AsyncTCP task that
+    // mutates it — see the note above publishLiveEvent() in WebServer.cpp.
+    // Do not add a second such caller.
     {
         static uint32_t s_lastLiveTick = 0;
         uint32_t now = millis();
@@ -1130,11 +1138,20 @@ void loop() {
         // (Codex review: clear-then-read leaves a race window.)
         PendingRtcSet t = g_pendingRtcTime;
         g_pendingRtcSet.store(false, std::memory_order_relaxed);
-        Rtc->SetIsWriteProtected(false); delay(10);
-        Rtc->SetIsRunning(true);         delay(10);
-        RtcDateTime dt(t.year, t.month, t.day, t.hour, t.minute, 0);
-        Rtc->SetDateTime(dt);            delay(100);
-        Rtc->SetIsWriteProtected(true);
+        // ~120 ms of bus time. Under rtcMutex so a pipeline task's clock read
+        // cannot land in the middle of the write and address a register this
+        // sequence never meant to touch.
+        MutexGuard rg(rtcMutex, pdMS_TO_TICKS(1000));
+        if (rtcMutex && !rg.isLocked()) {
+            Serial.println("[RTC] hardware clock not written: bus busy, will retry");
+            g_pendingRtcSet.store(true, std::memory_order_release);
+        } else {
+            Rtc->SetIsWriteProtected(false); delay(10);
+            Rtc->SetIsRunning(true);         delay(10);
+            RtcDateTime dt(t.year, t.month, t.day, t.hour, t.minute, 0);
+            Rtc->SetDateTime(dt);            delay(100);
+            Rtc->SetIsWriteProtected(true);
+        }
     }
 
     // ── Deferred OTA rollback (AUDIT 3.16) ───────────────────────────────────
@@ -1281,7 +1298,10 @@ void loop() {
                 loggingState   = STATE_WAIT_FLOW;
                 stateStartTime = millis(); cycleStartTime = millis();
                 if (onlineLoggerMode && Rtc) {
-                    RtcDateTime now = Rtc->GetDateTime();
+                    MutexGuard rg(rtcMutex, pdMS_TO_TICKS(200));
+                    RtcDateTime now = (rtcMutex && !rg.isLocked())
+                                      ? RtcDateTime(0, 0, 0, 0, 0, 0)
+                                      : Rtc->GetDateTime();
                     currentWakeTimestamp = now.IsValid() ? now.Unix32Time() : 0;
                 }
                 highCountFF = 0; highCountPF = 0;
@@ -1290,7 +1310,10 @@ void loop() {
                 loggingState   = STATE_WAIT_FLOW;
                 stateStartTime = millis(); cycleStartTime = millis();
                 if (onlineLoggerMode && Rtc) {
-                    RtcDateTime now = Rtc->GetDateTime();
+                    MutexGuard rg(rtcMutex, pdMS_TO_TICKS(200));
+                    RtcDateTime now = (rtcMutex && !rg.isLocked())
+                                      ? RtcDateTime(0, 0, 0, 0, 0, 0)
+                                      : Rtc->GetDateTime();
                     currentWakeTimestamp = now.IsValid() ? now.Unix32Time() : 0;
                 }
                 highCountFF = 0; highCountPF = 0;
