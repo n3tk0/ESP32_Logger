@@ -1,5 +1,6 @@
 #include "AggregationEngine.h"
 #include <math.h>
+#include <new>      // std::nothrow
 
 // ---------------------------------------------------------------------------
 // LTTB — Steinarsson 2013, O(n) after bucket grouping
@@ -95,8 +96,12 @@ SensorReading AggregationEngine::_reduceWindow(const SensorReading* w,
             double sum = 0;
             for (size_t i = 0; i < wLen; i++) sum += w[i].value;
             result.value = (float)(sum / wLen);
-            // Timestamp = midpoint
-            result.timestamp = (w[0].timestamp + w[wLen-1].timestamp) / 2;
+            // Midpoint without the sum: two uint32 epochs add past UINT32_MAX
+            // from 2038-01-19 on (2 x 2^31), and the wrapped result would date
+            // an averaged point to 1970. Identical to (a+b)/2 for b >= a,
+            // which chronological readings always are.
+            result.timestamp = w[0].timestamp +
+                               (w[wLen-1].timestamp - w[0].timestamp) / 2;
             break;
         }
         case AGG_MIN: {
@@ -210,13 +215,25 @@ size_t AggregationEngine::aggregate(const SensorReading* in,  size_t inLen,
     SensorReading* tmpBuf = nullptr;
     if (mode == AGG_LTTB && bucketMins != BUCKET_RAW) {
         size_t tmpSz = (inLen < outMaxLen) ? inLen : outMaxLen;
-        tmpBuf  = new SensorReading[tmpSz];
+        // nothrow, because the fallback below is the point. arduino-esp32
+        // builds with -fno-exceptions, where a plain `new` that cannot
+        // allocate aborts instead of returning null — so the check was dead
+        // code and an out-of-memory /api/data request took the device down
+        // rather than serving a coarser chart. Same reasoning as the nothrow
+        // allocations in RtcManager (AUDIT 8.12).
+        tmpBuf  = new (std::nothrow) SensorReading[tmpSz];
         if (!tmpBuf) {
             // Fallback: no intermediate, skip LTTB
             return bucket(in, inLen, out, outMaxLen, bucketMins, AGG_AVG);
         }
         bucketed    = tmpBuf;
-        bucketedMax = outMaxLen;
+        // tmpSz, NOT outMaxLen: when inLen < outMaxLen the buffer is the
+        // smaller of the two, and telling bucket() it may write outMaxLen
+        // entries hands it a capacity the allocation does not have. It cannot
+        // exceed inLen today — each output consumes at least one input — but
+        // that is a property of bucket()'s loop, not a promise it makes, and
+        // the cost of relying on it is a heap overflow.
+        bucketedMax = tmpSz;
     }
 
     // Use AGG_MAX for the pre-bucket pass when LTTB is selected so that spikes

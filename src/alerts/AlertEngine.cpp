@@ -193,10 +193,9 @@ void AlertEngine::evaluate(const SensorReading& r, uint32_t nowTs) {
             }
         }
 
-        // Snapshot pending alerts to stack-local; clear under lock so a
-        // Snapshot pending alerts to stack-local. The buffer was zeroed
-        // at the top of the locked block (line ~152) so subsequent
-        // evaluate() calls already start fresh — no second reset needed.
+        // Snapshot pending alerts to a stack-local. No second reset needed:
+        // _pendingMqttCount was zeroed at the top of this locked block, so the
+        // next evaluate() already starts fresh.
         stagedCount = _pendingMqttCount;
         if (stagedCount > PENDING_MQTT_MAX) stagedCount = PENDING_MQTT_MAX;
         memcpy(stagedMqtt, _pendingMqtt,
@@ -269,6 +268,12 @@ void AlertEngine::_pushToast(const Rule& rule, float val, uint32_t ts) {
 }
 
 // ---------------------------------------------------------------------------
+// WHEN THIS REACHES FLASH: not here. _save() is called from fromJson() and
+// snooze() — both web requests — so a fired alert's history entry survives a
+// reboot only if a rule edit or a snooze happens to follow it. begin() does
+// restore whatever the last save captured. Writing on every fire would put a
+// flash write and fsMutex in ProcessingTask's path, which is why it does not
+// happen; the gap is deliberate, but it was not written down anywhere.
 void AlertEngine::_appendHistory(const Rule& rule, float val, uint32_t ts) {
     HistEntry& e = _history[_histHead];
     e.ts    = ts;
@@ -307,7 +312,17 @@ void AlertEngine::toJson(JsonDocument& doc) const {
         doc["history"].to<JsonArray>();
         return;
     }
-    if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(200)) != pdTRUE) return;
+    if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(200)) != pdTRUE) {
+        // Say WHY the panel is empty. A bare return left the caller with a
+        // document carrying neither rules nor an error, which renders exactly
+        // like a device with no rules configured — the one reading a user
+        // cannot distinguish from the truth.
+        doc["ok"]    = false;
+        doc["error"] = "busy";
+        doc["rules"].to<JsonArray>();
+        doc["history"].to<JsonArray>();
+        return;
+    }
 
     JsonArray rArr = doc["rules"].to<JsonArray>();
     for (int i = 0; i < _ruleCount; i++) {
