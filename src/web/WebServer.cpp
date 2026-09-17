@@ -1654,12 +1654,24 @@ void setupWebServer() {
     // C2: track web activity for idle power restore
     auto touchActivity = []() { g_lastWebActivity = millis(); };
 
-    // Defense-in-depth headers applied to every response.  Pass 4 A4 removed
-    // every inline on* handler and the inline theme-boot <script>, so
-    // script-src no longer needs 'unsafe-inline' — any injected <script>
-    // (stored XSS, rogue file upload) is now blocked by the browser.
-    // style-src still keeps 'unsafe-inline' because many layout style="…"
-    // attributes remain; tightening that is a separate pass.
+    // Defense-in-depth headers applied to every response.
+    //
+    // WHAT THIS DOES NOT DO, stated plainly because the comment here used to
+    // claim the opposite. Pass 4 A4 removed every inline on* handler and the
+    // inline theme-boot <script> from the SPA in /www — but the failsafe page
+    // is not in /www. It is the gzipped PROGMEM blob in FailsafeHtml.h, built
+    // from src/web/failsafe.html, and it carries an inline <script> block and
+    // a dozen inline onclick= attributes (Restart, Factory Reset, Format
+    // Filesystem, the upload drop zone, the Core Logic tab). So script-src
+    // still needs 'unsafe-inline', and an injected <script> is NOT blocked by
+    // the browser today.
+    //
+    // Dropping it means moving that page's handlers into a script served from
+    // PROGMEM on its own route — it cannot use a file in /www, because a
+    // missing /www is the reason it exists. Worth doing; not a review fix.
+    //
+    // style-src keeps 'unsafe-inline' because many layout style="…" attributes
+    // remain; tightening that is a separate pass.
     //
     // When the firmware is built with -DUI_CDN_BASE the CSP must permit the
     // CDN host in script-src / style-src / connect-src / img-src so the
@@ -1668,10 +1680,18 @@ void setupWebServer() {
     // by every modern browser and is tighter than a bare origin (codex P1
     // review on PR #54).
 #ifdef UI_CDN_BASE
+    // 'unsafe-inline' HERE TOO, and this is the branch that showed the bug.
+    // It was omitted, so a CDN build enforced a policy the failsafe page
+    // cannot satisfy: its inline script and every onclick would be blocked —
+    // no upload, no format, no OTA — on the one page whose whole job is
+    // recovering a device whose UI is missing. DefaultHeaders applies one
+    // policy to every response and a second CSP header can only ever narrow
+    // it, so the page cannot opt out per-response; the policy has to allow
+    // what it needs until the page stops needing it.
     DefaultHeaders::Instance().addHeader(
         "Content-Security-Policy",
         "default-src 'self'; "
-        "script-src 'self' " UI_CDN_BASE "/; "
+        "script-src 'self' 'unsafe-inline' " UI_CDN_BASE "/; "
         "style-src 'self' 'unsafe-inline' " UI_CDN_BASE "/; "
         "img-src 'self' data: " UI_CDN_BASE "/; "
         "font-src 'self' " UI_CDN_BASE "/; "
@@ -1682,8 +1702,8 @@ void setupWebServer() {
 #else
     // cdn.jsdelivr.net is allowed in script-src / style-src so the uPlot CDN
     // fallback works when the library file is not present on LittleFS.
-    // 'unsafe-inline' is already present for the failsafe PROGMEM page; adding
-    // a CDN host does not weaken the existing posture further.
+    // 'unsafe-inline' is required by the failsafe PROGMEM page (see above);
+    // adding a CDN host does not weaken the existing posture further.
     DefaultHeaders::Instance().addHeader(
         "Content-Security-Policy",
         "default-src 'self'; "
@@ -1716,8 +1736,10 @@ void setupWebServer() {
 #ifdef UI_CDN_BASE
     // Bootstrap HTML hoisted out of the request handler (gemini review
     // PR #54).  CSP-compatible (codex P1 on PR #54): no <base href> (would
-    // violate base-uri 'self') and no inline <script> (would need
-    // 'unsafe-inline' even with the CDN whitelisted in script-src).  The
+    // violate base-uri 'self') and no inline <script> — and it stays that way
+    // on purpose even though the policy above now allows 'unsafe-inline' for
+    // the failsafe page's sake: this page does not need it, and the day the
+    // failsafe page stops needing it either, the allowance goes.  The
     // boot logic lives in /cdn-boot.js, served from the device itself so
     // script-src 'self' covers it.  Stylesheet / theme-boot loaded by
     // absolute CDN URL — the relaxed CSP whitelists UI_CDN_BASE.
