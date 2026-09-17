@@ -71,9 +71,23 @@ bool ExportManager::_sendWithRetry(IExporter* exp,
     // loop bound comparison is unambiguously signed/signed.
     const int maxRetries = (int)exp->maxRetries();
     for (int attempt = 0; attempt <= maxRetries; attempt++) {
+        // THE HEARTBEAT HAS TO BE FED IN HERE, not only once per exporter in
+        // sendAll(). The defaults are maxRetries 3 and retryDelayMs 1000, so
+        // this loop is four send() attempts plus 1+2+4 s of backoff, and none
+        // of the HTTP exporters set a timeout — HTTPClient's own default is
+        // 5 s per attempt, and a TLS handshake to a host that is simply not
+        // answering takes longer than that.
+        //
+        // 4 x 5 s + 7 s of backoff is 27 s against a MAX_SILENCE_MS of 30 s
+        // (TaskManager::checkHealth), for ONE unreachable exporter. So a slow
+        // or blackholed upstream server used to reboot the logger: the
+        // watchdog saw ExportTask silent, set shouldRestart, and the device
+        // restarted mid-export with nothing wrong with it.
+        g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
         if (attempt > 0) {
             uint32_t delayMs = exp->retryDelayMs() * (1 << (attempt - 1));
             vTaskDelay(pdMS_TO_TICKS(delayMs));
+            g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
         }
         if (exp->send(r, n)) return true;
         Serial.printf("[ExportManager] '%s' retry %d/%d\n",
@@ -178,6 +192,10 @@ bool ExportManager::_drainSpool(IExporter* exp) {
         count++;
 
         if (count >= EXPORT_SPOOL_BATCH) {
+            // Same reason as _sendWithRetry: a spool backlog is many sends in
+            // one pass, each as slow as the network is, and the watchdog is
+            // counting.
+            g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
             if (!exp->send(batch, count)) { allOk = false; break; }
             count = 0;
         }

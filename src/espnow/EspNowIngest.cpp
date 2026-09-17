@@ -840,6 +840,20 @@ bool espnowIngestBegin() {
     Serial.printf("[ESPNOW] up on channel %u, %d node(s)%s\n",
                   currentChannel(), s_nodes.count(),
                   espnowPairingActive() ? ", pairing open" : "");
+
+    // Said out loud, because of what this particular default costs. The LMK is
+    // both the link's encryption key and the only thing a DISCOVER tag proves
+    // possession of — and a collector that knows no nodes opens a pairing
+    // window by itself at boot (above). So a build that never passed
+    // -DESPNOW_LMK will adopt a node from anyone in radio range who has read
+    // this repository. Not refused, for the same reason the ingest token is
+    // not: a deployed pair of devices sharing the default must keep talking
+    // until their owner rebuilds both.
+    if (memcmp(ESPNOW_LMK, "change-this-key!", 16) == 0) {
+        Serial.println("[ESPNOW] WARNING: ESPNOW_LMK is the built-in default — "
+                       "any node within range can pair. Rebuild collector AND "
+                       "nodes with -DESPNOW_LMK='\"16-byte-secret!\"'.");
+    }
     return true;
 }
 

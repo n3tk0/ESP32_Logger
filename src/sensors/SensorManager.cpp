@@ -490,8 +490,15 @@ void SensorManager::toJson(JsonArray arr) const {
     // ring once per missing metric, while ProcessingTask waits 5 ms for this
     // very mutex before dropping a reading.
     // Guard against legacy / early-boot path where mutexes are still nullptr.
-    if (!webDataMutex || xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) != pdTRUE) return;
-    for (int i = 0; i < slotCount; i++) {
+    //
+    // A timeout here used to `return`, which also skipped the health block
+    // below — and health comes from _health[]/_lastReadMs[], which this mutex
+    // has nothing to do with. So a moment of ring-buffer contention cost the
+    // UI its uptime bars and latency figures as well as its last values, and
+    // the bars are exactly what a person looks at when the device is busy.
+    const bool haveRing =
+        webDataMutex && xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE;
+    if (haveRing) for (int i = 0; i < slotCount; i++) {
         Slot& sl = slots[i];
         JsonObject vals = sl.obj["last_values"].to<JsonObject>();
         for (int m = 0; m < sl.mcount; m++) {
@@ -528,7 +535,7 @@ void SensorManager::toJson(JsonArray arr) const {
             }
         }
     }
-    xSemaphoreGive(webDataMutex);
+    if (haveRing) xSemaphoreGive(webDataMutex);
 
     // ------------------------------------------------------------------
     // Health objects — appended outside the mutex (health arrays are

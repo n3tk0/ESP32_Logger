@@ -7,10 +7,16 @@
 // ---------------------------------------------
 // A node's HTTP POST lands on the AsyncTCP task. Writing straight into the
 // pipeline from there would bypass everything SensorManager::tickFiltered()
-// does on the way past — calibration axes, the outlier/rate filters, the
-// ReadingCache feed that HeaterModule and BME688Sensor read, and the
-// per-sensor enable flag. It would also put a pipeline producer on a task
-// that must never block.
+// does on the way past — the read-interval cadence, the health accounting
+// (hourly buckets, latency, overdue detection), the backfill test that keeps
+// an outage's backlog out of the live view, the ReadingCache feed that
+// HeaterModule and BME688Sensor read, and the per-sensor enable flag. It
+// would also put a pipeline producer on a task that must never block.
+//
+// (It would not bypass calibration: CalibrationAxis is applied inside each
+// plugin's own read path, not in the tick. Earlier wording here promised
+// "the outlier/rate filters" as well — there are none in this firmware, and
+// a reader should not size a node's validation on the assumption there are.)
 //
 // So an ingest POST only drops values in this table. A RemoteNodeSensor
 // plugin instance drains its own node's slots on the normal sensor tick, and

@@ -12,7 +12,60 @@
 #endif
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <time.h>                       // time() — pipelineNowEpoch()
+#include "../utils/MutexGuard.h"        // rtcMutex around the DS1302 exchange
 #include "../core/SdCompat.h"   // sdFs() — SD.h only when FEATURE_SD_STORAGE
+
+// ---------------------------------------------------------------------------
+// See the contract in TaskManager.h — the ordering is the whole point.
+uint32_t pipelineNowEpoch() {
+    const time_t sysT = time(nullptr);
+    if (sysT > 1000000000L) return (uint32_t)sysT;
+
+    // ── Past here the DS1302 is the only clock, and this is the hot path ──
+    //
+    // On a device with no network the branch above never returns, so this
+    // runs on every SensorTask tick, every SlowSensorTask tick (2 Hz) and
+    // every StorageTask pass — three tasks bit-banging one three-wire bus
+    // that has no arbitration, while loop() may be in the middle of a
+    // /set_time write and the web worker in getRtcDateTimeString(). Two
+    // interleaved transactions do not fail cleanly; they hand back a
+    // plausible wrong time.
+    //
+    // So: one reader at a time, and at most one bus exchange per second
+    // shared by all of them. A clock read a fraction of a second stale is
+    // indistinguishable from a fresh one at this resolution, and the
+    // seconds are carried forward from millis() in between.
+    if (!Rtc) return (uint32_t)(millis() / 1000UL) + 1;
+
+    static uint32_t s_epoch = 0;    // last good RTC reading
+    static uint32_t s_atMs  = 0;    // millis() when it was taken
+
+    MutexGuard g(rtcMutex, pdMS_TO_TICKS(50));
+    if (rtcMutex && !g.isLocked()) {
+        // The bus is busy — an unprotect/write/protect sequence holds it for
+        // ~120 ms. Carry the last reading forward rather than queue behind a
+        // write or, worse, read across it.
+        if (s_epoch) return s_epoch + (millis() - s_atMs) / 1000UL;
+        return (uint32_t)(millis() / 1000UL) + 1;
+    }
+
+    const uint32_t elapsed = millis() - s_atMs;
+    if (s_epoch && elapsed < 1000UL) return s_epoch + elapsed / 1000UL;
+
+    RtcDateTime now = Rtc->GetDateTime();
+    if (now.IsValid() && now.Year() >= 2020) {
+        s_epoch = now.Unix32Time();
+        s_atMs  = millis();
+        return s_epoch;
+    }
+    // The part answered, but with nothing usable. Keep extrapolating from the
+    // last good reading if there is one: a DS1302 that has lost its backup
+    // cell reads invalid for ever, and falling back to millis() there would
+    // move every timestamp backwards by decades.
+    if (s_epoch) return s_epoch + elapsed / 1000UL;
+    return (uint32_t)(millis() / 1000UL) + 1;
+}
 
 // Static member definitions
 TaskHandle_t      TaskManager::hSensor     = nullptr;
@@ -138,8 +191,9 @@ bool TaskManager::init(fs::FS& fs) {
     configMutex  = xSemaphoreCreateMutex();
     wireMutex    = xSemaphoreCreateMutex();   // I2C bus serialisation (#14)
     fsMutex      = xSemaphoreCreateMutex();   // FS write serialisation (FS1)
+    rtcMutex     = xSemaphoreCreateMutex();   // DS1302 three-wire bus
 
-    if (!webDataMutex || !configMutex || !wireMutex || !fsMutex) {
+    if (!webDataMutex || !configMutex || !wireMutex || !fsMutex || !rtcMutex) {
         Serial.println("[TaskManager] Mutex creation FAILED");
         _cleanupPartialInit();
         return false;
@@ -300,8 +354,11 @@ void TaskManager::shutdown() {
     // Wait for sensor queues to drain (up to 3s) before hard timeout.
     // Prevents storageQueue data loss when sensor pipeline is still writing.
     constexpr uint32_t DRAIN_TIMEOUT_MS = 3000;
-    uint32_t deadline = millis() + DRAIN_TIMEOUT_MS;
-    while (millis() < deadline) {
+    // Elapsed, not millis() < millis() + N: the sum wraps at the ~49.7-day
+    // rollover, and a shutdown that lands there would skip the drain entirely
+    // and then force-delete tasks mid-write.
+    const uint32_t drainStart = millis();
+    while (millis() - drainStart < DRAIN_TIMEOUT_MS) {
         UBaseType_t sq = sensorQueue  ? uxQueueMessagesWaiting(sensorQueue)  : 0;
         UBaseType_t stq = storageQueue ? uxQueueMessagesWaiting(storageQueue) : 0;
         UBaseType_t eq = exportQueue  ? uxQueueMessagesWaiting(exportQueue)  : 0;
@@ -316,13 +373,13 @@ void TaskManager::shutdown() {
     // reads (SDS011 / PMS5003 ~2 s). 4 s ceiling.
     constexpr uint32_t WAIT_MS  = 4000;
     constexpr uint32_t STEP_MS  = 50;
-    uint32_t waitDeadline = millis() + WAIT_MS;
+    const uint32_t waitStart = millis();       // elapsed; see the note above
     TaskHandle_t* handles[] = { &hSensor, &hSlowSensor, &hProcess,
                                 &hStorage, &hExport };
     for (TaskHandle_t* hp : handles) {
         if (*hp == nullptr) continue;
         bool deleted = false;
-        while (millis() < waitDeadline) {
+        while (millis() - waitStart < WAIT_MS) {
             if (eTaskGetState(*hp) == eDeleted) { deleted = true; break; }
             vTaskDelay(pdMS_TO_TICKS(STEP_MS));
         }

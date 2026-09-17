@@ -1,6 +1,7 @@
 #include "RtcManager.h"
 #include "../core/Globals.h"
 #include "../utils/AtomicWrite.h"
+#include "../utils/MutexGuard.h"      // rtcMutex — the DS1302 bus
 #include "../pipeline/DataPipeline.h"
 #include <LittleFS.h>
 #include <esp_sleep.h>
@@ -12,10 +13,26 @@ void initRtc() {
     DBGLN("Init RTC...");
     bool pinsValid = true;
 
+    // Bounds PER TARGET, matching ConfigManager::sanitizeWakeConfig()'s
+    // isSafePin. This was a C3-only range (0..21 minus the 11-17 flash bus),
+    // which is the exact mistake HardwareManager::initHardware warns about in
+    // its own comment: on a classic ESP32 or an S3 it refuses GPIOs the chip
+    // and the sanitiser both accept, so a DS1302 wired to GPIO25/26/27 — the
+    // ordinary choice on a devkit — reported "RTC pins invalid!" and left
+    // rtcValid false with no way to fix it from the UI.
     auto isPinSafe = [](int p) {
-        if (p < 0 || p > 21) return false;
-        if (p >= 11 && p <= 17) return false;
-        return true;
+#if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6
+        return p >= 0 && p <= 21 && !(p >= 11 && p <= 17);
+#elif CONFIG_IDF_TARGET_ESP32
+        // Internal flash occupies 6-11; 34-39 are input-only, and the DS1302
+        // needs to drive CE/SCLK and both directions on IO.
+        return p >= 0 && p <= 33 && !(p >= 6 && p <= 11);
+#elif CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32S3
+        // 26-37 is flash + octal PSRAM on the parts this project builds for.
+        return p >= 0 && p <= 48 && !(p >= 26 && p <= 37);
+#else
+        return p >= 0 && p <= 48;
+#endif
     };
 
     if (!isPinSafe(config.hardware.pinRtcCE) ||
@@ -96,18 +113,26 @@ void initRtc() {
 
 void backupBootCount() {
     if (Rtc) {
-        // R22 follow-up (Gemini HIGH + Codex P2 on PR #99): initRtc now
-        // re-enables write protection, so SetMemory needs its own
-        // unprotect/write/protect cycle — same pattern /set_time and
-        // syncTimeFromNTP use. Without this, SetMemory silently no-ops
-        // and bootCount drifts away from the RTC RAM copy.
-        Rtc->SetIsWriteProtected(false);
-        Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR),     (uint8_t)((bootCount >> 24) & 0xFF));
-        Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 1), (uint8_t)((bootCount >> 16) & 0xFF));
-        Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 2), (uint8_t)((bootCount >>  8) & 0xFF));
-        Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 3), (uint8_t)( bootCount        & 0xFF));
-        Rtc->SetMemory((uint8_t)RTC_RAM_MAGIC_ADDR, (uint8_t)RTC_RAM_MAGIC_VALUE);
-        Rtc->SetIsWriteProtected(true);
+        // SCOPED so the bus lock is released before atomicWrite() below takes
+        // fsMutex: rtcMutex is the innermost lock in this firmware and nothing
+        // else may be acquired while it is held (see DataPipeline.h).
+        MutexGuard rg(rtcMutex, pdMS_TO_TICKS(500));
+        if (rtcMutex && !rg.isLocked()) {
+            Serial.println("[RTC] bootcount not backed up to RTC RAM: bus busy");
+        } else {
+            // R22 follow-up (Gemini HIGH + Codex P2 on PR #99): initRtc now
+            // re-enables write protection, so SetMemory needs its own
+            // unprotect/write/protect cycle — same pattern /set_time and
+            // syncTimeFromNTP use. Without this, SetMemory silently no-ops
+            // and bootCount drifts away from the RTC RAM copy.
+            Rtc->SetIsWriteProtected(false);
+            Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR),     (uint8_t)((bootCount >> 24) & 0xFF));
+            Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 1), (uint8_t)((bootCount >> 16) & 0xFF));
+            Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 2), (uint8_t)((bootCount >>  8) & 0xFF));
+            Rtc->SetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 3), (uint8_t)( bootCount        & 0xFF));
+            Rtc->SetMemory((uint8_t)RTC_RAM_MAGIC_ADDR, (uint8_t)RTC_RAM_MAGIC_VALUE);
+            Rtc->SetIsWriteProtected(true);
+        }
     }
     atomicWrite(LittleFS, BOOTCOUNT_BACKUP_FILE, [](File& f) -> bool {
         return f.write((uint8_t*)&bootCount, sizeof(bootCount)) == sizeof(bootCount);
@@ -116,7 +141,10 @@ void backupBootCount() {
 
 void restoreBootCount() {
     if (Rtc) {
-        uint8_t magic = Rtc->GetMemory((uint8_t)RTC_RAM_MAGIC_ADDR);
+        MutexGuard rg(rtcMutex, pdMS_TO_TICKS(500));
+        uint8_t magic = (rtcMutex && !rg.isLocked())
+                        ? 0   // bus busy — fall through to the flash copy
+                        : Rtc->GetMemory((uint8_t)RTC_RAM_MAGIC_ADDR);
         if (magic == RTC_RAM_MAGIC_VALUE) {
             bootCount = ((uint32_t)Rtc->GetMemory((uint8_t) RTC_RAM_BOOTCOUNT_ADDR)     << 24) |
                         ((uint32_t)Rtc->GetMemory((uint8_t)(RTC_RAM_BOOTCOUNT_ADDR + 1)) << 16) |
@@ -145,7 +173,14 @@ static bool _sysClockTm(struct tm* out) {
 
 String getRtcDateTimeString() {
     if (Rtc) {
-        RtcDateTime now = Rtc->GetDateTime();
+        // Runs on the AsyncTCP worker for /api/status and /api/diag, while
+        // three pipeline tasks may be reading the same bus.
+        RtcDateTime now(0, 0, 0, 0, 0, 0);
+        {
+            MutexGuard rg(rtcMutex, pdMS_TO_TICKS(200));
+            if (rtcMutex && !rg.isLocked()) return "RTC busy";
+            now = Rtc->GetDateTime();
+        }
         if (now.Year() >= 2020 && now.Month() != 0) {
             // RTC stores UTC (after NTP sync); convert to local for display.
             time_t epoch = (time_t)now.Unix32Time();
@@ -254,16 +289,42 @@ String getWakeupReason() {
     if (cause == ESP_SLEEP_WAKEUP_GPIO) {
         int expectedState = (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH) ? HIGH : LOW;
 
+        // An unassigned pin (PIN_UNSET = 255) must not reach either of the
+        // reads below: `bitmask >> 255` is undefined for a 32-bit value, and
+        // digitalRead(255) is an out-of-range GPIO. A device with no buttons
+        // wired cannot have woken on one, so unset reads as not-triggered.
+        //
+        // THE POLARITY CONVERSION HAPPENS INSIDE THE GUARD, NOT AFTER IT.
+        // This used to be a bare level test followed by
+        // `if (expectedState == LOW) { x = !x; }`, and that block undid the
+        // guard: "unassigned" and "outside the 32-bit snapshot" both read as
+        // false here, so negating turned each of them into "this pin woke us".
+        // The first such pin then won the priority checks below and reported
+        // itself as the wake source, hiding a real one behind it. A guard that
+        // a later line can invert is not a guard, so the two cannot be
+        // separate steps.
+        //
+        // Not reachable today, and the fix is not conditional on that staying
+        // true: configureWakeup() refuses to arm GPIO wake unless all three
+        // pins are 0..5 (see isRtcWakePinC3), so an ESP_SLEEP_WAKEUP_GPIO
+        // implies all three were assigned and inside the snapshot. This
+        // function should not depend on a distant invariant in a different
+        // function to be correct about its own inputs.
+        auto earlyTriggered = [expectedState](uint32_t mask, uint8_t pin) -> bool {
+            // Unknown is not "low": both of these mean we cannot say, and
+            // neither may become an affirmative answer under either polarity.
+            if (pin == PIN_UNSET || pin >= 32) return false;
+            const bool high = (mask >> pin) & 1u;
+            return expectedState == HIGH ? high : !high;
+        };
+        auto readIs = [](uint8_t pin, int expected) -> bool {
+            return pin != PIN_UNSET && pin <= 48 && digitalRead(pin) == expected;
+        };
+
         if (earlyGPIO_captured) {
-            bool ffEarly  = (bool)((earlyGPIO_bitmask >> config.hardware.pinWakeupFF)    & 1);
-            bool pfEarly  = (bool)((earlyGPIO_bitmask >> config.hardware.pinWakeupPF)    & 1);
-            bool wifiEarly= (bool)((earlyGPIO_bitmask >> config.hardware.pinWifiTrigger) & 1);
-            
-            if (expectedState == LOW) {
-                ffEarly   = !ffEarly;
-                pfEarly   = !pfEarly;
-                wifiEarly = !wifiEarly;
-            }
+            bool ffEarly   = earlyTriggered(earlyGPIO_bitmask, config.hardware.pinWakeupFF);
+            bool pfEarly   = earlyTriggered(earlyGPIO_bitmask, config.hardware.pinWakeupPF);
+            bool wifiEarly = earlyTriggered(earlyGPIO_bitmask, config.hardware.pinWifiTrigger);
 
             DBGF("GPIO early: FF=%d PF=%d WIFI=%d (bitmask=0x%08X)\n",
                           ffEarly, pfEarly, wifiEarly, earlyGPIO_bitmask);
@@ -274,9 +335,9 @@ String getWakeupReason() {
 
         // Fallback
         delay(config.hardware.debounceMs);
-        bool ffNow   = (digitalRead(config.hardware.pinWakeupFF)    == expectedState);
-        bool pfNow   = (digitalRead(config.hardware.pinWakeupPF)    == expectedState);
-        bool wifiNow = (digitalRead(config.hardware.pinWifiTrigger) == expectedState);
+        bool ffNow   = readIs(config.hardware.pinWakeupFF,    expectedState);
+        bool pfNow   = readIs(config.hardware.pinWakeupPF,    expectedState);
+        bool wifiNow = readIs(config.hardware.pinWifiTrigger, expectedState);
         if (ffNow)   return "FF_BTN";
         if (pfNow)   return "PF_BTN";
         if (wifiNow) return "WIFI";

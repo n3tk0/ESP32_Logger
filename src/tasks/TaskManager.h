@@ -10,6 +10,32 @@
 #include "../setup.h"
 
 // ============================================================================
+// pipelineNowEpoch() — the one answer to "what time is it" for every task
+// that stamps or files a reading.
+//
+// THREE PLACES USED TO ANSWER THIS, AND NOT THE SAME WAY. SensorTask asked
+// the system clock first; SlowSensorTask and StorageTask asked the DS1302
+// first. That difference is not cosmetic: nothing disciplines the DS1302 to
+// NTP and nothing seeds the system clock from it, so the two drift apart with
+// no upper bound, and ProcessingTask judges every reading's timestamp against
+// the SYSTEM clock via readingIsBackfilled().
+//
+// Once the RTC ran two minutes slow, everything stamped from it read as
+// history: the blocking sensors — the dust sensors and the anemometer, which
+// are exactly the ones on SlowSensorTask — dropped out of the live ring and
+// out of alert evaluation with nothing said, and the CSV rows StorageTask
+// wrote carried a different clock than the dashboard showed.
+//
+// Order: the system clock when it is plausible (it is the one that gets
+// disciplined, and the one the backfill test uses), then the hardware RTC —
+// which is what a device with no network has and where this falls through to
+// it exactly as before — then a millis counter, +1 so it can never be 0,
+// which SensorTypes.h reserves for "unknown" and LiveAggregator uses as its
+// first-flush sentinel.
+// ============================================================================
+uint32_t pipelineNowEpoch();
+
+// ============================================================================
 // TaskManager — creates all FreeRTOS queues, mutexes, and tasks.
 // Call init() once from setup() AFTER WiFi, storage, and sensors are ready.
 // ============================================================================

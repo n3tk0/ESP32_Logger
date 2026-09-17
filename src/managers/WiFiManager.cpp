@@ -1,6 +1,8 @@
 #include "WiFiManager.h"
 #include "../core/Globals.h"
 #include "ConfigManager.h"
+#include "../pipeline/DataPipeline.h"   // rtcMutex
+#include "../utils/MutexGuard.h"
 #include <WiFi.h>
 #include <DNSServer.h>            // Captive portal — Pass 5 5.5 phase 2
 #include <time.h>
@@ -46,7 +48,7 @@ void safeWiFiShutdown() {
     WiFi.scanDelete();
 
     // Disconnect от AP/Client, изчисти запазените credentials в RAM
-    WiFi.disconnect(true /*wifioff=false*/);
+    WiFi.disconnect(true /* wifioff: also power the radio down */);
     delay(50);
 
     // Спри SoftAP ако е активен
@@ -183,13 +185,21 @@ bool syncTimeFromNTP() {
     if (ti.tm_year < (2020 - 1900)) { DBGLN("NTP: Failed"); return false; }
 
     if (Rtc) {
-        Rtc->SetIsWriteProtected(false);
-        Rtc->SetIsRunning(true);
-        RtcDateTime dt(ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
-                        ti.tm_hour, ti.tm_min, ti.tm_sec);
-        Rtc->SetDateTime(dt);
-        DBGF("NTP: RTC set to %04d-%02d-%02d %02d:%02d:%02d\n",
-             dt.Year(), dt.Month(), dt.Day(), dt.Hour(), dt.Minute(), dt.Second());
+        // One writer on the three-wire bus at a time: the pipeline tasks read
+        // it for their timestamps and the web worker for /api/status.
+        MutexGuard rg(rtcMutex, pdMS_TO_TICKS(1000));
+        if (rtcMutex && !rg.isLocked()) {
+            DBGLN("NTP: system clock set, but the RTC bus was busy — not written");
+        } else {
+            Rtc->SetIsWriteProtected(false);
+            Rtc->SetIsRunning(true);
+            RtcDateTime dt(ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
+                            ti.tm_hour, ti.tm_min, ti.tm_sec);
+            Rtc->SetDateTime(dt);
+            Rtc->SetIsWriteProtected(true);
+            DBGF("NTP: RTC set to %04d-%02d-%02d %02d:%02d:%02d\n",
+                 dt.Year(), dt.Month(), dt.Day(), dt.Hour(), dt.Minute(), dt.Second());
+        }
     }
     return true;
 }

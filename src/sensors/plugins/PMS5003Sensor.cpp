@@ -32,15 +32,20 @@ bool PMS5003Sensor::init(JsonObjectConst cfg) {
 bool PMS5003Sensor::_readFrame() {
     if (!_serial) return false;
     uint8_t buf[FRAME_LEN];
-    unsigned long deadline = millis() + 2000;
+    // millis() - start, not millis() < start + N: the sum wraps at the
+    // ~49.7-day rollover and the wait would end before it began.
+    const unsigned long start = millis();
 
     int pos = 0;
-    while (millis() < deadline) {
+    while (millis() - start < 2000) {
         g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();
         if (!_serial->available()) { delay(5); continue; }
         uint8_t b = _serial->read();
         if (pos == 0 && b != START1) continue;
-        if (pos == 1 && b != START2) { pos = 0; continue; }
+        // A byte that is not START2 here ends this candidate frame — but if
+        // it is itself START1 it begins the next one, and throwing it away
+        // costs a whole frame (one second of data) waiting for another.
+        if (pos == 1 && b != START2) { pos = (b == START1) ? 1 : 0; continue; }
         buf[pos++] = b;
         if (pos == FRAME_LEN) {
             // Validate checksum (sum of bytes 0..29 == bytes 30+31)

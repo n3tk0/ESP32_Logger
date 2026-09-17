@@ -11,19 +11,16 @@
 namespace {
 
 // ---------------------------------------------------------------------------
-// Best-effort current epoch.  Tries the RTC first, then the system clock
-// (set by NTP), and finally falls back to a millis-based monotonic counter
-// so the aggregator still flushes on cadence even before time is known.
+// Best-effort current epoch — now the pipeline's shared one.
+//
+// This used to ask the DS1302 first and the system clock second, which is the
+// opposite of what SensorTask stamps readings with and of what
+// readingIsBackfilled() judges them against. With a drifting RTC that put a
+// different clock on the CSV rows than on the dashboard, and moved the
+// aggregator's flush baseline whenever the chosen source changed. See
+// pipelineNowEpoch() in TaskManager.h.
 // ---------------------------------------------------------------------------
-uint32_t nowEpochSafe() {
-    if (Rtc) {
-        RtcDateTime n = Rtc->GetDateTime();
-        if (n.IsValid() && n.Year() >= 2020) return n.Unix32Time();
-    }
-    time_t sysT = time(nullptr);
-    if (sysT > 1000000000) return (uint32_t)sysT;
-    return (uint32_t)(millis() / 1000UL);
-}
+inline uint32_t nowEpochSafe() { return pipelineNowEpoch(); }
 
 }  // namespace
 
@@ -182,20 +179,42 @@ void storageTaskFunc(void* param) {
                 // Release fsMutex between primary and mirror so a slow SD write
                 // (50-100 ms) doesn't block the mutex for the full dual-write
                 // window.  (AUDIT 2.16)
+                //
+                // A ROW LOST TO THE MUTEX IS STILL A ROW LOST. These used to
+                // read `if (g.isLocked() && !appendRow(...))`, so a 2-second
+                // fsMutex timeout skipped the write and every branch that says
+                // so: no log line, no g_queueDrops, an aggregation interval
+                // gone from the CSV with nothing anywhere to show it.
                 {
                     MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-                    if (g.isLocked() && !primary.appendRow(rowTs, headerBuf, rowBuf)) {
+                    if (!g.isLocked()) {
+                        Serial.printf("[StorageTask] primary row LOST ts=%lu (fsMutex timeout)\n",
+                                      (unsigned long)rowTs);
+                        g_queueDrops++;
+                    } else if (!primary.appendRow(rowTs, headerBuf, rowBuf)) {
                         Serial.printf("[StorageTask] primary row LOST ts=%lu\n", (unsigned long)rowTs);
                         g_queueDrops++;
                     }
                 }
                 if (mirrorActive) {
                     MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-                    if (g.isLocked() && !mirror.appendRow(rowTs, headerBuf, rowBuf)) {
+                    if (!g.isLocked()) {
+                        Serial.printf("[StorageTask] mirror row LOST ts=%lu (fsMutex timeout)\n",
+                                      (unsigned long)rowTs);
+                        g_queueDrops++;
+                    } else if (!mirror.appendRow(rowTs, headerBuf, rowBuf)) {
                         Serial.printf("[StorageTask] mirror row LOST ts=%lu\n", (unsigned long)rowTs);
                         g_queueDrops++;
                     }
                 }
+            } else {
+                // The other way a row disappears: a header too wide for
+                // ROW_BUF_BYTES. LiveAggregator.h static_asserts the worst
+                // case, so this needs a runtime column count to happen — and
+                // it would otherwise be as silent as the case above.
+                Serial.printf("[StorageTask] row ts=%lu dropped — header did not fit %u B\n",
+                              (unsigned long)rowTs, (unsigned)sizeof(headerBuf));
+                g_queueDrops++;
             }
         }
     }
@@ -206,7 +225,11 @@ void storageTaskFunc(void* param) {
         if (agg.flushNow(nowEpochSafe(), rowBuf, sizeof(rowBuf), &rowTs)) {
             if (agg.buildHeader(headerBuf, sizeof(headerBuf)) > 0) {
                 MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-                if (g.isLocked()) {
+                if (!g.isLocked()) {
+                    Serial.printf("[StorageTask] final row LOST ts=%lu (fsMutex timeout)\n",
+                                  (unsigned long)rowTs);
+                    g_queueDrops++;
+                } else {
                     if (!primary.appendRow(rowTs, headerBuf, rowBuf)) {
                         Serial.printf("[StorageTask] final primary row LOST ts=%lu\n", (unsigned long)rowTs);
                         g_queueDrops++;

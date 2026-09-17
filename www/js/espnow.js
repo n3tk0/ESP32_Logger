@@ -148,8 +148,16 @@ function enRenderNodes(d) {
             "</div>" +
             '<button class="btn" data-click="espnowSaveNode" data-args=\'[' + n.node_id + ']\'>' +
               '<span data-icon="save"></span> Save</button>' +
-            '<button class="btn warn" data-click="espnowForget" data-args=\'[' + n.node_id + ',"' +
-              enEsc(n.id) + '"]\'>' +
+            // JSON first, then escaped, in a double-quoted attribute — the
+            // pattern pages.js uses. Hand-building the array and escaping the
+            // NAME inside a single-quoted attribute looked equivalent and was
+            // not: enEsc turns a quote in the name into &quot;, the browser
+            // decodes the attribute before JSON.parse sees it, and the parse
+            // then fails on a broken string. The dispatcher catches that and
+            // calls the handler with no arguments, so Forget silently did
+            // nothing for any node whose name contained a quote.
+            '<button class="btn warn" data-click="espnowForget" data-args="' +
+              enEsc(JSON.stringify([n.node_id, n.id])) + '">' +
               '<span data-icon="trash"></span> Forget</button>' +
           "</div>" +
           // Renaming is not free and the page says so where the field is,

@@ -346,7 +346,27 @@ static String httpsGet(const char* url) {
 
     String body;
     const int code = http.GET();
-    if (code == 200) body = http.getString();
+    if (code == 200) {
+        // getString() buffers the WHOLE body before the filtered parse gets to
+        // discard most of it, so the heap cost is the endpoint's choice, not
+        // ours. A forecast response is 2-8 KB; refusing anything past 32 KB
+        // keeps a misbehaving or redirected endpoint from taking the C3's heap
+        // (and with it the sensor pipeline) rather than merely failing a fetch.
+        constexpr int MAX_BODY_BYTES = 32 * 1024;
+        const int len = http.getSize();      // -1 when chunked / unknown
+        if (len > MAX_BODY_BYTES) {
+            Serial.printf("[forecast] body too large (%d B) — refused\n", len);
+        } else {
+            body = http.getString();
+            if (len < 0 && body.length() > (size_t)MAX_BODY_BYTES) {
+                // Chunked: the length was unknown until it arrived. Drop it
+                // rather than parse it, and free the String on the way out.
+                Serial.printf("[forecast] chunked body too large (%u B) — refused\n",
+                              (unsigned)body.length());
+                body = String();
+            }
+        }
+    }
     else Serial.printf("[forecast] HTTP %d\n", code);
     http.end();
     return body;

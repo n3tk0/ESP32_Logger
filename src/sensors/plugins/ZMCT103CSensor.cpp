@@ -48,23 +48,32 @@ int ZMCT103CSensor::readAll(SensorReading* out, int maxOut) {
     //   3. Subtract mean, compute variance → √ → AC RMS count.
     //   4. Multiply by current_factor → Arms.
     // -----------------------------------------------------------------------
-    double sum = 0.0;
-    int samples = _samples;
-    int* buf = (int*)alloca(sizeof(int) * samples);
+    // ONE PASS, NO BUFFER. This used to keep every sample:
+    //
+    //     int* buf = (int*)alloca(sizeof(int) * samples);
+    //
+    // with `samples` clamped at 500, so up to 2000 bytes of stack — taken on
+    // SlowSensorTask, whose whole stack is STACK_SLOW_SENSOR_TASK (4096
+    // bytes), and taken from inside a call chain several frames deep.  alloca
+    // cannot report failure: the overflow is a corrupted stack, on the task
+    // that also drives the UART dust sensors.
+    //
+    // Welford's algorithm needs no samples kept and is better conditioned
+    // than the mean-then-subtract pass it replaces (verified against it on
+    // synthetic ADC sweeps: agreement to ~4e-16 relative, i.e. double
+    // rounding).  m2 accumulates the sum of squared deviations, so dividing
+    // by `samples` gives the same population variance as before.
+    const int samples = _samples;
+    double mean = 0.0, m2 = 0.0;
 
     for (int i = 0; i < samples; i++) {
-        buf[i] = analogRead(_pin);
-        sum += buf[i];
+        const double x = (double)analogRead(_pin);
+        const double d = x - mean;
+        mean += d / (double)(i + 1);
+        m2   += d * (x - mean);
         delayMicroseconds(_samplePeriodUs);
     }
-    double mean = sum / samples;
-
-    double sumSq = 0.0;
-    for (int i = 0; i < samples; i++) {
-        double diff = buf[i] - mean;
-        sumSq += diff * diff;
-    }
-    double rmsCount = sqrt(sumSq / samples);
+    double rmsCount = sqrt(m2 / (double)samples);
     float arms = (float)(rmsCount * _currentFactor);
     arms = _calCurrent.apply(arms);
     if (arms < 0.0f) arms = 0.0f;

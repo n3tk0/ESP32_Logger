@@ -2,9 +2,8 @@
 #include "TaskManager.h"
 #include "../sensors/SensorManager.h"
 #include "../pipeline/DataPipeline.h"
-#include "../core/Globals.h"  // Rtc, rtcValid
+#include "../core/Globals.h"  // (the clock now lives in pipelineNowEpoch)
 #include "../setup.h"         // SLOW_SENSOR_TICK_MS
-#include <time.h>
 
 // ---------------------------------------------------------------------------
 void slowSensorTaskFunc(void* /*param*/) {
@@ -17,18 +16,14 @@ void slowSensorTaskFunc(void* /*param*/) {
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();   // C4 heartbeat
 
-        // Timestamp priority: hardware RTC → NTP system clock → millis monotonic
-        uint32_t ts = 0;
-        if (Rtc) {
-            RtcDateTime now = Rtc->GetDateTime();
-            if (now.IsValid() && now.Year() >= 2020) ts = now.Unix32Time();
-        }
-        if (ts == 0) {
-            time_t sysT = time(nullptr);
-            if (sysT > 1000000000L) ts = (uint32_t)sysT;
-        }
-        // +1 avoids ts=0 (reserved sentinel).  (AUDIT 10.3)
-        if (ts == 0) ts = (uint32_t)(millis() / 1000UL) + 1;
+        // THE SAME CLOCK SensorTask AND ProcessingTask USE. This task asked
+        // the DS1302 first, which is the ordering SensorTask's comment was
+        // written to explain the removal of: a drifting RTC made every
+        // reading from the blocking sensors — the dust sensors and the
+        // anemometer, all of them here — read as backfill, dropping them from
+        // the live dashboard and from alerts without a word. See
+        // pipelineNowEpoch() in TaskManager.h.
+        const uint32_t ts = pipelineNowEpoch();
 
         // Only dispatch blocking sensors (SDS011, PMS5003, WindSensor).
         // tickFiltered can block 1.5-3 s for UART frame waits; refresh the

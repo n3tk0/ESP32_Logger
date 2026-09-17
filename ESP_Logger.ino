@@ -29,8 +29,11 @@
  *
  * ИЗПОЛЗВАНИ БИБЛИОТЕКИ (Arduino Library Manager):
  *   ArduinoJson                 (B. Blanchon)     >= 7.0   -> Core
- *   ESPAsyncWebServer           (esphome/lacamera)>= 3.1   -> WebServer
- *   AsyncTCP                    (me-no-dev)       >= 1.1   -> WebServer
+ *   ESPAsyncWebServer           (ESP32Async)      >= 3.12  -> WebServer
+ *   AsyncTCP                    (ESP32Async)      >= 3.5   -> WebServer
+ *     ^ the web server fork is load-bearing, not interchangeable: its
+ *       locked SSE client list is what makes publishLiveEvent() safe to
+ *       call from loop().  See the note beside lib_deps in platformio.ini.
  *
  * Всички сензорни драйвери (BME280, BME688, DS18B20, SDS011, PMS5003, SPS30, ENS160,
  * SGP30, SCD4x, VEML6075, VEML7700, BH1750, HC-SR04, ZMPT101B, ZMCT103C,
@@ -151,6 +154,7 @@
 #  include "src/sensors/plugins/ZMCT103CSensor.h"
 #endif
 #include "src/pipeline/DataPipeline.h"
+#include "src/utils/MutexGuard.h"       // rtcMutex guards around the DS1302
 #include "src/tasks/TaskManager.h"
 #include "src/export/ExportManager.h"
 #ifdef EXPORT_MQTT_ENABLED
@@ -297,8 +301,15 @@ static void _manageContinuousPower() {
     // Reset activity clock on explicit external events
     if (g_contLastActivity == 0) g_contLastActivity = millis(); // init once
 
-    // C2: web server activity restores full power
-    if (g_lastWebActivity > g_contLastActivity) {
+    // C2: web server activity restores full power.
+    //
+    // Signed difference, not `>`: both are raw millis() stamps, and across the
+    // ~49.7-day rollover g_lastWebActivity wraps to a small number while
+    // g_contLastActivity is still large — so for the following 49 days a web
+    // request would no longer restore power, leaving somebody using the UI on
+    // a throttled CPU with modem sleep on (which also breaks ESP-NOW unicast,
+    // see setup.h).
+    if ((int32_t)(g_lastWebActivity - g_contLastActivity) > 0) {
         g_contLastActivity = g_lastWebActivity;
         if (g_contPowerReduced) {
             setCpuFrequencyMhz(160);
@@ -678,6 +689,8 @@ void setup() {
     initHardware();   // Configure pin modes AND initialize RTC BEFORE reading time
 
     // ── Wake timestamp ────────────────────────────────────────────────────────
+    // Unguarded on purpose: this runs before TaskManager::init() creates
+    // rtcMutex, and nothing else exists yet to share the bus with.
     if (Rtc) {
         RtcDateTime now = Rtc->GetDateTime();
         currentWakeTimestamp = now.IsValid() ? now.Unix32Time() : 0;
@@ -1098,6 +1111,12 @@ void loop() {
 
     // ── SSE live heartbeat (1 Hz) ─────────────────────────────────────────────
     // No-op when no EventSource clients are subscribed.
+    //
+    // This is the one place the main task touches an async client. It is safe
+    // because the pinned web server locks its client list against the AsyncTCP
+    // task that mutates it — see the note above publishLiveEvent() in
+    // WebServer.cpp, and the dependency note in platformio.ini. Do not add a
+    // second such caller.
     {
         static uint32_t s_lastLiveTick = 0;
         uint32_t now = millis();
@@ -1123,11 +1142,20 @@ void loop() {
         // (Codex review: clear-then-read leaves a race window.)
         PendingRtcSet t = g_pendingRtcTime;
         g_pendingRtcSet.store(false, std::memory_order_relaxed);
-        Rtc->SetIsWriteProtected(false); delay(10);
-        Rtc->SetIsRunning(true);         delay(10);
-        RtcDateTime dt(t.year, t.month, t.day, t.hour, t.minute, 0);
-        Rtc->SetDateTime(dt);            delay(100);
-        Rtc->SetIsWriteProtected(true);
+        // ~120 ms of bus time. Under rtcMutex so a pipeline task's clock read
+        // cannot land in the middle of the write and address a register this
+        // sequence never meant to touch.
+        MutexGuard rg(rtcMutex, pdMS_TO_TICKS(1000));
+        if (rtcMutex && !rg.isLocked()) {
+            Serial.println("[RTC] hardware clock not written: bus busy, will retry");
+            g_pendingRtcSet.store(true, std::memory_order_release);
+        } else {
+            Rtc->SetIsWriteProtected(false); delay(10);
+            Rtc->SetIsRunning(true);         delay(10);
+            RtcDateTime dt(t.year, t.month, t.day, t.hour, t.minute, 0);
+            Rtc->SetDateTime(dt);            delay(100);
+            Rtc->SetIsWriteProtected(true);
+        }
     }
 
     // ── Deferred OTA rollback (AUDIT 3.16) ───────────────────────────────────
@@ -1190,9 +1218,11 @@ void loop() {
 
         if (highCountFF > 0 || highCountPF > 0) {
             // Publish button event as SensorReading through the pipeline
-            uint32_t ts = 0;
-            if (Rtc) { RtcDateTime now = Rtc->GetDateTime(); if (now.IsValid()) ts = now.Unix32Time(); }
-            if (ts == 0) ts = (uint32_t)(millis() / 1000UL);
+            // The pipeline's clock, like every other producer: ProcessingTask
+            // judges this reading's timestamp against the system clock, so
+            // stamping it from the DS1302 is how a button press ends up
+            // classified as backfill. See pipelineNowEpoch() in TaskManager.h.
+            const uint32_t ts = pipelineNowEpoch();
 
             if (highCountFF > 0) {
                 SensorReading btn = SensorReading::make(ts, "buttons", "gpio",
@@ -1272,7 +1302,10 @@ void loop() {
                 loggingState   = STATE_WAIT_FLOW;
                 stateStartTime = millis(); cycleStartTime = millis();
                 if (onlineLoggerMode && Rtc) {
-                    RtcDateTime now = Rtc->GetDateTime();
+                    MutexGuard rg(rtcMutex, pdMS_TO_TICKS(200));
+                    RtcDateTime now = (rtcMutex && !rg.isLocked())
+                                      ? RtcDateTime(0, 0, 0, 0, 0, 0)
+                                      : Rtc->GetDateTime();
                     currentWakeTimestamp = now.IsValid() ? now.Unix32Time() : 0;
                 }
                 highCountFF = 0; highCountPF = 0;
@@ -1281,7 +1314,10 @@ void loop() {
                 loggingState   = STATE_WAIT_FLOW;
                 stateStartTime = millis(); cycleStartTime = millis();
                 if (onlineLoggerMode && Rtc) {
-                    RtcDateTime now = Rtc->GetDateTime();
+                    MutexGuard rg(rtcMutex, pdMS_TO_TICKS(200));
+                    RtcDateTime now = (rtcMutex && !rg.isLocked())
+                                      ? RtcDateTime(0, 0, 0, 0, 0, 0)
+                                      : Rtc->GetDateTime();
                     currentWakeTimestamp = now.IsValid() ? now.Unix32Time() : 0;
                 }
                 highCountFF = 0; highCountPF = 0;

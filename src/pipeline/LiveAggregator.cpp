@@ -1,4 +1,5 @@
 #include "LiveAggregator.h"
+#include <Arduino.h>            // Serial — the discarded-row warning below
 #include "../utils/MutexGuard.h"
 #include <math.h>
 #include <string.h>
@@ -201,6 +202,13 @@ bool LiveAggregator::buildRowIfDue(uint32_t nowEpoch, char* buf, size_t bufLen,
     }
 
     int n = _writeRow(nowEpoch, buf, bufLen);
+    // A row that did not fit is an interval of readings thrown away, and the
+    // only other symptom is a CSV that quietly stops growing — so say so.
+    if (n <= 0) {
+        Serial.printf("[LiveAgg] row did not fit %u B for %u column(s) — "
+                      "interval discarded\n",
+                      (unsigned)bufLen, (unsigned)_nCols);
+    }
     _resetAccumulators();
     _lastFlushEpoch = nowEpoch;
     if (outRowEpoch) *outRowEpoch = nowEpoch;

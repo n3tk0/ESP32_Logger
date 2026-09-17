@@ -30,9 +30,18 @@ public:
     static constexpr uint8_t  COL_KEY_LEN    = 28;   // sensorType + '_' + metric
     static constexpr uint8_t  COL_HEADER_LEN = 28;
     // Worst-case header is timestamp + MAX_COLUMNS * (1 comma + COL_HEADER_LEN-1)
-    // characters + NUL — 24*28 ≈ 700 bytes.  Keep the headroom at 1 KB so a
-    // future bump to 32 columns or 32-char names doesn't silently overflow.
+    // characters + NUL — 9 + 24*28 = 681 bytes today.
     static constexpr size_t   ROW_BUF_BYTES  = 1024;
+
+    // ASSERTED, not promised. The comment here used to say 1 KB leaves room
+    // for "a future bump to 32 columns or 32-char names", and it does not:
+    // 9 + 32*33 = 1065. Overflowing is not loud either — buildHeader() and
+    // _writeRow() return -1, StorageTask skips the row, and the CSV simply
+    // stops growing. So the arithmetic is a build-time check.
+    static_assert(sizeof("timestamp") + (size_t)MAX_COLUMNS * COL_HEADER_LEN
+                      < ROW_BUF_BYTES,
+                  "ROW_BUF_BYTES too small for MAX_COLUMNS x COL_HEADER_LEN — "
+                  "raise it or the CSV row silently stops being written");
 
     LiveAggregator();
     ~LiveAggregator();

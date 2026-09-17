@@ -1,7 +1,9 @@
 #include "HttpExporter.h"
+#include <new>            // std::nothrow
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <string.h>        // strcasecmp/strlen for the method below
 
 static bool _isValidHeaderName(const char* s) {
     if (!s || !*s) return false;
@@ -63,7 +65,13 @@ bool HttpExporter::send(const SensorReading* readings, size_t count) {
     // "[" / "]" framing and NUL. (Verified: tests/host/test_httpexporter_bufsize.cpp.)
     static const size_t BYTES_PER_READING = 160;
     size_t bodyLen = count * BYTES_PER_READING + 32;
-    char*  body    = new char[bodyLen];
+    // nothrow: the check below is only a check under -fno-exceptions, which
+    // is how this firmware builds. A plain new[] that cannot allocate
+    // aborts the device instead of returning null, so an export during a
+    // heap squeeze became a reboot rather than a skipped batch. MqttExporter
+    // says "like everything else in this tree" about its own nothrow
+    // allocation; these two were the exceptions it did not know about.
+    char*  body    = new (std::nothrow) char[bodyLen];
     if (!body) return false;
 
     // Overflow-proof append helper: after each snprintf, clamp on error or when
@@ -111,7 +119,18 @@ bool HttpExporter::send(const SensorReading* readings, size_t count) {
         http.addHeader(_hdrKeys[i], _hdrVals[i]);
     }
 
-    int code = http.POST(body);
+    // THE CONFIGURED METHOD, which this read, logged and then ignored: every
+    // request went out as POST, so a webhook or API expecting PUT or PATCH got
+    // a verb it may well refuse, and the setting looked like it worked.
+    // Anything else falls back to POST rather than sending a verb the peer is
+    // unlikely to accept — and says so once, where the config is wrong.
+    const char* verb = "POST";
+    if      (strcasecmp(_method, "PUT")   == 0) verb = "PUT";
+    else if (strcasecmp(_method, "PATCH") == 0) verb = "PATCH";
+    else if (_method[0] && strcasecmp(_method, "POST") != 0) {
+        Serial.printf("[HTTP] method '%s' not supported — sending POST\n", _method);
+    }
+    int code = http.sendRequest(verb, (uint8_t*)body, strlen(body));
     bool ok  = (code >= 200 && code < 300);
     if (!ok) {
         Serial.printf("[HTTP] POST failed, code=%d\n", code);

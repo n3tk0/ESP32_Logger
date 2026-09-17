@@ -1,4 +1,5 @@
 #include "OpenSenseMapExporter.h"
+#include <new>            // std::nothrow
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
@@ -47,7 +48,13 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
     // Build JSON array: [{sensorId, value, createdAt}, ...]
     // Only include readings that have a mapped sensorId
     size_t bodyLen = count * 80 + 32;
-    char*  body    = new char[bodyLen];
+    // nothrow: the check below is only a check under -fno-exceptions, which
+    // is how this firmware builds. A plain new[] that cannot allocate
+    // aborts the device instead of returning null, so an export during a
+    // heap squeeze became a reboot rather than a skipped batch. MqttExporter
+    // says "like everything else in this tree" about its own nothrow
+    // allocation; these two were the exceptions it did not know about.
+    char*  body    = new (std::nothrow) char[bodyLen];
     if (!body) return false;
 
     size_t pos    = 0;

@@ -54,14 +54,30 @@ extern MqttExporter* g_mqttExporter;
 //   limit=   max output points (default 500)
 // ---------------------------------------------------------------------------
 static void handleApiData(AsyncWebServerRequest* req) {
-    uint32_t now = (uint32_t)(millis() / 1000UL); // fallback
+    // THE SAME CLOCK THE READINGS WERE STAMPED WITH. This was millis()/1000,
+    // which is not an epoch — so the defaults it computed could not match any
+    // stored timestamp: `to` defaulted to a few thousand while every reading
+    // carries ~1.7e9, and the `timestamp > toTs` filter below therefore
+    // discarded all of them. Worse, `from` defaulted to now - 86400, which
+    // underflows for the first 24 hours of uptime and asks for readings from
+    // the year 2106 onwards. A request without an explicit `to` always came
+    // back empty; the dashboard never noticed because every caller in www/js
+    // sends both bounds from the browser's clock.
+    // The system clock only, deliberately NOT pipelineNowEpoch(): its RTC leg
+    // bit-bangs the DS1302, and this runs on the AsyncTCP task where a GET
+    // should not be reaching for a shared three-wire bus. When the clock is
+    // not set there is no epoch to reason about, so the default window is
+    // opened all the way rather than closed onto a meaningless instant.
+    const time_t   sysT     = time(nullptr);
+    const bool     haveNow  = (sysT > 1000000000L);
+    const uint32_t now      = haveNow ? (uint32_t)sysT : 0u;
 
     uint32_t fromTs = req->hasParam("from")
                       ? (uint32_t)req->getParam("from")->value().toInt()
-                      : (now - 86400);
+                      : (now > 86400u ? now - 86400u : 0u);
     uint32_t toTs   = req->hasParam("to")
                       ? (uint32_t)req->getParam("to")->value().toInt()
-                      : now;
+                      : (haveNow ? now : UINT32_MAX);
 
     // Copy filter strings to local buffers — AsyncWebParameter::value() is a
     // String whose c_str() may dangle after the param object is freed during
@@ -1395,16 +1411,52 @@ static void handleApiModuleUpdate(AsyncWebServerRequest* req, const String& id,
         req->send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}");
         return;
     }
-    // Top-level "enabled" toggles runtime state; the rest of the payload is
-    // the module's own field bag (schema shape).
-    if (body["enabled"].is<bool>()) mod->setEnabled(body["enabled"].as<bool>());
     JsonObjectConst cfg = body["config"].is<JsonObjectConst>()
                           ? body["config"].as<JsonObjectConst>()
                           : body.as<JsonObjectConst>();
+
+    // ── A 400 HAS TO MEAN NOTHING HAPPENED ──────────────────────────────────
+    //
+    // It did not. IModule::load() is a merge, not a transaction: every
+    // config-backed module writes fields into the live DeviceConfig as it
+    // parses them and returns false only at the end, when it finds the bad
+    // one. WiFiModule is the clearest case — mode, SSID and password are
+    // already in `config` by the time a malformed static IP fails the
+    // payload. This handler then answered "validation failed" and returned
+    // without saving, so the device ran on a configuration the caller had
+    // been told was rejected, and the next unrelated saveConfig() — a theme
+    // change, /save_time, a module toggle — wrote it to flash.
+    //
+    // So the config is snapshotted and put back when load() refuses. On the
+    // heap, because sizeof(DeviceConfig) is about a kilobyte and this runs on
+    // the AsyncTCP worker's stack; nothrow, because failing to snapshot must
+    // mean "do not attempt the load" rather than an abort.
+    //
+    // WHAT THIS DOES NOT COVER, and cannot from here: a module that keeps its
+    // own members outside DeviceConfig (HeaterModule's pin and setpoints,
+    // OtaModule's confirm policy, ForecastModule's location). Those still
+    // apply field by field, and a module whose load() can reject a payload
+    // ought to validate before it assigns. The snapshot is the floor, not the
+    // contract — see the note on load() in src/core/IModule.h.
+    DeviceConfig* snapshot = new (std::nothrow) DeviceConfig(config);
+    if (!snapshot) {
+        req->send(503, "application/json",
+                  "{\"ok\":false,\"error\":\"out of memory — config not touched\"}");
+        return;
+    }
+
     if (!mod->load(cfg)) {
+        config = *snapshot;            // put back what load() half-applied
+        delete snapshot;
         req->send(400, "application/json", "{\"ok\":false,\"error\":\"validation failed\"}");
         return;
     }
+    delete snapshot;
+
+    // AFTER the load, not before it. A rejected payload used to leave the
+    // module enabled or disabled anyway — which for HeaterModule means an
+    // output energised or dropped by a request that answered 400.
+    if (body["enabled"].is<bool>()) mod->setEnabled(body["enabled"].as<bool>());
     // Persist: saveConfig() already shadows modules.json via moduleRegistry.
     saveConfig();
     req->send(200, "application/json", "{\"ok\":true}");
@@ -2023,11 +2075,19 @@ void registerApiRoutes(AsyncWebServer& server) {
     // Pass 5 phase 3: generic module CRUD.
     //
     // IMPORTANT — route ordering vs. prefix matching:
-    // The esphome ESPAsyncWebServer fork PREFIX-matches handlers
-    // (canHandle ≈ `url == uri || url.startsWith(uri + "/")`), NOT exact-match
-    // as an earlier comment here assumed. Handlers are tried in registration
-    // order and the first whose canHandle() passes wins, so MORE-SPECIFIC paths
-    // MUST be registered BEFORE shorter ones:
+    // ESPAsyncWebServer PREFIX-matches handlers, NOT exact-match as an earlier
+    // comment here assumed. Handlers are tried in registration order and the
+    // first whose canHandle() passes wins, so MORE-SPECIFIC paths MUST be
+    // registered BEFORE shorter ones.
+    //
+    // This survived the move to ESP32Async/ESPAsyncWebServer unchanged, which
+    // is worth stating because that version looks like it might have changed
+    // it: a plain string route now builds an AsyncURIMatcher, and that class
+    // does offer exact(), prefix() and dir() types. A bare `server.on("/x")`
+    // selects its BackwardCompatible type, whose match is
+    // `uri == url || url.startsWith(uri + "/")` — the same rule as before.
+    // (A route string ending in `*` would now select the prefix type instead.
+    // None of ours does; the list below is the reason not to add one casually.)
     //   • "/api/modules" registered first would swallow "/api/modules/<id>" —
     //     the detail/form GET would return the whole index array, so the UI
     //     shows "no configurable form".

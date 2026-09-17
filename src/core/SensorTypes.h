@@ -53,17 +53,24 @@ struct SensorReading {
     // Serialise to compact JSON line (no trailing newline)
     // Caller provides buffer of at least 128 bytes.
     int toJsonLine(char* buf, size_t bufLen) const {
+        // `n` accumulates the WOULD-BE length (snprintf semantics) so truncation
+        // is detectable at the end, which means it can run past bufLen.  The
+        // write cursor must not: `buf + n` beyond one-past-the-end is undefined
+        // behaviour even when the size passed alongside it is 0, so every step
+        // goes through at()/room() which clamp to the buffer.
+        auto at   = [&](size_t off) { return buf + (off < bufLen ? off : bufLen); };
+        auto room = [&](size_t off) { return off < bufLen ? bufLen - off : (size_t)0; };
         size_t n = 0;
-        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0,
+        n += (size_t)snprintf(at(n), room(n),
                               "{\"ts\":%lu,\"id\":", (unsigned long)timestamp);
-        n += (size_t)_appendJsonEscaped(buf + n, bufLen > n ? bufLen - n : 0, sensorId);
-        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0, ",\"sensor\":");
-        n += (size_t)_appendJsonEscaped(buf + n, bufLen > n ? bufLen - n : 0, sensorType);
-        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0, ",\"metric\":");
-        n += (size_t)_appendJsonEscaped(buf + n, bufLen > n ? bufLen - n : 0, metric);
-        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0, ",\"value\":%.4g,\"unit\":", value);
-        n += (size_t)_appendJsonEscaped(buf + n, bufLen > n ? bufLen - n : 0, unit);
-        n += (size_t)snprintf(buf + n, bufLen > n ? bufLen - n : 0, ",\"q\":%u}", (unsigned)quality);
+        n += (size_t)_appendJsonEscaped(at(n), room(n), sensorId);
+        n += (size_t)snprintf(at(n), room(n), ",\"sensor\":");
+        n += (size_t)_appendJsonEscaped(at(n), room(n), sensorType);
+        n += (size_t)snprintf(at(n), room(n), ",\"metric\":");
+        n += (size_t)_appendJsonEscaped(at(n), room(n), metric);
+        n += (size_t)snprintf(at(n), room(n), ",\"value\":%.4g,\"unit\":", value);
+        n += (size_t)_appendJsonEscaped(at(n), room(n), unit);
+        n += (size_t)snprintf(at(n), room(n), ",\"q\":%u}", (unsigned)quality);
         return (n >= bufLen) ? -1 : (int)n;
     }
 

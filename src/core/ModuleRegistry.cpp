@@ -5,6 +5,21 @@
 
 ModuleRegistry moduleRegistry;
 
+// Move an unusable file aside so the next boot writes a fresh one instead of
+// failing on the same bytes forever.  Derived from `path` and not spelled out:
+// loadAll/saveAll take the path as a parameter (a host test and a future second
+// registry both pass their own), and a hardcoded name renamed somebody else's
+// file while leaving the broken one in place.
+static void quarantine(fs::FS& fs, const char* path) {
+    if (!path) return;
+    String bad = String(path) + ".corrupt";
+    if (fs.exists(bad.c_str())) fs.remove(bad.c_str());  // FAT rename won't overwrite
+    if (!fs.rename(path, bad.c_str())) {
+        Serial.printf("[ModuleRegistry] could not move %s aside — removing\n", path);
+        fs.remove(path);
+    }
+}
+
 // ---------------------------------------------------------------------------
 bool ModuleRegistry::add(IModule* mod) {
     if (!mod) return false;
@@ -62,7 +77,7 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
         Serial.printf("[ModuleRegistry] %s too large (%u B, cap %u) — quarantining\n",
                       path, (unsigned)sz, (unsigned)MAX_FILE_BYTES);
         f.close();
-        fs.rename(path, "/config/modules.json.corrupt");
+        quarantine(fs, path);
         saveAll(fs, path);
         return false;
     }
@@ -72,7 +87,7 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
     f.close();
     if (err) {
         Serial.printf("[ModuleRegistry] parse error: %s — quarantining\n", err.c_str());
-        fs.rename(path, "/config/modules.json.corrupt");
+        quarantine(fs, path);
         saveAll(fs, path);
         return false;
     }

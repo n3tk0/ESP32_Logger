@@ -35,6 +35,10 @@ on:
       - 'tools/check_kindle_icons.py'
       - 'tools/check_body_handlers.py'
       - 'tools/check_fs_mutex.py'
+      - 'tools/check_rtc_mutex.py'
+      - 'tools/check_sse_lock.py'
+      - 'tools/check_tempobject_cleanup.py'
+      - 'tools/check_kindle_payload_keys.py'
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
@@ -67,6 +71,10 @@ on:
       - 'tools/check_kindle_icons.py'
       - 'tools/check_body_handlers.py'
       - 'tools/check_fs_mutex.py'
+      - 'tools/check_rtc_mutex.py'
+      - 'tools/check_sse_lock.py'
+      - 'tools/check_tempobject_cleanup.py'
+      - 'tools/check_kindle_payload_keys.py'
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
@@ -613,6 +621,202 @@ jobs:
           cp /tmp/tsm.orig src/pipeline/TrendStore.cpp
           rm /tmp/tsm.orig
           echo "the checker fails on an unguarded filesystem write, as it should"
+
+      - name: The DS1302 bus is serialised (check_rtc_mutex)
+        run: python3 tools/check_rtc_mutex.py
+
+      - name: Verify that checker fails on an unguarded RTC transaction
+        run: |
+          set -e
+          cp src/managers/DataLogger.cpp /tmp/dl.orig
+          python3 - <<'EOF'
+          s = open('src/managers/DataLogger.cpp').read()
+          s = s.replace('rtcMutex', 'noLockAtAll')
+          open('src/managers/DataLogger.cpp', 'w').write(s)
+          EOF
+          if grep -q 'rtcMutex' src/managers/DataLogger.cpp; then
+            echo "::error::the rtcMutex mutation no longer matches — this proof step is stale"
+            cp /tmp/dl.orig src/managers/DataLogger.cpp
+            exit 1
+          fi
+          if python3 tools/check_rtc_mutex.py > /dev/null 2>&1; then
+            echo "::error::check_rtc_mutex.py passed a DS1302 transaction with no lock"
+            cp /tmp/dl.orig src/managers/DataLogger.cpp
+            exit 1
+          fi
+          cp /tmp/dl.orig src/managers/DataLogger.cpp
+          rm /tmp/dl.orig
+          echo "the checker fails on an unguarded RTC transaction, as it should"
+
+      - name: The SSE push rests on a locked client list (check_sse_lock)
+        run: python3 tools/check_sse_lock.py
+
+      - name: Verify that checker fails on an unlocked web server
+        run: |
+          set -e
+          cp platformio.ini /tmp/pio.orig
+          python3 - <<'EOF'
+          s = open('platformio.ini').read()
+          s = s.replace('ESP32Async/ESPAsyncWebServer @ ^3.12.0',
+                        'esphome/ESPAsyncWebServer-esphome @ ^3.4.0')
+          open('platformio.ini', 'w').write(s)
+          EOF
+          if ! grep -q 'esphome/ESPAsyncWebServer-esphome' platformio.ini \
+             || grep -qE '^[[:space:]]*ESP32Async/ESPAsyncWebServer' platformio.ini; then
+            echo "::error::the web-server pin mutation no longer matches — this proof step is stale"
+            cp /tmp/pio.orig platformio.ini
+            exit 1
+          fi
+          if python3 tools/check_sse_lock.py > /dev/null 2>&1; then
+            echo "::error::check_sse_lock.py passed a web server that does not lock its client list"
+            cp /tmp/pio.orig platformio.ini
+            exit 1
+          fi
+          cp /tmp/pio.orig platformio.ini
+          rm /tmp/pio.orig
+          echo "the checker fails on an unlocked web server, as it should"
+
+      - name: Verify that checker fails when the locks are compiled out
+        run: |
+          set -e
+          cp platformio.ini /tmp/pio.orig
+          python3 - <<'EOF'
+          s = open('platformio.ini').read()
+          s = s.replace('-DASYNCWEBSERVER_USE_MUTEX=1', '-DASYNCWEBSERVER_USE_MUTEX=0')
+          open('platformio.ini', 'w').write(s)
+          EOF
+          if ! grep -q -- '-DASYNCWEBSERVER_USE_MUTEX=0' platformio.ini \
+             || grep -q -- '-DASYNCWEBSERVER_USE_MUTEX=1' platformio.ini; then
+            echo "::error::the USE_MUTEX mutation no longer matches — this proof step is stale"
+            cp /tmp/pio.orig platformio.ini
+            exit 1
+          fi
+          if python3 tools/check_sse_lock.py > /dev/null 2>&1; then
+            echo "::error::check_sse_lock.py passed a build whose web-server locks are no-ops"
+            cp /tmp/pio.orig platformio.ini
+            exit 1
+          fi
+          cp /tmp/pio.orig platformio.ini
+          rm /tmp/pio.orig
+          echo "the checker fails when the locks are compiled out, as it should"
+
+      - name: Per-request state in _tempObject is cleaned up (check_tempobject_cleanup)
+        run: python3 tools/check_tempobject_cleanup.py
+
+      - name: Verify that checker fails when the cleaner moves below the allocation
+        run: |
+          set -e
+          cp src/web/WebServer.cpp /tmp/ws.orig
+          python3 - <<'EOF'
+          p = 'src/web/WebServer.cpp'
+          lines = open(p).read().split('\n')
+          head = '                req->onDisconnect([req]() {'
+          assert lines.count(head) == 1, 'cleaner anchor moved'
+          start = lines.index(head)
+          end = next(i for i in range(start, len(lines)) if lines[i].strip() == '});')
+          block = lines[start:end + 1]
+          rest = lines[:start] + lines[end + 1:]
+          at = next(i for i, l in enumerate(rest) if 'req->_tempObject = buf;' in l)
+          open(p, 'w').write('\n'.join(rest[:at + 1] + block + rest[at + 1:]))
+          EOF
+          if python3 tools/check_tempobject_cleanup.py > /dev/null 2>&1; then
+            echo "::error::check_tempobject_cleanup.py passed an OOM sentinel whose cleaner is registered after the allocation"
+            cp /tmp/ws.orig src/web/WebServer.cpp
+            exit 1
+          fi
+          cp /tmp/ws.orig src/web/WebServer.cpp
+          rm /tmp/ws.orig
+          echo "the checker fails when the cleaner moves below the allocation, as it should"
+
+      - name: Verify that checker fails on a missing disconnect cleaner
+        run: |
+          set -e
+          cp src/web/IngestHandler.cpp /tmp/ih.orig
+          python3 - <<'EOF'
+          p = 'src/web/IngestHandler.cpp'
+          lines = open(p).read().split('\n')
+          head = '        req->onDisconnect([req]() {'
+          assert lines.count(head) == 1, 'cleaner anchor moved'
+          start = lines.index(head)
+          end = next(i for i in range(start, len(lines)) if lines[i].strip() == '});')
+          open(p, 'w').write('\n'.join(lines[:start] + lines[end + 1:]))
+          EOF
+          if grep -q 'onDisconnect' src/web/IngestHandler.cpp; then
+            echo "::error::the cleaner mutation no longer matches — this proof step is stale"
+            cp /tmp/ih.orig src/web/IngestHandler.cpp
+            exit 1
+          fi
+          if python3 tools/check_tempobject_cleanup.py > /dev/null 2>&1; then
+            echo "::error::check_tempobject_cleanup.py passed a _tempObject site with no cleaner"
+            cp /tmp/ih.orig src/web/IngestHandler.cpp
+            exit 1
+          fi
+          cp /tmp/ih.orig src/web/IngestHandler.cpp
+          rm /tmp/ih.orig
+          echo "the checker fails on a missing disconnect cleaner, as it should"
+      - name: The Kindle payload and the panel agree on key names
+        run: python3 tools/check_kindle_payload_keys.py
+
+      - name: Verify that checker fails on a key the panel would drop
+        run: |
+          set -e
+          cp src/web/KindleDashboard.cpp /tmp/kd.orig
+          python3 - <<'EOF'
+          s = open('src/web/KindleDashboard.cpp').read()
+          s = s.replace('kdShellVar(s, "DATE", dbuf);',
+                        'kdShellVar(s, "DATE", dbuf);\n            kdShellVar(s, "NOBODY_READS_THIS", dbuf);', 1)
+          open('src/web/KindleDashboard.cpp', 'w').write(s)
+          EOF
+          if ! grep -q 'NOBODY_READS_THIS' src/web/KindleDashboard.cpp; then
+            echo "::error::the payload-key mutation no longer matches — this proof step is stale"
+            cp /tmp/kd.orig src/web/KindleDashboard.cpp
+            exit 1
+          fi
+          if python3 tools/check_kindle_payload_keys.py > /dev/null 2>&1; then
+            echo "::error::check_kindle_payload_keys.py passed a key the panel drops"
+            cp /tmp/kd.orig src/web/KindleDashboard.cpp
+            exit 1
+          fi
+          cp /tmp/kd.orig src/web/KindleDashboard.cpp
+          rm /tmp/kd.orig
+          echo "the checker fails on a key the panel would drop, as it should"
+
+      - name: Verify that checker sees a write through an fs::FS& reference
+        run: |
+          set -e
+          # THE SHAPE THE CHECKER USED TO MISS. TrendStore writes through a
+          # pointer (_fs->open), and the mutation above only removes the
+          # awareness token — so it proved nothing about HOW the write is
+          # spelled. KindleSlotStore writes through a reference parameter
+          # (fs.open / fs.rename / fs.remove), which the pattern did not match
+          # at all: that file wrote /config/kindle_slots.json from the async
+          # web task with no lock, for as long as it existed, and every run of
+          # this check passed it.
+          cp src/web/KindleSlotStore.cpp /tmp/kss.orig
+          python3 - <<'EOF'
+          s = open('src/web/KindleSlotStore.cpp').read()
+          # Every awareness token, including the ones in comments —
+          # AWARE_RE matches the raw text on purpose, so a passing mention
+          # of atomicWrite() in a note is enough to satisfy it. Leaving that
+          # one behind is how this proof passed while proving nothing.
+          s = (s.replace('fsMutex', 'noLockAtAll')
+                .replace('MutexGuard', 'NoGuard')
+                .replace('atomicWrite', 'x'))
+          open('src/web/KindleSlotStore.cpp', 'w').write(s)
+          EOF
+          if grep -qE 'fsMutex|atomicWrite' src/web/KindleSlotStore.cpp; then
+            echo "::error::the KindleSlotStore mutation no longer matches — this proof step is stale"
+            cp /tmp/kss.orig src/web/KindleSlotStore.cpp
+            exit 1
+          fi
+          if python3 tools/check_fs_mutex.py > /dev/null 2>&1; then
+            echo "::error::check_fs_mutex.py passed an fs::FS& write with no lock"
+            cp /tmp/kss.orig src/web/KindleSlotStore.cpp
+            exit 1
+          fi
+          cp /tmp/kss.orig src/web/KindleSlotStore.cpp
+          rm /tmp/kss.orig
+          echo "the checker sees dot-notation writes through a reference, as it should"
 
       - name: Hold the panel's layout to the browser page's design
         # GET /kindle and kindle/update_dash.sh are one design rendered twice,

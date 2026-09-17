@@ -130,34 +130,51 @@ static bool sanitizeWakeConfig() {
     auto isSafePin    = [](uint8_t pin) -> bool { return pin <= 48; };
 #endif
 
-    bool invalidPins = !isRtcWakePin(config.hardware.pinWakeupFF) ||
-                       !isRtcWakePin(config.hardware.pinWakeupPF) ||
-                       !isRtcWakePin(config.hardware.pinWifiTrigger);
-    bool duplicatePins = (config.hardware.pinWakeupFF == config.hardware.pinWakeupPF) ||
-                         (config.hardware.pinWakeupFF == config.hardware.pinWifiTrigger) ||
-                         (config.hardware.pinWakeupPF == config.hardware.pinWifiTrigger);
+    // PIN_UNSET IS NOT AN INVALID PIN — it is the state every pin ships in
+    // (R11: the first-run wizard assigns them, DefaultPins are all PIN_UNSET),
+    // and it is a legitimate steady state for a board with no buttons, no
+    // flowmeter or no DS1302 wired at all.
+    //
+    // Judging it as invalid made this function reset three unset pins to the
+    // same PIN_UNSET, report `changed`, and hand loadConfig() a reason to
+    // write config.bin — on EVERY boot, which on the legacy deep-sleep
+    // platform means every button press, each one also logging "Wake pins
+    // invalid/duplicate - restored defaults" about pins nobody had set.
+    auto wakePinOk = [&](uint8_t pin) { return pin == PIN_UNSET || isRtcWakePin(pin); };
+    auto safePinOk = [&](uint8_t pin) { return pin == PIN_UNSET || isSafePin(pin);    };
+    // Two unset pins are not a collision either — only two ASSIGNED pins are.
+    auto clash     = [](uint8_t a, uint8_t b) { return a != PIN_UNSET && a == b; };
+
+    bool invalidPins = !wakePinOk(config.hardware.pinWakeupFF) ||
+                       !wakePinOk(config.hardware.pinWakeupPF) ||
+                       !wakePinOk(config.hardware.pinWifiTrigger);
+    bool duplicatePins = clash(config.hardware.pinWakeupFF, config.hardware.pinWakeupPF) ||
+                         clash(config.hardware.pinWakeupFF, config.hardware.pinWifiTrigger) ||
+                         clash(config.hardware.pinWakeupPF, config.hardware.pinWifiTrigger);
 
     bool changed = false;
+    // Report `changed` only when a byte actually changes, so "restored
+    // defaults" cannot mean "wrote the value that was already there".
+    auto assign = [&changed](uint8_t& dst, uint8_t v) {
+        if (dst != v) { dst = v; changed = true; }
+    };
 
     if (invalidPins || duplicatePins) {
-        config.hardware.pinWakeupFF    = DefaultPins::WAKEUP_FF;
-        config.hardware.pinWakeupPF    = DefaultPins::WAKEUP_PF;
-        config.hardware.pinWifiTrigger = DefaultPins::WIFI_TRIGGER;
-        changed = true;
+        assign(config.hardware.pinWakeupFF,    DefaultPins::WAKEUP_FF);
+        assign(config.hardware.pinWakeupPF,    DefaultPins::WAKEUP_PF);
+        assign(config.hardware.pinWifiTrigger, DefaultPins::WIFI_TRIGGER);
     }
 
-    if (!isSafePin(config.hardware.pinFlowSensor) || config.hardware.pinFlowSensor == 0) {
-        config.hardware.pinFlowSensor = DefaultPins::FLOW_SENSOR;
-        changed = true;
+    if (!safePinOk(config.hardware.pinFlowSensor) || config.hardware.pinFlowSensor == 0) {
+        assign(config.hardware.pinFlowSensor, DefaultPins::FLOW_SENSOR);
     }
 
-    if (!isSafePin(config.hardware.pinRtcCE) ||
-        !isSafePin(config.hardware.pinRtcIO) ||
-        !isSafePin(config.hardware.pinRtcSCLK)) {
-        config.hardware.pinRtcCE   = DefaultPins::RTC_CE;
-        config.hardware.pinRtcIO   = DefaultPins::RTC_IO;
-        config.hardware.pinRtcSCLK = DefaultPins::RTC_SCLK;
-        changed = true;
+    if (!safePinOk(config.hardware.pinRtcCE) ||
+        !safePinOk(config.hardware.pinRtcIO) ||
+        !safePinOk(config.hardware.pinRtcSCLK)) {
+        assign(config.hardware.pinRtcCE,   DefaultPins::RTC_CE);
+        assign(config.hardware.pinRtcIO,   DefaultPins::RTC_IO);
+        assign(config.hardware.pinRtcSCLK, DefaultPins::RTC_SCLK);
     }
 
     if (config.hardware.cpuFreqMHz != 80 && config.hardware.cpuFreqMHz != 160) {
@@ -405,6 +422,15 @@ void migrateConfig(uint8_t fromVersion) {
         config.kindle.fbinkResW       = 0;      // 0    → KINDLE_PAGE_W
         config.kindle.outdoorSensor[0] = '\0';  // ""   → KINDLE_OUTDOOR_SENSOR
         config.kindle.indoorSensor[0]  = '\0';  // ""   → KINDLE_INDOOR_SENSOR
+        // WHAT THIS COSTS: the four cadence fields were carved out of
+        // KindleConfig::reserved[] while the version byte still read 14, so a
+        // device that ran that build may hold real choices in them at these
+        // exact offsets — and a device that ran the build before it holds
+        // zeros, where followData/clockPinRefresh == 0 means "explicitly off"
+        // rather than "unset". Both files say version 14 and nothing in them
+        // tells the two apart, so the sentinel wins: a reader loses a refresh
+        // cadence they set once, instead of every earlier device silently
+        // stopping following its data.
     }
     config.version = CONFIG_VERSION;
     config.hardware.version = CONFIG_VERSION;

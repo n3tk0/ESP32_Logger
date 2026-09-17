@@ -130,6 +130,20 @@ uint32_t OtaManager::millisUntilConfirm() {
 void OtaManager::setConfirmPolicy(uint32_t autoConfirmMs, bool requireManual) {
     if (autoConfirmMs > 0) s_autoConfirmMs = autoConfirmMs;
     s_requireManualConfirm = requireManual;
+
+    // RE-ARM THE DEADLINE when one is already running. At boot the order is in
+    // this setting's favour — the sketch calls moduleRegistry.loadAll(), and
+    // so OtaModule::load() and this function, before OtaManager::boot()
+    // computes the deadline — so the configured window is already the one in
+    // force there. This is for the other caller: POST /api/modules/ota while
+    // an image is pending verify, where leaving the old deadline in place
+    // would ignore the change on the one boot it was made for.
+    //
+    // Measured from now rather than from boot: the window is "survive this
+    // long", and the part already survived is not what the setting is about.
+    if (s_pending && !s_confirmed) {
+        s_pendingDeadline = millis() + s_autoConfirmMs;
+    }
 }
 
 uint32_t OtaManager::autoConfirmMs()        { return s_autoConfirmMs; }
@@ -165,6 +179,16 @@ bool OtaManager::rollback() {
     Serial.printf("[OTA] Rolling back from %s to %s\n",
                   s_runningLabel, s_previousLabel);
     _logOtaEvent("ROLLBACK");
+
+    // A ROLLBACK IS A DECISION, NOT A CRASH. It reboots through
+    // esp_ota_mark_app_invalid_rollback_and_reboot(), which the next boot sees
+    // as ESP_RST_SW with the reset-guard magic still valid — so the safe-mode
+    // circuit breaker counted it as a crash-style reset. Three rollbacks
+    // inside a minute each (a bad image being rejected repeatedly is exactly
+    // when that happens) dropped the device into AP-only safe mode on top of
+    // the rollback it was already doing. Every other deliberate restart path
+    // in the firmware zeroes the magic for this reason; this one did not.
+    g_resetMagic = 0;
 
     esp_err_t err = esp_ota_mark_app_invalid_rollback_and_reboot();
     // If we get here, rollback failed (reboot didn't happen)

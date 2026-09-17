@@ -5,8 +5,11 @@
 // ============================================================================
 // CsvLogger — wide-CSV append writer with daily rotation and schema guard.
 //
-// File layout: {dir}/YYYY-MM-DD.csv  (per UTC day; uses epoch-day fallback if
-// the timestamp predates 2001-09-09 i.e. "no clock yet").
+// File layout: {dir}/YYYY-MM-DD.csv  (per LOCAL day — _getDate() formats via
+// localtime_r, so the file rolls at the midnight of the timezone configured
+// with configTime(), which is the boundary a person reading the file expects;
+// uses an epoch-day fallback if the timestamp predates 2001-09-09, i.e. "no
+// clock yet").
 //
 // On the first write to a fresh file, the supplied header line is written.
 // Subsequent writes append the row only when the current header line still
@@ -29,10 +32,6 @@ public:
     // expected first line of the file (without trailing newline).  `row` is
     // the data row (without trailing newline).  Returns true on success.
     bool appendRow(uint32_t epoch, const char* headerLine, const char* row);
-
-    // Filesystem-backed listing, most recent first (insertion order).  Each
-    // name is stripped to the file basename, NUL-terminated.
-    int  listFiles(fs::FS& fs, char (*names)[32], int maxNames) const;
 
     const char* directory() const { return _dir; }
 

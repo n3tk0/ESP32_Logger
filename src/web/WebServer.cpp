@@ -1,6 +1,7 @@
 /**
  * src/web/WebServer.cpp
- * ESP32 Water Logger v5.1.0 – Production audit hardening
+ * ESP32 Water Logger – Production audit hardening
+ * (version: src/core/Config.h — VERSION_MAJOR/MINOR/PATCH)
  *
  * Architecture:
  *   – Normal mode  : AsyncWebServer serves /www/index.html + /www/js/*.js
@@ -158,6 +159,30 @@ static void buildLiveSnapshot(JsonDocument& doc) {
 
 // Called from loop() at ~1 Hz.  Skips work entirely when nobody is subscribed
 // so polling-only deployments pay zero cost.
+// ---------------------------------------------------------------------------
+// CALLED FROM loop(), WHICH IS NOT THE TASK THAT OWNS THESE CLIENTS — and
+// that is safe only because of which web server library this builds against.
+//
+// AsyncEventSource keeps its subscribers in a list that the AsyncTCP task
+// mutates: added on connect, erased AND DELETED on disconnect. Walking it
+// from here at 1 Hz therefore races a browser opening or closing the live
+// page — a dashboard reload is exactly that event — and the losing outcome
+// is this task dereferencing a client the other one just freed.
+//
+// ESP32Async/ESPAsyncWebServer (pinned in platformio.ini, with
+// -DASYNCWEBSERVER_USE_MUTEX=1 stated explicitly) takes a recursive mutex
+// around that list in send(), count(), _addClient(), _handleDisconnect() and
+// close(). The esphome fork this project used to pin takes nothing, and under
+// it this function was a use-after-free waiting for a page refresh.
+//
+// So: the dependency is load-bearing, not incidental. If it is ever moved
+// back, this push has to go with it — the live page already falls back to
+// polling /api/live when the event stream is unavailable (www/js/pages.js
+// liveStartTransport), so removing the push is the safe retreat.
+//
+// Either way, nothing else may write to an async client from outside a
+// request handler: this stays the only such caller.
+// ---------------------------------------------------------------------------
 void publishLiveEvent() {
     if (liveEvents.count() == 0) return;
     JsonDocument doc;
@@ -1109,15 +1134,25 @@ static void h_post_api_datalog_create(AsyncWebServerRequest* r) {
     if (incDeviceId && strlen(config.deviceId) > 0)
         newFile += "_" + String(config.deviceId);
     if (timestampFn) {
+        // A zeroed RtcDateTime would render "_00000000_000000", which looks
+        // like a date and is not one. The millis() form below is the existing
+        // answer for "no clock to name this with", so a busy bus takes it too.
+        bool haveClock = false;
+        char buf[20];
         if (Rtc) {
-            RtcDateTime now = Rtc->GetDateTime();
-            char buf[20];
-            snprintf(buf, sizeof(buf), "_%04d%02d%02d_%02d%02d%02d",
-                now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second());
-            newFile += buf;
-        } else {
-            newFile += "_" + String(millis());
+            MutexGuard rg(rtcMutex, pdMS_TO_TICKS(200));
+            if (!rtcMutex || rg.isLocked()) {
+                RtcDateTime now = Rtc->GetDateTime();
+                if (now.IsValid()) {
+                    snprintf(buf, sizeof(buf), "_%04d%02d%02d_%02d%02d%02d",
+                             now.Year(), now.Month(), now.Day(),
+                             now.Hour(), now.Minute(), now.Second());
+                    haveClock = true;
+                }
+            }
         }
+        if (haveClock) newFile += buf;
+        else           newFile += "_" + String(millis());
     }
     newFile += ".txt";
 
@@ -1175,7 +1210,22 @@ static void h_post_save_network(AsyncWebServerRequest* r) {
     // on any unrelated save; without this guard the real password
     // would be overwritten with "***". Treat "***" as the
     // keep-existing sentinel.
-    if (r->hasParam("apPassword", true)     && r->getParam("apPassword", true)->value()     != "***") SAFE_STRNCPY(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), sizeof(config.network.apPassword));
+    // REFUSED RATHER THAN SAVED, because this one cannot be undone from here.
+    // WPA2 requires a passphrase of 8..63 characters and WiFi.softAP() returns
+    // false without starting the AP for anything shorter. This handler then
+    // restarts the device — so a seven-character password saved in AP mode
+    // brings the board back with no access point at all, and the only way back
+    // in is a serial reflash. The UI asks for 8; the API has to as well.
+    if (r->hasParam("apPassword", true) && r->getParam("apPassword", true)->value() != "***") {
+        const String pw = r->getParam("apPassword", true)->value();
+        if (pw.length() != 0 && (pw.length() < 8 || pw.length() > 63)) {
+            r->send(400, "application/json",
+                    "{\"ok\":false,\"error\":\"apPassword must be 8-63 characters "
+                    "(WPA2), or empty for an open AP\"}");
+            return;
+        }
+        SAFE_STRNCPY(config.network.apPassword, pw.c_str(), sizeof(config.network.apPassword));
+    }
     if (r->hasParam("clientSSID", true))     SAFE_STRNCPY(config.network.clientSSID,     r->getParam("clientSSID", true)->value().c_str(), sizeof(config.network.clientSSID));
     if (r->hasParam("clientPassword", true) && r->getParam("clientPassword", true)->value() != "***") SAFE_STRNCPY(config.network.clientPassword, r->getParam("clientPassword", true)->value().c_str(), sizeof(config.network.clientPassword));
     config.network.useStaticIP = r->hasParam("useStaticIP", true);
@@ -1221,6 +1271,21 @@ static void h_post_set_time(AsyncWebServerRequest* r) {
         String ts = r->getParam("time", true)->value();
         int yr = ds.substring(0,4).toInt(), mo = ds.substring(5,7).toInt(), dy = ds.substring(8,10).toInt();
         int hr = ts.substring(0,2).toInt(), mi = ts.substring(3,5).toInt();
+
+        // CHECKED BEFORE EITHER CLOCK MOVES. toInt() answers 0 for anything it
+        // cannot parse, and mktime() normalises the rest quietly — so "0000-00-00"
+        // used to set the system clock to 1999, mark rtcValid, and stage the same
+        // nonsense for the DS1302. A wrong clock is not cosmetic here: SensorTask
+        // stamps readings from it and readingIsBackfilled() judges them by it, so
+        // it is the one input that can make fresh readings vanish from the
+        // dashboard and from alerts.
+        if (yr < 2020 || yr > 2099 || mo < 1 || mo > 12 || dy < 1 || dy > 31 ||
+            hr < 0   || hr > 23   || mi < 0 || mi > 59) {
+            r->send(400, "application/json",
+                    "{\"ok\":false,\"error\":\"date/time out of range "
+                    "(expects YYYY-MM-DD and HH:MM, year 2020-2099, UTC)\"}");
+            return;
+        }
 
         // Always set the POSIX system clock so time(nullptr) works even
         // without hardware RTC.  Input is treated as UTC.  ESP32's newlib
@@ -1276,6 +1341,11 @@ static void h_post_rtc_protect(AsyncWebServerRequest* r) {
     if (!requireMutatingAuth(r)) return;
     if (Rtc) {
         bool protect = r->hasParam("protect", true);
+        MutexGuard rg(rtcMutex, pdMS_TO_TICKS(500));
+        if (rtcMutex && !rg.isLocked()) {
+            r->send(503, "application/json", "{\"ok\":false,\"error\":\"rtc busy\"}");
+            return;
+        }
         Rtc->SetIsWriteProtected(protect);
     }
     r->send(200, "application/json", "{\"ok\":true}");
@@ -1306,8 +1376,15 @@ static void h_post_factory_reset(AsyncWebServerRequest* r) {
     r->send(200, "application/json", "{\"ok\":true}");
     DBGLN("[FACTORY RESET] Formatting LittleFS…");
     {
-        MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-        if (LittleFS.format()) {
+        // Long timeout AND a check, matching /api/format_filesystem below: a
+        // 2-second unchecked guard meant the erase could start while
+        // StorageTask held an open File, which is how a LittleFS partition
+        // ends up neither formatted nor mountable. The restart below still
+        // happens either way, so a refusal costs the wipe, not the recovery.
+        MutexGuard g(fsMutex, pdMS_TO_TICKS(30000));
+        if (fsMutex && !g.isLocked()) {
+            DBGLN("[FACTORY RESET] fsMutex timeout – skipping format, restarting");
+        } else if (LittleFS.format()) {
             DBGLN("[FACTORY RESET] LittleFS formatted OK – restarting");
         } else {
             DBGLN("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
@@ -1519,6 +1596,11 @@ static void h_post_api_platform_reload(AsyncWebServerRequest* r) {
 // non-const in esphome/ESPAsyncWebServer-esphome. One signature cannot satisfy
 // both, and `override` turns the mismatch into a hard error rather than a
 // silently-never-called method — which is the failure mode worth avoiding.
+//
+// Every env now pins the ESP32Async line, so the const branch is the one that
+// ships; the shim stays because it is what let that move happen without
+// touching either gate handler, and it keeps a build against the older fork
+// honest rather than subtly broken.
 // ASYNCWEBSERVER_VERSION_MAJOR exists only in the ESP32Async line (it comes
 // from its AsyncWebServerVersion.h), so it is the discriminator.
 #ifdef ASYNCWEBSERVER_VERSION_MAJOR
@@ -1597,6 +1679,20 @@ static FirstRunGateHandler s_firstRunGate;
 void setupWebServer() {
     DBGLN("Setting up web server...");
 
+    // ── addHandler() TAKES OWNERSHIP, and every handler we pass it is a
+    // static. `_handlers` is a std::list<std::unique_ptr<AsyncWebHandler>>,
+    // so anything that removes an entry runs `delete` on an object that was
+    // never `new`ed — i.e. server.reset() or server.removeHandler() would
+    // corrupt the heap here, and so would destroying `server` itself.
+    //
+    // None of those happen: `server` is a global (src/core/Globals.cpp) that
+    // outlives every path through this firmware, its destructor never runs
+    // because a reboot is ESP.restart() rather than a return from main, and
+    // nothing in the tree calls reset() or removeHandler(). The statics are
+    // the cheaper shape and they are correct AS LONG AS THAT STAYS TRUE —
+    // adding a reset()/removeHandler() call means allocating every handler
+    // registered here instead, not just deleting a line.
+    //
     // R11: first-run gate runs before auth gate. The wizard must be
     // reachable on a fresh device even when Basic Auth is compiled in —
     // setting credentials is part of the wizard's job (a later phase).
@@ -1616,12 +1712,24 @@ void setupWebServer() {
     // C2: track web activity for idle power restore
     auto touchActivity = []() { g_lastWebActivity = millis(); };
 
-    // Defense-in-depth headers applied to every response.  Pass 4 A4 removed
-    // every inline on* handler and the inline theme-boot <script>, so
-    // script-src no longer needs 'unsafe-inline' — any injected <script>
-    // (stored XSS, rogue file upload) is now blocked by the browser.
-    // style-src still keeps 'unsafe-inline' because many layout style="…"
-    // attributes remain; tightening that is a separate pass.
+    // Defense-in-depth headers applied to every response.
+    //
+    // WHAT THIS DOES NOT DO, stated plainly because the comment here used to
+    // claim the opposite. Pass 4 A4 removed every inline on* handler and the
+    // inline theme-boot <script> from the SPA in /www — but the failsafe page
+    // is not in /www. It is the gzipped PROGMEM blob in FailsafeHtml.h, built
+    // from src/web/failsafe.html, and it carries an inline <script> block and
+    // a dozen inline onclick= attributes (Restart, Factory Reset, Format
+    // Filesystem, the upload drop zone, the Core Logic tab). So script-src
+    // still needs 'unsafe-inline', and an injected <script> is NOT blocked by
+    // the browser today.
+    //
+    // Dropping it means moving that page's handlers into a script served from
+    // PROGMEM on its own route — it cannot use a file in /www, because a
+    // missing /www is the reason it exists. Worth doing; not a review fix.
+    //
+    // style-src keeps 'unsafe-inline' because many layout style="…" attributes
+    // remain; tightening that is a separate pass.
     //
     // When the firmware is built with -DUI_CDN_BASE the CSP must permit the
     // CDN host in script-src / style-src / connect-src / img-src so the
@@ -1630,10 +1738,18 @@ void setupWebServer() {
     // by every modern browser and is tighter than a bare origin (codex P1
     // review on PR #54).
 #ifdef UI_CDN_BASE
+    // 'unsafe-inline' HERE TOO, and this is the branch that showed the bug.
+    // It was omitted, so a CDN build enforced a policy the failsafe page
+    // cannot satisfy: its inline script and every onclick would be blocked —
+    // no upload, no format, no OTA — on the one page whose whole job is
+    // recovering a device whose UI is missing. DefaultHeaders applies one
+    // policy to every response and a second CSP header can only ever narrow
+    // it, so the page cannot opt out per-response; the policy has to allow
+    // what it needs until the page stops needing it.
     DefaultHeaders::Instance().addHeader(
         "Content-Security-Policy",
         "default-src 'self'; "
-        "script-src 'self' " UI_CDN_BASE "/; "
+        "script-src 'self' 'unsafe-inline' " UI_CDN_BASE "/; "
         "style-src 'self' 'unsafe-inline' " UI_CDN_BASE "/; "
         "img-src 'self' data: " UI_CDN_BASE "/; "
         "font-src 'self' " UI_CDN_BASE "/; "
@@ -1644,8 +1760,8 @@ void setupWebServer() {
 #else
     // cdn.jsdelivr.net is allowed in script-src / style-src so the uPlot CDN
     // fallback works when the library file is not present on LittleFS.
-    // 'unsafe-inline' is already present for the failsafe PROGMEM page; adding
-    // a CDN host does not weaken the existing posture further.
+    // 'unsafe-inline' is required by the failsafe PROGMEM page (see above);
+    // adding a CDN host does not weaken the existing posture further.
     DefaultHeaders::Instance().addHeader(
         "Content-Security-Policy",
         "default-src 'self'; "
@@ -1678,8 +1794,10 @@ void setupWebServer() {
 #ifdef UI_CDN_BASE
     // Bootstrap HTML hoisted out of the request handler (gemini review
     // PR #54).  CSP-compatible (codex P1 on PR #54): no <base href> (would
-    // violate base-uri 'self') and no inline <script> (would need
-    // 'unsafe-inline' even with the CDN whitelisted in script-src).  The
+    // violate base-uri 'self') and no inline <script> — and it stays that way
+    // on purpose even though the policy above now allows 'unsafe-inline' for
+    // the failsafe page's sake: this page does not need it, and the day the
+    // failsafe page stops needing it either, the allowance goes.  The
     // boot logic lives in /cdn-boot.js, served from the device itself so
     // script-src 'self' covers it.  Stylesheet / theme-boot loaded by
     // absolute CDN URL — the relaxed CSP whitelists UI_CDN_BASE.
@@ -1818,10 +1936,20 @@ void setupWebServer() {
 
         o["rtcPresent"] = (Rtc != nullptr);
         if (Rtc) {
-            o["rtcProtected"] = Rtc->GetIsWriteProtected();
-            o["rtcRunning"]   = Rtc->GetIsRunning();
-            RtcDateTime rtNow = Rtc->GetDateTime();
-            o["timeSource"]   = (rtNow.Year() >= 2020) ? "rtc" : "unknown";
+            // Three bus exchanges, one lock: reading them separately would let
+            // a pipeline task's clock read land between them and shift the bits
+            // of whichever transaction was in flight.
+            MutexGuard rg(rtcMutex, pdMS_TO_TICKS(200));
+            if (rtcMutex && !rg.isLocked()) {
+                o["rtcProtected"] = false;
+                o["rtcRunning"]   = false;
+                o["timeSource"]   = "busy";
+            } else {
+                o["rtcProtected"] = Rtc->GetIsWriteProtected();
+                o["rtcRunning"]   = Rtc->GetIsRunning();
+                RtcDateTime rtNow = Rtc->GetDateTime();
+                o["timeSource"]   = (rtNow.Year() >= 2020) ? "rtc" : "unknown";
+            }
         } else {
             o["rtcProtected"] = false;
             o["rtcRunning"]   = false;
@@ -1911,6 +2039,8 @@ void setupWebServer() {
     server.on("/api/live", HTTP_GET, h_get_api_live);
 
     // SSE channel — same payload, pushed at 1 Hz by publishLiveEvent().
+    // Static, like the two gate handlers: see the ownership note at the top
+    // of setupWebServer() for why that is safe and what would break it.
     server.addHandler(&liveEvents);
 
     // =========================================================================
@@ -2214,7 +2344,18 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 DBGF("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
 
                 {
+                    // Pillar 1.2: a guard that is not checked is worse than no
+                    // guard, because the code around it reads as serialised.
+                    // These two takes were unchecked, so an upload landing
+                    // while StorageTask held fsMutex opened and wrote the file
+                    // anyway — two writers on one filesystem, which is what
+                    // the mutex exists to prevent.
                     MutexGuard g(fsMutex, pdMS_TO_TICKS(5000));
+                    if (fsMutex && !g.isLocked()) {
+                        DBGLN("Upload: fsMutex timeout — refusing");
+                        ctx->failed = true;
+                        return;
+                    }
                     if (upDir != "/") targetFS->mkdir(upDir);
                     ctx->file = targetFS->open(upPath, FILE_WRITE);
                 }
@@ -2227,7 +2368,10 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
             UploadCtx* ctx = (UploadCtx*)request->_tempObject;
             if (ctx && ctx->file && !ctx->failed && len) {
                 MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-                if (ctx->file.write(data, len) != len) {
+                if (fsMutex && !g.isLocked()) {
+                    DBGLN("Upload: fsMutex timeout mid-body — aborting");
+                    ctx->failed = true;
+                } else if (ctx->file.write(data, len) != len) {
                     DBGLN("Upload: short write (disk full?)");
                     ctx->failed = true;
                 }
@@ -2370,6 +2514,37 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
             // Content-Length cannot trigger a huge heap allocation.
             constexpr size_t kImportMax = 8192;
             if (!index) {
+                // THE CLEANER GOES ON BEFORE THE ALLOCATION, AND THAT ORDER IS
+                // LOAD-BEARING: IT IS WHAT KEEPS THE OOM PATH FROM CORRUPTING
+                // THE HEAP.
+                //
+                // ~AsyncWebServerRequest() does `free(_tempObject)` for any
+                // non-null value. It cannot know that the sentinel below is a
+                // fake pointer rather than a heap block — so a client that
+                // dropped between a FAILED allocation and the request callback
+                // left free((void*)1) to run on the web task. Not a leak, not
+                // a wrong answer: heap corruption, on the path taken when the
+                // device is already short of memory.
+                //
+                // Registering here covers both outcomes of the allocation,
+                // which registering after it could not. It is safe to do under
+                // memory pressure because it allocates nothing: the lambda
+                // captures one pointer, so std::function stores it inline
+                // rather than on the heap. And it is enough because
+                // _onDisconnect() calls this back and only THEN drops the
+                // request's self-reference (the library's WebRequest.cpp), so
+                // whatever this nulls, the destructor never frees.
+                //
+                // R13 follow-up (Codex P2 on PR #89): the original reason for
+                // a cleaner at all — a disconnect before the request callback
+                // orphaning the buffer. delete on nullptr is well-defined, so
+                // this stays a no-op after the success path's own delete.
+                req->onDisconnect([req]() {
+                    // Never delete the OOM sentinel (it is not a real pointer).
+                    if (req->_tempObject != reinterpret_cast<void*>(1))
+                        delete static_cast<String*>(req->_tempObject);
+                    req->_tempObject = nullptr;
+                });
                 String* buf = new (std::nothrow) String();
                 if (!buf) {
                     // Flag OOM with a sentinel instead of sending here: the
@@ -2379,21 +2554,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                     req->_tempObject = reinterpret_cast<void*>(1);
                     return;
                 }
-                // ML-2: publish the pointer and register the disconnect cleaner
-                // IMMEDIATELY after allocation — before reserve() — so there is
-                // no window in which an abort could leak the buffer.
-                // R13 follow-up (Codex P2 on PR #89): client disconnect before
-                // the request callback fires would otherwise leak the heap
-                // buffer. onDisconnect runs even on aborts; freeing here makes
-                // the success path's delete a no-op (delete on nullptr is
-                // well-defined).
                 req->_tempObject = buf;
-                req->onDisconnect([req]() {
-                    // Never delete the OOM sentinel (it is not a real pointer).
-                    if (req->_tempObject != reinterpret_cast<void*>(1))
-                        delete static_cast<String*>(req->_tempObject);
-                    req->_tempObject = nullptr;
-                });
                 size_t hint = req->contentLength() > 0 ? req->contentLength() : 4096;
                 if (hint > kImportMax) hint = kImportMax;
                 buf->reserve(hint);
@@ -2440,12 +2601,45 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
             bool shaMismatch  = false;
             bool shaActive    = false;
             bool authFailed   = false;
+            bool beginFailed  = false;
+            // Which kind of begin() failure, because they need different
+            // answers and begin() does not tell them apart by itself: it
+            // refuses an already-open partition with no error code AND fails
+            // its 4 KB sector-buffer malloc with no error code.
+            bool beginBusy    = false;
+            // Update.begin() succeeded and neither end() nor abort() has run.
+            // Cleared the moment the upload is concluded either way, exactly
+            // like shaActive above, so the destructor below is a no-op on
+            // every path that finished properly.
+            bool otaOpen      = false;
             String expectedSha;
             mbedtls_sha256_context sha;
             ~OtaCtx() {
                 if (shaActive) {
                     mbedtls_sha256_free(&sha);
                     shaActive = false;
+                }
+                // AN UPLOAD THAT OPENED THE OTA PARTITION AND NEVER CLOSED IT
+                // BREAKS EVERY UPLOAD AFTER IT, UNTIL THE DEVICE REBOOTS.
+                //
+                // UpdateClass::begin() starts with `if (_size > 0) return
+                // false;` and only end()/abort() put _size back to zero. So a
+                // browser that goes away mid-upload — tab closed, AP dropped,
+                // or the client's own timeout firing on a slow link — used to
+                // leave _size set forever. The next attempt then failed inside
+                // begin(), which this handler reported as "Invalid firmware
+                // image": the most misleading answer available, since the
+                // image was fine and no retry could ever work.
+                //
+                // Both ways out of a request destroy this context — the
+                // request callback deletes it, and onDisconnect deletes it on
+                // an abort — so this is the one place that covers both. It is
+                // cheap and flash-free (abort() just releases the 4 KB sector
+                // buffer and resets the counters), which is why it is safe to
+                // run from the web task.
+                if (otaOpen) {
+                    Update.abort();
+                    otaOpen = false;
                 }
             }
         };
@@ -2464,9 +2658,37 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 bool shaMismatch = ctx ? ctx->shaMismatch : false;
 
                 bool ok = !rejected && !Update.hasError();
+                char detail[192];
                 const char* msg;
                 if (shaMismatch) {
                     msg = "{\"success\":false,\"message\":\"SHA-256 mismatch — image rejected\"}";
+                } else if (ctx && ctx->beginFailed) {
+                    // Its own branch because it is not a bad image, and the
+                    // shared "Invalid firmware image" sent people looking for
+                    // a corrupt file. Three causes, three answers — and none
+                    // of them claims the partition was freed, because on the
+                    // busy path this request never held it and so cannot have
+                    // released it.
+                    if (ctx->beginBusy) {
+                        snprintf(detail, sizeof(detail),
+                                 "{\"success\":false,\"message\":"
+                                 "\"An update is already open on the OTA "
+                                 "partition. Wait for it to finish, or restart "
+                                 "the device and try again.\"}");
+                    } else if (Update.getError() != UPDATE_ERROR_OK) {
+                        snprintf(detail, sizeof(detail),
+                                 "{\"success\":false,\"message\":"
+                                 "\"Cannot open the OTA partition: %s\"}",
+                                 Update.errorString());
+                    } else {
+                        // begin() failed, was not busy, and set no error: the
+                        // only path left is its sector-buffer malloc.
+                        snprintf(detail, sizeof(detail),
+                                 "{\"success\":false,\"message\":"
+                                 "\"Not enough free memory to start the "
+                                 "update. Restart the device and try again.\"}");
+                    }
+                    msg = detail;
                 } else if (rejected) {
                     msg = "{\"success\":false,\"message\":\"Invalid firmware image\"}";
                 } else if (ok) {
@@ -2479,8 +2701,10 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 resp->addHeader("Connection", "close");
                 r->send(resp);
 
-                // Free per-request state.  Context destructor releases the
-                // mbedTLS SHA engine if the upload aborted before final.
+                // Free per-request state.  The context destructor releases
+                // the mbedTLS SHA engine and, if this upload opened the OTA
+                // partition without concluding it, that too — so the next
+                // attempt is not refused by a request that is already over.
                 if (ctx) {
                     delete ctx;
                     r->_tempObject = nullptr;
@@ -2555,11 +2779,18 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                         ctx->rejected = true;
                         return;
                     }
+                    // Read BEFORE the call: begin()'s own refusal path
+                    // leaves no trace of this, and it is the difference
+                    // between "someone else is flashing" and "out of memory".
+                    const bool wasBusy = Update.isRunning();
                     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
                         Update.printError(Serial);
-                        ctx->rejected = true;
+                        ctx->rejected    = true;
+                        ctx->beginFailed = true;   // not the image's fault
+                        ctx->beginBusy   = wasBusy;
                         return;
                     }
+                    ctx->otaOpen = true;
                     // Initialise the hasher exactly once per upload, regardless
                     // of whether verification was requested — the cost is tiny
                     // and lets us log the actual digest for debugging.
@@ -2596,11 +2827,21 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                             ctx->rejected    = true;
                             ctx->shaMismatch = true;
                             Update.abort();
+                            ctx->otaOpen = false;  // abort() reset _size
                             return;
                         }
                     }
-                    if (Update.end(true)) DBGF("OTA done: %u bytes\n", index + len);
-                    else Update.printError(Serial);
+                    if (Update.end(true)) {
+                        ctx->otaOpen = false;      // closed cleanly
+                        DBGF("OTA done: %u bytes\n", index + len);
+                    } else {
+                        // end() returns false WITHOUT resetting _size when an
+                        // earlier write already set an error, so the partition
+                        // is still open here. Leaving otaOpen set hands it to
+                        // the destructor, which is what keeps a failed write
+                        // from wedging the next attempt too.
+                        Update.printError(Serial);
+                    }
                 }
             }
         );
