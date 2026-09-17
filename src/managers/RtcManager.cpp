@@ -289,27 +289,42 @@ String getWakeupReason() {
     if (cause == ESP_SLEEP_WAKEUP_GPIO) {
         int expectedState = (config.hardware.wakeupMode == WAKEUP_GPIO_ACTIVE_HIGH) ? HIGH : LOW;
 
-        // An unassigned pin (PIN_UNSET = 255) must not reach either of the two
+        // An unassigned pin (PIN_UNSET = 255) must not reach either of the
         // reads below: `bitmask >> 255` is undefined for a 32-bit value, and
         // digitalRead(255) is an out-of-range GPIO. A device with no buttons
         // wired cannot have woken on one, so unset reads as not-triggered.
-        auto bitOf = [](uint32_t mask, uint8_t pin) -> bool {
-            return pin < 32 && ((mask >> pin) & 1u);
+        //
+        // THE POLARITY CONVERSION HAPPENS INSIDE THE GUARD, NOT AFTER IT.
+        // This used to be a bare level test followed by
+        // `if (expectedState == LOW) { x = !x; }`, and that block undid the
+        // guard: "unassigned" and "outside the 32-bit snapshot" both read as
+        // false here, so negating turned each of them into "this pin woke us".
+        // The first such pin then won the priority checks below and reported
+        // itself as the wake source, hiding a real one behind it. A guard that
+        // a later line can invert is not a guard, so the two cannot be
+        // separate steps.
+        //
+        // Not reachable today, and the fix is not conditional on that staying
+        // true: configureWakeup() refuses to arm GPIO wake unless all three
+        // pins are 0..5 (see isRtcWakePinC3), so an ESP_SLEEP_WAKEUP_GPIO
+        // implies all three were assigned and inside the snapshot. This
+        // function should not depend on a distant invariant in a different
+        // function to be correct about its own inputs.
+        auto earlyTriggered = [expectedState](uint32_t mask, uint8_t pin) -> bool {
+            // Unknown is not "low": both of these mean we cannot say, and
+            // neither may become an affirmative answer under either polarity.
+            if (pin == PIN_UNSET || pin >= 32) return false;
+            const bool high = (mask >> pin) & 1u;
+            return expectedState == HIGH ? high : !high;
         };
         auto readIs = [](uint8_t pin, int expected) -> bool {
             return pin != PIN_UNSET && pin <= 48 && digitalRead(pin) == expected;
         };
 
         if (earlyGPIO_captured) {
-            bool ffEarly  = bitOf(earlyGPIO_bitmask, config.hardware.pinWakeupFF);
-            bool pfEarly  = bitOf(earlyGPIO_bitmask, config.hardware.pinWakeupPF);
-            bool wifiEarly= bitOf(earlyGPIO_bitmask, config.hardware.pinWifiTrigger);
-            
-            if (expectedState == LOW) {
-                ffEarly   = !ffEarly;
-                pfEarly   = !pfEarly;
-                wifiEarly = !wifiEarly;
-            }
+            bool ffEarly   = earlyTriggered(earlyGPIO_bitmask, config.hardware.pinWakeupFF);
+            bool pfEarly   = earlyTriggered(earlyGPIO_bitmask, config.hardware.pinWakeupPF);
+            bool wifiEarly = earlyTriggered(earlyGPIO_bitmask, config.hardware.pinWifiTrigger);
 
             DBGF("GPIO early: FF=%d PF=%d WIFI=%d (bitmask=0x%08X)\n",
                           ffEarly, pfEarly, wifiEarly, earlyGPIO_bitmask);
