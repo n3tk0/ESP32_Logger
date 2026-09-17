@@ -297,8 +297,15 @@ static void _manageContinuousPower() {
     // Reset activity clock on explicit external events
     if (g_contLastActivity == 0) g_contLastActivity = millis(); // init once
 
-    // C2: web server activity restores full power
-    if (g_lastWebActivity > g_contLastActivity) {
+    // C2: web server activity restores full power.
+    //
+    // Signed difference, not `>`: both are raw millis() stamps, and across the
+    // ~49.7-day rollover g_lastWebActivity wraps to a small number while
+    // g_contLastActivity is still large — so for the following 49 days a web
+    // request would no longer restore power, leaving somebody using the UI on
+    // a throttled CPU with modem sleep on (which also breaks ESP-NOW unicast,
+    // see setup.h).
+    if ((int32_t)(g_lastWebActivity - g_contLastActivity) > 0) {
         g_contLastActivity = g_lastWebActivity;
         if (g_contPowerReduced) {
             setCpuFrequencyMhz(160);
@@ -1190,9 +1197,11 @@ void loop() {
 
         if (highCountFF > 0 || highCountPF > 0) {
             // Publish button event as SensorReading through the pipeline
-            uint32_t ts = 0;
-            if (Rtc) { RtcDateTime now = Rtc->GetDateTime(); if (now.IsValid()) ts = now.Unix32Time(); }
-            if (ts == 0) ts = (uint32_t)(millis() / 1000UL);
+            // The pipeline's clock, like every other producer: ProcessingTask
+            // judges this reading's timestamp against the system clock, so
+            // stamping it from the DS1302 is how a button press ends up
+            // classified as backfill. See pipelineNowEpoch() in TaskManager.h.
+            const uint32_t ts = pipelineNowEpoch();
 
             if (highCountFF > 0) {
                 SensorReading btn = SensorReading::make(ts, "buttons", "gpio",

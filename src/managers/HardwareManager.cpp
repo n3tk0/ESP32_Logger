@@ -30,6 +30,15 @@ void IRAM_ATTR onFlowPulse() {
 // ============================================================================
 void debounceButton(uint8_t pin, int& last, int& stable,
                     unsigned long& lastTime, int& count) {
+    // AN UNASSIGNED PIN IS NOT A BUTTON. initHardware() already refuses to
+    // pinMode() PIN_UNSET (0xFF), but loop() calls this on pinWakeupFF and
+    // pinWakeupPF every ~10 ms regardless of whether the wizard ever assigned
+    // them — and on the continuous platform a flapping read publishes
+    // ff_press/pf_press readings into the pipeline and resets the idle timer
+    // that the power saving depends on. digitalRead() on GPIO255 is not a
+    // defined read either.
+    if (pin == PIN_UNSET || pin > 48) return;
+
     // Seed lastTime on first call so the first edge doesn't bypass debounce.
     // Globals initialises lastTime to 0; treat 0 as uninitialised.
     if (lastTime == 0) lastTime = millis();

@@ -131,11 +131,13 @@ void OtaManager::setConfirmPolicy(uint32_t autoConfirmMs, bool requireManual) {
     if (autoConfirmMs > 0) s_autoConfirmMs = autoConfirmMs;
     s_requireManualConfirm = requireManual;
 
-    // RE-ARM THE DEADLINE, because the one boot this setting matters on is the
-    // boot it arrives too late for: boot() computes s_pendingDeadline from the
-    // compile-time default, and OtaModule::load() only reaches us afterwards,
-    // once modules.json has been read. A device configured for a 10-minute
-    // stability window would have confirmed at 90 s regardless.
+    // RE-ARM THE DEADLINE when one is already running. At boot the order is in
+    // this setting's favour — the sketch calls moduleRegistry.loadAll(), and
+    // so OtaModule::load() and this function, before OtaManager::boot()
+    // computes the deadline — so the configured window is already the one in
+    // force there. This is for the other caller: POST /api/modules/ota while
+    // an image is pending verify, where leaving the old deadline in place
+    // would ignore the change on the one boot it was made for.
     //
     // Measured from now rather than from boot: the window is "survive this
     // long", and the part already survived is not what the setting is about.
