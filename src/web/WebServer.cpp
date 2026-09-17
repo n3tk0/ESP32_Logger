@@ -1176,7 +1176,22 @@ static void h_post_save_network(AsyncWebServerRequest* r) {
     // on any unrelated save; without this guard the real password
     // would be overwritten with "***". Treat "***" as the
     // keep-existing sentinel.
-    if (r->hasParam("apPassword", true)     && r->getParam("apPassword", true)->value()     != "***") SAFE_STRNCPY(config.network.apPassword,     r->getParam("apPassword", true)->value().c_str(), sizeof(config.network.apPassword));
+    // REFUSED RATHER THAN SAVED, because this one cannot be undone from here.
+    // WPA2 requires a passphrase of 8..63 characters and WiFi.softAP() returns
+    // false without starting the AP for anything shorter. This handler then
+    // restarts the device — so a seven-character password saved in AP mode
+    // brings the board back with no access point at all, and the only way back
+    // in is a serial reflash. The UI asks for 8; the API has to as well.
+    if (r->hasParam("apPassword", true) && r->getParam("apPassword", true)->value() != "***") {
+        const String pw = r->getParam("apPassword", true)->value();
+        if (pw.length() != 0 && (pw.length() < 8 || pw.length() > 63)) {
+            r->send(400, "application/json",
+                    "{\"ok\":false,\"error\":\"apPassword must be 8-63 characters "
+                    "(WPA2), or empty for an open AP\"}");
+            return;
+        }
+        SAFE_STRNCPY(config.network.apPassword, pw.c_str(), sizeof(config.network.apPassword));
+    }
     if (r->hasParam("clientSSID", true))     SAFE_STRNCPY(config.network.clientSSID,     r->getParam("clientSSID", true)->value().c_str(), sizeof(config.network.clientSSID));
     if (r->hasParam("clientPassword", true) && r->getParam("clientPassword", true)->value() != "***") SAFE_STRNCPY(config.network.clientPassword, r->getParam("clientPassword", true)->value().c_str(), sizeof(config.network.clientPassword));
     config.network.useStaticIP = r->hasParam("useStaticIP", true);
@@ -1222,6 +1237,21 @@ static void h_post_set_time(AsyncWebServerRequest* r) {
         String ts = r->getParam("time", true)->value();
         int yr = ds.substring(0,4).toInt(), mo = ds.substring(5,7).toInt(), dy = ds.substring(8,10).toInt();
         int hr = ts.substring(0,2).toInt(), mi = ts.substring(3,5).toInt();
+
+        // CHECKED BEFORE EITHER CLOCK MOVES. toInt() answers 0 for anything it
+        // cannot parse, and mktime() normalises the rest quietly — so "0000-00-00"
+        // used to set the system clock to 1999, mark rtcValid, and stage the same
+        // nonsense for the DS1302. A wrong clock is not cosmetic here: SensorTask
+        // stamps readings from it and readingIsBackfilled() judges them by it, so
+        // it is the one input that can make fresh readings vanish from the
+        // dashboard and from alerts.
+        if (yr < 2020 || yr > 2099 || mo < 1 || mo > 12 || dy < 1 || dy > 31 ||
+            hr < 0   || hr > 23   || mi < 0 || mi > 59) {
+            r->send(400, "application/json",
+                    "{\"ok\":false,\"error\":\"date/time out of range "
+                    "(expects YYYY-MM-DD and HH:MM, year 2020-2099, UTC)\"}");
+            return;
+        }
 
         // Always set the POSIX system clock so time(nullptr) works even
         // without hardware RTC.  Input is treated as UTC.  ESP32's newlib
@@ -1307,8 +1337,15 @@ static void h_post_factory_reset(AsyncWebServerRequest* r) {
     r->send(200, "application/json", "{\"ok\":true}");
     DBGLN("[FACTORY RESET] Formatting LittleFS…");
     {
-        MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-        if (LittleFS.format()) {
+        // Long timeout AND a check, matching /api/format_filesystem below: a
+        // 2-second unchecked guard meant the erase could start while
+        // StorageTask held an open File, which is how a LittleFS partition
+        // ends up neither formatted nor mountable. The restart below still
+        // happens either way, so a refusal costs the wipe, not the recovery.
+        MutexGuard g(fsMutex, pdMS_TO_TICKS(30000));
+        if (fsMutex && !g.isLocked()) {
+            DBGLN("[FACTORY RESET] fsMutex timeout – skipping format, restarting");
+        } else if (LittleFS.format()) {
             DBGLN("[FACTORY RESET] LittleFS formatted OK – restarting");
         } else {
             DBGLN("[FACTORY RESET] LittleFS format FAILED – restarting anyway");
@@ -2215,7 +2252,18 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 DBGF("Upload start [%s]: %s\n", upStorage.c_str(), upPath.c_str());
 
                 {
+                    // Pillar 1.2: a guard that is not checked is worse than no
+                    // guard, because the code around it reads as serialised.
+                    // These two takes were unchecked, so an upload landing
+                    // while StorageTask held fsMutex opened and wrote the file
+                    // anyway — two writers on one filesystem, which is what
+                    // the mutex exists to prevent.
                     MutexGuard g(fsMutex, pdMS_TO_TICKS(5000));
+                    if (fsMutex && !g.isLocked()) {
+                        DBGLN("Upload: fsMutex timeout — refusing");
+                        ctx->failed = true;
+                        return;
+                    }
                     if (upDir != "/") targetFS->mkdir(upDir);
                     ctx->file = targetFS->open(upPath, FILE_WRITE);
                 }
@@ -2228,7 +2276,10 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
             UploadCtx* ctx = (UploadCtx*)request->_tempObject;
             if (ctx && ctx->file && !ctx->failed && len) {
                 MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-                if (ctx->file.write(data, len) != len) {
+                if (fsMutex && !g.isLocked()) {
+                    DBGLN("Upload: fsMutex timeout mid-body — aborting");
+                    ctx->failed = true;
+                } else if (ctx->file.write(data, len) != len) {
                     DBGLN("Upload: short write (disk full?)");
                     ctx->failed = true;
                 }

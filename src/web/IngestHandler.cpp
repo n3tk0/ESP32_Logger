@@ -417,6 +417,26 @@ static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
 }
 
 void registerIngestHandler(AsyncWebServer& server) {
+    // Said once, at boot, where somebody reads it. The token is the only thing
+    // between this endpoint and anything that can reach port 80, and it is a
+    // compile-time string — so a build that never passed -DINGEST_TOKEN is
+    // serving the pipeline to the whole subnet on a value printed in setup.h.
+    // Not refused: a device already deployed with the default must keep
+    // working until its owner rebuilds, and silently breaking ingest would be
+    // a worse surprise than a warning.
+    {
+        const char* tok = INGEST_TOKEN;
+        const size_t n  = strlen(tok);
+        if (n == 0 || strcmp(tok, "change-me") == 0) {
+            Serial.println("[ingest] WARNING: INGEST_TOKEN is the built-in default — "
+                           "anything on this network can post readings. Rebuild with "
+                           "-DINGEST_TOKEN='\"your-secret\"'.");
+        } else if (n < 12) {
+            Serial.printf("[ingest] WARNING: INGEST_TOKEN is only %u characters — "
+                          "it is the sole guard on POST /api/ingest.\n", (unsigned)n);
+        }
+    }
+
     server.on("/api/ingest", HTTP_POST,
               [](AsyncWebServerRequest* r) { /* handled in the body callback */ },
               nullptr,

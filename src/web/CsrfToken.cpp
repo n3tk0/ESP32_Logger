@@ -42,12 +42,22 @@ const char* CsrfToken::get() {
 
 bool CsrfToken::valid(AsyncWebServerRequest* req) {
     ensureToken();
-    // ESPAsyncWebServer drops custom request headers unless individual
-    // handlers opt in via addInterestingHeader; rather than touch every
-    // server.on() site we accept the token as a form/query param.  Common
-    // CSRF pattern in many web apps; no security difference for the
-    // double-submit-cookie threat model since the SPA already injects
-    // the token into every mutating call.
+    // The token arrives as a form or query param, not a header.
+    //
+    // THE REASON GIVEN HERE WAS WRONG, and it mattered because another
+    // handler was written around it: this said ESPAsyncWebServer drops custom
+    // request headers unless a handler opts in with addInterestingHeader().
+    // In the fork this project pins (esphome/ESPAsyncWebServer-esphome),
+    // AsyncCallbackWebHandler::canHandle() registers "ANY" for every
+    // server.on() route and _removeNotInterestingHeaders() then keeps
+    // everything — so a custom header would in fact be readable, as
+    // /api/ingest's X-Ingest-Token relies on.
+    //
+    // A param is still the right choice for THIS token: it is what the SPA
+    // already sends on every mutating call, it survives a plain HTML form
+    // post (the failsafe UI has no JavaScript), and it is no weaker against
+    // the threat CSRF covers — an attacker who can set a custom header has
+    // already defeated the same-origin policy this is defending.
     String supplied;
     if (req->hasParam("csrf", true)) {        // POST body
         supplied = req->getParam("csrf", true)->value();

@@ -54,14 +54,30 @@ extern MqttExporter* g_mqttExporter;
 //   limit=   max output points (default 500)
 // ---------------------------------------------------------------------------
 static void handleApiData(AsyncWebServerRequest* req) {
-    uint32_t now = (uint32_t)(millis() / 1000UL); // fallback
+    // THE SAME CLOCK THE READINGS WERE STAMPED WITH. This was millis()/1000,
+    // which is not an epoch — so the defaults it computed could not match any
+    // stored timestamp: `to` defaulted to a few thousand while every reading
+    // carries ~1.7e9, and the `timestamp > toTs` filter below therefore
+    // discarded all of them. Worse, `from` defaulted to now - 86400, which
+    // underflows for the first 24 hours of uptime and asks for readings from
+    // the year 2106 onwards. A request without an explicit `to` always came
+    // back empty; the dashboard never noticed because every caller in www/js
+    // sends both bounds from the browser's clock.
+    // The system clock only, deliberately NOT pipelineNowEpoch(): its RTC leg
+    // bit-bangs the DS1302, and this runs on the AsyncTCP task where a GET
+    // should not be reaching for a shared three-wire bus. When the clock is
+    // not set there is no epoch to reason about, so the default window is
+    // opened all the way rather than closed onto a meaningless instant.
+    const time_t   sysT     = time(nullptr);
+    const bool     haveNow  = (sysT > 1000000000L);
+    const uint32_t now      = haveNow ? (uint32_t)sysT : 0u;
 
     uint32_t fromTs = req->hasParam("from")
                       ? (uint32_t)req->getParam("from")->value().toInt()
-                      : (now - 86400);
+                      : (now > 86400u ? now - 86400u : 0u);
     uint32_t toTs   = req->hasParam("to")
                       ? (uint32_t)req->getParam("to")->value().toInt()
-                      : now;
+                      : (haveNow ? now : UINT32_MAX);
 
     // Copy filter strings to local buffers — AsyncWebParameter::value() is a
     // String whose c_str() may dangle after the param object is freed during
