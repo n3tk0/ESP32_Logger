@@ -1,14 +1,22 @@
+  <!-- ═══ PAGE: E-INK DASHBOARD SETTINGS (redesign 3a — panel-led/tabbed) ═══
+       The panel (left, sticky) is the navigation — tap a region and it opens
+       in the inspector on the right. Zones / Whole page / Reader tabs replace
+       one long scroll; the five "Why…" asides that used to sit one per card
+       are folded into a single collapsible at the top of the Zones tab, so
+       the page reads as controls first, reasons on request. See
+       www/js/kindle.js (kdTabInit, kindleZoneOpen, kindleJump) — none of the
+       actual rendering/save logic changed, only how it's grouped on screen. -->
   <section class="page" id="page-settings_kindle">
     <div class="page-head">
       <div>
-        <h1 class="page-title"><span data-icon="book-text"></span> E-ink dashboard</h1>
-        <div class="page-sub"><a href="#settings">Settings</a> / E-ink dashboard</div>
+        <h1 class="page-title"><span data-icon="book-text"></span> <span data-i18n="kindle.title">E-ink dashboard</span></h1>
+        <div class="page-sub"><a href="#settings" data-i18n="chrome.navSettings">Settings</a> / <span data-i18n="kindle.title">E-ink dashboard</span></div>
       </div>
       <div class="page-actions">
         <a class="btn" href="/kindle" target="_blank" rel="noopener">
-          <span data-icon="eye"></span> Open the page
+          <span data-icon="eye"></span> <span data-i18n="kindle.openPage">Open the page</span>
         </a>
-        <button class="btn" data-click="kindleRefresh"><span data-icon="refresh-cw"></span> Reload</button>
+        <button class="btn" data-click="kindleRefresh"><span data-icon="refresh-cw"></span> <span data-i18n="common.reload">Reload</span></button>
       </div>
     </div>
 
@@ -17,319 +25,11 @@
     <div id="kd-form">
       <div class="kd-shell">
 
-        <!-- ── The controls ─────────────────────────────────────────────── -->
-        <div class="kd-pane-form">
-
-          <!-- The page, zone by zone: this page's index AND its editor -->
-          <div class="card">
-            <div class="card-head">
-              <div class="card-title"><span data-icon="layout"></span> The page, zone by zone</div>
-              <span id="kd-slot-count" class="badge dim"></span>
-            </div>
-            <div class="card-body">
-              <p class="hint" style="margin-top:0">
-                Every region of the e-ink page, in the order it is drawn.
-                <strong>Open one</strong> — or tap it in the panel beside this —
-                and everything about it is in one place: whether it is drawn,
-                whether its figures are heavy, and which reading fills it.
-              </p>
-              <div id="kd-zones"></div>
-              <p class="hint">
-                <strong>Shown</strong> takes a region off the page entirely and
-                gives its height back to the ones above it, which is for the
-                reader who wants two numbers and nothing else.
-                <strong>Bold</strong> sets its figures heavier — for a shelf far
-                enough away that size alone stops being enough.
-              </p>
-            </div>
-          </div>
-
-          <!-- Clock -->
-          <div class="card" id="kd-card-clock">
-            <div class="card-head">
-              <div class="card-title"><span data-icon="clock"></span> Clock</div>
-            </div>
-            <div class="card-body">
-              <div class="kd-fields">
-                <div class="field">
-                  <label class="field-label" for="kd-clock">Style</label>
-                  <select id="kd-clock" class="input" data-change="kindleTouched">
-                    <option value="0">Plain — large numerals</option>
-                    <option value="1">Boxed — white on black</option>
-                    <option value="2">Ruled — hairline above, wider tracking</option>
-                    <option value="3">With the date beneath</option>
-                  </select>
-                </div>
-                <div class="field">
-                  <label class="field-label" for="kd-time">Time</label>
-                  <select id="kd-time" class="input" data-change="kindleTouched">
-                    <option value="0">09:05</option>
-                    <option value="1">9:05</option>
-                    <option value="2">9:05am</option>
-                  </select>
-                </div>
-                <div class="field" id="kd-date-field">
-                  <label class="field-label" for="kd-date">Date</label>
-                  <select id="kd-date" class="input" data-change="kindleTouched">
-                    <option value="0">27 august</option>
-                    <option value="1">august 27</option>
-                    <option value="2">27.08.2026</option>
-                    <option value="3">2026-08-27</option>
-                  </select>
-                  <p class="hint" id="kd-date-hint">Drawn only by the dated clock style.</p>
-                </div>
-              </div>
-              <details class="kd-why">
-                <summary>Why there are no seconds</summary>
-                <p class="hint">The panel repaints on a timer measured in minutes,
-                  so a seconds field would be wrong the moment it was drawn.</p>
-              </details>
-            </div>
-          </div>
-
-          <!-- Units and language -->
-          <div class="card" id="kd-card-units">
-            <div class="card-head">
-              <div class="card-title"><span data-icon="gauge"></span> Units and language</div>
-            </div>
-            <div class="card-body">
-              <div class="kd-fields">
-                <div class="field">
-                  <label class="field-label" for="kd-press">Pressure</label>
-                  <select id="kd-press" class="input" data-change="kindleTouched">
-                    <option value="0">hPa — 1008</option>
-                    <option value="1">mmHg — 756</option>
-                    <option value="2">inHg — 29.77</option>
-                  </select>
-                  <p class="hint">The three-hour change follows the same unit.</p>
-                </div>
-                <div class="field">
-                  <label class="field-label" for="kd-dec">Temperature</label>
-                  <select id="kd-dec" class="input" data-change="kindleTouched">
-                    <option value="1">One decimal — 8.4°</option>
-                    <option value="0">Whole degrees — 8°</option>
-                  </select>
-                  <p class="hint">Whole degrees set the big numerals wider apart.</p>
-                </div>
-                <div class="field">
-                  <label class="field-label" for="kd-lang">Wording</label>
-                  <select id="kd-lang" class="input" data-change="kindleTouched">
-                    <option value="0">As built</option>
-                    <option value="1">English</option>
-                    <option value="2">Български</option>
-                  </select>
-                </div>
-              </div>
-              <details class="kd-why">
-                <summary>What the wording does and does not cover</summary>
-                <p class="hint">
-                  The browser page and the Kindle's own FBInk panel together — they
-                  are one design drawn twice, and nobody reads one in English and
-                  the other in Bulgarian. Both wordings are in the firmware, so
-                  this needs no reflash.
-                </p>
-                <p class="hint">
-                  It does not translate the names you have given your places:
-                  those are your text and are drawn as you typed them. The weather
-                  provider's own summary is English whichever way this is set.
-                </p>
-              </details>
-            </div>
-          </div>
-
-          <!-- Typeface -->
-          <div class="card">
-            <div class="card-head">
-              <div class="card-title"><span data-icon="book-text"></span> Typeface</div>
-            </div>
-            <div class="card-body">
-              <div class="field">
-                <label class="field-label" for="kd-face">Face</label>
-                <select id="kd-face" class="input" data-change="kindleFaceChanged">
-                  <option value="0">Bookerly — the reader's own serif (default)</option>
-                  <option value="1">Caecilia — the older Kindle slab</option>
-                  <option value="2">Palatino</option>
-                  <option value="3">Baskerville</option>
-                  <option value="4">Helvetica — sans</option>
-                  <option value="5">Futura — geometric sans</option>
-                  <option value="6">Custom…</option>
-                </select>
-              </div>
-              <div class="field" id="kd-face-custom-row" style="display:none;margin-top:12px">
-                <label class="field-label" for="kd-face-custom">Font family list</label>
-                <input class="input" id="kd-face-custom" maxlength="47"
-                       data-change="kindleTouched"
-                       placeholder="Amazon Ember,Bookerly,serif">
-                <p class="hint">
-                  Written straight into the page's stylesheet, so it is filtered
-                  down to letters, digits, spaces, commas, quotes and hyphens.
-                  End it with a generic family.
-                </p>
-              </div>
-              <details class="kd-why">
-                <summary>Which faces a reader can actually reach</summary>
-                <p class="hint">
-                  It depends on its firmware. Every choice falls back to a generic
-                  family, so a face the device does not carry renders in the
-                  browser's default rather than in nothing.
-                </p>
-              </details>
-            </div>
-          </div>
-
-          <!-- Refresh cadence, as named choices -->
-          <div class="card">
-            <div class="card-head">
-              <div class="card-title"><span data-icon="timer"></span> How often the reader reloads</div>
-              <span id="kd-cad-badge" class="badge dim"></span>
-            </div>
-            <div class="card-body">
-              <div class="seg kd-seg" role="group" aria-label="Refresh cadence" id="kd-cad">
-                <button type="button" data-click="kindleCadence" data-args='["fast"]'>Often</button>
-                <button type="button" data-click="kindleCadence" data-args='["balanced"]'>Balanced</button>
-                <button type="button" data-click="kindleCadence" data-args='["saver"]'>Sparing</button>
-                <button type="button" data-click="kindleCadence" data-args='["custom"]'>By hand…</button>
-              </div>
-              <p class="hint" id="kd-cad-says"></p>
-              <div class="kd-fields" id="kd-cad-custom" style="display:none;margin-top:12px">
-                <div class="field">
-                  <label class="field-label" for="kd-refresh">Maximum interval (s)</label>
-                  <input type="number" id="kd-refresh" class="input" min="60" max="600"
-                         step="10" placeholder="300" data-change="kindleTouched">
-                </div>
-                <div class="field">
-                  <label class="field-label" for="kd-follow">Follow data</label>
-                  <select id="kd-follow" class="input" data-change="kindleTouched">
-                    <option value="1">On — reload after new data</option>
-                    <option value="0">Off — fixed interval only</option>
-                  </select>
-                </div>
-                <div class="field">
-                  <label class="field-label" for="kd-clockpin">Clock sync</label>
-                  <select id="kd-clockpin" class="input" data-change="kindleTouched">
-                    <option value="1">On — align to the minute</option>
-                    <option value="0">Off — free-running</option>
-                  </select>
-                </div>
-              </div>
-              <details class="kd-why">
-                <summary>What a reload costs</summary>
-                <p class="hint">
-                  Every reload repaints the whole panel, which flashes and costs
-                  battery. <strong>Follow data</strong> predicts when the next
-                  reading is due and reloads right after it, so the page is never
-                  showing a number it could already have replaced.
-                  <strong>Clock sync</strong> aligns the reload to the minute
-                  boundary, so the displayed time changes when the minute does.
-                </p>
-                <p class="hint">
-                  This is the <em>browser</em> page's cadence. The FBInk panel keeps
-                  its own, in <code>dash.conf</code> on the reader.
-                </p>
-              </details>
-            </div>
-          </div>
-
-          <!-- The reader -->
-          <div class="card">
-            <div class="card-head">
-              <div class="card-title"><span data-icon="monitor"></span> The reader</div>
-            </div>
-            <div class="card-body">
-              <div class="kd-row">
-                <div class="field" style="flex:1 1 220px">
-                  <label class="field-label" for="kd-fbink-res">Panel size, for the FBInk script</label>
-                  <select id="kd-fbink-res" class="input" data-change="kindleTouched">
-                    <option value="0">600×800 — Kindle 7th gen, Touch</option>
-                    <option value="1072">1072×1448 — Paperwhite 4</option>
-                  </select>
-                </div>
-                <button class="btn" data-click="kindleProbe">
-                  <span data-icon="search"></span> Ask the reader
-                </button>
-              </div>
-              <p class="hint" id="kd-probe-out">
-                It decides the chart's dimensions and the icon sizes served by
-                <code>/kindle/data</code>. <strong>Ask the reader</strong> opens
-                <code>/kindle/probe</code>, which answers with what the reader
-                actually is — rather than leaving it to be guessed from a list.
-              </p>
-
-              <div class="kd-row" style="margin-top:14px">
-                <div class="field" style="flex:1 1 160px">
-                  <label class="field-label" for="kd-outdoor-sensor">Outdoor sensor</label>
-                  <select id="kd-outdoor-sensor" class="input" data-change="kindleTouched">
-                    <option value="">Default (outdoor)</option>
-                  </select>
-                </div>
-                <div class="field" style="flex:1 1 160px">
-                  <label class="field-label" for="kd-indoor-sensor">Indoor sensor</label>
-                  <select id="kd-indoor-sensor" class="input" data-change="kindleTouched">
-                    <option value="">Default (indoor)</option>
-                  </select>
-                </div>
-              </div>
-              <p class="hint">
-                These two feed the <strong>chart</strong> and the 24-hour history.
-                Which reading stands in which place is chosen zone by zone above.
-              </p>
-
-              <div class="field" style="margin-top:14px">
-                <label class="field-label" for="kd-layout">The page's shape</label>
-                <select id="kd-layout" class="input" data-change="kindleTouched">
-                  <option value="0">Follow the collector</option>
-                  <option value="1">Always keep the forecast band</option>
-                  <option value="2">Standalone — no forecast, larger readings</option>
-                </select>
-              </div>
-              <p class="hint" id="kd-layout-says"></p>
-              <details class="kd-why">
-                <summary>What standalone means</summary>
-                <p class="hint">
-                  A collector running as its own <strong>access point</strong> —
-                  wifi and ESP-NOW nodes talking straight to it, nothing
-                  upstream — cannot fetch a forecast, and the forecast band is an
-                  eighth of the page. On the standalone page that band is gone and
-                  the readings take it: the same eleven places, a sixth larger,
-                  with the chart and the week strip where they were.
-                </p>
-                <p class="hint">
-                  <strong>Follow the collector</strong> switches by itself: it
-                  draws the standalone page while this device is an access point,
-                  while it was built without the forecast module, or while nothing
-                  has been able to refresh the forecast for six hours. The other
-                  two settings fix the shape whatever the network is doing — which
-                  is how you see one of them from a desk.
-                </p>
-                <p class="hint">
-                  The readings grow by a sixth and not by a third because the
-                  freed band is <em>vertical</em>: every number is limited by the
-                  column it sits in, and “1008 hPa” three across already fills
-                  87 px of a 90 px cell.
-                </p>
-              </details>
-              <p class="hint" id="kd-pagew"></p>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-body kd-row">
-              <button class="btn" data-click="kindleDefaults">
-                <span data-icon="rotate-ccw"></span> Back to the built-in design
-              </button>
-              <span class="hint" style="margin:0">
-                Bookerly, nothing bold, every region shown, hPa and one decimal,
-                and the eleven places rebuilt from the two sensors above.
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── The panel ────────────────────────────────────────────────── -->
+        <!-- ── The panel — sticky, left, and the navigation ────────────────── -->
         <div class="kd-pane-preview">
           <div class="card kd-pv">
             <div class="card-head">
-              <div class="card-title"><span data-icon="eye"></span> The panel, as it will be drawn</div>
+              <div class="card-title"><span data-icon="eye"></span> <span data-i18n="kindle.panelTitle">The panel</span></div>
               <span class="badge dim" id="kd-pv-size">600×800</span>
             </div>
             <div class="kd-pv-stage">
@@ -338,12 +38,274 @@
               </div>
             </div>
             <div class="kd-pv-foot">
-              <p class="hint" style="margin:0">
-                <strong>Tap a region</strong> to open it below. Hatched ones are
-                switched off and their space closes up. Drawn at the panel's own
-                coordinates, with <strong>example readings</strong> — the layout
-                is what this shows, not the current weather.
+              <p class="hint" style="margin:0" data-i18n="kindle.panelHint">
+                <strong>Tap a region</strong> to open it. Hatched ones are
+                switched off and their space closes up. Drawn with
+                <strong>example readings</strong> — the layout is what this
+                shows, not the current weather.
               </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── The inspector — tabbed ───────────────────────────────────────── -->
+        <div class="kd-pane-form">
+          <div class="seg" role="tablist" aria-label="Inspector" id="kd-tabs" style="margin-bottom:var(--gap)">
+            <button type="button" class="active" data-tab="zones" data-i18n="kindle.tabZones">Zones <span class="badge dim mono" id="kd-slot-count" style="margin-left:6px"></span></button>
+            <button type="button" data-tab="page" data-i18n="kindle.tabPage">Whole page</button>
+            <button type="button" data-tab="reader" data-i18n="kindle.tabReader">Reader</button>
+          </div>
+
+          <!-- ═══ TAB: ZONES ═══ -->
+          <div data-panel="zones">
+            <details class="card" style="margin-bottom:var(--gap)">
+              <summary class="card-head" style="cursor:pointer;list-style:none">
+                <div class="card-title"><span data-icon="info"></span> <span data-i18n="kindle.whyTitle">Why it's like this</span></div>
+                <span class="badge dim mono" data-i18n="kindle.whyCount">5 notes</span>
+              </summary>
+              <div class="card-body" id="kd-why-body">
+                <p class="hint" style="margin-top:0"><strong data-i18n="kindle.whySecondsLead">No seconds.</strong> <span data-i18n="kindle.whySeconds">The panel repaints on a timer measured in minutes, so a seconds field would be wrong the moment it was drawn.</span></p>
+                <p class="hint"><strong data-i18n="kindle.whyWordingLead">Wording.</strong> <span data-i18n="kindle.whyWording1">The browser page and the Kindle's own FBInk panel together — they are one design drawn twice, and nobody reads one in English and the other in Bulgarian. Both wordings are in the firmware, so this needs no reflash.</span> <span data-i18n="kindle.whyWording2">It does not translate the names you have given your places: those are your text and are drawn as you typed them. The weather provider's own summary is English whichever way this is set.</span></p>
+                <p class="hint"><strong data-i18n="kindle.whyFaceLead">Typeface.</strong> <span data-i18n="kindle.whyFace">It depends on its firmware. Every choice falls back to a generic family, so a face the device does not carry renders in the browser's default rather than in nothing.</span></p>
+                <p class="hint"><strong data-i18n="kindle.whyReloadLead">What a reload costs.</strong> <span data-i18n="kindle.whyReload1">Every reload repaints the whole panel, which flashes and costs battery.</span> <strong data-i18n="kindle.whyReloadFollowLabel">Follow data</strong> <span data-i18n="kindle.whyReload2">predicts when the next reading is due and reloads right after it, so the page is never showing a number it could already have replaced.</span> <strong data-i18n="kindle.whyReloadClockLabel">Clock sync</strong> <span data-i18n="kindle.whyReload3">aligns the reload to the minute boundary, so the displayed time changes when the minute does. This is the browser page's cadence — the FBInk panel keeps its own, in dash.conf on the reader.</span></p>
+                <p class="hint" style="margin-bottom:0"><strong data-i18n="kindle.whyStandaloneLead">What standalone means.</strong> <span data-i18n="kindle.whyStandalone1">A collector running as its own access point — WiFi and ESP-NOW nodes talking straight to it, nothing upstream — cannot fetch a forecast, and the forecast band is an eighth of the page. On the standalone page that band is gone and the readings take it: the same eleven places, a sixth larger, with the chart and the week strip where they were.</span> <span data-i18n="kindle.whyStandalone2">Follow the collector switches by itself: it draws the standalone page while this device is an access point, while it was built without the forecast module, or while nothing has been able to refresh the forecast for six hours. The other two settings fix the shape whatever the network is doing — which is how you see one of them from a desk.</span> <span data-i18n="kindle.whyStandalone3">The readings grow by a sixth and not by a third because the freed band is vertical: every number is limited by the column it sits in, and "1008 hPa" three across already fills 87 px of a 90 px cell.</span></p>
+              </div>
+            </details>
+
+            <div class="card">
+              <div class="card-head">
+                <div class="card-title"><span data-icon="layout"></span> <span data-i18n="kindle.zonesTitle">The page, zone by zone</span></div>
+              </div>
+              <div class="card-body">
+                <p class="hint" style="margin-top:0" data-i18n-html="kindle.zonesHint">
+                  Every region of the e-ink page, in the order it is drawn.
+                  <strong>Open one</strong> — or tap it in the panel beside this —
+                  and everything about it is in one place: whether it is drawn,
+                  whether its figures are heavy, and which reading fills it.
+                </p>
+                <div id="kd-zones"></div>
+                <p class="hint" data-i18n-html="kindle.zonesHint2">
+                  <strong>Shown</strong> takes a region off the page entirely and
+                  gives its height back to the ones above it, which is for the
+                  reader who wants two numbers and nothing else.
+                  <strong>Bold</strong> sets its figures heavier — for a shelf far
+                  enough away that size alone stops being enough.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- ═══ TAB: WHOLE PAGE ═══ -->
+          <div data-panel="page" hidden>
+            <div class="card" id="kd-card-clock">
+              <div class="card-head">
+                <div class="card-title"><span data-icon="clock"></span> <span data-i18n="kindle.clockTitle">Clock</span></div>
+              </div>
+              <div class="card-body">
+                <div class="kd-fields">
+                  <div class="field">
+                    <label class="field-label" for="kd-clock" data-i18n="kindle.clockStyle">Style</label>
+                    <select id="kd-clock" class="input" data-change="kindleTouched">
+                      <option value="0" data-i18n="kindle.clockStyle0">Plain — large numerals</option>
+                      <option value="1" data-i18n="kindle.clockStyle1">Boxed — white on black</option>
+                      <option value="2" data-i18n="kindle.clockStyle2">Ruled — hairline above, wider tracking</option>
+                      <option value="3" data-i18n="kindle.clockStyle3">With the date beneath</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label class="field-label" for="kd-time" data-i18n="kindle.clockTime">Time</label>
+                    <select id="kd-time" class="input" data-change="kindleTouched">
+                      <option value="0">09:05</option>
+                      <option value="1">9:05</option>
+                      <option value="2">9:05am</option>
+                    </select>
+                  </div>
+                  <div class="field" id="kd-date-field">
+                    <label class="field-label" for="kd-date" data-i18n="kindle.clockDate">Date</label>
+                    <select id="kd-date" class="input" data-change="kindleTouched">
+                      <option value="0">27 august</option>
+                      <option value="1">august 27</option>
+                      <option value="2">27.08.2026</option>
+                      <option value="3">2026-08-27</option>
+                    </select>
+                    <p class="hint" id="kd-date-hint" data-i18n="kindle.clockDateHint">Drawn only by the dated clock style.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card" id="kd-card-units" style="margin-top:var(--gap)">
+              <div class="card-head">
+                <div class="card-title"><span data-icon="gauge"></span> <span data-i18n="kindle.unitsTitle">Units and language</span></div>
+              </div>
+              <div class="card-body">
+                <div class="kd-fields">
+                  <div class="field">
+                    <label class="field-label" for="kd-press" data-i18n="kindle.pressure">Pressure</label>
+                    <select id="kd-press" class="input" data-change="kindleTouched">
+                      <option value="0">hPa — 1008</option>
+                      <option value="1">mmHg — 756</option>
+                      <option value="2">inHg — 29.77</option>
+                    </select>
+                    <p class="hint" data-i18n="kindle.pressureHint">The three-hour change follows the same unit.</p>
+                  </div>
+                  <div class="field">
+                    <label class="field-label" for="kd-dec" data-i18n="kindle.temperature">Temperature</label>
+                    <select id="kd-dec" class="input" data-change="kindleTouched">
+                      <option value="1" data-i18n="kindle.temp1">One decimal — 8.4°</option>
+                      <option value="0" data-i18n="kindle.temp0">Whole degrees — 8°</option>
+                    </select>
+                    <p class="hint" data-i18n="kindle.temperatureHint">Whole degrees set the big numerals wider apart.</p>
+                  </div>
+                  <div class="field">
+                    <label class="field-label" for="kd-lang" data-i18n="kindle.wording">Wording</label>
+                    <select id="kd-lang" class="input" data-change="kindleTouched">
+                      <option value="0" data-i18n="kindle.wordingAsBuilt">As built</option>
+                      <option value="1">English</option>
+                      <option value="2">Български</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card" style="margin-top:var(--gap)">
+              <div class="card-head">
+                <div class="card-title"><span data-icon="book-text"></span> <span data-i18n="kindle.faceTitle">Typeface</span></div>
+              </div>
+              <div class="card-body">
+                <div class="field">
+                  <label class="field-label" for="kd-face" data-i18n="kindle.face">Face</label>
+                  <select id="kd-face" class="input" data-change="kindleFaceChanged">
+                    <option value="0" data-i18n="kindle.face0">Bookerly — the reader's own serif (default)</option>
+                    <option value="1" data-i18n="kindle.face1">Caecilia — the older Kindle slab</option>
+                    <option value="2">Palatino</option>
+                    <option value="3">Baskerville</option>
+                    <option value="4" data-i18n="kindle.face4">Helvetica — sans</option>
+                    <option value="5" data-i18n="kindle.face5">Futura — geometric sans</option>
+                    <option value="6" data-i18n="kindle.face6">Custom…</option>
+                  </select>
+                </div>
+                <div class="field" id="kd-face-custom-row" style="display:none;margin-top:12px">
+                  <label class="field-label" for="kd-face-custom" data-i18n="kindle.faceCustom">Font family list</label>
+                  <input class="input" id="kd-face-custom" maxlength="47"
+                         data-change="kindleTouched"
+                         placeholder="Amazon Ember,Bookerly,serif">
+                  <p class="hint" data-i18n="kindle.faceCustomHint">
+                    Written straight into the page's stylesheet, so it is filtered
+                    down to letters, digits, spaces, commas, quotes and hyphens.
+                    End it with a generic family.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ═══ TAB: READER ═══ -->
+          <div data-panel="reader" hidden>
+            <div class="card">
+              <div class="card-head">
+                <div class="card-title"><span data-icon="timer"></span> <span data-i18n="kindle.cadenceTitle">How often the reader reloads</span></div>
+                <span id="kd-cad-badge" class="badge dim"></span>
+              </div>
+              <div class="card-body">
+                <div class="seg kd-seg" role="group" aria-label="Refresh cadence" id="kd-cad">
+                  <button type="button" data-click="kindleCadence" data-args='["fast"]' data-i18n="kindle.cadFast">Often</button>
+                  <button type="button" data-click="kindleCadence" data-args='["balanced"]' data-i18n="kindle.cadBalanced">Balanced</button>
+                  <button type="button" data-click="kindleCadence" data-args='["saver"]' data-i18n="kindle.cadSaver">Sparing</button>
+                  <button type="button" data-click="kindleCadence" data-args='["custom"]' data-i18n="kindle.cadCustom">By hand…</button>
+                </div>
+                <p class="hint" id="kd-cad-says"></p>
+                <div class="kd-fields" id="kd-cad-custom" style="display:none;margin-top:12px">
+                  <div class="field">
+                    <label class="field-label" for="kd-refresh" data-i18n="kindle.maxInterval">Maximum interval (s)</label>
+                    <input type="number" id="kd-refresh" class="input" min="60" max="600"
+                           step="10" placeholder="300" data-change="kindleTouched">
+                  </div>
+                  <div class="field">
+                    <label class="field-label" for="kd-follow" data-i18n="kindle.followData">Follow data</label>
+                    <select id="kd-follow" class="input" data-change="kindleTouched">
+                      <option value="1" data-i18n="kindle.followOn">On — reload after new data</option>
+                      <option value="0" data-i18n="kindle.followOff">Off — fixed interval only</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label class="field-label" for="kd-clockpin" data-i18n="kindle.clockSync">Clock sync</label>
+                    <select id="kd-clockpin" class="input" data-change="kindleTouched">
+                      <option value="1" data-i18n="kindle.clockSyncOn">On — align to the minute</option>
+                      <option value="0" data-i18n="kindle.clockSyncOff">Off — free-running</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card" style="margin-top:var(--gap)">
+              <div class="card-head">
+                <div class="card-title"><span data-icon="monitor"></span> <span data-i18n="kindle.readerTitle">The reader</span></div>
+              </div>
+              <div class="card-body">
+                <div class="kd-row">
+                  <div class="field" style="flex:1 1 220px">
+                    <label class="field-label" for="kd-fbink-res" data-i18n="kindle.panelSize">Panel size, for the FBInk script</label>
+                    <select id="kd-fbink-res" class="input" data-change="kindleTouched">
+                      <option value="0" data-i18n="kindle.panelSize0">600×800 — Kindle 7th gen, Touch</option>
+                      <option value="1072" data-i18n="kindle.panelSize1072">1072×1448 — Paperwhite 4</option>
+                    </select>
+                  </div>
+                  <button class="btn" data-click="kindleProbe">
+                    <span data-icon="search"></span> <span data-i18n="kindle.askReader">Ask the reader</span>
+                  </button>
+                </div>
+                <p class="hint" id="kd-probe-out" data-i18n-html="kindle.probeHint">
+                  It decides the chart's dimensions and the icon sizes served by
+                  <code>/kindle/data</code>. <strong>Ask the reader</strong> opens
+                  <code>/kindle/probe</code>, which answers with what the reader
+                  actually is — rather than leaving it to be guessed from a list.
+                </p>
+
+                <div class="kd-row" style="margin-top:14px">
+                  <div class="field" style="flex:1 1 160px">
+                    <label class="field-label" for="kd-outdoor-sensor" data-i18n="kindle.outdoorSensor">Outdoor sensor</label>
+                    <select id="kd-outdoor-sensor" class="input" data-change="kindleTouched">
+                      <option value="" data-i18n="kindle.defaultOutdoor">Default (outdoor)</option>
+                    </select>
+                  </div>
+                  <div class="field" style="flex:1 1 160px">
+                    <label class="field-label" for="kd-indoor-sensor" data-i18n="kindle.indoorSensor">Indoor sensor</label>
+                    <select id="kd-indoor-sensor" class="input" data-change="kindleTouched">
+                      <option value="" data-i18n="kindle.defaultIndoor">Default (indoor)</option>
+                    </select>
+                  </div>
+                </div>
+                <p class="hint" data-i18n="kindle.sensorsHint">
+                  These two feed the chart and the 24-hour history.
+                  Which reading stands in which place is chosen zone by zone in the Zones tab.
+                </p>
+
+                <div class="field" style="margin-top:14px">
+                  <label class="field-label" for="kd-layout" data-i18n="kindle.pageShape">The page's shape</label>
+                  <select id="kd-layout" class="input" data-change="kindleTouched">
+                    <option value="0" data-i18n="kindle.shape0">Follow the collector</option>
+                    <option value="1" data-i18n="kindle.shape1">Always keep the forecast band</option>
+                    <option value="2" data-i18n="kindle.shape2">Standalone — no forecast, larger readings</option>
+                  </select>
+                </div>
+                <p class="hint" id="kd-layout-says"></p>
+                <p class="hint" id="kd-pagew"></p>
+              </div>
+            </div>
+
+            <div class="card" style="margin-top:var(--gap)">
+              <div class="card-body kd-row">
+                <button class="btn" data-click="kindleDefaults">
+                  <span data-icon="rotate-ccw"></span> <span data-i18n="kindle.backToDefault">Back to the built-in design</span>
+                </button>
+                <span class="hint" style="margin:0" data-i18n="kindle.backToDefaultHint">
+                  Bookerly, nothing bold, every region shown, hPa and one decimal,
+                  and the eleven places rebuilt from the two sensors above.
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -355,9 +317,9 @@
       <div class="kd-savebar-in">
         <span id="kd-dirty" class="kd-dirty"></span>
         <span style="flex:1"></span>
-        <button class="btn" data-click="kindleDiscard">Discard</button>
+        <button class="btn" data-click="kindleDiscard" data-i18n="common.discard">Discard</button>
         <button class="btn primary" data-click="kindleSave">
-          <span data-icon="save"></span> Save
+          <span data-icon="save"></span> <span data-i18n="common.save">Save</span>
         </button>
       </div>
     </div>

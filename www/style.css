@@ -538,19 +538,21 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
    panel on the right at its own 600x800 coordinates, and the panel is the
    navigation — tapping a region opens it. See www/js/kindle.js. */
 
+/* Redesign 3a: the panel is the navigation, so it leads — sticky, on the
+   left, at a fixed width; the tabbed inspector fills the rest. Markup order
+   already puts .kd-pane-preview first (www/pages/settings_kindle.html), so
+   narrow layouts that just stack block-level children get panel-then-form
+   for free, with no order:-1 needed. */
 .kd-shell { display:block; }
 @media (min-width:1100px) {
   .kd-shell {
-    display:grid; grid-template-columns:minmax(0,1fr) 356px;
+    display:grid; grid-template-columns:356px minmax(0,1fr);
     gap:var(--gap); align-items:start;
   }
   /* Pinned, because the whole point is to watch it while editing the form. */
   .kd-pane-preview { position:sticky; top:calc(var(--nav-h) + 12px); }
 }
-/* Narrow: the panel goes FIRST. On a phone the form is a long scroll and a
-   preview at the bottom of it is a preview nobody sees. */
 @media (max-width:1099px) {
-  .kd-pane-preview { order:-1; }
   .kd-shell { display:flex; flex-direction:column; }
 }
 

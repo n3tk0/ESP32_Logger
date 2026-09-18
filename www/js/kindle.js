@@ -880,10 +880,42 @@ function kindleZoneOpen(id) {
 function kindleJump(id) {
   var el = document.getElementById(id);
   if (!el) return;
+  // Redesign 3a split the page into Zones / Whole page / Reader tabs, so a
+  // target this jumps to (e.g. Clock, from the "hero" zone's fill note) can
+  // now be sitting in a tab that isn't the active one — switch first, or the
+  // scroll lands on a hidden element and does nothing.
+  var panel = el.closest("[data-panel]");
+  if (panel && panel.hidden) kdActivateTab(panel.getAttribute("data-panel"));
   try { el.scrollIntoView({ block:"center", behavior:"smooth" }); }
   catch (e) { el.scrollIntoView(); }
   el.classList.add("kd-flash");
   setTimeout(function () { el.classList.remove("kd-flash"); }, 1400);
+}
+
+// ── Inspector tabs (redesign 3a) ────────────────────────────────────────────
+// Purely a visibility switch over the three [data-panel] groups; nothing
+// about the form/save/preview logic changes with the active tab.
+function kdActivateTab(name) {
+  var tabs = document.getElementById("kd-tabs");
+  if (tabs) {
+    Array.prototype.forEach.call(tabs.querySelectorAll("button[data-tab]"), function (b) {
+      b.classList.toggle("active", b.getAttribute("data-tab") === name);
+    });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("[data-panel]"), function (p) {
+    p.hidden = p.getAttribute("data-panel") !== name;
+  });
+}
+
+function kdTabInit() {
+  var tabs = document.getElementById("kd-tabs");
+  if (!tabs || tabs._kdWired) return;
+  tabs._kdWired = true;
+  tabs.addEventListener("click", function (ev) {
+    var b = ev.target.closest("button[data-tab]");
+    if (!b) return;
+    kdActivateTab(b.getAttribute("data-tab"));
+  });
 }
 
 // ============================================================================
@@ -1271,19 +1303,21 @@ function kindleRefresh() {
       var bar = document.getElementById("kd-savebar");
       if (bar) bar.hidden = true;
       if (!form) return;
+      var t = window.I18n ? I18n.t : function (k) { return k; };
       if (e && e.message === "not-in-build") {
         // Named rather than shown as an empty form, for the same reason the
         // battery-nodes page does it: a page that looks merely blank sends
         // people looking for a fault that is not there.
+        // Strings carry their own <code> markup (trusted, from the static
+        // i18n dictionary — not escaped, same as the rest of this page's
+        // hand-built HTML strings).
         form.innerHTML =
           '<div class="card"><div class="card-body"><p class="hint">' +
-          "This firmware was not built with <code>FEATURE_KINDLE_DASHBOARD</code>, " +
-          "so there is no <code>/kindle</code> page to configure. Enable it in " +
-          "the deploy tool's build features and reflash.</p></div></div>";
+          t("kindle.notInBuild") + "</p></div></div>";
       } else {
         form.innerHTML =
           '<div class="card"><div class="card-body"><p class="hint">' +
-          "Could not read the dashboard settings.</p></div></div>";
+          esc(t("kindle.couldNotRead")) + "</p></div></div>";
       }
     });
 }
@@ -1475,6 +1509,7 @@ function kindleDefaults() {
 }
 
 function kindleInit() {
+  kdTabInit();
   fetchWithTimeout("/api/sensors", {}, 10000)
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
