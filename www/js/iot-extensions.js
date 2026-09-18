@@ -20,6 +20,11 @@
   // ─── helpers ──────────────────────────────────────────────────────────────
   var root = document.documentElement;
 
+  // Guarded i18n lookup — same idiom as nodes.js's ndT() / settings.js's sdT().
+  // I18n.t() itself already falls back to English when a bg key is missing,
+  // so the only thing to guard against here is i18n.js not having loaded yet.
+  function ieT(key, vars) { return window.I18n ? I18n.t(key, vars) : key; }
+
   /** Small icon span understood by icons.js Icons.swap(). */
   function icon(name, cls) {
     var s = document.createElement("span");
@@ -185,13 +190,13 @@
   // Registry: id → { title, icon, render(card) → HTML string }
   var OVERVIEW_REGISTRY = {
     aqi: {
-      title: "Air Quality Index", icon: "wind",
+      title: ieT("iotExt.cardAqiTitle"), icon: "wind",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
-            '<div class="card-title"><span data-icon="wind"></span> Air Quality Index</div>' +
+            '<div class="card-title"><span data-icon="wind"></span> ' + esc(ieT("iotExt.cardAqiTitle")) + '</div>' +
             '<div style="display:flex;align-items:center;gap:6px">' +
-              '<select class="ov-sensor-pick" id="ov-aqi-pick" data-card-bind="aqi" title="Assign PM sensor"><option value="">Auto</option></select>' +
+              '<select class="ov-sensor-pick" id="ov-aqi-pick" data-card-bind="aqi" title="' + esc(ieT("iotExt.assignPmSensor")) + '"><option value="">' + esc(ieT("iotExt.auto")) + '</option></select>' +
               '<span class="badge ok" id="aqi-badge">GOOD</span>' +
             '</div>' +
           '</div>' +
@@ -220,111 +225,111 @@
       },
     },
     environment: {
-      title: "Environment", icon: "thermometer",
+      title: ieT("iotExt.cardEnvironmentTitle"), icon: "thermometer",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
-            '<div class="card-title"><span data-icon="thermometer"></span> Environment</div>' +
-            '<select class="ov-sensor-pick" id="ov-env-pick" data-card-bind="environment" title="Assign sensor"><option value="">Auto</option></select>' +
+            '<div class="card-title"><span data-icon="thermometer"></span> ' + esc(ieT("iotExt.cardEnvironmentTitle")) + '</div>' +
+            '<select class="ov-sensor-pick" id="ov-env-pick" data-card-bind="environment" title="' + esc(ieT("iotExt.assignSensor")) + '"><option value="">' + esc(ieT("iotExt.auto")) + '</option></select>' +
           '</div>' +
           '<div class="card-body">' +
             '<div class="grid grid-3" style="gap:10px" id="ov-env-kpis">' +
-              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="thermometer"></span> Temp</div><div class="kpi-v"><span class="num" id="ov-temp">—</span><span class="unit">°C</span></div><div class="kpi-d" id="ov-temp-d">—</div><svg class="metric-spark-bg" id="ov-temp-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg></div>' +
-              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="droplet"></span> Humidity</div><div class="kpi-v"><span class="num" id="ov-hum">—</span><span class="unit">%</span></div><div class="kpi-d" id="ov-hum-d">—</div><svg class="metric-spark-bg" id="ov-hum-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg></div>' +
-              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="gauge"></span> Pressure</div><div class="kpi-v"><span class="num" id="ov-pres">—</span><span class="unit">hPa</span></div><div class="kpi-d" id="ov-pres-d">—</div><svg class="metric-spark-bg" id="ov-pres-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg></div>' +
+              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="thermometer"></span> ' + esc(ieT("iotExt.temp")) + '</div><div class="kpi-v"><span class="num" id="ov-temp">—</span><span class="unit">°C</span></div><div class="kpi-d" id="ov-temp-d">—</div><svg class="metric-spark-bg" id="ov-temp-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg></div>' +
+              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="droplet"></span> ' + esc(ieT("iotExt.humidity")) + '</div><div class="kpi-v"><span class="num" id="ov-hum">—</span><span class="unit">%</span></div><div class="kpi-d" id="ov-hum-d">—</div><svg class="metric-spark-bg" id="ov-hum-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg></div>' +
+              '<div class="kpi" style="padding:14px"><div class="kpi-l"><span data-icon="gauge"></span> ' + esc(ieT("iotExt.pressure")) + '</div><div class="kpi-v"><span class="num" id="ov-pres">—</span><span class="unit">hPa</span></div><div class="kpi-d" id="ov-pres-d">—</div><svg class="metric-spark-bg" id="ov-pres-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg></div>' +
             '</div>' +
           '</div>' +
         '</div>';
       },
     },
     energy: {
-      title: "Energy", icon: "zap",
+      title: ieT("iotExt.cardEnergyTitle"), icon: "zap",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
-            '<div class="card-title"><span data-icon="zap"></span> Energy</div>' +
-            '<select class="ov-sensor-pick" id="ov-energy-pick" data-card-bind="energy" title="Assign sensor"><option value="">Auto</option></select>' +
+            '<div class="card-title"><span data-icon="zap"></span> ' + esc(ieT("iotExt.cardEnergyTitle")) + '</div>' +
+            '<select class="ov-sensor-pick" id="ov-energy-pick" data-card-bind="energy" title="' + esc(ieT("iotExt.assignSensor")) + '"><option value="">' + esc(ieT("iotExt.auto")) + '</option></select>' +
           '</div>' +
           '<div class="card-body">' +
             '<div class="energy-grid" id="ov-energy-grid">' +
-              '<div class="energy-tile live"><div class="energy-tile-l">Voltage</div><div class="energy-tile-v"><span id="ov-volt">—</span><span class="u">V</span></div><div class="energy-tile-trend" id="ov-volt-t">—</div></div>' +
-              '<div class="energy-tile live"><div class="energy-tile-l">Current</div><div class="energy-tile-v"><span id="ov-amp">—</span><span class="u">A</span></div><div class="energy-tile-trend" id="ov-amp-t">—</div></div>' +
-              '<div class="energy-tile live"><div class="energy-tile-l">Power</div><div class="energy-tile-v"><span id="ov-power">—</span><span class="u">W</span></div><div class="energy-tile-trend" id="ov-pf-t">—</div></div>' +
-              '<div class="energy-tile"><div class="energy-tile-l">Today</div><div class="energy-tile-v"><span id="ov-kwh-day">—</span><span class="u">kWh</span></div><div class="energy-tile-trend" id="ov-kwh-day-t">—</div></div>' +
-              '<div class="energy-tile"><div class="energy-tile-l">This week</div><div class="energy-tile-v"><span id="ov-kwh-week">—</span><span class="u">kWh</span></div><div class="energy-tile-trend" id="ov-kwh-week-t">—</div></div>' +
-              '<div class="energy-tile"><div class="energy-tile-l">This month</div><div class="energy-tile-v"><span id="ov-kwh-month">—</span><span class="u">kWh</span></div><div class="energy-tile-trend" id="ov-kwh-month-t">—</div></div>' +
+              '<div class="energy-tile live"><div class="energy-tile-l">' + esc(ieT("iotExt.voltage")) + '</div><div class="energy-tile-v"><span id="ov-volt">—</span><span class="u">V</span></div><div class="energy-tile-trend" id="ov-volt-t">—</div></div>' +
+              '<div class="energy-tile live"><div class="energy-tile-l">' + esc(ieT("iotExt.current")) + '</div><div class="energy-tile-v"><span id="ov-amp">—</span><span class="u">A</span></div><div class="energy-tile-trend" id="ov-amp-t">—</div></div>' +
+              '<div class="energy-tile live"><div class="energy-tile-l">' + esc(ieT("iotExt.power")) + '</div><div class="energy-tile-v"><span id="ov-power">—</span><span class="u">W</span></div><div class="energy-tile-trend" id="ov-pf-t">—</div></div>' +
+              '<div class="energy-tile"><div class="energy-tile-l">' + esc(ieT("iotExt.today")) + '</div><div class="energy-tile-v"><span id="ov-kwh-day">—</span><span class="u">kWh</span></div><div class="energy-tile-trend" id="ov-kwh-day-t">—</div></div>' +
+              '<div class="energy-tile"><div class="energy-tile-l">' + esc(ieT("iotExt.thisWeek")) + '</div><div class="energy-tile-v"><span id="ov-kwh-week">—</span><span class="u">kWh</span></div><div class="energy-tile-trend" id="ov-kwh-week-t">—</div></div>' +
+              '<div class="energy-tile"><div class="energy-tile-l">' + esc(ieT("iotExt.thisMonth")) + '</div><div class="energy-tile-v"><span id="ov-kwh-month">—</span><span class="u">kWh</span></div><div class="energy-tile-trend" id="ov-kwh-month-t">—</div></div>' +
             '</div>' +
           '</div>' +
         '</div>';
       },
     },
     water: {
-      title: "Water (live)", icon: "droplets",
+      title: ieT("iotExt.cardWaterTitle"), icon: "droplets",
       render: function () {
         return '<div class="card" data-mode-show="legacy hybrid">' +
-          '<div class="card-head"><div class="card-title"><span data-icon="droplets"></span> Water</div>' +
-            '<select class="ov-sensor-pick" id="ov-water-pick" data-card-bind="water" title="Assign sensor"><option value="">Auto</option></select></div>' +
+          '<div class="card-head"><div class="card-title"><span data-icon="droplets"></span> ' + esc(ieT("iotExt.water")) + '</div>' +
+            '<select class="ov-sensor-pick" id="ov-water-pick" data-card-bind="water" title="' + esc(ieT("iotExt.assignSensor")) + '"><option value="">' + esc(ieT("iotExt.auto")) + '</option></select></div>' +
           '<div class="card-body" style="display:flex;flex-direction:column;gap:14px">' +
-            '<div><div class="form-label">Current cycle</div>' +
+            '<div><div class="form-label">' + esc(ieT("iotExt.currentCycle")) + '</div>' +
             '<div class="mono" style="font-size:28px;font-weight:700"><span id="ov-water-today">—</span><span style="font-size:13px;color:var(--text-3);margin-left:4px">L</span></div></div>' +
-            '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--text-3)">Total pulses</span><span class="mono" id="ov-water-events">—</span></div>' +
+            '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--text-3)">' + esc(ieT("iotExt.totalPulses")) + '</span><span class="mono" id="ov-water-events">—</span></div>' +
           '</div>' +
         '</div>';
       },
     },
     outdoor: {
-      title: "Outdoor", icon: "cloud-rain",
+      title: ieT("iotExt.cardOutdoorTitle"), icon: "cloud-rain",
       render: function () {
         return '<div class="card">' +
-          '<div class="card-head"><div class="card-title"><span data-icon="cloud-rain"></span> Outdoor</div>' +
-            '<select class="ov-sensor-pick" id="ov-outdoor-pick" data-card-bind="outdoor" title="Assign sensor"><option value="">Auto</option></select></div>' +
+          '<div class="card-head"><div class="card-title"><span data-icon="cloud-rain"></span> ' + esc(ieT("iotExt.cardOutdoorTitle")) + '</div>' +
+            '<select class="ov-sensor-pick" id="ov-outdoor-pick" data-card-bind="outdoor" title="' + esc(ieT("iotExt.assignSensor")) + '"><option value="">' + esc(ieT("iotExt.auto")) + '</option></select></div>' +
           '<div class="card-body" style="display:flex;flex-direction:column;gap:14px">' +
-            '<div><div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Rain today</div>' +
+            '<div><div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">' + esc(ieT("iotExt.rainToday")) + '</div>' +
             '<div class="mono" style="font-size:28px;font-weight:700"><span id="ov-rain">—</span><span style="font-size:13px;color:var(--text-3);margin-left:4px">mm</span></div></div>' +
-            '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--text-3)">Wind</span><span class="mono" id="ov-wind">—</span></div>' +
+            '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--text-3)">' + esc(ieT("iotExt.wind")) + '</span><span class="mono" id="ov-wind">—</span></div>' +
           '</div>' +
         '</div>';
       },
     },
     alertFeed: {
-      title: "Recent alerts", icon: "bell",
+      title: ieT("iotExt.cardRecentAlertsTitle"), icon: "bell",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
-            '<div class="card-title"><span data-icon="bell"></span> Recent alerts</div>' +
-            '<a class="mono" style="font-size:11px;color:var(--accent);cursor:pointer" data-click="navPage" data-page="alerts">View all →</a>' +
+            '<div class="card-title"><span data-icon="bell"></span> ' + esc(ieT("iotExt.cardRecentAlertsTitle")) + '</div>' +
+            '<a class="mono" style="font-size:11px;color:var(--accent);cursor:pointer" data-click="navPage" data-page="alerts">' + esc(ieT("iotExt.viewAll")) + '</a>' +
           '</div>' +
           '<div class="card-body" style="padding:0" id="ov-alert-feed">' +
-            '<div class="empty" style="padding:20px"><span class="empty-title">No alerts</span></div>' +
+            '<div class="empty" style="padding:20px"><span class="empty-title">' + esc(ieT("iotExt.noAlerts")) + '</span></div>' +
           '</div>' +
         '</div>';
       },
     },
     sensorsList: {
-      title: "Active sensors", icon: "thermometer",
+      title: ieT("iotExt.cardActiveSensorsTitle"), icon: "thermometer",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
-            '<div class="card-title"><span data-icon="thermometer"></span> Active sensors</div>' +
-            '<a class="mono" style="font-size:11px;color:var(--accent);cursor:pointer" data-click="navPage" data-page="sensors">All sensors →</a>' +
+            '<div class="card-title"><span data-icon="thermometer"></span> ' + esc(ieT("iotExt.cardActiveSensorsTitle")) + '</div>' +
+            '<a class="mono" style="font-size:11px;color:var(--accent);cursor:pointer" data-click="navPage" data-page="sensors">' + esc(ieT("iotExt.allSensors")) + '</a>' +
           '</div>' +
           '<div class="card-body" id="ov-sensors-list" style="display:flex;flex-direction:column;gap:6px">' +
-            '<div class="empty" style="padding:20px"><span class="empty-title">Loading…</span></div>' +
+            '<div class="empty" style="padding:20px"><span class="empty-title">' + esc(ieT("common.loading")) + '</span></div>' +
           '</div>' +
         '</div>';
       },
     },
     diagnostics: {
-      title: "Sensor diagnostics", icon: "heart-pulse",
+      title: ieT("iotExt.cardDiagnosticsTitle"), icon: "heart-pulse",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
-            '<div class="card-title"><span data-icon="heart-pulse"></span> Sensor diagnostics</div>' +
+            '<div class="card-title"><span data-icon="heart-pulse"></span> ' + esc(ieT("iotExt.cardDiagnosticsTitle")) + '</div>' +
             '<span class="mono" style="font-size:11px;color:var(--text-3)" id="hl-summary">—</span>' +
           '</div>' +
           '<div class="card-body" id="ov-diagnostics-body">' +
             '<div class="health-grid" id="health-grid">' +
-              '<div class="empty" style="padding:20px"><span class="empty-title">Loading sensor health…</span></div>' +
+              '<div class="empty" style="padding:20px"><span class="empty-title">' + esc(ieT("iotExt.loadingSensorHealth")) + '</span></div>' +
             '</div>' +
           '</div>' +
         '</div>';
@@ -352,12 +357,12 @@
     page.innerHTML =
       '<div class="page-head">' +
         '<div>' +
-          '<h1 class="page-title"><span data-icon="layout-grid"></span> Overview</h1>' +
-          '<div class="page-sub" id="ov-sub">IoT sensor dashboard · loading…</div>' +
+          '<h1 class="page-title"><span data-icon="layout-grid"></span> ' + esc(ieT("chrome.navOverview")) + '</h1>' +
+          '<div class="page-sub" id="ov-sub">' + esc(ieT("iotExt.overviewSubLoading")) + '</div>' +
         '</div>' +
         '<div class="page-actions">' +
           '<div class="page-actions-deck" data-role="deck-toolbar"></div>' +
-          '<button class="btn" id="ovAddSensorBtn"><span data-icon="plus"></span> Add sensor</button>' +
+          '<button class="btn" id="ovAddSensorBtn"><span data-icon="plus"></span> ' + esc(ieT("iotExt.addSensor")) + '</button>' +
         '</div>' +
       '</div>' +
       '<div class="deck" id="overview-deck"></div>';
@@ -440,13 +445,13 @@
         renderHealthGrid(sensors);
         // Update subtitle now that we know the real sensor count
         var sub = document.getElementById("ov-sub");
-        if (sub) sub.textContent = sensors.length + " sensor" + (sensors.length !== 1 ? "s" : "") + " · live readings";
+        if (sub) sub.textContent = ieT(sensors.length === 1 ? "iotExt.overviewSubCount" : "iotExt.overviewSubCountPlural", { n: sensors.length });
       })
       .catch(function () {
         var grid = document.getElementById("health-grid");
         if (grid) {
           grid.innerHTML = "";
-          grid.appendChild(emptyState({ icon: "heart-pulse", title: "Unable to load", msg: "Could not reach /api/sensors." }));
+          grid.appendChild(emptyState({ icon: "heart-pulse", title: ieT("iotExt.unableToLoad"), msg: ieT("iotExt.couldNotReachSensors") }));
         }
       });
   }
@@ -593,7 +598,7 @@
     var arc = document.getElementById("aqi-arc");
     if (aqi !== null && score) {
       score.textContent = aqi;
-      var label = aqi < 50 ? "Good" : aqi < 100 ? "Moderate" : "Poor";
+      var label = aqi < 50 ? ieT("iotExt.aqiGood") : aqi < 100 ? ieT("iotExt.aqiModerate") : ieT("iotExt.aqiPoor");
       var cls   = aqi < 50 ? "aqi-good" : aqi < 100 ? "aqi-mod" : "aqi-poor";
       if (quality) { quality.textContent = label; quality.className = "aqi-quality " + cls; }
       if (badge)   { badge.textContent = label.toUpperCase(); badge.className = "badge " + (aqi < 50 ? "ok" : aqi < 100 ? "warn" : "err"); }
@@ -664,7 +669,7 @@
     if (!list) return;
     if (!Array.isArray(data) || data.length === 0) {
       list.innerHTML = "";
-      list.appendChild(emptyState({ icon: "thermometer", title: "No sensors", msg: "Add a sensor to get started." }));
+      list.appendChild(emptyState({ icon: "thermometer", title: ieT("iotExt.noSensors"), msg: ieT("iotExt.addSensorToStart") }));
       return;
     }
     list.innerHTML = data.slice(0, 8).map(function (s) {
@@ -752,7 +757,7 @@
       var sel = picks[i];
       var cardId = sel.dataset.cardBind;
       var saved = bindings[cardId] || "";
-      sel.innerHTML = '<option value="">Auto</option>';
+      sel.innerHTML = '<option value="">' + esc(ieT("iotExt.auto")) + '</option>';
       sensors.forEach(function (s) {
         var opt = document.createElement("option");
         opt.value = s.id;
@@ -871,50 +876,50 @@
 
   var ALERTS_REGISTRY = {
     kpiRules: {
-      title: "Rules KPI", icon: "list-checks",
+      title: ieT("iotExt.kpiRulesTitle"), icon: "list-checks",
       render: function () {
-        return '<div class="kpi"><div class="kpi-l"><span data-icon="list-checks"></span> Rules</div><div class="kpi-v"><span class="num" id="al-total">—</span></div><div class="kpi-d" id="al-rule-d">—</div></div>';
+        return '<div class="kpi"><div class="kpi-l"><span data-icon="list-checks"></span> ' + esc(ieT("iotExt.rules")) + '</div><div class="kpi-v"><span class="num" id="al-total">—</span></div><div class="kpi-d" id="al-rule-d">—</div></div>';
       },
     },
     kpiFiring: {
-      title: "Firing KPI", icon: "alert-triangle",
+      title: ieT("iotExt.kpiFiringTitle"), icon: "alert-triangle",
       render: function () {
-        return '<div class="kpi"><div class="kpi-l"><span data-icon="alert-triangle"></span> Firing</div><div class="kpi-v" style="color:var(--err)"><span class="num" id="al-firing">0</span></div><div class="kpi-d">right now</div></div>';
+        return '<div class="kpi"><div class="kpi-l"><span data-icon="alert-triangle"></span> ' + esc(ieT("iotExt.firing")) + '</div><div class="kpi-v" style="color:var(--err)"><span class="num" id="al-firing">0</span></div><div class="kpi-d">' + esc(ieT("iotExt.rightNow")) + '</div></div>';
       },
     },
     kpiToday: {
-      title: "Last 24 h KPI", icon: "clock",
+      title: ieT("iotExt.kpiTodayTitle"), icon: "clock",
       render: function () {
-        return '<div class="kpi"><div class="kpi-l"><span data-icon="clock"></span> Last 24 h</div><div class="kpi-v"><span class="num" id="al-day-trips">0</span></div><div class="kpi-d">trips</div></div>';
+        return '<div class="kpi"><div class="kpi-l"><span data-icon="clock"></span> ' + esc(ieT("iotExt.last24h")) + '</div><div class="kpi-v"><span class="num" id="al-day-trips">0</span></div><div class="kpi-d">' + esc(ieT("iotExt.trips")) + '</div></div>';
       },
     },
     kpiSnoozed: {
-      title: "Snoozed KPI", icon: "bell-off",
+      title: ieT("iotExt.kpiSnoozedTitle"), icon: "bell-off",
       render: function () {
-        return '<div class="kpi"><div class="kpi-l"><span data-icon="bell-off"></span> Snoozed</div><div class="kpi-v"><span class="num" id="al-snoozed">0</span></div><div class="kpi-d">—</div></div>';
+        return '<div class="kpi"><div class="kpi-l"><span data-icon="bell-off"></span> ' + esc(ieT("iotExt.snoozed")) + '</div><div class="kpi-v"><span class="num" id="al-snoozed">0</span></div><div class="kpi-d">—</div></div>';
       },
     },
     rules: {
-      title: "Rules list", icon: "list-checks",
+      title: ieT("iotExt.rulesListTitle"), icon: "list-checks",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
-            '<div class="card-title"><span data-icon="list-checks"></span> Rules</div>' +
-            '<input class="input" placeholder="Filter rules…" id="al-filter" style="width:200px;height:28px"/>' +
+            '<div class="card-title"><span data-icon="list-checks"></span> ' + esc(ieT("iotExt.rules")) + '</div>' +
+            '<input class="input" placeholder="' + esc(ieT("iotExt.filterRulesPh")) + '" id="al-filter" style="width:200px;height:28px"/>' +
           '</div>' +
           '<div class="card-body" style="padding:0" id="al-rules">' +
-            '<div class="empty" style="padding:24px"><span class="empty-title">Loading…</span></div>' +
+            '<div class="empty" style="padding:24px"><span class="empty-title">' + esc(ieT("common.loading")) + '</span></div>' +
           '</div>' +
         '</div>';
       },
     },
     history: {
-      title: "Trigger history", icon: "history",
+      title: ieT("iotExt.triggerHistoryTitle"), icon: "history",
       render: function () {
         return '<div class="card">' +
-          '<div class="card-head"><div class="card-title"><span data-icon="history"></span> Trigger history</div></div>' +
+          '<div class="card-head"><div class="card-title"><span data-icon="history"></span> ' + esc(ieT("iotExt.triggerHistoryTitle")) + '</div></div>' +
           '<div class="card-body" style="padding:0" id="al-history">' +
-            '<div class="empty" style="padding:24px"><span class="empty-title">Loading…</span></div>' +
+            '<div class="empty" style="padding:24px"><span class="empty-title">' + esc(ieT("common.loading")) + '</span></div>' +
           '</div>' +
         '</div>';
       },
@@ -941,12 +946,12 @@
     page.innerHTML =
       '<div class="page-head">' +
         '<div>' +
-          '<h1 class="page-title"><span data-icon="bell-ring"></span> Alerts</h1>' +
-          '<div class="page-sub">Threshold rules across all sensors</div>' +
+          '<h1 class="page-title"><span data-icon="bell-ring"></span> ' + esc(ieT("chrome.navAlerts")) + '</h1>' +
+          '<div class="page-sub">' + esc(ieT("iotExt.alertsSub")) + '</div>' +
         '</div>' +
         '<div class="page-actions">' +
           '<div class="page-actions-deck" data-role="deck-toolbar"></div>' +
-          '<button class="btn primary" data-click="alNewRule"><span data-icon="plus"></span> New rule</button>' +
+          '<button class="btn primary" data-click="alNewRule"><span data-icon="plus"></span> ' + esc(ieT("iotExt.newRule")) + '</button>' +
         '</div>' +
       '</div>' +
       '<div class="deck" id="alerts-deck"></div>';
@@ -1015,12 +1020,12 @@
 
     if (!rules.length) {
       rc.innerHTML = '<div class="empty" style="padding:24px">' +
-        '<span class="empty-title">No rules configured</span>' +
-        '<div class="empty-sub">Click "New rule" to create your first alert.</div></div>';
+        '<span class="empty-title">' + esc(ieT("iotExt.noRulesConfigured")) + '</span>' +
+        '<div class="empty-sub">' + esc(ieT("iotExt.noRulesConfiguredHint")) + '</div></div>';
       setEl("al-total",   0);
       setEl("al-firing",  0);
       setEl("al-snoozed", 0);
-      setEl("al-rule-d",  "across sensors");
+      setEl("al-rule-d",  ieT("iotExt.acrossSensors"));
       return;
     }
 
@@ -1050,18 +1055,18 @@
       // announcement per row ("Rule X · firing") instead of reading the
       // state dot, the title, the expression, and the meta column
       // separately as disconnected fragments.
-      var ariaLabel = (r.name || r.id || "Rule") + " · " + state;
+      var ariaLabel = (r.name || r.id || ieT("iotExt.rule")) + " · " + state;
       return '<div class="alert-rule ' + state + '" role="group" ' +
               'aria-label="' + esc(ariaLabel) + '" data-id="' + esc(r.id || "") + '">' +
         '<span class="ar-state" aria-hidden="true"></span>' +
-        '<div><div class="ar-name">' + esc(r.name || r.id || "Rule") + '</div>' +
+        '<div><div class="ar-name">' + esc(r.name || r.id || ieT("iotExt.rule")) + '</div>' +
           '<div class="ar-expr">' + expr + '</div></div>' +
         '<div class="ar-meta">' +
           '<span class="ar-last">' + lastFired + '</span>' +
         '</div>' +
         '<div class="ar-actions">' + acts +
-          '<button class="btn-mini" aria-label="Edit rule"><span data-icon="pencil"></span></button>' +
-          '<label class="switch" style="margin-left:4px" title="' + (r.enabled ? "Disable" : "Enable") + ' rule">' +
+          '<button class="btn-mini" aria-label="' + esc(ieT("iotExt.editRule")) + '"><span data-icon="pencil"></span></button>' +
+          '<label class="switch" style="margin-left:4px" title="' + esc((r.enabled ? ieT("iotExt.disableRule") : ieT("iotExt.enableRule"))) + '">' +
             '<input type="checkbox"' + (r.enabled ? " checked" : "") + ' data-rule-id="' + esc(r.id || "") + '"/>' +
             '<span></span></label>' +
         '</div>' +
@@ -1112,7 +1117,7 @@
     setEl("al-total",   rules.length);
     setEl("al-firing",  firing);
     setEl("al-snoozed", snoozed);
-    setEl("al-rule-d",  "across sensors");
+    setEl("al-rule-d",  ieT("iotExt.acrossSensors"));
 
     var badge = document.getElementById("alerts-badge");
     if (badge) {
@@ -1139,7 +1144,7 @@
 
     if (!history.length) {
       hc.innerHTML = '<div class="empty" style="padding:24px">' +
-        '<span class="empty-title">No alert history</span></div>';
+        '<span class="empty-title">' + esc(ieT("iotExt.noAlertHistory")) + '</span></div>';
       return;
     }
 
@@ -1168,7 +1173,7 @@
 
   function alNewRule() {
     if (_alertsData && (_alertsData.rules || []).length >= ALERT_MAX_RULES) {
-      showToast("Rule limit reached", "Firmware stores at most " + ALERT_MAX_RULES + " rules — delete one first", "warn");
+      showToast(ieT("iotExt.ruleLimitReached"), ieT("iotExt.ruleLimitReachedMsg", { n: ALERT_MAX_RULES }), "warn");
       return;
     }
     _ruleModalClose();
@@ -1176,28 +1181,28 @@
     ov.className = "popup-overlay active";
     ov.id = "rule-modal";
     ov.innerHTML =
-      '<div class="popup-content" style="width:min(480px,92vw)" role="dialog" aria-modal="true" aria-label="New alert rule">' +
+      '<div class="popup-content" style="width:min(480px,92vw)" role="dialog" aria-modal="true" aria-label="' + esc(ieT("iotExt.newRuleAria")) + '">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">' +
-          '<div style="font-weight:600;display:flex;align-items:center;gap:8px"><span data-icon="bell-plus"></span> New rule</div>' +
-          '<button type="button" class="btn-mini" id="rule-cancel-x" aria-label="Close"><span data-icon="x"></span></button>' +
+          '<div style="font-weight:600;display:flex;align-items:center;gap:8px"><span data-icon="bell-plus"></span> ' + esc(ieT("iotExt.newRule")) + '</div>' +
+          '<button type="button" class="btn-mini" id="rule-cancel-x" aria-label="' + esc(ieT("common.close")) + '"><span data-icon="x"></span></button>' +
         '</div>' +
         '<div class="form-grid">' +
-          '<div class="field" style="grid-column:1/-1"><label>Rule name</label><input class="input" id="rule-name" maxlength="32" placeholder="e.g. High PM2.5"></div>' +
-          '<div class="field"><label>Sensor</label><select class="input" id="rule-sensor"><option value="">Loading…</option></select></div>' +
-          '<div class="field"><label>Metric</label><select class="input" id="rule-metric"><option value="">— metric —</option></select></div>' +
-          '<div class="field"><label>Condition</label><select class="input" id="rule-op">' +
-            '<option value="&gt;">above (&gt;)</option><option value="&gt;=">at or above (&ge;)</option>' +
-            '<option value="&lt;">below (&lt;)</option><option value="&lt;=">at or below (&le;)</option>' +
-            '<option value="==">equals (=)</option></select></div>' +
-          '<div class="field"><label>Threshold value</label><input class="input mono" id="rule-value" type="number" step="any" placeholder="0.0"></div>' +
-          '<div class="field"><label>Sustained for (s)</label><input class="input mono" id="rule-duration" type="number" min="0" step="1" value="0"><div class="hint">0 = trigger immediately</div></div>' +
-          '<div class="field"><label>Actions</label><div style="display:flex;gap:14px;align-items:center;height:34px">' +
-            '<label class="check"><input type="checkbox" id="rule-act-toast" checked><span>Toast</span></label>' +
+          '<div class="field" style="grid-column:1/-1"><label>' + esc(ieT("iotExt.ruleName")) + '</label><input class="input" id="rule-name" maxlength="32" placeholder="' + esc(ieT("iotExt.ruleNamePh")) + '"></div>' +
+          '<div class="field"><label>' + esc(ieT("iotExt.sensor")) + '</label><select class="input" id="rule-sensor"><option value="">' + esc(ieT("common.loading")) + '</option></select></div>' +
+          '<div class="field"><label>' + esc(ieT("iotExt.metric")) + '</label><select class="input" id="rule-metric"><option value="">' + esc(ieT("iotExt.metricPlaceholder")) + '</option></select></div>' +
+          '<div class="field"><label>' + esc(ieT("iotExt.condition")) + '</label><select class="input" id="rule-op">' +
+            '<option value="&gt;">' + esc(ieT("iotExt.opAbove")) + '</option><option value="&gt;=">' + esc(ieT("iotExt.opAtOrAbove")) + '</option>' +
+            '<option value="&lt;">' + esc(ieT("iotExt.opBelow")) + '</option><option value="&lt;=">' + esc(ieT("iotExt.opAtOrBelow")) + '</option>' +
+            '<option value="==">' + esc(ieT("iotExt.opEquals")) + '</option></select></div>' +
+          '<div class="field"><label>' + esc(ieT("iotExt.thresholdValue")) + '</label><input class="input mono" id="rule-value" type="number" step="any" placeholder="0.0"></div>' +
+          '<div class="field"><label>' + esc(ieT("iotExt.sustainedFor")) + '</label><input class="input mono" id="rule-duration" type="number" min="0" step="1" value="0"><div class="hint">' + esc(ieT("iotExt.sustainedForHint")) + '</div></div>' +
+          '<div class="field"><label>' + esc(ieT("iotExt.actions")) + '</label><div style="display:flex;gap:14px;align-items:center;height:34px">' +
+            '<label class="check"><input type="checkbox" id="rule-act-toast" checked><span>' + esc(ieT("iotExt.actionToast")) + '</span></label>' +
             '<label class="check"><input type="checkbox" id="rule-act-mqtt"><span>MQTT</span></label></div></div>' +
         '</div>' +
         '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">' +
-          '<button type="button" class="btn" id="rule-cancel">Cancel</button>' +
-          '<button type="button" class="btn primary" id="rule-save"><span data-icon="check"></span> Create rule</button>' +
+          '<button type="button" class="btn" id="rule-cancel">' + esc(ieT("common.cancel")) + '</button>' +
+          '<button type="button" class="btn primary" id="rule-save"><span data-icon="check"></span> ' + esc(ieT("iotExt.createRule")) + '</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(ov);
@@ -1213,17 +1218,17 @@
     var sensorsCache = [];
     getSensors().then(function (d) {
       sensorsCache = (d && d.sensors) || [];
-      sensorSel.innerHTML = '<option value="">— sensor —</option>' + sensorsCache.map(function (s) {
+      sensorSel.innerHTML = '<option value="">' + esc(ieT("iotExt.sensorPlaceholder")) + '</option>' + sensorsCache.map(function (s) {
         return '<option value="' + esc(s.id) + '">' + esc(s.name || s.id) + '</option>';
       }).join("");
     }).catch(function () {
-      sensorSel.innerHTML = '<option value="">(failed to load sensors)</option>';
+      sensorSel.innerHTML = '<option value="">' + esc(ieT("iotExt.sensorsFailedToLoad")) + '</option>';
     });
     sensorSel.addEventListener("change", function () {
       var s = sensorsCache.filter(function (x) { return x.id === sensorSel.value; })[0];
       metricSel.innerHTML = (s && s.metrics && s.metrics.length)
         ? s.metrics.map(function (m) { return '<option value="' + esc(m) + '">' + esc(m) + '</option>'; }).join("")
-        : '<option value="">— metric —</option>';
+        : '<option value="">' + esc(ieT("iotExt.metricPlaceholder")) + '</option>';
     });
 
     document.getElementById("rule-save").addEventListener("click", _ruleModalSave);
@@ -1239,7 +1244,7 @@
     var toastEl  = document.getElementById("rule-act-toast");
     var mqttEl   = document.getElementById("rule-act-mqtt");
     if (!sensorEl || !metricEl || !valEl) {
-      showToast("Error", "Rule form is missing — reopen the dialog", "err");
+      showToast(ieT("iotExt.errorTitle"), ieT("iotExt.ruleFormMissing"), "err");
       return;
     }
     var name   = ((nameEl && nameEl.value) || "").trim();
@@ -1250,8 +1255,8 @@
     // min="0" on the input doesn't stop typed negatives (no native form
     // submit) — clamp so duration_s never goes negative into the uint32.
     var dur    = Math.max(0, parseInt((durEl && durEl.value) || "0", 10) || 0);
-    if (!sensor || !metric) { showToast("Missing field", "Pick a sensor and metric", "warn"); return; }
-    if (valStr === "" || isNaN(+valStr)) { showToast("Missing field", "Enter a numeric threshold", "warn"); return; }
+    if (!sensor || !metric) { showToast(ieT("iotExt.missingField"), ieT("iotExt.pickSensorAndMetric"), "warn"); return; }
+    if (valStr === "" || isNaN(+valStr)) { showToast(ieT("iotExt.missingField"), ieT("iotExt.enterNumericThreshold"), "warn"); return; }
     var actions = [];
     if (toastEl && toastEl.checked) actions.push("toast");
     if (mqttEl && mqttEl.checked)   actions.push("mqtt");
@@ -1283,7 +1288,7 @@
       .then(function (data) {
         _alertsData = data || { rules: [], history: [] };
         _alertsData.rules = _alertsData.rules || [];
-        if (_alertsData.rules.length >= ALERT_MAX_RULES) throw new Error("Rule limit reached (" + ALERT_MAX_RULES + ")");
+        if (_alertsData.rules.length >= ALERT_MAX_RULES) throw new Error(ieT("iotExt.ruleLimitReachedShort", { n: ALERT_MAX_RULES }));
         _alertsData.rules.push(rule);
         return getCsrfToken();
       })
@@ -1300,7 +1305,7 @@
         if (!res.ok) throw new Error(res.error || "save failed");
         _ruleModalClose();
         _renderAlertRules(_alertsData.rules);
-        showToast("Rule created", rule.name, "ok");
+        showToast(ieT("iotExt.ruleCreated"), rule.name, "ok");
       })
       .catch(function (e) {
         // Roll back the optimistic append so a retry doesn't duplicate
@@ -1308,7 +1313,7 @@
           _alertsData.rules = _alertsData.rules.filter(function (r2) { return r2.id !== rule.id; });
         }
         if (btn) btn.disabled = false;
-        showToast("Save failed", (e && e.message) || "Could not reach device", "err");
+        showToast(ieT("iotExt.saveFailed"), (e && e.message) || ieT("iotExt.couldNotReachDevice"), "err");
       });
   }
 
@@ -1316,11 +1321,11 @@
   function _relTime(ts) {
     if (!ts) return "—";
     var diff = Math.floor(Date.now() / 1000) - ts;
-    if (diff < 0)    return "just now";
-    if (diff < 60)   return diff + "s ago";
-    if (diff < 3600) return Math.floor(diff / 60) + " min ago";
-    if (diff < 86400) return Math.floor(diff / 3600) + " h ago";
-    return Math.floor(diff / 86400) + " d ago";
+    if (diff < 0)    return ieT("iotExt.justNow");
+    if (diff < 60)   return ieT("iotExt.secondsAgo", { n: diff });
+    if (diff < 3600) return ieT("iotExt.minutesAgo", { n: Math.floor(diff / 60) });
+    if (diff < 86400) return ieT("iotExt.hoursAgo", { n: Math.floor(diff / 3600) });
+    return ieT("iotExt.daysAgo", { n: Math.floor(diff / 86400) });
   }
 
   // ── Sensor diagnostics (formerly the Health page) ──────────────────────────
@@ -1340,7 +1345,7 @@
         var grid = document.getElementById("health-grid");
         if (grid) {
           grid.innerHTML = "";
-          grid.appendChild(emptyState({ icon: "heart-pulse", title: "Unable to load", msg: "Could not reach /api/sensors." }));
+          grid.appendChild(emptyState({ icon: "heart-pulse", title: ieT("iotExt.unableToLoad"), msg: ieT("iotExt.couldNotReachSensors") }));
         }
       });
   }
@@ -1365,7 +1370,7 @@
     if (!grid) return;
     if (!sensors.length) {
       grid.innerHTML = "";
-      grid.appendChild(emptyState({ icon: "heart-pulse", title: "No sensors", msg: "Add sensors via Core Logic." }));
+      grid.appendChild(emptyState({ icon: "heart-pulse", title: ieT("iotExt.noSensors"), msg: ieT("iotExt.addSensorsViaCoreLogic") }));
       return;
     }
 
@@ -1411,23 +1416,21 @@
           '<div class="health-uptime-bar" aria-label="24-hour uptime">' + uptimeBar(uptime, state) + '</div>' +
         '</div>' +
         '<div class="health-stats">' +
-          '<div class="health-stat"><span class="health-stat-l">Reads</span><span class="health-stat-v">' + reads.toLocaleString() + '</span></div>' +
-          '<div class="health-stat"><span class="health-stat-l">Errors</span><span class="health-stat-v' + (errors > 10 ? " err" : errors > 0 ? " warn" : "") + '">' + errors + '</span></div>' +
-          '<div class="health-stat"><span class="health-stat-l">Retries</span><span class="health-stat-v' + (retries > 10 ? " warn" : "") + '">' + retries + '</span></div>' +
-          '<div class="health-stat"><span class="health-stat-l">Avg latency</span><span class="health-stat-v">' + avgLat + '</span></div>' +
+          '<div class="health-stat"><span class="health-stat-l">' + esc(ieT("iotExt.reads")) + '</span><span class="health-stat-v">' + reads.toLocaleString() + '</span></div>' +
+          '<div class="health-stat"><span class="health-stat-l">' + esc(ieT("iotExt.errors")) + '</span><span class="health-stat-v' + (errors > 10 ? " err" : errors > 0 ? " warn" : "") + '">' + errors + '</span></div>' +
+          '<div class="health-stat"><span class="health-stat-l">' + esc(ieT("iotExt.retries")) + '</span><span class="health-stat-v' + (retries > 10 ? " warn" : "") + '">' + retries + '</span></div>' +
+          '<div class="health-stat"><span class="health-stat-l">' + esc(ieT("iotExt.avgLatency")) + '</span><span class="health-stat-v">' + avgLat + '</span></div>' +
         '</div>' +
         '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);font-family:var(--mono)">' +
-          '<span>Last: ' + esc(lastSeen) + '</span>' +
+          '<span>' + esc(ieT("iotExt.lastLabel")) + ' ' + esc(lastSeen) + '</span>' +
         '</div>' +
       '</div>';
     }).join("");
 
     reIcons(grid);
-    setEl("hl-summary",
-      sensors.length + " sensors · " +
-      upCount + " up · " +
-      staleCount + " stale · " +
-      errCount + " errored");
+    setEl("hl-summary", ieT("iotExt.healthSummary", {
+      total: sensors.length, up: upCount, stale: staleCount, err: errCount,
+    }));
   }
 
   // ─── Sensors page: live-cycle section (merged from removed Live page) ────
@@ -1456,24 +1459,24 @@
       '<div class="grid grid-12">' +
         '<div class="card span-8">' +
           '<div class="card-head">' +
-            '<div class="card-title"><span data-icon="droplets"></span> Current cycle</div>' +
+            '<div class="card-title"><span data-icon="droplets"></span> ' + esc(ieT("iotExt.currentCycle")) + '</div>' +
             '<span class="badge dim mono" id="slc-state">IDLE</span>' +
           '</div>' +
           '<div class="card-body">' +
             '<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;justify-content:space-between">' +
-              '<div class="bigstat"><div class="bigstat-l">Volume</div><div class="bigstat-v mono"><span id="slc-liters">0.00</span><span>L</span></div></div>' +
-              '<div class="bigstat"><div class="bigstat-l">Pulses</div><div class="bigstat-v mono" id="slc-pulses">0</div></div>' +
-              '<div class="bigstat"><div class="bigstat-l">Duration</div><div class="bigstat-v mono"><span id="slc-cycleTime">0</span><span>s</span></div></div>' +
-              '<div class="bigstat"><div class="bigstat-l">Trigger</div><div class="bigstat-v" style="color:var(--accent)" id="slc-trigger">–</div></div>' +
+              '<div class="bigstat"><div class="bigstat-l">' + esc(ieT("iotExt.volume")) + '</div><div class="bigstat-v mono"><span id="slc-liters">0.00</span><span>L</span></div></div>' +
+              '<div class="bigstat"><div class="bigstat-l">' + esc(ieT("iotExt.pulses")) + '</div><div class="bigstat-v mono" id="slc-pulses">0</div></div>' +
+              '<div class="bigstat"><div class="bigstat-l">' + esc(ieT("iotExt.duration")) + '</div><div class="bigstat-v mono"><span id="slc-cycleTime">0</span><span>s</span></div></div>' +
+              '<div class="bigstat"><div class="bigstat-l">' + esc(ieT("iotExt.trigger")) + '</div><div class="bigstat-v" style="color:var(--accent)" id="slc-trigger">–</div></div>' +
             '</div>' +
           '</div>' +
         '</div>' +
         '<div class="card span-4">' +
-          '<div class="card-head"><div class="card-title"><span data-icon="git-branch"></span> State machine</div></div>' +
+          '<div class="card-head"><div class="card-title"><span data-icon="git-branch"></span> ' + esc(ieT("iotExt.stateMachine")) + '</div></div>' +
           '<div class="card-body" style="display:flex;flex-direction:column;gap:12px">' +
             '<div id="sensors-live-state-wrap">' +
               '<div id="slc-state-mirror" class="badge dim">–</div>' +
-              '<div class="mono" style="font-size:11px;color:var(--text-3);margin-top:8px">Live feed from the legacy flow-meter pipeline. Open <a href="#live" data-click="navPage" data-page="live" data-args="[]">the full Live page</a> for the timer + log.</div>' +
+              '<div class="mono" style="font-size:11px;color:var(--text-3);margin-top:8px">' + ieT("iotExt.liveCycleHint") + '</div>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -1632,6 +1635,11 @@
     grid.style.display = "block";
 
     var ZONE_ICONS = { indoor:"home", outdoor:"sun", utility:"wrench", other:"grid" };
+    var ZONE_LABEL_KEYS = { indoor:"iotExt.zoneIndoor", outdoor:"iotExt.zoneOutdoor", utility:"iotExt.zoneUtility", other:"iotExt.zoneOther" };
+    function zoneLabel(zone) {
+      var key = ZONE_LABEL_KEYS[zone];
+      return key ? ieT(key) : zone.charAt(0).toUpperCase() + zone.slice(1);
+    }
 
     // Helper: flatten arrays of cards for a list of sensor ids
     function _cardsFor(ids) {
@@ -1653,9 +1661,9 @@
         '<div class="zone-head">' +
           '<div class="zone-title">' +
             '<span data-icon="' + (ZONE_ICONS[zone] || "grid") + '"></span>' +
-            zone.charAt(0).toUpperCase() + zone.slice(1) +
+            esc(zoneLabel(zone)) +
           '</div>' +
-          '<div class="zone-meta">' + uniqueIds.length + ' sensor' + (uniqueIds.length !== 1 ? 's' : '') + '</div>' +
+          '<div class="zone-meta">' + esc(ieT(uniqueIds.length === 1 ? "iotExt.zoneSensorCount" : "iotExt.zoneSensorCountPlural", { n: uniqueIds.length })) + '</div>' +
         '</div>' +
         '<div class="sensors-grid zone-cards"></div>';
 
@@ -1675,8 +1683,8 @@
       sec2.className = "zone-section";
       sec2.innerHTML =
         '<div class="zone-head">' +
-          '<div class="zone-title"><span data-icon="grid"></span> Other</div>' +
-          '<div class="zone-meta">' + unzonedIds.length + ' sensor' + (unzonedIds.length !== 1 ? 's' : '') + '</div>' +
+          '<div class="zone-title"><span data-icon="grid"></span> ' + esc(ieT("iotExt.zoneOther")) + '</div>' +
+          '<div class="zone-meta">' + esc(ieT(unzonedIds.length === 1 ? "iotExt.zoneSensorCount" : "iotExt.zoneSensorCountPlural", { n: unzonedIds.length })) + '</div>' +
         '</div>' +
         '<div class="sensors-grid zone-cards"></div>';
       var cg2 = sec2.querySelector(".zone-cards");
@@ -1704,8 +1712,8 @@
     var chipBar = document.createElement("div");
     chipBar.className = "compare-chips";
     chipBar.innerHTML =
-      '<span style="color:var(--text-3);align-self:center;margin-right:4px;font-size:11px">Compare:</span>' +
-      '<button class="cmp-add"><span data-icon="plus"></span> Add series</button>';
+      '<span style="color:var(--text-3);align-self:center;margin-right:4px;font-size:11px">' + esc(ieT("iotExt.compareLabel")) + '</span>' +
+      '<button class="cmp-add"><span data-icon="plus"></span> ' + esc(ieT("iotExt.addSeries")) + '</button>';
 
     // Insert after card-head
     var cardHead = chartCard.querySelector(".card-head");
@@ -1718,7 +1726,7 @@
       var s1 = document.getElementById("sc-sensor");
       var m1 = document.getElementById("sc-metric");
       if (!s1 || !s1.value || !m1 || !m1.value) {
-        showToast("Select a sensor first", "Choose a sensor and metric above to compare", "warn");
+        showToast(ieT("iotExt.selectSensorFirst"), ieT("iotExt.selectSensorFirstMsg"), "warn");
         return;
       }
       var existing = chipBar.querySelectorAll(".cmp-chip");
@@ -1730,7 +1738,7 @@
       chip.innerHTML =
         '<span class="cmp-dot" style="background:' + color + '"></span>' +
         esc(s1.options[s1.selectedIndex].text) + " · " + esc(m1.value) + " " +
-        '<button class="cmp-chip-rm" aria-label="Remove series">×</button>';
+        '<button class="cmp-chip-rm" aria-label="' + esc(ieT("iotExt.removeSeries")) + '">×</button>';
       chip.querySelector(".cmp-chip-rm").addEventListener("click", function () {
         chip.remove();
       });
@@ -1741,7 +1749,7 @@
   // ─── 4-step Add Sensor wizard ─────────────────────────────────────────────
   var _wizardEl = null;
   var _wizStep = 1;
-  var _wizLabels = ["Type", "ID & Zone", "Interface", "Review"];
+  var _wizLabelKeys = ["iotExt.wizStepType", "iotExt.wizStepIdZone", "iotExt.wizStepInterface", "iotExt.wizStepReview"];
 
   function buildWizardModal() {
     if (document.getElementById("sensorWizard")) return;
@@ -1751,7 +1759,7 @@
     wiz.id = "sensorWizard";
     wiz.setAttribute("role", "dialog");
     wiz.setAttribute("aria-modal", "true");
-    wiz.setAttribute("aria-label", "Add sensor");
+    wiz.setAttribute("aria-label", ieT("iotExt.addSensor"));
 
     var typeCards = [
       ["bme280",  "thermometer",     "BME280",    "I2C · T/H/P"],
@@ -1782,8 +1790,8 @@
     wiz.innerHTML =
       '<div class="modal">' +
         '<div class="modal-head">' +
-          '<div class="modal-title"><span data-icon="plus-circle"></span> Add sensor</div>' +
-          '<button class="btn-mini" id="wizClose" aria-label="Close"><span data-icon="x"></span></button>' +
+          '<div class="modal-title"><span data-icon="plus-circle"></span> ' + esc(ieT("iotExt.addSensor")) + '</div>' +
+          '<button class="btn-mini" id="wizClose" aria-label="' + esc(ieT("common.close")) + '"><span data-icon="x"></span></button>' +
         '</div>' +
         '<div class="modal-body">' +
           '<div class="wiz-steps">' +
@@ -1791,52 +1799,52 @@
           '</div>' +
           // Step 1
           '<div class="wiz-step active" data-step="1">' +
-            '<div class="label" style="margin-bottom:8px;font-size:12px;color:var(--text-3);font-weight:600">Sensor type</div>' +
+            '<div class="label" style="margin-bottom:8px;font-size:12px;color:var(--text-3);font-weight:600">' + esc(ieT("iotExt.sensorTypeLabel")) + '</div>' +
             '<div class="wiz-type-grid">' + typeGridHTML + '</div>' +
           '</div>' +
           // Step 2
           '<div class="wiz-step" data-step="2">' +
             '<div class="form-grid">' +
-              '<div class="field"><label for="wiz-id">Sensor ID</label><input id="wiz-id" class="input mono" value="new_sensor" placeholder="e.g. bme280_kitchen"/><p class="hint">Used in API responses and MQTT topics</p></div>' +
-              '<div class="field"><label for="wiz-zone">Zone</label><select id="wiz-zone" class="input"><option>indoor</option><option>outdoor</option><option>utility</option></select></div>' +
-              '<div class="field" style="grid-column:span 2"><label for="wiz-name">Display name</label><input id="wiz-name" class="input" value="New sensor"/></div>' +
+              '<div class="field"><label for="wiz-id">' + esc(ieT("iotExt.sensorIdLabel")) + '</label><input id="wiz-id" class="input mono" value="new_sensor" placeholder="' + esc(ieT("iotExt.sensorIdPh")) + '"/><p class="hint">' + esc(ieT("iotExt.sensorIdHint")) + '</p></div>' +
+              '<div class="field"><label for="wiz-zone">' + esc(ieT("iotExt.zoneLabel")) + '</label><select id="wiz-zone" class="input"><option>indoor</option><option>outdoor</option><option>utility</option></select></div>' +
+              '<div class="field" style="grid-column:span 2"><label for="wiz-name">' + esc(ieT("iotExt.displayNameLabel")) + '</label><input id="wiz-name" class="input" value="' + esc(ieT("iotExt.newSensorDefault")) + '"/></div>' +
             '</div>' +
           '</div>' +
           // Step 3
           '<div class="wiz-step" data-step="3">' +
             '<div class="form-grid">' +
-              '<div class="field"><label for="wiz-iface">Interface</label><select id="wiz-iface" class="input"><option>I2C</option><option>UART</option><option>Pulse</option><option>GPIO</option><option>ADC</option><option>1-Wire</option><option>HTTP</option></select></div>' +
+              '<div class="field"><label for="wiz-iface">' + esc(ieT("iotExt.interfaceLabel")) + '</label><select id="wiz-iface" class="input"><option>I2C</option><option>UART</option><option>Pulse</option><option>GPIO</option><option>ADC</option><option>1-Wire</option><option>HTTP</option></select></div>' +
               // I2C fields
-              '<div class="field wiz-if" data-if="i2c"><label for="wiz-addr">I2C Address</label><input id="wiz-addr" class="input mono" value="0x76"/></div>' +
-              '<div class="field wiz-if" data-if="i2c"><label for="wiz-sda">SDA pin</label><input id="wiz-sda" class="input mono" type="number" value="6"/></div>' +
-              '<div class="field wiz-if" data-if="i2c"><label for="wiz-scl">SCL pin</label><input id="wiz-scl" class="input mono" type="number" value="7"/></div>' +
+              '<div class="field wiz-if" data-if="i2c"><label for="wiz-addr">' + esc(ieT("iotExt.i2cAddressLabel")) + '</label><input id="wiz-addr" class="input mono" value="0x76"/></div>' +
+              '<div class="field wiz-if" data-if="i2c"><label for="wiz-sda">' + esc(ieT("iotExt.sdaPinLabel")) + '</label><input id="wiz-sda" class="input mono" type="number" value="6"/></div>' +
+              '<div class="field wiz-if" data-if="i2c"><label for="wiz-scl">' + esc(ieT("iotExt.sclPinLabel")) + '</label><input id="wiz-scl" class="input mono" type="number" value="7"/></div>' +
               // UART fields
-              '<div class="field wiz-if" data-if="uart"><label for="wiz-rx">RX pin</label><input id="wiz-rx" class="input mono" type="number" value="4"/></div>' +
-              '<div class="field wiz-if" data-if="uart"><label for="wiz-tx">TX pin <span style="color:var(--text-3)">(optional)</span></label><input id="wiz-tx" class="input mono" type="number" placeholder="—"/></div>' +
-              '<div class="field wiz-if" data-if="uart"><label for="wiz-baud">Baud</label><input id="wiz-baud" class="input mono" type="number" value="9600"/></div>' +
+              '<div class="field wiz-if" data-if="uart"><label for="wiz-rx">' + esc(ieT("iotExt.rxPinLabel")) + '</label><input id="wiz-rx" class="input mono" type="number" value="4"/></div>' +
+              '<div class="field wiz-if" data-if="uart"><label for="wiz-tx">' + esc(ieT("iotExt.txPinLabel")) + ' <span style="color:var(--text-3)">' + esc(ieT("iotExt.optionalParen")) + '</span></label><input id="wiz-tx" class="input mono" type="number" placeholder="—"/></div>' +
+              '<div class="field wiz-if" data-if="uart"><label for="wiz-baud">' + esc(ieT("iotExt.baudLabel")) + '</label><input id="wiz-baud" class="input mono" type="number" value="9600"/></div>' +
               // GPIO / ADC / 1-Wire: single data pin
-              '<div class="field wiz-if" data-if="pulse gpio adc 1-wire"><label for="wiz-pin">Data pin</label><input id="wiz-pin" class="input mono" type="number" value="4"/></div>' +
-              '<div class="field wiz-if" data-if="http"><label for="wiz-node">Remote Node ID</label><input id="wiz-node" class="input mono" type="text" placeholder="Defaults to Sensor ID"/></div>' +
+              '<div class="field wiz-if" data-if="pulse gpio adc 1-wire"><label for="wiz-pin">' + esc(ieT("iotExt.dataPinLabel")) + '</label><input id="wiz-pin" class="input mono" type="number" value="4"/></div>' +
+              '<div class="field wiz-if" data-if="http"><label for="wiz-node">' + esc(ieT("iotExt.remoteNodeIdLabel")) + '</label><input id="wiz-node" class="input mono" type="text" placeholder="' + esc(ieT("iotExt.remoteNodeIdPh")) + '"/></div>' +
               // Always shown
-              '<div class="field"><label for="wiz-int">Read interval (ms)</label><input id="wiz-int" class="input mono" type="number" value="10000" min="500"/></div>' +
+              '<div class="field"><label for="wiz-int">' + esc(ieT("iotExt.readIntervalLabel")) + '</label><input id="wiz-int" class="input mono" type="number" value="10000" min="500"/></div>' +
             '</div>' +
             // Restricted-pin warning + per-sensor override (populated by wizUpdatePinWarn)
             '<div id="wiz-pinwarn" style="display:none;margin-top:10px;padding:8px 10px;border-radius:6px;font-size:12px"></div>' +
             '<label id="wiz-unsafe-wrap" style="display:none;align-items:center;gap:6px;cursor:pointer;margin-top:8px;font-size:12px">' +
-              '<input type="checkbox" id="wiz-unsafe"> Use this pin anyway (I\'ve added proper pull-ups)' +
+              '<input type="checkbox" id="wiz-unsafe"> ' + esc(ieT("iotExt.useAnywayLabel")) +
             '</label>' +
           '</div>' +
           // Step 4
           '<div class="wiz-step" data-step="4">' +
-            '<div class="label" style="margin-bottom:8px;font-size:12px;color:var(--text-3);font-weight:600">Review configuration</div>' +
+            '<div class="label" style="margin-bottom:8px;font-size:12px;color:var(--text-3);font-weight:600">' + esc(ieT("iotExt.reviewConfigLabel")) + '</div>' +
             '<pre id="wiz-json" style="background:var(--panel-2);border:1px solid var(--border);border-radius:6px;padding:14px;font-family:var(--mono);font-size:11.5px;line-height:1.7;overflow:auto;white-space:pre-wrap"></pre>' +
-            '<p style="font-size:12px;color:var(--text-3);margin-top:10px">Saving will reload the platform pipeline.</p>' +
+            '<p style="font-size:12px;color:var(--text-3);margin-top:10px">' + esc(ieT("iotExt.savingWillReload")) + '</p>' +
           '</div>' +
         '</div>' +
         '<div class="modal-foot">' +
-          '<button class="btn" id="wizPrev" style="visibility:hidden"><span data-icon="arrow-left"></span> Back</button>' +
-          '<span class="mono" style="color:var(--text-3);font-size:11px" id="wizStepLabel">Step 1 of 4 · Type</span>' +
-          '<button class="btn primary" id="wizNext">Next <span data-icon="arrow-right"></span></button>' +
+          '<button class="btn" id="wizPrev" style="visibility:hidden"><span data-icon="arrow-left"></span> ' + esc(ieT("common.back")) + '</button>' +
+          '<span class="mono" style="color:var(--text-3);font-size:11px" id="wizStepLabel">' + esc(ieT("iotExt.wizStepOf4", { n: 1, label: ieT(_wizLabelKeys[0]) })) + '</span>' +
+          '<button class="btn primary" id="wizNext">' + esc(ieT("iotExt.next")) + ' <span data-icon="arrow-right"></span></button>' +
         '</div>' +
       '</div>';
 
@@ -1905,14 +1913,14 @@
       d.classList.toggle("done",   i + 1 < _wizStep);
       d.classList.toggle("active", i + 1 === _wizStep);
     });
-    setEl("wizStepLabel", "Step " + _wizStep + " of 4 · " + _wizLabels[_wizStep - 1]);
+    setEl("wizStepLabel", ieT("iotExt.wizStepOf4", { n: _wizStep, label: ieT(_wizLabelKeys[_wizStep - 1]) }));
     var prev = document.getElementById("wizPrev");
     if (prev) prev.style.visibility = _wizStep === 1 ? "hidden" : "visible";
     var next = document.getElementById("wizNext");
     if (next) {
       next.innerHTML = _wizStep === 4
-        ? '<span data-icon="check"></span> Save &amp; reload'
-        : 'Next <span data-icon="arrow-right"></span>';
+        ? '<span data-icon="check"></span> ' + esc(ieT("iotExt.saveAndReload"))
+        : esc(ieT("iotExt.next")) + ' <span data-icon="arrow-right"></span>';
       reIcons(next);
     }
   }
@@ -1957,8 +1965,8 @@
       warn.style.background = hard ? "rgba(220,38,38,.12)" : "rgba(217,119,6,.14)";
       warn.style.color      = hard ? "var(--err)" : "var(--warn)";
       warn.innerHTML = "⚠ " + msgs.join(" · ") +
-        (hard ? " — this pin can't be used (hardware-reserved); pick another."
-              : " — usable only with proper pull-ups; the device may fail to boot if held LOW at reset.");
+        (hard ? " " + ieT("iotExt.pinHardBlocked")
+              : " " + ieT("iotExt.pinSoftRisk"));
       // Override applies only to soft risks with no hard blocker present.
       if (wrap) wrap.style.display = (soft && !hard) ? "flex" : "none";
     });
@@ -2026,7 +2034,7 @@
     var pre = document.getElementById("wiz-json");
     var obj;
     try { obj = pre ? JSON.parse(pre.textContent) : null; } catch (e) { obj = null; }
-    if (!obj) { showToast("Parse error", "Could not read sensor config", "err"); return; }
+    if (!obj) { showToast(ieT("iotExt.parseError"), ieT("iotExt.couldNotReadSensorConfig"), "err"); return; }
 
     // Sensors live in platform_config.json, not the binary config, and there is
     // no single-sensor endpoint (the old /save_corelogic + add_sensor never
@@ -2058,7 +2066,7 @@
       .then(function (res) {
         if (res && res.ok) {
           closeWizard();
-          showToast("Sensor added", obj.id + " · device restarting to apply", "ok");
+          showToast(ieT("iotExt.sensorAdded"), obj.id + " · " + ieT("iotExt.deviceRestartingToApply"), "ok");
           // /save_platform only writes platform_config.json — the running
           // pipeline keeps the old config until reloaded. Mirror the Core Logic
           // page: signal a reload (sets shouldRestart server-side; not CSRF-
@@ -2066,11 +2074,11 @@
           postWithCsrf("/api/platform_reload", { method: "POST" }, 30000).catch(function () {});
           setTimeout(function () { if (typeof sensorsLoad === "function") sensorsLoad(); }, 6000);
         } else {
-          showToast("Save failed", (res && res.error) || "Check firmware logs", "err");
+          showToast(ieT("iotExt.saveFailed"), (res && res.error) || ieT("iotExt.checkFirmwareLogs"), "err");
         }
       })
       .catch(function (e) {
-        showToast("Save failed", (e && e.message) ? e.message : "Could not reach device", "err");
+        showToast(ieT("iotExt.saveFailed"), (e && e.message) ? e.message : ieT("iotExt.couldNotReachDevice"), "err");
       });
   }
 
