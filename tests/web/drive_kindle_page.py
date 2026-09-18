@@ -38,6 +38,17 @@ def check(cond, what):
         fails.append(what)
 
 
+# Redesign 3a (panel-led/tabbed) split the inspector into Zones / Whole page /
+# Reader tabs; only one is visible at a time, so any interaction with a field
+# outside the active one needs a switch first. The panel itself and the
+# savebar are NOT tab-gated (they sit outside .kd-pane-form entirely), so
+# clicks on panel hit-targets and the Save/Discard buttons work regardless of
+# which tab is showing.
+def tab(pg, name):
+    pg.click('#kd-tabs button[data-tab="%s"]' % name)
+    pg.wait_for_timeout(150)
+
+
 # What mock_device.py starts with — not the defaults, on purpose: a page that
 # renders correctly only when every value is zero has never had its selects
 # proven against anything.
@@ -193,6 +204,7 @@ with sync_playwright() as p:
     # date format is dimmed when the clock does not draw one: a visible control
     # that does nothing is a question the page asks and then ignores the answer
     # to.
+    tab(pg, "page")
     check(not pg.is_visible("#kd-face-custom-row"),
           "the custom font field is hidden for a named face")
     pg.select_option("#kd-face", "6")
@@ -212,6 +224,7 @@ with sync_playwright() as p:
           "another clock style says where the date format applies")
 
     # The page states the build-time width rather than offering it as a knob.
+    tab(pg, "reader")
     intro = pg.locator("#kd-pagew").inner_text()
     check("600" in intro, f"the layout width is stated: {intro.strip()[:60]!r}")
 
@@ -239,14 +252,19 @@ with sync_playwright() as p:
     check("setting" in dirty, f"and counts what is unsaved ({dirty!r})")
 
     # Bits flipped in both directions so a handler that only ever ORs, or one
-    # that writes a constant, cannot pass.
+    # that writes a constant, cannot pass. Split across the three tabs these
+    # fields now live in (redesign 3a) — same edits, same order of intent,
+    # just grouped by which panel has to be active to reach them.
+    tab(pg, "page")
     pg.select_option("#kd-lang", "1")       # English
     pg.select_option("#kd-face", "2")       # Palatino
     pg.select_option("#kd-clock", "1")      # boxed
     pg.select_option("#kd-time", "0")       # 24 h
     pg.select_option("#kd-press", "0")      # hPa
     pg.select_option("#kd-dec", "1")
+    tab(pg, "reader")
     pg.select_option("#kd-fbink-res", "0")  # back to the smaller panel
+    tab(pg, "zones")
     pg.uncheck("#kd-b-1")                   # clear outdoor temperature
     pg.check("#kd-b-4")                     # set pressure
     pg.check("#kd-s-64")                    # put the week strip back
@@ -255,6 +273,8 @@ with sync_playwright() as p:
 
     # AND A PLACE, in the same save. This is the half that used to be lost:
     # the Save at the foot of the page did not cover it and said "Saved".
+    # (Zones tab is already active from the checkbox edits just above, which
+    # is what the hero row's select needs to be reachable.)
     pg.click("#kd-panel .kd-hit[data-args='[\"hero\"]']")
     pg.wait_for_timeout(300)
     hero_ink = pg.locator("#kd-zone-hero select").last
@@ -296,6 +316,7 @@ with sync_playwright() as p:
 
     # ── Discard ─────────────────────────────────────────────────────────────
     # The other half of one save: a way back that does not need a reload.
+    tab(pg, "page")
     pg.select_option("#kd-dec", "0")
     pg.wait_for_timeout(250)
     check(pg.is_visible("#kd-savebar"), "an edit brings the bar back")
@@ -309,6 +330,7 @@ with sync_playwright() as p:
     # Eleven fixed places. What matters here is that the dropdowns reflect the
     # HARDWARE: a BMP280 must not offer humidity, because it cannot measure it,
     # and that is the whole reason for the feature.
+    tab(pg, "zones")
     pg.click("#kd-panel .kd-hit[data-args='[\"grid\"]']")
     pg.wait_for_timeout(350)
     grid_slots = pg.locator("#kd-zrow-grid .kd-slot")
@@ -444,16 +466,22 @@ with sync_playwright() as p:
     # the last named choice left in them — so every edit anywhere on the page
     # hid the fields the reader had just opened, and typing 600 into the
     # interval passes through 60, which IS a preset.
+    tab(pg, "reader")
     pg.click('[data-click="kindleCadence"][data-args=\'["balanced"]\']')
     pg.wait_for_timeout(300)
     check(not pg.is_visible("#kd-cad-custom"), "a named cadence keeps the fields shut")
     pg.click('[data-click="kindleCadence"][data-args=\'["custom"]\']')
     pg.wait_for_timeout(300)
     check(pg.is_visible("#kd-cad-custom"), "By hand opens them")
+    tab(pg, "zones")
     pg.click("#kd-s-32")                      # an unrelated switch, twice
     pg.wait_for_timeout(200)
     pg.click("#kd-s-32")
     pg.wait_for_timeout(200)
+    # Back to Reader to actually SEE that the fields are still open — the
+    # state persisted through the zones-tab edit above, but that's only
+    # verifiable while this tab is the one showing.
+    tab(pg, "reader")
     check(pg.is_visible("#kd-cad-custom"),
           "and an edit somewhere else does not shut them again")
     pg.fill("#kd-refresh", "60")              # a value that matches a preset
@@ -470,6 +498,7 @@ with sync_playwright() as p:
     def ink_of(key):
         return pg.locator("#kd-zone-" + key + " select").last.input_value()
 
+    tab(pg, "zones")
     pg.click("#kd-panel .kd-hit[data-args='[\"big\"]']")
     pg.wait_for_timeout(300)
     check(ink_of("big") == "2", "a place pushed into the mid grey round-trips (%s)"
@@ -485,6 +514,7 @@ with sync_playwright() as p:
     # a destructive button that acts before the reader has seen what it did is
     # a button nobody can undo.
     pg.on("dialog", lambda d: d.accept())
+    tab(pg, "reader")
     pg.click('[data-click="kindleDefaults"]')
     pg.wait_for_timeout(700)
     check(pg.input_value("#kd-face") == "0", "restoring fills the form")
@@ -518,6 +548,7 @@ with sync_playwright() as p:
     # "As built" has to say WHICH language that is, or it is a promise the page
     # cannot keep: a reader looking at the option has no way to know whether
     # leaving it there means English or Bulgarian.
+    tab(pg, "page")
     as_built = pg.locator("#kd-lang option[value='0']").inner_text()
     check("English" in as_built,
           f"the as-built option names the build's language ({as_built!r})")
@@ -544,6 +575,7 @@ with sync_playwright() as p:
     check(pg.locator("#kd-zones-unread").count() == 1,
           "and the rows say they are not the device's, rather than looking empty")
     pg.unroute("**/api/kindle/slots*")
+    tab(pg, "page")
     pg.select_option("#kd-face", "1")
     pg.wait_for_timeout(200)
     pg.click('[data-click="kindleSave"]')
@@ -570,6 +602,7 @@ with sync_playwright() as p:
              else route.continue_())
     pg.reload(wait_until="networkidle")
     pg.wait_for_timeout(1400)
+    tab(pg, "page")
     pg.select_option("#kd-face", "3")
     pg.wait_for_timeout(200)
     pg.click('[data-click="kindleSave"]')
@@ -590,6 +623,7 @@ with sync_playwright() as p:
     check(pg.input_value("#kd-layout") == "0",
           "the page's shape starts at what the device holds (follow the collector)")
     fc_before = pg.locator("#kd-panel .kd-hit[data-args='[\"fc\"]']").count()
+    tab(pg, "reader")
     pg.select_option("#kd-layout", "2")
     pg.wait_for_timeout(500)
 
