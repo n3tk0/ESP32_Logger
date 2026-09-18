@@ -24,6 +24,9 @@
 
 (function () {
 
+  // Guarded i18n lookup — same idiom as nodes.js's ndT() / iot-extensions.js's ieT().
+  function qsT(key, vars) { return window.I18n ? I18n.t(key, vars) : key; }
+
   var panel = null;
 
   function build() {
@@ -32,72 +35,72 @@
     panel.className = "qsp";
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "true");
-    panel.setAttribute("aria-label", "Quick settings");
+    panel.setAttribute("aria-label", qsT("quickSettings.title"));
     panel.innerHTML =
       '<div class="qsp-backdrop" data-role="backdrop"></div>' +
       '<aside class="qsp-sheet" role="region">' +
         '<header class="qsp-head">' +
-          '<div class="qsp-title"><span data-icon="sliders-horizontal"></span> Quick settings</div>' +
-          '<button type="button" class="btn-mini qsp-close" aria-label="Close"><span data-icon="x"></span></button>' +
+          '<div class="qsp-title"><span data-icon="sliders-horizontal"></span> ' + esc(qsT("quickSettings.title")) + '</div>' +
+          '<button type="button" class="btn-mini qsp-close" aria-label="' + esc(qsT("common.close")) + '"><span data-icon="x"></span></button>' +
         '</header>' +
         '<div class="qsp-body">' +
           // ── Appearance ─────────────────────────────────────────────────
           '<section class="qsp-section">' +
-            '<div class="qsp-eyebrow">APPEARANCE</div>' +
+            '<div class="qsp-eyebrow">' + esc(qsT("quickSettings.appearance")) + '</div>' +
             '<div class="qsp-row">' +
-              '<div class="qsp-label">Theme</div>' +
-              '<div class="qsp-seg" role="group" aria-label="Theme">' +
-                '<button type="button" data-theme="light"><span data-icon="sun"></span> Light</button>' +
-                '<button type="button" data-theme="dark"><span data-icon="moon"></span> Dark</button>' +
-                '<button type="button" data-theme="auto">Auto</button>' +
+              '<div class="qsp-label">' + esc(qsT("quickSettings.theme")) + '</div>' +
+              '<div class="qsp-seg" role="group" aria-label="' + esc(qsT("quickSettings.theme")) + '">' +
+                '<button type="button" data-theme="light"><span data-icon="sun"></span> ' + esc(qsT("quickSettings.light")) + '</button>' +
+                '<button type="button" data-theme="dark"><span data-icon="moon"></span> ' + esc(qsT("quickSettings.dark")) + '</button>' +
+                '<button type="button" data-theme="auto">' + esc(qsT("quickSettings.auto")) + '</button>' +
               '</div>' +
             '</div>' +
             '<div class="qsp-row">' +
-              '<div class="qsp-label">Accent</div>' +
+              '<div class="qsp-label">' + esc(qsT("quickSettings.accent")) + '</div>' +
               '<div class="qsp-swatches">' +
-                '<button type="button" class="accent-swatch" data-accent="cyan"   aria-label="Cyan"></button>' +
-                '<button type="button" class="accent-swatch" data-accent="amber"  aria-label="Amber"></button>' +
-                '<button type="button" class="accent-swatch" data-accent="green"  aria-label="Green"></button>' +
-                '<button type="button" class="accent-swatch" data-accent="violet" aria-label="Violet"></button>' +
+                '<button type="button" class="accent-swatch" data-accent="cyan"   aria-label="' + esc(qsT("quickSettings.accentCyan")) + '"></button>' +
+                '<button type="button" class="accent-swatch" data-accent="amber"  aria-label="' + esc(qsT("quickSettings.accentAmber")) + '"></button>' +
+                '<button type="button" class="accent-swatch" data-accent="green"  aria-label="' + esc(qsT("quickSettings.accentGreen")) + '"></button>' +
+                '<button type="button" class="accent-swatch" data-accent="violet" aria-label="' + esc(qsT("quickSettings.accentViolet")) + '"></button>' +
               '</div>' +
             '</div>' +
             '<div class="qsp-row">' +
-              '<div class="qsp-label">Density</div>' +
-              '<div class="qsp-seg" role="group" aria-label="Density">' +
-                '<button type="button" data-density="comfortable">Comfortable</button>' +
-                '<button type="button" data-density="compact">Compact</button>' +
+              '<div class="qsp-label">' + esc(qsT("quickSettings.density")) + '</div>' +
+              '<div class="qsp-seg" role="group" aria-label="' + esc(qsT("quickSettings.density")) + '">' +
+                '<button type="button" data-density="comfortable">' + esc(qsT("quickSettings.comfortable")) + '</button>' +
+                '<button type="button" data-density="compact">' + esc(qsT("quickSettings.compact")) + '</button>' +
               '</div>' +
             '</div>' +
             '<div class="qsp-row">' +
-              '<div class="qsp-label">Sidebar</div>' +
-              '<button type="button" class="btn qsp-flex" data-role="sidebar-toggle"><span data-icon="menu"></span> Toggle rail</button>' +
+              '<div class="qsp-label">' + esc(qsT("quickSettings.sidebar")) + '</div>' +
+              '<button type="button" class="btn qsp-flex" data-role="sidebar-toggle"><span data-icon="menu"></span> ' + esc(qsT("quickSettings.toggleRail")) + '</button>' +
             '</div>' +
           '</section>' +
           // ── Connectivity ───────────────────────────────────────────────
           '<section class="qsp-section">' +
-            '<div class="qsp-eyebrow">CONNECTIVITY</div>' +
+            '<div class="qsp-eyebrow">' + esc(qsT("quickSettings.connectivity")) + '</div>' +
             '<div class="qsp-summary">' +
-              '<div class="qsp-summary-row"><span class="qsp-label">Hostname</span><span class="mono" data-role="hostname">—</span></div>' +
+              '<div class="qsp-summary-row"><span class="qsp-label">' + esc(qsT("quickSettings.hostname")) + '</span><span class="mono" data-role="hostname">—</span></div>' +
               '<div class="qsp-summary-row"><span class="qsp-label">WiFi</span><span class="mono" data-role="wifi">—</span></div>' +
               '<div class="qsp-summary-row"><span class="qsp-label">IP</span><span class="mono" data-role="ip">—</span></div>' +
-              '<div class="qsp-summary-row"><span class="qsp-label">Mode</span><span class="mono" data-role="mode">—</span></div>' +
+              '<div class="qsp-summary-row"><span class="qsp-label">' + esc(qsT("quickSettings.mode")) + '</span><span class="mono" data-role="mode">—</span></div>' +
             '</div>' +
             '<div class="qsp-row qsp-row-actions">' +
-              '<button type="button" class="btn" data-role="goto-network"><span data-icon="wifi"></span> Network settings</button>' +
-              '<button type="button" class="btn" data-role="goto-platform"><span data-icon="cpu"></span> Platform</button>' +
+              '<button type="button" class="btn" data-role="goto-network"><span data-icon="wifi"></span> ' + esc(qsT("quickSettings.networkSettings")) + '</button>' +
+              '<button type="button" class="btn" data-role="goto-platform"><span data-icon="cpu"></span> ' + esc(qsT("cmdPalette.platform")) + '</button>' +
             '</div>' +
           '</section>' +
           // ── System ─────────────────────────────────────────────────────
           '<section class="qsp-section">' +
-            '<div class="qsp-eyebrow">SYSTEM</div>' +
+            '<div class="qsp-eyebrow">' + esc(qsT("quickSettings.system")) + '</div>' +
             '<div class="qsp-summary">' +
-              '<div class="qsp-summary-row"><span class="qsp-label">Firmware</span><span class="mono" data-role="fw">—</span></div>' +
-              '<div class="qsp-summary-row"><span class="qsp-label">Uptime</span><span class="mono" data-role="uptime">—</span></div>' +
-              '<div class="qsp-summary-row"><span class="qsp-label">Free heap</span><span class="mono" data-role="heap">—</span></div>' +
+              '<div class="qsp-summary-row"><span class="qsp-label">' + esc(qsT("quickSettings.firmware")) + '</span><span class="mono" data-role="fw">—</span></div>' +
+              '<div class="qsp-summary-row"><span class="qsp-label">' + esc(qsT("quickSettings.uptime")) + '</span><span class="mono" data-role="uptime">—</span></div>' +
+              '<div class="qsp-summary-row"><span class="qsp-label">' + esc(qsT("quickSettings.freeHeap")) + '</span><span class="mono" data-role="heap">—</span></div>' +
             '</div>' +
             '<div class="qsp-row qsp-row-actions">' +
-              '<button type="button" class="btn" data-role="goto-update"><span data-icon="cloud-upload"></span> Update firmware</button>' +
-              '<button type="button" class="btn warn" data-role="restart"><span data-icon="rotate-ccw"></span> Restart device</button>' +
+              '<button type="button" class="btn" data-role="goto-update"><span data-icon="cloud-upload"></span> ' + esc(qsT("quickSettings.updateFirmware")) + '</button>' +
+              '<button type="button" class="btn warn" data-role="restart"><span data-icon="rotate-ccw"></span> ' + esc(qsT("chrome.restartDevice")) + '</button>' +
             '</div>' +
           '</section>' +
         '</div>' +
@@ -186,7 +189,7 @@
     set("mode",     (cfg.platform && cfg.platform.mode) || document.documentElement.dataset.mode || "—");
     set("fw",       st.version  || st.fw       || "—");
     // /api/status has no uptime-in-seconds field; show boot count instead
-    set("uptime",   st.boot !== undefined ? "Boot #" + st.boot : formatUptime(st.uptime));
+    set("uptime",   st.boot !== undefined ? qsT("quickSettings.bootHash", { n: st.boot }) : formatUptime(st.uptime));
     set("heap",     st.heap     ? (st.heap + " B") : "—");
   }
 
