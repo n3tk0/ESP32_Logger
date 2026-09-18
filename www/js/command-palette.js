@@ -22,6 +22,9 @@
 
 (function () {
 
+  // Guarded i18n lookup — same idiom as nodes.js's ndT() / iot-extensions.js's ieT().
+  function cpT(key, vars) { return window.I18n ? I18n.t(key, vars) : key; }
+
   // ── Sources ──────────────────────────────────────────────────────────────
   // Static registry; sensor list is rebuilt each time the palette opens so
   // newly-added sensors show up without a reload.
@@ -32,42 +35,42 @@
     // buildItems() time — otherwise an Overview / Alerts hit in legacy
     // mode would mark the hidden page as active and leave the user
     // staring at a blank main panel (codex review PR #108).
-    { id: "p-overview",  group: "Page", title: "Overview",          icon: "layout-grid",      kw: "home iot",            modes: ["continuous","hybrid"], act: function () { navigateTo("overview");  } },
-    { id: "p-dashboard", group: "Page", title: "Dashboard",         icon: "layout-dashboard", kw: "water legacy",        modes: ["legacy","hybrid"],     act: function () { navigateTo("dashboard"); } },
-    { id: "p-sensors",   group: "Page", title: "Sensors",           icon: "thermometer",      kw: "readings env",                                        act: function () { navigateTo("sensors");   } },
-    { id: "p-alerts",    group: "Page", title: "Alerts",            icon: "bell-ring",        kw: "rules notifications", modes: ["continuous","hybrid"], act: function () { navigateTo("alerts");    } },
-    { id: "p-logs",      group: "Page", title: "Log viewer",        icon: "book-text",        kw: "flowmeter",           modes: ["legacy","hybrid"],     act: function () { navigateTo("logs");      } },
-    { id: "p-files",     group: "Page", title: "Files",             icon: "folder",           kw: "browser littlefs sd",                                 act: function () { navigateTo("files");     } },
-    { id: "p-settings",  group: "Page", title: "Settings",          icon: "settings",         kw: "options",                                             act: function () { navigateTo("settings");  } },
-    { id: "p-update",    group: "Page", title: "Firmware update",   icon: "cloud-upload",     kw: "ota upload",                                          act: function () { navigateTo("update");    } },
+    { id: "p-overview",  group: cpT("cmdPalette.groupPage"), title: cpT("chrome.navOverview"),          icon: "layout-grid",      kw: "home iot",            modes: ["continuous","hybrid"], act: function () { navigateTo("overview");  } },
+    { id: "p-dashboard", group: cpT("cmdPalette.groupPage"), title: cpT("chrome.navDashboard"),         icon: "layout-dashboard", kw: "water legacy",        modes: ["legacy","hybrid"],     act: function () { navigateTo("dashboard"); } },
+    { id: "p-sensors",   group: cpT("cmdPalette.groupPage"), title: cpT("chrome.navSensors"),           icon: "thermometer",      kw: "readings env",                                        act: function () { navigateTo("sensors");   } },
+    { id: "p-alerts",    group: cpT("cmdPalette.groupPage"), title: cpT("chrome.navAlerts"),            icon: "bell-ring",        kw: "rules notifications", modes: ["continuous","hybrid"], act: function () { navigateTo("alerts");    } },
+    { id: "p-logs",      group: cpT("cmdPalette.groupPage"), title: cpT("cmdPalette.logViewer"),        icon: "book-text",        kw: "flowmeter",           modes: ["legacy","hybrid"],     act: function () { navigateTo("logs");      } },
+    { id: "p-files",     group: cpT("cmdPalette.groupPage"), title: cpT("chrome.navFiles"),             icon: "folder",           kw: "browser littlefs sd",                                 act: function () { navigateTo("files");     } },
+    { id: "p-settings",  group: cpT("cmdPalette.groupPage"), title: cpT("chrome.navSettings"),          icon: "settings",         kw: "options",                                             act: function () { navigateTo("settings");  } },
+    { id: "p-update",    group: cpT("cmdPalette.groupPage"), title: cpT("cmdPalette.firmwareUpdate"),   icon: "cloud-upload",     kw: "ota upload",                                          act: function () { navigateTo("update");    } },
 
     // Settings sub-pages
-    { id: "s-device",   group: "Settings", title: "Device",          icon: "settings", kw: "name id",                 act: function () { location.hash = "settings_device";   } },
-    { id: "s-platform", group: "Settings", title: "Platform",        icon: "cpu",      kw: "hardware core logic mode pins sensors modules", act: function () { location.hash = "settings_platform"; } },
-    { id: "s-netime",   group: "Settings", title: "Network & Time",  icon: "wifi",     kw: "wifi ssid ap ntp timezone", act: function () { location.hash = "settings_netime"; } },
-    { id: "s-datalog",  group: "Settings", title: "Data log",        icon: "file-text", kw: "rotation retention csv",  act: function () { location.hash = "settings_datalog"; } },
-    { id: "s-export",   group: "Settings", title: "Export",          icon: "cloud-upload", kw: "mqtt http opensensemap webhook", act: function () { location.hash = "settings_export";  } },
+    { id: "s-device",   group: cpT("cmdPalette.groupSettings"), title: cpT("cmdPalette.device"),        icon: "settings", kw: "name id",                 act: function () { location.hash = "settings_device";   } },
+    { id: "s-platform", group: cpT("cmdPalette.groupSettings"), title: cpT("cmdPalette.platform"),      icon: "cpu",      kw: "hardware core logic mode pins sensors modules", act: function () { location.hash = "settings_platform"; } },
+    { id: "s-netime",   group: cpT("cmdPalette.groupSettings"), title: cpT("cmdPalette.networkAndTime"),icon: "wifi",     kw: "wifi ssid ap ntp timezone", act: function () { location.hash = "settings_netime"; } },
+    { id: "s-datalog",  group: cpT("cmdPalette.groupSettings"), title: cpT("cmdPalette.dataLog"),       icon: "file-text", kw: "rotation retention csv",  act: function () { location.hash = "settings_datalog"; } },
+    { id: "s-export",   group: cpT("cmdPalette.groupSettings"), title: cpT("cmdPalette.export"),        icon: "cloud-upload", kw: "mqtt http opensensemap webhook", act: function () { location.hash = "settings_export";  } },
 
     // Actions — theme.  Delegate to core.setTheme() so the data-theme
     // attribute, the theme-X class on <html>, localStorage, AND the topbar
     // toggle icon all update in one place (gemini review PR #108).
-    { id: "a-theme-dark",  group: "Action", title: "Switch to dark theme",  icon: "moon", kw: "appearance", act: function () { window.setTheme && setTheme("dark");  } },
-    { id: "a-theme-light", group: "Action", title: "Switch to light theme", icon: "sun",  kw: "appearance", act: function () { window.setTheme && setTheme("light"); } },
-    { id: "a-theme-auto",  group: "Action", title: "Theme follows OS",      icon: "moon", kw: "auto",       act: function () { window.setTheme && setTheme("auto");  } },
+    { id: "a-theme-dark",  group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.switchToDark"),  icon: "moon", kw: "appearance", act: function () { window.setTheme && setTheme("dark");  } },
+    { id: "a-theme-light", group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.switchToLight"), icon: "sun",  kw: "appearance", act: function () { window.setTheme && setTheme("light"); } },
+    { id: "a-theme-auto",  group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.themeFollowsOs"),icon: "moon", kw: "auto",       act: function () { window.setTheme && setTheme("auto");  } },
     // Actions — accent
-    { id: "a-accent-cyan",   group: "Action", title: "Accent: cyan",   icon: "palette", kw: "color theme default", act: function () { window.setAccent && setAccent("cyan");   } },
-    { id: "a-accent-amber",  group: "Action", title: "Accent: amber",  icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("amber");  } },
-    { id: "a-accent-green",  group: "Action", title: "Accent: green",  icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("green");  } },
-    { id: "a-accent-violet", group: "Action", title: "Accent: violet", icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("violet"); } },
+    { id: "a-accent-cyan",   group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.accentCyan"),   icon: "palette", kw: "color theme default", act: function () { window.setAccent && setAccent("cyan");   } },
+    { id: "a-accent-amber",  group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.accentAmber"),  icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("amber");  } },
+    { id: "a-accent-green",  group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.accentGreen"),  icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("green");  } },
+    { id: "a-accent-violet", group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.accentViolet"), icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("violet"); } },
     // Actions — density
-    { id: "a-density-toggle", group: "Action", title: "Toggle compact density", icon: "rows-3", kw: "comfortable spacing", act: function () { window.quickDensityToggle && quickDensityToggle(); } },
+    { id: "a-density-toggle", group: cpT("cmdPalette.groupAction"), title: cpT("chrome.toggleDensity"), icon: "rows-3", kw: "comfortable spacing", act: function () { window.quickDensityToggle && quickDensityToggle(); } },
     // Actions — sidebar
-    { id: "a-sidebar-toggle", group: "Action", title: "Toggle sidebar rail",    icon: "menu",   kw: "collapse expand",     act: function () { window.sidebarRailToggle && sidebarRailToggle(); } },
+    { id: "a-sidebar-toggle", group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.toggleSidebarRail"), icon: "menu",   kw: "collapse expand",     act: function () { window.sidebarRailToggle && sidebarRailToggle(); } },
     // Actions — destructive
-    { id: "a-restart", group: "Action", title: "Restart device…",  icon: "rotate-ccw", kw: "reboot",     act: function () { window.showPopup && showPopup("restartPopup"); } },
-    { id: "a-add-sensor", group: "Action", title: "Add sensor…",   icon: "plus",       kw: "new",       act: function () { window.openSensorWizard && openSensorWizard(); } },
+    { id: "a-restart", group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.restartDeviceEllipsis"),  icon: "rotate-ccw", kw: "reboot",     act: function () { window.showPopup && showPopup("restartPopup"); } },
+    { id: "a-add-sensor", group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.addSensorEllipsis"),   icon: "plus",       kw: "new",       act: function () { window.openSensorWizard && openSensorWizard(); } },
     // Actions — quick settings drawer
-    { id: "a-quick-settings", group: "Action", title: "Open quick settings",  icon: "sliders-horizontal", kw: "drawer panel", act: function () { window.QuickSettings && QuickSettings.open(); } },
+    { id: "a-quick-settings", group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.openQuickSettings"),  icon: "sliders-horizontal", kw: "drawer panel", act: function () { window.QuickSettings && QuickSettings.open(); } },
   ];
 
   function buildItems() {
@@ -86,7 +89,7 @@
         var label = (s.id || s.type) + " · " + (s.type || "—");
         items.push({
           id: "sensor-" + (s.id || idx),
-          group: "Sensor",
+          group: cpT("cmdPalette.groupSensor"),
           title: label,
           icon: "thermometer",
           kw: (s.zone || "") + " " + (s.interface || ""),
@@ -156,20 +159,20 @@
     palette.className = "cmd-palette";
     palette.setAttribute("role", "dialog");
     palette.setAttribute("aria-modal", "true");
-    palette.setAttribute("aria-label", "Command palette");
+    palette.setAttribute("aria-label", cpT("cmdPalette.ariaLabel"));
     palette.innerHTML =
       '<div class="cmd-backdrop" data-role="backdrop"></div>' +
       '<div class="cmd-sheet">' +
         '<div class="cmd-input-row">' +
           '<span class="cmd-search-icon" data-icon="search"></span>' +
-          '<input type="search" class="cmd-input" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Search pages, sensors, settings, actions…"/>' +
+          '<input type="search" class="cmd-input" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="' + esc(cpT("cmdPalette.searchPh")) + '"/>' +
           '<kbd class="cmd-kbd">Esc</kbd>' +
         '</div>' +
         '<div class="cmd-list" role="listbox"></div>' +
         '<div class="cmd-foot">' +
-          '<span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>' +
-          '<span><kbd>↵</kbd> open</span>' +
-          '<span><kbd>Esc</kbd> close</span>' +
+          '<span><kbd>↑</kbd><kbd>↓</kbd> ' + esc(cpT("cmdPalette.navigate")) + '</span>' +
+          '<span><kbd>↵</kbd> ' + esc(cpT("common.open")) + '</span>' +
+          '<span><kbd>Esc</kbd> ' + esc(cpT("common.close")) + '</span>' +
         '</div>' +
       '</div>';
     document.body.appendChild(palette);
@@ -215,7 +218,7 @@
   function renderList() {
     listEl.innerHTML = "";
     if (matches.length === 0) {
-      listEl.innerHTML = '<div class="cmd-empty">No matches.</div>';
+      listEl.innerHTML = '<div class="cmd-empty">' + esc(cpT("cmdPalette.noMatches")) + '</div>';
       return;
     }
     var lastGroup = null;
