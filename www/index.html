@@ -676,15 +676,15 @@
       <section class="page" id="page-sensors">
         <div class="page-head">
           <div>
-            <h1 class="page-title"><span data-icon="thermometer"></span> Sensors</h1>
-            <div class="page-sub" id="sensors-sub">Loading…</div>
+            <h1 class="page-title"><span data-icon="thermometer"></span> <span data-i18n="sensorsPage.title">Sensors</span></h1>
+            <div class="page-sub" id="sensors-sub" data-i18n="common.loading">Loading…</div>
           </div>
           <div class="page-actions">
-            <input type="search" id="sensors-filter" class="input" placeholder="Filter sensors…"
-                   style="width:160px" data-input="sensorsFilter" aria-label="Filter sensors">
-            <button class="btn primary" data-click="clAddSensor"><span data-icon="plus"></span> Add sensor</button>
-            <button class="btn" data-click="sensorsLoad"><span data-icon="refresh-cw"></span> Refresh</button>
-            <button class="btn" data-click="sensorsPrint" title="Print"><span data-icon="printer"></span> Print</button>
+            <input type="search" id="sensors-filter" class="input" data-i18n-placeholder="sensorsPage.filterPh" placeholder="Filter sensors…"
+                   style="width:160px" data-input="sensorsFilter" data-i18n-aria-label="sensorsPage.filterAria" aria-label="Filter sensors">
+            <button class="btn primary" data-click="clAddSensor"><span data-icon="plus"></span> <span data-i18n="sensorsPage.addSensor">Add sensor</span></button>
+            <button class="btn" data-click="sensorsLoad"><span data-icon="refresh-cw"></span> <span data-i18n="common.refresh">Refresh</span></button>
+            <button class="btn" data-click="sensorsPrint" data-i18n-title="sensorsPage.printBtn" title="Print"><span data-icon="printer"></span> <span data-i18n="sensorsPage.printBtn">Print</span></button>
           </div>
         </div>
         <div id="sensors-msg" class="text-muted" style="margin-bottom:1rem;font-size:.9rem"></div>
@@ -694,55 +694,55 @@
         <!-- Sensor chart -->
         <div class="card" style="margin-top:1rem">
           <div class="card-head">
-            <span><span data-icon="line-chart"></span> Sensor chart</span>
+            <span><span data-icon="line-chart"></span> <span data-i18n="sensorsPage.chartTitle">Sensor chart</span></span>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
               <select id="sc-sensor" class="input" style="width:auto" data-change="sensorChartLoad">
-                <option value="">— select sensor —</option>
+                <option value="" data-i18n="sensorsPage.optSensor">— select sensor —</option>
               </select>
               <select id="sc-metric" class="input" style="width:auto" data-change="sensorChartLoad">
-                <option value="">— metric —</option>
+                <option value="" data-i18n="sensorsPage.optMetric">— metric —</option>
               </select>
               <select id="sc-range" class="input" style="width:auto" data-change="sensorChartLoad">
-                <option value="3600">Last 1h</option>
-                <option value="21600">Last 6h</option>
-                <option value="86400" selected>Last 24h</option>
-                <option value="604800">Last 7d</option>
+                <option value="3600" data-i18n="sensorsPage.range1h">Last 1h</option>
+                <option value="21600" data-i18n="sensorsPage.range6h">Last 6h</option>
+                <option value="86400" selected data-i18n="sensorsPage.range24h">Last 24h</option>
+                <option value="604800" data-i18n="sensorsPage.range7d">Last 7d</option>
               </select>
               <select id="sc-mode" class="input" style="width:auto" data-change="sensorChartLoad">
-                <option value="lttb">LTTB</option>
-                <option value="avg">Avg</option>
-                <option value="min">Min</option>
-                <option value="max">Max</option>
+                <option value="lttb" data-i18n="sensorsPage.modeLttbShort">LTTB</option>
+                <option value="avg" data-i18n="sensorsPage.modeAvgShort">Avg</option>
+                <option value="min" data-i18n="sensorsPage.modeMinShort">Min</option>
+                <option value="max" data-i18n="sensorsPage.modeMaxShort">Max</option>
               </select>
               <select id="sc-agg" class="input" style="width:auto" data-change="sensorChartLoad">
-                <option value="5m">5 min</option>
-                <option value="1h">1 hour</option>
-                <option value="1d">1 day</option>
-                <option value="raw">Raw</option>
+                <option value="5m" data-i18n="sensorsPage.agg5m">5 min</option>
+                <option value="1h" data-i18n="sensorsPage.agg1h">1 hour</option>
+                <option value="1d" data-i18n="sensorsPage.agg1d">1 day</option>
+                <option value="raw" data-i18n="sensorsPage.aggRaw">Raw</option>
               </select>
             </div>
           </div>
           <!-- CURRENT value + stats row -->
           <div style="display:flex;justify-content:space-between;align-items:flex-end;padding:10px 16px 0;flex-wrap:wrap;gap:8px">
             <div>
-              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-family:var(--mono)">Current</div>
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-family:var(--mono)" data-i18n="sensorsPage.currentLabel">Current</div>
               <div id="sc-current" style="font-size:26px;font-weight:700;font-family:var(--mono);color:var(--text)">—</div>
             </div>
             <div id="sc-stats" style="display:flex;gap:16px;font-size:11px;color:var(--text-3);font-family:var(--mono);padding-bottom:4px">
-              <span>Min <span id="sc-min" style="color:var(--text)">—</span></span>
-              <span>Avg <span id="sc-avg" style="color:var(--text)">—</span></span>
-              <span>Max <span id="sc-max" style="color:var(--text)">—</span></span>
-              <span>Pts <span id="sc-pts" style="color:var(--text)">—</span></span>
+              <span><span data-i18n="sensorsPage.statMin">Min</span> <span id="sc-min" style="color:var(--text)">—</span></span>
+              <span><span data-i18n="sensorsPage.statAvg">Avg</span> <span id="sc-avg" style="color:var(--text)">—</span></span>
+              <span><span data-i18n="sensorsPage.statMax">Max</span> <span id="sc-max" style="color:var(--text)">—</span></span>
+              <span><span data-i18n="sensorsPage.statPts">Pts</span> <span id="sc-pts" style="color:var(--text)">—</span></span>
             </div>
           </div>
           <!-- Secondary series overlay (dual Y-axis) -->
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 16px;border-top:1px solid var(--border);font-size:.85rem;margin-top:8px">
-            <span style="color:var(--text-3)">Overlay:</span>
+            <span style="color:var(--text-3)" data-i18n="sensorsPage.overlayLabel">Overlay:</span>
             <select id="sc-sensor2" class="input" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
-              <option value="">— none —</option>
+              <option value="" data-i18n="sensorsPage.optNone">— none —</option>
             </select>
             <select id="sc-metric2" class="input" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
-              <option value="">— metric —</option>
+              <option value="" data-i18n="sensorsPage.optMetric">— metric —</option>
             </select>
           </div>
           <div class="card-body" style="padding:8px">
@@ -757,10 +757,10 @@
           <div id="sl-msg"></div>
           <div class="card">
             <div class="card-head">
-              <div class="card-title"><span data-icon="line-chart"></span> Sensor CSV logging</div>
+              <div class="card-title"><span data-icon="line-chart"></span> <span data-i18n="sensorsPage.csvTitle">Sensor CSV logging</span></div>
             </div>
             <div class="card-body">
-              <p class="hint" style="margin-bottom:1rem">
+              <p class="hint" style="margin-bottom:1rem" data-i18n="sensorsPage.csvHint">
                 Wide-CSV stores sensor readings as one row per aggregation
                 window with one column per active sensor metric. The header
                 is rebuilt dynamically when sensors are added or removed;
@@ -770,23 +770,23 @@
               <div class="field">
                 <label class="field-label">
                   <input type="checkbox" name="csvLoggingEnabled" id="sl-csvEnabled" value="1">
-                  Enable CSV logging
+                  <span data-i18n="sensorsPage.csvEnable">Enable CSV logging</span>
                 </label>
-                <p class="hint">Master switch. When off, sensor readings are still
+                <p class="hint" data-i18n="sensorsPage.csvEnableHint">Master switch. When off, sensor readings are still
                   streamed to the live UI but never written to flash/SD.</p>
               </div>
               <div class="form-grid">
                 <div class="field">
                   <label class="field-label">
-                    Aggregation interval (seconds)
-                    <span class="help-tip" tabindex="0" role="note" aria-label="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files." data-tip="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files.">i</span>
+                    <span data-i18n="sensorsPage.csvAggInterval">Aggregation interval (seconds)</span>
+                    <span class="help-tip" tabindex="0" role="note" data-i18n-aria-label="sensorsPage.csvAggIntervalTip" aria-label="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files." data-i18n-title="sensorsPage.csvAggIntervalTip" data-tip="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files.">i</span>
                   </label>
                   <input type="number" name="aggregationIntervalSec" id="sl-aggSec" class="input"
                     min="5" max="3600" step="5" value="60">
-                  <p class="hint">Default 60 s. Range 5–3600 s.</p>
+                  <p class="hint" data-i18n="sensorsPage.csvAggIntervalHint">Default 60 s. Range 5–3600 s.</p>
                 </div>
               </div>
-              <button type="submit" class="btn primary"><span data-icon="save"></span> Save</button>
+              <button type="submit" class="btn primary"><span data-icon="save"></span> <span data-i18n="common.save">Save</span></button>
             </div>
           </div>
         </form>
