@@ -201,8 +201,12 @@ function ndRowHtml(n) {
   var battCell, seenCell, rssiCell, clockCell;
   if (n.transport === "espnow") {
     var r = n.raw;
+    // r.days is null whenever the battery model refuses to estimate (too
+    // little history, a flat trace, a slope inside the noise) — that's not
+    // zero, so it only ever appears as a title, never printed as "0 d".
+    var daysTitle = r.days == null ? "" : ' title="' + esc(ndT("nodes.daysLeft", { d: r.days >= 365 ? "365+" : r.days })) + '"';
     battCell = r.percent == null ? '<span class="mono" style="font-size:12px;color:var(--text-4)">—</span>'
-      : '<span class="badge ' + ndBattClass(r) + ' mono">' + r.percent + "%" +
+      : '<span class="badge ' + ndBattClass(r) + ' mono"' + daysTitle + '>' + r.percent + "%" +
         (r.mv != null ? " · " + (r.mv / 1000).toFixed(2) + "V" : "") + "</span>";
     seenCell = '<span class="mono" style="font-size:12px">' + (r.seen ? ndFmtAge(r.age_s) : ndT("nodes.never")) + "</span>";
     rssiCell = '<span class="mono" style="font-size:12px' + (r.rssi == null ? ";color:var(--text-4)" : "") + '">' +

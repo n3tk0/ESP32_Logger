@@ -583,7 +583,9 @@
                 <a href="#settings_nodes" class="hub-row" id="hub-row-nodes" data-click="showSubpage" data-args='["settings_nodes"]'>
                   <span class="hub-row-icon"><span data-icon="cpu"></span></span>
                   <span class="hub-row-main">
-                    <span class="hub-row-title" data-i18n="settingsHub.nodes">Nodes <span class="badge dim mono">ESP-NOW + WiFi</span></span>
+                    <!-- data-i18n on the inner span, not this one: textContent
+                         would wipe the "ESP-NOW + WiFi" badge sibling. -->
+                    <span class="hub-row-title"><span data-i18n="settingsHub.nodes">Nodes</span> <span class="badge dim mono">ESP-NOW + WiFi</span></span>
                     <span class="hub-row-sub" data-i18n="settingsHub.nodesSub">Pairing · battery · reports · radio counters</span>
                   </span>
                   <span class="hub-row-status" id="hub-st-nodes"><span class="hub-row-skel"></span></span>

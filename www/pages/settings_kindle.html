@@ -38,7 +38,7 @@
               </div>
             </div>
             <div class="kd-pv-foot">
-              <p class="hint" style="margin:0" data-i18n="kindle.panelHint">
+              <p class="hint" style="margin:0" data-i18n-html="kindle.panelHint">
                 <strong>Tap a region</strong> to open it. Hatched ones are
                 switched off and their space closes up. Drawn with
                 <strong>example readings</strong> — the layout is what this
@@ -51,7 +51,11 @@
         <!-- ── The inspector — tabbed ───────────────────────────────────────── -->
         <div class="kd-pane-form">
           <div class="seg" role="tablist" aria-label="Inspector" id="kd-tabs" style="margin-bottom:var(--gap)">
-            <button type="button" class="active" data-tab="zones" data-i18n="kindle.tabZones">Zones <span class="badge dim mono" id="kd-slot-count" style="margin-left:6px"></span></button>
+            <!-- data-i18n goes on the inner span, not the button: I18n.apply()
+                 sets textContent, which would otherwise wipe the #kd-slot-count
+                 badge (a sibling child, populated by kdRenderZones()) every
+                 time translations are (re-)applied. -->
+            <button type="button" class="active" data-tab="zones"><span data-i18n="kindle.tabZones">Zones</span> <span class="badge dim mono" id="kd-slot-count" style="margin-left:6px"></span></button>
             <button type="button" data-tab="page" data-i18n="kindle.tabPage">Whole page</button>
             <button type="button" data-tab="reader" data-i18n="kindle.tabReader">Reader</button>
           </div>
