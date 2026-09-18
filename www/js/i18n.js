@@ -87,11 +87,20 @@ var I18n = (function () {
       root.querySelectorAll("[data-i18n]").forEach(function (el) {
         el.textContent = t(el.getAttribute("data-i18n"));
       });
-      root.querySelectorAll("[data-i18n-html]").forEach(function (el) {
+      var htmlEls = root.querySelectorAll("[data-i18n-html]");
+      htmlEls.forEach(function (el) {
         // Only for markup already trusted at the call site (e.g. a fixed
         // string containing <strong>) — never with user-supplied vars.
         el.innerHTML = t(el.getAttribute("data-i18n-html"));
       });
+      // Replacing innerHTML throws away any <svg> icons.js had already
+      // swapped in and puts back the <span data-icon> placeholders the
+      // string carries, so they have to be swapped again — otherwise the
+      // inline icon in a string like settingsHub.footerHint disappears on
+      // the first language switch and never comes back.
+      if (htmlEls.length && window.Icons && Icons.swap) {
+        htmlEls.forEach(function (el) { Icons.swap(el); });
+      }
       Object.keys(ATTR_MAP).forEach(function (dataAttr) {
         root.querySelectorAll("[" + dataAttr + "]").forEach(function (el) {
           el.setAttribute(ATTR_MAP[dataAttr], t(el.getAttribute(dataAttr)));

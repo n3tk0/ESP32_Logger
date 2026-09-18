@@ -22,6 +22,18 @@
   // Guarded i18n lookup — same idiom as nodes.js's ndT() / iot-extensions.js's ieT().
   function edT(key, vars) { return window.I18n ? I18n.t(key, vars) : key; }
 
+  // A registry's `title` is a module-level literal that its own file evaluates
+  // once at load, so it hands us an i18n key rather than text — resolving it
+  // there would freeze every card name in the language that loaded first.
+  // Resolve here, at render time.  I18n.t() echoes a key it has no entry for,
+  // so a registry that supplies plain text still comes back unchanged.
+  function metaTitle(meta) {
+    var s = (meta && meta.title) || "";
+    if (!window.I18n || !s) return s;
+    var out = I18n.t(s);
+    return out === s ? s : out;
+  }
+
   var STORAGE_PREFIX = "esp32logger.layout.";
   var ALLOWED_SPANS  = [3, 4, 6, 8, 12];
   var COLUMNS        = 12;
@@ -354,7 +366,7 @@
         slot.className = "deck-slot";
         slot.dataset.id = card.id;
         slot.dataset.span = card.span;
-        slot.dataset.title = meta.title;
+        slot.dataset.title = metaTitle(meta);
         var content = meta.render(card);
         if (typeof content === "string") slot.innerHTML = content;
         else if (content instanceof Node) slot.appendChild(content);
@@ -407,7 +419,7 @@
         slot.className = "deck-slot deck-thumb span-" + card.span;
         slot.dataset.id = card.id;
         slot.dataset.span = card.span;
-        slot.dataset.title = meta.title;
+        slot.dataset.title = metaTitle(meta);
 
         var chrome = document.createElement("div");
         chrome.className = "thumb-chrome";
@@ -445,7 +457,7 @@
         body.className = "thumb-body";
         body.innerHTML =
           (meta.icon ? '<span data-icon="' + esc(meta.icon) + '"></span>' : "") +
-          '<span class="thumb-title">' + esc(meta.title) + '</span>' +
+          '<span class="thumb-title">' + esc(metaTitle(meta)) + '</span>' +
           '<span class="thumb-span mono">' + card.span + '/12</span>';
         slot.appendChild(body);
 
@@ -485,7 +497,7 @@
         b.className = "deck-chip";
         b.innerHTML =
           (meta.icon ? '<span data-icon="' + esc(meta.icon) + '"></span>' : "") +
-          '<span>' + esc(meta.title) + '</span>' +
+          '<span>' + esc(metaTitle(meta)) + '</span>' +
           '<span class="deck-chip-add"><span data-icon="plus"></span></span>';
         b.addEventListener("click", action);
         return b;

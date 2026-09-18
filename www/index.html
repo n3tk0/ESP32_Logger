@@ -651,17 +651,17 @@
         </div>
         <div id="settings-no-match" class="empty" style="display:none">
           <div class="empty-icon"><span data-icon="search"></span></div>
-          <div class="empty-title">No settings match your search.</div>
+          <div class="empty-title" data-i18n="settingsHub.noMatch">No settings match your search.</div>
         </div>
 
         <div class="card" style="margin-top:var(--gap)">
-          <div class="card-head"><div class="card-title"><span data-icon="save"></span> Backup &amp; restore</div></div>
+          <div class="card-head"><div class="card-title"><span data-icon="save"></span> <span data-i18n="settingsHub.backupRestore">Backup &amp; restore</span></div></div>
           <div class="card-body">
             <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
-              <a href="/export_settings" download class="btn primary"><span data-icon="download"></span> Export settings</a>
+              <a href="/export_settings" download class="btn primary"><span data-icon="download"></span> <span data-i18n="settingsHub.exportSettings">Export settings</span></a>
               <form id="importForm" data-submit="settingsImport" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <input type="file" name="settings" id="importFile" accept=".json" class="input" style="height:36px">
-                <button type="submit" class="btn"><span data-icon="upload"></span> Import</button>
+                <button type="submit" class="btn"><span data-icon="upload"></span> <span data-i18n="common.import">Import</span></button>
               </form>
             </div>
             <div id="importProg" style="display:none;margin-top:10px">

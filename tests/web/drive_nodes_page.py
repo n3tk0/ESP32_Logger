@@ -267,6 +267,50 @@ with sync_playwright() as p:
     check("online" in pg.locator("#nd-rows").inner_text().lower(),
           "and switching back returns them to English")
 
+    # ── Global chrome that is built once and cached ─────────────────────────
+    # The command palette and the quick-settings drawer each generate their
+    # markup on first open and then hold onto the node for the life of the
+    # page, and the palette's item registry is a module-level literal
+    # evaluated at <script defer> time.  Both used to keep whatever language
+    # they were first opened in however often the page was toggled after.
+    # These live on index.html, not on the Nodes page — they are checked here
+    # because this is the driver that already drives the language toggle.
+    def palette_text():
+        pg.keyboard.press("Control+k")
+        pg.wait_for_timeout(300)
+        txt = pg.locator("#cmdPalette").inner_text()
+        ph = pg.locator("#cmdPalette .cmd-input").get_attribute("placeholder")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(200)
+        return txt + " | " + (ph or "")
+
+    en_pal = palette_text()
+    check("PAGE" in en_pal.upper() and "Search pages" in en_pal,
+          "the command palette opens in English")
+    pg.click("#langToggleBtn")
+    pg.wait_for_timeout(400)
+    bg_pal = palette_text()
+    check("СТРАНИЦА" in bg_pal.upper(),
+          "its group headings follow the switch (%r)" % bg_pal[:40])
+    check("Търси страници" in bg_pal, "and so does its placeholder")
+
+    # Quick settings, opened for the first time here, while still Bulgarian.
+    pg.keyboard.press(",")
+    pg.wait_for_timeout(300)
+    check("Бързи настройки" in pg.locator("#quickSettingsPanel").inner_text(),
+          "the quick-settings drawer opens in Bulgarian")
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(200)
+    pg.click("#langToggleBtn")       # back to English
+    pg.wait_for_timeout(400)
+    pg.keyboard.press(",")
+    pg.wait_for_timeout(300)
+    qs = pg.locator("#quickSettingsPanel").inner_text()
+    check("Quick settings" in qs,
+          "and a drawer already built follows the switch back (%r)" % qs[:40])
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(200)
+
     shot = os.environ.get("SCREENSHOT")
     if shot:
         pg.screenshot(path=shot, full_page=True)

@@ -54,6 +54,9 @@ I18n.register("settingsHub", {
     rotationMonthly: "Monthly",
     rotationSize: "By size",
     notAvailable: "—",
+    noMatch: "No settings match your search.",
+    backupRestore: "Backup & restore",
+    exportSettings: "Export settings",
   },
   bg: {
     title: "Настройки",
@@ -104,5 +107,8 @@ I18n.register("settingsHub", {
     rotationMonthly: "Месечна",
     rotationSize: "По размер",
     notAvailable: "—",
+    noMatch: "Няма настройки, които да отговарят на търсенето.",
+    backupRestore: "Архив и възстановяване",
+    exportSettings: "Експортирай настройките",
   },
 });

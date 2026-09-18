@@ -594,8 +594,8 @@ function kdRenderPreview() {
     var off = d.show > 0 && !(show & d.show);
     h += "<button type='button' class='kd-hit" + (off ? " off" : "") +
          (kdOpen === d.id ? " on" : "") + "' data-click='kindleZoneOpen'" +
-         " data-args='[\"" + d.id + "\"]' title='" + kdEsc(d.name) +
-         "' aria-label='" + kdEsc(d.name) + "' style='left:" + bx[0] + "px;top:" +
+         " data-args='[\"" + d.id + "\"]' title='" + kdEsc(kdZoneText(d, "name")) +
+         "' aria-label='" + kdEsc(kdZoneText(d, "name")) + "' style='left:" + bx[0] + "px;top:" +
          bx[1] + "px;width:" + bx[2] + "px;height:" + bx[3] + "px'></button>";
   }
 
@@ -621,6 +621,26 @@ function kdFitPreview() {
 // ============================================================================
 // The zone list: one row per region, the open one carrying its editors
 // ============================================================================
+// The zone table above keeps its English inline, next to each region's bit
+// values — that adjacency is what makes the mapping checkable by eye against
+// src/core/Config.h, so it is not replaced by keys. Instead the three text
+// fields are looked up per region at render time and fall back to the
+// table's own wording when a translation is absent.
+//   kdZoneText(d, "name") → kindle.z_<id>_name
+function kdZoneText(d, field) {
+  var fallback = field === "fill" ? (d.fill && (d.fill[0] === "text" ? d.fill[1] : d.fill[2])) : d[field];
+  if (!window.I18n) return fallback;
+  var key = "kindle.z_" + d.id + "_" + field;
+  var s = I18n.t(key);
+  return s === key ? fallback : s;   // t() echoes the key when it has none
+}
+
+// NOT kdT() — that is the panel's text-drawing helper (x, y, size, …). This
+// is the page's translator.
+function kdI18n(key, vars) {
+  return window.I18n ? I18n.t("kindle." + key, vars) : key;
+}
+
 function kdSwitch(bit, prefix, mask, label, none) {
   if (bit > 0) {
     return "<label class='kd-sw'><input type='checkbox' id='" + prefix + bit + "'" +
@@ -630,17 +650,18 @@ function kdSwitch(bit, prefix, mask, label, none) {
   return "<span class='kd-sw dim'>" + kdEsc(none) + "</span>";
 }
 
-function kdFillNote(fill) {
+function kdFillNote(fill, d) {
   if (!fill) return "";
+  var label = d ? kdZoneText(d, "fill") : (fill[0] === "text" ? fill[1] : fill[2]);
   if (fill[0] === "jump") {
     return "<button class='btn sm' data-click='kindleJump' data-args='[\"" +
-           fill[1] + "\"]'>" + kdEsc(fill[2]) + " <span data-icon='arrow-down'></span></button>";
+           fill[1] + "\"]'>" + kdEsc(label) + " <span data-icon='arrow-down'></span></button>";
   }
   if (fill[0] === "link") {
-    return "<a class='btn sm' href='" + kdEsc(fill[1]) + "'>" + kdEsc(fill[2]) +
+    return "<a class='btn sm' href='" + kdEsc(fill[1]) + "'>" + kdEsc(label) +
            " <span data-icon='arrow-right'></span></a>";
   }
-  return "<p class='hint' style='margin:0'>" + kdEsc(fill[1]) + "</p>";
+  return "<p class='hint' style='margin:0'>" + kdEsc(label) + "</p>";
 }
 
 // What the collapsed row says about what is in the region: the reading for a
@@ -648,7 +669,7 @@ function kdFillNote(fill) {
 function kdZoneSummary(d) {
   if (d.slot) {
     var z = kdSlot(d.slot);
-    if (!z.sensor || !z.metric) return "<span class='badge dim'>empty</span>";
+    if (!z.sensor || !z.metric) return "<span class='badge dim'>" + kdEsc(kdI18n("zoneEmpty")) + "</span>";
     return kdEsc(z.sensor + " · " + z.metric);
   }
   if (d.slots) {
@@ -717,7 +738,7 @@ function kdSlotEditor(key) {
   return "<div class='kd-slot' id='kd-zone-" + key + "'>" +
     "<div class='kd-slot-head'>" +
       "<strong>" + kdEsc(text[0]) + "</strong>" +
-      (empty ? "<span class='badge dim'>empty</span>"
+      (empty ? "<span class='badge dim'>" + kdEsc(kdI18n("zoneEmpty")) + "</span>"
              : "<span class='badge acc'>" +
                kdEsc(kdPvValue(z) + kdPvUnit(z)) + "</span>") +
       "<span style='flex:1'></span>" +
@@ -742,11 +763,11 @@ function kdSlotEditor(key) {
         kdInkSelect(key, z.ink | 0) + "</div>" +
     "</div>" +
     "<div class='kd-flags'>" +
-      kdFlagBox(key, kdFlags.unit,  "Show the unit") +
-      kdFlagBox(key, kdFlags.bold,  "Bold") +
-      kdFlagBox(key, kdFlags.age,   "Show the age when stale") +
+      kdFlagBox(key, kdFlags.unit,  kdI18n("flagUnit")) +
+      kdFlagBox(key, kdFlags.bold,  kdI18n("swBold")) +
+      kdFlagBox(key, kdFlags.age,   kdI18n("flagAge")) +
       (z.metric === "pressure"
-        ? kdFlagBox(key, kdFlags.trend, "Tendency arrow") : "") +
+        ? kdFlagBox(key, kdFlags.trend, kdI18n("flagTrend")) : "") +
     "</div></div>";
 }
 
@@ -798,10 +819,10 @@ function kdRenderZones() {
   // misdescribes a reader that may be fully set up. kindleSave() will not
   // send them; this is the half the reader can see.
   if (kdSlotsOk === false) {
+    // Carries its own <strong>; it comes from the static dictionary, never
+    // from device data, so it is not escaped.
     html += "<p class='hint' id='kd-zones-unread' style='margin:0 0 10px'>" +
-            "<strong>The readings could not be read from this device.</strong> " +
-            "The places below are not what it holds, and Save leaves them " +
-            "exactly as they are. Reload the page to try again.</p>";
+            kdI18n("zonesUnread") + "</p>";
   }
   for (var i = 0; i < KD_ZONES.length; i++) {
     var d = KD_ZONES[i], open = kdOpen === d.id;
@@ -811,7 +832,7 @@ function kdRenderZones() {
     // that ends with two non-regions is the confusion this replaced.
     if (d.span && !spanOpened) {
       spanOpened = true;
-      html += "<p class='kd-zsplit'>Everywhere on the page</p>";
+      html += "<p class='kd-zsplit'>" + kdEsc(kdI18n("zsplit")) + "</p>";
     }
 
     var body = "";
@@ -819,7 +840,7 @@ function kdRenderZones() {
       if (d.head) body += kdHeadingField(d.head);
       if (d.slot) body += kdSlotEditor(d.slot);
       if (d.slots) for (var s = 0; s < d.slots.length; s++) body += kdSlotEditor(d.slots[s]);
-      if (d.fill) body += "<div class='kd-fillnote'>" + kdFillNote(d.fill) + "</div>";
+      if (d.fill) body += "<div class='kd-fillnote'>" + kdFillNote(d.fill, d) + "</div>";
     }
 
     html +=
@@ -829,16 +850,16 @@ function kdRenderZones() {
             " data-args='[\"" + d.id + "\"]' aria-expanded='" + (open ? "true" : "false") +
             "' aria-controls='kd-zbody-" + d.id + "'>" +
             "<span class='kd-zchev' data-icon='chevron-right'></span>" +
-            "<span class='kd-ztext'><strong>" + kdEsc(d.name) + "</strong>" +
-              "<span class='kd-zwhere'>" + kdEsc(d.where) + "</span></span>" +
+            "<span class='kd-ztext'><strong>" + kdEsc(kdZoneText(d, "name")) + "</strong>" +
+              "<span class='kd-zwhere'>" + kdEsc(kdZoneText(d, "where")) + "</span></span>" +
             "<span class='kd-zsum'>" +
               ((noFc && d.id === "fc")
-                ? "<span class='badge dim'>not on this page</span>"
+                ? "<span class='badge dim'>" + kdEsc(kdI18n("notOnThisPage")) + "</span>"
                 : kdZoneSummary(d)) + "</span>" +
           "</button>" +
           "<div class='kd-zsw'>" +
-            kdSwitch(d.show, "kd-s-", show, "Shown", d.show === -1 ? "Module" : "Always") +
-            kdSwitch(d.bold, "kd-b-", bold, "Bold", "—") +
+            kdSwitch(d.show, "kd-s-", show, kdI18n("swShown"), d.show === -1 ? kdI18n("swModule") : kdI18n("swAlways")) +
+            kdSwitch(d.bold, "kd-b-", bold, kdI18n("swBold"), "—") +
           "</div>" +
         "</div>" +
         "<div class='kd-zbody' id='kd-zbody-" + d.id + "'" + (open ? "" : " hidden") + ">" +
@@ -853,7 +874,7 @@ function kdRenderZones() {
     if (kdZones[keys[k]].sensor && kdZones[keys[k]].metric) filled++;
   }
   var count = document.getElementById("kd-slot-count");
-  if (count) count.textContent = filled + " / " + (kdOrder.length || 11) + " places filled";
+  if (count) count.textContent = kdI18n("placesFilled", { filled: filled, total: kdOrder.length || 11 });
 
   if (window.Icons && Icons.swap) Icons.swap(box);
 }
@@ -1539,9 +1560,10 @@ function kindleInit() {
 // data-click and data-change through Handlers so injected markup cannot reach
 // an arbitrary global, and a handler that is only global is a dead button.
 // The zone rows, the panel and the cadence/layout sentences are built as
-// strings with kdT()/I18n.t() baked in at render time, so I18n.apply()'s
-// data-i18n walk cannot reach them. Redrawn from the working copy — never
-// re-fetched — so a language switch cannot discard unsaved edits.
+// strings — their wording comes from kdZoneText()/kdI18n() at render time
+// (NOT kdT(), which draws text on the panel), so I18n.apply()'s data-i18n
+// walk cannot reach them and they have to be redrawn. From the working
+// copy, never re-fetched, so a language switch cannot discard unsaved edits.
 document.addEventListener("i18n:change", function () {
   if (!kdLoaded || !document.getElementById("kd-zones")) return;
   kdRenderZones();

@@ -699,18 +699,31 @@ document.addEventListener("i18n:change", function () {
   }
 
   // Page bodies built as JS strings (rather than data-i18n markup) keep the
-  // language they were rendered in, so the active page is rebuilt through
-  // its own pageInit. NOT a blanket re-init:
-  //   live    — liveInit() opens an EventSource and a 3 s interval with no
-  //             teardown of its own (navigateTo does that on leaving), so
-  //             re-running it here leaks one of each per switch.
-  //   update  — otaInit() during an in-flight upload is not worth a label.
-  //   nodes / kindle — they subscribe to this event themselves and redraw
-  //             from their working copy, which pageInit would re-fetch over,
-  //             discarding unsaved edits.
-  var SELF_RERENDERS = { live: 1, update: 1, settings_nodes: 1, settings_kindle: 1 };
-  if (currentPage && !SELF_RERENDERS[currentPage]) {
-    try { pageInit(currentPage); } catch (e) { console.warn("i18n re-render failed for", currentPage, e); }
+  // language they were rendered in, so they have to be redrawn.
+  //
+  // EXPLICITLY NOT pageInit(). Every settings sub-page's init re-reads the
+  // device and re-fills the form — sdInit, netInit, thInit, dlInit, clLoad
+  // and expLoad all call setVal/setChk down their whole field list — so
+  // routing a language switch through pageInit silently reverts whatever the
+  // reader had typed and not yet saved. Changing a label must not be able to
+  // discard an edit. These entry points redraw a generated body and nothing
+  // else; the form sub-pages need no entry here at all, because their markup
+  // is data-i18n and I18n.apply() above has already done them.
+  var RERENDER = {
+    settings:  function () { if (typeof hubStatusInit === "function") hubStatusInit(); },
+    sensors:   function () { if (typeof sensorsLoad === "function") sensorsLoad(); },
+    files:     function () { if (typeof filesRender === "function") filesRender(); },
+    dashboard: function () { if (typeof dbLoadCards === "function") dbLoadCards(); },
+    // Re-renders from the rows already parsed, so it keeps the reader's
+    // chosen log file — logsInit() would rebuild the picker and drop it.
+    logs:      function () { if (typeof dbApplyFilters === "function" && dbFilteredData && dbFilteredData.length) dbApplyFilters(); },
+    // live redraws itself from the next SSE tick (1 Hz), and nodes/kindle
+    // subscribe to this event themselves so they can redraw from their
+    // working copy without re-fetching over unsaved edits.
+  };
+  var redraw = RERENDER[currentPage];
+  if (redraw) {
+    try { redraw(); } catch (e) { console.warn("i18n re-render failed for", currentPage, e); }
   }
 });
 

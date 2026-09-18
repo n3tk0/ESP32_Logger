@@ -188,9 +188,16 @@
   function _getBinding(cardId) { return _loadBindings()[cardId] || ""; }
 
   // Registry: id → { title, icon, render(card) → HTML string }
+  //
+  // `title` is an i18n KEY, not text.  render() is a function, so the ieT()
+  // calls inside it run afresh on every render and follow the language;
+  // `title` is a property of a module-level literal, evaluated once at
+  // <script defer> time, so resolving it here would pin the deck's card names
+  // and its edit-mode tray to whichever language loaded first.
+  // editable-deck.js resolves it at render time instead (metaTitle there).
   var OVERVIEW_REGISTRY = {
     aqi: {
-      title: ieT("iotExt.cardAqiTitle"), icon: "wind",
+      title: "iotExt.cardAqiTitle", icon: "wind",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
@@ -225,7 +232,7 @@
       },
     },
     environment: {
-      title: ieT("iotExt.cardEnvironmentTitle"), icon: "thermometer",
+      title: "iotExt.cardEnvironmentTitle", icon: "thermometer",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
@@ -243,7 +250,7 @@
       },
     },
     energy: {
-      title: ieT("iotExt.cardEnergyTitle"), icon: "zap",
+      title: "iotExt.cardEnergyTitle", icon: "zap",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
@@ -264,7 +271,7 @@
       },
     },
     water: {
-      title: ieT("iotExt.cardWaterTitle"), icon: "droplets",
+      title: "iotExt.cardWaterTitle", icon: "droplets",
       render: function () {
         return '<div class="card" data-mode-show="legacy hybrid">' +
           '<div class="card-head"><div class="card-title"><span data-icon="droplets"></span> ' + esc(ieT("iotExt.water")) + '</div>' +
@@ -278,7 +285,7 @@
       },
     },
     outdoor: {
-      title: ieT("iotExt.cardOutdoorTitle"), icon: "cloud-rain",
+      title: "iotExt.cardOutdoorTitle", icon: "cloud-rain",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head"><div class="card-title"><span data-icon="cloud-rain"></span> ' + esc(ieT("iotExt.cardOutdoorTitle")) + '</div>' +
@@ -292,7 +299,7 @@
       },
     },
     alertFeed: {
-      title: ieT("iotExt.cardRecentAlertsTitle"), icon: "bell",
+      title: "iotExt.cardRecentAlertsTitle", icon: "bell",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
@@ -306,7 +313,7 @@
       },
     },
     sensorsList: {
-      title: ieT("iotExt.cardActiveSensorsTitle"), icon: "thermometer",
+      title: "iotExt.cardActiveSensorsTitle", icon: "thermometer",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
@@ -320,7 +327,7 @@
       },
     },
     diagnostics: {
-      title: ieT("iotExt.cardDiagnosticsTitle"), icon: "heart-pulse",
+      title: "iotExt.cardDiagnosticsTitle", icon: "heart-pulse",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
@@ -876,31 +883,31 @@
 
   var ALERTS_REGISTRY = {
     kpiRules: {
-      title: ieT("iotExt.kpiRulesTitle"), icon: "list-checks",
+      title: "iotExt.kpiRulesTitle", icon: "list-checks",
       render: function () {
         return '<div class="kpi"><div class="kpi-l"><span data-icon="list-checks"></span> ' + esc(ieT("iotExt.rules")) + '</div><div class="kpi-v"><span class="num" id="al-total">—</span></div><div class="kpi-d" id="al-rule-d">—</div></div>';
       },
     },
     kpiFiring: {
-      title: ieT("iotExt.kpiFiringTitle"), icon: "alert-triangle",
+      title: "iotExt.kpiFiringTitle", icon: "alert-triangle",
       render: function () {
         return '<div class="kpi"><div class="kpi-l"><span data-icon="alert-triangle"></span> ' + esc(ieT("iotExt.firing")) + '</div><div class="kpi-v" style="color:var(--err)"><span class="num" id="al-firing">0</span></div><div class="kpi-d">' + esc(ieT("iotExt.rightNow")) + '</div></div>';
       },
     },
     kpiToday: {
-      title: ieT("iotExt.kpiTodayTitle"), icon: "clock",
+      title: "iotExt.kpiTodayTitle", icon: "clock",
       render: function () {
         return '<div class="kpi"><div class="kpi-l"><span data-icon="clock"></span> ' + esc(ieT("iotExt.last24h")) + '</div><div class="kpi-v"><span class="num" id="al-day-trips">0</span></div><div class="kpi-d">' + esc(ieT("iotExt.trips")) + '</div></div>';
       },
     },
     kpiSnoozed: {
-      title: ieT("iotExt.kpiSnoozedTitle"), icon: "bell-off",
+      title: "iotExt.kpiSnoozedTitle", icon: "bell-off",
       render: function () {
         return '<div class="kpi"><div class="kpi-l"><span data-icon="bell-off"></span> ' + esc(ieT("iotExt.snoozed")) + '</div><div class="kpi-v"><span class="num" id="al-snoozed">0</span></div><div class="kpi-d">—</div></div>';
       },
     },
     rules: {
-      title: ieT("iotExt.rulesListTitle"), icon: "list-checks",
+      title: "iotExt.rulesListTitle", icon: "list-checks",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head">' +
@@ -914,7 +921,7 @@
       },
     },
     history: {
-      title: ieT("iotExt.triggerHistoryTitle"), icon: "history",
+      title: "iotExt.triggerHistoryTitle", icon: "history",
       render: function () {
         return '<div class="card">' +
           '<div class="card-head"><div class="card-title"><span data-icon="history"></span> ' + esc(ieT("iotExt.triggerHistoryTitle")) + '</div></div>' +
@@ -2146,5 +2153,29 @@
     });
   }
   addKbdHints();
+
+  // ─── Language switch ──────────────────────────────────────────────────────
+  // Overview and Alerts have no HTML partial to re-fetch and no data-i18n
+  // attributes for I18n.apply() to walk — buildOverviewPage()/buildAlertsPage()
+  // generate the whole section from ieT() strings, and both guard on the
+  // section already existing.  So drop the section and build it again.  The
+  // builders re-mount their deck and re-fetch, which costs one request to a
+  // device on the local network, on an action the user takes by hand.
+  document.addEventListener("i18n:change", function () {
+    [["page-overview", buildOverviewPage, function () { _overviewDeck = null; }],
+     ["page-alerts",   buildAlertsPage,   function () { _alertsDeck   = null; }]
+    ].forEach(function (p) {
+      var old = document.getElementById(p[0]);
+      if (!old) return;                    // never visited — nothing is stale
+      var wasActive = old.classList.contains("active");
+      old.parentNode.removeChild(old);
+      p[2]();
+      p[1]();
+      var fresh = document.getElementById(p[0]);
+      // The router sets .active when the hash changes; it will not fire again
+      // for a language toggle, so carry the flag over ourselves.
+      if (fresh && wasActive) fresh.classList.add("active");
+    });
+  });
 
 })();

@@ -263,4 +263,32 @@
     onModeChange();
     loadProfiles();
   });
+
+  // I18n.apply() only reaches elements carrying data-i18n, and none of the
+  // wizard's generated content does: the pin labels, the per-pin verdicts,
+  // the "— Choose a board —" option and the profile hint are all written with
+  // textContent from JS and never revisited. Re-render them on a language
+  // switch, carrying the user's typed pins and chosen board across.
+  document.addEventListener("i18n:change", function () {
+    if (!$("pinGrid")) return;            // DOMContentLoaded has not run yet
+
+    var typed = {};
+    PIN_FIELDS.forEach(function (f) {
+      var el = $("pin-" + f.key);
+      if (el) typed[f.key] = el.value;
+    });
+    renderPinGrid();
+    PIN_FIELDS.forEach(function (f) {
+      var el = $("pin-" + f.key);
+      if (el && typed[f.key] !== undefined) el.value = typed[f.key];
+    });
+    onModeChange();                       // re-hide the legacy-only rows
+
+    // renderProfileSelect() rebuilds the <option> list from scratch, so the
+    // selection has to be put back by value afterwards.
+    var chosen = $("profile") ? $("profile").value : "";
+    renderProfileSelect();
+    if ($("profile")) $("profile").value = chosen;
+    onProfileChange();                    // redraws the hint, then revalidates
+  });
 })();

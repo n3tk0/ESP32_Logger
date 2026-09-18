@@ -334,7 +334,9 @@ function ndRenderDiag() {
   document.getElementById("nd-stats").innerHTML = html;
   var badge = document.getElementById("nd-diag-badge");
   badge.className = "badge " + (problems ? "warn" : "dim") + " mono";
-  badge.textContent = problems ? problems + " " + (problems === 1 ? "issue" : "issues") : "ok";
+  badge.textContent = problems
+    ? ndT(problems === 1 ? "nodes.diagIssue" : "nodes.diagIssues", { n: problems })
+    : ndT("nodes.diagOk");
 }
 
 // ── Pairing / add / forget (ESP-NOW mutating actions — immediate, not part
@@ -351,12 +353,33 @@ function nodesPair() {
       if (d && d.ok) {
         ndMsg(ndT("nodes.pairOpenedFor", { s: d.seconds }), "ok");
         nodesRefresh();
-        if (ndPairTimer) clearInterval(ndPairTimer);
+        ndStopPairPoll();
+        // The whole point of the window is that a node joins DURING it, so
+        // the tick has to redraw the LIST, not just the open/closed badge —
+        // otherwise the node that was just adopted stays invisible until
+        // something else refreshes. Not nodesRefresh() though: that clears
+        // ndDrafts, which would throw away an unsaved edit every 5 s for as
+        // long as the window is open.
+        var deadline = Date.now() + ((parseInt(d.seconds, 10) || 120) + 15) * 1000;
         ndPairTimer = setInterval(function () {
+          // Left the page, or the window outlived its own length (which a
+          // run of failed ticks would otherwise poll through forever).
+          if (currentPage !== "settings_nodes" || Date.now() > deadline) {
+            ndStopPairPoll();
+            return;
+          }
           ndFetchEspnow().then(function (data) {
+            // A failed tick is not "the device now has no nodes" — keep the
+            // last good payload rather than blanking the list and the KPIs.
+            if (!data) return;
             ndEspnowData = data;
+            ndMerge();
+            ndRenderKpis();
+            ndRenderRows();
             ndRenderPairState();
-            if (!data || !data.pairing) { clearInterval(ndPairTimer); ndPairTimer = null; }
+            ndRenderDiag();
+            ndDirtyRefresh();
+            if (!data.pairing) ndStopPairPoll();
           });
         }, 5000);
       } else {
@@ -366,11 +389,15 @@ function nodesPair() {
     .catch(function () { ndMsg(ndT("nodes.pairFailed"), "err"); });
 }
 
+function ndStopPairPoll() {
+  if (ndPairTimer) { clearInterval(ndPairTimer); ndPairTimer = null; }
+}
+
 function ndRenderPairState() {
   var el = document.getElementById("nd-pair-state");
   if (!el) return;
   var open = !!(ndEspnowData && ndEspnowData.pairing);
-  el.textContent = open ? "open" : "closed";
+  el.textContent = ndT(open ? "nodes.pairOpen" : "nodes.pairClosed");
   el.className = "badge " + (open ? "acc pulse" : "dim");
 }
 
@@ -518,10 +545,14 @@ function nodesSave() {
   Promise.all(calls).then(function (results) {
     var failed = results.filter(function (r) { return !r || !r.ok; });
     if (failed.length) {
+      // Keep the drafts: nodesRefresh() would clear them, so the edit the
+      // reader was trying to save is exactly what would be thrown away by
+      // the failure to save it. The savebar stays up with the work still in
+      // it, which is what makes Save worth pressing again.
       ndMsg((failed[0] && failed[0].error) || ndT("nodes.saveFailed"), "err");
-    } else {
-      ndMsg(ndT("nodes.savedNextReport"), "ok");
+      return;
     }
+    ndMsg(ndT("nodes.savedNextReport"), "ok");
     nodesRefresh();
   }).catch(function () { ndMsg(ndT("nodes.saveFailed"), "err"); });
 }
@@ -595,6 +626,7 @@ function nodesRefresh() {
 }
 
 function nodesInit() {
+  ndStopPairPoll();   // a poll left running from a previous visit
   ndOpenKey = null;
   ndFilterState = "all";
   ndSearchQuery = "";

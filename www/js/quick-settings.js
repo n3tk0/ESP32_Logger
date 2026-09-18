@@ -238,5 +238,18 @@
     window.quickSettingsOpen = open;
   }
 
+  // The drawer's markup is generated once by build() and then cached in
+  // `panel` for the lifetime of the page, so every qsT() above is frozen at
+  // whatever language was current the first time it opened.  Drop the node on
+  // a language switch and let open() build it again; open() re-runs
+  // syncToggles() and refreshSummary(), so nothing but the markup is lost.
+  document.addEventListener("i18n:change", function () {
+    if (!panel) return;                   // never opened — nothing is stale yet
+    var wasOpen = isOpen();
+    panel.parentNode.removeChild(panel);
+    panel = null;
+    if (wasOpen) open();
+  });
+
   window.QuickSettings = { open: open, close: close, isOpen: isOpen };
 })();

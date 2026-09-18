@@ -28,6 +28,12 @@
   // ── Sources ──────────────────────────────────────────────────────────────
   // Static registry; sensor list is rebuilt each time the palette opens so
   // newly-added sensors show up without a reload.
+  //
+  // `group` and `title` hold i18n KEYS, not text.  This file runs at <script
+  // defer> time, before the stored locale has necessarily been applied, and
+  // the registry is a module-level literal that is never re-evaluated — so
+  // resolving them here would freeze the palette in whatever language was
+  // loaded first.  buildItems() resolves them on every open instead.
   var STATIC_ITEMS = [
     // Pages
     // `modes` mirrors the sidebar's data-mode-show convention.  Items with
@@ -35,42 +41,42 @@
     // buildItems() time — otherwise an Overview / Alerts hit in legacy
     // mode would mark the hidden page as active and leave the user
     // staring at a blank main panel (codex review PR #108).
-    { id: "p-overview",  group: cpT("cmdPalette.groupPage"), title: cpT("chrome.navOverview"),          icon: "layout-grid",      kw: "home iot",            modes: ["continuous","hybrid"], act: function () { navigateTo("overview");  } },
-    { id: "p-dashboard", group: cpT("cmdPalette.groupPage"), title: cpT("chrome.navDashboard"),         icon: "layout-dashboard", kw: "water legacy",        modes: ["legacy","hybrid"],     act: function () { navigateTo("dashboard"); } },
-    { id: "p-sensors",   group: cpT("cmdPalette.groupPage"), title: cpT("chrome.navSensors"),           icon: "thermometer",      kw: "readings env",                                        act: function () { navigateTo("sensors");   } },
-    { id: "p-alerts",    group: cpT("cmdPalette.groupPage"), title: cpT("chrome.navAlerts"),            icon: "bell-ring",        kw: "rules notifications", modes: ["continuous","hybrid"], act: function () { navigateTo("alerts");    } },
-    { id: "p-logs",      group: cpT("cmdPalette.groupPage"), title: cpT("cmdPalette.logViewer"),        icon: "book-text",        kw: "flowmeter",           modes: ["legacy","hybrid"],     act: function () { navigateTo("logs");      } },
-    { id: "p-files",     group: cpT("cmdPalette.groupPage"), title: cpT("chrome.navFiles"),             icon: "folder",           kw: "browser littlefs sd",                                 act: function () { navigateTo("files");     } },
-    { id: "p-settings",  group: cpT("cmdPalette.groupPage"), title: cpT("chrome.navSettings"),          icon: "settings",         kw: "options",                                             act: function () { navigateTo("settings");  } },
-    { id: "p-update",    group: cpT("cmdPalette.groupPage"), title: cpT("cmdPalette.firmwareUpdate"),   icon: "cloud-upload",     kw: "ota upload",                                          act: function () { navigateTo("update");    } },
+    { id: "p-overview",  group: "cmdPalette.groupPage", title: "chrome.navOverview",          icon: "layout-grid",      kw: "home iot",            modes: ["continuous","hybrid"], act: function () { navigateTo("overview");  } },
+    { id: "p-dashboard", group: "cmdPalette.groupPage", title: "chrome.navDashboard",         icon: "layout-dashboard", kw: "water legacy",        modes: ["legacy","hybrid"],     act: function () { navigateTo("dashboard"); } },
+    { id: "p-sensors",   group: "cmdPalette.groupPage", title: "chrome.navSensors",           icon: "thermometer",      kw: "readings env",                                        act: function () { navigateTo("sensors");   } },
+    { id: "p-alerts",    group: "cmdPalette.groupPage", title: "chrome.navAlerts",            icon: "bell-ring",        kw: "rules notifications", modes: ["continuous","hybrid"], act: function () { navigateTo("alerts");    } },
+    { id: "p-logs",      group: "cmdPalette.groupPage", title: "cmdPalette.logViewer",        icon: "book-text",        kw: "flowmeter",           modes: ["legacy","hybrid"],     act: function () { navigateTo("logs");      } },
+    { id: "p-files",     group: "cmdPalette.groupPage", title: "chrome.navFiles",             icon: "folder",           kw: "browser littlefs sd",                                 act: function () { navigateTo("files");     } },
+    { id: "p-settings",  group: "cmdPalette.groupPage", title: "chrome.navSettings",          icon: "settings",         kw: "options",                                             act: function () { navigateTo("settings");  } },
+    { id: "p-update",    group: "cmdPalette.groupPage", title: "cmdPalette.firmwareUpdate",   icon: "cloud-upload",     kw: "ota upload",                                          act: function () { navigateTo("update");    } },
 
     // Settings sub-pages
-    { id: "s-device",   group: cpT("cmdPalette.groupSettings"), title: cpT("cmdPalette.device"),        icon: "settings", kw: "name id",                 act: function () { location.hash = "settings_device";   } },
-    { id: "s-platform", group: cpT("cmdPalette.groupSettings"), title: cpT("cmdPalette.platform"),      icon: "cpu",      kw: "hardware core logic mode pins sensors modules", act: function () { location.hash = "settings_platform"; } },
-    { id: "s-netime",   group: cpT("cmdPalette.groupSettings"), title: cpT("cmdPalette.networkAndTime"),icon: "wifi",     kw: "wifi ssid ap ntp timezone", act: function () { location.hash = "settings_netime"; } },
-    { id: "s-datalog",  group: cpT("cmdPalette.groupSettings"), title: cpT("cmdPalette.dataLog"),       icon: "file-text", kw: "rotation retention csv",  act: function () { location.hash = "settings_datalog"; } },
-    { id: "s-export",   group: cpT("cmdPalette.groupSettings"), title: cpT("cmdPalette.export"),        icon: "cloud-upload", kw: "mqtt http opensensemap webhook", act: function () { location.hash = "settings_export";  } },
+    { id: "s-device",   group: "cmdPalette.groupSettings", title: "cmdPalette.device",        icon: "settings", kw: "name id",                 act: function () { location.hash = "settings_device";   } },
+    { id: "s-platform", group: "cmdPalette.groupSettings", title: "cmdPalette.platform",      icon: "cpu",      kw: "hardware core logic mode pins sensors modules", act: function () { location.hash = "settings_platform"; } },
+    { id: "s-netime",   group: "cmdPalette.groupSettings", title: "cmdPalette.networkAndTime",icon: "wifi",     kw: "wifi ssid ap ntp timezone", act: function () { location.hash = "settings_netime"; } },
+    { id: "s-datalog",  group: "cmdPalette.groupSettings", title: "cmdPalette.dataLog",       icon: "file-text", kw: "rotation retention csv",  act: function () { location.hash = "settings_datalog"; } },
+    { id: "s-export",   group: "cmdPalette.groupSettings", title: "cmdPalette.export",        icon: "cloud-upload", kw: "mqtt http opensensemap webhook", act: function () { location.hash = "settings_export";  } },
 
     // Actions — theme.  Delegate to core.setTheme() so the data-theme
     // attribute, the theme-X class on <html>, localStorage, AND the topbar
     // toggle icon all update in one place (gemini review PR #108).
-    { id: "a-theme-dark",  group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.switchToDark"),  icon: "moon", kw: "appearance", act: function () { window.setTheme && setTheme("dark");  } },
-    { id: "a-theme-light", group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.switchToLight"), icon: "sun",  kw: "appearance", act: function () { window.setTheme && setTheme("light"); } },
-    { id: "a-theme-auto",  group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.themeFollowsOs"),icon: "moon", kw: "auto",       act: function () { window.setTheme && setTheme("auto");  } },
+    { id: "a-theme-dark",  group: "cmdPalette.groupAction", title: "cmdPalette.switchToDark",  icon: "moon", kw: "appearance", act: function () { window.setTheme && setTheme("dark");  } },
+    { id: "a-theme-light", group: "cmdPalette.groupAction", title: "cmdPalette.switchToLight", icon: "sun",  kw: "appearance", act: function () { window.setTheme && setTheme("light"); } },
+    { id: "a-theme-auto",  group: "cmdPalette.groupAction", title: "cmdPalette.themeFollowsOs",icon: "moon", kw: "auto",       act: function () { window.setTheme && setTheme("auto");  } },
     // Actions — accent
-    { id: "a-accent-cyan",   group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.accentCyan"),   icon: "palette", kw: "color theme default", act: function () { window.setAccent && setAccent("cyan");   } },
-    { id: "a-accent-amber",  group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.accentAmber"),  icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("amber");  } },
-    { id: "a-accent-green",  group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.accentGreen"),  icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("green");  } },
-    { id: "a-accent-violet", group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.accentViolet"), icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("violet"); } },
+    { id: "a-accent-cyan",   group: "cmdPalette.groupAction", title: "cmdPalette.accentCyan",   icon: "palette", kw: "color theme default", act: function () { window.setAccent && setAccent("cyan");   } },
+    { id: "a-accent-amber",  group: "cmdPalette.groupAction", title: "cmdPalette.accentAmber",  icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("amber");  } },
+    { id: "a-accent-green",  group: "cmdPalette.groupAction", title: "cmdPalette.accentGreen",  icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("green");  } },
+    { id: "a-accent-violet", group: "cmdPalette.groupAction", title: "cmdPalette.accentViolet", icon: "palette", kw: "color theme",         act: function () { window.setAccent && setAccent("violet"); } },
     // Actions — density
-    { id: "a-density-toggle", group: cpT("cmdPalette.groupAction"), title: cpT("chrome.toggleDensity"), icon: "rows-3", kw: "comfortable spacing", act: function () { window.quickDensityToggle && quickDensityToggle(); } },
+    { id: "a-density-toggle", group: "cmdPalette.groupAction", title: "chrome.toggleDensity", icon: "rows-3", kw: "comfortable spacing", act: function () { window.quickDensityToggle && quickDensityToggle(); } },
     // Actions — sidebar
-    { id: "a-sidebar-toggle", group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.toggleSidebarRail"), icon: "menu",   kw: "collapse expand",     act: function () { window.sidebarRailToggle && sidebarRailToggle(); } },
+    { id: "a-sidebar-toggle", group: "cmdPalette.groupAction", title: "cmdPalette.toggleSidebarRail", icon: "menu",   kw: "collapse expand",     act: function () { window.sidebarRailToggle && sidebarRailToggle(); } },
     // Actions — destructive
-    { id: "a-restart", group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.restartDeviceEllipsis"),  icon: "rotate-ccw", kw: "reboot",     act: function () { window.showPopup && showPopup("restartPopup"); } },
-    { id: "a-add-sensor", group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.addSensorEllipsis"),   icon: "plus",       kw: "new",       act: function () { window.openSensorWizard && openSensorWizard(); } },
+    { id: "a-restart", group: "cmdPalette.groupAction", title: "cmdPalette.restartDeviceEllipsis",  icon: "rotate-ccw", kw: "reboot",     act: function () { window.showPopup && showPopup("restartPopup"); } },
+    { id: "a-add-sensor", group: "cmdPalette.groupAction", title: "cmdPalette.addSensorEllipsis",   icon: "plus",       kw: "new",       act: function () { window.openSensorWizard && openSensorWizard(); } },
     // Actions — quick settings drawer
-    { id: "a-quick-settings", group: cpT("cmdPalette.groupAction"), title: cpT("cmdPalette.openQuickSettings"),  icon: "sliders-horizontal", kw: "drawer panel", act: function () { window.QuickSettings && QuickSettings.open(); } },
+    { id: "a-quick-settings", group: "cmdPalette.groupAction", title: "cmdPalette.openQuickSettings",  icon: "sliders-horizontal", kw: "drawer panel", act: function () { window.QuickSettings && QuickSettings.open(); } },
   ];
 
   function buildItems() {
@@ -81,6 +87,12 @@
     var mode = document.documentElement.getAttribute("data-mode") || "continuous";
     var items = STATIC_ITEMS.filter(function (it) {
       return !it.modes || it.modes.indexOf(mode) !== -1;
+    }).map(function (it) {
+      // Copy, resolving the keys — score() and renderList() both read plain
+      // text off these, and STATIC_ITEMS itself must stay untranslated so the
+      // next open in another language still has keys to resolve.
+      return { id: it.id, group: cpT(it.group), title: cpT(it.title),
+               icon: it.icon, kw: it.kw, act: it.act };
     });
 
     // Sensors from current platform config
@@ -296,6 +308,23 @@
       e.preventDefault();
       open();
     }
+  });
+
+  // The sheet's own chrome — aria-label, placeholder, the ↑↓/↵/Esc footer —
+  // is built once and cached in `palette`, so a language switch would leave
+  // it in the old language forever.  Throw the node away and let the next
+  // open() rebuild it; if it is open right now, rebuild in place and keep
+  // whatever the user had typed.
+  document.addEventListener("i18n:change", function () {
+    if (!palette) return;                 // never opened — nothing is stale yet
+    var wasOpen = isOpen();
+    var q = input ? input.value : "";
+    palette.parentNode.removeChild(palette);
+    palette = input = listEl = null;
+    if (!wasOpen) return;
+    open();
+    input.value = q;
+    rerank();
   });
 
   window.CommandPalette = { open: open, close: close, isOpen: isOpen };

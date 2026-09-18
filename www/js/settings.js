@@ -2240,8 +2240,11 @@ function hubStatusInit() {
   var notInBuild = [];
 
   // ── Device (ST, no fetch) ────────────────────────────────────────────────
-  setEl2("hub-st-device", (ST.device || ST.deviceName || "—") +
-    (ST.deviceId ? " · " + String(ST.deviceId).toLowerCase() : ""));
+  // esc(): both halves are device-supplied (the name is free text the reader
+  // typed on the Device page) and this row writes innerHTML, unlike every
+  // other one here, which goes through _hubBadge's escaping.
+  setEl2("hub-st-device", esc((ST.device || ST.deviceName || "—") +
+    (ST.deviceId ? " · " + String(ST.deviceId).toLowerCase() : "")));
 
   // ── Platform mode (ST.caps.platformMode, no fetch) ──────────────────────
   var modeIdx = ST.caps && typeof ST.caps.platformMode === "number" ? ST.caps.platformMode : null;
