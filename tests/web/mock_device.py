@@ -6,10 +6,11 @@ they are not compiled, so nothing catches a page that fetches a field the
 firmware does not send, or a button wired to a handler that was never
 registered in core.js's allowlist.
 
-The stub answers what the ESP-NOW and e-ink pages need. Everything else the
-SPA polls on boot gets an empty object, so the page under test is not competing
-with a wall of failed requests — and the routes it does NOT serve (a plain
-download link like /export_settings) 404 by design; the driver ignores those.
+The stub answers what the Nodes (ESP-NOW + WiFi remote, merged in redesign
+1a), sensors, and e-ink pages need. Everything else the SPA polls on boot
+gets an empty object, so the page under test is not competing with a wall of
+failed requests — and the routes it does NOT serve (a plain download link
+like /export_settings) 404 by design; the driver ignores those.
 
     python3 tests/web/mock_device.py 8765
 """
@@ -44,6 +45,22 @@ STATUS = {
               "ring_full": 0, "history_collapsed": 0, "history_no_clock": 2,
               "acks": 1531,
               "discover_seen": 5, "discover_bad_sig": 1, "paired": 3},
+}
+
+# GET /api/remote/status — the WiFi-remote half of the merged Nodes page
+# (redesign 1a). No node/interval/battery fields here at all: these nodes are
+# configured on their own captive portal, not from this collector, so the
+# page has nothing to write back for them — read-only by construction, not
+# by an editor that happens not to be wired up.
+REMOTE_STATUS = {
+    "nodes": [
+        {"id": "greenhouse", "online": True, "age_ms": 47000,
+         "metrics": [{"metric": "temperature", "value": 21.4, "unit": "°C"},
+                     {"metric": "humidity", "value": 62, "unit": "%"}]},
+        # Never reported: age_ms is None, which is NOT zero — same nulls
+        # discipline as the ESP-NOW side's rssi/days.
+        {"id": "shed-wifi", "online": False, "age_ms": None, "metrics": []},
+    ],
 }
 
 # GET /api/platform_config — what the sensors page loads and rewrites.
@@ -202,6 +219,8 @@ class H(http.server.SimpleHTTPRequestHandler):
             return self._json(SENSORS)
         if path == "/api/espnow/status":
             return self._json(STATUS)
+        if path == "/api/remote/status":
+            return self._json(REMOTE_STATUS)
         if path == "/api/kindle/config":
             return self._json(KINDLE)
         if path == "/api/csrf-token":

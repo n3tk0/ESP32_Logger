@@ -39,7 +39,7 @@
 
 <body>
   <!-- WCAG 2.4.1 bypass link — programmatic focus avoids the SPA hash router. -->
-  <button type="button" class="skip-link" data-click="skipToContent">Skip to main content</button>
+  <button type="button" class="skip-link" data-click="skipToContent" data-i18n="chrome.skipToContent">Skip to main content</button>
 
   <div class="app" id="app">
 
@@ -47,6 +47,8 @@
     <header class="topbar" role="banner">
       <button type="button" class="icon-btn" id="sidebarRailBtn"
               data-click="sidebarRailToggle"
+              data-i18n-aria-label="chrome.collapseSidebar"
+              data-i18n-title="chrome.collapseSidebar"
               aria-label="Collapse sidebar"
               aria-expanded="true"
               aria-controls="sidebar">
@@ -66,9 +68,20 @@
         <span class="pill mono" id="headerTime">--:--</span>
       </div>
       <div class="topbar-actions">
+        <!-- title/aria-label are kept in sync dynamically by I18n._syncToggleBtn()
+             (needs the {next} language name interpolated, which the generic
+             data-i18n-title attribute walk in I18n.apply() cannot do) rather
+             than a static data-i18n-title attribute. -->
+        <button type="button" class="icon-btn" id="langToggleBtn"
+                data-click="quickLangToggle"
+                title="Switch to Bulgarian" aria-label="Switch to Bulgarian">
+          <span id="langToggleLabel" class="mono" style="font-size:10px;font-weight:700">EN</span>
+        </button>
         <span class="accent-picker" id="accentPicker">
           <button type="button" class="icon-btn" id="accentPickerBtn"
                   data-click="accentPickerToggle"
+                  data-i18n-title="chrome.changeAccent"
+                  data-i18n-aria-label="chrome.changeAccent"
                   title="Change accent color"
                   aria-label="Change accent color"
                   aria-haspopup="true"
@@ -84,12 +97,16 @@
         </span>
         <button type="button" class="icon-btn" id="densityToggleBtn"
                 data-click="quickDensityToggle"
+                data-i18n-title="chrome.toggleDensity"
+                data-i18n-aria-label="chrome.toggleDensity"
                 title="Toggle compact density"
                 aria-label="Toggle compact density">
           <span data-icon="rows-3"></span>
         </button>
         <button type="button" class="icon-btn" id="quickSettingsBtn"
                 data-click="quickSettingsOpen"
+                data-i18n-title="chrome.quickSettings"
+                data-i18n-aria-label="chrome.quickSettings"
                 title="Quick settings (,)"
                 aria-label="Open quick settings">
           <span data-icon="sliders-horizontal"></span>
@@ -100,12 +117,14 @@
                 aria-label="Toggle dark/light theme">
           <span data-icon="moon"></span>
         </button>
-        <button type="button" class="icon-btn" id="bellBtn" aria-label="Notifications">
+        <button type="button" class="icon-btn" id="bellBtn" data-i18n-aria-label="chrome.notifications" aria-label="Notifications">
           <span data-icon="bell"></span>
           <span class="nbadge" id="topbar-alert-badge" style="display:none">0</span>
         </button>
         <button type="button" class="icon-btn" id="topbarRestartBtn"
                 data-click="showPopup" data-args='["restartPopup"]'
+                data-i18n-aria-label="chrome.restartDevice"
+                data-i18n-title="chrome.restartDevice"
                 aria-label="Restart device" title="Restart device">
           <span data-icon="rotate-ccw"></span>
         </button>
@@ -115,36 +134,36 @@
     <!-- ═══ SIDEBAR ═══ -->
     <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
       <nav>
-        <div class="nav-group">Main</div>
+        <div class="nav-group" data-i18n="chrome.navGroupMain">Main</div>
         <!-- Overview: IoT-first home (continuous / hybrid modes) -->
         <a href="#overview" data-page="overview" class="nav-item" data-click="navPage" data-mode-show="continuous hybrid">
-          <span class="icon" data-icon="layout-grid"></span><span>Overview</span>
+          <span class="icon" data-icon="layout-grid"></span><span data-i18n="chrome.navOverview">Overview</span>
         </a>
         <!-- Dashboard: water/legacy home (legacy / hybrid modes) -->
         <a href="#dashboard" data-page="dashboard" class="nav-item" data-click="navPage" data-mode-show="legacy hybrid">
-          <span class="icon" data-icon="layout-dashboard"></span><span>Dashboard</span>
+          <span class="icon" data-icon="layout-dashboard"></span><span data-i18n="chrome.navDashboard">Dashboard</span>
         </a>
         <a href="#sensors" data-page="sensors" class="nav-item" data-click="navPage">
-          <span class="icon" data-icon="gauge"></span><span>Sensors</span>
+          <span class="icon" data-icon="gauge"></span><span data-i18n="chrome.navSensors">Sensors</span>
         </a>
         <a href="#logs" data-page="logs" class="nav-item" data-click="navPage" data-mode-show="legacy hybrid">
-          <span class="icon" data-icon="book-text"></span><span>Logs</span>
+          <span class="icon" data-icon="book-text"></span><span data-i18n="chrome.navLogs">Logs</span>
         </a>
         <a href="#files" data-page="files" class="nav-item" data-click="navPage">
-          <span class="icon" data-icon="folder"></span><span>Files</span>
+          <span class="icon" data-icon="folder"></span><span data-i18n="chrome.navFiles">Files</span>
         </a>
         <!-- Alerts: IoT-first page (continuous / hybrid).  Health diagnostics
              merged into the Sensors page as a "Diagnostics" card type. -->
         <a href="#alerts" data-page="alerts" class="nav-item" data-click="navPage" data-mode-show="continuous hybrid">
-          <span class="icon" data-icon="bell-ring"></span><span>Alerts</span>
+          <span class="icon" data-icon="bell-ring"></span><span data-i18n="chrome.navAlerts">Alerts</span>
           <span class="nbadge" id="alerts-badge" style="display:none">0</span>
         </a>
-        <div class="nav-group">System</div>
+        <div class="nav-group" data-i18n="chrome.navGroupSystem">System</div>
         <a href="#settings" data-page="settings" class="nav-item" data-click="navPage">
-          <span class="icon" data-icon="settings"></span><span>Settings</span>
+          <span class="icon" data-icon="settings"></span><span data-i18n="chrome.navSettings">Settings</span>
         </a>
         <a href="#update" data-page="update" class="nav-item" data-click="navPage">
-          <span class="icon" data-icon="cloud-upload"></span><span>Update</span>
+          <span class="icon" data-icon="cloud-upload"></span><span data-i18n="chrome.navUpdate">Update</span>
         </a>
       </nav>
       <div class="sidebar-foot">
@@ -152,7 +171,7 @@
           <div class="sstat"><span data-icon="wifi"></span><span id="sstat-wifi">--</span></div>
           <div class="sstat"><span data-icon="cpu"></span><span id="sstat-cpu">--</span></div>
           <div class="sstat"><span data-icon="hard-drive"></span><span id="sstat-storage">--</span></div>
-          <div class="sstat ok" id="sstat-conn"><span data-icon="circle"></span><span id="sstat-conn-label">Online</span></div>
+          <div class="sstat ok" id="sstat-conn"><span data-icon="circle"></span><span id="sstat-conn-label" data-i18n="chrome.online">Online</span></div>
         </div>
         <div class="mono" style="color:var(--text-3);font-size:11px">FW <span id="footer-ver">--</span> · Boot #<span id="footer-boot">--</span></div>
         <div class="mono" style="color:var(--text-4);font-size:10px;margin-top:2px">© Petko Georgiev</div>
@@ -162,22 +181,22 @@
     <!-- ═══ BOTTOM NAV (mobile) ═══ -->
     <nav class="bottomnav" id="bottomNav">
       <a href="#overview" data-page="overview" class="bnav" data-click="navPage" data-mode-show="continuous hybrid">
-        <span data-icon="layout-grid"></span><span>Overview</span>
+        <span data-icon="layout-grid"></span><span data-i18n="chrome.navOverview">Overview</span>
       </a>
       <a href="#dashboard" data-page="dashboard" class="bnav" data-click="navPage" data-mode-show="legacy hybrid">
-        <span data-icon="layout-dashboard"></span><span>Dash</span>
+        <span data-icon="layout-dashboard"></span><span data-i18n="chrome.navDash">Dash</span>
       </a>
       <a href="#sensors" data-page="sensors" class="bnav" data-click="navPage">
-        <span data-icon="thermometer"></span><span>Sensors</span>
+        <span data-icon="thermometer"></span><span data-i18n="chrome.navSensors">Sensors</span>
       </a>
       <a href="#alerts" data-page="alerts" class="bnav" data-click="navPage" data-mode-show="continuous hybrid">
-        <span data-icon="bell-ring"></span><span>Alerts</span>
+        <span data-icon="bell-ring"></span><span data-i18n="chrome.navAlerts">Alerts</span>
       </a>
       <a href="#files" data-page="files" class="bnav" data-click="navPage">
-        <span data-icon="folder"></span><span>Files</span>
+        <span data-icon="folder"></span><span data-i18n="chrome.navFiles">Files</span>
       </a>
       <a href="#settings" data-page="settings" class="bnav" data-click="navPage">
-        <span data-icon="settings"></span><span>More</span>
+        <span data-icon="settings"></span><span data-i18n="chrome.navMore">More</span>
       </a>
     </nav>
 
@@ -188,21 +207,21 @@
       <section class="page" id="page-dashboard">
         <div class="page-head">
           <div>
-            <h1 class="page-title"><span data-icon="layout-dashboard"></span> Dashboard</h1>
-            <div class="page-sub">Live sensor readings · auto-refresh every 60 s</div>
+            <h1 class="page-title"><span data-icon="layout-dashboard"></span> <span data-i18n="dashboard.title">Dashboard</span></h1>
+            <div class="page-sub" data-i18n="dashboard.subtitle">Live sensor readings · auto-refresh every 60 s</div>
           </div>
           <div class="page-actions">
             <label class="check">
-              <span style="font-size:11px;color:var(--text-3)">Time</span>
+              <span style="font-size:11px;color:var(--text-3)" data-i18n="dashboard.timeLabel">Time</span>
               <select id="db-range" class="input" style="width:auto;padding:2px 6px;font-size:12px;min-height:26px" data-change="dbRangeChange">
-                <option value="900">Last 15 min</option>
-                <option value="3600" selected>Last 1 h</option>
-                <option value="43200">Last 12 h</option>
-                <option value="86400">Last 24 h</option>
+                <option value="900" data-i18n="dashboard.range15m">Last 15 min</option>
+                <option value="3600" selected data-i18n="dashboard.range1h">Last 1 h</option>
+                <option value="43200" data-i18n="dashboard.range12h">Last 12 h</option>
+                <option value="86400" data-i18n="dashboard.range24h">Last 24 h</option>
               </select>
             </label>
             <span id="db-poll-status" class="badge dim" style="font-size:10px">…</span>
-            <button class="btn-mini" data-click="dbRefreshNow" title="Refresh now"><span data-icon="refresh-cw"></span></button>
+            <button class="btn-mini" data-click="dbRefreshNow" title="Refresh now" data-i18n-title="dashboard.refreshNow"><span data-icon="refresh-cw"></span></button>
           </div>
         </div>
 
@@ -212,8 +231,8 @@
         <div id="db-empty" class="card" style="display:none">
           <div class="card-body text-center" style="padding:2rem 1rem">
             <div style="font-size:2rem"><span data-icon="satellite"></span></div>
-            <p style="margin:.5rem 0 0">No sensors registered yet.</p>
-            <p class="hint">Set platform mode to <strong>Continuous</strong> or
+            <p style="margin:.5rem 0 0" data-i18n="dashboard.emptyTitle">No sensors registered yet.</p>
+            <p class="hint" data-i18n-html="dashboard.emptyHint">Set platform mode to <strong>Continuous</strong> or
               <strong>Hybrid</strong> in <a href="#settings_corelogic">Core Logic</a>
               and add sensors to start streaming data.</p>
           </div>
@@ -234,12 +253,12 @@
       <section class="page" id="page-logs">
         <div class="page-head">
           <div>
-            <h1 class="page-title"><span data-icon="book-text"></span> Log Viewer</h1>
-            <div class="page-sub">Per-fill flowmeter log analysis · select a log file to load</div>
+            <h1 class="page-title"><span data-icon="book-text"></span> <span data-i18n="logs.title">Log Viewer</span></h1>
+            <div class="page-sub" data-i18n="logs.subtitle">Per-fill flowmeter log analysis · select a log file to load</div>
           </div>
           <div class="page-actions">
-            <button class="btn" data-click="dbExportCSV"><span data-icon="download"></span> Export CSV</button>
-            <button class="btn" data-click="dbExportPNG"><span data-icon="image"></span> PNG</button>
+            <button class="btn" data-click="dbExportCSV"><span data-icon="download"></span> <span data-i18n="logs.exportCsv">Export CSV</span></button>
+            <button class="btn" data-click="dbExportPNG"><span data-icon="image"></span> <span data-i18n="logs.exportPng">PNG</span></button>
           </div>
         </div>
 
@@ -247,9 +266,9 @@
           <div class="card-body">
             <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
               <select id="fileSelect" class="input" style="flex:1;min-width:200px" data-change="dbLoadData">
-                <option value="">Loading files…</option>
+                <option value="" data-i18n="logs.loadingFiles">Loading files…</option>
               </select>
-              <button class="btn primary" data-click="dbLoadData"><span data-icon="refresh-cw"></span> Reload</button>
+              <button class="btn primary" data-click="dbLoadData"><span data-icon="refresh-cw"></span> <span data-i18n="logs.reload">Reload</span></button>
             </div>
           </div>
         </div>
@@ -258,22 +277,22 @@
 
         <div class="grid grid-4" style="margin-top:var(--gap)">
           <div class="kpi">
-            <div class="kpi-l"><span data-icon="droplets"></span> Total volume</div>
+            <div class="kpi-l"><span data-icon="droplets"></span> <span data-i18n="logs.kpiTotalVolume">Total volume</span></div>
             <div class="kpi-v"><span class="num" id="db-totalVol">0.00</span><span class="unit">L</span></div>
-            <div class="kpi-d" id="db-volSub">all events</div>
+            <div class="kpi-d" id="db-volSub" data-i18n="logs.kpiVolSub">all events</div>
           </div>
           <div class="kpi">
-            <div class="kpi-l"><span data-icon="zap"></span> Events</div>
-            <div class="kpi-v"><span class="num" id="db-eventCount">0</span><span class="unit">flushes</span></div>
+            <div class="kpi-l"><span data-icon="zap"></span> <span data-i18n="logs.kpiEvents">Events</span></div>
+            <div class="kpi-v"><span class="num" id="db-eventCount">0</span><span class="unit" data-i18n="logs.kpiEventsUnit">flushes</span></div>
             <div class="kpi-d"><span class="mono">FF <span id="db-ffCount">0</span></span> · <span class="mono">PF <span id="db-pfCount">0</span></span></div>
           </div>
           <div class="kpi">
-            <div class="kpi-l"><span data-icon="alert-triangle"></span> Extra FF</div>
+            <div class="kpi-l"><span data-icon="alert-triangle"></span> <span data-i18n="logs.kpiExtraFF">Extra FF</span></div>
             <div class="kpi-v"><span class="num" id="db-totalFF" style="color:var(--ff-color,#e74c3c)">0</span></div>
             <div class="kpi-d" id="db-legendFF"></div>
           </div>
           <div class="kpi">
-            <div class="kpi-l"><span data-icon="alert-triangle"></span> Extra PF</div>
+            <div class="kpi-l"><span data-icon="alert-triangle"></span> <span data-i18n="logs.kpiExtraPF">Extra PF</span></div>
             <div class="kpi-v"><span class="num" id="db-totalPF" style="color:var(--pf-color,#3498db)">0</span></div>
             <div class="kpi-d" id="db-legendPF"></div>
           </div>
@@ -282,12 +301,12 @@
         <div class="grid grid-12" style="margin-top:var(--gap)">
           <div class="card span-8">
             <div class="card-head">
-              <div class="card-title"><span data-icon="bar-chart-3"></span> Volume timeline</div>
+              <div class="card-title"><span data-icon="bar-chart-3"></span> <span data-i18n="logs.chartTitle">Volume timeline</span></div>
               <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                <label class="check"><input type="number" id="db-threshold" class="input mono" style="width:72px;height:30px;padding:0 8px;font-size:12px" placeholder="0.0" min="0" step="0.1" data-input="dbApplyFilters"><span style="font-size:11px;color:var(--text-3)">L threshold</span></label>
-                <button class="btn-mini" data-click="dbZoom" data-args="[-1]" title="Zoom in"><span data-icon="search"></span></button>
-                <button class="btn-mini" data-click="dbZoom" data-args="[1]"  title="Zoom out"><span data-icon="search"></span></button>
-                <button class="btn-mini" data-click="dbZoomReset" title="Reset"><span data-icon="rotate-ccw"></span></button>
+                <label class="check"><input type="number" id="db-threshold" class="input mono" style="width:72px;height:30px;padding:0 8px;font-size:12px" placeholder="0.0" min="0" step="0.1" data-input="dbApplyFilters"><span style="font-size:11px;color:var(--text-3)" data-i18n="logs.lThreshold">L threshold</span></label>
+                <button class="btn-mini" data-click="dbZoom" data-args="[-1]" title="Zoom in" data-i18n-title="logs.zoomIn"><span data-icon="search"></span></button>
+                <button class="btn-mini" data-click="dbZoom" data-args="[1]"  title="Zoom out" data-i18n-title="logs.zoomOut"><span data-icon="search"></span></button>
+                <button class="btn-mini" data-click="dbZoomReset" title="Reset" data-i18n-title="logs.reset"><span data-icon="rotate-ccw"></span></button>
               </div>
             </div>
             <div class="card-body" style="padding:8px 12px 12px">
@@ -297,34 +316,34 @@
           </div>
 
           <div class="card span-4">
-            <div class="card-head"><div class="card-title"><span data-icon="filter"></span> Filters</div></div>
+            <div class="card-head"><div class="card-title"><span data-icon="filter"></span> <span data-i18n="logs.filtersTitle">Filters</span></div></div>
             <div class="card-body">
               <div class="form-grid">
-                <div class="field"><label>From</label>
+                <div class="field"><label data-i18n="logs.from">From</label>
                   <input type="date" id="startDate" class="input">
                 </div>
-                <div class="field"><label>To</label>
+                <div class="field"><label data-i18n="logs.to">To</label>
                   <input type="date" id="endDate" class="input">
                 </div>
-                <div class="field"><label>Trigger</label>
+                <div class="field"><label data-i18n="logs.trigger">Trigger</label>
                   <select id="eventFilter" class="input">
-                    <option value="ALL">All</option>
-                    <option value="BTN">Buttons only</option>
-                    <option value="FF">FF only</option>
-                    <option value="PF">PF only</option>
+                    <option value="ALL" data-i18n="logs.triggerAll">All</option>
+                    <option value="BTN" data-i18n="logs.triggerButtons">Buttons only</option>
+                    <option value="FF" data-i18n="logs.triggerFF">FF only</option>
+                    <option value="PF" data-i18n="logs.triggerPF">PF only</option>
                   </select>
                 </div>
-                <div class="field"><label>Extra presses</label>
+                <div class="field"><label data-i18n="logs.extraPresses">Extra presses</label>
                   <select id="pressFilter" class="input">
-                    <option value="ALL">All</option>
-                    <option value="EXTRA">With extra</option>
-                    <option value="NONE">No extra</option>
+                    <option value="ALL" data-i18n="logs.pressAll">All</option>
+                    <option value="EXTRA" data-i18n="logs.pressWith">With extra</option>
+                    <option value="NONE" data-i18n="logs.pressNone">No extra</option>
                   </select>
                 </div>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;flex-wrap:wrap;gap:8px">
-                <label class="check"><input type="checkbox" id="excludeZero" checked><span>Exclude 0.00 L entries</span></label>
-                <button class="btn primary" data-click="dbApplyFilters"><span data-icon="check"></span> Apply</button>
+                <label class="check"><input type="checkbox" id="excludeZero" checked><span data-i18n="logs.excludeZero">Exclude 0.00 L entries</span></label>
+                <button class="btn primary" data-click="dbApplyFilters"><span data-icon="check"></span> <span data-i18n="logs.apply">Apply</span></button>
               </div>
             </div>
           </div>
@@ -335,9 +354,9 @@
       <section class="page" id="page-live">
         <div class="page-head">
           <div>
-            <h1 class="page-title">Live <span class="badge ok pulse" id="conn">● Connected</span></h1>
+            <h1 class="page-title"><span data-i18n="live.title">Live</span> <span class="badge ok pulse" id="conn" data-i18n="live.connConnected">● Connected</span></h1>
             <div class="page-sub" style="display:flex;align-items:center;gap:6px">
-              Real-time telemetry · refreshing every
+              <span data-i18n="live.subtitle">Real-time telemetry · refreshing every</span>
               <select id="live-refresh-rate" class="input" style="width:auto;padding:2px 4px;font-size:11px;min-height:22px" data-change="liveSetRate">
                 <option value="500">0.5s</option>
                 <option value="1000">1s</option>
@@ -348,7 +367,7 @@
           </div>
           <div class="page-actions" style="display:flex;gap:12px;align-items:center">
             <div style="text-align:right">
-              <div class="text-muted" style="font-size:11px">Mode</div>
+              <div class="text-muted" style="font-size:11px" data-i18n="live.mode">Mode</div>
               <div id="mode" style="font-weight:600;font-size:14px">–</div>
             </div>
             <div id="live-time" class="mono" style="font-size:24px;font-weight:700">--:--:--</div>
@@ -358,31 +377,31 @@
         <div class="grid grid-12">
           <div class="card span-8">
             <div class="card-head">
-              <div class="card-title"><span data-icon="droplets"></span> Current cycle</div>
-              <span class="badge acc mono">CYCLE #<span id="live-cycle-num"></span></span>
+              <div class="card-title"><span data-icon="droplets"></span> <span data-i18n="live.currentCycle">Current cycle</span></div>
+              <span class="badge acc mono"><span data-i18n="live.cyclePrefix">CYCLE #</span><span id="live-cycle-num"></span></span>
             </div>
             <div class="card-body">
               <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;justify-content:space-between">
                 <div class="bigstat">
-                  <div class="bigstat-l">Volume</div>
+                  <div class="bigstat-l" data-i18n="live.volume">Volume</div>
                   <div class="bigstat-v mono"><span id="live-liters">0.00</span><span class="u">L</span></div>
                 </div>
                 <div class="bigstat">
-                  <div class="bigstat-l">Pulses</div>
+                  <div class="bigstat-l" data-i18n="live.pulses">Pulses</div>
                   <div class="bigstat-v mono" id="live-pulses">0</div>
                 </div>
                 <div class="bigstat">
-                  <div class="bigstat-l">Duration</div>
+                  <div class="bigstat-l" data-i18n="live.duration">Duration</div>
                   <div class="bigstat-v mono"><span id="live-cycleTime">0</span><span class="u">s</span></div>
                 </div>
                 <div class="bigstat">
-                  <div class="bigstat-l">Trigger</div>
+                  <div class="bigstat-l" data-i18n="live.trigger">Trigger</div>
                   <div class="bigstat-v" style="color:var(--accent)" id="live-trigger">–</div>
                 </div>
               </div>
               <div style="margin-top:16px">
                 <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:6px">
-                  <span class="mono">Extra FF: <span id="live-ffCount" style="color:var(--ff-color,#e74c3c);font-weight:bold">0</span> | Extra PF: <span id="live-pfCount" style="color:var(--pf-color,#3498db);font-weight:bold">0</span></span>
+                  <span class="mono"><span data-i18n="live.extraFFLabel">Extra FF:</span> <span id="live-ffCount" style="color:var(--ff-color,#e74c3c);font-weight:bold">0</span> | <span data-i18n="live.extraPFLabel">Extra PF:</span> <span id="live-pfCount" style="color:var(--pf-color,#3498db);font-weight:bold">0</span></span>
                 </div>
                 <svg class="live-chart" viewBox="0 0 600 80" preserveAspectRatio="none">
                   <g stroke="var(--border)" stroke-width="1"><line x1="0" y1="20" x2="600" y2="20"></line><line x1="0" y1="40" x2="600" y2="40"></line><line x1="0" y1="60" x2="600" y2="60"></line></g>
@@ -393,12 +412,12 @@
           </div>
 
           <div class="card span-4">
-            <div class="card-head"><div class="card-title"><span data-icon="git-branch"></span> State machine</div></div>
+            <div class="card-head"><div class="card-title"><span data-icon="git-branch"></span> <span data-i18n="live.stateMachine">State machine</span></div></div>
             <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
               <div id="state">–</div>
               <div class="sm-timer">
                 <div>
-                  <div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Timer</div>
+                  <div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em" data-i18n="live.timer">Timer</div>
                   <div class="mono" style="font-size:32px;font-weight:600;color:var(--accent)"><span id="stateRem">–</span><span style="font-size:14px;color:var(--text-3)">s</span></div>
                 </div>
                 <svg viewBox="0 0 60 60" width="56" height="56"><circle cx="30" cy="30" r="24" fill="none" stroke="var(--panel-3)" stroke-width="6"></circle><circle id="stateRing" cx="30" cy="30" r="24" fill="none" stroke="var(--accent)" stroke-width="6" stroke-dasharray="150" stroke-dashoffset="0" transform="rotate(-90 30 30)" stroke-linecap="round"></circle></svg>
@@ -410,32 +429,32 @@
 
         <div class="grid grid-12" style="margin-top:var(--gap)">
           <div class="card span-4">
-            <div class="card-head"><div class="card-title"><span data-icon="circle-dot"></span> Buttons</div></div>
+            <div class="card-head"><div class="card-title"><span data-icon="circle-dot"></span> <span data-i18n="live.buttons">Buttons</span></div></div>
             <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
-              <div class="btn-state"><span><span data-icon="droplets"></span> Full Flush</span><span class="badge live-idle" id="live-ff">IDLE</span></div>
-              <div class="btn-state"><span><span data-icon="droplet"></span> Part Flush</span><span class="badge live-idle" id="live-pf">IDLE</span></div>
-              <div class="btn-state"><span><span data-icon="wifi"></span> WiFi Trigger</span><span class="badge live-idle" id="live-wifi">IDLE</span></div>
+              <div class="btn-state"><span><span data-icon="droplets"></span> <span data-i18n="live.fullFlush">Full Flush</span></span><span class="badge live-idle" id="live-ff">IDLE</span></div>
+              <div class="btn-state"><span><span data-icon="droplet"></span> <span data-i18n="live.partFlush">Part Flush</span></span><span class="badge live-idle" id="live-pf">IDLE</span></div>
+              <div class="btn-state"><span><span data-icon="wifi"></span> <span data-i18n="live.wifiTrigger">WiFi Trigger</span></span><span class="badge live-idle" id="live-wifi">IDLE</span></div>
             </div>
           </div>
           <div class="card span-8">
             <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-              <div class="card-title"><span data-icon="terminal"></span> Recent log</div>
+              <div class="card-title"><span data-icon="terminal"></span> <span data-i18n="live.recentLog">Recent log</span></div>
               <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                <input type="search" id="logsFilter" class="input" placeholder="Filter…" data-input="liveLogsFilter" style="width:160px;padding:4px 8px;font-size:12px;min-height:28px" aria-label="Filter log entries">
-                <button type="button" class="btn-mini" data-click="liveLogsFilterClear" title="Clear filter"><span data-icon="x"></span></button>
+                <input type="search" id="logsFilter" class="input" placeholder="Filter…" data-input="liveLogsFilter" style="width:160px;padding:4px 8px;font-size:12px;min-height:28px" aria-label="Filter log entries" data-i18n-placeholder="live.filterPh" data-i18n-aria-label="live.filterAria">
+                <button type="button" class="btn-mini" data-click="liveLogsFilterClear" title="Clear filter" data-i18n-title="live.clearFilter"><span data-icon="x"></span></button>
               </div>
             </div>
             <div class="card-body" style="padding:0;overflow-x:auto">
-              <div class="log" id="logs">Loading...</div>
+              <div class="log" id="logs" data-i18n="live.loadingLogs">Loading...</div>
             </div>
           </div>
         </div>
 
         <div class="grid grid-4" style="margin-top:var(--gap)">
-          <div class="kpi"><div class="kpi-l"><span data-icon="cpu"></span> CPU</div><div class="kpi-v"><span class="num" id="live-chip">–</span></div><div style="color:var(--text-3);font-size:11px">SoC model</div></div>
-          <div class="kpi"><div class="kpi-l"><span data-icon="memory-stick"></span> RAM</div><div class="kpi-v"><span class="num" id="live-heap" style="font-size:20px">–</span> <span class="unit">/ <span id="live-heapTotal">–</span></span></div><div class="bar"><span id="live-heapBar" style="width:0%"></span></div></div>
-          <div class="kpi"><div class="kpi-l"><span data-icon="hard-drive"></span> Storage</div><div class="kpi-v"><span class="num" id="live-storage" style="font-size:18px">–</span><span class="unit"></span></div><div class="bar"><span id="live-storageBar" style="width:0%"></span></div></div>
-          <div class="kpi"><div class="kpi-l"><span data-icon="clock"></span> Uptime</div><div class="kpi-v mono" style="font-size:22px"><span id="live-uptime">–</span><span style="font-size:14px;color:var(--text-3)">s</span></div><div style="color:var(--text-3);font-size:11px">Boot <span id="live-boot">–</span></div></div>
+          <div class="kpi"><div class="kpi-l"><span data-icon="cpu"></span> <span data-i18n="live.cpu">CPU</span></div><div class="kpi-v"><span class="num" id="live-chip">–</span></div><div style="color:var(--text-3);font-size:11px" data-i18n="live.socModel">SoC model</div></div>
+          <div class="kpi"><div class="kpi-l"><span data-icon="memory-stick"></span> <span data-i18n="live.ram">RAM</span></div><div class="kpi-v"><span class="num" id="live-heap" style="font-size:20px">–</span> <span class="unit">/ <span id="live-heapTotal">–</span></span></div><div class="bar"><span id="live-heapBar" style="width:0%"></span></div></div>
+          <div class="kpi"><div class="kpi-l"><span data-icon="hard-drive"></span> <span data-i18n="live.storage">Storage</span></div><div class="kpi-v"><span class="num" id="live-storage" style="font-size:18px">–</span><span class="unit"></span></div><div class="bar"><span id="live-storageBar" style="width:0%"></span></div></div>
+          <div class="kpi"><div class="kpi-l"><span data-icon="clock"></span> <span data-i18n="live.uptime">Uptime</span></div><div class="kpi-v mono" style="font-size:22px"><span id="live-uptime">–</span><span style="font-size:14px;color:var(--text-3)">s</span></div><div style="color:var(--text-3);font-size:11px"><span data-i18n="live.boot">Boot</span> <span id="live-boot">–</span></div></div>
         </div>
       </section>
 
@@ -443,14 +462,14 @@
       <section class="page" id="page-files">
         <div class="page-head">
           <div>
-            <h1 class="page-title"><span data-icon="folder"></span> Files</h1>
+            <h1 class="page-title"><span data-icon="folder"></span> <span data-i18n="files.title">Files</span></h1>
             <div class="page-sub" id="files-dirLabel">/</div>
           </div>
           <div class="page-actions">
             <div id="tabs" class="seg"></div>
-            <button id="upBtn" class="btn" data-click="filesGoUp" style="display:none"><span data-icon="chevron-left"></span> Up</button>
-            <button id="btnEdit" class="btn" data-click="filesToggleEdit"><span data-icon="pencil"></span> Edit</button>
-            <button id="btnDone" class="btn" data-click="filesToggleEdit" style="display:none"><span data-icon="x"></span> Done</button>
+            <button id="upBtn" class="btn" data-click="filesGoUp" style="display:none"><span data-icon="chevron-left"></span> <span data-i18n="files.up">Up</span></button>
+            <button id="btnEdit" class="btn" data-click="filesToggleEdit"><span data-icon="pencil"></span> <span data-i18n="files.edit">Edit</span></button>
+            <button id="btnDone" class="btn" data-click="filesToggleEdit" style="display:none"><span data-icon="x"></span> <span data-i18n="files.done">Done</span></button>
           </div>
         </div>
 
@@ -459,22 +478,22 @@
         <div class="card">
           <div class="card-head" style="padding:8px 14px">
             <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-3);flex:1">
-              <span id="files-usage">Loading…</span>
+              <span id="files-usage" data-i18n="files.loading">Loading…</span>
               <div class="storage-bar" style="width:140px"><span id="bar" style="width:0%"></span></div>
               <span id="files-pct" class="mono">--%</span>
             </div>
           </div>
-          <div class="card-body" style="padding:0;overflow-x:auto" id="list">Loading…</div>
+          <div class="card-body" style="padding:0;overflow-x:auto" id="list" data-i18n="files.loading">Loading…</div>
 
           <div id="editTools" class="card-body" style="border-top:1px solid var(--border);background:var(--panel-2);display:none">
             <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
               <form id="uploadForm" data-submit="filesUpload" style="display:flex;gap:8px;align-items:center">
                 <input type="file" name="file" id="fileInput" required class="input" style="height:36px">
-                <button type="submit" class="btn primary"><span data-icon="upload"></span> Upload</button>
+                <button type="submit" class="btn primary"><span data-icon="upload"></span> <span data-i18n="files.upload">Upload</span></button>
               </form>
               <form id="mkdirForm" data-submit="filesMkdir" style="display:flex;gap:8px;align-items:center">
-                <input type="text" id="newFolder" placeholder="New folder" class="input" style="width:140px;height:36px">
-                <button type="submit" class="btn"><span data-icon="folder-plus"></span> Create</button>
+                <input type="text" id="newFolder" placeholder="New folder" data-i18n-placeholder="files.newFolderPh" class="input" style="width:140px;height:36px">
+                <button type="submit" class="btn"><span data-icon="folder-plus"></span> <span data-i18n="files.create">Create</span></button>
               </form>
             </div>
             <div id="uploadProg" style="display:none;margin-top:10px">
@@ -487,108 +506,162 @@
         </div>
       </section>
 
-      <!-- ─── PAGE: SETTINGS ─── -->
+      <!-- ─── PAGE: SETTINGS (redesign 2a — status rows) ─── -->
       <section class="page" id="page-settings">
         <div class="page-head">
           <div>
-            <h1 class="page-title"><span data-icon="settings"></span> Settings</h1>
-            <div class="page-sub">Configure device, sensors, exports and storage</div>
+            <h1 class="page-title"><span data-icon="settings"></span> <span data-i18n="settingsHub.title">Settings</span></h1>
+            <div class="page-sub" data-i18n="settingsHub.subtitle">Every row shows what the device holds right now — without opening it</div>
           </div>
           <div class="page-actions">
-            <input type="search" id="settings-search" class="input" placeholder="Filter settings…" style="width:240px" data-input="settingsHubFilter" aria-label="Filter settings">
-            <a href="/export_settings" download class="btn"><span data-icon="download"></span> Export</a>
-            <button class="btn warn" data-click="showPopup" data-args='["restartPopup"]'><span data-icon="refresh-cw"></span> Restart</button>
+            <input type="search" id="settings-search" class="input" data-i18n-placeholder="settingsHub.searchPh" placeholder="Filter settings…" style="width:240px" data-input="settingsHubFilter" aria-label="Filter settings" data-i18n-aria-label="settingsHub.searchAria">
+            <a href="/export_settings" download class="btn"><span data-icon="download"></span> <span data-i18n="common.export">Export</span></a>
+            <button class="btn warn" data-click="showPopup" data-args='["restartPopup"]'><span data-icon="refresh-cw"></span> <span data-i18n="chrome.restartDevice">Restart</span></button>
           </div>
         </div>
 
-        <!-- Settings hub: 10 cards collapsed to 6 in 3 grouped sections.
-             Hardware + Core logic + Modules → Platform (aggregator subpage).
-             Network + Time → Network & Time (aggregator subpage).
-             Theme moved into the topbar / quick-settings drawer.  Legacy
-             URLs (#settings_theme, #settings_hardware, …) still work — the
-             subpages were not removed. -->
+        <!-- Settings hub: status-first rows grouped into 3 sections. Each row
+             is a live snapshot (hubStatusInit() in settings.js fills the
+             .hub-row-status spans from cached ST/CFG + a couple of light
+             extra fetches) so you see what's configured before drilling in —
+             not just a label. Legacy URLs for pages still reachable under
+             their old names (#settings_device, #settings_platform, …) keep
+             working; only #settings_espnow / #settings_remote were retired,
+             folded into the single #settings_nodes page. -->
         <div id="settings-grid">
           <div class="settings-section">
-            <div class="settings-section-head">DEVICE</div>
-            <div class="grid grid-auto">
-              <div class="set-card" data-click="showSubpage" data-args='["settings_device"]'>
-                <div class="set-card-icon"><span data-icon="smartphone"></span></div>
-                <div class="set-card-t">Device</div>
-                <div class="set-card-d">Name · ID · default storage view</div>
-              </div>
-              <div class="set-card" data-click="showSubpage" data-args='["settings_platform"]'>
-                <div class="set-card-icon"><span data-icon="cpu"></span></div>
-                <div class="set-card-t">Platform</div>
-                <div class="set-card-d">Mode · pins · sensors · modules</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-section">
-            <div class="settings-section-head">CONNECTIVITY</div>
-            <div class="grid grid-auto">
-              <div class="set-card" data-click="showSubpage" data-args='["settings_netime"]'>
-                <div class="set-card-icon"><span data-icon="wifi"></span></div>
-                <div class="set-card-t">Network &amp; Time</div>
-                <div class="set-card-d">WiFi · AP · hostname · NTP · timezone</div>
-              </div>
-              <div class="set-card" data-click="showSubpage" data-args='["settings_export"]'>
-                <div class="set-card-icon"><span data-icon="cloud-upload"></span></div>
-                <div class="set-card-t">Export</div>
-                <div class="set-card-d">MQTT · HTTP · openSenseMap · webhook</div>
-              </div>
-              <div class="set-card" data-click="showSubpage" data-args='["settings_espnow"]'>
-                <div class="set-card-icon"><span data-icon="radio"></span></div>
-                <div class="set-card-t">Battery nodes</div>
-                <div class="set-card-d">ESP-NOW pairing · battery · radio counters</div>
-              </div>
-              <div class="set-card" data-click="showSubpage" data-args='["settings_kindle"]'>
-                <div class="set-card-icon"><span data-icon="book-text"></span></div>
-                <div class="set-card-t">E-ink dashboard</div>
-                <div class="set-card-d">Typeface · clock · weight · units</div>
-              </div>
-              <div class="set-card" data-click="showSubpage" data-args='["settings_remote"]'>
-                <div class="set-card-icon"><span data-icon="wifi"></span></div>
-                <div class="set-card-t">Remote WiFi nodes</div>
-                <div class="set-card-d">HTTP ingest · status · diagnostics</div>
+            <div class="settings-section-head" data-i18n="settingsHub.groupDevice">DEVICE</div>
+            <div class="card">
+              <div class="card-body" style="padding:0">
+                <a href="#settings_device" class="hub-row" data-click="showSubpage" data-args='["settings_device"]'>
+                  <span class="hub-row-icon"><span data-icon="smartphone"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.device">Device</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.deviceSub">Name · ID · default storage view</span>
+                  </span>
+                  <span class="hub-row-status mono" id="hub-st-device"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
+                <a href="#settings_platform" class="hub-row" data-click="showSubpage" data-args='["settings_platform"]'>
+                  <span class="hub-row-icon"><span data-icon="cpu"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.platform">Platform</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.platformSub">Mode · pins · sensors · modules</span>
+                  </span>
+                  <span class="hub-row-status" id="hub-st-platform"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
               </div>
             </div>
           </div>
 
           <div class="settings-section">
-            <div class="settings-section-head">STORAGE</div>
-            <div class="grid grid-auto">
-              <div class="set-card" data-click="showSubpage" data-args='["settings_datalog"]'>
-                <div class="set-card-icon"><span data-icon="file-text"></span></div>
-                <div class="set-card-t">Data log</div>
-                <div class="set-card-d">Rotation · retention · format</div>
-              </div>
-              <div class="set-card" data-click="showSubpage" data-args='["files"]'>
-                <div class="set-card-icon"><span data-icon="folder"></span></div>
-                <div class="set-card-t">Files</div>
-                <div class="set-card-d">Browse SD / LittleFS</div>
+            <div class="settings-section-head" data-i18n="settingsHub.groupConnectivity">CONNECTIVITY</div>
+            <div class="card">
+              <div class="card-body" style="padding:0">
+                <a href="#settings_netime" class="hub-row" data-click="showSubpage" data-args='["settings_netime"]'>
+                  <span class="hub-row-icon"><span data-icon="wifi"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.netime">Network &amp; Time</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.netimeSub">WiFi · AP · hostname · NTP · timezone</span>
+                  </span>
+                  <span class="hub-row-status" id="hub-st-netime"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
+                <a href="#settings_export" class="hub-row" data-click="showSubpage" data-args='["settings_export"]'>
+                  <span class="hub-row-icon"><span data-icon="cloud-upload"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.export">Export</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.exportSub">MQTT · HTTP · openSenseMap · webhook</span>
+                  </span>
+                  <span class="hub-row-status" id="hub-st-export"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
+                <!-- Merged ESP-NOW battery nodes + WiFi remote nodes (redesign
+                     1a). hub-row-attn is toggled on by hubStatusInit() when
+                     any node is offline or otherwise needs attention. -->
+                <a href="#settings_nodes" class="hub-row" id="hub-row-nodes" data-click="showSubpage" data-args='["settings_nodes"]'>
+                  <span class="hub-row-icon"><span data-icon="cpu"></span></span>
+                  <span class="hub-row-main">
+                    <!-- data-i18n on the inner span, not this one: textContent
+                         would wipe the "ESP-NOW + WiFi" badge sibling. -->
+                    <span class="hub-row-title"><span data-i18n="settingsHub.nodes">Nodes</span> <span class="badge dim mono">ESP-NOW + WiFi</span></span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.nodesSub">Pairing · battery · reports · radio counters</span>
+                  </span>
+                  <span class="hub-row-status" id="hub-st-nodes"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
+                <a href="#settings_kindle" class="hub-row" data-click="showSubpage" data-args='["settings_kindle"]'>
+                  <span class="hub-row-icon"><span data-icon="book-text"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.kindle">E-ink dashboard</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.kindleSub">Zones · typeface · clock · units</span>
+                  </span>
+                  <span class="hub-row-status" id="hub-st-kindle"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
               </div>
             </div>
           </div>
 
-          <p class="hint" style="margin-top:var(--gap)">
+          <div class="settings-section">
+            <div class="settings-section-head" data-i18n="settingsHub.groupStorage">STORAGE</div>
+            <div class="card">
+              <div class="card-body" style="padding:0">
+                <a href="#settings_datalog" class="hub-row" data-click="showSubpage" data-args='["settings_datalog"]'>
+                  <span class="hub-row-icon"><span data-icon="file-text"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.datalog">Data log</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.datalogSub">Rotation · retention · format</span>
+                  </span>
+                  <span class="hub-row-status mono" id="hub-st-datalog"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
+                <a href="#files" class="hub-row" data-click="showSubpage" data-args='["files"]'>
+                  <span class="hub-row-icon"><span data-icon="folder"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.files">Files</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.filesSub">Browse SD / LittleFS</span>
+                  </span>
+                  <span class="hub-row-status" id="hub-st-files"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Shown only when hubStatusInit() actually confirms a feature is
+               absent from this build (probed via its /api/* endpoint 404ing
+               — see FEATURE_KINDLE_DASHBOARD / FEATURE_REMOTE_NODES in
+               src/web/ApiHandlers.cpp), never as a guess. -->
+          <div class="card" id="hub-not-in-build" style="margin-top:var(--gap);border-style:dashed;display:none">
+            <div class="card-body" style="display:flex;gap:12px;align-items:flex-start">
+              <span data-icon="info" style="color:var(--text-3);margin-top:2px"></span>
+              <div>
+                <strong style="font-size:12.5px"><span data-i18n="common.notInBuild">Not in this build</span>: <span id="hub-not-in-build-list"></span></strong>
+                <p class="hint" style="margin:4px 0 0" data-i18n="settingsHub.notInBuildHint">Not an error — just not compiled in. Enable the matching FEATURE_ flag in the deploy tool and reflash.</p>
+              </div>
+            </div>
+          </div>
+
+          <p class="hint" style="margin-top:var(--gap)" data-i18n-html="settingsHub.footerHint">
             Looking for theme, accent, or density? They live in the topbar now (<span data-icon="palette"></span>) and quick-settings drawer (<kbd>,</kbd>).
             Press <kbd>⌘K</kbd> / <kbd>Ctrl K</kbd> to search every setting field.
           </p>
         </div>
         <div id="settings-no-match" class="empty" style="display:none">
           <div class="empty-icon"><span data-icon="search"></span></div>
-          <div class="empty-title">No settings match your search.</div>
+          <div class="empty-title" data-i18n="settingsHub.noMatch">No settings match your search.</div>
         </div>
 
         <div class="card" style="margin-top:var(--gap)">
-          <div class="card-head"><div class="card-title"><span data-icon="save"></span> Backup &amp; restore</div></div>
+          <div class="card-head"><div class="card-title"><span data-icon="save"></span> <span data-i18n="settingsHub.backupRestore">Backup &amp; restore</span></div></div>
           <div class="card-body">
             <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
-              <a href="/export_settings" download class="btn primary"><span data-icon="download"></span> Export settings</a>
+              <a href="/export_settings" download class="btn primary"><span data-icon="download"></span> <span data-i18n="settingsHub.exportSettings">Export settings</span></a>
               <form id="importForm" data-submit="settingsImport" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <input type="file" name="settings" id="importFile" accept=".json" class="input" style="height:36px">
-                <button type="submit" class="btn"><span data-icon="upload"></span> Import</button>
+                <button type="submit" class="btn"><span data-icon="upload"></span> <span data-i18n="common.import">Import</span></button>
               </form>
             </div>
             <div id="importProg" style="display:none;margin-top:10px">
@@ -605,15 +678,15 @@
       <section class="page" id="page-sensors">
         <div class="page-head">
           <div>
-            <h1 class="page-title"><span data-icon="thermometer"></span> Sensors</h1>
-            <div class="page-sub" id="sensors-sub">Loading…</div>
+            <h1 class="page-title"><span data-icon="thermometer"></span> <span data-i18n="sensorsPage.title">Sensors</span></h1>
+            <div class="page-sub" id="sensors-sub" data-i18n="common.loading">Loading…</div>
           </div>
           <div class="page-actions">
-            <input type="search" id="sensors-filter" class="input" placeholder="Filter sensors…"
-                   style="width:160px" data-input="sensorsFilter" aria-label="Filter sensors">
-            <button class="btn primary" data-click="clAddSensor"><span data-icon="plus"></span> Add sensor</button>
-            <button class="btn" data-click="sensorsLoad"><span data-icon="refresh-cw"></span> Refresh</button>
-            <button class="btn" data-click="sensorsPrint" title="Print"><span data-icon="printer"></span> Print</button>
+            <input type="search" id="sensors-filter" class="input" data-i18n-placeholder="sensorsPage.filterPh" placeholder="Filter sensors…"
+                   style="width:160px" data-input="sensorsFilter" data-i18n-aria-label="sensorsPage.filterAria" aria-label="Filter sensors">
+            <button class="btn primary" data-click="clAddSensor"><span data-icon="plus"></span> <span data-i18n="sensorsPage.addSensor">Add sensor</span></button>
+            <button class="btn" data-click="sensorsLoad"><span data-icon="refresh-cw"></span> <span data-i18n="common.refresh">Refresh</span></button>
+            <button class="btn" data-click="sensorsPrint" data-i18n-title="sensorsPage.printBtn" title="Print"><span data-icon="printer"></span> <span data-i18n="sensorsPage.printBtn">Print</span></button>
           </div>
         </div>
         <div id="sensors-msg" class="text-muted" style="margin-bottom:1rem;font-size:.9rem"></div>
@@ -623,55 +696,55 @@
         <!-- Sensor chart -->
         <div class="card" style="margin-top:1rem">
           <div class="card-head">
-            <span><span data-icon="line-chart"></span> Sensor chart</span>
+            <span><span data-icon="line-chart"></span> <span data-i18n="sensorsPage.chartTitle">Sensor chart</span></span>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
               <select id="sc-sensor" class="input" style="width:auto" data-change="sensorChartLoad">
-                <option value="">— select sensor —</option>
+                <option value="" data-i18n="sensorsPage.optSensor">— select sensor —</option>
               </select>
               <select id="sc-metric" class="input" style="width:auto" data-change="sensorChartLoad">
-                <option value="">— metric —</option>
+                <option value="" data-i18n="sensorsPage.optMetric">— metric —</option>
               </select>
               <select id="sc-range" class="input" style="width:auto" data-change="sensorChartLoad">
-                <option value="3600">Last 1h</option>
-                <option value="21600">Last 6h</option>
-                <option value="86400" selected>Last 24h</option>
-                <option value="604800">Last 7d</option>
+                <option value="3600" data-i18n="sensorsPage.range1h">Last 1h</option>
+                <option value="21600" data-i18n="sensorsPage.range6h">Last 6h</option>
+                <option value="86400" selected data-i18n="sensorsPage.range24h">Last 24h</option>
+                <option value="604800" data-i18n="sensorsPage.range7d">Last 7d</option>
               </select>
               <select id="sc-mode" class="input" style="width:auto" data-change="sensorChartLoad">
-                <option value="lttb">LTTB</option>
-                <option value="avg">Avg</option>
-                <option value="min">Min</option>
-                <option value="max">Max</option>
+                <option value="lttb" data-i18n="sensorsPage.modeLttbShort">LTTB</option>
+                <option value="avg" data-i18n="sensorsPage.modeAvgShort">Avg</option>
+                <option value="min" data-i18n="sensorsPage.modeMinShort">Min</option>
+                <option value="max" data-i18n="sensorsPage.modeMaxShort">Max</option>
               </select>
               <select id="sc-agg" class="input" style="width:auto" data-change="sensorChartLoad">
-                <option value="5m">5 min</option>
-                <option value="1h">1 hour</option>
-                <option value="1d">1 day</option>
-                <option value="raw">Raw</option>
+                <option value="5m" data-i18n="sensorsPage.agg5m">5 min</option>
+                <option value="1h" data-i18n="sensorsPage.agg1h">1 hour</option>
+                <option value="1d" data-i18n="sensorsPage.agg1d">1 day</option>
+                <option value="raw" data-i18n="sensorsPage.aggRaw">Raw</option>
               </select>
             </div>
           </div>
           <!-- CURRENT value + stats row -->
           <div style="display:flex;justify-content:space-between;align-items:flex-end;padding:10px 16px 0;flex-wrap:wrap;gap:8px">
             <div>
-              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-family:var(--mono)">Current</div>
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-family:var(--mono)" data-i18n="sensorsPage.currentLabel">Current</div>
               <div id="sc-current" style="font-size:26px;font-weight:700;font-family:var(--mono);color:var(--text)">—</div>
             </div>
             <div id="sc-stats" style="display:flex;gap:16px;font-size:11px;color:var(--text-3);font-family:var(--mono);padding-bottom:4px">
-              <span>Min <span id="sc-min" style="color:var(--text)">—</span></span>
-              <span>Avg <span id="sc-avg" style="color:var(--text)">—</span></span>
-              <span>Max <span id="sc-max" style="color:var(--text)">—</span></span>
-              <span>Pts <span id="sc-pts" style="color:var(--text)">—</span></span>
+              <span><span data-i18n="sensorsPage.statMin">Min</span> <span id="sc-min" style="color:var(--text)">—</span></span>
+              <span><span data-i18n="sensorsPage.statAvg">Avg</span> <span id="sc-avg" style="color:var(--text)">—</span></span>
+              <span><span data-i18n="sensorsPage.statMax">Max</span> <span id="sc-max" style="color:var(--text)">—</span></span>
+              <span><span data-i18n="sensorsPage.statPts">Pts</span> <span id="sc-pts" style="color:var(--text)">—</span></span>
             </div>
           </div>
           <!-- Secondary series overlay (dual Y-axis) -->
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 16px;border-top:1px solid var(--border);font-size:.85rem;margin-top:8px">
-            <span style="color:var(--text-3)">Overlay:</span>
+            <span style="color:var(--text-3)" data-i18n="sensorsPage.overlayLabel">Overlay:</span>
             <select id="sc-sensor2" class="input" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
-              <option value="">— none —</option>
+              <option value="" data-i18n="sensorsPage.optNone">— none —</option>
             </select>
             <select id="sc-metric2" class="input" style="width:auto;font-size:.82rem" data-change="sensorChartLoad">
-              <option value="">— metric —</option>
+              <option value="" data-i18n="sensorsPage.optMetric">— metric —</option>
             </select>
           </div>
           <div class="card-body" style="padding:8px">
@@ -686,10 +759,10 @@
           <div id="sl-msg"></div>
           <div class="card">
             <div class="card-head">
-              <div class="card-title"><span data-icon="line-chart"></span> Sensor CSV logging</div>
+              <div class="card-title"><span data-icon="line-chart"></span> <span data-i18n="sensorsPage.csvTitle">Sensor CSV logging</span></div>
             </div>
             <div class="card-body">
-              <p class="hint" style="margin-bottom:1rem">
+              <p class="hint" style="margin-bottom:1rem" data-i18n="sensorsPage.csvHint">
                 Wide-CSV stores sensor readings as one row per aggregation
                 window with one column per active sensor metric. The header
                 is rebuilt dynamically when sensors are added or removed;
@@ -699,23 +772,23 @@
               <div class="field">
                 <label class="field-label">
                   <input type="checkbox" name="csvLoggingEnabled" id="sl-csvEnabled" value="1">
-                  Enable CSV logging
+                  <span data-i18n="sensorsPage.csvEnable">Enable CSV logging</span>
                 </label>
-                <p class="hint">Master switch. When off, sensor readings are still
+                <p class="hint" data-i18n="sensorsPage.csvEnableHint">Master switch. When off, sensor readings are still
                   streamed to the live UI but never written to flash/SD.</p>
               </div>
               <div class="form-grid">
                 <div class="field">
                   <label class="field-label">
-                    Aggregation interval (seconds)
-                    <span class="help-tip" tabindex="0" role="note" aria-label="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files." data-tip="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files.">i</span>
+                    <span data-i18n="sensorsPage.csvAggInterval">Aggregation interval (seconds)</span>
+                    <span class="help-tip" tabindex="0" role="note" data-i18n-aria-label="sensorsPage.csvAggIntervalTip" aria-label="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files." data-i18n-title="sensorsPage.csvAggIntervalTip" data-tip="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files.">i</span>
                   </label>
                   <input type="number" name="aggregationIntervalSec" id="sl-aggSec" class="input"
                     min="5" max="3600" step="5" value="60">
-                  <p class="hint">Default 60 s. Range 5–3600 s.</p>
+                  <p class="hint" data-i18n="sensorsPage.csvAggIntervalHint">Default 60 s. Range 5–3600 s.</p>
                 </div>
               </div>
-              <button type="submit" class="btn primary"><span data-icon="save"></span> Save</button>
+              <button type="submit" class="btn primary"><span data-icon="save"></span> <span data-i18n="common.save">Save</span></button>
             </div>
           </div>
         </form>
@@ -731,17 +804,17 @@
   <div id="movePopup" class="popup-overlay" style="display:none" role="dialog" aria-modal="true" aria-label="Move or rename file">
     <div class="popup-content" style="text-align:left;max-width:400px">
       <div style="text-align:center;margin-bottom:.5rem;color:var(--accent)"><span data-icon="pencil" style="width:36px;height:36px;display:inline-block"></span></div>
-      <div style="font-size:1.2rem;font-weight:bold;text-align:center;margin-bottom:1rem">Move / Rename</div>
-      <div class="field"><label class="field-label">New Name</label>
+      <div style="font-size:1.2rem;font-weight:bold;text-align:center;margin-bottom:1rem" data-i18n="chrome.moveTitle">Move / Rename</div>
+      <div class="field"><label class="field-label" data-i18n="chrome.moveNewName">New Name</label>
         <input type="text" id="name" class="input">
       </div>
-      <div class="field"><label class="field-label">Destination Folder</label>
-        <input type="text" id="dest" class="input" placeholder="(leave empty = same folder)">
+      <div class="field"><label class="field-label" data-i18n="chrome.moveDest">Destination Folder</label>
+        <input type="text" id="dest" class="input" data-i18n-placeholder="chrome.moveDestPh" placeholder="(leave empty = same folder)">
       </div>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
-        <button class="btn"
+        <button class="btn" data-i18n="common.cancel"
           data-click="hidePopup" data-args='["movePopup"]'>Cancel</button>
-        <button class="btn primary" data-click="filesApplyMove"><span data-icon="check"></span> Apply</button>
+        <button class="btn primary" data-click="filesApplyMove"><span data-icon="check"></span> <span data-i18n="common.apply">Apply</span></button>
       </div>
     </div>
   </div>
@@ -749,14 +822,14 @@
   <div id="sensorPopup" class="popup-overlay" style="display:none;z-index:900" role="dialog" aria-modal="true" aria-labelledby="sensorPopupTitle">
     <div class="popup-content" style="text-align:left;max-width:500px;width:100%;max-height:80vh;overflow-y:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-        <div id="sensorPopupTitle" style="font-size:1.2rem;font-weight:bold">Sensor configuration</div>
-        <button class="btn" data-click="hidePopup" data-args='["sensorPopup"]' aria-label="Close"><span data-icon="x"></span></button>
+        <div id="sensorPopupTitle" style="font-size:1.2rem;font-weight:bold" data-i18n="chrome.sensorConfigTitle">Sensor configuration</div>
+        <button class="btn" data-click="hidePopup" data-args='["sensorPopup"]' data-i18n-aria-label="chrome.closeAria" aria-label="Close"><span data-icon="x"></span></button>
       </div>
       <div id="sensorPopupBody">
       </div>
       <div id="sensorPopupFooter" style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.5rem">
-        <button class="btn" data-click="hidePopup" data-args='["sensorPopup"]'>Cancel</button>
-        <button class="btn primary" id="sensorPopupSaveBtn"><span data-icon="save"></span> Save</button>
+        <button class="btn" data-i18n="common.cancel" data-click="hidePopup" data-args='["sensorPopup"]'>Cancel</button>
+        <button class="btn primary" id="sensorPopupSaveBtn"><span data-icon="save"></span> <span data-i18n="common.save">Save</span></button>
       </div>
     </div>
   </div>
@@ -765,16 +838,16 @@
   <div id="restartPopup" class="popup-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="rPopTitle">
     <div class="popup-content">
       <div id="rPopIcon" style="font-size:4rem;margin-bottom:1rem"><span data-icon="refresh-cw"></span></div>
-      <div id="rPopTitle" style="font-size:1.5rem;font-weight:bold;margin-bottom:.5rem">Restart Device?</div>
-      <div id="rPopMsg" style="margin-bottom:1rem">Device will restart.</div>
+      <div id="rPopTitle" style="font-size:1.5rem;font-weight:bold;margin-bottom:.5rem" data-i18n="chrome.restartTitle">Restart Device?</div>
+      <div id="rPopMsg" style="margin-bottom:1rem" data-i18n="chrome.restartMsg">Device will restart.</div>
       <div id="rPopProgress" style="display:none">
         <div class="progress-track" style="margin-bottom:.5rem">
           <div id="rPopBar" class="progress-fill" style="width:0%"></div>
         </div>
       </div>
       <div id="rPopButtons" style="display:flex;gap:1rem;justify-content:center">
-        <button class="btn warn" data-click="confirmRestart"><span data-icon="check"></span> Confirm</button>
-        <button class="btn" data-click="hidePopup" data-args='["restartPopup"]'><span data-icon="x"></span> Cancel</button>
+        <button class="btn warn" data-click="confirmRestart"><span data-icon="check"></span> <span data-i18n="chrome.restartConfirm">Confirm</span></button>
+        <button class="btn" data-click="hidePopup" data-args='["restartPopup"]'><span data-icon="x"></span> <span data-i18n="common.cancel">Cancel</span></button>
       </div>
     </div>
   </div>
@@ -792,13 +865,32 @@
   <!-- defer preserves load order while unblocking first paint; load order is
        still guaranteed because deferred scripts execute in document order. -->
   <script src="/js/core.js" defer></script>
+  <!-- i18n runtime + string dictionaries. i18n.js defines the I18n global;
+       every dictionary partial below is self-registering (I18n.register)
+       and can load in any order after it, before or after the feature
+       module that uses its strings — DOMContentLoaded / pageInit() run
+       after every deferred script here regardless of position. -->
+  <script src="/js/i18n.js" defer></script>
+  <script src="/i18n/common.js" defer></script>
+  <script src="/i18n/settings-hub.js" defer></script>
+  <script src="/i18n/nodes.js" defer></script>
+  <script src="/i18n/kindle.js" defer></script>
+  <script src="/i18n/pages.js" defer></script>
+  <script src="/i18n/sensors.js" defer></script>
+  <script src="/i18n/settings-pages.js" defer></script>
+  <script src="/i18n/settings-ota.js" defer></script>
+  <script src="/i18n/editable-deck.js" defer></script>
+  <script src="/i18n/command-palette.js" defer></script>
+  <script src="/i18n/quick-settings.js" defer></script>
+  <script src="/i18n/iot-extensions.js" defer></script>
   <script src="/js/icons.js" defer></script>
   <script src="/js/pages.js" defer></script>
   <script src="/js/settings.js" defer></script>
   <script src="/js/sensors.js" defer></script>
-  <script src="/js/espnow.js" defer></script>
+  <!-- nodes.js replaces the former espnow.js + remote.js pair — one merged
+       ESP-NOW + WiFi remote nodes page (redesign 1a). -->
+  <script src="/js/nodes.js" defer></script>
   <script src="/js/kindle.js" defer></script>
-  <script src="/js/remote.js" defer></script>
   <!-- Editable card deck (drag-reorder, masonry, library tray).  Used by
        Overview / Sensors / Alerts via iot-extensions.js. -->
   <script src="/js/editable-deck.js" defer></script>

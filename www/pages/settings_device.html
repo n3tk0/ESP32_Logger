@@ -1,7 +1,7 @@
   <section class="page" id="page-settings_device">
     <div class="page-head">
-      <h1 class="page-title">📱 Device</h1>
-      <div class="page-sub"><a href="#settings">Settings</a> / Device
+      <h1 class="page-title">📱 <span data-i18n="settingsPages.devTitle">Device</span></h1>
+      <div class="page-sub"><a href="#settings" data-i18n="chrome.navSettings">Settings</a> / <span data-i18n="settingsPages.devTitle">Device</span>
       </div>
     </div>
 
@@ -10,23 +10,23 @@
 
       <!-- Identity -->
       <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="tag"></span> Identity</div></div>
+        <div class="card-head"><div class="card-title"><span data-icon="tag"></span> <span data-i18n="settingsPages.devIdentity">Identity</span></div></div>
         <div class="card-body">
           <div class="field">
-            <label class="field-label" for="sd-devName">Device Name</label>
+            <label class="field-label" for="sd-devName" data-i18n="settingsPages.devNameLabel">Device Name</label>
             <input type="text" name="deviceName" id="sd-devName" maxlength="32" class="input"
-              placeholder="Water Logger">
-            <p class="hint">Displayed in the sidebar, header, and browser title.</p>
+              data-i18n-placeholder="settingsPages.devNamePh" placeholder="Water Logger">
+            <p class="hint" data-i18n="settingsPages.devNameHint">Displayed in the sidebar, header, and browser title.</p>
           </div>
           <div class="field">
-            <label class="field-label">Device ID</label>
-            <p class="hint">Unique device identifier. Used in log filenames and CSV exports.</p>
+            <label class="field-label" data-i18n="settingsPages.devIdLabel">Device ID</label>
+            <p class="hint" data-i18n="settingsPages.devIdHint">Unique device identifier. Used in log filenames and CSV exports.</p>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <input type="text" id="sd-devId" name="deviceId" maxlength="12" class="input"
                 style="flex:1;min-width:120px" disabled>
-              <button type="button" data-click="regenDevId" class="btn"><span data-icon="refresh-cw"></span> New ID</button>
+              <button type="button" data-click="regenDevId" class="btn"><span data-icon="refresh-cw"></span> <span data-i18n="settingsPages.devNewId">New ID</span></button>
               <button type="button" data-click="toggleManualId" data-args='["sd-devId"]' class="btn"><span data-icon="pencil"></span>
-                Manual</button>
+                <span data-i18n="settingsPages.devManual">Manual</span></button>
             </div>
           </div>
         </div>
@@ -34,15 +34,15 @@
 
       <!-- Storage -->
       <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="save"></span> Storage</div></div>
+        <div class="card-head"><div class="card-title"><span data-icon="save"></span> <span data-i18n="settingsPages.devStorageTitle">Storage</span></div></div>
         <div class="card-body">
           <div class="field">
-            <label class="field-label" for="sd-defaultStorage">Default Storage View</label>
+            <label class="field-label" for="sd-defaultStorage" data-i18n="settingsPages.devDefaultView">Default Storage View</label>
             <select name="defaultStorageView" id="sd-defaultStorage" class="input">
-              <option value="0">Internal (LittleFS)</option>
-              <option value="1">💳 SD Card</option>
+              <option value="0" data-i18n="settingsPages.devStorageInternal">Internal (LittleFS)</option>
+              <option value="1" data-i18n="settingsPages.devStorageSd">💳 SD Card</option>
             </select>
-            <p class="hint">Choose which storage (Internal LittleFS or SD Card) the Files page opens to by default.
+            <p class="hint" data-i18n="settingsPages.devDefaultViewHint">Choose which storage (Internal LittleFS or SD Card) the Files page opens to by default.
             </p>
           </div>
         </div>
@@ -50,14 +50,14 @@
 
       <!-- Web Server -->
       <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="globe"></span> Web Server</div></div>
+        <div class="card-head"><div class="card-title"><span data-icon="globe"></span> <span data-i18n="settingsPages.devWebServer">Web Server</span></div></div>
         <div class="card-body">
           <div class="field">
             <label class="field-label">
               <input type="checkbox" name="forceWebServer" id="sd-forceWS" value="1">
-              Force Web Server On
+              <span data-i18n="settingsPages.devForceWs">Force Web Server On</span>
             </label>
-            <p class="hint">When enabled, the web server stays active even in deep sleep modes. Disable to save
+            <p class="hint" data-i18n="settingsPages.devForceWsHint">When enabled, the web server stays active even in deep sleep modes. Disable to save
               power when web access is not needed.</p>
           </div>
         </div>
@@ -65,30 +65,30 @@
 
       <!-- System Info -->
       <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="bar-chart-3"></span> System Info</div></div>
+        <div class="card-head"><div class="card-title"><span data-icon="bar-chart-3"></span> <span data-i18n="settingsPages.devSysInfo">System Info</span></div></div>
         <div class="card-body">
           <div class="form-grid" id="sysInfo">
-            <div><strong>Firmware</strong>
+            <div><strong data-i18n="settingsPages.devFirmware">Firmware</strong>
               <div class="text-primary" id="siFirmware">–</div>
             </div>
-            <div><strong>Boot Count</strong>
+            <div><strong data-i18n="settingsPages.devBootCount">Boot Count</strong>
               <div id="siBoot">–</div>
               <button type="submit" name="resetBootCount" value="1" class="btn warn"
                       style="margin-top:.35rem"
                       data-confirm="Reset boot counter to 0?">
-                <span data-icon="refresh-cw"></span> Reset
+                <span data-icon="refresh-cw"></span> <span data-i18n="settingsPages.devReset">Reset</span>
               </button>
             </div>
-            <div><strong>Mode</strong>
+            <div><strong data-i18n="settingsPages.devMode">Mode</strong>
               <div id="siMode">–</div>
             </div>
-            <div><strong>Free Heap</strong>
+            <div><strong data-i18n="settingsPages.devFreeHeap">Free Heap</strong>
               <div id="siHeap">–</div>
             </div>
-            <div><strong>CPU</strong>
+            <div><strong data-i18n="settingsPages.devCpu">CPU</strong>
               <div id="siCpu">–</div>
             </div>
-            <div><strong>Storage</strong>
+            <div><strong data-i18n="settingsPages.devStorageCard">Storage</strong>
               <div id="siStorage">–</div>
             </div>
           </div>
@@ -99,27 +99,27 @@
       <div class="card">
         <div class="card-head" data-click="changelogToggle"
           style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
-          <span><span data-icon="file-text"></span> Change Log <small class="text-muted">(tap)</small></span>
+          <span><span data-icon="file-text"></span> <span data-i18n="settingsPages.devChangelog">Change Log</span> <small class="text-muted" data-i18n="settingsPages.devChangelogTap">(tap)</small></span>
           <span id="changelogChevron" style="transition: transform 0.3s;">▼</span>
         </div>
         <div class="card-body hidden" id="changelog" data-loaded="">
-          <div class="text-muted" id="sd_clContent">Loading...</div>
+          <div class="text-muted" id="sd_clContent" data-i18n="common.loading">Loading...</div>
         </div>
       </div>
 
       <!-- About -->
       <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="info"></span> About</div></div>
+        <div class="card-head"><div class="card-title"><span data-icon="info"></span> <span data-i18n="settingsPages.devAbout">About</span></div></div>
         <div class="card-body">
           <div style="text-align:center">
             <div style="font-size:1.2rem;font-weight:bold;color:var(--primary);margin-bottom:.5rem">Water Logger</div>
-            <div style="color:var(--text-muted);font-size:.9rem">Created by</div>
+            <div style="color:var(--text-muted);font-size:.9rem" data-i18n="settingsPages.devCreatedBy">Created by</div>
             <div style="font-weight:600;margin:.5rem 0">Petko Georgiev</div>
             <div style="color:var(--text-muted);font-size:.85rem;margin-top:.25rem">📍 Sevlievo, Bulgaria</div>
           </div>
         </div>
       </div>
 
-      <button type="submit" class="btn primary"><span data-icon="save"></span> Save</button>
+      <button type="submit" class="btn primary"><span data-icon="save"></span> <span data-i18n="common.save">Save</span></button>
     </form>
   </section>

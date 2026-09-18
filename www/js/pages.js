@@ -5,6 +5,11 @@
  */
 "use strict";
 
+// Same guarded-lookup idiom as ndT() in nodes.js: i18n.js loads before this
+// file, so window.I18n is normally present, but the guard keeps pages.js
+// safe if it's ever loaded standalone.
+function pgT(key, vars) { return window.I18n ? I18n.t(key, vars) : key; }
+
 // ============================================================================
 // ══ PAGE: DASHBOARD ══
 // uPlot replaces Chart.js as the sole chart engine.  uPlot is canvas-based,
@@ -57,13 +62,11 @@ function dbLoadUPlot(cb) {
     _uPlotLoading = false;
     var err = document.getElementById("errorMsg");
     if (err) {
-      err.innerHTML =
-        "<strong>Charts unavailable:</strong> Could not load <code>uPlot.iife.min.js</code>. " +
-        "If you removed it from LittleFS, re-upload it via /upload.";
+      err.innerHTML = pgT("dashboard.chartsUnavailableHtml");
       err.style.display = "block";
     }
     if (typeof showToast === "function") {
-      showToast("Failed to load uPlot.iife.min.js", "error");
+      showToast(pgT("dashboard.uplotLoadFailed"), "error");
     }
   }
 
@@ -243,7 +246,7 @@ function dbLoadCards() {
       if (loading) loading.style.display = "none";
       var err = document.getElementById("errorMsg");
       if (err) {
-        err.textContent = "Failed to load sensor list: " + e;
+        err.textContent = pgT("dashboard.failedLoadSensors", { error: e });
         err.style.display = "block";
       }
     });
@@ -301,7 +304,7 @@ function dbMountSparkChart(key, xs, ys) {
     try { dbCardCharts[key].destroy(); } catch (e) {}
   }
   if (!xs.length) {
-    host.innerHTML = '<span class="sensor-card-mini-empty">no data</span>';
+    host.innerHTML = '<span class="sensor-card-mini-empty">' + esc(pgT("dashboard.noData")) + '</span>';
     return;
   }
   host.innerHTML = "";
@@ -356,8 +359,8 @@ function dbRefreshLatest() {
         if (q) {
           q.textContent =
             it.q === 1 ? "" :
-            it.q === 2 ? "est" :
-            it.q === 3 ? "err" : "?";
+            it.q === 2 ? pgT("dashboard.qualityEst") :
+            it.q === 3 ? pgT("dashboard.qualityErr") : "?";
           q.className = "quality" + (it.q === 3 ? " text-danger" : "");
         }
       });
@@ -366,7 +369,7 @@ function dbRefreshLatest() {
       if (typeof setConnState === "function") setConnState(false);
       var status = document.getElementById("db-poll-status");
       if (status) {
-        status.textContent = "offline";
+        status.textContent = pgT("dashboard.offline");
         status.className = "badge err";
       }
     });
@@ -392,7 +395,7 @@ function logsInit() {
         sel.innerHTML = "";
         var curFile = d.currentFile || ST.currentFile || "";
         if (!d.files || !d.files.length) {
-          sel.innerHTML = "<option>No log files found</option>";
+          sel.innerHTML = "<option>" + esc(pgT("logs.noLogFiles")) + "</option>";
           return;
         }
         d.files.forEach(function (f) {
@@ -407,7 +410,7 @@ function logsInit() {
       .catch(function (e) {
         var err = document.getElementById("logsErrorMsg");
         if (err) {
-          err.textContent = "Error loading file list: " + e.message;
+          err.textContent = pgT("logs.errorLoadingFileList", { error: e.message });
           err.style.display = "block";
         }
       });
@@ -417,7 +420,7 @@ function logsInit() {
 // Matches original: function loadData()
 function dbLoadData() {
   var file = getVal("fileSelect");
-  if (!file || file === "No log files found") return;
+  if (!file || file === pgT("logs.noLogFiles")) return;
   var err = document.getElementById("logsErrorMsg");
   if (err) err.style.display = "none";
   // Pass storage explicitly so the load/download targets the same FS the list
@@ -434,7 +437,7 @@ function dbLoadData() {
     })
     .catch(function (e) {
       if (err) {
-        err.textContent = "Error loading: " + e.message;
+        err.textContent = pgT("logs.errorLoading", { error: e.message });
         err.style.display = "block";
       }
     });
@@ -633,7 +636,7 @@ function dbRenderChart(data) {
     return d.date + " " + d.time;
   }
 
-  var series = [{}, { label: "Liters (L)", stroke: ffColor, fill: ffColor, paths: barPaths }];
+  var series = [{}, { label: pgT("logs.seriesLiters"), stroke: ffColor, fill: ffColor, paths: barPaths }];
   var seriesData = [xs, ys];
 
   ctx.innerHTML = "";
@@ -651,7 +654,7 @@ function dbRenderChart(data) {
         },
         rotate: 45,
       },
-      { label: "Liters" },
+      { label: pgT("logs.axisLiters") },
     ],
     series: series,
     cursor: { drag: { x: false, y: false } },
@@ -663,7 +666,7 @@ function dbRenderChart(data) {
 // Matches original: function exportCSV()
 function dbExportCSV() {
   if (!dbFilteredData.length) {
-    showToast("No data to export", "error");
+    showToast(pgT("logs.noDataToExport"), "error");
     return;
   }
   var csv = "Date,Time,Boot,Volume (L),Trigger,Extra FF,Extra PF\n";
@@ -712,7 +715,7 @@ function dbExportCSV() {
 function dbExportPNG() {
   var src = dbChart && dbChart.ctx && dbChart.ctx.canvas;
   if (!src) {
-    showToast("No chart to export — load data first", "error");
+    showToast(pgT("logs.noChartToExport"), "error");
     return;
   }
   var out = document.createElement("canvas");
@@ -738,7 +741,7 @@ function filesInit() {
   var hw = CFG.hardware || {};
   currentFilesStorage = hw.defaultStorageView === 1 ? "sdcard" : "internal";
   var list = document.getElementById("list");
-  if (list && list.innerHTML.trim().length === 0) list.innerHTML = "<div style='padding:14px;color:var(--text-3)'>Loading…</div>";
+  if (list && list.innerHTML.trim().length === 0) list.innerHTML = "<div style='padding:14px;color:var(--text-3)'>" + esc(pgT("files.loading")) + "</div>";
   filesRender();
 }
 
@@ -748,10 +751,10 @@ function filesRender() {
     tabs.innerHTML =
       '<button data-click="filesSetStorage" data-args=\'["internal"]\' class="' +
       (currentFilesStorage === "internal" ? "active" : "") +
-      '"><span data-icon="microchip"></span> LittleFS</button>' +
+      '"><span data-icon="microchip"></span> ' + esc(pgT("files.littlefs")) + '</button>' +
       '<button data-click="filesSetStorage" data-args=\'["sdcard"]\' class="' +
       (currentFilesStorage === "sdcard" ? "active" : "") +
-      '"><span data-icon="hard-drive"></span> SD Card</button>';
+      '"><span data-icon="hard-drive"></span> ' + esc(pgT("files.sdcard")) + '</button>';
   }
 
   var list = document.getElementById("list");
@@ -784,7 +787,7 @@ function filesRender() {
       if (lbl) {
         lbl.innerHTML =
           '<span class="mono">' +
-          (currentFilesStorage === "sdcard" ? "SD:" : "FS:") +
+          esc(currentFilesStorage === "sdcard" ? pgT("files.sdPrefix") : pgT("files.fsPrefix")) +
           "</span> " + esc(currentFilesDir);
       }
       var upBtn = document.getElementById("upBtn");
@@ -805,8 +808,8 @@ function filesRender() {
         list.innerHTML = "";
         list.appendChild(emptyState({
           icon: "folder",
-          title: "No files",
-          msg: "This directory is empty. Upload a file or create a subfolder to get started."
+          title: pgT("files.emptyTitle"),
+          msg: pgT("files.emptyMsg")
         }));
         return;
       }
@@ -815,7 +818,7 @@ function filesRender() {
       if (d.truncated) {
         rows +=
           '<tr><td colspan="5" style="color:var(--warn);font-size:11.5px;padding:6px 14px">' +
-          "Listing truncated at 500 entries — refine with a subfolder." +
+          esc(pgT("files.truncated")) +
           "</td></tr>";
       }
       files.forEach(function (f) {
@@ -833,7 +836,7 @@ function filesRender() {
         var actions = "";
         if (!f.isDir) {
           actions +=
-            '<a class="btn-mini" title="Download" href="/download?file=' +
+            '<a class="btn-mini" title="' + esc(pgT("files.download")) + '" href="/download?file=' +
             encodeURIComponent(f.path) +
             "&storage=" + currentFilesStorage + '">' +
             '<span data-icon="download"></span></a>';
@@ -841,12 +844,12 @@ function filesRender() {
         if (filesEditMode) {
           if (!f.isDir) {
             actions +=
-              '<button class="btn-mini" title="Move/Rename" data-click="showMovePopup" data-args="' +
+              '<button class="btn-mini" title="' + esc(pgT("files.moveRename")) + '" data-click="showMovePopup" data-args="' +
               esc(JSON.stringify([f.path, f.name])) + '">' +
               '<span data-icon="pencil"></span></button>';
           }
           actions +=
-            '<button class="btn-mini warn" title="Delete" data-click="filesDelete" data-args="' +
+            '<button class="btn-mini warn" title="' + esc(pgT("common.delete")) + '" data-click="filesDelete" data-args="' +
             esc(JSON.stringify([f.path])) + '">' +
             '<span data-icon="trash-2"></span></button>';
         }
@@ -859,7 +862,7 @@ function filesRender() {
       });
       list.innerHTML =
         '<table class="ftable">' +
-        "<thead><tr><th></th><th>Name</th><th>Size</th><th>Modified</th><th></th></tr></thead>" +
+        "<thead><tr><th></th><th>" + esc(pgT("files.colName")) + "</th><th>" + esc(pgT("files.colSize")) + "</th><th>" + esc(pgT("files.colModified")) + "</th><th></th></tr></thead>" +
         "<tbody>" + rows + "</tbody></table>";
       if (window.Icons && Icons.swap) Icons.swap(list);
     })
@@ -869,7 +872,7 @@ function filesRender() {
         list.style.opacity = "1";
         list.style.pointerEvents = "auto";
         list.innerHTML =
-          '<div style="padding:14px;color:var(--err)">Error: ' + esc(String(e)) + "</div>";
+          '<div style="padding:14px;color:var(--err)">' + esc(pgT("files.genericError", { error: String(e) })) + "</div>";
       }
     });
 }
@@ -900,13 +903,13 @@ function filesDelete(path) {
   var name = path.split("/").pop() || path;
   if (typeof showUndoToast === "function") {
     showUndoToast(
-      "Will delete " + name,
-      "Press Undo to keep the file",
+      pgT("files.willDelete", { name: name }),
+      pgT("files.pressUndoToKeep"),
       function () { /* user clicked Undo — no-op */ },
       { onCommit: function () { _filesPerformDelete(path); } }
     );
   } else {
-    if (!confirm("Delete " + path + "?")) return;
+    if (!confirm(pgT("files.deleteConfirm", { path: path }))) return;
     _filesPerformDelete(path);
   }
 }
@@ -920,12 +923,12 @@ function _filesPerformDelete(path) {
       .then(function (r) {
         if (r.status === 403) {
           window.__csrfToken = null;
-          throw new Error("CSRF token rejected — refresh page");
+          throw new Error(pgT("files.csrfRejected"));
         }
         filesRender();
       })
       .catch(function (e) {
-        showToast("Error: " + e, "error");
+        showToast(pgT("files.genericError", { error: e }), "error");
       });
   });
 }
@@ -967,7 +970,7 @@ function filesUpload() {
       next();
     };
     xhr.onerror = function () {
-      showToast("Upload failed: " + files[i].name, "error");
+      showToast(pgT("files.uploadFailed", { name: files[i].name }), "error");
       if (prog) prog.style.display = "none";
     };
     // /upload is CSRF-gated — append the token to the query string so the
@@ -995,12 +998,12 @@ function filesMkdir() {
       .then(function (r) {
         if (r.status === 403) {
           window.__csrfToken = null;
-          throw new Error("CSRF token rejected — refresh page");
+          throw new Error(pgT("files.csrfRejected"));
         }
         name.value = "";
         filesRender();
       })
-      .catch(function (e) { showToast("Error: " + e, "error"); });
+      .catch(function (e) { showToast(pgT("files.genericError", { error: e }), "error"); });
   });
 }
 
@@ -1029,13 +1032,13 @@ function filesApplyMove() {
       .then(function (r) {
         if (r.status === 403) {
           window.__csrfToken = null;
-          throw new Error("CSRF token rejected — refresh page");
+          throw new Error(pgT("files.csrfRejected"));
         }
         document.getElementById("movePopup").style.display = "none";
         filesRender();
       })
       .catch(function (e) {
-        showToast("Error: " + e, "error");
+        showToast(pgT("files.genericError", { error: e }), "error");
       });
   });
 }
@@ -1056,8 +1059,9 @@ function liveInit() {
     // monitoringWindowSecs / firstLoopMonitoringWindowSecs were removed when
     // the flowmeter UI was consolidated into the per-sensor cards. The
     // generic state-machine outline still applies to legacy mode.
-    hint.textContent =
-      "🔧 IDLE → 🟡 WAIT_FLOW → 🟢 MONITORING → Logging";
+    // State names (IDLE / WAIT_FLOW / MONITORING) mirror the firmware's own
+    // state-machine constants and stay untranslated in both languages.
+    hint.textContent = pgT("live.stateHintText");
   }
 
   // Prefer Server-Sent Events; fall back to polling on error / unsupported.
@@ -1103,7 +1107,7 @@ function liveStartTransport() {
     // polling if the SSE channel never recovers.
     var conn = document.getElementById("conn");
     if (conn) {
-      conn.textContent = "● Reconnecting…";
+      conn.textContent = pgT("live.connReconnecting");
       conn.className = "text-warning";
     }
     if (typeof setConnState === "function") setConnState(false);
@@ -1145,7 +1149,7 @@ function liveUpdate() {
       if (typeof setConnState === "function") setConnState(false);
       var conn = document.getElementById("conn");
       if (conn) {
-        conn.textContent = "● Disconnected";
+        conn.textContent = pgT("live.connDisconnected");
         conn.className = "text-danger";
       }
     })
@@ -1162,7 +1166,7 @@ function liveRender(d) {
   if (!d) return;
   var conn = document.getElementById("conn");
   if (conn) {
-    conn.textContent = "● Connected";
+    conn.textContent = pgT("live.connConnected");
     conn.className = "text-success";
   }
 
@@ -1248,15 +1252,16 @@ function liveRender(d) {
     flow.setAttribute("points", fpts);
   }
 
-  liveBtn("live-ff",   d.ff,   "Pressed", "Released", "live-on",   "live-idle");
-  liveBtn("live-pf",   d.pf,   "Pressed", "Released", "live-on",   "live-idle");
-  liveBtn("live-wifi", d.wifi, "Pressed", "Released", "live-wifi", "live-idle");
+  var _pressedTxt = pgT("live.pressed"), _releasedTxt = pgT("live.released");
+  liveBtn("live-ff",   d.ff,   _pressedTxt, _releasedTxt, "live-on",   "live-idle");
+  liveBtn("live-pf",   d.pf,   _pressedTxt, _releasedTxt, "live-on",   "live-idle");
+  liveBtn("live-wifi", d.wifi, _pressedTxt, _releasedTxt, "live-wifi", "live-idle");
 
   var modeEl = document.getElementById("mode");
   if (modeEl) {
-    if (d.mode === "online") modeEl.textContent = "🌐 Online Logger";
-    else if (d.mode === "webonly") modeEl.textContent = "📡 Web Only";
-    else modeEl.textContent = "📊 Logging";
+    if (d.mode === "online") modeEl.textContent = pgT("live.modeOnline");
+    else if (d.mode === "webonly") modeEl.textContent = pgT("live.modeWebOnly");
+    else modeEl.textContent = pgT("live.modeLoggingDefault");
   }
 
   if (d.time) setEl("headerTime", d.time.split(" ")[1] || d.time);
@@ -1337,10 +1342,10 @@ function _liveLogsRender() {
     el.innerHTML = "";
     el.appendChild(emptyState({
       icon: "activity",
-      title: query ? "No matches" : "No log entries yet",
+      title: query ? pgT("live.noMatchesTitle") : pgT("live.noEntriesTitle"),
       msg: query
-        ? "Try a different search term, or clear the filter."
-        : "Log entries appear here after the first wakeup with flow."
+        ? pgT("live.noMatchesMsg")
+        : pgT("live.noEntriesMsg")
     }));
     return;
   }
@@ -1348,7 +1353,7 @@ function _liveLogsRender() {
   var html =
     '<table style="width:100%;border-collapse:collapse;font-size:.75rem">';
   html +=
-    '<tr style="background:var(--bg)"><th style="padding:6px;text-align:left">Time</th><th>Trigger</th><th>Volume</th><th>+FF</th><th>+PF</th></tr>';
+    '<tr style="background:var(--bg)"><th style="padding:6px;text-align:left">' + esc(pgT("live.colTime")) + '</th><th>' + esc(pgT("live.colTrigger")) + '</th><th>' + esc(pgT("live.colVolume")) + '</th><th>' + esc(pgT("live.colFF")) + '</th><th>' + esc(pgT("live.colPF")) + '</th></tr>';
   rows.forEach(function (l) {
     var trig = String(l.trigger || "");   // log rows may lack a trigger field
     var color =

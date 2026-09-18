@@ -19,6 +19,21 @@
 
 (function () {
 
+  // Guarded i18n lookup — same idiom as nodes.js's ndT() / iot-extensions.js's ieT().
+  function edT(key, vars) { return window.I18n ? I18n.t(key, vars) : key; }
+
+  // A registry's `title` is a module-level literal that its own file evaluates
+  // once at load, so it hands us an i18n key rather than text — resolving it
+  // there would freeze every card name in the language that loaded first.
+  // Resolve here, at render time.  I18n.t() echoes a key it has no entry for,
+  // so a registry that supplies plain text still comes back unchanged.
+  function metaTitle(meta) {
+    var s = (meta && meta.title) || "";
+    if (!window.I18n || !s) return s;
+    var out = I18n.t(s);
+    return out === s ? s : out;
+  }
+
   var STORAGE_PREFIX = "esp32logger.layout.";
   var ALLOWED_SPANS  = [3, 4, 6, 8, 12];
   var COLUMNS        = 12;
@@ -154,7 +169,7 @@
         // Create the ghost label
         ghost = document.createElement("div");
         ghost.className = "deck-ghost";
-        ghost.textContent = slot.dataset.title || "Card";
+        ghost.textContent = slot.dataset.title || edT("editableDeck.card");
         document.body.appendChild(ghost);
       }
       if (ghost) {
@@ -295,7 +310,7 @@
         var btn = document.createElement("button");
         btn.type = "button";
         btn.className = "btn deck-customise-btn";
-        btn.innerHTML = '<span data-icon="sliders-horizontal"></span> Customise';
+        btn.innerHTML = '<span data-icon="sliders-horizontal"></span> ' + esc(edT("editableDeck.customise"));
         btn.addEventListener("click", function () {
           editing = true; renderToolbar(); render(); editingHooks(true);
         });
@@ -303,11 +318,11 @@
       } else {
         var badge = document.createElement("span");
         badge.className = "badge acc mono deck-editing-badge";
-        badge.textContent = "EDITING";
+        badge.textContent = edT("editableDeck.editingBadge");
         var reset = document.createElement("button");
         reset.type = "button";
         reset.className = "btn";
-        reset.innerHTML = '<span data-icon="rotate-ccw"></span> Reset';
+        reset.innerHTML = '<span data-icon="rotate-ccw"></span> ' + esc(edT("editableDeck.reset"));
         reset.addEventListener("click", function () {
           // Snapshot current layout, reset immediately, give the user an
           // 8 s undo window via the standard toast helper.
@@ -315,8 +330,8 @@
           resetLayout();
           if (typeof showUndoToast === "function") {
             showUndoToast(
-              "Layout reset",
-              "Restored defaults — press Undo to revert",
+              edT("editableDeck.layoutReset"),
+              edT("editableDeck.layoutResetHint"),
               function () {
                 cards = snapshot;
                 persist(); render();
@@ -327,7 +342,7 @@
         var done = document.createElement("button");
         done.type = "button";
         done.className = "btn primary";
-        done.innerHTML = '<span data-icon="check"></span> Done';
+        done.innerHTML = '<span data-icon="check"></span> ' + esc(edT("common.done"));
         done.addEventListener("click", function () {
           editing = false; renderToolbar(); render(); editingHooks(false);
         });
@@ -351,7 +366,7 @@
         slot.className = "deck-slot";
         slot.dataset.id = card.id;
         slot.dataset.span = card.span;
-        slot.dataset.title = meta.title;
+        slot.dataset.title = metaTitle(meta);
         var content = meta.render(card);
         if (typeof content === "string") slot.innerHTML = content;
         else if (content instanceof Node) slot.appendChild(content);
@@ -404,14 +419,14 @@
         slot.className = "deck-slot deck-thumb span-" + card.span;
         slot.dataset.id = card.id;
         slot.dataset.span = card.span;
-        slot.dataset.title = meta.title;
+        slot.dataset.title = metaTitle(meta);
 
         var chrome = document.createElement("div");
         chrome.className = "thumb-chrome";
 
         var grip = document.createElement("span");
         grip.className = "edit-grip";
-        grip.title = "Drag to reorder";
+        grip.title = edT("editableDeck.dragToReorder");
         grip.innerHTML = '<span data-icon="grip-vertical"></span>';
         chrome.appendChild(grip);
 
@@ -422,7 +437,7 @@
           b.type = "button";
           b.className = "edit-span" + (card.span === s ? " active" : "");
           b.textContent = s;
-          b.title = "Set width to " + s + "/12";
+          b.title = edT("editableDeck.setWidthTo", { n: s });
           b.addEventListener("click", function () { setSpan(card.id, s); });
           spans.appendChild(b);
         });
@@ -431,7 +446,7 @@
         var hide = document.createElement("button");
         hide.type = "button";
         hide.className = "edit-hide";
-        hide.title = "Hide card";
+        hide.title = edT("editableDeck.hideCard");
         hide.innerHTML = '<span data-icon="eye-off"></span>';
         hide.addEventListener("click", function () { setHidden(card.id, true); });
         chrome.appendChild(hide);
@@ -442,7 +457,7 @@
         body.className = "thumb-body";
         body.innerHTML =
           (meta.icon ? '<span data-icon="' + esc(meta.icon) + '"></span>' : "") +
-          '<span class="thumb-title">' + esc(meta.title) + '</span>' +
+          '<span class="thumb-title">' + esc(metaTitle(meta)) + '</span>' +
           '<span class="thumb-span mono">' + card.span + '/12</span>';
         slot.appendChild(body);
 
@@ -463,15 +478,15 @@
 
       tray.innerHTML =
         '<div class="deck-tray-section">' +
-          '<div class="deck-tray-eyebrow">HIDDEN (' + hidden.length + ')</div>' +
+          '<div class="deck-tray-eyebrow">' + esc(edT("editableDeck.hiddenEyebrow", { n: hidden.length })) + '</div>' +
           (hidden.length === 0
-            ? '<div class="deck-tray-hint">All cards are visible. Hide a card with the eye icon to stash it here.</div>'
+            ? '<div class="deck-tray-hint">' + esc(edT("editableDeck.allCardsVisibleHint")) + '</div>'
             : '<div class="deck-tray-chips" data-role="hidden"></div>') +
         '</div>' +
         '<div class="deck-tray-section">' +
-          '<div class="deck-tray-eyebrow">ADD CARD (' + available.length + ')</div>' +
+          '<div class="deck-tray-eyebrow">' + esc(edT("editableDeck.addCardEyebrow", { n: available.length })) + '</div>' +
           (available.length === 0
-            ? '<div class="deck-tray-hint">Every card type is on the page. Hide some to free up the library.</div>'
+            ? '<div class="deck-tray-hint">' + esc(edT("editableDeck.everyCardOnPageHint")) + '</div>'
             : '<div class="deck-tray-chips" data-role="library"></div>') +
         '</div>';
       container.appendChild(tray);
@@ -482,7 +497,7 @@
         b.className = "deck-chip";
         b.innerHTML =
           (meta.icon ? '<span data-icon="' + esc(meta.icon) + '"></span>' : "") +
-          '<span>' + esc(meta.title) + '</span>' +
+          '<span>' + esc(metaTitle(meta)) + '</span>' +
           '<span class="deck-chip-add"><span data-icon="plus"></span></span>';
         b.addEventListener("click", action);
         return b;

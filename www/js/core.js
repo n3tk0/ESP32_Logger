@@ -50,7 +50,11 @@ function setConnState(ok) {
     chip.classList.toggle("ok", ok);
     chip.classList.toggle("err", !ok);
   }
-  if (label) label.textContent = ok ? "Online" : "Offline";
+  if (label) {
+    label.textContent = window.I18n
+      ? I18n.t(ok ? "chrome.online" : "chrome.offline")
+      : (ok ? "Online" : "Offline");
+  }
 }
 window.setConnState = setConnState;
 
@@ -497,7 +501,9 @@ function _themeUpdateToggleIcon(mode) {
   if (!btn) return;
   // Show the icon for the mode you'd switch INTO so the affordance is obvious.
   btn.textContent = mode === "dark" ? "☀️" : (mode === "light" ? "🌓" : "🌙");
-  btn.title = "Theme: " + mode + " (click to change)";
+  var label = window.I18n ? I18n.t("chrome.toggleTheme") : "Toggle dark/light theme";
+  btn.title = label + " (" + mode + ")";
+  btn.setAttribute("aria-label", label);
 }
 
 // Public alias — other modules (command-palette, quick-settings) call this
@@ -533,7 +539,8 @@ function quickDensityToggle() {
 function _densitySyncBtn(d) {
   var btn = document.getElementById("densityToggleBtn");
   if (!btn) return;
-  btn.title = "Density: " + d + " (click to switch)";
+  var label = window.I18n ? I18n.t("chrome.toggleDensity") : "Toggle compact density";
+  btn.title = label + " (" + d + ")";
   btn.setAttribute("aria-label", btn.title);
 }
 
@@ -666,11 +673,58 @@ function sidebarRailToggle() {
 function _sidebarRailSyncBtn(isRail) {
   var btn = document.getElementById("sidebarRailBtn");
   if (!btn) return;
-  btn.setAttribute("aria-label", isRail ? "Expand sidebar" : "Collapse sidebar");
-  btn.setAttribute("title",      isRail ? "Expand sidebar" : "Collapse sidebar");
+  var key = isRail ? "chrome.expandSidebar" : "chrome.collapseSidebar";
+  var label = window.I18n ? I18n.t(key) : (isRail ? "Expand sidebar" : "Collapse sidebar");
+  btn.setAttribute("aria-label", label);
+  btn.setAttribute("title", label);
 }
 document.addEventListener("DOMContentLoaded", function () {
   _sidebarRailSyncBtn(document.documentElement.classList.contains("sidebar-rail"));
+});
+
+// i18n.js fires this on every language switch. I18n.apply(document) (called
+// by I18n itself) already refreshes every static data-i18n[-*] attribute;
+// this re-derives the handful of labels core.js builds dynamically in JS
+// (theme/density/sidebar-rail titles carry live state, connection chip text
+// isn't attribute-driven at all).
+document.addEventListener("i18n:change", function () {
+  var themeMode = "auto";
+  try { themeMode = localStorage.getItem("themeOverride") || "auto"; } catch (e) {}
+  _themeUpdateToggleIcon(themeMode);
+  _densitySyncBtn(document.documentElement.getAttribute("data-density") || "comfortable");
+  _sidebarRailSyncBtn(document.documentElement.classList.contains("sidebar-rail"));
+  if (_connOnline !== null) {
+    var label = document.getElementById("sstat-conn-label");
+    if (label) label.textContent = I18n.t(_connOnline ? "chrome.online" : "chrome.offline");
+  }
+
+  // Page bodies built as JS strings (rather than data-i18n markup) keep the
+  // language they were rendered in, so they have to be redrawn.
+  //
+  // EXPLICITLY NOT pageInit(). Every settings sub-page's init re-reads the
+  // device and re-fills the form — sdInit, netInit, thInit, dlInit, clLoad
+  // and expLoad all call setVal/setChk down their whole field list — so
+  // routing a language switch through pageInit silently reverts whatever the
+  // reader had typed and not yet saved. Changing a label must not be able to
+  // discard an edit. These entry points redraw a generated body and nothing
+  // else; the form sub-pages need no entry here at all, because their markup
+  // is data-i18n and I18n.apply() above has already done them.
+  var RERENDER = {
+    settings:  function () { if (typeof hubStatusInit === "function") hubStatusInit(); },
+    sensors:   function () { if (typeof sensorsLoad === "function") sensorsLoad(); },
+    files:     function () { if (typeof filesRender === "function") filesRender(); },
+    dashboard: function () { if (typeof dbLoadCards === "function") dbLoadCards(); },
+    // Re-renders from the rows already parsed, so it keeps the reader's
+    // chosen log file — logsInit() would rebuild the picker and drop it.
+    logs:      function () { if (typeof dbApplyFilters === "function" && dbFilteredData && dbFilteredData.length) dbApplyFilters(); },
+    // live redraws itself from the next SSE tick (1 Hz), and nodes/kindle
+    // subscribe to this event themselves so they can redraw from their
+    // working copy without re-fetching over unsaved edits.
+  };
+  var redraw = RERENDER[currentPage];
+  if (redraw) {
+    try { redraw(); } catch (e) { console.warn("i18n re-render failed for", currentPage, e); }
+  }
 });
 
 // WCAG 2.4.1 skip-to-content — programmatic focus instead of #anchor so
@@ -809,9 +863,8 @@ var LAZY_PAGES = {
   settings_modules:   1,
   settings_platform:  1, // aggregator: hardware + core logic + modules
   settings_netime:    1, // aggregator: network + time
-  settings_espnow:    1, // ESP-NOW battery nodes
+  settings_nodes:     1, // unified ESP-NOW + WiFi remote nodes (redesign 1a)
   settings_kindle:    1, // the e-ink dashboard's appearance
-  settings_remote:    1, // WiFi remote sensor nodes
   update:             1,
 };
 var _loadedPartials = {};   // page name → true once injected
@@ -845,12 +898,14 @@ function loadPagePartial(page) {
       // page partials load afterwards, so their <span data-icon> placeholders
       // would otherwise never be replaced with SVGs (blank icons on Network,
       // Hardware, etc.). Swap the freshly-injected page element now.
-      if (window.Icons && Icons.swap) {
-        // A valid partial always contains its #page-<name> element, so scope
-        // the swap to it — never fall back to document.body (that would
-        // re-scan every icon already in the SPA on each navigation).
-        var injected = document.getElementById("page-" + page);
-        if (injected) Icons.swap(injected);
+      // A valid partial always contains its #page-<name> element, so scope
+      // both the icon swap and the i18n pass to it — never fall back to
+      // document.body (that would re-scan everything already in the SPA on
+      // each navigation).
+      var injected = document.getElementById("page-" + page);
+      if (injected) {
+        if (window.Icons && Icons.swap) Icons.swap(injected);
+        if (window.I18n) I18n.apply(injected);
       }
     })
     .catch(function (e) {
@@ -970,16 +1025,14 @@ function pageInit(page) {
     case "settings_modules":
       modulesInit();
       break;
-    case "settings_espnow":
-      espnowInit();
+    case "settings_nodes":
+      nodesInit();
       break;
     case "settings_kindle":
       kindleInit();
       break;
-    case "settings_remote":
-      remoteInit();
-      break;
     case "settings":
+      if (typeof hubStatusInit === "function") hubStatusInit();
       break;
   }
 }
@@ -1043,7 +1096,7 @@ function showToast(a, b, c) {
   var close = document.createElement("button");
   close.type = "button";
   close.className = "toast-close";
-  close.setAttribute("aria-label", "Dismiss notification");
+  close.setAttribute("aria-label", window.I18n ? I18n.t("chrome.toastDismiss") : "Dismiss notification");
   var closeIcon = document.createElement("span");
   closeIcon.setAttribute("data-icon", "x");
   close.appendChild(closeIcon);
@@ -1108,13 +1161,13 @@ function showUndoToast(title, msg, onUndo, opts) {
   var undoBtn = document.createElement("button");
   undoBtn.type = "button";
   undoBtn.className = "btn-mini toast-undo-btn";
-  undoBtn.textContent = "Undo";
+  undoBtn.textContent = window.I18n ? I18n.t("chrome.toastUndo") : "Undo";
   el.appendChild(undoBtn);
 
   var close = document.createElement("button");
   close.type = "button";
   close.className = "toast-close";
-  close.setAttribute("aria-label", "Dismiss notification");
+  close.setAttribute("aria-label", window.I18n ? I18n.t("chrome.toastDismiss") : "Dismiss notification");
   var closeIcon = document.createElement("span");
   closeIcon.setAttribute("data-icon", "x");
   close.appendChild(closeIcon);
@@ -1282,9 +1335,8 @@ var PAGE_MSG_IDS = {
   settings_time: "time-msg",
   settings_datalog: "dl-msg",
   sensors:          "sl-msg",
-  settings_espnow:  "en-msg",
+  settings_nodes:   "nd-msg",
   settings_kindle:  "kd-msg",
-  settings_remote:  "rn-msg",
 };
 
 function settingsSave(ev, url, form, restart) {
@@ -1581,12 +1633,13 @@ function confirmRestart() {
   document.getElementById("rPopProgress").style.display = "block";
   var rIcon = document.getElementById("rPopIcon");
   if (rIcon && window.Icons) rIcon.innerHTML = Icons.svg("clock");
-  setEl("rPopTitle", "Restarting…");
+  setEl("rPopTitle", window.I18n ? I18n.t("chrome.restarting") : "Restarting…");
   var s = 5,
     bar = document.getElementById("rPopBar");
   var tick = function () {
-    document.getElementById("rPopMsg").innerHTML =
-      "Redirecting in <strong>" + s + "</strong> seconds…";
+    document.getElementById("rPopMsg").innerHTML = window.I18n
+      ? I18n.t("chrome.restartRedirecting", { s: "<strong>" + s + "</strong>" })
+      : "Redirecting in <strong>" + s + "</strong> seconds…";
     if (bar) bar.style.width = (5 - s) * 20 + "%";
     if (s <= 0) {
       // /restart is CSRF-gated — use postWithCsrf so the device actually
@@ -1667,29 +1720,30 @@ registerHandlers({
 
   function openHelp() {
     if (document.getElementById("kbHelpSheet")) return;
+    var tt = window.I18n ? I18n.t : function (k) { return k; };
     var sheet = document.createElement("div");
     sheet.id = "kbHelpSheet";
     sheet.setAttribute("role", "dialog");
-    sheet.setAttribute("aria-label", "Keyboard shortcuts");
+    sheet.setAttribute("aria-label", tt("chrome.kbTitle"));
     sheet.className = "kb-help-sheet";
     sheet.innerHTML =
       '<div class="kb-help-card">' +
-        '<div class="kb-help-title">Keyboard shortcuts</div>' +
+        '<div class="kb-help-title">' + esc(tt("chrome.kbTitle")) + '</div>' +
         '<ul class="kb-help-list">' +
-          '<li><kbd>⌘</kbd> <kbd>K</kbd><span>Command palette (also <kbd>Ctrl K</kbd> or <kbd>/</kbd>)</span></li>' +
-          '<li><kbd>,</kbd><span>Quick settings drawer</span></li>' +
-          '<li><kbd>G</kbd> <kbd>D</kbd><span>Dashboard</span></li>' +
-          '<li><kbd>G</kbd> <kbd>O</kbd><span>Overview</span></li>' +
-          '<li><kbd>G</kbd> <kbd>A</kbd><span>Alerts</span></li>' +
-          '<li><kbd>G</kbd> <kbd>L</kbd><span>Live</span></li>' +
-          '<li><kbd>G</kbd> <kbd>F</kbd><span>Files</span></li>' +
-          '<li><kbd>G</kbd> <kbd>C</kbd><span>Sensors</span></li>' +
-          '<li><kbd>G</kbd> <kbd>S</kbd><span>Settings</span></li>' +
-          '<li><kbd>G</kbd> <kbd>U</kbd><span>Update</span></li>' +
-          '<li><kbd>?</kbd><span>Show this help</span></li>' +
-          '<li><kbd>Esc</kbd><span>Close help</span></li>' +
+          '<li><kbd>⌘</kbd> <kbd>K</kbd><span>' + esc(tt("chrome.kbPalette", { ctrlK: "Ctrl K", slash: "/" })) + '</span></li>' +
+          '<li><kbd>,</kbd><span>' + esc(tt("chrome.kbQuickSettings")) + '</span></li>' +
+          '<li><kbd>G</kbd> <kbd>D</kbd><span>' + esc(tt("chrome.kbDashboard")) + '</span></li>' +
+          '<li><kbd>G</kbd> <kbd>O</kbd><span>' + esc(tt("chrome.kbOverview")) + '</span></li>' +
+          '<li><kbd>G</kbd> <kbd>A</kbd><span>' + esc(tt("chrome.kbAlerts")) + '</span></li>' +
+          '<li><kbd>G</kbd> <kbd>L</kbd><span>' + esc(tt("chrome.kbLive")) + '</span></li>' +
+          '<li><kbd>G</kbd> <kbd>F</kbd><span>' + esc(tt("chrome.kbFiles")) + '</span></li>' +
+          '<li><kbd>G</kbd> <kbd>C</kbd><span>' + esc(tt("chrome.kbSensors")) + '</span></li>' +
+          '<li><kbd>G</kbd> <kbd>S</kbd><span>' + esc(tt("chrome.kbSettings")) + '</span></li>' +
+          '<li><kbd>G</kbd> <kbd>U</kbd><span>' + esc(tt("chrome.kbUpdate")) + '</span></li>' +
+          '<li><kbd>?</kbd><span>' + esc(tt("chrome.kbHelp")) + '</span></li>' +
+          '<li><kbd>Esc</kbd><span>' + esc(tt("chrome.kbClose")) + '</span></li>' +
         '</ul>' +
-        '<div class="kb-help-hint">Click outside to dismiss</div>' +
+        '<div class="kb-help-hint">' + esc(tt("chrome.kbHint")) + '</div>' +
       '</div>';
     sheet.addEventListener("click", function (ev) {
       if (ev.target === sheet) closeHelp();

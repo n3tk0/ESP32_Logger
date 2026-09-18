@@ -5,6 +5,24 @@
  */
 "use strict";
 
+// spT(key, fallback, vars): translated string with an explicit English
+// fallback, same guarded pattern used across the rest of the app (see
+// firstrun.js / core.js / nodes.js). Namespace is "sensorsPage" —
+// registered in www/i18n/sensors.js. Interpolates {var} into the fallback
+// too, so callers can rely on vars being applied either way.
+function spT(key, fallback, vars) {
+  if (window.I18n) return I18n.t("sensorsPage." + key, vars);
+  var s = fallback;
+  if (vars) {
+    for (var k in vars) {
+      if (Object.prototype.hasOwnProperty.call(vars, k)) {
+        s = s.split("{" + k + "}").join(String(vars[k]));
+      }
+    }
+  }
+  return s;
+}
+
 // ============================================================================
 // PLATFORM CONFIG  (platform_config.json management)
 // ============================================================================
@@ -42,7 +60,7 @@ var sensorChart = null;
 function sensorsLoad() {
   var grid = document.getElementById("sensors-grid");
   var msg = document.getElementById("sensors-msg");
-  if (msg) msg.textContent = "Loading…";
+  if (msg) msg.textContent = window.I18n ? I18n.t("common.loading") : "Loading…";
   if (grid) grid.innerHTML = "";
 
   // Hydrate the inline "Sensor CSV logging" card if it's mounted on this
@@ -71,10 +89,12 @@ function sensorsLoad() {
     .then(function (d) {
       if (!d || !d.sensors || d.sensors.length === 0) {
         if (msg)
-          msg.textContent =
-            "No sensors registered. Set mode to Continuous in Core Logic settings and configure sensors.";
+          msg.textContent = spT(
+            "noSensorsRegistered",
+            "No sensors registered. Set mode to Continuous in Core Logic settings and configure sensors."
+          );
         var sub = document.getElementById("sensors-sub");
-        if (sub) sub.textContent = "0 sensors";
+        if (sub) sub.textContent = spT("sensorsCount", "{n} sensors", { n: 0 });
         return;
       }
       if (msg) msg.textContent = "";
@@ -85,8 +105,8 @@ function sensorsLoad() {
       var okCount  = d.sensors.filter(function(s) { return s && s.status === "ok"; }).length;
       var sub = document.getElementById("sensors-sub");
       if (sub) {
-        var parts = [okCount + " active"];
-        if (errCount) parts.push(errCount + " errored");
+        var parts = [spT("activeCount", "{n} active", { n: okCount })];
+        if (errCount) parts.push(spT("erroredCount", "{n} errored", { n: errCount }));
         sub.textContent = parts.join(" · ");
       }
 
@@ -154,12 +174,12 @@ function sensorsLoad() {
             var freshMs = s.data_interval_ms || s.read_interval_ms;
             if (refMs && freshMs) {
               var ageMs = nowMs - refMs;
-              ageStr = _sensorFmtAge(ageMs) + " ago";
+              ageStr = spT("ago", "{t} ago", { t: _sensorFmtAge(ageMs) });
               if (ageMs > freshMs * 2) {
                 stateClass = " stale";
               } else if (s.periodic && ageMs > s.read_interval_ms) {
                 sleeping = true;
-                ageStr = "sleeping · " + ageStr;
+                ageStr = spT("sleepingAge", "sleeping · {age}", { age: ageStr });
               }
             }
             if (s.status === "err" || s.status === "error") stateClass = " err";
@@ -276,15 +296,15 @@ function sensorsLoad() {
           .join("");
       var sel = document.getElementById("sc-sensor");
       if (sel) {
-        sel.innerHTML = '<option value="">— select sensor —</option>' + sensorOpts;
+        sel.innerHTML = '<option value="">' + esc(spT("optSensor", "— select sensor —")) + '</option>' + sensorOpts;
       }
       var sel2 = document.getElementById("sc-sensor2");
       if (sel2) {
-        sel2.innerHTML = '<option value="">— none —</option>' + sensorOpts;
+        sel2.innerHTML = '<option value="">' + esc(spT("optNone", "— none —")) + '</option>' + sensorOpts;
       }
     })
     .catch(function (e) {
-      if (msg) msg.textContent = "Failed to load sensors: " + e;
+      if (msg) msg.textContent = spT("failedLoadSensors", "Failed to load sensors: {e}", { e: e });
     });
 }
 
@@ -314,7 +334,7 @@ function sensorChartLoad() {
   // Update metric dropdown when sensor changes
   var metricSel = document.getElementById("sc-metric");
   if (metricSel && !metric) {
-    if (msg) msg.textContent = "Select a metric…";
+    if (msg) msg.textContent = spT("selectMetricPrompt", "Select a metric…");
     return;
   }
 
@@ -344,7 +364,7 @@ function sensorChartLoad() {
       "&agg=" + agg + "&mode=" + mode + "&limit=250";
   }
 
-  if (msg) msg.textContent = "Loading…";
+  if (msg) msg.textContent = window.I18n ? I18n.t("common.loading") : "Loading…";
 
   // Fetch primary (and optionally secondary) data
   var fetches = [fetchWithTimeout(url1, {}, 15000).then(function (r) { return r.ok ? r.json() : null; })];
@@ -356,7 +376,7 @@ function sensorChartLoad() {
       var d2 = results.length > 1 ? results[1] : null;
 
       if (!d1 || !d1.data || d1.data.length === 0) {
-        if (msg) msg.textContent = "No data for selected period.";
+        if (msg) msg.textContent = spT("noDataPeriod", "No data for selected period.");
         return;
       }
 
@@ -416,7 +436,7 @@ function sensorChartLoad() {
       if (elPts) elPts.textContent = d1.count !== undefined ? d1.count : "—";
 
       var infoStr = d1.agg + " · " + d1.mode;
-      if (hasDual) infoStr += " + overlay";
+      if (hasDual) infoStr += spT("plusOverlay", " + overlay");
       if (msg) msg.textContent = infoStr;
 
       var ctx = document.getElementById("sensorChart");
@@ -429,7 +449,7 @@ function sensorChartLoad() {
         var xs = d1.data.map(function (pt) { return pt.ts; });
 
         var series = [
-          { label: "Time" },
+          { label: spT("timeLabel", "Time") },
           {
             label: sid + " / " + metric + (unit1 ? " (" + unit1 + ")" : ""),
             stroke: "#275673",
@@ -485,7 +505,7 @@ function sensorChartLoad() {
       }
     })
     .catch(function (e) {
-      if (msg) msg.textContent = "Error: " + e;
+      if (msg) msg.textContent = spT("errorPrefix", "Error: {e}", { e: e });
     });
 }
 
@@ -499,7 +519,7 @@ document.addEventListener("DOMContentLoaded", function () {
       var metricSel = document.getElementById(metricId);
       if (!metricSel) return;
       if (!sid) {
-        metricSel.innerHTML = '<option value="">— metric —</option>';
+        metricSel.innerHTML = '<option value="">' + esc(spT("optMetric", "— metric —")) + '</option>';
         return;
       }
       getSensors()
@@ -600,11 +620,11 @@ function clLoadBoardProfile() {
 
             // Build warnings map from restriction lists.
             CL_SYSTEM_PINS = {};
-            (profile.strapPins    || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'strap pin (boot risk)'; });
-            (profile.usbPins      || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'USB CDC'; });
-            (profile.flashPins    || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'SPI flash bus'; });
-            (profile.reservedPins || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'UART0 console'; });
-            (profile.absentPins   || []).forEach(function (p) { CL_SYSTEM_PINS[p] = 'not broken out'; });
+            (profile.strapPins    || []).forEach(function (p) { CL_SYSTEM_PINS[p] = spT("pinStrap", "strap pin (boot risk)"); });
+            (profile.usbPins      || []).forEach(function (p) { CL_SYSTEM_PINS[p] = spT("pinUsb", "USB CDC"); });
+            (profile.flashPins    || []).forEach(function (p) { CL_SYSTEM_PINS[p] = spT("pinFlash", "SPI flash bus"); });
+            (profile.reservedPins || []).forEach(function (p) { CL_SYSTEM_PINS[p] = spT("pinUart", "UART0 console"); });
+            (profile.absentPins   || []).forEach(function (p) { CL_SYSTEM_PINS[p] = spT("pinNotBroken", "not broken out"); });
         })
         .catch(function () {
             // Silent — fallback table above keeps the UI alive on legacy
@@ -722,8 +742,8 @@ function clRenderSensors(sensors) {
     list.innerHTML = "";
     list.appendChild(emptyState({
       icon: "gauge",
-      title: "No sensors configured",
-      msg: "Click + Add Sensor to register your first sensor."
+      title: spT("noSensorsConfigured", "No sensors configured"),
+      msg: spT("noSensorsConfiguredMsg", "Click + Add Sensor to register your first sensor.")
     }));
     return;
   }
@@ -744,14 +764,14 @@ function clRenderSensors(sensors) {
       };
       var pinInfo =
         s.interface === "http" || s.type === "remote"
-          ? "Node:" + (s.node || s.id || "?")
+          ? spT("pinInfoNode", "Node:") + (s.node || s.id || "?")
           : s.interface === "i2c"
             ? "SDA:" + pinTxt(s.sda) + " SCL:" + pinTxt(s.scl) +
-              (s.bus ? " Bus:" + s.bus : "")
+              (s.bus ? " " + spT("pinInfoBus", "Bus:") + s.bus : "")
             : s.interface === "uart"
               ? "RX:" + pinTxt(s.uart_rx)
               : s.interface === "pulse"
-                ? "Pin:" + pinTxt(s.pin)
+                ? spT("pinInfoPin", "Pin:") + pinTxt(s.pin)
                 : "";
       return (
         '<div class="sensor-list-row" data-sensor-idx="' + i + '" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border)">' +
@@ -762,7 +782,7 @@ function clRenderSensors(sensors) {
         (s.enabled ? " checked" : "") +
         ">" +
         '<span style="font-size:.8rem;color:var(--text-muted)">' +
-        (s.enabled ? "ON" : "OFF") +
+        (s.enabled ? spT("on", "ON") : spT("off", "OFF")) +
         "</span>" +
         "</label>" +
         '<div style="flex:1;min-width:0">' +
@@ -806,8 +826,8 @@ function clRemoveSensor(idx) {
 
   if (typeof showUndoToast === "function") {
     showUndoToast(
-      "Removed " + name,
-      "Press Undo to restore (save on the page to persist)",
+      spT("removedSensor", "Removed {name}", { name: name }),
+      spT("removedSensorUndoHint", "Press Undo to restore (save on the page to persist)"),
       function () {
         // Re-insert at original index — clamp in case the list shrank.
         var insertAt = Math.min(idx, PCFG.sensors.length);
@@ -816,7 +836,7 @@ function clRemoveSensor(idx) {
       }
     );
   } else if (window.showToast) {
-    showToast("Removed " + name, "ok");
+    showToast(spT("removedSensor", "Removed {name}", { name: name }), "ok");
   }
 }
 
@@ -829,14 +849,14 @@ function _clBuildEditFormHtml(s) {
   var html = '<form id="sensorEditForm" data-submit="clSaveEditedSensor">';
   
   // ID
-  html += '<div class="field"><label class="field-label">Sensor ID</label>' +
+  html += '<div class="field"><label class="field-label">' + esc(spT("fieldSensorId", "Sensor ID")) + '</label>' +
           '<input type="text" name="id" class="input" value="' + esc(s.id || '') + '"></div>';
-          
+
   // Enabled
-  html += '<div class="field"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" name="enabled"' + (s.enabled ? ' checked' : '') + '> Enabled</label></div>';
-  
+  html += '<div class="field"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" name="enabled"' + (s.enabled ? ' checked' : '') + '> ' + esc(spT("fieldEnabled", "Enabled")) + '</label></div>';
+
   // Read Interval
-  html += '<div class="field"><label class="field-label">Read Interval (ms)</label>' +
+  html += '<div class="field"><label class="field-label">' + esc(spT("fieldReadInterval", "Read Interval (ms)")) + '</label>' +
           '<input type="number" step="100" name="read_interval_ms" class="input" value="' + (s.read_interval_ms || 10000) + '"></div>';
 
   if (s.interface === "http" || s.type === "remote") {
@@ -844,53 +864,55 @@ function _clBuildEditFormHtml(s) {
     // contacts the node — the node POSTs to /api/ingest — so there is no
     // address here to get wrong: the pairing is this string, compared
     // exactly (strcmp) against the "node" field of the arriving payload.
-    html += '<div class="field"><label class="field-label">Remote node id</label>' +
+    html += '<div class="field"><label class="field-label">' + esc(spT("fieldRemoteNodeId", "Remote node id")) + '</label>' +
             '<input type="text" name="node" class="input mono" maxlength="16" value="' +
             esc(s.node !== undefined ? s.node : "") + '" placeholder="' + esc(s.id || "") + '">' +
-            '<p class="hint">Must match the <b>Node id</b> in the satellite\u2019s ' +
-            'setup portal, exactly, up to 16 characters. Left empty, the sensor id ' +
-            'above is used instead.</p></div>';
+            '<p class="hint">' + spT(
+              "remoteNodeHint",
+              "Must match the <b>Node id</b> in the satellite\u2019s setup portal, exactly, up to 16 characters. Left empty, the sensor id above is used instead."
+            ) + '</p></div>';
   } else if (s.interface === "i2c") {
     var busVal = (s.bus !== undefined ? s.bus : 0);
     html += '<div class="form-grid">' +
-            '<div class="field"><label class="field-label">SDA Pin</label><input type="number" name="sda" class="input" value="' + (s.sda !== undefined ? s.sda : 6) + '"></div>' +
-            '<div class="field"><label class="field-label">SCL Pin</label><input type="number" name="scl" class="input" value="' + (s.scl !== undefined ? s.scl : 7) + '"></div>' +
+            '<div class="field"><label class="field-label">' + esc(spT("fieldSdaPin", "SDA Pin")) + '</label><input type="number" name="sda" class="input" value="' + (s.sda !== undefined ? s.sda : 6) + '"></div>' +
+            '<div class="field"><label class="field-label">' + esc(spT("fieldSclPin", "SCL Pin")) + '</label><input type="number" name="scl" class="input" value="' + (s.scl !== undefined ? s.scl : 7) + '"></div>' +
             '</div>' +
-            '<div class="field"><label class="field-label">I2C Bus</label>' +
+            '<div class="field"><label class="field-label">' + esc(spT("fieldI2cBus", "I2C Bus")) + '</label>' +
             '<select name="bus" class="input">' +
-              '<option value="0"' + (busVal === 0 ? " selected" : "") + '>Bus 0 (default)</option>' +
-              '<option value="1"' + (busVal === 1 ? " selected" : "") + '>Bus 1 (second controller)</option>' +
+              '<option value="0"' + (busVal === 0 ? " selected" : "") + '>' + esc(spT("busDefault", "Bus 0 (default)")) + '</option>' +
+              '<option value="1"' + (busVal === 1 ? " selected" : "") + '>' + esc(spT("busSecond", "Bus 1 (second controller)")) + '</option>' +
             '</select>' +
-            '<div class="hint">Put devices with the same fixed address on different buses — e.g. VEML6075 and VEML7700 are both 0x10 and cannot share one. ' +
-            'Bus 1 needs a chip with two I2C controllers (ESP32-S3, ESP32); the ESP32-C3 has only bus 0. ' +
-            'Each bus needs its own SDA/SCL pins and its own pull-ups.</div></div>';
+            '<div class="hint">' + spT(
+              "i2cBusHint",
+              "Put devices with the same fixed address on different buses — e.g. VEML6075 and VEML7700 are both 0x10 and cannot share one. Bus 1 needs a chip with two I2C controllers (ESP32-S3, ESP32); the ESP32-C3 has only bus 0. Each bus needs its own SDA/SCL pins and its own pull-ups."
+            ) + '</div></div>';
   } else if (s.interface === "uart") {
     html += '<div class="form-grid">' +
-            '<div class="field"><label class="field-label">RX Pin</label><input type="number" name="uart_rx" class="input" value="' + (s.uart_rx !== undefined ? s.uart_rx : 20) + '"></div>' +
-            '<div class="field"><label class="field-label">TX Pin</label><input type="number" name="uart_tx" class="input" value="' + (s.uart_tx !== undefined ? s.uart_tx : -1) + '"></div>' +
+            '<div class="field"><label class="field-label">' + esc(spT("fieldRxPin", "RX Pin")) + '</label><input type="number" name="uart_rx" class="input" value="' + (s.uart_rx !== undefined ? s.uart_rx : 20) + '"></div>' +
+            '<div class="field"><label class="field-label">' + esc(spT("fieldTxPin", "TX Pin")) + '</label><input type="number" name="uart_tx" class="input" value="' + (s.uart_tx !== undefined ? s.uart_tx : -1) + '"></div>' +
             '</div>';
-    html += '<div class="field"><label class="field-label">Baud Rate</label><select name="baud" class="input">' +
+    html += '<div class="field"><label class="field-label">' + esc(spT("fieldBaudRate", "Baud Rate")) + '</label><select name="baud" class="input">' +
             '<option value="9600"' + (s.baud == 9600 ? ' selected' : '') + '>9600</option>' +
             '<option value="19200"' + (s.baud == 19200 ? ' selected' : '') + '>19200</option>' +
             '<option value="38400"' + (s.baud == 38400 ? ' selected' : '') + '>38400</option>' +
             '<option value="115200"' + (s.baud == 115200 ? ' selected' : '') + '>115200</option>' +
             '</select></div>';
     if (s.type === "sds011") {
-      html += '<div class="field"><label class="field-label">Working Period (minutes)</label>' +
+      html += '<div class="field"><label class="field-label">' + esc(spT("fieldWorkPeriod", "Working Period (minutes)")) + '</label>' +
               '<input type="number" min="0" max="30" name="work_period_min" class="input" value="' + (s.work_period_min !== undefined ? s.work_period_min : 1) + '">' +
-              '<p class="hint">0 = Continuous. 1-30 = Sensor sleeps and wakes automatically.</p></div>';
+              '<p class="hint">' + esc(spT("workPeriodHint", "0 = Continuous. 1-30 = Sensor sleeps and wakes automatically.")) + '</p></div>';
       html += '<div class="field" style="margin-top:10px"><label style="display:flex;align-items:center;gap:6px;cursor:pointer">' +
-              '<input type="checkbox" name="humidityCorrectionEnabled"' + (s.humidityCorrectionEnabled ? ' checked' : '') + '> Enable Humidity Correction</label>' +
-              '<p class="hint">Requires a humidity sensor in the stream.</p></div>';
-      html += '<div class="field"><label class="field-label">Correction &kappa; (Köhler)</label>' +
+              '<input type="checkbox" name="humidityCorrectionEnabled"' + (s.humidityCorrectionEnabled ? ' checked' : '') + '> ' + esc(spT("fieldHumidityCorrection", "Enable Humidity Correction")) + '</label>' +
+              '<p class="hint">' + esc(spT("humidityCorrectionHint", "Requires a humidity sensor in the stream.")) + '</p></div>';
+      html += '<div class="field"><label class="field-label">' + spT("fieldCorrectionKappa", "Correction &kappa; (Köhler)") + '</label>' +
               '<input type="number" step="0.05" min="0" max="2" name="humidityCorrectionKappa" class="input" value="' + (s.humidityCorrectionKappa !== undefined ? s.humidityCorrectionKappa : 0.35) + '"></div>';
     }
   } else if (s.interface === "pulse") {
-    html += '<div class="field"><label class="field-label">Pin</label><input type="number" name="pin" class="input" value="' + (s.pin !== undefined ? s.pin : 9) + '"></div>';
+    html += '<div class="field"><label class="field-label">' + esc(spT("fieldPin", "Pin")) + '</label><input type="number" name="pin" class="input" value="' + (s.pin !== undefined ? s.pin : 9) + '"></div>';
     if (s.type === "yfs201") {
       html += '<div class="form-grid">' +
-              '<div class="field"><label class="field-label">Pulses/Liter</label><input type="number" step="0.1" name="pulses_per_liter" class="input" value="' + (s.pulses_per_liter !== undefined ? s.pulses_per_liter : 450) + '"></div>' +
-              '<div class="field"><label class="field-label">Multiplier</label><input type="number" step="0.1" name="calibration" class="input" value="' + (s.calibration !== undefined ? s.calibration : 1.0) + '"></div>' +
+              '<div class="field"><label class="field-label">' + esc(spT("fieldPulsesPerLiter", "Pulses/Liter")) + '</label><input type="number" step="0.1" name="pulses_per_liter" class="input" value="' + (s.pulses_per_liter !== undefined ? s.pulses_per_liter : 450) + '"></div>' +
+              '<div class="field"><label class="field-label">' + esc(spT("fieldMultiplier", "Multiplier")) + '</label><input type="number" step="0.1" name="calibration" class="input" value="' + (s.calibration !== undefined ? s.calibration : 1.0) + '"></div>' +
               '</div>';
     }
   }
@@ -901,7 +923,7 @@ function _clBuildEditFormHtml(s) {
   html += '<label id="sensor-unsafe-wrap" style="display:' + (s.allow_unsafe_pins ? 'flex' : 'none') +
           ';align-items:center;gap:6px;cursor:pointer;margin-top:8px;font-size:12px">' +
           '<input type="checkbox" name="allow_unsafe_pins"' + (s.allow_unsafe_pins ? ' checked' : '') +
-          '> Use restricted pin anyway (proper pull-ups added)</label>';
+          '> ' + esc(spT("fieldAllowUnsafe", "Use restricted pin anyway (proper pull-ups added)")) + '</label>';
 
   var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "bus", "uart_rx", "uart_tx", "baud", "pin", "node", "work_period_min", "pulses_per_liter", "calibration", "humidityCorrectionEnabled", "humidityCorrectionKappa", "allow_unsafe_pins"];
   var advObj = {};
@@ -909,9 +931,9 @@ function _clBuildEditFormHtml(s) {
     if (stdKeys.indexOf(k) === -1) advObj[k] = s[k];
   }
   var advStr = Object.keys(advObj).length > 0 ? JSON.stringify(advObj) : "{}";
-  html += '<div class="field" style="margin-top:1rem"><label class="field-label">Advanced (JSON overlay)</label>' +
+  html += '<div class="field" style="margin-top:1rem"><label class="field-label">' + esc(spT("fieldAdvanced", "Advanced (JSON overlay)")) + '</label>' +
           '<input type="text" name="advanced" class="input" value="' + esc(advStr) + '">' +
-          '<p class="hint">Additional parameters applied directly to this sensor. Keep as {} if unsure.</p></div>';
+          '<p class="hint">' + esc(spT("advancedHint", "Additional parameters applied directly to this sensor. Keep as {} if unsure.")) + '</p></div>';
 
   html += '</form>';
   return html;
@@ -952,8 +974,8 @@ function clWirePinWarn() {
       warn.style.background = hard ? "rgba(220,38,38,.12)" : "rgba(217,119,6,.14)";
       warn.style.color      = hard ? "var(--err)" : "var(--warn)";
       warn.innerHTML = "⚠ " + msgs.join(" · ") +
-        (hard ? " — can't be used (hardware-reserved); pick another pin."
-              : " — usable only with proper pull-ups; the device may fail to boot if held LOW at reset.");
+        (hard ? spT("pinHardBlocked", " — can't be used (hardware-reserved); pick another pin.")
+              : spT("pinSoftWarn", " — usable only with proper pull-ups; the device may fail to boot if held LOW at reset."));
       if (wrap) wrap.style.display = ((soft && !hard) || (chk && chk.checked)) ? "flex" : "none";
     });
   }
@@ -970,15 +992,16 @@ function _clEditInline(idx, s) {
   var panel = document.createElement("div");
   panel.className = "sensor-inline-edit";
   panel.setAttribute("data-sensor-idx", idx);
+  var closeAria = window.I18n ? I18n.t("chrome.closeAria") : "Close";
   panel.innerHTML =
     '<div class="sensor-inline-head">' +
-      '<div class="sensor-inline-title">Edit · <span class="mono">' + esc(s.id || s.type) + '</span></div>' +
-      '<button type="button" class="btn-mini" data-role="close" aria-label="Close"><span data-icon="x"></span></button>' +
+      '<div class="sensor-inline-title">' + esc(spT("editPrefix", "Edit · ")) + '<span class="mono">' + esc(s.id || s.type) + '</span></div>' +
+      '<button type="button" class="btn-mini" data-role="close" aria-label="' + esc(closeAria) + '"><span data-icon="x"></span></button>' +
     '</div>' +
     '<div class="sensor-inline-body">' + _clBuildEditFormHtml(s) + '</div>' +
     '<div class="sensor-inline-foot">' +
-      '<button type="button" class="btn" data-role="cancel">Cancel</button>' +
-      '<button type="button" class="btn primary" data-role="save"><span data-icon="save"></span> Save</button>' +
+      '<button type="button" class="btn" data-role="cancel">' + esc(window.I18n ? I18n.t("common.cancel") : "Cancel") + '</button>' +
+      '<button type="button" class="btn primary" data-role="save"><span data-icon="save"></span> ' + esc(window.I18n ? I18n.t("common.save") : "Save") + '</button>' +
     '</div>';
 
   // Mount immediately after the row so the expander shows in flow
@@ -1012,7 +1035,7 @@ function clEditSensor(idx) {
   var t = document.getElementById("sensorPopupTitle");
   var f = document.getElementById("sensorPopupFooter");
   var btn = document.getElementById("sensorPopupSaveBtn");
-  t.textContent = "Edit Sensor: " + (s.id || s.type);
+  t.textContent = spT("editSensorTitle", "Edit Sensor: {name}", { name: s.id || s.type });
   b.innerHTML = _clBuildEditFormHtml(s);
   f.style.display = "flex";
   btn.onclick = clSaveEditedSensor;
@@ -1069,7 +1092,7 @@ function clSaveEditedSensor() {
       var advObj = JSON.parse(adv);
       for (var k in advObj) s[k] = advObj[k];
     } catch(e) {
-      showToast("Invalid Advanced JSON. Saving standard fields only.", "error");
+      showToast(spT("invalidAdvancedJson", "Invalid Advanced JSON. Saving standard fields only."), "error");
     }
   }
 
@@ -1083,7 +1106,7 @@ function clSave() {
   var msg = document.getElementById("cl-msg") || document.getElementById("ss-msg");
   if (!PCFG) {
     if (msg) {
-      msg.textContent = "✗ No config loaded";
+      msg.textContent = spT("noConfigLoaded", "✗ No config loaded");
       msg.className = "alert alert-danger";
     }
     return;
@@ -1146,14 +1169,14 @@ function clSave() {
       parseInt(haEl.value, 10) || CL_SLEEP_DEFAULTS.hyb_active_window_ms;
 
   if (msg) {
-    msg.textContent = "Saving…";
+    msg.textContent = window.I18n ? I18n.t("common.saving") : "Saving…";
     msg.className = "";
   }
 
   pcfgSave(PCFG, function (ok, err) {
     if (ok) {
       if (msg) {
-        msg.textContent = "✓ Saved! Restarting device…";
+        msg.textContent = spT("savedRestarting", "✓ Saved! Restarting device…");
         msg.className = "";
       }
       // Trigger restart so new mode takes effect
@@ -1162,7 +1185,7 @@ function clSave() {
       }, 500);
     } else {
       if (msg) {
-        msg.textContent = "✗ Save failed: " + err;
+        msg.textContent = spT("saveFailed", "✗ Save failed: {err}", { err: err });
         msg.className = "";
       }
     }
@@ -1197,7 +1220,11 @@ function clUpdateHybCycle() {
     parseInt(haEl ? haEl.value : CL_SLEEP_DEFAULTS.hyb_active_window_ms, 10) ||
     CL_SLEEP_DEFAULTS.hyb_active_window_ms;
   var totalMs = sleepMs + activeMs;
-  lbl.textContent = `${(sleepMs / 1000).toFixed(0)}s sleep + ${(activeMs / 1000).toFixed(0)}s active = ${(totalMs / 1000).toFixed(0)}s per cycle`;
+  lbl.textContent = spT("hybCycleSummary", "{sleep}s sleep + {active}s active = {total}s per cycle", {
+    sleep: (sleepMs / 1000).toFixed(0),
+    active: (activeMs / 1000).toFixed(0),
+    total: (totalMs / 1000).toFixed(0),
+  });
 }
 
 // ============================================================================
@@ -1274,7 +1301,7 @@ function expLoad() {
               m +
               '" class="input" value="' +
               esc(ids[m] || "") +
-              '" placeholder="sensor ID…">' +
+              '" placeholder="' + esc(spT("osmSensorIdPh", "sensor ID…")) + '">' +
               "</div>"
             );
           })
@@ -1365,13 +1392,13 @@ function expSave() {
   };
 
   if (msg) {
-    msg.textContent = "Saving…";
+    msg.textContent = window.I18n ? I18n.t("common.saving") : "Saving…";
     msg.className = "";
   }
   pcfgSave(PCFG, function (ok, err) {
     if (ok) {
       if (msg) {
-        msg.textContent = "✓ Saved! Restarting…";
+        msg.textContent = spT("savedRestartingExp", "✓ Saved! Restarting…");
         msg.className = "";
       }
       setTimeout(function () {
@@ -1379,7 +1406,7 @@ function expSave() {
       }, 500);
     } else {
       if (msg) {
-        msg.textContent = "✗ " + err;
+        msg.textContent = spT("saveFailedShort", "✗ {err}", { err: err });
         msg.className = "";
       }
     }

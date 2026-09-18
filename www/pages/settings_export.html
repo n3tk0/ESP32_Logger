@@ -1,8 +1,8 @@
 <section class="page" id="page-settings_export">
     <div class="page-head">
-      <h1 class="page-title"><span data-icon="wifi"></span> Export</h1>
+      <h1 class="page-title"><span data-icon="wifi"></span> <span data-i18n="exportPage.title">Export</span></h1>
       <div class="page-sub">
-        <a href="#settings">Settings</a> / Export
+        <a href="#settings" data-i18n="chrome.navSettings">Settings</a> / <span data-i18n="exportPage.title">Export</span>
       </div>
     </div>
 
@@ -11,61 +11,61 @@
     <!-- MQTT -->
     <div class="card">
       <div class="card-head">
-        <div class="card-title"><span data-icon="link"></span> MQTT</div>
+        <div class="card-title"><span data-icon="link"></span> <span data-i18n="exportPage.mqttTitle">MQTT</span></div>
         <label class="switch"><input type="checkbox" id="exp-mqtt-en"><span></span></label>
       </div>
       <div class="card-body">
-        <p class="hint" style="margin-bottom:.75rem">
+        <p class="hint" style="margin-bottom:.75rem" data-i18n-html="exportPage.mqttHint">
           Publishes each sensor reading to <code>{prefix}/device/{id}/sensor/{name}/{metric}</code>.
           Requires an MQTT broker (e.g. Mosquitto, Home Assistant, Node-RED).
         </p>
         <div class="form-grid">
           <div class="field">
-            <label class="field-label" for="exp-mqtt-host">Broker Host</label>
+            <label class="field-label" for="exp-mqtt-host" data-i18n="exportPage.mqttHostLabel">Broker Host</label>
             <input type="text" id="exp-mqtt-host" class="input" placeholder="192.168.1.100">
           </div>
           <div class="field">
-            <label class="field-label" for="exp-mqtt-port">Port</label>
+            <label class="field-label" for="exp-mqtt-port" data-i18n="exportPage.mqttPortLabel">Port</label>
             <input type="number" id="exp-mqtt-port" class="input" value="1883">
           </div>
         </div>
         <div class="form-grid">
           <div class="field">
-            <label class="field-label" for="exp-mqtt-prefix">Topic Prefix</label>
+            <label class="field-label" for="exp-mqtt-prefix" data-i18n="exportPage.mqttPrefixLabel">Topic Prefix</label>
             <input type="text" id="exp-mqtt-prefix" class="input" value="waterlogger" maxlength="32">
           </div>
           <div class="field">
-            <label class="field-label" for="exp-mqtt-clientid">Client ID (leave blank = auto)</label>
+            <label class="field-label" for="exp-mqtt-clientid" data-i18n="exportPage.mqttClientIdLabel">Client ID (leave blank = auto)</label>
             <input type="text" id="exp-mqtt-clientid" class="input" placeholder="wl-DEVICEID" maxlength="32">
           </div>
         </div>
         <div class="form-grid">
           <div class="field">
-            <label class="field-label" for="exp-mqtt-user">Username</label>
+            <label class="field-label" for="exp-mqtt-user" data-i18n="exportPage.mqttUserLabel">Username</label>
             <input type="text" id="exp-mqtt-user" class="input" autocomplete="off" maxlength="32">
           </div>
           <div class="field">
-            <label class="field-label" for="exp-mqtt-pass">Password</label>
+            <label class="field-label" for="exp-mqtt-pass" data-i18n="exportPage.mqttPassLabel">Password</label>
             <input type="password" id="exp-mqtt-pass" class="input" autocomplete="new-password" maxlength="64">
           </div>
         </div>
         <div class="form-grid">
           <div class="field">
-            <label class="field-label" for="exp-mqtt-interval">Send Interval (ms)</label>
+            <label class="field-label" for="exp-mqtt-interval" data-i18n="exportPage.sendIntervalLabel">Send Interval (ms)</label>
             <input type="number" id="exp-mqtt-interval" class="input" value="60000" step="1000">
-            <p class="hint">How often to flush batched readings. Default 60 000 ms.</p>
+            <p class="hint" data-i18n="exportPage.mqttIntervalHint">How often to flush batched readings. Default 60 000 ms.</p>
           </div>
           <div class="field" style="justify-content:flex-end">
-            <label class="check"><input type="checkbox" id="exp-mqtt-retain"><span>Retain messages</span></label>
+            <label class="check"><input type="checkbox" id="exp-mqtt-retain"><span data-i18n="exportPage.mqttRetainLabel">Retain messages</span></label>
           </div>
         </div>
         <div class="field">
-          <label class="field-label" for="exp-mqtt-tls">Connection Security</label>
+          <label class="field-label" for="exp-mqtt-tls" data-i18n="exportPage.mqttTlsLabel">Connection Security</label>
           <select id="exp-mqtt-tls" class="input">
-            <option value="plain">Plaintext (port 1883)</option>
-            <option value="tls">TLS (port 8883)</option>
+            <option value="plain" data-i18n="exportPage.tlsPlain">Plaintext (port 1883)</option>
+            <option value="tls" data-i18n="exportPage.tlsSecure">TLS (port 8883)</option>
           </select>
-          <p class="hint">TLS uses <code>WiFiClientSecure</code> with no cert verification (no CA bundle on device). Use for cloud brokers where encryption matters; plaintext is fine for local LAN.</p>
+          <p class="hint" data-i18n-html="exportPage.mqttTlsHint">TLS uses <code>WiFiClientSecure</code> with no cert verification (no CA bundle on device). Use for cloud brokers where encryption matters; plaintext is fine for local LAN.</p>
         </div>
       </div>
     </div>
@@ -73,32 +73,34 @@
     <!-- HTTP POST -->
     <div class="card">
       <div class="card-head">
-        <div class="card-title"><span data-icon="globe"></span> HTTP POST</div>
+        <div class="card-title"><span data-icon="globe"></span> <span data-i18n="exportPage.httpTitle">HTTP POST</span></div>
         <label class="switch"><input type="checkbox" id="exp-http-en"><span></span></label>
       </div>
       <div class="card-body">
-        <p class="hint" style="margin-bottom:.75rem">
+        <p class="hint" style="margin-bottom:.75rem" data-i18n-html="exportPage.httpHint">
           POSTs a JSON array of readings to any HTTP endpoint.
           Compatible with InfluxDB v2 (<code>/api/v2/write</code>), Grafana, custom servers.
         </p>
         <div class="field">
-          <label class="field-label" for="exp-http-url">URL</label>
+          <label class="field-label" for="exp-http-url" data-i18n="exportPage.httpUrlLabel">URL</label>
           <input type="url" id="exp-http-url" class="input" placeholder="http://192.168.1.100:8086/api/v2/write"
             pattern="https?://[A-Za-z0-9._\-/:?#=&amp;%~,+]+"
             maxlength="128"
+            data-i18n-title="exportPage.httpUrlTitle"
             title="Must be a valid http:// or https:// URL">
-          <p class="hint">HTTPS endpoints use TLS without certificate verification (no bundled CA store). Self-signed certs work; MITM is possible on unprotected networks.</p>
+          <p class="hint" data-i18n="exportPage.httpUrlHint">HTTPS endpoints use TLS without certificate verification (no bundled CA store). Self-signed certs work; MITM is possible on unprotected networks.</p>
         </div>
         <div class="field">
-          <label class="field-label" for="exp-http-auth">Authorization Header (optional)</label>
+          <label class="field-label" for="exp-http-auth" data-i18n="exportPage.httpAuthLabel">Authorization Header (optional)</label>
           <input type="text" id="exp-http-auth" class="input" placeholder="Token mytoken  or  Bearer xyz"
             pattern="[A-Za-z0-9 _\-]+"
             maxlength="128"
+            data-i18n-title="exportPage.httpAuthTitle"
             title="Header value: alphanumeric, dash, underscore, space only. Newlines/colons not allowed (CRLF injection risk).">
-          <p class="hint">Sent as <code>Authorization: …</code>. Most APIs use <code>Bearer &lt;token&gt;</code> or <code>Basic &lt;base64&gt;</code>. CRLF characters are rejected client-side; backend double-checks (HttpExporter).</p>
+          <p class="hint" data-i18n-html="exportPage.httpAuthHint">Sent as <code>Authorization: …</code>. Most APIs use <code>Bearer &lt;token&gt;</code> or <code>Basic &lt;base64&gt;</code>. CRLF characters are rejected client-side; backend double-checks (HttpExporter).</p>
         </div>
         <div class="field">
-          <label class="field-label" for="exp-http-interval">Send Interval (ms)</label>
+          <label class="field-label" for="exp-http-interval" data-i18n="exportPage.sendIntervalLabel">Send Interval (ms)</label>
           <input type="number" id="exp-http-interval" class="input" value="60000" step="1000">
         </div>
       </div>
@@ -107,11 +109,11 @@
     <!-- Sensor.Community -->
     <div class="card">
       <div class="card-head">
-        <div class="card-title"><span data-icon="cloud-fog"></span> Sensor.Community</div>
+        <div class="card-title"><span data-icon="cloud-fog"></span> <span data-i18n="exportPage.scTitle">Sensor.Community</span></div>
         <label class="switch"><input type="checkbox" id="exp-sc-en"><span></span></label>
       </div>
       <div class="card-body">
-        <p class="hint">
+        <p class="hint" data-i18n-html="exportPage.scHint">
           Sends PM2.5/PM10 and environmental data to
           <a href="https://sensor.community" target="_blank">sensor.community</a>.
           Register your device at the site first to get a chip ID.
@@ -119,7 +121,7 @@
           Send interval must be ≥ 145 seconds (API requirement).
         </p>
         <div class="field" style="margin-top:.75rem">
-          <label class="field-label" for="exp-sc-interval">Send Interval (ms)</label>
+          <label class="field-label" for="exp-sc-interval" data-i18n="exportPage.sendIntervalLabel">Send Interval (ms)</label>
           <input type="number" id="exp-sc-interval" class="input" value="145000" min="145000">
         </div>
       </div>
@@ -128,29 +130,30 @@
     <!-- openSenseMap -->
     <div class="card">
       <div class="card-head">
-        <div class="card-title"><span data-icon="globe"></span> openSenseMap</div>
+        <div class="card-title"><span data-icon="globe"></span> <span data-i18n="exportPage.osmTitle">openSenseMap</span></div>
         <label class="switch"><input type="checkbox" id="exp-osm-en"><span></span></label>
       </div>
       <div class="card-body">
-        <p class="hint" style="margin-bottom:.75rem">
+        <p class="hint" style="margin-bottom:.75rem" data-i18n-html="exportPage.osmHint">
           Sends readings to <a href="https://opensensemap.org" target="_blank">opensensemap.org</a>.
           Create a senseBox at the site, then copy the Box ID, access token and sensor IDs below.
         </p>
         <div class="form-grid">
           <div class="field">
-            <label class="field-label" for="exp-osm-boxid">Box ID</label>
+            <label class="field-label" for="exp-osm-boxid" data-i18n="exportPage.osmBoxIdLabel">Box ID</label>
             <input type="text" id="exp-osm-boxid" class="input" placeholder="5f3a...">
           </div>
           <div class="field">
-            <label class="field-label" for="exp-osm-token">Access Token</label>
+            <label class="field-label" for="exp-osm-token" data-i18n="exportPage.osmTokenLabel">Access Token</label>
             <input type="password" id="exp-osm-token" class="input" autocomplete="new-password"
               pattern="[A-Za-z0-9]{20,64}"
               maxlength="64"
+              data-i18n-title="exportPage.osmTokenTitle"
               title="OpenSenseMap access token: alphanumeric, 20-128 chars.">
-            <p class="hint">&#9888; Tokens stored on device in plaintext (LittleFS). Treat this device like a long-lived API key holder; revoke and rotate via opensensemap.org if the device is lost or re-flashed.</p>
+            <p class="hint" data-i18n="exportPage.osmTokenHint">&#9888; Tokens stored on device in plaintext (LittleFS). Treat this device like a long-lived API key holder; revoke and rotate via opensensemap.org if the device is lost or re-flashed.</p>
           </div>
         </div>
-        <p class="hint" style="margin-bottom:.5rem">Sensor IDs — copy from your senseBox sensors:</p>
+        <p class="hint" style="margin-bottom:.5rem" data-i18n="exportPage.osmSensorIdsLabel">Sensor IDs — copy from your senseBox sensors:</p>
         <div id="exp-osm-ids">
           <!-- Populated by expLoad() -->
         </div>
@@ -158,7 +161,7 @@
     </div>
 
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">
-      <button class="btn primary" data-click="expSave"><span data-icon="save"></span> Save &amp; Restart</button>
-      <button class="btn" data-click="expLoad"><span data-icon="refresh-cw"></span> Reload</button>
+      <button class="btn primary" data-click="expSave"><span data-icon="save"></span> <span data-i18n="exportPage.saveRestart">Save &amp; Restart</span></button>
+      <button class="btn" data-click="expLoad"><span data-icon="refresh-cw"></span> <span data-i18n="common.reload">Reload</span></button>
     </div>
   </section>

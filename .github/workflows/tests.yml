@@ -214,16 +214,22 @@ jobs:
           pip install --quiet playwright
           python3 -m playwright install --with-deps chromium
 
-      - name: Drive the ESP-NOW settings page
+      - name: Drive the unified Nodes settings page
         # The pages are not compiled, so nothing else in this repository
         # notices a page that fetches a field the firmware does not send, uses
         # an icon that is not in the sheet, or wires a button to a handler
         # core.js never registered. Each of those opens a window that looks
         # fine and does nothing.
+        #
+        # Replaces "Drive the ESP-NOW settings page": redesign 1a merged the
+        # former Battery nodes (ESP-NOW) and Remote WiFi nodes pages into one
+        # #settings_nodes list, transport shown as a column, with no redirect
+        # from the old #settings_espnow/#settings_remote routes — so this now
+        # drives the merged page instead of the page it replaced.
         run: |
           python3 tests/web/mock_device.py 8765 &
           sleep 2
-          MOCK_PORT=8765 python3 tests/web/drive_espnow_page.py
+          MOCK_PORT=8765 python3 tests/web/drive_nodes_page.py
 
       # ONE PORT PER STEP, NEVER REUSED IN THIS JOB. Actions does not kill a
       # step's background children, so every mock_device.py started here is
@@ -375,16 +381,21 @@ jobs:
         # must stop doing anything.
         run: |
           set -e
-          cp www/js/espnow.js www/js/espnow.js.orig
-          sed -i 's/  espnowPair: espnowPair,//' www/js/espnow.js
+          cp www/js/nodes.js www/js/nodes.js.orig
+          sed -i 's/  nodesPair: nodesPair,//' www/js/nodes.js
+          grep -q '  nodesPair: nodesPair,' www/js/nodes.js && {
+            echo "::error::the self-test no longer matches the handler registration"
+            mv www/js/nodes.js.orig www/js/nodes.js
+            exit 1
+          }
           python3 tests/web/mock_device.py 8766 &
           sleep 2
-          if MOCK_PORT=8766 python3 tests/web/drive_espnow_page.py > /dev/null 2>&1; then
-            mv www/js/espnow.js.orig www/js/espnow.js
+          if MOCK_PORT=8766 python3 tests/web/drive_nodes_page.py > /dev/null 2>&1; then
+            mv www/js/nodes.js.orig www/js/nodes.js
             echo "::error::the browser test passed with the pairing button unwired"
             exit 1
           fi
-          mv www/js/espnow.js.orig www/js/espnow.js
+          mv www/js/nodes.js.orig www/js/nodes.js
           echo "browser test fires on an unwired button"
 
   api-docs:
