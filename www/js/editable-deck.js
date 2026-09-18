@@ -19,6 +19,9 @@
 
 (function () {
 
+  // Guarded i18n lookup — same idiom as nodes.js's ndT() / iot-extensions.js's ieT().
+  function edT(key, vars) { return window.I18n ? I18n.t(key, vars) : key; }
+
   var STORAGE_PREFIX = "esp32logger.layout.";
   var ALLOWED_SPANS  = [3, 4, 6, 8, 12];
   var COLUMNS        = 12;
@@ -154,7 +157,7 @@
         // Create the ghost label
         ghost = document.createElement("div");
         ghost.className = "deck-ghost";
-        ghost.textContent = slot.dataset.title || "Card";
+        ghost.textContent = slot.dataset.title || edT("editableDeck.card");
         document.body.appendChild(ghost);
       }
       if (ghost) {
@@ -295,7 +298,7 @@
         var btn = document.createElement("button");
         btn.type = "button";
         btn.className = "btn deck-customise-btn";
-        btn.innerHTML = '<span data-icon="sliders-horizontal"></span> Customise';
+        btn.innerHTML = '<span data-icon="sliders-horizontal"></span> ' + esc(edT("editableDeck.customise"));
         btn.addEventListener("click", function () {
           editing = true; renderToolbar(); render(); editingHooks(true);
         });
@@ -303,11 +306,11 @@
       } else {
         var badge = document.createElement("span");
         badge.className = "badge acc mono deck-editing-badge";
-        badge.textContent = "EDITING";
+        badge.textContent = edT("editableDeck.editingBadge");
         var reset = document.createElement("button");
         reset.type = "button";
         reset.className = "btn";
-        reset.innerHTML = '<span data-icon="rotate-ccw"></span> Reset';
+        reset.innerHTML = '<span data-icon="rotate-ccw"></span> ' + esc(edT("editableDeck.reset"));
         reset.addEventListener("click", function () {
           // Snapshot current layout, reset immediately, give the user an
           // 8 s undo window via the standard toast helper.
@@ -315,8 +318,8 @@
           resetLayout();
           if (typeof showUndoToast === "function") {
             showUndoToast(
-              "Layout reset",
-              "Restored defaults — press Undo to revert",
+              edT("editableDeck.layoutReset"),
+              edT("editableDeck.layoutResetHint"),
               function () {
                 cards = snapshot;
                 persist(); render();
@@ -327,7 +330,7 @@
         var done = document.createElement("button");
         done.type = "button";
         done.className = "btn primary";
-        done.innerHTML = '<span data-icon="check"></span> Done';
+        done.innerHTML = '<span data-icon="check"></span> ' + esc(edT("common.done"));
         done.addEventListener("click", function () {
           editing = false; renderToolbar(); render(); editingHooks(false);
         });
@@ -411,7 +414,7 @@
 
         var grip = document.createElement("span");
         grip.className = "edit-grip";
-        grip.title = "Drag to reorder";
+        grip.title = edT("editableDeck.dragToReorder");
         grip.innerHTML = '<span data-icon="grip-vertical"></span>';
         chrome.appendChild(grip);
 
@@ -422,7 +425,7 @@
           b.type = "button";
           b.className = "edit-span" + (card.span === s ? " active" : "");
           b.textContent = s;
-          b.title = "Set width to " + s + "/12";
+          b.title = edT("editableDeck.setWidthTo", { n: s });
           b.addEventListener("click", function () { setSpan(card.id, s); });
           spans.appendChild(b);
         });
@@ -431,7 +434,7 @@
         var hide = document.createElement("button");
         hide.type = "button";
         hide.className = "edit-hide";
-        hide.title = "Hide card";
+        hide.title = edT("editableDeck.hideCard");
         hide.innerHTML = '<span data-icon="eye-off"></span>';
         hide.addEventListener("click", function () { setHidden(card.id, true); });
         chrome.appendChild(hide);
@@ -463,15 +466,15 @@
 
       tray.innerHTML =
         '<div class="deck-tray-section">' +
-          '<div class="deck-tray-eyebrow">HIDDEN (' + hidden.length + ')</div>' +
+          '<div class="deck-tray-eyebrow">' + esc(edT("editableDeck.hiddenEyebrow", { n: hidden.length })) + '</div>' +
           (hidden.length === 0
-            ? '<div class="deck-tray-hint">All cards are visible. Hide a card with the eye icon to stash it here.</div>'
+            ? '<div class="deck-tray-hint">' + esc(edT("editableDeck.allCardsVisibleHint")) + '</div>'
             : '<div class="deck-tray-chips" data-role="hidden"></div>') +
         '</div>' +
         '<div class="deck-tray-section">' +
-          '<div class="deck-tray-eyebrow">ADD CARD (' + available.length + ')</div>' +
+          '<div class="deck-tray-eyebrow">' + esc(edT("editableDeck.addCardEyebrow", { n: available.length })) + '</div>' +
           (available.length === 0
-            ? '<div class="deck-tray-hint">Every card type is on the page. Hide some to free up the library.</div>'
+            ? '<div class="deck-tray-hint">' + esc(edT("editableDeck.everyCardOnPageHint")) + '</div>'
             : '<div class="deck-tray-chips" data-role="library"></div>') +
         '</div>';
       container.appendChild(tray);
