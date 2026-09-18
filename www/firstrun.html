@@ -10,6 +10,7 @@
          font-family: -apple-system, system-ui, sans-serif;
          margin: 0; padding: 2rem 1rem; }
   .wizard { max-width: 720px; margin: 0 auto; }
+  .wizard-topbar { display: flex; justify-content: flex-end; margin-bottom: .5rem; }
   .wizard h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
   .wizard .sub { opacity: .65; margin-bottom: 1.5rem; }
   .step { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
@@ -42,43 +43,50 @@
 </head>
 <body>
 <div class="wizard">
-  <h1>First-run Setup</h1>
-  <div class="sub">Welcome. Pick your board and assign pins before the logger starts.</div>
+  <div class="wizard-topbar">
+    <button type="button" class="icon-btn" id="langToggleBtn"
+            data-click="quickLangToggle"
+            title="Switch to Bulgarian" aria-label="Switch to Bulgarian">
+      <span id="langToggleLabel" class="mono" style="font-size:10px;font-weight:700">EN</span>
+    </button>
+  </div>
+  <h1 data-i18n="firstrun.title">First-run Setup</h1>
+  <div class="sub" data-i18n="firstrun.subtitle">Welcome. Pick your board and assign pins before the logger starts.</div>
 
   <div class="step">
-    <h2>1. Select your board</h2>
-    <label for="profile">Board profile</label>
+    <h2 data-i18n="firstrun.step1Title">1. Select your board</h2>
+    <label for="profile" data-i18n="firstrun.profileLabel">Board profile</label>
     <select id="profile">
-      <option value="">— Loading profiles… —</option>
+      <option value="" data-i18n="firstrun.profileLoading">— Loading profiles… —</option>
     </select>
     <div class="hint" id="profileHint"></div>
     <div class="disclaimer hidden" id="customDisclaimer">
       <label>
         <input type="checkbox" id="customAck">
-        I select <strong>Custom</strong> and accept that pin validation is
+        <span data-i18n-html="firstrun.customDisclaimer">I select <strong>Custom</strong> and accept that pin validation is
         disabled. By continuing you accept full responsibility for any
-        boot-mode or hardware damage caused by unsafe pin assignments.
+        boot-mode or hardware damage caused by unsafe pin assignments.</span>
       </label>
     </div>
   </div>
 
   <div class="step">
-    <h2>2. Operating mode</h2>
-    <label for="mode">Mode</label>
+    <h2 data-i18n="firstrun.step2Title">2. Operating mode</h2>
+    <label for="mode" data-i18n="firstrun.modeLabel">Mode</label>
     <select id="mode">
-      <option value="legacy">Legacy — single flow meter with deep sleep</option>
-      <option value="continuous">Continuous — always-on sensor pipeline</option>
-      <option value="hybrid">Hybrid — both flow + sensor pipeline</option>
+      <option value="legacy" data-i18n="firstrun.modeLegacyOption">Legacy — single flow meter with deep sleep</option>
+      <option value="continuous" data-i18n="firstrun.modeContinuousOption">Continuous — always-on sensor pipeline</option>
+      <option value="hybrid" data-i18n="firstrun.modeHybridOption">Hybrid — both flow + sensor pipeline</option>
     </select>
-    <div class="hint">
+    <div class="hint" data-i18n="firstrun.modeHint">
       Legacy and Hybrid require GPIO pin assignments for the flow pipeline.
       Continuous configures sensors individually in the main UI later.
     </div>
   </div>
 
   <div class="step" id="pinsStep">
-    <h2>3. Pin assignments</h2>
-    <div class="hint">
+    <h2 data-i18n="firstrun.step3Title">3. Pin assignments</h2>
+    <div class="hint" data-i18n="firstrun.pinsHint">
       The WiFi-trigger and wake-up buttons drive the device's physical UI
       in every mode. Flow sensor and DS1302 RTC pins are only collected
       for legacy/hybrid modes (hidden when "Continuous" is selected).
@@ -93,10 +101,16 @@
   <div id="status" class="status"></div>
 
   <div class="actions">
-    <button type="button" class="btn btn-primary" id="saveBtn" aria-label="Save configuration and reboot the device">Save &amp; reboot</button>
+    <button type="button" class="btn btn-primary" id="saveBtn"
+            data-i18n="firstrun.saveBtn"
+            data-i18n-aria-label="firstrun.saveBtnAria"
+            aria-label="Save configuration and reboot the device">Save &amp; reboot</button>
   </div>
 </div>
 
+<script src="/js/i18n.js" defer></script>
+<script src="/i18n/common.js" defer></script>
+<script src="/i18n/firstrun.js" defer></script>
 <script src="/js/firstrun.js"></script>
 </body>
 </html>

@@ -5,20 +5,30 @@
 (function () {
   "use strict";
 
+  // t(key, fallback, vars): translated string with an explicit English
+  // fallback, same guarded pattern used across the rest of the app (see
+  // core.js / nodes.js / settings.js). firstrun.html always loads i18n.js
+  // now, but the guard keeps this file safe to load on its own too.
+  function t(key, fallback, vars) {
+    return window.I18n ? I18n.t(key, vars) : fallback;
+  }
+
   // legacyOnly: hidden when mode is "continuous" (those pins only matter
   // for the legacy flow pipeline). Always-shown pins (WiFi-trigger,
   // buttons) drive the device's physical UI in every mode and must be
   // collected even in continuous mode — leaving them unset breaks the
   // AP-trigger button and post-correction buttons.
   var PIN_FIELDS = [
-    { key: "wifiTrigger", label: "WiFi-trigger button",      required: false, legacyOnly: false },
-    { key: "wakeupFF",    label: "Wakeup (FF / manual)",     required: false, legacyOnly: false },
-    { key: "wakeupPF",    label: "Wakeup (PF / auto)",       required: false, legacyOnly: false },
-    { key: "flowSensor",  label: "Flow sensor input",        required: true,  legacyOnly: true  },
-    { key: "rtcCE",       label: "RTC chip-enable (DS1302)", required: false, legacyOnly: true  },
-    { key: "rtcIO",       label: "RTC data IO",              required: false, legacyOnly: true  },
-    { key: "rtcSCLK",     label: "RTC clock",                required: false, legacyOnly: true  },
+    { key: "wifiTrigger", labelKey: "firstrun.pinWifiTrigger", label: "WiFi-trigger button",      required: false, legacyOnly: false },
+    { key: "wakeupFF",    labelKey: "firstrun.pinWakeupFF",    label: "Wakeup (FF / manual)",     required: false, legacyOnly: false },
+    { key: "wakeupPF",    labelKey: "firstrun.pinWakeupPF",    label: "Wakeup (PF / auto)",       required: false, legacyOnly: false },
+    { key: "flowSensor",  labelKey: "firstrun.pinFlowSensor",  label: "Flow sensor input",        required: true,  legacyOnly: true  },
+    { key: "rtcCE",       labelKey: "firstrun.pinRtcCE",       label: "RTC chip-enable (DS1302)", required: false, legacyOnly: true  },
+    { key: "rtcIO",       labelKey: "firstrun.pinRtcIO",       label: "RTC data IO",              required: false, legacyOnly: true  },
+    { key: "rtcSCLK",     labelKey: "firstrun.pinRtcSCLK",     label: "RTC clock",                required: false, legacyOnly: true  },
   ];
+
+  function fieldLabel(f) { return t(f.labelKey, f.label); }
 
   // Escape any text we render into the DOM. The profile name / pin
   // reject reason strings come from the backend; treat them as untrusted.
@@ -43,13 +53,13 @@
         renderProfileSelect();
       })
       .catch(function (e) {
-        showStatus("Failed to load board profiles: " + esc(e.message), "err");
+        showStatus(t("firstrun.statusLoadProfilesFailed", "Failed to load board profiles: {msg}", { msg: esc(e.message) }), "err");
       });
   }
 
   function renderProfileSelect() {
     var sel = $("profile");
-    sel.innerHTML = "<option value=\"\">— Choose a board —</option>";
+    sel.innerHTML = "<option value=\"\">" + esc(t("firstrun.chooseBoard", "— Choose a board —")) + "</option>";
     state.profiles.forEach(function (p) {
       var opt = document.createElement("option");
       opt.value = p.id;
@@ -65,15 +75,20 @@
     var hint = $("profileHint");
     var disc = $("customDisclaimer");
     if (state.selectedProfile && state.selectedProfile.id === "custom") {
-      hint.textContent = "Validation disabled. Any GPIO 0–48 allowed.";
+      hint.textContent = t("firstrun.customValidationOff", "Validation disabled. Any GPIO 0–48 allowed.");
       disc.classList.remove("hidden");
     } else if (state.selectedProfile) {
-      var summary = "Strap: " + (state.selectedProfile.strapPins.join(",") || "none") +
-                    "  •  USB: " + (state.selectedProfile.usbPins.join(",") || "none") +
-                    "  •  max GPIO: " + state.selectedProfile.maxGpio;
+      var noneWord = t("firstrun.none", "none");
+      var summary = t("firstrun.hintSummary", "Strap: {strap}  •  USB: {usb}  •  max GPIO: {max}", {
+        strap: state.selectedProfile.strapPins.join(",") || noneWord,
+        usb: state.selectedProfile.usbPins.join(",") || noneWord,
+        max: state.selectedProfile.maxGpio,
+      });
       // Only board-specific profiles carry this; older firmware omits the key.
       var absent = state.selectedProfile.absentPins || [];
-      if (absent.length) summary += "  •  no header pad: " + absent.join(",");
+      if (absent.length) {
+        summary += t("firstrun.hintNoHeaderPad", "  •  no header pad: {pins}", { pins: absent.join(",") });
+      }
       hint.textContent = summary;
       disc.classList.add("hidden");
       $("customAck").checked = false;
@@ -89,7 +104,7 @@
     grid.innerHTML = "";
     PIN_FIELDS.forEach(function (f) {
       var labelEl = document.createElement("label");
-      labelEl.textContent = f.label + (f.required ? " *" : "");
+      labelEl.textContent = fieldLabel(f) + (f.required ? " *" : "");
       labelEl.setAttribute("for", "pin-" + f.key);
       labelEl.dataset.legacyOnly = f.legacyOnly ? "1" : "0";
       var input = document.createElement("input");
@@ -115,17 +130,17 @@
   // Mirror of isPinAllowed() in src/core/BoardProfiles.cpp. Kept in sync
   // by the GET /api/board-profiles response containing the same lists.
   function pinReason(profile, pin) {
-    if (!profile)           return { ok: false, reason: "no board profile selected" };
-    if (pin === -1)         return { ok: true,  reason: "unassigned (optional)" };
-    if (pin < 0)            return { ok: false, reason: "negative GPIO" };
-    if (pin > profile.maxGpio) return { ok: false, reason: "GPIO > " + profile.maxGpio + " for this board" };
-    if (profile.id === "custom") return { ok: true, reason: "custom — validation off" };
-    if (inList(profile.strapPins,    pin)) return { ok: false, reason: "bootstrap pin (boot-mode risk)" };
-    if (inList(profile.usbPins,      pin)) return { ok: false, reason: "USB CDC pin (D+/D-)" };
-    if (inList(profile.flashPins,    pin)) return { ok: false, reason: "SPI flash bus pin" };
-    if (inList(profile.reservedPins, pin)) return { ok: false, reason: "UART0 console (you would lose serial debug)" };
-    if (inList(profile.absentPins,   pin)) return { ok: false, reason: "not broken out on this board" };
-    return { ok: true, reason: "ok" };
+    if (!profile)           return { ok: false, reason: t("firstrun.reasonNoProfile", "no board profile selected") };
+    if (pin === -1)         return { ok: true,  reason: t("firstrun.reasonUnassigned", "unassigned (optional)") };
+    if (pin < 0)            return { ok: false, reason: t("firstrun.reasonNegative", "negative GPIO") };
+    if (pin > profile.maxGpio) return { ok: false, reason: t("firstrun.reasonMaxGpio", "GPIO > {max} for this board", { max: profile.maxGpio }) };
+    if (profile.id === "custom") return { ok: true, reason: t("firstrun.reasonCustomOff", "custom — validation off") };
+    if (inList(profile.strapPins,    pin)) return { ok: false, reason: t("firstrun.reasonBootstrap", "bootstrap pin (boot-mode risk)") };
+    if (inList(profile.usbPins,      pin)) return { ok: false, reason: t("firstrun.reasonUsbCdc", "USB CDC pin (D+/D-)") };
+    if (inList(profile.flashPins,    pin)) return { ok: false, reason: t("firstrun.reasonSpiFlash", "SPI flash bus pin") };
+    if (inList(profile.reservedPins, pin)) return { ok: false, reason: t("firstrun.reasonUart0", "UART0 console (you would lose serial debug)") };
+    if (inList(profile.absentPins,   pin)) return { ok: false, reason: t("firstrun.reasonAbsent", "not broken out on this board") };
+    return { ok: true, reason: t("firstrun.reasonOk", "ok") };
   }
 
   function revalidatePin(key) {
@@ -142,7 +157,7 @@
         if (k === key) continue;
         var other = parseInt($("pin-" + k).value, 10);
         if (other === pin) {
-          res = { ok: false, reason: "duplicate of " + PIN_FIELDS[i].label };
+          res = { ok: false, reason: t("firstrun.reasonDuplicate", "duplicate of {label}", { label: fieldLabel(PIN_FIELDS[i]) }) };
           break;
         }
       }
@@ -177,9 +192,9 @@
 
   function onSave() {
     var profile = state.selectedProfile;
-    if (!profile) { showStatus("Pick a board profile first.", "err"); return; }
+    if (!profile) { showStatus(t("firstrun.statusPickProfile", "Pick a board profile first."), "err"); return; }
     if (profile.id === "custom" && !$("customAck").checked) {
-      showStatus("Check the Custom acknowledgement to proceed.", "err");
+      showStatus(t("firstrun.statusCheckCustomAck", "Check the Custom acknowledgement to proceed."), "err");
       return;
     }
     var mode = $("mode").value;
@@ -195,17 +210,17 @@
       if (isNaN(pin)) pin = -1;
       if (f.required && pin === -1) {
         $("msg-" + f.key).className = "err";
-        $("msg-" + f.key).textContent = "required";
+        $("msg-" + f.key).textContent = t("firstrun.reasonRequired", "required");
         allOk = false;
       }
       var msgEl = $("msg-" + f.key);
       if (msgEl && msgEl.className === "err") allOk = false;
       body.pins[f.key] = pin;
     });
-    if (!allOk) { showStatus("Fix the highlighted pins above.", "err"); return; }
+    if (!allOk) { showStatus(t("firstrun.statusFixPins", "Fix the highlighted pins above."), "err"); return; }
 
     $("saveBtn").disabled = true;
-    showStatus("Saving and rebooting…", "ok");
+    showStatus(t("firstrun.statusSaving", "Saving and rebooting…"), "ok");
 
     fetch("/api/firstrun", {
       method: "POST",
@@ -213,20 +228,20 @@
       body: JSON.stringify(body),
     })
       .then(function (r) {
-        return r.text().then(function (t) {
-          var data; try { data = JSON.parse(t); } catch (e) { data = { ok: false, error: t }; }
+        return r.text().then(function (respText) {
+          var data; try { data = JSON.parse(respText); } catch (e) { data = { ok: false, error: respText }; }
           if (!data.ok) {
             $("saveBtn").disabled = false;
-            showStatus("Error: " + esc(data.error || ("HTTP " + r.status)), "err");
+            showStatus(t("firstrun.statusError", "Error: {error}", { error: esc(data.error || ("HTTP " + r.status)) }), "err");
             return;
           }
-          showStatus("Saved. Device is rebooting — this page will reload in 8 seconds.", "ok");
+          showStatus(t("firstrun.statusSaved", "Saved. Device is rebooting — this page will reload in 8 seconds."), "ok");
           setTimeout(function () { location.href = "/"; }, 8000);
         });
       })
       .catch(function (e) {
         $("saveBtn").disabled = false;
-        showStatus("Network error: " + esc(e.message), "err");
+        showStatus(t("firstrun.statusNetworkError", "Network error: {msg}", { msg: esc(e.message) }), "err");
       });
   }
 
@@ -236,6 +251,15 @@
     revalidateAllPins();
     $("mode").onchange = onModeChange;
     $("saveBtn").onclick = onSave;
+    // firstrun.html doesn't load core.js, so the data-click delegation
+    // dispatcher (installEventDispatcher() in core.js) never runs here.
+    // Wire the lang-toggle button directly instead.
+    var langBtn = $("langToggleBtn");
+    if (langBtn) {
+      langBtn.onclick = function () {
+        if (window.I18n) I18n.quickLangToggle();
+      };
+    }
     onModeChange();
     loadProfiles();
   });
