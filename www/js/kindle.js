@@ -1538,6 +1538,19 @@ function kindleInit() {
 // Through the dispatcher's allowlist, not on window: core.js routes every
 // data-click and data-change through Handlers so injected markup cannot reach
 // an arbitrary global, and a handler that is only global is a dead button.
+// The zone rows, the panel and the cadence/layout sentences are built as
+// strings with kdT()/I18n.t() baked in at render time, so I18n.apply()'s
+// data-i18n walk cannot reach them. Redrawn from the working copy — never
+// re-fetched — so a language switch cannot discard unsaved edits.
+document.addEventListener("i18n:change", function () {
+  if (!kdLoaded || !document.getElementById("kd-zones")) return;
+  kdRenderZones();
+  kdRenderPreview();
+  kdCadenceRender();
+  kdLayoutRender();
+  kdDirtyRefresh();
+});
+
 registerHandlers({
   kindleRefresh: kindleRefresh,
   kindleSave: kindleSave,

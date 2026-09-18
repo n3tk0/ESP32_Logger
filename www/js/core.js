@@ -697,6 +697,21 @@ document.addEventListener("i18n:change", function () {
     var label = document.getElementById("sstat-conn-label");
     if (label) label.textContent = I18n.t(_connOnline ? "chrome.online" : "chrome.offline");
   }
+
+  // Page bodies built as JS strings (rather than data-i18n markup) keep the
+  // language they were rendered in, so the active page is rebuilt through
+  // its own pageInit. NOT a blanket re-init:
+  //   live    — liveInit() opens an EventSource and a 3 s interval with no
+  //             teardown of its own (navigateTo does that on leaving), so
+  //             re-running it here leaks one of each per switch.
+  //   update  — otaInit() during an in-flight upload is not worth a label.
+  //   nodes / kindle — they subscribe to this event themselves and redraw
+  //             from their working copy, which pageInit would re-fetch over,
+  //             discarding unsaved edits.
+  var SELF_RERENDERS = { live: 1, update: 1, settings_nodes: 1, settings_kindle: 1 };
+  if (currentPage && !SELF_RERENDERS[currentPage]) {
+    try { pageInit(currentPage); } catch (e) { console.warn("i18n re-render failed for", currentPage, e); }
+  }
 });
 
 // WCAG 2.4.1 skip-to-content — programmatic focus instead of #anchor so

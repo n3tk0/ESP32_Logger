@@ -194,11 +194,43 @@ with sync_playwright() as p:
     check(pg.is_visible("#nd-savebar"), "editing a field brings the savebar up")
     dirty = pg.locator("#nd-dirty").inner_text()
     check("1" in dirty, "and it counts one changed node (%r)" % dirty)
+
+    # AN UNSAVED EDIT SURVIVES A RE-RENDER. #nd-rows is replaced wholesale on
+    # every collapse, filter and search, and only the open row has inputs at
+    # all — so a draft read back out of the DOM was lost the moment the row
+    # closed, while the bar stayed up and Save then wrote nothing. Collapse,
+    # filter and search between the edit and the Save so the row is rebuilt
+    # several times over.
+    row(pg, "en:1").click()          # collapse
+    pg.wait_for_timeout(250)
+    check(pg.is_visible("#nd-savebar"), "the bar survives collapsing the edited row")
+    pg.click('#nd-filter button[data-args=\'["espnow"]\']')
+    pg.wait_for_timeout(200)
+    pg.fill("#nd-search", "out")
+    pg.wait_for_timeout(200)
+    pg.fill("#nd-search", "")
+    pg.click('#nd-filter button[data-args=\'["all"]\']')
+    pg.wait_for_timeout(200)
+    row(pg, "en:1").click()          # re-open
+    pg.wait_for_timeout(300)
+    check(pg.input_value("#nd-label-1") == "garden",
+          "and the edit itself survives, rather than reverting to the device's value (%r)"
+          % pg.input_value("#nd-label-1"))
+    dirty = pg.locator("#nd-dirty").inner_text()
+    check("1" in dirty, "with the bar still counting exactly one node (%r)" % dirty)
+
     pg.click('[data-click="nodesSave"]')
     pg.wait_for_timeout(900)
     check("garden" in pg.locator("#nd-rows").inner_text().lower(),
           "a rename round-trips and re-renders")
     check(not pg.is_visible("#nd-savebar"), "and the bar goes away once saved")
+
+    # It reached the DEVICE, not just the list: a Save that re-rendered from
+    # its own drafts would look identical here without having sent anything.
+    saved = pg.evaluate(
+        "fetch('/api/espnow/status').then(function(r){return r.json()})")
+    names = [n["id"] for n in saved.get("nodes", [])]
+    check("garden" in names, "and the device holds the new name (%r)" % names)
 
     # ── Forget, with the confirm dialog accepted ─────────────────────────────
     pg.on("dialog", lambda d: d.accept())
@@ -215,6 +247,25 @@ with sync_playwright() as p:
     stats = pg.locator("#nd-stats").inner_text()
     check("1528" in stats, "the accepted-frame counter is shown")
     check("bad pairing signature" in stats, "the failure counters are labelled")
+
+    # ── Switching language re-renders what was built as strings ─────────────
+    # The rows are assembled with I18n.t() baked in at render time, so
+    # I18n.apply()'s data-i18n walk cannot reach them: without a re-render on
+    # i18n:change the page sat half-translated (Bulgarian chrome, English
+    # rows) until it was navigated away from and back.
+    before = pg.locator("#nd-rows").inner_text().lower()
+    check("online" in before, "the rows start in English")
+    pg.click("#langToggleBtn")
+    pg.wait_for_timeout(500)
+    after = pg.locator("#nd-rows").inner_text().lower()
+    check("онлайн" in after or "офлайн" in after,
+          "switching language re-renders the generated rows (%r)" % after[:60])
+    check(pg.locator("#nd-kpi-total-d").inner_text() != "",
+          "and the KPI line survives the switch")
+    pg.click("#langToggleBtn")       # back to English for any later assertions
+    pg.wait_for_timeout(500)
+    check("online" in pg.locator("#nd-rows").inner_text().lower(),
+          "and switching back returns them to English")
 
     shot = os.environ.get("SCREENSHOT")
     if shot:

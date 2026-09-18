@@ -16,7 +16,7 @@ I18n.register("settingsOta", {
     uploadFirmware: "Upload firmware",
     wrongFirmwareWarning: "Upload the correct <code>.bin</code> file. Wrong firmware will require USB recovery.",
     chooseFirmware: "Choose firmware (.bin)",
-    dragDrop: "or drag &amp; drop here",
+    dragDrop: "or drag & drop here",
     flashFirmware: "Flash firmware",
     preparing: "Preparing…",
 

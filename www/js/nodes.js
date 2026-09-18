@@ -26,7 +26,6 @@ var ndList = [];              // merged rows, rebuilt by ndMerge()
 var ndFilterState = "all";
 var ndSearchQuery = "";
 var ndOpenKey = null;         // currently expanded row's key, or null
-var ndBase = "{}";            // dirty-tracking snapshot baseline
 var ndPairTimer = null;
 
 function ndT(key, vars) { return window.I18n ? I18n.t(key, vars) : key; }
@@ -270,12 +269,12 @@ function ndDetailHtml(n) {
     '<div class="kd-fields" style="margin-bottom:12px">' +
       '<div class="field">' +
         '<label class="field-label" for="nd-label-' + r.node_id + '">' + esc(ndT("nodes.nameLabel")) + "</label>" +
-        '<input class="input" id="nd-label-' + r.node_id + '" data-nd-node="' + r.node_id + '" data-nd-field="label" maxlength="16" value="' + esc(n.name) + '" data-change="nodesFieldInput" data-input="nodesFieldInput">' +
+        '<input class="input" id="nd-label-' + r.node_id + '" data-nd-node="' + r.node_id + '" data-nd-field="label" maxlength="16" value="' + esc(ndFieldValue(r.node_id, "label", n.name)) + '" data-change="nodesFieldInput" data-input="nodesFieldInput">' +
         '<p class="hint">' + esc(ndT("nodes.renameHint")) + "</p>" +
       "</div>" +
       '<div class="field">' +
         '<label class="field-label" for="nd-iv-' + r.node_id + '">' + esc(ndT("nodes.intervalLabel")) + "</label>" +
-        '<input class="input" type="number" id="nd-iv-' + r.node_id + '" data-nd-node="' + r.node_id + '" data-nd-field="interval" min="10" max="65535" value="' + r.interval + '" data-change="nodesFieldInput" data-input="nodesFieldInput">' +
+        '<input class="input" type="number" id="nd-iv-' + r.node_id + '" data-nd-node="' + r.node_id + '" data-nd-field="interval" min="10" max="65535" value="' + esc(ndFieldValue(r.node_id, "interval", r.interval)) + '" data-change="nodesFieldInput" data-input="nodesFieldInput">' +
       "</div>" +
     "</div>" +
     '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
@@ -409,19 +408,73 @@ function nodesForget(nodeId, label) {
 }
 
 // ── Savebar: label/interval per ESP-NOW node + the offline-threshold field ─
+//
+// DRAFTS LIVE OUTSIDE THE ROW DOM. ndRenderRows() replaces #nd-rows wholesale
+// on every filter, search and row toggle, and only the OPEN row carries input
+// elements at all — so reading the unsaved state back out of the inputs (which
+// is what this did first) lost it the moment the reader collapsed the row they
+// had just typed into, or opened a second one, while the savebar stayed up
+// claiming otherwise and Save then found nothing to send and wrote nothing.
+// That is the same "reported success, stored nothing" failure the e-ink page's
+// one-Save redesign exists to end, so it is kept in a model instead: the
+// inputs render FROM ndDrafts, and never define it.
+var ndDrafts = {};          // node_id → {label?, interval?} — unsaved edits
+var ndOfflineDraft = null;  // unsaved offline threshold, or null when untouched
 
-function ndSnapshot() {
-  var nodes = {};
-  document.querySelectorAll("[data-nd-node]").forEach(function (el) {
-    var id = el.getAttribute("data-nd-node");
-    nodes[id] = nodes[id] || {};
-    nodes[id][el.getAttribute("data-nd-field")] = el.value;
-  });
-  var oiv = document.getElementById("nd-offline-iv");
-  return JSON.stringify({ nodes: nodes, offlineIv: oiv ? oiv.value : null });
+// What the device last told us a field held — what a draft is compared against.
+function ndNodeBaseline(id) {
+  for (var i = 0; i < ndList.length; i++) {
+    var n = ndList[i];
+    if (n.transport === "espnow" && String(n.raw.node_id) === String(id)) {
+      return { label: n.name, interval: String(n.raw.interval) };
+    }
+  }
+  return null;
+}
+
+// The value a field should render with: the unsaved edit if there is one,
+// otherwise what the device holds.
+function ndFieldValue(id, field, fallback) {
+  var d = ndDrafts[id];
+  return (d && d[field] !== undefined) ? d[field] : fallback;
+}
+
+// Every node whose draft actually differs from the device, with the full set
+// of values to send (a draft may hold only one of the two fields).
+function ndDirtyNodes() {
+  var out = [];
+  for (var id in ndDrafts) {
+    var base = ndNodeBaseline(id);
+    if (!base) continue;   // forgotten since the edit — nothing to save it to
+    var d = ndDrafts[id];
+    var merged = { label: base.label, interval: base.interval };
+    var changed = false;
+    for (var f in d) {
+      if (String(d[f]) !== String(base[f])) changed = true;
+      merged[f] = d[f];
+    }
+    if (changed) out.push({ id: id, label: merged.label, interval: merged.interval });
+  }
+  return out;
+}
+
+function ndOfflineDirty() {
+  if (ndOfflineDraft === null) return false;
+  var base = ndEspnowData && ndEspnowData.offline_intervals;
+  return base !== undefined && String(ndOfflineDraft) !== String(base);
 }
 
 function nodesFieldInput() {
+  var el = (this && this.nodeType === 1) ? this : null;
+  if (el) {
+    var id = el.getAttribute("data-nd-node");
+    if (id) {
+      ndDrafts[id] = ndDrafts[id] || {};
+      ndDrafts[id][el.getAttribute("data-nd-field")] = el.value;
+    } else if (el.id === "nd-offline-iv") {
+      ndOfflineDraft = el.value;
+    }
+  }
   ndDirtyRefresh();
 }
 
@@ -429,18 +482,10 @@ function ndDirtyRefresh() {
   var bar = document.getElementById("nd-savebar");
   var out = document.getElementById("nd-dirty");
   if (!bar || !out) return;
-  var now = ndSnapshot();
-  if (now === ndBase) { bar.hidden = true; return; }
 
-  var a = JSON.parse(ndBase), b = JSON.parse(now);
-  var dirtyNodes = 0, dirtySettings = 0;
-  for (var id in b.nodes) {
-    var av = a.nodes[id] || {}, bv = b.nodes[id];
-    var changed = false;
-    for (var f in bv) { if (String(av[f]) !== String(bv[f])) changed = true; }
-    if (changed) dirtyNodes++;
-  }
-  if (String(a.offlineIv) !== String(b.offlineIv)) dirtySettings++;
+  var dirtyNodes = ndDirtyNodes().length;
+  var dirtySettings = ndOfflineDirty() ? 1 : 0;
+  if (!dirtyNodes && !dirtySettings) { bar.hidden = true; return; }
 
   var parts = [];
   if (dirtyNodes) parts.push(ndT(dirtyNodes === 1 ? "nodes.unsavedNode" : "nodes.unsavedNodeP", { n: dirtyNodes }));
@@ -450,28 +495,26 @@ function ndDirtyRefresh() {
 }
 
 function nodesSave() {
-  var a = JSON.parse(ndBase), b = JSON.parse(ndSnapshot());
   var calls = [];
-
-  for (var id in b.nodes) {
-    var av = a.nodes[id] || {}, bv = b.nodes[id];
-    var changed = Object.keys(bv).some(function (f) { return String(av[f]) !== String(bv[f]); });
-    if (!changed) continue;
+  ndDirtyNodes().forEach(function (n) {
     var body = new URLSearchParams();
-    body.set("node_id", id);
-    if (bv.label !== undefined) body.set("label", bv.label);
-    if (bv.interval !== undefined) body.set("interval", bv.interval);
+    body.set("node_id", n.id);
+    body.set("label", n.label);
+    body.set("interval", n.interval);
     calls.push(postWithCsrf("/api/espnow/node", { body: body, headers: { "Content-Type": "application/x-www-form-urlencoded" } })
       .then(function (r) { return r.json(); }));
-  }
-  if (String(a.offlineIv) !== String(b.offlineIv) && b.offlineIv !== null) {
+  });
+  if (ndOfflineDirty()) {
     var cbody = new URLSearchParams();
-    cbody.set("offline_intervals", b.offlineIv);
+    cbody.set("offline_intervals", ndOfflineDraft);
     calls.push(postWithCsrf("/api/espnow/config", { body: cbody, headers: { "Content-Type": "application/x-www-form-urlencoded" } })
       .then(function (r) { return r.json(); }));
   }
 
-  if (!calls.length) return;
+  // Nothing to send means the bar was lying about something being unsaved —
+  // put it right rather than leaving a Save button that does nothing.
+  if (!calls.length) { ndDirtyRefresh(); return; }
+
   Promise.all(calls).then(function (results) {
     var failed = results.filter(function (r) { return !r || !r.ok; });
     if (failed.length) {
@@ -484,6 +527,8 @@ function nodesSave() {
 }
 
 function nodesDiscard() {
+  ndDrafts = {};
+  ndOfflineDraft = null;
   nodesRefresh();
 }
 
@@ -513,6 +558,11 @@ function nodesRefresh() {
   return Promise.all([ndFetchEspnow(), ndFetchRemote()]).then(function (res) {
     ndEspnowData = res[0];
     ndRemoteData = res[1];
+    // A fresh read from the device is the new baseline, so nothing is
+    // outstanding against it any more — including after a save, where these
+    // drafts are exactly what was just written.
+    ndDrafts = {};
+    ndOfflineDraft = null;
     ndMerge();
     ndRenderKpis();
     ndRenderRows();
@@ -533,7 +583,6 @@ function nodesRefresh() {
     var oiv = document.getElementById("nd-offline-iv");
     if (oiv && ndEspnowData && ndEspnowData.offline_intervals) oiv.value = ndEspnowData.offline_intervals;
 
-    ndBase = ndSnapshot();
     var bar = document.getElementById("nd-savebar");
     if (bar) bar.hidden = true;
 
@@ -553,6 +602,20 @@ function nodesInit() {
   if (search) search.value = "";
   nodesRefresh();
 }
+
+// Rows, KPIs and the diagnostics grid are built as strings with I18n.t()
+// baked in at render time, so I18n.apply()'s data-i18n walk cannot reach
+// them — without this a language switch left this page half-translated
+// until it was navigated away from and back. Re-rendered from the cached
+// payload rather than re-fetched, so unsaved drafts survive the switch.
+document.addEventListener("i18n:change", function () {
+  if (!document.getElementById("nd-rows")) return;
+  ndRenderKpis();
+  ndRenderRows();
+  ndRenderPairState();
+  ndRenderDiag();
+  ndDirtyRefresh();
+});
 
 registerHandlers({
   nodesRefresh: nodesRefresh,

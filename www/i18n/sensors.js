@@ -245,7 +245,7 @@ I18n.register("coreLogicPage", {
     tagRecommended: "RECOMMENDED",
     modeHybrid: "Hybrid",
     modeHybridDesc: "Water logger + sensor pipeline running together.",
-    sleepTitle: "Power &amp; Sleep",
+    sleepTitle: "Power & Sleep",
     contIdleLabel: "Idle timeout (ms)",
     contIdleTip: "Milliseconds without activity before CPU + WiFi power is reduced.",
     contCpuLabel: "Idle CPU (MHz)",
@@ -283,7 +283,7 @@ I18n.register("coreLogicPage", {
     httpCheckbox: "HTTP POST",
     scCheckbox: "Sensor.Community",
     osmCheckbox: "openSenseMap",
-    saveRestart: "Save &amp; Restart",
+    saveRestart: "Save & Restart",
   },
   bg: {
     title: "Основна логика",
@@ -373,7 +373,7 @@ I18n.register("exportPage", {
     osmTokenTitle: "OpenSenseMap access token: alphanumeric, 20-128 chars.",
     osmTokenHint: "⚠ Tokens stored on device in plaintext (LittleFS). Treat this device like a long-lived API key holder; revoke and rotate via opensensemap.org if the device is lost or re-flashed.",
     osmSensorIdsLabel: "Sensor IDs — copy from your senseBox sensors:",
-    saveRestart: "Save &amp; Restart",
+    saveRestart: "Save & Restart",
   },
   bg: {
     title: "Export",

@@ -16,7 +16,7 @@ I18n.register("settingsHub", {
     deviceSub: "Name · ID · default storage view",
     platform: "Platform",
     platformSub: "Mode · pins · sensors · modules",
-    netime: "Network &amp; Time",
+    netime: "Network & Time",
     netimeSub: "WiFi · AP · hostname · NTP · timezone",
     export: "Export",
     exportSub: "MQTT · HTTP · openSenseMap · webhook",
