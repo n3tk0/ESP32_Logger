@@ -30,23 +30,24 @@ function sdInit() {
       // System Info card — matches original .ino "System Info" card content
       var info = document.getElementById("sysInfo");
       if (info) {
+        var sdT = window.I18n ? I18n.t : function (k) { return k; };
         info.innerHTML =
-          '<div><strong>Firmware</strong><div class="text-primary">' +
+          "<div><strong>" + sdT("settingsPages.devFirmware") + '</strong><div class="text-primary">' +
           esc(d.version || "-") +
           "</div></div>" +
-          "<div><strong>Boot Count</strong><div>" +
+          "<div><strong>" + sdT("settingsPages.devBootCount") + "</strong><div>" +
           esc(d.boot || 0) +
           "</div></div>" +
-          "<div><strong>Mode</strong><div>" +
+          "<div><strong>" + sdT("settingsPages.devMode") + "</strong><div>" +
           esc(d.mode || "-") +
           "</div></div>" +
-          "<div><strong>Free Heap</strong><div>" +
+          "<div><strong>" + sdT("settingsPages.devFreeHeap") + "</strong><div>" +
           fmtBytes(d.heap) +
           "</div></div>" +
-          "<div><strong>CPU</strong><div>" +
+          "<div><strong>" + sdT("settingsPages.devCpu") + "</strong><div>" +
           esc(d.cpu || "-") +
           " MHz</div></div>" +
-          "<div><strong>Chip</strong><div>" +
+          "<div><strong>" + sdT("settingsPages.devChip") + "</strong><div>" +
           esc(d.chip || "-") +
           "</div></div>";
       }
@@ -54,14 +55,15 @@ function sdInit() {
 }
 
 function regenDevId() {
-  if (!confirm("Generate new ID based on MAC address?")) return;
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  if (!confirm(t("settingsPages.confirmRegenId"))) return;
   getCsrfToken().then(function (token) {
     var url = "/api/regen-id" + (token ? "?csrf=" + encodeURIComponent(token) : "");
     fetchWithTimeout(url, { method: "POST" }, 30000)
       .then(function (r) {
         if (r.status === 403) {
           window.__csrfToken = null;
-          throw new Error("CSRF token rejected — refresh the page and retry");
+          throw new Error(t("settingsPages.errCsrfRejected"));
         }
         return r.text();
       })
@@ -71,10 +73,10 @@ function regenDevId() {
           inp.value = id.trim();
           inp.disabled = false;
         }
-        showToast("New ID generated: " + id.trim() + ". Click Save to apply.", "success");
+        showToast(t("settingsPages.newIdGenerated", { id: id.trim() }), "success");
       })
       .catch(function (e) {
-        showToast("Error: " + e, "error");
+        showToast(t("settingsPages.errGeneric", { err: e }), "error");
       });
   });
 }
@@ -126,7 +128,8 @@ function changelogClose(ev) {
 function changelogLoad() {
   var el = document.getElementById("changelog");
   if (!el) return;
-  el.innerHTML = "<div class='text-muted' style='padding:.5rem'>Loading…</div>";
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  el.innerHTML = "<div class='text-muted' style='padding:.5rem'>" + esc(t("common.loading")) + "</div>";
 
   fetchWithTimeout("/api/changelog", {}, 15000)
     .then(function (r) {
@@ -169,15 +172,15 @@ function changelogLoad() {
 
       if (inVer) html += "</ul></div>";
       if (!hasEntries)
-        html += "<div class='text-muted'>No entries found.</div>";
+        html += "<div class='text-muted'>" + esc(t("settingsPages.devChangelogNoEntries")) + "</div>";
       el.innerHTML = html;
     })
     .catch(function () {
       changelogLoaded = false; // allow retry on next open
       el.innerHTML =
         "<div style='display:flex;justify-content:flex-end;margin-bottom:.5rem'>" +
-        '<button type="button" class="btn" data-click="changelogClose">✖ Close</button></div>' +
-        "<div class='alert alert-warning'>Changelog not found. Upload <code>/changelog.txt</code> to LittleFS.</div>";
+        '<button type="button" class="btn" data-click="changelogClose">✖ ' + esc(t("common.close")) + '</button></div>' +
+        "<div class='alert alert-warning'>" + t("settingsPages.devChangelogNotFound") + "</div>";
     });
 }
 
@@ -186,71 +189,77 @@ function changelogLoad() {
 // ============================================================================
 // First settings page migrated to schema-driven Form.bind (Pass 4 A3).
 // The HTML partial provides only #hw-host; the entire form is rendered
-// from HW_SCHEMA against CFG.hardware.
-var HW_SCHEMA = {
-  saveUrl: "/save_hardware",
-  restart: true,
-  confirm: "Settings will be saved and device will restart. Continue?",
-  submitLabel: "💾 Save & Restart",
-  sections: [
-    { title: "💾 Storage", fields: [
-        { name: "storageType", label: "Type", type: "select", options: [
-            ["0", "LittleFS (Internal)"],
-            ["1", "SD Card (SPI)"],
-        ]},
-        { row: [
-            { name: "pinSdCS",   label: "CS",   type: "number", showWhen: { storageType: "1" } },
-            { name: "pinSdMOSI", label: "MOSI", type: "number", showWhen: { storageType: "1" } },
-            { name: "pinSdMISO", label: "MISO", type: "number", showWhen: { storageType: "1" } },
-            { name: "pinSdSCK",  label: "SCK",  type: "number", showWhen: { storageType: "1" } },
-        ]},
-    ]},
-    { title: "😴 Wakeup Mode", fields: [
-        { name: "wakeupMode", label: "Button Active Level", type: "select",
-          hint: "HIGH = button connects to VCC, LOW = to GND.",
-          options: [
-            ["0", "Active HIGH (VCC)"],
-            ["1", "Active LOW (GND)"],
-        ]},
-        { name: "debounceMs", label: "Debounce (ms)", type: "number",
-          min: 20, max: 500,
-          hint: "Higher = fewer false triggers but slower response." },
-    ]},
-    { title: "🔘 Pin Configuration",
-      hint: "GPIO pin numbers for ESP32-C3",
-      fields: [
-        { row: [
-            { name: "pinWifiTrigger", label: "WiFi Trigger",   type: "number" },
-            { name: "pinWakeupFF",    label: "Full Flush Btn", type: "number" },
-            { name: "pinWakeupPF",    label: "Part Flush Btn", type: "number" },
-            { name: "pinFlowSensor",  label: "Flow Sensor",    type: "number" },
-        ]},
-    ]},
-    { title: "🕐 RTC DS1302", fields: [
-        { row: [
-            { name: "pinRtcCE",   label: "CE (RST)",   type: "number" },
-            { name: "pinRtcIO",   label: "IO (DAT)",   type: "number" },
-            { name: "pinRtcSCLK", label: "CLK (SCLK)", type: "number" },
-        ]},
-    ]},
-    { title: "⚡ CPU Frequency", fields: [
-        { name: "cpuFreqMHz", type: "select", options: [
-            ["80",  "80 MHz"],
-            ["160", "160 MHz"],
-        ]},
-    ]},
-    // Flow-meter LED diagnostics, migrated here when the standalone
-    // settings_flowmeter page was retired (PR #105 follow-up). The fields
-    // live on config.flowMeter; hwInit() merges them into the binding object.
-    { title: "💧 Flow Meter Test Mode", fields: [
-        { name: "testMode", label: "Enable LED blink on flow pulse", type: "checkbox",
-          hint: "Drives the WiFi-trigger pin while pulses are detected. Useful for verifying flow-sensor wiring." },
-        { name: "blinkDuration", label: "Blink duration (ms)", type: "number",
-          min: 50, max: 2000,
-          hint: "Controls how fast the indicator LED blinks while active." },
-    ]},
-  ],
-};
+// from hwSchema() against CFG.hardware.
+// Built by a function (not a static object) so the labels/hints pick up
+// the current I18n language every time hwInit() runs (Form.bind re-renders
+// from scratch on every page visit — same pattern as hubStatusInit()).
+function hwSchema() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  return {
+    saveUrl: "/save_hardware",
+    restart: true,
+    confirm: t("settingsPages.hwConfirmSave"),
+    submitLabel: "💾 " + t("settingsPages.hwSubmitSaveRestart"),
+    sections: [
+      { title: "💾 " + t("settingsPages.hwSectionStorage"), fields: [
+          { name: "storageType", label: t("settingsPages.hwStorageType"), type: "select", options: [
+              ["0", t("settingsPages.hwStorageLittleFs")],
+              ["1", t("settingsPages.hwStorageSdSpi")],
+          ]},
+          { row: [
+              { name: "pinSdCS",   label: t("settingsPages.hwCs"),   type: "number", showWhen: { storageType: "1" } },
+              { name: "pinSdMOSI", label: t("settingsPages.hwMosi"), type: "number", showWhen: { storageType: "1" } },
+              { name: "pinSdMISO", label: t("settingsPages.hwMiso"), type: "number", showWhen: { storageType: "1" } },
+              { name: "pinSdSCK",  label: t("settingsPages.hwSck"),  type: "number", showWhen: { storageType: "1" } },
+          ]},
+      ]},
+      { title: "😴 " + t("settingsPages.hwSectionWakeup"), fields: [
+          { name: "wakeupMode", label: t("settingsPages.hwButtonActiveLevel"), type: "select",
+            hint: t("settingsPages.hwWakeupHint"),
+            options: [
+              ["0", t("settingsPages.hwActiveHigh")],
+              ["1", t("settingsPages.hwActiveLow")],
+          ]},
+          { name: "debounceMs", label: t("settingsPages.hwDebounce"), type: "number",
+            min: 20, max: 500,
+            hint: t("settingsPages.hwDebounceHint") },
+      ]},
+      { title: "🔘 " + t("settingsPages.hwSectionPins"),
+        hint: t("settingsPages.hwPinsHint"),
+        fields: [
+          { row: [
+              { name: "pinWifiTrigger", label: t("settingsPages.hwWifiTrigger"),  type: "number" },
+              { name: "pinWakeupFF",    label: t("settingsPages.hwFullFlushBtn"), type: "number" },
+              { name: "pinWakeupPF",    label: t("settingsPages.hwPartFlushBtn"), type: "number" },
+              { name: "pinFlowSensor",  label: t("settingsPages.hwFlowSensor"),   type: "number" },
+          ]},
+      ]},
+      { title: "🕐 " + t("settingsPages.hwSectionRtc"), fields: [
+          { row: [
+              { name: "pinRtcCE",   label: t("settingsPages.hwCeRst"),   type: "number" },
+              { name: "pinRtcIO",   label: t("settingsPages.hwIoDat"),   type: "number" },
+              { name: "pinRtcSCLK", label: t("settingsPages.hwClkSclk"), type: "number" },
+          ]},
+      ]},
+      { title: "⚡ " + t("settingsPages.hwSectionCpuFreq"), fields: [
+          { name: "cpuFreqMHz", type: "select", options: [
+              ["80",  "80 MHz"],
+              ["160", "160 MHz"],
+          ]},
+      ]},
+      // Flow-meter LED diagnostics, migrated here when the standalone
+      // settings_flowmeter page was retired (PR #105 follow-up). The fields
+      // live on config.flowMeter; hwInit() merges them into the binding object.
+      { title: "💧 " + t("settingsPages.hwFmSectionTitle"), fields: [
+          { name: "testMode", label: t("settingsPages.hwFmEnableBlink"), type: "checkbox",
+            hint: t("settingsPages.hwFmEnableBlinkHint") },
+          { name: "blinkDuration", label: t("settingsPages.hwBlinkDuration"), type: "number",
+            min: 50, max: 2000,
+            hint: t("settingsPages.hwBlinkDurationHint") },
+      ]},
+    ],
+  };
+}
 
 function hwInit() {
   fetchWithTimeout("/export_settings", {}, 15000)
@@ -271,7 +280,7 @@ function hwInit() {
       hw.testMode      = !!fm.testMode;
       hw.blinkDuration = fm.blinkDuration > 0 ? fm.blinkDuration : 250;
 
-      Form.bind("hw-host", HW_SCHEMA, hw);
+      Form.bind("hw-host", hwSchema(), hw);
 
       var th = (ST && ST.theme) || (CFG && CFG.theme) || {};
       if (th.boardDiagramPath) {
@@ -398,9 +407,10 @@ function themeSave(e, form) {
     }
   }
 
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   var btn = form.querySelector('button[type="submit"]');
   var old = btn.innerHTML;
-  btn.innerHTML = "Saving...";
+  btn.innerHTML = t("settingsPages.saving");
   btn.disabled = true;
 
   function _sendTheme(isRetry) {
@@ -423,16 +433,16 @@ function themeSave(e, form) {
             var m = document.getElementById("th-msg");
             if (m)
               m.innerHTML =
-                '<div class="alert alert-success mt-1 mb-1">Theme saved! Rebooting...</div>';
+                '<div class="alert alert-success mt-1 mb-1">' + esc(t("settingsPages.themeSavedRebooting")) + '</div>';
             setTimeout(function () { location.reload(); }, 1000);
           } else {
-            showToast("Save failed.", "error");
+            showToast(t("settingsPages.saveFailed"), "error");
           }
         })
         .catch(function (err) {
           btn.innerHTML = old;
           btn.disabled = false;
-          showToast("Error: " + err, "error");
+          showToast(t("settingsPages.errGeneric", { err: err }), "error");
         });
     });
   }
@@ -470,12 +480,8 @@ function themeToggleChartPath() {
 }
 
 function themeRestoreDefault() {
-  if (
-    !confirm(
-      "Are you sure you want to restore the default theme colors? This will wipe your custom choices.",
-    )
-  )
-    return;
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  if (!confirm(t("settingsPages.confirmRestoreTheme"))) return;
   var fd = new FormData();
   fd.append("themeMode", "0");
   fd.append("primaryColor", "");
@@ -506,14 +512,14 @@ function themeRestoreDefault() {
         .then(function (d) {
           if (!d) return;
           if (d.ok) {
-            showToast("Theme restored to defaults! Rebooting...", "success");
+            showToast(t("settingsPages.themeRestoredRebooting"), "success");
             location.reload();
           } else {
-            showToast("Failed to restore theme defaults.", "error");
+            showToast(t("settingsPages.themeRestoreFailed"), "error");
           }
         })
         .catch(function () {
-          showToast("Theme restored to defaults! Rebooting...", "success");
+          showToast(t("settingsPages.themeRestoredRebooting"), "success");
           location.reload();
         });
     });
@@ -525,12 +531,15 @@ function themeRestoreDefault() {
 // ══ SETTINGS: NETWORK ══
 // ============================================================================
 function netInit() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   getStatus()
     .then(function (d) {
       ST = d;
       setEl(
         "net-status",
-        d.wifi === "client" ? "Connected: " + (d.network || "") : "AP Mode",
+        d.wifi === "client"
+          ? t("settingsPages.netConnectedTo", { network: d.network || "" })
+          : t("settingsPages.netApModeStatus"),
       );
       var rssiVal = d.rssi !== undefined ? d.rssi : -100;
       var rSvg = getRssiInfo(rssiVal);
@@ -659,9 +668,10 @@ function netToggleStatic() {
 
 // Matches original: function scanWifi() / function checkScanResult()
 function netScanWifi() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   var list = document.getElementById("wifiList");
   if (!list) return;
-  list.innerHTML = "<div class='list-item'>🔍 Scanning…</div>";
+  list.innerHTML = "<div class='list-item'>🔍 " + esc(t("settingsPages.netScanning")) + "</div>";
   list.style.display = "block";
   netScanRetries = 0;
   // /wifi_scan_start is behind requireMutatingAuth (CSRF), so it must be
@@ -672,6 +682,7 @@ function netScanWifi() {
   });
 }
 function netCheckScan() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   fetchWithTimeout("/wifi_scan_result", {}, 15000)
     .then(function (r) {
       return r.json();
@@ -683,11 +694,11 @@ function netCheckScan() {
         netScanRetries++;
         if (netScanRetries < 10) {
           list.innerHTML =
-            "<div class='list-item'>🔍 Scanning… (" +
-            netScanRetries +
-            ")</div>";
+            "<div class='list-item'>🔍 " +
+            esc(t("settingsPages.netScanningTries", { n: netScanRetries })) +
+            "</div>";
           setTimeout(netCheckScan, 1000);
-        } else list.innerHTML = "<div class='list-item'>⏱️ Scan timeout</div>";
+        } else list.innerHTML = "<div class='list-item'>⏱️ " + esc(t("settingsPages.netScanTimeout")) + "</div>";
       } else if (d.error) {
         // FAILED is common on the first poll (radio still settling after the
         // AP_STA switch). Re-kick the guarded start and keep polling within
@@ -695,7 +706,7 @@ function netCheckScan() {
         netScanRetries++;
         if (netScanRetries < 10) {
           list.innerHTML =
-            "<div class='list-item'>🔍 Scanning… (" + netScanRetries + ")</div>";
+            "<div class='list-item'>🔍 " + esc(t("settingsPages.netScanningTries", { n: netScanRetries })) + "</div>";
           postWithCsrf("/wifi_scan_start", { method: "GET" }, 15000).then(
             function () { setTimeout(netCheckScan, 1200); }
           );
@@ -707,7 +718,7 @@ function netCheckScan() {
           list.appendChild(errRow);
         }
       } else if (!d.networks || !d.networks.length) {
-        list.innerHTML = "<div class='list-item'>📶 No networks found</div>";
+        list.innerHTML = "<div class='list-item'>📶 " + esc(t("settingsPages.netNoNetworksFound")) + "</div>";
       } else {
         // Build rows via DOM so SSID content is always text, never HTML.
         list.innerHTML = "";
@@ -737,7 +748,7 @@ function netCheckScan() {
       l.innerHTML = "";
       var row = document.createElement("div");
       row.className = "list-item";
-      row.textContent = "✗ Error: " + e;
+      row.textContent = "✗ " + t("settingsPages.errGeneric", { err: e });
       l.appendChild(row);
     });
 }
@@ -748,8 +759,9 @@ function netCheckScan() {
 var netTestPollTimer = null;
 function netTestPoll(out, tries) {
   if (!out) return;
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   if (tries > 20) {          // 20×600ms ≈ 12s — safely over the 8s server cap
-    out.textContent = "✗ Timed out waiting for result";
+    out.textContent = "✗ " + t("settingsPages.netTestTimedOut");
     out.style.color = "var(--danger)";
     return;
   }
@@ -757,17 +769,17 @@ function netTestPoll(out, tries) {
     .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
     .then(function (d) {
       if (d.state === "success") {
-        out.textContent = "✓ Connected (" + d.rssi + " dBm, " + d.ip + ")";
+        out.textContent = "✓ " + t("settingsPages.netTestConnected", { rssi: d.rssi, ip: d.ip });
         out.style.color = "var(--success)";
       } else if (d.state === "failed") {
-        out.textContent = "✗ " + (d.error || "Failed to connect");
+        out.textContent = "✗ " + (d.error || t("settingsPages.netTestFailedToConnect"));
         out.style.color = "var(--danger)";
       } else if (d.state === "running") {
         netTestPollTimer = setTimeout(function () {
           netTestPoll(out, tries + 1);
         }, 600);
       } else {
-        out.textContent = "Result expired — click Test again";
+        out.textContent = t("settingsPages.netTestResultExpired");
         out.style.color = "var(--text-muted)";
       }
     })
@@ -777,17 +789,18 @@ function netTestPoll(out, tries) {
     });
 }
 function netTestWifi() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   var ssidEl = document.getElementById("net-cSSID");
   var passEl = document.getElementById("net-cPass");
   var out    = document.getElementById("net-testResult");
   var ssid   = ssidEl ? ssidEl.value.trim() : "";
   var pass   = passEl ? passEl.value        : "";
   if (!ssid) {
-    if (out) { out.textContent = "Enter an SSID first"; out.style.color = "var(--danger)"; }
+    if (out) { out.textContent = t("settingsPages.netEnterSsidFirst"); out.style.color = "var(--danger)"; }
     return;
   }
   if (netTestPollTimer) { clearTimeout(netTestPollTimer); netTestPollTimer = null; }
-  if (out) { out.textContent = "🧪 Testing… (up to 8s)"; out.style.color = "var(--text-muted)"; }
+  if (out) { out.textContent = "🧪 " + t("settingsPages.netTesting"); out.style.color = "var(--text-muted)"; }
   fetchWithTimeout("/api/modules/wifi/test", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -799,7 +812,7 @@ function netTestWifi() {
       if (resp.status === 202) {
         netTestPoll(out, 0);
       } else {
-        out.textContent = "✗ " + (resp.body.error || "Start failed");
+        out.textContent = "✗ " + (resp.body.error || t("settingsPages.netTestStartFailed"));
         out.style.color = "var(--danger)";
       }
     })
@@ -814,6 +827,7 @@ function netTestWifi() {
 // ══ SETTINGS: TIME ══
 // ============================================================================
 function timeInit() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   getStatus()
     .then(function (d) {
       ST = d;
@@ -834,23 +848,28 @@ function timeInit() {
         var src = d.timeSource || "unknown";
         if (src === "rtc") {
           status.className = "alert alert-success";
-          status.innerHTML = "✓ RTC";
+          status.innerHTML = "✓ " + esc(t("settingsPages.timeRtcSrc"));
         } else if (src === "ntp") {
           status.className = "alert alert-success";
-          status.innerHTML = "✓ NTP";
+          status.innerHTML = "✓ " + esc(t("settingsPages.timeNtpSrc"));
         } else {
           status.className = "alert alert-" + (rtcPresent ? "error" : "warning");
-          status.innerHTML = rtcPresent ? "✗ RTC Error" : "⚠ Time not set";
+          status.innerHTML = rtcPresent
+            ? "✗ " + esc(t("settingsPages.timeRtcErrorSrc"))
+            : "⚠ " + esc(t("settingsPages.timeNotSetSrc"));
         }
       }
       var detail = document.getElementById("rtcDetail");
       if (detail) {
         if (rtcPresent) {
-          detail.textContent =
-            "Protected: " + (d.rtcProtected ? "Yes" : "No") +
-            " | Running: " + (d.rtcRunning ? "Yes" : "No");
+          detail.textContent = t("settingsPages.timeDetailProtectedRunning", {
+            protected: d.rtcProtected ? t("settingsPages.timeYes") : t("settingsPages.timeNo"),
+            running: d.rtcRunning ? t("settingsPages.timeYes") : t("settingsPages.timeNo"),
+          });
         } else {
-          detail.textContent = "Source: " + (d.timeSource === "ntp" ? "NTP system clock" : "Not set — use NTP or manual set below");
+          detail.textContent = d.timeSource === "ntp"
+            ? t("settingsPages.timeDetailSourceNtp")
+            : t("settingsPages.timeDetailSourceNotSet");
         }
       }
       setChk("time-rtcProt", d.rtcProtected);
@@ -860,8 +879,8 @@ function timeInit() {
           d.wifi === "client" ? "alert alert-success" : "alert alert-warning";
         ntpSt.innerHTML =
           d.wifi === "client"
-            ? "✓ WiFi Connected – NTP available"
-            : "⚠ Not connected (AP mode) – NTP unavailable";
+            ? "✓ " + esc(t("settingsPages.timeNtpWifiConnected"))
+            : "⚠ " + esc(t("settingsPages.timeNtpNotConnected"));
       }
       var dateEl = document.getElementById("date");
       if (dateEl && !dateEl.value)
@@ -881,6 +900,7 @@ function timeInit() {
 
 function timeSetManual(ev) {
   ev.preventDefault();
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   var form = ev.target;
   var fd = new FormData(form);
   postWithCsrf("/set_time", { method: "POST", body: fd }, 30000)
@@ -891,9 +911,9 @@ function timeSetManual(ev) {
       showMsg(
         "time-msg",
         d.ok
-          ? "<div class='alert alert-success'>✓ Time set!</div>"
+          ? "<div class='alert alert-success'>✓ " + esc(t("settingsPages.timeSetOk")) + "</div>"
           : "<div class='alert alert-error'>✗ " +
-              (d.error || "Failed") +
+              esc(d.error || t("settingsPages.genericFailed")) +
               "</div>",
         true,
       );
@@ -903,9 +923,10 @@ function timeSetManual(ev) {
 
 function timeSyncNTP(ev) {
   if (ev) ev.preventDefault();
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   showMsg(
     "time-msg",
-    "<div class='alert alert-info'>Syncing from NTP…</div>",
+    "<div class='alert alert-info'>" + esc(t("settingsPages.timeSyncingFromNtp")) + "</div>",
     true,
   );
   postWithCsrf("/sync_time", { method: "POST" }, 30000)
@@ -913,7 +934,7 @@ function timeSyncNTP(ev) {
     .then(function (d) {
       if (!d.ok) {
         showMsg("time-msg",
-          "<div class='alert alert-error'>✗ NTP sync failed to start</div>",
+          "<div class='alert alert-error'>✗ " + esc(t("settingsPages.timeNtpSyncFailedToStart")) + "</div>",
           true);
         return;
       }
@@ -927,18 +948,18 @@ function timeSyncNTP(ev) {
           .then(function (s) {
             if (s.result === 1) {
               showMsg("time-msg",
-                "<div class='alert alert-success'>✓ Time synced!</div>",
+                "<div class='alert alert-success'>✓ " + esc(t("settingsPages.timeSynced")) + "</div>",
                 true);
               timeInit();
             } else if (s.result === -1) {
               showMsg("time-msg",
-                "<div class='alert alert-error'>✗ NTP sync failed</div>",
+                "<div class='alert alert-error'>✗ " + esc(t("settingsPages.timeNtpSyncFailed")) + "</div>",
                 true);
             } else if (attempts < 30) {
               setTimeout(poll, 500);
             } else {
               showMsg("time-msg",
-                "<div class='alert alert-error'>✗ NTP sync timed out</div>",
+                "<div class='alert alert-error'>✗ " + esc(t("settingsPages.timeNtpSyncTimedOut")) + "</div>",
                 true);
             }
           })
@@ -950,7 +971,7 @@ function timeSyncNTP(ev) {
     })
     .catch(function () {
       showMsg("time-msg",
-        "<div class='alert alert-error'>✗ Network error — could not start sync</div>",
+        "<div class='alert alert-error'>✗ " + esc(t("settingsPages.timeNetErrStartSync")) + "</div>",
         true);
     });
 }
@@ -963,41 +984,44 @@ function timeRtcProtect(ev) {
   postWithCsrf("/rtc_protect", { method: "POST", body: fd }, 30000);
 }
 function timeFlushLogs() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   postWithCsrf("/flush_logs", { method: "POST" }, 30000)
     .then(function (r) { return r.json(); })
     .then(function (d) {
       showMsg(
         "time-msg",
         d.ok
-          ? "<div class='alert alert-success'>✓ Log buffer flushed</div>"
-          : "<div class='alert alert-error'>✗ " + (d.error || "Flush failed") + "</div>",
+          ? "<div class='alert alert-success'>✓ " + esc(t("settingsPages.timeLogFlushed")) + "</div>"
+          : "<div class='alert alert-error'>✗ " + esc(d.error || t("settingsPages.timeFlushFailed")) + "</div>",
         true,
       );
     })
     .catch(function () {
       showMsg("time-msg",
-        "<div class='alert alert-error'>✗ Network error — flush failed</div>", true);
+        "<div class='alert alert-error'>✗ " + esc(t("settingsPages.timeNetErrFlush")) + "</div>", true);
     });
 }
 function timeBackupBoot() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   postWithCsrf("/backup_bootcount", { method: "POST" }, 30000)
     .then(function (r) { return r.json(); })
     .then(function (d) {
       showMsg(
         "time-msg",
         d.ok
-          ? "<div class='alert alert-success'>✓ Boot count backed up</div>"
-          : "<div class='alert alert-error'>✗ " + (d.error || "Backup failed") + "</div>",
+          ? "<div class='alert alert-success'>✓ " + esc(t("settingsPages.timeBootBackedUp")) + "</div>"
+          : "<div class='alert alert-error'>✗ " + esc(d.error || t("settingsPages.timeBackupFailed")) + "</div>",
         true,
       );
     })
     .catch(function () {
       showMsg("time-msg",
-        "<div class='alert alert-error'>✗ Network error — backup failed</div>", true);
+        "<div class='alert alert-error'>✗ " + esc(t("settingsPages.timeNetErrBackup")) + "</div>", true);
     });
 }
 function timeRestoreBoot() {
-  if (!confirm("Restore boot count from backup?")) return;
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  if (!confirm(t("settingsPages.confirmRestoreBoot"))) return;
   postWithCsrf("/restore_bootcount", { method: "POST" }, 30000)
     .then(function (r) {
       return r.json();
@@ -1006,19 +1030,17 @@ function timeRestoreBoot() {
       showMsg(
         "time-msg",
         d.ok
-          ? "<div class='alert alert-success'>✓ Restored: " +
-              d.old +
-              " → " +
-              d["new"] +
+          ? "<div class='alert alert-success'>✓ " +
+              esc(t("settingsPages.timeRestored", { old: d.old, "new": d["new"] })) +
               "</div>"
-          : "<div class='alert alert-error'>✗ Restore failed</div>",
+          : "<div class='alert alert-error'>✗ " + esc(t("settingsPages.timeRestoreFailed")) + "</div>",
         true,
       );
       if (d.ok) timeInit();
     })
     .catch(function () {
       showMsg("time-msg",
-        "<div class='alert alert-error'>✗ Network error — restore failed</div>", true);
+        "<div class='alert alert-error'>✗ " + esc(t("settingsPages.timeNetErrRestore")) + "</div>", true);
     });
 }
 
@@ -1111,7 +1133,8 @@ function dlLoadFiles() {
       var files = d.files || [],
         curFile = d.currentFile || "";
       if (!files.length) {
-        el.innerHTML = "<div class='list-item text-muted'>No log files</div>";
+        var t0 = window.I18n ? I18n.t : function (k) { return k; };
+        el.innerHTML = "<div class='list-item text-muted'>" + esc(t0("settingsPages.dlNoLogFiles")) + "</div>";
         return;
       }
       var html = "";
@@ -1143,7 +1166,8 @@ function dlLoadFiles() {
 
 // Uses storage=internal explicitly — matches original failsafe fix
 function dlDeleteFile(path) {
-  if (!confirm("Delete " + path + "?")) return;
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  if (!confirm(t("settingsPages.confirmDeleteFile", { path: path }))) return;
   getCsrfToken().then(function (token) {
     fetchWithTimeout(
       "/delete?path=" + encodeURIComponent(path) + "&storage=internal&csrf=" + encodeURIComponent(token),
@@ -1151,13 +1175,13 @@ function dlDeleteFile(path) {
       30000
     ).then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
-      showToast("File deleted", path, "ok");
+      showToast(t("settingsPages.fileDeleted"), path, "ok");
       dlLoadFiles();
     }).catch(function (err) {
-      showToast("Delete failed", (err && err.message) || "Network error", "err");
+      showToast(t("settingsPages.deleteFailed"), (err && err.message) || t("settingsPages.networkError"), "err");
     });
   }).catch(function () {
-    showToast("Delete failed", "Could not get CSRF token", "err");
+    showToast(t("settingsPages.deleteFailed"), t("settingsPages.couldNotGetCsrf"), "err");
   });
 }
 
@@ -1241,16 +1265,18 @@ function settingsImport() {
     }
   };
   xhr.onload = function () {
+    var t = window.I18n ? I18n.t : function (k) { return k; };
     if (xhr.status === 200) {
-      showToast("Settings imported!", "success");
+      showToast(t("settingsPages.settingsImported"), "success");
       location.reload();
     } else {
-      showToast("Import failed: " + xhr.responseText, "error");
+      showToast(t("settingsPages.importFailedWith", { err: xhr.responseText }), "error");
       if (prog) prog.style.display = "none";
     }
   };
   xhr.onerror = function () {
-    showToast("Import failed", "error");
+    var t = window.I18n ? I18n.t : function (k) { return k; };
+    showToast(t("settingsPages.importFailed"), "error");
     if (prog) prog.style.display = "none";
   };
   // /import_settings is CSRF-gated — include the token (accepted as a form
@@ -1269,12 +1295,12 @@ function otaInit() {
   if (!window.crypto || !window.crypto.subtle) {
     var warn = document.getElementById("ota-subtle-warn");
     if (!warn) {
+      var t = window.I18n ? I18n.t : function (k) { return k; };
       warn = document.createElement("p");
       warn.id = "ota-subtle-warn";
       warn.style.cssText = "color:#b45309;background:#fef3c7;padding:8px 12px;" +
                            "border-radius:4px;margin:8px 0;font-size:.875rem";
-      warn.textContent = "⚠ SHA-256 verification unavailable on plain HTTP " +
-                         "(Secure Context required). Upload will proceed without integrity check.";
+      warn.textContent = "⚠ " + t("settingsOta.subtleUnavailable");
       var btn = document.getElementById("otaUploadBtn");
       if (btn && btn.parentNode) btn.parentNode.insertBefore(warn, btn);
     }
@@ -1291,6 +1317,7 @@ function otaInit() {
 
 
 function otaFileSelected() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   var fileInput = document.getElementById("fwFile");
   var uploadBtn = document.getElementById("otaUploadBtn");
   var fileInfo = document.getElementById("otaFileInfo");
@@ -1306,12 +1333,12 @@ function otaFileSelected() {
 
   var errors = [];
   if (!file.name.toLowerCase().endsWith(".bin"))
-    errors.push("File must be a .bin file");
-  if (file.size < 10000) errors.push("File too small (min 10KB)");
+    errors.push(t("settingsOta.errMustBeBin"));
+  if (file.size < 10000) errors.push(t("settingsOta.errTooSmall"));
 
   if (errors.length > 0) {
     if (fileInfo) fileInfo.innerHTML =
-      '<span style="color:var(--err)">' + errors.join("<br>") + "</span>";
+      '<span style="color:var(--err)">' + errors.map(esc).join("<br>") + "</span>";
     if (dropzone) dropzone.classList.add("has-file");
     uploadBtn.disabled = true;
     return;
@@ -1322,7 +1349,7 @@ function otaFileSelected() {
     var arr = new Uint8Array(e.target.result);
     if (arr[0] !== 0xe9) {
       if (fileInfo) fileInfo.innerHTML =
-        '<span style="color:var(--err)">Invalid firmware (wrong magic byte)</span>';
+        '<span style="color:var(--err)">' + esc(t("settingsOta.errInvalidMagic")) + '</span>';
       if (dropzone) dropzone.classList.add("has-file");
       uploadBtn.disabled = true;
       return;
@@ -1391,6 +1418,7 @@ function _otaSha256(file) {
 }
 
 function otaUpload() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   var fileInput = document.getElementById("fwFile");
   var uploadBtn = document.getElementById("otaUploadBtn");
   var progressDiv = document.getElementById("otaProgress");
@@ -1404,8 +1432,8 @@ function otaUpload() {
   fileInput.disabled = true;
   otaShowPopup(
     "cpu",
-    "Hashing firmware…",
-    "Computing SHA-256 before upload.",
+    t("settingsOta.hashingTitle"),
+    t("settingsOta.hashingMsg"),
     true,
     false,
   );
@@ -1416,10 +1444,10 @@ function otaUpload() {
   _otaSha256(file).then(function (sha) {
     otaShowPopup(
       "cloud-upload",
-      "Uploading firmware…",
+      t("settingsOta.uploadingTitle"),
       sha
-        ? "Image hashed. Uploading and verifying on-device…"
-        : "Uploading firmware (SHA-256 unavailable on this browser).",
+        ? t("settingsOta.uploadingMsgHashed")
+        : t("settingsOta.uploadingMsgNoHash"),
       true,
       false,
     );
@@ -1472,13 +1500,13 @@ function otaUpload() {
     // Still moving: the stall clock starts again from here.
     otaArmWatchdog(
       OTA_IDLE_MS,
-      "Upload Stalled",
-      "The device accepted nothing for 45 s. Check the connection and retry.",
+      t("settingsOta.uploadStalledTitle"),
+      t("settingsOta.uploadStalledMsg"),
     );
     if (e.lengthComputable) {
       var pct = Math.round((e.loaded / e.total) * 100);
       if (progressBar) progressBar.style.width = pct + "%";
-      if (progressText) progressText.textContent = "Uploading firmware…";
+      if (progressText) progressText.textContent = t("settingsOta.uploadingTitle");
       var progressPct = document.getElementById("otaProgressPct");
       if (progressPct) progressPct.textContent = pct + "%";
       otaUpdatePopupProgress(
@@ -1498,19 +1526,17 @@ function otaUpload() {
     // verifying and flashing, with no progress events in between.
     otaArmWatchdog(
       OTA_FLASH_MS,
-      "No Answer From Device",
-      "The image was uploaded but the device did not report back within " +
-        "120 s. Do not re-upload yet — reload this page and check the " +
-        "firmware version first.",
+      t("settingsOta.noAnswerTitle"),
+      t("settingsOta.noAnswerMsg"),
     );
     otaShowPopup(
       "cpu",
-      "Verifying firmware…",
-      "Upload complete. The device is checking and flashing the binary.",
+      t("settingsOta.verifyingTitle"),
+      t("settingsOta.verifyingMsg"),
       true,
       false,
     );
-    otaUpdatePopupProgress(100, "Flashing…");
+    otaUpdatePopupProgress(100, t("settingsOta.flashingLabel"));
   };
   xhr.onload = function () {
     otaClearWatchdog();
@@ -1524,10 +1550,8 @@ function otaUpload() {
           var tick = function () {
             otaShowPopup(
               "check",
-              "Update Complete!",
-              "Device will restart...<br>Redirecting in <strong>" +
-                seconds +
-                "</strong> seconds",
+              t("settingsOta.updateCompleteTitle"),
+              t("settingsOta.redirectingMsg", { sec: seconds }),
               true,
               false,
             );
@@ -1544,8 +1568,8 @@ function otaUpload() {
         } else {
           otaShowPopup(
             "alert-triangle",
-            "Update Failed",
-            esc(resp.message || "Unknown error"),
+            t("settingsOta.updateFailedTitle"),
+            esc(resp.message || t("settingsOta.unknownError")),
             false,
             true,
           );
@@ -1558,10 +1582,8 @@ function otaUpload() {
         var tick = function () {
           otaShowPopup(
             "check",
-            "Update sent",
-            "Device is restarting...<br>Redirecting in <strong>" +
-              seconds +
-              "</strong> seconds",
+            t("settingsOta.updateSentTitle"),
+            t("settingsOta.restartingMsg", { sec: seconds }),
             true,
             false,
           );
@@ -1579,8 +1601,8 @@ function otaUpload() {
     } else {
       otaShowPopup(
         "alert-triangle",
-        "Upload Error",
-        "Server returned: " + esc(xhr.statusText),
+        t("settingsOta.uploadErrorTitle"),
+        t("settingsOta.serverReturned", { status: esc(xhr.statusText) }),
         false,
         true,
       );
@@ -1594,8 +1616,8 @@ function otaUpload() {
     if (progressDiv) progressDiv.style.display = "none";
     otaShowPopup(
       "alert-triangle",
-      "Connection Error",
-      "Could not connect to device",
+      t("settingsOta.connectionErrorTitle"),
+      t("settingsOta.connectionErrorMsg"),
       false,
       true,
     );
@@ -1618,8 +1640,8 @@ function otaUpload() {
       // caught — the first progress event re-arms it.
       otaArmWatchdog(
         OTA_IDLE_MS,
-        "Upload Stalled",
-        "The device accepted nothing for 45 s. Check the connection and retry.",
+        t("settingsOta.uploadStalledTitle"),
+        t("settingsOta.uploadStalledMsg"),
       );
       xhr.send(formData);
     });
@@ -1649,9 +1671,10 @@ function slInit() {
 // Decoupled from /save_datalog so switching the active file doesn't
 // silently re-submit (and clamp) every format/rotation field.
 function dlSwitchFile() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   var sel = document.getElementById("curFile");
   if (!sel || !sel.value) {
-    showMsg("dl-msg", "<div class='alert alert-error'>✗ Select a file first</div>", true);
+    showMsg("dl-msg", "<div class='alert alert-error'>✗ " + esc(t("settingsPages.dlSelectFileFirst")) + "</div>", true);
     return;
   }
   var path = sel.value;
@@ -1664,15 +1687,15 @@ function dlSwitchFile() {
       .then(function (resp) {
         if (resp.ok) {
           showMsg("dl-msg",
-            "<div class='alert alert-success'>✓ Switched active file to " + esc(path) + "</div>", true);
+            "<div class='alert alert-success'>✓ " + esc(t("settingsPages.dlSwitchedActiveFile", { path: path })) + "</div>", true);
           dlLoadFiles();
         } else {
           showMsg("dl-msg",
-            "<div class='alert alert-error'>✗ " + esc(resp.error || "Switch failed") + "</div>", true);
+            "<div class='alert alert-error'>✗ " + esc(resp.error || t("settingsPages.dlSwitchFailed")) + "</div>", true);
         }
       })
       .catch(function () {
-        showMsg("dl-msg", "<div class='alert alert-error'>✗ Network error</div>", true);
+        showMsg("dl-msg", "<div class='alert alert-error'>✗ " + esc(t("settingsPages.networkError")) + "</div>", true);
       });
   });
 }
@@ -1681,9 +1704,10 @@ function dlSwitchFile() {
 // Doesn't persist any other datalog field; the user is expected to have
 // hit Save before Create if they edited prefix/folder/flags.
 function dlCreateFile() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
   var prefix = getVal("dl-prefix") || "";
   if (!prefix) {
-    showMsg("dl-msg", "<div class='alert alert-error'>✗ Prefix required</div>", true);
+    showMsg("dl-msg", "<div class='alert alert-error'>✗ " + esc(t("settingsPages.dlPrefixRequired")) + "</div>", true);
     return;
   }
   getCsrfToken().then(function (token) {
@@ -1700,15 +1724,15 @@ function dlCreateFile() {
       .then(function (resp) {
         if (resp.ok) {
           showMsg("dl-msg",
-            "<div class='alert alert-success'>✓ Created and switched to " + esc(resp.file || "") + "</div>", true);
+            "<div class='alert alert-success'>✓ " + esc(t("settingsPages.dlCreatedAndSwitched", { file: resp.file || "" })) + "</div>", true);
           dlInit();
         } else {
           showMsg("dl-msg",
-            "<div class='alert alert-error'>✗ " + esc(resp.error || "Create failed") + "</div>", true);
+            "<div class='alert alert-error'>✗ " + esc(resp.error || t("settingsPages.dlCreateFailed")) + "</div>", true);
         }
       })
       .catch(function () {
-        showMsg("dl-msg", "<div class='alert alert-error'>✗ Network error</div>", true);
+        showMsg("dl-msg", "<div class='alert alert-error'>✗ " + esc(t("settingsPages.networkError")) + "</div>", true);
       });
   });
 }
@@ -1750,6 +1774,11 @@ var Modules = (function () {
   var _list   = [];                 // cached module index
   var _detail = null;               // cached detail of current module
   var _dirty  = false;              // unsaved changes in the detail form
+  // Bound once here (not per-function, unlike elsewhere in this file) since
+  // every function below is a closure over this IIFE and I18n already
+  // exists by the time settings.js runs (i18n.js loads first) — only the
+  // *dictionaries* may still be registering, and t() re-resolves at call time.
+  var t = window.I18n ? I18n.t : function (k) { return k; };
 
   function escAttr(v) { return esc(String(v == null ? "" : v)); }
   function _el(id) { return document.getElementById(id); }
@@ -1780,7 +1809,7 @@ var Modules = (function () {
       }
       return { text: m.status.text, tone: tone };
     }
-    var st = _ctx.st || {}, t = _ctx.time || {};
+    var st = _ctx.st || {}, tm = _ctx.time || {};
     if (m.id === "wifi") {
       if (st.ip && st.ip !== "0.0.0.0") {
         var bits = [];
@@ -1789,14 +1818,14 @@ var Modules = (function () {
         if (st.rssi != null && st.rssi !== 0) bits.push(st.rssi + " dBm");
         return { text: bits.join(" · "), tone: "ok" };
       }
-      return { text: "not connected", tone: m.enabled ? "warn" : "dim" };
+      return { text: t("settingsPages.modNotConnected"), tone: m.enabled ? "warn" : "dim" };
     }
     if (m.id === "time") {
-      if (t.result === 1)  return { text: "synced",      tone: "ok" };
-      if (t.result === -1) return { text: "sync failed", tone: "warn" };
-      return { text: m.enabled ? "not synced yet" : "off", tone: "dim" };
+      if (tm.result === 1)  return { text: t("settingsPages.modSynced"),     tone: "ok" };
+      if (tm.result === -1) return { text: t("settingsPages.modSyncFailed"), tone: "warn" };
+      return { text: m.enabled ? t("settingsPages.modNotSyncedYet") : t("settingsPages.modOff"), tone: "dim" };
     }
-    return m.enabled ? { text: "enabled", tone: "ok" } : { text: "disabled", tone: "dim" };
+    return m.enabled ? { text: t("settingsPages.modEnabled"), tone: "ok" } : { text: t("settingsPages.modDisabled"), tone: "dim" };
   }
 
   function _chip(s) { return '<span class="mod-chip ' + s.tone + '">' + escAttr(s.text) + '</span>'; }
@@ -1805,7 +1834,7 @@ var Modules = (function () {
   function renderList() {
     var host = _el("mod-list");
     if (!host) return;
-    if (!_list.length) { host.innerHTML = '<div class="mod-empty">No modules registered.</div>'; return; }
+    if (!_list.length) { host.innerHTML = '<div class="mod-empty">' + esc(t("settingsPages.modNoneRegistered")) + '</div>'; return; }
     host.innerHTML = "";
     _list.forEach(function (m) {
       if (!m || !m.id) return;
@@ -1816,12 +1845,12 @@ var Modules = (function () {
       row.innerHTML =
         '<div class="mod-row-main">' +
           '<div class="mod-row-name">' + escAttr(m.name) +
-            (m.hasUI ? "" : ' <span class="badge dim" style="font-size:9px">status</span>') +
+            (m.hasUI ? "" : ' <span class="badge dim" style="font-size:9px">' + esc(t("settingsPages.modStatusOnlyBadge")) + '</span>') +
           '</div>' +
           (m.description ? '<div class="mod-row-desc">' + escAttr(m.description) + '</div>' : '') +
           '<div class="mod-row-status">' + _chip(s) + '</div>' +
         '</div>' +
-        '<label class="switch mod-row-switch" title="Enable / disable">' +
+        '<label class="switch mod-row-switch" title="' + escAttr(t("settingsPages.modEnableDisable")) + '">' +
           '<input type="checkbox"' + (m.enabled ? " checked" : "") + '><span></span>' +
         '</label>';
       row.addEventListener("click", function (ev) {
@@ -1845,7 +1874,7 @@ var Modules = (function () {
         if (!res || !res.ok) {
           if (m) m.enabled = !on;       // revert
           renderList();
-          setMsg('<div class="alert alert-error">Could not ' + (on ? "enable" : "disable") + ' ' + escAttr(_name(id)) + '.</div>');
+          setMsg('<div class="alert alert-error">' + esc(t(on ? "settingsPages.modCouldNotEnable" : "settingsPages.modCouldNotDisable", { name: _name(id) })) + '</div>');
           return;
         }
         if (m) m.enabled = on;
@@ -1853,14 +1882,13 @@ var Modules = (function () {
         // refresh status chips after a toggle (may change wifi/time state)
         _fetchCtx().then(function (c) { _ctx = c; renderList(); });
         if (res.restartRequired) {
-          setMsg('<div class="alert alert-info">' + escAttr(_name(id)) + ' ' + (on ? "enabled" : "disabled") +
-                 ' — a restart is required to fully apply.</div>');
+          setMsg('<div class="alert alert-info">' + esc(t(on ? "settingsPages.modEnabledRestartNeeded" : "settingsPages.modDisabledRestartNeeded", { name: _name(id) })) + '</div>');
         }
       })
       .catch(function () {
         if (m) m.enabled = !on;
         renderList();
-        setMsg('<div class="alert alert-error">Network error toggling ' + escAttr(_name(id)) + '.</div>');
+        setMsg('<div class="alert alert-error">' + esc(t("settingsPages.modNetworkErrorToggling", { name: _name(id) })) + '</div>');
       });
   }
 
@@ -1890,7 +1918,7 @@ var Modules = (function () {
               (f.max != null ? ' max="' + Number(f.max) + '"' : '') + (f.required ? " required" : "") + '>';
     } else {
       var pattern = f.type === "ipv4"
-        ? ' pattern="^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$" title="IPv4 address (e.g. 192.168.1.10)"'
+        ? ' pattern="^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$" title="' + escAttr(t("settingsPages.modIpv4Title")) + '"'
         : (f.pattern ? ' pattern="' + escAttr(f.pattern) + '"' : "");
       input = '<input type="text" class="input" name="' + name + '" value="' + escAttr(val) + '"' +
               (f.max ? ' maxlength="' + Number(f.max) + '"' : '') + (f.required ? " required" : "") + pattern + '>';
@@ -1967,13 +1995,13 @@ var Modules = (function () {
 
     if (!detail.hasUI || !detail.schema) {
       host.innerHTML = descHtml +
-        '<p class="hint">This module has no configurable form — it is managed by the enable toggle and runs with built-in defaults.</p>' +
+        '<p class="hint">' + esc(t("settingsPages.modNoConfigurableForm")) + '</p>' +
         (detail.config ? '<pre class="mod-config">' + esc(JSON.stringify(detail.config, null, 2)) + '</pre>' : "");
       return;
     }
     var schema;
     try { schema = JSON.parse(detail.schema); }
-    catch (e) { host.innerHTML = '<p class="hint">Bad schema JSON.</p>'; return; }
+    catch (e) { host.innerHTML = '<p class="hint">' + esc(t("settingsPages.modBadSchemaJson")) + '</p>'; return; }
 
     var fieldsHtml = "", lastGroup = null;
     (schema.fields || []).forEach(function (f) {
@@ -1987,13 +2015,13 @@ var Modules = (function () {
       '<form id="mod-form" novalidate>' +
         '<div class="field mod-bool">' +
           '<label class="switch"><input type="checkbox" id="mod-enabled" name="__enabled"' + (detail.enabled ? " checked" : "") + '><span></span></label>' +
-          '<span class="mod-bool-label">Module enabled</span>' +
+          '<span class="mod-bool-label">' + esc(t("settingsPages.modModuleEnabled")) + '</span>' +
         '</div>' +
         fieldsHtml +
         '<div class="mod-actions">' +
-          '<button type="submit" class="btn primary" id="mod-save" disabled><span data-icon="save"></span> Save</button>' +
-          '<button type="button" class="btn" id="mod-reset">Reset</button>' +
-          '<span class="mod-dirty" id="mod-dirty" style="display:none">unsaved changes</span>' +
+          '<button type="submit" class="btn primary" id="mod-save" disabled><span data-icon="save"></span> ' + esc(t("common.save")) + '</button>' +
+          '<button type="button" class="btn" id="mod-reset">' + esc(t("settingsPages.modReset")) + '</button>' +
+          '<span class="mod-dirty" id="mod-dirty" style="display:none">' + esc(t("settingsPages.modUnsavedChanges")) + '</span>' +
         '</div>' +
       '</form>';
     _icons(host);
@@ -2011,22 +2039,22 @@ var Modules = (function () {
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
       if (!form.checkValidity()) { form.reportValidity(); return; }
-      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = t("settingsPages.saving"); }
       var body = { enabled: form.elements["__enabled"].checked, config: collect(form, schema) };
       save(detail.id, body).then(function (res) {
         if (res && res.ok) {
           _dirty = false; if (dirtyEl) dirtyEl.style.display = "none";
-          if (saveBtn) { saveBtn.innerHTML = '<span data-icon="save"></span> Save'; _icons(saveBtn); }
-          setMsg('<div class="alert alert-success">Saved ' + escAttr(detail.name) + '.</div>');
+          if (saveBtn) { saveBtn.innerHTML = '<span data-icon="save"></span> ' + esc(t("common.save")); _icons(saveBtn); }
+          setMsg('<div class="alert alert-success">' + esc(t("settingsPages.modSaved", { name: detail.name })) + '</div>');
           var m = _find(detail.id); if (m) m.enabled = body.enabled;
           _fetchCtx().then(function (c) { _ctx = c; renderList(); });
         } else {
-          if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<span data-icon="save"></span> Save'; _icons(saveBtn); }
-          setMsg('<div class="alert alert-error">' + escAttr((res && res.error) || "Save failed") + '.</div>');
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<span data-icon="save"></span> ' + esc(t("common.save")); _icons(saveBtn); }
+          setMsg('<div class="alert alert-error">' + esc(res && res.error ? res.error + "." : t("settingsPages.saveFailed")) + '</div>');
         }
       }).catch(function () {
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<span data-icon="save"></span> Save'; _icons(saveBtn); }
-        setMsg('<div class="alert alert-error">Network error while saving.</div>');
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<span data-icon="save"></span> ' + esc(t("common.save")); _icons(saveBtn); }
+        setMsg('<div class="alert alert-error">' + esc(t("settingsPages.modNetworkErrorSaving")) + '</div>');
       });
     });
 
@@ -2045,19 +2073,19 @@ var Modules = (function () {
     var panel = document.createElement("div");
     panel.className = "mod-ota-panel";
     panel.innerHTML =
-      '<div class="mod-group-head">Partition &amp; rollback</div>' +
-      row("Running", cfg.running || "?") +
-      row("Previous", cfg.previous || "—") +
-      row("Rollback on crash", cfg.rollbackCapable ? "supported" : "manual only") +
+      '<div class="mod-group-head">' + esc(t("settingsPages.modOtaPartitionRollback")) + '</div>' +
+      row(t("settingsPages.modOtaRunning"), cfg.running || "?") +
+      row(t("settingsPages.modOtaPrevious"), cfg.previous || "—") +
+      row(t("settingsPages.modOtaRollbackOnCrash"), cfg.rollbackCapable ? t("settingsPages.modOtaSupported") : t("settingsPages.modOtaManualOnly")) +
       (pending
-        ? '<div class="alert alert-warning">New firmware pending verification' +
-            (cdSec > 0 ? ' — auto-confirms in ' + cdSec + ' s.'
-                       : ' — manual confirm required.') + '</div>'
-        : '<div class="alert alert-success">Current firmware confirmed.</div>') +
+        ? '<div class="alert alert-warning">' + esc(t("settingsPages.modOtaPendingVerification")) +
+            (cdSec > 0 ? esc(t("settingsPages.modOtaAutoConfirmsIn", { sec: cdSec }))
+                       : esc(t("settingsPages.modOtaManualConfirmRequired"))) + '</div>'
+        : '<div class="alert alert-success">' + esc(t("settingsPages.modOtaFirmwareConfirmed")) + '</div>') +
       '<div class="mod-actions">' +
-        (pending ? '<button type="button" class="btn primary" id="ota-confirm">Confirm now</button>' : '') +
+        (pending ? '<button type="button" class="btn primary" id="ota-confirm">' + esc(t("settingsPages.modOtaConfirmNow")) + '</button>' : '') +
         ((cfg.rollbackCapable || (cfg.previous && cfg.previous !== "—"))
-            ? '<button type="button" class="btn" id="ota-rollback">Roll back</button>' : '') +
+            ? '<button type="button" class="btn" id="ota-rollback">' + esc(t("settingsPages.modOtaRollBack")) + '</button>' : '') +
       '</div>';
     host.appendChild(panel);
 
@@ -2071,20 +2099,21 @@ var Modules = (function () {
           return r.json().catch(function () { return {}; });
         })
         .then(function (d) {
-          if (d && d.ok === false) throw new Error(d.error || "Confirm failed");
-          setMsg('<div class="alert alert-success">Firmware confirmed.</div>');
+          if (d && d.ok === false) throw new Error(d.error || t("settingsPages.modOtaConfirmFailed"));
+          setMsg('<div class="alert alert-success">' + esc(t("settingsPages.modOtaFirmwareConfirmedDot")) + '</div>');
           select("ota", true);
         })
         .catch(function (err) {
           cBtn.disabled = false;
-          setMsg('<div class="alert alert-error">Confirm failed: ' +
-                 esc(err && err.message ? err.message : String(err)) + '</div>');
+          setMsg('<div class="alert alert-error">' + esc(t("settingsPages.modOtaConfirmFailedWith", {
+            msg: err && err.message ? err.message : String(err),
+          })) + '</div>');
         });
     });
 
     var rBtn = _el("ota-rollback");
     if (rBtn) rBtn.addEventListener("click", function () {
-      if (!confirm("Roll back to the previous firmware and restart now?")) return;
+      if (!confirm(t("settingsPages.confirmRollback"))) return;
       rBtn.disabled = true;
       postWithCsrf("/api/ota/rollback", { method: "POST" }, 15000)
         .then(function (r) {
@@ -2092,8 +2121,8 @@ var Modules = (function () {
           return r.json().catch(function () { return {}; });
         })
         .then(function (d) {
-          if (d && d.ok === false) throw new Error(d.error || "Rollback failed");
-          setMsg('<div class="alert alert-info">Rolling back and restarting… reconnect in ~10 s.</div>');
+          if (d && d.ok === false) throw new Error(d.error || t("settingsPages.modOtaRollbackFailed"));
+          setMsg('<div class="alert alert-info">' + esc(t("settingsPages.modOtaRollingBack")) + '</div>');
         })
         .catch(function (err) {
           // A successful rollback restarts the device and aborts this request,
@@ -2101,9 +2130,9 @@ var Modules = (function () {
           // means the request was actually rejected.
           if (err && err.message && err.message.indexOf("HTTP") === 0) {
             rBtn.disabled = false;
-            setMsg('<div class="alert alert-error">Rollback failed: ' + esc(err.message) + '</div>');
+            setMsg('<div class="alert alert-error">' + esc(t("settingsPages.modOtaRollbackFailedWith", { msg: err.message })) + '</div>');
           } else {
-            setMsg('<div class="alert alert-info">Rollback requested; the device may be restarting.</div>');
+            setMsg('<div class="alert alert-info">' + esc(t("settingsPages.modOtaRollbackRequested")) + '</div>');
           }
         });
     });
@@ -2120,38 +2149,38 @@ var Modules = (function () {
   }
 
   function select(id, force) {
-    if (!force && _dirty && id !== current && !confirm("Discard unsaved changes?")) { renderList(); return; }
+    if (!force && _dirty && id !== current && !confirm(t("settingsPages.confirmDiscardChanges"))) { renderList(); return; }
     current = id; _dirty = false;
     setMsg("");
     renderList();
-    var host = _el("mod-host"); if (host) host.innerHTML = '<p class="hint">Loading…</p>';
+    var host = _el("mod-host"); if (host) host.innerHTML = '<p class="hint">' + esc(t("common.loading")) + '</p>';
     loadDetail(id).then(function (d) {
-      if (!d) { if (host) host.innerHTML = '<p class="hint">Could not load this module.</p>'; return; }
+      if (!d) { if (host) host.innerHTML = '<p class="hint">' + esc(t("settingsPages.modCouldNotLoad")) + '</p>'; return; }
       renderDetail(d);
     }).catch(function () {
-      var h = _el("mod-host"); if (h) h.innerHTML = '<p class="hint">Could not load this module.</p>';
+      var h = _el("mod-host"); if (h) h.innerHTML = '<p class="hint">' + esc(t("settingsPages.modCouldNotLoad")) + '</p>';
     });
   }
 
   function init() {
     current = null; _dirty = false; _detail = null;
     var list = _el("mod-list");
-    if (list) list.innerHTML = '<div class="mod-empty">Loading…</div>';
+    if (list) list.innerHTML = '<div class="mod-empty">' + esc(t("common.loading")) + '</div>';
     setMsg("");
     Promise.all([loadList(), _fetchCtx()]).then(function (a) {
       var l = a[0];
       _ctx = a[1] || { st: {}, time: {} };
       if (!l || !l.length) {
         _list = [];
-        if (list) list.innerHTML = '<div class="mod-empty">No modules registered.</div>';
-        var host = _el("mod-host"); if (host) host.innerHTML = '<p class="hint">No modules to configure.</p>';
+        if (list) list.innerHTML = '<div class="mod-empty">' + esc(t("settingsPages.modNoneRegistered")) + '</div>';
+        var host = _el("mod-host"); if (host) host.innerHTML = '<p class="hint">' + esc(t("settingsPages.modNoneToConfigure")) + '</p>';
         return;
       }
       _list = l;
       renderList();
       select(l[0].id);
     }).catch(function () {
-      if (list) list.innerHTML = '<div class="mod-empty">Could not reach <code>/api/modules</code>.</div>';
+      if (list) list.innerHTML = '<div class="mod-empty">' + esc(t("settingsPages.modCouldNotReach")) + '</div>';
     });
   }
 

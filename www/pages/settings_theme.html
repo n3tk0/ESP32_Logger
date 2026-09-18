@@ -1,7 +1,7 @@
   <section class="page" id="page-settings_theme">
     <div class="page-head">
-      <h1 class="page-title"><span data-icon="palette"></span> Theme</h1>
-      <div class="page-sub"><a href="#settings">Settings</a> / Theme
+      <h1 class="page-title"><span data-icon="palette"></span> <span data-i18n="settingsPages.thTitle">Theme</span></h1>
+      <div class="page-sub"><a href="#settings" data-i18n="chrome.navSettings">Settings</a> / <span data-i18n="settingsPages.thTitle">Theme</span>
       </div>
     </div>
 
@@ -9,61 +9,61 @@
       <div id="th-msg"></div>
       <!-- Mode -->
       <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="moon"></span> Appearance</div></div>
+        <div class="card-head"><div class="card-title"><span data-icon="moon"></span> <span data-i18n="settingsPages.thAppearance">Appearance</span></div></div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
           <div class="field">
-            <label>Theme</label>
+            <label data-i18n="settingsPages.thTheme">Theme</label>
             <div class="seg" id="th-mode-seg">
-              <button type="button" data-v="0"><span data-icon="sun"></span> Light</button>
-              <button type="button" data-v="1"><span data-icon="moon"></span> Dark</button>
-              <button type="button" data-v="2"><span data-icon="laptop"></span> Auto</button>
+              <button type="button" data-v="0"><span data-icon="sun"></span> <span data-i18n="settingsPages.thLight">Light</span></button>
+              <button type="button" data-v="1"><span data-icon="moon"></span> <span data-i18n="settingsPages.thDark">Dark</span></button>
+              <button type="button" data-v="2"><span data-icon="laptop"></span> <span data-i18n="settingsPages.thAuto">Auto</span></button>
             </div>
             <select name="themeMode" id="th-mode" style="display:none">
-              <option value="0">Light</option>
-              <option value="1">Dark</option>
-              <option value="2">Auto</option>
+              <option value="0" data-i18n="settingsPages.thLight">Light</option>
+              <option value="1" data-i18n="settingsPages.thDark">Dark</option>
+              <option value="2" data-i18n="settingsPages.thAuto">Auto</option>
             </select>
           </div>
-          <label class="check"><input type="checkbox" name="showIcons" id="th-icons" value="1"><span>Show icons in nav and cards</span></label>
+          <label class="check"><input type="checkbox" name="showIcons" id="th-icons" value="1"><span data-i18n="settingsPages.thShowIcons">Show icons in nav and cards</span></label>
         </div>
       </div>
 
       <!-- Colors -->
       <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="palette"></span> Colors</div></div>
+        <div class="card-head"><div class="card-title"><span data-icon="palette"></span> <span data-i18n="settingsPages.thColors">Colors</span></div></div>
         <div class="card-body">
           <div class="color-grid">
-            <div class="field"><label class="field-label" for="th-primary">Primary</label><input type="color" name="primaryColor"
+            <div class="field"><label class="field-label" for="th-primary" data-i18n="settingsPages.thPrimary">Primary</label><input type="color" name="primaryColor"
                 id="th-primary" class="input"></div>
-            <div class="field"><label class="field-label" for="th-secondary">Secondary</label><input type="color" name="secondaryColor"
+            <div class="field"><label class="field-label" for="th-secondary" data-i18n="settingsPages.thSecondary">Secondary</label><input type="color" name="secondaryColor"
                 id="th-secondary" class="input"></div>
-            <div class="field"><label class="field-label" for="th-lightBg">Background (Light)</label><input type="color" name="lightBgColor"
+            <div class="field"><label class="field-label" for="th-lightBg" data-i18n="settingsPages.thBgLight">Background (Light)</label><input type="color" name="lightBgColor"
                 id="th-lightBg" class="input"></div>
-            <div class="field"><label class="field-label" for="th-darkBg">Background (Dark)</label><input type="color" name="darkBgColor"
+            <div class="field"><label class="field-label" for="th-darkBg" data-i18n="settingsPages.thBgDark">Background (Dark)</label><input type="color" name="darkBgColor"
                 id="th-darkBg" class="input"></div>
-            <div class="field"><label class="field-label" for="th-lightText">Text (Light)</label><input type="color" name="lightTextColor"
+            <div class="field"><label class="field-label" for="th-lightText" data-i18n="settingsPages.thTextLight">Text (Light)</label><input type="color" name="lightTextColor"
                 id="th-lightText" class="input"></div>
-            <div class="field"><label class="field-label" for="th-darkText">Text (Dark)</label><input type="color" name="darkTextColor"
+            <div class="field"><label class="field-label" for="th-darkText" data-i18n="settingsPages.thTextDark">Text (Dark)</label><input type="color" name="darkTextColor"
                 id="th-darkText" class="input"></div>
           </div>
-          <h4 class="mt-2">Chart</h4>
+          <h4 class="mt-2" data-i18n="settingsPages.thChart">Chart</h4>
           <div class="color-grid" style="grid-template-columns:repeat(3,1fr)">
-            <div class="field"><label class="field-label" for="th-ff">Full Flush</label><input type="color" name="ffColor"
+            <div class="field"><label class="field-label" for="th-ff" data-i18n="settingsPages.thFullFlush">Full Flush</label><input type="color" name="ffColor"
                 id="th-ff" class="input"></div>
-            <div class="field"><label class="field-label" for="th-pf">Part Flush</label><input type="color" name="pfColor"
+            <div class="field"><label class="field-label" for="th-pf" data-i18n="settingsPages.thPartFlush">Part Flush</label><input type="color" name="pfColor"
                 id="th-pf" class="input"></div>
-            <div class="field"><label class="field-label" for="th-other">Other</label><input type="color" name="otherColor"
+            <div class="field"><label class="field-label" for="th-other" data-i18n="settingsPages.thOther">Other</label><input type="color" name="otherColor"
                 id="th-other" class="input"></div>
           </div>
-          <h4 class="mt-2">Storage Bar</h4>
+          <h4 class="mt-2" data-i18n="settingsPages.thStorageBar">Storage Bar</h4>
           <div class="color-grid">
-            <div class="field"><label class="field-label" for="th-bar">Normal</label><input type="color" name="storageBarColor"
+            <div class="field"><label class="field-label" for="th-bar" data-i18n="settingsPages.thNormal">Normal</label><input type="color" name="storageBarColor"
                 id="th-bar" class="input"></div>
             <div class="field"><label class="field-label" for="th-bar70">70%+</label><input type="color" name="storageBar70Color"
                 id="th-bar70" class="input"></div>
             <div class="field"><label class="field-label" for="th-bar90">90%+</label><input type="color" name="storageBar90Color"
                 id="th-bar90" class="input"></div>
-            <div class="field"><label class="field-label" for="th-barB">Border</label><input type="color" name="storageBarBorder"
+            <div class="field"><label class="field-label" for="th-barB" data-i18n="settingsPages.thBorder">Border</label><input type="color" name="storageBarBorder"
                 id="th-barB" class="input"></div>
           </div>
         </div>
@@ -71,82 +71,82 @@
 
       <!-- Images -->
       <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="image"></span> Images</div></div>
+        <div class="card-head"><div class="card-title"><span data-icon="image"></span> <span data-i18n="settingsPages.thImages">Images</span></div></div>
         <div class="card-body">
-          <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem">Supported: PNG, JPG, GIF, SVG, ICO. Path:
+          <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem" data-i18n="settingsPages.thImagesHint">Supported: PNG, JPG, GIF, SVG, ICO. Path:
             /file.png</p>
-          <div class="field"><label class="field-label" for="th-logo">Logo Path</label><input type="text" name="logoSource"
-              id="th-logo" placeholder="/logo.png" class="input" maxlength="128"
-              pattern="^/([\w.\-](\/[\w.\-]+)*)?$" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
-          <div class="field"><label class="field-label" for="th-favicon">Favicon</label><input type="text" name="faviconPath"
-              id="th-favicon" placeholder="/favicon.ico" class="input" maxlength="32"
-              pattern="^/([\w.\-](\/[\w.\-]+)*)?$" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
-          <div class="field"><label class="field-label" for="th-board">Board Diagram</label><input type="text"
-              name="boardDiagramPath" id="th-board" placeholder="/xiao_esp32_c3_board.jpg" class="input" maxlength="64"
-              pattern="^/([\w.\-](\/[\w.\-]+)*)?$" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
+          <div class="field"><label class="field-label" for="th-logo" data-i18n="settingsPages.thLogoPath">Logo Path</label><input type="text" name="logoSource"
+              id="th-logo" data-i18n-placeholder="settingsPages.thLogoPh" placeholder="/logo.png" class="input" maxlength="128"
+              pattern="^/([\w.\-](\/[\w.\-]+)*)?$" data-i18n-title="settingsPages.thPathTitle" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
+          <div class="field"><label class="field-label" for="th-favicon" data-i18n="settingsPages.thFavicon">Favicon</label><input type="text" name="faviconPath"
+              id="th-favicon" data-i18n-placeholder="settingsPages.thFaviconPh" placeholder="/favicon.ico" class="input" maxlength="32"
+              pattern="^/([\w.\-](\/[\w.\-]+)*)?$" data-i18n-title="settingsPages.thPathTitle" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
+          <div class="field"><label class="field-label" for="th-board" data-i18n="settingsPages.thBoardDiagram">Board Diagram</label><input type="text"
+              name="boardDiagramPath" id="th-board" data-i18n-placeholder="settingsPages.thBoardDiagramPh" placeholder="/xiao_esp32_c3_board.jpg" class="input" maxlength="64"
+              pattern="^/([\w.\-](\/[\w.\-]+)*)?$" data-i18n-title="settingsPages.thPathTitle" title="Must start with / and contain only path-safe characters (no protocol-relative URLs)"></div>
         </div>
       </div>
 
       <!-- Chart engine -->
       <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="line-chart"></span> Chart Source</div></div>
+        <div class="card-head"><div class="card-title"><span data-icon="line-chart"></span> <span data-i18n="settingsPages.thChartSource">Chart Source</span></div></div>
         <div class="card-body">
           <div class="field">
-            <label class="field-label" for="th-chartSrc">uPlot Library</label>
+            <label class="field-label" for="th-chartSrc" data-i18n="settingsPages.thUplotLib">uPlot Library</label>
             <select name="chartSource" id="th-chartSrc" class="input"
               data-change="themeToggleChartPath">
-              <option value="0">Local File</option>
-              <option value="1">CDN (Online)</option>
+              <option value="0" data-i18n="settingsPages.thLocalFile">Local File</option>
+              <option value="1" data-i18n="settingsPages.thCdnOnline">CDN (Online)</option>
             </select>
-            <p class="hint">Local: requires /uPlot.iife.min.js (or .gz) in LittleFS. CDN: needs internet.</p>
+            <p class="hint" data-i18n="settingsPages.thChartSourceHint">Local: requires /uPlot.iife.min.js (or .gz) in LittleFS. CDN: needs internet.</p>
           </div>
           <div id="chartPathRow" style="display:none">
             <div class="field">
-              <label class="field-label" for="th-chartPath">Local Path</label>
-              <input type="text" name="chartLocalPath" id="th-chartPath" placeholder="/uPlot.iife.min.js" class="input"
-                pattern="^/[a-zA-Z0-9._\-]+\.js(\.gz)?$" title="Local path only: /filename.js or /filename.js.gz (no protocol-relative or external URLs)">
+              <label class="field-label" for="th-chartPath" data-i18n="settingsPages.thLocalPath">Local Path</label>
+              <input type="text" name="chartLocalPath" id="th-chartPath" data-i18n-placeholder="settingsPages.thLocalPathPh" placeholder="/uPlot.iife.min.js" class="input"
+                pattern="^/[a-zA-Z0-9._\-]+\.js(\.gz)?$" data-i18n-title="settingsPages.thLocalPathTitle" title="Local path only: /filename.js or /filename.js.gz (no protocol-relative or external URLs)">
             </div>
           </div>
           <div class="field mt-1">
-            <label class="field-label" for="th-labelFmt">Dashboard Column Labels</label>
+            <label class="field-label" for="th-labelFmt" data-i18n="settingsPages.thColumnLabels">Dashboard Column Labels</label>
             <select name="chartLabelFormat" id="th-labelFmt" class="input">
-              <option value="0">Date + Time</option>
-              <option value="1">Boot Count (#1234)</option>
-              <option value="2">Both</option>
+              <option value="0" data-i18n="settingsPages.thDateTime">Date + Time</option>
+              <option value="1" data-i18n="settingsPages.thBootCountFmt">Boot Count (#1234)</option>
+              <option value="2" data-i18n="settingsPages.thBoth">Both</option>
             </select>
           </div>
         </div>
       </div>
 
       <div style="display:flex; gap:10px;">
-        <button type="submit" class="btn primary" style="flex:1;"><span data-icon="save"></span> Save</button>
-        <button type="button" class="btn" data-click="themeRestoreDefault"><span data-icon="refresh-cw"></span> Restore Default
-          Theme</button>
+        <button type="submit" class="btn primary" style="flex:1;"><span data-icon="save"></span> <span data-i18n="common.save">Save</span></button>
+        <button type="button" class="btn" data-click="themeRestoreDefault"><span data-icon="refresh-cw"></span> <span data-i18n="settingsPages.thRestoreDefault">Restore Default
+          Theme</span></button>
       </div>
     </form>
 
     <!-- Display preferences (client-side, instant apply via localStorage —
          not part of the /save_theme POST since they're per-device). -->
     <div class="card">
-      <div class="card-head"><div class="card-title"><span data-icon="sliders"></span> Display Preferences</div></div>
+      <div class="card-head"><div class="card-title"><span data-icon="sliders"></span> <span data-i18n="settingsPages.thDisplayPrefs">Display Preferences</span></div></div>
       <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
         <div class="field">
-          <label>Density</label>
+          <label data-i18n="settingsPages.thDensity">Density</label>
           <div class="seg" id="th-density-seg">
-            <button type="button" data-v="comfortable" data-click="densitySelect">Comfortable</button>
-            <button type="button" data-v="compact" data-click="densitySelect">Compact</button>
+            <button type="button" data-v="comfortable" data-click="densitySelect" data-i18n="settingsPages.thComfortable">Comfortable</button>
+            <button type="button" data-v="compact" data-click="densitySelect" data-i18n="settingsPages.thCompact">Compact</button>
           </div>
-          <p class="hint">Compact shrinks row height, card padding, and gaps.</p>
+          <p class="hint" data-i18n="settingsPages.thDensityHint">Compact shrinks row height, card padding, and gaps.</p>
         </div>
         <div class="field">
-          <label>Accent Color</label>
+          <label data-i18n="settingsPages.thAccentColor">Accent Color</label>
           <div class="seg" id="th-accent-seg">
-            <button type="button" data-v="cyan"   data-click="accentSelect" style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:10px;height:10px;background:#22d3ee;border-radius:50%"></i>Cyan</button>
-            <button type="button" data-v="green"  data-click="accentSelect" style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:50%"></i>Green</button>
-            <button type="button" data-v="amber"  data-click="accentSelect" style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:50%"></i>Amber</button>
-            <button type="button" data-v="violet" data-click="accentSelect" style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:10px;height:10px;background:#a78bfa;border-radius:50%"></i>Violet</button>
+            <button type="button" data-v="cyan"   data-click="accentSelect" style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:10px;height:10px;background:#22d3ee;border-radius:50%"></i><span data-i18n="settingsPages.thCyan">Cyan</span></button>
+            <button type="button" data-v="green"  data-click="accentSelect" style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:50%"></i><span data-i18n="settingsPages.thGreen">Green</span></button>
+            <button type="button" data-v="amber"  data-click="accentSelect" style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:50%"></i><span data-i18n="settingsPages.thAmber">Amber</span></button>
+            <button type="button" data-v="violet" data-click="accentSelect" style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:10px;height:10px;background:#a78bfa;border-radius:50%"></i><span data-i18n="settingsPages.thViolet">Violet</span></button>
           </div>
-          <p class="hint">Applies instantly. Stored on this device only.</p>
+          <p class="hint" data-i18n="settingsPages.thAccentHint">Applies instantly. Stored on this device only.</p>
         </div>
       </div>
     </div>

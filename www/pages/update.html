@@ -1,7 +1,7 @@
   <section class="page" id="page-update">
     <div class="page-head">
-      <h1 class="page-title"><span data-icon="cloud-upload"></span> Firmware Update</h1>
-      <div class="page-sub"><a href="#settings">Settings</a> / Update
+      <h1 class="page-title"><span data-icon="cloud-upload"></span> <span data-i18n="settingsOta.title">Firmware Update</span></h1>
+      <div class="page-sub"><a href="#settings" data-i18n="chrome.navSettings">Settings</a> / <span data-i18n="settingsOta.crumb">Update</span>
       </div>
     </div>
 
@@ -17,42 +17,42 @@
           </div>
           <div id="popupCounter"></div>
         </div>
-        <button id="popupClose" class="btn" data-click="closePopup" style="display:none">Close</button>
+        <button id="popupClose" class="btn" data-click="closePopup" style="display:none" data-i18n="common.close">Close</button>
       </div>
     </div>
 
     <div class="grid grid-4">
       <div class="kpi">
-        <div class="kpi-l"><span data-icon="info"></span> Version</div>
+        <div class="kpi-l"><span data-icon="info"></span> <span data-i18n="settingsOta.version">Version</span></div>
         <div class="kpi-v"><span class="num" id="ota-currentVer" style="font-size:18px">–</span></div>
       </div>
       <div class="kpi">
-        <div class="kpi-l"><span data-icon="cpu"></span> Device</div>
+        <div class="kpi-l"><span data-icon="cpu"></span> <span data-i18n="settingsOta.device">Device</span></div>
         <div class="kpi-v"><span class="num" id="fwDevice" style="font-size:18px">–</span></div>
       </div>
       <div class="kpi">
-        <div class="kpi-l"><span data-icon="memory-stick"></span> Free heap</div>
+        <div class="kpi-l"><span data-icon="memory-stick"></span> <span data-i18n="settingsOta.freeHeap">Free heap</span></div>
         <div class="kpi-v"><span class="num" id="fwHeap" style="font-size:18px">–</span></div>
       </div>
       <div class="kpi">
-        <div class="kpi-l"><span data-icon="hard-drive"></span> Storage</div>
+        <div class="kpi-l"><span data-icon="hard-drive"></span> <span data-i18n="settingsOta.storage">Storage</span></div>
         <div class="kpi-v"><span class="num" id="fwStorage" style="font-size:18px">–</span></div>
       </div>
     </div>
 
     <div class="card" style="margin-top:var(--gap)">
-      <div class="card-head"><div class="card-title"><span data-icon="upload-cloud"></span> Upload firmware</div></div>
+      <div class="card-head"><div class="card-title"><span data-icon="upload-cloud"></span> <span data-i18n="settingsOta.uploadFirmware">Upload firmware</span></div></div>
       <div class="card-body">
         <div class="alert alert-warning" style="margin-bottom:14px">
           <span data-icon="alert-triangle"></span>
-          Upload the correct <code>.bin</code> file. Wrong firmware will require USB recovery.
+          <span data-i18n-html="settingsOta.wrongFirmwareWarning">Upload the correct <code>.bin</code> file. Wrong firmware will require USB recovery.</span>
         </div>
         <form id="otaForm" data-submit="otaUpload">
           <label class="dropzone" for="fwFile">
             <span class="drop-idle" style="display:flex;flex-direction:column;align-items:center;gap:6px">
               <span data-icon="upload-cloud" style="width:32px;height:32px"></span>
-              <strong>Choose firmware (.bin)</strong>
-              <span style="font-size:11px;color:var(--text-3)">or drag &amp; drop here</span>
+              <strong data-i18n="settingsOta.chooseFirmware">Choose firmware (.bin)</strong>
+              <span style="font-size:11px;color:var(--text-3)" data-i18n="settingsOta.dragDrop">or drag &amp; drop here</span>
             </span>
             <span class="drop-ready">
               <span data-icon="file-archive" style="width:24px;height:24px;color:var(--accent)"></span>
@@ -61,11 +61,11 @@
             <input type="file" id="fwFile" name="update" accept=".bin" required data-change="otaFileSelected" style="position:absolute;opacity:0;width:0;height:0">
           </label>
           <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
-            <button type="submit" id="otaUploadBtn" class="btn warn" disabled><span data-icon="rocket"></span> Flash firmware</button>
+            <button type="submit" id="otaUploadBtn" class="btn warn" disabled><span data-icon="rocket"></span> <span data-i18n="settingsOta.flashFirmware">Flash firmware</span></button>
           </div>
         </form>
         <div id="otaProgress" class="ota-progress" style="display:none">
-          <div class="ota-status" id="otaProgressText">Preparing…</div>
+          <div class="ota-status" id="otaProgressText" data-i18n="settingsOta.preparing">Preparing…</div>
           <div class="ota-bar-wrap">
             <div class="ota-bar"><span id="otaProgressBar" style="width:0%"></span></div>
             <span class="ota-pct" id="otaProgressPct">0%</span>

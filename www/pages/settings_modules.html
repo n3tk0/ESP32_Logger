@@ -1,8 +1,8 @@
   <section class="page" id="page-settings_modules">
     <div class="page-head">
       <div>
-        <h1 class="page-title"><span data-icon="puzzle"></span> Modules</h1>
-        <div class="page-sub"><a href="#settings">Settings</a> / Modules · enable, configure &amp; monitor device modules</div>
+        <h1 class="page-title"><span data-icon="puzzle"></span> <span data-i18n="settingsPages.modTitle">Modules</span></h1>
+        <div class="page-sub"><a href="#settings" data-i18n="chrome.navSettings">Settings</a> / <span data-i18n="settingsPages.modSubtitle">Modules · enable, configure &amp; monitor device modules</span></div>
       </div>
     </div>
 
@@ -10,21 +10,21 @@
 
     <div class="mod-layout">
       <div class="card mod-list-card">
-        <div class="card-head"><div class="card-title"><span data-icon="layers"></span> Installed modules</div></div>
+        <div class="card-head"><div class="card-title"><span data-icon="layers"></span> <span data-i18n="settingsPages.modInstalled">Installed modules</span></div></div>
         <div class="card-body" style="padding:8px">
-          <div id="mod-list"><div class="mod-empty">Loading…</div></div>
+          <div id="mod-list"><div class="mod-empty" data-i18n="common.loading">Loading…</div></div>
         </div>
       </div>
 
       <div class="card mod-detail-card">
-        <div class="card-head"><div class="card-title" id="mod-detail-title"><span data-icon="sliders"></span> Configuration</div></div>
+        <div class="card-head"><div class="card-title" id="mod-detail-title"><span data-icon="sliders"></span> <span data-i18n="settingsPages.modConfiguration">Configuration</span></div></div>
         <div class="card-body">
-          <div id="mod-host"><p class="hint">Select a module to configure it.</p></div>
+          <div id="mod-host"><p class="hint" data-i18n="settingsPages.modSelectHint">Select a module to configure it.</p></div>
         </div>
       </div>
     </div>
 
-    <p class="hint" style="margin-top:var(--gap)">
+    <p class="hint" style="margin-top:var(--gap)" data-i18n-html="settingsPages.modFooterHint">
       Toggles take effect immediately; some modules need a restart to fully apply (you'll be told).
       The dedicated <a href="#settings_netime">Network &amp; Time</a> and Theme pages remain available for the same settings.
     </p>

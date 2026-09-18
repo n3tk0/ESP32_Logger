@@ -1,7 +1,7 @@
   <section class="page" id="page-settings_network">
     <div class="page-head">
-      <h1 class="page-title"><span data-icon="globe"></span> Network</h1>
-      <div class="page-sub"><a href="#settings">Settings</a> / Network
+      <h1 class="page-title"><span data-icon="globe"></span> <span data-i18n="settingsPages.netTitle">Network</span></h1>
+      <div class="page-sub"><a href="#settings" data-i18n="chrome.navSettings">Settings</a> / <span data-i18n="settingsPages.netTitle">Network</span>
       </div>
     </div>
 
@@ -9,8 +9,8 @@
     <div class="card">
       <div class="card-body">
         <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
-          <span><strong>Status:</strong> <span id="net-status">–</span></span>
-          <span style="display:flex;align-items:center;gap:6px;"><strong>Signal strength:</strong> <span
+          <span><strong data-i18n="settingsPages.netStatus">Status:</strong> <span id="net-status">–</span></span>
+          <span style="display:flex;align-items:center;gap:6px;"><strong data-i18n="settingsPages.netSignalStrength">Signal strength:</strong> <span
               id="net-rssi-icon"></span><span id="net-rssi">–</span></span>
         </div>
       </div>
@@ -20,12 +20,12 @@
       <div id="net-msg"></div>
       <!-- WiFi Mode -->
       <div class="card">
-        <div class="card-head"><div class="card-title"><span data-icon="wifi"></span> WiFi Mode</div></div>
+        <div class="card-head"><div class="card-title"><span data-icon="wifi"></span> <span data-i18n="settingsPages.netWifiMode">WiFi Mode</span></div></div>
         <div class="card-body">
           <div class="field">
             <select name="wifiMode" id="net-mode" class="input" data-change="netToggleMode">
-              <option value="0">📶 AP Mode</option>
-              <option value="1">🔗 Client Mode</option>
+              <option value="0" data-i18n="settingsPages.netApModeOpt">📶 AP Mode</option>
+              <option value="1" data-i18n="settingsPages.netClientModeOpt">🔗 Client Mode</option>
             </select>
           </div>
         </div>
@@ -34,12 +34,12 @@
       <!-- AP Settings -->
       <div id="apSection">
         <div class="card">
-          <div class="card-head"><div class="card-title"><span data-icon="wifi"></span> AP Mode</div></div>
+          <div class="card-head"><div class="card-title"><span data-icon="wifi"></span> <span data-i18n="settingsPages.netApMode">AP Mode</span></div></div>
           <div class="card-body">
-            <div class="field"><label class="field-label" for="net-apSSID">SSID</label>
+            <div class="field"><label class="field-label" for="net-apSSID" data-i18n="settingsPages.netSsid">SSID</label>
               <input type="text" name="apSSID" id="net-apSSID" placeholder="WaterLogger" class="input">
             </div>
-            <div class="field"><label class="field-label">Password</label>
+            <div class="field"><label class="field-label" data-i18n="settingsPages.netPassword">Password</label>
               <div style="display:flex;gap:8px">
                 <input type="password" name="apPassword" id="net-apPass" class="input" style="flex:1">
                 <button type="button" class="btn" data-click="togglePass" data-args='["net-apPass"]'><span data-icon="eye"></span></button>
@@ -48,14 +48,14 @@
           </div>
         </div>
         <div class="card">
-          <div class="card-head"><div class="card-title"><span data-icon="wrench"></span> AP Network Properties</div></div>
+          <div class="card-head"><div class="card-title"><span data-icon="wrench"></span> <span data-i18n="settingsPages.netApProps">AP Network Properties</span></div></div>
           <div class="card-body">
             <div class="form-grid">
-              <div class="field"><label class="field-label" for="net-apIP">IP Address</label><input type="text" name="apIP"
+              <div class="field"><label class="field-label" for="net-apIP" data-i18n="settingsPages.netIpAddress">IP Address</label><input type="text" name="apIP"
                   id="net-apIP" class="input"></div>
-              <div class="field"><label class="field-label" for="net-apGW">Gateway</label> <input type="text" name="apGateway"
+              <div class="field"><label class="field-label" for="net-apGW" data-i18n="settingsPages.netGateway">Gateway</label> <input type="text" name="apGateway"
                   id="net-apGW" class="input"></div>
-              <div class="field"><label class="field-label" for="net-apSN">Subnet Mask</label><input type="text" name="apSubnet"
+              <div class="field"><label class="field-label" for="net-apSN" data-i18n="settingsPages.netSubnet">Subnet Mask</label><input type="text" name="apSubnet"
                   id="net-apSN" class="input"></div>
             </div>
           </div>
@@ -65,9 +65,9 @@
       <!-- Client Settings -->
       <div id="clientSection" style="display:none">
         <div class="card">
-          <div class="card-head"><div class="card-title"><span data-icon="link"></span> Client Mode</div></div>
+          <div class="card-head"><div class="card-title"><span data-icon="link"></span> <span data-i18n="settingsPages.netClientMode">Client Mode</span></div></div>
           <div class="card-body">
-            <div class="field"><label class="field-label">SSID</label>
+            <div class="field"><label class="field-label" data-i18n="settingsPages.netSsid">SSID</label>
               <div style="display:flex;gap:8px">
                 <input type="text" name="clientSSID" id="net-cSSID" class="input" style="flex:1">
                 <button type="button" class="btn" data-click="netScanWifi"><span data-icon="search"></span></button>
@@ -76,18 +76,18 @@
             <div id="wifiList"
               style="display:none;margin-bottom:1rem;max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
             </div>
-            <div class="field"><label class="field-label">Password</label>
+            <div class="field"><label class="field-label" data-i18n="settingsPages.netPassword">Password</label>
               <div style="display:flex;gap:8px">
                 <input type="password" name="clientPassword" id="net-cPass" class="input" style="flex:1">
                 <button type="button" class="btn" data-click="togglePass" data-args='["net-cPass"]'><span data-icon="eye"></span></button>
-                <button type="button" class="btn" data-click="netTestWifi" title="Verify credentials without saving">🧪 Test</button>
+                <button type="button" class="btn" data-click="netTestWifi" data-i18n-title="settingsPages.netTestTitle" title="Verify credentials without saving">🧪 <span data-i18n="settingsPages.netTest">Test</span></button>
               </div>
               <div id="net-testResult" style="font-size:.85rem;margin-top:6px"></div>
             </div>
           </div>
         </div>
         <div class="card">
-          <div class="card-head"><div class="card-title"><span data-icon="wrench"></span> Client Network Properties</div></div>
+          <div class="card-head"><div class="card-title"><span data-icon="wrench"></span> <span data-i18n="settingsPages.netClientProps">Client Network Properties</span></div></div>
           <div class="card-body">
             <div class="form-grid" id="staticFields">
               <!-- Hidden fields to store current connection details when form is un-checked -->
@@ -96,25 +96,25 @@
               <input type="hidden" id="net-sn-current" value="">
               <input type="hidden" id="net-dns-current" value="">
 
-              <div class="field"><label class="field-label" for="net-ip2">IP Address</label><input type="text" name="staticIP"
+              <div class="field"><label class="field-label" for="net-ip2" data-i18n="settingsPages.netIpAddress">IP Address</label><input type="text" name="staticIP"
                   id="net-ip2" class="input" disabled></div>
-              <div class="field"><label class="field-label" for="net-gw">Gateway</label> <input type="text" name="gateway"
+              <div class="field"><label class="field-label" for="net-gw" data-i18n="settingsPages.netGateway">Gateway</label> <input type="text" name="gateway"
                   id="net-gw" class="input" disabled></div>
-              <div class="field"><label class="field-label" for="net-sn">Subnet Mask</label><input type="text" name="subnet"
+              <div class="field"><label class="field-label" for="net-sn" data-i18n="settingsPages.netSubnet">Subnet Mask</label><input type="text" name="subnet"
                   id="net-sn" class="input" disabled></div>
-              <div class="field"><label class="field-label" for="net-dns">DNS Server</label> <input type="text" name="dns"
+              <div class="field"><label class="field-label" for="net-dns" data-i18n="settingsPages.netDns">DNS Server</label> <input type="text" name="dns"
                   id="net-dns" class="input" disabled></div>
             </div>
             <div class="field mt-1">
               <label class="field-label">
-                <input type="checkbox" name="useStaticIP" id="staticCheck" value="1" data-change="netToggleStatic"> Use
-                Static IP
+                <input type="checkbox" name="useStaticIP" id="staticCheck" value="1" data-change="netToggleStatic"> <span data-i18n="settingsPages.netUseStaticIp">Use
+                Static IP</span>
               </label>
             </div>
           </div>
         </div>
       </div>
 
-      <button type="submit" class="btn primary"><span data-icon="save"></span> Save &amp; Restart</button>
+      <button type="submit" class="btn primary"><span data-icon="save"></span> <span data-i18n="settingsPages.netSaveRestart">Save &amp; Restart</span></button>
     </form>
   </section>
