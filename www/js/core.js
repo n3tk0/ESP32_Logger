@@ -1008,6 +1008,7 @@ function pageInit(page) {
       remoteInit();
       break;
     case "settings":
+      if (typeof hubStatusInit === "function") hubStatusInit();
       break;
   }
 }

@@ -176,6 +176,7 @@ button, a, [role="button"] { min-height: 24px; }
   border-color:var(--accent);
   box-shadow:0 0 0 3px var(--accent-soft);
 }
+.hub-row.search-match { box-shadow: inset 0 0 0 2px var(--accent-soft); }
 
 /* APP shell */
 .app {
@@ -722,13 +723,54 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
    ring — surface it on the visual track instead. */
 .switch input:focus-visible + span { outline:3px solid var(--accent); outline-offset:2px; }
 
-/* SETTINGS HUB */
+/* SETTINGS HUB (grid-card variant — still used wherever set-card markup
+   appears, e.g. other card decks). */
 .set-card { display:flex; flex-direction:column; gap:6px; padding:18px; background:var(--panel); border:1px solid var(--border); border-radius:6px; cursor:pointer; transition:.12s; }
 .set-card:hover { border-color:var(--accent); transform:translateY(-1px); box-shadow:var(--shadow-md); }
 .set-card-icon { width:32px; height:32px; border-radius:6px; background:var(--accent-soft); color:var(--accent); display:grid; place-items:center; }
 .set-card-icon [data-lucide] { width:16px; height:16px; }
 .set-card-t { font-weight:600; font-size:13px; }
 .set-card-d { font-size:11.5px; color:var(--text-3); }
+
+/* SETTINGS HUB — status-row variant (redesign 2a): each settings section is
+   a single .card whose .card-body holds one .hub-row per link, showing live
+   device state instead of a blind drill-down. */
+.hub-row {
+  display: grid;
+  grid-template-columns: 34px 1fr minmax(0,240px) 18px;
+  gap: 12px;
+  align-items: center;
+  padding: 13px 16px;
+  min-height: 56px;
+  border-bottom: 1px solid var(--border);
+  color: inherit;
+  text-decoration: none;
+  transition: background .1s;
+}
+.hub-row:last-child { border-bottom: none; }
+.hub-row:hover, .hub-row:focus-visible { background: var(--panel-2); }
+.hub-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.hub-row.hub-row-attn { background: var(--accent-soft); }
+.hub-row.hub-row-attn:hover, .hub-row.hub-row-attn:focus-visible { background: var(--accent-soft); }
+.hub-row-icon { color: var(--text-3); display: flex; }
+.hub-row.hub-row-attn .hub-row-icon,
+.hub-row.hub-row-attn .hub-row-chev { color: var(--accent); }
+.hub-row-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.hub-row-title { font-size: 13px; font-weight: 600; }
+.hub-row-sub { font-size: 11.5px; color: var(--text-3); margin: 0; }
+.hub-row-status { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.hub-row-status.mono { font-size: 12px; color: var(--text-2); text-align: right; white-space: nowrap; }
+.hub-row-chev { color: var(--text-4); display: flex; }
+.hub-row-skel {
+  display: inline-block; width: 64px; height: 14px; border-radius: 4px;
+  background: linear-gradient(90deg, var(--panel) 0%, var(--panel-3) 50%, var(--panel) 100%);
+  background-size: 200% 100%;
+  animation: dbSkeleton 1.4s ease-in-out infinite;
+}
+@media (max-width: 640px) {
+  .hub-row { grid-template-columns: 34px 1fr 18px; min-height: 56px; }
+  .hub-row-status { display: none; }
+}
 
 /* DROPZONE */
 .dropzone {
@@ -831,6 +873,7 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
    5. SETTINGS SEARCH HIGHLIGHT
    ══════════════════════════════════════════════ */
 .set-card.search-hide  { opacity:.25; pointer-events:none; }
+.hub-row.search-hide   { opacity:.25; pointer-events:none; }
 
 /* ══════════════════════════════════════════════
    7. OTA PROGRESS

@@ -2166,23 +2166,196 @@ function modulesSelect(id) { Modules.select(id); }
 // rationale.  modulesInit is called internally by pageInit, not via markup,
 // so it is left out here.
 // Settings-hub filter — #settings-search shipped with no handler, so typing
-// in it did nothing. Matches card title/description text; hides sections
-// whose cards all miss and shows the #settings-no-match empty state.
+// in it did nothing. Matches row title/sub text; hides sections whose rows
+// all miss and shows the #settings-no-match empty state.
+// Redesign 2a swapped .set-card grid cells for .hub-row status rows — the
+// selector below follows that, keeping the same filter behaviour.
 function settingsHubFilter() {
   var q = (this.value || "").trim().toLowerCase();
   var any = false;
-  document.querySelectorAll("#settings-grid .set-card").forEach(function (c) {
+  document.querySelectorAll("#settings-grid .hub-row").forEach(function (c) {
     var hit = !q || c.textContent.toLowerCase().indexOf(q) !== -1;
     c.classList.toggle("search-hide", !!q && !hit);
     c.classList.toggle("search-match", !!q && hit);
     if (hit) any = true;
   });
   document.querySelectorAll("#settings-grid .settings-section").forEach(function (sec) {
-    var visible = sec.querySelector(".set-card:not(.search-hide)");
+    var visible = sec.querySelector(".hub-row:not(.search-hide)");
     sec.style.display = visible ? "" : "none";
   });
   var nomatch = document.getElementById("settings-no-match");
   if (nomatch) nomatch.style.display = any ? "none" : "";
+}
+
+// ============================================================================
+// SETTINGS HUB — status rows (redesign 2a)
+// ----------------------------------------------------------------------------
+// Paints what's cheap immediately from the already-cached ST/CFG (populated
+// by core.js before first navigation), then lazy-fills the rows that need an
+// extra round trip: Platform's sensor count and Export's channel count both
+// live in platform_config.json (one shared fetch), Nodes needs the ESP-NOW
+// and Remote status endpoints, and the E-ink row needs the Kindle config +
+// slots endpoints. Every one of those four endpoints only exists when its
+// firmware feature was compiled in (#ifdef FEATURE_..., src/web/ApiHandlers.cpp)
+// — a 404 from any of them is read as "not in this build", never guessed.
+// ============================================================================
+var HUB_ROTATION_KEYS = ["rotationNone", "rotationDaily", "rotationWeekly", "rotationMonthly", "rotationSize"];
+var HUB_MODE_KEYS = ["modeLegacy", "modeContinuous", "modeHybrid"];
+
+function _hubBadge(cls, text) {
+  return '<span class="badge ' + cls + ' mono">' + esc(text) + '</span>';
+}
+
+function hubStatusInit() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  var notInBuild = [];
+
+  // ── Device (ST, no fetch) ────────────────────────────────────────────────
+  setEl2("hub-st-device", (ST.device || ST.deviceName || "—") +
+    (ST.deviceId ? " · " + String(ST.deviceId).toLowerCase() : ""));
+
+  // ── Platform mode (ST.caps.platformMode, no fetch) ──────────────────────
+  var modeIdx = ST.caps && typeof ST.caps.platformMode === "number" ? ST.caps.platformMode : null;
+  var modeHtml = modeIdx !== null && HUB_MODE_KEYS[modeIdx]
+    ? _hubBadge("acc", t("settingsHub." + HUB_MODE_KEYS[modeIdx]))
+    : _hubBadge("dim", t("settingsHub.notAvailable"));
+  setEl2("hub-st-platform", modeHtml + '<span id="hub-st-platform-sensors"></span>');
+
+  // ── Network & time (ST, no fetch) ────────────────────────────────────────
+  var netHtml = ST.wifi === "client"
+    ? _hubBadge("ok", t("settingsHub.wifiClient"))
+    : _hubBadge("dim", t("settingsHub.apMode"));
+  var timeKey = ST.timeSource === "ntp" ? "timeNtp"
+    : ST.timeSource === "rtc" ? "timeRtc"
+    : ST.timeSource === "busy" ? "timeBusy"
+    : "timeUnknown";
+  var timeCls = ST.timeSource === "ntp" || ST.timeSource === "rtc" ? "ok" : "warn";
+  setEl2("hub-st-netime", netHtml + _hubBadge(timeCls, t("settingsHub." + timeKey)));
+
+  // ── Data log (CFG.datalog, no fetch) ─────────────────────────────────────
+  var dl = (CFG && CFG.datalog) || null;
+  if (dl) {
+    var rotKey = HUB_ROTATION_KEYS[dl.rotation] || HUB_ROTATION_KEYS[0];
+    setEl2("hub-st-datalog", esc((dl.prefix || "datalog")) + " · " + esc(t("settingsHub." + rotKey)));
+  } else {
+    setEl2("hub-st-datalog", t("settingsHub.notAvailable"));
+  }
+
+  // ── Files (ST.fsPct, no fetch — reflects the active storage at boot) ────
+  if (typeof ST.fsPct === "number") {
+    var pct = Math.round(ST.fsPct);
+    var barCls = pct >= 90 ? "warn" : "";
+    setEl2("hub-st-files",
+      '<span class="storage-bar" style="width:60px"><span class="' + barCls + '" style="width:' + pct + '%"></span></span>' +
+      '<span class="mono" style="font-size:12px">' + pct + '%</span>');
+  } else {
+    setEl2("hub-st-files", _hubBadge("dim", t("settingsHub.notAvailable")));
+  }
+
+  // ── Platform sensor count + Export channel count (one shared fetch) ─────
+  fetchWithTimeout("/api/platform_config", {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (pc) {
+      var sensors = document.getElementById("hub-st-platform-sensors");
+      if (sensors) sensors.innerHTML = " " + _hubBadge("dim", t("settingsHub.sensorsCount", { n: (pc.sensors || []).length }));
+
+      var exp = pc.export || {};
+      var enabled = ["mqtt", "http", "sensor_community", "opensensemap"].filter(function (k) {
+        return exp[k] && exp[k].enabled;
+      }).length;
+      setEl2("hub-st-export", enabled
+        ? _hubBadge("ok", t("settingsHub.exportChannels", { n: enabled }))
+        : _hubBadge("dim", t("settingsHub.exportNone")));
+    })
+    .catch(function () {
+      var sensors = document.getElementById("hub-st-platform-sensors");
+      if (sensors) sensors.innerHTML = "";
+      setEl2("hub-st-export", _hubBadge("dim", t("settingsHub.notAvailable")));
+    });
+
+  // ── Nodes: merge ESP-NOW + WiFi remote (two endpoints, either may 404 if
+  //    its feature isn't compiled in — that's the build-absence signal). ──
+  var espnowP = fetchWithTimeout("/api/espnow/status", {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .catch(function (status) { return { __absent: status === 404 }; });
+  var remoteP = fetchWithTimeout("/api/remote/status", {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .catch(function (status) { return { __absent: status === 404 }; });
+  Promise.all([espnowP, remoteP]).then(function (res) {
+    var en = res[0], rn = res[1];
+    if (en.__absent) notInBuild.push("FEATURE_ESPNOW");
+    if (rn.__absent) notInBuild.push("FEATURE_REMOTE_NODES");
+    var nodes = [].concat((en.nodes || [])).concat((rn.nodes || []));
+    var row = document.getElementById("hub-row-nodes");
+    if (!nodes.length) {
+      setEl2("hub-st-nodes", en.__absent && rn.__absent
+        ? _hubBadge("dim", t("settingsHub.notAvailable"))
+        : _hubBadge("dim", t("settingsHub.nodesNone")));
+    } else {
+      var offline = nodes.filter(function (n) {
+        return n.offline === true || n.online === false;
+      }).length;
+      if (offline > 0) {
+        setEl2("hub-st-nodes", _hubBadge("warn", t("settingsHub.nodesOfflineOf", { off: offline, total: nodes.length })));
+        if (row) row.classList.add("hub-row-attn");
+      } else {
+        setEl2("hub-st-nodes", _hubBadge("ok", t("settingsHub.nodesAllOnline", { total: nodes.length })));
+      }
+    }
+    _hubMaybeShowNotInBuild(notInBuild, t);
+  });
+
+  // ── E-ink dashboard zones (two endpoints; 404 => not in this build) ─────
+  var kdConfigP = fetchWithTimeout("/api/kindle/config", {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .catch(function (status) { return { __absent: status === 404 }; });
+  var kdSlotsP = fetchWithTimeout("/api/kindle/slots", {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .catch(function (status) { return { __absent: status === 404 }; });
+  Promise.all([kdConfigP, kdSlotsP]).then(function (res) {
+    var kc = res[0], ks = res[1];
+    if (kc.__absent || ks.__absent) {
+      notInBuild.push("FEATURE_KINDLE_DASHBOARD");
+      setEl2("hub-st-kindle", _hubBadge("dim", t("settingsHub.notAvailable")));
+    } else {
+      var zones = (ks.zones && typeof ks.zones === "object") ? ks.zones : {};
+      var order = ks.order || Object.keys(zones);
+      var total = order.length || 11;
+      var filled = 0;
+      order.forEach(function (o) {
+        var key = o && o.key !== undefined ? o.key : o;
+        var z = zones[key];
+        if (z && z.sensor && z.metric) filled++;
+      });
+      var cadenceHtml = kc.refresh_sec
+        ? " " + _hubBadge("dim", t("settingsHub.everyMin", { m: Math.round(kc.refresh_sec / 60) }))
+        : "";
+      setEl2("hub-st-kindle", _hubBadge("dim", t("settingsHub.zonesFilled", { filled: filled, total: total })) + cadenceHtml);
+    }
+    _hubMaybeShowNotInBuild(notInBuild, t);
+  });
+}
+
+// Both async probes (nodes + kindle) call this after they land; only once
+// both have reported in do we know the full not-in-build list, so each call
+// just re-renders from the array accumulated so far — settling twice is
+// harmless (innerHTML replace) and avoids a fragile "wait for both" join.
+function _hubMaybeShowNotInBuild(list, t) {
+  var card = document.getElementById("hub-not-in-build");
+  var listEl = document.getElementById("hub-not-in-build-list");
+  if (!card || !listEl) return;
+  if (!list.length) { card.style.display = "none"; return; }
+  listEl.innerHTML = list.map(function (f) { return _hubBadge("dim", f); }).join(" ");
+  card.style.display = "";
+  if (window.Icons && Icons.swap) Icons.swap(card);
+}
+
+// textContent is unsafe here — several callers build small badge HTML
+// fragments (_hubBadge already escapes the interpolated text). Kept as a
+// tiny helper instead of reaching for showMsg() (which auto-clears).
+function setEl2(id, html) {
+  var e = document.getElementById(id);
+  if (e) e.innerHTML = html;
 }
 
 registerHandlers({

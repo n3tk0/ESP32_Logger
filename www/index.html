@@ -506,91 +506,143 @@
         </div>
       </section>
 
-      <!-- ─── PAGE: SETTINGS ─── -->
+      <!-- ─── PAGE: SETTINGS (redesign 2a — status rows) ─── -->
       <section class="page" id="page-settings">
         <div class="page-head">
           <div>
-            <h1 class="page-title"><span data-icon="settings"></span> Settings</h1>
-            <div class="page-sub">Configure device, sensors, exports and storage</div>
+            <h1 class="page-title"><span data-icon="settings"></span> <span data-i18n="settingsHub.title">Settings</span></h1>
+            <div class="page-sub" data-i18n="settingsHub.subtitle">Every row shows what the device holds right now — without opening it</div>
           </div>
           <div class="page-actions">
-            <input type="search" id="settings-search" class="input" placeholder="Filter settings…" style="width:240px" data-input="settingsHubFilter" aria-label="Filter settings">
-            <a href="/export_settings" download class="btn"><span data-icon="download"></span> Export</a>
-            <button class="btn warn" data-click="showPopup" data-args='["restartPopup"]'><span data-icon="refresh-cw"></span> Restart</button>
+            <input type="search" id="settings-search" class="input" data-i18n-placeholder="settingsHub.searchPh" placeholder="Filter settings…" style="width:240px" data-input="settingsHubFilter" aria-label="Filter settings" data-i18n-aria-label="settingsHub.searchAria">
+            <a href="/export_settings" download class="btn"><span data-icon="download"></span> <span data-i18n="common.export">Export</span></a>
+            <button class="btn warn" data-click="showPopup" data-args='["restartPopup"]'><span data-icon="refresh-cw"></span> <span data-i18n="chrome.restartDevice">Restart</span></button>
           </div>
         </div>
 
-        <!-- Settings hub: 10 cards collapsed to 6 in 3 grouped sections.
-             Hardware + Core logic + Modules → Platform (aggregator subpage).
-             Network + Time → Network & Time (aggregator subpage).
-             Theme moved into the topbar / quick-settings drawer.  Legacy
-             URLs (#settings_theme, #settings_hardware, …) still work — the
-             subpages were not removed. -->
+        <!-- Settings hub: status-first rows grouped into 3 sections. Each row
+             is a live snapshot (hubStatusInit() in settings.js fills the
+             .hub-row-status spans from cached ST/CFG + a couple of light
+             extra fetches) so you see what's configured before drilling in —
+             not just a label. Legacy URLs for pages still reachable under
+             their old names (#settings_device, #settings_platform, …) keep
+             working; only #settings_espnow / #settings_remote were retired,
+             folded into the single #settings_nodes page. -->
         <div id="settings-grid">
           <div class="settings-section">
-            <div class="settings-section-head">DEVICE</div>
-            <div class="grid grid-auto">
-              <div class="set-card" data-click="showSubpage" data-args='["settings_device"]'>
-                <div class="set-card-icon"><span data-icon="smartphone"></span></div>
-                <div class="set-card-t">Device</div>
-                <div class="set-card-d">Name · ID · default storage view</div>
-              </div>
-              <div class="set-card" data-click="showSubpage" data-args='["settings_platform"]'>
-                <div class="set-card-icon"><span data-icon="cpu"></span></div>
-                <div class="set-card-t">Platform</div>
-                <div class="set-card-d">Mode · pins · sensors · modules</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-section">
-            <div class="settings-section-head">CONNECTIVITY</div>
-            <div class="grid grid-auto">
-              <div class="set-card" data-click="showSubpage" data-args='["settings_netime"]'>
-                <div class="set-card-icon"><span data-icon="wifi"></span></div>
-                <div class="set-card-t">Network &amp; Time</div>
-                <div class="set-card-d">WiFi · AP · hostname · NTP · timezone</div>
-              </div>
-              <div class="set-card" data-click="showSubpage" data-args='["settings_export"]'>
-                <div class="set-card-icon"><span data-icon="cloud-upload"></span></div>
-                <div class="set-card-t">Export</div>
-                <div class="set-card-d">MQTT · HTTP · openSenseMap · webhook</div>
-              </div>
-              <div class="set-card" data-click="showSubpage" data-args='["settings_espnow"]'>
-                <div class="set-card-icon"><span data-icon="radio"></span></div>
-                <div class="set-card-t">Battery nodes</div>
-                <div class="set-card-d">ESP-NOW pairing · battery · radio counters</div>
-              </div>
-              <div class="set-card" data-click="showSubpage" data-args='["settings_kindle"]'>
-                <div class="set-card-icon"><span data-icon="book-text"></span></div>
-                <div class="set-card-t">E-ink dashboard</div>
-                <div class="set-card-d">Typeface · clock · weight · units</div>
-              </div>
-              <div class="set-card" data-click="showSubpage" data-args='["settings_remote"]'>
-                <div class="set-card-icon"><span data-icon="wifi"></span></div>
-                <div class="set-card-t">Remote WiFi nodes</div>
-                <div class="set-card-d">HTTP ingest · status · diagnostics</div>
+            <div class="settings-section-head" data-i18n="settingsHub.groupDevice">DEVICE</div>
+            <div class="card">
+              <div class="card-body" style="padding:0">
+                <a href="#settings_device" class="hub-row" data-click="showSubpage" data-args='["settings_device"]'>
+                  <span class="hub-row-icon"><span data-icon="smartphone"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.device">Device</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.deviceSub">Name · ID · default storage view</span>
+                  </span>
+                  <span class="hub-row-status mono" id="hub-st-device"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
+                <a href="#settings_platform" class="hub-row" data-click="showSubpage" data-args='["settings_platform"]'>
+                  <span class="hub-row-icon"><span data-icon="cpu"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.platform">Platform</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.platformSub">Mode · pins · sensors · modules</span>
+                  </span>
+                  <span class="hub-row-status" id="hub-st-platform"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
               </div>
             </div>
           </div>
 
           <div class="settings-section">
-            <div class="settings-section-head">STORAGE</div>
-            <div class="grid grid-auto">
-              <div class="set-card" data-click="showSubpage" data-args='["settings_datalog"]'>
-                <div class="set-card-icon"><span data-icon="file-text"></span></div>
-                <div class="set-card-t">Data log</div>
-                <div class="set-card-d">Rotation · retention · format</div>
-              </div>
-              <div class="set-card" data-click="showSubpage" data-args='["files"]'>
-                <div class="set-card-icon"><span data-icon="folder"></span></div>
-                <div class="set-card-t">Files</div>
-                <div class="set-card-d">Browse SD / LittleFS</div>
+            <div class="settings-section-head" data-i18n="settingsHub.groupConnectivity">CONNECTIVITY</div>
+            <div class="card">
+              <div class="card-body" style="padding:0">
+                <a href="#settings_netime" class="hub-row" data-click="showSubpage" data-args='["settings_netime"]'>
+                  <span class="hub-row-icon"><span data-icon="wifi"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.netime">Network &amp; Time</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.netimeSub">WiFi · AP · hostname · NTP · timezone</span>
+                  </span>
+                  <span class="hub-row-status" id="hub-st-netime"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
+                <a href="#settings_export" class="hub-row" data-click="showSubpage" data-args='["settings_export"]'>
+                  <span class="hub-row-icon"><span data-icon="cloud-upload"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.export">Export</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.exportSub">MQTT · HTTP · openSenseMap · webhook</span>
+                  </span>
+                  <span class="hub-row-status" id="hub-st-export"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
+                <!-- Merged ESP-NOW battery nodes + WiFi remote nodes (redesign
+                     1a). hub-row-attn is toggled on by hubStatusInit() when
+                     any node is offline or otherwise needs attention. -->
+                <a href="#settings_nodes" class="hub-row" id="hub-row-nodes" data-click="showSubpage" data-args='["settings_nodes"]'>
+                  <span class="hub-row-icon"><span data-icon="cpu"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.nodes">Nodes <span class="badge dim mono">ESP-NOW + WiFi</span></span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.nodesSub">Pairing · battery · reports · radio counters</span>
+                  </span>
+                  <span class="hub-row-status" id="hub-st-nodes"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
+                <a href="#settings_kindle" class="hub-row" data-click="showSubpage" data-args='["settings_kindle"]'>
+                  <span class="hub-row-icon"><span data-icon="book-text"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.kindle">E-ink dashboard</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.kindleSub">Zones · typeface · clock · units</span>
+                  </span>
+                  <span class="hub-row-status" id="hub-st-kindle"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
               </div>
             </div>
           </div>
 
-          <p class="hint" style="margin-top:var(--gap)">
+          <div class="settings-section">
+            <div class="settings-section-head" data-i18n="settingsHub.groupStorage">STORAGE</div>
+            <div class="card">
+              <div class="card-body" style="padding:0">
+                <a href="#settings_datalog" class="hub-row" data-click="showSubpage" data-args='["settings_datalog"]'>
+                  <span class="hub-row-icon"><span data-icon="file-text"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.datalog">Data log</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.datalogSub">Rotation · retention · format</span>
+                  </span>
+                  <span class="hub-row-status mono" id="hub-st-datalog"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
+                <a href="#files" class="hub-row" data-click="showSubpage" data-args='["files"]'>
+                  <span class="hub-row-icon"><span data-icon="folder"></span></span>
+                  <span class="hub-row-main">
+                    <span class="hub-row-title" data-i18n="settingsHub.files">Files</span>
+                    <span class="hub-row-sub" data-i18n="settingsHub.filesSub">Browse SD / LittleFS</span>
+                  </span>
+                  <span class="hub-row-status" id="hub-st-files"><span class="hub-row-skel"></span></span>
+                  <span class="hub-row-chev"><span data-icon="chevron-right"></span></span>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Shown only when hubStatusInit() actually confirms a feature is
+               absent from this build (probed via its /api/* endpoint 404ing
+               — see FEATURE_KINDLE_DASHBOARD / FEATURE_REMOTE_NODES in
+               src/web/ApiHandlers.cpp), never as a guess. -->
+          <div class="card" id="hub-not-in-build" style="margin-top:var(--gap);border-style:dashed;display:none">
+            <div class="card-body" style="display:flex;gap:12px;align-items:flex-start">
+              <span data-icon="info" style="color:var(--text-3);margin-top:2px"></span>
+              <div>
+                <strong style="font-size:12.5px"><span data-i18n="common.notInBuild">Not in this build</span>: <span id="hub-not-in-build-list"></span></strong>
+                <p class="hint" style="margin:4px 0 0" data-i18n="settingsHub.notInBuildHint">Not an error — just not compiled in. Enable the matching FEATURE_ flag in the deploy tool and reflash.</p>
+              </div>
+            </div>
+          </div>
+
+          <p class="hint" style="margin-top:var(--gap)" data-i18n-html="settingsHub.footerHint">
             Looking for theme, accent, or density? They live in the topbar now (<span data-icon="palette"></span>) and quick-settings drawer (<kbd>,</kbd>).
             Press <kbd>⌘K</kbd> / <kbd>Ctrl K</kbd> to search every setting field.
           </p>
@@ -818,6 +870,7 @@
        after every deferred script here regardless of position. -->
   <script src="/js/i18n.js" defer></script>
   <script src="/i18n/common.js" defer></script>
+  <script src="/i18n/settings-hub.js" defer></script>
   <script src="/js/icons.js" defer></script>
   <script src="/js/pages.js" defer></script>
   <script src="/js/settings.js" defer></script>
