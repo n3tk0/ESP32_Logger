@@ -1,0 +1,174 @@
+  <!-- ═══ PAGE: NODES (redesign 1a) ═══
+       Merges the former Battery nodes (#settings_espnow, ESP-NOW) and Remote
+       WiFi nodes (#settings_remote) pages into one list, transport shown as
+       a column. Driven by www/js/nodes.js. Old routes are gone (no
+       redirect) — see the "Legacy URLs" decision in the redesign PR. -->
+  <section class="page" id="page-settings_nodes">
+    <div class="page-head">
+      <div>
+        <h1 class="page-title"><span data-icon="cpu"></span> <span data-i18n="nodes.title">Nodes</span></h1>
+        <div class="page-sub"><a href="#settings" data-i18n="chrome.navSettings">Settings</a> / <span data-i18n="nodes.subtitle">ESP-NOW and WiFi nodes in one place</span></div>
+      </div>
+      <div class="page-actions">
+        <button class="btn" data-click="nodesRefresh"><span data-icon="refresh-cw"></span> <span data-i18n="common.refresh">Refresh</span></button>
+        <button class="btn primary" id="nd-pair-cta" data-click="nodesPair"><span data-icon="link"></span> <span data-i18n="nodes.pairCta">Open pairing window</span></button>
+      </div>
+    </div>
+
+    <div id="nd-msg"></div>
+
+    <div class="grid grid-4" style="margin-bottom:var(--gap)" id="nd-kpis">
+      <div class="kpi">
+        <div class="kpi-l"><span data-icon="cpu"></span> <span data-i18n="nodes.kpiTotal">Nodes</span></div>
+        <div class="kpi-v"><span class="num" id="nd-kpi-total">–</span><span class="unit" data-i18n="nodes.kpiTotalUnit">total</span></div>
+        <div class="kpi-d mono" id="nd-kpi-total-d"></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-l"><span data-icon="circle"></span> <span data-i18n="nodes.kpiOnline">Online</span></div>
+        <div class="kpi-v"><span class="num" id="nd-kpi-online" style="color:var(--ok)">–</span><span class="unit" id="nd-kpi-online-unit"></span></div>
+        <div class="kpi-d mono" id="nd-kpi-online-d"></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-l"><span data-icon="battery"></span> <span data-i18n="nodes.kpiBattery">Lowest battery</span></div>
+        <div class="kpi-v"><span class="num" id="nd-kpi-batt" style="color:var(--warn)">–</span><span class="unit">%</span></div>
+        <div class="kpi-d mono" id="nd-kpi-batt-d"></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-l"><span data-icon="activity"></span> <span data-i18n="nodes.kpiFrames">Frames accepted</span></div>
+        <div class="kpi-v"><span class="num" id="nd-kpi-frames">–</span><span class="unit" data-i18n="nodes.kpiFramesUnit">since boot</span></div>
+        <div class="kpi-d mono" id="nd-kpi-frames-d"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head" style="gap:10px;flex-wrap:wrap">
+        <div class="card-title"><span data-icon="cpu"></span> <span data-i18n="nodes.allNodes">All nodes</span></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div class="seg" role="group" aria-label="Filter" id="nd-filter">
+            <button type="button" class="active" data-click="nodesFilter" data-args='["all"]' data-i18n="nodes.filterAll">All</button>
+            <button type="button" data-click="nodesFilter" data-args='["espnow"]'>ESP-NOW</button>
+            <button type="button" data-click="nodesFilter" data-args='["wifi"]'>WiFi</button>
+            <button type="button" data-click="nodesFilter" data-args='["problem"]' data-i18n="nodes.filterProblem">Problem</button>
+          </div>
+          <input type="search" id="nd-search" class="input" data-i18n-placeholder="nodes.searchPh" placeholder="Search nodes…" style="width:160px;height:36px" data-input="nodesSearch">
+        </div>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div class="node-table-head">
+          <span data-i18n="nodes.colName">Node</span><span data-i18n="nodes.colTransport">Transport</span><span data-i18n="nodes.colBattery">Battery</span><span data-i18n="nodes.colSeen">Seen</span><span data-i18n="nodes.colRssi">RSSI</span><span data-i18n="nodes.colClock">Clock</span><span></span>
+        </div>
+        <div id="nd-rows"><p class="hint" data-i18n="common.loading" style="margin:14px">Loading…</p></div>
+      </div>
+    </div>
+
+    <!-- Pairing — ESP-NOW only, hidden entirely when the feature isn't built. -->
+    <div class="card" id="nd-card-pairing" style="margin-top:var(--gap);display:none">
+      <div class="card-head">
+        <div class="card-title"><span data-icon="link"></span> <span data-i18n="nodes.pairingTitle">Pairing</span></div>
+        <span id="nd-pair-state" class="badge dim">closed</span>
+      </div>
+      <div class="card-body">
+        <p class="hint" data-i18n="nodes.pairingHint">
+          Open the window, then power the node. It sweeps channels 1–13 looking
+          for a collector and is adopted only while this is open and only if it
+          holds the same 16-character key this firmware was built with.
+        </p>
+        <div class="field">
+          <label class="field-label" for="nd-pair-secs" data-i18n="nodes.pairingWindow">Window length</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="nd-pair-secs" class="input" style="flex:0 0 140px">
+              <option value="60" data-i18n="nodes.pairing1m">1 minute</option>
+              <option value="120" selected data-i18n="nodes.pairing2m">2 minutes</option>
+              <option value="300" data-i18n="nodes.pairing5m">5 minutes</option>
+            </select>
+            <button class="btn primary" data-click="nodesPair">
+              <span data-icon="link"></span> <span data-i18n="nodes.pairCta">Open pairing window</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="nd-card-addmanual" style="margin-top:var(--gap);display:none">
+      <div class="card-head">
+        <div class="card-title"><span data-icon="plus-circle"></span> <span data-i18n="nodes.addManualTitle">Add node manually</span></div>
+      </div>
+      <div class="card-body">
+        <p class="hint" data-i18n="nodes.addManualHint">
+          For nodes that cannot pair over the air. The node must still hold the
+          same 16-character key to have its frames accepted.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:180px">
+            <label class="field-label" for="nd-add-mac" data-i18n="nodes.addMac">MAC address</label>
+            <input class="input" id="nd-add-mac" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17">
+          </div>
+          <div style="flex:0 0 100px">
+            <label class="field-label" for="nd-add-id" data-i18n="nodes.addId">Node ID</label>
+            <input class="input" id="nd-add-id" type="number" min="1" max="254" placeholder="1">
+          </div>
+          <div style="flex:1;min-width:120px">
+            <label class="field-label" for="nd-add-label" data-i18n="nodes.addName">Name</label>
+            <input class="input" id="nd-add-label" maxlength="16" placeholder="outdoor">
+          </div>
+          <div style="flex:0 0 110px">
+            <label class="field-label" for="nd-add-iv" data-i18n="nodes.addInterval">Interval (s)</label>
+            <input class="input" id="nd-add-iv" type="number" min="10" max="65535" value="60">
+          </div>
+          <button class="btn primary" data-click="nodesAddManual">
+            <span data-icon="plus"></span> <span data-i18n="common.add">Add</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="nd-card-config" style="margin-top:var(--gap);display:none">
+      <div class="card-head">
+        <div class="card-title"><span data-icon="settings"></span> <span data-i18n="nodes.configTitle">Configuration</span></div>
+      </div>
+      <div class="card-body">
+        <div class="field" style="max-width:320px">
+          <label class="field-label" for="nd-offline-iv" data-i18n="nodes.offlineThreshold">Offline threshold (missed intervals)</label>
+          <input class="input" id="nd-offline-iv" type="number" min="2" max="60" value="3" data-change="nodesFieldInput" data-input="nodesFieldInput">
+          <p class="hint" data-i18n="nodes.offlineThresholdHint">How many consecutive missed reports before a node counts as offline. Three is the default — one miss is ordinary on 2.4 GHz, so the minimum is two.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="nd-card-wifinote" style="margin-top:var(--gap);display:none">
+      <div class="card-body">
+        <p class="hint" data-i18n-html="nodes.wifiNote">
+          <strong>Note:</strong> WiFi nodes are configured via their own captive portal, and registered on this collector via <code>platform_config.json</code> sensor entries of type <code>"remote"</code>.
+        </p>
+      </div>
+    </div>
+
+    <details class="card" id="nd-card-diag" style="margin-top:var(--gap);display:none">
+      <summary class="card-head" style="cursor:pointer;list-style:none">
+        <div class="card-title"><span data-icon="activity"></span> <span data-i18n="nodes.diagTitle">Radio diagnostics</span></div>
+        <span id="nd-diag-badge" class="badge dim mono"></span>
+      </summary>
+      <div class="card-body">
+        <p class="hint" style="margin-top:0" data-i18n="nodes.diagHint">
+          Since boot. When nothing is arriving, these are what tell a mismatched
+          key from a moved channel from an unprovisioned node.
+        </p>
+        <div id="nd-stats" class="grid grid-auto"></div>
+      </div>
+    </details>
+
+    <!-- One savebar for every dirty ESP-NOW node (label/interval) plus the
+         offline-threshold config field. Forget is destructive and stays an
+         immediate action outside the savebar, like the confirm() it already
+         requires. WiFi rows have no editable fields (no endpoint to save to
+         — they're configured on their own captive portal), so they never
+         contribute to dirty state. -->
+    <div class="kd-savebar" id="nd-savebar" hidden>
+      <div class="kd-savebar-in">
+        <span id="nd-dirty" class="kd-dirty"></span>
+        <span style="flex:1"></span>
+        <button class="btn" data-click="nodesDiscard" data-i18n="common.discard">Discard</button>
+        <button class="btn primary" data-click="nodesSave"><span data-icon="save"></span> <span data-i18n="common.save">Save</span></button>
+      </div>
+    </div>
+  </section>

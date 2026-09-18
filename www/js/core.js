@@ -835,9 +835,8 @@ var LAZY_PAGES = {
   settings_modules:   1,
   settings_platform:  1, // aggregator: hardware + core logic + modules
   settings_netime:    1, // aggregator: network + time
-  settings_espnow:    1, // ESP-NOW battery nodes
+  settings_nodes:     1, // unified ESP-NOW + WiFi remote nodes (redesign 1a)
   settings_kindle:    1, // the e-ink dashboard's appearance
-  settings_remote:    1, // WiFi remote sensor nodes
   update:             1,
 };
 var _loadedPartials = {};   // page name → true once injected
@@ -998,14 +997,11 @@ function pageInit(page) {
     case "settings_modules":
       modulesInit();
       break;
-    case "settings_espnow":
-      espnowInit();
+    case "settings_nodes":
+      nodesInit();
       break;
     case "settings_kindle":
       kindleInit();
-      break;
-    case "settings_remote":
-      remoteInit();
       break;
     case "settings":
       if (typeof hubStatusInit === "function") hubStatusInit();
@@ -1311,9 +1307,8 @@ var PAGE_MSG_IDS = {
   settings_time: "time-msg",
   settings_datalog: "dl-msg",
   sensors:          "sl-msg",
-  settings_espnow:  "en-msg",
+  settings_nodes:   "nd-msg",
   settings_kindle:  "kd-msg",
-  settings_remote:  "rn-msg",
 };
 
 function settingsSave(ev, url, form, restart) {

@@ -121,7 +121,7 @@ var KD_ZONES = [
   { id:"batt", name:"Low-battery badge",
     where:"Beside the outdoor heading, when a node is nearly flat.",
     show:0x0080, bold:0, box:[234,12,30,26], sabox:[234,12,30,26],
-    fill:["link","#settings_espnow","Which nodes report a battery"] },
+    fill:["link","#settings_nodes","Which nodes report a battery"] },
 
   // The last two are not regions. They are the two things that appear inside
   // every region, and they own a weight bit each — which is why they used to
