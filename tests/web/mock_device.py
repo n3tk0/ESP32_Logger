@@ -47,6 +47,31 @@ STATUS = {
               "discover_seen": 5, "discover_bad_sig": 1, "paired": 3},
 }
 
+# GET /api/modules — the module manager's index, shaped like a real device's.
+# Two kinds of `status` on purpose, because the page has to survive both:
+# wifi/ota/time answer with the {text,tone} chip the UI renders directly,
+# while forecast answers with its own domain object and NO `text` field at
+# all — that row has to fall through to the client-side heuristic rather than
+# printing "undefined" or taking the whole list down with it.
+MODULES = [
+    {"id": "wifi", "name": "Wi-Fi", "enabled": True, "hasUI": True,
+     "description": "Station/AP connection, credentials and static-IP settings.",
+     "status": {"text": "Internet · 192.168.1.214 · -19 dBm", "tone": "ok"}},
+    {"id": "ota", "name": "OTA update", "enabled": True, "hasUI": True,
+     "description": "Firmware updates and A/B rollback.",
+     "status": {"tone": "ok", "text": "app1"}},
+    {"id": "time", "name": "Time", "enabled": True, "hasUI": True,
+     "description": "NTP sync, timezone and DST.",
+     "status": {"text": "synced", "tone": "ok"}},
+    {"id": "usbcdc", "name": "USB CDC", "enabled": False, "hasUI": False,
+     "description": "USB serial-on-boot.",
+     "status": {"tone": "ok", "text": "on · GPIO 18,19 locked"}},
+    {"id": "forecast", "name": "Weather forecast", "enabled": True, "hasUI": True,
+     "description": "Short forecast from Open-Meteo or OpenWeatherMap",
+     "status": {"provider": "open-meteo", "valid": True, "failures": 0,
+                "tempC": 29.2, "summary": "Променливо"}},
+]
+
 # GET /api/remote/status — the WiFi-remote half of the merged Nodes page
 # (redesign 1a). No node/interval/battery fields here at all: these nodes are
 # configured on their own captive portal, not from this collector, so the
@@ -227,6 +252,21 @@ class H(http.server.SimpleHTTPRequestHandler):
             return self._json({"token": "test-token"})
         if path == "/api/platform_config":
             return self._json(PLATFORM)
+        # The index must be tested BEFORE the detail prefix, or "/api/modules"
+        # falls into the startswith below and answers with one module.
+        if path == "/api/modules":
+            return self._json(MODULES)
+        if path.startswith("/api/modules/"):
+            mid = path[len("/api/modules/"):]
+            m = next((x for x in MODULES if x["id"] == mid), None)
+            if m is None:
+                return self._json({"ok": False, "error": "unknown module"}, 404)
+            # A detail response is the index entry plus its form; only the
+            # modules the page can configure carry a schema.
+            return self._json(dict(m, config={"enabled": m["enabled"]},
+                                   schema=([{"key": "enabled", "type": "bool",
+                                             "label": "Module enabled"}]
+                                           if m["hasUI"] else [])))
         # Everything else the SPA polls on boot — answered emptily so the page
         # under test is not competing with a wall of failed requests.
         if path.startswith("/api/") or path in ("/status", "/wifi_scan_result"):

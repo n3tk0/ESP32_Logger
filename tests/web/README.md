@@ -14,6 +14,7 @@ python3 tests/web/mock_device.py 8765 &
 python3 tests/web/drive_nodes_page.py
 python3 tests/web/drive_kindle_page.py
 python3 tests/web/drive_sensors_page.py
+python3 tests/web/drive_modules_page.py
 ```
 
 | | |
@@ -22,6 +23,12 @@ python3 tests/web/drive_sensors_page.py
 | [`drive_nodes_page.py`](drive_nodes_page.py) | drives `#settings_nodes` (ESP-NOW + WiFi remote, merged) in Chromium |
 | [`drive_kindle_page.py`](drive_kindle_page.py) | drives `#settings_kindle` in Chromium |
 | [`drive_sensors_page.py`](drive_sensors_page.py) | drives the Sensors page's remote-sensor editor in Chromium |
+| [`drive_modules_page.py`](drive_modules_page.py) | drives `#settings_modules`, including what it says when the reply will not parse |
+
+`drive_modules_page.py` binds a second port, `MOCK_PORT + 100`, for a proxy it
+puts in front of the mock. That is how it corrupts the one response under test
+— a body cut short mid-document, which is what an ESPAsyncWebServer stream
+that runs out of heap produces — without teaching the shared mock to lie.
 
 `drive_nodes_page.py` replaces the former `drive_espnow_page.py`: redesign 1a
 merged the Battery nodes (ESP-NOW) and Remote WiFi nodes pages into one list,

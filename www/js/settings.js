@@ -2138,8 +2138,41 @@ var Modules = (function () {
     });
   }
 
-  function loadList()   { return fetchWithTimeout("/api/modules", {}, 15000).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }); }
-  function loadDetail(id) { return fetchWithTimeout("/api/modules/" + encodeURIComponent(id), {}, 15000).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }); }
+  // Every way of failing used to arrive here as the same "Could not reach
+  // /api/modules", with nothing on the console — so a device that answered
+  // the URL perfectly well in a browser tab but shipped a body the SPA could
+  // not parse looked identical to one that was off the network. The two are
+  // opposite problems. Name which one happened.
+  //
+  // A malformed body is not hypothetical: r.json() rejects on a raw control
+  // byte inside a string and on a body cut short mid-document, and an
+  // ESPAsyncWebServer stream that runs out of heap produces exactly the
+  // latter. Neither shows up when the same URL is opened in a browser tab,
+  // because the tab prints the bytes instead of parsing them.
+  function _reason(e) {
+    if (!e) return t("settingsPages.modErrUnknown");
+    if (e.name === "AbortError")  return t("settingsPages.modErrTimeout");
+    if (e.name === "SyntaxError") return t("settingsPages.modErrBadJson");
+    if (e.message && e.message.indexOf("HTTP ") === 0) {
+      return t("settingsPages.modErrHttp", { status: e.message.slice(5) });
+    }
+    return t("settingsPages.modErrNetwork");
+  }
+
+  // Shared by both loaders: r.json()'s SyntaxError carries no clue about
+  // which request produced it, so log the url alongside it.
+  function _getJson(url) {
+    return fetchWithTimeout(url, {}, 15000).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json().catch(function (e) {
+        console.error("Modules: " + url + " did not return parseable JSON:", e);
+        throw e;
+      });
+    });
+  }
+
+  function loadList()     { return _getJson("/api/modules"); }
+  function loadDetail(id) { return _getJson("/api/modules/" + encodeURIComponent(id)); }
   function save(id, body) {
     // POST /api/modules/:id is CSRF-gated and reads the token from the query
     // string only — postWithCsrf appends ?csrf=<token> and retries once on 403.
@@ -2157,8 +2190,12 @@ var Modules = (function () {
     loadDetail(id).then(function (d) {
       if (!d) { if (host) host.innerHTML = '<p class="hint">' + esc(t("settingsPages.modCouldNotLoad")) + '</p>'; return; }
       renderDetail(d);
-    }).catch(function () {
-      var h = _el("mod-host"); if (h) h.innerHTML = '<p class="hint">' + esc(t("settingsPages.modCouldNotLoad")) + '</p>';
+    }).catch(function (e) {
+      var h = _el("mod-host");
+      if (h) {
+        h.innerHTML = '<p class="hint">' + esc(t("settingsPages.modCouldNotLoad")) +
+                      ' <span class="mono">' + esc(_reason(e)) + '</span></p>';
+      }
     });
   }
 
@@ -2179,8 +2216,17 @@ var Modules = (function () {
       _list = l;
       renderList();
       select(l[0].id);
-    }).catch(function () {
-      if (list) list.innerHTML = '<div class="mod-empty">' + esc(t("settingsPages.modCouldNotReach")) + '</div>';
+    }).catch(function (e) {
+      console.error("Modules: could not load /api/modules:", e);
+      if (list) {
+        list.innerHTML =
+          '<div class="mod-empty">' + esc(t("settingsPages.modCouldNotReach")) +
+            '<div class="mod-err-why">' + esc(_reason(e)) + '</div>' +
+            '<button type="button" class="btn" id="mod-retry">' + esc(t("common.retry")) + '</button>' +
+          '</div>';
+        var rb = _el("mod-retry");
+        if (rb) rb.addEventListener("click", function () { init(); });
+      }
     });
   }
 

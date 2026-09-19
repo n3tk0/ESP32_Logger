@@ -231,12 +231,54 @@ jobs:
           sleep 2
           MOCK_PORT=8765 python3 tests/web/drive_nodes_page.py
 
+      - name: Drive the Modules settings page
+        # Reported: the page listed nothing while /api/modules, opened in a
+        # browser tab, plainly returned the modules. It had no driver and the
+        # mock had no route for it, so nothing here exercised it at all.
+        #
+        # The driver puts a proxy in front of the mock so it can corrupt that
+        # one response. A body cut short mid-document is what an
+        # ESPAsyncWebServer stream that runs out of heap produces, and a
+        # browser tab shows that as perfectly fine text, because it prints the
+        # bytes instead of parsing them. The page has to tell that apart from
+        # an unreachable device: they are opposite problems.
+        run: |
+          python3 tests/web/mock_device.py 8774 &
+          sleep 2
+          MOCK_PORT=8774 python3 tests/web/drive_modules_page.py
+
+      - name: Verify that check actually fails when a failure stops naming itself
+        # The whole point of that error path is saying WHICH failure happened.
+        # Collapse it back to the one sentence it used to show and the driver
+        # has to notice, or it is only asserting that some words appeared.
+        run: |
+          set -e
+          cp www/js/settings.js www/js/settings.js.orig
+          python3 - <<'EOF'
+          p = "www/js/settings.js"
+          s = open(p).read()
+          a = """'<div class="mod-err-why">' + esc(_reason(e)) + '</div>' +"""
+          assert s.count(a) == 1, "the reason line moved; update this check"
+          open(p, "w").write(s.replace(a, ""))
+          EOF
+          python3 tests/web/mock_device.py 8775 &
+          sleep 2
+          if MOCK_PORT=8775 python3 tests/web/drive_modules_page.py > /dev/null 2>&1; then
+            mv www/js/settings.js.orig www/js/settings.js
+            echo "::error::the browser test passed with every failure reading the same"
+            exit 1
+          fi
+          mv www/js/settings.js.orig www/js/settings.js
+          echo "browser test fires when a failure stops naming itself"
+
       # ONE PORT PER STEP, NEVER REUSED IN THIS JOB. Actions does not kill a
       # step's background children, so every mock_device.py started here is
       # still listening when the next step runs: a second server on the same
       # port dies with EADDRINUSE and its driver silently tests against the
       # earlier one — whose fixture the earlier driver had already POSTed
-      # over. 8765/8766 espnow, 8767/8768 kindle, 8770/8771 sensors.
+      # over. 8765/8766 espnow, 8767/8768 kindle, 8770/8771 sensors,
+      # 8774/8775 modules. drive_modules_page.py also binds MOCK_PORT+100 for
+      # its proxy, so keep 8874/8875 clear too.
       - name: Drive the sensors page's remote-sensor editor
         # A satellite node pairs with the collector on one string, its node id,
         # and that string is the whole configuration of a "remote" sensor —
