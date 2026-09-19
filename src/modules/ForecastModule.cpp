@@ -640,7 +640,19 @@ void ForecastModule::statusJson(JsonObject out) const {
     out["failures"]  = _failures;
     if (d.valid) {
         out["tempC"]   = d.tempC;
-        out["summary"] = d.summary;
+        // String(), not the bare buffer. `d` is a snapshot living on THIS
+        // stack frame, and ArduinoJson links a const char* instead of copying
+        // it — the document then holds a pointer into a frame that is gone by
+        // the time sendJsonResponse() serialises it. What got written out was
+        // whatever had since been pushed over those bytes: garbage that
+        // changed between requests, and, when it happened to contain a raw
+        // control byte, a response the browser could not parse at all. That
+        // took out /api/modules and /api/modules/forecast for everyone.
+        //
+        // The other fields above are scalars, copied by value; only the char
+        // buffer is affected. Every other module's statusJson() assigns a
+        // String already — this was the one raw buffer.
+        out["summary"] = String(d.summary);
     }
 }
 
