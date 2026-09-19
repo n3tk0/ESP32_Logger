@@ -254,21 +254,39 @@ jobs:
         run: |
           set -e
           cp www/js/settings.js www/js/settings.js.orig
-          python3 - <<'EOF'
+          python3 - <<'EOF' || { cp www/js/settings.js.orig www/js/settings.js; exit 1; }
           p = "www/js/settings.js"
           s = open(p).read()
           a = """'<div class="mod-err-why">' + esc(_reason(e)) + '</div>' +"""
           assert s.count(a) == 1, "the reason line moved; update this check"
           open(p, "w").write(s.replace(a, ""))
           EOF
+          # The mutation must leave valid JS, or the driver fails on a syntax
+          # error and the guard "passes" without testing anything.
+          node --check www/js/settings.js || {
+            cp www/js/settings.js.orig www/js/settings.js
+            echo "::error::the mutation left www/js/settings.js unparseable"
+            exit 1
+          }
           python3 tests/web/mock_device.py 8775 &
           sleep 2
-          if MOCK_PORT=8775 python3 tests/web/drive_modules_page.py > /dev/null 2>&1; then
-            mv www/js/settings.js.orig www/js/settings.js
+          # Keep the output: an unrelated non-zero exit would otherwise be
+          # indistinguishable from the guard firing for the right reason.
+          set +e
+          MOCK_PORT=8775 python3 tests/web/drive_modules_page.py > /tmp/mut.log 2>&1
+          rc=$?
+          set -e
+          cp www/js/settings.js.orig www/js/settings.js
+          rm www/js/settings.js.orig
+          if [ "$rc" -eq 0 ]; then
             echo "::error::the browser test passed with every failure reading the same"
             exit 1
           fi
-          mv www/js/settings.js.orig www/js/settings.js
+          if ! grep -q 'FAIL.*cut short\|FAIL.*not JSON' /tmp/mut.log; then
+            echo "::error::the driver exited $rc, but not on the assertions this guards"
+            tail -30 /tmp/mut.log
+            exit 1
+          fi
           echo "browser test fires when a failure stops naming itself"
 
       # ONE PORT PER STEP, NEVER REUSED IN THIS JOB. Actions does not kill a

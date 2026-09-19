@@ -2141,14 +2141,19 @@ var Modules = (function () {
   // Every way of failing used to arrive here as the same "Could not reach
   // /api/modules", with nothing on the console — so a device that answered
   // the URL perfectly well in a browser tab but shipped a body the SPA could
-  // not parse looked identical to one that was off the network. The two are
-  // opposite problems. Name which one happened.
+  // not parse looked identical to one that was off the network. Name which
+  // one happened, and do not claim more than fetch() can actually tell us.
   //
-  // A malformed body is not hypothetical: r.json() rejects on a raw control
-  // byte inside a string and on a body cut short mid-document, and an
-  // ESPAsyncWebServer stream that runs out of heap produces exactly the
-  // latter. Neither shows up when the same URL is opened in a browser tab,
-  // because the tab prints the bytes instead of parsing them.
+  // In particular a reply cut short mid-stream — an ESPAsyncWebServer that
+  // runs out of heap, a device that reboots mid-response — does NOT surface
+  // as a JSON error. The promise rejects with a bare "TypeError: Failed to
+  // fetch", the same rejection an unplugged device gives: once the body
+  // breaks, Chrome reports the transfer as failed and there is nothing left
+  // to parse. So TypeError has to name both possibilities rather than assert
+  // the device was never reached, which is the reading that would send
+  // someone off checking their wiring while the firmware is the problem.
+  // SyntaxError is the narrower case: a COMPLETE body that is not JSON
+  // (a stray control byte, an HTML error page), which does parse-and-fail.
   function _reason(e) {
     if (!e) return t("settingsPages.modErrUnknown");
     if (e.name === "AbortError")  return t("settingsPages.modErrTimeout");
@@ -2156,18 +2161,42 @@ var Modules = (function () {
     if (e.message && e.message.indexOf("HTTP ") === 0) {
       return t("settingsPages.modErrHttp", { status: e.message.slice(5) });
     }
+    if (e.name === "TypeError") return t("settingsPages.modErrTransport");
     return t("settingsPages.modErrNetwork");
   }
 
-  // Shared by both loaders: r.json()'s SyntaxError carries no clue about
-  // which request produced it, so log the url alongside it.
-  function _getJson(url) {
-    return fetchWithTimeout(url, {}, 15000).then(function (r) {
+  // Shared by both loaders.
+  //
+  // The timeout is ours rather than fetchWithTimeout's. That helper clears
+  // its abort timer in a .finally() on the fetch promise (core.js), and that
+  // promise settles when the response HEADERS arrive — so the body read runs
+  // with no deadline at all. A device that answers and then stalls mid-body
+  // leaves this page on "Loading…" forever: no reason, no retry, which is
+  // the reported symptom with the diagnosis stripped out of it. Race the
+  // whole read, headers and body, against one deadline.
+  //
+  // r.json()'s SyntaxError names neither the url nor the request, so log it.
+  function _getJson(url, ms) {
+    ms = ms || 15000;
+    var ctrl = new AbortController();
+    var timer = null;
+    var read = fetch(url, { signal: ctrl.signal }).then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json().catch(function (e) {
-        console.error("Modules: " + url + " did not return parseable JSON:", e);
+        console.error("Modules: " + url + " did not return usable JSON:", e);
         throw e;
       });
+    });
+    var deadline = new Promise(function (_, reject) {
+      timer = setTimeout(function () {
+        ctrl.abort();
+        // Match what an aborted fetch rejects with, so _reason() reads one
+        // shape whichever of the two fires first.
+        var e = new Error("timed out"); e.name = "AbortError"; reject(e);
+      }, ms);
+    });
+    return Promise.race([read, deadline]).finally(function () {
+      clearTimeout(timer);
     });
   }
 
@@ -2214,8 +2243,20 @@ var Modules = (function () {
         return;
       }
       _list = l;
-      renderList();
-      select(l[0].id);
+      // Rendering is not loading. A throw in here — a malformed entry that
+      // renderList() guards against but select() does not, say — would
+      // otherwise land in the catch below and be reported, confidently and
+      // wrongly, as the device failing to answer.
+      try {
+        renderList();
+        select(l[0].id);
+      } catch (err) {
+        console.error("Modules: the list loaded but could not be rendered:", err);
+        if (list) {
+          list.innerHTML = '<div class="mod-empty">' +
+            esc(t("settingsPages.modCouldNotRender")) + '</div>';
+        }
+      }
     }).catch(function (e) {
       console.error("Modules: could not load /api/modules:", e);
       if (list) {

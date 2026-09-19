@@ -64,8 +64,20 @@ class Proxy(BaseHTTPRequestHandler):
         if path == "/api/modules" and MODE["kind"] != "pass":
             body = urllib.request.urlopen(BASE + "/api/modules").read()
             if MODE["kind"] == "truncated":
-                body = body[: len(body) // 2]      # what an OOM mid-stream leaves
-            elif MODE["kind"] == "http500":
+                # A REAL cut-short stream: Content-Length promises the whole
+                # body, we send half and hang up. Recomputing the header
+                # instead would produce a *complete* response that merely
+                # isn't JSON — a different failure with a different rejection
+                # (SyntaxError, not TypeError), which is how an earlier
+                # version of this test passed while the page misreported the
+                # case it exists for.
+                return self._send(body, deliver=body[: len(body) // 2],
+                                  close=True)
+            if MODE["kind"] == "badbyte":
+                # Complete, correctly framed, and not JSON: a raw control
+                # byte inside a string. This is the SyntaxError case.
+                return self._send(body.replace(b'"Wi-Fi"', b'"Wi\x07Fi"'))
+            if MODE["kind"] == "http500":
                 return self._send(b'{"ok":false}', code=500)
             return self._send(body)
         try:
@@ -75,12 +87,19 @@ class Proxy(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             return self._send(e.read() or b"", code=e.code)
 
-    def _send(self, raw, code=200, ctype="application/json"):
+    def _send(self, raw, code=200, ctype="application/json",
+              deliver=None, close=False):
+        """`raw` sets Content-Length; `deliver` is what actually goes on the
+        wire. They differ only for the cut-short fixture."""
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(raw)))
+        if close:
+            self.send_header("Connection", "close")
         self.end_headers()
-        self.wfile.write(raw)
+        self.wfile.write(raw if deliver is None else deliver)
+        if close:
+            self.close_connection = True
 
 
 PROXY_PORT = int(PORT) + 100
@@ -134,11 +153,33 @@ with sync_playwright() as p:
     check(usb.locator(".badge").count() == 1,
           "a status-only module is badged rather than dropped")
 
-    # The first module is selected and its form loaded.
+    # The first module is selected and its form loaded. Asserting only that
+    # the pane is non-empty would pass on "Bad schema JSON." — which is what
+    # it used to render, because the mock handed back a parsed array while
+    # the firmware sends a JSON *string*. Assert on the fields instead.
     check(rows(pg).nth(0).get_attribute("class").find("active") != -1,
           "the first module starts selected")
-    check(pg.locator("#mod-host").inner_text().strip() != "",
-          "and its detail pane is populated")
+    host = pg.locator("#mod-host")
+    check("schema" not in host.inner_text().lower(),
+          "and its schema parses (%r)" % host.inner_text()[:70])
+    check(host.locator('[name="ssid"]').count() == 1,
+          "and the form has the field the schema declares")
+    check(host.locator('[name="ssid"]').input_value() == "MonkeyNet",
+          "populated from the module's config")
+
+    # showIf is the one schema key the form evaluates rather than renders:
+    # wifi's static-IP field is hidden until useStatic is ticked.
+    ip_row = host.locator('[name="ip"]')
+    check(ip_row.count() == 1, "a showIf-gated field is present in the DOM")
+    check(not ip_row.is_visible(), "but hidden while its condition is false")
+    # A bool renders as a .switch whose real <input> is opacity:0 — the
+    # visible control is its sibling <span>, so click that, the way a person
+    # does. Clicking the input itself is what a person cannot do.
+    host.locator('[name="useStatic"] + span').click()
+    pg.wait_for_timeout(300)
+    check(host.locator('[name="useStatic"]').is_checked(),
+          "ticking the switch flips the checkbox behind it")
+    check(ip_row.is_visible(), "and revealed once the condition holds")
 
     # ── a failure names itself ──────────────────────────────────────────────
     # Each of these used to render the same sentence with an empty console.
@@ -149,11 +190,27 @@ with sync_playwright() as p:
         pg.wait_for_timeout(1500)
         return pg.locator("#mod-list").inner_text()
 
+    # A cut-short stream rejects as a bare "TypeError: Failed to fetch" —
+    # identical to an unplugged device, because once the body breaks there is
+    # nothing left to parse. The page must not claim the request never
+    # arrived: that reading sends someone off checking their wiring while the
+    # firmware is what ran out of heap. It has to name both.
     txt = reload_with("truncated")
     check(rows(pg).count() == 0, "a reply cut short loads no rows")
-    check("JSON" in txt or "cut short" in txt,
-          "and says the reply was not valid JSON (%r)" % txt.replace("\n", " ")[:90])
+    check("cut short" in txt,
+          "and says the reply may have been cut short (%r)"
+          % txt.replace("\n", " ")[:100])
+    check("never reached" not in txt,
+          "and does NOT claim the request never reached the device")
     check(pg.locator("#mod-retry").count() == 1, "and offers a retry")
+
+    # A complete body that is not JSON is the narrower, separable case.
+    txt = reload_with("badbyte")
+    check("not JSON" in txt,
+          "a complete but unparseable reply is reported as such (%r)"
+          % txt.replace("\n", " ")[:100])
+    check("cut short" not in txt,
+          "and is told apart from a cut-short one")
     check(any(c[0] == "error" and "/api/modules" in c[1] for c in console),
           "and leaves the reason on the console")
 
@@ -179,12 +236,17 @@ with sync_playwright() as p:
         pg.screenshot(path=shot, full_page=True)
     b.close()
 
-# Failures the driver provoked on purpose are logged by design; only errors
-# from OTHER requests, and any pageerror at all, count against the page.
+# The failures this driver provokes on purpose are logged by design, and the
+# mock does not serve every route the SPA touches on boot. Exclude those two
+# and nothing else: an earlier filter here dropped anything mentioning
+# "/api/modules", which on this page is very nearly every error it can emit,
+# leaving only pageerror meaningfully asserted.
+PROVOKED = "did not return usable JSON"           # what _getJson logs
 errs = [c for c in console
         if c[0] == "pageerror"
         or (c[0] == "error"
-            and "/api/modules" not in c[1]
+            and PROVOKED not in c[1]
+            and "could not load /api/modules" not in c[1].lower()
             and "404" not in c[1]
             and "Failed to load resource" not in c[1])]
 print()

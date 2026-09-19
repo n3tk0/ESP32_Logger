@@ -1946,8 +1946,11 @@ body.deck-dragging * { cursor: grabbing !important; }
 
 .mod-empty { padding:18px 12px; color:var(--text-3); font-size:13px; text-align:center; }
 /* Why the list is empty, under the headline — an unreachable device, a reply
-   cut short and an HTTP error all used to read exactly the same. */
-.mod-err-why { margin:6px auto 12px; max-width:38ch; font-size:12px; color:var(--text-4); line-height:1.45; }
+   cut short and an HTTP error all used to read exactly the same. This is the
+   sentence the whole error path exists to deliver, so it takes --text-3 like
+   other body copy; --text-4 is marked decorative-only at the top of this
+   file and is not for text someone has to read and act on. */
+.mod-err-why { margin:6px auto 12px; max-width:38ch; font-size:13px; color:var(--text-3); line-height:1.45; }
 
 .mod-row {
   display:flex; align-items:center; gap:10px;
