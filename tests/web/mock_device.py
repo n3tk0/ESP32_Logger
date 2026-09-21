@@ -47,6 +47,59 @@ STATUS = {
               "discover_seen": 5, "discover_bad_sig": 1, "paired": 3},
 }
 
+# GET /api/modules — the module manager's index, shaped like a real device's.
+# Two kinds of `status` on purpose, because the page has to survive both:
+# wifi/ota/time answer with the {text,tone} chip the UI renders directly,
+# while forecast answers with its own domain object and NO `text` field at
+# all — that row has to fall through to the client-side heuristic rather than
+# printing "undefined" or taking the whole list down with it.
+MODULES = [
+    {"id": "wifi", "name": "Wi-Fi", "enabled": True, "hasUI": True,
+     "description": "Station/AP connection, credentials and static-IP settings.",
+     "status": {"text": "Internet · 192.168.1.214 · -19 dBm", "tone": "ok"}},
+    {"id": "ota", "name": "OTA update", "enabled": True, "hasUI": True,
+     "description": "Firmware updates and A/B rollback.",
+     "status": {"tone": "ok", "text": "app1"}},
+    {"id": "time", "name": "Time", "enabled": True, "hasUI": True,
+     "description": "NTP sync, timezone and DST.",
+     "status": {"text": "synced", "tone": "ok"}},
+    {"id": "usbcdc", "name": "USB CDC", "enabled": False, "hasUI": False,
+     "description": "USB serial-on-boot.",
+     "status": {"tone": "ok", "text": "on · GPIO 18,19 locked"}},
+    {"id": "forecast", "name": "Weather forecast", "enabled": True, "hasUI": True,
+     "description": "Short forecast from Open-Meteo or OpenWeatherMap",
+     "status": {"provider": "open-meteo", "valid": True, "failures": 0,
+                "tempC": 29.2, "summary": "Променливо"}},
+]
+
+# GET /api/modules/:id → config + schema. The schema is a STRING of
+# {"fields":[…]} because that is what the firmware sends: each module returns
+# a PROGMEM JSON literal from schema() and ModuleRegistry::toDetailJson
+# assigns it straight through, so the page does JSON.parse on it. Copied in
+# shape from TIME_SCHEMA (src/modules/TimeModule.cpp), including the showIf
+# key, which is the one field rule the form evaluates rather than renders.
+MODULE_SCHEMA = {
+    "time": json.dumps({"fields": [
+        {"id": "ntpServer", "type": "string", "max": 64, "label": "NTP server",
+         "group": "NTP", "help": "Hostname queried at boot."},
+        {"id": "timezone", "type": "int", "min": -12, "max": 14,
+         "label": "Timezone", "unit": "h"},
+        {"id": "dstOffsetHours", "type": "int", "min": 0, "max": 2,
+         "label": "DST offset", "unit": "h"},
+    ]}),
+    "wifi": json.dumps({"fields": [
+        {"id": "ssid", "type": "string", "max": 32, "label": "SSID"},
+        {"id": "useStatic", "type": "bool", "label": "Use a static IP"},
+        {"id": "ip", "type": "ipv4", "label": "IP address",
+         "showIf": {"useStatic": True}},
+    ]}),
+}
+
+MODULE_CONFIG = {
+    "time": {"ntpServer": "pool.ntp.org", "timezone": 2, "dstOffsetHours": 1},
+    "wifi": {"ssid": "MonkeyNet", "useStatic": False, "ip": "192.168.1.214"},
+}
+
 # GET /api/remote/status — the WiFi-remote half of the merged Nodes page
 # (redesign 1a). No node/interval/battery fields here at all: these nodes are
 # configured on their own captive portal, not from this collector, so the
@@ -227,6 +280,27 @@ class H(http.server.SimpleHTTPRequestHandler):
             return self._json({"token": "test-token"})
         if path == "/api/platform_config":
             return self._json(PLATFORM)
+        # The index must be tested BEFORE the detail prefix, or "/api/modules"
+        # falls into the startswith below and answers with one module.
+        if path == "/api/modules":
+            return self._json(MODULES)
+        if path.startswith("/api/modules/"):
+            mid = path[len("/api/modules/"):]
+            m = next((x for x in MODULES if x["id"] == mid), None)
+            if m is None:
+                return self._json({"ok": False, "error": "unknown module"}, 404)
+            # A detail response is the index entry plus its form. `schema` is
+            # a JSON *string* holding {"fields":[{"id":…}]}, not an object:
+            # ModuleRegistry::toDetailJson assigns the module's PROGMEM
+            # literal straight through, and settings.js does JSON.parse on it.
+            # Handing back a parsed array here would make every detail pane
+            # render "Bad schema JSON." while the driver still saw a populated
+            # pane — the form, showIf, collect and save paths would all go
+            # untested. Shaped after TIME_SCHEMA in src/modules/TimeModule.cpp.
+            return self._json(dict(
+                m,
+                config=MODULE_CONFIG.get(mid, {}),
+                **({"schema": MODULE_SCHEMA[mid]} if mid in MODULE_SCHEMA else {})))
         # Everything else the SPA polls on boot — answered emptily so the page
         # under test is not competing with a wall of failed requests.
         if path.startswith("/api/") or path in ("/status", "/wifi_scan_result"):

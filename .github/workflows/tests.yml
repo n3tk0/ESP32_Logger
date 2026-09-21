@@ -231,12 +231,72 @@ jobs:
           sleep 2
           MOCK_PORT=8765 python3 tests/web/drive_nodes_page.py
 
+      - name: Drive the Modules settings page
+        # Reported: the page listed nothing while /api/modules, opened in a
+        # browser tab, plainly returned the modules. It had no driver and the
+        # mock had no route for it, so nothing here exercised it at all.
+        #
+        # The driver puts a proxy in front of the mock so it can corrupt that
+        # one response. A body cut short mid-document is what an
+        # ESPAsyncWebServer stream that runs out of heap produces, and a
+        # browser tab shows that as perfectly fine text, because it prints the
+        # bytes instead of parsing them. The page has to tell that apart from
+        # an unreachable device: they are opposite problems.
+        run: |
+          python3 tests/web/mock_device.py 8774 &
+          sleep 2
+          MOCK_PORT=8774 python3 tests/web/drive_modules_page.py
+
+      - name: Verify that check actually fails when a failure stops naming itself
+        # The whole point of that error path is saying WHICH failure happened.
+        # Collapse it back to the one sentence it used to show and the driver
+        # has to notice, or it is only asserting that some words appeared.
+        run: |
+          set -e
+          cp www/js/settings.js www/js/settings.js.orig
+          python3 - <<'EOF' || { cp www/js/settings.js.orig www/js/settings.js; exit 1; }
+          p = "www/js/settings.js"
+          s = open(p).read()
+          a = """'<div class="mod-err-why">' + esc(_reason(e)) + '</div>' +"""
+          assert s.count(a) == 1, "the reason line moved; update this check"
+          open(p, "w").write(s.replace(a, ""))
+          EOF
+          # The mutation must leave valid JS, or the driver fails on a syntax
+          # error and the guard "passes" without testing anything.
+          node --check www/js/settings.js || {
+            cp www/js/settings.js.orig www/js/settings.js
+            echo "::error::the mutation left www/js/settings.js unparseable"
+            exit 1
+          }
+          python3 tests/web/mock_device.py 8775 &
+          sleep 2
+          # Keep the output: an unrelated non-zero exit would otherwise be
+          # indistinguishable from the guard firing for the right reason.
+          set +e
+          MOCK_PORT=8775 python3 tests/web/drive_modules_page.py > /tmp/mut.log 2>&1
+          rc=$?
+          set -e
+          cp www/js/settings.js.orig www/js/settings.js
+          rm www/js/settings.js.orig
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the browser test passed with every failure reading the same"
+            exit 1
+          fi
+          if ! grep -q 'FAIL.*cut short\|FAIL.*not JSON' /tmp/mut.log; then
+            echo "::error::the driver exited $rc, but not on the assertions this guards"
+            tail -30 /tmp/mut.log
+            exit 1
+          fi
+          echo "browser test fires when a failure stops naming itself"
+
       # ONE PORT PER STEP, NEVER REUSED IN THIS JOB. Actions does not kill a
       # step's background children, so every mock_device.py started here is
       # still listening when the next step runs: a second server on the same
       # port dies with EADDRINUSE and its driver silently tests against the
       # earlier one — whose fixture the earlier driver had already POSTed
-      # over. 8765/8766 espnow, 8767/8768 kindle, 8770/8771 sensors.
+      # over. 8765/8766 espnow, 8767/8768 kindle, 8770/8771 sensors,
+      # 8774/8775 modules. drive_modules_page.py also binds MOCK_PORT+100 for
+      # its proxy, so keep 8874/8875 clear too.
       - name: Drive the sensors page's remote-sensor editor
         # A satellite node pairs with the collector on one string, its node id,
         # and that string is the whole configuration of a "remote" sensor —
@@ -1038,6 +1098,38 @@ jobs:
         # feature it was built for; one that matched the WRONG feature is
         # worse, and VEML6075 (UV) and VEML7700 (lux) are one character apart.
         run: python3 tests/tools/drive_feature_resolve.py
+
+      - name: Check no module's status outlives its own stack frame
+        # ArduinoJson 7 LINKS a const char* instead of copying it, so a string
+        # assigned into the response has to own its bytes or outlive the
+        # serialise. ForecastModule::statusJson() assigned a char buffer
+        # belonging to a local snapshot: by the time sendJsonResponse() ran,
+        # the frame was gone and it wrote whatever had been pushed over those
+        # bytes. Garbage that changed per request — and, when it contained a
+        # raw control byte (which ArduinoJson emits unescaped), a reply no
+        # browser could parse. That took /api/modules down entirely, since the
+        # index embeds every module's status.
+        run: python3 tests/tools/check_statusjson_lifetimes.py
+
+      - name: Verify that check actually fails when the buffer is handed over raw
+        run: |
+          set -e
+          cp src/modules/ForecastModule.cpp /tmp/fc.orig
+          sed -i 's|out\["summary"\] = String(d.summary);|out["summary"] = d.summary;|' \
+              src/modules/ForecastModule.cpp
+          grep -q 'out\["summary"\] = d.summary;' src/modules/ForecastModule.cpp || {
+            cp /tmp/fc.orig src/modules/ForecastModule.cpp
+            echo "::error::the self-test no longer matches the assignment it mutates"
+            exit 1
+          }
+          if python3 tests/tools/check_statusjson_lifetimes.py > /dev/null 2>&1; then
+            cp /tmp/fc.orig src/modules/ForecastModule.cpp
+            echo "::error::the check passed with a local buffer linked into the response"
+            exit 1
+          fi
+          cp /tmp/fc.orig src/modules/ForecastModule.cpp
+          rm /tmp/fc.orig
+          echo "the check fails when the buffer is handed over raw, as it should"
 
       - name: Check the OTA size check knows where the partition table is
         # It answers one question — how many bytes may an OTA image be on this
