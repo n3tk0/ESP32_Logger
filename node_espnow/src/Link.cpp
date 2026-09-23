@@ -35,6 +35,31 @@ static volatile bool s_haveWelcome = false;
 
 static uint16_t s_wantSeq = 0;   ///< the sequence number we are waiting on
 
+/// A CFG is accepted only while linkExchangeCfg() is waiting for one, only
+/// from the collector's MAC and only for our node id. It is the one frame
+/// that can change what this node does, so "it decrypted" is not the only
+/// check it gets.
+static volatile bool s_wantCfg = false;
+static volatile bool s_haveCfg = false;
+static CfgChunkMsg   s_cfg;
+static uint8_t       s_cfgFrom[6];
+static uint8_t       s_cfgNode = 0;
+
+/// The link key (see linkSetKey()). Starts as the compiled one so a caller
+/// that forgets to set it gets today's behaviour, not a zero key.
+static uint8_t s_key[16];
+static bool    s_keySet = false;
+
+void linkSetKey(const char* key16) {
+    memcpy(s_key, key16, 16);
+    s_keySet = true;
+}
+
+static const uint8_t* key() {
+    if (!s_keySet) linkSetKey(ESPNOW_LMK);
+    return s_key;
+}
+
 // ---------------------------------------------------------------------------
 // Callbacks — WiFi task
 // ---------------------------------------------------------------------------
@@ -68,6 +93,19 @@ static void onRecv(const uint8_t* mac, const uint8_t* data, int len) {
         return;
     }
 
+    if (type == EN_MSG_CFG) {
+        if (!s_wantCfg || memcmp(mac, s_cfgFrom, 6) != 0) return;
+        CfgChunkMsg c;
+        memset(&c, 0, sizeof(c));
+        memcpy(&c, data, (size_t)len);          // espnowValidate() bounded len
+        if (c.nodeId != s_cfgNode) return;
+        memcpy(&s_cfg, &c, sizeof(c));
+        s_wantCfg = false;                      // one per request
+        s_haveCfg = true;
+        xSemaphoreGive(s_replySem);
+        return;
+    }
+
     if (type == EN_MSG_WELCOME) {
         WelcomeMsg w;
         memcpy(&w, data, sizeof(w));
@@ -76,7 +114,7 @@ static void onRecv(const uint8_t* mac, const uint8_t* data, int len) {
         // target field so we ignore somebody else's, and the signature so a
         // stranger cannot hand us a collector.
         if (memcmp(w.target, s_ownMac, 6) != 0) return;
-        if (!espnowVerifyTag((const uint8_t*)ESPNOW_LMK, (const uint8_t*)&w,
+        if (!espnowVerifyTag(key(), (const uint8_t*)&w,
                              EN_WELCOME_SIGNED_LEN, w.tag)) return;
         memcpy(&s_welcome, &w, sizeof(w));
         memcpy(s_collectorMac, mac, 6);
@@ -94,7 +132,7 @@ static bool addPeer(const uint8_t mac[6], bool encrypt) {
 
     esp_now_peer_info_t p{};
     memcpy(p.peer_addr, mac, 6);
-    if (encrypt) memcpy(p.lmk, ESPNOW_LMK, 16);
+    if (encrypt) memcpy(p.lmk, key(), 16);
     // Channel 0 is "whatever the interface is on". The node sets its channel
     // explicitly before sending, so pinning a number in the peer as well would
     // be a second place to keep in step with the first.
@@ -154,33 +192,29 @@ const uint8_t* linkOwnMac() { return s_ownMac; }
 // Reporting
 // ---------------------------------------------------------------------------
 
-LinkResult linkSend(const NodeLink& link, const DataMsg& msg, uint8_t count) {
+LinkResult linkSendData(const NodeLink& link, const uint8_t* frame, int len, uint16_t seq,
+                        uint16_t windowMs) {
     LinkResult r{};
-
-    uint8_t buf[ESPNOW_MAX_FRAME];
-    DataMsg  m = msg;
-    m.count = count;
-    const int len = espnowEncodeData(m, buf, sizeof(buf));
-    if (len < 0) return r;
+    if (!frame || len <= 0 || len > ESPNOW_MAX_FRAME) return r;
 
     s_sendDone    = false;
     s_sendOk      = false;
     s_haveAck     = false;
-    s_wantSeq     = m.seq;
+    s_wantSeq     = seq;
     xSemaphoreTake(s_replySem, 0);      // drain anything left from a previous call
 
     const uint32_t t0 = millis();
-    if (esp_now_send(link.collector, buf, (size_t)len) != ESP_OK) {
+    if (esp_now_send(link.collector, frame, (size_t)len) != ESP_OK) {
         r.waitedMs = 0;
         return r;
     }
 
     // THE WINDOW. A ceiling and not a duration: xSemaphoreTake returns the
     // instant the receive callback gives it, which is normally a few
-    // milliseconds. The full NODE_ACK_WINDOW_MS is only ever spent on the
-    // wakes where no reply is coming — which are exactly the wakes that are
-    // about to decide something is wrong.
-    const bool got = xSemaphoreTake(s_replySem, pdMS_TO_TICKS(NODE_ACK_WINDOW_MS)) == pdTRUE;
+    // milliseconds. The full window (link.ack_window_ms) is only ever spent
+    // on the wakes where no reply is coming — which are exactly the wakes that
+    // are about to decide something is wrong.
+    const bool got = xSemaphoreTake(s_replySem, pdMS_TO_TICKS(windowMs)) == pdTRUE;
     r.waitedMs = millis() - t0;
     r.sent     = s_sendOk;
 
@@ -190,8 +224,60 @@ LinkResult linkSend(const NodeLink& link, const DataMsg& msg, uint8_t count) {
         r.intervalS  = s_ack.intervalS;
         r.channel    = s_ack.channel;
         r.rediscover = (s_ack.flags & EN_ACK_REDISCOVER) != 0;
+        r.cfgPending = (s_ack.flags & EN_ACK_CFG_PENDING) != 0;
     }
     return r;
+}
+
+/// Wait for the send callback of the frame just queued. It fires after the
+/// MAC-level ACK (or the last retry), which is a few milliseconds; the bound
+/// is only there so a callback that never comes cannot hold the node awake.
+static bool waitSent() {
+    const uint32_t t0 = millis();
+    while (!s_sendDone && (millis() - t0) < 30) delay(1);
+    return s_sendDone && s_sendOk;
+}
+
+bool linkSendFrame(const NodeLink& link, const void* frame, int len) {
+    if (!frame || len <= 0 || len > ESPNOW_MAX_FRAME) return false;
+    s_sendDone = false;
+    s_sendOk   = false;
+    if (esp_now_send(link.collector, (const uint8_t*)frame, (size_t)len) != ESP_OK)
+        return false;
+    return waitSent();
+}
+
+bool linkExchangeCfg(const NodeLink& link, const void* frame, int len, uint16_t windowMs,
+                     CfgChunkMsg& out) {
+    if (!frame || len <= 0 || len > ESPNOW_MAX_FRAME) return false;
+    s_sendDone = false;
+    s_sendOk   = false;
+    s_haveAck  = false;
+    s_haveCfg  = false;
+    memcpy(s_cfgFrom, link.collector, 6);
+    s_cfgNode  = link.nodeId;
+    xSemaphoreTake(s_replySem, 0);
+    // Armed BEFORE the send: the collector answers from its receive callback,
+    // and a reply can beat esp_now_send() back to this line.
+    s_wantCfg  = true;
+
+    if (esp_now_send(link.collector, (const uint8_t*)frame, (size_t)len) != ESP_OK) {
+        s_wantCfg = false;
+        return false;
+    }
+    // The semaphore is shared with the ACK path, and a late duplicate of this
+    // wake's ACK (the radio's own retry) gives it too. Keep waiting out the
+    // rest of the window for the CFG rather than counting that as a miss.
+    const uint32_t t0 = millis();
+    for (;;) {
+        const uint32_t spent = millis() - t0;
+        if (s_haveCfg || spent >= windowMs) break;
+        if (xSemaphoreTake(s_replySem, pdMS_TO_TICKS(windowMs - spent)) != pdTRUE) break;
+    }
+    s_wantCfg = false;
+    if (!s_haveCfg) return false;
+    memcpy(&out, &s_cfg, sizeof(out));
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +293,7 @@ bool linkPair(NodeLink& io, uint32_t* epochOut) {
         if (esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE) != ESP_OK) continue;
 
         DiscoverMsg d;
-        if (!espnowFillDiscover(d, (const uint8_t*)ESPNOW_LMK, io.nodeId,
+        if (!espnowFillDiscover(d, key(), io.nodeId,
                                 s_ownMac, esp_random()))
             return false;
 
@@ -241,22 +327,31 @@ bool linkPair(NodeLink& io, uint32_t* epochOut) {
 // Finding a moved channel
 // ---------------------------------------------------------------------------
 
-uint8_t linkFindChannel(const NodeLink& link) {
+ScanResult linkFindChannel(const NodeLink& link, const char* nextSsid) {
+    ScanResult out{};
     // Passive: listen for beacons rather than probe for them. It is slower per
     // channel but it transmits nothing, and a node doing this because it has
     // lost its collector has no business shouting on thirteen channels.
     const int n = WiFi.scanNetworks(false, true, true, 300);
     if (n <= 0) {
         WiFi.scanDelete();
-        return 0;
+        return out;
     }
 
+    const bool wantNext = nextSsid && nextSsid[0];
     uint8_t byBssid = 0, bySsid = 0;
+    int32_t nextRssi = -1000;
     for (int i = 0; i < n; i++) {
         const uint8_t* b = WiFi.BSSID(i);
-        if (b && memcmp(b, link.bssid, 6) == 0) { byBssid = (uint8_t)WiFi.channel(i); break; }
-        if (!bySsid && link.ssid[0] && WiFi.SSID(i) == link.ssid)
+        const String ssid = WiFi.SSID(i);
+        if (!byBssid && b && memcmp(b, link.bssid, 6) == 0) byBssid = (uint8_t)WiFi.channel(i);
+        if (!bySsid && link.ssid[0] && ssid == link.ssid)
             bySsid = (uint8_t)WiFi.channel(i);
+        if (wantNext && ssid == nextSsid && WiFi.RSSI(i) > nextRssi) {
+            nextRssi  = WiFi.RSSI(i);
+            out.nextCh = (uint8_t)WiFi.channel(i);
+            if (b) memcpy(out.nextBssid, b, 6);
+        }
     }
     WiFi.scanDelete();
 
@@ -265,5 +360,6 @@ uint8_t linkFindChannel(const NodeLink& link) {
     // is not necessarily the one the collector is on — but a wrong guess
     // costs one wake, and having no fallback costs every wake until somebody
     // notices.
-    return byBssid ? byBssid : bySsid;
+    out.storedCh = byBssid ? byBssid : bySsid;
+    return out;
 }
