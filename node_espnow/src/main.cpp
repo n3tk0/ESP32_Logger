@@ -210,14 +210,16 @@ static float battVolts() { return (float)readBatteryMv(s_cfg.batt) / 1000.0f; }
 // One reading
 // ---------------------------------------------------------------------------
 
-/// How a DS18B20 conversion is waited out (nodeSensorsSetWait). At 12 bits
+/// How a sensor's measurement is waited out (nodeSensorsSetWait): a DS18B20
+/// conversion and a one-shot BH1750 (180 ms), which run together. At 12 bits
 /// the probe needs up to 750 ms, and the reading has to come from THIS wake —
 /// reading straight away returns the previous conversion, 85 °C after a
 /// power-on. Spent in delay() that is ~0.76 s at the C3's radio-off idle,
 /// about 20 mA: ~6 mAh a day at one-minute intervals, more than half again
 /// the node's whole budget (docs/ESPNOW_NODE.md §7, §9). The probe converts
 /// from its own 3V3 supply and the bus idles high on its 4.7 kΩ pull-up, so
-/// nothing needs the CPU meanwhile: light sleep, ~0.2 mA with the board.
+/// nothing needs the CPU meanwhile: light sleep, ~0.2 mA with the board. The
+/// same holds for a BH1750, which measures on its own and powers itself down.
 ///
 /// Only on a battery. A mains node may be counting pulses in an interrupt or
 /// receiving an SDS011 on a UART, neither of which runs in light sleep (the
@@ -226,8 +228,8 @@ static float battVolts() { return (float)readBatteryMv(s_cfg.batt) / 1000.0f; }
 /// collectLive() runs before linkBegin().
 ///
 /// The wake-up timer runs on the calibrated RTC slow clock; the 1/32 extra
-/// (24 ms at 12 bits, at light-sleep current) covers its error, so the probe
-/// is never read mid-conversion.
+/// (24 ms at 12 bits, 6 ms for a BH1750, at light-sleep current) covers its
+/// error, so neither is read mid-measurement.
 static void waitConversion(uint32_t ms) {
 #ifndef NODE_NO_DEEP_SLEEP
     if (s_cfg.sleep) {

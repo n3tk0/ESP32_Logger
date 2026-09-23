@@ -578,6 +578,38 @@ first wake after a power-on. Light sleep keeps the 12-bit reading, taken this
 wake, for almost all of the saving. Like everything in §7, these are
 datasheet figures, not measurements.
 
+### A BH1750
+
+The light sensor used to run as the collector runs it, in continuous
+high-resolution mode, and that is wrong twice on a node that deep sleeps.
+Every wake is a reset, so bring-up ran every wake and waited 200 ms for the
+first measurement (up to 180 ms, ROHM BH1750FVI datasheet) in `delay()`. And a
+continuous BH1750 never stops: it kept measuring at ~120 µA typical (190 µA
+maximum) through every deep sleep, nearly three times the board's own ~44 µA.
+
+On a sleeping ESP-NOW node it now runs in one-time mode instead. Bring-up only
+checks that it answers, with a power-down command. Every read powers it on and
+starts one measurement, which is waited out with the DS18B20 conversion,
+through the same light sleep, for the longer of the two. The part then powers
+itself down, at 0.01 µA typical. The reading is still one taken during this
+wake.
+
+| | per day, one minute | per day, thirty seconds |
+|---|---|---|
+| **before:** 200 ms `delay()` at ~20 mA per wake | ~1.6 mAh | ~3.2 mAh |
+| **before:** measuring through deep sleep, 120 µA (190 max) | ~2.9 mAh (4.6) | ~2.9 mAh (4.6) |
+| **after:** 186 ms light sleep at ~0.2 mA (nothing with a DS18B20, whose wait is longer) | ~0.015 mAh | ~0.03 mAh |
+| **after:** one measurement, 120–180 ms at 120 µA | ~0.01 mAh | ~0.02 mAh |
+| **after:** powered down, 0.01 µA (1 max) | ~0.0002 mAh (0.024) | ~0.0002 mAh (0.024) |
+
+That is ~4.5 mAh a day down to ~0.03 at one-minute intervals. Against §7's ~10,
+a node with a light sensor goes from about 300 days back to the table's ~430.
+Mains mode and the WiFi node keep continuous mode, with its one wait at
+bring-up (through `delay()`), because a node that stays up reads a fresh value
+any time without waiting. `nodeSensorsEnd()` powers a BH1750 down before a deep
+sleep either way, so a node switched from mains to battery does not take a
+running sensor into its first sleep.
+
 ### Mains mode
 
 `sleep: false` turns the node into a mains-powered one: it stays awake and
