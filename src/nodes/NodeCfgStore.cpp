@@ -183,6 +183,15 @@ static void keepReport(Entry& e, JsonDocument& doc, JsonObjectConst rep, NodeCon
     takeProbes(e, r, scratch);
 }
 
+/// A node that has applied `desired` does not report it again (§5; a WiFi
+/// node only reports after a boot or a local edit), so what it runs is that
+/// document — kept as `reported`, with the secrets blanked like a GET's.
+static void reportedFromDesired(Entry& e, Work* w) {
+    w->aux.set(w->doc["desired"]);
+    ncr::secretsForGet(w->aux.as<JsonObject>(), w->doc["sec_known"] | 0);
+    keepReport(e, w->doc, w->aux.as<JsonObjectConst>(), w->cfg);
+}
+
 #ifdef FEATURE_ESPNOW_INGEST
 static void tableFollows(const Entry& e, const NodeConfig& c) {
     if (e.espnow) espnowUpdateNode(e.id, ncr::validName(c.name) ? c.name : nullptr, c.interval_s);
@@ -392,7 +401,10 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
     if (e && !adopted && applied != e->s.applied) {
         e->s.applied = applied;
         e->s.status  = ncr::statusAfterApplied(e->s.status, e->s.rev, applied);
-        if (applied >= e->s.rev) w->doc["sec_dirty"] = 0;
+        if (applied >= e->s.rev) {
+            w->doc["sec_dirty"] = 0;
+            if (rep.isNull()) reportedFromDesired(*e, w);
+        }
         save = true;
     }
 
@@ -427,11 +439,10 @@ bool nodeCfgRadioState(uint8_t id, NodeCfgRadio& r) {
     return true;
 }
 
-uint16_t nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
-                             const char* label, uint16_t intervalS) {
+void nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
+                         const char* label, uint16_t intervalS, ncr::ReportPlan plan) {
     Work* w = new (std::nothrow) Work;
-    if (!w) return 0;
-    uint16_t out = 0;
+    if (!w) return;
     do {
         if (deserializeJson(w->aux, json, len) || !w->aux.is<JsonObject>()) break;
         JsonObjectConst rep = w->aux.as<JsonObjectConst>();
@@ -443,7 +454,12 @@ uint16_t nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
 
         const bool     local = rep["local"] | false;
         const uint16_t rrev  = rep["rev"] | 0;
-        const ncr::ReportPlan plan = ncr::planReport(e != nullptr, e ? e->s.rev : 0, rrev, local);
+        // The callback's mirror said a config was held, the store has none
+        // (forgotten in between): plan it as the new node it now is.
+        if (!e && !plan.adopt) plan = ncr::planReport(false, 0, rrev, local);
+        // A report that is not local goes unanswered, so the node keeps its
+        // rev; one adopted at a new rev is then simply pending and fetched.
+        if (!local) plan.applied = rrev;
         if (plan.adopt) {
             const bool first = (e == nullptr);
             if (e) decodeDesired(w->doc, w->cfg, true);
@@ -456,11 +472,15 @@ uint16_t nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
             }
             if (!e && (e = alloc(true, nullptr, id)) == nullptr) break;
             w->cfg.transport = Transport::EspNow;
-            e->s.rev     = plan.rev;
-            e->s.applied = plan.rev;
-            w->cfg.rev   = plan.rev;
+            // The node was told plan.applied; the desired rev must still move
+            // past anything a web edit made since the callback's mirror.
+            const uint16_t rev = (!first && e->s.rev >= plan.rev) ? ncr::nextRev(e->s.rev)
+                                                                  : plan.rev;
+            e->s.rev     = rev;
+            e->s.applied = plan.applied;
+            w->cfg.rev   = rev;
             w->cfg.local = false;
-            e->s.status  = ncr::ST_APPLIED;
+            e->s.status  = ncr::statusAfterApplied(ncr::ST_PENDING, rev, plan.applied);
             e->s.err.field[0] = e->s.err.reason[0] = '\0';
             // First contact: the table's label and interval win, and the node
             // is sent them in the next rev. After a local edit the table
@@ -478,10 +498,8 @@ uint16_t nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
         }
         keepReport(*e, w->doc, rep, w->cfg);
         saveEntry(*e, w->doc);
-        out = e->s.applied;
     } while (false);
     delete w;
-    return out;
 }
 
 void nodeCfgEspnowAck(uint8_t id, uint16_t rev, bool ok, const char* field, const char* reason) {
@@ -500,8 +518,12 @@ void nodeCfgEspnowAck(uint8_t id, uint16_t rev, bool ok, const char* field, cons
     }
     Work* w = new (std::nothrow) Work;
     if (!w) { s_gen++; return; }
-    if (loadEntry(*e, w->doc)) saveEntry(*e, w->doc);
-    else s_gen++;
+    if (loadEntry(*e, w->doc)) {
+        if (ok && rev == e->s.rev) reportedFromDesired(*e, w);
+        saveEntry(*e, w->doc);
+    } else {
+        s_gen++;
+    }
     delete w;
 }
 

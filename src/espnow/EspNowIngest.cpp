@@ -179,8 +179,16 @@ static uint32_t  s_cfgMirrorGen = 0;   ///< store generation mirrored; 0 = resyn
 /// tick to adopt. One and not one per node: a node reports on its first wake
 /// after boot and after a local edit, rarely two at once — and a node that
 /// loses the slot to another simply reports again on its next wake.
-static EnCfgAssembler s_asm;
-static volatile bool  s_reportReady = false;   ///< s_asm holds a complete report
+static EnCfgAssembler  s_asm;
+static ncr::ReportPlan s_reportPlan;            ///< what the callback decided (and said)
+static volatile bool   s_reportReady = false;   ///< s_asm holds a complete report
+
+/// The last local report adopted per slot — a hash of its bytes and rev — and
+/// the rev it was adopted at. A node that missed the answer repeats the same
+/// report on a later wake (§5) and must be told the same rev, not adopted
+/// again at a new one.
+static uint32_t s_repHash[EspNowNodeTable::CAP] = {0};
+static uint16_t s_repRev[EspNowNodeTable::CAP]  = {0};
 
 // ---------------------------------------------------------------------------
 // How far each node's clock is from ours
@@ -412,7 +420,9 @@ static void sendAck(const uint8_t* mac, uint8_t nodeId, uint16_t seq) {
     const int idx = s_nodes.indexOf(nodeId);
     if (idx >= 0) {
         known    = true;
-        interval = s_nodes.at(idx).intervalS;
+        // §5: with a config held the interval travels in it; any other value
+        // here would undo an applied config on the node's next wake.
+        interval = s_cfgHave[idx] ? 0 : s_nodes.at(idx).intervalS;
         cfg      = s_cfgPend[idx];
     }
     taskEXIT_CRITICAL(&s_nodeMux);
@@ -443,31 +453,67 @@ static int slotFor(const uint8_t* mac, uint8_t nodeId) {
     return idx;
 }
 
+/// Park a frame for the tick. False when the ring is full.
+static bool ringPush(const uint8_t* mac, uint8_t type, const void* data, int len) {
+    taskENTER_CRITICAL(&s_ringMux);
+    const int next = (s_ringTail + 1) % RX_RING;
+    const bool room = next != s_ringHead;
+    if (room) {
+        memcpy(s_ring[s_ringTail].mac, mac, 6);
+        s_ring[s_ringTail].type = type;
+        s_ring[s_ringTail].len  = (uint8_t)len;
+        memcpy(s_ring[s_ringTail].buf, data, (size_t)len);
+        s_ringTail = next;
+    }
+    taskEXIT_CRITICAL(&s_ringMux);
+    if (!room) s_stats.ringFull++;
+    return room;
+}
+
 /// CFG_GET: one slice of the rendered desired config, straight back (§5).
-/// The node is awake and asking in a loop; this is a memcpy and a send. A
-/// node whose config is not rendered (yet) gets nothing and asks again or
-/// gives up for this wake — it resumes from offset 0 next time.
+/// The node is awake and asking in a loop, max(ack window, 50 ms) per slice;
+/// this is a memcpy and a send. When there is nothing newer than what the
+/// node has — or nothing rendered to send — a CFG with total 0 says "up to
+/// date" so it stops asking. A node asking with haveRev at the desired rev
+/// already runs it (its CFG_ACK was lost): it is recorded as applied, through
+/// the tick, as the CFG_ACK it will also repeat.
 static void answerCfgGet(const uint8_t* mac, const uint8_t* data) {
     CfgGetMsg g;
     memcpy(&g, data, sizeof(g));
     CfgChunkMsg m;
-    int n = -1;
+    int  n       = -1;
+    bool applied = false;
     taskENTER_CRITICAL(&s_nodeMux);
     const int idx = slotFor(mac, g.nodeId);
-    if (idx >= 0 && s_cfgDoc[idx])
-        n = espnowFillCfgChunk(m, EN_MSG_CFG, g.nodeId, s_cfgDocRev[idx], s_cfgDoc[idx],
-                               s_cfgDocLen[idx], g.offset);
+    if (idx >= 0) {
+        const uint16_t want = s_cfgHave[idx] ? s_cfgRev[idx] : 0;
+        if (s_cfgDoc[idx] && g.haveRev < s_cfgDocRev[idx]) {
+            n = espnowFillCfgChunk(m, EN_MSG_CFG, g.nodeId, s_cfgDocRev[idx], s_cfgDoc[idx],
+                                   s_cfgDocLen[idx], g.offset);
+        } else {
+            applied = s_cfgPend[idx] && g.haveRev >= want;
+            if (applied) s_cfgPend[idx] = false;
+            n = espnowFillCfgChunk(m, EN_MSG_CFG, g.nodeId, g.haveRev > want ? g.haveRev : want,
+                                   nullptr, 0, 0);
+        }
+    }
     taskEXIT_CRITICAL(&s_nodeMux);
     if (n > 0) esp_now_send(mac, (const uint8_t*)&m, (size_t)n);
+    if (applied) {
+        CfgAckMsg a;
+        espnowFillCfgAck(a, g.nodeId, g.haveRev, EN_CFG_OK, nullptr, nullptr);
+        ringPush(mac, EN_MSG_CFG_ACK, &a, (int)sizeof(a));
+    }
 }
 
-/// CFG_REPORT: reassemble; on the last slice, answer with the rev the report
-/// is adopted at (CFG, total 0) while the node is still listening, and leave
-/// the document for the tick to store.
+/// CFG_REPORT: reassemble; on the last slice of a LOCAL report, answer with
+/// the rev it is adopted at (CFG, total 0) while the node is still listening,
+/// and leave the document for the tick to store. A report without `local`
+/// (the one after a boot) needs no answer (§5).
 ///
 /// The rev is worked out HERE, from the mirrored desired rev, with the same
-/// ncr::planReport() the store then applies — so the answer does not wait for
-/// a flash write. `local` is read with a string search rather than a JSON
+/// ncr::planReport() the store then keeps to — so the answer does not wait
+/// for a flash write. `local` is read with a string search rather than a JSON
 /// parse: the node writes compact JSON with the codec, so a local edit is
 /// exactly `"local":true`, and no value in the document can contain a quote.
 static void feedCfgReport(const uint8_t* mac, const uint8_t* data, int len) {
@@ -476,21 +522,35 @@ static void feedCfgReport(const uint8_t* mac, const uint8_t* data, int len) {
     memcpy(&c, data, (size_t)len);
     if (c.total == 0) return;                   // the "adopted" form is ours to send
 
-    bool     have = false;
-    uint16_t drev = 0;
     taskENTER_CRITICAL(&s_nodeMux);
     const int idx = slotFor(mac, c.nodeId);
-    if (idx >= 0) { have = s_cfgHave[idx]; drev = s_cfgRev[idx]; }
     taskEXIT_CRITICAL(&s_nodeMux);
     if (idx < 0) return;
-
     if (espnowCfgFeed(s_asm, c) != EN_CFG_FEED_DONE) return;
-    const bool local = strstr(s_asm.doc, "\"local\":true") != nullptr;
-    const ncr::ReportPlan plan = ncr::planReport(have, drev, s_asm.rev, local);
-    s_reportReady = true;
 
+    const bool local = strstr(s_asm.doc, "\"local\":true") != nullptr;
+    uint32_t   h     = 2166136261u ^ s_asm.rev;             // FNV-1a
+    for (uint16_t i = 0; i < s_asm.total; i++) h = (h ^ (uint8_t)s_asm.doc[i]) * 16777619u;
+    if (!h) h = 1;
+
+    bool     repeat = false;
+    uint16_t told   = 0;
+    taskENTER_CRITICAL(&s_nodeMux);
+    if (local && s_repHash[idx] == h) {
+        repeat = true;
+        told   = s_repRev[idx];
+    } else {
+        s_reportPlan = ncr::planReport(s_cfgHave[idx], s_cfgRev[idx], s_asm.rev, local);
+        told         = s_reportPlan.applied;
+        if (local) { s_repHash[idx] = h; s_repRev[idx] = told; }
+    }
+    taskEXIT_CRITICAL(&s_nodeMux);
+
+    if (repeat) espnowCfgReset(s_asm);          // adopted already: nothing to store
+    else        s_reportReady = true;
+    if (!local) return;
     CfgChunkMsg m;
-    const int n = espnowFillCfgChunk(m, EN_MSG_CFG, c.nodeId, plan.applied, nullptr, 0, 0);
+    const int n = espnowFillCfgChunk(m, EN_MSG_CFG, c.nodeId, told, nullptr, 0, 0);
     if (n > 0) esp_now_send(mac, (const uint8_t*)&m, (size_t)n);
 }
 
@@ -560,19 +620,7 @@ static void onRecv(const uint8_t* mac, const uint8_t* data, int len) {
     // rather than double-counting; the CSV gets two rows with the same stamp.
     // Deduplicating properly needs per-sample identity rather than per-frame,
     // which the wire format does not carry today.
-    taskENTER_CRITICAL(&s_ringMux);
-    const int next = (s_ringTail + 1) % RX_RING;
-    if (next == s_ringHead) {
-        taskEXIT_CRITICAL(&s_ringMux);
-        s_stats.ringFull++;
-        return;
-    }
-    memcpy(s_ring[s_ringTail].mac, mac, 6);
-    s_ring[s_ringTail].type = type;
-    s_ring[s_ringTail].len  = (uint8_t)len;
-    memcpy(s_ring[s_ringTail].buf, data, (size_t)len);
-    s_ringTail = next;
-    taskEXIT_CRITICAL(&s_ringMux);
+    if (!ringPush(mac, type, data, len)) return;
 
     // A CFG_ACK is not acknowledged: the node sends it and goes back to sleep.
     if (type == EN_MSG_CFG_ACK) return;
@@ -867,7 +915,8 @@ static void serviceCfgReport() {
     const EspNowNode* n = s_nodes.byId(s_asm.nodeId);
     if (n) { memcpy(label, n->id, sizeof(label) - 1); interval = n->intervalS; }
     taskEXIT_CRITICAL(&s_nodeMux);
-    if (n) nodeCfgEspnowReport(s_asm.nodeId, s_asm.doc, s_asm.total, label, interval);
+    if (n) nodeCfgEspnowReport(s_asm.nodeId, s_asm.doc, s_asm.total, label, interval,
+                               s_reportPlan);
     espnowCfgReset(s_asm);
     s_reportReady = false;
 }
@@ -1168,7 +1217,10 @@ bool espnowAddNode(const uint8_t mac[6], uint8_t nodeId, const char* label,
     // the node is merely being renamed — clearing there costs one report.
     if (ok) {
         const int idx = s_nodes.indexOf(nodeId);
-        if (idx >= 0) { s_haveSkew[idx] = false; s_skew[idx] = 0; s_skewLoggedMs[idx] = 0; }
+        if (idx >= 0) {
+            s_haveSkew[idx] = false; s_skew[idx] = 0; s_skewLoggedMs[idx] = 0;
+            s_repHash[idx]  = 0;
+        }
     }
     taskEXIT_CRITICAL(&s_nodeMux);
 
@@ -1207,7 +1259,10 @@ bool espnowRemoveNode(uint8_t nodeId) {
         memcpy(mac, n->mac, 6);
         // Before remove(), while the slot still answers to this node id.
         const int idx = s_nodes.indexOf(nodeId);
-        if (idx >= 0) { s_haveSkew[idx] = false; s_skew[idx] = 0; s_skewLoggedMs[idx] = 0; }
+        if (idx >= 0) {
+            s_haveSkew[idx] = false; s_skew[idx] = 0; s_skewLoggedMs[idx] = 0;
+            s_repHash[idx]  = 0;
+        }
         s_nodes.remove(nodeId);
         found = true;
     }

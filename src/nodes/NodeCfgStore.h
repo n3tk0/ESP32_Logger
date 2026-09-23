@@ -100,14 +100,18 @@ struct NodeCfgRadio {
 /// False only when the store was busy — the caller should ask again later.
 bool nodeCfgRadioState(uint8_t id, NodeCfgRadio& out);
 
-/// A completed CFG_REPORT. Returns the rev the node now runs (0 on failure).
+/// A completed CFG_REPORT. `told` is the plan the receive callback worked
+/// out from its mirror, and for a local report already answered with
+/// (`told.applied` is what the node now believes it runs); the store keeps to
+/// it, moving only the desired rev on if a web edit landed in between.
 /// `label` / `intervalS` are the node table's; on first contact they win
 /// (ncr::adoptTableIdentity), after a local edit the table follows the node —
 /// the store updates it.
-uint16_t nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
-                             const char* label, uint16_t intervalS);
+void nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
+                         const char* label, uint16_t intervalS, ncr::ReportPlan told);
 
-/// A CFG_ACK.
+/// A CFG_ACK. An ok one for the desired rev also makes `desired` the
+/// reported config: the node does not report again after applying (§5).
 void nodeCfgEspnowAck(uint8_t id, uint16_t rev, bool ok, const char* field, const char* reason);
 
 /// The desired config as the radio carries it (§5: compact, no net, no
