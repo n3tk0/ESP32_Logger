@@ -208,13 +208,21 @@ restart if network/sensor fields changed, else apply live) and reports
 `cfg_rev: 5` on the next POST. The collector marks `applied` when it sees
 `cfg_rev == desired.rev`, `rejected` on `cfg_error`.
 
+Secrets in that reply: the collector only ever learns a node's secrets as
+`_set` flags (a report carries none), so its stored copy can be stale. It
+therefore sends a secret's value only when it was set through the collector
+(`/api/nodes/config`, or the handover's `net.next.pass`) since the node last
+applied a config; every other secret goes as `""` + `"<field>_set": true` —
+"keep yours" under principle 5.
+
 If the node reports `cfg` with `local: true`, the collector stores it as
 `desired` (keeping its stored secrets where the node sent `""`), bumps rev,
 and replies with that `cfg` (rev only is enough: `{"cfg":{"rev":6}}` means
 "your local config is now rev 6"; the node clears `local`).
 
 The node's JSON parse buffer for the reply must hold a full config: budget
-2 KB.
+2 KB. The collector accepts an ingest body of up to 6 KB (a full buffered
+batch plus `cfg`).
 
 A cycle with nothing queued still POSTs, with `"readings": []`, so config
 keeps flowing to a node whose sensors all fail; the collector accepts an
@@ -330,6 +338,10 @@ unknown types in `espnowValidate()`.
   the report on a later wake if it does not come — so a repeated report of
   the same local document must be answered with the rev already adopted for
   it, not adopted again. A report with `local == false` needs no answer.
+  The FIRST report from a node the collector holds no config for is adopted
+  with the node table's label and interval in place of the node's own `name`
+  and `interval_s` (the label is the id its readings are filed under), and
+  flagged to the node as a new rev when they differ.
 - `EN_MSG_DATA2 = 9` (node → collector) — the dynamic-sensor data frame:
 
   ```
@@ -489,4 +501,9 @@ carries). `GET /api/nodes/handover` answers `active:false` once finished.
 A WiFi node the collector has never seen a `cfg` report from still appears
 (from `/api/remote/status`); its config GET answers `"reported": null`
 (`desired` may be null too), its panel says "waiting for the node to report
-its settings" and editing is disabled until it does.
+its settings" and editing is disabled until it does. (The collector answers
+every well-formed key it holds no file for that way — `desired`,
+`reported`, `status` and `error` null, `applied_rev` 0 — never with a 404.)
+Such a node was not handed the next network, so it stays `pending` for the
+rest of a handover unless it is offline — the automatic switch waits, and
+`{"action":"switch"}` overrides.

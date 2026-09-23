@@ -11,6 +11,8 @@
 #include "../pipeline/DataPipeline.h"   // fsMutex
 #include "../utils/AtomicWrite.h"
 #include "../utils/MutexGuard.h"
+#include "../sensors/RemoteIngest.h"   // the handover's WiFi node list
+#include "../web/IngestHandler.h"       // REMOTE_STATUS_STALE_MS
 #ifdef FEATURE_ESPNOW_INGEST
 #include "../espnow/EspNowIngest.h"     // the table label follows the config
 #endif
@@ -120,6 +122,14 @@ static bool loadEntry(const Entry& e, JsonDocument& doc) {
     return readJson(p, doc) && doc["desired"].is<JsonObject>();
 }
 
+/// The `error` object of a rejected rev — {field, reason} — or null.
+static void putError(JsonVariant dst, const NodeCfgSummary& s) {
+    if (s.status != ncr::ST_REJECTED) { dst.set(nullptr); return; }
+    JsonObject er = dst.to<JsonObject>();
+    er["field"]  = (const char*)s.err.field;
+    er["reason"] = (const char*)s.err.reason;
+}
+
 /// Write the RAM fields of `e` into `doc` and the file. The generation moves
 /// even if the write fails: RAM is what everything else reads, and it holds
 /// the new state either way.
@@ -127,13 +137,7 @@ static bool saveEntry(const Entry& e, JsonDocument& doc) {
     doc["applied_rev"] = e.s.applied;
     doc["status"]      = ncr::statusName(e.s.status);
     doc["ho_rev"]      = e.s.hoRev;
-    if (e.s.status == ncr::ST_REJECTED) {
-        JsonObject er = doc["error"].to<JsonObject>();
-        er["field"]  = (const char*)e.s.err.field;
-        er["reason"] = (const char*)e.s.err.reason;
-    } else {
-        doc.remove("error");
-    }
+    putError(doc["error"], e.s);
     const uint32_t now = (uint32_t)time(nullptr);
     if (now >= 1000000000u) doc["seen"] = now;
     s_gen++;
@@ -200,6 +204,36 @@ static void tableFollows(const Entry& e, const NodeConfig& c) {
 static void tableFollows(const Entry&, const NodeConfig&) {}
 #endif
 
+/// Adopt a report as the desired config (§3, §5), into w->cfg: decoded over
+/// what was desired (or the defaults, for a node seen for the first time,
+/// whose entry is allocated here), at `rev`, the node running `applied`. The
+/// caller finishes with adoptDone(). False when the report does not decode.
+static bool adopt(Entry*& e, Work* w, JsonObjectConst rep, bool espnow, const char* name,
+                  uint8_t id, uint16_t rev, uint16_t applied) {
+    if (!e) w->doc.clear();
+    decodeDesired(w->doc, w->cfg, espnow);
+    Issue is;
+    if (!decodeConfig(rep, w->cfg, NCJ_DEC_REV | NCJ_DEC_IDENTITY, &is)) {
+        Serial.printf("[nodecfg] report from %s/%u refused: %s %s\n", name, id, is.field,
+                      is.reason);
+        return false;
+    }
+    if (!e && (e = alloc(espnow, name, id)) == nullptr) return false;
+    w->cfg.transport = espnow ? Transport::EspNow : Transport::Wifi;
+    w->cfg.rev   = rev;
+    w->cfg.local = false;
+    e->s.rev     = rev;
+    e->s.applied = applied;
+    e->s.status  = ncr::statusAfterApplied(ncr::ST_PENDING, rev, applied);
+    e->s.err.field[0] = e->s.err.reason[0] = '\0';
+    return true;
+}
+
+static void adoptDone(Entry& e, Work* w) {
+    copyStr(e.dname, sizeof(e.dname), w->cfg.name);
+    encodeDesired(w->doc, w->cfg);
+}
+
 // ============================================================================
 // Boot
 // ============================================================================
@@ -229,31 +263,30 @@ void nodeCfgBegin() {
     }
 
     for (int i = 0; i < n; i++) {
-        const char* nm = names[i];
-        const size_t len = strlen(nm);
-        if (len < 8 || strcmp(nm + len - 5, ".json") != 0 || nm[1] != '_') continue;
-        char base[NODE_NAME_MAX + 1];
-        if (len - 7 > NODE_NAME_MAX) continue;
-        memcpy(base, nm + 2, len - 7);
-        base[len - 7] = '\0';
-
-        char key[ncr::KEY_CAP] = { nm[0], ':', 0 };
-        strAppend(key, sizeof(key), base);
+        // "w_balcony.json" is key "w:balcony"; parseKey() refuses the rest
+        // (handover.json, a stray *.tmp).
+        char* key = names[i];
+        const size_t len = strlen(key);
+        if (len < 8 || strcmp(key + len - 5, ".json") != 0) continue;
+        key[len - 5] = '\0';
+        key[1] = ':';
         bool espnow; char name[NODE_NAME_MAX + 1]; uint8_t id;
         if (!ncr::parseKey(key, espnow, name, id)) continue;
         Entry* e = alloc(espnow, name, id);
         if (!e || !loadEntry(*e, w->doc)) { if (e) e->used = false; continue; }
 
-        JsonDocument& d = w->doc;
-        e->s.rev     = d["desired"]["rev"] | 0;
+        JsonObjectConst d   = w->doc.as<JsonObjectConst>();
+        JsonObjectConst des = d["desired"];
+        JsonObjectConst er  = d["error"];
+        e->s.rev     = des["rev"] | 0;
         e->s.applied = d["applied_rev"] | 0;
         e->s.hoRev   = d["ho_rev"] | 0;
         e->s.status  = ncr::statusParse(d["status"] | "");
         if (e->s.status == ncr::ST_NONE)
             e->s.status = ncr::statusAfterApplied(ncr::ST_PENDING, e->s.rev, e->s.applied);
-        copyStr(e->s.err.field, sizeof(e->s.err.field), d["error"]["field"] | "");
-        copyStr(e->s.err.reason, sizeof(e->s.err.reason), d["error"]["reason"] | "");
-        copyStr(e->dname, sizeof(e->dname), d["desired"]["name"] | "");
+        copyStr(e->s.err.field, sizeof(e->s.err.field), er["field"] | "");
+        copyStr(e->s.err.reason, sizeof(e->s.err.reason), er["reason"] | "");
+        copyStr(e->dname, sizeof(e->dname), des["name"] | "");
         takeProbes(*e, d["reported"], w->cfg);
     }
 
@@ -269,30 +302,14 @@ void nodeCfgBegin() {
 
 uint32_t nodeCfgGeneration() { return s_gen; }
 
-bool nodeCfgSummary(bool espnow, const char* name, uint8_t id, NodeCfgSummary& out) {
-    NC_LOCK(500, false);
-    const Entry* e = find(espnow, name, id);
-    if (!e) return false;
-    out = e->s;
-    return true;
-}
-
-int nodeCfgKeys(NodeCfgKey* out, int max) {
-    NC_LOCK(500, 0);
-    int n = 0;
-    for (const Entry& e : s_e) {
-        if (!e.used || n >= max) continue;
-        out[n].espnow = e.espnow;
-        out[n].id     = e.id;
-        copyStr(out[n].name, sizeof(out[n].name), e.name);
-        n++;
-    }
-    return n;
-}
-
 void nodeCfgPutSummary(JsonObject node, bool espnow, const char* name, uint8_t id) {
     NodeCfgSummary s;
-    if (!nodeCfgSummary(espnow, name, id, s)) return;
+    {
+        NC_LOCK(500, );
+        const Entry* e = find(espnow, name, id);
+        if (!e) return;
+        s = e->s;
+    }
     char key[ncr::KEY_CAP];
     ncr::formatKey(key, espnow, name, id);
     JsonObject c = node["cfg"].to<JsonObject>();
@@ -300,11 +317,7 @@ void nodeCfgPutSummary(JsonObject node, bool espnow, const char* name, uint8_t i
     c["rev"]         = s.rev;
     c["applied_rev"] = s.applied;
     c["status"]      = ncr::statusName(s.status);
-    if (s.status == ncr::ST_REJECTED) {
-        JsonObject er = c["error"].to<JsonObject>();
-        er["field"]  = (const char*)s.err.field;
-        er["reason"] = (const char*)s.err.reason;
-    }
+    if (s.status == ncr::ST_REJECTED) putError(c["error"], s);   // only then (§7)
 }
 
 // ============================================================================
@@ -312,9 +325,9 @@ void nodeCfgPutSummary(JsonObject node, bool espnow, const char* name, uint8_t i
 // ============================================================================
 
 void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
-    JsonVariantConst cr = body["cfg_rev"];
-    if (!cr.is<unsigned>() || !ncr::validName(node)) return;
-    const uint16_t nodeRev = (uint16_t)cr.as<unsigned>();
+    const long cr = body["cfg_rev"] | -1L;        // absent or not a whole number: -1
+    if (cr < 0 || cr > 0xFFFF || !ncr::validName(node)) return;
+    const uint16_t nodeRev = (uint16_t)cr;
     JsonObjectConst rep = body["cfg"];
     JsonObjectConst ce  = body["cfg_error"];
 
@@ -369,31 +382,16 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
             e->s.applied = applied;     // `have` was true, so e is set
             e->s.status  = ncr::statusAfterApplied(e->s.status, e->s.rev, applied);
             if (applied >= e->s.rev) w->doc["sec_dirty"] = 0;
-        } else {
-            if (e) decodeDesired(w->doc, w->cfg, false);
-            else   w->cfg = configDefaults(Transport::Wifi, Hw::Esp8266);
-            Issue is;
-            if (decodeConfig(rep, w->cfg, NCJ_DEC_REV | NCJ_DEC_IDENTITY, &is) &&
-                (e || (e = alloc(false, node, 0)) != nullptr)) {
-                w->cfg.transport = Transport::Wifi;
-                w->cfg.rev   = plan.rev;
-                w->cfg.local = false;
-                encodeDesired(w->doc, w->cfg);
-                // The node's own secrets are what it runs; the collector's copy
-                // may be stale, so none is sent until it is edited here again.
-                w->doc["sec_known"] = ncr::reportSecretsKnown(rep);
-                w->doc["sec_dirty"] = 0;
-                e->s.rev     = plan.rev;
-                e->s.applied = plan.rev;
-                e->s.status  = ncr::ST_APPLIED;
-                e->s.err.field[0] = e->s.err.reason[0] = '\0';
-                copyStr(e->dname, sizeof(e->dname), w->cfg.name);
-                adopted = true;
-            } else {
-                Serial.printf("[nodecfg] report from %s not adopted: %s %s\n",
-                              node, is.field, is.reason);
-                if (!e) { delete w; return; }
-            }
+        } else if (adopt(e, w, rep, false, node, 0, plan.rev, plan.rev)) {
+            adoptDone(*e, w);
+            // The node's own secrets are what it runs; the collector's copy
+            // may be stale, so none is sent until it is edited here again.
+            w->doc["sec_known"] = ncr::reportSecretsKnown(rep);
+            w->doc["sec_dirty"] = 0;
+            adopted = true;
+        } else if (!e) {
+            delete w;
+            return;
         }
         if (e) { keepReport(*e, w->doc, rep, w->cfg); save = true; }
     }
@@ -462,26 +460,11 @@ void nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
         if (!local) plan.applied = rrev;
         if (plan.adopt) {
             const bool first = (e == nullptr);
-            if (e) decodeDesired(w->doc, w->cfg, true);
-            else   w->cfg = configDefaults(Transport::EspNow, Hw::Esp32c3);
-            Issue is;
-            if (!decodeConfig(rep, w->cfg, NCJ_DEC_REV | NCJ_DEC_IDENTITY, &is)) {
-                Serial.printf("[nodecfg] report from node %u not adopted: %s %s\n",
-                              id, is.field, is.reason);
-                break;
-            }
-            if (!e && (e = alloc(true, nullptr, id)) == nullptr) break;
-            w->cfg.transport = Transport::EspNow;
             // The node was told plan.applied; the desired rev must still move
             // past anything a web edit made since the callback's mirror.
             const uint16_t rev = (!first && e->s.rev >= plan.rev) ? ncr::nextRev(e->s.rev)
                                                                   : plan.rev;
-            e->s.rev     = rev;
-            e->s.applied = plan.applied;
-            w->cfg.rev   = rev;
-            w->cfg.local = false;
-            e->s.status  = ncr::statusAfterApplied(ncr::ST_PENDING, rev, plan.applied);
-            e->s.err.field[0] = e->s.err.reason[0] = '\0';
+            if (!adopt(e, w, rep, true, "", id, rev, plan.applied)) break;
             // First contact: the table's label and interval win, and the node
             // is sent them in the next rev. After a local edit the table
             // follows the node instead (§0.4, local edits win).
@@ -490,8 +473,7 @@ void nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
             } else {
                 tableFollows(*e, w->cfg);
             }
-            copyStr(e->dname, sizeof(e->dname), w->cfg.name);
-            encodeDesired(w->doc, w->cfg);
+            adoptDone(*e, w);
         } else {
             e->s.applied = plan.applied;
             e->s.status  = ncr::statusAfterApplied(e->s.status, e->s.rev, plan.applied);
@@ -551,12 +533,16 @@ size_t nodeCfgRadioDoc(uint8_t id, char* buf, size_t cap, uint16_t& rev) {
     return n;
 }
 
-bool nodeCfgProbeMap(uint8_t id, ncr::ProbeMap& out) {
-    NC_LOCK(200, false);
-    const Entry* e = find(true, nullptr, id);
-    if (!e || !e->haveProbes) return false;
-    out = e->probes;
-    return true;
+int nodeCfgData2Named(uint8_t id, const Data2Sample& s, ncr::NamedValue* out, int max) {
+    NodeConfig c;
+    bool have = false;
+    {
+        MutexGuard g(s_mx, pdMS_TO_TICKS(200));
+        const Entry* e = g.isLocked() ? find(true, nullptr, id) : nullptr;
+        if (e && e->haveProbes) { ncr::probeMapToConfig(e->probes, c); have = true; }
+    }
+    float battV = 0.0f;
+    return ncr::data2Named(have ? &c : nullptr, s, out, max, battV);
 }
 
 void nodeCfgForget(bool espnow, const char* name, uint8_t id) {
@@ -581,7 +567,7 @@ static int fail400(JsonDocument& out, const char* field, const char* reason) {
     return 400;
 }
 
-int nodeCfgApiGet(const char* key, bool known, JsonDocument& out) {
+int nodeCfgApiGet(const char* key, JsonDocument& out) {
     bool espnow; char name[NODE_NAME_MAX + 1]; uint8_t id;
     if (!ncr::parseKey(key, espnow, name, id)) return fail400(out, "key", "not a node key");
 
@@ -593,10 +579,6 @@ int nodeCfgApiGet(const char* key, bool known, JsonDocument& out) {
         const Entry* e = g.isLocked() ? find(espnow, name, id) : nullptr;
         if (!g.isLocked()) {
             code = 503;
-        } else if (!e && !known) {
-            out["ok"] = false;
-            out["error"] = "unknown node";
-            code = 404;
         } else {
             out["key"]       = key;
             out["transport"] = espnow ? "espnow" : "wifi";
@@ -608,13 +590,7 @@ int nodeCfgApiGet(const char* key, bool known, JsonDocument& out) {
                 out["reported"].set(w->doc["reported"]);
                 out["applied_rev"] = e->s.applied;
                 out["status"]      = ncr::statusName(e->s.status);
-                if (e->s.status == ncr::ST_REJECTED) {
-                    JsonObject er = out["error"].to<JsonObject>();
-                    er["field"]  = (const char*)e->s.err.field;
-                    er["reason"] = (const char*)e->s.err.reason;
-                } else {
-                    out["error"] = nullptr;
-                }
+                putError(out["error"], e->s);
                 parseHw(w->doc["reported"]["hw"] | "", hw);
             } else {
                 out["desired"]     = nullptr;
@@ -681,17 +657,70 @@ int nodeCfgApiPost(JsonObjectConst body, JsonDocument& out) {
 // Handover — §4
 // ============================================================================
 
-bool nodeCfgHandoverActive() {
+bool nodeCfgHandover(char ssid[SSID_CAP], uint32_t* startMs) {
     NC_LOCK(500, false);
+    if (ssid)    copyStr(ssid, SSID_CAP, s_ho.ssid);
+    if (startMs) *startMs = s_ho.startMs;
     return s_ho.active;
 }
 
-uint32_t nodeCfgHandoverStartedMs() { return s_ho.startMs; }
+int nodeCfgHandoverSort(JsonObject out) {
+    struct K {
+        bool    espnow, offline;
+        uint8_t id;
+        char    name[NODE_NAME_MAX + 1];
+    };
+    K   k[NODECFG_LIST_MAX];
+    int n = 0;
+    NC_LOCK(1000, 0);
+    // The slot for a node, added (offline until a list says otherwise) when
+    // it is not there yet; null when full.
+    auto slot = [&](bool espnow, const char* name, uint8_t id) -> K* {
+        for (int i = 0; i < n; i++)
+            if (k[i].espnow == espnow && (espnow ? k[i].id == id : !strcmp(k[i].name, name)))
+                return &k[i];
+        if (n >= NODECFG_LIST_MAX) return nullptr;
+        K& x = k[n++];
+        x.espnow = espnow; x.offline = true; x.id = id;
+        copyStr(x.name, sizeof(x.name), name);
+        return &x;
+    };
+    for (const Entry& e : s_e)
+        if (e.used) slot(e.espnow, e.name, e.id);
+#ifdef FEATURE_ESPNOW_INGEST
+    {
+        EspNowNode nodes[ESPNOW_MAX_NODES];
+        const int      c   = espnowCopyNodes(nodes, ESPNOW_MAX_NODES);
+        const uint32_t now = millis();
+        const uint8_t  iv  = espnowGetOfflineIntervals();
+        for (int j = 0; j < c; j++)
+            if (K* x = slot(true, "", nodes[j].nodeId)) x->offline = espnowNodeOffline(nodes[j], now, iv);
+    }
+#endif
+    char nid[RemoteIngest::MAX_NODE_ID];
+    for (int j = 0; remoteIngest.nodeIdAt(j, nid, sizeof(nid)); j++) {
+        const uint32_t age = remoteIngest.ageMsForNode(nid);
+        if (K* x = slot(false, nid, 0)) x->offline = !(age != UINT32_MAX && age < REMOTE_STATUS_STALE_MS);
+    }
 
-void nodeCfgHandoverSsid(char out[SSID_CAP]) {
-    out[0] = '\0';
-    NC_LOCK(500, );
-    copyStr(out, SSID_CAP, s_ho.ssid);
+    JsonArray lists[3];
+    if (!out.isNull()) {
+        lists[ncr::HO_READY]   = out["ready"].to<JsonArray>();
+        lists[ncr::HO_PENDING] = out["pending"].to<JsonArray>();
+        lists[ncr::HO_OFFLINE] = out["offline"].to<JsonArray>();
+    }
+    int pending = 0;
+    for (int i = 0; i < n; i++) {
+        const Entry*  e = find(k[i].espnow, k[i].name, k[i].id);
+        const uint8_t c = ncr::hoClassify(e != nullptr, e ? e->s.applied : 0, e ? e->s.hoRev : 0,
+                                          k[i].offline);
+        if (c == ncr::HO_PENDING) pending++;
+        if (out.isNull()) continue;
+        char key[ncr::KEY_CAP];
+        ncr::formatKey(key, k[i].espnow, k[i].name, k[i].id);
+        lists[c].add((const char*)key);
+    }
+    return pending;
 }
 
 /// Hand every node the next network (ssid "" takes it back) in a new rev.
@@ -710,6 +739,8 @@ static void handAll(Work* w, const char* ssid, const char* pass, bool start) {
     }
 }
 
+/// Start (ssid set) or cancel (ssid "") — one path, as the two differ only
+/// in what is handed out and whether the file is written or removed.
 bool nodeCfgHandoverStart(const char* ssid, const char* pass, JsonVariantConst form) {
     Work* w = new (std::nothrow) Work;
     if (!w) return false;
@@ -717,15 +748,21 @@ bool nodeCfgHandoverStart(const char* ssid, const char* pass, JsonVariantConst f
     {
         MutexGuard g(s_mx, pdMS_TO_TICKS(3000));
         if (g.isLocked()) {
-            w->aux["ssid"] = ssid;
-            w->aux["pass"] = pass;
-            if (!form.isNull()) w->aux["form"].set(form);
-            if (writeJson(HO_PATH, w->aux)) {
-                s_ho.active  = true;
+            const bool start = ssid[0] != '\0';
+            if (start) {
+                w->aux["ssid"] = ssid;
+                w->aux["pass"] = pass;
+                if (!form.isNull()) w->aux["form"].set(form);
+                ok = writeJson(HO_PATH, w->aux);
+            } else {
+                removeFile(HO_PATH);
+                ok = true;
+            }
+            if (ok) {
+                if (start || s_ho.active) handAll(w, ssid, pass, start);
+                s_ho.active  = start;
                 s_ho.startMs = millis();
                 copyStr(s_ho.ssid, sizeof(s_ho.ssid), ssid);
-                handAll(w, ssid, pass, true);
-                ok = true;
             }
         }
     }
@@ -733,22 +770,7 @@ bool nodeCfgHandoverStart(const char* ssid, const char* pass, JsonVariantConst f
     return ok;
 }
 
-bool nodeCfgHandoverCancel() {
-    Work* w = new (std::nothrow) Work;
-    if (!w) return false;
-    bool ok = false;
-    {
-        MutexGuard g(s_mx, pdMS_TO_TICKS(3000));
-        if (g.isLocked()) {
-            if (s_ho.active) handAll(w, "", "", false);
-            s_ho.active = false;
-            removeFile(HO_PATH);
-            ok = true;
-        }
-    }
-    delete w;
-    return ok;
-}
+bool nodeCfgHandoverCancel() { return nodeCfgHandoverStart("", "", JsonVariantConst()); }
 
 bool nodeCfgHandoverFinish(JsonDocument& out) {
     NC_LOCK(3000, false);

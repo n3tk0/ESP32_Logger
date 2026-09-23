@@ -470,6 +470,13 @@ static bool ringPush(const uint8_t* mac, uint8_t type, const void* data, int len
     return room;
 }
 
+/// espnowFillCfgChunk() for a CFG frame, out of line: one copy of the
+/// framing for both answers the callback gives.
+static int __attribute__((noinline)) cfgFrame(CfgChunkMsg& m, uint8_t nodeId, uint16_t rev,
+                                              const char* doc, uint16_t total, uint16_t offset) {
+    return espnowFillCfgChunk(m, EN_MSG_CFG, nodeId, rev, doc, total, offset);
+}
+
 /// CFG_GET: one slice of the rendered desired config, straight back (§5).
 /// The node is awake and asking in a loop, max(ack window, 50 ms) per slice;
 /// this is a memcpy and a send. When there is nothing newer than what the
@@ -486,16 +493,15 @@ static void answerCfgGet(const uint8_t* mac, const uint8_t* data) {
     taskENTER_CRITICAL(&s_nodeMux);
     const int idx = slotFor(mac, g.nodeId);
     if (idx >= 0) {
-        const uint16_t want = s_cfgHave[idx] ? s_cfgRev[idx] : 0;
-        if (s_cfgDoc[idx] && g.haveRev < s_cfgDocRev[idx]) {
-            n = espnowFillCfgChunk(m, EN_MSG_CFG, g.nodeId, s_cfgDocRev[idx], s_cfgDoc[idx],
-                                   s_cfgDocLen[idx], g.offset);
-        } else {
+        const uint16_t want  = s_cfgHave[idx] ? s_cfgRev[idx] : 0;
+        const bool     slice = s_cfgDoc[idx] && g.haveRev < s_cfgDocRev[idx];
+        if (!slice) {
             applied = s_cfgPend[idx] && g.haveRev >= want;
             if (applied) s_cfgPend[idx] = false;
-            n = espnowFillCfgChunk(m, EN_MSG_CFG, g.nodeId, g.haveRev > want ? g.haveRev : want,
-                                   nullptr, 0, 0);
         }
+        n = slice ? cfgFrame(m, g.nodeId, s_cfgDocRev[idx], s_cfgDoc[idx], s_cfgDocLen[idx],
+                             g.offset)
+                  : cfgFrame(m, g.nodeId, g.haveRev > want ? g.haveRev : want, nullptr, 0, 0);
     }
     taskEXIT_CRITICAL(&s_nodeMux);
     if (n > 0) esp_now_send(mac, (const uint8_t*)&m, (size_t)n);
@@ -550,7 +556,7 @@ static void feedCfgReport(const uint8_t* mac, const uint8_t* data, int len) {
     else        s_reportReady = true;
     if (!local) return;
     CfgChunkMsg m;
-    const int n = espnowFillCfgChunk(m, EN_MSG_CFG, c.nodeId, told, nullptr, 0, 0);
+    const int n = cfgFrame(m, c.nodeId, told, nullptr, 0, 0);
     if (n > 0) esp_now_send(mac, (const uint8_t*)&m, (size_t)n);
 }
 
@@ -1032,15 +1038,10 @@ void espnowIngestTick() {
             }
         } else {
             // DATA2 (§5): each value names its metric by catalogue id, and a
-            // probe by its ordinal — named through the config the node last
-            // reported, or the default probe_temp[_N] before it has.
-            ncr::ProbeMap              pm;
-            nodecfg::NodeConfig        nameCfg;
-            const nodecfg::NodeConfig* cfgp = nullptr;
-            if (nodeCfgProbeMap(h.nodeId, pm)) {
-                ncr::probeMapToConfig(pm, nameCfg);
-                cfgp = &nameCfg;
-            }
+            // probe by its ordinal — named by the store, through the config
+            // the node last reported, or the default probe_temp[_N] before it
+            // has. (There, not here: the store's copy of the catalogue and its
+            // string helpers is the one that is linked.)
             Data2Header hh;
             Data2Cursor cur;
             Data2Sample smp;
@@ -1048,8 +1049,7 @@ void espnowIngestTick() {
             for (uint8_t i = 0; espnowData2Next(cur, smp); i++) {
                 const uint32_t ts = (base > smp.dt_s) ? base - smp.dt_s : base;
                 ncr::NamedValue nv[EN_DATA2_MAX_VALUES];
-                float bv = 0.0f;
-                const int cnt = ncr::data2Named(cfgp, smp, nv, EN_DATA2_MAX_VALUES, bv);
+                const int cnt = nodeCfgData2Named(h.nodeId, smp, nv, EN_DATA2_MAX_VALUES);
                 for (int k = 0; k < cnt; k++)
                     landReading(id, i == newest, nv[k].name, nv[k].value, nv[k].unit, ts);
             }

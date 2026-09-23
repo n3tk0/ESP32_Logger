@@ -568,10 +568,17 @@ reading cannot be one its own pipeline then hides from the dashboard and from
 alerts. The reading itself is never dropped for this.
 
 The body is accumulated across TCP segments, like `/api/firstrun` and
-`/api/kindle/slots`. It has to be: the cap is 4 KB for buffered batches and the
-ESP32's MSS is about 1460 bytes, so a batch large enough to need the cap always
-arrives split. `tools/check_body_handlers.py` holds every body handler in
-`src/web` to that.
+`/api/kindle/slots`. It has to be: the cap is 6 KB (a 4 KB buffered batch plus
+the node's config, `docs/NODE_CONFIG.md` §3) and the ESP32's MSS is about 1460
+bytes, so a batch large enough to need the cap always arrives split.
+`tools/check_body_handlers.py` holds every body handler in `src/web` to that.
+The accumulator (`accumulateBody()` in `IngestHandler.cpp`) is shared with the
+`/api/nodes/*` POSTs below.
+
+Since `docs/NODE_CONFIG.md` §3 the body may also carry `cfg_rev`, `cfg` and
+`cfg_error`, and the reply then gains `cfg` when the node is behind its
+desired config (the whole document, or `{"rev":N}` alone to confirm a local
+edit). An empty `readings` array is accepted and marks the node alive.
 
 **A reading may carry `dt_s`: how many seconds before the batch it was taken.**
 That is how a node hands over what it buffered through an outage, and it is the
@@ -695,6 +702,20 @@ collector with no clock of its own cannot judge and takes `ts` as sent.
 | Method | Route | Auth | Purpose |
 |---|---|---|---|
 | GET | `/api/remote/status` | read | List HTTP WiFi nodes, metrics, age, and online status |
+| GET | `/api/nodes/config` | read | One node's desired/reported config, status and caps (`?key=w:<name>` or `e:<id>`) |
+| POST | `/api/nodes/config` | CSRF | Edit a node's config (JSON `{"key","config"}`); validated, then a new rev |
+| GET | `/api/nodes/handover` | read | Network handover progress: ready / pending / offline nodes |
+| POST | `/api/nodes/handover` | CSRF | `start` (hand every node the next network), `switch`, `cancel` (JSON body) |
+
+The node configuration routes are `docs/NODE_CONFIG.md` §7, built with
+`FEATURE_REMOTE_NODES` (both kinds of node). Each node's config lives in
+`/nodes/w_<name>.json` or `/nodes/e_<id>.json` (`src/nodes/NodeCfgStore`),
+and `/api/espnow/status` and `/api/remote/status` carry a per-node `cfg`
+summary so the lists need no request per row. A key with no file behind it —
+a node that has not reported its settings yet — is answered with nulls, not a
+404. Secrets are never returned: each comes back as `""` with a `*_set` flag.
+The handover `switch` saves the network settings exactly as `/save_network`
+does (it shares `applyNetworkForm()`) and restarts.
 
 `/api/espnow/add` exists because pairing needs the node awake, in range and
 holding the right key at the moment somebody clicks a button — fine on a bench,

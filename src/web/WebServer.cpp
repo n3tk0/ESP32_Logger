@@ -39,6 +39,7 @@
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
 #include "../pipeline/DataPipeline.h"   // fsMutex (FS1)
 #include "../utils/MutexGuard.h"
+#include "../utils/Ipv4Parse.h"         // settings form IPs, without sscanf
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Update.h>
@@ -1228,10 +1229,7 @@ const char* applyNetworkForm(NetworkConfig& net, NetFormGet get, void* ctx) {
     net.useStaticIP = get(ctx, "useStaticIP") != nullptr;
 
     auto parseIP = [&](const char* param, uint8_t* dst) {
-        const char* s = get(ctx, param);
-        uint8_t tmp[4];
-        if (s && sscanf(s, "%hhu.%hhu.%hhu.%hhu", &tmp[0], &tmp[1], &tmp[2], &tmp[3]) == 4)
-            memcpy(dst, tmp, 4);
+        ipv4Parse(get(ctx, param), dst);   // leaves dst alone unless valid
     };
     parseIP("staticIP",  net.staticIP);
     parseIP("gateway",   net.gateway);

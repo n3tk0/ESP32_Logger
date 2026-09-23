@@ -17,48 +17,21 @@
 #include "../nodecfg/UdpDiscovery.h"
 #include "../nodecfg/UdpDiscoveryHmac.h"
 #include "../nodes/NodeCfgStore.h"
-#include "../sensors/RemoteIngest.h"
-#include "../utils/JsonResponse.h"
-#ifdef FEATURE_ESPNOW_INGEST
-#include "../espnow/EspNowIngest.h"
-#endif
 
 // ============================================================================
 // Bodies
 // ============================================================================
 // A partial config is small, but a whole one — eight sensors, every field —
 // is ~1.5 KB of JSON and arrives in more than one TCP segment, so the body is
-// accumulated through _tempObject like /api/ingest and /api/kindle/slots.
+// accumulated through _tempObject by /api/ingest's accumulateBody().
 static constexpr size_t NODES_MAX_BODY = 3072;
 
 typedef void (*JsonBodyFn)(AsyncWebServerRequest* req, JsonDocument& body);
 
 static void accumulate(AsyncWebServerRequest* req, uint8_t* data, size_t len,
                        size_t index, size_t total, JsonBodyFn fn) {
-    if (total > NODES_MAX_BODY) {
-        if (index == 0)
-            req->send(413, "application/json", "{\"ok\":false,\"error\":\"body too large\"}");
-        return;
-    }
-    if (index == 0) {
-        req->_tempObject = new (std::nothrow) String();
-        if (!req->_tempObject) {
-            req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
-            return;
-        }
-        // Registered straight after the allocation: a client that goes away
-        // mid-body would otherwise orphan the buffer.
-        req->onDisconnect([req]() {
-            delete static_cast<String*>(req->_tempObject);
-            req->_tempObject = nullptr;
-        });
-        static_cast<String*>(req->_tempObject)->reserve(total);
-    }
-    String* buf = static_cast<String*>(req->_tempObject);
+    String* buf = accumulateBody(req, data, len, index, total, NODES_MAX_BODY);
     if (!buf) return;
-    buf->concat(reinterpret_cast<const char*>(data), len);
-    if (index + len < total) return;
-
     if (requireMutatingAuth(req)) {         // rate limit + CSRF, once, on the whole body
         JsonDocument body;
         if (deserializeJson(body, buf->c_str(), buf->length()) || !body.is<JsonObject>())
@@ -67,35 +40,14 @@ static void accumulate(AsyncWebServerRequest* req, uint8_t* data, size_t len,
             fn(req, body);
     }
     delete buf;
-    req->_tempObject = nullptr;
 }
 
 static void sendJson(AsyncWebServerRequest* req, int code, const JsonDocument& doc) {
-    if (code == 200) { sendJsonResponse(req, doc); return; }
-    String s;
-    serializeJson(doc, s);
-    req->send(code, "application/json", s);
-}
-
-// ============================================================================
-// Which nodes exist
-// ============================================================================
-
-/// Is this a node one of the status lists shows? (A node without a config
-/// file is answered with nulls rather than a 404 — §7.)
-static bool nodeListed(bool espnow, const char* name, uint8_t id) {
-    if (espnow) {
-#ifdef FEATURE_ESPNOW_INGEST
-        EspNowNode nodes[ESPNOW_MAX_NODES];
-        const int n = espnowCopyNodes(nodes, ESPNOW_MAX_NODES);
-        for (int i = 0; i < n; i++) if (nodes[i].nodeId == id) return true;
-#endif
-        return false;
-    }
-    char nid[RemoteIngest::MAX_NODE_ID];
-    for (int i = 0; remoteIngest.nodeIdAt(i, nid, sizeof(nid)); i++)
-        if (strcmp(nid, name) == 0) return true;
-    return false;
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+    if (!resp) { req->send(500); return; }
+    resp->setCode(code);
+    serializeJson(doc, *resp);
+    req->send(resp);
 }
 
 // ============================================================================
@@ -103,12 +55,9 @@ static bool nodeListed(bool espnow, const char* name, uint8_t id) {
 // ============================================================================
 
 void handleNodesConfigGet(AsyncWebServerRequest* req) {
-    char key[ncr::KEY_CAP] = "";
-    if (req->hasParam("key")) nodecfg::copyStr(key, sizeof(key), req->getParam("key")->value().c_str());
-    bool espnow; char name[nodecfg::NODE_NAME_MAX + 1]; uint8_t id;
-    const bool known = ncr::parseKey(key, espnow, name, id) && nodeListed(espnow, name, id);
+    const AsyncWebParameter* p = req->getParam("key");
     JsonDocument out;
-    sendJson(req, nodeCfgApiGet(key, known, out), out);
+    sendJson(req, nodeCfgApiGet(p ? p->value().c_str() : "", out), out);
 }
 
 static void nodesConfigPost(AsyncWebServerRequest* req, JsonDocument& body) {
@@ -125,85 +74,16 @@ void handleNodesConfigBody(AsyncWebServerRequest* req, uint8_t* data, size_t len
 // /api/nodes/handover — §4
 // ============================================================================
 
-/// Every node that could be asked to follow: those with a config file, and
-/// those in either status list without one (they cannot follow, and say so by
-/// never becoming ready). Classified ready / pending / offline by the rules in
-/// NodeCfgRules.h and each transport's own offline rule. Returns how many are
-/// pending; fills `out` with the three lists when it is not null.
-static int handoverSort(JsonObject out) {
-    static const int MAXK = NODECFG_LIST_MAX;
-    NodeCfgKey keys[MAXK];
-    bool       offline[MAXK];
-    int n = nodeCfgKeys(keys, MAXK);
-    auto has = [&](bool espnow, const char* name, uint8_t id) {
-        for (int i = 0; i < n; i++)
-            if (keys[i].espnow == espnow &&
-                (espnow ? keys[i].id == id : strcmp(keys[i].name, name) == 0)) return i;
-        return -1;
-    };
-    for (int i = 0; i < n; i++) offline[i] = true;   // until a list says otherwise
-
-#ifdef FEATURE_ESPNOW_INGEST
-    {
-        EspNowNode nodes[ESPNOW_MAX_NODES];
-        const int      c   = espnowCopyNodes(nodes, ESPNOW_MAX_NODES);
-        const uint32_t now = millis();
-        const uint8_t  iv  = espnowGetOfflineIntervals();
-        for (int j = 0; j < c; j++) {
-            int i = has(true, "", nodes[j].nodeId);
-            if (i < 0 && n < MAXK) {
-                i = n++;
-                keys[i].espnow = true; keys[i].id = nodes[j].nodeId; keys[i].name[0] = '\0';
-            }
-            if (i >= 0) offline[i] = espnowNodeOffline(nodes[j], now, iv);
-        }
-    }
-#endif
-    {
-        char nid[RemoteIngest::MAX_NODE_ID];
-        for (int j = 0; remoteIngest.nodeIdAt(j, nid, sizeof(nid)); j++) {
-            int i = has(false, nid, 0);
-            if (i < 0 && n < MAXK) {
-                i = n++;
-                keys[i].espnow = false; keys[i].id = 0;
-                nodecfg::copyStr(keys[i].name, sizeof(keys[i].name), nid);
-            }
-            const uint32_t age = remoteIngest.ageMsForNode(nid);
-            if (i >= 0) offline[i] = !(age != UINT32_MAX && age < REMOTE_STATUS_STALE_MS);
-        }
-    }
-
-    JsonArray lists[3];
-    if (!out.isNull()) {
-        lists[ncr::HO_READY]   = out["ready"].to<JsonArray>();
-        lists[ncr::HO_PENDING] = out["pending"].to<JsonArray>();
-        lists[ncr::HO_OFFLINE] = out["offline"].to<JsonArray>();
-    }
-    int pending = 0;
-    for (int i = 0; i < n; i++) {
-        NodeCfgSummary s;
-        const bool have = nodeCfgSummary(keys[i].espnow, keys[i].name, keys[i].id, s);
-        const uint8_t c = ncr::hoClassify(have, have ? s.applied : 0, have ? s.hoRev : 0, offline[i]);
-        if (c == ncr::HO_PENDING) pending++;
-        if (out.isNull()) continue;
-        char key[ncr::KEY_CAP];
-        ncr::formatKey(key, keys[i].espnow, keys[i].name, keys[i].id);
-        lists[c].add((const char*)key);
-    }
-    return pending;
-}
-
 void handleNodesHandoverGet(AsyncWebServerRequest* req) {
     JsonDocument out;
-    const bool active = nodeCfgHandoverActive();
+    char ssid[nodecfg::SSID_CAP];
+    const bool active = nodeCfgHandover(ssid, nullptr);
     out["active"] = active;
     if (active) {
-        char ssid[nodecfg::SSID_CAP];
-        nodeCfgHandoverSsid(ssid);
         out["ssid"] = (const char*)ssid;
-        handoverSort(out.as<JsonObject>());
+        nodeCfgHandoverSort(out.as<JsonObject>());
     }
-    sendJsonResponse(req, out);
+    sendJson(req, 200, out);
 }
 
 static const char* formField(void* ctx, const char* key) {
@@ -232,11 +112,12 @@ static bool handoverSwitch() {
     return true;
 }
 
+/// Every reason is a fixed string of ours or applyNetworkForm()'s, none with
+/// a quote or backslash in it, so no JSON escaping is needed.
 static void handoverFail(AsyncWebServerRequest* req, int code, const char* reason) {
-    JsonDocument out;
-    out["ok"]     = false;
-    out["reason"] = reason;
-    sendJson(req, code, out);
+    char b[128];
+    snprintf(b, sizeof(b), "{\"ok\":false,\"reason\":\"%s\"}", reason);
+    req->send(code, "application/json", b);
 }
 
 static void nodesHandoverPost(AsyncWebServerRequest* req, JsonDocument& body) {
@@ -326,9 +207,9 @@ void nodeCfgApiTick() {
     static uint32_t s_nextHo = 0;
     if ((int32_t)(millis() - s_nextHo) < 0) return;
     s_nextHo = millis() + 2000;
-    if (shouldRestart || !nodeCfgHandoverActive()) return;
-    if (ncr::hoAutoSwitch(true, handoverSort(JsonObject()), millis() - nodeCfgHandoverStartedMs()))
-        handoverSwitch();
+    uint32_t since = 0;
+    if (shouldRestart || !nodeCfgHandover(nullptr, &since)) return;
+    if (ncr::hoAutoSwitch(true, nodeCfgHandoverSort(JsonObject()), millis() - since)) handoverSwitch();
 }
 
 #endif  // FEATURE_REMOTE_NODES

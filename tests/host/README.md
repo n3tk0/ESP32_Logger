@@ -23,6 +23,8 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_nodecfg.cpp` | `src/nodecfg/` — every validation rule of docs/NODE_CONFIG.md §1.2 one at a time, the JSON codec (round trip, partial documents, secrets), legacy `/config.json` migration, the metric catalogue, `caps` |
 | `test_hw_pins.cpp` | `src/nodecfg/HwPins.h` — both chips' pin tables, label resolution, and pin-for-pin agreement with `node/src/NodePins.h` |
 | `test_udp_discovery.cpp` | `src/nodecfg/UdpDiscovery.h` — the collector-discovery packets, against a reference HMAC-SHA256 checked with RFC 4231 |
+| `test_nodecfg_collector.cpp` | `src/nodes/NodeCfgRules.h` — the collector's node-config decisions: revs and status, keys and file names, report adoption, the ingest reply, which secrets travel, first-contact identity, the handover, DATA2 naming |
+| `test_ipv4_parse.cpp` | `src/utils/Ipv4Parse.h` — the dotted-quad parser that replaced `sscanf` (300 is refused, not wrapped to 44) |
 | `test_espnow_nodetable.cpp` | the three decisions the collector makes about an arriving frame |
 | `test_remote_ingest.cpp` | the mailbox and the separate historical queue it grew |
 | `test_battery_model.cpp` | that the remaining-life model **refuses** to answer when it cannot |

@@ -70,7 +70,7 @@ static inline uint16_t nextRev(uint16_t rev) {
 /// rejected — the rejected rev is still the desired one, and the node is
 /// still (correctly) running its previous config.
 static inline uint8_t statusAfterApplied(uint8_t status, uint16_t rev, uint16_t applied) {
-    return applied >= rev ? ST_APPLIED : status;
+    return applied >= rev ? (uint8_t)ST_APPLIED : status;
 }
 
 /// Is there a config the node should be handed? Pending and behind. A

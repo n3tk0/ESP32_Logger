@@ -43,6 +43,7 @@ bool RemoteIngest::put(const char* nodeId, const char* metric, float value,
             _e[i].value    = value;
             _e[i].ts       = ts;
             _e[i].rxMillis = now;
+            _e[i].seenMs   = now;
             copyClamped(_e[i].unit, MAX_UNIT, unit);
             stored = true;
             break;
@@ -55,6 +56,7 @@ bool RemoteIngest::put(const char* nodeId, const char* metric, float value,
         _e[free].value    = value;
         _e[free].ts       = ts;
         _e[free].rxMillis = now;
+        _e[free].seenMs   = now;
         _e[free].used     = true;
         stored = true;
     }
@@ -197,12 +199,21 @@ uint32_t RemoteIngest::ageMsForNode(const char* nodeId) const {
     taskENTER_CRITICAL(&_mux);
     for (int i = 0; i < MAX_ENTRIES; i++) {
         if (!_e[i].used || !eq(_e[i].nodeId, nodeId)) continue;
-        const uint32_t age = now - _e[i].rxMillis;
+        const uint32_t age = now - _e[i].seenMs;
         if (age < best) best = age;
     }
     taskEXIT_CRITICAL(&_mux);
 
     return best;
+}
+
+void RemoteIngest::touch(const char* nodeId) {
+    if (nodeId == nullptr) return;
+    const uint32_t now = millis();
+    taskENTER_CRITICAL(&_mux);
+    for (int i = 0; i < MAX_ENTRIES; i++)
+        if (_e[i].used && eq(_e[i].nodeId, nodeId)) _e[i].seenMs = now;
+    taskEXIT_CRITICAL(&_mux);
 }
 
 // Deduplicating the node list is an O(n²) walk of string compares. Doing

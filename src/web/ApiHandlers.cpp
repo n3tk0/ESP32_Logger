@@ -2002,13 +2002,11 @@ void registerApiRoutes(AsyncWebServer& server) {
     // JSON bodies, accumulated across segments by NodeCfgApi.cpp.
     nodeCfgBegin();
     server.on("/api/nodes/config",      HTTP_GET,  handleNodesConfigGet);
-    server.on("/api/nodes/config",      HTTP_POST,
-              [](AsyncWebServerRequest* r) { /* handled in the body callback */ },
-              nullptr, handleNodesConfigBody);
+    server.on("/api/nodes/config",      HTTP_POST, answeredInBody, nullptr,
+              handleNodesConfigBody);
     server.on("/api/nodes/handover",    HTTP_GET,  handleNodesHandoverGet);
-    server.on("/api/nodes/handover",    HTTP_POST,
-              [](AsyncWebServerRequest* r) { /* handled in the body callback */ },
-              nullptr, handleNodesHandoverBody);
+    server.on("/api/nodes/handover",    HTTP_POST, answeredInBody, nullptr,
+              handleNodesHandoverBody);
 #endif
 #ifdef FEATURE_KINDLE_DASHBOARD
     server.on("/api/kindle/config",     HTTP_GET,  handleKindleConfigGet);

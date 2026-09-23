@@ -242,6 +242,31 @@ static void test_history_is_not_stale_merely_for_being_old() {
     CHECK_EQ((int)out[0].quality, (int)QUALITY_GOOD);
 }
 
+// An empty POST ("readings": [], docs/NODE_CONFIG.md §3) says the node is
+// alive and nothing more. It must move last-seen — or a node whose sensors all
+// failed would drop off the status list while it is still talking — and it
+// must NOT make the values it last sent look fresh: those are as old as they
+// were, and drain() has to keep calling them stale.
+static void test_touch_moves_last_seen_not_the_values() {
+    RemoteIngest& ri = fresh();
+    ri.put("out", "temperature", 20.0f, "C", T0);
+    hostAdvanceMillis(700000);
+    CHECK(ri.ageMsForNode("out") >= 700000u);
+
+    ri.touch("out");
+    CHECK(ri.ageMsForNode("out") < 1000u);
+
+    SensorReading out[4];
+    CHECK_EQ(ri.drain("out", out, 4, 600000), 1);
+    CHECK_EQ((int)out[0].quality, (int)QUALITY_ERROR);
+
+    // A node the mailbox has never held is not invented by a touch.
+    ri.touch("ghost");
+    CHECK_EQ(ri.ageMsForNode("ghost"), UINT32_MAX);
+    CHECK_EQ(ri.nodeCount(), 1);
+    ri.touch(nullptr);                     // and nullptr is harmless
+}
+
 // ---------------------------------------------------------------------------
 // historyRoom() — the number a sender is told to wait on
 // ---------------------------------------------------------------------------
@@ -308,6 +333,7 @@ int main() {
     RUN(test_ring_wraps_cleanly);
     RUN(test_staleness_still_marks_the_live_value);
     RUN(test_history_is_not_stale_merely_for_being_old);
+    RUN(test_touch_moves_last_seen_not_the_values);
     RUN(test_history_room_counts_down_to_zero_and_stops);
     RUN(test_a_shed_is_not_a_refusal);
     return SUMMARY();

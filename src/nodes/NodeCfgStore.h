@@ -65,19 +65,6 @@ struct NodeCfgSummary {
     nodecfg::Issue err;       ///< when rejected
 };
 
-/// The RAM index entry for a node, if it has a config file.
-bool nodeCfgSummary(bool espnow, const char* name, uint8_t id, NodeCfgSummary& out);
-
-/// Every node that has a config file — the handover walks these as well as
-/// the status lists, since a WiFi node that has not posted since boot is in no
-/// list but still has to be handed the next network.
-struct NodeCfgKey {
-    bool    espnow;
-    uint8_t id;
-    char    name[nodecfg::NODE_NAME_MAX + 1];
-};
-int nodeCfgKeys(NodeCfgKey* out, int max);
-
 /// Add `"cfg": {"key","rev","applied_rev","status","error"?}` to a node of a
 /// status list (§7) — nothing when the node has no config file.
 void nodeCfgPutSummary(JsonObject node, bool espnow, const char* name, uint8_t id);
@@ -119,27 +106,34 @@ void nodeCfgEspnowAck(uint8_t id, uint16_t rev, bool ok, const char* field, cons
 /// does not fit `cap` / EN_CFG_MAX_TOTAL.
 size_t nodeCfgRadioDoc(uint8_t id, char* buf, size_t cap, uint16_t& rev);
 
-/// The node's reported probe entries, for naming DATA2 values. False before
-/// the node has reported a config.
-bool nodeCfgProbeMap(uint8_t id, ncr::ProbeMap& out);
+/// One DATA2 sample as named readings (§5): probes named through the config
+/// the node last reported, or probe_temp[_N] before it has. Returns how many.
+int nodeCfgData2Named(uint8_t id, const Data2Sample& s, ncr::NamedValue* out, int max);
 
 /// Forget an ESP-NOW node's file (the node was removed from the table).
 void nodeCfgForget(bool espnow, const char* name, uint8_t id);
 
 // ── The Nodes page API (§7) ─────────────────────────────────────────────────
 
-/// GET /api/nodes/config. `known` says the node exists in a status list
-/// even without a file (answered with nulls, §7). Returns the HTTP status.
-int nodeCfgApiGet(const char* key, bool known, JsonDocument& out);
+/// GET /api/nodes/config. A key with no file (a node that has not reported
+/// yet) is answered with nulls, §7. Returns the HTTP status.
+int nodeCfgApiGet(const char* key, JsonDocument& out);
 
 /// POST /api/nodes/config. Returns the HTTP status.
 int nodeCfgApiPost(JsonObjectConst body, JsonDocument& out);
 
 // ── Handover (§4) ───────────────────────────────────────────────────────────
 
-bool     nodeCfgHandoverActive();
-uint32_t nodeCfgHandoverStartedMs();
-void     nodeCfgHandoverSsid(char out[nodecfg::SSID_CAP]);
+/// Whether a handover is running; if so, and when given, the network it
+/// hands out and the millis() it started at.
+bool nodeCfgHandover(char ssid[nodecfg::SSID_CAP], uint32_t* startMs);
+
+/// §4 step 3: sort every node that could be asked to follow into
+/// ready / pending / offline. Those are the nodes with a config file and
+/// those in either status list without one (they cannot follow, and say so
+/// by never becoming ready). Fills `out` with the three key lists unless it
+/// is null; returns how many are pending.
+int nodeCfgHandoverSort(JsonObject out);
 
 /// Start (or restart) a handover: every node with a config is handed the
 /// next network in a new rev, and `form` is kept for the switch.
