@@ -299,12 +299,15 @@ static HwSig sigOf(const SensorCfg& s) {
 }
 
 /// Same hardware? Metric names are left out on purpose: a renamed ds18b20
-/// bus reads the same probes, and needs no re-init.
+/// bus reads the same probes, and needs no re-init. So is `per_pulse`: it is
+/// a scale applied at read time from the live config, so a new one needs no
+/// re-init — and comparing it with == would re-init (and zero the running
+/// total) on the few-ULP drift a float picks up on its JSON round trips
+/// between node, file and collector.
 static bool sameSensor(const SensorCfg& a, const HwSig& b) {
     return a.type == b.type && a.addr == b.addr && a.pin == b.pin &&
            a.count == b.count && a.rx == b.rx && a.tx == b.tx &&
-           a.mode == b.mode && a.per_pulse == b.per_pulse &&
-           a.debounce_us == b.debounce_us;
+           a.mode == b.mode && a.debounce_us == b.debounce_us;
 }
 
 static bool sameSetup(const NodeConfig& cfg) {
