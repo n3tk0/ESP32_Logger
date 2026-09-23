@@ -221,10 +221,8 @@ Headers reached through `-I..`, not copied:
 | `node_common/NodeSensors.h` | the sensor layer both node firmwares share |
 | `src/drivers/BME280_Mini.h` | the same compensation maths on both ends |
 
-`src/sensors_stub.cpp` is a temporary BME280-only implementation of
-`node_common/NodeSensors.h`, standing in until the shared implementation
-lands; swapping it is deleting that file and adding a one-line wrapper in
-`src/` (`node_sensors_impl.cpp`) that includes the shared one.
+`src/node_sensors_impl.cpp` compiles the shared implementation,
+`node_common/NodeSensors.cpp`, into this firmware.
 
 The logic that could be pulled away from the radio is in headers the host
 tests compile: the RTC backlog (`src/Backlog.h`), the per-wake config fetch
