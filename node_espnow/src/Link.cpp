@@ -265,9 +265,17 @@ bool linkExchangeCfg(const NodeLink& link, const void* frame, int len, uint16_t 
         s_wantCfg = false;
         return false;
     }
-    const bool got = xSemaphoreTake(s_replySem, pdMS_TO_TICKS(windowMs)) == pdTRUE;
+    // The semaphore is shared with the ACK path, and a late duplicate of this
+    // wake's ACK (the radio's own retry) gives it too. Keep waiting out the
+    // rest of the window for the CFG rather than counting that as a miss.
+    const uint32_t t0 = millis();
+    for (;;) {
+        const uint32_t spent = millis() - t0;
+        if (s_haveCfg || spent >= windowMs) break;
+        if (xSemaphoreTake(s_replySem, pdMS_TO_TICKS(windowMs - spent)) != pdTRUE) break;
+    }
     s_wantCfg = false;
-    if (!got || !s_haveCfg) return false;
+    if (!s_haveCfg) return false;
     memcpy(&out, &s_cfg, sizeof(out));
     return true;
 }
