@@ -87,8 +87,8 @@ void handleNodesHandoverGet(AsyncWebServerRequest* req) {
 }
 
 static const char* formField(void* ctx, const char* key) {
-    JsonVariantConst v = (*static_cast<JsonObjectConst*>(ctx))[key];
-    return v.is<const char*>() ? v.as<const char*>() : nullptr;
+    // as<const char*>() is null for anything that is not a string.
+    return (*static_cast<JsonObjectConst*>(ctx))[key].as<const char*>();
 }
 
 /// §4 step 4: save the collector's own network config the way /save_network
@@ -136,6 +136,11 @@ static void nodesHandoverPost(AsyncWebServerRequest* req, JsonDocument& body) {
             NetworkConfig scratch = config.network;
             const char* err = fo.isNull() ? "form must be an object"
                                           : applyNetworkForm(scratch, formField, &fo);
+            // All strings, as the form posts them (§4.1): formField() reads
+            // any other value as absent, so a `"useStaticIP": true` would be
+            // dropped at the switch, not refused here.
+            for (JsonPairConst kv : fo)
+                if (!kv.value().is<const char*>()) err = "form values must be strings";
             if (err) { handoverFail(req, 400, err); return; }
         }
         if (!nodeCfgHandoverStart(ssid, pass, form)) { handoverFail(req, 500, "could not save the handover"); return; }

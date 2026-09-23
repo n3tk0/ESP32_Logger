@@ -176,9 +176,15 @@ static uint16_t  s_cfgDocRev[EspNowNodeTable::CAP] = {0};
 static uint32_t  s_cfgMirrorGen = 0;   ///< store generation mirrored; 0 = resync
 
 /// One CFG_REPORT being reassembled, and one completed one waiting for the
-/// tick to adopt. One and not one per node: a node reports on its first wake
-/// after boot and after a local edit, rarely two at once — and a node that
-/// loses the slot to another simply reports again on its next wake.
+/// tick to adopt. One and not one per node (a whole report is 1 KB): a node
+/// reports on its first wake after boot and after a local edit, rarely two at
+/// once. A node that loses the slot to another (its slices dropped, or its
+/// partial report restarted by the other's first slice) retries only a LOCAL
+/// report, which waits for an answer. The report after a boot counts the
+/// radio's per-slice delivery as success and is not sent again until the next
+/// boot; the collector then keeps what it already held for that node (its
+/// stored `reported` and probe names), and a node it has never seen gets its
+/// entry at its next boot or local edit.
 static EnCfgAssembler  s_asm;
 static ncr::ReportPlan s_reportPlan;            ///< what the callback decided (and said)
 static volatile bool   s_reportReady = false;   ///< s_asm holds a complete report
@@ -494,14 +500,15 @@ static void answerCfgGet(const uint8_t* mac, const uint8_t* data) {
     const int idx = slotFor(mac, g.nodeId);
     if (idx >= 0) {
         const uint16_t want  = s_cfgHave[idx] ? s_cfgRev[idx] : 0;
-        const bool     slice = s_cfgDoc[idx] && g.haveRev < s_cfgDocRev[idx];
+        const bool     slice = s_cfgDoc[idx] && !ncr::revAtOrPast(g.haveRev, s_cfgDocRev[idx]);
         if (!slice) {
-            applied = s_cfgPend[idx] && g.haveRev >= want;
+            applied = s_cfgPend[idx] && ncr::revAtOrPast(g.haveRev, want);
             if (applied) s_cfgPend[idx] = false;
         }
         n = slice ? cfgFrame(m, g.nodeId, s_cfgDocRev[idx], s_cfgDoc[idx], s_cfgDocLen[idx],
                              g.offset)
-                  : cfgFrame(m, g.nodeId, g.haveRev > want ? g.haveRev : want, nullptr, 0, 0);
+                  : cfgFrame(m, g.nodeId, ncr::revAtOrPast(g.haveRev, want) ? g.haveRev : want,
+                             nullptr, 0, 0);
     }
     taskEXIT_CRITICAL(&s_nodeMux);
     if (n > 0) esp_now_send(mac, (const uint8_t*)&m, (size_t)n);

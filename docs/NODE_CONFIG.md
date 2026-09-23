@@ -13,7 +13,8 @@ document wins and the code is the bug.
    config in the reply to its own POST; the ESP-NOW node learns about it from a
    flag in the ACK to its own DATA frame. The collector never connects to a node.
 2. **Desired vs applied.** The collector holds a *desired* config per node with
-   a revision number `rev` (uint16, starts at 1, 0 = never synced). The node
+   a revision number `rev` (uint16, starts at 1, 0 = never synced; after
+   65535 it wraps to 1, and the collector orders revs on that circle). The node
    holds its *applied* config and the `rev` it came from. The UI shows
    `applied` / `pending (applied N → desired M)` / `rejected: <reason>`.
 3. **The node validates everything it is sent**, with the same shared code the
@@ -263,7 +264,8 @@ bytes after the name's first NUL is refused; a reply with port 0 is refused.
    `form` is optional: every field of the `/save_network` form, keyed by its
    form name (`wifiMode`, `clientSSID`, `clientPassword`, `useStaticIP`,
    `staticIP`, `gateway`, `subnet`, `dns`, `apSSID`, …), all strings, exactly
-   as that form would post them (an unchecked checkbox is absent). When the
+   as that form would post them (an unchecked checkbox is absent); a value of
+   any other type is refused with 400. When the
    collector switches (step 4) it applies `form` the way `/save_network`
    would; without it, it changes only `clientSSID`/`clientPassword`. It
    exists so a static address meant for the new network is not lost. The page

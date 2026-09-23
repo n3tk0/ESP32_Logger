@@ -575,8 +575,9 @@ static inline bool migrateLegacyWifi(JsonVariantConst in, NodeConfig& cfg) {
     if (Num::take(o["intervalMs"], 0, 2147483647L, x)) {
         // Milliseconds to seconds, rounded, and pulled into the range the new
         // format allows: an old node posting every 5 s becomes 10 s rather
-        // than a config its own validator refuses.
-        long s = (x + 500) / 1000;
+        // than a config its own validator refuses. Rounded without adding
+        // first: x + 500 overflows a 32-bit long near its top.
+        long s = x / 1000 + (x % 1000 >= 500);
         if (s < (long)INTERVAL_MIN_S) s = INTERVAL_MIN_S;
         if (s > (long)INTERVAL_MAX_S) s = INTERVAL_MAX_S;
         cfg.interval_s = (uint16_t)s;

@@ -63,6 +63,17 @@ static inline uint16_t nextRev(uint16_t rev) {
     return rev == 0xFFFF ? 1 : (uint16_t)(rev + 1);
 }
 
+/// Is `a` the same rev as `b`, or a later one? Revs are compared on a
+/// circle, not as plain numbers: nextRev() wraps 0xFFFF to 1, and after that
+/// a plain `>=` calls rev 1 older than 65535 — the node would be called up to
+/// date and never sent it. The difference read as signed is right while the
+/// two are less than 32768 revs apart. 0 ("never synced") is behind every rev.
+static inline bool revAtOrPast(uint16_t a, uint16_t b) {
+    if (!b) return true;
+    if (!a) return false;
+    return (int16_t)(uint16_t)(a - b) >= 0;
+}
+
 /// What the status becomes once the node says it runs `applied`.
 ///
 /// A node that caught up is applied, whatever it was. One that is still
@@ -70,14 +81,14 @@ static inline uint16_t nextRev(uint16_t rev) {
 /// rejected — the rejected rev is still the desired one, and the node is
 /// still (correctly) running its previous config.
 static inline uint8_t statusAfterApplied(uint8_t status, uint16_t rev, uint16_t applied) {
-    return applied >= rev ? (uint8_t)ST_APPLIED : status;
+    return revAtOrPast(applied, rev) ? (uint8_t)ST_APPLIED : status;
 }
 
 /// Is there a config the node should be handed? Pending and behind. A
 /// rejected rev is NOT re-sent: the node would refuse it again on every
 /// contact, and on an ESP-NOW node every refusal is battery.
 static inline bool shouldSend(uint8_t status, uint16_t rev, uint16_t applied) {
-    return status == ST_PENDING && rev > applied;
+    return status == ST_PENDING && !revAtOrPast(applied, rev);
 }
 
 // ---------------------------------------------------------------------------
@@ -182,8 +193,8 @@ static inline ReportPlan planReport(bool have, uint16_t desiredRev, uint16_t rep
     if (!have) {
         p.rev = local ? nextRev(reportRev) : (reportRev ? reportRev : 1);
     } else if (local) {
-        p.rev = nextRev(desiredRev > reportRev ? desiredRev : reportRev);
-    } else if (reportRev > desiredRev) {
+        p.rev = nextRev(revAtOrPast(desiredRev, reportRev) ? desiredRev : reportRev);
+    } else if (!revAtOrPast(desiredRev, reportRev)) {
         p.rev = reportRev;
     } else {
         p.adopt   = false;
@@ -349,7 +360,7 @@ enum : uint8_t { HO_READY = 0, HO_PENDING = 1, HO_OFFLINE = 2 };
 /// is ready whether or not it has spoken since. A node without a config file
 /// cannot be handed anything and is never ready.
 static inline uint8_t hoClassify(bool haveEntry, uint16_t applied, uint16_t hoRev, bool offline) {
-    if (haveEntry && hoRev && applied >= hoRev) return HO_READY;
+    if (haveEntry && hoRev && revAtOrPast(applied, hoRev)) return HO_READY;
     return offline ? HO_OFFLINE : HO_PENDING;
 }
 
