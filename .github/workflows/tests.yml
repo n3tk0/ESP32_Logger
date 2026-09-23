@@ -30,6 +30,10 @@ on:
       - 'tools/features.py'
       - 'tools/check_features.py'
       - 'tools/check_node_portal.py'
+      - 'tools/check_node_portal_css.py'
+      - 'tools/build_node_portal.py'
+      - 'tools/build_web.py'
+      - 'node_portal/**'
       - 'tools/check_sensor_plugins.py'
       - 'tools/check_kindle_parity.py'
       - 'tools/check_kindle_icons.py'
@@ -66,6 +70,10 @@ on:
       - 'tools/features.py'
       - 'tools/check_features.py'
       - 'tools/check_node_portal.py'
+      - 'tools/check_node_portal_css.py'
+      - 'tools/build_node_portal.py'
+      - 'tools/build_web.py'
+      - 'node_portal/**'
       - 'tools/check_sensor_plugins.py'
       - 'tools/check_kindle_parity.py'
       - 'tools/check_kindle_icons.py'
@@ -230,6 +238,42 @@ jobs:
           python3 tests/web/mock_device.py 8765 &
           sleep 2
           MOCK_PORT=8765 python3 tests/web/drive_nodes_page.py
+
+      - name: Drive the node's own setup page, both transports
+        # node_portal/ is the page a person uses on a phone joined to a
+        # node's AP (docs/NODE_CONFIG.md §6). The mock serves the bytes of the
+        # committed src/nodecfg/NodePortalPage.h, so this drives what ships:
+        # the WiFi and the ESP-NOW wizard end to end at 360 px, a pin typed as
+        # the flash bus, a refusal from the node landing on its field, and a
+        # save that waits for the node to come back.
+        run: |
+          python3 tests/web/mock_node.py 8790 &
+          sleep 2
+          MOCK_PORT=8790 python3 tests/web/drive_node_portal.py
+
+      - name: Verify that check actually fails when a refusal loses its field
+        # The point of {"ok":false,"field"} is that the page takes the user to
+        # the step holding that field. Break that and the driver must notice.
+        run: |
+          set -e
+          cp node_portal/app.js /tmp/np_app.orig
+          sed -i 's/      S.step = stepOfField(S.srv.field);/      S.step = S.steps.length - 1;/' node_portal/app.js
+          if cmp -s node_portal/app.js /tmp/np_app.orig; then
+            echo "::error::the mutation no longer matches app.js — this proof step is stale"
+            exit 1
+          fi
+          python3 tools/build_node_portal.py > /dev/null
+          python3 tests/web/mock_node.py 8791 &
+          sleep 2
+          if MOCK_PORT=8791 python3 tests/web/drive_node_portal.py > /dev/null 2>&1; then
+            cp /tmp/np_app.orig node_portal/app.js
+            git checkout -- src/nodecfg/NodePortalPage.h
+            echo "::error::drive_node_portal.py passed a page that loses the node's refusal"
+            exit 1
+          fi
+          cp /tmp/np_app.orig node_portal/app.js
+          git checkout -- src/nodecfg/NodePortalPage.h
+          echo "the driver fails when a refusal no longer reaches its field, as it should"
 
       - name: Drive the Modules settings page
         # Reported: the page listed nothing while /api/modules, opened in a
@@ -1234,6 +1278,47 @@ jobs:
           rm /tmp/portal.orig
           echo "the check fails when only the browser can put the radio back"
           echo "the check fails on broken portal JavaScript, as it should"
+
+      - name: Verify the node page's tokens and header (check_node_portal_css)
+        # node_portal/style.css carries a hand-kept copy of www/style.css's
+        # design tokens, and the page ships as a generated header that is
+        # committed. Both drift silently: a retuned --accent in www/, an
+        # app.js edit without a rebuild. The header is compared by what it
+        # INFLATES to, not by its compressed bytes (zlib vs zlib-ng).
+        run: python3 tools/check_node_portal_css.py
+
+      - name: Verify that check actually fails on a drifted token or a stale header
+        run: |
+          set -e
+          cp node_portal/style.css /tmp/np_css.orig
+          cp node_portal/app.js /tmp/np_js.orig
+          restore() { cp /tmp/np_css.orig node_portal/style.css; cp /tmp/np_js.orig node_portal/app.js; }
+
+          # 1. A dark token that no longer matches the collector's.
+          sed -i 's/--accent:        #22d3ee;/--accent:        #22d3ef;/' node_portal/style.css
+          if cmp -s node_portal/style.css /tmp/np_css.orig; then
+            restore; echo "::error::the token mutation no longer matches — this proof step is stale"; exit 1
+          fi
+          if python3 tools/check_node_portal_css.py > /dev/null 2>&1; then
+            restore; echo "::error::check_node_portal_css.py passed a drifted --accent"; exit 1
+          fi
+          restore
+
+          # 2. A dark token dropped: the node page would keep the light value.
+          sed -i '/--err:           #f87171;/d' node_portal/style.css
+          if python3 tools/check_node_portal_css.py > /dev/null 2>&1; then
+            restore; echo "::error::check_node_portal_css.py passed a missing dark --err"; exit 1
+          fi
+          restore
+
+          # 3. The source edited, the header not rebuilt.
+          printf '\nvar ciProbe = 1;\n' >> node_portal/app.js
+          if python3 tools/check_node_portal_css.py > /dev/null 2>&1; then
+            restore; echo "::error::check_node_portal_css.py passed a stale NodePortalPage.h"; exit 1
+          fi
+          restore
+          python3 tools/check_node_portal_css.py > /dev/null
+          echo "the node page check fails on drift and on a stale header, as it should"
 
       - name: Verify the deploy tools offer every feature setup.h declares
         # tools/features.py parses src/setup.h with a regex, and the deploy CLI

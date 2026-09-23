@@ -24,6 +24,15 @@ python3 tests/web/drive_modules_page.py
 | [`drive_kindle_page.py`](drive_kindle_page.py) | drives `#settings_kindle` in Chromium |
 | [`drive_sensors_page.py`](drive_sensors_page.py) | drives the Sensors page's remote-sensor editor in Chromium |
 | [`drive_modules_page.py`](drive_modules_page.py) | drives `#settings_modules`, including what it says when the reply will not parse |
+| [`mock_node.py`](mock_node.py) | a sensor node's setup API (docs/NODE_CONFIG.md §6), WiFi or ESP-NOW, serving the committed `src/nodecfg/NodePortalPage.h` |
+| [`drive_node_portal.py`](drive_node_portal.py) | walks the node's own setup wizard for both transports at 360 px |
+
+The node page is not part of `www/`, so it has its own mock:
+
+```
+python3 tests/web/mock_node.py 8790 &          # ?transport=wifi|espnow on / resets it
+MOCK_PORT=8790 python3 tests/web/drive_node_portal.py
+```
 
 `drive_modules_page.py` binds a second port, `MOCK_PORT + 100`, for a proxy it
 puts in front of the mock. That is how it corrupts the one response under test

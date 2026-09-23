@@ -264,11 +264,44 @@ HTTP API served by both nodes:
 ```jsonc
 { "transport": "wifi", "hw": "esp8266",
   "sensor_types": ["bmx280","bme688","ds18b20","bh1750","sds011","pulse"],
-  "boards": [{"id":0,"name":"NodeMCU V2/V3","pins":{"D0":16,"D1":5,…}}, …],
+  "boards": [{"id":0,"name":"NodeMCU V2/V3","pins":{"D0":16,"D1":5,…},
+              "left":["A0","RSV",…], "right":["D0","D1",…]}, …],
   "forbidden_pins": [6,7,8,9,10,11],
   "warn_pins": {"0":"boot strap, must be high at reset", …},
   "max_sensors": 8, "max_metrics": 8 }
 ```
+
+`boards[].left` / `right` (optional) are the header's pads top to bottom as
+printed, for the diagram; pads that are not in `pins` (`GND`, `3V3`, `RST`…)
+are drawn as plain pads. Without them the page draws a grid of `pins`. The
+page accepts any key of the selected board's `pins` (case-insensitive),
+`GPIOn` or a bare number as a pin, and always shows what it resolved to.
+
+Additions the page relies on (all optional, absent = shown as "—"):
+
+- **ESP-NOW key.** The ESP-NOW node's §1 document carries `"lmk": ""` and
+  `"lmk_set": true|false`, a write-only secret under principle 5 (`""` on
+  POST = keep; exactly 16 characters = set; anything else is refused with
+  `field: "lmk"`). It exists only on this page's API: never in `EN_MSG_CFG` /
+  `EN_MSG_CFG_REPORT` (principle 6), never in the collector's copy.
+- **`/api/status` on the ESP-NOW node** adds `"paired": bool`, `"node_id"`,
+  `"ch"` (the stored link state, since ESP-NOW is off while the page runs)
+  and `"batt_v"` (last battery voltage, after divider and trim — the page's
+  trim helper computes `trim_applied × measured / batt_v`).
+- **`/api/scan` `enc`** is the core's own number (ESP8266 `ENC_TYPE_NONE`
+  = 7, ESP32 `WIFI_AUTH_OPEN` = 0) or the strings `"open"`/`"none"`; the page
+  reads it by `caps.hw`.
+
+Validation errors name the field in the §1 spelling (`name`, `interval_s`,
+`i2c.sda`, `sensors[1].pin`, `sensors[1].type`, `sensors` for the count and
+the budget, `net.host`, `lmk`, `batt.trim`, …); the page takes the user to
+the step holding that field and shows `reason` under it, or at the top of
+the step when there is no such input. The page repeats the §1.2 rules as
+live hints but never disables Save on them — the node's validator is the
+authority, so a page copy that drifted stricter cannot lock anyone out.
+After `{"ok":true}` it polls `/api/status` until `uptime_s` shows a restart;
+on the setup AP that never comes (the restart closes the AP), so after ~30 s
+it says so instead.
 
 Where it runs: WiFi node — as today (AP portal, and on the LAN behind basic
 auth). ESP-NOW node — hold BOOT (GPIO9) through reset, or no key/never
