@@ -1,5 +1,12 @@
 // ============================================================================
-// node/src/node_config.h — everything you need to change for your deployment.
+// node/src/node_config.h — the DEFAULTS a freshly flashed node starts from.
+//
+// These values are not the configuration. They seed /config.json on a blank
+// filesystem (NodeStore.cpp); after that the node's own setup page and the
+// collector (docs/NODE_CONFIG.md) change it, and nothing here is read again —
+// a node already in the field keeps its settings across a reflash with
+// different flags. To start over from these values, erase the filesystem
+// (`pio run -t erase`, then upload).
 //
 // Keep real credentials out of git. Either edit this file and leave it
 // untracked, or override each value from platformio.ini:
@@ -11,6 +18,11 @@
 //       -DINGEST_TOKEN='"the-same-token-as-the-collector"'
 // ============================================================================
 #pragma once
+
+// Reported to the collector as `fw` (docs/NODE_CONFIG.md §1).
+#ifndef NODE_FW_VERSION
+#  define NODE_FW_VERSION "2026.09.1"
+#endif
 
 // ── WiFi ────────────────────────────────────────────────────────────────────
 #ifndef WIFI_SSID
@@ -65,13 +77,16 @@
 #endif
 
 // ============================================================================
-// SENSOR SELECTION — pick at build time; only what you pick is compiled in
+// DEFAULT SENSOR LIST — what a blank node starts with
 // ============================================================================
-// Same idea as the collector's setup.h toggles. Each one costs flash and RAM
-// only when enabled, and the setup portal shows pin fields only for sensors
-// that are actually in the build.
+// Every driver is compiled into every build; which sensors a node reads is
+// the `sensors` list of its config, edited on the setup page or from the
+// collector's Nodes page. These toggles only decide what that list holds on
+// first boot — and which sensors an old flat /config.json is migrated onto,
+// since that format recorded the pins but never the sensors. The pins and
+// options further down seed each entry the same way.
 //
-// All three drivers are the collector's own, included unmodified from
+// All drivers are the collector's own, included unmodified from
 // ../src/drivers/ — so the compensation maths cannot drift between a wired
 // sensor and a remote one.
 // ----------------------------------------------------------------------------
@@ -108,9 +123,10 @@
 // anywhere — the surplus is simply not copied, which is exactly the kind of
 // silent loss that is painful to diagnose from the dashboard end.
 //
-// So count what this build will emit and say so at compile time. How many
-// DS18B20 probes are on the wire cannot be known here; set
-// NODE_DS18B20_EXPECTED if you run more than one.
+// The validator (src/nodecfg/NodeConfigValidate.h) refuses such a config from
+// the page or the collector — but a default list is not validated before the
+// node runs it, so count what it will emit and say so at compile time.
+// NODE_DS18B20_EXPECTED seeds the ds18b20 entry's `count`.
 #ifndef NODE_DS18B20_EXPECTED
 #  define NODE_DS18B20_EXPECTED 1
 #endif
