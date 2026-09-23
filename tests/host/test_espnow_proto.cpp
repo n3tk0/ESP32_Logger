@@ -278,6 +278,353 @@ static void test_signed_regions() {
     CHECK((int)(offsetof(WelcomeMsg, target) + 6) <= (int)EN_WELCOME_SIGNED_LEN);
 }
 
+// ===========================================================================
+// Remote configuration and DATA2 (docs/NODE_CONFIG.md §5)
+// ===========================================================================
+
+// Copy `len` bytes into a heap buffer of exactly that size, so a validator
+// that reads one byte too far is an ASan report rather than a silent pass.
+static uint8_t* exact(const void* src, int len) {
+    uint8_t* b = (uint8_t*)malloc(len > 0 ? (size_t)len : 1);
+    if (len > 0) memcpy(b, src, (size_t)len);
+    return b;
+}
+
+static bool validates(const void* src, int len, uint8_t expectType) {
+    uint8_t* b = exact(src, len);
+    uint8_t type = 0;
+    const bool ok = espnowValidate(b, len, type);
+    free(b);
+    return ok && type == expectType;
+}
+
+static void test_cfg_layout_and_numbers() {
+    // The numbers are the contract's; a renumbering is a protocol break that
+    // compiles, so it is pinned here as well as in the header.
+    CHECK_EQ((int)EN_MSG_CFG_GET, 5);
+    CHECK_EQ((int)EN_MSG_CFG, 6);
+    CHECK_EQ((int)EN_MSG_CFG_ACK, 7);
+    CHECK_EQ((int)EN_MSG_CFG_REPORT, 8);
+    CHECK_EQ((int)EN_MSG_DATA2, 9);
+    CHECK_EQ((int)EN_ACK_CFG_PENDING, 2);
+    // A new flag, not a new version: an old node must keep talking.
+    CHECK_EQ((int)ESPNOW_PROTO_VER, 1);
+    CHECK((EN_ACK_CFG_PENDING & EN_ACK_REDISCOVER) == 0);
+
+    CHECK_EQ((int)sizeof(CfgGetMsg), 8);
+    CHECK_EQ((int)sizeof(CfgChunkMsg), 211);
+    CHECK_EQ((int)sizeof(CfgAckMsg), 79);
+    CHECK_EQ((int)sizeof(Data2Header), 12);
+    CHECK_EQ((int)sizeof(Data2Value), 6);
+    CHECK_EQ(espnowCfgChunkLen(0), 11);
+    CHECK_EQ(espnowCfgChunkLen(EN_CFG_CHUNK_MAX), 211);
+    CHECK(espnowCfgChunkLen(EN_CFG_CHUNK_MAX) <= ESPNOW_MAX_FRAME);
+    CHECK_EQ(espnowData2SampleLen(0), 3);
+    CHECK_EQ(espnowData2SampleLen(EN_DATA2_MAX_VALUES), 57);
+}
+
+// ---------------------------------------------------------------------------
+static void test_data2_round_trip() {
+    uint8_t buf[ESPNOW_MAX_FRAME];
+    int len = espnowData2Begin(buf, sizeof(buf), 9, 4321, EN_FLAG_FIRST_BOOT, 1750000000u);
+    CHECK_EQ(len, 12);
+
+    // Three samples of different shapes: a full one, an empty one (a node
+    // whose sensors all failed still has to send something to get its ACK),
+    // and one with a probe index.
+    Data2Value a[3] = { {1, 0, 21.5f}, {2, 0, 48.0f}, {14, 0, 3.91f} };
+    Data2Value c[2] = { {13, 0, 18.25f}, {13, 2, -4.5f} };
+    CHECK(espnowData2Append(buf, sizeof(buf), len, 120, a, 3));
+    CHECK(espnowData2Append(buf, sizeof(buf), len, 60, nullptr, 0));
+    CHECK(espnowData2Append(buf, sizeof(buf), len, 0, c, 2));
+    CHECK_EQ(len, 12 + 21 + 3 + 15);
+
+    CHECK(validates(buf, len, EN_MSG_DATA2));
+
+    Data2Header h;
+    Data2Cursor cur;
+    espnowData2Open(buf, len, h, cur);
+    CHECK_EQ(h.magic, ESPNOW_MAGIC);
+    CHECK_EQ(h.type, (uint8_t)EN_MSG_DATA2);
+    CHECK_EQ(h.nodeId, 9);
+    CHECK_EQ(h.seq, 4321);
+    CHECK_EQ(h.count, 3);
+    CHECK_EQ(h.flags, (uint8_t)EN_FLAG_FIRST_BOOT);
+    CHECK_EQ((long long)h.epoch, 1750000000LL);
+
+    Data2Sample s;
+    CHECK(espnowData2Next(cur, s));
+    CHECK_EQ(s.dt_s, 120);
+    CHECK_EQ(s.n, 3);
+    CHECK_EQ(s.v[0].metric, 1);
+    CHECK(s.v[0].value == 21.5f);
+    CHECK_EQ(s.v[2].metric, 14);
+    CHECK(s.v[2].value == 3.91f);
+
+    CHECK(espnowData2Next(cur, s));
+    CHECK_EQ(s.dt_s, 60);
+    CHECK_EQ(s.n, 0);
+
+    CHECK(espnowData2Next(cur, s));
+    CHECK_EQ(s.n, 2);
+    CHECK_EQ(s.v[1].metric, 13);
+    CHECK_EQ(s.v[1].index, 2);
+    CHECK(s.v[1].value == -4.5f);
+
+    CHECK(!espnowData2Next(cur, s));   // exactly three, then done
+}
+
+// ---------------------------------------------------------------------------
+static void test_data2_packs_whole_samples_only() {
+    // Full samples (9 values, 57 bytes) until the frame is full: (250-12)/57
+    // is 4. The fifth must be refused WITHOUT touching the frame, so the node
+    // can send what it has and carry the fifth to the next frame.
+    uint8_t buf[ESPNOW_MAX_FRAME + 64];
+    int len = espnowData2Begin(buf, sizeof(buf), 1, 1, 0, 0);
+    Data2Value v[EN_DATA2_MAX_VALUES];
+    for (uint8_t i = 0; i < EN_DATA2_MAX_VALUES; i++) v[i] = { (uint8_t)(i + 1), 0, (float)i };
+
+    int fitted = 0;
+    while (espnowData2Append(buf, sizeof(buf), len, (uint16_t)(fitted * 60), v,
+                             EN_DATA2_MAX_VALUES))
+        fitted++;
+    CHECK_EQ(fitted, 4);
+    CHECK_EQ(len, 12 + 4 * 57);
+    CHECK_EQ(buf[6], 4);
+    CHECK(len <= ESPNOW_MAX_FRAME);   // even though the buffer was bigger
+    CHECK(validates(buf, len, EN_MSG_DATA2));
+
+    // A small sample still fits in what is left (250 - 240 = 10 bytes).
+    CHECK(espnowData2Append(buf, sizeof(buf), len, 999, v, 1));
+    CHECK_EQ(buf[6], 5);
+    CHECK(validates(buf, len, EN_MSG_DATA2));
+
+    // Bad input.
+    int l2 = espnowData2Begin(buf, sizeof(buf), 1, 1, 0, 0);
+    CHECK(!espnowData2Append(buf, sizeof(buf), l2, 0, v, EN_DATA2_MAX_VALUES + 1));
+    CHECK(!espnowData2Append(buf, sizeof(buf), l2, 0, nullptr, 2));
+    CHECK(!espnowData2Append(buf, 20, l2, 0, v, 2));   // cap smaller than the sample
+    CHECK_EQ(l2, 12);
+    CHECK_EQ(espnowData2Begin(buf, 11, 1, 1, 0, 0), -1);
+    // A begun frame with no sample is not a frame.
+    CHECK(!validates(buf, 12, EN_MSG_DATA2));
+}
+
+// ---------------------------------------------------------------------------
+static void test_data2_validate_rejects() {
+    uint8_t buf[ESPNOW_MAX_FRAME];
+    int len = espnowData2Begin(buf, sizeof(buf), 3, 7, 0, 0);
+    Data2Value v[2] = { {1, 0, 20.0f}, {2, 0, 50.0f} };
+    espnowData2Append(buf, sizeof(buf), len, 0, v, 2);
+    espnowData2Append(buf, sizeof(buf), len, 60, v, 1);
+    CHECK(validates(buf, len, EN_MSG_DATA2));
+
+    // Every truncation, and one byte of trailing junk: each sample's length is
+    // implied by its own `n`, so any mismatch with `len` is a lost tail or a
+    // frame that is not what it claims.
+    for (int l = 0; l < len; l++) CHECK(!validates(buf, l, EN_MSG_DATA2));
+    {
+        uint8_t more[ESPNOW_MAX_FRAME];
+        memcpy(more, buf, (size_t)len);
+        more[len] = 0;
+        CHECK(!validates(more, len + 1, EN_MSG_DATA2));
+    }
+
+    uint8_t b[ESPNOW_MAX_FRAME];
+    // count says more samples than there are
+    memcpy(b, buf, (size_t)len); b[6] = 3;
+    CHECK(!validates(b, len, EN_MSG_DATA2));
+    // count says fewer — the rest is junk
+    memcpy(b, buf, (size_t)len); b[6] = 1;
+    CHECK(!validates(b, len, EN_MSG_DATA2));
+    memcpy(b, buf, (size_t)len); b[6] = 0;
+    CHECK(!validates(b, len, EN_MSG_DATA2));
+    // a sample claiming more values than a sample may hold
+    memcpy(b, buf, (size_t)len); b[12 + 2] = EN_DATA2_MAX_VALUES + 1;
+    CHECK(!validates(b, len, EN_MSG_DATA2));
+    // a sample claiming one value more than it carries
+    memcpy(b, buf, (size_t)len); b[12 + 2] = 3;
+    CHECK(!validates(b, len, EN_MSG_DATA2));
+
+    // Longer than the radio can carry, even if internally consistent.
+    {
+        uint8_t big[ESPNOW_MAX_FRAME + 16];
+        int bl = espnowData2Begin(big, sizeof(big), 1, 1, 0, 0);
+        // Hand-built, because espnowData2Append() will not go past 250: empty
+        // samples (3 bytes each) until the frame is just over the limit.
+        big[6] = 0;
+        while (bl + 3 <= (int)sizeof(big) - 1) {
+            big[bl] = 0; big[bl + 1] = 0; big[bl + 2] = 0;
+            bl += 3; big[6]++;
+            if (bl > ESPNOW_MAX_FRAME) break;
+        }
+        CHECK(bl > ESPNOW_MAX_FRAME);
+        CHECK(!validates(big, bl, EN_MSG_DATA2));
+    }
+}
+
+// ---------------------------------------------------------------------------
+static void test_cfg_chunks_slice_a_document() {
+    // A 450-byte document goes as 200 + 200 + 50, each slice valid on its own
+    // and saying where it sits.
+    char doc[451];
+    for (int i = 0; i < 450; i++) doc[i] = (char)('a' + i % 26);
+    doc[450] = '\0';
+
+    CfgChunkMsg m;
+    int n = espnowFillCfgChunk(m, EN_MSG_CFG, 4, 17, doc, 450, 0);
+    CHECK_EQ(n, 211);
+    CHECK_EQ(m.len, 200);
+    CHECK(validates(&m, n, EN_MSG_CFG));
+    n = espnowFillCfgChunk(m, EN_MSG_CFG, 4, 17, doc, 450, 200);
+    CHECK_EQ(m.len, 200);
+    CHECK(validates(&m, n, EN_MSG_CFG));
+    n = espnowFillCfgChunk(m, EN_MSG_CFG_REPORT, 4, 17, doc, 450, 400);
+    CHECK_EQ(n, 61);
+    CHECK_EQ(m.len, 50);
+    CHECK(validates(&m, n, EN_MSG_CFG_REPORT));
+    CHECK(memcmp(m.data, doc + 400, 50) == 0);
+
+    // Outside the document, oversized, or the wrong type: refused.
+    CHECK_EQ(espnowFillCfgChunk(m, EN_MSG_CFG, 4, 17, doc, 450, 450), -1);
+    CHECK_EQ(espnowFillCfgChunk(m, EN_MSG_CFG, 4, 17, doc, EN_CFG_MAX_TOTAL + 1, 0), -1);
+    CHECK_EQ(espnowFillCfgChunk(m, EN_MSG_DATA, 4, 17, doc, 450, 0), -1);
+    CHECK_EQ(espnowFillCfgChunk(m, EN_MSG_CFG, 4, 17, nullptr, 450, 0), -1);
+
+    // The data-less "your local config is now rev N" reply.
+    n = espnowFillCfgChunk(m, EN_MSG_CFG, 4, 18, nullptr, 0, 0);
+    CHECK_EQ(n, 11);
+    CHECK_EQ(m.total, 0);
+    CHECK_EQ(m.rev, 18);
+    CHECK(validates(&m, n, EN_MSG_CFG));
+}
+
+// ---------------------------------------------------------------------------
+static void test_cfg_chunk_validate_rejects() {
+    char doc[300];
+    memset(doc, 'x', sizeof(doc));
+    CfgChunkMsg m;
+    const int n = espnowFillCfgChunk(m, EN_MSG_CFG, 1, 2, doc, 300, 200);
+    CHECK_EQ(n, 111);
+    CHECK(validates(&m, n, EN_MSG_CFG));
+
+    for (int l = 0; l < n; l++) CHECK(!validates(&m, l, EN_MSG_CFG));
+    CHECK(!validates(&m, n + 1, EN_MSG_CFG));
+
+    CfgChunkMsg b;
+    b = m; b.len = 101;                         // len disagrees with the frame
+    CHECK(!validates(&b, n, EN_MSG_CFG));
+    b = m; b.offset = 250;                      // slice runs past total
+    CHECK(!validates(&b, n, EN_MSG_CFG));
+    b = m; b.total = EN_CFG_MAX_TOTAL + 1;      // over the ceiling
+    CHECK(!validates(&b, n, EN_MSG_CFG));
+    b = m; b.total = 0;                         // "adopted" reply with data
+    CHECK(!validates(&b, n, EN_MSG_CFG));
+    // An empty slice in the middle of a document would never advance.
+    b = m; b.len = 0;
+    CHECK(!validates(&b, espnowCfgChunkLen(0), EN_MSG_CFG));
+    // 201 bytes of data does not fit the struct and is refused by len alone.
+    b = m; b.len = EN_CFG_CHUNK_MAX + 1;
+    CHECK(!validates(&b, (int)sizeof(CfgChunkMsg), EN_MSG_CFG));
+}
+
+// ---------------------------------------------------------------------------
+static void test_cfg_assembler() {
+    char doc[431];
+    for (int i = 0; i < 430; i++) doc[i] = (char)('A' + i % 26);
+    doc[430] = '\0';
+
+    EnCfgAssembler a;
+    espnowCfgReset(a);
+    CfgChunkMsg m;
+
+    espnowFillCfgChunk(m, EN_MSG_CFG, 5, 9, doc, 430, 0);
+    CHECK_EQ((int)espnowCfgFeed(a, m), (int)EN_CFG_FEED_MORE);
+    CHECK_EQ(a.have, 200);
+
+    // The same slice again (a radio retry) is not the next one: ignored,
+    // nothing moves.
+    CHECK_EQ((int)espnowCfgFeed(a, m), (int)EN_CFG_FEED_MORE);   // offset 0 restarts...
+    CHECK_EQ(a.have, 200);                                        // ...to the same place
+
+    // A slice from further on is not the next one either.
+    espnowFillCfgChunk(m, EN_MSG_CFG, 5, 9, doc, 430, 400);
+    CHECK_EQ((int)espnowCfgFeed(a, m), (int)EN_CFG_FEED_IGNORED);
+    CHECK_EQ(a.have, 200);
+
+    // Nor is the right offset of a different rev or node.
+    espnowFillCfgChunk(m, EN_MSG_CFG, 5, 10, doc, 430, 200);
+    CHECK_EQ((int)espnowCfgFeed(a, m), (int)EN_CFG_FEED_IGNORED);
+    espnowFillCfgChunk(m, EN_MSG_CFG, 6, 9, doc, 430, 200);
+    CHECK_EQ((int)espnowCfgFeed(a, m), (int)EN_CFG_FEED_IGNORED);
+
+    espnowFillCfgChunk(m, EN_MSG_CFG, 5, 9, doc, 430, 200);
+    CHECK_EQ((int)espnowCfgFeed(a, m), (int)EN_CFG_FEED_MORE);
+    espnowFillCfgChunk(m, EN_MSG_CFG, 5, 9, doc, 430, 400);
+    CHECK_EQ((int)espnowCfgFeed(a, m), (int)EN_CFG_FEED_DONE);
+    CHECK_EQ(a.have, 430);
+    CHECK_EQ(a.rev, 9);
+    CHECK_EQ((int)strlen(a.doc), 430);
+    CHECK(strcmp(a.doc, doc) == 0);
+
+    // A new offset 0 starts over, whatever came before.
+    espnowFillCfgChunk(m, EN_MSG_CFG, 5, 11, doc, 150, 0);
+    CHECK_EQ((int)espnowCfgFeed(a, m), (int)EN_CFG_FEED_DONE);
+    CHECK_EQ(a.rev, 11);
+    CHECK_EQ((int)strlen(a.doc), 150);
+
+    // The data-less reply carries no document.
+    espnowFillCfgChunk(m, EN_MSG_CFG, 5, 12, nullptr, 0, 0);
+    CHECK_EQ((int)espnowCfgFeed(a, m), (int)EN_CFG_FEED_IGNORED);
+
+    // A fresh assembler does not accept a middle slice as a start.
+    espnowCfgReset(a);
+    espnowFillCfgChunk(m, EN_MSG_CFG, 5, 9, doc, 430, 200);
+    CHECK_EQ((int)espnowCfgFeed(a, m), (int)EN_CFG_FEED_IGNORED);
+}
+
+// ---------------------------------------------------------------------------
+static void test_cfg_get_and_ack() {
+    CfgGetMsg g;
+    espnowFillCfgGet(g, 3, 4, 200);
+    CHECK(validates(&g, sizeof(g), EN_MSG_CFG_GET));
+    CHECK(!validates(&g, sizeof(g) - 1, EN_MSG_CFG_GET));
+    CHECK_EQ(g.haveRev, 4);
+    CHECK_EQ(g.offset, 200);
+    // An offset no document can have.
+    espnowFillCfgGet(g, 3, 4, EN_CFG_MAX_TOTAL);
+    CHECK(!validates(&g, sizeof(g), EN_MSG_CFG_GET));
+
+    CfgAckMsg a;
+    espnowFillCfgAck(a, 3, 5, EN_CFG_REJECTED, "sensors[1].pin", "GPIO6 is the SPI flash bus");
+    CHECK(validates(&a, sizeof(a), EN_MSG_CFG_ACK));
+    CHECK(!validates(&a, sizeof(a) - 1, EN_MSG_CFG_ACK));
+    CHECK_STREQ(a.field, "sensors[1].pin");
+    CHECK_STREQ(a.reason, "GPIO6 is the SPI flash bus");
+    CHECK_EQ(a.rev, 5);
+
+    // Over-long strings are cut and still terminated.
+    espnowFillCfgAck(a, 3, 5, EN_CFG_REJECTED,
+                     "a-field-path-that-is-far-too-long-for-the-frame",
+                     "a reason that goes on and on well past the forty-eight bytes it has");
+    CHECK_EQ((int)strlen(a.field), (int)EN_CFG_FIELD_LEN - 1);
+    CHECK_EQ((int)strlen(a.reason), (int)EN_CFG_REASON_LEN - 1);
+    CHECK(validates(&a, sizeof(a), EN_MSG_CFG_ACK));
+
+    espnowFillCfgAck(a, 3, 6, EN_CFG_OK, nullptr, nullptr);
+    CHECK(validates(&a, sizeof(a), EN_MSG_CFG_ACK));
+    CHECK_STREQ(a.field, "");
+
+    // An unknown status, and strings with no terminator, are refused: the
+    // collector reads both as C strings.
+    CfgAckMsg b = a; b.status = 2;
+    CHECK(!validates(&b, sizeof(b), EN_MSG_CFG_ACK));
+    b = a; memset(b.field, 'f', sizeof(b.field));
+    CHECK(!validates(&b, sizeof(b), EN_MSG_CFG_ACK));
+    b = a; memset(b.reason, 'r', sizeof(b.reason));
+    CHECK(!validates(&b, sizeof(b), EN_MSG_CFG_ACK));
+}
+
 int main() {
     RUN(test_sizes);
     RUN(test_round_trip);
@@ -287,5 +634,13 @@ int main() {
     RUN(test_validate_rejects);
     RUN(test_validate_accepts_each_type);
     RUN(test_signed_regions);
+    RUN(test_cfg_layout_and_numbers);
+    RUN(test_data2_round_trip);
+    RUN(test_data2_packs_whole_samples_only);
+    RUN(test_data2_validate_rejects);
+    RUN(test_cfg_chunks_slice_a_document);
+    RUN(test_cfg_chunk_validate_rejects);
+    RUN(test_cfg_assembler);
+    RUN(test_cfg_get_and_ack);
     return SUMMARY();
 }
