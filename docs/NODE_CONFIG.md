@@ -287,6 +287,11 @@ unknown types in `espnowValidate()`.
   would have a battery node download it again every wake). The node also
   defends itself: it remembers the rev it refused, stops a fetch at the first
   slice of that rev, repeats its CFG_ACK, and backs off.
+- `AckMsg.intervalS` (the legacy interval push, still honoured and written
+  into the node's document unless `local` is set or the same ACK flags a
+  pending config) must be `desired.interval_s` once the collector holds a
+  desired config for the node, or 0 — any other value would undo an applied
+  config on the next wake.
 - `EN_MSG_CFG_GET = 5` (node → collector, encrypted unicast):
   `magic ver type nodeId | haveRev u16 | offset u16`.
 - `EN_MSG_CFG = 6` (collector → node, encrypted unicast):
