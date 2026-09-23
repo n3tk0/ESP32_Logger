@@ -20,6 +20,7 @@
 #include "node_espnow/src/CfgApply.h"
 #include "node_espnow/src/CfgFetch.h"
 #include "node_espnow/src/Rescan.h"
+#include "src/nodes/NodeCfgRules.h"
 #include "check.h"
 
 using namespace nodecfg;
@@ -428,6 +429,306 @@ static void test_a_report_reassembles_into_the_same_config_and_never_carries_the
 }
 
 // ---------------------------------------------------------------------------
+// Reporting until the collector says it landed (§5 CFG_REPORT)
+// ---------------------------------------------------------------------------
+
+/// The collector's side of CFG_REPORT as src/espnow/EspNowIngest.cpp's
+/// feedCfgReport() does it: ONE assembler for every node, held against
+/// another node's first slice while a transfer is moving, a ready slot the
+/// tick empties, and an answer (CFG, total 0) to every complete report.
+/// `old`: a collector from before that — it answered only a local report.
+struct SimReportCollector {
+    EnCfgAssembler a;
+    uint32_t lastMs = 0;
+    bool     ready  = false;
+    bool     old    = false;
+    int      landed[256];
+    char     got[256][EN_CFG_MAX_TOTAL + 1];
+    uint16_t desiredRev[256];            ///< 0 = no config held for that node
+
+    SimReportCollector() {
+        espnowCfgReset(a);
+        memset(landed, 0, sizeof(landed));
+        memset(desiredRev, 0, sizeof(desiredRev));
+    }
+    /// One slice heard at `now`. True, with `out`, when it answers.
+    bool hear(const CfgChunkMsg& c, uint32_t now, CfgChunkMsg& out) {
+        uint8_t type = 0;
+        CHECK(espnowValidate((const uint8_t*)&c, espnowCfgChunkLen(c.len), type));
+        if (ready) return false;
+        if (espnowCfgHeld(a, c, now - lastMs)) return false;
+        const EnCfgFeed f = espnowCfgFeed(a, c);
+        if (f == EN_CFG_FEED_IGNORED) return false;
+        lastMs = now;
+        if (f != EN_CFG_FEED_DONE) return false;
+        ready = true;
+        const bool local = strstr(a.doc, "\"local\":true") != nullptr;
+        const uint16_t d = desiredRev[a.nodeId];
+        const ncr::ReportPlan plan = ncr::planReport(d != 0, d, a.rev, local);
+        if (plan.adopt) desiredRev[a.nodeId] = plan.rev;
+        landed[a.nodeId]++;
+        memcpy(got[a.nodeId], a.doc, a.total + 1);
+        if (old && !local) return false;
+        return espnowFillCfgChunk(out, EN_MSG_CFG, a.nodeId,
+                                  ncr::reportAnswerRev(plan, a.rev, local), nullptr, 0, 0) > 0;
+    }
+    /// The loop() tick: stores the report and frees the assembler.
+    void tick() {
+        if (ready) espnowCfgReset(a);
+        ready = false;
+    }
+};
+
+/// A node's report, as main.cpp's reportConfig() sends it: every slice, the
+/// last one waiting for the answer, the report kept owed until it comes. The
+/// decisions are CfgFetch.h's own (choose, reportAnswered, Backoff).
+struct SimNode {
+    uint8_t        id;
+    NodeConfig     cfg;
+    bool           reportDue = true;           // a boot just happened
+    encfg::Backoff report{0, 0};
+    encfg::Backoff fetch{0, 0};
+    int            reports = 0;                // attempts
+    int            fetches = 0;
+    // one attempt in flight
+    char           doc[EN_CFG_MAX_TOTAL + 1];
+    uint16_t       n   = 0;
+    uint16_t       off = 0;
+    bool           sending = false;
+    bool           deaf    = false;             // the next answer is lost in the air
+
+    SimNode(uint8_t nodeId, uint16_t rev) : id(nodeId), cfg(desired()) {
+        cfg.rev = rev;
+        char nm[16];
+        snprintf(nm, sizeof(nm), "node-%02X", nodeId);
+        copyStr(cfg.name, sizeof(cfg.name), nm);
+    }
+    /// After the wake's ACK: what the node does next.
+    encfg::Exchange wake(bool cfgPending) {
+        const encfg::Exchange x = encfg::choose(cfg.local, reportDue, cfgPending, report, fetch);
+        if (x == encfg::Exchange::Report) {
+            n = (uint16_t)encodeConfigTo(cfg, doc, sizeof(doc), 0);
+            CHECK(n > EN_CFG_CHUNK_MAX);             // several slices: they can interleave
+            off = 0;
+            sending = true;
+            reports++;
+        }
+        if (x == encfg::Exchange::Fetch) {
+            fetches++;
+            encfg::succeeded(fetch);
+        }
+        return x;
+    }
+    /// The next slice; `last` = the one that waits for the answer.
+    void next(CfgChunkMsg& m, bool& last) {
+        espnowFillCfgChunk(m, EN_MSG_CFG_REPORT, id, cfg.rev, doc, n, off);
+        off = (uint16_t)(off + m.len);
+        last = off >= n;
+    }
+    /// The window after the last slice closed with `answer` (nullptr: none).
+    void finish(const CfgChunkMsg* answer) {
+        sending = false;
+        if (deaf) answer = nullptr;
+        deaf = false;
+        if (!encfg::reportAnswered(answer, id, cfg.local)) {
+            encfg::failed(report);
+            return;
+        }
+        if (cfg.local) {
+            cfg.rev   = answer->rev;
+            cfg.local = false;
+        }
+        reportDue = false;
+        encfg::succeeded(report);
+    }
+};
+
+/// One wake for every node in `nodes`, all at once (a power cut is over):
+/// their slices go out round-robin, 2 ms apart, as the air interleaves them.
+/// `lose(k)` drops the k-th slice of the wake.
+template <typename Lose>
+static void wakeTogether(SimReportCollector& col, SimNode* const* nodes, int count,
+                         uint32_t& now, Lose lose) {
+    for (int i = 0; i < count; i++) nodes[i]->wake(false);
+    int k = 0;
+    for (bool any = true; any;) {
+        any = false;
+        for (int i = 0; i < count; i++) {
+            SimNode& nd = *nodes[i];
+            if (!nd.sending) continue;
+            any = true;
+            CfgChunkMsg m, rep;
+            bool last = false;
+            nd.next(m, last);
+            now += 2;
+            const bool heard    = !lose(k++);
+            const bool answered = heard && col.hear(m, now, rep);
+            if (last) nd.finish(answered ? &rep : nullptr);
+            else      CHECK(!answered);           // only a last slice is answered
+        }
+    }
+    col.tick();
+    now += 60000;                                  // a minute's sleep
+}
+
+static bool never(int) { return false; }
+
+static void test_a_lost_boot_report_is_sent_again_until_answered() {
+    SimReportCollector col;
+    SimNode a(7, 3);
+    SimNode* nodes[] = {&a};
+    uint32_t now = 1000;
+
+    // Wake 1: the second slice is lost on the air. The radio's delivery of
+    // the other slices proves nothing; no answer comes, the report stays owed.
+    wakeTogether(col, nodes, 1, now, [](int k) { return k == 1; });
+    CHECK(a.reportDue);
+    CHECK_EQ(col.landed[7], 0);
+    // Wake 2 is skipped by the backoff; wake 3 reports again and it lands.
+    wakeTogether(col, nodes, 1, now, never);
+    CHECK_EQ(a.reports, 1);
+    wakeTogether(col, nodes, 1, now, never);
+    CHECK_EQ(a.reports, 2);
+    CHECK(!a.reportDue);
+    CHECK_EQ(col.landed[7], 1);
+    CHECK_STREQ(col.got[7], a.doc);
+    // The answer to a report after a boot moved nothing on the node.
+    CHECK_EQ(a.cfg.rev, 3);
+    CHECK(!a.cfg.local);
+    // And it is not sent again.
+    for (int w = 0; w < 10; w++) wakeTogether(col, nodes, 1, now, never);
+    CHECK_EQ(a.reports, 2);
+    CHECK_EQ(col.landed[7], 1);
+
+    // A node the collector has never seen, at rev 0: adopted at 1, and the
+    // answer hands the node its own rev back — it stays at 0 and fetches 1.
+    SimNode b(9, 0);
+    SimNode* nb[] = {&b};
+    wakeTogether(col, nb, 1, now, never);
+    CHECK(!b.reportDue);
+    CHECK_EQ(col.desiredRev[9], 1);
+    CHECK_EQ(b.cfg.rev, 0);
+
+    // The answer itself lost (the collector has the report, the node does
+    // not know): the node reports again, and the repeat is a status report —
+    // in step, not adopted a second time at a new rev.
+    SimNode c(10, 5);
+    SimNode* nc[] = {&c};
+    c.deaf = true;
+    wakeTogether(col, nc, 1, now, never);
+    CHECK(c.reportDue);
+    CHECK_EQ(col.landed[10], 1);
+    CHECK_EQ(col.desiredRev[10], 5);
+    wakeTogether(col, nc, 1, now, never);       // skipped by the backoff
+    wakeTogether(col, nc, 1, now, never);
+    CHECK(!c.reportDue);
+    CHECK_EQ(col.landed[10], 2);
+    CHECK_EQ(col.desiredRev[10], 5);
+    CHECK_EQ(c.cfg.rev, 5);
+}
+
+static void test_nodes_booting_together_all_land_eventually() {
+    SimReportCollector col;
+    SimNode a(7, 3), b(8, 3), c(9, 0);
+    c.cfg.local = true;                      // edited on its page before the cut
+    SimNode* nodes[] = {&a, &b, &c};
+    uint32_t now = 1000;
+
+    // Wake 1: three reports on the air at once, slices interleaved. The
+    // first to start holds the assembler; the others' slices are dropped,
+    // not allowed to wipe it — so exactly one lands whole.
+    wakeTogether(col, nodes, 3, now, never);
+    CHECK_EQ(col.landed[7], 1);
+    CHECK_STREQ(col.got[7], a.doc);
+    CHECK(!a.reportDue);
+    CHECK(b.reportDue);
+    CHECK(c.cfg.local);
+    CHECK_EQ(col.landed[8] + col.landed[9], 0);
+
+    int wakes = 1;
+    while ((b.reportDue || c.cfg.local || c.reportDue) && wakes < 64) {
+        wakeTogether(col, nodes, 3, now, never);
+        wakes++;
+    }
+    CHECK(!b.reportDue);
+    CHECK(!c.reportDue);
+    CHECK(!c.cfg.local);
+    CHECK_EQ(col.landed[7], 1);
+    CHECK_EQ(col.landed[8], 1);
+    CHECK_EQ(col.landed[9], 1);
+    CHECK_STREQ(col.got[8], b.doc);
+    CHECK_EQ(c.cfg.rev, 1);                  // the local edit was adopted and said so
+    CHECK_EQ(col.desiredRev[9], 1);
+    CHECK(wakes <= 8);
+    printf("  three nodes after a power cut: all reports landed by wake %d\n", wakes);
+
+    // A transfer that stalls (its node gave up) is not held for ever: once
+    // it is EN_CFG_HOLD_MS old, another node's report starts over it.
+    SimReportCollector col2;
+    SimNode d(11, 2), e(12, 2);
+    SimNode* nd[] = {&d};
+    SimNode* ne[] = {&e};
+    uint32_t t = 5000;
+    wakeTogether(col2, nd, 1, t, [](int k) { return k == 1; });   // d stalls after slice 0
+    CHECK(d.reportDue);
+    CHECK(col2.a.have > 0 && col2.a.have < col2.a.total);          // still half of d's
+    t -= 60000;                                                    // e, EN_CFG_HOLD_MS later
+    t += EN_CFG_HOLD_MS;
+    wakeTogether(col2, ne, 1, t, never);
+    CHECK(!e.reportDue);
+    CHECK_EQ(col2.landed[12], 1);
+}
+
+static void test_a_collector_that_never_answers_costs_bounded_reports() {
+    SimReportCollector col;
+    col.old = true;                          // answers only a local report
+    SimNode a(7, 3);
+    SimNode* nodes[] = {&a};
+    uint32_t now = 1000;
+
+    // A day of one-minute wakes. The report lands every time — the old
+    // collector just never says so — and the node cannot know: it keeps
+    // asking, but the backoff makes that one report per 64 wakes, not 1440.
+    for (int w = 0; w < 1440; w++) wakeTogether(col, nodes, 1, now, never);
+    printf("  a collector that never answers: %d reports in a day of wakes\n", a.reports);
+    CHECK(a.reportDue);
+    CHECK(a.reports >= 2);
+    CHECK(a.reports <= 6 + 1440 / 64 + 1);
+    CHECK_EQ(col.landed[7], a.reports);
+
+    // And the report it owes never holds up a pending config: on every wake
+    // the report backoff skips, a flagged config is fetched.
+    encfg::Backoff rb{0, 0}, fb{0, 0};
+    CHECK(encfg::choose(false, true, true, rb, fb) == encfg::Exchange::Report);
+    encfg::failed(rb);
+    CHECK(encfg::choose(false, true, true, rb, fb) == encfg::Exchange::Fetch);
+    CHECK(encfg::choose(false, true, true, rb, fb) == encfg::Exchange::Report);
+    // A local edit, though, is reported before anything is fetched, and
+    // nothing is fetched while it waits.
+    encfg::failed(rb);
+    CHECK(encfg::choose(true, true, true, rb, fb) == encfg::Exchange::None);
+    CHECK_EQ(fb.skip, 0);
+    CHECK(encfg::choose(false, false, true, rb, fb) == encfg::Exchange::Fetch);
+    CHECK(encfg::choose(false, false, false, rb, fb) == encfg::Exchange::None);
+}
+
+static void test_what_counts_as_the_answer_to_a_report() {
+    CfgChunkMsg m;
+    espnowFillCfgChunk(m, EN_MSG_CFG, 7, 0, nullptr, 0, 0);
+    CHECK(encfg::reportAnswered(&m, 7, false));      // after a boot: rev 0 is fine
+    CHECK(!encfg::reportAnswered(&m, 7, true));      // a local edit is never adopted at 0
+    espnowFillCfgChunk(m, EN_MSG_CFG, 7, 4, nullptr, 0, 0);
+    CHECK(encfg::reportAnswered(&m, 7, true));
+    CHECK(!encfg::reportAnswered(&m, 8, true));      // somebody else's
+    CHECK(!encfg::reportAnswered(nullptr, 7, false));
+    char doc[] = "{\"rev\":4}";
+    espnowFillCfgChunk(m, EN_MSG_CFG, 7, 4, doc, (uint16_t)strlen(doc), 0);
+    CHECK(!encfg::reportAnswered(&m, 7, false));     // a slice is not the answer
+    espnowFillCfgChunk(m, EN_MSG_CFG_REPORT, 7, 4, nullptr, 0, 0);
+    CHECK(!encfg::reportAnswered(&m, 7, false));
+}
+
+// ---------------------------------------------------------------------------
 // Backoff
 // ---------------------------------------------------------------------------
 
@@ -498,6 +799,10 @@ int main() {
     RUN(test_a_partial_document_is_an_edit_and_the_body_cannot_forge_identity);
     RUN(test_the_largest_valid_configs_fit_one_kilobyte);
     RUN(test_a_report_reassembles_into_the_same_config_and_never_carries_the_key);
+    RUN(test_a_lost_boot_report_is_sent_again_until_answered);
+    RUN(test_nodes_booting_together_all_land_eventually);
+    RUN(test_a_collector_that_never_answers_costs_bounded_reports);
+    RUN(test_what_counts_as_the_answer_to_a_report);
     RUN(test_backoff_doubles_to_an_hour_and_resets_on_success);
     RUN(test_the_rescan_gate_is_counted_in_wakes);
     RUN(test_what_a_scan_decides);

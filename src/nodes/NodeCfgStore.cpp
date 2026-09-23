@@ -462,8 +462,8 @@ void nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
         // The callback's mirror said a config was held, the store has none
         // (forgotten in between): plan it as the new node it now is.
         if (!e && !plan.adopt) plan = ncr::planReport(false, 0, rrev, local);
-        // A report that is not local goes unanswered, so the node keeps its
-        // rev; one adopted at a new rev is then simply pending and fetched.
+        // A report that is not local is answered with its own rev, so the
+        // node keeps it; one adopted at a new rev is then pending and fetched.
         if (!local) plan.applied = rrev;
         if (plan.adopt) {
             const bool first = (e == nullptr);

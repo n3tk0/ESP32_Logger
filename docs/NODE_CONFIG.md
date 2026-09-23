@@ -334,12 +334,36 @@ unknown types in `espnowValidate()`.
 - `EN_MSG_CFG_REPORT = 8` (node → collector): same framing as `EN_MSG_CFG`
   (`rev` = node's current rev), sent on the first wake after boot and while
   `local == true`. The collector reassembles by (nodeId, rev, total) and
-  answers the last chunk with a CFG with `total == 0` and the adopted `rev`
-  (meaning "your local config is now rev N"). The node waits for that answer
-  only when `local` is true (same per-slice window as CFG_GET) and repeats
-  the report on a later wake if it does not come — so a repeated report of
-  the same local document must be answered with the rev already adopted for
-  it, not adopted again. A report with `local == false` needs no answer.
+  answers the last chunk of EVERY complete report with a CFG with
+  `total == 0`:
+  - `local == true`: `rev` is the rev the edit was adopted at ("your local
+    config is now rev N"); the node takes it and clears `local`. A repeated
+    report of the same local document must be answered with the rev already
+    adopted for it, not adopted again.
+  - `local == false` (the report after a boot): `rev` is the node's own rev
+    handed back — what the collector records it as running — and the node
+    takes nothing from it; it only means "it landed". Such a report is never
+    adopted as a local edit: a node behind the desired rev (or one the
+    collector has just adopted a first config for) stays pending and fetches;
+    a node ahead of the collector is believed (§0.4). Hearing the same report
+    twice is harmless — the second is a status report.
+
+  The node waits for that answer after the last slice (same per-slice window
+  as CFG_GET) whatever `local` is, and keeps the report owed (RTC memory,
+  across deep sleep) until it comes; it reports again on a later wake under
+  the same backoff as a failed fetch (skip 1, 3, 7 … 63 wakes). The radio's
+  per-slice delivery does not count: the collector has ONE assembler, and a
+  report it dropped (below) was delivered slice by slice all the same. While
+  the boot report's backoff holds it, a flagged config is still fetched;
+  while `local` is set, nothing is fetched.
+
+  *Older collectors* answered only a local report, so against one a node
+  never hears the answer to its boot report and keeps sending it — one
+  report (a few slices and one reply window, ~0.002 mAh) per 64 wakes once
+  the backoff tops out, ~0.04 mAh/day at one wake a minute. The collector
+  stores each copy as it did the first. An older node ignores the answer: a
+  CFG arriving while it is not waiting for one is dropped.
+
   The FIRST report from a node the collector holds no config for is adopted
   with the node table's label and interval in place of the node's own `name`
   and `interval_s` (the label is the id its readings are filed under), and
@@ -379,7 +403,16 @@ unknown types in `espnowValidate()`.
   CFG_ACK's `status` is 0 or 1 and both strings are NUL-terminated inside
   their arrays. Reassembly (`EnCfgAssembler`) is strictly sequential: an
   offset-0 slice starts over, anything but the next expected offset of the
-  same (nodeId, rev, total) is ignored.
+  same (nodeId, rev, total) is ignored. The collector has one assembler for
+  every node's CFG_REPORT, and nodes that boot together (a power cut) report
+  together, so it does not let another node's offset-0 slice start over a
+  transfer in progress whose last slice is under 400 ms old
+  (`EN_CFG_HOLD_MS`, `espnowCfgHeld()`): that slice is dropped, its node
+  hears no answer and reports again on a later wake. 400 ms is the node's
+  whole per-wake config budget (`NODE_CFG_BUDGET_MS`), while a live
+  report's slices are milliseconds apart (each send waits at most 30 ms for
+  its delivery), so a transfer idle that long is one its node has given up
+  on — it is then replaced. The same node's offset-0 slice always restarts.
 
 ## 6. The node's own page (both nodes)
 

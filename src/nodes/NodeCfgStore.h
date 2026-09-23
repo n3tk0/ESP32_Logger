@@ -89,7 +89,8 @@ bool nodeCfgRadioState(uint8_t id, NodeCfgRadio& out);
 
 /// A completed CFG_REPORT. `told` is the plan the receive callback worked
 /// out from its mirror, and for a local report already answered with
-/// (`told.applied` is what the node now believes it runs); the store keeps to
+/// (`told.applied` is what the node now believes it runs; any other report
+/// was answered with its own rev, which is what is recorded); the store keeps to
 /// it, moving only the desired rev on if a web edit landed in between.
 /// `label` / `intervalS` are the node table's; on first contact they win
 /// (ncr::adoptTableIdentity), after a local edit the table follows the node —

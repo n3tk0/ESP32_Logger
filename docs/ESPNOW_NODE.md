@@ -462,7 +462,9 @@ microseconds of airtime at 1 Mbit/s. JSON is only ever touched on the wakes
 where a config moves (§9). The two costs that are new are both bounded and
 both conditional: a config fetch, about 0.001 mAh once per change, and the
 hourly scan-plus-sweep while a collector stays unreachable, ~2 mAh/day for as
-long as that lasts (§2).
+long as that lasts (§2). (A third, only against a collector too old to
+answer the report a node sends after booting: that report repeated once per
+64 wakes, ~0.04 mAh/day — §9.)
 
 Every figure above is a calculation, not a measurement. Nothing here has been
 run on hardware yet.
@@ -525,10 +527,22 @@ tested against a simulated collector in
 The node sends its document as `CFG_REPORT` slices on the first wake after a
 boot (the collector then knows exactly what is running, including a custom
 probe name it needs to label `DATA2` values) and whenever it holds a local
-edit (`local: true`). Only in the second case does it wait, for the
-collector's "your local config is now rev N", and then clears `local`. A
-report that is not answered is retried with the same backoff, so an old
-collector that ignores the new frames does not cost a report every wake.
+edit (`local: true`). Either way it waits one reply window after the last
+slice for the collector's answer — for a local edit "your local config is
+now rev N", and it clears `local`; for the boot report just "it landed". The
+radio delivering every slice is not proof: the collector reassembles every
+node's report in one buffer, and after a power cut every node reports at
+once, so all but one are dropped and must come again. A report that is not
+answered stays owed, in RTC memory across deep sleep, and is retried with
+the same backoff as a fetch.
+
+The cost is one reply window per report, left the moment the answer comes
+(a few milliseconds) — nothing a budget notices. Against a collector built
+before it answered the boot report, the answer never comes and the node
+keeps asking: once the backoff tops out, one report per 64 wakes, about
+0.002 mAh each, ~0.04 mAh/day at one wake a minute. The owed boot report
+never holds up a config fetch (it is skipped on the wakes the backoff
+holds it); a local edit does, because it wins.
 
 ### The setup page
 

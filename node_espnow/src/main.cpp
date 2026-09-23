@@ -368,10 +368,12 @@ static void fetchConfig() {
     }
 }
 
-/// Send the running config as CFG_REPORT slices. When `local` is set, wait
-/// after the last slice for the collector's "your local config is now rev N"
-/// (a CFG with total == 0) and clear `local`. Otherwise (the report owed after
-/// a boot) the radio's own delivery of every slice is enough.
+/// Send the running config as CFG_REPORT slices, and wait after the last for
+/// the collector's answer (a CFG with total == 0). For a local edit that says
+/// "your local config is now rev N": adopt N and clear `local`. For the report
+/// owed since boot it only says the report landed. Either way the report stays
+/// owed until the answer comes, and is sent again on a later wake under
+/// s_reportBackoff (CfgFetch.h, "Reporting").
 static void reportConfig() {
     char doc[EN_CFG_MAX_TOTAL + 1];
     const size_t n = encodeConfigTo(s_cfg, doc, sizeof(doc), 0);
@@ -385,32 +387,26 @@ static void reportConfig() {
         const int flen = espnowFillCfgChunk(m, EN_MSG_CFG_REPORT, s_link.nodeId, s_cfg.rev,
                                             doc, (uint16_t)n, off);
         if (flen < 0) break;
-        const bool last = (uint32_t)off + m.len >= n;
-        if (!(last && s_cfg.local)) {
-            if (!linkSendFrame(s_link, &m, flen)) {
-                encfg::failed(s_reportBackoff);
-                return;
-            }
+        if ((uint32_t)off + m.len < n) {
+            if (!linkSendFrame(s_link, &m, flen)) break;
             continue;
         }
         CfgChunkMsg rep;
-        if (linkExchangeCfg(s_link, &m, flen, cfgReplyWindow(), rep) && rep.total == 0 &&
-            rep.rev) {
+        const bool got = linkExchangeCfg(s_link, &m, flen, cfgReplyWindow(), rep);
+        if (!encfg::reportAnswered(got ? &rep : nullptr, s_link.nodeId, s_cfg.local)) break;
+        if (s_cfg.local) {
             s_cfg.rev   = rep.rev;
             s_cfg.local = false;
             cfgStoreSave(s_cfg);
-            s_reportDue = false;
-            encfg::succeeded(s_reportBackoff);
             Serial.printf("[cfg] collector adopted the local config as rev %u\n",
                           (unsigned)rep.rev);
-        } else {
-            encfg::failed(s_reportBackoff);
-            Serial.println("[cfg] local config reported, not adopted yet");
         }
+        s_reportDue = false;
+        encfg::succeeded(s_reportBackoff);
         return;
     }
-    s_reportDue = false;
-    encfg::succeeded(s_reportBackoff);
+    encfg::failed(s_reportBackoff);
+    Serial.println("[cfg] config reported, no answer yet");
 }
 
 // ---------------------------------------------------------------------------
@@ -591,12 +587,15 @@ static void wake() {
             Serial.println("[node] collector no longer knows us — pairing again");
             uint32_t e = 0;
             if (linkPair(s_link, &e)) { adoptClock(e); saveLink(); }
-        } else if (s_cfg.local || s_reportDue) {
-            // Local edits win: report before fetching anything, and the
-            // collector's adoption answers the pending flag as well.
-            if (encfg::due(s_reportBackoff)) reportConfig();
-        } else if (r.cfgPending) {
-            if (encfg::due(s_fetchBackoff)) fetchConfig();
+        } else {
+            // Local edits win; the report owed since boot goes before a
+            // fetch but cannot hold one up (CfgFetch.h, choose()).
+            switch (encfg::choose(s_cfg.local, s_reportDue, r.cfgPending, s_reportBackoff,
+                                  s_fetchBackoff)) {
+                case encfg::Exchange::Report: reportConfig(); break;
+                case encfg::Exchange::Fetch:  fetchConfig();  break;
+                case encfg::Exchange::None:   break;
+            }
         }
     } else {
         if (s_failStreak < 255) s_failStreak++;

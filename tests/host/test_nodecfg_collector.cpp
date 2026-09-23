@@ -241,6 +241,48 @@ static void test_plan_report_status_only() {
     CHECK(shouldSend(statusAfterApplied(ST_PENDING, p.rev, p.applied), p.rev, p.applied));
 }
 
+/// §5: every complete ESP-NOW CFG_REPORT is answered, the one after a boot as
+/// well as a local edit, and the node keeps reporting until it hears it. What
+/// the answer says must not move a node that did not edit anything.
+static void test_report_answer_rev() {
+    // A local edit is told the rev it is adopted at.
+    ReportPlan p = planReport(true, 9, 4, true);
+    CHECK_EQ(reportAnswerRev(p, 4, true), 10);
+    p = planReport(false, 0, 0, true);
+    CHECK_EQ(reportAnswerRev(p, 0, true), 1);
+
+    // After a boot, every case is told its own rev back — never a rev taken
+    // from what the collector adopted:
+    p = planReport(false, 0, 0, false);            // unknown, never synced
+    CHECK(p.adopt);
+    CHECK_EQ(p.rev, 1);                            // adopted at 1 ...
+    CHECK_EQ(reportAnswerRev(p, 0, false), 0);     // ... the node stays at 0, and fetches
+    p = planReport(false, 0, 7, false);            // unknown, collector lost its file
+    CHECK_EQ(reportAnswerRev(p, 7, false), 7);
+    p = planReport(true, 5, 9, false);             // known, node ahead: believed
+    CHECK(p.adopt);
+    CHECK_EQ(reportAnswerRev(p, 9, false), 9);
+    p = planReport(true, 5, 5, false);             // in step
+    CHECK_EQ(reportAnswerRev(p, 5, false), 5);
+    p = planReport(true, 5, 2, false);             // behind the desired rev
+    CHECK(!p.adopt);                               // not adopted as desired
+    CHECK_EQ(reportAnswerRev(p, 2, false), 2);     // told 2: still pending
+    CHECK(shouldSend(statusAfterApplied(ST_PENDING, p.rev, 2), p.rev, 2));
+
+    // The same report heard twice (the answer was lost, the node reports
+    // again on a later wake) is a status report the second time: once the
+    // first adopted it, the collector holds that rev and the repeat is in
+    // step or behind — never adopted twice.
+    p = planReport(false, 0, 7, false);
+    ReportPlan again = planReport(true, p.rev, 7, false);
+    CHECK(!again.adopt);
+    CHECK_EQ(reportAnswerRev(again, 7, false), 7);
+    p = planReport(false, 0, 0, false);
+    again = planReport(true, p.rev, 0, false);
+    CHECK(!again.adopt);
+    CHECK_EQ(reportAnswerRev(again, 0, false), 0);
+}
+
 static void test_ingest_reply() {
     CHECK_EQ((int)ingestReply(true, ST_APPLIED, 6, 6, 0), (int)REPLY_REV);
     CHECK_EQ((int)ingestReply(false, ST_PENDING, 6, 5, 0), (int)REPLY_FULL);
@@ -489,6 +531,7 @@ int main() {
     RUN(test_plan_report_no_config_held);
     RUN(test_plan_report_local_edit_wins);
     RUN(test_plan_report_status_only);
+    RUN(test_report_answer_rev);
     RUN(test_ingest_reply);
     RUN(test_secret_bits);
     RUN(test_report_secrets_known);

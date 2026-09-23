@@ -584,6 +584,63 @@ static void test_cfg_assembler() {
 }
 
 // ---------------------------------------------------------------------------
+// The collector has ONE report assembler for every node. Nodes that boot
+// together (a power cut) report together, and another node's first slice
+// must not wipe a transfer that is still moving; a stalled one is given up.
+static void test_cfg_assembler_held_against_another_node() {
+    char doc[431];
+    for (int i = 0; i < 430; i++) doc[i] = (char)('a' + i % 26);
+    doc[430] = '\0';
+
+    EnCfgAssembler a;
+    espnowCfgReset(a);
+    CfgChunkMsg mA, mB;
+
+    // Empty: nothing to hold, anybody may start.
+    espnowFillCfgChunk(mB, EN_MSG_CFG_REPORT, 6, 3, doc, 300, 0);
+    CHECK(!espnowCfgHeld(a, mB, 0));
+
+    // Node 5 is one slice into its report.
+    espnowFillCfgChunk(mA, EN_MSG_CFG_REPORT, 5, 9, doc, 430, 0);
+    CHECK(!espnowCfgHeld(a, mA, 0));
+    CHECK_EQ((int)espnowCfgFeed(a, mA), (int)EN_CFG_FEED_MORE);
+
+    // Node 6's first slice, a few ms later: held off ...
+    CHECK(espnowCfgHeld(a, mB, 3));
+    CHECK(espnowCfgHeld(a, mB, EN_CFG_HOLD_MS - 1));
+    // ... node 6's later slices are not the next one anyway ...
+    espnowFillCfgChunk(mB, EN_MSG_CFG_REPORT, 6, 3, doc, 300, 200);
+    CHECK(!espnowCfgHeld(a, mB, 3));
+    CHECK_EQ((int)espnowCfgFeed(a, mB), (int)EN_CFG_FEED_IGNORED);
+    // ... and node 5's own slice 0 (its retry) always restarts.
+    CHECK(!espnowCfgHeld(a, mA, 3));
+
+    // A transfer idle for the whole per-wake budget is given up.
+    espnowFillCfgChunk(mB, EN_MSG_CFG_REPORT, 6, 3, doc, 300, 0);
+    CHECK(!espnowCfgHeld(a, mB, EN_CFG_HOLD_MS));
+    CHECK(!espnowCfgHeld(a, mB, 60000));
+
+    // Played out: node 5's slices and node 6's interleaved, ms apart. Node 5
+    // lands whole; node 6 is dropped (and reports again on a later wake).
+    espnowCfgReset(a);
+    int done5 = 0;
+    for (uint16_t off = 0; off < 430; off = (uint16_t)(off + 200)) {
+        espnowFillCfgChunk(mA, EN_MSG_CFG_REPORT, 5, 9, doc, 430, off);
+        if (!espnowCfgHeld(a, mA, 2) && espnowCfgFeed(a, mA) == EN_CFG_FEED_DONE) done5++;
+        espnowFillCfgChunk(mB, EN_MSG_CFG_REPORT, 6, 3, doc, 300, off < 300 ? off : 200);
+        if (!espnowCfgHeld(a, mB, 2)) espnowCfgFeed(a, mB);
+    }
+    CHECK_EQ(done5, 1);
+    CHECK_EQ(a.nodeId, 5);
+    CHECK_EQ(a.have, 430);
+    CHECK(memcmp(a.doc, doc, 430) == 0);
+    // Complete: not "in progress", so it holds nobody off (the collector's
+    // own ready flag keeps it until the tick has stored it).
+    espnowFillCfgChunk(mB, EN_MSG_CFG_REPORT, 6, 3, doc, 300, 0);
+    CHECK(!espnowCfgHeld(a, mB, 0));
+}
+
+// ---------------------------------------------------------------------------
 static void test_cfg_get_and_ack() {
     CfgGetMsg g;
     espnowFillCfgGet(g, 3, 4, 200);
@@ -641,6 +698,7 @@ int main() {
     RUN(test_cfg_chunks_slice_a_document);
     RUN(test_cfg_chunk_validate_rejects);
     RUN(test_cfg_assembler);
+    RUN(test_cfg_assembler_held_against_another_node);
     RUN(test_cfg_get_and_ack);
     return SUMMARY();
 }

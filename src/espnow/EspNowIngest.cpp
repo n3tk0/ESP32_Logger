@@ -178,14 +178,17 @@ static uint32_t  s_cfgMirrorGen = 0;   ///< store generation mirrored; 0 = resyn
 /// One CFG_REPORT being reassembled, and one completed one waiting for the
 /// tick to adopt. One and not one per node (a whole report is 1 KB): a node
 /// reports on its first wake after boot and after a local edit, rarely two at
-/// once. A node that loses the slot to another (its slices dropped, or its
-/// partial report restarted by the other's first slice) retries only a LOCAL
-/// report, which waits for an answer. The report after a boot counts the
-/// radio's per-slice delivery as success and is not sent again until the next
-/// boot; the collector then keeps what it already held for that node (its
-/// stored `reported` and probe names), and a node it has never seen gets its
-/// entry at its next boot or local edit.
+/// once — except after a power cut, when every node boots together. So a
+/// transfer in progress is HELD: another node's first slice is dropped while
+/// the current one's last slice is under EN_CFG_HOLD_MS old (espnowCfgHeld()),
+/// rather than wiping it, and a stalled one is given up after that. Every
+/// complete report is answered (CFG, total 0), the one after a boot as well
+/// as a local one, and a node keeps reporting — on later wakes, under its
+/// report backoff — until it hears that answer. So a node that lost the slot
+/// (its slices dropped, or the tick had not yet taken the last report) has
+/// its report land on a later wake instead of at its next boot.
 static EnCfgAssembler  s_asm;
+static uint32_t        s_asmMs = 0;             ///< millis() of s_asm's last accepted slice
 static ncr::ReportPlan s_reportPlan;            ///< what the callback decided (and said)
 static volatile bool   s_reportReady = false;   ///< s_asm holds a complete report
 
@@ -519,10 +522,13 @@ static void answerCfgGet(const uint8_t* mac, const uint8_t* data) {
     }
 }
 
-/// CFG_REPORT: reassemble; on the last slice of a LOCAL report, answer with
-/// the rev it is adopted at (CFG, total 0) while the node is still listening,
-/// and leave the document for the tick to store. A report without `local`
-/// (the one after a boot) needs no answer (§5).
+/// CFG_REPORT: reassemble; on the last slice answer (CFG, total 0) while the
+/// node is still listening, and leave the document for the tick to store. A
+/// LOCAL report is told the rev it is adopted at; any other (the one after a
+/// boot) is told its own rev back — what the store records it as running
+/// (it is never adopted as a local edit, and a node behind the desired rev
+/// stays pending and fetches). The answer is what stops the node reporting
+/// again (§5).
 ///
 /// The rev is worked out HERE, from the mirrored desired rev, with the same
 /// ncr::planReport() the store then keeps to — so the answer does not wait
@@ -539,7 +545,12 @@ static void feedCfgReport(const uint8_t* mac, const uint8_t* data, int len) {
     const int idx = slotFor(mac, c.nodeId);
     taskEXIT_CRITICAL(&s_nodeMux);
     if (idx < 0) return;
-    if (espnowCfgFeed(s_asm, c) != EN_CFG_FEED_DONE) return;
+    const uint32_t now = millis();
+    if (espnowCfgHeld(s_asm, c, now - s_asmMs)) return;   // another node's, in progress
+    const EnCfgFeed fed = espnowCfgFeed(s_asm, c);
+    if (fed == EN_CFG_FEED_IGNORED) return;
+    s_asmMs = now;
+    if (fed != EN_CFG_FEED_DONE) return;
 
     const bool local = strstr(s_asm.doc, "\"local\":true") != nullptr;
     uint32_t   h     = 2166136261u ^ s_asm.rev;             // FNV-1a
@@ -554,14 +565,13 @@ static void feedCfgReport(const uint8_t* mac, const uint8_t* data, int len) {
         told   = s_repRev[idx];
     } else {
         s_reportPlan = ncr::planReport(s_cfgHave[idx], s_cfgRev[idx], s_asm.rev, local);
-        told         = s_reportPlan.applied;
+        told         = ncr::reportAnswerRev(s_reportPlan, s_asm.rev, local);
         if (local) { s_repHash[idx] = h; s_repRev[idx] = told; }
     }
     taskEXIT_CRITICAL(&s_nodeMux);
 
     if (repeat) espnowCfgReset(s_asm);          // adopted already: nothing to store
     else        s_reportReady = true;
-    if (!local) return;
     CfgChunkMsg m;
     const int n = cfgFrame(m, c.nodeId, told, nullptr, 0, 0);
     if (n > 0) esp_now_send(mac, (const uint8_t*)&m, (size_t)n);

@@ -779,8 +779,8 @@ static inline void espnowFillCfgAck(CfgAckMsg& m, uint8_t nodeId, uint16_t rev,
 /// going to start over from 0 anyway (a wake that runs out of time resumes
 /// from 0 next wake) and hole-filling is where reassembly bugs live.
 ///
-/// ~1 KB. The node keeps one; the collector keeps one per node that is
-/// reporting, and can drop it when the report completes.
+/// ~1 KB. The node keeps one; the collector keeps ONE for every node's
+/// CFG_REPORT, and holds it for a transfer in progress (espnowCfgHeld()).
 struct EnCfgAssembler {
     uint8_t  nodeId;
     uint16_t rev;
@@ -823,6 +823,27 @@ static inline EnCfgFeed espnowCfgFeed(EnCfgAssembler& a, const CfgChunkMsg& m) {
     if (a.have < a.total) return EN_CFG_FEED_MORE;
     a.doc[a.total] = '\0';
     return EN_CFG_FEED_DONE;
+}
+
+/// How long the collector's one report assembler stays with a transfer that
+/// has stopped moving. A node sends its report's slices back to back, each
+/// bounded by a 30 ms wait for the radio's own delivery, so a live transfer's
+/// slices are milliseconds apart; and a node's whole config exchange in one
+/// wake is budgeted at 400 ms (NODE_CFG_BUDGET_MS). A transfer idle for that
+/// long belongs to a node that has given up for this wake and will start
+/// over from slice 0 — never one about to finish.
+static const uint32_t EN_CFG_HOLD_MS = 400;
+
+/// True when `m` is ANOTHER node's first slice and `a` holds a transfer still
+/// in progress — last slice accepted `idleMs` ago, under EN_CFG_HOLD_MS. The
+/// caller drops `m` instead of feeding it: restarting on it would wipe the
+/// transfer (nodes that boot together report together), and the dropped node
+/// hears no answer and reports again on a later wake. The same node's slice 0
+/// always restarts: that is its own retry.
+static inline bool espnowCfgHeld(const EnCfgAssembler& a, const CfgChunkMsg& m,
+                                 uint32_t idleMs) {
+    return m.offset == 0 && m.nodeId != a.nodeId && a.have && a.have < a.total &&
+           idleMs < EN_CFG_HOLD_MS;
 }
 
 // ---------------------------------------------------------------------------

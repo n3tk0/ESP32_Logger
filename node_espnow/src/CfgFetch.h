@@ -172,4 +172,45 @@ static inline void succeeded(Backoff& b) {
     b.skip  = 0;
 }
 
+// ---------------------------------------------------------------------------
+// Reporting — the other direction, and which exchange a wake makes
+// ---------------------------------------------------------------------------
+// The node reports its config (CFG_REPORT slices) on the first wake after a
+// boot and while it holds a local edit. Either way it waits, after the last
+// slice, for the collector's CFG with total == 0 — the only proof the whole
+// report was reassembled: the radio's delivery of each slice is not, because
+// the collector has ONE assembler and drops another node's report while it
+// is busy (nodes that boot together after a power cut report together). No
+// answer = report again on a later wake, under the report Backoff, so a
+// collector that never answers (one built before it answered the report after
+// a boot) costs one report per 64 wakes, not one per wake.
+
+/// Did the frame that came back after a report's last slice (nullptr: none)
+/// answer it? For a local report the rev it carries is the one the edit was
+/// adopted at, and 0 is not one; for the report after a boot it is the
+/// node's own rev handed back, and only its arrival matters.
+static inline bool reportAnswered(const CfgChunkMsg* m, uint8_t nodeId, bool local) {
+    return m && m->type == EN_MSG_CFG && m->nodeId == nodeId && m->total == 0 &&
+           (m->rev || !local);
+}
+
+enum class Exchange : uint8_t { None, Report, Fetch };
+
+/// Which config exchange this wake makes, once its DATA was ACKed. Call once
+/// per such wake: it consumes the backoffs' skips.
+///
+///  * A local edit wins: reported before anything is fetched, and nothing is
+///    fetched while it waits to be adopted (the adoption answers the pending
+///    flag as well).
+///  * The report owed since boot goes first when it is due; while its backoff
+///    holds it, a pending config is still fetched — so a collector that never
+///    answers that report cannot keep a config from arriving.
+static inline Exchange choose(bool local, bool reportDue, bool cfgPending, Backoff& report,
+                              Backoff& fetch) {
+    if (local) return due(report) ? Exchange::Report : Exchange::None;
+    if (reportDue && due(report)) return Exchange::Report;
+    if (cfgPending && due(fetch)) return Exchange::Fetch;
+    return Exchange::None;
+}
+
 }  // namespace encfg

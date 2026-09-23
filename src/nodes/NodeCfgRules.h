@@ -206,6 +206,17 @@ static inline ReportPlan planReport(bool have, uint16_t desiredRev, uint16_t rep
     return p;
 }
 
+/// The rev the collector's answer to an ESP-NOW CFG_REPORT carries (§5, a CFG
+/// with total 0). A local edit is told the rev it was adopted at. Any other
+/// report — the one after a boot — is told its own rev back, which is what
+/// the store records it as running: that answer only says "it landed", and
+/// the node must not take a rev from it. A node a new config is adopted for
+/// (first contact, the table's label and interval) or that is behind the
+/// desired rev stays behind and fetches it.
+static inline uint16_t reportAnswerRev(const ReportPlan& p, uint16_t reportRev, bool local) {
+    return local ? p.applied : reportRev;
+}
+
 /// What the WiFi node's ingest reply carries (§3).
 enum : uint8_t { REPLY_NONE = 0, REPLY_REV = 1, REPLY_FULL = 2 };
 
