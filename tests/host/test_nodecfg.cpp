@@ -1094,6 +1094,22 @@ static void test_legacy_migration() {
     deserializeJson(s, "{\"ssid\":\"x\",\"intervalMs\":5000}");
     migrateLegacyWifi(s.as<JsonVariantConst>(), f);
     CHECK_EQ((int)f.interval_s, 10);
+    // Rounds half up, and the top of the accepted range (INT32_MAX ms) clamps
+    // to the maximum. That used to be `(x + 500) / 1000`, which on the
+    // ESP8266's 32-bit long overflows (UB) before it divides; a 64-bit host
+    // long never shows it, so the values are pinned here instead.
+    const char* const ms[]  = { "61500", "999", "1499", "2147483647", "2147483147" };
+    const int         sec[] = { 62, 10, 10, 65535, 65535 };
+    for (size_t i = 0; i < sizeof(sec) / sizeof(sec[0]); i++) {
+        char js[64] = "{\"intervalMs\":";
+        strAppend(js, sizeof(js), ms[i]);
+        strAppend(js, sizeof(js), "}");
+        JsonDocument m;
+        deserializeJson(m, js);
+        NodeConfig h = configDefaults(Transport::Wifi, Hw::Esp8266);
+        migrateLegacyWifi(m.as<JsonVariantConst>(), h);
+        CHECK_EQ((int)h.interval_s, sec[i]);
+    }
     // Values that do not fit keep the default; the node is booting and
     // nobody is there to read an error.
     JsonDocument b;
@@ -1166,6 +1182,43 @@ static void test_caps_esp32c3() {
     CHECK(boards[2]["left"].isNull());   // "other": nothing to draw
 }
 
+// ArduinoJson 7 stores a string BY POINTER only when it is a string literal
+// (StringAdapter<const char (&)[N]>, a RamString marked static). A
+// `const char*` or a char array is adapted as a non-static RamString and
+// copied into the document — inline when it is tiny, into the pool when not.
+// encodeCaps() and the collector's handover lists pass a stack buffer as
+// `(const char*)key`; this pins that the document owns those bytes, so the
+// buffer may be reused or die at once.
+static void test_const_char_ptr_keys_are_copied() {
+    JsonDocument d;
+    JsonObject o = d.to<JsonObject>();
+    char buf[24];
+    for (unsigned i = 0; i < 3; i++) {
+        copyStr(buf, sizeof(buf), i == 1 ? "k" : "a-long-key-");   // tiny, and not
+        strAppendUint(buf, sizeof(buf), i);
+        o[(const char*)buf] = (int)i;
+    }
+    copyStr(buf, sizeof(buf), "value-that-is-not-tiny");
+    o["v"] = (const char*)buf;
+    memset(buf, 'X', sizeof(buf) - 1);                    // clobber the buffer
+    buf[sizeof(buf) - 1] = '\0';
+    char out[128];
+    serializeJson(d, out, sizeof(out));
+    CHECK_STREQ(out, "{\"a-long-key-0\":0,\"k1\":1,\"a-long-key-2\":2,"
+                     "\"v\":\"value-that-is-not-tiny\"}");
+
+    // And the caps' warn_pins keys, read after encodeCaps() has returned:
+    // every C3 note under its own GPIO number, in table order.
+    JsonDocument c;
+    encodeCaps(Transport::EspNow, Hw::Esp32c3, c.to<JsonObject>());
+    std::string keys;
+    for (JsonPairConst kv : c["warn_pins"].as<JsonObjectConst>()) {
+        keys += kv.key().c_str();
+        keys += ',';
+    }
+    CHECK_STREQ(keys.c_str(), "2,8,9,18,19,20,21,");
+}
+
 int main() {
     RUN(test_bases_are_valid);
     RUN(test_name_rules);
@@ -1205,6 +1258,7 @@ int main() {
     RUN(test_legacy_migration);
     RUN(test_caps_esp8266);
     RUN(test_caps_esp32c3);
+    RUN(test_const_char_ptr_keys_are_copied);
     std::printf("       %d rejections provoked, every reason whole\n", g_reasonsSeen);
     return SUMMARY();
 }

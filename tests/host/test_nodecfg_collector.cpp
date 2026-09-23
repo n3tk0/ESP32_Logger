@@ -82,6 +82,37 @@ static void test_should_send_only_pending_and_behind() {
     CHECK(!shouldSend(ST_NONE, 5, 4));
 }
 
+// nextRev() wraps 0xFFFF -> 1. Compared as plain numbers, the rev after the
+// wrap would be "older" than the one before it: never sent, and the node
+// called applied. Every ordering the collector makes goes through
+// revAtOrPast(), which reads the difference as signed.
+static void test_revs_compare_across_the_wrap() {
+    CHECK(revAtOrPast(5, 5));
+    CHECK(revAtOrPast(6, 5));
+    CHECK(!revAtOrPast(4, 5));
+    CHECK(revAtOrPast(1, 0xFFFF));                // one bump past the wrap
+    CHECK(revAtOrPast(3, 0xFFFE));
+    CHECK(!revAtOrPast(0xFFFF, 1));
+    CHECK(!revAtOrPast(0, 1));                    // never synced: behind all
+    CHECK(!revAtOrPast(0, 0xFFFF));
+    CHECK(revAtOrPast(0x8000, 0));
+    CHECK(revAtOrPast(0, 0));
+    CHECK(revAtOrPast(40000, 20000));             // far apart, same side
+
+    // The decisions built on it, at the wrap: desired rev 1, node on 65535.
+    const uint16_t desired = nextRev(0xFFFF);
+    CHECK(shouldSend(ST_PENDING, desired, 0xFFFF));
+    CHECK_EQ((int)statusAfterApplied(ST_PENDING, desired, 0xFFFF), (int)ST_PENDING);
+    CHECK_EQ((int)statusAfterApplied(ST_PENDING, desired, desired), (int)ST_APPLIED);
+    CHECK(!shouldSend(ST_PENDING, desired, desired));
+    ReportPlan p = planReport(true, desired, 0xFFFF, false);   // node behind: not adopted
+    CHECK(!p.adopt);
+    CHECK_EQ(p.applied, 0xFFFF);
+    p = planReport(true, 0xFFFF, 2, false);                    // node past the wrap: ahead
+    CHECK(p.adopt);
+    CHECK_EQ(p.rev, 2);
+}
+
 // ===========================================================================
 // Keys and file names
 // ===========================================================================
@@ -183,9 +214,13 @@ static void test_plan_report_local_edit_wins() {
     CHECK(p.adopt);
     CHECK_EQ(p.rev, 10);
 
-    p = planReport(true, 0xFFFF, 3, true);               // wraps past 0
+    p = planReport(true, 0xFFFF, 0xFFFE, true);          // wraps past 0
     CHECK(p.adopt);
     CHECK_EQ(p.rev, 1);
+
+    p = planReport(true, 0xFFFF, 3, true);               // 3 is past the wrap: the later one
+    CHECK(p.adopt);
+    CHECK_EQ(p.rev, 4);
 }
 
 static void test_plan_report_status_only() {
@@ -335,6 +370,8 @@ static void test_handover_classify() {
     CHECK_EQ((int)hoClassify(false, 0, 0, false), (int)HO_PENDING);   // no file: never ready
     CHECK_EQ((int)hoClassify(false, 0, 0, true), (int)HO_OFFLINE);
     CHECK_EQ((int)hoClassify(true, 5, 0, false), (int)HO_PENDING);    // not handed one yet
+    CHECK_EQ((int)hoClassify(true, 1, 0xFFFF, false), (int)HO_READY);  // across the wrap
+    CHECK_EQ((int)hoClassify(true, 0xFFFF, 1, false), (int)HO_PENDING);
 }
 
 static void test_handover_auto_switch() {
@@ -445,6 +482,7 @@ int main() {
     RUN(test_next_rev_skips_zero);
     RUN(test_status_after_applied);
     RUN(test_should_send_only_pending_and_behind);
+    RUN(test_revs_compare_across_the_wrap);
     RUN(test_valid_name);
     RUN(test_parse_key);
     RUN(test_format_key_and_path);

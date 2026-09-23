@@ -28,6 +28,7 @@ struct Entry {
     bool           espnow;
     uint8_t        id;            ///< ESP-NOW radio id
     bool           haveProbes;    ///< a reported config has been seen
+    uint32_t       seenMs;        ///< WiFi: millis()|1 of its last POST; 0 = none since boot
     char           name[NODE_NAME_MAX + 1];    ///< WiFi: the key
     char           dname[NODE_NAME_MAX + 1];   ///< desired name (a WiFi rename)
     NodeCfgSummary s;
@@ -164,7 +165,7 @@ static void bumped(Entry& e, NodeConfig& c) {
     e.s.rev   = ncr::nextRev(e.s.rev);
     c.rev     = e.s.rev;
     c.local   = false;
-    e.s.status = e.s.applied >= e.s.rev ? ncr::ST_APPLIED : ncr::ST_PENDING;
+    e.s.status = ncr::statusAfterApplied(ncr::ST_PENDING, e.s.rev, e.s.applied);
     e.s.err.field[0] = e.s.err.reason[0] = '\0';
     copyStr(e.dname, sizeof(e.dname), c.name);
 }
@@ -381,7 +382,7 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
         if (!plan.adopt) {
             e->s.applied = applied;     // `have` was true, so e is set
             e->s.status  = ncr::statusAfterApplied(e->s.status, e->s.rev, applied);
-            if (applied >= e->s.rev) w->doc["sec_dirty"] = 0;
+            if (ncr::revAtOrPast(applied, e->s.rev)) w->doc["sec_dirty"] = 0;
         } else if (adopt(e, w, rep, false, node, 0, plan.rev, plan.rev)) {
             adoptDone(*e, w);
             // The node's own secrets are what it runs; the collector's copy
@@ -392,14 +393,19 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
         } else if (!e) {
             delete w;
             return;
+        } else {
+            // Refused (logged by adopt()): like the ESP-NOW path, nothing of
+            // it is kept — not as `reported`, and not the rev it would have
+            // been adopted at as the one the node runs.
+            applied = e->s.applied;
         }
-        if (e) { keepReport(*e, w->doc, rep, w->cfg); save = true; }
+        if (e && adopted == plan.adopt) { keepReport(*e, w->doc, rep, w->cfg); save = true; }
     }
 
     if (e && !adopted && applied != e->s.applied) {
         e->s.applied = applied;
         e->s.status  = ncr::statusAfterApplied(e->s.status, e->s.rev, applied);
-        if (applied >= e->s.rev) {
+        if (ncr::revAtOrPast(applied, e->s.rev)) {
             w->doc["sec_dirty"] = 0;
             if (rep.isNull()) reportedFromDesired(*e, w);
         }
@@ -407,6 +413,7 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
     }
 
     if (e) {
+        e->seenMs = millis() | 1;
         switch (ncr::ingestReply(adopted, e->s.status, e->s.rev, applied, refused)) {
             case ncr::REPLY_REV:
                 reply["cfg"]["rev"] = e->s.rev;
@@ -462,8 +469,9 @@ void nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
             const bool first = (e == nullptr);
             // The node was told plan.applied; the desired rev must still move
             // past anything a web edit made since the callback's mirror.
-            const uint16_t rev = (!first && e->s.rev >= plan.rev) ? ncr::nextRev(e->s.rev)
-                                                                  : plan.rev;
+            const uint16_t rev = (!first && ncr::revAtOrPast(e->s.rev, plan.rev))
+                                     ? ncr::nextRev(e->s.rev)
+                                     : plan.rev;
             if (!adopt(e, w, rep, true, "", id, rev, plan.applied)) break;
             // First contact: the table's label and interval win, and the node
             // is sent them in the next rev. After a local edit the table
@@ -685,8 +693,13 @@ int nodeCfgHandoverSort(JsonObject out) {
         copyStr(x.name, sizeof(x.name), name);
         return &x;
     };
+    // A WiFi node is alive when it posted lately. Its own POSTs say so
+    // (seenMs), since one that only ever posts "readings": [] — or whose
+    // readings found the mailbox full — is not in remoteIngest at all.
     for (const Entry& e : s_e)
-        if (e.used) slot(e.espnow, e.name, e.id);
+        if (e.used)
+            if (K* x = slot(e.espnow, e.name, e.id))
+                x->offline = !e.seenMs || millis() - e.seenMs >= REMOTE_STATUS_STALE_MS;
 #ifdef FEATURE_ESPNOW_INGEST
     {
         EspNowNode nodes[ESPNOW_MAX_NODES];
@@ -700,7 +713,8 @@ int nodeCfgHandoverSort(JsonObject out) {
     char nid[RemoteIngest::MAX_NODE_ID];
     for (int j = 0; remoteIngest.nodeIdAt(j, nid, sizeof(nid)); j++) {
         const uint32_t age = remoteIngest.ageMsForNode(nid);
-        if (K* x = slot(false, nid, 0)) x->offline = !(age != UINT32_MAX && age < REMOTE_STATUS_STALE_MS);
+        if (K* x = slot(false, nid, 0))
+            if (age < REMOTE_STATUS_STALE_MS) x->offline = false;
     }
 
     JsonArray lists[3];
