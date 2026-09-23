@@ -193,7 +193,7 @@ bool kdSlotsSave(fs::FS& fs, const KindleZones& zones, const char* path) {
         return false;
     }
     const size_t want    = measureJson(doc);
-    const size_t written = serializeJson(doc, f);
+    const size_t written = serializeJson(doc, static_cast<Print&>(f));
     f.close();
     // A SHORT WRITE IS NOT A SUCCESS. `written == 0` was the only rejection,
     // so a full volume that took half the document renamed that half into

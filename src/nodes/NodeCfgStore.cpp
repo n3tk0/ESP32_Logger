@@ -104,7 +104,7 @@ static bool readJson(const char* path, JsonDocument& doc) {
 
 static bool writeJson(const char* path, const JsonDocument& doc) {
     return atomicWrite(LittleFS, path,
-                       [&doc](File& f) { return serializeJson(doc, f) > 0; }, fsMutex);
+                       [&doc](File& f) { return serializeJson(doc, static_cast<Print&>(f)) > 0; }, fsMutex);
 }
 
 static void removeFile(const char* path) {

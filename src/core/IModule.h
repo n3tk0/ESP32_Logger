@@ -104,7 +104,7 @@ public:
     static bool validateSchema(const char* s) {
         if (!s) return true;
         JsonDocument doc;
-        return deserializeJson(doc, s) == DeserializationError::Ok;
+        return deserializeJson(doc, s, strlen(s)) == DeserializationError::Ok;
     }
 
 protected:

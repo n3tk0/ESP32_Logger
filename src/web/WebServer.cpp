@@ -846,7 +846,7 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     AsyncResponseStream *resp = r->beginResponseStream("application/json");
     String fn = String(strlen(config.deviceName) ? config.deviceName : "device") + "_settings.json";
     resp->addHeader("Content-Disposition", "attachment; filename=\"" + fn + "\"");
-    serializeJson(doc, *resp);
+    serializeJson(doc, static_cast<Print&>(*resp));
     r->send(resp);
 }
 
@@ -2420,7 +2420,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
             String* buf = static_cast<String*>(r->_tempObject);
             if (!buf || buf->isEmpty()) { r->send(400, "text/plain", "No data"); return; }
             JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, *buf);
+            DeserializationError err = deserializeJson(doc, buf->c_str(), buf->length());
             delete buf;
             r->_tempObject = nullptr;
             if (err) { r->send(400, "text/plain", String("JSON error: ") + err.c_str()); return; }

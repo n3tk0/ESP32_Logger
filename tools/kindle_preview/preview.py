@@ -32,7 +32,7 @@ def kdpx(n):
 # copy of the CSS is a preview that can be right while the device is wrong,
 # which has already happened twice on this branch.
 src = open(os.path.join(ROOT, 'src/web/KindleDashboard.cpp')).read()
-i0 = src.index('#define KD_N(n)   p += kdPx(n)')
+i0 = src.index('#define KD_N(n)')
 i1 = src.index('#undef KD_S')
 blk = src[i0:i1]
 blk = re.sub(r'/\*.*?\*/', '', blk, flags=re.S)

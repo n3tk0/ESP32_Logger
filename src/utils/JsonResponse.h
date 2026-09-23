@@ -30,6 +30,6 @@ inline void sendJsonResponse(AsyncWebServerRequest* r, const JsonDocument& doc) 
         r->send(500, "application/json", "{\"ok\":false,\"error\":\"oom\"}");
         return;
     }
-    serializeJson(doc, *resp);
+    serializeJson(doc, static_cast<Print&>(*resp));
     r->send(resp);
 }

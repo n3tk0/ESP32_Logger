@@ -453,7 +453,7 @@ bool AlertEngine::_save() const {
     // atomicWrite serialises against StorageTask and all other FS writers.
     return atomicWrite(*_fs, _path, [&](File& f) -> bool {
         size_t want = measureJson(doc);
-        size_t got  = serializeJson(doc, f);
+        size_t got  = serializeJson(doc, static_cast<Print&>(f));
         return got > 0 && got == want;
     }, fsMutex);
 }
