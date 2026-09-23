@@ -17,6 +17,11 @@
 
     <div id="nd-msg"></div>
 
+    <!-- The network handover banner (docs/NODE_CONFIG.md §4), drawn by
+         nodes.js while the collector is moving its nodes to a new WiFi
+         network. The Network page has the same slot. -->
+    <div id="nd-handover" data-nd-ho hidden></div>
+
     <div class="grid grid-4" style="margin-bottom:var(--gap)" id="nd-kpis">
       <div class="kpi">
         <div class="kpi-l"><span data-icon="cpu"></span> <span data-i18n="nodes.kpiTotal">Nodes</span></div>
@@ -138,7 +143,7 @@
     <div class="card" id="nd-card-wifinote" style="margin-top:var(--gap);display:none">
       <div class="card-body">
         <p class="hint" data-i18n-html="nodes.wifiNote">
-          <strong>Note:</strong> WiFi nodes are configured via their own captive portal, and registered on this collector via <code>platform_config.json</code> sensor entries of type <code>"remote"</code>.
+          <strong>Note:</strong> a WiFi node's settings are edited in its row above once it has reported them. The node also has its own page: its setup hotspot when it cannot reach the network, or its address on your network. Changes saved there are adopted here on its next report.
         </p>
       </div>
     </div>
@@ -157,12 +162,11 @@
       </div>
     </details>
 
-    <!-- One savebar for every dirty ESP-NOW node (label/interval) plus the
-         offline-threshold config field. Forget is destructive and stays an
-         immediate action outside the savebar, like the confirm() it already
-         requires. WiFi rows have no editable fields (no endpoint to save to
-         — they're configured on their own captive portal), so they never
-         contribute to dirty state. -->
+    <!-- One savebar for every node with unsaved settings (the panel in its
+         open row, both transports) plus the offline-threshold config field.
+         Forget is destructive and stays an immediate action outside the
+         savebar, like the confirm() it already requires; so do pairing and
+         the handover banner's buttons. -->
     <div class="kd-savebar" id="nd-savebar" hidden>
       <div class="kd-savebar-in">
         <span id="nd-dirty" class="kd-dirty"></span>
