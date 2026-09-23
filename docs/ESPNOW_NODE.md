@@ -17,6 +17,13 @@ and the radio (`src/espnow/EspNowIngest.cpp`). The node firmware is
 compiles three of those headers so the two cannot drift apart. The dashboard
 warning badge is not written yet.
 
+Since the node configuration contract ([`NODE_CONFIG.md`](NODE_CONFIG.md)) the
+node is no longer a BME280 compiled in: it runs the shared config document
+(sensor list, interval, pins, divider, radio tuning, sleep), reports readings
+as `DATA2` frames, pulls a changed config from the collector in the wake after
+the change, and has a setup page of its own. §9 below is what that costs and
+why it is shaped the way it is.
+
 Nothing has been run on hardware. Everything below that describes behaviour on
 a board is a design statement, not an observation, and the two places most
 likely to need revising once one exists are marked where they appear.
@@ -93,7 +100,9 @@ what that looks like from the outside.
 
 **Configuration.** `intervalS` lets the wake period be changed from the
 collector's web interface, without walking to a node that may be behind a wall
-or on a roof.
+or on a roof. The whole config document rides on the same ACK now: a flag bit,
+`EN_ACK_CFG_PENDING`, says the collector holds a newer one, and the node pulls
+it before it goes back to sleep (§9).
 
 **Liveness.** This is the part that heals the channel. The radio's own send
 callback reports whether the frame was acknowledged at the MAC layer, which
@@ -127,15 +136,27 @@ wakes that are about to trigger a rescan anyway.
 
 ### And the rescan itself
 
-Three consecutive wakes with no reply, and the node does a passive scan for its
-access point, takes the channel it finds, stores it, and carries on.
+Three consecutive wakes with no reply (`link.rescan_fails`), and the node does a
+passive scan for its access point, takes the channel it finds, stores it, and
+carries on. If the access point is gone and the network the collector
+announced it is moving to (`link.next_ssid`, NODE_CONFIG.md §4) is on the air,
+the node switches to that one and keeps the old name as the fallback. If
+nothing moved and nobody answers, it runs the signed pairing sweep: a
+collector that was reflashed, or moved to a network the node was never told
+about, answers a DISCOVER from a node already in its table.
 
 Two bounds on that, in opposite directions:
 
-* **At most once an hour.** A collector that is simply switched off would
-  otherwise make the node scan every single minute, and a scan is 1.5–2 s of
-  radio — an order of magnitude more than a normal wake. The ceiling turns a
-  dead collector from a battery emergency into a rounding error.
+* **At most once an hour** (`link.rescan_min_s`). A collector that is simply
+  switched off would otherwise make the node scan every single minute, and a
+  scan is 1.5–2 s of radio — an order of magnitude more than a normal wake.
+  The ceiling turns a dead collector from a battery emergency into a rounding
+  error. With the sweep now also running when the access point is where it
+  always was, a switched-off collector costs a scan *and* a sweep an hour —
+  about 3.5 s of radio, ~2 mAh/day while it stays off, against ~1 before. That
+  is the price of a reflashed or moved collector being found at all; before,
+  a node whose access point stayed on the air never swept, and the recovery
+  this section promised for a reflashed collector did not happen.
 * **Immediately on the first eligible failure.** The ceiling is a rate limit,
   not a schedule. A channel move at 14:03 is recovered at the next wake, not at
   15:00. Losing an hour of readings to a router reboot would be the wrong trade.
@@ -153,9 +174,10 @@ BSSID under you while the SSID stays put.
 
 ## 3. Provisioning
 
-The shared key (LMK, 16 bytes) is set on both sides at build time, which is what
-removes the chicken-and-egg problem of exchanging a key over a link that needs
-the key:
+The shared key (LMK, 16 bytes) is set on both sides at build time — or, on the
+node, typed on its setup page (§9), which never sends it anywhere — which is
+what removes the chicken-and-egg problem of exchanging a key over a link that
+needs the key:
 
 ```
 -DFEATURE_ESPNOW_INGEST -DESPNOW_LMK='"16-byte-secret!!"'
@@ -241,6 +263,10 @@ Comparing either numerically would silence a node or mark every node offline.
 | `AckMsg`      | collector → node | 14 | echoed sequence, channel, epoch, interval |
 | `DiscoverMsg` | node → broadcast | 22 | MAC, nonce, truncated HMAC |
 | `WelcomeMsg`  | collector → broadcast | 65 | node id, channel, SSID, BSSID, interval, target, tag |
+| `DATA2`       | node → collector | 12 + per sample 3 + 6 × values | what this node now sends: (metric id, index, float) per value |
+| `CfgGetMsg`   | node → collector | 8 | "send me the config from offset N" |
+| `CfgChunkMsg` | both ways (`CFG`, `CFG_REPORT`) | 11 + ≤ 200 | one slice of the config document |
+| `CfgAckMsg`   | node → collector | 79 | applied, or rejected with field and reason |
 
 It is binary rather than JSON because ESP-NOW carries at most 250 bytes per
 frame and that is a MAC-layer limit, not a buffer. The JSON the ESP8266 node
@@ -251,9 +277,16 @@ fit at all.
 The saving is not the point. Fitting fifteen samples in one frame is the point:
 that is what lets a node that could not reach the collector keep its readings in
 RTC memory and send them as one burst when the link comes back, with `dt_s` on
-each sample giving it an honest timestamp. The node holds up to fourteen —
-one slot in the frame is always the live reading — and drops the **oldest**
-when that fills, because losing the start of an outage beats losing the end.
+each sample giving it an honest timestamp.
+
+With `DATA2` a sample is as wide as the config makes it — 27 bytes for a
+BME280 with battery, 57 for nine values — so the node keeps its backlog as a
+1 KB pool of variable-length samples (`node_espnow/src/Backlog.h`) rather than
+a fixed array: 35 BME280 readings, or 17 of the widest. A frame carries the
+oldest ones that fit (seven, for the BME280 node) beside the live reading,
+which is always last; the ACK removes exactly those, and a longer backlog
+drains over the next wakes. When the pool fills it drops the **oldest**,
+because losing the start of an outage beats losing the end.
 
 ### What the collector does with that burst
 
@@ -285,8 +318,10 @@ Latest values are drained **before** history, and that ordering is deliberate:
 history comes a few readings per tick, so ahead of the current value it would
 leave the dashboard showing nothing for minutes while a backlog cleared.
 
-The queue holds 64 readings — one node emptying a full buffer is fourteen
-samples of four metrics, or fifty-six. When it overflows it sheds the oldest
+The queue holds 64 readings — one node's full `DATA` burst was fourteen
+samples of four metrics, or fifty-six; a `DATA2` frame carries at most
+fourteen samples' worth of values too, since the frame, not the node's pool,
+is the unit that arrives at once. When it overflows it sheds the oldest
 and counts it in `EspNowIngestStats::historyCollapsed`, because a backlog that
 keeps overflowing is a tuning fact worth being able to see.
 
@@ -421,10 +456,21 @@ At that scale the cell's own self-discharge stops being negligible: around 2 %
 a month over fourteen months is roughly a quarter of the capacity. Expect
 **10–11 months** at one-minute intervals and about seven at thirty seconds.
 
+What the config document adds to that table: nothing on an ordinary wake. A
+`DATA2` frame for a BME280 with battery is 39 bytes against `DATA`'s 24 —
+microseconds of airtime at 1 Mbit/s. JSON is only ever touched on the wakes
+where a config moves (§9). The two costs that are new are both bounded and
+both conditional: a config fetch, about 0.001 mAh once per change, and the
+hourly scan-plus-sweep while a collector stays unreachable, ~2 mAh/day for as
+long as that lasts (§2).
+
 Every figure above is a calculation, not a measurement. Nothing here has been
 run on hardware yet.
 
 ## 8. What is left
+
+- `node_common/NodeSensors.h` is implemented, for now, by a BME280-only stand-in
+  (`node_espnow/src/sensors_stub.cpp`); the shared sensor layer replaces it.
 
 - The warning badge on the Kindle dashboard and in the web interface.
 - A pairing button, so a second node does not need the collector power-cycled.
@@ -432,3 +478,83 @@ run on hardware yet.
 - Signal strength: `EspNowNode::rssi` stays 0 on Arduino core 2.x, because IDF
   4.4 hands the receive callback no signal information. The core-3 branch that
   reads it is written and compiled only by the probe environment.
+
+## 9. Configuration over the radio, and what it costs
+
+The contract is [`NODE_CONFIG.md`](NODE_CONFIG.md) §5; this is the node's side
+of it, and the battery reasoning behind the shape.
+
+### Pulling a config: one extra round trip, only on change
+
+The collector cannot push: the node is asleep except for the milliseconds after
+its own report. So the ACK carries a flag, and a node that sees
+`EN_ACK_CFG_PENDING` stays awake a little longer, in the same wake:
+
+```
+DATA2 → ACK(cfg pending) → CFG_GET(0) → CFG[0..199] → CFG_GET(200) → … → CFG_ACK → sleep
+```
+
+A document is at most 1 KB, six 200-byte slices; a typical one is 500–850
+bytes, three to five. Answered from the collector's receive callback, a slice
+is a few milliseconds, so the whole exchange is tens of milliseconds of
+receive at ~85 mA — about **0.001 mAh, once, in the wake after somebody
+changed something**. There is no polling: the flag rides on an ACK the node
+was already waiting for, and costs nothing when it is clear.
+
+The node validates what it pulled with the same code the collector validated
+it with (`src/nodecfg/NodeConfigValidate.h`), saves it to NVS only if it
+passes, and answers with a `CFG_ACK` carrying `ok` or the refused field and
+reason. A refused config changes nothing on the node.
+
+Bounded in three ways, because the failure to design for is a collector that
+sets the flag and then does not answer (`node_espnow/src/CfgFetch.h`):
+
+| bound | value | why |
+|---|---|---|
+| per slice | max(`ack_window_ms`, 50 ms) | a slice is a bigger frame than an ACK; still a ceiling, left the moment the reply arrives |
+| per wake | 400 ms (`NODE_CFG_BUDGET_MS`), or two unanswered requests in a row | six slices with room for a lost one; at 85 mA a spent budget is ~0.009 mAh |
+| across wakes | after a failed attempt, skip the next 1, 3, 7 … 63 wakes' attempts | a collector that flags forever costs ~0.2 mAh/day instead of ~13 |
+
+A wake that runs out resumes from offset 0 next time: the desired config may
+have changed in between, and a node holding half of an old document is worth
+nothing. A rev it already refused is recognised on its first slice and not
+downloaded again — it repeats its refusal instead, in case the first
+`CFG_ACK` was lost. Everything that decides this is a pure state machine
+tested against a simulated collector in
+`tests/host/test_espnow_node_cfgfetch.cpp`.
+
+### Reporting a config
+
+The node sends its document as `CFG_REPORT` slices on the first wake after a
+boot (the collector then knows exactly what is running, including a custom
+probe name it needs to label `DATA2` values) and whenever it holds a local
+edit (`local: true`). Only in the second case does it wait, for the
+collector's "your local config is now rev N", and then clears `local`. A
+report that is not answered is retried with the same backoff, so an old
+collector that ignores the new frames does not cost a report every wake.
+
+### The setup page
+
+Holding BOOT after a reset (not through it: that is the C3's ROM download
+mode) opens a WPA2 access point, `esp-node-XXXX`, serving the shared node
+page from `src/nodecfg/NodePortalPage.h`. It is the one place the ESP-NOW key
+can be typed — it is stored on the node and never sent anywhere. The radio's
+ESP-NOW side is off while it runs; it closes itself after five minutes with
+nobody connected. A node that has never paired and has only the placeholder
+key opens it by itself at power-on, since it cannot do anything else. Its
+cost is irrelevant to the budget: it runs when a person is standing there.
+
+The power-on check waits two seconds for the button, and only on a power-on
+or a press of RESET — never on a wake from deep sleep, where two seconds would
+cost more than the wake itself.
+
+### Mains mode
+
+`sleep: false` turns the node into a mains-powered one: it stays awake and
+reports every `interval_s` from a delay loop, bringing the radio up for each
+report and down after it (nothing listens in between; the node still starts
+every conversation). The sensors keep running between reports, which is what
+an SDS011 (thirty seconds of fan before a reading means anything) and a pulse
+counter (it counts in an interrupt) need; the validator refuses both on a
+sleeping node. Awake, the C3 draws tens of milliamps: this is for a USB
+supply, not the 21700.
