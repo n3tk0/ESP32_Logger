@@ -47,6 +47,10 @@
 
 class RemoteIngest {
 public:
+    /// Writes the spinlock's unlocked state at run time. See the note on
+    /// `_mux` below: that is what keeps the global out of flash.
+    RemoteIngest() { portMUX_INITIALIZE(&_mux); }
+
     // A node posts one metric set per interval. Four nodes × eight metrics
     // covers the intended shape (a handful of BME280/BMP280 satellites)
     // without making the linear scan interesting. Slots are claimed
@@ -216,7 +220,13 @@ private:
     Hist  _h[MAX_HISTORY] = {};
     int   _hHead = 0;      ///< next to drain
     int   _hCount = 0;     ///< occupied slots
-    mutable portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;
+    // NOT `= portMUX_INITIALIZER_UNLOCKED`. The unlocked state is not zero
+    // (owner = 0xB33FFFFF), and one non-zero member makes the compiler emit
+    // the WHOLE global as initialised data: every array above, stored in the
+    // app image and copied to RAM at boot. The constructor writes it instead,
+    // so the object stays in .bss and costs no flash at all.
+    // tools/check_flash_trims.py fails the build if it drifts back.
+    mutable portMUX_TYPE _mux;
 };
 
 extern RemoteIngest remoteIngest;
