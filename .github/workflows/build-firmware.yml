@@ -286,11 +286,12 @@ jobs:
   # unnoticed -- including one caused by editing the BME280_Mini driver the
   # two firmwares share.
   #
-  # The sensor set is chosen at build time, so building only the default
-  # (BMx280) would check one of seven shapes.  The matrix walks the
-  # combinations that exercise a different code path: each driver at least
-  # once, both pulse modes, and the two selections that require disabling the
-  # default sensor.
+  # Every sensor driver is compiled into every build now (node_common/
+  # NodeSensors.cpp); the NODE_SENSOR_* toggles only seed the default sensor
+  # list on a blank filesystem (node/src/NodeStore.cpp).  The matrix walks the
+  # seeds that take a different #ifdef path there -- each type at least once,
+  # both pulse modes, the two that disable the default sensor -- and proves
+  # the compile-time budget warning still fires for a seed over 8 metrics.
   build-node:
     name: build (esp8266 node, ${{ matrix.name }})
     runs-on: ubuntu-latest

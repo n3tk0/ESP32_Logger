@@ -469,9 +469,6 @@ run on hardware yet.
 
 ## 8. What is left
 
-- `node_common/NodeSensors.h` is implemented, for now, by a BME280-only stand-in
-  (`node_espnow/src/sensors_stub.cpp`); the shared sensor layer replaces it.
-
 - The warning badge on the Kindle dashboard and in the web interface.
 - A pairing button, so a second node does not need the collector power-cycled.
 - Per-node keys instead of one shared key.

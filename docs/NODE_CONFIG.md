@@ -216,6 +216,10 @@ and replies with that `cfg` (rev only is enough: `{"cfg":{"rev":6}}` means
 The node's JSON parse buffer for the reply must hold a full config: budget
 2 KB.
 
+A cycle with nothing queued still POSTs, with `"readings": []`, so config
+keeps flowing to a node whose sensors all fail; the collector accepts an
+empty array (only a missing one is a 400).
+
 ### 3.1 Collector discovery (UDP, port 47810)
 
 When the configured `host` does not answer (3 consecutive failed POSTs) or
@@ -283,7 +287,7 @@ bytes after the name's first NUL is refused; a reply with port 0 is refused.
 7. **Rollback** (WiFi node): after applying a config that changed `net.ssid`,
    `net.pass`, `net.host`, `net.port` or `net.token`, if no POST succeeds in
    5 cycles (and discovery finds nothing), restore `/config.prev.json`,
-   restart, and report `cfg_error {"reason":"rolled back: no collector on new settings"}`.
+   restart, and report `cfg_error {"rev":<the rev rolled back from>,"field":"net","reason":"rolled back: no collector on new settings"}`.
 
 ## 5. ESP-NOW node ⇄ collector (radio)
 
