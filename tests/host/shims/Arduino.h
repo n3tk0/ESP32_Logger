@@ -150,6 +150,7 @@ extern HostSerial Serial;   // defined by the test TU that needs it
 // ----------------------------------------------------------------------------
 typedef int portMUX_TYPE;
 #define portMUX_INITIALIZER_UNLOCKED 0
+#define portMUX_INITIALIZE(mux) (*(mux) = 0)
 #define taskENTER_CRITICAL(mux)      ((void)(mux))
 #define taskEXIT_CRITICAL(mux)       ((void)(mux))
 #define taskENTER_CRITICAL_ISR(mux)  ((void)(mux))

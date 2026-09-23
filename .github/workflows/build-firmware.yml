@@ -27,6 +27,7 @@ on:
       - 'platformio.ini'
       - 'boards/**'
       - 'partitions_balanced.csv'
+      - 'tools/check_flash_trims.py'
       - 'node/**'
       - 'node_espnow/**'
       - '.github/workflows/build-firmware.yml'
@@ -39,6 +40,7 @@ on:
       - 'platformio.ini'
       - 'boards/**'
       - 'partitions_balanced.csv'
+      - 'tools/check_flash_trims.py'
       - 'node/**'
       - 'node_espnow/**'
   workflow_dispatch:
@@ -91,6 +93,11 @@ jobs:
 
       - name: Build firmware (${{ matrix.name }})
         run: pio run -e ${{ matrix.env }}
+
+      # Reads the linked ELF: the big globals must be .bss, and the IDF trims
+      # an env opts into must still be keeping their archive members out.
+      - name: Check the flash trims still hold
+        run: python3 tools/check_flash_trims.py --env ${{ matrix.env }}
 
       - name: Collect binary and report size
         run: |
@@ -211,6 +218,12 @@ jobs:
 
       - name: Rebuild at the default width for the size report
         run: pio run -e xiao_esp32c3
+
+      # The same check as the matrix, on the image that needs it most: the
+      # optional features link more, and more is what could pull the
+      # replaced mbedTLS and core dump members back in.
+      - name: Check the flash trims still hold
+        run: python3 tools/check_flash_trims.py --env xiao_esp32c3
 
       - name: Report size
         run: |

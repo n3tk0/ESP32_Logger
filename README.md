@@ -172,8 +172,8 @@ Current, `xiao_esp32c3`, `firmware.bin`:
 
 | build | image | free of 1,507,328 |
 |---|---:|---:|
-| default `src/setup.h` | 1,333,408 | 173,920 (88 %) |
-| every optional feature on | 1,397,392 | 109,936 (92 %) |
+| default `src/setup.h` | 1,303,744 | 203,584 (86 %) |
+| every optional feature on | 1,469,264 | 38,064 (97.5 %) |
 
 Levers, all measured as `firmware.bin` deltas on `xiao_esp32c3`:
 
@@ -183,6 +183,13 @@ Levers, all measured as `firmware.bin` deltas on `xiao_esp32c3`:
 | `FEATURE_SD_STORAGE` off (`src/setup.h`) | **−34,576** — drops `<SD.h>`, the FatFs library and the SD driver |
 | failsafe recovery page, stored gzipped (on) | **−18,348** — 27,622 B of PROGMEM text became 8,239 B of gzip plus a 1,035 B plain fallback |
 | route handlers as named functions rather than lambdas (done) | **−1,504** — one `std::function` instantiation instead of 47 |
+| mbedTLS error sentences replaced by the bare code (`LOGGER_TERSE_TLS_ERRORS`, C3 envs) | **−15,584** — see `src/core/IdfTrims.c` |
+| core dump writer dropped, there is no `coredump` partition (`LOGGER_NO_COREDUMP`, C3 envs) | **−11,888** — same file |
+| `remoteIngest`, `trendRing`, `readingCache` kept in `.bss` (spinlock set in the constructor) | **−10,464** with every feature on — a non-zero member initialiser had put each whole object into the image |
+
+The last three are measured with every optional feature on, and
+`tools/check_flash_trims.py` reads the linked ELF in CI so none of them can
+quietly come undone.
 
 The last one is listed for honesty rather than for its size: the estimate before
 it was made was −11 KB, from summing `_Function_handler` symbol sizes in the

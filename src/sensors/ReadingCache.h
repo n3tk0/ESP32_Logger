@@ -41,6 +41,10 @@
 
 class ReadingCache {
 public:
+    /// Writes the spinlock's unlocked state at run time. See the note on
+    /// `_mux` below: that is what keeps the global out of flash.
+    ReadingCache() { portMUX_INITIALIZE(&_mux); }
+
     // MAX_SENSORS (16) × a few metrics each would overflow any reasonable
     // table, so this caps at the number of DISTINCT series worth tracking.
     // Entries are claimed first-come; once full, put() only updates series
@@ -81,7 +85,13 @@ private:
     };
 
     Entry _entries[MAX_ENTRIES];
-    mutable portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;
+    // NOT `= portMUX_INITIALIZER_UNLOCKED`. The unlocked state is not zero
+    // (owner = 0xB33FFFFF), and one non-zero member makes the compiler emit
+    // the WHOLE global as initialised data: every array above, stored in the
+    // app image and copied to RAM at boot. The constructor writes it instead,
+    // so the object stays in .bss and costs no flash at all.
+    // tools/check_flash_trims.py fails the build if it drifts back.
+    mutable portMUX_TYPE _mux;
 };
 
 // Global singleton — defined in ReadingCache.cpp

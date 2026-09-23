@@ -58,6 +58,10 @@
 
 class TrendRing {
 public:
+    /// Writes the spinlock's unlocked state at run time. See the note on
+    /// `_mux` below: that is what keeps the global out of flash.
+    TrendRing() { portMUX_INITIALIZE(&_mux); }
+
     static constexpr int HOURS      = 24;
     static constexpr int MAX_SERIES = 4;
 
@@ -153,7 +157,13 @@ private:
 
     Series _s[MAX_SERIES] = {};
     bool   _dirty = false;      ///< an hour was completed; see dirty()
-    mutable portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;
+    // NOT `= portMUX_INITIALIZER_UNLOCKED`. The unlocked state is not zero
+    // (owner = 0xB33FFFFF), and one non-zero member makes the compiler emit
+    // the WHOLE global as initialised data: every array above, stored in the
+    // app image and copied to RAM at boot. The constructor writes it instead,
+    // so the object stays in .bss and costs no flash at all.
+    // tools/check_flash_trims.py fails the build if it drifts back.
+    mutable portMUX_TYPE _mux;
 };
 
 extern TrendRing trendRing;
