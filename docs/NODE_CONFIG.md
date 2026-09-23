@@ -247,7 +247,17 @@ bytes after the name's first NUL is refused; a reply with port 0 is refused.
 
 1. The collector's network page saves a new SSID/pass (after its existing
    `/api/modules/wifi/test`). Instead of switching immediately, it calls
-   `POST /api/nodes/handover {"action":"start","ssid":…,"pass":…}`.
+   `POST /api/nodes/handover {"action":"start","ssid":…,"pass":…,"form":{…}}`.
+   `form` is optional: every field of the `/save_network` form, keyed by its
+   form name (`wifiMode`, `clientSSID`, `clientPassword`, `useStaticIP`,
+   `staticIP`, `gateway`, `subnet`, `dns`, `apSSID`, …), all strings, exactly
+   as that form would post them (an unchecked checkbox is absent). When the
+   collector switches (step 4) it applies `form` the way `/save_network`
+   would; without it, it changes only `clientSSID`/`clientPassword`. It
+   exists so a static address meant for the new network is not lost. The page
+   only takes this path for a NEW client SSID while at least one node exists;
+   otherwise it posts `/save_network` as before. A 404 from this endpoint also
+   makes it fall back to `/save_network`.
 2. The collector bumps `desired.rev` of every node: WiFi nodes get
    `net.next = {ssid, pass}`, ESP-NOW nodes get `link.next_ssid`.
 3. `GET /api/nodes/handover` →
@@ -425,12 +435,27 @@ All POSTs need the CSRF token like every other settings POST.
 | GET | `/api/nodes/config?key=w:balcony` (or `e:3`) | `{"key","transport","desired":{…secrets blanked…},"reported":{…}|null,"applied_rev","status","error","caps"}` — `caps` as §6 for the node's `hw`, from the reported config (defaults to the transport's hw) |
 | POST | `/api/nodes/config` | `{"key":"w:balcony","config":{…partial §1…}}` → validates with the shared validator → `{"ok":true,"rev":5}` or 400 `{"ok":false,"field","reason"}` |
 | GET | `/api/nodes/handover` | §4 step 3 |
-| POST | `/api/nodes/handover` | `{"action":"start","ssid","pass"}` / `{"action":"switch"}` / `{"action":"cancel"}` |
+| POST | `/api/nodes/handover` | `{"action":"start","ssid","pass","form"?}` (§4.1) / `{"action":"switch"}` / `{"action":"cancel"}` → `{"ok":true}`, or 4xx `{"ok":false,"reason"}` |
 
 `GET /api/espnow/status` and `GET /api/remote/status` each gain, per node,
-`"cfg": {"key","rev","applied_rev","status"}` so the list can show the badge
-without one request per row.
+`"cfg": {"key","rev","applied_rev","status","error"?}` so the list can show the badge
+without one request per row. `error` (`{"field","reason"}`, as in the
+config GET) is present only when `status == "rejected"`, so the badge can say
+why. A node the collector holds no config file for has no `cfg`.
+
+Field paths in a 400 `field` (and in `cfg_error`/`error`) are dotted, with
+list indices in brackets: `name`, `interval_s`, `i2c.sda`, `sensors[1].pin`,
+`net.port`, `link.ack_window_ms`, `batt.pin`. `sensors` alone means the list
+as a whole (too many entries, over the metric budget). The page puts the
+reason beside the field the path names, and at the top of the panel when it
+names none.
+
+The Nodes page no longer calls `/api/espnow/node`: an ESP-NOW node's `name`
+and `interval_s` saved through `/api/nodes/config` must also update the label
+and interval that `/api/espnow/status` reports (and the interval the ACK
+carries). `GET /api/nodes/handover` answers `active:false` once finished.
 
 A WiFi node the collector has never seen a `cfg` report from still appears
-(from `/api/remote/status`); its panel says "waiting for the node to report
+(from `/api/remote/status`); its config GET answers `"reported": null`
+(`desired` may be null too), its panel says "waiting for the node to report
 its settings" and editing is disabled until it does.
