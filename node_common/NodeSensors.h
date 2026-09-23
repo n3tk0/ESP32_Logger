@@ -59,6 +59,17 @@ bool nodeSensorsReady();
 /// when altitude_m == 0. Returns how many were written (<= maxOut).
 int nodeSensorsRead(const nodecfg::NodeConfig& cfg, NodeReading* out, int maxOut);
 
+/// How nodeSensorsRead() spends a DS18B20 conversion (up to 760 ms at 12
+/// bits). nullptr, the default, is delay() — right for the WiFi node, whose
+/// radio stays associated, and for any node with an interrupt or a serial
+/// sensor running. The ESP-NOW node in battery mode passes a light sleep
+/// instead: the probe converts on its own supply, so the CPU need not be
+/// awake for it (docs/ESPNOW_NODE.md §9, "A DS18B20").
+///
+/// The hook is called with the whole conversion time and must not return
+/// before at least that much has passed.
+void nodeSensorsSetWait(void (*wait)(uint32_t ms));
+
 /// Short human description for the boot log and /api/status,
 /// e.g. "bmx280@0x76 ok, ds18b20x2@GPIO12 ok, pulse@GPIO4 rain".
 const char* nodeSensorsDescribe();

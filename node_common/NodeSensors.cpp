@@ -138,6 +138,9 @@ bool       s_haveSetup = false;
 nodecfg::Hw s_hw       = nodecfg::Hw::Esp8266;
 uint8_t    s_board     = 0;
 
+// How a DS18B20 conversion is waited out (nodeSensorsSetWait); null = delay().
+void (*s_waitConv)(uint32_t ms) = nullptr;
+
 // I2C: one bus shared by every I2C entry.
 bool    s_wireUp  = false;
 uint8_t s_wireSda = 0xFF;
@@ -586,6 +589,8 @@ bool nodeSensorsReady() {
 
 const char* nodeSensorsDescribe() { return s_describe[0] ? s_describe : "none"; }
 
+void nodeSensorsSetWait(void (*wait)(uint32_t ms)) { s_waitConv = wait; }
+
 // ---------------------------------------------------------------------------
 // Read
 // ---------------------------------------------------------------------------
@@ -706,7 +711,8 @@ int nodeSensorsRead(const NodeConfig& cfg, NodeReading* out, int maxOut) {
     // driver's requestTemperatures() does not wait, and reading straight after
     // it returns the PREVIOUS conversion — 85 °C, the power-on value, on the
     // first cycle after boot. The collector's DS18B20 plugin waits; so does
-    // this.
+    // this — through the node's hook when it has one (NodeSensors.h: the
+    // ESP-NOW node light-sleeps it on a battery), else with delay().
     uint32_t convMs = 0;
     for (uint8_t i = 0; i < k; i++) {
         EntryState& e = s_entry[i];
@@ -715,7 +721,10 @@ int nodeSensorsRead(const NodeConfig& cfg, NodeReading* out, int maxOut) {
         e.ds->requestTemperatures();
         if (e.ds->conversionTimeMs() > convMs) convMs = e.ds->conversionTimeMs();
     }
-    if (convMs) delay(convMs);
+    if (convMs) {
+        if (s_waitConv) s_waitConv(convMs);
+        else            delay(convMs);
+    }
 
     int n = 0;
     uint8_t si = 0;

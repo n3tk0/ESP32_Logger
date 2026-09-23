@@ -191,7 +191,16 @@ class Node:
             t = s.get("type")
             if t not in caps["sensor_types"]:
                 return "sensors[%d].type" % i, "unknown sensor type"
-            total += s.get("count", 1) if t == "ds18b20" else METRICS[t]
+            if t == "ds18b20":
+                # The node refuses a count that is not a whole number of probes
+                # (NodeConfigValidate.h); a string or null must be a 400 here
+                # too, not a TypeError that drops the connection unanswered.
+                k = s.get("count", 1)
+                if isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= 8:
+                    return "sensors[%d].count" % i, "must be 1..8 probes"
+                total += k
+            else:
+                total += METRICS[t]
             if self.transport == "espnow" and c.get("sleep") and t in ("sds011", "pulse"):
                 return "sensors[%d].type" % i, "%s needs the node awake (sleep is on)" % t
             for k in PIN_KEYS.get(t, []):

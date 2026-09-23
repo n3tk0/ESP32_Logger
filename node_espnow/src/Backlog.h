@@ -61,6 +61,12 @@ static_assert(NODE_BACKLOG_BYTES >= 5 + 6 * EN_DATA2_MAX_VALUES,
               "the backlog must hold at least one widest sample");
 static_assert(NODE_BACKLOG_BYTES <= 0xFFFF, "used is a u16");
 
+// entryLen() and valid() below spell a value as 6 bytes, and push() copies
+// n × sizeof(Data2Value): the two must agree or a push writes past its entry.
+// EspNowProto.h asserts the wire size too; this keeps the pool's own
+// arithmetic honest if that header's struct ever changes.
+static_assert(sizeof(Data2Value) == 6, "a pool value is metric u8 + index u8 + f32, packed");
+
 /// Bytes one entry of `n` values occupies in the pool.
 static inline uint16_t entryLen(uint8_t n) { return (uint16_t)(5 + 6u * n); }
 

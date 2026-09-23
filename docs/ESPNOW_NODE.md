@@ -545,6 +545,39 @@ The power-on check waits two seconds for the button, and only on a power-on
 or a press of RESET — never on a wake from deep sleep, where two seconds would
 cost more than the wake itself.
 
+### A DS18B20
+
+The one sensor whose reading costs time on every wake. At 12 bits the probe
+needs up to 750 ms to convert, and it must be waited for: reading straight
+after the convert command returns the previous conversion, which after a
+power-on is 85 °C. Waited out in `delay()`, that is ~0.76 s at the C3's
+radio-off idle, ~20 mA:
+
+| | per wake | per day, one minute | per day, thirty seconds |
+|---|---|---|---|
+| `delay()` at ~20 mA | 0.0042 mAh | ~6.1 mAh | ~12.2 mAh |
+| light sleep at ~0.2 mA (what the node does) | 0.00004 mAh | ~0.06 mAh | ~0.12 mAh |
+| the probe's own conversion, ~1–1.5 mA | 0.0003 mAh | ~0.3–0.45 mAh | ~0.6–0.9 mAh |
+
+Against §7's ~10 mAh a day, `delay()` would have taken a one-minute node from
+about 430 days to about 270; light sleep adds under a percent. The probe's
+own current, 3–5 %, is paid whichever way it is waited for. So in battery mode the wait is a light sleep (`waitConversion()` in
+`main.cpp`, reached through `nodeSensorsSetWait()`): the probe converts from
+its own 3V3 supply, the bus idles high on its pull-up, and the radio is not up
+yet (`collectLive()` runs before `linkBegin()`). The wake-up is padded by 1/32
+so the RTC clock's error cannot read the probe mid-conversion. Mains mode and
+the bench build keep `delay()` — a pulse interrupt, an SDS011's UART and a USB
+console do not run in light sleep — and so does the WiFi node, which shares
+the sensor layer and keeps its radio associated.
+
+Two other ways were weighed. A lower resolution on this node halves the time
+per bit dropped, but 10 bits is 0.25 °C steps for still ~1.5 mAh a day. And
+starting the conversion before deep sleep costs nothing awake, but sends a
+temperature one interval old stamped as now, and has nothing to send on the
+first wake after a power-on. Light sleep keeps the 12-bit reading, taken this
+wake, for almost all of the saving. Like everything in §7, these are
+datasheet figures, not measurements.
+
 ### Mains mode
 
 `sleep: false` turns the node into a mains-powered one: it stays awake and
