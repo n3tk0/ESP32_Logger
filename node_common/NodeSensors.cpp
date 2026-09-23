@@ -141,6 +141,27 @@ uint8_t    s_board     = 0;
 // How a DS18B20 conversion is waited out (nodeSensorsSetWait); null = delay().
 void (*s_waitConv)(uint32_t ms) = nullptr;
 
+/// Wait for a sensor to finish measuring: the node's hook, else delay().
+void waitMeasure(uint32_t ms) {
+    if (s_waitConv) s_waitConv(ms);
+    else            delay(ms);
+}
+
+/// One command byte to a BH1750. True when it ACKed.
+bool bh1750Cmd(uint8_t addr, uint8_t cmd) {
+    Wire.beginTransmission(addr);
+    Wire.write(cmd);
+    return Wire.endTransmission() == 0;
+}
+
+/// One measurement per read (see BH1750_CMD_ONCE_HRES) on a node that deep
+/// sleeps between reads. A switch between sleep and mains always passes
+/// through a restart or a deep sleep on the ESP-NOW node (main.cpp), so
+/// begin() and read always agree on the mode.
+bool bh1750OneShot(const NodeConfig& cfg) {
+    return cfg.transport == nodecfg::Transport::EspNow && cfg.sleep;
+}
+
 // I2C: one bus shared by every I2C entry.
 bool    s_wireUp  = false;
 uint8_t s_wireSda = 0xFF;
@@ -151,11 +172,30 @@ uint8_t s_wireScl = 0xFF;
 BME280_Mini s_bmx;
 BME688_Mini s_bme688;
 
-// BH1750: continuous high-resolution mode; 1.2 counts per lux, per the
-// datasheet and matching the collector's BH1750 plugin so the two agree.
-const uint8_t BH1750_CMD_POWER_ON  = 0x01;
-const uint8_t BH1750_CMD_CONT_HRES = 0x10;
-const float   BH1750_DIVIDER       = 1.2f;
+// BH1750 (ROHM BH1750FVI datasheet): high-resolution mode, 1 lx steps,
+// 1.2 counts per lux at the default MTreg — matching the collector's BH1750
+// plugin so the two agree. An H-resolution measurement takes 120 ms typical,
+// 180 ms at most.
+//
+// Two ways to run it, chosen by bh1750OneShot():
+//  * continuous (0x10), the collector's way: it measures for ever, so any
+//    read returns a reading at most one measurement old. Right for a node
+//    that stays awake, and what the WiFi node always did.
+//  * one-time (0x20) on a sleeping ESP-NOW node: every nodeSensorsRead()
+//    powers it on and starts ONE measurement, waited out together with any
+//    DS18B20 conversion, after which the part powers itself down (0.01 uA
+//    typical). Continuous mode would keep measuring at ~120 uA typical
+//    (190 max) through every deep sleep — more than the whole board's
+//    ~44 uA — and cost a 200 ms wait in begin() on every wake besides.
+const uint8_t  BH1750_CMD_POWER_DOWN = 0x00;
+const uint8_t  BH1750_CMD_POWER_ON   = 0x01;
+const uint8_t  BH1750_CMD_CONT_HRES  = 0x10;
+const uint8_t  BH1750_CMD_ONCE_HRES  = 0x20;
+const uint32_t BH1750_HRES_MAX_MS    = 180;   // datasheet maximum
+const float    BH1750_DIVIDER        = 1.2f;
+/// One-shot: nodeSensorsRead() started a measurement and waited it out. One
+/// flag, not one per entry: the validator allows a single bh1750 entry.
+bool s_bhFresh = false;
 
 // SDS011
 #if defined(ESP8266)
@@ -328,10 +368,16 @@ static void releaseAll() {
     s_sdsPos  = 0;
     s_pulses  = 0;
     s_pulseTotal = 0.0f;
+    s_bhFresh   = false;
     s_haveSetup = false;
 }
 
 void nodeSensorsEnd() {
+    // A BH1750 left in continuous mode measures through a deep sleep at
+    // ~120 uA; one-shot ones are already down, and a second 0x00 is harmless.
+    for (uint8_t i = 0; i < MAX_SENSORS; i++)
+        if (s_wireUp && s_entry[i].ok && s_entry[i].type == SensorType::Bh1750)
+            bh1750Cmd(s_entry[i].addr, BH1750_CMD_POWER_DOWN);
     releaseAll();
 #if !defined(ESP8266)
     if (s_wireUp) Wire.end();
@@ -420,16 +466,23 @@ static bool beginBh1750(EntryState& e, const SensorCfg& s, const NodeConfig& cfg
     // other, for the same reason as the BMx280.
     uint8_t cand[2];
     addrCandidates(s.addr, 0x23, 0x5C, cand);
+    const bool once = bh1750OneShot(cfg);
     for (uint8_t i = 0; i < 2; i++) {
-        Wire.beginTransmission(cand[i]);
-        Wire.write(BH1750_CMD_POWER_ON);
-        if (Wire.endTransmission() != 0) continue;
-        Wire.beginTransmission(cand[i]);
-        Wire.write(BH1750_CMD_CONT_HRES);
-        if (Wire.endTransmission() != 0) continue;
-        e.addr = cand[i];
-        delay(200);   // the first continuous conversion takes up to 180 ms
-        NS_LOG("[sensor] BH1750 at 0x%02X\n", cand[i]);
+        if (once) {
+            // Presence only, and the state it should sleep in: the read
+            // powers it on and measures. No wait here at all.
+            if (!bh1750Cmd(cand[i], BH1750_CMD_POWER_DOWN)) continue;
+        } else {
+            if (!bh1750Cmd(cand[i], BH1750_CMD_POWER_ON)) continue;
+            if (!bh1750Cmd(cand[i], BH1750_CMD_CONT_HRES)) continue;
+            // The first continuous measurement: until it completes the data
+            // register holds nothing worth reading.
+            waitMeasure(BH1750_HRES_MAX_MS + 20);
+        }
+        e.addr    = cand[i];
+        s_bhFresh = false;
+        if (once) NS_LOG("[sensor] BH1750 at 0x%02X, one-shot\n", cand[i]);
+        else      NS_LOG("[sensor] BH1750 at 0x%02X, continuous\n", cand[i]);
         return true;
     }
     char sda[20], scl[20];
@@ -618,7 +671,8 @@ static void drainSds() {
 
 /// One entry's values, in the order sensorTypeMetricIds() lists them (for a
 /// ds18b20, probe by probe). NAN for anything it could not produce.
-static uint8_t readEntry(uint8_t si, const SensorCfg& s, float altitude, float* v, uint8_t cap) {
+static uint8_t readEntry(uint8_t si, const SensorCfg& s, float altitude, bool bhOnce, float* v,
+                         uint8_t cap) {
     EntryState& e = s_entry[si];
     for (uint8_t i = 0; i < cap; i++) v[i] = NAN;
     switch (s.type) {
@@ -644,6 +698,13 @@ static uint8_t readEntry(uint8_t si, const SensorCfg& s, float altitude, float* 
             return 5;
         }
         case SensorType::Bh1750: {
+            // One-shot: only a measurement nodeSensorsRead() started (and
+            // waited out) this time. Otherwise the register holds the last
+            // wake's value, or nothing after a power-on.
+            if (bhOnce) {
+                if (!s_bhFresh) return 1;
+                s_bhFresh = false;
+            }
             Wire.requestFrom((uint8_t)e.addr, (uint8_t)2);
             if (Wire.available() >= 2) {
                 // Two separate statements on purpose: `(read() << 8) | read()`
@@ -713,18 +774,25 @@ int nodeSensorsRead(const NodeConfig& cfg, NodeReading* out, int maxOut) {
     // first cycle after boot. The collector's DS18B20 plugin waits; so does
     // this — through the node's hook when it has one (NodeSensors.h: the
     // ESP-NOW node light-sleeps it on a battery), else with delay().
+    //
+    // A one-shot BH1750 (see BH1750_CMD_ONCE_HRES) is started here too, so a
+    // node with both waits once, for the longer of the two.
     uint32_t convMs = 0;
+    const bool bhOnce = bh1750OneShot(cfg);
     for (uint8_t i = 0; i < k; i++) {
         EntryState& e = s_entry[i];
-        if (e.type != SensorType::Ds18b20 || cfg.sensors[i].type != SensorType::Ds18b20) continue;
-        if (!e.ok || !e.ds || e.found == 0) continue;
-        e.ds->requestTemperatures();
-        if (e.ds->conversionTimeMs() > convMs) convMs = e.ds->conversionTimeMs();
+        if (e.type != cfg.sensors[i].type || !e.ok) continue;
+        if (e.type == SensorType::Ds18b20) {
+            if (!e.ds || e.found == 0) continue;
+            e.ds->requestTemperatures();
+            if (e.ds->conversionTimeMs() > convMs) convMs = e.ds->conversionTimeMs();
+        } else if (e.type == SensorType::Bh1750 && bhOnce) {
+            s_bhFresh = bh1750Cmd(e.addr, BH1750_CMD_POWER_ON) &&
+                        bh1750Cmd(e.addr, BH1750_CMD_ONCE_HRES);
+            if (s_bhFresh && BH1750_HRES_MAX_MS > convMs) convMs = BH1750_HRES_MAX_MS;
+        }
     }
-    if (convMs) {
-        if (s_waitConv) s_waitConv(convMs);
-        else            delay(convMs);
-    }
+    if (convMs) waitMeasure(convMs);
 
     int n = 0;
     uint8_t si = 0;
@@ -738,7 +806,8 @@ int nodeSensorsRead(const NodeConfig& cfg, NodeReading* out, int maxOut) {
 
         float v[nodecfg::DS_MAX_COUNT];
         uint8_t nv = 0;
-        if (live) nv = readEntry(si, s, cfg.altitude_m, v, (uint8_t)(sizeof(v) / sizeof(v[0])));
+        if (live)
+            nv = readEntry(si, s, cfg.altitude_m, bhOnce, v, (uint8_t)(sizeof(v) / sizeof(v[0])));
 
         // The slots of this entry, in order: the k-th of them is v[k].
         uint8_t j = 0;

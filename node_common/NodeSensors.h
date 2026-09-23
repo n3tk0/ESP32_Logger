@@ -59,12 +59,15 @@ bool nodeSensorsReady();
 /// when altitude_m == 0. Returns how many were written (<= maxOut).
 int nodeSensorsRead(const nodecfg::NodeConfig& cfg, NodeReading* out, int maxOut);
 
-/// How nodeSensorsRead() spends a DS18B20 conversion (up to 760 ms at 12
-/// bits). nullptr, the default, is delay() — right for the WiFi node, whose
+/// How the sensor layer waits for a sensor to finish measuring: a DS18B20
+/// conversion (up to 760 ms at 12 bits) and a one-shot BH1750 measurement
+/// (180 ms), started together in nodeSensorsRead() and waited out once, and
+/// a continuous BH1750's first measurement in nodeSensorsBegin(). nullptr,
+/// the default, is delay() — right for the WiFi node, whose
 /// radio stays associated, and for any node with an interrupt or a serial
 /// sensor running. The ESP-NOW node in battery mode passes a light sleep
-/// instead: the probe converts on its own supply, so the CPU need not be
-/// awake for it (docs/ESPNOW_NODE.md §9, "A DS18B20").
+/// instead: the sensors measure on their own supply, so the CPU need not be
+/// awake for it (docs/ESPNOW_NODE.md §9, "A DS18B20", "A BH1750").
 ///
 /// The hook is called with the whole conversion time and must not return
 /// before at least that much has passed.
