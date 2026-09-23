@@ -26,6 +26,13 @@ document wins and the code is the bug.
 5. **Secrets are write-only.** WiFi passphrase, ingest token and basic-auth
    password are never returned by any GET. A GET returns `""` plus a
    `<field>_set: true|false`; a POST with `""` means "keep the stored one".
+   `""` together with `"<field>_set": false` means "clear it" — the only way
+   to remove an optional secret (basic-auth password, the passphrase of a
+   network that became open); it is also exactly what echoing a GET back
+   sends for a secret that was never set, so an unedited echo changes nothing.
+   A document written *with* secrets carries the `_set` flags too, so the
+   collector sending `"basic_pass": "", "basic_pass_set": false` means "none",
+   not "keep yours".
    The collector does send secrets *to the WiFi node* in the ingest reply
    (see §3) — that is the one place they travel.
 6. **The ESP-NOW key (LMK) never travels over the radio.** It can be typed on
@@ -71,16 +78,46 @@ document wins and the code is the bug.
 Unknown keys are ignored on read (forward compatibility). Missing keys keep
 the node's current value (a partial document is a valid edit).
 
+Decoding details (`src/nodecfg/NodeConfigJson.h`, shared by every side):
+
+- `sensors`, when present, **replaces** the whole list. An entry that keeps its
+  position and its `type` keeps the fields it does not mention; any other
+  entry starts from that type's defaults for the chip. Changing a pulse
+  entry's `mode` also resets `per_pulse` and `debounce_us` to that mode's
+  defaults unless the document gives them.
+- A value of the wrong type, or outside its field's storage range (a pin of
+  262, an `interval_s` of 70000, a 17-character `name`), is an error with the
+  same `{field, reason}` shape as a validation error — never wrapped or
+  truncated. Decoding is all-or-nothing.
+- `net` is read only on a WiFi node and `link`/`batt` only on an ESP-NOW
+  node; sent to the other kind they are ignored like unknown keys. `sleep` is
+  written only for an ESP-NOW node.
+- `rev`/`local` are read only when the receiver asks for them (a node applying
+  the collector's config, the collector reading a report), and
+  `transport`/`hw`/`fw` only by the collector reading a report — never from a
+  page POST.
+- ESP-NOW node page only: `"lmk": ""` + `"lmk_set"` on GET; POST `lmk` with
+  exactly 16 characters sets the key, `""` keeps it, `""` + `"lmk_set": false`
+  returns to the compiled key. Never on the radio, never at the collector.
+
 ### 1.1 Sensors
 
 | `type` | Fields | Metrics (name, unit) | Count | Sleep-safe |
 |---|---|---|---|---|
 | `bmx280` | `addr` (0x76/0x77, 0 = probe both) | temperature C, humidity %, pressure hPa, pressure_sea hPa | 4 | yes |
-| `bme688` | `addr` | the above + gas_resistance kOhm | 5 | yes |
+| `bme688` | `addr` | the above + gas_resistance Ohm | 5 | yes |
 | `ds18b20` | `pin`, `count` (1–8), `metric` (≤10 chars, default `probe_temp`) | probe_temp, probe_temp_1, … C | count | yes |
 | `bh1750` | `addr` (0x23/0x5C) | lux lx | 1 | yes |
 | `sds011` | `rx`, `tx` | pm25, pm10 ug/m3 | 2 | **no** |
 | `pulse` | `pin`, `mode` (`rain`/`flow`), `per_pulse`, `debounce_us` | rain_rate mm/h + rain_total mm, or flow_rate L/min + flow_total L | 2 | **no** |
+
+Units are the ones the collector's own sensor plugins and the WiFi node
+already publish (gas_resistance is `Ohm`, as `BME688Sensor` and node/ report
+it — not kOhm), so a remote reading is indistinguishable from a wired one.
+
+A ds18b20 entry's probe N publishes `<metric>` for N = 0 and `<metric>_N`
+after that. With two ds18b20 entries every resulting name must still be
+unique (see §1.2), so give each bus its own `metric`.
 
 `pressure_sea` is only published when `altitude_m != 0` but is always counted
 in the budget. The ESP-NOW node additionally always publishes
@@ -102,9 +139,42 @@ Rejected, with a machine-readable `field` and a human `reason`:
 - `interval_s` outside 10..65535; `name` empty/too long/bad characters;
 - `ds18b20.metric` longer than 10 chars.
 
+Also rejected — rules the list above implied but did not spell out, added
+when the validator was written:
+
+- two metrics with the same name anywhere in the config (two ds18b20 entries
+  both called `probe_temp`, a ds18b20 `metric` of `humidity` beside a bmx280,
+  a bus called `pool_1` beside a two-probe bus called `pool`) — the collector
+  keys readings by (node, metric), so the second would silently overwrite the
+  first;
+- `pulse.pin == 16` on ESP8266 (no interrupt, same as `sds011.rx`);
+- a pin that is not on the chip (ESP8266 > 16, ESP32-C3 > 21);
+- ESP-NOW: `batt.pin` counts as a used pin, and must be ADC1 (GPIO 0–4; ADC2
+  belongs to the radio);
+- field values: bmx280/bme688 `addr` 0x76/0x77/0, bh1750 `addr` 0x23/0x5C,
+  ds18b20 `count` 1–8 and `metric` of `[a-z0-9_]` starting with a letter,
+  pulse `per_pulse > 0` and `debounce_us` ≤ 1 000 000, `board` a known board
+  of the chip, `altitude_m` −500..9000;
+- ESP-NOW: `batt.divider` 1..20, `batt.trim` 0.5..1.5, `link.ack_window_ms`
+  5..1000, `link.rescan_fails` ≥ 1;
+- WiFi: `net.ssid` and `net.host` required, `net.port` ≥ 1, `net.pass` and
+  `net.next.pass` empty (open network) or at least 8 characters;
+- `lmk` (ESP-NOW page) empty or exactly 16 characters.
+
+The first failing rule is reported, in a fixed order (identity, sensors,
+metrics, pins, transport sections). `field` is at most 23 characters and
+`reason` at most 47, so both fit a CFG_ACK unchanged. Field paths used:
+`name`, `interval_s`, `altitude_m`, `board`, `i2c.sda`, `i2c.scl`, `sensors`
+(count/budget), `sensors[N].<type|addr|pin|count|metric|rx|tx|mode|per_pulse|debounce_us>`,
+`batt.pin|divider|trim`, `link.ack_window_ms|rescan_fails`,
+`net.ssid|pass|host|port|token|basic_user|basic_pass|next.ssid|next.pass`, `lmk`.
+A sensor that is not allowed to sleep on a sleeping ESP-NOW node is reported
+at `sensors[N].type`.
+
 Warned (accepted, the page shows it): ESP8266 GPIO 0, 2, 15 (boot straps),
 1, 3 (console), 16 (no interrupt/pull-up); ESP32-C3 GPIO 2, 8, 9 (straps),
-18, 19 (USB), 20, 21 (console).
+18, 19 (USB), 20, 21 (console). Warnings come back as
+`"warnings": [{"field","reason"}…]` next to `"ok"`.
 
 ## 2. Where it is stored
 
@@ -165,6 +235,13 @@ The collector, if the tag verifies against its INGEST_TOKEN, unicasts back:
 The node takes the sender IP as the new `net.host`, saves it, and marks it
 `local: true` so the collector learns the change. HMAC-SHA256 comes from
 `bearssl` on the ESP8266 and `mbedtls` on the collector.
+
+Both packets are built and checked by `src/nodecfg/UdpDiscovery.h`
+(`udpdisc::buildQuery/parseQuery/buildReply/parseReply`, HMAC passed in; the
+two firmware adapters are in `UdpDiscoveryHmac.h`). The HMAC key is the token
+string's bytes; with no token on either side the key is empty, which both
+ends compute identically. The name field is zero padded, and a packet with
+bytes after the name's first NUL is refused; a reply with port 0 is refused.
 
 ## 4. Following the collector's network (handover)
 
@@ -233,6 +310,26 @@ unknown types in `espnowValidate()`.
   samples as fit. The collector accepts both `EN_MSG_DATA` (legacy BME node)
   and `EN_MSG_DATA2`, ACKs both the same way.
 
+  Precisely (as implemented in `listMetrics()` / `metricNameFor()`): the
+  probe_temp `index` is the probe's **ordinal across all ds18b20 entries in
+  list order** — a first bus with two probes has indexes 0 and 1, a second
+  bus's first probe is 2 — and the collector names it from the reported
+  config as that entry's `metric`, plus `_N` for probe N ≥ 1 *within the
+  entry*. Before any config has been reported, index k is named
+  `probe_temp` / `probe_temp_k`. An unknown metric id is dropped (the rest of
+  the sample is kept); a non-finite value is dropped. A sample carries at most
+  9 values (`EN_DATA2_MAX_VALUES`: the 8-metric budget + battery_voltage) and
+  may carry none — a node whose sensors all failed still sends a frame, so it
+  still gets its ACK. `count` ≥ 1.
+
+  Framing rules `espnowValidate()` enforces: a CFG / CFG_REPORT slice has
+  `len` ≥ 1 and `offset + len ≤ total ≤ 1024`, except the `total == 0` reply,
+  which has `offset == 0` and `len == 0`; CFG_GET's `offset` < 1024;
+  CFG_ACK's `status` is 0 or 1 and both strings are NUL-terminated inside
+  their arrays. Reassembly (`EnCfgAssembler`) is strictly sequential: an
+  offset-0 slice starts over, anything but the next expected offset of the
+  same (nodeId, rev, total) is ignored.
+
 ## 6. The node's own page (both nodes)
 
 Sources in `node_portal/` (`index.html`, `app.js`, `style.css`). `style.css`
@@ -269,6 +366,16 @@ HTTP API served by both nodes:
   "warn_pins": {"0":"boot strap, must be high at reset", …},
   "max_sensors": 8, "max_metrics": 8 }
 ```
+
+`encodeCaps()` (`src/nodecfg/NodeConfigJson.h`) also writes, all optional for
+the page: `"sleep_unsafe": ["sds011","pulse"]` (refused on a sleeping ESP-NOW
+node), `"metric_count": {"bmx280":4,…,"ds18b20":1}` (budget cost per entry;
+ds18b20's is per probe, times `count`), `"max_gpio"` (16 / 21), and per board
+`"left"` / `"right"` — header pads top to bottom, non-GPIO pads such as `GND`
+included; absent for "other". Board ids are 0..2 on both chips: ESP8266
+NodeMCU / Wemos D1 mini / bare ESP-12; ESP32-C3 Seeed XIAO / C3 SuperMini
+(labels are the printed GPIO numbers) / other. Pin tables:
+`src/nodecfg/HwPins.h`.
 
 Where it runs: WiFi node — as today (AP portal, and on the LAN behind basic
 auth). ESP-NOW node — hold BOOT (GPIO9) through reset, or no key/never
