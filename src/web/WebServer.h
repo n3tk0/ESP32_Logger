@@ -57,3 +57,15 @@ String getModeDisplay();
 String getNetworkDisplay();
 
 void sendRestartPage(AsyncWebServerRequest* r, const char* message);
+
+struct NetworkConfig;
+
+/// A /save_network form field by name: its value, or nullptr when absent (an
+/// unchecked checkbox is absent).
+typedef const char* (*NetFormGet)(void* ctx, const char* key);
+
+/// Apply the /save_network form to `net` — the one place that knows what its
+/// fields mean. POST /save_network and the network handover's switch
+/// (docs/NODE_CONFIG.md §4) both come through here. Returns nullptr, or the
+/// reason the form was refused (then `net` may be half-applied: pass a copy).
+const char* applyNetworkForm(NetworkConfig& net, NetFormGet get, void* ctx);

@@ -21,6 +21,8 @@
 #include "IngestHandler.h"           // POST /api/ingest (FEATURE_REMOTE_NODES)
 #ifdef FEATURE_REMOTE_NODES
 #include "../sensors/RemoteIngest.h"
+#include "../nodes/NodeCfgStore.h"   // per-node "cfg" in the status lists
+#include "NodeCfgApi.h"              // /api/nodes/config, /api/nodes/handover
 #endif
 #include "../espnow/EspNowIngest.h"   // GET/POST /api/espnow/* (FEATURE_ESPNOW_INGEST)
 #include "KindleSkin.h"               // GET/POST /api/kindle/config
@@ -391,6 +393,7 @@ static void handleEspnowStatus(AsyncWebServerRequest* req) {
         o["id"]        = e.id;
         o["node_id"]   = e.nodeId;
         o["interval"]  = e.intervalS;
+        nodeCfgPutSummary(o, true, nullptr, e.nodeId);   // docs/NODE_CONFIG.md §7
         o["frames"]    = e.framesRx;
         o["dropped"]   = e.framesDropped;
         o["offline"]   = espnowNodeOffline(e, nowMs, offlineIv);
@@ -727,6 +730,9 @@ static void handleEspnowForget(AsyncWebServerRequest* req) {
         req->send(404, "application/json", "{\"ok\":false,\"error\":\"no such node\"}");
         return;
     }
+    // Its config goes with it: a node paired again later under the same id
+    // is a new node, and must not be handed the old one's sensors.
+    nodeCfgForget(true, nullptr, id);
     req->send(200, "application/json", "{\"ok\":true}");
 }
 #endif  // FEATURE_ESPNOW_INGEST
@@ -747,7 +753,7 @@ static void handleEspnowForget(AsyncWebServerRequest* req) {
 // node is down. A node whose plugin is configured with its own
 // `stale_after_ms` will disagree with this figure, which is why the age is
 // reported alongside the verdict rather than instead of it.
-static constexpr uint32_t REMOTE_STATUS_STALE_MS = 600000UL;   // 10 minutes
+// (REMOTE_STATUS_STALE_MS is in IngestHandler.h: the handover shares it.)
 
 static void handleApiRemoteStatus(AsyncWebServerRequest* req) {
     JsonDocument doc;
@@ -763,6 +769,7 @@ static void handleApiRemoteStatus(AsyncWebServerRequest* req) {
 
         JsonObject n = nodesArr.add<JsonObject>();
         n["id"] = nodeId;
+        nodeCfgPutSummary(n, false, nodeId, 0);   // docs/NODE_CONFIG.md §7
 
         // UINT32_MAX means "never heard from", which is not an age. Sent as
         // null so the page prints a dash instead of forty-nine days.
@@ -1991,6 +1998,17 @@ void registerApiRoutes(AsyncWebServer& server) {
 #endif
 #ifdef FEATURE_REMOTE_NODES
     server.on("/api/remote/status",     HTTP_GET,  handleApiRemoteStatus);
+    // Node configuration and the network handover, docs/NODE_CONFIG.md §7.
+    // JSON bodies, accumulated across segments by NodeCfgApi.cpp.
+    nodeCfgBegin();
+    server.on("/api/nodes/config",      HTTP_GET,  handleNodesConfigGet);
+    server.on("/api/nodes/config",      HTTP_POST,
+              [](AsyncWebServerRequest* r) { /* handled in the body callback */ },
+              nullptr, handleNodesConfigBody);
+    server.on("/api/nodes/handover",    HTTP_GET,  handleNodesHandoverGet);
+    server.on("/api/nodes/handover",    HTTP_POST,
+              [](AsyncWebServerRequest* r) { /* handled in the body callback */ },
+              nullptr, handleNodesHandoverBody);
 #endif
 #ifdef FEATURE_KINDLE_DASHBOARD
     server.on("/api/kindle/config",     HTTP_GET,  handleKindleConfigGet);

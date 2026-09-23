@@ -97,6 +97,12 @@ bool espnowPairingActive();
 bool espnowAddNode(const uint8_t mac[6], uint8_t nodeId, const char* label,
                    uint16_t intervalS);
 
+/// Set a known node's label and wake interval (null label = keep it) — what
+/// a config saved or adopted for it says (docs/NODE_CONFIG.md §7: the name
+/// and interval_s of an ESP-NOW node's config ARE its label and interval).
+/// Does nothing when both already match. False for an unknown node.
+bool espnowUpdateNode(uint8_t nodeId, const char* label, uint16_t intervalS);
+
 /// Forget a node: drops the radio peer and the slot, and persists the change.
 bool espnowRemoveNode(uint8_t nodeId);
 

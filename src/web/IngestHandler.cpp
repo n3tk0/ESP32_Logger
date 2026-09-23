@@ -11,11 +11,9 @@
 
 #include "IngestBatch.h"
 #include "RateLimiter.h"
+#include "../nodes/NodeCfgStore.h"   // cfg_rev / cfg / cfg_error, docs/NODE_CONFIG.md §3
 #include "../sensors/RemoteIngest.h"
-
-#ifndef INGEST_TOKEN
-#  define INGEST_TOKEN "change-me"
-#endif
+#include "../utils/JsonResponse.h"
 
 // A node payload is a handful of small objects. Anything larger is either a
 // misconfigured client or someone probing, and buffering it would be the
@@ -28,7 +26,12 @@
 // node reporting every minute could not catch up on an outage faster than it
 // was accumulating a new one. It is still a fixed ceiling and still the only
 // buffer on this path; it is just one that fits the job the path now has.
-static constexpr size_t INGEST_MAX_BODY = 4096;
+//
+// SIX, since docs/NODE_CONFIG.md §3: a node also sends its whole config (~1.5
+// KB of JSON) on the first POST after boot and after a local edit, and that
+// must not push a full 4 KB backlog batch over the cap — a node holds a batch
+// on any non-200, so a 413 there would wedge it exactly as described above.
+static constexpr size_t INGEST_MAX_BODY = 6144;
 
 // Length-independent compare. The token is short and this endpoint is rate
 // limited, so a timing oracle here is largely theoretical — but the whole
@@ -348,16 +351,22 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
     // questions — how much is current, how much was backlog — and `held` says
     // plainly that the rest of the batch was not read at all, so a node that
     // gets a 200 back never mistakes it for "all of it arrived".
-    char out[256];
-    snprintf(out, sizeof(out),
-             "{\"ok\":true,\"accepted\":%d,\"stored\":%d,\"queued\":%d,"
-             "\"rejected\":%d,\"held\":%s,\"no_clock\":%s,\"room\":%d,"
-             "\"clock_rejected\":%s}",
-             accepted, stored, queued, rejected,
-             backpressure ? "true" : "false", noClock ? "true" : "false",
-             room < 0 ? 0 : room,
-             clockRejected ? "true" : "false");
-    req->send(200, "application/json", out);
+    //
+    // A document rather than the fixed snprintf this was: the reply may now
+    // carry the node's whole config (§3), which is 1-2 KB and has no fixed
+    // shape.
+    JsonDocument out;
+    out["ok"]             = true;
+    out["accepted"]       = accepted;
+    out["stored"]         = stored;
+    out["queued"]         = queued;
+    out["rejected"]       = rejected;
+    out["held"]           = backpressure;
+    out["no_clock"]       = noClock;
+    out["room"]           = room < 0 ? 0 : room;
+    out["clock_rejected"] = clockRejected;
+    nodeCfgIngest(node, body.as<JsonObjectConst>(), out.as<JsonObject>());
+    sendJsonResponse(req, out);
 }
 
 // ── One body, however many TCP segments it arrives in ───────────────────────

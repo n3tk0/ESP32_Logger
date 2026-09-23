@@ -12,6 +12,7 @@
 #include <Preferences.h>
 
 #include "EspNowAuth.h"
+#include "../nodes/NodeCfgStore.h"  // remote configuration, docs/NODE_CONFIG.md §5
 #include "../core/EventLog.h"   // the clock-skew warning outlives the serial cable
 #include "../core/Globals.h"    // bootCount, to tie a log line to a boot
 #include "../pipeline/DataPipeline.h"   // fsMutex
@@ -117,9 +118,15 @@ static uint8_t           s_offlineIntervals = 0;  // 0 = use ESPNOW_OFFLINE_INTE
 /// fill it, and the tick runs every loop() iteration. Overflow is counted
 /// rather than silently dropped, because "the ring filled" and "nothing ever
 /// arrived" are very different problems with the same symptom.
+///
+/// The frame is kept as it arrived rather than decoded: DATA, DATA2 and
+/// CFG_ACK all come through here, and DATA2 is variable length. The tick
+/// decodes; the callback only proves (espnowValidate) that it can.
 struct RxFrame {
     uint8_t mac[6];   ///< kept for the log line when a frame names no known node
-    DataMsg msg;
+    uint8_t type;     ///< EN_MSG_DATA, EN_MSG_DATA2 or EN_MSG_CFG_ACK
+    uint8_t len;
+    uint8_t buf[ESPNOW_MAX_FRAME];
 };
 static const int    RX_RING = 4;
 static RxFrame      s_ring[RX_RING];
@@ -136,6 +143,44 @@ static portMUX_TYPE s_ringMux  = portMUX_INITIALIZER_UNLOCKED;
 static DiscoverMsg s_pendingDiscover;
 static uint8_t     s_pendingMac[6];
 static volatile bool s_pendingValid = false;
+
+// ---------------------------------------------------------------------------
+// Remote configuration — what the receive callback needs, mirrored
+// ---------------------------------------------------------------------------
+// The config store (src/nodes/NodeCfgStore) lives behind a mutex and a
+// filesystem, and the receive callback may take neither. So the tick copies
+// in, per table slot and under s_nodeMux, exactly what the callback answers
+// from:
+//
+//   s_cfgHave/Rev  whether a config is held and its desired rev — enough to
+//                  work out the rev a CFG_REPORT is adopted at (ncr::planReport)
+//                  and answer it at once, while the node is still listening;
+//   s_cfgDoc       the desired config, already rendered as the radio carries
+//                  it, for a node that is due one — so a CFG_GET is a memcpy of
+//                  one slice and a send, not a file read and a JSON encode.
+//                  Heap, and only while that node is pending: a few hundred
+//                  bytes each, freed once it has applied;
+//   s_cfgPend      the ACK flag (EN_ACK_CFG_PENDING): set only once the doc is
+//                  ready, so a node is never told to ask for something that
+//                  is not there to be sent.
+//
+// Refreshed whenever the store's generation moves (or the table changes).
+// Parallel arrays and not EspNowNode fields for the reason the skew array
+// gives: the table is persisted as raw structs.
+static bool      s_cfgHave[EspNowNodeTable::CAP]   = {false};
+static bool      s_cfgPend[EspNowNodeTable::CAP]   = {false};
+static uint16_t  s_cfgRev[EspNowNodeTable::CAP]    = {0};
+static char*     s_cfgDoc[EspNowNodeTable::CAP]    = {nullptr};
+static uint16_t  s_cfgDocLen[EspNowNodeTable::CAP] = {0};
+static uint16_t  s_cfgDocRev[EspNowNodeTable::CAP] = {0};
+static uint32_t  s_cfgMirrorGen = 0;   ///< store generation mirrored; 0 = resync
+
+/// One CFG_REPORT being reassembled, and one completed one waiting for the
+/// tick to adopt. One and not one per node: a node reports on its first wake
+/// after boot and after a local edit, rarely two at once — and a node that
+/// loses the slot to another simply reports again on its next wake.
+static EnCfgAssembler s_asm;
+static volatile bool  s_reportReady = false;   ///< s_asm holds a complete report
 
 // ---------------------------------------------------------------------------
 // How far each node's clock is from ours
@@ -358,27 +403,95 @@ static bool addBroadcastPeer() {
 /// EN_ACK_REDISCOVER: that is what sends a node whose collector was reflashed
 /// back through pairing, instead of leaving it transmitting for months into
 /// something that will never decode it.
-static void sendAck(const uint8_t* mac, const DataMsg& m) {
+static void sendAck(const uint8_t* mac, uint8_t nodeId, uint16_t seq) {
     bool     known    = false;
+    bool     cfg      = false;
     uint16_t interval = 0;
 
     taskENTER_CRITICAL(&s_nodeMux);
-    const EspNowNode* n = s_nodes.byId(m.nodeId);
-    if (n) { known = true; interval = n->intervalS; }
+    const int idx = s_nodes.indexOf(nodeId);
+    if (idx >= 0) {
+        known    = true;
+        interval = s_nodes.at(idx).intervalS;
+        cfg      = s_cfgPend[idx];
+    }
     taskEXIT_CRITICAL(&s_nodeMux);
 
     AckMsg a{};
     a.magic     = ESPNOW_MAGIC;
     a.ver       = ESPNOW_PROTO_VER;
     a.type      = EN_MSG_ACK;
-    a.nodeId    = m.nodeId;
-    a.ackSeq    = m.seq;
-    a.flags     = known ? 0 : EN_ACK_REDISCOVER;
+    a.nodeId    = nodeId;
+    a.ackSeq    = seq;
+    // CFG_PENDING while desired.rev > applied_rev (§5). A node built before the
+    // flag ignores the bit.
+    a.flags     = known ? (cfg ? EN_ACK_CFG_PENDING : 0) : EN_ACK_REDISCOVER;
     a.epoch     = nowEpoch();
     a.intervalS = interval;
     a.channel   = currentChannel();
 
     if (esp_now_send(mac, (const uint8_t*)&a, sizeof(a)) == ESP_OK) s_stats.acksSent++;
+}
+
+/// The table slot of `nodeId` if `mac` is the MAC it was paired with, else
+/// -1. Config frames are encrypted with the shared key, so the radio already
+/// proved the sender holds it; this stops one node speaking for another.
+/// Caller holds s_nodeMux.
+static int slotFor(const uint8_t* mac, uint8_t nodeId) {
+    const int idx = s_nodes.indexOf(nodeId);
+    if (idx < 0 || memcmp(s_nodes.at(idx).mac, mac, 6) != 0) return -1;
+    return idx;
+}
+
+/// CFG_GET: one slice of the rendered desired config, straight back (§5).
+/// The node is awake and asking in a loop; this is a memcpy and a send. A
+/// node whose config is not rendered (yet) gets nothing and asks again or
+/// gives up for this wake — it resumes from offset 0 next time.
+static void answerCfgGet(const uint8_t* mac, const uint8_t* data) {
+    CfgGetMsg g;
+    memcpy(&g, data, sizeof(g));
+    CfgChunkMsg m;
+    int n = -1;
+    taskENTER_CRITICAL(&s_nodeMux);
+    const int idx = slotFor(mac, g.nodeId);
+    if (idx >= 0 && s_cfgDoc[idx])
+        n = espnowFillCfgChunk(m, EN_MSG_CFG, g.nodeId, s_cfgDocRev[idx], s_cfgDoc[idx],
+                               s_cfgDocLen[idx], g.offset);
+    taskEXIT_CRITICAL(&s_nodeMux);
+    if (n > 0) esp_now_send(mac, (const uint8_t*)&m, (size_t)n);
+}
+
+/// CFG_REPORT: reassemble; on the last slice, answer with the rev the report
+/// is adopted at (CFG, total 0) while the node is still listening, and leave
+/// the document for the tick to store.
+///
+/// The rev is worked out HERE, from the mirrored desired rev, with the same
+/// ncr::planReport() the store then applies — so the answer does not wait for
+/// a flash write. `local` is read with a string search rather than a JSON
+/// parse: the node writes compact JSON with the codec, so a local edit is
+/// exactly `"local":true`, and no value in the document can contain a quote.
+static void feedCfgReport(const uint8_t* mac, const uint8_t* data, int len) {
+    if (s_reportReady) return;                  // the tick has not taken the last one
+    CfgChunkMsg c;
+    memcpy(&c, data, (size_t)len);
+    if (c.total == 0) return;                   // the "adopted" form is ours to send
+
+    bool     have = false;
+    uint16_t drev = 0;
+    taskENTER_CRITICAL(&s_nodeMux);
+    const int idx = slotFor(mac, c.nodeId);
+    if (idx >= 0) { have = s_cfgHave[idx]; drev = s_cfgRev[idx]; }
+    taskEXIT_CRITICAL(&s_nodeMux);
+    if (idx < 0) return;
+
+    if (espnowCfgFeed(s_asm, c) != EN_CFG_FEED_DONE) return;
+    const bool local = strstr(s_asm.doc, "\"local\":true") != nullptr;
+    const ncr::ReportPlan plan = ncr::planReport(have, drev, s_asm.rev, local);
+    s_reportReady = true;
+
+    CfgChunkMsg m;
+    const int n = espnowFillCfgChunk(m, EN_MSG_CFG, c.nodeId, plan.applied, nullptr, 0, 0);
+    if (n > 0) esp_now_send(mac, (const uint8_t*)&m, (size_t)n);
 }
 
 #if ESP_IDF_VERSION_MAJOR >= 5
@@ -412,15 +525,14 @@ static void onRecv(const uint8_t* mac, const uint8_t* data, int len) {
         }
         return;
     }
-    if (type != EN_MSG_DATA) {
-        // ACK and WELCOME are ours to send, not to receive. A collector
+    if (type == EN_MSG_CFG_GET)    { answerCfgGet(mac, data); return; }
+    if (type == EN_MSG_CFG_REPORT) { feedCfgReport(mac, data, len); return; }
+    if (type != EN_MSG_DATA && type != EN_MSG_DATA2 && type != EN_MSG_CFG_ACK) {
+        // ACK, WELCOME and CFG are ours to send, not to receive. A collector
         // hearing one is either talking to itself or hearing a second
         // collector; there is nothing useful to do with it either way.
         return;
     }
-
-    DataMsg m;
-    espnowDecodeData(data, len, m);
 
     // QUEUE FIRST, ACK SECOND, and the order is the whole point.
     //
@@ -456,13 +568,19 @@ static void onRecv(const uint8_t* mac, const uint8_t* data, int len) {
         return;
     }
     memcpy(s_ring[s_ringTail].mac, mac, 6);
-    s_ring[s_ringTail].msg = m;
+    s_ring[s_ringTail].type = type;
+    s_ring[s_ringTail].len  = (uint8_t)len;
+    memcpy(s_ring[s_ringTail].buf, data, (size_t)len);
     s_ringTail = next;
     taskEXIT_CRITICAL(&s_ringMux);
 
+    // A CFG_ACK is not acknowledged: the node sends it and goes back to sleep.
+    if (type == EN_MSG_CFG_ACK) return;
+
     // Safely outside the spinlock, and only now that the frame is somewhere
-    // the tick will find it.
-    sendAck(mac, m);
+    // the tick will find it. DATA2 shares DATA's header, so nodeId and seq are
+    // at the same offsets in both.
+    sendAck(mac, data[3], enRdU16(data + 4));
 
     if (rssi) {
         taskENTER_CRITICAL(&s_nodeMux);
@@ -486,7 +604,18 @@ static bool servicePendingDiscover() {
     memcpy(mac, s_pendingMac, 6);
     s_pendingValid = false;      // released before the work, so a retry can park
 
-    if (!espnowPairingActive()) return false;
+    // Outside a pairing window, a node the table already holds is still
+    // answered (docs/NODE_CONFIG.md §4.6): a node that slept through a network
+    // handover, or whose router changed channel, finds the collector again on
+    // its own sweep instead of waiting for somebody to press Pair. It is not
+    // new trust — the MAC was adopted once already, and the tag below must
+    // still verify — and it never takes a slot.
+    if (!espnowPairingActive()) {
+        taskENTER_CRITICAL(&s_nodeMux);
+        const bool known = s_nodes.byMac(mac) != nullptr;
+        taskEXIT_CRITICAL(&s_nodeMux);
+        if (!known) return false;
+    }
 
     // Verified with the shared helper, against exactly the region the node
     // signed with the same one. Two implementations of this is how a node
@@ -549,6 +678,7 @@ static bool servicePendingDiscover() {
     if (!addPeer(mac)) return false;
     s_stats.paired++;
     s_dirty = true;
+    s_cfgMirrorGen = 0;
     Serial.printf("[ESPNOW] paired node %u on channel %u\n", assigned, w.channel);
     return true;
 }
@@ -564,6 +694,38 @@ static bool acceptFrame(const RxFrame& f, char* outId, size_t outIdLen,
                         EspNowNode& outSnap) {
     bool ok = false;
 
+    // DATA and DATA2 share the 12-byte header.
+    Data2Header h;
+    memcpy(&h, f.buf, sizeof(h));
+
+    // The battery samples, gathered before the lock: DATA2 has to be walked
+    // to find them, and a critical section is no place for a walk.
+    uint16_t bMv[ESPNOW_MAX_SAMPLES];
+    uint16_t bDt[ESPNOW_MAX_SAMPLES];
+    int      nb = 0;
+    if (f.type == EN_MSG_DATA) {
+        const DataMsg* d = reinterpret_cast<const DataMsg*>(f.buf);
+        for (uint8_t i = 0; i < h.count && i < ESPNOW_MAX_SAMPLES; i++) {
+            EnvSample es;
+            memcpy(&es, &d->s[i], sizeof(es));
+            const float mv = enUnpackMv(es.vbat_mv);
+            if (enIsAbsent(mv)) continue;
+            bMv[nb] = (uint16_t)mv; bDt[nb++] = es.dt_s;
+        }
+    } else {
+        Data2Header hh; Data2Cursor cur; Data2Sample smp;
+        espnowData2Open(f.buf, f.len, hh, cur);
+        while (nb < ESPNOW_MAX_SAMPLES && espnowData2Next(cur, smp)) {
+            for (uint8_t k = 0; k < smp.n; k++) {
+                const float v = smp.v[k].value;
+                if (smp.v[k].metric != nodecfg::M_BATTERY_VOLTAGE || !(v > 0.0f && v < 65.0f))
+                    continue;
+                bMv[nb] = (uint16_t)(v * 1000.0f + 0.5f); bDt[nb++] = smp.dt_s;
+                break;
+            }
+        }
+    }
+
     // Filled under the lock, acted on after it is released: the log line writes
     // flash, which a critical section is the last place to do.
     bool    logSkew     = false;
@@ -577,15 +739,15 @@ static bool acceptFrame(const RxFrame& f, char* outId, size_t outIdLen,
     const uint32_t ours = nowEpoch();
 
     taskENTER_CRITICAL(&s_nodeMux);
-    EspNowNode* n = s_nodes.byId(f.msg.nodeId);
+    EspNowNode* n = s_nodes.byId(h.nodeId);
     if (n) {
         const EspNowSeqVerdict v =
-            espnowSeqCheck(n->haveSeq, n->lastSeq, f.msg.seq, f.msg.flags);
+            espnowSeqCheck(n->haveSeq, n->lastSeq, h.seq, h.flags);
         if (v == EN_SEQ_DUPLICATE || v == EN_SEQ_STALE) {
             n->framesDropped++;
         } else {
             n->haveSeq    = true;
-            n->lastSeq    = f.msg.seq;
+            n->lastSeq    = h.seq;
             n->lastSeenMs = millis();
             n->everSeen   = true;
             n->framesRx++;
@@ -594,8 +756,8 @@ static bool acceptFrame(const RxFrame& f, char* outId, size_t outIdLen,
             // The arithmetic and its two guards live in NodeTable.h, where the
             // host tests can reach them.
             int32_t skew = 0;
-            if (espnowClockSkew(ours, f.msg.epoch, skew)) {
-                const int idx = s_nodes.indexOf(f.msg.nodeId);
+            if (espnowClockSkew(ours, h.epoch, skew)) {
+                const int idx = s_nodes.indexOf(h.nodeId);
                 if (idx >= 0) {
                     const int32_t mag = skew < 0 ? -skew : skew;
                     // Log on crossing the threshold, at most once an hour per
@@ -616,13 +778,10 @@ static bool acceptFrame(const RxFrame& f, char* outId, size_t outIdLen,
                 }
             }
 
-            const uint32_t base = f.msg.epoch ? f.msg.epoch : ours;
-            for (uint8_t i = 0; i < f.msg.count && i < ESPNOW_MAX_SAMPLES; i++) {
-                const float mv = enUnpackMv(f.msg.s[i].vbat_mv);
-                if (enIsAbsent(mv)) continue;
-                n->lastMv = (uint16_t)mv;
-                const uint32_t ts = (base > f.msg.s[i].dt_s) ? base - f.msg.s[i].dt_s
-                                                             : base;
+            const uint32_t base = h.epoch ? h.epoch : ours;
+            for (int i = 0; i < nb; i++) {
+                n->lastMv = bMv[i];
+                const uint32_t ts = (base > bDt[i]) ? base - bDt[i] : base;
                 batteryHistoryAdd(n->batt, ts, n->lastMv);
             }
 
@@ -655,7 +814,7 @@ static bool acceptFrame(const RxFrame& f, char* outId, size_t outIdLen,
         // pair it again.
         Serial.printf("[ESPNOW] frame from unprovisioned node %u "
                       "(%02x:%02x:%02x:%02x:%02x:%02x)\n",
-                      f.msg.nodeId, f.mac[0], f.mac[1], f.mac[2],
+                      h.nodeId, f.mac[0], f.mac[1], f.mac[2],
                       f.mac[3], f.mac[4], f.mac[5]);
     } else if (!ok) {
         s_stats.replayed++;
@@ -665,10 +824,110 @@ static bool acceptFrame(const RxFrame& f, char* outId, size_t outIdLen,
     return ok;
 }
 
+/// Hand one reading on: the newest sample of a frame to the mailbox, the
+/// rest to the history queue. See the tick below for why the two differ.
+static void landReading(const char* id, bool newest, const char* metric, float value,
+                        const char* unit, uint32_t ts) {
+    if (newest) {
+        remoteIngest.put(id, metric, value, unit, ts);
+    } else if (ts < 1000000000u) {
+        // No clock anywhere — not on the node, not here — so a backdated
+        // reading has no date to be filed under and putHistorical() would
+        // refuse it. Counted separately from the overflow below, because the
+        // two ask for opposite things: one wants a bigger queue, this one
+        // wants NTP or an RTC.
+        s_stats.historyNoClock++;
+    } else if (!remoteIngest.putHistorical(id, metric, value, unit, ts)) {
+        // The queue was full and shed its oldest entry to take this one.
+        // Counted, because a backlog that keeps overflowing means the drain
+        // is too slow for the burst size and that is a tuning fact, not a
+        // mystery.
+        s_stats.historyCollapsed++;
+    }
+}
+
+/// A CFG_ACK: the node applied a rev, or refused it and said why.
+static void handleCfgAck(const RxFrame& f) {
+    CfgAckMsg a;
+    memcpy(&a, f.buf, sizeof(a));
+    taskENTER_CRITICAL(&s_nodeMux);
+    const int idx = slotFor(f.mac, a.nodeId);
+    taskEXIT_CRITICAL(&s_nodeMux);
+    if (idx < 0) return;
+    // Terminated inside their arrays — espnowValidate() refused anything else.
+    nodeCfgEspnowAck(a.nodeId, a.rev, a.status == EN_CFG_OK, a.field, a.reason);
+}
+
+/// A completed CFG_REPORT, already answered from the callback: store it.
+static void serviceCfgReport() {
+    if (!s_reportReady) return;
+    char     label[sizeof(EspNowNode::id)] = {0};
+    uint16_t interval = 0;
+    taskENTER_CRITICAL(&s_nodeMux);
+    const EspNowNode* n = s_nodes.byId(s_asm.nodeId);
+    if (n) { memcpy(label, n->id, sizeof(label) - 1); interval = n->intervalS; }
+    taskEXIT_CRITICAL(&s_nodeMux);
+    if (n) nodeCfgEspnowReport(s_asm.nodeId, s_asm.doc, s_asm.total, label, interval);
+    espnowCfgReset(s_asm);
+    s_reportReady = false;
+}
+
+/// Refresh what the receive callback answers from — see the comment on
+/// s_cfgDoc. Runs only when the store (or the table) has changed.
+static void syncCfgMirrors() {
+    const uint32_t gen = nodeCfgGeneration();
+    if (gen == s_cfgMirrorGen) return;
+    bool again = false;
+    for (int i = 0; i < EspNowNodeTable::CAP; i++) {
+        taskENTER_CRITICAL(&s_nodeMux);
+        const bool     used    = s_nodes.at(i).used;
+        const uint8_t  id      = s_nodes.at(i).nodeId;
+        const bool     haveDoc = s_cfgDoc[i] != nullptr;
+        const uint16_t docRev  = s_cfgDocRev[i];
+        taskEXIT_CRITICAL(&s_nodeMux);
+
+        NodeCfgRadio r = { false, 0, 0, 0 };
+        if (used && !nodeCfgRadioState(id, r)) { again = true; continue; }
+        const bool send = r.have && ncr::shouldSend(r.status, r.rev, r.applied);
+        const bool keep = send && haveDoc && docRev == r.rev;
+
+        char*    doc = nullptr;
+        uint16_t len = 0;
+        if (send && !keep) {
+            char* buf = (char*)malloc(EN_CFG_MAX_TOTAL + 1);
+            uint16_t rev = 0;
+            const size_t n = buf ? nodeCfgRadioDoc(id, buf, EN_CFG_MAX_TOTAL + 1, rev) : 0;
+            if (n && rev == r.rev) {
+                char* fit = (char*)realloc(buf, n);
+                doc = fit ? fit : buf;
+                len = (uint16_t)n;
+            } else {
+                free(buf);
+            }
+        }
+
+        char* old = nullptr;
+        taskENTER_CRITICAL(&s_nodeMux);
+        if (!keep) {
+            old            = s_cfgDoc[i];
+            s_cfgDoc[i]    = doc;
+            s_cfgDocLen[i] = len;
+            s_cfgDocRev[i] = r.rev;
+        }
+        s_cfgHave[i] = r.have;
+        s_cfgRev[i]  = r.rev;
+        s_cfgPend[i] = s_cfgDoc[i] != nullptr;
+        taskEXIT_CRITICAL(&s_nodeMux);
+        free(old);
+    }
+    if (!again) s_cfgMirrorGen = gen;
+}
+
 void espnowIngestTick() {
     if (!s_up) return;
 
     servicePendingDiscover();
+    serviceCfgReport();
 
     for (;;) {
         RxFrame f;
@@ -678,15 +937,19 @@ void espnowIngestTick() {
         s_ringHead = (s_ringHead + 1) % RX_RING;
         taskEXIT_CRITICAL(&s_ringMux);
 
+        if (f.type == EN_MSG_CFG_ACK) { handleCfgAck(f); continue; }
+
         char       id[sizeof(EspNowNode::id)];
         EspNowNode snap{};
         if (!acceptFrame(f, id, sizeof(id), snap)) continue;
+        Data2Header h;                              // DATA's header too
+        memcpy(&h, f.buf, sizeof(h));
 
         // The node's own clock is used when it has one, and it is load-bearing:
         // SensorManager stamps only a reading whose timestamp is zero, so what
         // is derived here is the time the reading is filed under. Zero when
         // neither side has a clock, which the history path below tests for.
-        const uint32_t base = f.msg.epoch ? f.msg.epoch : nowEpoch();
+        const uint32_t base = h.epoch ? h.epoch : nowEpoch();
 
         // WHERE EACH SAMPLE GOES
         //
@@ -705,33 +968,41 @@ void espnowIngestTick() {
         // stamps a reading whose timestamp is zero, and ProcessingTask keeps
         // backfilled readings out of the live ring and out of alert
         // evaluation while still folding them into storage and the trend grid.
-        const uint8_t newest = (uint8_t)(f.msg.count - 1);
+        const uint8_t newest = (uint8_t)(h.count - 1);
 
-        for (uint8_t i = 0; i < f.msg.count && i < ESPNOW_MAX_SAMPLES; i++) {
-            const EnvSample& s = f.msg.s[i];
-            const uint32_t ts = (base > s.dt_s) ? base - s.dt_s : base;
-
-            EspNowMetric m[EN_MAX_SAMPLE_METRICS];
-            const int cnt = espnowExpandSample(s, m, EN_MAX_SAMPLE_METRICS);
-            for (int k = 0; k < cnt; k++) {
-                if (i == newest) {
-                    remoteIngest.put(id, m[k].metric, m[k].value, m[k].unit, ts);
-                } else if (ts < 1000000000u) {
-                    // No clock anywhere — not on the node, not here — so a
-                    // backdated reading has no date to be filed under and
-                    // putHistorical() would refuse it. Counted separately
-                    // from the overflow below, because the two ask for
-                    // opposite things: one wants a bigger queue, this one
-                    // wants NTP or an RTC.
-                    s_stats.historyNoClock++;
-                } else if (!remoteIngest.putHistorical(id, m[k].metric, m[k].value,
-                                                       m[k].unit, ts)) {
-                    // The queue was full and shed its oldest entry to take
-                    // this one. Counted, because a backlog that keeps
-                    // overflowing means the drain is too slow for the burst
-                    // size and that is a tuning fact, not a mystery.
-                    s_stats.historyCollapsed++;
-                }
+        if (f.type == EN_MSG_DATA) {
+            DataMsg msg;
+            espnowDecodeData(f.buf, f.len, msg);
+            for (uint8_t i = 0; i < msg.count && i < ESPNOW_MAX_SAMPLES; i++) {
+                const EnvSample& s = msg.s[i];
+                const uint32_t ts = (base > s.dt_s) ? base - s.dt_s : base;
+                EspNowMetric m[EN_MAX_SAMPLE_METRICS];
+                const int cnt = espnowExpandSample(s, m, EN_MAX_SAMPLE_METRICS);
+                for (int k = 0; k < cnt; k++)
+                    landReading(id, i == newest, m[k].metric, m[k].value, m[k].unit, ts);
+            }
+        } else {
+            // DATA2 (§5): each value names its metric by catalogue id, and a
+            // probe by its ordinal — named through the config the node last
+            // reported, or the default probe_temp[_N] before it has.
+            ncr::ProbeMap              pm;
+            nodecfg::NodeConfig        nameCfg;
+            const nodecfg::NodeConfig* cfgp = nullptr;
+            if (nodeCfgProbeMap(h.nodeId, pm)) {
+                ncr::probeMapToConfig(pm, nameCfg);
+                cfgp = &nameCfg;
+            }
+            Data2Header hh;
+            Data2Cursor cur;
+            Data2Sample smp;
+            espnowData2Open(f.buf, f.len, hh, cur);
+            for (uint8_t i = 0; espnowData2Next(cur, smp); i++) {
+                const uint32_t ts = (base > smp.dt_s) ? base - smp.dt_s : base;
+                ncr::NamedValue nv[EN_DATA2_MAX_VALUES];
+                float bv = 0.0f;
+                const int cnt = ncr::data2Named(cfgp, smp, nv, EN_DATA2_MAX_VALUES, bv);
+                for (int k = 0; k < cnt; k++)
+                    landReading(id, i == newest, nv[k].name, nv[k].value, nv[k].unit, ts);
             }
         }
 
@@ -758,6 +1029,8 @@ void espnowIngestTick() {
     if (s_dirty || (today != 0 && today != s_lastDay && s_nodes.count() > 0)) {
         if (saveNodes()) s_lastDay = today;
     }
+
+    syncCfgMirrors();
 }
 
 // ---------------------------------------------------------------------------
@@ -904,7 +1177,24 @@ bool espnowAddNode(const uint8_t mac[6], uint8_t nodeId, const char* label,
         return false;
     }
     s_dirty = true;
+    s_cfgMirrorGen = 0;
     return true;
+}
+
+bool espnowUpdateNode(uint8_t nodeId, const char* label, uint16_t intervalS) {
+    uint8_t mac[6];
+    bool    found = false, same = false;
+    taskENTER_CRITICAL(&s_nodeMux);
+    const EspNowNode* n = s_nodes.byId(nodeId);
+    if (n) {
+        found = true;
+        memcpy(mac, n->mac, 6);
+        same = (!label || strcmp(label, n->id) == 0) && n->intervalS == intervalS;
+    }
+    taskEXIT_CRITICAL(&s_nodeMux);
+    if (!found) return false;
+    if (same) return true;
+    return espnowAddNode(mac, nodeId, label, intervalS);
 }
 
 bool espnowRemoveNode(uint8_t nodeId) {
@@ -926,6 +1216,7 @@ bool espnowRemoveNode(uint8_t nodeId) {
     if (!found) return false;
     if (s_up) esp_now_del_peer(mac);
     s_dirty = true;
+    s_cfgMirrorGen = 0;
     return true;
 }
 

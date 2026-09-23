@@ -1,0 +1,151 @@
+// ============================================================================
+// src/nodes/NodeCfgStore.h
+//
+// The collector's copy of every node's configuration — docs/NODE_CONFIG.md §2.
+//
+// One file per node on LittleFS:
+//
+//   /nodes/w_<name>.json   a WiFi node, keyed by the id it posts as
+//   /nodes/e_<id>.json     an ESP-NOW node, keyed by its radio id
+//
+//   { "desired": {…§1 WITH secrets…}, "applied_rev": 3,
+//     "reported": {…§1 without secrets…}, "status": "applied|pending|rejected",
+//     "error": {"field","reason"}, "seen": <epoch>,
+//     "ho_rev": 7, "sec_known": 3, "sec_dirty": 0 }
+//
+// The last three are the collector's own bookkeeping (§4's handover rev and
+// the secret bits explained in NodeCfgRules.h); unknown keys to anybody else.
+//
+// A small index of every file is kept in RAM — revs, status, the last error,
+// and for an ESP-NOW node the probe names DATA2 needs — so a status list or a
+// radio frame never has to touch the filesystem. Files are read only when a
+// config itself is needed, and written only when something changed: a WiFi
+// node posting its unchanged cfg_rev every minute costs no flash.
+//
+// A file exists only once the node has reported its config, or been adopted
+// on first contact. Nothing is invented for a node that never reported: a
+// config made up from defaults and pushed to it would wipe its sensor list.
+//
+// THREADS. The async web task (ingest, the Nodes page API) and loop() (the
+// ESP-NOW tick, the handover) both call in; one mutex serialises every call,
+// and every file access inside also takes fsMutex (Pillar 1.3). The ESP-NOW
+// receive callback never calls in at all — EspNowIngest mirrors what it needs.
+//
+// Compiled only with FEATURE_REMOTE_NODES.
+// ============================================================================
+#pragma once
+
+#include "../setup.h"
+
+#ifdef FEATURE_REMOTE_NODES
+
+#include <ArduinoJson.h>
+
+#include "NodeCfgRules.h"
+
+#ifndef NODECFG_MAX_NODES
+#  define NODECFG_MAX_NODES 16   ///< config files held: ESPNOW_MAX_NODES (8) + 8 WiFi nodes
+#endif
+/// Most nodes a handover walks: every file, plus nodes in the status lists
+/// without one.
+#define NODECFG_LIST_MAX (NODECFG_MAX_NODES + 24)
+
+/// Load the index from /nodes. Call once from setup, before the web server
+/// starts; every other call is a no-op until it has run.
+void nodeCfgBegin();
+
+/// Bumped on every change — EspNowIngest re-mirrors when it moves.
+uint32_t nodeCfgGeneration();
+
+struct NodeCfgSummary {
+    uint16_t       rev;       ///< desired
+    uint16_t       applied;
+    uint16_t       hoRev;     ///< rev that carried the handover's next network, 0 = none
+    uint8_t        status;    ///< ncr::ST_*
+    nodecfg::Issue err;       ///< when rejected
+};
+
+/// The RAM index entry for a node, if it has a config file.
+bool nodeCfgSummary(bool espnow, const char* name, uint8_t id, NodeCfgSummary& out);
+
+/// Every node that has a config file — the handover walks these as well as
+/// the status lists, since a WiFi node that has not posted since boot is in no
+/// list but still has to be handed the next network.
+struct NodeCfgKey {
+    bool    espnow;
+    uint8_t id;
+    char    name[nodecfg::NODE_NAME_MAX + 1];
+};
+int nodeCfgKeys(NodeCfgKey* out, int max);
+
+/// Add `"cfg": {"key","rev","applied_rev","status","error"?}` to a node of a
+/// status list (§7) — nothing when the node has no config file.
+void nodeCfgPutSummary(JsonObject node, bool espnow, const char* name, uint8_t id);
+
+// ── WiFi node, over /api/ingest (§3) ────────────────────────────────────────
+
+/// Read cfg_rev / cfg / cfg_error from an ingest body and act on them; put
+/// "cfg" into `reply` when the node is due one. A body without cfg_rev (a node
+/// that predates §3) is ignored entirely.
+void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply);
+
+// ── ESP-NOW node (§5), all called from espnowIngestTick() ───────────────────
+
+struct NodeCfgRadio {
+    bool     have;        ///< a config file exists
+    uint16_t rev;         ///< desired
+    uint16_t applied;
+    uint8_t  status;
+};
+/// False only when the store was busy — the caller should ask again later.
+bool nodeCfgRadioState(uint8_t id, NodeCfgRadio& out);
+
+/// A completed CFG_REPORT. Returns the rev the node now runs (0 on failure).
+/// `label` / `intervalS` are the node table's; on first contact they win
+/// (ncr::adoptTableIdentity), after a local edit the table follows the node —
+/// the store updates it.
+uint16_t nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
+                             const char* label, uint16_t intervalS);
+
+/// A CFG_ACK.
+void nodeCfgEspnowAck(uint8_t id, uint16_t rev, bool ok, const char* field, const char* reason);
+
+/// The desired config as the radio carries it (§5: compact, no net, no
+/// secrets, no key). Returns its length, 0 when there is nothing to send or it
+/// does not fit `cap` / EN_CFG_MAX_TOTAL.
+size_t nodeCfgRadioDoc(uint8_t id, char* buf, size_t cap, uint16_t& rev);
+
+/// The node's reported probe entries, for naming DATA2 values. False before
+/// the node has reported a config.
+bool nodeCfgProbeMap(uint8_t id, ncr::ProbeMap& out);
+
+/// Forget an ESP-NOW node's file (the node was removed from the table).
+void nodeCfgForget(bool espnow, const char* name, uint8_t id);
+
+// ── The Nodes page API (§7) ─────────────────────────────────────────────────
+
+/// GET /api/nodes/config. `known` says the node exists in a status list
+/// even without a file (answered with nulls, §7). Returns the HTTP status.
+int nodeCfgApiGet(const char* key, bool known, JsonDocument& out);
+
+/// POST /api/nodes/config. Returns the HTTP status.
+int nodeCfgApiPost(JsonObjectConst body, JsonDocument& out);
+
+// ── Handover (§4) ───────────────────────────────────────────────────────────
+
+bool     nodeCfgHandoverActive();
+uint32_t nodeCfgHandoverStartedMs();
+void     nodeCfgHandoverSsid(char out[nodecfg::SSID_CAP]);
+
+/// Start (or restart) a handover: every node with a config is handed the
+/// next network in a new rev, and `form` is kept for the switch.
+bool nodeCfgHandoverStart(const char* ssid, const char* pass, JsonVariantConst form);
+
+/// Take the next network back from every node (another rev) and stop.
+bool nodeCfgHandoverCancel();
+
+/// End the handover for the switch: copies out what it was started with and
+/// forgets it. `form` is null in `out` when none was given.
+bool nodeCfgHandoverFinish(JsonDocument& out);
+
+#endif  // FEATURE_REMOTE_NODES

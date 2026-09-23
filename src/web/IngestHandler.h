@@ -47,7 +47,18 @@
 
 #ifdef FEATURE_REMOTE_NODES
 
+#include <stdint.h>
+
 class AsyncWebServer;
+
+#ifndef INGEST_TOKEN
+#  define INGEST_TOKEN "change-me"
+#endif
+
+/// A remote node not heard from for this long reads as offline — on
+/// /api/remote/status and in a network handover (docs/NODE_CONFIG.md §4). It
+/// matches RemoteNodeSensor's default staleness; see handleApiRemoteStatus().
+static constexpr uint32_t REMOTE_STATUS_STALE_MS = 600000UL;   // 10 minutes
 
 /// Registers POST /api/ingest on `server`. Call from setupWebServer().
 void registerIngestHandler(AsyncWebServer& server);

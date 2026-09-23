@@ -1,0 +1,741 @@
+#include "NodeCfgStore.h"
+
+#ifdef FEATURE_REMOTE_NODES
+
+#include <Arduino.h>
+#include <LittleFS.h>
+#include <new>
+#include <time.h>
+
+#include "../nodecfg/NodeConfigJson.h"
+#include "../pipeline/DataPipeline.h"   // fsMutex
+#include "../utils/AtomicWrite.h"
+#include "../utils/MutexGuard.h"
+#ifdef FEATURE_ESPNOW_INGEST
+#include "../espnow/EspNowIngest.h"     // the table label follows the config
+#endif
+
+using namespace nodecfg;
+
+// ============================================================================
+// Index
+// ============================================================================
+
+struct Entry {
+    bool           used;
+    bool           espnow;
+    uint8_t        id;            ///< ESP-NOW radio id
+    bool           haveProbes;    ///< a reported config has been seen
+    char           name[NODE_NAME_MAX + 1];    ///< WiFi: the key
+    char           dname[NODE_NAME_MAX + 1];   ///< desired name (a WiFi rename)
+    NodeCfgSummary s;
+    ncr::ProbeMap  probes;
+};
+
+static Entry             s_e[NODECFG_MAX_NODES];
+static SemaphoreHandle_t s_mx  = nullptr;
+static volatile uint32_t s_gen = 1;
+
+static const char NODES_DIR[] = "/nodes";
+static const char HO_PATH[]   = "/nodes/handover.json";
+
+struct HandoverState {
+    bool     active;
+    uint32_t startMs;
+    char     ssid[SSID_CAP];
+};
+static HandoverState s_ho;
+
+/// The heap scratch every operation needs: a file's document, a config to
+/// decode it into and the one it was before. ~2.2 KB plus the document,
+/// which is too much for the async web task's stack alongside ArduinoJson.
+struct Work {
+    JsonDocument doc;
+    JsonDocument aux;
+    NodeConfig   cfg;
+    NodeConfig   old;
+    Validation   v;
+};
+
+/// Lock for every public entry point. Unlocked (and so a no-op caller) until
+/// nodeCfgBegin() has created the mutex.
+#define NC_LOCK(ms, fail)                                   \
+    MutexGuard _g(s_mx, pdMS_TO_TICKS(ms));                 \
+    if (!_g.isLocked()) return fail
+
+static Entry* find(bool espnow, const char* name, uint8_t id) {
+    for (Entry& e : s_e) {
+        if (!e.used || e.espnow != espnow) continue;
+        if (espnow ? e.id == id : strcmp(e.name, name) == 0) return &e;
+    }
+    return nullptr;
+}
+
+static Entry* alloc(bool espnow, const char* name, uint8_t id) {
+    for (Entry& e : s_e) {
+        if (e.used) continue;
+        memset(&e, 0, sizeof(e));
+        e.used   = true;
+        e.espnow = espnow;
+        e.id     = id;
+        copyStr(e.name, sizeof(e.name), espnow ? "" : name);
+        return &e;
+    }
+    Serial.println("[nodecfg] index full — config not kept");
+    return nullptr;
+}
+
+// ============================================================================
+// Files — every access under fsMutex (Pillar 1.3)
+// ============================================================================
+
+static bool readJson(const char* path, JsonDocument& doc) {
+    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+    if (fsMutex && !g.isLocked()) return false;
+    File f = LittleFS.open(path, "r");
+    if (!f) return false;
+    const DeserializationError err = deserializeJson(doc, f);
+    f.close();
+    return !err;
+}
+
+static bool writeJson(const char* path, const JsonDocument& doc) {
+    return atomicWrite(LittleFS, path,
+                       [&doc](File& f) { return serializeJson(doc, f) > 0; }, fsMutex);
+}
+
+static void removeFile(const char* path) {
+    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+    if (fsMutex && !g.isLocked()) return;
+    LittleFS.remove(path);
+}
+
+static void pathOf(const Entry& e, char out[ncr::PATH_CAP]) {
+    ncr::filePath(out, e.espnow, e.name, e.id);
+}
+
+static bool loadEntry(const Entry& e, JsonDocument& doc) {
+    char p[ncr::PATH_CAP];
+    pathOf(e, p);
+    return readJson(p, doc) && doc["desired"].is<JsonObject>();
+}
+
+/// Write the RAM fields of `e` into `doc` and the file. The generation moves
+/// even if the write fails: RAM is what everything else reads, and it holds
+/// the new state either way.
+static bool saveEntry(const Entry& e, JsonDocument& doc) {
+    doc["applied_rev"] = e.s.applied;
+    doc["status"]      = ncr::statusName(e.s.status);
+    doc["ho_rev"]      = e.s.hoRev;
+    if (e.s.status == ncr::ST_REJECTED) {
+        JsonObject er = doc["error"].to<JsonObject>();
+        er["field"]  = (const char*)e.s.err.field;
+        er["reason"] = (const char*)e.s.err.reason;
+    } else {
+        doc.remove("error");
+    }
+    const uint32_t now = (uint32_t)time(nullptr);
+    if (now >= 1000000000u) doc["seen"] = now;
+    s_gen++;
+    char p[ncr::PATH_CAP];
+    pathOf(e, p);
+    if (writeJson(p, doc)) return true;
+    Serial.printf("[nodecfg] could not write %s\n", p);
+    return false;
+}
+
+static bool decodeDesired(JsonDocument& doc, NodeConfig& c, bool espnow) {
+    c = configDefaults(espnow ? Transport::EspNow : Transport::Wifi,
+                       espnow ? Hw::Esp32c3 : Hw::Esp8266);
+    return decodeConfig(doc["desired"].as<JsonVariantConst>(), c,
+                        NCJ_DEC_REV | NCJ_DEC_IDENTITY, nullptr);
+}
+
+static void encodeDesired(JsonDocument& doc, const NodeConfig& c) {
+    encodeConfig(c, doc["desired"].to<JsonObject>(), NCJ_SECRETS);
+}
+
+/// A new desired rev: pending, no error, the new name remembered.
+static void bumped(Entry& e, NodeConfig& c) {
+    e.s.rev   = ncr::nextRev(e.s.rev);
+    c.rev     = e.s.rev;
+    c.local   = false;
+    e.s.status = e.s.applied >= e.s.rev ? ncr::ST_APPLIED : ncr::ST_PENDING;
+    e.s.err.field[0] = e.s.err.reason[0] = '\0';
+    copyStr(e.dname, sizeof(e.dname), c.name);
+}
+
+/// The ds18b20 entries of a reported config, for DATA2 naming.
+static void takeProbes(Entry& e, JsonVariantConst reported, NodeConfig& scratch) {
+    if (!e.espnow || !reported.is<JsonObjectConst>()) return;
+    scratch = configDefaults(Transport::EspNow, Hw::Esp32c3);
+    if (!decodeConfig(reported, scratch, NCJ_DEC_REV | NCJ_DEC_IDENTITY, nullptr)) return;
+    ncr::probeMapFrom(scratch, e.probes);
+    e.haveProbes = true;
+}
+
+/// Store a report as `reported`, stamped with the rev the node now runs.
+static void keepReport(Entry& e, JsonDocument& doc, JsonObjectConst rep, NodeConfig& scratch) {
+    JsonObject r = doc["reported"].to<JsonObject>();
+    r.set(rep);
+    r["rev"]   = e.s.applied;
+    r["local"] = false;
+    takeProbes(e, r, scratch);
+}
+
+#ifdef FEATURE_ESPNOW_INGEST
+static void tableFollows(const Entry& e, const NodeConfig& c) {
+    if (e.espnow) espnowUpdateNode(e.id, ncr::validName(c.name) ? c.name : nullptr, c.interval_s);
+}
+#else
+static void tableFollows(const Entry&, const NodeConfig&) {}
+#endif
+
+// ============================================================================
+// Boot
+// ============================================================================
+
+void nodeCfgBegin() {
+    if (s_mx) return;
+    Work* w = new (std::nothrow) Work;
+    if (!w) return;
+
+    // Names first, under one hold of fsMutex; the files are read afterwards,
+    // each under its own, so StorageTask is not held off for the whole scan.
+    char names[NODECFG_MAX_NODES + 2][24];
+    int  n = 0;
+    {
+        MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+        if (!fsMutex || g.isLocked()) {
+            if (!LittleFS.exists(NODES_DIR)) LittleFS.mkdir(NODES_DIR);
+            File d = LittleFS.open(NODES_DIR);
+            if (d && d.isDirectory()) {
+                while (File f = d.openNextFile()) {
+                    if (n < (int)(sizeof(names) / sizeof(names[0])))
+                        copyStr(names[n++], sizeof(names[0]), f.name());
+                    f.close();
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < n; i++) {
+        const char* nm = names[i];
+        const size_t len = strlen(nm);
+        if (len < 8 || strcmp(nm + len - 5, ".json") != 0 || nm[1] != '_') continue;
+        char base[NODE_NAME_MAX + 1];
+        if (len - 7 > NODE_NAME_MAX) continue;
+        memcpy(base, nm + 2, len - 7);
+        base[len - 7] = '\0';
+
+        char key[ncr::KEY_CAP] = { nm[0], ':', 0 };
+        strAppend(key, sizeof(key), base);
+        bool espnow; char name[NODE_NAME_MAX + 1]; uint8_t id;
+        if (!ncr::parseKey(key, espnow, name, id)) continue;
+        Entry* e = alloc(espnow, name, id);
+        if (!e || !loadEntry(*e, w->doc)) { if (e) e->used = false; continue; }
+
+        JsonDocument& d = w->doc;
+        e->s.rev     = d["desired"]["rev"] | 0;
+        e->s.applied = d["applied_rev"] | 0;
+        e->s.hoRev   = d["ho_rev"] | 0;
+        e->s.status  = ncr::statusParse(d["status"] | "");
+        if (e->s.status == ncr::ST_NONE)
+            e->s.status = ncr::statusAfterApplied(ncr::ST_PENDING, e->s.rev, e->s.applied);
+        copyStr(e->s.err.field, sizeof(e->s.err.field), d["error"]["field"] | "");
+        copyStr(e->s.err.reason, sizeof(e->s.err.reason), d["error"]["reason"] | "");
+        copyStr(e->dname, sizeof(e->dname), d["desired"]["name"] | "");
+        takeProbes(*e, d["reported"], w->cfg);
+    }
+
+    if (readJson(HO_PATH, w->doc) && (w->doc["ssid"] | "")[0]) {
+        s_ho.active  = true;
+        s_ho.startMs = millis();
+        copyStr(s_ho.ssid, sizeof(s_ho.ssid), w->doc["ssid"] | "");
+    }
+    delete w;
+
+    s_mx = xSemaphoreCreateMutex();
+}
+
+uint32_t nodeCfgGeneration() { return s_gen; }
+
+bool nodeCfgSummary(bool espnow, const char* name, uint8_t id, NodeCfgSummary& out) {
+    NC_LOCK(500, false);
+    const Entry* e = find(espnow, name, id);
+    if (!e) return false;
+    out = e->s;
+    return true;
+}
+
+int nodeCfgKeys(NodeCfgKey* out, int max) {
+    NC_LOCK(500, 0);
+    int n = 0;
+    for (const Entry& e : s_e) {
+        if (!e.used || n >= max) continue;
+        out[n].espnow = e.espnow;
+        out[n].id     = e.id;
+        copyStr(out[n].name, sizeof(out[n].name), e.name);
+        n++;
+    }
+    return n;
+}
+
+void nodeCfgPutSummary(JsonObject node, bool espnow, const char* name, uint8_t id) {
+    NodeCfgSummary s;
+    if (!nodeCfgSummary(espnow, name, id, s)) return;
+    char key[ncr::KEY_CAP];
+    ncr::formatKey(key, espnow, name, id);
+    JsonObject c = node["cfg"].to<JsonObject>();
+    c["key"]         = (const char*)key;
+    c["rev"]         = s.rev;
+    c["applied_rev"] = s.applied;
+    c["status"]      = ncr::statusName(s.status);
+    if (s.status == ncr::ST_REJECTED) {
+        JsonObject er = c["error"].to<JsonObject>();
+        er["field"]  = (const char*)s.err.field;
+        er["reason"] = (const char*)s.err.reason;
+    }
+}
+
+// ============================================================================
+// WiFi node — §3
+// ============================================================================
+
+void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
+    JsonVariantConst cr = body["cfg_rev"];
+    if (!cr.is<unsigned>() || !ncr::validName(node)) return;
+    const uint16_t nodeRev = (uint16_t)cr.as<unsigned>();
+    JsonObjectConst rep = body["cfg"];
+    JsonObjectConst ce  = body["cfg_error"];
+
+    NC_LOCK(2000, );
+    Entry* e = find(false, node, 0);
+    if (!e) {
+        // A node the collector renamed now posts under its new name. Its file
+        // is still under the old one; move it rather than lose it.
+        for (Entry& x : s_e) {
+            if (!x.used || x.espnow || strcmp(x.dname, node) != 0) continue;
+            char from[ncr::PATH_CAP], to[ncr::PATH_CAP];
+            pathOf(x, from);
+            ncr::filePath(to, false, node, 0);
+            MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+            if (fsMutex && !g.isLocked()) break;
+            if (LittleFS.rename(from, to)) { copyStr(x.name, sizeof(x.name), node); e = &x; }
+            break;
+        }
+    }
+    if (!e && rep.isNull()) return;       // nothing held, nothing reported
+
+    Work* w = new (std::nothrow) Work;
+    if (!w) return;
+    bool haveFile = e && loadEntry(*e, w->doc);
+    if (e && !haveFile) {                 // the file went; so does the entry
+        e->used = false;
+        e = nullptr;
+        if (rep.isNull()) { delete w; return; }
+    }
+
+    bool     save    = false;
+    bool     adopted = false;
+    uint16_t refused = 0;
+
+    if (!ce.isNull()) {
+        refused = ce["rev"] | 0;
+        if (e && refused == e->s.rev && e->s.status != ncr::ST_REJECTED) {
+            e->s.status = ncr::ST_REJECTED;
+            copyStr(e->s.err.field, sizeof(e->s.err.field), ce["field"] | "");
+            copyStr(e->s.err.reason, sizeof(e->s.err.reason), ce["reason"] | "");
+            save = true;
+        }
+    }
+
+    uint16_t applied = nodeRev;
+    if (!rep.isNull()) {
+        const bool     local = rep["local"] | false;
+        const uint16_t rrev  = rep["rev"] | nodeRev;
+        const ncr::ReportPlan plan = ncr::planReport(e != nullptr, e ? e->s.rev : 0, rrev, local);
+        applied = plan.applied;
+        if (!plan.adopt) {
+            e->s.applied = applied;     // `have` was true, so e is set
+            e->s.status  = ncr::statusAfterApplied(e->s.status, e->s.rev, applied);
+            if (applied >= e->s.rev) w->doc["sec_dirty"] = 0;
+        } else {
+            if (e) decodeDesired(w->doc, w->cfg, false);
+            else   w->cfg = configDefaults(Transport::Wifi, Hw::Esp8266);
+            Issue is;
+            if (decodeConfig(rep, w->cfg, NCJ_DEC_REV | NCJ_DEC_IDENTITY, &is) &&
+                (e || (e = alloc(false, node, 0)) != nullptr)) {
+                w->cfg.transport = Transport::Wifi;
+                w->cfg.rev   = plan.rev;
+                w->cfg.local = false;
+                encodeDesired(w->doc, w->cfg);
+                // The node's own secrets are what it runs; the collector's copy
+                // may be stale, so none is sent until it is edited here again.
+                w->doc["sec_known"] = ncr::reportSecretsKnown(rep);
+                w->doc["sec_dirty"] = 0;
+                e->s.rev     = plan.rev;
+                e->s.applied = plan.rev;
+                e->s.status  = ncr::ST_APPLIED;
+                e->s.err.field[0] = e->s.err.reason[0] = '\0';
+                copyStr(e->dname, sizeof(e->dname), w->cfg.name);
+                adopted = true;
+            } else {
+                Serial.printf("[nodecfg] report from %s not adopted: %s %s\n",
+                              node, is.field, is.reason);
+                if (!e) { delete w; return; }
+            }
+        }
+        if (e) { keepReport(*e, w->doc, rep, w->cfg); save = true; }
+    }
+
+    if (e && !adopted && applied != e->s.applied) {
+        e->s.applied = applied;
+        e->s.status  = ncr::statusAfterApplied(e->s.status, e->s.rev, applied);
+        if (applied >= e->s.rev) w->doc["sec_dirty"] = 0;
+        save = true;
+    }
+
+    if (e) {
+        switch (ncr::ingestReply(adopted, e->s.status, e->s.rev, applied, refused)) {
+            case ncr::REPLY_REV:
+                reply["cfg"]["rev"] = e->s.rev;
+                break;
+            case ncr::REPLY_FULL: {
+                JsonObject c = reply["cfg"].to<JsonObject>();
+                c.set(w->doc["desired"].as<JsonObjectConst>());
+                ncr::secretsForNode(c, w->doc["sec_dirty"] | 0);
+                break;
+            }
+            default:
+                break;
+        }
+        if (save) saveEntry(*e, w->doc);
+    }
+    delete w;
+}
+
+// ============================================================================
+// ESP-NOW node — §5
+// ============================================================================
+
+bool nodeCfgRadioState(uint8_t id, NodeCfgRadio& r) {
+    r = NodeCfgRadio{ false, 0, 0, ncr::ST_NONE };
+    NC_LOCK(200, false);
+    const Entry* e = find(true, nullptr, id);
+    if (e) { r.have = true; r.rev = e->s.rev; r.applied = e->s.applied; r.status = e->s.status; }
+    return true;
+}
+
+uint16_t nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
+                             const char* label, uint16_t intervalS) {
+    Work* w = new (std::nothrow) Work;
+    if (!w) return 0;
+    uint16_t out = 0;
+    do {
+        if (deserializeJson(w->aux, json, len) || !w->aux.is<JsonObject>()) break;
+        JsonObjectConst rep = w->aux.as<JsonObjectConst>();
+
+        MutexGuard g(s_mx, pdMS_TO_TICKS(2000));
+        if (!g.isLocked()) break;
+        Entry* e = find(true, nullptr, id);
+        if (e && !loadEntry(*e, w->doc)) { e->used = false; e = nullptr; }
+
+        const bool     local = rep["local"] | false;
+        const uint16_t rrev  = rep["rev"] | 0;
+        const ncr::ReportPlan plan = ncr::planReport(e != nullptr, e ? e->s.rev : 0, rrev, local);
+        if (plan.adopt) {
+            const bool first = (e == nullptr);
+            if (e) decodeDesired(w->doc, w->cfg, true);
+            else   w->cfg = configDefaults(Transport::EspNow, Hw::Esp32c3);
+            Issue is;
+            if (!decodeConfig(rep, w->cfg, NCJ_DEC_REV | NCJ_DEC_IDENTITY, &is)) {
+                Serial.printf("[nodecfg] report from node %u not adopted: %s %s\n",
+                              id, is.field, is.reason);
+                break;
+            }
+            if (!e && (e = alloc(true, nullptr, id)) == nullptr) break;
+            w->cfg.transport = Transport::EspNow;
+            e->s.rev     = plan.rev;
+            e->s.applied = plan.rev;
+            w->cfg.rev   = plan.rev;
+            w->cfg.local = false;
+            e->s.status  = ncr::ST_APPLIED;
+            e->s.err.field[0] = e->s.err.reason[0] = '\0';
+            // First contact: the table's label and interval win, and the node
+            // is sent them in the next rev. After a local edit the table
+            // follows the node instead (§0.4, local edits win).
+            if (first) {
+                if (ncr::adoptTableIdentity(w->cfg, label, intervalS)) bumped(*e, w->cfg);
+            } else {
+                tableFollows(*e, w->cfg);
+            }
+            copyStr(e->dname, sizeof(e->dname), w->cfg.name);
+            encodeDesired(w->doc, w->cfg);
+        } else {
+            e->s.applied = plan.applied;
+            e->s.status  = ncr::statusAfterApplied(e->s.status, e->s.rev, plan.applied);
+        }
+        keepReport(*e, w->doc, rep, w->cfg);
+        saveEntry(*e, w->doc);
+        out = e->s.applied;
+    } while (false);
+    delete w;
+    return out;
+}
+
+void nodeCfgEspnowAck(uint8_t id, uint16_t rev, bool ok, const char* field, const char* reason) {
+    NC_LOCK(2000, );
+    Entry* e = find(true, nullptr, id);
+    if (!e) return;
+    if (ok) {
+        if (rev == e->s.applied) return;
+        e->s.applied = rev;
+        e->s.status  = ncr::statusAfterApplied(e->s.status, e->s.rev, rev);
+    } else {
+        if (rev != e->s.rev || e->s.status == ncr::ST_REJECTED) return;
+        e->s.status = ncr::ST_REJECTED;
+        copyStr(e->s.err.field, sizeof(e->s.err.field), field);
+        copyStr(e->s.err.reason, sizeof(e->s.err.reason), reason);
+    }
+    Work* w = new (std::nothrow) Work;
+    if (!w) { s_gen++; return; }
+    if (loadEntry(*e, w->doc)) saveEntry(*e, w->doc);
+    else s_gen++;
+    delete w;
+}
+
+size_t nodeCfgRadioDoc(uint8_t id, char* buf, size_t cap, uint16_t& rev) {
+    NC_LOCK(2000, 0);
+    const Entry* e = find(true, nullptr, id);
+    if (!e || !ncr::shouldSend(e->s.status, e->s.rev, e->s.applied)) return 0;
+    Work* w = new (std::nothrow) Work;
+    if (!w) return 0;
+    size_t n = 0;
+    if (loadEntry(*e, w->doc)) {
+        // `desired` of an ESP-NOW node was written from a config whose
+        // transport is espnow, so it has no `net` and no secrets to strip.
+        JsonVariantConst d = w->doc["desired"];
+        const size_t need = measureJson(d);
+        if (need <= EN_CFG_MAX_TOTAL && need < cap) {
+            n = serializeJson(d, buf, cap);
+            rev = e->s.rev;
+        } else {
+            Serial.printf("[nodecfg] config for node %u is %u bytes — too big for the radio\n",
+                          id, (unsigned)need);
+        }
+    }
+    delete w;
+    return n;
+}
+
+bool nodeCfgProbeMap(uint8_t id, ncr::ProbeMap& out) {
+    NC_LOCK(200, false);
+    const Entry* e = find(true, nullptr, id);
+    if (!e || !e->haveProbes) return false;
+    out = e->probes;
+    return true;
+}
+
+void nodeCfgForget(bool espnow, const char* name, uint8_t id) {
+    NC_LOCK(2000, );
+    Entry* e = find(espnow, name, id);
+    if (!e) return;
+    char p[ncr::PATH_CAP];
+    pathOf(*e, p);
+    removeFile(p);
+    e->used = false;
+    s_gen++;
+}
+
+// ============================================================================
+// The Nodes page — §7
+// ============================================================================
+
+static int fail400(JsonDocument& out, const char* field, const char* reason) {
+    out["ok"]     = false;
+    out["field"]  = field;
+    out["reason"] = reason;
+    return 400;
+}
+
+int nodeCfgApiGet(const char* key, bool known, JsonDocument& out) {
+    bool espnow; char name[NODE_NAME_MAX + 1]; uint8_t id;
+    if (!ncr::parseKey(key, espnow, name, id)) return fail400(out, "key", "not a node key");
+
+    Work* w = new (std::nothrow) Work;
+    if (!w) return 500;
+    int code = 200;
+    {
+        MutexGuard g(s_mx, pdMS_TO_TICKS(2000));
+        const Entry* e = g.isLocked() ? find(espnow, name, id) : nullptr;
+        if (!g.isLocked()) {
+            code = 503;
+        } else if (!e && !known) {
+            out["ok"] = false;
+            out["error"] = "unknown node";
+            code = 404;
+        } else {
+            out["key"]       = key;
+            out["transport"] = espnow ? "espnow" : "wifi";
+            Hw hw = espnow ? Hw::Esp32c3 : Hw::Esp8266;
+            if (e && loadEntry(*e, w->doc)) {
+                JsonObject d = out["desired"].to<JsonObject>();
+                d.set(w->doc["desired"].as<JsonObjectConst>());
+                ncr::secretsForGet(d, w->doc["sec_known"] | 0);
+                out["reported"].set(w->doc["reported"]);
+                out["applied_rev"] = e->s.applied;
+                out["status"]      = ncr::statusName(e->s.status);
+                if (e->s.status == ncr::ST_REJECTED) {
+                    JsonObject er = out["error"].to<JsonObject>();
+                    er["field"]  = (const char*)e->s.err.field;
+                    er["reason"] = (const char*)e->s.err.reason;
+                } else {
+                    out["error"] = nullptr;
+                }
+                parseHw(w->doc["reported"]["hw"] | "", hw);
+            } else {
+                out["desired"]     = nullptr;
+                out["reported"]    = nullptr;
+                out["applied_rev"] = 0;
+                out["status"]      = nullptr;
+                out["error"]       = nullptr;
+            }
+            encodeCaps(espnow ? Transport::EspNow : Transport::Wifi, hw,
+                       out["caps"].to<JsonObject>());
+        }
+    }
+    delete w;
+    return code;
+}
+
+int nodeCfgApiPost(JsonObjectConst body, JsonDocument& out) {
+    bool espnow; char name[NODE_NAME_MAX + 1]; uint8_t id;
+    if (!ncr::parseKey(body["key"] | "", espnow, name, id))
+        return fail400(out, "key", "not a node key");
+    JsonVariantConst in = body["config"];
+    if (!in.is<JsonObjectConst>()) return fail400(out, "config", "must be an object");
+
+    Work* w = new (std::nothrow) Work;
+    if (!w) return 500;
+    int code = 200;
+    do {
+        MutexGuard g(s_mx, pdMS_TO_TICKS(3000));
+        if (!g.isLocked()) { code = 503; break; }
+        Entry* e = find(espnow, name, id);
+        if (!e || !loadEntry(*e, w->doc) || !decodeDesired(w->doc, w->cfg, espnow)) {
+            code = fail400(out, "key", "no config for this node yet");
+            break;
+        }
+        w->old = w->cfg;
+        Issue is;
+        if (!decodeConfig(in, w->cfg, 0, &is)) { code = fail400(out, is.field, is.reason); break; }
+        // The next network is the handover's to set and to take back (§4),
+        // not the page's: an edit made during a handover must not drop it.
+        w->cfg.net.next = w->old.net.next;
+        copyStr(w->cfg.link.next_ssid, sizeof(w->cfg.link.next_ssid), w->old.link.next_ssid);
+
+        if (!validate(w->cfg, w->v)) {
+            encodeValidation(w->v, out.to<JsonObject>());
+            code = 400;
+            break;
+        }
+        uint8_t known = w->doc["sec_known"] | 0, dirty = w->doc["sec_dirty"] | 0;
+        ncr::secretsEdited(ncr::secretsDiff(w->old, w->cfg), w->cfg, known, dirty);
+        w->doc["sec_known"] = known;
+        w->doc["sec_dirty"] = dirty;
+        bumped(*e, w->cfg);
+        encodeDesired(w->doc, w->cfg);
+        if (!saveEntry(*e, w->doc)) { code = 500; out["ok"] = false; out["reason"] = "could not save"; break; }
+        tableFollows(*e, w->cfg);
+        encodeValidation(w->v, out.to<JsonObject>());
+        out["rev"] = e->s.rev;
+    } while (false);
+    delete w;
+    return code;
+}
+
+// ============================================================================
+// Handover — §4
+// ============================================================================
+
+bool nodeCfgHandoverActive() {
+    NC_LOCK(500, false);
+    return s_ho.active;
+}
+
+uint32_t nodeCfgHandoverStartedMs() { return s_ho.startMs; }
+
+void nodeCfgHandoverSsid(char out[SSID_CAP]) {
+    out[0] = '\0';
+    NC_LOCK(500, );
+    copyStr(out, SSID_CAP, s_ho.ssid);
+}
+
+/// Hand every node the next network (ssid "" takes it back) in a new rev.
+static void handAll(Work* w, const char* ssid, const char* pass, bool start) {
+    for (Entry& e : s_e) {
+        if (!e.used || !loadEntry(e, w->doc) || !decodeDesired(w->doc, w->cfg, e.espnow)) continue;
+        const uint8_t changed = ncr::hoApplyNext(w->cfg, ssid, pass);
+        uint8_t known = w->doc["sec_known"] | 0, dirty = w->doc["sec_dirty"] | 0;
+        ncr::secretsEdited(changed, w->cfg, known, dirty);
+        w->doc["sec_known"] = known;
+        w->doc["sec_dirty"] = dirty;
+        bumped(e, w->cfg);
+        e.s.hoRev = start ? e.s.rev : 0;
+        encodeDesired(w->doc, w->cfg);
+        saveEntry(e, w->doc);
+    }
+}
+
+bool nodeCfgHandoverStart(const char* ssid, const char* pass, JsonVariantConst form) {
+    Work* w = new (std::nothrow) Work;
+    if (!w) return false;
+    bool ok = false;
+    {
+        MutexGuard g(s_mx, pdMS_TO_TICKS(3000));
+        if (g.isLocked()) {
+            w->aux["ssid"] = ssid;
+            w->aux["pass"] = pass;
+            if (!form.isNull()) w->aux["form"].set(form);
+            if (writeJson(HO_PATH, w->aux)) {
+                s_ho.active  = true;
+                s_ho.startMs = millis();
+                copyStr(s_ho.ssid, sizeof(s_ho.ssid), ssid);
+                handAll(w, ssid, pass, true);
+                ok = true;
+            }
+        }
+    }
+    delete w;
+    return ok;
+}
+
+bool nodeCfgHandoverCancel() {
+    Work* w = new (std::nothrow) Work;
+    if (!w) return false;
+    bool ok = false;
+    {
+        MutexGuard g(s_mx, pdMS_TO_TICKS(3000));
+        if (g.isLocked()) {
+            if (s_ho.active) handAll(w, "", "", false);
+            s_ho.active = false;
+            removeFile(HO_PATH);
+            ok = true;
+        }
+    }
+    delete w;
+    return ok;
+}
+
+bool nodeCfgHandoverFinish(JsonDocument& out) {
+    NC_LOCK(3000, false);
+    if (!s_ho.active || !readJson(HO_PATH, out)) return false;
+    s_ho.active = false;
+    removeFile(HO_PATH);
+    for (Entry& e : s_e) e.s.hoRev = 0;
+    s_gen++;
+    return true;
+}
+
+#endif  // FEATURE_REMOTE_NODES
