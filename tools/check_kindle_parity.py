@@ -240,7 +240,7 @@ def self_test():
     of them in memory and assert the comparison notices. Nothing on disk is
     touched, so there is no restore to get wrong and no shape to match.
     """
-    sheet = extract_css(CPP, '#define KD_N(n)   p += kdPx(n)', '#undef KD_S')
+    sheet = extract_css(CPP, '#define KD_N(n)', '#undef KD_S')
     fails = []
 
     # Both directions, because the drift can start at either end: a layout
@@ -282,7 +282,7 @@ def self_test():
 
 
 def main():
-    sheet = extract_css(CPP, '#define KD_N(n)   p += kdPx(n)', '#undef KD_S')
+    sheet = extract_css(CPP, '#define KD_N(n)', '#undef KD_S')
     if len(sheet) < 1500:
         raise SystemExit('parity: stylesheet extraction produced %d chars — '
                          'the emitter changed shape' % len(sheet))

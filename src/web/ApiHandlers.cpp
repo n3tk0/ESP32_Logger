@@ -994,7 +994,7 @@ static void handleKindleSlotsPost(AsyncWebServerRequest* req, uint8_t* data, siz
     if (!requireMutatingAuth(req)) return;
 
     JsonDocument doc;
-    if (deserializeJson(doc, data, len) != DeserializationError::Ok) {
+    if (deserializeJson(doc, (const char*)data, len) != DeserializationError::Ok) {
         req->send(400, "application/json", "{\"ok\":false,\"error\":\"bad JSON\"}");
         return;
     }
@@ -1413,7 +1413,7 @@ static void handleApiModuleUpdate(AsyncWebServerRequest* req, const String& id,
         return;
     }
     JsonDocument body;
-    DeserializationError err = deserializeJson(body, data, len);
+    DeserializationError err = deserializeJson(body, (const char*)data, len);
     if (err) {
         req->send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}");
         return;
@@ -1642,7 +1642,7 @@ static void handleApiWifiTest(AsyncWebServerRequest* req,
     // until X-CSRF-Token header support lands.
 
     JsonDocument body;
-    if (deserializeJson(body, data, len)) {
+    if (deserializeJson(body, (const char*)data, len)) {
         req->send(400, "application/json",
                   "{\"ok\":false,\"error\":\"bad json\"}");
         return;
@@ -1829,7 +1829,7 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
         inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
     }
 
-    serializeJson(doc, *resp);
+    serializeJson(doc, static_cast<Print&>(*resp));
     xSemaphoreGive(configMutex);
     req->send(resp);
 }

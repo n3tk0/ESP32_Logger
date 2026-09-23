@@ -77,7 +77,7 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
     if (rateLimit429(req)) return;
 
     JsonDocument body;
-    if (deserializeJson(body, data, len)) {
+    if (deserializeJson(body, (const char*)data, len)) {
         req->send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}");
         return;
     }
@@ -376,7 +376,7 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
     JsonVariantConst c = cfg["cfg"];
     if (!c.isNull()) {
         resp->print(",\"cfg\":");
-        serializeJson(c, *resp);
+        serializeJson(c, static_cast<Print&>(*resp));
     }
     resp->print('}');
     req->send(resp);

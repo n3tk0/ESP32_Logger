@@ -175,7 +175,7 @@ bool ExportManager::_drainSpool(IExporter* exp) {
         lineBuf[len] = '\0';
 
         JsonDocument doc;
-        if (deserializeJson(doc, lineBuf) != DeserializationError::Ok) continue;
+        if (deserializeJson(doc, (const char*)lineBuf, len) != DeserializationError::Ok) continue;
 
         SensorReading& sr = batch[count];
         sr.timestamp = doc["ts"] | 0;

@@ -13,7 +13,7 @@ void SerialProvisioner::_respond(const char* json) {
 void SerialProvisioner::_respondDoc(JsonDocument& doc) {
     // Serialize directly to Serial to avoid an intermediate String heap allocation.
     Serial.print(SERIAL_RESP_PREFIX);
-    serializeJson(doc, Serial);
+    serializeJson(doc, static_cast<Print&>(Serial));
     Serial.println();
 }
 
@@ -42,7 +42,7 @@ void SerialProvisioner::_dispatch(const char* line) {
     if (line[0] != '{') return;
 
     JsonDocument doc;
-    if (deserializeJson(doc, line) != DeserializationError::Ok) {
+    if (deserializeJson(doc, line, strlen(line)) != DeserializationError::Ok) {
         _respond("{\"ok\":false,\"err\":\"parse_error\"}");
         return;
     }

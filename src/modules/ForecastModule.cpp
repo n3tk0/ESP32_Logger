@@ -418,7 +418,7 @@ bool ForecastModule::_fetchOpenMeteo() {
     }
 
     JsonDocument doc;
-    if (deserializeJson(doc, body, DeserializationOption::Filter(filter))) {
+    if (deserializeJson(doc, body.c_str(), body.length(), DeserializationOption::Filter(filter))) {
         Serial.println("[forecast] open-meteo: bad json");
         return false;
     }
@@ -497,7 +497,7 @@ bool ForecastModule::_fetchOwm() {
     filter["weather"][0]["id"] = true;
 
     JsonDocument doc;
-    if (deserializeJson(doc, body, DeserializationOption::Filter(filter))) {
+    if (deserializeJson(doc, body.c_str(), body.length(), DeserializationOption::Filter(filter))) {
         Serial.println("[forecast] owm: bad json");
         return false;
     }
@@ -551,7 +551,7 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
     filter["city"]["timezone"] = true;
 
     JsonDocument doc;
-    if (deserializeJson(doc, body, DeserializationOption::Filter(filter))) {
+    if (deserializeJson(doc, body.c_str(), body.length(), DeserializationOption::Filter(filter))) {
         Serial.println("[forecast] owm: bad forecast json");
         return false;
     }

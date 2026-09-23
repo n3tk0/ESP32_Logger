@@ -1742,6 +1742,29 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     req->send(s);
 }
 
+/// Appends `sheet` to `p`, replacing every "$n" / "$-n" with kdPx(n). The
+/// sheet is the KD_S/KD_N literal in handleKindle(); see the note there. A '$'
+/// not followed by a digit or a '-' is copied as it is.
+static void kdEmitSheet(String& p, const char* sheet) {
+    const char* seg = sheet;
+    for (const char* d; (d = strchr(seg, '$')) != nullptr; ) {
+        const char* q = d + 1;
+        const bool neg = (*q == '-');
+        if (neg) q++;
+        if (*q < '0' || *q > '9') {             // not a placeholder
+            p.concat(seg, (unsigned)(q - seg));
+            seg = q;
+            continue;
+        }
+        p.concat(seg, (unsigned)(d - seg));
+        int n = 0;
+        while (*q >= '0' && *q <= '9') n = n * 10 + (*q++ - '0');
+        p += kdPx(neg ? -n : n);
+        seg = q;
+    }
+    p += seg;
+}
+
 static void handleKindle(AsyncWebServerRequest* req) {
     // THE LANGUAGE, FIRST, BEFORE ANYTHING IS WORDED. kdT() and the weekday and
     // month tables read one ambient value rather than taking a parameter each —
@@ -1806,20 +1829,28 @@ static void handleKindle(AsyncWebServerRequest* req) {
     p += kdT("Weather", "Времето");
     p += F("</title><style>");
 
-    // The stylesheet, emitted rather than stored as one literal: every number
-    // in it is a 600-px-layout figure passed through kdPx(). KD_S is a literal
-    // fragment, KD_N a scaled number — reading a line as "fragment, number,
-    // fragment" is how to check one against the design it came from.
-    #define KD_S(lit) p += F(lit)
-    #define KD_N(n)   p += kdPx(n)
-
+    // The stylesheet: every number in it is a 600-px-layout figure passed
+    // through kdPx(). KD_S is a literal fragment, KD_N a scaled number —
+    // reading a line as "fragment, number, fragment" is how to check one
+    // against the design it came from.
+    //
+    // ONE CALL, NOT 271. The macros only build a string literal: KD_N(14)
+    // becomes "$14", and the whole sheet below is one argument that
+    // kdEmitSheet() walks at run time, scaling each $n as it goes. Written as
+    // one `p +=` per fragment it was the same text plus 2.7 KB of call sites.
+    // Keep it to KD_S and KD_N — no statement, no branch, no semicolon — both
+    // because it is one expression and because tools/kindle_preview and
+    // tools/check_kindle_parity.py rebuild this sheet by reading these lines.
+    #define KD_S(lit) lit
+    #define KD_N(n)   "$" #n
+    kdEmitSheet(p,
     KD_S("body{font-family:Bookerly,Caecilia,Georgia,'Times New Roman',serif;"
-         "margin:0;padding:");                 KD_N(14);
-    KD_S("px ");                               KD_N(18);
+         "margin:0;padding:")                 KD_N(14)
+    KD_S("px ")                               KD_N(18)
     KD_S("px;background:#fff;color:#000;-webkit-text-size-adjust:none}"
          "*{box-sizing:border-box}"
          "table{width:100%;border-collapse:collapse}"
-         "td{vertical-align:top;padding:0}");
+         "td{vertical-align:top;padding:0}")
 
     // Palette: #000 #444 #777 #aaa #d8d8d8 #fff. The panel has 16 real grey
     // levels — the dithering that argued against greys here comes from
@@ -1830,16 +1861,16 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // levels — the dithering that argued against greys here comes from
     // gradients and from tones too close together, not from flat
     // well-separated fills. Spaced this far apart each renders solid.
-    KD_S(".top td{padding:");                  KD_N(2);
-    KD_S("px 0 ");                             KD_N(4);
-    KD_S("px}");
+    KD_S(".top td{padding:")                  KD_N(2)
+    KD_S("px 0 ")                             KD_N(4)
+    KD_S("px}")
 
     // Two classes, not one: .top td above is (0,1,1) and would otherwise
     // outrank a bare .sep (0,1,0), zeroing this padding and letting the rule
     // sit against the first glyph of the indoor block.
-    KD_S(".top .sep{border-left:");             KD_N(1);
-    KD_S("px solid #aaa;padding-left:");        KD_N(30);
-    KD_S("px}");
+    KD_S(".top .sep{border-left:")             KD_N(1)
+    KD_S("px solid #aaa;padding-left:")        KD_N(30)
+    KD_S("px}")
 
     // The badge sits on the heading's own line, pushed right. float and not
     // flex: this page is built for a browser that may be WebKit 531, where
@@ -1851,17 +1882,17 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // battery is going. Pulling its margin box back inside the line makes the
     // page the same height whether the badge is drawn or not, which is what
     // tools/kindle_preview/README.md asks anyone changing this to check.
-    KD_S(".bw{float:right;margin-top:"); KD_N(-2);
-    KD_S("px;margin-bottom:");           KD_N(-4);
-    KD_S("px}");
+    KD_S(".bw{float:right;margin-top:") KD_N(-2)
+    KD_S("px;margin-bottom:")           KD_N(-4)
+    KD_S("px}")
 
     // ONE CAPTION STYLE FOR THE WHOLE PAGE. The group headings, the cell
     // captions and the section rules below all use it, so a reader who has
     // learnt what small tracked grey means on this page has learnt it once.
-    KD_S(".lab{font-size:");                   KD_N(14);
-    KD_S("px;letter-spacing:");                KD_N(2);
-    KD_S("px;text-transform:uppercase;margin-bottom:"); KD_N(2);
-    KD_S("px;color:#777;white-space:nowrap;overflow:hidden}");
+    KD_S(".lab{font-size:")                   KD_N(14)
+    KD_S("px;letter-spacing:")                KD_N(2)
+    KD_S("px;text-transform:uppercase;margin-bottom:") KD_N(2)
+    KD_S("px;color:#777;white-space:nowrap;overflow:hidden}")
 
     // ── The headline ────────────────────────────────────────────────────────
     // HERO and BIG on one baseline with a slash between them. They are usually
@@ -1871,28 +1902,28 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // nowrap and hidden rather than a smaller face at some width: the pair is
     // the one thing on the page that must not reflow, and the sizes below were
     // measured against the widest it gets, -12.4° / 100%.
-    KD_S(".head{line-height:1.02;white-space:nowrap;overflow:hidden;letter-spacing:-");
-    KD_N(1);
-    KD_S("px}");
-    KD_S(".v1{font-size:");                    KD_N(88);
-    KD_S("px}");
-    KD_S(".v2{font-size:");                    KD_N(44);
-    KD_S("px;color:#444;letter-spacing:");     KD_N(-1);
-    KD_S("px}");
-    KD_S(".slash{font-size:");                 KD_N(44);
-    KD_S("px;color:#aaa;letter-spacing:0;padding:0 "); KD_N(7);
-    KD_S("px;position:relative;top:");         KD_N(-5);
-    KD_S("px}");
+    KD_S(".head{line-height:1.02;white-space:nowrap;overflow:hidden;letter-spacing:-")
+    KD_N(1)
+    KD_S("px}")
+    KD_S(".v1{font-size:")                    KD_N(88)
+    KD_S("px}")
+    KD_S(".v2{font-size:")                    KD_N(44)
+    KD_S("px;color:#444;letter-spacing:")     KD_N(-1)
+    KD_S("px}")
+    KD_S(".slash{font-size:")                 KD_N(44)
+    KD_S("px;color:#aaa;letter-spacing:0;padding:0 ") KD_N(7)
+    KD_S("px;position:relative;top:")         KD_N(-5)
+    KD_S("px}")
 
     // The 24 h low-to-high and the age, on one line under the headline.
     // The 24 h low-to-high and the age, on one line under the headline. Set in
     // the page's mid grey rather than its dark one: it is context for the big
     // number above it, not a reading in its own right, and at #444 it competed
     // with the grid underneath. Switchable off entirely — see KSHOW_RANGE.
-    KD_S(".sub{font-size:");                   KD_N(17);
-    KD_S("px;margin-top:");                    KD_N(4);
-    KD_S("px;line-height:1.45;color:#777;white-space:nowrap;overflow:hidden}");
-    KD_S(".dim{color:#777}");
+    KD_S(".sub{font-size:")                   KD_N(17)
+    KD_S("px;margin-top:")                    KD_N(4)
+    KD_S("px;line-height:1.45;color:#777;white-space:nowrap;overflow:hidden}")
+    KD_S(".dim{color:#777}")
 
     // ── The two-by-two grid, and the indoor row ─────────────────────────────
     // The same shape at two sizes: caption above, value under it. A caption on
@@ -1903,13 +1934,13 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // table-layout:fixed so the width attribute is obeyed. Without it the
     // browser sizes columns by content and a four-digit pressure beside a
     // two-digit humidity takes space the layout had allocated.
-    KD_S(".grid,.inrow{table-layout:fixed;margin-top:"); KD_N(8);
-    KD_S("px}");
-    KD_S(".grid td,.inrow td{padding:0 ");     KD_N(10);
-    KD_S("px 0 0;vertical-align:top}");
-    KD_S(".cv{line-height:1.0;white-space:nowrap;overflow:hidden;letter-spacing:-");
-    KD_N(1);
-    KD_S("px}");
+    KD_S(".grid,.inrow{table-layout:fixed;margin-top:") KD_N(8)
+    KD_S("px}")
+    KD_S(".grid td,.inrow td{padding:0 ")     KD_N(10)
+    KD_S("px 0 0;vertical-align:top}")
+    KD_S(".cv{line-height:1.0;white-space:nowrap;overflow:hidden;letter-spacing:-")
+    KD_N(1)
+    KD_S("px}")
     // THE INDOOR ROW ALIGNS ALONG ITS BOTTOM, not its top. The first field has
     // no caption and is half again as tall as the other two, so aligning tops
     // would leave those two floating above a much larger number. The value is
@@ -1923,45 +1954,45 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // a "21.0°" that measures 94, and .cv clips: the degree sign, on the one
     // indoor number anybody reads, simply was not drawn. 6 px is what fits it,
     // and a 6 px gutter beside a legible degree beats a 10 px one beside none.
-    KD_S(".inrow td{vertical-align:bottom;padding-right:"); KD_N(6);
-    KD_S("px}");
-    KD_S(".gv{font-size:");                    KD_N(34);
-    KD_S("px}");
+    KD_S(".inrow td{vertical-align:bottom;padding-right:") KD_N(6)
+    KD_S("px}")
+    KD_S(".gv{font-size:")                    KD_N(34)
+    KD_S("px}")
     // Three across is a third of half a page, which "1008 hPa" with a tendency
     // arrow after it does not fit at the two-across size. The row carries the
     // class, so a page with three in one row and two in the next sets each row
     // at the size its own width can hold.
-    KD_S(".grid-3 .gv{font-size:");            KD_N(27);
-    KD_S("px}");
-    KD_S(".iv{font-size:");                    KD_N(31);
-    KD_S("px}");
+    KD_S(".grid-3 .gv{font-size:")            KD_N(27)
+    KD_S("px}")
+    KD_S(".iv{font-size:")                    KD_N(31)
+    KD_S("px}")
     // The first indoor field is the one the reader looks at, so it is larger by
     // TYPE and not by width — the columns stay equal, which is what keeps the
     // row aligned whether it holds three fields or two.
     // The first indoor field spends its caption's line on type instead: the
     // heading above already says which room this is, so a "TEMP" under it says
     // nothing the degree sign has not.
-    KD_S(".iv-1{font-size:");                  KD_N(52);
-    KD_S("px}");
-    KD_S(".val-b{font-weight:700}");
+    KD_S(".iv-1{font-size:")                  KD_N(52)
+    KD_S("px}")
+    KD_S(".val-b{font-weight:700}")
 
     // How dark a value is drawn, per place. Black is the default and carries no
     // class at all, so a page nobody has touched emits none of these.
-    KD_S(".ink-d{color:#444}");
-    KD_S(".ink-m{color:#777}");
-    KD_S(".ink-l{color:#aaa}");
+    KD_S(".ink-d{color:#444}")
+    KD_S(".ink-m{color:#777}")
+    KD_S(".ink-l{color:#aaa}")
 
     // A unit is a footnote to its number, not a second number.
-    KD_S(".unit{font-size:0.42em;font-weight:400;color:#444;letter-spacing:0}");
+    KD_S(".unit{font-size:0.42em;font-weight:400;color:#444;letter-spacing:0}")
     // The degree, set as the design has always set it: small, at the cap line
     // rather than on the baseline. In em so that one rule serves every size on
     // the page — a pixel offset tuned on the headline is wrong on a grid cell.
     // top is relative to the DEGREE's own size, which is why 0.38 here is the
     // same proportion the fixed 12 px on a 30 px glyph was.
     KD_S(".unit-d{font-size:0.34em;vertical-align:top;line-height:1;"
-         "position:relative;top:0.38em}");
+         "position:relative;top:0.38em}")
     // The three-hour tendency arrow, for the place that asked for one.
-    KD_S(".tend{font-size:0.5em;color:#444;letter-spacing:0;padding-left:0.15em}");
+    KD_S(".tend{font-size:0.5em;color:#444;letter-spacing:0;padding-left:0.15em}")
 
     // ── The clock ───────────────────────────────────────────────────────────
     // THE FIXED HEIGHT IS GONE, and the comment that used to justify it with
@@ -1969,107 +2000,107 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // block now sits under the clock in the same column rather than beside it.
     // What was alignment had become 35 px of empty cell, on a page whose whole
     // budget is one 800 px screen with no scrollbar to reveal what falls off.
-    KD_S(".clock{font-size:");                 KD_N(96);
-    KD_S("px;line-height:");                   KD_N(100);
-    KD_S("px;letter-spacing:");                KD_N(-4);
-    KD_S("px}");
-    KD_S(".clock-x{font-size:");               KD_N(44);
-    KD_S("px;line-height:");                   KD_N(100);
-    KD_S("px;color:#777;letter-spacing:0}");
+    KD_S(".clock{font-size:")                 KD_N(96)
+    KD_S("px;line-height:")                   KD_N(100)
+    KD_S("px;letter-spacing:")                KD_N(-4)
+    KD_S("px}")
+    KD_S(".clock-x{font-size:")               KD_N(44)
+    KD_S("px;line-height:")                   KD_N(100)
+    KD_S("px;color:#777;letter-spacing:0}")
     // The hairline between the clock and the indoor block. Lighter than the
     // page's section rules: it separates two things inside one column, where
     // .rule separates the columns from what is under them.
-    KD_S(".inrule{border-top:");               KD_N(1);
-    KD_S("px solid #d8d8d8;margin:");          KD_N(8);
-    KD_S("px 0 ");                             KD_N(6);
-    KD_S("px}");
+    KD_S(".inrule{border-top:")               KD_N(1)
+    KD_S("px solid #d8d8d8;margin:")          KD_N(8)
+    KD_S("px 0 ")                             KD_N(6)
+    KD_S("px}")
 
     // Three rules on the page, so a few px each is what keeps the footer above
     // the fold. Measured, not guessed.
-    KD_S(".rule{border-top:");                 KD_N(1);
-    KD_S("px solid #aaa;margin:");             KD_N(8);
-    KD_S("px 0 ");                             KD_N(6);
-    KD_S("px}");
-    KD_S(".sec{font-size:");                   KD_N(15);
-    KD_S("px;letter-spacing:");                KD_N(4);
-    KD_S("px;text-transform:uppercase;margin-bottom:"); KD_N(6);
-    KD_S("px;color:#777}");
+    KD_S(".rule{border-top:")                 KD_N(1)
+    KD_S("px solid #aaa;margin:")             KD_N(8)
+    KD_S("px 0 ")                             KD_N(6)
+    KD_S("px}")
+    KD_S(".sec{font-size:")                   KD_N(15)
+    KD_S("px;letter-spacing:")                KD_N(4)
+    KD_S("px;text-transform:uppercase;margin-bottom:") KD_N(6)
+    KD_S("px;color:#777}")
 
-    KD_S(".ico{vertical-align:top;padding-top:"); KD_N(4);
-    KD_S("px}");
-    KD_S(".fc{font-size:");                    KD_N(31);
-    KD_S("px;line-height:1.1;padding-left:");  KD_N(12);
-    KD_S("px}");
-    KD_S(".fc-t{font-size:");                  KD_N(33);
-    KD_S("px;margin-top:");                    KD_N(1);
-    KD_S("px;color:#000}");
+    KD_S(".ico{vertical-align:top;padding-top:") KD_N(4)
+    KD_S("px}")
+    KD_S(".fc{font-size:")                    KD_N(31)
+    KD_S("px;line-height:1.1;padding-left:")  KD_N(12)
+    KD_S("px}")
+    KD_S(".fc-t{font-size:")                  KD_N(33)
+    KD_S("px;margin-top:")                    KD_N(1)
+    KD_S("px;color:#000}")
 
     // Equal thirds of the right half; nowrap so a two-part daily figure never
     // breaks across lines.
-    KD_S(".per{width:");                       KD_N(88);
+    KD_S(".per{width:")                       KD_N(88)
     KD_S("px;text-align:center;vertical-align:top;white-space:nowrap;"
-         "background:#f0f0f0;border-left:");   KD_N(4);
-    KD_S("px solid #fff}");
-    KD_S(".per-l{font-size:");                 KD_N(14);
-    KD_S("px;letter-spacing:");                KD_N(2);
-    KD_S("px;text-transform:uppercase;margin-bottom:"); KD_N(1);
-    KD_S("px;color:#777;padding-top:");        KD_N(3);
-    KD_S("px}");
-    KD_S(".per-t{font-size:");                 KD_N(22);
-    KD_S("px;margin-top:");                    KD_N(-2);
-    KD_S("px;padding-bottom:");                KD_N(5);
-    KD_S("px}");
+         "background:#f0f0f0;border-left:")   KD_N(4)
+    KD_S("px solid #fff}")
+    KD_S(".per-l{font-size:")                 KD_N(14)
+    KD_S("px;letter-spacing:")                KD_N(2)
+    KD_S("px;text-transform:uppercase;margin-bottom:") KD_N(1)
+    KD_S("px;color:#777;padding-top:")        KD_N(3)
+    KD_S("px}")
+    KD_S(".per-t{font-size:")                 KD_N(22)
+    KD_S("px;margin-top:")                    KD_N(-2)
+    KD_S("px;padding-bottom:")                KD_N(5)
+    KD_S("px}")
 
-    KD_S(".chart{display:block;margin:");      KD_N(2);
-    KD_S("px auto 0}");
-    KD_S(".grid{stroke:#c4c4c4;stroke-width:"); KD_N(1);
-    KD_S("}.vgrid{stroke:#d5d5d5;stroke-width:"); KD_N(1);
-    KD_S("}.base{stroke:#777;stroke-width:");  KD_N(1);
-    KD_S("}.ax{font-size:");                   KD_N(14);
-    KD_S("px;fill:#777;font-family:Bookerly,Georgia,serif}");
-    KD_S(".band{fill:#d8d8d8;stroke:#8f8f8f;stroke-width:"); KD_N(1);
-    KD_S("}.l-out{fill:none;stroke:#000;stroke-width:"); KD_N(3);
-    KD_S("}.l-in{fill:none;stroke:#777;stroke-width:"); KD_N(2);
-    KD_S(";stroke-dasharray:");                KD_N(7);
-    KD_S(" ");                                 KD_N(5);
-    KD_S("}");
+    KD_S(".chart{display:block;margin:")      KD_N(2)
+    KD_S("px auto 0}")
+    KD_S(".grid{stroke:#c4c4c4;stroke-width:") KD_N(1)
+    KD_S("}.vgrid{stroke:#d5d5d5;stroke-width:") KD_N(1)
+    KD_S("}.base{stroke:#777;stroke-width:")  KD_N(1)
+    KD_S("}.ax{font-size:")                   KD_N(14)
+    KD_S("px;fill:#777;font-family:Bookerly,Georgia,serif}")
+    KD_S(".band{fill:#d8d8d8;stroke:#8f8f8f;stroke-width:") KD_N(1)
+    KD_S("}.l-out{fill:none;stroke:#000;stroke-width:") KD_N(3)
+    KD_S("}.l-in{fill:none;stroke:#777;stroke-width:") KD_N(2)
+    KD_S(";stroke-dasharray:")                KD_N(7)
+    KD_S(" ")                                 KD_N(5)
+    KD_S("}")
 
-    KD_S(".key{font-size:");                   KD_N(15);
-    KD_S("px;margin-top:");                    KD_N(2);
-    KD_S("px;color:#444}");
-    KD_S(".key td{padding-top:");              KD_N(2);
-    KD_S("px}");
-    KD_S(".note{font-size:");                  KD_N(17);
-    KD_S("px;font-style:italic;text-align:center;padding:"); KD_N(36);
-    KD_S("px 0;color:#777}");
+    KD_S(".key{font-size:")                   KD_N(15)
+    KD_S("px;margin-top:")                    KD_N(2)
+    KD_S("px;color:#444}")
+    KD_S(".key td{padding-top:")              KD_N(2)
+    KD_S("px}")
+    KD_S(".note{font-size:")                  KD_N(17)
+    KD_S("px;font-style:italic;text-align:center;padding:") KD_N(36)
+    KD_S("px 0;color:#777}")
 
     // Tighter under its heading than the two sections above: the strip is a
     // row of blocks, not a paragraph, and the extra gap was what pushed the
     // footer below the fold.
-    KD_S(".sec-wk{margin-bottom:");            KD_N(3);
-    KD_S("px}");
-    KD_S(".wk{margin-top:");                   KD_N(2);
-    KD_S("px}");
-    KD_S(".wd{width:14.28%;text-align:center;padding:"); KD_N(6);
-    KD_S("px 0 ");                             KD_N(5);
-    KD_S("px;background:#f4f4f4}");
-    KD_S(".wd-we{background:#e4e4e4}");
-    KD_S(".wd-n{font-size:");                  KD_N(14);
-    KD_S("px;letter-spacing:");                KD_N(2);
-    KD_S("px;text-transform:uppercase;color:#777}");
-    KD_S(".wd-d{font-size:");                  KD_N(30);
-    KD_S("px;line-height:1.15}");
+    KD_S(".sec-wk{margin-bottom:")            KD_N(3)
+    KD_S("px}")
+    KD_S(".wk{margin-top:")                   KD_N(2)
+    KD_S("px}")
+    KD_S(".wd{width:14.28%;text-align:center;padding:") KD_N(6)
+    KD_S("px 0 ")                             KD_N(5)
+    KD_S("px;background:#f4f4f4}")
+    KD_S(".wd-we{background:#e4e4e4}")
+    KD_S(".wd-n{font-size:")                  KD_N(14)
+    KD_S("px;letter-spacing:")                KD_N(2)
+    KD_S("px;text-transform:uppercase;color:#777}")
+    KD_S(".wd-d{font-size:")                  KD_N(30)
+    KD_S("px;line-height:1.15}")
 
     // Inverted rather than outlined: a filled block is the one mark that stays
     // unambiguous after e-ink dithering, where a thin ring can read as a smudge.
-    KD_S(".wd-now{background:#000;color:#fff}");
+    KD_S(".wd-now{background:#000;color:#fff}")
 
-    KD_S(".foot{border-top:");                 KD_N(1);
-    KD_S("px solid #aaa;margin-top:");         KD_N(6);
-    KD_S("px;font-size:");                     KD_N(15);
-    KD_S("px;color:#555;letter-spacing:.5px}");
-    KD_S(".foot td{padding-top:");             KD_N(4);
-    KD_S("px}");
+    KD_S(".foot{border-top:")                 KD_N(1)
+    KD_S("px solid #aaa;margin-top:")         KD_N(6)
+    KD_S("px;font-size:")                     KD_N(15)
+    KD_S("px;color:#555;letter-spacing:.5px}")
+    KD_S(".foot td{padding-top:")             KD_N(4)
+    KD_S("px}")
 
     // Boxed rather than underlined so the target is visible before it is
     // touched, which on a panel with no hover state is the only chance.
@@ -2085,14 +2116,14 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // the small end of the scale, which is where the extra height went: the
     // page finishes at 778 of 800 and has none left over to make the box
     // itself taller.
-    KD_S(".act{text-align:right;white-space:nowrap}");
-    KD_S(".act a{display:inline-block;border:");  KD_N(1);
-    KD_S("px solid #777;color:#000;text-decoration:none;padding:"); KD_N(4);
-    KD_S("px ");                                  KD_N(12);
-    KD_S("px;margin-left:");                      KD_N(8);
-    KD_S("px;font-size:");                        KD_N(15);
-    KD_S("px;letter-spacing:");                   KD_N(1);
-    KD_S("px;background:#f4f4f4}");
+    KD_S(".act{text-align:right;white-space:nowrap}")
+    KD_S(".act a{display:inline-block;border:")  KD_N(1)
+    KD_S("px solid #777;color:#000;text-decoration:none;padding:") KD_N(4)
+    KD_S("px ")                                  KD_N(12)
+    KD_S("px;margin-left:")                      KD_N(8)
+    KD_S("px;font-size:")                        KD_N(15)
+    KD_S("px;letter-spacing:")                   KD_N(1)
+    KD_S("px;background:#f4f4f4}")
 
     // ── The standalone page ─────────────────────────────────────────────────
     // The forecast band is an eighth of this page, and on a collector that is
@@ -2117,34 +2148,35 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // digits, and neither renderer wraps — the browser clips and FBInk draws
     // straight over its neighbour. The height left over becomes air, which is
     // what a panel read from across a room wants anyway.
-    KD_S(".sa .lab{font-size:");               KD_N(15);
-    KD_S("px}");
-    KD_S(".sa .v1{font-size:");                KD_N(104);
-    KD_S("px}");
-    KD_S(".sa .v2{font-size:");                KD_N(48);
-    KD_S("px}");
-    KD_S(".sa .slash{font-size:");             KD_N(48);
-    KD_S("px;padding:0 ");                     KD_N(8);
-    KD_S("px;top:");                           KD_N(-6);
-    KD_S("px}");
-    KD_S(".sa .sub{font-size:");               KD_N(19);
-    KD_S("px}");
-    KD_S(".sa .gv{font-size:");                KD_N(42);
-    KD_S("px}");
-    KD_S(".sa .grid-3 .gv{font-size:");        KD_N(31);
-    KD_S("px}");
-    KD_S(".sa .iv{font-size:");                KD_N(34);
-    KD_S("px}");
-    KD_S(".sa .iv-1{font-size:");              KD_N(56);
-    KD_S("px}");
+    KD_S(".sa .lab{font-size:")               KD_N(15)
+    KD_S("px}")
+    KD_S(".sa .v1{font-size:")                KD_N(104)
+    KD_S("px}")
+    KD_S(".sa .v2{font-size:")                KD_N(48)
+    KD_S("px}")
+    KD_S(".sa .slash{font-size:")             KD_N(48)
+    KD_S("px;padding:0 ")                     KD_N(8)
+    KD_S("px;top:")                           KD_N(-6)
+    KD_S("px}")
+    KD_S(".sa .sub{font-size:")               KD_N(19)
+    KD_S("px}")
+    KD_S(".sa .gv{font-size:")                KD_N(42)
+    KD_S("px}")
+    KD_S(".sa .grid-3 .gv{font-size:")        KD_N(31)
+    KD_S("px}")
+    KD_S(".sa .iv{font-size:")                KD_N(34)
+    KD_S("px}")
+    KD_S(".sa .iv-1{font-size:")              KD_N(56)
+    KD_S("px}")
     // The plain clock; the three styles carry their own twins in kdSkinCss(),
     // which is emitted after this and has to win against it.
-    KD_S(".sa .clock{font-size:");             KD_N(110);
-    KD_S("px;line-height:");                   KD_N(114);
-    KD_S("px}");
-    KD_S(".sa .clock-x{font-size:");           KD_N(48);
-    KD_S("px;line-height:");                   KD_N(114);
-    KD_S("px}");
+    KD_S(".sa .clock{font-size:")             KD_N(110)
+    KD_S("px;line-height:")                   KD_N(114)
+    KD_S("px}")
+    KD_S(".sa .clock-x{font-size:")           KD_N(48)
+    KD_S("px;line-height:")                   KD_N(114)
+    KD_S("px}")
+    );
 
     #undef KD_S
     #undef KD_N

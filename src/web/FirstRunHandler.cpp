@@ -41,7 +41,7 @@ bool persistPlatformMode(const char* mode) {
 
     return atomicWrite(*activeFS, PATH, [&](File& dst) -> bool {
         size_t want    = measureJson(doc);
-        size_t written = serializeJson(doc, dst);
+        size_t written = serializeJson(doc, static_cast<Print&>(dst));
         return written == want;
     }, fsMutex);
 }
@@ -113,7 +113,7 @@ void handleGetBoardProfiles(AsyncWebServerRequest* req) {
 void handlePostFirstRun(AsyncWebServerRequest* req,
                         uint8_t* data, size_t len) {
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, data, len);
+    DeserializationError err = deserializeJson(doc, (const char*)data, len);
     if (err) {
         req->send(400, "application/json",
                   "{\"ok\":false,\"error\":\"invalid JSON\"}");

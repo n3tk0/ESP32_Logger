@@ -46,7 +46,7 @@ static void sendJson(AsyncWebServerRequest* req, int code, const JsonDocument& d
     AsyncResponseStream* resp = req->beginResponseStream("application/json");
     if (!resp) { req->send(500); return; }
     resp->setCode(code);
-    serializeJson(doc, *resp);
+    serializeJson(doc, static_cast<Print&>(*resp));
     req->send(resp);
 }
 

@@ -172,8 +172,8 @@ Current, `xiao_esp32c3`, `firmware.bin`:
 
 | build | image | free of 1,507,328 |
 |---|---:|---:|
-| default `src/setup.h` | 1,303,744 | 203,584 (86 %) |
-| every optional feature on | 1,469,264 | 38,064 (97.5 %) |
+| default `src/setup.h` | 1,294,080 | 213,248 (86 %) |
+| every optional feature on | 1,454,064 | 53,264 (96.5 %) |
 
 Levers, all measured as `firmware.bin` deltas on `xiao_esp32c3`:
 
@@ -187,9 +187,14 @@ Levers, all measured as `firmware.bin` deltas on `xiao_esp32c3`:
 | core dump writer dropped, there is no `coredump` partition (`LOGGER_NO_COREDUMP`, C3 envs) | **−11,888** — same file |
 | `remoteIngest`, `trendRing`, `readingCache` kept in `.bss` (spinlock set in the constructor) | **−10,464** with every feature on — a non-zero member initialiser had put each whole object into the image |
 
-The last three are measured with every optional feature on, and
+| ArduinoJson parser compiled once for memory input, not seven times: every `deserializeJson` from memory passes `(const char*, length)` | **−9,376** — String, `char*`, `uint8_t*` and the rest each compiled the whole parser again |
+| ArduinoJson serialiser compiled once for streams: `serializeJson` to a response, File or Serial passes `static_cast<Print&>` | **−3,184** |
+| Kindle stylesheet emitted by one call instead of 271 (`kdEmitSheet()`, same bytes out) | **−2,672** |
+
+The last six are measured with every optional feature on, and
 `tools/check_flash_trims.py` reads the linked ELF in CI so none of them can
-quietly come undone.
+quietly come undone — including a new call site that hands ArduinoJson a type
+it has not been compiled for yet.
 
 The last one is listed for honesty rather than for its size: the estimate before
 it was made was −11 KB, from summing `_Function_handler` symbol sizes in the

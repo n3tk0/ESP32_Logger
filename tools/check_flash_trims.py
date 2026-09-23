@@ -4,7 +4,7 @@ check_flash_trims.py — the flash an image saved stays saved.
 
 WHY THIS EXISTS
 ---------------
-Three savings on the 4 MB C3 image (~38 KB with every feature on) leave no
+Four savings on the 4 MB C3 image (~53 KB with every feature on) leave no
 trace in the source a reviewer would notice going away. Each is undone by an
 ordinary-looking edit, and the only symptom is an image that grew:
 
@@ -26,11 +26,20 @@ symbol nobody has defined yet. Anything in the build that references another
 symbol from those members pulls them back in, and the definitions here then
 save nothing — without an error.
 
+  4. One copy of ArduinoJson's parser and one of its stream serialiser.
+     Both are templates on their input and output type, so every new type
+     passed to deserializeJson()/serializeJson() compiles the whole engine
+     again — seven parser copies and four serialiser copies cost ~12 KB
+     before they were folded. Memory input goes in as (const char*, length),
+     files as a File, and anything that prints goes out as a Print&.
+
 So this reads the linked ELF, not the source:
   * remoteIngest / trendRing / readingCache, where linked, are .bss symbols
   * with LOGGER_TERSE_TLS_ERRORS in the env's flags, mbedtls_high_level_strerr
     (error.c's table walker) is absent
   * with LOGGER_NO_COREDUMP, esp_core_dump_write_elf (libespcoredump) is absent
+  * ArduinoJson's JsonDeserializer and JsonSerializer are instantiated only
+    for the input and output types in JSON_READERS / JSON_WRITERS
 
 Usage:
     python3 tools/check_flash_trims.py --env xiao_esp32c3
@@ -61,6 +70,19 @@ TRIMS = {
 }
 
 
+# The one type each kind of call should go through; see 4. above. A new one
+# means a call site passed something else — cast or convert it at the call
+# (a String as .c_str(), .length(); a stream as static_cast<Print&>) rather
+# than growing these lists.
+JSON_READERS = {"BoundedReader<char const*, void>", "Reader<fs::File, void>"}
+JSON_WRITERS = {"Writer<Print, void>", "Writer<String, void>",
+                "StaticStringWriter", "DummyWriter"}
+JSON_READER_RE = re.compile(r"JsonDeserializer<ArduinoJson::\w+::detail::"
+                            r"((?:Bounded)?Reader<[^<>]*>)")
+JSON_WRITER_RE = re.compile(r"(?:JsonSerializer|TextFormatter)<ArduinoJson::"
+                            r"\w+::detail::(Writer<[^<>]*>|\w+Writer)\s*>")
+
+
 def find_nm(chip: str) -> str:
     pkg = Path.home() / ".platformio" / "packages"
     name = "toolchain-riscv32-esp" if chip in ("esp32c3", "esp32c6", "esp32h2") \
@@ -89,8 +111,11 @@ def main() -> int:
         print(f"FAIL: {elf} not found — build the env first")
         return 1
 
-    out = subprocess.run([find_nm(chip_for(a.env)), elf], check=True,
+    nm = find_nm(chip_for(a.env))
+    out = subprocess.run([nm, elf], check=True,
                          capture_output=True, text=True).stdout
+    demangled = subprocess.run([nm, "-C", elf], check=True,
+                               capture_output=True, text=True).stdout
     kind = {}
     for line in out.splitlines():
         parts = line.split()
@@ -112,12 +137,22 @@ def main() -> int:
             bad.append(f"{macro} is set but {sym} is linked: something "
                        f"references {what} again, so the trim saves nothing")
 
+    readers = set(JSON_READER_RE.findall(demangled))
+    writers = set(JSON_WRITER_RE.findall(demangled))
+    for t in sorted(readers - JSON_READERS):
+        bad.append(f"ArduinoJson's parser is compiled for {t} too: pass "
+                   f"memory as (const char*, length) — see JSON_READERS")
+    for t in sorted(writers - JSON_WRITERS):
+        bad.append(f"ArduinoJson's serialiser is compiled for {t} too: pass "
+                   f"a stream as static_cast<Print&> — see JSON_WRITERS")
+
     for b in bad:
         print(f"FAIL: {b}")
     if not bad:
         on = [m for m in TRIMS if flag_on(flags, m)]
         print(f"OK: {a.env}: {', '.join(BSS_GLOBALS)} in .bss; "
-              f"trims holding: {', '.join(on) or 'none set'}")
+              f"trims holding: {', '.join(on) or 'none set'}; "
+              f"ArduinoJson: {len(readers)} parser(s), {len(writers)} writer(s)")
     return 1 if bad else 0
 
 

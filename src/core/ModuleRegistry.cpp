@@ -151,7 +151,7 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
         return false;
     }
     size_t want    = measureJson(doc);
-    size_t written = serializeJson(doc, f);
+    size_t written = serializeJson(doc, static_cast<Print&>(f));
     f.close();
     if (written == 0 || written < want) {
         Serial.printf("[ModuleRegistry] save TRUNCATED: %u of %u bytes — discarding\n",
