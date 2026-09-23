@@ -51,10 +51,27 @@ enum ChangeFlags : uint8_t {
     CH_NET_TRIAL = 1 << 2,
 };
 
+/// per_pulse has crossed JSON on its way here, often more than once: node →
+/// /config.json → report → collector → reply. ArduinoJson writes a float
+/// with six decimal places and does not always read that text back to the
+/// same float, so an unchanged value can come back a few units off in its
+/// last place — and == would call that a new sensor and restart the node on
+/// a config that only renamed it. Measured over every float from 1e-9 to 1e9
+/// (tests/host/test_node_sync.cpp): about 1% drift after the first trip, by
+/// at most 8 ULP / 6.2e-7 relative over four. Two parts per million covers
+/// that with room, and is far below what a pulse calibration means.
+static inline bool samePerPulse(float a, float b) {
+    if (a == b) return true;
+    const float d  = (a > b) ? a - b : b - a;
+    const float aa = (a < 0) ? -a : a;
+    const float ab = (b < 0) ? -b : b;
+    return d <= ((aa > ab) ? aa : ab) * 2e-6f;
+}
+
 static inline bool sameSensor(const SensorCfg& a, const SensorCfg& b) {
     return a.type == b.type && a.addr == b.addr && a.pin == b.pin && a.count == b.count &&
            strncmp(a.metric, b.metric, sizeof(a.metric)) == 0 && a.rx == b.rx &&
-           a.tx == b.tx && a.mode == b.mode && a.per_pulse == b.per_pulse &&
+           a.tx == b.tx && a.mode == b.mode && samePerPulse(a.per_pulse, b.per_pulse) &&
            a.debounce_us == b.debounce_us;
 }
 

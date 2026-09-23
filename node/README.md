@@ -458,6 +458,12 @@ restarts on the old settings and reports `cfg_error` "rolled back: no
 collector on new settings". The trial survives a restart (`/sync.json`); a
 save on the node's own page ends it.
 
+Five cycles are counted, not timed. When what the new settings got wrong is
+the WiFi itself, each of those cycles is three association attempts and then
+the setup portal's five minutes, so the rollback lands about half an hour
+after the restart — later if somebody joins the portal, which holds it open.
+That is deliberate: the portal is how a human fixes the same mistake sooner.
+
 ## Following the collector to a new network
 
 When the collector's own WiFi is about to change, it first gives every node
