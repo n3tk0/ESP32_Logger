@@ -19,7 +19,12 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_psychrometrics.cpp` | Magnus saturation pressure, `dewPointC()`, the self-heating correction and its invariance |
 | `test_httpexporter_bufsize.cpp` | the JSON body buffer-size arithmetic, extracted because the exporter cannot be compiled on the host |
 | `test_refresh_cadence.cpp` | `RefreshCadence.h` — the clock's minute-boundary demand and the data prediction's age bands |
-| `test_espnow_proto.cpp` | the wire format: layouts, sentinels, encode/validate round trips |
+| `test_espnow_proto.cpp` | the wire format: layouts, sentinels, encode/validate round trips; the config slices, CFG_ACK, reassembly and DATA2 |
+| `test_nodecfg.cpp` | `src/nodecfg/` — every validation rule of docs/NODE_CONFIG.md §1.2 one at a time, the JSON codec (round trip, partial documents, secrets), legacy `/config.json` migration, the metric catalogue, `caps` |
+| `test_hw_pins.cpp` | `src/nodecfg/HwPins.h` — both chips' pin tables, label resolution, and pin-for-pin agreement with `node/src/NodePins.h` |
+| `test_udp_discovery.cpp` | `src/nodecfg/UdpDiscovery.h` — the collector-discovery packets, against a reference HMAC-SHA256 checked with RFC 4231 |
+| `test_nodecfg_collector.cpp` | `src/nodes/NodeCfgRules.h` — the collector's node-config decisions: revs and status, keys and file names, report adoption, the ingest reply, which secrets travel, first-contact identity, the handover, DATA2 naming |
+| `test_ipv4_parse.cpp` | `src/utils/Ipv4Parse.h` — the dotted-quad parser that replaced `sscanf` (300 is refused, not wrapped to 44) |
 | `test_espnow_nodetable.cpp` | the three decisions the collector makes about an arriving frame |
 | `test_remote_ingest.cpp` | the mailbox and the separate historical queue it grew |
 | `test_battery_model.cpp` | that the remaining-life model **refuses** to answer when it cannot |
@@ -43,6 +48,13 @@ test TU. The rest exercise header-only logic.
 shims in `shims/` (types and C stdlib only — **not** a board emulation). The
 shim directory is on the include path *only* for these tests and must never be
 added to the firmware build.
+
+`<ArduinoJson.h>` is the one exception to "thin": `shims/ArduinoJson.h`
+includes the real library, vendored unmodified as the single-header release
+in `vendor/ArduinoJson-v7.4.3.h` (the version all three firmwares pin in
+`lib_deps`; bump both together). It is vendored rather than fetched so the
+loop above needs no network and cannot test against a different version than
+the devices run.
 
 ## Run locally
 

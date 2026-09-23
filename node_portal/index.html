@@ -1,0 +1,32 @@
+<!doctype html>
+<!--
+  node_portal/index.html — the node's own setup page (docs/NODE_CONFIG.md §6).
+
+  Served by BOTH node firmwares (node/ ESP8266 WiFi, node_espnow/ XIAO C3)
+  from src/nodecfg/NodePortalPage.h, which tools/build_node_portal.py builds
+  by inlining style.css and app.js into this file and gzipping the result.
+  Edit the three sources, then run:  python3 tools/build_node_portal.py
+
+  Everything on screen is rendered by app.js from GET /api/config: the steps
+  depend on the transport, the pins on the board, the sensors on the caps.
+  Nothing here may load from the internet — the phone is on the node's AP.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:,">
+<title>Node setup</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="wrap" id="app">
+  <p class="hint">Loading…</p>
+</main>
+<nav class="nav" id="nav" hidden></nav>
+<div class="overlay" id="ov" hidden></div>
+<noscript><p style="padding:16px">This page needs JavaScript.</p></noscript>
+<script src="app.js"></script>
+</body>
+</html>

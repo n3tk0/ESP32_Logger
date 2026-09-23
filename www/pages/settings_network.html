@@ -16,7 +16,13 @@
       </div>
     </div>
 
-    <form data-submit="settingsSaveForm" data-save-url="/save_network" data-save-restart>
+    <!-- The network handover banner (docs/NODE_CONFIG.md §4). Saving a new
+         client network while nodes are paired does not switch at once: the
+         nodes are handed the new network first, and this follows them across.
+         Drawn by nodes.js (ndHoRender); the Nodes page has the same slot. -->
+    <div id="net-handover" data-nd-ho hidden></div>
+
+    <form data-submit="netSaveForm" data-save-url="/save_network" data-save-restart>
       <div id="net-msg"></div>
       <!-- WiFi Mode -->
       <div class="card">

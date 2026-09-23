@@ -532,6 +532,9 @@ function themeRestoreDefault() {
 // ============================================================================
 function netInit() {
   var t = window.I18n ? I18n.t : function (k) { return k; };
+  // A move to a new network may already be under way (started here earlier,
+  // or on the Nodes page's banner) — show where it is.
+  if (typeof ndHoCheck === "function") ndHoCheck();
   getStatus()
     .then(function (d) {
       ST = d;
@@ -757,13 +760,16 @@ function netCheckScan() {
 // and responds 202 immediately, then we poll GET /api/modules/wifi/test for
 // the result.  Keeps the async web server responsive for other clients.
 var netTestPollTimer = null;
-function netTestPoll(out, tries) {
-  if (!out) return;
+// The ssid/pass of the last test that connected — what lets a Save move the
+// nodes (netSaveForm) without testing the same credentials a second time.
+var netLastTestOk = null;
+function netTestPoll(out, tries, done) {
+  if (!out) return done(false);
   var t = window.I18n ? I18n.t : function (k) { return k; };
   if (tries > 20) {          // 20×600ms ≈ 12s — safely over the 8s server cap
     out.textContent = "✗ " + t("settingsPages.netTestTimedOut");
     out.style.color = "var(--danger)";
-    return;
+    return done(false);
   }
   fetchWithTimeout("/api/modules/wifi/test", {}, 15000)
     .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
@@ -771,22 +777,60 @@ function netTestPoll(out, tries) {
       if (d.state === "success") {
         out.textContent = "✓ " + t("settingsPages.netTestConnected", { rssi: d.rssi, ip: d.ip });
         out.style.color = "var(--success)";
+        done(true);
       } else if (d.state === "failed") {
         out.textContent = "✗ " + (d.error || t("settingsPages.netTestFailedToConnect"));
         out.style.color = "var(--danger)";
+        done(false);
       } else if (d.state === "running") {
         netTestPollTimer = setTimeout(function () {
-          netTestPoll(out, tries + 1);
+          netTestPoll(out, tries + 1, done);
         }, 600);
       } else {
         out.textContent = t("settingsPages.netTestResultExpired");
         out.style.color = "var(--text-muted)";
+        done(false);
       }
     })
     .catch(function (e) {
       out.textContent = "✗ " + e;
       out.style.color = "var(--danger)";
+      done(false);
     });
+}
+// Resolves true when the collector could join ssid/pass, false otherwise
+// (the reason is already on screen in #net-testResult).
+function netRunTest(ssid, pass) {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  var out = document.getElementById("net-testResult");
+  if (netTestPollTimer) { clearTimeout(netTestPollTimer); netTestPollTimer = null; }
+  if (out) { out.textContent = "🧪 " + t("settingsPages.netTesting"); out.style.color = "var(--text-muted)"; }
+  return new Promise(function (resolve) {
+    function done(ok) {
+      netLastTestOk = ok ? { ssid: ssid, pass: pass } : null;
+      resolve(ok);
+    }
+    fetchWithTimeout("/api/modules/wifi/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ssid: ssid, password: pass })
+    }, 30000)
+      .then(function (r) { return r.json().then(function (d) { return { status: r.status, body: d }; }); })
+      .then(function (resp) {
+        if (!out) return done(false);
+        if (resp.status === 202) {
+          netTestPoll(out, 0, done);
+        } else {
+          out.textContent = "✗ " + (resp.body.error || t("settingsPages.netTestStartFailed"));
+          out.style.color = "var(--danger)";
+          done(false);
+        }
+      })
+      .catch(function (e) {
+        if (out) { out.textContent = "✗ " + e; out.style.color = "var(--danger)"; }
+        done(false);
+      });
+  });
 }
 function netTestWifi() {
   var t = window.I18n ? I18n.t : function (k) { return k; };
@@ -799,28 +843,53 @@ function netTestWifi() {
     if (out) { out.textContent = t("settingsPages.netEnterSsidFirst"); out.style.color = "var(--danger)"; }
     return;
   }
-  if (netTestPollTimer) { clearTimeout(netTestPollTimer); netTestPollTimer = null; }
-  if (out) { out.textContent = "🧪 " + t("settingsPages.netTesting"); out.style.color = "var(--text-muted)"; }
-  fetchWithTimeout("/api/modules/wifi/test", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ssid: ssid, password: pass })
-  }, 30000)
-    .then(function (r) { return r.json().then(function (d) { return { status: r.status, body: d }; }); })
-    .then(function (resp) {
-      if (!out) return;
-      if (resp.status === 202) {
-        netTestPoll(out, 0);
-      } else {
-        out.textContent = "✗ " + (resp.body.error || t("settingsPages.netTestStartFailed"));
-        out.style.color = "var(--danger)";
-      }
-    })
-    .catch(function (e) {
-      if (!out) return;
-      out.textContent = "✗ " + e;
-      out.style.color = "var(--danger)";
+  netRunTest(ssid, pass);
+}
+
+// Save the Network form. Moving the collector to a DIFFERENT client network
+// while it has nodes is not a plain save: the nodes would lose it and — the
+// WiFi ones — never find it again. So that one case hands the new network to
+// every node first (docs/NODE_CONFIG.md §4, POST /api/nodes/handover) and
+// lets the collector switch once they have it; nodes.js draws the banner
+// that follows it. Everything else, and a firmware without handover (404),
+// saves and restarts exactly as it always has.
+function netSaveForm(ev) {
+  var form = ev.target;
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  var cur = (CFG && CFG.network) || {};
+  var ssid = (getVal("net-cSSID") || "").trim();
+  var pass = getVal("net-cPass") || "";
+  var url = form.getAttribute("data-save-url");
+  var newNet = getVal("net-mode") === "1" && ssid && ssid !== (cur.clientSSID || "");
+  if (!newNet || typeof ndHoCountNodes !== "function") return settingsSaveForm(ev);
+
+  function plainSave() { settingsSave(null, url, form, true); }
+  function fail(key) {
+    showMsg("net-msg", "<div class='alert alert-error'>" + esc(t(key)) + "</div>", true);
+  }
+
+  ndHoCountNodes().then(function (n) {
+    if (!n) return plainSave();
+    // The nodes are about to be told to trust this network; it has to be
+    // one the collector itself can join.
+    var tested = netLastTestOk && netLastTestOk.ssid === ssid && netLastTestOk.pass === pass;
+    return (tested ? Promise.resolve(true) : netRunTest(ssid, pass)).then(function (ok) {
+      if (!ok) return fail("nodes.hoTestFirst");
+      // The rest of the form rides along, so a static address meant for the
+      // new network is applied with it rather than dropped.
+      var fields = {};
+      new FormData(form).forEach(function (v, k) { if (k !== "csrf") fields[k] = String(v); });
+      return ndHoStart(ssid, pass, fields).then(function (res) {
+        if (res.status === 404) return plainSave();
+        if (res.status >= 400 || !res.body || res.body.ok === false) {
+          showMsg("net-msg", "<div class='alert alert-error'>" +
+            esc((res.body && (res.body.reason || res.body.error)) || t("nodes.hoFailed")) + "</div>", true);
+          return;
+        }
+        showMsg("net-msg", "<div class='alert alert-success'>" + esc(t("nodes.hoStarted", { ssid: ssid, n: n })) + "</div>", true);
+      });
     });
+  }).catch(function () { fail("nodes.hoFailed"); });
 }
 
 // ============================================================================
@@ -2492,6 +2561,7 @@ registerHandlers({
   netToggleStatic: netToggleStatic,
   netScanWifi: netScanWifi,
   netTestWifi: netTestWifi,
+  netSaveForm: netSaveForm,
   timeSetManual: timeSetManual,
   timeSyncNTP: timeSyncNTP,
   timeRtcProtect: timeRtcProtect,

@@ -2,18 +2,14 @@
 #include "../core/Globals.h"
 #include "../core/Config.h"
 #include <WiFi.h>
+#include "../utils/Ipv4Parse.h"
 
 namespace {
 
 // Parse "a.b.c.d" → 4-byte array.  Returns false on malformed input (target untouched).
 bool parseIPv4(const char* s, uint8_t out[4]) {
     if (!s) return true;  // absent field is not a validation error
-    int a, b, c, d;
-    if (sscanf(s, "%d.%d.%d.%d", &a, &b, &c, &d) != 4) return false;
-    if (a < 0 || a > 255 || b < 0 || b > 255 || c < 0 || c > 255 || d < 0 || d > 255) return false;
-    out[0] = (uint8_t)a; out[1] = (uint8_t)b;
-    out[2] = (uint8_t)c; out[3] = (uint8_t)d;
-    return true;
+    return ipv4Parse(s, out);   // not sscanf: see Ipv4Parse.h
 }
 
 void formatIPv4(const uint8_t in[4], char* out, size_t n) {

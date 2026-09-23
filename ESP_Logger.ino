@@ -79,6 +79,9 @@
 #ifdef FEATURE_ESPNOW_INGEST
 #  include "src/espnow/EspNowIngest.h"      // battery nodes over ESP-NOW
 #endif
+#ifdef FEATURE_REMOTE_NODES
+#  include "src/web/NodeCfgApi.h"           // node config: discovery, handover
+#endif
 #include "src/managers/ConfigManager.h"
 #include "src/managers/HardwareManager.h"
 #include "src/managers/StorageManager.h"
@@ -1098,6 +1101,14 @@ void loop() {
         }
         if (s_espnowUp) espnowIngestTick();
     }
+#endif
+
+#ifdef FEATURE_REMOTE_NODES
+    // ── Node configuration (docs/NODE_CONFIG.md) ─────────────────────────────
+    // UDP discovery replies (§3.1) and the network handover's automatic switch
+    // (§4). Here, before the mode-specific early returns below, for the same
+    // reason as the ESP-NOW tick above.
+    nodeCfgApiTick();
 #endif
 
 #ifdef FEATURE_KINDLE_DASHBOARD

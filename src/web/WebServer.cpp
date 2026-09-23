@@ -39,6 +39,7 @@
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
 #include "../pipeline/DataPipeline.h"   // fsMutex (FS1)
 #include "../utils/MutexGuard.h"
+#include "../utils/Ipv4Parse.h"         // settings form IPs, without sscanf
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Update.h>
@@ -1201,10 +1202,10 @@ static void h_post_api_datalog_switch(AsyncWebServerRequest* r) {
     r->send(200, "application/json", "{\"ok\":true}");
 }
 
-static void h_post_save_network(AsyncWebServerRequest* r) {
-    if (!requireMutatingAuth(r)) return;
-    if (r->hasParam("wifiMode", true))       config.network.wifiMode = (WiFiModeType)r->getParam("wifiMode", true)->value().toInt();
-    if (r->hasParam("apSSID", true))         SAFE_STRNCPY(config.network.apSSID,         r->getParam("apSSID", true)->value().c_str(), sizeof(config.network.apSSID));
+const char* applyNetworkForm(NetworkConfig& net, NetFormGet get, void* ctx) {
+    const char* v;
+    if ((v = get(ctx, "wifiMode")))  net.wifiMode = (WiFiModeType)atol(v);
+    if ((v = get(ctx, "apSSID")))    SAFE_STRNCPY(net.apSSID, v, sizeof(net.apSSID));
     // R13 follow-up (Codex P1 on PR #89): /export_settings masks
     // passwords as "***". The SPA round-trips that value back here
     // on any unrelated save; without this guard the real password
@@ -1216,35 +1217,48 @@ static void h_post_save_network(AsyncWebServerRequest* r) {
     // restarts the device — so a seven-character password saved in AP mode
     // brings the board back with no access point at all, and the only way back
     // in is a serial reflash. The UI asks for 8; the API has to as well.
-    if (r->hasParam("apPassword", true) && r->getParam("apPassword", true)->value() != "***") {
-        const String pw = r->getParam("apPassword", true)->value();
-        if (pw.length() != 0 && (pw.length() < 8 || pw.length() > 63)) {
-            r->send(400, "application/json",
-                    "{\"ok\":false,\"error\":\"apPassword must be 8-63 characters "
-                    "(WPA2), or empty for an open AP\"}");
-            return;
-        }
-        SAFE_STRNCPY(config.network.apPassword, pw.c_str(), sizeof(config.network.apPassword));
+    if ((v = get(ctx, "apPassword")) && strcmp(v, "***") != 0) {
+        const size_t n = strlen(v);
+        if (n != 0 && (n < 8 || n > 63))
+            return "apPassword must be 8-63 characters (WPA2), or empty for an open AP";
+        SAFE_STRNCPY(net.apPassword, v, sizeof(net.apPassword));
     }
-    if (r->hasParam("clientSSID", true))     SAFE_STRNCPY(config.network.clientSSID,     r->getParam("clientSSID", true)->value().c_str(), sizeof(config.network.clientSSID));
-    if (r->hasParam("clientPassword", true) && r->getParam("clientPassword", true)->value() != "***") SAFE_STRNCPY(config.network.clientPassword, r->getParam("clientPassword", true)->value().c_str(), sizeof(config.network.clientPassword));
-    config.network.useStaticIP = r->hasParam("useStaticIP", true);
+    if ((v = get(ctx, "clientSSID")))  SAFE_STRNCPY(net.clientSSID, v, sizeof(net.clientSSID));
+    if ((v = get(ctx, "clientPassword")) && strcmp(v, "***") != 0)
+        SAFE_STRNCPY(net.clientPassword, v, sizeof(net.clientPassword));
+    net.useStaticIP = get(ctx, "useStaticIP") != nullptr;
 
     auto parseIP = [&](const char* param, uint8_t* dst) {
-        if (r->hasParam(param, true)) {
-            uint8_t tmp[4];
-            if (sscanf(r->getParam(param, true)->value().c_str(), "%hhu.%hhu.%hhu.%hhu", &tmp[0], &tmp[1], &tmp[2], &tmp[3]) == 4) {
-                memcpy(dst, tmp, 4);
-            }
-        }
+        ipv4Parse(get(ctx, param), dst);   // leaves dst alone unless valid
     };
-    parseIP("staticIP",  config.network.staticIP);
-    parseIP("gateway",   config.network.gateway);
-    parseIP("subnet",    config.network.subnet);
-    parseIP("dns",       config.network.dns);
-    parseIP("apIP",      config.network.apIP);
-    parseIP("apGateway", config.network.apGateway);
-    parseIP("apSubnet",  config.network.apSubnet);
+    parseIP("staticIP",  net.staticIP);
+    parseIP("gateway",   net.gateway);
+    parseIP("subnet",    net.subnet);
+    parseIP("dns",       net.dns);
+    parseIP("apIP",      net.apIP);
+    parseIP("apGateway", net.apGateway);
+    parseIP("apSubnet",  net.apSubnet);
+    return nullptr;
+}
+
+static const char* formParam(void* ctx, const char* key) {
+    AsyncWebServerRequest* r = static_cast<AsyncWebServerRequest*>(ctx);
+    return r->hasParam(key, true) ? r->getParam(key, true)->value().c_str() : nullptr;
+}
+
+// Applied to a copy and committed whole: a refused field used to leave the
+// ones before it changed in RAM (and saved by whatever wrote config next).
+// The same function applies a network handover's form (docs/NODE_CONFIG.md
+// §4), so the two cannot disagree about what a field means.
+static void h_post_save_network(AsyncWebServerRequest* r) {
+    if (!requireMutatingAuth(r)) return;
+    NetworkConfig net = config.network;
+    if (const char* err = applyNetworkForm(net, formParam, r)) {
+        r->send(400, "application/json",
+                String("{\"ok\":false,\"error\":\"") + err + "\"}");
+        return;
+    }
+    config.network = net;
 
     saveConfig();
     sendRestartPage(r, "Device is restarting with new network settings.");

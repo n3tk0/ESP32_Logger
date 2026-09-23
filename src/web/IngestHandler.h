@@ -47,9 +47,36 @@
 
 #ifdef FEATURE_REMOTE_NODES
 
+#include <stdint.h>
+
+#include <stddef.h>
+
 class AsyncWebServer;
+class AsyncWebServerRequest;
+class String;
+
+#ifndef INGEST_TOKEN
+#  define INGEST_TOKEN "change-me"
+#endif
+
+/// A remote node not heard from for this long reads as offline — on
+/// /api/remote/status and in a network handover (docs/NODE_CONFIG.md §4). It
+/// matches RemoteNodeSensor's default staleness; see handleApiRemoteStatus().
+static constexpr uint32_t REMOTE_STATUS_STALE_MS = 600000UL;   // 10 minutes
 
 /// Registers POST /api/ingest on `server`. Call from setupWebServer().
 void registerIngestHandler(AsyncWebServer& server);
+
+/// One JSON body, however many TCP segments it arrives in — the onBody half
+/// of /api/ingest, shared with /api/nodes/* (NodeCfgApi.cpp). Accumulates in
+/// `_tempObject` (with the disconnect cleaner), answers 413 past `cap` and
+/// 500 when out of memory, and returns the whole body once the last segment
+/// is in — detached from the request, so the caller deletes it. nullptr
+/// until then, and on every failure.
+String* accumulateBody(AsyncWebServerRequest* req, const uint8_t* data, size_t len,
+                       size_t index, size_t total, size_t cap);
+
+/// The onRequest half of a POST answered from its body callback.
+void answeredInBody(AsyncWebServerRequest* req);
 
 #endif  // FEATURE_REMOTE_NODES

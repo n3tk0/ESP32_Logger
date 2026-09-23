@@ -11,11 +11,8 @@
 
 #include "IngestBatch.h"
 #include "RateLimiter.h"
+#include "../nodes/NodeCfgStore.h"   // cfg_rev / cfg / cfg_error, docs/NODE_CONFIG.md §3
 #include "../sensors/RemoteIngest.h"
-
-#ifndef INGEST_TOKEN
-#  define INGEST_TOKEN "change-me"
-#endif
 
 // A node payload is a handful of small objects. Anything larger is either a
 // misconfigured client or someone probing, and buffering it would be the
@@ -28,7 +25,12 @@
 // node reporting every minute could not catch up on an outage faster than it
 // was accumulating a new one. It is still a fixed ceiling and still the only
 // buffer on this path; it is just one that fits the job the path now has.
-static constexpr size_t INGEST_MAX_BODY = 4096;
+//
+// SIX, since docs/NODE_CONFIG.md §3: a node also sends its whole config (~1.5
+// KB of JSON) on the first POST after boot and after a local edit, and that
+// must not push a full 4 KB backlog batch over the cap — a node holds a batch
+// on any non-200, so a 413 there would wedge it exactly as described above.
+static constexpr size_t INGEST_MAX_BODY = 6144;
 
 // Length-independent compare. The token is short and this endpoint is rate
 // limited, so a timing oracle here is largely theoretical — but the whole
@@ -348,16 +350,36 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
     // questions — how much is current, how much was backlog — and `held` says
     // plainly that the rest of the batch was not read at all, so a node that
     // gets a 200 back never mistakes it for "all of it arrived".
+    //
+    // Every POST says the node is alive, including the empty one it sends
+    // every cycle to keep config flowing (§3, "readings": []).
+    remoteIngest.touch(node);
+
+    // §3: the node's config — or only its new rev — rides along when it is
+    // due one. 1-2 KB with no fixed shape, so it is serialized after the
+    // fixed part rather than squeezed into the buffer.
+    JsonDocument cfg;
+    nodeCfgIngest(node, body.as<JsonObjectConst>(), cfg.to<JsonObject>());
+
+    AsyncResponseStream* resp = req->beginResponseStream("application/json");
+    if (!resp) { req->send(500); return; }
     char out[256];
     snprintf(out, sizeof(out),
              "{\"ok\":true,\"accepted\":%d,\"stored\":%d,\"queued\":%d,"
              "\"rejected\":%d,\"held\":%s,\"no_clock\":%s,\"room\":%d,"
-             "\"clock_rejected\":%s}",
+             "\"clock_rejected\":%s",
              accepted, stored, queued, rejected,
              backpressure ? "true" : "false", noClock ? "true" : "false",
              room < 0 ? 0 : room,
              clockRejected ? "true" : "false");
-    req->send(200, "application/json", out);
+    resp->print(out);
+    JsonVariantConst c = cfg["cfg"];
+    if (!c.isNull()) {
+        resp->print(",\"cfg\":");
+        serializeJson(c, *resp);
+    }
+    resp->print('}');
+    req->send(resp);
 }
 
 // ── One body, however many TCP segments it arrives in ───────────────────────
@@ -377,18 +399,18 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
 // opening segment, register the disconnect cleaner immediately after (a client
 // that drops mid-body would otherwise orphan the buffer, because the delete at
 // the end never runs), and answer once, when the last byte is in.
-static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
-                             size_t len, size_t index, size_t total) {
+String* accumulateBody(AsyncWebServerRequest* req, const uint8_t* data, size_t len,
+                       size_t index, size_t total, size_t cap) {
     // The size check answers only on the opening segment. Every req->send()
     // overwrites the request's response object — leaking the previous one —
     // and writes another HTTP response onto the same socket, so replying per
     // segment corrupts the connection.
-    if (total > INGEST_MAX_BODY) {
+    if (total > cap) {
         if (index == 0) {
             req->send(413, "application/json",
                       "{\"ok\":false,\"error\":\"body too large\"}");
         }
-        return;
+        return nullptr;
     }
 
     if (index == 0) {
@@ -396,7 +418,7 @@ static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
         if (!req->_tempObject) {
             req->send(500, "application/json",
                       "{\"ok\":false,\"error\":\"out of memory\"}");
-            return;
+            return nullptr;
         }
         req->onDisconnect([req]() {
             delete static_cast<String*>(req->_tempObject);
@@ -406,14 +428,21 @@ static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
     }
 
     String* buf = static_cast<String*>(req->_tempObject);
-    if (!buf) return;                     // the opening segment failed to allocate
+    if (!buf) return nullptr;             // the opening segment failed to allocate
     buf->concat(reinterpret_cast<const char*>(data), len);
+    if (index + len < total) return nullptr;
+    req->_tempObject = nullptr;           // the caller's now; the cleaner sees null
+    return buf;
+}
 
-    if (index + len >= total) {
-        handleIngestPayload(req, (const uint8_t*)buf->c_str(), buf->length());
-        delete buf;
-        req->_tempObject = nullptr;
-    }
+void answeredInBody(AsyncWebServerRequest*) {}
+
+static void handleIngestBody(AsyncWebServerRequest* req, uint8_t* data,
+                             size_t len, size_t index, size_t total) {
+    String* buf = accumulateBody(req, data, len, index, total, INGEST_MAX_BODY);
+    if (!buf) return;
+    handleIngestPayload(req, (const uint8_t*)buf->c_str(), buf->length());
+    delete buf;
 }
 
 void registerIngestHandler(AsyncWebServer& server) {
@@ -437,10 +466,7 @@ void registerIngestHandler(AsyncWebServer& server) {
         }
     }
 
-    server.on("/api/ingest", HTTP_POST,
-              [](AsyncWebServerRequest* r) { /* handled in the body callback */ },
-              nullptr,
-              handleIngestBody);
+    server.on("/api/ingest", HTTP_POST, answeredInBody, nullptr, handleIngestBody);
 }
 
 #endif  // FEATURE_REMOTE_NODES

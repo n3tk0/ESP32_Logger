@@ -1,8 +1,15 @@
 # The ESP-NOW battery node
 
 A XIAO ESP32-C3 with a BME280 and a 21700 cell. It wakes about once a minute,
-reads the sensor, sends twenty-four bytes, waits a few milliseconds for an
+reads its sensors, sends a few dozen bytes, waits a few milliseconds for an
 acknowledgement and goes back to sleep. It never joins the WiFi network.
+
+The BME280 is the default, not the limit: the node runs the shared config
+document of [`../docs/NODE_CONFIG.md`](../docs/NODE_CONFIG.md), so its sensor
+list, interval, pins, battery divider and radio tuning are set on its own setup
+page or from the collector's Nodes page — no rebuild. With `sleep` turned off
+it becomes a mains-powered node that stays awake, which is what an SDS011 or a
+rain gauge needs.
 
 This is not the node in [`../node/`](../node/README.md). That one is an ESP8266
 that stays awake and posts JSON to `POST /api/ingest`, and it is not a battery
@@ -23,10 +30,10 @@ is a design statement.
 
 | | XIAO ESP32-C3 | note |
 |---|---|---|
-| BME280 SDA | D4 / GPIO6 | `NODE_I2C_SDA` |
-| BME280 SCL | D5 / GPIO7 | `NODE_I2C_SCL` |
+| BME280 SDA | D4 / GPIO6 | `i2c.sda` (default `NODE_I2C_SDA`) |
+| BME280 SCL | D5 / GPIO7 | `i2c.scl` (default `NODE_I2C_SCL`) |
 | BME280 VCC | 3V3 | |
-| Battery divider | A0 / GPIO2 | `NODE_BATT_PIN` |
+| Battery divider | A0 / GPIO2 | `batt.pin` (default `NODE_BATT_PIN`) |
 | Cell + | BAT pad, underside | |
 | Cell − | BAT pad, underside | |
 
@@ -59,8 +66,55 @@ and would make the whole battery estimate fiction. What that does not correct
 is the resistors, which are 1 % at best.
 
 So: measure the cell with a meter, read what the node reports, and set the
-ratio as `NODE_BATT_TRIM`. It takes a minute and it is the difference between a
-remaining-life figure that means something and one that is confidently wrong.
+ratio as `batt.trim` — the setup page's Battery step has a helper that does the
+division from its live reading. It takes a minute and it is the difference
+between a remaining-life figure that means something and one that is
+confidently wrong.
+
+## Settings
+
+Every value in `src/node_config.h` marked *default* only seeds the config
+document on a node that has none. After that the document in NVS is what
+runs, and it changes in two ways:
+
+- **On the node's own page** (below). A save there sets `local: true`; the node
+  reports the document on its next contact and the collector adopts it as the
+  new desired config. Local edits win.
+- **From the collector.** When the collector holds a newer config for this
+  node, its ACK says so and the node pulls it in the same wake, validates it
+  with the same code the collector used, applies it and says whether it took
+  it (or which field it refused and why). A refused config changes nothing.
+
+The collector's older interval push (the ACK's interval field) still works
+and is written into the document.
+
+### The setup page
+
+Press **RESET** (or plug the node in), then **hold BOOT** within two seconds.
+Not the other way round: BOOT held *through* reset is the C3's ROM download
+mode, and the firmware never runs. A node that has never been paired and has
+only the placeholder key opens the page on its own at power-on.
+
+Join the WPA2 network `esp-node-XXXX` (password `PORTAL_AP_PASS`, default
+`configure` — change it) and a phone shows the page. It walks through the key
+and pairing status, board and I2C pins, sensors, battery, and this node's
+name, interval, altitude and sleep, validates as you go, and saves. The node
+restarts to apply it. The page closes by itself after five minutes with
+nobody connected, and ESP-NOW is off while it is up.
+
+The ESP-NOW key can be typed there (exactly 16 characters). It is stored on
+the node only: it never goes over the radio and the collector's page cannot
+show or set it. Clearing it returns the node to the compiled `ESPNOW_LMK`.
+
+### Mains mode
+
+`sleep: false` keeps the node awake: it reports every `interval_s` from a
+delay loop instead of deep sleeping, and the sensors keep running in between.
+That is what lets it carry an SDS011 (the fan needs half a minute to give a
+meaningful reading) or a pulse counter (it counts in an interrupt) — the
+validator refuses both on a sleeping node. Holding BOOT for a second opens
+the setup page without a reset. It is for USB power: at around 25 mA awake it
+would flatten the 21700 in about a week.
 
 ## Building
 
@@ -71,11 +125,16 @@ pio run -e xiao_esp32c3_bench    # stays awake, keeps the serial console
 pio run -e xiao_esp32c3 -t upload
 ```
 
-**Set the key first, on both sides.** `ESPNOW_LMK` in `platformio.ini` here and
-`ESPNOW_LMK` in the collector's build must be the same sixteen bytes. It
-encrypts the link and it authorises this node to be adopted. If they differ,
-nothing pairs and nothing decrypts, and neither end will say anything more
-useful than "bad signature".
+**Set the key first, on both sides.** `ESPNOW_LMK` here (a build flag, or
+typed on the setup page) and `ESPNOW_LMK` in the collector's build must be the
+same sixteen bytes. It encrypts the link and it authorises this node to be
+adopted. If they differ, nothing pairs and nothing decrypts, and neither end
+will say anything more useful than "bad signature".
+
+**It needs a collector that speaks DATA2.** Readings go out as `DATA2` frames
+(metric id + value, so any sensor list fits), which a collector built before
+the config document drops as an unknown type — the node would then see no
+ACKs and go looking for its network every hour.
 
 The bench build stays awake between sends so a serial console can watch a
 pairing attempt or a channel rescan happen. It says so at boot, because a node
@@ -105,15 +164,19 @@ one.
 |---|---|
 | one frame lost | nothing; it is a shared band |
 | three wakes with no answer | passive scan for the access point, take its channel |
+| the collector moved to another network (`link.next_ssid`) | the scan finds the new network: switch to it, keep the old one as the fallback |
 | access point not on the air | sweep for a collector again — at most once an hour |
 | collector reflashed | the same sweep. It cannot tell you it forgot: an encrypted frame from a peer it no longer holds is dropped by the radio before any code runs |
-| collector switched off | keep buffering, scan at most once an hour |
+| collector switched off | keep buffering; scan and sweep at most once an hour |
+| collector flags a config and never sends it | give up after 400 ms, try again after 1, 3, 7 … 63 wakes |
 
-Readings that could not be delivered are held in RTC memory — up to fifteen,
-about a quarter of an hour at the default interval — and sent as one burst when
-the link comes back, each with the time it was actually taken. That is what the
-clock in the acknowledgement is for. When the queue is full the **oldest** is
-dropped: losing the start of an outage is better than losing the end of it.
+Readings that could not be delivered are held in 1 KB of RTC memory — 35 of
+them for a BME280 with battery, about half an hour at the default interval —
+and sent when the link comes back, each with the time it was actually taken.
+That is what the clock in the acknowledgement is for. One frame carries seven
+of those beside the live reading, so a long outage drains over a few wakes,
+oldest first. When the queue is full the **oldest** is dropped: losing the
+start of an outage is better than losing the end of it.
 
 The hourly limit on scanning is a **rate limit, not a schedule**. A channel
 change at 14:03 is recovered at the next wake, not at 15:00. The ceiling exists
@@ -131,6 +194,11 @@ minute would cost more radio than reporting does.
 | **total** | **~10.0 mAh/day** | **~18.7 mAh/day** |
 | from 4312 mAh usable | ~430 days | ~230 days |
 
+A config change costs one extra round trip per 200 bytes of document, in the
+wake after the change and never otherwise — typically four frames and a few
+tens of milliseconds, about 0.001 mAh. There is no polling for configs: the
+flag rides on the ACK the node already waits for.
+
 At that scale the cell's own self-discharge stops being negligible — around 2 %
 a month is roughly a quarter of the capacity over fourteen months. Expect
 **10–11 months** at one-minute intervals and about seven at thirty seconds.
@@ -143,13 +211,25 @@ Every figure above is arithmetic. None of it has been measured.
 
 ## What is shared with the collector, and why it matters
 
-Three headers, reached through `-I..`, not copied:
+Headers reached through `-I..`, not copied:
 
 | | |
 |---|---|
 | `src/espnow/EspNowProto.h` | the wire format |
 | `src/espnow/EspNowAuth.h` | the DISCOVER and WELCOME signature |
+| `src/nodecfg/` | the config document, its JSON codec, the validator, the metric catalogue, the pin tables and the setup page |
+| `node_common/NodeSensors.h` | the sensor layer both node firmwares share |
 | `src/drivers/BME280_Mini.h` | the same compensation maths on both ends |
+
+`src/node_sensors_impl.cpp` compiles the shared implementation,
+`node_common/NodeSensors.cpp`, into this firmware.
+
+The logic that could be pulled away from the radio is in headers the host
+tests compile: the RTC backlog (`src/Backlog.h`), the per-wake config fetch
+and its backoff (`src/CfgFetch.h`), what a received config has to pass
+(`src/CfgApply.h`) and the rescan decisions (`src/Rescan.h`) —
+`tests/host/test_espnow_node_backlog.cpp` and
+`tests/host/test_espnow_node_cfgfetch.cpp`.
 
 Sharing them is what stops the two firmwares drifting apart. A signature in
 particular is the kind of thing two implementations get subtly different — the

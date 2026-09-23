@@ -147,6 +147,12 @@ public:
     /// forty-nine days — as though it were a measurement.
     uint32_t ageMsForNode(const char* nodeId) const;
 
+    /// The node posted with nothing to report ("readings": [], docs/
+    /// NODE_CONFIG.md §3): it is alive. Moves what ageMsForNode() answers
+    /// for a node already in the table, and nothing else — its values keep
+    /// the age they were measured at, so drain() still calls them stale.
+    void touch(const char* nodeId);
+
     /// Number of distinct nodes that have reported at least once.
     int nodeCount() const;
 
@@ -197,6 +203,7 @@ private:
         float    value;
         uint32_t ts;         // node-supplied epoch seconds, 0 = none
         uint32_t rxMillis;   // local millis() at receipt
+        uint32_t seenMs;     // local millis() the node last posted at all
         bool     used;
     };
 
