@@ -184,7 +184,10 @@
 #endif
 
 // BME280/BMP280 breakouts ship as either 0x76 or 0x77 depending on how SDO is
-// strapped. The node probes both, starting here.
+// strapped. The node probes both, starting here. The BME680/BME688 straps the
+// same two addresses and starts here too: the two are never enabled together
+// (see the #error above), so they share this one macro — there is no
+// BME688_ADDR, and never was.
 #ifndef BMX280_ADDR
 #  define BMX280_ADDR 0x76
 #endif

@@ -19,6 +19,7 @@
 //
 // So the rules are a header with no Arduino in it, and this drives them.
 #include "node/src/NodeSync.h"
+#include "src/nodecfg/NodeConfigJson.h"
 #include "check.h"
 
 using namespace NodeSync;
@@ -339,6 +340,102 @@ static void test_metric_names_outlive_the_reading() {
     CHECK_STREQ(g.intern("abcdefghij_7xyz"), "abcdefghij_7xyz");
 }
 
+// ---------------------------------------------------------------------------
+// sameSensor() compares per_pulse, and the value it compares has been through
+// JSON: the collector's reply is its own decode of this node's report,
+// re-encoded. ArduinoJson writes a float with six decimal places, so the FIRST
+// trip can round (0.00123457 goes out as 0.001235) — and it does not always
+// read its own text back to the same float either, so a value keeps drifting
+// by a few units in the last place on later trips too (about 1% of floats;
+// 4.122726 → 4.12272549 → 4.12272501). With == that drift read as a sensor
+// change and restarted the node on a config that only renamed it. A node's
+// running per_pulse has made the first trip whenever it came from a file
+// (/config.json) or a reply, so an unchanged sensor must not read as changed.
+
+/// `from` → JSON text → decoded over `into`, the way every hop does it.
+static NodeConfig viaJson(const NodeConfig& from, const NodeConfig& into, uint8_t encFlags) {
+    char buf[2048];
+    const size_t n = nodecfg::encodeConfigTo(from, buf, sizeof(buf), encFlags);
+    CHECK(n > 0);
+    JsonDocument doc;
+    CHECK(deserializeJson(doc, buf, n) == DeserializationError::Ok);
+    NodeConfig out = into;
+    nodecfg::Issue is;
+    CHECK(nodecfg::decodeConfig(doc.as<JsonVariantConst>(), out, nodecfg::NCJ_DEC_REV, &is));
+    return out;
+}
+
+static NodeConfig withPulse(float perPulse) {
+    NodeConfig c = base();
+    nodecfg::SensorCfg p = nodecfg::sensorDefaults(nodecfg::SensorType::Pulse, c.hw);
+    nodecfg::pulseModeDefaults(p, nodecfg::PulseMode::Flow);
+    p.pin = 14;
+    p.per_pulse = perPulse;
+    nodecfg::addSensor(c, p);
+    return c;
+}
+
+static void test_a_json_round_trip_is_not_a_sensor_change() {
+    // Spread over the whole range a per_pulse can sensibly take and well past
+    // it, in both notations ArduinoJson uses (plain, and e-notation below 1e-5
+    // and from 1e7), plus the values people actually type.
+    const float picked[] = { 0.2794f, 0.00222f, 0.00123457f, 0.1f, 1.0f / 3.0f,
+                             2.25e-3f, 1.2345678e-5f, 9.87654e-6f, 123.456789f,
+                             4.5e7f };
+    int tried = 0, rounded = 0, drifted = 0, misread = 0;
+    auto one = [&](float pp) {
+        const NodeConfig typed = withPulse(pp);
+        // Saved and loaded: the node's running config after any restart.
+        const NodeConfig running = viaJson(typed, typed, nodecfg::NCJ_SECRETS);
+        if (running.sensors[2].per_pulse != pp) rounded++;
+        // Reported (no secrets), decoded by the collector, renamed there and
+        // sent back in a reply: nothing about the sensor changed.
+        NodeConfig atCollector = viaJson(running, typed, 0);
+        nodecfg::copyStr(atCollector.name, sizeof(atCollector.name), "attic");
+        const NodeConfig reply = viaJson(atCollector, running, nodecfg::NCJ_SECRETS);
+        if (reply.sensors[2].per_pulse != running.sensors[2].per_pulse) drifted++;
+        if (NodeSync::classifyChange(running, reply) != NodeSync::CH_LIVE) misread++;
+        // And that reply, applied, saved and loaded again, is still the same.
+        const NodeConfig again = viaJson(reply, reply, nodecfg::NCJ_SECRETS);
+        if (NodeSync::classifyChange(reply, again) != NodeSync::CH_NONE) misread++;
+        tried++;
+    };
+    for (float pp : picked) one(pp);
+    // Every 9973rd float bit pattern from 1e-9 to 1e9.
+    const float lo = 1e-9f, hi = 1e9f;
+    uint32_t blo, bhi;
+    memcpy(&blo, &lo, 4);
+    memcpy(&bhi, &hi, 4);
+    for (uint32_t bits = blo; bits <= bhi; bits += 9973) {
+        float pp;
+        memcpy(&pp, &bits, 4);
+        one(pp);
+    }
+    printf("  per_pulse: %d values, %d rounded on the first trip, %d drifted after it, "
+           "%d misread as a change\n", tried, rounded, drifted, misread);
+    CHECK(tried > 50000);
+    CHECK(rounded > 0);          // the first trip does round,
+    CHECK(drifted > 0);          // later ones drift: the premise is real
+    CHECK_EQ(misread, 0);        // ...and neither is a sensor change
+
+    // The tolerance is not a blind spot for a real edit.
+    CHECK(samePerPulse(0.2794f, 0.2794f));
+    CHECK(!samePerPulse(0.2794f, 0.2795f));
+    CHECK(!samePerPulse(0.00222f, 0.00223f));
+    CHECK(!samePerPulse(1e-8f, 2e-8f));
+    CHECK(!samePerPulse(0.2794f, 0.2794f * 1.00001f));   // ten parts per million
+    CHECK(samePerPulse(4.122726f, 4.12272501f));         // the drift above
+
+    // The one case that is not covered: a value that never made the first
+    // trip — a compiled-in PULSE_UNITS_PER_PULSE with more than six decimals,
+    // on a node running without a /config.json. It reads as a change once, and
+    // the node restarts once (the safe direction: a restart applies anything),
+    // after which it runs on the saved, rounded value like every other node.
+    const NodeConfig seeded = withPulse(0.00123457f);
+    const NodeConfig echo = viaJson(viaJson(seeded, seeded, 0), seeded, nodecfg::NCJ_SECRETS);
+    CHECK(NodeSync::classifyChange(seeded, echo) & NodeSync::CH_RESTART);
+}
+
 int main() {
     RUN(test_what_needs_a_restart_and_what_does_not);
     RUN(test_when_the_report_rides_along);
@@ -353,5 +450,6 @@ int main() {
     RUN(test_the_trial_is_counted_per_cycle_and_afresh_after_a_restart);
     RUN(test_a_whole_handover);
     RUN(test_metric_names_outlive_the_reading);
+    RUN(test_a_json_round_trip_is_not_a_sensor_change);
     return SUMMARY();
 }

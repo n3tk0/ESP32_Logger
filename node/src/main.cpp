@@ -59,6 +59,14 @@ static uint16_t s_rejectedRev = 0;
 /// A config from the collector changed the network, the I2C pair or the
 /// sensors: restart once this cycle's POSTs are done.
 static bool     s_restartPending = false;
+/// The network settings this boot has been posting with, pinned when a
+/// collector config that restarts the node replaces s_cfg mid-cycle. The
+/// reply that carried it came over THIS association to THIS host with THIS
+/// token; the new settings take effect at the restart (WiFi is only joined at
+/// boot), so the batches still to go before it — restartForConfig() hands over
+/// the RAM backlog — go where the last one just went. nullptr otherwise; on
+/// the heap because it lives only until the restart.
+static nodecfg::NetCfg* s_postNet = nullptr;
 
 // ---------------------------------------------------------------------------
 // Collector discovery (§3.1)
@@ -337,6 +345,10 @@ static void applyCollectorConfig(JsonVariantConst doc, uint16_t rev) {
         s_sync.trialRev = rev;
         syncSave(s_sync);
     }
+    // Out of memory leaves it null: the rest of the cycle then posts with the
+    // new settings, which is no worse than not pinning at all.
+    if ((change & NodeSync::CH_RESTART) && !s_postNet)
+        s_postNet = new (std::nothrow) nodecfg::NetCfg(s_cfg.net);
     s_cfg = w->cfg;
     delete w;
 
@@ -462,11 +474,12 @@ static PostResult postBatch() {
         serializeJson(doc, body);
     }
 
+    const nodecfg::NetCfg& net = s_postNet ? *s_postNet : s_cfg.net;
     WiFiClient  client;
     HTTPClient  http;
     char url[96];
     snprintf(url, sizeof(url), "http://%s:%u/api/ingest",
-             s_cfg.net.host, (unsigned)s_cfg.net.port);
+             net.host, (unsigned)net.port);
 
     s_linkStatus.attempted = true;
     if (!http.begin(client, url)) {
@@ -476,9 +489,9 @@ static PostResult postBatch() {
     }
     http.setTimeout(5000);
     http.addHeader("Content-Type", "application/json");
-    http.addHeader("X-Ingest-Token", s_cfg.net.token);
-    if (s_cfg.net.basic_user[0] != '\0') {
-        http.setAuthorization(s_cfg.net.basic_user, s_cfg.net.basic_pass);
+    http.addHeader("X-Ingest-Token", net.token);
+    if (net.basic_user[0] != '\0') {
+        http.setAuthorization(net.basic_user, net.basic_pass);
     }
 
     const int code = http.POST(body);
@@ -494,7 +507,9 @@ static PostResult postBatch() {
                            http.errorToString(code).c_str(), s_backlog.count());
         s_linkStatus.lastOk = false;
         const uint8_t a = s_link.postResult(false);
-        if (a & NodeSync::LA_DISCOVER) runDiscovery();
+        // Not while a restart is pending: discovery rewrites s_cfg's host,
+        // which is the collector's new config now, not the one posting.
+        if ((a & NodeSync::LA_DISCOVER) && !s_restartPending) runDiscovery();
         return PostResult::Failed;
     }
 

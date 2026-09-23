@@ -75,6 +75,8 @@ static void seedDefaults(NodeConfig& c) {
 #ifdef NODE_SENSOR_BME688
     {
         SensorCfg s = nodecfg::sensorDefaults(SensorType::Bme688, c.hw);
+        // BMX280_ADDR on purpose: it is the one I2C address macro for both
+        // (node_config.h says why).
         s.addr = (BMX280_ADDR == 0x76) ? 0 : BMX280_ADDR;
         nodecfg::addSensor(c, s);
     }
