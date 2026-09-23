@@ -273,7 +273,10 @@ bytes after the name's first NUL is refused; a reply with port 0 is refused.
    (§3.1), set `local: true`. If both fail, alternate; the setup portal
    behaves as today.
 6. ESP-NOW node: it never needed the password. `link.next_ssid` is tried by
-   `linkFindChannel()` when the stored SSID/BSSID is not on the air. And the
+   `linkFindChannel()` when the stored SSID/BSSID is not on the air (or is
+   still up on the very channel the node is failing on while `next_ssid` is
+   heard elsewhere — the old network need not go away). On success it is
+   promoted, the old SSID becomes `next_ssid`, and `local` is set. And the
    collector now answers a signed DISCOVER **from a MAC already in its node
    table even when no pairing window is open**, so a node that slept through
    the handover finds it on its hourly sweep.
@@ -288,7 +291,17 @@ All additions are **new message types and a new ACK flag**; `ESPNOW_PROTO_VER`
 stays 1. An old node ignores unknown ACK flag bits; an old collector drops
 unknown types in `espnowValidate()`.
 
-- `EN_ACK_CFG_PENDING = 1 << 1` — set in ACK while `desired.rev > applied_rev`.
+- `EN_ACK_CFG_PENDING = 1 << 1` — set in ACK while `desired.rev > applied_rev`
+  and the node has not answered `desired.rev` with a rejecting CFG_ACK (a
+  rejected rev stays unapplied until someone edits it; flagging it anyway
+  would have a battery node download it again every wake). The node also
+  defends itself: it remembers the rev it refused, stops a fetch at the first
+  slice of that rev, repeats its CFG_ACK, and backs off.
+- `AckMsg.intervalS` (the legacy interval push, still honoured and written
+  into the node's document unless `local` is set or the same ACK flags a
+  pending config) must be `desired.interval_s` once the collector holds a
+  desired config for the node, or 0 — any other value would undo an applied
+  config on the next wake.
 - `EN_MSG_CFG_GET = 5` (node → collector, encrypted unicast):
   `magic ver type nodeId | haveRev u16 | offset u16`.
 - `EN_MSG_CFG = 6` (collector → node, encrypted unicast):
@@ -296,14 +309,23 @@ unknown types in `espnowValidate()`.
   `data` is a slice of the §1 document as compact JSON, without `net`.
   The node requests offset 0, then each next offset, until `offset+len == total`
   (max total 1 KB), all within the same wake. A wake that runs out of time
-  resumes next wake from offset 0.
+  resumes next wake from offset 0. The node waits at most
+  max(`link.ack_window_ms`, 50 ms) per slice and 400 ms per wake, so answer
+  from the receive path. A CFG_GET whose `haveRev` equals `desired.rev` means
+  the node already runs it (its CFG_ACK was lost): the node treats a first
+  slice with `rev == haveRev`, or a CFG with `total == 0`, as "up to date"
+  and repeats its CFG_ACK.
 - `EN_MSG_CFG_ACK = 7` (node → collector): `magic ver type nodeId | rev u16 |
   status u8 (0 ok, 1 rejected) | field[24] | reason[48]`.
 - `EN_MSG_CFG_REPORT = 8` (node → collector): same framing as `EN_MSG_CFG`
   (`rev` = node's current rev), sent on the first wake after boot and while
   `local == true`. The collector reassembles by (nodeId, rev, total) and
   answers the last chunk with a CFG with `total == 0` and the adopted `rev`
-  (meaning "your local config is now rev N").
+  (meaning "your local config is now rev N"). The node waits for that answer
+  only when `local` is true (same per-slice window as CFG_GET) and repeats
+  the report on a later wake if it does not come — so a repeated report of
+  the same local document must be answered with the rev already adopted for
+  it, not adopted again. A report with `local == false` needs no answer.
 - `EN_MSG_DATA2 = 9` (node → collector) — the dynamic-sensor data frame:
 
   ```
@@ -316,8 +338,9 @@ unknown types in `espnowValidate()`.
   6 lux, 7 pm25, 8 pm10, 9 rain_rate, 10 rain_total, 11 flow_rate,
   12 flow_total, 13 probe_temp (index = probe number; the name suffix `_N`
   is added for N ≥ 1, custom `metric` names map via the reported config),
-  14 battery_voltage. Whole frame ≤ 250 bytes; the node packs as many whole
-  samples as fit. The collector accepts both `EN_MSG_DATA` (legacy BME node)
+  14 battery_voltage. Values are in the catalogue's units — `pressure` hPa,
+  `battery_voltage` **volts** (legacy DATA carried millivolts). Whole frame
+  ≤ 250 bytes; the node packs as many whole samples as fit. The collector accepts both `EN_MSG_DATA` (legacy BME node)
   and `EN_MSG_DATA2`, ACKs both the same way.
 
   Precisely (as implemented in `listMetrics()` / `metricNameFor()`): the
@@ -421,10 +444,14 @@ on the setup AP that never comes (the restart closes the AP), so after ~30 s
 it says so instead.
 
 Where it runs: WiFi node — as today (AP portal, and on the LAN behind basic
-auth). ESP-NOW node — hold BOOT (GPIO9) through reset, or no key/never
-paired and no compiled defaults: WPA2 AP `esp-node-XXXX` (pass
-`PORTAL_AP_PASS`), 5-minute timeout paused while a station is connected, then
-restart. ESP-NOW is off while the portal runs.
+auth). ESP-NOW node — press RESET (or power it up), then hold BOOT (GPIO9)
+within 2 s; BOOT held *through* reset selects the C3's ROM download mode, so
+the firmware watches for it after a power-on/reset instead. In mains mode
+(`sleep: false`) holding BOOT for 1 s also works. It also opens by itself on
+a power-on when the node has never paired and its key is still the shipped
+placeholder. WPA2 AP `esp-node-XXXX` (pass `PORTAL_AP_PASS`), 5-minute
+timeout paused while a station is connected, then restart. ESP-NOW is off
+while the portal runs.
 
 ## 7. Collector HTTP API (for the Nodes page)
 

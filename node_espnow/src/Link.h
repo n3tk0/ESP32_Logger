@@ -23,7 +23,7 @@ struct NodeLink {
     uint8_t  collector[6];  ///< the collector's STA MAC
     uint8_t  bssid[6];      ///< the access point, for finding a moved channel
     char     ssid[33];
-    uint16_t intervalS;
+    uint16_t intervalS;     ///< from the WELCOME; main.cpp moves it into the config
 };
 
 /// The outcome of one report. Every field is something the caller acts on.
@@ -35,7 +35,13 @@ struct LinkResult {
     uint16_t intervalS;   ///< requested wake interval, 0 = keep the current one
     uint8_t  channel;     ///< the channel the collector reported being on
     bool     rediscover;  ///< the collector asked for a fresh pairing
+    bool     cfgPending;  ///< EN_ACK_CFG_PENDING: a newer config is waiting
 };
+
+/// The 16-byte key for everything that follows: the encrypted peer (LMK) and
+/// the DISCOVER / WELCOME signature. The page's key when one was set there,
+/// else the compiled ESPNOW_LMK (ConfigStore.h). Call before linkBegin().
+void linkSetKey(const char* key16);
 
 /// Start the radio, optionally pinned to `channel` (0 = leave it alone).
 /// Adds the broadcast peer, and the collector as an encrypted peer when
@@ -45,12 +51,26 @@ bool linkBegin(const NodeLink& link);
 /// Stop the radio cleanly before sleeping.
 void linkEnd();
 
-/// Send one DATA frame and wait up to NODE_ACK_WINDOW_MS for the reply.
+/// Send one DATA2 frame (already built, `seq` inside it) and wait up to
+/// `windowMs` for the ACK echoing `seq`.
 ///
 /// The wait ENDS THE MOMENT THE REPLY ARRIVES — the window is a ceiling, not a
 /// duration, and `LinkResult::waitedMs` reports what it actually cost so the
 /// battery arithmetic can be checked against reality rather than assumed.
-LinkResult linkSend(const NodeLink& link, const DataMsg& msg, uint8_t count);
+LinkResult linkSendData(const NodeLink& link, const uint8_t* frame, int len, uint16_t seq,
+                        uint16_t windowMs);
+
+/// Send one frame to the collector and wait (a few ms, bounded) for the
+/// radio's MAC-level verdict. True = delivered to the collector's radio. For
+/// frames nobody answers: CFG_ACK, and every CFG_REPORT slice but the last.
+bool linkSendFrame(const NodeLink& link, const void* frame, int len);
+
+/// Send one frame and wait up to `windowMs` for a CFG from the collector
+/// addressed to this node. Used for CFG_GET (the reply is the next slice) and
+/// for the last CFG_REPORT slice (the reply is total == 0 with the adopted
+/// rev). Like the ACK window, a ceiling: it returns the moment a CFG arrives.
+bool linkExchangeCfg(const NodeLink& link, const void* frame, int len, uint16_t windowMs,
+                     CfgChunkMsg& out);
 
 /// Sweep the channels broadcasting a signed DISCOVER until a WELCOME for this
 /// node comes back. On success `io` holds everything the collector sent, and
@@ -64,12 +84,22 @@ LinkResult linkSend(const NodeLink& link, const DataMsg& msg, uint8_t count);
 /// for thirteen channels — so the caller rate-limits it.
 bool linkPair(NodeLink& io, uint32_t* epochOut = nullptr);
 
-/// Passive scan for the stored access point. Returns its channel, or 0 when it
-/// is not on the air.
+/// What one scan heard.
+struct ScanResult {
+    uint8_t storedCh;      ///< channel of the stored network, 0 = not heard
+    uint8_t nextCh;        ///< channel of `nextSsid`, 0 = not heard / not asked
+    uint8_t nextBssid[6];  ///< the access point `nextCh` came from
+};
+
+/// Passive scan for the stored access point and, when `nextSsid` is not
+/// empty, for the network the collector said it is moving to
+/// (link.next_ssid, docs/NODE_CONFIG.md §4.6). Rescan.h decides what to do
+/// with the answer.
 ///
-/// Matches on BSSID first because that is exact, then falls back to SSID: a
-/// mesh or a repeater changes the BSSID under you while the SSID stays put.
-uint8_t linkFindChannel(const NodeLink& link);
+/// The stored network matches on BSSID first because that is exact, then
+/// falls back to SSID: a mesh or a repeater changes the BSSID under you while
+/// the SSID stays put. The strongest radio of `nextSsid` wins.
+ScanResult linkFindChannel(const NodeLink& link, const char* nextSsid);
 
 /// This node's STA MAC, for the DISCOVER frame and for matching a WELCOME.
 const uint8_t* linkOwnMac();

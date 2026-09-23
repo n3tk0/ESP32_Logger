@@ -5,6 +5,13 @@
 // Each is overridable from platformio.ini with -D, so a second node with a
 // different sensor address or a different divider does not need this file
 // edited.
+//
+// SINCE THE CONFIG DOCUMENT (docs/NODE_CONFIG.md): most values here are now
+// only DEFAULTS. The node's settings live in NVS as the §1 document and are
+// edited on its own page or from the collector; these values seed that
+// document on a node that has none (ConfigStore.cpp, cfgStoreDefaults()) and
+// are otherwise not read. Marked "default" below. The keys, the radio
+// constants and the portal constants are still used as they are.
 // ============================================================================
 #pragma once
 
@@ -31,8 +38,9 @@ static_assert(sizeof(ESPNOW_PMK) == 17, "ESPNOW_PMK must be exactly 16 character
 // Cadence
 // ---------------------------------------------------------------------------
 
-/// Seconds between wakes. The collector can change this at runtime through the
-/// ACK; this is only the value used before it has ever answered.
+/// Default interval_s. Seconds between wakes. The collector can change this at
+/// runtime (the config document, or the ACK's legacy interval field); this is
+/// only the value used before anything has.
 ///
 /// 60 s costs roughly 10 mAh/day and 30 s roughly 19 — see docs/ESPNOW_NODE.md
 /// for where those come from and why the real figure is shorter than the
@@ -41,8 +49,8 @@ static_assert(sizeof(ESPNOW_PMK) == 17, "ESPNOW_PMK must be exactly 16 character
 #  define NODE_INTERVAL_S 60
 #endif
 
-/// Longest the node holds its radio in receive waiting for the collector's
-/// ACK. A CEILING, not a duration: the wait ends the moment the frame arrives,
+/// Default link.ack_window_ms. Longest the node holds its radio in receive
+/// waiting for the collector's ACK. A CEILING, not a duration: the wait ends the moment the frame arrives,
 /// which is normally a few milliseconds.
 ///
 /// The distinction is the whole battery argument. A fixed 30 ms at one wake a
@@ -52,13 +60,13 @@ static_assert(sizeof(ESPNOW_PMK) == 17, "ESPNOW_PMK must be exactly 16 character
 #  define NODE_ACK_WINDOW_MS 30
 #endif
 
-/// Consecutive wakes with no ACK before the node goes looking for a moved
-/// channel. Three, because a single lost frame is ordinary in a shared band.
+/// Default link.rescan_fails. Consecutive wakes with no ACK before the node
+/// goes looking for a moved channel. Three, because a single lost frame is ordinary in a shared band.
 #ifndef NODE_RESCAN_FAILS
 #  define NODE_RESCAN_FAILS 3
 #endif
 
-/// Least time between two channel scans.
+/// Default link.rescan_min_s. Least time between two channel scans.
 ///
 /// A RATE LIMIT, NOT A SCHEDULE, and the difference matters in both
 /// directions. A collector that is simply switched off would otherwise make
@@ -87,8 +95,9 @@ static_assert(sizeof(ESPNOW_PMK) == 17, "ESPNOW_PMK must be exactly 16 character
 #endif
 
 // ---------------------------------------------------------------------------
-// Sensor — BME280 or BMP280 on I2C
+// Sensor — defaults for the one BME280 or BMP280 a fresh node starts with
 // ---------------------------------------------------------------------------
+// The sensor list is the config document's `sensors`; these only seed it.
 // XIAO ESP32-C3 defaults: D4 = GPIO6 = SDA, D5 = GPIO7 = SCL.
 #ifndef NODE_I2C_SDA
 #  define NODE_I2C_SDA 6
@@ -97,24 +106,27 @@ static_assert(sizeof(ESPNOW_PMK) == 17, "ESPNOW_PMK must be exactly 16 character
 #  define NODE_I2C_SCL 7
 #endif
 
-/// 0x76 with SDO to ground, 0x77 with SDO to VCC. Most breakout boards tie it
-/// low; a few do not, and the node tries the other address if the first is
-/// silent rather than making that a build-time decision somebody has to
-/// discover.
+/// 0x76 with SDO to ground, 0x77 with SDO to VCC. 0 (the default) = probe
+/// 0x76 then 0x77: most breakout boards tie SDO low, a few do not, and trying
+/// the other address costs a millisecond rather than making it a build-time
+/// decision somebody has to discover. That was this node's behaviour before
+/// the config document, and "addr": 0 is how the document says it.
 #ifndef NODE_BMX_ADDR
-#  define NODE_BMX_ADDR 0x76
+#  define NODE_BMX_ADDR 0
 #endif
 
 // ---------------------------------------------------------------------------
 // Battery sensing
 // ---------------------------------------------------------------------------
 
-/// ADC pin the divider's midpoint goes to. A0 on the XIAO ESP32-C3.
+/// Default batt.pin. ADC pin the divider's midpoint goes to. A0 on the XIAO
+/// ESP32-C3.
 #ifndef NODE_BATT_PIN
 #  define NODE_BATT_PIN 2
 #endif
 
-/// Ratio of cell voltage to what the pin sees. 2.0 for two equal resistors.
+/// Default batt.divider. Ratio of cell voltage to what the pin sees. 2.0 for
+/// two equal resistors.
 ///
 /// TWO 220 kΩ RESISTORS, PERMANENTLY CONNECTED. That is about 9.5 µA at 4.2 V,
 /// under a percent of the daily budget at one-minute intervals — cheaper than
@@ -128,7 +140,8 @@ static_assert(sizeof(ESPNOW_PMK) == 17, "ESPNOW_PMK must be exactly 16 character
 #  define NODE_BATT_DIVIDER 2.0f
 #endif
 
-/// Per-node trim, applied after the divider ratio. 1.0 disables it.
+/// Default batt.trim. Per-node trim, applied after the divider ratio. 1.0
+/// disables it.
 ///
 /// The resistors are 1 % at best and the ADC reference varies part to part, so
 /// two nodes built identically will disagree by tens of millivolts. Measure
@@ -143,6 +156,69 @@ static_assert(sizeof(ESPNOW_PMK) == 17, "ESPNOW_PMK must be exactly 16 character
 /// of the noise out of a measurement the whole battery estimate rests on.
 #ifndef NODE_BATT_SAMPLES
 #  define NODE_BATT_SAMPLES 16
+#endif
+
+// ---------------------------------------------------------------------------
+// Config exchange with the collector (docs/NODE_CONFIG.md §5, CfgFetch.h)
+// ---------------------------------------------------------------------------
+
+/// Whole-fetch ceiling, in ms, for pulling a changed config within one wake.
+///
+/// Six 200-byte slices is the largest document there can be; answered from
+/// the collector's receive callback each is a few ms, so a real fetch is tens
+/// of ms. The ceiling is for a collector that flags a config and then does
+/// not answer: 400 ms of receive at ~85 mA is ~0.009 mAh, and the backoff in
+/// CfgFetch.h stops that from repeating every wake. Past the ceiling the
+/// wake gives up and the next one starts again from offset 0.
+#ifndef NODE_CFG_BUDGET_MS
+#  define NODE_CFG_BUDGET_MS 400
+#endif
+
+/// Per-request reply ceiling for CFG_GET and for the last CFG_REPORT slice.
+/// The larger of this and link.ack_window_ms is used: a slice is a bigger
+/// frame than an ACK and the collector may do a little more work for it.
+#ifndef NODE_CFG_REPLY_MS
+#  define NODE_CFG_REPLY_MS 50
+#endif
+
+/// Unanswered CFG_GETs in a row before the wake gives up.
+#ifndef NODE_CFG_MAX_MISSES
+#  define NODE_CFG_MAX_MISSES 2
+#endif
+
+// ---------------------------------------------------------------------------
+// The setup page (docs/NODE_CONFIG.md §6, Portal.h)
+// ---------------------------------------------------------------------------
+
+/// The button that opens the page. GPIO9 = BOOT on the XIAO ESP32-C3.
+#ifndef NODE_PORTAL_PIN
+#  define NODE_PORTAL_PIN 9
+#endif
+
+/// After a power-on or a press of RESET, how long the node watches BOOT
+/// before carrying on. BOOT held THROUGH reset selects the C3's ROM download
+/// mode, so the gesture is "RESET, then hold BOOT" and the firmware has to be
+/// looking when it happens. Paid only on those boots, never on a wake.
+#ifndef NODE_PORTAL_WINDOW_MS
+#  define NODE_PORTAL_WINDOW_MS 2000
+#endif
+
+/// The setup AP's WPA2 password — at least 8 characters. The same default as
+/// the WiFi node's; change it.
+#ifndef PORTAL_AP_PASS
+#  define PORTAL_AP_PASS "configure"
+#endif
+static_assert(sizeof(PORTAL_AP_PASS) >= 9, "PORTAL_AP_PASS: WPA2 needs 8+ characters");
+
+/// Idle time before the page gives up and restarts the node. The clock only
+/// runs while nobody is connected to the AP.
+#ifndef PORTAL_TIMEOUT_MS
+#  define PORTAL_TIMEOUT_MS 300000UL   // 5 minutes
+#endif
+
+/// Reported as `fw` in the config document.
+#ifndef NODE_FW_VERSION
+#  define NODE_FW_VERSION "2026.09.1"
 #endif
 
 // ---------------------------------------------------------------------------
