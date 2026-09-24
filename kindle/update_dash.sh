@@ -130,11 +130,17 @@ TOUCH_SWAP=0
 # overwrites, so by the time the question is asked there is nothing left to
 # compare against — and "these are the labels the reader chose" and "these have
 # simply never been changed" are the same four words.
-MENU_LBL_STD="Refresh|Awake/Sleep|More|Exit"
+MENU_LBL_STD="Refresh|Awake/Sleep|Forecast|More|Exit"
+#: The shipped four before `forecast`. Still in every older dash.conf, and still
+#: shipped words rather than the reader's, so it is refused the same way.
+MENU_LBL_OLD="Refresh|Awake/Sleep|More|Exit"
 MENU_LBL2_STD="Find|Next|Battery|Info|Back"
 SURE_LBL_STD="Tap the bar again to exit"
 MENU_LBL="$MENU_LBL_STD"
-MENU_ACT="refresh|wake|settings|quit"
+MENU_ACT="refresh|wake|forecast|settings|quit"
+#: The bar every reader had before `forecast` existed. conf_load() moves a
+#: dash.conf still carrying it to the one above; a list somebody chose is theirs.
+MENU_ACT_OLD="refresh|wake|settings|quit"
 MENU_LBL2="$MENU_LBL2_STD"
 SURE_LBL="$SURE_LBL_STD"
 MODE_LBL="awake|radio off|asleep"
@@ -213,7 +219,7 @@ conf_help() {
         TOUCH_SWAP)         echo "1 if the panel reports Y where X is expected" ;;
         LAYOUT)             echo "auto follows the collector; normal keeps the forecast band; standalone drops it and enlarges the readings" ;;
         MENU_LBL)           echo "The labels on the tap menu, separated by bars" ;;
-        MENU_ACT)           echo "What each button does: refresh|wake|settings|hide|quit" ;;
+        MENU_ACT)           echo "What each button does: refresh|wake|forecast|settings|hide|quit" ;;
         MENU_LBL2)          echo "The labels on the settings bar, separated by bars" ;;
         SURE_LBL)           echo "What the bar says when it is asking to confirm Exit" ;;
         MODE_LBL)           echo "The three words for the power modes, separated by bars" ;;
@@ -395,7 +401,7 @@ conf_valid() {
             while : ; do
                 one="${rest%%|*}"
                 case "$one" in
-                    refresh|wake|settings|hide|quit) ;;
+                    refresh|wake|forecast|settings|hide|quit) ;;
                     *) return 1 ;;
                 esac
                 n=$((n + 1))
@@ -489,6 +495,17 @@ conf_load() {
             CONF_WARNED="$kept"
         fi
     done
+    # The shipped bar before `forecast`, with the shipped words or none, is a
+    # bar nobody chose: the reader gets the button the new one ships with. Own
+    # labels over the old four buttons mean somebody sat down and named them,
+    # and both keys are left exactly as they are.
+    if [ "$MENU_ACT" = "$MENU_ACT_OLD" ]; then
+        case "${MENU_LBL:-}" in
+            ""|"$MENU_LBL_OLD"|"$MENU_LBL_STD")
+                MENU_ACT="refresh|wake|forecast|settings|quit" ;;
+        esac
+    fi
+    return 0
 }
 
 # Is the collector address still the one the package shipped?
@@ -1341,7 +1358,7 @@ menu_geom() {
     MENU_W=${RES_W:-600}
     # SET, NOT DEFAULTED PAST. Everything that asks which button is where has
     # to get the same answer as everything that draws one.
-    [ -n "${MENU_ACTS:-}" ] || MENU_ACTS="${MENU_ACT:-refresh|wake|settings|quit}"
+    [ -n "${MENU_ACTS:-}" ] || MENU_ACTS="${MENU_ACT:-refresh|wake|forecast|settings|quit}"
     list_len "$MENU_ACTS"
     MENU_N=$LIST_N
     [ "$MENU_N" -ge 1 ] 2>/dev/null || MENU_N=1
@@ -1383,7 +1400,7 @@ menu_hit() {
 menu_open() {
     case "${1:-main}" in
         main) MENU=1
-              MENU_ACTS="${MENU_ACT:-refresh|wake|settings|quit}"
+              MENU_ACTS="${MENU_ACT:-refresh|wake|forecast|settings|quit}"
               menu_labels "${MENU_LBL:-}" "$MENU_LBL_STD" ;;
         more) MENU=2
               MENU_ACTS="find|next|power|diag|back"
@@ -1396,7 +1413,7 @@ menu_open() {
               MENU_ACTS="sure"
               menu_labels "${SURE_LBL:-}" "$SURE_LBL_STD" ;;
         *)    MENU=1
-              MENU_ACTS="${MENU_ACT:-refresh|wake|settings|quit}"
+              MENU_ACTS="${MENU_ACT:-refresh|wake|forecast|settings|quit}"
               menu_labels "${MENU_LBL:-}" "$MENU_LBL_STD" ;;
     esac
     draw_menu
@@ -1441,13 +1458,13 @@ menu_label() {
 menu_word() {
     local acts lbls="" want i=0
     MENU_WORD=""
-    acts="${MENU_ACT:-refresh|wake|settings|quit}"
+    acts="${MENU_ACT:-refresh|wake|forecast|settings|quit}"
     list_len "$acts"; want=$LIST_N
     list_len "${MENU_LBL:-}"
     # The same rule the bar is drawn under — see menu_labels(). A sentence
     # naming a button has to name the word that is ON it.
     if [ -n "${MENU_LBL:-}" ] && [ "$LIST_N" = "$want" ] &&
-       [ "$MENU_LBL" != "$MENU_LBL_STD" ]; then
+       [ "$MENU_LBL" != "$MENU_LBL_STD" ] && [ "$MENU_LBL" != "$MENU_LBL_OLD" ]; then
         lbls="$MENU_LBL"
     fi
     while [ "$i" -lt "$want" ]; do
@@ -1520,6 +1537,39 @@ power_cycle() {
     return 0
 }
 
+# One line across the whole bar, in place of its buttons, for an action whose
+# answer is a sentence rather than a redraw.
+menu_note() {
+    menu_geom
+    fill_rect 0 "$MENU_Y" "$MENU_W" "$MENU_H" BLACK
+    local sz=$(( MENU_H * 32 / 100 ))
+    [ "$sz" -lt 12 ] && sz=12
+    draw_text_reg_inv $(( MENU_W / 16 )) $(( MENU_Y + (MENU_H - sz) / 2 )) "$sz" "$1"
+    refresh_zone 0 "$MENU_Y" "$MENU_W" "$MENU_H" 1
+    return 0
+}
+
+# Ask the collector for a fresh forecast, then draw the page with it.
+#
+# THE COLLECTOR ONLY QUEUES IT: the fetch runs on its own task a moment later
+# and takes up to a few seconds, so the page is redrawn after a wait rather
+# than straight away — straight away would draw the forecast it already had.
+# The answer is one line, see handleKindleForecast() in KindleDashboard.cpp.
+forecast_now() {
+    local ans
+    net_up
+    ans=$(wget -q -T "$FETCH_TIMEOUT" -O - "$(host_url)/kindle/forecast?t=1" 2>/dev/null)
+    case "$ans" in
+        ok)     menu_note "Updating the forecast..."; sleep "${DASH_FC_SETTLE:-8}" ;;
+        wait*)  menu_note "Updated a moment ago. Try again in ${ans#wait } s"
+                sleep "${DASH_FC_NOTE:-3}" ;;
+        off)    menu_note "The forecast is off on the collector"; sleep "${DASH_FC_NOTE:-3}" ;;
+        *)      menu_note "No answer from the collector"; sleep "${DASH_FC_NOTE:-3}" ;;
+    esac
+    : > "$TMP/redraw"
+    return 0
+}
+
 settings_run() {
     # The same script KUAL runs, as its own process: one implementation of
     # "find the collector on this network", not two, and its own screen of
@@ -1536,6 +1586,7 @@ settings_run() {
 menu_word_of() {
     case "$1" in
         refresh)  MENU_WORD_DEF="Refresh" ;;
+        forecast) MENU_WORD_DEF="Forecast" ;;
         wake)     MENU_WORD_DEF="Awake/Sleep" ;;
         settings) MENU_WORD_DEF="More" ;;
         hide)     MENU_WORD_DEF="Hide" ;;
@@ -1577,7 +1628,8 @@ menu_labels() {
     # The shipped list is refused for the same reason: a reader who changes
     # MENU_ACT and leaves MENU_LBL alone has four labels for four buttons, and
     # every one of them belongs to a button that is no longer there.
-    if [ -n "${1:-}" ] && [ "$LIST_N" = "$want" ] && [ "$1" != "${2:-}" ]; then
+    if [ -n "${1:-}" ] && [ "$LIST_N" = "$want" ] && [ "$1" != "${2:-}" ] &&
+       [ "$1" != "$MENU_LBL_OLD" ]; then
         MENU_LBLS="$1"
         return 0
     fi
@@ -3554,6 +3606,10 @@ while true; do
             # A full tick, through the same file settings.sh leaves behind:
             # one way for "draw everything now", not two.
             refresh)  MENU=0; : > "$TMP/redraw" ;;
+            # The collector fetches, then the whole page is drawn with it —
+            # the bar has to come off the screen anyway, and a redraw is what
+            # takes it off.
+            forecast) MENU=0; forecast_now ;;
             # THE BUTTON THIS WHOLE MECHANISM EXISTS FOR. Written to dash.conf,
             # so KUAL and settings.sh agree with the panel afterwards.
             wake)     MENU=0; power_toggle; : > "$TMP/redraw" ;;

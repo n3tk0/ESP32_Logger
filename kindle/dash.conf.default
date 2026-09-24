@@ -133,9 +133,10 @@ TOUCH_SWAP=0
 
 # ── What is on the bar ───────────────────────────────────────────────────────
 # MENU_ACT is the list that decides: how many buttons the bar has, and what
-# each one does. Two to five of these five words —
+# each one does. Two to five of these six words —
 #
 #   refresh    fetch everything and redraw the whole page now
+#   forecast   ask the collector to fetch a new forecast now, then redraw
 #   wake       stop sleeping, so the device can be told things — and on the
 #              second press, go back to sleeping. This is the button the power
 #              button exists to reach: it writes POWER, so KUAL and the panel
@@ -152,12 +153,12 @@ TOUCH_SWAP=0
 # slash between them — `Awake/Sleep` — and the bar draws the half that says
 # which way the next tap will go. A label with no slash is used as it is.
 # The labels are used only when there are exactly as many of them as MENU_ACT
-# has buttons AND they are not the shipped four below; otherwise each button is
+# has buttons AND they are not the shipped five below; otherwise each button is
 # named after what it DOES (refresh -> Refresh, hide -> Hide). So if you change
 # MENU_ACT, change these with it or delete the line — a bar whose words are one
 # place along from its buttons is worse than a bar you cannot read.
-MENU_LBL=Refresh|Awake/Sleep|More|Exit
-MENU_ACT=refresh|wake|settings|quit
+MENU_LBL=Refresh|Awake/Sleep|Forecast|More|Exit
+MENU_ACT=refresh|wake|forecast|settings|quit
 
 # The settings bar, in its fixed order: find, next, battery, info, back.
 MENU_LBL2=Find|Next|Battery|Info|Back

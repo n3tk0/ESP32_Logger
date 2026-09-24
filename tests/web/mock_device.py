@@ -15,7 +15,7 @@ like /export_settings) 404 by design; the driver ignores those.
 
     python3 tests/web/mock_device.py 8765
 """
-import json, threading, http.server, socketserver, urllib.parse, os, sys
+import json, threading, http.server, socketserver, urllib.parse, os, sys, time
 
 import pathlib
 ROOT = str(pathlib.Path(__file__).resolve().parent.parent.parent / "www")
@@ -70,7 +70,11 @@ MODULES = [
     {"id": "forecast", "name": "Weather forecast", "enabled": True, "hasUI": True,
      "description": "Short forecast from Open-Meteo or OpenWeatherMap",
      "status": {"provider": "open-meteo", "valid": True, "failures": 0,
-                "tempC": 29.2, "summary": "Променливо"}},
+                "tempC": 29.2, "summary": "Променливо",
+                # An hour old, so the panel has an age to print, and the
+                # refresh URL a build with the Kindle dashboard adds.
+                "fetchedAt": int(time.time()) - 3600, "pending": False,
+                "refresh": "/kindle/forecast"}},
 ]
 
 # GET /api/modules/:id → config + schema. The schema is a STRING of
@@ -88,6 +92,10 @@ MODULE_SCHEMA = {
         {"id": "dstOffsetHours", "type": "int", "min": 0, "max": 2,
          "label": "DST offset", "unit": "h"},
     ]}),
+    "forecast": json.dumps({"fields": [
+        {"id": "lat", "type": "float", "label": "Latitude"},
+        {"id": "lon", "type": "float", "label": "Longitude"},
+    ]}),
     "wifi": json.dumps({"fields": [
         {"id": "ssid", "type": "string", "max": 32, "label": "SSID"},
         {"id": "useStatic", "type": "bool", "label": "Use a static IP"},
@@ -96,7 +104,10 @@ MODULE_SCHEMA = {
     ]}),
 }
 
+FORECAST = {"asked": False}
+
 MODULE_CONFIG = {
+    "forecast": {"provider": "open-meteo", "lat": 42.7, "lon": 23.3, "interval_min": 30},
     "time": {"ntpServer": "pool.ntp.org", "timezone": 2, "dstOffsetHours": 1},
     "wifi": {"ssid": "MonkeyNet", "useStatic": False, "ip": "192.168.1.214"},
 }
@@ -599,6 +610,14 @@ class H(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
+    def _text(self, body, code=200):
+        b = body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/api/kindle/slots":
@@ -642,6 +661,20 @@ class H(http.server.SimpleHTTPRequestHandler):
         # and this is the poll, which finds it already connected.
         if path == "/api/modules/wifi/test":
             return self._json({"state": "success", "rssi": -51, "ip": "192.168.7.23"})
+        # The forecast button's one-line answer (handleKindleForecast). "ok"
+        # the first time; the fetch is "done" at once, so the status the page
+        # polls next already carries a newer fetchedAt. Then "wait", like the
+        # device's one-minute floor. /__mock/forecast?reset=1 starts it over.
+        if path == "/kindle/forecast":
+            st = next(x for x in MODULES if x["id"] == "forecast")["status"]
+            if FORECAST["asked"]:
+                return self._text("wait 57")
+            FORECAST["asked"] = True
+            st["fetchedAt"] = int(time.time())
+            return self._text("ok")
+        if path == "/__mock/forecast":
+            FORECAST["asked"] = False
+            return self._json(FORECAST)
         if path.startswith("/api/modules/"):
             mid = path[len("/api/modules/"):]
             m = next((x for x in MODULES if x["id"] == mid), None)

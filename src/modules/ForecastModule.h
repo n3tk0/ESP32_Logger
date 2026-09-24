@@ -112,6 +112,23 @@ public:
     /// Snapshot of the last successful fetch. Safe to call from any task.
     Data snapshot() const;
 
+    /// What a refresh button gets back from requestRefresh().
+    enum Refresh : uint8_t {
+        REFRESH_QUEUED = 0,   // the next tick fetches, whatever the interval
+        REFRESH_WAIT   = 1,   // a fetch was tried under a minute ago
+        REFRESH_OFF    = 2,   // disabled, or no location set
+    };
+
+    /// Asks for a fetch now rather than at the end of the interval. Called
+    /// from the web server, so it only raises a flag: the fetch itself blocks
+    /// for seconds and stays on the export task, where tick() already runs it.
+    /// `waitS` is set on REFRESH_WAIT to the seconds left.
+    ///
+    /// ONE MINUTE BETWEEN ATTEMPTS, manual or not. The button sits on a page
+    /// served without a password, and OWM's free key is counted per day — a
+    /// reader tapping it ten times should cost one request, not ten.
+    Refresh requestRefresh(uint32_t nowMs, uint32_t& waitS);
+
 private:
     bool _fetch();
     bool _fetchOpenMeteo();
@@ -130,6 +147,9 @@ private:
 
     uint32_t _lastAttempt  = 0;
     uint32_t _failures     = 0;
+    // Set by requestRefresh() on the AsyncTCP task, cleared by tick() on the
+    // export task. A lone byte, so the store needs no lock.
+    volatile bool _refreshRequested = false;
     Data     _data;
 
     mutable portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;
