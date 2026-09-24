@@ -242,11 +242,21 @@ tag = first 8 bytes of HMAC-SHA256(ingest token, all preceding bytes)
 The collector, if the tag verifies against its INGEST_TOKEN, unicasts back:
 
 ```
-"ESPL!" (5) | nonce echoed (8) | http port (uint16 LE) | tag (8, same scheme)
+"ESPL!" (5) | nonce echoed (8) | http port (uint16 LE) | collector IPv4 (4) | tag (8, same scheme)
 ```
 
-The node takes the sender IP as the new `net.host`, saves it, and marks it
-`local: true` so the collector learns the change. HMAC-SHA256 comes from
+The IPv4 field is the collector's own address on the network the query came
+in on (its STA address, or its AP address for a node on the collector's AP),
+first octet first. The node refuses a reply whose signed address is not the
+address the reply came from, so a host on the LAN cannot re-send a captured
+reply from its own IP and be taken for the collector. The node then takes
+that address as the new `net.host`, saves it, and marks it `local: true` so
+the collector learns the change.
+
+The reply is 27 bytes. Firmware from before the address field sent and
+expected a 23-byte reply; each side refuses the other's by length, so an old
+node and a new collector (or the reverse) do not discover each other — the
+node keeps its configured `host` and keeps retrying it. Update both. HMAC-SHA256 comes from
 `bearssl` on the ESP8266 and `mbedtls` on the collector.
 
 Both packets are built and checked by `src/nodecfg/UdpDiscovery.h`

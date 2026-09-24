@@ -161,6 +161,7 @@ static void test_reference_hmac_matches_rfc4231() {
 
 // ---------------------------------------------------------------------------
 static const uint8_t NONCE[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+static const uint8_t IP[4]    = { 192, 168, 1, 50 };   // the collector, first octet first
 static const char*   TOKEN    = "s3cret-ingest-token";
 
 static void test_query_layout() {
@@ -208,7 +209,7 @@ static void test_query_round_trip_and_refusals() {
     }
     // A reply is not a query.
     uint8_t r[REPLY_LEN];
-    CHECK(buildReply(r, NONCE, 80, TOKEN, ref::hmac));
+    CHECK(buildReply(r, NONCE, 80, IP, TOKEN, ref::hmac));
     CHECK(!parseQuery(r, sizeof(r), TOKEN, ref::hmac, nonce, name));
     // A crypto failure is a refusal, never a pass.
     CHECK(!parseQuery(q, sizeof(q), TOKEN, brokenHmac, nonce, name));
@@ -249,46 +250,69 @@ static void test_query_names() {
 // ---------------------------------------------------------------------------
 static void test_reply_layout_and_round_trip() {
     uint8_t r[REPLY_LEN];
-    CHECK(buildReply(r, NONCE, 0x1F90, TOKEN, ref::hmac));   // 8080
+    CHECK(buildReply(r, NONCE, 0x1F90, IP, TOKEN, ref::hmac));   // 8080
     CHECK(memcmp(r, "ESPL!", 5) == 0);
     CHECK(memcmp(r + 5, NONCE, 8) == 0);
     CHECK_EQ(r[13], 0x90);   // little-endian, whatever the host
     CHECK_EQ(r[14], 0x1F);
+    CHECK(memcmp(r + 15, IP, 4) == 0);   // first octet first
     uint8_t full[32];
-    ref::hmac((const uint8_t*)TOKEN, strlen(TOKEN), r, 15, full);
-    CHECK(memcmp(r + 15, full, 8) == 0);
+    ref::hmac((const uint8_t*)TOKEN, strlen(TOKEN), r, 19, full);
+    CHECK(memcmp(r + 19, full, 8) == 0);
 
     uint16_t port = 0;
-    CHECK(parseReply(r, sizeof(r), NONCE, TOKEN, ref::hmac, port));
+    CHECK(parseReply(r, sizeof(r), NONCE, TOKEN, ref::hmac, IP, port));
     CHECK_EQ(port, 8080);
 }
 
 static void test_reply_refusals() {
     uint8_t r[REPLY_LEN];
-    CHECK(buildReply(r, NONCE, 80, TOKEN, ref::hmac));
+    CHECK(buildReply(r, NONCE, 80, IP, TOKEN, ref::hmac));
     uint16_t port = 1234;
 
     // An answer to somebody else's question — or to an earlier one of ours:
     // the nonce is what makes a captured reply useless later.
     const uint8_t other[8] = { 1, 2, 3, 4, 5, 6, 7, 9 };
-    CHECK(!parseReply(r, sizeof(r), other, TOKEN, ref::hmac, port));
-    CHECK(!parseReply(r, sizeof(r), NONCE, "other-token", ref::hmac, port));
+    CHECK(!parseReply(r, sizeof(r), other, TOKEN, ref::hmac, IP, port));
+    CHECK(!parseReply(r, sizeof(r), NONCE, "other-token", ref::hmac, IP, port));
     for (size_t i = 0; i < REPLY_LEN; i++) {
         uint8_t t[REPLY_LEN];
         memcpy(t, r, sizeof(t));
         t[i] ^= 0x80;
-        CHECK(!parseReply(t, sizeof(t), NONCE, TOKEN, ref::hmac, port));
+        CHECK(!parseReply(t, sizeof(t), NONCE, TOKEN, ref::hmac, IP, port));
     }
-    CHECK(!parseReply(r, REPLY_LEN - 1, NONCE, TOKEN, ref::hmac, port));
-    CHECK(!parseReply(r, sizeof(r), NONCE, TOKEN, brokenHmac, port));
+    CHECK(!parseReply(r, REPLY_LEN - 1, NONCE, TOKEN, ref::hmac, IP, port));
+    CHECK(!parseReply(r, sizeof(r), NONCE, TOKEN, brokenHmac, IP, port));
     // Port 0 cannot be a web server, however well signed.
-    CHECK(buildReply(r, NONCE, 0, TOKEN, ref::hmac));
-    CHECK(!parseReply(r, sizeof(r), NONCE, TOKEN, ref::hmac, port));
+    CHECK(buildReply(r, NONCE, 0, IP, TOKEN, ref::hmac));
+    CHECK(!parseReply(r, sizeof(r), NONCE, TOKEN, ref::hmac, IP, port));
     CHECK_EQ(port, 1234);   // untouched by every refusal
     // A query is not a reply.
     uint8_t q[QUERY_LEN];
     CHECK(buildQuery(q, NONCE, "balcony", TOKEN, ref::hmac));
-    CHECK(!parseReply(q, REPLY_LEN, NONCE, TOKEN, ref::hmac, port));
+    CHECK(!parseReply(q, REPLY_LEN, NONCE, TOKEN, ref::hmac, IP, port));
+    CHECK_EQ(port, 1234);
+}
+
+static void test_reply_bound_to_sender() {
+    // A valid, fresh reply re-sent by another host on the LAN: signed for
+    // the collector's address, arriving from someone else's. Refused — the
+    // node would otherwise POST its token and take a config from that host.
+    uint8_t r[REPLY_LEN];
+    CHECK(buildReply(r, NONCE, 80, IP, TOKEN, ref::hmac));
+    uint16_t port = 1234;
+    const uint8_t other[4] = { 192, 168, 1, 66 };
+    CHECK(!parseReply(r, sizeof(r), NONCE, TOKEN, ref::hmac, other, port));
+    CHECK(!parseReply(r, sizeof(r), NONCE, TOKEN, ref::hmac, nullptr, port));
+    CHECK_EQ(port, 1234);
+    // Rewriting the address to the sender's breaks the tag.
+    memcpy(r + 15, other, 4);
+    CHECK(!parseReply(r, sizeof(r), NONCE, TOKEN, ref::hmac, other, port));
+    CHECK(!buildReply(r, NONCE, 80, nullptr, TOKEN, ref::hmac));
+    // The 23-byte reply of earlier firmware is refused by length, and a new
+    // reply by length at an old node: neither side mistakes the other's.
+    CHECK(!parseReply(r, 23, NONCE, TOKEN, ref::hmac, IP, port));
+    CHECK_EQ(REPLY_LEN, 27u);
 }
 
 static void test_empty_token_is_symmetric() {
@@ -300,11 +324,11 @@ static void test_empty_token_is_symmetric() {
     uint16_t port = 0;
     CHECK(buildQuery(q, NONCE, "attic", "", ref::hmac));
     CHECK(parseQuery(q, sizeof(q), nullptr, ref::hmac, nonce, name));   // null == ""
-    CHECK(buildReply(r, nonce, 80, nullptr, ref::hmac));
-    CHECK(parseReply(r, sizeof(r), NONCE, "", ref::hmac, port));
+    CHECK(buildReply(r, nonce, 80, IP, nullptr, ref::hmac));
+    CHECK(parseReply(r, sizeof(r), NONCE, "", ref::hmac, IP, port));
     CHECK_EQ(port, 80);
     // …and a node WITH a token refuses a collector without one.
-    CHECK(!parseReply(r, sizeof(r), NONCE, TOKEN, ref::hmac, port));
+    CHECK(!parseReply(r, sizeof(r), NONCE, TOKEN, ref::hmac, IP, port));
 }
 
 int main() {
@@ -314,6 +338,7 @@ int main() {
     RUN(test_query_names);
     RUN(test_reply_layout_and_round_trip);
     RUN(test_reply_refusals);
+    RUN(test_reply_bound_to_sender);
     RUN(test_empty_token_is_symmetric);
     return SUMMARY();
 }

@@ -122,9 +122,13 @@ static bool runDiscovery() {
             uint8_t buf[REPLY_LEN + 1];
             const int n = udp.read(buf, sizeof(buf));
             uint16_t p = 0;
+            // The reply must come from the address it signed (§3.1): a host
+            // re-sending a captured reply from its own IP is refused here.
+            const IPAddress rip = udp.remoteIP();
+            const uint8_t ripb[4] = { rip[0], rip[1], rip[2], rip[3] };
             if (n > 0 && parseReply(buf, (size_t)n, nonce, s_cfg.net.token,
-                                    udpdiscHmacSha256, p)) {
-                from  = udp.remoteIP();
+                                    udpdiscHmacSha256, ripb, p)) {
+                from  = rip;
                 port  = p;
                 found = true;
             }
