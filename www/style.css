@@ -2039,3 +2039,26 @@ body.deck-dragging * { cursor: grabbing !important; }
   background:var(--panel-2); border:1px solid var(--border);
   border-radius:var(--radius-sm); padding:12px; overflow:auto; white-space:pre-wrap; margin-top:10px;
 }
+
+/* ── Pin fields + board header (www/js/pins.js) ─────────────────────────────
+   The node's setup page (node_portal/style.css "board header diagram") with
+   a pm- prefix, so .chip / .header elsewhere on these pages stay untouched. */
+.pin-hint { font-size:11px; font-family:var(--mono); color:var(--text-3); margin-top:3px; min-height:1.3em; overflow-wrap:anywhere; }
+.pin-hint.ok   { color:var(--ok); }
+.pin-hint.warn { color:var(--warn); }
+.pin-hint.err  { color:var(--err); }
+.input.pin-bad { border-color:var(--err); }
+.pm-wrap { margin:4px 0 12px; }
+.pm-header { display:grid; grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr); gap:0 6px; max-width:420px; }
+.pm-col { display:flex; flex-direction:column; gap:3px; align-items:flex-start; }
+.pm-col.l { align-items:flex-end; }
+.pm-body { background:var(--panel-3); border:1px solid var(--border); border-radius:4px; }
+.pm-grid { display:flex; flex-wrap:wrap; gap:4px; }
+.pm-chip { display:inline-flex; align-items:center; gap:4px; height:22px; padding:0 6px; border-radius:4px; font-family:var(--mono); font-size:11px; border:1px solid var(--border); background:var(--panel-2); color:var(--text-3); max-width:100%; white-space:nowrap; }
+.pm-chip b { font-weight:700; color:var(--text); }
+.pm-chip.pwr  { background:transparent; border-style:dashed; }
+.pm-chip.warn { border-color:var(--warn); color:var(--warn); }
+.pm-chip.err  { border-color:var(--err); color:var(--err); text-decoration:line-through; }
+.pm-chip.use  { border-color:var(--accent); background:var(--accent-soft); color:var(--accent); }
+.pm-chip.use b { color:var(--accent); }
+.pm-legend { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }

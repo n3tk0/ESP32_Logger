@@ -27,6 +27,7 @@ on:
       - 'tests/web/**'
       - 'tools/pio_envs.py'
       - 'tools/check_pio_envs.py'
+      - 'tools/check_boards_json.py'
       - 'tools/features.py'
       - 'tools/check_features.py'
       - 'tools/check_node_portal.py'
@@ -67,6 +68,7 @@ on:
       - 'tests/web/**'
       - 'tools/pio_envs.py'
       - 'tools/check_pio_envs.py'
+      - 'tools/check_boards_json.py'
       - 'tools/features.py'
       - 'tools/check_features.py'
       - 'tools/check_node_portal.py'
@@ -339,7 +341,7 @@ jobs:
       # port dies with EADDRINUSE and its driver silently tests against the
       # earlier one — whose fixture the earlier driver had already POSTed
       # over. 8765/8766 espnow, 8767/8768 kindle, 8770/8771 sensors,
-      # 8774/8775 modules. drive_modules_page.py also binds MOCK_PORT+100 for
+      # 8774/8775 modules, 8776/8777 pins. drive_modules_page.py also binds MOCK_PORT+100 for
       # its proxy, so keep 8874/8875 clear too.
       - name: Drive the sensors page's remote-sensor editor
         # A satellite node pairs with the collector on one string, its node id,
@@ -382,6 +384,38 @@ jobs:
           cp www/js/sensors.js.orig www/js/sensors.js
           rm www/js/sensors.js.orig
           echo "the driver fails without the field, as it should"
+
+      - name: Drive the pin fields (first-run, Hardware, sensor editor, wizard)
+        # www/js/pins.js: a pin typed as the board prints it ("D9") or as a
+        # GPIO, a strap or console pin warned about and allowed, and only the
+        # flash bus, a GPIO the chip lacks or a pin already in use refused.
+        # The mock reads its board profiles from BoardProfiles.cpp itself.
+        run: |
+          python3 tests/web/mock_device.py 8776 &
+          sleep 2
+          MOCK_PORT=8776 python3 tests/web/drive_pin_pages.py
+
+      - name: Verify that check actually fails when a flash pin is only a warning
+        # The one rule that must never soften: GPIO 11-17 on a C3 is the flash
+        # bus, and a device configured to drive it does not boot. Downgrade
+        # that level in pins.js and the driver has to notice.
+        run: |
+          set -e
+          cp www/js/pins.js /tmp/pins.orig
+          sed -i 's/return { level: "err",  why: t("flash"/return { level: "warn", why: t("flash"/' www/js/pins.js
+          if cmp -s www/js/pins.js /tmp/pins.orig; then
+            echo "::error::the flash-pin mutation no longer matches — this proof step is stale"
+            exit 1
+          fi
+          python3 tests/web/mock_device.py 8777 &
+          sleep 2
+          if MOCK_PORT=8777 python3 tests/web/drive_pin_pages.py > /dev/null 2>&1; then
+            echo "::error::drive_pin_pages.py passed with the flash bus downgraded to a warning"
+            cp /tmp/pins.orig www/js/pins.js
+            exit 1
+          fi
+          cp /tmp/pins.orig www/js/pins.js
+          echo "the driver fails when a flash pin is allowed, as it should"
 
       - name: Drive the e-ink dashboard settings page
         # Its two bitmasks carry bit values defined in src/core/Config.h and
@@ -1110,6 +1144,11 @@ jobs:
         # env its parser cannot see is a board the tool will not offer, and
         # nothing else would say so.
         run: python3 tools/check_pio_envs.py
+
+      - name: Verify the board drawings match the firmware's board profiles
+        # www/boards.json is display data in LittleFS, so nothing compiles it
+        # against src/core/BoardProfiles.cpp or the node's HwPins.h. This does.
+        run: python3 tools/check_boards_json.py
 
       - name: Verify that check actually fails on a board missing from the form
         # The board dropdown in build-ota-firmware.yml is the one board list

@@ -789,54 +789,9 @@ function postWithCsrf(url, opts, timeoutMs) {
 }
 window.postWithCsrf = postWithCsrf;
 
-// ── Board restricted-pin helper (sensor pin warnings) ───────────────────────
-// Caches the ACTIVE board's restricted-pin sets from /api/board-profiles so the
-// sensor wizard + editor can warn when a chosen GPIO is risky.
-var _boardPinsCache = null;
-function getBoardPins() {
-  if (_boardPinsCache) return Promise.resolve(_boardPinsCache);
-  var EMPTY = { strap: [], flash: [], reserved: [], usb: [], absent: [], maxGpio: 255 };
-  return fetchWithTimeout("/api/board-profiles", {}, 15000)
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (d) {
-      if (!d || !d.profiles) return EMPTY;
-      var activeId = d.active && d.active.id;
-      var p = null;
-      for (var i = 0; i < d.profiles.length; i++) {
-        if (d.profiles[i].id === activeId) { p = d.profiles[i]; break; }
-      }
-      if (!p) return EMPTY;
-      _boardPinsCache = {
-        strap:    p.strapPins    || [],
-        flash:    p.flashPins    || [],
-        reserved: p.reservedPins || [],
-        usb:      p.usbPins      || [],
-        absent:   p.absentPins   || [],
-        maxGpio:  (typeof p.maxGpio === "number") ? p.maxGpio : 255,
-      };
-      return _boardPinsCache;
-    })
-    .catch(function () { return EMPTY; });
-}
-// Classify a pin against the board. Returns null if safe, else
-// { reason, hard } — hard=true means it can NOT be overridden (flash bus /
-// out of range); hard=false is risky-but-usable-with-pull-ups (strapping /
-// reserved / USB), matching firmware's allow_unsafe_pins semantics.
-function pinRisk(pins, pinVal) {
-  var pin = parseInt(pinVal, 10);
-  if (isNaN(pin) || pin < 0) return null;
-  if ((pins.flash || []).indexOf(pin) >= 0) return { reason: "SPI flash-bus pin", hard: true };
-  if (pin > pins.maxGpio)                    return { reason: "GPIO out of range for board", hard: true };
-  if ((pins.strap || []).indexOf(pin) >= 0)  return { reason: "bootstrap/strapping pin (boot-mode risk)", hard: false };
-  if ((pins.reserved || []).indexOf(pin) >= 0) return { reason: "reserved (UART0 console)", hard: false };
-  if ((pins.usb || []).indexOf(pin) >= 0)    return { reason: "USB D+/D- pin", hard: false };
-  // Soft, like the firmware: the GPIO exists and works, it just has no header
-  // pad on this carrier — module pads and B2B connectors can still reach it.
-  if ((pins.absent || []).indexOf(pin) >= 0) return { reason: "not broken out on this board", hard: false };
-  return null;
-}
-window.getBoardPins = getBoardPins;
-window.pinRisk = pinRisk;
+// Pin checks and the board header live in www/js/pins.js (window.Pins),
+// shared by the first-run wizard, Hardware, the sensor editor and the
+// add-sensor wizard.
 
 
 // ============================================================================
@@ -1492,7 +1447,7 @@ function h(tag, attrs, children) {
 //   ]
 // };
 //
-// Field types: text | number | password | select | checkbox
+// Field types: text | number | password | select | checkbox | pin
 // Per-field options: min, max, step, placeholder, hint, hidden, showWhen.
 //
 // Form.bind returns the rendered <form>; values can be re-applied later via
@@ -1508,6 +1463,20 @@ var Form = (function () {
 
     var val = (data != null && f.name in data) ? data[f.name] : f.value;
     var input;
+
+    // A pin (www/js/pins.js): a text box that takes the board's label or a
+    // GPIO, plus a hidden input carrying the GPIO under f.name, so the form
+    // POST is unchanged. f.pinCtx is the board context; Pins.wire() makes
+    // the hint line under it live.
+    if (f.type === "pin" && window.Pins) {
+      var box = document.createElement("div");
+      box.innerHTML = Pins.field(f.name, f.label, typeof val === "number" ? val : parseInt(val, 10),
+                                 f.pinCtx || null, { target: f.name });
+      var pg = box.firstChild;
+      if (f.showWhen) pg.setAttribute("data-showwhen", JSON.stringify(f.showWhen));
+      if (f.hidden) pg.style.display = "none";
+      return pg;
+    }
 
     if (f.type === "select") {
       input = h("select", {

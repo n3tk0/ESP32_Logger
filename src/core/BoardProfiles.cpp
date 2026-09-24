@@ -150,6 +150,43 @@ constexpr BoardProfile XIAO_S3 = {
     { 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 38, 39, 40, 41, 42, PIN_UNSET },
 };
 
+// --- WEMOS LOLIN C3 PICO -----------------------------------------------------
+// Validates exactly like GENERIC_C3: every GPIO the silicon can use is broken
+// out (0-10, 20, 21), so there is nothing absent to list. It exists as its own
+// profile for the pages, which draw its header and name its pads — the pin
+// map is in platformio.ini [env:lolin_c3_pico]. GPIO8 is a strap and also the
+// vendor's I2C SDA; the pages warn about it, they do not refuse it.
+constexpr BoardProfile LOLIN_C3_PICO = {
+    BOARD_LOLIN_C3_PICO,
+    "WEMOS LOLIN C3 PICO",
+    "lolin_c3_pico",
+    21,
+    { 2, 8, 9, PIN_UNSET },
+    { PIN_UNSET },  // USB CDC handled by validatePin() dynamically
+    { 11, 12, 13, 14, 15, 16, 17, PIN_UNSET },
+    { 20, 21, PIN_UNSET },
+    { PIN_UNSET },
+};
+
+// --- Espressif ESP32-S3-DevKitC-1 --------------------------------------------
+// The board [env:esp32s3] and [env:esp32s3_n16r8] build for. Both headers
+// carry 0-21 and 35-48; 35-37 are on the header but belong to the octal PSRAM
+// of the R8 modules, so they stay in the flash list with 26-34. 22-25 do not
+// exist on the S3 at all; they are listed as absent so a typed "23" gets a
+// reason instead of a sensor that never answers. GPIO48 is the on-board RGB
+// LED on v1.0 boards (38 on v1.1) — usable, just not free.
+constexpr BoardProfile DEVKITC_S3 = {
+    BOARD_DEVKITC_S3,
+    "ESP32-S3-DevKitC-1",
+    "devkitc_s3",
+    48,
+    { 0, 3, 45, 46, PIN_UNSET },
+    { PIN_UNSET },  // USB CDC handled by validatePin() dynamically
+    { 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, PIN_UNSET },
+    { 43, 44, PIN_UNSET },
+    { 22, 23, 24, 25, PIN_UNSET },
+};
+
 // --- Custom (user accepts responsibility) ------------------------------------
 // Empty restriction lists. isPinAllowed() short-circuits on this id.
 constexpr BoardProfile CUSTOM = {
@@ -170,6 +207,8 @@ const BoardProfile* const ALL_PROFILES[] = {
     &GENERIC_C3,
     &GENERIC_S3,
     &XIAO_S3,
+    &LOLIN_C3_PICO,
+    &DEVKITC_S3,
     &CUSTOM,
 };
 constexpr uint8_t ALL_PROFILES_COUNT = sizeof(ALL_PROFILES) / sizeof(ALL_PROFILES[0]);
@@ -205,6 +244,8 @@ ASSERT_TERMINATED(SUPERMINI_C3);
 ASSERT_TERMINATED(GENERIC_C3);
 ASSERT_TERMINATED(GENERIC_S3);
 ASSERT_TERMINATED(XIAO_S3);
+ASSERT_TERMINATED(LOLIN_C3_PICO);
+ASSERT_TERMINATED(DEVKITC_S3);
 ASSERT_TERMINATED(CUSTOM);
 #undef ASSERT_TERMINATED
 
@@ -310,6 +351,23 @@ const char* pinRejectReason(const BoardProfile* profile, uint8_t pin) {
     if (inList(profile->reservedPins, pin)) return "reserved (UART0 console)";
     if (inList(profile->absentPins,   pin)) return "not broken out on this board";
     return "ok";
+}
+
+const char* pinHardReason(const BoardProfile* profile, uint8_t pin) {
+    if (pin == PIN_UNSET)          return nullptr;
+    if (profile == nullptr)        return "no board profile selected";
+    if (pin > profile->maxGpio)    return "GPIO out of range for board";
+    if (profile->id == BOARD_CUSTOM) return nullptr;
+    if (inList(profile->flashPins, pin)) return "SPI flash bus pin";
+    return nullptr;
+}
+
+const BoardProfile* suggestedProfile() {
+#ifdef LOGGER_BOARD_PROFILE
+    return getProfileByShortId(LOGGER_BOARD_PROFILE);
+#else
+    return nullptr;
+#endif
 }
 
 // ============================================================================

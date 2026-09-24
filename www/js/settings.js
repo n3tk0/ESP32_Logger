@@ -193,7 +193,7 @@ function changelogLoad() {
 // Built by a function (not a static object) so the labels/hints pick up
 // the current I18n language every time hwInit() runs (Form.bind re-renders
 // from scratch on every page visit — same pattern as hubStatusInit()).
-function hwSchema() {
+function hwSchema(ctx) {
   var t = window.I18n ? I18n.t : function (k) { return k; };
   return {
     saveUrl: "/save_hardware",
@@ -207,10 +207,10 @@ function hwSchema() {
               ["1", t("settingsPages.hwStorageSdSpi")],
           ]},
           { row: [
-              { name: "pinSdCS",   label: t("settingsPages.hwCs"),   type: "number", showWhen: { storageType: "1" } },
-              { name: "pinSdMOSI", label: t("settingsPages.hwMosi"), type: "number", showWhen: { storageType: "1" } },
-              { name: "pinSdMISO", label: t("settingsPages.hwMiso"), type: "number", showWhen: { storageType: "1" } },
-              { name: "pinSdSCK",  label: t("settingsPages.hwSck"),  type: "number", showWhen: { storageType: "1" } },
+              { name: "pinSdCS",   label: t("settingsPages.hwCs"),   type: "pin", pinCtx: ctx, showWhen: { storageType: "1" } },
+              { name: "pinSdMOSI", label: t("settingsPages.hwMosi"), type: "pin", pinCtx: ctx, showWhen: { storageType: "1" } },
+              { name: "pinSdMISO", label: t("settingsPages.hwMiso"), type: "pin", pinCtx: ctx, showWhen: { storageType: "1" } },
+              { name: "pinSdSCK",  label: t("settingsPages.hwSck"),  type: "pin", pinCtx: ctx, showWhen: { storageType: "1" } },
           ]},
       ]},
       { title: "😴 " + t("settingsPages.hwSectionWakeup"), fields: [
@@ -228,17 +228,17 @@ function hwSchema() {
         hint: t("settingsPages.hwPinsHint"),
         fields: [
           { row: [
-              { name: "pinWifiTrigger", label: t("settingsPages.hwWifiTrigger"),  type: "number" },
-              { name: "pinWakeupFF",    label: t("settingsPages.hwFullFlushBtn"), type: "number" },
-              { name: "pinWakeupPF",    label: t("settingsPages.hwPartFlushBtn"), type: "number" },
-              { name: "pinFlowSensor",  label: t("settingsPages.hwFlowSensor"),   type: "number" },
+              { name: "pinWifiTrigger", label: t("settingsPages.hwWifiTrigger"),  type: "pin", pinCtx: ctx },
+              { name: "pinWakeupFF",    label: t("settingsPages.hwFullFlushBtn"), type: "pin", pinCtx: ctx },
+              { name: "pinWakeupPF",    label: t("settingsPages.hwPartFlushBtn"), type: "pin", pinCtx: ctx },
+              { name: "pinFlowSensor",  label: t("settingsPages.hwFlowSensor"),   type: "pin", pinCtx: ctx },
           ]},
       ]},
       { title: "🕐 " + t("settingsPages.hwSectionRtc"), fields: [
           { row: [
-              { name: "pinRtcCE",   label: t("settingsPages.hwCeRst"),   type: "number" },
-              { name: "pinRtcIO",   label: t("settingsPages.hwIoDat"),   type: "number" },
-              { name: "pinRtcSCLK", label: t("settingsPages.hwClkSclk"), type: "number" },
+              { name: "pinRtcCE",   label: t("settingsPages.hwCeRst"),   type: "pin", pinCtx: ctx },
+              { name: "pinRtcIO",   label: t("settingsPages.hwIoDat"),   type: "pin", pinCtx: ctx },
+              { name: "pinRtcSCLK", label: t("settingsPages.hwClkSclk"), type: "pin", pinCtx: ctx },
           ]},
       ]},
       { title: "⚡ " + t("settingsPages.hwSectionCpuFreq"), fields: [
@@ -262,9 +262,14 @@ function hwSchema() {
 }
 
 function hwInit() {
-  fetchWithTimeout("/export_settings", {}, 15000)
-    .then(function (r) { return r.json(); })
-    .then(function (d) {
+  // The board profile and its header drawing come first: the pin fields show
+  // the board's own labels, and the page draws which pads are taken.
+  var pinsReady = window.Pins ? Pins.load().catch(function () { return null; }) : Promise.resolve(null);
+  Promise.all([
+    fetchWithTimeout("/export_settings", {}, 15000).then(function (r) { return r.json(); }),
+    pinsReady,
+  ]).then(function (res) {
+      var d = res[0], pdata = res[1];
       CFG = d;
       var hw = d.hardware || {};
       var defaults = {
@@ -280,7 +285,9 @@ function hwInit() {
       hw.testMode      = !!fm.testMode;
       hw.blinkDuration = fm.blinkDuration > 0 ? fm.blinkDuration : 250;
 
-      Form.bind("hw-host", hwSchema(), hw);
+      var ctx = pdata ? Pins.ctx(pdata, pdata.active) : null;
+      var form = Form.bind("hw-host", hwSchema(ctx), hw);
+      if (form && ctx && ctx.profile) hwWirePins(form, ctx);
 
       var th = (ST && ST.theme) || (CFG && CFG.theme) || {};
       if (th.boardDiagramPath) {
@@ -294,6 +301,41 @@ function hwInit() {
   if (document.getElementById("cl-sensors-list") && typeof clLoad === "function") {
     clLoad();
   }
+}
+
+// Live hints under every pin field, the drawn header, and a submit that
+// stops on a red pin. Uses = this form's visible pins + the enabled sensors
+// (PCFG, loaded by clLoad on the same page), so a button put on a sensor's
+// SDA is caught here rather than by a sensor that silently never answers.
+function hwWirePins(form, ctx) {
+  var map = document.getElementById("hwPinMap");
+  var hintEl = document.getElementById("hwPinMapHint");
+  var mapCard = document.getElementById("hwPinMapCard");
+  if (mapCard) mapCard.style.display = "";
+  if (hintEl) hintEl.textContent = ctx.board ? I18n.t("pins.boardHint") : I18n.t("pins.gridHint");
+  function uses() {
+    var out = [];
+    form.querySelectorAll("input[data-pin]").forEach(function (inp) {
+      if (inp.offsetParent === null) return;         // hidden: SD pins off LittleFS
+      var r = Pins.parse(ctx, inp.value), key = inp.getAttribute("data-pin");
+      if (r.gpio != null) out.push({ key: key, g: r.gpio, who: Pins.hwLabel(key) });
+    });
+    var sensors = (typeof PCFG !== "undefined" && PCFG && PCFG.sensors) || [];
+    return out.concat(Pins.sensorUses(sensors));
+  }
+  var repaint = Pins.wire(form, ctx, uses, function (u) {
+    if (map) map.innerHTML = Pins.diagram(ctx, u);
+  });
+  // The sensor list loads on its own; repaint once it has, so its pins show.
+  window.hwPinsRepaint = repaint;
+  // Form.bind's submit listener is on the form itself; a capture listener on
+  // the form runs before it, so a red pin stops the save there.
+  form.addEventListener("submit", function (ev) {
+    if (repaint()) return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    showToast(I18n.t("pins.fixPins"), "err");
+  }, true);
 }
 
 // ============================================================================

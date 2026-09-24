@@ -22,10 +22,9 @@
           border: 1px solid rgba(255,255,255,.15); background: rgba(0,0,0,.3);
           color: inherit; font-size: 1rem; box-sizing: border-box; }
   .step input[type="number"] { width: 6rem; }
-  .pin-grid { display: grid; grid-template-columns: 1fr auto auto; gap: .5rem 1rem;
-              align-items: center; margin-top: .5rem; }
-  .pin-grid .err { color: #ff6b6b; font-size: .8rem; }
-  .pin-grid .ok { color: #6bcf7f; font-size: .8rem; }
+  .pin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+              gap: .75rem 1rem; margin-top: .75rem; }
+  .pin-grid .pin-hint { font-size: .8rem; }
   .actions { display: flex; gap: .75rem; justify-content: flex-end; margin-top: 1.5rem; }
   .btn { padding: .6rem 1.25rem; border-radius: 6px; border: 0; font-size: 1rem;
          cursor: pointer; background: rgba(255,255,255,.1); color: inherit; }
@@ -60,6 +59,7 @@
       <option value="" data-i18n="firstrun.profileLoading">— Loading profiles… —</option>
     </select>
     <div class="hint" id="profileHint"></div>
+    <div class="pm-wrap" id="pinMap"></div>
     <div class="disclaimer hidden" id="customDisclaimer">
       <label>
         <input type="checkbox" id="customAck">
@@ -90,8 +90,9 @@
       The WiFi-trigger and wake-up buttons drive the device's physical UI
       in every mode. Flow sensor and DS1302 RTC pins are only collected
       for legacy/hybrid modes (hidden when "Continuous" is selected).
-      Leave any optional field at -1 to skip. Each pin is validated
-      against the selected board's restriction list.
+      Leave an optional field empty to skip it. Type a pin the way the
+      board prints it (D6) or as a GPIO (12); the line under each field
+      says what it resolved to and whether the board allows it.
     </div>
     <div class="pin-grid" id="pinGrid">
       <!-- populated by JS -->
@@ -110,6 +111,8 @@
 
 <script src="/js/i18n.js" defer></script>
 <script src="/i18n/common.js" defer></script>
+<script src="/i18n/pins.js" defer></script>
+<script src="/js/pins.js" defer></script>
 <script src="/i18n/firstrun.js" defer></script>
 <script src="/js/firstrun.js"></script>
 </body>

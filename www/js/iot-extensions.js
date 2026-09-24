@@ -1823,23 +1823,21 @@
               '<div class="field"><label for="wiz-iface">' + esc(ieT("iotExt.interfaceLabel")) + '</label><select id="wiz-iface" class="input"><option>I2C</option><option>UART</option><option>Pulse</option><option>GPIO</option><option>ADC</option><option>1-Wire</option><option>HTTP</option></select></div>' +
               // I2C fields
               '<div class="field wiz-if" data-if="i2c"><label for="wiz-addr">' + esc(ieT("iotExt.i2cAddressLabel")) + '</label><input id="wiz-addr" class="input mono" value="0x76"/></div>' +
-              '<div class="field wiz-if" data-if="i2c"><label for="wiz-sda">' + esc(ieT("iotExt.sdaPinLabel")) + '</label><input id="wiz-sda" class="input mono" type="number" value="6"/></div>' +
-              '<div class="field wiz-if" data-if="i2c"><label for="wiz-scl">' + esc(ieT("iotExt.sclPinLabel")) + '</label><input id="wiz-scl" class="input mono" type="number" value="7"/></div>' +
+              wizPinField("wiz-sda", ieT("iotExt.sdaPinLabel"), 6, "i2c") +
+              wizPinField("wiz-scl", ieT("iotExt.sclPinLabel"), 7, "i2c") +
               // UART fields
-              '<div class="field wiz-if" data-if="uart"><label for="wiz-rx">' + esc(ieT("iotExt.rxPinLabel")) + '</label><input id="wiz-rx" class="input mono" type="number" value="4"/></div>' +
-              '<div class="field wiz-if" data-if="uart"><label for="wiz-tx">' + esc(ieT("iotExt.txPinLabel")) + ' <span style="color:var(--text-3)">' + esc(ieT("iotExt.optionalParen")) + '</span></label><input id="wiz-tx" class="input mono" type="number" placeholder="—"/></div>' +
+              wizPinField("wiz-rx", ieT("iotExt.rxPinLabel"), 4, "uart") +
+              wizPinField("wiz-tx", ieT("iotExt.txPinLabel") + " " + ieT("iotExt.optionalParen"), -1, "uart") +
               '<div class="field wiz-if" data-if="uart"><label for="wiz-baud">' + esc(ieT("iotExt.baudLabel")) + '</label><input id="wiz-baud" class="input mono" type="number" value="9600"/></div>' +
               // GPIO / ADC / 1-Wire: single data pin
-              '<div class="field wiz-if" data-if="pulse gpio adc 1-wire"><label for="wiz-pin">' + esc(ieT("iotExt.dataPinLabel")) + '</label><input id="wiz-pin" class="input mono" type="number" value="4"/></div>' +
+              wizPinField("wiz-pin", ieT("iotExt.dataPinLabel"), 4, "pulse gpio adc 1-wire") +
               '<div class="field wiz-if" data-if="http"><label for="wiz-node">' + esc(ieT("iotExt.remoteNodeIdLabel")) + '</label><input id="wiz-node" class="input mono" type="text" placeholder="' + esc(ieT("iotExt.remoteNodeIdPh")) + '"/></div>' +
               // Always shown
               '<div class="field"><label for="wiz-int">' + esc(ieT("iotExt.readIntervalLabel")) + '</label><input id="wiz-int" class="input mono" type="number" value="10000" min="500"/></div>' +
             '</div>' +
-            // Restricted-pin warning + per-sensor override (populated by wizUpdatePinWarn)
-            '<div id="wiz-pinwarn" style="display:none;margin-top:10px;padding:8px 10px;border-radius:6px;font-size:12px"></div>' +
-            '<label id="wiz-unsafe-wrap" style="display:none;align-items:center;gap:6px;cursor:pointer;margin-top:8px;font-size:12px">' +
-              '<input type="checkbox" id="wiz-unsafe"> ' + esc(ieT("iotExt.useAnywayLabel")) +
-            '</label>' +
+            // A yellow pin is allowed and saved with allow_unsafe_pins; this
+            // line says so (wizUpdatePinWarn). Red pins stop the Next button.
+            '<p id="wiz-pinwarn" class="hint" style="display:none;color:var(--warn);margin-top:10px"></p>' +
           '</div>' +
           // Step 4
           '<div class="wiz-step" data-step="4">' +
@@ -1888,11 +1886,8 @@
     var ifaceSel = wiz.querySelector("#wiz-iface");
     if (ifaceSel) ifaceSel.addEventListener("change", wizUpdateIfaceFields);
     wizUpdateIfaceFields();
-    // Live restricted-pin warning as the user edits any pin field.
-    ["wiz-sda", "wiz-scl", "wiz-rx", "wiz-tx", "wiz-pin"].forEach(function (id) {
-      var el = wiz.querySelector("#" + id);
-      if (el) el.addEventListener("input", wizUpdatePinWarn);
-    });
+    // Live hints under each pin, once the board context is in.
+    wizWirePins(wiz);
 
     wiz.querySelector("#wizClose").addEventListener("click", closeWizard);
     wiz.addEventListener("click", function (e) { if (e.target === wiz) closeWizard(); });
@@ -1902,6 +1897,10 @@
     });
     wiz.querySelector("#wizNext").addEventListener("click", function () {
       if (_wizStep < 4) {
+        if (_wizStep === 3 && _wizPins && !_wizPins()) {
+          showToast(ieT("pins.fixPins"), "", "err");
+          return;
+        }
         if (_wizStep === 3) buildWizReview();
         _wizStep++;
         updateWizard();
@@ -1920,6 +1919,7 @@
       d.classList.toggle("done",   i + 1 < _wizStep);
       d.classList.toggle("active", i + 1 === _wizStep);
     });
+    if (_wizStep === 3 && _wizPins) _wizPins();   // its fields are visible now
     setEl("wizStepLabel", ieT("iotExt.wizStepOf4", { n: _wizStep, label: ieT(_wizLabelKeys[_wizStep - 1]) }));
     var prev = document.getElementById("wizPrev");
     if (prev) prev.style.visibility = _wizStep === 1 ? "hidden" : "visible";
@@ -1942,41 +1942,61 @@
       var list = (el.getAttribute("data-if") || "").split(" ");
       el.style.display = (list.indexOf(iface) >= 0) ? "" : "none";
     });
-    wizUpdatePinWarn();
+    if (_wizPins) _wizPins(); else wizUpdatePinWarn();
   }
 
-  // Warn when a chosen GPIO is a strapping/reserved/flash pin for this board,
-  // and reveal the per-sensor override for the (soft) risky-but-usable cases.
-  function wizUpdatePinWarn() {
-    if (!_wizardEl || typeof getBoardPins !== "function") return;
-    var warn = document.getElementById("wiz-pinwarn");
-    var wrap = document.getElementById("wiz-unsafe-wrap");
-    if (!warn) return;
+  // ── Pins (www/js/pins.js, context shared with sensors.js) ─────────────────
+  var _wizPins = null, _wizSensors = null;
+  function wizPinField(id, label, value, ifaces) {
+    var ctx = (typeof CL_PINS !== "undefined" && CL_PINS.ctx) || null;
+    return Pins.field(id, label, value, ctx, { target: id, cls: "wiz-if", attrs: ' data-if="' + ifaces + '"' });
+  }
+  function wizIds() {
     var iface = ((document.getElementById("wiz-iface") || {}).value || "I2C").toLowerCase();
-    var ids = iface === "i2c"  ? ["wiz-sda", "wiz-scl"]
-            : iface === "uart" ? ["wiz-rx", "wiz-tx"]
-            : ["wiz-pin"];
-    getBoardPins().then(function (pins) {
-      var msgs = [], hard = false, soft = false;
-      ids.forEach(function (id) {
-        var el = document.getElementById(id);
-        if (!el || el.value === "") return;
-        var risk = pinRisk(pins, el.value);
-        if (risk) {
-          msgs.push("GPIO" + parseInt(el.value, 10) + " — " + risk.reason);
-          if (risk.hard) hard = true; else soft = true;
-        }
+    return iface === "i2c" ? ["wiz-sda", "wiz-scl"] : iface === "uart" ? ["wiz-rx", "wiz-tx"]
+         : iface === "http" ? [] : ["wiz-pin"];
+  }
+  function wizGpio(id) {
+    var inp = _wizardEl && _wizardEl.querySelector('input[data-pin="' + id + '"]');
+    var ctx = (typeof CL_PINS !== "undefined" && CL_PINS.ctx) || null;
+    return inp ? Pins.parse(ctx, inp.value).gpio : null;
+  }
+  function wizWirePins(wiz) {
+    if (!window.Pins || typeof clPinsReady !== "function") return;
+    var sensorsReady = fetchWithTimeout("/api/platform_config", {}, 15000)
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (c) { _wizSensors = (c && c.sensors) || []; })
+      .catch(function () { _wizSensors = []; });
+    Promise.all([clPinsReady(), sensorsReady]).then(function () {
+      if (!wiz.isConnected) return;
+      var ctx = CL_PINS.ctx || { profile: null, board: null };
+      wiz.querySelectorAll("input[data-pin]").forEach(function (inp) {
+        var hid = wiz.querySelector('input[name="' + inp.getAttribute("data-pin-target") + '"]');
+        if (hid && document.activeElement !== inp) inp.value = Pins.text(ctx, parseInt(hid.value, 10));
       });
-      if (!msgs.length) { warn.style.display = "none"; if (wrap) wrap.style.display = "none"; return; }
-      warn.style.display = "";
-      warn.style.background = hard ? "rgba(220,38,38,.12)" : "rgba(217,119,6,.14)";
-      warn.style.color      = hard ? "var(--err)" : "var(--warn)";
-      warn.innerHTML = "⚠ " + msgs.join(" · ") +
-        (hard ? " " + ieT("iotExt.pinHardBlocked")
-              : " " + ieT("iotExt.pinSoftRisk"));
-      // Override applies only to soft risks with no hard blocker present.
-      if (wrap) wrap.style.display = (soft && !hard) ? "flex" : "none";
+      var step = wiz.querySelector('.wiz-step[data-step="3"]');
+      _wizPins = Pins.wire(step, ctx, function () {
+        var out = [];
+        wizIds().forEach(function (id) {
+          var g = wizGpio(id);
+          if (g == null) return;
+          var k = id.slice(4);
+          out.push({ key: id, g: g, who: ((document.getElementById("wiz-id") || {}).value || "") + " " + k.toUpperCase(),
+                     share: (k === "sda" || k === "scl") ? "i2c0:" + k : "" });
+        });
+        return out.concat(Pins.hardwareUses(CL_PINS.hw), Pins.sensorUses(_wizSensors));
+      }, wizUpdatePinWarn);
     });
+  }
+
+  // The yellow-pin line: shown when a pin of the chosen interface needs
+  // allow_unsafe_pins, which buildWizReview() then sets.
+  function wizUpdatePinWarn() {
+    var warn = document.getElementById("wiz-pinwarn");
+    if (!warn || !window.Pins || typeof CL_PINS === "undefined") return;
+    var on = Pins.needsUnsafe(CL_PINS.ctx, wizIds().map(wizGpio));
+    warn.style.display = on ? "" : "none";
+    warn.textContent = on ? ieT("pins.unsafeAuto") : "";
   }
 
   function buildWizReview() {
@@ -1993,9 +2013,8 @@
 
     // Read an integer field by id; return `def` when blank/missing/non-numeric.
     function pinVal(id, def) {
-      var v = (document.getElementById(id) || {}).value;
-      var n = parseInt(v, 10);
-      return isNaN(n) ? def : n;
+      var g = wizGpio(id);
+      return g == null ? def : g;
     }
 
     var obj = {
@@ -2007,8 +2026,9 @@
       interface:        iface,
       read_interval_ms: parseInt(intVal, 10),
     };
-    if ((document.getElementById("wiz-unsafe") || {}).checked) {
-      obj.allow_unsafe_pins = true;   // user opted into a strapping/reserved pin
+    if (window.Pins && typeof CL_PINS !== "undefined" && CL_PINS.ctx &&
+        Pins.needsUnsafe(CL_PINS.ctx, wizIds().map(wizGpio))) {
+      obj.allow_unsafe_pins = true;   // a yellow pin: the page said why, the firmware needs the flag
     }
 
     // Interface-specific pins/keys — must match the SensorManager plugin schema.
