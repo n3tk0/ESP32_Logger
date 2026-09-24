@@ -51,6 +51,8 @@ enum BoardProfileId : uint8_t {
     BOARD_GENERIC_C3    = 3,   // bare ESP32-C3 module
     BOARD_GENERIC_S3    = 4,   // bare ESP32-S3 module
     BOARD_XIAO_S3       = 5,   // Seeed XIAO ESP32-S3
+    BOARD_LOLIN_C3_PICO = 6,   // WEMOS LOLIN C3 PICO
+    BOARD_DEVKITC_S3    = 7,   // Espressif ESP32-S3-DevKitC-1 (N8R8 / N16R8)
     BOARD_CUSTOM        = 99,  // user accepts full responsibility; no validation
 };
 
@@ -131,6 +133,19 @@ bool isPinAllowed(const BoardProfile* profile,
 /// allowed, or "no board profile" if profile is nullptr. The pointer is
 /// to a static string; do not free.
 const char* pinRejectReason(const BoardProfile* profile, uint8_t pin);
+
+/// The save-time rule for the hardware pins (buttons, flow input, RTC, SD):
+/// returns nullptr when `pin` may be stored, else the reason it may not.
+/// Only what no wiring can fix is refused — no profile, out of range, the
+/// flash bus. A strap, the console UART or a pin with no header pad is
+/// stored; the pages show why it is risky, the same way the node's own page
+/// does (docs/NODE_CONFIG.md §6). PIN_UNSET is always accepted.
+const char* pinHardReason(const BoardProfile* profile, uint8_t pin);
+
+/// The profile this firmware was built for (LOGGER_BOARD_PROFILE, set per
+/// env in platformio.ini), or nullptr when the build did not name one. The
+/// first-run wizard offers it preselected; it is never applied on its own.
+const BoardProfile* suggestedProfile();
 
 /// Runtime guard called by sensor plugin init() functions before they
 /// configure GPIOs or install ISRs. Returns true if the pin is safe to

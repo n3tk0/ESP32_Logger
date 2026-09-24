@@ -72,13 +72,6 @@ I18n.register("sensorsPage", {
     errorPrefix: "Error: {e}",
 
     // Pin warnings
-    pinStrap: "strap pin (boot risk)",
-    pinUsb: "USB CDC",
-    pinFlash: "SPI flash bus",
-    pinUart: "UART0 console",
-    pinNotBroken: "not broken out",
-    pinHardBlocked: " — can't be used (hardware-reserved); pick another pin.",
-    pinSoftWarn: " — usable only with proper pull-ups; the device may fail to boot if held LOW at reset.",
 
     // Core Logic sensor list + editor (dynamic)
     noSensorsConfigured: "No sensors configured",
@@ -112,7 +105,6 @@ I18n.register("sensorsPage", {
     fieldPin: "Pin",
     fieldPulsesPerLiter: "Pulses/Liter",
     fieldMultiplier: "Multiplier",
-    fieldAllowUnsafe: "Use restricted pin anyway (proper pull-ups added)",
     fieldAdvanced: "Advanced (JSON overlay)",
     advancedHint: "Additional parameters applied directly to this sensor. Keep as {} if unsure.",
     editPrefix: "Edit · ",
@@ -177,13 +169,6 @@ I18n.register("sensorsPage", {
     timeLabel: "Час",
     errorPrefix: "Грешка: {e}",
 
-    pinStrap: "strap пин (риск при зареждане)",
-    pinUsb: "USB CDC",
-    pinFlash: "SPI flash шина",
-    pinUart: "UART0 конзола",
-    pinNotBroken: "не е изведен",
-    pinHardBlocked: " — не може да се използва (хардуерно резервиран); изберете друг пин.",
-    pinSoftWarn: " — използваем само с подходящи pull-up резистори; устройството може да не се стартира, ако е LOW при reset.",
 
     noSensorsConfigured: "Няма конфигурирани сензори",
     noSensorsConfiguredMsg: "Натиснете + Add Sensor, за да регистрирате първия си сензор.",
@@ -216,7 +201,6 @@ I18n.register("sensorsPage", {
     fieldPin: "Пин",
     fieldPulsesPerLiter: "Импулси/литър",
     fieldMultiplier: "Множител",
-    fieldAllowUnsafe: "Използвай ограничения пин въпреки това (с подходящи pull-up резистори)",
     fieldAdvanced: "Разширени (JSON overlay)",
     advancedHint: "Допълнителни параметри, приложени директно към този сензор. Оставете {} ако не сте сигурни.",
     editPrefix: "Редакция · ",

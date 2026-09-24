@@ -422,27 +422,18 @@ function ndBoard(cfgKey) {
 }
 
 // A pin box takes the label printed on the board ("D6") or the GPIO number
-// ("12", "GPIO12"); the config document only ever holds the GPIO.
+// ("12", "GPIO12"); the config document only ever holds the GPIO. Parsing and
+// naming are www/js/pins.js's, the same as on the Collector's own pin pages;
+// the risk lists stay the node's own (`caps`), below.
 function ndParsePin(cfgKey, text) {
-  var t = String(text == null ? "" : text).trim();
-  if (t === "") return { gpio: null, bad: true };
-  var m = /^(?:gpio)?\s*(\d{1,2})$/i.exec(t);
-  if (m) return { gpio: parseInt(m[1], 10), bad: false };
-  var b = ndBoard(cfgKey);
-  var pins = (b && b.pins) || {};
-  for (var lbl in pins) {
-    if (lbl.toLowerCase() === t.toLowerCase()) return { gpio: pins[lbl], bad: false };
-  }
-  return { gpio: null, bad: true };
+  var r = Pins.parse({ board: ndBoard(cfgKey) }, text);
+  if (r.empty || r.bad) return { gpio: null, bad: true };
+  return { gpio: r.gpio, bad: false };
 }
 
 // How a GPIO is shown back: the board's own label when it has one for it.
 function ndPinLabel(cfgKey, gpio) {
-  if (gpio == null) return "";
-  var b = ndBoard(cfgKey);
-  var pins = (b && b.pins) || {};
-  for (var lbl in pins) if (pins[lbl] === gpio) return lbl;
-  return String(gpio);
+  return Pins.text({ board: ndBoard(cfgKey) }, gpio);
 }
 
 // The line under a pin box: what it resolved to, and whether the chip can

@@ -909,7 +909,7 @@ the number came from rather than hunting for a control that does not exist.
 |---|---|---|---|
 | POST | `/api/i2c_scan` | CSRF | Scan an I2C bus (`?bus=N`, default 0; the bus must already be configured by a sensor) |
 | GET | `/firstrun` | read | Serve the first-run wizard HTML |
-| GET | `/api/board-profiles` | read | Available board profiles |
+| GET | `/api/board-profiles` | read | Available board profiles, the active one, and `suggested` (the board this build is for) |
 | POST | `/api/firstrun` | first-run | Provision board / pins / mode (only while `g_setupRequired`) |
 
 ### 6.3 Selected payloads

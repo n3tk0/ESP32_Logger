@@ -22,7 +22,7 @@
 #include "../core/Globals.h"
 #include "../core/SdCompat.h"           // sdFs() — SD.h only when FEATURE_SD_STORAGE
 #include "FailsafeHtml.h"               // gzipped recovery UI (generated)
-#include "../core/BoardProfiles.h"      // R11: g_boardProfile + isPinAllowed
+#include "../core/BoardProfiles.h"      // R11: g_boardProfile + pinHardReason
 #include "../modules/OtaModule.h"       // R20: /do_update respects OtaModule.enabled
 #include "../modules/DataLogModule.h"  // /save_datalog delegates to DataLogModule::load()
 #include "../managers/ConfigManager.h"
@@ -884,11 +884,14 @@ static void h_post_save_hardware(AsyncWebServerRequest* r) {
                     "{\"ok\":false,\"error\":\"pin out of range\"}");
             return false;
         }
-        if (!isPinAllowed(g_boardProfile, (uint8_t)v, PIN_PURPOSE_GENERIC)) {
+        // Refuse only what no wiring fixes (pinHardReason); a strap or the
+        // console UART is stored, and the Hardware page says why it is risky.
+        const char* why = pinHardReason(g_boardProfile, (uint8_t)v);
+        if (why) {
             char body[180];
             snprintf(body, sizeof(body),
                      "{\"ok\":false,\"error\":\"%s = GPIO%d rejected: %s\"}",
-                     name, v, pinRejectReason(g_boardProfile, (uint8_t)v));
+                     name, v, why);
             r->send(400, "application/json", body);
             return false;
         }
@@ -1670,6 +1673,7 @@ static AsyncAuthGateHandler s_authGate;
 //   - /firstrun, /firstrun.html         (wizard page)
 //   - /api/firstrun                     (POST handler that saves profile)
 //   - /api/board-profiles               (GET profile list for the wizard)
+//   - /boards.json                      (header drawings the wizard shows)
 //   - static asset extensions           (CSS, JS, fonts, favicon)
 class FirstRunGateHandler : public AsyncWebHandler {
 public:
@@ -1679,6 +1683,7 @@ public:
         if (url == "/firstrun" || url == "/firstrun.html")        return false;
         if (url.startsWith("/api/firstrun"))                       return false;
         if (url.startsWith("/api/board-profiles"))                 return false;
+        if (url == "/boards.json")                                 return false;
         if (url.endsWith(".css")  || url.endsWith(".js"))          return false;
         if (url.endsWith(".woff2")|| url.endsWith(".ico"))         return false;
         if (url.endsWith(".png")  || url.endsWith(".svg"))         return false;

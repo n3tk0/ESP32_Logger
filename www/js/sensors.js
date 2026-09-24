@@ -567,73 +567,10 @@ var CL_SENSOR_TYPES = [
   { value: "remote", label: "Remote node (HTTP ingest)", iface: "http" },
 ];
 
-// R11: GPIO pin list + per-pin warnings are derived from the active
-// board profile (fetched from /api/board-profiles on page load). The
-// hardcoded XIAO C3 fallback below is used only if the API call fails
-// or the response is malformed — keeps the sensors page functional
-// during partial-init or pre-R11 builds.
-var CL_GPIO_PINS = [
-    { gpio: 0,  label: 'GPIO0',  adc: true  },
-    { gpio: 1,  label: 'GPIO1',  adc: true  },
-    { gpio: 2,  label: 'GPIO2',  adc: true  },
-    { gpio: 3,  label: 'GPIO3',  adc: true  },
-    { gpio: 4,  label: 'GPIO4',  adc: true  },
-    { gpio: 5,  label: 'GPIO5',  adc: true  },
-    { gpio: 6,  label: 'GPIO6',  adc: false },
-    { gpio: 7,  label: 'GPIO7',  adc: false },
-    { gpio: 8,  label: 'GPIO8',  adc: false },
-    { gpio: 9,  label: 'GPIO9',  adc: false },
-    { gpio: 10, label: 'GPIO10', adc: false },
-    { gpio: 20, label: 'GPIO20', adc: false },
-    { gpio: 21, label: 'GPIO21', adc: false }
-];
-
-// Populated from the active profile by clLoadBoardProfile().  Keys are
-// GPIO numbers; values are a short reason string ("strap", "USB", etc).
-var CL_SYSTEM_PINS = {};
-
-// Active board profile descriptor (from /api/board-profiles → "active").
-// null until the fetch resolves; treated as "no validation" until then.
-window._r11Profile = null;
-
-// One-shot fetch of the active board profile. Refreshes CL_GPIO_PINS so
-// the pin selector knows the right GPIO range, and CL_SYSTEM_PINS so it
-// can show profile-aware warnings. Safe to call multiple times.
-function clLoadBoardProfile() {
-    return fetchWithTimeout('/api/board-profiles', { credentials: 'same-origin' }, 15000)
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-            var activeId = (data.active && data.active.id) || '';
-            var profile  = (data.profiles || []).find(function (p) { return p.id === activeId; });
-            if (!profile) return;
-            window._r11Profile = profile;
-
-            // Rebuild GPIO list within the profile's range.  ADC range
-            // on C3/S3 is GPIO 0-5 / 1-10 respectively; keep the simple
-            // "<= 10 is potentially ADC" heuristic — sensor plugins
-            // perform their own analogRead validity check at runtime.
-            var pins = [];
-            for (var g = 0; g <= profile.maxGpio; g++) {
-                pins.push({ gpio: g, label: 'GPIO' + g, adc: (g <= 10) });
-            }
-            CL_GPIO_PINS = pins;
-
-            // Build warnings map from restriction lists.
-            CL_SYSTEM_PINS = {};
-            (profile.strapPins    || []).forEach(function (p) { CL_SYSTEM_PINS[p] = spT("pinStrap", "strap pin (boot risk)"); });
-            (profile.usbPins      || []).forEach(function (p) { CL_SYSTEM_PINS[p] = spT("pinUsb", "USB CDC"); });
-            (profile.flashPins    || []).forEach(function (p) { CL_SYSTEM_PINS[p] = spT("pinFlash", "SPI flash bus"); });
-            (profile.reservedPins || []).forEach(function (p) { CL_SYSTEM_PINS[p] = spT("pinUart", "UART0 console"); });
-            (profile.absentPins   || []).forEach(function (p) { CL_SYSTEM_PINS[p] = spT("pinNotBroken", "not broken out"); });
-        })
-        .catch(function () {
-            // Silent — fallback table above keeps the UI alive on legacy
-            // builds or transient API failures.
-        });
-}
-// Fire the fetch as soon as the script loads.  No await — the selector
-// re-renders on every popup open and will pick up the populated data.
-if (typeof window !== 'undefined') clLoadBoardProfile();
+// Pins are typed, checked and drawn by www/js/pins.js — see clPinField /
+// clWirePinWarn below. The board profile comes from /api/board-profiles
+// through Pins.load(), shared with the Hardware page and the add-sensor
+// wizard, instead of a fetch and a fallback table of its own here.
 
 // Single source of truth for sleep-config defaults (mirrors Logger.ino initial values).
 var CL_SLEEP_DEFAULTS = {
@@ -736,6 +673,9 @@ function clLoad() {
 }
 
 function clRenderSensors(sensors) {
+  // The Hardware page draws the board with the sensors' pins marked; it
+  // wires before this list loads, so tell it the list is here now.
+  if (typeof window.hwPinsRepaint === "function") window.hwPinsRepaint();
   var list = document.getElementById("cl-sensors-list");
   if (!list) return;
   if (!sensors || sensors.length === 0) {
@@ -874,8 +814,8 @@ function _clBuildEditFormHtml(s) {
   } else if (s.interface === "i2c") {
     var busVal = (s.bus !== undefined ? s.bus : 0);
     html += '<div class="form-grid">' +
-            '<div class="field"><label class="field-label">' + esc(spT("fieldSdaPin", "SDA Pin")) + '</label><input type="number" name="sda" class="input" value="' + (s.sda !== undefined ? s.sda : 6) + '"></div>' +
-            '<div class="field"><label class="field-label">' + esc(spT("fieldSclPin", "SCL Pin")) + '</label><input type="number" name="scl" class="input" value="' + (s.scl !== undefined ? s.scl : 7) + '"></div>' +
+            clPinField("sda", spT("fieldSdaPin", "SDA Pin"), s.sda !== undefined ? s.sda : 6) +
+            clPinField("scl", spT("fieldSclPin", "SCL Pin"), s.scl !== undefined ? s.scl : 7) +
             '</div>' +
             '<div class="field"><label class="field-label">' + esc(spT("fieldI2cBus", "I2C Bus")) + '</label>' +
             '<select name="bus" class="input">' +
@@ -888,8 +828,8 @@ function _clBuildEditFormHtml(s) {
             ) + '</div></div>';
   } else if (s.interface === "uart") {
     html += '<div class="form-grid">' +
-            '<div class="field"><label class="field-label">' + esc(spT("fieldRxPin", "RX Pin")) + '</label><input type="number" name="uart_rx" class="input" value="' + (s.uart_rx !== undefined ? s.uart_rx : 20) + '"></div>' +
-            '<div class="field"><label class="field-label">' + esc(spT("fieldTxPin", "TX Pin")) + '</label><input type="number" name="uart_tx" class="input" value="' + (s.uart_tx !== undefined ? s.uart_tx : -1) + '"></div>' +
+            clPinField("uart_rx", spT("fieldRxPin", "RX Pin"), s.uart_rx !== undefined ? s.uart_rx : 20) +
+            clPinField("uart_tx", spT("fieldTxPin", "TX Pin"), s.uart_tx !== undefined ? s.uart_tx : -1) +
             '</div>';
     html += '<div class="field"><label class="field-label">' + esc(spT("fieldBaudRate", "Baud Rate")) + '</label><select name="baud" class="input">' +
             '<option value="9600"' + (s.baud == 9600 ? ' selected' : '') + '>9600</option>' +
@@ -908,7 +848,7 @@ function _clBuildEditFormHtml(s) {
               '<input type="number" step="0.05" min="0" max="2" name="humidityCorrectionKappa" class="input" value="' + (s.humidityCorrectionKappa !== undefined ? s.humidityCorrectionKappa : 0.35) + '"></div>';
     }
   } else if (s.interface === "pulse") {
-    html += '<div class="field"><label class="field-label">' + esc(spT("fieldPin", "Pin")) + '</label><input type="number" name="pin" class="input" value="' + (s.pin !== undefined ? s.pin : 9) + '"></div>';
+    html += clPinField("pin", spT("fieldPin", "Pin"), s.pin !== undefined ? s.pin : 9);
     if (s.type === "yfs201") {
       html += '<div class="form-grid">' +
               '<div class="field"><label class="field-label">' + esc(spT("fieldPulsesPerLiter", "Pulses/Liter")) + '</label><input type="number" step="0.1" name="pulses_per_liter" class="input" value="' + (s.pulses_per_liter !== undefined ? s.pulses_per_liter : 450) + '"></div>' +
@@ -918,12 +858,10 @@ function _clBuildEditFormHtml(s) {
   }
 
   // Support for custom JSON fields (advanced)
-  // Restricted-pin warning + per-sensor override (populated by clWirePinWarn).
-  html += '<div id="sensor-pinwarn" style="display:none;margin-top:1rem;padding:8px 10px;border-radius:6px;font-size:12px"></div>';
-  html += '<label id="sensor-unsafe-wrap" style="display:' + (s.allow_unsafe_pins ? 'flex' : 'none') +
-          ';align-items:center;gap:6px;cursor:pointer;margin-top:8px;font-size:12px">' +
-          '<input type="checkbox" name="allow_unsafe_pins"' + (s.allow_unsafe_pins ? ' checked' : '') +
-          '> ' + esc(spT("fieldAllowUnsafe", "Use restricted pin anyway (proper pull-ups added)")) + '</label>';
+  // A yellow pin (strap, console, no pad) is allowed, as on the node's page:
+  // the sensor is saved with allow_unsafe_pins so the firmware accepts it at
+  // init, and this line says so. Shown by clWirePinWarn.
+  html += '<p id="sensor-pinwarn" class="hint" style="display:none;color:var(--warn)"></p>';
 
   var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "bus", "uart_rx", "uart_tx", "baud", "pin", "node", "work_period_min", "pulses_per_liter", "calibration", "humidityCorrectionEnabled", "humidityCorrectionKappa", "allow_unsafe_pins"];
   var advObj = {};
@@ -942,45 +880,84 @@ function _clBuildEditFormHtml(s) {
 // Inline-edit mount point for desktop (≥780 px).  Expands a panel below
 // the row, replacing the modal popup for less context loss.  Falls back
 // to the popup on mobile and when the row can't be located.
-// Live restricted-pin warning for the sensor edit form (both inline + popup
-// mounts). Warns when a pin field holds a strapping/reserved/flash GPIO and
-// reveals the allow_unsafe_pins checkbox for the soft (override-able) cases.
-function clWirePinWarn() {
-  if (typeof getBoardPins !== "function") return;
-  var form = document.getElementById("sensorEditForm");
-  if (!form) return;
-  var sel = 'input[name="sda"],input[name="scl"],input[name="uart_rx"],input[name="uart_tx"],input[name="pin"]';
-  function refresh() {
-    var warn = document.getElementById("sensor-pinwarn");
-    var wrap = document.getElementById("sensor-unsafe-wrap");
-    var chk  = form.querySelector('input[name="allow_unsafe_pins"]');
-    if (!warn) return;
-    getBoardPins().then(function (pins) {
-      var msgs = [], hard = false, soft = false;
-      form.querySelectorAll(sel).forEach(function (el) {
-        if (el.value === "") return;
-        var risk = pinRisk(pins, el.value);
-        if (risk) {
-          msgs.push("GPIO" + parseInt(el.value, 10) + " — " + risk.reason);
-          if (risk.hard) hard = true; else soft = true;
-        }
-      });
-      if (!msgs.length) {
-        warn.style.display = "none";
-        if (wrap && !(chk && chk.checked)) wrap.style.display = "none";
-        return;
-      }
-      warn.style.display = "";
-      warn.style.background = hard ? "rgba(220,38,38,.12)" : "rgba(217,119,6,.14)";
-      warn.style.color      = hard ? "var(--err)" : "var(--warn)";
-      warn.innerHTML = "⚠ " + msgs.join(" · ") +
-        (hard ? spT("pinHardBlocked", " — can't be used (hardware-reserved); pick another pin.")
-              : spT("pinSoftWarn", " — usable only with proper pull-ups; the device may fail to boot if held LOW at reset."));
-      if (wrap) wrap.style.display = ((soft && !hard) || (chk && chk.checked)) ? "flex" : "none";
+// ── Pin fields (www/js/pins.js) ─────────────────────────────────────────────
+// The board context and the Hardware page's pins, loaded once per page load.
+// Until they arrive a field still takes a GPIO number; labels, hints and the
+// duplicate check light up when they do.
+var CL_PINS = { ctx: null, hw: null, ready: null };
+function clPinsReady() {
+  if (CL_PINS.ready) return CL_PINS.ready;
+  var hw = (typeof CFG !== "undefined" && CFG && CFG.hardware)
+    ? Promise.resolve(CFG.hardware)
+    : fetchWithTimeout("/export_settings", {}, 15000)
+        .then(function (r) { return r.ok ? r.json() : {}; })
+        .then(function (d) { return d.hardware || null; })
+        .catch(function () { return null; });
+  CL_PINS.ready = Promise.all([window.Pins ? Pins.load() : Promise.resolve(null), hw])
+    .then(function (r) {
+      CL_PINS.ctx = r[0] ? Pins.ctx(r[0], r[0].active) : null;
+      CL_PINS.hw = r[1];
+      return CL_PINS;
     });
-  }
-  form.querySelectorAll(sel).forEach(function (el) { el.addEventListener("input", refresh); });
-  refresh();
+  return CL_PINS.ready;
+}
+if (typeof window !== "undefined" && window.Pins) clPinsReady();
+
+// One pin field. The text box shows the board's label; the hidden input
+// under `name` carries the GPIO, so FormData reads a number as before.
+function clPinField(name, label, value) {
+  var v = parseInt(value, 10);
+  return Pins.field("s-" + name, label, isNaN(v) ? -1 : v, CL_PINS.ctx, { target: name });
+}
+
+// The pins this form uses (with the bus share for I2C), plus the Hardware
+// page's and every other enabled sensor's — so a sensor put on the WiFi
+// button's GPIO, or on another UART sensor's RX, is red before it is saved.
+function clFormUses(form, idx) {
+  var ctx = CL_PINS.ctx, out = [], cur = (PCFG && PCFG.sensors && PCFG.sensors[idx]) || {};
+  var busEl = form.querySelector('select[name="bus"]');
+  var bus = busEl ? busEl.value : (cur.bus || 0);
+  form.querySelectorAll("input[data-pin]").forEach(function (inp) {
+    var r = Pins.parse(ctx, inp.value), k = inp.getAttribute("data-pin-target");
+    if (r.gpio == null) return;
+    out.push({ key: inp.getAttribute("data-pin"), g: r.gpio,
+               who: (cur.id || cur.type || "") + " " + k.toUpperCase(),
+               share: (k === "sda" || k === "scl") ? "i2c" + bus + ":" + k : "" });
+  });
+  return out.concat(Pins.hardwareUses(CL_PINS.hw), Pins.sensorUses(PCFG && PCFG.sensors, idx));
+}
+
+function clFormGpios(form) {
+  var g = [];
+  form.querySelectorAll("input[data-pin]").forEach(function (inp) {
+    g.push(Pins.parse(CL_PINS.ctx, inp.value).gpio);
+  });
+  return g;
+}
+
+// Live hints under each pin of the sensor edit form (inline and popup).
+// Returns nothing; the repaint function is kept on the form for the save.
+function clWirePinWarn() {
+  var form = document.getElementById("sensorEditForm");
+  if (!form || !window.Pins) return;
+  var idx = window.clCurrentEditingSensor;
+  clPinsReady().then(function () {
+    if (!form.isConnected) return;
+    // Built before the context arrived: show the board's labels now.
+    form.querySelectorAll("input[data-pin]").forEach(function (inp) {
+      var hid = form.querySelector('input[name="' + inp.getAttribute("data-pin-target") + '"]');
+      if (hid && document.activeElement !== inp) inp.value = Pins.text(CL_PINS.ctx, parseInt(hid.value, 10));
+    });
+    form._pinsRepaint = Pins.wire(form, CL_PINS.ctx || { profile: null, board: null },
+      function () { return clFormUses(form, idx); },
+      function () {
+        var warn = document.getElementById("sensor-pinwarn");
+        if (!warn) return;
+        var on = Pins.needsUnsafe(CL_PINS.ctx, clFormGpios(form));
+        warn.style.display = on ? "" : "none";
+        warn.textContent = on ? I18n.t("pins.unsafeAuto") : "";
+      });
+  });
 }
 
 function _clEditInline(idx, s) {
@@ -1013,8 +990,7 @@ function _clEditInline(idx, s) {
   panel.querySelector('[data-role="close"]').addEventListener("click", dismiss);
   panel.querySelector('[data-role="cancel"]').addEventListener("click", dismiss);
   panel.querySelector('[data-role="save"]').addEventListener("click", function () {
-    clSaveEditedSensor();
-    dismiss();
+    if (clSaveEditedSensor() !== false) dismiss();
   });
   return true;
 }
@@ -1049,6 +1025,12 @@ function clSaveEditedSensor() {
   var s = PCFG.sensors[idx];
   var form = document.getElementById("sensorEditForm");
   if (!form) return;
+  // A red pin (flash bus, not on the chip, taken by something else) stops
+  // the save here, with the reason already under the field.
+  if (form._pinsRepaint && !form._pinsRepaint()) {
+    showToast(I18n.t("pins.fixPins"), "err");
+    return false;
+  }
   var fd = new FormData(form);
   
   s.id = fd.get("id");
@@ -1083,8 +1065,13 @@ function clSaveEditedSensor() {
     }
   }
 
-  s.allow_unsafe_pins = fd.get("allow_unsafe_pins") === "on";
-  if (!s.allow_unsafe_pins) delete s.allow_unsafe_pins;   // keep config tidy
+  // Set exactly when a yellow pin is in use: the firmware refuses a strap,
+  // console or no-pad pin at init without it, and the page has already said
+  // why the pin is risky. Kept tidy (absent) otherwise.
+  if (window.Pins && CL_PINS.ctx && CL_PINS.ctx.profile) {
+    if (Pins.needsUnsafe(CL_PINS.ctx, clFormGpios(form))) s.allow_unsafe_pins = true;
+    else delete s.allow_unsafe_pins;
+  }
 
   var adv = fd.get("advanced");
   if (adv && adv !== "{}") {

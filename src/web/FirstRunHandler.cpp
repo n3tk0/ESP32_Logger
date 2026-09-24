@@ -80,6 +80,10 @@ void handleGetBoardProfiles(AsyncWebServerRequest* req) {
     JsonObject active = doc["active"].to<JsonObject>();
     active["id"]      = g_boardProfile ? g_boardProfile->shortId : "";
     active["setupRequired"] = g_setupRequired;
+    // The profile this image was built for, offered preselected by the
+    // wizard. Absent when the build names none (chaos env, custom builds).
+    const BoardProfile* sug = suggestedProfile();
+    if (sug) doc["suggested"] = sug->shortId;
 
     sendJsonResponse(req, doc);
 }
@@ -141,8 +145,10 @@ void handlePostFirstRun(AsyncWebServerRequest* req,
     //   - Legacy/hybrid only: flow sensor + DS1302 RTC trio.
     //
     // Per-pin policy: PIN_UNSET allowed (user may legitimately skip an
-    // optional feature); strap/USB/flash/reserved pins rejected with a
-    // specific reason; duplicates rejected regardless of profile.
+    // optional feature); only what no wiring fixes is rejected (out of
+    // range, flash bus — pinHardReason); a strap or console pin is stored
+    // and the wizard says why it is risky; duplicates rejected regardless
+    // of profile.
     struct PinAssignment { const char* key; uint8_t value; bool legacyOnly; };
     PinAssignment pins[] = {
         { "wifiTrigger", (uint8_t)(doc["pins"]["wifiTrigger"] | (int)PIN_UNSET), false },
@@ -164,12 +170,12 @@ void handlePostFirstRun(AsyncWebServerRequest* req,
     for (int i = 0; i < N_PINS; i++) {
         if (!inScope(pins[i])) continue;
         if (pins[i].value == PIN_UNSET) continue;
-        if (!isPinAllowed(profile, pins[i].value, PIN_PURPOSE_GENERIC)) {
+        const char* why = pinHardReason(profile, pins[i].value);
+        if (why) {
             char body[160];
             snprintf(body, sizeof(body),
                      "{\"ok\":false,\"error\":\"pin %s = GPIO%u rejected: %s\"}",
-                     pins[i].key, pins[i].value,
-                     pinRejectReason(profile, pins[i].value));
+                     pins[i].key, pins[i].value, why);
             req->send(400, "application/json", body);
             return;
         }

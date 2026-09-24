@@ -15,7 +15,9 @@ absent), so `g_setupRequired = true` and all HTTP requests redirect to
 
 ### Stage 1 — Board profile
 
-Select the board that matches your hardware from the profile list. The profiles
+Select the board that matches your hardware from the profile list. The board
+the firmware was built for is preselected (`LOGGER_BOARD_PROFILE` in
+`platformio.ini`, sent as `suggested` by `/api/board-profiles`). The profiles
 are:
 
 | Short id | Board |
@@ -24,9 +26,29 @@ are:
 | `supermini_c3` | ESP32-C3 SuperMini |
 | `generic_c3` | Generic ESP32-C3 |
 | `generic_s3` | Generic ESP32-S3 |
+| `xiao_s3` | Seeed XIAO ESP32-S3 |
+| `lolin_c3_pico` | WEMOS LOLIN C3 PICO |
+| `devkitc_s3` | ESP32-S3-DevKitC-1 (N8R8 / N16R8) |
 | `custom` | Custom — all pins allowed |
 
-Source: `src/core/BoardProfiles.cpp` (profile structs).
+Source: `src/core/BoardProfiles.cpp` (profile structs). The header drawings the
+pages show, and the silkscreen labels you can type, are in `www/boards.json`;
+`tools/check_boards_json.py` keeps them in step with the profiles.
+
+### Pin fields (every page)
+
+First-run, **Settings → Hardware**, the sensor editor and the add-sensor wizard
+share one pin field (`www/js/pins.js`), the same rules as the node's own setup
+page:
+
+- Type the pin as the board prints it (`D6`) or as a GPIO (`12`, `GPIO12`). The
+  line under the field says what it resolved to. Configs only ever hold GPIOs.
+- **Red** (refused): not on the chip, the SPI flash bus, or a pin something
+  else already uses (a Hardware pin, another sensor; I2C sensors on one bus may
+  share SDA/SCL).
+- **Yellow** (allowed): a boot strap, the console UART, USB, or a GPIO the board
+  does not break out. A sensor saved with one gets `allow_unsafe_pins` set by
+  the page, because `validateAttachPin()` refuses such a pin at init without it.
 
 ### Stage 2 — Operating mode
 
@@ -51,8 +73,10 @@ The wizard collects seven pin fields (the `PinAssignment` table in `handlePostFi
 | `rtcSCLK` | DS1302 serial clock |
 
 Pins are validated against the active board profile before being accepted
-(`handlePostFirstRun()` in `src/web/FirstRunHandler.cpp`). Strap, USB, flash, and reserved pins
-are rejected. Continuous-mode builds can leave `flowSensor`/RTC pins as
+(`handlePostFirstRun()` in `src/web/FirstRunHandler.cpp`, and `/save_hardware`
+the same way): only an out-of-range or flash-bus pin is rejected
+(`pinHardReason()`); a strap or console pin is stored, and the page says why
+it is risky. Duplicates are rejected. Continuous-mode builds can leave `flowSensor`/RTC pins as
 `PIN_UNSET` (0xFF) if those features are not wired.
 
 After the wizard submits `POST /api/firstrun`, the board profile is written to
@@ -106,11 +130,8 @@ Flow events are recorded by `FlowRunLogger`; other sensors feed the pipeline.
 ### Adding a sensor
 
 Navigate to **Settings → Core Logic** (or directly to `/settings/sensors`).
-Click **+ Add Sensor**, choose a sensor type, and assign pins. Before
-rendering the pin picker, `clLoadBoardProfile()` in `www/js/sensors.js`
-fetches `/api/board-profiles` and builds a pin dropdown that contains only
-GPIOs allowed by the active board profile. Pins not allowed by the profile
-are excluded from the selector.
+Click **+ Add Sensor**, choose a sensor type, and assign pins in the shared
+pin fields described under [Pin fields](#pin-fields-every-page).
 
 Save using **Save & Restart**. The device writes `platform_config.json` and
 reboots to apply.

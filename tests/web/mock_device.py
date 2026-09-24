@@ -132,6 +132,36 @@ PLATFORM = {
     ],
 }
 
+# GET /api/board-profiles — built from src/core/BoardProfiles.cpp itself, not
+# typed out here, so the pin pages are always driven against the lists the
+# firmware really has. MOCK_BOARD picks the active profile (default xiao_c3).
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / "tools"))
+import check_boards_json as _cbj  # noqa: E402
+
+def _board_profiles():
+    import re
+    text = re.sub(r"//[^\n]*", "", open(_cbj.PROFILES_CPP, encoding="utf-8").read())
+    pat = re.compile(r"constexpr\s+BoardProfile\s+\w+\s*=\s*\{\s*\w+\s*,\s*\"([^\"]*)\"\s*,"
+                     r"\s*\"(\w+)\"\s*,\s*(\d+)\s*,((?:\s*\{[^}]*\}\s*,?)+)\s*\};")
+    out = []
+    for m in pat.finditer(text):
+        lists = [[int(x) for x in re.findall(r"\b\d+\b", l)] for l in re.findall(r"\{([^}]*)\}", m.group(4))]
+        out.append({"id": m.group(2), "name": m.group(1).replace("\\xE2\\x80\\x94", "\u2014"),
+                    "maxGpio": int(m.group(3)), "strapPins": lists[0], "usbPins": lists[1],
+                    "flashPins": lists[2], "reservedPins": lists[3], "absentPins": lists[4]})
+    return out
+
+BOARD = {"active": os.environ.get("MOCK_BOARD", "xiao_c3"), "setupRequired": False}
+
+# GET /export_settings → hardware; POST /save_hardware and /api/firstrun
+# store what they are sent, and /__mock/hw hands it back to the driver.
+# 255 is PIN_UNSET, exactly as the firmware exports an unassigned pin.
+HARDWARE = {"storageType": 1, "wakeupMode": 0, "debounceMs": 100, "cpuFreqMHz": 80,
+            "pinWifiTrigger": 9, "pinWakeupFF": 255, "pinWakeupPF": 255,
+            "pinFlowSensor": 21, "pinRtcCE": 255, "pinRtcIO": 255, "pinRtcSCLK": 255,
+            "pinSdCS": 10, "pinSdMOSI": 5, "pinSdMISO": 3, "pinSdSCK": 255}
+HW_POSTS = []
+
 # The e-ink dashboard's appearance, as GET /api/kindle/config returns it.
 # Deliberately NOT the defaults: a page that renders correctly only when every
 # value is zero is a page whose select boxes have never been proven to reflect
@@ -595,6 +625,15 @@ class H(http.server.SimpleHTTPRequestHandler):
             return self._json({"token": "test-token"})
         if path == "/api/platform_config":
             return self._json(PLATFORM)
+        if path == "/api/board-profiles":
+            return self._json({"profiles": _board_profiles(),
+                               "active": {"id": BOARD["active"], "setupRequired": BOARD["setupRequired"]},
+                               "suggested": os.environ.get("MOCK_SUGGESTED", "xiao_c3")})
+        if path == "/export_settings":
+            return self._json({"hardware": HARDWARE, "flowMeter": {"testMode": False, "blinkDuration": 250},
+                               "theme": {}})
+        if path == "/__mock/hw":
+            return self._json({"hardware": HARDWARE, "posts": HW_POSTS, "board": BOARD})
         # The index must be tested BEFORE the detail prefix, or "/api/modules"
         # falls into the startswith below and answers with one module.
         if path == "/api/modules":
@@ -671,6 +710,13 @@ class H(http.server.SimpleHTTPRequestHandler):
                 return self._json({"ok": False, "error": "bad json"}, 400)
             body, code = handover_post(doc)
             return self._json(body, code)
+        if path == "/api/firstrun":
+            doc = self._read_json()
+            if doc is None:
+                return self._json({"ok": False, "error": "bad json"}, 400)
+            HW_POSTS.append({"path": path, "body": doc})
+            BOARD["active"] = doc.get("profile", "")
+            return self._json({"ok": True})
         if path == "/save_platform":
             doc = self._read_json()
             if doc is None:
@@ -679,7 +725,25 @@ class H(http.server.SimpleHTTPRequestHandler):
             PLATFORM.update(doc)
             return self._json({"ok": True})
         n = int(self.headers.get("Content-Length") or 0)
-        body = urllib.parse.parse_qs(self.rfile.read(n).decode())
+        raw = self.rfile.read(n).decode()
+        if "multipart/form-data" in (self.headers.get("Content-Type") or ""):
+            # settingsSave() posts FormData, which the browser sends as
+            # multipart; the firmware's hasParam(name, true) reads both.
+            import re
+            body = {}
+            for m in re.finditer(r'name="([^"]+)"\r\n\r\n(.*?)\r\n--', raw, re.S):
+                body.setdefault(m.group(1), []).append(m.group(2))
+        else:
+            body = urllib.parse.parse_qs(raw)
+        if path == "/save_hardware":
+            # A form POST, like the firmware's: every pin arrives as a GPIO
+            # number or -1, never as the label the user typed.
+            flat = {k: v[0] for k, v in body.items() if k != "csrf"}
+            HW_POSTS.append({"path": path, "body": flat})
+            for k, v in flat.items():
+                if k.startswith("pin"):
+                    HARDWARE[k] = 255 if v == "-1" else int(v)
+            return self._json({"ok": True})
         if path == "/api/espnow/pair":
             STATUS["pairing"] = True
             return self._json({"ok": True, "seconds": int(body.get("seconds", ["120"])[0])})

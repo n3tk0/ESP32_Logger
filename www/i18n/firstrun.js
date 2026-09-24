@@ -19,9 +19,6 @@ I18n.register("firstrun", {
     chooseBoard: "— Choose a board —",
     customDisclaimer: "I select <strong>Custom</strong> and accept that pin validation is disabled. By continuing you accept full responsibility for any boot-mode or hardware damage caused by unsafe pin assignments.",
     customValidationOff: "Validation disabled. Any GPIO 0–48 allowed.",
-    hintSummary: "Strap: {strap}  •  USB: {usb}  •  max GPIO: {max}",
-    hintNoHeaderPad: "  •  no header pad: {pins}",
-    none: "none",
 
     step2Title: "2. Operating mode",
     modeLabel: "Mode",
@@ -31,7 +28,7 @@ I18n.register("firstrun", {
     modeHint: "Legacy and Hybrid require GPIO pin assignments for the flow pipeline. Continuous configures sensors individually in the main UI later.",
 
     step3Title: "3. Pin assignments",
-    pinsHint: "The WiFi-trigger and wake-up buttons drive the device's physical UI in every mode. Flow sensor and DS1302 RTC pins are only collected for legacy/hybrid modes (hidden when “Continuous” is selected). Leave any optional field at -1 to skip. Each pin is validated against the selected board's restriction list.",
+    pinsHint: "The WiFi-trigger and wake-up buttons drive the device's physical UI in every mode. Flow sensor and DS1302 RTC pins are only collected for legacy/hybrid modes (hidden when “Continuous” is selected). Leave an optional field empty to skip it. Type a pin the way the board prints it (D6) or as a GPIO (12); the line under each field says what it resolved to and whether the board allows it.",
 
     pinWifiTrigger: "WiFi-trigger button",
     pinWakeupFF: "Wakeup (FF / manual)",
@@ -40,20 +37,6 @@ I18n.register("firstrun", {
     pinRtcCE: "RTC chip-enable (DS1302)",
     pinRtcIO: "RTC data IO",
     pinRtcSCLK: "RTC clock",
-
-    reasonNoProfile: "no board profile selected",
-    reasonUnassigned: "unassigned (optional)",
-    reasonNegative: "negative GPIO",
-    reasonMaxGpio: "GPIO > {max} for this board",
-    reasonCustomOff: "custom — validation off",
-    reasonBootstrap: "bootstrap pin (boot-mode risk)",
-    reasonUsbCdc: "USB CDC pin (D+/D-)",
-    reasonSpiFlash: "SPI flash bus pin",
-    reasonUart0: "UART0 console (you would lose serial debug)",
-    reasonAbsent: "not broken out on this board",
-    reasonOk: "ok",
-    reasonDuplicate: "duplicate of {label}",
-    reasonRequired: "required",
 
     saveBtn: "Save & reboot",
     saveBtnAria: "Save configuration and reboot the device",
@@ -77,9 +60,6 @@ I18n.register("firstrun", {
     chooseBoard: "— Изберете платка —",
     customDisclaimer: "Избирам <strong>Custom</strong> и приемам, че валидацията на пиновете е изключена. С продължаването поемам пълна отговорност за всякакви повреди от boot-mode конфликт или хардуерна щета, причинени от небезопасно разпределение на пиновете.",
     customValidationOff: "Валидацията е изключена. Разрешени са всички GPIO 0–48.",
-    hintSummary: "Strap: {strap}  •  USB: {usb}  •  макс. GPIO: {max}",
-    hintNoHeaderPad: "  •  без извод на платката: {pins}",
-    none: "няма",
 
     step2Title: "2. Режим на работа",
     modeLabel: "Режим",
@@ -89,7 +69,7 @@ I18n.register("firstrun", {
     modeHint: "Legacy и Hybrid изискват разпределение на GPIO пинове за разходомерния пайплайн. Continuous настройва сензорите поотделно по-късно в основния интерфейс.",
 
     step3Title: "3. Разпределение на пиновете",
-    pinsHint: "Бутоните за WiFi-тригер и събуждане управляват физическия интерфейс на устройството във всеки режим. Пиновете за разходомер и DS1302 RTC се събират само за режими legacy/hybrid (скрити при избран „Continuous“). Оставете всяко незадължително поле на -1, за да го пропуснете. Всеки пин се валидира спрямо ограничителния списък на избраната платка.",
+    pinsHint: "Бутоните за WiFi-тригер и събуждане управляват физическия интерфейс на устройството във всеки режим. Пиновете за разходомер и DS1302 RTC се събират само за режими legacy/hybrid (скрити при избран „Continuous“). Оставете незадължително поле празно, за да го пропуснете. Пишете пина както е на платката (D6) или като GPIO (12); редът под полето казва в какво се превръща и дали платката го позволява.",
 
     pinWifiTrigger: "Бутон WiFi-тригер",
     pinWakeupFF: "Събуждане (FF / ръчно)",
@@ -98,20 +78,6 @@ I18n.register("firstrun", {
     pinRtcCE: "RTC chip-enable (DS1302)",
     pinRtcIO: "RTC данни (IO)",
     pinRtcSCLK: "RTC clock",
-
-    reasonNoProfile: "не е избран профил на платка",
-    reasonUnassigned: "незададен (незадължителен)",
-    reasonNegative: "отрицателен GPIO",
-    reasonMaxGpio: "GPIO > {max} за тази платка",
-    reasonCustomOff: "custom — валидацията е изключена",
-    reasonBootstrap: "bootstrap пин (риск за boot-mode)",
-    reasonUsbCdc: "USB CDC пин (D+/D-)",
-    reasonSpiFlash: "пин от SPI flash шината",
-    reasonUart0: "UART0 конзола (ще загубите сериен дебъг)",
-    reasonAbsent: "не е изведен на тази платка",
-    reasonOk: "ok",
-    reasonDuplicate: "дублира {label}",
-    reasonRequired: "задължително",
 
     saveBtn: "Запази и рестартирай",
     saveBtnAria: "Запази конфигурацията и рестартирай устройството",
