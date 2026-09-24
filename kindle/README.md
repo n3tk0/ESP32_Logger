@@ -110,7 +110,7 @@ The folder name is free — KUAL scans the subdirectories of
 *Stop Dashboard* ends it and restores the screensaver.
 
 **From the panel itself:** tap the screen. A bar appears along the bottom —
-**Refresh · Awake/Sleep · More · Exit** — and *More* opens **Find · Next · Battery ·
+**Refresh · Awake/Sleep · Forecast · More · Exit** — and *More* opens **Find · Next · Battery ·
 Info · Back**, which is the settings menu with no launcher involved. *Exit*
 asks before it acts. Everything on both bars is reachable without a keyboard,
 a cable or KUAL, which matters because `GUI_STOP=1` takes KUAL away.
@@ -187,8 +187,8 @@ settings screen you were just looking at gives way to the page again by itself.
 | `TOUCH` | `1` | Tap the screen for the menu |
 | `WAKE_MENU` | `1` | A press of the power button wakes the panel and opens the menu |
 | `WAKE_HOLD` | `120` | Seconds it then stays awake and listening; every tap pushes this out |
-| `MENU_ACT` | `refresh\|wake\|settings\|quit` | What the bar's buttons do — 2 to 5 of `refresh`, `wake`, `settings`, `hide`, `quit` |
-| `MENU_LBL` | `Refresh\|Awake/Sleep\|More\|Exit` | What they are called. The sleep button may carry both directions with a slash; the bar draws the half that says where the next tap goes. Used only when there are as many labels as buttons and they are not the shipped four — otherwise each button is named after what it does, so changing `MENU_ACT` alone cannot mislabel the bar |
+| `MENU_ACT` | `refresh\|wake\|forecast\|settings\|quit` | What the bar's buttons do — 2 to 5 of `refresh`, `wake`, `forecast`, `settings`, `hide`, `quit`. A `dash.conf` still carrying the old shipped four (and the old shipped labels, or none) gets `forecast` added on its own |
+| `MENU_LBL` | `Refresh\|Awake/Sleep\|Forecast\|More\|Exit` | What they are called. The sleep button may carry both directions with a slash; the bar draws the half that says where the next tap goes. Used only when there are as many labels as buttons and they are not the shipped ones — otherwise each button is named after what it does, so changing `MENU_ACT` alone cannot mislabel the bar |
 | `QUIET_FROM`, `QUIET_TO` | `0`, `0` | Hours between which nothing flashes. Equal = off |
 | `QUIET_EVERY` | `15` | Minutes between clock updates during those hours |
 | `STATUS` | `1` | Draw this Kindle's battery and power mode at the end of the footer |

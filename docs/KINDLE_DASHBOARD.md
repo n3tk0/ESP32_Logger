@@ -714,6 +714,12 @@ underneath for hours. **clear** walks `/kindle/clear` through four full-screen
 frames, alternating black and white, and returns to the dashboard. That is what
 actually resets the pixels; nothing an ordinary page draws will.
 
+**forecast** asks the collector to fetch the forecast now instead of at the end
+of its interval (`/kindle/forecast`), says so, and comes back to the dashboard
+a few seconds later with the new one. The fetch itself runs on the collector's
+export task, never in the web server, and is limited to one a minute whoever
+asks. The link is left out while the collector is its own access point.
+
 The step number comes in a query string, so it is reader-supplied and clamped —
 otherwise a stray link could build a chain that never comes back.
 
@@ -1580,17 +1586,18 @@ with no controls on it, which is right for something read from across a room
 and wrong the moment somebody is standing in front of it wanting it refreshed.
 
 Tap once and a bar appears along the bottom ninth of the screen, ruled into one
-slot per button: **Refresh · Awake/Sleep · More · Exit**. Tap a slot and it runs; tap
+slot per button: **Refresh · Awake/Sleep · Forecast · More · Exit**. Tap a slot and it runs; tap
 anywhere above the bar and it goes away. A bar left up on its own is dismissed
 at the next tick rather than drawn through, because a zone repainted over half
 a bar is a smear nobody asked for.
 
 **`MENU_ACT` is the list that decides what the bar is** — how many buttons it
-has and what each one does — out of five words:
+has and what each one does — out of six words:
 
 | | |
 |---|---|
 | `refresh` | fetch everything and redraw the whole page now |
+| `forecast` | ask the collector for a fresh forecast (`/kindle/forecast?t=1`), say on the bar what it answered, and redraw the page once the fetch has had time to land. The collector allows one fetch a minute; inside that the bar says how long to wait |
 | `wake` | stop sleeping, so the device can be told things; pressed again, go back to sleeping. It writes `POWER` to `dash.conf`, so KUAL and the panel agree about it afterwards |
 | `settings` | a second bar: **Find · Next · Battery · Info · Back** |
 | `hide` | put the bar away, which tapping above it also does |

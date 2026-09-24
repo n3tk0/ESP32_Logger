@@ -308,8 +308,10 @@ void ForecastModule::tick(uint32_t nowMs) {
 
     // Unsigned subtraction handles the millis() wrap. _lastAttempt starts at
     // 0, so the first tick after boot fetches immediately.
-    if (_lastAttempt != 0 && (nowMs - _lastAttempt) < _intervalMs) return;
+    if (_lastAttempt != 0 && (nowMs - _lastAttempt) < _intervalMs &&
+        !_refreshRequested) return;
     _lastAttempt = nowMs ? nowMs : 1;
+    _refreshRequested = false;
 
     if (_fetch()) {
         _failures = 0;
@@ -322,6 +324,20 @@ void ForecastModule::tick(uint32_t nowMs) {
         Serial.printf("[forecast] fetch failed (%lu consecutive)\n",
                       (unsigned long)_failures);
     }
+}
+
+ForecastModule::Refresh ForecastModule::requestRefresh(uint32_t nowMs,
+                                                       uint32_t& waitS) {
+    waitS = 0;
+    if (!isEnabled() || (_lat == 0.0f && _lon == 0.0f)) return REFRESH_OFF;
+    constexpr uint32_t MIN_GAP_MS = 60000UL;
+    const uint32_t last = _lastAttempt;
+    if (last != 0 && (nowMs - last) < MIN_GAP_MS) {
+        waitS = (MIN_GAP_MS - (nowMs - last) + 999UL) / 1000UL;
+        return REFRESH_WAIT;
+    }
+    _refreshRequested = true;
+    return REFRESH_QUEUED;
 }
 
 bool ForecastModule::_fetch() {
@@ -638,6 +654,12 @@ void ForecastModule::statusJson(JsonObject out) const {
     out["valid"]     = d.valid;
     out["fetchedAt"] = d.fetchedAt;
     out["failures"]  = _failures;
+    out["pending"]   = _refreshRequested;
+    #ifdef FEATURE_KINDLE_DASHBOARD
+    // Where the refresh button posts. Only /kindle serves it, so a build
+    // without the dashboard leaves the key out and the page shows no button.
+    out["refresh"]   = "/kindle/forecast";
+    #endif
     if (d.valid) {
         out["tempC"]   = d.tempC;
         // String(), not the bare buffer. `d` is a snapshot living on THIS

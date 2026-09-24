@@ -2265,7 +2265,19 @@ static void handleKindle(AsyncWebServerRequest* req) {
     p += kdT("refresh", "обнови");
     p += F("</a><a href=\"/kindle/clear\">");
     p += kdT("clear", "изчисти");
-    p += F("</a></td></tr></table></body></html>");
+    p += F("</a>");
+#ifdef MODULE_FORECAST_ENABLED
+    // Not on an access point, which has no route to the provider. Offered
+    // on the standalone page otherwise: a forecast six hours stale is one of
+    // the things that turns the page standalone, and it is exactly the moment
+    // somebody wants to ask for a fresh one.
+    if (forecastModule.isEnabled() && !apModeTriggered) {
+        p += F("<a href=\"/kindle/forecast\">");
+        p += kdT("forecast", "прогноза");
+        p += F("</a>");
+    }
+#endif
+    p += F("</td></tr></table></body></html>");
 
     AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
     // The meta tag drives the refresh, so nothing may be served from cache: an
@@ -2401,6 +2413,64 @@ static void handleKindleClear(AsyncWebServerRequest* req) {
     req->send(res);
 }
 
+#ifdef MODULE_FORECAST_ENABLED
+// ---------------------------------------------------------------------------
+// GET /kindle/forecast — fetch the forecast now, then come back
+// ---------------------------------------------------------------------------
+// The footer link on /kindle, the button on the Modules page and the tap menu
+// on the panel all land here. It only asks: the fetch runs on the export task
+// a moment later (see ForecastModule::requestRefresh), so the page says so and
+// meta-refreshes back to the dashboard once the fetch has had time to finish —
+// two HTTPS requests at six seconds' timeout each, for OWM, at the worst.
+//
+// A GET, like /kindle/clear, because the reader's browser follows links and
+// submits nothing, and the side effect is one rate-limited forecast request.
+//
+// ?t=1 answers in one plain line instead — "ok", "wait <s>" or "off" — for
+// the panel's script and the Modules page, which have no use for a page.
+static void handleKindleForecast(AsyncWebServerRequest* req) {
+    uint32_t waitS = 0;
+    const auto r = forecastModule.requestRefresh(millis(), waitS);
+
+    if (req->hasParam("t")) {
+        char line[16];
+        if (r == ForecastModule::REFRESH_QUEUED)    strcpy(line, "ok");
+        else if (r == ForecastModule::REFRESH_WAIT) snprintf(line, sizeof(line), "wait %lu", (unsigned long)waitS);
+        else                                        strcpy(line, "off");
+        AsyncWebServerResponse* res = req->beginResponse(200, "text/plain", line);
+        res->addHeader("Cache-Control", "no-store");
+        req->send(res);
+        return;
+    }
+
+    String p;
+    p.reserve(520);
+    p += F("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+           "<meta name=\"viewport\" content=\"width=");
+    p += PAGE_W;
+    p += F("\"><meta http-equiv=\"refresh\" content=\"");
+    p += (r == ForecastModule::REFRESH_QUEUED) ? 8 : 4;
+    p += F(";url=/kindle\"><title>...</title><style>body{margin:0;padding:40% 8% 0;"
+           "font:24px sans-serif;text-align:center}</style></head><body><p>");
+    if (r == ForecastModule::REFRESH_QUEUED) {
+        p += kdT("Updating the forecast&hellip;", "Обновявам прогнозата&hellip;");
+    } else if (r == ForecastModule::REFRESH_WAIT) {
+        p += kdT("Updated under a minute ago. Try again in ",
+                 "Обновена е преди по-малко от минута. Опитай след ");
+        p += waitS;
+        p += F(" s.");
+    } else {
+        p += kdT("The forecast is off, or has no location set.",
+                 "Прогнозата е изключена или няма зададено място.");
+    }
+    p += F("</p></body></html>");
+
+    AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
+    res->addHeader("Cache-Control", "no-store");
+    req->send(res);
+}
+#endif
+
 // ORDER IS LOAD-BEARING. AsyncCallbackWebHandler::canHandle matches when the
 // request URL equals its uri OR starts with uri + "/", and _attachHandler
 // takes the first handler that matches, in registration order. So "/kindle"
@@ -2419,6 +2489,9 @@ void registerKindleDashboard(AsyncWebServer& server) {
 
     server.on("/kindle/probe", HTTP_GET, handleKindleProbe);
     server.on("/kindle/clear", HTTP_GET, handleKindleClear);
+#ifdef MODULE_FORECAST_ENABLED
+    server.on("/kindle/forecast", HTTP_GET, handleKindleForecast);
+#endif
     server.on("/kindle/data",  HTTP_GET, handleKindleData);
     server.on("/kindle/graph.bmp", HTTP_GET, handleKindleGraph);
     server.on("/kindle",       HTTP_GET, handleKindle);

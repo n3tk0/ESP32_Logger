@@ -2171,6 +2171,75 @@ var Modules = (function () {
 
     // OTA gets a read-only status + actions panel below its settings form.
     if (detail.id === "ota") _renderOtaActions(host, detail.config || {});
+    if (detail.id === "forecast") _renderForecastActions(host, detail.status || {});
+  }
+
+  // ── Forecast-only status + "refresh now" ───────────────────────────────────
+  // The button only asks: the device fetches on its export task a moment
+  // later, so the panel polls the module's status until fetchedAt moves.
+  // st.refresh is present only on builds that serve /kindle/forecast.
+  function _renderForecastActions(host, st) {
+    function age(ts) {
+      if (!ts) return t("settingsPages.modFcNever");
+      var m = Math.max(0, Math.floor((Date.now() / 1000 - ts) / 60));
+      return m < 60 ? t("settingsPages.modFcAgeMin", { n: m })
+                    : t("settingsPages.modFcAgeH", { n: Math.floor(m / 60) });
+    }
+    function rows(s) {
+      function row(k, v) {
+        return '<div class="mod-ota-row"><span>' + escAttr(k) + '</span><b>' + escAttr(v) + '</b></div>';
+      }
+      return row(t("settingsPages.modFcProvider"), s.provider === "owm" ? "OpenWeatherMap" : "Open-Meteo") +
+             row(t("settingsPages.modFcLast"), age(s.fetchedAt)) +
+             row(t("settingsPages.modFcFailures"), String(s.failures || 0));
+    }
+    var panel = document.createElement("div");
+    panel.className = "mod-ota-panel";
+    panel.innerHTML =
+      '<div class="mod-group-head">' + esc(t("settingsPages.modFcHead")) + '</div>' +
+      '<div id="fc-rows">' + rows(st) + '</div>' +
+      (st.refresh ? '<div class="mod-actions"><button type="button" class="btn" id="fc-refresh">' +
+                    esc(t("settingsPages.modFcRefresh")) + '</button></div>' : '');
+    host.appendChild(panel);
+
+    var btn = _el("fc-refresh");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      btn.disabled = true;
+      var before = st.fetchedAt || 0, tries = 0;
+      function done(html) { btn.disabled = false; if (html) setMsg(html); }
+      function poll() {
+        fetchWithTimeout("/api/modules/forecast", {}, 10000)
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            var s = (d && d.status) || {};
+            var box = _el("fc-rows");
+            if (box) box.innerHTML = rows(s);
+            if ((s.fetchedAt || 0) !== before) {
+              done('<div class="alert alert-success">' + esc(t("settingsPages.modFcUpdated")) + '</div>');
+            } else if (++tries < 6) {
+              setTimeout(poll, 2000);
+            } else {
+              done('<div class="alert alert-error">' + esc(t("settingsPages.modFcNoAnswer")) + '</div>');
+            }
+          })
+          .catch(function () { done('<div class="alert alert-error">' + esc(t("settingsPages.modFcNoAnswer")) + '</div>'); });
+      }
+      fetchWithTimeout(st.refresh + "?t=1", {}, 10000)
+        .then(function (r) { return r.text(); })
+        .then(function (txt) {
+          txt = (txt || "").trim();
+          if (txt === "ok") {
+            setMsg('<div class="alert alert-info">' + esc(t("settingsPages.modFcFetching")) + '</div>');
+            setTimeout(poll, 2000);
+          } else if (txt.indexOf("wait ") === 0) {
+            done('<div class="alert alert-warning">' + esc(t("settingsPages.modFcWait", { sec: txt.slice(5) })) + '</div>');
+          } else {
+            done('<div class="alert alert-warning">' + esc(t("settingsPages.modFcOff")) + '</div>');
+          }
+        })
+        .catch(function () { done('<div class="alert alert-error">' + esc(t("settingsPages.modFcNoAnswer")) + '</div>'); });
+    });
   }
 
   // ── OTA-only status & actions panel (partition info + confirm/rollback) ─────

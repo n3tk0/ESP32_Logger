@@ -79,6 +79,12 @@ case "$url" in
         elif [ "${DATA_TRUNCATE:-0}" = "1" ]; then head -20 "$FIXTURE" > "$out"
         else cp "$FIXTURE" "$out"; fi
         exit 0 ;;
+    # The forecast button's one-line answer. FC_ANSWER is what the collector
+    # says; the request is logged so a test can see it was made at all.
+    *"$WGET_OK_HOST"*/kindle/forecast\?t=1)
+        echo "$url" >> "${WGET_LOG:-/dev/null}"
+        echo "${FC_ANSWER:-ok}"
+        exit 0 ;;
     *"$WGET_OK_HOST"*/kindle/graph.bmp)
         # A REAL, SELF-CONSISTENT BMP: "BM", then the file's own length as a
         # 32-bit little-endian count at offset 2 (130 = \202), then bytes to
@@ -1388,16 +1394,17 @@ check "$?" "a panel with its own scale, or its axes swapped, still lands where i
   menu_geom
   [ "$MENU_H" = "88" ] || exit 1             # 800/9
   [ "$MENU_Y" = "712" ] || exit 2            # 800 - 88
-  [ "$MENU_N" = "4" ] || exit 3              # the built-in four
-  [ "$MENU_SLOT" = "150" ] || exit 4
+  [ "$MENU_N" = "5" ] || exit 3              # the built-in five
+  [ "$MENU_SLOT" = "120" ] || exit 4
   menu_hit 50 760;  [ "$MENU_HIT" = "refresh" ]  || exit 5
-  menu_hit 200 760; [ "$MENU_HIT" = "wake" ]     || exit 6
-  menu_hit 350 760; [ "$MENU_HIT" = "settings" ] || exit 7
+  menu_hit 170 760; [ "$MENU_HIT" = "wake" ]     || exit 6
+  menu_hit 290 760; [ "$MENU_HIT" = "forecast" ] || exit 13
+  menu_hit 410 760; [ "$MENU_HIT" = "settings" ] || exit 7
   menu_hit 550 760; [ "$MENU_HIT" = "quit" ]     || exit 8
   menu_hit 300 400; [ "$MENU_HIT" = "outside" ]  || exit 9
-  # The slots meet exactly: 150 belongs to the button on its right.
-  menu_hit 149 760; [ "$MENU_HIT" = "refresh" ]  || exit 10
-  menu_hit 150 760; [ "$MENU_HIT" = "wake" ]     || exit 11
+  # The slots meet exactly: 120 belongs to the button on its right.
+  menu_hit 119 760; [ "$MENU_HIT" = "refresh" ]  || exit 10
+  menu_hit 120 760; [ "$MENU_HIT" = "wake" ]     || exit 11
   # And the last slot keeps the remainder of an odd division, so the bar has
   # no dead strip down its right-hand edge for a finger to land in.
   menu_hit 599 760; [ "$MENU_HIT" = "quit" ]     || exit 12
@@ -1436,15 +1443,15 @@ check "$?" "a hit test before any bar was opened still knows what the buttons ar
   menu_open main
   menu_geom
   grep -q -- "-B	BLACK	-k	top=$MENU_Y,left=0,width=600,height=$MENU_H" "$FBINK_LOG" || exit 1
-  for w in Refresh More Exit; do
+  for w in Refresh Forecast More Exit; do
       grep -q -- "--	$w" "$FBINK_LOG" || { echo "no $w" >&2; exit 2; }
   done
   # Knocked out of the plate, not drawn bgless over it.
   grep -q -- "-h	-C	BLACK	-B	WHITE" "$FBINK_LOG" || exit 3
   # And it refreshes only its own strip, not the whole screen.
   grep -q -- "-f	-s	top=$MENU_Y,left=0,width=600,height=$MENU_H" "$FBINK_LOG" || exit 4
-  # Three dividers for four buttons, and none at either end.
-  [ "$(grep -c -- "-B	GRAY7	-k" "$FBINK_LOG")" = "3" ] || exit 5
+  # Four dividers for five buttons, and none at either end.
+  [ "$(grep -c -- "-B	GRAY7	-k" "$FBINK_LOG")" = "4" ] || exit 5
   exit 0 )
 check "$?" "the menu is knocked out of a plate along the bottom, and refreshes only itself"
 
@@ -2103,6 +2110,59 @@ check "$?" "and draws nothing at all when it is switched off"
   POWER=suspend; power_cycle; [ "$POWER" = "awake" ]   || exit 7
   exit 0 )
 check "$?" "Awake stops the sleeping, writes it to dash.conf, and puts it back"
+
+# ── The forecast button ──────────────────────────────────────────────────────
+# It asks the collector for a fetch, says so on the bar, and leaves the full
+# redraw behind — the bar has to come off the screen, and the redraw is what
+# takes it off. Every answer the collector can give gets its own sentence.
+( reset_log
+  RES_W=600 RES_H=800 MENU_ACTS="" FONT_REG="$WORK/fonts/Bookerly-Regular.ttf"
+  export WGET_OK_HOST=10.9.9.42 WGET_LOG="$WORK/fc.log" FC_ANSWER=ok
+  HOST=10.9.9.42 DASH_FC_SETTLE=0 DASH_FC_NOTE=0
+  : > "$WGET_LOG"; rm -f "$TMP/redraw"
+  forecast_now
+  grep -q "/kindle/forecast?t=1" "$WGET_LOG" || exit 1
+  grep -q -- "--	Updating the forecast" "$FBINK_LOG" || exit 2
+  [ -f "$TMP/redraw" ] || exit 3
+  reset_log
+  FC_ANSWER="wait 42"; forecast_now
+  grep -q -- "--	Updated a moment ago. Try again in 42 s" "$FBINK_LOG" || exit 4
+  reset_log
+  FC_ANSWER=off; forecast_now
+  grep -q -- "--	The forecast is off" "$FBINK_LOG" || exit 5
+  reset_log
+  HOST=10.9.9.254; forecast_now
+  grep -q -- "--	No answer from the collector" "$FBINK_LOG" || exit 6
+  exit 0 )
+check "$?" "Forecast asks the collector, says what it answered, and redraws"
+
+# THE OLD SHIPPED BAR MOVES TO THE NEW ONE; A BAR SOMEBODY NAMED DOES NOT.
+# Every dash.conf installed before the button carries the four shipped actions
+# and the four shipped words, and would never see the button otherwise.
+( CONF="$WORK/fc-migrate.conf"
+  printf 'MENU_ACT=refresh|wake|settings|quit\nMENU_LBL=Refresh|Awake/Sleep|More|Exit\n' > "$CONF"
+  conf_load 2>/dev/null
+  [ "$MENU_ACT" = "refresh|wake|forecast|settings|quit" ] || { echo "got [$MENU_ACT]" >&2; exit 1; }
+  printf 'MENU_ACT=refresh|wake|settings|quit\nMENU_LBL=Обнови|Буден|Още|Изход\n' > "$CONF"
+  conf_load 2>/dev/null
+  [ "$MENU_ACT" = "refresh|wake|settings|quit" ] || exit 2
+  [ "$MENU_LBL" = "Обнови|Буден|Още|Изход" ] || exit 3
+  printf 'MENU_ACT=refresh|hide|quit\n' > "$CONF"
+  conf_load 2>/dev/null
+  [ "$MENU_ACT" = "refresh|hide|quit" ] || exit 4
+  exit 0 )
+check "$?" "an untouched old bar gains the Forecast button; a bar somebody set keeps theirs"
+
+# And the old shipped words over a bar of four other buttons are still the
+# shipped words: refused, so they cannot sit one place along from what they name.
+( reset_log
+  RES_W=600 RES_H=800 MENU_ACTS="" FONT_REG="$WORK/fonts/Bookerly-Regular.ttf"
+  MENU_ACT="refresh|wake|hide|quit" MENU_LBL="Refresh|Awake/Sleep|More|Exit"
+  menu_open main
+  grep -q -- "--	More" "$FBINK_LOG" && exit 1
+  grep -q -- "--	Hide" "$FBINK_LOG" || exit 2
+  exit 0 )
+check "$?" "the old shipped labels are refused like the new ones"
 
 # ── Time that went missing ───────────────────────────────────────────────────
 # A press of the power button in POWER=awake sends the reader to sleep by the

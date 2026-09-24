@@ -181,6 +181,30 @@ with sync_playwright() as p:
           "ticking the switch flips the checkbox behind it")
     check(ip_row.is_visible(), "and revealed once the condition holds")
 
+    # ── the forecast's refresh button ────────────────────────────────────────
+    # A panel under the form: provider, age, failures, and a button that asks
+    # /kindle/forecast and then polls the module until fetchedAt moves.
+    urllib.request.urlopen(BASE + "/__mock/forecast?reset=1").read()
+    # The wifi form above was left dirty on purpose; leaving it asks first.
+    pg.once("dialog", lambda d: d.accept())
+    fc.click()
+    pg.wait_for_timeout(800)
+    btn = pg.locator("#fc-refresh")
+    check(btn.count() == 1, "the forecast module shows a refresh button")
+    panel = host.inner_text()
+    check("Open-Meteo" in panel and "1 h ago" in panel,
+          "and the provider and the age of the last fetch (%r)"
+          % panel[-120:].replace("\n", " "))
+    btn.click()
+    pg.wait_for_timeout(3500)
+    msg = pg.locator("#settings_modules").inner_text() if pg.locator("#settings_modules").count() else pg.inner_text("body")
+    check("Forecast updated." in msg, "a refresh that lands says so")
+    check("0 min ago" in host.inner_text(), "and the age row moves to the new fetch")
+    btn.click()
+    pg.wait_for_timeout(800)
+    msg = pg.inner_text("body")
+    check("Try again in 57 s" in msg, "a second press inside the minute is told to wait")
+
     # ── a failure names itself ──────────────────────────────────────────────
     # Each of these used to render the same sentence with an empty console.
     def reload_with(kind):
