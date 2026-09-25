@@ -281,15 +281,6 @@ def cell(lab, val, unit, arrow, ink, cls, caption=True):
     return (('<div class="lab">' + lab + '</div>' if caption else '') +
             '<div class="cv">' + value(val, unit, arrow, cls, False, ink) + '</div>')
 
-def row_split(n, cols=3):
-    """Balanced, full rows — the same rule kdGridRowSplit() applies: the number
-    of rows comes from the cap, then the cells spread as evenly as they go."""
-    if n <= 0:
-        return []
-    rows = (n + cols - 1) // cols
-    base, extra = divmod(n, rows)
-    return [base + (1 if r < extra else 0) for r in range(rows)]
-
 def grid_rows():
     """The rows the layout chose — the same call appendTopBlock() follows."""
     out, at = '', 0

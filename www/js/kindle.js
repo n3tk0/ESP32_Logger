@@ -420,6 +420,11 @@ function kdFlowMinDigits(metric, unit) {
   if (["humidity","humidity_amb","soil_moisture","battery_percent",
        "wind_direction"].indexOf(metric) >= 0) return 3;
   if (metric === "pressure") return unit === "mmHg" ? 3 : (unit === "inHg" ? 2 : 4);
+  if (["co2","eco2","tvoc"].indexOf(metric) >= 0) return 4;
+  if (metric === "lux") return 5;
+  if (["aqi","pm1","pm25","pm4","pm10","battery_days"].indexOf(metric) >= 0) return 3;
+  if (["rain","rain_rate","rain_total","wind","wind_speed","flow_rate",
+       "uva","uvb"].indexOf(metric) >= 0) return 2;
   return 0;
 }
 
@@ -742,30 +747,28 @@ function kdRenderPreview() {
 
   var ilive = L.inside;
   if (ilive.length) {
-    {
-      h += kdBox(318, L.inRuleY, 264, 1, "kd-rl soft");
-      h += kdT(318, L.inLabY, L.labSz, kdGroups["in"] || kdGroupPh["in"],
-               { ink:"#777777", bold:capB });
-      // The first field's share is what it needs to be set larger, not a
-      // fixed fraction; or it has a line of its own and the others share the
-      // one under it.
-      var w1 = L.inStack ? 0 : Math.round(264 * L.inW1Pm / 1000);
-      var cw2 = ilive.length > 1 ? Math.floor((264 - w1) / (ilive.length - 1)) : 264;
-      for (i = 0; i < ilive.length; i++) {
-        z = kdSlot(ilive[i]);
-        var big = i === 0, ivs = big ? L.inValSz1 : L.inValSz;
-        var iy = big ? L.inValY : L.inVal2Y;
-        x = big ? 318 : 318 + w1 + (i - 1) * cw2;
-        if (!big) h += kdT(x, iy - 18, L.labSz, kdPvCaption(z),
-                           { ink:"#777777", bold:capB });
-        v = kdPvValue(z);
-        h += kdT(x, iy, ivs, v,
-                 { bold:(z.flags & kdFlags.bold) || (bold & 0x0010), ink:kdPvInk(z.ink) });
-        u = kdPvUnit(z);
-        h += kdT(x + kdTw(v, ivs), iy + (big ? 16 : 9),
-                 Math.round(ivs * (u === "°" ? 0.34 : 0.42)), u,
-                 { ink:"#444444", bold:unitB });
-      }
+    h += kdBox(318, L.inRuleY, 264, 1, "kd-rl soft");
+    h += kdT(318, L.inLabY, L.labSz, kdGroups["in"] || kdGroupPh["in"],
+             { ink:"#777777", bold:capB });
+    // The first field's share is what it needs to be set larger, not a
+    // fixed fraction; or it has a line of its own and the others share the
+    // one under it.
+    var w1 = L.inStack ? 0 : Math.round(264 * L.inW1Pm / 1000);
+    var cw2 = ilive.length > 1 ? Math.floor((264 - w1) / (ilive.length - 1)) : 264;
+    for (i = 0; i < ilive.length; i++) {
+      z = kdSlot(ilive[i]);
+      var big = i === 0, ivs = big ? L.inValSz1 : L.inValSz;
+      var iy = big ? L.inValY : L.inVal2Y;
+      x = big ? 318 : 318 + w1 + (i - 1) * cw2;
+      if (!big) h += kdT(x, iy - 18, L.labSz, kdPvCaption(z),
+                         { ink:"#777777", bold:capB });
+      v = kdPvValue(z);
+      h += kdT(x, iy, ivs, v,
+               { bold:(z.flags & kdFlags.bold) || (bold & 0x0010), ink:kdPvInk(z.ink) });
+      u = kdPvUnit(z);
+      h += kdT(x + kdTw(v, ivs), iy + (big ? 16 : 9),
+               Math.round(ivs * (u === "°" ? 0.34 : 0.42)), u,
+               { ink:"#444444", bold:unitB });
     }
   }
 

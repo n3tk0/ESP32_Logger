@@ -66,10 +66,17 @@ static void test_worst_advance_is_the_widest_it_gets() {
     // Humidity for 100.
     CHECK_EQ(kdFlowWorstAdvance("humidity", "44", "%", false),
              kdFlowWorstAdvance("humidity", "100", "%", false));
+    // CO2 is sized for four digits and light for five, so a room around
+    // 1000 ppm or a sky around 10 000 lx does not resize (and so repaint) the
+    // page each time it crosses.
+    CHECK_EQ(kdFlowWorstAdvance("co2", "987", "ppm", false),
+             kdFlowWorstAdvance("co2", "1012", "ppm", false));
+    CHECK_EQ(kdFlowWorstAdvance("lux", "9800", "lx", false),
+             kdFlowWorstAdvance("lux", "10200", "lx", false));
     // A metric the table does not know is sized by what it reads, and grows
     // with it.
-    CHECK(kdFlowWorstAdvance("co2", "640", "ppm", false) <
-          kdFlowWorstAdvance("co2", "1240", "ppm", false));
+    CHECK(kdFlowWorstAdvance("voltage", "3.7", "V", false) <
+          kdFlowWorstAdvance("voltage", "12.1", "V", false));
     // The decimals are the place's own.
     CHECK(kdFlowWorstAdvance("temperature", "21", "\xC2\xB0", false) <
           kdFlowWorstAdvance("temperature", "21.0", "\xC2\xB0", false));
@@ -415,6 +422,14 @@ static void test_page_css() {
     CHECK(c.has(".v1{font-size:88px}"));
     CHECK(c.has(".col-l,.col-r{height:250px}"));
     CHECK(c.has(".clock{font-size:96px;line-height:100px}"));
+    // What stands in for the clock, and the slash, at the sheet's own sizes on
+    // the ordinary page — and grown with the rest without a forecast.
+    CHECK(c.has(".clock-x{font-size:44px;line-height:100px}"));
+    CHECK(c.has(".slash{padding:0 7px;top:-5px}"));
+    KdFlowIn noFc = defaultPage(); noFc.forecast = false;
+    Css g;  kdFlowCss(g, kdFlowCompute(noFc), 0, ident);
+    CHECK(g.has(".clock-x{font-size:48px;line-height:114px}"));
+    CHECK(g.has(".slash{padding:0 8px;top:-6px}"));
     CHECK(c.has(".grid td{vertical-align:middle;height:115px}"));
     // Each clock style gets its own arm, at this layout's size.
     Css boxed;  kdFlowCss(boxed, f, 1, ident);

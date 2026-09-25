@@ -127,6 +127,19 @@ static inline int kdFlowMinDigits(const char* metric, const char* unit) {
         if (unit && !strcmp(unit, "inHg")) return 2;
         return 4;
     }
+    // The rest by the range they live in: a CO2 reading around 1000 ppm, or
+    // light around 10 000 lx, would otherwise resize the page each time it
+    // crossed the power of ten — and a panel repaints whole when it does.
+    if (!strcmp(metric, "co2") || !strcmp(metric, "eco2") ||
+        !strcmp(metric, "tvoc")) return 4;
+    if (!strcmp(metric, "lux")) return 5;
+    if (!strcmp(metric, "aqi") || !strcmp(metric, "pm1") || !strcmp(metric, "pm25") ||
+        !strcmp(metric, "pm4") || !strcmp(metric, "pm10") ||
+        !strcmp(metric, "battery_days")) return 3;
+    if (!strcmp(metric, "rain") || !strcmp(metric, "rain_rate") ||
+        !strcmp(metric, "rain_total") || !strcmp(metric, "wind") ||
+        !strcmp(metric, "wind_speed") || !strcmp(metric, "flow_rate") ||
+        !strcmp(metric, "uva") || !strcmp(metric, "uvb")) return 2;
     return 0;
 }
 
@@ -504,8 +517,12 @@ static inline int kdFlowPanel(int v, unsigned resW) {
 static const int KDF_PANEL_KEYS = 48;
 static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out) {
     int n = 0;
-    #define KDF_K(k, v)  do { out[n].key = (k); out[n].value = kdFlowPanel((v), resW); n++; } while (0)
-    #define KDF_R(k, v)  do { out[n].key = (k); out[n].value = (v); n++; } while (0)
+    // Bounded: a key added below without KDF_PANEL_KEYS growing with it is
+    // dropped (and fails test_panel_keys) rather than written past `out`.
+    #define KDF_K(k, v)  do { if (n < KDF_PANEL_KEYS) { out[n].key = (k); \
+                              out[n].value = kdFlowPanel((v), resW); } n++; } while (0)
+    #define KDF_R(k, v)  do { if (n < KDF_PANEL_KEYS) { out[n].key = (k); \
+                              out[n].value = (v); } n++; } while (0)
     KDF_K("GROUP_LAB_SZ", f.labSz);
     KDF_K("HERO_Y",       f.heroY);
     KDF_K("HERO_SZ",      f.heroSz);
@@ -556,7 +573,7 @@ static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out)
     KDF_R("FC_BAND",      f.forecast ? 1 : 0);
     #undef KDF_K
     #undef KDF_R
-    return n;
+    return n > KDF_PANEL_KEYS ? -1 : n;      // -1: the table outgrew its count
 }
 
 /// The grid's rows, as the panel reads them: "2", "1 1", "3 2".
@@ -619,6 +636,9 @@ inline void kdFlowCss(StringT& out, const KdFlow& f, uint8_t clockStyle, PxFn px
     out += ".lab{font-size:";        KDF_PX(f.labSz);    out += "}";
     out += ".v1{font-size:";         KDF_PX(f.heroSz);   out += "}";
     out += ".v2,.slash{font-size:";  KDF_PX(f.bigSz);    out += "}";
+    // The slash's padding and lift grow with the headline it sits beside.
+    out += ".slash{padding:0 ";      KDF_PX(f.headGap - 1);
+    out += ";top:";                  KDF_PX(-kdfScale(5, f.grow)); out += "}";
     out += ".sub{font-size:";        KDF_PX(f.subSz);    out += "}";
     // The top block is as tall as the layout gave it, whatever is in it: its
     // two cells carry the height, and the grid's rows share theirs out.
@@ -663,6 +683,11 @@ inline void kdFlowCss(StringT& out, const KdFlow& f, uint8_t clockStyle, PxFn px
             out += ";line-height:";       KDF_PX(100 * gc / 1000); out += "}";
             break;
     }
+    // The line printed in the clock's place when there is no time to show:
+    // as tall as the clock it stands in for, so the indoor row stays where
+    // the layout put it.
+    out += ".clock-x{font-size:";   KDF_PX(f.bigSz);
+    out += ";line-height:";         KDF_PX(100 * gc / 1000); out += "}";
     #undef KDF_PX
 }
 

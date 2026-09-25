@@ -1972,6 +1972,21 @@ graph_ok() {
     [ "$have" = "$want" ]
 }
 
+# Is the image on disk as tall as the chart the layout has room for? The
+# collector's layout sizes the chart, and a fetch for the new height can fail
+# after the page has already moved: the kept image, drawn at the new GR_Y,
+# would run over the key and the band below it. Not drawn then — the line
+# saying there is no chart yet goes there instead, until the fetch comes in.
+# The BMP's height is at offset 22, negative for a top-down image; a reader
+# with no od, or a header that says 0, is let through as before.
+graph_fits() {
+    [ "${LAYOUT_FLOW:-0}" = "1" ] || return 0
+    local h
+    h=$(od -An -td4 -j22 -N4 "$1" 2>/dev/null | tr -dc '0-9')
+    case "$h" in ''|0) return 0 ;; esac
+    [ "$h" = "${GR_H:-}" ]
+}
+
 # Is the chart switched on? Consulted before FETCHING as well as before
 # drawing: a reader who turns the chart off in Settings should not have the
 # Kindle keep downloading a 56 KB image over WiFi every GRAPH_EVERY minutes
@@ -2139,6 +2154,13 @@ flow_apply() {
     LAYOUT_FLOW=0
     unset IN_W1 IN_STACK IN_VAL2_Y FC_BAND 2>/dev/null
     case "${LY_GR_H:-}" in ''|*[!0-9]*) FLOW_SIG=""; return 0 ;; esac
+    # The grid's rows are a list of counts, each divided into the column's
+    # width: 1..6 each, separated by single spaces, or the grid is not drawn
+    # at all rather than divided by zero.
+    local r
+    for r in ${LY_GRID_ROWS:-}; do
+        case "$r" in [1-6]) ;; *) LY_GRID_ROWS=""; break ;; esac
+    done
     for k in $FLOW_KEYS; do
         eval "v=\${LY_$k:-}"
         case "$v" in ''|*[!0-9]*) continue ;; esac
@@ -3021,7 +3043,7 @@ draw_chart_body() {
         return 0
     fi
 
-    if draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"; then
+    if graph_fits "$TMP/graph.bmp" && draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"; then
         draw_chart_axis
         draw_chart_key
         return 0

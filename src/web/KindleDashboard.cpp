@@ -1017,7 +1017,7 @@ static void kdRenderBegin(KdRender& r, const KindleConfig& skin, uint32_t now,
     r.flow = kdFlowFor(skin, r.res, standalone, r.sub[0] != '\0', html);
 }
 
-static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t now,
+static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
                       KdRender& rd) {
     // IN PLACE, not a copy: seven hundred bytes of places on the web server's
     // stack is enough once. Nothing reads them after this but the layout keys,
@@ -1060,7 +1060,6 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
     kdShellVarUpper(s, "Z_GROUP_OUT", kdGroupOutLabel(zones));
     kdShellVarUpper(s, "Z_GROUP_IN",  kdGroupInLabel(zones));
 
-    (void)now;
     kdShellVar(s, "Z_SUB", rd.sub);
 
     char key[24];
@@ -1662,7 +1661,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // update_dash.sh keeps working from the keys it knows; a current one draws
     // the places and ignores them. Nobody has to update the reader and the
     // collector in the same minute.
-    emitZones(s, skin, now, rd);
+    emitZones(s, skin, rd);
 
     // ── Metadata ──
     const uint16_t resW = skin.fbinkResW ? skin.fbinkResW : (uint16_t)KINDLE_PAGE_W;

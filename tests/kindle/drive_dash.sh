@@ -840,6 +840,43 @@ done
   exit 0 )
 check "$?" "an LY_ value that is not a number, or not a layout name, is ignored"
 
+# The grid's rows are counts the script divides by: anything but 1..6 and
+# the list is dropped, never divided by.
+for bad in '0' '2 x' '7' '1;reboot'; do
+  ( flow_payload "$WORK/ly.txt" res=600
+    grep -v '^LY_GRID_ROWS=' "$WORK/ly.txt" > "$WORK/ly2.txt"
+    echo "LY_GRID_ROWS=\"$bad\"" >> "$WORK/ly2.txt"
+    ly_load "$WORK/ly2.txt"
+    LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+    load_layout
+    [ "$LAYOUT_FLOW" = "1" ] || exit 1
+    [ -z "$LY_GRID_ROWS" ] || exit 2
+    exit 0 )
+  check "$?" "LY_GRID_ROWS=\"$bad\" is dropped rather than divided by"
+done
+
+# A CHART FETCHED FOR THE OLD LAYOUT IS NOT DRAWN IN THE NEW ONE. The image's
+# height is in its header; one that is not the layout's GR_H would run over
+# the key and the band under it.
+bmp_of_height() {   # $1=file $2=height -> a 130-byte BMP whose header says so
+    { printf 'BM\202\000\000\000'
+      dd if=/dev/zero bs=1 count=16 2>/dev/null
+      h=$2; printf "\\$(printf %o $((h & 255)))\\$(printf %o $(((h >> 8) & 255)))\\000\\000"
+      dd if=/dev/zero bs=1 count=104 2>/dev/null; } > "$1"
+}
+( flow_payload "$WORK/ly.txt" res=600 week=0; ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800; load_layout
+  bmp_of_height "$DASH_TMP/graph.bmp" 220
+  graph_fits "$DASH_TMP/graph.bmp" && exit 1          # 220 on a 221 layout
+  bmp_of_height "$DASH_TMP/graph.bmp" "$GR_H"
+  graph_fits "$DASH_TMP/graph.bmp" || exit 2
+  # Without a layout the file's chart is the only size there is.
+  ly_load /dev/null; load_layout
+  bmp_of_height "$DASH_TMP/graph.bmp" 999
+  graph_fits "$DASH_TMP/graph.bmp" || exit 3
+  exit 0 )
+check "$?" "a chart of another height is not drawn on the layout's page"
+
 # A LAYOUT THAT MOVED IS A PAGE REPAINTED WHOLE, the same as the standalone
 # page coming and going: switch the week strip off and every coordinate above
 # it moves.
