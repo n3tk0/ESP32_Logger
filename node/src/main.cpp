@@ -48,6 +48,13 @@ static PortalLinkStatus  s_linkStatus;
 static uint32_t s_lastPost   = 0;
 static bool     s_postedOnce = false;
 
+/// How many configured sensor entries answered at the last nodeSensorsBegin(),
+/// and the cycles since. One that failed at boot while another works is
+/// retried every SENSOR_RETRY_CYCLES cycles, not only once all are down.
+static const uint8_t SENSOR_RETRY_CYCLES = 5;
+static int      s_sensorsOk    = 0;
+static uint8_t  s_sensorCycles = 0;
+
 static bool     s_portalBgRunning = false;
 
 /// §3: the full config goes with the first POST after boot (until one
@@ -731,7 +738,7 @@ void setup() {
                   (unsigned)s_cfg.interval_s, (unsigned)s_cfg.rev,
                   s_cfg.local ? ", local" : "");
 
-    nodeSensorsBegin(s_cfg);
+    s_sensorsOk = nodeSensorsBegin(s_cfg);
     LOGF("sensors: %s\n", nodeSensorsDescribe());
     ensureWifi();
 }
@@ -766,7 +773,18 @@ void loop() {
     // The probe needs no network and costs a few milliseconds, so it goes
     // first and unconditionally; the network follows and is likewise not
     // conditional on the sensor.
-    if (!nodeSensorsReady()) nodeSensorsBegin(s_cfg);
+    //
+    // With every entry down it runs each cycle. With only some down (a DS18B20
+    // plugged in after boot beside a working BME280) it runs every
+    // SENSOR_RETRY_CYCLES: nodeSensorsBegin() skips the entries that already
+    // answered, so a retry costs only the missing ones' probes.
+    if (!nodeSensorsReady() ||
+        (s_sensorsOk < (int)s_cfg.sensor_count && ++s_sensorCycles >= SENSOR_RETRY_CYCLES)) {
+        s_sensorCycles = 0;
+        const int was = s_sensorsOk;
+        s_sensorsOk = nodeSensorsBegin(s_cfg);
+        if (s_sensorsOk != was) LOGF("sensors: %s\n", nodeSensorsDescribe());
+    }
 
     // MEASURED AND REMEMBERED BEFORE THE NETWORK IS EVEN LOOKED AT. The one
     // thing the backlog exists for — the cycle where the router is down — must
