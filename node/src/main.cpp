@@ -342,19 +342,32 @@ static void applyCollectorConfig(JsonVariantConst doc, uint16_t rev) {
     }
 
     const uint8_t change = NodeSync::classifyChange(s_cfg, w->cfg);
+    const uint16_t prevTrial = s_sync.trialRev;
+    if (change & NodeSync::CH_NET_TRIAL) {
+        // §4.7: this config decides whether the node can reach anything. Run
+        // it on trial; the backup storeSave() takes below is what a rollback
+        // restores. The trial is written FIRST: a crash between the two
+        // writes then leaves a trial naming a rev the saved config is not,
+        // which setup() drops — never a new network config with no way back.
+        s_sync.trialRev = rev;
+        if (!syncSave(s_sync)) {
+            s_sync.trialRev = prevTrial;
+            LOGLN("[cfg] could not record the trial; not applying the collector's config");
+            delete w;
+            return;
+        }
+    }
     if (!storeSave(w->cfg, !s_link.onTrial())) {
         // Not refused — the config is fine, the flash is not. Nothing is
         // reported, so the collector keeps offering it and the next cycle
         // tries again.
         LOGLN("[cfg] could not save the collector's config");
+        if (s_sync.trialRev != prevTrial) {
+            s_sync.trialRev = prevTrial;
+            syncSave(s_sync);
+        }
         delete w;
         return;
-    }
-    if (change & NodeSync::CH_NET_TRIAL) {
-        // §4.7: this config decides whether the node can reach anything. Run
-        // it on trial; the backup taken just now is what a rollback restores.
-        s_sync.trialRev = rev;
-        syncSave(s_sync);
     }
     // Out of memory leaves it null: the rest of the cycle then posts with the
     // new settings, which is no worse than not pinning at all.
@@ -698,6 +711,14 @@ void setup() {
 
     storeLoad(s_cfg);
     syncLoad(s_sync);
+    if (s_sync.trialRev && s_sync.trialRev != s_cfg.rev) {
+        // Written just before a config save that never happened (a reset
+        // between the two): the config on flash is not the one on trial.
+        LOGF("[cfg] dropping the trial of rev %u: the saved config is rev %u\n",
+                      (unsigned)s_sync.trialRev, (unsigned)s_cfg.rev);
+        s_sync.trialRev = 0;
+        syncSave(s_sync);
+    }
     if (s_sync.trialRev) {
         LOGF("[cfg] rev %u's network settings are on trial\n",
                       (unsigned)s_sync.trialRev);
