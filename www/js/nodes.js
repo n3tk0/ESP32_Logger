@@ -683,7 +683,7 @@ function ndCfgPanelHtml(n) {
       '<div class="kd-fields">' +
         ndField(ctx, "link.ack_window_ms", ndT("nodes.cfgAckWindow"), "int", { min: 1, max: 1000 }) +
         ndField(ctx, "link.rescan_fails", ndT("nodes.cfgRescanFails"), "int", { min: 1, max: 255 }) +
-        ndField(ctx, "link.rescan_min_s", ndT("nodes.cfgRescanMin"), "int", { min: 0 }) +
+        ndField(ctx, "link.rescan_min_s", ndT("nodes.cfgRescanMin"), "int", { min: 300, max: 604800 }) +
       "</div>" +
       (link.next_ssid ? '<p class="nd-ro" style="margin:0">' + esc(ndT("nodes.cfgNetNext", { ssid: link.next_ssid })) + "</p>" : "") +
       '<div class="kd-fields">' +

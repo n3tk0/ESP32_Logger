@@ -450,7 +450,7 @@ static inline bool decodeInto(JsonObjectConst o, NodeConfig& c, uint8_t flags, D
                          "link.ack_window_ms") ||
                 !readInt(lv["rescan_fails"], 0, 255, c.link.rescan_fails, d,
                          "link.rescan_fails") ||
-                !readInt(lv["rescan_min_s"], 0, 2147483647L, c.link.rescan_min_s, d,
+                !readInt(lv["rescan_min_s"], 0, 604800L, c.link.rescan_min_s, d,
                          "link.rescan_min_s") ||
                 !readStr(lv["next_ssid"], c.link.next_ssid, sizeof(c.link.next_ssid), d,
                          "link.next_ssid"))
