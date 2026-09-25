@@ -685,6 +685,10 @@ void ForecastModule::statusJson(JsonObject out) const {
     }
 }
 
+const char* forecastSummary(const ForecastModule::Data& d) {
+    return wmoSummary(d.code);
+}
+
 // ---------------------------------------------------------------------------
 // Dashboard section
 // ---------------------------------------------------------------------------
@@ -701,7 +705,7 @@ void appendForecastSection(String& out) {
     out += F("</div><table><tr><td width=\"56\" class=\"ico\">");
     appendWeatherIcon(out, d.code, kdPx(52));
     out += F("</td><td class=\"fc\">");
-    out += d.summary;
+    out += forecastSummary(d);
     if (isfinite(d.highC) && isfinite(d.lowC)) {
         out += F("<div class=\"fc-t\">");
         out += (int)lroundf(d.highC);

@@ -177,6 +177,12 @@ void appendForecastSection(String& out);
 /// one set when the forecast was fetched. See Period::wday.
 const char* forecastPeriodLabel(const ForecastModule::Period& p);
 
+/// The condition word ("Overcast", "Облачно"), likewise in the language set now.
+/// Data::summary was written on the fetch task, where the language is whatever
+/// the last page rendered left behind — the build default after a boot — so a
+/// Bulgarian panel said "Overcast" until the next fetch after a Bulgarian page.
+const char* forecastSummary(const ForecastModule::Data& d);
+
 /// Draws a stroke-only condition glyph for a WMO code at `px` square.
 /// Exposed for the dashboard; see the note in the .cpp on why the icon is
 /// drawn rather than fetched from the provider.

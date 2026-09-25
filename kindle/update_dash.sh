@@ -2366,11 +2366,21 @@ draw_text() {
     # map, so --invert means the same thing to the eye on a K3 as on a KT2.
     [ -n "$6" ] || return 0
     [ -n "$4" ] || return 0
+    local txt="$6"
+    # NO ARROW REACHES FBINK. The Kindle's book faces have none, and FBInk
+    # draws a missing glyph as an empty box — the tendency arrow was one, and
+    # so was every "→" in the offline hint, which the collector sends and the
+    # reader may have typed into a label. The tendency is drawn by draw_arrow();
+    # an arrow inside a sentence becomes the ASCII the font does have. A case
+    # first, so the strings that carry none — all but one or two — cost no fork.
+    case "$txt" in
+        *'→'*|*'←'*) txt=$(printf '%s' "$txt" | sed 's/→/>/g; s/←/</g') ;;
+    esac
     text_geom "$2" "$3"
     if [ -n "$7" ]; then
-        fb -q -b -h -C BLACK -B WHITE -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$6"
+        fb -q -b -h -C BLACK -B WHITE -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$txt"
     else
-        fb -q -b -O -C "$5" -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$6"
+        fb -q -b -O -C "$5" -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$txt"
     fi
 }
 
@@ -3379,7 +3389,7 @@ redraw_offline() {
     local y2=$(( y + ${OFF_SZ:-26} + 12 ))
     draw_text_reg "${OFF_X:-40}" "$y2" \
                   "${OFF_SUB_SZ:-16}" "GRAY5" \
-                  "${LBL_OFFLINE_HINT:-Check WiFi, or KUAL → Settings → Find collector}"
+                  "${LBL_OFFLINE_HINT:-Check WiFi, or KUAL > Settings > Find collector}"
 
     # ── And the two things that hint could not say ──────────────────────────
     # WHEN IT LAST WORKED, which is the difference between a collector that
@@ -3391,7 +3401,7 @@ redraw_offline() {
     if [ "${TOUCH_READY:-0}" = "1" ] && menu_word settings; then
         hint="$MENU_WORD"
         list_at "${MENU_LBL2:-Find|Next|Battery|Info|Back}" 0
-        [ -n "$LIST_ITEM" ] && hint="$hint → $LIST_ITEM"
+        [ -n "$LIST_ITEM" ] && hint="$hint > $LIST_ITEM"
     fi
     if [ -n "${LAST_OK:-}" ]; then
         if [ -n "$hint" ]; then hint="$hint   ($LAST_OK)"
