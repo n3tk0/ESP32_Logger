@@ -724,8 +724,12 @@ void setup() {
     Serial.println("[node] BENCH BUILD — no deep sleep. Do not run this on a battery.");
 #endif
 
+    // A panic or a brownout starts over too: the state that survived may be
+    // what crashed it, and a kept state would crash it again on every boot.
+    const esp_reset_reason_t why = esp_reset_reason();
     const uint32_t image    = runningImageId();
-    const bool     coldBoot = isColdStart() || s_rtcMagic != RTC_MAGIC ||
+    const bool     coldBoot = isColdStart() || why == ESP_RST_PANIC ||
+                              why == ESP_RST_BROWNOUT || s_rtcMagic != RTC_MAGIC ||
                               s_rtcImage != image || !enbl::valid(s_backlog);
     if (coldBoot) {
         s_rtcMagic         = RTC_MAGIC;
