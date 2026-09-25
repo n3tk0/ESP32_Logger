@@ -1364,11 +1364,15 @@ function ndHoPost(body) {
 }
 
 // For settings.js: how many nodes would have to follow the collector.
+// Resolves null when either list could not be fetched: "no nodes" and "could
+// not find out" must not look alike, or a failed fetch reads as 0 nodes and
+// the collector switches networks without handing them the new one.
 function ndHoCountNodes() {
   return Promise.all([ndFetchEspnow(), ndFetchRemote()]).then(function (res) {
     ndEspnowData = res[0];
     ndRemoteData = res[1];
     ndMerge();
+    if (ndEspnowAvailable === null || ndRemoteAvailable === null) return null;
     return ndList.length;
   });
 }

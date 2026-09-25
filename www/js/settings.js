@@ -914,6 +914,7 @@ function netSaveForm(ev) {
   }
 
   ndHoCountNodes().then(function (n) {
+    if (n === null) return fail("nodes.hoCountFailed");
     if (!n) return plainSave();
     // The nodes are about to be told to trust this network; it has to be
     // one the collector itself can join.
