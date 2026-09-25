@@ -485,6 +485,12 @@ Additions the page relies on (all optional, absent = shown as "—"):
   POST = keep; exactly 16 characters = set; anything else is refused with
   `field: "lmk"`). It exists only on this page's API: never in `EN_MSG_CFG` /
   `EN_MSG_CFG_REPORT` (principle 6), never in the collector's copy.
+- **Clearing a WiFi node secret.** A secret field left empty keeps the saved
+  one (principle 5), so the page offers a Clear button beside each saved
+  `pass` / `token` / `basic_pass` and then sends `""` + `"<key>_set": false`.
+  It does the same for `pass` without the button when the SSID differs from
+  the saved one, or was picked from the scan as an open network, and no new
+  passphrase was typed: the old network's passphrase is never carried over.
 - **`/api/status` on the ESP-NOW node** adds `"paired": bool`, `"node_id"`,
   `"ch"` (the stored link state, since ESP-NOW is off while the page runs)
   and `"batt_v"` (last battery voltage, after divider and trim — the page's
