@@ -9,8 +9,8 @@
 // -----------
 //   query  (node → broadcast, UDP 47810), 37 bytes:
 //       "ESPL?" | nonce[8] | name[16, zero padded] | tag[8]
-//   reply  (collector → the node, unicast), 23 bytes:
-//       "ESPL!" | nonce[8] echoed | http port u16 LE | tag[8]
+//   reply  (collector → the node, unicast), 27 bytes:
+//       "ESPL!" | nonce[8] echoed | http port u16 LE | collector IPv4[4] | tag[8]
 //
 //   tag = first 8 bytes of HMAC-SHA256(key = the ingest token, every byte
 //         before the tag)
@@ -22,7 +22,15 @@
 // has to prove it comes from something holding the ingest token, and the
 // question has to as well, or anyone on the LAN could map every node by name.
 // The nonce, echoed and covered by the reply's tag, stops an old captured
-// reply being replayed at a node that has moved on.
+// reply being replayed at a node that has moved on. The collector's own IPv4
+// address, also under the tag, stops a fresh reply being re-sent from another
+// host on the LAN: the node only believes a reply whose signed address is the
+// one it came from, so the address it adopts is one the token holder named.
+//
+// The 23-byte reply of earlier firmware had no address. Its length is what
+// tells the two apart: each side refuses the other's reply outright, so a
+// node and a collector on different sides of that change simply do not
+// discover each other — the node keeps its configured host and carries on.
 //
 // It is not secrecy: the node's name travels in the clear, as it already does
 // in every ingest POST. And with no token configured on either side the key
@@ -62,13 +70,14 @@ static const size_t   NONCE_LEN = 8;
 static const size_t   NAME_LEN  = 16;   ///< == NODE_NAME_MAX: a full name has no NUL on the wire
 static const size_t   TAG_LEN   = 8;
 static const size_t   QUERY_LEN = MAGIC_LEN + NONCE_LEN + NAME_LEN + TAG_LEN;   // 37
-static const size_t   REPLY_LEN = MAGIC_LEN + NONCE_LEN + 2 + TAG_LEN;          // 23
+static const size_t   IP_LEN    = 4;
+static const size_t   REPLY_LEN = MAGIC_LEN + NONCE_LEN + 2 + IP_LEN + TAG_LEN; // 27
 
 static const char QUERY_MAGIC[] = "ESPL?";
 static const char REPLY_MAGIC[] = "ESPL!";
 
 static_assert(QUERY_LEN == 37, "§3.1: 5 + 8 + 16 + 8");
-static_assert(REPLY_LEN == 23, "§3.1: 5 + 8 + 2 + 8");
+static_assert(REPLY_LEN == 27, "§3.1: 5 + 8 + 2 + 4 + 8");
 static_assert(NAME_LEN == NODE_NAME_MAX, "the query carries a whole node name");
 
 /// tag = HMAC(token, buf[0..signedLen))[0..8)
@@ -142,28 +151,36 @@ static inline bool parseQuery(const uint8_t* buf, size_t len, const char* token,
 /// Collector side: build the reply to a query whose nonce is `nonce`.
 /// `httpPort` is the port the collector's web server (and /api/ingest)
 /// listens on — little-endian on the wire whatever the host's order.
+/// `selfIp` is the collector's IPv4 address on the network the query came
+/// from, in wire order (selfIp[0] is the first octet): the node refuses the
+/// reply unless it arrives from exactly that address.
 static inline bool buildReply(uint8_t out[REPLY_LEN], const uint8_t nonce[NONCE_LEN],
-                              uint16_t httpPort, const char* token, HmacSha256Fn hmac) {
-    if (!out || !nonce) return false;
+                              uint16_t httpPort, const uint8_t selfIp[IP_LEN],
+                              const char* token, HmacSha256Fn hmac) {
+    if (!out || !nonce || !selfIp) return false;
     memcpy(out, REPLY_MAGIC, MAGIC_LEN);
     memcpy(out + MAGIC_LEN, nonce, NONCE_LEN);
     out[MAGIC_LEN + NONCE_LEN]     = (uint8_t)(httpPort & 0xFF);
     out[MAGIC_LEN + NONCE_LEN + 1] = (uint8_t)(httpPort >> 8);
+    memcpy(out + MAGIC_LEN + NONCE_LEN + 2, selfIp, IP_LEN);
     const size_t signedLen = REPLY_LEN - TAG_LEN;
     return computeTag(token, out, signedLen, hmac, out + signedLen);
 }
 
 /// Node side: is `buf` the collector's answer to OUR query (the nonce we
-/// sent), signed with our token? On success writes the HTTP port. The sender's
-/// IP address — which the caller has from the socket — becomes net.host.
+/// sent), signed with our token, and sent from the address it signed?
+/// `fromIp` is the sender's address from the socket, in wire order; on
+/// success it becomes net.host and the HTTP port is written to `portOut`.
 /// A port of 0 is refused: it cannot be the collector's web server.
 static inline bool parseReply(const uint8_t* buf, size_t len,
                               const uint8_t expectNonce[NONCE_LEN], const char* token,
-                              HmacSha256Fn hmac, uint16_t& portOut) {
-    if (!buf || !expectNonce || len != REPLY_LEN) return false;
+                              HmacSha256Fn hmac, const uint8_t fromIp[IP_LEN],
+                              uint16_t& portOut) {
+    if (!buf || !expectNonce || !fromIp || len != REPLY_LEN) return false;
     if (memcmp(buf, REPLY_MAGIC, MAGIC_LEN) != 0) return false;
     if (memcmp(buf + MAGIC_LEN, expectNonce, NONCE_LEN) != 0) return false;
     if (!tagMatches(token, buf, REPLY_LEN - TAG_LEN, hmac)) return false;
+    if (memcmp(buf + MAGIC_LEN + NONCE_LEN + 2, fromIp, IP_LEN) != 0) return false;
     const uint16_t port = (uint16_t)(buf[MAGIC_LEN + NONCE_LEN] |
                                      ((uint16_t)buf[MAGIC_LEN + NONCE_LEN + 1] << 8));
     if (port == 0) return false;

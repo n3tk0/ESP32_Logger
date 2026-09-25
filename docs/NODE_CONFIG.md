@@ -246,11 +246,21 @@ tag = first 8 bytes of HMAC-SHA256(ingest token, all preceding bytes)
 The collector, if the tag verifies against its INGEST_TOKEN, unicasts back:
 
 ```
-"ESPL!" (5) | nonce echoed (8) | http port (uint16 LE) | tag (8, same scheme)
+"ESPL!" (5) | nonce echoed (8) | http port (uint16 LE) | collector IPv4 (4) | tag (8, same scheme)
 ```
 
-The node takes the sender IP as the new `net.host`, saves it, and marks it
-`local: true` so the collector learns the change. HMAC-SHA256 comes from
+The IPv4 field is the collector's own address on the network the query came
+in on (its STA address, or its AP address for a node on the collector's AP),
+first octet first. The node refuses a reply whose signed address is not the
+address the reply came from, so a host on the LAN cannot re-send a captured
+reply from its own IP and be taken for the collector. The node then takes
+that address as the new `net.host`, saves it, and marks it `local: true` so
+the collector learns the change.
+
+The reply is 27 bytes. Firmware from before the address field sent and
+expected a 23-byte reply; each side refuses the other's by length, so an old
+node and a new collector (or the reverse) do not discover each other — the
+node keeps its configured `host` and keeps retrying it. Update both. HMAC-SHA256 comes from
 `bearssl` on the ESP8266 and `mbedtls` on the collector.
 
 Both packets are built and checked by `src/nodecfg/UdpDiscovery.h`
@@ -487,6 +497,12 @@ Additions the page relies on (all optional, absent = shown as "—"):
   POST = keep; exactly 16 characters = set; anything else is refused with
   `field: "lmk"`). It exists only on this page's API: never in `EN_MSG_CFG` /
   `EN_MSG_CFG_REPORT` (principle 6), never in the collector's copy.
+- **Clearing a WiFi node secret.** A secret field left empty keeps the saved
+  one (principle 5), so the page offers a Clear button beside each saved
+  `pass` / `token` / `basic_pass` and then sends `""` + `"<key>_set": false`.
+  It does the same for `pass` without the button when the SSID differs from
+  the saved one, or was picked from the scan as an open network, and no new
+  passphrase was typed: the old network's passphrase is never carried over.
 - **`/api/status` on the ESP-NOW node** adds `"paired": bool`, `"node_id"`,
   `"ch"` (the stored link state, since ESP-NOW is off while the page runs)
   and `"batt_v"` (last battery voltage, after divider and trim — the page's

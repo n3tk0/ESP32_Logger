@@ -197,9 +197,19 @@ static void discoveryTick() {
         char    name[ud::NAME_LEN + 1];
         if (!ud::parseQuery(buf, (size_t)n, INGEST_TOKEN, ud::udpdiscHmacSha256, nonce, name))
             continue;
+        // §3.1: the reply names the address it is sent from — ours on the
+        // network the query came in on (our own AP, or the STA side).
+        const IPAddress peer(from.sin_addr.s_addr);
+        IPAddress self = WiFi.localIP();
+        if ((WiFi.getMode() & WIFI_AP) && WiFi.softAPIP() != IPAddress((uint32_t)0)) {
+            const uint32_t m = (uint32_t)WiFi.softAPSubnetMask();
+            if (((uint32_t)peer & m) == ((uint32_t)WiFi.softAPIP() & m)) self = WiFi.softAPIP();
+        }
+        if ((uint32_t)self == 0) continue;
+        const uint8_t selfIp[ud::IP_LEN] = { self[0], self[1], self[2], self[3] };
         uint8_t reply[ud::REPLY_LEN];
         // Port 80: the web server (and /api/ingest) is AsyncWebServer server(80).
-        if (ud::buildReply(reply, nonce, 80, INGEST_TOKEN, ud::udpdiscHmacSha256))
+        if (ud::buildReply(reply, nonce, 80, selfIp, INGEST_TOKEN, ud::udpdiscHmacSha256))
             lwip_sendto(s_udp, reply, sizeof(reply), 0, (sockaddr*)&from, fl);
     }
 }

@@ -230,7 +230,11 @@ public:
     /// The outcome of this cycle's association attempt on `tried`.
     uint8_t wifiResult(bool connected, Net tried) {
         if (!connected) {
-            if (_wifiFails < 255) _wifiFails++;
+            // A u8 that stuck at 255 would freeze the alternation on one
+            // network forever (after ~a day of failures at a 60 s interval).
+            // Step back and forth between 254 and 255 instead: the count stays
+            // far above NEXT_AFTER_FAILS and its parity keeps flipping.
+            _wifiFails = (_wifiFails == 255) ? 254 : (uint8_t)(_wifiFails + 1);
             return LA_NONE;
         }
         _wifiFails = 0;
