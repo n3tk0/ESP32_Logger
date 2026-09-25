@@ -683,7 +683,7 @@ function ndCfgPanelHtml(n) {
       '<div class="kd-fields">' +
         ndField(ctx, "link.ack_window_ms", ndT("nodes.cfgAckWindow"), "int", { min: 1, max: 1000 }) +
         ndField(ctx, "link.rescan_fails", ndT("nodes.cfgRescanFails"), "int", { min: 1, max: 255 }) +
-        ndField(ctx, "link.rescan_min_s", ndT("nodes.cfgRescanMin"), "int", { min: 0 }) +
+        ndField(ctx, "link.rescan_min_s", ndT("nodes.cfgRescanMin"), "int", { min: 300, max: 604800 }) +
       "</div>" +
       (link.next_ssid ? '<p class="nd-ro" style="margin:0">' + esc(ndT("nodes.cfgNetNext", { ssid: link.next_ssid })) + "</p>" : "") +
       '<div class="kd-fields">' +
@@ -1364,11 +1364,15 @@ function ndHoPost(body) {
 }
 
 // For settings.js: how many nodes would have to follow the collector.
+// Resolves null when either list could not be fetched: "no nodes" and "could
+// not find out" must not look alike, or a failed fetch reads as 0 nodes and
+// the collector switches networks without handing them the new one.
 function ndHoCountNodes() {
   return Promise.all([ndFetchEspnow(), ndFetchRemote()]).then(function (res) {
     ndEspnowData = res[0];
     ndRemoteData = res[1];
     ndMerge();
+    if (ndEspnowAvailable === null || ndRemoteAvailable === null) return null;
     return ndList.length;
   });
 }

@@ -218,10 +218,20 @@ String urlEncode(const String& v) {
 // Centralized validation for sensor pins that integrates USB CDC detection
 // ============================================================================
 
+// Highest GPIO number on the chip this image is built for. The S3 numbers its
+// pads 0-21 and 26-48 (48 is the DevKitC-1 RGB LED, a real pin), the C3 0-21.
+// Board profiles narrow this further (maxGpio, absentPins); this is only the
+// silicon bound, so it must never be below a profile's maxGpio.
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+static constexpr int kChipMaxGpio = 21;
+#else
+static constexpr int kChipMaxGpio = 48;
+#endif
+
 bool validatePin(int pin, const String& usage) {
-    // Check for valid pin range. ESP32-C3 has 22 GPIO (0-21), S3 has 48 (0-47).
-    // Note: validateAttachPin() performs stricter checks against the board profile's maxGpio
-    if (pin < 0 || pin >= 48) {
+    // Chip range only. validateAttachPin() then checks the board profile's
+    // maxGpio, strap/flash/reserved lists.
+    if (pin < 0 || pin > kChipMaxGpio) {
         Serial.printf("[validatePin] INVALID: Pin %d out of range (usage: %s)\n", pin, usage.c_str());
         return false;
     }

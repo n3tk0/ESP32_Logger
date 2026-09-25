@@ -48,6 +48,13 @@ static PortalLinkStatus  s_linkStatus;
 static uint32_t s_lastPost   = 0;
 static bool     s_postedOnce = false;
 
+/// How many configured sensor entries answered at the last nodeSensorsBegin(),
+/// and the cycles since. One that failed at boot while another works is
+/// retried every SENSOR_RETRY_CYCLES cycles, not only once all are down.
+static const uint8_t SENSOR_RETRY_CYCLES = 5;
+static int      s_sensorsOk    = 0;
+static uint8_t  s_sensorCycles = 0;
+
 static bool     s_portalBgRunning = false;
 
 /// §3: the full config goes with the first POST after boot (until one
@@ -122,9 +129,13 @@ static bool runDiscovery() {
             uint8_t buf[REPLY_LEN + 1];
             const int n = udp.read(buf, sizeof(buf));
             uint16_t p = 0;
+            // The reply must come from the address it signed (§3.1): a host
+            // re-sending a captured reply from its own IP is refused here.
+            const IPAddress rip = udp.remoteIP();
+            const uint8_t ripb[4] = { rip[0], rip[1], rip[2], rip[3] };
             if (n > 0 && parseReply(buf, (size_t)n, nonce, s_cfg.net.token,
-                                    udpdiscHmacSha256, p)) {
-                from  = udp.remoteIP();
+                                    udpdiscHmacSha256, ripb, p)) {
+                from  = rip;
                 port  = p;
                 found = true;
             }
@@ -331,19 +342,32 @@ static void applyCollectorConfig(JsonVariantConst doc, uint16_t rev) {
     }
 
     const uint8_t change = NodeSync::classifyChange(s_cfg, w->cfg);
+    const uint16_t prevTrial = s_sync.trialRev;
+    if (change & NodeSync::CH_NET_TRIAL) {
+        // §4.7: this config decides whether the node can reach anything. Run
+        // it on trial; the backup storeSave() takes below is what a rollback
+        // restores. The trial is written FIRST: a crash between the two
+        // writes then leaves a trial naming a rev the saved config is not,
+        // which setup() drops — never a new network config with no way back.
+        s_sync.trialRev = rev;
+        if (!syncSave(s_sync)) {
+            s_sync.trialRev = prevTrial;
+            LOGLN("[cfg] could not record the trial; not applying the collector's config");
+            delete w;
+            return;
+        }
+    }
     if (!storeSave(w->cfg, !s_link.onTrial())) {
         // Not refused — the config is fine, the flash is not. Nothing is
         // reported, so the collector keeps offering it and the next cycle
         // tries again.
         LOGLN("[cfg] could not save the collector's config");
+        if (s_sync.trialRev != prevTrial) {
+            s_sync.trialRev = prevTrial;
+            syncSave(s_sync);
+        }
         delete w;
         return;
-    }
-    if (change & NodeSync::CH_NET_TRIAL) {
-        // §4.7: this config decides whether the node can reach anything. Run
-        // it on trial; the backup taken just now is what a rollback restores.
-        s_sync.trialRev = rev;
-        syncSave(s_sync);
     }
     // Out of memory leaves it null: the rest of the cycle then posts with the
     // new settings, which is no worse than not pinning at all.
@@ -687,6 +711,14 @@ void setup() {
 
     storeLoad(s_cfg);
     syncLoad(s_sync);
+    if (s_sync.trialRev && s_sync.trialRev != s_cfg.rev) {
+        // Written just before a config save that never happened (a reset
+        // between the two): the config on flash is not the one on trial.
+        LOGF("[cfg] dropping the trial of rev %u: the saved config is rev %u\n",
+                      (unsigned)s_sync.trialRev, (unsigned)s_cfg.rev);
+        s_sync.trialRev = 0;
+        syncSave(s_sync);
+    }
     if (s_sync.trialRev) {
         LOGF("[cfg] rev %u's network settings are on trial\n",
                       (unsigned)s_sync.trialRev);
@@ -727,7 +759,7 @@ void setup() {
                   (unsigned)s_cfg.interval_s, (unsigned)s_cfg.rev,
                   s_cfg.local ? ", local" : "");
 
-    nodeSensorsBegin(s_cfg);
+    s_sensorsOk = nodeSensorsBegin(s_cfg);
     LOGF("sensors: %s\n", nodeSensorsDescribe());
     ensureWifi();
 }
@@ -762,7 +794,18 @@ void loop() {
     // The probe needs no network and costs a few milliseconds, so it goes
     // first and unconditionally; the network follows and is likewise not
     // conditional on the sensor.
-    if (!nodeSensorsReady()) nodeSensorsBegin(s_cfg);
+    //
+    // With every entry down it runs each cycle. With only some down (a DS18B20
+    // plugged in after boot beside a working BME280) it runs every
+    // SENSOR_RETRY_CYCLES: nodeSensorsBegin() skips the entries that already
+    // answered, so a retry costs only the missing ones' probes.
+    if (!nodeSensorsReady() ||
+        (s_sensorsOk < (int)s_cfg.sensor_count && ++s_sensorCycles >= SENSOR_RETRY_CYCLES)) {
+        s_sensorCycles = 0;
+        const int was = s_sensorsOk;
+        s_sensorsOk = nodeSensorsBegin(s_cfg);
+        if (s_sensorsOk != was) LOGF("sensors: %s\n", nodeSensorsDescribe());
+    }
 
     // MEASURED AND REMEMBERED BEFORE THE NETWORK IS EVEN LOOKED AT. The one
     // thing the backlog exists for — the cycle where the router is down — must

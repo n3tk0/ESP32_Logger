@@ -333,7 +333,7 @@ static void test_the_largest_valid_configs_fit_one_kilobyte() {
     a.rev = 65535;
     a.local = true;
     a.altitude_m = -432.25f;
-    a.link.rescan_min_s = 2000000000u;
+    a.link.rescan_min_s = RESCAN_MIN_S_MAX;
     a.batt.divider = 3.14159f;
     a.batt.trim = 0.987654f;
     const uint8_t pins[8] = {0, 1, 3, 4, 5, 8, 10, 20};
@@ -761,11 +761,27 @@ static void test_the_rescan_gate_is_counted_in_wakes() {
     CHECK(due(9, 60, 3, 3600, 60));
     // A longer interval means fewer wakes to the hour.
     CHECK(due(9, 12, 3, 3600, 300));
-    // rescan_min_s 0 = no ceiling; rescan_fails 0 is treated as 1; interval 0
-    // as 60 rather than a division by zero.
-    CHECK(due(1, 0, 1, 0, 60));
-    CHECK(due(1, 0, 0, 0, 60));
+    // rescan_fails 0 is treated as 1; interval 0 as 60 rather than a
+    // division by zero.
+    CHECK(due(1, 60, 0, 3600, 60));
     CHECK(due(1, 60, 1, 3600, 0));
+}
+
+static void test_the_rescan_ceiling_is_clamped() {
+    using enrescan::spaced;
+    // rescan_min_s 0 is not "every wake": the validator's floor of five
+    // minutes holds here too, so a stray 0 cannot cost a scan per wake.
+    CHECK(!spaced(0, 0, 60));
+    CHECK(!spaced(4, 0, 60));
+    CHECK(spaced(5, 0, 60));
+    // A ceiling past what the u16 wake counter can count would mean never
+    // again: capped at a week, and at 0xFFFF wakes.
+    CHECK(spaced(10080, 0xFFFFFFFFu, 60));          // a week at one a minute
+    CHECK(!spaced(10079, 0xFFFFFFFFu, 60));
+    CHECK(spaced(0xFFFF, 0xFFFFFFFFu, 1));          // the saturated counter
+    CHECK(spaced(0xFFFF, enrescan::MIN_S_CEILING, 1));
+    // The "never scanned" start value passes any gate.
+    CHECK(enrescan::due(3, 0xFFFF, 3, enrescan::MIN_S_CEILING, 10));
 }
 
 static void test_what_a_scan_decides() {
@@ -805,6 +821,7 @@ int main() {
     RUN(test_what_counts_as_the_answer_to_a_report);
     RUN(test_backoff_doubles_to_an_hour_and_resets_on_success);
     RUN(test_the_rescan_gate_is_counted_in_wakes);
+    RUN(test_the_rescan_ceiling_is_clamped);
     RUN(test_what_a_scan_decides);
     return SUMMARY();
 }

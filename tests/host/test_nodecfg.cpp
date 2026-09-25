@@ -502,6 +502,24 @@ static void test_battery_and_link_ranges() {
     e.link.ack_window_ms = 30;
     e.link.rescan_fails = 0;
     REJECT(e, "link.rescan_fails", nullptr);
+    e.link.rescan_fails = 3;
+    // 0 would scan and sweep on every failing wake; past a week the node's
+    // wake counter could never reach the ceiling.
+    e.link.rescan_min_s = 0;
+    REJECT(e, "link.rescan_min_s", nullptr);
+    e.link.rescan_min_s = RESCAN_MIN_S_MIN - 1;
+    REJECT(e, "link.rescan_min_s", nullptr);
+    e.link.rescan_min_s = RESCAN_MIN_S_MAX + 1;
+    REJECT(e, "link.rescan_min_s", nullptr);
+    e.link.rescan_min_s = RESCAN_MIN_S_MIN;
+    ACCEPT(e);
+    e.link.rescan_min_s = RESCAN_MIN_S_MAX;
+    ACCEPT(e);
+    // The decoder refuses what no wake arithmetic should ever see.
+    NodeConfig d = espnowBase();
+    CHECK(!dec("{\"link\":{\"rescan_min_s\":2000000000}}", d, 0));
+    CHECK(dec("{\"link\":{\"rescan_min_s\":604800}}", d, 0));
+    CHECK_EQ((long)d.link.rescan_min_s, 604800L);
 }
 
 static void test_net_rules() {

@@ -456,7 +456,9 @@ anything at all. So it runs **on trial**: if no POST is answered within **5
 cycles** (discovery included), the node restores `/config.prev.json`,
 restarts on the old settings and reports `cfg_error` "rolled back: no
 collector on new settings". The trial survives a restart (`/sync.json`); a
-save on the node's own page ends it.
+save on the node's own page ends it. The trial is written before the new
+config, so a reset between the two writes never leaves new network settings
+with no trial; a trial whose rev is not the saved config's is dropped at boot.
 
 Five cycles are counted, not timed. When what the new settings got wrong is
 the WiFi itself, each of those cycles is three association attempts and then

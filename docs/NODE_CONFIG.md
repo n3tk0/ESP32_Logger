@@ -17,6 +17,10 @@ document wins and the code is the bug.
    65535 it wraps to 1, and the collector orders revs on that circle). The node
    holds its *applied* config and the `rev` it came from. The UI shows
    `applied` / `pending (applied N → desired M)` / `rejected: <reason>`.
+   A new desired rev is one past both the desired rev and the highest rev
+   the node has been told or said it runs (a local report the collector
+   told a rev but could not keep, an ACK past the desired rev), so a node
+   never already holds the rev of an edit it has not seen.
 3. **The node validates everything it is sent**, with the same shared code the
    collector and the node page use (`src/nodecfg/`). A rejected config is
    reported with a reason and the node keeps running its previous config.
@@ -157,7 +161,7 @@ when the validator was written:
   pulse `per_pulse > 0` and `debounce_us` ≤ 1 000 000, `board` a known board
   of the chip, `altitude_m` −500..9000;
 - ESP-NOW: `batt.divider` 1..20, `batt.trim` 0.5..1.5, `link.ack_window_ms`
-  5..1000, `link.rescan_fails` ≥ 1;
+  5..1000, `link.rescan_fails` ≥ 1, `link.rescan_min_s` 300..604 800 (7 days);
 - WiFi: `net.ssid` and `net.host` required, `net.port` ≥ 1, `net.pass` and
   `net.next.pass` empty (open network) or at least 8 characters;
 - `lmk` (ESP-NOW page) empty or exactly 16 characters.
@@ -167,7 +171,7 @@ metrics, pins, transport sections). `field` is at most 23 characters and
 `reason` at most 47, so both fit a CFG_ACK unchanged. Field paths used:
 `name`, `interval_s`, `altitude_m`, `board`, `i2c.sda`, `i2c.scl`, `sensors`
 (count/budget), `sensors[N].<type|addr|pin|count|metric|rx|tx|mode|per_pulse|debounce_us>`,
-`batt.pin|divider|trim`, `link.ack_window_ms|rescan_fails`,
+`batt.pin|divider|trim`, `link.ack_window_ms|rescan_fails|rescan_min_s`,
 `net.ssid|pass|host|port|token|basic_user|basic_pass|next.ssid|next.pass`, `lmk`.
 A sensor that is not allowed to sleep on a sleeping ESP-NOW node is reported
 at `sensors[N].type`.
@@ -242,11 +246,21 @@ tag = first 8 bytes of HMAC-SHA256(ingest token, all preceding bytes)
 The collector, if the tag verifies against its INGEST_TOKEN, unicasts back:
 
 ```
-"ESPL!" (5) | nonce echoed (8) | http port (uint16 LE) | tag (8, same scheme)
+"ESPL!" (5) | nonce echoed (8) | http port (uint16 LE) | collector IPv4 (4) | tag (8, same scheme)
 ```
 
-The node takes the sender IP as the new `net.host`, saves it, and marks it
-`local: true` so the collector learns the change. HMAC-SHA256 comes from
+The IPv4 field is the collector's own address on the network the query came
+in on (its STA address, or its AP address for a node on the collector's AP),
+first octet first. The node refuses a reply whose signed address is not the
+address the reply came from, so a host on the LAN cannot re-send a captured
+reply from its own IP and be taken for the collector. The node then takes
+that address as the new `net.host`, saves it, and marks it `local: true` so
+the collector learns the change.
+
+The reply is 27 bytes. Firmware from before the address field sent and
+expected a 23-byte reply; each side refuses the other's by length, so an old
+node and a new collector (or the reverse) do not discover each other — the
+node keeps its configured `host` and keeps retrying it. Update both. HMAC-SHA256 comes from
 `bearssl` on the ESP8266 and `mbedtls` on the collector.
 
 Both packets are built and checked by `src/nodecfg/UdpDiscovery.h`
@@ -277,7 +291,11 @@ bytes after the name's first NUL is refused; a reply with port 0 is refused.
 3. `GET /api/nodes/handover` →
    `{"active":true,"ssid":"new","ready":["w:balcony"],"pending":["e:3"],"offline":["w:attic"]}`.
    A node is *ready* when its `applied_rev` ≥ the handover rev; *offline* when
-   the collector's own offline rule says so.
+   the collector's own offline rule says so. A local edit a node reports
+   while the handover is active is adopted with the next network kept (the
+   report has none, or an old one); unless the node already holds it, the
+   collector tells the node its edit's rev as usual, bumps once more to send
+   it the next network, and that rev becomes the node's handover rev.
 4. The collector switches (saves its network config and restarts WiFi) when
    every non-offline node is ready, or on `{"action":"switch"}`. `{"action":"cancel"}`
    clears `next` on all nodes (another rev bump).
@@ -289,8 +307,11 @@ bytes after the name's first NUL is refused; a reply with port 0 is refused.
 6. ESP-NOW node: it never needed the password. `link.next_ssid` is tried by
    `linkFindChannel()` when the stored SSID/BSSID is not on the air (or is
    still up on the very channel the node is failing on while `next_ssid` is
-   heard elsewhere — the old network need not go away). On success it is
-   promoted, the old SSID becomes `next_ssid`, and `local` is set. And the
+   heard elsewhere — the old network need not go away). Success means the
+   collector answers a signed DISCOVER on the channel `next_ssid` was heard
+   on; only then is it promoted, the old SSID becomes `next_ssid`, and
+   `local` is set. A network on the air with no collector answering is not
+   adopted, and the next scan looks again. And the
    collector now answers a signed DISCOVER **from a MAC already in its node
    table even when no pairing window is open**, so a node that slept through
    the handover finds it on its hourly sweep.
@@ -332,7 +353,8 @@ unknown types in `espnowValidate()`.
 - `EN_MSG_CFG_ACK = 7` (node → collector): `magic ver type nodeId | rev u16 |
   status u8 (0 ok, 1 rejected) | field[24] | reason[48]`.
 - `EN_MSG_CFG_REPORT = 8` (node → collector): same framing as `EN_MSG_CFG`
-  (`rev` = node's current rev), sent on the first wake after boot and while
+  (`rev` = node's current rev), sent on the first wake after boot, after the
+  node pairs again (a sweep, a handover, `EN_ACK_REDISCOVER`) and while
   `local == true`. The collector reassembles by (nodeId, rev, total) and
   answers the last chunk of EVERY complete report with a CFG with
   `total == 0`:
@@ -475,6 +497,12 @@ Additions the page relies on (all optional, absent = shown as "—"):
   POST = keep; exactly 16 characters = set; anything else is refused with
   `field: "lmk"`). It exists only on this page's API: never in `EN_MSG_CFG` /
   `EN_MSG_CFG_REPORT` (principle 6), never in the collector's copy.
+- **Clearing a WiFi node secret.** A secret field left empty keeps the saved
+  one (principle 5), so the page offers a Clear button beside each saved
+  `pass` / `token` / `basic_pass` and then sends `""` + `"<key>_set": false`.
+  It does the same for `pass` without the button when the SSID differs from
+  the saved one, or was picked from the scan as an open network, and no new
+  passphrase was typed: the old network's passphrase is never carried over.
 - **`/api/status` on the ESP-NOW node** adds `"paired": bool`, `"node_id"`,
   `"ch"` (the stored link state, since ESP-NOW is off while the page runs)
   and `"batt_v"` (last battery voltage, after divider and trim — the page's

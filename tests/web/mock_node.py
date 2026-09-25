@@ -17,7 +17,8 @@ driver that passes against that has tested what ships.
 
 Behaviour worth knowing when reading a driver:
   * GET never returns a secret: `pass`, `token`, `basic_pass`, `lmk` are ""
-    plus `<field>_set`. A POSTed "" keeps the stored value.
+    plus `<field>_set`. A POSTed "" keeps the stored value; "" with
+    `<field>_set: false` clears it.
   * POST /api/config validates a few of the shared rules the real node
     enforces (forbidden pin, pin used twice, metric budget, name, interval,
     sleep-unsafe sensor, LMK length) and answers 400
@@ -234,13 +235,14 @@ class Node:
         # Read-only keys are the node's to say, not the page's.
         body = {k: v for k, v in body.items() if k not in ("rev", "transport", "hw", "fw", "local")}
         merge(merged, body)
-        for path in SECRETS[self.transport]:       # "" = keep the stored one
+        for path in SECRETS[self.transport]:       # "" = keep, "" + _set:false = clear
             parts = path.split(".")
             new, old = merged, self.cfg
             for p in parts[:-1]:
                 new, old = new.get(p, {}), old.get(p, {})
             if new.get(parts[-1], "") == "":
-                new[parts[-1]] = old.get(parts[-1], "")
+                clear = new.get(parts[-1] + "_set") is False
+                new[parts[-1]] = "" if clear else old.get(parts[-1], "")
             new.pop(parts[-1] + "_set", None)
         err = self.validate(merged)
         if err:

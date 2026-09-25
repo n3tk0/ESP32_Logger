@@ -183,8 +183,10 @@ with sync_playwright() as p:
 
     # ── the forecast's refresh button ────────────────────────────────────────
     # A panel under the form: provider, age, failures, and a button that asks
-    # /kindle/forecast and then polls the module until fetchedAt moves.
-    urllib.request.urlopen(BASE + "/__mock/forecast?reset=1").read()
+    # /kindle/forecast and then polls the module for as long as it says the
+    # fetch is pending. Three pending reads is ~6 s: past the first look, so a
+    # page that stopped at the first "not updated yet" fails here.
+    urllib.request.urlopen(BASE + "/__mock/forecast?reset=1&polls=3").read()
     # The wifi form above was left dirty on purpose; leaving it asks first.
     pg.once("dialog", lambda d: d.accept())
     fc.click()
@@ -197,6 +199,9 @@ with sync_playwright() as p:
           % panel[-120:].replace("\n", " "))
     btn.click()
     pg.wait_for_timeout(3500)
+    check(btn.is_disabled() and "Forecast updated." not in pg.inner_text("body"),
+          "while the collector says the fetch is pending, the page keeps waiting")
+    pg.wait_for_timeout(5000)
     msg = pg.locator("#settings_modules").inner_text() if pg.locator("#settings_modules").count() else pg.inner_text("body")
     check("Forecast updated." in msg, "a refresh that lands says so")
     check("0 min ago" in host.inner_text(), "and the age row moves to the new fetch")
@@ -204,6 +209,14 @@ with sync_playwright() as p:
     pg.wait_for_timeout(800)
     msg = pg.inner_text("body")
     check("Try again in 57 s" in msg, "a second press inside the minute is told to wait")
+    # A collector in AP mode, or with its WiFi down, queues nothing and says so.
+    urllib.request.urlopen(BASE + "/__mock/forecast?reset=1&offline=1").read()
+    btn.click()
+    pg.wait_for_timeout(800)
+    msg = pg.inner_text("body")
+    check("not connected to a network" in msg and not btn.is_disabled(),
+          "an offline collector is named as offline, not as an update")
+    urllib.request.urlopen(BASE + "/__mock/forecast?reset=1").read()
 
     # ── a failure names itself ──────────────────────────────────────────────
     # Each of these used to render the same sentence with an empty console.

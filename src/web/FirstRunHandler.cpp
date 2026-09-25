@@ -12,6 +12,7 @@
 #include "../managers/ConfigManager.h"
 #include "../utils/AtomicWrite.h"
 #include "../utils/JsonResponse.h"
+#include "../modules/UsbCdcModule.h"  // usbCdc: live USB D-/D+ lock
 #include "../pipeline/DataPipeline.h"   // fsMutex
 
 namespace {
@@ -72,6 +73,14 @@ void handleGetBoardProfiles(AsyncWebServerRequest* req) {
         };
         fill("strapPins",    p->strapPins);
         fill("usbPins",      p->usbPins);
+        // The profiles list no USB pins: whether D-/D+ are taken depends on
+        // this build's USB CDC, which validatePin() checks live. Report the
+        // live answer so the pages mark them instead of showing them free.
+        // (Every profile's own usbPins list is empty, so nothing repeats.)
+        JsonArray usb = o["usbPins"];
+        for (int g = 0; g <= p->maxGpio; g++) {
+            if (usbCdc.isUsbPinLocked(g)) usb.add(g);
+        }
         fill("flashPins",    p->flashPins);
         fill("reservedPins", p->reservedPins);
         fill("absentPins",   p->absentPins);

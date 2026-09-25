@@ -74,6 +74,16 @@ static inline bool revAtOrPast(uint16_t a, uint16_t b) {
     return (int16_t)(uint16_t)(a - b) >= 0;
 }
 
+/// The rev a new desired config gets: one past both the desired rev and
+/// `told`, the highest rev the node is known to have been told or to run.
+/// The two part when the store could not keep what the node was told (a
+/// local report refused, or missed) or an ACK names a rev past the desired
+/// one: reusing a rev the node already holds would have it answer "up to
+/// date" and the edit be marked applied without ever reaching it.
+static inline uint16_t revAfter(uint16_t desired, uint16_t told) {
+    return nextRev(revAtOrPast(desired, told) ? desired : told);
+}
+
 /// What the status becomes once the node says it runs `applied`.
 ///
 /// A node that caught up is applied, whatever it was. One that is still
@@ -155,6 +165,36 @@ static inline void filePath(char out[PATH_CAP], bool espnow, const char* name, u
     if (espnow) nodecfg::strAppendUint(out, PATH_CAP, id);
     else        nodecfg::strAppend(out, PATH_CAP, name);
     nodecfg::strAppend(out, PATH_CAP, ".json");
+}
+
+/// Longest file name in /nodes/ that can be a node's: "w_" + 16 + ".json".
+static const size_t FILE_NAME_CAP = 24;
+
+/// The node a /nodes/ file name ("w_balcony.json", "e_3.json") belongs to.
+/// Refuses everything else: handover.json, and a leftover "*.json.tmp" of an
+/// interrupted write — whose name must not be cut to fit a buffer first, or
+/// a 16-letter node's "w_<name>.json.tmp" reads as its "w_<name>.json".
+static inline bool keyFromFileName(const char* fname, bool& espnow,
+                                   char name[nodecfg::NODE_NAME_MAX + 1], uint8_t& id) {
+    if (!fname) return false;
+    const size_t len = strlen(fname);
+    if (len < 8 || len >= FILE_NAME_CAP || strcmp(fname + len - 5, ".json") != 0) return false;
+    char key[FILE_NAME_CAP];
+    memcpy(key, fname, len - 5);
+    key[len - 5] = '\0';
+    if (key[1] != '_') return false;
+    key[1] = ':';
+    return parseKey(key, espnow, name, id);
+}
+
+/// Is a WiFi node posting as `posted` the one whose config is filed under
+/// another name? It is when that is the name the collector wants it to have
+/// (`dname`, the desired name) or the one it was last sent in a full reply
+/// (`sent`): a second rename before the node's next POST changes the first
+/// but not what the node already applied.
+static inline bool renamedTo(const char* posted, const char* dname, const char* sent) {
+    return validName(posted) &&
+           (strcmp(dname, posted) == 0 || (sent && strcmp(sent, posted) == 0));
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +413,29 @@ enum : uint8_t { HO_READY = 0, HO_PENDING = 1, HO_OFFLINE = 2 };
 static inline uint8_t hoClassify(bool haveEntry, uint16_t applied, uint16_t hoRev, bool offline) {
     if (haveEntry && hoRev && revAtOrPast(applied, hoRev)) return HO_READY;
     return offline ? HO_OFFLINE : HO_PENDING;
+}
+
+/// A node's local edit reported during a handover (§4) is adopted over the
+/// desired config, and the node's report has no next network — or an old
+/// one. `c` is that adopted config and `before` the desired one it replaces:
+/// the next network is put back, since it is the handover's and not the
+/// node's (like an edit on the Nodes page). Returns true when the node does
+/// not already hold it, so the caller must send it in a new rev — and count
+/// the node ready only once it runs that one. A WiFi node already on
+/// `hoSsid` (it promoted next itself) needs nothing.
+static inline bool hoKeepNext(nodecfg::NodeConfig& c, const nodecfg::NodeConfig& before,
+                              const char* hoSsid) {
+    if (c.transport == nodecfg::Transport::EspNow) {
+        if (strcmp(c.link.next_ssid, before.link.next_ssid) == 0) return false;
+        nodecfg::copyStr(c.link.next_ssid, sizeof(c.link.next_ssid), before.link.next_ssid);
+        return true;
+    }
+    if (hoSsid && hoSsid[0] && strcmp(c.net.ssid, hoSsid) == 0) return false;
+    if (strcmp(c.net.next.ssid, before.net.next.ssid) == 0 &&
+        strcmp(c.net.next.pass, before.net.next.pass) == 0)
+        return false;
+    c.net.next = before.net.next;
+    return true;
 }
 
 /// Least time between start and an automatic switch, so the page that

@@ -235,3 +235,6 @@ AUTO_FIND=1
 #
 # The two fixed choices are also how you see the other page from a desk.
 LAYOUT=auto
+
+# Which upgrades this file has had. Written by the dashboard; leave it alone.
+CONF_VER=2

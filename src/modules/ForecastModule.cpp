@@ -311,9 +311,12 @@ void ForecastModule::tick(uint32_t nowMs) {
     if (_lastAttempt != 0 && (nowMs - _lastAttempt) < _intervalMs &&
         !_refreshRequested) return;
     _lastAttempt = nowMs ? nowMs : 1;
+    _fetching = true;
     _refreshRequested = false;
 
-    if (_fetch()) {
+    const bool ok = _fetch();
+    _fetching = false;
+    if (ok) {
         _failures = 0;
     } else {
         _failures++;
@@ -330,6 +333,9 @@ ForecastModule::Refresh ForecastModule::requestRefresh(uint32_t nowMs,
                                                        uint32_t& waitS) {
     waitS = 0;
     if (!isEnabled() || (_lat == 0.0f && _lon == 0.0f)) return REFRESH_OFF;
+    // Same gate as tick(): in AP mode, or with the station link down, the
+    // export task skips the fetch, so a raised flag would only sit there.
+    if (WiFi.status() != WL_CONNECTED) return REFRESH_OFFLINE;
     constexpr uint32_t MIN_GAP_MS = 60000UL;
     const uint32_t last = _lastAttempt;
     if (last != 0 && (nowMs - last) < MIN_GAP_MS) {
@@ -654,7 +660,8 @@ void ForecastModule::statusJson(JsonObject out) const {
     out["valid"]     = d.valid;
     out["fetchedAt"] = d.fetchedAt;
     out["failures"]  = _failures;
-    out["pending"]   = _refreshRequested;
+    // Queued OR in flight: the pages poll this until it drops.
+    out["pending"]   = refreshPending();
     #ifdef FEATURE_KINDLE_DASHBOARD
     // Where the refresh button posts. Only /kindle serves it, so a build
     // without the dashboard leaves the key out and the page shows no button.

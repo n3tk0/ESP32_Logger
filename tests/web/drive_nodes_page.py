@@ -551,8 +551,21 @@ with sync_playwright() as p:
     mock = pg.evaluate("fetch('/__mock/nodes').then(function(r){return r.json()})")
     check(mock["handover"].get("switched") is True, "and the collector was told to switch")
 
-    # No nodes at all: exactly the old behaviour — save and restart.
+    # A node list that cannot be fetched is not "no nodes": nothing is saved,
+    # and the page says why.
     pg.route("**/api/espnow/status", lambda r: r.fulfill(status=200, content_type="application/json", body='{"nodes":[]}'))
+    pg.route("**/api/remote/status", lambda r: r.fulfill(status=500, body="busy"))
+    pg.fill("#net-cSSID", "FourthNet")
+    before = len([u for u in requests if "/save_network" in u])
+    pg.click('#page-settings_network button[type="submit"]')
+    pg.wait_for_timeout(1200)
+    check(len([u for u in requests if "/save_network" in u]) == before,
+          "a failed node count does not save the network without a handover")
+    check("could not check which nodes" in pg.locator("#net-msg").inner_text(),
+          "and says why (%r)" % pg.locator("#net-msg").inner_text()[:60])
+    pg.unroute("**/api/remote/status")
+
+    # No nodes at all: exactly the old behaviour — save and restart.
     pg.route("**/api/remote/status", lambda r: r.fulfill(status=200, content_type="application/json", body='{"nodes":[]}'))
     pg.fill("#net-cSSID", "ThirdNet")
     before = len([u for u in requests if "/save_network" in u])

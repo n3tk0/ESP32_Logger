@@ -243,6 +243,62 @@ def wifi(b):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+def wifi_clear(b):
+    print("\n── WiFi node: clearing a saved secret")
+    ctx = b.new_context(viewport={"width": 360, "height": 740}, color_scheme="light", locale="en-US")
+    pg = ctx.new_page()
+    attach(pg)
+
+    # An open network: the saved passphrase must go, or the ESP8266 never joins.
+    pg.goto(BASE + "/?transport=wifi", wait_until="networkidle")
+    pg.wait_for_selector("#steps")
+    pg.click("[data-a=scan]")
+    pg.wait_for_selector("#nets", timeout=8000)
+    rows = pg.locator("#nets button")
+    names = [rows.nth(i).locator(".n").inner_text() for i in range(rows.count())]
+    rows.nth(names.index("cafe guest")).click()
+    check("will be cleared" in (fld(pg, "net.pass").get_attribute("placeholder") or ""),
+          "picking an open network says the saved passphrase will be cleared")
+    pg.click("[data-a=go][data-i='5']")
+    check("cleared" in pg.locator(".kv").inner_text(), "and Review says so")
+    pg.click("#save")
+    wait_saved(pg)
+    body = mock("/__last")
+    check(body["net"]["ssid"] == "cafe guest" and body["net"]["pass"] == "" and body["net"].get("pass_set") is False,
+          "an open network is sent as pass \"\" + pass_set:false (%r)" % body["net"])
+    check("token_set" not in body["net"] and "basic_pass_set" not in body["net"], "the other secrets are kept")
+    st = mock("/__state")
+    check(st["net"]["pass"] == "" and st["net"]["token"] == "s3cret-token", "the mock cleared only the passphrase")
+
+    # The token, cleared on purpose; typing another SSID and back changes nothing else.
+    pg.goto(BASE + "/?transport=wifi", wait_until="networkidle")
+    pg.wait_for_selector("#steps")
+    ph = lambda: fld(pg, "net.pass").get_attribute("placeholder") or ""
+    fld(pg, "net.ssid").fill("elsewhere")
+    check("will be cleared" in ph(), "another SSID with no passphrase typed clears the saved one")
+    fld(pg, "net.ssid").fill("home")
+    check("leave empty to keep" in ph(), "back to the saved SSID keeps it")
+    nxt(pg)
+    clr = pg.locator('[data-a=clr][data-i="net.token"]')
+    check(clr.count() == 1, "a saved token offers Clear")
+    check(pg.locator('[data-a=clr][data-i="net.basic_pass"]').count() == 0, "an unset one does not")
+    clr.click()
+    check("will be cleared" in (fld(pg, "net.token").get_attribute("placeholder") or ""), "Clear marks the token")
+    pg.locator('[data-a=clr][data-i="net.token"]').click()
+    check("leave empty to keep" in (fld(pg, "net.token").get_attribute("placeholder") or ""), "and pressing it again undoes that")
+    pg.locator('[data-a=clr][data-i="net.token"]').click()
+    pg.click("[data-a=go][data-i='5']")
+    pg.click("#save")
+    wait_saved(pg)
+    body = mock("/__last")
+    check(body["net"].get("token_set") is False and "pass_set" not in body["net"],
+          "a cleared token is sent as token_set:false, the passphrase kept (%r)" % body["net"])
+    st = mock("/__state")
+    check(st["net"]["token"] == "" and st["net"]["pass"] == "hunter22", "the mock cleared only the token")
+    ctx.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 def espnow(b):
     print("\n── ESP-NOW node (XIAO ESP32-C3), dark, 360 px, Bulgarian browser")
     ctx = b.new_context(viewport={"width": 360, "height": 740}, color_scheme="dark", locale="bg-BG")
@@ -343,6 +399,7 @@ with sync_playwright() as p:
     b = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
     try:
         wifi(b)
+        wifi_clear(b)
         espnow(b)
     except Exception as e:  # a timeout is a failure with a story, not a crash
         fails.append("driver stopped: %s" % str(e).splitlines()[0])

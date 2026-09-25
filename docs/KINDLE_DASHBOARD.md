@@ -716,9 +716,20 @@ actually resets the pixels; nothing an ordinary page draws will.
 
 **forecast** asks the collector to fetch the forecast now instead of at the end
 of its interval (`/kindle/forecast`), says so, and comes back to the dashboard
-a few seconds later with the new one. The fetch itself runs on the collector's
-export task, never in the web server, and is limited to one a minute whoever
-asks. The link is left out while the collector is its own access point.
+with the new one once the fetch is over. The page waits by reloading itself
+every three seconds as `/kindle/forecast?w=<n>`, which asks for nothing and
+only looks whether the fetch is still queued or running; it gives up after
+45 s. The fetch itself runs on the collector's export task, never in the web
+server, and is limited to one a minute whoever asks. The link is left out while
+the collector is its own access point, and a collector with no station link
+(access point, or its network down) queues nothing and says it is offline.
+
+`?t=1` answers the same request in one plain line, for the panel's script and
+the Modules page: `ok` (queued), `wait <s>` (fetched under a minute ago),
+`off` (the module is off or has no location) or `offline` (no station link, so
+nothing was queued). After `ok`, `?t=1&w=1` answers `pending` while the fetch
+is queued or running and `done` once it is not, and asks for nothing itself;
+`pending` in `/api/modules/forecast`'s status is the same flag.
 
 The step number comes in a query string, so it is reader-supplied and clamped —
 otherwise a stray link could build a chain that never comes back.
@@ -1597,7 +1608,7 @@ has and what each one does — out of six words:
 | | |
 |---|---|
 | `refresh` | fetch everything and redraw the whole page now |
-| `forecast` | ask the collector for a fresh forecast (`/kindle/forecast?t=1`), say on the bar what it answered, and redraw the page once the fetch has had time to land. The collector allows one fetch a minute; inside that the bar says how long to wait |
+| `forecast` | ask the collector for a fresh forecast (`/kindle/forecast?t=1`), say on the bar what it answered, and redraw the page once the collector says the fetch is over (`?t=1&w=1` every 3 s, 45 s at most). The collector allows one fetch a minute; inside that the bar says how long to wait, and a collector with no network says it is offline |
 | `wake` | stop sleeping, so the device can be told things; pressed again, go back to sleeping. It writes `POWER` to `dash.conf`, so KUAL and the panel agree about it afterwards |
 | `settings` | a second bar: **Find · Next · Battery · Info · Back** |
 | `hide` | put the bar away, which tapping above it also does |

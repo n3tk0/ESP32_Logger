@@ -13,7 +13,9 @@
 //     field says what it resolved to, and a forbidden pin is refused outright
 //     with a "did you mean D6?" when that is the likely slip.
 //   * Secrets are write-only. The API never returns them; a field left empty
-//     means "keep the saved one" and says so in its placeholder.
+//     means "keep the saved one" and says so in its placeholder. Clearing one
+//     is a deliberate act (the Clear button, or for the WiFi password picking
+//     an open network or another SSID) and is sent as "" + <key>_set:false.
 //   * SSIDs come from the air: they are escaped, and never put in markup
 //     attributes — the scan list refers to them by index.
 //
@@ -86,7 +88,8 @@ en: {
   sleepHint: "On for batteries. Off = mains powered, always awake.",
   fw: "Firmware", localEdits: "local edits",
   issues: "The node will refuse this configuration:", noIssues: "Looks good. Saving restarts the node.",
-  secNew: "new", secKeep: "saved",
+  secNew: "new", secKeep: "saved", secClr: "cleared",
+  clr: "Clear saved", clrUndo: "Keep saved", clrPh: "will be cleared — type one to set it",
   saving: "Saving…", saved: "Saved, restarting…", waiting: "Waiting for the node to come back…",
   isBack: "The node is back (up {t}).",
   apGone: "The node restarted and closed its setup network, as expected: {what} Rejoin your usual WiFi.",
@@ -162,7 +165,8 @@ bg: {
   sleepHint: "Включено при батерии. Изключено = мрежово захранване, винаги буден.",
   fw: "Фърмуер", localEdits: "локални промени",
   issues: "Възелът ще откаже тази конфигурация:", noIssues: "Изглежда наред. Записът рестартира възела.",
-  secNew: "нова", secKeep: "запазена",
+  secNew: "нова", secKeep: "запазена", secClr: "изтрита",
+  clr: "Изтрий запазената", clrUndo: "Запази я", clrPh: "ще бъде изтрита — въведете нова, за да я зададете",
   saving: "Запис…", saved: "Запазено, рестартиране…", waiting: "Изчакване възелът да се върне…",
   isBack: "Възелът е отново на линия (работи от {t}).",
   apGone: "Възелът се рестартира и затвори мрежата за настройка, както се очаква: {what} Върнете се към обичайната WiFi мрежа.",
@@ -254,7 +258,9 @@ var S = {
   steps: [],
   srv: null,       // {field, reason} from the last refused POST
   scan: null,      // null | "running" | [nets]
-  showPw: {}
+  showPw: {},
+  clr: {},         // secret field path -> 1: the user asked to clear the saved one
+  openPick: null   // SSID last picked from the scan if it was open, else null
 };
 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
@@ -435,6 +441,11 @@ function fld(label, f, kind, o) {
     at += ' type="' + (S.showPw[f] ? "text" : "password") + '" autocomplete="new-password" autocapitalize="off" spellcheck="false"';
     inp = '<div class="pw"><input' + at + ' value="' + esc(v || "") + '"><button type="button" data-a="pw" data-i="' +
       f + '" aria-label="' + esc(t("show")) + '">' + ic("eye") + "</button></div>";
+    // "" keeps the saved secret, so clearing one needs its own control.
+    if (o.clr && secretSet(f) && !autoClear(f)) {
+      inp += '<button type="button" class="btn sm" style="margin-top:6px" data-a="clr" data-i="' + f + '">' +
+        esc(t(S.clr[f] ? "clrUndo" : "clr")) + "</button>";
+    }
   } else if (o.opts) {
     inp = "<select" + at + ">";
     for (var i = 0; i < o.opts.length; i++) {
@@ -454,7 +465,23 @@ function card(icon, title, body, right) {
   return '<section class="card"><div class="card-head"><div class="card-title">' + ic(icon) + " " + esc(title) +
     "</div>" + (right || "") + '</div><div class="card-body">' + body + "</div></section>";
 }
-function secretPh(set) { return set ? t("keep") : t("notSet"); }
+function secretPh(set, f) { return f && willClear(f) ? t("clrPh") : set ? t("keep") : t("notSet"); }
+// "net.pass" -> S.cfg.net.pass_set: does the node have one saved?
+function secretSet(f) {
+  var p = f.split("."), o = S.cfg;
+  for (var i = 0; i < p.length - 1; i++) o = (o || {})[p[i]];
+  return !!(o && o[p[p.length - 1] + "_set"]);
+}
+// The saved WiFi password belongs to the saved SSID: another network, or one
+// picked from the scan as open, must not inherit it (an ESP8266 given a
+// passphrase for an open network does not connect, and the node would fall
+// back to its AP).
+function autoClear(f) {
+  return f === "net.pass" && (S.ed.net.ssid !== S.cfg.net.ssid || S.ed.net.ssid === S.openPick);
+}
+// Sent as "" + <key>_set:false: only when nothing new was typed and there is
+// a saved one to drop.
+function willClear(f) { return !getP(S.ed, f) && secretSet(f) && !!(S.clr[f] || autoClear(f)); }
 function fmtDur(s) {
   if (s == null || s < 0) return "—";
   if (s < 90) return Math.round(s) + " s";
@@ -470,7 +497,7 @@ var R = {};
 R.net = function () {
   var n = S.ed.net, h = "", sc = "";
   h += fld(t("ssid"), "net.ssid", "s", { max: 32 });
-  h += fld(t("pass"), "net.pass", "pw", { max: 64, ph: secretPh(S.cfg.net.pass_set) });
+  h += fld(t("pass"), "net.pass", "pw", { max: 64, ph: secretPh(S.cfg.net.pass_set, "net.pass"), clr: 1 });
   if (S.scan === "running") sc = '<p class="hint" style="display:flex;gap:8px;align-items:center"><span class="spin"></span>' + esc(t("scanning")) + "</p>";
   else if (S.scan && !S.scan.length) sc = '<p class="hint">' + esc(t("scanNone")) + "</p>";
   else if (S.scan) {
@@ -499,9 +526,9 @@ R.coll = function () {
   if (isW()) {
     h += '<div class="form-grid">' + fld(t("host"), "net.host", "s", { max: 64, hint: t("hostHint") }) +
       fld(t("port"), "net.port", "i", {}) + "</div>";
-    h += fld(t("token"), "net.token", "pw", { max: 64, ph: secretPh(S.cfg.net.token_set), hint: t("tokenHint") });
+    h += fld(t("token"), "net.token", "pw", { max: 64, ph: secretPh(S.cfg.net.token_set, "net.token"), hint: t("tokenHint"), clr: 1 });
     h += '<div class="form-grid">' + fld(t("bUser"), "net.basic_user", "s", { max: 32 }) +
-      fld(t("bPass"), "net.basic_pass", "pw", { max: 64, ph: secretPh(S.cfg.net.basic_pass_set) }) + "</div>";
+      fld(t("bPass"), "net.basic_pass", "pw", { max: 64, ph: secretPh(S.cfg.net.basic_pass_set, "net.basic_pass"), clr: 1 }) + "</div>";
     h += '<p class="hint">' + esc(t("bHint")) + "</p>";
     return card("server", t("s_coll"), h, collBadge());
   }
@@ -632,13 +659,13 @@ R.node = function () {
   return card("tag", t("s_node"), h);
 };
 
-function secretLine(v, set) { return v ? t("secNew") : set ? t("secKeep") : t("notSet"); }
+function secretLine(v, set, f) { return v ? t("secNew") : f && willClear(f) ? t("secClr") : set ? t("secKeep") : t("notSet"); }
 R.review = function () {
   var e = S.ed, kv = [], i, h = "";
   if (isW()) {
-    kv.push([t("ssid"), e.net.ssid], [t("pass"), secretLine(e.net.pass, S.cfg.net.pass_set)],
-      [t("host"), e.net.host + ":" + e.net.port], [t("token"), secretLine(e.net.token, S.cfg.net.token_set)],
-      [t("bUser"), e.net.basic_user || "—"], [t("bPass"), secretLine(e.net.basic_pass, S.cfg.net.basic_pass_set)]);
+    kv.push([t("ssid"), e.net.ssid], [t("pass"), secretLine(e.net.pass, S.cfg.net.pass_set, "net.pass")],
+      [t("host"), e.net.host + ":" + e.net.port], [t("token"), secretLine(e.net.token, S.cfg.net.token_set, "net.token")],
+      [t("bUser"), e.net.basic_user || "—"], [t("bPass"), secretLine(e.net.basic_pass, S.cfg.net.basic_pass_set, "net.basic_pass")]);
   } else kv.push([t("lmk"), secretLine(e.lmk, S.cfg.lmk_set)]);
   kv.push([t("board"), boardDef().name]);
   if (hasI2C()) kv.push(["I2C", "SDA " + pinText(e.i2c.sda) + " · SCL " + pinText(e.i2c.scl)]);
@@ -750,6 +777,9 @@ function live() {
   }
   if ($("diag")) $("diag").innerHTML = diagram();
   if ($("lmkn")) $("lmkn").textContent = S.ed.lmk ? S.ed.lmk.length + " / 16" : "";
+  // Editing the SSID changes what an empty password means (autoClear).
+  var pp = document.querySelector('[data-f="net.pass"]');
+  if (pp) pp.placeholder = secretPh(S.cfg.net.pass_set, "net.pass");
   if ($("cal-go")) calib();
 }
 
@@ -828,10 +858,16 @@ function onClick(ev) {
     S.showPw[i] = !S.showPw[i];
     var inp = document.querySelector('input[data-f="' + i + '"]');
     if (inp) inp.type = S.showPw[i] ? "text" : "password";
+  } else if (a === "clr") {
+    if (S.clr[i]) delete S.clr[i]; else S.clr[i] = 1;
+    render();
   } else if (a === "scan") scan();
   else if (a === "net") {
     var n = S.scan[+i];
     S.ed.net.ssid = n.ssid;
+    // An open network has no password: drop the saved one, even when the
+    // open network has the saved SSID (autoClear).
+    S.openPick = n.open ? n.ssid : null;
     render();
     var p = document.querySelector('[data-f="net.pass"]');
     if (p && !n.open) p.focus();
@@ -901,9 +937,12 @@ function payload() {
     i2c: { sda: e.i2c.sda, scl: e.i2c.scl }, sensors: e.sensors
   };
   if (isW()) {
-    // next is the collector's to set (§4); pass fields "" mean keep.
+    // next is the collector's to set (§4); secret fields "" mean keep, and
+    // "" + <key>_set:false clears (§0.5).
     o.net = { ssid: e.net.ssid, pass: e.net.pass || "", host: e.net.host, port: e.net.port,
       token: e.net.token || "", basic_user: e.net.basic_user || "", basic_pass: e.net.basic_pass || "" };
+    var sk = ["pass", "token", "basic_pass"];
+    for (var i = 0; i < sk.length; i++) if (willClear("net." + sk[i])) o.net[sk[i] + "_set"] = false;
   } else {
     o.sleep = !!e.sleep;
     o.batt = { pin: e.batt.pin, divider: e.batt.divider, trim: e.batt.trim };

@@ -81,8 +81,10 @@ bool linkExchangeCfg(const NodeLink& link, const void* frame, int len, uint16_t 
 /// timestamp those readings with nothing.
 ///
 /// Costs up to NODE_MAX_CHANNEL × NODE_PAIR_DWELL_MS of radio — about 1.6 s
-/// for thirteen channels — so the caller rate-limits it.
-bool linkPair(NodeLink& io, uint32_t* epochOut = nullptr);
+/// for thirteen channels — so the caller rate-limits it. `onlyCh` (not 0)
+/// asks on that one channel instead: one dwell, for confirming the collector
+/// is where a scan suggests before anything is stored.
+bool linkPair(NodeLink& io, uint32_t* epochOut = nullptr, uint8_t onlyCh = 0);
 
 /// What one scan heard.
 struct ScanResult {

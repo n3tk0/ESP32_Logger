@@ -285,9 +285,12 @@ function hwInit() {
       hw.testMode      = !!fm.testMode;
       hw.blinkDuration = fm.blinkDuration > 0 ? fm.blinkDuration : 250;
 
-      var ctx = pdata ? Pins.ctx(pdata, pdata.active) : null;
+      // Wired even without a board context: Pins.wire() is what copies each
+      // typed pin into the hidden input the form POSTs, so skipping it when
+      // the profile list failed to load sent the old GPIOs and said "saved".
+      var ctx = pdata ? Pins.ctx(pdata, pdata.active) : { profile: null, board: null };
       var form = Form.bind("hw-host", hwSchema(ctx), hw);
-      if (form && ctx && ctx.profile) hwWirePins(form, ctx);
+      if (form && window.Pins) hwWirePins(form, ctx);
 
       var th = (ST && ST.theme) || (CFG && CFG.theme) || {};
       if (th.boardDiagramPath) {
@@ -311,7 +314,7 @@ function hwWirePins(form, ctx) {
   var map = document.getElementById("hwPinMap");
   var hintEl = document.getElementById("hwPinMapHint");
   var mapCard = document.getElementById("hwPinMapCard");
-  if (mapCard) mapCard.style.display = "";
+  if (mapCard) mapCard.style.display = ctx.profile ? "" : "none";   // nothing to draw without one
   if (hintEl) hintEl.textContent = ctx.board ? I18n.t("pins.boardHint") : I18n.t("pins.gridHint");
   function uses() {
     var out = [];
@@ -911,6 +914,7 @@ function netSaveForm(ev) {
   }
 
   ndHoCountNodes().then(function (n) {
+    if (n === null) return fail("nodes.hoCountFailed");
     if (!n) return plainSave();
     // The nodes are about to be told to trust this network; it has to be
     // one the collector itself can join.
@@ -2206,7 +2210,11 @@ var Modules = (function () {
     if (!btn) return;
     btn.addEventListener("click", function () {
       btn.disabled = true;
-      var before = st.fetchedAt || 0, tries = 0;
+      // Polled for as long as the collector says the fetch is queued or
+      // running ("pending") — OWM is two HTTPS requests at up to six seconds
+      // each, so any fixed wait is either too short or too long — with a cap
+      // so a collector that never clears it cannot keep the button disabled.
+      var before = st.fetchedAt || 0, until = Date.now() + 45000;
       function done(html) { btn.disabled = false; if (html) setMsg(html); }
       function poll() {
         fetchWithTimeout("/api/modules/forecast", {}, 10000)
@@ -2215,10 +2223,10 @@ var Modules = (function () {
             var s = (d && d.status) || {};
             var box = _el("fc-rows");
             if (box) box.innerHTML = rows(s);
-            if ((s.fetchedAt || 0) !== before) {
-              done('<div class="alert alert-success">' + esc(t("settingsPages.modFcUpdated")) + '</div>');
-            } else if (++tries < 6) {
+            if (s.pending && Date.now() < until) {
               setTimeout(poll, 2000);
+            } else if ((s.fetchedAt || 0) !== before) {
+              done('<div class="alert alert-success">' + esc(t("settingsPages.modFcUpdated")) + '</div>');
             } else {
               done('<div class="alert alert-error">' + esc(t("settingsPages.modFcNoAnswer")) + '</div>');
             }
@@ -2234,6 +2242,8 @@ var Modules = (function () {
             setTimeout(poll, 2000);
           } else if (txt.indexOf("wait ") === 0) {
             done('<div class="alert alert-warning">' + esc(t("settingsPages.modFcWait", { sec: txt.slice(5) })) + '</div>');
+          } else if (txt === "offline") {
+            done('<div class="alert alert-warning">' + esc(t("settingsPages.modFcOffline")) + '</div>');
           } else {
             done('<div class="alert alert-warning">' + esc(t("settingsPages.modFcOff")) + '</div>');
           }

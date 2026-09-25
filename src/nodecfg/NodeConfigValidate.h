@@ -68,6 +68,11 @@ static const float DIVIDER_MAX    = 20.0f;
 static const float TRIM_MIN       = 0.5f;
 static const float TRIM_MAX       = 1.5f;
 static const uint32_t DEBOUNCE_MAX_US = 1000000;  // 1 s: past that it is not bounce
+// link.rescan_min_s: below five minutes a dead collector costs a scan and a
+// sweep (~3.5 s of radio) every few wakes; past a week the node would in
+// effect never look for its network again (node_espnow/src/Rescan.h).
+static const uint32_t RESCAN_MIN_S_MIN = 300;
+static const uint32_t RESCAN_MIN_S_MAX = 604800;
 
 namespace detail {
 
@@ -368,6 +373,8 @@ static inline bool validate(const NodeConfig& c, Validation& out) {
             return fail(out, "link.ack_window_ms", "must be 5..1000 ms");
         if (c.link.rescan_fails < 1)
             return fail(out, "link.rescan_fails", "must be at least 1");
+        if (c.link.rescan_min_s < RESCAN_MIN_S_MIN || c.link.rescan_min_s > RESCAN_MIN_S_MAX)
+            return fail(out, "link.rescan_min_s", "must be 300..604800 s");
     } else {
         if (c.net.ssid[0] == '\0')
             return fail(out, "net.ssid", "the WiFi network is required");

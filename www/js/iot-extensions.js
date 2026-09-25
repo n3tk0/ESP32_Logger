@@ -2046,7 +2046,9 @@
     } else if (iface === "uart") {
       obj.uart_rx = pinVal("wiz-rx", -1);   // required by SDS011/PMS5003 plugins
       obj.uart_tx = pinVal("wiz-tx", -1);   // optional (-1 = RX-only)
-      obj.baud    = pinVal("wiz-baud", 9600);
+      // Baud is not a pin: pinVal() looks up input[data-pin], so read it directly.
+      var baudVal = parseInt((document.getElementById("wiz-baud") || {}).value, 10);
+      obj.baud    = baudVal > 0 ? baudVal : 9600;
     } else {
       // gpio (pulse) / adc / 1-wire — single data pin
       obj.pin     = pinVal("wiz-pin", -1);

@@ -18,7 +18,10 @@ Four pages, in the order a device meets them:
   1. first-run wizard  — the build's board preselected, labels, save payload
   2. Hardware          — labels shown back, a clash with a sensor's SDA
   3. sensor editor     — a strap pin saved with allow_unsafe_pins, a clash
-  4. add-sensor wizard — a flash pin stops Next, a strap pin sets the flag
+  4. add-sensor wizard — a flash pin stops Next, a strap pin sets the flag,
+                         a UART sensor keeps the baud it was given
+  5. Hardware again    — with /api/board-profiles failing, a typed pin is
+                         still what gets saved, and the next load retries
 
     python3 tests/web/mock_device.py 8765 &
     python3 tests/web/drive_pin_pages.py
@@ -160,6 +163,32 @@ with sync_playwright() as p:
     check(s0.get("sda") == 8 and s0.get("scl") == 7, f"saved as GPIOs: sda={s0.get('sda')} scl={s0.get('scl')}")
     check(s0.get("allow_unsafe_pins") is True, "with allow_unsafe_pins set for the strap")
 
+    # A sensor whose pins the form does not show (they live in advanced JSON,
+    # like an HC-SR04's trig_pin/echo_pin) keeps the flag its strap needs.
+    pg.evaluate("""PCFG.sensors.push({id: "sonar", type: "hcsr04", enabled: true,
+        interface: "gpio", trig_pin: 2, echo_pin: 1, read_interval_ms: 10000,
+        allow_unsafe_pins: true}); clRenderSensors(PCFG.sensors)""")
+    pg.wait_for_timeout(300)
+    row = pg.locator(".sensor-list-row", has_text="sonar").first
+    row.locator('button[data-click="clEditSensor"]').first.click()
+    pg.wait_for_timeout(600)
+    pg.locator('#sensorPopup button#sensorPopupSaveBtn, button[data-role="save"]').first.click()
+    pg.wait_for_timeout(400)
+    sn = pg.evaluate("PCFG.sensors.filter(function (x) { return x.id === 'sonar'; })[0]")
+    check(sn.get("trig_pin") == 2 and sn.get("allow_unsafe_pins") is True,
+          f"a strap in advanced JSON (trig_pin=2) keeps allow_unsafe_pins: {sn.get('allow_unsafe_pins')!r}")
+
+    # And the flag goes when no pin needs it any more.
+    row = pg.locator(".sensor-list-row", has_text="env_indoor").first
+    row.locator('button[data-click="clEditSensor"]').first.click()
+    pg.wait_for_timeout(600)
+    pg.locator("#pin-s-sda").fill("D2")
+    pg.locator('#sensorPopup button#sensorPopupSaveBtn, button[data-role="save"]').first.click()
+    pg.wait_for_timeout(400)
+    s0 = pg.evaluate("PCFG.sensors[0]")
+    check(s0.get("sda") == 4 and "allow_unsafe_pins" not in s0,
+          f"moved off the strap, the flag is dropped: sda={s0.get('sda')} flag={s0.get('allow_unsafe_pins')!r}")
+
     # ── 4. Add-sensor wizard ─────────────────────────────────────────────────
     print("\nAdd-sensor wizard:")
     check(not pg.locator("#sensorPopup").is_visible(), "the editor closed on the good save")
@@ -185,7 +214,48 @@ with sync_playwright() as p:
     check(review.get("pin") == 2, f"D0 is GPIO2 in the review: {review.get('pin')!r}")
     check(review.get("allow_unsafe_pins") is True, "and the strap sets allow_unsafe_pins")
 
-    errs = [(k, t) for k, t in console if k in ("error", "pageerror")]
+    # A UART sensor at 115200: the baud box is not a pin field, and reading it
+    # as one saved every UART sensor at 9600.
+    pg.locator("#wizPrev").click()
+    pg.wait_for_timeout(200)
+    pg.select_option("#wiz-iface", "UART")
+    pg.locator("#pin-wiz-rx").fill("1")
+    pg.locator("#pin-wiz-tx").fill("")
+    pg.fill("#wiz-baud", "115200")
+    pg.locator("#wizNext").click()
+    pg.wait_for_timeout(300)
+    review = json.loads(pg.locator("#wiz-json").inner_text() or "{}")
+    check(review.get("baud") == 115200 and review.get("uart_rx") == 1,
+          f"the review carries baud 115200: baud={review.get('baud')!r} rx={review.get('uart_rx')!r}")
+    pg.locator("#wizNext").click()             # save (and the page reloads)
+    pg.wait_for_timeout(1500)
+    saved = json.loads(pg.request.get(BASE + "/api/platform_config").text()).get("sensors", [])
+    uart = [x for x in saved if x.get("interface") == "uart"]
+    check(uart and uart[-1].get("baud") == 115200,
+          f"and /save_platform is sent baud 115200: {[x.get('baud') for x in uart]}")
+
+    # ── 5. Hardware, board profiles unavailable ──────────────────────────────
+    print("\nHardware page, board profiles unavailable:")
+    pg.request.get(BASE + "/__mock/profiles?fail=1")
+    pg.goto(BASE + "/#settings_hardware", wait_until="networkidle")
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_timeout(1500)
+    box = pg.locator("#pin-pinWifiTrigger")
+    check(box.input_value() == "6", f"no board context: the pin shows as a GPIO: {box.input_value()!r}")
+    box.fill("20")
+    before = len(mock_hw(pg)["posts"])
+    pg.locator('#hw-host button[type="submit"]').click()
+    pg.wait_for_timeout(800)
+    posts = mock_hw(pg)["posts"]
+    sent = posts[-1]["body"] if len(posts) > before else {}
+    check(sent.get("pinWifiTrigger") == "20",
+          f"the typed pin is what is saved, not the old one: {sent.get('pinWifiTrigger')!r}")
+    pg.request.get(BASE + "/__mock/profiles?fail=0")
+    n = pg.evaluate("Pins.load().then(function (d) { return d.profiles.length; })")
+    check(n > 0, f"the failed load was not cached: the next one has {n} profiles")
+
+    # The 503s above are the test's own doing, not the page's.
+    errs = [(k, t) for k, t in console if k in ("error", "pageerror") and "503" not in t]
     check(not errs, f"no console errors ({len(errs)})")
     for k, t in errs:
         print(f"        {k}: {t}")
