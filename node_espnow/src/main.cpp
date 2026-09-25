@@ -17,8 +17,9 @@
 // --------------------------------
 // RTC memory  the sequence number, the failure counters, the readings that
 //             could not be delivered (Backlog.h), and the config exchange's
-//             bookkeeping. Survives deep sleep, costs nothing to write, and is
-//             gone on a power cut — which is correct for all of it.
+//             bookkeeping. Survives deep sleep, a software restart and a
+//             watchdog reset, costs nothing to write, and is gone on a power
+//             cut — which is correct for all of it.
 // NVS         the link — the collector's MAC, the channel, the node id, the
 //             access point to look for ("espnow-node") — and the config
 //             document and page key ("cfg", ConfigStore.h). Written only when
@@ -30,6 +31,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <esp_ota_ops.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
 #include <math.h>
@@ -61,29 +63,41 @@ using namespace nodecfg;
 /// read an old layout as the new one.
 static const uint32_t RTC_MAGIC = 0x4E4F4432;   // "NOD2"
 
-RTC_DATA_ATTR static uint32_t s_rtcMagic;
-RTC_DATA_ATTR static uint16_t s_seq;
-RTC_DATA_ATTR static uint8_t  s_failStreak;     ///< consecutive unanswered wakes
-RTC_DATA_ATTR static uint16_t s_wakesSinceScan; ///< see the rescan gate
-RTC_DATA_ATTR static uint32_t s_wakeCount;
+// RTC_NOINIT_ATTR, not RTC_DATA_ATTR. Both survive deep sleep, but the
+// startup code reloads RTC_DATA_ATTR from the image on every other reset —
+// so esp_restart() (the bench build's "sleep") and a watchdog reset threw
+// the backlog away and started the sequence over. NOINIT is left alone by
+// every reset and is garbage after a power-on, which is what the checks in
+// setup() are for: a cold start by reset reason, the magic, the image that
+// wrote it (s_rtcImage) and enbl::valid().
+RTC_NOINIT_ATTR static uint32_t s_rtcMagic;
+/// Four bytes of the running image's ELF SHA-256. A new firmware may lay
+/// these variables out differently, and it is flashed with a reset that need
+/// not count as a power-on, so the magic alone could read an old layout as
+/// the new one.
+RTC_NOINIT_ATTR static uint32_t s_rtcImage;
+RTC_NOINIT_ATTR static uint16_t s_seq;
+RTC_NOINIT_ATTR static uint8_t  s_failStreak;     ///< consecutive unanswered wakes
+RTC_NOINIT_ATTR static uint16_t s_wakesSinceScan; ///< see the rescan gate
+RTC_NOINIT_ATTR static uint32_t s_wakeCount;
 /// EN_FLAG_FIRST_BOOT goes on every frame until one is ACKed, not only on the
 /// first: seq restarted at 0, and if that first frame is lost the collector's
 /// replay guard would otherwise drop the next ones as stale.
-RTC_DATA_ATTR static bool     s_firstBootPending;
+RTC_NOINIT_ATTR static bool     s_firstBootPending;
 
 /// Readings the node could not deliver — see Backlog.h. A node that cannot
 /// reach its collector for twenty minutes should not silently lose twenty
 /// minutes of weather; it hands them over when the link comes back, each
 /// with the time it was actually taken.
-RTC_DATA_ATTR static enbl::Pool s_backlog;
+RTC_NOINIT_ATTR static enbl::Pool s_backlog;
 
 /// The config exchange (docs/NODE_CONFIG.md §5).
-RTC_DATA_ATTR static bool           s_reportDue;    ///< CFG_REPORT still owed since boot
-RTC_DATA_ATTR static encfg::Backoff s_fetchBackoff;
-RTC_DATA_ATTR static encfg::Backoff s_reportBackoff;
-RTC_DATA_ATTR static uint16_t       s_rejectedRev;  ///< last rev refused, 0 = none
-RTC_DATA_ATTR static char           s_rejField[EN_CFG_FIELD_LEN];
-RTC_DATA_ATTR static char           s_rejReason[EN_CFG_REASON_LEN];
+RTC_NOINIT_ATTR static bool           s_reportDue;    ///< CFG_REPORT still owed
+RTC_NOINIT_ATTR static encfg::Backoff s_fetchBackoff;
+RTC_NOINIT_ATTR static encfg::Backoff s_reportBackoff;
+RTC_NOINIT_ATTR static uint16_t       s_rejectedRev;  ///< last rev refused, 0 = none
+RTC_NOINIT_ATTR static char           s_rejField[EN_CFG_FIELD_LEN];
+RTC_NOINIT_ATTR static char           s_rejReason[EN_CFG_REASON_LEN];
 
 // ---------------------------------------------------------------------------
 // The clock
@@ -302,12 +316,23 @@ static void rejectCfg(uint16_t rev, const char* field, const char* reason) {
 
 /// A whole document arrived: decode, validate (CfgApply.h), save, apply,
 /// answer. On any failure the running config is untouched (principle 3).
-static void applyConfigDoc(const EnCfgAssembler& a) {
+///
+/// False only when the flash write failed. That is not the document's fault,
+/// so the rev is NOT remembered as refused and no CFG_ACK goes out: the
+/// collector keeps flagging it and the fetch is tried again after the
+/// backoff, instead of a good config being refused until the next boot.
+static bool applyConfigDoc(const EnCfgAssembler& a) {
     static NodeConfig next;           // ~1 KB: off the loop task's stack
     Issue why;
-    if (!encfg::acceptFromCollector(s_cfg, a.doc, a.total, a.rev, next, why))
-        return rejectCfg(a.rev, why.field, why.reason);
-    if (!cfgStoreSave(next)) return rejectCfg(a.rev, "", "could not write the config to flash");
+    if (!encfg::acceptFromCollector(s_cfg, a.doc, a.total, a.rev, next, why)) {
+        rejectCfg(a.rev, why.field, why.reason);
+        return true;
+    }
+    if (!cfgStoreSave(next)) {
+        Serial.printf("[cfg] rev %u could not be written to flash — will retry\n",
+                      (unsigned)a.rev);
+        return false;
+    }
 
     const bool wasMains = !s_cfg.sleep;
     s_cfg = next;
@@ -320,6 +345,7 @@ static void applyConfigDoc(const EnCfgAssembler& a) {
     // has to redo them now; a switch between sleep and mains takes effect at
     // the end of this wake (see loop() / finishWake()).
     if (wasMains && !s_cfg.sleep) nodeSensorsBegin(s_cfg);
+    return true;
 }
 
 /// Pull the desired config: CFG_GET from offset 0, one slice per request,
@@ -348,8 +374,8 @@ static void fetchConfig() {
             case encfg::Step::Complete:
                 Serial.printf("[cfg] rev %u fetched (%u bytes) in %lu ms\n", (unsigned)f.a.rev,
                               (unsigned)f.a.total, (unsigned long)(millis() - t0));
-                encfg::succeeded(s_fetchBackoff);
-                applyConfigDoc(f.a);
+                if (applyConfigDoc(f.a)) encfg::succeeded(s_fetchBackoff);
+                else                     encfg::failed(s_fetchBackoff);
                 return;
             case encfg::Step::UpToDate:
                 // The collector is offering what we already run: our CFG_ACK
@@ -413,16 +439,47 @@ static void reportConfig() {
 // §4.6: the collector's network moved while we slept
 // ---------------------------------------------------------------------------
 
+/// A collector answered a (re-)pairing: it may be a different one, or one
+/// that lost what it knew of us, so the config report owed after a boot is
+/// owed again — and now, not after whatever backoff a silent collector built.
+static void reportAfterPairing() {
+    s_reportDue = true;
+    encfg::succeeded(s_reportBackoff);
+}
+
 /// Promote link.next_ssid to the stored network, and keep the old one as
 /// next, so a handover the collector cancels is survivable the same way.
 /// `local` is set so the collector learns the swap on the next contact.
+///
+/// Only once the collector is confirmed there (§4.6 "on success"): a signed
+/// DISCOVER on that one channel, which it answers from its node table without
+/// a pairing window. A network on the air is not a collector on it — one
+/// that is restarting would otherwise send the node to the wrong channel
+/// until the next scan an hour later. Unconfirmed, nothing is stored and the
+/// next eligible scan looks again.
 static void adoptNextNetwork(const ScanResult& sr) {
+    NodeLink fresh = s_link;
+    fresh.nodeId = 0;
+    uint32_t e = 0;
+    if (!linkPair(fresh, &e, sr.nextCh)) {
+        Serial.printf("[node] \"%s\" is on channel %u but no collector answered there\n",
+                      s_cfg.link.next_ssid, (unsigned)sr.nextCh);
+        return;
+    }
+    adoptClock(e);
+
     char old[sizeof(s_link.ssid)];
     copyStr(old, sizeof(old), s_link.ssid);
-    copyStr(s_link.ssid, sizeof(s_link.ssid), s_cfg.link.next_ssid);
-    memcpy(s_link.bssid, sr.nextBssid, 6);
-    s_link.channel = sr.nextCh;
+    s_link = fresh;
+    // The WELCOME names the collector's network; an empty one (a collector
+    // on its own AP) falls back to what the scan heard.
+    if (!s_link.ssid[0]) {
+        copyStr(s_link.ssid, sizeof(s_link.ssid), s_cfg.link.next_ssid);
+        memcpy(s_link.bssid, sr.nextBssid, 6);
+    }
     saveLink();
+    s_failStreak = 0;
+    reportAfterPairing();
 
     copyStr(s_cfg.link.next_ssid, sizeof(s_cfg.link.next_ssid), old);
     s_cfg.local = true;
@@ -479,6 +536,7 @@ static void maybeRescan() {
         saveLink();
         s_failStreak = 0;
         applyIntervalPush(s_link.intervalS);
+        reportAfterPairing();
         Serial.printf("[node] re-paired as node %u\n", s_link.nodeId);
     }
 }
@@ -542,6 +600,7 @@ static void wake() {
             adoptClock(pairedEpoch);
             saveLink();
             applyIntervalPush(s_link.intervalS);
+            reportAfterPairing();
             Serial.printf("[node] paired as node %u on channel %u\n",
                           s_link.nodeId, s_link.channel);
         } else {
@@ -570,7 +629,31 @@ static void wake() {
                   (unsigned long)r.waitedMs);
     s_seq++;                       // the frame went out; never reuse its number
 
-    if (r.acked) {
+    if (r.acked && r.rediscover) {
+        // The collector answered but does not know us, so it dropped the
+        // frame: nothing in it was delivered. Keep the backlog and this
+        // reading. Pairing again is a ~1.6 s sweep, so it goes through the
+        // rescan's rate limit — a collector whose table is full, or one that
+        // keeps forgetting us, must not cost a sweep every wake.
+        s_failStreak = 0;
+        bufferLive(live, liveN);
+        adoptClock(r.epoch);
+        rememberChannel(r.channel);
+        if (enrescan::spaced(s_wakesSinceScan, s_cfg.link.rescan_min_s, s_cfg.interval_s)) {
+            s_wakesSinceScan = 0;
+            Serial.println("[node] collector no longer knows us — pairing again");
+            uint32_t e = 0;
+            if (linkPair(s_link, &e)) {
+                adoptClock(e);
+                saveLink();
+                applyIntervalPush(s_link.intervalS);
+                reportAfterPairing();
+                Serial.printf("[node] re-paired as node %u\n", s_link.nodeId);
+            }
+        } else {
+            Serial.println("[node] collector no longer knows us — pairing again later");
+        }
+    } else if (r.acked) {
         s_failStreak       = 0;
         s_firstBootPending = false;
         enbl::dropOldest(s_backlog, taken);   // delivered; exactly those
@@ -583,19 +666,13 @@ static void wake() {
         if (!r.cfgPending) applyIntervalPush(r.intervalS);
         rememberChannel(r.channel);
 
-        if (r.rediscover) {
-            Serial.println("[node] collector no longer knows us — pairing again");
-            uint32_t e = 0;
-            if (linkPair(s_link, &e)) { adoptClock(e); saveLink(); }
-        } else {
-            // Local edits win; the report owed since boot goes before a
-            // fetch but cannot hold one up (CfgFetch.h, choose()).
-            switch (encfg::choose(s_cfg.local, s_reportDue, r.cfgPending, s_reportBackoff,
-                                  s_fetchBackoff)) {
-                case encfg::Exchange::Report: reportConfig(); break;
-                case encfg::Exchange::Fetch:  fetchConfig();  break;
-                case encfg::Exchange::None:   break;
-            }
+        // Local edits win; the report owed since boot goes before a fetch
+        // but cannot hold one up (CfgFetch.h, choose()).
+        switch (encfg::choose(s_cfg.local, s_reportDue, r.cfgPending, s_reportBackoff,
+                              s_fetchBackoff)) {
+            case encfg::Exchange::Report: reportConfig(); break;
+            case encfg::Exchange::Fetch:  fetchConfig();  break;
+            case encfg::Exchange::None:   break;
         }
     } else {
         if (s_failStreak < 255) s_failStreak++;
@@ -615,6 +692,15 @@ static void wake() {
 static bool isColdStart() {
     const esp_reset_reason_t why = esp_reset_reason();
     return why == ESP_RST_POWERON || why == ESP_RST_EXT;
+}
+
+/// Which firmware wrote the RTC state: four bytes of the image's ELF SHA-256,
+/// which every build changes.
+static uint32_t runningImageId() {
+    const esp_app_desc_t* d = esp_ota_get_app_description();
+    uint32_t id = 0;
+    if (d) memcpy(&id, d->app_elf_sha256, sizeof(id));
+    return id;
 }
 
 /// Is `pin` wired to something in this config? The mains loop does not poll
@@ -638,9 +724,12 @@ void setup() {
     Serial.println("[node] BENCH BUILD — no deep sleep. Do not run this on a battery.");
 #endif
 
-    const bool coldBoot = (s_rtcMagic != RTC_MAGIC) || !enbl::valid(s_backlog);
+    const uint32_t image    = runningImageId();
+    const bool     coldBoot = isColdStart() || s_rtcMagic != RTC_MAGIC ||
+                              s_rtcImage != image || !enbl::valid(s_backlog);
     if (coldBoot) {
         s_rtcMagic         = RTC_MAGIC;
+        s_rtcImage         = image;
         s_seq              = 0;
         s_failStreak       = 0;
         s_wakesSinceScan   = 0xFFFF;   // scan on the first eligible failure
