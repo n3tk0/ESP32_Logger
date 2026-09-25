@@ -53,12 +53,16 @@
   /// { profiles:[…], active:"id", suggested:"id"|"", boards:{id:{pins,left,right}} }
   /// A missing /boards.json only costs the drawings; a missing profile list
   /// leaves every pin unchecked (level ok), never blocked.
+  /// A failed profile fetch is not cached: the next call asks again, so one
+  /// dropped request does not leave every later page on an unchecked context.
   function load(force) {
     if (_load && !force) return _load;
-    _load = Promise.all([
-      getJson("/api/board-profiles").catch(function () { return {}; }),
+    var failed = false;
+    var p = _load = Promise.all([
+      getJson("/api/board-profiles").catch(function () { failed = true; return {}; }),
       getJson("/boards.json").catch(function () { return {}; }),
     ]).then(function (r) {
+      if (failed && _load === p) _load = null;
       var bp = r[0] || {};
       return {
         profiles: bp.profiles || [],
@@ -114,11 +118,12 @@
     if (g == null) return { level: "ok", why: "" };
     if (!p) return { level: "ok", why: "" };                 // nothing to check against
     if (g < 0 || g > p.maxGpio) return { level: "err", why: t("range", "not on this chip (GPIO 0–{max})", { max: p.maxGpio }) };
+    // usbPins is live (USB CDC on in this build), so it applies to custom too.
+    if (inList(p.usbPins, g))      return { level: "warn", why: t("usb", "USB D-/D+") };
     if (p.id === "custom") return { level: "ok", why: "" };
     if (inList(p.flashPins, g))    return { level: "err",  why: t("flash", "SPI flash bus, never usable") };
     if (inList(p.strapPins, g))    return { level: "warn", why: t("strap", "boot strap: must not be held low at reset") };
     if (inList(p.reservedPins, g)) return { level: "warn", why: t("uart", "UART0, the serial console") };
-    if (inList(p.usbPins, g))      return { level: "warn", why: t("usb", "USB D-/D+") };
     if (inList(p.absentPins, g))   return { level: "warn", why: t("absent", "no header pad on this board") };
     return { level: "ok", why: "" };
   }
@@ -155,6 +160,16 @@
         out.push({ key: "sensor:" + i + ":" + k, g: g, who: (s.id || s.type) + " " + k.toUpperCase(),
                    share: (k === "sda" || k === "scl") ? "i2c" + (s.bus || 0) + ":" + k : "" });
       });
+    });
+    return out;
+  }
+  /// Every GPIO a stored sensor carries, whichever key holds it (the edit
+  /// form shows only some of them; the rest come from advanced JSON).
+  function sensorGpios(s) {
+    var out = [];
+    SENSOR_PIN_KEYS.forEach(function (k) {
+      var g = s && s[k];
+      if (typeof g === "number" && g >= 0 && g !== 255) out.push(g);
     });
     return out;
   }
@@ -309,7 +324,7 @@
   window.Pins = {
     load: load, ctx: ctx, parse: parse, text: text, labelOf: labelOf, risk: risk,
     hint: hint, conflicts: conflicts, needsUnsafe: needsUnsafe, diagram: diagram,
-    sensorUses: sensorUses, hardwareUses: hardwareUses, hwLabel: function (name) {
+    sensorUses: sensorUses, sensorGpios: sensorGpios, hardwareUses: hardwareUses, hwLabel: function (name) {
       for (var i = 0; i < HW_PINS.length; i++) if (HW_PINS[i][0] === name) return t(HW_PINS[i][1], HW_PINS[i][2]) + (HW_PINS[i][3] || "");
       return name;
     },

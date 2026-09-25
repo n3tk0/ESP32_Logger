@@ -285,9 +285,12 @@ function hwInit() {
       hw.testMode      = !!fm.testMode;
       hw.blinkDuration = fm.blinkDuration > 0 ? fm.blinkDuration : 250;
 
-      var ctx = pdata ? Pins.ctx(pdata, pdata.active) : null;
+      // Wired even without a board context: Pins.wire() is what copies each
+      // typed pin into the hidden input the form POSTs, so skipping it when
+      // the profile list failed to load sent the old GPIOs and said "saved".
+      var ctx = pdata ? Pins.ctx(pdata, pdata.active) : { profile: null, board: null };
       var form = Form.bind("hw-host", hwSchema(ctx), hw);
-      if (form && ctx && ctx.profile) hwWirePins(form, ctx);
+      if (form && window.Pins) hwWirePins(form, ctx);
 
       var th = (ST && ST.theme) || (CFG && CFG.theme) || {};
       if (th.boardDiagramPath) {
@@ -311,7 +314,7 @@ function hwWirePins(form, ctx) {
   var map = document.getElementById("hwPinMap");
   var hintEl = document.getElementById("hwPinMapHint");
   var mapCard = document.getElementById("hwPinMapCard");
-  if (mapCard) mapCard.style.display = "";
+  if (mapCard) mapCard.style.display = ctx.profile ? "" : "none";   // nothing to draw without one
   if (hintEl) hintEl.textContent = ctx.board ? I18n.t("pins.boardHint") : I18n.t("pins.gridHint");
   function uses() {
     var out = [];

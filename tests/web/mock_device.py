@@ -163,6 +163,9 @@ def _board_profiles():
     return out
 
 BOARD = {"active": os.environ.get("MOCK_BOARD", "xiao_c3"), "setupRequired": False}
+# /__mock/profiles?fail=1 makes /api/board-profiles answer 503 until
+# ?fail=0: the dropped request the Hardware page must survive.
+PROFILES_FAIL = {"on": False}
 
 # GET /export_settings → hardware; POST /save_hardware and /api/firstrun
 # store what they are sent, and /__mock/hw hands it back to the driver.
@@ -644,6 +647,12 @@ class H(http.server.SimpleHTTPRequestHandler):
             return self._json({"token": "test-token"})
         if path == "/api/platform_config":
             return self._json(PLATFORM)
+        if path == "/__mock/profiles":
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            PROFILES_FAIL["on"] = q.get("fail", ["0"])[0] == "1"
+            return self._json(PROFILES_FAIL)
+        if path == "/api/board-profiles" and PROFILES_FAIL["on"]:
+            return self._json({"error": "unavailable"}, 503)
         if path == "/api/board-profiles":
             return self._json({"profiles": _board_profiles(),
                                "active": {"id": BOARD["active"], "setupRequired": BOARD["setupRequired"]},

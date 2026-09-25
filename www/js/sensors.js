@@ -897,6 +897,8 @@ function clPinsReady() {
     .then(function (r) {
       CL_PINS.ctx = r[0] ? Pins.ctx(r[0], r[0].active) : null;
       CL_PINS.hw = r[1];
+      // No profile list (a failed fetch): ask again next time, like Pins.load().
+      if (!r[0] || !(r[0].profiles || []).length) CL_PINS.ready = null;
       return CL_PINS;
     });
   return CL_PINS.ready;
@@ -1065,14 +1067,6 @@ function clSaveEditedSensor() {
     }
   }
 
-  // Set exactly when a yellow pin is in use: the firmware refuses a strap,
-  // console or no-pad pin at init without it, and the page has already said
-  // why the pin is risky. Kept tidy (absent) otherwise.
-  if (window.Pins && CL_PINS.ctx && CL_PINS.ctx.profile) {
-    if (Pins.needsUnsafe(CL_PINS.ctx, clFormGpios(form))) s.allow_unsafe_pins = true;
-    else delete s.allow_unsafe_pins;
-  }
-
   var adv = fd.get("advanced");
   if (adv && adv !== "{}") {
     try {
@@ -1081,6 +1075,18 @@ function clSaveEditedSensor() {
     } catch(e) {
       showToast(spT("invalidAdvancedJson", "Invalid Advanced JSON. Saving standard fields only."), "error");
     }
+  }
+
+  // Set exactly when a yellow pin is in use: the firmware refuses a strap,
+  // console or no-pad pin at init without it, and the page has already said
+  // why the pin is risky. Kept tidy (absent) otherwise. Judged on every pin
+  // the sensor stores once the advanced JSON is applied, not only the ones
+  // the form shows: a gpio/adc pin or an HC-SR04 trig_pin/echo_pin lives
+  // only in advanced JSON, and dropping the flag for it made the firmware
+  // refuse the sensor at the next boot.
+  if (window.Pins && CL_PINS.ctx && CL_PINS.ctx.profile) {
+    if (Pins.needsUnsafe(CL_PINS.ctx, Pins.sensorGpios(s).concat(clFormGpios(form)))) s.allow_unsafe_pins = true;
+    else delete s.allow_unsafe_pins;
   }
 
   clRenderSensors(PCFG.sensors);
