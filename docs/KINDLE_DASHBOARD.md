@@ -370,16 +370,17 @@ value's own line would be denser, and it also makes every cell a different
 width — six captions of different lengths put six numbers at six different x.
 Above the value they all start at the cell's left edge.
 
-**Every row divides its own width by its own count.** The grid is up to three
-across and two deep, and the cells that survived are spread across balanced,
-full rows — 1, 2, 3, then 2+2, 3+2, 3+3. Two readings are two halves, not two of
+**Every row divides its own width by its own count.** The cells that survived
+are spread across balanced, full rows. Two readings are two halves, not two of
 three thirds with the last one white; four are two rows of two, not three and a
-lone cell. Three across is narrower than two, so a row of three steps its type
-down: "1008 hPa" with a tendency arrow after it does not fit a third of half a
-page at the two-across size.
+lone cell. Which rows, and how large, is the layout's — see
+[The layout follows what is on the page](#the-layout-follows-what-is-on-the-page):
+two readings with height to spare go one under the other, because that sets
+them larger than side by side.
 
-The indoor row gives its **first field more of the width** (42 % of three, 58 %
-of two) because it is set much larger, and that field carries **no caption** at
+The indoor row gives its **first field more of the width** — what it needs to
+be set larger, measured, with each other field keeping at least room for its
+caption — and that first field carries **no caption** at
 all — the heading directly above already names the room, and a "TEMP" under it
 says nothing the degree sign has not. The line it gives back is spent on type.
 The other two hang their captions in the space it does not use and sit on its
@@ -507,6 +508,66 @@ touch read as one muddy mass — so it is gone.
 The two chart lines are still told apart by **dash pattern as well as** shade,
 because redundant coding costs nothing and survives a panel with its contrast
 turned down.
+
+## The layout follows what is on the page
+
+The page used to be two hand-measured layouts, ordinary and standalone, and
+everything else was a fixed coordinate. Switch the week strip off and its 88 px
+stayed white; put two readings in the grid and they sat on one row with an
+empty one under them, at the size four would have had.
+
+**`src/web/KindleFlow.h` works the layout out on every render**, from what is
+on the page: which sections are on, whether there is a forecast, how many
+places have a reading and how wide the widest thing each can print is. The
+answer goes to both renderers — to the browser page as a block of CSS after
+the design's sheet, to the FBInk panel as `LY_*` keys in `/kindle/data` — so
+the two cannot disagree about where a thing is.
+
+1. **The sections below the readings are fixed and stacked from the bottom**:
+   footer 36, week strip 88, forecast band 124. One that is not on the page
+   gives its height back.
+2. **The room left goes to the readings first, then to the chart.** The top
+   block takes height only while it turns it into larger type — the headline,
+   the clock and the captions grow together up to the standalone page's sizes,
+   a sixth larger, where the width of their column stops them. Whatever is
+   left makes the chart taller (`/kindle/graph.bmp?h=N`). With the chart off
+   the readings take all of it.
+3. **The grid tries every way of breaking its readings into rows** and keeps
+   the one that sets them largest, all at one size. Rows share the height, and
+   each is centred in its share, so there is no white row at the bottom.
+4. **The indoor row is set on one line, or the first field on a line of its
+   own and the others under it**, whichever is larger.
+5. **Sizes come from the widest a reading can get, not today's value**: a
+   temperature is sized for a sign and two digits, a humidity for 100, a
+   pressure for four digits of hPa. The layout does not jump when a reading
+   crosses 10 or 1000.
+
+| on the page | top block | chart |
+|---|---|---|
+| everything | 20…282, as before | 220 |
+| no forecast | 20…404 | 222 |
+| no week strip | 20…369 | 221 |
+| no chart | 20…552 | — |
+
+**The browser page draws the same layout.** Its sections are a little taller
+than the panel's (caption lines, rule margins, the footer's two buttons), so
+the page takes that difference out of the chart — or out of the top block when
+there is no chart — and stays inside 800 px whatever is switched off. The
+`body.sa` rules are no longer applied by this firmware; they stay for
+`tools/check_kindle_parity.py`, which still holds the standalone overlay a
+panel on an older collector draws.
+
+**The panel lays `LY_*` over its layout file**, names from a fixed list
+(`FLOW_KEYS` in `kindle/update_dash.sh`) and digits only. A collector too old
+to send them sends no `LY_GR_H`, and the panel draws the file's page as it
+always has; a script too old to know them ignores them and draws from the file.
+A layout that moved asks for a full repaint, as the standalone page does.
+
+**The settings preview computes it too.** `www/js/kindle.js` carries the same
+rules so the preview shows the page before anything is saved;
+`tools/check_kindle_flow_parity.py` runs both over every combination and fails
+CI on the first number they disagree on. `tools/kindle_preview/preview.py`
+takes `chart=0 fc=0 week=0 grid=N in=N` to render any of them.
 
 ## Appearance
 
@@ -1393,13 +1454,11 @@ the footer — which is what they were under the forecast all along. Nothing
 draws a line there, because a second hairline one pixel above the week's would
 be a two-pixel line nobody asked for.
 
-**The browser page draws the same design.** `body.sa` and a block of `.sa`
-rules, emitted unconditionally so the stylesheet stays a statement of fact for
-`tools/kindle_preview` and `tools/check_kindle_parity.py` to replay — and each
-of the three clock styles carries a standalone twin in `kdSkinCss()`, because
-`.sa .clock` in the sheet is two classes to those rules' one and would
-otherwise win. The parity checker holds the overlay and the `.sa` rules
-together exactly as it holds the base layout and the design together.
+**Both renderers now work it out rather than read it.** With a collector
+that sends a layout, the standalone page is simply the layout with no forecast
+band — see [The layout follows what is on the page](#the-layout-follows-what-is-on-the-page).
+The overlay file and the `.sa` rules remain what a panel on an older collector
+draws, and the parity checker still holds them together.
 
 **And the footer says where you are.** "Measured on site" is the right thing to
 say about numbers that came over a network from a windowsill; on an access

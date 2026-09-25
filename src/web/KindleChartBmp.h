@@ -105,6 +105,18 @@ namespace ChartBmp {
 inline uint16_t imageW(uint16_t panelW) { return (panelW > 600) ? 1000 : 560; }
 inline uint16_t imageH(uint16_t panelW) { return (panelW > 600) ? 396 : 220; }
 
+/// The height a reader that follows the layout asks for — /kindle/graph.bmp?h=
+/// — held to what that layout can produce: never much under the ordinary
+/// chart, never more than three of it. 0 means "not asked", which is the
+/// fixed image an older reader has always been sent. The image is streamed a
+/// row at a time, so its height costs time on the wire and nothing in memory.
+inline uint16_t clampH(uint16_t h, uint16_t panelW) {
+    const uint16_t base = imageH(panelW);
+    if (h == 0) return base;
+    const uint16_t lo = (uint16_t)(base * 9 / 10), hi = (uint16_t)(base * 3);
+    return h < lo ? lo : (h > hi ? hi : h);
+}
+
 /// The plot area inside that image, in image pixels. The margins are the
 /// 560x220 design's, scaled with the image — so each divides by the design's
 /// own dimension, 560 across and 220 down.

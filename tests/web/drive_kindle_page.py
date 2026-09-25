@@ -634,33 +634,40 @@ with sync_playwright() as p:
     check(pg.locator("#kd-zrow-fc .badge", has_text="not on this page").count() == 1,
           "and says so on its row, which stays for its weight switch")
 
-    # ...and the chart moved down into what the band used to be.
+    # ...and the chart moved down into what the band used to be, to where the
+    # layout put it. That is kdFlowCompute(); tools/check_kindle_flow_parity.py
+    # holds it to the collector's own, so here it is the drawing that is
+    # checked against the layout, and the layout against the ordinary page.
     chart = pg.evaluate(
         "(function(){var p=document.querySelector('#kd-panel').getBoundingClientRect();"
         "var c=document.querySelector('#kd-panel .kd-hit[data-args=\\'[\"chart\"]\\']')"
         ".getBoundingClientRect();"
         "return Math.round((c.top-p.top)/(p.height/800));})()")
-    check(abs(chart - 406) <= 3,
-          "the chart sits where the standalone layout puts it (%d, want 406)" % chart)
+    want = pg.evaluate("kdShape().rule2Y")
+    check(abs(chart - want) <= 3 and want > 282,
+          "the chart moves down to where the layout puts it (%d, want %d, below 282)"
+          % (chart, want))
 
     # ── AND EVERY READING STILL FITS ITS COLUMN ─────────────────────────────
     # The freed band is VERTICAL. The columns are the width they always were,
-    # so the type could only grow until the widest string each reading can
-    # produce filled its cell — which is why the standalone sizes are a sixth
-    # larger and not a third. Measured with the page's own estimator, against
-    # the column widths the layout files fix.
+    # so the type can only grow until the widest string each reading can
+    # produce fills its cell. Measured with the page's own estimator, for the
+    # places as they are, against the cells the layout gave them.
     fits = pg.evaluate(
-        "(function(){var L=kdShape(),bad=[];"
-        "if (kdTw('1008',L.gridVal3)+3+kdTw('hPa',Math.round(L.gridVal3*0.42))>90)"
-        " bad.push('grid-3');"
-        "if (kdTw('1008',L.gridVal)+3+kdTw('hPa',Math.round(L.gridVal*0.42))>135)"
-        " bad.push('grid-2');"
-        "if (kdTw('21.4',L.inVal1)+kdTw('\\u00b0',Math.round(L.inVal1*0.34))>111)"
-        " bad.push('indoor-1');"
-        "if (kdTw('17:40',L.clockSz)>264) bad.push('clock');"
-        "if (18+kdTw('8.4',L.heroSz)+kdTw('\\u00b0',Math.round(L.heroSz*0.34))+8+"
+        "(function(){var L=kdShape(),bad=[],at=0;"
+        "function w(z,s){var v=kdPvValue(z),u=kdPvUnit(z);"
+        " return kdTw(v,s)+3+kdTw(u,Math.round(s*(u==='\\u00b0'?0.34:0.42)));}"
+        "for(var r=0;r<L.gridRows.length;r++)for(var c=0;c<L.gridRows[r];c++,at++)"
+        " if(w(kdSlot(L.grid[at]),L.gridValSz)>Math.floor(270/L.gridRows[r]))"
+        "  bad.push('grid '+L.grid[at]);"
+        "if(L.inside.length){var w1=(L.inStack||L.inside.length===1)?264:"
+        " Math.round(264*L.inW1Pm/1000);"
+        " if(w(kdSlot(L.inside[0]),L.inValSz1)>w1)bad.push('indoor-1');}"
+        "if(kdTw('17:40',L.clSize)>264) bad.push('clock');"
+        "if(18+kdTw('8.4',L.heroSz)+kdTw('\\u00b0',Math.round(L.heroSz*0.34))+L.headGap+"
         "kdTw('/',L.bigSz)+6+kdTw('71',L.bigSz)+"
         "kdTw('%',Math.round(L.bigSz*0.42))>288) bad.push('headline');"
+        "if(!L.gridValSz&&L.grid.length) bad.push('no grid size');"
         "return bad;})()")
     check(not fits, "every reading still fits its column (%s)" % (fits or "all fit"))
 
@@ -677,15 +684,13 @@ with sync_playwright() as p:
         "out.push(b[i][0]+'/'+b[j][0]);}return out;})()")
     check(not over2, "and no two standalone targets overlap (%s)" % (over2 or "none"))
 
-    # ── AND THE PREVIEW'S COPY OF THE GEOMETRY IS THE PANEL'S ───────────────
+    # ── AND THE PREVIEW'S LAYOUT IS THE PANEL'S ─────────────────────────────
     #
-    # KD_SHAPE is a third copy of these numbers: the panel reads them from
-    # kindle/layout/*.conf, the browser page gets its type sizes from the
-    # firmware's stylesheet (tools/check_kindle_parity.py holds those two
-    # together), and the preview draws from this table. Nothing connected the
-    # third one, so a layout edit could leave the preview quietly describing
-    # the page as it used to be — which is the one failure a preview cannot
-    # survive, because it is believed.
+    # With every section on and a forecast, the layout has no room to give and
+    # lands everything where kindle/layout/600x800.conf has always put it. That
+    # file is what a panel on an older collector still draws from, so the two
+    # have to agree on that page. The rest — every other combination — is
+    # tools/check_kindle_flow_parity.py, against the collector's own numbers.
     def conf_of(path):
         vals = {}
         for line in open(os.path.join(ROOT_DIR, path), encoding="utf-8"):
@@ -699,27 +704,19 @@ with sync_playwright() as p:
         return vals
 
     base = conf_of("kindle/layout/600x800.conf")
-    sa = dict(base, **conf_of("kindle/layout/600x800-standalone.conf"))
     KEYS = {
         "heroSz":"HERO_SZ", "bigSz":"BIG_SZ", "subY":"SUB_Y", "subSz":"SUB_SZ",
-        "gridY":"GRID_Y", "rowH":"GRID_ROW_H", "gridVal":"GRID_VAL_SZ",
-        "gridVal3":"GRID_VAL_SZ_3", "labSz":"GRID_LAB_SZ", "sepH":"SEP_H",
-        "clockSz":"CL_SIZE", "clockH":"CL_H", "boxed":"CL_SZ_BOXED",
-        "ruled":"CL_SZ_RULED", "dated":"CL_SZ_DATED", "dateSz":"CL_DATE_SZ",
-        "inRuleY":"IN_RULE_Y", "inLabY":"IN_LAB_Y", "inValY":"IN_VAL_Y",
-        "inVal1":"IN_VAL_SZ_1", "inVal":"IN_VAL_SZ", "chartRuleY":"RULE2_Y",
-        "chartLabY":"LAB_CHART_Y", "chartY":"GR_Y", "keyY":"KEY_Y",
+        "labSz":"GRID_LAB_SZ", "sepH":"SEP_H", "clSize":"CL_SIZE", "clH":"CL_H",
+        "clBoxed":"CL_SZ_BOXED", "clRuled":"CL_SZ_RULED", "clDated":"CL_SZ_DATED",
+        "clDateSz":"CL_DATE_SZ", "inRuleY":"IN_RULE_Y", "inLabY":"IN_LAB_Y",
+        "rule2Y":"RULE2_Y", "grY":"GR_Y", "grH":"GR_H", "rule3Y":"RULE3_Y",
     }
-    shapes = pg.evaluate("KD_SHAPE")
-    drift = []
-    for shape, conf in (("normal", base), ("sa", sa)):
-        for js_key, conf_key in KEYS.items():
-            if shapes[shape][js_key] != conf.get(conf_key):
-                drift.append("%s.%s=%s but %s=%s" % (
-                    shape, js_key, shapes[shape][js_key],
-                    conf_key, conf.get(conf_key)))
-    check(not drift, "the preview's geometry is the panel's, both shapes (%s)"
-          % ("; ".join(drift) if drift else "all %d agree" % (2 * len(KEYS))))
+    ordinary = pg.evaluate(
+        "(function(){var i=kdFlowInput(0xFF);i.forecast=true;return kdFlowCompute(i);})()")
+    drift = ["%s=%s but %s=%s" % (k, ordinary[k], c, base.get(c))
+             for k, c in KEYS.items() if ordinary[k] != base.get(c)]
+    check(not drift, "the preview's ordinary page is the layout file's (%s)"
+          % ("; ".join(drift) if drift else "all %d agree" % len(KEYS)))
 
     # It is a setting like any other: unsaved until Save, then read back.
     check(pg.is_visible("#kd-savebar"), "choosing a shape is an unsaved change")

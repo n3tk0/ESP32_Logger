@@ -55,34 +55,31 @@
 //   fill:  ["jump", elementId, label]  a control further down this page
 //          ["link", href, label]       the page that owns it
 //          ["text", sentence]          nothing configures it
-//   box:   [x, y, w, h] on the 600x800 panel — where the preview puts its
-//          hit target, from kindle/layout/600x800.conf. THEY MUST NOT OVERLAP:
-//          the headline's number and the value beside it share a baseline on
-//          the real panel, and boxes drawn to match that left the headline's
-//          target almost entirely underneath its neighbour's — a region you
-//          could only open by aiming at its edge. The three rows that are not
-//          regions at all (the tendency arrow, captions, units) carry no box,
-//          because there is no one place on the panel to point at.
+//   Each region's hit target on the preview comes from kdPvBoxes(), which
+//   places it where the layout put the region. THEY MUST NOT OVERLAP: the
+//   headline's number and the value beside it share a baseline on the real
+//   panel, and boxes drawn to match that left the headline's target almost
+//   entirely underneath its neighbour's — a region you could only open by
+//   aiming at its edge. The three rows that are not regions at all (the
+//   tendency arrow, captions, units) get no box, because there is no one
+//   place on the panel to point at.
 var KD_ZONES = [
   { id:"hero", name:"Headline",
     where:"Top left. The largest number on the page.",
-    show:0, bold:0x0001, slot:"hero", head:"out",
-    box:[10,12,136,112], sabox:[10,12,152,132] },
+    show:0, bold:0x0001, slot:"hero", head:"out" },
 
   { id:"big", name:"Beside the headline",
     where:"Shares the headline's baseline, after a slash.",
-    show:0x0001, bold:0x0002, slot:"big",
-    box:[148,40,146,64], sabox:[164,48,130,80] },
+    show:0x0001, bold:0x0002, slot:"big" },
 
   { id:"sub", name:"24-hour low-to-high",
     where:"The small line under the headline, with the reading's age.",
-    show:0x0008, bold:0, box:[10,126,284,24], sabox:[10,152,284,28],
+    show:0x0008, bold:0,
     fill:["text","Follows the headline's sensor."] },
 
   { id:"grid", name:"The grid",
-    where:"Under that line — up to three across and two deep.",
-    show:0x0002, bold:0x0004, slots:["g1","g2","g3","g4","g5","g6"],
-    box:[10,152,284,122], sabox:[10,186,284,196] },
+    where:"Under that line — up to six, in whichever rows set them largest.",
+    show:0x0002, bold:0x0004, slots:["g1","g2","g3","g4","g5","g6"] },
 
   { id:"tend", name:"Pressure tendency arrow",
     where:"After a pressure reading, wherever one is placed.",
@@ -91,36 +88,35 @@ var KD_ZONES = [
 
   { id:"clock", name:"Clock",
     where:"Top right, above the indoor row.",
-    show:0, bold:0x0008, box:[314,20,272,102], sabox:[314,20,272,116],
+    show:0, bold:0x0008,
     fill:["jump","kd-card-clock","Style, time and date"] },
 
   { id:"inrow", name:"Indoor row",
-    where:"Under the clock — up to three readings on one baseline.",
-    show:0x0010, bold:0x0010, slots:["in1","in2","in3"], head:"in",
-    box:[314,126,272,148], sabox:[314,140,272,160] },
+    where:"Under the clock — up to three readings, sized to fill the column.",
+    show:0x0010, bold:0x0010, slots:["in1","in2","in3"], head:"in" },
 
   { id:"chart", name:"24-hour trend chart",
     where:"Full width, under the two columns.",
-    show:0x0020, bold:0, box:[8,282,584,260], sabox:[8,406,584,264],
+    show:0x0020, bold:0,
     fill:["text","Drawn from the stored history of the outdoor and indoor sensors named under “The reader”."] },
 
   { id:"fc", name:"Weather forecast",
     where:"Under the chart: the condition, and three outlook columns.",
-    // NO sabox: the band is where the readings above went, so on that page
-    // there is nothing to point at. The row stays in the list — its weight
+    // NO BOX on a page with no forecast: the band is where the readings above
+    // went, so there is nothing to point at. The row stays in the list — its weight
     // switch is a bit of the mask, and a bit with no checkbox in the DOM is a
     // bit dropped on the next Save.
-    show:-1, bold:0x0040, box:[8,552,584,118],
+    show:-1, bold:0x0040,
     fill:["link","#settings_modules","Provider, place and outlook"] },
 
   { id:"week", name:"Week strip",
     where:"The seven days above the footer, today knocked out in black.",
-    show:0x0040, bold:0x0080, box:[10,674,580,84], sabox:[10,674,580,84],
+    show:0x0040, bold:0x0080,
     fill:["text","Drawn from the device's own date."] },
 
   { id:"batt", name:"Low-battery badge",
     where:"Beside the outdoor heading, when a node is nearly flat.",
-    show:0x0080, bold:0, box:[234,12,30,26], sabox:[234,12,30,26],
+    show:0x0080, bold:0,
     fill:["link","#settings_nodes","Which nodes report a battery"] },
 
   // The last two are not regions. They are the two things that appear inside
@@ -373,43 +369,283 @@ function kdPvDate() {
   return ["27 august","august 27","27.08.2026","2026-08-27"][kdVal("kd-date","0") | 0];
 }
 
-// ── The two shapes this page comes in ──────────────────────────────────────
-// A collector that is its own access point cannot fetch a forecast, so the
-// band it would occupy goes and the readings grow into it. That is a second
-// set of coordinates, and these are they: mirrored from
-// kindle/layout/600x800.conf and 600x800-standalone.conf, which is where the
-// panel reads the same numbers. tools/check_kindle_parity.py holds the type
-// sizes of both to the firmware's own stylesheet; this table is the preview's
-// copy of the geometry around them.
+// ── Where everything goes: src/web/KindleFlow.h, again ─────────────────────
+// The page is not two fixed layouts any more. The collector works out, on
+// every render, where each section goes and how large each reading is set
+// from what is on the page — which sections are on, whether there is a
+// forecast, how many places have a reading and how wide the widest thing each
+// can print is — and sends the result to both renderers. This is that same
+// calculation, rule for rule, so the preview can draw the page the form
+// describes before it is saved. tools/check_kindle_flow_parity.py runs both
+// over the same inputs and fails CI on the first number they disagree on;
+// change one, change the other.
 //
-// THE TYPE GREW BY A SIXTH AND NOT A THIRD because the freed band is vertical
-// and every number is limited by the COLUMN it sits in — see the note in the
-// overlay file. The preview proves it: tests/web/drive_kindle_page.py measures
-// the widest string each reading can produce, with kdTw, against its column.
-var KD_SHAPE = {
-  normal: {
-    heroSz:88,  bigSz:44,  subY:128, subSz:17,
-    gridY:158,  rowH:58,   gridVal:34, gridVal3:27, labSz:14,
-    sepH:252,   clockSz:96, clockH:97, boxed:84, ruled:72, dated:66, dateSz:15,
-    inRuleY:124, inLabY:134, inValY:166, inVal1:52, inVal:31,
-    chartRuleY:282, chartLabY:288, chartY:308, keyY:530,
-    forecast:true
-  },
-  sa: {
-    heroSz:104, bigSz:48,  subY:158, subSz:19,
-    gridY:196,  rowH:92,   gridVal:42, gridVal3:31, labSz:15,
-    sepH:376,   clockSz:110, clockH:111, boxed:96, ruled:82, dated:74, dateSz:16,
-    inRuleY:138, inLabY:152, inValY:190, inVal1:56, inVal:34,
-    chartRuleY:406, chartLabY:412, chartY:432, keyY:654,
-    forecast:false
-  }
+// C's integer division truncates toward zero; kdQ() is that, and every
+// division below goes through it so the two agree to the pixel.
+function kdQ(a, b) { return (a / b) | 0; }
+function kdScaleG(v, g) { return kdQ(v * g + 500, 1000); }
+
+var KDF = {
+  FOOT_Y:764, WEEK_H:88, FC_H:124, TOP_Y:20, CHART_ABOVE:26, CHART_BELOW:24,
+  CHART_MIN:220, TOP_MIN:262, TOP_GROWN:386, COL_L:270, COL_R:252, CL_Y:26,
+  HERO_Y:38, CELL_PAD:6, IN_CAP_W:66, GRID_GAP:6,
+  GROW_MAX:1180, GROW_CLOCK:1146, GROW_BIG:1090, GROW_SUB:1120
 };
 
-// Which one the preview draws. `auto` is not a shape — it is the collector
-// deciding, minute by minute, and the page cannot know today's answer. It
-// draws the ordinary page and says so under the control.
+// kdAdvanceMille(): a string's width in thousandths of its type size. The C
+// walks UTF-8 bytes; this walks code points to the same answer.
+function kdAdvanceMille(s) {
+  var t = String(s == null ? "" : s), total = 0;
+  for (var i = 0; i < t.length; i++) {
+    var c = t.charCodeAt(i), w;
+    if (c >= 0xDC00 && c <= 0xDFFF) continue;     // the second half of a pair
+    if (c >= 0x80 && c < 0xC0)            w = c === 0xB0 ? 330 : (c === 0xB5 ? 520 : 550);
+    else if (c >= 0xC0)                   w = 620;
+    else if (c >= 48 && c <= 57)          w = 500;
+    else if (".,:'".indexOf(t[i]) >= 0)   w = 260;
+    else if ("-+/".indexOf(t[i]) >= 0)    w = 330;
+    else if (c === 32)                    w = 250;
+    else if (c === 37)                    w = 800;
+    else if (c >= 65 && c <= 90)          w = 620;
+    else if (c >= 97 && c <= 122)         w = 500;
+    else                                  w = 550;
+    total += w;
+  }
+  return total;
+}
+
+function kdFlowMinDigits(metric, unit) {
+  if (!metric) return 0;
+  if (metric === "temperature" || metric === "dew_point") return 2;
+  if (["humidity","humidity_amb","soil_moisture","battery_percent",
+       "wind_direction"].indexOf(metric) >= 0) return 3;
+  if (metric === "pressure") return unit === "mmHg" ? 3 : (unit === "inHg" ? 2 : 4);
+  return 0;
+}
+
+function kdFlowWorstAdvance(metric, text, unit, arrow) {
+  var p = String(text == null ? "" : text), neg = false, worst = "", k = 0;
+  if (p[0] === "-" || p[0] === "+") { neg = p[0] === "-"; p = p.slice(1); }
+  while (k < p.length && p.charCodeAt(k) >= 48 && p.charCodeAt(k) <= 57) k++;
+  var need = Math.max(1, Math.max(k, kdFlowMinDigits(metric, unit)));
+  if (neg || metric === "temperature" || metric === "dew_point") worst = "-";
+  for (var i = 0; i < need; i++) worst += "0";
+  worst += p.slice(k);
+  var adv = kdAdvanceMille(worst);
+  if (unit) {
+    if (unit === "°")    adv += kdQ(330 * 34, 100);
+    else if (unit === "%")    adv += kdQ(800 * 42, 100);
+    else                      adv += kdQ((250 + kdAdvanceMille(unit)) * 42, 100);
+  }
+  if (arrow) adv += 350;
+  return adv;
+}
+
+function kdFlowSplit(n, r) {
+  var base = kdQ(n, r), extra = n - base * r, rows = [];
+  for (var i = 0; i < r; i++) { rows.push(base + (extra > 0 ? 1 : 0)); if (extra > 0) extra--; }
+  return rows;
+}
+
+function kdFlowInNeed(s1, a1, adv, m) {
+  var w = kdQ(s1 * a1, 1000) + KDF.CELL_PAD, s2 = kdQ(s1 * 6, 10);
+  for (var i = 1; i < m; i++) {
+    var a = adv[i] || 1000;
+    w += Math.max(kdQ(s2 * a, 1000) + KDF.CELL_PAD, KDF.IN_CAP_W);
+  }
+  return w;
+}
+
+function kdFlowTop(inp, T, f) {
+  var K = KDF, i, r, c;
+  f.topBot = K.TOP_Y + T;
+  var g = 1000 + kdQ((K.GROW_MAX - 1000) * (T - K.TOP_MIN), K.TOP_GROWN - K.TOP_MIN);
+  g = Math.max(1000, Math.min(K.GROW_MAX, g));
+  f.grow = g;
+  f.labSz   = g >= K.GROW_BIG ? 15 : 14;
+  f.heroSz  = kdScaleG(88, g);
+  f.bigSz   = kdScaleG(44, Math.min(g, K.GROW_BIG));
+  f.headGap = kdScaleG(8, g);
+  f.slashW  = kdScaleG(22, g);
+  f.subSz   = kdScaleG(17, Math.min(g, K.GROW_SUB));
+  f.heroY   = K.HERO_Y;
+  var air = g - 1000;
+  f.subY = f.heroY + f.heroSz + 2 + kdQ(air * 14, K.GROW_MAX - 1000);
+  var gridTop = inp.sub ? f.subY + f.subSz + 13 + kdQ(air * 6, K.GROW_MAX - 1000) : f.subY;
+  var bot = f.topBot - 8;
+
+  // The grid
+  f.gridRows = []; f.gridY = gridTop; f.gridRowH = 0; f.gridValSz = 0;
+  var n = Math.min(6, inp.nGrid);
+  if (n > 0) {
+    var areaH = bot - gridTop, cap = kdQ(f.heroSz * 60, 100);
+    var rMin = kdQ(n + 2, 3), best = -1, bestR = rMin;
+    for (r = rMin; r <= n; r++) {
+      var rows = kdFlowSplit(n, r), pitch = kdQ(areaH, r);
+      var v = pitch - f.labSz - 4 - K.GRID_GAP, at = 0;
+      for (var k = 0; k < r; k++) {
+        var cellW = kdQ(K.COL_L, rows[k]) - K.CELL_PAD;
+        for (c = 0; c < rows[k]; c++, at++) {
+          v = Math.min(v, kdQ(cellW * 1000, inp.gridAdv[at] || 1000));
+        }
+      }
+      v = Math.min(v, cap);
+      if (r === rMin) {
+        var floorV = rows[0] >= 3 ? 27 : 34;
+        v = Math.max(v, Math.min(floorV, pitch - f.labSz - 4 - K.GRID_GAP));
+      }
+      if (v >= best) { best = v; bestR = r; }
+    }
+    f.gridRows = kdFlowSplit(n, bestR);
+    f.gridValSz = Math.max(best, 10);
+    f.gridRowH = kdQ(areaH, bestR);
+    f.gridY = gridTop + Math.max(0, kdQ(f.gridRowH - (f.labSz + 4 + f.gridValSz), 2));
+  }
+
+  // The clock
+  var gc = Math.min(g, K.GROW_CLOCK);
+  f.clGrow = gc;
+  f.clSize = kdQ(96 * gc, 1000);  f.clBoxed = kdQ(84 * gc, 1000);
+  f.clRuled = kdQ(72 * gc, 1000); f.clRuledPad = kdQ(16 * gc, 1000);
+  f.clDated = kdQ(66 * gc, 1000); f.clDateSz = kdQ(15 * gc, 1000);
+  f.clDateGap = kdQ(6 * gc, 1000);
+  f.clH = f.clSize + 1;
+
+  // The indoor row
+  f.inRuleY = K.CL_Y + f.clH + 1;
+  f.inLabY = f.inRuleY + 10 + kdQ(air * 4, K.GROW_MAX - 1000);
+  f.inValSz1 = f.inValSz = 0; f.inW1Pm = 1000; f.inStack = false;
+  f.inValY = f.inVal2Y = f.inLabY + f.labSz + 18;
+  var m = Math.min(3, inp.nIn);
+  if (m > 0) {
+    var top = f.inLabY + f.labSz + 18, ah = bot - top, icap = kdQ(f.heroSz * 80, 100);
+    var a1 = inp.inAdv[0] || 1000, others = 0;
+    for (i = 1; i < m; i++) others += inp.inAdv[i] || 1000;
+    var s1 = m === 1 ? kdQ((K.COL_R - K.CELL_PAD) * 1000, a1)
+                     : kdQ((K.COL_R - K.CELL_PAD * m) * 1000, a1 + kdQ(others * 6, 10));
+    s1 = Math.min(s1, ah, icap);
+    s1 = Math.max(s1, Math.min(52, ah));
+    while (m > 1 && s1 > 40 && kdFlowInNeed(s1, a1, inp.inAdv, m) > K.COL_R) s1--;
+    var s1s = 0;
+    if (m >= 2) {
+      s1s = kdQ((K.COL_R - K.CELL_PAD) * 1000, a1);
+      var s2 = kdQ((K.COL_R - K.CELL_PAD * (m - 1)) * 1000, others);
+      s1s = Math.min(s1s, kdQ(s2 * 10, 6), kdQ((ah - 14 - f.labSz) * 10, 16), icap);
+    }
+    if (s1s > s1 + 2) {
+      f.inStack = true; f.inValSz1 = s1s; f.inValSz = kdQ(s1s * 6, 10);
+      var hh = f.inValSz1 + 10 + f.labSz + 4 + f.inValSz;
+      f.inValY = top + Math.max(0, kdQ(ah - hh, 2));
+      f.inVal2Y = f.inValY + f.inValSz1 + 10 + f.labSz + 4;
+    } else {
+      f.inValSz1 = s1; f.inValSz = kdQ(s1 * 6, 10);
+      f.inValY = top + Math.max(0, kdQ(ah - s1, 2));
+      f.inVal2Y = f.inValY + f.inValSz1 - f.inValSz;
+      if (m > 1) {
+        var need1 = kdQ(f.inValSz1 * a1, 1000) + K.CELL_PAD;
+        var needO = kdFlowInNeed(f.inValSz1, a1, inp.inAdv, m) - need1;
+        f.inW1Pm = kdQ(need1 * 1000, Math.max(1, need1 + needO));
+      }
+    }
+  }
+  f.sepH = T - 10;
+  return f;
+}
+
+function kdFlowSameType(a, b) {
+  return a.heroSz === b.heroSz && a.clSize === b.clSize && a.labSz === b.labSz &&
+         a.gridValSz === b.gridValSz && a.gridRows.length === b.gridRows.length &&
+         a.inValSz1 === b.inValSz1 && a.inStack === b.inStack;
+}
+
+// inp: { chart, forecast, week, sub, nGrid, gridAdv[], nIn, inAdv[] }
+function kdFlowCompute(inp) {
+  var K = KDF, f = { chart:!!inp.chart, forecast:!!inp.forecast, week:!!inp.week };
+  f.wkRuleY = inp.week ? K.FOOT_Y - K.WEEK_H : K.FOOT_Y;
+  var below = f.wkRuleY - (inp.forecast ? K.FC_H : 0);
+  var avail = below - K.TOP_Y - (inp.chart ? K.CHART_ABOVE + K.CHART_BELOW : 0);
+  var T = Math.max(K.TOP_MIN, inp.chart ? avail - K.CHART_MIN : avail);
+  kdFlowTop(inp, T, f);
+  if (inp.chart) {
+    for (var t = K.TOP_MIN; t < T; t++) {
+      if (kdFlowSameType(kdFlowTop(inp, t, {}), f)) { T = t; break; }
+    }
+    kdFlowTop(inp, T, f);
+    f.rule2Y = f.topBot;
+    f.grY = f.rule2Y + K.CHART_ABOVE;
+    f.grH = below - K.CHART_BELOW - f.grY;
+    f.rule3Y = below;
+  } else {
+    f.rule2Y = f.rule3Y = f.grY = f.topBot;
+    f.grH = 0;
+  }
+  return f;
+}
+
+// Whether the page the preview draws has a forecast band. `auto` is not an
+// answer — it is the collector deciding, minute by minute, and the page cannot
+// know today's; it draws the ordinary page and says so under the control.
+function kdPvForecast() {
+  return kdVal("kd-layout", "0") !== "2";
+}
+
+// What the collector would work the layout out from, read off the form.
+function kdFlowInput(show) {
+  var inp = { chart:!!(show & 0x0020), week:!!(show & 0x0040),
+              forecast:kdPvForecast(), sub:!!(show & 0x0008),
+              nGrid:0, gridAdv:[], nIn:0, inAdv:[], grid:[], inside:[] };
+  function adv(key) {
+    var z = kdSlot(key), v = kdPvValue(z);
+    if (v === "") return 0;
+    var arrow = !!(z.flags & kdFlags.trend) && !!(show & 0x0004) && z.metric === "pressure";
+    return kdFlowWorstAdvance(z.metric, v, kdPvUnit(z), arrow);
+  }
+  var i, a;
+  if (show & 0x0002) {
+    for (i = 1; i <= 6; i++) {
+      if ((a = adv("g" + i))) { inp.grid.push("g" + i); inp.gridAdv.push(a); }
+    }
+  }
+  if (show & 0x0010) {
+    for (i = 1; i <= 3; i++) {
+      if ((a = adv("in" + i))) { inp.inside.push("in" + i); inp.inAdv.push(a); }
+    }
+  }
+  inp.nGrid = inp.grid.length;
+  inp.nIn = inp.inside.length;
+  return inp;
+}
+
+// The layout the preview draws, with the places that are in it.
 function kdShape() {
-  return (kdVal("kd-layout", "0") === "2") ? KD_SHAPE.sa : KD_SHAPE.normal;
+  var show = kdLoaded ? kdMaskOf(KD_SHOW, "kd-s-") : kdShowInit;
+  var inp = kdFlowInput(show), f = kdFlowCompute(inp);
+  f.grid = inp.grid;
+  f.inside = inp.inside;
+  return f;
+}
+
+// Where each region's hit target goes on this layout, [x, y, w, h]. THEY MUST
+// NOT OVERLAP (see KD_ZONES), and on the ordinary page they are exactly the
+// rectangles that table used to carry. A region switched off keeps a thin
+// target where it would start, so it can still be opened and switched back
+// on, without covering what took its room.
+function kdPvBoxes(L) {
+  var g = L.grow - 1000, b = {};
+  var heroW = 136 + kdQ(g * 16, 180), bigX = 12 + heroW;
+  b.hero  = [10, 12, heroW, L.subY - 16];
+  b.big   = [bigX, 40 + kdQ(g * 8, 180), 294 - bigX, 64 + kdQ(g * 16, 180)];
+  b.sub   = [10, L.subY - 2, 284, L.subSz + 7];
+  var gy = L.subY + L.subSz + 7;
+  b.grid  = [10, gy, 284, L.topBot - 8 - gy];
+  b.clock = [314, 20, 272, L.inRuleY - 22];
+  b.inrow = [314, L.inRuleY + 2, 272, L.topBot - 8 - (L.inRuleY + 2)];
+  b.chart = L.chart ? [8, L.rule2Y, 584, L.rule3Y - L.rule2Y - 10]
+                    : [8, L.rule2Y - 6, 584, 6];
+  if (L.forecast) b.fc = [8, L.rule3Y, 584, 118];
+  b.week  = L.week ? [10, L.wkRuleY - 2, 580, 84] : [10, 758, 580, 6];
+  b.batt  = [234, 12, 30, 26];
+  return b;
 }
 
 function kdRenderPreview() {
@@ -419,11 +655,12 @@ function kdRenderPreview() {
   var capB = !!(bold & 0x0100), unitB = !!(bold & 0x0020);
   var L = kdShape();
   var h = "", i, z, v, u, x, ux, usz;
+  var gAir = L.grow - 1000;
 
   // ── Left column: the headline, its line, its grid ──
   h += kdT(18, 20, L.labSz, kdGroups.out || kdGroupPh.out, { ink:"#777777", bold:capB });
   z = kdSlot("hero"); v = kdPvValue(z);
-  h += kdT(18, 38, L.heroSz, v || "—",
+  h += kdT(18, L.heroY, L.heroSz, v || "—",
            { bold:(z.flags & kdFlags.bold) || (bold & 0x0001), ink:kdPvInk(z.ink) });
   x = 18 + kdTw(v || "—", L.heroSz);
   u = kdPvUnit(z);
@@ -440,7 +677,7 @@ function kdRenderPreview() {
     z = kdSlot("big"); v = kdPvValue(z);
     if (v) {
       var by = 56 + Math.round((L.heroSz - 88) / 2);
-      x += 8;
+      x += L.headGap;
       h += kdT(x, by, L.bigSz, "/", { ink:"#aaaaaa" });
       x += kdTw("/", L.bigSz) + 6;
       h += kdT(x, by, L.bigSz, v,
@@ -453,14 +690,17 @@ function kdRenderPreview() {
     h += kdT(18, L.subY, L.subSz, "-2.4 to 15.3°  ·  3 min", { ink:"#777777" });
   }
 
-  if (show & 0x0002) {
-    var gk = ["g1","g2","g3","g4","g5","g6"], live = [];
-    for (i = 0; i < 6; i++) if (kdPvValue(kdSlot(gk[i])) !== "") live.push(gk[i]);
-    var rows = [live.slice(0, 3), live.slice(3, 6)];
+  if (L.grid.length) {
+    // The rows the layout chose — two side by side or one under the other,
+    // whichever sets them larger — each centred in its share of the height.
+    var rows = [], at = 0;
+    for (var r0 = 0; r0 < L.gridRows.length; r0++) {
+      rows.push(L.grid.slice(at, at + L.gridRows[r0]));
+      at += L.gridRows[r0];
+    }
     for (var r = 0; r < rows.length; r++) {
-      if (!rows[r].length) continue;
-      var cw = Math.floor(270 / rows[r].length), gy = L.gridY + r * L.rowH;
-      var vs = rows[r].length >= 3 ? L.gridVal3 : L.gridVal;
+      var cw = Math.floor(270 / rows[r].length), gy = L.gridY + r * L.gridRowH;
+      var vs = L.gridValSz;
       for (i = 0; i < rows[r].length; i++) {
         z = kdSlot(rows[r][i]); x = 18 + i * cw; v = kdPvValue(z);
         h += kdT(x, gy, L.labSz, kdPvCaption(z), { ink:"#777777", bold:capB });
@@ -485,34 +725,36 @@ function kdRenderPreview() {
   // ── Right column: the clock, then the indoor row ──
   var cs = kdVal("kd-clock", "0") | 0, cb = !!(bold & 0x0008);
   if (cs === 1) {
-    h += kdBox(318, 26, 264, L.clockH, "kd-pl dk");
-    h += "<i style='left:340px;top:" + (26 + Math.round(L.clockH * 0.19)) +
-         "px;font-size:" + L.boxed + "px;color:#ffffff;font-weight:" +
+    h += kdBox(318, 26, 264, L.clH, "kd-pl dk");
+    h += "<i style='left:340px;top:" + (26 + Math.round(L.clH * 0.19)) +
+         "px;font-size:" + L.clBoxed + "px;color:#ffffff;font-weight:" +
          (cb ? 600 : 400) + "'>" + kdEsc(kdPvClock()) + "</i>";
   } else if (cs === 2) {
     h += kdBox(318, 26, 264, 1, "kd-rl");
-    h += kdT(340, 26 + Math.round(L.clockH * 0.21), L.ruled, kdPvClock(),
+    h += kdT(340, 26 + Math.round(L.clH * 0.21), L.clRuled, kdPvClock(),
              { bold:cb, ls:2 });
   } else if (cs === 3) {
-    h += kdT(318, 26, L.dated, kdPvClock(), { bold:cb });
-    h += kdT(318, 26 + L.dated + 12, L.dateSz, kdPvDate(), { ink:"#444444" });
+    h += kdT(318, 26, L.clDated, kdPvClock(), { bold:cb });
+    h += kdT(318, 26 + L.clDated + 2 * L.clDateGap, L.clDateSz, kdPvDate(), { ink:"#444444" });
   } else {
-    h += kdT(318, 26, L.clockSz, kdPvClock(), { bold:cb });
+    h += kdT(318, 26, L.clSize, kdPvClock(), { bold:cb });
   }
 
-  if (show & 0x0010) {
-    var ik = ["in1","in2","in3"], ilive = [];
-    for (i = 0; i < 3; i++) if (kdPvValue(kdSlot(ik[i])) !== "") ilive.push(ik[i]);
-    if (ilive.length) {
+  var ilive = L.inside;
+  if (ilive.length) {
+    {
       h += kdBox(318, L.inRuleY, 264, 1, "kd-rl soft");
       h += kdT(318, L.inLabY, L.labSz, kdGroups["in"] || kdGroupPh["in"],
                { ink:"#777777", bold:capB });
-      var w1 = ilive.length >= 3 ? 111 : (ilive.length === 2 ? 153 : 264);
+      // The first field's share is what it needs to be set larger, not a
+      // fixed fraction; or it has a line of its own and the others share the
+      // one under it.
+      var w1 = L.inStack ? 0 : Math.round(264 * L.inW1Pm / 1000);
       var cw2 = ilive.length > 1 ? Math.floor((264 - w1) / (ilive.length - 1)) : 264;
       for (i = 0; i < ilive.length; i++) {
         z = kdSlot(ilive[i]);
-        var big = i === 0, ivs = big ? L.inVal1 : L.inVal;
-        var iy = big ? L.inValY : L.inValY + L.inVal1 - L.inVal;
+        var big = i === 0, ivs = big ? L.inValSz1 : L.inValSz;
+        var iy = big ? L.inValY : L.inVal2Y;
         x = big ? 318 : 318 + w1 + (i - 1) * cw2;
         if (!big) h += kdT(x, iy - 18, L.labSz, kdPvCaption(z),
                            { ink:"#777777", bold:capB });
@@ -528,19 +770,19 @@ function kdRenderPreview() {
   }
 
   // ── The chart ──
-  h += kdBox(18, L.chartRuleY, 564, 1, "kd-rl");
-  if (show & 0x0020) {
-    h += kdT(18, L.chartLabY, L.labSz, "24 HOURS", { ink:"#777777", bold:capB });
-    h += kdBox(20, L.chartY, 560, 220, "kd-pl");
-    for (i = 1; i < 4; i++) h += kdBox(20, L.chartY + i * 55, 560, 1, "kd-rl soft");
-    h += "<svg style='left:20px;top:" + L.chartY +
-         "px;width:560px;height:220px' viewBox='0 0 560 220'" +
-         " aria-hidden='true'>" +
+  h += kdBox(18, L.rule2Y, 564, 1, "kd-rl");
+  if (L.chart) {
+    h += kdT(18, L.rule2Y + 6, L.labSz, "24 HOURS", { ink:"#777777", bold:capB });
+    h += kdBox(20, L.grY, 560, L.grH, "kd-pl");
+    for (i = 1; i < 4; i++) h += kdBox(20, L.grY + Math.round(i * L.grH / 4), 560, 1, "kd-rl soft");
+    h += "<svg style='left:20px;top:" + L.grY +
+         "px;width:560px;height:" + L.grH + "px' viewBox='0 0 560 220'" +
+         " preserveAspectRatio='none' aria-hidden='true'>" +
          "<polyline points='0,150 70,140 140,158 210,120 280,96 350,110 420,74 490,88 560,66'" +
          " fill='none' stroke='#111111' stroke-width='3'/>" +
          "<polyline points='0,60 70,62 140,58 210,64 280,60 350,56 420,62 490,58 560,60'" +
          " fill='none' stroke='#777777' stroke-width='2' stroke-dasharray='7 5'/></svg>";
-    h += kdT(20, L.keyY, 15, "outside mean", { ink:"#444444" });
+    h += kdT(20, L.grY + L.grH + 2, 15, "outside mean", { ink:"#444444" });
   }
 
   // ── The forecast, on the page that has one ──
@@ -548,30 +790,32 @@ function kdRenderPreview() {
   // above went, and drawing it here would be a preview of a page the reader
   // will never see. Its row in the list stays, marked — see kdRenderZones.
   if (L.forecast) {
-    h += kdBox(18, 552, 564, 1, "kd-rl");
-    h += kdT(18, 558, 14, "FORECAST", { ink:"#777777", bold:capB });
-    h += kdBox(18, 580, 52, 52, "kd-pl");
-    h += kdT(78, 580, 31, "Showers", { bold:!!(bold & 0x0040) });
-    h += kdT(78, 614, 33, "14°/3°", { bold:true });
-    h += kdT(78, 652, 17, "wind 23 km/h · 8 min", { ink:"#444444" });
+    var fy = L.rule3Y;
+    h += kdBox(18, fy + 0, 564, 1, "kd-rl");
+    h += kdT(18, fy + 6, 14, "FORECAST", { ink:"#777777", bold:capB });
+    h += kdBox(18, fy + 28, 52, 52, "kd-pl");
+    h += kdT(78, fy + 28, 31, "Showers", { bold:!!(bold & 0x0040) });
+    h += kdT(78, fy + 62, 33, "14°/3°", { bold:true });
+    h += kdT(78, fy + 100, 17, "wind 23 km/h · 8 min", { ink:"#444444" });
     for (i = 0; i < 3; i++) {
-      h += kdBox(320 + i * 90, 560, 88, 92, "kd-pl");
-      h += kdT(326 + i * 90, 564, 14, ["21:00","00:00","03:00"][i], { ink:"#777777", bold:capB });
-      h += kdBox(340 + i * 90, 584, 34, 34, "kd-wk we");
-      h += kdT(340 + i * 90, 622, 22, ["6°","4°","3°"][i], { bold:true });
+      h += kdBox(320 + i * 90, fy + 8, 88, 92, "kd-pl");
+      h += kdT(326 + i * 90, fy + 12, 14, ["21:00","00:00","03:00"][i], { ink:"#777777", bold:capB });
+      h += kdBox(340 + i * 90, fy + 32, 34, 34, "kd-wk we");
+      h += kdT(340 + i * 90, fy + 70, 22, ["6°","4°","3°"][i], { bold:true });
     }
   }
 
   // ── The week strip ──
-  if (show & 0x0040) {
-    h += kdBox(18, 676, 564, 1, "kd-rl");
-    h += kdT(18, 681, 15, "august", { ink:"#777777", bold:capB });
+  if (L.week) {
+    var wy = L.wkRuleY;
+    h += kdBox(18, wy + 0, 564, 1, "kd-rl");
+    h += kdT(18, wy + 5, 15, "august", { ink:"#777777", bold:capB });
     var nm = ["MO","TU","WE","TH","FR","SA","SU"], dy = [24,25,26,27,28,29,30];
     for (i = 0; i < 7; i++) {
       var cls = i === 3 ? "kd-wk today" : (i >= 5 ? "kd-wk we" : "kd-wk");
-      h += kdBox(18 + i * 81, 700, 81, 58, cls);
-      h += kdT(40 + i * 81, 706, 14, nm[i], { ink:i === 3 ? "#ffffff" : "#777777" });
-      h += kdT(44 + i * 81, 726, 30, dy[i],
+      h += kdBox(18 + i * 81, wy + 24, 81, 58, cls);
+      h += kdT(40 + i * 81, wy + 30, 14, nm[i], { ink:i === 3 ? "#ffffff" : "#777777" });
+      h += kdT(44 + i * 81, wy + 50, 30, dy[i],
                { ink:i === 3 ? "#ffffff" : "#111111", bold:!!(bold & 0x0080) });
     }
   }
@@ -582,14 +826,14 @@ function kdRenderPreview() {
 
   // ── The hit targets ──
   // A button per region, over the drawing, so the picture is the index. Each
-  // zone's rectangle follows the shape the page is in: `sabox` where the
-  // standalone page put it, and no target at all for a region that page does
-  // not have — the forecast's row stays in the list, but there is nothing on
-  // the drawing to point at.
-  var sa = !L.forecast;
+  // zone's rectangle is where the layout put that region — kdPvBoxes() — and
+  // a region the page does not have gets no target at all: the forecast's row
+  // stays in the list on a page with no forecast, but there is nothing on the
+  // drawing to point at.
+  var boxes = kdPvBoxes(L);
   for (i = 0; i < KD_ZONES.length; i++) {
     var d = KD_ZONES[i];
-    var bx = sa ? d.sabox : d.box;
+    var bx = boxes[d.id];
     if (!bx) continue;
     var off = d.show > 0 && !(show & d.show);
     h += "<button type='button' class='kd-hit" + (off ? " off" : "") +

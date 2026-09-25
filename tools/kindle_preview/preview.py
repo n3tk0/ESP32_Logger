@@ -15,6 +15,11 @@ random.seed(7)
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 exec(open(os.path.join(HERE, 'icons.py')).read())
+# key=value arguments anywhere after the script name choose what is ON the page
+# — chart=0, fc=0, week=0, grid=N (0..6 places), in=N (0..3) — and the layout
+# for it is worked out by src/web/KindleFlow.h itself, through flow_dump.
+KW = dict(a.split('=', 1) for a in sys.argv[1:] if '=' in a)
+sys.argv = [sys.argv[0]] + [a for a in sys.argv[1:] if '=' not in a]
 mode = sys.argv[1] if len(sys.argv)>1 else 'hourly'
 lang = sys.argv[2] if len(sys.argv)>2 else 'en'
 scen = sys.argv[3] if len(sys.argv)>3 else 'calm'
@@ -84,7 +89,39 @@ S = {
    mon='ноември', wd=['пн','вт','ср','чт','пт','сб','нд'], cols3=['ср','чт','пт']),
 }[lang]
 
-W,H = kdpx(560), kdpx(220)
+# ── Where everything goes ──────────────────────────────────────────────────
+# Worked out by src/web/KindleFlow.h — the collector's own code, compiled here
+# as tools/kindle_preview/flow_dump — for what this preview puts on the page.
+# Like the stylesheet, and unlike the markup, it is not this script's copy.
+import subprocess, json
+FLOW_BIN = os.path.join(HERE, 'flow_dump')
+def flow_run(what, args):
+    src_ = os.path.join(HERE, 'flow_dump.cpp')
+    hdr = os.path.join(ROOT, 'src', 'web', 'KindleFlow.h')
+    if (not os.path.exists(FLOW_BIN) or
+            os.path.getmtime(FLOW_BIN) < max(os.path.getmtime(src_), os.path.getmtime(hdr))):
+        subprocess.check_call(['g++', '-std=gnu++17', '-O1', '-I', ROOT, src_, '-o', FLOW_BIN])
+    return subprocess.check_output([FLOW_BIN, what] + args, text=True)
+
+SHOW_CHART = KW.get('chart', '1') != '0'
+SHOW_FC    = KW.get('fc', '1') != '0'
+SHOW_WEEK  = KW.get('week', '1') != '0'
+NG = max(0, min(6, int(KW.get('grid', '3'))))
+NI = max(0, min(3, int(KW.get('in', '3'))))
+# metric, the value as printed, its unit, and whether it carries the arrow —
+# measured by kdFlowWorstAdvance() exactly as the collector measures a place.
+GRID_M = [('pressure', '1008', 'hPa', '1'), ('dew_point', '3.1', '°', '0'),
+          ('co2', '640', 'ppm', '0'), ('humidity', '71', '%', '0'),
+          ('aqi', '42', '', '0'), ('lux', '1250', 'lx', '0')][:NG]
+IN_M = [('temperature', '21.0', '°', '0'), ('humidity', '44', '%', '0'),
+        ('aqi', '42', '', '0')][:NI]
+FLOW_ARGS = ['chart=%d' % SHOW_CHART, 'fc=%d' % SHOW_FC, 'week=%d' % SHOW_WEEK, 'sub=1',
+             'gridp=' + ';'.join(':'.join(m) for m in GRID_M),
+             'inp=' + ';'.join(':'.join(m) for m in IN_M),
+             'pagew=%d' % PAGE_W, 'html=1']
+FLOW = json.loads(flow_run('json', FLOW_ARGS))
+
+W,H = kdpx(560), kdpx(FLOW['htmlChartH'] if SHOW_CHART else 220)
 L,R = kdpx(40), W - kdpx(4)
 T,B = kdpx(10), H - kdpx(26)
 HOURS=24
@@ -216,10 +253,13 @@ LAB_AGE   = '3 min old' if lang == 'en' else '3 мин'
 # the pressure and the dew point rather than instead of one of them.
 GRID   = [(LAB_PRESS, HERO['hpa'], 'hPa', '↘', ''),
           (LAB_DEW, '3.1', '°', '', ''),
-          ('CO₂', '640', 'ppm', '', 'ink-d')]
+          ('CO₂', '640', 'ppm', '', 'ink-d'),
+          (LAB_HUM, '71', '%', '', ''),
+          ('AQI', '42', '', '', 'ink-d'),
+          ('LIGHT', '1250', 'lx', '', '')][:NG]
 INDOOR = [(LAB_TEMP, '21.0', '°', '', ''),
           (LAB_HUM, '44', '%', '', 'ink-d'),
-          ('AQI', '42', '', '', 'ink-d')]
+          ('AQI', '42', '', '', 'ink-d')][:NI]
 
 def unit_span(unit):
     """Degrees and per-cent set tight against the number; everything else after
@@ -251,9 +291,10 @@ def row_split(n, cols=3):
     return [base + (1 if r < extra else 0) for r in range(rows)]
 
 def grid_rows():
+    """The rows the layout chose — the same call appendTopBlock() follows."""
     out, at = '', 0
-    for cols in row_split(len(GRID)):
-        out += '<table class="grid' + (' grid-3' if cols >= 3 else '') + '"><tr>'
+    for cols in FLOW['gridRows']:
+        out += '<table class="grid"><tr>'
         for _ in range(cols):
             out += ('<td width="%d%%">' % (100 // cols) +
                     cell(*GRID[at], 'gv') + '</td>')
@@ -265,18 +306,35 @@ def indoor_row():
     if not INDOOR:
         return ''
     n = len(INDOOR)
-    # The first field gets more of the row because it is set larger — the same
-    # split appendTopBlock() applies.
-    first = 42 if n >= 3 else (58 if n == 2 else 100)
+    stack = FLOW['inStack']
+    first = 100 if stack else (FLOW['inW1Pm'] + 5) // 10
     tds = ''
     for i, (lab, val, unit, arrow, ink) in enumerate(INDOOR):
-        w = first if i == 0 else (100 - first) // (n - 1)
+        if i == 1 and stack:
+            tds += '</tr></table><table class="inrow inrow2"><tr>'
+        w = first if i == 0 else (100 // (n - 1) if stack else (100 - first) // (n - 1))
         # The first field carries no caption and spends the line on type.
         tds += ('<td width="%d%%">' % w +
                 cell(lab, val, unit, arrow, ink,
                      'iv iv-1' if i == 0 else 'iv', i != 0) + '</td>')
     return ('<div class="inrule"></div><div class="lab">' + S['ins'] + '</div>'
             '<table class="inrow"><tr>' + tds + '</tr></table>')
+
+CHART_HTML = ('<div class="rule"></div><div class="sec">'+S['h24']+'</div>'
+ + '\n'.join(g) +
+ '<table class="key"><tr><td>'
+ +('<svg width="%d" height="%d"><line x1="0" y1="%d" x2="%d" y2="%d" stroke="#000" stroke-width="%d"/></svg> '%(kdpx(26),kdpx(9),kdpx(5),kdpx(26),kdpx(5),kdpx(3)))
+ +S['mean']+'<span class="dim">'+S['band']+'</span>'
+ '</td><td style="text-align:right">'
+ +('<svg width="%d" height="%d"><line x1="0" y1="%d" x2="%d" y2="%d" stroke="#777" stroke-width="%d" stroke-dasharray="%d %d"/></svg> '%(kdpx(26),kdpx(9),kdpx(5),kdpx(26),kdpx(5),kdpx(2),kdpx(7),kdpx(5)))
+ +S['inl']+'</td></tr></table>') if SHOW_CHART else ''
+FC_HTML = ('<div class="rule"></div><div class="sec">'+S['fc']+'</div>'
+ '<table><tr><td width="%d" class="ico">'%kdpx(56)+ico(HERO['ic'],kdpx(52))+'</td>'
+ '<td class="fc">'+HERO['cond']+'<div class="fc-t">'+HERO['ft']+'</div>'
+ '<div class="sub">'+HERO['wind']+' &middot; <span class="dim">'+S['age']+'</span></div></td>'
+ +per+'</tr></table>') if SHOW_FC else ''
+WEEK_HTML = ('<div class="rule"></div><div class="sec sec-wk">'+S['mon']+'</div>'
+ '<table class="wk"><tr>'+wk+'</tr></table>') if SHOW_WEEK else ''
 
 body=('<table class="top"><tr><td class="col-l" width="50%">'
  '<div class="lab">' + S['out'] + (battery_badge() if WARN else '') + '</div>'
@@ -293,23 +351,11 @@ body=('<table class="top"><tr><td class="col-l" width="50%">'
  +('<div class="clock-d">25 %s</div>'%S['mon'] if CLOCK=='dated' else '')
  + indoor_row()
  + '</td></tr></table>'
- + '<div class="rule"></div><div class="sec">'+S['h24']+'</div>'
- + '\n'.join(g) +
- '<table class="key"><tr><td>'
- +('<svg width="%d" height="%d"><line x1="0" y1="%d" x2="%d" y2="%d" stroke="#000" stroke-width="%d"/></svg> '%(kdpx(26),kdpx(9),kdpx(5),kdpx(26),kdpx(5),kdpx(3)))
- +S['mean']+'<span class="dim">'+S['band']+'</span>'
- '</td><td style="text-align:right">'
- +('<svg width="%d" height="%d"><line x1="0" y1="%d" x2="%d" y2="%d" stroke="#777" stroke-width="%d" stroke-dasharray="%d %d"/></svg> '%(kdpx(26),kdpx(9),kdpx(5),kdpx(26),kdpx(5),kdpx(2),kdpx(7),kdpx(5)))
- +S['inl']+'</td></tr></table>'
- '<div class="rule"></div><div class="sec">'+S['fc']+'</div>'
- '<table><tr><td width="%d" class="ico">'%kdpx(56)+ico(HERO['ic'],kdpx(52))+'</td>'
- '<td class="fc">'+HERO['cond']+'<div class="fc-t">'+HERO['ft']+'</div>'
- '<div class="sub">'+HERO['wind']+' &middot; <span class="dim">'+S['age']+'</span></div></td>'
- +per+'</tr></table>'
- '<div class="rule"></div><div class="sec sec-wk">'+S['mon']+'</div>'
- '<table class="wk"><tr>'+wk+'</tr></table>'
+ + CHART_HTML + FC_HTML + WEEK_HTML
  +'<table class="foot"><tr><td>'+S['foot2']+'</td>'
   '<td class="act"><a href="/kindle">'+S['refresh']+'</a>'
   '<a href="/kindle/clear">'+S['clear']+'</a></td></tr></table>')
+# The layout's overrides go last, after the clock style, as kdFlowCss() does.
+style += flow_run('css', FLOW_ARGS + ['clock=%d' % {'plain': 0, 'boxed': 1, 'ruled': 2, 'dated': 3}[CLOCK]]).strip()
 open(os.path.join(HERE, 'preview.html'),'w').write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>W</title><style>'+style+'</style></head><body>'+body+'</body></html>')
 print('preview:',mode)
