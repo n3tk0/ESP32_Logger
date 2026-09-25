@@ -39,6 +39,7 @@ import check_kindle_icons                                      # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CPP = os.path.join(ROOT, 'src/web/KindleDashboard.cpp')
+FLOW_H = os.path.join(ROOT, 'src/web/KindleFlow.h')
 SKIN = os.path.join(ROOT, 'src/web/KindleSkin.h')
 
 # The two panels this firmware ships layouts for, and the KINDLE_PAGE_W each
@@ -380,11 +381,15 @@ def main():
     # into 181 px where the page used 184, one pixel lower and a percent and a
     # half shorter. Nothing said so: the size check above compares GR_W/GR_H,
     # which were both right.
-    m = re.search(r'CHART_H = kdPx\((\d+)\);', open(CPP, encoding='utf-8').read())
+    #
+    # The chart's height is the layout's now (src/web/KindleFlow.h), per
+    # render, and both ends are handed it; the design height the margins are
+    # proportioned against is the one the layout never goes below.
+    m = re.search(r'KDF_CHART_MIN\s*=\s*(\d+);', open(FLOW_H, encoding='utf-8').read())
     design_h = int(m.group(1)) if m else None
     if design_h is None:
-        problems.append('parity: no CHART_H = kdPx(N) in KindleDashboard.cpp — '
-                        'the page no longer states its chart height')
+        problems.append('parity: no KDF_CHART_MIN in KindleFlow.h — '
+                        'the layout no longer states the chart\'s design height')
 
     svg = re.search(r'const int L = kdPx\((\d+)\), R = CHART_W - kdPx\((\d+)\), '
                     r'T = kdPx\((\d+)\), B = CHART_H - kdPx\((\d+)\);',

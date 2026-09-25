@@ -71,7 +71,10 @@ done
 # Both endpoints answer only for WGET_OK_HOST, so a test can point the
 # dashboard at an address that is not there and see what it does about it.
 case "$url" in
-    *"$WGET_OK_HOST"*/kindle/data)
+    # ?shape= is the page the reader chose, when it chose one; logged, so a
+    # test can see it was asked for.
+    *"$WGET_OK_HOST"*/kindle/data|*"$WGET_OK_HOST"*/kindle/data\?shape=*)
+        echo "$url" >> "${WGET_LOG:-/dev/null}"
         if [ "$out" = "-" ] || [ -z "$out" ]; then cat "$FIXTURE"
         # DATA_TRUNCATE=1 is the connection that died partway through the
         # payload: a prefix of a good one, which parses perfectly and is
@@ -96,7 +99,9 @@ case "$url" in
             echo done
         fi
         exit 0 ;;
-    *"$WGET_OK_HOST"*/kindle/graph.bmp)
+    # ?h= is the chart's height on the collector's layout.
+    *"$WGET_OK_HOST"*/kindle/graph.bmp|*"$WGET_OK_HOST"*/kindle/graph.bmp\?h=*)
+        echo "$url" >> "${WGET_LOG:-/dev/null}"
         # A REAL, SELF-CONSISTENT BMP: "BM", then the file's own length as a
         # 32-bit little-endian count at offset 2 (130 = \202), then bytes to
         # match. GRAPH_TRUNCATE=1 keeps the promise in the header and stops
@@ -736,6 +741,195 @@ RES_W=600; RES_H=800; load_layout
   exit 0 )
 check "$?" "a page that changes shape asks for a full repaint, not a tier"
 RES_W=600; RES_H=800; LAYOUT=auto; unset PAGE_MODE; load_layout
+
+# ── 2a-ter. THE COLLECTOR'S LAYOUT ──────────────────────────────────────────
+#
+# A collector that knows what is on the page works out where it goes
+# (src/web/KindleFlow.h) and sends it as LY_* keys, already at the panel's
+# size; the panel lays them over its layout file. The payloads below are that
+# header's own output, through tools/kindle_preview/flow_dump, so what is
+# tested is the pair of them rather than numbers copied out of one.
+FLOW_DUMP="$WORK/flow_dump"
+g++ -std=gnu++17 -O1 -I "$ROOT" "$ROOT/tools/kindle_preview/flow_dump.cpp" -o "$FLOW_DUMP" \
+    2>"$WORK/flow_dump.err"
+check "$?" "the collector's layout builds for the tests (tools/kindle_preview/flow_dump)"
+
+# flow_payload FILE [flow_dump args...] -> the LY_* keys, as the payload has them
+flow_payload() {
+    local f="$1"; shift
+    "$FLOW_DUMP" kv gridp='pressure:1008:hPa:1;dew_point:3.1:°;co2:640:ppm' \
+        inp='temperature:21.0:°;humidity:44:%;aqi:42:' "$@" > "$f"
+}
+# ly_load FILE -> the keys set as the payload would set them, nothing else left
+ly_load() {
+    local z
+    for z in $FLOW_KEYS GRID_ROWS CH_T CH_B; do unset "LY_$z" 2>/dev/null; done
+    load_kv "$1" PAYLOAD
+}
+
+# A collector too old to send one: the file's page, exactly as it always was.
+( ly_load /dev/null; LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  [ "$LAYOUT_FLOW" = "0" ] || exit 1
+  [ "$RULE2_Y" = "282" ] && [ "$RULE3_Y" = "552" ] && [ "$GR_H" = "220" ] || exit 2
+  exit 0 )
+check "$?" "no LY_* keys: the layout file's page, as before"
+
+# Every section on is the page the layout file describes — key for key, where
+# nothing moved.
+( flow_payload "$WORK/ly.txt" res=600; ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  [ "$LAYOUT_FLOW" = "1" ] || exit 1
+  [ "$RULE2_Y" = "282" ] || exit 2
+  [ "$GR_Y" = "308" ] && [ "$GR_H" = "220" ] || exit 3
+  [ "$RULE3_Y" = "552" ] && [ "$WK_Y" = "700" ] || exit 4
+  [ "$HERO_SZ" = "88" ] && [ "$CL_SIZE" = "96" ] || exit 5
+  fc_wanted || exit 6
+  exit 0 )
+check "$?" "every section on: the collector's layout is the layout file's page"
+
+# THE WEEK STRIP OFF: everything above it comes down, and the rectangles the
+# panel is refreshed in still tile it with nothing left over.
+for res in 600x800 1072x1448; do
+  for args in "week=0" "fc=0" "fc=0 week=0" "chart=0" "chart=0 fc=0 week=0"; do
+    ( flow_payload "$WORK/ly.txt" res=${res%x*} $args; ly_load "$WORK/ly.txt"
+      LAYOUT=auto; unset PAGE_MODE; RES_W=${res%x*} RES_H=${res#*x}
+      load_layout
+      [ "$LAYOUT_FLOW" = "1" ] || exit 1
+      [ "$Z_SENS_H" -eq "$Z_CHART_Y" ] || exit 2
+      [ $((Z_CHART_Y + Z_CHART_H)) -eq "$Z_FC_Y" ] || exit 3
+      [ $((Z_FC_Y + Z_FC_H)) -eq "$RES_H" ] || exit 4
+      case " $args " in
+        *" chart=0 "*) [ "$Z_CHART_H" -eq 0 ] || exit 5 ;;
+        *) [ $((GR_Y + GR_H)) -lt "$RULE3_Y" ] || exit 6
+           [ "$KEY_Y" -lt "$RULE3_Y" ] || exit 7 ;;
+      esac
+      case " $args " in
+        *" fc=0 "*) fc_wanted && exit 8 ;;
+        *) fc_wanted || exit 9 ;;
+      esac
+      # The week strip, when it is there, sits on its own rule and above the
+      # footer; when it is not, the band over it comes down to the footer.
+      case " $args " in
+        *" week=0 "*) [ "$RULE3_Y" -gt "$(( 552 * RES_W / 600 ))" ] || exit 10 ;;
+        *) [ "$WK_Y" -gt "$WK_HDG_RULE_Y" ] || exit 11 ;;
+      esac
+      # The top block: its last grid row and the indoor row finish above
+      # whatever is under them.
+      rows=$(set -- $LY_GRID_ROWS; echo $#)
+      [ $((GRID_Y + (rows - 1) * GRID_ROW_H + GRID_LAB_SZ + 4 + GRID_VAL_SZ)) \
+          -lt "$RULE2_Y" ] || exit 12
+      [ $((IN_VAL_Y + IN_VAL_SZ_1)) -lt "$RULE2_Y" ] || exit 13
+      exit 0 )
+    check "$?" "$res with $args: the page tiles and nothing overruns"
+  done
+done
+
+# Numbers only, and only the names the panel knows. A value that is not
+# digits is dropped and the file's number stays.
+( flow_payload "$WORK/ly.txt" res=600 week=0
+  echo 'LY_HERO_SZ="1;reboot"' >> "$WORK/ly.txt"
+  echo 'LY_FOOT_Y=10' >> "$WORK/ly.txt"
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  [ "$LAYOUT_FLOW" = "1" ] || exit 1
+  [ "$HERO_SZ" = "88" ] || exit 2          # the file's
+  [ "$FOOT_Y" = "772" ] || exit 3          # not a name it lays over
+  exit 0 )
+check "$?" "an LY_ value that is not a number, or not a layout name, is ignored"
+
+# The grid's rows are counts the script divides by: anything but 1..6 and
+# the list is dropped, never divided by.
+for bad in '0' '2 x' '7' '1;reboot'; do
+  ( flow_payload "$WORK/ly.txt" res=600
+    grep -v '^LY_GRID_ROWS=' "$WORK/ly.txt" > "$WORK/ly2.txt"
+    echo "LY_GRID_ROWS=\"$bad\"" >> "$WORK/ly2.txt"
+    ly_load "$WORK/ly2.txt"
+    LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+    load_layout
+    [ "$LAYOUT_FLOW" = "1" ] || exit 1
+    [ -z "$LY_GRID_ROWS" ] || exit 2
+    exit 0 )
+  check "$?" "LY_GRID_ROWS=\"$bad\" is dropped rather than divided by"
+done
+
+# A CHART FETCHED FOR THE OLD LAYOUT IS NOT DRAWN IN THE NEW ONE. The image's
+# height is in its header; one that is not the layout's GR_H would run over
+# the key and the band under it.
+bmp_of_height() {   # $1=file $2=height -> a 130-byte BMP whose header says so
+    { printf 'BM\202\000\000\000'
+      dd if=/dev/zero bs=1 count=16 2>/dev/null
+      h=$2; printf "\\$(printf %o $((h & 255)))\\$(printf %o $(((h >> 8) & 255)))\\000\\000"
+      dd if=/dev/zero bs=1 count=104 2>/dev/null; } > "$1"
+}
+( flow_payload "$WORK/ly.txt" res=600 week=0; ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800; load_layout
+  bmp_of_height "$DASH_TMP/graph.bmp" 220
+  graph_fits "$DASH_TMP/graph.bmp" && exit 1          # 220 on a 221 layout
+  bmp_of_height "$DASH_TMP/graph.bmp" "$GR_H"
+  graph_fits "$DASH_TMP/graph.bmp" || exit 2
+  # Without a layout the file's chart is the only size there is.
+  ly_load /dev/null; load_layout
+  bmp_of_height "$DASH_TMP/graph.bmp" 999
+  graph_fits "$DASH_TMP/graph.bmp" || exit 3
+  exit 0 )
+check "$?" "a chart of another height is not drawn on the layout's page"
+
+# A LAYOUT THAT MOVED IS A PAGE REPAINTED WHOLE, the same as the standalone
+# page coming and going: switch the week strip off and every coordinate above
+# it moves.
+( rm -f "$DASH_TMP/redraw"
+  HAVE_DATA=1 LAYOUT=auto RES_W=600 RES_H=800; unset PAGE_MODE
+  flow_payload "$WORK/ly.txt" res=600; ly_load "$WORK/ly.txt"; load_layout
+  rm -f "$DASH_TMP/redraw"
+  load_layout
+  [ -f "$DASH_TMP/redraw" ] && exit 1      # no change, no repaint
+  flow_payload "$WORK/ly.txt" res=600 week=0; ly_load "$WORK/ly.txt"; load_layout
+  [ -f "$DASH_TMP/redraw" ] || exit 2
+  rm -f "$DASH_TMP/redraw"
+  exit 0 )
+check "$?" "a layout that moved asks for a full repaint"
+
+# The grid breaks where the layout says, and every row is one size: two
+# readings with the room for it go one under the other.
+( flow_payload "$WORK/ly.txt" res=600 fc=0 gridp='pressure:1008:hPa:1;dew_point:3.1:°'
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  [ "$LY_GRID_ROWS" = "1 1" ] || { echo "rows [$LY_GRID_ROWS]" >&2; exit 1; }
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"; load_layout
+  GRID_ZONES="PRES DEW"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  # Both values at the column's left edge, at the one size, on two lines.
+  px=$(px_of "$GRID_VAL_SZ")
+  n=$(grep -c -- "px=$px,left=${COL_L_X:-18}," "$FBINK_LOG")
+  [ "$n" -eq 2 ] || { echo "grid values at the left edge: $n" >&2; exit 2; }
+  exit 0 )
+check "$?" "two readings the layout stacks are drawn one under the other"
+
+# Old script, new collector: the file's own GRID_ROWS is still sent for it.
+grep -q 'GRID_ROWS=' "$FIXTURE"
+check "$?" "the fixture still carries the file-page GRID_ROWS older scripts read"
+
+# The two requests carry what the layout needs: the chart as tall as it now
+# is, and the page the reader chose.
+( : > "$WORK/wget.log"; WGET_LOG="$WORK/wget.log"; export WGET_LOG
+  flow_payload "$WORK/ly.txt" res=600 week=0; ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800; load_layout
+  WGET_OK_HOST=10.9.9.42; HOST=10.9.9.42; export WGET_OK_HOST
+  fetch_graph >/dev/null 2>&1
+  grep -q "/kindle/graph.bmp?h=$GR_H\$" "$WORK/wget.log" || exit 1
+  LAYOUT=standalone
+  fetch_data >/dev/null 2>&1
+  grep -q "/kindle/data?shape=standalone\$" "$WORK/wget.log" || exit 2
+  exit 0 )
+check "$?" "the chart is fetched at the layout's height, the data for the chosen page"
+LAYOUT=auto; unset PAGE_MODE; RES_W=600; RES_H=800
+ly_load /dev/null; load_layout
 
 # ── 2b. The clock rectangle is cleared and flashed, so nothing else may live
 # in it ───────────────────────────────────────────────────────────────────────

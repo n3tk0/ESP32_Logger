@@ -27,6 +27,13 @@ the WK%d_/FC%d_ families) are NOT checked: their names do not exist in the
 source to compare, and the allowlist covers them by prefix. Checking what can
 be checked beats a check that has to guess.
 
+AND THE LAYOUT'S KEYS BOTH WAYS. kdFlowPanelKeys() in src/web/KindleFlow.h
+sends LY_<name> for every value the layout moves, and the script's flow_apply()
+assigns only the names in its FLOW_KEYS list. A name on one side and not the
+other is a value worked out and thrown away, or one the panel waits for and
+never gets — either way a section drawn where the layout file put it rather
+than where the page has room. So the two lists must be the same list.
+
     python3 tools/check_kindle_payload_keys.py
 """
 from __future__ import annotations
@@ -39,6 +46,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIRMWARE = os.path.join(ROOT, 'src', 'web', 'KindleDashboard.cpp')
 SCRIPT = os.path.join(ROOT, 'kindle', 'update_dash.sh')
+FLOW = os.path.join(ROOT, 'src', 'web', 'KindleFlow.h')
 
 # END is read by payload_ok() with a direct `grep -q '^END=1'` on the file,
 # deliberately outside load_kv() and therefore outside the allowlist: it is the
@@ -95,6 +103,27 @@ def main() -> int:
 
     print('OK: all %d literal payload key(s) the collector sends are accepted '
           'by the Kindle script (%d patterns).' % (len(keys), len(pats)))
+
+    flow = open(FLOW, encoding='utf-8').read()
+    body = flow[flow.index('kdFlowPanelKeys(const KdFlow'):]
+    body = body[:body.index('#undef KDF_K')]
+    sent = set(re.findall(r'KDF_[KR]\(\s*"([A-Z0-9_]+)"', body))
+    m = re.search(r'^FLOW_KEYS="([^"]*)"', sh, re.M)
+    if not sent or not m:
+        print('FAIL: could not read the layout keys out of KindleFlow.h or '
+              'FLOW_KEYS out of update_dash.sh — this check is stale.')
+        return 1
+    applied = set(m.group(1).split())
+    if sent != applied:
+        for k in sorted(sent - applied):
+            print('FAIL: LY_%s is sent by kdFlowPanelKeys() and never applied — '
+                  'add it to FLOW_KEYS in kindle/update_dash.sh' % k)
+        for k in sorted(applied - sent):
+            print('FAIL: FLOW_KEYS applies %s, which the collector never sends — '
+                  'the panel keeps the layout file\'s value for it' % k)
+        return 1
+    print('OK: the %d layout keys the collector sends are the %d the Kindle '
+          'script applies.' % (len(sent), len(applied)))
     return 0
 
 

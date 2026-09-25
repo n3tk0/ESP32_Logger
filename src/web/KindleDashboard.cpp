@@ -18,6 +18,7 @@
 #include "KindleSkin.h"                 // config.kindle -> face, weight, formats
 #include "KindleChartBmp.h"             // ChartBmpCtx / ChartBmpReader
 #include "KindleSlotStore.h"            // the configurable slot list
+#include "KindleFlow.h"                 // where everything goes, for what is on the page
 #ifdef FEATURE_ESPNOW_INGEST
 #  include "../espnow/EspNowIngest.h"   // espnowAnyBatteryWarn()
 #endif
@@ -75,6 +76,19 @@ static bool kdStandalone() {
     return kdStandaloneDecide(config.kindle.layoutMode, haveModule,
                               apModeTriggered, fetchedAt,
                               (uint32_t)time(nullptr), KD_FORECAST_STALE_S);
+}
+
+// The shape a request asks for. The FBInk reader carries its own override —
+// LAYOUT= in dash.conf, KUAL's Settings → Screen → Page shape — and sends it as
+// ?shape= so the layout is worked out for the page it will actually draw; a
+// request that does not say takes the collector's own answer.
+static bool kdStandaloneFor(AsyncWebServerRequest* req) {
+    if (req && req->hasParam("shape")) {
+        const String& v = req->getParam("shape")->value();
+        if (v == "normal")     return false;
+        if (v == "standalone") return true;
+    }
+    return kdStandalone();
 }
 
 // The left half of the footer. "Measured on site" is the right thing to say
@@ -143,7 +157,9 @@ static void kdFooterNote(char* buf, size_t n) {
 
 static constexpr int PAGE_W  = KINDLE_PAGE_W;
 static constexpr int CHART_W = kdPx(560);
-static constexpr int CHART_H = kdPx(220);
+// The chart's height is not a constant any more: it is what the layout had
+// left once the readings above it stopped growing — see KindleFlow.h. 220 is
+// what it is on the ordinary page, and the least it ever is.
 
 static const char* outdoorSensorId() {
     return (config.kindle.outdoorSensor[0] != '\0') ? config.kindle.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
@@ -296,7 +312,7 @@ static bool seriesHasData(const TrendRing::Hour* h) {
 
 static void appendChart(String& out,
                         const TrendRing::Hour* a, const TrendRing::Hour* b,
-                        bool haveA, bool haveB) {
+                        bool haveA, bool haveB, int CHART_H) {
     float lo =  1e9f, hi = -1e9f;
     for (int i = 0; i < TrendRing::HOURS; i++) {
         if (haveA && a[i].count) { if (a[i].min < lo) lo = a[i].min; if (a[i].max > hi) hi = a[i].max; }
@@ -662,7 +678,15 @@ static void appendWeek(String& out, uint32_t now) {
 void handleKindleGraph(AsyncWebServerRequest* req) {
     const KindleConfig skin = config.kindle;
     const uint16_t W = ChartBmp::imageW(skin.fbinkResW);
-    const uint16_t H = ChartBmp::imageH(skin.fbinkResW);
+    // As tall as the reader's layout left the chart, when it says — see
+    // LY_GR_H in /kindle/data. A reader that does not say gets the fixed
+    // image it has always been sent.
+    uint16_t askH = 0;
+    if (req->hasParam("h")) {
+        const long v = req->getParam("h")->value().toInt();
+        if (v > 0 && v < 4000) askH = (uint16_t)v;
+    }
+    const uint16_t H = ChartBmp::clampH(askH, skin.fbinkResW);
 
     // A shared_ptr, AND THAT IS THE FIX, not a tidier spelling of the same
     // thing. The previous version held raw pointers and deleted them only on
@@ -788,46 +812,9 @@ struct KdResolved {
     uint32_t    ts;
 };
 
-/// How wide a string comes out, in THOUSANDTHS OF THE TYPE SIZE.
-///
-/// For the shell renderer, which draws with FBInk and cannot ask it how wide it
-/// drew something. The headline sets two values and a slash on one baseline, so
-/// the second one's x depends on the first one's width, and a script counting
-/// characters would be wrong twice over: `${#var}` counts bytes, so "8.4°" is
-/// five of them, and a digit and a full stop are not the same width anyway.
-///
-/// The weights are for a serif at a glance size — Bookerly, Caecilia, Georgia,
-/// which is the stack this page names. Figures are tabular in all three, hence
-/// one width for all ten. Being a few per cent out moves the slash by a pixel
-/// or two, which is why an estimate is good enough here and would not be for
-/// anything that had to line up.
-static unsigned kdAdvanceMille(const char* s) {
-    if (!s) return 0;
-    unsigned total = 0;
-    for (const unsigned char* q = (const unsigned char*)s; *q; q++) {
-        if ((*q & 0xC0) == 0x80) continue;          // a UTF-8 continuation byte
-        unsigned w;
-        if (*q == 0xC2) {
-            // The two Latin-1 supplement glyphs this page actually prints.
-            const unsigned char n = q[1];
-            w = (n == 0xB0) ? 330u :                // ° — narrow
-                (n == 0xB5) ? 520u : 550u;          // µ
-        }
-        else if (*q >= 0xC0)                 w = 620;   // a letter outside ASCII
-        else if (*q >= '0' && *q <= '9')     w = 500;   // tabular figures
-        else if (*q == '.' || *q == ',' ||
-                 *q == ':' || *q == '\'')    w = 260;
-        else if (*q == '-' || *q == '+' ||
-                 *q == '/')                  w = 330;
-        else if (*q == ' ')                  w = 250;
-        else if (*q == '%')                  w = 800;
-        else if (*q >= 'A' && *q <= 'Z')     w = 620;
-        else if (*q >= 'a' && *q <= 'z')     w = 500;
-        else                                 w = 550;
-        total += w;
-    }
-    return total;
-}
+// kdAdvanceMille() — how wide a string comes out, in thousandths of the type
+// size — lives in KindleFlow.h now, beside the layout that sizes each reading
+// by it.
 
 /// Resolve all eleven places against the live readings.
 ///
@@ -965,9 +952,78 @@ static void kdSubLine(char* buf, size_t n, const KindleConfig& skin,
 /// `$Z_HERO_VALUE` and a person reading it knows where that lands. GRID_ZONES
 /// and IN_ZONES carry the closing-up: they list only the places that survived,
 /// in order, so the script iterates a list instead of re-deriving the rule.
-static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t now) {
+// ---------------------------------------------------------------------------
+// The layout, for what is on the page
+// ---------------------------------------------------------------------------
+/// The widest one place can print, for the layout to size it by — its reading
+/// widened to the most digits its metric reaches, with its unit, and with the
+/// tendency arrow if it is a place that draws one. The arrow counts whether or
+/// not there is a tendency yet: it appears three hours after a restart, and a
+/// layout that made room for it only then would shrink the grid at that hour.
+static uint16_t kdPlaceAdvance(const KindleConfig& skin, const KindleSlot& sl,
+                               const KdResolved& r) {
+    const bool arrow = (sl.flags & KSLOTF_TREND) && (skin.showFlags & KSHOW_TENDENCY) &&
+                       strcmp(sl.metric, "pressure") == 0;
+    return (uint16_t)kdFlowWorstAdvance(sl.metric, r.text, r.unit, arrow);
+}
+
+/// Where everything goes on this render. ONE CALL, USED BY BOTH RENDERERS, for
+/// the reason the places are resolved once: the browser page and the panel
+/// must not disagree about which cell is on which row or how big it is.
+///
+/// `res` is the places as kdResolveZones() left them; `standalone` is whether
+/// the forecast band is on the page; `haveSub` whether the line under the
+/// headline has anything in it; `html` whether it is for the browser page.
+static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT],
+                        bool standalone, bool haveSub, bool html) {
+    const KindleZones& zones = kdSlots();
+    bool visible[KZ_COUNT];
+    kdZoneVisibility(res, visible);
+
+    KdFlowIn in;
+    in.chart    = (skin.showFlags & KSHOW_CHART) != 0;
+    in.week     = (skin.showFlags & KSHOW_WEEK) != 0;
+    in.forecast = !standalone;
+    in.sub      = haveSub;
+
+    uint8_t used[KZ_GRID_COUNT];
+    const int n = (skin.showFlags & KSHOW_GRID) ? kdGridUsed(zones, visible, used) : 0;
+    in.nGrid = (uint8_t)n;
+    for (int i = 0; i < n; i++)
+        in.gridAdv[i] = kdPlaceAdvance(skin, zones.z[used[i]], res[used[i]]);
+
+    uint8_t inUsed[KZ_INDOOR_COUNT];
+    const int m = (skin.showFlags & KSHOW_INSIDE) ? kdIndoorUsed(zones, visible, inUsed) : 0;
+    in.nIn = (uint8_t)m;
+    for (int i = 0; i < m; i++)
+        in.inAdv[i] = kdPlaceAdvance(skin, zones.z[inUsed[i]], res[inUsed[i]]);
+
+    return html ? kdFlowComputeHtml(in) : kdFlowCompute(in);
+}
+
+/// The places and the layout, resolved once for a render. Both handlers need
+/// the same three things in the same order, and the layout cannot be worked out
+/// before the places are.
+struct KdRender {
     KdResolved res[KZ_COUNT];
-    kdResolveZones(skin, res);
+    char       sub[64];
+    KdFlow     flow;
+};
+
+static void kdRenderBegin(KdRender& r, const KindleConfig& skin, uint32_t now,
+                          bool standalone, bool html) {
+    kdResolveZones(skin, r.res);
+    kdSubLine(r.sub, sizeof(r.sub), skin, r.res[KZ_HERO], now);
+    r.flow = kdFlowFor(skin, r.res, standalone, r.sub[0] != '\0', html);
+}
+
+static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
+                      KdRender& rd) {
+    // IN PLACE, not a copy: seven hundred bytes of places on the web server's
+    // stack is enough once. Nothing reads them after this but the layout keys,
+    // which were worked out before KSHOW_BIG is applied below and do not
+    // depend on the second headline value.
+    KdResolved* res = rd.res;
 
     bool visible[KZ_COUNT];
     kdZoneVisibility(res, visible);
@@ -1004,9 +1060,7 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin, uint32_t
     kdShellVarUpper(s, "Z_GROUP_OUT", kdGroupOutLabel(zones));
     kdShellVarUpper(s, "Z_GROUP_IN",  kdGroupInLabel(zones));
 
-    char sub[64];
-    kdSubLine(sub, sizeof(sub), skin, res[KZ_HERO], now);
-    kdShellVar(s, "Z_SUB", sub);
+    kdShellVar(s, "Z_SUB", rd.sub);
 
     char key[24];
     for (int i = 0; i < KZ_COUNT; i++) {
@@ -1152,9 +1206,10 @@ static void appendCell(String& p, const KdResolved& r, const KindleSlot& sl,
 
 /// The whole top of the page: the outdoor headline and grid on the left, the
 /// clock and the indoor row on the right.
-static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now) {
-    KdResolved res[KZ_COUNT];
-    kdResolveZones(skin, res);
+static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now,
+                           const KdRender& rd) {
+    const KdResolved* res = rd.res;
+    const KdFlow& flow = rd.flow;
 
     bool visible[KZ_COUNT];
     kdZoneVisibility(res, visible);
@@ -1182,35 +1237,25 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now) {
     }
     p += F("</div>");
 
-    char sub[64];
-    kdSubLine(sub, sizeof(sub), skin, res[KZ_HERO], now);
-    if (sub[0]) {
+    if (rd.sub[0]) {
         p += F("<div class=\"sub\">");
-        appendEscaped(p, sub);
+        appendEscaped(p, rd.sub);
         p += F("</div>");
     }
 
-    // ── The two-by-two grid ─────────────────────────────────────────────────
-    // Two columns always, so the second cell of a row lands under the second
-    // cell of the row above it. A single survivor takes the left half and
-    // leaves the right one empty rather than stretching across both: a value
-    // twice as wide as the one under it is a worse answer than white space.
-    if (skin.showFlags & KSHOW_GRID) {
+    // ── The grid ────────────────────────────────────────────────────────────
+    // Broken into rows the way the layout chose — two side by side, or one
+    // under the other when that sets them larger — and every cell at the one
+    // size it chose. EACH ROW DIVIDES ITS OWN WIDTH BY ITS OWN COUNT: two cells
+    // are two halves, not two of three thirds with the last one white.
+    if (flow.gridNRows) {
         uint8_t used[KZ_GRID_COUNT];
         const int n = kdGridUsed(zones, visible, used);
 
-        int rows[KZ_GRID_COUNT];
-        const int nRows = kdGridRowSplit(n, rows, KZ_GRID_COUNT);
-
         int at = 0;
-        for (int r = 0; r < nRows; r++) {
-            const int cols = rows[r];
-            // EACH ROW DIVIDES ITS OWN WIDTH BY ITS OWN COUNT. Two cells are
-            // two halves, not two of three thirds with the last one white —
-            // "no empty space" has to hold whichever places got filled in.
-            p += F("<table class=\"grid");
-            if (cols >= 3) p += F(" grid-3");    // the tighter type scale
-            p += F("\"><tr>");
+        for (int r = 0; r < flow.gridNRows; r++) {
+            const int cols = flow.gridRows[r];
+            p += F("<table class=\"grid\"><tr>");
             for (int c = 0; c < cols && at < n; c++, at++) {
                 p += F("<td width=\"");
                 p += (int)(100 / cols);
@@ -1255,32 +1300,32 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now) {
     }
 
     // ── The indoor row ──────────────────────────────────────────────────────
-    // Three places or two, whichever is configured and reporting, on one row
-    // with the first set larger. Equal columns, so two fields are two halves
-    // and three are three thirds — and the first is bigger by TYPE, not by
-    // width, which is what keeps the row aligned whichever count it is.
-    if (skin.showFlags & KSHOW_INSIDE) {
+    // One row with the first field set larger, its share of the width what it
+    // needs to be — or, when that sets it larger still, the first field on a
+    // line of its own and the others under it. Which one, and every size, is
+    // the layout's.
+    if (flow.inValSz1) {
         uint8_t used[KZ_INDOOR_COUNT];
         const int n = kdIndoorUsed(zones, visible, used);
         if (n > 0) {
             p += F("<div class=\"inrule\"></div><div class=\"lab\">");
             appendEscaped(p, kdGroupInLabel(zones));
             p += F("</div><table class=\"inrow\"><tr>");
-            // THE FIRST FIELD GETS MORE OF THE ROW, not an equal share. It is
-            // set larger, so equal columns crowd it against its neighbour while
-            // leaving the small ones with space they do not need — "21.0°" at
-            // forty pixels does not fit a third of half a page.
-            const int firstW = (n >= 3) ? 42 : (n == 2 ? 58 : 100);
+            // THE FIRST FIELD CARRIES NO CAPTION and spends the line on type
+            // instead. The heading directly above it already says which room
+            // this is, and "TEMP" under it says nothing a degree sign has not
+            // already said. The others keep theirs and, on one line, sit on
+            // its bottom edge, so the values line up along one edge rather
+            // than along their tops.
+            const int firstW = flow.inStack ? 100 : (int)((flow.inW1Pm + 5) / 10);
             for (int i = 0; i < n; i++) {
+                if (i == 1 && flow.inStack)
+                    p += F("</tr></table><table class=\"inrow inrow2\"><tr>");
                 p += F("<td width=\"");
-                p += (i == 0) ? firstW : ((100 - firstW) / (n - 1));
+                if (i == 0)            p += firstW;
+                else if (flow.inStack) p += (100 / (n - 1));
+                else                   p += ((100 - firstW) / (n - 1));
                 p += F("%\">");
-                // THE FIRST FIELD CARRIES NO CAPTION and spends the line on
-                // type instead. The heading directly above it already says
-                // which room this is, and "TEMP" under it says nothing a
-                // degree sign has not already said. The other two keep theirs
-                // and sit on the bottom of the row, so all three values line
-                // up along one edge rather than along their tops.
                 appendCell(p, res[used[i]], zones.z[used[i]],
                            i == 0 ? "iv iv-1" : "iv", i != 0);
                 p += F("</td>");
@@ -1318,6 +1363,12 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     KindleConfig skin = config.kindle;
     kdSkinClamp(skin);
     char buf[24];
+
+    // The page's shape and everything on it, decided once for this payload:
+    // the forecast keys, PAGE_MODE and the layout all have to agree on it.
+    const bool standalone = kdStandaloneFor(req);
+    KdRender rd;
+    kdRenderBegin(rd, skin, now, standalone, false);
 
     AsyncResponseStream* s = req->beginResponseStream("text/plain");
 
@@ -1502,7 +1553,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // no forecast rather than a stale one under a layout that has no room for
     // it. One rule, two vintages of reader.
     #ifdef MODULE_FORECAST_ENABLED
-    if (!kdStandalone()) {
+    if (!standalone) {
         const auto& fc = forecastModule.snapshot();
         kdShellVar(s, "FC_SUMMARY", fc.summary);
         s->printf("FC_CODE=%d\n", fc.code);
@@ -1610,10 +1661,27 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // update_dash.sh keeps working from the keys it knows; a current one draws
     // the places and ignores them. Nobody has to update the reader and the
     // collector in the same minute.
-    emitZones(s, skin, now);
+    emitZones(s, skin, rd);
 
     // ── Metadata ──
     const uint16_t resW = skin.fbinkResW ? skin.fbinkResW : (uint16_t)KINDLE_PAGE_W;
+
+    // ── Where everything goes ───────────────────────────────────────────────
+    // The layout worked out for what is on the page — see KindleFlow.h — as
+    // the layout file's own names, at this panel's size. The reader lays them
+    // over the file it loaded, so the file stays the description of
+    // everything that does not move. A reader running an older update_dash.sh
+    // drops every LY_ key and keeps drawing the fixed page it always has,
+    // from the GRID_ROWS, PAGE_MODE and CH_* keys above and below, which keep
+    // their old meaning for it.
+    {
+        KdFlowKV kv[KDF_PANEL_KEYS];
+        const int nkv = kdFlowPanelKeys(rd.flow, resW, kv);
+        for (int i = 0; i < nkv; i++) s->printf("LY_%s=%d\n", kv[i].key, kv[i].value);
+        char rows[16];
+        kdFlowRowsText(rd.flow, rows, sizeof(rows));
+        kdShellVar(s, "LY_GRID_ROWS", rows);
+    }
     const uint16_t resH = (resW > 600) ? 1448 : 800;
     s->printf("RES_W=%u\n", resW);
     s->printf("RES_H=%u\n", resH);
@@ -1636,7 +1704,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // the coordinates for both and no way to know which applies: only this end
     // knows whether a forecast is coming. A reader running an older
     // update_dash.sh ignores the key and keeps the page it has always drawn.
-    kdShellVar(s, "PAGE_MODE", kdStandalone() ? "standalone" : "normal");
+    kdShellVar(s, "PAGE_MODE", standalone ? "standalone" : "normal");
 
     // Whether the chart has anything in it, which is what decides if the key
     // under it is drawn — the same test the page makes before drawing its own.
@@ -1714,6 +1782,16 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         s->printf("CH_L=%d\nCH_R=%d\nCH_T=%d\nCH_B=%d\n",
                   ChartBmp::marginL(cw), ChartBmp::marginR(cw),
                   ChartBmp::marginT(ch), ChartBmp::marginB(ch));
+        // And the same for the image a reader that follows the layout asks for
+        // — /kindle/graph.bmp?h=LY_GR_H — which is as tall as the layout left
+        // the chart. CH_T/CH_B above stay the fixed image's, because a reader
+        // running an older script still fetches that one.
+        {
+            const uint16_t fh = ChartBmp::clampH(
+                (uint16_t)kdFlowPanel(rd.flow.grH, resW), skin.fbinkResW);
+            s->printf("LY_CH_T=%d\nLY_CH_B=%d\n",
+                      ChartBmp::marginT(fh), ChartBmp::marginB(fh));
+        }
 
         // What the page prints instead of a chart when the record is empty.
         // The panel drew the grid regardless, which reads as "nothing is
@@ -1799,6 +1877,11 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // disagree about which clock is being drawn.
     KindleConfig skin = config.kindle;
     kdSkinClamp(skin);
+
+    // The places and where everything goes, once for the whole page: the
+    // stylesheet's sizes and the markup's rows have to come from one answer.
+    KdRender rd;
+    kdRenderBegin(rd, skin, now, kdStandalone(), true);
 
     String p;
     p.reserve(7000);
@@ -2188,12 +2271,12 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // arm of every choice into the picture at once.
     kdSkinCss(p, skin);
 
-    // The class the block above hangs on, and the only place the page's shape
-    // is chosen. Everything else about standalone is a rule that was already
-    // in the sheet.
-    p += F("</style></head><body");
-    if (kdStandalone()) p += F(" class=\"sa\"");
-    p += F(">");
+    // And last, the layout for what is on this page — the sizes and heights
+    // KindleFlow.h worked out. After the clock style, because the clock's size
+    // is one of the things it decides.
+    kdFlowCss(p, rd.flow, skin.clockStyle, [](int v) { return kdPx(v); });
+
+    p += F("</style></head><body>");
 
     // No masthead. The place name never changed and the date is carried by the
     // week strip at the foot, so the row was two lines of furniture above the
@@ -2202,13 +2285,13 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // THE SAME ELEVEN PLACES THE FBINK RENDERER DRAWS, resolved by the same call,
     // so "what is in this place" has one answer on this device rather than one
     // per screen.
-    appendTopBlock(p, skin, now);
+    appendTopBlock(p, skin, now, rd);
 
     if (skin.showFlags & KSHOW_CHART) {
         p += F("<div class=\"rule\"></div><div class=\"sec\">");
         p += kdT("Last 24 hours", "Последните 24 часа");
         p += F("</div>");
-        appendChart(p, tOut, tIn, haveOut, haveIn);
+        appendChart(p, tOut, tIn, haveOut, haveIn, kdPx(kdFlowHtmlChartH(rd.flow)));
         // The key names the lines the chart DREW, which is what appendChart's
         // own lo > hi test turns on — not the series the ring is tracking.
         const bool drewOut = haveOut && seriesHasData(tOut);
@@ -2241,7 +2324,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // alone, so a collector built with the module and then run on its own AP
     // served the section with a circled question mark in it — furniture, in
     // the one place on the page where the readings could have been.
-    if (!kdStandalone()) appendForecastSection(p);
+    if (rd.flow.forecast) appendForecastSection(p);
 #endif
 
     if (skin.showFlags & KSHOW_WEEK) appendWeek(p, now);

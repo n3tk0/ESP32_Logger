@@ -281,6 +281,10 @@ payload_key_ok() {
         # Which shape the page is. Only the collector can know: it is the end
         # that can see whether a forecast is coming.
         PAGE_MODE) return 0 ;;
+        # Where everything goes: the layout the collector worked out for what
+        # is on the page, under the layout file's own names. Applied by
+        # flow_apply(), which takes only names it lists and only digits.
+        LY_*) return 0 ;;
         # Written by cache_save(), not by the collector — but the cache is
         # loaded through exactly the same path as a payload, so they are
         # allowed here. They reach one drawn string and nothing else.
@@ -1837,7 +1841,13 @@ fetch_data() {
     # Into a scratch file and only into place once it is whole — the same shape
     # as fetch_graph, for the same reason: keeping the last good payload is a
     # better failure than replacing it with part of a new one.
-    if wget -q -T "$FETCH_TIMEOUT" -O "$TMP/data.new" "$(host_url)/kindle/data" \
+    # The page shape the reader has chosen, if it has: the collector works the
+    # layout out for the page this panel will draw, and only this end knows.
+    local q=""
+    case "${LAYOUT:-auto}" in
+        normal|standalone) q="?shape=$LAYOUT" ;;
+    esac
+    if wget -q -T "$FETCH_TIMEOUT" -O "$TMP/data.new" "$(host_url)/kindle/data$q" \
             2>/dev/null && payload_ok "$TMP/data.new"; then
         mv "$TMP/data.new" "$TMP/data.txt"
         FAILS=0
@@ -1962,6 +1972,21 @@ graph_ok() {
     [ "$have" = "$want" ]
 }
 
+# Is the image on disk as tall as the chart the layout has room for? The
+# collector's layout sizes the chart, and a fetch for the new height can fail
+# after the page has already moved: the kept image, drawn at the new GR_Y,
+# would run over the key and the band below it. Not drawn then — the line
+# saying there is no chart yet goes there instead, until the fetch comes in.
+# The BMP's height is at offset 22, negative for a top-down image; a reader
+# with no od, or a header that says 0, is let through as before.
+graph_fits() {
+    [ "${LAYOUT_FLOW:-0}" = "1" ] || return 0
+    local h
+    h=$(od -An -td4 -j22 -N4 "$1" 2>/dev/null | tr -dc '0-9')
+    case "$h" in ''|0) return 0 ;; esac
+    [ "$h" = "${GR_H:-}" ]
+}
+
 # Is the chart switched on? Consulted before FETCHING as well as before
 # drawing: a reader who turns the chart off in Settings should not have the
 # Kindle keep downloading a 56 KB image over WiFi every GRAPH_EVERY minutes
@@ -1976,7 +2001,11 @@ fetch_graph() {
     # redraw_chart clears its rectangle before drawing, that showed as a blank
     # strip where the chart was until the next successful fetch. Keeping the
     # last good chart is the better failure.
-    if wget -q -T 15 -O "$TMP/graph.new" "$(host_url)/kindle/graph.bmp" 2>/dev/null \
+    # As tall as the collector's layout left the chart. Without a layout the
+    # fixed image, which is what the layout file's GR_H was measured against.
+    local q=""
+    [ "${LAYOUT_FLOW:-0}" = "1" ] && q="?h=${GR_H}"
+    if wget -q -T 15 -O "$TMP/graph.new" "$(host_url)/kindle/graph.bmp$q" 2>/dev/null \
        && graph_ok "$TMP/graph.new"; then
         mv "$TMP/graph.new" "$TMP/graph.bmp"
         return 0
@@ -2022,6 +2051,9 @@ zones_forget() {
     # a firmware that does not send it would otherwise leave the panel drawing
     # the standalone layout for ever, because load_kv only ever assigns.
     unset PAGE_MODE 2>/dev/null
+    # And the layout, for the same reason again: a collector downgraded to a
+    # firmware that works none out has to take the panel back to the file's.
+    for z in $FLOW_KEYS GRID_ROWS CH_T CH_B; do unset "LY_$z" 2>/dev/null; done
     unset CACHED_AT CACHED_ON 2>/dev/null
     return 0
 }
@@ -2083,7 +2115,65 @@ LAYOUT_SA=0
 # and hiding the block on that page is 124 px of white with a week strip under
 # it — the exact hole this whole change exists to close. The two questions
 # cannot be allowed to disagree, so only one of them decides.
-fc_wanted() { [ "${LAYOUT_SA:-0}" != "1" ]; }
+fc_wanted() {
+    if [ "${LAYOUT_FLOW:-0}" = "1" ]; then [ "${FC_BAND:-1}" = "1" ]; return; fi
+    [ "${LAYOUT_SA:-0}" != "1" ]
+}
+
+# ── The layout the collector worked out ──────────────────────────────────────
+# A COLLECTOR THAT KNOWS WHAT IS ON THE PAGE SAYS WHERE IT GOES. The layout
+# file is one fixed page: switch the week strip off and its 88 px stay white;
+# put two readings in the grid and they sit on one row with an empty one under
+# them. The collector is the end that knows which sections are on, how many
+# places have a reading and how wide each can get, so it works the page out —
+# src/web/KindleFlow.h — and sends it as LY_<name> for the names below, already
+# at this panel's size. They are laid over the file, which stays the
+# description of everything that does not move.
+#
+# THESE NAMES AND NO OTHERS, AND DIGITS ONLY. The values are assigned with
+# eval into the variables every draw reads, so a name outside this list or a
+# value that is not a number is dropped rather than trusted.
+#
+# A collector too old to send a layout sends no LY_GR_H, and the panel draws
+# the file's page exactly as it always has.
+FLOW_KEYS="GROUP_LAB_SZ HERO_Y HERO_SZ BIG_SZ HEAD_GAP SLASH_W SUB_Y SUB_SZ
+ GRID_Y GRID_ROW_H GRID_LAB_SZ GRID_VAL_SZ GRID_VAL_SZ_3 SEP_H
+ CL_SIZE CL_H CL_SZ_BOXED CL_SZ_RULED CL_RULED_PAD CL_SZ_DATED CL_DATE_SZ CL_DATE_GAP
+ IN_RULE_Y IN_LAB_Y IN_VAL_Y IN_VAL2_Y IN_VAL_SZ IN_VAL_SZ_1 IN_W1 IN_STACK
+ RULE2_Y LAB_CHART_Y GR_Y GR_H KEY_Y RULE3_Y
+ LAB_FC_Y FC_ICON_Y FC_TEXT_Y FC_TEMP_Y FC_WIND_Y OL0_Y OL1_Y OL2_Y
+ WK_HDG_RULE_Y WK_HDG_Y WK_Y FC_BAND"
+
+#: 1 when the collector's layout is the one loaded. See flow_apply().
+LAYOUT_FLOW=0
+#: Every value it set, in order — how load_layout tells a page that moved.
+FLOW_SIG=""
+
+flow_apply() {
+    local k v sig=""
+    LAYOUT_FLOW=0
+    unset IN_W1 IN_STACK IN_VAL2_Y FC_BAND 2>/dev/null
+    case "${LY_GR_H:-}" in ''|*[!0-9]*) FLOW_SIG=""; return 0 ;; esac
+    # The grid's rows are a list of counts, each divided into the column's
+    # width: 1..6 each, separated by single spaces, or the grid is not drawn
+    # at all rather than divided by zero.
+    local r
+    for r in ${LY_GRID_ROWS:-}; do
+        case "$r" in [1-6]) ;; *) LY_GRID_ROWS=""; break ;; esac
+    done
+    for k in $FLOW_KEYS; do
+        eval "v=\${LY_$k:-}"
+        case "$v" in ''|*[!0-9]*) continue ;; esac
+        eval "$k=\$v"
+        sig="$sig$v,"
+    done
+    # The chart's axis, for the image this layout asks for rather than the
+    # fixed one: /kindle/graph.bmp?h=GR_H is as tall as the chart now is.
+    case "${LY_CH_T:-}" in ''|*[!0-9]*) ;; *) CH_T="$LY_CH_T" ;; esac
+    case "${LY_CH_B:-}" in ''|*[!0-9]*) ;; *) CH_B="$LY_CH_B" ;; esac
+    FLOW_SIG="$sig${LY_GRID_ROWS:-}"
+    LAYOUT_FLOW=1
+}
 
 load_layout() {
     local conf
@@ -2109,7 +2199,7 @@ load_layout() {
     # at the right size, and hiding the band without moving anything would be
     # the hole this change exists to close. LAYOUT_SA is what the rest of the
     # script reads, so the two cannot disagree.
-    local was="${LAYOUT_SA:-0}"
+    local was="${LAYOUT_SA:-0}" was_sig="${FLOW_SIG:-}"
     LAYOUT_SA=0
     if page_standalone; then
         conf="${conf%.conf}-standalone.conf"
@@ -2128,8 +2218,13 @@ load_layout() {
     #
     # Skipped on the first load of a run, where `was` and the new value can
     # only differ because nothing had been drawn yet.
+    #
+    # AND THE COLLECTOR'S LAYOUT ON TOP OF BOTH, which moves things for more
+    # reasons than the forecast: a section switched off, a reading that came
+    # or went. Any change to it is the same case as the one above.
+    flow_apply
     if [ -n "${HAVE_DATA:-}" ] && [ "$HAVE_DATA" = "1" ] &&
-       [ "$was" != "$LAYOUT_SA" ]; then
+       { [ "$was" != "$LAYOUT_SA" ] || [ "$was_sig" != "$FLOW_SIG" ]; }; then
         : > "$TMP/redraw"
     fi
     # Derived once here rather than per string: both depend only on the layout,
@@ -2664,9 +2759,14 @@ draw_zones() {
     # GRID_ROWS says how many cells are on each row; each row then divides its
     # own width by its own count, so two cells are two halves rather than two of
     # three thirds with the last one left white.
-    local gy="${GRID_Y:-150}" gcols gvsz gcw gi=0
+    local gy="${GRID_Y:-150}" gcols gvsz gcw gi=0 grows="${GRID_ROWS:-}"
+    # The collector's layout may break them differently — two one under the
+    # other rather than side by side, when that sets them larger — and sizes
+    # every row alike. GRID_ROWS stays the fixed page's answer for a reader
+    # that has no layout to follow.
+    [ "${LAYOUT_FLOW:-0}" = "1" ] && grows="${LY_GRID_ROWS:-}"
     set -- ${GRID_ZONES:-}
-    for gcols in ${GRID_ROWS:-}; do
+    for gcols in $grows; do
         gcw=$(( ${COL_L_W:-270} / gcols ))
         if [ "$gcols" -ge 3 ]; then gvsz="${GRID_VAL_SZ_3:-26}"
         else                        gvsz="${GRID_VAL_SZ:-31}"
@@ -2701,7 +2801,11 @@ draw_zones() {
         # larger, so equal columns crowd it against its neighbour while leaving
         # the small ones space they do not need.
         local w1
-        if [ "$n" -ge 3 ]; then w1=$(( rw * 42 / 100 ))
+        if [ -n "${IN_W1:-}" ]; then
+            # The collector's layout: what the first field needs of the row,
+            # in thousandths, rather than a fixed share.
+            w1=$(( rw * IN_W1 / 1000 ))
+        elif [ "$n" -ge 3 ]; then w1=$(( rw * 42 / 100 ))
         elif [ "$n" -eq 2 ]; then w1=$(( rw * 58 / 100 ))
         else w1="$rw"
         fi
@@ -2712,7 +2816,15 @@ draw_zones() {
         # again as tall and starts higher.
         local big="${IN_VAL_SZ_1:-52}" small="${IN_VAL_SZ:-28}"
         local big_y="${IN_VAL_Y:-158}"
-        local small_y=$(( big_y + big - small ))
+        local small_y="${IN_VAL2_Y:-$(( big_y + big - small ))}"
+        # OR THE FIRST ON A LINE OF ITS OWN, the others under it sharing the
+        # whole width — the collector's choice, when it sets the first larger.
+        local stack=0
+        if [ "${IN_STACK:-0}" = "1" ] && [ "$n" -gt 1 ]; then
+            stack=1
+            w1="$rw"
+            cw=$(( rw / (n - 1) ))
+        fi
 
         i=0
         for z in $IN_ZONES; do
@@ -2721,6 +2833,10 @@ draw_zones() {
             eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"
             if [ "$i" = "0" ]; then
                 cx="$rx"; vsz="$big"; y="$big_y"
+            elif [ "$stack" = "1" ]; then
+                cx=$(( rx + (i - 1) * cw )); vsz="$small"; y="$small_y"
+                draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \
+                              "${GRID_LAB_SZ:-10}" "GRAY7" "$lab"
             else
                 cx=$(( rx + w1 + (i - 1) * cw )); vsz="$small"; y="$small_y"
                 draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \
@@ -2927,7 +3043,7 @@ draw_chart_body() {
         return 0
     fi
 
-    if draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"; then
+    if graph_fits "$TMP/graph.bmp" && draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"; then
         draw_chart_axis
         draw_chart_key
         return 0
@@ -3150,6 +3266,10 @@ redraw_sensors() {
 }
 
 redraw_chart() {
+    # NO RECTANGLE AT ALL when the collector's layout has no chart: the
+    # readings above run straight into what is under them, and a refresh of a
+    # zero-height region is not a refresh FBInk promises to keep small.
+    [ "${Z_CHART_H:-0}" -gt 0 ] 2>/dev/null || return 0
     fill_rect "$Z_CHART_X" "$Z_CHART_Y" "$Z_CHART_W" "$Z_CHART_H" WHITE
     draw_chart_body
     refresh_zone "$Z_CHART_X" "$Z_CHART_Y" "$Z_CHART_W" "$Z_CHART_H" 0

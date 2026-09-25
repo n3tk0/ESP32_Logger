@@ -44,6 +44,8 @@ on:
       - 'tools/check_sse_lock.py'
       - 'tools/check_tempobject_cleanup.py'
       - 'tools/check_kindle_payload_keys.py'
+      - 'tools/check_kindle_flow_parity.py'
+      - 'tools/kindle_preview/**'
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
@@ -85,6 +87,8 @@ on:
       - 'tools/check_sse_lock.py'
       - 'tools/check_tempobject_cleanup.py'
       - 'tools/check_kindle_payload_keys.py'
+      - 'tools/check_kindle_flow_parity.py'
+      - 'tools/kindle_preview/**'
       - 'node/**'
       - 'kindle/**'
       - 'tests/kindle/**'
@@ -500,8 +504,8 @@ jobs:
         run: |
           set -e
           cp www/js/kindle.js www/js/kindle.js.orig
-          sed -i 's|return (kdVal("kd-layout", "0") === "2") ? KD_SHAPE.sa : KD_SHAPE.normal;|return KD_SHAPE.normal;|' www/js/kindle.js
-          grep -q 'return KD_SHAPE.normal;' www/js/kindle.js  # the sed matched something
+          sed -i 's|  return kdVal("kd-layout", "0") !== "2";|  return true;|' www/js/kindle.js
+          grep -q '^  return true;$' www/js/kindle.js  # the sed matched something
           python3 tests/web/mock_device.py 8773 &
           sleep 2
           if MOCK_PORT=8773 python3 tests/web/drive_kindle_page.py > /dev/null 2>&1; then
@@ -994,6 +998,16 @@ jobs:
         # in memory: no shape to match, no file to restore, and it grows with
         # the table instead of alongside it.
         run: python3 tools/check_kindle_parity.py --self-test
+
+      - name: Hold the settings preview's layout to the collector's
+        # src/web/KindleFlow.h works out where everything on the e-ink page
+        # goes; the settings page carries the same rules in www/js/kindle.js
+        # so it can draw the page before anything is saved. Every combination
+        # of sections and places, both sides, field by field.
+        run: python3 tools/check_kindle_flow_parity.py
+
+      - name: Verify that checker fails when one side's rules change
+        run: python3 tools/check_kindle_flow_parity.py --self-test
 
       - name: Hold each panel icon's ground to the ground it is drawn on
         # The page's glyphs are inline SVG with no background at all, so one
