@@ -17,6 +17,10 @@ document wins and the code is the bug.
    65535 it wraps to 1, and the collector orders revs on that circle). The node
    holds its *applied* config and the `rev` it came from. The UI shows
    `applied` / `pending (applied N → desired M)` / `rejected: <reason>`.
+   A new desired rev is one past both the desired rev and the highest rev
+   the node has been told or said it runs (a local report the collector
+   told a rev but could not keep, an ACK past the desired rev), so a node
+   never already holds the rev of an edit it has not seen.
 3. **The node validates everything it is sent**, with the same shared code the
    collector and the node page use (`src/nodecfg/`). A rejected config is
    reported with a reason and the node keeps running its previous config.
@@ -277,7 +281,11 @@ bytes after the name's first NUL is refused; a reply with port 0 is refused.
 3. `GET /api/nodes/handover` →
    `{"active":true,"ssid":"new","ready":["w:balcony"],"pending":["e:3"],"offline":["w:attic"]}`.
    A node is *ready* when its `applied_rev` ≥ the handover rev; *offline* when
-   the collector's own offline rule says so.
+   the collector's own offline rule says so. A local edit a node reports
+   while the handover is active is adopted with the next network kept (the
+   report has none, or an old one); unless the node already holds it, the
+   collector tells the node its edit's rev as usual, bumps once more to send
+   it the next network, and that rev becomes the node's handover rev.
 4. The collector switches (saves its network config and restarts WiFi) when
    every non-offline node is ready, or on `{"action":"switch"}`. `{"action":"cancel"}`
    clears `next` on all nodes (another rev bump).

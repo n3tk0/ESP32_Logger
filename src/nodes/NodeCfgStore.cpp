@@ -29,8 +29,10 @@ struct Entry {
     uint8_t        id;            ///< ESP-NOW radio id
     bool           haveProbes;    ///< a reported config has been seen
     uint32_t       seenMs;        ///< WiFi: millis()|1 of its last POST; 0 = none since boot
+    uint16_t       told;          ///< highest rev the node was told or ran (ncr::revAfter)
     char           name[NODE_NAME_MAX + 1];    ///< WiFi: the key
     char           dname[NODE_NAME_MAX + 1];   ///< desired name (a WiFi rename)
+    char           sname[NODE_NAME_MAX + 1];   ///< WiFi: name in the last full reply
     NodeCfgSummary s;
     ncr::ProbeMap  probes;
 };
@@ -58,6 +60,7 @@ struct Work {
     NodeConfig   cfg;
     NodeConfig   old;
     Validation   v;
+    bool         hoKept;   ///< adopt() put the handover's next network back
 };
 
 /// Lock for every public entry point. Unlocked (and so a no-op caller) until
@@ -113,6 +116,14 @@ static void removeFile(const char* path) {
     LittleFS.remove(path);
 }
 
+/// Remember a rev the node was told, or says it runs, past the desired one.
+/// True when it moved.
+static bool noteRev(Entry& e, uint16_t rev) {
+    if (!rev || ncr::revAtOrPast(e.told, rev)) return false;
+    e.told = rev;
+    return true;
+}
+
 static void pathOf(const Entry& e, char out[ncr::PATH_CAP]) {
     ncr::filePath(out, e.espnow, e.name, e.id);
 }
@@ -138,6 +149,7 @@ static bool saveEntry(const Entry& e, JsonDocument& doc) {
     doc["applied_rev"] = e.s.applied;
     doc["status"]      = ncr::statusName(e.s.status);
     doc["ho_rev"]      = e.s.hoRev;
+    doc["told_rev"]    = e.told;
     putError(doc["error"], e.s);
     const uint32_t now = (uint32_t)time(nullptr);
     if (now >= 1000000000u) doc["seen"] = now;
@@ -160,9 +172,10 @@ static void encodeDesired(JsonDocument& doc, const NodeConfig& c) {
     encodeConfig(c, doc["desired"].to<JsonObject>(), NCJ_SECRETS);
 }
 
-/// A new desired rev: pending, no error, the new name remembered.
+/// A new desired rev: pending, no error, the new name remembered. Past any
+/// rev the node already holds, not only the desired one (ncr::revAfter).
 static void bumped(Entry& e, NodeConfig& c) {
-    e.s.rev   = ncr::nextRev(e.s.rev);
+    e.s.rev   = ncr::revAfter(e.s.rev, e.told);
     c.rev     = e.s.rev;
     c.local   = false;
     e.s.status = ncr::statusAfterApplied(ncr::ST_PENDING, e.s.rev, e.s.applied);
@@ -209,10 +222,17 @@ static void tableFollows(const Entry&, const NodeConfig&) {}
 /// what was desired (or the defaults, for a node seen for the first time,
 /// whose entry is allocated here), at `rev`, the node running `applied`. The
 /// caller finishes with adoptDone(). False when the report does not decode.
+///
+/// During a handover the next network is kept over what the node reported
+/// (ncr::hoKeepNext); when the node lacks it, it is sent in one more rev,
+/// which is then the one it must run to be ready, and w->hoKept is set.
 static bool adopt(Entry*& e, Work* w, JsonObjectConst rep, bool espnow, const char* name,
                   uint8_t id, uint16_t rev, uint16_t applied) {
-    if (!e) w->doc.clear();
+    const bool had = e != nullptr;
+    if (!had) w->doc.clear();
     decodeDesired(w->doc, w->cfg, espnow);
+    w->old    = w->cfg;
+    w->hoKept = false;
     Issue is;
     if (!decodeConfig(rep, w->cfg, NCJ_DEC_REV | NCJ_DEC_IDENTITY, &is)) {
         Serial.printf("[nodecfg] report from %s/%u refused: %s %s\n", name, id, is.field,
@@ -227,6 +247,12 @@ static bool adopt(Entry*& e, Work* w, JsonObjectConst rep, bool espnow, const ch
     e->s.applied = applied;
     e->s.status  = ncr::statusAfterApplied(ncr::ST_PENDING, rev, applied);
     e->s.err.field[0] = e->s.err.reason[0] = '\0';
+    noteRev(*e, applied);
+    if (had && s_ho.active && ncr::hoKeepNext(w->cfg, w->old, s_ho.ssid)) {
+        bumped(*e, w->cfg);
+        e->s.hoRev = e->s.rev;
+        w->hoKept  = true;
+    }
     return true;
 }
 
@@ -246,7 +272,7 @@ void nodeCfgBegin() {
 
     // Names first, under one hold of fsMutex; the files are read afterwards,
     // each under its own, so StorageTask is not held off for the whole scan.
-    char names[NODECFG_MAX_NODES + 2][24];
+    char names[NODECFG_MAX_NODES + 2][ncr::FILE_NAME_CAP];
     int  n = 0;
     {
         MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
@@ -255,7 +281,9 @@ void nodeCfgBegin() {
             File d = LittleFS.open(NODES_DIR);
             if (d && d.isDirectory()) {
                 while (File f = d.openNextFile()) {
-                    if (n < (int)(sizeof(names) / sizeof(names[0])))
+                    // A name that does not fit is no node's; cut, it could be.
+                    if (n < (int)(sizeof(names) / sizeof(names[0])) &&
+                        strlen(f.name()) < sizeof(names[0]))
                         copyStr(names[n++], sizeof(names[0]), f.name());
                     f.close();
                 }
@@ -264,15 +292,11 @@ void nodeCfgBegin() {
     }
 
     for (int i = 0; i < n; i++) {
-        // "w_balcony.json" is key "w:balcony"; parseKey() refuses the rest
-        // (handover.json, a stray *.tmp).
-        char* key = names[i];
-        const size_t len = strlen(key);
-        if (len < 8 || strcmp(key + len - 5, ".json") != 0) continue;
-        key[len - 5] = '\0';
-        key[1] = ':';
+        // "w_balcony.json" is node "w:balcony"; the rest (handover.json, a
+        // stray *.tmp) is refused, and so is a second file for one node.
         bool espnow; char name[NODE_NAME_MAX + 1]; uint8_t id;
-        if (!ncr::parseKey(key, espnow, name, id)) continue;
+        if (!ncr::keyFromFileName(names[i], espnow, name, id)) continue;
+        if (find(espnow, name, id)) continue;
         Entry* e = alloc(espnow, name, id);
         if (!e || !loadEntry(*e, w->doc)) { if (e) e->used = false; continue; }
 
@@ -282,6 +306,7 @@ void nodeCfgBegin() {
         e->s.rev     = des["rev"] | 0;
         e->s.applied = d["applied_rev"] | 0;
         e->s.hoRev   = d["ho_rev"] | 0;
+        e->told      = d["told_rev"] | 0;
         e->s.status  = ncr::statusParse(d["status"] | "");
         if (e->s.status == ncr::ST_NONE)
             e->s.status = ncr::statusAfterApplied(ncr::ST_PENDING, e->s.rev, e->s.applied);
@@ -338,7 +363,7 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
         // A node the collector renamed now posts under its new name. Its file
         // is still under the old one; move it rather than lose it.
         for (Entry& x : s_e) {
-            if (!x.used || x.espnow || strcmp(x.dname, node) != 0) continue;
+            if (!x.used || x.espnow || !ncr::renamedTo(node, x.dname, x.sname)) continue;
             char from[ncr::PATH_CAP], to[ncr::PATH_CAP];
             pathOf(x, from);
             ncr::filePath(to, false, node, 0);
@@ -362,6 +387,9 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
     bool     save    = false;
     bool     adopted = false;
     uint16_t refused = 0;
+    // A rev past the desired one (a restored node, a report refused below)
+    // is one the next edit must not reuse.
+    if (e && noteRev(*e, nodeRev)) save = true;
 
     if (!ce.isNull()) {
         refused = ce["rev"] | 0;
@@ -387,8 +415,11 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
             adoptDone(*e, w);
             // The node's own secrets are what it runs; the collector's copy
             // may be stale, so none is sent until it is edited here again.
-            w->doc["sec_known"] = ncr::reportSecretsKnown(rep);
-            w->doc["sec_dirty"] = 0;
+            uint8_t known = ncr::reportSecretsKnown(rep), dirty = 0;
+            // ...except the handover's next passphrase, when it was put back.
+            if (w->hoKept) ncr::secretsEdited(ncr::SEC_NPASS, w->cfg, known, dirty);
+            w->doc["sec_known"] = known;
+            w->doc["sec_dirty"] = dirty;
             adopted = true;
         } else if (!e) {
             delete w;
@@ -416,12 +447,16 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
         e->seenMs = millis() | 1;
         switch (ncr::ingestReply(adopted, e->s.status, e->s.rev, applied, refused)) {
             case ncr::REPLY_REV:
-                reply["cfg"]["rev"] = e->s.rev;
+                // The rev its edit was adopted at — which is behind the
+                // desired one when a handover's next network was put back
+                // (adopt()), so the node is sent that on its next POST.
+                reply["cfg"]["rev"] = applied;
                 break;
             case ncr::REPLY_FULL: {
                 JsonObject c = reply["cfg"].to<JsonObject>();
                 c.set(w->doc["desired"].as<JsonObjectConst>());
                 ncr::secretsForNode(c, w->doc["sec_dirty"] | 0);
+                copyStr(e->sname, sizeof(e->sname), c["name"] | "");
                 break;
             }
             default:
@@ -447,14 +482,20 @@ bool nodeCfgRadioState(uint8_t id, NodeCfgRadio& r) {
 void nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
                          const char* label, uint16_t intervalS, ncr::ReportPlan plan) {
     Work* w = new (std::nothrow) Work;
-    if (!w) return;
+    const bool parsed = w && !deserializeJson(w->aux, json, len) && w->aux.is<JsonObject>();
     do {
-        if (deserializeJson(w->aux, json, len) || !w->aux.is<JsonObject>()) break;
-        JsonObjectConst rep = w->aux.as<JsonObjectConst>();
-
         MutexGuard g(s_mx, pdMS_TO_TICKS(2000));
         if (!g.isLocked()) break;
         Entry* e = find(true, nullptr, id);
+        // The callback has already told the node plan.applied (at most one
+        // past what it said), whether or not the report is kept below: a
+        // later edit must move past it (ncr::revAfter).
+        const bool moved = e && noteRev(*e, plan.applied);
+        if (!parsed) {
+            if (moved && w && loadEntry(*e, w->doc)) saveEntry(*e, w->doc);
+            break;
+        }
+        JsonObjectConst rep = w->aux.as<JsonObjectConst>();
         if (e && !loadEntry(*e, w->doc)) { e->used = false; e = nullptr; }
 
         const bool     local = rep["local"] | false;
@@ -472,7 +513,10 @@ void nodeCfgEspnowReport(uint8_t id, const char* json, size_t len,
             const uint16_t rev = (!first && ncr::revAtOrPast(e->s.rev, plan.rev))
                                      ? ncr::nextRev(e->s.rev)
                                      : plan.rev;
-            if (!adopt(e, w, rep, true, "", id, rev, plan.applied)) break;
+            if (!adopt(e, w, rep, true, "", id, rev, plan.applied)) {
+                if (e && moved) saveEntry(*e, w->doc);   // keeps told_rev
+                break;
+            }
             // First contact: the table's label and interval win, and the node
             // is sent them in the next rev. After a local edit the table
             // follows the node instead (§0.4, local edits win).
@@ -497,7 +541,10 @@ void nodeCfgEspnowAck(uint8_t id, uint16_t rev, bool ok, const char* field, cons
     Entry* e = find(true, nullptr, id);
     if (!e) return;
     if (ok) {
-        if (rev == e->s.applied) return;
+        // An ACK past the desired rev (a report the store refused, or
+        // missed) is a rev the next edit must not reuse.
+        const bool moved = noteRev(*e, rev);
+        if (rev == e->s.applied && !moved) return;
         e->s.applied = rev;
         e->s.status  = ncr::statusAfterApplied(e->s.status, e->s.rev, rev);
     } else {

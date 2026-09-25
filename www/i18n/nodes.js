@@ -173,6 +173,7 @@ I18n.register("nodes", {
     hoFailed: "Could not change the network handover.",
     hoStarted: "Not switched yet: {n} node(s) are being handed {ssid} first. The collector switches once they have it.",
     hoTestFirst: "The new network has to pass the test before nodes can be moved to it.",
+    hoCountFailed: "Not saved: could not check which nodes this collector has, and switching without them would leave them on the old network. Try again.",
   },
   bg: {
     title: "Нодове",
@@ -343,5 +344,6 @@ I18n.register("nodes", {
     hoFailed: "Преместването на нодовете не можа да се промени.",
     hoStarted: "Още не е превключено: първо {n} нод(а) получават {ssid}. Колекторът превключва, щом го получат.",
     hoTestFirst: "Новата мрежа трябва да мине теста, преди нодовете да бъдат преместени в нея.",
+    hoCountFailed: "Не е записано: не успях да проверя кои нодове има колекторът, а превключване без тях би ги оставило в старата мрежа. Опитайте отново.",
   },
 });

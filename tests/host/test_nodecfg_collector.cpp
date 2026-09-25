@@ -13,6 +13,10 @@
 //   • an ESP-NOW node's first report keeps the table's label and interval;
 //   • a handover is ready only when every node runs the rev that carried the
 //     next network, and never switches before the page saw a status;
+//   • a node's local edit during a handover keeps the next network and is
+//     sent it again before it counts as ready;
+//   • a new rev moves past any rev the node was told, not only the desired
+//     one; a second rename and a leftover *.tmp do not lose or double a node;
 //   • DATA2 ids come out under the same names the node lists, non-finite
 //     values dropped.
 #include <math.h>
@@ -441,6 +445,143 @@ static void test_handover_apply_next() {
     CHECK_STREQ(e.link.next_ssid, "");
 }
 
+// ---------------------------------------------------------------------------
+// A handover survives a node's local edit
+// ---------------------------------------------------------------------------
+
+/// `node`'s own report of itself (no secrets, as it sends it), decoded over
+/// `desired` the way the store adopts it.
+static NodeConfig adoptOver(const NodeConfig& desired, const NodeConfig& node) {
+    JsonDocument doc;
+    encodeConfig(node, doc.to<JsonObject>(), 0);
+    doc["local"] = true;
+    NodeConfig c = desired;
+    CHECK(decodeConfig(doc.as<JsonObjectConst>(), c, NCJ_DEC_REV | NCJ_DEC_IDENTITY, nullptr));
+    return c;
+}
+
+static void test_handover_keeps_next_over_a_local_edit() {
+    // Desired rev 7 carries the next network (the handover rev); the node
+    // runs 7, then edits its interval locally — its report has no next.
+    NodeConfig desired = wifiNode();
+    hoApplyNext(desired, "newnet", "newpass1");
+    desired.rev = 7;
+    NodeConfig node = wifiNode();
+    node.interval_s = 120;
+    node.rev = 7;
+
+    const ReportPlan p = planReport(true, 7, 7, true);
+    CHECK_EQ((int)p.rev, 8);
+    NodeConfig c = adoptOver(desired, node);
+    CHECK_STREQ(c.net.next.ssid, "");              // what the report alone does
+    CHECK(hoKeepNext(c, desired, "newnet"));
+    CHECK_STREQ(c.net.next.ssid, "newnet");
+    CHECK_STREQ(c.net.next.pass, "newpass1");
+    CHECK_EQ((int)c.interval_s, 120);              // the node's edit still wins
+    // The node is told 8 and runs it; the next network goes out in 9, which
+    // is the rev it must run to be ready — not 8.
+    const uint16_t hoRev = revAfter(p.rev, p.applied);
+    CHECK_EQ((int)hoRev, 9);
+    CHECK_EQ((int)hoClassify(true, p.applied, hoRev, false), (int)HO_PENDING);
+    CHECK_EQ((int)hoClassify(true, hoRev, hoRev, false), (int)HO_READY);
+
+    // A report that still carries it ("keep yours" for the pass): nothing.
+    NodeConfig has = node;
+    hoApplyNext(has, "newnet", "");
+    NodeConfig c2 = desired;
+    {
+        JsonDocument doc;
+        encodeConfig(has, doc.to<JsonObject>(), 0);
+        doc["net"]["next"]["pass_set"] = true;
+        CHECK(decodeConfig(doc.as<JsonObjectConst>(), c2, NCJ_DEC_REV | NCJ_DEC_IDENTITY, nullptr));
+    }
+    CHECK(!hoKeepNext(c2, desired, "newnet"));
+    CHECK_STREQ(c2.net.next.pass, "newpass1");
+
+    // A node that already moved to the new network itself: left alone.
+    NodeConfig moved = node;
+    copyStr(moved.net.ssid, sizeof(moved.net.ssid), "newnet");
+    hoApplyNext(moved, "home", "");
+    NodeConfig c3 = adoptOver(desired, moved);
+    CHECK(!hoKeepNext(c3, desired, "newnet"));
+
+    // ESP-NOW: link.next_ssid.
+    NodeConfig ed = espnowNode();
+    hoApplyNext(ed, "newnet", nullptr);
+    NodeConfig en = espnowNode();
+    en.interval_s = 900;
+    NodeConfig ec = adoptOver(ed, en);
+    CHECK_STREQ(ec.link.next_ssid, "");
+    CHECK(hoKeepNext(ec, ed, "newnet"));
+    CHECK_STREQ(ec.link.next_ssid, "newnet");
+    CHECK(!hoKeepNext(ec, ed, "newnet"));          // now it matches
+}
+
+// ---------------------------------------------------------------------------
+// A new rev never reuses one the node already holds
+// ---------------------------------------------------------------------------
+
+static void test_rev_after_moves_past_what_the_node_was_told() {
+    CHECK_EQ((int)revAfter(5, 0), 6);              // nothing told: plain next
+    CHECK_EQ((int)revAfter(5, 5), 6);
+    CHECK_EQ((int)revAfter(5, 3), 6);              // told less: the desired wins
+    // A local report at desired 5 was answered with rev 6 (the callback's
+    // plan), and the store refused it: desired stays 5. The next web edit
+    // must not be 6 — the node runs a 6 of its own and would say "up to date".
+    const ReportPlan p = planReport(true, 5, 5, true);
+    CHECK_EQ((int)reportAnswerRev(p, 5, true), 6);
+    const uint16_t edit = revAfter(5, reportAnswerRev(p, 5, true));
+    CHECK_EQ((int)edit, 7);
+    CHECK(shouldSend(ST_PENDING, edit, 6));
+    // An ACK for rev 9 against desired 5 (a restored node).
+    CHECK_EQ((int)revAfter(5, 9), 10);
+    // Across the wrap.
+    CHECK_EQ((int)revAfter(0xFFFF, 1), 2);
+    CHECK_EQ((int)revAfter(1, 0xFFFF), 2);
+    CHECK_EQ((int)revAfter(0xFFFE, 0xFFFF), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Renames and file names
+// ---------------------------------------------------------------------------
+
+static void test_renamed_to_matches_desired_or_sent_name() {
+    // Stored as "balcony"; renamed to "attic" and sent; renamed again to
+    // "roof" before the node's next POST, which comes as "attic".
+    CHECK(renamedTo("attic", "roof", "attic"));
+    CHECK(renamedTo("roof", "roof", "attic"));
+    CHECK(!renamedTo("garden", "roof", "attic"));
+    CHECK(renamedTo("roof", "roof", nullptr));
+    CHECK(!renamedTo("", "", ""));                 // an empty name matches nothing
+    CHECK(!renamedTo("a/b", "a/b", "a/b"));
+}
+
+static void test_key_from_file_name() {
+    bool espnow = false; char name[NODE_NAME_MAX + 1]; uint8_t id = 0;
+    CHECK(keyFromFileName("w_balcony.json", espnow, name, id));
+    CHECK(!espnow);
+    CHECK_STREQ(name, "balcony");
+    CHECK(keyFromFileName("e_3.json", espnow, name, id));
+    CHECK(espnow);
+    CHECK_EQ((int)id, 3);
+    CHECK(keyFromFileName("w_abcdefghijklmnop.json", espnow, name, id));   // 16 letters
+    CHECK_STREQ(name, "abcdefghijklmnop");
+    // A leftover of an interrupted write, whole or cut to the buffer boot
+    // lists names into: neither is a second file for the node.
+    CHECK(!keyFromFileName("w_abcdefghijklmnop.json.tmp", espnow, name, id));
+    CHECK(!keyFromFileName("w_balcony.json.tmp", espnow, name, id));
+    CHECK(!keyFromFileName("handover.json", espnow, name, id));
+    CHECK(!keyFromFileName("x_balcony.json", espnow, name, id));
+    CHECK(!keyFromFileName("wxbalcony.json", espnow, name, id));
+    CHECK(!keyFromFileName("e_0.json", espnow, name, id));
+    CHECK(!keyFromFileName("w_.json", espnow, name, id));
+    CHECK(!keyFromFileName(nullptr, espnow, name, id));
+    // Every name a node can have fits the buffer it is listed into.
+    char path[PATH_CAP];
+    filePath(path, false, "abcdefghijklmnop", 0);
+    CHECK(strlen(path) - strlen("/nodes/") < FILE_NAME_CAP);
+}
+
 // ===========================================================================
 // DATA2 naming (§5)
 // ===========================================================================
@@ -541,6 +682,10 @@ int main() {
     RUN(test_handover_classify);
     RUN(test_handover_auto_switch);
     RUN(test_handover_apply_next);
+    RUN(test_handover_keeps_next_over_a_local_edit);
+    RUN(test_rev_after_moves_past_what_the_node_was_told);
+    RUN(test_renamed_to_matches_desired_or_sent_name);
+    RUN(test_key_from_file_name);
     RUN(test_probe_map_names_like_the_full_config);
     RUN(test_data2_named);
     return SUMMARY();
