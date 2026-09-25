@@ -931,6 +931,29 @@ check "$?" "the chart is fetched at the layout's height, the data for the chosen
 LAYOUT=auto; unset PAGE_MODE; RES_W=600; RES_H=800
 ly_load /dev/null; load_layout
 
+# ── THE TENDENCY ARROW IS DRAWN, NOT TYPESET ────────────────────────────────
+# The Kindle's book faces have no arrows, and FBInk draws a missing glyph as an
+# empty box — which is what the pressure tendency was on the panel. So no text
+# call may carry one of the five, and each is a handful of rectangles instead.
+( load_kv "$DASH_TMP/data.txt" PAYLOAD; RES_W=600 RES_H=800; load_layout
+  reset_log
+  draw_zones >/dev/null 2>&1
+  grep -q -- '↘' "$FBINK_LOG" && exit 1           # no glyph sent to FBInk
+  for a in '↑' '↗' '→' '↘' '↓'; do
+    reset_log
+    draw_arrow 100 200 20 "$a" GRAY4
+    n=$(grep -c -- '-k' "$FBINK_LOG")
+    [ "$n" -ge 3 ] || { echo "$a: $n rectangles" >&2; exit 2; }
+    grep -q -- "$a" "$FBINK_LOG" && exit 3
+    # Every rectangle inside the arrow's own square, on the baseline.
+    awk -F'\t' -v a="$a" '{ for (i = 1; i <= NF; i++) if ($i ~ /^top=/) {
+        split($i, kv, /[=,]/); t = kv[2]; l = kv[4]; w = kv[6]; h = kv[8]
+        if (l < 100 || l + w > 113 || t < 188 || t + h > 200) { print a, $i; bad = 1 } } }
+        END { exit bad }' "$FBINK_LOG" || exit 4
+  done
+  exit 0 )
+check "$?" "the tendency arrows are drawn from rectangles, never as a missing glyph"
+
 # ── 2b. The clock rectangle is cleared and flashed, so nothing else may live
 # in it ───────────────────────────────────────────────────────────────────────
 # The rule above the indoor row sat six pixels inside it: drawn by

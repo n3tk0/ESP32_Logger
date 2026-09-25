@@ -1173,6 +1173,16 @@ rectangle, it draws the glyphs and no box, so nothing rubs out what came
 before it. It does not take the fast path at all.
 
 
+### The tendency arrow is drawn, not typeset
+
+The fonts a Kindle ships are book faces, and none of them has the arrows
+U+2191…U+2198. FBInk draws a missing glyph as an empty box, so the pressure
+tendency came out as a square on the panel while the browser page, which can
+fall back to a system font, drew it fine. `draw_arrow()` in
+`kindle/update_dash.sh` draws the five arrows the collector sends from
+rectangles instead: a shaft and a head, on the baseline of the value beside
+them, at the size the arrow would have been set in.
+
 ### Upper case, and why it has to be done at the collector
 
 Every caption on this dashboard is set uppercase, and on the page that is one
