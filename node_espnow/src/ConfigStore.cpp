@@ -69,6 +69,14 @@ void cfgStoreDefaults(NodeConfig& c) {
     c.link.rescan_min_s  = NODE_RESCAN_MIN_INTERVAL_S;
 }
 
+// Older firmware stored link.rescan_min_s without bounds. Pull such a value
+// into range rather than let the whole stored config fail validation and
+// drop back to the compiled defaults.
+static void clampStoredRescan(NodeConfig& c) {
+    if (c.link.rescan_min_s < RESCAN_MIN_S_MIN) c.link.rescan_min_s = RESCAN_MIN_S_MIN;
+    if (c.link.rescan_min_s > RESCAN_MIN_S_MAX) c.link.rescan_min_s = RESCAN_MIN_S_MAX;
+}
+
 void cfgStoreLoad(NodeConfig& out) {
     cfgStoreDefaults(out);
 
@@ -97,11 +105,13 @@ void cfgStoreLoad(NodeConfig& out) {
             Serial.println("[cfg] stored config is not JSON — using defaults");
         } else if (!decodeConfig(doc.as<JsonVariantConst>(), tmp, NCJ_DEC_REV, &err)) {
             Serial.printf("[cfg] stored config refused: %s: %s\n", err.field, err.reason);
-        } else if (!validate(tmp, v)) {
-            Serial.printf("[cfg] stored config invalid: %s: %s\n",
-                          v.error.field, v.error.reason);
         } else {
-            out = tmp;
+            clampStoredRescan(tmp);
+            if (!validate(tmp, v))
+                Serial.printf("[cfg] stored config invalid: %s: %s\n",
+                              v.error.field, v.error.reason);
+            else
+                out = tmp;
         }
     }
 
