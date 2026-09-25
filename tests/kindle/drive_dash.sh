@@ -3069,6 +3069,23 @@ check "$?" "the offline message is in the language the collector last sent"
   grep -q "Find collector" "$FBINK_LOG" || exit 2
   exit 0 )
 check "$?" "and English before the collector has ever answered"
+
+# The hint is a path through menus, and the collector spells it with "→" —
+# a glyph no Kindle face has, so FBInk drew each one as an empty box. Whatever
+# the collector sent, the one it has now, or the one before first contact.
+( for hint in "Проверете WiFi, или KUAL → Settings → Find collector" ""; do
+    reset_log
+    if [ -n "$hint" ]; then LBL_OFFLINE_HINT="$hint"; else unset LBL_OFFLINE_HINT; fi
+    HOST=10.9.9.42
+    redraw_offline "12:34"
+    grep -q -- 'KUAL > Settings > Find collector' "$FBINK_LOG" || exit 1
+    grep -q -- '→' "$FBINK_LOG" && exit 2
+  done
+  reset_log
+  draw_text_reg 10 10 16 BLACK "a ← b → c"
+  grep -q -- '	a < b > c	' "$FBINK_LOG" || exit 3
+  exit 0 )
+check "$?" "no arrow in a sentence reaches FBInk, it is set as > and <"
 load_kv "$DASH_TMP/data.txt" PAYLOAD
 reset_log
 

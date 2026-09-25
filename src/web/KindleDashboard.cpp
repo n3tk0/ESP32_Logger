@@ -1555,7 +1555,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     #ifdef MODULE_FORECAST_ENABLED
     if (!standalone) {
         const auto& fc = forecastModule.snapshot();
-        kdShellVar(s, "FC_SUMMARY", fc.summary);
+        kdShellVar(s, "FC_SUMMARY", forecastSummary(fc));
         s->printf("FC_CODE=%d\n", fc.code);
         // FC_ICON, NOT FC_CODE, IS WHAT THE PANEL DRAWS WITH. It has eleven BMP
         // files, one per range, and no way to reduce a code itself — so it looked
