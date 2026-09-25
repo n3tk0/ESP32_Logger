@@ -115,7 +115,9 @@ peer table **cannot tell the node so.** ESP-NOW decrypts an incoming frame only
 from a peer it already holds the key for, so the node's reports are dropped by
 the radio before any code on the collector runs. `EN_ACK_REDISCOVER` exists and
 is correct, but it is reachable only in the narrow case where the peer entry
-survived and the node record did not.
+survived and the node record did not. Such an ACK does not count as a
+delivery: the node keeps its backlog, and pairs again under the same
+`link.rescan_min_s` limit as the rescan rather than on every wake.
 
 Recovery from a reflashed collector is therefore the node's, by the same route
 as everything else: enough unanswered wakes, and it runs the pairing sweep
@@ -140,14 +142,15 @@ Three consecutive wakes with no reply (`link.rescan_fails`), and the node does a
 passive scan for its access point, takes the channel it finds, stores it, and
 carries on. If the access point is gone and the network the collector
 announced it is moving to (`link.next_ssid`, NODE_CONFIG.md §4) is on the air,
-the node switches to that one and keeps the old name as the fallback. If
+the node asks for the collector there with one signed DISCOVER and, only if
+it answers, switches to that network and keeps the old name as the fallback. If
 nothing moved and nobody answers, it runs the signed pairing sweep: a
 collector that was reflashed, or moved to a network the node was never told
 about, answers a DISCOVER from a node already in its table.
 
 Two bounds on that, in opposite directions:
 
-* **At most once an hour** (`link.rescan_min_s`). A collector that is simply
+* **At most once an hour** (`link.rescan_min_s`, 300 s to 7 days). A collector that is simply
   switched off would otherwise make the node scan every single minute, and a
   scan is 1.5–2 s of radio — an order of magnitude more than a normal wake.
   The ceiling turns a dead collector from a battery emergency into a rounding
@@ -525,8 +528,9 @@ tested against a simulated collector in
 ### Reporting a config
 
 The node sends its document as `CFG_REPORT` slices on the first wake after a
-boot (the collector then knows exactly what is running, including a custom
-probe name it needs to label `DATA2` values) and whenever it holds a local
+boot or after pairing again (the collector then knows exactly what is
+running, including a custom probe name it needs to label `DATA2` values) and
+whenever it holds a local
 edit (`local: true`). Either way it waits one reply window after the last
 slice for the collector's answer — for a local edit "your local config is
 now rev N", and it clears `local`; for the boot report just "it landed". The

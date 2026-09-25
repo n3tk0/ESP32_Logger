@@ -15,15 +15,32 @@
 
 namespace enrescan {
 
+/// The floor and ceiling the validator puts on link.rescan_min_s
+/// (NodeConfigValidate.h), applied again here: the gate is what keeps a dead
+/// collector from costing a scan every wake, so it defends itself against a
+/// config that got past the validator some other way.
+static const uint32_t MIN_S_FLOOR   = 300;
+static const uint32_t MIN_S_CEILING = 604800;
+
+/// Has link.rescan_min_s passed since the last scan or sweep? `wakesSinceScan`
+/// saturates at 0xFFFF (= never scanned), so the wake count is capped there
+/// too: a ceiling the counter cannot reach would mean never again.
+static inline bool spaced(uint16_t wakesSinceScan, uint32_t rescanMinS, uint16_t intervalS) {
+    const uint32_t iv = intervalS ? intervalS : 60;
+    if (rescanMinS < MIN_S_FLOOR) rescanMinS = MIN_S_FLOOR;
+    if (rescanMinS > MIN_S_CEILING) rescanMinS = MIN_S_CEILING;
+    uint32_t wakesPerCeiling = (rescanMinS + iv - 1) / iv;
+    if (wakesPerCeiling > 0xFFFF) wakesPerCeiling = 0xFFFF;
+    return wakesSinceScan >= wakesPerCeiling;
+}
+
 /// May this wake scan? `failStreak` unanswered wakes in a row, `wakesSinceScan`
 /// since the last scan (0xFFFF = never), against the config's
 /// link.rescan_fails and link.rescan_min_s at `intervalS` a wake.
 static inline bool due(uint8_t failStreak, uint16_t wakesSinceScan, uint8_t rescanFails,
                        uint32_t rescanMinS, uint16_t intervalS) {
-    const uint32_t iv = intervalS ? intervalS : 60;
-    const uint32_t wakesPerCeiling = (rescanMinS + iv - 1) / iv;
-    const uint8_t  fails = rescanFails ? rescanFails : 1;
-    return failStreak >= fails && wakesSinceScan >= wakesPerCeiling;
+    const uint8_t fails = rescanFails ? rescanFails : 1;
+    return failStreak >= fails && spaced(wakesSinceScan, rescanMinS, intervalS);
 }
 
 enum class Action : uint8_t {

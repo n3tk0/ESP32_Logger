@@ -157,7 +157,7 @@ when the validator was written:
   pulse `per_pulse > 0` and `debounce_us` ≤ 1 000 000, `board` a known board
   of the chip, `altitude_m` −500..9000;
 - ESP-NOW: `batt.divider` 1..20, `batt.trim` 0.5..1.5, `link.ack_window_ms`
-  5..1000, `link.rescan_fails` ≥ 1;
+  5..1000, `link.rescan_fails` ≥ 1, `link.rescan_min_s` 300..604 800 (7 days);
 - WiFi: `net.ssid` and `net.host` required, `net.port` ≥ 1, `net.pass` and
   `net.next.pass` empty (open network) or at least 8 characters;
 - `lmk` (ESP-NOW page) empty or exactly 16 characters.
@@ -167,7 +167,7 @@ metrics, pins, transport sections). `field` is at most 23 characters and
 `reason` at most 47, so both fit a CFG_ACK unchanged. Field paths used:
 `name`, `interval_s`, `altitude_m`, `board`, `i2c.sda`, `i2c.scl`, `sensors`
 (count/budget), `sensors[N].<type|addr|pin|count|metric|rx|tx|mode|per_pulse|debounce_us>`,
-`batt.pin|divider|trim`, `link.ack_window_ms|rescan_fails`,
+`batt.pin|divider|trim`, `link.ack_window_ms|rescan_fails|rescan_min_s`,
 `net.ssid|pass|host|port|token|basic_user|basic_pass|next.ssid|next.pass`, `lmk`.
 A sensor that is not allowed to sleep on a sleeping ESP-NOW node is reported
 at `sensors[N].type`.
@@ -289,8 +289,11 @@ bytes after the name's first NUL is refused; a reply with port 0 is refused.
 6. ESP-NOW node: it never needed the password. `link.next_ssid` is tried by
    `linkFindChannel()` when the stored SSID/BSSID is not on the air (or is
    still up on the very channel the node is failing on while `next_ssid` is
-   heard elsewhere — the old network need not go away). On success it is
-   promoted, the old SSID becomes `next_ssid`, and `local` is set. And the
+   heard elsewhere — the old network need not go away). Success means the
+   collector answers a signed DISCOVER on the channel `next_ssid` was heard
+   on; only then is it promoted, the old SSID becomes `next_ssid`, and
+   `local` is set. A network on the air with no collector answering is not
+   adopted, and the next scan looks again. And the
    collector now answers a signed DISCOVER **from a MAC already in its node
    table even when no pairing window is open**, so a node that slept through
    the handover finds it on its hourly sweep.
@@ -332,7 +335,8 @@ unknown types in `espnowValidate()`.
 - `EN_MSG_CFG_ACK = 7` (node → collector): `magic ver type nodeId | rev u16 |
   status u8 (0 ok, 1 rejected) | field[24] | reason[48]`.
 - `EN_MSG_CFG_REPORT = 8` (node → collector): same framing as `EN_MSG_CFG`
-  (`rev` = node's current rev), sent on the first wake after boot and while
+  (`rev` = node's current rev), sent on the first wake after boot, after the
+  node pairs again (a sweep, a handover, `EN_ACK_REDISCOVER`) and while
   `local == true`. The collector reassembles by (nodeId, rev, total) and
   answers the last chunk of EVERY complete report with a CFG with
   `total == 0`:

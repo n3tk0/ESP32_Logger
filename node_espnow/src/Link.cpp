@@ -284,12 +284,14 @@ bool linkExchangeCfg(const NodeLink& link, const void* frame, int len, uint16_t 
 // Pairing
 // ---------------------------------------------------------------------------
 
-bool linkPair(NodeLink& io, uint32_t* epochOut) {
+bool linkPair(NodeLink& io, uint32_t* epochOut, uint8_t onlyCh) {
     // A nonce per attempt so two sweeps are not byte-identical on the air.
     // esp_random() is the hardware RNG; it is seeded without WiFi being
     // associated, which matters because this runs before the node has a
     // collector at all.
-    for (uint8_t ch = 1; ch <= NODE_MAX_CHANNEL; ch++) {
+    const uint8_t first = onlyCh ? onlyCh : 1;
+    const uint8_t last  = onlyCh ? onlyCh : NODE_MAX_CHANNEL;
+    for (uint8_t ch = first; ch <= last; ch++) {
         if (esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE) != ESP_OK) continue;
 
         DiscoverMsg d;
