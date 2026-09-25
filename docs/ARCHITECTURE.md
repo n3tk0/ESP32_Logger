@@ -548,7 +548,7 @@ The **Auth** column in the index uses:
 | GET | `/kindle` | read | Server-rendered e-ink dashboard (`FEATURE_KINDLE_DASHBOARD`) |
 | GET | `/kindle/probe` | read | Reports the reader's viewport, DPR and user agent, to pick `KINDLE_PAGE_W` |
 | GET | `/kindle/clear` | read | Full-screen black/white frames to clear e-ink ghosting, then back to `/kindle` |
-| GET | `/kindle/forecast` | read | Queue a forecast fetch now (one a minute at most), then back to `/kindle`; `?t=1` answers `ok`, `wait <s>` or `off` (`MODULE_FORECAST_ENABLED`) |
+| GET | `/kindle/forecast` | read | Queue a forecast fetch now (one a minute at most), then back to `/kindle`; `?t=1` answers `ok`, `wait <s>`, `off` or `offline` (no station link, nothing queued); `?t=1&w=1` only polls, `pending` or `done` (`MODULE_FORECAST_ENABLED`) |
 
 `/api/ingest` is the one mutating route that does **not** go through
 `requireMutatingAuth()`. That chain checks a CSRF token, which exists to stop a

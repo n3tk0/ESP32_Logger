@@ -2206,7 +2206,11 @@ var Modules = (function () {
     if (!btn) return;
     btn.addEventListener("click", function () {
       btn.disabled = true;
-      var before = st.fetchedAt || 0, tries = 0;
+      // Polled for as long as the collector says the fetch is queued or
+      // running ("pending") — OWM is two HTTPS requests at up to six seconds
+      // each, so any fixed wait is either too short or too long — with a cap
+      // so a collector that never clears it cannot keep the button disabled.
+      var before = st.fetchedAt || 0, until = Date.now() + 45000;
       function done(html) { btn.disabled = false; if (html) setMsg(html); }
       function poll() {
         fetchWithTimeout("/api/modules/forecast", {}, 10000)
@@ -2215,10 +2219,10 @@ var Modules = (function () {
             var s = (d && d.status) || {};
             var box = _el("fc-rows");
             if (box) box.innerHTML = rows(s);
-            if ((s.fetchedAt || 0) !== before) {
-              done('<div class="alert alert-success">' + esc(t("settingsPages.modFcUpdated")) + '</div>');
-            } else if (++tries < 6) {
+            if (s.pending && Date.now() < until) {
               setTimeout(poll, 2000);
+            } else if ((s.fetchedAt || 0) !== before) {
+              done('<div class="alert alert-success">' + esc(t("settingsPages.modFcUpdated")) + '</div>');
             } else {
               done('<div class="alert alert-error">' + esc(t("settingsPages.modFcNoAnswer")) + '</div>');
             }
@@ -2234,6 +2238,8 @@ var Modules = (function () {
             setTimeout(poll, 2000);
           } else if (txt.indexOf("wait ") === 0) {
             done('<div class="alert alert-warning">' + esc(t("settingsPages.modFcWait", { sec: txt.slice(5) })) + '</div>');
+          } else if (txt === "offline") {
+            done('<div class="alert alert-warning">' + esc(t("settingsPages.modFcOffline")) + '</div>');
           } else {
             done('<div class="alert alert-warning">' + esc(t("settingsPages.modFcOff")) + '</div>');
           }

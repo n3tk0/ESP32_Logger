@@ -173,9 +173,17 @@ AUTO_FIND=1
 #               top block takes its 124 px. For a panel on a collector that is
 #               its own access point and is never going to have a forecast.
 LAYOUT=auto
+# WHICH ONE-TIME MOVES dash.conf HAS ALREADY HAD. A dash.conf with no CONF_VER
+# line predates the marker and is 1; dash.conf.default ships the current one.
+# conf_load() applies each move once and then writes the new number back, so a
+# move never undoes a choice the reader makes afterwards.
+#
+#   2  the pre-`forecast` bar (MENU_ACT_OLD) gains the Forecast button
+CONF_VER=1
+CONF_VER_NOW=2
 
 conf_keys() {
-    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP CANVAS TOUCH TOUCH_DEV TOUCH_MAXX TOUCH_MAXY TOUCH_SWAP MENU_LBL MENU_ACT MENU_LBL2 SURE_LBL MODE_LBL WAKE_MENU WAKE_HOLD QUIET_FROM QUIET_TO QUIET_EVERY STATUS AUTO_FIND LAYOUT"
+    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP CANVAS TOUCH TOUCH_DEV TOUCH_MAXX TOUCH_MAXY TOUCH_SWAP MENU_LBL MENU_ACT MENU_LBL2 SURE_LBL MODE_LBL WAKE_MENU WAKE_HOLD QUIET_FROM QUIET_TO QUIET_EVERY STATUS AUTO_FIND LAYOUT CONF_VER"
 }
 
 # THE KEYS THAT ARE NOT NUMBERS, in one place because two places drifted.
@@ -230,6 +238,7 @@ conf_help() {
         QUIET_EVERY)        echo "Minutes between clock updates during quiet hours (0 = as usual)" ;;
         STATUS)             echo "Draw battery, mode and collector state in the footer (1 = on)" ;;
         AUTO_FIND)          echo "Scan for the collector once if the first fetch fails (1 = on)" ;;
+        CONF_VER)           echo "Which upgrades this file has had. Written by the dashboard; leave it alone" ;;
         *)                  echo "" ;;
     esac
 }
@@ -495,15 +504,25 @@ conf_load() {
             CONF_WARNED="$kept"
         fi
     done
-    # The shipped bar before `forecast`, with the shipped words or none, is a
-    # bar nobody chose: the reader gets the button the new one ships with. Own
-    # labels over the old four buttons mean somebody sat down and named them,
-    # and both keys are left exactly as they are.
-    if [ "$MENU_ACT" = "$MENU_ACT_OLD" ]; then
-        case "${MENU_LBL:-}" in
-            ""|"$MENU_LBL_OLD"|"$MENU_LBL_STD")
-                MENU_ACT="refresh|wake|forecast|settings|quit" ;;
-        esac
+    # ONCE, THEN WRITTEN DOWN. Applied on every load, the move below made the
+    # old four-button bar impossible to choose again: a reader who took the
+    # Forecast button off got it back a minute later. So it runs while CONF_VER
+    # says it has not, and the new number goes into dash.conf with it.
+    if [ "${CONF_VER:-1}" -lt 2 ]; then
+        # The shipped bar before `forecast`, with the shipped words or none, is
+        # a bar nobody chose: the reader gets the button the new one ships
+        # with. Own labels over the old four buttons mean somebody sat down and
+        # named them, and both keys are left exactly as they are.
+        if [ "$MENU_ACT" = "$MENU_ACT_OLD" ]; then
+            case "${MENU_LBL:-}" in
+                ""|"$MENU_LBL_OLD"|"$MENU_LBL_STD")
+                    MENU_ACT="refresh|wake|forecast|settings|quit" ;;
+            esac
+        fi
+    fi
+    if [ "${CONF_VER:-1}" -lt "$CONF_VER_NOW" ]; then
+        CONF_VER=$CONF_VER_NOW
+        conf_write 2>/dev/null || echo "dash.conf: could not record CONF_VER" >&2
     fi
     return 0
 }
@@ -1552,18 +1571,34 @@ menu_note() {
 # Ask the collector for a fresh forecast, then draw the page with it.
 #
 # THE COLLECTOR ONLY QUEUES IT: the fetch runs on its own task a moment later
-# and takes up to a few seconds, so the page is redrawn after a wait rather
-# than straight away — straight away would draw the forecast it already had.
-# The answer is one line, see handleKindleForecast() in KindleDashboard.cpp.
+# and takes up to a dozen seconds (two HTTPS requests for OWM, six seconds'
+# timeout each), so the page is redrawn once the collector says the fetch is
+# over rather than straight away — straight away would draw the forecast it
+# already had. It is asked every DASH_FC_STEP seconds, with ?w=1, which only
+# answers "pending" or "done", and never for longer than DASH_FC_MAX. Anything
+# else, an older collector's answer or none, ends the wait too.
+# The answers are one line, see handleKindleForecast() in KindleDashboard.cpp.
 forecast_now() {
-    local ans
+    local ans waited=0
+    local step="${DASH_FC_STEP:-3}" max="${DASH_FC_MAX:-45}" inc
+    # A step of 0 (the tests) still counts, or the cap would never come.
+    inc=$step; [ "$inc" -gt 0 ] || inc=1
     net_up
     ans=$(wget -q -T "$FETCH_TIMEOUT" -O - "$(host_url)/kindle/forecast?t=1" 2>/dev/null)
     case "$ans" in
-        ok)     menu_note "Updating the forecast..."; sleep "${DASH_FC_SETTLE:-8}" ;;
+        ok)     menu_note "Updating the forecast..."
+                while [ "$waited" -lt "$max" ]; do
+                    sleep "$step"
+                    waited=$((waited + inc))
+                    ans=$(wget -q -T "$FETCH_TIMEOUT" -O - \
+                          "$(host_url)/kindle/forecast?t=1&w=1" 2>/dev/null)
+                    [ "$ans" = "pending" ] || break
+                done ;;
         wait*)  menu_note "Updated a moment ago. Try again in ${ans#wait } s"
                 sleep "${DASH_FC_NOTE:-3}" ;;
         off)    menu_note "The forecast is off on the collector"; sleep "${DASH_FC_NOTE:-3}" ;;
+        offline) menu_note "The collector is offline: no forecast to fetch"
+                sleep "${DASH_FC_NOTE:-3}" ;;
         *)      menu_note "No answer from the collector"; sleep "${DASH_FC_NOTE:-3}" ;;
     esac
     : > "$TMP/redraw"

@@ -85,6 +85,17 @@ case "$url" in
         echo "$url" >> "${WGET_LOG:-/dev/null}"
         echo "${FC_ANSWER:-ok}"
         exit 0 ;;
+    # The wait that follows "ok": "pending" for as many polls as the file
+    # FC_PENDING names holds in its count, then "done".
+    *"$WGET_OK_HOST"*/kindle/forecast\?t=1\&w=1)
+        echo "$url" >> "${WGET_LOG:-/dev/null}"
+        n=0; [ -n "${FC_PENDING:-}" ] && n=$(cat "$FC_PENDING" 2>/dev/null)
+        if [ "${n:-0}" -gt 0 ]; then
+            echo $((n - 1)) > "$FC_PENDING"; echo pending
+        else
+            echo done
+        fi
+        exit 0 ;;
     *"$WGET_OK_HOST"*/kindle/graph.bmp)
         # A REAL, SELF-CONSISTENT BMP: "BM", then the file's own length as a
         # 32-bit little-endian count at offset 2 (130 = \202), then bytes to
@@ -2118,18 +2129,34 @@ check "$?" "Awake stops the sleeping, writes it to dash.conf, and puts it back"
 ( reset_log
   RES_W=600 RES_H=800 MENU_ACTS="" FONT_REG="$WORK/fonts/Bookerly-Regular.ttf"
   export WGET_OK_HOST=10.9.9.42 WGET_LOG="$WORK/fc.log" FC_ANSWER=ok
-  HOST=10.9.9.42 DASH_FC_SETTLE=0 DASH_FC_NOTE=0
+  HOST=10.9.9.42 DASH_FC_STEP=0 DASH_FC_NOTE=0
   : > "$WGET_LOG"; rm -f "$TMP/redraw"
   forecast_now
   grep -q "/kindle/forecast?t=1" "$WGET_LOG" || exit 1
   grep -q -- "--	Updating the forecast" "$FBINK_LOG" || exit 2
   [ -f "$TMP/redraw" ] || exit 3
+  # It waits while the collector says the fetch is still going — the fetch
+  # can outlast any fixed pause — and stops as soon as it is not.
+  export FC_PENDING="$WORK/fc.pending"; echo 4 > "$FC_PENDING"
+  : > "$WGET_LOG"; forecast_now
+  [ "$(grep -c 'w=1' "$WGET_LOG")" = "5" ] || { echo "$(grep -c 'w=1' "$WGET_LOG") polls" >&2; exit 7; }
+  # And never longer than the cap, whatever the collector keeps saying.
+  echo 999 > "$FC_PENDING"; : > "$WGET_LOG"
+  DASH_FC_MAX=6 forecast_now
+  [ "$(grep -c 'w=1' "$WGET_LOG")" = "6" ] || { echo "$(grep -c 'w=1' "$WGET_LOG") polls" >&2; exit 8; }
+  unset FC_PENDING
   reset_log
   FC_ANSWER="wait 42"; forecast_now
   grep -q -- "--	Updated a moment ago. Try again in 42 s" "$FBINK_LOG" || exit 4
   reset_log
   FC_ANSWER=off; forecast_now
   grep -q -- "--	The forecast is off" "$FBINK_LOG" || exit 5
+  # An access point, or a collector whose network is down: nothing was queued,
+  # so the bar says why instead of pretending to update.
+  reset_log; : > "$WGET_LOG"
+  FC_ANSWER=offline; forecast_now
+  grep -q -- "--	The collector is offline" "$FBINK_LOG" || exit 9
+  grep -q 'w=1' "$WGET_LOG" && exit 10
   reset_log
   HOST=10.9.9.254; forecast_now
   grep -q -- "--	No answer from the collector" "$FBINK_LOG" || exit 6
@@ -2140,18 +2167,43 @@ check "$?" "Forecast asks the collector, says what it answered, and redraws"
 # Every dash.conf installed before the button carries the four shipped actions
 # and the four shipped words, and would never see the button otherwise.
 ( CONF="$WORK/fc-migrate.conf"
+  CONF_VER=1
   printf 'MENU_ACT=refresh|wake|settings|quit\nMENU_LBL=Refresh|Awake/Sleep|More|Exit\n' > "$CONF"
   conf_load 2>/dev/null
   [ "$MENU_ACT" = "refresh|wake|forecast|settings|quit" ] || { echo "got [$MENU_ACT]" >&2; exit 1; }
+  CONF_VER=1
   printf 'MENU_ACT=refresh|wake|settings|quit\nMENU_LBL=Обнови|Буден|Още|Изход\n' > "$CONF"
   conf_load 2>/dev/null
   [ "$MENU_ACT" = "refresh|wake|settings|quit" ] || exit 2
   [ "$MENU_LBL" = "Обнови|Буден|Още|Изход" ] || exit 3
+  CONF_VER=1
   printf 'MENU_ACT=refresh|hide|quit\n' > "$CONF"
   conf_load 2>/dev/null
   [ "$MENU_ACT" = "refresh|hide|quit" ] || exit 4
   exit 0 )
 check "$?" "an untouched old bar gains the Forecast button; a bar somebody set keeps theirs"
+
+# ONCE. The move is written down as CONF_VER in dash.conf, so a reader who then
+# takes the Forecast button off again keeps the old four-button bar: before the
+# marker, every conf_load() put the button straight back.
+( CONF="$WORK/fc-once.conf"
+  CONF_VER=1
+  printf 'MENU_ACT=refresh|wake|settings|quit\nMENU_LBL=Refresh|Awake/Sleep|More|Exit\n' > "$CONF"
+  conf_load 2>/dev/null
+  [ "$MENU_ACT" = "refresh|wake|forecast|settings|quit" ] || exit 1
+  grep -q '^CONF_VER=2$' "$CONF" || exit 2
+  grep -q '^MENU_ACT=refresh|wake|forecast|settings|quit$' "$CONF" || exit 3
+  # The reader chooses the old bar back, from KUAL or by hand.
+  sed -i 's/^MENU_ACT=.*/MENU_ACT=refresh|wake|settings|quit/' "$CONF"
+  conf_load 2>/dev/null
+  [ "$MENU_ACT" = "refresh|wake|settings|quit" ] || { echo "got [$MENU_ACT]" >&2; exit 4; }
+  # And a fresh shell reading the same file — a restart — agrees.
+  ( CONF_VER=1; MENU_ACT=x; conf_load 2>/dev/null
+    [ "$MENU_ACT" = "refresh|wake|settings|quit" ] ) || exit 5
+  # The shipped default is already current, so a new install is never moved.
+  grep -q "^CONF_VER=$CONF_VER_NOW\$" "$KDIR/dash.conf.default" || exit 6
+  exit 0 )
+check "$?" "the move is recorded once in dash.conf, so the old bar can be chosen again"
 
 # And the old shipped words over a bar of four other buttons are still the
 # shipped words: refused, so they cannot sit one place along from what they name.
