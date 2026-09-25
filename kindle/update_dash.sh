@@ -2651,9 +2651,79 @@ draw_field() {
     if [ -n "$arrow" ]; then
         asz=$(( sz * 50 / 100 ))
         [ "$asz" -lt 10 ] && asz=10
-        draw_text_reg "$(( ux + sz / 10 ))" "$(baseline_y "$y" "$sz" "$asz")" \
-                      "$asz" "GRAY4" "$arrow"
+        draw_arrow "$(( ux + sz / 10 ))" "$(( y + sz * ${BASELINE_MILLE:-848} / 1000 ))" \
+                   "$asz" "$arrow" "GRAY4"
     fi
+}
+
+# ── The tendency arrow, drawn rather than typeset ────────────────────────────
+# THE PANEL'S FONTS HAVE NO ARROWS. Bookerly, Caecilia and the rest of what a
+# Kindle ships are book faces: U+2191..U+2198 are not in them, and FBInk draws
+# a missing glyph as an empty box — which is what the pressure tendency was on
+# the panel, while the browser page, with a system font to fall back on, drew
+# it fine. So the five arrows the collector sends are drawn from rectangles:
+# a shaft and a head, sitting on the baseline of the value beside them, at the
+# size that value's arrow would have been set in.
+#
+# A diagonal shaft is a stair of small squares; its head is the two sides of
+# the corner it points into. A straight one is one bar with a chevron of
+# squares for its head. Something the collector sends that is not one of the
+# five is typeset as before.
+draw_arrow() {
+    # $1=x $2=baseline y $3=size $4=the arrow $5=colour
+    local x="$1" base="$2" sz="$3" a="$4" col="${5:-GRAY4}"
+    local s t st hl top cx cy i
+    s=$(( sz * 62 / 100 ));  [ "$s" -lt 7 ] && s=7
+    t=$(( s / 7 ));          [ "$t" -lt 2 ] && t=2
+    st=$(( t / 2 ));         [ "$st" -lt 1 ] && st=1
+    hl=$(( s * 45 / 100 ))                  # the head's arms
+    top=$(( base - s ))
+    cx=$(( x + (s - t) / 2 )); cy=$(( top + (s - t) / 2 ))
+    case "$a" in
+        '↘')
+            i=0
+            while [ "$i" -le $(( s - t )) ]; do
+                fill_rect $(( x + i )) $(( top + i )) "$t" "$t" "$col"
+                i=$(( i + st ))
+            done
+            fill_rect $(( x + s - hl )) $(( top + s - t )) "$hl" "$t" "$col"
+            fill_rect $(( x + s - t )) $(( top + s - hl )) "$t" "$hl" "$col" ;;
+        '↗')
+            i=0
+            while [ "$i" -le $(( s - t )) ]; do
+                fill_rect $(( x + i )) $(( top + s - t - i )) "$t" "$t" "$col"
+                i=$(( i + st ))
+            done
+            fill_rect $(( x + s - hl )) "$top" "$hl" "$t" "$col"
+            fill_rect $(( x + s - t )) "$top" "$t" "$hl" "$col" ;;
+        '→')
+            fill_rect "$x" "$cy" "$s" "$t" "$col"
+            i=0
+            while [ "$i" -le "$hl" ]; do
+                fill_rect $(( x + s - t - i )) $(( cy - i )) "$t" "$t" "$col"
+                fill_rect $(( x + s - t - i )) $(( cy + i )) "$t" "$t" "$col"
+                i=$(( i + st ))
+            done ;;
+        '↑')
+            fill_rect "$cx" "$top" "$t" "$s" "$col"
+            i=0
+            while [ "$i" -le "$hl" ]; do
+                fill_rect $(( cx - i )) $(( top + i )) "$t" "$t" "$col"
+                fill_rect $(( cx + i )) $(( top + i )) "$t" "$t" "$col"
+                i=$(( i + st ))
+            done ;;
+        '↓')
+            fill_rect "$cx" "$top" "$t" "$s" "$col"
+            i=0
+            while [ "$i" -le "$hl" ]; do
+                fill_rect $(( cx - i )) $(( top + s - t - i )) "$t" "$t" "$col"
+                fill_rect $(( cx + i )) $(( top + s - t - i )) "$t" "$t" "$col"
+                i=$(( i + st ))
+            done ;;
+        *)
+            draw_text_reg "$x" $(( base - sz * ${BASELINE_MILLE:-848} / 1000 )) \
+                          "$sz" "$col" "$a" ;;
+    esac
 }
 
 # Where a smaller value has to start so it shares a baseline with a larger one
@@ -2899,7 +2969,13 @@ draw_sensors_body() {
         draw_text_bold "$PRES_X" "$PRES_Y" "$PRES_SZ" "BLACK" "$OUT_PRES $OUT_PRES_UNIT"
     fi
     if [ -n "$OUT_TEND" ]; then
-        draw_text_reg "$TEND_X" "$TEND_Y" "$TEND_SZ" "GRAY4" "$OUT_TEND_ARROW $OUT_TEND ($OUT_TEND_DELTA)"
+        local tx="$TEND_X"
+        if [ -n "$OUT_TEND_ARROW" ]; then
+            draw_arrow "$TEND_X" $(( TEND_Y + TEND_SZ * ${BASELINE_MILLE:-848} / 1000 )) \
+                       "$TEND_SZ" "$OUT_TEND_ARROW" "GRAY4"
+            tx=$(( TEND_X + TEND_SZ ))
+        fi
+        draw_text_reg "$tx" "$TEND_Y" "$TEND_SZ" "GRAY4" "$OUT_TEND ($OUT_TEND_DELTA)"
     fi
 
     draw_hline "$RULE1_X" "$RULE1_Y" "$RULE1_W" "GRAYA"
