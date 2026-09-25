@@ -189,6 +189,25 @@ static void test_next_after_two_failed_cycles_then_alternate() {
     CHECK(m.networkToTry(true) == Net::Current);   // one failure, not two in a row
 }
 
+static void test_alternation_outlives_the_counter() {
+    // The fail count is a u8; hundreds of failed cycles (a day at 60 s, with
+    // the old AP gone and the new one not yet up) must not pin the node to
+    // one network. Every pair of cycles past NEXT_AFTER_FAILS tries both.
+    Link l;
+    Net prev = Net::Current;
+    for (int i = 0; i < 1000; i++) {
+        const Net n = l.networkToTry(true);
+        if (i > Link::NEXT_AFTER_FAILS) CHECK(n != prev);
+        prev = n;
+        CHECK_EQ(l.wifiResult(false, n), LA_NONE);
+        CHECK(l.wifiFails() >= (i < 254 ? i + 1 : 254));
+    }
+    // And joining next after all that still promotes it.
+    while (l.networkToTry(true) != Net::Next) l.wifiResult(false, Net::Current);
+    CHECK_EQ(l.wifiResult(true, Net::Next), LA_PROMOTE | LA_DISCOVER);
+    CHECK_EQ(l.wifiFails(), 0);
+}
+
 static void test_joining_next_promotes_it_and_looks_for_the_collector() {
     Link l;
     l.wifiResult(false, Net::Current);
@@ -443,6 +462,7 @@ int main() {
     RUN(test_a_refusal_is_carried_intact);
     RUN(test_without_a_next_network_only_the_current_one_is_tried);
     RUN(test_next_after_two_failed_cycles_then_alternate);
+    RUN(test_alternation_outlives_the_counter);
     RUN(test_joining_next_promotes_it_and_looks_for_the_collector);
     RUN(test_discovery_after_three_failed_posts);
     RUN(test_a_network_change_that_reaches_nothing_is_rolled_back);
