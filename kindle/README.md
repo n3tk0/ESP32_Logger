@@ -187,13 +187,14 @@ settings screen you were just looking at gives way to the page again by itself.
 | `TOUCH` | `1` | Tap the screen for the menu |
 | `WAKE_MENU` | `1` | A press of the power button wakes the panel and opens the menu |
 | `WAKE_HOLD` | `120` | Seconds it then stays awake and listening; every tap pushes this out |
-| `MENU_ACT` | `refresh\|wake\|forecast\|settings\|quit` | What the bar's buttons do — 2 to 5 of `refresh`, `wake`, `forecast`, `settings`, `hide`, `quit`. A `dash.conf` still carrying the old shipped four (and the old shipped labels, or none) gets `forecast` added on its own |
+| `MENU_ACT` | `refresh\|wake\|forecast\|settings\|quit` | What the bar's buttons do — 2 to 5 of `refresh`, `wake`, `forecast`, `settings`, `hide`, `quit`. A `dash.conf` still carrying the old shipped four (and the old shipped labels, or none) gets `forecast` added on its own, once: the move is recorded as `CONF_VER`, so taking the button off again sticks |
 | `MENU_LBL` | `Refresh\|Awake/Sleep\|Forecast\|More\|Exit` | What they are called. The sleep button may carry both directions with a slash; the bar draws the half that says where the next tap goes. Used only when there are as many labels as buttons and they are not the shipped ones — otherwise each button is named after what it does, so changing `MENU_ACT` alone cannot mislabel the bar |
 | `QUIET_FROM`, `QUIET_TO` | `0`, `0` | Hours between which nothing flashes. Equal = off |
 | `QUIET_EVERY` | `15` | Minutes between clock updates during those hours |
 | `STATUS` | `1` | Draw this Kindle's battery and power mode at the end of the footer |
 | `AUTO_FIND` | `1` | Look for the collector once if the very first fetch fails |
 | `LAYOUT` | `auto` | The page's shape: `auto` follows the collector, `normal` keeps the forecast band, `standalone` drops it and enlarges the readings |
+| `CONF_VER` | `2` | Which one-time upgrades `dash.conf` has had. Written by the dashboard; leave it alone |
 
 `Find collector` writes the addresses that answered to `collectors`, beside
 `dash.conf` — not under `/tmp`, which Stop deletes and a reboot clears — so

@@ -117,17 +117,25 @@ public:
         REFRESH_QUEUED = 0,   // the next tick fetches, whatever the interval
         REFRESH_WAIT   = 1,   // a fetch was tried under a minute ago
         REFRESH_OFF    = 2,   // disabled, or no location set
+        REFRESH_OFFLINE = 3,  // no station link (AP mode, or STA down): tick()
+                              // would not fetch, so nothing is queued
     };
 
     /// Asks for a fetch now rather than at the end of the interval. Called
     /// from the web server, so it only raises a flag: the fetch itself blocks
     /// for seconds and stays on the export task, where tick() already runs it.
-    /// `waitS` is set on REFRESH_WAIT to the seconds left.
+    /// `waitS` is set on REFRESH_WAIT to the seconds left. Without a station
+    /// link it answers REFRESH_OFFLINE and raises nothing, since tick() would
+    /// skip the fetch and the button would promise one that never comes.
     ///
     /// ONE MINUTE BETWEEN ATTEMPTS, manual or not. The button sits on a page
     /// served without a password, and OWM's free key is counted per day — a
     /// reader tapping it ten times should cost one request, not ten.
     Refresh requestRefresh(uint32_t nowMs, uint32_t& waitS);
+
+    /// A fetch is queued or in flight — what statusJson() reports as
+    /// "pending". The pages that asked for a refresh wait on this.
+    bool refreshPending() const { return _refreshRequested || _fetching; }
 
 private:
     bool _fetch();
@@ -150,6 +158,10 @@ private:
     // Set by requestRefresh() on the AsyncTCP task, cleared by tick() on the
     // export task. A lone byte, so the store needs no lock.
     volatile bool _refreshRequested = false;
+    // True while tick() is inside _fetch(). The flag above drops as the fetch
+    // STARTS, so without this "pending" would read false for the seconds the
+    // HTTPS requests take and the pages polling it would give up too early.
+    volatile bool _fetching = false;
     Data     _data;
 
     mutable portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;

@@ -2420,23 +2420,71 @@ static void handleKindleClear(AsyncWebServerRequest* req) {
 // The footer link on /kindle, the button on the Modules page and the tap menu
 // on the panel all land here. It only asks: the fetch runs on the export task
 // a moment later (see ForecastModule::requestRefresh), so the page says so and
-// meta-refreshes back to the dashboard once the fetch has had time to finish —
-// two HTTPS requests at six seconds' timeout each, for OWM, at the worst.
+// then waits for it: it meta-refreshes to ?w=<n>, which asks nothing and only
+// looks whether the fetch is still queued or in flight, every few seconds,
+// and goes back to the dashboard once it is not. Capped, so a fetch that
+// hangs — two HTTPS requests at six seconds' timeout each, for OWM, at the
+// worst — cannot keep the reader on this page.
 //
 // A GET, like /kindle/clear, because the reader's browser follows links and
 // submits nothing, and the side effect is one rate-limited forecast request.
 //
-// ?t=1 answers in one plain line instead — "ok", "wait <s>" or "off" — for
-// the panel's script and the Modules page, which have no use for a page.
+// ?t=1 answers in one plain line instead — "ok", "wait <s>", "off" or
+// "offline" — for the panel's script and the Modules page, which have no use
+// for a page. "offline" means the collector has no station link (AP mode, or
+// the network is down), so nothing was queued. After "ok" those callers poll
+// "pending" in /api/modules/forecast, or ?t=1&w=1, which answers "pending" or
+// "done" without asking for anything.
 static void handleKindleForecast(AsyncWebServerRequest* req) {
+    static const int POLL_S = 3, POLL_MAX = 15;   // 45 s, the most we wait
+
+    const bool text = req->hasParam("t");
+
+    // ?w=<n>: a poll, not a request.
+    if (req->hasParam("w")) {
+        int step = req->getParam("w")->value().toInt();
+        if (step < 1)        step = 1;
+        if (step > POLL_MAX) step = POLL_MAX;
+        const bool busy = forecastModule.refreshPending();
+        if (text) {
+            AsyncWebServerResponse* res = req->beginResponse(
+                200, "text/plain", busy ? "pending" : "done");
+            res->addHeader("Cache-Control", "no-store");
+            req->send(res);
+            return;
+        }
+        String p;
+        p.reserve(420);
+        p += F("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+               "<meta name=\"viewport\" content=\"width=");
+        p += PAGE_W;
+        p += F("\"><meta http-equiv=\"refresh\" content=\"");
+        if (busy && step < POLL_MAX) {
+            p += POLL_S;
+            p += F(";url=/kindle/forecast?w=");
+            p += (step + 1);
+        } else {
+            p += F("0;url=/kindle");
+        }
+        p += F("\"><title>...</title><style>body{margin:0;padding:40% 8% 0;"
+               "font:24px sans-serif;text-align:center}</style></head><body><p>");
+        p += kdT("Updating the forecast&hellip;", "Обновявам прогнозата&hellip;");
+        p += F("</p></body></html>");
+        AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
+        res->addHeader("Cache-Control", "no-store");
+        req->send(res);
+        return;
+    }
+
     uint32_t waitS = 0;
     const auto r = forecastModule.requestRefresh(millis(), waitS);
 
-    if (req->hasParam("t")) {
+    if (text) {
         char line[16];
-        if (r == ForecastModule::REFRESH_QUEUED)    strcpy(line, "ok");
-        else if (r == ForecastModule::REFRESH_WAIT) snprintf(line, sizeof(line), "wait %lu", (unsigned long)waitS);
-        else                                        strcpy(line, "off");
+        if (r == ForecastModule::REFRESH_QUEUED)       strcpy(line, "ok");
+        else if (r == ForecastModule::REFRESH_WAIT)    snprintf(line, sizeof(line), "wait %lu", (unsigned long)waitS);
+        else if (r == ForecastModule::REFRESH_OFFLINE) strcpy(line, "offline");
+        else                                           strcpy(line, "off");
         AsyncWebServerResponse* res = req->beginResponse(200, "text/plain", line);
         res->addHeader("Cache-Control", "no-store");
         req->send(res);
@@ -2444,13 +2492,18 @@ static void handleKindleForecast(AsyncWebServerRequest* req) {
     }
 
     String p;
-    p.reserve(520);
+    p.reserve(560);
     p += F("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
            "<meta name=\"viewport\" content=\"width=");
     p += PAGE_W;
     p += F("\"><meta http-equiv=\"refresh\" content=\"");
-    p += (r == ForecastModule::REFRESH_QUEUED) ? 8 : 4;
-    p += F(";url=/kindle\"><title>...</title><style>body{margin:0;padding:40% 8% 0;"
+    if (r == ForecastModule::REFRESH_QUEUED) {
+        p += POLL_S;
+        p += F(";url=/kindle/forecast?w=1");
+    } else {
+        p += F("4;url=/kindle");
+    }
+    p += F("\"><title>...</title><style>body{margin:0;padding:40% 8% 0;"
            "font:24px sans-serif;text-align:center}</style></head><body><p>");
     if (r == ForecastModule::REFRESH_QUEUED) {
         p += kdT("Updating the forecast&hellip;", "Обновявам прогнозата&hellip;");
@@ -2459,6 +2512,9 @@ static void handleKindleForecast(AsyncWebServerRequest* req) {
                  "Обновена е преди по-малко от минута. Опитай след ");
         p += waitS;
         p += F(" s.");
+    } else if (r == ForecastModule::REFRESH_OFFLINE) {
+        p += kdT("The collector is offline, so it cannot fetch a forecast.",
+                 "Колекторът е без интернет и не може да изтегли прогноза.");
     } else {
         p += kdT("The forecast is off, or has no location set.",
                  "Прогнозата е изключена или няма зададено място.");

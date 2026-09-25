@@ -104,7 +104,10 @@ MODULE_SCHEMA = {
     ]}),
 }
 
-FORECAST = {"asked": False}
+# `polls`: how many status reads after "ok" still say pending, so the page is
+# seen to wait for the fetch rather than for a fixed time. `offline`: answer
+# as a collector with no station link does.
+FORECAST = {"asked": False, "polls": 0, "left": 0, "offline": False}
 
 MODULE_CONFIG = {
     "forecast": {"provider": "open-meteo", "lat": 42.7, "lon": 23.3, "interval_min": 30},
@@ -671,19 +674,35 @@ class H(http.server.SimpleHTTPRequestHandler):
         if path == "/api/modules/wifi/test":
             return self._json({"state": "success", "rssi": -51, "ip": "192.168.7.23"})
         # The forecast button's one-line answer (handleKindleForecast). "ok"
-        # the first time; the fetch is "done" at once, so the status the page
-        # polls next already carries a newer fetchedAt. Then "wait", like the
-        # device's one-minute floor. /__mock/forecast?reset=1 starts it over.
+        # the first time; the status then says "pending" for FORECAST["polls"]
+        # reads, and only after that carries the newer fetchedAt. Then "wait",
+        # like the device's one-minute floor. /__mock/forecast?reset=1 starts
+        # it over; &polls=N and &offline=1 set the next round up.
         if path == "/kindle/forecast":
             st = next(x for x in MODULES if x["id"] == "forecast")["status"]
+            if FORECAST["offline"]:
+                return self._text("offline")
             if FORECAST["asked"]:
                 return self._text("wait 57")
             FORECAST["asked"] = True
-            st["fetchedAt"] = int(time.time())
+            FORECAST["left"] = FORECAST["polls"]
+            if FORECAST["left"] > 0:
+                st["pending"] = True
+            else:
+                st["fetchedAt"] = int(time.time())
             return self._text("ok")
         if path == "/__mock/forecast":
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             FORECAST["asked"] = False
+            FORECAST["polls"] = int(q.get("polls", ["0"])[0])
+            FORECAST["offline"] = q.get("offline", ["0"])[0] == "1"
             return self._json(FORECAST)
+        if path == "/api/modules/forecast" and FORECAST["left"] > 0:
+            st = next(x for x in MODULES if x["id"] == "forecast")["status"]
+            FORECAST["left"] -= 1
+            if FORECAST["left"] == 0:
+                st["pending"] = False
+                st["fetchedAt"] = int(time.time())
         if path.startswith("/api/modules/"):
             mid = path[len("/api/modules/"):]
             m = next((x for x in MODULES if x["id"] == mid), None)

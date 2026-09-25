@@ -378,6 +378,7 @@ I18n.register("settingsPages", {
     modFcUpdated: "Forecast updated.",
     modFcWait: "Updated under a minute ago. Try again in {sec} s.",
     modFcOff: "The forecast is off, or has no location set. Save the settings first.",
+    modFcOffline: "The collector is not connected to a network (access point mode, or WiFi is down), so it cannot fetch a forecast.",
     modFcNoAnswer: "No new forecast arrived. Check the network and the location.",
 
     // ── Network & Time / Platform aggregator sub-pages ──────────────────────
@@ -758,6 +759,7 @@ I18n.register("settingsPages", {
     modFcUpdated: "Прогнозата е обновена.",
     modFcWait: "Обновена е преди по-малко от минута. Опитай след {sec} s.",
     modFcOff: "Прогнозата е изключена или няма зададено място. Първо запази настройките.",
+    modFcOffline: "Колекторът не е свързан към мрежа (режим точка за достъп или WiFi не работи) и не може да изтегли прогноза.",
     modFcNoAnswer: "Не пристигна нова прогноза. Провери мрежата и мястото.",
 
     // ── Network & Time / Platform aggregator sub-pages ──────────────────────
