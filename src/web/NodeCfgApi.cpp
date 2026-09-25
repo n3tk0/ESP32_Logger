@@ -200,8 +200,14 @@ static void discoveryTick() {
         // §3.1: the reply names the address it is sent from — ours on the
         // network the query came in on (our own AP, or the STA side).
         const IPAddress peer(from.sin_addr.s_addr);
+        // The STA side is asked first: should our AP's subnet overlap the
+        // home network's, the node on the home network still gets the
+        // address it can reach.
         IPAddress self = WiFi.localIP();
-        if ((WiFi.getMode() & WIFI_AP) && WiFi.softAPIP() != IPAddress((uint32_t)0)) {
+        const uint32_t sm = (uint32_t)WiFi.subnetMask();
+        const bool onSta = (uint32_t)self != 0 &&
+                           ((uint32_t)peer & sm) == ((uint32_t)self & sm);
+        if (!onSta && (WiFi.getMode() & WIFI_AP) && WiFi.softAPIP() != IPAddress((uint32_t)0)) {
             const uint32_t m = (uint32_t)WiFi.softAPSubnetMask();
             if (((uint32_t)peer & m) == ((uint32_t)WiFi.softAPIP() & m)) self = WiFi.softAPIP();
         }
