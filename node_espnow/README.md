@@ -158,6 +158,28 @@ A **second** node needs the window opened again, and there is no button for
 that yet. `espnowBeginPairing()` on the collector is written and waiting for
 one.
 
+## Firmware updates
+
+From the collector (Settings → Nodes, with an SD card in it): upload a
+`firmware.bin` from `.pio/build/xiao_esp32c3/` and pick the nodes. Each one
+downloads it over ESP-NOW in the wakes after its next report — up to 20 s of
+radio a wake, three or four wakes for a whole image — checks it, and restarts
+into it. A node whose battery is under the rollout's floor (3600 mV unless
+set otherwise; only when a divider is fitted) waits and says so.
+
+A new image is on trial until it hears its first acknowledgement. Three wakes
+without one and the node goes back to the firmware it came from by itself, and
+tells the collector, which shows the update as failed. Nothing to walk to.
+
+On the node's own setup page, **Firmware** uploads a `.bin` directly. Only an
+ESP-NOW node image is accepted (a collector or WiFi-node image is refused
+before it is written); the node restarts into it a second later.
+
+Every image carries a `NODEFW1|espnow-c3|<NODE_FW_VERSION>|` marker, printed
+at boot. Bump `NODE_FW_VERSION` in `src/node_config.h` for a release: it is
+what the pages show. What decides "done" is the image id, which every build
+changes. The whole protocol is [docs/NODE_OTA.md](../docs/NODE_OTA.md).
+
 ## What it does when things go wrong
 
 | what happened | what the node does |
@@ -169,6 +191,7 @@ one.
 | collector reflashed | the same sweep. It cannot tell you it forgot: an encrypted frame from a peer it no longer holds is dropped by the radio before any code runs |
 | collector switched off | keep buffering; scan and sweep at most once an hour |
 | collector flags a config and never sends it | give up after 400 ms, try again after 1, 3, 7 … 63 wakes |
+| a new firmware never reaches the collector | three wakes, then back to the previous firmware; the collector is told |
 
 Readings that could not be delivered are held in 1 KB of RTC memory — 35 of
 them for a BME280 with battery, about half an hour at the default interval —

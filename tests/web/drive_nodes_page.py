@@ -33,6 +33,11 @@ from the collector's validator shown beside the field it names. And the
 network handover (§4): a new WiFi network saved on the Network page is handed
 to the nodes first, with a banner that follows them, on both pages.
 
+And node firmware updates (docs/NODE_OTA.md §2): one image slot per node kind,
+an upload refused in words and one accepted, a node followed from Update to
+done by the page's own poll (and the poll stopping after), "all", Cancel,
+Retry, a battery deferral, no SD card, and a build without the API at all.
+
     python3 tests/web/mock_device.py 8765 &
     python3 tests/web/drive_nodes_page.py
 """
@@ -414,6 +419,210 @@ with sync_playwright() as p:
     stats = pg.locator("#nd-stats").inner_text()
     check("1528" in stats, "the accepted-frame counter is shown")
     check("bad pairing signature" in stats, "the failure counters are labelled")
+
+    # ── Node firmware (docs/NODE_OTA.md §2) ──────────────────────────────────
+    # The mock starts with an ESP8266 image on the card, a WiFi node whose
+    # update FAILED, and no C3 image. Nodes move one step per GET of
+    # /api/nodes/fw, so every state below is reached by the page's own poll.
+    def fw_mock():
+        return pg.evaluate("fetch('/__mock/fw').then(function(r){return r.json()})")
+
+    def fw_set(doc):
+        pg.evaluate("fetch('/__mock/fw',{method:'POST',body:%r}).then(function(r){return r.json()})"
+                    % __import__("json").dumps(doc))
+
+    def fw_gets():
+        return len([u for u in requests if u.endswith("/api/nodes/fw")])
+
+    def c3_image(ver="2026.10.1", kind="espnow-c3"):
+        return b"\xe9" + b"\x00" * 4000 + ("NODEFW1|%s|%s|" % (kind, ver)).encode() + b"\x00" * 16000
+
+    def upload(slot, name, data):
+        slot.locator("input[type=file]").set_input_files(
+            files=[{"name": name, "mimeType": "application/octet-stream", "buffer": data}])
+        pg.wait_for_timeout(900)
+
+    card = pg.locator("#nd-card-fw")
+    slot_w = pg.locator('[data-nd-fw-slot="esp8266"]')
+    slot_c = pg.locator('[data-nd-fw-slot="espnow-c3"]')
+    check(card.is_visible(), "the node firmware card is shown when the collector has the API")
+    heads = [h.strip() for h in card.locator(".nd-fw-slot .nd-sec-h").all_inner_texts()]
+    check(heads == ["WiFi nodes (ESP8266)", "ESP-NOW nodes (XIAO C3)"], "one slot per node kind (%r)" % heads)
+    wtxt = slot_w.inner_text()
+    check("2026.09.1" in wtxt and "456 KB" in wtxt and "uploaded" in wtxt,
+          "a stored image shows its version, size and upload date (%r)" % wtxt[:80])
+    check(slot_w.locator('[data-nd-fw-sum="failed"]').count() == 1,
+          "and how its targets stand (%r)" % slot_w.locator(".nd-fw-sum").inner_text())
+    check(slot_c.locator("[data-nd-fw-none]").count() == 1, "a kind with no image says so")
+    check(slot_c.locator('[data-click="nodesFwStartAll"]').is_disabled(),
+          "and cannot be rolled out")
+    check(slot_c.locator("#nd-fw-minmv").count() == 0, "nor has a battery limit to set yet")
+    chip = row(pg, "rn:greenhouse").locator(".nd-fw-chip")
+    check(chip.count() == 1 and "failed: md5 mismatch" in chip.inner_text().lower(),
+          "a node whose update failed says so in the list (%r)" % (chip.inner_text() if chip.count() else None))
+    check(row(pg, "en:1").locator(".nd-fw-chip").count() == 0, "a node with no update gets no chip")
+
+    # A refused upload: no marker at all. The collector refuses it and the
+    # image that was there stays.
+    upload(slot_w, "junk.bin", b"\xe9" + b"\x00" * 20000)
+    err = slot_w.locator("[data-nd-fw-err]")
+    check(err.count() == 1 and "not a node firmware image" in err.inner_text(),
+          "a file that is not a node image is refused in words (%r)" % (err.inner_text() if err.count() else None))
+    check(fw_mock()["images"]["esp8266"]["ver"] == "2026.09.1", "and the stored image is untouched")
+
+    # The other kind's image on this slot: stopped here, never sent — the
+    # collector files an image by its marker, so it would land in the OTHER
+    # slot while the reader watched this one.
+    ups = fw_mock()["uploads"]
+    upload(slot_w, "c3.bin", c3_image())
+    err = slot_w.locator("[data-nd-fw-err]")
+    check(err.count() == 1 and "ESP-NOW nodes (XIAO C3)" in err.inner_text(),
+          "an image dropped on the wrong slot names the right one (%r)" % (err.inner_text() if err.count() else None))
+    check(fw_mock()["uploads"] == ups, "and is not uploaded")
+
+    upload(slot_c, "firmware.bin", c3_image())
+    check("Stored the image for ESP-NOW nodes (XIAO C3): 2026.10.1" in pg.locator("#nd-msg").inner_text(),
+          "an accepted upload says what was stored (%r)" % pg.locator("#nd-msg").inner_text()[:70])
+    check(slot_c.locator("[data-nd-fw-ver]").inner_text() == "2026.10.1", "and the slot shows it")
+    check(slot_c.locator("[data-nd-fw-err]").count() == 0, "with no error left over")
+    check(not slot_c.locator('[data-click="nodesFwStartAll"]').is_disabled(), "and can now be rolled out")
+
+    # Minimum battery: volts in the box, millivolts on the wire.
+    mm = slot_c.locator("#nd-fw-minmv")
+    check(mm.input_value() == "3.60", "the battery limit starts at the collector's 3.60 V (%r)" % mm.input_value())
+    posts = len(fw_mock()["posts"])
+    mm.fill("2.5")
+    slot_c.locator('[data-click="nodesFwMinSave"]').click()
+    pg.wait_for_timeout(300)
+    check("3.00 to 4.20" in slot_c.inner_text() and len(fw_mock()["posts"]) == posts,
+          "a voltage no cell holds is refused here, and not sent")
+    slot_c.locator("#nd-fw-minmv").fill("3.3")
+    slot_c.locator('[data-click="nodesFwMinSave"]').click()
+    pg.wait_for_timeout(600)
+    last = fw_mock()["posts"][-1]
+    check(last == {"action": "min_mv", "kind": "espnow-c3", "min_mv": 3300},
+          "3.3 V goes to the collector as 3300 mV (%r)" % last)
+    check(slot_c.locator("#nd-fw-minmv").input_value() == "3.30", "and reads back from it")
+
+    # One node, from its drawer: Update, then watch it go through.
+    row(pg, "en:1").click()
+    pg.wait_for_timeout(700)
+    sec = pg.locator('.nd-fw-sec[data-nd-fw-key="e:1"]')
+    check(sec.count() == 1, "an open row has a firmware section")
+    check("2026.09.1" in sec.locator("[data-nd-fw-running]").inner_text(),
+          "saying what the node runs (%r)" % sec.locator("[data-nd-fw-running]").inner_text())
+    check("goes back to the old one" in sec.inner_text(), "an ESP-NOW node says it rolls itself back")
+    sec.locator('[data-click="nodesFwStart"]').click()
+    pg.wait_for_timeout(300)
+    check(fw_mock()["posts"][-1] == {"action": "start", "kind": "espnow-c3", "keys": ["e:1"]},
+          "Update starts that node alone (%r)" % fw_mock()["posts"][-1])
+    seen = []
+    for _ in range(60):
+        b_ = pg.locator('.nd-fw-sec[data-nd-fw-key="e:1"] [data-nd-fw-st]')
+        if b_.count():
+            st = b_.get_attribute("data-nd-fw-st")
+            txt = b_.inner_text().lower()
+            if not seen or seen[-1][0] != st or seen[-1][1] != txt:
+                seen.append((st, txt))
+            if st == "done":
+                break
+        pg.wait_for_timeout(300)
+    states = [s_ for s_, _ in seen]
+    check(states[-1:] == ["done"] and "sending" in states and "staged" in states,
+          "the badge follows the node through to done by polling (%r)" % seen)
+    check(any(t_ == "sending 35%" for _, t_ in seen) or any(t_ == "sending 75%" for _, t_ in seen),
+          "with the download's progress (%r)" % [t_ for _, t_ in seen])
+    check(seen and seen[-1][1] == "updated", "done reads as updated")
+    pg.wait_for_timeout(1200)
+    check("2026.10.1" in pg.locator('.nd-fw-sec[data-nd-fw-key="e:1"] [data-nd-fw-running]').inner_text(),
+          "and the running version is read again (%r)"
+          % pg.locator('.nd-fw-sec[data-nd-fw-key="e:1"] [data-nd-fw-running]').inner_text())
+    g0 = fw_gets()
+    pg.wait_for_timeout(6000)
+    check(fw_gets() == g0, "with nothing in flight, the page stops polling (%d more reads)" % (fw_gets() - g0))
+
+    # Everyone of a kind. Node 3 stays deferred on its battery.
+    slot_c.locator('[data-click="nodesFwStartAll"]').click()      # confirm() accepted
+    pg.wait_for_timeout(500)
+    check(fw_mock()["posts"][-1] == {"action": "start", "kind": "espnow-c3", "keys": "all"},
+          "Update all sends \"all\" (%r)" % fw_mock()["posts"][-1])
+    check("2 node(s) will update" in pg.locator("#nd-msg").inner_text(),
+          "and says how many nodes that is (%r)" % pg.locator("#nd-msg").inner_text()[:60])
+    pg.wait_for_timeout(3500)
+    c3 = row(pg, "en:3").locator(".nd-fw-chip")
+    check(c3.count() == 1 and "deferred: battery 3.41 v" in c3.inner_text().lower(),
+          "a node below the battery limit is deferred, with the voltage (%r)" % (c3.inner_text() if c3.count() else None))
+    check(slot_c.locator('[data-nd-fw-sum="deferred"]').count() == 1, "and counted in the slot")
+    row(pg, "en:3").click()
+    pg.wait_for_timeout(600)
+    sec3 = pg.locator('.nd-fw-sec[data-nd-fw-key="e:3"]')
+    check(sec3.locator('[data-click="nodesFwCancel"]').count() == 1, "an active target can be cancelled from its row")
+    sec3.locator('[data-click="nodesFwCancel"]').click()
+    pg.wait_for_timeout(600)
+    check(fw_mock()["posts"][-1] == {"action": "cancel", "kind": "espnow-c3", "keys": ["e:3"]},
+          "Cancel drops that node alone (%r)" % fw_mock()["posts"][-1])
+    check(row(pg, "en:3").locator(".nd-fw-chip").count() == 0, "and its chip goes")
+    check(sec3.locator('[data-click="nodesFwStart"]').count() == 1, "leaving Update offered again")
+    slot_c.locator('[data-click="nodesFwCancelAll"]').click()
+    pg.wait_for_timeout(600)
+    check(fw_mock()["posts"][-1] == {"action": "cancel", "kind": "espnow-c3", "keys": "all"},
+          "Cancel all drops every target of the kind")
+    check(not [k for k, t in fw_mock()["targets"].items() if t["kind"] == "espnow-c3"],
+          "and the collector holds none")
+
+    # Retry a failed WiFi node; the ESP8266 cannot roll back and says so.
+    row(pg, "rn:greenhouse").click()
+    pg.wait_for_timeout(700)
+    secw = pg.locator('.nd-fw-sec[data-nd-fw-key="w:greenhouse"]')
+    check("cannot roll back" in secw.inner_text(), "a WiFi node warns that an ESP8266 cannot roll back")
+    check("failed: md5 mismatch" in secw.locator("[data-nd-fw-st]").inner_text().lower(),
+          "and shows why it failed")
+    secw.locator('[data-click="nodesFwStart"]').click()
+    pg.wait_for_timeout(500)
+    check(fw_mock()["posts"][-1] == {"action": "start", "kind": "esp8266", "keys": ["w:greenhouse"]},
+          "Retry starts it again (%r)" % fw_mock()["posts"][-1])
+    st = pg.locator('.nd-fw-sec[data-nd-fw-key="w:greenhouse"] [data-nd-fw-st]').get_attribute("data-nd-fw-st")
+    check(st in ("pending", "sending"), "and it is back in progress (%r)" % st)
+
+    # No SD card: the card stays, the upload does not.
+    fw_set({"sd": False})
+    pg.click('#page-settings_nodes [data-click="nodesRefresh"]')
+    pg.wait_for_timeout(1000)
+    check(card.is_visible(), "without an SD card the card is still shown")
+    check("Insert an SD card" in slot_c.locator("[data-nd-fw-err]").inner_text(),
+          "and says to insert one (%r)" % slot_c.inner_text()[:80])
+    check(slot_w.locator("input[type=file]").is_disabled() and slot_c.locator("input[type=file]").is_disabled(),
+          "with both uploads disabled")
+    fw_set({"sd": True})
+
+    # Delete an image.
+    pg.click('#page-settings_nodes [data-click="nodesRefresh"]')
+    pg.wait_for_timeout(1000)
+    slot_c.locator('[data-click="nodesFwDelete"]').click()        # confirm() accepted
+    pg.wait_for_timeout(700)
+    check(fw_mock()["images"]["espnow-c3"] is None and slot_c.locator("[data-nd-fw-none]").count() == 1,
+          "Delete image removes it")
+
+    # Bulgarian.
+    pg.click("#langToggleBtn")
+    pg.wait_for_timeout(500)
+    check("Фърмуер на нодовете" in card.inner_text() and "WiFi нодове (ESP8266)" in slot_w.inner_text(),
+          "the card follows a language switch (%r)" % card.inner_text()[:60])
+    pg.click("#langToggleBtn")
+    pg.wait_for_timeout(500)
+
+    # A build without the feature: no card, no section.
+    pg.route("**/api/nodes/fw", lambda r: r.fulfill(status=404, body="Not found"))
+    pg.click('#page-settings_nodes [data-click="nodesRefresh"]')
+    pg.wait_for_timeout(1000)
+    check(not card.is_visible(), "a firmware without node updates shows no firmware card")
+    row(pg, "en:1").click()
+    pg.wait_for_timeout(600)
+    check(pg.locator(".nd-fw-sec").count() == 0, "and no firmware section in a row")
+    row(pg, "en:1").click()
+    pg.unroute("**/api/nodes/fw")
+    pg.click('#page-settings_nodes [data-click="nodesRefresh"]')
+    pg.wait_for_timeout(800)
 
     # ── Switching language re-renders what was built as strings ─────────────
     # The rows are assembled with I18n.t() baked in at render time, so

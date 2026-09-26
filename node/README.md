@@ -486,6 +486,38 @@ config local so the collector learns what its address is on this network. An
 answer that is not signed with the token is ignored — nothing else on the LAN
 can redirect the node.
 
+## Firmware updates
+
+Two ways, both checked by the node before it switches
+([`docs/NODE_OTA.md`](../docs/NODE_OTA.md)):
+
+- **From the collector.** Upload the node's `firmware.bin`
+  (`node/.pio/build/nodemcuv2/firmware.bin`) on the collector's Nodes page and
+  choose which WiFi nodes get it. The node learns of it in the reply to its
+  next POST, downloads it after that cycle's POSTs (with the same token and
+  basic auth), and restarts into it — after handing the collector what is in
+  the backlog. The collector marks it done only once the node reports the
+  new image's MD5 (`fw_md5`, sent with every POST). A failed download is
+  reported (`fw_error`) and not tried again until you press Retry.
+- **From the node's own page.** The *This node* step has a Firmware section:
+  pick the `.bin`, and the node takes it, checks it, answers, and restarts a
+  second later. On the LAN it is behind the same basic auth as the rest of
+  the page.
+
+Either way the image must carry this firmware's marker
+(`NODEFW1|esp8266|<version>|`, printed on the serial log at boot). Anything
+else — another sketch, the ESP-NOW node's image, a truncated or corrupted
+download (MD5) — is refused and **never committed**: the running firmware
+stays as it was. The ESP8266 core has no `Update.abort()`, so a refused
+image is ended with a target MD5 no image matches, which makes `end()` fail
+before it writes the boot command that would copy the image over the sketch
+(`node/src/FwFlash.cpp` cites the core's lines).
+
+There is no rollback on this chip: it has one slot to run from. A new image
+that boots but cannot reach the collector (a build with the wrong defaults,
+say) needs a local fix — the setup page (hold FLASH through reset if it does
+not come up by itself) or USB.
+
 ## Pairing with the collector
 
 The node POSTs to `/api/ingest`, and the only thing that pairs the two is the
