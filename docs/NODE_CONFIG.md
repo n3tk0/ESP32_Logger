@@ -445,7 +445,8 @@ is a hand-kept subset of `www/style.css` tokens and classes (`--bg`,
 `tools/check_node_portal_css.py` fails if a token value drifts from
 `www/style.css`. `tools/build_node_portal.py` inlines and gzips the three
 files into `src/nodecfg/NodePortalPage.h` (`NODE_PORTAL_GZ[]`, `PROGMEM`),
-which is committed. Target: under 20 KB gzipped.
+which is committed. Target: under 21 KB gzipped (it was 20 KB until the
+Firmware section of [NODE_OTA.md](NODE_OTA.md) §5 took it to ~20.1 KB).
 
 It is a single-page wizard driven entirely by the JSON API below; it
 renders sections by `transport` and by `caps`. Steps: Network (WiFi) or
