@@ -36,6 +36,7 @@ struct LinkResult {
     uint8_t  channel;     ///< the channel the collector reported being on
     bool     rediscover;  ///< the collector asked for a fresh pairing
     bool     cfgPending;  ///< EN_ACK_CFG_PENDING: a newer config is waiting
+    bool     fwPending;   ///< EN_ACK_FW_PENDING: a firmware image is waiting (NODE_OTA.md §4)
 };
 
 /// The 16-byte key for everything that follows: the encrypted peer (LMK) and
@@ -71,6 +72,14 @@ bool linkSendFrame(const NodeLink& link, const void* frame, int len);
 /// rev). Like the ACK window, a ceiling: it returns the moment a CFG arrives.
 bool linkExchangeCfg(const NodeLink& link, const void* frame, int len, uint16_t windowMs,
                      CfgChunkMsg& out);
+
+/// Send one FW_GET and wait up to `windowMs` for a FW from the collector
+/// addressed to this node (docs/NODE_OTA.md §4.3). The same rules as a CFG:
+/// accepted only while this call waits, only from the collector's MAC and
+/// only for our node id — it is the frame that ends up in a boot partition.
+/// A ceiling like the others: it returns the moment the FW arrives.
+bool linkExchangeFw(const NodeLink& link, const FwGetMsg& req, uint16_t windowMs,
+                    FwChunkMsg& out);
 
 /// Sweep the channels broadcasting a signed DISCOVER until a WELCOME for this
 /// node comes back. On success `io` holds everything the collector sent, and

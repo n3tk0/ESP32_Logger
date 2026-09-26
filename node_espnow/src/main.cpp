@@ -4,7 +4,8 @@
 // One wake, start to finish:
 //
 //     boot → read battery → read sensors → send DATA2 → wait ≤ ack window
-//          → [config exchange, only when there is one] → sleep
+//          → [config exchange, only when there is one]
+//          → [firmware download, only when there is one] → sleep
 //
 // setup() does all of it and never returns to loop(), because deep sleep is a
 // reset: there is no main loop on a device that is awake for a third of a
@@ -16,13 +17,15 @@
 // WHAT SURVIVES A SLEEP, AND WHERE
 // --------------------------------
 // RTC memory  the sequence number, the failure counters, the readings that
-//             could not be delivered (Backlog.h), and the config exchange's
-//             bookkeeping. Survives deep sleep, a software restart and a
+//             could not be delivered (Backlog.h), the config exchange's
+//             bookkeeping and how far a firmware download got (FwFetch.cpp).
+//             Survives deep sleep, a software restart and a
 //             watchdog reset, costs nothing to write, and is gone on a power
 //             cut — which is correct for all of it.
 // NVS         the link — the collector's MAC, the channel, the node id, the
 //             access point to look for ("espnow-node") — and the config
-//             document and page key ("cfg", ConfigStore.h). Written only when
+//             document and page key ("cfg", ConfigStore.h), and a new
+//             firmware's trial ("nodefw", FwTrial.h). Written only when
 //             something actually changed, because flash wears out.
 //
 // Nothing is written to flash on an ordinary wake. A node that stored its
@@ -42,15 +45,24 @@
 #include "CfgApply.h"
 #include "CfgFetch.h"
 #include "ConfigStore.h"
+#include "FwFetch.h"
+#include "FwTrial.h"
 #include "Link.h"
 #include "Portal.h"
 #include "Rescan.h"
 #include "node_common/NodeSensors.h"
 #include "node_config.h"
 #include "src/espnow/EspNowProto.h"
+#include "src/nodecfg/FwImage.h"
 #include "src/nodecfg/NodeConfigJson.h"
 
 using namespace nodecfg;
+
+/// What makes this .bin an ESP-NOW node image to the collector, to the page's
+/// /update and to another node's download (docs/NODE_OTA.md §1.1). Printed at
+/// a cold boot: --gc-sections drops an array nothing references, and an image
+/// without its marker is refused everywhere.
+static const char FW_MARKER[] = NODEFW_MARKER_TEXT("espnow-c3", NODE_FW_VERSION);
 
 // ---------------------------------------------------------------------------
 // State that outlives the sleep
@@ -98,6 +110,17 @@ RTC_NOINIT_ATTR static encfg::Backoff s_reportBackoff;
 RTC_NOINIT_ATTR static uint16_t       s_rejectedRev;  ///< last rev refused, 0 = none
 RTC_NOINIT_ATTR static char           s_rejField[EN_CFG_FIELD_LEN];
 RTC_NOINIT_ATTR static char           s_rejReason[EN_CFG_REASON_LEN];
+
+/// This image's id: four bytes of its ELF SHA-256, which every build changes.
+/// Which firmware wrote the RTC state, and the number the collector compares
+/// with an image it holds (docs/NODE_OTA.md §1.3: nodefw::c3ImageId() reads
+/// the same bytes at 0xB0 of the .bin).
+static uint32_t runningImageId() {
+    const esp_app_desc_t* d = esp_ota_get_app_description();
+    uint32_t id = 0;
+    if (d) memcpy(&id, d->app_elf_sha256, sizeof(id));
+    return id;
+}
 
 // ---------------------------------------------------------------------------
 // The clock
@@ -589,6 +612,7 @@ static void wake() {
     if (!linkBegin(s_link)) {
         Serial.println("[node] radio failed to start");
         bufferLive(live, liveN);
+        fwTrialAfterWake(false);
         return;
     }
 
@@ -611,6 +635,7 @@ static void wake() {
             Serial.println("[node] nobody answered — is the collector's pairing window open?");
             linkEnd();
             bufferLive(live, liveN);
+            fwTrialAfterWake(false);
             return;
         }
     }
@@ -628,6 +653,11 @@ static void wake() {
                   (unsigned)taken, len, (unsigned)s_seq, (int)r.sent, (int)r.acked,
                   (unsigned long)r.waitedMs);
     s_seq++;                       // the frame went out; never reuse its number
+
+    // A new image on trial is confirmed by the first ACK — before anything
+    // else this wake does — or counts one more unanswered wake (FwTrial.h).
+    // Rolling back restarts here.
+    fwTrialAfterWake(r.acked);
 
     if (r.acked && r.rediscover) {
         // The collector answered but does not know us, so it dropped the
@@ -674,6 +704,14 @@ static void wake() {
             case encfg::Exchange::Fetch:  fetchConfig();  break;
             case encfg::Exchange::None:   break;
         }
+
+        // Firmware second: a config is small and may be what makes the node
+        // reachable at all, an image is a minute of radio (FwFetch.h). A
+        // staged image restarts from inside; otherwise this returns.
+        if (r.fwPending)
+            fwOnPending(s_link, runningImageId(), vbat, s_mains,
+                        s_cfg.link.ack_window_ms > NODE_FW_REPLY_MS ? s_cfg.link.ack_window_ms
+                                                                    : (uint16_t)NODE_FW_REPLY_MS);
     } else {
         if (s_failStreak < 255) s_failStreak++;
         bufferLive(live, liveN);
@@ -692,15 +730,6 @@ static void wake() {
 static bool isColdStart() {
     const esp_reset_reason_t why = esp_reset_reason();
     return why == ESP_RST_POWERON || why == ESP_RST_EXT;
-}
-
-/// Which firmware wrote the RTC state: four bytes of the image's ELF SHA-256,
-/// which every build changes.
-static uint32_t runningImageId() {
-    const esp_app_desc_t* d = esp_ota_get_app_description();
-    uint32_t id = 0;
-    if (d) memcpy(&id, d->app_elf_sha256, sizeof(id));
-    return id;
 }
 
 /// Is `pin` wired to something in this config? The mains loop does not poll
@@ -724,6 +753,10 @@ void setup() {
     Serial.println("[node] BENCH BUILD — no deep sleep. Do not run this on a battery.");
 #endif
 
+    // Before anything that could crash: an image on trial that crash-loops
+    // must still get as far as counting this start (FwTrial.h).
+    fwTrialBoot();
+
     // A panic or a brownout starts over too: the state that survived may be
     // what crashed it, and a kept state would crash it again on every boot.
     const esp_reset_reason_t why = esp_reset_reason();
@@ -746,6 +779,8 @@ void setup() {
         s_rejField[0]      = '\0';
         s_rejReason[0]     = '\0';
         enbl::clear(s_backlog);
+        fwColdBoot();
+        Serial.printf("[node] %s, image %08lx\n", FW_MARKER, (unsigned long)image);
     }
 
     loadLink();

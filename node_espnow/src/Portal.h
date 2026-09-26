@@ -12,6 +12,9 @@
 //   GET  /api/scan     {"state":"running"} / {"state":"done","nets":[…]}
 //   GET  /api/status   uptime_s, mac, ip, rev, local, paired, node_id, ch,
 //                      batt_v, collector ("unknown": the radio is off)
+//   POST /update       multipart, field `fw`: a node_espnow firmware, checked
+//                      and written to the other OTA slot, then restart —
+//                      docs/NODE_OTA.md §5
 //
 // WHEN IT RUNS
 // ------------
