@@ -237,25 +237,57 @@ bool nodeFwCommit(const NodeFwMeta& u) {
     if (!kindOk(u.kind)) return false;
     NF_LOCK(3000, false);
     Img& m = s_img[u.kind];
-    char p[40];
+    char p[40], old[40];
+    bool lost = false;
     filePath(p, sizeof(p), u.kind, "bin");
+    filePath(old, sizeof(old), u.kind, "old");
     {
         MutexGuard g(fsMutex, pdMS_TO_TICKS(5000));
         if (fsMutex && !g.isLocked()) return false;
         // Gone before the rename: a download of the old image must not read
         // the new one's bytes (nodeFwRead checks the serial under fsMutex).
+        // The serial moves either way, so the generation has to move with it:
+        // the radio mirror holds the serial, and a stale one reads nothing.
+        const bool had = m.have;
         m.have = false;
         m.serial++;
-        sdFs()->remove(p);                        // FAT will not rename over it
-        if (!sdFs()->rename(NODEFW_TMP, p)) return false;
-        m.have     = true;
-        m.size     = u.size;
-        m.imgId    = u.imgId;
-        const uint32_t now = (uint32_t)time(nullptr);
-        m.uploaded = now >= 1000000000u ? now : 0;
-        memcpy(m.ver, u.ver, sizeof(m.ver));
-        memcpy(m.md5, u.md5, sizeof(m.md5));
-        memcpy(m.sha, u.sha256, sizeof(m.sha));
+        s_gen++;
+        // FAT will not rename over a file, so the old image steps aside
+        // rather than being deleted: a rename that then fails puts it back,
+        // and the nodes working towards it keep their image.
+        sdFs()->remove(old);
+        const bool moved = had && sdFs()->rename(p, old);
+        if (!moved) sdFs()->remove(p);
+        if (!sdFs()->rename(NODEFW_TMP, p)) {
+            sdFs()->remove(NODEFW_TMP);
+            if (moved && sdFs()->rename(old, p)) {
+                m.have = true;                    // the old image, untouched
+                return false;
+            }
+            // Nothing left to serve: the same state as the delete action, so
+            // no node is told an image is waiting that can never be read.
+            char j[40];
+            filePath(j, sizeof(j), u.kind, "json");
+            sdFs()->remove(j);
+            lost = true;
+        }
+        if (!lost) {
+            sdFs()->remove(old);
+            m.have     = true;
+            m.size     = u.size;
+            m.imgId    = u.imgId;
+            const uint32_t now = (uint32_t)time(nullptr);
+            m.uploaded = now >= 1000000000u ? now : 0;
+            memcpy(m.ver, u.ver, sizeof(m.ver));
+            memcpy(m.md5, u.md5, sizeof(m.md5));
+            memcpy(m.sha, u.sha256, sizeof(m.sha));
+        }
+    }
+    if (lost) {
+        for (Target& t : s_t)
+            if (t.key[0] && nfr::kindOfKey(t.key) == u.kind) t.key[0] = '\0';
+        saveRollout();
+        return false;
     }
     saveMeta(u.kind);
     // §2.1: the targets stay chosen, every one pending again, on a new attempt.

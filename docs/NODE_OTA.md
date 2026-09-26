@@ -84,6 +84,9 @@ version).
 
 An upload is streamed to `/nodefw/upload.tmp` while MD5, SHA-256 and the
 marker scan run over it; it becomes `<kind>.bin` only when every check passed.
+The image it replaces is renamed to `<kind>.old` first and put back if that
+rename fails; only when neither file can be put in place is the kind left
+with no image, exactly as if it had been deleted.
 A new image for a kind resets every target of that kind to `pending` with a
 new `attempt` (§4.5) — the targets stay chosen. Deleting an image drops its
 rollout. Every SD access holds `fsMutex`.
