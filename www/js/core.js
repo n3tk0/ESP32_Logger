@@ -1275,8 +1275,13 @@ function showMsg(containerId, html, autoClear) {
   var el = document.getElementById(containerId);
   if (el) {
     el.innerHTML = html;
+    // One timer per slot: the previous message's timer used to fire on the
+    // NEXT message, wiping it after a fraction of its 4 s when two arrived
+    // close together (a node update started just after a save, say).
+    if (el._msgTimer) { clearTimeout(el._msgTimer); el._msgTimer = null; }
     if (autoClear)
-      setTimeout(function () {
+      el._msgTimer = setTimeout(function () {
+        el._msgTimer = null;
         el.innerHTML = "";
       }, 4000);
   }

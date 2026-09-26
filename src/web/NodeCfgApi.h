@@ -21,6 +21,7 @@
 
 #ifdef FEATURE_REMOTE_NODES
 
+#include <ArduinoJson.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -35,6 +36,15 @@ void handleNodesConfigBody(AsyncWebServerRequest* req, uint8_t* data, size_t len
                            size_t index, size_t total);
 void handleNodesHandoverBody(AsyncWebServerRequest* req, uint8_t* data, size_t len,
                              size_t index, size_t total);
+
+/// Shared with NodeFwApi.cpp: a JSON body accumulated across segments
+/// (NODES_MAX_BODY), admitted by requireMutatingAuth() once whole, parsed,
+/// and handed to `fn` — or answered 400 when it is not a JSON object.
+typedef void (*JsonBodyFn)(AsyncWebServerRequest* req, JsonDocument& body);
+void nodesApiBody(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index,
+                  size_t total, JsonBodyFn fn);
+/// Send `doc` as the answer, with `code`.
+void nodesApiSend(AsyncWebServerRequest* req, int code, const JsonDocument& doc);
 
 /// From loop(): answer discovery queries, and switch networks once every
 /// node that can follow is ready.

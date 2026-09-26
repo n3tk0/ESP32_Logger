@@ -823,6 +823,26 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .input.nd-bad { border-color: var(--err); }
 .nd-cfg-badge { max-width: 100%; }
 .nd-cfg-badge > span { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Node firmware (nodes.js, docs/NODE_OTA.md §2): the card's slots and the
+   drawer's section. A deferral's reason can be a sentence, so the badges
+   carrying one are cut rather than allowed to widen the row. */
+.nd-fw-slots {
+  display: grid; gap: 12px; align-items: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+}
+.nd-fw-img { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; font-size: 12px; color: var(--text-3); }
+.nd-fw-img > strong { font-size: 14px; color: var(--text); }
+.nd-fw-sum { display: flex; gap: 6px; flex-wrap: wrap; }
+.dropzone.nd-fw-drop { padding: 18px; position: relative; cursor: pointer; text-align: center; }
+.dropzone.nd-fw-drop.nd-fw-drag { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone.nd-fw-drop.nd-fw-off { opacity: .55; cursor: not-allowed; }
+.dropzone.nd-fw-busy { cursor: default; align-items: stretch; }
+.nd-fw-sec { margin-top: 12px; }
+.nd-fw-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 12.5px; }
+.nd-fw-l { color: var(--text-3); }
+.nd-fw-norb { display: flex; gap: 6px; align-items: flex-start; color: var(--warn); }
+.nd-fw-chip, .nd-fw-sec .nd-sec-h > .badge { max-width: 100%; }
+.nd-fw-chip > span, .nd-fw-sec .nd-sec-h > .badge > span { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The network handover banner (docs/NODE_CONFIG.md §4). */
 .nd-ho { margin-bottom: var(--gap); border-color: var(--accent); }
 .nd-ho-bar { height: 6px; background: var(--panel-3); border-radius: 3px; overflow: hidden; }

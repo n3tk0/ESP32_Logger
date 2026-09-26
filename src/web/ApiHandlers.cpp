@@ -23,6 +23,8 @@
 #include "../sensors/RemoteIngest.h"
 #include "../nodes/NodeCfgStore.h"   // per-node "cfg" in the status lists
 #include "NodeCfgApi.h"              // /api/nodes/config, /api/nodes/handover
+#include "NodeFwApi.h"               // /api/nodes/fw*, docs/NODE_OTA.md §2.3
+#include "../nodes/NodeFwStore.h"    // nodeFwBegin()
 #endif
 #include "../espnow/EspNowIngest.h"   // GET/POST /api/espnow/* (FEATURE_ESPNOW_INGEST)
 #include "KindleSkin.h"               // GET/POST /api/kindle/config
@@ -2007,6 +2009,18 @@ void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/nodes/handover",    HTTP_GET,  handleNodesHandoverGet);
     server.on("/api/nodes/handover",    HTTP_POST, answeredInBody, nullptr,
               handleNodesHandoverBody);
+    // Node firmware updates, docs/NODE_OTA.md §2.3. The store reads the SD
+    // card, mounted by initStorage() long before this runs. /bin is for the
+    // nodes and checks their ingest token itself. The two longer paths are
+    // registered FIRST: a plain path also matches "<path>/…" in this
+    // library, so /api/nodes/fw would otherwise take the upload and /bin.
+    nodeFwBegin();
+    server.on("/api/nodes/fw/upload",   HTTP_POST, handleNodesFwUploadDone,
+              handleNodesFwUpload);
+    server.on("/api/nodes/fw/bin",      HTTP_GET,  handleNodesFwBin);
+    server.on("/api/nodes/fw",          HTTP_GET,  handleNodesFwGet);
+    server.on("/api/nodes/fw",          HTTP_POST, answeredInBody, nullptr,
+              handleNodesFwBody);
 #endif
 #ifdef FEATURE_KINDLE_DASHBOARD
     server.on("/api/kindle/config",     HTTP_GET,  handleKindleConfigGet);
