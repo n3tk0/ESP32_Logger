@@ -12,6 +12,7 @@
 #include "src/nodecfg/NodeConfigJson.h"
 #include "NodeCfgTables.h"
 #include "src/nodecfg/NodePortalPage.h"
+#include "FwFlash.h"
 
 using nodecfg::NodeConfig;
 
@@ -383,6 +384,143 @@ static void handleStatus() {
 }
 
 // ---------------------------------------------------------------------------
+// POST /update — a firmware image from the page (docs/NODE_OTA.md §5)
+// ---------------------------------------------------------------------------
+//
+// multipart/form-data, one file (field "fw"), streamed chunk by chunk
+// (HTTP_UPLOAD_BUFLEN, 2 KB) through FwFlash into the update slot — never
+// held in RAM, which on this part could not hold a tenth of it. FwFlash
+// checks the header on the first chunk and the marker once the last one is
+// in; a refused image is ended with the MD5 trick and never committed, so a
+// wrong file costs the flash writes and nothing else.
+//
+// The server calls the upload half once per chunk and the done half once the
+// body is in; the answer (§5's table) goes out from the done half:
+//
+//   200 {"ok":true}                                  staged; restart in ~1 s
+//   400 {"ok":false,"error":"not_node_image"}        header, marker or kind
+//   400 {"ok":false,"error":"too_big"}               larger than the slot
+//   500 {"ok":false,"error":"write_failed","detail"} the flash said no
+//
+// A local update arms nothing and asks nobody: the person doing it is
+// standing at the page. The readings the node holds in RAM for the collector
+// are lost with the restart, as they are when the page saves a config.
+
+/// §5: "the node restarts about a second later" — long enough for the 200 to
+/// leave; the page then waits for the node to come back.
+static const uint32_t kFwRestartDelayMs = 1000;
+
+static FwFlash* s_fw        = nullptr;   ///< on the heap only while a request is in
+static bool     s_fwSeen    = false;     ///< this request carried a file
+static bool     s_fwAuthed  = false;
+static bool     s_fwOk      = false;     ///< verified and staged
+static bool     s_fwStaged  = false;     ///< answered 200; restart pending
+static uint32_t s_fwStagedAt = 0;
+
+/// The auth gate of the upload half, which runs once per chunk. Decided at
+/// UPLOAD_FILE_START — the headers are in by then — and remembered for the
+/// rest of the body. requestAuthentication() is not called here: that would
+/// answer in the middle of the request body. The 401 goes out from
+/// handleUpdateDone(), and nothing is written in the meantime.
+static bool authOkUpload() {
+    if (s_http.upload().status == UPLOAD_FILE_START) {
+        const NodeConfig& c = *s_target;
+        s_fwAuthed = !s_background ||
+                     (c.net.basic_user[0] && c.net.basic_pass[0] &&
+                      s_http.authenticate(c.net.basic_user, c.net.basic_pass));
+    }
+    return s_fwAuthed;
+}
+
+static void handleUpdateUpload() {
+    if (!authOkUpload()) return;
+    HTTPUpload& up = s_http.upload();
+    switch (up.status) {
+        case UPLOAD_FILE_START:
+            // One image per request: a second file part is not a second
+            // update over the first.
+            if (s_fwSeen) return;
+            s_fwSeen = true;
+            s_fwOk   = false;
+            LOGF("[portal] firmware upload \"%s\" (heap %u)\n", up.filename.c_str(),
+                 (unsigned)ESP.getFreeHeap());
+            delete s_fw;
+            s_fw = new (std::nothrow) FwFlash();
+            if (s_fw) s_fw->begin(0, nullptr);   // a failure is kept in error()
+            break;
+        case UPLOAD_FILE_WRITE:
+            if (s_fw && s_fw->active()) s_fw->write(up.buf, up.currentSize);
+            break;
+        case UPLOAD_FILE_END:
+            if (s_fw && s_fw->active()) s_fwOk = s_fw->finish();
+            break;
+        case UPLOAD_FILE_ABORTED:
+            // The browser went away mid-body.
+            if (s_fw) s_fw->abort();
+            break;
+    }
+}
+
+static void handleUpdateDone() {
+    if (!authOk()) {
+        if (s_fw) s_fw->abort();
+        delete s_fw;
+        s_fw = nullptr;
+        s_fwSeen = s_fwOk = false;
+        return;
+    }
+    int code = 200;
+    const char* err = nullptr;
+    String detail;
+    if (s_fwOk) {
+        s_fwStaged   = true;
+        s_fwStagedAt = millis();
+    } else if (!s_fwSeen) {
+        err = "not_node_image";   // no file in the request at all
+    } else if (!s_fw) {
+        err = "write_failed";
+        detail = F("out of memory");
+    } else {
+        s_fw->abort();   // a body that stopped before UPLOAD_FILE_END
+        err = s_fw->error() ? s_fw->error() : "not_node_image";
+        detail = s_fw->detail();
+    }
+    delete s_fw;
+    s_fw = nullptr;
+    s_fwSeen = s_fwOk = false;
+
+    String out;
+    {
+        JsonDocument doc;
+        doc["ok"] = (err == nullptr);
+        if (err) {
+            // Only the three words §5 promises reach the page.
+            if (strcmp(err, "not_node_image") != 0 && strcmp(err, "too_big") != 0) {
+                if (!detail.length()) detail = err;
+                err = "write_failed";
+            }
+            code = strcmp(err, "write_failed") == 0 ? 500 : 400;
+            doc["error"] = err;
+            if (code == 500) doc["detail"] = detail;
+            LOGF("[portal] firmware refused: %s %s\n", err, detail.c_str());
+        } else {
+            LOGLN("[portal] firmware staged; restarting in a second");
+        }
+        serializeJson(doc, out);
+    }
+    sendJson(code, out);
+}
+
+/// Restart into the staged image once the 200 has had its second.
+static void fwRestartIfDue() {
+    if (s_fwStaged && millis() - s_fwStagedAt >= kFwRestartDelayMs) {
+        LOGLN("[portal] restarting into the new firmware");
+        delay(50);
+        ESP.restart();
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 /// Both portals answer the same routes. Registered once — see s_routesBound
 /// above for what re-registering used to cost.
@@ -393,6 +531,7 @@ static void bindRoutes() {
     s_http.on("/api/config", HTTP_POST, handleConfigPost);
     s_http.on("/api/scan", HTTP_GET, handleScan);
     s_http.on("/api/status", HTTP_GET, handleStatus);
+    s_http.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
     // Every other path gets the page: that is what makes a phone's captive-
     // portal probe (generate_204, hotspot-detect.html, …) open it.
     s_http.onNotFound(handlePage);
@@ -433,6 +572,7 @@ bool portalRun(NodeConfig& c, uint32_t timeoutMs) {
         s_dns.processNextRequest();
         s_http.handleClient();
         scanWatchdog();
+        fwRestartIfDue();
 
         if (s_saved) {
             if (millis() - s_savedAt >= kRestartDelayMs) break;
@@ -508,6 +648,14 @@ bool portalStartBackground(NodeConfig& c) {
 
 void portalHandleClient() {
     s_http.handleClient();
+    if (s_fwStaged) {
+        // As below: the reply leaves, then the restart.
+        while (millis() - s_fwStagedAt < kFwRestartDelayMs) {
+            s_http.handleClient();
+            delay(5);
+        }
+        fwRestartIfDue();
+    }
     if (s_saved) {
         // Let the reply leave before the restart takes the socket with it.
         while (millis() - s_savedAt < kRestartDelayMs) {

@@ -24,6 +24,10 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_hw_pins.cpp` | `src/nodecfg/HwPins.h` — both chips' pin tables, label resolution, and pin-for-pin agreement with `node/src/NodePins.h` |
 | `test_udp_discovery.cpp` | `src/nodecfg/UdpDiscovery.h` — the collector-discovery packets, against a reference HMAC-SHA256 checked with RFC 4231 |
 | `test_nodecfg_collector.cpp` | `src/nodes/NodeCfgRules.h` — the collector's node-config decisions: revs and status, keys and file names, report adoption, the ingest reply, which secrets travel, first-contact identity, the handover, DATA2 naming |
+| `test_node_fw.cpp` | `src/nodecfg/FwImage.h` and the FW_GET / FW / FW_DONE frames (docs/NODE_OTA.md §1, §4.1): the marker scanner split at every byte, two markers, the head checks and the C3 image id; frame layouts, build and validation |
+| `test_node_fw_rules.cpp` | `src/nodes/NodeFwRules.h` — the collector's node-firmware decisions (docs/NODE_OTA.md): target status and the ACK flag, the WiFi offer, FW_DONE outcomes, and the two serving windows driven through whole transfers byte for byte |
+| `test_espnow_node_fw.cpp` | the ESP-NOW node's firmware update (docs/NODE_OTA.md §4.3–4.4): `node_espnow/src/FwFetch.h` against a simulated collector and NOR flash — the first answer's verdicts (running, rolled back, low battery, refused before), resuming across wakes, sectors erased as entered, a new image or attempt starting over, lost replies, the budget — and `FwTrial.h`'s boot / wake counting |
+| `test_node_fw_offer.cpp` | `node/src/FwOffer.h` — the WiFi node's side of docs/NODE_OTA.md §3: which `fw` offer to act on, the failed `(md5, attempt)` not retried, `fw_error` held until a POST carrying it is answered, the verdict on a whole image |
 | `test_ipv4_parse.cpp` | `src/utils/Ipv4Parse.h` — the dotted-quad parser that replaced `sscanf` (300 is refused, not wrapped to 44) |
 | `test_espnow_nodetable.cpp` | the three decisions the collector makes about an arriving frame |
 | `test_remote_ingest.cpp` | the mailbox and the separate historical queue it grew |

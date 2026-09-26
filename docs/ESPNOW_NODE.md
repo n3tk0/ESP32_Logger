@@ -638,3 +638,65 @@ an SDS011 (thirty seconds of fan before a reading means anything) and a pulse
 counter (it counts in an interrupt) need; the validator refuses both on a
 sleeping node. Awake, the C3 draws tens of milliamps: this is for a USB
 supply, not the 21700.
+
+## 10. Firmware updates
+
+The contract is [`NODE_OTA.md`](NODE_OTA.md) §4 and §5; this is the node's
+side of it (`node_espnow/src/FwFetch.{h,cpp}`, `FwTrial.h`).
+
+### Over the radio
+
+The collector holds one `espnow-c3` image on its SD card and a list of nodes
+that should run it. Same pull as a config: an ACK with `EN_ACK_FW_PENDING`
+makes the node, after any config exchange, ask with `FW_GET`. The first answer
+names the image (its id: four bytes of the ELF SHA-256, the same number
+`esp_ota_get_app_description()` gives the image once it runs), its size, the
+rollout's `attempt` and the battery floor, and decides:
+
+| first answer | the node |
+|---|---|
+| the image it already runs | `FW_DONE(RUNNING)` — the collector marks it done |
+| the (image, attempt) it rolled back from, or already refused | repeats that `FW_DONE`, downloads nothing |
+| battery measured and under the floor (default 3600 mV, set on the collector) | `FW_DONE(LOW_BATTERY, mV)`, tries again on a later wake |
+| collector busy with another node | nothing; a later wake |
+| anything else | downloads it into the other OTA slot |
+
+A node with no divider fitted reads 0 V, which is "unknown", not "flat": the
+floor applies only to a measured battery.
+
+The image is ~1 MB, about 6500 200-byte slices and 320 sector erases — tens of
+seconds of radio at ~85 mA, roughly 1–1.5 mAh once per update. So one wake
+spends at most `NODE_FW_BUDGET_MS` (20 s; 120 s in mains mode) or six
+unanswered requests in a row, and how far it got stays in RTC memory for the
+next wake, which carries on from there. A different image or a new attempt
+starts over; a power cut does too. A collector that keeps failing is tried
+again after 1, 3, 7 … 63 wakes, as for a config.
+
+Complete, the node checks what is in flash — the head, the `NODEFW1` marker
+(kind `espnow-c3`), the id — and `esp_ota_set_boot_partition()` checks the
+image's own SHA-256. Any failure is `FW_DONE(BAD_IMAGE)` or `FLASH_ERROR` and
+the running firmware is untouched. Otherwise: arm the trial, `FW_DONE(STAGED)`,
+restart into it.
+
+### The trial, and going back
+
+The new image is on trial until its first ACK. It rolls itself back to the
+previous slot after **three unanswered wakes**: counted as starts in NVS (on a
+battery every wake is a start, and a crash loop is too) and as unanswered
+wakes in RAM (mains mode starts once). If it never starts at all, the
+bootloader already went back and the old firmware notices at boot. Either way
+the old firmware answers the next offer of that exact (image, attempt) with
+`FW_DONE(ROLLED_BACK)`, and the collector shows the target as failed; a Retry
+there is a new attempt and a fresh try.
+
+This does not rely on the bootloader's own rollback: Arduino marks every image
+valid before `setup()`, so that only ever covers an image that dies first.
+
+### From the setup page
+
+The page's Firmware section uploads a `.bin` to `POST /update`. The node
+streams it into the other slot with the same checks (ESP32-C3 head, `espnow-c3`
+marker, fits the 1280 KB slot) and answers as §5 of the contract says; a
+refused file is aborted and never bootable. Accepted, it restarts a second
+later. A local update arms no trial — the person doing it is standing there —
+and clears one that was running.

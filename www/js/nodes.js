@@ -19,6 +19,9 @@
 // While the collector is moving to another WiFi network (§4), a banner on
 // this page and on the Network page follows the nodes across.
 //
+// Node firmware updates (docs/NODE_OTA.md) live here too: a card with one
+// image slot per node kind, and a Firmware section in every row's drawer.
+//
 // TWO VALUES ARE NULL RATHER THAN ZERO on ESP-NOW nodes, carried over from
 // the page this replaces:
 //   rssi   unavailable on Arduino core 2.x — IDF 4.4 gives the receive
@@ -249,7 +252,7 @@ function ndRowHtml(n) {
   var html =
     '<div class="node-row' + (isOpen ? " node-row-open" : "") + '" data-click="nodesToggleRow" data-args=\'["' + n.key + '"]\'>' +
       '<div class="node-row-name">' +
-        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><strong style="font-size:13px">' + esc(n.name) + "</strong>" + statusBadge + ndCfgBadge(n) + "</div>" +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><strong style="font-size:13px">' + esc(n.name) + "</strong>" + statusBadge + ndCfgBadge(n) + ndFwRowChip(n) + "</div>" +
         '<span class="mono" style="font-size:11px;color:var(--text-3)">' +
           (n.transport === "espnow" ? "node " + n.raw.node_id + " · " + esc(n.raw.mac) : esc(n.raw.metrics && n.raw.metrics.length ? n.raw.metrics.map(function (m) { return m.metric; }).join(", ") : "")) +
         "</span>" +
@@ -306,7 +309,7 @@ function ndDetailHtml(n) {
     }).join(" ");
     top = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' +
       (metrics || '<span class="hint">' + esc(ndT("nodes.noNodesReported")) + "</span>") + "</div>";
-    return '<div class="node-row-detail">' + top + ndCfgPanelHtml(n) + "</div>";
+    return '<div class="node-row-detail">' + top + ndCfgPanelHtml(n) + ndFwSecHtml(n) + "</div>";
   }
 
   var r = n.raw;
@@ -321,6 +324,7 @@ function ndDetailHtml(n) {
   return '<div class="node-row-detail">' +
     top +
     ndCfgPanelHtml(n) +
+    ndFwSecHtml(n) +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' +
       '<button class="btn" data-click="nodesPair"><span data-icon="link"></span> ' + esc(ndT("nodes.rePair")) + "</button>" +
       '<span style="flex:1"></span>' +
@@ -1421,6 +1425,575 @@ function nodesHoCancel() {
   }).catch(function () { ndHoMsg(ndT("nodes.hoFailed"), "err"); });
 }
 
+// ── Node firmware (docs/NODE_OTA.md §2) ─────────────────────────────────────
+//
+// The collector holds at most one image per node KIND on its SD card, and a
+// list of targets — nodes that should end up running it. Nothing here talks
+// to a node: a node learns about its target the next time it reports (§0.1),
+// so every status below moves at the node's pace, not the page's. That is
+// why the page polls while anything is in flight and stops when nothing is.
+//
+// `done` means the node REPORTS RUNNING the image (§0.5), never that the
+// download finished — so a node that downloaded, restarted and never came
+// back sits in `staged` (C3) or `sending` (ESP8266), not `done`.
+//
+// Keys are the Nodes page's config keys, "w:<name>" / "e:<id>" (§2.3), so a
+// target and a row are matched on n.cfgKey — the same key the config panel
+// uses — never on the row's own "rn:"/"en:" key.
+
+var ND_FW_KINDS = [
+  { kind: "esp8266", transport: "wifi", icon: "wifi", label: "nodes.fwKindWifi" },
+  { kind: "espnow-c3", transport: "espnow", icon: "radio", label: "nodes.fwKindEspnow" },
+];
+// Statuses a node is still working through. Anything else is terminal until
+// the reader acts (Retry), so it is not worth a request every few seconds.
+var ND_FW_ACTIVE = { pending: 1, sending: 1, staged: 1, deferred: 1 };
+var ND_FW_BADGE = { pending: "dim", sending: "acc", staged: "acc", deferred: "warn", done: "ok", failed: "err" };
+// The collector's error codes this page has its own words for; anything else
+// is shown as the collector said it.
+var ND_FW_ERRS = { no_sd: 1, not_node_image: 1, too_big: 1, bad_header: 1, zero_id: 1, busy: 1, no_image: 1, bad_key: 1 };
+
+var ndFw = null;             // last GET /api/nodes/fw payload, or null
+var ndFwAvailable = null;    // true | false (404: not in this build) | null (unknown)
+var ndFwSig = "";            // the payload as a string, to skip identical redraws
+var ndFwTimer = null;
+var ndFwPollMs = 2500;
+var ndFwUp = {};             // kind → {pct, checking} while an upload runs, or {err}
+var ndFwMinDraft = null;     // min-battery box as typed (volts), or null when untouched
+var ndFwMinErr = "";
+
+function ndFwKindOf(transport) { return transport === "espnow" ? "espnow-c3" : "esp8266"; }
+function ndFwKindName(kind) {
+  for (var i = 0; i < ND_FW_KINDS.length; i++) if (ND_FW_KINDS[i].kind === kind) return ndT(ND_FW_KINDS[i].label);
+  return kind;
+}
+function ndFwImage(kind) { return (ndFw && ndFw.images && ndFw.images[kind]) || null; }
+function ndFwTarget(cfgKey) { return (ndFw && ndFw.targets && ndFw.targets[cfgKey]) || null; }
+function ndFwAnyActive() {
+  var t = (ndFw && ndFw.targets) || {};
+  for (var k in t) if (ND_FW_ACTIVE[t[k].st]) return true;
+  return false;
+}
+
+function ndIsBg() { return !!(window.I18n && I18n.getLang && I18n.getLang() === "bg"); }
+
+// Volts with the reader's decimal separator: "3,41" in Bulgarian.
+function ndFwVolts(mv) {
+  var v = (mv / 1000).toFixed(2);
+  return ndIsBg() ? v.replace(".", ",") : v;
+}
+
+// A deferral's `err` names the battery voltage (§2.2) — "battery 3.41 V" from
+// the collector. The number is said again in the reader's language (with
+// its decimal comma); a bare millivolt figure is read as one too. Anything
+// else is the collector's own words, shown as they are.
+function ndFwErrText(st, err) {
+  var e = err == null ? "" : String(err);
+  if (st === "deferred") {
+    var m = /(\d+(?:\.\d+)?)\s*(mv|v)?\b/i.exec(e);
+    if (m) {
+      var n = parseFloat(m[1]);
+      var unit = (m[2] || "").toLowerCase();
+      var mv = unit === "v" || (!unit && n < 10) ? Math.round(n * 1000) : Math.round(n);
+      if (mv > 0) return ndT("nodes.fwBatt", { v: ndFwVolts(mv) });
+    }
+  }
+  return e;
+}
+
+// The badge for one target: pending / sending 42% / staged / deferred: … /
+// done / failed: …
+function ndFwBadge(t, extraCls) {
+  if (!t || !t.st) return "";
+  var cls = ND_FW_BADGE[t.st] || "dim";
+  var text;
+  switch (t.st) {
+    case "pending": text = ndT("nodes.fwStPending"); break;
+    case "sending": text = t.pct != null ? ndT("nodes.fwStSending", { pct: t.pct }) : ndT("nodes.fwStSendingNoPct"); break;
+    case "staged": text = ndT("nodes.fwStStaged"); break;
+    case "deferred": text = t.err ? ndT("nodes.fwStDeferred", { err: ndFwErrText(t.st, t.err) }) : ndT("nodes.fwStDeferredNoErr"); break;
+    case "done": text = ndT("nodes.fwStDone"); break;
+    case "failed": text = t.err ? ndT("nodes.fwStFailed", { err: ndFwErrText(t.st, t.err) }) : ndT("nodes.fwStFailedNoErr"); break;
+    default: text = t.st;
+  }
+  return '<span class="badge ' + cls + (extraCls ? " " + extraCls : "") + '" data-nd-fw-st="' + esc(t.st) +
+    '" title="' + esc(text) + '"><span>' + esc(text) + "</span></span>";
+}
+
+// The chip beside a row's name: only while something is happening to it, or
+// when it failed and is waiting for the reader. A `done` node needs nothing.
+function ndFwRowChip(n) {
+  var t = ndFwTarget(n.cfgKey);
+  if (!t || !(ND_FW_ACTIVE[t.st] || t.st === "failed")) return "";
+  return ndFwBadge(t, "nd-fw-chip");
+}
+
+function ndFwFmtDate(u) {
+  if (u == null || u === "" || u === 0) return "";
+  if (typeof u === "number") {
+    // Epoch seconds from the collector's clock; a small number means the
+    // clock was not set when the image arrived, which is not a date.
+    if (u < 1e9) return "";
+    return new Date(u * 1000).toLocaleString(ndIsBg() ? "bg-BG" : undefined,
+      { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+  return String(u);
+}
+
+function ndFwKb(size) { return Math.max(1, Math.round((size || 0) / 1024)); }
+
+// ── The drawer's Firmware section ──────────────────────────────────────────
+
+function ndFwSecHtml(n) {
+  if (!ndFwAvailable || !ndFw) return "";
+  var kind = ndFwKindOf(n.transport);
+  var img = ndFwImage(kind);
+  var t = ndFwTarget(n.cfgKey);
+  var c = ndCfg[n.cfgKey];
+  var data = c && c.data;
+  // The version the node RUNS is what it reported; the desired document
+  // only repeats it (fw is read-only, §7), so an ESP-NOW node that has
+  // never reported has no version to show, however full its desired config.
+  var running = data && data.reported && data.reported.fw;
+
+  var facts = '<div class="nd-fw-facts">' +
+    '<span class="nd-fw-l">' + esc(ndT("nodes.fwRunning")) + '</span><span class="mono" data-nd-fw-running>' +
+      esc(running || (c && c.loading ? "…" : ndT("nodes.fwUnknown"))) + "</span>" +
+    '<span class="nd-fw-l">' + esc(ndT("nodes.fwAvailable")) + '</span><span class="mono">' +
+      esc(img ? img.ver + " · " + ndFwKb(img.size) + " KB" : ndT("nodes.fwNoImage")) + "</span>" +
+    "</div>";
+
+  var args = esc(JSON.stringify([kind, n.cfgKey]));
+  var btns = "";
+  var active = t && ND_FW_ACTIVE[t.st];
+  if (img && !t) {
+    btns += '<button type="button" class="btn primary" data-click="nodesFwStart" data-args="' + args + '"><span data-icon="rocket"></span> ' + esc(ndT("nodes.fwUpdate")) + "</button>";
+  }
+  if (img && t && t.st === "failed") {
+    btns += '<button type="button" class="btn primary" data-click="nodesFwStart" data-args="' + args + '"><span data-icon="refresh-cw"></span> ' + esc(ndT("nodes.fwRetry")) + "</button>";
+  }
+  if (t && (active || t.st === "failed")) {
+    btns += '<button type="button" class="btn" data-click="nodesFwCancel" data-args="' + args + '"><span data-icon="x"></span> ' + esc(ndT("nodes.fwCancel")) + "</button>";
+  }
+
+  var notes = "";
+  if (!img) {
+    notes += '<p class="hint" style="margin:0">' + esc(ndT("nodes.fwNoImageForKind", { kind: ndFwKindName(kind) })) + "</p>";
+  } else if (n.transport === "wifi") {
+    // §0.6: an ESP8266 has no second slot to fall back to.
+    notes += '<p class="hint nd-fw-norb" style="margin:0"><span data-icon="alert-triangle"></span> ' + esc(ndT("nodes.fwWifiNoRollback")) + "</p>";
+  } else {
+    notes += '<p class="hint" style="margin:0">' + esc(ndT("nodes.fwEspnowRollback")) + "</p>";
+  }
+
+  var body = facts +
+    (btns ? '<div style="display:flex;gap:8px;flex-wrap:wrap">' + btns + "</div>" : "") + notes;
+  return '<div class="nd-fw-sec" data-nd-fw-key="' + esc(n.cfgKey) + '">' +
+    ndSection("cloud-upload", ndT("nodes.fwSec"), body, ndFwBadge(t), true) + "</div>";
+}
+
+// ── The card: one slot per kind ────────────────────────────────────────────
+
+function ndFwSlotHtml(k) {
+  var kind = k.kind;
+  var img = ndFwImage(kind);
+  var sd = !!(ndFw && ndFw.sd);
+  var up = ndFwUp[kind];
+  var busy = !!(up && !up.err);
+  var targets = (ndFw && ndFw.targets) || {};
+  var counts = {}, total = 0;
+  for (var key in targets) {
+    if (targets[key].kind !== kind) continue;
+    counts[targets[key].st] = (counts[targets[key].st] || 0) + 1;
+    total++;
+  }
+
+  var image = img
+    ? '<div class="nd-fw-img"><strong class="mono" data-nd-fw-ver>' + esc(img.ver) + "</strong>" +
+        '<span class="mono">' + ndFwKb(img.size) + " KB</span>" +
+        (ndFwFmtDate(img.uploaded) ? "<span>" + esc(ndT("nodes.fwUploadedAt", { date: ndFwFmtDate(img.uploaded) })) + "</span>" : "") +
+      "</div>"
+    : '<div class="nd-fw-img"><span class="hint" style="margin:0" data-nd-fw-none>' + esc(ndT("nodes.fwNoImage")) + "</span></div>";
+
+  var sum = "";
+  if (total) {
+    sum = '<div class="nd-fw-sum">' + ["sending", "staged", "pending", "deferred", "failed", "done"].filter(function (s) { return counts[s]; })
+      .map(function (s) {
+        return '<span class="badge ' + ND_FW_BADGE[s] + '" data-nd-fw-sum="' + s + '">' + counts[s] + " " + esc(ndT("nodes.fwSum_" + s)) + "</span>";
+      }).join("") + "</div>";
+  }
+
+  var dzOff = !sd || busy;
+  var drop;
+  if (busy) {
+    drop = '<div class="dropzone nd-fw-drop nd-fw-busy" data-nd-fw-kind="' + kind + '">' +
+      '<div class="ota-status">' + esc(up.checking ? ndT("nodes.fwChecking") : ndT("nodes.fwUploading", { pct: up.pct || 0 })) + "</div>" +
+      '<div class="ota-bar-wrap" style="width:100%"><div class="ota-bar"><span style="width:' + (up.checking ? 100 : (up.pct || 0)) + '%"></span></div>' +
+      '<span class="ota-pct">' + (up.checking ? 100 : (up.pct || 0)) + "%</span></div></div>";
+  } else {
+    drop = '<label class="dropzone nd-fw-drop' + (dzOff ? " nd-fw-off" : "") + '" data-nd-fw-kind="' + kind + '">' +
+      '<span data-icon="upload-cloud" style="width:24px;height:24px"></span>' +
+      "<strong>" + esc(ndT("nodes.fwChoose")) + "</strong>" +
+      '<span style="font-size:11px;color:var(--text-3)">' + esc(ndT("nodes.fwDrag")) + "</span>" +
+      '<input type="file" accept=".bin" data-nd-fw-kind="' + kind + '" data-change="nodesFwPick"' + (dzOff ? " disabled" : "") +
+        ' style="position:absolute;opacity:0;width:0;height:0">' +
+      "</label>";
+  }
+  var err = "";
+  if (!sd) err = '<p class="nd-ferr" data-nd-fw-err="' + kind + '">' + esc(ndT("nodes.fwErr_no_sd")) + "</p>";
+  else if (up && up.err) err = '<p class="nd-ferr" data-nd-fw-err="' + kind + '">' + esc(up.err) + "</p>";
+
+  var minBatt = "";
+  if (kind === "espnow-c3" && img) {
+    var mv = img.min_mv == null ? 3600 : img.min_mv;
+    var shown = ndFwMinDraft !== null ? ndFwMinDraft : (mv / 1000).toFixed(2);
+    minBatt = '<div class="field" style="margin:0">' +
+      '<label class="field-label" for="nd-fw-minmv">' + esc(ndT("nodes.fwMinBatt")) + "</label>" +
+      '<div style="display:flex;gap:8px">' +
+        '<input class="input mono' + (ndFwMinErr ? " nd-bad" : "") + '" id="nd-fw-minmv" type="number" min="0" max="4.2" step="0.01" value="' + esc(shown) +
+          '" style="flex:0 0 110px" data-input="nodesFwMinInput">' +
+        '<button type="button" class="btn" data-click="nodesFwMinSave"><span data-icon="save"></span> ' + esc(ndT("nodes.fwMinBattSet")) + "</button>" +
+      "</div>" +
+      (ndFwMinErr ? '<p class="nd-ferr" data-nd-fw-minerr>' + esc(ndFwMinErr) + "</p>" : "") +
+      '<p class="hint" style="margin:0">' + esc(ndT("nodes.fwMinBattHint")) + "</p>" +
+      "</div>";
+  }
+
+  var kargs = esc(JSON.stringify([kind]));
+  var actions = '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+    '<button type="button" class="btn primary" data-click="nodesFwStartAll" data-args="' + kargs + '"' + (img ? "" : " disabled") + '><span data-icon="rocket"></span> ' + esc(ndT("nodes.fwUpdateAll")) + "</button>" +
+    '<button type="button" class="btn" data-click="nodesFwCancelAll" data-args="' + kargs + '"' + (total ? "" : " disabled") + '><span data-icon="x"></span> ' + esc(ndT("nodes.fwCancelAll")) + "</button>" +
+    '<span style="flex:1"></span>' +
+    (img ? '<button type="button" class="btn warn" data-click="nodesFwDelete" data-args="' + kargs + '"' + (busy ? " disabled" : "") + '><span data-icon="trash"></span> ' + esc(ndT("nodes.fwDelete")) + "</button>" : "") +
+    "</div>";
+
+  return '<div class="nd-sec nd-fw-slot" data-nd-fw-slot="' + kind + '">' +
+    '<div class="nd-sec-h"><span data-icon="' + k.icon + '"></span> <span>' + esc(ndT(k.label)) + "</span></div>" +
+    '<div class="nd-sec-b">' + image + sum + drop + err + minBatt + actions + "</div></div>";
+}
+
+function ndFwRenderCard() {
+  var card = document.getElementById("nd-card-fw");
+  var box = document.getElementById("nd-fw-slots");
+  if (!card || !box) return;
+  if (!ndFwAvailable || !ndFw) { card.style.display = "none"; return; }
+  card.style.display = "";
+  // Same caret rule as the rows: a poll must not take the min-battery box
+  // away from someone typing in it.
+  var act = document.activeElement;
+  var focusId = act && act.id && box.contains(act) ? act.id : null;
+  box.innerHTML = ND_FW_KINDS.map(ndFwSlotHtml).join("");
+  if (window.Icons && Icons.swap) Icons.swap(box);
+  if (focusId) { var back = document.getElementById(focusId); if (back) back.focus(); }
+}
+
+// ── Reading and polling ────────────────────────────────────────────────────
+
+function ndFwStop() {
+  if (ndFwTimer) { clearTimeout(ndFwTimer); ndFwTimer = null; }
+}
+
+function ndFwLoad() {
+  ndFwStop();
+  return fetchWithTimeout("/api/nodes/fw", {}, 15000)
+    .then(function (r) {
+      if (r.status === 404) { ndFwAvailable = false; return null; }
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
+    .then(function (d) {
+      if (d) {
+        ndFwAvailable = true;
+        ndFwNoteDone(ndFw, d);
+        ndFw = d;
+      } else if (ndFwAvailable === false) {
+        ndFw = null;
+      }
+      // Redraw only on a change: while a node downloads, most polls bring
+      // one new percentage, and rebuilding the rows costs the open panel
+      // its scroll position for nothing when even that did not move.
+      var sig = JSON.stringify(ndFw) + "|" + ndFwAvailable;
+      if (sig !== ndFwSig) {
+        ndFwSig = sig;
+        ndFwRenderCard();
+        ndRenderRows();
+      }
+      ndFwSchedule();
+    })
+    .catch(function () {
+      // A failed read is not "nothing is updating": keep what was shown and
+      // ask again, if there was anything to follow.
+      ndFwSchedule();
+    });
+}
+
+// A node that has just become `done` reported a new `fw` with it, and the
+// drawer's "Running" line reads that from the node's config — which this
+// page read once, when the row was opened. Forget it so the next draw reads
+// it again; not while the reader holds unsaved edits to that node, which
+// hang off the copy that would be thrown away.
+function ndFwNoteDone(before, after) {
+  var was = (before && before.targets) || {};
+  var now = (after && after.targets) || {};
+  for (var k in now) {
+    if (now[k].st === "done" && was[k] && was[k].st !== "done" && ndCfg[k] && ndCfg[k].data && !ndDrafts[k]) {
+      delete ndCfg[k];
+    }
+  }
+}
+
+function ndFwSchedule() {
+  ndFwStop();
+  if (currentPage !== "settings_nodes" || !ndFwAnyActive()) return;
+  ndFwTimer = setTimeout(function () {
+    ndFwTimer = null;
+    if (currentPage === "settings_nodes") ndFwLoad();
+  }, ndFwPollMs);
+}
+
+// ── Actions ────────────────────────────────────────────────────────────────
+
+function ndFwPost(body) {
+  return postWithCsrf("/api/nodes/fw", {
+    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
+  }).then(function (r) {
+    return r.json().catch(function () { return null; })
+      .then(function (d) {
+        if (r.status >= 400 || !d || d.ok === false) {
+          var why = (d && (d.reason || d.error)) || "HTTP " + r.status;
+          throw new Error(ND_FW_ERRS[why] ? ndT("nodes.fwErr_" + why) : ndT("nodes.fwActionFailed", { why: why }));
+        }
+        return d;
+      });
+  });
+}
+
+function ndFwAct(body, okText) {
+  return ndFwPost(body)
+    .then(function (d) {
+      if (okText) ndMsg(typeof okText === "function" ? okText(d) : okText, "ok");
+      return ndFwLoad();
+    })
+    .catch(function (e) {
+      ndMsg(e && e.message ? e.message : ndT("nodes.fwActionFailed", { why: "net" }), "err");
+    });
+}
+
+function nodesFwStart(kind, key) {
+  return ndFwAct({ action: "start", kind: kind, keys: [key] }, ndT("nodes.fwStartedOne"));
+}
+
+function nodesFwCancel(kind, key) {
+  return ndFwAct({ action: "cancel", kind: kind, keys: [key] }, ndT("nodes.fwCancelled"));
+}
+
+function nodesFwStartAll(kind) {
+  var img = ndFwImage(kind);
+  if (!img) return;
+  var q = ndT("nodes.fwUpdateAllConfirm", { kind: ndFwKindName(kind), ver: img.ver });
+  if (kind === "esp8266") q += "\n\n" + ndT("nodes.fwWifiNoRollback");
+  if (!confirm(q)) return;
+  return ndFwAct({ action: "start", kind: kind, keys: "all" }, function (d) {
+    return ndT("nodes.fwStarted", { n: d.targets != null ? d.targets : "?" });
+  });
+}
+
+function nodesFwCancelAll(kind) {
+  return ndFwAct({ action: "cancel", kind: kind, keys: "all" }, ndT("nodes.fwCancelled"));
+}
+
+function nodesFwDelete(kind) {
+  var img = ndFwImage(kind);
+  if (!img || !confirm(ndT("nodes.fwDeleteConfirm", { kind: ndFwKindName(kind), ver: img.ver }))) return;
+  if (kind === "espnow-c3") { ndFwMinDraft = null; ndFwMinErr = ""; }
+  return ndFwAct({ action: "delete", kind: kind }, ndT("nodes.fwDeleted"));
+}
+
+function nodesFwMinInput() {
+  var el = (this && this.nodeType === 1) ? this : null;
+  if (!el) return;
+  ndFwMinDraft = el.value;
+  if (ndFwMinErr) {
+    ndFwMinErr = "";
+    el.classList.remove("nd-bad");
+    var e = document.querySelector("[data-nd-fw-minerr]");
+    if (e) e.remove();
+  }
+}
+
+// Volts in the box, millivolts on the wire; 0 is "no limit", anything else
+// must be a voltage a Li-ion cell can actually be at (§2.3: 3000..4200).
+function nodesFwMinSave() {
+  var el = document.getElementById("nd-fw-minmv");
+  var raw = String(el ? el.value : "").trim().replace(",", ".");
+  var v = raw === "" ? NaN : Number(raw);
+  var mv = Math.round(v * 1000);
+  if (!isFinite(v) || (mv !== 0 && (mv < 3000 || mv > 4200))) {
+    ndFwMinErr = ndT("nodes.fwMinBattBad");
+    ndFwRenderCard();
+    return;
+  }
+  return ndFwPost({ action: "min_mv", kind: "espnow-c3", min_mv: mv })
+    .then(function () {
+      ndFwMinDraft = null;
+      ndFwMinErr = "";
+      ndMsg(mv ? ndT("nodes.fwMinBattSaved", { v: ndFwVolts(mv) }) : ndT("nodes.fwMinBattOff"), "ok");
+      return ndFwLoad().then(ndFwRenderCard);
+    })
+    .catch(function (e) {
+      ndFwMinErr = e && e.message ? e.message : ndT("nodes.fwActionFailed", { why: "net" });
+      ndFwRenderCard();
+    });
+}
+
+// ── Upload ─────────────────────────────────────────────────────────────────
+//
+// Straight to the collector, which streams it onto the card while it checks
+// it (§2.1) — so the reply comes only after the last byte, and a refusal
+// arrives as that reply, never mid-way.
+//
+// One check happens here first: the marker names the image's kind (§1.1),
+// and an image dropped on the other kind's slot would otherwise be stored
+// (the collector files an upload by its marker, not by where it came from)
+// while the reader watched the slot they dropped it on stay empty. The
+// collector's own checks are the ones that count; this only catches the
+// wrong slot, and a file without a marker still goes up to be refused there.
+
+function ndFwMarkerKind(buf) {
+  var b = new Uint8Array(buf);
+  var tag = [0x4E, 0x4F, 0x44, 0x45, 0x46, 0x57, 0x31, 0x7C]; // "NODEFW1|"
+  outer:
+  for (var i = 0; i + tag.length < b.length; i++) {
+    for (var j = 0; j < tag.length; j++) if (b[i + j] !== tag[j]) continue outer;
+    var s = "";
+    for (var p = i + tag.length; p < b.length && p < i + tag.length + 16 && b[p] !== 0x7C; p++) s += String.fromCharCode(b[p]);
+    return s;
+  }
+  return "";
+}
+
+function ndFwUploadErr(kind, text) {
+  ndFwUp[kind] = { err: text };
+  ndFwRenderCard();
+}
+
+function ndFwUpload(kind, file) {
+  if (ndFwUp[kind] && !ndFwUp[kind].err) return;   // one at a time per slot
+  if (!ndFw || !ndFw.sd) { ndFwUploadErr(kind, ndT("nodes.fwErr_no_sd")); return; }
+  if (!/\.bin$/i.test(file.name)) { ndFwUploadErr(kind, ndT("nodes.fwErrNotBin")); return; }
+
+  ndFwUp[kind] = { pct: 0 };
+  ndFwRenderCard();
+  var rd = new FileReader();
+  rd.onerror = function () { ndFwUploadErr(kind, ndT("nodes.fwUploadNet")); };
+  rd.onload = function (e) {
+    var found = ndFwMarkerKind(e.target.result);
+    if (found && found !== kind && (found === "esp8266" || found === "espnow-c3")) {
+      ndFwUploadErr(kind, ndT("nodes.fwErrWrongSlot", { kind: ndFwKindName(found) }));
+      return;
+    }
+    getCsrfToken().then(function (token) { ndFwSend(kind, file, token, false); });
+  };
+  rd.readAsArrayBuffer(file);
+}
+
+function ndFwSend(kind, file, token, isRetry) {
+  var fd = new FormData();
+  fd.append("fw", file, file.name);
+  var xhr = new XMLHttpRequest();
+  // No overall timeout, for the reason otaUpload() gives: a stall watchdog
+  // that every progress event re-arms, and a longer one once the last byte
+  // is out and the collector is hashing and renaming on the card.
+  var dog = null;
+  function arm(ms) {
+    if (dog) clearTimeout(dog);
+    dog = setTimeout(function () { dog = null; xhr.abort(); ndFwUploadErr(kind, ndT("nodes.fwUploadStalled")); }, ms);
+  }
+  xhr.upload.onprogress = function (e) {
+    arm(45000);
+    if (!e.lengthComputable) return;
+    ndFwUp[kind] = { pct: Math.round(e.loaded * 100 / e.total) };
+    // Only the bar moves: a full redraw per progress event would restart
+    // the page's icon swap a few hundred times per upload.
+    var slot = document.querySelector('[data-nd-fw-slot="' + kind + '"]');
+    var bar = slot && slot.querySelector(".ota-bar > span");
+    var pct = slot && slot.querySelector(".ota-pct");
+    var st = slot && slot.querySelector(".ota-status");
+    if (bar) bar.style.width = ndFwUp[kind].pct + "%";
+    if (pct) pct.textContent = ndFwUp[kind].pct + "%";
+    if (st) st.textContent = ndT("nodes.fwUploading", { pct: ndFwUp[kind].pct });
+  };
+  xhr.upload.onload = function () {
+    arm(60000);
+    ndFwUp[kind] = { checking: true };
+    ndFwRenderCard();
+  };
+  xhr.onerror = function () {
+    if (dog) clearTimeout(dog);
+    ndFwUploadErr(kind, ndT("nodes.fwUploadNet"));
+  };
+  xhr.onload = function () {
+    if (dog) clearTimeout(dog);
+    if (xhr.status === 403 && !isRetry) {
+      window.__csrfToken = null;
+      getCsrfToken().then(function (t) { ndFwSend(kind, file, t, true); });
+      return;
+    }
+    var d = null;
+    try { d = JSON.parse(xhr.responseText); } catch (e) { /* not JSON */ }
+    if (xhr.status === 200 && d && d.ok) {
+      delete ndFwUp[kind];
+      ndMsg(ndT("nodes.fwStored", { kind: ndFwKindName(d.kind || kind), ver: d.ver || "", size: ndFwKb(d.size) }), "ok");
+      ndFwLoad().then(ndFwRenderCard);
+      return;
+    }
+    if (xhr.status === 404) { ndFwAvailable = false; delete ndFwUp[kind]; ndFwRenderCard(); return; }
+    var why = (d && (d.error || d.reason)) || "HTTP " + xhr.status;
+    ndFwUploadErr(kind, ND_FW_ERRS[why] ? ndT("nodes.fwErr_" + why) : ndT("nodes.fwUploadFailed", { why: why }));
+    // no_sd means the card went away since the page last looked.
+    if (why === "no_sd") ndFwLoad();
+  };
+  xhr.open("POST", "/api/nodes/fw/upload" + (token ? "?csrf=" + encodeURIComponent(token) : ""));
+  arm(45000);
+  xhr.send(fd);
+}
+
+function nodesFwPick() {
+  var el = (this && this.nodeType === 1) ? this : null;
+  if (!el || !el.files || !el.files[0]) return;
+  var f = el.files[0];
+  el.value = "";   // the same file again must fire change again
+  ndFwUpload(el.getAttribute("data-nd-fw-kind"), f);
+}
+
+// Drag and drop onto a slot. Delegated once at load, because the slots are
+// rebuilt on every poll that changes something.
+(function () {
+  function zone(ev) {
+    var z = ev.target && ev.target.closest ? ev.target.closest(".nd-fw-drop[data-nd-fw-kind]") : null;
+    return z && !z.classList.contains("nd-fw-off") && !z.classList.contains("nd-fw-busy") ? z : null;
+  }
+  document.addEventListener("dragover", function (ev) {
+    var z = zone(ev);
+    if (!z) return;
+    ev.preventDefault();
+    z.classList.add("nd-fw-drag");
+  });
+  document.addEventListener("dragleave", function (ev) {
+    var z = zone(ev);
+    if (z && !z.contains(ev.relatedTarget)) z.classList.remove("nd-fw-drag");
+  });
+  document.addEventListener("drop", function (ev) {
+    var z = zone(ev);
+    if (!z) return;
+    ev.preventDefault();
+    z.classList.remove("nd-fw-drag");
+    var f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+    if (f) ndFwUpload(z.getAttribute("data-nd-fw-kind"), f);
+  });
+})();
+
 // ── Boot / refresh ───────────────────────────────────────────────────────
 
 function ndShowCards() {
@@ -1479,6 +2052,10 @@ function nodesRefresh() {
     if (ndEspnowAvailable === false && ndRemoteAvailable === false) {
       ndMsg(ndT("nodes.notInBuildBoth"), "err");
     }
+    // The firmware card and the rows' firmware sections read their own
+    // endpoint, after the lists so its redraw lands on rows that exist.
+    ndFwSig = "";
+    ndFwLoad();
   }).catch(function () {
     ndMsg(ndT("nodes.couldNotRead"), "err");
   });
@@ -1486,6 +2063,10 @@ function nodesRefresh() {
 
 function nodesInit() {
   ndStopPairPoll();   // a poll left running from a previous visit
+  ndFwStop();
+  ndFwUp = {};
+  ndFwMinDraft = null;
+  ndFwMinErr = "";
   ndOpenKey = null;
   ndFilterState = "all";
   ndSearchQuery = "";
@@ -1507,6 +2088,7 @@ document.addEventListener("i18n:change", function () {
   ndRenderRows();
   ndRenderPairState();
   ndRenderDiag();
+  ndFwRenderCard();
   ndDirtyRefresh();
 });
 
@@ -1527,4 +2109,12 @@ registerHandlers({
   nodesDiscard: nodesDiscard,
   nodesHoSwitch: nodesHoSwitch,
   nodesHoCancel: nodesHoCancel,
+  nodesFwPick: nodesFwPick,
+  nodesFwStart: nodesFwStart,
+  nodesFwCancel: nodesFwCancel,
+  nodesFwStartAll: nodesFwStartAll,
+  nodesFwCancelAll: nodesFwCancelAll,
+  nodesFwDelete: nodesFwDelete,
+  nodesFwMinInput: nodesFwMinInput,
+  nodesFwMinSave: nodesFwMinSave,
 });

@@ -45,6 +45,13 @@ static CfgChunkMsg   s_cfg;
 static uint8_t       s_cfgFrom[6];
 static uint8_t       s_cfgNode = 0;
 
+/// A FW (docs/NODE_OTA.md §4), under the same three conditions as a CFG and
+/// for a stronger reason: its bytes are written into the next boot slot.
+/// Decryption, the image's own SHA-256 and the id check come on top.
+static volatile bool s_wantFw = false;
+static volatile bool s_haveFw = false;
+static FwChunkMsg    s_fw;
+
 /// The link key (see linkSetKey()). Starts as the compiled one so a caller
 /// that forgets to set it gets today's behaviour, not a zero key.
 static uint8_t s_key[16];
@@ -102,6 +109,16 @@ static void onRecv(const uint8_t* mac, const uint8_t* data, int len) {
         memcpy(&s_cfg, &c, sizeof(c));
         s_wantCfg = false;                      // one per request
         s_haveCfg = true;
+        xSemaphoreGive(s_replySem);
+        return;
+    }
+
+    if (type == EN_MSG_FW) {
+        if (!s_wantFw || memcmp(mac, s_cfgFrom, 6) != 0) return;
+        if (data[3] != s_cfgNode) return;       // nodeId, header byte 3
+        memcpy(&s_fw, data, (size_t)len);       // espnowValidate() bounded len
+        s_wantFw = false;                       // one per request
+        s_haveFw = true;
         xSemaphoreGive(s_replySem);
         return;
     }
@@ -225,6 +242,7 @@ LinkResult linkSendData(const NodeLink& link, const uint8_t* frame, int len, uin
         r.channel    = s_ack.channel;
         r.rediscover = (s_ack.flags & EN_ACK_REDISCOVER) != 0;
         r.cfgPending = (s_ack.flags & EN_ACK_CFG_PENDING) != 0;
+        r.fwPending  = (s_ack.flags & EN_ACK_FW_PENDING) != 0;
     }
     return r;
 }
@@ -277,6 +295,38 @@ bool linkExchangeCfg(const NodeLink& link, const void* frame, int len, uint16_t 
     s_wantCfg = false;
     if (!s_haveCfg) return false;
     memcpy(&out, &s_cfg, sizeof(out));
+    return true;
+}
+
+bool linkExchangeFw(const NodeLink& link, const FwGetMsg& req, uint16_t windowMs,
+                    FwChunkMsg& out) {
+    s_sendDone = false;
+    s_sendOk   = false;
+    s_haveAck  = false;
+    s_haveFw   = false;
+    memcpy(s_cfgFrom, link.collector, 6);
+    s_cfgNode  = link.nodeId;
+    xSemaphoreTake(s_replySem, 0);
+    s_wantFw   = true;                          // before the send, as for a CFG
+
+    if (esp_now_send(link.collector, (const uint8_t*)&req, sizeof(req)) != ESP_OK) {
+        s_wantFw = false;
+        return false;
+    }
+    // A late FW answering the previous request (the collector's window was
+    // being refilled) can land here too; FwFetch.h checks the offset, and a
+    // wrong one only costs a request.
+    const uint32_t t0 = millis();
+    for (;;) {
+        const uint32_t spent = millis() - t0;
+        if (s_haveFw || spent >= windowMs) break;
+        if (xSemaphoreTake(s_replySem, pdMS_TO_TICKS(windowMs - spent)) != pdTRUE) break;
+    }
+    s_wantFw = false;
+    if (!s_haveFw) return false;
+    // Only the frame's header and `len` bytes of data are meaningful; the
+    // rest of `s_fw` is whatever an earlier slice left there.
+    memcpy(&out, &s_fw, (size_t)espnowFwChunkLen(s_fw.len));
     return true;
 }
 

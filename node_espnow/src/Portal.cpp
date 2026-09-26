@@ -4,11 +4,15 @@
 #include <ArduinoJson.h>
 #include <DNSServer.h>
 #include <WebServer.h>
+#include <Update.h>
 #include <WiFi.h>
 #include <esp_mac.h>
+#include <esp_ota_ops.h>
 
 #include "ConfigStore.h"
+#include "FwTrial.h"
 #include "node_config.h"
+#include "src/nodecfg/FwImage.h"
 #include "src/nodecfg/NodeConfigJson.h"
 #include "src/nodecfg/NodePortalPage.h"
 
@@ -180,6 +184,115 @@ static void handleStatus() {
     sendJson(200, doc);
 }
 
+// ---------------------------------------------------------------------------
+// POST /update — a firmware from the page (docs/NODE_OTA.md §5)
+// ---------------------------------------------------------------------------
+// Streamed into the next OTA slot by the core's Update library while the
+// same checks run over it that a download from the collector gets: the head
+// (an ESP32-C3 app image), the NODEFW1 marker (an ESP-NOW node's, not the
+// collector's or the WiFi node's), and the slot's size. Whatever fails, the
+// update is abort()ed: Update holds the image's first 16 bytes back until
+// end(), so a refused or half-written slot is never bootable and the running
+// firmware is untouched. end() itself switches only after the image's own
+// SHA-256 checks out (esp_ota_set_boot_partition).
+//
+// The version on the page is the config's `fw` (/api/config), set from
+// NODE_FW_VERSION at every load (ConfigStore.cpp) — the same field the WiFi
+// node's page reads.
+
+static struct {
+    bool     started;        ///< a file part arrived
+    bool     failed;
+    bool     headChecked;
+    int      code;
+    const char* error;       ///< §5's error word
+    char     detail[48];
+    uint32_t got;
+    uint32_t slot;           ///< largest image that fits
+    uint8_t  head[nodefw::HEAD_NEED];
+    nodefw::MarkerScan scan;
+} s_up;
+
+static void upFail(int code, const char* error, const char* detail) {
+    if (s_up.failed) return;             // the first reason is the one to report
+    s_up.failed = true;
+    s_up.code   = code;
+    s_up.error  = error;
+    copyStr(s_up.detail, sizeof(s_up.detail), detail ? detail : "");
+    if (Update.isRunning()) Update.abort();
+    Serial.printf("[portal] update refused: %s %s\n", error, s_up.detail);
+}
+
+static void handleUpdateUpload() {
+    HTTPUpload& u = s_http.upload();
+    switch (u.status) {
+        case UPLOAD_FILE_START: {
+            memset(&s_up, 0, sizeof(s_up));
+            nodefw::scanBegin(s_up.scan);
+            s_up.started = true;
+            const esp_partition_t* p = esp_ota_get_next_update_partition(nullptr);
+            const uint32_t kindMax = nodefw::maxSize(nodefw::KIND_ESPNOW_C3);
+            s_up.slot = p ? (p->size < kindMax ? p->size : kindMax) : 0;
+            if (!p || !Update.begin(UPDATE_SIZE_UNKNOWN))
+                upFail(500, "write_failed", p ? Update.errorString() : "no update partition");
+            return;
+        }
+        case UPLOAD_FILE_WRITE: {
+            if (s_up.failed || !s_up.started) return;
+            if ((uint64_t)s_up.got + u.currentSize > s_up.slot)
+                return upFail(400, "too_big", "");
+            if (s_up.got < sizeof(s_up.head)) {
+                size_t n = sizeof(s_up.head) - s_up.got;
+                if (n > u.currentSize) n = u.currentSize;
+                memcpy(s_up.head + s_up.got, u.buf, n);
+            }
+            s_up.got += u.currentSize;
+            // Judged the moment the head is complete — normally in the first
+            // chunk (the server hands them over ~1.4 KB at a time) — so a
+            // wrong file is refused before most of it is written.
+            if (!s_up.headChecked && s_up.got >= sizeof(s_up.head)) {
+                s_up.headChecked = true;
+                if (!nodefw::headOk(nodefw::KIND_ESPNOW_C3, s_up.head, sizeof(s_up.head)))
+                    return upFail(400, "not_node_image", "");
+            }
+            nodefw::scanFeed(s_up.scan, u.buf, u.currentSize);
+            if (Update.write(u.buf, u.currentSize) != u.currentSize)
+                upFail(500, "write_failed", Update.errorString());
+            return;
+        }
+        case UPLOAD_FILE_END:
+            if (s_up.failed || !s_up.started) return;
+            if (!s_up.headChecked || nodefw::scanKind(s_up.scan) != nodefw::KIND_ESPNOW_C3)
+                return upFail(400, "not_node_image", "");
+            if (!Update.end(true)) upFail(500, "write_failed", Update.errorString());
+            return;
+        case UPLOAD_FILE_ABORTED:
+            upFail(500, "write_failed", "upload interrupted");
+            return;
+    }
+}
+
+static void handleUpdateDone() {
+    if (!s_up.started) upFail(400, "not_node_image", "no file");
+    JsonDocument doc;
+    if (s_up.failed) {
+        doc["ok"]    = false;
+        doc["error"] = s_up.error;
+        if (s_up.detail[0]) doc["detail"] = (const char*)s_up.detail;
+        sendJson(s_up.code, doc);
+        return;
+    }
+    doc["ok"] = true;
+    sendJson(200, doc);
+    // A remote update's trial would go back to the slot this one just
+    // replaced; the person who uploaded it is the check now (§5).
+    fwTrialClear();
+    Serial.printf("[portal] firmware %s written (%lu bytes); restarting\n", s_up.scan.ver,
+                  (unsigned long)s_up.got);
+    s_restartAt = millis() + 1000;
+    if (s_restartAt == 0) s_restartAt = 1;
+}
+
 static void handleNotFound() {
     // Captive-portal probes (generate_204, hotspot-detect.html, …) and any
     // stray path get the page: phones then show "sign in to network".
@@ -225,6 +338,7 @@ void portalRun(NodeConfig& cfg, const NodeLink& link, float (*battV)()) {
     s_http.on("/api/config", HTTP_POST, handleConfigPost);
     s_http.on("/api/scan", HTTP_GET, handleScan);
     s_http.on("/api/status", HTTP_GET, handleStatus);
+    s_http.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
     s_http.onNotFound(handleNotFound);
     s_http.begin();
 

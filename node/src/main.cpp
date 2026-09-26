@@ -31,11 +31,14 @@
 #include "NodeSync.h"
 #include "ConfigPortal.h"
 #include "Backlog.h"
+#include "FwOffer.h"
+#include "FwFlash.h"
 #include "node_common/NodeSensors.h"
 #include "src/nodecfg/NodeConfigJson.h"
 #include "NodeCfgTables.h"
 #include "src/nodecfg/UdpDiscovery.h"
 #include "src/nodecfg/UdpDiscoveryHmac.h"
+#include "src/nodecfg/FwImage.h"
 
 using nodecfg::NodeConfig;
 using NodeSync::Net;
@@ -74,6 +77,30 @@ static bool     s_restartPending = false;
 /// the RAM backlog — go where the last one just went. nullptr otherwise; on
 /// the heap because it lives only until the restart.
 static nodecfg::NetCfg* s_postNet = nullptr;
+
+// ---------------------------------------------------------------------------
+// Firmware identity (docs/NODE_OTA.md §1)
+// ---------------------------------------------------------------------------
+
+/// The marker that makes this .bin a node image of kind "esp8266" (§1.1): the
+/// collector refuses an upload without it, and this node refuses an image
+/// without it. In flash (PROGMEM), and PRINTED at boot — an array nothing
+/// references is dropped by --gc-sections, marker and all, and the build
+/// would still succeed.
+static const char FW_MARKER[] PROGMEM = NODEFW_MARKER_TEXT("esp8266", NODE_FW_VERSION);
+
+/// ESP.getSketchMD5() — the MD5 of exactly the .bin this node was flashed
+/// from (§1.3), which is how the collector knows an update is RUNNING and not
+/// merely downloaded (§0.5). Hashing the ~460 KB sketch out of flash takes a
+/// few hundred milliseconds, so once, at boot; "" if it could not be read,
+/// and then the POST says nothing rather than something wrong.
+static char s_fwMd5[NodeFw::MD5_CAP] = "";
+
+/// The `fw` of the latest answered ingest reply — acted on once the cycle's
+/// POSTs are done (§3), and forgotten either way.
+static NodeFw::Offer  s_fwOffer;
+/// What failed since boot, and the fw_error still to deliver.
+static NodeFw::Report s_fwReport;
 
 // ---------------------------------------------------------------------------
 // Collector discovery (§3.1)
@@ -416,6 +443,26 @@ static void handleReplyCfg(JsonVariantConst c) {
     }
 }
 
+/// The reply's `fw` (NODE_OTA.md §3), copied as it came: decideOffer() does
+/// the checking, after the cycle's POSTs. The latest answered reply wins —
+/// one without `fw` withdraws an offer an earlier batch carried (the user
+/// cancelled between two POSTs).
+static void readReplyFw(JsonVariantConst v) {
+    s_fwOffer = NodeFw::Offer();
+    if (!v.is<JsonObjectConst>()) return;
+    s_fwOffer.present = true;
+    // A truncated md5 or path is a wrong one, not a shorter right one: an
+    // md5 of 33 characters cut to 32 would pass isMd5Hex(). Emptied, it is
+    // refused as bad_offer.
+    if (!nodecfg::copyStr(s_fwOffer.md5, sizeof(s_fwOffer.md5), v["md5"] | ""))
+        s_fwOffer.md5[0] = '\0';
+    if (!nodecfg::copyStr(s_fwOffer.path, sizeof(s_fwOffer.path), v["path"] | ""))
+        s_fwOffer.path[0] = '\0';
+    nodecfg::copyStr(s_fwOffer.ver, sizeof(s_fwOffer.ver), v["ver"] | "");
+    s_fwOffer.size    = v["size"] | 0u;
+    s_fwOffer.attempt = v["attempt"] | 0u;
+}
+
 // ---------------------------------------------------------------------------
 // Post
 // ---------------------------------------------------------------------------
@@ -444,6 +491,7 @@ static PostResult postBatch() {
 
     const bool withCfg = NodeSync::shouldSendCfg(s_cfg.local, s_reportedSinceBoot);
     const uint16_t errRev = s_sync.err.rev;
+    const uint16_t fwTok  = s_fwReport.token();
 
     String body;
     int n = 0;
@@ -463,6 +511,16 @@ static PostResult postBatch() {
             e["rev"]    = s_sync.err.rev;
             e["field"]  = (const char*)s_sync.err.field;
             e["reason"] = (const char*)s_sync.err.reason;
+        }
+        // NODE_OTA.md §3: what this node runs, with every POST — the only
+        // thing that makes a target `done` — and a failed update until one
+        // POST carrying it has been answered.
+        if (s_fwMd5[0]) doc["fw_md5"] = (const char*)s_fwMd5;
+        if (fwTok) {
+            JsonObject f = doc["fw_error"].to<JsonObject>();
+            f["md5"]     = s_fwReport.md5();
+            f["attempt"] = s_fwReport.attempt();
+            f["reason"]  = s_fwReport.reason();
         }
 
         JsonArray readings = doc["readings"].to<JsonArray>();
@@ -551,6 +609,7 @@ static PostResult postBatch() {
         s_sync.err.clear();
         syncSave(s_sync);
     }
+    s_fwReport.delivered(fwTok);
 
     // ── What the collector says it did, and what this node does about it ────
     //
@@ -578,12 +637,14 @@ static PostResult postBatch() {
             accepted = res["accepted"] | n;
             room     = res["room"]     | -1;
             handleReplyCfg(res["cfg"]);
+            readReplyFw(res["fw"]);
         } else {
             // 200 with a body this node cannot read: something in the way
             // answering for the collector, or an out-of-memory parse. The
             // status line is all there is to go on, and a node that never
             // empties its queue stops being able to record anything new.
             LOGF("[post] %d readings -> 200, unreadable reply\n", n);
+            s_fwOffer.present = false;
         }
     }
 
@@ -687,15 +748,169 @@ static void rollBack() {
     ESP.restart();
 }
 
-static void restartForConfig() {
-    // The backlog is RAM and does not survive the restart, so hand over what
-    // the collector will take first — it has just answered, so it is there.
-    // Bounded: a collector with a full queue takes nothing, and the new config
-    // is not worth waiting indefinitely for.
+/// The backlog is RAM and does not survive a restart, so hand over what the
+/// collector will take first — it has just answered, so it is there.
+/// Bounded: a collector with a full queue takes nothing, and neither a new
+/// config nor a new firmware is worth waiting indefinitely for.
+static void flushBeforeRestart() {
     if (s_backlog.count() > 0) flushBacklog(8);
     if (s_backlog.count() > 0)
-        LOGF("[cfg] restarting with %d readings not delivered\n", s_backlog.count());
+        LOGF("[node] restarting with %d readings not delivered\n", s_backlog.count());
+}
+
+static void restartForConfig() {
+    flushBeforeRestart();
     LOGLN("[cfg] restarting to apply the collector's config");
+    delay(200);
+    ESP.restart();
+}
+
+// ---------------------------------------------------------------------------
+// Firmware from the collector (docs/NODE_OTA.md §3)
+// ---------------------------------------------------------------------------
+
+/// The whole download, start to verdict. A 470 KB image on a LAN takes 10-20
+/// s; three minutes is a link that is barely there, and past that the node
+/// has been deaf (no sensor reads, no page) for long enough.
+static const uint32_t FW_DOWNLOAD_MAX_MS = 180000;
+/// No byte for this long is a collector that has gone, not a slow one.
+static const uint32_t FW_STALL_MS        = 15000;
+/// Update.begin() takes a 4 KB sector buffer, the TCP connection a few KB
+/// more, the chunk below 1 KB. Starting with less than this is starting
+/// something that ends in an out-of-memory reset halfway through erasing.
+static const uint32_t FW_MIN_HEAP        = 16384;
+static const size_t   FW_CHUNK           = 1024;
+
+/// GET the offered image and stream it through FwFlash. True = staged; false
+/// with `reason` set to the fw_error reason. The running sketch is untouched
+/// on every false path (FwFlash's destructor aborts).
+static bool downloadFw(const NodeFw::Offer& o, char* reason, size_t cap) {
+    const uint32_t heap = ESP.getFreeHeap();
+    if (heap < FW_MIN_HEAP) {
+        LOGF("[fw] %u bytes of heap; not starting a download\n", (unsigned)heap);
+        nodecfg::copyStr(reason, cap, "no_memory");
+        return false;
+    }
+    // Where this cycle's POSTs went (see s_postNet), with the same token and
+    // basic auth as postBatch(): the collector serves the image behind them.
+    const nodecfg::NetCfg& net = s_postNet ? *s_postNet : s_cfg.net;
+    char url[24 + nodecfg::HOST_CAP + NodeFw::PATH_CAP];
+    snprintf(url, sizeof(url), "http://%s:%u%s", net.host, (unsigned)net.port, o.path);
+
+    WiFiClient client;
+    HTTPClient http;
+    if (!http.begin(client, url)) {
+        nodecfg::copyStr(reason, cap, "download_failed");
+        return false;
+    }
+    http.setTimeout(10000);
+    http.addHeader("X-Ingest-Token", net.token);
+    if (net.basic_user[0] != '\0') http.setAuthorization(net.basic_user, net.basic_pass);
+
+    const int code = http.GET();
+    if (code != 200) {
+        LOGF("[fw] GET %s -> %d\n", o.path, code);
+        snprintf(reason, cap, "http_%d", code);
+        http.end();
+        return false;
+    }
+    // -1 = no Content-Length (chunked): the offer's size is then the only
+    // one there is, and Update.end() refuses a body that stops short of it.
+    const int len = http.getSize();
+    if (len >= 0 && (uint32_t)len != o.size) {
+        LOGF("[fw] the collector sends %d bytes, the offer said %u\n", len, (unsigned)o.size);
+        nodecfg::copyStr(reason, cap, "size_mismatch");
+        http.end();
+        return false;
+    }
+
+    FwFlash fl;
+    uint8_t* buf = new (std::nothrow) uint8_t[FW_CHUNK];
+    if (!buf || !fl.begin(o.size, o.md5)) {
+        nodecfg::copyStr(reason, cap, buf ? fl.error() : "no_memory");
+        if (fl.detail()[0]) LOGF("[fw] %s\n", fl.detail());
+        delete[] buf;
+        http.end();
+        return false;
+    }
+    LOGF("[fw] downloading \"%s\" (%u bytes, attempt %u)\n", o.ver, (unsigned)o.size,
+         (unsigned)o.attempt);
+
+    WiFiClient* in = http.getStreamPtr();
+    const uint32_t t0 = millis();
+    uint32_t lastByte = t0, got = 0, nextLog = 65536;
+    const char* err = nullptr;
+    while (got < o.size) {
+        if (millis() - t0 > FW_DOWNLOAD_MAX_MS) { err = "timeout"; break; }
+        const size_t avail = in ? (size_t)in->available() : 0;
+        if (avail == 0) {
+            if (!in || !in->connected()) { err = "download_failed"; break; }
+            if (millis() - lastByte > FW_STALL_MS) { err = "timeout"; break; }
+            // Feeds the watchdog and lets the WiFi stack bring the next
+            // segment in; a bare spin here is a WDT reset.
+            delay(1);
+            continue;
+        }
+        size_t want = avail < FW_CHUNK ? avail : FW_CHUNK;
+        if (want > o.size - got) want = o.size - got;
+        const int n = in->read(buf, want);
+        if (n <= 0) { yield(); continue; }
+        if (!fl.write(buf, (size_t)n)) { err = fl.error(); break; }
+        got += (uint32_t)n;
+        lastByte = millis();
+        if (got >= nextLog) {
+            LOGF("[fw] %u%%\n", (unsigned)((uint64_t)got * 100 / o.size));
+            nextLog += 65536;
+        }
+        // Update.write() yields while it erases and writes a sector; the
+        // chunks in between must too.
+        yield();
+    }
+    delete[] buf;
+    http.end();
+
+    if (!err && !fl.finish()) err = fl.error();
+    if (err) {
+        LOGF("[fw] failed after %u of %u bytes: %s %s\n", (unsigned)got, (unsigned)o.size,
+             err, fl.detail());
+        nodecfg::copyStr(reason, cap, err);
+        return false;
+    }
+    return true;
+}
+
+/// Act on the offer the cycle's replies carried, if any (§3 steps 1-5).
+static void runFwOffer() {
+    const NodeFw::Offer o = s_fwOffer;
+    s_fwOffer.present = false;
+    const uint32_t room = FwFlash::maxImage();
+    switch (NodeFw::decideOffer(o, s_fwMd5, s_fwReport, room)) {
+        case NodeFw::OfferAction::None:
+        case NodeFw::OfferAction::AlreadyFailed:
+            return;
+        case NodeFw::OfferAction::Running:
+            // The collector marks the target done from this POST's fw_md5;
+            // an offer of the running image is one it made before it knew.
+            return;
+        case NodeFw::OfferAction::Invalid: {
+            const char* why = NodeFw::invalidReason(o, room);
+            LOGF("[fw] cannot take the offered image: %s\n", why);
+            s_fwReport.fail(o.md5, o.attempt, why);
+            return;
+        }
+        case NodeFw::OfferAction::Download:
+            break;
+    }
+    char reason[NodeFw::REASON_CAP];
+    if (!downloadFw(o, reason, sizeof(reason))) {
+        s_fwReport.fail(o.md5, o.attempt, reason);
+        return;
+    }
+    // §3 step 4. Staged: the eboot command is written, and the next boot
+    // copies the image over this sketch. The new firmware's first POST
+    // carries its fw_md5, which is what makes the target done.
+    flushBeforeRestart();
+    LOGLN("[fw] restarting into the new firmware");
     delay(200);
     ESP.restart();
 }
@@ -705,6 +920,10 @@ void setup() {
     Serial.begin(115200);
     delay(200);
     LOGLN("\n\nESP32_Logger sensor node " NODE_FW_VERSION);
+    // The marker, printed: this reference is what keeps it in the image.
+    Serial.println(FPSTR(FW_MARKER));
+    nodecfg::copyStr(s_fwMd5, sizeof(s_fwMd5), ESP.getSketchMD5().c_str());
+    LOGF("sketch md5 %s\n", s_fwMd5[0] ? s_fwMd5 : "(unreadable)");
 
     // Read the button before anything else claims GPIO0.
     const bool forcePortal = portalButtonHeld();
@@ -812,8 +1031,14 @@ void loop() {
     // not be the one cycle whose reading was never taken.
     if (nodeSensorsReady()) collectReading();
 
+    // An offer is only ever the one this cycle's replies carried.
+    s_fwOffer.present = false;
     if (ensureWifi()) flushBacklog(NODE_BATCHES_PER_CYCLE);
 
     if (s_link.cycleEnd() & NodeSync::LA_ROLLBACK) rollBack();
     if (s_restartPending) restartForConfig();
+    // After the POSTs (§3), and never with a config restart pending: that
+    // restart comes first, and the collector offers the image again to the
+    // node that comes back (the target is still `sending`).
+    if (s_fwOffer.present) runFwOffer();
 }

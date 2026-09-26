@@ -8,7 +8,8 @@ registered in core.js's allowlist.
 
 The stub answers what the Nodes (ESP-NOW + WiFi remote, merged in redesign
 1a — with each node's settings and the network handover of
-docs/NODE_CONFIG.md §7), sensors, and e-ink pages need. Everything else the SPA polls on boot
+docs/NODE_CONFIG.md §7, and the node firmware updates of docs/NODE_OTA.md
+§2.3), sensors, and e-ink pages need. Everything else the SPA polls on boot
 gets an empty object, so the page under test is not competing with a wall of
 failed requests — and the routes it does NOT serve (a plain download link
 like /export_settings) 404 by design; the driver ignores those.
@@ -594,6 +595,163 @@ def nodes_config_post(doc):
 NODE_CFG_POSTS = []
 
 
+# ── Node firmware (docs/NODE_OTA.md §2) ────────────────────────────────────
+#
+# One image per kind and the targets that should run it, in memory. Starts
+# with an ESP8266 image already on the card and one WiFi target that FAILED
+# — the state that needs a Retry, and the one a page drawing only the happy
+# path has never been proven against — and no C3 image, so the driver has to
+# upload one before it can update an ESP-NOW node.
+#
+# Nodes move one step per GET, which is what a node reporting between two
+# polls looks like: pending → sending 35% → sending 75% → staged (C3 only)
+# → done. Node 3 (espnow-03) stays deferred on a low battery, in the
+# collector's words ("battery 3.41 V"), so "all" has a node that never
+# finishes. `done` also moves that node's reported `fw` to the image's
+# version — §0.5: done means the node says it runs it.
+FW_KINDS = ("esp8266", "espnow-c3")
+FW = {}
+
+
+def fw_reset():
+    FW.clear()
+    FW.update({
+        "sd": True,
+        "images": {
+            "esp8266": {"kind": "esp8266", "ver": "2026.09.1", "size": 466848,
+                        "md5": "0123456789abcdef0123456789abcdef", "sha256": "ab" * 32,
+                        "uploaded": 1790000000},
+            "espnow-c3": None,
+        },
+        "attempt": {"esp8266": 1, "espnow-c3": 0},
+        "targets": {"w:greenhouse": {"kind": "esp8266", "st": "failed",
+                                     "err": "md5 mismatch", "attempt": 1}},
+        "posts": [],
+        "uploads": 0,
+    })
+
+
+fw_reset()
+
+
+def _fw_kind_of(key):
+    return "espnow-c3" if key.startswith("e:") else "esp8266"
+
+
+def fw_get():
+    for key, t in FW["targets"].items():
+        st = t["st"]
+        if st == "pending":
+            if key == "e:3":
+                t.update(st="deferred", err="battery 3.41 V")
+            else:
+                t.update(st="sending", pct=35)
+        elif st == "sending":
+            if t.get("pct", 0) < 70:
+                t["pct"] = 75
+            else:
+                t.pop("pct", None)
+                t["st"] = "staged" if t["kind"] == "espnow-c3" else "done"
+        elif st == "staged":
+            t["st"] = "done"
+        if t["st"] == "done" and st != "done":
+            c = NODE_CFG.get(key)
+            ver = (FW["images"].get(t["kind"]) or {}).get("ver")
+            if c and ver:
+                c["desired"]["fw"] = ver
+                if c.get("reported"):
+                    c["reported"]["fw"] = ver
+    targets = {}
+    for key, t in FW["targets"].items():
+        o = {"kind": t["kind"], "st": t["st"], "attempt": FW["attempt"][t["kind"]]}
+        if t["st"] == "sending" and "pct" in t:
+            o["pct"] = t["pct"]
+        if t.get("err") and t["st"] in ("deferred", "failed"):
+            o["err"] = t["err"]
+        targets[key] = o
+    return {"sd": FW["sd"], "images": FW["images"], "targets": targets}
+
+
+def fw_post(doc):
+    FW["posts"].append(doc)
+    action, kind = doc.get("action"), doc.get("kind")
+    if kind not in FW_KINDS:
+        return {"ok": False, "error": "bad_request"}, 400
+    if action in ("start", "cancel"):
+        keys = doc.get("keys")
+        if keys == "all":
+            keys = [k for k, _ in _node_keys() if _fw_kind_of(k) == kind]
+        elif not isinstance(keys, list) or any(_fw_kind_of(str(k)) != kind for k in keys):
+            return {"ok": False, "error": "bad_key"}, 400
+        if action == "cancel":
+            for k in keys:
+                FW["targets"].pop(k, None)
+            return {"ok": True}, 200
+        if not FW["images"][kind]:
+            return {"ok": False, "error": "no_image"}, 409
+        FW["attempt"][kind] += 1
+        for k in keys:
+            FW["targets"][k] = {"kind": kind, "st": "pending", "attempt": FW["attempt"][kind]}
+        return {"ok": True, "targets": len(keys)}, 200
+    if action == "delete":
+        FW["images"][kind] = None
+        for k in [k for k, t in FW["targets"].items() if t["kind"] == kind]:
+            del FW["targets"][k]
+        return {"ok": True}, 200
+    if action == "min_mv":
+        mv = doc.get("min_mv")
+        if kind != "espnow-c3" or not isinstance(mv, int) or not (mv == 0 or 3000 <= mv <= 4200):
+            return {"ok": False, "error": "bad_request"}, 400
+        if not FW["images"][kind]:
+            return {"ok": False, "error": "no_image"}, 409
+        FW["images"][kind]["min_mv"] = mv
+        return {"ok": True}, 200
+    return {"ok": False, "error": "bad_request"}, 400
+
+
+def fw_upload(content_type, body):
+    """Just enough of §2.1's checks to show the page each answer: the SD,
+    the marker (kind + version), the head byte, the size limit."""
+    import re, hashlib
+    FW["uploads"] += 1
+    if not FW["sd"]:
+        return {"ok": False, "error": "no_sd"}, 409
+    m = re.search(r'boundary="?([^";]+)"?', content_type or "")
+    if not m:
+        return {"ok": False, "error": "bad_request"}, 400
+    sep = b"--" + m.group(1).encode()
+    data = None
+    for part in body.split(sep):
+        head, _, rest = part.partition(b"\r\n\r\n")
+        if b'name="fw"' in head:
+            data = rest[:-2] if rest.endswith(b"\r\n") else rest
+    if data is None:
+        return {"ok": False, "error": "bad_request"}, 400
+    mk = re.search(rb"NODEFW1\|([a-z0-9-]+)\|([A-Za-z0-9._+-]{1,23})\|", data)
+    if not mk or mk.group(1).decode() not in FW_KINDS:
+        return {"ok": False, "error": "not_node_image"}, 400
+    kind, ver = mk.group(1).decode(), mk.group(2).decode()
+    if data[:1] != b"\xe9":
+        return {"ok": False, "error": "bad_header"}, 400
+    if len(data) > (0xFF000 if kind == "esp8266" else 0x140000):
+        return {"ok": False, "error": "too_big"}, 400
+    img = {"kind": kind, "ver": ver, "size": len(data),
+           "md5": hashlib.md5(data).hexdigest(), "sha256": hashlib.sha256(data).hexdigest(),
+           "uploaded": 1790086400}
+    if kind == "espnow-c3":
+        old = FW["images"][kind]
+        img.update(img_id=0x1234ABCD, min_mv=(old or {}).get("min_mv", 3600))
+    FW["images"][kind] = img
+    # §2.1: a new image resets that kind's targets to pending, still chosen.
+    FW["attempt"][kind] += 1
+    for t in FW["targets"].values():
+        if t["kind"] == kind:
+            t.update(st="pending", attempt=FW["attempt"][kind])
+            t.pop("pct", None)
+            t.pop("err", None)
+    return {"ok": True, "kind": kind, "ver": ver, "size": len(data)}, 200
+
+
 class H(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=ROOT, **kw)
@@ -640,6 +798,13 @@ class H(http.server.SimpleHTTPRequestHandler):
             return self._json(body, code)
         if path == "/api/nodes/handover":
             return self._json(handover_get())
+        if path == "/api/nodes/fw":
+            return self._json(fw_get())
+        # Mock-only: what the page asked of the firmware API, without moving
+        # any node a step (a GET of /api/nodes/fw does).
+        if path == "/__mock/fw":
+            return self._json({"posts": FW["posts"], "uploads": FW["uploads"],
+                               "images": FW["images"], "targets": FW["targets"]})
         # Mock-only: what the page sent, so a driver can check the save was
         # partial and the handover carried the rest of the Network form.
         if path == "/__mock/nodes":
@@ -765,6 +930,25 @@ class H(http.server.SimpleHTTPRequestHandler):
         if path == "/api/modules/wifi/test":
             self._read_json()
             return self._json({"started": True}, 202)
+        if path == "/api/nodes/fw/upload":
+            n = int(self.headers.get("Content-Length") or 0)
+            body, code = fw_upload(self.headers.get("Content-Type"), self.rfile.read(n))
+            return self._json(body, code)
+        if path == "/api/nodes/fw":
+            doc = self._read_json()
+            if doc is None:
+                return self._json({"ok": False, "error": "bad_request"}, 400)
+            body, code = fw_post(doc)
+            return self._json(body, code)
+        # Mock-only: take the SD card out ({"sd": false}) or start over
+        # ({"reset": true}).
+        if path == "/__mock/fw":
+            doc = self._read_json() or {}
+            if doc.get("reset"):
+                fw_reset()
+            if "sd" in doc:
+                FW["sd"] = bool(doc["sd"])
+            return self._json({"ok": True})
         if path == "/api/nodes/handover":
             doc = self._read_json()
             if doc is None:

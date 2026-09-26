@@ -19,6 +19,10 @@ What it proves, in the order a person meets it:
   * the node's own refusal ({"ok":false,"field","reason"}) lands next to the
     field it names, on the step that holds it;
   * a good save says "Saved, restarting…" and notices the node come back;
+  * the Firmware section (docs/NODE_OTA.md §5) uploads a .bin as multipart
+    field "fw", turns the node's refusals (another kind's image, too big) and
+    an older node's 404 into words, and after a 200 reloads once the node is
+    back — the same on both transports;
   * no console errors, and no horizontal scroll at 360 px on any step.
 
     python3 tests/web/mock_node.py 8790 &
@@ -394,6 +398,89 @@ def espnow(b):
     ctx.close()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+def image(kind, ver="2026.10.1", size=4096):
+    """A stand-in node image: the ESP header byte, padding, the §1.1 marker."""
+    marker = ("NODEFW1|%s|%s|" % (kind, ver)).encode() + b"\0"
+    body = b"\xe9" + b"\0" * 1023 + marker
+    return body + b"\xff" * max(0, size - len(body))
+
+
+def upload(pg, name, data):
+    pg.set_input_files("#fwf", files=[{"name": name, "mimeType": "application/octet-stream", "buffer": data}])
+    pg.click("[data-a=fw]")
+
+
+def fresh(pg, transport):
+    """The node's page in factory state, at "This node" (step 5 on both).
+
+    The URL is put back to "/" at once: the page reloads itself after an
+    update, and a reload of "/?transport=…" would reset the mock to factory
+    state — the new firmware's version with it.
+    """
+    pg.goto(BASE + "/?transport=" + transport, wait_until="networkidle")
+    pg.evaluate("history.replaceState(null, '', '/')")
+    pg.click("[data-a=go][data-i='4']")
+
+
+def firmware(b):
+    print("\n── the Firmware section (NODE_OTA.md §5), both transports")
+    ctx = b.new_context(viewport={"width": 360, "height": 740}, color_scheme="light", locale="en-US")
+    pg = ctx.new_page()
+    attach(pg)
+    fresh(pg, "wifi")
+    check("running: 2026.09.1" in pg.locator("#fwv").inner_text().lower(), "the running version is shown")
+    no_hscroll(pg, "This node + Firmware")
+
+    # Refused: the ESP-NOW node's image offered to the ESP8266.
+    upload(pg, "espnow.bin", image("espnow-c3"))
+    pg.wait_for_selector("#fwe", timeout=10000)
+    msg = pg.locator("#fwe").inner_text().lower()
+    check("not a firmware for this node" in msg and "unchanged" in msg,
+          "an image of another kind is refused, and the page says nothing changed (%r)" % msg)
+    check(pg.locator("#ov").is_hidden(), "the progress overlay is gone after a refusal")
+    fw = mock("/__fw")
+    check(fw["field"] == "fw" and fw["size"] == 4096, "sent as multipart, field \"fw\", whole (%r)" % fw)
+    check(mock("/__state")["fw"] == "2026.09.1", "and the node did not switch")
+
+    upload(pg, "huge.bin", image("esp8266", size=0xFF001))
+    pg.wait_for_function("document.getElementById('fwe') && /too big/i.test(document.getElementById('fwe').textContent)",
+                         timeout=15000)
+    check(True, "an image larger than the slot is refused as too big")
+
+    # Accepted: progress, restart, and the page comes back on the new firmware.
+    upload(pg, "node.bin", image("esp8266", "2026.10.1"))
+    pg.wait_for_selector("#saved", timeout=10000)
+    check("updated, restarting" in pg.locator("#ov").inner_text().lower(), "a good image says it is restarting")
+    pg.wait_for_function("document.querySelector('.page-sub') && document.querySelector('.page-sub').textContent.indexOf('2026.10.1') >= 0",
+                         timeout=30000)
+    check(True, "the page reloads once the node is back, on the new firmware")
+
+    # A node older than §5: 404.
+    n = len(console)
+    fresh(pg, "wifi&fw=old")
+    upload(pg, "node.bin", image("esp8266"))
+    pg.wait_for_selector("#fwe", timeout=10000)
+    check("cannot update itself" in pg.locator("#fwe").inner_text().lower(), "a 404 reads as a firmware that cannot update itself")
+    # That 404 is the point of the case, not a page error.
+    console[n:] = [c for c in console[n:] if "status of 404" not in c[1]]
+
+    # The same section, the same contract, on the ESP-NOW node.
+    fresh(pg, "espnow")
+    upload(pg, "wifi.bin", image("esp8266"))
+    pg.wait_for_selector("#fwe", timeout=10000)
+    check("not a firmware for this node" in pg.locator("#fwe").inner_text().lower(), "ESP-NOW: the WiFi node's image is refused")
+    pg.click("[data-a=lang][data-i=bg]")
+    pg.click("[data-a=go][data-i='4']")
+    upload(pg, "c3.bin", image("espnow-c3", "2026.10.2"))
+    pg.wait_for_selector("#saved", timeout=10000)
+    check("обновено" in pg.locator("#ov").inner_text().lower(), "ESP-NOW: accepted, said in Bulgarian")
+    pg.wait_for_function("document.querySelector('.page-sub') && document.querySelector('.page-sub').textContent.indexOf('2026.10.2') >= 0",
+                         timeout=30000)
+    check(True, "ESP-NOW: back on the new firmware")
+    ctx.close()
+
+
 with sync_playwright() as p:
     exe = os.environ.get("CHROMIUM_PATH")
     b = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
@@ -401,6 +488,7 @@ with sync_playwright() as p:
         wifi(b)
         wifi_clear(b)
         espnow(b)
+        firmware(b)
     except Exception as e:  # a timeout is a failure with a story, not a crash
         fails.append("driver stopped: %s" % str(e).splitlines()[0])
         print("  FAIL driver stopped: %s" % e)

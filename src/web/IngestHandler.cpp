@@ -12,6 +12,7 @@
 #include "IngestBatch.h"
 #include "RateLimiter.h"
 #include "../nodes/NodeCfgStore.h"   // cfg_rev / cfg / cfg_error, docs/NODE_CONFIG.md §3
+#include "../nodes/NodeFwStore.h"    // fw_md5 / fw_error, docs/NODE_OTA.md §3
 #include "../sensors/RemoteIngest.h"
 
 // A node payload is a handful of small objects. Anything larger is either a
@@ -53,7 +54,7 @@ static bool tokenMatches(const char* got) {
     return diff == 0;
 }
 
-static bool authorised(AsyncWebServerRequest* req) {
+bool ingestAuthorised(AsyncWebServerRequest* req) {
     if (req->hasHeader("X-Ingest-Token")) {
         return tokenMatches(req->getHeader("X-Ingest-Token")->value().c_str());
     }
@@ -69,7 +70,7 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
                                 const uint8_t* data, size_t len) {
     // Auth before the rate limiter: the bucket is device-wide, so checking it
     // first let an unauthenticated caller drain it and lock out the real node.
-    if (!authorised(req)) {
+    if (!ingestAuthorised(req)) {
         req->send(401, "application/json",
                   "{\"ok\":false,\"error\":\"bad or missing ingest token\"}");
         return;
@@ -357,9 +358,12 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
 
     // §3: the node's config — or only its new rev — rides along when it is
     // due one. 1-2 KB with no fixed shape, so it is serialized after the
-    // fixed part rather than squeezed into the buffer.
+    // fixed part rather than squeezed into the buffer. A firmware offer
+    // (docs/NODE_OTA.md §3) goes the same way, as "fw".
     JsonDocument cfg;
-    nodeCfgIngest(node, body.as<JsonObjectConst>(), cfg.to<JsonObject>());
+    JsonObject   extra = cfg.to<JsonObject>();
+    nodeCfgIngest(node, body.as<JsonObjectConst>(), extra);
+    nodeFwIngest(node, body.as<JsonObjectConst>(), extra);
 
     AsyncResponseStream* resp = req->beginResponseStream("application/json");
     if (!resp) { req->send(500); return; }
@@ -373,10 +377,9 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
              room < 0 ? 0 : room,
              clockRejected ? "true" : "false");
     resp->print(out);
-    JsonVariantConst c = cfg["cfg"];
-    if (!c.isNull()) {
-        resp->print(",\"cfg\":");
-        serializeJson(c, static_cast<Print&>(*resp));
+    for (JsonPairConst kv : cfg.as<JsonObjectConst>()) {
+        resp->printf(",\"%s\":", kv.key().c_str());
+        serializeJson(kv.value(), static_cast<Print&>(*resp));
     }
     resp->print('}');
     req->send(resp);

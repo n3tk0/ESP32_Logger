@@ -13,6 +13,7 @@
 
 #include "EspNowAuth.h"
 #include "../nodes/NodeCfgStore.h"  // remote configuration, docs/NODE_CONFIG.md §5
+#include "../nodes/NodeFwStore.h"   // firmware updates, docs/NODE_OTA.md §4
 #include "../core/EventLog.h"   // the clock-skew warning outlives the serial cable
 #include "../core/Globals.h"    // bootCount, to tie a log line to a boot
 #include "../pipeline/DataPipeline.h"   // fsMutex
@@ -124,7 +125,7 @@ static uint8_t           s_offlineIntervals = 0;  // 0 = use ESPNOW_OFFLINE_INTE
 /// decodes; the callback only proves (espnowValidate) that it can.
 struct RxFrame {
     uint8_t mac[6];   ///< kept for the log line when a frame names no known node
-    uint8_t type;     ///< EN_MSG_DATA, EN_MSG_DATA2 or EN_MSG_CFG_ACK
+    uint8_t type;     ///< EN_MSG_DATA, EN_MSG_DATA2, EN_MSG_CFG_ACK or EN_MSG_FW_DONE
     uint8_t len;
     uint8_t buf[ESPNOW_MAX_FRAME];
 };
@@ -198,6 +199,37 @@ static volatile bool   s_reportReady = false;   ///< s_asm holds a complete repo
 /// again at a new one.
 static uint32_t s_repHash[EspNowNodeTable::CAP] = {0};
 static uint16_t s_repRev[EspNowNodeTable::CAP]  = {0};
+
+// ---------------------------------------------------------------------------
+// Firmware updates — docs/NODE_OTA.md §4
+// ---------------------------------------------------------------------------
+// Same arrangement as the config: the store (src/nodes/NodeFwStore) is behind
+// a mutex and an SD card, so the tick mirrors what the callback answers from.
+//
+//   s_fwSt     per slot, under s_nodeMux: the node's target status — the ACK
+//              flag (nfr::ackFlag) and whether a FW_GET is served at all;
+//   s_fwImg    under s_fwMux: the image's id, size, minMv, attempt, serial;
+//   s_fwServe  under s_fwMux: the two 4 KB windows of it (nfr::Serve), which
+//              the callback answers from and the tick fills from SD.
+//
+// One transfer at a time (s_fwOwner): a C3 image is ~1 MB and 8 KB of windows
+// is what the collector can spare, not 8 KB per node. The buffer exists only
+// while a transfer is live and is freed by the tick after nfr::IDLE_MS of
+// silence. Only the tick allocates, fills and frees it; the callback only
+// reads a window the tick has published.
+//
+// Its own spinlock, not s_nodeMux: the callback takes s_nodeMux for the slot
+// and releases it before s_fwMux, so the two are never held together.
+static uint8_t      s_fwSt[EspNowNodeTable::CAP] = {0};
+static uint32_t     s_fwMirrorGen = 0;   ///< store generation mirrored; 0 = resync
+static portMUX_TYPE s_fwMux       = portMUX_INITIALIZER_UNLOCKED;
+static NodeFwImage  s_fwImg       = {};  ///< size 0 = no image
+static nfr::Serve   s_fwServe     = { {{0, 0}, {0, 0}}, -1, 0, false, 0, 0 };
+static uint8_t*     s_fwBuf       = nullptr;   ///< 2 × nfr::WIN, while a transfer is live
+static uint8_t      s_fwOwner     = 0;         ///< node id of the transfer, 0 = none
+static uint32_t     s_fwLastMs    = 0;         ///< millis() of its last FW_GET
+static uint32_t     s_fwProgOff   = 0;         ///< its last requested offset...
+static bool         s_fwProg      = false;     ///< ...not yet handed to the store
 
 // ---------------------------------------------------------------------------
 // How far each node's clock is from ours
@@ -423,6 +455,7 @@ static bool addBroadcastPeer() {
 static void sendAck(const uint8_t* mac, uint8_t nodeId, uint16_t seq) {
     bool     known    = false;
     bool     cfg      = false;
+    bool     fw       = false;
     uint16_t interval = 0;
 
     taskENTER_CRITICAL(&s_nodeMux);
@@ -433,6 +466,7 @@ static void sendAck(const uint8_t* mac, uint8_t nodeId, uint16_t seq) {
         // here would undo an applied config on the node's next wake.
         interval = s_cfgHave[idx] ? 0 : s_nodes.at(idx).intervalS;
         cfg      = s_cfgPend[idx];
+        fw       = nfr::ackFlag(s_fwSt[idx]);
     }
     taskEXIT_CRITICAL(&s_nodeMux);
 
@@ -444,7 +478,8 @@ static void sendAck(const uint8_t* mac, uint8_t nodeId, uint16_t seq) {
     a.ackSeq    = seq;
     // CFG_PENDING while desired.rev > applied_rev (§5). A node built before the
     // flag ignores the bit.
-    a.flags     = known ? (cfg ? EN_ACK_CFG_PENDING : 0) : EN_ACK_REDISCOVER;
+    a.flags     = known ? (uint8_t)((cfg ? EN_ACK_CFG_PENDING : 0) | (fw ? EN_ACK_FW_PENDING : 0))
+                        : (uint8_t)EN_ACK_REDISCOVER;
     a.epoch     = nowEpoch();
     a.intervalS = interval;
     a.channel   = currentChannel();
@@ -577,6 +612,46 @@ static void feedCfgReport(const uint8_t* mac, const uint8_t* data, int len) {
     if (n > 0) esp_now_send(mac, (const uint8_t*)&m, (size_t)n);
 }
 
+/// FW_GET (§4.2): one slice straight from a RAM window, like a CFG_GET — the
+/// node is awake and asking in a loop. A slice not in a window is not
+/// answered: the tick is asked to load it, and the node asks again. Size 0
+/// tells a node that is no longer a target (or asks for an image that was
+/// replaced) to stop and forget; EN_FW_BUSY one that has to wait its turn.
+static void answerFwGet(const uint8_t* mac, const uint8_t* data) {
+    FwGetMsg g;
+    memcpy(&g, data, sizeof(g));
+    taskENTER_CRITICAL(&s_nodeMux);
+    const int     idx = slotFor(mac, g.nodeId);
+    const uint8_t st  = idx >= 0 ? s_fwSt[idx] : (uint8_t)nfr::ST_NONE;
+    taskEXIT_CRITICAL(&s_nodeMux);
+    if (idx < 0) return;
+
+    FwChunkMsg     m;
+    int            n   = -1;
+    const uint32_t now = millis();
+    taskENTER_CRITICAL(&s_fwMux);
+    const NodeFwImage& im = s_fwImg;
+    if (!im.size || !nfr::isOpen(st) || (g.imgId != EN_FW_ANY && g.imgId != im.imgId)) {
+        n = espnowFillFwChunk(m, g.nodeId, 0, 0, 0, 0, 0, 0, nullptr, 0);
+    } else if (nfr::busyFor(s_fwOwner, now - s_fwLastMs, g.nodeId)) {
+        n = espnowFillFwChunk(m, g.nodeId, im.imgId, im.size, 0, im.minMv, im.attempt,
+                              EN_FW_BUSY, nullptr, 0);
+    } else {
+        s_fwOwner  = g.nodeId;
+        s_fwLastMs = now;
+        // EN_FW_ANY is answered with the identity and the slice at 0 (§4.2).
+        const uint32_t off = g.imgId == EN_FW_ANY ? 0 : g.offset;
+        uint8_t len = 0;
+        const int w = nfr::lookup(s_fwServe, off, im.size, len);
+        if (w >= 0 && s_fwBuf)
+            n = espnowFillFwChunk(m, g.nodeId, im.imgId, im.size, off, im.minMv, im.attempt, 0,
+                                  s_fwBuf + w * nfr::WIN + (off - s_fwServe.w[w].base), len);
+        if (g.imgId != EN_FW_ANY) { s_fwProgOff = off; s_fwProg = true; }
+    }
+    taskEXIT_CRITICAL(&s_fwMux);
+    if (n > 0) esp_now_send(mac, (const uint8_t*)&m, (size_t)n);
+}
+
 #if ESP_IDF_VERSION_MAJOR >= 5
 // Arduino core 3.x / IDF 5 replaced the bare MAC with a struct that also
 // carries the signal strength. This firmware pins core 2.0.17, so this branch
@@ -610,7 +685,9 @@ static void onRecv(const uint8_t* mac, const uint8_t* data, int len) {
     }
     if (type == EN_MSG_CFG_GET)    { answerCfgGet(mac, data); return; }
     if (type == EN_MSG_CFG_REPORT) { feedCfgReport(mac, data, len); return; }
-    if (type != EN_MSG_DATA && type != EN_MSG_DATA2 && type != EN_MSG_CFG_ACK) {
+    if (type == EN_MSG_FW_GET)     { answerFwGet(mac, data); return; }
+    if (type != EN_MSG_DATA && type != EN_MSG_DATA2 && type != EN_MSG_CFG_ACK &&
+        type != EN_MSG_FW_DONE) {
         // ACK, WELCOME and CFG are ours to send, not to receive. A collector
         // hearing one is either talking to itself or hearing a second
         // collector; there is nothing useful to do with it either way.
@@ -645,8 +722,9 @@ static void onRecv(const uint8_t* mac, const uint8_t* data, int len) {
     // which the wire format does not carry today.
     if (!ringPush(mac, type, data, len)) return;
 
-    // A CFG_ACK is not acknowledged: the node sends it and goes back to sleep.
-    if (type == EN_MSG_CFG_ACK) return;
+    // A CFG_ACK or FW_DONE is not acknowledged: the node sends it and goes
+    // back to sleep (or restarts into the new image).
+    if (type == EN_MSG_CFG_ACK || type == EN_MSG_FW_DONE) return;
 
     // Safely outside the spinlock, and only now that the frame is somewhere
     // the tick will find it. DATA2 shares DATA's header, so nodeId and seq are
@@ -750,6 +828,7 @@ static bool servicePendingDiscover() {
     s_stats.paired++;
     s_dirty = true;
     s_cfgMirrorGen = 0;
+    s_fwMirrorGen  = 0;
     Serial.printf("[ESPNOW] paired node %u on channel %u\n", assigned, w.channel);
     return true;
 }
@@ -995,6 +1074,94 @@ static void syncCfgMirrors() {
     if (!again) s_cfgMirrorGen = gen;
 }
 
+/// A FW_DONE (§4.3): the store maps it to a status. The transfer it ends is
+/// released at once, so the next node need not wait out the idle timeout.
+static void handleFwDone(const RxFrame& f) {
+    FwDoneMsg d;
+    memcpy(&d, f.buf, sizeof(d));
+    taskENTER_CRITICAL(&s_nodeMux);
+    const int idx = slotFor(f.mac, d.nodeId);
+    taskEXIT_CRITICAL(&s_nodeMux);
+    if (idx < 0) return;
+    taskENTER_CRITICAL(&s_fwMux);
+    if (s_fwOwner == d.nodeId) s_fwLastMs = millis() - nfr::IDLE_MS;
+    taskEXIT_CRITICAL(&s_fwMux);
+    nodeFwEspnowDone(d.nodeId, d.imgId, d.status, d.attempt, d.value);
+}
+
+/// Refresh s_fwSt and s_fwImg when the store (or the table) has changed. A
+/// new or deleted image empties the windows — they hold the old one's bytes.
+static void syncFwMirrors() {
+    const uint32_t gen = nodeFwGeneration();
+    if (gen == s_fwMirrorGen) return;
+    NodeFwImage im;
+    if (!nodeFwImage(nodefw::KIND_ESPNOW_C3, im)) return;   // busy: next pass
+    uint8_t st[EspNowNodeTable::CAP];
+    for (int i = 0; i < EspNowNodeTable::CAP; i++) {
+        taskENTER_CRITICAL(&s_nodeMux);
+        const bool    used = s_nodes.at(i).used;
+        const uint8_t id   = s_nodes.at(i).nodeId;
+        taskEXIT_CRITICAL(&s_nodeMux);
+        st[i] = used ? nodeFwRadioStatus(id) : (uint8_t)nfr::ST_NONE;
+        if (st[i] == NODEFW_ST_BUSY) return;
+    }
+    taskENTER_CRITICAL(&s_nodeMux);
+    memcpy(s_fwSt, st, sizeof(st));
+    taskEXIT_CRITICAL(&s_nodeMux);
+    taskENTER_CRITICAL(&s_fwMux);
+    if (im.serial != s_fwImg.serial || !im.size) nfr::serveReset(s_fwServe);
+    s_fwImg = im;
+    taskEXIT_CRITICAL(&s_fwMux);
+    s_fwMirrorGen = gen;
+}
+
+/// §4.2, the loop's half: drop an idle transfer, pass progress on, and load
+/// the window the callback asked for.
+static void serviceFw() {
+    syncFwMirrors();
+    uint8_t* drop  = nullptr;
+    taskENTER_CRITICAL(&s_fwMux);
+    if (s_fwOwner && millis() - s_fwLastMs >= nfr::IDLE_MS) {
+        s_fwOwner = 0;
+        drop      = s_fwBuf;
+        s_fwBuf   = nullptr;
+        nfr::serveReset(s_fwServe);
+    }
+    const bool     prog    = s_fwProg && s_fwOwner;
+    const uint8_t  owner   = s_fwOwner;
+    const uint32_t off     = s_fwProgOff;
+    const uint32_t imgId   = s_fwImg.imgId;
+    const bool     needBuf = s_fwServe.req && !s_fwBuf;
+    s_fwProg = false;
+    taskEXIT_CRITICAL(&s_fwMux);
+    free(drop);
+    if (prog) nodeFwEspnowGet(owner, imgId, off);
+
+    if (needBuf) {
+        uint8_t* b = (uint8_t*)malloc(2 * nfr::WIN);
+        if (!b) return;                      // the node asks again; so do we
+        taskENTER_CRITICAL(&s_fwMux);
+        if (!s_fwBuf) { s_fwBuf = b; b = nullptr; }
+        taskEXIT_CRITICAL(&s_fwMux);
+        free(b);
+    }
+    uint8_t  w  = 0;
+    uint32_t at = 0;
+    taskENTER_CRITICAL(&s_fwMux);
+    const bool     load   = s_fwBuf && nfr::take(s_fwServe, w, at);
+    uint8_t* const buf    = s_fwBuf;
+    const uint32_t serial = s_fwImg.serial, size = s_fwImg.size;
+    taskEXIT_CRITICAL(&s_fwMux);
+    if (!load) return;
+    // The window is empty while it is read (take()), so the callback cannot
+    // answer from half-written bytes; and only this function frees the buffer.
+    const int n = nodeFwRead(nodefw::KIND_ESPNOW_C3, serial, at, buf + w * nfr::WIN,
+                             nfr::loadLen(at, size));
+    taskENTER_CRITICAL(&s_fwMux);
+    nfr::loaded(s_fwServe, w, n > 0 ? (uint32_t)n : 0);
+    taskEXIT_CRITICAL(&s_fwMux);
+}
+
 void espnowIngestTick() {
     if (!s_up) return;
 
@@ -1010,6 +1177,7 @@ void espnowIngestTick() {
         taskEXIT_CRITICAL(&s_ringMux);
 
         if (f.type == EN_MSG_CFG_ACK) { handleCfgAck(f); continue; }
+        if (f.type == EN_MSG_FW_DONE) { handleFwDone(f); continue; }
 
         char       id[sizeof(EspNowNode::id)];
         EspNowNode snap{};
@@ -1097,6 +1265,7 @@ void espnowIngestTick() {
     }
 
     syncCfgMirrors();
+    serviceFw();
 }
 
 // ---------------------------------------------------------------------------
@@ -1247,6 +1416,7 @@ bool espnowAddNode(const uint8_t mac[6], uint8_t nodeId, const char* label,
     }
     s_dirty = true;
     s_cfgMirrorGen = 0;
+    s_fwMirrorGen  = 0;
     return true;
 }
 
@@ -1289,6 +1459,7 @@ bool espnowRemoveNode(uint8_t nodeId) {
     if (s_up) esp_now_del_peer(mac);
     s_dirty = true;
     s_cfgMirrorGen = 0;
+    s_fwMirrorGen  = 0;
     return true;
 }
 

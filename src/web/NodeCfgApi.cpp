@@ -26,9 +26,7 @@
 // accumulated through _tempObject by /api/ingest's accumulateBody().
 static constexpr size_t NODES_MAX_BODY = 3072;
 
-typedef void (*JsonBodyFn)(AsyncWebServerRequest* req, JsonDocument& body);
-
-static void accumulate(AsyncWebServerRequest* req, uint8_t* data, size_t len,
+void nodesApiBody(AsyncWebServerRequest* req, uint8_t* data, size_t len,
                        size_t index, size_t total, JsonBodyFn fn) {
     String* buf = accumulateBody(req, data, len, index, total, NODES_MAX_BODY);
     if (!buf) return;
@@ -42,7 +40,7 @@ static void accumulate(AsyncWebServerRequest* req, uint8_t* data, size_t len,
     delete buf;
 }
 
-static void sendJson(AsyncWebServerRequest* req, int code, const JsonDocument& doc) {
+void nodesApiSend(AsyncWebServerRequest* req, int code, const JsonDocument& doc) {
     AsyncResponseStream* resp = req->beginResponseStream("application/json");
     if (!resp) { req->send(500); return; }
     resp->setCode(code);
@@ -57,17 +55,17 @@ static void sendJson(AsyncWebServerRequest* req, int code, const JsonDocument& d
 void handleNodesConfigGet(AsyncWebServerRequest* req) {
     const AsyncWebParameter* p = req->getParam("key");
     JsonDocument out;
-    sendJson(req, nodeCfgApiGet(p ? p->value().c_str() : "", out), out);
+    nodesApiSend(req, nodeCfgApiGet(p ? p->value().c_str() : "", out), out);
 }
 
 static void nodesConfigPost(AsyncWebServerRequest* req, JsonDocument& body) {
     JsonDocument out;
-    sendJson(req, nodeCfgApiPost(body.as<JsonObjectConst>(), out), out);
+    nodesApiSend(req, nodeCfgApiPost(body.as<JsonObjectConst>(), out), out);
 }
 
 void handleNodesConfigBody(AsyncWebServerRequest* req, uint8_t* data, size_t len,
                            size_t index, size_t total) {
-    accumulate(req, data, len, index, total, nodesConfigPost);
+    nodesApiBody(req, data, len, index, total, nodesConfigPost);
 }
 
 // ============================================================================
@@ -83,7 +81,7 @@ void handleNodesHandoverGet(AsyncWebServerRequest* req) {
         out["ssid"] = (const char*)ssid;
         nodeCfgHandoverSort(out.as<JsonObject>());
     }
-    sendJson(req, 200, out);
+    nodesApiSend(req, 200, out);
 }
 
 static const char* formField(void* ctx, const char* key) {
@@ -157,7 +155,7 @@ static void nodesHandoverPost(AsyncWebServerRequest* req, JsonDocument& body) {
 
 void handleNodesHandoverBody(AsyncWebServerRequest* req, uint8_t* data, size_t len,
                              size_t index, size_t total) {
-    accumulate(req, data, len, index, total, nodesHandoverPost);
+    nodesApiBody(req, data, len, index, total, nodesHandoverPost);
 }
 
 // ============================================================================
