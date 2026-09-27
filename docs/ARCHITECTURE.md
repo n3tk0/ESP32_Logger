@@ -707,6 +707,10 @@ collector with no clock of its own cannot judge and takes `ts` as sent.
 | POST | `/api/nodes/config` | CSRF | Edit a node's config (JSON `{"key","config"}`); validated, then a new rev |
 | GET | `/api/nodes/handover` | read | Network handover progress: ready / pending / offline nodes |
 | POST | `/api/nodes/handover` | CSRF | `start` (hand every node the next network), `switch`, `cancel` (JSON body) |
+| GET | `/api/nodes/fw` | read | Node firmware images on the SD card and every target's update status (`docs/NODE_OTA.md` §2.3) |
+| POST | `/api/nodes/fw` | CSRF | `start` / `cancel` a rollout (`keys` or `"all"`), `delete` an image, `min_mv` (JSON body) |
+| POST | `/api/nodes/fw/upload` | CSRF | Upload a node image (multipart, field `fw`); checked, then offered to the chosen nodes |
+| GET | `/api/nodes/fw/bin` | ingest token | The image for a WiFi node (`?kind=esp8266`, `X-Ingest-Token`), with `x-MD5` |
 
 The node configuration routes are `docs/NODE_CONFIG.md` §7, built with
 `FEATURE_REMOTE_NODES` (both kinds of node). Each node's config lives in

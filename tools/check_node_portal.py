@@ -37,7 +37,10 @@ So this reads the committed page and ConfigPortal.cpp and checks that:
   6. GET /api/status writes every key §6's table lists, and GET /api/scan
      writes state, nets and each net's ssid/rssi/ch/enc;
   7. the AP loop serves captive-portal DNS, stops its clock while a station
-     is associated, and puts the radio back after a scan on its own.
+     is associated, and puts the radio back after a scan on its own;
+  8. POST /update (docs/NODE_OTA.md §5), which the page's firmware upload
+     calls, is bound with an upload handler, and BOTH halves are gated: the
+     upload half is what writes the image into flash, chunk by chunk.
 
 Run:  python3 tools/check_node_portal.py
 Exits non-zero with an explanation on any failure.
@@ -98,15 +101,29 @@ def function_body(src: str, name: str) -> str:
     return ""
 
 
-def page_requests() -> set[tuple[str, str]]:
+_html: list[str] = []
+
+
+def page_html() -> str:
+    """The committed page, inflated ("" after reporting why it could not be)."""
+    if _html:
+        return _html[0]
     gz = build_node_portal.committed_payload()
+    html = ""
     if not gz:
         fail("src/nodecfg/NodePortalPage.h has no NODE_PORTAL_GZ array")
-        return set()
-    try:
-        html = gzip.decompress(gz).decode("utf-8")
-    except (OSError, EOFError, UnicodeDecodeError) as exc:
-        fail(f"NODE_PORTAL_GZ does not inflate ({exc})")
+    else:
+        try:
+            html = gzip.decompress(gz).decode("utf-8")
+        except (OSError, EOFError, UnicodeDecodeError) as exc:
+            fail(f"NODE_PORTAL_GZ does not inflate ({exc})")
+    _html.append(html)
+    return html
+
+
+def page_requests() -> set[tuple[str, str]]:
+    html = page_html()
+    if not html:
         return set()
     reqs = set(re.findall(r'req\(\s*"([A-Z]+)"\s*,\s*"(/[^"?]*)', html))
     if not reqs:
@@ -141,6 +158,13 @@ def main() -> int:
         routes[(method, path)] = handler
     for path, handler in re.findall(r's_http\.on\(\s*"([^"]+)"\s*,\s*(\w+)\s*\)', bind):
         routes[("ANY", path)] = handler
+    # on(path, method, done, upload): the upload half runs once per chunk of a
+    # multipart body, before the done half answers.
+    uploads: dict[tuple[str, str], str] = {}
+    for path, method, handler, up in re.findall(
+            r's_http\.on\(\s*"([^"]+)"\s*,\s*HTTP_([A-Z]+)\s*,\s*(\w+)\s*,\s*(\w+)\s*\)', bind):
+        routes[(method, path)] = handler
+        uploads[(method, path)] = up
     nf = re.search(r"s_http\.onNotFound\(\s*(\w+)\s*\)", bind)
 
     def served(method: str, path: str) -> bool:
@@ -265,6 +289,27 @@ def main() -> int:
             ok(f"the portal loop calls {', '.join(sorted(set(narrowers)))} — "
                   f"the radio is put back without the browser's help")
     ok(f"the AP loop answers DNS and holds its window open while a phone is connected")
+
+    # ── 8. the firmware upload (NODE_OTA.md §5) ─────────────────────────────
+    # The page posts it with its own XHR (a multipart body with progress), not
+    # req(), so section 1 does not see it.
+    if '"/update"' in page_html():
+        if ("POST", "/update") not in uploads:
+            fail("the page uploads firmware to POST /update, and ConfigPortal.cpp binds "
+                 "no such route with an upload handler — the node would take the "
+                 "whole image as a form and answer with the page")
+        else:
+            up = function_body(src, uploads[("POST", "/update")])
+            first = up.strip().split(";", 1)[0]
+            if not re.search(r"\bauthOk\w*\(\)", first):
+                fail(f"{uploads[('POST', '/update')]}() does not start with an auth gate. "
+                     f"It writes the image into flash; on the LAN, without the gate, "
+                     f"anything on the network could replace the firmware")
+            done = function_body(src, routes[("POST", "/update")])
+            if "abort()" not in done:
+                fail("the done half of POST /update never aborts the update: a "
+                     "refused or unauthorised upload must end without committing")
+    ok("POST /update is bound with an upload handler, and both halves are gated")
 
     if errors:
         for e in errors:

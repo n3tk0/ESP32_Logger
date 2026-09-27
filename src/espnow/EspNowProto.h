@@ -97,6 +97,12 @@ enum EspNowMsgType : uint8_t {
     EN_MSG_CFG_ACK    = 7,   ///< node → collector: applied, or rejected and why
     EN_MSG_CFG_REPORT = 8,   ///< node → collector: one slice of the node's own config
     EN_MSG_DATA2      = 9,   ///< node → collector: readings as (metric id, index, value)
+
+    // Firmware updates — docs/NODE_OTA.md §4. Encrypted unicast between paired
+    // peers, new types for the same reason as the five above.
+    EN_MSG_FW_GET     = 10,  ///< node → collector: "send me the image from offset N"
+    EN_MSG_FW         = 11,  ///< collector → node: one slice of the image
+    EN_MSG_FW_DONE    = 12,  ///< node → collector: the outcome (staged, refused, …)
 };
 
 // ---------------------------------------------------------------------------
@@ -183,6 +189,12 @@ enum EspNowAckFlags : uint8_t {
     /// pulls the config with CFG_GET. A node built before this flag existed
     /// ignores the bit, which is exactly the right thing for it to do.
     EN_ACK_CFG_PENDING = 1 << 1,
+
+    /// The collector holds a firmware image this node has been asked to run
+    /// and has not reported running — docs/NODE_OTA.md §4. Same shape as
+    /// CFG_PENDING: a flag on the one frame the node listens for, and the
+    /// node pulls with FW_GET. A node built before OTA ignores the bit.
+    EN_ACK_FW_PENDING = 1 << 2,
 };
 
 /// collector → node, sent immediately from the receive path.
@@ -369,6 +381,86 @@ struct __attribute__((packed)) CfgAckMsg {
 };
 
 // ---------------------------------------------------------------------------
+// Firmware update frames — docs/NODE_OTA.md §4
+// ---------------------------------------------------------------------------
+// The image (~1 MB) lives on the collector's SD card and cannot be sent from
+// the receive callback the way a config slice is, so the collector serves
+// slices from a RAM window its loop keeps filled ahead of the node. A request
+// that falls outside the window is simply not answered; the node asks again.
+
+/// Most image bytes one FW frame carries. 21 bytes of header plus 200 is 221.
+static const uint8_t  EN_FW_CHUNK_MAX = 200;
+
+/// Largest image either side accepts: the C3's 1280 KB OTA slot.
+static const uint32_t EN_FW_MAX_SIZE = 0x140000;
+
+/// FW_GET.imgId value meaning "whatever you have for me" — the node's first
+/// request, answered with the image's identity and its first slice.
+static const uint32_t EN_FW_ANY = 0;
+
+/// node → collector: request the slice of image `imgId` at `offset`.
+struct __attribute__((packed)) FwGetMsg {
+    uint8_t  magic;
+    uint8_t  ver;
+    uint8_t  type;      ///< EN_MSG_FW_GET
+    uint8_t  nodeId;
+    uint32_t imgId;     ///< EN_FW_ANY, or the id the first FW named
+    uint32_t offset;
+};
+
+enum EspNowFwFlags : uint8_t {
+    /// The collector is sending another node right now; ask again on a later
+    /// wake. Sent with len 0.
+    EN_FW_BUSY = 1 << 0,
+};
+
+/// collector → node: one slice of the image. On the wire only `len` bytes of
+/// `data` are sent. `size == 0` means "nothing for you any more" (the rollout
+/// was cancelled or the image deleted): stop, and forget any partial download.
+struct __attribute__((packed)) FwChunkMsg {
+    uint8_t  magic;
+    uint8_t  ver;
+    uint8_t  type;      ///< EN_MSG_FW
+    uint8_t  nodeId;
+    uint32_t imgId;     ///< the image's id (docs/NODE_OTA.md §1.3)
+    uint32_t size;      ///< whole image length, 0 = nothing for you
+    uint32_t offset;    ///< where this slice starts
+    uint16_t minMv;     ///< don't start below this battery voltage, 0 = no limit
+    uint8_t  attempt;   ///< the rollout's attempt number (§4.5)
+    uint8_t  flags;     ///< EspNowFwFlags
+    uint8_t  len;       ///< bytes of data, 0..EN_FW_CHUNK_MAX
+    uint8_t  data[EN_FW_CHUNK_MAX];
+};
+
+/// Header bytes of a FwChunkMsg — everything before `data`.
+static const int EN_FW_CHUNK_HDR = 21;
+
+static inline int espnowFwChunkLen(uint8_t len) { return EN_FW_CHUNK_HDR + (int)len; }
+
+enum EspNowFwStatus : uint8_t {
+    EN_FW_ST_STAGED      = 1,   ///< written and verified; restarting into it
+    EN_FW_ST_RUNNING     = 2,   ///< already running this image: done
+    EN_FW_ST_BAD_IMAGE   = 3,   ///< failed verification, or not a node image
+    EN_FW_ST_FLASH_ERROR = 4,   ///< could not erase / write / switch
+    EN_FW_ST_LOW_BATTERY = 5,   ///< deferred: battery under minMv
+    EN_FW_ST_ROLLED_BACK = 6,   ///< ran it, never reached the collector, went back
+};
+static const uint8_t EN_FW_ST_LAST = EN_FW_ST_ROLLED_BACK;
+
+/// node → collector: the outcome for image `imgId`. `value` is the battery in
+/// mV for LOW_BATTERY and 0 otherwise.
+struct __attribute__((packed)) FwDoneMsg {
+    uint8_t  magic;
+    uint8_t  ver;
+    uint8_t  type;      ///< EN_MSG_FW_DONE
+    uint8_t  nodeId;
+    uint32_t imgId;
+    uint8_t  status;    ///< EspNowFwStatus
+    uint8_t  attempt;   ///< echoed from FW
+    uint16_t value;
+};
+
+// ---------------------------------------------------------------------------
 // DATA2 — the dynamic-sensor data frame, docs/NODE_CONFIG.md §5
 // ---------------------------------------------------------------------------
 // DATA is four fixed fields per sample because the node used to have exactly
@@ -499,6 +591,12 @@ static inline uint16_t enRdU16(const uint8_t* p) {
     return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
 }
 
+/// Little-endian u32 at `p`, likewise.
+static inline uint32_t enRdU32(const uint8_t* p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+           ((uint32_t)p[3] << 24);
+}
+
 /// Walk a DATA2 frame's samples once, checking every length on the way.
 ///
 /// This is what makes the variable-length format safe to read afterwards: it
@@ -592,6 +690,23 @@ static inline bool espnowValidate(const uint8_t* buf, int len, uint8_t& type) {
             break;
         case EN_MSG_DATA2:
             if (!espnowData2Walk(buf, len)) return false;
+            break;
+        case EN_MSG_FW_GET:
+            if (len != (int)sizeof(FwGetMsg)) return false;
+            if (enRdU32(buf + 8) >= EN_FW_MAX_SIZE) return false;
+            break;
+        case EN_MSG_FW: {
+            if (len < EN_FW_CHUNK_HDR) return false;
+            const uint8_t dlen = buf[20];
+            if (dlen > EN_FW_CHUNK_MAX || len != espnowFwChunkLen(dlen)) return false;
+            const uint32_t size = enRdU32(buf + 8), off = enRdU32(buf + 12);
+            if (size > EN_FW_MAX_SIZE) return false;
+            if (size == 0 ? (off != 0 || dlen != 0) : (uint64_t)off + dlen > size) return false;
+            break;
+        }
+        case EN_MSG_FW_DONE:
+            if (len != (int)sizeof(FwDoneMsg)) return false;
+            if (buf[8] < EN_FW_ST_STAGED || buf[8] > EN_FW_ST_LAST) return false;
             break;
         default:
             return false;
@@ -847,6 +962,48 @@ static inline bool espnowCfgHeld(const EnCfgAssembler& a, const CfgChunkMsg& m,
 }
 
 // ---------------------------------------------------------------------------
+// Firmware frames — build
+// ---------------------------------------------------------------------------
+
+static inline void espnowFillFwGet(FwGetMsg& m, uint8_t nodeId, uint32_t imgId, uint32_t offset) {
+    enFillHeader((uint8_t*)&m, EN_MSG_FW_GET, nodeId);
+    m.imgId  = imgId;
+    m.offset = offset;
+}
+
+/// Build a FW frame carrying `len` bytes of `data` (the slice at `offset`).
+/// Returns the wire length, or -1 when the slice is not inside the image.
+/// size = 0 with len = 0 builds "nothing for you"; len = 0 with EN_FW_BUSY
+/// builds "busy, later".
+static inline int espnowFillFwChunk(FwChunkMsg& m, uint8_t nodeId, uint32_t imgId,
+                                    uint32_t size, uint32_t offset, uint16_t minMv,
+                                    uint8_t attempt, uint8_t flags,
+                                    const uint8_t* data, uint8_t len) {
+    if (len > EN_FW_CHUNK_MAX || size > EN_FW_MAX_SIZE) return -1;
+    if (size == 0 ? (offset != 0 || len != 0) : (uint64_t)offset + len > size) return -1;
+    if (len && !data) return -1;
+    enFillHeader((uint8_t*)&m, EN_MSG_FW, nodeId);
+    m.imgId   = imgId;
+    m.size    = size;
+    m.offset  = offset;
+    m.minMv   = minMv;
+    m.attempt = attempt;
+    m.flags   = flags;
+    m.len     = len;
+    if (len) memcpy(m.data, data, len);
+    return espnowFwChunkLen(len);
+}
+
+static inline void espnowFillFwDone(FwDoneMsg& m, uint8_t nodeId, uint32_t imgId,
+                                    uint8_t status, uint8_t attempt, uint16_t value) {
+    enFillHeader((uint8_t*)&m, EN_MSG_FW_DONE, nodeId);
+    m.imgId   = imgId;
+    m.status  = status;
+    m.attempt = attempt;
+    m.value   = value;
+}
+
+// ---------------------------------------------------------------------------
 // Layout assertions
 // ---------------------------------------------------------------------------
 // A packed struct whose size drifts is a protocol break that compiles. These
@@ -888,3 +1045,13 @@ static_assert(offsetof(Data2Header, count) == offsetof(DataMsg, count),
 static_assert(sizeof(Data2Value)  == 6,  "a DATA2 value is id + index + float32");
 static_assert(EN_DATA2_HDR + 3 + EN_DATA2_MAX_VALUES * 6 <= ESPNOW_MAX_FRAME,
               "one full DATA2 sample must fit a frame");
+static_assert(sizeof(FwGetMsg)    == 12, "FwGetMsg: 4 + imgId + offset");
+static_assert(offsetof(FwGetMsg, offset) == 8, "espnowValidate() reads offset at [8]");
+static_assert(sizeof(FwChunkMsg)  == EN_FW_CHUNK_HDR + EN_FW_CHUNK_MAX,
+              "FwChunkMsg: 21-byte header + data");
+static_assert(offsetof(FwChunkMsg, size)   == 8,  "espnowValidate() reads size at [8]");
+static_assert(offsetof(FwChunkMsg, offset) == 12, "espnowValidate() reads offset at [12]");
+static_assert(offsetof(FwChunkMsg, len)    == 20, "espnowValidate() reads len at [20]");
+static_assert(sizeof(FwChunkMsg)  <= ESPNOW_MAX_FRAME, "a firmware slice must fit one frame");
+static_assert(sizeof(FwDoneMsg)   == 12, "FwDoneMsg: 4 + imgId + status + attempt + value");
+static_assert(offsetof(FwDoneMsg, status) == 8, "espnowValidate() reads status at [8]");

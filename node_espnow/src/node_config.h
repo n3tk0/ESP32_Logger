@@ -187,6 +187,44 @@ static_assert(sizeof(ESPNOW_PMK) == 17, "ESPNOW_PMK must be exactly 16 character
 #endif
 
 // ---------------------------------------------------------------------------
+// Firmware updates from the collector (docs/NODE_OTA.md §4, FwFetch.h)
+// ---------------------------------------------------------------------------
+
+/// Most time one wake spends downloading an image, in ms, on a battery.
+///
+/// A ~1 MB image is ~6500 slices and ~320 sector erases: 40–60 s of radio in
+/// receive at ~85 mA, about 1–1.5 mAh — once per update, a few hours of the
+/// node's ordinary budget. Split over wakes so no single wake holds the node
+/// (and its readings) up for a minute, and so a collector that stops
+/// answering costs one budget, not a flat cell. 20 s is three or four wakes
+/// for a whole image.
+#ifndef NODE_FW_BUDGET_MS
+#  define NODE_FW_BUDGET_MS 20000
+#endif
+
+/// The same in mains mode, where the energy is free and the only cost is the
+/// report that waits: two minutes normally covers the whole image in one go.
+#ifndef NODE_FW_BUDGET_MAINS_MS
+#  define NODE_FW_BUDGET_MAINS_MS 120000
+#endif
+
+/// Per-request reply ceiling for FW_GET. The larger of this and
+/// link.ack_window_ms is used. The collector answers from its receive
+/// callback when the slice is in its RAM window, and not at all while it
+/// loads the next one from the card — so this is sized for the answer, and
+/// the next setting for the refill.
+#ifndef NODE_FW_REPLY_MS
+#  define NODE_FW_REPLY_MS 50
+#endif
+
+/// Unanswered FW_GETs in a row before the wake gives up. A window refill
+/// from the SD card costs a request or two; six in a row is a collector that
+/// is gone, or busy with something else.
+#ifndef NODE_FW_MAX_MISSES
+#  define NODE_FW_MAX_MISSES 6
+#endif
+
+// ---------------------------------------------------------------------------
 // The setup page (docs/NODE_CONFIG.md §6, Portal.h)
 // ---------------------------------------------------------------------------
 
@@ -216,7 +254,8 @@ static_assert(sizeof(PORTAL_AP_PASS) >= 9, "PORTAL_AP_PASS: WPA2 needs 8+ charac
 #  define PORTAL_TIMEOUT_MS 300000UL   // 5 minutes
 #endif
 
-/// Reported as `fw` in the config document.
+/// Reported as `fw` in the config document, and the version in the image's
+/// NODEFW1 marker (docs/NODE_OTA.md §1): [A-Za-z0-9._+-], at most 23 chars.
 #ifndef NODE_FW_VERSION
 #  define NODE_FW_VERSION "2026.09.1"
 #endif

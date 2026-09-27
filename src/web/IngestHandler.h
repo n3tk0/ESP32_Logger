@@ -76,6 +76,11 @@ void registerIngestHandler(AsyncWebServer& server);
 String* accumulateBody(AsyncWebServerRequest* req, const uint8_t* data, size_t len,
                        size_t index, size_t total, size_t cap);
 
+/// Whether `req` carries the ingest token (`X-Ingest-Token` or `?token=`),
+/// compared in constant time. Also what GET /api/nodes/fw/bin checks: the
+/// image is fetched by the node, which holds the token and nothing else.
+bool ingestAuthorised(AsyncWebServerRequest* req);
+
 /// The onRequest half of a POST answered from its body callback.
 void answeredInBody(AsyncWebServerRequest* req);
 

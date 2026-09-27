@@ -66,6 +66,20 @@
       </div>
     </div>
 
+    <!-- Node firmware (docs/NODE_OTA.md §2) — one image per node kind on the
+         SD card, and which nodes should run it. Hidden entirely when
+         /api/nodes/fw 404s (a build without it); the slots are drawn by
+         nodes.js (ndFwRenderCard) because they follow a poll. -->
+    <div class="card" id="nd-card-fw" style="margin-top:var(--gap);display:none">
+      <div class="card-head">
+        <div class="card-title"><span data-icon="cloud-upload"></span> <span data-i18n="nodes.fwTitle">Node firmware</span></div>
+      </div>
+      <div class="card-body">
+        <p class="hint" style="margin-top:0" data-i18n="nodes.fwHint">One image per kind of node, kept on the collector's SD card. Choose which nodes run it: one at a time from its row above, or all of them here. Each node fetches it itself the next time it reports.</p>
+        <div id="nd-fw-slots" class="nd-fw-slots"></div>
+      </div>
+    </div>
+
     <!-- Pairing — ESP-NOW only, hidden entirely when the feature isn't built. -->
     <div class="card" id="nd-card-pairing" style="margin-top:var(--gap);display:none">
       <div class="card-head">

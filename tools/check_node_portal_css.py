@@ -25,7 +25,7 @@ So this fails when:
   3. src/nodecfg/NodePortalPage.h does not inflate to what
      tools/build_node_portal.py builds from the sources right now (compared by
      content, not by compressed bytes — see that tool's docstring), or the
-     page is over its 20 KB budget;
+     page is over its 21 KB budget;
   4. the page's JavaScript does not parse (only when `node` is installed).
 
 Run:  python3 tools/check_node_portal_css.py

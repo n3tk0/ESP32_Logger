@@ -87,6 +87,13 @@ en: {
   sleep: "Deep sleep",
   sleepHint: "On for batteries. Off = mains powered, always awake.",
   fw: "Firmware", localEdits: "local edits",
+  fwRun: "Running", fwGo: "Upload & restart",
+  fwUp: "Uploading… {p}%", fwChk: "Checking…", fwOk: "Updated, restarting…",
+  fwFail: "Upload failed: {e}",
+  fwOld: "This firmware cannot update itself from the page.",
+  fwKeep: " The running firmware is unchanged.",
+  fe_not_node_image: "Not a firmware for this node.", fe_too_big: "Too big for this node.",
+  fe_write_failed: "Could not write it ({d}).",
   issues: "The node will refuse this configuration:", noIssues: "Looks good. Saving restarts the node.",
   secNew: "new", secKeep: "saved", secClr: "cleared",
   clr: "Clear saved", clrUndo: "Keep saved", clrPh: "will be cleared — type one to set it",
@@ -164,6 +171,13 @@ bg: {
   sleep: "Дълбок сън",
   sleepHint: "Включено при батерии. Изключено = мрежово захранване, винаги буден.",
   fw: "Фърмуер", localEdits: "локални промени",
+  fwRun: "Работещ", fwGo: "Качи и рестартирай",
+  fwUp: "Качване… {p}%", fwChk: "Проверка…", fwOk: "Обновено, рестартиране…",
+  fwFail: "Качването не успя: {e}",
+  fwOld: "Този фърмуер не може да се обнови от страницата.",
+  fwKeep: " Работещият фърмуер не е променен.",
+  fe_not_node_image: "Не е фърмуер за този възел.", fe_too_big: "Твърде голям за този възел.",
+  fe_write_failed: "Записът не успя ({d}).",
   issues: "Възелът ще откаже тази конфигурация:", noIssues: "Изглежда наред. Записът рестартира възела.",
   secNew: "нова", secKeep: "запазена", secClr: "изтрита",
   clr: "Изтрий запазената", clrUndo: "Запази я", clrPh: "ще бъде изтрита — въведете нова, за да я зададете",
@@ -248,19 +262,29 @@ function newSensor(type) {
 }
 
 // ── state ───────────────────────────────────────────────────────────────────
+// Whole-line comments here, not trailing ones: the build strips only those,
+// and the page is held to a gzip budget (tools/build_node_portal.py).
 var S = {
-  cfg: null,       // config as read from the node (the applied one)
+  // config as read from the node (the applied one)
+  cfg: null,
   caps: null,
-  st: null,        // last /api/status
-  ed: null,        // the edit copy — what Save sends
-  raw: {},         // pin fields: what was typed, keyed by field path
+  // last /api/status
+  st: null,
+  // the edit copy — what Save sends
+  ed: null,
+  // pin fields: what was typed, keyed by field path
+  raw: {},
   step: 0,
   steps: [],
-  srv: null,       // {field, reason} from the last refused POST
-  scan: null,      // null | "running" | [nets]
+  // {field, reason} from the last refused POST
+  srv: null,
+  // null | "running" | [nets]
+  scan: null,
   showPw: {},
-  clr: {},         // secret field path -> 1: the user asked to clear the saved one
-  openPick: null   // SSID last picked from the scan if it was open, else null
+  // secret field path -> 1: the user asked to clear the saved one
+  clr: {},
+  // SSID last picked from the scan if it was open, else null
+  openPick: null
 };
 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
@@ -656,8 +680,17 @@ R.node = function () {
       (S.ed.sleep ? " checked" : "") + "><span></span></span></label><p class=\"hint\">" + esc(t("sleepHint")) +
       '</p><div class="ferr" data-fe="sleep"></div>';
   }
-  return card("tag", t("s_node"), h);
+  return card("tag", t("s_node"), h) + fwCard();
 };
+
+// docs/NODE_OTA.md §5. Transport-neutral on purpose: both nodes answer
+// POST /update the same way, and the node, not the page, decides whether the
+// file is an image for it.
+function fwCard() {
+  return card("cpu", t("fw"), '<p class="hint" id="fwv">' + esc(t("fwRun") + ": " + (S.cfg.fw || "—")) +
+    '</p>' + '<input id="fwf" type="file" accept=".bin" aria-label="' + esc(t("fw")) + '"><div id="fwm"></div>' +
+    '<button type="button" class="btn" data-a="fw">' + esc(t("fwGo")) + "</button>");
+}
 
 function secretLine(v, set, f) { return v ? t("secNew") : f && willClear(f) ? t("secClr") : set ? t("secKeep") : t("notSet"); }
 R.review = function () {
@@ -875,6 +908,7 @@ function onClick(ev) {
     S.ed.batt.trim = S.newTrim;
     render();
   } else if (a === "save") save();
+  else if (a === "fw") fwUp();
   else if (a === "close") $("ov").hidden = true;
 }
 
@@ -963,12 +997,7 @@ function save() {
   var before = S.st && S.st.uptime_s, t0 = Date.now(), sent = payload();
   overlay('<p style="display:flex;gap:10px;align-items:center"><span class="spin"></span>' + esc(t("saving")) + "</p>");
   req("POST", "/api/config", sent, function (st, j) {
-    if (st === 200 && j && j.ok) {
-      overlay('<p style="display:flex;gap:10px;align-items:center;font-weight:600" id="saved"><span class="spin"></span>' + esc(t("saved")) +
-        '</p><p class="hint" id="wait">' + esc(t("waiting")) + '</p><p class="hint">' + esc(t("apNote")) + "</p>");
-      setTimeout(function () { waitBack(before, t0, sent); }, 2500);
-      return;
-    }
+    if (st === 200 && j && j.ok) { restarting("saved", before, t0, sent); return; }
     $("ov").hidden = true;
     if (j && j.ok === false) {
       S.srv = { field: j.field || "", reason: j.reason || "?" };
@@ -985,20 +1014,65 @@ function save() {
     $("srv").innerHTML = '<div class="alert err">' + esc(t("saveFail", { e: st ? "HTTP " + st : "no reply" })) + "</div>";
   });
 }
+// The file goes as multipart, field "fw", with its own XHR for the progress
+// bar. A node older than §5 answers 404 — or, on the ESP8266, the page itself
+// with a 200 (every unknown path serves it) — and neither is a JSON verdict.
+function fwUp() {
+  var f = $("fwf").files[0], x = new XMLHttpRequest(), fd = new FormData();
+  if (!f) { $("fwf").focus(); return; }
+  var before = S.st && S.st.uptime_s, t0 = Date.now();
+  function say(k, v, keep) {
+    $("ov").hidden = true;
+    $("fwm").innerHTML = '<div class="alert err" id="fwe">' + esc(t(k, v) + (keep ? t("fwKeep") : "")) + "</div>";
+  }
+  fd.append("fw", f, f.name);
+  overlay('<p id="fwp">' + esc(t("fwUp", { p: 0 })) + '</p><div class="bar"><span id="fwb" style="width:0"></span></div>');
+  x.upload.onprogress = function (e) {
+    if (!e.lengthComputable) return;
+    var p = Math.round(100 * e.loaded / e.total);
+    $("fwb").style.width = p + "%";
+    // The last byte sent is not the end: the node checks the marker first.
+    $("fwp").textContent = p < 100 ? t("fwUp", { p: p }) : t("fwChk");
+  };
+  x.onload = function () {
+    var j = null;
+    try { j = JSON.parse(x.responseText); } catch (e) { j = null; }
+    if (x.status === 200 && j && j.ok) restarting("fwOk", before, t0, null);
+    else if (x.status === 404 || x.status === 200 && (!j || typeof j.ok !== "boolean")) say("fwOld");
+    // The node refused it: whatever the reason, it never switched to it.
+    else if (j && j.error && L.en["fe_" + j.error]) say("fe_" + j.error, { d: j.detail || "?" }, 1);
+    else say("fwFail", { e: "HTTP " + x.status });
+  };
+  x.onerror = x.ontimeout = function () { say("fwFail", { e: "no reply" }); };
+  x.open("POST", "/update", true);
+  x.timeout = 300000;
+  x.send(fd);
+}
+
+// The node said yes and restarts: a config save, or a firmware update.
+function restarting(k, before, t0, sent) {
+  overlay('<p style="display:flex;gap:10px;align-items:center;font-weight:600" id="saved"><span class="spin"></span>' + esc(t(k)) +
+    '</p><p class="hint" id="wait">' + esc(t("waiting")) + '</p><p class="hint">' + esc(t("apNote")) + "</p>");
+  setTimeout(function () { waitBack(before, t0, sent); }, 2500);
+}
+
 // Poll until the node answers with a fresh uptime. On the setup AP it never
 // will — the restart closes the AP — so after a while say that plainly
-// instead of spinning forever.
+// instead of spinning forever. `sent` null: a firmware update, which reloads
+// the page once the node is back, so what is shown is the new firmware's.
 function waitBack(before, t0, sent) {
   var tries = 0;
   (function poll() {
     req("GET", "/api/status", null, function (st, j) {
       var elapsed = (Date.now() - t0) / 1000;
       if (st === 200 && j && (before == null || j.uptime_s < before + elapsed - 1)) {
+        if (!sent) { location.reload(); return; }
         overlay('<p class="alert ok" id="back">' + esc(t("isBack", { t: fmtDur(j.uptime_s) })) + '</p><button type="button" class="btn primary" data-a="reload" id="reload">' +
           esc(t("reload")) + "</button>");
         return;
       }
       if (++tries < 15) { setTimeout(poll, 2000); return; }
+      if (!sent) { overlay('<p class="alert warn" id="gone">' + esc(t("apNote")) + "</p>"); return; }
       var what = isW() ? t("apGoneW", { ssid: sent.net.ssid, host: sent.net.host }) : t("apGoneE");
       overlay('<p class="alert warn" id="gone">' + esc(t("apGone", { what: what })) + "</p>");
     }, 3000);

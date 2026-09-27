@@ -25,8 +25,14 @@ Behaviour worth knowing when reading a driver:
     {"ok":false,"field","reason"} with the contract's field spelling.
   * A good POST "restarts" the node: /api/status answers 503 for
     RESTART_S seconds, then comes back with a fresh uptime.
+  * POST /update (docs/NODE_OTA.md §5) takes a multipart firmware file and
+    answers like the node: 400 not_node_image unless it starts with 0xE9 and
+    carries exactly this node's marker kind, 400 too_big past the kind's slot,
+    200 {"ok":true} and a restart into the marker's version otherwise.
+    `GET /?transport=…&fw=old` makes it a node older than §5: 404.
   * Test hooks, not part of §6:  GET /__last  (the last POSTed body),
-    GET /__state (the stored config, secrets included).
+    GET /__state (the stored config, secrets included), GET /__fw (the
+    field name and size of the last uploaded file).
 """
 import copy
 import gzip
@@ -133,6 +139,9 @@ NETS = [
     {"ssid": "<img src=x onerror=window.__pwned=1>", "rssi": -90, "ch": 9, "enc": 3},
 ]
 
+# src/nodecfg/FwImage.h: the marker kind each node takes, and its slot.
+MARKER_KIND = {"wifi": b"esp8266", "espnow": b"espnow-c3"}
+MAX_IMAGE = {"wifi": 0xFF000, "espnow": 0x140000}
 METRICS = {"bmx280": 4, "bme688": 5, "bh1750": 1, "sds011": 2, "pulse": 2}
 PIN_KEYS = {"ds18b20": ["pin"], "sds011": ["rx", "tx"], "pulse": ["pin"]}
 
@@ -149,6 +158,35 @@ class Node:
         self.down_until = 0.0
         self.scan_calls = 0
         self.last_post = None
+        self.last_fw = None
+        self.fw_old = False
+
+    # ── POST /update (NODE_OTA.md §5) ────────────────────────────────────
+    def update(self, ctype, raw):
+        """(status, body) for a multipart upload, the node's §5 answers."""
+        m = re.search(r'boundary="?([^";]+)"?', ctype or "")
+        data, field = None, None
+        if m:
+            for part in raw.split(b"--" + m.group(1).encode()):
+                head, sep, body = part.partition(b"\r\n\r\n")
+                if sep and b"filename=" in head:
+                    fm = re.search(rb'name="([^"]*)"', head)
+                    field = fm.group(1).decode() if fm else ""
+                    data = body[:-2] if body.endswith(b"\r\n") else body
+                    break
+        self.last_fw = {"field": field, "size": len(data) if data is not None else None}
+        mine = MARKER_KIND[self.transport]
+        kinds = set(re.findall(rb"NODEFW1\|([a-z0-9-]+)\|", data or b""))
+        if not data or data[0] != 0xE9 or kinds != {mine}:
+            return 400, {"ok": False, "error": "not_node_image"}
+        if len(data) > MAX_IMAGE[self.transport]:
+            return 400, {"ok": False, "error": "too_big"}
+        ver = re.search(rb"NODEFW1\|[a-z0-9-]+\|([A-Za-z0-9._+-]+)\|", data)
+        self.cfg["fw"] = ver.group(1).decode() if ver else self.cfg["fw"]
+        now = time.time()
+        self.down_until = now + RESTART_S
+        self.boot = self.down_until
+        return 200, {"ok": True}
 
     # ── views ────────────────────────────────────────────────────────────
     def public(self):
@@ -298,6 +336,7 @@ class H(http.server.BaseHTTPRequestHandler):
             if u.path == "/":
                 if "transport" in q and q["transport"][0] in CAPS:
                     NODE.reset(q["transport"][0])
+                    NODE.fw_old = q.get("fw", [""])[0] == "old"
                 return self.send(200, PAGE, "text/html; charset=utf-8", {"Content-Encoding": "gzip"})
             if self.down():
                 return self.send(503, {"error": "restarting"})
@@ -314,6 +353,8 @@ class H(http.server.BaseHTTPRequestHandler):
                 return self.send(200, NODE.last_post)
             if u.path == "/__state":
                 return self.send(200, NODE.cfg)
+            if u.path == "/__fw":
+                return self.send(200, NODE.last_fw)
         return self.send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -322,6 +363,9 @@ class H(http.server.BaseHTTPRequestHandler):
         with NODE.lock:
             if self.down():
                 return self.send(503, {"error": "restarting"})
+            if self.path == "/update" and not NODE.fw_old:
+                code, body = NODE.update(self.headers.get("Content-Type"), raw)
+                return self.send(code, body)
             if self.path != "/api/config":
                 return self.send(404, {"error": "not found"})
             try:

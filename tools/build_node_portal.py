@@ -44,7 +44,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "node_portal"
 OUT = ROOT / "src" / "nodecfg" / "NodePortalPage.h"
-BUDGET = 20 * 1024  # §6: under 20 KB gzipped
+BUDGET = 21 * 1024  # §6: under 21 KB gzipped (20 KB until the Firmware section, NODE_OTA.md §5)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_web import minify_css, minify_html  # noqa: E402
