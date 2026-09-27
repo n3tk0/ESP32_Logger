@@ -222,6 +222,9 @@ static inline Step onReply(Fetch& f, Progress& p, const Failed& failed, const Fw
     // mid-image can be shorter than 200 — and the next request is at
     // offset + len. An empty one (not BUSY, not size 0) is a miss.
     if (m->offset != p.written || m->len == 0) return miss(f);
+    // espnowValidate() already bounds it by `size`; kept here so this
+    // header does not depend on who called it.
+    if (m->len > p.size - p.written) return miss(f);
     f.slice  = m;
     f.misses = 0;
     return Step::Write;

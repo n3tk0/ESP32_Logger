@@ -85,7 +85,7 @@ static inline bool sameMd5(const char* a, const char* b) {
         if (x != y) return false;
         if (x == '\0') return true;
     }
-    return true;
+    return false;   // longer than an MD5: not one
 }
 
 enum class OfferAction : uint8_t {

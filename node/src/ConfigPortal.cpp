@@ -455,8 +455,12 @@ static void handleUpdateUpload() {
             if (s_fw && s_fw->active()) s_fwOk = s_fw->finish();
             break;
         case UPLOAD_FILE_ABORTED:
-            // The browser went away mid-body.
+            // The browser went away mid-body. The server does not call
+            // handleUpdateDone() after an abort, so this is the only cleanup.
             if (s_fw) s_fw->abort();
+            delete s_fw;
+            s_fw = nullptr;
+            s_fwSeen = s_fwOk = s_fwAuthed = false;
             break;
     }
 }
@@ -466,7 +470,7 @@ static void handleUpdateDone() {
         if (s_fw) s_fw->abort();
         delete s_fw;
         s_fw = nullptr;
-        s_fwSeen = s_fwOk = false;
+        s_fwSeen = s_fwOk = s_fwAuthed = false;
         return;
     }
     int code = 200;
@@ -487,7 +491,7 @@ static void handleUpdateDone() {
     }
     delete s_fw;
     s_fw = nullptr;
-    s_fwSeen = s_fwOk = false;
+    s_fwSeen = s_fwOk = s_fwAuthed = false;
 
     String out;
     {

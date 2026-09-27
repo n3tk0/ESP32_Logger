@@ -202,6 +202,7 @@ static void handleStatus() {
 
 static struct {
     bool     started;        ///< a file part arrived
+    bool     ended;          ///< ...and ended: later parts are ignored
     bool     failed;
     bool     headChecked;
     int      code;
@@ -227,6 +228,9 @@ static void handleUpdateUpload() {
     HTTPUpload& u = s_http.upload();
     switch (u.status) {
         case UPLOAD_FILE_START: {
+            // One image per request: a second file part would begin a new
+            // write into the slot the first one may already have switched to.
+            if (s_up.started) return;
             memset(&s_up, 0, sizeof(s_up));
             nodefw::scanBegin(s_up.scan);
             s_up.started = true;
@@ -238,7 +242,7 @@ static void handleUpdateUpload() {
             return;
         }
         case UPLOAD_FILE_WRITE: {
-            if (s_up.failed || !s_up.started) return;
+            if (s_up.failed || !s_up.started || s_up.ended) return;
             if ((uint64_t)s_up.got + u.currentSize > s_up.slot)
                 return upFail(400, "too_big", "");
             if (s_up.got < sizeof(s_up.head)) {
@@ -261,13 +265,16 @@ static void handleUpdateUpload() {
             return;
         }
         case UPLOAD_FILE_END:
-            if (s_up.failed || !s_up.started) return;
+            if (s_up.failed || !s_up.started || s_up.ended) return;
+            s_up.ended = true;
             if (!s_up.headChecked || nodefw::scanKind(s_up.scan) != nodefw::KIND_ESPNOW_C3)
                 return upFail(400, "not_node_image", "");
             if (!Update.end(true)) upFail(500, "write_failed", Update.errorString());
             return;
         case UPLOAD_FILE_ABORTED:
+            // No handleUpdateDone() follows an abort: clear for the next one.
             upFail(500, "write_failed", "upload interrupted");
+            memset(&s_up, 0, sizeof(s_up));
             return;
     }
 }
@@ -280,6 +287,7 @@ static void handleUpdateDone() {
         doc["error"] = s_up.error;
         if (s_up.detail[0]) doc["detail"] = (const char*)s_up.detail;
         sendJson(s_up.code, doc);
+        memset(&s_up, 0, sizeof(s_up));   // the next request starts clean
         return;
     }
     doc["ok"] = true;
@@ -289,6 +297,7 @@ static void handleUpdateDone() {
     fwTrialClear();
     Serial.printf("[portal] firmware %s written (%lu bytes); restarting\n", s_up.scan.ver,
                   (unsigned long)s_up.got);
+    memset(&s_up, 0, sizeof(s_up));
     s_restartAt = millis() + 1000;
     if (s_restartAt == 0) s_restartAt = 1;
 }

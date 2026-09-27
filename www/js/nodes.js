@@ -1882,6 +1882,9 @@ function ndFwUpload(kind, file) {
   if (ndFwUp[kind] && !ndFwUp[kind].err) return;   // one at a time per slot
   if (!ndFw || !ndFw.sd) { ndFwUploadErr(kind, ndT("nodes.fwErr_no_sd")); return; }
   if (!/\.bin$/i.test(file.name)) { ndFwUploadErr(kind, ndT("nodes.fwErrNotBin")); return; }
+  // Before reading it whole for the marker: nothing past the largest node
+  // slot (the C3's 1280 KB) is a node image, and the collector refuses it too.
+  if (file.size > 0x140000) { ndFwUploadErr(kind, ndT("nodes.fwErr_too_big")); return; }
 
   ndFwUp[kind] = { pct: 0 };
   ndFwRenderCard();

@@ -51,6 +51,8 @@ static void test_md5_text() {
     CHECK(!sameMd5(MD5_A, MD5_B));
     CHECK(!sameMd5(MD5_A, ""));
     CHECK(!sameMd5(MD5_A, nullptr));
+    // Equal past 32 characters is not an MD5 at all.
+    CHECK(!sameMd5("0123456789abcdef0123456789abcdef0", "0123456789abcdef0123456789abcdef0"));
 }
 
 static void test_what_to_do_with_an_offer() {
