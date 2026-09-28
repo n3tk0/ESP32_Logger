@@ -864,13 +864,18 @@ function clWireCal(s) {
   var box = document.getElementById("sensor-cal");
   if (!box) return;
   function add(metric, unit) {
-    if (!metric || box.querySelector('.cal-row[data-metric="' + metric + '"]')) return;
+    // Compared as strings, not through a selector: a node names its own
+    // metrics, and a quote in one would make querySelector throw.
+    var rows = box.querySelectorAll(".cal-row");
+    for (var i = 0; i < rows.length; i++) if (rows[i].getAttribute("data-metric") === metric) return;
+    if (!metric) return;
     box.insertAdjacentHTML("beforeend", clCalRowHtml(metric, null, unit));
     var w = document.getElementById("sensor-cal-wait");
     if (w) w.style.display = "none";
   }
   if (s.type === "remote") {
-    var node = s.node || s.id;
+    // The mailbox and RemoteNodeSensor both keep 16 characters of a node id.
+    var node = String(s.node || s.id || "").slice(0, 16);
     fetchWithTimeout("/api/remote/status", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : {}; })
       .then(function (d) {
@@ -900,8 +905,8 @@ function clReadCal(form, s) {
   var cal = {};
   rows.forEach(function (row) {
     var m = row.getAttribute("data-metric");
-    var offEl = row.querySelector('[name="cal_off_' + m + '"]');
-    var scEl = row.querySelector('[name="cal_sc_' + m + '"]');
+    var inputs = row.querySelectorAll("input");   // offset, then multiplier
+    var offEl = inputs[0], scEl = inputs[1];
     var off = parseFloat(String(offEl ? offEl.value : "").replace(",", "."));
     var sc = parseFloat(String(scEl ? scEl.value : "").replace(",", "."));
     if (!isFinite(off)) off = 0;
