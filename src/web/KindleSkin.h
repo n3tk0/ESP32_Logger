@@ -381,6 +381,21 @@ inline uint8_t kdRotFromDeg(long deg, uint8_t fallback) {
     }
 }
 
+/// Days between the FBInk reader setting its clock from the collector's, as
+/// the API, the settings page and the payload's CLOCK_SYNC say it: 0 never.
+inline uint8_t kdClockSyncDays(const KindleConfig& k) {
+    if (k.clockSync == KCLOCK_SYNC_OFF) return 0;
+    if (k.clockSync == 0 || k.clockSync > KCLOCK_SYNC_MAX) return 1;
+    return k.clockSync;
+}
+
+/// And back: days to the stored byte, or `fallback` for a number out of range.
+inline uint8_t kdClockSyncFromDays(long days, uint8_t fallback) {
+    if (days == 0) return KCLOCK_SYNC_OFF;
+    if (days >= 1 && days <= KCLOCK_SYNC_MAX) return (uint8_t)days;
+    return fallback;
+}
+
 /// Whether the page is the landscape one: the reader on its side.
 inline bool kdRotLandscape(uint8_t rot) { return rot == KROT_90 || rot == KROT_270; }
 
@@ -408,6 +423,9 @@ inline void kdSkinClamp(KindleConfig& k) {
     // always drawable, so a byte nobody recognises lands there.
     if (k.rotation > KROT_270)          k.rotation = KROT_0;
     if (k.clockOff > 1)                 k.clockOff = 1;
+    // Every day — the default, and an older config's 0 — for a byte nobody
+    // recognises: a clock set too often costs nothing, one never set drifts.
+    if (k.clockSync > KCLOCK_SYNC_MAX && k.clockSync != KCLOCK_SYNC_OFF) k.clockSync = 0;
     k.boldZones &= 0x01FF;
     k.showFlags &= KSHOW_ALL;
     k.faceCustom[sizeof(k.faceCustom) - 1] = '\0';

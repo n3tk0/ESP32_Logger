@@ -963,6 +963,59 @@ check "$?" "a reader started in landscape is turned upright for the upright page
   exit 0 )
 check "$?" "ROTATE in dash.conf: 0, 90, 180, 270 or auto, and it goes out as ?rot="
 
+# The collector's zone, POSIX's way round; and the arithmetic that stands in
+# for a busybox date that will not take @seconds.
+( [ "$(tz_from_off 7200)" = "UTC-2" ] || exit 1
+  [ "$(tz_from_off -18000)" = "UTC+5" ] || exit 2
+  [ "$(tz_from_off 19800)" = "UTC-5:30" ] || exit 3
+  [ "$(tz_from_off 0)" = "UTC-0" ] || exit 4
+  tz_from_off "" && exit 5
+  tz_from_off "1-2" && exit 6
+  [ "$(epoch_utc 0)" = "1970-01-01 00:00:00" ] || exit 7
+  [ "$(epoch_utc 951782400)" = "2000-02-29 00:00:00" ] || exit 8
+  [ "$(epoch_utc 1790640000)" = "2026-09-29 00:00:00" ] || exit 9
+  [ "$(epoch_utc 1767225599)" = "2025-12-31 23:59:59" ] || exit 10
+  TIME_OFF=10800; TZ=""; tz_apply; [ "$TZ" = "UTC-3" ] || exit 11
+  exit 0 )
+check "$?" "the collector's time zone as a TZ, and seconds as a date"
+
+# When the clock is set: never with 0 days; at once when it has never been, or
+# is more than ten minutes out; otherwise once the days have gone by.
+( n=1790640000
+  clock_sync_due "$n" "$n" "" 0 && exit 1                       # never
+  clock_sync_due "$n" "$n" "" 1 || exit 2                       # never set yet
+  clock_sync_due "$n" $(( n + 5 )) $(( n - 3600 )) 1 && exit 3  # set an hour ago
+  clock_sync_due "$n" $(( n + 5 )) $(( n - 86400 )) 1 || exit 4 # a day ago
+  clock_sync_due "$n" $(( n + 5 )) $(( n - 86400 )) 7 && exit 5 # weekly: not yet
+  clock_sync_due "$n" $(( n + 700 )) $(( n - 60 )) 7 || exit 6  # far out: now
+  clock_sync_due "$n" $(( n - 700 )) $(( n - 60 )) 7 || exit 7  # either way
+  clock_sync_due "$n" "$n" $(( n + 86400 )) 7 || exit 8          # a clock gone back
+  CLOCK_SYNC=auto SYNC_DAYS=5; clock_sync_days; [ "$SYNC_EVERY" = "5" ] || exit 9
+  CLOCK_SYNC=auto; unset SYNC_DAYS; clock_sync_days; [ "$SYNC_EVERY" = "1" ] || exit 10
+  CLOCK_SYNC=0 SYNC_DAYS=5; clock_sync_days; [ "$SYNC_EVERY" = "0" ] || exit 11
+  conf_valid CLOCK_SYNC auto && conf_valid CLOCK_SYNC 0 && conf_valid CLOCK_SYNC 365 || exit 12
+  conf_valid CLOCK_SYNC 366 && exit 13
+  conf_valid CLOCK_SYNC x && exit 14
+  exit 0 )
+check "$?" "the Kindle's clock is set every CLOCK_SYNC days, and at once when far out"
+
+# Only from a payload fetched just now, and remembered on disk; a cached
+# payload's TIME_UTC is hours old and must not set anything.
+( CLOCK_SYNC_FILE="$WORK/clocksync"; rm -f "$CLOCK_SYNC_FILE"
+  SET_TO=""
+  clock_set() { SET_TO="$1"; return 0; }
+  date() { case "$1" in +%s) echo 1790640000 ;; *) command date "$@" ;; esac; }
+  CLOCK_SYNC=auto SYNC_DAYS=1 TIME_UTC=1790640090 HAVE_DATA=0
+  clock_sync 2>/dev/null || exit 1
+  [ "$SET_TO" = "1790640090" ] || exit 2
+  [ "$(cat "$CLOCK_SYNC_FILE")" = "1790640090" ] || exit 3
+  SET_TO=""; TIME_UTC=1790640095
+  clock_sync 2>/dev/null; [ -z "$SET_TO" ] || exit 4           # not a day yet
+  CLOCK_SYNC=0; rm -f "$CLOCK_SYNC_FILE"
+  clock_sync 2>/dev/null; [ -z "$SET_TO" ] || exit 5           # switched off
+  exit 0 )
+check "$?" "a clock set from the collector is remembered, and not set again until due"
+
 # Without the clock nothing is drawn in its place, upright or on its side —
 # the indoor row has moved up into its rectangle.
 ( : > "$FBINK_LOG"; SHOW_CLOCK=0 CLOCK_STYLE=1; draw_clock "12:34"

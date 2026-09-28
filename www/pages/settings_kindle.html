@@ -134,7 +134,20 @@
                     </select>
                     <p class="hint" id="kd-date-hint" data-i18n="kindle.clockDateHint">Drawn only by the dated clock style.</p>
                   </div>
+                  <div class="field">
+                    <label class="field-label" for="kd-csync" data-i18n="kindle.clockSet">Set the Kindle's clock</label>
+                    <select id="kd-csync" class="input" data-change="kindleTouched">
+                      <option value="1" data-i18n="kindle.clockSet1">Every day</option>
+                      <option value="2" data-i18n="kindle.clockSet2">Every 2 days</option>
+                      <option value="7" data-i18n="kindle.clockSet7">Every week</option>
+                      <option value="c" data-i18n="kindle.clockSetC">Every … days</option>
+                      <option value="0" data-i18n="kindle.clockSet0">Never</option>
+                    </select>
+                    <input id="kd-csync-days" class="input" type="number" min="1" max="60" step="1"
+                           style="margin-top:6px" hidden data-change="kindleTouched">
+                  </div>
                 </div>
+                <p class="hint" data-i18n="kindle.clockSetHint">The FBInk panel draws its clock from the Kindle's own time, in this collector's time zone, and sets that time from this collector's this often. A clock found more than ten minutes out is set at once. dash.conf's CLOCK_SYNC on the Kindle wins over this.</p>
               </div>
             </div>
 

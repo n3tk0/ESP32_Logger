@@ -578,6 +578,20 @@ whole width. It is kept out of `showFlags` in the config (`clockOff`, and
 `clock` in `/api/kindle/config`) so that a config from before the switch, and
 a settings page from before it, both read as "clock on".
 
+### The reader's clock
+
+The FBInk panel draws its clock from the Kindle's own time, every minute, with
+or without the collector. `/kindle/data` carries `TIME_UTC` (the collector's
+time, only once NTP or the RTC has given it one), `TIME_OFF` (its zone,
+daylight saving included, in seconds east of UTC) and `SYNC_DAYS` (**Set the
+Kindle's clock**, `clock_sync` in `/api/kindle/config`: days, 0 never, 1 by
+default). The script shows the time in `TIME_OFF`'s zone and sets the Kindle's
+system and hardware clocks from `TIME_UTC` once every `SYNC_DAYS` days —
+`CLOCK_SYNC` in `dash.conf` overrides it — or at once when the two are more
+than ten minutes apart. Only a payload fetched that minute sets the clock; the
+cached one never does. The last setting is remembered in `clocksync` beside
+`dash.conf`.
+
 ### On its side: the landscape page
 
 **Rotation** (`rotation` in `/api/kindle/config`: 0, 90, 180 or 270 degrees

@@ -1795,6 +1795,24 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     s->printf("SHOW_WEEK=%d\n",  (skin.showFlags & KSHOW_WEEK)  ? 1 : 0);
     s->printf("SHOW_CLOCK=%d\n", (kdShowMask(skin) & KSHOW_CLOCK) ? 1 : 0);
 
+    // THE TIME, FOR THE READER TO SET ITS OWN CLOCK BY — which it does once
+    // every SYNC_DAYS days, not on every fetch: between those it keeps its own
+    // time, and draws the clock from it whether or not this end answers.
+    // TIME_OFF is this collector's zone, daylight saving included, so the
+    // panel shows the time the web page shows. Neither is sent without a real
+    // time to send: a collector still at 1970 would set the reader back to it.
+    s->printf("SYNC_DAYS=%u\n", (unsigned)kdClockSyncDays(skin));
+    {
+        const time_t t = time(nullptr);
+        if (t > 1000000000) {
+            s->printf("TIME_UTC=%lu\n", (unsigned long)t);
+            s->printf("TIME_OFF=%ld\n",
+                      (long)(config.network.timezone + config.network.dstOffsetHours) * 3600L);
+        } else {
+            s->print("TIME_UTC=\nTIME_OFF=\n");
+        }
+    }
+
     // WHICH SHAPE THE PAGE IS, decided here and nowhere else. The panel has
     // the coordinates for both and no way to know which applies: only this end
     // knows whether a forecast is coming. A reader running an older

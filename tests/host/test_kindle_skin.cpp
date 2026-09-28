@@ -393,6 +393,25 @@ static void test_clamp_filters_the_font_list() {
     CHECK(!css.has("font-family"));
 }
 
+static void test_clock_sync_days() {
+    KindleConfig k = defaults();
+    CHECK(k.clockSync == 0 && kdClockSyncDays(k) == 1);   // an older config: every day
+    k.clockSync = kdClockSyncFromDays(0, k.clockSync);
+    CHECK(k.clockSync == KCLOCK_SYNC_OFF && kdClockSyncDays(k) == 0);
+    k.clockSync = kdClockSyncFromDays(7, k.clockSync);
+    CHECK(kdClockSyncDays(k) == 7);
+    k.clockSync = kdClockSyncFromDays(61, k.clockSync);   // out of range: kept
+    CHECK(kdClockSyncDays(k) == 7);
+    k.clockSync = kdClockSyncFromDays(-1, k.clockSync);
+    CHECK(kdClockSyncDays(k) == 7);
+    k.clockSync = 200;                                    // a byte off storage
+    kdSkinClamp(k);
+    CHECK(k.clockSync == 0 && kdClockSyncDays(k) == 1);
+    k.clockSync = KCLOCK_SYNC_OFF;
+    kdSkinClamp(k);
+    CHECK(kdClockSyncDays(k) == 0);
+}
+
 static void test_clamp_leaves_a_valid_config_alone() {
     KindleConfig k = defaults();
     k.face = KFACE_FUTURA;
@@ -424,5 +443,6 @@ int main() {
     RUN(test_clamp_rejects_what_a_form_cannot_send);
     RUN(test_clamp_filters_the_font_list);
     RUN(test_clamp_leaves_a_valid_config_alone);
+    RUN(test_clock_sync_days);
     return SUMMARY();
 }

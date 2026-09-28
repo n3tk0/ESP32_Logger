@@ -852,6 +852,8 @@ static void handleKindleConfigGet(AsyncWebServerRequest* req) {
     doc["clock"]            = k.clockOff ? 0 : 1;
     // Degrees, which is what the reader's own dash.conf and ?rot= say too.
     doc["rotation"]         = (int)k.rotation * 90;
+    // Days between the reader setting its clock from this one; 0 never.
+    doc["clock_sync"]       = kdClockSyncDays(k);
     doc["outdoor_sensor"]   = (k.outdoorSensor[0] != '\0') ? k.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
     doc["indoor_sensor"]    = (k.indoorSensor[0] != '\0') ? k.indoorSensor : KINDLE_INDOOR_SENSOR;
 
@@ -892,6 +894,9 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     if (req->hasParam("rotation", true))
         k.rotation = kdRotFromDeg(req->getParam("rotation", true)->value().toInt(),
                                   k.rotation);
+    if (req->hasParam("clock_sync", true))
+        k.clockSync = kdClockSyncFromDays(req->getParam("clock_sync", true)->value().toInt(),
+                                          k.clockSync);
 
     if (req->hasParam("face_custom", true)) {
         const String v = req->getParam("face_custom", true)->value();

@@ -200,6 +200,10 @@ constexpr uint16_t KSHOW_CHART     = 0x0020;
 constexpr uint16_t KSHOW_WEEK      = 0x0040;
 constexpr uint16_t KSHOW_BATTERY   = 0x0080;   // the low-battery badge
 constexpr uint16_t KSHOW_ALL       = 0x00FF;
+// KindleConfig::clockSync: never, and the most days apart a reader may go.
+static const uint8_t KCLOCK_SYNC_OFF = 0xFF;
+static const uint8_t KCLOCK_SYNC_MAX = 60;
+
 // The clock, which is NOT stored in showFlags — see KindleConfig::clockOff.
 // The settings page and the layout treat it as one more switch, so it has a
 // bit of its own there: kdShowMask() folds it in, the API sends it as `clock`.
@@ -409,7 +413,12 @@ struct KindleConfig {
     // would have read as switched off on every device that upgraded.
     uint8_t  rotation;        // KROT_*: quarter turns clockwise
     uint8_t  clockOff;        // 1 = no clock on the page
-    uint8_t  reserved[5];
+    // v15.2 — how often the FBInk reader sets its own clock from this one,
+    // formerly in reserved[]. 0 is what an older config holds and means the
+    // default, every day; KCLOCK_SYNC_OFF never; 1..KCLOCK_SYNC_MAX days.
+    // Read through kdClockSyncDays().
+    uint8_t  clockSync;
+    uint8_t  reserved[4];
 };
 
 struct DeviceConfig {

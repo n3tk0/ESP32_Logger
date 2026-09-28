@@ -189,6 +189,18 @@ ROTATE=auto
 # 1 if 90 and 270 come out the wrong way round on this model — the port on the
 # left when 90 was asked for. Some Kindles number their rotations the other way.
 ROTATE_SWAP=0
+# HOW OFTEN THIS KINDLE SETS ITS CLOCK FROM THE COLLECTOR'S, in days.
+#
+#   auto        the collector says — the Clock sync setting on its Kindle page
+#               (every day unless somebody changed it).
+#   0           never: the Kindle keeps whatever time it has.
+#   1 .. 365    every that many days.
+#
+# Between those the clock is drawn from the Kindle's own time, with or without
+# the collector; the collector's time zone is used either way, so the panel
+# says what the collector's web page says. A clock found more than ten
+# minutes out is set at once, whatever the interval.
+CLOCK_SYNC=auto
 # WHICH ONE-TIME MOVES dash.conf HAS ALREADY HAD. A dash.conf with no CONF_VER
 # line predates the marker and is 1; dash.conf.default ships the current one.
 # conf_load() applies each move once and then writes the new number back, so a
@@ -199,7 +211,7 @@ CONF_VER=1
 CONF_VER_NOW=2
 
 conf_keys() {
-    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP CANVAS TOUCH TOUCH_DEV TOUCH_MAXX TOUCH_MAXY TOUCH_SWAP MENU_LBL MENU_ACT MENU_LBL2 SURE_LBL MODE_LBL WAKE_MENU WAKE_HOLD QUIET_FROM QUIET_TO QUIET_EVERY STATUS AUTO_FIND LAYOUT ROTATE ROTATE_SWAP CONF_VER"
+    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP CANVAS TOUCH TOUCH_DEV TOUCH_MAXX TOUCH_MAXY TOUCH_SWAP MENU_LBL MENU_ACT MENU_LBL2 SURE_LBL MODE_LBL WAKE_MENU WAKE_HOLD QUIET_FROM QUIET_TO QUIET_EVERY STATUS AUTO_FIND LAYOUT ROTATE ROTATE_SWAP CLOCK_SYNC CONF_VER"
 }
 
 # THE KEYS THAT ARE NOT NUMBERS, in one place because two places drifted.
@@ -214,7 +226,7 @@ conf_keys() {
 conf_is_text() {
     case "$1" in
         HOST|POWER|CANVAS|TOUCH_DEV) return 0 ;;
-        MENU_LBL|MENU_ACT|MENU_LBL2|SURE_LBL|MODE_LBL|LAYOUT|ROTATE) return 0 ;;
+        MENU_LBL|MENU_ACT|MENU_LBL2|SURE_LBL|MODE_LBL|LAYOUT|ROTATE|CLOCK_SYNC) return 0 ;;
     esac
     return 1
 }
@@ -244,6 +256,7 @@ conf_help() {
         LAYOUT)             echo "auto follows the collector; normal keeps the forecast band; standalone drops it and enlarges the readings" ;;
         ROTATE)             echo "auto follows the collector; 0, 90, 180 or 270 degrees clockwise (90 and 270 lie the Kindle on its side)" ;;
         ROTATE_SWAP)        echo "1 if 90 and 270 come out the wrong way round on this Kindle" ;;
+        CLOCK_SYNC)         echo "auto follows the collector; days between setting this Kindle's clock from the collector's (0 = never)" ;;
         MENU_LBL)           echo "The labels on the tap menu, separated by bars" ;;
         MENU_ACT)           echo "What each button does: refresh|wake|forecast|settings|hide|quit" ;;
         MENU_LBL2)          echo "The labels on the settings bar, separated by bars" ;;
@@ -302,6 +315,9 @@ payload_key_ok() {
         # Which way up the page is, in degrees, as the collector has it; and
         # whether the clock is on the page at all.
         PAGE_ROT|SHOW_CLOCK) return 0 ;;
+        # The collector's time, its zone, and how often to set this clock by
+        # them — see clock_sync().
+        TIME_UTC|TIME_OFF|SYNC_DAYS) return 0 ;;
         # Where everything goes: the layout the collector worked out for what
         # is on the page, under the layout file's own names. Applied by
         # flow_apply(), which takes only names it lists and only digits.
@@ -420,6 +436,12 @@ conf_valid() {
                 auto|0|90|180|270) return 0 ;;
                 *) return 1 ;;
             esac ;;
+        CLOCK_SYNC)
+            case "$v" in
+                auto) return 0 ;;
+                ''|*[!0-9]*) return 1 ;;
+            esac
+            [ "${#v}" -le 3 ] && [ "$v" -le 365 ] ;;
         MENU_LBL|MENU_LBL2|SURE_LBL|MODE_LBL)
             # Labels separated by bars. They reach draw_text_reg_inv and
             # nothing else, so the shell metacharacters are what matter — the
@@ -2028,6 +2050,105 @@ rot_sync() {
     return 1
 }
 
+# ── Whose time ───────────────────────────────────────────────────────────────
+# THE CLOCK ON THE PANEL IS THIS KINDLE'S, drawn every minute from `date`, and
+# it goes on being drawn while the collector is away. What the collector gives
+# it is a reference: every CLOCK_SYNC days (or SYNC_DAYS, the collector's
+# setting, under auto) the Kindle's clock is set from TIME_UTC, the system
+# clock and — so it survives a sleep or a reboot — the hardware one. And
+# TIME_OFF, the collector's zone, is what the clock is shown in, so the panel
+# and the web page agree whatever zone the Kindle itself was set to.
+
+#: Where the last setting is remembered, across restarts: epoch seconds.
+CLOCK_SYNC_FILE="${DASH_CLOCK_SYNC:-$DASH_DIR/clocksync}"
+#: A clock this far out is set at once, whatever the interval.
+CLOCK_SYNC_FAR=600
+
+# A POSIX TZ for an offset EAST of UTC in seconds. The sign is POSIX's, the
+# other way round: UTC+2 is "UTC-2".
+tz_from_off() {
+    local off="$1" sign="-" h m
+    case "$off" in ''|*[!0-9-]*|*?-*) return 1 ;; esac
+    [ "$off" -lt 0 ] && { sign="+"; off=$(( -off )); }
+    h=$(( off / 3600 )); m=$(( off % 3600 / 60 ))
+    if [ "$m" -eq 0 ]; then echo "UTC$sign$h"
+    else printf 'UTC%s%d:%02d\n' "$sign" "$h" "$m"; fi
+}
+
+tz_apply() {
+    local tz
+    tz=$(tz_from_off "${TIME_OFF:-}") || return 0
+    [ "$tz" = "${TZ:-}" ] && return 0
+    TZ="$tz"; export TZ
+}
+
+# Days between settings: this panel's own, or the collector's. 0 is never.
+clock_sync_days() {
+    case "${CLOCK_SYNC:-auto}" in
+        auto) SYNC_EVERY="${SYNC_DAYS:-1}" ;;
+        *)    SYNC_EVERY="$CLOCK_SYNC" ;;
+    esac
+    case "$SYNC_EVERY" in ''|*[!0-9]*) SYNC_EVERY=1 ;; esac
+}
+
+# Whether to set the clock now. $1 the Kindle's time, $2 the collector's, $3
+# when it was last set (empty for never), $4 the days between.
+clock_sync_due() {
+    local now="$1" utc="$2" last="$3" days="$4" d
+    [ "${days:-0}" -gt 0 ] 2>/dev/null || return 1
+    d=$(( utc - now )); [ "$d" -lt 0 ] && d=$(( -d ))
+    [ "$d" -gt "$CLOCK_SYNC_FAR" ] && return 0
+    case "$last" in ''|*[!0-9]*) return 0 ;; esac
+    # A remembered setting in the future is a clock that has since gone back.
+    [ "$last" -gt "$(( now + 3600 ))" ] && return 0
+    [ $(( now - last )) -ge $(( days * 86400 )) ]
+}
+
+# Epoch seconds to "YYYY-MM-DD hh:mm:ss" UTC, in shell arithmetic — for a
+# busybox date that will not take -s @seconds.
+epoch_utc() {
+    local t="$1" z era doe yoe y doy mp d m
+    z=$(( t / 86400 + 719468 )); era=$(( z / 146097 ))
+    doe=$(( z - era * 146097 ))
+    yoe=$(( (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365 ))
+    y=$(( yoe + era * 400 )); doy=$(( doe - (365 * yoe + yoe / 4 - yoe / 100) ))
+    mp=$(( (5 * doy + 2) / 153 )); d=$(( doy - (153 * mp + 2) / 5 + 1 ))
+    if [ "$mp" -lt 10 ]; then m=$(( mp + 3 )); else m=$(( mp - 9 )); fi
+    [ "$m" -le 2 ] && y=$(( y + 1 ))
+    printf '%04d-%02d-%02d %02d:%02d:%02d\n' "$y" "$m" "$d" \
+        $(( t % 86400 / 3600 )) $(( t % 3600 / 60 )) $(( t % 60 ))
+}
+
+clock_set() {
+    date -u -s "@$1" >/dev/null 2>&1 ||
+        date -u -s "$(epoch_utc "$1")" >/dev/null 2>&1 || return 1
+    # And the hardware clock, or the next suspend or reboot undoes it.
+    hwclock -u -w >/dev/null 2>&1 || hwclock -w >/dev/null 2>&1
+    return 0
+}
+
+clock_sync() {
+    local utc="${TIME_UTC:-}" now last
+    case "$utc" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$utc" -gt 1000000000 ] || return 0
+    clock_sync_days
+    now=$(date +%s)
+    last=$(tr -dc '0-9' < "$CLOCK_SYNC_FILE" 2>/dev/null)
+    clock_sync_due "$now" "$utc" "$last" "$SYNC_EVERY" || return 0
+    if [ $(( utc - now )) -ge 2 ] || [ $(( now - utc )) -ge 2 ]; then
+        if ! clock_set "$utc"; then
+            echo "$(date '+%H:%M') clock: could not set the time from the collector" >&2
+            return 1
+        fi
+        echo "$(date '+%H:%M') clock: set from the collector ($(( utc - now )) s)" >&2
+        # Every tier is measured against this clock.
+        EPOCH="$utc"
+        [ "${HAVE_DATA:-0}" = "1" ] && : > "$TMP/redraw"
+    fi
+    echo "$utc" > "$CLOCK_SYNC_FILE" 2>/dev/null
+    return 0
+}
+
 fetch_data() {
     # Into a scratch file and only into place once it is whole — the same shape
     # as fetch_graph, for the same reason: keeping the last good payload is a
@@ -2043,6 +2164,8 @@ fetch_data() {
     if wget -q -T "$FETCH_TIMEOUT" -O "$TMP/data.new" "$(host_url)/kindle/data$q" \
             2>/dev/null && payload_ok "$TMP/data.new"; then
         mv "$TMP/data.new" "$TMP/data.txt"
+        # The time in it is this minute's, which a cached payload's is not.
+        TIME_FRESH=1
         FAILS=0
         TRUNC_WARNED=0
         return 0
@@ -2254,6 +2377,7 @@ zones_forget() {
     # And which way up, and whether there is a clock: a collector that no
     # longer says lays out the upright page with one.
     unset PAGE_ROT SHOW_CLOCK FC3_LABEL FC4_LABEL 2>/dev/null
+    unset TIME_UTC TIME_OFF SYNC_DAYS 2>/dev/null
     # And the layout, for the same reason again: a collector downgraded to a
     # firmware that works none out has to take the panel back to the file's.
     for z in $FLOW_KEYS GRID_ROWS CH_T CH_B CH_L CH_R; do unset "LY_$z" 2>/dev/null; done
@@ -2281,6 +2405,13 @@ load_data() {
         zones_forget
         load_kv "$TMP/data.txt" PAYLOAD || return 1
         load_layout
+    fi
+    # The collector's zone, from any payload, the cached one included; its
+    # time only from one fetched just now.
+    tz_apply
+    if [ "${TIME_FRESH:-0}" = "1" ]; then
+        TIME_FRESH=0
+        clock_sync
     fi
     HAVE_DATA=1
     DATA_FRESH=1

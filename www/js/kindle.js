@@ -782,6 +782,28 @@ function kdPvBoxesLand(L) {
 // The page's rotation on the form, in degrees.
 function kdPvRot() { return kdVal("kd-rot", "0") | 0; }
 
+// Days between the Kindle setting its clock from the collector's: the select,
+// or the number beside it under "Every … days". 0 is never.
+function kdCsyncDays() {
+  var v = kdVal("kd-csync", "1");
+  if (v !== "c") return v | 0;
+  var n = parseInt(kdVal("kd-csync-days", ""), 10);
+  return (n >= 1 && n <= 60) ? n : 1;
+}
+
+function kdCsyncSet(days) {
+  days = (days === undefined || days === null) ? 1 : (days | 0);
+  var preset = (days === 0 || days === 1 || days === 2 || days === 7);
+  kdSet("kd-csync", preset ? days : "c");
+  kdSet("kd-csync-days", preset ? "" : days);
+  kdCsyncRender();
+}
+
+function kdCsyncRender() {
+  var n = document.getElementById("kd-csync-days");
+  if (n) n.hidden = kdVal("kd-csync", "1") !== "c";
+}
+
 function kdRenderPreview() {
   var el = document.getElementById("kd-panel");
   if (!el) return;
@@ -1345,7 +1367,7 @@ function kdSnapshot() {
     press:kdVal("kd-press","0"), dec:kdVal("kd-dec","1"),
     refresh:kdVal("kd-refresh",""), follow:kdVal("kd-follow","1"),
     pin:kdVal("kd-clockpin","1"), res:kdVal("kd-fbink-res","0"),
-    layout:kdVal("kd-layout","0"), rot:kdVal("kd-rot","0"),
+    layout:kdVal("kd-layout","0"), rot:kdVal("kd-rot","0"), csync:kdCsyncDays(),
     out:kdVal("kd-outdoor-sensor",""), inn:kdVal("kd-indoor-sensor",""),
     show:kdMaskOf(KD_SHOW,"kd-s-"), bold:kdMaskOf(KD_BOLD,"kd-b-"),
     zones:kdZones, groups:kdGroups
@@ -1400,6 +1422,7 @@ function kindleTouched(ev) {
   kdRenderPreview();
   kdCadenceRender();
   kdLayoutRender();
+  kdCsyncRender();
   kdDirtyRefresh();
 }
 
@@ -1634,6 +1657,7 @@ function kindleRender(d) {
   kdSet("kd-fbink-res", d.fbink_res_w || 0);
   kdSet("kd-layout",    d.layout_mode || 0);
   kdSet("kd-rot",       d.rotation || 0);
+  kdCsyncSet(d.clock_sync);
   kdSet("kd-outdoor-sensor", d.outdoor_sensor || "");
   kdSet("kd-indoor-sensor",  d.indoor_sensor || "");
 
@@ -1751,6 +1775,7 @@ function kdConfigBody() {
   body.set("show",          show & 0xFF);
   body.set("clock",         (show & 0x0100) ? 1 : 0);
   body.set("rotation",      kdVal("kd-rot", "0"));
+  body.set("clock_sync",    kdCsyncDays());
   body.set("refresh_sec",   kdVal("kd-refresh", "") || "0");
   body.set("follow_data",   kdVal("kd-follow", "1"));
   body.set("clock_pin_refresh", kdVal("kd-clockpin", "1"));
@@ -1877,6 +1902,7 @@ function kindleDefaults() {
   // did not make.
   kdSet("kd-layout", "0");
   kdSet("kd-rot", "0");
+  kdCsyncSet(1);
 
   kdShowInit = 0x1FF;  // KSHOW_ALL, and the clock
   kdBoldInit = 0;
@@ -1967,6 +1993,7 @@ document.addEventListener("i18n:change", function () {
   kdRenderPreview();
   kdCadenceRender();
   kdLayoutRender();
+  kdCsyncRender();
   kdDirtyRefresh();
 });
 

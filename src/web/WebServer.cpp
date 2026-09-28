@@ -794,6 +794,7 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     kd["indoorSensor"]    = config.kindle.indoorSensor;
     kd["rotation"]        = config.kindle.rotation * 90;   // degrees, as the API and ?rot= spell it
     kd["clockOff"]        = config.kindle.clockOff;
+    kd["clockSync"]       = kdClockSyncDays(config.kindle);   // days, 0 never
 
     // ── Network ───────────────────────────────────────────────────────────
     JsonObject net = doc["network"].to<JsonObject>();
@@ -2526,6 +2527,9 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                                                           config.kindle.rotation);
                 if (kd["clockOff"].is<int>())
                     config.kindle.clockOff = (uint8_t)kd["clockOff"].as<int>();
+                if (kd["clockSync"].is<int>())
+                    config.kindle.clockSync = kdClockSyncFromDays(kd["clockSync"].as<int>(),
+                                                                  config.kindle.clockSync);
                 // An imported file is not a form: it can carry anything,
                 // including values written by a firmware that had one more
                 // clock style than this one. Clamped here so the renderer

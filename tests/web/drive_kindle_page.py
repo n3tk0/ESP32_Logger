@@ -769,6 +769,34 @@ with sync_playwright() as p:
     check(not pg.is_checked("#kd-s-256") and pg.input_value("#kd-rot") == "90",
           "and both come back on the re-read")
 
+    # ── Setting the Kindle's clock ──────────────────────────────────────────
+    # The device's every-day answer comes up as the preset; "Every … days"
+    # opens the number beside it, and the number is what is saved.
+    tab(pg, "page")
+    check(pg.input_value("#kd-csync") == "1" and pg.is_hidden("#kd-csync-days"),
+          "the clock is set every day, with the number put away")
+    pg.select_option("#kd-csync", "c")
+    pg.wait_for_timeout(150)
+    check(pg.is_visible("#kd-csync-days"), "Every ... days opens the number")
+    pg.fill("#kd-csync-days", "5")
+    pg.dispatch_event("#kd-csync-days", "change")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("clock_sync") == 5, "and it reaches the device in days (%r)" % got.get("clock_sync"))
+    pg.reload()
+    pg.wait_for_timeout(1500)
+    tab(pg, "page")
+    check(pg.input_value("#kd-csync") == "c" and pg.input_value("#kd-csync-days") == "5",
+          "a number no preset has comes back as Every ... days")
+    pg.select_option("#kd-csync", "0")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("clock_sync") == 0, "and Never goes out as 0 (%r)" % got.get("clock_sync"))
+
     shot = os.environ.get("SCREENSHOT")
     if shot:
         pg.screenshot(path=shot, full_page=True)

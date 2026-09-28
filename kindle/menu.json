@@ -258,8 +258,49 @@
                             ]
                         },
                         {
-                            "name": "Reset settings",
+                            "name": "Clock sync",
                             "priority": 11,
+                            "items": [
+                                    {
+                                        "name": "Clock sync: follow the collector",
+                                        "priority": 1,
+                                        "action": "/bin/sh",
+                                        "params": "kual.sh set CLOCK_SYNC auto",
+                                        "exitmenu": true
+                                    },
+                                    {
+                                        "name": "Clock sync: every day",
+                                        "priority": 2,
+                                        "action": "/bin/sh",
+                                        "params": "kual.sh set CLOCK_SYNC 1",
+                                        "exitmenu": true
+                                    },
+                                    {
+                                        "name": "Clock sync: every 2 days",
+                                        "priority": 3,
+                                        "action": "/bin/sh",
+                                        "params": "kual.sh set CLOCK_SYNC 2",
+                                        "exitmenu": true
+                                    },
+                                    {
+                                        "name": "Clock sync: every week",
+                                        "priority": 4,
+                                        "action": "/bin/sh",
+                                        "params": "kual.sh set CLOCK_SYNC 7",
+                                        "exitmenu": true
+                                    },
+                                    {
+                                        "name": "Clock sync: never",
+                                        "priority": 5,
+                                        "action": "/bin/sh",
+                                        "params": "kual.sh set CLOCK_SYNC 0",
+                                        "exitmenu": true
+                                    }
+                            ]
+                        },
+                        {
+                            "name": "Reset settings",
+                            "priority": 12,
                             "action": "/bin/sh",
                             "params": "kual.sh reset",
                             "exitmenu": true

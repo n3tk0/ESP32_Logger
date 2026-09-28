@@ -196,6 +196,7 @@ settings screen you were just looking at gives way to the page again by itself.
 | `LAYOUT` | `auto` | The page's shape: `auto` follows the collector, `normal` keeps the forecast band, `standalone` drops it and enlarges the readings |
 | `ROTATE` | `auto` | Which way up, in degrees clockwise: `auto` follows the collector's Rotation setting; `0` upright (USB at the bottom), `90` on its side with the USB port on the right, `180` upside down, `270` on its side with the port on the left. `90` and `270` draw the landscape page |
 | `ROTATE_SWAP` | `0` | `1` if `90` and `270` come out the wrong way round on this model |
+| `CLOCK_SYNC` | `auto` | Days between setting the Kindle's clock from the collector's: `auto` follows the collector's setting (every day unless changed), `0` never, `1`–`365` |
 | `CONF_VER` | `2` | Which one-time upgrades `dash.conf` has had. Written by the dashboard; leave it alone |
 
 `Find collector` writes the addresses that answered to `collectors`, beside
@@ -285,6 +286,18 @@ freed is vertical: every number is limited by the column it sits in, and
 "1008 hPa" three across already fills 87 px of a 90 px cell. The rest of the
 height becomes air around them, which is what a panel read from across a room
 wants anyway.
+
+### Whose clock
+
+The clock on the panel is **the Kindle's own**, drawn every minute from its
+own time, and it keeps going while the collector is away. Every day (or every
+2 days, every week, never — **Settings → Clock sync** in KUAL, `CLOCK_SYNC=` in
+`dash.conf`, or **Set the Kindle's clock** on the collector's Kindle page,
+which also takes any number of days) the dashboard sets the Kindle's clock,
+and its hardware clock, from the collector's. A clock found more than ten
+minutes out is set at once. The time is shown in the **collector's** time
+zone, so the panel and the collector's web page agree. Each setting is logged
+in `kual.log`.
 
 ### When the collector cannot be reached
 
