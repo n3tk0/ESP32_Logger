@@ -147,6 +147,32 @@ static inline bool kdFlowSigned(const char* metric) {
     return metric && (!strcmp(metric, "temperature") || !strcmp(metric, "dew_point"));
 }
 
+/// A figure's width when a reading is SIZED, in thousandths of the type size.
+static const unsigned KDF_FIG_SIZE = 620;
+
+/// How wide a value comes out with its unit and arrow, in thousandths of the
+/// value's type size — kdFlowWorstAdvance() without the widening, for the
+/// headline, which is sized to what it prints (see kdFlowHeadFit()).
+///
+/// Every figure a little wider than kdAdvanceMille() puts it. That weight is
+/// right for placing a unit after a value the script already drew, but a size
+/// is a promise the value FITS: the page's fallback, Georgia, has figures of
+/// about 0.62 em, the panel's bold faces are wider again, and with the
+/// readings as large as their column allows, a pressure of 1013 was cut at its
+/// right edge. So each figure counts for KDF_FIG_SIZE here.
+static inline unsigned kdFlowFieldAdvance(const char* text, const char* unit, bool arrow) {
+    unsigned figs = 0;
+    for (const char* c = text ? text : ""; *c; c++) if (*c >= '0' && *c <= '9') figs++;
+    unsigned adv = kdAdvanceMille(text) + figs * (KDF_FIG_SIZE - 500u);
+    if (unit && *unit) {
+        if (!strcmp(unit, "\xC2\xB0"))   adv += 330u * 34u / 100u;      // the degree
+        else if (!strcmp(unit, "%"))     adv += 800u * 42u / 100u;
+        else                             adv += (250u + kdAdvanceMille(unit)) * 42u / 100u;
+    }
+    if (arrow) adv += 350u;
+    return adv;
+}
+
 /// The widest a place's value, unit and arrow come out, in thousandths of the
 /// VALUE's type size — the three are drawn at three sizes, and this is the
 /// sum in the value's terms: the unit at 0.42 of it (the degree at 0.34), the
@@ -172,14 +198,7 @@ static inline unsigned kdFlowWorstAdvance(const char* metric, const char* text,
     for (; *q && at < sizeof(worst) - 1; q++) worst[at++] = *q;
     worst[at] = '\0';
 
-    unsigned adv = kdAdvanceMille(worst);
-    if (unit && *unit) {
-        if (!strcmp(unit, "\xC2\xB0"))   adv += 330u * 34u / 100u;      // the degree
-        else if (!strcmp(unit, "%"))     adv += 800u * 42u / 100u;
-        else                             adv += (250u + kdAdvanceMille(unit)) * 42u / 100u;
-    }
-    if (arrow) adv += 350u;
-    return adv;
+    return kdFlowFieldAdvance(worst, unit, arrow);
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +256,8 @@ struct KdFlowIn {
     uint16_t inAdv[3]   = {0, 0, 0};
     uint8_t outPct   = 100;     ///< the grid's values, per cent of the most that fits
     uint8_t inPct    = 100;     ///< the indoor values, likewise
+    uint16_t heroAdv = 0;       ///< the headline's kdFlowFieldAdvance(); 0 for none
+    uint16_t bigAdv  = 0;       ///< the value beside it; 0 when there is none
     /// Whoever draws it knows the two-column indoor row. An FBInk script from
     /// before it would draw the column's two readings side by side in the
     /// column's width, one over the other; it says ?col=1 when it knows.
@@ -368,9 +389,32 @@ static inline void kdFlowClockSizes(int gc, KdFlow& f) {
     f.clH        = (int16_t)(f.clSize + 1);
 }
 
+/// The headline made to fit its column. It grew with the room above and
+/// below it and nothing looked across: "23.5° / 1013 hPa" at 88 and 44 is
+/// wider than the 270 px the column has, and the pressure ran off its right
+/// edge. The value beside the headline gives way first, down to KDF_BIG_MIN;
+/// then the headline itself, so the two still read as one line.
+static const int KDF_BIG_MIN  = 28;
+static const int KDF_HERO_MIN = 40;
+static inline void kdFlowHeadFit(const KdFlowIn& in, KdFlow& f) {
+    if (!in.heroAdv) return;
+    const int heroA = in.heroAdv;
+    const int bigA  = in.bigAdv;
+    int hero = f.heroSz, big = f.bigSz;
+    const int room = f.colLW - (bigA ? f.headGap + f.slashW : 0);
+    while (hero * heroA / 1000 + (bigA ? big * bigA / 1000 : 0) > room) {
+        if (bigA && big > KDF_BIG_MIN) big--;
+        else if (hero > KDF_HERO_MIN)  hero--;
+        else break;
+    }
+    f.heroSz = (uint8_t)hero;
+    f.bigSz  = (uint8_t)big;
+}
+
 /// The outdoor column under f.heroY: the line under the headline and the grid,
 /// which ends at `bot`. Sized to f.colLW across.
 static inline void kdFlowOutdoor(const KdFlowIn& in, int bot, KdFlow& f) {
+    kdFlowHeadFit(in, f);
     // The headline's growth, as air: the standalone page put 14 px more under
     // the headline and 6 more under the line below it than the ordinary one.
     const int air = kdfMax(0, f.grow - 1000);
@@ -456,7 +500,9 @@ static inline void kdFlowIndoor(const KdFlowIn& in, int bot, KdFlow& f) {
     const int top   = f.inLabY + f.labSz + 18;
     const int areaH = bot - top;
     // Never larger than the headline; it used to stop at eight tenths of it.
-    const int cap   = f.heroSz;
+    // The headline's size before kdFlowHeadFit(): a wide second value that
+    // shrinks it has nothing to do with this column.
+    const int cap   = kdfScale(88, f.grow);
     const int a1    = in.inAdv[0] ? in.inAdv[0] : 1000;
     const int pct   = kdfPct(in.inPct);
 
@@ -547,7 +593,7 @@ static inline void kdFlowTop(const KdFlowIn& in, int T, KdFlow& f) {
 
 /// Whether two layouts set everything in the top block the same.
 static inline bool kdFlowSameType(const KdFlow& a, const KdFlow& b) {
-    if (a.heroSz != b.heroSz || a.clSize != b.clSize || a.labSz != b.labSz) return false;
+    if (a.heroSz != b.heroSz || a.bigSz != b.bigSz || a.clSize != b.clSize || a.labSz != b.labSz) return false;
     if (a.gridValSz != b.gridValSz || a.gridNRows != b.gridNRows) return false;
     if (a.inValSz1 != b.inValSz1 || a.inStack != b.inStack || a.inCol != b.inCol) return false;
     return true;
@@ -1012,7 +1058,7 @@ inline void kdFlowCss(StringT& out, const KdFlow& f, uint8_t clockStyle, PxFn px
     // The line printed in the clock's place when there is no time to show:
     // as tall as the clock it stands in for, so the indoor row stays where
     // the layout put it.
-    out += ".clock-x{font-size:";   KDF_PX(f.bigSz);
+    out += ".clock-x{font-size:";   KDF_PX(kdfScale(44, kdfMin(f.grow, KDF_GROW_BIG)));
     out += ";line-height:";         KDF_PX(100 * gc / 1000); out += "}";
     // The landscape page's rows and columns — see kdFlowLand().
     if (f.land) {

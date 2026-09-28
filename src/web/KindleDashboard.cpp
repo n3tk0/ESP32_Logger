@@ -1153,6 +1153,15 @@ static uint16_t kdPlaceAdvance(const KindleConfig& skin, const KindleSlot& sl,
     return (uint16_t)kdFlowWorstAdvance(sl.metric, r.text, r.unit, arrow);
 }
 
+/// A headline value as it prints, with its unit and the arrow kdPlaceAdvance()
+/// counts.
+static uint16_t kdHeadAdvance(const KindleConfig& skin, const KindleSlot& sl,
+                              const KdResolved& r) {
+    const bool arrow = (sl.flags & KSLOTF_TREND) && (skin.showFlags & KSHOW_TENDENCY) &&
+                       strcmp(sl.metric, "pressure") == 0;
+    return (uint16_t)kdFlowFieldAdvance(r.text, r.unit, arrow);
+}
+
 /// Where everything goes on this render. ONE CALL, USED BY BOTH RENDERERS, for
 /// the reason the places are resolved once: the browser page and the panel
 /// must not disagree about which cell is on which row or how big it is.
@@ -1177,6 +1186,15 @@ static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT]
     in.outPct   = (uint8_t)kdOutSizePct(skin);
     in.inPct    = (uint8_t)kdInSizePct(skin);
     in.inColOk  = inCol;
+    // The headline and the value beside it, so the flow can fit the two on
+    // one line — as the page draws them: the second only when it is switched
+    // on and has a reading. BY WHAT THEY PRINT, not widened like the grid's:
+    // sized for "-00.0°" the ordinary "8.4° / 71%" would not fit its column,
+    // and the fit only ever takes size away from a line that is too wide.
+    if (zones.z[KZ_HERO].used() && res[KZ_HERO].ok)
+        in.heroAdv = kdHeadAdvance(skin, zones.z[KZ_HERO], res[KZ_HERO]);
+    if ((skin.showFlags & KSHOW_BIG) && zones.z[KZ_BIG].used() && res[KZ_BIG].ok)
+        in.bigAdv = kdHeadAdvance(skin, zones.z[KZ_BIG], res[KZ_BIG]);
 
     uint8_t used[KZ_GRID_COUNT];
     const int n = (skin.showFlags & KSHOW_GRID) ? kdGridUsed(zones, visible, used) : 0;

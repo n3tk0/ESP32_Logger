@@ -640,6 +640,18 @@ room allows, never larger than the headline. One grid reading alone used to
 stop at six tenths of the headline, and one indoor reading at eight tenths,
 which left most of their row white.
 
+"The room" is worked out with every figure at 0.62 of the type size, wider
+than the 0.5 the panel script places units by: the page's fallback font and
+the panel's bold faces have figures that wide, and a four-figure pressure
+sized by 0.5 was cut at its cell's right edge.
+
+The headline and the value beside it share one line in a 270 px column, and
+"23.5° / 1013 hPa" does not fit it at 88 and 44. When the two are too wide
+for the column, the value beside the headline gets smaller first, down to 28
+px, then the headline itself. They are measured by what they print, so the
+ordinary "8.4° / 71%" keeps its 88 and 44, and a line that fits is never
+touched. The indoor row keeps the unshrunk headline size as its limit.
+
 The indoor row, upright:
 
 - one reading stands alone, centred in the column;

@@ -57,6 +57,10 @@ PLACES = [
 
 PCTS = [(100, 100), (100, 100), (90, 60), (70, 80), (60, 100)]
 
+# The headline and the value beside it: none measured, a lone headline, the
+# ordinary "8.4° / 1008 hPa ↑", and a pair too wide for the column.
+HEADS = [(0, 0), (2202, 0), (2202, 3615), (3400, 4200)]
+
 WIDTHS = [
     [3135, 2202, 2376, 1836, 1500, 2600],   # an ordinary page
     [3600, 3400, 3200, 3000, 2800, 2600],   # long units, big numbers
@@ -86,11 +90,13 @@ def cases():
                 for ni in range(4):
                     # The size settings, turned down on a spread of the cases.
                     pct = PCTS[(mask + ng + ni) % len(PCTS)]
+                    head = HEADS[(mask + ng * 3 + ni) % len(HEADS)]
                     yield {
                         'chart': mask & 1, 'fc': (mask >> 1) & 1, 'week': (mask >> 2) & 1,
                         'sub': (mask >> 3) & 1, 'grid': w[:ng], 'in': w[:ni][::-1],
                         'clk': 1 - ((mask >> 4) & 1), 'land': (mask >> 5) & 1,
                         'outp': pct[0], 'inp': pct[1],
+                        'hero': head[0], 'big': head[1],
                     }
 
 
@@ -107,7 +113,8 @@ def run(js_text):
                     'clk=%d' % c['clk'], 'land=%d' % c['land'],
                     'grid=' + ','.join(map(str, c['grid'])),
                     'in=' + ','.join(map(str, c['in'])),
-                    'outp=%d' % c['outp'], 'inp%%=%d' % c['inp']]
+                    'outp=%d' % c['outp'], 'inp%%=%d' % c['inp'],
+                    'hero=%d' % c['hero'], 'big=%d' % c['big']]
             c_out.append(json.loads(subprocess.check_output([exe] + args, text=True)))
 
         driver = js_engine(js_text) + '''
@@ -119,7 +126,8 @@ var out = { adv: input.places.map(function (p) {
                                      sub: !!c.sub, clock: !!c.clk, land: !!c.land,
                                      nGrid: c.grid.length, gridAdv: c.grid,
                                      nIn: c.in.length, inAdv: c.in,
-                                     outPct: c.outp, inPct: c.inp }); }) };
+                                     outPct: c.outp, inPct: c.inp,
+                                     heroAdv: c.hero, bigAdv: c.big }); }) };
 process.stdout.write(JSON.stringify(out));
 '''
         js_file = os.path.join(tmp, 'flow.js')

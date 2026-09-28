@@ -102,6 +102,8 @@ int main(int argc, char** argv) {
         else if (k == "inp")   in.nIn      = (uint8_t)parsePlaces(v, in.inAdv, 3);
         else if (k == "outp")  in.outPct   = (uint8_t)atoi(v);
         else if (k == "inp%")  in.inPct    = (uint8_t)atoi(v);
+        else if (k == "hero")  in.heroAdv  = (uint16_t)atoi(v);
+        else if (k == "big")   in.bigAdv   = (uint16_t)atoi(v);
         else if (k == "res")   res   = (unsigned)atoi(v);
         else if (k == "pagew") pagew = (unsigned)atoi(v);
         else if (k == "clock") clock = atoi(v);

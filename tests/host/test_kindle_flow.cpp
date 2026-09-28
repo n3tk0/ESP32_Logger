@@ -194,10 +194,55 @@ static void test_two_indoor_fields_take_the_row() {
     KdFlowIn in = defaultPage();
     in.nIn = 2;
     const KdFlow two = kdFlowCompute(in);
-    const KdFlow three = kdFlowCompute(defaultPage());
+    // Against three on one line: in two columns the first of three is about
+    // as large as the first of two, which is the point of the columns.
+    KdFlowIn line = defaultPage();
+    line.inColOk = false;
+    const KdFlow three = kdFlowCompute(line);
     CHECK(two.inValSz1 > three.inValSz1);
     // The first field gets what it needs, not a fixed share.
     CHECK(two.inW1Pm > 500 && two.inW1Pm < 900);
+}
+
+// A four-figure pressure, beside the headline and alone in the grid: both
+// were cut at the column's right edge.
+static void test_a_wide_reading_fits_its_column() {
+    // The headline by what it prints; the grid by the widest it gets.
+    const unsigned T = kdFlowFieldAdvance("23.5", "\xC2\xB0", false);
+    const unsigned P = kdFlowFieldAdvance("1013", "hPa", true);
+    CHECK_EQ(P, kdFlowWorstAdvance("pressure", "1013", "hPa", true));
+    // Sized with room to spare for figures wider than kdAdvanceMille()'s.
+    CHECK(P > kdAdvanceMille("0000") + (250u + kdAdvanceMille("hPa")) * 42u / 100u + 350u);
+
+    // The ordinary "8.4° / 71%" keeps the layout file's sizes.
+    KdFlowIn ord = defaultPage();
+    ord.heroAdv = (uint16_t)kdFlowFieldAdvance("8.4", "\xC2\xB0", false);
+    ord.bigAdv  = (uint16_t)kdFlowFieldAdvance("71", "%", false);
+    CHECK_EQ(kdFlowCompute(ord).heroSz, 88);
+    CHECK_EQ(kdFlowCompute(ord).bigSz, 44);
+
+    KdFlowIn in = defaultPage();
+    in.heroAdv = (uint16_t)T;
+    in.bigAdv  = (uint16_t)P;
+    const KdFlow f = kdFlowCompute(in);
+    CHECK(f.heroSz * (int)T / 1000 + f.headGap + f.slashW + f.bigSz * (int)P / 1000 <= f.colLW);
+    CHECK(f.bigSz >= KDF_BIG_MIN);
+    CHECK(f.heroSz < 88);
+    // The indoor row does not shrink with it.
+    KdFlowIn plain = defaultPage();
+    CHECK_EQ(f.inValSz1, kdFlowCompute(plain).inValSz1);
+
+    // The headline alone, with the column to itself, stays as it was.
+    KdFlowIn lone = defaultPage();
+    lone.heroAdv = (uint16_t)T;
+    CHECK_EQ(kdFlowCompute(lone).heroSz, kdFlowCompute(plain).heroSz);
+
+    // One pressure alone in the grid fits its cell.
+    KdFlowIn g = defaultPage();
+    g.nGrid = 1;
+    g.gridAdv[0] = (uint16_t)P;
+    const KdFlow gf = kdFlowCompute(g);
+    CHECK(gf.gridValSz * (int)P / 1000 <= gf.colLW - KDF_CELL_PAD);
 }
 
 // ---------------------------------------------------------------------------
@@ -606,6 +651,7 @@ int main() {
     RUN(test_no_chart_gives_the_readings_everything);
     RUN(test_four_readings_fill_two_rows);
     RUN(test_two_indoor_fields_take_the_row);
+    RUN(test_a_wide_reading_fits_its_column);
     RUN(test_every_combination);
     RUN(test_indoor_columns);
     RUN(test_switching_a_section_off_never_shrinks_anything);

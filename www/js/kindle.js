@@ -407,7 +407,7 @@ function kdScaleG(v, g) { return kdQ(v * g + 500, 1000); }
 var KDF = {
   FOOT_Y:764, WEEK_H:88, FC_H:124, TOP_Y:20, CHART_ABOVE:26, CHART_BELOW:24,
   CHART_MIN:220, TOP_MIN:262, TOP_GROWN:386, COL_L:270, COL_R:252, CL_Y:26,
-  HERO_Y:38, CELL_PAD:6, IN_CAP_W:66, GRID_GAP:6,
+  HERO_Y:38, CELL_PAD:6, IN_CAP_W:66, GRID_GAP:6, FIG_SIZE:620, BIG_MIN:28, HERO_MIN:40,
   GROW_MAX:1180, GROW_CLOCK:1146, GROW_BIG:1090, GROW_SUB:1120,
   LAND_FOOT_Y:564, LAND_X1:782, LAND_COL:300, LAND_SEP:328, LAND_CLOCK:840,
   LAND_ROW_W:77, IN_H:102, LAND_GROW_MIN:640, OL_PITCH:92
@@ -457,7 +457,15 @@ function kdFlowWorstAdvance(metric, text, unit, arrow) {
   if (neg || metric === "temperature" || metric === "dew_point") worst = "-";
   for (var i = 0; i < need; i++) worst += "0";
   worst += p.slice(k);
-  var adv = kdAdvanceMille(worst);
+  return kdFlowFieldAdvance(worst, unit, arrow);
+}
+
+// A value with its unit and arrow, each figure at KDF.FIG_SIZE — see
+// kdFlowFieldAdvance() in KindleFlow.h.
+function kdFlowFieldAdvance(text, unit, arrow) {
+  text = String(text == null ? "" : text);
+  var figs = text.replace(/[^0-9]/g, "").length;
+  var adv = kdAdvanceMille(text) + figs * (KDF.FIG_SIZE - 500);
   if (unit) {
     if (unit === "°")    adv += kdQ(330 * 34, 100);
     else if (unit === "%")    adv += kdQ(800 * 42, 100);
@@ -502,8 +510,23 @@ function kdFlowClockSizes(gc, f) {
   f.clH = f.clSize + 1;
 }
 
+// The headline and the value beside it made to fit their column — see
+// kdFlowHeadFit() in KindleFlow.h.
+function kdFlowHeadFit(inp, f) {
+  if (!inp.heroAdv) return;
+  var hA = inp.heroAdv, bA = inp.bigAdv || 0, hero = f.heroSz, big = f.bigSz;
+  var room = f.colLW - (bA ? f.headGap + f.slashW : 0);
+  while (kdQ(hero * hA, 1000) + (bA ? kdQ(big * bA, 1000) : 0) > room) {
+    if (bA && big > KDF.BIG_MIN) big--;
+    else if (hero > KDF.HERO_MIN) hero--;
+    else break;
+  }
+  f.heroSz = hero; f.bigSz = big;
+}
+
 function kdFlowOutdoor(inp, bot, f) {
   var K = KDF, r, c;
+  kdFlowHeadFit(inp, f);
   var air = Math.max(0, f.grow - 1000);
   f.subY = f.heroY + f.heroSz + 2 + kdQ(air * 14, K.GROW_MAX - 1000);
   var gridTop = inp.sub ? f.subY + f.subSz + 13 + kdQ(air * 6, K.GROW_MAX - 1000) : f.subY;
@@ -546,7 +569,7 @@ function kdFlowIndoor(inp, bot, f) {
   f.inValY = f.inVal2Y = f.inVal3Y = f.inLabY + f.labSz + 18;
   var m = Math.min(3, inp.nIn);
   if (m === 0) return;
-  var top = f.inLabY + f.labSz + 18, ah = bot - top, cap = f.heroSz;
+  var top = f.inLabY + f.labSz + 18, ah = bot - top, cap = kdScaleG(88, f.grow);
   var a1 = inp.inAdv[0] || 1000, pct = kdPct(inp.inPct), s1, s, wR, stackH;
   var colTop = f.inLabY + f.labSz + 6;
   var a2 = Math.max(inp.inAdv[1] || 1000, inp.inAdv[2] || 1000), c1 = 0, t;
@@ -608,7 +631,7 @@ function kdFlowTop(inp, T, f) {
 }
 
 function kdFlowSameType(a, b) {
-  return a.heroSz === b.heroSz && a.clSize === b.clSize && a.labSz === b.labSz &&
+  return a.heroSz === b.heroSz && a.bigSz === b.bigSz && a.clSize === b.clSize && a.labSz === b.labSz &&
          a.gridValSz === b.gridValSz && a.gridRows.length === b.gridRows.length &&
          a.inValSz1 === b.inValSz1 && a.inStack === b.inStack && a.inCol === b.inCol;
 }
@@ -737,7 +760,17 @@ function kdFlowInput(show) {
     var arrow = !!(z.flags & kdFlags.trend) && !!(show & 0x0004) && z.metric === "pressure";
     return kdFlowWorstAdvance(z.metric, v, kdPvUnit(z), arrow);
   }
+  // The headline and the value beside it by what they print, as the
+  // collector measures them for kdFlowHeadFit().
+  function head(key) {
+    var z = kdSlot(key), v = kdPvValue(z);
+    if (v === "") return 0;
+    var arrow = !!(z.flags & kdFlags.trend) && !!(show & 0x0004) && z.metric === "pressure";
+    return kdFlowFieldAdvance(v, kdPvUnit(z), arrow);
+  }
   var i, a;
+  inp.heroAdv = head("hero");
+  inp.bigAdv = (show & 0x0001) ? head("big") : 0;
   if (show & 0x0002) {
     for (i = 1; i <= 6; i++) {
       if ((a = adv("g" + i))) { inp.grid.push("g" + i); inp.gridAdv.push(a); }
