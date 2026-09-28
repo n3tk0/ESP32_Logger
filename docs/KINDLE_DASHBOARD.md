@@ -587,8 +587,8 @@ daylight saving included, in seconds east of UTC) and `SYNC_DAYS` (**Set the
 Kindle's clock**, `clock_sync` in `/api/kindle/config`: days, 0 never, 1 by
 default). The script shows the time in `TIME_OFF`'s zone and sets the Kindle's
 system and hardware clocks from `TIME_UTC` once every `SYNC_DAYS` days —
-`CLOCK_SYNC` in `dash.conf` overrides it — or at once when the two are more
-than ten minutes apart. Only a payload fetched that minute sets the clock; the
+`CLOCK_SYNC` in `dash.conf` overrides it — or, unless that is never, at once
+when the two are more than ten minutes apart. Only a payload fetched that minute sets the clock; the
 cached one never does. The last setting is remembered in `clocksync` beside
 `dash.conf`.
 

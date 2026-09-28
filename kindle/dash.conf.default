@@ -253,9 +253,9 @@ ROTATE_SWAP=0
 
 # How often this Kindle sets its clock from the collector's, in days: auto
 # follows the Clock sync setting on the collector's Kindle page (every day
-# unless changed), 0 never, or 1 to 365. The clock itself is always drawn from
-# the Kindle's own time, in the collector's time zone; a clock found more than
-# ten minutes out is set at once.
+# unless changed), 0 never, or 1 to 60. The clock itself is always drawn from
+# the Kindle's own time, in the collector's time zone; unless this is 0, a
+# clock found more than ten minutes out is set at once.
 CLOCK_SYNC=auto
 
 # Which upgrades this file has had. Written by the dashboard; leave it alone.

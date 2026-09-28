@@ -971,6 +971,7 @@ check "$?" "ROTATE in dash.conf: 0, 90, 180, 270 or auto, and it goes out as ?ro
   [ "$(tz_from_off 0)" = "UTC-0" ] || exit 4
   tz_from_off "" && exit 5
   tz_from_off "1-2" && exit 6
+  tz_from_off "-" && exit 12
   [ "$(epoch_utc 0)" = "1970-01-01 00:00:00" ] || exit 7
   [ "$(epoch_utc 951782400)" = "2000-02-29 00:00:00" ] || exit 8
   [ "$(epoch_utc 1790640000)" = "2026-09-29 00:00:00" ] || exit 9
@@ -993,8 +994,9 @@ check "$?" "the collector's time zone as a TZ, and seconds as a date"
   CLOCK_SYNC=auto SYNC_DAYS=5; clock_sync_days; [ "$SYNC_EVERY" = "5" ] || exit 9
   CLOCK_SYNC=auto; unset SYNC_DAYS; clock_sync_days; [ "$SYNC_EVERY" = "1" ] || exit 10
   CLOCK_SYNC=0 SYNC_DAYS=5; clock_sync_days; [ "$SYNC_EVERY" = "0" ] || exit 11
-  conf_valid CLOCK_SYNC auto && conf_valid CLOCK_SYNC 0 && conf_valid CLOCK_SYNC 365 || exit 12
-  conf_valid CLOCK_SYNC 366 && exit 13
+  conf_valid CLOCK_SYNC auto && conf_valid CLOCK_SYNC 0 && conf_valid CLOCK_SYNC 60 || exit 12
+  conf_valid CLOCK_SYNC 61 && exit 13
+  conf_valid CLOCK_SYNC 08 && exit 15                            # octal to $(( ))
   conf_valid CLOCK_SYNC x && exit 14
   exit 0 )
 check "$?" "the Kindle's clock is set every CLOCK_SYNC days, and at once when far out"
@@ -1011,8 +1013,12 @@ check "$?" "the Kindle's clock is set every CLOCK_SYNC days, and at once when fa
   [ "$(cat "$CLOCK_SYNC_FILE")" = "1790640090" ] || exit 3
   SET_TO=""; TIME_UTC=1790640095
   clock_sync 2>/dev/null; [ -z "$SET_TO" ] || exit 4           # not a day yet
-  CLOCK_SYNC=0; rm -f "$CLOCK_SYNC_FILE"
+  CLOCK_SYNC=0; rm -f "$CLOCK_SYNC_FILE"; CLOCK_SYNC_READ=0
   clock_sync 2>/dev/null; [ -z "$SET_TO" ] || exit 5           # switched off
+  # Set back an hour: a wake window held to an absolute time moves with it.
+  CLOCK_SYNC=1; TIME_UTC=1790636400; AWAKE_UNTIL=1790640060
+  clock_sync 2>/dev/null; [ "$SET_TO" = "1790636400" ] || exit 6
+  [ "$AWAKE_UNTIL" = "1790636460" ] && [ "$CLOCK_JUMPED" = "1" ] || exit 7
   exit 0 )
 check "$?" "a clock set from the collector is remembered, and not set again until due"
 

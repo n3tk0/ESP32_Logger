@@ -52,7 +52,7 @@ I18n.register("kindle", {
     clockSet7: "Every week",
     clockSetC: "Every … days",
     clockSet0: "Never",
-    clockSetHint: "The FBInk panel draws its clock from the Kindle's own time, in this collector's time zone, and sets that time from this collector's this often. A clock found more than ten minutes out is set at once. dash.conf's CLOCK_SYNC on the Kindle wins over this.",
+    clockSetHint: "The FBInk panel draws its clock from the Kindle's own time, in this collector's time zone, and sets that time from this collector's this often. Unless this is Never, a clock found more than ten minutes out is set at once. dash.conf's CLOCK_SYNC on the Kindle wins over this.",
 
     unitsTitle: "Units and language",
     pressure: "Pressure",
@@ -217,7 +217,7 @@ I18n.register("kindle", {
     clockSet7: "Всяка седмица",
     clockSetC: "На … дни",
     clockSet0: "Никога",
-    clockSetHint: "FBInk панелът рисува часовника по собственото време на Kindle, в часовата зона на колектора, и го сверява с колектора толкова често. Часовник, избягал с над десет минути, се сверява веднага. CLOCK_SYNC в dash.conf на Kindle е с предимство.",
+    clockSetHint: "FBInk панелът рисува часовника по собственото време на Kindle, в часовата зона на колектора, и го сверява с колектора толкова често. Освен при „Никога“, часовник, избягал с над десет минути, се сверява веднага. CLOCK_SYNC в dash.conf на Kindle е с предимство.",
 
     unitsTitle: "Единици и език",
     pressure: "Налягане",

@@ -1803,9 +1803,9 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // time to send: a collector still at 1970 would set the reader back to it.
     s->printf("SYNC_DAYS=%u\n", (unsigned)kdClockSyncDays(skin));
     {
-        const time_t t = time(nullptr);
-        if (t > 1000000000) {
-            s->printf("TIME_UTC=%lu\n", (unsigned long)t);
+        // The same instant every age in this payload was measured against.
+        if (now > 1000000000u) {
+            s->printf("TIME_UTC=%lu\n", (unsigned long)now);
             s->printf("TIME_OFF=%ld\n",
                       (long)(config.network.timezone + config.network.dstOffsetHours) * 3600L);
         } else {

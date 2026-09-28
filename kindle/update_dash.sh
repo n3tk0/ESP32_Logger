@@ -194,12 +194,12 @@ ROTATE_SWAP=0
 #   auto        the collector says — the Clock sync setting on its Kindle page
 #               (every day unless somebody changed it).
 #   0           never: the Kindle keeps whatever time it has.
-#   1 .. 365    every that many days.
+#   1 .. 60     every that many days.
 #
 # Between those the clock is drawn from the Kindle's own time, with or without
 # the collector; the collector's time zone is used either way, so the panel
-# says what the collector's web page says. A clock found more than ten
-# minutes out is set at once, whatever the interval.
+# says what the collector's web page says. Unless it is 0, a clock found more
+# than ten minutes out is set at once, whatever the interval.
 CLOCK_SYNC=auto
 # WHICH ONE-TIME MOVES dash.conf HAS ALREADY HAD. A dash.conf with no CONF_VER
 # line predates the marker and is 1; dash.conf.default ships the current one.
@@ -256,7 +256,7 @@ conf_help() {
         LAYOUT)             echo "auto follows the collector; normal keeps the forecast band; standalone drops it and enlarges the readings" ;;
         ROTATE)             echo "auto follows the collector; 0, 90, 180 or 270 degrees clockwise (90 and 270 lie the Kindle on its side)" ;;
         ROTATE_SWAP)        echo "1 if 90 and 270 come out the wrong way round on this Kindle" ;;
-        CLOCK_SYNC)         echo "auto follows the collector; days between setting this Kindle's clock from the collector's (0 = never)" ;;
+        CLOCK_SYNC)         echo "auto follows the collector; 1-60 days between setting this Kindle's clock from the collector's; 0 never" ;;
         MENU_LBL)           echo "The labels on the tap menu, separated by bars" ;;
         MENU_ACT)           echo "What each button does: refresh|wake|forecast|settings|hide|quit" ;;
         MENU_LBL2)          echo "The labels on the settings bar, separated by bars" ;;
@@ -437,11 +437,13 @@ conf_valid() {
                 *) return 1 ;;
             esac ;;
         CLOCK_SYNC)
+            # Not through strip_zeros, being a text key for `auto`: so no
+            # leading zero either, which $(( )) would read as octal.
             case "$v" in
-                auto) return 0 ;;
-                ''|*[!0-9]*) return 1 ;;
+                auto|0) return 0 ;;
+                ''|0*|*[!0-9]*) return 1 ;;
             esac
-            [ "${#v}" -le 3 ] && [ "$v" -le 365 ] ;;
+            [ "${#v}" -le 2 ] && [ "$v" -le 60 ] ;;
         MENU_LBL|MENU_LBL2|SURE_LBL|MODE_LBL)
             # Labels separated by bars. They reach draw_text_reg_inv and
             # nothing else, so the shell metacharacters are what matter — the
@@ -2063,12 +2065,17 @@ rot_sync() {
 CLOCK_SYNC_FILE="${DASH_CLOCK_SYNC:-$DASH_DIR/clocksync}"
 #: A clock this far out is set at once, whatever the interval.
 CLOCK_SYNC_FAR=600
+#: The file's value, read once: it changes only when this script writes it.
+CLOCK_SYNC_LAST=""
+CLOCK_SYNC_READ=0
+#: 1 when the last clock_sync() moved the clock.
+CLOCK_JUMPED=0
 
 # A POSIX TZ for an offset EAST of UTC in seconds. The sign is POSIX's, the
 # other way round: UTC+2 is "UTC-2".
 tz_from_off() {
     local off="$1" sign="-" h m
-    case "$off" in ''|*[!0-9-]*|*?-*) return 1 ;; esac
+    case "$off" in ''|-|*[!0-9-]*|*?-*) return 1 ;; esac
     [ "$off" -lt 0 ] && { sign="+"; off=$(( -off )); }
     h=$(( off / 3600 )); m=$(( off % 3600 / 60 ))
     if [ "$m" -eq 0 ]; then echo "UTC$sign$h"
@@ -2122,8 +2129,10 @@ epoch_utc() {
 clock_set() {
     date -u -s "@$1" >/dev/null 2>&1 ||
         date -u -s "$(epoch_utc "$1")" >/dev/null 2>&1 || return 1
-    # And the hardware clock, or the next suspend or reboot undoes it.
-    hwclock -u -w >/dev/null 2>&1 || hwclock -w >/dev/null 2>&1
+    # And the hardware clock, or the next suspend or reboot undoes it — in
+    # UTC, which is what the kernel reads it as: a plain -w writes local time,
+    # and TZ is the collector's zone by now.
+    hwclock -u -w >/dev/null 2>&1 || TZ=UTC0 hwclock -w >/dev/null 2>&1
     return 0
 }
 
@@ -2132,8 +2141,13 @@ clock_sync() {
     case "$utc" in ''|*[!0-9]*) return 0 ;; esac
     [ "$utc" -gt 1000000000 ] || return 0
     clock_sync_days
+    [ "$SYNC_EVERY" -gt 0 ] 2>/dev/null || return 0
+    if [ "$CLOCK_SYNC_READ" = "0" ]; then
+        CLOCK_SYNC_LAST=$(tr -dc '0-9' < "$CLOCK_SYNC_FILE" 2>/dev/null)
+        CLOCK_SYNC_READ=1
+    fi
     now=$(date +%s)
-    last=$(tr -dc '0-9' < "$CLOCK_SYNC_FILE" 2>/dev/null)
+    last="$CLOCK_SYNC_LAST"
     clock_sync_due "$now" "$utc" "$last" "$SYNC_EVERY" || return 0
     if [ $(( utc - now )) -ge 2 ] || [ $(( now - utc )) -ge 2 ]; then
         if ! clock_set "$utc"; then
@@ -2141,10 +2155,15 @@ clock_sync() {
             return 1
         fi
         echo "$(date '+%H:%M') clock: set from the collector ($(( utc - now )) s)" >&2
-        # Every tier is measured against this clock.
+        # Every tier is measured against this clock, and a wake window held
+        # open to an absolute time moves with it — or setting the clock back
+        # an hour reopens a window that had closed, for an hour.
+        [ "${AWAKE_UNTIL:-0}" -gt 0 ] 2>/dev/null &&
+            AWAKE_UNTIL=$(( AWAKE_UNTIL + utc - now ))
         EPOCH="$utc"
-        [ "${HAVE_DATA:-0}" = "1" ] && : > "$TMP/redraw"
+        CLOCK_JUMPED=1
     fi
+    CLOCK_SYNC_LAST="$utc"
     echo "$utc" > "$CLOCK_SYNC_FILE" 2>/dev/null
     return 0
 }
@@ -2408,10 +2427,17 @@ load_data() {
     fi
     # The collector's zone, from any payload, the cached one included; its
     # time only from one fetched just now.
+    local tz_was="${TZ:-}"
     tz_apply
+    CLOCK_JUMPED=0
     if [ "${TIME_FRESH:-0}" = "1" ]; then
         TIME_FRESH=0
         clock_sync
+    fi
+    # The time the caller is about to draw was read before either: read it
+    # again, so this tick draws the new one rather than the next clock tier.
+    if [ "${TZ:-}" != "$tz_was" ] || [ "$CLOCK_JUMPED" = "1" ]; then
+        NOW_TIME=$(now_clock)
     fi
     HAVE_DATA=1
     DATA_FRESH=1

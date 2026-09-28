@@ -201,8 +201,8 @@ constexpr uint16_t KSHOW_WEEK      = 0x0040;
 constexpr uint16_t KSHOW_BATTERY   = 0x0080;   // the low-battery badge
 constexpr uint16_t KSHOW_ALL       = 0x00FF;
 // KindleConfig::clockSync: never, and the most days apart a reader may go.
-static const uint8_t KCLOCK_SYNC_OFF = 0xFF;
-static const uint8_t KCLOCK_SYNC_MAX = 60;
+constexpr uint8_t KCLOCK_SYNC_OFF = 0xFF;
+constexpr uint8_t KCLOCK_SYNC_MAX = 60;
 
 // The clock, which is NOT stored in showFlags — see KindleConfig::clockOff.
 // The settings page and the layout treat it as one more switch, so it has a

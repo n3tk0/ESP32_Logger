@@ -788,7 +788,8 @@ function kdCsyncDays() {
   var v = kdVal("kd-csync", "1");
   if (v !== "c") return v | 0;
   var n = parseInt(kdVal("kd-csync-days", ""), 10);
-  return (n >= 1 && n <= 60) ? n : 1;
+  if (!(n >= 1)) return 1;
+  return n > 60 ? 60 : n;
 }
 
 function kdCsyncSet(days) {
@@ -801,7 +802,11 @@ function kdCsyncSet(days) {
 
 function kdCsyncRender() {
   var n = document.getElementById("kd-csync-days");
-  if (n) n.hidden = kdVal("kd-csync", "1") !== "c";
+  if (!n) return;
+  n.hidden = kdVal("kd-csync", "1") !== "c";
+  // The number the page will save, in the box: a 90 typed past the max, or
+  // an empty box, shows what it became rather than quietly saving 1.
+  if (!n.hidden && String(kdCsyncDays()) !== n.value) n.value = kdCsyncDays();
 }
 
 function kdRenderPreview() {
