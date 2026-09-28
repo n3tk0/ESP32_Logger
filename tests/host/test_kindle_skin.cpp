@@ -429,6 +429,64 @@ static void test_page_rotation_follows_or_stands_alone() {
     CHECK(k.pageRot == 0 && kdPageRot(k) == KROT_90);
 }
 
+static void test_metric_size() {
+    KindleConfig k = defaults();
+    // 0 is an older config's and is as large as fits.
+    CHECK(kdOutSizePct(k) == 100 && kdInSizePct(k) == 100);
+    k.metricSize = kdSizePack(kdSizeStepFromPct(70), kdSizeStepFromPct(60));
+    CHECK(kdOutSizePct(k) == 70 && kdInSizePct(k) == 60);
+    // The nearest step; anything out of range, the most that fits.
+    CHECK(kdSizeStepFromPct(84) == 2 && kdSizeStepFromPct(86) == 1);
+    CHECK(kdSizeStepFromPct(101) == 0 && kdSizeStepFromPct(59) == 0 &&
+          kdSizeStepFromPct(-5) == 0);
+    // A byte nobody wrote goes back to the default.
+    k.metricSize = 0xF7;
+    kdSkinClamp(k);
+    CHECK(k.metricSize == 0);
+    k.metricSize = 0x34;
+    kdSkinClamp(k);
+    CHECK(kdOutSizePct(k) == 60 && kdInSizePct(k) == 70);
+}
+
+static void test_rules_and_week_style() {
+    KindleConfig k = defaults();
+    // 0 in both is the page as it was, and writes nothing.
+    CHECK(kdRulePx(k) == 1 && kdRuleInk(k) == KRULE_LIGHT && kdRuleStyle(k) == KRULE_SOLID);
+    CHECK(kdWeekStyle(k) == KWEEK_FILLED && !kdWeekForecast(k));
+    CHECK(!strcmp(kdRuleFbink(KRULE_LIGHT, false), "GRAYA"));
+    CHECK(!strcmp(kdRuleFbink(KRULE_LIGHT, true), "GRAYD"));   // the old .inrule
+    CHECK(!strcmp(kdRuleCss(KRULE_BLACK, false), "#000"));
+    CHECK(!strcmp(kdRuleCss(KRULE_BLACK, true), "#444"));
+
+    k.rules = kdRulesPack(KRULE_THICK, KRULE_MID, KRULE_DOTTED);
+    CHECK(kdRulePx(k) == 3 && kdRuleInk(k) == KRULE_MID && kdRuleStyle(k) == KRULE_DOTTED);
+    Css css;
+    kdSkinCss(css, k);
+    CHECK(css.has(".rule{border-top:3px dotted #777"));
+    CHECK(css.has(".inrule{border-top:3px dotted #aaa"));
+    CHECK(css.has(".top .sep{border-left:3px dotted #777}"));
+    CHECK(!kdSkinIsDefault(k));
+
+    // Out of range from a form or a file: each field back to its first value.
+    CHECK(kdRulesPack(9, -1, 3) == 0);
+    k.rules = 0xFF;
+    k.weekStyle = 0xFF;
+    kdSkinClamp(k);
+    CHECK(kdRuleWeight(k) == 0 && kdRuleInk(k) == KRULE_BLACK && kdRuleStyle(k) == 0);
+    CHECK(k.weekStyle == (KWEEK_STYLE_MASK | KWEEK_FORECAST));
+
+    // Every unfilled week style clears the cells and keeps today marked.
+    for (uint8_t st = KWEEK_OUTLINE; st <= KWEEK_MINIMAL; st++) {
+        KindleConfig w = defaults();
+        w.weekStyle = st;
+        Css c;
+        kdSkinCss(c, w);
+        CHECK(c.has(".wd,.wd-we{background:none}"));
+        CHECK(c.has(".wd-now{"));
+        CHECK(c.has(".wf .wd-now{background:none"));
+    }
+}
+
 static void test_clamp_leaves_a_valid_config_alone() {
     KindleConfig k = defaults();
     k.face = KFACE_FUTURA;
@@ -462,5 +520,7 @@ int main() {
     RUN(test_clamp_leaves_a_valid_config_alone);
     RUN(test_clock_sync_days);
     RUN(test_page_rotation_follows_or_stands_alone);
+    RUN(test_rules_and_week_style);
+    RUN(test_metric_size);
     return SUMMARY();
 }

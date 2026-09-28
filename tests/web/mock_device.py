@@ -290,6 +290,15 @@ KINDLE = {
     "rotation": 0,
     "page_rotation": -1,
     "clock_sync": 1,
+    # The week strip and the rules, each at the page as it always was.
+    "week_forecast": 0,
+    "week_style": 0,
+    "rule_weight": 0,
+    "rule_ink": 0,
+    "rule_style": 0,
+    # How large the readings are set, per cent of the most that fits.
+    "out_size": 100,
+    "in_size": 100,
     "outdoor_sensor": "balcony",
     "indoor_sensor": "",
 }
@@ -1010,7 +1019,9 @@ class H(http.server.SimpleHTTPRequestHandler):
             for k in ("face", "bold", "show", "clock_style", "time_format",
                       "date_format", "pressure_unit", "decimals", "lang",
                       "refresh_sec", "follow_data", "clock_pin_refresh",
-                      "fbink_res_w", "layout_mode", "clock", "rotation", "page_rotation", "clock_sync"):
+                      "fbink_res_w", "layout_mode", "clock", "rotation", "page_rotation", "clock_sync",
+                      "week_forecast", "week_style", "rule_weight", "rule_ink",
+                      "rule_style", "out_size", "in_size"):
                 if k in body:
                     KINDLE[k] = int(body[k][0])
             for k in ("face_custom", "outdoor_sensor", "indoor_sensor"):

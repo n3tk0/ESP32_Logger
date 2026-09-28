@@ -100,6 +100,10 @@ int main(int argc, char** argv) {
         else if (k == "in")    in.nIn      = (uint8_t)parseList(v, in.inAdv, 3);
         else if (k == "gridp") in.nGrid    = (uint8_t)parsePlaces(v, in.gridAdv, 6);
         else if (k == "inp")   in.nIn      = (uint8_t)parsePlaces(v, in.inAdv, 3);
+        else if (k == "outp")  in.outPct   = (uint8_t)atoi(v);
+        else if (k == "inp%")  in.inPct    = (uint8_t)atoi(v);
+        else if (k == "hero")  in.heroAdv  = (uint16_t)atoi(v);
+        else if (k == "big")   in.bigAdv   = (uint16_t)atoi(v);
         else if (k == "res")   res   = (unsigned)atoi(v);
         else if (k == "pagew") pagew = (unsigned)atoi(v);
         else if (k == "clock") clock = atoi(v);
@@ -140,9 +144,11 @@ int main(int argc, char** argv) {
                f.clSize, f.clBoxed, f.clRuled, f.clRuledPad, f.clDated, f.clDateSz,
                f.clDateGap, f.clGrow, f.clH);
         printf("\"inRuleY\":%d,\"inLabY\":%d,\"inValY\":%d,\"inVal2Y\":%d,"
-               "\"inValSz1\":%d,\"inValSz\":%d,\"inW1Pm\":%d,\"inStack\":%s,\"sepH\":%d,",
+               "\"inValSz1\":%d,\"inValSz\":%d,\"inW1Pm\":%d,\"inStack\":%s,\"sepH\":%d,"
+               "\"inVal3Y\":%d,\"inCol\":%s,",
                f.inRuleY, f.inLabY, f.inValY, f.inVal2Y, f.inValSz1, f.inValSz,
-               f.inW1Pm, f.inStack ? "true" : "false", f.sepH);
+               f.inW1Pm, f.inStack ? "true" : "false", f.sepH,
+               f.inVal3Y, f.inCol ? "true" : "false");
         printf("\"chart\":%s,\"forecast\":%s,\"week\":%s,\"rule2Y\":%d,\"grY\":%d,"
                "\"grH\":%d,\"rule3Y\":%d,\"wkRuleY\":%d,\"htmlChartH\":%d,\"htmlColH\":%d",
                f.chart ? "true" : "false", f.forecast ? "true" : "false",

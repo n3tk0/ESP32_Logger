@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <math.h>
+#include "../core/Globals.h"        // config.kindle: whether the week strip wants the days
 #include "../web/DashboardStrings.h"
 #include "../web/KindleDashboard.h"   // kdPx(): the glyphs scale with the page
 
@@ -395,29 +396,21 @@ static String httpsGet(const char* url) {
 }
 
 bool ForecastModule::_fetchOpenMeteo() {
-    // One request covers current conditions and whichever outlook is
-    // configured. forecast_hours anchors the hourly array on the CURRENT hour
-    // rather than on local midnight, which is what makes index 3/6/9 mean
-    // +3/+6/+9 h without any date arithmetic here.
+    // One request covers current conditions, the hours and the week, whichever
+    // outlook is configured: the Kindle's week strip wants the days while its
+    // outlook columns keep the hours. forecast_hours anchors the hourly array
+    // on the CURRENT hour rather than on local midnight, which is what makes
+    // index 3/6/9 mean +3/+6/+9 h without any date arithmetic here; the daily
+    // arrays start today.
     char url[320];
-    if (_outlook == OUTLOOK_DAILY) {
-        snprintf(url, sizeof(url),
-                 "https://api.open-meteo.com/v1/forecast"
-                 "?latitude=%.4f&longitude=%.4f"
-                 "&current=temperature_2m,weather_code,wind_speed_10m"
-                 "&daily=temperature_2m_max,temperature_2m_min,weather_code"
-                 "&timezone=auto&forecast_days=6",
-                 (double)_lat, (double)_lon);
-    } else {
-        snprintf(url, sizeof(url),
-                 "https://api.open-meteo.com/v1/forecast"
-                 "?latitude=%.4f&longitude=%.4f"
-                 "&current=temperature_2m,weather_code,wind_speed_10m"
-                 "&daily=temperature_2m_max,temperature_2m_min"
-                 "&hourly=temperature_2m,weather_code"
-                 "&timezone=auto&forecast_days=1&forecast_hours=16",
-                 (double)_lat, (double)_lon);
-    }
+    snprintf(url, sizeof(url),
+             "https://api.open-meteo.com/v1/forecast"
+             "?latitude=%.4f&longitude=%.4f"
+             "&current=temperature_2m,weather_code,wind_speed_10m"
+             "&daily=temperature_2m_max,temperature_2m_min,weather_code"
+             "&hourly=temperature_2m,weather_code"
+             "&timezone=auto&forecast_days=7&forecast_hours=16",
+             (double)_lat, (double)_lon);
 
     const String body = httpsGet(url);
     if (body.isEmpty()) return false;
@@ -431,13 +424,10 @@ bool ForecastModule::_fetchOpenMeteo() {
     filter["current"]["wind_speed_10m"]   = true;
     filter["daily"]["temperature_2m_max"] = true;
     filter["daily"]["temperature_2m_min"] = true;
-    if (_outlook == OUTLOOK_DAILY) {
-        filter["daily"]["weather_code"]   = true;
-    } else {
-        filter["hourly"]["time"]           = true;
-        filter["hourly"]["temperature_2m"] = true;
-        filter["hourly"]["weather_code"]   = true;
-    }
+    filter["daily"]["weather_code"]       = true;
+    filter["hourly"]["time"]              = true;
+    filter["hourly"]["temperature_2m"]    = true;
+    filter["hourly"]["weather_code"]      = true;
 
     JsonDocument doc;
     if (deserializeJson(doc, body.c_str(), body.length(), DeserializationOption::Filter(filter))) {
@@ -458,33 +448,31 @@ bool ForecastModule::_fetchOpenMeteo() {
     d.fetchedAt = (uint32_t)time(nullptr);
     strncpy(d.summary, wmoSummary(d.code), sizeof(d.summary) - 1);
 
-    if (_outlook == OUTLOOK_DAILY) {
-        for (int i = 0; i < OUTLOOK_N; i++) {
-            // Index 0 is today, so the columns are +1..+5 days.
-            JsonVariantConst hi = doc["daily"]["temperature_2m_max"][i + 1];
-            if (hi.isNull()) break;
-            d.outlook[i].valid = true;
-            d.outlook[i].tempC = hi | NAN;
-            d.outlook[i].lowC  = doc["daily"]["temperature_2m_min"][i + 1] | NAN;
-            d.outlook[i].code  = doc["daily"]["weather_code"][i + 1] | -1;
-            weekdayLabel(d.outlook[i], i + 1);
-        }
-    } else {
-        for (int i = 0; i < OUTLOOK_N; i++) {
-            const int idx = (i + 1) * 3;             // +3 h, +6 h ... +15 h
-            JsonVariantConst t = doc["hourly"]["temperature_2m"][idx];
-            if (t.isNull()) break;
-            d.outlook[i].valid = true;
-            d.outlook[i].tempC = t | NAN;
-            d.outlook[i].code  = doc["hourly"]["weather_code"][idx] | -1;
-            // "2026-08-25T21:00" — take the clock face out of the middle
-            // rather than reformatting it; it is already local, because the
-            // request asked for timezone=auto.
-            const char* iso = doc["hourly"]["time"][idx] | "";
-            if (strlen(iso) >= 16) {
-                memcpy(d.outlook[i].label, iso + 11, 5);
-                d.outlook[i].label[5] = '\0';
-            }
+    d.daily = (_outlook == OUTLOOK_DAILY);
+    for (int i = 0; i < WEEK_N; i++) {
+        // Index 0 is today; the outlook's daily columns are 1..5.
+        JsonVariantConst hi = doc["daily"]["temperature_2m_max"][i];
+        if (hi.isNull()) break;
+        d.days[i].valid = true;
+        d.days[i].tempC = hi | NAN;
+        d.days[i].lowC  = doc["daily"]["temperature_2m_min"][i] | NAN;
+        d.days[i].code  = doc["daily"]["weather_code"][i] | -1;
+        weekdayLabel(d.days[i], i);
+    }
+    for (int i = 0; i < OUTLOOK_N; i++) {
+        const int idx = (i + 1) * 3;             // +3 h, +6 h ... +15 h
+        JsonVariantConst t = doc["hourly"]["temperature_2m"][idx];
+        if (t.isNull()) break;
+        d.hours[i].valid = true;
+        d.hours[i].tempC = t | NAN;
+        d.hours[i].code  = doc["hourly"]["weather_code"][idx] | -1;
+        // "2026-08-25T21:00" — take the clock face out of the middle
+        // rather than reformatting it; it is already local, because the
+        // request asked for timezone=auto.
+        const char* iso = doc["hourly"]["time"][idx] | "";
+        if (strlen(iso) >= 16) {
+            memcpy(d.hours[i].label, iso + 11, 5);
+            d.hours[i].label[5] = '\0';
         }
     }
 
@@ -545,6 +533,7 @@ bool ForecastModule::_fetchOwm() {
     // A failed outlook leaves the current conditions usable rather than
     // discarding the whole fetch: three empty columns are a smaller loss than
     // a blank forecast block.
+    d.daily = (_outlook == OUTLOOK_DAILY);
     _fetchOwmOutlook(d);
 
     taskENTER_CRITICAL(&_mux);
@@ -554,16 +543,22 @@ bool ForecastModule::_fetchOwm() {
 }
 
 bool ForecastModule::_fetchOwmOutlook(Data& d) {
-    // As few 3-hourly slots as the mode needs, which is also the bound on how
-    // much JSON lands in heap on a 4 MB C3: the five hourly columns are the
-    // first five slots, and five days need the whole of the free tier's 40
-    // (the fifth of them only partly covered, and aggregated from what there is).
+    // As few 3-hourly slots as are used, which is also the bound on how much
+    // JSON lands in heap on a 4 MB C3: the hourly columns are the first five
+    // of eight. The days — the daily outlook, or the Kindle's week strip
+    // holding the forecast — are aggregated out of the whole of the free
+    // tier's 40: today and the next four days, the fifth only partly
+    // covered. The free tier has no daily endpoint and nothing past five
+    // days, so the last cells of a seven-day week stay empty here.
+    bool days = (_outlook == OUTLOOK_DAILY);
+#ifdef FEATURE_KINDLE_DASHBOARD
+    days = days || (config.kindle.weekStyle & KWEEK_FORECAST);
+#endif
     char url[256];
     snprintf(url, sizeof(url),
              "https://api.openweathermap.org/data/2.5/forecast"
              "?lat=%.4f&lon=%.4f&units=metric&cnt=%d&appid=%s",
-             (double)_lat, (double)_lon,
-             (_outlook == OUTLOOK_HOURLY) ? 8 : 40, _apiKey);
+             (double)_lat, (double)_lon, days ? 40 : 8, _apiKey);
 
     const String body = httpsGet(url);
     if (body.isEmpty()) return false;
@@ -583,37 +578,32 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
     JsonArrayConst list = doc["list"];
     if (list.isNull() || list.size() == 0) return false;
 
-    if (_outlook == OUTLOOK_HOURLY) {
-        // list[0] is the next slot, so the first five are +3 .. +15 h.
-        const long tz = doc["city"]["timezone"] | 0L;
-        for (int i = 0; i < OUTLOOK_N && i < (int)list.size(); i++) {
-            JsonObjectConst e = list[i];
-            d.outlook[i].valid = true;
-            d.outlook[i].tempC = e["main"]["temp"] | NAN;
-            d.outlook[i].code  = owmToWmo(e["weather"][0]["id"] | -1);
-            // dt is UTC; city.timezone is the location's offset in seconds.
-            const time_t local = (time_t)((long)(e["dt"] | 0L) + tz);
-            struct tm tmv;
-            if (gmtime_r(&local, &tmv) != nullptr) {
-                snprintf(d.outlook[i].label, sizeof(d.outlook[i].label),
-                         "%02d:%02d", tmv.tm_hour, tmv.tm_min);
-            }
+    // list[0] is the next slot, so the first five are +3 .. +15 h.
+    const long tz = doc["city"]["timezone"] | 0L;
+    for (int i = 0; i < OUTLOOK_N && i < (int)list.size(); i++) {
+        JsonObjectConst e = list[i];
+        d.hours[i].valid = true;
+        d.hours[i].tempC = e["main"]["temp"] | NAN;
+        d.hours[i].code  = owmToWmo(e["weather"][0]["id"] | -1);
+        // dt is UTC; city.timezone is the location's offset in seconds.
+        const time_t local = (time_t)((long)(e["dt"] | 0L) + tz);
+        struct tm tmv;
+        if (gmtime_r(&local, &tmv) != nullptr) {
+            snprintf(d.hours[i].label, sizeof(d.hours[i].label),
+                     "%02d:%02d", tmv.tm_hour, tmv.tm_min);
         }
-        return true;
     }
 
-    // Daily mode. The free tier has no daily endpoint, so the days are
-    // aggregated out of the same 3-hourly list: max and min per local day,
-    // and the condition taken from the slot nearest midday, which is the one
-    // that describes the day a reader would recognise. An early-hours shower
-    // should not make a sunny day render as rain.
-    const long tz = doc["city"]["timezone"] | 0L;
+    // The days: max and min per local day, and the condition taken from the
+    // slot nearest midday, which is the one that describes the day a reader
+    // would recognise. An early-hours shower should not make a sunny day
+    // render as rain.
     const time_t nowLocal = (time_t)((long)time(nullptr) + tz);
     struct tm nowTm;
-    if (nowLocal < 1000000000 || gmtime_r(&nowLocal, &nowTm) == nullptr) return false;
+    if (nowLocal < 1000000000 || gmtime_r(&nowLocal, &nowTm) == nullptr) return true;
 
     struct Acc { bool used = false; float hi = -1e9f, lo = 1e9f; int code = -1; int bestGap = 99; };
-    Acc acc[OUTLOOK_N];
+    Acc acc[WEEK_N];
 
     for (JsonObjectConst e : list) {
         const time_t local = (time_t)((long)(e["dt"] | 0L) + tz);
@@ -622,9 +612,9 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
 
         // Whole local days apart, which knows nothing of years, leap or not.
         const int ahead = (int)(local / 86400 - nowLocal / 86400);
-        if (ahead < 1 || ahead > OUTLOOK_N) continue;   // only tomorrow .. +5 days
+        if (ahead < 0 || ahead >= WEEK_N) continue;
 
-        Acc& a = acc[ahead - 1];
+        Acc& a = acc[ahead];
         const float t = e["main"]["temp"] | NAN;
         if (!isfinite(t)) continue;
         a.used = true;
@@ -638,13 +628,20 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
         }
     }
 
-    for (int i = 0; i < OUTLOOK_N; i++) {
+    // Today with no slot left in it (late evening): what it is doing now.
+    if (!acc[0].used && isfinite(d.tempC)) {
+        acc[0].used = true;
+        acc[0].hi = acc[0].lo = d.tempC;
+        acc[0].code = d.code;
+    }
+
+    for (int i = 0; i < WEEK_N; i++) {
         if (!acc[i].used) continue;
-        d.outlook[i].valid = true;
-        d.outlook[i].tempC = acc[i].hi;
-        d.outlook[i].lowC  = acc[i].lo;
-        d.outlook[i].code  = acc[i].code;
-        weekdayLabel(d.outlook[i], i + 1);
+        d.days[i].valid = true;
+        d.days[i].tempC = acc[i].hi;
+        d.days[i].lowC  = acc[i].lo;
+        d.days[i].code  = acc[i].code;
+        weekdayLabel(d.days[i], i);
     }
     return true;
 }
@@ -694,7 +691,7 @@ const char* forecastSummary(const ForecastModule::Data& d) {
 // ---------------------------------------------------------------------------
 // Dashboard section
 // ---------------------------------------------------------------------------
-void appendForecastSection(String& out, int columns) {
+void appendForecastSection(String& out, int columns, bool hourly) {
     if (columns < 1) columns = 1;
     if (columns > ForecastModule::OUTLOOK_N) columns = ForecastModule::OUTLOOK_N;
     const ForecastModule::Data d = forecastModule.snapshot();
@@ -736,7 +733,7 @@ void appendForecastSection(String& out, int columns) {
     out += F("</div></td>");
 
     for (int i = 0; i < columns; i++) {
-        const ForecastModule::Period& pd = d.outlook[i];
+        const ForecastModule::Period& pd = d.outlookAt(i, hourly);
         out += F("<td class=\"per\">");
         if (pd.valid) {
             out += F("<div class=\"per-l\">");

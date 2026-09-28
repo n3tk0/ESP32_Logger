@@ -188,10 +188,16 @@ with sync_playwright() as p:
 
     # A region that nothing on this page fills says so, rather than opening
     # onto an empty box.
+    pg.click('#kd-zrow-sub .kd-zhead')
+    pg.wait_for_timeout(300)
+    sub = pg.locator("#kd-zrow-sub .kd-zbody").inner_text()
+    check("headline" in sub.lower(), f"a region nothing here fills says why ({sub[:44]!r})")
+
+    # The week strip's is set on the Whole page tab, and its row says where.
     pg.click('#kd-zrow-week .kd-zhead')
     pg.wait_for_timeout(300)
     week = pg.locator("#kd-zrow-week .kd-zbody").inner_text()
-    check("date" in week.lower(), f"a region nothing here fills says why ({week[:44]!r})")
+    check("forecast" in week.lower(), f"the week strip's row points at its card ({week[:44]!r})")
 
     # And the pressure block's switch is a MASTER switch for the per-place
     # arrows, which is the one relationship the old table stated wrongly.
@@ -768,6 +774,67 @@ with sync_playwright() as p:
     got = pg.evaluate(
         "fetch('/api/kindle/config').then(function(r){return r.json()})")
     check(got.get("page_rotation") == -1, "and Same as the panel goes out as -1")
+
+    # The week strip and the dividing lines: five selects, five keys, and a
+    # re-read that brings every one of them back.
+    tab(pg, "page")
+    pg.select_option("#kd-wkfc", "1")
+    pg.select_option("#kd-wkst", "3")
+    pg.select_option("#kd-rulew", "2")
+    pg.select_option("#kd-rulei", "1")
+    pg.select_option("#kd-rules", "2")
+    pg.wait_for_timeout(200)
+    pv = pg.evaluate("document.getElementById('kd-panel').innerHTML")
+    check("dotted" in pv and "3px dotted #777777" in pv,
+          "the preview draws the rules as chosen")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    want = {"week_forecast": 1, "week_style": 3, "rule_weight": 2,
+            "rule_ink": 1, "rule_style": 2}
+    check(all(got.get(k) == v for k, v in want.items()),
+          "the week strip and the rules reach the device (%r)"
+          % {k: got.get(k) for k in want})
+    pg.reload()
+    pg.wait_for_timeout(1500)
+    tab(pg, "page")
+    back = [pg.input_value(s) for s in ("#kd-wkfc", "#kd-wkst", "#kd-rulew",
+                                          "#kd-rulei", "#kd-rules")]
+    check(back == ["1", "3", "2", "1", "2"], "and they come back on the re-read (%r)" % back)
+    for sel in ("#kd-wkfc", "#kd-wkst", "#kd-rulew", "#kd-rulei", "#kd-rules"):
+        pg.select_option(sel, "0")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+
+    # The readings' size: turned down, it shrinks the preview's layout, and
+    # it survives a save and a re-read.
+    def flow():
+        return pg.evaluate("(function(){var i=kdFlowInput(kdMaskOf(KD_SHOW,'kd-s-'));"
+                           "i.forecast=true;return kdFlowCompute(i);})()")
+    full = flow()
+    pg.select_option("#kd-outsz", "70")
+    pg.select_option("#kd-insz", "60")
+    pg.wait_for_timeout(200)
+    small = flow()
+    check(small["gridValSz"] < full["gridValSz"] and small["inValSz1"] < full["inValSz1"],
+          "a smaller size shrinks the preview (%r -> %r, %r -> %r)"
+          % (full["gridValSz"], small["gridValSz"], full["inValSz1"], small["inValSz1"]))
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("out_size") == 70 and got.get("in_size") == 60,
+          "the sizes reach the device (%r, %r)" % (got.get("out_size"), got.get("in_size")))
+    pg.reload()
+    pg.wait_for_timeout(1500)
+    tab(pg, "page")
+    back = [pg.input_value(s) for s in ("#kd-outsz", "#kd-insz")]
+    check(back == ["70", "60"], "and they come back on the re-read (%r)" % back)
+    for sel in ("#kd-outsz", "#kd-insz"):
+        pg.select_option(sel, "100")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
 
     # The clock is a region switch like the others, but it goes out as
     # `clock`, and `show` keeps only the stored bits — a page that posted the

@@ -18,6 +18,9 @@
 // the in-memory ring buffer only — historical FS queries return 0 rows.
 #include "../core/Globals.h"         // config, activeFS
 #include "../core/ModuleRegistry.h"  // Pass 5 phase 3: /api/modules
+#ifdef MODULE_FORECAST_ENABLED
+#  include "../modules/ForecastModule.h"   // a fetch when the week strip wants the days
+#endif
 #include "IngestHandler.h"           // POST /api/ingest (FEATURE_REMOTE_NODES)
 #ifdef FEATURE_REMOTE_NODES
 #include "../sensors/RemoteIngest.h"
@@ -855,6 +858,19 @@ static void handleKindleConfigGet(AsyncWebServerRequest* req) {
     doc["page_rotation"]    = kdPageRotDeg(k);   // -1: the same as the panel
     // Days between the reader setting its clock from this one; 0 never.
     doc["clock_sync"]       = kdClockSyncDays(k);
+    // The week strip: how its cells are drawn (0 filled .. 3 minimal), and
+    // whether it holds the forecast instead of the calendar.
+    doc["week_style"]       = kdWeekStyle(k);
+    doc["week_forecast"]    = kdWeekForecast(k) ? 1 : 0;
+    // The dividing lines: weight 0..2 (1..3 px), ink 0..3 (light .. black),
+    // style 0..2 (solid, dashed, dotted).
+    doc["rule_weight"]      = kdRuleWeight(k);
+    doc["rule_ink"]         = kdRuleInk(k);
+    doc["rule_style"]       = kdRuleStyle(k);
+    // How large the readings are set, per cent of the most that fits:
+    // 100, 90, 80, 70 or 60.
+    doc["out_size"]         = kdOutSizePct(k);
+    doc["in_size"]          = kdInSizePct(k);
     doc["outdoor_sensor"]   = (k.outdoorSensor[0] != '\0') ? k.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
     doc["indoor_sensor"]    = (k.indoorSensor[0] != '\0') ? k.indoorSensor : KINDLE_INDOOR_SENSOR;
 
@@ -902,6 +918,29 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
         k.clockSync = kdClockSyncFromDays(req->getParam("clock_sync", true)->value().toInt(),
                                           k.clockSync);
 
+    if (req->hasParam("week_style", true))
+        k.weekStyle = (uint8_t)((k.weekStyle & ~KWEEK_STYLE_MASK) |
+                      (req->getParam("week_style", true)->value().toInt() & KWEEK_STYLE_MASK));
+    if (req->hasParam("week_forecast", true)) {
+        if (req->getParam("week_forecast", true)->value().toInt()) k.weekStyle |= KWEEK_FORECAST;
+        else k.weekStyle &= (uint8_t)~KWEEK_FORECAST;
+    }
+    {
+        int w = kdRuleWeight(k), ink = kdRuleInk(k), st = kdRuleStyle(k);
+        if (req->hasParam("rule_weight", true)) w   = req->getParam("rule_weight", true)->value().toInt();
+        if (req->hasParam("rule_ink", true))    ink = req->getParam("rule_ink", true)->value().toInt();
+        if (req->hasParam("rule_style", true))  st  = req->getParam("rule_style", true)->value().toInt();
+        k.rules = kdRulesPack(w, ink, st);
+    }
+    {
+        int o = k.metricSize & 0x0F, i = k.metricSize >> 4;
+        if (req->hasParam("out_size", true))
+            o = kdSizeStepFromPct(req->getParam("out_size", true)->value().toInt());
+        if (req->hasParam("in_size", true))
+            i = kdSizeStepFromPct(req->getParam("in_size", true)->value().toInt());
+        k.metricSize = kdSizePack(o, i);
+    }
+
     if (req->hasParam("face_custom", true)) {
         const String v = req->getParam("face_custom", true)->value();
         strncpy(k.faceCustom, v.c_str(), sizeof(k.faceCustom) - 1);
@@ -925,7 +964,20 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     // here, where the settings-import path could not reach them.
     kdSkinClamp(k);
 
+    // The week strip taking the forecast needs the days, which OpenWeatherMap
+    // only fetches on request (ForecastModule::_fetchOwmOutlook): fetch them
+    // now rather than leave the calendar up until the next poll.
+    const bool wantDays = (k.weekStyle & KWEEK_FORECAST) &&
+                          !(config.kindle.weekStyle & KWEEK_FORECAST);
     config.kindle = k;
+#ifdef MODULE_FORECAST_ENABLED
+    if (wantDays) {
+        uint32_t waitS = 0;
+        forecastModule.requestRefresh(millis(), waitS);
+    }
+#else
+    (void)wantDays;
+#endif
     if (!saveConfig()) {
         req->send(500, "application/json", "{\"ok\":false,\"error\":\"save failed\"}");
         return;

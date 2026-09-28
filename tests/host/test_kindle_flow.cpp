@@ -194,10 +194,55 @@ static void test_two_indoor_fields_take_the_row() {
     KdFlowIn in = defaultPage();
     in.nIn = 2;
     const KdFlow two = kdFlowCompute(in);
-    const KdFlow three = kdFlowCompute(defaultPage());
+    // Against three on one line: in two columns the first of three is about
+    // as large as the first of two, which is the point of the columns.
+    KdFlowIn line = defaultPage();
+    line.inColOk = false;
+    const KdFlow three = kdFlowCompute(line);
     CHECK(two.inValSz1 > three.inValSz1);
     // The first field gets what it needs, not a fixed share.
     CHECK(two.inW1Pm > 500 && two.inW1Pm < 900);
+}
+
+// A four-figure pressure, beside the headline and alone in the grid: both
+// were cut at the column's right edge.
+static void test_a_wide_reading_fits_its_column() {
+    // The headline by what it prints; the grid by the widest it gets.
+    const unsigned T = kdFlowFieldAdvance("23.5", "\xC2\xB0", false);
+    const unsigned P = kdFlowFieldAdvance("1013", "hPa", true);
+    CHECK_EQ(P, kdFlowWorstAdvance("pressure", "1013", "hPa", true));
+    // Sized with room to spare for figures wider than kdAdvanceMille()'s.
+    CHECK(P > kdAdvanceMille("0000") + (250u + kdAdvanceMille("hPa")) * 42u / 100u + 350u);
+
+    // The ordinary "8.4° / 71%" keeps the layout file's sizes.
+    KdFlowIn ord = defaultPage();
+    ord.heroAdv = (uint16_t)kdFlowFieldAdvance("8.4", "\xC2\xB0", false);
+    ord.bigAdv  = (uint16_t)kdFlowFieldAdvance("71", "%", false);
+    CHECK_EQ(kdFlowCompute(ord).heroSz, 88);
+    CHECK_EQ(kdFlowCompute(ord).bigSz, 44);
+
+    KdFlowIn in = defaultPage();
+    in.heroAdv = (uint16_t)T;
+    in.bigAdv  = (uint16_t)P;
+    const KdFlow f = kdFlowCompute(in);
+    CHECK(f.heroSz * (int)T / 1000 + f.headGap + f.slashW + f.bigSz * (int)P / 1000 <= f.colLW);
+    CHECK(f.bigSz >= KDF_BIG_MIN);
+    CHECK(f.heroSz < 88);
+    // The indoor row does not shrink with it.
+    KdFlowIn plain = defaultPage();
+    CHECK_EQ(f.inValSz1, kdFlowCompute(plain).inValSz1);
+
+    // The headline alone, with the column to itself, stays as it was.
+    KdFlowIn lone = defaultPage();
+    lone.heroAdv = (uint16_t)T;
+    CHECK_EQ(kdFlowCompute(lone).heroSz, kdFlowCompute(plain).heroSz);
+
+    // One pressure alone in the grid fits its cell.
+    KdFlowIn g = defaultPage();
+    g.nGrid = 1;
+    g.gridAdv[0] = (uint16_t)P;
+    const KdFlow gf = kdFlowCompute(g);
+    CHECK(gf.gridValSz * (int)P / 1000 <= gf.colLW - KDF_CELL_PAD);
 }
 
 // ---------------------------------------------------------------------------
@@ -242,8 +287,8 @@ static void checkPage(const KdFlowIn& in, const KdFlow& f) {
         CHECK(f.gridY + (f.gridNRows - 1) * f.gridRowH + f.labSz + 4 + f.gridValSz <= bot);
         // A caption and its value fit their row, with a gap before the next.
         CHECK(f.labSz + 4 + f.gridValSz + KDF_GRID_GAP <= f.gridRowH);
-        // Never larger than six tenths of the headline.
-        CHECK(f.gridValSz <= f.heroSz * 60 / 100);
+        // Never larger than the headline.
+        CHECK(f.gridValSz <= f.heroSz);
         // Every cell fits its column, or is at the size the ordinary page
         // measured as fitting — the estimate is pessimistic by design.
         int at = 0;
@@ -265,8 +310,26 @@ static void checkPage(const KdFlowIn& in, const KdFlow& f) {
     if (in.nIn) {
         CHECK(f.inValSz1 > 0);
         CHECK(f.inValY >= f.inLabY + f.labSz + 18);
-        CHECK(f.inValSz1 <= f.heroSz * 80 / 100);
-        if (f.inStack) {
+        CHECK(f.inValSz1 <= f.heroSz);
+        CHECK(!f.inStack);
+        // Only three, upright, are ever two columns; anything else is one
+        // line, as are three whose column would not fit.
+        if (f.inCol) CHECK(in.nIn == 3 && !in.land);
+        if (f.inCol) {
+            const int s = f.inValSz, lab = f.labSz;
+            // The first field and the lower of the other two share a bottom line.
+            CHECK_EQ(f.inVal3Y + s, f.inValY + f.inValSz1);
+            CHECK(f.inValY + f.inValSz1 <= bot);
+            // The upper one's caption is under the heading, and its value
+            // clears the lower one's caption.
+            CHECK(f.inVal2Y - lab - 4 >= f.inLabY + lab + 2);
+            CHECK(f.inVal2Y + s + 6 <= f.inVal3Y - lab - 4);
+            // The column holds the wider of the two, or its caption.
+            const int w1 = (f.inW - 12) * f.inW1Pm / 1000;
+            const int a2 = in.inAdv[1] > in.inAdv[2] ? in.inAdv[1] : in.inAdv[2];
+            CHECK(f.inValSz1 * in.inAdv[0] / 1000 <= w1 || f.inValSz1 <= 20);
+            CHECK(s * a2 / 1000 <= f.inW - 12 - w1 || f.inValSz1 <= 20);
+        } else if (f.inStack) {
             CHECK(in.nIn >= 2);
             CHECK(f.inVal2Y >= f.inValY + f.inValSz1 + f.labSz + 4);
             CHECK(f.inVal2Y + f.inValSz <= bot);
@@ -341,7 +404,7 @@ static void checkLand(const KdFlowIn& in, const KdFlow& f, int footY) {
     const int outBot = f.inRuleY - 8;
     if (in.nGrid) {
         CHECK(f.gridY + (f.gridNRows - 1) * f.gridRowH + f.labSz + 4 + f.gridValSz <= outBot);
-        CHECK(f.gridValSz <= f.heroSz * 60 / 100);
+        CHECK(f.gridValSz <= f.heroSz);
     }
     // ── The indoor row, one line under the outdoor one ──
     CHECK_EQ(f.inX, f.colLX);
@@ -397,11 +460,34 @@ static void test_every_combination() {
             CHECK_EQ(kdFlowHtmlChartH(h), 0);
         }
         // The indoor fields on one line have room for their captions too.
-        if (ni > 1 && !f.inStack)
+        if (ni > 1 && !f.inStack && !f.inCol)
             CHECK(kdFlowInNeed(f.inValSz1, f.inValSz1 ? in.inAdv[0] : 1000, in.inAdv, ni) <=
                   KDF_COL_R || f.inValSz1 <= 40);
     }
     std::printf("  %d pages checked\n", g_cases);
+}
+
+static void test_indoor_columns() {
+    KdFlowIn in = defaultPage();
+    in.nIn = 3;
+    in.inAdv[0] = 2600; in.inAdv[1] = 1200; in.inAdv[2] = 1200;
+    KdFlow f = kdFlowCompute(in);
+    CHECK(f.inCol);
+    // A reader that does not know the columns gets the one line.
+    in.inColOk = false;
+    f = kdFlowCompute(in);
+    CHECK(!f.inCol);
+    CHECK_EQ(f.inVal2Y, f.inValY + f.inValSz1 - f.inValSz);
+    // Readings too wide for any column: one line, not a column that overflows.
+    in.inColOk = true;
+    in.inAdv[0] = 9000; in.inAdv[1] = 9000; in.inAdv[2] = 9000;
+    f = kdFlowCompute(in);
+    CHECK(!f.inCol);
+    // And the size setting shrinks what fits, never grows it.
+    in.inAdv[0] = 2600; in.inAdv[1] = 1200; in.inAdv[2] = 1200;
+    const int full = kdFlowCompute(in).inValSz1;
+    in.inPct = 70;
+    CHECK(kdFlowCompute(in).inValSz1 < full);
 }
 
 static void test_switching_a_section_off_never_shrinks_anything() {
@@ -565,7 +651,9 @@ int main() {
     RUN(test_no_chart_gives_the_readings_everything);
     RUN(test_four_readings_fill_two_rows);
     RUN(test_two_indoor_fields_take_the_row);
+    RUN(test_a_wide_reading_fits_its_column);
     RUN(test_every_combination);
+    RUN(test_indoor_columns);
     RUN(test_switching_a_section_off_never_shrinks_anything);
     RUN(test_panel_keys);
     RUN(test_page_css);
