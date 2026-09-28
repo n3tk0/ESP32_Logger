@@ -1996,7 +1996,10 @@ static void appendLandBody(String& p, const KindleConfig& skin, uint32_t now,
     if (f.clock || week) {
         p += F("<table class=\"trow\"><tr>");
         if (f.clock) {
-            p += F("<td class=\"tclk\">");
+            // The whole row when the week is not drawn beside it — which the
+            // layout cannot know about a collector with no time yet.
+            p += week ? F("<td class=\"tclk\">")
+                      : F("<td class=\"tclk\" style=\"width:100%;text-align:center\">");
             appendClock(p, skin, now);
             p += F("</td>");
         }

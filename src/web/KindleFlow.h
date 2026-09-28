@@ -731,7 +731,7 @@ static inline int kdFlowPanel(int v, unsigned resW) {
 /// file's, which were measured on each panel and are not all a plain scale of
 /// the 600 px file's. The landscape page sends its x too.
 static const int KDF_PANEL_BASE = 48;
-static const int KDF_PANEL_KEYS = KDF_PANEL_BASE + 42;
+static const int KDF_PANEL_KEYS = KDF_PANEL_BASE + 48;
 static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out) {
     int n = 0;
     // Bounded: a key added below without KDF_PANEL_KEYS growing with it is
@@ -964,8 +964,10 @@ inline void kdFlowCss(StringT& out, const KdFlow& f, uint8_t clockStyle, PxFn px
     out += ";line-height:";         KDF_PX(100 * gc / 1000); out += "}";
     // The landscape page's rows and columns — see kdFlowLand().
     if (f.land) {
-        out += ".trow{height:";     KDF_PX(f.topRowY - KDF_TOP_Y);
-        out += "}.trow td{vertical-align:middle;padding:0}.trow .wk{margin-top:0}";
+        if (f.topRowY > KDF_TOP_Y) {
+            out += ".trow{height:"; KDF_PX(f.topRowY - KDF_TOP_Y); out += "}";
+        }
+        out += ".trow td{vertical-align:middle;padding:0}.trow .wk{margin-top:0}";
         if (f.clock && f.week) { out += ".tclk{width:"; KDF_PX(f.wkX - f.colLX); out += "}"; }
         else                     out += ".tclk{text-align:center}";
         if (f.chart) {

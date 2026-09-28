@@ -3648,9 +3648,11 @@ redraw_sensors() {
 
 # The landscape page's top row: the clock, the week strip, the rule under them.
 draw_top_row() {
+    # $1=HH:MM, or empty for the row without the clock (the offline page,
+    # where the readings the clock stands with are not drawn)
     [ "${LAND:-0}" = "1" ] || return 0
     [ "${Z_TOP_H:-0}" -gt 0 ] 2>/dev/null || return 0
-    draw_clock "$1"
+    [ -n "$1" ] && draw_clock "$1"
     [ "${SHOW_WEEK:-1}" = "1" ] && draw_week
     draw_hline "${FOOT_RULE_X:-18}" "$TOPROW_Y" "${FOOT_RULE_W:-764}" "GRAYA"
 }
@@ -3746,8 +3748,9 @@ redraw_all() {
         draw_sensors_body
         if [ "${LAND:-0}" = "1" ]; then draw_top_row "$1"; else draw_clock "$1"; fi
     fi
-    # The week strip is the date, and stands without the readings.
-    data_stale && [ "${LAND:-0}" = "1" ] && [ "${SHOW_WEEK:-1}" = "1" ] && draw_week
+    # The week strip is the date, and stands without the readings — with the
+    # rule under the row, which is drawn with it.
+    data_stale && [ "${LAND:-0}" = "1" ] && draw_top_row ""
     draw_chart_body
     draw_forecast_body
     if ! data_stale; then

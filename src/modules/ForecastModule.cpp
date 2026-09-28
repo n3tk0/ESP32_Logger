@@ -611,7 +611,6 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
     const time_t nowLocal = (time_t)((long)time(nullptr) + tz);
     struct tm nowTm;
     if (nowLocal < 1000000000 || gmtime_r(&nowLocal, &nowTm) == nullptr) return false;
-    const int today = nowTm.tm_yday;
 
     struct Acc { bool used = false; float hi = -1e9f, lo = 1e9f; int code = -1; int bestGap = 99; };
     Acc acc[OUTLOOK_N];
@@ -621,8 +620,8 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
         struct tm tmv;
         if (gmtime_r(&local, &tmv) == nullptr) continue;
 
-        int ahead = tmv.tm_yday - today;
-        if (ahead < 0) ahead += 365;              // year wrap
+        // Whole local days apart, which knows nothing of years, leap or not.
+        const int ahead = (int)(local / 86400 - nowLocal / 86400);
         if (ahead < 1 || ahead > OUTLOOK_N) continue;   // only tomorrow .. +5 days
 
         Acc& a = acc[ahead - 1];
