@@ -517,8 +517,8 @@ static void appendChart(String& out,
         out += F("<text class=\"ax\" x=\""); out += (L + R) / 2;
         out += F("\" y=\""); out += (T + B) / 2 + kdPx(4);
         out += F("\" text-anchor=\"middle\">");
-        out += kdT("The 24 hour record fills as readings arrive.",
-                   "24-часовият запис се попълва с постъпването на данни.");
+        out += kdT("The record fills as readings arrive.",
+                   "Записът се попълва с постъпването на данни.");
         out += F("</text>");
     }
 
@@ -1983,12 +1983,12 @@ static void handleKindleData(AsyncWebServerRequest* req) {
                       ChartBmp::marginL(fw), ChartBmp::marginR(fw));
         }
 
-        // What the page prints instead of a chart when the record is empty.
-        // The panel drew the grid regardless, which reads as "nothing is
-        // happening outside" rather than "this has not filled in yet".
+        // What the page prints inside the empty chart. A bare grid reads as
+        // "nothing is happening outside" rather than "this has not filled in
+        // yet". No "24 hour" in it: the first hours' chart covers two.
         kdShellVar(s, "CH_NOTE", haveAny ? "" :
-                   KD_T("The 24 hour record fills as readings arrive.",
-                        "24-часовият запис се попълва с постъпването на данни."));
+                   KD_T("The record fills as readings arrive.",
+                        "Записът се попълва с постъпването на данни."));
     }
 
     // ── The last line, and the reason there is one ──────────────────────────

@@ -533,7 +533,7 @@ the two cannot disagree about where a thing is.
    left makes the chart taller (`/kindle/graph.bmp?h=N`). With the chart off
    the readings take all of it. On, it is always drawn: with nothing
    recorded yet it is drawn empty — the grid and the hour axis, no
-   scale down the side, and "The 24 hour record fills as readings arrive."
+   scale down the side, and "The record fills as readings arrive."
    inside the plot — so the page does not change shape when the first
    reading lands. For its first two hours the chart is the last two
    hours in five-minute buckets (`TrendRing::recent()`, axis in minutes,
