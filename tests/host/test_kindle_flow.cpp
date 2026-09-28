@@ -242,8 +242,8 @@ static void checkPage(const KdFlowIn& in, const KdFlow& f) {
         CHECK(f.gridY + (f.gridNRows - 1) * f.gridRowH + f.labSz + 4 + f.gridValSz <= bot);
         // A caption and its value fit their row, with a gap before the next.
         CHECK(f.labSz + 4 + f.gridValSz + KDF_GRID_GAP <= f.gridRowH);
-        // Never larger than six tenths of the headline.
-        CHECK(f.gridValSz <= f.heroSz * 60 / 100);
+        // Never larger than the headline.
+        CHECK(f.gridValSz <= f.heroSz);
         // Every cell fits its column, or is at the size the ordinary page
         // measured as fitting — the estimate is pessimistic by design.
         int at = 0;
@@ -265,8 +265,25 @@ static void checkPage(const KdFlowIn& in, const KdFlow& f) {
     if (in.nIn) {
         CHECK(f.inValSz1 > 0);
         CHECK(f.inValY >= f.inLabY + f.labSz + 18);
-        CHECK(f.inValSz1 <= f.heroSz * 80 / 100);
-        if (f.inStack) {
+        CHECK(f.inValSz1 <= f.heroSz);
+        CHECK(!f.inStack);
+        // Three, upright, are two columns; anything else is one line.
+        CHECK_EQ(f.inCol, in.nIn == 3 && !in.land);
+        if (f.inCol) {
+            const int s = f.inValSz, lab = f.labSz;
+            // The first field and the lower of the other two share a bottom line.
+            CHECK_EQ(f.inVal3Y + s, f.inValY + f.inValSz1);
+            CHECK(f.inValY + f.inValSz1 <= bot);
+            // The upper one's caption is under the heading, and its value
+            // clears the lower one's caption.
+            CHECK(f.inVal2Y - lab - 4 >= f.inLabY + lab + 2);
+            CHECK(f.inVal2Y + s + 6 <= f.inVal3Y - lab - 4);
+            // The column holds the wider of the two, or its caption.
+            const int w1 = (f.inW - 12) * f.inW1Pm / 1000;
+            const int a2 = in.inAdv[1] > in.inAdv[2] ? in.inAdv[1] : in.inAdv[2];
+            CHECK(f.inValSz1 * in.inAdv[0] / 1000 <= w1 || f.inValSz1 <= 20);
+            CHECK(s * a2 / 1000 <= f.inW - 12 - w1 || f.inValSz1 <= 20);
+        } else if (f.inStack) {
             CHECK(in.nIn >= 2);
             CHECK(f.inVal2Y >= f.inValY + f.inValSz1 + f.labSz + 4);
             CHECK(f.inVal2Y + f.inValSz <= bot);
@@ -341,7 +358,7 @@ static void checkLand(const KdFlowIn& in, const KdFlow& f, int footY) {
     const int outBot = f.inRuleY - 8;
     if (in.nGrid) {
         CHECK(f.gridY + (f.gridNRows - 1) * f.gridRowH + f.labSz + 4 + f.gridValSz <= outBot);
-        CHECK(f.gridValSz <= f.heroSz * 60 / 100);
+        CHECK(f.gridValSz <= f.heroSz);
     }
     // ── The indoor row, one line under the outdoor one ──
     CHECK_EQ(f.inX, f.colLX);
@@ -397,7 +414,7 @@ static void test_every_combination() {
             CHECK_EQ(kdFlowHtmlChartH(h), 0);
         }
         // The indoor fields on one line have room for their captions too.
-        if (ni > 1 && !f.inStack)
+        if (ni > 1 && !f.inStack && !f.inCol)
             CHECK(kdFlowInNeed(f.inValSz1, f.inValSz1 ? in.inAdv[0] : 1000, in.inAdv, ni) <=
                   KDF_COL_R || f.inValSz1 <= 40);
     }

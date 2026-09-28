@@ -247,6 +247,14 @@ constexpr uint8_t KRULE_SOLID    = 0;
 constexpr uint8_t KRULE_DASHED   = 1;
 constexpr uint8_t KRULE_DOTTED   = 2;
 
+// ── How large the readings are set ──────────────────────────────────────────
+// KindleConfig::metricSize: the outdoor grid's step in the low four bits, the
+// indoor row's in the high four. 0 is as large as the room allows (never
+// larger than the headline); each step after it is ten per cent less, down
+// to KSIZE_MIN_PCT.
+constexpr uint8_t KSIZE_STEPS    = 5;   // 100, 90, 80, 70, 60 per cent
+constexpr uint8_t KSIZE_MIN_PCT  = 60;
+
 // ── Which shape the page is drawn in ────────────────────────────────────────
 // A collector running as its own access point — a wifi or ESP-NOW node talking
 // to it directly, nothing upstream — cannot fetch a forecast, and the forecast
@@ -455,7 +463,9 @@ struct KindleConfig {
     // kdWeek*() and kdRule*() helpers in KindleSkin.h.
     uint8_t  weekStyle;       // KWEEK_* in the low bits, KWEEK_FORECAST
     uint8_t  rules;           // KRULE_* weight, ink and style packed
-    uint8_t  reserved[1];
+    // v15.5 — how large the readings are set, the last of reserved[]. 0 is
+    // an older config's and is as large as they fit. See kdSizePct().
+    uint8_t  metricSize;      // outdoor step in bits 0-3, indoor in 4-7
 };
 
 struct DeviceConfig {

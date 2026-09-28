@@ -807,6 +807,35 @@ with sync_playwright() as p:
     pg.click('[data-click="kindleSave"]')
     pg.wait_for_timeout(1400)
 
+    # The readings' size: turned down, it shrinks the preview's layout, and
+    # it survives a save and a re-read.
+    def flow():
+        return pg.evaluate("(function(){var i=kdFlowInput(kdMaskOf(KD_SHOW,'kd-s-'));"
+                           "i.forecast=true;return kdFlowCompute(i);})()")
+    full = flow()
+    pg.select_option("#kd-outsz", "70")
+    pg.select_option("#kd-insz", "60")
+    pg.wait_for_timeout(200)
+    small = flow()
+    check(small["gridValSz"] < full["gridValSz"] and small["inValSz1"] < full["inValSz1"],
+          "a smaller size shrinks the preview (%r -> %r, %r -> %r)"
+          % (full["gridValSz"], small["gridValSz"], full["inValSz1"], small["inValSz1"]))
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("out_size") == 70 and got.get("in_size") == 60,
+          "the sizes reach the device (%r, %r)" % (got.get("out_size"), got.get("in_size")))
+    pg.reload()
+    pg.wait_for_timeout(1500)
+    tab(pg, "page")
+    back = [pg.input_value(s) for s in ("#kd-outsz", "#kd-insz")]
+    check(back == ["70", "60"], "and they come back on the re-read (%r)" % back)
+    for sel in ("#kd-outsz", "#kd-insz"):
+        pg.select_option(sel, "100")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+
     # The clock is a region switch like the others, but it goes out as
     # `clock`, and `show` keeps only the stored bits — a page that posted the
     # clock's bit in `show` would be clamped away by the firmware and the

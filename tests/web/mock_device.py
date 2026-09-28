@@ -296,6 +296,9 @@ KINDLE = {
     "rule_weight": 0,
     "rule_ink": 0,
     "rule_style": 0,
+    # How large the readings are set, per cent of the most that fits.
+    "out_size": 100,
+    "in_size": 100,
     "outdoor_sensor": "balcony",
     "indoor_sensor": "",
 }
@@ -1018,7 +1021,7 @@ class H(http.server.SimpleHTTPRequestHandler):
                       "refresh_sec", "follow_data", "clock_pin_refresh",
                       "fbink_res_w", "layout_mode", "clock", "rotation", "page_rotation", "clock_sync",
                       "week_forecast", "week_style", "rule_weight", "rule_ink",
-                      "rule_style"):
+                      "rule_style", "out_size", "in_size"):
                 if k in body:
                     KINDLE[k] = int(body[k][0])
             for k in ("face_custom", "outdoor_sensor", "indoor_sensor"):

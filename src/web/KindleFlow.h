@@ -235,6 +235,8 @@ struct KdFlowIn {
     uint16_t gridAdv[6] = {0, 0, 0, 0, 0, 0};   ///< kdFlowWorstAdvance() of each
     uint8_t nIn      = 0;       ///< indoor places with a reading, 0..3
     uint16_t inAdv[3]   = {0, 0, 0};
+    uint8_t outPct   = 100;     ///< the grid's values, per cent of the most that fits
+    uint8_t inPct    = 100;     ///< the indoor values, likewise
 };
 
 /// Outlook columns at most: five on the landscape page, three upright.
@@ -261,10 +263,12 @@ struct KdFlow {
 
     int16_t inRuleY, inLabY;
     int16_t inValY;          ///< the first field's top
-    int16_t inVal2Y;         ///< the others' top, when they are on a line of their own
+    int16_t inVal2Y;         ///< the others' top; in a column, the upper one's
+    int16_t inVal3Y;         ///< in a column: the lower one's top, on the first one's bottom line
     uint8_t inValSz1, inValSz;
     uint16_t inW1Pm;         ///< the first field's share of the row, in thousandths
-    bool    inStack;         ///< the first field on a line of its own
+    bool    inStack;         ///< the first field on a line of its own (never, now)
+    bool    inCol;           ///< the other two one above the other, beside the first
 
     int16_t sepH;            ///< the hairline between the columns
 
@@ -306,6 +310,8 @@ struct KdFlow {
 static inline int kdfMin(int a, int b) { return a < b ? a : b; }
 static inline int kdfMax(int a, int b) { return a > b ? a : b; }
 static inline int kdfScale(int v, int permille) { return (v * permille + 500) / 1000; }
+/// A size setting's per cent; 0 is the most that fits, as 100 is.
+static inline int kdfPct(uint8_t p) { return p ? p : 100; }
 
 /// Break `n` cells into `r` rows as evenly as they go, remainder to the
 /// earlier rows. kdGridRowSplit() in KindleSlots.h is this with r fixed by the
@@ -377,7 +383,10 @@ static inline void kdFlowOutdoor(const KdFlowIn& in, int bot, KdFlow& f) {
     const int n = in.nGrid > 6 ? 6 : in.nGrid;
     if (n > 0) {
         const int areaH = bot - gridTop;
-        const int cap   = f.heroSz * 60 / 100;
+        // As large as the room allows, but never larger than the headline:
+        // one reading alone used to stop at six tenths of it, and left the
+        // rest of its row white.
+        const int cap   = f.heroSz;
         const int rMin  = (n + 2) / 3;
         int best = -1, bestR = rMin;
         for (int r = rMin; r <= n; r++) {
@@ -408,7 +417,7 @@ static inline void kdFlowOutdoor(const KdFlowIn& in, int bot, KdFlow& f) {
         }
         f.gridNRows = (uint8_t)bestR;
         kdFlowSplit(n, bestR, f.gridRows);
-        f.gridValSz = (uint8_t)kdfMax(best, 10);
+        f.gridValSz = (uint8_t)kdfMax(best * kdfPct(in.outPct) / 100, 10);
         f.gridRowH  = (int16_t)(areaH / bestR);
         const int content = f.labSz + 4 + f.gridValSz;
         f.gridY = (int16_t)(gridTop + kdfMax(0, (f.gridRowH - content) / 2));
@@ -417,11 +426,17 @@ static inline void kdFlowOutdoor(const KdFlowIn& in, int bot, KdFlow& f) {
 
 /// The indoor row under f.inRuleY, ending at `bot`, f.inW across.
 ///
-/// ALWAYS ONE LINE. The first field used to take a line of its own whenever
-/// that set it larger, which with three readings was nearly always — so the
-/// third one the reader added dropped under the other two. They stay side by
-/// side now, the first a little smaller when it has to be; f.inStack is
-/// always false, and IN_STACK still goes out as 0 for the panel.
+/// NEVER ONE FIELD OVER THE OTHERS. The first field used to take a line of its
+/// own whenever that set it larger, which with three readings was nearly
+/// always, so f.inStack is always false and IN_STACK still goes out as 0.
+///
+/// One field stands alone, as large as the room and the headline allow. Two
+/// share a line, the second at six tenths of the first and on its bottom
+/// edge. Three, upright, are two columns: the first large on the left, and
+/// the other two one above the other beside it (f.inCol), the upper one
+/// starting under the heading and the lower one on the first one's bottom
+/// line. The landscape row is too short for that, and keeps all three on one
+/// line.
 static inline void kdFlowIndoor(const KdFlowIn& in, int bot, KdFlow& f) {
     const int air = kdfMax(0, f.grow - 1000);
     // The narrower of the two renderers' widths — see KDF_COL_R.
@@ -430,43 +445,77 @@ static inline void kdFlowIndoor(const KdFlowIn& in, int bot, KdFlow& f) {
     f.inValSz1 = f.inValSz = 0;
     f.inW1Pm = 1000;
     f.inStack = false;
-    f.inValY = f.inVal2Y = (int16_t)(f.inLabY + f.labSz + 18);
+    f.inCol = false;
+    f.inValY = f.inVal2Y = f.inVal3Y = (int16_t)(f.inLabY + f.labSz + 18);
     const int m = in.nIn > 3 ? 3 : in.nIn;
-    if (m > 0) {
-        const int top   = f.inLabY + f.labSz + 18;
-        const int areaH = bot - top;
-        const int cap   = f.heroSz * 80 / 100;
-        const int a1    = in.inAdv[0] ? in.inAdv[0] : 1000;
-        int others = 0;
-        for (int i = 1; i < m; i++) others += in.inAdv[i] ? in.inAdv[i] : 1000;
+    if (m == 0) return;
+    const int top   = f.inLabY + f.labSz + 18;
+    const int areaH = bot - top;
+    // Never larger than the headline; it used to stop at eight tenths of it.
+    const int cap   = f.heroSz;
+    const int a1    = in.inAdv[0] ? in.inAdv[0] : 1000;
+    const int pct   = kdfPct(in.inPct);
 
-        // All on one line, the first set larger and the others at six tenths
-        // of it, hanging their captions above themselves.
-        int s1;
-        if (m == 1) s1 = (W - KDF_CELL_PAD) * 1000 / a1;
-        else        s1 = (W - KDF_CELL_PAD * m) * 1000 / (a1 + others * 6 / 10);
-        s1 = kdfMin(s1, areaH);
-        s1 = kdfMin(s1, cap);
-        // The ordinary page's 52, which was measured to fit.
-        s1 = kdfMax(s1, kdfMin(52, areaH));
-        // Each of the others also carries its caption above it, spaced out in
-        // capitals, and that is wider than a short figure: the first field
-        // gives up size until they all have room for theirs.
-        while (m > 1 && s1 > 30 &&
-               kdFlowInNeed(s1, a1, in.inAdv, m) > W) s1--;
-
-        f.inValSz1 = (uint8_t)s1;
-        f.inValSz  = (uint8_t)(s1 * 6 / 10);
-        f.inValY   = (int16_t)(top + kdfMax(0, (areaH - s1) / 2));
-        f.inVal2Y  = (int16_t)(f.inValY + f.inValSz1 - f.inValSz);
-        if (m > 1) {
-            // The width each field needs, and the slack shared out in the
-            // same proportion — so the first field gets what it takes to
-            // be set larger, not a fixed 42 or 58 per cent.
-            const int need1 = f.inValSz1 * a1 / 1000 + KDF_CELL_PAD;
-            const int needO = kdFlowInNeed(f.inValSz1, a1, in.inAdv, m) - need1;
-            f.inW1Pm = (uint16_t)(need1 * 1000 / kdfMax(1, need1 + needO));
+    if (m == 3 && !f.land) {
+        // The column beside the first field: as wide as the wider of the two,
+        // or of their captions, and two captions and two values tall.
+        const int colTop = f.inLabY + f.labSz + 6;
+        const int a2 = kdfMax(in.inAdv[1] ? in.inAdv[1] : 1000,
+                              in.inAdv[2] ? in.inAdv[2] : 1000);
+        int s1 = kdfMin(cap, areaH);
+        for (; s1 > 20; s1--) {
+            const int s  = s1 * 6 / 10;
+            const int wR = kdfMax(s * a2 / 1000 + KDF_CELL_PAD, KDF_IN_CAP_W);
+            const int stackH = 2 * (f.labSz + 4 + s) + 6;
+            if (s1 * a1 / 1000 + KDF_CELL_PAD + wR <= W && stackH <= bot - colTop) break;
         }
+        s1 = kdfMax(20, s1 * pct / 100);
+        const int s  = s1 * 6 / 10;
+        const int wR = kdfMax(s * a2 / 1000 + KDF_CELL_PAD, KDF_IN_CAP_W);
+        const int stackH = 2 * (f.labSz + 4 + s) + 6;
+        f.inCol    = true;
+        f.inValSz1 = (uint8_t)s1;
+        f.inValSz  = (uint8_t)s;
+        // The column is the taller of the two, so it is what gets centred in
+        // the room, and the first field stands on its bottom line.
+        const int base = colTop + stackH + kdfMax(0, (bot - colTop - stackH) / 2);
+        f.inValY  = (int16_t)(base - s1);
+        f.inVal2Y = (int16_t)(base - stackH + f.labSz + 4);
+        f.inVal3Y = (int16_t)(base - s);
+        const int need1 = s1 * a1 / 1000 + KDF_CELL_PAD;
+        f.inW1Pm = (uint16_t)(need1 * 1000 / kdfMax(1, need1 + wR));
+        return;
+    }
+
+    int others = 0;
+    for (int i = 1; i < m; i++) others += in.inAdv[i] ? in.inAdv[i] : 1000;
+    // On one line, the first set larger and the others at six tenths of it,
+    // hanging their captions above themselves.
+    int s1;
+    if (m == 1) s1 = (W - KDF_CELL_PAD) * 1000 / a1;
+    else        s1 = (W - KDF_CELL_PAD * m) * 1000 / (a1 + others * 6 / 10);
+    s1 = kdfMin(s1, areaH);
+    s1 = kdfMin(s1, cap);
+    // The ordinary page's 52, which was measured to fit.
+    s1 = kdfMax(s1, kdfMin(52, areaH));
+    // Each of the others also carries its caption above it, spaced out in
+    // capitals, and that is wider than a short figure: the first field
+    // gives up size until they all have room for theirs.
+    while (m > 1 && s1 > 30 &&
+           kdFlowInNeed(s1, a1, in.inAdv, m) > W) s1--;
+    s1 = kdfMax(20, s1 * pct / 100);
+
+    f.inValSz1 = (uint8_t)s1;
+    f.inValSz  = (uint8_t)(s1 * 6 / 10);
+    f.inValY   = (int16_t)(top + kdfMax(0, (areaH - s1) / 2));
+    f.inVal2Y  = f.inVal3Y = (int16_t)(f.inValY + f.inValSz1 - f.inValSz);
+    if (m > 1) {
+        // The width each field needs, and the slack shared out in the
+        // same proportion — so the first field gets what it takes to
+        // be set larger, not a fixed 42 or 58 per cent.
+        const int need1 = f.inValSz1 * a1 / 1000 + KDF_CELL_PAD;
+        const int needO = kdFlowInNeed(f.inValSz1, a1, in.inAdv, m) - need1;
+        f.inW1Pm = (uint16_t)(need1 * 1000 / kdfMax(1, need1 + needO));
     }
 }
 
@@ -493,7 +542,7 @@ static inline void kdFlowTop(const KdFlowIn& in, int T, KdFlow& f) {
 static inline bool kdFlowSameType(const KdFlow& a, const KdFlow& b) {
     if (a.heroSz != b.heroSz || a.clSize != b.clSize || a.labSz != b.labSz) return false;
     if (a.gridValSz != b.gridValSz || a.gridNRows != b.gridNRows) return false;
-    if (a.inValSz1 != b.inValSz1 || a.inStack != b.inStack) return false;
+    if (a.inValSz1 != b.inValSz1 || a.inStack != b.inStack || a.inCol != b.inCol) return false;
     return true;
 }
 
@@ -578,7 +627,7 @@ static inline void kdFlowLand(const KdFlowIn& in, int footY, KdFlow& f) {
     for (int g = KDF_GROW_MAX; g >= KDF_LAND_GROW_MIN; g -= 20) {
         kdFlowType(g, f);
         kdFlowOutdoor(in, outBot, f);
-        const bool ok = n ? f.gridValSz >= (f.gridRows[0] >= 3 ? 27 : 34)
+        const bool ok = n ? f.gridValSz >= (f.gridRows[0] >= 3 ? 27 : 34) * kdfPct(in.outPct) / 100
                           : f.subY + (in.sub ? f.subSz : 0) <= outBot;
         if (ok) { pick = g; break; }
         if (n && f.gridValSz >= bestV) { bestV = f.gridValSz; bestG = g; }
@@ -715,7 +764,7 @@ static inline int kdFlowPanel(int v, unsigned resW) {
 /// The upright page sends only heights, as it always has: its x are the layout
 /// file's, which were measured on each panel and are not all a plain scale of
 /// the 600 px file's. The landscape page sends its x too.
-static const int KDF_PANEL_BASE = 48;
+static const int KDF_PANEL_BASE = 50;
 static const int KDF_PANEL_KEYS = KDF_PANEL_BASE + 48;
 static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out) {
     int n = 0;
@@ -755,6 +804,8 @@ static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out)
     KDF_K("IN_VAL_SZ_1",  f.inValSz1);
     KDF_R("IN_W1",        f.inW1Pm);
     KDF_R("IN_STACK",     f.inStack ? 1 : 0);
+    KDF_R("IN_COL",       f.inCol ? 1 : 0);
+    KDF_K("IN_VAL3_Y",    f.inVal3Y);
     KDF_K("RULE2_Y",      f.rule2Y);
     KDF_K("LAB_CHART_Y",  f.rule2Y + 6);
     KDF_K("GR_Y",         f.grY);
@@ -915,6 +966,12 @@ inline void kdFlowCss(StringT& out, const KdFlow& f, uint8_t clockStyle, PxFn px
         out += ".inrow{margin-top:";
         KDF_PX(8 + f.inValY - (f.inLabY + f.labSz + 18)); out += "}";
         out += ".inrow2{margin-top:"; KDF_PX(10); out += "}";
+        out += ".inrow td.c1{text-align:center}";
+        if (f.inCol) {
+            // The gap from the upper value's foot to the lower one's caption.
+            out += ".inb{margin-top:";
+            KDF_PX(f.inVal3Y - f.labSz - 4 - (f.inVal2Y + f.inValSz)); out += "}";
+        }
     }
     // The clock, in whichever style it is set — the same arms kdSkinCss()
     // writes, at this layout's size.

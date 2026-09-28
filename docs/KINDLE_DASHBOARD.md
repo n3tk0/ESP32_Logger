@@ -633,6 +633,33 @@ BMP it writes once into its temp directory and then reuses.
 The two settings live in `KindleConfig::weekStyle` and `KindleConfig::rules`,
 two of the old reserved bytes, so an older config reads as the old page.
 
+### How large the readings are
+
+Every reading in the outdoor grid and the indoor row is set as large as its
+room allows, never larger than the headline. One grid reading alone used to
+stop at six tenths of the headline, and one indoor reading at eight tenths,
+which left most of their row white.
+
+The indoor row, upright:
+
+- one reading stands alone, centred in the column;
+- two share a line, the second at six tenths of the first and on its bottom
+  line;
+- three are two columns: the first large on the left, the other two one above
+  the other beside it, the lower one on the first one's bottom line. The
+  panel gets `IN_COL=1` and `IN_VAL3_Y` (the lower one's top); `IN_VAL2_Y` is
+  the upper one's.
+
+On the landscape page the indoor row is too short for two readings one above
+the other, and all three stay on one line.
+
+**Size of the readings** on the Whole page tab turns each group down from
+that: `out_size` and `in_size` in `/api/kindle/config`, per cent of the most
+that fits, 100 (the default), 90, 80, 70 or 60. They are one byte,
+`KindleConfig::metricSize` (the grid's step in the low four bits, the indoor
+row's in the high four), the last of the old reserved bytes; 0 is an older
+config's and means as large as fits.
+
 ### On its side: the landscape page
 
 **Rotation** (`rotation` in `/api/kindle/config`: 0, 90, 180 or 270 degrees

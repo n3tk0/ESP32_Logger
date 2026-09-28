@@ -864,6 +864,10 @@ static void handleKindleConfigGet(AsyncWebServerRequest* req) {
     doc["rule_weight"]      = kdRuleWeight(k);
     doc["rule_ink"]         = kdRuleInk(k);
     doc["rule_style"]       = kdRuleStyle(k);
+    // How large the readings are set, per cent of the most that fits:
+    // 100, 90, 80, 70 or 60.
+    doc["out_size"]         = kdOutSizePct(k);
+    doc["in_size"]          = kdInSizePct(k);
     doc["outdoor_sensor"]   = (k.outdoorSensor[0] != '\0') ? k.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
     doc["indoor_sensor"]    = (k.indoorSensor[0] != '\0') ? k.indoorSensor : KINDLE_INDOOR_SENSOR;
 
@@ -924,6 +928,14 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
         if (req->hasParam("rule_ink", true))    ink = req->getParam("rule_ink", true)->value().toInt();
         if (req->hasParam("rule_style", true))  st  = req->getParam("rule_style", true)->value().toInt();
         k.rules = kdRulesPack(w, ink, st);
+    }
+    {
+        int o = k.metricSize & 0x0F, i = k.metricSize >> 4;
+        if (req->hasParam("out_size", true))
+            o = kdSizeStepFromPct(req->getParam("out_size", true)->value().toInt());
+        if (req->hasParam("in_size", true))
+            i = kdSizeStepFromPct(req->getParam("in_size", true)->value().toInt());
+        k.metricSize = kdSizePack(o, i);
     }
 
     if (req->hasParam("face_custom", true)) {

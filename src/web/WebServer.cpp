@@ -800,6 +800,7 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     // are stored in — kdSkinClamp() narrows them on the way back in.
     kd["weekStyle"]       = config.kindle.weekStyle;
     kd["rules"]           = config.kindle.rules;
+    kd["metricSize"]      = config.kindle.metricSize;
 
     // ── Network ───────────────────────────────────────────────────────────
     JsonObject net = doc["network"].to<JsonObject>();
@@ -2546,6 +2547,8 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                     config.kindle.weekStyle = (uint8_t)kd["weekStyle"].as<int>();
                 if (kd["rules"].is<int>())
                     config.kindle.rules = (uint8_t)kd["rules"].as<int>();
+                if (kd["metricSize"].is<int>())
+                    config.kindle.metricSize = (uint8_t)kd["metricSize"].as<int>();
                 // An imported file is not a form: it can carry anything,
                 // including values written by a firmware that had one more
                 // clock style than this one. Clamped here so the renderer

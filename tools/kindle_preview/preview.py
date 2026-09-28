@@ -299,15 +299,24 @@ def indoor_row():
     n = len(INDOOR)
     stack = FLOW['inStack']
     first = 100 if stack else (FLOW['inW1Pm'] + 5) // 10
+    # Three, upright, are two columns: the other two one above the other
+    # in the second cell, as the firmware's appendIndoor() draws them.
+    col = FLOW.get('inCol') and n == 3 and not stack
     tds = ''
     for i, (lab, val, unit, arrow, ink) in enumerate(INDOOR):
         if i == 1 and stack:
             tds += '</tr></table><table class="inrow inrow2"><tr>'
-        w = first if i == 0 else (100 // (n - 1) if stack else (100 - first) // (n - 1))
+        if col and i == 2:
+            tds += ('<div class="inb">' + cell(lab, val, unit, arrow, ink, 'iv', True) +
+                    '</div></td>')
+            continue
+        w = first if i == 0 else (100 // (n - 1) if stack else
+                                  (100 - first) if col else (100 - first) // (n - 1))
         # The first field carries no caption and spends the line on type.
-        tds += ('<td width="%d%%">' % w +
+        tds += (('<td class="c1" width="%d%%">' if n == 1 else '<td width="%d%%">') % w +
                 cell(lab, val, unit, arrow, ink,
-                     'iv iv-1' if i == 0 else 'iv', i != 0) + '</td>')
+                     'iv iv-1' if i == 0 else 'iv', i != 0) +
+                ('' if col and i == 1 else '</td>'))
     return ('<div class="inrule"></div><div class="lab">' + S['ins'] + '</div>'
             '<table class="inrow"><tr>' + tds + '</tr></table>')
 

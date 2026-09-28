@@ -32,7 +32,7 @@ FIELDS = ['topBot', 'grow', 'labSz', 'heroSz', 'bigSz', 'headGap', 'slashW', 'su
           'heroY', 'subY', 'gridRows', 'gridY', 'gridRowH', 'gridValSz', 'clSize',
           'clBoxed', 'clRuled', 'clRuledPad', 'clDated', 'clDateSz', 'clDateGap',
           'clGrow', 'clH', 'inRuleY', 'inLabY', 'inValY', 'inVal2Y', 'inValSz1',
-          'inValSz', 'inW1Pm', 'inStack', 'sepH', 'chart', 'forecast', 'week',
+          'inValSz', 'inW1Pm', 'inStack', 'inVal3Y', 'inCol', 'sepH', 'chart', 'forecast', 'week',
           'rule2Y', 'grY', 'grH', 'rule3Y', 'wkRuleY',
           # Across, and the landscape page
           'clock', 'land', 'pageW', 'pageH', 'groupY', 'colLX', 'colLW', 'inX', 'inW',
@@ -54,6 +54,8 @@ PLACES = [
     ('temperature', '+5.0', '°', 0), ('voltage', '3.71', 'V', 0),
     ('temperature', '21.5', '°C', 0), ('temperature', '70', '°F', 0),
 ]
+
+PCTS = [(100, 100), (100, 100), (90, 60), (70, 80), (60, 100)]
 
 WIDTHS = [
     [3135, 2202, 2376, 1836, 1500, 2600],   # an ordinary page
@@ -82,10 +84,13 @@ def cases():
         for w in WIDTHS:
             for ng in range(7):
                 for ni in range(4):
+                    # The size settings, turned down on a spread of the cases.
+                    pct = PCTS[(mask + ng + ni) % len(PCTS)]
                     yield {
                         'chart': mask & 1, 'fc': (mask >> 1) & 1, 'week': (mask >> 2) & 1,
                         'sub': (mask >> 3) & 1, 'grid': w[:ng], 'in': w[:ni][::-1],
                         'clk': 1 - ((mask >> 4) & 1), 'land': (mask >> 5) & 1,
+                        'outp': pct[0], 'inp': pct[1],
                     }
 
 
@@ -101,7 +106,8 @@ def run(js_text):
                     'week=%d' % c['week'], 'sub=%d' % c['sub'],
                     'clk=%d' % c['clk'], 'land=%d' % c['land'],
                     'grid=' + ','.join(map(str, c['grid'])),
-                    'in=' + ','.join(map(str, c['in']))]
+                    'in=' + ','.join(map(str, c['in'])),
+                    'outp=%d' % c['outp'], 'inp%%=%d' % c['inp']]
             c_out.append(json.loads(subprocess.check_output([exe] + args, text=True)))
 
         driver = js_engine(js_text) + '''
@@ -112,7 +118,8 @@ var out = { adv: input.places.map(function (p) {
               return kdFlowCompute({ chart: !!c.chart, forecast: !!c.fc, week: !!c.week,
                                      sub: !!c.sub, clock: !!c.clk, land: !!c.land,
                                      nGrid: c.grid.length, gridAdv: c.grid,
-                                     nIn: c.in.length, inAdv: c.in }); }) };
+                                     nIn: c.in.length, inAdv: c.in,
+                                     outPct: c.outp, inPct: c.inp }); }) };
 process.stdout.write(JSON.stringify(out));
 '''
         js_file = os.path.join(tmp, 'flow.js')

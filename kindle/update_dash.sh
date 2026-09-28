@@ -2512,6 +2512,7 @@ FLOW_KEYS="GROUP_LAB_SZ HERO_Y HERO_SZ BIG_SZ HEAD_GAP SLASH_W SUB_Y SUB_SZ
  GRID_Y GRID_ROW_H GRID_LAB_SZ GRID_VAL_SZ GRID_VAL_SZ_3 SEP_H
  CL_SIZE CL_H CL_SZ_BOXED CL_SZ_RULED CL_RULED_PAD CL_SZ_DATED CL_DATE_SZ CL_DATE_GAP
  IN_RULE_Y IN_LAB_Y IN_VAL_Y IN_VAL2_Y IN_VAL_SZ IN_VAL_SZ_1 IN_W1 IN_STACK
+ IN_COL IN_VAL3_Y
  RULE2_Y LAB_CHART_Y GR_Y GR_H KEY_Y RULE3_Y
  LAB_FC_Y FC_ICON_Y FC_TEXT_Y FC_TEMP_Y FC_WIND_Y OL0_Y OL1_Y OL2_Y
  WK_HDG_RULE_Y WK_HDG_Y WK_Y FC_BAND
@@ -2532,7 +2533,7 @@ flow_apply() {
     LAYOUT_FLOW=0
     # The keys no layout file carries, which would otherwise outlive the page
     # that sent them — a landscape page's LAND=1 on the upright one after it.
-    unset IN_W1 IN_STACK IN_VAL2_Y FC_BAND LAND TOPROW_Y KEY_BAND OL_N \
+    unset IN_W1 IN_STACK IN_COL IN_VAL3_Y IN_VAL2_Y FC_BAND LAND TOPROW_Y KEY_BAND OL_N \
           OL3_X OL4_X OL3_Y OL4_Y 2>/dev/null
     case "${LY_GR_H:-}" in ''|*[!0-9]*) FLOW_SIG=""; return 0 ;; esac
     # The grid's rows are a list of counts, each divided into the column's
@@ -3508,6 +3509,14 @@ draw_zones() {
             w1="$rw"
             cw=$(( rw / (n - 1) ))
         fi
+        # OR THREE AS TWO COLUMNS: the first on the left, the other two one
+        # above the other beside it, the lower one on the first one's bottom
+        # line — the collector's IN_COL.
+        local col=0 low_y
+        if [ "${IN_COL:-0}" = "1" ] && [ "$n" -eq 3 ] && [ "$stack" = "0" ]; then
+            col=1
+            low_y="${IN_VAL3_Y:-$(( big_y + big - small ))}"
+        fi
 
         i=0
         for z in $IN_ZONES; do
@@ -3516,6 +3525,17 @@ draw_zones() {
             eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"
             if [ "$i" = "0" ]; then
                 cx="$rx"; vsz="$big"; y="$big_y"
+                # Alone, it stands in the middle of the column.
+                if [ "$n" -eq 1 ] && [ -n "$val" ] && [ "$vadv" -gt 0 ] 2>/dev/null; then
+                    field_w "$big" "$val" "$unit" "$arrow" "$vadv" "$uadv"
+                    centre_in "$rx" "$rw" "$FIELD_W"
+                    cx="$CENTRE_X"
+                fi
+            elif [ "$col" = "1" ]; then
+                cx=$(( rx + w1 )); vsz="$small"
+                if [ "$i" = "1" ]; then y="$small_y"; else y="$low_y"; fi
+                draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \
+                              "${GRID_LAB_SZ:-10}" "GRAY7" "$lab"
             elif [ "$stack" = "1" ]; then
                 cx=$(( rx + (i - 1) * cw )); vsz="$small"; y="$small_y"
                 draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \

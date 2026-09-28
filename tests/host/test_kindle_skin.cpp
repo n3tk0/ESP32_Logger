@@ -429,6 +429,25 @@ static void test_page_rotation_follows_or_stands_alone() {
     CHECK(k.pageRot == 0 && kdPageRot(k) == KROT_90);
 }
 
+static void test_metric_size() {
+    KindleConfig k = defaults();
+    // 0 is an older config's and is as large as fits.
+    CHECK(kdOutSizePct(k) == 100 && kdInSizePct(k) == 100);
+    k.metricSize = kdSizePack(kdSizeStepFromPct(70), kdSizeStepFromPct(60));
+    CHECK(kdOutSizePct(k) == 70 && kdInSizePct(k) == 60);
+    // The nearest step; anything out of range, the most that fits.
+    CHECK(kdSizeStepFromPct(84) == 2 && kdSizeStepFromPct(86) == 1);
+    CHECK(kdSizeStepFromPct(101) == 0 && kdSizeStepFromPct(59) == 0 &&
+          kdSizeStepFromPct(-5) == 0);
+    // A byte nobody wrote goes back to the default.
+    k.metricSize = 0xF7;
+    kdSkinClamp(k);
+    CHECK(k.metricSize == 0);
+    k.metricSize = 0x34;
+    kdSkinClamp(k);
+    CHECK(kdOutSizePct(k) == 60 && kdInSizePct(k) == 70);
+}
+
 static void test_rules_and_week_style() {
     KindleConfig k = defaults();
     // 0 in both is the page as it was, and writes nothing.
@@ -502,5 +521,6 @@ int main() {
     RUN(test_clock_sync_days);
     RUN(test_page_rotation_follows_or_stands_alone);
     RUN(test_rules_and_week_style);
+    RUN(test_metric_size);
     return SUMMARY();
 }

@@ -97,6 +97,28 @@ inline uint8_t kdRuleStyle(const KindleConfig& k)  { return (k.rules >> 4) & 0x0
 /// Their thickness in design pixels, 1..3.
 inline int kdRulePx(const KindleConfig& k) { return kdRuleWeight(k) + 1; }
 
+/// The readings' size settings, as per cent of the most that fits: the
+/// outdoor grid's and the indoor row's, 100 .. KSIZE_MIN_PCT in tens.
+inline int kdSizeStepPct(int step) {
+    return (step >= 0 && step < KSIZE_STEPS) ? 100 - 10 * step : 100;
+}
+inline int kdOutSizePct(const KindleConfig& k) { return kdSizeStepPct(k.metricSize & 0x0F); }
+inline int kdInSizePct(const KindleConfig& k)  { return kdSizeStepPct(k.metricSize >> 4); }
+
+/// A per cent from the API back to its step: the nearest one, anything out
+/// of range the most that fits.
+inline int kdSizeStepFromPct(int pct) {
+    if (pct > 100 || pct < KSIZE_MIN_PCT) return 0;
+    return (100 - pct + 5) / 10;
+}
+
+/// And packed, each step clamped to what it can be.
+inline uint8_t kdSizePack(int outStep, int inStep) {
+    if (outStep < 0 || outStep >= KSIZE_STEPS) outStep = 0;
+    if (inStep < 0 || inStep >= KSIZE_STEPS)   inStep = 0;
+    return (uint8_t)(outStep | (inStep << 4));
+}
+
 /// And packed back, each field clamped to what it can be.
 inline uint8_t kdRulesPack(int weight, int ink, int style) {
     if (weight < KRULE_THIN || weight > KRULE_THICK) weight = KRULE_THIN;
@@ -544,6 +566,7 @@ inline void kdSkinClamp(KindleConfig& k) {
     // last value, go back to the page as it was.
     k.weekStyle &= (uint8_t)(KWEEK_STYLE_MASK | KWEEK_FORECAST);
     k.rules = kdRulesPack(k.rules & 0x03, (k.rules >> 2) & 0x03, (k.rules >> 4) & 0x03);
+    k.metricSize = kdSizePack(k.metricSize & 0x0F, k.metricSize >> 4);
     k.boldZones &= 0x01FF;
     k.showFlags &= KSHOW_ALL;
     k.faceCustom[sizeof(k.faceCustom) - 1] = '\0';

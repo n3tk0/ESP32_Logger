@@ -1210,6 +1210,10 @@ check "$?" "a layout that moved asks for a full repaint"
   load_kv "$DASH_TMP/data.txt" PAYLOAD
   ly_load "$WORK/ly.txt"; load_layout
   GRID_ZONES="PRES DEW"
+  # The widths the collector sends for these (kdAdvanceMille): the fixture's
+  # are rounder and wider, and at the size one reading to a row now gets,
+  # "1008 hPa" with its arrow would not fit its column by them.
+  Z_PRES_VADVW=2000 Z_PRES_UADVW=1740
   reset_log
   draw_zones >/dev/null 2>&1
   # Both values at the one size, on two lines — and, each being a row of
@@ -1221,6 +1225,39 @@ check "$?" "a layout that moved asks for a full repaint"
   [ "$n" -eq 0 ] || { echo "grid values at the left edge: $n" >&2; exit 3; }
   exit 0 )
 check "$?" "two readings the layout stacks are drawn one under the other, centred"
+
+# THREE INDOOR READINGS, UPRIGHT, ARE TWO COLUMNS: the second and third share
+# an x beside the first, one above the other, the third on the first one's
+# bottom line; one reading alone is centred in the column.
+( flow_payload "$WORK/ly.txt" res=600
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  [ "${IN_COL:-0}" = "1" ] || { echo "IN_COL [$IN_COL]" >&2; exit 1; }
+  [ $((IN_VAL3_Y + IN_VAL_SZ)) -eq $((IN_VAL_Y + IN_VAL_SZ_1)) ] || exit 2
+  reset_log
+  draw_zones >/dev/null 2>&1
+  px=$(px_of "$IN_VAL_SZ")
+  l2=$(grep -- "px=$px,left=" "$FBINK_LOG" | grep -e "--${T}${Z_IHUM_VALUE}${T}" | sed 's/.*left=\([0-9]*\),top=\([0-9]*\).*/\1 \2/')
+  l3=$(grep -- "px=$px,left=" "$FBINK_LOG" | grep -e "--${T}${Z_IAQI_VALUE}${T}" | sed 's/.*left=\([0-9]*\),top=\([0-9]*\).*/\1 \2/')
+  set -- $l2 $l3
+  [ $# -eq 4 ] || { echo "indoor small values: [$l2] [$l3]" >&2; exit 3; }
+  [ "$1" = "$3" ] || { echo "not one column: $1 vs $3" >&2; exit 4; }
+  [ "$2" -lt "$4" ] || { echo "not one above the other: $2 vs $4" >&2; exit 5; }
+  [ "$1" -gt 318 ] || exit 6
+  # One reading alone: in the middle of the column, not at its left edge.
+  flow_payload "$WORK/ly.txt" res=600 inp='temperature:21.0:°'
+  ly_load "$WORK/ly.txt"; load_layout
+  [ "${IN_COL:-0}" = "0" ] || exit 7
+  IN_ZONES="ITEMP"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  px=$(px_of "$IN_VAL_SZ_1")
+  n=$(grep -c -- "px=$px,left=318," "$FBINK_LOG")
+  [ "$n" -eq 0 ] || { echo "the lone indoor value at the left edge" >&2; exit 8; }
+  exit 0 )
+check "$?" "three indoor readings are two columns, one alone is centred"
 
 # Old script, new collector: the file's own GRID_ROWS is still sent for it.
 grep -q 'GRID_ROWS=' "$FIXTURE"

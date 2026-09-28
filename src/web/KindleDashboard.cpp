@@ -1153,6 +1153,8 @@ static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT]
     in.sub      = haveSub;
     in.clock    = (kdShowMask(skin) & KSHOW_CLOCK) != 0;
     in.land     = land;
+    in.outPct   = (uint8_t)kdOutSizePct(skin);
+    in.inPct    = (uint8_t)kdInSizePct(skin);
 
     uint8_t used[KZ_GRID_COUNT];
     const int n = (skin.showFlags & KSHOW_GRID) ? kdGridUsed(zones, visible, used) : 0;
@@ -1508,17 +1510,30 @@ static void appendIndoor(String& p, const KdRender& rd, const bool visible[KZ_CO
             // already said. The others keep theirs and, on one line, sit on
             // its bottom edge, so the values line up along one edge rather
             // than along their tops.
+            //
+            // THREE, UPRIGHT, ARE TWO COLUMNS (flow.inCol): the other two one
+            // above the other in the second cell, which sits on the same
+            // bottom edge, so the lower one lines up with the first.
             const int firstW = flow.inStack ? 100 : (int)((flow.inW1Pm + 5) / 10);
+            const bool col = flow.inCol && n == 3 && !flow.inStack;
             for (int i = 0; i < n; i++) {
                 if (i == 1 && flow.inStack)
                     p += F("</tr></table><table class=\"inrow inrow2\"><tr>");
-                p += F("<td width=\"");
-                if (i == 0)            p += firstW;
-                else if (flow.inStack) p += (100 / (n - 1));
-                else                   p += ((100 - firstW) / (n - 1));
-                p += F("%\">");
+                if (col && i == 2) {
+                    p += F("<div class=\"inb\">");
+                } else {
+                    // Alone, it stands in the middle of the column.
+                    p += n == 1 ? F("<td class=\"c1\" width=\"") : F("<td width=\"");
+                    if (i == 0)            p += firstW;
+                    else if (flow.inStack) p += (100 / (n - 1));
+                    else if (col)          p += (100 - firstW);
+                    else                   p += ((100 - firstW) / (n - 1));
+                    p += F("%\">");
+                }
                 appendCell(p, res[used[i]], zones.z[used[i]],
                            i == 0 ? "iv iv-1" : "iv", i != 0);
+                if (col && i == 1) continue;
+                if (col && i == 2) p += F("</div>");
                 p += F("</td>");
             }
             p += F("</tr></table>");
