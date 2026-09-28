@@ -238,6 +238,9 @@ struct KdFlowIn {
     uint16_t inAdv[3]   = {0, 0, 0};
 };
 
+/// Outlook columns at most: five on the landscape page, three upright.
+static const int KDF_OL_MAX = 5;
+
 /// Where everything goes, in design pixels.
 struct KdFlow {
     // ── The top block ──
@@ -293,7 +296,7 @@ struct KdFlow {
     int16_t keyInX;          ///< where the key's indoor entry starts
     bool    keyBand;         ///< whether the key has room for "shaded band = ..."
     uint8_t olN;             ///< outlook columns in the forecast band: 3, or 5
-    int16_t olX[5];
+    int16_t olX[KDF_OL_MAX];
     int16_t wkX, wkY, wkCellW, wkHdgY;
     bool    wkRule;          ///< whether the week strip has a hairline of its own
     int16_t footY;           ///< the footer's rule
@@ -620,7 +623,7 @@ static inline void kdFlowLand(const KdFlowIn& in, int footY, KdFlow& f) {
 
     // ── The forecast band: five outlook columns ──
     f.olN = 5;
-    for (int i = 0; i < 5; i++) f.olX[i] = (int16_t)(X0 + 308 + KDF_OL_PITCH * i);
+    for (int i = 0; i < KDF_OL_MAX; i++) f.olX[i] = (int16_t)(X0 + 308 + KDF_OL_PITCH * i);
 }
 
 /// The upright page's x, which are the layout file's.
@@ -641,7 +644,7 @@ static inline void kdFlowUpright(const KdFlowIn& in, KdFlow& f) {
     f.keyInX = 470;
     f.keyBand = true;
     f.olN = 3;
-    for (int i = 0; i < 5; i++) f.olX[i] = i < 3 ? ol[i] : 0;
+    for (int i = 0; i < KDF_OL_MAX; i++) f.olX[i] = i < 3 ? ol[i] : 0;
     f.wkX = 18;   f.wkCellW = 81;
     f.wkRule = true;
     f.footY = (int16_t)KDF_FOOT_Y;

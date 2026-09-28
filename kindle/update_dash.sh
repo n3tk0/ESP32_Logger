@@ -1894,6 +1894,9 @@ ROT_DEG=0
 ROT_FAIL=0
 #: The rotation the framebuffer had before this script touched it.
 ROT_ORIG=""
+#: The rotation that draws the page upright: ROT_ORIG, unless the reader was
+#: already on its side when the dashboard started, then the panel's own 0.
+ROT_BASE=""
 ROT_NODE="${ROT_NODE:-/sys/class/graphics/fb0/rotate}"
 
 rot_fbdepth() {
@@ -1927,17 +1930,14 @@ rot_is_wide() {
 rot_apply() {
     local deg="$1" q
     q=$(( deg / 90 ))
-    if [ -z "$ROT_ORIG" ]; then
-        ROT_ORIG=$(rot_read)
-        # For stop.sh, which has to put it back after a dashboard that died.
-        echo "$ROT_ORIG" > "$TMP/rota" 2>/dev/null
-    fi
+    rot_origin
+    ROT_TOUCHED=1
     # The two quarter turns the other way round, on a model that numbers them
     # so — ROTATE_SWAP=1.
     if [ "${ROTATE_SWAP:-0}" = "1" ]; then
         case "$q" in 1) q=3 ;; 3) q=1 ;; esac
     fi
-    local want=$(( (ROT_ORIG + q) % 4 ))
+    local want=$(( (ROT_BASE + q) % 4 ))
     rot_set_raw "$want" && rot_check "$deg" && return 0
     # The panel's own numbering did not come out that shape: FBInk's canonical
     # one, which is the Linux convention whatever the model.
@@ -1945,6 +1945,17 @@ rot_apply() {
         rot_check "$deg" && return 0
     fi
     return 1
+}
+
+# Where the framebuffer started, once. A reader that was left in landscape
+# (its own UI turned) is not "upright" for this page: the panel's 0 is.
+rot_origin() {
+    [ -n "$ROT_ORIG" ] && return 0
+    ROT_ORIG=$(rot_read)
+    ROT_BASE="$ROT_ORIG"
+    [ "$(rot_is_wide)" = "1" ] && ROT_BASE=0
+    # For stop.sh, which has to put it back after a dashboard that died.
+    echo "$ROT_ORIG" > "$TMP/rota" 2>/dev/null
 }
 
 # CHECKED BY ITS SHAPE. Half a turn cannot be told from none this way, and a
@@ -1967,8 +1978,10 @@ rot_set_raw() {
 
 # Back to how the reader was, on the way out.
 rot_restore() {
+    # Whether or not a turn ever succeeded: one that failed half way can
+    # still have left the panel somewhere else.
     [ -n "$ROT_ORIG" ] || return 0
-    [ "${ROT_DEG:-0}" = "0" ] || rot_set_raw "$ROT_ORIG"
+    [ "${ROT_TOUCHED:-0}" = "1" ] && rot_set_raw "$ROT_ORIG"
     ROT_DEG=0
     rm -f "$TMP/rota" 2>/dev/null
 }
@@ -1989,7 +2002,14 @@ rot_local() {
 rot_sync() {
     local d="${PAGE_ROT:-0}"
     case "$d" in 0|90|180|270) ;; *) d=0 ;; esac
-    [ "$d" = "${ROT_DEG:-0}" ] && return 0
+    # Already there — except the first time, when the reader may have been
+    # left on its side and even the upright page needs a turn.
+    local first=0
+    [ -n "$ROT_ORIG" ] || { rot_origin; first=1; }
+    if [ "$d" = "${ROT_DEG:-0}" ]; then
+        [ "$first" = "0" ] && return 0
+        [ "$ROT_BASE" = "$ROT_ORIG" ] && return 0
+    fi
     if rot_apply "$d"; then
         ROT_DEG="$d"
         # Every pixel on the panel is somewhere else now.
@@ -1998,7 +2018,13 @@ rot_sync() {
     fi
     echo "$(date '+%H:%M') rotation: the panel did not turn to $d degrees, drawing the upright page" >&2
     ROT_FAIL=1
-    [ "${ROT_DEG:-0}" = "0" ] || { rot_apply 0; ROT_DEG=0; }
+    # Back to upright, whatever the failed turn left behind — and to where the
+    # reader was if even that does not check out.
+    if [ "$d" = "0" ] || ! rot_apply 0; then
+        [ -n "$ROT_ORIG" ] && rot_set_raw "$ROT_ORIG"
+    fi
+    ROT_DEG=0
+    [ "${HAVE_DATA:-0}" = "1" ] && : > "$TMP/redraw"
     return 1
 }
 
@@ -2225,6 +2251,9 @@ zones_forget() {
     # a firmware that does not send it would otherwise leave the panel drawing
     # the standalone layout for ever, because load_kv only ever assigns.
     unset PAGE_MODE 2>/dev/null
+    # And which way up, and whether there is a clock: a collector that no
+    # longer says lays out the upright page with one.
+    unset PAGE_ROT SHOW_CLOCK FC3_LABEL FC4_LABEL 2>/dev/null
     # And the layout, for the same reason again: a collector downgraded to a
     # firmware that works none out has to take the panel back to the file's.
     for z in $FLOW_KEYS GRID_ROWS CH_T CH_B CH_L CH_R; do unset "LY_$z" 2>/dev/null; done
@@ -3605,12 +3634,15 @@ redraw_sensors() {
     fi
     fill_rect "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" WHITE
     draw_sensors_body
-    if [ "${LAND:-0}" = "1" ]; then
-        # The clock is in the top row on its side, with the week strip.
-        redraw_top_row "$1" "${2:-0}"
-    else
-        draw_clock "$1"             # inside this rectangle, so it goes with it
+    if [ "${LAND:-0}" = "1" ] && [ "${Z_TOP_H:-0}" -gt 0 ] 2>/dev/null; then
+        # The clock is in the top row on its side, with the week strip — and
+        # ONE refresh for both, so a flashing tier flashes once.
+        fill_rect 0 0 "$ZW" "$Z_TOP_H" WHITE
+        draw_top_row "$1"
+        refresh_zone 0 0 "$ZW" $(( Z_SENS_Y + Z_SENS_H )) "${2:-0}"
+        return 0
     fi
+    [ "${LAND:-0}" = "1" ] || draw_clock "$1"   # inside this rectangle, so it goes with it
     refresh_zone "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" "${2:-0}"
 }
 

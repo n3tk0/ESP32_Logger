@@ -68,7 +68,12 @@ esac
 if [ -f "$DASH_TMP/rota" ]; then
     r=$(tr -dc '0-3' < "$DASH_TMP/rota" 2>/dev/null | cut -c1)
     if [ -n "$r" ]; then
-        { command -v fbdepth >/dev/null 2>&1 && fbdepth -r "$r" >/dev/null 2>&1; } ||
+        # The same fbdepth update_dash.sh turned it with, wherever that was.
+        fb=""
+        for c in fbdepth /mnt/us/koreader/fbdepth /mnt/us/libkh/bin/fbdepth; do
+            if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then fb="$c"; break; fi
+        done
+        { [ -n "$fb" ] && "$fb" -r "$r" >/dev/null 2>&1; } ||
             echo "$r" > /sys/class/graphics/fb0/rotate 2>/dev/null
     fi
 fi

@@ -27,6 +27,13 @@
 #  include "../modules/ForecastModule.h"
 #endif
 
+// The most outlook columns any page sends — ForecastModule::OUTLOOK_N, which a
+// build without the module cannot name, and KdFlow::olX's length.
+static constexpr int KD_FC_COLS = KDF_OL_MAX;
+#ifdef MODULE_FORECAST_ENABLED
+static_assert(ForecastModule::OUTLOOK_N == KD_FC_COLS, "outlook columns");
+#endif
+
 // Every forecast key, empty. Two callers — a build without the module and a
 // page drawn in standalone — and they have to send the same set: a key that
 // one of them omits is a key the panel keeps from the LAST payload, which is
@@ -34,7 +41,7 @@
 static void kdForecastKeysEmpty(AsyncResponseStream* s) {
     s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_ICON=-1\nFC_HIGH=\nFC_LOW=\n"
              "FC_WIND=\nFC_AGE=\"\"\n");
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < KD_FC_COLS; i++)
         s->printf("FC%d_LABEL=\"\"\nFC%d_LABELW=0\nFC%d_CODE=-1\nFC%d_ICON=-1\n"
                   "FC%d_TEMP=\nFC%d_TEMPW=0\nFC%d_LOW=\n", i, i, i, i, i, i, i);
 }
@@ -99,6 +106,20 @@ static uint8_t kdRotFor(AsyncWebServerRequest* req, const KindleConfig& skin) {
     if (req && req->hasParam("rot"))
         return kdRotFromDeg(req->getParam("rot")->value().toInt(), skin.rotation);
     return skin.rotation;
+}
+
+// The ?rot= this request came with, to carry on: every link and meta refresh
+// back to /kindle from a bookmarked /kindle?rot=90 has to keep the page on its
+// side, or one tap on "refresh" turns it upright. Empty when there was none.
+static String kdRotArg(AsyncWebServerRequest* req, char sep) {
+    String a;
+    if (!req || !req->hasParam("rot")) return a;
+    const long deg = req->getParam("rot")->value().toInt();
+    if (kdRotFromDeg(deg, 0xFF) == 0xFF) return a;
+    a += sep;
+    a += F("rot=");
+    a += deg;
+    return a;
 }
 
 // The left half of the footer. "Measured on site" is the right thing to say
@@ -1634,7 +1655,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         // three and the landscape one all five, and a payload that carried
         // only what this page draws would leave the reader holding the last
         // page's fourth and fifth after it was turned.
-        for (int i = 0; i < ForecastModule::OUTLOOK_N; i++) {
+        for (int i = 0; i < KD_FC_COLS; i++) {
             // forecastPeriodLabel(), NOT .label — the same call the HTML renderer
             // makes. The stored string was written when the provider was last
             // polled, so on this path it was still the language that was set then:
@@ -1738,7 +1759,14 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         // time on its own task, so one table is all that is ever in use.
         static KdFlowKV kv[KDF_PANEL_KEYS];
         const int nkv = kdFlowPanelKeys(rd.flow, resW, kv);
-        for (int i = 0; i < nkv; i++) s->printf("LY_%s=%d\n", kv[i].key, kv[i].value);
+        for (int i = 0; i < nkv; i++) {
+            int v = kv[i].value;
+            // The width /kindle/graph.bmp?w= will actually serve, which the
+            // panel then requires the image to be — clampW's, not the flow's.
+            if (!strcmp(kv[i].key, "GR_W"))
+                v = ChartBmp::clampW((uint16_t)v, skin.fbinkResW);
+            s->printf("LY_%s=%d\n", kv[i].key, v);
+        }
         char rows[16];
         kdFlowRowsText(rd.flow, rows, sizeof(rows));
         kdShellVar(s, "LY_GRID_ROWS", rows);
@@ -2507,9 +2535,14 @@ static void handleKindle(AsyncWebServerRequest* req) {
         kdFooterNote(note, sizeof(note));
         appendEscaped(p, note);
     }
-    p += F("</td><td class=\"act\"><a href=\"/kindle\">");
+    const String ra = kdRotArg(req, '?');
+    p += F("</td><td class=\"act\"><a href=\"/kindle");
+    p += ra;
+    p += F("\">");
     p += kdT("refresh", "обнови");
-    p += F("</a><a href=\"/kindle/clear\">");
+    p += F("</a><a href=\"/kindle/clear");
+    p += ra;
+    p += F("\">");
     p += kdT("clear", "изчисти");
     p += F("</a>");
 #ifdef MODULE_FORECAST_ENABLED
@@ -2518,7 +2551,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // the things that turns the page standalone, and it is exactly the moment
     // somebody wants to ask for a fresh one.
     if (forecastModule.isEnabled() && !apModeTriggered) {
-        p += F("<a href=\"/kindle/forecast\">");
+        p += F("<a href=\"/kindle/forecast");
+        p += ra;
+        p += F("\">");
         p += kdT("forecast", "прогноза");
         p += F("</a>");
     }
@@ -2650,7 +2685,8 @@ static void handleKindleClear(AsyncWebServerRequest* req) {
            "<meta name=\"viewport\" content=\"width=");
     p += PAGE_W;
     p += F("\"><meta http-equiv=\"refresh\" content=\"1;url=/kindle");
-    if (step < FRAMES) { p += F("/clear?s="); p += (step + 1); }
+    if (step < FRAMES) { p += F("/clear?s="); p += (step + 1); p += kdRotArg(req, '&'); }
+    else p += kdRotArg(req, '?');
     p += F("\"><title>...</title><style>html,body{margin:0;padding:0;height:100%;"
            "background:");
     p += black ? F("#000") : F("#fff");
@@ -2711,8 +2747,10 @@ static void handleKindleForecast(AsyncWebServerRequest* req) {
             p += POLL_S;
             p += F(";url=/kindle/forecast?w=");
             p += (step + 1);
+            p += kdRotArg(req, '&');
         } else {
             p += F("0;url=/kindle");
+            p += kdRotArg(req, '?');
         }
         p += F("\"><title>...</title><style>body{margin:0;padding:40% 8% 0;"
                "font:24px sans-serif;text-align:center}</style></head><body><p>");
@@ -2748,8 +2786,10 @@ static void handleKindleForecast(AsyncWebServerRequest* req) {
     if (r == ForecastModule::REFRESH_QUEUED) {
         p += POLL_S;
         p += F(";url=/kindle/forecast?w=1");
+        p += kdRotArg(req, '&');
     } else {
         p += F("4;url=/kindle");
+        p += kdRotArg(req, '?');
     }
     p += F("\"><title>...</title><style>body{margin:0;padding:40% 8% 0;"
            "font:24px sans-serif;text-align:center}</style></head><body><p>");

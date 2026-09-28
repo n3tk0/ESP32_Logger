@@ -926,6 +926,33 @@ check "$?" "touch follows the page round: 90, 180 and 270 map back to the drawn 
   exit 0 )
 check "$?" "the panel turns to the page it was sent, and back on the way out"
 
+# A turn that does not check out is undone, even the first one — and the
+# reader goes back to how it was when the dashboard quits.
+( ROT_NODE="$WORK/rotate"; echo 0 > "$ROT_NODE"
+  ROT_DEG=0 ROT_FAIL=0 ROT_ORIG="" ROT_BASE="" ROT_TOUCHED=0 HAVE_DATA=0
+  rot_is_wide() { echo 0; }            # this panel never comes out wide
+  PAGE_ROT=90; rot_sync && exit 1
+  [ "$ROT_FAIL" = "1" ] && [ "$ROT_DEG" = "0" ] || exit 2
+  [ "$(cat "$ROT_NODE")" = "0" ] || exit 3
+  echo 1 > "$ROT_NODE"; rot_restore     # whatever it was left at
+  [ "$(cat "$ROT_NODE")" = "0" ] || exit 4
+  exit 0 )
+check "$?" "a turn that fails is undone at once, and the reader put back on quit"
+
+# A reader left on its side is not "upright" for this page: the panel's own
+# 0 is, and quitting leaves it on its side again.
+( ROT_NODE="$WORK/rotate"; echo 1 > "$ROT_NODE"
+  ROT_DEG=0 ROT_FAIL=0 ROT_ORIG="" ROT_BASE="" ROT_TOUCHED=0 HAVE_DATA=0
+  rot_is_wide() { case "$(cat "$ROT_NODE")" in 1|3) echo 1 ;; *) echo 0 ;; esac; }
+  PAGE_ROT=0;  rot_sync || exit 1
+  [ "$(cat "$ROT_NODE")" = "0" ] || exit 2
+  PAGE_ROT=90; rot_sync || exit 3
+  [ "$(cat "$ROT_NODE")" = "1" ] && [ "$ROT_DEG" = "90" ] || exit 4
+  rot_restore
+  [ "$(cat "$ROT_NODE")" = "1" ] || exit 5
+  exit 0 )
+check "$?" "a reader started in landscape is turned upright for the upright page"
+
 # This panel's own ROTATE is asked for by name; auto leaves it to the collector.
 ( ROT_FAIL=0 ROTATE=270; rot_local && [ "$ROT_LOCAL" = "270" ] || exit 1
   ROTATE=auto; rot_local && exit 2
